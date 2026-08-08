@@ -1,0 +1,90 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "simbench_bw/schemas/nvbit_external_tracer_artifact_identity.schema.json",
+  "title": "External NVBit tracer artifact identity",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "source_manifest",
+    "build_receipt",
+    "source_identity",
+    "artifact",
+    "bundle_files",
+    "contract",
+    "model_seal_sha256"
+  ],
+  "properties": {
+    "schema_version": {"const": "nvbit_external_tracer_artifact_identity.v1"},
+    "source_manifest": {"$ref": "#/$defs/source_manifest_file"},
+    "build_receipt": {"$ref": "#/$defs/build_receipt_file"},
+    "source_identity": {"$ref": "#/$defs/source_identity"},
+    "artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "sha256", "size_bytes", "source_kind"],
+      "properties": {
+        "name": {"const": "tracer_tool.so"},
+        "sha256": {"$ref": "#/$defs/sha256"},
+        "size_bytes": {"type": "integer", "minimum": 1, "maximum": 268435456},
+        "source_kind": {"const": "external_non_git_retained_descriptor_v1"}
+      }
+    },
+    "bundle_files": {
+      "const": [
+        "artifact_identity.json",
+        "build_receipt.json",
+        "source_manifest.json",
+        "tracer_tool.so"
+      ]
+    },
+    "contract": {"$ref": "#/$defs/contract"},
+    "model_seal_sha256": {"$ref": "#/$defs/sha256"}
+  },
+  "$defs": {
+    "sha1": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "sealed_file_base": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "sha256", "size_bytes", "model_seal_sha256"],
+      "properties": {
+        "name": {"type": "string"},
+        "sha256": {"$ref": "#/$defs/sha256"},
+        "size_bytes": {"type": "integer", "minimum": 1, "maximum": 536870912},
+        "model_seal_sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "source_manifest_file": {
+      "$ref": "#/$defs/sealed_file_base",
+      "properties": {"name": {"const": "source_manifest.json"}}
+    },
+    "build_receipt_file": {
+      "$ref": "#/$defs/sealed_file_base",
+      "properties": {"name": {"const": "build_receipt.json"}}
+    },
+    "source_identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["head_commit_sha1", "head_tree_sha1", "inventory_sha256"],
+      "properties": {
+        "head_commit_sha1": {"$ref": "#/$defs/sha1"},
+        "head_tree_sha1": {"$ref": "#/$defs/sha1"},
+        "inventory_sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["architecture", "nvbit_release", "binary_contract", "binary_version", "trace_contract", "supported_trace_schema_versions"],
+      "properties": {
+        "architecture": {"const": "sm_86"},
+        "nvbit_release": {"const": "NVBit1.8"},
+        "binary_contract": {"const": "binary86"},
+        "binary_version": {"const": 86},
+        "trace_contract": {"const": "sm86_addr_carry_shmem_split_v2"},
+        "supported_trace_schema_versions": {"const": [1, 2, 3, 6, 8]}
+      }
+    }
+  }
+}

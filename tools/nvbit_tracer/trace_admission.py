@@ -56,15 +56,32 @@ from tools.nvbit_tracer.protobuf_wire_preflight import (
 )
 
 
-EXPECTED_TRACE_CONTRACT_ID = "sm86_addr_carry_v1"
+LEGACY_TRACE_CONTRACT_ID = "sm86_addr_carry_v1"
+EXPECTED_TRACE_CONTRACT_ID = "sm86_addr_carry_shmem_split_v2"
+SUPPORTED_TRACE_CONTRACT_IDS = frozenset(
+    {LEGACY_TRACE_CONTRACT_ID, EXPECTED_TRACE_CONTRACT_ID}
+)
 EXPECTED_MEMORY_PAYLOAD_CLASSES = (1, 2, 3, 6, 8)
 TRACE_ADMISSION_SCOPE = "forward_capture_only"
+HISTORICAL_TRACE_ADMISSION_SCOPE = "historical_read_only"
 I128_MIN = -(2**127)
 I128_MAX = 2**127 - 1
 I64_MAX = 2**63 - 1
 U64_MAX = 2**64 - 1
 _MIB = 1024 * 1024
 _GIB = 1024 * _MIB
+
+
+def _memory_payload_capabilities_valid(
+    trace_contract_id: str,
+    capabilities: tuple[int, ...],
+) -> bool:
+    if trace_contract_id == LEGACY_TRACE_CONTRACT_ID:
+        return (
+            len(capabilities) == len(EXPECTED_MEMORY_PAYLOAD_CLASSES)
+            and set(capabilities) == set(EXPECTED_MEMORY_PAYLOAD_CLASSES)
+        )
+    return capabilities == EXPECTED_MEMORY_PAYLOAD_CLASSES
 
 
 @dataclass(frozen=True)
@@ -269,16 +286,53 @@ class TraceAdmission:
     threadblock_payload_manifest_sha256: str
     trace_filesystem_generation_sha256: str
     launches: tuple[TraceLaunchSummary, ...]
+    trace_contract_id: str = EXPECTED_TRACE_CONTRACT_ID
+    memory_payload_classes: tuple[int, ...] = EXPECTED_MEMORY_PAYLOAD_CLASSES
+    admission_scope: str = TRACE_ADMISSION_SCOPE
     trace_admission_sha256: str = field(init=False)
 
     def __post_init__(self) -> None:
+        if type(self.trace_contract_id) is not str:
+            raise TypeError("trace_contract_id must be an exact string")
+        if (
+            type(self.memory_payload_classes) is not tuple
+            or any(type(value) is not int for value in self.memory_payload_classes)
+        ):
+            raise TypeError("memory_payload_classes must be an exact integer tuple")
+        if self.admission_scope == TRACE_ADMISSION_SCOPE:
+            if self.trace_contract_id != EXPECTED_TRACE_CONTRACT_ID:
+                raise ValueError(
+                    "forward trace admission requires the exact split-v2 contract"
+                )
+            if self.memory_payload_classes != EXPECTED_MEMORY_PAYLOAD_CLASSES:
+                raise ValueError(
+                    "forward memory_payload_classes must equal the canonical "
+                    "split-v2 vector"
+                )
+        elif self.admission_scope == HISTORICAL_TRACE_ADMISSION_SCOPE:
+            if self.trace_contract_id not in SUPPORTED_TRACE_CONTRACT_IDS:
+                raise ValueError(
+                    "historical trace admission requires a supported contract"
+                )
+            if not _memory_payload_capabilities_valid(
+                self.trace_contract_id,
+                self.memory_payload_classes,
+            ):
+                raise ValueError(
+                    "historical memory_payload_classes do not satisfy their "
+                    "versioned contract"
+                )
+        else:
+            raise ValueError("admission_scope is unknown")
         # Keep the portable byte/content seal independent of its presentation
         # path and local inode/directory generations. Dataclass equality still
         # binds both the path and separate filesystem-generation seal during
         # same-host downstream use.
         model = {
             "schema_version": 1,
-            "scope": TRACE_ADMISSION_SCOPE,
+            "scope": self.admission_scope,
+            "trace_contract_id": self.trace_contract_id,
+            "memory_payload_classes": list(self.memory_payload_classes),
             "launch_count": self.launch_count,
             "threadblock_count": self.threadblock_count,
             "instruction_count": self.instruction_count,
@@ -920,7 +974,12 @@ def _read_inventory_member(
     return snapshot
 
 
-def _validate_trace_root(root_bytes: bytes, root_path: Path) -> Any:
+def _validate_trace_root(
+    root_bytes: bytes,
+    root_path: Path,
+    *,
+    historical_only: bool,
+) -> Any:
     try:
         preflight_trace_protobuf(root_bytes)
     except MemoryError as exc:
@@ -953,16 +1012,38 @@ def _validate_trace_root(root_bytes: bytes, root_path: Path) -> Any:
         ) from exc
     except Exception as exc:  # protobuf raises version-specific decode classes
         raise TraceAdmissionError("trace_root_unparseable", str(exc)) from exc
-    if root.trace_contract_id != EXPECTED_TRACE_CONTRACT_ID:
+    if historical_only:
+        if root.trace_contract_id not in SUPPORTED_TRACE_CONTRACT_IDS:
+            raise TraceAdmissionError(
+                "trace_contract_mismatch",
+                f"got {root.trace_contract_id!r}, expected one of "
+                f"{sorted(SUPPORTED_TRACE_CONTRACT_IDS)!r}",
+            )
+    elif root.trace_contract_id != EXPECTED_TRACE_CONTRACT_ID:
+        if root.trace_contract_id == LEGACY_TRACE_CONTRACT_ID:
+            raise TraceAdmissionError(
+                "legacy_trace_historical_only",
+                "legacy v1 traces are historical-read-only and cannot mint "
+                "new evidence",
+            )
         raise TraceAdmissionError(
             "trace_contract_mismatch",
-            f"got {root.trace_contract_id!r}, expected {EXPECTED_TRACE_CONTRACT_ID!r}",
+            f"got {root.trace_contract_id!r}, expected "
+            f"{EXPECTED_TRACE_CONTRACT_ID!r}",
         )
-    capabilities = sorted(int(value) for value in root.memory_payload_classes)
-    if capabilities != list(EXPECTED_MEMORY_PAYLOAD_CLASSES):
+    capabilities = tuple(int(value) for value in root.memory_payload_classes)
+    capabilities_valid = _memory_payload_capabilities_valid(
+        root.trace_contract_id,
+        capabilities,
+    )
+    if root.trace_contract_id == LEGACY_TRACE_CONTRACT_ID:
+        expected_detail = f"historical set {list(EXPECTED_MEMORY_PAYLOAD_CLASSES)}"
+    else:
+        expected_detail = f"ordered vector {list(EXPECTED_MEMORY_PAYLOAD_CLASSES)}"
+    if not capabilities_valid:
         raise TraceAdmissionError(
             "trace_capabilities_invalid",
-            f"got {capabilities}, expected {list(EXPECTED_MEMORY_PAYLOAD_CLASSES)}",
+            f"got {list(capabilities)}, expected {expected_detail}",
         )
     return root
 
@@ -1038,23 +1119,51 @@ def _launch_summary(
     stream_id: int,
     kernel: Any,
     inst_count: int,
+    trace_contract_id: str,
 ) -> TraceLaunchSummary:
+    launch_id = (device_id, stream_id, int(kernel.id))
     combined_shared_bytes = int(kernel.size_shared_memory)
     if combined_shared_bytes < 0:
         raise TraceAdmissionError(
             "trace_launch_shared_memory_invalid",
-            f"launch {(device_id, stream_id, int(kernel.id))} has negative "
-            f"combined shared-memory bytes {combined_shared_bytes}",
+            f"launch {launch_id} has negative combined shared-memory bytes "
+            f"{combined_shared_bytes}",
         )
-    if combined_shared_bytes:
-        raise TraceAdmissionError(
-            "shared_memory_split_unavailable",
-            "NVBit kernel.size_shared_memory carries the producer's combined "
-            "static+dynamic byte count; the split cannot be authenticated for "
-            f"launch {(device_id, stream_id, int(kernel.id))}",
-        )
-    # CUDA static and dynamic shared-memory sizes are nonnegative, so a combined
-    # producer value of zero authenticates the sole possible split: zero + zero.
+
+    has_static = kernel.HasField("shared_memory_static_bytes")
+    has_dynamic = kernel.HasField("shared_memory_dynamic_bytes")
+    if trace_contract_id == LEGACY_TRACE_CONTRACT_ID:
+        if has_static or has_dynamic:
+            raise TraceAdmissionError(
+                "shared_memory_split_unadvertised",
+                f"legacy launch {launch_id} carries split shared-memory fields",
+            )
+        if combined_shared_bytes:
+            raise TraceAdmissionError(
+                "shared_memory_split_unavailable",
+                "NVBit kernel.size_shared_memory carries the producer's combined "
+                "static+dynamic byte count; the split cannot be authenticated for "
+                f"launch {launch_id}",
+            )
+        shared_static_bytes = 0
+        shared_dynamic_bytes = 0
+    else:
+        if not has_static or not has_dynamic:
+            raise TraceAdmissionError(
+                "shared_memory_split_missing",
+                f"split-capable launch {launch_id} must explicitly carry both "
+                "shared-memory components",
+            )
+        shared_static_bytes = int(kernel.shared_memory_static_bytes)
+        shared_dynamic_bytes = int(kernel.shared_memory_dynamic_bytes)
+        if shared_static_bytes + shared_dynamic_bytes != combined_shared_bytes:
+            raise TraceAdmissionError(
+                "shared_memory_split_mismatch",
+                f"launch {launch_id} has combined shared-memory bytes "
+                f"{combined_shared_bytes}, but static {shared_static_bytes} plus "
+                f"dynamic {shared_dynamic_bytes} differs",
+            )
+
     return TraceLaunchSummary(
         launch_index=launch_index,
         device_id=device_id,
@@ -1067,8 +1176,8 @@ def _launch_summary(
         block_x=int(kernel.block_dim.x),
         block_y=int(kernel.block_dim.y),
         block_z=int(kernel.block_dim.z),
-        shared_mem_static_bytes=0,
-        shared_mem_dynamic_bytes=0,
+        shared_mem_static_bytes=shared_static_bytes,
+        shared_mem_dynamic_bytes=shared_dynamic_bytes,
         regs_per_thread=int(kernel.number_of_registers),
         inst_count=inst_count,
     )
@@ -1079,11 +1188,14 @@ def _require_trace_admission_snapshot(
     *,
     limits: TraceAdmissionLimits = DEFAULT_TRACE_ADMISSION_LIMITS,
     reader: PinnedDirectoryReader | None = None,
+    historical_only: bool = False,
 ) -> _TraceAdmissionSnapshot:
     """Admit exact bounded bytes and retain their ephemeral source identities."""
 
     if not isinstance(limits, TraceAdmissionLimits):
         raise TypeError("limits must be a TraceAdmissionLimits value")
+    if type(historical_only) is not bool:
+        raise TypeError("historical_only must be an exact boolean")
     trace_dir = _lexical_absolute_trace_dir(trace_dir)
     if reader is None:
         try:
@@ -1178,7 +1290,11 @@ def _require_trace_admission_snapshot(
                 )
             payload_size += size
 
-        root = _validate_trace_root(root_bytes, root_path)
+        root = _validate_trace_root(
+            root_bytes,
+            root_path,
+            historical_only=historical_only,
+        )
         launches = _ordered_launches(root)
 
         allocation_relative = "extra_info/allocations.json"
@@ -1385,6 +1501,7 @@ def _require_trace_admission_snapshot(
                     stream_key,
                     kernel,
                     launch_instruction_count,
+                    root.trace_contract_id,
                 )
             )
 
@@ -1463,6 +1580,15 @@ def _require_trace_admission_snapshot(
             threadblock_payload_manifest_sha256=payload_manifest.hexdigest(),
             trace_filesystem_generation_sha256=filesystem_generation_sha256,
             launches=tuple(launch_summaries),
+            trace_contract_id=str(root.trace_contract_id),
+            memory_payload_classes=tuple(
+                int(value) for value in root.memory_payload_classes
+            ),
+            admission_scope=(
+                HISTORICAL_TRACE_ADMISSION_SCOPE
+                if historical_only
+                else TRACE_ADMISSION_SCOPE
+            ),
         )
         sources = [
             _AdmittedSourceIdentity(
@@ -1514,11 +1640,12 @@ def require_trace_admission(
     *,
     limits: TraceAdmissionLimits = DEFAULT_TRACE_ADMISSION_LIMITS,
 ) -> TraceAdmission:
-    """Admit exact bounded bytes from one anchored stable tree snapshot."""
+    """Admit split-v2 bytes for a forward capture that may mint evidence."""
     try:
         return _require_trace_admission_snapshot(
             trace_dir,
             limits=limits,
+            historical_only=False,
         ).admission
     except (ImmutableArtifactError, OSError, MemoryError) as exc:
         if _is_trace_resource_error(exc):
@@ -1529,28 +1656,62 @@ def require_trace_admission(
         raise
 
 
+def require_historical_trace_admission(
+    trace_dir: Path,
+    *,
+    limits: TraceAdmissionLimits = DEFAULT_TRACE_ADMISSION_LIMITS,
+) -> TraceAdmission:
+    """Read a supported historical trace without granting capture authority."""
+    try:
+        return _require_trace_admission_snapshot(
+            trace_dir,
+            limits=limits,
+            historical_only=True,
+        ).admission
+    except (ImmutableArtifactError, OSError, MemoryError) as exc:
+        if _is_trace_resource_error(exc):
+            raise TraceAdmissionError(
+                "trace_snapshot_resource_unavailable",
+                f"historical trace admission exhausted a required host resource: {exc}",
+            ) from exc
+        raise
+
+
 def open_admitted_trace_sources(
     trace_dir: Path,
     *,
     expected_admission: TraceAdmission,
     limits: TraceAdmissionLimits = DEFAULT_TRACE_ADMISSION_LIMITS,
+    reader: PinnedDirectoryReader | None = None,
 ) -> AdmittedTraceSources:
     """Open a monitored capability for exactly one admitted trace generation."""
     if not isinstance(expected_admission, TraceAdmission):
         raise TypeError("expected_admission must be a TraceAdmission value")
     if not isinstance(limits, TraceAdmissionLimits):
         raise TypeError("limits must be a TraceAdmissionLimits value")
+    historical_only = (
+        expected_admission.admission_scope == HISTORICAL_TRACE_ADMISSION_SCOPE
+    )
     trace_dir = _lexical_absolute_trace_dir(trace_dir)
 
     with ExitStack() as construction:
-        try:
-            reader = PinnedDirectoryReader(trace_dir)
-        except (ImmutableArtifactError, OSError, MemoryError) as exc:
-            _raise_trace_source_open_error(
-                exc,
-                detail_prefix="cannot open expected admitted trace root",
-            )
-        construction.callback(reader.close)
+        if reader is None:
+            try:
+                reader = PinnedDirectoryReader(trace_dir)
+            except (ImmutableArtifactError, OSError, MemoryError) as exc:
+                _raise_trace_source_open_error(
+                    exc,
+                    detail_prefix="cannot open expected admitted trace root",
+                )
+            construction.callback(reader.close)
+        else:
+            try:
+                reader.verify_path()
+            except (ImmutableArtifactError, OSError, MemoryError) as exc:
+                _raise_trace_source_open_error(
+                    exc,
+                    detail_prefix="cannot reuse expected admitted trace root",
+                )
 
         allocation_expected = (
             expected_admission.allocations_sidecar_size_bytes is not None
@@ -1586,6 +1747,7 @@ def open_admitted_trace_sources(
                 trace_dir,
                 limits=limits,
                 reader=reader,
+                historical_only=historical_only,
             )
         except TraceAdmissionError as exc:
             preserved_authentication_reasons = {
@@ -1694,9 +1856,22 @@ def main(argv: list[str] | None = None) -> int:
         epilog=f"authority scope: {TRACE_ADMISSION_SCOPE}",
     )
     parser.add_argument("trace_dir", type=Path)
+    parser.add_argument(
+        "--historical-only",
+        action="store_true",
+        help=(
+            "read a supported historical generation without granting "
+            "forward-capture evidence authority"
+        ),
+    )
     args = parser.parse_args(argv)
     try:
-        result = require_trace_admission(args.trace_dir)
+        admit = (
+            require_historical_trace_admission
+            if args.historical_only
+            else require_trace_admission
+        )
+        result = admit(args.trace_dir)
     except TraceAdmissionError as exc:
         print(f"trace_admission: FAIL {exc}", file=sys.stderr)
         return 1

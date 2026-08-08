@@ -7,14 +7,20 @@ from pathlib import Path
 
 import pytest
 
+from tools.local_labels import protected_paths
 from tools.local_labels.protected_paths import (
     EXTERNAL_PROTECTED_ABSOLUTE,
+    GIT_REPOSITORY_BARE,
+    GIT_REPOSITORY_NOT_FOUND,
+    GIT_REPOSITORY_STATUS_UNAVAILABLE,
+    GIT_REPOSITORY_WORKTREE,
     REPO_PROTECTED_RELATIVE,
     ProtectedPathError,
     assert_external_output,
     assert_write_allowed,
     canonicalize_candidate,
     discover_repo_root,
+    git_repository_status,
     is_inside_git_worktree,
     is_protected_path,
 )
@@ -137,13 +143,19 @@ def test_explicit_output_accepts_external_temporary_destination(tmp_path: Path) 
 
 def test_git_worktree_detection_distinguishes_repo_and_external_tmp(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     assert is_inside_git_worktree(REPO_ROOT / "future/output.json")
+    assert git_repository_status(REPO_ROOT / "future/output.json") == (
+        GIT_REPOSITORY_WORKTREE
+    )
     external = tmp_path / "external/output.json"
     assert not is_inside_git_worktree(external)
+    assert git_repository_status(external) == GIT_REPOSITORY_NOT_FOUND
 
     repo = tmp_path / "repo"
     linked = tmp_path / "linked"
+    bare = tmp_path / "bare.git"
     subprocess.run(["git", "init", "-q", str(repo)], check=True)
     subprocess.run(["git", "-C", str(repo), "config", "user.name", "test"], check=True)
     subprocess.run(
@@ -158,3 +170,94 @@ def test_git_worktree_detection_distinguishes_repo_and_external_tmp(
         check=True,
     )
     assert is_inside_git_worktree(linked / "future/output.json")
+    assert git_repository_status(repo / "future/output.json") == (
+        GIT_REPOSITORY_WORKTREE
+    )
+    assert git_repository_status(linked / "future/output.json") == (
+        GIT_REPOSITORY_WORKTREE
+    )
+    subprocess.run(["git", "init", "-q", "--bare", str(bare)], check=True)
+    tracer = bare / "tracer_tool.so"
+    tracer.write_bytes(b"tracer")
+    monkeypatch.setenv("GIT_CEILING_DIRECTORIES", str(bare))
+    fake_bin = tmp_path / "fake-bin"
+    fake_bin.mkdir()
+    fake_git = fake_bin / "git"
+    fake_git.write_text("#!/bin/sh\nprintf 'false\\nfalse\\n'\n", encoding="utf-8")
+    fake_git.chmod(0o755)
+    monkeypatch.setenv("PATH", str(fake_bin))
+    assert not is_inside_git_worktree(tracer)
+    assert git_repository_status(tracer) == GIT_REPOSITORY_BARE
+
+
+def test_git_repository_status_preserves_malformed_probe_as_unavailable(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        protected_paths.subprocess,
+        "run",
+        lambda *_args, **_kwargs: subprocess.CompletedProcess(
+            args=["git"],
+            returncode=0,
+            stdout="false\nfalse\n",
+            stderr="",
+        ),
+    )
+
+    assert (
+        git_repository_status(tmp_path / "tracer_tool.so")
+        == GIT_REPOSITORY_STATUS_UNAVAILABLE
+    )
+
+
+def test_git_worktree_probe_execution_error_fails_closed_on_consumer_path(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fail_probe(*_args, **_kwargs):
+        raise OSError("injected Git execution failure")
+
+    monkeypatch.setattr(protected_paths.subprocess, "run", fail_probe)
+    candidate = tmp_path / "external" / "result.json"
+
+    assert git_repository_status(candidate) == GIT_REPOSITORY_STATUS_UNAVAILABLE
+    with pytest.raises(ProtectedPathError, match="cannot determine Git-worktree"):
+        is_inside_git_worktree(candidate)
+    with pytest.raises(ProtectedPathError, match="cannot determine Git-worktree"):
+        assert_external_output(candidate, repo_root=REPO_ROOT)
+
+
+@pytest.mark.parametrize(
+    ("returncode", "stdout", "stderr"),
+    (
+        (0, "false\nfalse\n", ""),
+        (1, "", "injected rev-parse failure"),
+        (128, "", "fatal: ambiguous probe failure"),
+    ),
+    ids=("malformed-success", "generic-nonzero", "unrecognized-128"),
+)
+def test_git_worktree_indeterminate_results_fail_closed_on_consumer_path(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    returncode: int,
+    stdout: str,
+    stderr: str,
+) -> None:
+    monkeypatch.setattr(
+        protected_paths.subprocess,
+        "run",
+        lambda *_args, **_kwargs: subprocess.CompletedProcess(
+            args=["git"],
+            returncode=returncode,
+            stdout=stdout,
+            stderr=stderr,
+        ),
+    )
+    candidate = tmp_path / "external" / "result.json"
+
+    assert git_repository_status(candidate) == GIT_REPOSITORY_STATUS_UNAVAILABLE
+    with pytest.raises(ProtectedPathError, match="cannot determine Git-worktree"):
+        is_inside_git_worktree(candidate)
+    with pytest.raises(ProtectedPathError, match="cannot determine Git-worktree"):
+        assert_external_output(candidate, repo_root=REPO_ROOT)

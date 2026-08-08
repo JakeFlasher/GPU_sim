@@ -18,5 +18,17 @@ _PYCACHE_PREFIX = os.fspath(
 )
 os.environ["PYTHONPYCACHEPREFIX"] = _PYCACHE_PREFIX
 os.environ["PYTHONDONTWRITEBYTECODE"] = "1"
+# External tracer build tests exercise a production boundary that requires a
+# single-threaded parent. Keep numerical runtimes from creating ambient worker
+# pools during earlier tests in the same pytest process.
+for _thread_limit_variable in (
+    "BLIS_NUM_THREADS",
+    "MKL_NUM_THREADS",
+    "NUMEXPR_NUM_THREADS",
+    "OMP_NUM_THREADS",
+    "OPENBLAS_NUM_THREADS",
+    "VECLIB_MAXIMUM_THREADS",
+):
+    os.environ[_thread_limit_variable] = "1"
 sys.pycache_prefix = _PYCACHE_PREFIX
 sys.dont_write_bytecode = True

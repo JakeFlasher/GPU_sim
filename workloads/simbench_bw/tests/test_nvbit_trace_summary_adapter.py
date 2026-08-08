@@ -10,7 +10,8 @@ import os
 import shutil
 import stat
 import sys
-from contextlib import ExitStack
+import tempfile
+from contextlib import ExitStack, contextmanager, nullcontext
 from dataclasses import replace
 from pathlib import Path, PurePosixPath
 from types import SimpleNamespace
@@ -35,6 +36,11 @@ from tools.local_labels.immutable_artifact import (  # noqa: E402
     ImmutableArtifactLimitError,
     ImmutableArtifactResourceError,
 )
+from tools.nvbit_tracer.external_tracer import (  # noqa: E402
+    EXTERNAL_TRACER_PATH_ENV,
+    EXTERNAL_TRACER_SHA256_ENV,
+    ExternalTracerAuthority,
+)
 from tools.nvbit_tracer.proto_binding_loader import (  # noqa: E402
     ProtoBindingIntegrityError,
     ProtoBindingRuntimePrerequisiteError,
@@ -43,6 +49,7 @@ from tools.nvbit_tracer.test_trace_admission import _write_trace  # noqa: E402
 from tools.nvbit_tracer.trace_admission import (  # noqa: E402
     TraceAdmissionError,
     open_admitted_trace_sources,
+    require_historical_trace_admission,
     require_trace_admission,
 )
 
@@ -50,6 +57,56 @@ from tools.nvbit_tracer.trace_admission import (  # noqa: E402
 # no disposable short-name aliases.  Keep the cleanup roster explicit and empty:
 # deleting central-owned entries would poison the nonrollbackable descriptor state.
 _TEST_PROTOBUF_SHORT_ALIASES: tuple[str, ...] = ()
+
+
+@pytest.fixture(autouse=True)
+def _external_tracer_authority_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    raw_root = tempfile.mkdtemp(prefix="task615-run-suite-tracer-", dir="/tmp")
+    tracer = Path(raw_root) / "tracer_tool.so"
+    tracer.write_bytes(b"default external tracer authority fixture")
+    monkeypatch.setenv(EXTERNAL_TRACER_PATH_ENV, str(tracer))
+    monkeypatch.setenv(
+        EXTERNAL_TRACER_SHA256_ENV,
+        hashlib.sha256(tracer.read_bytes()).hexdigest(),
+    )
+
+    def fixture_authority(
+        path=None,
+        sha256=None,
+        *,
+        repo_root=None,
+        environment=None,
+    ) -> ExternalTracerAuthority:
+        del repo_root, environment
+        selected_path = Path(
+            path if path is not None else os.environ[EXTERNAL_TRACER_PATH_ENV]
+        ).resolve()
+        selected_sha256 = (
+            sha256
+            if sha256 is not None
+            else os.environ[EXTERNAL_TRACER_SHA256_ENV]
+        )
+        with immutable.open_retained_regular(selected_path) as retained:
+            path_identity = retained.path_identity
+        return ExternalTracerAuthority(
+            selected_path,
+            selected_sha256,
+            path_identity=path_identity,
+        )
+
+    monkeypatch.setattr(
+        run_suite, "require_external_tracer_authority", fixture_authority
+    )
+    try:
+        yield
+    finally:
+        tracer.unlink(missing_ok=True)
+        try:
+            Path(raw_root).rmdir()
+        except FileNotFoundError:
+            pass
 
 
 def _inotify_queue_overflow_event() -> bytes:
@@ -198,7 +255,7 @@ def _valid_phase_ledger_payload(
             "t_wall_no_inject_ns": 100,
             "t_wall_with_inject_ns": 101,
             "overhead_pct": 1.0,
-            "admission_threshold_pct": 5.0,
+            "admission_threshold_pct": 10.0,
             "admitted": True,
         },
         dual_run_manifest_ref="dual_run_manifest.json",
@@ -294,6 +351,65 @@ def _publish_active_summary_fixture(
     return admitted, result, record_path
 
 
+class _FixtureRetainedRuntime:
+    """Minimal descriptor-authority double owned by the source ExitStack."""
+
+    def __init__(self) -> None:
+        self.environment: dict[str, str] = {}
+        self.dso_sha256 = {"libprotobuf.so.fixture": "d" * 64}
+        self.changed = False
+        self.close_error: BaseException | None = None
+        self.closed = False
+
+    @property
+    def pass_fds(self) -> tuple[int, ...]:
+        return ()
+
+    def verify_unchanged(self) -> None:
+        if self.closed:
+            raise run_suite.TracerRuntimeError(
+                "runtime_capability_closed", "fixture runtime is closed"
+            )
+        if self.changed:
+            raise run_suite.TracerRuntimeError(
+                "runtime_dso_generation_changed",
+                "fixture runtime generation changed",
+            )
+
+    def close(self) -> None:
+        if self.closed:
+            return
+        self.closed = True
+        if self.close_error is not None:
+            raise self.close_error
+
+    def __enter__(self) -> "_FixtureRetainedRuntime":
+        self.verify_unchanged()
+        return self
+
+    def __exit__(self, exc_type, exc, traceback) -> bool:
+        if exc is not None:
+            try:
+                self.verify_unchanged()
+            except BaseException as verification_error:
+                exc.add_note(
+                    f"fixture runtime revalidation failed: {verification_error}"
+                )
+            try:
+                self.close()
+            except BaseException as cleanup_error:
+                exc.add_note(
+                    f"fixture runtime cleanup failed: {cleanup_error}"
+                )
+            return False
+        try:
+            self.verify_unchanged()
+        finally:
+            self.close()
+        return False
+
+
+
 def _configure_successful_trace_handle(
     *,
     monkeypatch: pytest.MonkeyPatch,
@@ -304,9 +420,13 @@ def _configure_successful_trace_handle(
     executable = tmp_path / "global_scalar_32b_copy_run"
     executable.write_bytes(b"retained executable fixture")
     executable.chmod(0o755)
-    tracer = tmp_path / "tracer_tool.so"
+    tracer = Path(os.environ[EXTERNAL_TRACER_PATH_ENV])
     tracer.write_bytes(b"retained tracer fixture")
-    monkeypatch.setattr(run_suite, "NVBIT_TRACER_SO", tracer)
+    monkeypatch.setenv(EXTERNAL_TRACER_PATH_ENV, str(tracer))
+    monkeypatch.setenv(
+        EXTERNAL_TRACER_SHA256_ENV,
+        hashlib.sha256(tracer.read_bytes()).hexdigest(),
+    )
     monkeypatch.setattr(
         run_suite, "_find_kernel_executable", lambda _slug: executable
     )
@@ -316,8 +436,13 @@ def _configure_successful_trace_handle(
         lambda _row, _props: artifact_dir,
     )
 
-    def fake_capture(*, traces_folder: Path, **_kwargs) -> dict[str, object]:
+    def fake_capture(*, traces_folder: Path, **kwargs) -> dict[str, object]:
         _write_trace_into_existing(traces_folder)
+        runtime_stack = kwargs.get("runtime_stack")
+        assert isinstance(runtime_stack, ExitStack)
+        retained_runtime = runtime_stack.enter_context(
+            _FixtureRetainedRuntime()
+        )
         return {
             "baseline_proc": SimpleNamespace(
                 returncode=0,
@@ -338,6 +463,8 @@ def _configure_successful_trace_handle(
             "tracer_build_sha256": hashlib.sha256(
                 b"retained tracer fixture"
             ).hexdigest(),
+            "retained_runtime": retained_runtime,
+            "runtime_dso_sha256": dict(retained_runtime.dso_sha256),
         }
 
     monkeypatch.setattr(run_suite, "_run_retained_nvbit_capture", fake_capture)
@@ -654,6 +781,23 @@ def _raw_file_hashes(path: Path) -> dict[str, str]:
         identity.relative_path: identity.sha256
         for identity in observed.files
     }
+
+
+def _same_byte_replace(path: Path) -> None:
+    """Replace one immutable fixture leaf while preserving its visible bytes."""
+    payload = path.read_bytes()
+    leaf_mode = stat.S_IMODE(path.stat().st_mode)
+    parent_mode = stat.S_IMODE(path.parent.stat().st_mode)
+    replacement = path.parent / f".{path.name}.task619-replacement"
+    path.parent.chmod(parent_mode | stat.S_IWUSR | stat.S_IXUSR)
+    try:
+        replacement.write_bytes(payload)
+        replacement.chmod(leaf_mode)
+        os.replace(replacement, path)
+    finally:
+        replacement.unlink(missing_ok=True)
+        path.parent.chmod(parent_mode)
+
 
 
 def _prepare_legacy_join_fixture(
@@ -1683,7 +1827,7 @@ def test_admitted_summary_never_reopens_trace_bytes(tmp_path: Path) -> None:
     trace_dir = _write_trace(tmp_path / "trace")
     admission = require_trace_admission(trace_dir)
     executable = tmp_path / "fixture_run"
-    tracer = tmp_path / "tracer_tool.so"
+    tracer = Path(os.environ[EXTERNAL_TRACER_PATH_ENV])
     executable.write_bytes(b"executable")
     tracer.write_bytes(b"tracer")
     binary_sha256 = hashlib.sha256(b"executable").hexdigest()
@@ -1728,6 +1872,34 @@ def test_admitted_summary_never_reopens_trace_bytes(tmp_path: Path) -> None:
         )
     )
     jsonschema.validate(record, schema)
+
+
+def test_historical_admission_cannot_mint_nvbit_summary_evidence(
+    tmp_path: Path,
+) -> None:
+    trace_dir = _write_trace(
+        tmp_path / "legacy-trace",
+        trace_contract_id="sm86_addr_carry_v1",
+        include_split_fields=False,
+    )
+    admission = require_historical_trace_admission(trace_dir)
+    output = tmp_path / "summary.json"
+    sentinel = b"existing authority must survive\n"
+    output.write_bytes(sentinel)
+
+    with pytest.raises(RuntimeError, match="historical-read-only"):
+        adapter.emit_admitted_nvbit_trace_summary(
+            admission=admission,
+            slug="fixture",
+            shape_point="fixture_shape",
+            repeat_index=0,
+            launch_index=0,
+            binary_sha256="a" * 64,
+            tracer_build_sha256="b" * 64,
+            output_path=output,
+        )
+
+    assert output.read_bytes() == sentinel
 
 
 def test_summary_fallback_dispatches_historical_v1_and_admitted_v2() -> None:
@@ -3088,14 +3260,18 @@ def test_handle_trace_typed_unavailable_record_is_non_active_authority(
     executable = tmp_path / "global_scalar_32b_copy_run"
     executable.write_bytes(b"fixture executable")
     executable.chmod(0o755)
-    tracer = tmp_path / "tracer_tool.so"
+    tracer = Path(os.environ[EXTERNAL_TRACER_PATH_ENV])
     tracer.write_bytes(b"fixture tracer")
     artifact_dir = tmp_path / "artifact"
     artifact_dir.mkdir()
     stale = artifact_dir / "nvbit_trace_summary_0_0.json"
     stale.write_text('{"stale": true}\n', encoding="utf-8")
 
-    monkeypatch.setattr(run_suite, "NVBIT_TRACER_SO", tracer)
+    monkeypatch.setenv(EXTERNAL_TRACER_PATH_ENV, str(tracer))
+    monkeypatch.setenv(
+        EXTERNAL_TRACER_SHA256_ENV,
+        hashlib.sha256(tracer.read_bytes()).hexdigest(),
+    )
     monkeypatch.setattr(
         run_suite,
         "_find_kernel_executable",
@@ -3508,12 +3684,16 @@ def test_handle_trace_reports_feature_resource_failure_without_snapshot_change(
     executable = tmp_path / "global_scalar_32b_copy_run"
     executable.write_bytes(b"retained executable fixture")
     executable.chmod(0o755)
-    tracer = tmp_path / "tracer_tool.so"
+    tracer = Path(os.environ[EXTERNAL_TRACER_PATH_ENV])
     tracer.write_bytes(b"retained tracer fixture")
     artifact_dir = tmp_path / "artifact"
     original_os_read = immutable.os.read
 
-    monkeypatch.setattr(run_suite, "NVBIT_TRACER_SO", tracer)
+    monkeypatch.setenv(EXTERNAL_TRACER_PATH_ENV, str(tracer))
+    monkeypatch.setenv(
+        EXTERNAL_TRACER_SHA256_ENV,
+        hashlib.sha256(tracer.read_bytes()).hexdigest(),
+    )
     monkeypatch.setattr(
         run_suite,
         "_find_kernel_executable",
@@ -3679,7 +3859,7 @@ def test_handle_trace_final_gate_rejects_same_byte_unadmitted_raw_replacement(
     )
     event = json.loads(event_path.read_text(encoding="utf-8"))
     assert event["activation_state"] == "non_active"
-    assert event["status"] == "preactivation_final_evidence_generation_gate_failed"
+    assert event["status"] == "preactivation_final_authority_acquisition_failed"
     assert event["typed_reason"] == "trace_filesystem_invalid"
 
 
@@ -3778,7 +3958,9 @@ def test_handle_trace_success_activates_only_after_all_required_stages(
         order.append("manifest")
         return original_manifest(*args, **kwargs)
 
-    def activate(path: Path, record: dict[str, object]) -> None:
+    def activate(
+        path: Path, record: dict[str, object], **publication_kwargs
+    ) -> None:
         order.append("activation")
         assert not path.exists()
         for descriptor_field in (
@@ -3794,7 +3976,7 @@ def test_handle_trace_success_activates_only_after_all_required_stages(
         summaries = record["nvbit_trace_summary_paths"]
         assert isinstance(summaries, list) and summaries
         assert all((artifact_dir / path).is_file() for path in summaries)
-        original_activation(path, record)
+        original_activation(path, record, **publication_kwargs)
 
     monkeypatch.setattr(
         run_suite,
@@ -5164,6 +5346,7 @@ def _prepare_phase_generation_authority_fixture(
     *,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    phase_mutation: str | None = None,
 ) -> tuple[Path, Path, dict[str, object]]:
     artifact_dir = tmp_path / "artifact"
     row, props = _configure_successful_trace_handle(
@@ -5187,6 +5370,23 @@ def _prepare_phase_generation_authority_fixture(
             kernel_signature_sha256=kwargs["kernel_signature_sha256"],
             tracer_build_sha256=kwargs["tracer_build_sha256"],
         )
+        if phase_mutation is not None:
+            ledger = json.loads(payload)
+            if phase_mutation == "threshold_rejected":
+                ledger["ab_overhead_record"] = {
+                    "t_wall_no_inject_ns": 100,
+                    "t_wall_with_inject_ns": 111,
+                    "overhead_pct": 11.0,
+                    "admission_threshold_pct": 10.0,
+                    "admitted": False,
+                }
+            elif phase_mutation == "mapping_rejected":
+                ledger["phase_boundary_status"] = (
+                    "phase_boundary_mapping_unresolved"
+                )
+            else:
+                raise AssertionError(f"unknown phase mutation: {phase_mutation}")
+            payload = phase_ledger.serialize_phase_cycle_ledger(ledger)
         final = immutable.publish_directory(
             generation_root,
             kwargs["attempt_id"],
@@ -5211,7 +5411,21 @@ def _prepare_phase_generation_authority_fixture(
             "typed_reason": None,
             "generation": generation,
             "staging_path": None,
-            "summary": {"n_admitted": 1, "n_rejected": 0},
+            "summary": {
+                "emitted_admitted": [
+                    {
+                        "repeat_index": 0,
+                        "launch_index": 0,
+                        "output_path": str(
+                            final / "phase_cycle_ledger_0_0.json"
+                        ),
+                        "admitted": True,
+                    }
+                ],
+                "emitted_rejected": [],
+                "n_admitted": 1,
+                "n_rejected": 0,
+            },
         }
 
     monkeypatch.setattr(
@@ -5344,6 +5558,273 @@ def test_handle_trace_binds_exact_phase_generation_before_activation(
     )
 
 
+def test_handle_trace_does_not_activate_rejected_phase_summary(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    artifact_dir = tmp_path / "artifact"
+    row, props = _configure_successful_trace_handle(
+        monkeypatch=monkeypatch,
+        tmp_path=tmp_path,
+        artifact_dir=artifact_dir,
+    )
+    attempt_id = "attempt-rejected-phase-summary"
+    monkeypatch.setattr(run_suite, "_new_trace_attempt_id", lambda: attempt_id)
+
+    def publish_rejected_phase_generation(**kwargs) -> dict[str, object]:
+        payload = _valid_phase_ledger_payload(
+            slug=kwargs["slug"],
+            shape_point=kwargs["shape_point_name"],
+            repeat_index=0,
+            launch_index=0,
+            binary_sha256=kwargs["binary_sha256"],
+            kernel_signature_sha256=kwargs["kernel_signature_sha256"],
+            tracer_build_sha256=kwargs["tracer_build_sha256"],
+        )
+        final = immutable.publish_directory(
+            artifact_dir
+            / run_suite.PHASE_LEDGER_GENERATION_NAMESPACE
+            / kwargs["shape_point_name"],
+            kwargs["attempt_id"],
+            [
+                immutable.ImmutableFile.from_bytes(
+                    "phase_cycle_ledger_0_0.json",
+                    payload,
+                )
+            ],
+            accept_existing=False,
+        )
+        generation = immutable.inspect_immutable_directory_generation(
+            final,
+            require_nonempty=True,
+            max_files=1,
+            max_directories=1,
+            max_total_file_bytes=len(payload),
+            max_total_relative_path_bytes=4096,
+        )
+        return {
+            "return_code": run_suite.EXIT_OK,
+            "typed_reason": None,
+            "generation": generation,
+            "staging_path": None,
+            "summary": {
+                "emitted_admitted": [],
+                "emitted_rejected": [
+                    {
+                        "repeat_index": 0,
+                        "launch_index": 0,
+                        "output_path": str(
+                            final / "phase_cycle_ledger_0_0.json"
+                        ),
+                        "admitted": False,
+                    }
+                ],
+                "n_admitted": 0,
+                "n_rejected": 1,
+            },
+        }
+
+    monkeypatch.setattr(
+        run_suite,
+        "_run_phase_inject_ab_for_handle_trace",
+        publish_rejected_phase_generation,
+    )
+
+    assert run_suite.handle_trace(
+        row,
+        props,
+        tmp_path,
+        shape_point_name="trace_00",
+        phase_inject_ab=True,
+        ab_repeat_count=1,
+    ) == run_suite.EXIT_BUILD_FAILED
+    assert not (artifact_dir / "trace_trace_00.json").exists()
+    event = json.loads(
+        (
+            artifact_dir
+            / run_suite.TRACE_CAPTURE_ATTEMPT_NAMESPACE
+            / "trace_00"
+            / attempt_id
+            / "preactivation_failed.json"
+        ).read_text(encoding="utf-8")
+    )
+    assert event["activation_state"] == "non_active"
+    assert event["typed_reason"] == "phase_cycle_ledger_inadmissible"
+    assert event["phase_cycle_ledger_generation"] is not None
+
+
+@pytest.mark.parametrize(
+    ("phase_mutation", "expected_token"),
+    (
+        ("threshold_rejected", "nvbit_phase_injection_overhead_exceeded"),
+        ("mapping_rejected", "phase_boundary_mapping_unresolved"),
+    ),
+)
+def test_merge_and_verifier_rerun_phase_ledger_admission(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    phase_mutation: str,
+    expected_token: str,
+) -> None:
+    artifact_dir, _active_path, _active = (
+        _prepare_phase_generation_authority_fixture(
+            tmp_path=tmp_path,
+            monkeypatch=monkeypatch,
+            phase_mutation=phase_mutation,
+        )
+    )
+
+    discovered, merge_errors = merge_evidence._discover_nvbit_summary_inputs(
+        artifact_dir
+    )
+    assert discovered == []
+    assert len(merge_errors) == 1
+    assert "semantically inadmissible" in merge_errors[0]
+    assert expected_token in merge_errors[0]
+
+    verifier_errors = verify_artifacts._verify_canonical_trace_pb_admission(
+        artifact_dir
+    )
+    assert any(
+        "semantically inadmissible" in error and expected_token in error
+        for error in verifier_errors
+    )
+
+
+@pytest.mark.parametrize(
+    ("failure_kind", "expected_token"),
+    (
+        ("cleanup", "phase_inject_ab_cleanup_failed"),
+        ("output", "phase_inject_ab_output_limit_exceeded"),
+        ("resource", "phase_inject_ab_resource_unavailable"),
+        ("launch", "phase_inject_ab_launch_failed"),
+    ),
+)
+def test_handle_trace_types_new_phase_executor_failures_and_retains_streams(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    failure_kind: str,
+    expected_token: str,
+) -> None:
+    artifact_dir = tmp_path / "artifact"
+    row, props = _configure_successful_trace_handle(
+        monkeypatch=monkeypatch,
+        tmp_path=tmp_path,
+        artifact_dir=artifact_dir,
+    )
+    attempt_id = f"attempt-phase-{failure_kind}"
+    monkeypatch.setattr(run_suite, "_new_trace_attempt_id", lambda: attempt_id)
+    monkeypatch.setattr(
+        phase_inject._consumer,
+        "load_admission_registry",
+        lambda: SimpleNamespace(),
+    )
+    monkeypatch.setattr(
+        phase_inject._consumer,
+        "admission_threshold_for_slug",
+        lambda _admission, _slug: 5.0,
+    )
+    stdout_bytes = b"phase stdout\x00\xff"
+    stderr_bytes = b"phase stderr\xfe\x80"
+    observed_lower_bound = phase_inject.PHASE_AB_MAX_CAPTURE_BYTES + 777
+    if failure_kind == "cleanup":
+        planted = phase_inject.PhaseInjectAbCleanupFailed(
+            pid=123,
+            stage="cgroup_cleanup",
+            timeout_s=2.0,
+            detail="planted cleanup precedence failure",
+            stdout_bytes=stdout_bytes,
+            stderr_bytes=stderr_bytes,
+            observed_output_bytes_lower_bound=observed_lower_bound,
+        )
+    elif failure_kind == "output":
+        planted = phase_inject.PhaseInjectAbOutputLimitExceeded(
+            observed=observed_lower_bound,
+            stderr="planted output cap",
+            stdout_bytes=stdout_bytes,
+            stderr_bytes=stderr_bytes,
+            observed_is_lower_bound=True,
+        )
+    elif failure_kind == "resource":
+        planted = phase_inject.PhaseInjectAbResourceUnavailable(
+            side="with_inject",
+            detail="planted EMFILE",
+            stdout_bytes=stdout_bytes,
+            stderr_bytes=stderr_bytes,
+        )
+    else:
+        planted = phase_inject.PhaseInjectAbLaunchFailed(
+            side="no_inject",
+            detail="planted launch refusal",
+            stdout_bytes=stdout_bytes,
+            stderr_bytes=stderr_bytes,
+        )
+
+    def raise_planted_failure(*_args, **_kwargs):
+        raise planted
+
+    monkeypatch.setattr(
+        phase_inject, "run_ab_overhead_pair", raise_planted_failure
+    )
+    observed_phase_result: dict[str, object] = {}
+    original_phase_runner = run_suite._run_phase_inject_ab_for_handle_trace
+
+    def recording_phase_runner(**kwargs):
+        result = original_phase_runner(**kwargs)
+        observed_phase_result.update(result)
+        return result
+
+    monkeypatch.setattr(
+        run_suite,
+        "_run_phase_inject_ab_for_handle_trace",
+        recording_phase_runner,
+    )
+
+    rc = run_suite.handle_trace(
+        row,
+        props,
+        tmp_path,
+        shape_point_name="trace_00",
+        phase_inject_ab=True,
+        ab_repeat_count=1,
+    )
+
+    assert rc == run_suite.EXIT_BUILD_FAILED
+    assert observed_phase_result["typed_reason"] == expected_token
+    expected_lower_bound = (
+        observed_lower_bound
+        if failure_kind in {"cleanup", "output"}
+        else None
+    )
+    assert (
+        observed_phase_result["observed_output_bytes_lower_bound"]
+        == expected_lower_bound
+    )
+    assert not (artifact_dir / "trace_trace_00.json").exists()
+    event_path = (
+        artifact_dir
+        / run_suite.TRACE_CAPTURE_ATTEMPT_NAMESPACE
+        / "trace_00"
+        / attempt_id
+        / "preactivation_failed.json"
+    )
+    event = json.loads(event_path.read_text(encoding="utf-8"))
+    assert event["status"] == "optional_phase_failed"
+    assert event["typed_reason"] == expected_token
+    if failure_kind in {"cleanup", "output"}:
+        assert event["observed_output_bytes_lower_bound"] == observed_lower_bound
+    else:
+        assert "observed_output_bytes_lower_bound" not in event
+    staging = artifact_dir / str(event["derived_staging_path"])
+    phase_root = staging / "phase_inject_ab"
+    assert (
+        phase_root / f"{expected_token}_failure.stdout.bin"
+    ).read_bytes() == stdout_bytes
+    assert (
+        phase_root / f"{expected_token}_failure.stderr.bin"
+    ).read_bytes() == stderr_bytes
+
+
 @pytest.mark.parametrize(
     "failure_mode",
     ("source_mutation", "source_reader_cleanup"),
@@ -5361,11 +5842,6 @@ def test_phase_postcommit_failure_event_binds_preserved_generation(
     )
     attempt_id = "attempt-phase-postcommit-failure"
     monkeypatch.setattr(run_suite, "_new_trace_attempt_id", lambda: attempt_id)
-    monkeypatch.setattr(
-        run_suite,
-        "tracer_runtime_env",
-        lambda *_args, **_kwargs: {},
-    )
     monkeypatch.setattr(
         phase_inject._consumer,
         "load_admission_registry",
@@ -7333,8 +7809,24 @@ def test_handle_trace_raw_stage_close_preserves_selected_capture_failure(
     attempt_id = "attempt-capture-failure-close"
     monkeypatch.setattr(run_suite, "_new_trace_attempt_id", lambda: attempt_id)
 
+    failure_evidence = ({
+        "path": "trace_runtime_verification_failure.stdout.bin",
+        "sha256": hashlib.sha256(b"partial stdout").hexdigest(),
+        "size_bytes": len(b"partial stdout"),
+    },)
+
     def fail_capture(**_kwargs):
-        raise run_suite.TracerRuntimeError("planted tracer dependency failure")
+        error = run_suite._TraceChildExecutionError(
+            "trace_injected_process_timeout",
+            "planted bounded child timeout",
+            stdout=b"partial stdout",
+            process_id=456,
+            observed_output_bytes_lower_bound=(
+                run_suite._TRACE_CHILD_MAX_STDOUT_STDERR_BYTES + 4096
+            ),
+        )
+        error.failure_evidence = failure_evidence
+        raise error
 
     monkeypatch.setattr(run_suite, "_run_retained_nvbit_capture", fail_capture)
     _install_raw_stage_close_failure(
@@ -7356,7 +7848,47 @@ def test_handle_trace_raw_stage_close_preserves_selected_capture_failure(
         ).read_text(encoding="utf-8")
     )
     assert event["status"] == "capture_failed"
-    assert event["typed_reason"] == "tracer_so_deps_unresolved"
+    assert event["typed_reason"] == "trace_injected_process_timeout"
+    assert event["process_failure_evidence"] == list(failure_evidence)
+    assert event["observed_output_bytes_lower_bound"] == (
+        run_suite._TRACE_CHILD_MAX_STDOUT_STDERR_BYTES + 4096
+    )
+
+
+def test_capture_raw_trace_preserves_tracer_runtime_reason(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    failure_evidence = ({
+        "path": "trace_runtime_verification_failure.stderr.bin",
+        "sha256": hashlib.sha256(b"runtime drift").hexdigest(),
+        "size_bytes": len(b"runtime drift"),
+    },)
+
+    def fail_capture(**_kwargs):
+        error = run_suite.TracerRuntimeError(
+            "runtime_dso_generation_changed",
+            "planted runtime generation drift",
+        )
+        error.failure_evidence = failure_evidence
+        raise error
+
+    monkeypatch.setattr(run_suite, "_run_retained_nvbit_capture", fail_capture)
+    result = run_suite._capture_raw_trace_generation(
+        artifact_dir=tmp_path,
+        shape_point="trace_00",
+        attempt_id="attempt-runtime-drift",
+        retained_executable=object(),
+        retained_tracer=object(),
+        args=[],
+    )
+
+    assert result["status"] == "capture_failed"
+    assert result["typed_reason"] == "runtime_dso_generation_changed"
+    assert result["detail"] == (
+        "runtime_dso_generation_changed: planted runtime generation drift"
+    )
+    assert result["process_failure_evidence"] == list(failure_evidence)
 
 
 def test_handle_trace_raw_stage_close_preserves_typed_unavailable_result(
@@ -7670,7 +8202,7 @@ def test_handle_trace_retires_activation_on_derived_close_failure(
     assert event["activation_state"] == "non_active"
 
 
-def test_handle_trace_activation_rollback_preserves_concurrent_locator(
+def test_handle_trace_unexpected_rollback_preserves_foreign_locator(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
@@ -7682,9 +8214,10 @@ def test_handle_trace_activation_rollback_preserves_concurrent_locator(
         artifact_dir=artifact_dir,
     )
     active_path = artifact_dir / "trace_trace_00.json"
+    failed_evidence_path = artifact_dir / ".failed-activation-evidence"
     concurrent_payload = b'{"concurrent":"active-replacement"}\n'
-    published_payload = []
-    expected_retirements = []
+    published_payloads: list[bytes] = []
+    expected_retirements: list[bytes] = []
     original_retire = run_suite.retire_regular_file
 
     def record_retirement(path, *args, **kwargs):
@@ -7693,39 +8226,44 @@ def test_handle_trace_activation_rollback_preserves_concurrent_locator(
         return original_retire(path, *args, **kwargs)
 
     monkeypatch.setattr(run_suite, "retire_regular_file", record_retirement)
-    original_close = immutable.ExclusiveDirectoryStage.close
+    original_close = run_suite._TraceActivationAuthoritySet.close
     raced = False
 
-    def replace_locator_then_fail(stage) -> None:
+    def replace_locator_then_fail(authorities) -> None:
         nonlocal raced
-        original_close(stage)
-        if (
-            not raced
-            and run_suite.TRACE_DERIVED_GENERATION_NAMESPACE
-            in stage.output_root.parts
-        ):
+        was_closed = authorities._closed
+        original_close(authorities)
+        if not was_closed:
             raced = True
-            published_payload.append(active_path.read_bytes())
+            published_payloads.append(active_path.read_bytes())
+            os.replace(active_path, failed_evidence_path)
             replacement = active_path.with_name(".concurrent-active")
             replacement.write_bytes(concurrent_payload)
             replacement.chmod(0o444)
             os.replace(replacement, active_path)
-            raise OSError(errno.EIO, "planted derived close failure after race")
+            raise RuntimeError(
+                "planted unexpected authority close after foreign replacement"
+            )
 
     monkeypatch.setattr(
-        immutable.ExclusiveDirectoryStage,
+        run_suite._TraceActivationAuthoritySet,
         "close",
         replace_locator_then_fail,
     )
 
-    assert run_suite.handle_trace(
-        row, props, tmp_path, shape_point_name="trace_00"
-    ) == run_suite.EXIT_BUILD_FAILED
+    with pytest.raises(
+        RuntimeError,
+        match="planted unexpected authority close after foreign replacement",
+    ):
+        run_suite.handle_trace(
+            row, props, tmp_path, shape_point_name="trace_00"
+        )
 
     assert raced is True
     assert active_path.read_bytes() == concurrent_payload
-    assert len(published_payload) == 1
-    assert expected_retirements == published_payload
+    assert len(published_payloads) == 1
+    assert failed_evidence_path.read_bytes() == published_payloads[0]
+    assert expected_retirements == published_payloads
     assert all(
         path.read_bytes() != concurrent_payload
         for path in artifact_dir.glob(".trace_trace_00.json.*.retired")
@@ -7902,11 +8440,41 @@ def test_handle_trace_crash_after_retirement_leaves_no_stale_activation(
     assert retired[0].read_bytes() == previous_payload
 
 
-@pytest.mark.parametrize("crash_after_commit", (False, True))
-def test_handle_trace_activation_exception_is_atomic(
+def test_handle_trace_precommit_activation_exception_leaves_no_active_leaf(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-    crash_after_commit: bool,
+) -> None:
+    artifact_dir = tmp_path / "artifact"
+    row, props = _configure_successful_trace_handle(
+        monkeypatch=monkeypatch,
+        tmp_path=tmp_path,
+        artifact_dir=artifact_dir,
+    )
+
+    def fail_before_commit(
+        _path: Path, _record: dict[str, object], **_publication_kwargs
+    ) -> None:
+        raise RuntimeError("planted precommit activation failure")
+
+    monkeypatch.setattr(
+        run_suite, "_publish_trace_artifact_record", fail_before_commit
+    )
+    with pytest.raises(
+        RuntimeError, match="planted precommit activation failure"
+    ):
+        run_suite.handle_trace(
+            row, props, tmp_path, shape_point_name="trace_00"
+        )
+
+    assert not (artifact_dir / "trace_trace_00.json").exists()
+    assert tuple(artifact_dir.glob(".trace_trace_00.json.*.retired")) == ()
+
+
+@pytest.mark.parametrize("error_type", (MemoryError, RuntimeError))
+def test_handle_trace_retires_exact_activation_after_postcommit_exception(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    error_type: type[BaseException],
 ) -> None:
     artifact_dir = tmp_path / "artifact"
     row, props = _configure_successful_trace_handle(
@@ -7915,20 +8483,35 @@ def test_handle_trace_activation_exception_is_atomic(
         artifact_dir=artifact_dir,
     )
     original_activation = run_suite._publish_trace_artifact_record
+    committed_payloads: list[bytes] = []
 
-    def crash(path: Path, record: dict[str, object]) -> None:
-        if crash_after_commit:
-            original_activation(path, record)
-        raise RuntimeError("planted activation crash")
+    def fail_after_commit(
+        path: Path, record: dict[str, object], **publication_kwargs
+    ) -> None:
+        original_activation(path, record, **publication_kwargs)
+        committed_payloads.append(path.read_bytes())
+        raise error_type("planted recoverable postcommit activation failure")
 
-    monkeypatch.setattr(run_suite, "_publish_trace_artifact_record", crash)
-    with pytest.raises(RuntimeError, match="planted activation crash"):
+    monkeypatch.setattr(
+        run_suite, "_publish_trace_artifact_record", fail_after_commit
+    )
+    with pytest.raises(
+        error_type, match="planted recoverable postcommit activation failure"
+    ):
         run_suite.handle_trace(
             row, props, tmp_path, shape_point_name="trace_00"
         )
 
     active_path = artifact_dir / "trace_trace_00.json"
-    assert active_path.exists() is crash_after_commit
+    assert not active_path.exists()
+    assert len(committed_payloads) == 1
+    retired = tuple(artifact_dir.glob(".trace_trace_00.json.*.retired"))
+    assert len(retired) == 1
+    assert retired[0].read_bytes() == committed_payloads[0]
+    committed = json.loads(committed_payloads[0])
+    assert committed["activation_state"] == "active"
+    assert committed["nvbit_trace_summary_generation"]["file_count"] == 1
+
     attempt_events = tuple(
         (
             artifact_dir
@@ -7947,10 +8530,21 @@ def test_handle_trace_activation_exception_is_atomic(
         artifact_dir
         / ready["nvbit_trace_summary_generation"]["files"][0]["path"]
     ).is_file()
-    if crash_after_commit:
-        active = json.loads(active_path.read_text(encoding="utf-8"))
-        assert active["activation_state"] == "active"
-        assert active["nvbit_trace_summary_generation"]["file_count"] == 1
+    failures = tuple(
+        (
+            artifact_dir
+            / run_suite.TRACE_CAPTURE_ATTEMPT_NAMESPACE
+            / "trace_00"
+        ).glob("*/activation_failed.json")
+    )
+    if error_type is MemoryError:
+        assert failures == ()
+    else:
+        assert len(failures) == 1
+        failure = json.loads(failures[0].read_text(encoding="utf-8"))
+        assert failure["activation_state"] == "non_active"
+        assert failure["status"] == "activation_failed"
+        assert failure["typed_reason"] == "trace_activation_failed"
 
 
 def test_handle_trace_activation_destination_race_is_not_overwritten(
@@ -7966,9 +8560,11 @@ def test_handle_trace_activation_destination_race_is_not_overwritten(
     original_activation = run_suite._publish_trace_artifact_record
     planted = b'{"concurrent":true}\n'
 
-    def plant_race(path: Path, record: dict[str, object]) -> None:
+    def plant_race(
+        path: Path, record: dict[str, object], **publication_kwargs
+    ) -> None:
         path.write_bytes(planted)
-        original_activation(path, record)
+        original_activation(path, record, **publication_kwargs)
 
     monkeypatch.setattr(
         run_suite, "_publish_trace_artifact_record", plant_race
@@ -8004,6 +8600,511 @@ def test_handle_trace_activation_destination_race_is_not_overwritten(
 
 
 @pytest.mark.parametrize(
+    "mutated_role",
+    (
+        "summary",
+        "derived_artifact",
+        "manifest",
+        "raw_non_utf8_diagnostic",
+        "admitted_trace_artifact",
+        "activation_ready_event",
+    ),
+)
+def test_handle_trace_rejects_post_gate_precommit_generation_substitution(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    mutated_role: str,
+) -> None:
+    artifact_dir = tmp_path / "artifact"
+    row, props = _configure_successful_trace_handle(
+        monkeypatch=monkeypatch,
+        tmp_path=tmp_path,
+        artifact_dir=artifact_dir,
+    )
+    if mutated_role == "raw_non_utf8_diagnostic":
+        fixture_capture = run_suite._run_retained_nvbit_capture
+
+        def capture_with_binary_diagnostic(
+            *, traces_folder: Path, **kwargs
+        ) -> dict[str, object]:
+            result = fixture_capture(traces_folder=traces_folder, **kwargs)
+            (traces_folder / "capture_diagnostic.bin").write_bytes(
+                b"\xff\xfe\x00task619-diagnostic\x80"
+            )
+            return result
+
+        monkeypatch.setattr(
+            run_suite,
+            "_run_retained_nvbit_capture",
+            capture_with_binary_diagnostic,
+        )
+    if mutated_role == "derived_artifact":
+        def emit_unreferenced_derived_artifact(**kwargs) -> None:
+            target = Path(kwargs["traces_folder"]) / "derived_diagnostic.bin"
+            target.write_bytes(b"task619 derived bytes\x00\xff")
+
+        monkeypatch.setattr(
+            run_suite,
+            "_emit_admitted_trace_features",
+            emit_unreferenced_derived_artifact,
+        )
+
+    original_activation = run_suite._publish_trace_artifact_record
+
+    def substitute_then_publish(
+        path: Path,
+        record: dict[str, object],
+        **publication_kwargs,
+    ) -> None:
+        if mutated_role == "summary":
+            summaries = record["nvbit_trace_summary_paths"]
+            assert isinstance(summaries, list) and summaries
+            target = artifact_dir / str(summaries[0])
+        elif mutated_role == "derived_artifact":
+            generation = record["trace_derived_generation"]
+            assert isinstance(generation, dict)
+            target = (
+                artifact_dir
+                / str(generation["path"])
+                / "derived_diagnostic.bin"
+            )
+        elif mutated_role == "manifest":
+            manifest = record["measurement_manifest"]
+            assert isinstance(manifest, dict)
+            target = artifact_dir / str(manifest["path"])
+        elif mutated_role == "raw_non_utf8_diagnostic":
+            generation = record["raw_trace_generation"]
+            assert isinstance(generation, dict)
+            target = (
+                artifact_dir
+                / str(generation["path"])
+                / "capture_diagnostic.bin"
+            )
+            assert target.read_bytes().startswith(b"\xff\xfe\x00")
+        elif mutated_role == "admitted_trace_artifact":
+            generation = record["raw_trace_generation"]
+            assert isinstance(generation, dict)
+            target = artifact_dir / str(generation["path"]) / "stats.csv"
+        else:
+            event = record["trace_capture_attempt_event"]
+            assert isinstance(event, dict)
+            target = artifact_dir / str(event["path"])
+        _same_byte_replace(target)
+        original_activation(path, record, **publication_kwargs)
+
+    monkeypatch.setattr(
+        run_suite, "_publish_trace_artifact_record", substitute_then_publish
+    )
+
+    rc = run_suite.handle_trace(
+        row, props, tmp_path, shape_point_name="trace_00"
+    )
+
+    assert rc == run_suite.EXIT_BUILD_FAILED
+    assert not (artifact_dir / "trace_trace_00.json").exists()
+    assert tuple(artifact_dir.glob(".trace_trace_00.json.*.retired")) == ()
+    failures = tuple(
+        (
+            artifact_dir
+            / run_suite.TRACE_CAPTURE_ATTEMPT_NAMESPACE
+            / "trace_00"
+        ).glob("*/activation_failed.json")
+    )
+    assert len(failures) == 1
+    failure = json.loads(failures[0].read_text(encoding="utf-8"))
+    assert failure["status"] == "activation_failed"
+    assert failure["typed_reason"] == "trace_activation_failed"
+
+
+
+def test_handle_trace_rejects_post_gate_precommit_phase_generation_substitution(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    artifact_dir = tmp_path / "artifact"
+    row, props = _configure_successful_trace_handle(
+        monkeypatch=monkeypatch,
+        tmp_path=tmp_path,
+        artifact_dir=artifact_dir,
+    )
+
+    def publish_phase_generation(**kwargs) -> dict[str, object]:
+        payload = _valid_phase_ledger_payload(
+            slug=kwargs["slug"],
+            shape_point=kwargs["shape_point_name"],
+            repeat_index=0,
+            launch_index=0,
+            binary_sha256=kwargs["binary_sha256"],
+            kernel_signature_sha256=kwargs["kernel_signature_sha256"],
+            tracer_build_sha256=kwargs["tracer_build_sha256"],
+        )
+        final = immutable.publish_directory(
+            artifact_dir
+            / run_suite.PHASE_LEDGER_GENERATION_NAMESPACE
+            / kwargs["shape_point_name"],
+            kwargs["attempt_id"],
+            [
+                immutable.ImmutableFile.from_bytes(
+                    "phase_cycle_ledger_0_0.json", payload
+                )
+            ],
+            accept_existing=False,
+        )
+        generation = immutable.inspect_immutable_directory_generation(
+            final,
+            require_nonempty=True,
+            max_files=1,
+            max_directories=1,
+            max_total_file_bytes=len(payload),
+            max_total_relative_path_bytes=4096,
+        )
+        return {
+            "return_code": run_suite.EXIT_OK,
+            "typed_reason": None,
+            "generation": generation,
+            "staging_path": None,
+            "summary": {
+                "emitted_admitted": [{
+                    "repeat_index": 0,
+                    "launch_index": 0,
+                    "output_path": str(final / "phase_cycle_ledger_0_0.json"),
+                    "admitted": True,
+                }],
+                "emitted_rejected": [],
+                "n_admitted": 1,
+                "n_rejected": 0,
+            },
+        }
+
+    monkeypatch.setattr(
+        run_suite,
+        "_run_phase_inject_ab_for_handle_trace",
+        publish_phase_generation,
+    )
+    original_activation = run_suite._publish_trace_artifact_record
+
+    def substitute_phase_then_publish(
+        path: Path,
+        record: dict[str, object],
+        **publication_kwargs,
+    ) -> None:
+        phase = record["phase_inject_ab"]
+        assert isinstance(phase, dict)
+        generation = phase["generation"]
+        assert isinstance(generation, dict)
+        target = (
+            artifact_dir
+            / str(generation["path"])
+            / "phase_cycle_ledger_0_0.json"
+        )
+        _same_byte_replace(target)
+        original_activation(path, record, **publication_kwargs)
+
+    monkeypatch.setattr(
+        run_suite,
+        "_publish_trace_artifact_record",
+        substitute_phase_then_publish,
+    )
+
+    rc = run_suite.handle_trace(
+        row,
+        props,
+        tmp_path,
+        shape_point_name="trace_00",
+        phase_inject_ab=True,
+        ab_repeat_count=1,
+    )
+
+    assert rc == run_suite.EXIT_BUILD_FAILED
+    assert not (artifact_dir / "trace_trace_00.json").exists()
+    failures = tuple(
+        (
+            artifact_dir
+            / run_suite.TRACE_CAPTURE_ATTEMPT_NAMESPACE
+            / "trace_00"
+        ).glob("*/activation_failed.json")
+    )
+    assert len(failures) == 1
+
+
+@pytest.mark.parametrize(
+    ("failure_kind", "expected_reason", "expect_retired"),
+    (
+        ("runtime_mutation", "runtime_dso_generation_changed", False),
+        ("runtime_cleanup", "runtime_cleanup_failed", True),
+    ),
+)
+def test_handle_trace_rejects_runtime_authority_mutation_or_cleanup_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    failure_kind: str,
+    expected_reason: str,
+    expect_retired: bool,
+) -> None:
+    artifact_dir = tmp_path / "artifact"
+    row, props = _configure_successful_trace_handle(
+        monkeypatch=monkeypatch,
+        tmp_path=tmp_path,
+        artifact_dir=artifact_dir,
+    )
+    fixture_capture = run_suite._run_retained_nvbit_capture
+    runtime_holder: dict[str, _FixtureRetainedRuntime] = {}
+
+    def retain_runtime_handle(**kwargs) -> dict[str, object]:
+        result = fixture_capture(**kwargs)
+        retained_runtime = result["retained_runtime"]
+        assert isinstance(retained_runtime, _FixtureRetainedRuntime)
+        runtime_holder["runtime"] = retained_runtime
+        return result
+
+    monkeypatch.setattr(
+        run_suite, "_run_retained_nvbit_capture", retain_runtime_handle
+    )
+    original_activation = run_suite._publish_trace_artifact_record
+
+    def fail_runtime_then_publish(
+        path: Path,
+        record: dict[str, object],
+        **publication_kwargs,
+    ) -> None:
+        runtime = runtime_holder["runtime"]
+        if failure_kind == "runtime_mutation":
+            runtime.changed = True
+        else:
+            runtime.close_error = run_suite.TracerRuntimeError(
+                "runtime_cleanup_failed",
+                "planted retained runtime cleanup failure",
+            )
+        original_activation(path, record, **publication_kwargs)
+
+    monkeypatch.setattr(
+        run_suite, "_publish_trace_artifact_record", fail_runtime_then_publish
+    )
+
+    rc = run_suite.handle_trace(
+        row, props, tmp_path, shape_point_name="trace_00"
+    )
+
+    active_path = artifact_dir / "trace_trace_00.json"
+    assert rc == run_suite.EXIT_BUILD_FAILED
+    assert not active_path.exists()
+    retired = tuple(artifact_dir.glob(".trace_trace_00.json.*.retired"))
+    assert bool(retired) is expect_retired
+    failures = tuple(
+        (
+            artifact_dir
+            / run_suite.TRACE_CAPTURE_ATTEMPT_NAMESPACE
+            / "trace_00"
+        ).glob("*/activation_failed.json")
+    )
+    assert len(failures) == 1
+    failure = json.loads(failures[0].read_text(encoding="utf-8"))
+    assert failure["typed_reason"] == expected_reason
+
+
+
+def test_handle_trace_rejects_missing_runtime_authority_role(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    artifact_dir = tmp_path / "artifact"
+    row, props = _configure_successful_trace_handle(
+        monkeypatch=monkeypatch,
+        tmp_path=tmp_path,
+        artifact_dir=artifact_dir,
+    )
+    fixture_capture = run_suite._run_retained_nvbit_capture
+
+    def omit_runtime_role(**kwargs) -> dict[str, object]:
+        result = fixture_capture(**kwargs)
+        result["retained_runtime"] = None
+        result["runtime_dso_sha256"] = None
+        return result
+
+    monkeypatch.setattr(
+        run_suite, "_run_retained_nvbit_capture", omit_runtime_role
+    )
+
+    rc = run_suite.handle_trace(
+        row, props, tmp_path, shape_point_name="trace_00"
+    )
+
+    assert rc == run_suite.EXIT_BUILD_FAILED
+    assert not (artifact_dir / "trace_trace_00.json").exists()
+    failures = tuple(
+        (
+            artifact_dir
+            / run_suite.TRACE_CAPTURE_ATTEMPT_NAMESPACE
+            / "trace_00"
+        ).glob("*/preactivation_failed.json")
+    )
+    assert len(failures) == 1
+    failure = json.loads(failures[0].read_text(encoding="utf-8"))
+    assert failure["typed_reason"] == "trace_activation_authority_missing"
+
+
+
+def test_handle_trace_types_precommit_descriptor_resource_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    artifact_dir = tmp_path / "artifact"
+    row, props = _configure_successful_trace_handle(
+        monkeypatch=monkeypatch,
+        tmp_path=tmp_path,
+        artifact_dir=artifact_dir,
+    )
+    original_activation = run_suite._publish_trace_artifact_record
+
+    def fail_descriptor_before_commit(
+        path: Path,
+        record: dict[str, object],
+        **publication_kwargs,
+    ) -> None:
+        def descriptor_failure() -> None:
+            raise ImmutableArtifactResourceError(
+                "VERIFY_RESOURCE_BOUND: task619 planted EMFILE"
+            )
+
+        publication_kwargs["before_commit"] = descriptor_failure
+        original_activation(path, record, **publication_kwargs)
+
+    monkeypatch.setattr(
+        run_suite,
+        "_publish_trace_artifact_record",
+        fail_descriptor_before_commit,
+    )
+
+    rc = run_suite.handle_trace(
+        row, props, tmp_path, shape_point_name="trace_00"
+    )
+
+    assert rc == run_suite.EXIT_BUILD_FAILED
+    assert not (artifact_dir / "trace_trace_00.json").exists()
+    captured = capsys.readouterr()
+    assert "trace_activation_resource_unavailable" in captured.err
+    assert "trace_snapshot_resource_unavailable" in captured.err
+    assert "task619 planted EMFILE" in captured.err
+    failures = tuple(
+        (
+            artifact_dir
+            / run_suite.TRACE_CAPTURE_ATTEMPT_NAMESPACE
+            / "trace_00"
+        ).glob("*/activation_failed.json")
+    )
+    assert failures == ()
+
+
+
+def test_handle_trace_retires_commit_on_activation_authority_cleanup_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    artifact_dir = tmp_path / "artifact"
+    row, props = _configure_successful_trace_handle(
+        monkeypatch=monkeypatch,
+        tmp_path=tmp_path,
+        artifact_dir=artifact_dir,
+    )
+    original_close = run_suite._TraceActivationAuthoritySet.close
+
+    def fail_first_close(authorities) -> None:
+        was_closed = authorities._closed
+        original_close(authorities)
+        if not was_closed:
+            raise ImmutableArtifactError(
+                "planted activation authority descriptor cleanup failure"
+            )
+
+    monkeypatch.setattr(
+        run_suite._TraceActivationAuthoritySet, "close", fail_first_close
+    )
+
+    rc = run_suite.handle_trace(
+        row, props, tmp_path, shape_point_name="trace_00"
+    )
+
+    assert rc == run_suite.EXIT_BUILD_FAILED
+    assert not (artifact_dir / "trace_trace_00.json").exists()
+    retired = tuple(artifact_dir.glob(".trace_trace_00.json.*.retired"))
+    assert len(retired) == 1
+    failures = tuple(
+        (
+            artifact_dir
+            / run_suite.TRACE_CAPTURE_ATTEMPT_NAMESPACE
+            / "trace_00"
+        ).glob("*/activation_failed.json")
+    )
+    assert len(failures) == 1
+
+
+def test_handle_trace_retires_exact_activation_on_unexpected_authority_close(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    artifact_dir = tmp_path / "artifact"
+    row, props = _configure_successful_trace_handle(
+        monkeypatch=monkeypatch,
+        tmp_path=tmp_path,
+        artifact_dir=artifact_dir,
+    )
+    original_publication = run_suite._publish_trace_artifact_record
+    committed_payloads: list[bytes] = []
+
+    def record_publication(
+        path: Path, record: dict[str, object], **publication_kwargs
+    ) -> None:
+        original_publication(path, record, **publication_kwargs)
+        committed_payloads.append(path.read_bytes())
+
+    monkeypatch.setattr(
+        run_suite, "_publish_trace_artifact_record", record_publication
+    )
+    original_close = run_suite._TraceActivationAuthoritySet.close
+
+    def close_then_raise_runtime(authorities) -> None:
+        was_closed = authorities._closed
+        original_close(authorities)
+        if not was_closed:
+            raise RuntimeError(
+                "planted unexpected activation authority closure failure"
+            )
+
+    monkeypatch.setattr(
+        run_suite._TraceActivationAuthoritySet,
+        "close",
+        close_then_raise_runtime,
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="planted unexpected activation authority closure failure",
+    ):
+        run_suite.handle_trace(
+            row, props, tmp_path, shape_point_name="trace_00"
+        )
+
+    active_path = artifact_dir / "trace_trace_00.json"
+    assert not active_path.exists()
+    assert len(committed_payloads) == 1
+    retired = tuple(artifact_dir.glob(".trace_trace_00.json.*.retired"))
+    assert len(retired) == 1
+    assert retired[0].read_bytes() == committed_payloads[0]
+    failures = tuple(
+        (
+            artifact_dir
+            / run_suite.TRACE_CAPTURE_ATTEMPT_NAMESPACE
+            / "trace_00"
+        ).glob("*/activation_failed.json")
+    )
+    assert len(failures) == 1
+    failure = json.loads(failures[0].read_text(encoding="utf-8"))
+    assert failure["status"] == "activation_authority_closure_failed"
+    assert failure["typed_reason"] == "trace_activation_failed"
+
+
+@pytest.mark.parametrize(
     "mutated_source", ("executable", "tracer", "raw_trace")
 )
 def test_handle_trace_retires_activation_when_retained_source_changes(
@@ -8018,10 +9119,12 @@ def test_handle_trace_retires_activation_when_retained_source_changes(
         artifact_dir=artifact_dir,
     )
     executable = tmp_path / "global_scalar_32b_copy_run"
-    tracer = tmp_path / "tracer_tool.so"
+    tracer = Path(os.environ[EXTERNAL_TRACER_PATH_ENV])
     original_activation = run_suite._publish_trace_artifact_record
 
-    def mutate_then_publish(path: Path, record: dict[str, object]) -> None:
+    def mutate_then_publish(
+        path: Path, record: dict[str, object], **publication_kwargs
+    ) -> None:
         if mutated_source == "raw_trace":
             raw_record = record["raw_trace_generation"]
             assert isinstance(raw_record, dict)
@@ -8038,7 +9141,7 @@ def test_handle_trace_retires_activation_when_retained_source_changes(
             replacement.write_bytes(target.read_bytes())
             replacement.chmod(0o755 if target == executable else 0o644)
             os.replace(replacement, target)
-        original_activation(path, record)
+        original_activation(path, record, **publication_kwargs)
 
     monkeypatch.setattr(
         run_suite,
@@ -8055,11 +9158,7 @@ def test_handle_trace_retires_activation_when_retained_source_changes(
     failed_activations = tuple(
         artifact_dir.glob(".trace_trace_00.json.*.retired")
     )
-    assert len(failed_activations) == 1
-    failed_record = json.loads(
-        failed_activations[0].read_text(encoding="utf-8")
-    )
-    assert failed_record["activation_state"] == "active"
+    assert failed_activations == ()
     activation_failures = tuple(
         (
             artifact_dir
@@ -8175,23 +9274,50 @@ def test_run_suite_executes_and_injects_retained_descriptors(
     executable = tmp_path / "fixture_run"
     executable.write_bytes(b"#!/bin/sh\nexit 0\n")
     executable.chmod(0o755)
-    tracer = tmp_path / "tracer_tool.so"
+    tracer = Path(os.environ[EXTERNAL_TRACER_PATH_ENV])
     tracer.write_bytes(b"tracer bytes")
     traces = tmp_path / "trace"
     traces.mkdir()
-    calls: list[tuple[list[str], dict[str, object]]] = []
+    calls: list[tuple[tuple[str, ...], dict[str, object]]] = []
+    runtime_base_environments: list[dict[str, str]] = []
+    monkeypatch.setenv("LD_PRELOAD", "/tmp/planted-preload.so")
+    monkeypatch.setenv("NVBIT_TOOL", "planted-tool")
+    monkeypatch.setenv("TRACE_SAMPLING_MODE", "planted-sampling")
 
-    def fake_runtime_env(path: Path, *, retained_descriptor: int):
+    def fake_runtime_env(
+        path: Path,
+        *,
+        base_env=None,
+        runtime_manifest: Path,
+        retained_descriptor: int,
+    ):
         assert path == tracer
+        assert runtime_manifest == run_suite.default_runtime_manifest_path(tracer)
         assert retained_descriptor >= 0
-        return {}
+        assert isinstance(base_env, dict)
+        runtime_base_environments.append(dict(base_env))
+        return nullcontext(SimpleNamespace(
+            environment={
+                "LD_LIBRARY_PATH": f"/proc/self/fd/{retained_descriptor + 1}"
+            },
+            pass_fds=(retained_descriptor + 1,),
+            dso_sha256={"libprotobuf.so.fixture": "d" * 64},
+            verify_unchanged=lambda: None,
+        ))
 
-    def fake_run(command: list[str], **kwargs):
+    def fake_execute(command: tuple[str, ...], **kwargs):
         calls.append((command, kwargs))
-        return SimpleNamespace(returncode=0, stdout="{}", stderr="")
+        return run_suite._nvbit_process.NvbitCaptureProcessResult(
+            returncode=0,
+            stdout=b"{}",
+            stderr=b"",
+            process_id=123,
+        )
 
-    monkeypatch.setattr(run_suite, "tracer_runtime_env", fake_runtime_env)
-    monkeypatch.setattr("subprocess.run", fake_run)
+    monkeypatch.setattr(run_suite, "retained_tracer_runtime_env", fake_runtime_env)
+    monkeypatch.setattr(
+        run_suite._nvbit_process, "execute_capture_process", fake_execute
+    )
     traces_descriptor = os.open(traces, os.O_RDONLY | os.O_DIRECTORY)
     try:
         with immutable.open_retained_executable(executable) as retained_executable:
@@ -8207,32 +9333,351 @@ def test_run_suite_executes_and_injects_retained_descriptors(
         os.close(traces_descriptor)
 
     assert len(calls) == 2
+    assert len(runtime_base_environments) == 1
+    for forbidden in ("LD_PRELOAD", "NVBIT_TOOL", "TRACE_SAMPLING_MODE"):
+        assert forbidden not in runtime_base_environments[0]
+        assert forbidden not in calls[0][1]["environment"]
+        assert forbidden not in calls[1][1]["environment"]
     baseline_command, baseline_kwargs = calls[0]
     trace_command, trace_kwargs = calls[1]
     assert baseline_command[0].startswith("/proc/self/fd/")
     assert trace_command[0] == baseline_command[0]
     executable_fd = int(trace_command[0].rsplit("/", 1)[1])
-    tracer_path = str(trace_kwargs["env"]["CUDA_INJECTION64_PATH"])
+    tracer_path = str(
+        trace_kwargs["environment"]["CUDA_INJECTION64_PATH"]
+    )
     assert tracer_path.startswith("/proc/self/fd/")
     tracer_fd = int(tracer_path.rsplit("/", 1)[1])
     expected_capture_path = f"/proc/self/fd/{traces_descriptor}"
-    assert baseline_kwargs["env"]["TRACES_FOLDER"] == expected_capture_path
-    assert trace_kwargs["env"]["TRACES_FOLDER"] == expected_capture_path
-    assert baseline_kwargs["pass_fds"] == (
+    assert baseline_kwargs["environment"]["TRACES_FOLDER"] == expected_capture_path
+    assert trace_kwargs["environment"]["TRACES_FOLDER"] == expected_capture_path
+    assert baseline_kwargs["inherited_descriptors"] == (
         executable_fd,
         traces_descriptor,
     )
-    assert trace_kwargs["pass_fds"] == (
+    assert trace_kwargs["inherited_descriptors"] == (
         executable_fd,
         tracer_fd,
         traces_descriptor,
+        tracer_fd + 1,
     )
+    for kwargs in (baseline_kwargs, trace_kwargs):
+        assert (
+            kwargs["timeout_seconds"]
+            == run_suite._TRACE_CHILD_TIMEOUT_SECONDS
+        )
+        assert (
+            kwargs["max_output_bytes"]
+            == run_suite._TRACE_CHILD_MAX_STDOUT_STDERR_BYTES
+        )
     assert result["binary_sha256"] == hashlib.sha256(
         executable.read_bytes()
     ).hexdigest()
     assert result["tracer_build_sha256"] == hashlib.sha256(
         tracer.read_bytes()
     ).hexdigest()
+
+
+@pytest.mark.parametrize("chain_kind", ("cause", "context"))
+@pytest.mark.parametrize(
+    "resource_error",
+    (
+        OSError(errno.EMFILE, "planted EMFILE"),
+        OSError(errno.ENFILE, "planted ENFILE"),
+        OSError(errno.ENOMEM, "planted ENOMEM"),
+        MemoryError("planted MemoryError"),
+    ),
+    ids=("emfile", "enfile", "enomem", "memory-error"),
+)
+def test_run_suite_maps_chained_capture_resources_before_launch_failure(
+    monkeypatch: pytest.MonkeyPatch,
+    chain_kind: str,
+    resource_error: BaseException,
+) -> None:
+    role = "trace_injected_process"
+    executor_error = run_suite._nvbit_process.NvbitCaptureProcessError(
+        f"{role}_launch_failed",
+        "planted executor launch wrapper",
+    )
+    if chain_kind == "cause":
+        executor_error.__cause__ = resource_error
+    else:
+        executor_error.__context__ = resource_error
+
+    def fail_execute(*_args, **_kwargs):
+        raise executor_error
+
+    monkeypatch.setattr(
+        run_suite._nvbit_process, "execute_capture_process", fail_execute
+    )
+
+    with pytest.raises(run_suite._TraceChildExecutionError) as exc_info:
+        run_suite._run_bounded_trace_child(
+            ("/fixture/trace-child",),
+            environment={},
+            working_directory="/tmp",
+            inherited_descriptors=(),
+            role=role,
+        )
+
+    assert exc_info.value.reason == f"{role}_resource_unavailable"
+    assert "launch_failed" not in exc_info.value.reason
+    assert exc_info.value.__cause__ is executor_error
+
+
+def test_run_suite_capture_cleanup_failure_precedes_chained_resource(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    role = "trace_injected_process"
+    executor_error = run_suite._nvbit_process.NvbitCaptureProcessError(
+        f"{role}_launch_failed",
+        "planted cleanup precedence wrapper",
+        process_cleanup_incomplete=True,
+    )
+    executor_error.__cause__ = OSError(errno.EMFILE, "planted EMFILE")
+
+    def fail_execute(*_args, **_kwargs):
+        raise executor_error
+
+    monkeypatch.setattr(
+        run_suite._nvbit_process, "execute_capture_process", fail_execute
+    )
+
+    with pytest.raises(run_suite._TraceChildExecutionError) as exc_info:
+        run_suite._run_bounded_trace_child(
+            ("/fixture/trace-child",),
+            environment={},
+            working_directory="/tmp",
+            inherited_descriptors=(),
+            role=role,
+        )
+
+    assert exc_info.value.reason == f"{role}_cleanup_failed"
+
+
+def test_run_suite_retains_invalid_utf8_nonzero_streams_byte_exact(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    executable = tmp_path / "fixture_run"
+    executable.write_bytes(b"#!/bin/sh\nexit 0\n")
+    executable.chmod(0o755)
+    tracer = Path(os.environ[EXTERNAL_TRACER_PATH_ENV])
+    tracer.write_bytes(b"tracer bytes")
+    traces = tmp_path / "trace"
+    traces.mkdir()
+    stdout_bytes = b"nonzero stdout\x00\xff\xfe\x80"
+    stderr_bytes = b"nonzero stderr\xf5\x81\x82\x00"
+    call_count = 0
+
+    monkeypatch.setattr(
+        run_suite,
+        "retained_tracer_runtime_env",
+        lambda _path, *, base_env=None, runtime_manifest, retained_descriptor: nullcontext(
+            SimpleNamespace(
+                environment={},
+                pass_fds=(),
+                dso_sha256={"libprotobuf.so.fixture": "d" * 64},
+                verify_unchanged=lambda: None,
+            )
+        ),
+    )
+
+    def fake_execute(_command: tuple[str, ...], **_kwargs):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            return run_suite._nvbit_process.NvbitCaptureProcessResult(
+                returncode=0,
+                stdout=b"{}",
+                stderr=b"",
+                process_id=123,
+            )
+        return run_suite._nvbit_process.NvbitCaptureProcessResult(
+            returncode=17,
+            stdout=stdout_bytes,
+            stderr=stderr_bytes,
+            process_id=456,
+        )
+
+    monkeypatch.setattr(
+        run_suite._nvbit_process, "execute_capture_process", fake_execute
+    )
+    with immutable.open_retained_executable(executable) as retained_executable:
+        with immutable.open_retained_regular(tracer) as retained_tracer:
+            result = run_suite._run_retained_nvbit_capture(
+                retained_executable=retained_executable,
+                retained_tracer=retained_tracer,
+                args=[],
+                traces_folder=traces,
+            )
+
+    trace_proc = result["trace_proc"]
+    assert trace_proc is not None
+    assert trace_proc.returncode == 17
+    assert trace_proc.stdout == stdout_bytes
+    assert trace_proc.stderr == stderr_bytes
+    expected_evidence = [
+        {
+            "path": "trace_injected_process_failure.stdout.bin",
+            "sha256": hashlib.sha256(stdout_bytes).hexdigest(),
+            "size_bytes": len(stdout_bytes),
+        },
+        {
+            "path": "trace_injected_process_failure.stderr.bin",
+            "sha256": hashlib.sha256(stderr_bytes).hexdigest(),
+            "size_bytes": len(stderr_bytes),
+        },
+    ]
+    assert result["process_failure_evidence"] == expected_evidence
+    for evidence, payload in zip(
+        expected_evidence, (stdout_bytes, stderr_bytes), strict=True
+    ):
+        retained = traces / evidence["path"]
+        assert retained.read_bytes() == payload
+        assert retained.stat().st_size == len(payload)
+        assert hashlib.sha256(retained.read_bytes()).hexdigest() == evidence[
+            "sha256"
+        ]
+
+
+@pytest.mark.parametrize("failure_role", ("baseline", "injected"))
+@pytest.mark.parametrize(
+    ("executor_code", "expected_reason"),
+    [
+        (
+            "trace_injected_process_timeout",
+            "trace_injected_process_timeout",
+        ),
+        (
+            run_suite._nvbit_process.NVBIT_CAPTURE_OUTPUT_LIMIT,
+            "trace_injected_process_output_limit",
+        ),
+        (
+            "trace_injected_process_launch_failed",
+            "trace_injected_process_launch_failed",
+        ),
+    ],
+)
+def test_run_suite_retains_bounded_injected_failure_streams(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    executor_code: str,
+    expected_reason: str,
+    failure_role: str,
+) -> None:
+    executable = tmp_path / "fixture_run"
+    executable.write_bytes(b"#!/bin/sh\nexit 0\n")
+    executable.chmod(0o755)
+    tracer = Path(os.environ[EXTERNAL_TRACER_PATH_ENV])
+    tracer.write_bytes(b"tracer bytes")
+    traces = tmp_path / "trace"
+    traces.mkdir()
+    call_count = 0
+    runtime_state = {"entered": False}
+
+    @contextmanager
+    def fake_runtime_env(
+        path: Path,
+        *,
+        base_env=None,
+        runtime_manifest: Path,
+        retained_descriptor: int,
+    ):
+        assert path == tracer
+        assert runtime_manifest == run_suite.default_runtime_manifest_path(tracer)
+        runtime_state["entered"] = True
+        try:
+            yield SimpleNamespace(
+                environment={},
+                pass_fds=(),
+                dso_sha256={"libprotobuf.so.fixture": "d" * 64},
+                verify_unchanged=lambda: None,
+            )
+        finally:
+            runtime_state["entered"] = False
+
+    def fake_execute(command: tuple[str, ...], **kwargs):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1 and failure_role == "injected":
+            return run_suite._nvbit_process.NvbitCaptureProcessResult(
+                returncode=0,
+                stdout=b"{}",
+                stderr=b"",
+                process_id=123,
+            )
+        assert runtime_state["entered"] is (failure_role == "injected")
+        selected_executor_code = (
+            executor_code.replace("trace_injected_process", "trace_baseline_process")
+            if failure_role == "baseline"
+            else executor_code
+        )
+        observed_lower_bound = (
+            run_suite._TRACE_CHILD_MAX_STDOUT_STDERR_BYTES + 777
+            if executor_code == run_suite._nvbit_process.NVBIT_CAPTURE_OUTPUT_LIMIT
+            else None
+        )
+        error = run_suite._nvbit_process.NvbitCaptureProcessError(
+            selected_executor_code,
+            "bounded child failed",
+            observed_output_bytes_lower_bound=observed_lower_bound,
+        )
+        error.stdout = b"partial stdout"
+        error.stderr = b"partial stderr"
+        error.process_id = 456
+        raise error
+
+    monkeypatch.setattr(run_suite, "retained_tracer_runtime_env", fake_runtime_env)
+    monkeypatch.setattr(
+        run_suite._nvbit_process, "execute_capture_process", fake_execute
+    )
+
+    with pytest.raises(run_suite._TraceChildExecutionError) as exc_info:
+        with immutable.open_retained_executable(executable) as retained_executable:
+            with immutable.open_retained_regular(tracer) as retained_tracer:
+                run_suite._run_retained_nvbit_capture(
+                    retained_executable=retained_executable,
+                    retained_tracer=retained_tracer,
+                    args=[],
+                    traces_folder=traces,
+                )
+
+    error = exc_info.value
+    assert runtime_state["entered"] is False
+    expected_reason = (
+        expected_reason.replace("trace_injected_process", "trace_baseline_process")
+        if failure_role == "baseline"
+        else expected_reason
+    )
+    assert error.reason == expected_reason
+    assert error.process_id == 456
+    assert error.stdout == b"partial stdout"
+    assert error.stderr == b"partial stderr"
+    assert error.observed_output_bytes_lower_bound == (
+        run_suite._TRACE_CHILD_MAX_STDOUT_STDERR_BYTES + 777
+        if executor_code == run_suite._nvbit_process.NVBIT_CAPTURE_OUTPUT_LIMIT
+        else None
+    )
+    evidence_role = f"trace_{failure_role}_process"
+    assert (
+        traces / f"{evidence_role}_failure.stdout.bin"
+    ).read_bytes() == b"partial stdout"
+    assert (
+        traces / f"{evidence_role}_failure.stderr.bin"
+    ).read_bytes() == b"partial stderr"
+    assert error.failure_evidence == (
+        {
+            "path": f"{evidence_role}_failure.stdout.bin",
+            "sha256": hashlib.sha256(b"partial stdout").hexdigest(),
+            "size_bytes": len(b"partial stdout"),
+        },
+        {
+            "path": f"{evidence_role}_failure.stderr.bin",
+            "sha256": hashlib.sha256(b"partial stderr").hexdigest(),
+            "size_bytes": len(b"partial stderr"),
+        },
+    )
 
 
 @pytest.mark.parametrize("mutated_input", ("executable", "tracer"))
@@ -8244,7 +9689,7 @@ def test_run_suite_rejects_retained_input_path_swap(
     executable = tmp_path / "fixture_run"
     executable.write_bytes(b"#!/bin/sh\nexit 0\n")
     executable.chmod(0o755)
-    tracer = tmp_path / "tracer_tool.so"
+    tracer = Path(os.environ[EXTERNAL_TRACER_PATH_ENV])
     tracer.write_bytes(b"tracer bytes")
     traces = tmp_path / "trace"
     traces.mkdir()
@@ -8252,11 +9697,18 @@ def test_run_suite_rejects_retained_input_path_swap(
 
     monkeypatch.setattr(
         run_suite,
-        "tracer_runtime_env",
-        lambda _path, *, retained_descriptor: {},
+        "retained_tracer_runtime_env",
+        lambda _path, *, base_env=None, runtime_manifest, retained_descriptor: nullcontext(SimpleNamespace(
+            environment={
+                "LD_LIBRARY_PATH": f"/proc/self/fd/{retained_descriptor + 1}"
+            },
+            pass_fds=(retained_descriptor + 1,),
+            dso_sha256={"libprotobuf.so.fixture": "d" * 64},
+            verify_unchanged=lambda: None,
+        )),
     )
 
-    def fake_run(_command: list[str], **_kwargs):
+    def fake_execute(_command: tuple[str, ...], **_kwargs):
         nonlocal call_count
         call_count += 1
         if call_count == 2:
@@ -8266,9 +9718,16 @@ def test_run_suite_rejects_retained_input_path_swap(
             if target == executable:
                 replacement.chmod(0o755)
             os.replace(replacement, target)
-        return SimpleNamespace(returncode=0, stdout="{}", stderr="")
+        return run_suite._nvbit_process.NvbitCaptureProcessResult(
+            returncode=0,
+            stdout=b"{}",
+            stderr=b"",
+            process_id=123,
+        )
 
-    monkeypatch.setattr("subprocess.run", fake_run)
+    monkeypatch.setattr(
+        run_suite._nvbit_process, "execute_capture_process", fake_execute
+    )
     with pytest.raises(
         ImmutableArtifactError,
         match="named regular-file path changed",
@@ -8434,7 +9893,7 @@ def test_run_suite_emits_all_summaries_after_trace_tree_disappears(
     trace_dir = _write_trace(tmp_path / "trace")
     admission = require_trace_admission(trace_dir)
     executable = tmp_path / "fixture_run"
-    tracer = tmp_path / "tracer_tool.so"
+    tracer = Path(os.environ[EXTERNAL_TRACER_PATH_ENV])
     executable.write_bytes(b"executable")
     tracer.write_bytes(b"tracer")
     shutil.rmtree(trace_dir)

@@ -369,7 +369,7 @@ impl L2SourceSplit {
 
 use crate::issue::{
     Advance, BlockReplay, IssueError, IssueModelParams, MemRequest, MemoryOperation, ReplayHorizon,
-    ReplyTo, SmCore, SmMemMode, SmSimResult, TailFlags, checked_cycle_add,
+    ReplyTo, SharedMemoryResidency, SmCore, SmMemMode, SmSimResult, TailFlags, checked_cycle_add,
 };
 use crate::program::FunctionSchedule;
 
@@ -1050,10 +1050,11 @@ pub(crate) struct SystemResult {
 /// `Unmodeled` is the latency-only ablation / equivalence-differential
 /// mode; `Carded` rates are validated non-zero here (typed
 /// [`SystemError::DramBandwidthInvalid`], never a clamp).
-pub(crate) fn simulate_kernel_shared(
+pub(crate) fn simulate_kernel_shared_with_residency(
     per_sm_blocks: &BTreeMap<i32, Vec<BlockReplay>>,
     schedule: &FunctionSchedule,
     params: &IssueModelParams,
+    shared_memory_residency: SharedMemoryResidency,
     l1_config: L1Config,
     l2: &mut L2Model,
     dram: DramBw,
@@ -1096,7 +1097,15 @@ pub(crate) fn simulate_kernel_shared(
     let sm_ids: Vec<i32> = per_sm_blocks.keys().copied().collect();
     let mut cores: Vec<SmCore<'_>> = per_sm_blocks
         .values()
-        .map(|blocks| SmCore::new(blocks, schedule, params, SmMemMode::L1Shared(l1_config)))
+        .map(|blocks| {
+            SmCore::new_with_residency(
+                blocks,
+                schedule,
+                params,
+                shared_memory_residency,
+                SmMemMode::L1Shared(l1_config),
+            )
+        })
         .collect::<Result<_, _>>()?;
 
     let mut queue: EventQueue<Ev> = EventQueue::new();
@@ -1528,6 +1537,26 @@ pub(crate) fn simulate_kernel_shared(
     };
     *l2 = staged_l2;
     Ok(result)
+}
+
+#[cfg(test)]
+fn simulate_kernel_shared(
+    per_sm_blocks: &BTreeMap<i32, Vec<BlockReplay>>,
+    schedule: &FunctionSchedule,
+    params: &IssueModelParams,
+    l1_config: L1Config,
+    l2: &mut L2Model,
+    dram: DramBw,
+) -> Result<SystemResult, SystemError> {
+    simulate_kernel_shared_with_residency(
+        per_sm_blocks,
+        schedule,
+        params,
+        SharedMemoryResidency::unconstrained_fixture(),
+        l1_config,
+        l2,
+        dram,
+    )
 }
 
 fn replay_horizon(response: Option<u64>, unpriced: Option<u64>) -> ReplayHorizon {

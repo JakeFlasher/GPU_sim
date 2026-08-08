@@ -34,6 +34,7 @@ import math
 import subprocess
 import sys
 from pathlib import Path
+from typing import Callable, TypeVar
 
 _HERE = Path(__file__).resolve().parent
 _REPO_ROOT = _HERE.parents[1]
@@ -55,16 +56,16 @@ from compute_predicted_l1_per_admitted_cell import (  # noqa: E402
     _extract_identity_tuple,
     _load_cohort_priority_keys,
     _manifest_path_for,
-    _read_manifest,
-    _sha256_of_file,
-    _sha256_of_sorted_files,
-    _threadblock_pb_paths,
+    _snapshot_classifier_manifest,
+    _snapshot_trace_inputs,
     _trace_dir_for,
 )
 from corpus_cell_identity import (  # noqa: E402
     cell_variant_id,
     is_pending_refit_factorial,
 )
+from tools.local_labels import immutable_artifact as immutable  # noqa: E402
+
 
 _OLD_ARTIFACT_PATH = (
     _REPO_ROOT / "data" / "sm_86_predictor_accuracy_recovery_v2"
@@ -80,6 +81,7 @@ DEFAULT_SCHEMA = (
 
 _KERNEL_ID = 1
 _EMPTY_SHA = hashlib.sha256(b"").hexdigest()
+_SnapshotResult = TypeVar("_SnapshotResult")
 
 # FROZEN structural configuration. Nothing here was fit to any
 # label; the sha256 of this block is the config digest the
@@ -168,6 +170,40 @@ def _typed_entry(
     return entry
 
 
+def _with_typed_resource_failure(
+    label: str,
+    action: Callable[[], _SnapshotResult],
+) -> _SnapshotResult:
+    """Normalize descriptor exhaustion across every snapshot phase."""
+    try:
+        return action()
+    except immutable.ImmutableArtifactResourceError:
+        raise
+    except BaseException as exc:
+        resource_cause = immutable._descriptor_resource_cause(exc)
+        if resource_cause is None:
+            raise
+        raise immutable.ImmutableArtifactResourceError(
+            f"{immutable.VERIFY_RESOURCE_BOUND}: warp-pool {label}: "
+            f"{resource_cause}"
+        ) from exc
+
+
+def _sha256_of_retained_threadblocks(
+    threadblocks: tuple[tuple[Path, bytes], ...],
+) -> str:
+    """Digest the exact retained threadblock path/byte generation."""
+    digest = hashlib.sha256()
+    for path, payload in threadblocks:
+        relative_path = path.relative_to(_REPO_ROOT)
+        digest.update(
+            f"{relative_path}\t{immutable.sha256_bytes(payload)}\n".encode(
+                "utf-8"
+            )
+        )
+    return digest.hexdigest()
+
+
 def compute_for_cell(
     *, slug: str, shape_point: str, cell_row: dict,
     walk_overrides: dict | None = None,
@@ -186,8 +222,7 @@ def compute_for_cell(
     )
 
     manifest_path = _manifest_path_for(slug, shape_point)
-    manifest = _read_manifest(slug, shape_point)
-    if manifest is None:
+    if not manifest_path.is_file():
         return _typed_entry(
             slug=slug, shape_point=shape_point, identity=identity,
             typed_reason="predictor_l1_sass_provenance_missing",
@@ -197,26 +232,16 @@ def compute_for_cell(
                 f"sm_86/{slug}__{shape_point}.json"
             ),
         )
+    manifest_payload, manifest = _with_typed_resource_failure(
+        "classifier-manifest snapshot",
+        lambda: _snapshot_classifier_manifest(manifest_path),
+    )
+    manifest_sha256 = immutable.sha256_bytes(manifest_payload)
     status = manifest.get("sass_provenance_status")
-    if status == "matched_no_load_class_instructions":
-        return _typed_entry(
-            slug=slug, shape_point=shape_point, identity=identity,
-            typed_reason=(
-                "predictor_l1_no_modeled_l1_eligible_accesses"
-            ),
-            diagnostic=(
-                "manifest parsed cleanly with no load-class "
-                "instructions; nothing for the warp-pool walk to "
-                "model"
-            ),
-            input_digests={
-                "classifier_manifest_sha256": _sha256_of_file(
-                    manifest_path),
-                "dynamic_trace_pb_sha256": _EMPTY_SHA,
-                "threadblock_proto_set_sha256": _EMPTY_SHA,
-            },
-        )
-    if status != "matched":
+    if status not in {
+        "matched",
+        "matched_no_load_class_instructions",
+    }:
         return _typed_entry(
             slug=slug, shape_point=shape_point, identity=identity,
             typed_reason="predictor_l1_sass_provenance_missing",
@@ -225,8 +250,7 @@ def compute_for_cell(
                 f"not matched"
             ),
             input_digests={
-                "classifier_manifest_sha256": _sha256_of_file(
-                    manifest_path),
+                "classifier_manifest_sha256": manifest_sha256,
                 "dynamic_trace_pb_sha256": _EMPTY_SHA,
                 "threadblock_proto_set_sha256": _EMPTY_SHA,
             },
@@ -234,44 +258,51 @@ def compute_for_cell(
 
     trace_dir = _trace_dir_for(slug, shape_point)
     trace_pb = trace_dir / "dynamic_trace.pb"
-    if not trace_pb.is_file():
+    if not trace_dir.is_dir():
         return _typed_entry(
             slug=slug, shape_point=shape_point, identity=identity,
             typed_reason="predictor_l1_sass_provenance_missing",
             diagnostic=f"dynamic_trace.pb missing at {trace_pb}",
             input_digests={
-                "classifier_manifest_sha256": _sha256_of_file(
-                    manifest_path),
+                "classifier_manifest_sha256": manifest_sha256,
                 "dynamic_trace_pb_sha256": _EMPTY_SHA,
                 "threadblock_proto_set_sha256": _EMPTY_SHA,
             },
         )
-    tb_paths = _threadblock_pb_paths(trace_dir)
-    input_digests = {
-        "classifier_manifest_sha256": _sha256_of_file(manifest_path),
-        "dynamic_trace_pb_sha256": _sha256_of_file(trace_pb),
-        "threadblock_proto_set_sha256": _sha256_of_sorted_files(
-            tb_paths),
-    }
-    if not tb_paths:
+    trace_inputs = _with_typed_resource_failure(
+        "trace-tree snapshot",
+        lambda: _snapshot_trace_inputs(trace_dir),
+    )
+    if trace_inputs is None:
         return _typed_entry(
             slug=slug, shape_point=shape_point, identity=identity,
             typed_reason="predictor_l1_sass_provenance_missing",
-            diagnostic=(
-                "matched manifest but no threadblock protos on "
-                "disk; dynamic trace evidence is missing "
-                "(capture-side defect, not a kernel-without-loads "
-                "condition)"
-            ),
-            input_digests=input_digests,
+            diagnostic=f"dynamic_trace.pb missing at {trace_pb}",
+            input_digests={
+                "classifier_manifest_sha256": manifest_sha256,
+                "dynamic_trace_pb_sha256": _EMPTY_SHA,
+                "threadblock_proto_set_sha256": _EMPTY_SHA,
+            },
         )
-
+    tb_paths = [path for path, _payload in trace_inputs.threadblocks]
+    input_digests = {
+        "classifier_manifest_sha256": manifest_sha256,
+        "dynamic_trace_pb_sha256": immutable.sha256_bytes(
+            trace_inputs.dynamic_trace_payload
+        ),
+        "threadblock_proto_set_sha256": _sha256_of_retained_threadblocks(
+            trace_inputs.threadblocks
+        ),
+    }
     # Dependency failures are not cell evidence: missing tracked `_pb2.py`
     # authorities are repository corruption and a missing protobuf runtime is
     # a prerequisite failure. The helper's distinct hard exceptions propagate.
     trace_pb2_mod, threadblock_pb2_mod, _ = lph._load_proto_bindings()
     kernel = lph._find_kernel_record(
-        trace_pb2_mod, trace_pb, _KERNEL_ID,
+        trace_pb2_mod,
+        trace_inputs.dynamic_trace_path,
+        _KERNEL_ID,
+        retained_trace_pb_payload=trace_inputs.dynamic_trace_payload,
     )
     if kernel is None:
         return _typed_entry(
@@ -307,6 +338,37 @@ def compute_for_cell(
             input_digests=input_digests,
         )
 
+    # A no-load result is still a prediction from this consumer. Validate the
+    # exact trace contract, canonical capability vector, every kernel's shared-
+    # memory split, requested-kernel identity, and launch geometry above before
+    # taking this semantic shortcut (BL-20260708-guard-on-consumer-path).
+    if status == "matched_no_load_class_instructions":
+        return _typed_entry(
+            slug=slug, shape_point=shape_point, identity=identity,
+            typed_reason=(
+                "predictor_l1_no_modeled_l1_eligible_accesses"
+            ),
+            diagnostic=(
+                "manifest parsed cleanly with no load-class "
+                "instructions; nothing for the warp-pool walk to "
+                "model"
+            ),
+            input_digests=input_digests,
+        )
+
+    if not tb_paths:
+        return _typed_entry(
+            slug=slug, shape_point=shape_point, identity=identity,
+            typed_reason="predictor_l1_sass_provenance_missing",
+            diagnostic=(
+                "matched manifest but no threadblock protos on "
+                "disk; dynamic trace evidence is missing "
+                "(capture-side defect, not a kernel-without-loads "
+                "condition)"
+            ),
+            input_digests=input_digests,
+        )
+
     try:
         import_trace_contract_mod = (
             lph._load_import_trace_contract()
@@ -320,6 +382,9 @@ def compute_for_cell(
             grid_y=(int(kernel.grid_dim.y)
                     if kernel.HasField("grid_dim") else 0),
             grid_dim=grid_dim,
+            retained_threadblock_pb_payloads=[
+                payload for _path, payload in trace_inputs.threadblocks
+            ],
         )
         per_warp = lta.build_per_warp_l1_accesses(
             records,

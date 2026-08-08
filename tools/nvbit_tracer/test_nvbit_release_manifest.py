@@ -265,11 +265,14 @@ def test_parser_rejects_malformed_or_unsafe_rows() -> None:
         parse_manifest(good.replace(b"tools/nvbit", b"tools/../nvbit", 1))
 
 
-def test_emit_refuses_canonical_worktree_path(tmp_path: Path) -> None:
+def test_emit_refuses_canonical_worktree_path() -> None:
     assert main(["--tree", "HEAD", "--emit", str(REPO_ROOT / MANIFEST_REL)]) == 1
-    destination = tmp_path / "manifest.sha256"
-    assert main(["--tree", "HEAD", "--emit", str(destination)]) == 0
-    assert destination.read_bytes() == generate_manifest("HEAD")
+    with tempfile.TemporaryDirectory(
+        prefix="nvbit-release-manifest-", dir="/tmp"
+    ) as root:
+        destination = Path(root) / "manifest.sha256"
+        assert main(["--tree", "HEAD", "--emit", str(destination)]) == 0
+        assert destination.read_bytes() == generate_manifest("HEAD")
 
 
 def test_missing_check_input_is_prerequisite_exit_two(tmp_path: Path) -> None:

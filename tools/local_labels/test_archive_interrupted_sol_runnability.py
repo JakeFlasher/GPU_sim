@@ -1579,6 +1579,27 @@ def test_directory_inventory_refuses_before_unbounded_materialization(
         os.close(descriptor)
 
 
+def test_directory_inventory_uses_an_independent_stream_offset(tmp_path: Path):
+    directory = tmp_path / "repeated-directory"
+    directory.mkdir(mode=0o700)
+    _write(directory / "entry", b"")
+    descriptor = os.open(
+        directory,
+        os.O_RDONLY | getattr(os, "O_DIRECTORY", 0),
+    )
+    try:
+        first = archive._directory_names(
+            descriptor, role="repeated fixture", max_entries=1,
+        )
+        second = archive._directory_names(
+            descriptor, role="repeated fixture", max_entries=1,
+        )
+    finally:
+        os.close(descriptor)
+
+    assert first == second == {"entry"}
+
+
 def test_oversized_payload_refuses_before_content_read(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ):

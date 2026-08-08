@@ -18,6 +18,7 @@ environment/toolchain identities (Rule 1 governs metric values).
 
 Usage:
   .venv/bin/python tools/local_labels/campaign_preflight.py \
+      --nvbit-tracer /external/build/tracer_tool.so \
       --output /path/to/preflight_manifest.json
 Exit: 0 capture admitted; 1 one or more blockers; 2 semantic emission failed;
 3 typed storage stop (the smoke tree is preserved and stderr carries a stable
@@ -27,6 +28,7 @@ from __future__ import annotations
 
 import argparse
 import ast
+import contextlib
 import csv
 import errno
 import hashlib
@@ -68,13 +70,30 @@ from tools.local_labels import capture_toolchain_contract as toolchain_contract 
 from tools.local_labels import immutable_artifact as immutable  # noqa: E402
 from tools.local_labels import ncu_action_executor as ncu_executor  # noqa: E402
 from tools.local_labels.protected_paths import (  # noqa: E402
+    GIT_REPOSITORY_NOT_FOUND,
+    GIT_REPOSITORY_STATUS_UNAVAILABLE,
     ProtectedPathError,
     assert_external_output,
     assert_write_allowed,
+    git_repository_status,
+    is_inside_git_worktree,
+)
+from tools.nvbit_tracer import capture_process as nvbit_process  # noqa: E402
+from tools.nvbit_tracer import runtime_env as nvbit_runtime_env  # noqa: E402
+from tools.nvbit_tracer.external_tracer import (  # noqa: E402
+    EXTERNAL_TRACER_MAX_BYTES,
 )
 from tools.nvbit_tracer.proto_binding_loader import (  # noqa: E402
     ProtoBindingError,
     load_dynamic_trace_bindings,
+)
+from tools.nvbit_tracer.trace_admission import (  # noqa: E402
+    DEFAULT_TRACE_ADMISSION_LIMITS,
+    TraceAdmissionError,
+    _require_trace_admission_snapshot,
+    open_admitted_trace_sources,
+    raw_trace_generation_limits,
+    require_trace_admission,
 )
 
 STATUS_OK = "ok"
@@ -100,6 +119,11 @@ _DEVICE_UUID = re.compile(
 PREFLIGHT_STORAGE_MARKER = "CAMPAIGN_PREFLIGHT_STORAGE_FAILURE:"
 PREFLIGHT_STORAGE_CAPACITY = "capacity"
 PREFLIGHT_STORAGE_INTEGRITY = "integrity"
+_INJECTION_SMOKE_MAX_OUTPUT_BYTES = 64 * 1024 * 1024
+_INJECTION_SMOKE_TIMEOUT_CODE = "INJECTION_SMOKE_TIMEOUT"
+_INJECTION_SMOKE_LAUNCH_CODE = "INJECTION_SMOKE_LAUNCH_FAILED"
+_INJECTION_SMOKE_STDOUT_NAME = "injection_smoke.stdout.bin"
+_INJECTION_SMOKE_STDERR_NAME = "injection_smoke.stderr.bin"
 _STORAGE_CAPACITY_ERRNOS = frozenset({errno.ENOSPC, errno.EDQUOT})
 _STORAGE_INTEGRITY_ERRNOS = frozenset({
     errno.EIO,
@@ -270,6 +294,31 @@ def _sha256_smoke_output(path: Path, *, operation: str) -> str:
         raise
 
 
+def _retain_smoke_process_streams(
+    root: Path, *, stdout: bytes, stderr: bytes,
+) -> dict[str, dict[str, object]]:
+    streams: dict[str, dict[str, object]] = {}
+    for stream_name, file_name, payload in (
+        ("stdout", _INJECTION_SMOKE_STDOUT_NAME, stdout),
+        ("stderr", _INJECTION_SMOKE_STDERR_NAME, stderr),
+    ):
+        try:
+            immutable.publish_regular_file(root, file_name, payload)
+        except (OSError, immutable.ImmutableArtifactError) as exc:
+            storage_failure = preflight_storage_failure_from_exception(
+                exc, operation=f"injection_smoke_{stream_name}_retention",
+            )
+            if storage_failure is not None:
+                raise storage_failure from exc
+            raise
+        streams[stream_name] = {
+            "path": file_name,
+            "sha256": hashlib.sha256(payload).hexdigest(),
+            "size_bytes": len(payload),
+        }
+    return streams
+
+
 def _cleanup_smoke_output(path: Path) -> None:
     try:
         shutil.rmtree(path)
@@ -340,8 +389,8 @@ _BLOCKING_CHECKS = (
     "sol_environment",
 )
 
-_EXPECTED_TRACE_CONTRACT_ID = "sm86_addr_carry_v1"
-_EXPECTED_MEMORY_PAYLOAD_CLASSES = frozenset({1, 2, 3, 6, 8})
+_EXPECTED_TRACE_CONTRACT_ID = "sm86_addr_carry_shmem_split_v2"
+_EXPECTED_MEMORY_PAYLOAD_CLASSES = (1, 2, 3, 6, 8)
 _CONFLICTING_PROCESS_SCRIPTS = frozenset({
     "campaign_preflight.py",
     "eval_driver.py",
@@ -409,6 +458,58 @@ def _campaign_output_plan(
         output, operation="write campaign preflight manifest",
     )
     return output_path, _injection_temp_plan(smoke_temp_root)
+
+
+def _absolute_external_tracer(
+    path: Path | str,
+    *,
+    repo_root: Path,
+) -> Path:
+    candidate = Path(path)
+    if not candidate.is_absolute():
+        raise ValueError("NVBit tracer must be an absolute path")
+    lexical = Path(candidate.anchor)
+    for component in candidate.parts[1:]:
+        lexical /= component
+        if lexical.is_symlink():
+            raise ValueError(f"NVBit tracer path contains a symlink: {lexical}")
+    resolved = candidate.resolve(strict=True)
+    if any(
+        resolved.parts[index : index + 2] == (".claude", "worktrees")
+        for index in range(len(resolved.parts) - 1)
+    ):
+        raise ValueError("NVBit tracer must not come from a Claude worktree")
+    try:
+        resolved.relative_to(repo_root.resolve(strict=True))
+    except ValueError:
+        pass
+    else:
+        raise ValueError("NVBit tracer must be external to the repository")
+    for ancestor in resolved.parents:
+        marker = ancestor / ".git"
+        try:
+            marker.lstat()
+        except FileNotFoundError:
+            continue
+        except OSError as exc:
+            raise ValueError(
+                f"NVBit tracer Git-worktree status is unavailable: {ancestor}"
+            ) from exc
+        raise ValueError("NVBit tracer must come from a non-Git build tree")
+    repository_status = git_repository_status(resolved)
+    if repository_status == GIT_REPOSITORY_STATUS_UNAVAILABLE:
+        raise ValueError("NVBit tracer Git-repository status is unavailable")
+    if repository_status != GIT_REPOSITORY_NOT_FOUND:
+        raise ValueError("NVBit tracer must come from a non-Git build tree")
+    if is_inside_git_worktree(resolved):
+        raise ValueError("NVBit tracer must come from a non-Git build tree")
+    try:
+        metadata = resolved.lstat()
+    except OSError as exc:
+        raise ValueError(f"NVBit tracer is unavailable: {exc}") from exc
+    if not stat.S_ISREG(metadata.st_mode) or metadata.st_size <= 0:
+        raise ValueError("NVBit tracer must be a nonempty regular file")
+    return resolved
 
 
 # --------------------------------------------------------------------------- #
@@ -722,6 +823,19 @@ def _decode_all_launch_coverage(traces_dir: Path, root_trace: dict) -> tuple[int
     return grid_blocks, decoded_blocks, decoded_records, zero_record_blocks
 
 
+def _bounded_compatibility_trace_inventory(traces_dir: Path) -> int:
+    """Bound legacy coverage inputs before invoking any protobuf decoder."""
+
+    with immutable.PinnedDirectoryReader(traces_dir) as generation_reader:
+        with generation_reader.retain_tree_generation(
+            **_bounded_trace_tree_limits()
+        ) as tree:
+            _files, _total_bytes, threadblock_count = (
+                _bounded_trace_generation_inventory(tree)
+            )
+            return threadblock_count
+
+
 def _analyze_full_trace_coverage(
     traces_dir: Path, root_trace: dict, expected: int | None,
     admitted: int | None, stats_row_count: int,
@@ -732,6 +846,7 @@ def _analyze_full_trace_coverage(
         # Repository-code import is immutable input, not smoke-output I/O.
         from tools.trace_sampling.counting_pass import analyze_trace_dir
     try:
+        pb_count = _bounded_compatibility_trace_inventory(traces_dir)
         if expected_launch_count == 1:
             stats = analyze_trace_dir(traces_dir, "preflight_smoke")
             decoded_blocks = stats.n_blocks
@@ -755,28 +870,13 @@ def _analyze_full_trace_coverage(
         )
         if storage_failure is not None:
             raise storage_failure from exc
+        pb_count = 0
         decoded_blocks = decoded_records = grid_blocks = zero_record_blocks = 0
         decode_error = str(exc)
     except Exception as exc:  # noqa: BLE001 - ordinary malformed payload
+        pb_count = 0
         decoded_blocks = decoded_records = grid_blocks = zero_record_blocks = 0
         decode_error = str(exc)
-    pb_root = traces_dir / "threadblocks"
-    pb_root_stat = _smoke_output_lstat(
-        pb_root, operation="injection_smoke_payload_tree_stat",
-    )
-    try:
-        pb_count = (
-            len(list(pb_root.rglob("*.pb")))
-            if pb_root_stat is not None and stat.S_ISDIR(pb_root_stat.st_mode)
-            else 0
-        )
-    except OSError as exc:
-        storage_failure = preflight_storage_failure_from_exception(
-            exc, operation="injection_smoke_payload_tree_walk",
-        )
-        if storage_failure is not None:
-            raise storage_failure from exc
-        raise
     sampling_present = any(
         _smoke_output_lstat(path, operation="injection_smoke_sidecar_stat")
         is not None
@@ -827,18 +927,24 @@ def root_trace_verdict(
     contract/capabilities, at least one launch, and positive grid/block geometry
     on every launch.
     """
-    if pb_bytes <= 0:
-        return STATUS_FAILED, "dynamic_trace.pb is empty"
     if parse_error:
         return STATUS_FAILED, f"Trace protobuf parse failed: {parse_error}"
+    if pb_bytes <= 0:
+        return STATUS_FAILED, "dynamic_trace.pb is empty"
     if trace_contract_id != _EXPECTED_TRACE_CONTRACT_ID:
         return STATUS_FAILED, (
             f"trace_contract_id={trace_contract_id!r}, expected "
             f"{_EXPECTED_TRACE_CONTRACT_ID!r}")
-    classes = set(memory_payload_classes or [])
-    missing = sorted(_EXPECTED_MEMORY_PAYLOAD_CLASSES - classes)
-    if missing:
-        return STATUS_FAILED, f"memory_payload_classes missing {missing}"
+    expected_classes = list(_EXPECTED_MEMORY_PAYLOAD_CLASSES)
+    if (
+        not isinstance(memory_payload_classes, list)
+        or any(type(value) is not int for value in memory_payload_classes)
+        or memory_payload_classes != expected_classes
+    ):
+        return STATUS_FAILED, (
+            "memory_payload_classes must equal the canonical ordered vector "
+            f"{expected_classes!r}, observed {memory_payload_classes!r}"
+        )
     launches = launch_geometries or []
     if not launches:
         return STATUS_FAILED, "Trace contains zero kernel launches"
@@ -853,59 +959,94 @@ def root_trace_verdict(
     return STATUS_OK, f"root Trace binds {len(launches)} launch(es)"
 
 
-def _validate_root_trace(pb_path: Path, repo_root: Path) -> dict:
-    """Parse and validate the top-level Trace protobuf emitted by the smoke."""
-    try:
-        raw = pb_path.read_bytes()
-    except OSError as exc:
-        storage_failure = preflight_storage_failure_from_exception(
-            exc, operation="injection_smoke_root_read",
+def _bounded_trace_tree_limits() -> dict[str, int]:
+    """Return complete-tree limits shared with forward trace admission."""
+
+    policy = raw_trace_generation_limits(DEFAULT_TRACE_ADMISSION_LIMITS)
+    return {
+        name: int(policy[name])
+        for name in (
+            "max_files",
+            "max_directories",
+            "max_total_file_bytes",
+            "max_total_relative_path_bytes",
         )
-        if storage_failure is not None:
-            raise storage_failure from exc
-        raw = b""
-        read_error = str(exc)
-    else:
-        read_error = None
+    }
 
-    contract_id: str | None = None
-    classes: list[int] | None = None
-    launches: list[dict] | None = None
-    parse_error = read_error
-    if parse_error is None and raw:
-        try:
-            trace_pb2 = load_dynamic_trace_bindings().trace_pb2
 
-            trace = trace_pb2.Trace()
-            trace.ParseFromString(raw)
-            contract_id = trace.trace_contract_id
-            classes = [int(v) for v in trace.memory_payload_classes]
-            launches = []
-            for device in trace.gpu_device.values():
-                for stream in device.streams.values():
-                    for kernel in stream.kernels:
-                        launches.append({
-                            "device_id": int(device.id),
-                            "stream_id": int(stream.id),
-                            "kernel_id": int(kernel.id),
-                            "kernel_name": kernel.name,
-                            "grid_dim": [
-                                int(kernel.grid_dim.x), int(kernel.grid_dim.y),
-                                int(kernel.grid_dim.z),
-                            ],
-                            "block_dim": [
-                                int(kernel.block_dim.x), int(kernel.block_dim.y),
-                                int(kernel.block_dim.z),
-                            ],
-                        })
-        except ProtoBindingError:
-            raise
-        except Exception as exc:  # noqa: BLE001 — typed below
-            parse_error = str(exc)
+def _bounded_trace_generation_inventory(
+    tree: immutable.PinnedTreeSnapshot,
+) -> tuple[dict[str, immutable.MetadataSnapshot], int, int]:
+    """Materialize only an already-bounded generation before trace admission."""
 
+    try:
+        policy = raw_trace_generation_limits(DEFAULT_TRACE_ADMISSION_LIMITS)
+        max_file_bytes = int(policy["max_file_bytes"])
+        path_limits = policy["max_file_bytes_by_path"]
+        assert isinstance(path_limits, dict)
+        file_metadata: dict[str, immutable.MetadataSnapshot] = {}
+        total_bytes = 0
+        threadblock_count = 0
+        for relative_path, metadata in tree.files:
+            file_limit = min(
+                max_file_bytes,
+                int(path_limits.get(relative_path, max_file_bytes)),
+            )
+            size_bytes = metadata[4]
+            if size_bytes > file_limit:
+                raise immutable.ImmutableArtifactLimitError(
+                    "pre-admission smoke inventory per-file limit exceeded: "
+                    f"{relative_path}: {size_bytes} > {file_limit}"
+                )
+            file_metadata[relative_path] = metadata
+            total_bytes += size_bytes
+            if (
+                relative_path.startswith("threadblocks/")
+                and relative_path.endswith(".pb")
+            ):
+                threadblock_count += 1
+                if (
+                    threadblock_count
+                    > DEFAULT_TRACE_ADMISSION_LIMITS.threadblock_files
+                ):
+                    raise immutable.ImmutableArtifactLimitError(
+                        "pre-admission smoke threadblock file-count limit exceeded"
+                    )
+        return file_metadata, total_bytes, threadblock_count
+    except MemoryError as exc:
+        raise immutable.ImmutableArtifactResourceError(
+            "VERIFY_RESOURCE_BOUND: pre-admission smoke inventory exhausted memory"
+        ) from exc
+
+
+def _root_trace_from_admitted_sources(sources: object) -> dict:
+    """Derive root fields from the exact retained admission capability."""
+
+    admission = sources.admission
+    raw = sources.read_dynamic_trace_snapshot().payload
+    trace_pb2 = load_dynamic_trace_bindings().trace_pb2
+    trace = trace_pb2.Trace()
+    trace.ParseFromString(raw)
+    contract_id = trace.trace_contract_id
+    classes = [int(value) for value in trace.memory_payload_classes]
+    launches = [
+        {
+            "device_id": launch.device_id,
+            "stream_id": launch.stream_id,
+            "kernel_id": launch.kernel_id,
+            "kernel_name": launch.kernel_name,
+            "grid_dim": [launch.grid_x, launch.grid_y, launch.grid_z],
+            "block_dim": [launch.block_x, launch.block_y, launch.block_z],
+            "shared_memory_static_bytes": launch.shared_mem_static_bytes,
+            "shared_memory_dynamic_bytes": launch.shared_mem_dynamic_bytes,
+        }
+        for launch in admission.launches
+    ]
     status, detail = root_trace_verdict(
-        pb_bytes=len(raw), parse_error=parse_error,
-        trace_contract_id=contract_id, memory_payload_classes=classes,
+        pb_bytes=len(raw),
+        parse_error=None,
+        trace_contract_id=contract_id,
+        memory_payload_classes=classes,
         launch_geometries=launches,
     )
     return {
@@ -914,8 +1055,105 @@ def _validate_root_trace(pb_path: Path, repo_root: Path) -> dict:
         "pb_bytes": len(raw),
         "trace_contract_id": contract_id,
         "memory_payload_classes": classes,
-        "launch_count": len(launches or []),
-        "launches": launches or [],
+        "launch_count": len(launches),
+        "launches": launches,
+    }
+
+
+def _analyze_admitted_full_trace_coverage(
+    admission: object,
+    root_trace: dict,
+    tree: immutable.PinnedTreeSnapshot,
+    *,
+    expected_launch_count: int = 1,
+) -> dict:
+    """Adjudicate coverage using only one retained, admitted generation."""
+
+    inventory_paths = {
+        relative_path for relative_path, _metadata in tree.files
+    } | {
+        relative_path for relative_path, _metadata in tree.directories
+    }
+    sampling_present = any(
+        relative_path in inventory_paths
+        for relative_path in (
+            "trace_sampling.json",
+            "extra_info/trace_sampling_capture.json",
+        )
+    )
+    grid_blocks = sum(
+        launch.grid_x * launch.grid_y * launch.grid_z
+        for launch in admission.launches
+    )
+    status, detail = full_trace_coverage_verdict(
+        root_launch_count=root_trace.get("launch_count", 0),
+        grid_threadblocks=grid_blocks,
+        decoded_threadblocks=admission.threadblock_count,
+        threadblock_pb_count=admission.threadblock_count,
+        decoded_records=admission.instruction_count,
+        expected_records=admission.expected_record_count,
+        admitted_records=admission.admitted_record_count,
+        stats_row_count=admission.stats_row_count,
+        sampling_sidecar_present=sampling_present,
+        zero_record_threadblocks=0,
+        expected_launch_count=expected_launch_count,
+    )
+    return {
+        "status": status,
+        "detail": detail,
+        "grid_threadblock_count": grid_blocks,
+        "decoded_threadblock_count": admission.threadblock_count,
+        "threadblocks_pb_count": admission.threadblock_count,
+        "decoded_record_count": admission.instruction_count,
+        "zero_record_threadblock_count": 0,
+        "stats_row_count": admission.stats_row_count,
+        "sampling_sidecar_present": sampling_present,
+    }
+
+
+def _validate_root_trace(pb_path: Path, repo_root: Path) -> dict:
+    """Compatibility wrapper over one retained top-level trace generation."""
+    del repo_root
+    raw_bytes = 0
+    parse_error: str | None = None
+    try:
+        admission = require_trace_admission(pb_path.parent)
+        with open_admitted_trace_sources(
+            pb_path.parent,
+            expected_admission=admission,
+        ) as sources:
+            result = _root_trace_from_admitted_sources(sources)
+            sources.verify_unchanged()
+            return result
+    except ProtoBindingError:
+        raise
+    except TraceAdmissionError as exc:
+        parse_error = f"{exc.typed_reason}: {exc}"
+    except (OSError, immutable.ImmutableArtifactError) as exc:
+        storage_failure = preflight_storage_failure_from_exception(
+            exc, operation="injection_smoke_root_read",
+        )
+        if storage_failure is not None:
+            raise storage_failure from exc
+        parse_error = str(exc)
+    except Exception as exc:  # noqa: BLE001 — typed below
+        parse_error = str(exc)
+
+    status, detail = root_trace_verdict(
+        pb_bytes=raw_bytes,
+        parse_error=parse_error,
+        trace_contract_id=None,
+        memory_payload_classes=None,
+        launch_geometries=None,
+    )
+    return {
+        "status": status,
+        "detail": detail,
+        "pb_bytes": raw_bytes,
+        "trace_contract_id": None,
+        "memory_payload_classes": None,
+        "launch_count": 0,
+        "launches": [],
     }
 
 
@@ -928,11 +1166,31 @@ def _sha256_file(path: Path) -> str:
 
 
 def _run(cmd: list[str], *, timeout: int = 30, cwd: Path | None = None,
-         env: dict | None = None) -> tuple[int, str, str]:
+         env: dict | None = None,
+         pass_fds: tuple[int, ...] = (),
+         bounded_output_bytes: int | None = None) -> tuple[int, str, str]:
+    if bounded_output_bytes is not None:
+        if type(bounded_output_bytes) is not int or bounded_output_bytes <= 0:
+            raise ValueError("bounded output byte limit must be a positive integer")
+        result = nvbit_process.execute_capture_process(
+            tuple(cmd),
+            environment=(dict(os.environ) if env is None else dict(env)),
+            working_directory=str(Path.cwd() if cwd is None else cwd),
+            inherited_descriptors=pass_fds,
+            timeout_seconds=float(timeout),
+            max_output_bytes=bounded_output_bytes,
+            timeout_code=_INJECTION_SMOKE_TIMEOUT_CODE,
+            launch_code=_INJECTION_SMOKE_LAUNCH_CODE,
+        )
+        return (
+            result.returncode,
+            result.stdout.decode("utf-8", errors="surrogateescape"),
+            result.stderr.decode("utf-8", errors="surrogateescape"),
+        )
     try:
         proc = subprocess.run(
             cmd, capture_output=True, text=True, timeout=timeout,
-            cwd=str(cwd) if cwd else None, env=env,
+            cwd=str(cwd) if cwd else None, env=env, pass_fds=pass_fds,
         )
         return proc.returncode, proc.stdout, proc.stderr
     except FileNotFoundError:
@@ -1801,6 +2059,7 @@ def probe_injection_runtime(
     pins: dict,
     repo_root: Path,
     *,
+    nvbit_tracer_path: Path | str | None,
     smoke_temp_root: Path | str | None = None,
 ) -> dict:
     """Real contract-valid NVBit injection smoke — the true capture-admission gate.
@@ -1809,55 +2068,91 @@ def probe_injection_runtime(
     ``.toolchain/pb/lib`` on ``LD_LIBRARY_PATH`` the ``CUDA_INJECTION64_PATH`` load
     fails with zero stderr and the app runs UNTRACED (per the injection playbook).
     But a resolvable ``.so`` still does not prove injection yields a usable trace,
-    so this actually injects the pinned tracer into the smallest deterministic
-    portable_lcd binary (into a temp dir OUTSIDE the repo), then requires a
-    ``dynamic_trace.pb`` + ``stats.csv``, nonzero admitted instruction records, and
-    a pass from the tracer's own ``validate_trace_dir`` contract validator. The
-    smoke reads only admission counters + contract validity — never an NCU metric
-    (Rule 1). Fail ⇒ capture blocked before any roster cell runs.
+    so this injects an explicit external, retained split-capable tracer into the
+    smallest deterministic portable_lcd binary (into a temp dir OUTSIDE the repo),
+    then requires a ``dynamic_trace.pb`` + ``stats.csv``, nonzero admitted
+    instruction records, and a pass from the tracer's own ``validate_trace_dir``
+    contract validator. The smoke reads only admission counters + contract validity
+    — never an NCU metric (Rule 1). Fail ⇒ capture blocked before any roster cell
+    runs.
     """
     inj = pins["injection_runtime"]
     pb_lib = repo_root / inj["pb_lib_relpath"]
-    tracer_so = repo_root / inj["tracer_so_relpath"]
     smoke_binary = repo_root / inj["smoke_binary_relpath"]
     shape_argv = list(inj.get("smoke_shape_argv", []))
     result: dict = {
-        "tracer_so": inj["tracer_so_relpath"],
+        "tracer_source_kind": "external_non_git_retained_descriptor_v1",
+        "tracer_source_path": (
+            str(nvbit_tracer_path)
+            if nvbit_tracer_path is not None
+            else None
+        ),
         "pb_lib": inj["pb_lib_relpath"],
         "smoke_binary": inj["smoke_binary_relpath"],
         "smoke_shape_argv": shape_argv,
     }
+    if nvbit_tracer_path is None:
+        result.update(
+            status=STATUS_FAILED,
+            detail="an explicit external split-capable NVBit tracer is required",
+        )
+        return result
+    try:
+        tracer_so = _absolute_external_tracer(
+            nvbit_tracer_path,
+            repo_root=repo_root,
+        )
+    except (OSError, ValueError) as exc:
+        result.update(status=STATUS_FAILED, detail=str(exc))
+        return result
+    result["tracer_source_path"] = str(tracer_so)
+    result["tracer_so"] = str(tracer_so)
     if not pb_lib.is_dir():
         result.update(status=STATUS_FAILED, detail=f"pb runtime dir absent: {pb_lib}")
-        return result
-    if not tracer_so.is_file():
-        result.update(status=STATUS_FAILED,
-                      detail=(
-                          "tracer .so absent; restore the byte-exact preserved "
-                          f"artifact before capture: {tracer_so}"
-                      ))
         return result
     if not (smoke_binary.is_file() and os.access(smoke_binary, os.X_OK)):
         result.update(status=STATUS_FAILED,
                       detail=f"smoke binary absent/not executable: {smoke_binary}")
         return result
-    result["tracer_so_sha256"] = _sha256_file(tracer_so)
+    tracer_stack = contextlib.ExitStack()
+    try:
+        retained_tracer = tracer_stack.enter_context(
+            immutable.open_retained_regular(
+                tracer_so, max_bytes=EXTERNAL_TRACER_MAX_BYTES
+            )
+        )
+    except (OSError, immutable.ImmutableArtifactError) as exc:
+        tracer_stack.close()
+        result.update(
+            status=STATUS_FAILED,
+            detail=f"cannot retain external NVBit tracer authority: {exc}",
+        )
+        return result
+    result["tracer_so_sha256"] = retained_tracer.sha256
     result["smoke_binary_sha256"] = _sha256_file(smoke_binary)
 
     # Clearance happens before ldd, temp creation, or workload launch.
     temp_plan = _injection_temp_plan(smoke_temp_root)
 
-    # Build the injection env EXACTLY as the capture harness does.
-    env = os.environ.copy()
-    prev = env.get("LD_LIBRARY_PATH", "")
-    if str(pb_lib) not in prev.split(":"):
-        env["LD_LIBRARY_PATH"] = f"{pb_lib}:{prev}" if prev else str(pb_lib)
-
-    rc, out, err = _run(["ldd", str(tracer_so)], env=env)
-    ldd_missing = (["ldd failed: " + err.strip()] if rc != 0
-                   else [ln.strip() for ln in out.splitlines() if "not found" in ln])
-    result["ldd_missing_deps"] = ldd_missing
-    if ldd_missing:
+    # Authenticate the exact retained tracer against the pinned protobuf/Abseil
+    # runtime.  A mere absence of ``not found`` is insufficient: ldd may resolve
+    # a same-SONAME DSO from an ambient host prefix.
+    try:
+        retained_runtime = tracer_stack.enter_context(
+            nvbit_runtime_env.retained_tracer_runtime_env(
+                tracer_so,
+                base_env=nvbit_runtime_env.sanitized_capture_environment(),
+                pb_lib=pb_lib,
+                runtime_manifest=nvbit_runtime_env.default_runtime_manifest_path(
+                    tracer_so
+                ),
+                retained_descriptor=retained_tracer.descriptor,
+            )
+        )
+        env = retained_runtime.environment
+    except nvbit_runtime_env.TracerRuntimeError as exc:
+        ldd_missing = [str(exc)]
+        result["ldd_missing_deps"] = ldd_missing
         status, detail = injection_smoke_verdict(
             ldd_missing=ldd_missing, returncode=0, pb_present=False,
             stats_present=False, expected=None, admitted=None,
@@ -1867,11 +2162,15 @@ def probe_injection_runtime(
             banner_seen=False, full_coverage_ok=None,
             full_coverage_reason=None)
         result.update(status=status, detail=detail)
+        tracer_stack.close()
         return result
+    ldd_missing: list[str] = []
+    result["ldd_missing_deps"] = ldd_missing
 
     tmp = temp_plan["root"]
     preserve_smoke_tree = False
     smoke_tree_created = False
+    generation_reader: immutable.PinnedDirectoryReader | None = None
     try:
         _smoke_output_mkdir(
             tmp, parents=True, exist_ok=False,
@@ -1888,66 +2187,204 @@ def probe_injection_runtime(
             workload_output, parents=True, exist_ok=True,
             operation="injection_smoke_workload_output_create",
         )
+        try:
+            generation_reader = immutable.PinnedDirectoryReader(traces)
+            generation_reader.__enter__()
+        except (OSError, immutable.ImmutableArtifactError) as exc:
+            if generation_reader is not None:
+                generation_reader.__exit__(type(exc), exc, exc.__traceback__)
+                generation_reader = None
+            storage_failure = preflight_storage_failure_from_exception(
+                exc, operation="injection_smoke_generation_pin",
+            )
+            if storage_failure is not None:
+                raise storage_failure from exc
+            trace_inventory_error_code = (
+                "trace_inventory_resource_unavailable"
+                if isinstance(exc, immutable.ImmutableArtifactResourceError)
+                else "trace_inventory_io_failed"
+                if isinstance(exc, OSError)
+                else "trace_inventory_invalid"
+            )
+            result.update(
+                status=STATUS_FAILED,
+                detail=str(exc),
+                trace_inventory_error_code=trace_inventory_error_code,
+                smoke_root_path=str(tmp),
+                smoke_trace_root_path=str(traces),
+                smoke_trace_retention="preserved_failure_evidence_v1",
+            )
+            preserve_smoke_tree = True
+            return result
+        trace_proc_path = Path(
+            f"/proc/self/fd/{generation_reader.descriptor}"
+        )
         effective_shape_argv = [
             *shape_argv, "--output_dir", str(workload_output),
         ]
         result["smoke_effective_argv"] = effective_shape_argv
-        env["CUDA_INJECTION64_PATH"] = str(tracer_so)
+        env["CUDA_INJECTION64_PATH"] = retained_tracer.proc_path
         env["USER_DEFINED_FOLDERS"] = "1"
-        env["TRACES_FOLDER"] = str(traces)
-        rc, _out, serr = _run([str(smoke_binary), *effective_shape_argv],
-                              timeout=300, cwd=smoke_binary.parent, env=env)
+        env["TRACES_FOLDER"] = str(trace_proc_path)
+        process_failure: nvbit_process.NvbitCaptureProcessError | None = None
+        try:
+            rc, out, serr = _run(
+                [str(smoke_binary), *effective_shape_argv],
+                timeout=300,
+                cwd=smoke_binary.parent,
+                env=env,
+                pass_fds=tuple(dict.fromkeys((
+                    retained_tracer.descriptor,
+                    generation_reader.descriptor,
+                    *retained_runtime.pass_fds,
+                ))),
+                bounded_output_bytes=_INJECTION_SMOKE_MAX_OUTPUT_BYTES,
+            )
+        except nvbit_process.NvbitCaptureProcessError as exc:
+            process_failure = exc
+            rc = 125
+            out = exc.stdout.decode("utf-8", errors="surrogateescape")
+            serr = exc.stderr.decode("utf-8", errors="surrogateescape")
+        smoke_streams = _retain_smoke_process_streams(
+            tmp,
+            stdout=out.encode("utf-8", errors="surrogateescape"),
+            stderr=serr.encode("utf-8", errors="surrogateescape"),
+        )
         if rc != 0:
-            _probe_failed_smoke_output_storage(traces)
+            _probe_failed_smoke_output_storage(trace_proc_path)
         banner_seen = any("nvbit" in ln.lower() for ln in serr.splitlines())
-        pb = traces / "dynamic_trace.pb"
-        stats = traces / "stats.csv"
-        pb_stat = _smoke_output_lstat(
-            pb, operation="injection_smoke_root_stat",
-        )
-        stats_stat = _smoke_output_lstat(
-            stats, operation="injection_smoke_stats_stat",
-        )
-        pb_present = pb_stat is not None and stat.S_ISREG(pb_stat.st_mode)
-        stats_present = (
-            stats_stat is not None and stat.S_ISREG(stats_stat.st_mode)
-        )
-        root_trace = (_validate_root_trace(pb, repo_root) if pb_present else {
+        pb = trace_proc_path / "dynamic_trace.pb"
+        stats = trace_proc_path / "stats.csv"
+        root_trace = {
             "status": STATUS_FAILED,
-            "detail": "dynamic_trace.pb missing",
+            "detail": "trace generation was not admitted",
             "pb_bytes": 0,
             "trace_contract_id": None,
             "memory_payload_classes": None,
             "launch_count": 0,
             "launches": [],
-        })
-        stats_details = (
-            _parse_stats_admission_details(stats) if stats_present else
-            {"expected": None, "admitted": None, "row_count": 0,
-             "error": "stats file missing"}
-        )
-        expected, admitted = stats_details["expected"], stats_details["admitted"]
-        validator_ok, validator_reason = _validate_smoke_trace(traces, repo_root)
-        tb_root = traces / "threadblocks"
-        tb_stat = _smoke_output_lstat(
-            tb_root, operation="injection_smoke_threadblocks_stat",
-        )
+        }
+        expected = admitted = None
+        pb_present = stats_present = False
+        validator_ok = False
+        validator_reason = "trace generation was not admitted"
+        tb_count = 0
+        trace_tree_bytes = 0
+        dynamic_trace_sha256 = stats_sha256 = None
+        trace_admission_sha256 = None
+        trace_filesystem_generation_sha256 = None
+        stats_parse_error: str | None = validator_reason
+        full_coverage = {
+            "status": STATUS_FAILED,
+            "detail": validator_reason,
+            "grid_threadblock_count": 0,
+            "decoded_threadblock_count": 0,
+            "threadblocks_pb_count": 0,
+            "decoded_record_count": 0,
+            "zero_record_threadblock_count": 0,
+            "stats_row_count": 0,
+            "sampling_sidecar_present": False,
+        }
+        trace_inventory_error_code: str | None = None
         try:
-            tb_count = (
-                len(list(tb_root.rglob("*.pb")))
-                if tb_stat is not None and stat.S_ISDIR(tb_stat.st_mode)
-                else 0
-            )
-        except OSError as exc:
+            generation_reader.verify_path()
+            with contextlib.nullcontext(generation_reader) as generation_reader:
+                with generation_reader.retain_tree_generation(
+                    **_bounded_trace_tree_limits()
+                ) as tree:
+                    (
+                        file_metadata,
+                        trace_tree_bytes,
+                        tb_count,
+                    ) = _bounded_trace_generation_inventory(tree)
+                    pb_present = "dynamic_trace.pb" in file_metadata
+                    stats_present = "stats.csv" in file_metadata
+                    try:
+                        admission = _require_trace_admission_snapshot(
+                            traces,
+                            limits=DEFAULT_TRACE_ADMISSION_LIMITS,
+                            reader=generation_reader,
+                        ).admission
+                        with open_admitted_trace_sources(
+                            traces,
+                            expected_admission=admission,
+                            reader=generation_reader,
+                        ) as sources:
+                            root_trace = _root_trace_from_admitted_sources(sources)
+                            full_coverage = _analyze_admitted_full_trace_coverage(
+                                admission,
+                                root_trace,
+                                tree,
+                            )
+                            expected = admission.expected_record_count
+                            admitted = admission.admitted_record_count
+                            tb_count = admission.threadblock_count
+                            validator_ok = True
+                            validator_reason = "trace_admission_ok"
+                            stats_parse_error = None
+                            dynamic_trace_sha256 = admission.dynamic_trace_sha256
+                            stats_sha256 = admission.stats_sha256
+                            trace_admission_sha256 = admission.trace_admission_sha256
+                            trace_filesystem_generation_sha256 = (
+                                admission.trace_filesystem_generation_sha256
+                            )
+                            sources.verify_unchanged()
+                    except TraceAdmissionError as exc:
+                        validator_reason = f"{exc.typed_reason}: {exc.detail}"
+                        root_trace["detail"] = validator_reason
+                        root_metadata = file_metadata.get("dynamic_trace.pb")
+                        root_trace["pb_bytes"] = (
+                            root_metadata[4] if root_metadata is not None else 0
+                        )
+                        stats_parse_error = validator_reason
+                        full_coverage["detail"] = validator_reason
+        except ProtoBindingError:
+            raise
+        except (OSError, immutable.ImmutableArtifactError) as exc:
             storage_failure = preflight_storage_failure_from_exception(
-                exc, operation="injection_smoke_threadblocks_walk",
+                exc, operation="injection_smoke_generation_read",
             )
             if storage_failure is not None:
                 raise storage_failure from exc
-            raise
-        full_coverage = _analyze_full_trace_coverage(
-            traces, root_trace, expected, admitted, stats_details["row_count"],
-        )
+            if isinstance(exc, immutable.ImmutableArtifactLimitError):
+                trace_inventory_error_code = "trace_inventory_limit_exceeded"
+            elif isinstance(exc, immutable.ImmutableArtifactResourceError):
+                trace_inventory_error_code = "trace_inventory_resource_unavailable"
+            elif isinstance(exc, OSError):
+                trace_inventory_error_code = "trace_inventory_io_failed"
+            else:
+                trace_inventory_error_code = "trace_inventory_invalid"
+            validator_reason = str(exc)
+            root_trace = {
+                "status": STATUS_FAILED,
+                "detail": validator_reason,
+                "pb_bytes": 0,
+                "trace_contract_id": None,
+                "memory_payload_classes": None,
+                "launch_count": 0,
+                "launches": [],
+            }
+            expected = admitted = None
+            pb_present = stats_present = False
+            validator_ok = False
+            tb_count = 0
+            trace_tree_bytes = 0
+            dynamic_trace_sha256 = stats_sha256 = None
+            trace_admission_sha256 = None
+            trace_filesystem_generation_sha256 = None
+            stats_parse_error = validator_reason
+            full_coverage = {
+                "status": STATUS_FAILED,
+                "detail": validator_reason,
+                "grid_threadblock_count": 0,
+                "decoded_threadblock_count": 0,
+                "threadblocks_pb_count": 0,
+                "decoded_record_count": 0,
+                "zero_record_threadblock_count": 0,
+                "stats_row_count": 0,
+                "sampling_sidecar_present": False,
+            }
+
         status, detail = injection_smoke_verdict(
             ldd_missing=ldd_missing, returncode=rc, pb_present=pb_present,
             stats_present=stats_present, expected=expected, admitted=admitted,
@@ -1962,6 +2399,23 @@ def probe_injection_runtime(
         result.update(
             status=status, detail=detail,
             smoke_returncode=rc, nvbit_banner_seen=banner_seen,
+            smoke_process_error_code=(
+                process_failure.code
+                if process_failure is not None
+                else "target_nonzero_exit" if rc != 0 else None
+            ),
+            smoke_process_error_detail=(
+                process_failure.detail if process_failure is not None else None
+            ),
+            smoke_process_id=(
+                process_failure.process_id if process_failure is not None else None
+            ),
+            smoke_started_at_utc=(
+                process_failure.started_at_utc
+                if process_failure is not None else None
+            ),
+            smoke_streams=smoke_streams,
+            trace_inventory_error_code=trace_inventory_error_code,
             expected_insts=expected, admitted_insts=admitted,
             validator_ok=validator_ok, validator_reason=validator_reason,
             threadblocks_pb_count=tb_count,
@@ -1981,22 +2435,26 @@ def probe_injection_runtime(
                 full_coverage["zero_record_threadblock_count"]),
             sampling_sidecar_present=full_coverage["sampling_sidecar_present"],
             stats_row_count=full_coverage["stats_row_count"],
-            stats_parse_error=stats_details["error"],
-            dynamic_trace_pb_sha256=(
-                _sha256_smoke_output(
-                    pb, operation="injection_smoke_root_hash",
-                ) if pb_present else None
+            stats_parse_error=stats_parse_error,
+            trace_tree_bytes=trace_tree_bytes,
+            smoke_root_path=str(tmp),
+            smoke_trace_root_path=str(traces),
+            smoke_trace_retention=(
+                "preserved_exact_admitted_generation_v1"
+                if status == STATUS_OK else "preserved_failure_evidence_v1"
             ),
-            stats_csv_sha256=(
-                _sha256_smoke_output(
-                    stats, operation="injection_smoke_stats_hash",
-                ) if stats_present else None
+            trace_admission_sha256=trace_admission_sha256,
+            trace_filesystem_generation_sha256=(
+                trace_filesystem_generation_sha256
             ),
+            dynamic_trace_pb_sha256=dynamic_trace_sha256,
+            stats_csv_sha256=stats_sha256,
             smoke_stderr_tail=serr[-300:] if status != STATUS_OK else None,
         )
-        # An unsuccessful/ambiguous probe is evidence.  Keep it even when the
-        # output filesystem is healthy and classification remains semantic.
-        preserve_smoke_tree = status != STATUS_OK
+        # Both successful authority and failed diagnostics are evidence.  Keep
+        # the exact generation so later admission/provenance disputes can replay
+        # the same bytes rather than trusting hashes of a deleted tree.
+        preserve_smoke_tree = True
         return result
     except PreflightStorageFailure:
         # The incomplete tree is diagnostic evidence.  More importantly,
@@ -2011,6 +2469,28 @@ def probe_injection_runtime(
         preserve_smoke_tree = True
         raise
     finally:
+        primary_info = sys.exc_info()
+        if generation_reader is not None:
+            try:
+                primary = primary_info[1]
+                if primary is None and result.get("status") != STATUS_OK:
+                    primary = RuntimeError(
+                        f"injection smoke failed: {result.get('detail')}"
+                    )
+                    reader_info = (type(primary), primary, primary.__traceback__)
+                else:
+                    reader_info = primary_info
+                generation_reader.__exit__(*reader_info)
+            except BaseException:
+                preserve_smoke_tree = True
+                raise
+            finally:
+                generation_reader = None
+        try:
+            tracer_stack.__exit__(*primary_info)
+        except BaseException:
+            preserve_smoke_tree = True
+            raise
         if smoke_tree_created and not preserve_smoke_tree:
             assert_external_output(
                 tmp, repo_root=REPO_ROOT,
@@ -2176,6 +2656,7 @@ def build_manifest(
     *, pins_path: Path, budget_path: Path, output_root: Path,
     ignore_relpaths: list[str], repo_root: Path = REPO_ROOT,
     matrix_path: Path = DEFAULT_MATRIX,
+    nvbit_tracer_path: Path | str | None = None,
     smoke_temp_root: Path | str | None = None,
 ) -> dict:
     pins = json.loads(pins_path.read_text())
@@ -2211,7 +2692,10 @@ def build_manifest(
         }
     else:
         checks["injection_runtime"] = probe_injection_runtime(
-            pins, repo_root, smoke_temp_root=smoke_temp_root,
+            pins,
+            repo_root,
+            nvbit_tracer_path=nvbit_tracer_path,
+            smoke_temp_root=smoke_temp_root,
         )
 
         # Close the race across the smoke itself: clocks and process exclusivity
@@ -2233,7 +2717,7 @@ def build_manifest(
                 if checks[name].get("status") != STATUS_OK]
     generated_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     return {
-        "schema_version": 3,
+        "schema_version": 4,
         "arch": pins.get("arch"),
         "sku": pins.get("sku"),
         "captured_at_utc": generated_at,
@@ -2259,6 +2743,13 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--pins", default=str(DEFAULT_PINS))
     ap.add_argument("--trace-budget", default=str(DEFAULT_BUDGET))
     ap.add_argument("--matrix", default=str(DEFAULT_MATRIX))
+    ap.add_argument(
+        "--nvbit-tracer",
+        required=True,
+        help=(
+            "absolute path to an external non-Git split-capable tracer_tool.so"
+        ),
+    )
     ap.add_argument("--output-root", default=None,
                     help="filesystem whose free space is checked (default: repo root)")
     ap.add_argument(
@@ -2302,6 +2793,7 @@ def main(argv: list[str] | None = None) -> int:
             pins_path=pins_path, budget_path=budget_path,
             output_root=output_root, ignore_relpaths=ignore,
             matrix_path=matrix_path,
+            nvbit_tracer_path=Path(args.nvbit_tracer),
             smoke_temp_root=smoke_plan["root"],
         )
     except PreflightStorageFailure as exc:

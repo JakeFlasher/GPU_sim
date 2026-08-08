@@ -76,6 +76,11 @@ from workloads.simbench_bw.phase_cycle_ledger_aggregator import (  # noqa: E402
     PhaseLedgerSchemaInvalid,
     serialize_phase_cycle_ledger,
 )
+from workloads.simbench_bw.phase_cycle_ledger_consumer import (  # noqa: E402
+    NvbitPhaseInjectionOverheadExceeded,
+    PhaseBoundaryMappingUnresolved,
+    admit_phase_cycle_ledger,
+)
 
 
 SUITE_ROOT = Path(__file__).resolve().parent
@@ -1854,6 +1859,16 @@ def _active_phase_generation_binding_error(
                     return (
                         "referenced phase ledger fails schema validation: "
                         f"{relative_path}: {exc}"
+                    )
+                try:
+                    admit_phase_cycle_ledger(ledger)
+                except (
+                    NvbitPhaseInjectionOverheadExceeded,
+                    PhaseBoundaryMappingUnresolved,
+                ) as exc:
+                    return (
+                        "referenced phase ledger is semantically inadmissible: "
+                        f"{relative_path}: {exc.TOKEN}: {exc}"
                     )
                 if launch_index not in admitted_launch_indices:
                     return (

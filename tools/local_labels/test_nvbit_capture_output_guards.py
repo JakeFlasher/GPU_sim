@@ -9,9 +9,10 @@ import os
 import shutil
 import subprocess
 import tempfile
-from contextlib import ExitStack, nullcontext
+from contextlib import ExitStack, contextmanager, nullcontext
 from dataclasses import replace
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -29,14 +30,104 @@ from tools.local_labels.immutable_artifact import (
     ImmutableArtifactError,
     ImmutableArtifactResourceError,
 )
-from tools.local_labels.protected_paths import ProtectedPathError, is_protected_path
-from tools.nvbit_tracer.trace_admission import TraceAdmission, TraceLaunchSummary
+from tools.local_labels.protected_paths import (
+    ProtectedPathError,
+    is_protected_path,
+    retained_git_environment,
+)
+from tools.nvbit_tracer.external_tracer import (
+    EXTERNAL_TRACER_PATH_ENV,
+    EXTERNAL_TRACER_SHA256_ENV,
+    ExternalTracerAuthority,
+)
+from tools.nvbit_tracer.trace_admission import (
+    HISTORICAL_TRACE_ADMISSION_SCOPE,
+    TraceAdmission,
+    TraceLaunchSummary,
+)
 
 
 REPO = Path(__file__).resolve().parents[2]
 STAGING = REPO / "results" / "nvbit_capture_staging"
 PROTECTED = REPO / "data" / "local_labels" / "campaign"
 GOLDEN_SCRIPT = REPO / "tools" / "trace_sampling" / "golden_cells" / "capture_golden_cells.sh"
+
+
+def _fixture_path_identity(path: Path):
+    cursor = Path(path.anchor)
+    ancestors = []
+    for component in path.parts[1:-1]:
+        metadata = cursor.stat()
+        ancestors.append((metadata.st_dev, metadata.st_ino, metadata.st_mode))
+        cursor /= component
+    metadata = cursor.stat()
+    ancestors.append((metadata.st_dev, metadata.st_ino, metadata.st_mode))
+    leaf = path.stat()
+    return tuple(ancestors), (
+        leaf.st_dev,
+        leaf.st_ino,
+        leaf.st_mode,
+        leaf.st_nlink,
+        leaf.st_size,
+        leaf.st_mtime_ns,
+        leaf.st_ctime_ns,
+    )
+
+
+@pytest.fixture(autouse=True)
+def _external_tracer_authority_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    raw_root = tempfile.mkdtemp(prefix="task615-output-guard-tracer-", dir="/tmp")
+    tracer = Path(raw_root) / "tracer_tool.so"
+    tracer.write_bytes(b"default external tracer authority fixture")
+    monkeypatch.setenv(EXTERNAL_TRACER_PATH_ENV, str(tracer))
+    monkeypatch.setenv(
+        EXTERNAL_TRACER_SHA256_ENV,
+        hashlib.sha256(tracer.read_bytes()).hexdigest(),
+    )
+
+    def fixture_authority(
+        path=None,
+        sha256=None,
+        *,
+        repo_root=None,
+        environment=None,
+    ) -> ExternalTracerAuthority:
+        del repo_root, environment
+        selected_path = Path(
+            path if path is not None else os.environ[EXTERNAL_TRACER_PATH_ENV]
+        ).resolve()
+        selected_sha256 = (
+            sha256
+            if sha256 is not None
+            else os.environ[EXTERNAL_TRACER_SHA256_ENV]
+        )
+        path_identity = _fixture_path_identity(selected_path)
+        return ExternalTracerAuthority(
+            selected_path,
+            selected_sha256,
+            path_identity=path_identity,
+        )
+
+    for module in (activation, roster_capture, variants, canary):
+        monkeypatch.setattr(
+            module, "require_external_tracer_authority", fixture_authority
+        )
+    original_run_roster_capture = roster_capture._run_roster_capture
+
+    def fixture_run_roster_capture(*args, **kwargs):
+        kwargs.setdefault("tracer_authority", fixture_authority())
+        return original_run_roster_capture(*args, **kwargs)
+
+    monkeypatch.setattr(
+        roster_capture, "_run_roster_capture", fixture_run_roster_capture
+    )
+    try:
+        yield
+    finally:
+        os.unlink(tracer)
+        os.rmdir(raw_root)
 
 
 def _admitted_trace(
@@ -88,10 +179,46 @@ def _admitted_trace(
     )
 
 
+def test_tracer_resolves_traces_folder_during_nvbit_at_init() -> None:
+    source = (
+        REPO / "tools" / "nvbit_tracer" / "tracer_tool" / "tracer_tool.cu"
+    ).read_text(encoding="utf-8")
+    init_start = source.index("void nvbit_at_init() {")
+    callback_start = source.index("void nvbit_at_cuda_event(", init_start)
+    init_body = source[init_start:callback_start]
+
+    assert "GET_VAR_INT(user_defined_folders" in init_body
+    assert "configure_trace_output_paths_from_environment();" in init_body
+    assert init_body.index("GET_VAR_INT(user_defined_folders") < init_body.index(
+        "configure_trace_output_paths_from_environment();"
+    )
+    assert "std::getenv(\"TRACES_FOLDER\")" in source[:init_start]
+
+
+def test_evidence_producers_refuse_historical_admission_scope() -> None:
+    historical = replace(
+        _admitted_trace(),
+        admission_scope=HISTORICAL_TRACE_ADMISSION_SCOPE,
+    )
+
+    with pytest.raises(RuntimeError, match="historical-read-only"):
+        activation._validate_trace_admission_identities(
+            historical, producer="activation fixture"
+        )
+    with pytest.raises(RuntimeError, match="historical-read-only"):
+        variants._require_single_admitted_launch(
+            historical, producer="variant fixture"
+        )
+
+
 def _assert_sidecar_admission_identities(
     record: dict[str, object],
     admission: TraceAdmission,
 ) -> None:
+    assert record["trace_contract_id"] == admission.trace_contract_id
+    assert record["memory_payload_classes"] == list(
+        admission.memory_payload_classes
+    )
     assert record["trace_bytes"] == admission.dynamic_trace_size_bytes
     assert record["dynamic_trace_size_bytes"] == admission.dynamic_trace_size_bytes
     assert record["dynamic_trace_sha256"] == admission.dynamic_trace_sha256
@@ -159,6 +286,45 @@ class _RetainedBytesFixture:
         self.verify_count += 1
 
 
+def _prepare_direct_source_fixture(
+    repo: Path,
+    binary: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source_stem = binary.name[:-4] if binary.name.endswith("_run") else binary.name
+    source = binary.with_name(f"{source_stem}.cu")
+    source.write_bytes(b"__global__ void direct_fixture() {}\n")
+    monkeypatch.setattr(roster_capture, "REPO_ROOT", repo)
+    monkeypatch.setattr(
+        roster_capture, "_DIRECT_SOURCE_COMMIT_AUTHORITY_PATHS", ()
+    )
+    monkeypatch.setattr(roster_capture, "_git_head", lambda: "d" * 40)
+    monkeypatch.setattr(
+        roster_capture,
+        "_resolve_direct_source_commit",
+        lambda _source, _retained: "d" * 40,
+    )
+    monkeypatch.setattr(
+        roster_capture,
+        "_verify_roster_source_commit_head",
+        lambda _source_commit: None,
+    )
+
+
+@contextmanager
+def _fixture_runtime_context(*_args, retained_descriptor: int, **_kwargs):
+    runtime_descriptor = os.dup(retained_descriptor)
+    try:
+        yield SimpleNamespace(
+            environment={
+                "LD_LIBRARY_PATH": f"/proc/self/fd/{runtime_descriptor}"
+            },
+            pass_fds=(runtime_descriptor,),
+        )
+    finally:
+        os.close(runtime_descriptor)
+
+
 def _activation_capture_fixture(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -168,10 +334,16 @@ def _activation_capture_fixture(
     slug = "fixture_activation"
     binary = repo / "workloads" / "portable_lcd" / slug / f"{slug}_run"
     source = binary.with_name(f"{slug}.cu")
-    tracer = repo / "tools" / "nvbit_tracer" / "tracer_tool" / "tracer_tool.so"
+    tracer = Path(os.environ[EXTERNAL_TRACER_PATH_ENV])
     tracer_bytes = b"retained activation tracer"
     _write_executable(binary, b"retained activation executable")
     source.write_bytes(b"__global__ void fixture_kernel() {}\n")
+    for relative_path in activation._SOURCE_COMMIT_AUTHORITY_PATHS:
+        authority_path = repo / relative_path
+        authority_path.parent.mkdir(parents=True, exist_ok=True)
+        authority_path.write_bytes(
+            f"fixture authority: {relative_path}\n".encode("utf-8")
+        )
     tracer.parent.mkdir(parents=True, exist_ok=True)
     tracer.write_bytes(tracer_bytes)
 
@@ -186,7 +358,11 @@ def _activation_capture_fixture(
         "portable_manifest": cell / "workload_output" / slug / "manifest.json",
     }
     monkeypatch.setattr(activation, "_REPO_ROOT", repo)
-    monkeypatch.setattr(activation, "_TRACER_SO", tracer)
+    monkeypatch.setenv(EXTERNAL_TRACER_PATH_ENV, str(tracer))
+    monkeypatch.setenv(
+        EXTERNAL_TRACER_SHA256_ENV,
+        hashlib.sha256(tracer_bytes).hexdigest(),
+    )
     monkeypatch.setattr(
         activation,
         "_assert_staging_output",
@@ -198,7 +374,11 @@ def _activation_capture_fixture(
         "_resolve_clean_source_commit",
         lambda _source, _retained: "f" * 40,
     )
-    monkeypatch.setattr(activation, "_tracer_env", lambda **_kwargs: {})
+    monkeypatch.setattr(
+        activation,
+        "retained_tracer_runtime_env",
+        _fixture_runtime_context,
+    )
     monkeypatch.setattr(
         activation,
         "require_trace_admission",
@@ -216,12 +396,18 @@ def _activation_capture_fixture(
         ),
     )
 
-    def fake_run(cmd, **kwargs):
-        trace_root = Path(kwargs["env"]["TRACES_FOLDER"])
+    def fake_capture_process(command, **kwargs):
+        trace_root = Path(kwargs["environment"]["TRACES_FOLDER"])
         (trace_root / "dynamic_trace.pb").write_bytes(b"fixture trace")
-        return subprocess.CompletedProcess(cmd, 0, "", "")
+        return activation.nvbit_process.NvbitCaptureProcessResult(
+            0, b"", b"",
+        )
 
-    monkeypatch.setattr(activation.subprocess, "run", fake_run)
+    monkeypatch.setattr(
+        activation.nvbit_process,
+        "execute_capture_process",
+        fake_capture_process,
+    )
     return plan, tracer_bytes
 
 
@@ -232,7 +418,7 @@ def _variant_capture_fixture(
 ) -> tuple[dict[str, Path], bytes]:
     repo = tmp_path / "variant_repo"
     binary = repo / "bin" / "register_spill_local_mem_run__cap64"
-    tracer = repo / "tools" / "nvbit_tracer" / "tracer_tool" / "tracer_tool.so"
+    tracer = Path(os.environ[EXTERNAL_TRACER_PATH_ENV])
     shapes = repo / "workloads" / "simbench_bw" / "shapes" / "register_spill_local_mem.toml"
     tracer_bytes = b"retained variant tracer"
     _write_executable(binary, b"retained variant executable")
@@ -263,7 +449,11 @@ def _variant_capture_fixture(
         "tmp_path": sidecar.with_name(sidecar.name + ".tmp"),
     }
     monkeypatch.setattr(variants, "_REPO_ROOT", repo)
-    monkeypatch.setattr(variants, "_TRACER_SO", tracer)
+    monkeypatch.setenv(EXTERNAL_TRACER_PATH_ENV, str(tracer))
+    monkeypatch.setenv(
+        EXTERNAL_TRACER_SHA256_ENV,
+        hashlib.sha256(tracer_bytes).hexdigest(),
+    )
     monkeypatch.setattr(variants, "_SHAPES_TOML", shapes)
     monkeypatch.setattr(
         variants,
@@ -282,7 +472,11 @@ def _variant_capture_fixture(
         "_kernel_args_for_shape",
         lambda _shape_point, _seed, **_kwargs: ["--fixture"],
     )
-    monkeypatch.setattr(variants, "tracer_runtime_env", lambda *_args, **_kwargs: {})
+    monkeypatch.setattr(
+        variants,
+        "retained_tracer_runtime_env",
+        _fixture_runtime_context,
+    )
     monkeypatch.setattr(
         variants,
         "require_trace_admission",
@@ -300,14 +494,16 @@ def _variant_capture_fixture(
         ),
     )
 
-    def fake_variant_run(_cmd, env, _cwd, **_kwargs):
-        trace_root = Path(env["TRACES_FOLDER"])
+    def fake_variant_run(command, **kwargs):
+        trace_root = Path(kwargs["environment"]["TRACES_FOLDER"])
         (trace_root / "dynamic_trace.pb").write_bytes(b"fixture trace")
-        return subprocess.CompletedProcess([], 0, "", "")
+        return variants.nvbit_process.NvbitCaptureProcessResult(
+            0, b"", b"",
+        )
 
     monkeypatch.setattr(
-        variants,
-        "_run_workload",
+        variants.nvbit_process,
+        "execute_capture_process",
         fake_variant_run,
     )
     return plan, tracer_bytes
@@ -363,6 +559,57 @@ def test_activation_orchestrator_protected_output_refuses_before_mutation(
     assert calls == []
 
 
+@pytest.mark.parametrize(
+    ("module", "head_function_name"),
+    (
+        (activation, "_git_head"),
+        (roster_capture, "_git_head"),
+        (canary, "_canary_git_head"),
+    ),
+)
+def test_source_authority_git_uses_retained_descriptor_and_closed_environment(
+    monkeypatch: pytest.MonkeyPatch,
+    module,
+    head_function_name: str,
+) -> None:
+    hostile = {
+        "GIT_DIR": "/tmp/hostile-git-dir",
+        "GIT_WORK_TREE": "/tmp/hostile-worktree",
+        "GIT_INDEX_FILE": "/tmp/hostile-index",
+        "GIT_OBJECT_DIRECTORY": "/tmp/hostile-objects",
+        "GIT_ALTERNATE_OBJECT_DIRECTORIES": "/tmp/hostile-alternates",
+        "GIT_CONFIG_COUNT": "1",
+        "GIT_CONFIG_KEY_0": "core.worktree",
+        "GIT_CONFIG_VALUE_0": "/tmp/hostile-worktree",
+        "PATH": "/tmp/hostile-bin",
+    }
+    for name, value in hostile.items():
+        monkeypatch.setenv(name, value)
+    observed: dict[str, object] = {}
+
+    def fake_run(command, **kwargs):
+        observed["command"] = tuple(command)
+        observed["kwargs"] = kwargs
+        return subprocess.CompletedProcess(command, 0, "a" * 40 + "\n", "")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    with immutable.open_retained_executable(
+        Path("/usr/bin/git")
+    ) as retained_git:
+        assert getattr(module, head_function_name)(retained_git) == "a" * 40
+        command = observed["command"]
+        kwargs = observed["kwargs"]
+        assert command[0] == retained_git.proc_path
+        assert command[-3:] == ("rev-parse", "--verify", "HEAD")
+        assert kwargs["pass_fds"] == (retained_git.descriptor,)
+        assert kwargs["env"] == retained_git_environment()
+        assert kwargs["env"]["PATH"] == "/usr/bin:/bin"
+        assert not (
+            set(kwargs["env"])
+            & (set(hostile) - {"PATH"})
+        )
+
+
 def test_activation_source_commit_binds_clean_authority_and_retained_bytes(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -371,50 +618,73 @@ def test_activation_source_commit_binds_clean_authority_and_retained_bytes(
     source = repo / "workloads" / "portable_lcd" / "fixture" / "fixture.cu"
     payload = b"__global__ void fixture() {}\n"
     head = "a" * 40
-    retained = _RetainedBytesFixture(payload)
+    source_relative = source.relative_to(repo).as_posix()
+    authority_paths = (*activation._SOURCE_COMMIT_AUTHORITY_PATHS, source_relative)
+    retained = {
+        relative_path: _RetainedBytesFixture(
+            payload if relative_path == source_relative
+            else f"authority:{relative_path}\n".encode()
+        )
+        for relative_path in authority_paths
+    }
     commands: list[list[str]] = []
     monkeypatch.setattr(activation, "_REPO_ROOT", repo)
     monkeypatch.setattr(activation, "_git_head", lambda: head)
 
     def git_run(command: list[str], **_kwargs):
         commands.append(command)
-        if command[3] == "status":
+        if "status" in command:
             return subprocess.CompletedProcess(command, 0, "", "")
-        if command[3] == "show":
-            return subprocess.CompletedProcess(command, 0, payload, b"")
+        if "show" in command:
+            show_index = command.index("show")
+            relative_path = command[show_index + 1].split(":", 1)[1]
+            return subprocess.CompletedProcess(
+                command, 0, retained[relative_path].payload, b""
+            )
         raise AssertionError(f"unexpected command: {command}")
 
     monkeypatch.setattr(activation.subprocess, "run", git_run)
 
     assert activation._resolve_clean_source_commit(source, retained) == head
-    assert retained.verify_count == 1
-    source_relative = source.relative_to(repo).as_posix()
-    assert commands == [
-        [
-            "git",
-            "-C",
-            str(repo),
-            "status",
-            "--porcelain",
-            "--",
-            *activation._SOURCE_COMMIT_AUTHORITY_PATHS,
-            source_relative,
-        ],
-        [
-            "git",
-            "-C",
-            str(repo),
-            "show",
-            f"{head}:{source_relative}",
-        ],
-    ]
+    assert all(value.verify_count == 1 for value in retained.values())
+    assert activation._SOURCE_COMMIT_AUTHORITY_PATHS == (
+        "tools/local_labels/activation_trace_orchestrator.py",
+        "tools/local_labels/delegated_cgroup.py",
+        "tools/local_labels/immutable_artifact.py",
+        "tools/local_labels/protected_paths.py",
+        "tools/local_labels/roster_path_resolver.py",
+        "tools/nvbit_tracer/capture_process.py",
+        "tools/nvbit_tracer/external_tracer.py",
+        "tools/nvbit_tracer/import_trace_contract.py",
+        "tools/nvbit_tracer/proto_binding_loader.py",
+        "tools/nvbit_tracer/protobuf_wire_preflight.py",
+        "tools/nvbit_tracer/runtime_env.py",
+        "tools/nvbit_tracer/trace_admission.py",
+        "workloads/simbench_bw/_pb_generated/address_pb2.py",
+        "workloads/simbench_bw/_pb_generated/cuda_stream_pb2.py",
+        "workloads/simbench_bw/_pb_generated/dim3d_pb2.py",
+        "workloads/simbench_bw/_pb_generated/gpu_device_pb2.py",
+        "workloads/simbench_bw/_pb_generated/instruction_pb2.py",
+        "workloads/simbench_bw/_pb_generated/kernel_pb2.py",
+        "workloads/simbench_bw/_pb_generated/threadblock_pb2.py",
+        "workloads/simbench_bw/_pb_generated/trace_pb2.py",
+        "workloads/simbench_bw/_pb_generated/warp_pb2.py",
+    )
+    assert len(commands) == 1 + len(authority_paths)
+    status_index = commands[0].index("status")
+    assert commands[0][status_index:] == (
+        "status", "--porcelain=v1", "--untracked-files=all", "--",
+        *authority_paths,
+    )
+    for command, relative_path in zip(commands[1:], authority_paths, strict=True):
+        assert command[-2:] == ("show", f"{head}:{relative_path}")
 
 
 @pytest.mark.parametrize(
     ("failure", "message"),
     [
         ("dirty", "authority is dirty or untracked"),
-        ("source_mismatch", "retained activation source bytes disagree"),
+        ("source_mismatch", "retained activation authority bytes disagree"),
         ("head_drift", "source_commit changed during authority verification"),
     ],
 )
@@ -428,7 +698,15 @@ def test_activation_source_commit_rejects_contaminated_authority(
     source = repo / "workloads" / "portable_lcd" / "fixture" / "fixture.cu"
     payload = b"__global__ void fixture() {}\n"
     head = "a" * 40
-    retained = _RetainedBytesFixture(payload)
+    source_relative = source.relative_to(repo).as_posix()
+    authority_paths = (*activation._SOURCE_COMMIT_AUTHORITY_PATHS, source_relative)
+    retained = {
+        relative_path: _RetainedBytesFixture(
+            payload if relative_path == source_relative
+            else f"authority:{relative_path}\n".encode()
+        )
+        for relative_path in authority_paths
+    }
     heads = iter((head, "b" * 40)) if failure == "head_drift" else None
     monkeypatch.setattr(activation, "_REPO_ROOT", repo)
     monkeypatch.setattr(
@@ -438,11 +716,15 @@ def test_activation_source_commit_rejects_contaminated_authority(
     )
 
     def git_run(command: list[str], **_kwargs):
-        if command[3] == "status":
+        if "status" in command:
             status = " M tools/nvbit_tracer/runtime_env.py\n" if failure == "dirty" else ""
             return subprocess.CompletedProcess(command, 0, status, "")
-        if command[3] == "show":
-            committed = b"different source\n" if failure == "source_mismatch" else payload
+        if "show" in command:
+            show_index = command.index("show")
+            relative_path = command[show_index + 1].split(":", 1)[1]
+            committed = retained[relative_path].payload
+            if failure == "source_mismatch" and relative_path == source_relative:
+                committed = b"different source\n"
             return subprocess.CompletedProcess(command, 0, committed, b"")
         raise AssertionError(f"unexpected command: {command}")
 
@@ -450,7 +732,14 @@ def test_activation_source_commit_rejects_contaminated_authority(
 
     with pytest.raises(RuntimeError, match=message):
         activation._resolve_clean_source_commit(source, retained)
-    assert retained.verify_count == 0
+    expected_verified = (
+        0
+        if failure == "dirty"
+        else len(retained) - 1
+        if failure == "source_mismatch"
+        else len(retained)
+    )
+    assert sum(value.verify_count for value in retained.values()) == expected_verified
 
 
 @pytest.mark.parametrize("invalid_identity", ("attempt", "source_commit"))
@@ -506,6 +795,7 @@ def test_activation_orchestrator_propagates_retained_trace_identities(
         cell_dir=plan["cell_dir"],
         sidecar=sidecar,
     )
+    assert roster_record["source_commit"] == sidecar["source_commit"]
     assert roster_record["binary_sha256"] == sidecar["binary_sha256"]
     assert roster_record["nvbit_tracer_build_hash"] == sidecar[
         "nvbit_tracer_build_hash"
@@ -543,6 +833,8 @@ def test_activation_capture_passes_all_output_capabilities_by_descriptor(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     admission = _admitted_trace()
+    monkeypatch.setenv("LD_PRELOAD", "/ambient/activation.so")
+    monkeypatch.setenv("NVBIT_TOOL", "/ambient/tool.so")
     plan, _tracer_bytes = _activation_capture_fixture(
         tmp_path, monkeypatch, admission
     )
@@ -550,15 +842,26 @@ def test_activation_capture_passes_all_output_capabilities_by_descriptor(
 
     def capture_descriptors(command, **kwargs):
         observed["command"] = command
-        observed["env"] = dict(kwargs["env"])
-        observed["pass_fds"] = tuple(kwargs["pass_fds"])
-        trace_root = Path(kwargs["env"]["TRACES_FOLDER"])
+        observed["env"] = dict(kwargs["environment"])
+        observed["pass_fds"] = tuple(kwargs["inherited_descriptors"])
+        observed["working_directory"] = kwargs["working_directory"]
+        observed["timeout_seconds"] = kwargs["timeout_seconds"]
+        observed["max_output_bytes"] = kwargs["max_output_bytes"]
+        observed["timeout_code"] = kwargs["timeout_code"]
+        observed["launch_code"] = kwargs["launch_code"]
+        trace_root = Path(kwargs["environment"]["TRACES_FOLDER"])
         (trace_root / "dynamic_trace.pb").write_bytes(b"fixture trace")
-        for descriptor in kwargs["pass_fds"]:
+        for descriptor in kwargs["inherited_descriptors"]:
             os.fstat(descriptor)
-        return subprocess.CompletedProcess(command, 0, "", "")
+        return activation.nvbit_process.NvbitCaptureProcessResult(
+            0, b"", b"",
+        )
 
-    monkeypatch.setattr(activation.subprocess, "run", capture_descriptors)
+    monkeypatch.setattr(
+        activation.nvbit_process,
+        "execute_capture_process",
+        capture_descriptors,
+    )
     activation.trace_activation_cell(
         slug="fixture_activation",
         shape_point="timing_shape",
@@ -568,9 +871,22 @@ def test_activation_capture_passes_all_output_capabilities_by_descriptor(
     command = observed["command"]
     env = observed["env"]
     pass_fds = observed["pass_fds"]
-    assert isinstance(command, list)
+    assert isinstance(command, tuple)
     assert isinstance(env, dict)
     assert isinstance(pass_fds, tuple)
+    assert str(observed["working_directory"]).endswith(
+        "/workloads/portable_lcd/fixture_activation"
+    )
+    assert observed["timeout_seconds"] == (
+        activation._ACTIVATION_CAPTURE_TIMEOUT_SECONDS
+    )
+    assert observed["max_output_bytes"] == (
+        activation._ACTIVATION_CAPTURE_MAX_OUTPUT_BYTES
+    )
+    assert observed["timeout_code"] == activation._ACTIVATION_CAPTURE_TIMEOUT_CODE
+    assert observed["launch_code"] == activation._ACTIVATION_CAPTURE_LAUNCH_CODE
+    assert "LD_PRELOAD" not in env
+    assert "NVBIT_TOOL" not in env
     assert command[0].startswith("/proc/self/fd/")
     output_index = command.index("--output_dir") + 1
     assert command[output_index].startswith("/proc/self/fd/")
@@ -582,7 +898,8 @@ def test_activation_capture_passes_all_output_capabilities_by_descriptor(
         int(str(env["CUDA_INJECTION64_PATH"]).rsplit("/", 1)[1]),
         int(str(env["TRACES_FOLDER"]).rsplit("/", 1)[1]),
     }
-    assert inherited == set(pass_fds)
+    assert inherited.issubset(set(pass_fds))
+    assert len(set(pass_fds) - inherited) == 1
 
 
 def test_activation_failed_rerun_preserves_prior_attempt_bytes(
@@ -1293,14 +1610,21 @@ def test_activation_git_pipe_exhaustion_keeps_resource_taxonomy(
     source.parent.mkdir(parents=True)
     source_payload = b"__global__ void fixture() {}\n"
     source.write_bytes(source_payload)
-    retained_source = _RetainedBytesFixture(source_payload)
+    source_relative = source.relative_to(repo).as_posix()
+    retained_authority = {
+        relative_path: _RetainedBytesFixture(source_payload)
+        for relative_path in (
+            *activation._SOURCE_COMMIT_AUTHORITY_PATHS,
+            source_relative,
+        )
+    }
     head = "f" * 40
     exhausted_calls = 0
 
     def run_git(command, **_kwargs):
         nonlocal exhausted_calls
         if boundary == "head":
-            assert command == ["git", "rev-parse", "HEAD"]
+            assert command[-3:] == ("rev-parse", "--verify", "HEAD")
         elif boundary == "status":
             assert "status" in command
         elif "status" in command:
@@ -1324,7 +1648,9 @@ def test_activation_git_pipe_exhaustion_keeps_resource_taxonomy(
         if boundary == "head":
             activation._git_head()
         else:
-            activation._resolve_clean_source_commit(source, retained_source)
+            activation._resolve_clean_source_commit(
+                source, retained_authority
+            )
 
     assert exhausted_calls == 1
     assert isinstance(caught.value.__cause__, OSError)
@@ -1407,9 +1733,9 @@ def test_activation_late_descriptor_exhaustion_keeps_resource_taxonomy(
     )
     if boundary == "lock_dup":
         monkeypatch.setattr(
-            activation.subprocess,
-            "run",
-            lambda *_args, **_kwargs: pytest.fail("subprocess must not run"),
+            activation.nvbit_process,
+            "execute_capture_process",
+            lambda *_args, **_kwargs: pytest.fail("capture must not run"),
         )
 
         def exhaust_lock_dup(_descriptor: int) -> int:
@@ -1420,7 +1746,11 @@ def test_activation_late_descriptor_exhaustion_keeps_resource_taxonomy(
         def exhaust_subprocess(*_args, **_kwargs):
             raise OSError(resource_errno, "planted activation pipe exhaustion")
 
-        monkeypatch.setattr(activation.subprocess, "run", exhaust_subprocess)
+        monkeypatch.setattr(
+            activation.nvbit_process,
+            "execute_capture_process",
+            exhaust_subprocess,
+        )
 
     with pytest.raises(
         ImmutableArtifactResourceError, match=VERIFY_RESOURCE_BOUND,
@@ -1559,19 +1889,30 @@ def test_roster_direct_capture_propagates_every_trace_identity(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     admission = _admitted_trace(launch_count=2, with_allocations=True)
+    monkeypatch.setenv("LD_PRELOAD", "/ambient/roster.so")
+    monkeypatch.setenv("NVBIT_TOOL", "/ambient/tool.so")
     binary = tmp_path / "direct" / "fixture_run"
-    tracer = tmp_path / "tracer_tool.so"
+    tracer = Path(os.environ[EXTERNAL_TRACER_PATH_ENV])
     binary_bytes = b"retained direct executable"
     tracer_bytes = b"retained direct tracer"
     _write_executable(binary, binary_bytes)
+    _prepare_direct_source_fixture(tmp_path, binary, monkeypatch)
     tracer.write_bytes(tracer_bytes)
-    monkeypatch.setattr(roster_capture, "_TRACER_SO", tracer)
+    monkeypatch.setenv(EXTERNAL_TRACER_PATH_ENV, str(tracer))
+    monkeypatch.setenv(
+        EXTERNAL_TRACER_SHA256_ENV,
+        hashlib.sha256(tracer.read_bytes()).hexdigest(),
+    )
     monkeypatch.setattr(
         roster_capture,
         "_assert_staging_output",
         lambda path, *, operation: Path(path),
     )
-    monkeypatch.setattr(roster_capture, "_tracer_env", lambda **_kwargs: {})
+    monkeypatch.setattr(
+        roster_capture,
+        "retained_tracer_runtime_env",
+        _fixture_runtime_context,
+    )
     monkeypatch.setattr(
         roster_capture,
         "require_trace_admission",
@@ -1591,17 +1932,24 @@ def test_roster_direct_capture_propagates_every_trace_identity(
 
     observed: dict[str, object] = {}
 
-    def fake_direct_run(cmd, **kwargs):
-        observed["command"] = list(cmd)
-        observed["env"] = dict(kwargs["env"])
-        observed["pass_fds"] = tuple(kwargs["pass_fds"])
-        trace_root = Path(kwargs["env"]["TRACES_FOLDER"])
+    def fake_direct_run(command, **kwargs):
+        observed["command"] = tuple(command)
+        observed["env"] = dict(kwargs["environment"])
+        observed["pass_fds"] = tuple(kwargs["inherited_descriptors"])
+        observed["working_directory"] = kwargs["working_directory"]
+        observed["timeout_seconds"] = kwargs["timeout_seconds"]
+        observed["max_output_bytes"] = kwargs["max_output_bytes"]
+        observed["timeout_code"] = kwargs["timeout_code"]
+        observed["launch_code"] = kwargs["launch_code"]
+        trace_root = Path(kwargs["environment"]["TRACES_FOLDER"])
         (trace_root / "dynamic_trace.pb").write_bytes(b"fixture trace")
-        return subprocess.CompletedProcess(cmd, 0, "", "")
+        return roster_capture.nvbit_process.NvbitCaptureProcessResult(
+            0, b"", b"",
+        )
 
     monkeypatch.setattr(
-        roster_capture.subprocess,
-        "run",
+        roster_capture.nvbit_process,
+        "execute_capture_process",
         fake_direct_run,
     )
 
@@ -1617,9 +1965,20 @@ def test_roster_direct_capture_propagates_every_trace_identity(
     command = observed["command"]
     env = observed["env"]
     pass_fds = observed["pass_fds"]
-    assert isinstance(command, list)
+    assert isinstance(command, tuple)
     assert isinstance(env, dict)
     assert isinstance(pass_fds, tuple)
+    assert observed["working_directory"] == str(binary.parent)
+    assert observed["timeout_seconds"] == (
+        roster_capture._DIRECT_CAPTURE_TIMEOUT_SECONDS
+    )
+    assert observed["max_output_bytes"] == (
+        roster_capture._DIRECT_CAPTURE_MAX_OUTPUT_BYTES
+    )
+    assert observed["timeout_code"] == roster_capture._DIRECT_CAPTURE_TIMEOUT_CODE
+    assert observed["launch_code"] == roster_capture._DIRECT_CAPTURE_LAUNCH_CODE
+    assert "LD_PRELOAD" not in env
+    assert "NVBIT_TOOL" not in env
     output_index = command.index("--output_dir") + 1
     proc_paths = {
         command[0],
@@ -1630,7 +1989,11 @@ def test_roster_direct_capture_propagates_every_trace_identity(
     assert all(path.startswith("/proc/self/fd/") for path in proc_paths)
     assert {
         int(path.rsplit("/", 1)[1]) for path in proc_paths
-    } == set(pass_fds)
+    }.issubset(set(pass_fds))
+    assert len(set(pass_fds) - {
+        int(path.rsplit("/", 1)[1]) for path in proc_paths
+    }) == 1
+    assert record["source_commit"] == "d" * 40
     assert record["binary_sha256"] == hashlib.sha256(binary_bytes).hexdigest()
     assert record["nvbit_tracer_build_hash"] == hashlib.sha256(
         tracer_bytes
@@ -1790,8 +2153,14 @@ def _valid_direct_aggregate_record(
         "records_expected": 1,
         "records_admitted": 1,
         "drop_count": 0,
+        "source_commit": roster_capture._git_head(),
         "binary_sha256": digest,
         "nvbit_tracer_build_hash": digest,
+        "tracer_source_kind": roster_capture.EXTERNAL_TRACER_SOURCE_KIND,
+        "trace_contract_id": roster_capture.EXPECTED_TRACE_CONTRACT_ID,
+        "memory_payload_classes": list(
+            roster_capture.EXPECTED_MEMORY_PAYLOAD_CLASSES
+        ),
         "trace_admission_sha256": digest,
         "trace_filesystem_generation_sha256": "c" * 64,
         "dynamic_trace_size_bytes": 1,
@@ -1885,6 +2254,7 @@ def _single_direct_roster_fixture(
         "zero_raw_directory_count",
         "incomplete_raw_total_bytes",
         "drop_count_mismatch",
+        "mixed_source_commit",
         "coercive_host_clock",
     ),
 )
@@ -1895,7 +2265,15 @@ def test_aggregate_manifest_strictly_rejects_hostile_models(
     manifest = {
         "generated_by": "roster_trace_capture",
         "capture_attempt_id": "aggregate-attempt",
+        "source_commit": roster_capture._git_head(),
         "host_clock_state": {},
+        "tracer_source_kind": roster_capture.EXTERNAL_TRACER_SOURCE_KIND,
+        "tracer_source_path": os.environ[EXTERNAL_TRACER_PATH_ENV],
+        "tracer_sha256": os.environ[EXTERNAL_TRACER_SHA256_ENV],
+        "trace_contract_id": roster_capture.EXPECTED_TRACE_CONTRACT_ID,
+        "memory_payload_classes": list(
+            roster_capture.EXPECTED_MEMORY_PAYLOAD_CLASSES
+        ),
         "cells": [_valid_direct_aggregate_record()],
     }
     cell = manifest["cells"][0]
@@ -1951,6 +2329,8 @@ def test_aggregate_manifest_strictly_rejects_hostile_models(
         cell["stats_size_bytes"] = 1
     elif hostile_case == "drop_count_mismatch":
         cell["drop_count"] = 1
+    elif hostile_case == "mixed_source_commit":
+        cell["source_commit"] = "f" * 40
     elif hostile_case == "coercive_host_clock":
         manifest["host_clock_state"] = {"clock": 7}
     else:  # pragma: no cover - exhaustive parameter invariant
@@ -1965,7 +2345,15 @@ def test_aggregate_manifest_accepts_complete_exact_model() -> None:
     manifest = {
         "generated_by": "roster_trace_capture",
         "capture_attempt_id": "aggregate-attempt",
+        "source_commit": roster_capture._git_head(),
         "host_clock_state": {},
+        "tracer_source_kind": roster_capture.EXTERNAL_TRACER_SOURCE_KIND,
+        "tracer_source_path": os.environ[EXTERNAL_TRACER_PATH_ENV],
+        "tracer_sha256": os.environ[EXTERNAL_TRACER_SHA256_ENV],
+        "trace_contract_id": roster_capture.EXPECTED_TRACE_CONTRACT_ID,
+        "memory_payload_classes": list(
+            roster_capture.EXPECTED_MEMORY_PAYLOAD_CLASSES
+        ),
         "cells": [_valid_direct_aggregate_record()],
     }
     assert roster_capture._validate_aggregate_manifest(manifest, roster) is manifest
@@ -2588,16 +2976,25 @@ def test_failed_direct_capture_exposes_retained_close_diagnostic(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     binary = tmp_path / "direct" / "fixture_run"
-    tracer = tmp_path / "tracer_tool.so"
+    tracer = Path(os.environ[EXTERNAL_TRACER_PATH_ENV])
     _write_executable(binary, b"direct failure executable")
+    _prepare_direct_source_fixture(tmp_path, binary, monkeypatch)
     tracer.write_bytes(b"direct failure tracer")
-    monkeypatch.setattr(roster_capture, "_TRACER_SO", tracer)
+    monkeypatch.setenv(EXTERNAL_TRACER_PATH_ENV, str(tracer))
+    monkeypatch.setenv(
+        EXTERNAL_TRACER_SHA256_ENV,
+        hashlib.sha256(tracer.read_bytes()).hexdigest(),
+    )
     monkeypatch.setattr(
         roster_capture,
         "_assert_staging_output",
         lambda path, *, operation: Path(path),
     )
-    monkeypatch.setattr(roster_capture, "_tracer_env", lambda **_kwargs: {})
+    monkeypatch.setattr(
+        roster_capture,
+        "retained_tracer_runtime_env",
+        _fixture_runtime_context,
+    )
     original_open = roster_capture.open_retained_executable
 
     class CloseFailingExecutable:
@@ -2618,13 +3015,19 @@ def test_failed_direct_capture_exposes_retained_close_diagnostic(
     monkeypatch.setattr(
         roster_capture,
         "open_retained_executable",
-        lambda path: CloseFailingExecutable(original_open(path)),
+        lambda path: (
+            CloseFailingExecutable(original_open(path))
+            if Path(path) == binary
+            else original_open(path)
+        ),
     )
     monkeypatch.setattr(
-        roster_capture.subprocess,
-        "run",
-        lambda command, **_kwargs: subprocess.CompletedProcess(
-            command, 23, "", "planted capture failure"
+        roster_capture.nvbit_process,
+        "execute_capture_process",
+        lambda command, **_kwargs: (
+            roster_capture.nvbit_process.NvbitCaptureProcessResult(
+                23, b"", b"planted capture failure",
+            )
         ),
     )
 
@@ -2638,7 +3041,7 @@ def test_failed_direct_capture_exposes_retained_close_diagnostic(
     )
 
     assert record["ok"] is False
-    assert record["typed_reason"] == "capture_failed"
+    assert record["typed_reason"] == "capture_nonzero"
     assert record["returncode"] == 23
     assert record["close_diagnostics"] == [{
         "typed_reason": "retained_source_close_failed",
@@ -2646,28 +3049,39 @@ def test_failed_direct_capture_exposes_retained_close_diagnostic(
     }]
 
 
-def test_signed_subprocess_returncode_preserves_capture_failed_record(
+def test_signed_subprocess_returncode_preserves_capture_nonzero_record(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     binary = tmp_path / "direct" / "fixture_run"
-    tracer = tmp_path / "tracer_tool.so"
+    tracer = Path(os.environ[EXTERNAL_TRACER_PATH_ENV])
     binary_payload = b"signaled direct executable"
     tracer_payload = b"signaled direct tracer"
     _write_executable(binary, binary_payload)
+    _prepare_direct_source_fixture(tmp_path, binary, monkeypatch)
     tracer.write_bytes(tracer_payload)
-    monkeypatch.setattr(roster_capture, "_TRACER_SO", tracer)
+    monkeypatch.setenv(EXTERNAL_TRACER_PATH_ENV, str(tracer))
+    monkeypatch.setenv(
+        EXTERNAL_TRACER_SHA256_ENV,
+        hashlib.sha256(tracer.read_bytes()).hexdigest(),
+    )
     monkeypatch.setattr(
         roster_capture,
         "_assert_staging_output",
         lambda path, *, operation: Path(path),
     )
-    monkeypatch.setattr(roster_capture, "_tracer_env", lambda **_kwargs: {})
     monkeypatch.setattr(
-        roster_capture.subprocess,
-        "run",
-        lambda command, **_kwargs: subprocess.CompletedProcess(
-            command, -9, "", "terminated by signal 9",
+        roster_capture,
+        "retained_tracer_runtime_env",
+        _fixture_runtime_context,
+    )
+    monkeypatch.setattr(
+        roster_capture.nvbit_process,
+        "execute_capture_process",
+        lambda command, **_kwargs: (
+            roster_capture.nvbit_process.NvbitCaptureProcessResult(
+                -9, b"raw-stdout-\x80", b"terminated by signal 9-\xff",
+            )
         ),
     )
 
@@ -2679,13 +3093,24 @@ def test_signed_subprocess_returncode_preserves_capture_failed_record(
         tmp_path / "workload-output",
         attempt_id="signed-returncode-attempt",
     )
-    assert record["typed_reason"] == "capture_failed"
+    assert record["typed_reason"] == "capture_nonzero"
     assert record["returncode"] == -9
-    assert record["stderr_tail"] == "terminated by signal 9"
+    assert record["stderr_tail"] == "terminated by signal 9-�"
     assert record["binary_sha256"] == hashlib.sha256(binary_payload).hexdigest()
     assert record["nvbit_tracer_build_hash"] == hashlib.sha256(
         tracer_payload
     ).hexdigest()
+    stream_payloads = (b"raw-stdout-\x80", b"terminated by signal 9-\xff")
+    assert [item["role"] for item in record["process_failure_evidence"]] == [
+        "stdout", "stderr",
+    ]
+    for artifact, payload in zip(
+        record["process_failure_evidence"], stream_payloads, strict=True,
+    ):
+        artifact_path = tmp_path / artifact["path"]
+        assert artifact_path.read_bytes() == payload
+        assert artifact["size_bytes"] == len(payload)
+        assert artifact["sha256"] == hashlib.sha256(payload).hexdigest()
     record["shape_point"] = "timing_shape"
     record["via"] = "direct_injection"
     assert roster_capture._validate_capture_record(
@@ -2694,6 +3119,18 @@ def test_signed_subprocess_returncode_preserves_capture_failed_record(
         expected_shape_point="timing_shape",
         index=0,
     ) is record
+    roster_capture._verify_direct_failure_stream_artifacts(
+        record, cell_dir=tmp_path,
+    )
+    stdout_artifact = tmp_path / record["process_failure_evidence"][0]["path"]
+    stdout_artifact.chmod(0o600)
+    stdout_artifact.write_bytes(b"mutated failure stream")
+    with pytest.raises(
+        ImmutableArtifactError, match="artifact identity changed",
+    ):
+        roster_capture._verify_direct_failure_stream_artifacts(
+            record, cell_dir=tmp_path,
+        )
 
 
 def test_direct_exception_close_diagnostic_enters_attempt_manifest(
@@ -2703,18 +3140,27 @@ def test_direct_exception_close_diagnostic_enters_attempt_manifest(
     output_root = tmp_path / "roster"
     roster, plans, manifest_path = _single_direct_roster_fixture(output_root)
     binary = tmp_path / "bin" / "fixture_direct"
-    tracer = tmp_path / "tracer_tool.so"
+    tracer = Path(os.environ[EXTERNAL_TRACER_PATH_ENV])
     _write_executable(binary, b"direct exception executable")
+    _prepare_direct_source_fixture(tmp_path, binary, monkeypatch)
     tracer.write_bytes(b"direct exception tracer")
     monkeypatch.setattr(roster_capture, "REPO_ROOT", tmp_path)
-    monkeypatch.setattr(roster_capture, "_TRACER_SO", tracer)
+    monkeypatch.setenv(EXTERNAL_TRACER_PATH_ENV, str(tracer))
+    monkeypatch.setenv(
+        EXTERNAL_TRACER_SHA256_ENV,
+        hashlib.sha256(tracer.read_bytes()).hexdigest(),
+    )
     monkeypatch.setattr(
         roster_capture,
         "_assert_staging_output",
         lambda path, *, operation: Path(path),
     )
     monkeypatch.setattr(roster_capture, "_host_clock_state", lambda: {})
-    monkeypatch.setattr(roster_capture, "_tracer_env", lambda **_kwargs: {})
+    monkeypatch.setattr(
+        roster_capture,
+        "retained_tracer_runtime_env",
+        _fixture_runtime_context,
+    )
     attempts = iter(("aggregate-exception", "direct-exception"))
     monkeypatch.setattr(
         roster_capture, "_new_capture_attempt_id", lambda: next(attempts),
@@ -2739,11 +3185,15 @@ def test_direct_exception_close_diagnostic_enters_attempt_manifest(
     monkeypatch.setattr(
         roster_capture,
         "open_retained_executable",
-        lambda path: CloseFailingExecutable(original_open(path)),
+        lambda path: (
+            CloseFailingExecutable(original_open(path))
+            if Path(path) == binary
+            else original_open(path)
+        ),
     )
     monkeypatch.setattr(
-        roster_capture.subprocess,
-        "run",
+        roster_capture.nvbit_process,
+        "execute_capture_process",
         lambda *_args, **_kwargs: (_ for _ in ()).throw(
             RuntimeError("planted direct subprocess exception")
         ),
@@ -2786,20 +3236,29 @@ def test_direct_late_descriptor_exhaustion_keeps_resource_taxonomy(
     resource_errno: int,
 ) -> None:
     binary = tmp_path / "direct" / "fixture_run"
-    tracer = tmp_path / "tracer_tool.so"
+    tracer = Path(os.environ[EXTERNAL_TRACER_PATH_ENV])
     _write_executable(binary, b"resource executable")
+    _prepare_direct_source_fixture(tmp_path, binary, monkeypatch)
     tracer.write_bytes(b"resource tracer")
-    monkeypatch.setattr(roster_capture, "_TRACER_SO", tracer)
+    monkeypatch.setenv(EXTERNAL_TRACER_PATH_ENV, str(tracer))
+    monkeypatch.setenv(
+        EXTERNAL_TRACER_SHA256_ENV,
+        hashlib.sha256(tracer.read_bytes()).hexdigest(),
+    )
     monkeypatch.setattr(
         roster_capture,
         "_assert_staging_output",
         lambda path, *, operation: Path(path),
     )
-    monkeypatch.setattr(roster_capture, "_tracer_env", lambda **_kwargs: {})
     monkeypatch.setattr(
-        roster_capture.subprocess,
-        "run",
-        lambda *_args, **_kwargs: pytest.fail("subprocess must not run"),
+        roster_capture,
+        "retained_tracer_runtime_env",
+        _fixture_runtime_context,
+    )
+    monkeypatch.setattr(
+        roster_capture.nvbit_process,
+        "execute_capture_process",
+        lambda *_args, **_kwargs: pytest.fail("capture must not run"),
     )
 
     if boundary == "retained_open":
@@ -2823,7 +3282,9 @@ def test_direct_late_descriptor_exhaustion_keeps_resource_taxonomy(
             raise OSError(resource_errno, "planted direct subprocess exhaustion")
 
         monkeypatch.setattr(
-            roster_capture.subprocess, "run", exhaust_subprocess,
+            roster_capture.nvbit_process,
+            "execute_capture_process",
+            exhaust_subprocess,
         )
 
     record = roster_capture._capture_direct(
@@ -3028,10 +3489,11 @@ def test_register_cap_source_commit_binds_complete_retained_authority(
 
     def git_run(command: list[str], **_kwargs):
         commands.append(command)
-        if command[3] == "status":
+        if "status" in command:
             return subprocess.CompletedProcess(command, 0, "", "")
-        if command[3] == "show":
-            relative_path = command[4].split(":", 1)[1]
+        if "show" in command:
+            show_index = command.index("show")
+            relative_path = command[show_index + 1].split(":", 1)[1]
             return subprocess.CompletedProcess(
                 command, 0, payloads[relative_path], b""
             )
@@ -3041,6 +3503,11 @@ def test_register_cap_source_commit_binds_complete_retained_authority(
 
     assert variants._resolve_source_commit(retained) == (head, False)
     assert all(item.verify_count == 1 for item in retained.values())
+    assert {
+        "tools/local_labels/delegated_cgroup.py",
+        "tools/nvbit_tracer/capture_process.py",
+        "tools/nvbit_tracer/external_tracer.py",
+    }.issubset(variants._SOURCE_COMMIT_AUTHORITY_PATHS)
     assert (
         "workloads/simbench_bw/shapes/register_spill_local_mem.toml"
         in variants._SOURCE_COMMIT_AUTHORITY_PATHS
@@ -3453,21 +3920,34 @@ def test_register_cap_descriptor_bound_launch_and_attempt_generations(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     admission = _admitted_trace()
+    monkeypatch.setenv("LD_PRELOAD", "/ambient/register-cap.so")
+    monkeypatch.setenv("NVBIT_TOOL", "/ambient/tool.so")
     plan, _tracer_bytes = _variant_capture_fixture(
         tmp_path, monkeypatch, admission
     )
     observed: dict[str, object] = {}
 
-    def capture_launch(command, env, _cwd, *, pass_fds):
-        observed["command"] = list(command)
-        observed["env"] = dict(env)
-        observed["pass_fds"] = tuple(pass_fds)
-        (Path(env["TRACES_FOLDER"]) / "dynamic_trace.pb").write_bytes(
+    def capture_launch(command, **kwargs):
+        observed["command"] = tuple(command)
+        observed["env"] = dict(kwargs["environment"])
+        observed["pass_fds"] = tuple(kwargs["inherited_descriptors"])
+        observed["working_directory"] = kwargs["working_directory"]
+        observed["timeout_seconds"] = kwargs["timeout_seconds"]
+        observed["max_output_bytes"] = kwargs["max_output_bytes"]
+        observed["timeout_code"] = kwargs["timeout_code"]
+        observed["launch_code"] = kwargs["launch_code"]
+        (Path(kwargs["environment"]["TRACES_FOLDER"]) / "dynamic_trace.pb").write_bytes(
             b"fixture trace"
         )
-        return subprocess.CompletedProcess(command, 0, "", "")
+        return variants.nvbit_process.NvbitCaptureProcessResult(
+            0, b"", b"",
+        )
 
-    monkeypatch.setattr(variants, "_run_workload", capture_launch)
+    monkeypatch.setattr(
+        variants.nvbit_process,
+        "execute_capture_process",
+        capture_launch,
+    )
     monkeypatch.setattr(
         variants, "_new_capture_attempt_id", lambda: "variant-attempt"
     )
@@ -3480,19 +3960,32 @@ def test_register_cap_descriptor_bound_launch_and_attempt_generations(
     command = observed["command"]
     env = observed["env"]
     pass_fds = observed["pass_fds"]
-    assert isinstance(command, list)
+    assert isinstance(command, tuple)
     assert isinstance(env, dict)
     assert isinstance(pass_fds, tuple)
+    assert str(observed["working_directory"]).endswith("/bin")
+    assert observed["timeout_seconds"] == (
+        variants._REGISTER_CAP_CAPTURE_TIMEOUT_SECONDS
+    )
+    assert observed["max_output_bytes"] == (
+        variants._REGISTER_CAP_CAPTURE_MAX_OUTPUT_BYTES
+    )
+    assert observed["timeout_code"] == variants._REGISTER_CAP_CAPTURE_TIMEOUT_CODE
+    assert observed["launch_code"] == variants._REGISTER_CAP_CAPTURE_LAUNCH_CODE
+    assert "LD_PRELOAD" not in env
+    assert "NVBIT_TOOL" not in env
     proc_paths = {
         command[0],
         str(env["CUDA_INJECTION64_PATH"]),
         str(env["TRACES_FOLDER"]),
     }
     assert all(path.startswith("/proc/self/fd/") for path in proc_paths)
-    assert {
-        int(path.rsplit("/", 1)[1]) for path in proc_paths
-    }.issubset(set(pass_fds))
-    assert len(pass_fds) == 5
+    assert pass_fds == (
+        int(command[0].rsplit("/", 1)[1]),
+        int(str(env["CUDA_INJECTION64_PATH"]).rsplit("/", 1)[1]),
+        int(str(env["TRACES_FOLDER"]).rsplit("/", 1)[1]),
+        int(str(env["LD_LIBRARY_PATH"]).rsplit("/", 1)[1]),
+    )
     assert sidecar["trace_capture_attempt_id"] == "variant-attempt"
     assert (
         plan["variant_dir"] / sidecar["raw_trace_generation"]["path"]
@@ -3659,6 +4152,245 @@ def test_golden_capture_retired_output_override_cannot_redirect() -> None:
     assert not forbidden.exists()
 
 
+def test_canary_capture_inherits_retained_private_runtime_descriptors(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("LD_PRELOAD", "/ambient/canary.so")
+    monkeypatch.setenv("NVBIT_TOOL", "/ambient/tool.so")
+    binary = tmp_path / "canary_run"
+    tracer = Path(os.environ[EXTERNAL_TRACER_PATH_ENV])
+    output = tmp_path / "capture"
+    _write_executable(binary, b"retained canary executable")
+    tracer.write_bytes(b"retained canary tracer")
+    with immutable.open_retained_regular(tracer.resolve()) as retained_tracer:
+        path_identity = retained_tracer.path_identity
+    tracer_authority = canary.ExternalTracerAuthority(
+        path=tracer.resolve(),
+        sha256=hashlib.sha256(b"retained canary tracer").hexdigest(),
+        path_identity=path_identity,
+    )
+    observed: dict[str, object] = {}
+
+    def fake_run(command: list[str], **kwargs):
+        observed["command"] = command
+        observed["kwargs"] = kwargs
+        for descriptor in kwargs["pass_fds"]:
+            os.fstat(descriptor)
+        trace_root = Path(kwargs["env"]["TRACES_FOLDER"])
+        (trace_root / "dynamic_trace.pb").write_bytes(b"trace")
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(canary, "PB_LIB", tmp_path / "pb-lib")
+    monkeypatch.setattr(
+        canary, "_assert_staging_output", lambda path, **_kwargs: Path(path)
+    )
+    monkeypatch.setattr(
+        canary, "retained_tracer_runtime_env", _fixture_runtime_context
+    )
+    monkeypatch.setattr(canary, "_run", fake_run)
+    monkeypatch.setattr(canary, "require_trace_admission", lambda _path: None)
+
+    canary.capture(binary, output, tracer_authority=tracer_authority)
+
+    command = observed["command"]
+    kwargs = observed["kwargs"]
+    assert isinstance(command, list)
+    assert command[0].startswith("/proc/self/fd/")
+    assert kwargs["env"]["CUDA_INJECTION64_PATH"].startswith(
+        "/proc/self/fd/"
+    )
+    assert kwargs["env"]["TRACES_FOLDER"].startswith("/proc/self/fd/")
+    pass_fds = kwargs["pass_fds"]
+    assert len(pass_fds) == 4
+    assert int(command[0].rsplit("/", 1)[1]) == pass_fds[0]
+    assert (
+        int(kwargs["env"]["CUDA_INJECTION64_PATH"].rsplit("/", 1)[1])
+        == pass_fds[1]
+    )
+    assert int(kwargs["env"]["TRACES_FOLDER"].rsplit("/", 1)[1]) == pass_fds[2]
+    assert kwargs["env"]["LD_LIBRARY_PATH"] == f"/proc/self/fd/{pass_fds[3]}"
+    assert "LD_PRELOAD" not in kwargs["env"]
+    assert "NVBIT_TOOL" not in kwargs["env"]
+    assert (output / next(output.iterdir()).name / "dynamic_trace.pb").read_bytes() == b"trace"
+
+
+@pytest.mark.parametrize(
+    ("mapper", "timeout_code", "classes"),
+    (
+        (
+            activation._map_activation_capture_error,
+            activation._ACTIVATION_CAPTURE_TIMEOUT_CODE,
+            (
+                activation.ActivationCaptureTimeout,
+                activation.ActivationCaptureOutputLimitExceeded,
+                activation.ActivationCaptureLaunchFailed,
+                activation.ActivationCaptureResourceUnavailable,
+                activation.ActivationCaptureCleanupFailed,
+            ),
+        ),
+        (
+            roster_capture._map_direct_capture_error,
+            roster_capture._DIRECT_CAPTURE_TIMEOUT_CODE,
+            (
+                roster_capture.RosterDirectCaptureTimeout,
+                roster_capture.RosterDirectCaptureOutputLimitExceeded,
+                roster_capture.RosterDirectCaptureLaunchFailed,
+                roster_capture.RosterDirectCaptureResourceUnavailable,
+                roster_capture.RosterDirectCaptureCleanupFailed,
+            ),
+        ),
+        (
+            variants._map_register_cap_capture_error,
+            variants._REGISTER_CAP_CAPTURE_TIMEOUT_CODE,
+            (
+                variants.RegisterCapCaptureTimeout,
+                variants.RegisterCapCaptureOutputLimitExceeded,
+                variants.RegisterCapCaptureLaunchFailed,
+                variants.RegisterCapCaptureResourceUnavailable,
+                variants.RegisterCapCaptureCleanupFailed,
+            ),
+        ),
+        (
+            canary._map_canary_capture_error,
+            canary._CANARY_CAPTURE_TIMEOUT_CODE,
+            (
+                canary.CanaryCaptureTimeout,
+                canary.CanaryCaptureOutputLimitExceeded,
+                canary.CanaryCaptureLaunchFailed,
+                canary.CanaryCaptureResourceUnavailable,
+                canary.CanaryCaptureCleanupFailed,
+            ),
+        ),
+    ),
+)
+def test_launcher_executor_failures_have_distinct_byte_preserving_types(
+    mapper,
+    timeout_code: str,
+    classes: tuple[type[BaseException], ...],
+) -> None:
+    timeout_type, output_type, launch_type, resource_type, cleanup_type = classes
+    cases = (
+        (timeout_code, False, None, timeout_type),
+        (
+            activation.nvbit_process.NVBIT_CAPTURE_OUTPUT_LIMIT,
+            False,
+            None,
+            output_type,
+        ),
+        ("producer_launch_failed", False, None, launch_type),
+        (
+            "producer_launch_failed",
+            False,
+            MemoryError("planted resource exhaustion"),
+            resource_type,
+        ),
+        (timeout_code, True, None, cleanup_type),
+        (
+            activation.nvbit_process.NVBIT_CAPTURE_OUTPUT_LIMIT,
+            True,
+            None,
+            cleanup_type,
+        ),
+    )
+    for code, cleanup_incomplete, cause, expected_type in cases:
+        observed_lower_bound = (
+            9 * 1024 * 1024 + 123
+            if code == activation.nvbit_process.NVBIT_CAPTURE_OUTPUT_LIMIT
+            else None
+        )
+        process_error = activation.nvbit_process.NvbitCaptureProcessError(
+            code,
+            "planted executor failure",
+            process_cleanup_incomplete=cleanup_incomplete,
+            observed_output_bytes_lower_bound=observed_lower_bound,
+        )
+        process_error.stdout = b"exact-stdout-\xff"
+        process_error.stderr = b"exact-stderr-\x80"
+        process_error.process_id = 424242
+        if cause is not None:
+            process_error.__cause__ = cause
+
+        mapped = mapper(process_error)
+
+        assert type(mapped) is expected_type
+        assert mapped.stdout == b"exact-stdout-\xff"
+        assert mapped.stderr == b"exact-stderr-\x80"
+        assert mapped.process_id == 424242
+        assert mapped.observed_output_bytes_lower_bound == observed_lower_bound
+
+
+@pytest.mark.parametrize(
+    "failure",
+    (
+        activation.ActivationCaptureNonzero(
+            returncode=-9,
+            stdout=b"activation-out",
+            stderr=b"activation-\xff",
+        ),
+        roster_capture.RosterDirectCaptureNonzero(
+            returncode=-9,
+            stdout=b"roster-out",
+            stderr=b"roster-\xff",
+        ),
+        variants.RegisterCapCaptureNonzero(
+            returncode=-9,
+            stdout=b"variant-out",
+            stderr=b"variant-\xff",
+        ),
+        canary.CanaryCaptureNonzero(
+            returncode=-9,
+            stdout=b"canary-out",
+            stderr=b"canary-\xff",
+        ),
+    ),
+)
+def test_nonzero_capture_types_preserve_raw_bytes_and_replace_diagnostics(
+    failure,
+) -> None:
+    assert failure.returncode == -9
+    assert failure.stdout.endswith(b"out")
+    assert failure.stderr.endswith(b"\xff")
+    assert "�" in str(failure)
+
+
+def test_canary_central_executor_preserves_bytes_and_bounds(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    observed: dict[str, object] = {}
+
+    def execute(command, **kwargs):
+        observed["command"] = tuple(command)
+        observed.update(kwargs)
+        return canary.nvbit_process.NvbitCaptureProcessResult(
+            0, b"stdout-\xff", b"stderr-\x80",
+        )
+
+    monkeypatch.setattr(
+        canary.nvbit_process,
+        "execute_capture_process",
+        execute,
+    )
+    result = canary._run(
+        ["/proc/self/fd/10"],
+        nvbit_capture=True,
+        env={"PATH": "/bin"},
+        cwd="/tmp",
+        pass_fds=(10,),
+    )
+
+    assert result.stdout == b"stdout-\xff"
+    assert result.stderr == b"stderr-\x80"
+    assert observed["command"] == ("/proc/self/fd/10",)
+    assert observed["environment"] == {"PATH": "/bin"}
+    assert observed["working_directory"] == "/tmp"
+    assert observed["inherited_descriptors"] == (10,)
+    assert observed["timeout_seconds"] == canary._CANARY_CAPTURE_TIMEOUT_SECONDS
+    assert observed["max_output_bytes"] == canary._CANARY_CAPTURE_MAX_OUTPUT_BYTES
+    assert observed["timeout_code"] == canary._CANARY_CAPTURE_TIMEOUT_CODE
+    assert observed["launch_code"] == canary._CANARY_CAPTURE_LAUNCH_CODE
+
+
 def test_canary_safe_output_plan() -> None:
     plan = canary._canary_output_plan(
         out=STAGING / "test_canary" / "manifest.json",
@@ -3681,14 +4413,19 @@ def test_canary_protected_output_refuses_before_mutation(
     assert calls == []
 
 
-def test_campaign_preflight_safe_output_plan(tmp_path: Path) -> None:
-    output, smoke = campaign._campaign_output_plan(
-        output=STAGING / "test_campaign" / "preflight.json",
-        smoke_temp_root=tmp_path / "smoke",
-    )
-    assert output.is_relative_to(STAGING)
-    assert all(not is_protected_path(path, repo_root=REPO) for path in smoke.values())
-    assert not smoke["root"].exists()
+def test_campaign_preflight_safe_output_plan() -> None:
+    with tempfile.TemporaryDirectory(
+        prefix="campaign-preflight-output-", dir="/tmp"
+    ) as raw_root:
+        output, smoke = campaign._campaign_output_plan(
+            output=STAGING / "test_campaign" / "preflight.json",
+            smoke_temp_root=Path(raw_root) / "smoke",
+        )
+        assert output.is_relative_to(STAGING)
+        assert all(
+            not is_protected_path(path, repo_root=REPO) for path in smoke.values()
+        )
+        assert not smoke["root"].exists()
 
 
 def test_campaign_preflight_protected_output_refuses_before_mutation(
@@ -3724,16 +4461,21 @@ def test_measurement_stager_protected_output_refuses_before_mutation(
     assert calls == []
 
 
-def test_sm120_bundle_safe_output_plan(tmp_path: Path) -> None:
-    plan = sm120._bundle_output_plan(
-        candidates=[("register_spill_local_mem", "trace_l2_accuracy_xl")],
-        output_root=STAGING / "test_sm120",
-        helper_output=tmp_path / "sm120_helper",
-    )
-    cell = plan["cells"][("register_spill_local_mem", "trace_l2_accuracy_xl")]
-    assert plan["output_root"].is_relative_to(STAGING)
-    assert all(path.is_relative_to(STAGING) for path in cell.values())
-    assert not plan["helper"].is_relative_to(REPO)
+def test_sm120_bundle_safe_output_plan() -> None:
+    with tempfile.TemporaryDirectory(
+        prefix="sm120-helper-output-", dir="/tmp"
+    ) as raw_root:
+        plan = sm120._bundle_output_plan(
+            candidates=[("register_spill_local_mem", "trace_l2_accuracy_xl")],
+            output_root=STAGING / "test_sm120",
+            helper_output=Path(raw_root) / "sm120_helper",
+        )
+        cell = plan["cells"][
+            ("register_spill_local_mem", "trace_l2_accuracy_xl")
+        ]
+        assert plan["output_root"].is_relative_to(STAGING)
+        assert all(path.is_relative_to(STAGING) for path in cell.values())
+        assert not plan["helper"].is_relative_to(REPO)
 
 
 def test_sm120_bundle_protected_output_refuses_before_mutation(

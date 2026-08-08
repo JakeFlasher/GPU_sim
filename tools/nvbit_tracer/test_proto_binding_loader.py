@@ -25,6 +25,9 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 BINDING_ROOT = REPO_ROOT / "workloads" / "simbench_bw" / "_pb_generated"
 CANONICAL_MODULES = frozenset(pin.module_name for pin in BINDING_PINS)
 CANONICAL_FILENAMES = frozenset(pin.filename for pin in BINDING_PINS)
+AUTHORIZED_CPP_BINDING_BUILDER = (
+    REPO_ROOT / "tools" / "nvbit_tracer" / "external_tracer_build.py"
+)
 
 
 def _copy_bindings(destination: Path) -> Path:
@@ -93,8 +96,8 @@ def test_literal_pin_table_covers_exact_tracked_authorities() -> None:
             "b80bb0768bf852a3be3c84ee708a18f69a94b2143ba87fbd9afc94edaaba2135",
         ),
         "kernel_pb2.py": (
-            1802,
-            "4d8784dfe9be2eb322f4998656a2cdb83571a6395044638290baf5bc7f233c8b",
+            2024,
+            "d84c72e4217dd3efe535e04ffb6549137cfdc79e384e07db8bb5fad6e29cf6c0",
         ),
         "threadblock_pb2.py": (
             1885,
@@ -151,15 +154,100 @@ print("ok")
     assert result.stdout.strip() == "ok"
 
 
+def test_load_isolates_descriptors_classes_and_authenticated_consumers() -> None:
+    _run_subprocess(
+        """
+from google.protobuf import descriptor_pool, symbol_database
+import tools.nvbit_tracer.proto_binding_loader as loader
+import workloads.simbench_bw.nvbit_trace_summary_adapter as adapter
+
+def assert_identity_mapping(observed, expected):
+    assert set(observed) == set(expected)
+    assert all(observed[key] is value for key, value in expected.items())
+
+def assert_default_pool_clean(pool):
+    for pin in loader.BINDING_PINS:
+        try:
+            pool.FindFileByName(pin.proto_name)
+        except KeyError:
+            pass
+        else:
+            raise AssertionError(f"default pool contains {pin.proto_name}")
+
+default_pool = descriptor_pool.Default()
+public_database = symbol_database.Default()
+public_classes = symbol_database.SymbolDatabase._classes
+assert public_database._classes is public_classes
+public_snapshot = dict(public_classes)
+assert_default_pool_clean(default_pool)
+
+bundle = loader.load_dynamic_trace_bindings()
+private_pool = bundle.address_pb2.DESCRIPTOR.pool
+assert private_pool is not default_pool
+assert all(module.DESCRIPTOR.pool is private_pool for module in bundle.modules)
+assert_default_pool_clean(default_pool)
+assert_identity_mapping(public_classes, public_snapshot)
+for symbol in ("dynamic_trace.address", "dynamic_trace.threadblock", "dynamic_trace.Trace"):
+    try:
+        public_database.GetSymbol(symbol)
+    except KeyError:
+        pass
+    else:
+        raise AssertionError(f"public symbol database contains {symbol}")
+
+trace_pb2, threadblock_pb2 = adapter._import_pb_modules()
+assert trace_pb2 is bundle.trace_pb2
+assert threadblock_pb2 is bundle.threadblock_pb2
+trace = trace_pb2.Trace(name="isolated", binary_version=86)
+device = trace.gpu_device[7]
+device.id = 7
+stream = device.streams[3]
+stream.id = 3
+kernel = stream.kernels.add(id=11, name="consumer")
+kernel.grid_dim.x = 2
+kernel.block_dim.x = 32
+round_trip = trace_pb2.Trace.FromString(trace.SerializeToString())
+assert round_trip == trace
+threadblock = threadblock_pb2.threadblock()
+threadblock.block_id.x = 4
+threadblock.warps[0].id = 0
+assert threadblock_pb2.threadblock.FromString(
+    threadblock.SerializeToString()
+) == threadblock
+assert trace_pb2.Trace.__module__ == "trace_pb2"
+assert trace_pb2.Trace.GpuDeviceEntry.__qualname__ == "Trace.GpuDeviceEntry"
+
+assert loader.load_dynamic_trace_bindings() is bundle
+assert_default_pool_clean(default_pool)
+assert_identity_mapping(public_classes, public_snapshot)
+"""
+    )
+
+
 def test_concurrent_callers_publish_one_complete_bundle() -> None:
     _run_subprocess(
         """
 from concurrent.futures import ThreadPoolExecutor
-from tools.nvbit_tracer.proto_binding_loader import load_dynamic_trace_bindings
+from google.protobuf import descriptor_pool, symbol_database
+from tools.nvbit_tracer.proto_binding_loader import (
+    BINDING_PINS, load_dynamic_trace_bindings,
+)
+default_pool = descriptor_pool.Default()
+public_classes = symbol_database.SymbolDatabase._classes
+public_snapshot = dict(public_classes)
 with ThreadPoolExecutor(max_workers=8) as pool:
     bundles = list(pool.map(lambda _: load_dynamic_trace_bindings(), range(32)))
 assert all(bundle is bundles[0] for bundle in bundles)
 assert len(bundles[0].modules) == 9
+assert set(public_classes) == set(public_snapshot)
+assert all(public_classes[key] is value for key, value in public_snapshot.items())
+for pin in BINDING_PINS:
+    try:
+        default_pool.FindFileByName(pin.proto_name)
+    except KeyError:
+        pass
+    else:
+        raise AssertionError(f"default pool contains {pin.proto_name}")
 """
     )
 
@@ -350,6 +438,125 @@ else:
 assert sys.modules["trace_pb2"] is fake
 """,
         root,
+    )
+
+
+def test_public_descriptor_pool_constructor_is_never_executed() -> None:
+    _run_subprocess(
+        """
+from google.protobuf import descriptor_pool
+real_descriptor_pool = descriptor_pool.DescriptorPool
+constructor_calls = []
+class PlantedDescriptorPool:
+    def __new__(cls, *args, **kwargs):
+        constructor_calls.append((args, kwargs))
+        return real_descriptor_pool(*args, **kwargs)
+descriptor_pool.DescriptorPool = PlantedDescriptorPool
+import tools.nvbit_tracer.proto_binding_loader as loader
+bundle = loader.load_dynamic_trace_bindings()
+assert bundle.trace_pb2.DESCRIPTOR.pool is not descriptor_pool.Default()
+assert constructor_calls == []
+for pin in loader.BINDING_PINS:
+    try:
+        descriptor_pool.Default().FindFileByName(pin.proto_name)
+    except KeyError:
+        pass
+    else:
+        raise AssertionError(f"default pool contains {pin.proto_name}")
+"""
+    )
+
+
+@pytest.mark.parametrize("target", ("metaclass", "message", "api_implementation"))
+def test_preimport_message_factory_global_contamination_is_rejected(
+    target: str,
+) -> None:
+    _run_subprocess(
+        """
+import sys
+from google.protobuf import descriptor_pool, message_factory, reflection
+calls = []
+target = sys.argv[1]
+if target == "metaclass":
+    real_metaclass = message_factory._GENERATED_PROTOCOL_MESSAGE_TYPE
+    def planted_metaclass(*args, **kwargs):
+        calls.append((args, kwargs))
+        return real_metaclass(*args, **kwargs)
+    message_factory._GENERATED_PROTOCOL_MESSAGE_TYPE = planted_metaclass
+elif target == "message":
+    message_factory.message = object()
+else:
+    class PlantedApiImplementation:
+        @staticmethod
+        def Type():
+            calls.append("Type")
+            return "upb"
+    message_factory.api_implementation = PlantedApiImplementation
+import tools.nvbit_tracer.proto_binding_loader as loader
+try:
+    loader.load_dynamic_trace_bindings()
+except loader.ProtoBindingRuntimePrerequisiteError as exc:
+    assert "message factory runtime bindings changed" in str(exc), str(exc)
+else:
+    raise AssertionError("pre-import message-factory contamination was accepted")
+assert calls == []
+assert not any(name in sys.modules for name in loader._CANONICAL_MODULE_NAMES)
+for pin in loader.BINDING_PINS:
+    try:
+        descriptor_pool.Default().FindFileByName(pin.proto_name)
+    except KeyError:
+        pass
+    else:
+        raise AssertionError(f"default pool contains {pin.proto_name}")
+""",
+        target,
+    )
+
+
+@pytest.mark.parametrize("mutation", ("new", "namespace"))
+def test_preimport_enum_wrapper_class_mutation_is_rejected_before_binding_import(
+    mutation: str,
+) -> None:
+    _run_subprocess(
+        """
+import sys
+from google.protobuf import descriptor_pool
+from google.protobuf.internal.enum_type_wrapper import EnumTypeWrapper
+
+constructor_calls = []
+mutation = sys.argv[1]
+if mutation == "new":
+    def planted_new(cls, *args, **kwargs):
+        constructor_calls.append((args, kwargs))
+        return object.__new__(cls)
+    EnumTypeWrapper.__new__ = planted_new
+else:
+    EnumTypeWrapper.planted_namespace_member = object()
+
+import tools.nvbit_tracer.proto_binding_loader as loader
+binding_root_calls = []
+def reject_binding_root(*args, **kwargs):
+    binding_root_calls.append((args, kwargs))
+    raise AssertionError("generated binding root was opened")
+loader._open_directory_chain = reject_binding_root
+try:
+    loader.load_dynamic_trace_bindings()
+except loader.ProtoBindingRuntimePrerequisiteError as exc:
+    assert "EnumTypeWrapper class" in str(exc), str(exc)
+else:
+    raise AssertionError("pre-import EnumTypeWrapper mutation was accepted")
+assert constructor_calls == []
+assert binding_root_calls == []
+assert not any(name in sys.modules for name in loader._CANONICAL_MODULE_NAMES)
+for pin in loader.BINDING_PINS:
+    try:
+        descriptor_pool.Default().FindFileByName(pin.proto_name)
+    except KeyError:
+        pass
+    else:
+        raise AssertionError(f"default pool contains {pin.proto_name}")
+""",
+        mutation,
     )
 
 
@@ -546,9 +753,11 @@ def test_execution_failure_cleans_modules_and_permanently_poisons_loader(
 import builtins
 import pathlib
 import sys
-from google.protobuf import descriptor_pool
+from google.protobuf import descriptor_pool, symbol_database
 import tools.nvbit_tracer.proto_binding_loader as loader
 loader._BINDING_ROOT = pathlib.Path(sys.argv[1])
+public_classes = symbol_database.SymbolDatabase._classes
+public_snapshot = dict(public_classes)
 real_exec = builtins.exec
 count = 0
 def execute_first_then_fail(code, globals_dict, locals_dict):
@@ -565,7 +774,14 @@ except loader.ProtoBindingIntegrityError:
 else:
     raise AssertionError("planted execution failure was accepted")
 assert count == 1
-assert descriptor_pool.Default().FindFileByName("address.proto").name == "address.proto"
+try:
+    descriptor_pool.Default().FindFileByName("address.proto")
+except KeyError:
+    pass
+else:
+    raise AssertionError("failed transaction contaminated the default pool")
+assert set(public_classes) == set(public_snapshot)
+assert all(public_classes[key] is value for key, value in public_snapshot.items())
 assert not any(name in sys.modules for name in loader._CANONICAL_MODULE_NAMES)
 try:
     loader.load_dynamic_trace_bindings()
@@ -764,12 +980,70 @@ def _targets_sys_path(node: ast.AST) -> bool:
     )
 
 
-def test_active_production_tree_has_one_binding_import_route() -> None:
-    """AST-discover all production Python, rather than curating consumers."""
+def _generated_import_failures(path: Path, tree: ast.AST) -> list[str]:
     failures: list[str] = []
-    for path in _production_python_files():
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                parts = alias.name.split(".")
+                if "_pb_generated" in parts or parts[-1] in CANONICAL_MODULES:
+                    failures.append(
+                        f"{path}:{node.lineno}: generated import {alias.name}"
+                    )
+        elif isinstance(node, ast.ImportFrom):
+            module = node.module or ""
+            module_parts = module.split(".") if module else []
+            for alias in node.names:
+                imported_parts = alias.name.split(".")
+                if (
+                    "_pb_generated" in module_parts
+                    or "_pb_generated" in imported_parts
+                    or (module_parts and module_parts[-1] in CANONICAL_MODULES)
+                    or imported_parts[-1] in CANONICAL_MODULES
+                ):
+                    target = f"{module}.{alias.name}" if module else alias.name
+                    failures.append(
+                        f"{path}:{node.lineno}: generated import-from {target}"
+                    )
+    return failures
+
+
+@pytest.mark.parametrize(
+    "source",
+    (
+        "from workloads.simbench_bw._pb_generated import trace_pb2",
+        "from workloads.simbench_bw._pb_generated import trace_pb2 as planted",
+        "from workloads.simbench_bw import _pb_generated",
+        "import workloads.simbench_bw._pb_generated.trace_pb2 as planted",
+    ),
+)
+def test_binding_route_guard_rejects_package_form_generated_imports(
+    tmp_path: Path,
+    source: str,
+) -> None:
+    path = tmp_path / "planted_generated_import.py"
+    path.write_text(source, encoding="utf-8")
+    failures = _binding_route_failures([path])
+    assert failures
+    assert any("generated import" in failure for failure in failures)
+
+
+def test_binding_route_guard_allows_central_loader_import(tmp_path: Path) -> None:
+    path = tmp_path / "authenticated_consumer.py"
+    path.write_text(
+        "from tools.nvbit_tracer.proto_binding_loader "
+        "import load_dynamic_trace_bindings",
+        encoding="utf-8",
+    )
+    assert _binding_route_failures([path]) == []
+
+
+def _binding_route_failures(paths: list[Path]) -> list[str]:
+    failures: list[str] = []
+    for path in paths:
         source = path.read_text(encoding="utf-8")
         tree = ast.parse(source, filename=os.fspath(path))
+        failures.extend(_generated_import_failures(path, tree))
         tainted: set[str] = set()
         assignments = [
             node
@@ -795,19 +1069,7 @@ def test_active_production_tree_has_one_binding_import_route() -> None:
                             changed = True
 
         for node in ast.walk(tree):
-            if isinstance(node, ast.Import):
-                for alias in node.names:
-                    if alias.name.rsplit(".", 1)[-1] in CANONICAL_MODULES:
-                        failures.append(
-                            f"{path}:{node.lineno}: bare generated import {alias.name}"
-                        )
-            elif isinstance(node, ast.ImportFrom):
-                module = node.module or ""
-                if module.rsplit(".", 1)[-1] in CANONICAL_MODULES:
-                    failures.append(
-                        f"{path}:{node.lineno}: generated import-from {module}"
-                    )
-            elif isinstance(node, ast.Call):
+            if isinstance(node, ast.Call):
                 function = _attribute_name(node.func)
                 call_strings = tuple(
                     child.value
@@ -815,13 +1077,18 @@ def test_active_production_tree_has_one_binding_import_route() -> None:
                     if isinstance(child, ast.Constant)
                     and isinstance(child.value, str)
                 )
-                if any(
+                python_generation_marker = any(
                     "--python_out" in value
                     or "grpc_tools" in value
                     or "nvbit-pb-python" in value
-                    or value == "protoc"
-                    or value.endswith("/protoc")
                     for value in call_strings
+                )
+                protoc_marker = any(
+                    value == "protoc" or value.endswith("/protoc")
+                    for value in call_strings
+                )
+                if python_generation_marker or (
+                    protoc_marker and path != AUTHORIZED_CPP_BINDING_BUILDER
                 ):
                     failures.append(
                         f"{path}:{node.lineno}: binding generation fallback"
@@ -895,4 +1162,9 @@ def test_active_production_tree_has_one_binding_import_route() -> None:
                     failures.append(
                         f"{path}:{node.lineno}: duplicate generated binding table"
                     )
-    assert failures == []
+    return failures
+
+
+def test_active_production_tree_has_one_binding_import_route() -> None:
+    """AST-discover all production Python, rather than curating consumers."""
+    assert _binding_route_failures(_production_python_files()) == []

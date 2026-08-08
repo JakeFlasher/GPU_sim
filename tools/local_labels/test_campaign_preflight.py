@@ -9,7 +9,10 @@ import os
 import shutil
 import subprocess
 import sys
+from contextlib import contextmanager
+from dataclasses import replace
 from pathlib import Path
+from types import SimpleNamespace
 
 import jsonschema
 import pytest
@@ -25,6 +28,12 @@ _SCHEMA = json.loads(
     (_REPO / "workloads" / "simbench_bw" / "schemas"
      / "campaign_preflight_manifest.schema.json").read_text()
 )
+
+
+@contextmanager
+def _retained_runtime(environment: dict[str, str], *pass_fds: int):
+    yield SimpleNamespace(environment=environment, pass_fds=pass_fds)
+
 
 _SOL_COMPONENTS = {
     "python_version": "3.12.12",
@@ -854,14 +863,14 @@ def test_injection_smoke_default_root_trace_blocks():
 def test_root_trace_verdict_requires_contract_capabilities_and_geometry():
     common = dict(
         pb_bytes=64, parse_error=None,
-        trace_contract_id="sm86_addr_carry_v1",
+        trace_contract_id="sm86_addr_carry_shmem_split_v2",
         memory_payload_classes=[1, 2, 3, 6, 8],
         launch_geometries=[{"grid_dim": [1, 1, 1], "block_dim": [32, 1, 1]}],
     )
     assert cp.root_trace_verdict(**common)[0] == cp.STATUS_OK
     assert cp.root_trace_verdict(**(common | {"pb_bytes": 0}))[0] == cp.STATUS_FAILED
     assert cp.root_trace_verdict(
-        **(common | {"trace_contract_id": "legacy"}))[0] == cp.STATUS_FAILED
+        **(common | {"trace_contract_id": "sm86_addr_carry_v1"}))[0] == cp.STATUS_FAILED
     assert cp.root_trace_verdict(
         **(common | {"memory_payload_classes": [1, 2, 3, 6]}))[0] == cp.STATUS_FAILED
     assert cp.root_trace_verdict(
@@ -869,6 +878,159 @@ def test_root_trace_verdict_requires_contract_capabilities_and_geometry():
     assert cp.root_trace_verdict(**(
         common | {"launch_geometries": [
             {"grid_dim": [0, 1, 1], "block_dim": [32, 1, 1]}]}))[0] == cp.STATUS_FAILED
+
+
+@pytest.mark.parametrize(
+    "memory_payload_classes",
+    [
+        [1, 2, 3, 6],
+        [1, 2, 3, 6, 8, 9],
+        [2, 1, 3, 6, 8],
+        [1, 2, 3, 6, 9],
+        [1, 2, 3, 6, 8, 8],
+        [True, 2, 3, 6, 8],
+    ],
+    ids=["missing", "extra", "reordered", "unknown", "duplicate", "non-integer"],
+)
+def test_root_trace_verdict_rejects_noncanonical_capability_vector(
+    memory_payload_classes,
+):
+    status, detail = cp.root_trace_verdict(
+        pb_bytes=64,
+        parse_error=None,
+        trace_contract_id="sm86_addr_carry_shmem_split_v2",
+        memory_payload_classes=memory_payload_classes,
+        launch_geometries=[{
+            "grid_dim": [1, 1, 1],
+            "block_dim": [32, 1, 1],
+        }],
+    )
+
+    assert status == cp.STATUS_FAILED
+    assert "canonical ordered vector" in detail
+
+
+def _varint(value: int) -> bytes:
+    encoded = bytearray()
+    while True:
+        byte = value & 0x7f
+        value >>= 7
+        if value:
+            byte |= 0x80
+        encoded.append(byte)
+        if not value:
+            return bytes(encoded)
+
+
+def _message_field(number: int, payload: bytes) -> bytes:
+    return bytes((number << 3 | 2,)) + _varint(len(payload)) + payload
+
+
+def _trace_with_kernel_suffix(trace, suffix: bytes) -> bytes:
+    metadata = type(trace)()
+    metadata.CopyFrom(trace)
+    metadata.ClearField("gpu_device")
+    kernel = trace.gpu_device[0].streams[0].kernels[0].SerializeToString() + suffix
+    stream = _message_field(2, kernel)
+    stream_entry = _message_field(2, stream)
+    device = _message_field(2, stream_entry)
+    device_entry = _message_field(2, device)
+    return metadata.SerializeToString() + _message_field(6, device_entry)
+
+
+def _write_split_trace(root: Path):
+    bindings = cp.load_dynamic_trace_bindings()
+    root.mkdir(exist_ok=True)
+    trace = bindings.trace_pb2.Trace()
+    trace.trace_contract_id = "sm86_addr_carry_shmem_split_v2"
+    trace.memory_payload_classes.extend([1, 2, 3, 6, 8])
+    device = trace.gpu_device[0]
+    device.id = 0
+    stream = device.streams[0]
+    stream.id = 0
+    kernel = stream.kernels.add()
+    kernel.id = 0
+    kernel.name = "split_fixture"
+    kernel.function_unique_id = 1
+    kernel.grid_dim.x = kernel.grid_dim.y = kernel.grid_dim.z = 1
+    kernel.block_dim.x = 32
+    kernel.block_dim.y = kernel.block_dim.z = 1
+    kernel.size_shared_memory = 6144
+    kernel.shared_memory_static_bytes = 2048
+    kernel.shared_memory_dynamic_bytes = 4096
+    (root / "dynamic_trace.pb").write_bytes(trace.SerializeToString())
+
+    threadblock = bindings.threadblock_pb2.threadblock()
+    threadblock.block_id.x = threadblock.block_id.y = threadblock.block_id.z = 0
+    warp = threadblock.warps[0]
+    warp.id = 0
+    instruction = warp.instructions.add()
+    instruction.pc = instruction.vpc = 0x1000
+    instruction.active_mask = instruction.predicate_mask = 1
+    instruction.function_unique_id = 1
+    instruction.data_width = 4
+    instruction.warpid_tb = 0
+    tb_path = root / "threadblocks/device_0/stream_0/kernel_0/0.pb"
+    tb_path.parent.mkdir(parents=True)
+    tb_path.write_bytes(threadblock.SerializeToString())
+    (root / "stats.csv").write_text(
+        "kernel_id,total_insts,total_reported_insts\n0,1,1\n",
+        encoding="utf-8",
+    )
+    return trace
+
+
+def test_root_trace_validation_uses_admitted_split_geometry(tmp_path):
+    trace_dir = tmp_path / "trace"
+    _write_split_trace(trace_dir)
+
+    result = cp._validate_root_trace(trace_dir / "dynamic_trace.pb", tmp_path)
+
+    assert result["status"] == cp.STATUS_OK
+    assert result["memory_payload_classes"] == [1, 2, 3, 6, 8]
+    assert result["launches"] == [{
+        "device_id": 0,
+        "stream_id": 0,
+        "kernel_id": 0,
+        "kernel_name": "split_fixture",
+        "grid_dim": [1, 1, 1],
+        "block_dim": [32, 1, 1],
+        "shared_memory_static_bytes": 2048,
+        "shared_memory_dynamic_bytes": 4096,
+    }]
+
+
+@pytest.mark.parametrize(
+    ("mutation", "typed_reason"),
+    [
+        ("missing", "shared_memory_split_missing"),
+        ("mismatch", "shared_memory_split_mismatch"),
+        ("duplicate", "trace_root_unparseable"),
+        ("wrong_wire", "trace_root_unparseable"),
+    ],
+)
+def test_root_trace_validation_rejects_invalid_split_wire(
+    tmp_path, mutation, typed_reason,
+):
+    trace_dir = tmp_path / "trace"
+    trace = _write_split_trace(trace_dir)
+    kernel = trace.gpu_device[0].streams[0].kernels[0]
+    if mutation == "missing":
+        kernel.ClearField("shared_memory_dynamic_bytes")
+        payload = trace.SerializeToString()
+    elif mutation == "mismatch":
+        kernel.size_shared_memory += 1
+        payload = trace.SerializeToString()
+    elif mutation == "duplicate":
+        payload = _trace_with_kernel_suffix(trace, b"\x58" + _varint(2048))
+    else:
+        payload = _trace_with_kernel_suffix(trace, b"\x5a\x00")
+    (trace_dir / "dynamic_trace.pb").write_bytes(payload)
+
+    result = cp._validate_root_trace(trace_dir / "dynamic_trace.pb", tmp_path)
+
+    assert result["status"] == cp.STATUS_FAILED
+    assert typed_reason in result["detail"]
 
 
 def test_process_hygiene_is_closed_and_non_vacuous():
@@ -1744,9 +1906,56 @@ def test_preflight_dispatches_supplemental_matrix_without_canonical_fallback(
 
 
 # ---- schema enforces smoke evidence on an admitted injection probe --------- #
+def _root_trace_launch_projection() -> dict:
+    return {
+        "device_id": 0,
+        "stream_id": 0,
+        "kernel_id": 0,
+        "kernel_name": "preflight_smoke",
+        "grid_dim": [4, 1, 1],
+        "block_dim": [32, 1, 1],
+        "shared_memory_static_bytes": 2048,
+        "shared_memory_dynamic_bytes": 4096,
+    }
+
+
+def _ok_injection_probe() -> dict:
+    return {
+        "status": "ok",
+        "admitted_insts": 4800,
+        "expected_insts": 4800,
+        "validator_ok": True,
+        "threadblocks_pb_count": 4,
+        "root_trace_ok": True,
+        "root_trace_pb_bytes": 100,
+        "root_trace_contract_id": "sm86_addr_carry_shmem_split_v2",
+        "root_trace_memory_payload_classes": [1, 2, 3, 6, 8],
+        "root_trace_launch_count": 1,
+        "root_trace_launches": [_root_trace_launch_projection()],
+        "full_coverage_ok": True,
+        "grid_threadblock_count": 4,
+        "decoded_threadblock_count": 4,
+        "decoded_record_count": 4800,
+        "zero_record_threadblock_count": 0,
+        "sampling_sidecar_present": False,
+        "stats_row_count": 1,
+        "tracer_source_kind": "external_non_git_retained_descriptor_v1",
+        "tracer_source_path": "/tmp/external-build/tracer_tool.so",
+        "tracer_so_sha256": "c" * 64,
+        "smoke_binary_sha256": "d" * 64,
+        "smoke_root_path": "/tmp/campaign-preflight-smoke",
+        "smoke_trace_root_path": "/tmp/campaign-preflight-smoke/smoke_out",
+        "smoke_trace_retention": "preserved_exact_admitted_generation_v1",
+        "trace_admission_sha256": "e" * 64,
+        "trace_filesystem_generation_sha256": "f" * 64,
+        "dynamic_trace_pb_sha256": "a" * 64,
+        "stats_csv_sha256": "b" * 64,
+    }
+
+
 def _minimal_manifest(injection_probe):
     return {
-        "schema_version": 3,
+        "schema_version": 4,
         "arch": "sm_86",
         "captured_at_utc": "2026-07-10T12:00:00+00:00",
         "generated_at_utc": "2026-07-10T12:00:00+00:00",
@@ -1782,7 +1991,21 @@ def test_retained_preflight_v2_schema_is_byte_exact_and_separate():
     )
     historical = json.loads(payload)
     assert historical["properties"]["schema_version"]["const"] == 2
-    assert _SCHEMA["properties"]["schema_version"]["const"] == 3
+    assert _SCHEMA["properties"]["schema_version"]["const"] == 4
+
+
+def test_retained_preflight_v3_schema_is_byte_exact_and_separate():
+    path = (
+        _REPO / "workloads" / "simbench_bw" / "schemas"
+        / "campaign_preflight_manifest.v3.schema.json"
+    )
+    payload = path.read_bytes()
+    assert hashlib.sha256(payload).hexdigest() == (
+        "cacd78d381d850b7084ef1b9bf8e9e6c028076743fe3abfb6900d9e50086e3c6"
+    )
+    historical = json.loads(payload)
+    assert historical["properties"]["schema_version"]["const"] == 3
+    assert _SCHEMA["properties"]["schema_version"]["const"] == 4
 
 
 def test_active_schema_keeps_device_additive_but_closes_present_authority():
@@ -1862,21 +2085,26 @@ def test_schema_rejects_ok_injection_with_zero_threadblocks():
 
 
 def test_schema_accepts_ok_injection_with_full_smoke_evidence():
-    good = _minimal_manifest({
-        "status": "ok", "admitted_insts": 4800, "expected_insts": 4800,
-        "validator_ok": True, "threadblocks_pb_count": 4,
-        "root_trace_ok": True, "root_trace_pb_bytes": 100,
-        "root_trace_contract_id": "sm86_addr_carry_v1",
-        "root_trace_memory_payload_classes": [1, 2, 3, 6, 8],
-        "root_trace_launch_count": 1,
-        "full_coverage_ok": True, "grid_threadblock_count": 4,
-        "decoded_threadblock_count": 4, "decoded_record_count": 4800,
-        "zero_record_threadblock_count": 0,
-        "sampling_sidecar_present": False, "stats_row_count": 1,
-        "tracer_so_sha256": "c" * 64, "smoke_binary_sha256": "d" * 64,
-        "dynamic_trace_pb_sha256": "a" * 64, "stats_csv_sha256": "b" * 64,
-    })
+    good = _minimal_manifest(_ok_injection_probe())
     jsonschema.validate(good, _SCHEMA)  # must not raise
+
+    for field in ("tracer_source_kind", "tracer_source_path"):
+        missing_source = copy.deepcopy(good)
+        del missing_source["checks"]["injection_runtime"][field]
+        with pytest.raises(jsonschema.ValidationError):
+            jsonschema.validate(missing_source, _SCHEMA)
+    wrong_source_kind = copy.deepcopy(good)
+    wrong_source_kind["checks"]["injection_runtime"]["tracer_source_kind"] = (
+        "repository_tracer"
+    )
+    with pytest.raises(jsonschema.ValidationError):
+        jsonschema.validate(wrong_source_kind, _SCHEMA)
+    relative_source = copy.deepcopy(good)
+    relative_source["checks"]["injection_runtime"]["tracer_source_path"] = (
+        "relative/tracer.so"
+    )
+    with pytest.raises(jsonschema.ValidationError):
+        jsonschema.validate(relative_source, _SCHEMA)
 
     legacy = copy.deepcopy(good)
     legacy["schema_version"] = 1
@@ -1924,22 +2152,69 @@ def test_schema_accepts_ok_injection_with_full_smoke_evidence():
         jsonschema.validate(wrong_literal_compiler, _SCHEMA)
 
 
+@pytest.mark.parametrize(
+    "memory_payload_classes",
+    [
+        [1, 2, 3, 6],
+        [1, 2, 3, 6, 8, 9],
+        [2, 1, 3, 6, 8],
+        [1, 2, 3, 6, 9],
+        [1, 2, 3, 6, 8, 8],
+    ],
+    ids=["missing", "extra", "reordered", "unknown", "duplicate"],
+)
+def test_schema_rejects_noncanonical_memory_payload_vector(
+    memory_payload_classes,
+):
+    probe = _ok_injection_probe()
+    probe["root_trace_memory_payload_classes"] = memory_payload_classes
+
+    with pytest.raises(jsonschema.ValidationError):
+        jsonschema.validate(_minimal_manifest(probe), _SCHEMA)
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        "missing_launches",
+        "missing_static_projection",
+        "missing_dynamic_projection",
+        "negative_static_projection",
+        "negative_dynamic_projection",
+        "malformed_grid",
+        "extra_projection_field",
+        "extra_launch",
+        "count_mismatch",
+    ],
+)
+def test_schema_requires_closed_root_trace_launches(mutation):
+    probe = _ok_injection_probe()
+    launch = probe["root_trace_launches"][0]
+    if mutation == "missing_launches":
+        del probe["root_trace_launches"]
+    elif mutation == "missing_static_projection":
+        del launch["shared_memory_static_bytes"]
+    elif mutation == "missing_dynamic_projection":
+        del launch["shared_memory_dynamic_bytes"]
+    elif mutation == "negative_static_projection":
+        launch["shared_memory_static_bytes"] = -1
+    elif mutation == "negative_dynamic_projection":
+        launch["shared_memory_dynamic_bytes"] = -1
+    elif mutation == "malformed_grid":
+        launch["grid_dim"] = [4, 1]
+    elif mutation == "extra_projection_field":
+        launch["shared_memory_total_bytes"] = 6144
+    elif mutation == "extra_launch":
+        probe["root_trace_launches"].append(_root_trace_launch_projection())
+    else:
+        probe["root_trace_launch_count"] = 2
+
+    with pytest.raises(jsonschema.ValidationError):
+        jsonschema.validate(_minimal_manifest(probe), _SCHEMA)
+
+
 def test_schema_admits_only_exact_canonical_or_supplemental_sol_contract():
-    manifest = _minimal_manifest({
-        "status": "ok", "admitted_insts": 4800, "expected_insts": 4800,
-        "validator_ok": True, "threadblocks_pb_count": 4,
-        "root_trace_ok": True, "root_trace_pb_bytes": 100,
-        "root_trace_contract_id": "sm86_addr_carry_v1",
-        "root_trace_memory_payload_classes": [1, 2, 3, 6, 8],
-        "root_trace_launch_count": 1,
-        "full_coverage_ok": True, "grid_threadblock_count": 4,
-        "decoded_threadblock_count": 4, "decoded_record_count": 4800,
-        "zero_record_threadblock_count": 0,
-        "sampling_sidecar_present": False, "stats_row_count": 1,
-        "tracer_so_sha256": "c" * 64, "smoke_binary_sha256": "d" * 64,
-        "dynamic_trace_pb_sha256": "a" * 64,
-        "stats_csv_sha256": "b" * 64,
-    })
+    manifest = _minimal_manifest(_ok_injection_probe())
     canonical_probe = manifest["checks"]["sol_environment"]
     assert canonical_probe["environment_contract"] == _SOL_ENVIRONMENT_CONTRACT
     jsonschema.validate(manifest, _SCHEMA)
@@ -1988,20 +2263,12 @@ def test_schema_requires_closed_structured_nvcc_release():
 
 
 def test_schema_rejects_ok_injection_without_exact_full_coverage():
-    probe = {
-        "status": "ok", "admitted_insts": 4800, "expected_insts": 4800,
-        "validator_ok": True, "threadblocks_pb_count": 4,
-        "root_trace_ok": True, "root_trace_pb_bytes": 100,
-        "root_trace_contract_id": "sm86_addr_carry_v1",
-        "root_trace_memory_payload_classes": [1, 2, 3, 6, 8],
-        "root_trace_launch_count": 1,
-        "full_coverage_ok": False, "grid_threadblock_count": 4,
-        "decoded_threadblock_count": 3, "decoded_record_count": 3600,
-        "zero_record_threadblock_count": 0,
-        "sampling_sidecar_present": False, "stats_row_count": 1,
-        "tracer_so_sha256": "c" * 64, "smoke_binary_sha256": "d" * 64,
-        "dynamic_trace_pb_sha256": "a" * 64, "stats_csv_sha256": "b" * 64,
-    }
+    probe = _ok_injection_probe()
+    probe.update({
+        "full_coverage_ok": False,
+        "decoded_threadblock_count": 3,
+        "decoded_record_count": 3600,
+    })
     with pytest.raises(jsonschema.ValidationError):
         jsonschema.validate(_minimal_manifest(probe), _SCHEMA)
 
@@ -2149,6 +2416,529 @@ def test_build_manifest_sol_environment_refusal_blocks_before_smoke(
     assert manifest["capture_matrix_sha256"] == se.sha256_file(matrix_path)
 
 
+def _injection_probe_fixture(tmp_path: Path):
+    repo = tmp_path / "repo"
+    (repo / "pb").mkdir(parents=True)
+    smoke_binary = repo / "smoke"
+    smoke_binary.write_text("fixture")
+    smoke_binary.chmod(0o755)
+    pins = {
+        "injection_runtime": {
+            "pb_lib_relpath": "pb",
+            "tracer_so_relpath": "tracer.so",
+            "smoke_binary_relpath": "smoke",
+            "smoke_shape_argv": [],
+        }
+    }
+    return repo, pins
+
+
+def _allow_test_smoke_root(monkeypatch, root: Path) -> None:
+    monkeypatch.setattr(
+        cp,
+        "_injection_temp_plan",
+        lambda _requested: {
+            "root": root,
+            "traces": root / "smoke_out",
+            "workload_output": root / "workload_output",
+        },
+    )
+
+
+def test_injection_smoke_requires_explicit_external_tracer(tmp_path, monkeypatch):
+    repo, pins = _injection_probe_fixture(tmp_path)
+    monkeypatch.setattr(
+        cp,
+        "_run",
+        lambda *_args, **_kwargs: pytest.fail("launch attempted without tracer"),
+    )
+
+    result = cp.probe_injection_runtime(
+        pins,
+        repo,
+        nvbit_tracer_path=None,
+    )
+
+    assert result["status"] == cp.STATUS_FAILED
+    assert "explicit external" in result["detail"]
+
+
+@pytest.mark.parametrize(
+    "source_kind", ["repository", "git", "bare_git", "symlink", "relative"]
+)
+def test_injection_smoke_rejects_unauthorized_tracer_before_launch(
+    tmp_path, monkeypatch, source_kind,
+):
+    repo, pins = _injection_probe_fixture(tmp_path)
+    external = tmp_path / "external-build"
+    external.mkdir()
+    tracer = external / "tracer.so"
+    tracer.write_bytes(b"tracer")
+    if source_kind == "repository":
+        tracer = repo / "tracer.so"
+        tracer.write_bytes(b"tracer")
+    elif source_kind == "git":
+        (external / ".git").mkdir()
+    elif source_kind == "bare_git":
+        bare = tmp_path / "bare.git"
+        subprocess.run(["git", "init", "-q", "--bare", str(bare)], check=True)
+        tracer = bare / "tracer.so"
+        tracer.write_bytes(b"tracer")
+    elif source_kind == "symlink":
+        link = tmp_path / "tracer-link.so"
+        link.symlink_to(tracer)
+        tracer = link
+    elif source_kind == "relative":
+        tracer = Path("tracer.so")
+    monkeypatch.setattr(
+        cp,
+        "_run",
+        lambda *_args, **_kwargs: pytest.fail("unauthorized tracer was launched"),
+    )
+
+    result = cp.probe_injection_runtime(
+        pins,
+        repo,
+        nvbit_tracer_path=tracer,
+    )
+
+    assert result["status"] == cp.STATUS_FAILED
+
+
+def test_injection_smoke_authenticates_pinned_protobuf_runtime(
+    tmp_path, monkeypatch,
+):
+    repo, pins = _injection_probe_fixture(tmp_path)
+    tracer = tmp_path / "external-tracer.so"
+    tracer.write_bytes(b"tracer")
+    observed = {}
+    _allow_test_smoke_root(monkeypatch, tmp_path / "smoke-attempt")
+    monkeypatch.setattr(
+        cp,
+        "_absolute_external_tracer",
+        lambda path, *, repo_root: Path(path).resolve(strict=True),
+    )
+
+    def reject_wrong_prefix(
+        tracer_so, *, base_env, pb_lib, runtime_manifest, retained_descriptor,
+    ):
+        observed.update(
+            tracer=Path(tracer_so),
+            base_env=dict(base_env),
+            pb_lib=Path(pb_lib),
+            descriptor=retained_descriptor,
+            descriptor_bytes=os.pread(retained_descriptor, 4096, 0),
+        )
+        raise cp.nvbit_runtime_env.TracerRuntimeError(
+            "protobuf mapping resolved outside pinned prefix"
+        )
+
+    monkeypatch.setattr(
+        cp.nvbit_runtime_env, "retained_tracer_runtime_env", reject_wrong_prefix,
+    )
+    monkeypatch.setattr(
+        cp, "_run", lambda *_args, **_kwargs: pytest.fail(
+            "workload launched after runtime authentication refusal"
+        ),
+    )
+
+    result = cp.probe_injection_runtime(
+        pins, repo, nvbit_tracer_path=tracer,
+    )
+
+    assert result["status"] == cp.STATUS_FAILED
+    assert result["ldd_missing_deps"] == [
+        "protobuf mapping resolved outside pinned prefix"
+    ]
+    assert observed["tracer"] == tracer
+    assert observed["pb_lib"] == repo / "pb"
+    assert observed["descriptor_bytes"] == b"tracer"
+    assert observed["descriptor"] >= 0
+
+
+def test_injection_smoke_types_trace_root_pin_resource_failure_before_launch(
+    tmp_path, monkeypatch,
+):
+    repo, pins = _injection_probe_fixture(tmp_path)
+    tracer = tmp_path / "external-tracer.so"
+    tracer.write_bytes(b"tracer")
+    smoke_root = tmp_path / "campaign" / "pin-resource-failure"
+    _allow_test_smoke_root(monkeypatch, smoke_root)
+    monkeypatch.setattr(
+        cp,
+        "_absolute_external_tracer",
+        lambda path, *, repo_root: Path(path).resolve(strict=True),
+    )
+    monkeypatch.setattr(
+        cp.nvbit_runtime_env,
+        "retained_tracer_runtime_env",
+        lambda _tracer, *, base_env, pb_lib, runtime_manifest, retained_descriptor: (
+            _retained_runtime(dict(base_env))
+        ),
+    )
+    monkeypatch.setattr(
+        cp.immutable,
+        "PinnedDirectoryReader",
+        lambda _path: (_ for _ in ()).throw(
+            cp.immutable.ImmutableArtifactResourceError(
+                "injected trace-root descriptor exhaustion"
+            )
+        ),
+    )
+    monkeypatch.setattr(
+        cp,
+        "_run",
+        lambda *_args, **_kwargs: pytest.fail("smoke launched without output pin"),
+    )
+
+    result = cp.probe_injection_runtime(
+        pins,
+        repo,
+        nvbit_tracer_path=tracer,
+        smoke_temp_root=smoke_root,
+    )
+
+    assert result["status"] == cp.STATUS_FAILED
+    assert result["trace_inventory_error_code"] == (
+        "trace_inventory_resource_unavailable"
+    )
+    assert result["smoke_trace_retention"] == "preserved_failure_evidence_v1"
+    assert (smoke_root / "smoke_out").is_dir()
+
+
+def test_injection_smoke_bounds_noisy_output_and_retains_exact_failure_bytes(
+    tmp_path,
+    monkeypatch,
+):
+    repo, pins = _injection_probe_fixture(tmp_path)
+    smoke_binary = repo / "smoke"
+    smoke_binary.write_text(
+        "#!/usr/bin/python3\n"
+        "import os\n"
+        "os.write(1, b'x' * 4096)\n"
+    )
+    smoke_binary.chmod(0o755)
+    tracer = tmp_path / "external-tracer.so"
+    tracer.write_bytes(b"tracer")
+    smoke_root = tmp_path / "campaign" / "smoke-attempt"
+    _allow_test_smoke_root(monkeypatch, smoke_root)
+    monkeypatch.setattr(cp, "_INJECTION_SMOKE_MAX_OUTPUT_BYTES", 64)
+    monkeypatch.setattr(
+        cp,
+        "_absolute_external_tracer",
+        lambda path, *, repo_root: Path(path).resolve(strict=True),
+    )
+    monkeypatch.setattr(
+        cp.nvbit_runtime_env,
+        "retained_tracer_runtime_env",
+        lambda _tracer, *, base_env, pb_lib, runtime_manifest, retained_descriptor: (
+            _retained_runtime(dict(base_env))
+        ),
+    )
+
+    def output_limit(*_args, **_kwargs):
+        error = cp.nvbit_process.NvbitCaptureProcessError(
+            cp.nvbit_process.NVBIT_CAPTURE_OUTPUT_LIMIT,
+            "synthetic bounded output limit",
+        )
+        error.stdout = b"x" * 64
+        error.stderr = b""
+        error.process_id = 456
+        error.started_at_utc = "2026-08-04T00:00:00Z"
+        raise error
+
+    monkeypatch.setattr(
+        cp.nvbit_process, "execute_capture_process", output_limit,
+    )
+
+    result = cp.probe_injection_runtime(
+        pins,
+        repo,
+        nvbit_tracer_path=tracer,
+        smoke_temp_root=smoke_root,
+    )
+
+    assert result["status"] == cp.STATUS_FAILED
+    assert result["smoke_process_error_code"] == (
+        cp.nvbit_process.NVBIT_CAPTURE_OUTPUT_LIMIT
+    )
+    assert result["smoke_returncode"] == 125
+    assert (smoke_root / cp._INJECTION_SMOKE_STDOUT_NAME).read_bytes() == b"x" * 64
+    assert (smoke_root / cp._INJECTION_SMOKE_STDERR_NAME).read_bytes() == b""
+    assert result["smoke_streams"]["stdout"] == {
+        "path": cp._INJECTION_SMOKE_STDOUT_NAME,
+        "sha256": hashlib.sha256(b"x" * 64).hexdigest(),
+        "size_bytes": 64,
+    }
+    assert result["smoke_streams"]["stderr"] == {
+        "path": cp._INJECTION_SMOKE_STDERR_NAME,
+        "sha256": hashlib.sha256(b"").hexdigest(),
+        "size_bytes": 0,
+    }
+    assert result["smoke_process_id"] is not None
+    assert result["smoke_started_at_utc"] is not None
+
+
+def test_injection_smoke_rejects_many_zero_byte_files_before_admission(
+    tmp_path,
+    monkeypatch,
+):
+    repo, pins = _injection_probe_fixture(tmp_path)
+    tracer = tmp_path / "external-tracer.so"
+    tracer.write_bytes(b"tracer")
+    smoke_root = tmp_path / "campaign" / "smoke-attempt"
+    _allow_test_smoke_root(monkeypatch, smoke_root)
+    monkeypatch.setattr(
+        cp,
+        "DEFAULT_TRACE_ADMISSION_LIMITS",
+        replace(
+            cp.DEFAULT_TRACE_ADMISSION_LIMITS,
+            tree_files=32,
+            threadblock_files=32,
+        ),
+    )
+    monkeypatch.setattr(
+        cp,
+        "_absolute_external_tracer",
+        lambda path, *, repo_root: Path(path).resolve(strict=True),
+    )
+    monkeypatch.setattr(
+        cp.nvbit_runtime_env,
+        "retained_tracer_runtime_env",
+        lambda _tracer, *, base_env, pb_lib, runtime_manifest, retained_descriptor: (
+            _retained_runtime(dict(base_env), retained_descriptor + 1)
+        ),
+    )
+
+    def write_many_empty_files(_command, **kwargs):
+        trace_root = Path(kwargs["env"]["TRACES_FOLDER"])
+        for index in range(64):
+            (trace_root / f"empty-{index:03d}").touch()
+        return 0, "", "NVBit injected"
+
+    monkeypatch.setattr(cp, "_run", write_many_empty_files)
+    monkeypatch.setattr(
+        cp,
+        "require_trace_admission",
+        lambda *_args, **_kwargs: pytest.fail(
+            "trace admission ran after bounded inventory refusal"
+        ),
+    )
+
+    result = cp.probe_injection_runtime(
+        pins,
+        repo,
+        nvbit_tracer_path=tracer,
+        smoke_temp_root=smoke_root,
+    )
+
+    assert result["status"] == cp.STATUS_FAILED
+    assert result["trace_inventory_error_code"] == (
+        "trace_inventory_limit_exceeded"
+    )
+    assert result["validator_ok"] is False
+    assert result["threadblocks_pb_count"] == 0
+    assert result["trace_tree_bytes"] == 0
+    assert smoke_root.is_dir()
+
+
+def test_bounded_smoke_inventory_types_memory_exhaustion(monkeypatch):
+    def exhaust_memory(_tree):
+        raise MemoryError("injected inventory exhaustion")
+
+    monkeypatch.setattr(
+        cp,
+        "raw_trace_generation_limits",
+        exhaust_memory,
+    )
+
+    with pytest.raises(
+        cp.immutable.ImmutableArtifactResourceError,
+        match="inventory exhausted memory",
+    ):
+        cp._bounded_trace_generation_inventory(SimpleNamespace(files=()))
+
+
+def test_injection_smoke_rejects_byte_equivalent_trace_root_switch(
+    tmp_path, monkeypatch,
+):
+    repo, pins = _injection_probe_fixture(tmp_path)
+    tracer = tmp_path / "external-tracer.so"
+    tracer.write_bytes(b"tracer")
+    smoke_root = tmp_path / "campaign" / "smoke-attempt"
+    _allow_test_smoke_root(monkeypatch, smoke_root)
+    monkeypatch.setattr(
+        cp,
+        "_absolute_external_tracer",
+        lambda path, *, repo_root: Path(path).resolve(strict=True),
+    )
+
+    monkeypatch.setattr(
+        cp.nvbit_runtime_env,
+        "retained_tracer_runtime_env",
+        lambda _tracer, *, base_env, pb_lib, runtime_manifest, retained_descriptor: _retained_runtime(
+            {
+                **base_env,
+                "LD_LIBRARY_PATH": str(pb_lib),
+            },
+            retained_descriptor + 1,
+        ),
+    )
+
+    def capture_trace(_command, **kwargs):
+        _write_split_trace(Path(kwargs["env"]["TRACES_FOLDER"]))
+        return 0, "", "NVBit injected"
+
+    monkeypatch.setattr(cp, "_run", capture_trace)
+    real_root_reader = cp._root_trace_from_admitted_sources
+    switched = False
+
+    def switch_after_root_read(sources):
+        nonlocal switched
+        result = real_root_reader(sources)
+        if not switched:
+            switched = True
+            trace_root = smoke_root / "smoke_out"
+            replacement = smoke_root / "byte-equivalent-replacement"
+            displaced = smoke_root / "displaced-generation"
+            shutil.copytree(trace_root, replacement)
+            trace_root.rename(displaced)
+            replacement.rename(trace_root)
+        return result
+
+    monkeypatch.setattr(
+        cp, "_root_trace_from_admitted_sources", switch_after_root_read,
+    )
+
+    result = cp.probe_injection_runtime(
+        pins,
+        repo,
+        nvbit_tracer_path=tracer,
+        smoke_temp_root=smoke_root,
+    )
+
+    assert switched is True
+    assert result["status"] == cp.STATUS_FAILED
+    assert result["validator_ok"] is False
+    assert result["expected_insts"] is None
+    assert result["admitted_insts"] is None
+    assert result["threadblocks_pb_count"] == 0
+    assert result["trace_tree_bytes"] == 0
+    assert result["dynamic_trace_pb_sha256"] is None
+    assert result["stats_csv_sha256"] is None
+    assert result["root_trace_contract_id"] is None
+    assert smoke_root.is_dir()
+
+
+def test_successful_injection_smoke_preserves_exact_admitted_generation(
+    tmp_path, monkeypatch,
+):
+    repo, pins = _injection_probe_fixture(tmp_path)
+    tracer = tmp_path / "external-tracer.so"
+    tracer.write_bytes(b"tracer")
+    smoke_root = tmp_path / "campaign" / "successful-smoke"
+    _allow_test_smoke_root(monkeypatch, smoke_root)
+    monkeypatch.setattr(
+        cp,
+        "_absolute_external_tracer",
+        lambda path, *, repo_root: Path(path).resolve(strict=True),
+    )
+    monkeypatch.setattr(
+        cp.nvbit_runtime_env,
+        "retained_tracer_runtime_env",
+        lambda _tracer, *, base_env, pb_lib, runtime_manifest, retained_descriptor: _retained_runtime(
+            {**base_env, "LD_LIBRARY_PATH": str(pb_lib)},
+            retained_descriptor + 1,
+        ),
+    )
+
+    def capture_trace(_command, **kwargs):
+        _write_split_trace(Path(kwargs["env"]["TRACES_FOLDER"]))
+        return 0, "", "NVBit injected"
+
+    monkeypatch.setattr(cp, "_run", capture_trace)
+    monkeypatch.setattr(
+        cp,
+        "_cleanup_smoke_output",
+        lambda _path: pytest.fail("successful smoke evidence was deleted"),
+    )
+
+    result = cp.probe_injection_runtime(
+        pins,
+        repo,
+        nvbit_tracer_path=tracer,
+        smoke_temp_root=smoke_root,
+    )
+
+    assert result["status"] == cp.STATUS_OK
+    assert result["smoke_root_path"] == str(smoke_root)
+    assert result["smoke_trace_root_path"] == str(smoke_root / "smoke_out")
+    assert result["smoke_trace_retention"] == (
+        "preserved_exact_admitted_generation_v1"
+    )
+    assert result["trace_admission_sha256"] == cp.require_trace_admission(
+        smoke_root / "smoke_out"
+    ).trace_admission_sha256
+    assert result["trace_filesystem_generation_sha256"] == (
+        cp.require_trace_admission(
+            smoke_root / "smoke_out"
+        ).trace_filesystem_generation_sha256
+    )
+    assert (smoke_root / "smoke_out" / "dynamic_trace.pb").is_file()
+    assert (smoke_root / "smoke_out" / "stats.csv").is_file()
+    assert (smoke_root / cp._INJECTION_SMOKE_STDOUT_NAME).is_file()
+    assert (smoke_root / cp._INJECTION_SMOKE_STDERR_NAME).is_file()
+
+
+def test_injection_smoke_refuses_preexisting_root_without_overwrite(
+    tmp_path, monkeypatch,
+):
+    repo, pins = _injection_probe_fixture(tmp_path)
+    tracer = tmp_path / "external-tracer.so"
+    tracer.write_bytes(b"tracer")
+    smoke_root = tmp_path / "campaign" / "preexisting-smoke"
+    smoke_root.mkdir(parents=True)
+    sentinel = smoke_root / "retained-evidence"
+    sentinel.write_bytes(b"do not overwrite")
+    _allow_test_smoke_root(monkeypatch, smoke_root)
+    monkeypatch.setattr(
+        cp,
+        "_absolute_external_tracer",
+        lambda path, *, repo_root: Path(path).resolve(strict=True),
+    )
+    monkeypatch.setattr(
+        cp.nvbit_runtime_env,
+        "retained_tracer_runtime_env",
+        lambda _tracer, *, base_env, pb_lib, runtime_manifest, retained_descriptor: _retained_runtime(
+            {**base_env, "LD_LIBRARY_PATH": str(pb_lib)},
+            retained_descriptor + 1,
+        ),
+    )
+    monkeypatch.setattr(
+        cp,
+        "_run",
+        lambda *_args, **_kwargs: pytest.fail(
+            "smoke process started against a preexisting evidence root"
+        ),
+    )
+    monkeypatch.setattr(
+        cp,
+        "_cleanup_smoke_output",
+        lambda _path: pytest.fail("preexisting smoke evidence was deleted"),
+    )
+
+    with pytest.raises(FileExistsError):
+        cp.probe_injection_runtime(
+            pins,
+            repo,
+            nvbit_tracer_path=tracer,
+            smoke_temp_root=smoke_root,
+        )
+
+    assert sentinel.read_bytes() == b"do not overwrite"
+    assert list(smoke_root.iterdir()) == [sentinel]
+
+
 @pytest.mark.parametrize(
     ("expected_kind", "expected_errno"),
     [
@@ -2164,21 +2954,62 @@ def test_injection_smoke_storage_stop_preserves_tree_and_is_typed(
     repo = tmp_path / "repo"
     pb_lib = repo / "pb"
     pb_lib.mkdir(parents=True)
-    tracer = repo / "tracer.so"
+    tracer = tmp_path / "external-tracer.so"
     tracer.write_bytes(b"tracer")
     smoke_binary = repo / "smoke"
     smoke_binary.write_text("fixture")
     smoke_binary.chmod(0o755)
     smoke_root = tmp_path / "campaign" / "smoke-attempt"
+    _allow_test_smoke_root(monkeypatch, smoke_root)
     calls = []
+    runtime_calls = []
+    observed_trace_targets = []
+    monkeypatch.setattr(
+        cp,
+        "_absolute_external_tracer",
+        lambda path, *, repo_root: Path(path).resolve(strict=True),
+    )
+    hostile_injection = {
+        "CUDA_INJECTION64_PATH": "/hostile/injection64.so",
+        "CUDA_INJECTION32_PATH": "/hostile/injection32.so",
+        "LD_PRELOAD": "/hostile/preload.so",
+        "LD_AUDIT": "/hostile/audit.so",
+        "NVBIT_PB_PREFIX": "/hostile/pb",
+        "NVBIT_TOOL": "/hostile/tool.so",
+        "SIMBENCH_NVBIT_PHASE_INJECT": "hostile",
+        "TRACE_SAMPLING_SIDECAR": "/hostile/sidecar.json",
+        "TOOL_VERBOSE": "99",
+        "TRACES_FOLDER": "/hostile/traces",
+        "USER_DEFINED_FOLDERS": "hostile",
+    }
+    for name, value in hostile_injection.items():
+        monkeypatch.setenv(name, value)
 
-    def fake_run(command, **_kwargs):
-        calls.append(command)
-        if command[0] == "ldd":
-            return 0, "", ""
+    def fake_run(command, **kwargs):
+        calls.append((command, kwargs))
+        observed_trace_targets.append(
+            Path(os.readlink(kwargs["env"]["TRACES_FOLDER"]))
+        )
         return 1, "", "read failed: Input/output error"
 
+    def fake_runtime(
+        tracer_so, *, base_env, pb_lib, runtime_manifest, retained_descriptor,
+    ):
+        runtime_calls.append((
+            Path(tracer_so), dict(base_env), Path(pb_lib), retained_descriptor,
+        ))
+        return _retained_runtime(
+            {
+                **base_env,
+                "LD_LIBRARY_PATH": str(pb_lib),
+            },
+            retained_descriptor + 1,
+        )
+
     monkeypatch.setattr(cp, "_run", fake_run)
+    monkeypatch.setattr(
+        cp.nvbit_runtime_env, "retained_tracer_runtime_env", fake_runtime,
+    )
     monkeypatch.setattr(
         cp.os, "write",
         lambda *_args, **_kwargs: (_ for _ in ()).throw(
@@ -2195,14 +3026,41 @@ def test_injection_smoke_storage_stop_preserves_tree_and_is_typed(
     }
     with pytest.raises(cp.PreflightStorageFailure) as caught:
         cp.probe_injection_runtime(
-            pins, repo, smoke_temp_root=smoke_root,
+            pins,
+            repo,
+            nvbit_tracer_path=tracer,
+            smoke_temp_root=smoke_root,
         )
     assert caught.value.kind == expected_kind
     assert caught.value.error_number == expected_errno
     assert smoke_root.is_dir()
     assert (smoke_root / "smoke_out").is_dir()
     assert (smoke_root / "workload_output").is_dir()
-    assert len(calls) == 2
+    assert len(calls) == 1
+    assert len(runtime_calls) == 1
+    workload_command, workload_kwargs = calls[0]
+    runtime_tracer, runtime_base_env, runtime_pb_lib, retained_descriptor = (
+        runtime_calls[0]
+    )
+    retained_path = f"/proc/self/fd/{retained_descriptor}"
+    assert runtime_tracer == tracer
+    assert runtime_pb_lib == pb_lib
+    assert all(name not in runtime_base_env for name in hostile_injection)
+    assert workload_command[0] == str(smoke_binary)
+    trace_proc_path = workload_kwargs["env"]["TRACES_FOLDER"]
+    trace_descriptor = int(trace_proc_path.rsplit("/", 1)[1])
+    assert workload_kwargs["pass_fds"] == (
+        retained_descriptor,
+        trace_descriptor,
+        retained_descriptor + 1,
+    )
+    assert observed_trace_targets == [smoke_root / "smoke_out"]
+    assert workload_kwargs["env"]["CUDA_INJECTION64_PATH"] == retained_path
+    assert workload_kwargs["env"]["USER_DEFINED_FOLDERS"] == "1"
+    assert workload_kwargs["env"]["TRACES_FOLDER"] != "/hostile/traces"
+    for name in hostile_injection:
+        if name not in {"CUDA_INJECTION64_PATH", "TRACES_FOLDER", "USER_DEFINED_FOLDERS"}:
+            assert name not in workload_kwargs["env"]
 
 
 def test_injection_smoke_input_diagnostic_is_not_output_storage(
@@ -2210,18 +3068,34 @@ def test_injection_smoke_input_diagnostic_is_not_output_storage(
 ):
     repo = tmp_path / "repo"
     (repo / "pb").mkdir(parents=True)
-    (repo / "tracer.so").write_bytes(b"tracer")
+    tracer = tmp_path / "external-tracer.so"
+    tracer.write_bytes(b"tracer")
     smoke_binary = repo / "smoke"
     smoke_binary.write_text("fixture")
     smoke_binary.chmod(0o755)
     smoke_root = tmp_path / "campaign" / "smoke-attempt"
+    _allow_test_smoke_root(monkeypatch, smoke_root)
+    monkeypatch.setattr(
+        cp,
+        "_absolute_external_tracer",
+        lambda path, *, repo_root: Path(path).resolve(strict=True),
+    )
 
-    def fake_run(command, **_kwargs):
-        if command[0] == "ldd":
-            return 0, "", ""
+    def fake_run(_command, **_kwargs):
         return 1, "", "read failed: Input/output error"
 
     monkeypatch.setattr(cp, "_run", fake_run)
+    monkeypatch.setattr(
+        cp.nvbit_runtime_env,
+        "retained_tracer_runtime_env",
+        lambda _tracer, *, base_env, pb_lib, runtime_manifest, retained_descriptor: _retained_runtime(
+            {
+                **base_env,
+                "LD_LIBRARY_PATH": str(pb_lib),
+            },
+            retained_descriptor + 1,
+        ),
+    )
     result = cp.probe_injection_runtime({
         "injection_runtime": {
             "pb_lib_relpath": "pb",
@@ -2229,9 +3103,11 @@ def test_injection_smoke_input_diagnostic_is_not_output_storage(
             "smoke_binary_relpath": "smoke",
             "smoke_shape_argv": [],
         }
-    }, repo, smoke_temp_root=smoke_root)
+    }, repo, nvbit_tracer_path=tracer, smoke_temp_root=smoke_root)
     assert result["status"] == cp.STATUS_FAILED
     assert "Input/output error" in result["smoke_stderr_tail"]
+    assert result["tracer_source_path"] == str(tracer)
+    assert result["tracer_so_sha256"] == hashlib.sha256(b"tracer").hexdigest()
     assert smoke_root.is_dir()
 
 
@@ -2304,14 +3180,11 @@ def test_generated_smoke_read_faults_are_typed(boundary, operation, tmp_path, mo
     if boundary == "root":
         path = tmp_path / "dynamic_trace.pb"
         path.write_bytes(b"trace")
-        real_read = Path.read_bytes
 
-        def fail_read(candidate):
-            if candidate == path:
-                raise OSError(error_number, "injected root read failure")
-            return real_read(candidate)
+        def fail_admission(_trace_dir):
+            raise OSError(error_number, "injected root read failure")
 
-        monkeypatch.setattr(Path, "read_bytes", fail_read)
+        monkeypatch.setattr(cp, "require_trace_admission", fail_admission)
         call = lambda: cp._validate_root_trace(path, tmp_path)
     elif boundary == "stats":
         path = tmp_path / "stats.csv"
@@ -2326,6 +3199,7 @@ def test_generated_smoke_read_faults_are_typed(boundary, operation, tmp_path, mo
         monkeypatch.setattr(Path, "open", fail_open)
         call = lambda: cp._parse_stats_admission_details(path)
     elif boundary == "validator":
+        monkeypatch.syspath_prepend(str(_REPO / "tools" / "nvbit_tracer"))
         import import_trace_contract
         monkeypatch.setattr(
             import_trace_contract, "validate_trace_dir",
@@ -2357,6 +3231,8 @@ def test_preflight_main_emits_one_machine_parseable_storage_marker(
     pins.write_text("{}\n")
     output = tmp_path / "manifest.json"
     smoke_root = tmp_path / "smoke"
+    tracer = tmp_path / "external-tracer.so"
+    tracer.write_bytes(b"tracer")
     monkeypatch.setattr(
         cp, "_campaign_output_plan",
         lambda **_kwargs: (
@@ -2378,6 +3254,7 @@ def test_preflight_main_emits_one_machine_parseable_storage_marker(
     assert cp.main([
         "--pins", str(pins), "--output", str(output),
         "--smoke-temp-root", str(smoke_root),
+        "--nvbit-tracer", str(tracer),
     ]) == 3
     document = cp.parse_preflight_storage_marker(capsys.readouterr().err)
     assert document is not None
@@ -2387,17 +3264,26 @@ def test_preflight_main_emits_one_machine_parseable_storage_marker(
 
 
 # ---- host integration (needs the live toolchain) --------------------------- #
-_HAVE_GPU = shutil.which("nvidia-smi") and shutil.which("ncu")
+_LIVE_NVBIT_TRACER = os.environ.get("SM86_SPLIT_NVBIT_TRACER")
+_HAVE_GPU = (
+    shutil.which("nvidia-smi")
+    and shutil.which("ncu")
+    and _LIVE_NVBIT_TRACER
+)
 
 
 @pytest.mark.hardware_evidence
-@pytest.mark.skipif(not _HAVE_GPU, reason="no live NVIDIA toolchain on this host")
+@pytest.mark.skipif(
+    not _HAVE_GPU,
+    reason="no live NVIDIA toolchain and external split-capable tracer",
+)
 def test_environment_probes_ok_on_reference_host(tmp_path):
     manifest = cp.build_manifest(
         pins_path=cp.DEFAULT_PINS,
         budget_path=cp.DEFAULT_BUDGET,
         output_root=_REPO,
         ignore_relpaths=[],
+        nvbit_tracer_path=_LIVE_NVBIT_TRACER,
     )
     jsonschema.validate(manifest, _SCHEMA)
     # Every cheap check EXCEPT the worktree (which may be dirty while these files
@@ -2413,13 +3299,18 @@ def test_environment_probes_ok_on_reference_host(tmp_path):
     # Exercise the real smoke directly even when build_manifest correctly refuses
     # to run a kernel from a dirty worktree.
     inj = cp.probe_injection_runtime(
-        json.loads(cp.DEFAULT_PINS.read_text()), _REPO)
+        json.loads(cp.DEFAULT_PINS.read_text()),
+        _REPO,
+        nvbit_tracer_path=_LIVE_NVBIT_TRACER,
+    )
     assert inj["status"] == cp.STATUS_OK, inj
     assert inj["admitted_insts"] >= 1, inj
     assert inj["validator_ok"] is True, inj
     assert inj["threadblocks_pb_count"] >= 1, inj
     assert inj["root_trace_ok"] is True, inj
-    assert inj["root_trace_contract_id"] == "sm86_addr_carry_v1", inj
+    assert inj["root_trace_contract_id"] == (
+        "sm86_addr_carry_shmem_split_v2"
+    ), inj
     assert inj["root_trace_launch_count"] >= 1, inj
     assert {1, 2, 3, 6, 8}.issubset(inj["root_trace_memory_payload_classes"])
     assert len(inj["dynamic_trace_pb_sha256"]) == 64

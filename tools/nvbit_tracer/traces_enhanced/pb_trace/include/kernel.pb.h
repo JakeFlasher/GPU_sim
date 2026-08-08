@@ -228,6 +228,8 @@ class  PROTOBUF_FUTURE_ADD_EARLY_WARN_UNUSED kernel final : public ::google::pro
     kNumberOfRegistersFieldNumber = 5,
     kSharedMemoryBaseAddressFieldNumber = 6,
     kLocalMemoryBaseAddressFieldNumber = 7,
+    kSharedMemoryStaticBytesFieldNumber = 11,
+    kSharedMemoryDynamicBytesFieldNumber = 12,
   };
   // string name = 2;
   void clear_name() ;
@@ -352,11 +354,35 @@ class  PROTOBUF_FUTURE_ADD_EARLY_WARN_UNUSED kernel final : public ::google::pro
   void _internal_set_local_memory_base_address(::int64_t value);
 
   public:
+  // optional uint32 shared_memory_static_bytes = 11;
+  [[nodiscard]] bool has_shared_memory_static_bytes()
+      const;
+  void clear_shared_memory_static_bytes() ;
+  [[nodiscard]] ::uint32_t shared_memory_static_bytes() const;
+  void set_shared_memory_static_bytes(::uint32_t value);
+
+  private:
+  ::uint32_t _internal_shared_memory_static_bytes() const;
+  void _internal_set_shared_memory_static_bytes(::uint32_t value);
+
+  public:
+  // optional uint32 shared_memory_dynamic_bytes = 12;
+  [[nodiscard]] bool has_shared_memory_dynamic_bytes()
+      const;
+  void clear_shared_memory_dynamic_bytes() ;
+  [[nodiscard]] ::uint32_t shared_memory_dynamic_bytes() const;
+  void set_shared_memory_dynamic_bytes(::uint32_t value);
+
+  private:
+  ::uint32_t _internal_shared_memory_dynamic_bytes() const;
+  void _internal_set_shared_memory_dynamic_bytes(::uint32_t value);
+
+  public:
   // @@protoc_insertion_point(class_scope:dynamic_trace.kernel)
  private:
   class _Internal;
   friend class ::google::protobuf::internal::TcParser;
-  static const ::google::protobuf::internal::TcParseTable<4, 10,
+  static const ::google::protobuf::internal::TcParseTable<4, 12,
                                    3, 41,
                                    2>
       _table_;
@@ -390,6 +416,8 @@ class  PROTOBUF_FUTURE_ADD_EARLY_WARN_UNUSED kernel final : public ::google::pro
     ::int32_t number_of_registers_;
     ::int64_t shared_memory_base_address_;
     ::int64_t local_memory_base_address_;
+    ::uint32_t shared_memory_static_bytes_;
+    ::uint32_t shared_memory_dynamic_bytes_;
     PROTOBUF_TSAN_DECLARE_MEMBER
   };
   union { Impl_ _impl_; };
@@ -906,6 +934,64 @@ inline void kernel::set_allocated_cluster_dim(::dynamic_trace::dim3d* PROTOBUF_N
 
   _impl_.cluster_dim_ = reinterpret_cast<::dynamic_trace::dim3d*>(value);
   // @@protoc_insertion_point(field_set_allocated:dynamic_trace.kernel.cluster_dim)
+}
+
+// optional uint32 shared_memory_static_bytes = 11;
+inline bool kernel::has_shared_memory_static_bytes() const {
+  bool value = CheckHasBit(_impl_._has_bits_[0], 0x00000400U);
+  return value;
+}
+inline void kernel::clear_shared_memory_static_bytes() {
+  ::google::protobuf::internal::TSanWrite(&_impl_);
+  _impl_.shared_memory_static_bytes_ = 0u;
+  ClearHasBit(_impl_._has_bits_[0],
+                  0x00000400U);
+}
+inline ::uint32_t kernel::shared_memory_static_bytes() const {
+  // @@protoc_insertion_point(field_get:dynamic_trace.kernel.shared_memory_static_bytes)
+  return _internal_shared_memory_static_bytes();
+}
+inline void kernel::set_shared_memory_static_bytes(::uint32_t value) {
+  _internal_set_shared_memory_static_bytes(value);
+  SetHasBit(_impl_._has_bits_[0], 0x00000400U);
+  // @@protoc_insertion_point(field_set:dynamic_trace.kernel.shared_memory_static_bytes)
+}
+inline ::uint32_t kernel::_internal_shared_memory_static_bytes() const {
+  ::google::protobuf::internal::TSanRead(&_impl_);
+  return _impl_.shared_memory_static_bytes_;
+}
+inline void kernel::_internal_set_shared_memory_static_bytes(::uint32_t value) {
+  ::google::protobuf::internal::TSanWrite(&_impl_);
+  _impl_.shared_memory_static_bytes_ = value;
+}
+
+// optional uint32 shared_memory_dynamic_bytes = 12;
+inline bool kernel::has_shared_memory_dynamic_bytes() const {
+  bool value = CheckHasBit(_impl_._has_bits_[0], 0x00000800U);
+  return value;
+}
+inline void kernel::clear_shared_memory_dynamic_bytes() {
+  ::google::protobuf::internal::TSanWrite(&_impl_);
+  _impl_.shared_memory_dynamic_bytes_ = 0u;
+  ClearHasBit(_impl_._has_bits_[0],
+                  0x00000800U);
+}
+inline ::uint32_t kernel::shared_memory_dynamic_bytes() const {
+  // @@protoc_insertion_point(field_get:dynamic_trace.kernel.shared_memory_dynamic_bytes)
+  return _internal_shared_memory_dynamic_bytes();
+}
+inline void kernel::set_shared_memory_dynamic_bytes(::uint32_t value) {
+  _internal_set_shared_memory_dynamic_bytes(value);
+  SetHasBit(_impl_._has_bits_[0], 0x00000800U);
+  // @@protoc_insertion_point(field_set:dynamic_trace.kernel.shared_memory_dynamic_bytes)
+}
+inline ::uint32_t kernel::_internal_shared_memory_dynamic_bytes() const {
+  ::google::protobuf::internal::TSanRead(&_impl_);
+  return _impl_.shared_memory_dynamic_bytes_;
+}
+inline void kernel::_internal_set_shared_memory_dynamic_bytes(::uint32_t value) {
+  ::google::protobuf::internal::TSanWrite(&_impl_);
+  _impl_.shared_memory_dynamic_bytes_ = value;
 }
 
 #ifdef __GNUC__

@@ -2,8 +2,10 @@
 from __future__ import annotations
 
 from pathlib import Path
+import json
 import socket
 import subprocess
+import sys
 from types import SimpleNamespace
 
 import pytest
@@ -12,6 +14,7 @@ from tools.local_labels import immutable_artifact as immutable
 from tools.local_labels import ncu_action_executor
 from tools.trace_sampling.golden_cells import golden_capture_lock
 from tools.trace_sampling.golden_cells import golden_ncu_receipt
+from tools.trace_sampling.golden_cells import retained_golden_publication
 from tools.trace_sampling.golden_cells import retained_nvbit_launch
 from tools.trace_sampling.golden_cells import retained_nvcc_compile
 from tools.trace_sampling.golden_cells import golden_ncu_capture as golden
@@ -23,8 +26,62 @@ CSV = (
 ).encode()
 
 
+def _trace_launch(
+    *,
+    kernel_name: str = "_Z15syntheticKernelv___0",
+    grid_dim: tuple[int, int, int] = (36864, 1, 1),
+    block_dim: tuple[int, int, int] = (1024, 1, 1),
+) -> SimpleNamespace:
+    return SimpleNamespace(
+        launch_index=0,
+        device_id=0,
+        stream_id=0,
+        kernel_id=1,
+        kernel_name=kernel_name,
+        grid_x=grid_dim[0],
+        grid_y=grid_dim[1],
+        grid_z=grid_dim[2],
+        block_x=block_dim[0],
+        block_y=block_dim[1],
+        block_z=block_dim[2],
+    )
+
+
+def _trace_admission_fixture(
+    *, launches: tuple[SimpleNamespace, ...] | None = None,
+) -> SimpleNamespace:
+    selected = (_trace_launch(),) if launches is None else launches
+    return SimpleNamespace(
+        launch_count=1,
+        threadblock_count=1,
+        instruction_count=1,
+        expected_record_count=1,
+        admitted_record_count=1,
+        launches=selected,
+    )
+
+
+def _launch_observation(csv_payload: bytes = CSV) -> dict[str, object]:
+    report_sha256 = golden._sha256_bytes(csv_payload)
+    document = golden.parse_ncu_metrics.build_launch_observation_document(
+        csv_text=csv_payload.decode(),
+        report_sha256=report_sha256,
+        requested_launch_skip=0,
+        requested_launch_count=1,
+    )
+    golden.parse_ncu_metrics.validate_launch_observation_document(
+        document,
+        requested_launch_skip=0,
+        requested_launch_count=1,
+        report_sha256=report_sha256,
+    )
+    return document
+
+
 def _paths(tmp_path: Path) -> dict[str, Path]:
-    cell = tmp_path / "results" / "nvbit_capture_staging" / "golden_cells" / "gs_stream_copy"
+    root = tmp_path / "results" / "nvbit_capture_staging" / "golden_cells"
+    cell = root / f"gs_stream_copy.staged.1.{('a' * 32)}"
+    published_cell = root / "gs_stream_copy"
     cell.mkdir(parents=True)
     binary = cell / "gs_stream_copy.bin"
     binary.write_bytes(b"#!/bin/sh\nexit 0\n")
@@ -42,14 +99,44 @@ def _paths(tmp_path: Path) -> dict[str, Path]:
         "run": cell / "ncu_run_manifest.json.staged.1",
         "capture": cell / "ncu_capture_manifest.json.staged.1",
         "receipt": cell / "ncu_collection_receipt.json.staged.1",
-        "published_trace": cell / "trace",
-        "published_csv": cell / "ncu_l2.csv",
-        "published_stderr": cell / "ncu_l2.stderr",
-        "published_observation": cell / "ncu_launch_observation.json",
-        "published_run": cell / "ncu_run_manifest.json",
-        "published_capture": cell / "ncu_capture_manifest.json",
-        "published_receipt": cell / "ncu_collection_receipt.json",
+        "published_binary": published_cell / "gs_stream_copy.bin",
+        "published_trace": published_cell / "trace",
+        "published_csv": published_cell / "ncu_l2.csv",
+        "published_stderr": published_cell / "ncu_l2.stderr",
+        "published_observation": published_cell / "ncu_launch_observation.json",
+        "published_run": published_cell / "ncu_run_manifest.json",
+        "published_capture": published_cell / "ncu_capture_manifest.json",
+        "published_receipt": published_cell / "ncu_collection_receipt.json",
     }
+
+
+def _publication_root(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> Path:
+    root = tmp_path / "results" / "nvbit_capture_staging" / "golden_cells"
+    root.mkdir(parents=True)
+    monkeypatch.setattr(retained_golden_publication, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(retained_golden_publication, "_GOLDEN_ROOT", root)
+    return root
+
+
+def _write_nvbit_generation_handoff(trace_dir: Path) -> bytes:
+    metadata = trace_dir.stat()
+    document = immutable.seal_model(
+        {
+            "schema_version": 1,
+            "artifact_kind": "golden_nvbit_launch_attempt",
+            "status": "succeeded",
+            "trace_generation": {
+                "device": metadata.st_dev,
+                "inode": metadata.st_ino,
+            },
+        },
+        field="attempt_seal_sha256",
+    )
+    payload = immutable.canonical_json_bytes(document)
+    (trace_dir / "nvbit_launch_attempt.json").write_bytes(payload)
+    return payload
 
 
 def test_shell_routes_ncu_through_preflight_bound_adapter() -> None:
@@ -67,12 +154,33 @@ def test_shell_routes_ncu_through_preflight_bound_adapter() -> None:
     assert "--validate-only" in script
     assert "publish_target_check" in script
     assert "verify_published_receipt" in script
+    assert "golden_ncu_capture._trace_admission_model" in script
+    assert "parse_ncu_metrics.validate_launch_observation_document" in script
+    assert "golden_ncu_capture._bind_ncu_observation_to_trace" in script
+    assert "published golden NCU/trace launch binding differs" in script
     assert "publish_target_check \"$bin\" binary" in script
-    assert script.index('publish_target_check "$bin" binary') < script.index('retained_nvcc_compile.py')
+    assert script.index('publish_target_check "$bin" binary') < script.index(
+        "retained_nvcc_compile.py"
+    )
     assert "reject_ambient_cuda_selectors" in script
     assert "resolve_admitted_toolchain" in script
     assert "retained_nvcc_compile.py" in script
+    assert '--source "$cu" --preflight "$PREFLIGHT"' in script
+    assert '--preflight-sha256 "$PREFLIGHT_SHA256" --output' in script
     assert "retained_nvbit_launch.py" in script
+    assert "retained_golden_publication.py" in script
+    assert "secrets.token_hex(16)" in script
+    assert 'cell="$GOLDEN/${slug}.staged.${ATTEMPT_ID}"' in script
+    assert 'ncu_csv=""; ncu_stderr=""; ncu_observation=""' in script
+    assert "process-cell" in script
+    assert "commit-cell --stage" not in script
+    assert 'trace_admission.py" "$staged"' not in script
+    assert "tools/nvbit_tracer/tracer_tool/tracer_tool.so" not in script
+    assert 'injection["tracer_source_path"]' in script
+    assert "external_non_git_retained_descriptor_v1" in script
+    assert "--tracer-source-kind" in script
+    assert 'if (( ! PLAN_ONLY )) && [[ -z "$PREFLIGHT"' in script
+    assert "runtime_env.py" not in script
     assert "publish_directory" in script
     assert "publish_regular_file" in script
     assert "golden_capture_lock.py" in script
@@ -145,7 +253,7 @@ def test_capture_lock_refuses_startup_injection_and_builds_closed_environment(
 
 def test_retained_helpers_reject_final_publication_destinations() -> None:
     cell = golden.STAGING_ROOT / "golden_cells" / "gs_stream_copy"
-    with pytest.raises(retained_nvcc_compile.RetainedNvccError, match="staged"):
+    with pytest.raises(retained_nvcc_compile.RetainedNvccError, match="attempt cell"):
         retained_nvcc_compile._require_staging_output(
             cell / "gs_stream_copy.bin",
         )
@@ -153,11 +261,216 @@ def test_retained_helpers_reject_final_publication_destinations() -> None:
         retained_nvbit_launch._require_staging_trace(cell / "trace")
 
 
+def test_retained_compiler_accepts_only_nonce_attempt_cell_output() -> None:
+    root = retained_nvcc_compile._GOLDEN_STAGING_ROOT / "golden_cells"
+    attempt = root / f"gs_stream_copy.staged.17.{('a' * 32)}"
+    output = attempt / "gs_stream_copy.bin.staged.17"
+    assert retained_nvcc_compile._require_staging_output(output) == output
+    source = Path(retained_nvcc_compile.__file__).read_text(encoding="utf-8")
+    assert "ulimit -f" in source
+    assert retained_nvcc_compile._MAX_BINARY_BYTES == 1024 * 1024 * 1024
+
+
+def test_retained_compiler_file_size_launcher_enforces_limit(
+    tmp_path: Path,
+) -> None:
+    output = tmp_path / "bounded-output"
+    program = (
+        "import os; "
+        f"fd=os.open({str(output)!r}, os.O_WRONLY|os.O_CREAT, 0o600); "
+        "written=os.write(fd, b'x' * 4096); "
+        "raise SystemExit(0 if written == 4096 else 3)"
+    )
+    command = retained_nvcc_compile._file_size_limited_command(
+        bash_executable=str(retained_nvcc_compile._RETAINED_BASH),
+        target_executable=sys.executable,
+        target_arguments=("-I", "-S", "-c", program),
+        max_file_blocks=1,
+    )
+    result = subprocess.run(
+        command,
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        env={"LANG": "C", "LC_ALL": "C", "PATH": "/bin:/usr/bin"},
+        cwd="/",
+    )
+    assert result.returncode != 0
+    assert output.stat().st_size <= 1024
+
+
+def test_retained_compiler_rejects_legacy_preflight_schema() -> None:
+    class LegacyPreflight:
+        def read_bytes(self):
+            return json.dumps({
+                "schema_version": 3,
+                "git_head": "a" * 40,
+                "working_tree_clean": True,
+                "capture_admitted": True,
+            }).encode()
+
+        def verify_unchanged(self):
+            return None
+
+    class UnusedSource:
+        def verify_unchanged(self):
+            return None
+
+    with pytest.raises(
+        retained_nvcc_compile.RetainedNvccError,
+        match="requires preflight schema_version 4",
+    ):
+        retained_nvcc_compile._require_preflight_source_authority(
+            preflight=LegacyPreflight(),
+            source=UnusedSource(),
+            retained_git=object(),
+        )
+
+
+def test_retained_compiler_binds_source_to_preflight_clean_head_bytes() -> None:
+    source_path = (
+        retained_nvcc_compile.REPO_ROOT
+        / "tools"
+        / "trace_sampling"
+        / "golden_cells"
+        / "gs_stream_copy.cu"
+    )
+    head = subprocess.run(
+        ("/usr/bin/git", "-C", str(retained_nvcc_compile.REPO_ROOT),
+         "rev-parse", "--verify", "HEAD"),
+        check=True,
+        capture_output=True,
+        text=True,
+        env={"LANG": "C", "LC_ALL": "C", "PATH": "/usr/bin:/bin"},
+    ).stdout.strip()
+    preflight_payload = json.dumps({
+        "schema_version": 4,
+        "git_head": head,
+        "working_tree_clean": True,
+        "capture_admitted": True,
+    }).encode()
+
+    class FakePreflight:
+        def read_bytes(self):
+            return preflight_payload
+
+        def verify_unchanged(self):
+            return None
+
+    class AlteredSource:
+        path = source_path
+
+        def read_bytes(self):
+            return b"altered source bytes\n"
+
+        def verify_unchanged(self):
+            return None
+
+    with immutable.open_retained_executable(
+        Path("/usr/bin/git")
+    ) as retained_git:
+        with immutable.open_retained_regular(source_path) as retained_source:
+            assert retained_nvcc_compile._require_preflight_source_authority(
+                preflight=FakePreflight(),
+                source=retained_source,
+                retained_git=retained_git,
+            ) == head
+        with pytest.raises(
+            retained_nvcc_compile.RetainedNvccError,
+            match="differs from preflight clean-HEAD bytes",
+        ):
+            retained_nvcc_compile._require_preflight_source_authority(
+                preflight=FakePreflight(),
+                source=AlteredSource(),
+                retained_git=retained_git,
+            )
+
+
+def test_golden_ncu_rejects_visible_cell_as_staging(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    root = tmp_path / "results" / "nvbit_capture_staging" / "golden_cells"
+    cell = root / "gs_stream_copy"
+    cell.mkdir(parents=True)
+    monkeypatch.setattr(
+        golden, "STAGING_ROOT", tmp_path / "results" / "nvbit_capture_staging",
+    )
+    with pytest.raises(golden.GoldenNcuCaptureError, match="selected cell"):
+        golden._validate_cell_paths(
+            slug="gs_stream_copy",
+            binary=cell / "gs_stream_copy.bin",
+            published_binary=cell / "gs_stream_copy.bin",
+            trace_dir=cell / "trace.staged.1",
+            published_trace_dir=cell / "trace",
+            staged_artifacts=(),
+            published_artifacts=(),
+        )
+
+
+def test_publication_helper_rejects_paths_outside_golden_root(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    root = _publication_root(monkeypatch, tmp_path)
+    final = root / "gs_stream_copy"
+    outside = tmp_path / f"gs_stream_copy.staged.19.{('b' * 32)}"
+    with pytest.raises(
+        retained_golden_publication.GoldenPublicationError,
+        match="escapes guarded staging",
+    ):
+        retained_golden_publication.prepare_cell_stage(outside, final)
+
+
+def test_process_trace_cli_does_not_require_ncu_arguments(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    staged = tmp_path / "trace.staged.1"
+    published = tmp_path / "trace"
+    calls: list[tuple[Path, Path, object, object]] = []
+    monkeypatch.setattr(
+        retained_golden_publication,
+        "process_trace_generation",
+        lambda source, destination, *, derive_ncu, prepare_handoff: calls.append(
+            (source, destination, derive_ncu, prepare_handoff)
+        ),
+    )
+    cell_stage = tmp_path / "gs_stream_copy.staged.1" / "cell"
+    cell_final = tmp_path / "gs_stream_copy"
+    assert retained_golden_publication.main([
+        "process-cell", "--staged-trace", str(staged),
+        "--trace-out", str(published),
+        "--cell-stage", str(cell_stage),
+        "--cell-final", str(cell_final),
+    ]) == 0
+    assert len(calls) == 1
+    assert calls[0][:3] == (staged, published, None)
+    assert callable(calls[0][3])
+
+
 def test_preflight_hash_mismatch_refuses_before_schema_or_capture(tmp_path: Path) -> None:
     path = tmp_path / "preflight.json"
     path.write_text("{}", encoding="utf-8")
     with pytest.raises(golden.GoldenNcuCaptureError, match="SHA-256 mismatch"):
         golden._load_preflight(path, expected_sha256="0" * 64)
+
+
+def test_live_golden_collection_pins_active_preflight_v4_schema() -> None:
+    payload = golden.PREFLIGHT_SCHEMA.read_bytes()
+    schema = immutable.strict_json_loads(payload, label="preflight schema")
+    assert golden._sha256_bytes(payload) == golden.PREFLIGHT_SCHEMA_SHA256
+    assert schema["properties"]["schema_version"]["const"] == 4
+
+
+def test_live_golden_collection_rejects_historical_v3_preflight(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "preflight.json"
+    path.write_text('{"schema_version":3}\n', encoding="utf-8")
+    with pytest.raises(
+        golden.GoldenNcuCaptureError,
+        match="live golden collection requires preflight schema_version 4",
+    ):
+        golden._load_preflight(
+            path, expected_sha256=golden._sha256_file(path),
+        )
 
 
 def test_checkout_validation_ignores_ambient_fake_git(
@@ -205,6 +518,91 @@ def test_writable_target_mode_is_refused_before_ncu(tmp_path: Path) -> None:
             golden._retained_target_mode(retained)
 
 
+def test_trace_admission_rejects_vacuous_count_only_launch_inventory() -> None:
+    with pytest.raises(
+        golden.GoldenNcuCaptureError,
+        match="exactly one admitted launch",
+    ):
+        golden._trace_admission_model(
+            _trace_admission_fixture(launches=()),
+        )
+
+
+def test_exact_ncu_and_admitted_trace_launch_binding_passes() -> None:
+    trace_model = golden._trace_admission_model(_trace_admission_fixture())
+
+    binding = golden._bind_ncu_observation_to_trace(
+        _launch_observation(),
+        trace_model,
+        slug="gs_stream_copy",
+    )
+
+    assert binding["ncu_observation"]["kernel_name"] == (
+        golden._nvbit_kernel_base(
+            binding["admitted_trace_launch"]["kernel_name"]
+        )
+    )
+    assert binding["ncu_observation"]["grid_dim"] == [36864, 1, 1]
+    assert binding["ncu_observation"]["block_dim"] == [1024, 1, 1]
+
+
+@pytest.mark.parametrize(
+    ("trace_launch", "match"),
+    (
+        (_trace_launch(kernel_name="_Z17differentKernelv___0"), "kernel_name"),
+        (
+            _trace_launch(grid_dim=(18432, 2, 1)),
+            "grid_dim",
+        ),
+        (
+            _trace_launch(block_dim=(512, 2, 1)),
+            "block_dim",
+        ),
+    ),
+    ids=("kernel", "same-product-grid", "same-product-block"),
+)
+def test_ncu_binding_rejects_wrong_kernel_or_nonexact_geometry(
+    trace_launch: SimpleNamespace,
+    match: str,
+) -> None:
+    trace_model = golden._trace_admission_model(
+        _trace_admission_fixture(launches=(trace_launch,)),
+    )
+
+    with pytest.raises(
+        golden.GoldenNcuCaptureError,
+        match=r"differs from exact admitted trace launch",
+    ) as failure:
+        golden._bind_ncu_observation_to_trace(
+            _launch_observation(),
+            trace_model,
+            slug="gs_stream_copy",
+        )
+    assert match in str(failure.value)
+
+
+@pytest.mark.parametrize(
+    "kernel_name",
+    ("_Z15syntheticKernelv", "_Z15syntheticKernelv___1"),
+    ids=("missing-suffix", "ambiguous-variant"),
+)
+def test_ncu_binding_requires_unique_nvbit_variant_zero(
+    kernel_name: str,
+) -> None:
+    trace_model = golden._trace_admission_model(
+        _trace_admission_fixture(
+            launches=(_trace_launch(kernel_name=kernel_name),)
+        )
+    )
+
+    with pytest.raises(golden.GoldenNcuCaptureError, match="NVBit kernel"):
+        golden._bind_ncu_observation_to_trace(
+            _launch_observation(),
+            trace_model,
+            slug="gs_stream_copy",
+        )
+
+
 def test_missing_preflight_refuses_before_ncu_side_effect(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
 ) -> None:
@@ -231,6 +629,7 @@ def test_missing_preflight_refuses_before_ncu_side_effect(
             run_manifest_out=paths["run"],
             capture_manifest_out=paths["capture"],
             receipt_out=paths["receipt"],
+            published_binary=paths["published_binary"],
             published_trace_dir=paths["published_trace"],
             published_csv_out=paths["published_csv"],
             published_stderr_out=paths["published_stderr"],
@@ -260,18 +659,12 @@ def test_collection_binds_identity_controls_and_published_artifacts(
     monkeypatch.setattr(
         golden,
         "_load_preflight",
-        lambda path, expected_sha256: ("b" * 64, identity, {"schema_version": 3}),
+        lambda path, expected_sha256: ("b" * 64, identity, {"schema_version": 4}),
     )
     monkeypatch.setattr(
         golden.trace_admission,
         "require_trace_admission",
-        lambda _trace: SimpleNamespace(
-            launch_count=1,
-            threadblock_count=1,
-            instruction_count=1,
-            expected_record_count=1,
-            admitted_record_count=1,
-        ),
+        lambda _trace: _trace_admission_fixture(),
     )
     calls: list[tuple[object, ...]] = []
 
@@ -292,11 +685,12 @@ def test_collection_binds_identity_controls_and_published_artifacts(
         ))
         assert require_cgroup_containment is True
         assert expected == identity
-        assert tuple(arguments[:12]) == (
+        assert tuple(arguments[:14]) == (
             "--metrics", golden.GOLDEN_METRIC,
             "--clock-control", "none",
             "--cache-control", "all",
             "--replay-mode", "kernel",
+            "--kernel-name-base", "mangled",
             "--launch-count", "1",
             "--csv", "--",
         )
@@ -318,6 +712,7 @@ def test_collection_binds_identity_controls_and_published_artifacts(
         run_manifest_out=paths["run"],
         capture_manifest_out=paths["capture"],
         receipt_out=paths["receipt"],
+        published_binary=paths["published_binary"],
         published_trace_dir=paths["published_trace"],
         published_csv_out=paths["published_csv"],
         published_stderr_out=paths["published_stderr"],
@@ -342,6 +737,27 @@ def test_collection_binds_identity_controls_and_published_artifacts(
     assert receipt["target_binary"]["mode"] == "0555"
     assert receipt["target_argument_binding"]["target_mode"] == "0555"
     assert receipt["trace_admission"]["admitted_record_count"] == 1
+    assert receipt["trace_admission"]["launches"] == [{
+        "launch_index": 0,
+        "device_id": 0,
+        "stream_id": 0,
+        "kernel_id": 1,
+        "kernel_name": "_Z15syntheticKernelv___0",
+        "grid_dim": [36864, 1, 1],
+        "block_dim": [1024, 1, 1],
+    }]
+    assert receipt["launch_binding"]["ncu_observation"] == {
+        "report_launch_id": "1",
+        "device_id": 0,
+        "kernel_name": "_Z15syntheticKernelv",
+        "grid_dim": [36864, 1, 1],
+        "block_dim": [1024, 1, 1],
+    }
+    assert receipt["launch_binding"]["admitted_trace_launch"] == (
+        receipt["trace_admission"]["launches"][0]
+    )
+    assert receipt["schema_version"] == 2
+    assert receipt["kind"] == "golden_ncu_collection_receipt_v2"
     assert receipt["trace_tree_bytes"] == len(b"trace fixture")
     assert receipt["launch_controls"]["launch_count"] == 1
     broken = dict(receipt)
@@ -363,6 +779,28 @@ def test_collection_binds_identity_controls_and_published_artifacts(
     with pytest.raises(golden_ncu_receipt.GoldenReceiptError, match="binding"):
         golden_ncu_receipt.validate_intrinsic_receipt(
             immutable.seal_model(writable_target, "receipt_seal_sha256")
+        )
+    mismatched_launch = json.loads(json.dumps(receipt))
+    mismatched_launch["launch_binding"]["ncu_observation"][
+        "kernel_name"
+    ] = "_Z17differentKernelv"
+    mismatched_launch.pop("receipt_seal_sha256")
+    with pytest.raises(
+        golden_ncu_receipt.GoldenReceiptError,
+        match="observation differs from admitted trace launch",
+    ):
+        golden_ncu_receipt.validate_intrinsic_receipt(
+            immutable.seal_model(mismatched_launch, "receipt_seal_sha256")
+        )
+    counts_only = json.loads(json.dumps(receipt))
+    counts_only["trace_admission"].pop("launches")
+    counts_only.pop("receipt_seal_sha256")
+    with pytest.raises(
+        golden_ncu_receipt.GoldenReceiptError,
+        match="trace admission fields differ",
+    ):
+        golden_ncu_receipt.validate_intrinsic_receipt(
+            immutable.seal_model(counts_only, "receipt_seal_sha256")
         )
     assert paths["csv"].read_bytes() == CSV
     assert paths["run"].exists() and paths["capture"].exists()
@@ -390,3 +828,244 @@ def test_details_csv_payload_strips_recognized_preamble() -> None:
 def test_details_csv_payload_rejects_unrecognized_preamble() -> None:
     with pytest.raises(golden.GoldenNcuCaptureError, match="unexpected preamble"):
         golden._details_csv_payload(b"unexpected\n" + CSV)
+
+
+def test_retained_trace_generation_rejects_staged_tree_replacement(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    root = _publication_root(monkeypatch, tmp_path)
+    cell = root / f"gs_stream_copy.staged.11.{('b' * 32)}"
+    cell.mkdir()
+    staged = cell / "trace.staged.1"
+    staged.mkdir()
+    (staged / "payload").write_bytes(b"admitted")
+    _write_nvbit_generation_handoff(staged)
+    published = cell / "trace"
+    displaced = cell / "displaced"
+    admission = SimpleNamespace(
+        trace_admission_sha256="a" * 64,
+        launch_count=1,
+        threadblock_count=1,
+        instruction_count=1,
+        expected_record_count=1,
+        admitted_record_count=1,
+    )
+    monkeypatch.setattr(
+        retained_golden_publication.trace_admission,
+        "require_trace_admission",
+        lambda _path: admission,
+    )
+
+    def replace_generation(_trace: Path) -> None:
+        staged.rename(displaced)
+        staged.mkdir()
+        (staged / "payload").write_bytes(b"admitted")
+
+    with pytest.raises(immutable.ImmutableArtifactError):
+        retained_golden_publication.process_trace_generation(
+            staged,
+            published,
+            derive_ncu=replace_generation,
+        )
+    assert not published.exists()
+    assert (displaced / "payload").read_bytes() == b"admitted"
+    assert (staged / "payload").read_bytes() == b"admitted"
+
+
+def test_launch_handoff_rejects_replacement_before_publication_process(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    root = _publication_root(monkeypatch, tmp_path)
+    cell = root / f"gs_stream_copy.staged.15.{('f' * 32)}"
+    cell.mkdir()
+    staged = cell / "trace.staged.1"
+    staged.mkdir()
+    (staged / "payload").write_bytes(b"captured")
+    handoff_payload = _write_nvbit_generation_handoff(staged)
+    displaced = cell / "captured-generation"
+    staged.rename(displaced)
+    staged.mkdir()
+    (staged / "payload").write_bytes(b"replacement")
+    (staged / "nvbit_launch_attempt.json").write_bytes(handoff_payload)
+
+    with pytest.raises(
+        retained_golden_publication.GoldenPublicationError,
+        match="differs from the NVBit launch handoff",
+    ):
+        retained_golden_publication.process_trace_generation(
+            staged,
+            cell / "trace",
+        )
+    assert not (cell / "trace").exists()
+    assert (displaced / "payload").read_bytes() == b"captured"
+    assert (staged / "payload").read_bytes() == b"replacement"
+
+
+def test_retained_trace_generation_relocates_exact_admitted_inode(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    root = _publication_root(monkeypatch, tmp_path)
+    cell = root / f"gs_stream_copy.staged.12.{('c' * 32)}"
+    cell.mkdir()
+    staged = cell / "trace.staged.1"
+    staged.mkdir()
+    payload = staged / "payload"
+    payload.write_bytes(b"admitted")
+    _write_nvbit_generation_handoff(staged)
+    source_inode = staged.stat().st_ino
+    admission = SimpleNamespace(
+        trace_admission_sha256="b" * 64,
+        launch_count=1,
+        threadblock_count=1,
+        instruction_count=1,
+        expected_record_count=1,
+        admitted_record_count=1,
+    )
+    monkeypatch.setattr(
+        retained_golden_publication.trace_admission,
+        "require_trace_admission",
+        lambda _path: admission,
+    )
+    published = cell / "trace"
+    retained_golden_publication.process_trace_generation(staged, published)
+    assert not staged.exists()
+    assert published.stat().st_ino == source_inode
+    assert (published / "payload").read_bytes() == b"admitted"
+
+
+def test_cell_handoff_rejects_trace_replacement_before_final_commit(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    root = _publication_root(monkeypatch, tmp_path)
+    cell = root / f"gs_stream_copy.staged.13.{('d' * 32)}"
+    final = root / "gs_stream_copy"
+    retained_golden_publication.prepare_cell_stage(cell, final)
+    staged = cell / "trace.staged.1"
+    staged.mkdir()
+    (staged / "payload").write_bytes(b"admitted")
+    _write_nvbit_generation_handoff(staged)
+    published = cell / "trace"
+    admission = SimpleNamespace(
+        trace_admission_sha256="c" * 64,
+        launch_count=1,
+        threadblock_count=1,
+        instruction_count=1,
+        expected_record_count=1,
+        admitted_record_count=1,
+    )
+    monkeypatch.setattr(
+        retained_golden_publication.trace_admission,
+        "require_trace_admission",
+        lambda _path: admission,
+    )
+    displaced = cell / "displaced-trace"
+
+    def prepare(trace_descriptor: int):
+        handoff = retained_golden_publication._CellCommitHandoff.open(
+            cell,
+            final,
+            expected_trace_descriptor=trace_descriptor,
+        )
+        complete = handoff.complete
+
+        def replace_then_complete() -> None:
+            published.rename(displaced)
+            published.mkdir()
+            (published / "payload").write_bytes(b"admitted")
+            complete()
+
+        handoff.complete = replace_then_complete
+        return handoff
+
+    with pytest.raises(
+        retained_golden_publication.GoldenPublicationError,
+        match="trace identity changed",
+    ):
+        retained_golden_publication.process_trace_generation(
+            staged,
+            published,
+            prepare_handoff=prepare,
+        )
+    assert not final.exists()
+    assert (displaced / "payload").read_bytes() == b"admitted"
+    assert (published / "payload").read_bytes() == b"admitted"
+
+
+def test_cell_handoff_publishes_derived_artifacts_before_atomic_commit(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    root = _publication_root(monkeypatch, tmp_path)
+    cell = root / f"gs_stream_copy.staged.14.{('e' * 32)}"
+    final = root / "gs_stream_copy"
+    retained_golden_publication.prepare_cell_stage(cell, final)
+    trace = cell / "trace"
+    trace.mkdir()
+    (trace / "payload").write_bytes(b"admitted")
+    staged_report = cell / "ncu_l2.csv.staged.1"
+    staged_report.write_bytes(b"report")
+    report = cell / "ncu_l2.csv"
+    with immutable.PinnedDirectoryReader(trace) as trace_reader:
+        handoff = retained_golden_publication._CellCommitHandoff.open(
+            cell,
+            final,
+            expected_trace_descriptor=trace_reader.descriptor,
+            artifacts=((staged_report, report),),
+        )
+    try:
+        handoff.complete()
+    finally:
+        handoff.close()
+    assert (final / "trace" / "payload").read_bytes() == b"admitted"
+    assert (final / "ncu_l2.csv").read_bytes() == b"report"
+    assert (final / "ncu_l2.csv.staged.1").read_bytes() == b"report"
+
+
+def test_full_cell_commit_crash_retains_attempt_and_retry_can_publish(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    root = _publication_root(monkeypatch, tmp_path)
+    final = root / "gs_stream_copy"
+    first = root / f"gs_stream_copy.staged.101.{('d' * 32)}"
+    second = root / f"gs_stream_copy.staged.102.{('e' * 32)}"
+    retained_golden_publication.prepare_cell_stage(first, final)
+    (first / "trace").mkdir()
+    (first / "trace" / "payload").write_bytes(b"first-trace")
+    (first / "receipt").write_bytes(b"first-attempt")
+    real_rename = immutable._rename_noreplace_at
+
+    def crash_before_commit(*_args) -> None:
+        raise KeyboardInterrupt("injected pre-commit crash")
+
+    monkeypatch.setattr(immutable, "_rename_noreplace_at", crash_before_commit)
+    with pytest.raises(KeyboardInterrupt, match="injected pre-commit crash"):
+        retained_golden_publication.commit_cell_stage(first, final)
+    assert first.is_dir()
+    assert not final.exists()
+
+    monkeypatch.setattr(immutable, "_rename_noreplace_at", real_rename)
+    retained_golden_publication.prepare_cell_stage(second, final)
+    (second / "trace").mkdir()
+    (second / "trace" / "payload").write_bytes(b"retry-trace")
+    (second / "receipt").write_bytes(b"retry-attempt")
+    retained_golden_publication.commit_cell_stage(second, final)
+    assert (final / "receipt").read_bytes() == b"retry-attempt"
+    assert first.is_dir()
+    assert not second.exists()
+
+
+def test_full_cell_commit_never_replaces_existing_final(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    root = _publication_root(monkeypatch, tmp_path)
+    final = root / "gs_stream_copy"
+    stage = root / f"gs_stream_copy.staged.103.{('f' * 32)}"
+    retained_golden_publication.prepare_cell_stage(stage, final)
+    (stage / "trace").mkdir()
+    (stage / "trace" / "payload").write_bytes(b"candidate-trace")
+    (stage / "receipt").write_bytes(b"candidate")
+    final.mkdir()
+    (final / "receipt").write_bytes(b"winner")
+    with pytest.raises(FileExistsError):
+        retained_golden_publication.commit_cell_stage(stage, final)
+    assert (final / "receipt").read_bytes() == b"winner"
+    assert (stage / "receipt").read_bytes() == b"candidate"

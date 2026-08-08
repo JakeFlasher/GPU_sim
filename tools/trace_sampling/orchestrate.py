@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import subprocess
 import sys
 from contextlib import ExitStack, contextmanager
 from pathlib import Path
@@ -38,24 +37,36 @@ if str(_REPO) not in sys.path:
 from tools.local_labels.immutable_artifact import (  # noqa: E402
     ImmutableArtifactError,
     ImmutableArtifactResourceError,
+    PinnedDirectoryReader,
     RetainedExecutable,
     RetainedRegular,
     open_retained_executable,
     open_retained_regular,
+    publish_regular_file,
     retire_regular_file,
     salvage_retained_regular_descriptor,
+    write_regular_bytes_at,
 )
+from tools.nvbit_tracer import capture_process as nvbit_process  # noqa: E402
 from tools.nvbit_tracer.proto_binding_loader import (  # noqa: E402
     load_dynamic_trace_bindings,
 )
+from tools.nvbit_tracer.external_tracer import (  # noqa: E402
+    EXTERNAL_TRACER_MAX_BYTES,
+)
 from tools.nvbit_tracer.runtime_env import (  # noqa: E402
     TracerRuntimeError,
-    tracer_runtime_env,
+    default_runtime_manifest_path,
+    retained_tracer_runtime_env,
 )
 
 DEFAULT_TRACER_SO = _REPO / "tools" / "nvbit_tracer" / "tracer_tool" / "tracer_tool.so"
 DEFAULT_PB_LIB = _REPO / ".toolchain" / "pb" / "lib"
 CAPTURE_SIDECAR = Path("extra_info") / "trace_sampling_capture.json"
+_PASS_TIMEOUT_SECONDS = 60 * 60
+_PASS_MAX_STDOUT_STDERR_BYTES = 8 * 1024 * 1024
+_PASS_TIMEOUT_CODE = "sampling_target_timeout"
+_PASS_LAUNCH_CODE = "sampling_target_launch_failed"
 
 
 class SamplingRefusal(RuntimeError):
@@ -65,6 +76,10 @@ class SamplingRefusal(RuntimeError):
         self.reason = reason
         self.detail = detail
         self.evidence_state: str | None = None
+        self.stdout = b""
+        self.stderr = b""
+        self.process_id: int | None = None
+        self.failure_evidence: tuple[dict[str, object], ...] = ()
         super().__init__(f"{reason}: {detail}" if detail else reason)
 
 
@@ -99,6 +114,26 @@ def _require_sampling_inputs_unchanged(
     except (ImmutableArtifactError, OSError) as exc:
         raise SamplingRefusal(
             "sampling_input_invalid",
+            f"{type(exc).__name__}: {exc}",
+        ) from exc
+
+
+def _require_sampling_outputs_unchanged(
+    retained_outputs: list[PinnedDirectoryReader],
+) -> None:
+    """Revalidate every pass output root with stable typed refusal."""
+
+    try:
+        for retained_output in retained_outputs:
+            retained_output.verify_path()
+    except ImmutableArtifactResourceError as exc:
+        raise SamplingRefusal(
+            "sampling_output_resource_unavailable",
+            f"{type(exc).__name__}: {exc}",
+        ) from exc
+    except (ImmutableArtifactError, OSError) as exc:
+        raise SamplingRefusal(
+            "sampling_output_generation_changed",
             f"{type(exc).__name__}: {exc}",
         ) from exc
 
@@ -168,58 +203,177 @@ def _retained_sidecar_return_boundary(
         publication_state.close()
 
 
+def _retain_sampling_process_failure(
+    refusal: SamplingRefusal,
+    *,
+    out_dir: Path,
+    output_reader: PinnedDirectoryReader,
+    stdout: bytes,
+    stderr: bytes,
+) -> SamplingRefusal:
+    """Keep bounded partial streams in the failed pass directory."""
+
+    refusal.stdout = stdout
+    refusal.stderr = stderr
+    evidence: list[dict[str, object]] = []
+    try:
+        for stream, payload in (("stdout", stdout), ("stderr", stderr)):
+            name = f"capture_process.{stream}.bin"
+            write_regular_bytes_at(
+                output_reader.descriptor,
+                name,
+                payload,
+                mode=0o400,
+            )
+            evidence.append({
+                "path": name,
+                "sha256": hashlib.sha256(payload).hexdigest(),
+                "size_bytes": len(payload),
+            })
+    except BaseException as preservation_error:
+        try:
+            refusal.add_note(
+                "partial sampling process evidence preservation failed: "
+                f"{type(preservation_error).__name__}: {preservation_error}"
+            )
+        except (AttributeError, TypeError):
+            pass
+    refusal.failure_evidence = tuple(evidence)
+    return refusal
+
+
 def _run_retained_pass(
     retained_binary: RetainedExecutable,
     app_args: list[str],
     out_dir: Path,
+    output_reader: PinnedDirectoryReader,
     mode: int,
     *,
     selected_blocks: list[int] | None,
     retained_tracer: RetainedRegular,
     pb_lib: Path,
 ) -> None:
-    """Execute one pass only through the already-retained descriptors."""
+    """Execute one pass only through already-retained capabilities."""
     _require_sampling_inputs_unchanged(retained_binary, retained_tracer)
     try:
-        env = tracer_runtime_env(
+        output_reader.verify_path()
+    except ImmutableArtifactResourceError as exc:
+        raise SamplingRefusal(
+            "sampling_output_resource_unavailable",
+            f"{type(exc).__name__}: {exc}",
+        ) from exc
+    except (ImmutableArtifactError, OSError) as exc:
+        raise SamplingRefusal(
+            "sampling_output_generation_changed",
+            f"{type(exc).__name__}: {exc}",
+        ) from exc
+    output_proc_path = Path(f"/proc/self/fd/{output_reader.descriptor}")
+    try:
+        runtime_context = retained_tracer_runtime_env(
             retained_tracer.path,
             pb_lib=pb_lib,
+            runtime_manifest=default_runtime_manifest_path(
+                retained_tracer.path
+            ),
             retained_descriptor=retained_tracer.descriptor,
         )
     except TracerRuntimeError as exc:
         raise SamplingRefusal("tracer_runtime_unavailable", str(exc)) from exc
-    _require_sampling_inputs_unchanged(retained_binary, retained_tracer)
-    env["CUDA_INJECTION64_PATH"] = retained_tracer.proc_path
-    env["USER_DEFINED_FOLDERS"] = "1"
-    env["TRACES_FOLDER"] = str(out_dir)
-    env["TRACE_SAMPLING_MODE"] = str(mode)
-    if mode == 2:
-        env["TRACE_SAMPLING_SELECTED_BLOCKS"] = ",".join(
-            str(block_id) for block_id in (selected_blocks or [])
-        )
-    result = subprocess.run(
-        [retained_binary.proc_path, *app_args],
-        env=env,
-        cwd=str(retained_binary.path.parent),
-        capture_output=True,
-        pass_fds=(retained_binary.descriptor, retained_tracer.descriptor),
-    )
-    _require_sampling_inputs_unchanged(retained_binary, retained_tracer)
+    result = None
+    try:
+        with runtime_context as retained_runtime:
+            _require_sampling_inputs_unchanged(retained_binary, retained_tracer)
+            env = dict(retained_runtime.environment)
+            env["CUDA_INJECTION64_PATH"] = retained_tracer.proc_path
+            env["USER_DEFINED_FOLDERS"] = "1"
+            env["TRACES_FOLDER"] = str(output_proc_path)
+            env["TRACE_SAMPLING_MODE"] = str(mode)
+            if mode == 2:
+                env["TRACE_SAMPLING_SELECTED_BLOCKS"] = ",".join(
+                    str(block_id) for block_id in (selected_blocks or [])
+                )
+            try:
+                result = nvbit_process.execute_capture_process(
+                    (retained_binary.proc_path, *app_args),
+                    environment=env,
+                    working_directory=str(retained_binary.path.parent),
+                    inherited_descriptors=tuple(dict.fromkeys((
+                        retained_binary.descriptor,
+                        retained_tracer.descriptor,
+                        output_reader.descriptor,
+                        *retained_runtime.pass_fds,
+                    ))),
+                    timeout_seconds=_PASS_TIMEOUT_SECONDS,
+                    max_output_bytes=_PASS_MAX_STDOUT_STDERR_BYTES,
+                    timeout_code=_PASS_TIMEOUT_CODE,
+                    launch_code=_PASS_LAUNCH_CODE,
+                )
+            except nvbit_process.NvbitCaptureProcessError as exc:
+                if exc.process_cleanup_incomplete:
+                    reason = "sampling_target_cleanup_failed"
+                elif exc.code == _PASS_TIMEOUT_CODE:
+                    reason = _PASS_TIMEOUT_CODE
+                elif exc.code == nvbit_process.NVBIT_CAPTURE_OUTPUT_LIMIT:
+                    reason = "sampling_target_output_limit"
+                elif exc.code == _PASS_LAUNCH_CODE:
+                    reason = _PASS_LAUNCH_CODE
+                else:
+                    reason = "sampling_target_execution_failed"
+                refusal = SamplingRefusal(reason, exc.detail)
+                refusal.process_id = exc.process_id
+                raise _retain_sampling_process_failure(
+                    refusal,
+                    out_dir=out_dir,
+                    output_reader=output_reader,
+                    stdout=exc.stdout,
+                    stderr=exc.stderr,
+                ) from exc
+            _require_sampling_inputs_unchanged(retained_binary, retained_tracer)
+    except TracerRuntimeError as exc:
+        refusal = SamplingRefusal("tracer_runtime_unavailable", str(exc))
+        if result is not None:
+            refusal.process_id = result.process_id
+            _retain_sampling_process_failure(
+                refusal,
+                out_dir=out_dir,
+                output_reader=output_reader,
+                stdout=result.stdout,
+                stderr=result.stderr,
+            )
+        raise refusal from exc
+    assert result is not None
     # Fail closed on a nonzero target exit: a benchmark that fails a correctness
     # check while still writing a partial trace must NOT be routed as valid input.
     if result.returncode != 0:
-        raise SamplingRefusal(
+        refusal = SamplingRefusal(
             "target_process_failed",
             f"pass mode={mode}: target exited {result.returncode}\n"
             f"stdout: {result.stdout.decode(errors='replace')[-2000:]}\n"
             f"stderr: {result.stderr.decode(errors='replace')[-2000:]}",
         )
-    if not (out_dir / "dynamic_trace.pb").is_file():
-        raise SamplingRefusal(
+        refusal.process_id = result.process_id
+        raise _retain_sampling_process_failure(
+            refusal,
+            out_dir=out_dir,
+            output_reader=output_reader,
+            stdout=result.stdout,
+            stderr=result.stderr,
+        )
+    if not (output_proc_path / "dynamic_trace.pb").is_file():
+        refusal = SamplingRefusal(
             "capture_trace_missing",
             f"pass mode={mode}: no dynamic_trace.pb (injection failed?)",
         )
+        refusal.process_id = result.process_id
+        raise _retain_sampling_process_failure(
+            refusal,
+            out_dir=out_dir,
+            output_reader=output_reader,
+            stdout=result.stdout,
+            stderr=result.stderr,
+        )
     _require_sampling_inputs_unchanged(retained_binary, retained_tracer)
+    _require_sampling_outputs_unchanged([output_reader])
 
 
 def run_pass(
@@ -233,7 +387,9 @@ def run_pass(
     pb_lib: Path = DEFAULT_PB_LIB,
     retained_binary: RetainedExecutable | None = None,
     retained_tracer: RetainedRegular | None = None,
-) -> None:
+    retained_output_stack: ExitStack | None = None,
+    retained_output_readers: list[PinnedDirectoryReader] | None = None,
+) -> Path:
     """Run one instrumented pass from exact retained binary/tracer inodes.
 
     Standalone callers retain both inputs for this pass. ``orchestrate_cell``
@@ -246,43 +402,97 @@ def run_pass(
             "sampling_input_invalid",
             "retained binary and tracer must be supplied together",
         )
-    if retained_binary is not None and retained_tracer is not None:
-        _run_retained_pass(
-            retained_binary,
-            app_args,
-            out_dir,
-            mode,
-            selected_blocks=selected_blocks,
-            retained_tracer=retained_tracer,
-            pb_lib=pb_lib,
-        )
-        return
+
     try:
-        with (
-            open_retained_executable(binary) as owned_binary,
-            open_retained_regular(tracer_so) as owned_tracer,
-        ):
-            _run_retained_pass(
-                owned_binary,
-                app_args,
-                out_dir,
-                mode,
-                selected_blocks=selected_blocks,
-                retained_tracer=owned_tracer,
-                pb_lib=pb_lib,
-            )
-    except SamplingRefusal:
-        raise
+        output_reader = PinnedDirectoryReader(out_dir)
     except ImmutableArtifactResourceError as exc:
         raise SamplingRefusal(
-            "sampling_input_resource_unavailable",
+            "sampling_output_resource_unavailable",
             f"{type(exc).__name__}: {exc}",
         ) from exc
     except (ImmutableArtifactError, OSError) as exc:
         raise SamplingRefusal(
-            "sampling_input_invalid",
+            "sampling_output_generation_changed",
             f"{type(exc).__name__}: {exc}",
         ) from exc
+
+    def execute(reader: PinnedDirectoryReader) -> None:
+        if retained_binary is not None and retained_tracer is not None:
+            _run_retained_pass(
+                retained_binary,
+                app_args,
+                out_dir,
+                reader,
+                mode,
+                selected_blocks=selected_blocks,
+                retained_tracer=retained_tracer,
+                pb_lib=pb_lib,
+            )
+            return
+        try:
+            with (
+                open_retained_executable(binary) as owned_binary,
+                open_retained_regular(
+                    tracer_so, max_bytes=EXTERNAL_TRACER_MAX_BYTES
+                ) as owned_tracer,
+            ):
+                _run_retained_pass(
+                    owned_binary,
+                    app_args,
+                    out_dir,
+                    reader,
+                    mode,
+                    selected_blocks=selected_blocks,
+                    retained_tracer=owned_tracer,
+                    pb_lib=pb_lib,
+                )
+        except SamplingRefusal:
+            raise
+        except ImmutableArtifactResourceError as exc:
+            raise SamplingRefusal(
+                "sampling_input_resource_unavailable",
+                f"{type(exc).__name__}: {exc}",
+            ) from exc
+        except (ImmutableArtifactError, OSError) as exc:
+            raise SamplingRefusal(
+                "sampling_input_invalid",
+                f"{type(exc).__name__}: {exc}",
+            ) from exc
+
+    if retained_output_stack is not None:
+        try:
+            retained_reader = retained_output_stack.enter_context(output_reader)
+        except ImmutableArtifactResourceError as exc:
+            raise SamplingRefusal(
+                "sampling_output_resource_unavailable",
+                f"{type(exc).__name__}: {exc}",
+            ) from exc
+        except (ImmutableArtifactError, OSError) as exc:
+            raise SamplingRefusal(
+                "sampling_output_generation_changed",
+                f"{type(exc).__name__}: {exc}",
+            ) from exc
+        if retained_output_readers is not None:
+            retained_output_readers.append(retained_reader)
+        execute(retained_reader)
+        return Path(f"/proc/self/fd/{retained_reader.descriptor}")
+
+    try:
+        with output_reader as retained_reader:
+            execute(retained_reader)
+    except SamplingRefusal:
+        raise
+    except ImmutableArtifactResourceError as exc:
+        raise SamplingRefusal(
+            "sampling_output_resource_unavailable",
+            f"{type(exc).__name__}: {exc}",
+        ) from exc
+    except (ImmutableArtifactError, OSError) as exc:
+        raise SamplingRefusal(
+            "sampling_output_generation_changed",
+            f"{type(exc).__name__}: {exc}",
+        ) from exc
+    return out_dir
 
 
 def segments_from_stats(stats) -> dict[int, list[int]]:
@@ -457,6 +667,8 @@ def _orchestrate_cell_retained(
     *,
     retained_binary: RetainedExecutable,
     retained_tracer: RetainedRegular,
+    retained_output_stack: ExitStack,
+    retained_output_readers: list[PinnedDirectoryReader],
     args_hash: str = "0" * 8,
     cooperative: bool = False,
     seed: int = 0,
@@ -474,7 +686,7 @@ def _orchestrate_cell_retained(
     _refuse_existing_output(compressed_out, "compression_output_exists")
     _require_sampling_inputs_unchanged(retained_binary, retained_tracer)
     pass1 = work_dir / "pass1"
-    run_pass(
+    pass1_access = run_pass(
         binary,
         app_args,
         pass1,
@@ -483,9 +695,14 @@ def _orchestrate_cell_retained(
         pb_lib=pb_lib,
         retained_binary=retained_binary,
         retained_tracer=retained_tracer,
-    )
+        retained_output_stack=retained_output_stack,
+        retained_output_readers=retained_output_readers,
+    ) or pass1
     _require_sampling_inputs_unchanged(retained_binary, retained_tracer)
-    stats = cell_stats_from_capture(pass1, cell_id, cooperative=cooperative)
+    _require_sampling_outputs_unchanged(retained_output_readers)
+    stats = cell_stats_from_capture(
+        pass1_access, cell_id, cooperative=cooperative
+    )
     _require_sampling_inputs_unchanged(retained_binary, retained_tracer)
     gate = classify(stats, sample_size=sample_size)
 
@@ -509,7 +726,7 @@ def _orchestrate_cell_retained(
         accepted = None
         for attempt in range(1, max_reconcile_attempts + 1):
             pass2 = work_dir / f"pass2_attempt_{attempt}"
-            run_pass(
+            pass2_access = run_pass(
                 binary,
                 app_args,
                 pass2,
@@ -519,17 +736,22 @@ def _orchestrate_cell_retained(
                 pb_lib=pb_lib,
                 retained_binary=retained_binary,
                 retained_tracer=retained_tracer,
-            )
+                retained_output_stack=retained_output_stack,
+                retained_output_readers=retained_output_readers,
+            ) or pass2
             _require_sampling_inputs_unchanged(
                 retained_binary, retained_tracer
             )
+            _require_sampling_outputs_unchanged(retained_output_readers)
             pass2_stats = cell_stats_from_capture(
-                pass2, cell_id, cooperative=cooperative)
+                pass2_access, cell_id, cooperative=cooperative)
             _require_sampling_inputs_unchanged(
                 retained_binary, retained_tracer
             )
             _same_launch_identity(stats, pass2_stats)
-            capture_stats_sha256 = verify_capture_selection(pass2, candidate)
+            capture_stats_sha256 = verify_capture_selection(
+                pass2_access, candidate
+            )
             candidate_set = set(candidate)
             candidate_serialized_bytes = {
                 block.block_id: block.serialized_bytes
@@ -537,7 +759,7 @@ def _orchestrate_cell_retained(
                 if block.block_id in candidate_set
             }
             actual_records, actual_raw_bytes = verify_pass2_payload(
-                pass2,
+                pass2_access,
                 pass2_stats.grid,
                 candidate,
                 candidate_serialized_bytes,
@@ -595,7 +817,7 @@ def _orchestrate_cell_retained(
                 candidate = desired
                 bootstrap_force = final_force
                 continue
-            accepted = (attempt, pass2, pass2_stats, desired_plan, final_gate,
+            accepted = (attempt, pass2_access, pass2_stats, desired_plan, final_gate,
                         certainty_bytes, capture_stats_sha256, actual_records,
                         actual_raw_bytes)
             break
@@ -605,7 +827,7 @@ def _orchestrate_cell_retained(
                 "placement_reconciliation_exhausted",
                 f"max_attempts={max_reconcile_attempts}")
 
-        (attempts, pass2, final_stats, plan, gate, certainty_bytes,
+        (attempts, pass2_access, final_stats, plan, gate, certainty_bytes,
          capture_stats_sha256, actual_records, actual_raw_bytes) = accepted
         segments = plan.sidecar_segments()
         selected = _selected_block_ids(plan)
@@ -617,7 +839,7 @@ def _orchestrate_cell_retained(
                 f"raw={selected_payload_bytes}, max={max_trace_bytes}")
         _require_sampling_inputs_unchanged(retained_binary, retained_tracer)
         _create_fresh_directory(compressed_out, "compression_output_exists")
-        comp = compress_trace_dir(pass2, compressed_out)
+        comp = compress_trace_dir(pass2_access, compressed_out)
         _require_sampling_inputs_unchanged(retained_binary, retained_tracer)
         selected_serialized_bytes = sum(
             block.serialized_bytes for block in final_stats.blocks
@@ -695,6 +917,7 @@ def _orchestrate_cell_retained(
         )
 
     _require_sampling_inputs_unchanged(retained_binary, retained_tracer)
+    _require_sampling_outputs_unchanged(retained_output_readers)
     return sidecar
 
 
@@ -730,6 +953,7 @@ def orchestrate_cell(
     publication_state: SidecarPublicationState | None = None
     publication_attempted = False
     input_stack = ExitStack()
+    retained_output_readers: list[PinnedDirectoryReader] = []
 
     def close_inputs_preserving(primary: BaseException) -> None:
         try:
@@ -856,7 +1080,9 @@ def orchestrate_cell(
             open_retained_executable(binary)
         )
         retained_tracer = input_stack.enter_context(
-            open_retained_regular(tracer_so)
+            open_retained_regular(
+                tracer_so, max_bytes=EXTERNAL_TRACER_MAX_BYTES
+            )
         )
         sidecar = _orchestrate_cell_retained(
             binary,
@@ -864,6 +1090,8 @@ def orchestrate_cell(
             work_dir,
             retained_binary=retained_binary,
             retained_tracer=retained_tracer,
+            retained_output_stack=input_stack,
+            retained_output_readers=retained_output_readers,
             args_hash=args_hash,
             cooperative=cooperative,
             seed=seed,
@@ -876,6 +1104,7 @@ def orchestrate_cell(
         _require_sampling_inputs_unchanged(
             retained_binary, retained_tracer
         )
+        _require_sampling_outputs_unchanged(retained_output_readers)
         expected_payload = (
             json.dumps(sidecar, indent=2) + "\n"
         ).encode("utf-8")
@@ -910,6 +1139,7 @@ def orchestrate_cell(
                 f"{type(exc).__name__}: {exc}",
             ) from exc
         published_snapshot = publication_state.snapshot
+        _require_sampling_outputs_unchanged(retained_output_readers)
 
         try:
             retained_sidecar = open_retained_regular(out)
@@ -950,6 +1180,9 @@ def orchestrate_cell(
                 )
                 _require_sampling_inputs_unchanged(
                     retained_binary, retained_tracer
+                )
+                _require_sampling_outputs_unchanged(
+                    retained_output_readers
                 )
                 try:
                     input_stack.close()

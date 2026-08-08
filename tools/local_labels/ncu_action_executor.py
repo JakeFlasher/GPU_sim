@@ -23,6 +23,7 @@ from typing import NoReturn
 
 from tools.local_labels import delegated_cgroup
 from tools.local_labels import immutable_artifact as immutable
+from tools.nvbit_tracer import capture_process as nvbit_capture_process
 
 
 NCU_IDENTITY_INPUT_INVALID = "NCU_IDENTITY_INPUT_INVALID"
@@ -258,9 +259,18 @@ class _BorrowedActionDescriptors:
 class NcuActionExecutorError(RuntimeError):
     """A typed NCU authority or bounded-execution failure."""
 
-    def __init__(self, code: str, detail: str) -> None:
+    def __init__(
+        self,
+        code: str,
+        detail: str,
+        *,
+        process_cleanup_incomplete: bool = False,
+    ) -> None:
+        if type(process_cleanup_incomplete) is not bool:
+            raise TypeError("process_cleanup_incomplete must be an exact boolean")
         self.code = code
         self.detail = detail
+        self.process_cleanup_incomplete = process_cleanup_incomplete
         self.stdout = b""
         self.stderr = b""
         self.process_id: int | None = None
@@ -305,6 +315,9 @@ def _copy_process_failure(
     )
     target.process_tool_sha256 = source.process_tool_sha256
     target.containment = source.containment
+    target.process_cleanup_incomplete = (
+        target.process_cleanup_incomplete or source.process_cleanup_incomplete
+    )
 
 
 def _copy_process_result(
@@ -966,31 +979,63 @@ def _stop_and_reap(
     process: subprocess.Popen[bytes],
     containment: delegated_cgroup.DelegatedCgroupV2 | None = None,
 ) -> None:
-    _signal_group(process, signal.SIGTERM)
-    if not _wait_for_exit_unreaped(process, _TERMINATION_GRACE_SECONDS):
-        if containment is None:
-            _signal_group(process, signal.SIGKILL)
-        else:
-            containment.kill_all()
+    termination_error: BaseException | None = None
+    try:
+        _signal_group(process, signal.SIGTERM)
         if not _wait_for_exit_unreaped(process, _TERMINATION_GRACE_SECONDS):
-            raise NcuActionExecutorError(
-                NCU_ACTION_LAUNCH_FAILED,
-                "retained NCU process did not exit after forced termination",
-            )
-    else:
-        # Keep the exited leader unreaped while removing descendants that retain
-        # inherited capabilities in its process group or delegated cgroup.
-        if containment is None:
-            _signal_group(process, signal.SIGKILL)
+            try:
+                if containment is None:
+                    _signal_group(process, signal.SIGKILL)
+                else:
+                    containment.kill_all()
+            except BaseException as exc:
+                termination_error = exc
+            else:
+                if not _wait_for_exit_unreaped(
+                    process, _TERMINATION_GRACE_SECONDS
+                ):
+                    termination_error = NcuActionExecutorError(
+                        NCU_ACTION_LAUNCH_FAILED,
+                        "retained NCU process did not exit after forced termination",
+                        process_cleanup_incomplete=True,
+                    )
         else:
-            containment.kill_all()
+            # Keep the exited leader as PID/PGID authority while removing
+            # descendants, but never let descendant-cleanup failure skip reaping.
+            try:
+                if containment is None:
+                    _signal_group(process, signal.SIGKILL)
+                else:
+                    containment.kill_all()
+            except BaseException as exc:
+                termination_error = exc
+    except BaseException as exc:
+        termination_error = exc
+
     try:
         process.wait(timeout=_TERMINATION_GRACE_SECONDS)
-    except subprocess.TimeoutExpired as exc:
+    except BaseException as reap_error:
+        failure = NcuActionExecutorError(
+            NCU_ACTION_LAUNCH_FAILED,
+            f"cannot reap retained NCU process: {reap_error}",
+            process_cleanup_incomplete=True,
+        )
+        if termination_error is not None:
+            try:
+                failure.add_note(
+                    f"retained NCU descendant cleanup also failed: "
+                    f"{termination_error}"
+                )
+            except (AttributeError, TypeError):
+                pass
+        raise failure from reap_error
+
+    if termination_error is not None:
         raise NcuActionExecutorError(
             NCU_ACTION_LAUNCH_FAILED,
-            "cannot reap exited retained NCU process",
-        ) from exc
+            f"retained NCU descendant cleanup failed: {termination_error}",
+            process_cleanup_incomplete=True,
+        ) from termination_error
 
 
 def _close_monitor_resources(
@@ -1012,6 +1057,37 @@ def _close_monitor_resources(
     return tuple(errors)
 
 
+def _new_bounded_output_buffers() -> dict[str, bytearray]:
+    return {"stdout": bytearray(), "stderr": bytearray()}
+
+
+def _copy_bounded_stream_prefix(buffer: bytearray, length: int) -> bytes:
+    if length == len(buffer):
+        return bytes(buffer)
+    return bytes(memoryview(buffer)[:length])
+
+
+def _materialize_bounded_stream(
+    buffer: bytearray,
+) -> tuple[bytes, MemoryError | None]:
+    """Copy one stream, retaining a safe exact prefix after allocation failure."""
+
+    first_error: MemoryError | None = None
+    candidate_length = len(buffer)
+    retry_full = True
+    while candidate_length > 0:
+        try:
+            return _copy_bounded_stream_prefix(buffer, candidate_length), first_error
+        except MemoryError as exc:
+            if first_error is None:
+                first_error = exc
+            if retry_full:
+                retry_full = False
+            else:
+                candidate_length //= 2
+    return b"", first_error
+
+
 def _collect_bounded(
     process: subprocess.Popen[bytes],
     *,
@@ -1020,13 +1096,25 @@ def _collect_bounded(
     max_output_bytes: int,
     timeout_code: str,
     containment: delegated_cgroup.DelegatedCgroupV2 | None = None,
+    deadline_monotonic: float | None = None,
 ) -> NcuActionResult:
+    # Popen has already succeeded.  Keep every allocation and output copy under
+    # this cleanup guard so MemoryError cannot strand the retained process.
     selector: selectors.BaseSelector | None = None
-    buffers = {"stdout": bytearray(), "stderr": bytearray()}
-    total = 0
-    deadline = time.monotonic() + timeout_seconds
+    buffers: dict[str, bytearray] | None = None
     primary_error: BaseException | None = None
+    cleanup_error: BaseException | None = None
+    close_error: BaseException | None = None
+    returncode: int | None = None
+    process_reaped = False
     try:
+        buffers = _new_bounded_output_buffers()
+        total = 0
+        deadline = (
+            time.monotonic() + timeout_seconds
+            if deadline_monotonic is None
+            else deadline_monotonic
+        )
         if process.stdout is None or process.stderr is None:
             raise NcuActionExecutorError(
                 NCU_ACTION_LAUNCH_FAILED, "retained NCU pipes are unavailable",
@@ -1075,7 +1163,13 @@ def _collect_bounded(
                     selector.unregister(key.fileobj)
                     continue
                 remaining_capacity = max_output_bytes - total
-                buffers[key.data].extend(chunk[:remaining_capacity])
+                if remaining_capacity > 0:
+                    retained_chunk = (
+                        chunk
+                        if len(chunk) <= remaining_capacity
+                        else chunk[:remaining_capacity]
+                    )
+                    buffers[key.data].extend(retained_chunk)
                 total += len(chunk)
                 if total > max_output_bytes:
                     raise NcuActionExecutorError(
@@ -1099,59 +1193,148 @@ def _collect_bounded(
             else:
                 containment.kill_all()
         returncode = process.wait()
-        return NcuActionResult(
-            returncode,
-            bytes(buffers["stdout"]),
-            bytes(buffers["stderr"]),
-            process_id=process.pid,
-            started_at_utc=started_at_utc,
-        )
+        process_reaped = True
     except BaseException as active_error:
         primary_error = active_error
-        if isinstance(active_error, NcuActionExecutorError):
-            active_error.stdout = bytes(buffers["stdout"])
-            active_error.stderr = bytes(buffers["stderr"])
-            active_error.process_id = process.pid
-            active_error.started_at_utc = started_at_utc
+    finally:
+        if not process_reaped:
+            try:
+                _stop_and_reap(process, containment)
+                process_reaped = True
+            except BaseException as exc:
+                cleanup_error = exc
+                # A transient allocation/resource failure inside teardown must
+                # not be the only stop/reap attempt.
+                try:
+                    _stop_and_reap(process, containment)
+                    process_reaped = True
+                except BaseException as retry_error:
+                    try:
+                        cleanup_error.add_note(
+                            f"retained NCU process cleanup retry failed: {retry_error}"
+                        )
+                    except (AttributeError, TypeError):
+                        pass
+                else:
+                    cleanup_error = None
         try:
-            _stop_and_reap(process, containment)
-        except BaseException as cleanup_error:
-            cleanup_failure = NcuActionExecutorError(
-                NCU_ACTION_LAUNCH_FAILED,
-                f"retained NCU process cleanup failed: {cleanup_error}",
-            )
-            cleanup_failure.stdout = bytes(buffers["stdout"])
-            cleanup_failure.stderr = bytes(buffers["stderr"])
-            cleanup_failure.process_id = process.pid
-            cleanup_failure.started_at_utc = started_at_utc
+            close_errors = _close_monitor_resources(selector, process)
+        except BaseException as exc:
+            close_error = exc
+        else:
+            if close_errors:
+                try:
+                    detail = "; ".join(str(error) for error in close_errors)
+                    close_error = NcuActionExecutorError(
+                        NCU_ACTION_LAUNCH_FAILED,
+                        "cannot close retained NCU process resources: " + detail,
+                    )
+                    close_error.__cause__ = close_errors[0]
+                except BaseException as exc:
+                    close_error = exc
+
+    stdout = b""
+    stderr = b""
+    materialization_error: MemoryError | None = None
+    if buffers is not None:
+        stdout, stdout_error = _materialize_bounded_stream(buffers["stdout"])
+        stderr, stderr_error = _materialize_bounded_stream(buffers["stderr"])
+        materialization_error = stdout_error or stderr_error
+
+    if cleanup_error is not None:
+        cleanup_failure = NcuActionExecutorError(
+            NCU_ACTION_LAUNCH_FAILED,
+            f"retained NCU process cleanup failed: {cleanup_error}",
+            process_cleanup_incomplete=True,
+        )
+        cleanup_failure.stdout = stdout
+        cleanup_failure.stderr = stderr
+        cleanup_failure.process_id = process.pid
+        cleanup_failure.started_at_utc = started_at_utc
+        if primary_error is not None:
             try:
                 cleanup_failure.add_note(
-                    f"active retained NCU process error: {active_error}"
+                    f"active retained NCU process error: {primary_error}"
                 )
             except (AttributeError, TypeError):
                 pass
-            primary_error = cleanup_failure
-            raise cleanup_failure from cleanup_error
-        raise
-    finally:
-        close_errors = _close_monitor_resources(selector, process)
-        if close_errors:
-            detail = "; ".join(str(error) for error in close_errors)
-            if primary_error is not None:
-                try:
-                    primary_error.add_note(
-                        f"process resource closure failed: {detail}"
-                    )
-                except (AttributeError, TypeError):
-                    pass
-            else:
-                closure_error = NcuActionExecutorError(
-                    NCU_ACTION_LAUNCH_FAILED,
-                    f"cannot close retained NCU process resources: {detail}",
+        raise cleanup_failure from cleanup_error
+
+    if materialization_error is not None:
+        output_failure = NcuActionExecutorError(
+            NCU_ACTION_LAUNCH_FAILED,
+            "retained NCU bounded output materialization exhausted memory",
+        )
+        output_failure.stdout = stdout
+        output_failure.stderr = stderr
+        output_failure.process_id = process.pid
+        output_failure.started_at_utc = started_at_utc
+        if primary_error is not None:
+            try:
+                output_failure.add_note(
+                    f"active retained NCU process error: {primary_error}"
                 )
-                closure_error.process_id = process.pid
-                closure_error.started_at_utc = started_at_utc
-                raise closure_error from close_errors[0]
+            except (AttributeError, TypeError):
+                pass
+        if close_error is not None:
+            try:
+                output_failure.add_note(
+                    f"process resource closure failed: {close_error}"
+                )
+            except (AttributeError, TypeError):
+                pass
+        raise output_failure from materialization_error
+
+    if close_error is not None:
+        if primary_error is not None:
+            try:
+                primary_error.add_note(
+                    f"process resource closure failed: {close_error}"
+                )
+            except (AttributeError, TypeError):
+                pass
+        else:
+            closure_failure = (
+                close_error
+                if isinstance(close_error, NcuActionExecutorError)
+                else NcuActionExecutorError(
+                    NCU_ACTION_LAUNCH_FAILED,
+                    f"cannot close retained NCU process resources: {close_error}",
+                )
+            )
+            closure_failure.stdout = stdout
+            closure_failure.stderr = stderr
+            closure_failure.process_id = process.pid
+            closure_failure.started_at_utc = started_at_utc
+            raise closure_failure from close_error
+
+    if primary_error is not None:
+        if isinstance(primary_error, NcuActionExecutorError):
+            primary_error.stdout = stdout
+            primary_error.stderr = stderr
+            primary_error.process_id = process.pid
+            primary_error.started_at_utc = started_at_utc
+            raise primary_error
+        if isinstance(primary_error, MemoryError):
+            resource_failure = NcuActionExecutorError(
+                NCU_ACTION_LAUNCH_FAILED,
+                "retained NCU bounded output collection exhausted memory",
+            )
+            resource_failure.stdout = stdout
+            resource_failure.stderr = stderr
+            resource_failure.process_id = process.pid
+            resource_failure.started_at_utc = started_at_utc
+            raise resource_failure from primary_error
+        raise primary_error
+
+    assert returncode is not None
+    return NcuActionResult(
+        returncode,
+        stdout,
+        stderr,
+        process_id=process.pid,
+        started_at_utc=started_at_utc,
+    )
 
 
 def _run_command_bounded(
@@ -1169,15 +1352,9 @@ def _run_command_bounded(
     started_at_utc = (
         dt.datetime.now(dt.timezone.utc).isoformat().replace("+00:00", "Z")
     )
+    deadline_monotonic = time.monotonic() + timeout_seconds
     containment: delegated_cgroup.DelegatedCgroupV2 | None = None
-    if require_cgroup_containment:
-        try:
-            containment = delegated_cgroup.DelegatedCgroupV2.create()
-        except delegated_cgroup.CgroupContainmentError as exc:
-            raise NcuActionExecutorError(
-                launch_code,
-                f"cannot establish delegated cgroup containment: {exc}",
-            ) from exc
+    process: subprocess.Popen[bytes] | None = None
     popen_arguments = {
         "stdin": subprocess.DEVNULL,
         "stdout": subprocess.PIPE,
@@ -1188,25 +1365,76 @@ def _run_command_bounded(
         "start_new_session": True,
     }
     try:
-        process = (
-            subprocess.Popen(command, **popen_arguments)
-            if containment is None
-            else containment.popen(command, **popen_arguments)
-        )
-    except (OSError, ValueError, delegated_cgroup.CgroupContainmentError) as exc:
+        with nvbit_capture_process.bounded_launch(deadline_monotonic):
+            if require_cgroup_containment:
+                try:
+                    containment = delegated_cgroup.DelegatedCgroupV2.create()
+                except delegated_cgroup.CgroupContainmentError as exc:
+                    raise NcuActionExecutorError(
+                        launch_code,
+                        f"cannot establish delegated cgroup containment: {exc}",
+                    ) from exc
+            process = (
+                subprocess.Popen(command, **popen_arguments)
+                if containment is None
+                else containment.popen(command, **popen_arguments)
+            )
+    except BaseException as active_error:
+        cleanup_errors: list[BaseException] = []
+        if process is not None:
+            try:
+                _stop_and_reap(process, containment)
+            except BaseException as cleanup_error:
+                cleanup_errors.append(cleanup_error)
+            try:
+                cleanup_errors.extend(
+                    _close_monitor_resources(None, process)
+                )
+            except BaseException as cleanup_error:
+                cleanup_errors.append(cleanup_error)
         if containment is not None:
             try:
-                containment.close_after_error()
+                if process is None:
+                    containment.close_after_error()
+                else:
+                    containment.finish()
             except BaseException as cleanup_error:
-                try:
-                    exc.add_note(
-                        f"delegated cgroup launch cleanup failed: {cleanup_error}"
-                    )
-                except (AttributeError, TypeError):
-                    pass
+                cleanup_errors.append(cleanup_error)
+        if cleanup_errors:
+            cleanup_failure = NcuActionExecutorError(
+                launch_code,
+                "supervised process launch cleanup failed: "
+                + "; ".join(str(error) for error in cleanup_errors),
+                process_cleanup_incomplete=True,
+            )
+            cleanup_failure.process_id = (
+                None if process is None else process.pid
+            )
+            cleanup_failure.started_at_utc = started_at_utc
+            try:
+                cleanup_failure.add_note(
+                    f"active supervised process launch error: {active_error}"
+                )
+            except (AttributeError, TypeError):
+                pass
+            raise cleanup_failure from cleanup_errors[0]
+        if isinstance(
+            active_error, nvbit_capture_process.CaptureLaunchTimeout
+        ):
+            raise NcuActionExecutorError(
+                timeout_code,
+                f"supervised process launch exceeded {timeout_seconds} seconds",
+            ) from active_error
+        if not isinstance(active_error, Exception):
+            raise
+        if isinstance(active_error, NcuActionExecutorError):
+            raise
         raise NcuActionExecutorError(
-            launch_code, f"cannot launch supervised process: {exc}"
-        ) from exc
+            launch_code,
+            f"cannot launch supervised process: {active_error}",
+        ) from active_error
+
+    assert process is not None
     try:
         result = _collect_bounded(
             process,
@@ -1215,6 +1443,7 @@ def _run_command_bounded(
             max_output_bytes=max_output_bytes,
             timeout_code=timeout_code,
             containment=containment,
+            deadline_monotonic=deadline_monotonic,
         )
     except BaseException as active_error:
         if isinstance(active_error, NcuActionExecutorError):
@@ -1233,6 +1462,7 @@ def _run_command_bounded(
                 wrapped = NcuActionExecutorError(
                     launch_code,
                     f"delegated cgroup cleanup failed: {cleanup_error}",
+                    process_cleanup_incomplete=True,
                 )
                 _copy_process_failure(wrapped, process_error)
                 try:
@@ -1258,6 +1488,7 @@ def _run_command_bounded(
             error = NcuActionExecutorError(
                 launch_code,
                 f"delegated cgroup cleanup failed: {cleanup_error}",
+                process_cleanup_incomplete=True,
             )
             _copy_process_result(error, result)
             raise error from cleanup_error

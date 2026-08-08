@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import copy
 import json
+import tempfile
 from collections import Counter
+from collections.abc import Iterator
 from pathlib import Path
 
 import jsonschema
@@ -23,6 +25,17 @@ from tools.local_labels.test_cutlass_successor_capture_admission import (
 GENERATED_AT = "2026-07-23T01:00:00Z"
 FROZEN_MATRIX = Path("data/local_labels/campaign/sm86_reference_capture_matrix.json")
 FROZEN_MATRIX_SHA256 = "af29d72e955cf42e281036190f2d55d72af0af92a632c78c8d159073a072fb0e"
+
+
+@pytest.fixture
+def tmp_path() -> Iterator[Path]:
+    """Give production-gated receipt tests a fresh external root."""
+    with tempfile.TemporaryDirectory(
+        prefix="successor-schedule-pytest-", dir="/tmp",
+    ) as temporary_root:
+        root = Path(temporary_root) / "receipts"
+        root.mkdir()
+        yield root
 
 
 @pytest.fixture(autouse=True)
@@ -51,28 +64,85 @@ def _build(root: Path, seed: int = 42) -> dict:
     )
 
 
+def _schema_authority(version: int) -> dict:
+    relative = admission.RECEIPT_SCHEMA_PATHS_BY_VERSION[version]
+    path = schedule.ROOT / relative
+    return {
+        "schema_version": version,
+        "schema_id": admission.RECEIPT_SCHEMA_IDS_BY_VERSION[version],
+        "path": relative.as_posix(),
+        "sha256": admission.RECEIPT_SCHEMA_SHA256_BY_VERSION[version],
+        "size_bytes": path.stat().st_size,
+    }
+
+
 def _reseal(document: dict) -> None:
     document["schedule_sha256"] = m6.canonical_sha256(
         {key: value for key, value in document.items() if key != "schedule_sha256"}
     )
 
 
-def test_schedule_schema_is_closed():
-    schema_path = schedule.ROOT / schedule.SCHEMA_REL
-    schema = json.loads(schema_path.read_text())
-    jsonschema.Draft202012Validator.check_schema(schema)
+def test_schedule_schema_registry_preserves_v1_and_dispatches_active_v2():
+    assert set(schedule.SCHEMA_PATHS_BY_VERSION) == {1, 2}
+    assert schedule.ACTIVE_SCHEMA_VERSION == 2
+    assert schedule.SCHEMA_REL == schedule.SCHEMA_PATHS_BY_VERSION[2]
+    assert schedule.SCHEMA_SHA256_BY_VERSION[1] == (
+        "52af5bfe5a6e88393546ad5f5718b3a49dc93e126f070287c7c49b75d28547ac"
+    )
+    for version, relative in schedule.SCHEMA_PATHS_BY_VERSION.items():
+        schema_path = schedule.ROOT / relative
+        payload = schema_path.read_bytes()
+        assert admission.sha256_bytes(payload) == (
+            schedule.SCHEMA_SHA256_BY_VERSION[version]
+        )
+        schema_document = json.loads(payload)
+        assert schema_document["$id"] == schedule.SCHEMA_IDS_BY_VERSION[version]
+        assert schema_document["properties"]["schema_version"]["const"] == version
+        jsonschema.Draft202012Validator.check_schema(schema_document)
 
-    def visit(value):
-        if isinstance(value, dict):
-            if value.get("type") == "object":
-                assert value.get("additionalProperties") is False
-            for child in value.values():
-                visit(child)
-        elif isinstance(value, list):
-            for child in value:
-                visit(child)
+        def visit(value):
+            if isinstance(value, dict):
+                if value.get("type") == "object":
+                    assert value.get("additionalProperties") is False
+                for child in value.values():
+                    visit(child)
+            elif isinstance(value, list):
+                for child in value:
+                    visit(child)
 
-    visit(schema)
+        visit(schema_document)
+
+
+def test_historical_v1_schedule_shape_dispatches_read_only(tmp_path: Path):
+    _all_pairs(tmp_path)
+    historical = copy.deepcopy(_build(tmp_path))
+    historical["schema_version"] = 1
+    source = historical["source_identity"]
+    source["admission_overlay"]["overlay_id"] = (
+        admission.OVERLAY_IDS_BY_VERSION[1]
+    )
+    source.pop("receipt_schema_authorities")
+    source.pop("nvbit_tools")
+    producer_files = source["producer_files"]
+    producer_files["receipt_schema"] = schedule._file_ref(
+        admission.RECEIPT_SCHEMA_PATHS_BY_VERSION[2],
+        role="historical receipt schema",
+    )
+    producer_files["nvbit_tracer"] = schedule._file_ref(
+        schedule.TRACER_TOOL_REL,
+        role="historical NVBit tracer",
+    )
+    for cell in historical["cells"]:
+        cell["ncu_receipt"].pop("schema_authority")
+        cell["nvbit_receipt"].pop("schema_authority")
+        cell["nvbit_receipt"].pop("nvbit_tool")
+
+    schedule._validate_schema(historical)
+    with pytest.raises(
+        schedule.ScheduleError,
+        match="SUCCESSOR_M6_HISTORICAL_SCHEDULE",
+    ):
+        schedule.validate_schedule(historical)
 
 
 def test_absent_receipts_refuse_without_output(tmp_path: Path, capsys):
@@ -112,6 +182,10 @@ def test_all_pairs_build_exact_deterministic_schedule(tmp_path: Path, monkeypatc
     first = _build(tmp_path)
     second = _build(tmp_path)
     assert first == second
+    assert first["schema_version"] == schedule.ACTIVE_SCHEMA_VERSION == 2
+    assert first["source_identity"]["admission_overlay"]["overlay_id"] == (
+        "cutlass_successor_capture_admission_sm86_v2"
+    )
     assert first["counts"] == {
         "cells": 3,
         "configs": 6,
@@ -166,6 +240,220 @@ def test_all_pairs_build_exact_deterministic_schedule(tmp_path: Path, monkeypatc
         assert sum(
             slot["cell_id"] == cell["cell_id"] for slot in first["tier2_candidates"]
         ) == 10
+
+
+def test_historical_v2_receipts_cannot_build_active_schedule(tmp_path: Path):
+    _all_pairs(tmp_path, schema_version=2)
+
+    with pytest.raises(
+        admission.AdmissionError,
+        match="schema_version 2 is historical-read-only",
+    ):
+        _build(tmp_path)
+
+
+def test_historical_v2_receipts_cannot_publish_active_schedule(
+    tmp_path: Path,
+    capsys,
+):
+    _all_pairs(tmp_path, schema_version=2)
+    output = tmp_path.parent / f"{tmp_path.name}-historical-v2-schedule.json"
+
+    result = schedule.main(
+        [
+            "--receipt-root",
+            str(tmp_path),
+            "--output",
+            str(output),
+            "--seed",
+            "42",
+            "--generated-at-utc",
+            GENERATED_AT,
+        ]
+    )
+
+    assert result == 1
+    assert "schema_version 2 is historical-read-only" in capsys.readouterr().err
+    assert not output.exists()
+
+
+def test_schedule_consumer_refuses_historical_admission_overlay(
+    tmp_path: Path,
+):
+    _all_pairs(tmp_path)
+    overlay = admission.build_overlay(
+        tmp_path,
+        generated_at_utc=GENERATED_AT,
+    )
+    overlay["schema_version"] = 1
+    overlay["overlay_id"] = admission.OVERLAY_IDS_BY_VERSION[1]
+
+    with pytest.raises(
+        schedule.ScheduleError,
+        match="SUCCESSOR_M6_ADMISSION_SCHEMA",
+    ):
+        schedule._require_capture_ready(overlay, MATRIX)
+
+
+def test_schedule_consumer_refuses_synthetic_historical_receipt_overlay(
+    tmp_path: Path,
+):
+    _all_pairs(tmp_path)
+    overlay = admission.build_overlay(
+        tmp_path,
+        generated_at_utc=GENERATED_AT,
+    )
+    overlay["rows"][0]["ncu_receipt"]["schema_authority"][
+        "schema_version"
+    ] = 2
+
+    with pytest.raises(
+        schedule.ScheduleError,
+        match="SUCCESSOR_M6_HISTORICAL_RECEIPT",
+    ):
+        schedule._dispatched_receipt_authorities(overlay)
+
+
+def test_v3_schedule_validates_rich_nvbit_identity_then_projects_phase_tools(
+    tmp_path: Path,
+):
+    _all_pairs(tmp_path, schema_version=3)
+    overlay = admission.build_overlay(
+        tmp_path,
+        generated_at_utc=GENERATED_AT,
+    )
+    for row in overlay["rows"]:
+        rich_tool = row["nvbit_receipt"]["nvbit_tool"]
+        assert rich_tool["identity_kind"] == (
+            "retained_reviewed_external_build_bundle.v1"
+        )
+        assert set(rich_tool) == {
+            "identity_kind",
+            "path",
+            "sha256",
+            "size_bytes",
+            "runtime_manifest",
+            "external_build_authority",
+            "source_manifest",
+            "build_receipt",
+            "artifact_identity",
+        }
+        assert schedule._project_nvbit_tool_identity(
+            row,
+            rich_tool,
+            receipt_schema_version=3,
+        ) == {
+            "identity_kind": "retained_external_phase_tool",
+            "path": rich_tool["path"],
+            "sha256": rich_tool["sha256"],
+            "size_bytes": rich_tool["size_bytes"],
+        }
+
+    document = _build(tmp_path)
+    source = document["source_identity"]
+    assert source["receipt_schema_authorities"] == [_schema_authority(3)]
+    assert len(source["nvbit_tools"]) == len(MATRIX["rows"])
+    repository_tracer_sha256 = admission.sha256_bytes(
+        (schedule.ROOT / schedule.TRACER_TOOL_REL).read_bytes()
+    )
+    expected_paths = {
+        f"capture_tools/{row['variant_id']}.nvbit_tracer_tool.so"
+        for row in MATRIX["rows"]
+    }
+    assert {tool["path"] for tool in source["nvbit_tools"]} == expected_paths
+    assert all(
+        set(tool) == {"identity_kind", "path", "sha256", "size_bytes"}
+        and tool["identity_kind"] == "retained_external_phase_tool"
+        and tool["sha256"] != repository_tracer_sha256
+        for tool in source["nvbit_tools"]
+    )
+    tools_by_path = {tool["path"]: tool for tool in source["nvbit_tools"]}
+    for cell in document["cells"]:
+        assert cell["ncu_receipt"]["schema_authority"] == _schema_authority(3)
+        assert cell["nvbit_receipt"]["schema_authority"] == _schema_authority(3)
+        projected_tool = cell["nvbit_receipt"]["nvbit_tool"]
+        assert projected_tool == tools_by_path[projected_tool["path"]]
+
+
+@pytest.mark.parametrize(
+    ("field_path", "replacement"),
+    (
+        (("identity_kind",), "retained_external_phase_tool"),
+        (("path",), "capture_tools/wrong.nvbit_tracer_tool.so"),
+        (("sha256",), "0" * 64),
+        (("size_bytes",), 0),
+        (
+            ("external_build_authority", "authority_kind"),
+            "unreviewed_candidate_sha256.v1",
+        ),
+        (("external_build_authority", "expected_tracer_sha256"), "0" * 64),
+        (("source_manifest", "sha256"), "0" * 64),
+        (("runtime_manifest", "size_bytes"), 0),
+    ),
+)
+def test_schedule_consumer_refuses_mutated_rich_nvbit_tool_identity(
+    tmp_path: Path,
+    field_path: tuple[str, ...],
+    replacement,
+):
+    _all_pairs(tmp_path)
+    overlay = admission.build_overlay(
+        tmp_path,
+        generated_at_utc=GENERATED_AT,
+    )
+    tool = overlay["rows"][0]["nvbit_receipt"]["nvbit_tool"]
+    target = tool
+    for field in field_path[:-1]:
+        target = target[field]
+    target[field_path[-1]] = replacement
+
+    with pytest.raises(schedule.ScheduleError, match="SUCCESSOR_M6_NVBIT_TOOL"):
+        schedule._dispatched_receipt_authorities(overlay)
+
+
+@pytest.mark.parametrize(
+    "missing_field",
+    (
+        "runtime_manifest",
+        "external_build_authority",
+        "source_manifest",
+        "build_receipt",
+        "artifact_identity",
+    ),
+)
+def test_schedule_consumer_requires_complete_rich_nvbit_authority(
+    tmp_path: Path,
+    missing_field: str,
+):
+    _all_pairs(tmp_path)
+    overlay = admission.build_overlay(
+        tmp_path,
+        generated_at_utc=GENERATED_AT,
+    )
+    overlay["rows"][0]["nvbit_receipt"]["nvbit_tool"].pop(missing_field)
+
+    with pytest.raises(schedule.ScheduleError, match="SUCCESSOR_M6_NVBIT_TOOL"):
+        schedule._dispatched_receipt_authorities(overlay)
+
+
+def test_schedule_consumer_refuses_repository_tracer_substitution(tmp_path: Path):
+    _all_pairs(tmp_path)
+    overlay = admission.build_overlay(
+        tmp_path,
+        generated_at_utc=GENERATED_AT,
+    )
+    tool = overlay["rows"][0]["nvbit_receipt"]["nvbit_tool"]
+    repository_tracer_sha256 = admission.NVBIT_TRACER_SHA256_BY_RECEIPT_VERSION[2]
+    tool["sha256"] = repository_tracer_sha256
+    tool["external_build_authority"][
+        "expected_tracer_sha256"
+    ] = repository_tracer_sha256
+
+    with pytest.raises(
+        schedule.ScheduleError,
+        match="repository tracer substitution is forbidden",
+    ):
+        schedule._dispatched_receipt_authorities(overlay)
 
 
 def test_seed_changes_order_not_membership(tmp_path: Path):

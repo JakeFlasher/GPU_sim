@@ -2244,8 +2244,17 @@ def _directory_names(
             f"invalid {role} entry-count contract",
         )
     names: set[str] = set()
+    scan_descriptor: int | None = None
     try:
-        with os.scandir(descriptor) as iterator:
+        scan_descriptor = os.open(
+            ".",
+            os.O_RDONLY
+            | getattr(os, "O_DIRECTORY", 0)
+            | getattr(os, "O_NOFOLLOW", 0)
+            | getattr(os, "O_CLOEXEC", 0),
+            dir_fd=descriptor,
+        )
+        with os.scandir(scan_descriptor) as iterator:
             for entry in iterator:
                 if len(names) >= max_entries:
                     raise RunnabilityArchiveRefusal(
@@ -2257,6 +2266,9 @@ def _directory_names(
         raise RunnabilityArchiveRefusal(
             "RUNNABILITY_ARCHIVE_PATH_INVALID", f"{role}: {exc}",
         ) from exc
+    finally:
+        if scan_descriptor is not None:
+            os.close(scan_descriptor)
     return names
 
 

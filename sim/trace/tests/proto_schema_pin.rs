@@ -15,7 +15,7 @@ use std::path::PathBuf;
 use sim_trace::Sha256Digest;
 
 const GENERATED_BINDING_SHA256: &str =
-    "c5c0950c9b2a8de1eb92e10c3f8c9734ad8fc1f1113bd666e6d70b083a616c91";
+    "ce69ab506bf01e89f1ab3acd08b3a540031857b539c2d1e3173ab56aa7888227";
 
 const PROTO_PINS: &[(&str, u64)] = &[
     ("address.proto", 0xb768cd17c42a1788),
@@ -23,7 +23,7 @@ const PROTO_PINS: &[(&str, u64)] = &[
     ("dim3d.proto", 0x13d2f3d8144e1420),
     ("gpu_device.proto", 0x456a3472a1018842),
     ("instruction.proto", 0xa387ffa3c65bcb44),
-    ("kernel.proto", 0x2d6ee7fc080ec4ad),
+    ("kernel.proto", 0x3adc739e21faa22b),
     ("threadblock.proto", 0x0424145b630ec29a),
     ("trace.proto", 0xc7577e6647181017),
     ("warp.proto", 0xf6568d1a9c8bdf7b),

@@ -39,17 +39,19 @@ import ctypes
 import datetime as _dt
 import csv
 from contextlib import ExitStack, contextmanager, nullcontext
+import errno
 import hashlib
 import json
 import os
 import re
 import stat
+import subprocess
 import sys
 import tempfile
 import tomllib
 from ctypes import c_char, c_int, c_size_t, POINTER, byref, c_uint
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 
 SUITE_ROOT = Path(__file__).resolve().parent
@@ -64,6 +66,7 @@ if str(SUITE_ROOT) not in sys.path:
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from tools.nvbit_tracer import capture_process as _nvbit_process  # noqa: E402
 from tools.local_labels.immutable_artifact import (  # noqa: E402
     ExclusiveDirectoryStage,
     ImmutableArtifactError,
@@ -82,14 +85,23 @@ from tools.local_labels.immutable_artifact import (  # noqa: E402
     open_retained_regular,
     publish_directory,
     publish_regular_file,
+    publish_retained_regular_file,
     read_regular,
     replace_regular_bytes,
     retire_regular_file,
     sha256_file as anchored_sha256_file,
 )
+from tools.nvbit_tracer.external_tracer import (  # noqa: E402
+    EXTERNAL_TRACER_MAX_BYTES,
+    ExternalTracerAuthority,
+    require_external_tracer_authority,
+    verify_retained_tracer_authority,
+)
 from tools.nvbit_tracer.runtime_env import (  # noqa: E402
     TracerRuntimeError,
-    tracer_runtime_env,
+    default_runtime_manifest_path,
+    retained_tracer_runtime_env,
+    sanitized_capture_environment,
 )
 from tools.nvbit_tracer.trace_admission import (  # noqa: E402
     DEFAULT_TRACE_ADMISSION_LIMITS,
@@ -123,6 +135,9 @@ EXIT_BUILD_FAILED = 6
 EXIT_GOLDEN_MISMATCH = 7
 EXIT_UNKNOWN_TARGET_DEVICE = 8
 EXIT_DRY_RUN_NOT_SUPPORTED = 9
+
+_TRACE_CHILD_TIMEOUT_SECONDS = 60 * 60
+_TRACE_CHILD_MAX_STDOUT_STDERR_BYTES = 8 * 1024 * 1024
 
 KB_CAPABILITY_CARD = "references/NVIDIA_Manuals/blackwell_compatibility/01_blackwell-architecture-compatibility.md"
 
@@ -499,14 +514,17 @@ def _emit_manifest(
     *,
     filename: str = "measurement_manifest.json",
     preserve_previous: bool = False,
-) -> Path:
+    retain_capability: bool = False,
+) -> Path | RetainedRegular:
     """Publish one manifest without following destination path components.
 
     Ordinary timing/correctness callers retain the historical replace-in-place
     behavior.  Trace activation uses a shape-specific filename with
     ``preserve_previous=True``: the prior regular file is atomically retired as
     byte-exact evidence, then the new file is committed with no-replace
-    semantics so a concurrent destination cannot be overwritten.
+    semantics so a concurrent destination cannot be overwritten. Activation
+    callers also set ``retain_capability=True`` so the publication returns the
+    exact committed inode with its path monitor already armed.
     """
     if (
         type(filename) is not str
@@ -518,6 +536,12 @@ def _emit_manifest(
         raise ImmutableArtifactError(
             "manifest filename must be one portable path component"
         )
+    if type(retain_capability) is not bool:
+        raise ImmutableArtifactError("manifest retain selector must be boolean")
+    if retain_capability and not preserve_previous:
+        raise ImmutableArtifactError(
+            "retained manifest publication requires no-replace preservation"
+        )
     ensure_directory(out_dir)
     dest = out_dir / filename
     payload = (json.dumps(manifest, indent=2, sort_keys=False) + "\n").encode(
@@ -525,6 +549,8 @@ def _emit_manifest(
     )
     if preserve_previous:
         retire_regular_file(dest)
+        if retain_capability:
+            return publish_retained_regular_file(out_dir, filename, payload)
         publish_regular_file(out_dir, filename, payload)
     else:
         replace_regular_bytes(dest, payload)
@@ -687,7 +713,7 @@ def _find_kernel_executable(slug: str) -> Path | None:
     return None
 
 
-def _stdout_wall_time_s(stdout: str) -> float | None:
+def _stdout_wall_time_s(stdout: str | bytes) -> float | None:
     """Read positive numeric ``wall_time_ms`` from a subprocess's
     stdout JSON, return seconds.
 
@@ -706,7 +732,7 @@ def _stdout_wall_time_s(stdout: str) -> float | None:
     """
     try:
         result = json.loads(stdout)
-    except (json.JSONDecodeError, ValueError):
+    except (UnicodeDecodeError, json.JSONDecodeError, ValueError):
         return None
     if not isinstance(result, dict):
         return None
@@ -3309,12 +3335,6 @@ def handle_timing(row: dict[str, Any], props: DeviceProps, out_dir: Path,
     return EXIT_OK
 
 
-# Absolute path to the H3-preserved, SHA-bound NVBit tracer .so. Tests patch
-# this module attribute directly to exercise the missing-artifact refusal path.
-# Canonical checkout rebuild/clean/repin is prohibited while H3 holds.
-NVBIT_TRACER_SO = SUITE_ROOT.parent.parent / "tools" / "nvbit_tracer" / "tracer_tool" / "tracer_tool.so"
-
-
 def _write_trace_volume_exceeded(
     *,
     sidecar: Path,
@@ -3354,18 +3374,29 @@ def _trace_artifact_record_payload(record: dict[str, Any]) -> bytes:
     return (json.dumps(record, indent=2) + "\n").encode("utf-8")
 
 
-def _publish_trace_artifact_record(path: Path, record: dict[str, Any]) -> None:
+def _publish_trace_artifact_record(
+    path: Path,
+    record: dict[str, Any],
+    *,
+    before_commit: Callable[[], None] | None = None,
+    after_commit: Callable[[], None] | None = None,
+) -> None:
     """Commit the sole trace-activation leaf with no-replace semantics.
 
     The caller must retire any prior active record before beginning the rerun.
     Publication therefore refuses every destination race rather than replacing
     a concurrently created regular file.  The committed leaf is read-only and
-    can be retired byte-exact by the next attempt.
+    can be retired byte-exact by the next attempt. ``before_commit`` is the
+    final authority check immediately before the no-replace rename;
+    ``after_commit`` repeats it while rollback guards can still retire a bad
+    commit.
     """
     publish_regular_file(
         path.parent,
         path.name,
         _trace_artifact_record_payload(record),
+        before_commit=before_commit,
+        after_commit=after_commit,
     )
 
 
@@ -3585,6 +3616,332 @@ def _directory_generation_record(
     }
 
 
+class _TraceActivationAuthorityError(ImmutableArtifactError):
+    """A required activation role is absent or structurally invalid."""
+
+    def __init__(self, typed_reason: str, detail: str) -> None:
+        self.typed_reason = typed_reason
+        self.detail = detail
+        super().__init__(f"{typed_reason}: {detail}")
+
+
+class _RetainedDirectoryGenerationAuthority:
+    """One descriptor-bound immutable tree retained through activation."""
+
+    def __init__(
+        self,
+        *,
+        role: str,
+        generation: ImmutableDirectoryGeneration,
+        reader: PinnedDirectoryReader,
+        snapshot: PinnedTreeSnapshot,
+        max_total_relative_path_bytes: int,
+    ) -> None:
+        self.role = role
+        self.generation = generation
+        self.reader = reader
+        self.snapshot = snapshot
+        self.max_total_relative_path_bytes = max_total_relative_path_bytes
+
+    def verify_unchanged(self) -> None:
+        """Rehash exact bytes and rebind all metadata through retained roots."""
+        self.reader.verify_path()
+        observed = self.reader.snapshot_tree(
+            require_readonly_files=True,
+            require_readonly_directories=True,
+            max_files=max(1, self.generation.file_count),
+            max_directories=max(1, self.generation.directory_count),
+            max_total_file_bytes=self.generation.total_file_bytes,
+            max_total_relative_path_bytes=self.max_total_relative_path_bytes,
+        )
+        if observed != self.snapshot:
+            raise ImmutableArtifactError(
+                f"retained {self.role} tree metadata generation changed"
+            )
+        files = dict(observed.files)
+        directories = dict(observed.directories)
+        expected_files = {
+            identity.relative_path: identity
+            for identity in self.generation.files
+        }
+        if (
+            set(files) != set(expected_files)
+            or len(directories) != self.generation.directory_count
+            or "." not in directories
+        ):
+            raise ImmutableArtifactError(
+                f"retained {self.role} tree inventory changed"
+            )
+        for relative_path, metadata in directories.items():
+            if (
+                not stat.S_ISDIR(metadata[2])
+                or stat.S_IMODE(metadata[2]) != 0o555
+            ):
+                raise ImmutableArtifactError(
+                    f"retained {self.role} directory is not read-only: "
+                    f"{relative_path}"
+                )
+        for relative_path, identity in sorted(expected_files.items()):
+            metadata = files[relative_path]
+            if (
+                not stat.S_ISREG(metadata[2])
+                or stat.S_IMODE(metadata[2]) != 0o444
+                or metadata[3] != 1
+                or metadata[4] != identity.size_bytes
+            ):
+                raise ImmutableArtifactError(
+                    f"retained {self.role} file metadata changed: {relative_path}"
+                )
+            payload = self.reader.read_snapshot(
+                relative_path,
+                max_bytes=identity.size_bytes,
+                expected_metadata=metadata,
+            ).payload
+            if (
+                len(payload) != identity.size_bytes
+                or hashlib.sha256(payload).hexdigest() != identity.sha256
+            ):
+                raise ImmutableArtifactError(
+                    f"retained {self.role} file bytes changed: {relative_path}"
+                )
+        self.reader.verify_path()
+        if self.reader.snapshot_tree(
+            require_readonly_files=True,
+            require_readonly_directories=True,
+            max_files=max(1, self.generation.file_count),
+            max_directories=max(1, self.generation.directory_count),
+            max_total_file_bytes=self.generation.total_file_bytes,
+            max_total_relative_path_bytes=self.max_total_relative_path_bytes,
+        ) != self.snapshot:
+            raise ImmutableArtifactError(
+                f"retained {self.role} tree changed during byte verification"
+            )
+
+
+class _TraceActivationAuthoritySet:
+    """Explicit complete role set held from the final gate through commit."""
+
+    def __init__(self, expected_roles: set[str]) -> None:
+        if not expected_roles or any(
+            type(role) is not str or not role for role in expected_roles
+        ):
+            raise _TraceActivationAuthorityError(
+                "trace_activation_authority_invalid",
+                "activation authority roles must be nonempty strings",
+            )
+        self._expected_roles = frozenset(expected_roles)
+        self._verifiers: dict[str, Callable[[], None]] = {}
+        self._stack = ExitStack()
+        self._closed = False
+
+    @property
+    def stack(self) -> ExitStack:
+        if self._closed:
+            raise _TraceActivationAuthorityError(
+                "trace_activation_authority_closed",
+                "activation authority stack is already closed",
+            )
+        return self._stack
+
+    def add(self, role: str, verifier: Callable[[], None]) -> None:
+        if role not in self._expected_roles:
+            raise _TraceActivationAuthorityError(
+                "trace_activation_authority_unexpected",
+                f"unexpected activation authority role: {role}",
+            )
+        if role in self._verifiers:
+            raise _TraceActivationAuthorityError(
+                "trace_activation_authority_duplicate",
+                f"duplicate activation authority role: {role}",
+            )
+        if not callable(verifier):
+            raise _TraceActivationAuthorityError(
+                "trace_activation_authority_invalid",
+                f"activation authority verifier is not callable: {role}",
+            )
+        self._verifiers[role] = verifier
+
+    def verify_unchanged(self) -> None:
+        if self._closed:
+            raise _TraceActivationAuthorityError(
+                "trace_activation_authority_closed",
+                "activation authority set closed before commit",
+            )
+        observed_roles = frozenset(self._verifiers)
+        if observed_roles != self._expected_roles:
+            missing = sorted(self._expected_roles - observed_roles)
+            unexpected = sorted(observed_roles - self._expected_roles)
+            raise _TraceActivationAuthorityError(
+                "trace_activation_authority_missing",
+                f"missing_roles={missing} unexpected_roles={unexpected}",
+            )
+        for role in sorted(self._verifiers):
+            try:
+                self._verifiers[role]()
+            except BaseException as exc:
+                try:
+                    exc.add_note(
+                        f"trace activation authority role failed: {role}"
+                    )
+                except (AttributeError, TypeError):
+                    pass
+                raise
+
+    def close(self) -> None:
+        if self._closed:
+            return
+        self._closed = True
+        self._stack.close()
+
+
+
+def _retain_exact_directory_generation(
+    *,
+    authorities: _TraceActivationAuthoritySet,
+    role: str,
+    generation: ImmutableDirectoryGeneration,
+    require_nonempty: bool,
+    max_total_relative_path_bytes: int,
+) -> _RetainedDirectoryGenerationAuthority:
+    """Arm a tree monitor and bind it to one previously admitted generation."""
+    reader = authorities.stack.enter_context(
+        PinnedDirectoryReader(generation.path)
+    )
+    snapshot = authorities.stack.enter_context(
+        reader.retain_tree_generation(
+            require_readonly_files=True,
+            require_readonly_directories=True,
+            max_files=max(1, generation.file_count),
+            max_directories=max(1, generation.directory_count),
+            max_total_file_bytes=generation.total_file_bytes,
+            max_total_relative_path_bytes=max_total_relative_path_bytes,
+        )
+    )
+    observed = inspect_immutable_directory_generation(
+        generation.path,
+        require_nonempty=require_nonempty,
+        max_files=max(1, generation.file_count),
+        max_directories=max(1, generation.directory_count),
+        max_total_file_bytes=generation.total_file_bytes,
+        max_total_relative_path_bytes=max_total_relative_path_bytes,
+    )
+    if observed != generation:
+        raise ImmutableArtifactError(
+            f"{role} generation changed before retained authority acquisition"
+        )
+    retained = _RetainedDirectoryGenerationAuthority(
+        role=role,
+        generation=generation,
+        reader=reader,
+        snapshot=snapshot,
+        max_total_relative_path_bytes=max_total_relative_path_bytes,
+    )
+    retained.verify_unchanged()
+    authorities.add(role, retained.verify_unchanged)
+    return retained
+
+
+
+def _retained_capability_identity(
+    *,
+    retained: RetainedRegular,
+    artifact_dir: Path,
+) -> dict[str, Any]:
+    """Project one live retained file into the portable active-record identity."""
+    retained.verify_unchanged()
+    artifact_root = Path(os.path.abspath(os.fspath(artifact_dir)))
+    try:
+        relative = retained.path.relative_to(artifact_root).as_posix()
+    except ValueError as exc:
+        raise ImmutableArtifactError(
+            f"evidence path escapes artifact directory: {retained.path}"
+        ) from exc
+    return {
+        "path": relative,
+        "sha256": retained.sha256,
+        "size_bytes": retained.size_bytes,
+    }
+
+
+
+def _summary_generation_from_record(
+    *,
+    record: dict[str, Any],
+    artifact_dir: Path,
+) -> ImmutableDirectoryGeneration:
+    """Recover and authenticate the exact tree named by a summary descriptor."""
+    if type(record) is not dict:
+        raise _TraceActivationAuthorityError(
+            "trace_activation_authority_invalid",
+            "summary generation descriptor is not an object",
+        )
+    path_text = record.get("path")
+    file_count = record.get("file_count")
+    directory_count = record.get("directory_count")
+    total_file_bytes = record.get("total_file_bytes")
+    if (
+        type(path_text) is not str
+        or not path_text
+        or type(file_count) is not int
+        or file_count <= 0
+        or type(directory_count) is not int
+        or directory_count <= 0
+        or type(total_file_bytes) is not int
+        or total_file_bytes < 0
+    ):
+        raise _TraceActivationAuthorityError(
+            "trace_activation_authority_invalid",
+            "summary generation descriptor counts or path are invalid",
+        )
+    artifact_root = Path(os.path.abspath(os.fspath(artifact_dir)))
+    generation_path = artifact_root / path_text
+    try:
+        if generation_path.relative_to(artifact_root).as_posix() != path_text:
+            raise ValueError(path_text)
+    except ValueError as exc:
+        raise _TraceActivationAuthorityError(
+            "trace_activation_authority_invalid",
+            "summary generation descriptor escapes the artifact directory",
+        ) from exc
+    generation = inspect_immutable_directory_generation(
+        generation_path,
+        require_nonempty=True,
+        max_files=file_count,
+        max_directories=directory_count,
+        max_total_file_bytes=total_file_bytes,
+        max_total_relative_path_bytes=max(4096, file_count * 4096),
+    )
+    for field, observed in (
+        ("content_manifest_sha256", generation.content_manifest_sha256),
+        (
+            "filesystem_generation_sha256",
+            generation.filesystem_generation_sha256,
+        ),
+        ("file_count", generation.file_count),
+        ("directory_count", generation.directory_count),
+        ("total_file_bytes", generation.total_file_bytes),
+    ):
+        if record.get(field) != observed:
+            raise ImmutableArtifactError(
+                f"summary generation descriptor changed: {field}"
+            )
+    expected_files = record.get("files")
+    observed_files = [
+        {
+            "path": (Path(path_text) / identity.relative_path).as_posix(),
+            "sha256": identity.sha256,
+            "size_bytes": identity.size_bytes,
+        }
+        for identity in generation.files
+    ]
+    if expected_files != observed_files:
+        raise ImmutableArtifactError(
+            "summary generation descriptor file inventory changed"
+        )
+    return generation
+
+
+
 def _publish_trace_attempt_event(
     *,
     artifact_dir: Path,
@@ -3603,6 +3960,9 @@ def _publish_trace_attempt_event(
     phase_ledger_staging_path: Path | None = None,
     summary_generation: dict[str, Any] | None = None,
     measurement_manifest: dict[str, Any] | None = None,
+    process_failure_evidence: list[dict[str, Any]] | None = None,
+    observed_output_bytes_lower_bound: int | None = None,
+    retained_authorities: _TraceActivationAuthoritySet | None = None,
 ) -> dict[str, Any]:
     """Publish one immutable, non-active event for an attempt.
 
@@ -3665,13 +4025,46 @@ def _publish_trace_attempt_event(
         "nvbit_trace_summary_generation": summary_generation,
         "measurement_manifest": measurement_manifest,
     }
-    event_path = publish_regular_file(
+    if process_failure_evidence is not None:
+        event["process_failure_evidence"] = process_failure_evidence
+    if observed_output_bytes_lower_bound is not None:
+        if (
+            type(observed_output_bytes_lower_bound) is not int
+            or observed_output_bytes_lower_bound < 0
+        ):
+            raise ImmutableArtifactError(
+                "trace attempt output-byte lower bound is invalid"
+            )
+        event["observed_output_bytes_lower_bound"] = (
+            observed_output_bytes_lower_bound
+        )
+    event_payload = (json.dumps(event, indent=2) + "\n").encode("utf-8")
+    if retained_authorities is None:
+        event_path = publish_regular_file(
+            attempt_dir,
+            f"{event_name}.json",
+            event_payload,
+        )
+        assert isinstance(event_path, Path)
+        return _retained_artifact_identity(
+            path=event_path, artifact_dir=artifact_dir
+        )
+    if event_name != "activation_ready":
+        raise _TraceActivationAuthorityError(
+            "trace_activation_authority_invalid",
+            "only activation_ready may become a retained attempt event",
+        )
+    retained_event = publish_retained_regular_file(
         attempt_dir,
         f"{event_name}.json",
-        (json.dumps(event, indent=2) + "\n").encode("utf-8"),
+        event_payload,
     )
-    return _retained_artifact_identity(
-        path=event_path, artifact_dir=artifact_dir
+    retained_event = retained_authorities.stack.enter_context(retained_event)
+    retained_authorities.add(
+        "activation_ready_event", retained_event.verify_unchanged
+    )
+    return _retained_capability_identity(
+        retained=retained_event, artifact_dir=artifact_dir
     )
 
 
@@ -4331,6 +4724,192 @@ def _emit_admitted_trace_features(
     trace_sources.verify_unchanged()
 
 
+class _TraceChildExecutionError(RuntimeError):
+    """One bounded trace child failed after synchronous termination/reaping."""
+
+    def __init__(
+        self,
+        reason: str,
+        detail: str,
+        *,
+        stdout: bytes = b"",
+        stderr: bytes = b"",
+        process_id: int | None = None,
+        observed_output_bytes_lower_bound: int | None = None,
+    ) -> None:
+        self.reason = reason
+        self.detail = detail
+        self.stdout = stdout
+        self.stderr = stderr
+        self.process_id = process_id
+        if (
+            observed_output_bytes_lower_bound is not None
+            and (
+                type(observed_output_bytes_lower_bound) is not int
+                or observed_output_bytes_lower_bound < 0
+            )
+        ):
+            raise ValueError(
+                "trace child output-byte lower bound is invalid"
+            )
+        self.observed_output_bytes_lower_bound = observed_output_bytes_lower_bound
+        self.failure_evidence: tuple[dict[str, Any], ...] = ()
+        super().__init__(f"{reason}: {detail}")
+
+
+_TRACE_CAPTURE_RESOURCE_ERRNOS = frozenset({
+    errno.EAGAIN,
+    errno.EMFILE,
+    errno.ENFILE,
+    errno.ENOMEM,
+    errno.ENOSPC,
+})
+
+
+def _trace_capture_resource_failure(error: BaseException) -> bool:
+    """Recognize resource exhaustion across an exception chain."""
+
+    pending = [error]
+    seen: set[int] = set()
+    while pending:
+        current = pending.pop()
+        if id(current) in seen:
+            continue
+        seen.add(id(current))
+        if isinstance(current, MemoryError):
+            return True
+        if (
+            isinstance(current, OSError)
+            and current.errno in _TRACE_CAPTURE_RESOURCE_ERRNOS
+        ):
+            return True
+        for chained in (current.__cause__, current.__context__):
+            if isinstance(chained, BaseException):
+                pending.append(chained)
+    return False
+
+
+def _trace_child_presentation_text(payload: bytes) -> str:
+    """Decode child output for diagnostics without changing retained bytes."""
+
+    if not isinstance(payload, bytes):
+        raise TypeError("trace child output must remain bytes")
+    return payload.decode("utf-8", errors="replace").strip()
+
+
+def _retain_trace_child_failure_streams(
+    directory: Path,
+    *,
+    role: str,
+    stdout: bytes,
+    stderr: bytes,
+) -> tuple[dict[str, Any], ...]:
+    """Publish bounded partial streams in the already-preserved raw stage."""
+
+    evidence: list[dict[str, Any]] = []
+    for stream, payload in (("stdout", stdout), ("stderr", stderr)):
+        name = f"{role}_failure.{stream}.bin"
+        publish_regular_file(directory, name, payload)
+        evidence.append({
+            "path": name,
+            "sha256": hashlib.sha256(payload).hexdigest(),
+            "size_bytes": len(payload),
+        })
+    return tuple(evidence)
+
+
+def _bind_trace_child_failure_evidence(
+    error: BaseException,
+    *,
+    directory: Path,
+    role: str,
+    stdout: bytes,
+    stderr: bytes,
+) -> tuple[dict[str, Any], ...]:
+    try:
+        evidence = _retain_trace_child_failure_streams(
+            directory,
+            role=role,
+            stdout=stdout,
+            stderr=stderr,
+        )
+    except BaseException as preservation_error:
+        try:
+            error.add_note(
+                "partial trace process evidence preservation failed: "
+                f"{type(preservation_error).__name__}: {preservation_error}"
+            )
+        except (AttributeError, TypeError):
+            pass
+        evidence = ()
+    try:
+        error.failure_evidence = evidence
+    except (AttributeError, TypeError):
+        pass
+    return evidence
+
+
+def _run_bounded_trace_child(
+    command: tuple[str, ...],
+    *,
+    environment: dict[str, str],
+    working_directory: str,
+    inherited_descriptors: tuple[int, ...],
+    role: str,
+) -> subprocess.CompletedProcess[bytes]:
+    """Run one trace child with a wall clock, output cap, and typed cleanup."""
+
+    timeout_code = f"{role}_timeout"
+    launch_code = f"{role}_launch_failed"
+    try:
+        result = _nvbit_process.execute_capture_process(
+            command,
+            environment=environment,
+            working_directory=working_directory,
+            inherited_descriptors=inherited_descriptors,
+            timeout_seconds=_TRACE_CHILD_TIMEOUT_SECONDS,
+            max_output_bytes=_TRACE_CHILD_MAX_STDOUT_STDERR_BYTES,
+            timeout_code=timeout_code,
+            launch_code=launch_code,
+        )
+    except _nvbit_process.NvbitCaptureProcessError as exc:
+        if exc.process_cleanup_incomplete:
+            reason = f"{role}_cleanup_failed"
+        elif exc.code == _nvbit_process.NVBIT_CAPTURE_OUTPUT_LIMIT:
+            reason = f"{role}_output_limit"
+        elif exc.code == timeout_code:
+            reason = timeout_code
+        elif _trace_capture_resource_failure(exc):
+            reason = f"{role}_resource_unavailable"
+        elif exc.code == launch_code:
+            reason = launch_code
+        else:
+            reason = f"{role}_execution_failed"
+        raise _TraceChildExecutionError(
+            reason,
+            exc.detail,
+            stdout=exc.stdout,
+            stderr=exc.stderr,
+            process_id=exc.process_id,
+            observed_output_bytes_lower_bound=(
+                exc.observed_output_bytes_lower_bound
+            ),
+        ) from exc
+    except (MemoryError, OSError) as exc:
+        reason = (
+            f"{role}_resource_unavailable"
+            if _trace_capture_resource_failure(exc)
+            else launch_code
+        )
+        raise _TraceChildExecutionError(reason, str(exc)) from exc
+    return subprocess.CompletedProcess(
+        list(command),
+        result.returncode,
+        result.stdout,
+        result.stderr,
+    )
+
+
 def _run_retained_nvbit_capture(
     *,
     retained_executable: RetainedExecutable,
@@ -4338,14 +4917,17 @@ def _run_retained_nvbit_capture(
     args: list[str],
     traces_folder: Path,
     traces_descriptor: int | None = None,
+    runtime_stack: ExitStack | None = None,
 ) -> dict[str, Any]:
     """Run baseline and NVBit capture through retained source capabilities.
 
-    Canonical callers provide the exclusive staging-directory descriptor.  The
-    subprocess then receives ``/proc/self/fd/<n>`` rather than a mutable lexical
-    pathname, and the descriptor remains inherited for the complete capture.
+    Canonical callers provide the exclusive staging-directory descriptor and the
+    source transaction's ``runtime_stack``. The subprocess receives
+    ``/proc/self/fd/<n>`` rather than mutable lexical paths, and the executable,
+    tracer, capture root, and runtime DSO descriptors remain retained through
+    active publication. Standalone callers omit ``runtime_stack`` and retain the
+    runtime only through child completion.
     """
-    import subprocess as _sp
     import time as _time
 
     if traces_descriptor is not None:
@@ -4371,55 +4953,120 @@ def _run_retained_nvbit_capture(
             executable_proc_path = (
                 f"/proc/self/fd/{retained_executable.descriptor}"
             )
-            baseline_env = {
-                key: value
-                for key, value in os.environ.items()
-                if key != "CUDA_INJECTION64_PATH"
-            }
+            capture_base_env = sanitized_capture_environment()
+            baseline_env = dict(capture_base_env)
             baseline_env["TRACES_FOLDER"] = capture_folder
             baseline_t0 = _time.perf_counter()
-            baseline_proc = _sp.run(
-                [executable_proc_path, *args],
-                capture_output=True,
-                text=True,
-                env=baseline_env,
-                pass_fds=(retained_executable.descriptor, *capture_fds),
-            )
+            try:
+                baseline_proc = _run_bounded_trace_child(
+                    (executable_proc_path, *args),
+                    environment=baseline_env,
+                    working_directory=str(retained_executable.path.parent),
+                    inherited_descriptors=(
+                        retained_executable.descriptor,
+                        *capture_fds,
+                    ),
+                    role="trace_baseline_process",
+                )
+            except _TraceChildExecutionError as exc:
+                _bind_trace_child_failure_evidence(
+                    exc,
+                    directory=traces_folder,
+                    role="trace_baseline_process",
+                    stdout=exc.stdout,
+                    stderr=exc.stderr,
+                )
+                raise
             baseline_elapsed_s = _time.perf_counter() - baseline_t0
             if baseline_proc.returncode == 0:
                 try:
                     baseline_result = json.loads(baseline_proc.stdout)
-                except json.JSONDecodeError:
+                except (UnicodeDecodeError, json.JSONDecodeError):
                     baseline_result = None
             else:
                 baseline_result = None
 
             trace_proc = None
             trace_elapsed_s = None
+            retained_runtime = None
             if not (
                 isinstance(baseline_result, dict)
                 and baseline_result.get("result_kind") == "typed_unavailable"
             ):
-                env = tracer_runtime_env(
-                    retained_tracer.path,
-                    retained_descriptor=retained_tracer.descriptor,
+                trace_proc = None
+                owned_runtime_stack = (
+                    ExitStack() if runtime_stack is None else None
                 )
-                env["CUDA_INJECTION64_PATH"] = retained_tracer.proc_path
-                env["USER_DEFINED_FOLDERS"] = "1"
-                env["TRACES_FOLDER"] = capture_folder
-                trace_t0 = _time.perf_counter()
-                trace_proc = _sp.run(
-                    [executable_proc_path, *args],
-                    capture_output=True,
-                    text=True,
-                    env=env,
-                    pass_fds=(
-                        retained_executable.descriptor,
-                        retained_tracer.descriptor,
-                        *capture_fds,
-                    ),
+                selected_runtime_stack = (
+                    owned_runtime_stack
+                    if owned_runtime_stack is not None
+                    else runtime_stack
                 )
-                trace_elapsed_s = _time.perf_counter() - trace_t0
+                assert selected_runtime_stack is not None
+                try:
+                    retained_runtime = selected_runtime_stack.enter_context(
+                        retained_tracer_runtime_env(
+                            retained_tracer.path,
+                            base_env=capture_base_env,
+                            runtime_manifest=default_runtime_manifest_path(
+                                retained_tracer.path
+                            ),
+                            retained_descriptor=retained_tracer.descriptor,
+                        )
+                    )
+                    env = dict(retained_runtime.environment)
+                    env["CUDA_INJECTION64_PATH"] = retained_tracer.proc_path
+                    env["USER_DEFINED_FOLDERS"] = "1"
+                    env["TRACES_FOLDER"] = capture_folder
+                    trace_t0 = _time.perf_counter()
+                    trace_proc = _run_bounded_trace_child(
+                        (executable_proc_path, *args),
+                        environment=env,
+                        working_directory=str(
+                            retained_executable.path.parent
+                        ),
+                        inherited_descriptors=(
+                            retained_executable.descriptor,
+                            retained_tracer.descriptor,
+                            *capture_fds,
+                            *retained_runtime.pass_fds,
+                        ),
+                        role="trace_injected_process",
+                    )
+                    trace_elapsed_s = _time.perf_counter() - trace_t0
+                    retained_runtime.verify_unchanged()
+                except _TraceChildExecutionError as exc:
+                    _bind_trace_child_failure_evidence(
+                        exc,
+                        directory=traces_folder,
+                        role="trace_injected_process",
+                        stdout=exc.stdout,
+                        stderr=exc.stderr,
+                    )
+                    raise
+                except TracerRuntimeError as exc:
+                    if trace_proc is not None:
+                        _bind_trace_child_failure_evidence(
+                            exc,
+                            directory=traces_folder,
+                            role="trace_runtime_verification",
+                            stdout=trace_proc.stdout,
+                            stderr=trace_proc.stderr,
+                        )
+                    raise
+                finally:
+                    if owned_runtime_stack is not None:
+                        owned_runtime_stack.close()
+                        retained_runtime = None
+
+            process_failure_evidence: tuple[dict[str, Any], ...] = ()
+            if trace_proc is not None and trace_proc.returncode != 0:
+                process_failure_evidence = _retain_trace_child_failure_streams(
+                    traces_folder,
+                    role="trace_injected_process",
+                    stdout=trace_proc.stdout,
+                    stderr=trace_proc.stderr,
+                )
 
             result = {
                 "baseline_proc": baseline_proc,
@@ -4429,6 +5076,12 @@ def _run_retained_nvbit_capture(
                 "trace_elapsed_s": trace_elapsed_s,
                 "binary_sha256": retained_executable.sha256,
                 "tracer_build_sha256": retained_tracer.sha256,
+                "retained_runtime": retained_runtime,
+                "runtime_dso_sha256": (
+                    dict(retained_runtime.dso_sha256)
+                    if retained_runtime is not None else None
+                ),
+                "process_failure_evidence": list(process_failure_evidence),
             }
             retained_executable.verify_unchanged()
             retained_tracer.verify_unchanged()
@@ -4443,6 +5096,7 @@ def _capture_raw_trace_generation(
     retained_executable: RetainedExecutable,
     retained_tracer: RetainedRegular,
     args: list[str],
+    runtime_stack: ExitStack | None = None,
 ) -> dict[str, Any]:
     """Capture one attempt and commit its raw tree before any admission.
 
@@ -4550,15 +5204,32 @@ def _capture_raw_trace_generation(
                 args=args,
                 traces_folder=stage.staging_path,
                 traces_descriptor=stage.descriptor,
+                runtime_stack=runtime_stack,
             )
+        except _TraceChildExecutionError as exc:
+            return select({
+                "status": "capture_failed",
+                "typed_reason": exc.reason,
+                "detail": exc.detail,
+                "execution": None,
+                "generation": None,
+                "staging_path": stage.staging_path,
+                "process_failure_evidence": list(exc.failure_evidence),
+                "observed_output_bytes_lower_bound": (
+                    exc.observed_output_bytes_lower_bound
+                ),
+            })
         except TracerRuntimeError as exc:
             return select({
                 "status": "capture_failed",
-                "typed_reason": "tracer_so_deps_unresolved",
+                "typed_reason": exc.reason,
                 "detail": str(exc),
                 "execution": None,
                 "generation": None,
                 "staging_path": stage.staging_path,
+                "process_failure_evidence": list(
+                    getattr(exc, "failure_evidence", ())
+                ),
             })
         except ImmutableArtifactLimitError as exc:
             return select({
@@ -4622,11 +5293,14 @@ def _capture_raw_trace_generation(
                 "detail": (
                     f"{retained_executable.path} under tracer "
                     f"rc={trace_process.returncode}: "
-                    f"{trace_process.stderr.strip()}"
+                    f"{_trace_child_presentation_text(trace_process.stderr)}"
                 ),
                 "execution": execution,
                 "generation": None,
                 "staging_path": stage.staging_path,
+                "process_failure_evidence": execution.get(
+                    "process_failure_evidence", []
+                ),
             })
 
         generation: ImmutableDirectoryGeneration | None = None
@@ -4875,7 +5549,9 @@ def _phase_evidence_identities(
 def handle_trace(row: dict[str, Any], props: DeviceProps, out_dir: Path,
                  shape_point_name: str | None = None,
                  phase_inject_ab: bool = False,
-                 ab_repeat_count: int = 3) -> int:
+                 ab_repeat_count: int = 3,
+                 tracer_source_path: Path | str | None = None,
+                 tracer_sha256: str | None = None) -> int:
     if type(phase_inject_ab) is not bool:
         print(
             "phase_inject_request_invalid: phase_inject_ab must be an exact "
@@ -4899,6 +5575,15 @@ def handle_trace(row: dict[str, Any], props: DeviceProps, out_dir: Path,
                 file=sys.stderr,
             )
             return EXIT_USAGE
+    try:
+        tracer_authority = require_external_tracer_authority(
+            tracer_source_path,
+            tracer_sha256,
+            repo_root=REPO_ROOT,
+        )
+    except ValueError as exc:
+        print(f"external_tracer_authority_invalid: {exc}", file=sys.stderr)
+        return EXIT_USAGE
     source_stack = ExitStack()
     try:
         result = _handle_trace_with_sources(
@@ -4908,6 +5593,7 @@ def handle_trace(row: dict[str, Any], props: DeviceProps, out_dir: Path,
             shape_point_name=shape_point_name,
             phase_inject_ab=phase_inject_ab,
             ab_repeat_count=ab_repeat_count,
+            tracer_authority=tracer_authority,
             source_stack=source_stack,
         )
     except BaseException as primary:
@@ -4950,6 +5636,7 @@ def _handle_trace_with_sources(
     shape_point_name: str | None,
     phase_inject_ab: bool,
     ab_repeat_count: int,
+    tracer_authority: ExternalTracerAuthority,
     source_stack: ExitStack,
 ) -> int:
     slug = row["slug"]
@@ -5047,18 +5734,9 @@ def _handle_trace_with_sources(
         print(f"trace_shape_overbudget: sidecar at {sidecar}", file=sys.stderr)
         return EXIT_SAMPLING_REQUIRED
 
-    # Pre-admission passed. Now dispatch the NVBit tracer against the built
-    # kernel binary. The tracer is the H3-preserved .so; a missing artifact is
-    # not an invitation to rebuild in the canonical checkout.
-    tracer_so = NVBIT_TRACER_SO
-    if not tracer_so.exists():
-        print(
-            f"tracer_preserved_artifact_missing: {tracer_so} is missing; "
-            "restore the byte-exact SHA-bound artifact through the H3 "
-            "operator workflow; canonical rebuild is prohibited",
-            file=sys.stderr,
-        )
-        return EXIT_UNSUPPORTED
+    # Capture only through the explicit external tracer authority validated by
+    # handle_trace before any output retirement or other mutation.
+    tracer_so = tracer_authority.path
     executable = _find_kernel_executable(slug)
     if executable is None:
         print(f"executable_missing: {slug} has no {slug}_run executable (build the kernel first)", file=sys.stderr)
@@ -5069,8 +5747,12 @@ def _handle_trace_with_sources(
             open_retained_executable(executable)
         )
         retained_tracer = source_stack.enter_context(
-            open_retained_regular(tracer_so)
+            open_retained_regular(
+                tracer_so,
+                max_bytes=EXTERNAL_TRACER_MAX_BYTES,
+            )
         )
+        verify_retained_tracer_authority(retained_tracer, tracer_authority)
     except ImmutableArtifactResourceError as exc:
         print(
             "trace_input_identity_resource_unavailable: "
@@ -5078,7 +5760,7 @@ def _handle_trace_with_sources(
             file=sys.stderr,
         )
         return EXIT_BUILD_FAILED
-    except (ImmutableArtifactError, OSError) as exc:
+    except (ImmutableArtifactError, OSError, ValueError) as exc:
         print(
             "trace_input_identity_invalid: "
             f"{type(exc).__name__}: {exc}",
@@ -5098,6 +5780,7 @@ def _handle_trace_with_sources(
         retained_executable=retained_executable,
         retained_tracer=retained_tracer,
         args=args,
+        runtime_stack=source_stack,
     )
     capture_status = capture_result["status"]
     execution = capture_result["execution"]
@@ -5145,6 +5828,12 @@ def _handle_trace_with_sources(
                     None
                     if failed_raw_generation_record is not None
                     else raw_unresolved_committed_path
+                ),
+                process_failure_evidence=capture_result.get(
+                    "process_failure_evidence"
+                ),
+                observed_output_bytes_lower_bound=capture_result.get(
+                    "observed_output_bytes_lower_bound"
                 ),
             )
         except (ImmutableArtifactError, OSError) as event_exc:
@@ -5258,6 +5947,8 @@ def _handle_trace_with_sources(
                     if raw_staging_path is not None else None
                 ),
                 "binary_sha256": execution["binary_sha256"],
+                "tracer_so_path": str(retained_tracer.path),
+                "tracer_source_kind": tracer_authority.source_kind,
                 "nvbit_tracer_build_hash": execution["tracer_build_sha256"],
                 "kernel_signature_sha256": kernel_signature_sha256,
                 "source_commit": _resolve_source_commit(),
@@ -5316,6 +6007,7 @@ def _handle_trace_with_sources(
         phase_ledger_staging_path: Path | None = None,
         summary_generation: dict[str, Any] | None = None,
         measurement_manifest: dict[str, Any] | None = None,
+        observed_output_bytes_lower_bound: int | None = None,
     ) -> None:
         if typed_reason == "trace_snapshot_resource_unavailable":
             # The publication primitive depends on the same bounded no-follow
@@ -5344,6 +6036,9 @@ def _handle_trace_with_sources(
                 phase_ledger_staging_path=phase_ledger_staging_path,
                 summary_generation=summary_generation,
                 measurement_manifest=measurement_manifest,
+                observed_output_bytes_lower_bound=(
+                    observed_output_bytes_lower_bound
+                ),
             )
         except (ImmutableArtifactError, OSError) as event_exc:
             print(
@@ -5361,7 +6056,11 @@ def _handle_trace_with_sources(
         )
         return EXIT_BUILD_FAILED
     if proc.returncode != 0:
-        print(f"build_failed: {executable} under tracer rc={proc.returncode}: {proc.stderr.strip()}", file=sys.stderr)
+        print(
+            f"build_failed: {executable} under tracer rc={proc.returncode}: "
+            f"{_trace_child_presentation_text(proc.stderr)}",
+            file=sys.stderr,
+        )
         return EXIT_BUILD_FAILED
     # R13: prefer the workload's stdout `wall_time_ms` over host
     # `perf_counter` for the NVBit-instrumented run's wall time, so
@@ -5582,15 +6281,7 @@ def _handle_trace_with_sources(
         )
         return EXIT_BUILD_FAILED
 
-    # Serialize the tracer .so path as repo-relative when possible (readable
-    # in committed manifests); fall back to absolute for paths outside the
-    # repo tree (monkeypatched in tests, or externally installed tracers).
-    try:
-        tracer_so_serialized = str(
-            retained_tracer.path.relative_to(SUITE_ROOT.parent.parent)
-        )
-    except ValueError:
-        tracer_so_serialized = str(retained_tracer.path)
+    tracer_so_serialized = str(retained_tracer.path)
 
     artifact_record: dict[str, Any] = {
         "schema_version": 1,
@@ -5603,8 +6294,14 @@ def _handle_trace_with_sources(
         "trace_bytes": trace_bytes,
         "wall_time_s": actual_wall_time_s,
         "tracer_so_path": tracer_so_serialized,
+        "tracer_source_kind": tracer_authority.source_kind,
         "binary_sha256": execution["binary_sha256"],
         "nvbit_tracer_build_hash": execution["tracer_build_sha256"],
+        "nvbit_runtime_dso_sha256": execution.get("runtime_dso_sha256"),
+        "trace_contract_id": trace_admission.trace_contract_id,
+        "memory_payload_classes": list(
+            trace_admission.memory_payload_classes
+        ),
         "kernel_signature_sha256": kernel_signature_sha256,
         "source_commit": _resolve_source_commit(),
         # The portable seal intentionally excludes inode/local-generation
@@ -5692,31 +6389,68 @@ def _handle_trace_with_sources(
     feature_evidence: list[dict[str, Any]] = []
     summary_generation: dict[str, Any] | None = None
     manifest_identity: dict[str, Any] | None = None
-    activation_committed = False
+    retained_manifest: RetainedRegular | None = None
+    expected_activation_roles = {
+        "raw_generation",
+        "derived_generation",
+        "summary_generation",
+        "measurement_manifest",
+        "activation_ready_event",
+        "executable",
+        "tracer",
+        "tracer_runtime",
+        "admitted_trace_sources",
+    }
+    if phase_inject_ab:
+        expected_activation_roles.add("phase_generation")
+    activation_authorities = _TraceActivationAuthoritySet(
+        expected_activation_roles
+    )
+    activation_rollback_armed = False
     activation_payload: bytes | None = None
+    activation_authority_close_error: BaseException | None = None
     derived_stage_close_error: BaseException | None = None
 
-    def retire_failed_activation() -> None:
-        nonlocal activation_committed
-        if not activation_committed:
-            return
+    def retire_failed_activation(
+        primary: BaseException | None = None,
+    ) -> bool:
+        nonlocal activation_rollback_armed
+        if not activation_rollback_armed:
+            return True
         if activation_payload is None:
-            raise ImmutableArtifactError(
-                "committed trace activation has no retained locator payload"
+            missing_payload_error = ImmutableArtifactError(
+                "armed trace activation has no retained locator payload"
             )
+            if primary is None:
+                raise missing_payload_error
+            try:
+                primary.add_note(str(missing_payload_error))
+            except (AttributeError, TypeError):
+                pass
+            return False
         try:
             retire_regular_file(
                 artifact_path,
                 expected_payload=activation_payload,
             )
-        except (ImmutableArtifactError, OSError) as retirement_error:
+        except BaseException as retirement_error:
+            if primary is not None:
+                try:
+                    primary.add_note(
+                        "failed activation retirement also failed: "
+                        f"{type(retirement_error).__name__}: "
+                        f"{retirement_error}"
+                    )
+                except (AttributeError, TypeError):
+                    pass
             print(
                 "trace_failed_activation_retirement_failed: "
                 f"{type(retirement_error).__name__}: {retirement_error}",
                 file=sys.stderr,
             )
-        else:
-            activation_committed = False
+            return False
+        activation_rollback_armed = False
+        return True
 
     try:
         with open_admitted_trace_sources(
@@ -5764,6 +6498,25 @@ def _handle_trace_with_sources(
                     tracer_build_sha256=execution["tracer_build_sha256"],
                 )
                 rc_ab = int(phase_result["return_code"])
+                if rc_ab == EXIT_OK:
+                    phase_admission_error = _phase_summary_admission_error(
+                        phase_result.get("summary"),
+                        expected_ledger_count=(
+                            ab_repeat_count * len(trace_admission.launches)
+                        ),
+                    )
+                    if phase_admission_error is not None:
+                        print(
+                            "phase_cycle_ledger_inadmissible: "
+                            + phase_admission_error,
+                            file=sys.stderr,
+                        )
+                        phase_result = {
+                            **phase_result,
+                            "return_code": EXIT_BUILD_FAILED,
+                            "typed_reason": "phase_cycle_ledger_inadmissible",
+                        }
+                        rc_ab = EXIT_BUILD_FAILED
                 if rc_ab != EXIT_OK:
                     failed_phase_generation = phase_result.get("generation")
                     if isinstance(
@@ -5792,6 +6545,9 @@ def _handle_trace_with_sources(
                             None
                             if phase_ledger_generation_record is not None
                             else phase_result.get("staging_path")
+                        ),
+                        observed_output_bytes_lower_bound=phase_result.get(
+                            "observed_output_bytes_lower_bound"
                         ),
                     )
                     return rc_ab
@@ -5916,16 +6672,113 @@ def _handle_trace_with_sources(
                 shape_point=shape_point["name"],
                 binary_sha256=execution["binary_sha256"],
             )
-            manifest_path = _emit_manifest(
+            published_manifest = _emit_manifest(
                 manifest,
                 artifact_dir,
                 filename=f"measurement_manifest_{shape_point['name']}.json",
                 preserve_previous=True,
+                retain_capability=True,
             )
-            manifest_identity = _retained_artifact_identity(
-                path=manifest_path, artifact_dir=artifact_dir
+            if not isinstance(published_manifest, RetainedRegular):
+                raise _TraceActivationAuthorityError(
+                    "trace_activation_authority_missing",
+                    "measurement manifest publisher returned no retained capability",
+                )
+            retained_manifest = activation_authorities.stack.enter_context(
+                published_manifest
+            )
+            manifest_path = retained_manifest.path
+            manifest_identity = _retained_capability_identity(
+                retained=retained_manifest, artifact_dir=artifact_dir
+            )
+            activation_authorities.add(
+                "measurement_manifest", retained_manifest.verify_unchanged
             )
             artifact_record["measurement_manifest"] = manifest_identity
+
+            # Arm descriptor-bound monitors before the final semantic gate. They
+            # remain live through both active-leaf publication callbacks.
+            preactivation_stage = "final_authority_acquisition"
+            _retain_exact_directory_generation(
+                authorities=activation_authorities,
+                role="raw_generation",
+                generation=raw_generation,
+                require_nonempty=True,
+                max_total_relative_path_bytes=int(
+                    _trace_generation_commit_limits()[
+                        "max_total_relative_path_bytes"
+                    ]
+                ),
+            )
+            _retain_exact_directory_generation(
+                authorities=activation_authorities,
+                role="derived_generation",
+                generation=derived_generation,
+                require_nonempty=False,
+                max_total_relative_path_bytes=int(
+                    _derived_generation_commit_limits()[
+                        "max_total_relative_path_bytes"
+                    ]
+                ),
+            )
+            summary_directory_generation = _summary_generation_from_record(
+                record=summary_generation,
+                artifact_dir=artifact_dir,
+            )
+            _retain_exact_directory_generation(
+                authorities=activation_authorities,
+                role="summary_generation",
+                generation=summary_directory_generation,
+                require_nonempty=True,
+                max_total_relative_path_bytes=max(
+                    4096,
+                    summary_directory_generation.file_count * 4096,
+                ),
+            )
+            if phase_inject_ab:
+                if phase_ledger_generation is None:
+                    raise _TraceActivationAuthorityError(
+                        "trace_activation_authority_missing",
+                        "optional phase generation is absent at authority acquisition",
+                    )
+                _retain_exact_directory_generation(
+                    authorities=activation_authorities,
+                    role="phase_generation",
+                    generation=phase_ledger_generation,
+                    require_nonempty=True,
+                    max_total_relative_path_bytes=4 * 1024 * 1024,
+                )
+            retained_runtime = execution.get("retained_runtime")
+            if retained_runtime is None or not callable(
+                getattr(retained_runtime, "verify_unchanged", None)
+            ):
+                raise _TraceActivationAuthorityError(
+                    "trace_activation_authority_missing",
+                    "retained tracer runtime authority is absent",
+                )
+            runtime_dso_sha256 = execution.get("runtime_dso_sha256")
+            if (
+                type(runtime_dso_sha256) is not dict
+                or not runtime_dso_sha256
+                or runtime_dso_sha256
+                != dict(getattr(retained_runtime, "dso_sha256", {}))
+            ):
+                raise _TraceActivationAuthorityError(
+                    "trace_activation_authority_invalid",
+                    "retained tracer runtime DSO identities are absent or changed",
+                )
+            activation_authorities.add(
+                "executable", retained_executable.verify_unchanged
+            )
+            activation_authorities.add(
+                "tracer", retained_tracer.verify_unchanged
+            )
+            activation_authorities.add(
+                "tracer_runtime", retained_runtime.verify_unchanged
+            )
+            activation_authorities.add(
+                "admitted_trace_sources", trace_sources.verify_unchanged
+            )
 
             preactivation_stage = "final_evidence_generation_gate"
             observed_summary_generation = (
@@ -5943,8 +6796,10 @@ def _handle_trace_with_sources(
                 raise ImmutableArtifactError(
                     "NVBit summary generation changed before activation"
                 )
-            observed_manifest = _retained_artifact_identity(
-                path=manifest_path, artifact_dir=artifact_dir
+            assert retained_manifest is not None
+            retained_manifest.verify_unchanged()
+            observed_manifest = _retained_capability_identity(
+                retained=retained_manifest, artifact_dir=artifact_dir
             )
             if observed_manifest != manifest_identity:
                 raise ImmutableArtifactError(
@@ -6017,6 +6872,7 @@ def _handle_trace_with_sources(
                 phase_ledger_generation=phase_ledger_generation_record,
                 summary_generation=summary_generation,
                 measurement_manifest=manifest_identity,
+                retained_authorities=activation_authorities,
             )
             artifact_record["trace_capture_attempt_event"] = attempt_event
 
@@ -6028,19 +6884,61 @@ def _handle_trace_with_sources(
             preactivation_stage = "activation"
             artifact_record["activation_state"] = "active"
             artifact_record["typed_tombstone"] = False
-            retained_executable.verify_unchanged()
-            retained_tracer.verify_unchanged()
-            trace_sources.verify_unchanged()
             activation_payload = _trace_artifact_record_payload(
                 artifact_record
             )
-            _publish_trace_artifact_record(artifact_path, artifact_record)
-            activation_committed = True
+            # Arm exact-payload retirement before entering the publisher.  Its
+            # no-replace rename may commit before a callback, wrapper, or later
+            # authority closure raises; a precommit failure safely observes no
+            # matching leaf, while a foreign replacement cannot authenticate.
+            activation_rollback_armed = True
+            _publish_trace_artifact_record(
+                artifact_path,
+                artifact_record,
+                before_commit=activation_authorities.verify_unchanged,
+                after_commit=activation_authorities.verify_unchanged,
+            )
+            preactivation_stage = "activation_authority_closure"
+            activation_authorities.close()
             preactivation_stage = "activation_source_closure"
             trace_sources.verify_unchanged()
             retained_executable.verify_unchanged()
             retained_tracer.verify_unchanged()
+            retained_runtime.verify_unchanged()
             source_stack.pop_all().close()
+    except _TraceActivationAuthorityError as exc:
+        retire_failed_activation()
+        activation_failure = preactivation_stage.startswith("activation")
+        publish_committed_failure_event(
+            event_name=(
+                "activation_failed"
+                if activation_failure else "preactivation_failed"
+            ),
+            status=(
+                "activation_failed"
+                if activation_failure
+                else f"preactivation_{preactivation_stage}_failed"
+            ),
+            typed_reason=exc.typed_reason,
+            derived_generation=derived_generation_record,
+            derived_staging_path=(
+                None if derived_stage.committed else feature_staging_folder
+            ),
+            phase_ledger_generation=phase_ledger_generation_record,
+            phase_ledger_staging_path=(
+                None
+                if phase_ledger_generation is not None
+                else phase_ledger_staging_path
+            ),
+            summary_generation=summary_generation,
+            measurement_manifest=manifest_identity,
+        )
+        print(
+            f"trace_activation_authority_failed: {exc.typed_reason}: "
+            f"{exc.detail}",
+            file=sys.stderr,
+        )
+        return EXIT_BUILD_FAILED
     except ImmutableArtifactLimitError as exc:
         retire_failed_activation()
         publish_committed_failure_event(
@@ -6097,6 +6995,43 @@ def _handle_trace_with_sources(
         )
         print(
             f"{diagnostic}: {exc.typed_reason}: {exc.detail}",
+            file=sys.stderr,
+        )
+        return EXIT_BUILD_FAILED
+    except TracerRuntimeError as exc:
+        retire_failed_activation()
+        activation_failure = preactivation_stage.startswith("activation")
+        typed_reason = (
+            "trace_snapshot_resource_unavailable"
+            if exc.reason == "runtime_resource_unavailable"
+            else exc.reason
+        )
+        publish_committed_failure_event(
+            event_name=(
+                "activation_failed"
+                if activation_failure else "preactivation_failed"
+            ),
+            status=(
+                "activation_failed"
+                if activation_failure
+                else f"preactivation_{preactivation_stage}_failed"
+            ),
+            typed_reason=typed_reason,
+            derived_generation=derived_generation_record,
+            derived_staging_path=(
+                None if derived_stage.committed else feature_staging_folder
+            ),
+            phase_ledger_generation=phase_ledger_generation_record,
+            phase_ledger_staging_path=(
+                None
+                if phase_ledger_generation is not None
+                else phase_ledger_staging_path
+            ),
+            summary_generation=summary_generation,
+            measurement_manifest=manifest_identity,
+        )
+        print(
+            f"trace_activation_runtime_failed: {typed_reason}: {exc.detail}",
             file=sys.stderr,
         )
         return EXIT_BUILD_FAILED
@@ -6186,17 +7121,120 @@ def _handle_trace_with_sources(
             file=sys.stderr,
         )
         return EXIT_BUILD_FAILED
+    except BaseException as exc:
+        # Ordinary Python exceptions after the active rename are recoverable:
+        # retire only the armed exact payload, retain a typed attempt event when
+        # the evidence publisher is usable, and then preserve the primary error.
+        # Process/host termination remains outside this catchable boundary.
+        retire_failed_activation(primary=exc)
+        activation_failure = preactivation_stage.startswith("activation")
+        typed_reason = (
+            "trace_snapshot_resource_unavailable"
+            if (
+                isinstance(exc, ImmutableArtifactResourceError)
+                or _trace_capture_resource_failure(exc)
+            )
+            else (
+                exc.reason
+                if isinstance(exc, TracerRuntimeError)
+                else (
+                    "trace_activation_failed"
+                    if activation_failure
+                    else "trace_filesystem_invalid"
+                )
+            )
+        )
+        try:
+            publish_committed_failure_event(
+                event_name=(
+                    "activation_failed"
+                    if activation_failure else "preactivation_failed"
+                ),
+                status=(
+                    f"{preactivation_stage}_failed"
+                    if activation_failure
+                    else f"preactivation_{preactivation_stage}_failed"
+                ),
+                typed_reason=typed_reason,
+                derived_generation=derived_generation_record,
+                derived_staging_path=(
+                    None if derived_stage.committed else feature_staging_folder
+                ),
+                phase_ledger_generation=phase_ledger_generation_record,
+                phase_ledger_staging_path=(
+                    None
+                    if phase_ledger_generation is not None
+                    else phase_ledger_staging_path
+                ),
+                summary_generation=summary_generation,
+                measurement_manifest=manifest_identity,
+            )
+        except BaseException as evidence_error:
+            try:
+                exc.add_note(
+                    "unexpected trace failure evidence preservation also failed: "
+                    f"{type(evidence_error).__name__}: {evidence_error}"
+                )
+            except (AttributeError, TypeError):
+                pass
+        raise
     finally:
+        active_error = sys.exc_info()[1]
+        try:
+            activation_authorities.close()
+        except BaseException as cleanup_exc:
+            retire_failed_activation(primary=active_error or cleanup_exc)
+            if active_error is not None:
+                try:
+                    active_error.add_note(
+                        "trace activation authority cleanup also failed: "
+                        f"{type(cleanup_exc).__name__}: {cleanup_exc}"
+                    )
+                except (AttributeError, TypeError):
+                    pass
+            else:
+                activation_authority_close_error = cleanup_exc
+            print(
+                "trace_activation_authority_cleanup_failed: "
+                f"{type(cleanup_exc).__name__}: {cleanup_exc}",
+                file=sys.stderr,
+            )
         try:
             derived_stage.close()
         except BaseException as cleanup_exc:
             derived_stage_close_error = cleanup_exc
-            retire_failed_activation()
+            retire_failed_activation(primary=active_error or cleanup_exc)
             print(
                 "trace_derived_stage_cleanup_failed: "
                 f"{type(cleanup_exc).__name__}: {cleanup_exc}",
                 file=sys.stderr,
             )
+
+    if activation_authority_close_error is not None:
+        typed_reason = (
+            "trace_snapshot_resource_unavailable"
+            if isinstance(
+                activation_authority_close_error,
+                (ImmutableArtifactResourceError, MemoryError),
+            )
+            else (
+                activation_authority_close_error.reason
+                if isinstance(
+                    activation_authority_close_error, TracerRuntimeError
+                )
+                else "trace_activation_failed"
+            )
+        )
+        publish_committed_failure_event(
+            event_name="activation_failed",
+            status="activation_authority_closure_failed",
+            typed_reason=typed_reason,
+            derived_generation=derived_generation_record,
+            phase_ledger_generation=phase_ledger_generation_record,
+            summary_generation=summary_generation,
+            measurement_manifest=manifest_identity,
+        )
+        return EXIT_BUILD_FAILED
 
     if derived_stage_close_error is not None:
         typed_reason = (
@@ -6223,6 +7261,39 @@ def _handle_trace_with_sources(
         f"(artifact at {artifact_path})"
     )
     return EXIT_OK
+
+
+def _phase_summary_admission_error(
+    summary: object,
+    *,
+    expected_ledger_count: int,
+) -> str | None:
+    """Require every produced repeat-by-launch ledger to be admitted."""
+
+    if type(summary) is not dict:
+        return "phase ledger producer summary is not an object"
+    n_admitted = summary.get("n_admitted")
+    n_rejected = summary.get("n_rejected")
+    emitted_admitted = summary.get("emitted_admitted")
+    emitted_rejected = summary.get("emitted_rejected")
+    if (
+        type(n_admitted) is not int
+        or type(n_rejected) is not int
+        or type(emitted_admitted) is not list
+        or type(emitted_rejected) is not list
+    ):
+        return "phase ledger producer summary has malformed admission counts"
+    if (
+        n_admitted != len(emitted_admitted)
+        or n_rejected != len(emitted_rejected)
+        or n_admitted + n_rejected != expected_ledger_count
+    ):
+        return "phase ledger producer summary disagrees with repeat-by-launch authority"
+    if n_rejected != 0:
+        return f"phase ledger producer rejected {n_rejected} ledger(s)"
+    if n_admitted != expected_ledger_count:
+        return "phase ledger producer did not admit the complete repeat-by-launch set"
+    return None
 
 
 def _run_phase_inject_ab_for_handle_trace(
@@ -6252,13 +7323,27 @@ def _run_phase_inject_ab_for_handle_trace(
         generation: ImmutableDirectoryGeneration | None = None,
         staging_path: Path | None = None,
         summary: dict[str, Any] | None = None,
+        observed_output_bytes_lower_bound: int | None = None,
     ) -> dict[str, Any]:
+        if (
+            observed_output_bytes_lower_bound is not None
+            and (
+                type(observed_output_bytes_lower_bound) is not int
+                or observed_output_bytes_lower_bound < 0
+            )
+        ):
+            raise ImmutableArtifactError(
+                "phase failure output-byte lower bound is invalid"
+            )
         return {
             "return_code": EXIT_BUILD_FAILED,
             "typed_reason": typed_reason,
             "generation": generation,
             "staging_path": staging_path,
             "summary": summary,
+            "observed_output_bytes_lower_bound": (
+                observed_output_bytes_lower_bound
+            ),
         }
 
     try:
@@ -6269,13 +7354,6 @@ def _run_phase_inject_ab_for_handle_trace(
         _pinj._validated_arguments(args)
         retained_executable.verify_unchanged()
         retained_tracer.verify_unchanged()
-        base_env = tracer_runtime_env(
-            retained_tracer.path,
-            retained_descriptor=retained_tracer.descriptor,
-        )
-    except TracerRuntimeError as exc:
-        print(f"tracer_so_deps_unresolved: {exc}", file=sys.stderr)
-        return failed("tracer_so_deps_unresolved")
     except (
         _pinj.PhaseInjectAbRepeatCountInvalid,
         _pinj.PhaseInjectLaunchAuthorityInvalid,
@@ -6326,7 +7404,6 @@ def _run_phase_inject_ab_for_handle_trace(
             traces_descriptor=phase_sources.descriptor,
             traces_reader=phase_sources,
             repeat_count=ab_repeat_count,
-            base_env=base_env,
         )
         try:
             ab_overhead_result = _pinj.run_ab_overhead_pair(
@@ -6355,7 +7432,12 @@ def _run_phase_inject_ab_for_handle_trace(
                 f"{exc.stderr.strip()[:200]}",
                 file=sys.stderr,
             )
-            return failed(exc.TOKEN)
+            return failed(
+                exc.TOKEN,
+                observed_output_bytes_lower_bound=(
+                    exc.observed_output_bytes_lower_bound
+                ),
+            )
         except _pinj.PhaseInjectAbRunTimeout as exc:
             print(
                 "phase_inject_ab_run_timeout: "
@@ -6363,13 +7445,38 @@ def _run_phase_inject_ab_for_handle_trace(
                 f"{exc.stderr.strip()[:200]}",
                 file=sys.stderr,
             )
-            return failed(exc.TOKEN)
+            return failed(
+                exc.TOKEN,
+                observed_output_bytes_lower_bound=(
+                    exc.observed_output_bytes_lower_bound
+                ),
+            )
         except _pinj.PhaseInjectRuntimeUnavailable as exc:
             print(
                 f"phase_inject_runtime_unavailable: {exc.detail}",
                 file=sys.stderr,
             )
             return failed(exc.TOKEN)
+        except (
+            _pinj.PhaseInjectAbCleanupFailed,
+            _pinj.PhaseInjectAbOutputLimitExceeded,
+            _pinj.PhaseInjectAbResourceUnavailable,
+            _pinj.PhaseInjectAbLaunchFailed,
+        ) as exc:
+            _bind_trace_child_failure_evidence(
+                exc,
+                directory=phase_traces_folder,
+                role=exc.TOKEN,
+                stdout=exc.stdout_bytes,
+                stderr=exc.stderr_bytes,
+            )
+            print(str(exc), file=sys.stderr)
+            return failed(
+                exc.TOKEN,
+                observed_output_bytes_lower_bound=(
+                    exc.observed_output_bytes_lower_bound
+                ),
+            )
         except (
             _pinj.PhaseInjectLaunchAuthorityInvalid,
             _pinj.PhaseInjectAdmissionThresholdInvalid,
@@ -6497,6 +7604,22 @@ def _run_phase_inject_ab_for_handle_trace(
         )
     assert generation is not None
     assert summary is not None
+    phase_admission_error = _phase_summary_admission_error(
+        summary,
+        expected_ledger_count=(
+            ab_repeat_count * len(expected_launch_indices)
+        ),
+    )
+    if phase_admission_error is not None:
+        print(
+            "phase_cycle_ledger_inadmissible: " + phase_admission_error,
+            file=sys.stderr,
+        )
+        return failed(
+            "phase_cycle_ledger_inadmissible",
+            generation=generation,
+            summary=summary,
+        )
     print(
         "run_suite: phase_inject_ab "
         f"slug={slug} shape_point={shape_point_name} "
@@ -6816,6 +7939,17 @@ def main(argv: list[str] | None = None) -> int:
                         "(timing_shapes for --mode timing; trace_shapes for --mode trace). "
                         "When omitted, both handlers default to index 0 of their respective "
                         "shape list.")
+    p.add_argument(
+        "--nvbit-tracer",
+        type=Path,
+        default=None,
+        help="Trace mode: absolute external non-Git split-v2 tracer path.",
+    )
+    p.add_argument(
+        "--nvbit-tracer-sha256",
+        default=None,
+        help="Trace mode: exact lowercase SHA-256 for --nvbit-tracer.",
+    )
     p.add_argument("--phase-inject-ab", action="store_true",
                    help="Non-root measurement NVBit phase-injection contract: when --mode trace is "
                         "set, run a paired no-injection / with-injection trace pair and "
@@ -6907,6 +8041,8 @@ def main(argv: list[str] | None = None) -> int:
                 shape_point_name=args.shape_point,
                 phase_inject_ab=args.phase_inject_ab,
                 ab_repeat_count=args.ab_repeat_count,
+                tracer_source_path=args.nvbit_tracer,
+                tracer_sha256=args.nvbit_tracer_sha256,
             )
         elif args.mode == "emit-dual-run-manifest":
             rc = handle_emit_dual_run_manifest(

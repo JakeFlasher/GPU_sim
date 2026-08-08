@@ -1,0 +1,47 @@
+from pathlib import Path
+
+
+_TRACER_SOURCE = (
+    Path(__file__).resolve().parent / "tracer_tool" / "tracer_tool.cu"
+)
+
+
+def test_static_shared_memory_attribute_fails_closed_before_serialization() -> None:
+    source = _TRACER_SOURCE.read_text(encoding="utf-8")
+    attribute = "CU_FUNC_ATTRIBUTE_SHARED_SIZE_BYTES"
+    assert source.count(attribute) == 1
+
+    query = source.index(attribute)
+    status_check = source.index(
+        "shmem_static_status != CUDA_SUCCESS", query
+    )
+    fatal = source.index(
+        "static_shared_memory_attribute_unavailable", status_check
+    )
+    process_exit = source.index("_exit(EXIT_FAILURE)", fatal)
+    combined = source.index("const uint64_t shmem_combined_nbytes", process_exit)
+    static_setter = source.index(
+        "set_shared_memory_static_bytes", combined
+    )
+    dynamic_setter = source.index(
+        "set_shared_memory_dynamic_bytes", static_setter
+    )
+
+    query_line_start = source.rfind("\n", 0, query)
+    query_context = source[source.rfind("\n", 0, query_line_start) : query]
+    assert "CUDA_SAFECALL" not in query_context
+    assert "int shmem_static_nbytes = -1;" in source[:query]
+    assert query < status_check < fatal < process_exit < combined
+    assert combined < static_setter < dynamic_setter
+
+
+def test_register_attribute_fails_closed_before_serialization() -> None:
+    source = _TRACER_SOURCE.read_text(encoding="utf-8")
+    query = source.index("CU_FUNC_ATTRIBUTE_NUM_REGS")
+    status_check = source.index("nregs_status != CUDA_SUCCESS", query)
+    fatal = source.index("register_attribute_unavailable", status_check)
+    process_exit = source.index("_exit(EXIT_FAILURE)", fatal)
+    setter = source.index("set_number_of_registers", process_exit)
+
+    assert "int nregs = -1;" in source[:query]
+    assert query < status_check < fatal < process_exit < setter

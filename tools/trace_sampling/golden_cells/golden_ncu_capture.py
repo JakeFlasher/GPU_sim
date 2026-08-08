@@ -4,7 +4,7 @@
 The shell trace collector owns the NVBit process and calls this module only
 after that process has exited and the trace has passed admission.  This module
 owns the separate NCU process: its executable identity comes from a retained
-v3 campaign preflight, the target binary is retained through the action, and
+v4 campaign preflight, the target binary is retained through the action, and
 the CSV plus the sealed provenance/collection receipt are emitted together.
 No NCU value is used as a simulator feature or calibration input here.
 """
@@ -33,12 +33,26 @@ PREFLIGHT_SCHEMA = (
     / "campaign_preflight_manifest.schema.json"
 )
 PREFLIGHT_SCHEMA_SHA256 = (
-    "cacd78d381d850b7084ef1b9bf8e9e6c028076743fe3abfb6900d9e50086e3c6"
+    "8d4f0ecaa98532b33541181ceeddad23ed7264d751a19ce1539446cedbd93a5e"
 )
 EXPECTED_NCU_VERSION = "2026.1.0"
 EXPECTED_NCU_EXECUTION_MODE = "direct_inner_elf_v1"
 EXPECTED_NCU_HOST_MACHINE = "x86_64"
 GOLDEN_METRIC = "lts__t_sector_hit_rate.pct"
+_GOLDEN_LAUNCH_GEOMETRY = {
+    "gs_stream_copy": {
+        "grid_dim": (36864, 1, 1),
+        "block_dim": (1024, 1, 1),
+    },
+    "gs_stream_reuse": {
+        "grid_dim": (36864, 1, 1),
+        "block_dim": (1024, 1, 1),
+    },
+    "gs_var_stride": {
+        "grid_dim": (36864, 1, 1),
+        "block_dim": (1024, 1, 1),
+    },
+}
 _GIT_EXECUTABLE = Path("/usr/bin/git")
 _GIT_ENVIRONMENT = {
     "GIT_CONFIG_GLOBAL": "/dev/null",
@@ -87,18 +101,83 @@ def _sha256_file(path: Path) -> str:
         _fail(f"cannot retain file for hashing: {path}: {exc}")
 
 
-def _trace_admission_document(trace_dir: Path) -> dict[str, int]:
+def _trace_launch_model(launch: object) -> dict[str, Any]:
+    integer_fields = (
+        "launch_index",
+        "device_id",
+        "stream_id",
+        "kernel_id",
+        "grid_x",
+        "grid_y",
+        "grid_z",
+        "block_x",
+        "block_y",
+        "block_z",
+    )
+    values = {name: getattr(launch, name, None) for name in integer_fields}
+    if any(type(value) is not int for value in values.values()):
+        _fail("golden admitted trace launch identity fields are not exact integers")
+    if any(values[name] < 0 for name in (
+        "launch_index", "device_id", "stream_id", "kernel_id",
+    )):
+        _fail("golden admitted trace launch identifiers are negative")
+    grid_dim = tuple(values[name] for name in ("grid_x", "grid_y", "grid_z"))
+    block_dim = tuple(values[name] for name in ("block_x", "block_y", "block_z"))
+    if any(component <= 0 for component in (*grid_dim, *block_dim)):
+        _fail("golden admitted trace launch geometry is not positive")
+    kernel_name = getattr(launch, "kernel_name", None)
+    if (
+        type(kernel_name) is not str
+        or not kernel_name.strip()
+        or kernel_name != kernel_name.strip()
+        or "\x00" in kernel_name
+    ):
+        _fail("golden admitted trace kernel name is invalid")
+    return {
+        "launch_index": values["launch_index"],
+        "device_id": values["device_id"],
+        "stream_id": values["stream_id"],
+        "kernel_id": values["kernel_id"],
+        "kernel_name": kernel_name,
+        "grid_dim": list(grid_dim),
+        "block_dim": list(block_dim),
+    }
+
+
+def _trace_admission_model(admission: object) -> dict[str, Any]:
+    counter_fields = (
+        "launch_count",
+        "threadblock_count",
+        "instruction_count",
+        "expected_record_count",
+        "admitted_record_count",
+    )
+    counters = {name: getattr(admission, name, None) for name in counter_fields}
+    if any(type(value) is not int or value <= 0 for value in counters.values()):
+        _fail("golden NVBit trace admission counters are invalid")
+    launches = getattr(admission, "launches", None)
+    if not isinstance(launches, tuple):
+        _fail("golden NVBit trace admitted launch inventory is not immutable")
+    if counters["launch_count"] != 1 or len(launches) != 1:
+        _fail(
+            "golden NVBit trace must contain exactly one admitted launch; "
+            f"count={counters['launch_count']}; inventory={len(launches)}"
+        )
+    launch_model = _trace_launch_model(launches[0])
+    if launch_model["launch_index"] != 0:
+        _fail("golden NVBit trace launch inventory does not start at ordinal zero")
+    return {
+        **counters,
+        "launches": [launch_model],
+    }
+
+
+def _trace_admission_document(trace_dir: Path) -> dict[str, Any]:
     try:
         admission = trace_admission.require_trace_admission(trace_dir)
     except trace_admission.TraceAdmissionError as exc:
         _fail(f"golden NVBit trace is not admitted: {exc}")
-    return {
-        "launch_count": admission.launch_count,
-        "threadblock_count": admission.threadblock_count,
-        "instruction_count": admission.instruction_count,
-        "expected_record_count": admission.expected_record_count,
-        "admitted_record_count": admission.admitted_record_count,
-    }
+    return _trace_admission_model(admission)
 
 
 def _trace_tree_identity(trace_dir: Path) -> tuple[str, int]:
@@ -299,6 +378,10 @@ def _load_preflight(
         manifest = immutable.strict_json_loads(payload, label="preflight manifest")
     except immutable.ImmutableArtifactError as exc:
         _fail(f"preflight manifest is not strict JSON: {exc}")
+    if not isinstance(manifest, dict):
+        _fail("preflight manifest root is not an object")
+    if manifest.get("schema_version") != 4:
+        _fail("live golden collection requires preflight schema_version 4")
     try:
         schema_payload = PREFLIGHT_SCHEMA.read_bytes()
     except OSError as exc:
@@ -323,8 +406,6 @@ def _load_preflight(
             f"/{'/'.join(str(item) for item in error.absolute_path)}: "
             f"{error.message}"
         )
-    if not isinstance(manifest, dict):
-        _fail("preflight manifest root is not an object")
     if (
         manifest.get("capture_admitted") is not True
         or manifest.get("working_tree_clean") is not True
@@ -455,6 +536,24 @@ def _details_csv_payload(output: bytes) -> str:
     return "".join(lines[header_index:])
 
 
+def _ncu_launch_dim3(raw: object, *, label: str) -> tuple[int, int, int]:
+    if type(raw) is not str:
+        _fail(f"golden NCU {label} is malformed")
+    token = raw.strip()
+    if not token.startswith("(") or not token.endswith(")"):
+        _fail(f"golden NCU {label} is malformed")
+    components = token[1:-1].split(",")
+    if len(components) != 3:
+        _fail(f"golden NCU {label} is malformed")
+    try:
+        values = tuple(int(component.strip(), 10) for component in components)
+    except ValueError as exc:
+        _fail(f"golden NCU {label} is malformed: {exc}")
+    if any(component <= 0 for component in values):
+        _fail(f"golden NCU {label} is malformed")
+    return values  # type: ignore[return-value]
+
+
 def _validate_golden_metric_csv(payload: str) -> None:
     try:
         parsed_rows = list(csv.reader(payload.splitlines(), strict=True))
@@ -483,24 +582,109 @@ def _validate_golden_metric_csv(payload: str) -> None:
         raise AssertionError("unreachable") from exc
     if not math.isfinite(value) or not 0.0 <= value <= 100.0:
         _fail(f"golden NCU metric value is outside [0, 100]: {value!r}")
-    def dim3(raw: str | None, label: str) -> tuple[int, int, int]:
-        try:
-            values = tuple(
-                int(component.strip())
-                for component in (raw or "").strip().strip("()").split(",")
-            )
-        except ValueError as exc:
-            _fail(f"golden NCU {label} is malformed")
-            raise AssertionError("unreachable") from exc
-        if len(values) != 3 or any(component <= 0 for component in values):
-            _fail(f"golden NCU {label} is malformed")
-        return values  # type: ignore[return-value]
-    if dim3(row.get("Grid Size"), "grid size") != (36864, 1, 1):
+    if _ncu_launch_dim3(
+        row.get("Grid Size"), label="grid size",
+    ) != (36864, 1, 1):
         _fail("golden NCU grid size differs from the admitted cell geometry")
-    if dim3(row.get("Block Size"), "block size") != (1024, 1, 1):
+    if _ncu_launch_dim3(
+        row.get("Block Size"), label="block size",
+    ) != (1024, 1, 1):
         _fail("golden NCU block size differs from the admitted cell geometry")
     if row.get("Device") != "0" or not (row.get("Kernel Name") or "").strip():
         _fail("golden NCU launch identity is incomplete")
+
+
+def _nvbit_kernel_base(value: object) -> str:
+    if type(value) is not str:
+        _fail("golden NVBit kernel name is not a string")
+    match = re.fullmatch(r"(.+)___(0|[1-9][0-9]*)", value)
+    if match is None:
+        _fail("golden NVBit kernel name lacks its producer variant suffix")
+    if match.group(2) != "0":
+        _fail("golden NVBit kernel variant is ambiguous for the NCU launch join")
+    return match.group(1)
+
+
+def _bind_ncu_observation_to_trace(
+    observation: dict[str, Any],
+    trace_admission_model: dict[str, Any],
+    *,
+    slug: str,
+) -> dict[str, Any]:
+    """Bind the one NCU launch to the exact admitted NVBit launch identity."""
+
+    expected_geometry = _GOLDEN_LAUNCH_GEOMETRY.get(slug)
+    if expected_geometry is None:
+        _fail(f"golden cell has no launch-geometry authority: {slug}")
+    launches = trace_admission_model.get("launches")
+    if not isinstance(launches, list) or len(launches) != 1:
+        _fail("golden trace launch binding has no unique admitted launch")
+    trace_launch = launches[0]
+    if not isinstance(trace_launch, dict):
+        _fail("golden trace launch binding is malformed")
+    identity = observation.get("identity")
+    if not isinstance(identity, dict):
+        _fail("golden NCU launch observation identity is unavailable")
+    try:
+        report_launch_id = identity["ID"]
+        kernel_name = identity["Kernel Name"]
+        device_raw = identity["Device"]
+        grid_dim = _ncu_launch_dim3(
+            identity["Grid Size"], label="grid size",
+        )
+        block_dim = _ncu_launch_dim3(
+            identity["Block Size"], label="block size",
+        )
+    except KeyError as exc:
+        _fail(f"golden NCU launch observation is missing {exc.args[0]!r}")
+    if (
+        type(report_launch_id) is not str
+        or not report_launch_id.strip()
+        or report_launch_id != report_launch_id.strip()
+        or type(kernel_name) is not str
+        or not kernel_name.strip()
+        or kernel_name != kernel_name.strip()
+        or type(device_raw) is not str
+        or re.fullmatch(r"0|[1-9][0-9]*", device_raw) is None
+    ):
+        _fail("golden NCU launch observation identity is malformed")
+    device_id = int(device_raw, 10)
+    expected_grid = tuple(expected_geometry["grid_dim"])
+    expected_block = tuple(expected_geometry["block_dim"])
+    observed_grid = tuple(trace_launch.get("grid_dim", ()))
+    observed_block = tuple(trace_launch.get("block_dim", ()))
+    trace_kernel_base = _nvbit_kernel_base(trace_launch.get("kernel_name"))
+    mismatches: list[str] = []
+    if trace_kernel_base != kernel_name:
+        mismatches.append("kernel_name")
+    if trace_launch.get("device_id") != device_id:
+        mismatches.append("device_id")
+    if observed_grid != expected_grid:
+        mismatches.append("grid_dim")
+    if observed_block != expected_block:
+        mismatches.append("block_dim")
+    if observed_grid != grid_dim:
+        mismatches.append("grid_dim")
+    if observed_block != block_dim:
+        mismatches.append("block_dim")
+    if mismatches:
+        _fail(
+            "golden NCU observation differs from exact admitted trace launch: "
+            f"{mismatches}"
+        )
+    return {
+        "schema_version": 1,
+        "kind": "golden_ncu_trace_launch_binding_v1",
+        "cell_slug": slug,
+        "ncu_observation": {
+            "report_launch_id": report_launch_id,
+            "device_id": device_id,
+            "kernel_name": kernel_name,
+            "grid_dim": list(grid_dim),
+            "block_dim": list(block_dim),
+        },
+        "admitted_trace_launch": dict(trace_launch),
+    }
 
 
 def _retained_target_mode(
@@ -531,6 +715,8 @@ def _action_environment() -> dict[str, str]:
 def _validate_cell_paths(
     *,
     slug: str,
+    binary: Path,
+    published_binary: Path,
     trace_dir: Path,
     published_trace_dir: Path,
     staged_artifacts: tuple[tuple[Path, str], ...],
@@ -538,7 +724,24 @@ def _validate_cell_paths(
 ) -> None:
     staged_cell = trace_dir.parent
     published_cell = published_trace_dir.parent
-    if staged_cell != published_cell or published_cell.name != slug:
+    golden_root = (STAGING_ROOT / "golden_cells").resolve(strict=False)
+    attempt_cell = (
+        published_cell.parent == golden_root
+        and published_cell.name == slug
+        and staged_cell.parent == published_cell.parent
+        and re.fullmatch(
+            rf"{re.escape(slug)}\.staged\.[1-9][0-9]*\.[0-9a-f]{{32}}",
+            staged_cell.name,
+        ) is not None
+    )
+    if (
+        published_cell.name != slug
+        or not attempt_cell
+        or binary.parent != staged_cell
+        or binary.name != f"{slug}.bin"
+        or published_binary.parent != published_cell
+        or published_binary.name != f"{slug}.bin"
+    ):
         _fail("golden trace and artifact paths do not share the selected cell")
     if published_trace_dir.name != "trace":
         _fail("published golden trace must be named trace")
@@ -593,6 +796,7 @@ def collect_golden_ncu(
     run_manifest_out: Path,
     capture_manifest_out: Path,
     receipt_out: Path,
+    published_binary: Path,
     published_trace_dir: Path,
     published_csv_out: Path,
     published_stderr_out: Path,
@@ -614,6 +818,7 @@ def collect_golden_ncu(
     ):
         _staging_path(path, label=label)
     for path, label in (
+        (published_binary, "published golden target binary path"),
         (published_csv_out, "published NCU CSV path"),
         (published_stderr_out, "published NCU stderr path"),
         (published_observation_out, "published NCU launch observation path"),
@@ -644,6 +849,8 @@ def collect_golden_ncu(
         _fail("golden target binary does not belong to the selected cell")
     _validate_cell_paths(
         slug=slug,
+        binary=binary,
+        published_binary=published_binary,
         trace_dir=trace_dir,
         published_trace_dir=published_trace_dir,
         staged_artifacts=(
@@ -687,6 +894,7 @@ def collect_golden_ncu(
                 "--clock-control", "none",
                 "--cache-control", "all",
                 "--replay-mode", "kernel",
+                "--kernel-name-base", "mangled",
                 "--launch-count", "1",
                 "--csv", "--", target_argument,
             )
@@ -763,15 +971,21 @@ def collect_golden_ncu(
         )
     except ValueError as exc:
         _fail(f"golden NCU launch observation is not admitted: {exc}")
+    launch_binding = _bind_ncu_observation_to_trace(
+        observation,
+        trace_admission_model,
+        slug=slug,
+    )
     observation_sha256 = observation.get("observation_sha256")
     if not isinstance(observation_sha256, str):
         _fail("golden NCU launch observation has no seal")
+    published_binary_relative = _relative_declared_artifact(published_binary)
     csv_relative = _relative_declared_artifact(published_csv_out)
     stderr_relative = _relative_declared_artifact(published_stderr_out)
     observation_relative = _relative_declared_artifact(published_observation_out)
     run_manifest = {
-        "schema_version": 1,
-        "kind": "golden_ncu_run_manifest_v1",
+        "schema_version": 2,
+        "kind": "golden_ncu_run_manifest_v2",
         "slug": slug,
         "preflight_sha256": preflight_sha256,
         "ncu_identity": {
@@ -783,8 +997,7 @@ def collect_golden_ncu(
         "environment": environment,
         "working_directory": "/",
         "target_binary": {
-            "relative_path": binary.relative_to(REPO_ROOT).as_posix()
-            if binary.is_relative_to(REPO_ROOT) else str(binary),
+            "relative_path": published_binary_relative,
             "sha256": binary_sha256,
             "size_bytes": binary_size,
             "mode": target_mode,
@@ -803,11 +1016,12 @@ def collect_golden_ncu(
             "launch_count": 1,
             "metric": GOLDEN_METRIC,
         },
+        "launch_binding": launch_binding,
         "exit_status": result.returncode,
     }
     capture_manifest = {
-        "schema_version": 1,
-        "kind": "golden_ncu_capture_manifest_v1",
+        "schema_version": 2,
+        "kind": "golden_ncu_capture_manifest_v2",
         "slug": slug,
         "preflight_sha256": preflight_sha256,
         "trace_relative_path": _relative_declared_artifact(published_trace_dir),
@@ -820,6 +1034,7 @@ def collect_golden_ncu(
         "ncu_stderr_relative_path": stderr_relative,
         "ncu_stderr_sha256": _sha256_file(stderr_out),
         "ncu_launch_observation_sha256": observation_sha256,
+        "launch_binding": launch_binding,
         "ncu_controls": run_manifest["launch_controls"],
         "source_manifest_schema_version": manifest.get("schema_version"),
     }
@@ -876,6 +1091,7 @@ def collect_golden_ncu(
             exit_status=result.returncode,
             artifacts=artifacts,
             launch_observation_sha256=observation_sha256,
+            launch_binding=launch_binding,
             controls=controls,
         )
     except golden_ncu_receipt.GoldenReceiptError as exc:
@@ -917,6 +1133,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--run-manifest-out", type=Path, required=True)
     parser.add_argument("--capture-manifest-out", type=Path, required=True)
     parser.add_argument("--receipt-out", type=Path, required=True)
+    parser.add_argument("--published-binary", type=Path, required=True)
     parser.add_argument("--published-trace-dir", type=Path, required=True)
     parser.add_argument("--published-csv-out", type=Path, required=True)
     parser.add_argument("--published-stderr-out", type=Path, required=True)
@@ -940,6 +1157,7 @@ def main(argv: list[str] | None = None) -> int:
             run_manifest_out=args.run_manifest_out,
             capture_manifest_out=args.capture_manifest_out,
             receipt_out=args.receipt_out,
+            published_binary=args.published_binary,
             published_trace_dir=args.published_trace_dir,
             published_csv_out=args.published_csv_out,
             published_stderr_out=args.published_stderr_out,

@@ -1,0 +1,101 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "simbench_bw/schemas/nvbit_external_tracer_source_manifest.schema.json",
+  "title": "External NVBit tracer source manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "source_kind",
+    "repository",
+    "dependency_pathspecs",
+    "files",
+    "inventory",
+    "contract",
+    "model_seal_sha256"
+  ],
+  "properties": {
+    "schema_version": {"const": "nvbit_external_tracer_source_manifest.v1"},
+    "source_kind": {"const": "git_sha1_dependency_closed_blob_inventory_v1"},
+    "repository": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["object_format", "head_commit_sha1", "head_tree_sha1"],
+      "properties": {
+        "object_format": {"const": "sha1"},
+        "head_commit_sha1": {"$ref": "#/$defs/sha1"},
+        "head_tree_sha1": {"$ref": "#/$defs/sha1"}
+      }
+    },
+    "dependency_pathspecs": {
+      "const": [
+        "tools/nvbit_tracer/Makefile",
+        "tools/nvbit_tracer/isa_def",
+        "tools/nvbit_tracer/metric_extractor/tier2_sha256.h",
+        "tools/nvbit_tracer/nvbit_release/core",
+        "tools/nvbit_tracer/tracer_tool",
+        "tools/nvbit_tracer/traces_enhanced"
+      ]
+    },
+    "files": {
+      "type": "array",
+      "minItems": 3,
+      "maxItems": 4096,
+      "items": {"$ref": "#/$defs/source_file"}
+    },
+    "inventory": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["file_count", "total_size_bytes", "sha256"],
+      "properties": {
+        "file_count": {"type": "integer", "minimum": 3, "maximum": 4096},
+        "total_size_bytes": {"type": "integer", "minimum": 1, "maximum": 536870912},
+        "sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "contract": {"$ref": "#/$defs/contract"},
+    "model_seal_sha256": {"$ref": "#/$defs/sha256"}
+  },
+  "$defs": {
+    "sha1": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "repo_path": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4096,
+      "pattern": "^(?!/)(?!.*\\\\)(?!.*//)(?!.*/$)(?!\\.\\.?(?:/|$))(?!.*(?:/\\.\\.?)(?:/|$))[^\\u0000-\\u001f\\u007f]+$"
+    },
+    "source_file": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "mode", "blob_oid_sha1", "sha256", "size_bytes"],
+      "properties": {
+        "path": {"$ref": "#/$defs/repo_path"},
+        "mode": {"enum": ["100644", "100755"]},
+        "blob_oid_sha1": {"$ref": "#/$defs/sha1"},
+        "sha256": {"$ref": "#/$defs/sha256"},
+        "size_bytes": {"type": "integer", "minimum": 0, "maximum": 67108864}
+      }
+    },
+    "contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "architecture",
+        "nvbit_release",
+        "binary_contract",
+        "binary_version",
+        "trace_contract",
+        "supported_trace_schema_versions"
+      ],
+      "properties": {
+        "architecture": {"const": "sm_86"},
+        "nvbit_release": {"const": "NVBit1.8"},
+        "binary_contract": {"const": "binary86"},
+        "binary_version": {"const": 86},
+        "trace_contract": {"const": "sm86_addr_carry_shmem_split_v2"},
+        "supported_trace_schema_versions": {"const": [1, 2, 3, 6, 8]}
+      }
+    }
+  }
+}

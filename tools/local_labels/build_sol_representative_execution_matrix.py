@@ -81,6 +81,7 @@ EXECUTION_TOOL_PATHS = (
     "tools/local_labels/sol_workload_capture_chunk.py",
     "tools/cloud/trace_budgets.py",
     "workloads/simbench_bw/schemas/campaign_preflight_manifest.schema.json",
+    "workloads/simbench_bw/schemas/campaign_preflight_manifest.v3.schema.json",
     "workloads/simbench_bw/schemas/sol_live_workload_coverage_inventory.schema.json",
     "workloads/simbench_bw/schemas/sol_representative_capture_matrix.schema.json",
     "workloads/simbench_bw/schemas/sol_representative_execution_matrix.schema.json",

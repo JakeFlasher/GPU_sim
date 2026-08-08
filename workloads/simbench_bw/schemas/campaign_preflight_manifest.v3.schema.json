@@ -1,0 +1,370 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "simbench_bw/schemas/campaign_preflight_manifest.schema.json",
+  "title": "sm_86 capture preflight/provenance manifest",
+  "description": "Emitted by tools/local_labels/campaign_preflight.py. Version 3 records the PATH-discovered NCU launcher as provenance while binding executable authority to the retained x86_64 inner ELF that actions must execute directly. Its additive device probe binds fresh capture to one host GPU at index 0 using only a SHA-256 of the physical UUID; older v3 manifests may omit that probe only for historical finalization. Records host, toolchain, clock state, and capture-session admission. A live gate artifact (embeds timestamp + NVML covariates), not a byte-stable committed pin.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "arch",
+    "captured_at_utc",
+    "generated_at_utc",
+    "git_head",
+    "working_tree_clean",
+    "pins_sha256",
+    "capture_matrix_sha256",
+    "checks",
+    "blockers",
+    "capture_admitted"
+  ],
+  "properties": {
+    "schema_version": {"type": "integer", "const": 3},
+    "arch": {"type": "string"},
+    "sku": {"type": ["string", "null"]},
+    "captured_at_utc": {"type": "string"},
+    "generated_at_utc": {"type": "string"},
+    "git_head": {"type": ["string", "null"]},
+    "working_tree_clean": {"type": "boolean"},
+    "pins_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "capture_matrix_sha256": {
+      "type": ["string", "null"],
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "protocol_version": {"type": ["string", "null"]},
+    "checks": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "worktree", "ncu", "driver", "nvcc", "nvbit",
+        "capture_processes", "clock_state", "injection_runtime", "trace_budget"
+        , "sol_environment"
+      ],
+      "properties": {
+        "worktree": {"$ref": "#/$defs/probe"},
+        "ncu": {"$ref": "#/$defs/ncuProbe"},
+        "driver": {"$ref": "#/$defs/probe"},
+        "device": {"$ref": "#/$defs/deviceProbe"},
+        "nvcc": {"$ref": "#/$defs/probe"},
+        "nvbit": {"$ref": "#/$defs/probe"},
+        "capture_processes": {"$ref": "#/$defs/probe"},
+        "clock_state": {"$ref": "#/$defs/probe"},
+        "injection_runtime": {"$ref": "#/$defs/injection_probe"},
+        "trace_budget": {"$ref": "#/$defs/probe"}
+        , "sol_environment": {"$ref": "#/$defs/solEnvironmentProbe"}
+      }
+    },
+    "covariates": {"type": "object"},
+    "blockers": {"type": "array", "items": {"type": "string"}},
+    "capture_admitted": {"type": "boolean"}
+  },
+  "$defs": {
+    "probe": {
+      "type": "object",
+      "required": ["status"],
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": ["ok", "mismatch", "unavailable", "failed"]
+        }
+      }
+    },
+    "deviceProbe": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status", "selection_policy", "selected_host_gpu_index",
+        "nvidia_smi_device_count", "gpu_uuid_sha256"
+      ],
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": ["ok", "mismatch", "unavailable", "failed"]
+        },
+        "selection_policy": {"const": "single_nvidia_smi_device_v1"},
+        "selected_host_gpu_index": {"type": ["integer", "null"]},
+        "nvidia_smi_device_count": {
+          "type": ["integer", "null"],
+          "minimum": 0
+        },
+        "gpu_uuid_sha256": {
+          "type": ["string", "null"],
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {"status": {"const": "ok"}},
+            "required": ["status"]
+          },
+          "then": {
+            "properties": {
+              "selected_host_gpu_index": {"const": 0},
+              "nvidia_smi_device_count": {"const": 1},
+              "gpu_uuid_sha256": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "selected_host_gpu_index": {"type": "null"},
+              "gpu_uuid_sha256": {"type": "null"}
+            }
+          }
+        }
+      ]
+    },
+    "ncuProbe": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status", "expected", "observed", "execution_mode", "host_machine",
+        "launcher_resolved_path", "launcher_sha256", "launcher_target_relpath",
+        "resolved_path", "executable_sha256", "version_line"
+      ],
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": ["ok", "mismatch", "unavailable", "failed"]
+        },
+        "expected": {"type": ["string", "null"]},
+        "observed": {"type": ["string", "null"]},
+        "execution_mode": {
+          "type": ["string", "null"],
+          "enum": ["direct_inner_elf_v1", null]
+        },
+        "host_machine": {
+          "type": ["string", "null"],
+          "enum": ["x86_64", null]
+        },
+        "launcher_resolved_path": {"type": ["string", "null"]},
+        "launcher_sha256": {
+          "type": ["string", "null"],
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "launcher_target_relpath": {
+          "type": ["string", "null"],
+          "enum": ["target/linux-desktop-glibc_2_11_3-x64/ncu", null]
+        },
+        "resolved_path": {"type": ["string", "null"]},
+        "executable_sha256": {
+          "type": ["string", "null"],
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "version_line": {"type": ["string", "null"]},
+        "detail": {"type": "string", "minLength": 1}
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {"status": {"const": "ok"}},
+            "required": ["status"]
+          },
+          "then": {
+            "properties": {
+              "expected": {"const": "2026.1.0"},
+              "execution_mode": {"const": "direct_inner_elf_v1"},
+              "host_machine": {"const": "x86_64"},
+              "launcher_resolved_path": {
+                "type": "string",
+                "pattern": "^/"
+              },
+              "launcher_sha256": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              },
+              "launcher_target_relpath": {
+                "const": "target/linux-desktop-glibc_2_11_3-x64/ncu"
+              },
+              "observed": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "^Version\\s+2026\\.1\\.0(?:$|[.\\s(+-])"
+              },
+              "resolved_path": {
+                "type": "string",
+                "pattern": "^/"
+              },
+              "executable_sha256": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              },
+              "version_line": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "^Version\\s+2026\\.1\\.0(?:$|[.\\s(+-])"
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "observed": {"type": "null"},
+              "execution_mode": {"type": "null"},
+              "host_machine": {"type": "null"},
+              "launcher_resolved_path": {"type": "null"},
+              "launcher_sha256": {"type": "null"},
+              "launcher_target_relpath": {"type": "null"},
+              "resolved_path": {"type": "null"},
+              "executable_sha256": {"type": "null"},
+              "version_line": {"type": "null"}
+            }
+          }
+        }
+      ]
+    },
+    "injection_probe": {
+      "description": "The injection_runtime probe. When admitted (status=ok) it MUST carry the evidence that the smoke actually ran and yielded a nonzero contract-valid trace: admitted instruction records >= 1, a passing contract validator, and the dynamic_trace.pb + stats.csv identity hashes. ldd resolution alone can never satisfy this.",
+      "allOf": [
+        {"$ref": "#/$defs/probe"},
+        {
+          "if": {
+            "properties": {"status": {"const": "ok"}},
+            "required": ["status"]
+          },
+          "then": {
+            "required": [
+              "admitted_insts", "expected_insts", "validator_ok",
+              "threadblocks_pb_count",
+              "root_trace_ok", "root_trace_pb_bytes", "root_trace_contract_id",
+              "root_trace_memory_payload_classes", "root_trace_launch_count",
+              "full_coverage_ok", "grid_threadblock_count",
+              "decoded_threadblock_count", "decoded_record_count",
+              "zero_record_threadblock_count", "sampling_sidecar_present",
+              "stats_row_count",
+              "tracer_so_sha256", "smoke_binary_sha256",
+              "dynamic_trace_pb_sha256", "stats_csv_sha256"
+            ],
+            "properties": {
+              "admitted_insts": {"type": "integer", "minimum": 1},
+              "expected_insts": {"type": "integer", "minimum": 1},
+              "validator_ok": {"const": true},
+              "threadblocks_pb_count": {"type": "integer", "minimum": 1},
+              "root_trace_ok": {"const": true},
+              "root_trace_pb_bytes": {"type": "integer", "minimum": 1},
+              "root_trace_contract_id": {"const": "sm86_addr_carry_v1"},
+              "root_trace_memory_payload_classes": {
+                "type": "array",
+                "uniqueItems": true,
+                "allOf": [
+                  {"contains": {"const": 1}},
+                  {"contains": {"const": 2}},
+                  {"contains": {"const": 3}},
+                  {"contains": {"const": 6}},
+                  {"contains": {"const": 8}}
+                ]
+              },
+              "root_trace_launch_count": {"type": "integer", "minimum": 1},
+              "full_coverage_ok": {"const": true},
+              "grid_threadblock_count": {"type": "integer", "minimum": 1},
+              "decoded_threadblock_count": {"type": "integer", "minimum": 1},
+              "decoded_record_count": {"type": "integer", "minimum": 1},
+              "zero_record_threadblock_count": {"type": "integer", "const": 0},
+              "sampling_sidecar_present": {"const": false},
+              "stats_row_count": {"type": "integer", "const": 1},
+              "tracer_so_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+              "smoke_binary_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+              "dynamic_trace_pb_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+              "stats_csv_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+            }
+          }
+        }
+      ]
+    },
+    "solEnvironmentProbe": {
+      "allOf": [
+        {"$ref": "#/$defs/probe"},
+        {
+          "if": {
+            "properties": {"status": {"const": "ok"}},
+            "required": ["status"]
+          },
+          "then": {
+            "required": [
+              "typed_error", "ambient", "environment_contract",
+              "environment_contract_sha256", "constructed_environment_delta",
+              "matrix_pin", "matrix_sha256", "observed_fingerprint",
+              "compiler_identity", "nvcc_release", "nvcc_version_output"
+            ],
+            "properties": {
+              "typed_error": {"type": "null"},
+              "environment_contract": {
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["CUTLASS_DIR", "PATH_prepend", "NVCC_CCBIN"],
+                    "properties": {
+                      "CUTLASS_DIR": {"const": "third_party/cutlass"},
+                      "PATH_prepend": {"const": "tools/sol_execbench/.venv/bin"},
+                      "NVCC_CCBIN": {"const": "g++-14"}
+                    }
+                  },
+                  {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "CUTLASS_DIR", "PATH_prepend", "CUDA_HOME", "NVCC_CCBIN",
+                      "CC", "CXX", "CUDAHOSTCXX"
+                    ],
+                    "properties": {
+                      "CUTLASS_DIR": {"const": "third_party/cutlass"},
+                      "PATH_prepend": {"const": "tools/sol_execbench/.venv/bin"},
+                      "CUDA_HOME": {"const": "/usr/local/cuda-13.2"},
+                      "NVCC_CCBIN": {"const": "g++-14"},
+                      "CC": {"const": "gcc-14"},
+                      "CXX": {"const": "g++-14"},
+                      "CUDAHOSTCXX": {"const": "g++-14"}
+                    }
+                  }
+                ]
+              },
+              "environment_contract_sha256": {
+                "type": "string", "pattern": "^[0-9a-f]{64}$"
+              },
+              "matrix_sha256": {
+                "type": "string", "pattern": "^[0-9a-f]{64}$"
+              },
+              "observed_fingerprint": {
+                "type": "object",
+                "required": ["components", "hash", "missing", "degraded"],
+                "properties": {
+                  "hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+                  "missing": {"type": "array", "maxItems": 0},
+                  "degraded": {"const": false}
+                }
+              },
+              "compiler_identity": {
+                "type": "object",
+                "required": [
+                  "requested", "resolved_realpath", "executable_sha256",
+                  "version_line"
+                ],
+                "properties": {
+                  "requested": {"const": "g++-14"},
+                  "resolved_realpath": {"type": "string", "pattern": "^/"},
+                  "executable_sha256": {
+                    "type": "string", "pattern": "^[0-9a-f]{64}$"
+                  },
+                  "version_line": {"type": "string", "minLength": 1}
+                }
+              },
+              "nvcc_release": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["major", "minor"],
+                "properties": {
+                  "major": {"type": "integer", "minimum": 0},
+                  "minor": {"type": "integer", "minimum": 0}
+                }
+              },
+              "nvcc_version_output": {"type": "string", "minLength": 1}
+            }
+          }
+        }
+      ]
+    }
+  }
+}

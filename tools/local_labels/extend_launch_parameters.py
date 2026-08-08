@@ -55,6 +55,18 @@ Fail-close arms (typed exceptions):
   - ``LaunchParametersKernelIdNotFound`` when the trace
     parses but contains no kernel records (a malformed-trace
     case).
+  - ``LaunchParametersTraceMalformed`` when strict protobuf wire
+    preflight rejects malformed wire data before decoding.
+  - ``LaunchParametersTraceLimitExceeded`` when the retained bytes or decoded
+    protobuf object graph exceed an implementation ceiling.
+  - ``LaunchParametersTraceResourceUnavailable`` when retaining, preflighting,
+    or decoding the trace exhausts local resources.
+  - ``LaunchParametersTraceContractUnsupported`` when the trace advertises
+    anything other than an exact supported contract ID.
+  - ``LaunchParametersTraceCapabilitiesInvalid`` when a supported trace does
+    not advertise the exact canonical memory-payload capability vector.
+  - ``LaunchParametersSharedMemorySplitUnavailable`` when the trace
+    does not authenticate separate static and dynamic shared-memory bytes.
   - ``LaunchParametersAmbiguousJoin`` when multiple
     auxiliary-sidecar candidates exist with conflicting
     join keys (e.g., two CUPTI Activity files whose
@@ -91,10 +103,19 @@ _DEFAULT_ARCH_DIR = "rtx_3090_ti/sm_86"
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
+from tools.local_labels import immutable_artifact as immutable  # noqa: E402
 from tools.nvbit_tracer.proto_binding_loader import (  # noqa: E402
     ProtoBindingIntegrityError,
     ProtoBindingRuntimePrerequisiteError,
     load_dynamic_trace_bindings,
+)
+from tools.nvbit_tracer.protobuf_wire_preflight import (  # noqa: E402
+    ProtobufDecodedResourceLimitExceeded,
+    ProtobufWireMalformed,
+    preflight_trace_protobuf,
+)
+from tools.nvbit_tracer.trace_admission import (  # noqa: E402
+    EXPECTED_MEMORY_PAYLOAD_CLASSES,
 )
 
 # Arch-token policy boundary mapping for the cohort sidecar emitter.
@@ -131,7 +152,15 @@ def _arch_dir_for_label_arch(arch: str) -> str:
     ``workloads/simbench_bw/results/<slug>/<sku>/<arch>/``. Uses the
     shared ``arch_token_policy.platform_path_for_label_arch`` map."""
     return _atp.platform_path_for_label_arch(arch)
+
+
+_LEGACY_TRACE_CONTRACT_ID = "sm86_addr_carry_v1"
+_SPLIT_TRACE_CONTRACT_ID = "sm86_addr_carry_shmem_split_v2"
+_SUPPORTED_TRACE_CONTRACT_IDS = frozenset(
+    {_LEGACY_TRACE_CONTRACT_ID, _SPLIT_TRACE_CONTRACT_ID}
+)
 _AMPERE_WARP_SIZE = 32
+_TRACE_ROOT_MAX_BYTES = 256 * 1024 * 1024
 
 
 class LaunchParametersTraceMissing(Exception):
@@ -158,6 +187,34 @@ class LaunchParametersRuntimePrerequisiteMissing(
 class LaunchParametersKernelIdNotFound(Exception):
     """Raised when the parsed trace contains no kernel
     records (a malformed trace surface)."""
+
+
+class LaunchParametersTraceMalformed(Exception):
+    """The dynamic trace fails strict protobuf wire preflight."""
+
+
+class LaunchParametersTraceLimitExceeded(Exception):
+    """The dynamic trace exceeds the bounded root protobuf ceiling."""
+
+
+class LaunchParametersTraceResourceUnavailable(Exception):
+    """The dynamic trace cannot be retained within local resource bounds."""
+
+
+class LaunchParametersTraceGenerationChanged(Exception):
+    """The dynamic trace path or inode changed during retained loading."""
+
+
+class LaunchParametersTraceContractUnsupported(Exception):
+    """The trace advertises an unknown or mistyped contract ID."""
+
+
+class LaunchParametersTraceCapabilitiesInvalid(Exception):
+    """A supported trace lacks the exact canonical capability vector."""
+
+
+class LaunchParametersSharedMemorySplitUnavailable(Exception):
+    """The trace cannot authenticate static and dynamic shared-memory bytes."""
 
 
 class LaunchParametersAmbiguousJoin(Exception):
@@ -204,28 +261,153 @@ def _load_trace_bindings() -> Any:
         raise LaunchParametersTrackedBindingsCorrupt(str(exc)) from exc
 
 
+def _caused_by_missing_path(error: BaseException) -> bool:
+    current: BaseException | None = error
+    seen: set[int] = set()
+    while current is not None and id(current) not in seen:
+        if isinstance(current, FileNotFoundError):
+            return True
+        seen.add(id(current))
+        current = current.__cause__ or current.__context__
+    return False
+
+
 def _extract_first_kernel_geometry(
     trace_pb_path: Path,
     trace_pb2_mod: Any,
+    *,
+    historical_only: bool = False,
 ) -> LaunchGeometry:
     """Parse the dynamic_trace.pb and return the geometry of
     the FIRST kernel record. The 9 admitted cells each have a
     single kernel of interest; if there are multiple kernels,
     the first (by sorted (device_id, stream_id) iteration) is
-    chosen — the catalog's per-cell aggregation uses this
-    representative kernel's geometry."""
-    if not trace_pb_path.is_file():
+    chosen after every kernel has passed its declared shared-memory contract —
+    the catalog's per-cell aggregation uses this representative kernel's
+    geometry."""
+    retained_opened = False
+    try:
+        with immutable.open_retained_regular(
+            trace_pb_path, max_bytes=_TRACE_ROOT_MAX_BYTES,
+        ) as retained_trace:
+            retained_opened = True
+            raw = retained_trace.read_bytes(max_bytes=_TRACE_ROOT_MAX_BYTES)
+            retained_trace.verify_unchanged()
+    except immutable.ImmutableArtifactLimitError as exc:
+        raise LaunchParametersTraceLimitExceeded(str(exc)) from exc
+    except immutable.ImmutableArtifactResourceError as exc:
+        raise LaunchParametersTraceResourceUnavailable(str(exc)) from exc
+    except MemoryError as exc:
+        raise LaunchParametersTraceResourceUnavailable(
+            f"cannot materialize dynamic_trace.pb at {trace_pb_path}"
+        ) from exc
+    except FileNotFoundError as exc:
         raise LaunchParametersTraceMissing(
             f"dynamic_trace.pb missing at {trace_pb_path}"
+        ) from exc
+    except immutable.ImmutableArtifactError as exc:
+        if not retained_opened and _caused_by_missing_path(exc):
+            raise LaunchParametersTraceMissing(
+                f"dynamic_trace.pb missing at {trace_pb_path}"
+            ) from exc
+        raise LaunchParametersTraceGenerationChanged(str(exc)) from exc
+    try:
+        preflight_trace_protobuf(raw)
+    except ProtobufDecodedResourceLimitExceeded as exc:
+        raise LaunchParametersTraceLimitExceeded(str(exc)) from exc
+    except ProtobufWireMalformed as exc:
+        raise LaunchParametersTraceMalformed(str(exc)) from exc
+    except MemoryError as exc:
+        raise LaunchParametersTraceResourceUnavailable(
+            f"cannot preflight dynamic_trace.pb at {trace_pb_path}"
+        ) from exc
+    try:
+        trace = trace_pb2_mod.Trace()
+        trace.ParseFromString(raw)
+    except MemoryError as exc:
+        raise LaunchParametersTraceResourceUnavailable(
+            f"cannot decode dynamic_trace.pb at {trace_pb_path}"
+        ) from exc
+    if type(historical_only) is not bool:
+        raise TypeError("historical_only must be an exact boolean")
+    contract_id = str(trace.trace_contract_id)
+    if contract_id == _LEGACY_TRACE_CONTRACT_ID and not historical_only:
+        raise LaunchParametersTraceContractUnsupported(
+            "legacy v1 traces are historical-read-only and cannot mint launch-"
+            "parameter evidence"
         )
-    trace = trace_pb2_mod.Trace()
-    trace.ParseFromString(trace_pb_path.read_bytes())
+    accepted_contract_ids = (
+        _SUPPORTED_TRACE_CONTRACT_IDS
+        if historical_only
+        else frozenset({_SPLIT_TRACE_CONTRACT_ID})
+    )
+    # Accept only exact contract IDs. Historical compatibility is deliberately
+    # opt-in and does not participate in the public evidence builder.
+    if contract_id not in accepted_contract_ids:
+        raise LaunchParametersTraceContractUnsupported(
+            f"unsupported trace_contract_id={contract_id!r}; expected one of "
+            f"{sorted(accepted_contract_ids)!r}"
+        )
+    capabilities = tuple(
+        int(value) for value in trace.memory_payload_classes
+    )
+    if capabilities != EXPECTED_MEMORY_PAYLOAD_CLASSES:
+        raise LaunchParametersTraceCapabilitiesInvalid(
+            "invalid memory_payload_classes for "
+            f"trace_contract_id={contract_id!r}: got {list(capabilities)!r}, "
+            f"expected {list(EXPECTED_MEMORY_PAYLOAD_CLASSES)!r}"
+        )
+    first_geometry: LaunchGeometry | None = None
     for _device_id in sorted(trace.gpu_device.keys()):
         device = trace.gpu_device[_device_id]
         for _stream_id in sorted(device.streams.keys()):
             stream = device.streams[_stream_id]
             for kernel in stream.kernels:
-                return LaunchGeometry(
+                combined_shared_bytes = int(kernel.size_shared_memory)
+                if contract_id == _SPLIT_TRACE_CONTRACT_ID:
+                    if not kernel.HasField("shared_memory_static_bytes"):
+                        raise LaunchParametersSharedMemorySplitUnavailable(
+                            "kernel is missing shared_memory_static_bytes"
+                        )
+                    if not kernel.HasField("shared_memory_dynamic_bytes"):
+                        raise LaunchParametersSharedMemorySplitUnavailable(
+                            "kernel is missing shared_memory_dynamic_bytes"
+                        )
+                    static_shared_bytes = int(
+                        kernel.shared_memory_static_bytes
+                    )
+                    dynamic_shared_bytes = int(
+                        kernel.shared_memory_dynamic_bytes
+                    )
+                    if (
+                        static_shared_bytes + dynamic_shared_bytes
+                        != combined_shared_bytes
+                    ):
+                        raise LaunchParametersSharedMemorySplitUnavailable(
+                            "kernel shared-memory split does not equal the combined "
+                            "size_shared_memory value"
+                        )
+                elif contract_id == _LEGACY_TRACE_CONTRACT_ID:
+                    if kernel.HasField(
+                        "shared_memory_static_bytes"
+                    ) or kernel.HasField("shared_memory_dynamic_bytes"):
+                        raise LaunchParametersSharedMemorySplitUnavailable(
+                            "legacy kernel carries unauthenticated shared-memory "
+                            "split fields"
+                        )
+                    if combined_shared_bytes != 0:
+                        raise LaunchParametersSharedMemorySplitUnavailable(
+                            "legacy kernel has nonzero combined shared-memory bytes; "
+                            "the contract cannot authenticate a static/dynamic split"
+                        )
+                    # A legacy combined zero is the sole value whose split is
+                    # unambiguous: both components must also be zero.
+                    static_shared_bytes = 0
+                else:  # Defensive fail-close if the supported set changes.
+                    raise LaunchParametersTraceContractUnsupported(
+                        f"unsupported trace_contract_id={contract_id!r}"
+                    )
+                geometry = LaunchGeometry(
                     kernel_id=int(kernel.id),
                     grid_x=int(kernel.grid_dim.x),
                     grid_y=int(kernel.grid_dim.y),
@@ -233,13 +415,13 @@ def _extract_first_kernel_geometry(
                     block_x=int(kernel.block_dim.x),
                     block_y=int(kernel.block_dim.y),
                     block_z=int(kernel.block_dim.z),
-                    static_shared_bytes=int(
-                        kernel.size_shared_memory
-                    ),
-                    regs_per_thread=int(
-                        kernel.number_of_registers
-                    ),
+                    static_shared_bytes=static_shared_bytes,
+                    regs_per_thread=int(kernel.number_of_registers),
                 )
+                if first_geometry is None:
+                    first_geometry = geometry
+    if first_geometry is not None:
+        return first_geometry
     raise LaunchParametersKernelIdNotFound(
         f"no kernel records found in {trace_pb_path}"
     )
@@ -917,6 +1099,13 @@ def main(argv: list[str] | None = None) -> int:
         LaunchParametersTraceMissing,
         LaunchParametersProtobufBindingsMissing,
         LaunchParametersKernelIdNotFound,
+        LaunchParametersTraceMalformed,
+        LaunchParametersTraceLimitExceeded,
+        LaunchParametersTraceResourceUnavailable,
+        LaunchParametersTraceGenerationChanged,
+        LaunchParametersTraceContractUnsupported,
+        LaunchParametersTraceCapabilitiesInvalid,
+        LaunchParametersSharedMemorySplitUnavailable,
         LaunchParametersAmbiguousJoin,
         LaunchParametersJoinKeyMismatch,
     ) as exc:

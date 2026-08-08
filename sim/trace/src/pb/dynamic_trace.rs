@@ -146,6 +146,13 @@ pub struct Kernel {
     /// (1,1,1) cluster of one block).
     #[prost(message, optional, tag = "10")]
     pub cluster_dim: ::core::option::Option<Dim3d>,
+    /// Presence-bearing components of size_shared_memory. Producers advertising
+    /// the sm86_addr_carry_shmem_split_v2 trace contract must write both fields,
+    /// including explicit zero values, and their sum must equal field 4.
+    #[prost(uint32, optional, tag = "11")]
+    pub shared_memory_static_bytes: ::core::option::Option<u32>,
+    #[prost(uint32, optional, tag = "12")]
+    pub shared_memory_dynamic_bytes: ::core::option::Option<u32>,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct CudaStream {

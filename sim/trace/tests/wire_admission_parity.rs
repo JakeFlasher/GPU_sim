@@ -115,6 +115,20 @@ fn threadblock_with_instruction_suffix(threadblock: &pb::Threadblock, suffix: &[
     encoded
 }
 
+fn trace_with_kernel_suffix(trace: &pb::Trace, suffix: &[u8]) -> Vec<u8> {
+    let mut metadata = trace.clone();
+    metadata.gpu_device.clear();
+    let mut kernel = trace.gpu_device[&0].streams[&0].kernels[0].encode_to_vec();
+    kernel.extend_from_slice(suffix);
+    let stream = message_field(2, &kernel);
+    let stream_entry = message_field(2, &stream);
+    let device = message_field(2, &stream_entry);
+    let device_entry = message_field(2, &device);
+    let mut encoded = metadata.encode_to_vec();
+    encoded.extend(message_field(6, &device_entry));
+    encoded
+}
+
 fn write_case(root: &Path, mutation: &str) {
     std::fs::create_dir(root).unwrap();
     let kernel = pb::Kernel {
@@ -156,6 +170,7 @@ fn write_case(root: &Path, mutation: &str) {
     let mut empty_payload = false;
     let mut empty_root = false;
     let mut root_known_field_wrong_wire_type = false;
+    let mut kernel_wire_suffix = Vec::new();
     let mut instruction_known_field_wrong_wire_type = false;
     let mut write_allocations = true;
 
@@ -176,6 +191,14 @@ fn write_case(root: &Path, mutation: &str) {
             trace.memory_payload_classes.pop();
         }
         "duplicate_capability" => trace.memory_payload_classes.push(1),
+        "split_capabilities_reversed" => {
+            trace.trace_contract_id = "sm86_addr_carry_shmem_split_v2".into();
+            trace.memory_payload_classes.reverse();
+        }
+        "split_capabilities_permuted" => {
+            trace.trace_contract_id = "sm86_addr_carry_shmem_split_v2".into();
+            trace.memory_payload_classes.swap(1, 2);
+        }
         "zero_launches" => {
             trace
                 .gpu_device
@@ -247,6 +270,163 @@ fn write_case(root: &Path, mutation: &str) {
                 .as_mut()
                 .unwrap()
                 .x = 0;
+        }
+        "legacy_shared_memory_nonzero" => {
+            trace
+                .gpu_device
+                .get_mut(&0)
+                .unwrap()
+                .streams
+                .get_mut(&0)
+                .unwrap()
+                .kernels[0]
+                .size_shared_memory = 4096;
+        }
+        "legacy_shared_memory_split_unadvertised" => {
+            let kernel = &mut trace
+                .gpu_device
+                .get_mut(&0)
+                .unwrap()
+                .streams
+                .get_mut(&0)
+                .unwrap()
+                .kernels[0];
+            kernel.shared_memory_static_bytes = Some(0);
+            kernel.shared_memory_dynamic_bytes = Some(0);
+        }
+        "split_shared_memory_matching" => {
+            trace.trace_contract_id = "sm86_addr_carry_shmem_split_v2".into();
+            let kernel = &mut trace
+                .gpu_device
+                .get_mut(&0)
+                .unwrap()
+                .streams
+                .get_mut(&0)
+                .unwrap()
+                .kernels[0];
+            kernel.size_shared_memory = 6144;
+            kernel.shared_memory_static_bytes = Some(2048);
+            kernel.shared_memory_dynamic_bytes = Some(4096);
+        }
+        "split_shared_memory_zero" => {
+            trace.trace_contract_id = "sm86_addr_carry_shmem_split_v2".into();
+            let kernel = &mut trace
+                .gpu_device
+                .get_mut(&0)
+                .unwrap()
+                .streams
+                .get_mut(&0)
+                .unwrap()
+                .kernels[0];
+            kernel.shared_memory_static_bytes = Some(0);
+            kernel.shared_memory_dynamic_bytes = Some(0);
+        }
+        "split_shared_memory_static_only" => {
+            trace.trace_contract_id = "sm86_addr_carry_shmem_split_v2".into();
+            let kernel = &mut trace
+                .gpu_device
+                .get_mut(&0)
+                .unwrap()
+                .streams
+                .get_mut(&0)
+                .unwrap()
+                .kernels[0];
+            kernel.size_shared_memory = 2048;
+            kernel.shared_memory_static_bytes = Some(2048);
+            kernel.shared_memory_dynamic_bytes = Some(0);
+        }
+        "split_shared_memory_dynamic_only" => {
+            trace.trace_contract_id = "sm86_addr_carry_shmem_split_v2".into();
+            let kernel = &mut trace
+                .gpu_device
+                .get_mut(&0)
+                .unwrap()
+                .streams
+                .get_mut(&0)
+                .unwrap()
+                .kernels[0];
+            kernel.size_shared_memory = 4096;
+            kernel.shared_memory_static_bytes = Some(0);
+            kernel.shared_memory_dynamic_bytes = Some(4096);
+        }
+        "split_shared_memory_missing_both" => {
+            trace.trace_contract_id = "sm86_addr_carry_shmem_split_v2".into();
+        }
+        "split_shared_memory_missing_static" => {
+            trace.trace_contract_id = "sm86_addr_carry_shmem_split_v2".into();
+            trace
+                .gpu_device
+                .get_mut(&0)
+                .unwrap()
+                .streams
+                .get_mut(&0)
+                .unwrap()
+                .kernels[0]
+                .shared_memory_dynamic_bytes = Some(0);
+        }
+        "split_shared_memory_missing_dynamic" => {
+            trace.trace_contract_id = "sm86_addr_carry_shmem_split_v2".into();
+            trace
+                .gpu_device
+                .get_mut(&0)
+                .unwrap()
+                .streams
+                .get_mut(&0)
+                .unwrap()
+                .kernels[0]
+                .shared_memory_static_bytes = Some(0);
+        }
+        "split_shared_memory_mismatch" => {
+            trace.trace_contract_id = "sm86_addr_carry_shmem_split_v2".into();
+            let kernel = &mut trace
+                .gpu_device
+                .get_mut(&0)
+                .unwrap()
+                .streams
+                .get_mut(&0)
+                .unwrap()
+                .kernels[0];
+            kernel.size_shared_memory = 4096;
+            kernel.shared_memory_static_bytes = Some(1024);
+            kernel.shared_memory_dynamic_bytes = Some(2048);
+        }
+        "shared_memory_combined_negative" => {
+            trace
+                .gpu_device
+                .get_mut(&0)
+                .unwrap()
+                .streams
+                .get_mut(&0)
+                .unwrap()
+                .kernels[0]
+                .size_shared_memory = -1;
+        }
+        "split_shared_memory_wrong_wire_type" => {
+            trace.trace_contract_id = "sm86_addr_carry_shmem_split_v2".into();
+            trace
+                .gpu_device
+                .get_mut(&0)
+                .unwrap()
+                .streams
+                .get_mut(&0)
+                .unwrap()
+                .kernels[0]
+                .shared_memory_dynamic_bytes = Some(0);
+            kernel_wire_suffix = vec![0x5a, 0x00];
+        }
+        "split_shared_memory_duplicate_field" => {
+            trace.trace_contract_id = "sm86_addr_carry_shmem_split_v2".into();
+            let kernel = &mut trace
+                .gpu_device
+                .get_mut(&0)
+                .unwrap()
+                .streams
+                .get_mut(&0)
+                .unwrap()
+                .kernels[0];
+            kernel.shared_memory_static_bytes = Some(0);
+            kernel.shared_memory_dynamic_bytes = Some(0);
+            kernel_wire_suffix = vec![0x58, 0x00];
         }
         "no_payload_files" => payload_kernel_ids.clear(),
         "launch_payload_missing" => payload_kernel_ids = vec![9],
@@ -589,6 +769,9 @@ fn write_case(root: &Path, mutation: &str) {
     } else {
         trace.encode_to_vec()
     };
+    if !kernel_wire_suffix.is_empty() {
+        root_bytes = trace_with_kernel_suffix(&trace, &kernel_wire_suffix);
+    }
     if root_known_field_wrong_wire_type {
         root_bytes.extend([0x08, 0x00]);
     }
@@ -614,6 +797,30 @@ fn write_case(root: &Path, mutation: &str) {
             threadblock.encode_to_vec()
         };
         std::fs::write(path, payload).unwrap();
+    }
+}
+
+#[test]
+fn split_v2_rejects_reversed_and_permuted_capability_vectors() {
+    for (mutation, expected) in [
+        ("split_capabilities_reversed", vec![8, 6, 3, 2, 1]),
+        ("split_capabilities_permuted", vec![1, 3, 2, 6, 8]),
+    ] {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("trace");
+        write_case(&root, mutation);
+        let error = TraceDir::open(&root)
+            .err()
+            .expect("reordered split-v2 vector must fail closed");
+        match error {
+            sim_trace::TraceError::MemoryPayloadCapabilitiesInvalid {
+                contract_id, got, ..
+            } => {
+                assert_eq!(contract_id, "sm86_addr_carry_shmem_split_v2");
+                assert_eq!(got, expected, "{mutation}");
+            }
+            error => panic!("{mutation}: unexpected Rust error: {error:?}"),
+        }
     }
 }
 

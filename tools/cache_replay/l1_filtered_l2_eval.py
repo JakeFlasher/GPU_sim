@@ -111,9 +111,11 @@ def _sha256(path: Path) -> str:
 
 
 def _single_kernel_record(trace_pb2, trace_dir: Path):
-    """Return the sole kernel record from the trace, or None if absent/ambiguous."""
-    trace = trace_pb2.Trace()
-    trace.ParseFromString((trace_dir / "dynamic_trace.pb").read_bytes())
+    """Return the sole validated kernel, or None if absent/ambiguous."""
+    trace = lph._load_validated_trace(
+        trace_pb2,
+        trace_dir / "dynamic_trace.pb",
+    )
     kernels = []
     for did in sorted(trace.gpu_device.keys()):
         dev = trace.gpu_device[did]

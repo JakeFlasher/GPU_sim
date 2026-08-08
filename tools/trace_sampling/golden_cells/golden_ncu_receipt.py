@@ -58,6 +58,7 @@ def _command(command: Sequence[str]) -> list[str]:
         "--clock-control", "none",
         "--cache-control", "all",
         "--replay-mode", "kernel",
+        "--kernel-name-base", "mangled",
         "--launch-count", "1", "--csv",
     )
     if tuple(values[:-2]) != expected_prefix or values[-2] != "--":
@@ -169,21 +170,154 @@ def _artifacts(artifacts: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
     return result
 
 
-def _trace_admission(value: Mapping[str, Any]) -> dict[str, int]:
+def _dim3(value: object, *, label: str) -> list[int]:
+    if (
+        type(value) is not list
+        or len(value) != 3
+        or any(type(component) is not int or component <= 0 for component in value)
+    ):
+        _fail(f"{label} is not an exact positive dim3")
+    return list(value)
+
+
+def _trace_launch(value: Mapping[str, Any]) -> dict[str, Any]:
     expected_fields = {
+        "launch_index",
+        "device_id",
+        "stream_id",
+        "kernel_id",
+        "kernel_name",
+        "grid_dim",
+        "block_dim",
+    }
+    if not isinstance(value, Mapping) or set(value) != expected_fields:
+        _fail("golden admitted trace launch fields differ")
+    for name in ("launch_index", "device_id", "stream_id", "kernel_id"):
+        if type(value[name]) is not int or value[name] < 0:
+            _fail(f"golden admitted trace {name} is invalid")
+    kernel_name = value["kernel_name"]
+    if (
+        type(kernel_name) is not str
+        or not kernel_name.strip()
+        or kernel_name != kernel_name.strip()
+        or "\x00" in kernel_name
+    ):
+        _fail("golden admitted trace kernel name is invalid")
+    return {
+        "launch_index": value["launch_index"],
+        "device_id": value["device_id"],
+        "stream_id": value["stream_id"],
+        "kernel_id": value["kernel_id"],
+        "kernel_name": kernel_name,
+        "grid_dim": _dim3(value["grid_dim"], label="golden trace grid_dim"),
+        "block_dim": _dim3(value["block_dim"], label="golden trace block_dim"),
+    }
+
+
+def _trace_admission(value: Mapping[str, Any]) -> dict[str, Any]:
+    counter_fields = {
         "launch_count", "threadblock_count", "instruction_count",
         "expected_record_count", "admitted_record_count",
     }
+    expected_fields = counter_fields | {"launches"}
     if not isinstance(value, Mapping) or set(value) != expected_fields:
         _fail("golden trace admission fields differ")
     if any(
         type(value[name]) is not int or value[name] <= 0
-        for name in expected_fields
+        for name in counter_fields
     ):
         _fail("golden trace admission counters are invalid")
     if value["admitted_record_count"] > value["expected_record_count"]:
         _fail("golden trace admission counters are inconsistent")
-    return {name: value[name] for name in expected_fields}
+    launches = value["launches"]
+    if (
+        type(launches) is not list
+        or value["launch_count"] != 1
+        or len(launches) != 1
+    ):
+        _fail("golden trace admission must bind exactly one launch")
+    launch = _trace_launch(launches[0])
+    if launch["launch_index"] != 0:
+        _fail("golden trace admission launch ordinal is not zero")
+    return {
+        **{name: value[name] for name in counter_fields},
+        "launches": [launch],
+    }
+
+
+def _nvbit_kernel_base(value: object) -> str:
+    if type(value) is not str:
+        _fail("golden admitted trace kernel name is not a string")
+    match = re.fullmatch(r"(.+)___(0|[1-9][0-9]*)", value)
+    if match is None:
+        _fail("golden admitted trace kernel lacks its producer variant suffix")
+    if match.group(2) != "0":
+        _fail("golden admitted trace kernel variant is ambiguous")
+    return match.group(1)
+
+
+def _launch_binding(value: Mapping[str, Any]) -> dict[str, Any]:
+    expected_fields = {
+        "schema_version",
+        "kind",
+        "cell_slug",
+        "ncu_observation",
+        "admitted_trace_launch",
+    }
+    if not isinstance(value, Mapping) or set(value) != expected_fields:
+        _fail("golden NCU/trace launch binding fields differ")
+    slug = value["cell_slug"]
+    if (
+        type(slug) is not str
+        or not slug
+        or "/" in slug
+        or "\\" in slug
+        or value["schema_version"] != 1
+        or value["kind"] != "golden_ncu_trace_launch_binding_v1"
+    ):
+        _fail("golden NCU/trace launch binding identity differs")
+    ncu = value["ncu_observation"]
+    ncu_fields = {
+        "report_launch_id", "device_id", "kernel_name", "grid_dim", "block_dim",
+    }
+    if not isinstance(ncu, Mapping) or set(ncu) != ncu_fields:
+        _fail("golden NCU launch binding fields differ")
+    if (
+        type(ncu["report_launch_id"]) is not str
+        or not ncu["report_launch_id"].strip()
+        or ncu["report_launch_id"] != ncu["report_launch_id"].strip()
+        or type(ncu["device_id"]) is not int
+        or ncu["device_id"] < 0
+        or type(ncu["kernel_name"]) is not str
+        or not ncu["kernel_name"].strip()
+        or ncu["kernel_name"] != ncu["kernel_name"].strip()
+    ):
+        _fail("golden NCU launch binding identity is invalid")
+    ncu_grid_dim = _dim3(
+        ncu["grid_dim"], label="golden NCU observation grid_dim",
+    )
+    ncu_block_dim = _dim3(
+        ncu["block_dim"], label="golden NCU observation block_dim",
+    )
+    trace_launch = _trace_launch(value["admitted_trace_launch"])
+    if (
+        ncu["device_id"] != trace_launch["device_id"]
+        or ncu["kernel_name"] != _nvbit_kernel_base(trace_launch["kernel_name"])
+        or ncu_grid_dim != trace_launch["grid_dim"]
+        or ncu_block_dim != trace_launch["block_dim"]
+    ):
+        _fail("golden NCU observation differs from admitted trace launch")
+    return {
+        "schema_version": 1,
+        "kind": "golden_ncu_trace_launch_binding_v1",
+        "cell_slug": slug,
+        "ncu_observation": {
+            **dict(ncu),
+            "grid_dim": ncu_grid_dim,
+            "block_dim": ncu_block_dim,
+        },
+        "admitted_trace_launch": trace_launch,
+    }
 
 
 def _target_binary(target_binary: Mapping[str, Any]) -> dict[str, Any]:
@@ -277,13 +411,13 @@ def validate_intrinsic_receipt(document: Any) -> None:
         "working_directory", "exit_status", "target_binary",
         "trace_relative_path", "trace_admission", "trace_tree_sha256",
         "trace_tree_bytes", "launch_controls", "artifacts",
-        "launch_observation_sha256",
+        "launch_observation_sha256", "launch_binding",
     }
     if set(document) != expected_fields | {"receipt_seal_sha256"}:
         _fail("golden receipt fields differ")
     if (
-        document["schema_version"] != 1
-        or document["kind"] != "golden_ncu_collection_receipt_v1"
+        document["schema_version"] != 2
+        or document["kind"] != "golden_ncu_collection_receipt_v2"
         or document["trust_scope"] != "capture_process_integrity_v1"
         or document["status"] != "pass"
         or document["target_argument_role"]
@@ -334,6 +468,12 @@ def validate_intrinsic_receipt(document: Any) -> None:
         document["trace_relative_path"], label="golden trace path",
     )
     trace_admission = _trace_admission(document["trace_admission"])
+    launch_binding = _launch_binding(document["launch_binding"])
+    if launch_binding["admitted_trace_launch"] != trace_admission["launches"][0]:
+        _fail("golden receipt launch binding differs from trace admission")
+    target_slug = Path(target["relative_path"]).parent.name
+    if launch_binding["cell_slug"] != target_slug:
+        _fail("golden receipt launch binding differs from target cell")
     if (
         not _sha256(document["trace_tree_sha256"])
         or type(document["trace_tree_bytes"]) is not int
@@ -362,6 +502,7 @@ def build_receipt(
     exit_status: int,
     artifacts: Sequence[Mapping[str, Any]],
     launch_observation_sha256: str,
+    launch_binding: Mapping[str, Any],
     controls: Mapping[str, Any],
 ) -> dict[str, Any]:
     if not _sha256(preflight_sha256) or not _sha256(launch_observation_sha256):
@@ -374,6 +515,17 @@ def build_receipt(
     target_model = _target_binary(target_binary)
     trace_model = _relative_path(trace_relative_path, label="golden trace path")
     trace_admission_model = _trace_admission(trace_admission)
+    launch_binding_model = _launch_binding(launch_binding)
+    if (
+        launch_binding_model["admitted_trace_launch"]
+        != trace_admission_model["launches"][0]
+    ):
+        _fail("golden launch binding differs from trace admission")
+    if (
+        launch_binding_model["cell_slug"]
+        != Path(target_model["relative_path"]).parent.name
+    ):
+        _fail("golden launch binding differs from target cell")
     if (
         not _sha256(trace_tree_sha256)
         or type(trace_tree_bytes) is not int
@@ -390,8 +542,8 @@ def build_receipt(
     if not isinstance(controls, Mapping):
         _fail("golden controls are not an object")
     unsigned = {
-        "schema_version": 1,
-        "kind": "golden_ncu_collection_receipt_v1",
+        "schema_version": 2,
+        "kind": "golden_ncu_collection_receipt_v2",
         "trust_scope": "capture_process_integrity_v1",
         "status": "pass",
         "supervision": {
@@ -421,6 +573,7 @@ def build_receipt(
         "launch_controls": controls_model,
         "artifacts": artifact_model,
         "launch_observation_sha256": launch_observation_sha256,
+        "launch_binding": launch_binding_model,
     }
     try:
         receipt = immutable.seal_model(unsigned, "receipt_seal_sha256")
@@ -442,6 +595,7 @@ def build_receipt(
         expected_exit_status=exit_status,
         expected_artifacts=artifact_model,
         expected_launch_observation_sha256=launch_observation_sha256,
+        expected_launch_binding=launch_binding_model,
         expected_controls=controls,
     )
     return receipt
@@ -464,6 +618,7 @@ def validate_receipt(
     expected_exit_status: int,
     expected_artifacts: Sequence[Mapping[str, Any]],
     expected_launch_observation_sha256: str,
+    expected_launch_binding: Mapping[str, Any],
     expected_controls: Mapping[str, Any],
 ) -> None:
     if not isinstance(document, dict):
@@ -479,9 +634,18 @@ def validate_receipt(
     )
     artifact_model = _artifacts(expected_artifacts)
     _topology(target_model, trace_model, artifact_model)
+    trace_admission_model = _trace_admission(expected_trace_admission)
+    launch_binding_model = _launch_binding(expected_launch_binding)
+    if (
+        launch_binding_model["admitted_trace_launch"]
+        != trace_admission_model["launches"][0]
+        or launch_binding_model["cell_slug"]
+        != Path(target_model["relative_path"]).parent.name
+    ):
+        _fail("expected golden launch binding differs from trace or target")
     expected = {
-        "schema_version": 1,
-        "kind": "golden_ncu_collection_receipt_v1",
+        "schema_version": 2,
+        "kind": "golden_ncu_collection_receipt_v2",
         "trust_scope": "capture_process_integrity_v1",
         "status": "pass",
         "supervision": {
@@ -507,12 +671,13 @@ def validate_receipt(
         "exit_status": expected_exit_status,
         "target_binary": target_model,
         "trace_relative_path": trace_model,
-        "trace_admission": _trace_admission(expected_trace_admission),
+        "trace_admission": trace_admission_model,
         "trace_tree_sha256": expected_trace_tree_sha256,
         "trace_tree_bytes": expected_trace_tree_bytes,
         "launch_controls": _controls(expected_controls),
         "artifacts": artifact_model,
         "launch_observation_sha256": expected_launch_observation_sha256,
+        "launch_binding": launch_binding_model,
     }
     for name, value in expected.items():
         if document.get(name) != value:

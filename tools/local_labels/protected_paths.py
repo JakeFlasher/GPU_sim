@@ -37,15 +37,12 @@ EXTERNAL_PROTECTED_ABSOLUTE = (
     Path("/home/jakeshea/sm86_reference_capture_r27"),
 )
 
-_GIT_LOCAL_ENV = (
-    "GIT_ALTERNATE_OBJECT_DIRECTORIES",
-    "GIT_COMMON_DIR",
-    "GIT_DIR",
-    "GIT_INDEX_FILE",
-    "GIT_OBJECT_DIRECTORY",
-    "GIT_PREFIX",
-    "GIT_WORK_TREE",
-)
+GIT_REPOSITORY_NOT_FOUND = "not_repository"
+GIT_REPOSITORY_WORKTREE = "worktree"
+GIT_REPOSITORY_BARE = "bare"
+GIT_REPOSITORY_STATUS_UNAVAILABLE = "status_unavailable"
+TRUSTED_GIT_EXECUTABLE = Path("/usr/bin/git")
+_TRUSTED_GIT_EXECUTABLE = str(TRUSTED_GIT_EXECUTABLE)
 
 
 class ProtectedPathError(ValueError):
@@ -53,10 +50,74 @@ class ProtectedPathError(ValueError):
 
 
 def _git_env() -> dict[str, str]:
-    env = os.environ.copy()
-    for name in _GIT_LOCAL_ENV:
-        env.pop(name, None)
-    return env
+    return retained_git_environment()
+
+
+def retained_git_environment() -> dict[str, str]:
+    """Return the complete nonambient environment for read-only Git authority."""
+
+    return {
+        "GIT_CONFIG_GLOBAL": "/dev/null",
+        "GIT_CONFIG_NOSYSTEM": "1",
+        "GIT_CONFIG_SYSTEM": "/dev/null",
+        "GIT_NO_REPLACE_OBJECTS": "1",
+        "GIT_OPTIONAL_LOCKS": "0",
+        "GIT_PAGER": "",
+        "GIT_TERMINAL_PROMPT": "0",
+        "HOME": "/nonexistent",
+        "LANG": "C",
+        "LANGUAGE": "C",
+        "LC_ALL": "C",
+        "PATH": "/usr/bin:/bin",
+    }
+
+
+def run_retained_git(
+    retained_git: object,
+    *,
+    repo_root: Path | str,
+    arguments: tuple[str, ...],
+    text: bool = False,
+    check: bool = False,
+) -> subprocess.CompletedProcess:
+    """Run one Git builtin through a retained executable capability."""
+
+    root = Path(repo_root).resolve(strict=False)
+    descriptor = getattr(retained_git, "descriptor", None)
+    proc_path = getattr(retained_git, "proc_path", None)
+    verify_unchanged = getattr(retained_git, "verify_unchanged", None)
+    if (
+        type(descriptor) is not int
+        or descriptor < 0
+        or type(proc_path) is not str
+        or not proc_path
+        or not callable(verify_unchanged)
+    ):
+        raise ProtectedPathError("retained Git capability is invalid")
+    verify_unchanged()
+    completed = subprocess.run(
+        (
+            proc_path,
+            "--no-pager",
+            "--no-optional-locks",
+            "-C",
+            str(root),
+            "-c",
+            "core.hooksPath=/dev/null",
+            "-c",
+            "core.fsmonitor=false",
+            *arguments,
+        ),
+        check=check,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=text,
+        cwd="/",
+        env=retained_git_environment(),
+        pass_fds=(descriptor,),
+    )
+    verify_unchanged()
+    return completed
 
 
 def _nearest_existing_parent(path: Path) -> Path:
@@ -85,7 +146,7 @@ def discover_repo_root(start: Path | str | None = None) -> Path:
     probe = _nearest_existing_parent(candidate)
     try:
         completed = subprocess.run(
-            ["git", "-C", str(probe), "rev-parse", "--show-toplevel"],
+            [_TRUSTED_GIT_EXECUTABLE, "-C", str(probe), "rev-parse", "--show-toplevel"],
             check=False,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -252,25 +313,64 @@ def assert_write_allowed(
     return candidate
 
 
-def is_inside_git_worktree(path: Path | str) -> bool:
-    """Return whether ``path`` resolves beneath any Git worktree."""
+def git_repository_status(path: Path | str) -> str:
+    """Classify Git membership, preserving unavailable or malformed probes."""
 
     candidate = Path(path)
     if not candidate.is_absolute():
         candidate = Path.cwd() / candidate
     probe = _nearest_existing_parent(candidate.resolve(strict=False))
+    env = _git_env()
+    env.update({"LANG": "C", "LANGUAGE": "C", "LC_ALL": "C"})
     try:
         completed = subprocess.run(
-            ["git", "-C", str(probe), "rev-parse", "--is-inside-work-tree"],
+            [
+                _TRUSTED_GIT_EXECUTABLE,
+                "-C",
+                str(probe),
+                "rev-parse",
+                "--is-inside-work-tree",
+                "--is-bare-repository",
+            ],
             check=False,
             stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
             text=True,
-            env=_git_env(),
+            env=env,
         )
     except OSError:
+        return GIT_REPOSITORY_STATUS_UNAVAILABLE
+    stdout = completed.stdout.strip().splitlines()
+    if completed.returncode == 0:
+        if stdout == ["true", "false"]:
+            return GIT_REPOSITORY_WORKTREE
+        if stdout == ["false", "true"]:
+            return GIT_REPOSITORY_BARE
+        return GIT_REPOSITORY_STATUS_UNAVAILABLE
+    stderr = completed.stderr.strip()
+    if completed.returncode == 128 and stderr.startswith(
+        "fatal: not a git repository"
+    ):
+        return GIT_REPOSITORY_NOT_FOUND
+    return GIT_REPOSITORY_STATUS_UNAVAILABLE
+
+
+def is_inside_git_worktree(path: Path | str) -> bool:
+    """Return whether ``path`` resolves beneath any Git worktree.
+
+    A recognized non-repository or bare-repository result is a definitive
+    negative.  Execution failures, nonzero probe errors, and malformed output
+    are indeterminate and therefore raise instead of clearing a write.
+    """
+
+    status = git_repository_status(path)
+    if status == GIT_REPOSITORY_WORKTREE:
+        return True
+    if status in {GIT_REPOSITORY_NOT_FOUND, GIT_REPOSITORY_BARE}:
         return False
-    return completed.returncode == 0 and completed.stdout.strip() == "true"
+    raise ProtectedPathError(
+        f"cannot determine Git-worktree containment for {Path(path)}"
+    )
 
 
 def assert_external_output(

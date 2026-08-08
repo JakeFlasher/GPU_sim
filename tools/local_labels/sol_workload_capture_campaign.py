@@ -21,7 +21,6 @@ import fcntl
 import hashlib
 import json
 import os
-import subprocess
 import sys
 import uuid
 import stat
@@ -39,6 +38,7 @@ for _path in (REPO_ROOT, LOCAL_LABELS):
     if str(_path) not in sys.path:
         sys.path.insert(0, str(_path))
 
+from tools.local_labels import ncu_action_executor as ncu_executor  # noqa: E402
 import sol_workload_capture_chunk as chunk_capture  # noqa: E402
 import sol_workload_coverage_inventory as coverage_inventory_builder  # noqa: E402
 
@@ -51,6 +51,19 @@ GLOBAL_GPU_LOCK_PATH = Path(
 )
 INHERITED_GPU_LOCK_FD_ENV = "SOLBENCH_SM86_GPU_LOCK_FD"
 STORAGE_FAULT_ROOT = GLOBAL_GPU_LOCK_PATH.parent
+
+_GIT_DISCOVERY_TIMEOUT_SECONDS = 30.0
+_GIT_DISCOVERY_MAX_OUTPUT_BYTES = 64 * 1024
+_GIT_DISCOVERY_TIMEOUT_CODE = "campaign_git_discovery_timeout"
+_GIT_DISCOVERY_OUTPUT_LIMIT_CODE = "campaign_git_discovery_output_limit"
+_GIT_DISCOVERY_RESOURCE_CODE = "campaign_git_discovery_resource_unavailable"
+_PREFLIGHT_TIMEOUT_SECONDS = 2 * 60 * 60.0
+_PREFLIGHT_MAX_OUTPUT_BYTES = 16 * 1024 * 1024
+_PREFLIGHT_TIMEOUT_CODE = "campaign_preflight_timeout"
+_PREFLIGHT_OUTPUT_LIMIT_CODE = "campaign_preflight_output_limit"
+_PREFLIGHT_RESOURCE_CODE = "campaign_preflight_resource_unavailable"
+_PROBE_CLEANUP_FAILED_CODE = "campaign_bounded_probe_cleanup_failed"
+_PROBE_DIAGNOSTIC_TAIL_BYTES = 4096
 
 
 class CampaignRefusal(RuntimeError):
@@ -1664,6 +1677,56 @@ def _orchestrator_lock(output_root: Path):
     return os.fdopen(descriptor, "r+")
 
 
+def _run_bounded_probe(
+    command: list[str] | tuple[str, ...], *, cwd: Path,
+    environment: dict[str, str], timeout_seconds: float,
+    max_output_bytes: int, timeout_code: str, resource_code: str,
+) -> ncu_executor.NcuActionResult:
+    """Run a campaign child with bounded output and process-group teardown."""
+    return ncu_executor.execute_bounded_command(
+        tuple(command),
+        environment=environment,
+        working_directory=str(cwd),
+        inherited_descriptors=(),
+        timeout_seconds=timeout_seconds,
+        max_output_bytes=max_output_bytes,
+        timeout_code=timeout_code,
+        launch_code=resource_code,
+    )
+
+
+def _probe_output_text(payload: bytes) -> str:
+    return payload.decode("utf-8", errors="surrogateescape")
+
+
+def _probe_diagnostic_tail(payload: bytes) -> str:
+    return _probe_output_text(payload[-_PROBE_DIAGNOSTIC_TAIL_BYTES:]).strip()
+
+
+def _bounded_probe_refusal(
+    exc: ncu_executor.NcuActionExecutorError, *, timeout_code: str,
+    output_limit_code: str, resource_code: str,
+) -> CampaignRefusal:
+    if exc.process_cleanup_incomplete:
+        code = _PROBE_CLEANUP_FAILED_CODE
+    elif exc.code == timeout_code:
+        code = timeout_code
+    elif exc.code == ncu_executor.NCU_ACTION_OUTPUT_LIMIT:
+        code = output_limit_code
+    elif exc.code == resource_code:
+        code = resource_code
+    else:
+        code = "campaign_bounded_executor_contract_failed"
+    return CampaignRefusal(
+        code,
+        f"executor_code={exc.code}; "
+        f"process_cleanup_incomplete={exc.process_cleanup_incomplete}; "
+        f"detail={exc.detail}; "
+        f"stdout_tail={_probe_diagnostic_tail(exc.stdout)!r}; "
+        f"stderr_tail={_probe_diagnostic_tail(exc.stderr)!r}",
+    )
+
+
 def _new_preflight(
     args: argparse.Namespace, *, source_commit: str, chunk_id: str,
     retry_ordinal: int, matrix_path: Path,
@@ -1684,6 +1747,7 @@ def _new_preflight(
         "--output", str(path), "--pins", str(args.pins),
         "--trace-budget", str(args.aggregate_budget),
         "--matrix", str(matrix_path),
+        "--nvbit-tracer", str(args.nvbit_tracer),
         "--output-root", str(args.output_root),
         "--smoke-temp-root", str(smoke_root),
     ]
@@ -1701,23 +1765,50 @@ def _new_preflight(
     ):
         clean_env.pop(name, None)
     try:
-        local_git_env = subprocess.run(
-            ["git", "rev-parse", "--local-env-vars"], cwd=REPO_ROOT,
-            env=clean_env, capture_output=True, text=True, check=True,
-        ).stdout.splitlines()
-    except subprocess.CalledProcessError as exc:
-        raise CampaignRefusal(
-            "campaign_preflight_environment_failed", str(exc)
+        git_outcome = _run_bounded_probe(
+            ["git", "rev-parse", "--local-env-vars"],
+            cwd=REPO_ROOT,
+            environment=clean_env,
+            timeout_seconds=_GIT_DISCOVERY_TIMEOUT_SECONDS,
+            max_output_bytes=_GIT_DISCOVERY_MAX_OUTPUT_BYTES,
+            timeout_code=_GIT_DISCOVERY_TIMEOUT_CODE,
+            resource_code=_GIT_DISCOVERY_RESOURCE_CODE,
+        )
+    except ncu_executor.NcuActionExecutorError as exc:
+        raise _bounded_probe_refusal(
+            exc,
+            timeout_code=_GIT_DISCOVERY_TIMEOUT_CODE,
+            output_limit_code=_GIT_DISCOVERY_OUTPUT_LIMIT_CODE,
+            resource_code=_GIT_DISCOVERY_RESOURCE_CODE,
         ) from exc
+    if git_outcome.returncode != 0:
+        raise CampaignRefusal(
+            "campaign_preflight_environment_failed",
+            f"returncode={git_outcome.returncode}; "
+            f"stderr_tail={_probe_diagnostic_tail(git_outcome.stderr)!r}",
+        )
+    local_git_env = _probe_output_text(git_outcome.stdout).splitlines()
     for name in local_git_env:
         clean_env.pop(name.strip(), None)
     clean_env["PYTHONNOUSERSITE"] = "1"
-    outcome = subprocess.run(
-        command, cwd=REPO_ROOT, env=clean_env,
-        capture_output=True, text=True, check=False,
-    )
+    preflight_execution_error: ncu_executor.NcuActionExecutorError | None = None
+    try:
+        outcome = _run_bounded_probe(
+            command,
+            cwd=REPO_ROOT,
+            environment=clean_env,
+            timeout_seconds=_PREFLIGHT_TIMEOUT_SECONDS,
+            max_output_bytes=_PREFLIGHT_MAX_OUTPUT_BYTES,
+            timeout_code=_PREFLIGHT_TIMEOUT_CODE,
+            resource_code=_PREFLIGHT_RESOURCE_CODE,
+        )
+        preflight_stderr = outcome.stderr
+    except ncu_executor.NcuActionExecutorError as exc:
+        preflight_execution_error = exc
+        preflight_stderr = exc.stderr
+    preflight_stderr_text = _probe_output_text(preflight_stderr)
     storage_marker = chunk_capture.preflight.parse_preflight_storage_marker(
-        outcome.stderr
+        preflight_stderr_text
     )
     if storage_marker is not None:
         campaign_output_operations = {
@@ -1762,10 +1853,18 @@ def _new_preflight(
                 "child": storage_marker,
             }, sort_keys=True),
         )
+    if preflight_execution_error is not None:
+        raise _bounded_probe_refusal(
+            preflight_execution_error,
+            timeout_code=_PREFLIGHT_TIMEOUT_CODE,
+            output_limit_code=_PREFLIGHT_OUTPUT_LIMIT_CODE,
+            resource_code=_PREFLIGHT_RESOURCE_CODE,
+        ) from preflight_execution_error
     if outcome.returncode != 0 or not path.is_file():
         raise CampaignRefusal(
             "campaign_preflight_failed",
-            f"returncode={outcome.returncode}; stderr={outcome.stderr.strip()}",
+            f"returncode={outcome.returncode}; "
+            f"stderr_tail={_probe_diagnostic_tail(outcome.stderr)!r}",
         )
     payload = path.read_bytes()
     staging_sha256 = hashlib.sha256(payload).hexdigest()
@@ -1848,28 +1947,143 @@ def _new_preflight(
     return external_path
 
 
+_CAPTURE_EXECUTION_ROOTS = frozenset({
+    "sol_capture_prepare_failed",
+    "label_capture_failed",
+    "trace_target_failed",
+    "trace_sampling_target_failed",
+    "control_bits_unavailable",
+})
+_UNSUPERVISED_CAPTURE_ROOTS = _CAPTURE_EXECUTION_ROOTS - {
+    "label_capture_failed"
+}
+_MONITORED_CAPTURE_ROOTS = frozenset({
+    "trace_target_failed",
+    "trace_sampling_target_failed",
+})
+_RETRYABLE_CAPTURE_ROOTS = _CAPTURE_EXECUTION_ROOTS - {
+    "control_bits_unavailable"
+}
+_RETRYABLE_UNSUPERVISED_SUFFIXES = frozenset({
+    "_start_failed",
+    "_output_resource_unavailable",
+    "_output_read_failed",
+})
+_PROCESS_BLOCKED_SUFFIXES = frozenset({
+    "_cleanup_failed",
+    "_output_cleanup_failed",
+    "_containment_unavailable",
+})
+
 _RETRYABLE_CODES = frozenset({
-    "cell_deadline_exhausted", "trace_route_deadline_exhausted",
-    "trace_target_failed", "trace_target_failed_timeout",
-    "label_capture_failed", "label_capture_failed_timeout",
-    "sol_capture_prepare_failed", "sol_capture_prepare_failed_timeout",
+    "cell_deadline_exhausted",
+    "trace_route_deadline_exhausted",
+    "capture_process_conflict",
+    "campaign_writer_active",
+    "trace_snapshot_resource_unavailable",
+    "trace_runtime_resource_unavailable",
+    "trace_tracer_resource_unavailable",
+    "injection_runtime_resource_unavailable",
+    "control_output_resource_unavailable",
+    "label_ncu_report_resource_unavailable",
+    "sol_control_ncu_report_resource_unavailable",
+    "vendor_control_ncu_report_resource_unavailable",
+    "sol_all_launch_ncu_report_resource_unavailable",
+    "launch_set_adapter_report_resource_unavailable",
+    "sol_ncu_identity_report_resource_unavailable",
+}) | _RETRYABLE_CAPTURE_ROOTS | frozenset(
+    root + "_timeout" for root in _CAPTURE_EXECUTION_ROOTS
+) | frozenset(
+    root + suffix
+    for root in _UNSUPERVISED_CAPTURE_ROOTS
+    for suffix in _RETRYABLE_UNSUPERVISED_SUFFIXES
+) | frozenset(
+    root + "_tree_resource_unavailable"
+    for root in _MONITORED_CAPTURE_ROOTS
+)
+_PROCESS_BLOCKED_CODES = frozenset(
+    root + suffix
+    for root in _UNSUPERVISED_CAPTURE_ROOTS
+    for suffix in _PROCESS_BLOCKED_SUFFIXES
+) | frozenset({
+    "label_capture_failed_cleanup_failed",
+    "label_launch_set_collection_cleanup_failed",
 })
 _ROW_BUDGET_CODES = frozenset({
-    "trace_target_failed_tree_limit_exceeded",
     "supplemental_full_trace_retention_ceiling_exceeded",
     "supplemental_chunk_rows_budget_blocked",
-})
+    "trace_retained_budget_exceeded",
+    "control_output_limit_exceeded",
+    "trace_inventory_limit_exceeded",
+    "label_ncu_report_limit_exceeded",
+    "sol_control_ncu_report_limit_exceeded",
+    "vendor_control_ncu_report_limit_exceeded",
+    "sol_all_launch_ncu_report_limit_exceeded",
+    "launch_set_adapter_report_limit_exceeded",
+    "sol_ncu_identity_report_limit_exceeded",
+}) | frozenset(
+    root + "_output_limit" for root in _CAPTURE_EXECUTION_ROOTS
+) | frozenset(
+    root + "_tree_limit_exceeded"
+    for root in _MONITORED_CAPTURE_ROOTS
+)
 _CAMPAIGN_BUDGET_CODES = frozenset({
     "supplemental_retention_budget_exceeded",
 })
 _STORAGE_CAPACITY_CODES = frozenset({chunk_capture.STORAGE_CAPACITY_CODE})
-_STORAGE_INTEGRITY_CODES = frozenset({chunk_capture.STORAGE_INTEGRITY_CODE})
+# The supplemental chunk normally converts producer storage failures to the
+# two errno-backed codes above/below.  If a known raw producer token escapes,
+# stop all campaign-volume writes conservatively rather than recording a false
+# semantic-integrity event; the raw code cannot distinguish capacity from I/O
+# integrity without its causal errno.
+_RAW_STORAGE_CODES = frozenset({
+    "capture_output_storage_failure",
+    "sol_phase_storage_failure",
+    "label_capture_storage_failure",
+    "trace_generated_output_storage_failure",
+    "trace_snapshot_storage_failure",
+    "control_bits_storage_failure",
+    "sol_control_storage_failure",
+    "cell_inventory_storage_failure",
+    "cell_result_storage_failure",
+    "output_root_storage_failure",
+    "campaign_lock_storage_failure",
+    "cell_journal_storage_failure",
+}) | frozenset(
+    root + "_storage_failure" for root in _CAPTURE_EXECUTION_ROOTS
+) | frozenset(
+    root + "_storage_monitor_failed"
+    for root in _MONITORED_CAPTURE_ROOTS
+)
+_STORAGE_INTEGRITY_CODES = frozenset({
+    chunk_capture.STORAGE_INTEGRITY_CODE
+}) | _RAW_STORAGE_CODES
+_KNOWN_INTEGRITY_CODES = frozenset({
+    "control_bits_unavailable",
+    "capture_label_driver_authority_invalid",
+    "capture_ncu_authority_invalid",
+    "trace_runtime_limit_exceeded",
+    "trace_tracer_limit_exceeded",
+    "injection_runtime_limit_exceeded",
+    "trace_runtime_contract_invalid",
+    "injection_runtime_hash_drift",
+    "label_capture_failed_supervision_invalid",
+}) | frozenset(
+    root + "_output_reader_start_failed"
+    for root in _UNSUPERVISED_CAPTURE_ROOTS
+) | frozenset(
+    root + suffix
+    for root in _MONITORED_CAPTURE_ROOTS
+    for suffix in ("_tree_monitor_failed", "_tree_limit_invalid")
+)
 
 
 def classify_capture_failure(code: str) -> str:
     """Closed disposition over codes actually emitted by capture producers."""
     if code in _RETRYABLE_CODES:
         return "retryable"
+    if code in _PROCESS_BLOCKED_CODES:
+        return "process_blocked"
     if code in _ROW_BUDGET_CODES:
         return "row_budget_blocked"
     if code in _CAMPAIGN_BUDGET_CODES:
@@ -1878,6 +2092,8 @@ def classify_capture_failure(code: str) -> str:
         return "storage_blocked"
     if code in _STORAGE_INTEGRITY_CODES:
         return "storage_integrity_blocked"
+    if code in _KNOWN_INTEGRITY_CODES:
+        return "integrity_blocked"
     return "integrity_blocked"
 
 
@@ -1921,6 +2137,7 @@ def _failure_row_outcomes(
         return []
     status = {
         "retryable": "retry_exhausted",
+        "row_budget_blocked": "budget_blocked",
         "storage_blocked": "storage_blocked",
         "storage_integrity_blocked": "storage_integrity_blocked",
         "representative_measured_infeasible": "measured_infeasible_trace_capture",
@@ -2358,12 +2575,14 @@ def _run_campaign_locked(args: argparse.Namespace) -> Path:
                 ):
                     classification = "representative_measured_infeasible"
                 if classification in {
-                    "storage_blocked", "storage_integrity_blocked",
+                    "storage_blocked",
+                    "storage_integrity_blocked",
+                    "process_blocked",
                 }:
-                    # The campaign filesystem has just failed.  Do not append
-                    # an event, publish a snapshot, finalize, or perform any
-                    # other write to that same medium.  The outer boundary
-                    # records a typed receipt on the independent runtime fs.
+                    # A failed campaign filesystem or incomplete process-group
+                    # teardown makes any event/snapshot write and any retry
+                    # unsafe.  The outer boundary persists known storage stops;
+                    # live-process admission guards protect a later restart.
                     raise exc
                 outcome = {
                     "retryable": "chunk_failed",
@@ -2525,6 +2744,19 @@ def run_campaign(args: argparse.Namespace) -> Path:
             storage_refusal = chunk_capture.WorkloadCaptureRefusal(
                 code, str(getattr(exc, "detail", exc))
             )
+        elif code in _RAW_STORAGE_CODES:
+            # The producer normally supplies a causal errno to the chunk-level
+            # normalizer.  An escaped known storage token lacks enough evidence
+            # to claim capacity, so persist the conservative integrity stop and
+            # retain the original token in its hashed receipt detail.
+            storage_refusal = chunk_capture.WorkloadCaptureRefusal(
+                chunk_capture.STORAGE_INTEGRITY_CODE,
+                json.dumps({
+                    "operation": "campaign_raw_producer_storage_failure",
+                    "producer_code": code,
+                    "producer_detail": str(getattr(exc, "detail", exc)),
+                }, sort_keys=True),
+            )
         else:
             # A semantic refusal may retain an OSError as its diagnostic
             # cause (for example EAGAIN on an already-held orchestrator lock,
@@ -2575,6 +2807,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--full-coverage-inventory", required=True)
     parser.add_argument("--live-coverage-inventory", required=True)
     parser.add_argument("--live-coverage-inventory-root", required=True)
+    parser.add_argument(
+        "--nvbit-tracer",
+        required=True,
+        help="absolute path to an external non-Git split-capable tracer_tool.so",
+    )
     parser.add_argument("--output-root", required=True)
     parser.add_argument("--max-chunk-attempts", type=int, default=3)
     parser.add_argument(

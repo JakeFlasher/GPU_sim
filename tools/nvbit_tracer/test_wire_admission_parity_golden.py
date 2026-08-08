@@ -10,6 +10,7 @@ from tools.nvbit_tracer.trace_admission import (
     TraceAdmissionError,
     _import_pb_modules,
     _import_trace_pb2,
+    require_historical_trace_admission,
     require_trace_admission,
 )
 
@@ -88,13 +89,25 @@ def _threadblock_with_instruction_suffix(threadblock: Any, suffix: bytes) -> byt
     )
 
 
+def _trace_with_kernel_suffix(trace: Any, suffix: bytes) -> bytes:
+    metadata = type(trace)()
+    metadata.CopyFrom(trace)
+    metadata.ClearField("gpu_device")
+    kernel = trace.gpu_device[0].streams[0].kernels[0].SerializeToString() + suffix
+    stream = _message_field(2, kernel)
+    stream_entry = _message_field(2, stream)
+    device = _message_field(2, stream_entry)
+    device_entry = _message_field(2, device)
+    return metadata.SerializeToString() + _message_field(6, device_entry)
+
+
 def _build_case(trace_dir: Path, mutation: str) -> None:
     trace_pb2 = _import_trace_pb2()
     threadblock_pb2, instruction_pb2, address_pb2 = _import_pb_modules()
     trace_dir.mkdir()
 
     trace = trace_pb2.Trace()
-    trace.trace_contract_id = "sm86_addr_carry_v1"
+    trace.trace_contract_id = "sm86_addr_carry_shmem_split_v2"
     trace.memory_payload_classes.extend([1, 2, 3, 6, 8])
     device = trace.gpu_device[0]
     device.id = 0
@@ -107,6 +120,8 @@ def _build_case(trace_dir: Path, mutation: str) -> None:
     kernel.grid_dim.x = kernel.grid_dim.y = kernel.grid_dim.z = 1
     kernel.block_dim.x = 32
     kernel.block_dim.y = kernel.block_dim.z = 1
+    kernel.shared_memory_static_bytes = 0
+    kernel.shared_memory_dynamic_bytes = 0
 
     threadblock = threadblock_pb2.threadblock()
     threadblock.block_id.x = threadblock.block_id.y = threadblock.block_id.z = 0
@@ -129,6 +144,7 @@ def _build_case(trace_dir: Path, mutation: str) -> None:
     empty_payload = False
     write_root = True
     root_known_field_wrong_wire_type = False
+    kernel_wire_suffix = b""
     instruction_known_field_wrong_wire_type = False
     write_allocations = True
     allocations_raw: str | None = None
@@ -166,6 +182,55 @@ def _build_case(trace_dir: Path, mutation: str) -> None:
         kernel.grid_dim.x = 0
     elif mutation == "zero_block_axis":
         kernel.block_dim.x = 0
+    elif mutation == "legacy_shared_memory_nonzero":
+        trace.trace_contract_id = "sm86_addr_carry_v1"
+        kernel.ClearField("shared_memory_static_bytes")
+        kernel.ClearField("shared_memory_dynamic_bytes")
+        kernel.size_shared_memory = 4096
+    elif mutation == "legacy_shared_memory_split_unadvertised":
+        trace.trace_contract_id = "sm86_addr_carry_v1"
+    elif mutation == "split_shared_memory_matching":
+        trace.trace_contract_id = "sm86_addr_carry_shmem_split_v2"
+        kernel.size_shared_memory = 6144
+        kernel.shared_memory_static_bytes = 2048
+        kernel.shared_memory_dynamic_bytes = 4096
+    elif mutation == "split_shared_memory_zero":
+        trace.trace_contract_id = "sm86_addr_carry_shmem_split_v2"
+        kernel.shared_memory_static_bytes = 0
+        kernel.shared_memory_dynamic_bytes = 0
+    elif mutation == "split_shared_memory_static_only":
+        trace.trace_contract_id = "sm86_addr_carry_shmem_split_v2"
+        kernel.size_shared_memory = 2048
+        kernel.shared_memory_static_bytes = 2048
+        kernel.shared_memory_dynamic_bytes = 0
+    elif mutation == "split_shared_memory_dynamic_only":
+        trace.trace_contract_id = "sm86_addr_carry_shmem_split_v2"
+        kernel.size_shared_memory = 4096
+        kernel.shared_memory_static_bytes = 0
+        kernel.shared_memory_dynamic_bytes = 4096
+    elif mutation == "split_shared_memory_missing_both":
+        kernel.ClearField("shared_memory_static_bytes")
+        kernel.ClearField("shared_memory_dynamic_bytes")
+    elif mutation == "split_shared_memory_missing_static":
+        kernel.ClearField("shared_memory_static_bytes")
+    elif mutation == "split_shared_memory_missing_dynamic":
+        kernel.ClearField("shared_memory_dynamic_bytes")
+    elif mutation == "split_shared_memory_mismatch":
+        trace.trace_contract_id = "sm86_addr_carry_shmem_split_v2"
+        kernel.size_shared_memory = 4096
+        kernel.shared_memory_static_bytes = 1024
+        kernel.shared_memory_dynamic_bytes = 2048
+    elif mutation == "shared_memory_combined_negative":
+        kernel.size_shared_memory = -1
+    elif mutation == "split_shared_memory_wrong_wire_type":
+        trace.trace_contract_id = "sm86_addr_carry_shmem_split_v2"
+        kernel.shared_memory_dynamic_bytes = 0
+        kernel_wire_suffix = b"\x5a\x00"
+    elif mutation == "split_shared_memory_duplicate_field":
+        trace.trace_contract_id = "sm86_addr_carry_shmem_split_v2"
+        kernel.shared_memory_static_bytes = 0
+        kernel.shared_memory_dynamic_bytes = 0
+        kernel_wire_suffix = b"\x58\x00"
     elif mutation == "no_payload_files":
         payload_kernel_ids = []
     elif mutation == "launch_payload_missing":
@@ -441,6 +506,8 @@ def _build_case(trace_dir: Path, mutation: str) -> None:
         raise AssertionError(f"unimplemented golden mutation {mutation!r}")
 
     root_bytes = trace.SerializeToString() if write_root else b""
+    if kernel_wire_suffix:
+        root_bytes = _trace_with_kernel_suffix(trace, kernel_wire_suffix)
     if root_known_field_wrong_wire_type:
         root_bytes += b"\x08\x00"
     (trace_dir / "dynamic_trace.pb").write_bytes(root_bytes)
@@ -481,9 +548,19 @@ def test_python_wire_admission_matches_shared_typed_outcome(
     tmp_path: Path, case: dict[str, object]
 ) -> None:
     trace_dir = tmp_path / "trace"
-    _build_case(trace_dir, str(case["mutation"]))
+    mutation = str(case["mutation"])
+    _build_case(trace_dir, mutation)
+    admission = (
+        require_historical_trace_admission
+        if mutation
+        in {
+            "legacy_shared_memory_nonzero",
+            "legacy_shared_memory_split_unadvertised",
+        }
+        else require_trace_admission
+    )
     try:
-        require_trace_admission(trace_dir)
+        admission(trace_dir)
         actual = None
     except TraceAdmissionError as error:
         actual = error.typed_reason

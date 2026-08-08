@@ -51,16 +51,20 @@ CLI:
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import hashlib
 import json
 import sys
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(_REPO_ROOT))
 sys.path.insert(0, str(_REPO_ROOT / "tools" / "cache_predictor"))
 sys.path.insert(0, str(_REPO_ROOT / "tools" / "local_labels"))
 
 import l1_production_helper as lph  # noqa: E402
+from tools.local_labels import immutable_artifact as immutable  # noqa: E402
+from tools.nvbit_tracer import trace_admission as trace_admission_contract  # noqa: E402
 # Shared base-predictor-cohort boundary: register-cap build variants + pending-
 # refit factorial cells are admitted in the corpus but not yet folded into the
 # predictor head, so the per-admitted-cell L1 prediction skips them (no row)
@@ -105,6 +109,32 @@ _SM_86_L1TEX_CAPACITY_SOURCE: str = "static_card_constant"
 _SM_86_L1_SHARED_CARVEOUT_SOURCE: str = "default"
 _SM_86_CTA_TO_SM_POLICY: str = "round_robin_homogeneous"
 _KERNEL_ID: int = 1
+
+# Every scalar prediction is computed from one byte-exact, bounded snapshot.
+# Reuse the forward trace-admission ceilings rather than inventing a looser
+# predictor-only policy. The classifier manifest is a separate regular-file
+# authority and receives its own bounded anchored read.
+_TRACE_INPUT_LIMITS = trace_admission_contract.DEFAULT_TRACE_ADMISSION_LIMITS
+_CLASSIFIER_MANIFEST_MAX_BYTES = 16 * 1024 * 1024
+_CLASSIFIER_MANIFEST_TREE_LIMITS = {
+    "max_files": 4096,
+    "max_directories": 64,
+    "max_total_file_bytes": 64 * 1024 * 1024,
+    "max_total_relative_path_bytes": 1024 * 1024,
+}
+_THREADBLOCK_ROOT = PurePosixPath(
+    "threadblocks/device_0/stream_0/kernel_1"
+)
+
+
+@dataclasses.dataclass(frozen=True)
+class _RetainedTraceInputs:
+    """Exact trace bytes read once from one monitored tree generation."""
+
+    dynamic_trace_path: Path
+    dynamic_trace_payload: bytes
+    threadblocks: tuple[tuple[Path, bytes], ...]
+
 
 # R17 carveout-aware capacity: per-cell `carveout_percent` source.
 # Cells whose binary calls
@@ -204,12 +234,143 @@ def _sha256_of_sorted_files(paths: list[Path]) -> str:
     EXACT set of threadblock proto files the L1 head consumed.
     A future regeneration that adds, drops, or reorders a
     threadblock proto produces a different digest.
+
+    This path-reading compatibility helper remains imported by the separate
+    warp-pool producer. The production per-admitted-cell path below uses
+    ``_sha256_of_retained_files`` so parsing and serialization share bytes.
     """
     h = hashlib.sha256()
     for p in paths:
         rel = str(p.relative_to(_REPO_ROOT))
         sha = _sha256_of_file(p)
         h.update(f"{rel}\t{sha}\n".encode("utf-8"))
+    return h.hexdigest()
+
+
+def _trace_tree_generation_limits() -> dict[str, int]:
+    policy = trace_admission_contract.raw_trace_generation_limits(
+        _TRACE_INPUT_LIMITS
+    )
+    return {
+        name: int(policy[name])
+        for name in (
+            "max_files",
+            "max_directories",
+            "max_total_file_bytes",
+            "max_total_relative_path_bytes",
+        )
+    }
+
+
+def _snapshot_classifier_manifest(path: Path) -> tuple[bytes, dict]:
+    with immutable.PinnedDirectoryReader(path.parent) as reader:
+        with reader.retain_tree_generation(
+            **_CLASSIFIER_MANIFEST_TREE_LIMITS
+        ) as tree:
+            file_metadata = dict(tree.files)
+            metadata = file_metadata.get(path.name)
+            if metadata is None:
+                raise immutable.ImmutableArtifactError(
+                    f"classifier manifest generation lost {path.name}"
+                )
+            snapshot = reader.read_snapshot(
+                path.name,
+                max_bytes=_CLASSIFIER_MANIFEST_MAX_BYTES,
+                expected_metadata=metadata,
+            )
+    manifest = immutable.strict_json_loads(
+        snapshot.payload,
+        label=f"classifier manifest {path}",
+    )
+    if type(manifest) is not dict:
+        raise immutable.ImmutableArtifactError(
+            f"classifier manifest {path} must be an exact JSON object"
+        )
+    return snapshot.payload, manifest
+
+
+def _snapshot_trace_inputs(trace_dir: Path) -> _RetainedTraceInputs | None:
+    """Read the root and selected threadblocks once from one generation.
+
+    ``None`` preserves the producer's typed-unavailable arm for an otherwise
+    valid trace directory that lacks ``dynamic_trace.pb``. Any unsafe node,
+    resource exhaustion, limit violation, or mutation during the snapshot is a
+    hard immutable-artifact failure rather than prediction evidence.
+    """
+    limits = _TRACE_INPUT_LIMITS
+    with immutable.PinnedDirectoryReader(trace_dir) as reader:
+        with reader.retain_tree_generation(
+            **_trace_tree_generation_limits()
+        ) as tree:
+            file_metadata = dict(tree.files)
+            dynamic_metadata = file_metadata.get("dynamic_trace.pb")
+            if dynamic_metadata is None:
+                return None
+            if dynamic_metadata[4] > limits.trace_root_bytes:
+                raise immutable.ImmutableArtifactLimitError(
+                    "predictor dynamic_trace.pb exceeds the bounded byte limit"
+                )
+
+            threadblock_names = tuple(sorted(
+                name
+                for name in file_metadata
+                if (
+                    PurePosixPath(name).parent == _THREADBLOCK_ROOT
+                    and PurePosixPath(name).suffix == ".pb"
+                )
+            ))
+            if len(threadblock_names) > limits.threadblock_files:
+                raise immutable.ImmutableArtifactLimitError(
+                    "predictor threadblock set exceeds the bounded file limit"
+                )
+            threadblock_total = 0
+            for name in threadblock_names:
+                size = file_metadata[name][4]
+                if size > limits.threadblock_bytes:
+                    raise immutable.ImmutableArtifactLimitError(
+                        f"predictor threadblock {name} exceeds the bounded "
+                        "per-file byte limit"
+                    )
+                if threadblock_total > limits.total_threadblock_bytes - size:
+                    raise immutable.ImmutableArtifactLimitError(
+                        "predictor threadblock set exceeds the bounded total-byte "
+                        "limit"
+                    )
+                threadblock_total += size
+
+            dynamic = reader.read_snapshot(
+                "dynamic_trace.pb",
+                max_bytes=limits.trace_root_bytes,
+                expected_metadata=dynamic_metadata,
+            )
+            threadblocks: list[tuple[Path, bytes]] = []
+            for name in threadblock_names:
+                retained = reader.read_snapshot(
+                    name,
+                    max_bytes=limits.threadblock_bytes,
+                    expected_metadata=file_metadata[name],
+                )
+                threadblocks.append((
+                    trace_dir.joinpath(*PurePosixPath(name).parts),
+                    retained.payload,
+                ))
+
+    return _RetainedTraceInputs(
+        dynamic_trace_path=trace_dir / "dynamic_trace.pb",
+        dynamic_trace_payload=dynamic.payload,
+        threadblocks=tuple(threadblocks),
+    )
+
+
+def _sha256_of_retained_files(
+    files: tuple[tuple[Path, bytes], ...],
+) -> str:
+    """Canonical-list digest over the exact retained threadblock bytes."""
+    h = hashlib.sha256()
+    for path, payload in files:
+        rel = str(path.relative_to(_REPO_ROOT))
+        digest = immutable.sha256_bytes(payload)
+        h.update(f"{rel}\t{digest}\n".encode("utf-8"))
     return h.hexdigest()
 
 
@@ -252,15 +413,27 @@ def _build_mpi_skeleton(
 
 
 def _digest_skeleton(*, trace_pb_path: Path) -> dict:
-    """The L1 head's input_sidecar_digests are predictor-side
-    provenance for the typed-unavailable schema. The
-    predicted-L1 artifact's own ``input_digests`` carries the
-    L1-side real digests separately; the L1 head's MPI
-    consumes this minimal skeleton for schema compliance."""
+    """Compatibility path reader for the separate warp-pool producer."""
     return {
         "dynamic_trace_pb": {
             "path": str(trace_pb_path.relative_to(_REPO_ROOT)),
             "sha256": _sha256_of_file(trace_pb_path),
+        },
+        "sector_stream": {
+            "path": "n/a-l1-head-does-not-consume-sector-stream",
+            "sha256": "0" * 64,
+        },
+    }
+
+
+def _digest_skeleton_from_retained(
+    *, trace_pb_path: Path, trace_pb_payload: bytes,
+) -> dict:
+    """Build predictor provenance from the exact retained root bytes."""
+    return {
+        "dynamic_trace_pb": {
+            "path": str(trace_pb_path.relative_to(_REPO_ROOT)),
+            "sha256": immutable.sha256_bytes(trace_pb_payload),
         },
         "sector_stream": {
             "path": "n/a-l1-head-does-not-consume-sector-stream",
@@ -284,8 +457,7 @@ def compute_for_cell(
     )
 
     manifest_path = _manifest_path_for(slug, shape_point)
-    manifest = _read_manifest(slug, shape_point)
-    if manifest is None:
+    if not manifest_path.is_file():
         # No classifier manifest on disk -- emit
         # typed_unavailable WITH a placeholder digest set so
         # the schema validates. Use sha-256-of-empty for the
@@ -313,9 +485,12 @@ def compute_for_cell(
             },
         }
 
+    manifest_payload, manifest = _snapshot_classifier_manifest(manifest_path)
+    manifest_sha256 = immutable.sha256_bytes(manifest_payload)
+
     trace_dir = _trace_dir_for(slug, shape_point)
     trace_pb = trace_dir / "dynamic_trace.pb"
-    if not trace_pb.is_file():
+    if not trace_dir.is_dir():
         empty_sha = hashlib.sha256(b"").hexdigest()
         return {
             "slug": slug,
@@ -331,17 +506,43 @@ def compute_for_cell(
                 ),
             },
             "input_digests": {
-                "classifier_manifest_sha256": _sha256_of_file(manifest_path),
+                "classifier_manifest_sha256": manifest_sha256,
                 "dynamic_trace_pb_sha256": empty_sha,
                 "threadblock_proto_set_sha256": empty_sha,
             },
         }
-    tb_paths = _threadblock_pb_paths(trace_dir)
+
+    trace_inputs = _snapshot_trace_inputs(trace_dir)
+    if trace_inputs is None:
+        empty_sha = hashlib.sha256(b"").hexdigest()
+        return {
+            "slug": slug,
+            "shape_point": shape_point,
+            **identity,
+            "result_kind": "typed_unavailable",
+            "cache_layer": "L1TEX",
+            "predicted_hit_rate": None,
+            "typed_reason": "predictor_l1_sass_provenance_missing",
+            "evidence": {
+                "diagnostic": (
+                    f"dynamic_trace.pb missing at {trace_pb}"
+                ),
+            },
+            "input_digests": {
+                "classifier_manifest_sha256": manifest_sha256,
+                "dynamic_trace_pb_sha256": empty_sha,
+                "threadblock_proto_set_sha256": empty_sha,
+            },
+        }
+    tb_paths = [path for path, _payload in trace_inputs.threadblocks]
 
     mpi = _build_mpi_skeleton(
         slug=slug, shape_point=shape_point, identity=identity,
     )
-    isd = _digest_skeleton(trace_pb_path=trace_pb)
+    isd = _digest_skeleton_from_retained(
+        trace_pb_path=trace_inputs.dynamic_trace_path,
+        trace_pb_payload=trace_inputs.dynamic_trace_payload,
+    )
 
     # R17 carveout-aware capacity: if the cell has a per-cell
     # carveout_percent setting in `_CARVEOUT_PERCENT_BY_CELL`,
@@ -359,7 +560,7 @@ def compute_for_cell(
         default_l1_for_helper = _SM_86_L1_CAPACITY_BYTES
 
     bundle = lph.predict_l1_from_trace_dir(
-        trace_pb_path=trace_pb,
+        trace_pb_path=trace_inputs.dynamic_trace_path,
         threadblock_pb_paths=tb_paths,
         kernel_id=_KERNEL_ID,
         classifier_manifest=manifest,
@@ -376,6 +577,10 @@ def compute_for_cell(
         default_l1_bytes=default_l1_for_helper,
         carveout_percent=carveout_percent_for_cell,
         warmup_launches=5,
+        retained_trace_pb_payload=trace_inputs.dynamic_trace_payload,
+        retained_threadblock_pb_payloads=[
+            payload for _path, payload in trace_inputs.threadblocks
+        ],
     )
 
     entry: dict = {
@@ -388,9 +593,13 @@ def compute_for_cell(
         "typed_reason": bundle.get("typed_reason"),
         "evidence": bundle.get("evidence", {}),
         "input_digests": {
-            "classifier_manifest_sha256": _sha256_of_file(manifest_path),
-            "dynamic_trace_pb_sha256": _sha256_of_file(trace_pb),
-            "threadblock_proto_set_sha256": _sha256_of_sorted_files(tb_paths),
+            "classifier_manifest_sha256": manifest_sha256,
+            "dynamic_trace_pb_sha256": immutable.sha256_bytes(
+                trace_inputs.dynamic_trace_payload
+            ),
+            "threadblock_proto_set_sha256": _sha256_of_retained_files(
+                trace_inputs.threadblocks
+            ),
         },
     }
     return entry
@@ -432,106 +641,29 @@ def _load_cohort_priority_keys(
     return keys
 
 
-_IDENTITY_FIELDS_STAMPED_ON_PRESERVED_ROW: tuple[str, ...] = (
-    "arch",
-    "cache_layer",
-    "binary_sha256",
-    "source_commit",
-    "kernel_signature_sha256",
-    "ncu_metric_version",
-)
-
-
-def _build_existing_lookup(
-    existing_artifact_path: Path | None,
-) -> dict[tuple[str, str], dict]:
-    """Return a ``(slug, shape_point) -> row`` lookup over any
-    existing artifact at ``existing_artifact_path``. Used by the
-    merge-with-prior pattern: when the producer cannot compute a
-    fresh scalar/bounded prediction (because trace artifacts or
-    classifier manifests are absent), it preserves the
-    previously-committed scalar/bounded row's prediction fields
-    while stamping the current admitted identity onto every
-    emitted row.
-    """
-    if existing_artifact_path is None or not existing_artifact_path.is_file():
-        return {}
-    try:
-        existing = json.loads(
-            existing_artifact_path.read_text(encoding="utf-8"),
-        )
-    except (OSError, json.JSONDecodeError):
-        return {}
-    lookup: dict[tuple[str, str], dict] = {}
-    for row in existing.get("cells", []) or []:
-        slug = row.get("slug")
-        shape_point = row.get("shape_point")
-        if isinstance(slug, str) and isinstance(shape_point, str):
-            lookup[(slug, shape_point)] = row
-    return lookup
-
-
-def _preserve_prior_row_with_current_identity(
-    *, prior_row: dict, fresh_row: dict,
-) -> dict:
-    """Build a merged row that preserves the prior row's
-    prediction fields (``predicted_hit_rate``, ``result_kind``,
-    ``evidence``, ``input_digests``, ``typed_reason``) while
-    stamping the current admitted identity onto every cell-
-    identity field.
-
-    The merged row carries an
-    ``evidence.preserved_from_prior_artifact`` marker so future
-    audits can trace the preservation lineage. Mirrors the
-    Round-25/26 manual restoration pattern documented in the
-    prior committed artifact's per-cell ``evidence.note``
-    fields, generalized into the producer.
-    """
-    merged = {
-        # Slug + shape_point come from the fresh row (which built
-        # them from the admitted cell directly); identity fields
-        # ditto. Prediction + evidence fields come from the prior
-        # row.
-        "slug": fresh_row["slug"],
-        "shape_point": fresh_row["shape_point"],
-    }
-    for key in _IDENTITY_FIELDS_STAMPED_ON_PRESERVED_ROW:
-        if key in fresh_row:
-            merged[key] = fresh_row[key]
-    # Copy every non-identity field from the prior row, then
-    # overlay the merged-identity values to ensure identity wins.
-    prediction_fields = (
-        "predicted_hit_rate",
-        "result_kind",
-        "typed_reason",
-        "evidence",
-        "input_digests",
-    )
-    for key in prediction_fields:
-        if key in prior_row:
-            merged[key] = prior_row[key]
-    # Stamp the preservation marker on the evidence block. The
-    # cache_predictor schema accepts additionalProperties on
-    # evidence sub-objects (the bundle's evidence carries a wide
-    # range of free-form keys); the predicted_l1 schema mirrors
-    # that openness for its evidence block.
-    evidence = dict(merged.get("evidence") or {})
-    evidence["preserved_from_prior_artifact"] = True
-    evidence["preserved_with_current_identity"] = True
-    merged["evidence"] = evidence
-    return merged
-
-
 def build_artifact(
     *,
     label_admitted_path: Path,
     existing_artifact_path: Path | None = None,
 ) -> dict:
+    """Build every row from the current admitted row and fresh inputs only.
+
+    ``existing_artifact_path`` remains a source-compatible CLI/public-call
+    parameter, but its bytes are deliberately not prediction authority. A prior
+    scalar has no independent prediction digest and cannot be authenticated when
+    the retained classifier/trace generation is unavailable. In that case the
+    fresh ``typed_unavailable`` row must survive unchanged rather than acquiring
+    stale prediction fields under a newly stamped identity.
+
+    BL-20260708-guard-on-consumer-path: the producer that emits the scalar is the
+    consumer path that must authenticate its inputs; historical output bytes are
+    not a substitute for those inputs.
+    """
+    _ = existing_artifact_path
     with label_admitted_path.open("r", encoding="utf-8") as fh:
         admitted = json.load(fh)
     cells = admitted.get("cells", [])
     entries: list[dict] = []
-    existing_by_key = _build_existing_lookup(existing_artifact_path)
     for cell in cells:
         # Filter to sm_86 (or legacy missing-arch). This is the
         # sm_86-only generator: cross-host merge workflows that
@@ -599,14 +731,6 @@ def build_artifact(
         fresh = compute_for_cell(
             slug=slug, shape_point=shape_point, cell_row=cell,
         )
-        if fresh.get("result_kind") == "typed_unavailable":
-            prior = existing_by_key.get((slug, shape_point))
-            if prior is not None and prior.get("result_kind") in (
-                "scalar", "bounded",
-            ):
-                fresh = _preserve_prior_row_with_current_identity(
-                    prior_row=prior, fresh_row=fresh,
-                )
         entries.append(fresh)
     # Sort entries so the 13-cell headline cohort lands first
     # (in cohort_accounting order), then any non-cohort cells in
@@ -687,7 +811,6 @@ def main(argv: list[str] | None = None) -> int:
     try:
         artifact = build_artifact(
             label_admitted_path=args.label_admitted_path,
-            existing_artifact_path=args.out,
         )
     except _ArtifactIdentityFieldMissing as exc:
         sys.stderr.write(

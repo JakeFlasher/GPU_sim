@@ -122,6 +122,11 @@ STORAGE_INTEGRITY_ERRNOS = frozenset({
 })
 STORAGE_CAPACITY_CODE = "supplemental_storage_capacity_exhausted"
 STORAGE_INTEGRITY_CODE = "supplemental_storage_integrity_failure"
+STABLE_BUDGET_FAILURE_CODES = frozenset({
+    "trace_retained_budget_exceeded",
+    "trace_target_failed_tree_limit_exceeded",
+    "supplemental_full_trace_retention_ceiling_exceeded",
+})
 
 
 def storage_refusal_from_exception(
@@ -4522,10 +4527,17 @@ def _launch_set_preflight_authority(
     expected_protocol_version: str, expected_ncu_version_prefix: str,
 ) -> tuple[ncu_action_executor.ExpectedNcuIdentity, str, int]:
     """Derive immutable launch-set authority without reopening live host state."""
-    schema_path = (
-        REPO_ROOT / "workloads/simbench_bw/schemas"
-        / "campaign_preflight_manifest.schema.json"
-    )
+    schema_version = document.get("schema_version")
+    schema_root = REPO_ROOT / "workloads/simbench_bw/schemas"
+    if schema_version == 4:
+        schema_path = schema_root / "campaign_preflight_manifest.schema.json"
+    elif schema_version == 3:
+        schema_path = schema_root / "campaign_preflight_manifest.v3.schema.json"
+    else:
+        raise WorkloadCaptureRefusal(
+            "supplemental_done_launch_set_preflight_invalid",
+            f"unsupported retained preflight schema_version: {schema_version!r}",
+        )
     try:
         jsonschema.validate(document, json.loads(schema_path.read_text()))
     except (OSError, json.JSONDecodeError, jsonschema.ValidationError) as exc:
@@ -4533,8 +4545,7 @@ def _launch_set_preflight_authority(
             "supplemental_done_launch_set_preflight_invalid", str(exc),
         ) from exc
     if (
-        document.get("schema_version") != 3
-        or document.get("capture_admitted") is not True
+        document.get("capture_admitted") is not True
         or document.get("working_tree_clean") is not True
         or document.get("git_head") != expected_source_commit
         or document.get("pins_sha256") != expected_pins_sha256
@@ -7104,6 +7115,10 @@ def _capture_one(
         result = canonical_capture.capture_cell(
             cell=cell, cell_dir=cell_dir, matrix=canonical_matrix, pins=pins,
             cell_budgets=cell_budgets,
+            tracer_source_path=Path(
+                preflight_manifest["checks"]["injection_runtime"]
+                ["tracer_source_path"]
+            ),
             expected_tracer_sha256=(
                 preflight_manifest["checks"]["injection_runtime"]
                 ["tracer_so_sha256"]
@@ -7469,6 +7484,21 @@ def _finalize(
     return final_dir
 
 
+def _stable_budget_failure(
+    *, row: dict[str, Any], prior_state: dict[str, Any]
+) -> dict[str, Any] | None:
+    prior_failure = prior_state.get("terminal_failure") or {}
+    prior_code = prior_failure.get("failure_code")
+    if prior_code not in STABLE_BUDGET_FAILURE_CODES:
+        return None
+    return {
+        "row_key": copy.deepcopy(row["key"]),
+        "failure_code": prior_code,
+        "failure_detail": prior_failure.get("failure_detail"),
+        "attempt_ordinal": prior_failure.get("attempt_ordinal"),
+    }
+
+
 def _run_chunk_impl(
     args: argparse.Namespace, *, campaign_lock_lease: _CampaignLockLease,
 ) -> Path:
@@ -7825,10 +7855,6 @@ def _run_chunk_impl(
             flashinfer_proof=flashinfer_proof,
         )
     stable_budget_failures: list[dict[str, Any]] = []
-    stable_budget_codes = {
-        "trace_target_failed_tree_limit_exceeded",
-        "supplemental_full_trace_retention_ceiling_exceeded",
-    }
     for row, variant, cell in resolved:
         binding = bindings[_safe_name(row["key"])]
         safe_name = _safe_name(row["key"])
@@ -7846,15 +7872,9 @@ def _run_chunk_impl(
             ],
             preflight_sha256=preflight_sha, source_commit=head,
         )
-        prior_failure = prior_state.get("terminal_failure") or {}
-        prior_code = prior_failure.get("failure_code")
-        if prior_code in stable_budget_codes:
-            stable_budget_failures.append({
-                "row_key": copy.deepcopy(row["key"]),
-                "failure_code": prior_code,
-                "failure_detail": prior_failure.get("failure_detail"),
-                "attempt_ordinal": prior_failure.get("attempt_ordinal"),
-            })
+        stable_failure = _stable_budget_failure(row=row, prior_state=prior_state)
+        if stable_failure is not None:
+            stable_budget_failures.append(stable_failure)
             continue
         _require_retention_capacity(
             output_root=output_root, aggregate_budget=aggregate_budget,
@@ -7902,7 +7922,7 @@ def _run_chunk_impl(
                 # never become a campaign-volume receipt.
                 raise
             exc = caught
-            if exc.code not in stable_budget_codes:
+            if exc.code not in STABLE_BUDGET_FAILURE_CODES:
                 raise WorkloadCaptureRefusal(
                     exc.code,
                     json.dumps({

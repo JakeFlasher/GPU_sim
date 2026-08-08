@@ -21,16 +21,28 @@
 //! typed error, never a skip.
 
 use std::collections::{BTreeMap, BTreeSet};
+#[cfg(test)]
 use std::fs;
 use std::path::{Path, PathBuf};
 
 use prost::Message;
+use serde::de::{DeserializeSeed, IgnoredAny, MapAccess, SeqAccess, Visitor};
 
-use crate::anchored::{AnchoredDir, AnchoredFile, AnchoredReadError, FileIdentity};
+use crate::anchored::{
+    AnchoredDir, AnchoredFile, AnchoredReadError, FileGenerationIdentity, FileIdentity,
+};
 use crate::digest::{Sha256, Sha256Digest, canonical_json};
 use crate::lanes::{self, LaneError};
 use crate::pb;
 use crate::wire_preflight::{self, WirePreflightError};
+
+const MIB: u64 = 1024 * 1024;
+const ALLOCATIONS_JSON_MAX_BYTES: u64 = 16 * MIB;
+const TRACE_SAMPLING_JSON_MAX_BYTES: u64 = 64 * MIB;
+const STATS_CSV_MAX_BYTES: u64 = 64 * MIB;
+const ALLOCATION_ENTRY_MAX_COUNT: u64 = 131_072;
+const ALLOCATIONS_JSON_MAX_NODES: u64 = 1 + 7 * ALLOCATION_ENTRY_MAX_COUNT;
+const TRACE_SAMPLING_JSON_MAX_NODES: u64 = 1_000_000;
 
 #[derive(Debug, thiserror::Error)]
 pub enum TraceError {
@@ -42,6 +54,12 @@ pub enum TraceError {
     },
     #[error("descriptor-anchored trace snapshot failed: {0}")]
     AnchoredSnapshot(#[from] AnchoredReadError),
+    #[error("descriptor-anchored trace snapshot artifact {artifact} read failed: {source}")]
+    SnapshotArtifactRead {
+        artifact: &'static str,
+        #[source]
+        source: AnchoredReadError,
+    },
     #[error(
         "trace snapshot artifact {artifact} presence mismatch: expected {expected}, actual {actual}"
     )]
@@ -65,6 +83,16 @@ pub enum TraceError {
         artifact: &'static str,
         expected: u64,
         actual: u64,
+    },
+    #[error(
+        "trace artifact {artifact} at {path} has {resource} {observed}, exceeding implementation limit {limit}"
+    )]
+    TraceArtifactResourceLimitExceeded {
+        path: PathBuf,
+        artifact: &'static str,
+        resource: &'static str,
+        observed: u64,
+        limit: u64,
     },
     #[error("trace root protobuf {path} is empty")]
     TraceRootEmpty { path: PathBuf },
@@ -92,11 +120,55 @@ pub enum TraceError {
         limit: u64,
     },
     #[error(
-        "{path}: unsupported trace_contract_id {got:?}; expected empty legacy identity or sm86_addr_carry_v1"
+        "{path}: unsupported trace_contract_id {got:?}; expected empty legacy identity, sm86_addr_carry_v1, or sm86_addr_carry_shmem_split_v2"
     )]
     TraceContractUnsupported { path: PathBuf, got: String },
     #[error(
-        "{path}: trace contract {contract_id:?} carries invalid memory_payload_classes {got:?}; expected exactly [GLOBAL, SHARED, LOCAL, ATOMIC, ASYNC_COPY]"
+        "launch ({device_id}, {stream_id}, {kernel_id}) has negative combined shared-memory bytes {combined}"
+    )]
+    TraceLaunchSharedMemoryInvalid {
+        device_id: i64,
+        stream_id: i64,
+        kernel_id: i32,
+        combined: i32,
+    },
+    #[error(
+        "legacy launch ({device_id}, {stream_id}, {kernel_id}) carries split shared-memory fields"
+    )]
+    SharedMemorySplitUnadvertised {
+        device_id: i64,
+        stream_id: i64,
+        kernel_id: i32,
+    },
+    #[error(
+        "launch ({device_id}, {stream_id}, {kernel_id}) has a nonzero combined shared-memory count without an authenticated split"
+    )]
+    SharedMemorySplitUnavailable {
+        device_id: i64,
+        stream_id: i64,
+        kernel_id: i32,
+    },
+    #[error(
+        "split-capable launch ({device_id}, {stream_id}, {kernel_id}) does not carry both shared-memory components"
+    )]
+    SharedMemorySplitMissing {
+        device_id: i64,
+        stream_id: i64,
+        kernel_id: i32,
+    },
+    #[error(
+        "launch ({device_id}, {stream_id}, {kernel_id}) combined shared-memory bytes {combined} disagree with static {static_bytes} plus dynamic {dynamic_bytes}"
+    )]
+    SharedMemorySplitMismatch {
+        device_id: i64,
+        stream_id: i64,
+        kernel_id: i32,
+        combined: i32,
+        static_bytes: u32,
+        dynamic_bytes: u32,
+    },
+    #[error(
+        "{path}: trace contract {contract_id:?} carries invalid memory_payload_classes {got:?}; expected canonical values [GLOBAL, SHARED, LOCAL, ATOMIC, ASYNC_COPY], in that exact order for split-v2"
     )]
     MemoryPayloadCapabilitiesInvalid {
         path: PathBuf,
@@ -115,8 +187,24 @@ pub enum TraceError {
     ThreadblockPayloadSnapshotInvalid { root: PathBuf, message: String },
     #[error("verified sampling payload snapshot is missing expected file {path}")]
     SamplingPayloadSnapshotMissing { path: PathBuf },
+    #[error(
+        "{threadblock}: warp map key {map_key} disagrees with embedded Warp.id {warp_id} (canonical: warp_map_key_mismatch)"
+    )]
+    WarpMapKeyMismatch {
+        threadblock: String,
+        map_key: i32,
+        warp_id: i32,
+    },
     #[error("{record}: warpid_tb absent on the wire (canonical: warpid_tb_missing)")]
     WarpidTbMissing { record: String },
+    #[error(
+        "{record}: warpid_tb={actual} disagrees with enclosing warp id {expected} (canonical: warpid_tb_mismatch)"
+    )]
+    WarpidTbMismatch {
+        record: String,
+        expected: i32,
+        actual: i32,
+    },
     #[error(
         "{record}: function_unique_id={got} is not strictly positive (canonical: function_unique_id_invalid)"
     )]
@@ -352,9 +440,21 @@ impl TraceError {
             Self::ProtobufDecodedResourceLimitExceeded { .. } => {
                 Some("protobuf_decoded_resource_limit_exceeded")
             }
+            Self::TraceArtifactResourceLimitExceeded { .. } => {
+                Some("trace_artifact_resource_limit_exceeded")
+            }
             Self::TraceContractUnsupported { .. } => Some("trace_contract_mismatch"),
+            Self::TraceLaunchSharedMemoryInvalid { .. } => {
+                Some("trace_launch_shared_memory_invalid")
+            }
+            Self::SharedMemorySplitUnadvertised { .. } => Some("shared_memory_split_unadvertised"),
+            Self::SharedMemorySplitUnavailable { .. } => Some("shared_memory_split_unavailable"),
+            Self::SharedMemorySplitMissing { .. } => Some("shared_memory_split_missing"),
+            Self::SharedMemorySplitMismatch { .. } => Some("shared_memory_split_mismatch"),
             Self::MemoryPayloadCapabilitiesInvalid { .. } => Some("trace_capabilities_invalid"),
+            Self::WarpMapKeyMismatch { .. } => Some("warp_map_key_mismatch"),
             Self::WarpidTbMissing { .. } => Some("warpid_tb_missing"),
+            Self::WarpidTbMismatch { .. } => Some("warpid_tb_mismatch"),
             Self::FunctionUniqueIdInvalid { .. } => Some("function_unique_id_invalid"),
             Self::ActiveMaskMissing { .. } => Some("active_mask_missing"),
             Self::PredicateMaskMissing { .. } => Some("predicate_mask_missing"),
@@ -529,11 +629,13 @@ impl TraceValidationSummary {
 }
 
 pub const ADDRESS_CARRYING_TRACE_CONTRACT_ID: &str = "sm86_addr_carry_v1";
+pub const SHARED_MEMORY_SPLIT_TRACE_CONTRACT_ID: &str = "sm86_addr_carry_shmem_split_v2";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MemoryPayloadContract {
     LegacyExclusion,
     AddressCarryingV1,
+    AddressCarryingSharedMemorySplitV2,
 }
 
 const ADDRESS_CARRYING_PAYLOAD_CLASSES: [pb::MemoryOpClass; 5] = [
@@ -543,6 +645,7 @@ const ADDRESS_CARRYING_PAYLOAD_CLASSES: [pb::MemoryOpClass; 5] = [
     pb::MemoryOpClass::Atomic,
     pb::MemoryOpClass::AsyncCopy,
 ];
+const SHARED_MEMORY_SPLIT_V2_PAYLOAD_CAPABILITY_VECTOR: [i32; 5] = [1, 2, 3, 6, 8];
 
 fn classify_memory_payload_contract(
     trace: &pb::Trace,
@@ -558,10 +661,33 @@ fn classify_memory_payload_contract(
             got: trace.memory_payload_classes.clone(),
         });
     }
-    if trace.trace_contract_id != ADDRESS_CARRYING_TRACE_CONTRACT_ID {
-        return Err(TraceError::TraceContractUnsupported {
+    let contract = match trace.trace_contract_id.as_str() {
+        ADDRESS_CARRYING_TRACE_CONTRACT_ID => MemoryPayloadContract::AddressCarryingV1,
+        SHARED_MEMORY_SPLIT_TRACE_CONTRACT_ID => {
+            MemoryPayloadContract::AddressCarryingSharedMemorySplitV2
+        }
+        _ => {
+            return Err(TraceError::TraceContractUnsupported {
+                path: path.to_path_buf(),
+                got: trace.trace_contract_id.clone(),
+            });
+        }
+    };
+
+    // Split-v2's repeated enum field is an ordered capability vector, not a set.
+    // Keep v1's historical set-based admission below unchanged; the stronger
+    // ordering requirement belongs only to the additive split-v2 contract.
+    if contract == MemoryPayloadContract::AddressCarryingSharedMemorySplitV2
+        && !trace
+            .memory_payload_classes
+            .iter()
+            .copied()
+            .eq(SHARED_MEMORY_SPLIT_V2_PAYLOAD_CAPABILITY_VECTOR)
+    {
+        return Err(TraceError::MemoryPayloadCapabilitiesInvalid {
             path: path.to_path_buf(),
-            got: trace.trace_contract_id.clone(),
+            contract_id: trace.trace_contract_id.clone(),
+            got: trace.memory_payload_classes.clone(),
         });
     }
 
@@ -590,7 +716,7 @@ fn classify_memory_payload_contract(
             got: trace.memory_payload_classes.clone(),
         });
     }
-    Ok(MemoryPayloadContract::AddressCarryingV1)
+    Ok(contract)
 }
 
 /// Raw-byte identity of one snapshotted trace artifact.
@@ -729,7 +855,7 @@ pub struct TraceDirSnapshot {
     stats_csv: Option<Vec<u8>>,
     threadblock_payload: VerifiedSamplingPayload,
     identity: TraceArtifactIdentity,
-    file_identities: BTreeMap<FileIdentity, PathBuf>,
+    file_identities: BTreeMap<FileIdentity, (PathBuf, FileGenerationIdentity)>,
 }
 
 impl TraceDirSnapshot {
@@ -753,18 +879,21 @@ impl TraceDirSnapshot {
         limits: Option<TraceSnapshotLimits>,
     ) -> Result<Self, TraceError> {
         let root = reader.root().join(root_relative);
+        let preserve_manifest_artifact_role = limits.is_some();
         let dynamic_relative = root_relative.join("dynamic_trace.pb");
         let dynamic_file = match limits {
             Some(limits) => reader
                 .read_exact_regular(&dynamic_relative, limits.dynamic_trace_pb_size)
-                .map_err(|source| map_snapshot_read_error("dynamic_trace_pb", source))?,
+                .map_err(|source| map_manifest_snapshot_read_error("dynamic_trace_pb", source))?,
             None => reader.read_bounded_regular(&dynamic_relative, u64::MAX)?,
         };
         let dynamic_path = root.join("dynamic_trace.pb");
         let mut file_identities = BTreeMap::new();
         insert_snapshot_file_identity(
             &mut file_identities,
-            dynamic_file.identity(),
+            "dynamic_trace_pb",
+            preserve_manifest_artifact_role,
+            dynamic_file.generation_identity(),
             dynamic_path.clone(),
         )?;
         let dynamic_trace_pb = dynamic_file.into_raw();
@@ -782,11 +911,14 @@ impl TraceDirSnapshot {
             &allocations_relative,
             limits.map(|limits| limits.allocations_json_size),
             "allocations_json",
+            ALLOCATIONS_JSON_MAX_BYTES,
         )?;
         if let Some(file) = &allocations_file {
             insert_snapshot_file_identity(
                 &mut file_identities,
-                file.identity(),
+                "allocations_json",
+                preserve_manifest_artifact_role,
+                file.generation_identity(),
                 allocations_path.clone(),
             )?;
         }
@@ -799,11 +931,14 @@ impl TraceDirSnapshot {
             &sampling_relative,
             limits.map(|limits| limits.trace_sampling_json_size),
             "trace_sampling_json",
+            TRACE_SAMPLING_JSON_MAX_BYTES,
         )?;
         if let Some(file) = &sampling_file {
             insert_snapshot_file_identity(
                 &mut file_identities,
-                file.identity(),
+                "trace_sampling_json",
+                preserve_manifest_artifact_role,
+                file.generation_identity(),
                 sampling_path.clone(),
             )?;
         }
@@ -816,11 +951,14 @@ impl TraceDirSnapshot {
             &stats_relative,
             limits.map(|limits| limits.stats_csv_size),
             "stats_csv",
+            STATS_CSV_MAX_BYTES,
         )?;
         if let Some(file) = &stats_file {
             insert_snapshot_file_identity(
                 &mut file_identities,
-                file.identity(),
+                "stats_csv",
+                preserve_manifest_artifact_role,
+                file.generation_identity(),
                 stats_path.clone(),
             )?;
         }
@@ -832,7 +970,9 @@ impl TraceDirSnapshot {
         let tree_relative = root_relative.join("threadblocks");
         let mut tree = reader
             .read_pb_tree(&tree_relative, maximum_files, maximum_bytes)
-            .map_err(|source| map_threadblock_tree_read_error(&root, source))?;
+            .map_err(|source| {
+                map_threadblock_tree_read_error(&root, source, preserve_manifest_artifact_role)
+            })?;
         let actual_file_count = u64::try_from(tree.files.len()).map_err(|_| {
             TraceError::SnapshotArtifactCardinalityMismatch {
                 artifact: "threadblock_payload",
@@ -898,7 +1038,9 @@ impl TraceDirSnapshot {
             let path = root.join(relative);
             insert_snapshot_file_identity(
                 &mut file_identities,
-                entry.file.identity(),
+                "threadblock_payload",
+                preserve_manifest_artifact_role,
+                entry.file.generation_identity(),
                 path.clone(),
             )?;
             let raw = entry.file.into_raw();
@@ -967,11 +1109,22 @@ impl TraceDirSnapshot {
     pub fn file_identities(&self) -> impl Iterator<Item = (FileIdentity, &Path)> {
         self.file_identities
             .iter()
-            .map(|(identity, path)| (*identity, path.as_path()))
+            .map(|(identity, (path, _))| (*identity, path.as_path()))
+    }
+
+    /// Every file generation whose exact bytes entered this snapshot.
+    pub fn file_generations(&self) -> impl Iterator<Item = (FileGenerationIdentity, &Path)> {
+        self.file_identities
+            .values()
+            .map(|(path, generation)| (*generation, path.as_path()))
     }
 }
 
-fn map_threadblock_tree_read_error(root: &Path, source: AnchoredReadError) -> TraceError {
+fn map_threadblock_tree_read_error(
+    root: &Path,
+    source: AnchoredReadError,
+    preserve_manifest_artifact_role: bool,
+) -> TraceError {
     match source {
         AnchoredReadError::Io { path, source }
             if path == root.join("threadblocks")
@@ -979,11 +1132,18 @@ fn map_threadblock_tree_read_error(root: &Path, source: AnchoredReadError) -> Tr
         {
             TraceError::TraceThreadblocksEmpty { dir: path }
         }
+        other if preserve_manifest_artifact_role => {
+            map_manifest_snapshot_read_error("threadblock_payload", other)
+        }
         other => TraceError::AnchoredSnapshot(other),
     }
 }
 
-fn map_snapshot_read_error(artifact: &'static str, source: AnchoredReadError) -> TraceError {
+fn map_snapshot_read_error_with(
+    artifact: &'static str,
+    source: AnchoredReadError,
+    anchored: impl FnOnce(AnchoredReadError) -> TraceError,
+) -> TraceError {
     match source {
         AnchoredReadError::SizeMismatch {
             expected, actual, ..
@@ -992,8 +1152,32 @@ fn map_snapshot_read_error(artifact: &'static str, source: AnchoredReadError) ->
             expected,
             actual,
         },
-        other => TraceError::AnchoredSnapshot(other),
+        AnchoredReadError::SizeLimitExceeded {
+            path,
+            limit,
+            actual,
+        } => TraceError::TraceArtifactResourceLimitExceeded {
+            path,
+            artifact,
+            resource: "bytes",
+            observed: actual,
+            limit,
+        },
+        other => anchored(other),
     }
+}
+
+fn map_snapshot_read_error(artifact: &'static str, source: AnchoredReadError) -> TraceError {
+    map_snapshot_read_error_with(artifact, source, TraceError::AnchoredSnapshot)
+}
+
+fn map_manifest_snapshot_read_error(
+    artifact: &'static str,
+    source: AnchoredReadError,
+) -> TraceError {
+    map_snapshot_read_error_with(artifact, source, |source| {
+        TraceError::SnapshotArtifactRead { artifact, source }
+    })
 }
 
 fn capture_optional_snapshot_artifact(
@@ -1001,22 +1185,45 @@ fn capture_optional_snapshot_artifact(
     relative: &Path,
     expected: Option<Option<u64>>,
     artifact: &'static str,
+    maximum_size: u64,
 ) -> Result<Option<AnchoredFile>, TraceError> {
+    let map_read_error = |source| {
+        if expected.is_some() {
+            map_manifest_snapshot_read_error(artifact, source)
+        } else {
+            map_snapshot_read_error(artifact, source)
+        }
+    };
     match expected {
         None => reader
-            .read_optional_bounded_regular(relative, u64::MAX)
-            .map_err(TraceError::AnchoredSnapshot),
-        Some(Some(size)) => reader
-            .read_optional_exact_regular(relative, size)
-            .map_err(|source| map_snapshot_read_error(artifact, source))?
-            .ok_or(TraceError::SnapshotArtifactPresenceMismatch {
-                artifact,
-                expected: true,
-                actual: false,
-            })
-            .map(Some),
+            .read_optional_bounded_regular(relative, maximum_size)
+            .map_err(map_read_error),
+        Some(Some(size)) => {
+            if size > maximum_size {
+                return Err(TraceError::TraceArtifactResourceLimitExceeded {
+                    path: reader.root().join(relative),
+                    artifact,
+                    resource: "bytes",
+                    observed: size,
+                    limit: maximum_size,
+                });
+            }
+            reader
+                .read_optional_exact_regular(relative, size)
+                .map_err(map_read_error)?
+                .ok_or(TraceError::SnapshotArtifactPresenceMismatch {
+                    artifact,
+                    expected: true,
+                    actual: false,
+                })
+                .map(Some)
+        }
         Some(None) => {
-            if reader.probe_optional_regular(relative)?.is_some() {
+            if reader
+                .probe_optional_regular(relative)
+                .map_err(map_read_error)?
+                .is_some()
+            {
                 return Err(TraceError::SnapshotArtifactPresenceMismatch {
                     artifact,
                     expected: false,
@@ -1028,18 +1235,262 @@ fn capture_optional_snapshot_artifact(
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct JsonShape {
+    nodes: u64,
+    top_level_sequence_entries: u64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct JsonResourceLimit {
+    resource: &'static str,
+    observed: u64,
+    limit: u64,
+}
+
+#[derive(Debug)]
+enum JsonPreflightError {
+    Malformed(String),
+    ResourceLimit(JsonResourceLimit),
+}
+
+struct JsonShapeCounter {
+    nodes: u64,
+    top_level_sequence_entries: u64,
+    maximum_nodes: u64,
+    maximum_top_level_sequence_entries: Option<u64>,
+    exceeded: Option<JsonResourceLimit>,
+}
+
+impl JsonShapeCounter {
+    fn bump_nodes<E: serde::de::Error>(&mut self) -> Result<(), E> {
+        self.nodes = self.nodes.checked_add(1).unwrap_or(u64::MAX);
+        if self.nodes > self.maximum_nodes {
+            let exceeded = JsonResourceLimit {
+                resource: "json_nodes",
+                observed: self.nodes,
+                limit: self.maximum_nodes,
+            };
+            self.exceeded = Some(exceeded);
+            return Err(E::custom("JSON node limit exceeded"));
+        }
+        Ok(())
+    }
+
+    fn bump_top_level_sequence_entries<E: serde::de::Error>(&mut self) -> Result<(), E> {
+        self.top_level_sequence_entries = self
+            .top_level_sequence_entries
+            .checked_add(1)
+            .unwrap_or(u64::MAX);
+        if let Some(limit) = self.maximum_top_level_sequence_entries
+            && self.top_level_sequence_entries > limit
+        {
+            let exceeded = JsonResourceLimit {
+                resource: "top_level_entries",
+                observed: self.top_level_sequence_entries,
+                limit,
+            };
+            self.exceeded = Some(exceeded);
+            return Err(E::custom("JSON top-level entry limit exceeded"));
+        }
+        Ok(())
+    }
+}
+
+struct JsonValueSeed<'a> {
+    counter: &'a mut JsonShapeCounter,
+    root: bool,
+    top_level_sequence_entry: bool,
+}
+
+impl<'de> DeserializeSeed<'de> for JsonValueSeed<'_> {
+    type Value = ();
+
+    fn deserialize<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        if self.top_level_sequence_entry {
+            self.counter.bump_top_level_sequence_entries()?;
+        }
+        self.counter.bump_nodes()?;
+        deserializer.deserialize_any(JsonValueVisitor {
+            counter: self.counter,
+            root: self.root,
+        })
+    }
+}
+
+struct JsonValueVisitor<'a> {
+    counter: &'a mut JsonShapeCounter,
+    root: bool,
+}
+
+impl<'de> Visitor<'de> for JsonValueVisitor<'_> {
+    type Value = ();
+
+    fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("a JSON value")
+    }
+
+    fn visit_bool<E>(self, _value: bool) -> Result<Self::Value, E> {
+        Ok(())
+    }
+
+    fn visit_i64<E>(self, _value: i64) -> Result<Self::Value, E> {
+        Ok(())
+    }
+
+    fn visit_u64<E>(self, _value: u64) -> Result<Self::Value, E> {
+        Ok(())
+    }
+
+    fn visit_f64<E>(self, _value: f64) -> Result<Self::Value, E> {
+        Ok(())
+    }
+
+    fn visit_str<E>(self, _value: &str) -> Result<Self::Value, E> {
+        Ok(())
+    }
+
+    fn visit_string<E>(self, _value: String) -> Result<Self::Value, E> {
+        Ok(())
+    }
+
+    fn visit_none<E>(self) -> Result<Self::Value, E> {
+        Ok(())
+    }
+
+    fn visit_unit<E>(self) -> Result<Self::Value, E> {
+        Ok(())
+    }
+
+    fn visit_some<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        JsonValueSeed {
+            counter: self.counter,
+            root: false,
+            top_level_sequence_entry: false,
+        }
+        .deserialize(deserializer)
+    }
+
+    fn visit_seq<A>(self, mut sequence: A) -> Result<Self::Value, A::Error>
+    where
+        A: SeqAccess<'de>,
+    {
+        while sequence
+            .next_element_seed(JsonValueSeed {
+                counter: self.counter,
+                root: false,
+                top_level_sequence_entry: self.root,
+            })?
+            .is_some()
+        {}
+        Ok(())
+    }
+
+    fn visit_map<A>(self, mut object: A) -> Result<Self::Value, A::Error>
+    where
+        A: MapAccess<'de>,
+    {
+        while object.next_key::<IgnoredAny>()?.is_some() {
+            object.next_value_seed(JsonValueSeed {
+                counter: self.counter,
+                root: false,
+                top_level_sequence_entry: false,
+            })?;
+        }
+        Ok(())
+    }
+}
+
+fn preflight_json_shape(
+    raw: &[u8],
+    maximum_nodes: u64,
+    maximum_top_level_sequence_entries: Option<u64>,
+) -> Result<JsonShape, JsonPreflightError> {
+    let mut counter = JsonShapeCounter {
+        nodes: 0,
+        top_level_sequence_entries: 0,
+        maximum_nodes,
+        maximum_top_level_sequence_entries,
+        exceeded: None,
+    };
+    let mut deserializer = serde_json::Deserializer::from_slice(raw);
+    let parsed = JsonValueSeed {
+        counter: &mut counter,
+        root: true,
+        top_level_sequence_entry: false,
+    }
+    .deserialize(&mut deserializer);
+    if let Some(exceeded) = counter.exceeded {
+        return Err(JsonPreflightError::ResourceLimit(exceeded));
+    }
+    parsed.map_err(|error| JsonPreflightError::Malformed(error.to_string()))?;
+    deserializer
+        .end()
+        .map_err(|error| JsonPreflightError::Malformed(error.to_string()))?;
+    Ok(JsonShape {
+        nodes: counter.nodes,
+        top_level_sequence_entries: counter.top_level_sequence_entries,
+    })
+}
+
+fn sidecar_byte_limit(
+    path: &Path,
+    artifact: &'static str,
+    raw: &[u8],
+    maximum_bytes: u64,
+) -> Result<(), TraceError> {
+    let observed = u64::try_from(raw.len()).unwrap_or(u64::MAX);
+    if observed > maximum_bytes {
+        return Err(TraceError::TraceArtifactResourceLimitExceeded {
+            path: path.to_path_buf(),
+            artifact,
+            resource: "bytes",
+            observed,
+            limit: maximum_bytes,
+        });
+    }
+    Ok(())
+}
+
+fn map_json_preflight_limit(
+    path: &Path,
+    artifact: &'static str,
+    error: JsonResourceLimit,
+) -> TraceError {
+    TraceError::TraceArtifactResourceLimitExceeded {
+        path: path.to_path_buf(),
+        artifact,
+        resource: error.resource,
+        observed: error.observed,
+        limit: error.limit,
+    }
+}
+
 fn insert_snapshot_file_identity(
-    identities: &mut BTreeMap<FileIdentity, PathBuf>,
-    identity: FileIdentity,
+    identities: &mut BTreeMap<FileIdentity, (PathBuf, FileGenerationIdentity)>,
+    artifact: &'static str,
+    preserve_manifest_artifact_role: bool,
+    generation: FileGenerationIdentity,
     path: PathBuf,
 ) -> Result<(), TraceError> {
-    if let Some(first) = identities.insert(identity, path.clone()) {
-        return Err(TraceError::AnchoredSnapshot(
-            AnchoredReadError::HardlinkAlias {
-                first,
-                second: path,
-            },
-        ));
+    if let Some((first, _)) =
+        identities.insert(generation.file_identity(), (path.clone(), generation))
+    {
+        let source = AnchoredReadError::HardlinkAlias {
+            first,
+            second: path,
+        };
+        return Err(if preserve_manifest_artifact_role {
+            TraceError::SnapshotArtifactRead { artifact, source }
+        } else {
+            TraceError::AnchoredSnapshot(source)
+        });
     }
     Ok(())
 }
@@ -1187,6 +1638,67 @@ fn positive_geometry(dim: Option<&pb::Dim3d>) -> bool {
     dim.is_some_and(|dim| dim.x > 0 && dim.y > 0 && dim.z > 0)
 }
 
+fn validate_shared_memory_split(
+    device_id: i64,
+    stream_id: i64,
+    kernel: &pb::Kernel,
+    contract: MemoryPayloadContract,
+) -> Result<(), TraceError> {
+    if kernel.size_shared_memory < 0 {
+        return Err(TraceError::TraceLaunchSharedMemoryInvalid {
+            device_id,
+            stream_id,
+            kernel_id: kernel.id,
+            combined: kernel.size_shared_memory,
+        });
+    }
+
+    match contract {
+        MemoryPayloadContract::LegacyExclusion | MemoryPayloadContract::AddressCarryingV1 => {
+            if kernel.shared_memory_static_bytes.is_some()
+                || kernel.shared_memory_dynamic_bytes.is_some()
+            {
+                return Err(TraceError::SharedMemorySplitUnadvertised {
+                    device_id,
+                    stream_id,
+                    kernel_id: kernel.id,
+                });
+            }
+            if kernel.size_shared_memory != 0 {
+                return Err(TraceError::SharedMemorySplitUnavailable {
+                    device_id,
+                    stream_id,
+                    kernel_id: kernel.id,
+                });
+            }
+        }
+        MemoryPayloadContract::AddressCarryingSharedMemorySplitV2 => {
+            let (Some(static_bytes), Some(dynamic_bytes)) = (
+                kernel.shared_memory_static_bytes,
+                kernel.shared_memory_dynamic_bytes,
+            ) else {
+                return Err(TraceError::SharedMemorySplitMissing {
+                    device_id,
+                    stream_id,
+                    kernel_id: kernel.id,
+                });
+            };
+            let sum = u64::from(static_bytes) + u64::from(dynamic_bytes);
+            if sum != kernel.size_shared_memory as u64 {
+                return Err(TraceError::SharedMemorySplitMismatch {
+                    device_id,
+                    stream_id,
+                    kernel_id: kernel.id,
+                    combined: kernel.size_shared_memory,
+                    static_bytes,
+                    dynamic_bytes,
+                });
+            }
+        }
+    }
+    Ok(())
+}
+
 fn validate_trace_snapshot_semantics(
     root: &Path,
     trace: &pb::Trace,
@@ -1263,6 +1775,12 @@ fn validate_trace_snapshot_semantics(
                         field: "block_dim",
                     });
                 }
+                validate_shared_memory_split(
+                    device_key,
+                    stream_key,
+                    kernel,
+                    memory_payload_contract,
+                )?;
 
                 let launch_dir = root
                     .join("threadblocks")
@@ -3253,15 +3771,48 @@ impl TraceSamplingSidecar {
     #[cfg(test)]
     fn load(root: &Path) -> Result<Option<Self>, TraceError> {
         let path = root.join("trace_sampling.json");
-        let raw = match fs::read(&path) {
-            Ok(raw) => raw,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-            Err(source) => return Err(TraceError::Io { path, source }),
+        let reader = AnchoredDir::open(root)?;
+        let raw = match reader
+            .read_optional_bounded_regular(
+                Path::new("trace_sampling.json"),
+                TRACE_SAMPLING_JSON_MAX_BYTES,
+            )
+            .map_err(|source| map_snapshot_read_error("trace_sampling_json", source))?
+        {
+            Some(file) => file.into_raw(),
+            None => return Ok(None),
         };
         Self::parse(&path, &raw).map(Some)
     }
 
     fn parse(path: &Path, raw: &[u8]) -> Result<Self, TraceError> {
+        Self::parse_with_limits(
+            path,
+            raw,
+            TRACE_SAMPLING_JSON_MAX_BYTES,
+            TRACE_SAMPLING_JSON_MAX_NODES,
+        )
+    }
+
+    fn parse_with_limits(
+        path: &Path,
+        raw: &[u8],
+        maximum_bytes: u64,
+        maximum_nodes: u64,
+    ) -> Result<Self, TraceError> {
+        sidecar_byte_limit(path, "trace_sampling_json", raw, maximum_bytes)?;
+        match preflight_json_shape(raw, maximum_nodes, None) {
+            Ok(_) => {}
+            Err(JsonPreflightError::Malformed(message)) => {
+                return Err(TraceError::SamplingSidecarMalformed {
+                    path: path.to_path_buf(),
+                    message,
+                });
+            }
+            Err(JsonPreflightError::ResourceLimit(error)) => {
+                return Err(map_json_preflight_limit(path, "trace_sampling_json", error));
+            }
+        }
         let parsed: serde_json::Value =
             serde_json::from_slice(raw).map_err(|e| TraceError::SamplingSidecarMalformed {
                 path: path.to_path_buf(),
@@ -4280,10 +4831,16 @@ impl AllocationRegistry {
     /// non-hex `base_address`, or a duplicate `allocation_id`.
     pub fn load(root: &Path) -> Result<Option<Self>, TraceError> {
         let path = root.join("extra_info").join("allocations.json");
-        let raw = match fs::read(&path) {
-            Ok(raw) => raw,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-            Err(source) => return Err(TraceError::Io { path, source }),
+        let reader = AnchoredDir::open(root)?;
+        let raw = match reader
+            .read_optional_bounded_regular(
+                Path::new("extra_info/allocations.json"),
+                ALLOCATIONS_JSON_MAX_BYTES,
+            )
+            .map_err(|source| map_snapshot_read_error("allocations_json", source))?
+        {
+            Some(file) => file.into_raw(),
+            None => return Ok(None),
         };
         Self::parse(&path, &raw).map(Some)
     }
@@ -4294,6 +4851,35 @@ impl AllocationRegistry {
     }
 
     fn parse(path: &Path, raw: &[u8]) -> Result<Self, TraceError> {
+        Self::parse_with_limits(
+            path,
+            raw,
+            ALLOCATIONS_JSON_MAX_BYTES,
+            ALLOCATIONS_JSON_MAX_NODES,
+            ALLOCATION_ENTRY_MAX_COUNT,
+        )
+    }
+
+    fn parse_with_limits(
+        path: &Path,
+        raw: &[u8],
+        maximum_bytes: u64,
+        maximum_nodes: u64,
+        maximum_entries: u64,
+    ) -> Result<Self, TraceError> {
+        sidecar_byte_limit(path, "allocations_json", raw, maximum_bytes)?;
+        match preflight_json_shape(raw, maximum_nodes, Some(maximum_entries)) {
+            Ok(_) => {}
+            Err(JsonPreflightError::Malformed(message)) => {
+                return Err(TraceError::AllocationsSidecarMalformed {
+                    path: path.to_path_buf(),
+                    message,
+                });
+            }
+            Err(JsonPreflightError::ResourceLimit(error)) => {
+                return Err(map_json_preflight_limit(path, "allocations_json", error));
+            }
+        }
         let entries: Vec<RawAllocation> =
             serde_json::from_slice(raw).map_err(|e| TraceError::AllocationsSidecarMalformed {
                 path: path.to_path_buf(),
@@ -4439,9 +5025,10 @@ pub fn check_allocation_identity(
     check_preflighted_allocation_identity(preflight, registry, record)
 }
 
-/// Apply the complete Python-equivalent per-instruction contract to every
-/// record in one decoded threadblock. Iteration follows sorted protobuf map keys
-/// and then instruction order, matching `validate_threadblock`'s fail-fast walk.
+/// Apply the complete per-instruction contract and enclosing warp-identity
+/// contract to every record in one decoded threadblock. Iteration follows sorted
+/// protobuf map keys and then instruction order, matching the full-snapshot
+/// admission walk.
 pub fn validate_threadblock_contract(
     threadblock: &pb::Threadblock,
     label: impl AsRef<str>,
@@ -4451,9 +5038,26 @@ pub fn validate_threadblock_contract(
 ) -> Result<(), TraceError> {
     let label = label.as_ref();
     for (&warp_id, warp) in &threadblock.warps {
+        if warp.id != warp_id {
+            return Err(TraceError::WarpMapKeyMismatch {
+                threadblock: label.to_owned(),
+                map_key: warp_id,
+                warp_id: warp.id,
+            });
+        }
         for (instruction_index, instruction) in warp.instructions.iter().enumerate() {
             let record = || format!("{label} warp={warp_id} inst={instruction_index}");
             let preflight = preflight_memory_access(instruction, &record)?;
+            let Some(instruction_warp_id) = instruction.warpid_tb else {
+                return Err(TraceError::WarpidTbMissing { record: record() });
+            };
+            if instruction_warp_id != warp_id {
+                return Err(TraceError::WarpidTbMismatch {
+                    record: record(),
+                    expected: warp_id,
+                    actual: instruction_warp_id,
+                });
+            }
             if instruction.function_unique_id != expected_function_unique_id {
                 return Err(TraceError::FunctionUniqueIdMismatch {
                     record: record(),
@@ -4464,7 +5068,11 @@ pub fn validate_threadblock_contract(
             let Some(preflight) = preflight else {
                 continue;
             };
-            if payload_contract == MemoryPayloadContract::AddressCarryingV1 {
+            if matches!(
+                payload_contract,
+                MemoryPayloadContract::AddressCarryingV1
+                    | MemoryPayloadContract::AddressCarryingSharedMemorySplitV2
+            ) {
                 validate_address_carrying_v1_shape(preflight, &record)?;
             }
             check_preflighted_allocation_identity(preflight, registry, record)?;
@@ -4577,6 +5185,14 @@ mod tests {
         }
     }
 
+    fn split_v2_trace() -> pb::Trace {
+        pb::Trace {
+            trace_contract_id: SHARED_MEMORY_SPLIT_TRACE_CONTRACT_ID.into(),
+            memory_payload_classes: SHARED_MEMORY_SPLIT_V2_PAYLOAD_CAPABILITY_VECTOR.to_vec(),
+            ..Default::default()
+        }
+    }
+
     #[test]
     fn memory_payload_contract_distinguishes_legacy_and_address_carrying_traces() {
         assert_eq!(
@@ -4590,6 +5206,41 @@ mod tests {
                 Path::new("address-carrying.pb")
             )
             .expect("complete address-carrying capability"),
+            MemoryPayloadContract::AddressCarryingV1
+        );
+        assert_eq!(
+            classify_memory_payload_contract(&split_v2_trace(), Path::new("split-v2.pb"))
+                .expect("canonical ordered split-v2 capability vector"),
+            MemoryPayloadContract::AddressCarryingSharedMemorySplitV2
+        );
+    }
+
+    #[test]
+    fn split_v2_requires_order_while_v1_retains_historical_set_semantics() {
+        for (name, capabilities) in [
+            ("reversed", vec![8, 6, 3, 2, 1]),
+            ("representative-permutation", vec![1, 3, 2, 6, 8]),
+        ] {
+            let mut trace = split_v2_trace();
+            trace.memory_payload_classes = capabilities.clone();
+            assert!(
+                matches!(
+                    classify_memory_payload_contract(&trace, Path::new("split-v2.pb")),
+                    Err(TraceError::MemoryPayloadCapabilitiesInvalid {
+                        contract_id,
+                        got,
+                        ..
+                    }) if contract_id == SHARED_MEMORY_SPLIT_TRACE_CONTRACT_ID && got == capabilities
+                ),
+                "{name} split-v2 vector must fail closed"
+            );
+        }
+
+        let mut v1 = address_carrying_trace();
+        v1.memory_payload_classes.reverse();
+        assert_eq!(
+            classify_memory_payload_contract(&v1, Path::new("historical-v1.pb"))
+                .expect("v1 retains its historical set-based capability check"),
             MemoryPayloadContract::AddressCarryingV1
         );
     }
@@ -4676,6 +5327,8 @@ mod tests {
             }),
             block_dim: Some(pb::Dim3d { x: 64, y: 1, z: 1 }),
             cluster_dim: Some(pb::Dim3d { x: 1, y: 1, z: 1 }),
+            shared_memory_static_bytes: None,
+            shared_memory_dynamic_bytes: None,
         };
         let stream = pb::CudaStream {
             id: 0,
@@ -4749,6 +5402,67 @@ mod tests {
         dir.join(format!(
             "threadblocks/device_0/stream_0/kernel_{kernel_id}/d_0_s_0_k_{kernel_id}_0,0,0.pb"
         ))
+    }
+
+    fn write_nonselected_second_launch(dir: &Path) -> PathBuf {
+        let mut trace = read_synthetic_root(dir);
+        let stream = trace
+            .gpu_device
+            .get_mut(&0)
+            .unwrap()
+            .streams
+            .get_mut(&0)
+            .unwrap();
+        let mut second = stream.kernels[0].clone();
+        second.id = 2;
+        second.function_unique_id = 2;
+        stream.kernels.push(second);
+        write_synthetic_root(dir, &trace);
+
+        let first_path = synthetic_threadblock_path(dir, 1);
+        let raw = std::fs::read(first_path).unwrap();
+        let mut threadblock = pb::Threadblock::decode(raw.as_slice()).unwrap();
+        for instruction in &mut threadblock.warps.get_mut(&0).unwrap().instructions {
+            instruction.function_unique_id = 2;
+        }
+        let second_path = synthetic_threadblock_path(dir, 2);
+        std::fs::create_dir_all(second_path.parent().unwrap()).unwrap();
+        std::fs::write(&second_path, threadblock.encode_to_vec()).unwrap();
+        second_path
+    }
+
+    #[test]
+    fn manifest_snapshot_root_allocation_failure_retains_artifact_role() {
+        let path = PathBuf::from("trace/dynamic_trace.pb");
+        assert!(matches!(
+            map_manifest_snapshot_read_error(
+                "dynamic_trace_pb",
+                AnchoredReadError::AllocationFailed {
+                    path: path.clone(),
+                    bytes: u64::MAX,
+                },
+            ),
+            TraceError::SnapshotArtifactRead {
+                artifact: "dynamic_trace_pb",
+                source: AnchoredReadError::AllocationFailed {
+                    path: actual_path,
+                    bytes: u64::MAX,
+                },
+            } if actual_path == path
+        ));
+        assert!(matches!(
+            map_snapshot_read_error(
+                "dynamic_trace_pb",
+                AnchoredReadError::AllocationFailed {
+                    path: path.clone(),
+                    bytes: u64::MAX,
+                },
+            ),
+            TraceError::AnchoredSnapshot(AnchoredReadError::AllocationFailed {
+                path: actual_path,
+                bytes: u64::MAX,
+            }) if actual_path == path
+        ));
     }
 
     #[test]
@@ -4850,6 +5564,54 @@ mod tests {
         std::fs::remove_file(second_path).unwrap();
         let error = TraceDir::open(tmp.path()).err().unwrap();
         assert_eq!(error.typed_reason(), Some("trace_launch_payload_missing"));
+    }
+
+    #[test]
+    fn full_snapshot_rejects_warp_map_identity_in_nonselected_launch() {
+        let tmp = tempfile::tempdir().unwrap();
+        write_synthetic_trace(tmp.path(), 1);
+        let second_path = write_nonselected_second_launch(tmp.path());
+        let raw = std::fs::read(&second_path).unwrap();
+        let mut threadblock = pb::Threadblock::decode(raw.as_slice()).unwrap();
+        let warp = threadblock.warps.remove(&0).unwrap();
+        assert_eq!(warp.id, 0);
+        threadblock.warps.insert(1, warp);
+        std::fs::write(&second_path, threadblock.encode_to_vec()).unwrap();
+
+        let snapshot = TraceDirSnapshot::capture(tmp.path()).unwrap();
+        let error = TraceDir::from_snapshot(snapshot).err().unwrap();
+        assert!(matches!(
+            &error,
+            TraceError::WarpMapKeyMismatch {
+                threadblock,
+                map_key: 1,
+                warp_id: 0,
+            } if threadblock == second_path.to_string_lossy().as_ref()
+        ));
+        assert_eq!(error.typed_reason(), Some("warp_map_key_mismatch"));
+    }
+
+    #[test]
+    fn full_snapshot_rejects_instruction_warp_identity_in_nonselected_launch() {
+        let tmp = tempfile::tempdir().unwrap();
+        write_synthetic_trace(tmp.path(), 1);
+        let second_path = write_nonselected_second_launch(tmp.path());
+        let raw = std::fs::read(&second_path).unwrap();
+        let mut threadblock = pb::Threadblock::decode(raw.as_slice()).unwrap();
+        threadblock.warps.get_mut(&0).unwrap().instructions[1].warpid_tb = Some(1);
+        std::fs::write(&second_path, threadblock.encode_to_vec()).unwrap();
+
+        let snapshot = TraceDirSnapshot::capture(tmp.path()).unwrap();
+        let error = TraceDir::from_snapshot(snapshot).err().unwrap();
+        assert!(matches!(
+            &error,
+            TraceError::WarpidTbMismatch {
+                record,
+                expected: 0,
+                actual: 1,
+            } if record.contains("kernel_2") && record.ends_with("warp=0 inst=1")
+        ));
+        assert_eq!(error.typed_reason(), Some("warpid_tb_mismatch"));
     }
 
     #[test]
@@ -5061,6 +5823,8 @@ mod tests {
             grid_dim: Some(pb::Dim3d { x: 2, y: 2, z: 1 }),
             block_dim: Some(pb::Dim3d { x: 32, y: 1, z: 1 }),
             cluster_dim: Some(pb::Dim3d { x: 1, y: 1, z: 1 }),
+            shared_memory_static_bytes: None,
+            shared_memory_dynamic_bytes: None,
         };
         let tb = pb::Threadblock {
             block_id: Some(pb::Dim3d { x: 2, y: 0, z: 0 }),
@@ -5755,6 +6519,57 @@ mod tests {
     }
 
     #[test]
+    fn allocation_sidecar_limits_precede_vec_materialization() {
+        let path = Path::new("allocations.json");
+        let raw = br#"[{"allocation_id":1,"context_id":1,"device_id":0,"base_address":"0x1000","size_bytes":16,"alive":true},{"allocation_id":2,"context_id":1,"device_id":0,"base_address":"0x2000","size_bytes":16,"alive":true}]"#;
+        let bytes = u64::try_from(raw.len()).unwrap();
+        let nodes = 1 + 2 * 7;
+
+        AllocationRegistry::parse_with_limits(path, raw, bytes, nodes, 2).unwrap();
+
+        for (maximum_bytes, maximum_nodes, maximum_entries, resource) in [
+            (bytes - 1, nodes, 2, "bytes"),
+            (bytes, nodes - 1, 2, "json_nodes"),
+            (bytes, nodes, 1, "top_level_entries"),
+        ] {
+            assert!(matches!(
+                AllocationRegistry::parse_with_limits(
+                    path,
+                    raw,
+                    maximum_bytes,
+                    maximum_nodes,
+                    maximum_entries,
+                ),
+                Err(TraceError::TraceArtifactResourceLimitExceeded {
+                    artifact: "allocations_json",
+                    resource: actual,
+                    ..
+                }) if actual == resource
+            ));
+        }
+    }
+
+    #[test]
+    fn allocation_sidecar_load_rejects_oversized_sparse_file_before_reading() {
+        let tmp = tempfile::tempdir().unwrap();
+        let extra = tmp.path().join("extra_info");
+        std::fs::create_dir(&extra).unwrap();
+        let file = std::fs::File::create(extra.join("allocations.json")).unwrap();
+        file.set_len(ALLOCATIONS_JSON_MAX_BYTES + 1).unwrap();
+
+        assert!(matches!(
+            AllocationRegistry::load(tmp.path()),
+            Err(TraceError::TraceArtifactResourceLimitExceeded {
+                artifact: "allocations_json",
+                resource: "bytes",
+                observed,
+                limit: ALLOCATIONS_JSON_MAX_BYTES,
+                ..
+            }) if observed == ALLOCATIONS_JSON_MAX_BYTES + 1
+        ));
+    }
+
+    #[test]
     fn sidecar_parser_enforces_python_parity() {
         let p = Path::new("t");
         // The canonical valid six-field entry admits.
@@ -5897,6 +6712,53 @@ mod sampling_sidecar_tests {
     fn absent_sidecar_loads_as_none() {
         let tmp = tempfile::tempdir().unwrap();
         assert!(TraceSamplingSidecar::load(tmp.path()).unwrap().is_none());
+    }
+
+    #[test]
+    fn sampling_sidecar_limits_precede_value_materialization() {
+        let raw = PYTHON_SEALED_LOSSLESS.as_bytes();
+        let bytes = u64::try_from(raw.len()).unwrap();
+        let shape = preflight_json_shape(raw, u64::MAX, None).unwrap();
+        let path = Path::new("trace_sampling.json");
+
+        TraceSamplingSidecar::parse_with_limits(path, raw, bytes, shape.nodes).unwrap();
+
+        for (maximum_bytes, maximum_nodes, resource) in [
+            (bytes - 1, shape.nodes, "bytes"),
+            (bytes, shape.nodes - 1, "json_nodes"),
+        ] {
+            assert!(matches!(
+                TraceSamplingSidecar::parse_with_limits(
+                    path,
+                    raw,
+                    maximum_bytes,
+                    maximum_nodes,
+                ),
+                Err(TraceError::TraceArtifactResourceLimitExceeded {
+                    artifact: "trace_sampling_json",
+                    resource: actual,
+                    ..
+                }) if actual == resource
+            ));
+        }
+    }
+
+    #[test]
+    fn sampling_sidecar_load_rejects_oversized_sparse_file_before_reading() {
+        let tmp = tempfile::tempdir().unwrap();
+        let file = std::fs::File::create(tmp.path().join("trace_sampling.json")).unwrap();
+        file.set_len(TRACE_SAMPLING_JSON_MAX_BYTES + 1).unwrap();
+
+        assert!(matches!(
+            TraceSamplingSidecar::load(tmp.path()),
+            Err(TraceError::TraceArtifactResourceLimitExceeded {
+                artifact: "trace_sampling_json",
+                resource: "bytes",
+                observed,
+                limit: TRACE_SAMPLING_JSON_MAX_BYTES,
+                ..
+            }) if observed == TRACE_SAMPLING_JSON_MAX_BYTES + 1
+        ));
     }
 
     #[test]

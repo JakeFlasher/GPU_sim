@@ -18,10 +18,9 @@ Provides three surfaces consumed by `merge_evidence.py join-cupti-nvbit`,
    and complete admission seal retained by `TraceAdmission`; it never reopens the
    trace root or threadblock payloads.
 
-3. `emit_nvbit_trace_summary(...)` — compatibility parser for diagnostic callers
-   that do not hold an admitted snapshot. It reads `dynamic_trace.pb` and walks
-   `traces/threadblocks/**/*.pb`; it must not be substituted at an admission-to-
-   publication boundary.
+3. `emit_nvbit_trace_summary(...)` — compatibility wrapper for callers that do
+   not already hold an admitted snapshot. It performs the same complete forward
+   trace admission before emitting; no direct parser may fabricate launch metadata.
 
 Both parser surfaces require the `google.protobuf` Python runtime and tracked
 `_pb_generated/*_pb2.py` authorities during admission or direct parsing. A
@@ -53,7 +52,13 @@ from tools.local_labels.immutable_artifact import (  # noqa: E402
     replace_regular_bytes,
     write_regular_bytes_at,
 )
-from tools.nvbit_tracer.trace_admission import TraceAdmission  # noqa: E402
+from tools.nvbit_tracer.trace_admission import (  # noqa: E402
+    EXPECTED_MEMORY_PAYLOAD_CLASSES,
+    EXPECTED_TRACE_CONTRACT_ID,
+    TRACE_ADMISSION_SCOPE,
+    TraceAdmission,
+    require_trace_admission,
+)
 from tools.nvbit_tracer.proto_binding_loader import (  # noqa: E402
     ProtoBindingIntegrityError,
     ProtoBindingRuntimePrerequisiteError,
@@ -281,31 +286,14 @@ def _extract_kernel_metadata_for_launch(
     caller (and the orchestrator's producer hook) can fail loudly
     when an out-of-range launch index is requested.
     """
-    kernels = _enumerate_kernels(trace_pb2_mod, trace_pb_path)
-    if launch_index < 0 or launch_index >= len(kernels):
+    admission = require_trace_admission(trace_pb_path.parent)
+    if launch_index < 0 or launch_index >= admission.launch_count:
         raise IndexError(
-            f"launch_index {launch_index} out of range; trace .pb at "
-            f"{trace_pb_path} carries {len(kernels)} kernel record(s)"
+            f"launch_index {launch_index} out of range; admitted snapshot at "
+            f"{trace_pb_path} carries {admission.launch_count} kernel record(s)"
         )
-    kernel = kernels[launch_index]
-    grid = kernel.grid_dim
-    block = kernel.block_dim
-    metadata = {
-        "kernel_name": kernel.name,
-        "grid_x": int(grid.x),
-        "grid_y": int(grid.y),
-        "grid_z": int(grid.z),
-        "block_x": int(block.x),
-        "block_y": int(block.y),
-        "block_z": int(block.z),
-        "shared_mem_static_bytes": int(kernel.size_shared_memory),
-        # The .proto's kernel message does not carry dynamic shared
-        # memory separately; default to 0 (the static field IS the
-        # per-launch static allocation per the field name).
-        "shared_mem_dynamic_bytes": 0,
-        "regs_per_thread": int(kernel.number_of_registers),
-    }
-    return metadata, int(kernel.id)
+    launch = admission.launches[launch_index]
+    return launch.kernel_signature_inputs(), launch.kernel_id
 
 
 def _sum_inst_count_for_kernel(
@@ -455,6 +443,18 @@ def emit_admitted_nvbit_trace_summary(
     """
     if not isinstance(admission, TraceAdmission):
         raise TypeError("admission must be a TraceAdmission value")
+    if admission.admission_scope != TRACE_ADMISSION_SCOPE:
+        raise RuntimeError(
+            "historical-read-only trace admission cannot mint NVBit summary evidence"
+        )
+    if admission.trace_contract_id != EXPECTED_TRACE_CONTRACT_ID:
+        raise RuntimeError(
+            "NVBit summary evidence requires the exact split-v2 trace contract"
+        )
+    if admission.memory_payload_classes != EXPECTED_MEMORY_PAYLOAD_CLASSES:
+        raise RuntimeError(
+            "NVBit summary evidence requires the canonical capability vector"
+        )
     if admission.launch_count != len(admission.launches):
         raise RuntimeError(
             "trace admission launch count disagrees with retained launch inputs"
@@ -513,27 +513,9 @@ def emit_nvbit_trace_summary(
     Raises `RuntimeError` if `dynamic_trace.pb` is missing or empty,
     or if the executable / tracer .so paths cannot be hashed.
     """
-    trace_pb2_mod, threadblock_pb2_mod = _import_pb_modules()
-
-    trace_pb_path = traces_dir / "dynamic_trace.pb"
-    if not trace_pb_path.is_file():
-        raise RuntimeError(
-            f"dynamic_trace.pb not found at {trace_pb_path}; expected "
-            "the NVBit trace .pb to be present in traces_dir"
-        )
-    threadblocks_root = traces_dir / "threadblocks"
-
-    kernel_metadata, kernel_id = _extract_kernel_metadata_for_launch(
-        trace_pb2_mod, trace_pb_path, launch_index,
-    )
-    inst_count = _sum_inst_count_for_kernel(
-        threadblock_pb2_mod, threadblocks_root, kernel_id,
-    )
-    return _write_summary_record(
-        kernel_metadata=kernel_metadata,
-        inst_count=inst_count,
-        trace_pb_path=_repo_relative_or_absolute(trace_pb_path),
-        trace_pb_hash=sha256_of_file(trace_pb_path),
+    admission = require_trace_admission(traces_dir)
+    return emit_admitted_nvbit_trace_summary(
+        admission=admission,
         slug=slug,
         shape_point=shape_point,
         repeat_index=repeat_index,

@@ -50,9 +50,12 @@
         "instruction_trace_mode",
         "instr_begin",
         "instr_end",
+        "trace_contract_id",
+        "trace_source_generation",
         "threadblock_proto_file_count",
         "threadblock_proto_set_sha256",
-        "threadblock_proto_retention"
+        "threadblock_proto_retention",
+        "nvbit_launch_attempt"
       ],
       "properties": {
         "nvbit_trace_pb_path": {"type": "string", "minLength": 1},
@@ -68,11 +71,38 @@
         },
         "instr_begin": {"type": "integer", "minimum": 0},
         "instr_end": {"type": "integer", "minimum": 0},
+        "trace_contract_id": {
+          "type": "string",
+          "const": "sm86_addr_carry_shmem_split_v2"
+        },
+        "trace_source_generation": {"$ref": "#/$defs/trace_source_generation"},
         "threadblock_proto_file_count": {"type": "integer", "minimum": 1},
         "threadblock_proto_set_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
         "threadblock_proto_retention": {
           "type": "string",
-          "const": "summarized_then_pruned_after_digest"
+          "const": "retained_raw_threadblock_protos_after_digest"
+        },
+        "nvbit_launch_attempt": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "sha256",
+            "attempt_seal_sha256",
+            "start_path",
+            "start_sha256",
+            "start_seal_sha256",
+            "trace_source_generation"
+          ],
+          "properties": {
+            "path": {"type": "string", "minLength": 1},
+            "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+            "attempt_seal_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+            "start_path": {"type": "string", "minLength": 1},
+            "start_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+            "start_seal_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+            "trace_source_generation": {"$ref": "#/$defs/trace_source_generation"}
+          }
         }
       }
     },
@@ -91,6 +121,8 @@
         "repeat_index",
         "stats_csv_path",
         "stats_csv_sha256",
+        "trace_contract_id",
+        "trace_source_generation",
         "launch_geometry",
         "instruction_trace_mode"
       ],
@@ -106,6 +138,11 @@
         "repeat_index": {"type": "integer", "minimum": 0},
         "stats_csv_path": {"type": "string", "minLength": 1},
         "stats_csv_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "trace_contract_id": {
+          "type": "string",
+          "const": "sm86_addr_carry_shmem_split_v2"
+        },
+        "trace_source_generation": {"$ref": "#/$defs/trace_source_generation"},
         "launch_geometry": {"$ref": "#/$defs/launch_geometry"},
         "instruction_trace_mode": {
           "type": "string",
@@ -203,6 +240,68 @@
     "deploy_legal": {"type": "boolean", "const": true}
   },
   "$defs": {
+    "trace_source_generation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "artifact_kind",
+        "trace_contract_id",
+        "trace_admission_sha256",
+        "trace_filesystem_generation_sha256",
+        "bounded_inventory",
+        "source_generation_sha256"
+      ],
+      "properties": {
+        "schema_version": {"type": "integer", "const": 1},
+        "artifact_kind": {
+          "type": "string",
+          "const": "timing_nvbit_retained_source_generation"
+        },
+        "trace_contract_id": {
+          "type": "string",
+          "const": "sm86_addr_carry_shmem_split_v2"
+        },
+        "trace_admission_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "trace_filesystem_generation_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "bounded_inventory": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "source_file_count",
+            "source_total_bytes",
+            "max_tree_files",
+            "max_tree_directories",
+            "max_trace_root_bytes",
+            "max_stats_bytes",
+            "max_threadblock_files",
+            "max_threadblock_bytes",
+            "max_total_threadblock_bytes"
+          ],
+          "properties": {
+            "source_file_count": {"type": "integer", "minimum": 3},
+            "source_total_bytes": {"type": "integer", "minimum": 1},
+            "max_tree_files": {"type": "integer", "minimum": 3},
+            "max_tree_directories": {"type": "integer", "minimum": 1},
+            "max_trace_root_bytes": {"type": "integer", "minimum": 1},
+            "max_stats_bytes": {"type": "integer", "minimum": 1},
+            "max_threadblock_files": {"type": "integer", "minimum": 1},
+            "max_threadblock_bytes": {"type": "integer", "minimum": 1},
+            "max_total_threadblock_bytes": {"type": "integer", "minimum": 1}
+          }
+        },
+        "source_generation_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      }
+    },
     "integer_count_map": {
       "type": "object",
       "minProperties": 1,
@@ -243,6 +342,8 @@
       "additionalProperties": false,
       "required": [
         "trace_contract_ok",
+        "trace_contract_id",
+        "trace_source_generation",
         "threadblock_proto_file_count",
         "threadblock_proto_set_sha256",
         "memory_instruction_record_count",
@@ -254,6 +355,11 @@
       ],
       "properties": {
         "trace_contract_ok": {"type": "boolean", "const": true},
+        "trace_contract_id": {
+          "type": "string",
+          "const": "sm86_addr_carry_shmem_split_v2"
+        },
+        "trace_source_generation": {"$ref": "#/$defs/trace_source_generation"},
         "threadblock_proto_file_count": {"type": "integer", "minimum": 1},
         "threadblock_proto_set_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
         "memory_instruction_record_count": {"type": "integer", "minimum": 1},

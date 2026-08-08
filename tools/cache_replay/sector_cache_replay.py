@@ -34,7 +34,7 @@ import sys
 from collections import OrderedDict
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Iterable, Sequence
+from typing import Any, Callable, Iterable, Sequence
 
 _HERE = Path(__file__).resolve().parent
 _REPO_ROOT = _HERE.parent.parent
@@ -219,6 +219,7 @@ class AccessStream:
     n_global: int = 0
     n_local: int = 0
     n_excluded_op_class: int = 0
+    included_op_class_counts: dict[int, int] = field(default_factory=dict)
     excluded_op_class_counts: dict[int, int] = field(default_factory=dict)
     n_launches: int = 0
     n_threadblocks: int = 0
@@ -254,36 +255,35 @@ def _iter_launch_dirs(trace_dir: Path) -> list[Path]:
     return kernel_dirs
 
 
-def decode_cell_access_stream(
-    trace_dir: Path,
+def _decode_access_stream_sources(
+    threadblock_paths: Iterable[str],
+    read_payload: Callable[[str], bytes],
     *,
-    op_classes: Iterable[int] = DEFAULT_L2_OP_CLASSES,
-    cta_interleave: bool = False,
+    op_classes: Iterable[int],
+    cta_interleave: bool,
 ) -> AccessStream:
-    """Decode one cell's NVBit dynamic trace into an ordered access stream.
-
-    Walks ``threadblocks/**/*.pb`` per launch, reconstructs per-lane addresses
-    via the validated wire-contract primitives, and expands each active+
-    predicated lane access into 32 B sector touches (sector-edge accounting).
-    Only the requested ``op_classes`` (default GLOBAL + LOCAL, the L2 classes)
-    contribute to the L2 access stream; other classes are tallied and excluded.
-    """
     threadblock_pb2, _, _ = import_trace_contract._import_pb_modules()
     # Retain the authenticated generated class for the decode batch; looking it up
     # per payload would revalidate the complete private binding state each time.
     threadblock_cls = threadblock_pb2.threadblock
     op_class_set = frozenset(op_classes)
     stream = AccessStream()
-    launch_dirs = _iter_launch_dirs(trace_dir)
-    stream.n_launches = len(launch_dirs)
+    launches: dict[str, list[str]] = {}
+    for relative_path in threadblock_paths:
+        parent = Path(relative_path).parent.as_posix()
+        launches.setdefault(parent, []).append(relative_path)
+    stream.n_launches = len(launches)
 
-    for kernel_dir in launch_dirs:
-        tb_paths = sorted(kernel_dir.glob("*.pb"), key=_tb_block_coord_sort_key)
+    for launch_path in sorted(launches):
+        tb_paths = sorted(
+            launches[launch_path],
+            key=lambda path: _tb_block_coord_sort_key(Path(path)),
+        )
         per_tb: list[list[tuple[int, int]]] = []
         for tb_path in tb_paths:
             stream.n_threadblocks += 1
             tb = threadblock_cls()
-            tb.ParseFromString(tb_path.read_bytes())
+            tb.ParseFromString(read_payload(tb_path))
             tb_accesses: list[tuple[int, int]] = []
             for warp_index in sorted(tb.warps.keys()):
                 for inst in tb.warps[warp_index].instructions:
@@ -333,9 +333,13 @@ def decode_cell_access_stream(
                                 continue
                             access_start = int(lane_addr)
                             first_sector = access_start // SECTOR_BYTES
-                            last_sector = (access_start + int(data_width) - 1) // SECTOR_BYTES
+                            last_sector = (
+                                access_start + int(data_width) - 1
+                            ) // SECTOR_BYTES
                             if not is_l2:
-                                stream.n_excluded_op_class += last_sector - first_sector + 1
+                                stream.n_excluded_op_class += (
+                                    last_sector - first_sector + 1
+                                )
                                 stream.excluded_op_class_counts[op_class] = (
                                     stream.excluded_op_class_counts.get(op_class, 0)
                                     + (last_sector - first_sector + 1)
@@ -345,6 +349,10 @@ def decode_cell_access_stream(
                                 line_id = (sector_n * SECTOR_BYTES) // LINE_BYTES
                                 sector_offset = sector_n % SECTORS_PER_LINE
                                 tb_accesses.append((line_id, sector_offset))
+                                stream.included_op_class_counts[op_class] = (
+                                    stream.included_op_class_counts.get(op_class, 0)
+                                    + 1
+                                )
                                 if bucket_global:
                                     stream.n_global += 1
                                 else:
@@ -367,6 +375,50 @@ def decode_cell_access_stream(
     stream.n_accesses = len(stream.line_ids)
     # Detect any retained binding mutation before the materialized stream escapes.
     import_trace_contract._import_pb_modules()
+    return stream
+
+
+def decode_cell_access_stream(
+    trace_dir: Path,
+    *,
+    op_classes: Iterable[int] = DEFAULT_L2_OP_CLASSES,
+    cta_interleave: bool = False,
+) -> AccessStream:
+    """Decode one lexical NVBit trace directory into an ordered access stream."""
+
+    paths = [
+        path.relative_to(trace_dir).as_posix()
+        for launch_dir in _iter_launch_dirs(trace_dir)
+        for path in sorted(
+            launch_dir.glob("*.pb"), key=_tb_block_coord_sort_key
+        )
+    ]
+    return _decode_access_stream_sources(
+        paths,
+        lambda relative_path: (trace_dir / relative_path).read_bytes(),
+        op_classes=op_classes,
+        cta_interleave=cta_interleave,
+    )
+
+
+def decode_admitted_access_stream(
+    sources: Any,
+    *,
+    op_classes: Iterable[int] = DEFAULT_L2_OP_CLASSES,
+    cta_interleave: bool = False,
+) -> AccessStream:
+    """Decode only bytes exposed by one retained admitted-trace capability."""
+
+    paths = sources.threadblock_paths
+    stream = _decode_access_stream_sources(
+        paths,
+        lambda relative_path: sources.read_threadblock_snapshot(
+            relative_path
+        ).payload,
+        op_classes=op_classes,
+        cta_interleave=cta_interleave,
+    )
+    sources.verify_unchanged()
     return stream
 
 

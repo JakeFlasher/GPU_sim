@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "simbench_bw/schemas/campaign_preflight_manifest.schema.json",
   "title": "sm_86 capture preflight/provenance manifest",
-  "description": "Emitted by tools/local_labels/campaign_preflight.py. Version 3 records the PATH-discovered NCU launcher as provenance while binding executable authority to the retained x86_64 inner ELF that actions must execute directly. Its additive device probe binds fresh capture to one host GPU at index 0 using only a SHA-256 of the physical UUID; older v3 manifests may omit that probe only for historical finalization. Records host, toolchain, clock state, and capture-session admission. A live gate artifact (embeds timestamp + NVML covariates), not a byte-stable committed pin.",
+  "description": "Emitted by tools/local_labels/campaign_preflight.py. Version 4 preserves the version-3 NCU and single-device authority while requiring a successful injection probe to bind an explicit external non-Git shared-memory-split tracer source and its retained bytes. Records host, toolchain, clock state, and capture-session admission. A live gate artifact (embeds timestamp + NVML covariates), not a byte-stable committed pin.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -19,7 +19,7 @@
     "capture_admitted"
   ],
   "properties": {
-    "schema_version": {"type": "integer", "const": 3},
+    "schema_version": {"type": "integer", "const": 4},
     "arch": {"type": "string"},
     "sku": {"type": ["string", "null"]},
     "captured_at_utc": {"type": "string"},
@@ -230,11 +230,16 @@
               "threadblocks_pb_count",
               "root_trace_ok", "root_trace_pb_bytes", "root_trace_contract_id",
               "root_trace_memory_payload_classes", "root_trace_launch_count",
+              "root_trace_launches",
               "full_coverage_ok", "grid_threadblock_count",
               "decoded_threadblock_count", "decoded_record_count",
               "zero_record_threadblock_count", "sampling_sidecar_present",
               "stats_row_count",
+              "tracer_source_kind", "tracer_source_path",
               "tracer_so_sha256", "smoke_binary_sha256",
+              "smoke_root_path", "smoke_trace_root_path",
+              "smoke_trace_retention", "trace_admission_sha256",
+              "trace_filesystem_generation_sha256",
               "dynamic_trace_pb_sha256", "stats_csv_sha256"
             ],
             "properties": {
@@ -244,19 +249,17 @@
               "threadblocks_pb_count": {"type": "integer", "minimum": 1},
               "root_trace_ok": {"const": true},
               "root_trace_pb_bytes": {"type": "integer", "minimum": 1},
-              "root_trace_contract_id": {"const": "sm86_addr_carry_v1"},
+              "root_trace_contract_id": {"const": "sm86_addr_carry_shmem_split_v2"},
               "root_trace_memory_payload_classes": {
-                "type": "array",
-                "uniqueItems": true,
-                "allOf": [
-                  {"contains": {"const": 1}},
-                  {"contains": {"const": 2}},
-                  {"contains": {"const": 3}},
-                  {"contains": {"const": 6}},
-                  {"contains": {"const": 8}}
-                ]
+                "const": [1, 2, 3, 6, 8]
               },
-              "root_trace_launch_count": {"type": "integer", "minimum": 1},
+              "root_trace_launch_count": {"const": 1},
+              "root_trace_launches": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 1,
+                "items": {"$ref": "#/$defs/rootTraceLaunchProjection"}
+              },
               "full_coverage_ok": {"const": true},
               "grid_threadblock_count": {"type": "integer", "minimum": 1},
               "decoded_threadblock_count": {"type": "integer", "minimum": 1},
@@ -264,14 +267,68 @@
               "zero_record_threadblock_count": {"type": "integer", "const": 0},
               "sampling_sidecar_present": {"const": false},
               "stats_row_count": {"type": "integer", "const": 1},
+              "tracer_source_kind": {
+                "const": "external_non_git_retained_descriptor_v1"
+              },
+              "tracer_source_path": {
+                "type": "string",
+                "pattern": "^/"
+              },
               "tracer_so_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
               "smoke_binary_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+              "smoke_root_path": {"type": "string", "pattern": "^/"},
+              "smoke_trace_root_path": {"type": "string", "pattern": "^/"},
+              "smoke_trace_retention": {
+                "const": "preserved_exact_admitted_generation_v1"
+              },
+              "trace_admission_sha256": {
+                "type": "string", "pattern": "^[0-9a-f]{64}$"
+              },
+              "trace_filesystem_generation_sha256": {
+                "type": "string", "pattern": "^[0-9a-f]{64}$"
+              },
               "dynamic_trace_pb_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
               "stats_csv_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
             }
           }
         }
       ]
+    },
+    "rootTraceLaunchProjection": {
+      "description": "One launch projection derived from the retained, admitted dynamic_trace.pb generation. The split shared-memory values are authenticated by trace admission before this projection is emitted.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "device_id", "stream_id", "kernel_id", "kernel_name",
+        "grid_dim", "block_dim",
+        "shared_memory_static_bytes", "shared_memory_dynamic_bytes"
+      ],
+      "properties": {
+        "device_id": {"type": "integer", "minimum": 0},
+        "stream_id": {"type": "integer", "minimum": 0},
+        "kernel_id": {"type": "integer", "minimum": 0},
+        "kernel_name": {"type": "string", "minLength": 1},
+        "grid_dim": {
+          "type": "array",
+          "minItems": 3,
+          "maxItems": 3,
+          "items": {"type": "integer", "minimum": 1}
+        },
+        "block_dim": {
+          "type": "array",
+          "minItems": 3,
+          "maxItems": 3,
+          "items": {"type": "integer", "minimum": 1}
+        },
+        "shared_memory_static_bytes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "shared_memory_dynamic_bytes": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
     },
     "solEnvironmentProbe": {
       "allOf": [

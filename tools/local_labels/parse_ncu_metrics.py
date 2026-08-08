@@ -1210,6 +1210,9 @@ def extract_launch_metric_observations(
 
 
 _NCU_IMPORT_TIMEOUT_SECONDS = 600.0
+# One report is a per-file campaign input. Hashing and descriptor retention stop
+# at this bound before any importer subprocess or report-sized allocation.
+NCU_REPORT_MAX_BYTES = 1024 * 1024 * 1024
 RETAINED_REPORT_ARGUMENT = "<RETAINED_REPORT_FD>"
 
 
@@ -1298,32 +1301,25 @@ def _details_csv_payload(output: str) -> str:
     return "".join(lines[header_index:])
 
 
-def _import_report_csv(
+def _import_retained_report_csv(
     expected_ncu_identity: ncu_executor.ExpectedNcuIdentity,
-    report_path: Path,
+    retained_report: immutable.RetainedRegular,
     *,
     timeout_seconds: float = _NCU_IMPORT_TIMEOUT_SECONDS,
     require_cgroup_containment: bool = False,
 ) -> tuple[ImportedReportCsv | None, MetricExtractionResult | None]:
-    """Import one retained report through independently authorized NCU.
-
-    The executable and report are both descriptor-bound for the complete action.
-    ``ImportedReportCsv.report_sha256`` is the hash observed through the retained
-    report capability and is the only report hash downstream launch-observation
-    emission may bind.
-    """
+    """Import the exact caller-owned retained report through authorized NCU."""
     try:
         expected = ncu_executor.validate_expected_ncu_identity(
             expected_ncu_identity
         )
+        retained_report.verify_unchanged()
     except ncu_executor.NcuActionExecutorError as exc:
         return _executor_import_error(exc)
-    try:
-        retained_report = immutable.open_retained_regular(report_path)
     except (OSError, immutable.ImmutableArtifactError) as exc:
         return _import_error(
             typed_reason="ncu_import_report_identity_invalid",
-            detail=f"could not retain NCU report {report_path}: {exc}",
+            detail=f"retained NCU report is unavailable: {exc}",
         )
 
     imported: ImportedReportCsv | None = None
@@ -1395,16 +1391,58 @@ def _import_report_csv(
                 )
     except ncu_executor.NcuActionExecutorError as exc:
         _unused, error = _executor_import_error(exc)
+    try:
+        retained_report.verify_unchanged()
+    except (OSError, immutable.ImmutableArtifactError) as exc:
+        imported = None
+        _unused, error = _import_error(
+            typed_reason="ncu_import_report_identity_invalid",
+            detail=f"retained NCU report changed during import: {exc}",
+        )
+    return imported, error
+
+
+def _import_report_csv(
+    expected_ncu_identity: ncu_executor.ExpectedNcuIdentity,
+    report_path: Path,
+    *,
+    timeout_seconds: float = _NCU_IMPORT_TIMEOUT_SECONDS,
+    require_cgroup_containment: bool = False,
+) -> tuple[ImportedReportCsv | None, MetricExtractionResult | None]:
+    """Validate authority, open once within the cap, then close generation."""
+    try:
+        expected_ncu_identity = ncu_executor.validate_expected_ncu_identity(
+            expected_ncu_identity
+        )
+    except ncu_executor.NcuActionExecutorError as exc:
+        return _executor_import_error(exc)
+    try:
+        retained_report = immutable.open_retained_regular(
+            report_path, max_bytes=NCU_REPORT_MAX_BYTES,
+        )
+    except (OSError, immutable.ImmutableArtifactError) as exc:
+        return _import_error(
+            typed_reason="ncu_import_report_identity_invalid",
+            detail=f"could not retain bounded NCU report {report_path}: {exc}",
+        )
+    imported: ImportedReportCsv | None = None
+    error: MetricExtractionResult | None = None
+    try:
+        imported, error = _import_retained_report_csv(
+            expected_ncu_identity,
+            retained_report,
+            timeout_seconds=timeout_seconds,
+            require_cgroup_containment=require_cgroup_containment,
+        )
     finally:
         try:
             retained_report.close()
         except (OSError, immutable.ImmutableArtifactError) as exc:
-            if error is None:
-                imported = None
-                _unused, error = _import_error(
-                    typed_reason="ncu_import_report_identity_invalid",
-                    detail=f"could not close retained NCU report: {exc}",
-                )
+            imported = None
+            _unused, error = _import_error(
+                typed_reason="ncu_import_report_identity_invalid",
+                detail=f"could not close retained NCU report: {exc}",
+            )
     return imported, error
 
 

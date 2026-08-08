@@ -88,7 +88,7 @@ def _write_memory_trace(
 
     root.mkdir()
     trace = trace_pb2.Trace()
-    trace.trace_contract_id = "sm86_addr_carry_v1"
+    trace.trace_contract_id = "sm86_addr_carry_shmem_split_v2"
     trace.memory_payload_classes.extend([1, 2, 3, 6, 8])
     device = trace.gpu_device[0]
     device.id = 0
@@ -101,6 +101,8 @@ def _write_memory_trace(
     kernel.grid_dim.x = kernel.grid_dim.y = kernel.grid_dim.z = 1
     kernel.block_dim.x = 32
     kernel.block_dim.y = kernel.block_dim.z = 1
+    kernel.shared_memory_static_bytes = 0
+    kernel.shared_memory_dynamic_bytes = 0
     (root / "dynamic_trace.pb").write_bytes(trace.SerializeToString())
 
     tb = threadblock_pb2.threadblock()
@@ -154,7 +156,7 @@ def _write_two_launch_trace(root: Path) -> Path:
     )
     root.mkdir()
     trace = trace_pb2.Trace()
-    trace.trace_contract_id = "sm86_addr_carry_v1"
+    trace.trace_contract_id = "sm86_addr_carry_shmem_split_v2"
     trace.memory_payload_classes.extend([1, 2, 3, 6, 8])
     device = trace.gpu_device[0]
     device.id = 0
@@ -168,6 +170,8 @@ def _write_two_launch_trace(root: Path) -> Path:
         kernel.grid_dim.x = kernel.grid_dim.y = kernel.grid_dim.z = 1
         kernel.block_dim.x = 32
         kernel.block_dim.y = kernel.block_dim.z = 1
+        kernel.shared_memory_static_bytes = 0
+        kernel.shared_memory_dynamic_bytes = 0
 
         tb = threadblock_pb2.threadblock()
         tb.block_id.x = tb.block_id.y = tb.block_id.z = 0

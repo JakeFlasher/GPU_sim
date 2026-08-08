@@ -6,6 +6,9 @@ import json
 import hashlib
 import os
 import shutil
+import signal
+import sys
+import time
 from argparse import Namespace
 from pathlib import Path
 
@@ -53,7 +56,7 @@ def test_supplemental_campaign_gate_refuses_before_any_output_or_gpu_effect(
     monkeypatch.setattr(campaign, "_global_gpu_lock", unexpected)
     monkeypatch.setattr(campaign, "_check_storage_fault_receipt", unexpected)
     monkeypatch.setattr(campaign, "_run_campaign_locked", unexpected)
-    monkeypatch.setattr(campaign.subprocess, "run", unexpected)
+    monkeypatch.setattr(campaign, "_run_bounded_probe", unexpected)
 
     with pytest.raises(campaign.CampaignRefusal) as caught:
         campaign.run_campaign(Namespace(
@@ -302,6 +305,226 @@ def test_row_failure_detail_is_exact_and_retry_is_terminal_only():
         code="label_capture_failed_timeout", detail=retry_detail,
         classification="retryable", terminal_retry=True,
     )[0]["status"] == "retry_exhausted"
+    assert campaign._failure_row_outcomes(
+        code="trace_target_failed_output_limit", detail=retry_detail,
+        classification="row_budget_blocked", terminal_retry=True,
+    )[0]["status"] == "budget_blocked"
+
+
+_CAPTURE_EXECUTION_ROOTS = (
+    "sol_capture_prepare_failed",
+    "label_capture_failed",
+    "trace_target_failed",
+    "trace_sampling_target_failed",
+    "control_bits_unavailable",
+)
+_UNSUPERVISED_CAPTURE_ROOTS = (
+    "sol_capture_prepare_failed",
+    "trace_target_failed",
+    "trace_sampling_target_failed",
+    "control_bits_unavailable",
+)
+_MONITORED_CAPTURE_ROOTS = (
+    "trace_target_failed",
+    "trace_sampling_target_failed",
+)
+
+
+@pytest.mark.parametrize(
+    "code",
+    (
+        "sol_capture_prepare_failed",
+        "label_capture_failed",
+        "trace_target_failed",
+        "trace_sampling_target_failed",
+        "cell_deadline_exhausted",
+        "trace_route_deadline_exhausted",
+        "capture_process_conflict",
+        "campaign_writer_active",
+        "trace_snapshot_resource_unavailable",
+        "trace_runtime_resource_unavailable",
+        "trace_tracer_resource_unavailable",
+        "injection_runtime_resource_unavailable",
+        "control_output_resource_unavailable",
+        "label_ncu_report_resource_unavailable",
+        "sol_control_ncu_report_resource_unavailable",
+        "vendor_control_ncu_report_resource_unavailable",
+        "sol_all_launch_ncu_report_resource_unavailable",
+        "launch_set_adapter_report_resource_unavailable",
+        "sol_ncu_identity_report_resource_unavailable",
+    ),
+)
+def test_capture_failure_taxonomy_closes_over_retryable_producer_codes(code):
+    assert campaign.classify_capture_failure(code) == "retryable"
+
+
+@pytest.mark.parametrize("root", _CAPTURE_EXECUTION_ROOTS)
+def test_capture_failure_taxonomy_closes_over_timeout_suffixes(root):
+    assert campaign.classify_capture_failure(root + "_timeout") == "retryable"
+
+
+@pytest.mark.parametrize("root", _UNSUPERVISED_CAPTURE_ROOTS)
+@pytest.mark.parametrize(
+    "suffix",
+    (
+        "_start_failed",
+        "_output_resource_unavailable",
+        "_output_read_failed",
+    ),
+)
+def test_capture_failure_taxonomy_closes_over_transient_executor_suffixes(
+    root, suffix,
+):
+    assert campaign.classify_capture_failure(root + suffix) == "retryable"
+
+
+@pytest.mark.parametrize("root", _MONITORED_CAPTURE_ROOTS)
+def test_capture_failure_taxonomy_closes_over_transient_tree_resources(root):
+    assert campaign.classify_capture_failure(
+        root + "_tree_resource_unavailable"
+    ) == "retryable"
+
+
+@pytest.mark.parametrize("root", _UNSUPERVISED_CAPTURE_ROOTS)
+@pytest.mark.parametrize(
+    "suffix",
+    ("_cleanup_failed", "_output_cleanup_failed", "_containment_unavailable"),
+)
+def test_capture_failure_taxonomy_stops_on_incomplete_process_cleanup(
+    root, suffix,
+):
+    assert campaign.classify_capture_failure(root + suffix) == "process_blocked"
+
+
+def test_supervised_launch_set_cleanup_failure_is_process_blocked() -> None:
+    code = "label_launch_set_collection_cleanup_failed"
+
+    assert code in campaign._PROCESS_BLOCKED_CODES
+    assert code not in campaign._RETRYABLE_CODES
+    assert campaign.classify_capture_failure(code) == "process_blocked"
+
+
+def test_supervised_label_cleanup_failure_is_process_blocked() -> None:
+    code = "label_capture_failed_cleanup_failed"
+
+    assert code in campaign._PROCESS_BLOCKED_CODES
+    assert code not in campaign._RETRYABLE_CODES
+    assert campaign.classify_capture_failure(code) == "process_blocked"
+
+
+@pytest.mark.parametrize("root", _CAPTURE_EXECUTION_ROOTS)
+def test_capture_failure_taxonomy_closes_over_output_limits(root):
+    assert campaign.classify_capture_failure(root + "_output_limit") == (
+        "row_budget_blocked"
+    )
+
+
+@pytest.mark.parametrize("root", _MONITORED_CAPTURE_ROOTS)
+def test_capture_failure_taxonomy_closes_over_tree_limits(root):
+    assert campaign.classify_capture_failure(root + "_tree_limit_exceeded") == (
+        "row_budget_blocked"
+    )
+
+
+@pytest.mark.parametrize(
+    "code",
+    (
+        "supplemental_full_trace_retention_ceiling_exceeded",
+        "supplemental_chunk_rows_budget_blocked",
+        "trace_retained_budget_exceeded",
+        "control_output_limit_exceeded",
+        "trace_inventory_limit_exceeded",
+        "label_ncu_report_limit_exceeded",
+        "sol_control_ncu_report_limit_exceeded",
+        "vendor_control_ncu_report_limit_exceeded",
+        "sol_all_launch_ncu_report_limit_exceeded",
+        "launch_set_adapter_report_limit_exceeded",
+        "sol_ncu_identity_report_limit_exceeded",
+    ),
+)
+def test_capture_failure_taxonomy_closes_over_standalone_row_budget_codes(code):
+    assert campaign.classify_capture_failure(code) == "row_budget_blocked"
+
+
+@pytest.mark.parametrize("root", _CAPTURE_EXECUTION_ROOTS)
+def test_capture_failure_taxonomy_stops_on_raw_producer_storage_failures(root):
+    assert campaign.classify_capture_failure(root + "_storage_failure") == (
+        "storage_integrity_blocked"
+    )
+
+
+@pytest.mark.parametrize("root", _MONITORED_CAPTURE_ROOTS)
+def test_capture_failure_taxonomy_stops_on_raw_storage_monitor_failures(root):
+    assert campaign.classify_capture_failure(root + "_storage_monitor_failed") == (
+        "storage_integrity_blocked"
+    )
+
+
+@pytest.mark.parametrize(
+    ("code", "expected"),
+    (
+        (chunk.STORAGE_CAPACITY_CODE, "storage_blocked"),
+        (chunk.STORAGE_INTEGRITY_CODE, "storage_integrity_blocked"),
+        ("capture_output_storage_failure", "storage_integrity_blocked"),
+        ("sol_phase_storage_failure", "storage_integrity_blocked"),
+        ("label_capture_storage_failure", "storage_integrity_blocked"),
+        ("trace_generated_output_storage_failure", "storage_integrity_blocked"),
+        ("trace_snapshot_storage_failure", "storage_integrity_blocked"),
+        ("control_bits_storage_failure", "storage_integrity_blocked"),
+        ("sol_control_storage_failure", "storage_integrity_blocked"),
+        ("cell_inventory_storage_failure", "storage_integrity_blocked"),
+        ("cell_result_storage_failure", "storage_integrity_blocked"),
+        ("output_root_storage_failure", "storage_integrity_blocked"),
+        ("campaign_lock_storage_failure", "storage_integrity_blocked"),
+        ("cell_journal_storage_failure", "storage_integrity_blocked"),
+        ("supplemental_retention_budget_exceeded", "campaign_budget_blocked"),
+    ),
+)
+def test_capture_failure_taxonomy_closes_over_storage_and_campaign_codes(
+    code, expected,
+):
+    assert campaign.classify_capture_failure(code) == expected
+
+
+@pytest.mark.parametrize("root", _UNSUPERVISED_CAPTURE_ROOTS)
+def test_capture_failure_taxonomy_keeps_reader_start_failures_integrity(root):
+    assert campaign.classify_capture_failure(
+        root + "_output_reader_start_failed"
+    ) == "integrity_blocked"
+
+
+@pytest.mark.parametrize("root", _MONITORED_CAPTURE_ROOTS)
+@pytest.mark.parametrize("suffix", ("_tree_monitor_failed", "_tree_limit_invalid"))
+def test_capture_failure_taxonomy_keeps_tree_contract_failures_integrity(
+    root, suffix,
+):
+    assert campaign.classify_capture_failure(root + suffix) == "integrity_blocked"
+
+
+@pytest.mark.parametrize(
+    "code",
+    (
+        "control_bits_unavailable",
+        "capture_label_driver_authority_invalid",
+        "capture_ncu_authority_invalid",
+        "label_capture_failed_supervision_invalid",
+        "trace_runtime_limit_exceeded",
+        "trace_tracer_limit_exceeded",
+        "injection_runtime_limit_exceeded",
+        "trace_runtime_contract_invalid",
+        "injection_runtime_hash_drift",
+        "unknown_output_limit",
+        "trace_target_failed_output_limit_extra",
+        "unknown_storage_failure",
+        "label_capture_failed_start_failed",
+        "control_bits_unavailable_tree_limit_exceeded",
+        "sol_capture_prepare_failed_storage_monitor_failed",
+    ),
+)
+def test_capture_failure_taxonomy_fails_closed_for_contract_and_unknown_codes(
+    code,
+):
+    assert campaign.classify_capture_failure(code) == "integrity_blocked"
 
 
 def test_snapshot_publication_is_atomic_idempotent_and_resume_safe(tmp_path):
@@ -663,6 +886,45 @@ def test_storage_integrity_receipt_requires_explicit_reconciliation(
     assert calls == ["run"]
 
 
+def test_raw_producer_storage_failure_persists_conservative_integrity_stop(
+    tmp_path, monkeypatch, _permit_offline_supplemental_campaign,
+):
+    output = tmp_path / "campaign"
+    output.mkdir(mode=0o700)
+    runtime = tmp_path / "runtime"
+    runtime.mkdir(mode=0o700)
+    monkeypatch.setattr(campaign, "STORAGE_FAULT_ROOT", runtime)
+    monkeypatch.setattr(
+        campaign, "GLOBAL_GPU_LOCK_PATH", runtime / "solbench-sm86-gpu.lock"
+    )
+    monkeypatch.setattr(
+        campaign.chunk_capture,
+        "assert_external_output_root_before_mutation",
+        lambda _output_root: None,
+    )
+    monkeypatch.setattr(
+        campaign, "_storage_state",
+        lambda _path: {"available_bytes": 100, "available_inodes": 20},
+    )
+    raw_code = "trace_target_failed_storage_monitor_failed"
+    monkeypatch.setattr(
+        campaign,
+        "_run_campaign_locked",
+        lambda _args: (_ for _ in ()).throw(
+            campaign.chunk_capture.WorkloadCaptureRefusal(
+                raw_code, "injected producer storage stop"
+            )
+        ),
+    )
+
+    with pytest.raises(
+        campaign.CampaignRefusal, match=chunk.STORAGE_INTEGRITY_CODE
+    ):
+        campaign.run_campaign(Namespace(output_root=str(output)))
+    receipt = json.loads(campaign._storage_fault_receipt_path(output).read_text())
+    assert receipt["failure_code"] == chunk.STORAGE_INTEGRITY_CODE
+
+
 @pytest.mark.parametrize(
     "error_number",
     [errno.EIO, getattr(errno, "ESTALE", errno.EIO)],
@@ -928,9 +1190,170 @@ def test_bounded_pilot_cli_rejects_nonpositive_limit():
             "--full-coverage-inventory", "/tmp/full.json",
             "--live-coverage-inventory", "/tmp/live.json",
             "--live-coverage-inventory-root", "/tmp/plan",
+            "--nvbit-tracer", "/tmp/external-tracer.so",
             "--output-root", "/tmp/output",
             "--max-new-chunks", "0",
         ])
+
+
+def test_campaign_probe_timeout_kills_real_descendant_process_group(tmp_path):
+    process_ids_path = tmp_path / "processes.pid"
+    program = (
+        "import os, pathlib, subprocess, sys, time; "
+        "child = subprocess.Popen([sys.executable, '-c', "
+        "'import time; time.sleep(30)']); "
+        "pathlib.Path(sys.argv[1]).write_text("
+        "f'{os.getpid()} {child.pid}'); "
+        "time.sleep(30)"
+    )
+    try:
+        started = time.monotonic()
+        with pytest.raises(
+            campaign.ncu_executor.NcuActionExecutorError
+        ) as caught:
+            campaign._run_bounded_probe(
+                [sys.executable, "-c", program, str(process_ids_path)],
+                cwd=tmp_path,
+                environment=dict(os.environ),
+                timeout_seconds=1.0,
+                max_output_bytes=4096,
+                timeout_code="campaign_test_probe_timeout",
+                resource_code="campaign_test_probe_resource_unavailable",
+            )
+        assert caught.value.code == "campaign_test_probe_timeout"
+        assert time.monotonic() - started < 5
+        _leader_pid, child_pid = map(int, process_ids_path.read_text().split())
+        deadline = time.monotonic() + 2
+        while time.monotonic() < deadline:
+            try:
+                os.kill(child_pid, 0)
+            except ProcessLookupError:
+                break
+            time.sleep(0.02)
+        else:
+            pytest.fail(
+                f"timed-out campaign descendant {child_pid} is still alive"
+            )
+    finally:
+        if process_ids_path.is_file():
+            leader_pid, child_pid = map(
+                int, process_ids_path.read_text().split()
+            )
+            try:
+                os.killpg(leader_pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            try:
+                os.kill(child_pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+
+
+def test_campaign_probe_bounds_real_child_output(tmp_path):
+    max_output_bytes = 4096
+    with pytest.raises(
+        campaign.ncu_executor.NcuActionExecutorError
+    ) as caught:
+        campaign._run_bounded_probe(
+            [
+                sys.executable,
+                "-c",
+                "import os; os.write(1, b'x' * 1048576)",
+            ],
+            cwd=tmp_path,
+            environment=dict(os.environ),
+            timeout_seconds=5,
+            max_output_bytes=max_output_bytes,
+            timeout_code="campaign_test_probe_timeout",
+            resource_code="campaign_test_probe_resource_unavailable",
+        )
+    assert caught.value.code == campaign.ncu_executor.NCU_ACTION_OUTPUT_LIMIT
+    assert len(caught.value.stdout) + len(caught.value.stderr) == max_output_bytes
+
+
+def test_campaign_probe_real_start_failure_uses_resource_code(tmp_path):
+    with pytest.raises(
+        campaign.ncu_executor.NcuActionExecutorError
+    ) as caught:
+        campaign._run_bounded_probe(
+            [str(tmp_path / "missing-executable")],
+            cwd=tmp_path,
+            environment=dict(os.environ),
+            timeout_seconds=5,
+            max_output_bytes=4096,
+            timeout_code="campaign_test_probe_timeout",
+            resource_code="campaign_test_probe_resource_unavailable",
+        )
+    assert caught.value.code == "campaign_test_probe_resource_unavailable"
+
+
+@pytest.mark.parametrize(
+    ("executor_code", "expected"),
+    (
+        ("campaign_test_probe_timeout", "campaign_test_probe_timeout"),
+        (
+            campaign.ncu_executor.NCU_ACTION_OUTPUT_LIMIT,
+            "campaign_test_probe_output_limit",
+        ),
+        (
+            "campaign_test_probe_resource_unavailable",
+            "campaign_test_probe_resource_unavailable",
+        ),
+        (
+            campaign.ncu_executor.NCU_ACTION_REQUEST_INVALID,
+            "campaign_bounded_executor_contract_failed",
+        ),
+    ),
+)
+def test_campaign_probe_executor_failures_map_to_typed_campaign_codes(
+    executor_code, expected,
+):
+    exc = campaign.ncu_executor.NcuActionExecutorError(
+        executor_code, "injected bounded executor failure"
+    )
+    exc.stdout = b"bounded stdout"
+    exc.stderr = b"bounded stderr"
+    refusal = campaign._bounded_probe_refusal(
+        exc,
+        timeout_code="campaign_test_probe_timeout",
+        output_limit_code="campaign_test_probe_output_limit",
+        resource_code="campaign_test_probe_resource_unavailable",
+    )
+    assert refusal.code == expected
+    assert "bounded stderr" in refusal.detail
+    assert "process_cleanup_incomplete=False" in refusal.detail
+
+
+@pytest.mark.parametrize(
+    "executor_code",
+    (
+        "campaign_test_probe_timeout",
+        campaign.ncu_executor.NCU_ACTION_OUTPUT_LIMIT,
+        "campaign_test_probe_resource_unavailable",
+        campaign.ncu_executor.NCU_ACTION_REQUEST_INVALID,
+    ),
+)
+def test_campaign_probe_cleanup_failure_overrides_original_executor_code(
+    executor_code,
+):
+    exc = campaign.ncu_executor.NcuActionExecutorError(
+        executor_code,
+        "injected bounded executor cleanup failure",
+        process_cleanup_incomplete=True,
+    )
+    exc.stdout = b"bounded stdout"
+    exc.stderr = b"bounded stderr"
+
+    refusal = campaign._bounded_probe_refusal(
+        exc,
+        timeout_code="campaign_test_probe_timeout",
+        output_limit_code="campaign_test_probe_output_limit",
+        resource_code="campaign_test_probe_resource_unavailable",
+    )
+
+    assert refusal.code == campaign._PROBE_CLEANUP_FAILED_CODE
+    assert "process_cleanup_incomplete=True" in refusal.detail
+    assert f"executor_code={executor_code}" in refusal.detail
 
 
 @pytest.mark.parametrize(
@@ -958,12 +1381,13 @@ def test_preflight_child_storage_marker_maps_before_generic_failure(
         detail="injected child storage failure",
     ).marker()
     outcomes = iter([
-        Namespace(stdout="", stderr="", returncode=0),
-        Namespace(stdout="", stderr=marker + "\n", returncode=3),
+        Namespace(stdout=b"", stderr=b"", returncode=0),
+        Namespace(
+            stdout=b"", stderr=(marker + "\n").encode(), returncode=3
+        ),
     ])
     commands = []
     child_matrix_hashes = []
-    real_run = campaign.subprocess.run
 
     def run(command, *_args, **_kwargs):
         commands.append(command)
@@ -974,15 +1398,14 @@ def test_preflight_child_storage_marker_maps_before_generic_failure(
             )
         return next(outcomes)
 
-    monkeypatch.setattr(
-        campaign.subprocess, "run", run,
-    )
+    monkeypatch.setattr(campaign, "_run_bounded_probe", run)
     args = Namespace(
         output_root=str(output),
         pins=str(repo / "pins.json"),
         aggregate_budget=str(repo / "budget.json"),
         matrix=str(repo / "supplemental.json"),
         canonical_matrix=str(repo / "matrix.json"),
+        nvbit_tracer=str(tmp_path / "external-tracer.so"),
     )
     with pytest.raises(campaign.chunk_capture.WorkloadCaptureRefusal) as caught:
         campaign._new_preflight(
@@ -994,6 +1417,8 @@ def test_preflight_child_storage_marker_maps_before_generic_failure(
     preflight_command = commands[1]
     matrix_index = preflight_command.index("--matrix") + 1
     assert preflight_command[matrix_index] == str(supplemental_matrix)
+    tracer_index = preflight_command.index("--nvbit-tracer") + 1
+    assert preflight_command[tracer_index] == args.nvbit_tracer
     assert str(repo / "matrix.json") not in preflight_command
     assert child_matrix_hashes == [
         hashlib.sha256(supplemental_matrix.read_bytes()).hexdigest()
@@ -1028,20 +1453,23 @@ def test_retained_restart_preflight_uses_retained_matrix_after_source_deletion(
         nonlocal calls
         calls += 1
         if calls == 1:
-            return Namespace(stdout="", stderr="", returncode=0)
+            return Namespace(stdout=b"", stderr=b"", returncode=0)
         matrix_arg = Path(command[command.index("--matrix") + 1])
         child_observation.update(
             path=matrix_arg,
             sha256=hashlib.sha256(matrix_arg.read_bytes()).hexdigest(),
             command=command,
         )
-        return Namespace(stdout="", stderr=marker + "\n", returncode=3)
+        return Namespace(
+            stdout=b"", stderr=(marker + "\n").encode(), returncode=3
+        )
 
-    monkeypatch.setattr(campaign.subprocess, "run", run)
+    monkeypatch.setattr(campaign, "_run_bounded_probe", run)
     args = Namespace(
         output_root=str(output), pins=str(repo / "pins.json"),
         aggregate_budget=str(repo / "budget.json"), matrix=str(original),
         canonical_matrix=str(repo / "canonical.json"),
+        nvbit_tracer=str(tmp_path / "external-tracer.so"),
     )
     with pytest.raises(campaign.chunk_capture.WorkloadCaptureRefusal):
         campaign._new_preflight(
@@ -1052,6 +1480,8 @@ def test_retained_restart_preflight_uses_retained_matrix_after_source_deletion(
     assert child_observation["sha256"] == hashlib.sha256(matrix_bytes).hexdigest()
     assert str(original) not in child_observation["command"]
     assert str(args.canonical_matrix) not in child_observation["command"]
+    tracer_index = child_observation["command"].index("--nvbit-tracer") + 1
+    assert child_observation["command"][tracer_index] == args.nvbit_tracer
 
 
 def test_repo_local_preflight_manifest_storage_marker_creates_no_campaign_receipt(
@@ -1067,6 +1497,11 @@ def test_repo_local_preflight_manifest_storage_marker_creates_no_campaign_receip
     monkeypatch.setattr(campaign, "LOCAL_LABELS", repo / "tools/local_labels")
     monkeypatch.setattr(campaign, "STORAGE_FAULT_ROOT", runtime)
     monkeypatch.setattr(campaign, "_global_gpu_lock", lambda: object())
+    monkeypatch.setattr(
+        campaign.chunk_capture,
+        "assert_external_output_root_before_mutation",
+        lambda _output_root: None,
+    )
     marker = chunk.preflight.PreflightStorageFailure(
         chunk.preflight.PREFLIGHT_STORAGE_INTEGRITY,
         error_number=errno.EIO,
@@ -1074,12 +1509,14 @@ def test_repo_local_preflight_manifest_storage_marker_creates_no_campaign_receip
         detail="injected repo-local staging write failure",
     ).marker()
     outcomes = iter([
-        Namespace(stdout="", stderr="", returncode=0),
-        Namespace(stdout="", stderr=marker + "\n", returncode=3),
+        Namespace(stdout=b"", stderr=b"", returncode=0),
+        Namespace(
+            stdout=b"", stderr=(marker + "\n").encode(), returncode=3
+        ),
     ])
-    real_run = campaign.subprocess.run
+    real_run = campaign._run_bounded_probe
     monkeypatch.setattr(
-        campaign.subprocess, "run", lambda *_args, **_kwargs: next(outcomes)
+        campaign, "_run_bounded_probe", lambda *_args, **_kwargs: next(outcomes)
     )
     args = Namespace(
         output_root=str(output),
@@ -1087,6 +1524,7 @@ def test_repo_local_preflight_manifest_storage_marker_creates_no_campaign_receip
         aggregate_budget=str(repo / "budget.json"),
         matrix=str(repo / "supplemental.json"),
         canonical_matrix=str(repo / "matrix.json"),
+        nvbit_tracer=str(tmp_path / "external-tracer.so"),
     )
     with pytest.raises(
         campaign.CampaignRefusal,
@@ -1097,7 +1535,7 @@ def test_repo_local_preflight_manifest_storage_marker_creates_no_campaign_receip
             retry_ordinal=1, matrix_path=repo / "supplemental.json",
         )
     local_failure = caught.value
-    monkeypatch.setattr(campaign.subprocess, "run", real_run)
+    monkeypatch.setattr(campaign, "_run_bounded_probe", real_run)
     monkeypatch.setattr(
         campaign, "_run_campaign_locked",
         lambda _args: (_ for _ in ()).throw(local_failure),

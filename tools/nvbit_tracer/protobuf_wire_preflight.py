@@ -12,9 +12,12 @@ from dataclasses import dataclass
 from typing import Final
 
 _MAX_GROUP_NESTING: Final = 64
+_UINT32_MAX: Final = 0xFFFF_FFFF
+_SIGN_EXTENDED_INT32_MIN: Final = 0xFFFF_FFFF_8000_0000
 _KNOWN_FIELD_WIRE_TYPE_MISMATCH: Final = (
     "known protobuf field has incompatible wire type"
 )
+_UINT32_VARINT_OUT_OF_RANGE: Final = "protobuf uint32 field exceeds uint32 range"
 
 
 class ProtobufWireMalformed(ValueError):
@@ -117,10 +120,9 @@ class _WireCursor:
 
     def skip_value(
         self, field_number: int, wire_type: int, depth: int
-    ) -> memoryview | None:
+    ) -> int | memoryview | None:
         if wire_type == 0:
-            self.read_varint()
-            return None
+            return self.read_varint()
         if wire_type == 1:
             self.take(8)
             return None
@@ -136,7 +138,7 @@ class _WireCursor:
             return None
         raise ProtobufWireMalformed("invalid protobuf wire type")
 
-    def next_field(self) -> tuple[int, int, memoryview | None] | None:
+    def next_field(self) -> tuple[int, int, int | memoryview | None] | None:
         if self.empty():
             return None
         number, wire_type = self.read_key()
@@ -144,28 +146,50 @@ class _WireCursor:
         return number, wire_type, payload
 
 
-def _require_varint(field: tuple[int, int, memoryview | None]) -> None:
+def _require_varint(field: tuple[int, int, int | memoryview | None]) -> None:
     _number, wire_type, _payload = field
     if wire_type != 0:
         raise ProtobufWireMalformed(_KNOWN_FIELD_WIRE_TYPE_MISMATCH)
 
 
+def _require_uint32(field: tuple[int, int, int | memoryview | None]) -> None:
+    _number, wire_type, payload = field
+    if wire_type != 0 or not isinstance(payload, int):
+        raise ProtobufWireMalformed(_KNOWN_FIELD_WIRE_TYPE_MISMATCH)
+    if payload > _UINT32_MAX:
+        raise ProtobufWireMalformed(_UINT32_VARINT_OUT_OF_RANGE)
+
+
+def _require_shared_memory_int32(
+    field: tuple[int, int, int | memoryview | None],
+) -> None:
+    _number, wire_type, payload = field
+    if wire_type != 0 or not isinstance(payload, int):
+        raise ProtobufWireMalformed(_KNOWN_FIELD_WIRE_TYPE_MISMATCH)
+    # Protobuf int32 encodes negative values as sign-extended ten-byte
+    # varints. Preserve those for the post-decode nonnegative semantic check,
+    # but reject the over-wide middle range that can truncate to a valid
+    # nonnegative shared-memory size.
+    if _UINT32_MAX < payload < _SIGN_EXTENDED_INT32_MIN:
+        raise ProtobufWireMalformed(_UINT32_VARINT_OUT_OF_RANGE)
+
+
 def _require_length_delimited(
-    field: tuple[int, int, memoryview | None],
+    field: tuple[int, int, int | memoryview | None],
 ) -> memoryview:
     _number, wire_type, payload = field
-    if wire_type != 2 or payload is None:
+    if wire_type != 2 or not isinstance(payload, memoryview):
         raise ProtobufWireMalformed(_KNOWN_FIELD_WIRE_TYPE_MISMATCH)
     return payload
 
 
 def _require_repeated_varint(
-    field: tuple[int, int, memoryview | None],
+    field: tuple[int, int, int | memoryview | None],
 ) -> memoryview | None:
     _number, wire_type, payload = field
     if wire_type == 0:
         return None
-    if wire_type == 2 and payload is not None:
+    if wire_type == 2 and isinstance(payload, memoryview):
         return payload
     raise ProtobufWireMalformed(_KNOWN_FIELD_WIRE_TYPE_MISMATCH)
 
@@ -268,7 +292,7 @@ def _scan_device(
     while (field := cursor.next_field()) is not None:
         number, _wire_type, _payload = field
         if number == 1:
-            _require_varint(field)
+            _require_uint32(field)
         elif number == 2:
             map_entry = _require_length_delimited(field)
             _bump(counts, "streams", 1, limits.streams, "CUDA streams")
@@ -349,10 +373,17 @@ def _scan_kernel(
     limits: _RootLimits,
 ) -> None:
     cursor = _WireCursor(raw)
+    split_fields: set[int] = set()
     while (field := cursor.next_field()) is not None:
         number, _wire_type, _payload = field
-        if number == 1 or 3 <= number <= 7:
+        if number == 1 or number == 3 or 5 <= number <= 7:
             _require_varint(field)
+        # Field 4 is a legacy int32, but valid shared-memory sizes are
+        # nonnegative and participate in the uint32 split-field contract.
+        # Rejecting an over-wide raw varint here prevents generated decoders
+        # from truncating it before the aggregate/split equality check.
+        elif number == 4:
+            _require_shared_memory_int32(field)
         elif number == 2:
             _require_length_delimited(field)
         elif 8 <= number <= 10:
@@ -365,6 +396,13 @@ def _scan_kernel(
                 "root decoded nodes",
             )
             _scan_dim3d(dimensions)
+        elif 11 <= number <= 12:
+            _require_uint32(field)
+            if number in split_fields:
+                raise ProtobufWireMalformed(
+                    "duplicate shared-memory split protobuf field"
+                )
+            split_fields.add(number)
 
 
 def _scan_dim3d(raw: memoryview) -> None:
@@ -471,7 +509,9 @@ def _scan_instruction(
     cursor = _WireCursor(raw)
     while (field := cursor.next_field()) is not None:
         number, _wire_type, _payload = field
-        if 1 <= number <= 4 or 6 <= number <= 13:
+        if 1 <= number <= 3:
+            _require_uint32(field)
+        elif number == 4 or 6 <= number <= 13:
             _require_varint(field)
         elif number == 5:
             address = _require_length_delimited(field)
@@ -534,7 +574,9 @@ def _scan_address(
     address_counts: dict[str, int] = {}
     while (field := cursor.next_field()) is not None:
         number, _wire_type, _payload = field
-        if 1 <= number <= 5 or 7 <= number <= 8:
+        if number in {2, 7}:
+            _require_uint32(field)
+        elif number == 1 or 3 <= number <= 5 or number == 8:
             _require_varint(field)
         elif number == 6:
             packed = _require_repeated_varint(field)

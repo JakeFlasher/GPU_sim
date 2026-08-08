@@ -35,22 +35,82 @@ from tools.local_labels import ncu_action_executor as ncu_executor  # noqa: E402
 from tools.local_labels.capture_toolchain_contract import (  # noqa: E402
     ncu_version_matches,
 )
+from tools.nvbit_tracer import external_tracer_build as external_build  # noqa: E402
+from tools.nvbit_tracer.protobuf_wire_preflight import (  # noqa: E402
+    ProtobufDecodedResourceLimitExceeded,
+    ProtobufWireMalformed,
+    preflight_trace_protobuf,
+)
 
 
 PINNED_BUNDLE_COMMIT = "237f17cd34728b31ea752062e7ea7843a3a2603a"
-RECEIPT_SCHEMA_REL = Path(
-    "workloads/simbench_bw/schemas/cutlass_successor_capture_receipt.schema.json"
-)
-OVERLAY_SCHEMA_REL = Path(
-    "workloads/simbench_bw/schemas/cutlass_successor_capture_admission.schema.json"
-)
-OVERLAY_ID = "cutlass_successor_capture_admission_sm86_v1"
+RECEIPT_SCHEMA_PATHS_BY_VERSION = {
+    2: Path(
+        "workloads/simbench_bw/schemas/"
+        "cutlass_successor_capture_receipt.schema.json"
+    ),
+    3: Path(
+        "workloads/simbench_bw/schemas/"
+        "cutlass_successor_capture_receipt.v3.schema.json"
+    ),
+}
+RECEIPT_SCHEMA_IDS_BY_VERSION = {
+    2: "cutlass_successor_capture_receipt.schema.json",
+    3: "cutlass_successor_capture_receipt.v3.schema.json",
+}
+RECEIPT_SCHEMA_SHA256_BY_VERSION = {
+    2: "1833c68061a4e0d52f372ec61c5a445235071d918bf14dc2b2ddaec44770d486",
+    3: "9ff5b0d86fd95b908ce05adac3f96c1ea5aac397d9fbc6b729c3c512586b8865",
+}
+CAPTURE_PRODUCER_SHA256_BY_RECEIPT_VERSION = {
+    # v2 receipts were emitted by the final repository-tracer producer before
+    # retained external NVBit phase tools became part of the receipt contract.
+    2: "a67f4a0f84f5ee73cd3f5998e4da79927ac2bee05148cecd08216ddab5694e86",
+    3: "bad7125c3b77e8228952408a211cabb1f8124b48e6dfbe1b614d042c1474236a",
+}
+ACTIVE_RECEIPT_SCHEMA_VERSION = 3
+RECEIPT_SCHEMA_REL = RECEIPT_SCHEMA_PATHS_BY_VERSION[
+    ACTIVE_RECEIPT_SCHEMA_VERSION
+]
+OVERLAY_SCHEMA_PATHS_BY_VERSION = {
+    1: Path(
+        "workloads/simbench_bw/schemas/"
+        "cutlass_successor_capture_admission.schema.json"
+    ),
+    2: Path(
+        "workloads/simbench_bw/schemas/"
+        "cutlass_successor_capture_admission.v2.schema.json"
+    ),
+}
+OVERLAY_SCHEMA_IDS_BY_VERSION = {
+    1: "cutlass_successor_capture_admission.schema.json",
+    2: "cutlass_successor_capture_admission.v2.schema.json",
+}
+OVERLAY_SCHEMA_SHA256_BY_VERSION = {
+    1: "a5b8f636e32ee2979fe0d577c16c4610f3faa259b9ac687331dc6438031cb064",
+    2: "7f8f7368bbb080f7fd26c6e2dc8ab173fce455e353b2dec179dda13a8943e27b",
+}
+OVERLAY_IDS_BY_VERSION = {
+    1: "cutlass_successor_capture_admission_sm86_v1",
+    2: "cutlass_successor_capture_admission_sm86_v2",
+}
+ACTIVE_OVERLAY_SCHEMA_VERSION = 2
+OVERLAY_SCHEMA_REL = OVERLAY_SCHEMA_PATHS_BY_VERSION[
+    ACTIVE_OVERLAY_SCHEMA_VERSION
+]
+OVERLAY_ID = OVERLAY_IDS_BY_VERSION[ACTIVE_OVERLAY_SCHEMA_VERSION]
 DEFAULT_METRIC_VERSION = "ncu_2026.1.x"
 RECEIPT_SUFFIX = ".capture_receipt.json"
 LOCAL_LABEL_SIDECAR_SCHEMA_REL = Path(
     "workloads/simbench_bw/schemas/local_label_sidecar.schema.json"
 )
-TRACE_CONTRACT_ID = "sm86_addr_carry_v1"
+TRACE_CONTRACT_IDS_BY_RECEIPT_VERSION = {
+    2: "sm86_addr_carry_v1",
+    3: "sm86_addr_carry_shmem_split_v2",
+}
+TRACE_CONTRACT_ID = TRACE_CONTRACT_IDS_BY_RECEIPT_VERSION[
+    ACTIVE_RECEIPT_SCHEMA_VERSION
+]
 TRACE_MEMORY_PAYLOAD_CLASSES = [1, 2, 3, 6, 8]
 NVBIT_TRACE_BINARY_VERSION = 86
 NVBIT_VERSION = "1.8"
@@ -78,14 +138,24 @@ GPU_UUID_PATTERN = (
 LABEL_DRIVER_REL = label_driver_authority.LABEL_DRIVER_REL
 LABEL_DRIVER_SHA256 = label_driver_authority.LABEL_DRIVER_SHA256
 LABEL_DRIVER_MODE = label_driver_authority.LABEL_DRIVER_MODE
-NCU_ACTION_EXECUTOR_SHA256 = (
-    "3515165fafd2084e7fb1d24402b0d8be751f18714f7827cabb1a603344b6c8ac"
-)
+NCU_ACTION_EXECUTOR_SHA256_BY_RECEIPT_VERSION = {
+    2: "3515165fafd2084e7fb1d24402b0d8be751f18714f7827cabb1a603344b6c8ac",
+    3: "ae2e0a23babfc0789e9297815633171506a8a9be1108e2c62eeb21c0b0013ce4",
+}
+NCU_ACTION_EXECUTOR_SHA256 = NCU_ACTION_EXECUTOR_SHA256_BY_RECEIPT_VERSION[
+    ACTIVE_RECEIPT_SCHEMA_VERSION
+]
+NVBIT_TRACER_SHA256_BY_RECEIPT_VERSION = {
+    2: "de47b3af6a18ae69287f61ff149dbdb03b4baf6ca8e33f03d2a2221a0482ee5d",
+}
+NVBIT_TRACER_SIZE_BYTES_BY_RECEIPT_VERSION = {
+    2: 15_942_128,
+}
 CGROUP_CONTAINMENT_SUPERVISOR_SHA256 = (
-    "7a938d2f7f07fbb1477351a195616f9a7478db5c28b81fa29a3d226d11eadbff"
+    "1b4cbe75929eb6f8f98c55f300c964ba1592fa5547335cdcf2324fe0d4a0d452"
 )
 CAPTURE_PRODUCER_SELF_SHA256_AUTHORITY = (
-    "da3b3dc996227b93559e30a91fb9d85e44582283cf926e0f0b2994b4b1cc924b"
+    "d2754d7e4ef33877c0962d2ca18431981b4b50d6c2fe3b20e893e5cb9a951b31"
 )
 NCU_LAUNCHER_PATH = (
     "/usr/local/cuda-13.2/nsight-compute-2026.1.0/ncu"
@@ -150,8 +220,32 @@ BUNDLE_HASHES = {
 }
 
 
+ADMISSION_REFUSED = "capture_admission_refused"
+ADMISSION_RESOURCE_UNAVAILABLE = "capture_admission_resource_unavailable"
+
+
 class AdmissionError(RuntimeError):
     """External capture admission failed closed."""
+
+    def __init__(
+        self,
+        detail: str,
+        *,
+        code: str = ADMISSION_REFUSED,
+    ) -> None:
+        self.code = code
+        self.detail = detail
+        rendered = detail if code == ADMISSION_REFUSED else f"{code}: {detail}"
+        super().__init__(rendered)
+
+
+def _memory_refusal(stage: str, cause: MemoryError) -> AdmissionError:
+    error = AdmissionError(
+        f"{stage} exhausted memory",
+        code=ADMISSION_RESOURCE_UNAVAILABLE,
+    )
+    error.__cause__ = cause
+    return error
 
 
 class _ReceiptGeneration:
@@ -165,12 +259,18 @@ class _ReceiptGeneration:
     ) -> None:
         self.root = root
         self.reader = reader
-        self._metadata = dict(snapshot.files)
-        self._payloads: dict[str, bytes] = {}
+        try:
+            self._metadata = dict(snapshot.files)
+            self._payloads: dict[str, bytes] = {}
+        except MemoryError as exc:
+            raise _memory_refusal("receipt retained generation", exc) from exc
 
     @property
     def paths(self) -> list[Path]:
-        return [self.root / relative for relative in self._metadata]
+        try:
+            return [self.root / relative for relative in self._metadata]
+        except MemoryError as exc:
+            raise _memory_refusal("receipt retained path inventory", exc) from exc
 
     def _relative(self, path: Path) -> str:
         try:
@@ -186,26 +286,33 @@ class _ReceiptGeneration:
         return relative
 
     def read_bytes(self, path: Path) -> bytes:
-        relative = self._relative(path)
-        metadata = self._metadata[relative]
-        if relative not in self._payloads:
-            self._payloads[relative] = self.reader.read_snapshot(
-                relative, expected_metadata=metadata,
-            ).payload
-        else:
-            self.reader.verify_regular(relative, metadata)
-        return self._payloads[relative]
+        try:
+            relative = self._relative(path)
+            metadata = self._metadata[relative]
+            if relative not in self._payloads:
+                payload = self.reader.read_snapshot(
+                    relative, expected_metadata=metadata,
+                ).payload
+                self._payloads[relative] = payload
+            else:
+                self.reader.verify_regular(relative, metadata)
+            return self._payloads[relative]
+        except MemoryError as exc:
+            raise _memory_refusal("receipt retained byte cache", exc) from exc
 
     def inventory(self) -> list[dict[str, Any]]:
-        inventory: list[dict[str, Any]] = []
-        for relative in self._metadata:
-            payload = self.read_bytes(self.root / relative)
-            inventory.append({
-                "path": relative,
-                "sha256": sha256_bytes(payload),
-                "size_bytes": len(payload),
-            })
-        return inventory
+        try:
+            inventory: list[dict[str, Any]] = []
+            for relative in self._metadata:
+                payload = self.read_bytes(self.root / relative)
+                inventory.append({
+                    "path": relative,
+                    "sha256": sha256_bytes(payload),
+                    "size_bytes": len(payload),
+                })
+            return inventory
+        except MemoryError as exc:
+            raise _memory_refusal("receipt retained inventory", exc) from exc
 
 
 def canonical_sha(value: Any) -> str:
@@ -277,7 +384,20 @@ def _capture_producer_self_digest(payload: bytes) -> str:
     return declared
 
 
-def _capture_producer_sha256() -> str:
+def _capture_producer_sha256(receipt_schema_version: int) -> str:
+    expected_sha256 = CAPTURE_PRODUCER_SHA256_BY_RECEIPT_VERSION.get(
+        receipt_schema_version
+    )
+    if expected_sha256 is None:
+        raise AdmissionError(
+            "unsupported receipt version for capture producer authority: "
+            f"{receipt_schema_version!r}"
+        )
+    if receipt_schema_version != ACTIVE_RECEIPT_SCHEMA_VERSION:
+        # Historical receipt producers are immutable hash authorities.  They
+        # are intentionally not substituted with the active producer bytes.
+        return expected_sha256
+
     source = ROOT / "tools/local_labels/capture_cutlass_successor_receipts.py"
     try:
         with immutable.open_retained_regular(source) as retained:
@@ -287,11 +407,62 @@ def _capture_producer_sha256() -> str:
                 raise AdmissionError(
                     "successor capture producer differs from self-seal authority"
                 )
+            if retained.sha256 != expected_sha256:
+                raise AdmissionError(
+                    "successor capture producer differs from receipt-version authority"
+                )
             return retained.sha256
     except immutable.ImmutableArtifactError as exc:
         raise AdmissionError(
             f"successor capture producer immutable identity failed: {exc}"
         ) from exc
+
+
+def _ncu_action_executor_sha256(receipt_schema_version: int) -> str:
+    expected_sha256 = NCU_ACTION_EXECUTOR_SHA256_BY_RECEIPT_VERSION.get(
+        receipt_schema_version
+    )
+    if expected_sha256 is None:
+        raise AdmissionError(
+            "unsupported receipt version for NCU executor authority: "
+            f"{receipt_schema_version!r}"
+        )
+    if receipt_schema_version != ACTIVE_RECEIPT_SCHEMA_VERSION:
+        return expected_sha256
+
+    try:
+        with immutable.open_retained_regular(
+            Path(ncu_executor.__file__).resolve(strict=True)
+        ) as retained:
+            if retained.sha256 != expected_sha256:
+                raise AdmissionError(
+                    "successor NCU executor differs from receipt-version authority"
+                )
+            return retained.sha256
+    except (OSError, immutable.ImmutableArtifactError) as exc:
+        raise AdmissionError(
+            f"successor NCU executor immutable identity failed: {exc}"
+        ) from exc
+
+
+def _historical_nvbit_tracer_authority(
+    receipt_schema_version: int,
+) -> dict[str, Any]:
+    sha256 = NVBIT_TRACER_SHA256_BY_RECEIPT_VERSION.get(receipt_schema_version)
+    size_bytes = NVBIT_TRACER_SIZE_BYTES_BY_RECEIPT_VERSION.get(
+        receipt_schema_version
+    )
+    if sha256 is None or size_bytes is None:
+        raise AdmissionError(
+            "unsupported receipt version for historical NVBit tracer authority: "
+            f"{receipt_schema_version!r}"
+        )
+    return {
+        "identity_kind": "repository_tracer",
+        "path": NVBIT_TRACER_REL.as_posix(),
+        "sha256": sha256,
+        "size_bytes": size_bytes,
+    }
 
 
 def _regular(path: Path, label: str) -> None:
@@ -339,9 +510,125 @@ def _check_dt(value: str, label: str) -> None:
 def _validate_schema(path: Path, document: dict[str, Any], label: str) -> None:
     schema = _load_json(path, label)
     try:
-        jsonschema.Draft202012Validator(schema, format_checker=jsonschema.FormatChecker()).validate(document)
+        jsonschema.Draft202012Validator(
+            schema, format_checker=jsonschema.FormatChecker()
+        ).validate(document)
     except jsonschema.ValidationError as exc:
-        raise AdmissionError(f"{label} schema validation failed: {exc.message}") from exc
+        raise AdmissionError(
+            f"{label} schema validation failed: {exc.message}"
+        ) from exc
+
+
+def _validate_registered_overlay_schema(
+    document: dict[str, Any], label: str,
+) -> None:
+    version = document.get("schema_version")
+    if type(version) is not int or version not in OVERLAY_SCHEMA_PATHS_BY_VERSION:
+        raise AdmissionError(
+            f"{label} has unsupported overlay schema_version: {version!r}"
+        )
+    relative = OVERLAY_SCHEMA_PATHS_BY_VERSION[version]
+    try:
+        with immutable.open_retained_regular(ROOT / relative) as retained:
+            payload = retained.read_bytes()
+    except (OSError, immutable.ImmutableArtifactError) as exc:
+        raise AdmissionError(
+            f"{label} schema authority is unavailable: {relative}: {exc}"
+        ) from exc
+    if sha256_bytes(payload) != OVERLAY_SCHEMA_SHA256_BY_VERSION[version]:
+        raise AdmissionError(
+            f"{label} schema authority hash differs for version {version}"
+        )
+    try:
+        schema = immutable.strict_json_loads(
+            payload, label=f"capture admission overlay schema v{version}"
+        )
+    except immutable.ImmutableArtifactError as exc:
+        raise AdmissionError(
+            f"{label} schema authority is invalid: {exc}"
+        ) from exc
+    if (
+        type(schema) is not dict
+        or schema.get("$id") != OVERLAY_SCHEMA_IDS_BY_VERSION[version]
+        or schema.get("properties", {}).get("schema_version", {}).get("const")
+        != version
+    ):
+        raise AdmissionError(
+            f"{label} schema authority identity differs for version {version}"
+        )
+    try:
+        jsonschema.Draft202012Validator.check_schema(schema)
+        jsonschema.Draft202012Validator(
+            schema, format_checker=jsonschema.FormatChecker()
+        ).validate(document)
+    except jsonschema.SchemaError as exc:
+        raise AdmissionError(
+            f"{label} schema authority is invalid: {exc.message}"
+        ) from exc
+    except jsonschema.ValidationError as exc:
+        raise AdmissionError(
+            f"{label} schema validation failed: {exc.message}"
+        ) from exc
+
+
+def _validate_registered_receipt_schema(
+    document: dict[str, Any], label: str,
+) -> dict[str, Any]:
+    version = document.get("schema_version")
+    if type(version) is not int or version not in RECEIPT_SCHEMA_PATHS_BY_VERSION:
+        raise AdmissionError(
+            f"{label} has unsupported receipt schema_version: {version!r}"
+        )
+    relative = RECEIPT_SCHEMA_PATHS_BY_VERSION[version]
+    path = ROOT / relative
+    try:
+        with immutable.open_retained_regular(path) as retained:
+            payload = retained.read_bytes()
+    except (OSError, immutable.ImmutableArtifactError) as exc:
+        raise AdmissionError(
+            f"{label} schema authority is unavailable: {relative}: {exc}"
+        ) from exc
+    if sha256_bytes(payload) != RECEIPT_SCHEMA_SHA256_BY_VERSION[version]:
+        raise AdmissionError(
+            f"{label} schema authority hash differs for version {version}"
+        )
+    try:
+        schema = immutable.strict_json_loads(
+            payload, label=f"receipt schema v{version}"
+        )
+    except immutable.ImmutableArtifactError as exc:
+        raise AdmissionError(
+            f"{label} schema authority is invalid: {exc}"
+        ) from exc
+    if (
+        type(schema) is not dict
+        or schema.get("$id") != RECEIPT_SCHEMA_IDS_BY_VERSION[version]
+        or schema.get("properties", {}).get("schema_version", {}).get("const")
+        != version
+    ):
+        raise AdmissionError(
+            f"{label} schema authority identity differs for version {version}"
+        )
+    try:
+        jsonschema.Draft202012Validator.check_schema(schema)
+        jsonschema.Draft202012Validator(
+            schema, format_checker=jsonschema.FormatChecker()
+        ).validate(document)
+    except jsonschema.SchemaError as exc:
+        raise AdmissionError(
+            f"{label} schema authority is invalid: {exc.message}"
+        ) from exc
+    except jsonschema.ValidationError as exc:
+        raise AdmissionError(
+            f"{label} schema validation failed: {exc.message}"
+        ) from exc
+    return {
+        "schema_version": version,
+        "schema_id": RECEIPT_SCHEMA_IDS_BY_VERSION[version],
+        "path": relative.as_posix(),
+        "sha256": RECEIPT_SCHEMA_SHA256_BY_VERSION[version],
+        "size_bytes": len(payload),
+    }
 
 
 def _git_blob(path: Path) -> bytes:
@@ -383,6 +670,8 @@ def validate_immutable_bundle() -> tuple[dict[str, Any], dict[str, Any], dict[st
             expected_documents[path.as_posix()] = expected_document
     try:
         documents = cohort.validate_existing_bundle()
+    except MemoryError:
+        raise
     except Exception as exc:  # normalize helper failures at this boundary
         raise AdmissionError(f"pinned successor bundle validation failed: {exc}") from exc
     expected_return = tuple(
@@ -437,15 +726,22 @@ def _receipt_ref(
     root: Path,
     relative: str,
     seal: str,
+    *,
+    schema_authority: dict[str, Any],
+    nvbit_tool: dict[str, Any] | None,
 ) -> dict[str, Any]:
     path = _safe_receipt_path(root, relative, "receipt path")
     payload = generation.read_bytes(path)
-    return {
+    reference = {
         "path": relative,
         "sha256": sha256_bytes(payload),
         "size_bytes": len(payload),
         "receipt_seal_sha256": seal,
+        "schema_authority": dict(schema_authority),
     }
+    if nvbit_tool is not None:
+        reference["nvbit_tool"] = dict(nvbit_tool)
+    return reference
 
 
 def _expected_rows(matrix: dict[str, Any]) -> dict[tuple[str, str], dict[str, Any]]:
@@ -780,6 +1076,8 @@ def _verify_ncu_artifacts(
             )
     except AdmissionError:
         raise
+    except MemoryError:
+        raise
     except Exception as exc:
         raise AdmissionError(f"NCU label sidecar semantic validation failed: {exc}") from exc
 
@@ -921,6 +1219,8 @@ def _verify_ncu_artifacts(
             requested_launch_count=1,
             report_sha256=report_artifact["sha256"],
         )
+    except MemoryError:
+        raise
     except Exception as exc:
         raise AdmissionError(
             f"NCU launch observation contract is invalid: {exc}"
@@ -967,6 +1267,8 @@ def _verify_nvbit_artifacts(
     receipt: dict[str, Any],
     row: dict[str, Any],
     artifact_by_role: dict[str, list[dict[str, Any]]],
+    *,
+    receipt_schema_version: int,
 ) -> dict[str, Any]:
     """Re-derive the closed NVBit trace-summary contract from its JSON payload."""
     trace_roles = {
@@ -1013,6 +1315,9 @@ def _verify_nvbit_artifacts(
     dynamic_path = _safe_receipt_path(
         root, dynamic["path"], "NVBit dynamic trace"
     )
+    expected_trace_contract_id = TRACE_CONTRACT_IDS_BY_RECEIPT_VERSION[
+        receipt_schema_version
+    ]
     expected_trace_root = root / "nvbit" / row["successor_slug"]
     if dynamic_path != expected_trace_root / "dynamic_trace.pb":
         raise AdmissionError("NVBit dynamic trace path differs from canonical trace root")
@@ -1045,6 +1350,7 @@ def _verify_nvbit_artifacts(
         dynamic_payload = generation.read_bytes(dynamic_path)
         if sha256_bytes(dynamic_payload) != dynamic["sha256"]:
             raise AdmissionError("NVBit dynamic trace changed before metadata validation")
+        preflight_trace_protobuf(dynamic_payload)
         from tools.nvbit_tracer.proto_binding_loader import (
             load_dynamic_trace_bindings,
         )
@@ -1053,6 +1359,15 @@ def _verify_nvbit_artifacts(
         trace = trace_pb2.Trace()
         trace.ParseFromString(dynamic_payload)
     except AdmissionError:
+        raise
+    except (
+        ProtobufDecodedResourceLimitExceeded,
+        ProtobufWireMalformed,
+    ) as exc:
+        raise AdmissionError(
+            f"NVBit trace producer metadata is unreadable: {exc}"
+        ) from exc
+    except MemoryError:
         raise
     except Exception as exc:
         raise AdmissionError(
@@ -1063,6 +1378,8 @@ def _verify_nvbit_artifacts(
         or trace.binary_version != NVBIT_TRACE_BINARY_VERSION
         or type(trace.nvbit_version) is not str
         or trace.nvbit_version != NVBIT_VERSION
+        or trace.trace_contract_id != expected_trace_contract_id
+        or list(trace.memory_payload_classes) != TRACE_MEMORY_PAYLOAD_CLASSES
     ):
         raise AdmissionError("NVBit dynamic trace producer version metadata differs")
 
@@ -1070,7 +1387,7 @@ def _verify_nvbit_artifacts(
         "schema_version": 1,
         "producer": NVBIT_TRACE_SUMMARY_PRODUCER,
         "artifact_kind": "cutlass_successor_nvbit_trace_summary",
-        "trace_contract_id": TRACE_CONTRACT_ID,
+        "trace_contract_id": expected_trace_contract_id,
         "memory_payload_classes": TRACE_MEMORY_PAYLOAD_CLASSES,
         "binary_version": NVBIT_TRACE_BINARY_VERSION,
         "nvbit_version": NVBIT_VERSION,
@@ -1123,14 +1440,24 @@ def _verify_nvbit_artifacts(
         raise AdmissionError("NVBit trace summary admits more records than expected")
     try:
         from tools.nvbit_tracer.import_trace_contract import validate_trace_dir
-        from tools.nvbit_tracer.trace_admission import require_trace_admission
+        from tools.nvbit_tracer.trace_admission import (
+            require_historical_trace_admission,
+            require_trace_admission,
+        )
 
         trace_root = dynamic_path.parent
-        admission_result = require_trace_admission(trace_root)
+        admission = (
+            require_historical_trace_admission
+            if receipt_schema_version == 2
+            else require_trace_admission
+        )
+        admission_result = admission(trace_root)
         contract = validate_trace_dir(trace_root)
         if not contract.ok:
             raise AdmissionError(f"NVBit trace contract failed: {contract.typed_reason}")
     except AdmissionError:
+        raise
+    except MemoryError:
         raise
     except Exception as exc:
         raise AdmissionError(f"NVBit trace semantic validation failed: {exc}") from exc
@@ -1235,10 +1562,25 @@ def _expected_nvbit_command(row: dict[str, Any]) -> list[str]:
 def _expected_nvbit_environment(
     output_root: Path,
     row: dict[str, Any],
+    *,
+    receipt_schema_version: int = ACTIVE_RECEIPT_SCHEMA_VERSION,
 ) -> dict[str, str]:
     binary = ROOT / row["static_launch_inventory"]["binary_path"]
+    if receipt_schema_version == 2:
+        injection_path = ROOT / NVBIT_TRACER_REL
+    elif receipt_schema_version == 3:
+        injection_path = (
+            output_root
+            / "capture_tools"
+            / f"{row['variant_id']}.nvbit_tracer_tool.so"
+        )
+    else:
+        raise AdmissionError(
+            "unsupported receipt version for NVBit environment authority: "
+            f"{receipt_schema_version!r}"
+        )
     return {
-        "CUDA_INJECTION64_PATH": str(ROOT / NVBIT_TRACER_REL),
+        "CUDA_INJECTION64_PATH": str(injection_path),
         "CUDA_VISIBLE_DEVICES": "0",
         "LANG": "C",
         "LANGUAGE": "C",
@@ -1323,6 +1665,8 @@ def _verify_capture_documents(
     row: dict[str, Any],
     roster_row: dict[str, Any],
     artifact_by_role: dict[str, list[dict[str, Any]]],
+    *,
+    receipt_schema_version: int,
 ) -> ncu_executor.ExpectedNcuIdentity | None:
     preflight = _load_json(
         _safe_receipt_path(root, artifact_by_role["preflight"][0]["path"], "preflight"),
@@ -1362,7 +1706,11 @@ def _verify_capture_documents(
     ):
         raise AdmissionError("successor environment variables are not closed strings")
     if receipt["capture_kind"] == "nvbit":
-        expected_nvbit_environment = _expected_nvbit_environment(root, row)
+        expected_nvbit_environment = _expected_nvbit_environment(
+            root,
+            row,
+            receipt_schema_version=receipt_schema_version,
+        )
         if selected != expected_nvbit_environment:
             raise AdmissionError("NVBit collection environment pins differ")
         trace_root = _safe_receipt_path(
@@ -1537,7 +1885,16 @@ def _verify_receipt(
 ]:
     rel = path.relative_to(root).as_posix()
     document = _load_json(path, f"receipt {rel}", generation)
-    _validate_schema(ROOT / RECEIPT_SCHEMA_REL, document, f"receipt {rel}")
+    schema_authority = _validate_registered_receipt_schema(
+        document, f"receipt {rel}"
+    )
+    schema_version = schema_authority["schema_version"]
+    if schema_version != ACTIVE_RECEIPT_SCHEMA_VERSION:
+        raise AdmissionError(
+            "receipt schema_version "
+            f"{schema_version} is historical-read-only and cannot enter "
+            "active capture admission"
+        )
     seal = document["receipt_seal_sha256"]
     if seal != canonical_sha({k: v for k, v in document.items() if k != "receipt_seal_sha256"}):
         raise AdmissionError(f"receipt seal mismatch: {rel}")
@@ -1573,35 +1930,32 @@ def _verify_receipt(
     if receipt["process"]["command_sha256"] != receipt["command_sha256"]:
         raise AdmissionError(f"{rel} process command does not match receipt command")
     _check_dt(receipt["captured_at_utc"], f"{rel} captured_at_utc")
-    expected_tool = ROOT / (
-        "tools/local_labels/label_driver.sh"
-        if receipt["capture_kind"] == "ncu"
-        else NVBIT_TRACER_REL
-    )
-    _regular(expected_tool, "successor capture phase tool")
-    phase_tool_sha256 = sha256_bytes(expected_tool.read_bytes())
-    if (
-        receipt["capture_kind"] == "ncu"
-        and phase_tool_sha256 != LABEL_DRIVER_SHA256
-    ):
-        raise AdmissionError("successor label driver differs from pinned authority")
     containment_sha256 = sha256_bytes(Path(delegated_cgroup.__file__).read_bytes())
     if containment_sha256 != CGROUP_CONTAINMENT_SUPERVISOR_SHA256:
         raise AdmissionError(
             "successor cgroup containment supervisor differs from pinned authority"
         )
     expected_provenance = {
-        "capture_producer_sha256": _capture_producer_sha256(),
+        "capture_producer_sha256": _capture_producer_sha256(schema_version),
         "containment_supervisor_sha256": containment_sha256,
-        "phase_tool_sha256": phase_tool_sha256,
     }
+    nvbit_tool: dict[str, Any] | None = None
     if receipt["capture_kind"] == "ncu":
-        executor_sha256 = sha256_bytes(Path(ncu_executor.__file__).read_bytes())
-        if executor_sha256 != NCU_ACTION_EXECUTOR_SHA256:
-            raise AdmissionError("successor NCU executor differs from pinned authority")
-        expected_provenance["action_executor_sha256"] = executor_sha256
-    if receipt["provenance"] != expected_provenance:
-        raise AdmissionError(f"{rel} capture tool provenance does not match current inputs")
+        expected_tool = ROOT / "tools/local_labels/label_driver.sh"
+        _regular(expected_tool, "successor capture phase tool")
+        phase_tool_sha256 = sha256_bytes(expected_tool.read_bytes())
+        if phase_tool_sha256 != LABEL_DRIVER_SHA256:
+            raise AdmissionError("successor label driver differs from pinned authority")
+        expected_provenance["phase_tool_sha256"] = phase_tool_sha256
+        expected_provenance["action_executor_sha256"] = (
+            _ncu_action_executor_sha256(schema_version)
+        )
+    elif schema_version == 2:
+        # Historical v2 receipts bind an explicit immutable tracer identity.
+        # Admission must not reconstruct that authority from the current ignored
+        # repository tracer, which may be absent or belong to a later build.
+        nvbit_tool = _historical_nvbit_tracer_authority(schema_version)
+        expected_provenance["phase_tool_sha256"] = nvbit_tool["sha256"]
     expected_semantics = (
         {
             "semantic_kind": "ncu_metric_validation",
@@ -1622,13 +1976,41 @@ def _verify_receipt(
             "simulator_config_present": False,
         }
     )
+    if receipt["capture_kind"] == "nvbit" and schema_version == 3:
+        expected_semantics["descriptor_bindings"] = {
+            "command_0": "capture_target",
+            "CUDA_INJECTION64_PATH": "phase_tool",
+            "TRACES_FOLDER": "trace_root",
+        }
     if receipt["semantic_validation"] != expected_semantics:
         raise AdmissionError(f"{rel} semantic validation is not exact")
-    expected_roles = (
-        {"ncu_report", "label_sidecar", "label_run_manifest", "ncu_launch_observation", "preflight", "environment"}
-        if receipt["capture_kind"] == "ncu"
-        else {"dynamic_trace", "stats", "threadblock", "trace_summary", "trace_auxiliary", "preflight", "environment"}
-    )
+    if receipt["capture_kind"] == "ncu":
+        expected_roles = {
+            "ncu_report",
+            "label_sidecar",
+            "label_run_manifest",
+            "ncu_launch_observation",
+            "preflight",
+            "environment",
+        }
+    else:
+        expected_roles = {
+            "dynamic_trace",
+            "stats",
+            "threadblock",
+            "trace_summary",
+            "trace_auxiliary",
+            "preflight",
+            "environment",
+        }
+        if schema_version == 3:
+            expected_roles.update({
+                "phase_tool",
+                "runtime_manifest",
+                "external_build_source_manifest",
+                "external_build_receipt",
+                "external_build_artifact_identity",
+            })
     mandatory_roles = expected_roles - {"threadblock", "trace_auxiliary"}
     artifact_by_role: dict[str, list[dict[str, Any]]] = {}
     seen_roles: set[str] = set()
@@ -1650,6 +2032,62 @@ def _verify_receipt(
             ):
                 raise AdmissionError(
                     "NVBit canonical capture stream has the wrong artifact role"
+                )
+        if role == "phase_tool":
+            expected_phase_tool = (
+                root
+                / "capture_tools"
+                / f"{row['variant_id']}.nvbit_tracer_tool.so"
+            )
+            if (
+                schema_version != 3
+                or receipt["capture_kind"] != "nvbit"
+                or artifact_path != expected_phase_tool
+            ):
+                raise AdmissionError(
+                    f"NVBit phase-tool artifact path differs: {artifact['path']}"
+                )
+        if role == "runtime_manifest":
+            expected_runtime_manifest = (
+                root
+                / "capture_tools"
+                / f"{row['variant_id']}.nvbit_runtime_manifest.json"
+            )
+            if (
+                schema_version != 3
+                or receipt["capture_kind"] != "nvbit"
+                or artifact_path != expected_runtime_manifest
+            ):
+                raise AdmissionError(
+                    "NVBit runtime-manifest artifact path differs: "
+                    f"{artifact['path']}"
+                )
+        if role in {
+            "external_build_source_manifest",
+            "external_build_receipt",
+            "external_build_artifact_identity",
+        }:
+            filename_by_role = {
+                "external_build_source_manifest": (
+                    "nvbit_external_build_source_manifest.json"
+                ),
+                "external_build_receipt": "nvbit_external_build_receipt.json",
+                "external_build_artifact_identity": (
+                    "nvbit_external_build_artifact_identity.json"
+                ),
+            }
+            expected_build_document = (
+                root
+                / "capture_tools"
+                / f"{row['variant_id']}.{filename_by_role[role]}"
+            )
+            if (
+                schema_version != 3
+                or receipt["capture_kind"] != "nvbit"
+                or artifact_path != expected_build_document
+            ):
+                raise AdmissionError(
+                    f"NVBit external-build artifact path differs: {artifact['path']}"
                 )
         if role in seen_roles and role not in {"threadblock", "trace_auxiliary"}:
             raise AdmissionError(f"duplicate artifact role in receipt: {rel}:{role}")
@@ -1678,8 +2116,90 @@ def _verify_receipt(
             raise AdmissionError(f"zero-size artifact: {artifact_rel}")
         if sha256_bytes(payload) != artifact["sha256"] or len(payload) != artifact["size_bytes"]:
             raise AdmissionError(f"artifact hash or size drifted: {artifact_rel}")
-    if not mandatory_roles.issubset(seen_roles) or (receipt["capture_kind"] == "nvbit" and not artifact_by_role.get("threadblock")):
+    if not mandatory_roles.issubset(seen_roles) or (
+        receipt["capture_kind"] == "nvbit"
+        and not artifact_by_role.get("threadblock")
+    ):
         raise AdmissionError(f"receipt artifact set incomplete: {rel}")
+    if receipt["capture_kind"] == "nvbit" and schema_version == 3:
+        phase_tool_artifact = artifact_by_role["phase_tool"][0]
+        expected_provenance["phase_tool_sha256"] = phase_tool_artifact[
+            "sha256"
+        ]
+        runtime_manifest_artifact = artifact_by_role["runtime_manifest"][0]
+        expected_provenance["runtime_manifest_sha256"] = (
+            runtime_manifest_artifact["sha256"]
+        )
+        source_manifest_artifact = artifact_by_role[
+            "external_build_source_manifest"
+        ][0]
+        build_receipt_artifact = artifact_by_role["external_build_receipt"][0]
+        artifact_identity_artifact = artifact_by_role[
+            "external_build_artifact_identity"
+        ][0]
+        source_payload = generation.read_bytes(
+            _safe_receipt_path(
+                root,
+                source_manifest_artifact["path"],
+                "external build source manifest",
+            )
+        )
+        build_payload = generation.read_bytes(
+            _safe_receipt_path(
+                root,
+                build_receipt_artifact["path"],
+                "external build receipt",
+            )
+        )
+        artifact_payload = generation.read_bytes(
+            _safe_receipt_path(
+                root,
+                artifact_identity_artifact["path"],
+                "external build artifact identity",
+            )
+        )
+        try:
+            external_identity = external_build.verify_admitted_bundle_documents(
+                source_payload,
+                build_payload,
+                artifact_payload,
+                repo_root=ROOT,
+                expected_tracer_sha256=phase_tool_artifact["sha256"],
+                expected_tracer_size_bytes=phase_tool_artifact["size_bytes"],
+            )
+        except external_build.ExternalTracerBuildAuthorityError as exc:
+            raise AdmissionError(
+                f"NVBit external build authority is invalid: {exc}"
+            ) from exc
+        source_identity = external_identity["source_identity"]
+        expected_build_authority = {
+            "authority_kind": external_build.REVIEWED_AUTHORITY_KIND,
+            "expected_tracer_sha256": phase_tool_artifact["sha256"],
+            "source_commit_sha1": source_identity["head_commit_sha1"],
+            "source_tree_sha1": source_identity["head_tree_sha1"],
+            "source_inventory_sha256": source_identity["inventory_sha256"],
+            "source_manifest_sha256": source_manifest_artifact["sha256"],
+            "build_receipt_sha256": build_receipt_artifact["sha256"],
+            "artifact_identity_sha256": artifact_identity_artifact["sha256"],
+        }
+        expected_provenance["external_build_authority"] = (
+            expected_build_authority
+        )
+        nvbit_tool = {
+            "identity_kind": "retained_reviewed_external_build_bundle.v1",
+            "path": phase_tool_artifact["path"],
+            "sha256": phase_tool_artifact["sha256"],
+            "size_bytes": phase_tool_artifact["size_bytes"],
+            "runtime_manifest": dict(runtime_manifest_artifact),
+            "external_build_authority": expected_build_authority,
+            "source_manifest": dict(source_manifest_artifact),
+            "build_receipt": dict(build_receipt_artifact),
+            "artifact_identity": dict(artifact_identity_artifact),
+        }
+    if receipt["provenance"] != expected_provenance:
+        raise AdmissionError(
+            f"{rel} capture tool provenance does not match current inputs"
+        )
     preflight = artifact_by_role["preflight"][0]
     environment = artifact_by_role["environment"][0]
     if receipt["preflight_path"] != preflight["path"] or receipt["preflight_sha256"] != preflight["sha256"]:
@@ -1687,7 +2207,13 @@ def _verify_receipt(
     if receipt["environment_sha256"] != environment["sha256"]:
         raise AdmissionError(f"{rel} environment hash does not match typed artifact")
     expected_ncu_identity = _verify_capture_documents(
-        generation, root, receipt, row, roster_row, artifact_by_role
+        generation,
+        root,
+        receipt,
+        row,
+        roster_row,
+        artifact_by_role,
+        receipt_schema_version=schema_version,
     )
     if receipt["capture_kind"] == "ncu":
         if expected_ncu_identity is None:
@@ -1702,7 +2228,12 @@ def _verify_receipt(
         )
     else:
         observed_launch = _verify_nvbit_artifacts(
-            generation, root, receipt, row, artifact_by_role
+            generation,
+            root,
+            receipt,
+            row,
+            artifact_by_role,
+            receipt_schema_version=schema_version,
         )
     declared_observation = {
         "kernel_name": receipt["launch_identity"]["kernel_name"],
@@ -1720,7 +2251,14 @@ def _verify_receipt(
         receipt["launch_identity"],
         observed_launch,
         receipt["process"],
-        _receipt_ref(generation, root, rel, seal),
+        _receipt_ref(
+            generation,
+            root,
+            rel,
+            seal,
+            schema_authority=schema_authority,
+            nvbit_tool=nvbit_tool,
+        ),
     )
 
 
@@ -1829,7 +2367,7 @@ def _build_overlay_from_generation(
     else:
         dispatch_status, dispatch_reason = "not_admitted", "capture_receipts_partially_ready"
     document = {
-        "schema_version": 1,
+        "schema_version": ACTIVE_OVERLAY_SCHEMA_VERSION,
         "artifact_kind": "cutlass_successor_capture_admission_overlay",
         "overlay_id": OVERLAY_ID,
         "generated_at_utc": generated_at_utc,
@@ -1843,7 +2381,9 @@ def _build_overlay_from_generation(
         "integrity": {"base_bundle_unchanged": True, "unique_matrix_keys": True, "unique_variant_ids": True, "receipt_inventory_closed": True, "only_ready_rows_chunked": True, "separate_ncu_nvbit_processes": True},
     }
     document["overlay_seal_sha256"] = canonical_sha(document)
-    _validate_schema(ROOT / OVERLAY_SCHEMA_REL, document, "capture admission overlay")
+    _validate_registered_overlay_schema(
+        document, "capture admission overlay"
+    )
     return document
 
 
@@ -1859,12 +2399,12 @@ def _receipt_generation_limits() -> dict[str, int]:
 
 
 def build_overlay(receipt_root: Path, *, generated_at_utc: str) -> dict[str, Any]:
-    root = _external_root(receipt_root)
-    _check_dt(generated_at_utc, "generated_at_utc")
-    _, _, roster, matrix = validate_immutable_bundle()
-    expected = _expected_rows(matrix)
-    expected_roster = _expected_roster_rows(roster)
     try:
+        root = _external_root(receipt_root)
+        _check_dt(generated_at_utc, "generated_at_utc")
+        _, _, roster, matrix = validate_immutable_bundle()
+        expected = _expected_rows(matrix)
+        expected_roster = _expected_roster_rows(roster)
         with immutable.PinnedDirectoryReader(root) as reader:
             with reader.retain_tree_generation(
                 **_receipt_generation_limits()
@@ -1878,6 +2418,10 @@ def build_overlay(receipt_root: Path, *, generated_at_utc: str) -> dict[str, Any
                     expected=expected,
                     expected_roster=expected_roster,
                 )
+    except AdmissionError:
+        raise
+    except MemoryError as exc:
+        raise _memory_refusal("capture admission overlay generation", exc) from exc
     except immutable.ImmutableArtifactError as exc:
         raise AdmissionError(
             f"receipt tree immutable generation validation failed: {exc}"
@@ -1899,13 +2443,16 @@ def _overlay_output_target(output: Path, receipt_root: Path) -> tuple[Path, Path
 
 
 def _overlay_payload(document: dict[str, Any]) -> bytes:
-    return (json.dumps(document, indent=2, sort_keys=True) + "\n").encode("utf-8")
+    try:
+        return (json.dumps(document, indent=2, sort_keys=True) + "\n").encode("utf-8")
+    except MemoryError as exc:
+        raise _memory_refusal("capture admission overlay serialization", exc) from exc
 
 
 def write_overlay(document: dict[str, Any], output: Path, receipt_root: Path) -> None:
-    _resolved_root, _target = _overlay_output_target(output, receipt_root)
-    payload = _overlay_payload(document)
     try:
+        _resolved_root, _target = _overlay_output_target(output, receipt_root)
+        payload = _overlay_payload(document)
         with immutable.PinnedDirectoryReader(output.parent) as parent:
             immutable.write_regular_bytes_at(
                 parent.descriptor,
@@ -1914,11 +2461,15 @@ def write_overlay(document: dict[str, Any], output: Path, receipt_root: Path) ->
                 mode=0o444,
             )
             parent.verify_path()
+    except AdmissionError:
+        raise
+    except MemoryError as exc:
+        raise _memory_refusal("capture admission overlay write", exc) from exc
     except (OSError, immutable.ImmutableArtifactError) as exc:
         raise AdmissionError(f"cannot exclusively write overlay {output}: {exc}") from exc
 
 
-def build_and_write_overlay(
+def _build_and_write_overlay(
     receipt_root: Path,
     output: Path,
     *,
@@ -1988,18 +2539,42 @@ def build_and_write_overlay(
         ) from exc
 
 
-def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--receipt-root", type=Path, required=True)
-    parser.add_argument("--output", type=Path, required=True)
-    parser.add_argument("--generated-at-utc", default="2026-07-23T00:00:00Z")
-    args = parser.parse_args(argv)
+def build_and_write_overlay(
+    receipt_root: Path,
+    output: Path,
+    *,
+    generated_at_utc: str,
+) -> dict[str, Any]:
+    """Translate every allocation failure into one typed admission refusal."""
+
     try:
+        return _build_and_write_overlay(
+            receipt_root,
+            output,
+            generated_at_utc=generated_at_utc,
+        )
+    except AdmissionError:
+        raise
+    except MemoryError as exc:
+        raise _memory_refusal("capture admission retained overlay", exc) from exc
+
+
+def main(argv: list[str] | None = None) -> int:
+    try:
+        parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+        parser.add_argument("--receipt-root", type=Path, required=True)
+        parser.add_argument("--output", type=Path, required=True)
+        parser.add_argument("--generated-at-utc", default="2026-07-23T00:00:00Z")
+        args = parser.parse_args(argv)
         build_and_write_overlay(
             args.receipt_root,
             args.output,
             generated_at_utc=args.generated_at_utc,
         )
+    except MemoryError as exc:
+        refusal = _memory_refusal("capture admission CLI", exc)
+        print(f"CUTLASS successor capture admission failed: {refusal}", file=sys.stderr)
+        return 1
     except (AdmissionError, OSError, ValueError, jsonschema.SchemaError) as exc:
         print(f"CUTLASS successor capture admission failed: {exc}", file=sys.stderr)
         return 1

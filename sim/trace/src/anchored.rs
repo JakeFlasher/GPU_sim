@@ -27,17 +27,66 @@ const MAX_TREE_DEPTH: usize = 16;
 const MIN_TREE_ENTRY_BUDGET: u64 = 1_024;
 const TREE_ENTRIES_PER_PAYLOAD: u64 = 8;
 
-/// Stable filesystem identity used only to reject hard-link aliases during admission.
+/// Stable filesystem identity used to reject hard-link aliases during admission.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct FileIdentity {
     device: u64,
     inode: u64,
 }
 
+/// One regular file generation observed through a descriptor-anchored name.
+///
+/// Device/inode alone does not distinguish an in-place overwrite. Size plus the
+/// modification/change timestamps make persistent replacement, deletion, and
+/// same-inode substitution observable at the final publication boundary.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FileGenerationIdentity {
+    identity: FileIdentity,
+    size_bytes: u64,
+    modified_seconds: i64,
+    modified_nanoseconds: i64,
+    changed_seconds: i64,
+    changed_nanoseconds: i64,
+}
+
+impl FileGenerationIdentity {
+    fn from_stat(stat: &rustix::fs::Stat) -> Option<Self> {
+        Some(Self {
+            identity: FileIdentity {
+                device: u64::try_from(stat.st_dev).ok()?,
+                inode: u64::try_from(stat.st_ino).ok()?,
+            },
+            size_bytes: u64::try_from(stat.st_size).ok()?,
+            modified_seconds: i64::try_from(stat.st_mtime).ok()?,
+            modified_nanoseconds: i64::try_from(stat.st_mtime_nsec).ok()?,
+            changed_seconds: i64::try_from(stat.st_ctime).ok()?,
+            changed_nanoseconds: i64::try_from(stat.st_ctime_nsec).ok()?,
+        })
+    }
+
+    fn from_metadata(metadata: &std::fs::Metadata) -> Self {
+        Self {
+            identity: FileIdentity {
+                device: metadata.dev(),
+                inode: metadata.ino(),
+            },
+            size_bytes: metadata.len(),
+            modified_seconds: metadata.mtime(),
+            modified_nanoseconds: metadata.mtime_nsec(),
+            changed_seconds: metadata.ctime(),
+            changed_nanoseconds: metadata.ctime_nsec(),
+        }
+    }
+
+    pub fn file_identity(self) -> FileIdentity {
+        self.identity
+    }
+}
+
 /// Bytes and metadata read from one retained regular-file descriptor.
 pub struct AnchoredFile {
     raw: Vec<u8>,
-    identity: FileIdentity,
+    generation: FileGenerationIdentity,
 }
 
 impl AnchoredFile {
@@ -50,7 +99,11 @@ impl AnchoredFile {
     }
 
     pub fn identity(&self) -> FileIdentity {
-        self.identity
+        self.generation.file_identity()
+    }
+
+    pub fn generation_identity(&self) -> FileGenerationIdentity {
+        self.generation
     }
 
     pub fn size_bytes(&self) -> u64 {
@@ -112,6 +165,8 @@ pub enum AnchoredReadError {
     RetainedDescriptorModeInvalid { path: PathBuf },
     #[error("descriptor-anchored artifact is not a regular file: {path}")]
     NotRegular { path: PathBuf },
+    #[error("descriptor-anchored artifact generation metadata is invalid: {path}")]
+    GenerationIdentityInvalid { path: PathBuf },
     #[error("descriptor-anchored artifact {path} has size {actual}, expected {expected}")]
     SizeMismatch {
         path: PathBuf,
@@ -259,14 +314,14 @@ impl AnchoredDir {
             .transpose()
     }
 
-    /// Inspect a no-follow regular-file name without reopening its contents.
+    /// Inspect a no-follow regular-file generation without reopening its contents.
     ///
-    /// This binds a retained file descriptor to a name beneath the anchored
-    /// directory even after read permission on that name has been removed.
-    pub fn inspect_regular_identity(
+    /// This binds a retained directory capability to the named generation even
+    /// after read permission on the leaf has been removed.
+    pub fn inspect_regular_generation(
         &self,
         relative: &Path,
-    ) -> Result<FileIdentity, AnchoredReadError> {
+    ) -> Result<FileGenerationIdentity, AnchoredReadError> {
         let mut components = relative_components(relative, false)?;
         let leaf = components.pop().expect("nonempty path checked");
         let parent = components.iter().collect::<PathBuf>();
@@ -283,10 +338,17 @@ impl AnchoredDir {
         if FileType::from_raw_mode(stat.st_mode) != FileType::RegularFile {
             return Err(AnchoredReadError::NotRegular { path });
         }
-        Ok(FileIdentity {
-            device: stat.st_dev,
-            inode: stat.st_ino,
-        })
+        FileGenerationIdentity::from_stat(&stat)
+            .ok_or(AnchoredReadError::GenerationIdentityInvalid { path })
+    }
+
+    /// Inspect the device/inode portion of a no-follow regular-file name.
+    pub fn inspect_regular_identity(
+        &self,
+        relative: &Path,
+    ) -> Result<FileIdentity, AnchoredReadError> {
+        self.inspect_regular_generation(relative)
+            .map(FileGenerationIdentity::file_identity)
     }
 
     pub(crate) fn read_pb_tree(
@@ -744,41 +806,15 @@ fn read_opened_regular(
         path: path.clone(),
         source,
     })?;
-    let after_observation = FileObservation::from_metadata(&after);
-    let before_observation = FileObservation::from_metadata(&before);
-    if u64::try_from(raw.len()).ok() != Some(size) || after_observation != before_observation {
+    let after_generation = FileGenerationIdentity::from_metadata(&after);
+    let before_generation = FileGenerationIdentity::from_metadata(&before);
+    if u64::try_from(raw.len()).ok() != Some(size) || after_generation != before_generation {
         return Err(AnchoredReadError::ChangedWhileReading { path });
     }
     Ok(AnchoredFile {
         raw,
-        identity: before_observation.identity,
+        generation: before_generation,
     })
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct FileObservation {
-    identity: FileIdentity,
-    size: u64,
-    modified_seconds: i64,
-    modified_nanoseconds: i64,
-    changed_seconds: i64,
-    changed_nanoseconds: i64,
-}
-
-impl FileObservation {
-    fn from_metadata(metadata: &std::fs::Metadata) -> Self {
-        Self {
-            identity: FileIdentity {
-                device: metadata.dev(),
-                inode: metadata.ino(),
-            },
-            size: metadata.len(),
-            modified_seconds: metadata.mtime(),
-            modified_nanoseconds: metadata.mtime_nsec(),
-            changed_seconds: metadata.ctime(),
-            changed_nanoseconds: metadata.ctime_nsec(),
-        }
-    }
 }
 
 #[cfg(test)]

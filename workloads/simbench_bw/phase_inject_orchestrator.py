@@ -36,8 +36,6 @@ import hashlib
 import math
 import os
 import re
-import selectors
-import signal
 import stat
 import subprocess
 import sys
@@ -67,9 +65,14 @@ from tools.local_labels.immutable_artifact import (  # noqa: E402
     inspect_immutable_directory_generation,
     publish_regular_file,
 )
+from tools.nvbit_tracer import capture_process as nvbit_process  # noqa: E402
 from tools.nvbit_tracer.runtime_env import (  # noqa: E402
+    DEFAULT_PB_LIB,
+    RetainedTracerRuntime,
     TracerRuntimeError,
-    tracer_runtime_env,
+    default_runtime_manifest_path,
+    retained_tracer_runtime_env,
+    sanitized_capture_environment,
 )
 
 
@@ -92,9 +95,9 @@ PHASE_AB_MAX_DIAGNOSTIC_BYTES = 64 * 1024
 PHASE_RECORD_MAX_RECORDS = 262_144
 PHASE_RECORD_MAX_BYTES = PHASE_RECORD_MAX_RECORDS * _agg.PHASE_CLOCK_RECORD_SIZE
 PHASE_TIMEOUT_MAX_S = 3600
+PHASE_AB_CLEANUP_TIMEOUT_S = 5.0
 PHASE_ADMISSION_THRESHOLD_MAX_PCT = 1000.0
 
-_PHASE_AB_IO_CHUNK_BYTES = 64 * 1024
 _PHASE_SOURCE_MAX_FILES = 4096
 _PHASE_SOURCE_MAX_DIRECTORIES = 4096
 _PHASE_SOURCE_MAX_BYTES = 512 * 1024 * 1024
@@ -210,8 +213,9 @@ class PhaseInjectTimeoutInvalid(Exception):
 
     def __init__(self, value: object):
         super().__init__(
-            f"{self.TOKEN}: timeout_per_run_s must be None or an exact integer "
-            f"in [1, {PHASE_TIMEOUT_MAX_S}]; "
+            f"{self.TOKEN}: timeout_per_run_s must be an exact integer in "
+            f"[1, {PHASE_TIMEOUT_MAX_S}] for production; None is allowed only "
+            "with an explicitly injected test runner; "
             f"got {_bounded_value_label(value)}"
         )
         self.value = value
@@ -246,18 +250,112 @@ class PhaseInjectAbOutputLimitExceeded(PhaseInjectResourceLimitExceeded):
 
     TOKEN = "phase_inject_ab_output_limit_exceeded"
 
-    def __init__(self, *, observed: int, stderr: str):
+    def __init__(
+        self,
+        *,
+        observed: int,
+        stderr: str,
+        stdout_bytes: bytes = b"",
+        stderr_bytes: bytes = b"",
+        observed_is_lower_bound: bool = False,
+    ):
         PhaseInjectResourceLimitExceeded.__init__(
             self,
             resource="A/B subprocess combined stdout/stderr bytes",
             limit=PHASE_AB_MAX_CAPTURE_BYTES,
             observed=observed,
         )
+        bound_label = "at_least" if observed_is_lower_bound else "observed"
         self.args = (
-            f"{self.TOKEN}: combined stdout/stderr observed={observed} exceeds "
-            f"limit={PHASE_AB_MAX_CAPTURE_BYTES}; stderr={stderr!r}",
+            f"{self.TOKEN}: combined stdout/stderr {bound_label}={observed} "
+            f"exceeds limit={PHASE_AB_MAX_CAPTURE_BYTES}; stderr={stderr!r}",
         )
         self.stderr = stderr
+        self.stdout_bytes = stdout_bytes
+        self.stderr_bytes = stderr_bytes
+        self.observed_is_lower_bound = observed_is_lower_bound
+        self.observed_output_bytes_lower_bound = (
+            observed if observed_is_lower_bound else None
+        )
+
+
+class PhaseInjectAbCleanupFailed(Exception):
+    """The supervised A/B child or delegated cgroup was not fully cleaned."""
+
+    TOKEN = "phase_inject_ab_cleanup_failed"
+
+    def __init__(
+        self,
+        *,
+        pid: int | None,
+        stage: str,
+        timeout_s: float,
+        detail: str,
+        stdout_bytes: bytes = b"",
+        stderr_bytes: bytes = b"",
+        observed_output_bytes_lower_bound: int | None = None,
+    ) -> None:
+        super().__init__(
+            f"{self.TOKEN}: pid={pid} stage={stage!r} "
+            f"cleanup_timeout_s={timeout_s:g}: {detail}"
+        )
+        self.pid = pid
+        self.stage = stage
+        self.timeout_s = timeout_s
+        self.detail = detail
+        self.stdout_bytes = stdout_bytes
+        self.stderr_bytes = stderr_bytes
+        self.observed_output_bytes_lower_bound = (
+            observed_output_bytes_lower_bound
+        )
+
+
+class PhaseInjectAbLaunchFailed(Exception):
+    """The centrally contained phase child could not be launched or monitored."""
+
+    TOKEN = "phase_inject_ab_launch_failed"
+
+    def __init__(
+        self,
+        *,
+        side: str,
+        detail: str,
+        stdout_bytes: bytes = b"",
+        stderr_bytes: bytes = b"",
+        observed_output_bytes_lower_bound: int | None = None,
+    ) -> None:
+        super().__init__(f"{self.TOKEN}: side={side!r}: {detail}")
+        self.side = side
+        self.detail = detail
+        self.stdout_bytes = stdout_bytes
+        self.stderr_bytes = stderr_bytes
+        self.observed_output_bytes_lower_bound = (
+            observed_output_bytes_lower_bound
+        )
+
+
+class PhaseInjectAbResourceUnavailable(Exception):
+    """Host resources prevented one centrally contained phase capture."""
+
+    TOKEN = "phase_inject_ab_resource_unavailable"
+
+    def __init__(
+        self,
+        *,
+        side: str,
+        detail: str,
+        stdout_bytes: bytes = b"",
+        stderr_bytes: bytes = b"",
+        observed_output_bytes_lower_bound: int | None = None,
+    ) -> None:
+        super().__init__(f"{self.TOKEN}: side={side!r}: {detail}")
+        self.side = side
+        self.detail = detail
+        self.stdout_bytes = stdout_bytes
+        self.stderr_bytes = stderr_bytes
+        self.observed_output_bytes_lower_bound = (
+            observed_output_bytes_lower_bound
+        )
 
 
 @contextmanager
@@ -522,154 +620,119 @@ def _captured_output_bytes(value: object, *, label: str) -> bytes:
     if isinstance(value, bytes):
         return value
     if type(value) is str:
-        if len(value) > PHASE_AB_MAX_CAPTURE_BYTES:
+        encoded = value.encode("utf-8", errors="replace")
+        if len(encoded) > PHASE_AB_MAX_CAPTURE_BYTES:
             raise PhaseInjectAbOutputLimitExceeded(
-                observed=len(value),
+                observed=len(encoded),
                 stderr=_bounded_diagnostic_text(value if label == "stderr" else ""),
+                stderr_bytes=encoded if label == "stderr" else b"",
+                stdout_bytes=encoded if label == "stdout" else b"",
             )
-        return value.encode("utf-8", errors="replace")
+        return encoded
     raise ImmutableArtifactError(
         f"phase A/B subprocess {label} must be bytes, string, or None"
     )
 
 
-def _kill_process_group(process: subprocess.Popen[bytes]) -> None:
-    try:
-        os.killpg(process.pid, signal.SIGKILL)
-    except ProcessLookupError:
-        pass
-    except OSError as exc:
-        if exc.errno != errno.ESRCH:
-            raise
-    process.wait()
+_PHASE_CAPTURE_TIMEOUT_CODE = "phase_inject_ab_capture_timeout"
+_PHASE_CAPTURE_LAUNCH_CODE = "phase_inject_ab_capture_launch_failed"
+_PHASE_CAPTURE_RESOURCE_ERRNOS = frozenset({
+    errno.EAGAIN,
+    errno.EMFILE,
+    errno.ENFILE,
+    errno.ENOMEM,
+    errno.ENOSPC,
+})
 
 
-def _bounded_subprocess_runner(
-    command: list[str],
+def _phase_capture_resource_failure(error: BaseException) -> bool:
+    pending = [error]
+    seen: set[int] = set()
+    while pending:
+        current = pending.pop()
+        if id(current) in seen:
+            continue
+        seen.add(id(current))
+        if isinstance(current, MemoryError):
+            return True
+        if (
+            isinstance(current, OSError)
+            and current.errno in _PHASE_CAPTURE_RESOURCE_ERRNOS
+        ):
+            return True
+        for chained in (current.__cause__, current.__context__):
+            if isinstance(chained, BaseException):
+                pending.append(chained)
+    return False
+
+
+def _map_phase_capture_error(
+    error: nvbit_process.NvbitCaptureProcessError,
     *,
-    capture_output: bool,
-    text: bool,
-    env: dict[str, str],
-    pass_fds: tuple[int, ...],
-    timeout: int | None = None,
-) -> subprocess.CompletedProcess[bytes]:
-    """Run one child with bounded combined output and process-group cleanup."""
-    if capture_output is not True or text is not False:
-        raise ImmutableArtifactError(
-            "bounded phase subprocess runner requires binary captured output"
-        )
-    process = subprocess.Popen(
-        command,
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        env=env,
-        pass_fds=pass_fds,
-        start_new_session=True,
+    side: str,
+    timeout_s: int,
+) -> BaseException:
+    stdout_bytes = error.stdout
+    stderr_bytes = error.stderr
+    observed_output_bytes_lower_bound = (
+        error.observed_output_bytes_lower_bound
     )
-    selector: selectors.BaseSelector | None = None
-    buffers = {"stdout": bytearray(), "stderr": bytearray()}
-    total_bytes = 0
-    deadline = None if timeout is None else time.monotonic() + timeout
-    primary: BaseException | None = None
-    try:
-        if process.stdout is None or process.stderr is None:
-            raise ImmutableArtifactError(
-                "bounded phase subprocess pipes are unavailable"
-            )
-        selector = selectors.DefaultSelector()
-        selector.register(process.stdout, selectors.EVENT_READ, "stdout")
-        selector.register(process.stderr, selectors.EVENT_READ, "stderr")
-        while selector.get_map():
-            if deadline is None:
-                wait_s = 0.1
-            else:
-                remaining = deadline - time.monotonic()
-                if remaining <= 0:
-                    raise subprocess.TimeoutExpired(
-                        command,
-                        timeout,
-                        output=bytes(buffers["stdout"]),
-                        stderr=bytes(buffers["stderr"]),
-                    )
-                wait_s = min(0.1, remaining)
-            for key, _mask in selector.select(timeout=wait_s):
-                chunk = os.read(key.fd, _PHASE_AB_IO_CHUNK_BYTES)
-                if not chunk:
-                    selector.unregister(key.fileobj)
-                    continue
-                capacity = PHASE_AB_MAX_CAPTURE_BYTES - total_bytes
-                buffers[key.data].extend(chunk[: max(0, capacity)])
-                total_bytes += len(chunk)
-                if total_bytes > PHASE_AB_MAX_CAPTURE_BYTES:
-                    raise PhaseInjectAbOutputLimitExceeded(
-                        observed=total_bytes,
-                        stderr=_bounded_diagnostic_text(buffers["stderr"]),
-                    )
-        if deadline is None:
-            returncode = process.wait()
-        else:
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                raise subprocess.TimeoutExpired(
-                    command,
-                    timeout,
-                    output=bytes(buffers["stdout"]),
-                    stderr=bytes(buffers["stderr"]),
-                )
-            returncode = process.wait(timeout=remaining)
-        return subprocess.CompletedProcess(
-            command,
-            returncode,
-            bytes(buffers["stdout"]),
-            bytes(buffers["stderr"]),
+    if (
+        error.code == nvbit_process.NVBIT_CAPTURE_OUTPUT_LIMIT
+        and observed_output_bytes_lower_bound is None
+    ):
+        raise RuntimeError(
+            "central NVBit output-limit failure omitted its observed byte lower bound"
         )
-    except BaseException as exc:
-        primary = exc
-        try:
-            _kill_process_group(process)
-        except BaseException as cleanup:
-            try:
-                exc.add_note(
-                    "phase subprocess cleanup also failed: "
-                    f"{type(cleanup).__name__}: {cleanup}"
-                )
-            except (AttributeError, TypeError):
-                pass
-        raise
-    finally:
-        close_errors: list[BaseException] = []
-        if primary is None:
-            try:
-                _kill_process_group(process)
-            except BaseException as exc:
-                close_errors.append(exc)
-        if selector is not None:
-            try:
-                selector.close()
-            except BaseException as exc:
-                close_errors.append(exc)
-        for pipe in (process.stdout, process.stderr):
-            if pipe is not None and not pipe.closed:
-                try:
-                    pipe.close()
-                except BaseException as exc:
-                    close_errors.append(exc)
-        if close_errors:
-            detail = "; ".join(
-                f"{type(exc).__name__}: {exc}" for exc in close_errors
-            )
-            if primary is not None:
-                try:
-                    primary.add_note(
-                        f"phase subprocess resource cleanup failed: {detail}"
-                    )
-                except (AttributeError, TypeError):
-                    pass
-            else:
-                raise ImmutableArtifactError(
-                    f"phase subprocess resource cleanup failed: {detail}"
-                ) from close_errors[0]
+    if error.process_cleanup_incomplete:
+        return PhaseInjectAbCleanupFailed(
+            pid=error.process_id,
+            stage="central_executor_cleanup",
+            timeout_s=PHASE_AB_CLEANUP_TIMEOUT_S,
+            detail=error.detail,
+            stdout_bytes=stdout_bytes,
+            stderr_bytes=stderr_bytes,
+            observed_output_bytes_lower_bound=(
+                observed_output_bytes_lower_bound
+            ),
+        )
+    if error.code == nvbit_process.NVBIT_CAPTURE_OUTPUT_LIMIT:
+        assert observed_output_bytes_lower_bound is not None
+        return PhaseInjectAbOutputLimitExceeded(
+            observed=observed_output_bytes_lower_bound,
+            observed_is_lower_bound=True,
+            stderr=_bounded_diagnostic_text(stderr_bytes),
+            stdout_bytes=stdout_bytes,
+            stderr_bytes=stderr_bytes,
+        )
+    if error.code == _PHASE_CAPTURE_TIMEOUT_CODE:
+        return PhaseInjectAbRunTimeout(
+            side=side,
+            timeout_s=timeout_s,
+            stderr=_bounded_diagnostic_text(stderr_bytes),
+            stdout_bytes=stdout_bytes,
+            stderr_bytes=stderr_bytes,
+            observed_output_bytes_lower_bound=(
+                observed_output_bytes_lower_bound
+            ),
+        )
+    if _phase_capture_resource_failure(error):
+        return PhaseInjectAbResourceUnavailable(
+            side=side,
+            detail=error.detail,
+            stdout_bytes=stdout_bytes,
+            stderr_bytes=stderr_bytes,
+            observed_output_bytes_lower_bound=(
+                observed_output_bytes_lower_bound
+            ),
+        )
+    return PhaseInjectAbLaunchFailed(
+        side=side,
+        detail=error.detail,
+        stdout_bytes=stdout_bytes,
+        stderr_bytes=stderr_bytes,
+        observed_output_bytes_lower_bound=observed_output_bytes_lower_bound,
+    )
 
 
 def _median_ns(samples: list[int]) -> int:
@@ -687,6 +750,7 @@ def run_ab_overhead_pair(
     subprocess_runner: Callable[..., Any] | None = None,
     timer_ns=time.perf_counter_ns,
     timeout_per_run_s: int | None = _DEFAULT_TIMEOUT_PER_RUN_S,
+    _retained_runtime: RetainedTracerRuntime | None = None,
 ) -> dict[str, Any]:
     """Run the executable twice (no-injection NVBit + with-injection
     NVBit) `repeat_count` times each. Compute the median wall-clock
@@ -694,20 +758,13 @@ def run_ab_overhead_pair(
     overhead fields plus `_phase_source_snapshot`, the exact retained source tree
     after the final corresponding subprocess.
 
-    The `subprocess_runner` and `timer_ns` parameters allow tests to
-    monkeypatch behavior without a real GPU run; production callers
-    use the defaults.
+    ``subprocess_runner`` is a non-production test seam. Production callers must
+    leave it as ``None`` and use the mandatory centrally contained executor.
 
-    Each subprocess invocation is bounded by `timeout_per_run_s` (default
-    600 s) so the A/B orchestration cannot hang indefinitely. A timeout
-    on either side surfaces as `PhaseInjectAbRunTimeout` with the typed
-    reason `phase_inject_ab_run_timeout` (distinct from the return-code-
-    driven `PhaseInjectAbRunFailed` which carries `phase_inject_ab_run_failed`).
-    Both typed exceptions are caught by the `run_suite.handle_trace`
-    boundary and translated to `EXIT_BUILD_FAILED` with a stderr
-    diagnostic. Pass `timeout_per_run_s=None` to opt out (production
-    runs should keep the bound; the opt-out path exists for tests and
-    for explicit-debug operator runs)."""
+    Each production invocation is bounded by ``timeout_per_run_s`` (default
+    600 s); production rejects ``None``. An injected test runner may explicitly
+    use ``None`` to exercise legacy/debug boundary behavior without creating a
+    production unbounded-launch path."""
     repeat_count, expected_launch_indices = _validated_repeat_and_launch_domain(
         inputs.repeat_count,
         inputs.expected_launch_indices,
@@ -715,6 +772,8 @@ def run_ab_overhead_pair(
     arguments = _validated_arguments(inputs.args)
     threshold_pct = _validated_admission_threshold(admission_threshold_pct)
     timeout_s = _validated_timeout(timeout_per_run_s)
+    if subprocess_runner is None and timeout_s is None:
+        raise PhaseInjectTimeoutInvalid(timeout_per_run_s)
     if not isinstance(inputs.executable_authority, RetainedExecutable):
         raise ImmutableArtifactError(
             "phase executable authority must be a RetainedExecutable"
@@ -764,21 +823,32 @@ def run_ab_overhead_pair(
         except (ImmutableArtifactError, OSError) as exc:
             raise PhaseInjectExecutableAuthorityInvalid(str(exc)) from exc
 
+    if _retained_runtime is None:
+        try:
+            with retained_tracer_runtime_env(
+                inputs.tracer_so_path,
+                base_env=sanitized_capture_environment(inputs.base_env),
+                pb_lib=DEFAULT_PB_LIB,
+                runtime_manifest=default_runtime_manifest_path(
+                    inputs.tracer_so_path
+                ),
+                retained_descriptor=inputs.tracer_descriptor,
+            ) as retained_runtime:
+                return run_ab_overhead_pair(
+                    inputs,
+                    admission_threshold_pct=admission_threshold_pct,
+                    subprocess_runner=subprocess_runner,
+                    timer_ns=timer_ns,
+                    timeout_per_run_s=timeout_per_run_s,
+                    _retained_runtime=retained_runtime,
+                )
+        except TracerRuntimeError as exc:
+            raise PhaseInjectRuntimeUnavailable(str(exc)) from exc
+
     verify_executable_authority()
-    try:
-        base_env = tracer_runtime_env(
-            inputs.tracer_so_path,
-            base_env=inputs.base_env,
-            retained_descriptor=tracer_descriptor,
-        )
-    except TracerRuntimeError as exc:
-        raise PhaseInjectRuntimeUnavailable(str(exc)) from exc
+    base_env = dict(_retained_runtime.environment)
+    runtime_fds = _retained_runtime.pass_fds
     tracer_proc_path = f"/proc/self/fd/{tracer_descriptor}"
-    effective_runner = (
-        _bounded_subprocess_runner
-        if subprocess_runner is None
-        else subprocess_runner
-    )
     env_no_inject = dict(base_env)
     env_no_inject["CUDA_INJECTION64_PATH"] = tracer_proc_path
     capture_fds: tuple[int, ...] = ()
@@ -846,30 +916,68 @@ def run_ab_overhead_pair(
                 raise PhaseInjectExecutableAuthorityInvalid(
                     "duplicated child executable is not the admitted inode"
                 )
-            runner_kwargs: dict[str, Any] = {
-                "capture_output": True,
-                "text": False,
-                "env": env,
-                "pass_fds": (
-                    invocation_descriptor,
-                    tracer_descriptor,
-                    *capture_fds,
-                ),
-            }
-            if timeout_s is not None:
-                runner_kwargs["timeout"] = timeout_s
+            command = [f"/proc/self/fd/{invocation_descriptor}", *arguments]
+            inherited_descriptors = (
+                invocation_descriptor,
+                tracer_descriptor,
+                *capture_fds,
+                *runtime_fds,
+            )
             try:
-                proc = effective_runner(
-                    [f"/proc/self/fd/{invocation_descriptor}", *arguments],
-                    **runner_kwargs,
-                )
+                if subprocess_runner is None:
+                    assert timeout_s is not None
+                    proc = nvbit_process.execute_capture_process(
+                        tuple(command),
+                        environment=env,
+                        working_directory=os.getcwd(),
+                        inherited_descriptors=inherited_descriptors,
+                        timeout_seconds=timeout_s,
+                        max_output_bytes=PHASE_AB_MAX_CAPTURE_BYTES,
+                        timeout_code=_PHASE_CAPTURE_TIMEOUT_CODE,
+                        launch_code=_PHASE_CAPTURE_LAUNCH_CODE,
+                    )
+                else:
+                    # Explicitly test-only: production never delegates child
+                    # supervision to an arbitrary callable.
+                    runner_kwargs: dict[str, Any] = {
+                        "capture_output": True,
+                        "text": False,
+                        "env": env,
+                        "pass_fds": inherited_descriptors,
+                    }
+                    if timeout_s is not None:
+                        runner_kwargs["timeout"] = timeout_s
+                    proc = subprocess_runner(command, **runner_kwargs)
                 t_end = timer_ns()
+            except nvbit_process.NvbitCaptureProcessError as exc:
+                assert timeout_s is not None
+                primary = _map_phase_capture_error(
+                    exc, side=side, timeout_s=timeout_s,
+                )
             except subprocess.TimeoutExpired as exc:
                 primary = PhaseInjectAbRunTimeout(
                     side=side,
                     timeout_s=timeout_s or 0,
                     stderr=_bounded_diagnostic_text(exc.stderr),
+                    stdout_bytes=_captured_output_bytes(
+                        exc.output, label="stdout",
+                    ),
+                    stderr_bytes=_captured_output_bytes(
+                        exc.stderr, label="stderr",
+                    ),
                 )
+            except (MemoryError, OSError) as exc:
+                if subprocess_runner is None:
+                    if _phase_capture_resource_failure(exc):
+                        primary = PhaseInjectAbResourceUnavailable(
+                            side=side, detail=str(exc),
+                        )
+                    else:
+                        primary = PhaseInjectAbLaunchFailed(
+                            side=side, detail=str(exc),
+                        )
+                else:
+                    primary = exc
             except BaseException as exc:
                 primary = exc
         finally:
@@ -908,6 +1016,8 @@ def run_ab_overhead_pair(
             raise PhaseInjectAbOutputLimitExceeded(
                 observed=output_bytes,
                 stderr=_bounded_diagnostic_text(stderr_bytes),
+                stdout_bytes=stdout_bytes,
+                stderr_bytes=stderr_bytes,
             )
         if type(proc.returncode) is not int or not (
             -(2**31) <= proc.returncode <= 2**31 - 1
@@ -921,6 +1031,8 @@ def run_ab_overhead_pair(
                 side=side,
                 returncode=proc.returncode,
                 stderr=_bounded_diagnostic_text(stderr_bytes),
+                stdout_bytes=stdout_bytes,
+                stderr_bytes=stderr_bytes,
             )
         return proc, t_end - t_start
 
@@ -1068,7 +1180,16 @@ class PhaseInjectAbRunFailed(Exception):
 
     TOKEN = "phase_inject_ab_run_failed"
 
-    def __init__(self, *, side: str, returncode: int, stderr: str):
+    def __init__(
+        self,
+        *,
+        side: str,
+        returncode: int,
+        stderr: str,
+        stdout_bytes: bytes = b"",
+        stderr_bytes: bytes = b"",
+        observed_output_bytes_lower_bound: int | None = None,
+    ):
         super().__init__(
             f"{self.TOKEN}: side={side!r} rc={returncode} "
             f"stderr={stderr!r}; the A/B overhead pair must complete "
@@ -1077,6 +1198,11 @@ class PhaseInjectAbRunFailed(Exception):
         self.side = side
         self.returncode = returncode
         self.stderr = stderr
+        self.stdout_bytes = stdout_bytes
+        self.stderr_bytes = stderr_bytes
+        self.observed_output_bytes_lower_bound = (
+            observed_output_bytes_lower_bound
+        )
 
     def to_json(self) -> dict[str, Any]:
         return {
@@ -1106,7 +1232,16 @@ class PhaseInjectAbRunTimeout(Exception):
 
     TOKEN = "phase_inject_ab_run_timeout"
 
-    def __init__(self, *, side: str, timeout_s: int, stderr: str):
+    def __init__(
+        self,
+        *,
+        side: str,
+        timeout_s: int,
+        stderr: str,
+        stdout_bytes: bytes = b"",
+        stderr_bytes: bytes = b"",
+        observed_output_bytes_lower_bound: int | None = None,
+    ):
         super().__init__(
             f"{self.TOKEN}: side={side!r} timeout_s={timeout_s} "
             f"stderr={stderr!r}; the A/B overhead pair's per-run "
@@ -1116,6 +1251,11 @@ class PhaseInjectAbRunTimeout(Exception):
         self.side = side
         self.timeout_s = timeout_s
         self.stderr = stderr
+        self.stdout_bytes = stdout_bytes
+        self.stderr_bytes = stderr_bytes
+        self.observed_output_bytes_lower_bound = (
+            observed_output_bytes_lower_bound
+        )
 
     def to_json(self) -> dict[str, Any]:
         return {

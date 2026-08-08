@@ -9,6 +9,7 @@ use sim_sm::{
     ManifestArtifactToken, ManifestError, ReplayError, ReplayMemMode, admit_launch_evidence,
     aggregate_full_launch_set, replay_kernel,
 };
+use sim_trace::reader::MemoryPayloadContract;
 use sim_trace::{Sha256Digest, TraceDirSnapshot, canonical_json};
 use tempfile::TempDir;
 
@@ -39,6 +40,26 @@ fn write_json(path: &Path, value: &Value) {
         serde_json::to_vec_pretty(value).expect("serialize fixture JSON"),
     )
     .expect("write fixture JSON");
+}
+
+fn write_flat_json_array(path: &Path, item: &[u8], count: usize) {
+    let mut raw = Vec::with_capacity(2 + count * (item.len() + 1));
+    raw.push(b'[');
+    for index in 0..count {
+        if index != 0 {
+            raw.push(b',');
+        }
+        raw.extend_from_slice(item);
+    }
+    raw.push(b']');
+    fs::write(path, raw).expect("write flat JSON array");
+}
+
+fn admission_error(path: &Path, context: &str) -> ManifestError {
+    match admit_launch_evidence(path) {
+        Ok(_) => panic!("{context}"),
+        Err(error) => error,
+    }
 }
 
 fn artifact(root: &Path, relative: &str) -> Value {
@@ -113,6 +134,43 @@ fn refresh_trace_artifacts(fixture: &mut Fixture) {
     });
     fixture.manifest["artifacts"]["stats_csv"] = artifact(&fixture.root, "trace/stats.csv");
     write_json(&fixture.manifest_path, &fixture.manifest);
+}
+
+fn add_nonselected_root_payload(fixture: &mut Fixture) -> PathBuf {
+    let dynamic_path = fixture.root.join("trace/dynamic_trace.pb");
+    let raw = fs::read(&dynamic_path).expect("read dynamic trace");
+    let mut trace = sim_trace::pb::Trace::decode(raw.as_slice()).expect("decode dynamic trace");
+    let stream = trace
+        .gpu_device
+        .get_mut(&0)
+        .expect("fixture device")
+        .streams
+        .get_mut(&0)
+        .expect("fixture stream");
+    let mut second = stream.kernels[0].clone();
+    second.id = 2;
+    second.function_unique_id = 2;
+    stream.kernels.push(second);
+    fs::write(&dynamic_path, trace.encode_to_vec()).expect("rewrite dynamic trace");
+
+    let first_payload = fixture
+        .root
+        .join("trace/threadblocks/device_0/stream_0/kernel_1/d_0_s_0_k_1_0,0,0.pb");
+    let raw = fs::read(&first_payload).expect("read first payload");
+    let mut threadblock =
+        sim_trace::pb::Threadblock::decode(raw.as_slice()).expect("decode first threadblock");
+    for warp in threadblock.warps.values_mut() {
+        for instruction in &mut warp.instructions {
+            instruction.function_unique_id = 2;
+        }
+    }
+    let second_payload = fixture
+        .root
+        .join("trace/threadblocks/device_0/stream_0/kernel_2/d_0_s_0_k_2_0,0,0.pb");
+    fs::create_dir_all(second_payload.parent().expect("second payload parent"))
+        .expect("create second payload parent");
+    fs::write(&second_payload, threadblock.encode_to_vec()).expect("write second payload");
+    second_payload
 }
 
 fn opcode(pc: u64) -> &'static str {
@@ -460,6 +518,78 @@ fn canary_admits_to_one_stable_canonical_seal() {
 }
 
 #[test]
+fn shared_memory_split_v2_admits_launch_evidence_and_binary_gap() {
+    let mut fixture = fixture();
+    let dynamic_path = fixture.root.join("trace/dynamic_trace.pb");
+    let raw = fs::read(&dynamic_path).expect("read dynamic trace");
+    let mut trace = sim_trace::pb::Trace::decode(raw.as_slice()).expect("decode dynamic trace");
+    trace.trace_contract_id = "sm86_addr_carry_shmem_split_v2".to_owned();
+    let kernel = trace
+        .gpu_device
+        .get_mut(&0)
+        .expect("fixture device")
+        .streams
+        .get_mut(&0)
+        .expect("fixture stream")
+        .kernels
+        .first_mut()
+        .expect("fixture kernel");
+    kernel.size_shared_memory = 6144;
+    kernel.shared_memory_static_bytes = Some(2048);
+    kernel.shared_memory_dynamic_bytes = Some(4096);
+    fs::write(&dynamic_path, trace.encode_to_vec()).expect("rewrite split trace");
+    refresh_trace_artifacts(&mut fixture);
+
+    let admitted = admit_launch_evidence(&fixture.manifest_path)
+        .expect("admit shared-memory-split v2 launch evidence");
+
+    assert_eq!(
+        admitted.trace_dir().memory_payload_contract(),
+        MemoryPayloadContract::AddressCarryingSharedMemorySplitV2
+    );
+    assert_eq!(
+        admitted.identity().binary_digest_gap(),
+        BinaryDigestGap::TraceContractDoesNotEmitBinaryDigest
+    );
+}
+
+#[test]
+fn shared_memory_split_v2_over_architecture_capacity_fails_coverage_admission() {
+    let mut fixture = fixture();
+    let dynamic_path = fixture.root.join("trace/dynamic_trace.pb");
+    let raw = fs::read(&dynamic_path).expect("read dynamic trace");
+    let mut trace = sim_trace::pb::Trace::decode(raw.as_slice()).expect("decode dynamic trace");
+    trace.trace_contract_id = "sm86_addr_carry_shmem_split_v2".to_owned();
+    let kernel = trace
+        .gpu_device
+        .get_mut(&0)
+        .expect("fixture device")
+        .streams
+        .get_mut(&0)
+        .expect("fixture stream")
+        .kernels
+        .first_mut()
+        .expect("fixture kernel");
+    kernel.size_shared_memory = 102_401;
+    kernel.shared_memory_static_bytes = Some(102_401);
+    kernel.shared_memory_dynamic_bytes = Some(0);
+    fs::write(&dynamic_path, trace.encode_to_vec()).expect("rewrite split trace");
+    refresh_trace_artifacts(&mut fixture);
+
+    assert!(matches!(
+        admit_launch_evidence(&fixture.manifest_path),
+        Err(ManifestError::Coverage(
+            ReplayError::CtaSharedMemoryCapacityExceeded {
+                kernel_id: 1,
+                arch: sim_arch::ArchId::Sm86,
+                bytes_per_cta: 102_401,
+                max_bytes_per_sm: 102_400,
+            }
+        ))
+    ));
+}
+
+#[test]
 fn trace_bundle_projection_binds_v2_components_and_replay_identity() {
     let fixture = fixture();
     let admitted = admit_launch_evidence(&fixture.manifest_path)
@@ -744,33 +874,10 @@ fn full_coverage_rejects_a_cta_with_a_missing_warp() {
 #[test]
 fn nonselected_root_payload_is_still_semantically_validated() {
     let mut fixture = fixture();
-    let dynamic_path = fixture.root.join("trace/dynamic_trace.pb");
-    let raw = fs::read(&dynamic_path).expect("read dynamic trace");
-    let mut trace = sim_trace::pb::Trace::decode(raw.as_slice()).expect("decode dynamic trace");
-    let stream = trace
-        .gpu_device
-        .get_mut(&0)
-        .expect("fixture device")
-        .streams
-        .get_mut(&0)
-        .expect("fixture stream");
-    let mut second = stream.kernels[0].clone();
-    second.id = 2;
-    second.function_unique_id = 2;
-    stream.kernels.push(second);
-    fs::write(&dynamic_path, trace.encode_to_vec()).expect("rewrite dynamic trace");
-
-    let first_payload = fixture
-        .root
-        .join("trace/threadblocks/device_0/stream_0/kernel_1/d_0_s_0_k_1_0,0,0.pb");
-    let raw = fs::read(&first_payload).expect("read first payload");
+    let second_payload = add_nonselected_root_payload(&mut fixture);
+    let raw = fs::read(&second_payload).expect("read second payload");
     let mut threadblock =
-        sim_trace::pb::Threadblock::decode(raw.as_slice()).expect("decode first threadblock");
-    for warp in threadblock.warps.values_mut() {
-        for instruction in &mut warp.instructions {
-            instruction.function_unique_id = 2;
-        }
-    }
+        sim_trace::pb::Threadblock::decode(raw.as_slice()).expect("decode second threadblock");
     threadblock
         .warps
         .values_mut()
@@ -778,12 +885,7 @@ fn nonselected_root_payload_is_still_semantically_validated() {
         .expect("fixture warp")
         .instructions[0]
         .warpid_tb = None;
-    let second_payload = fixture
-        .root
-        .join("trace/threadblocks/device_0/stream_0/kernel_2/d_0_s_0_k_2_0,0,0.pb");
-    fs::create_dir_all(second_payload.parent().expect("second payload parent"))
-        .expect("create second payload parent");
-    fs::write(second_payload, threadblock.encode_to_vec()).expect("write second payload");
+    fs::write(&second_payload, threadblock.encode_to_vec()).expect("rewrite second payload");
     refresh_trace_artifacts(&mut fixture);
 
     assert!(matches!(
@@ -791,6 +893,61 @@ fn nonselected_root_payload_is_still_semantically_validated() {
         Err(ManifestError::Trace(
             sim_trace::TraceError::WarpidTbMissing { .. }
         ))
+    ));
+}
+
+#[test]
+fn sealed_admission_rejects_nonselected_warp_map_identity_mismatch() {
+    let mut fixture = fixture();
+    let second_payload = add_nonselected_root_payload(&mut fixture);
+    let raw = fs::read(&second_payload).expect("read second payload");
+    let mut threadblock =
+        sim_trace::pb::Threadblock::decode(raw.as_slice()).expect("decode second threadblock");
+    let warp = threadblock.warps.remove(&0).expect("fixture warp");
+    assert_eq!(warp.id, 0);
+    threadblock.warps.insert(1, warp);
+    fs::write(&second_payload, threadblock.encode_to_vec()).expect("rewrite second payload");
+    refresh_trace_artifacts(&mut fixture);
+
+    assert!(matches!(
+        admission_error(
+            &fixture.manifest_path,
+            "nonselected warp map mismatch unexpectedly admitted",
+        ),
+        ManifestError::Trace(sim_trace::TraceError::WarpMapKeyMismatch {
+            map_key: 1,
+            warp_id: 0,
+            ..
+        })
+    ));
+}
+
+#[test]
+fn sealed_admission_rejects_nonselected_instruction_warp_identity_mismatch() {
+    let mut fixture = fixture();
+    let second_payload = add_nonselected_root_payload(&mut fixture);
+    let raw = fs::read(&second_payload).expect("read second payload");
+    let mut threadblock =
+        sim_trace::pb::Threadblock::decode(raw.as_slice()).expect("decode second threadblock");
+    threadblock
+        .warps
+        .get_mut(&0)
+        .expect("fixture warp")
+        .instructions[0]
+        .warpid_tb = Some(1);
+    fs::write(&second_payload, threadblock.encode_to_vec()).expect("rewrite second payload");
+    refresh_trace_artifacts(&mut fixture);
+
+    assert!(matches!(
+        admission_error(
+            &fixture.manifest_path,
+            "nonselected instruction warp mismatch unexpectedly admitted",
+        ),
+        ManifestError::Trace(sim_trace::TraceError::WarpidTbMismatch {
+            expected: 0,
+            actual: 1,
+            ..
+        })
     ));
 }
 
@@ -876,6 +1033,174 @@ fn trace_bundle_projection_rejects_vacuous_and_mixed_record_counts() {
 }
 
 #[test]
+fn trace_snapshot_root_failures_retain_dynamic_trace_role() {
+    let missing_root = fixture();
+    fs::remove_dir_all(missing_root.root.join("trace")).expect("remove trace root");
+    let error = admission_error(
+        &missing_root.manifest_path,
+        "missing trace root must fail closed",
+    );
+    assert!(
+        matches!(
+            error,
+            ManifestError::ArtifactRead {
+                artifact: ManifestArtifactToken::DynamicTracePb,
+                source: sim_trace::AnchoredReadError::Io { ref source, .. },
+            } if source.kind() == std::io::ErrorKind::NotFound
+        ),
+        "unexpected missing-root error: {error:?}"
+    );
+
+    let nonregular_root = fixture();
+    let dynamic_path = nonregular_root.root.join("trace/dynamic_trace.pb");
+    fs::remove_file(&dynamic_path).expect("remove dynamic trace root protobuf");
+    fs::create_dir(&dynamic_path).expect("replace dynamic trace root with directory");
+    let error = admission_error(
+        &nonregular_root.manifest_path,
+        "nonregular dynamic trace root must fail closed",
+    );
+    assert!(
+        matches!(
+            error,
+            ManifestError::ArtifactRead {
+                artifact: ManifestArtifactToken::DynamicTracePb,
+                ..
+            }
+        ),
+        "unexpected dynamic-trace storage error: {error:?}"
+    );
+}
+
+#[test]
+fn optional_trace_artifact_read_failures_retain_roles() {
+    let allocations_missing = fixture();
+    fs::remove_file(
+        allocations_missing
+            .root
+            .join("trace/extra_info/allocations.json"),
+    )
+    .expect("remove allocations sidecar");
+    assert!(matches!(
+        admit_launch_evidence(&allocations_missing.manifest_path),
+        Err(ManifestError::ArtifactPresenceMismatch {
+            artifact: ManifestArtifactToken::AllocationsJson,
+            expected: true,
+            actual: false,
+        })
+    ));
+
+    let allocations_nonregular = fixture();
+    let allocations_path = allocations_nonregular
+        .root
+        .join("trace/extra_info/allocations.json");
+    fs::remove_file(&allocations_path).expect("remove allocations sidecar");
+    fs::create_dir(&allocations_path).expect("replace allocations sidecar with directory");
+    let error = admission_error(
+        &allocations_nonregular.manifest_path,
+        "nonregular allocations sidecar must fail closed",
+    );
+    assert!(
+        matches!(
+            error,
+            ManifestError::ArtifactRead {
+                artifact: ManifestArtifactToken::AllocationsJson,
+                ..
+            }
+        ),
+        "unexpected allocations storage error: {error:?}"
+    );
+
+    let sampling_nonregular = fixture();
+    fs::create_dir(sampling_nonregular.root.join("trace/trace_sampling.json"))
+        .expect("replace absent sampling sidecar with directory");
+    let error = admission_error(
+        &sampling_nonregular.manifest_path,
+        "nonregular optional sampling sidecar must fail closed",
+    );
+    assert!(
+        matches!(
+            error,
+            ManifestError::ArtifactRead {
+                artifact: ManifestArtifactToken::TraceSamplingJson,
+                ..
+            }
+        ),
+        "unexpected sampling storage error: {error:?}"
+    );
+}
+
+#[test]
+fn threadblock_tree_ceiling_failures_retain_payload_role() {
+    let file_ceiling = fixture();
+    let payload_dir = file_ceiling
+        .root
+        .join("trace/threadblocks/device_0/stream_0/kernel_1");
+    let first_payload = payload_dir.join("d_0_s_0_k_1_0,0,0.pb");
+    fs::copy(&first_payload, payload_dir.join("d_0_s_0_k_1_0,0,1.pb"))
+        .expect("add payload beyond declared file ceiling");
+    let error = admission_error(
+        &file_ceiling.manifest_path,
+        "payload file ceiling must fail closed",
+    );
+    assert!(
+        matches!(
+            error,
+            ManifestError::ArtifactRead {
+                artifact: ManifestArtifactToken::ThreadblockPayload,
+                source: sim_trace::AnchoredReadError::TreeFileLimitExceeded { .. },
+            }
+        ),
+        "unexpected payload file-ceiling error: {error:?}"
+    );
+
+    let byte_ceiling = fixture();
+    let payload_path = byte_ceiling
+        .root
+        .join("trace/threadblocks/device_0/stream_0/kernel_1/d_0_s_0_k_1_0,0,0.pb");
+    let mut payload = fs::read(&payload_path).expect("read payload for byte-ceiling mutation");
+    payload.push(0);
+    fs::write(&payload_path, payload).expect("grow payload beyond declared byte ceiling");
+    let error = admission_error(
+        &byte_ceiling.manifest_path,
+        "payload byte ceiling must fail closed",
+    );
+    assert!(
+        matches!(
+            error,
+            ManifestError::ArtifactRead {
+                artifact: ManifestArtifactToken::ThreadblockPayload,
+                source: sim_trace::AnchoredReadError::TreeByteLimitExceeded { .. },
+            }
+        ),
+        "unexpected payload byte-ceiling error: {error:?}"
+    );
+
+    let entry_ceiling = fixture();
+    let tree_root = entry_ceiling.root.join("trace/threadblocks");
+    // A one-payload manifest permits 1 * 8 + 1024 traversed entries. The
+    // canonical fixture already contributes four entries, so 1029 ignored
+    // regular files cross the traversal ceiling without changing payload count.
+    for index in 0..1029 {
+        fs::write(tree_root.join(format!("ignored-{index:04}.txt")), b"")
+            .expect("add ignored tree entry");
+    }
+    let error = admission_error(
+        &entry_ceiling.manifest_path,
+        "payload entry ceiling must fail closed",
+    );
+    assert!(
+        matches!(
+            error,
+            ManifestError::ArtifactRead {
+                artifact: ManifestArtifactToken::ThreadblockPayload,
+                source: sim_trace::AnchoredReadError::TreeEntryLimitExceeded { .. },
+            }
+        ),
+        "unexpected payload entry-ceiling error: {error:?}"
+    );
+}
+
+#[test]
 fn symlinked_and_hardlinked_bundle_artifacts_fail_closed() {
     let symlink_fixture = fixture();
     let outside = TempDir::new().expect("create outside artifact directory");
@@ -919,11 +1244,10 @@ fn symlinked_and_hardlinked_bundle_artifacts_fail_closed() {
     symlink(&outside_payload, &payload_path).expect("symlink payload outside bundle");
     assert!(matches!(
         admit_launch_evidence(&payload_fixture.manifest_path),
-        Err(ManifestError::Trace(
-            sim_trace::TraceError::AnchoredSnapshot(
-                sim_trace::AnchoredReadError::NotRegular { .. }
-            )
-        ))
+        Err(ManifestError::ArtifactRead {
+            artifact: ManifestArtifactToken::ThreadblockPayload,
+            source: sim_trace::AnchoredReadError::NotRegular { .. },
+        })
     ));
 
     let mut hardlink_fixture = fixture();
@@ -939,10 +1263,43 @@ fn symlinked_and_hardlinked_bundle_artifacts_fail_closed() {
     assert!(matches!(
         admit_launch_evidence(&hardlink_fixture.manifest_path),
         Err(ManifestError::ArtifactFileAlias {
-            artifact: ManifestArtifactToken::DynamicTracePb,
+            artifact: ManifestArtifactToken::AllocationsJson,
             ..
         })
     ));
+
+    let mut payload_hardlink_fixture = fixture();
+    let first_payload = payload_hardlink_fixture
+        .root
+        .join("trace/threadblocks/device_0/stream_0/kernel_1/d_0_s_0_k_1_0,0,0.pb");
+    let second_payload = payload_hardlink_fixture
+        .root
+        .join("trace/threadblocks/device_0/stream_0/kernel_1/d_0_s_0_k_1_0,0,1.pb");
+    fs::hard_link(&first_payload, &second_payload).expect("hardlink payload artifacts");
+    let payload_size = fs::metadata(&first_payload)
+        .expect("stat payload artifact")
+        .len();
+    payload_hardlink_fixture.manifest["artifacts"]["threadblock_payload"]["file_count"] = json!(2);
+    payload_hardlink_fixture.manifest["artifacts"]["threadblock_payload"]["raw_bytes"] =
+        json!(payload_size * 2);
+    write_json(
+        &payload_hardlink_fixture.manifest_path,
+        &payload_hardlink_fixture.manifest,
+    );
+    let payload_alias_error = match admit_launch_evidence(&payload_hardlink_fixture.manifest_path) {
+        Ok(_) => panic!("payload hardlink alias must fail"),
+        Err(error) => error,
+    };
+    assert!(
+        matches!(
+            payload_alias_error,
+            ManifestError::ArtifactFileAlias {
+                artifact: ManifestArtifactToken::ThreadblockPayload,
+                ..
+            }
+        ),
+        "unexpected payload alias error: {payload_alias_error:?}"
+    );
 }
 
 #[test]
@@ -1137,6 +1494,50 @@ fn unsupported_version_precedes_version_specific_shape() {
 }
 
 #[test]
+fn parsed_sidecar_resource_limits_retain_manifest_artifact_roles() {
+    let mut allocations_fixture = fixture();
+    let allocations_path = allocations_fixture
+        .root
+        .join("trace/extra_info/allocations.json");
+    write_flat_json_array(&allocations_path, b"{}", 131_073);
+    allocations_fixture.manifest["artifacts"]["allocations_json"]["artifact"] = artifact(
+        &allocations_fixture.root,
+        "trace/extra_info/allocations.json",
+    );
+    write_json(
+        &allocations_fixture.manifest_path,
+        &allocations_fixture.manifest,
+    );
+    assert!(matches!(
+        admit_launch_evidence(&allocations_fixture.manifest_path),
+        Err(ManifestError::ArtifactResourceLimitExceeded {
+            artifact: ManifestArtifactToken::AllocationsJson,
+            resource: "top_level_entries",
+            declared: 131_073,
+            limit: 131_072,
+        })
+    ));
+
+    let mut sampling_fixture = fixture();
+    let sampling_path = sampling_fixture.root.join("trace/trace_sampling.json");
+    write_flat_json_array(&sampling_path, b"null", 1_000_000);
+    sampling_fixture.manifest["artifacts"]["trace_sampling_json"] = json!({
+        "status": "present",
+        "artifact": artifact(&sampling_fixture.root, "trace/trace_sampling.json"),
+    });
+    write_json(&sampling_fixture.manifest_path, &sampling_fixture.manifest);
+    assert!(matches!(
+        admit_launch_evidence(&sampling_fixture.manifest_path),
+        Err(ManifestError::ArtifactResourceLimitExceeded {
+            artifact: ManifestArtifactToken::TraceSamplingJson,
+            resource: "json_nodes",
+            declared: 1_000_001,
+            limit: 1_000_000,
+        })
+    ));
+}
+
+#[test]
 fn declared_resource_costs_are_bounded_before_artifact_reads() {
     let artifact_fixture = fixture();
     let mut manifest = artifact_fixture.manifest.clone();
@@ -1146,6 +1547,36 @@ fn declared_resource_costs_are_bounded_before_artifact_reads() {
         admit_launch_evidence(&artifact_fixture.manifest_path),
         Err(ManifestError::ArtifactResourceLimitExceeded {
             artifact: ManifestArtifactToken::DynamicTracePb,
+            resource: "bytes",
+            ..
+        })
+    ));
+
+    let allocations_fixture = fixture();
+    let mut manifest = allocations_fixture.manifest.clone();
+    manifest["artifacts"]["allocations_json"]["artifact"]["size_bytes"] =
+        json!(16_u64 * 1024 * 1024 + 1);
+    write_json(&allocations_fixture.manifest_path, &manifest);
+    assert!(matches!(
+        admit_launch_evidence(&allocations_fixture.manifest_path),
+        Err(ManifestError::ArtifactResourceLimitExceeded {
+            artifact: ManifestArtifactToken::AllocationsJson,
+            resource: "bytes",
+            declared,
+            limit,
+        }) if declared == 16_u64 * 1024 * 1024 + 1
+            && limit == 16_u64 * 1024 * 1024
+    ));
+
+    let mut sampling_fixture = fixture();
+    add_lossless_sampling_sidecar(&mut sampling_fixture);
+    sampling_fixture.manifest["artifacts"]["trace_sampling_json"]["artifact"]["size_bytes"] =
+        json!(64_u64 * 1024 * 1024 + 1);
+    write_json(&sampling_fixture.manifest_path, &sampling_fixture.manifest);
+    assert!(matches!(
+        admit_launch_evidence(&sampling_fixture.manifest_path),
+        Err(ManifestError::ArtifactResourceLimitExceeded {
+            artifact: ManifestArtifactToken::TraceSamplingJson,
             resource: "bytes",
             ..
         })

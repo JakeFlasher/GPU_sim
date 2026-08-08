@@ -5,6 +5,7 @@ import json
 import os
 import shutil
 import subprocess
+from contextlib import contextmanager, nullcontext
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -15,6 +16,7 @@ from tools.nvbit_tracer.proto_binding_loader import load_dynamic_trace_bindings
 
 from admissibility_gate import MIN_SEGMENTS
 from counting_pass import BlockStat, CellStats
+import orchestrate as _orch_module
 from orchestrate import (DEFAULT_TRACER_SO, SamplingRefusal, orchestrate_cell,
                          select_segments)
 from selection import SelectionPlanError
@@ -23,8 +25,52 @@ from sidecar import sidecar_sha256, validate_sidecar
 _REPO = Path(__file__).resolve().parents[3]
 
 
+@pytest.fixture(autouse=True)
+def _delegated_capture_fixture(monkeypatch):
+    class TestContainment:
+        def __init__(self):
+            self.process = None
+
+        def popen(self, command, **kwargs):
+            self.process = subprocess.Popen(command, **kwargs)
+            return self.process
+
+        def kill_all(self):
+            if self.process is None:
+                return
+            try:
+                os.killpg(self.process.pid, _orch_module.nvbit_process.signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+
+        def finish(self):
+            self.kill_all()
+            return _orch_module.nvbit_process.delegated_cgroup.CgroupContainmentEvidence(
+                kind=(
+                    _orch_module.nvbit_process.delegated_cgroup.CGROUP_V2_KILL_V1
+                ),
+                parent_cgroup_sha256="a" * 64,
+                cgroup_inode=123,
+                terminal_populated_zero=True,
+                leaf_removed=True,
+            )
+
+        def close_after_error(self):
+            self.kill_all()
+
+    monkeypatch.setattr(
+        _orch_module.nvbit_process.delegated_cgroup.DelegatedCgroupV2,
+        "create",
+        TestContainment,
+    )
+
+
 def _have_live():
+    runtime_manifest = _orch_module.default_runtime_manifest_path(
+        DEFAULT_TRACER_SO
+    )
     return (DEFAULT_TRACER_SO.is_file()
+            and runtime_manifest.is_file()
             and shutil.which("nvidia-smi") is not None
             and Path("/usr/local/cuda-13.2/bin/nvcc").is_file())
 
@@ -179,7 +225,7 @@ def _install_mock_pipeline(
             retained_caps.append(retained)
             return retained
 
-        def fake_tracer_opener(path):
+        def fake_tracer_opener(path, *, max_bytes=None):
             if Path(path).name == "trace_sampling.json":
                 return immutable.open_retained_regular(Path(path))
             retained = FakeRetained(path, 902)
@@ -274,8 +320,17 @@ def test_verify_pass2_payload_rejects_per_block_size_mismatch(tmp_path):
     assert exc_info.value.reason == "pass2_serialized_bytes_mismatch"
 
 
-def test_run_pass_fails_closed_on_nonzero_exit(tmp_path):
+def test_run_pass_fails_closed_on_nonzero_exit(tmp_path, monkeypatch):
+    import orchestrate as orch
     from orchestrate import run_pass
+
+    monkeypatch.setattr(
+        orch,
+        "retained_tracer_runtime_env",
+        lambda _path, *, pb_lib, runtime_manifest, retained_descriptor: nullcontext(
+            SimpleNamespace(environment={}, pass_fds=())
+        ),
+    )
     gcc = shutil.which("cc") or shutil.which("gcc")
     if gcc is None:
         pytest.skip("no C compiler")
@@ -313,18 +368,35 @@ def test_run_pass_executes_exact_retained_descriptors(tmp_path, monkeypatch):
     output = tmp_path / "capture"
     observed = {}
 
-    def fake_runtime(path, *, pb_lib, retained_descriptor):
+    def fake_runtime(path, *, pb_lib, runtime_manifest, retained_descriptor):
         observed["runtime"] = (path, pb_lib, retained_descriptor)
-        return {}
+        return nullcontext(SimpleNamespace(
+            environment={
+                "LD_LIBRARY_PATH": f"/proc/self/fd/{retained_descriptor + 1}"
+            },
+            pass_fds=(retained_descriptor + 1,),
+        ))
 
-    def fake_subprocess_run(command, **kwargs):
+    def fake_execute(command, **kwargs):
         observed["command"] = list(command)
         observed["kwargs"] = kwargs
-        (output / "dynamic_trace.pb").write_bytes(b"trace")
-        return SimpleNamespace(returncode=0, stdout=b"", stderr=b"")
+        observed["output_target"] = Path(
+            os.readlink(kwargs["environment"]["TRACES_FOLDER"])
+        )
+        Path(kwargs["environment"]["TRACES_FOLDER"]).joinpath(
+            "dynamic_trace.pb"
+        ).write_bytes(b"trace")
+        return orch.nvbit_process.NvbitCaptureProcessResult(
+            returncode=0,
+            stdout=b"",
+            stderr=b"",
+            process_id=123,
+        )
 
-    monkeypatch.setattr(orch, "tracer_runtime_env", fake_runtime)
-    monkeypatch.setattr(orch.subprocess, "run", fake_subprocess_run)
+    monkeypatch.setattr(orch, "retained_tracer_runtime_env", fake_runtime)
+    monkeypatch.setattr(
+        orch.nvbit_process, "execute_capture_process", fake_execute
+    )
 
     orch.run_pass(
         binary,
@@ -336,17 +408,244 @@ def test_run_pass_executes_exact_retained_descriptors(tmp_path, monkeypatch):
     )
 
     binary_proc, app_arg = observed["command"]
-    tracer_proc = observed["kwargs"]["env"]["CUDA_INJECTION64_PATH"]
+    tracer_proc = observed["kwargs"]["environment"]["CUDA_INJECTION64_PATH"]
+    output_proc = observed["kwargs"]["environment"]["TRACES_FOLDER"]
     binary_fd = int(binary_proc.rsplit("/", 1)[1])
     tracer_fd = int(tracer_proc.rsplit("/", 1)[1])
+    output_fd = int(output_proc.rsplit("/", 1)[1])
     assert binary_proc == f"/proc/self/fd/{binary_fd}"
     assert tracer_proc == f"/proc/self/fd/{tracer_fd}"
+    assert output_proc == f"/proc/self/fd/{output_fd}"
+    assert observed["output_target"] == output
     assert app_arg == "arg"
-    assert observed["kwargs"]["pass_fds"] == (binary_fd, tracer_fd)
+    assert observed["kwargs"]["inherited_descriptors"] == (
+        binary_fd,
+        tracer_fd,
+        output_fd,
+        tracer_fd + 1,
+    )
     assert observed["runtime"][2] == tracer_fd
     assert observed["runtime"][0] == tracer.absolute()
     assert str(binary) not in observed["command"]
-    assert observed["kwargs"]["cwd"] == str(binary.parent)
+    assert observed["kwargs"]["working_directory"] == str(binary.parent)
+    assert observed["kwargs"]["timeout_seconds"] == orch._PASS_TIMEOUT_SECONDS
+    assert (
+        observed["kwargs"]["max_output_bytes"]
+        == orch._PASS_MAX_STDOUT_STDERR_BYTES
+    )
+
+
+def test_run_pass_rejects_output_root_replacement_after_child_exit(
+    tmp_path, monkeypatch
+):
+    import orchestrate as orch
+
+    binary, tracer = _write_retained_sampling_inputs(tmp_path)
+    output = tmp_path / "capture"
+    displaced = tmp_path / "capture-displaced"
+
+    monkeypatch.setattr(
+        orch,
+        "retained_tracer_runtime_env",
+        lambda _path, *, pb_lib, runtime_manifest, retained_descriptor: nullcontext(
+            SimpleNamespace(environment={}, pass_fds=())
+        ),
+    )
+
+    def replace_after_write(_command, **kwargs):
+        trace_proc = Path(kwargs["environment"]["TRACES_FOLDER"])
+        assert int(trace_proc.name) in kwargs["inherited_descriptors"]
+        (trace_proc / "dynamic_trace.pb").write_bytes(b"original")
+        output.rename(displaced)
+        output.mkdir()
+        (output / "dynamic_trace.pb").write_bytes(b"replacement")
+        return orch.nvbit_process.NvbitCaptureProcessResult(
+            returncode=0,
+            stdout=b"",
+            stderr=b"",
+            process_id=321,
+        )
+
+    monkeypatch.setattr(
+        orch.nvbit_process,
+        "execute_capture_process",
+        replace_after_write,
+    )
+
+    with pytest.raises(SamplingRefusal) as exc_info:
+        orch.run_pass(
+            binary,
+            [],
+            output,
+            mode=1,
+            tracer_so=tracer,
+            pb_lib=tmp_path / "pb-lib",
+        )
+
+    assert exc_info.value.reason == "sampling_output_generation_changed"
+    assert (displaced / "dynamic_trace.pb").read_bytes() == b"original"
+    assert (output / "dynamic_trace.pb").read_bytes() == b"replacement"
+
+
+def test_run_pass_types_output_pin_resource_failure_before_launch(
+    tmp_path, monkeypatch
+):
+    import orchestrate as orch
+
+    binary, tracer = _write_retained_sampling_inputs(tmp_path)
+    output = tmp_path / "capture"
+    monkeypatch.setattr(
+        orch,
+        "PinnedDirectoryReader",
+        lambda _path: (_ for _ in ()).throw(
+            orch.ImmutableArtifactResourceError("injected descriptor exhaustion")
+        ),
+    )
+    monkeypatch.setattr(
+        orch.nvbit_process,
+        "execute_capture_process",
+        lambda *_args, **_kwargs: pytest.fail("capture launched without output pin"),
+    )
+
+    with pytest.raises(SamplingRefusal) as exc_info:
+        orch.run_pass(
+            binary,
+            [],
+            output,
+            mode=1,
+            tracer_so=tracer,
+            pb_lib=tmp_path / "pb-lib",
+        )
+
+    assert exc_info.value.reason == "sampling_output_resource_unavailable"
+    assert output.is_dir()
+
+
+@pytest.mark.parametrize(
+    ("executor_code", "expected_reason"),
+    [
+        ("sampling_target_timeout", "sampling_target_timeout"),
+        ("nvbit_capture_output_limit", "sampling_target_output_limit"),
+        ("sampling_target_launch_failed", "sampling_target_launch_failed"),
+    ],
+)
+def test_run_pass_retains_bounded_failure_streams(
+    tmp_path, monkeypatch, executor_code, expected_reason
+):
+    import orchestrate as orch
+
+    binary, tracer = _write_retained_sampling_inputs(tmp_path)
+    output = tmp_path / "capture"
+    runtime_state = {"entered": False}
+
+    @contextmanager
+    def fake_runtime(path, *, pb_lib, runtime_manifest, retained_descriptor):
+        runtime_state["entered"] = True
+        try:
+            yield SimpleNamespace(environment={}, pass_fds=())
+        finally:
+            runtime_state["entered"] = False
+
+    def refuse_execution(command, **kwargs):
+        assert runtime_state["entered"] is True
+        error = orch.nvbit_process.NvbitCaptureProcessError(
+            executor_code, "bounded child failed"
+        )
+        error.stdout = b"partial stdout"
+        error.stderr = b"partial stderr"
+        error.process_id = 456
+        raise error
+
+    monkeypatch.setattr(orch, "retained_tracer_runtime_env", fake_runtime)
+    monkeypatch.setattr(
+        orch.nvbit_process, "execute_capture_process", refuse_execution
+    )
+
+    with pytest.raises(SamplingRefusal) as exc_info:
+        orch.run_pass(
+            binary,
+            [],
+            output,
+            mode=1,
+            tracer_so=tracer,
+            pb_lib=tmp_path / "pb-lib",
+        )
+
+    refusal = exc_info.value
+    assert runtime_state["entered"] is False
+    assert refusal.reason == expected_reason
+    assert refusal.process_id == 456
+    assert refusal.stdout == b"partial stdout"
+    assert refusal.stderr == b"partial stderr"
+    assert (output / "capture_process.stdout.bin").read_bytes() == b"partial stdout"
+    assert (output / "capture_process.stderr.bin").read_bytes() == b"partial stderr"
+    assert refusal.failure_evidence == (
+        {
+            "path": "capture_process.stdout.bin",
+            "sha256": hashlib.sha256(b"partial stdout").hexdigest(),
+            "size_bytes": len(b"partial stdout"),
+        },
+        {
+            "path": "capture_process.stderr.bin",
+            "sha256": hashlib.sha256(b"partial stderr").hexdigest(),
+            "size_bytes": len(b"partial stderr"),
+        },
+    )
+
+
+def test_run_pass_retains_streams_when_injection_produces_no_trace(
+    tmp_path, monkeypatch
+):
+    import orchestrate as orch
+
+    binary, tracer = _write_retained_sampling_inputs(tmp_path)
+    output = tmp_path / "capture"
+
+    def fake_runtime(path, *, pb_lib, runtime_manifest, retained_descriptor):
+        return nullcontext(SimpleNamespace(environment={}, pass_fds=()))
+
+    def fake_execute(command, **kwargs):
+        return orch.nvbit_process.NvbitCaptureProcessResult(
+            returncode=0,
+            stdout=b"injection stdout",
+            stderr=b"injection stderr",
+            process_id=789,
+        )
+
+    monkeypatch.setattr(orch, "retained_tracer_runtime_env", fake_runtime)
+    monkeypatch.setattr(
+        orch.nvbit_process, "execute_capture_process", fake_execute
+    )
+
+    with pytest.raises(SamplingRefusal) as exc_info:
+        orch.run_pass(
+            binary,
+            [],
+            output,
+            mode=1,
+            tracer_so=tracer,
+            pb_lib=tmp_path / "pb-lib",
+        )
+
+    refusal = exc_info.value
+    assert refusal.reason == "capture_trace_missing"
+    assert refusal.process_id == 789
+    assert refusal.stdout == b"injection stdout"
+    assert refusal.stderr == b"injection stderr"
+    assert (output / "capture_process.stdout.bin").read_bytes() == b"injection stdout"
+    assert (output / "capture_process.stderr.bin").read_bytes() == b"injection stderr"
+    assert refusal.failure_evidence == (
+        {
+            "path": "capture_process.stdout.bin",
+            "sha256": hashlib.sha256(b"injection stdout").hexdigest(),
+            "size_bytes": len(b"injection stdout"),
+        },
+        {
+            "path": "capture_process.stderr.bin",
+            "sha256": hashlib.sha256(b"injection stderr").hexdigest(),
+            "size_bytes": len(b"injection stderr"),
+        },
+    )
 
 
 def test_orchestrate_sidecar_matches_the_seeded_population_plan(tmp_path, monkeypatch):
@@ -403,7 +702,7 @@ def _record_real_retained_inputs(monkeypatch, orch):
         opened.append(retained)
         return retained
 
-    def open_tracer(path):
+    def open_tracer(path, *, max_bytes=None):
         retained = real_tracer_open(path)
         if Path(path).name != "trace_sampling.json":
             opened.append(retained)
@@ -770,8 +1069,8 @@ def test_sidecar_replacement_during_return_boundary_is_preserved(
                 replaced = True
             return self._retained.__exit__(exc_type, exc, traceback)
 
-    def retain_with_exit_replacement(path):
-        retained = original_opener(path)
+    def retain_with_exit_replacement(path, **kwargs):
+        retained = original_opener(path, **kwargs)
         if Path(path) == out:
             return ReplaceBeforeExit(retained)
         return retained

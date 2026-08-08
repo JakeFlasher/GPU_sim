@@ -3072,13 +3072,43 @@ void nvbit_at_cuda_event(CUcontext ctx, int is_exit, nvbit_api_cuda_t cbid,
         ts_scope_dims_captured = true;
       }
       
-      int nregs = 0;
-      CUDA_SAFECALL(
-          cuFuncGetAttribute(&nregs, CU_FUNC_ATTRIBUTE_NUM_REGS, kernel_func));
+      int nregs = -1;
+      const CUresult nregs_status = cuFuncGetAttribute(
+          &nregs, CU_FUNC_ATTRIBUTE_NUM_REGS, kernel_func);
+      if (nregs_status != CUDA_SUCCESS || nregs < 0) {
+        fprintf(stderr,
+                "FATAL: register_attribute_unavailable: "
+                "cuFuncGetAttribute(NUM_REGS) returned CUresult=%d, value=%d; "
+                "refusing to serialize an unauthenticated value.\n",
+                static_cast<int>(nregs_status), nregs);
+        fflush(stderr);
+        _exit(EXIT_FAILURE);
+      }
 
-      int shmem_static_nbytes = 0;
-      CUDA_SAFECALL(cuFuncGetAttribute(
-          &shmem_static_nbytes, CU_FUNC_ATTRIBUTE_SHARED_SIZE_BYTES, kernel_func));
+      int shmem_static_nbytes = -1;
+      const CUresult shmem_static_status = cuFuncGetAttribute(
+          &shmem_static_nbytes, CU_FUNC_ATTRIBUTE_SHARED_SIZE_BYTES, kernel_func);
+      if (shmem_static_status != CUDA_SUCCESS || shmem_static_nbytes < 0) {
+        fprintf(stderr,
+                "FATAL: static_shared_memory_attribute_unavailable: "
+                "cuFuncGetAttribute(SHARED_SIZE_BYTES) returned CUresult=%d, "
+                "value=%d; refusing to serialize an unauthenticated value.\n",
+                static_cast<int>(shmem_static_status), shmem_static_nbytes);
+        fflush(stderr);
+        _exit(EXIT_FAILURE);
+      }
+      const uint64_t shmem_combined_nbytes =
+          static_cast<uint64_t>(shmem_static_nbytes) +
+          static_cast<uint64_t>(shared_mem_bytes);
+      if (shmem_combined_nbytes >
+          static_cast<uint64_t>(std::numeric_limits<int32_t>::max())) {
+        fprintf(stderr,
+                "FATAL: combined shared-memory byte count %" PRIu64
+                " exceeds the legacy int32 protobuf field. Aborting.\n",
+                shmem_combined_nbytes);
+        fflush(stderr);
+        _exit(EXIT_FAILURE);
+      }
 
       {
         // NVBit's CUDA_SAFECALL macro uses cudaGetLastError() (runtime API) to
@@ -3181,7 +3211,12 @@ void nvbit_at_cuda_event(CUcontext ctx, int is_exit, nvbit_api_cuda_t cbid,
           ker->set_id(kernel_id[device_id].load(std::memory_order_acquire));
           ker->set_name(final_kernel_name);
           ker->set_function_unique_id(it_map_unique_function_id->second);
-          ker->set_size_shared_memory(shmem_static_nbytes + shared_mem_bytes);
+          ker->set_size_shared_memory(
+              static_cast<int32_t>(shmem_combined_nbytes));
+          ker->set_shared_memory_static_bytes(
+              static_cast<uint32_t>(shmem_static_nbytes));
+          ker->set_shared_memory_dynamic_bytes(
+              static_cast<uint32_t>(shared_mem_bytes));
           ker->set_number_of_registers(nregs);
           ker->set_shared_memory_base_address((uint64_t)nvbit_get_shmem_base_addr(ctx));
           ker->set_local_memory_base_address((uint64_t)nvbit_get_local_mem_base_addr(ctx));
@@ -4969,15 +5004,11 @@ void nvbit_at_ctx_term(CUcontext ctx) {
       dyn_trace.set_nvbit_version(NVBIT_VERSION);
       dyn_trace.set_accelsim_version(TRACER_VERSION);
       dyn_trace.set_is_gathered_registers_values(static_cast<bool>(gather_registers));
-      // Trace-contract identity + capability (address-carrying contract
-      // transition). `trace_contract_id` names the emitted contract so a new
-      // address-carrying trace is never silently cross-compared with an old
-      // exclusion-semantics one; `memory_payload_classes` lists the classes
-      // this trace emits address records for: GLOBAL/SHARED/LOCAL (unchanged)
-      // + ATOMIC (global atomics resolve identity; shared atomics exempt) +
-      // ASYNC_COPY (the LDGSTS global source; the shared destination is not
-      // recorded). Both flips are in this one contract.
-      dyn_trace.set_trace_contract_id("sm86_addr_carry_v1");
+      // Trace-contract identity + capability. The v2 contract preserves the
+      // address-carrying payload classes and additionally requires every kernel
+      // to carry presence-bearing static and dynamic shared-memory components
+      // whose sum equals the legacy combined field.
+      dyn_trace.set_trace_contract_id("sm86_addr_carry_shmem_split_v2");
       dyn_trace.add_memory_payload_classes(dynamic_trace::MEMORY_OP_CLASS_GLOBAL);
       dyn_trace.add_memory_payload_classes(dynamic_trace::MEMORY_OP_CLASS_SHARED);
       dyn_trace.add_memory_payload_classes(dynamic_trace::MEMORY_OP_CLASS_LOCAL);

@@ -363,6 +363,11 @@ def strict_json_loads(payload: bytes, *, label: str = "JSON") -> Any:
 
 
 MetadataSnapshot = tuple[int, int, int, int, int, int, int]
+AncestorIdentitySnapshot = tuple[int, int, int]
+RetainedPathIdentity = tuple[
+    tuple[AncestorIdentitySnapshot, ...],
+    MetadataSnapshot,
+]
 _Snapshot = MetadataSnapshot
 _TreeSnapshot = tuple[dict[str, _Snapshot], dict[str, _Snapshot]]
 
@@ -890,7 +895,9 @@ class RetainedExecutable:
         if _snapshot_fields(os.fstat(descriptor)) != self.snapshot:
             raise ImmutableArtifactError("retained executable metadata changed")
         os.lseek(descriptor, 0, os.SEEK_SET)
-        digest, _size, mode = _hash_fd(descriptor)
+        digest, _size, mode = _hash_fd(
+            descriptor, allow_hardlinks=self._pinned.allow_hardlinks,
+        )
         if _snapshot_fields(os.fstat(descriptor)) != self.snapshot:
             raise ImmutableArtifactError("retained executable metadata changed")
         if digest != self.sha256:
@@ -944,10 +951,14 @@ class RetainedExecutable:
 
 
 @_translate_descriptor_resource_errors("retained executable open")
-def open_retained_executable(path: Path) -> RetainedExecutable:
+def open_retained_executable(
+    path: Path, *, allow_hardlinks: bool = False,
+) -> RetainedExecutable:
     """Open, hash, and retain one executable without following any symlink."""
     absolute = Path(os.path.abspath(os.fspath(path)))
-    pinned, monitor_state = _open_regular_with_early_path_monitor(absolute)
+    pinned, monitor_state = _open_regular_with_early_path_monitor(
+        absolute, allow_hardlinks=allow_hardlinks,
+    )
     retained: RetainedExecutable | None = None
     try:
         descriptor = pinned.descriptor
@@ -957,7 +968,9 @@ def open_retained_executable(path: Path) -> RetainedExecutable:
         # Ancestor and leaf watches are armed before path traversal completes,
         # so a transient namespace swap cannot hide before this identity hash.
         os.lseek(descriptor, 0, os.SEEK_SET)
-        digest, _size, _mode = _hash_fd(descriptor)
+        digest, _size, _mode = _hash_fd(
+            descriptor, allow_hardlinks=allow_hardlinks,
+        )
         after = _snapshot_fields(os.fstat(descriptor))
         if after != before:
             raise ImmutableArtifactError("executable metadata changed during identity read")
@@ -1005,16 +1018,38 @@ class RetainedRegular:
     def proc_path(self) -> str:
         return f"/proc/self/fd/{self.descriptor}"
 
-    def read_bytes(self) -> bytes:
-        """Read this retained inode while preserving path and snapshot identity."""
+    @property
+    def path_identity(self) -> RetainedPathIdentity:
+        """Return retained ancestor identities and exact leaf metadata."""
+        _require_retained_path_monitor_quiet(self._monitor_state)
+        self._pinned.verify_path()
+        ancestor_identities = tuple(
+            (
+                metadata.st_dev,
+                metadata.st_ino,
+                metadata.st_mode,
+            )
+            for metadata in (
+                os.fstat(descriptor)
+                for descriptor in self._pinned.directory_descriptors
+            )
+        )
+        identity = (ancestor_identities, self.snapshot)
+        _require_retained_path_monitor_quiet(self._monitor_state)
+        return identity
+
+    def read_bytes(self, *, max_bytes: int | None = None) -> bytes:
+        """Read this retained inode within an optional strict byte ceiling."""
         _require_retained_path_monitor_quiet(self._monitor_state)
         descriptor = self.descriptor
         self._pinned.verify_path()
         if _snapshot_fields(os.fstat(descriptor)) != self.snapshot:
             raise ImmutableArtifactError("retained regular-file metadata changed")
         os.lseek(descriptor, 0, os.SEEK_SET)
-        payload = _read_fd(descriptor)
-        if _snapshot_fields(os.fstat(descriptor)) != self.snapshot:
+        payload, observed_snapshot = _read_fd_snapshot(
+            descriptor, max_bytes=max_bytes,
+        )
+        if observed_snapshot != self.snapshot:
             raise ImmutableArtifactError("retained regular-file metadata changed")
         if len(payload) != self.size_bytes:
             raise ImmutableArtifactError("retained regular-file size changed")
@@ -1087,8 +1122,10 @@ class RetainedRegular:
 
 
 @_translate_descriptor_resource_errors("retained regular-file open")
-def open_retained_regular(path: Path) -> RetainedRegular:
-    """Open, hash, and retain one regular file without following any symlink."""
+def open_retained_regular(
+    path: Path, *, max_bytes: int | None = None,
+) -> RetainedRegular:
+    """Open, bounded-hash, and retain one regular file without symlinks."""
     absolute = Path(os.path.abspath(os.fspath(path)))
     pinned, monitor_state = _open_regular_with_early_path_monitor(absolute)
     retained: RetainedRegular | None = None
@@ -1097,7 +1134,9 @@ def open_retained_regular(path: Path) -> RetainedRegular:
         before = _snapshot_fields(os.fstat(descriptor))
         # Ancestor and leaf watches already cover this first identity hash.
         os.lseek(descriptor, 0, os.SEEK_SET)
-        digest, size, _mode = _hash_fd(descriptor)
+        digest, size, _mode = _hash_fd(
+            descriptor, max_bytes=max_bytes,
+        )
         after = _snapshot_fields(os.fstat(descriptor))
         if after != before:
             raise ImmutableArtifactError(

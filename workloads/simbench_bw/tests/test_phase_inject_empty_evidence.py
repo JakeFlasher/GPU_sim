@@ -34,6 +34,18 @@ from tools.local_labels.immutable_artifact import (  # noqa: E402
 
 
 @contextmanager
+def _retained_runtime(
+    environment: dict[str, str] | None = None,
+    pass_fds: tuple[int, ...] = (),
+):
+    yield SimpleNamespace(
+        environment={} if environment is None else environment,
+        pass_fds=pass_fds,
+    )
+
+
+
+@contextmanager
 def _ab_inputs(
     tmp_path: Path,
     *,
@@ -177,12 +189,19 @@ def test_phase_ab_executes_and_injects_retained_descriptors(
         path: Path,
         *,
         base_env: dict[str, str] | None,
+        pb_lib: Path,
+        runtime_manifest: Path,
         retained_descriptor: int,
-    ) -> dict[str, str]:
+    ):
         assert path == tracer
         assert base_env == {"FIXTURE": "1"}
+        assert pb_lib == phase.DEFAULT_PB_LIB
+        assert runtime_manifest == phase.default_runtime_manifest_path(tracer)
         assert retained_descriptor == tracer_descriptor
-        return {"FIXTURE": "1"}
+        return _retained_runtime(
+            {"FIXTURE": "1", "LD_LIBRARY_PATH": "/proc/self/fd/100000"},
+            (100000,),
+        )
 
     def fake_runner(command: list[str], **kwargs):
         calls.append((command, kwargs))
@@ -202,7 +221,7 @@ def test_phase_ab_executes_and_injects_retained_descriptors(
             ).write_bytes(b"phase record fixture")
         return SimpleNamespace(returncode=0, stdout="", stderr="")
 
-    monkeypatch.setattr(phase, "tracer_runtime_env", fake_runtime_env)
+    monkeypatch.setattr(phase, "retained_tracer_runtime_env", fake_runtime_env)
     try:
         with open_retained_executable(executable) as executable_authority:
             result = phase.run_ab_overhead_pair(
@@ -239,6 +258,7 @@ def test_phase_ab_executes_and_injects_retained_descriptors(
             invocation_descriptor,
             tracer_descriptor,
             traces_descriptor,
+            100000,
         )
         assert kwargs["text"] is False
         assert kwargs["env"]["CUDA_INJECTION64_PATH"] == expected_tracer
@@ -307,8 +327,8 @@ def test_phase_ab_assigns_distinct_repeat_identity_to_every_pair(
 
     monkeypatch.setattr(
         phase,
-        "tracer_runtime_env",
-        lambda *_args, **_kwargs: {},
+        "retained_tracer_runtime_env",
+        lambda *_args, **_kwargs: _retained_runtime(),
     )
     try:
         with open_retained_executable(executable) as executable_authority:
@@ -366,8 +386,8 @@ def test_phase_ab_rejects_stale_repeat_file_before_subprocess(
 
     monkeypatch.setattr(
         phase,
-        "tracer_runtime_env",
-        lambda *_args, **_kwargs: {},
+        "retained_tracer_runtime_env",
+        lambda *_args, **_kwargs: _retained_runtime(),
     )
     try:
         with open_retained_executable(executable) as executable_authority:
@@ -407,8 +427,8 @@ def test_phase_ab_executable_authority_sabotage_fails_after_one_exact_child(
 ) -> None:
     monkeypatch.setattr(
         phase,
-        "tracer_runtime_env",
-        lambda *_args, **_kwargs: {},
+        "retained_tracer_runtime_env",
+        lambda *_args, **_kwargs: _retained_runtime(),
     )
     calls = 0
 
@@ -460,8 +480,8 @@ def test_phase_ab_timeout_invalid_utf8_stderr_is_bounded_replacement_text(
 ) -> None:
     monkeypatch.setattr(
         phase,
-        "tracer_runtime_env",
-        lambda *_args, **_kwargs: {},
+        "retained_tracer_runtime_env",
+        lambda *_args, **_kwargs: _retained_runtime(),
     )
 
     def timeout_runner(command: list[str], **_kwargs):
@@ -491,8 +511,8 @@ def test_phase_ab_none_timeout_is_only_explicit_unbounded_debug_opt_out(
 ) -> None:
     monkeypatch.setattr(
         phase,
-        "tracer_runtime_env",
-        lambda *_args, **_kwargs: {},
+        "retained_tracer_runtime_env",
+        lambda *_args, **_kwargs: _retained_runtime(),
     )
     observed_kwargs: list[dict[str, object]] = []
 
@@ -520,14 +540,30 @@ def test_phase_ab_none_timeout_is_only_explicit_unbounded_debug_opt_out(
     assert all("timeout" not in kwargs for kwargs in observed_kwargs)
 
 
+def test_phase_ab_production_rejects_none_timeout_before_runtime(
+    tmp_path: Path,
+) -> None:
+    with _ab_inputs(tmp_path) as fixture:
+        inputs, _authority, _executable, _traces = fixture
+        with pytest.raises(
+            phase.PhaseInjectTimeoutInvalid,
+            match="None is allowed only with an explicitly injected test runner",
+        ):
+            phase.run_ab_overhead_pair(
+                inputs,
+                admission_threshold_pct=5.0,
+                timeout_per_run_s=None,
+            )
+
+
 def test_phase_ab_rejects_missing_admitted_launch_in_each_repeat(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
         phase,
-        "tracer_runtime_env",
-        lambda *_args, **_kwargs: {},
+        "retained_tracer_runtime_env",
+        lambda *_args, **_kwargs: _retained_runtime(),
     )
 
     def runner(_command: list[str], **kwargs):
@@ -699,8 +735,8 @@ def test_phase_ab_custom_runner_output_is_bounded_and_typed(
 ) -> None:
     monkeypatch.setattr(
         phase,
-        "tracer_runtime_env",
-        lambda *_args, **_kwargs: {},
+        "retained_tracer_runtime_env",
+        lambda *_args, **_kwargs: _retained_runtime(),
     )
     calls = 0
 
@@ -732,8 +768,8 @@ def test_phase_ab_timeout_stderr_replacement_output_has_exact_byte_cap(
 ) -> None:
     monkeypatch.setattr(
         phase,
-        "tracer_runtime_env",
-        lambda *_args, **_kwargs: {},
+        "retained_tracer_runtime_env",
+        lambda *_args, **_kwargs: _retained_runtime(),
     )
 
     def timeout_runner(command: list[str], **_kwargs):
@@ -765,10 +801,10 @@ def test_phase_ab_environment_bytes_fail_before_subprocess(
 ) -> None:
     monkeypatch.setattr(
         phase,
-        "tracer_runtime_env",
-        lambda *_args, **_kwargs: {
+        "retained_tracer_runtime_env",
+        lambda *_args, **_kwargs: _retained_runtime({
             "OVERSIZED": "x" * phase.PHASE_AB_MAX_ENVIRONMENT_BYTES
-        },
+        }),
     )
     called = False
 
@@ -790,23 +826,164 @@ def test_phase_ab_environment_bytes_fail_before_subprocess(
     assert called is False
 
 
-def test_default_phase_subprocess_runner_bounds_output_and_reaps() -> None:
-    with pytest.raises(phase.PhaseInjectAbOutputLimitExceeded):
-        phase._bounded_subprocess_runner(
-            [
-                sys.executable,
-                "-c",
-                (
-                    "import os; os.write(1, b'x' * "
-                    f"{phase.PHASE_AB_MAX_CAPTURE_BYTES + 1})"
-                ),
-            ],
-            capture_output=True,
-            text=False,
-            env=dict(os.environ),
-            pass_fds=(),
-            timeout=10,
+def test_phase_production_uses_central_bounded_executor(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[tuple[tuple[str, ...], dict[str, object]]] = []
+    monkeypatch.setenv("LD_PRELOAD", "/ambient/forbidden.so")
+    monkeypatch.setenv("SIMBENCH_NVBIT_PHASE_INJECT", "ambient")
+    monkeypatch.setattr(
+        phase,
+        "retained_tracer_runtime_env",
+        lambda *_args, **_kwargs: _retained_runtime(
+            dict(_kwargs["base_env"], LD_LIBRARY_PATH="/proc/self/fd/100000"),
+            (100000,),
+        ),
+    )
+
+    def execute(command, **kwargs):
+        calls.append((tuple(command), dict(kwargs)))
+        env = kwargs["environment"]
+        if env.get("SIMBENCH_NVBIT_PHASE_INJECT") == "1":
+            repeat_index = env[phase.PHASE_REPEAT_INDEX_ENV]
+            (Path(env["TRACES_FOLDER"]) / f"phase_records_{repeat_index}_0.bin").write_bytes(
+                b"phase record fixture"
+            )
+        return phase.nvbit_process.NvbitCaptureProcessResult(0, b"", b"")
+
+    monkeypatch.setattr(
+        phase.nvbit_process,
+        "execute_capture_process",
+        execute,
+    )
+    with _ab_inputs(tmp_path) as fixture:
+        inputs, _authority, _executable, _traces = fixture
+        result = phase.run_ab_overhead_pair(
+            inputs,
+            admission_threshold_pct=5.0,
+            timer_ns=iter((0, 100, 100, 201)).__next__,
+            timeout_per_run_s=7,
         )
+
+    assert result["overhead_pct"] == 1.0
+    assert len(calls) == 2
+    for command, kwargs in calls:
+        assert command[0].startswith("/proc/self/fd/")
+        assert kwargs["timeout_seconds"] == 7
+        assert kwargs["max_output_bytes"] == phase.PHASE_AB_MAX_CAPTURE_BYTES
+        assert kwargs["timeout_code"] == phase._PHASE_CAPTURE_TIMEOUT_CODE
+        assert kwargs["launch_code"] == phase._PHASE_CAPTURE_LAUNCH_CODE
+        assert 100000 in kwargs["inherited_descriptors"]
+        assert "LD_PRELOAD" not in kwargs["environment"]
+    assert "SIMBENCH_NVBIT_PHASE_INJECT" not in calls[0][1]["environment"]
+    assert calls[1][1]["environment"]["SIMBENCH_NVBIT_PHASE_INJECT"] == "1"
+
+
+def test_phase_central_output_limit_reports_proven_lower_bound_and_bytes() -> None:
+    process_error = phase.nvbit_process.NvbitCaptureProcessError(
+        phase.nvbit_process.NVBIT_CAPTURE_OUTPUT_LIMIT,
+        "bounded output exceeded",
+        observed_output_bytes_lower_bound=(
+            phase.PHASE_AB_MAX_CAPTURE_BYTES + 65537
+        ),
+    )
+    process_error.stdout = b"exact-stdout"
+    process_error.stderr = b"invalid-\xff"
+
+    mapped = phase._map_phase_capture_error(
+        process_error,
+        side="with_inject",
+        timeout_s=7,
+    )
+
+    assert isinstance(mapped, phase.PhaseInjectAbOutputLimitExceeded)
+    assert mapped.observed == phase.PHASE_AB_MAX_CAPTURE_BYTES + 65537
+    assert mapped.observed_output_bytes_lower_bound == (
+        phase.PHASE_AB_MAX_CAPTURE_BYTES + 65537
+    )
+    assert mapped.observed_is_lower_bound is True
+    assert mapped.stdout_bytes == b"exact-stdout"
+    assert mapped.stderr_bytes == b"invalid-\xff"
+    assert mapped.stderr == "invalid-�"
+
+
+def test_phase_central_cleanup_failure_preserves_overflow_lower_bound() -> None:
+    process_error = phase.nvbit_process.NvbitCaptureProcessError(
+        phase.nvbit_process.NVBIT_CAPTURE_OUTPUT_LIMIT,
+        "cleanup superseded overflow",
+        process_cleanup_incomplete=True,
+        observed_output_bytes_lower_bound=(
+            phase.PHASE_AB_MAX_CAPTURE_BYTES + 9001
+        ),
+    )
+    process_error.stdout = b"bounded-stdout-\xff"
+    process_error.stderr = b"bounded-stderr-\x80"
+    process_error.process_id = 424243
+
+    mapped = phase._map_phase_capture_error(
+        process_error,
+        side="with_inject",
+        timeout_s=7,
+    )
+
+    assert isinstance(mapped, phase.PhaseInjectAbCleanupFailed)
+    assert mapped.pid == 424243
+    assert mapped.observed_output_bytes_lower_bound == (
+        phase.PHASE_AB_MAX_CAPTURE_BYTES + 9001
+    )
+    assert mapped.stdout_bytes == b"bounded-stdout-\xff"
+    assert mapped.stderr_bytes == b"bounded-stderr-\x80"
+
+
+def test_phase_central_cleanup_failure_precedes_timeout() -> None:
+    process_error = phase.nvbit_process.NvbitCaptureProcessError(
+        phase._PHASE_CAPTURE_TIMEOUT_CODE,
+        "cleanup superseded timeout",
+        process_cleanup_incomplete=True,
+    )
+    process_error.stdout = b"exact-stdout"
+    process_error.stderr = b"exact-stderr"
+    process_error.process_id = 424242
+
+    mapped = phase._map_phase_capture_error(
+        process_error,
+        side="no_inject",
+        timeout_s=7,
+    )
+
+    assert isinstance(mapped, phase.PhaseInjectAbCleanupFailed)
+    assert mapped.pid == 424242
+    assert mapped.stage == "central_executor_cleanup"
+    assert mapped.stdout_bytes == b"exact-stdout"
+    assert mapped.stderr_bytes == b"exact-stderr"
+
+
+@pytest.mark.parametrize(
+    ("cause", "expected_type"),
+    (
+        (None, phase.PhaseInjectAbLaunchFailed),
+        (MemoryError("resource exhausted"), phase.PhaseInjectAbResourceUnavailable),
+    ),
+)
+def test_phase_central_launch_and_resource_mappings_are_distinct(
+    cause: BaseException | None,
+    expected_type: type[BaseException],
+) -> None:
+    process_error = phase.nvbit_process.NvbitCaptureProcessError(
+        phase._PHASE_CAPTURE_LAUNCH_CODE,
+        "launch failed",
+    )
+    if cause is not None:
+        process_error.__cause__ = cause
+
+    mapped = phase._map_phase_capture_error(
+        process_error,
+        side="no_inject",
+        timeout_s=7,
+    )
+
+    assert isinstance(mapped, expected_type)
 
 
 def test_tracer_phase_record_filename_uses_repeat_environment(

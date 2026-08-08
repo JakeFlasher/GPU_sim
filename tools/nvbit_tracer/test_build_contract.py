@@ -95,14 +95,95 @@ def test_pinned_environment_exports_the_complete_contract() -> None:
     assert '_NVBIT_PB_LOCK_SHA256="d522b3ee1560e98512cd460b213adee5a901f77aef0e4fae3ba94699e3b1e222"' in env_script
     assert 'if [[ "${BASH_SOURCE[0]}" == "$0" ]]' in env_script
     assert 'if [[ "$#" -eq 1 && "$1" == "--ensure" ]]' in env_script
+    assert 'elif [[ "$#" -eq 1 && "$1" == "--ensure-external" ]]' in env_script
     assert 'pb_prefix="${NVBIT_PB_PREFIX:-$default_prefix}"' in env_script
-    assert '"$installer" create -y -p "$pb_prefix" --file "$lock_path"' in env_script
+    assert '"$installer" create -y --copy -p "$pb_prefix" --file "$lock_path"' in env_script
+    assert "_nvbit_normalize_external_prefix" in env_script
+    assert "_nvbit_validate_external_destination" in env_script
     assert 'export NVCC_CCBIN="$host_cxx"' in env_script
     assert 'export CXX="$host_cxx"' in env_script
     assert 'export PROTOC="$protoc"' in env_script
     assert 'export PKG_CONFIG_FLAGS="--define-prefix"' in env_script
     assert 'nvcc_release" != "13.2"' in env_script
     assert 'protoc_release" != "$_NVBIT_PROTOC_VERSION"' in env_script
+
+
+def test_external_pinned_handoff_is_operational_and_dealiases_members(
+    tmp_path: Path,
+) -> None:
+    script, env = _fake_pinned_tree(tmp_path)
+    repo = tmp_path / "repo"
+    shutil.rmtree(repo / ".toolchain" / "pb")
+    external_parent = tmp_path / "external"
+    external_parent.mkdir()
+    external = external_parent / "protobuf-34.1"
+    fake_bin = repo / "fake-bin"
+    _executable(
+        fake_bin / "micromamba",
+        """
+prefix=
+while [[ $# -gt 0 ]]; do
+  if [[ "$1" == "-p" ]]; then prefix="$2"; shift 2; else shift; fi
+done
+[[ -n "$prefix" ]]
+mkdir -p "$prefix/bin" "$prefix/include" "$prefix/lib/pkgconfig"
+printf '#!/usr/bin/env bash\nprintf "libprotoc 34.1\\n"\n' > "$prefix/bin/protoc-real"
+chmod 755 "$prefix/bin/protoc-real"
+ln -s protoc-real "$prefix/bin/protoc"
+printf fixture > "$prefix/lib/libprotobuf-real.so"
+ln "$prefix/lib/libprotobuf-real.so" "$prefix/lib/libprotobuf-hardlink.so"
+printf 'Version: 34.1.0\n' > "$prefix/lib/pkgconfig/protobuf.pc"
+""",
+    )
+    env["NVBIT_PB_PREFIX"] = str(external)
+    env["FAKE_PB_PREFIX"] = str(external)
+
+    result = subprocess.run(
+        ["bash", str(script), "--ensure-external"],
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert external.is_dir()
+    for path in external.rglob("*"):
+        metadata = path.lstat()
+        assert not path.is_symlink()
+        if path.is_file():
+            assert metadata.st_nlink == 1
+    assert subprocess.run(
+        [str(external / "bin/protoc"), "--version"],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip() == "libprotoc 34.1"
+
+
+def test_external_pinned_handoff_rejects_dot_and_symlink_ancestors(
+    tmp_path: Path,
+) -> None:
+    script, base_env = _fake_pinned_tree(tmp_path)
+    external_parent = tmp_path / "external"
+    (external_parent / "child").mkdir(parents=True)
+    alias = tmp_path / "external-alias"
+    alias.symlink_to(external_parent, target_is_directory=True)
+    bad_destinations = (
+        external_parent / ".." / "repo" / "escaped-prefix",
+        alias / "child" / "aliased-prefix",
+    )
+
+    for destination in bad_destinations:
+        env = base_env | {"NVBIT_PB_PREFIX": str(destination)}
+        result = subprocess.run(
+            ["bash", str(script), "--ensure-external"],
+            env=env,
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode != 0
+        assert "exact path validation" in result.stderr
+        assert not destination.exists()
 
 
 def test_top_level_make_default_goal_builds_all() -> None:

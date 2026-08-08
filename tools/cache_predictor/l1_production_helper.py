@@ -80,6 +80,16 @@ from tools.nvbit_tracer.proto_binding_loader import (  # noqa: E402
     ProtoBindingRuntimePrerequisiteError,
     load_dynamic_trace_bindings,
 )
+from tools.nvbit_tracer.protobuf_wire_preflight import (  # noqa: E402
+    preflight_threadblock_protobuf,
+    preflight_trace_protobuf,
+)
+from tools.nvbit_tracer.trace_admission import (  # noqa: E402
+    EXPECTED_MEMORY_PAYLOAD_CLASSES,
+)
+
+
+_SHARED_MEMORY_SPLIT_TRACE_CONTRACT_ID = "sm86_addr_carry_shmem_split_v2"
 
 
 class L1ProductionHelperProtobufBindingsMissing(Exception):
@@ -98,6 +108,14 @@ class L1ProductionHelperRuntimePrerequisiteMissing(
     L1ProductionHelperProtobufBindingsMissing
 ):
     """The project-pinned Python protobuf runtime is unavailable."""
+
+
+class L1ProductionHelperSharedMemorySplitUnavailable(Exception):
+    """The trace cannot authenticate static and dynamic shared-memory bytes."""
+
+
+class L1ProductionHelperTraceCapabilitiesInvalid(Exception):
+    """The trace does not advertise the exact canonical capability vector."""
 
 
 class L1ProductionHelperThreadblockMalformed(Exception):
@@ -206,21 +224,132 @@ def _load_import_trace_contract() -> Any:
     return module
 
 
-def _find_kernel_record(
-    trace_pb2_mod: Any, trace_pb_path: Path, kernel_id: int,
-) -> Any | None:
-    """Return the kernel record with the requested id, or None
-    when the trace contains no matching kernel."""
+def _load_validated_trace(
+    trace_pb2_mod: Any,
+    trace_pb_path: Path,
+    *,
+    retained_trace_pb_payload: bytes | None = None,
+) -> Any:
+    """Decode one exact trace payload and validate its consumer contract."""
+    if retained_trace_pb_payload is None:
+        raw = trace_pb_path.read_bytes()
+    elif type(retained_trace_pb_payload) is bytes:
+        raw = retained_trace_pb_payload
+    else:
+        raise TypeError("retained_trace_pb_payload must be exact bytes")
+    preflight_trace_protobuf(raw)
     trace = trace_pb2_mod.Trace()
-    trace.ParseFromString(trace_pb_path.read_bytes())
+    trace.ParseFromString(raw)
+    _require_exact_trace_contract(trace)
+    for _device_id in sorted(trace.gpu_device.keys()):
+        device = trace.gpu_device[_device_id]
+        for _stream_id in sorted(device.streams.keys()):
+            stream = device.streams[_stream_id]
+            for kernel in stream.kernels:
+                _authenticated_shared_memory_split(trace, kernel, None)
+    return trace
+
+
+def _find_trace_and_kernel_record(
+    trace_pb2_mod: Any,
+    trace_pb_path: Path,
+    kernel_id: int,
+    *,
+    retained_trace_pb_payload: bytes | None = None,
+) -> tuple[Any, Any] | None:
+    """Return the validated trace and requested kernel from one payload."""
+    trace = _load_validated_trace(
+        trace_pb2_mod,
+        trace_pb_path,
+        retained_trace_pb_payload=retained_trace_pb_payload,
+    )
     for _device_id in sorted(trace.gpu_device.keys()):
         device = trace.gpu_device[_device_id]
         for _stream_id in sorted(device.streams.keys()):
             stream = device.streams[_stream_id]
             for kernel in stream.kernels:
                 if int(kernel.id) == kernel_id:
-                    return kernel
+                    return trace, kernel
     return None
+
+
+def _find_kernel_record(
+    trace_pb2_mod: Any,
+    trace_pb_path: Path,
+    kernel_id: int,
+    *,
+    retained_trace_pb_payload: bytes | None = None,
+) -> Any | None:
+    """Return the requested kernel while preserving the historical API."""
+    trace_kernel = _find_trace_and_kernel_record(
+        trace_pb2_mod,
+        trace_pb_path,
+        kernel_id,
+        retained_trace_pb_payload=retained_trace_pb_payload,
+    )
+    if trace_kernel is None:
+        return None
+    _trace, kernel = trace_kernel
+    return kernel
+
+
+def _require_exact_trace_contract(trace: Any) -> None:
+    """Reject every trace contract except the split-capable v2 authority.
+
+    BL-20260708-guard-on-consumer-path: this check belongs immediately after
+    protobuf decoding, before missing-kernel or geometry availability branches.
+    Otherwise a legacy or unknown contract can be mislabeled as an unrelated
+    scheduling failure without ever proving that this consumer supports its
+    wire semantics.
+    """
+    if trace.trace_contract_id != _SHARED_MEMORY_SPLIT_TRACE_CONTRACT_ID:
+        raise L1ProductionHelperSharedMemorySplitUnavailable(
+            "unsupported trace_contract_id "
+            f"{trace.trace_contract_id!r}; expected exact contract "
+            f"{_SHARED_MEMORY_SPLIT_TRACE_CONTRACT_ID!r}"
+        )
+    capabilities = sorted(
+        int(value) for value in trace.memory_payload_classes
+    )
+    expected_capabilities = list(EXPECTED_MEMORY_PAYLOAD_CLASSES)
+    if capabilities != expected_capabilities:
+        raise L1ProductionHelperTraceCapabilitiesInvalid(
+            "trace capabilities invalid: "
+            f"got {capabilities}, expected {expected_capabilities}"
+        )
+
+
+def _authenticated_shared_memory_split(
+    trace: Any,
+    kernel: Any,
+    caller_dynamic_shared_bytes: int | None,
+) -> tuple[int, int]:
+    if trace.trace_contract_id != _SHARED_MEMORY_SPLIT_TRACE_CONTRACT_ID:
+        raise L1ProductionHelperSharedMemorySplitUnavailable(
+            "authenticated static/dynamic shared-memory split is unavailable"
+        )
+    if not kernel.HasField("shared_memory_static_bytes") or not kernel.HasField(
+        "shared_memory_dynamic_bytes"
+    ):
+        raise L1ProductionHelperSharedMemorySplitUnavailable(
+            "split-capable trace does not carry both shared-memory components"
+        )
+    static_shared_bytes = int(kernel.shared_memory_static_bytes)
+    dynamic_shared_bytes = int(kernel.shared_memory_dynamic_bytes)
+    if static_shared_bytes + dynamic_shared_bytes != int(
+        kernel.size_shared_memory
+    ):
+        raise L1ProductionHelperSharedMemorySplitUnavailable(
+            "trace shared-memory components disagree with the combined field"
+        )
+    if (
+        caller_dynamic_shared_bytes is not None
+        and caller_dynamic_shared_bytes != dynamic_shared_bytes
+    ):
+        raise L1ProductionHelperSharedMemorySplitUnavailable(
+            "caller dynamic shared-memory value disagrees with the trace"
+        )
+    return static_shared_bytes, dynamic_shared_bytes
 
 
 def _flatten_block_id(
@@ -333,6 +462,7 @@ def _walk_threadblock_protos(
     grid_x: int,
     grid_y: int,
     grid_dim: int,
+    retained_threadblock_pb_payloads: list[bytes] | None = None,
 ) -> list[TraceRecord]:
     """Walk all per-threadblock proto files and emit
     TraceRecord entries for each memory instruction.
@@ -352,9 +482,25 @@ def _walk_threadblock_protos(
     raise ``L1ProductionHelperAddressMalformed``.
     """
     records: list[TraceRecord] = []
-    for tb_path in threadblock_pb_paths:
+    if (
+        retained_threadblock_pb_payloads is not None
+        and len(retained_threadblock_pb_payloads) != len(threadblock_pb_paths)
+    ):
+        raise ValueError(
+            "retained threadblock payload count does not match path labels"
+        )
+    for index, tb_path in enumerate(threadblock_pb_paths):
+        if retained_threadblock_pb_payloads is None:
+            raw = tb_path.read_bytes()
+        else:
+            raw = retained_threadblock_pb_payloads[index]
+            if type(raw) is not bytes:
+                raise TypeError(
+                    "retained_threadblock_pb_payloads must contain exact bytes"
+                )
+        preflight_threadblock_protobuf(raw)
         tb_message = threadblock_pb2_mod.threadblock()
-        tb_message.ParseFromString(tb_path.read_bytes())
+        tb_message.ParseFromString(raw)
         block_index = _block_index_from_message(
             tb_message,
             grid_x=grid_x,
@@ -471,9 +617,11 @@ def predict_l1_from_trace_dir(
     occupancy_derived_assignment: list[int] | None = None,
     carveout_max_l1_bytes: int | None = None,
     default_l1_bytes: int | None = None,
-    dynamic_shared_bytes: int = 0,
+    dynamic_shared_bytes: int | None = None,
     warmup_launches: int | None = None,
     carveout_percent: int | None = None,
+    retained_trace_pb_payload: bytes | None = None,
+    retained_threadblock_pb_payloads: list[bytes] | None = None,
 ) -> dict:
     """Drive the L1 walker on a real trace directory and return
     a schema-valid L1 predictor bundle.
@@ -483,8 +631,8 @@ def predict_l1_from_trace_dir(
       threadblock_pb_paths: ordered list of per-threadblock
         proto files for the target kernel.
       kernel_id: the kernel id within the trace; the helper
-        extracts grid/block/static-shared metadata from this
-        kernel record.
+        extracts grid/block and authenticated static/dynamic shared-memory
+        metadata from this kernel record.
       classifier_manifest: a matched cache-op manifest.
       sm_count: per-arch SM count.
       l1tex_capacity_source / l1_shared_carveout_source /
@@ -499,45 +647,57 @@ def predict_l1_from_trace_dir(
       carveout_max_l1_bytes / default_l1_bytes: passed through
         to the L1 head; required when l1tex_capacity_source is
         non-static and the carveout source is default.
-      dynamic_shared_bytes: per-kernel dynamic shared usage
-        (the proto does not record this; the caller must
-        supply it from the launch parameters).
+      dynamic_shared_bytes: optional independent launch value; when supplied it
+        must equal the authenticated dynamic component carried by the trace.
+      retained_trace_pb_payload / retained_threadblock_pb_payloads: optional
+        exact byte snapshots aligned with the diagnostic path labels. When
+        supplied, protobuf preflight and parsing consume these bytes and never
+        reopen the mutable source paths.
 
     Returns a schema-valid bundle from
     ``predict_l1_hit_rate_from_manifest``."""
     cp = _load_cache_predictor()
 
-    # Pre-adapter short-circuit: when the classifier manifest's
-    # sass_provenance_status is ``matched_no_load_class_instructions``
-    # the kernel parsed cleanly but has no LDG/LDGSTS/LDL/STL/ATOM/TEX
-    # opcodes for the L1 model to walk. Delegate directly to
-    # ``predict_l1_hit_rate_from_manifest``, whose documented
-    # behavior is to emit ``predictor_l1_no_modeled_l1_eligible_accesses``
-    # with ``cache_layer=L1TEX``. Routing this case through the
-    # adapter would raise ``L1TraceAdapterManifestNotMatched`` and
-    # mis-route the bundle to ``predictor_l1_sass_provenance_missing``.
     if (
-        classifier_manifest.get("sass_provenance_status")
-        == "matched_no_load_class_instructions"
+        (retained_trace_pb_payload is None)
+        != (retained_threadblock_pb_payloads is None)
     ):
-        return cp.predict_l1_hit_rate_from_manifest(
-            cache_op_manifest=classifier_manifest,
-            manifest_pairing_index=manifest_pairing_index,
-            input_sidecar_digests=input_sidecar_digests,
-            device=device,
-            cache_model_capacity_bytes=cache_model_capacity_bytes,
-            bootstrap_seed=bootstrap_seed,
-            epsilon=epsilon,
+        raise ValueError(
+            "retained root and threadblock payloads must be supplied together"
         )
+    if (
+        retained_trace_pb_payload is not None
+        and type(retained_trace_pb_payload) is not bytes
+    ):
+        raise TypeError("retained_trace_pb_payload must be exact bytes")
+    if retained_threadblock_pb_payloads is not None:
+        if type(retained_threadblock_pb_payloads) is not list:
+            raise TypeError(
+                "retained_threadblock_pb_payloads must be an exact list"
+            )
+        if len(retained_threadblock_pb_payloads) != len(threadblock_pb_paths):
+            raise ValueError(
+                "retained threadblock payload count does not match path labels"
+            )
+        if any(
+            type(payload) is not bytes
+            for payload in retained_threadblock_pb_payloads
+        ):
+            raise TypeError(
+                "retained_threadblock_pb_payloads must contain exact bytes"
+            )
 
     trace_pb2_mod, threadblock_pb2_mod, _instruction_pb2_mod = (
         _load_proto_bindings()
     )
 
-    kernel = _find_kernel_record(
-        trace_pb2_mod, trace_pb_path, kernel_id,
+    trace_kernel = _find_trace_and_kernel_record(
+        trace_pb2_mod,
+        trace_pb_path,
+        kernel_id,
+        retained_trace_pb_payload=retained_trace_pb_payload,
     )
-    if kernel is None:
+    if trace_kernel is None:
         return cp._typed_unavailable_bundle(
             cache_layer="L1TEX",
             typed_reason="predictor_l1_cta_to_sm_schedule_unknown",
@@ -553,6 +713,7 @@ def predict_l1_from_trace_dir(
             },
         )
 
+    trace, kernel = trace_kernel
     grid_x = int(kernel.grid_dim.x) if kernel.HasField("grid_dim") else 0
     grid_y = int(kernel.grid_dim.y) if kernel.HasField("grid_dim") else 0
     grid_z = int(kernel.grid_dim.z) if kernel.HasField("grid_dim") else 0
@@ -586,7 +747,35 @@ def predict_l1_from_trace_dir(
             },
         )
 
-    static_shared_bytes = int(kernel.size_shared_memory)
+    static_shared_bytes, dynamic_shared_bytes = (
+        _authenticated_shared_memory_split(
+            trace,
+            kernel,
+            dynamic_shared_bytes,
+        )
+    )
+
+    # Pre-adapter short-circuit: when the classifier manifest's
+    # sass_provenance_status is ``matched_no_load_class_instructions``
+    # the kernel parsed cleanly but has no LDG/LDGSTS/LDL/STL/ATOM/TEX
+    # opcodes for the L1 model to walk. The shortcut deliberately follows the
+    # exact-byte protobuf preflight, exact trace-contract check, requested-kernel
+    # lookup, geometry check, and authenticated static/dynamic shared-memory
+    # split above. BL-20260708-guard-on-consumer-path: a semantic shortcut may
+    # skip access walking, never the input contract that authorizes the result.
+    if (
+        classifier_manifest.get("sass_provenance_status")
+        == "matched_no_load_class_instructions"
+    ):
+        return cp.predict_l1_hit_rate_from_manifest(
+            cache_op_manifest=classifier_manifest,
+            manifest_pairing_index=manifest_pairing_index,
+            input_sidecar_digests=input_sidecar_digests,
+            device=device,
+            cache_model_capacity_bytes=cache_model_capacity_bytes,
+            bootstrap_seed=bootstrap_seed,
+            epsilon=epsilon,
+        )
 
     # Fail-close on missing dynamic evidence: a matched manifest
     # with eligible PCs but ZERO threadblock proto paths means
@@ -628,7 +817,12 @@ def predict_l1_from_trace_dir(
             threadblock_pb2_mod,
             threadblock_pb_paths,
             import_trace_contract_mod,
-            grid_x=grid_x, grid_y=grid_y, grid_dim=grid_dim,
+            grid_x=grid_x,
+            grid_y=grid_y,
+            grid_dim=grid_dim,
+            retained_threadblock_pb_payloads=(
+                retained_threadblock_pb_payloads
+            ),
         )
         per_block_accesses = build_per_block_l1_accesses(
             trace_records,
@@ -783,7 +977,9 @@ __all__ = [
     "L1ProductionHelperInstructionMalformed",
     "L1ProductionHelperProtobufBindingsMissing",
     "L1ProductionHelperRuntimePrerequisiteMissing",
+    "L1ProductionHelperSharedMemorySplitUnavailable",
     "L1ProductionHelperThreadblockMalformed",
+    "L1ProductionHelperTraceCapabilitiesInvalid",
     "L1ProductionHelperTrackedBindingsCorrupt",
     "predict_l1_from_trace_dir",
 ]

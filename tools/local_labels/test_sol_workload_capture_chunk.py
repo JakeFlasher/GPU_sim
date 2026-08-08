@@ -8,6 +8,7 @@ import inspect
 import json
 import os
 import shutil
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
@@ -104,6 +105,29 @@ def test_launch_set_preflight_threads_selected_device_authority(tmp_path):
             **_launch_set_preflight_kwargs(document)
         )
     assert caught.value.code == "supplemental_done_launch_set_preflight_invalid"
+
+
+def test_launch_set_done_accepts_historical_v3_preflight(tmp_path):
+    document = canonical_fixture._historical_v3_preflight(tmp_path)
+    identity, gpu_uuid_sha256, selected_host_gpu_index = (
+        capture._launch_set_preflight_authority(
+            **_launch_set_preflight_kwargs(document)
+        )
+    )
+    assert identity == canonical_fixture._expected_ncu_identity()
+    assert gpu_uuid_sha256 == canonical_fixture.GPU_UUID_SHA256
+    assert selected_host_gpu_index == canonical_fixture.SELECTED_HOST_GPU_INDEX
+
+
+def test_launch_set_done_rejects_unknown_preflight_version(tmp_path):
+    document = canonical_fixture._preflight(tmp_path)
+    document["schema_version"] = 5
+    with pytest.raises(capture.WorkloadCaptureRefusal) as caught:
+        capture._launch_set_preflight_authority(
+            **_launch_set_preflight_kwargs(document)
+        )
+    assert caught.value.code == "supplemental_done_launch_set_preflight_invalid"
+    assert "unsupported retained preflight schema_version" in caught.value.detail
 
 
 def _launch_set_crosswalk_fixture(tmp_path: Path, *, device: int) -> dict:
@@ -3390,6 +3414,8 @@ def _attempt_capture_kwargs(
     tmp_path: Path, binding: dict, monkeypatch,
 ) -> tuple[dict, Path]:
     journal = tmp_path / "output" / "journals" / "row"
+    tracer_source_path = (tmp_path / "external-tracer.so").resolve()
+    tracer_source_path.write_bytes(b"split tracer fixture")
     monkeypatch.setattr(capture, "certified_row_environment", lambda **_: {})
     monkeypatch.setattr(
         capture.canonical_capture,
@@ -3411,7 +3437,10 @@ def _attempt_capture_kwargs(
         "preflight_manifest": {
             "checks": {
                 "device": canonical_fixture._current_device_probe(),
-                "injection_runtime": {"tracer_so_sha256": "6" * 64},
+                "injection_runtime": {
+                    "tracer_so_sha256": "6" * 64,
+                    "tracer_source_path": str(tracer_source_path),
+                },
             }
         },
         "expected_ncu_identity": (
@@ -3517,6 +3546,39 @@ def test_failed_attempt_is_preserved_and_next_attempt_can_complete(
         preflight_sha256=kwargs["preflight_sha256"], source_commit="a" * 40,
     )
     assert loaded is not None and loaded[1] == result
+
+
+@pytest.mark.parametrize("error_number", [errno.ENOSPC, errno.EIO, errno.EROFS])
+def test_trace_snapshot_storage_failure_never_writes_failure_journal(
+    tmp_path, monkeypatch, error_number,
+):
+    path, rows, values = _literal_rows(tmp_path)
+    _invocation, binding = _binding(path=path, rows=rows, values=values)
+    kwargs, journal = _attempt_capture_kwargs(tmp_path, binding, monkeypatch)
+
+    def fail_capture(**call):
+        (call["cell_dir"] / "partial.bin").write_bytes(b"preserved snapshot evidence")
+        cause = OSError(error_number, "injected snapshot storage failure")
+        refusal = capture.canonical_capture.ChunkRefusal(
+            "trace_snapshot_storage_failure", "snapshot medium failed"
+        )
+        raise refusal from cause
+
+    monkeypatch.setattr(capture.canonical_capture, "capture_cell", fail_capture)
+    expected_code = (
+        capture.STORAGE_CAPACITY_CODE
+        if error_number == errno.ENOSPC
+        else capture.STORAGE_INTEGRITY_CODE
+    )
+    with pytest.raises(capture.WorkloadCaptureRefusal) as caught:
+        capture._capture_one(**kwargs)
+
+    assert caught.value.code == expected_code
+    attempt = journal / "attempts" / "attempt-000001"
+    assert not (attempt / "journal_failure.json").exists()
+    assert (
+        attempt / "cells" / capture._safe_name(binding["row_key"]) / "partial.bin"
+    ).read_bytes() == b"preserved snapshot evidence"
 
 
 def test_hard_interrupted_start_is_bound_into_retry_history(tmp_path, monkeypatch):
@@ -3994,6 +4056,15 @@ def test_unique_name_launch_reports_swapped_are_rejected(tmp_path):
         )
 
 
+def _with_retained_control_source(trace_dir: Path, trace: dict):
+    retained = canonical_capture._open_retained_trace_generation(trace_dir)
+    return {
+        **trace,
+        canonical_capture._TRACE_CONTROL_GENERATION_KEY: retained,
+        canonical_capture._TRACE_CONTROL_GENERATION_SOURCE_KEY: trace_dir,
+    }, retained
+
+
 def test_per_ordinal_control_views_cover_all_launches_and_are_not_retained(
     tmp_path, monkeypatch,
 ):
@@ -4027,7 +4098,9 @@ def test_per_ordinal_control_views_cover_all_launches_and_are_not_retained(
         json.dumps({"kernels": kernels})
     )
 
-    def fake_control(*, cell_dir, **_kwargs):
+    def fake_control(*, trace, cell_dir, **_kwargs):
+        retained_view = canonical_capture._require_trace_control_generation(trace)
+        assert retained_view.path == trace["control_trace_dir"]
         out = cell_dir / "control_bits.json"
         manifest = cell_dir / "control_capture_manifest.json"
         out.write_text("{}\n")
@@ -4045,20 +4118,27 @@ def test_per_ordinal_control_views_cover_all_launches_and_are_not_retained(
     cell_dir.mkdir()
     trace_log = tmp_path / "trace.log"
     trace_log.write_text("trace")
-    result = canonical_capture.capture_sol_controls_all_launches(
-        cell={"identity": {"roster_source": "sol_execbench", "slug": "x"}},
-        invocation={"authority_reference_sha256": "a" * 64},
-        labels_by_ordinal=labels,
-        trace={
+    trace, retained_source = _with_retained_control_source(
+        trace_dir,
+        {
             "dynamic_launch_inventory": inventory,
             "dynamic_launch_inventory_sha256": seal,
             "control_trace_dir": trace_dir,
             "stdout_log": trace_log,
             "stderr_log": trace_log,
         },
-        cell_dir=cell_dir,
-        module_store=tmp_path / "module_store",
     )
+    try:
+        result = canonical_capture.capture_sol_controls_all_launches(
+            cell={"identity": {"roster_source": "sol_execbench", "slug": "x"}},
+            invocation={"authority_reference_sha256": "a" * 64},
+            labels_by_ordinal=labels,
+            trace=trace,
+            cell_dir=cell_dir,
+            module_store=tmp_path / "module_store",
+        )
+    finally:
+        retained_source.close()
     assert result["outcome"] == "complete_dynamic_launch_set"
     assert result["complete_control_count"] == 2
     assert not list(cell_dir.rglob("control_trace_view"))
@@ -4123,26 +4203,33 @@ def test_per_ordinal_control_failure_escapes_for_retry_without_downgrade(
     cell_dir.mkdir()
     trace_log = tmp_path / "trace.log"
     trace_log.write_text("trace")
-    with pytest.raises(
-        canonical_capture.ChunkRefusal,
-        match="sol_control_runtime_decode_failed",
-    ):
-        canonical_capture.capture_sol_controls_all_launches(
-            cell={"identity": {
-                "roster_source": "sol_execbench", "slug": "x"
-            }},
-            invocation={"authority_reference_sha256": "a" * 64},
-            labels_by_ordinal=labels,
-            trace={
-                "dynamic_launch_inventory": inventory,
-                "dynamic_launch_inventory_sha256": seal,
-                "control_trace_dir": trace_dir,
-                "stdout_log": trace_log,
-                "stderr_log": trace_log,
-            },
-            cell_dir=cell_dir,
-            module_store=tmp_path / "module_store",
-        )
+    trace, retained_source = _with_retained_control_source(
+        trace_dir,
+        {
+            "dynamic_launch_inventory": inventory,
+            "dynamic_launch_inventory_sha256": seal,
+            "control_trace_dir": trace_dir,
+            "stdout_log": trace_log,
+            "stderr_log": trace_log,
+        },
+    )
+    try:
+        with pytest.raises(
+            canonical_capture.ChunkRefusal,
+            match="sol_control_runtime_decode_failed",
+        ):
+            canonical_capture.capture_sol_controls_all_launches(
+                cell={"identity": {
+                    "roster_source": "sol_execbench", "slug": "x"
+                }},
+                invocation={"authority_reference_sha256": "a" * 64},
+                labels_by_ordinal=labels,
+                trace=trace,
+                cell_dir=cell_dir,
+                module_store=tmp_path / "module_store",
+            )
+    finally:
+        retained_source.close()
     assert called == [0]
     assert not list(cell_dir.rglob("control_trace_view"))
 
@@ -4192,25 +4279,34 @@ def test_per_ordinal_control_storage_failure_preserves_control_view(
         canonical_capture, "_materialize_sol_launch_control_view", materialize,
     )
     monkeypatch.setattr(canonical_capture, "capture_sol_control", fail_control)
-    with pytest.raises(
-        canonical_capture.ChunkRefusal,
-        match="sol_control_storage_failure",
-    ) as caught:
-        canonical_capture.capture_sol_controls_all_launches(
-            cell={"identity": {
-                "roster_source": "sol_execbench", "slug": "fixture",
-            }},
-            invocation={"authority_reference_sha256": "b" * 64},
-            labels_by_ordinal=labels,
-            trace={
-                "dynamic_launch_inventory": inventory,
-                "dynamic_launch_inventory_sha256": (
-                    canonical_capture.canonical_sha256(inventory)
-                ),
-            },
-            cell_dir=cell_dir,
-            module_store=tmp_path / "module-store",
-        )
+    source_trace = tmp_path / "trace-source"
+    source_trace.mkdir()
+    trace, retained_source = _with_retained_control_source(
+        source_trace,
+        {
+            "dynamic_launch_inventory": inventory,
+            "dynamic_launch_inventory_sha256": (
+                canonical_capture.canonical_sha256(inventory)
+            ),
+        },
+    )
+    try:
+        with pytest.raises(
+            canonical_capture.ChunkRefusal,
+            match="sol_control_storage_failure",
+        ) as caught:
+            canonical_capture.capture_sol_controls_all_launches(
+                cell={"identity": {
+                    "roster_source": "sol_execbench", "slug": "fixture",
+                }},
+                invocation={"authority_reference_sha256": "b" * 64},
+                labels_by_ordinal=labels,
+                trace=trace,
+                cell_dir=cell_dir,
+                module_store=tmp_path / "module-store",
+            )
+    finally:
+        retained_source.close()
     assert canonical_capture._storage_origin(caught.value).errno == error_number
     mapped = capture.storage_refusal_from_exception(
         caught.value, operation="capture_monitored_output_tree",
@@ -4266,23 +4362,33 @@ def test_per_ordinal_raw_module_input_eio_is_not_output_storage(
         canonical_capture, "_materialize_sol_launch_control_view", materialize,
     )
     monkeypatch.setattr(canonical_capture, "capture_sol_control", fail_control)
-    with pytest.raises(
-        canonical_capture.ChunkRefusal, match="sol_control_module_absent",
-    ) as caught:
-        canonical_capture.capture_sol_controls_all_launches(
-            cell={"identity": {
-                "roster_source": "sol_execbench", "slug": "fixture",
-            }},
-            invocation={"authority_reference_sha256": "b" * 64},
-            labels_by_ordinal=labels,
-            trace={
-                "dynamic_launch_inventory": inventory,
-                "dynamic_launch_inventory_sha256": (
-                    canonical_capture.canonical_sha256(inventory)
-                ),
-            },
-            cell_dir=cell_dir, module_store=tmp_path / "module-store",
-        )
+    source_trace = tmp_path / "trace-source"
+    source_trace.mkdir()
+    trace, retained_source = _with_retained_control_source(
+        source_trace,
+        {
+            "dynamic_launch_inventory": inventory,
+            "dynamic_launch_inventory_sha256": (
+                canonical_capture.canonical_sha256(inventory)
+            ),
+        },
+    )
+    try:
+        with pytest.raises(
+            canonical_capture.ChunkRefusal, match="sol_control_module_absent",
+        ) as caught:
+            canonical_capture.capture_sol_controls_all_launches(
+                cell={"identity": {
+                    "roster_source": "sol_execbench", "slug": "fixture",
+                }},
+                invocation={"authority_reference_sha256": "b" * 64},
+                labels_by_ordinal=labels,
+                trace=trace,
+                cell_dir=cell_dir,
+                module_store=tmp_path / "module-store",
+            )
+    finally:
+        retained_source.close()
     assert not canonical_capture._is_explicit_output_storage_refusal(caught.value)
     assert (cell_dir / "control_launches/launch_0000/control_trace_view").is_dir()
 
@@ -4866,6 +4972,219 @@ def test_reduced_prevalidation_keeps_native_evidence_scope_closed(
     )
     assert observed["runnability_path"] == runnability_path
     assert observed["supplemental_runnability_evidence"] is None
+
+
+def test_retained_budget_failure_is_restart_terminal_without_recapture():
+    row = {"key": {
+        "slug": "problem_001_test",
+        "source_workload_uuid": "12345678-1234-5123-8123-123456789abc",
+        "variant_id": "a" * 64,
+    }}
+    prior_state = {"terminal_failure": {
+        "failure_code": "trace_retained_budget_exceeded",
+        "failure_detail": "retained bytes exceed row authority",
+        "attempt_ordinal": 3,
+    }}
+
+    assert capture._stable_budget_failure(
+        row=row, prior_state=prior_state
+    ) == {
+        "row_key": row["key"],
+        "failure_code": "trace_retained_budget_exceeded",
+        "failure_detail": "retained bytes exceed row authority",
+        "attempt_ordinal": 3,
+    }
+    assert capture._stable_budget_failure(
+        row=row,
+        prior_state={"terminal_failure": {
+            "failure_code": "transient_capture_failure",
+        }},
+    ) is None
+
+
+def test_new_stable_budget_refusal_is_aggregated_by_run_chunk_impl(
+    monkeypatch,
+):
+    matrix, row, _variant = _standalone_contract()
+    source_commit = "a" * 40
+    matrix.update({
+        "source_commit": source_commit,
+        "matrix_seal_sha256": "b" * 64,
+        "canonical_matrix": {},
+        "input_pins": {"sol_native_env_fingerprint": "c" * 64},
+    })
+    canonical_matrix = {
+        "cells": [],
+        "matrix_seal_sha256": "d" * 64,
+    }
+    aggregate_budget = {
+        "retention_budget_gib": 2,
+        "metadata_margin_gib": 0,
+        "raw_staging_margin_gib": 1,
+    }
+
+    with tempfile.TemporaryDirectory(
+        prefix="sol-chunk-budget-pytest-", dir="/tmp",
+    ) as temporary_root:
+        root = Path(temporary_root)
+        inputs = root / "inputs"
+        inputs.mkdir(mode=0o700)
+
+        def write_input(name, document):
+            path = inputs / name
+            path.write_text(json.dumps(document) + "\n")
+            return path
+
+        matrix_path = write_input("matrix.json", matrix)
+        canonical_matrix_path = write_input(
+            "canonical-matrix.json", canonical_matrix,
+        )
+        authority_path = write_input("authority.json", {})
+        pins_path = write_input("pins.json", {})
+        aggregate_budget_path = write_input(
+            "aggregate-budget.json", aggregate_budget,
+        )
+        cell_budget_path = write_input("cell-budgets.json", {})
+        registry_path = write_input("metric-registry.json", {})
+        preflight_path = write_input("preflight.json", {})
+        full_inventory_path = write_input("full-inventory.json", {})
+
+        runnability_root = root / "runnability-owner"
+        shrink_root = root / "shrink-owner"
+        live_inventory_root = root / "live-inventory-owner"
+        for owner_root in (
+            runnability_root, shrink_root, live_inventory_root,
+        ):
+            owner_root.mkdir(mode=0o700)
+        runnability_path = runnability_root / "runnability.json"
+        shrink_path = shrink_root / "shrink.json"
+        live_inventory_path = live_inventory_root / "live-inventory.json"
+        for path in (runnability_path, shrink_path, live_inventory_path):
+            path.write_text("{}\n")
+
+        output_root = root / "output"
+        args = SimpleNamespace(
+            matrix=str(matrix_path),
+            canonical_matrix=str(canonical_matrix_path),
+            authority=str(authority_path),
+            pins=str(pins_path),
+            aggregate_budget=str(aggregate_budget_path),
+            cell_budgets=str(cell_budget_path),
+            metric_registry=str(registry_path),
+            preflight=str(preflight_path),
+            output_root=str(output_root),
+            chunk_id="sol-workload-test-001",
+            runnability=str(runnability_path),
+            runnability_root=str(runnability_root),
+            shrink_provenance=str(shrink_path),
+            shrink_root=str(shrink_root),
+            full_coverage_inventory=str(full_inventory_path),
+            live_coverage_inventory=str(live_inventory_path),
+            live_coverage_inventory_root=str(live_inventory_root),
+        )
+
+        monkeypatch.setattr(
+            capture, "validate_supplemental_matrix", lambda *_a, **_k: None,
+        )
+        monkeypatch.setattr(
+            capture, "validate_live_coverage_inventory",
+            lambda **_kwargs: ({}, {}),
+        )
+        monkeypatch.setattr(
+            capture, "input_file_identity", lambda *_a, **_k: None,
+        )
+        monkeypatch.setattr(
+            capture.metric_registry, "parse_registry", lambda _document: object(),
+        )
+        monkeypatch.setattr(
+            capture, "_validate_loaded_canonical_pin", lambda *_a, **_k: None,
+        )
+        monkeypatch.setattr(
+            capture, "validate_frozen_canonical_base", lambda *_a, **_k: None,
+        )
+        monkeypatch.setattr(
+            capture, "verify_flashinfer_contracts", lambda _resolved: {},
+        )
+        monkeypatch.setattr(
+            capture, "_require_live_supplemental_source_state",
+            lambda _matrix: source_commit,
+        )
+        monkeypatch.setattr(
+            capture, "_validate_supplemental_preflight_reference",
+            lambda **_kwargs: ({}, object()),
+        )
+        monkeypatch.setattr(
+            capture, "_certify_environment", lambda **_kwargs: ({}, {}),
+        )
+        cell_budgets = object()
+        monkeypatch.setattr(
+            capture, "explicit_chunk_budgets", lambda _resolved: cell_budgets,
+        )
+        monkeypatch.setattr(
+            capture, "validate_external_reduced_sources",
+            lambda *_a, **_k: ({}, {}),
+        )
+        monkeypatch.setattr(
+            capture, "supplemental_campaign_identity",
+            lambda **_kwargs: {"fixture": "campaign-identity"},
+        )
+
+        def establish_output(path, *, campaign_identity):
+            assert campaign_identity == {"fixture": "campaign-identity"}
+            path.mkdir(mode=0o700)
+
+        monkeypatch.setattr(
+            capture, "establish_supplemental_output_root", establish_output,
+        )
+        monkeypatch.setattr(
+            capture, "retain_campaign_inputs", lambda *_a, **_k: None,
+        )
+        monkeypatch.setattr(
+            capture, "retained_reduced_input_paths",
+            lambda **_kwargs: ({}, {}),
+        )
+        monkeypatch.setattr(
+            capture, "prevalidate_supplemental_rows", lambda **_kwargs: None,
+        )
+        monkeypatch.setattr(
+            capture.canonical_capture,
+            "require_cell_budget",
+            lambda observed, _slug: (
+                SimpleNamespace(max_trace_bytes=1)
+                if observed is cell_budgets
+                else pytest.fail("unexpected cell-budget collection")
+            ),
+        )
+        capture_calls = 0
+
+        def refuse_capture(**_kwargs):
+            nonlocal capture_calls
+            capture_calls += 1
+            raise capture.WorkloadCaptureRefusal(
+                "trace_retained_budget_exceeded",
+                "synthetic retained-budget limit",
+            )
+
+        monkeypatch.setattr(capture, "_capture_one", refuse_capture)
+
+        class Lease:
+            @staticmethod
+            def acquire(path):
+                assert path == output_root
+                assert path.is_dir()
+
+        with pytest.raises(capture.WorkloadCaptureRefusal) as caught:
+            capture._run_chunk_impl(args, campaign_lock_lease=Lease())
+
+    assert caught.value.code == "supplemental_chunk_rows_budget_blocked"
+    assert json.loads(caught.value.detail) == [{
+        "row_key": copy.deepcopy(row["key"]),
+        "failure_code": "trace_retained_budget_exceeded",
+        "failure_detail": "synthetic retained-budget limit",
+        "attempt_ordinal": 1,
+    }]
+    assert capture_calls == 1
+
 
 
 def test_invalid_matrix_refuses_before_external_output_mutation(tmp_path):

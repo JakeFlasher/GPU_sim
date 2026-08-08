@@ -19,9 +19,9 @@
 //!   warp of the block is waiting at it (warps that already finished do
 //!   not block release, matching Volta+ exited-thread semantics).
 //! - Block residency: blocks are admitted to the SM in launch order while
-//!   the resident warp count stays within `max_resident_warps_per_sm` and
-//!   concurrently resident CTAs use disjoint physical warp slots; a finished
-//!   block frees its slots for a later CTA (wave execution).
+//!   resident warps and resident shared-memory bytes stay within their
+//!   architecture-local ceilings and concurrent CTAs use disjoint physical warp
+//!   slots; a finished block frees both resources for a later CTA (wave execution).
 //!
 //! Memory timing comes in three modes ([`SmMemMode`]):
 //! - **Flat**: no cache model; global-class barriers clear at the flat
@@ -46,8 +46,8 @@
 //! strictly BEFORE `horizon` (the event system passes the next queued
 //! event's time so no cross-SM effect is overrun; a self-emitted request
 //! additionally caps the run-ahead at the earliest time its response
-//! could arrive). [`simulate_sm`] is the synchronous wrapper for the
-//! Flat/L1Const modes (horizon = ∞, no requests possible).
+//! could arrive). [`simulate_sm_with_residency`] is the synchronous wrapper for
+//! the Flat/L1Const modes (horizon = ∞, no requests possible).
 //!
 //! The instruction COUNT produced by replay is placement- and
 //! timing-invariant: every traced record issues exactly once, so
@@ -93,6 +93,37 @@ pub(crate) struct WarpReplay {
 pub(crate) struct BlockReplay {
     pub(crate) launch_index: i64,
     pub(crate) warps: Vec<WarpReplay>,
+}
+
+/// Architecture-card capacity paired with the admitted launch's per-CTA demand.
+/// The trace's split static/dynamic values have already been checked against the
+/// admitted total before this value reaches the issue model.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct SharedMemoryResidency {
+    max_bytes_per_sm: u64,
+    bytes_per_cta: u64,
+}
+
+impl SharedMemoryResidency {
+    pub(crate) const fn new(max_bytes_per_sm: u64, bytes_per_cta: u64) -> Self {
+        Self {
+            max_bytes_per_sm,
+            bytes_per_cta,
+        }
+    }
+
+    pub(crate) const fn max_bytes_per_sm(self) -> u64 {
+        self.max_bytes_per_sm
+    }
+
+    pub(crate) const fn bytes_per_cta(self) -> u64 {
+        self.bytes_per_cta
+    }
+
+    #[cfg(test)]
+    pub(crate) const fn unconstrained_fixture() -> Self {
+        Self::new(u64::MAX, 0)
+    }
 }
 
 /// Authority lane for scheduler-resource values. The legacy lane is the only
@@ -462,6 +493,19 @@ pub enum IssueError {
         live_warps: u32,
         arch: ArchId,
         max_resident_warps: u32,
+    },
+    #[error(
+        "architecture {arch} has invalid shared-memory capacity {max_bytes_per_sm} bytes per SM"
+    )]
+    SharedMemoryCapacityInvalid { arch: ArchId, max_bytes_per_sm: u64 },
+    #[error(
+        "block {launch_index} requires {bytes_per_cta} shared-memory bytes, exceeding architecture {arch} per-SM capacity {max_bytes_per_sm}"
+    )]
+    BlockSharedMemoryLimitExceeded {
+        launch_index: i64,
+        bytes_per_cta: u64,
+        arch: ArchId,
+        max_bytes_per_sm: u64,
     },
     #[error(
         "block {launch_index} physical warp slot {warp_slot} is outside architecture {arch} range 0..{physical_warp_slots}"
@@ -1024,6 +1068,7 @@ struct BlockState {
     unfinished: usize,
     waiting: usize,
     warp_count: u32,
+    shared_memory_bytes: u64,
     /// Physical slots held while this block is resident. The trace does not carry
     /// CTA lifetime, so modeled overlap may admit another block only when its slot
     /// set is disjoint from every currently resident block.
@@ -1485,6 +1530,7 @@ impl MemModel {
 pub(crate) struct SmCore<'a> {
     schedule: &'a FunctionSchedule,
     params: IssueModelParams,
+    shared_memory_residency: SharedMemoryResidency,
     physical_warp_slots: u32,
     mem: MemModel,
     blocks: &'a [BlockReplay],
@@ -1499,6 +1545,7 @@ pub(crate) struct SmCore<'a> {
     t: u64,
     arrival_stamp: u64,
     resident_warps: u32,
+    resident_shared_memory_bytes: u64,
     resident_warp_slots: HashSet<i32>,
     unfinished_warps: usize,
     next_block: usize,
@@ -1511,13 +1558,20 @@ impl<'a> SmCore<'a> {
     /// driver enforces that before calling). Cache modes attach a FRESH
     /// per-SM L1 (cold cache per kernel, NCU `--cache-control all`
     /// parity).
-    pub(crate) fn new(
+    pub(crate) fn new_with_residency(
         blocks: &'a [BlockReplay],
         schedule: &'a FunctionSchedule,
         params: &IssueModelParams,
+        shared_memory_residency: SharedMemoryResidency,
         mode: SmMemMode,
     ) -> Result<Self, IssueError> {
         params.require_executable_resource_lane()?;
+        if shared_memory_residency.max_bytes_per_sm() == 0 {
+            return Err(IssueError::SharedMemoryCapacityInvalid {
+                arch: params.arch,
+                max_bytes_per_sm: shared_memory_residency.max_bytes_per_sm(),
+            });
+        }
         if params.arch != ArchId::Sm86 {
             return Err(IssueError::ArchitectureUnsupported { arch: params.arch });
         }
@@ -1558,6 +1612,17 @@ impl<'a> SmCore<'a> {
                     live_warps,
                     arch: params.arch,
                     max_resident_warps: params.max_resident_warps_per_sm,
+                });
+            }
+            if live_warps != 0
+                && shared_memory_residency.bytes_per_cta()
+                    > shared_memory_residency.max_bytes_per_sm()
+            {
+                return Err(IssueError::BlockSharedMemoryLimitExceeded {
+                    launch_index: block.launch_index,
+                    bytes_per_cta: shared_memory_residency.bytes_per_cta(),
+                    arch: params.arch,
+                    max_bytes_per_sm: shared_memory_residency.max_bytes_per_sm(),
                 });
             }
             let mut block_slots = HashSet::with_capacity(block.warps.len());
@@ -1659,6 +1724,7 @@ impl<'a> SmCore<'a> {
         let mut core = Self {
             schedule,
             params: *params,
+            shared_memory_residency,
             physical_warp_slots,
             mem,
             blocks,
@@ -1673,12 +1739,29 @@ impl<'a> SmCore<'a> {
             t: 0,
             arrival_stamp: 0,
             resident_warps: 0,
+            resident_shared_memory_bytes: 0,
             resident_warp_slots: HashSet::new(),
             unfinished_warps: 0,
             next_block: 0,
         };
         core.admit_blocks(0)?;
         Ok(core)
+    }
+
+    #[cfg(test)]
+    fn new(
+        blocks: &'a [BlockReplay],
+        schedule: &'a FunctionSchedule,
+        params: &IssueModelParams,
+        mode: SmMemMode,
+    ) -> Result<Self, IssueError> {
+        Self::new_with_residency(
+            blocks,
+            schedule,
+            params,
+            SharedMemoryResidency::unconstrained_fixture(),
+            mode,
+        )
     }
 
     #[cfg(test)]
@@ -1720,16 +1803,22 @@ impl<'a> SmCore<'a> {
         }
     }
 
-    /// Admit blocks in launch order while both modeled constraints allow: the
-    /// resident-warp ceiling and disjoint physical warp slots across concurrent
-    /// CTAs. A colliding later CTA waits for the earlier CTA to retire; reuse
-    /// after retirement is valid. A block whose warps are ALL empty occupies no
-    /// residency (it can never retire through the issue path, so counting it
-    /// would leak warp slots and block later admissions forever).
+    /// Admit blocks in launch order while all modeled constraints allow: the
+    /// resident-warp ceiling, the architecture-card shared-memory capacity, and
+    /// disjoint physical warp slots across concurrent CTAs. A colliding later CTA
+    /// waits for the earlier CTA to retire; reuse after retirement is valid. A
+    /// block whose warps are ALL empty occupies no residency (it can never retire
+    /// through the issue path, so counting it would leak resources and block later
+    /// admissions forever).
     fn admit_blocks(&mut self, t: u64) -> Result<(), IssueError> {
         while self.next_block < self.blocks.len() {
             let blk = &self.blocks[self.next_block];
             let live_warps = self.block_live_warps[self.next_block];
+            let block_shared_memory_bytes = if live_warps == 0 {
+                0
+            } else {
+                self.shared_memory_residency.bytes_per_cta()
+            };
             let Some(next_resident_warps) = self.resident_warps.checked_add(live_warps) else {
                 // Construction proved this CTA fits alone, so an overflowing sum
                 // can only mean it must wait for the current wave to retire.
@@ -1738,6 +1827,17 @@ impl<'a> SmCore<'a> {
                 }
                 return Err(IssueError::CounterOverflow {
                     counter: "resident warp",
+                });
+            };
+            let Some(next_resident_shared_memory_bytes) = self
+                .resident_shared_memory_bytes
+                .checked_add(block_shared_memory_bytes)
+            else {
+                if self.resident_warps > 0 {
+                    break;
+                }
+                return Err(IssueError::CounterOverflow {
+                    counter: "resident shared-memory byte",
                 });
             };
             let pending_slots = blk
@@ -1750,7 +1850,10 @@ impl<'a> SmCore<'a> {
                 .iter()
                 .any(|slot| self.resident_warp_slots.contains(slot));
             if self.resident_warps > 0
-                && (next_resident_warps > self.params.max_resident_warps_per_sm || slots_collide)
+                && (next_resident_warps > self.params.max_resident_warps_per_sm
+                    || next_resident_shared_memory_bytes
+                        > self.shared_memory_residency.max_bytes_per_sm()
+                    || slots_collide)
             {
                 break;
             }
@@ -1850,11 +1953,13 @@ impl<'a> SmCore<'a> {
                 unfinished: admitted_warps,
                 waiting: 0,
                 warp_count: live_warps,
+                shared_memory_bytes: block_shared_memory_bytes,
                 warp_slots: pending_slots.into_boxed_slice(),
                 first_warp,
                 admitted_warps,
             });
             self.resident_warps = next_resident_warps;
+            self.resident_shared_memory_bytes = next_resident_shared_memory_bytes;
             self.unfinished_warps = next_unfinished_warps;
             self.arrival_stamp = next_arrival_stamp;
             self.next_block = next_block;
@@ -3008,6 +3113,7 @@ impl<'a> SmCore<'a> {
             },
         )?;
         let mut residency_released = 0u32;
+        let mut shared_memory_released = 0u64;
         for (block, retirements, arrivals) in block_deltas.into_iter().flatten() {
             let state = &self.block_states[block];
             let unfinished =
@@ -3038,6 +3144,11 @@ impl<'a> SmCore<'a> {
                     residency_released,
                     state.warp_count,
                 )?;
+                shared_memory_released = checked_u64_counter_add(
+                    "resident shared-memory retirement",
+                    shared_memory_released,
+                    state.shared_memory_bytes,
+                )?;
             }
         }
         self.resident_warps.checked_sub(residency_released).ok_or(
@@ -3045,6 +3156,11 @@ impl<'a> SmCore<'a> {
                 counter: "resident warp",
             },
         )?;
+        self.resident_shared_memory_bytes
+            .checked_sub(shared_memory_released)
+            .ok_or(IssueError::CounterUnderflow {
+                counter: "resident shared-memory byte",
+            })?;
         Ok(next_issued)
     }
 
@@ -3205,6 +3321,12 @@ impl<'a> SmCore<'a> {
                         .checked_sub(self.block_states[blk_ix].warp_count)
                         .ok_or(IssueError::CounterUnderflow {
                             counter: "resident warp",
+                        })?;
+                    self.resident_shared_memory_bytes = self
+                        .resident_shared_memory_bytes
+                        .checked_sub(self.block_states[blk_ix].shared_memory_bytes)
+                        .ok_or(IssueError::CounterUnderflow {
+                            counter: "resident shared-memory byte",
                         })?;
                     for &warp_slot in &self.block_states[blk_ix].warp_slots {
                         let removed = self.resident_warp_slots.remove(&warp_slot);
@@ -3533,17 +3655,19 @@ fn lookup(
 /// [`SmCore`] + the event system). `l1_config`, when supplied, attaches
 /// a FRESH per-SM L1 (cold cache per kernel, NCU `--cache-control all`
 /// parity).
-pub(crate) fn simulate_sm(
+pub(crate) fn simulate_sm_with_residency(
     blocks: &[BlockReplay],
     schedule: &FunctionSchedule,
     params: &IssueModelParams,
+    shared_memory_residency: SharedMemoryResidency,
     l1_config: Option<L1Config>,
 ) -> Result<SmSimResult, IssueError> {
     let mode = match l1_config {
         Some(cfg) => SmMemMode::L1Const(cfg),
         None => SmMemMode::Flat,
     };
-    let mut core = SmCore::new(blocks, schedule, params, mode)?;
+    let mut core =
+        SmCore::new_with_residency(blocks, schedule, params, shared_memory_residency, mode)?;
     let mut out = Vec::new();
     match core.advance(ReplayHorizon::Unbounded, &mut out)? {
         Advance::Done => {}
@@ -3551,6 +3675,22 @@ pub(crate) fn simulate_sm(
     }
     debug_assert!(out.is_empty(), "synchronous modes emit no requests");
     Ok(core.result())
+}
+
+#[cfg(test)]
+fn simulate_sm(
+    blocks: &[BlockReplay],
+    schedule: &FunctionSchedule,
+    params: &IssueModelParams,
+    l1_config: Option<L1Config>,
+) -> Result<SmSimResult, IssueError> {
+    simulate_sm_with_residency(
+        blocks,
+        schedule,
+        params,
+        SharedMemoryResidency::unconstrained_fixture(),
+        l1_config,
+    )
 }
 
 #[cfg(test)]
@@ -4755,6 +4895,30 @@ mod tests {
     }
 
     #[test]
+    fn first_cta_must_fit_the_architecture_shared_memory_capacity() {
+        let sched = schedule(vec![(0, slot(cb(1), OpClass::Other, "EXIT"))]);
+        let blocks = vec![BlockReplay {
+            launch_index: 6,
+            warps: vec![warp(0, vec![inst(0)])],
+        }];
+        assert!(matches!(
+            SmCore::new_with_residency(
+                &blocks,
+                &sched,
+                &params(),
+                SharedMemoryResidency::new(64, 65),
+                SmMemMode::Flat,
+            ),
+            Err(IssueError::BlockSharedMemoryLimitExceeded {
+                launch_index: 6,
+                bytes_per_cta: 65,
+                arch: ArchId::Sm86,
+                max_bytes_per_sm: 64,
+            })
+        ));
+    }
+
+    #[test]
     fn colliding_ctas_wait_then_reuse_the_physical_slot() {
         let sched = schedule(vec![(0, slot(cb(1), OpClass::Other, "EXIT"))]);
         let blocks = vec![
@@ -4899,6 +5063,45 @@ mod tests {
         assert!(r.cycles >= 4, "cycles={}", r.cycles);
         let r2 = simulate_sm(&blocks, &sched, &params(), None).unwrap();
         assert_eq!(r2.cycles, 2);
+    }
+
+    #[test]
+    fn shared_memory_capacity_forces_waves_and_releases_on_retirement() {
+        let sched = schedule(vec![(0, slot(cb(1), OpClass::Other, "EXIT"))]);
+        let blocks = vec![
+            BlockReplay {
+                launch_index: 0,
+                warps: vec![warp(0, vec![inst(0)])],
+            },
+            BlockReplay {
+                launch_index: 1,
+                warps: vec![warp(1, vec![inst(0)])],
+            },
+        ];
+        let residency = SharedMemoryResidency::new(64, 64);
+        let mut core =
+            SmCore::new_with_residency(&blocks, &sched, &params(), residency, SmMemMode::Flat)
+                .unwrap();
+        assert_eq!(core.next_block, 1);
+        assert_eq!(core.resident_shared_memory_bytes, 64);
+        assert_eq!(core.resident_warp_slots, HashSet::from([0]));
+
+        let mut out = Vec::new();
+        assert_eq!(
+            core.advance(ReplayHorizon::Bounded(1), &mut out).unwrap(),
+            Advance::Idle { wake_at: Some(1) }
+        );
+        assert_eq!(core.next_block, 2);
+        assert_eq!(core.resident_shared_memory_bytes, 64);
+        assert_eq!(core.resident_warp_slots, HashSet::from([1]));
+
+        assert_eq!(
+            core.advance(ReplayHorizon::Unbounded, &mut out).unwrap(),
+            Advance::Done
+        );
+        assert_eq!(core.resident_shared_memory_bytes, 0);
+        assert!(core.resident_warp_slots.is_empty());
+        assert_eq!(core.instructions_issued(), 2);
     }
 
     #[test]

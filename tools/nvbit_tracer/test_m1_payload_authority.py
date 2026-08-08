@@ -6,11 +6,20 @@ import functools
 import hashlib
 import json
 import os
+import tempfile
 from pathlib import Path
 
 import pytest
 
 from tools.nvbit_tracer import build_m1_payload_authority as m1
+
+
+@pytest.fixture
+def external_tmp_path() -> Path:
+    with tempfile.TemporaryDirectory(
+        prefix="m1-payload-authority-", dir="/tmp"
+    ) as root:
+        yield Path(root)
 
 
 @functools.lru_cache(maxsize=1)
@@ -269,11 +278,11 @@ def test_canonical_creation_requires_both_targets_absent(
 
 
 def test_external_pair_emission_is_atomic_and_rollback_safe(
-    tmp_path: Path, monkeypatch
+    external_tmp_path: Path, monkeypatch
 ) -> None:
     built = _live_built()
-    alias = tmp_path / "aliases.json"
-    payload = tmp_path / "payloads.sha256"
+    alias = external_tmp_path / "aliases.json"
+    payload = external_tmp_path / "payloads.sha256"
     monkeypatch.setattr(m1, "build_authority_bytes", lambda _root=m1.REPO_ROOT: built)
     m1.emit_authorities(alias, payload)
     assert alias.read_bytes() == built.path_aliases

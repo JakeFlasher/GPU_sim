@@ -41,7 +41,7 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parents[2]
 REGISTRY_RELATIVE = "eval/guards/evaluator_import_surface_registry.v1.json"
 SCHEMA_RELATIVE = "eval/guards/evaluator_import_surface_registry.v1.schema.json"
-REGISTRY_SHA256 = "050dbcb9db9ac491b7ce25e19b00ae99e7b1346040f316e5e5cfa7ff21ec8716"
+REGISTRY_SHA256 = "e3b1fac72331f9fc8a899900f6003dfa188146a4be94981e580b770336f9f0f3"
 ENTRYPOINT = "eval/production_evaluator/__init__.py"
 ENTRYPOINT_MODULE = "eval.production_evaluator"
 SCHEMA_ID = (
@@ -5405,8 +5405,11 @@ def test_runtime_code_authentication_accepts_lone_surrogate_constant() -> None:
         dont_inherit=True,
         optimize=0,
     )
-    observed = marshal.loads(marshal.dumps(expected))
+    payload = marshal.dumps(expected)
+    observed = marshal.loads(payload)
+    expected = marshal.loads(payload)
     assert isinstance(observed, CodeType)
+    assert isinstance(expected, CodeType)
     assert any(
         isinstance(value, frozenset) and "\ud800" in value
         for value in expected.co_consts

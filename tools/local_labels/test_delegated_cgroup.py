@@ -9,6 +9,7 @@ import pytest
 from tools.local_labels import capture_cutlass_successor_receipts as capture
 from tools.local_labels import delegated_cgroup as cgroup
 from tools.local_labels import ncu_action_executor as executor
+from tools.nvbit_tracer import capture_process
 
 
 def _write_proc_contracts(
@@ -114,6 +115,44 @@ def test_missing_delegated_controls_remove_partial_leaf(
         cgroup.DelegatedCgroupV2.create()
 
     assert list(parent.iterdir()) == []
+
+
+def test_create_preserves_operator_interruption_during_leaf_creation(
+    tmp_path: Path, monkeypatch,
+):
+    mount = _write_proc_contracts(tmp_path, monkeypatch, b"0::/delegated\n")
+    parent = mount / "delegated"
+    parent.mkdir()
+    interruption = KeyboardInterrupt("synthetic cgroup creation interruption")
+    monkeypatch.setattr(
+        cgroup.os,
+        "mkdir",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(interruption),
+    )
+
+    with pytest.raises(KeyboardInterrupt) as failure:
+        cgroup.DelegatedCgroupV2.create()
+
+    assert failure.value is interruption
+
+
+def test_create_preserves_capture_deadline_during_leaf_creation(
+    tmp_path: Path, monkeypatch,
+):
+    mount = _write_proc_contracts(tmp_path, monkeypatch, b"0::/delegated\n")
+    parent = mount / "delegated"
+    parent.mkdir()
+    deadline = capture_process.CaptureLaunchTimeout("synthetic deadline")
+    monkeypatch.setattr(
+        cgroup.os,
+        "mkdir",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(deadline),
+    )
+
+    with pytest.raises(capture_process.CaptureLaunchTimeout) as failure:
+        cgroup.DelegatedCgroupV2.create()
+
+    assert failure.value is deadline
 
 
 def test_required_capture_containment_never_falls_back(monkeypatch, tmp_path: Path):

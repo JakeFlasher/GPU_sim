@@ -14,11 +14,13 @@ import tools.nvbit_tracer.import_trace_contract as import_trace_contract
 import tools.nvbit_tracer.trace_admission as trace_admission
 from tools.nvbit_tracer.trace_admission import (
     DEFAULT_TRACE_ADMISSION_LIMITS,
+    HISTORICAL_TRACE_ADMISSION_SCOPE,
     TRACE_ADMISSION_SCOPE,
     TraceAdmissionError,
     _raise_admission_prerequisite,
     monitor_admitted_trace_sources,
     open_admitted_trace_sources,
+    require_historical_trace_admission,
     require_trace_admission,
 )
 from tools.nvbit_tracer.import_trace_contract import (
@@ -33,13 +35,21 @@ def _pb_modules():
     return bindings.trace_pb2, bindings.threadblock_pb2
 
 
-def _write_trace(root: Path, *, launch: bool = True, instruction: bool = True,
-                 expected: int = 1, admitted: int = 1) -> Path:
+def _write_trace(
+    root: Path,
+    *,
+    launch: bool = True,
+    instruction: bool = True,
+    expected: int = 1,
+    admitted: int = 1,
+    trace_contract_id: str = trace_admission.EXPECTED_TRACE_CONTRACT_ID,
+    include_split_fields: bool = True,
+) -> Path:
     trace_pb2, threadblock_pb2 = _pb_modules()
     root.mkdir()
 
     trace = trace_pb2.Trace()
-    trace.trace_contract_id = "sm86_addr_carry_v1"
+    trace.trace_contract_id = trace_contract_id
     trace.memory_payload_classes.extend([1, 2, 3, 6, 8])
     if launch:
         device = trace.gpu_device[0]
@@ -53,6 +63,9 @@ def _write_trace(root: Path, *, launch: bool = True, instruction: bool = True,
         kernel.grid_dim.x = kernel.grid_dim.y = kernel.grid_dim.z = 1
         kernel.block_dim.x = 32
         kernel.block_dim.y = kernel.block_dim.z = 1
+        if include_split_fields:
+            kernel.shared_memory_static_bytes = 0
+            kernel.shared_memory_dynamic_bytes = 0
     (root / "dynamic_trace.pb").write_bytes(trace.SerializeToString())
 
     tb = threadblock_pb2.threadblock()
@@ -111,6 +124,9 @@ def test_require_trace_admission_accepts_nonvacuous_capture(tmp_path: Path) -> N
     assert result.stats_row_count == 1
     assert result.expected_record_count == 1
     assert result.admitted_record_count == 1
+    assert result.admission_scope == TRACE_ADMISSION_SCOPE
+    assert result.trace_contract_id == trace_admission.EXPECTED_TRACE_CONTRACT_ID
+    assert result.memory_payload_classes == (1, 2, 3, 6, 8)
     root_bytes = (tmp_path / "trace" / "dynamic_trace.pb").read_bytes()
     stats_bytes = (tmp_path / "trace" / "stats.csv").read_bytes()
     assert result.dynamic_trace_size_bytes == len(root_bytes)
@@ -132,19 +148,174 @@ def test_require_trace_admission_accepts_nonvacuous_capture(tmp_path: Path) -> N
     assert changed.trace_admission_sha256 != result.trace_admission_sha256
 
 
+def test_legacy_v1_requires_explicit_historical_read_only_admission(
+    tmp_path: Path,
+) -> None:
+    trace_dir = _write_trace(
+        tmp_path / "legacy",
+        trace_contract_id=trace_admission.LEGACY_TRACE_CONTRACT_ID,
+        include_split_fields=False,
+    )
+
+    with pytest.raises(TraceAdmissionError) as caught:
+        require_trace_admission(trace_dir)
+    assert caught.value.typed_reason == "legacy_trace_historical_only"
+
+    historical = require_historical_trace_admission(trace_dir)
+    assert historical.admission_scope == HISTORICAL_TRACE_ADMISSION_SCOPE
+    assert historical.trace_contract_id == trace_admission.LEGACY_TRACE_CONTRACT_ID
+    with open_admitted_trace_sources(
+        trace_dir,
+        expected_admission=historical,
+    ) as sources:
+        sources.verify_unchanged()
+
+
+def test_legacy_v1_retains_historical_set_capability_semantics(
+    tmp_path: Path,
+) -> None:
+    trace_dir = _write_trace(
+        tmp_path / "legacy-reordered",
+        trace_contract_id=trace_admission.LEGACY_TRACE_CONTRACT_ID,
+        include_split_fields=False,
+    )
+    root = _read_root(trace_dir)
+    capabilities = list(root.memory_payload_classes)
+    del root.memory_payload_classes[:]
+    root.memory_payload_classes.extend(reversed(capabilities))
+    _write_root(trace_dir, root)
+
+    historical = require_historical_trace_admission(trace_dir)
+
+    assert historical.admission_scope == HISTORICAL_TRACE_ADMISSION_SCOPE
+    assert historical.memory_payload_classes == tuple(reversed(capabilities))
+
+
 def test_trace_admission_does_not_fabricate_shared_memory_split(
     tmp_path: Path,
 ) -> None:
-    trace_dir = _write_trace(tmp_path / "trace")
+    trace_dir = _write_trace(
+        tmp_path / "trace",
+        trace_contract_id=trace_admission.LEGACY_TRACE_CONTRACT_ID,
+        include_split_fields=False,
+    )
     root = _read_root(trace_dir)
     root.gpu_device[0].streams[0].kernels[0].size_shared_memory = 4096
     _write_root(trace_dir, root)
 
     with pytest.raises(TraceAdmissionError) as caught:
-        require_trace_admission(trace_dir)
+        require_historical_trace_admission(trace_dir)
 
     assert caught.value.typed_reason == "shared_memory_split_unavailable"
     assert "combined static+dynamic" in caught.value.detail
+
+
+def test_trace_admission_accepts_authenticated_shared_memory_split(
+    tmp_path: Path,
+) -> None:
+    trace_dir = _write_trace(tmp_path / "trace")
+    root = _read_root(trace_dir)
+    root.trace_contract_id = trace_admission.EXPECTED_TRACE_CONTRACT_ID
+    kernel = root.gpu_device[0].streams[0].kernels[0]
+    kernel.size_shared_memory = 6144
+    kernel.shared_memory_static_bytes = 2048
+    kernel.shared_memory_dynamic_bytes = 4096
+    _write_root(trace_dir, root)
+
+    admitted = require_trace_admission(trace_dir)
+
+    assert admitted.launches[0].shared_mem_static_bytes == 2048
+    assert admitted.launches[0].shared_mem_dynamic_bytes == 4096
+
+
+def test_trace_admission_requires_explicit_zero_split_components(
+    tmp_path: Path,
+) -> None:
+    trace_dir = _write_trace(tmp_path / "trace")
+    root = _read_root(trace_dir)
+    root.trace_contract_id = trace_admission.EXPECTED_TRACE_CONTRACT_ID
+    kernel = root.gpu_device[0].streams[0].kernels[0]
+    kernel.shared_memory_static_bytes = 0
+    kernel.shared_memory_dynamic_bytes = 0
+    _write_root(trace_dir, root)
+
+    admitted = require_trace_admission(trace_dir)
+
+    assert admitted.launches[0].shared_mem_static_bytes == 0
+    assert admitted.launches[0].shared_mem_dynamic_bytes == 0
+
+
+@pytest.mark.parametrize(
+    "present_field",
+    ["shared_memory_static_bytes", "shared_memory_dynamic_bytes", None],
+)
+def test_trace_admission_rejects_incomplete_advertised_split(
+    tmp_path: Path,
+    present_field: str | None,
+) -> None:
+    trace_dir = _write_trace(
+        tmp_path / "trace", include_split_fields=False
+    )
+    root = _read_root(trace_dir)
+    root.trace_contract_id = trace_admission.EXPECTED_TRACE_CONTRACT_ID
+    if present_field is not None:
+        setattr(root.gpu_device[0].streams[0].kernels[0], present_field, 0)
+    _write_root(trace_dir, root)
+
+    with pytest.raises(TraceAdmissionError) as caught:
+        require_trace_admission(trace_dir)
+
+    assert caught.value.typed_reason == "shared_memory_split_missing"
+
+
+def test_trace_admission_rejects_split_sum_mismatch(tmp_path: Path) -> None:
+    trace_dir = _write_trace(tmp_path / "trace")
+    root = _read_root(trace_dir)
+    root.trace_contract_id = trace_admission.EXPECTED_TRACE_CONTRACT_ID
+    kernel = root.gpu_device[0].streams[0].kernels[0]
+    kernel.size_shared_memory = 4096
+    kernel.shared_memory_static_bytes = 1024
+    kernel.shared_memory_dynamic_bytes = 2048
+    _write_root(trace_dir, root)
+
+    with pytest.raises(TraceAdmissionError) as caught:
+        require_trace_admission(trace_dir)
+
+    assert caught.value.typed_reason == "shared_memory_split_mismatch"
+
+
+def test_trace_admission_rejects_unadvertised_split_fields(
+    tmp_path: Path,
+) -> None:
+    trace_dir = _write_trace(
+        tmp_path / "trace",
+        trace_contract_id=trace_admission.LEGACY_TRACE_CONTRACT_ID,
+        include_split_fields=False,
+    )
+    root = _read_root(trace_dir)
+    kernel = root.gpu_device[0].streams[0].kernels[0]
+    kernel.shared_memory_static_bytes = 0
+    kernel.shared_memory_dynamic_bytes = 0
+    _write_root(trace_dir, root)
+
+    with pytest.raises(TraceAdmissionError) as caught:
+        require_historical_trace_admission(trace_dir)
+
+    assert caught.value.typed_reason == "shared_memory_split_unadvertised"
+
+
+def test_trace_admission_rejects_negative_combined_shared_memory(
+    tmp_path: Path,
+) -> None:
+    trace_dir = _write_trace(tmp_path / "trace")
+    root = _read_root(trace_dir)
+    root.gpu_device[0].streams[0].kernels[0].size_shared_memory = -1
+    _write_root(trace_dir, root)
+
+    with pytest.raises(TraceAdmissionError) as caught:
+        require_trace_admission(trace_dir)
+
+    assert caught.value.typed_reason == "trace_launch_shared_memory_invalid"
 
 
 def test_trace_admission_content_seal_is_relocation_portable(
@@ -996,6 +1167,31 @@ def test_open_admitted_trace_sources_uses_one_descriptor_anchored_reader(
     assert reader_count == 1
 
 
+def test_open_admitted_trace_sources_reuses_caller_directory_pin(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    trace_dir = _write_trace(tmp_path / "trace")
+    with immutable_artifact.PinnedDirectoryReader(trace_dir) as reader:
+        admission = trace_admission._require_trace_admission_snapshot(
+            trace_dir,
+            reader=reader,
+        ).admission
+        monkeypatch.setattr(
+            trace_admission,
+            "PinnedDirectoryReader",
+            lambda _path: pytest.fail("supplied trace-root pin was reopened"),
+        )
+        with open_admitted_trace_sources(
+            trace_dir,
+            expected_admission=admission,
+            reader=reader,
+        ) as sources:
+            assert sources.read_dynamic_trace_snapshot().payload
+        reader.verify_path()
+        assert reader.read("stats.csv")
+
+
 @pytest.mark.parametrize(
     "substitution",
     ("symlink", "fifo", "same_bytes", "oversize", "metadata"),
@@ -1380,6 +1576,19 @@ def test_root_capabilities_are_exact_not_subset_only(tmp_path: Path) -> None:
     trace_dir = _write_trace(tmp_path / "trace")
     root = _read_root(trace_dir)
     root.memory_payload_classes.append(1)
+    _write_root(trace_dir, root)
+
+    with pytest.raises(TraceAdmissionError) as caught:
+        require_trace_admission(trace_dir)
+    assert caught.value.typed_reason == "trace_capabilities_invalid"
+
+
+def test_root_capabilities_require_exact_order(tmp_path: Path) -> None:
+    trace_dir = _write_trace(tmp_path / "trace")
+    root = _read_root(trace_dir)
+    capabilities = list(root.memory_payload_classes)
+    del root.memory_payload_classes[:]
+    root.memory_payload_classes.extend(reversed(capabilities))
     _write_root(trace_dir, root)
 
     with pytest.raises(TraceAdmissionError) as caught:

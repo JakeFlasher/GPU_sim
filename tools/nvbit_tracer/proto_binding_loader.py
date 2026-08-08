@@ -36,9 +36,11 @@ try:
     import google.protobuf.descriptor as _descriptor_module
     import google.protobuf.descriptor_pool as _descriptor_pool_module
     import google.protobuf.internal as _protobuf_internal_module
+    import google.protobuf.internal.api_implementation as _api_implementation_module
     import google.protobuf.internal.builder as _builder_module
     import google.protobuf.internal.enum_type_wrapper as _enum_wrapper_module
     import google.protobuf.message as _message_module
+    import google.protobuf.message_factory as _message_factory_module
     import google.protobuf.reflection as _reflection_module
     import google.protobuf.runtime_version as _runtime_version_module
     import google.protobuf.symbol_database as _symbol_database_module
@@ -51,9 +53,11 @@ else:
         "descriptor": _descriptor_module,
         "descriptor_pool": _descriptor_pool_module,
         "protobuf_internal": _protobuf_internal_module,
+        "api_implementation": _api_implementation_module,
         "builder": _builder_module,
         "enum_wrapper": _enum_wrapper_module,
         "message": _message_module,
+        "message_factory": _message_factory_module,
         "reflection": _reflection_module,
         "runtime_version": _runtime_version_module,
         "symbol_database": _symbol_database_module,
@@ -117,8 +121,8 @@ BINDING_PINS: tuple[BindingPin, ...] = (
         "kernel_pb2",
         "kernel_pb2.py",
         "kernel.proto",
-        1802,
-        "4d8784dfe9be2eb322f4998656a2cdb83571a6395044638290baf5bc7f233c8b",
+        2024,
+        "d84c72e4217dd3efe535e04ffb6549137cfdc79e384e07db8bb5fad6e29cf6c0",
         ("dim3d_pb2",),
     ),
     BindingPin(
@@ -318,6 +322,184 @@ class _PrivateSymbolDatabase:
         return message
 
 
+class _IsolatedMessageFactory:
+    __slots__ = ("_get_message_class", "_symbol_database", "pool")
+
+    def __init__(
+        self,
+        pool: Any,
+        get_message_class: Any,
+        symbol_database: _PrivateSymbolDatabase,
+    ) -> None:
+        object.__setattr__(self, "pool", pool)
+        object.__setattr__(self, "_get_message_class", get_message_class)
+        object.__setattr__(self, "_symbol_database", symbol_database)
+
+    def build_generated_class(
+        self, module_name: str, descriptor: Any, qualname: str
+    ) -> type:
+        if getattr(descriptor.file, "pool", None) is not self.pool:
+            raise _integrity(
+                f"message descriptor {descriptor.full_name} is not factory-owned"
+            )
+        message_class = self._get_message_class(descriptor)
+        if (
+            not isinstance(message_class, type)
+            or getattr(message_class, "DESCRIPTOR", None) is not descriptor
+            or getattr(message_class, "__name__", None) != descriptor.name
+        ):
+            raise _integrity(
+                f"message factory returned incompatible class for {descriptor.full_name}"
+            )
+        message_class.__module__ = module_name
+        message_class.__qualname__ = qualname
+        for nested_descriptor in descriptor.nested_types:
+            nested_qualname = f"{qualname}.{nested_descriptor.name}"
+            nested_class = self.build_generated_class(
+                module_name, nested_descriptor, nested_qualname
+            )
+            if getattr(message_class, nested_descriptor.name, None) is not nested_class:
+                raise _integrity(
+                    f"message factory nested class mismatch for "
+                    f"{nested_descriptor.full_name}"
+                )
+        self._symbol_database.RegisterMessage(message_class)
+        return message_class
+
+    def __setattr__(self, _name: str, _value: Any) -> NoReturn:
+        raise AttributeError("isolated message factory is read-only")
+
+    def __delattr__(self, _name: str) -> NoReturn:
+        raise AttributeError("isolated message factory is read-only")
+
+
+class _PrivateEnumTypeWrapper:
+    """Loader-owned enum capability with no ambient protobuf class dispatch."""
+
+    __slots__ = ("_descriptor", "_enum_type")
+    ValueType = int
+
+    def __init__(self, enum_type: Any) -> None:
+        object.__setattr__(self, "_enum_type", enum_type)
+        object.__setattr__(self, "_descriptor", enum_type)
+
+    @property
+    def DESCRIPTOR(self) -> Any:
+        return object.__getattribute__(self, "_descriptor")
+
+    def Name(self, number: int) -> str:
+        enum_type = object.__getattribute__(self, "_enum_type")
+        try:
+            return enum_type.values_by_number[number].name
+        except KeyError:
+            if not isinstance(number, int):
+                raise TypeError(
+                    f"Enum value for {enum_type.name} must be an int, but got "
+                    f"{type(number)} {number!r}."
+                ) from None
+            raise ValueError(
+                f"Enum {enum_type.name} has no name defined for value {number!r}"
+            ) from None
+
+    def Value(self, name: str) -> int:
+        enum_type = object.__getattribute__(self, "_enum_type")
+        try:
+            return enum_type.values_by_name[name].number
+        except KeyError:
+            raise ValueError(
+                f"Enum {enum_type.name} has no value defined for name {name!r}"
+            ) from None
+
+    def keys(self) -> list[str]:
+        return [
+            value.name
+            for value in object.__getattribute__(self, "_enum_type").values
+        ]
+
+    def values(self) -> list[int]:
+        return [
+            value.number
+            for value in object.__getattribute__(self, "_enum_type").values
+        ]
+
+    def items(self) -> list[tuple[str, int]]:
+        return [
+            (value.name, value.number)
+            for value in object.__getattribute__(self, "_enum_type").values
+        ]
+
+    def __getattr__(self, name: str) -> int:
+        enum_type = object.__getattribute__(self, "_enum_type")
+        try:
+            return enum_type.values_by_name[name].number
+        except KeyError:
+            raise AttributeError(
+                f"Enum {enum_type.name} has no value defined for name {name!r}"
+            ) from None
+
+    def __or__(self, other: Any) -> Any:
+        return type(self) | other
+
+    def __setattr__(self, _name: str, _value: Any) -> NoReturn:
+        raise AttributeError("private enum wrapper is read-only")
+
+    def __delattr__(self, _name: str) -> NoReturn:
+        raise AttributeError("private enum wrapper is read-only")
+
+
+class _PrivateGeneratedBuilder:
+    __slots__ = ("_message_factory",)
+
+    def __init__(self, message_factory: _IsolatedMessageFactory) -> None:
+        object.__setattr__(self, "_message_factory", message_factory)
+
+    def _build_nested_descriptors(
+        self, module: dict[str, Any], descriptor: Any, prefix: str
+    ) -> None:
+        for name, nested_descriptor in descriptor.nested_types_by_name.items():
+            module_name = f"{prefix}{name.upper()}"
+            module[module_name] = nested_descriptor
+            self._build_nested_descriptors(
+                module, nested_descriptor, f"{module_name}_"
+            )
+        for enum_descriptor in descriptor.enum_types:
+            module[f"{prefix}{enum_descriptor.name.upper()}"] = enum_descriptor
+
+    def BuildMessageAndEnumDescriptors(
+        self, file_descriptor: Any, module: dict[str, Any]
+    ) -> None:
+        for name, message_descriptor in file_descriptor.message_types_by_name.items():
+            module_name = f"_{name.upper()}"
+            module[module_name] = message_descriptor
+            self._build_nested_descriptors(
+                module, message_descriptor, f"{module_name}_"
+            )
+
+    def BuildTopDescriptorsAndMessages(
+        self, file_descriptor: Any, module_name: str, module: dict[str, Any]
+    ) -> None:
+        for name, enum_descriptor in file_descriptor.enum_types_by_name.items():
+            module[f"_{name.upper()}"] = enum_descriptor
+            module[name] = _PrivateEnumTypeWrapper(enum_descriptor)
+            for enum_value in enum_descriptor.values:
+                module[enum_value.name] = enum_value.number
+        for name, extension_descriptor in file_descriptor.extensions_by_name.items():
+            module[f"{name.upper()}_FIELD_NUMBER"] = extension_descriptor.number
+            module[name] = extension_descriptor
+        for name, service_descriptor in file_descriptor.services_by_name.items():
+            module[f"_{name.upper()}"] = service_descriptor
+        for name, message_descriptor in file_descriptor.message_types_by_name.items():
+            module[name] = self._message_factory.build_generated_class(
+                module_name, message_descriptor, message_descriptor.name
+            )
+
+    def __setattr__(self, _name: str, _value: Any) -> NoReturn:
+        raise AttributeError("private generated builder is read-only")
+
+    def __delattr__(self, _name: str) -> NoReturn:
+        raise AttributeError("private generated builder is read-only")
+
+
 class BindingModuleView:
     """Sealed, read-only capability for one authenticated generated namespace."""
 
@@ -483,6 +665,7 @@ class _RuntimeAuthority:
     classes: tuple[_ClassCapture, ...]
     protobuf: Any
     protobuf_internal: Any
+    api_implementation: Any
     descriptor: Any
     descriptor_pool: Any
     runtime_version: Any
@@ -491,6 +674,7 @@ class _RuntimeAuthority:
     enum_wrapper: Any
     reflection: Any
     message: Any
+    message_factory: Any
     default_pool: Any
     default_symbol_database: Any
     pool_runtime_type: type
@@ -515,6 +699,7 @@ class _ExecutionRuntime:
     authority: _RuntimeAuthority
     pool: Any
     symbol_database: _PrivateSymbolDatabase
+    message_factory: _IsolatedMessageFactory
     protobuf_proxy: _FrozenNamespace
     internal_proxy: _FrozenNamespace
     marker: _ExecutionMarker
@@ -607,6 +792,29 @@ def _code_fingerprint(code: types.CodeType) -> str:
     return digest.hexdigest()
 
 
+_ENUM_WRAPPER_METHOD_NAMES = (
+    "__init__",
+    "Name",
+    "Value",
+    "keys",
+    "values",
+    "items",
+    "__getattr__",
+    "__or__",
+)
+_ENUM_WRAPPER_NAMESPACE_NAMES = frozenset(
+    {
+        "__module__",
+        "__doc__",
+        "DESCRIPTOR",
+        "ValueType",
+        *_ENUM_WRAPPER_METHOD_NAMES,
+        "__dict__",
+        "__weakref__",
+    }
+)
+_ENUM_WRAPPER_DOC = "A utility for finding the names of enum values."
+
 _FUNCTION_PINS = {
     "descriptor_pool.Default": "e004443293e7a69fe433a64b03989b15db8c539942a2d6592bab64994a9ae82c",
     "runtime_version.ValidateProtobufRuntimeVersion": "fbd06c76d975f7c1012af0f7ddf3c45b08913949e7a068c61375cce9225d8c13",
@@ -616,13 +824,18 @@ _FUNCTION_PINS = {
     "builder.BuildTopDescriptorsAndMessages": "59f391fcc20e2cd2bf7c8424ea6e97b152369e5199bb20f3d9e511bb22dbbc54",
     "builder._BuildNestedDescriptors": "4ef8b058d76f71ba60275127d9748f23baa962cd9f826802166edd00c63ae2c3",
     "builder._BuildMessage": "32fa9fdb2ec45a483d8ed9f069503c99af1167da31e7944de9d588867419a14e",
+    "message_factory.GetMessageClass": "efd27444fb41f82ac19ce13a22b2f8c848e3e120f317f91e4330cf59e365b814",
+    "message_factory._InternalCreateMessageClass": "de4fb5e479e320afa6866dabb94d89202d7273cf22ad39b93229758ee0b2b3ad",
     "EnumTypeWrapper.__init__": "37f452941845e5683a3c23a95d40862aac7132e8fbac6fc9cbe2bfefa93cb1b9",
     "EnumTypeWrapper.Name": "a7623424c80416801d5fdf838e88615431056b25e5368cdf33c104805f249a95",
     "EnumTypeWrapper.Value": "18478f259e7f4d588a2b1cf440f6262ac35bd8e7d5563e684897d31ed379d99c",
     "EnumTypeWrapper.keys": "459e6d30b225f11262255339e47f804309129971339e883ea37e0fa546f8f0a0",
     "EnumTypeWrapper.values": "7d64973148e55405a55f67ca9414ca75d02900632523f6e78c2aa002317515f9",
     "EnumTypeWrapper.items": "eb68ee31faf094e2ccff22807245d7ead8d966cc00631321c0ed82049743b0fc",
+    "EnumTypeWrapper.__getattr__": "ed2ce042d147b3198a2cc6daad14fcad1bc7b3ce780e37135dc5a1f68c7e1a6a",
+    "EnumTypeWrapper.__or__": "8269d89706b9cf63c6bbea003abc16ded0354f80ef1c6895e46b4b4330831b96",
 }
+
 
 def _spec_state(spec: Any) -> tuple[Any, ...]:
     locations = getattr(spec, "submodule_search_locations", None)
@@ -703,9 +916,11 @@ def _build_runtime_authority(imported: Mapping[str, Any]) -> _RuntimeAuthority:
     descriptor = imported["descriptor"]
     descriptor_pool = imported["descriptor_pool"]
     protobuf_internal = imported["protobuf_internal"]
+    api_implementation = imported["api_implementation"]
     builder = imported["builder"]
     enum_wrapper = imported["enum_wrapper"]
     message = imported["message"]
+    message_factory = imported["message_factory"]
     reflection = imported["reflection"]
     runtime_version = imported["runtime_version"]
     symbol_database = imported["symbol_database"]
@@ -717,9 +932,11 @@ def _build_runtime_authority(imported: Mapping[str, Any]) -> _RuntimeAuthority:
             ("google.protobuf.descriptor", descriptor),
             ("google.protobuf.descriptor_pool", descriptor_pool),
             ("google.protobuf.internal", protobuf_internal),
+            ("google.protobuf.internal.api_implementation", api_implementation),
             ("google.protobuf.internal.builder", builder),
             ("google.protobuf.internal.enum_type_wrapper", enum_wrapper),
             ("google.protobuf.message", message),
+            ("google.protobuf.message_factory", message_factory),
             ("google.protobuf.reflection", reflection),
             ("google.protobuf.runtime_version", runtime_version),
             ("google.protobuf.symbol_database", symbol_database),
@@ -778,11 +995,28 @@ def _build_runtime_authority(imported: Mapping[str, Any]) -> _RuntimeAuthority:
             "_BuildMessage",
             ("_BuildMessage", "_reflection", "_message", "_sym_db"),
         ),
+        _capture_function(
+            "message_factory.GetMessageClass",
+            message_factory,
+            "GetMessageClass",
+            ("_InternalCreateMessageClass",),
+        ),
+        _capture_function(
+            "message_factory._InternalCreateMessageClass",
+            message_factory,
+            "_InternalCreateMessageClass",
+            (
+                "_GENERATED_PROTOCOL_MESSAGE_TYPE",
+                "message",
+                "GetMessageClass",
+                "api_implementation",
+            ),
+        ),
         *(
             _capture_function(
                 f"EnumTypeWrapper.{name}", enum_wrapper_class, name
             )
-            for name in ("__init__", "Name", "Value", "keys", "values", "items")
+            for name in _ENUM_WRAPPER_METHOD_NAMES
         ),
     )
     classes = (
@@ -807,6 +1041,7 @@ def _build_runtime_authority(imported: Mapping[str, Any]) -> _RuntimeAuthority:
         classes=classes,
         protobuf=protobuf,
         protobuf_internal=protobuf_internal,
+        api_implementation=api_implementation,
         descriptor=descriptor,
         descriptor_pool=descriptor_pool,
         runtime_version=runtime_version,
@@ -815,6 +1050,7 @@ def _build_runtime_authority(imported: Mapping[str, Any]) -> _RuntimeAuthority:
         enum_wrapper=enum_wrapper,
         reflection=reflection,
         message=message,
+        message_factory=message_factory,
         default_pool=default_pool,
         default_symbol_database=default_symbol_database,
         pool_runtime_type=type(default_pool),
@@ -925,6 +1161,75 @@ def _validate_function_capture(capture: _FunctionCapture) -> None:
             )
 
 
+def _validate_enum_wrapper_class(
+    runtime: _RuntimeAuthority,
+    function_captures: Mapping[str, _FunctionCapture],
+) -> None:
+    wrapper_class = runtime.enum_wrapper_class
+    if (
+        type(wrapper_class) is not type
+        or wrapper_class.__module__
+        != "google.protobuf.internal.enum_type_wrapper"
+        or wrapper_class.__name__ != "EnumTypeWrapper"
+        or wrapper_class.__qualname__ != "EnumTypeWrapper"
+        or wrapper_class.__bases__ != (object,)
+        or wrapper_class.__mro__ != (wrapper_class, object)
+        or wrapper_class.__new__ is not object.__new__
+    ):
+        raise _runtime_prerequisite("EnumTypeWrapper class authority changed")
+
+    namespace = vars(wrapper_class)
+    if frozenset(namespace) != _ENUM_WRAPPER_NAMESPACE_NAMES:
+        raise _runtime_prerequisite("EnumTypeWrapper class namespace changed")
+    if (
+        type(namespace["__module__"]) is not str
+        or namespace["__module__"]
+        != "google.protobuf.internal.enum_type_wrapper"
+        or type(namespace["__doc__"]) is not str
+        or namespace["__doc__"] != _ENUM_WRAPPER_DOC
+        or namespace["DESCRIPTOR"] is not None
+        or namespace["ValueType"] is not int
+    ):
+        raise _runtime_prerequisite("EnumTypeWrapper class constants changed")
+
+    for name in _ENUM_WRAPPER_METHOD_NAMES:
+        capture = function_captures[f"EnumTypeWrapper.{name}"]
+        function = namespace[name]
+        if (
+            function is not capture.function
+            or type(function.__annotations__) is not dict
+            or function.__annotations__
+            or function.__defaults__ is not None
+            or function.__kwdefaults__ is not None
+        ):
+            raise _runtime_prerequisite(
+                f"EnumTypeWrapper class member {name!r} changed"
+            )
+    getattr_closure = namespace["__getattr__"].__closure__
+    if (
+        type(getattr_closure) is not tuple
+        or len(getattr_closure) != 1
+        or getattr_closure[0].cell_contents is not wrapper_class
+    ):
+        raise _runtime_prerequisite("EnumTypeWrapper __getattr__ closure changed")
+    for name in _ENUM_WRAPPER_METHOD_NAMES:
+        if name != "__getattr__" and namespace[name].__closure__ is not None:
+            raise _runtime_prerequisite(
+                f"EnumTypeWrapper class member {name!r} closure changed"
+            )
+
+    for name in ("__dict__", "__weakref__"):
+        descriptor = namespace[name]
+        if (
+            type(descriptor) is not types.GetSetDescriptorType
+            or descriptor.__objclass__ is not wrapper_class
+            or descriptor.__name__ != name
+        ):
+            raise _runtime_prerequisite(
+                f"EnumTypeWrapper class descriptor {name!r} changed"
+            )
+
+
 def _validate_runtime_authority(runtime: _RuntimeAuthority) -> None:
     version = getattr(runtime.protobuf, "__version__", None)
     if type(version) is not str or version != EXPECTED_PROTOBUF_RUNTIME_VERSION:
@@ -959,11 +1264,38 @@ def _validate_runtime_authority(runtime: _RuntimeAuthority) -> None:
         ):
             raise _runtime_prerequisite(f"class {capture.label} identity changed")
 
+    function_captures = {capture.label: capture for capture in runtime.functions}
+    _validate_enum_wrapper_class(runtime, function_captures)
+    get_message_class = function_captures["message_factory.GetMessageClass"]
+    create_message_class = function_captures[
+        "message_factory._InternalCreateMessageClass"
+    ]
+    get_globals = get_message_class.function.__globals__
+    create_globals = create_message_class.function.__globals__
+    if (
+        get_globals.get("_InternalCreateMessageClass", _MISSING)
+        is not create_message_class.function
+        or create_globals.get("_GENERATED_PROTOCOL_MESSAGE_TYPE", _MISSING)
+        is not runtime.generated_message_meta
+        or create_globals.get("message", _MISSING) is not runtime.message
+        or create_globals.get("GetMessageClass", _MISSING)
+        is not get_message_class.function
+        or create_globals.get("api_implementation", _MISSING)
+        is not runtime.api_implementation
+    ):
+        raise _runtime_prerequisite("message factory runtime bindings changed")
+
     package_bindings = (
         (runtime.protobuf, "descriptor", runtime.descriptor),
         (runtime.protobuf, "descriptor_pool", runtime.descriptor_pool),
+        (runtime.protobuf, "message_factory", runtime.message_factory),
         (runtime.protobuf, "runtime_version", runtime.runtime_version),
         (runtime.protobuf, "symbol_database", runtime.symbol_database),
+        (
+            runtime.protobuf_internal,
+            "api_implementation",
+            runtime.api_implementation,
+        ),
         (runtime.protobuf_internal, "builder", runtime.builder),
     )
     for owner, name, expected in package_bindings:
@@ -1328,17 +1660,16 @@ def _clone_retained_function(
 
 
 def _new_execution_runtime(runtime: _RuntimeAuthority) -> _ExecutionRuntime:
-    pool = runtime.default_pool
-    if type(pool) is not runtime.pool_runtime_type:
-        raise _runtime_prerequisite("default descriptor pool identity is forged")
+    pool = runtime.pool_runtime_type()
+    if type(pool) is not runtime.pool_runtime_type or pool is runtime.default_pool:
+        raise _runtime_prerequisite("isolated descriptor pool construction failed")
     symbol_database = _PrivateSymbolDatabase(pool)
-
-    build_descriptors = _function_capture(
-        runtime, "builder.BuildMessageAndEnumDescriptors"
-    ).function
-    build_top = _function_capture(
-        runtime, "builder.BuildTopDescriptorsAndMessages"
-    ).function
+    message_factory = _IsolatedMessageFactory(
+        pool,
+        _function_capture(runtime, "message_factory.GetMessageClass").function,
+        symbol_database,
+    )
+    generated_builder = _PrivateGeneratedBuilder(message_factory)
 
     descriptor_proxy = _FrozenNamespace(
         "google.protobuf.descriptor",
@@ -1369,10 +1700,12 @@ def _new_execution_runtime(runtime: _RuntimeAuthority) -> _ExecutionRuntime:
         "google.protobuf.internal.builder",
         {
             "BuildMessageAndEnumDescriptors": _FrozenCallable(
-                "BuildMessageAndEnumDescriptors", build_descriptors
+                "BuildMessageAndEnumDescriptors",
+                generated_builder.BuildMessageAndEnumDescriptors,
             ),
             "BuildTopDescriptorsAndMessages": _FrozenCallable(
-                "BuildTopDescriptorsAndMessages", build_top
+                "BuildTopDescriptorsAndMessages",
+                generated_builder.BuildTopDescriptorsAndMessages,
             ),
         },
     )
@@ -1392,6 +1725,7 @@ def _new_execution_runtime(runtime: _RuntimeAuthority) -> _ExecutionRuntime:
         authority=runtime,
         pool=pool,
         symbol_database=symbol_database,
+        message_factory=message_factory,
         protobuf_proxy=protobuf_proxy,
         internal_proxy=internal_proxy,
         marker=_ExecutionMarker(),
@@ -1549,10 +1883,23 @@ def _validate_owned_modules(
     directory: _PinnedBindingDirectory | None,
 ) -> None:
     _validate_runtime_authority(runtime.authority)
-    if type(runtime.pool) is not runtime.authority.pool_runtime_type:
-        raise _integrity("private descriptor pool type changed")
+    if (
+        type(runtime.pool) is not runtime.authority.pool_runtime_type
+        or runtime.pool is runtime.authority.default_pool
+    ):
+        raise _integrity("private descriptor pool identity changed")
     if runtime.symbol_database.pool is not runtime.pool:
         raise _integrity("private symbol database pool binding changed")
+    if (
+        runtime.message_factory.pool is not runtime.pool
+        or object.__getattribute__(runtime.message_factory, "_symbol_database")
+        is not runtime.symbol_database
+        or object.__getattribute__(runtime.message_factory, "_get_message_class")
+        is not _function_capture(
+            runtime.authority, "message_factory.GetMessageClass"
+        ).function
+    ):
+        raise _integrity("isolated message factory binding changed")
     expected_root = (
         directory.path if directory is not None else _lexical_absolute(_BINDING_ROOT)
     )
@@ -1595,6 +1942,22 @@ def _validate_owned_modules(
                 f"{pin.proto_name} dependency graph changed: "
                 f"{observed_dependencies!r}"
             )
+        namespace = vars(module)
+        for name, enum_descriptor in descriptor.enum_types_by_name.items():
+            wrapper = namespace.get(name, _MISSING)
+            if (
+                type(wrapper) is not _PrivateEnumTypeWrapper
+                or wrapper.DESCRIPTOR is not enum_descriptor
+            ):
+                raise _integrity(
+                    f"{pin.module_name} enum wrapper {name!r} is not loader-owned"
+                )
+            for enum_value in enum_descriptor.values:
+                observed = namespace.get(enum_value.name, _MISSING)
+                if not _same_typed_value(observed, enum_value.number):
+                    raise _integrity(
+                        f"{pin.module_name} enum value {enum_value.name!r} changed"
+                    )
 
 
 def _identity_snapshot(mapping: Mapping[str, Any]) -> Mapping[str, Any]:
@@ -1651,7 +2014,7 @@ def _build_private_state(
                 class_namespace = _snapshot_object_namespace(value)
                 if class_namespace is not None:
                     class_snapshots.append(_ObjectSnapshot(value, class_namespace))
-            elif type(value) is runtime.authority.enum_wrapper_class:
+            elif type(value) is _PrivateEnumTypeWrapper:
                 object_namespace = _snapshot_object_namespace(value)
                 if object_namespace is not None:
                     object_snapshots.append(_ObjectSnapshot(value, object_namespace))
@@ -1691,6 +2054,7 @@ def _validate_private_state(
 ) -> None:
     runtime = state.runtime
     _validate_runtime_authority(runtime.authority)
+    _reject_descriptor_contamination(runtime.authority)
     _reject_preloaded_modules()
     _validate_owned_modules(state.modules, runtime, None)
     if not _identity_mapping_matches(

@@ -25,7 +25,7 @@ _sym_db = _symbol_database.Default()
 import dim3d_pb2 as dim3d__pb2
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x0ckernel.proto\x12\rdynamic_trace\x1a\x0b\x64im3d.proto\"\xba\x02\n\x06kernel\x12\n\n\x02id\x18\x01 \x01(\x05\x12\x0c\n\x04name\x18\x02 \x01(\t\x12\x1a\n\x12\x66unction_unique_id\x18\x03 \x01(\x05\x12\x1a\n\x12size_shared_memory\x18\x04 \x01(\x05\x12\x1b\n\x13number_of_registers\x18\x05 \x01(\x05\x12\"\n\x1ashared_memory_base_address\x18\x06 \x01(\x03\x12!\n\x19local_memory_base_address\x18\x07 \x01(\x03\x12&\n\x08grid_dim\x18\x08 \x01(\x0b\x32\x14.dynamic_trace.dim3d\x12\'\n\tblock_dim\x18\t \x01(\x0b\x32\x14.dynamic_trace.dim3d\x12)\n\x0b\x63luster_dim\x18\n \x01(\x0b\x32\x14.dynamic_trace.dim3db\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x0ckernel.proto\x12\rdynamic_trace\x1a\x0b\x64im3d.proto\"\xcc\x03\n\x06kernel\x12\n\n\x02id\x18\x01 \x01(\x05\x12\x0c\n\x04name\x18\x02 \x01(\t\x12\x1a\n\x12\x66unction_unique_id\x18\x03 \x01(\x05\x12\x1a\n\x12size_shared_memory\x18\x04 \x01(\x05\x12\x1b\n\x13number_of_registers\x18\x05 \x01(\x05\x12\"\n\x1ashared_memory_base_address\x18\x06 \x01(\x03\x12!\n\x19local_memory_base_address\x18\x07 \x01(\x03\x12&\n\x08grid_dim\x18\x08 \x01(\x0b\x32\x14.dynamic_trace.dim3d\x12\'\n\tblock_dim\x18\t \x01(\x0b\x32\x14.dynamic_trace.dim3d\x12)\n\x0b\x63luster_dim\x18\n \x01(\x0b\x32\x14.dynamic_trace.dim3d\x12\'\n\x1ashared_memory_static_bytes\x18\x0b \x01(\rH\x00\x88\x01\x01\x12(\n\x1bshared_memory_dynamic_bytes\x18\x0c \x01(\rH\x01\x88\x01\x01\x42\x1d\n\x1b_shared_memory_static_bytesB\x1e\n\x1c_shared_memory_dynamic_bytesb\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
@@ -33,5 +33,5 @@ _builder.BuildTopDescriptorsAndMessages(DESCRIPTOR, 'kernel_pb2', _globals)
 if not _descriptor._USE_C_DESCRIPTORS:
   DESCRIPTOR._loaded_options = None
   _globals['_KERNEL']._serialized_start=45
-  _globals['_KERNEL']._serialized_end=359
+  _globals['_KERNEL']._serialized_end=505
 # @@protoc_insertion_point(module_scope)

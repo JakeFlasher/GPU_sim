@@ -9,8 +9,9 @@
 //! SM the hardware ran it on, and each warp uses its observed physical slot.
 //! Traces without `sm_id` are a typed error (a synthetic placement model is a
 //! future knob, not a silent fallback). Exact temporal block co-residency is not
-//! present on the wire; launch-order overlap under the resident-warp ceiling and
-//! disjoint traced physical slots is explicitly typed as [`CoResidency::Modeled`].
+//! present on the wire; launch-order overlap under the resident-warp and
+//! architecture-card shared-memory ceilings plus disjoint traced physical slots is
+//! explicitly typed as [`CoResidency::Modeled`].
 //!
 //! Memory-record classification (L1 mode): a global-class record takes
 //! the [`MemRole`] its pc's SIDECAR OPCODE was classified to at join
@@ -54,11 +55,13 @@ use sim_mem::{
 
 use crate::evidence::AdmittedLaunchEvidence;
 use crate::issue::{
-    AccessKind, BlockReplay, IssueError, IssueModelParams, ReplayInst, SmSimResult, TailFlags,
-    WarpReplay, simulate_sm,
+    AccessKind, BlockReplay, IssueError, IssueModelParams, ReplayInst, SharedMemoryResidency,
+    SmSimResult, TailFlags, WarpReplay, simulate_sm_with_residency,
 };
 use crate::program::FunctionSchedule;
-use crate::system::{DramBw, DramStats, L2SourceSplit, SystemError, simulate_kernel_shared};
+use crate::system::{
+    DramBw, DramStats, L2SourceSplit, SystemError, simulate_kernel_shared_with_residency,
+};
 
 mod aggregation;
 pub use aggregation::{
@@ -176,6 +179,27 @@ pub enum ReplayError {
     ArchitectureCardPlacement {
         #[source]
         source: CalibError,
+    },
+    #[error("architecture {arch} shared-memory capacity is unavailable from its card: {source}")]
+    ArchitectureCardSharedMemoryCapacity {
+        arch: ArchId,
+        #[source]
+        source: CalibError,
+    },
+    #[error("architecture {arch} card has invalid per-SM shared-memory capacity {bytes} bytes")]
+    SharedMemoryCapacityInvalid { arch: ArchId, bytes: u64 },
+    #[error(
+        "kernel {kernel_id} launch shared-memory total {bytes} is outside the unsigned byte domain"
+    )]
+    SharedMemoryDemandInvalid { kernel_id: i32, bytes: i32 },
+    #[error(
+        "kernel {kernel_id} requires {bytes_per_cta} shared-memory bytes per CTA, exceeding architecture {arch} per-SM capacity {max_bytes_per_sm}"
+    )]
+    CtaSharedMemoryCapacityExceeded {
+        kernel_id: i32,
+        arch: ArchId,
+        bytes_per_cta: u64,
+        max_bytes_per_sm: u64,
     },
     #[error(
         "{path}: traced sm_id {sm_id} is outside architecture {arch} SKU {sku:?} range 0..{sm_count}"
@@ -878,6 +902,7 @@ struct ExtractedKernel {
     per_sm_blocks: BTreeMap<i32, Vec<BlockReplay>>,
     records_seen: u64,
     coverage: ExtractedCoverage,
+    shared_memory_residency: SharedMemoryResidency,
 }
 
 /// Card-derived spatial-placement authority. Only the architecture/SKU-local SM
@@ -887,6 +912,7 @@ struct PlacementAuthority {
     arch: ArchId,
     sku: Sku,
     sm_count: u32,
+    max_shared_bytes_per_sm: u64,
 }
 
 impl PlacementAuthority {
@@ -896,11 +922,46 @@ impl PlacementAuthority {
         require_replay_arch(expected_arch, arch, "architecture card")?;
         let sku = card.sku_id().map_err(card_error)?;
         let sm_count = card.sm_count().map_err(card_error)?;
+        let max_shared_bytes_per_sm = card
+            .require_l1_geometry()
+            .map_err(|source| ReplayError::ArchitectureCardSharedMemoryCapacity { arch, source })?
+            .max_shared_bytes;
+        if max_shared_bytes_per_sm == 0 {
+            return Err(ReplayError::SharedMemoryCapacityInvalid {
+                arch,
+                bytes: max_shared_bytes_per_sm,
+            });
+        }
         Ok(Self {
             arch,
             sku,
             sm_count,
+            max_shared_bytes_per_sm,
         })
+    }
+
+    fn shared_memory_residency(
+        self,
+        kernel: &pb::Kernel,
+    ) -> Result<SharedMemoryResidency, ReplayError> {
+        let bytes_per_cta = u64::try_from(kernel.size_shared_memory).map_err(|_| {
+            ReplayError::SharedMemoryDemandInvalid {
+                kernel_id: kernel.id,
+                bytes: kernel.size_shared_memory,
+            }
+        })?;
+        if bytes_per_cta > self.max_shared_bytes_per_sm {
+            return Err(ReplayError::CtaSharedMemoryCapacityExceeded {
+                kernel_id: kernel.id,
+                arch: self.arch,
+                bytes_per_cta,
+                max_bytes_per_sm: self.max_shared_bytes_per_sm,
+            });
+        }
+        Ok(SharedMemoryResidency::new(
+            self.max_shared_bytes_per_sm,
+            bytes_per_cta,
+        ))
     }
 
     fn require_traced_sm(self, path: &Path, sm_id: i32) -> Result<(), ReplayError> {
@@ -936,6 +997,7 @@ const fn sm86_test_placement() -> PlacementAuthority {
         arch: ArchId::Sm86,
         sku: Sku::Rtx3090Ti,
         sm_count: 84,
+        max_shared_bytes_per_sm: 102_400,
     }
 }
 
@@ -1047,6 +1109,7 @@ fn extract_per_sm_blocks(
     decode_sectors: bool,
 ) -> Result<ExtractedKernel, ReplayError> {
     let expected_fuid = schedule.function_unique_id;
+    let shared_memory_residency = placement.shared_memory_residency(loc.kernel())?;
     let block = loc
         .kernel()
         .block_dim
@@ -1345,6 +1408,7 @@ fn extract_per_sm_blocks(
         per_sm_blocks,
         records_seen,
         coverage,
+        shared_memory_residency,
     })
 }
 
@@ -1521,8 +1585,9 @@ pub enum ReplayMemMode {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CoResidency {
     /// Blocks are admitted in launch-index order under the modeled resident-warp
-    /// ceiling, and concurrent CTAs must use disjoint traced physical warp slots.
-    /// This is never a claim that the hardware used the same overlap.
+    /// ceiling and architecture-card shared-memory capacity; concurrent CTAs must
+    /// also use disjoint traced physical warp slots. This is never a claim that the
+    /// hardware used the same overlap.
     Modeled,
 }
 
@@ -1635,6 +1700,7 @@ fn replay_kernel_with_schedule(
         per_sm_blocks,
         records_seen,
         coverage,
+        shared_memory_residency,
     } = extract_per_sm_blocks(td, loc, schedule, placement, decode_sectors)?;
     let replay = match mode {
         ReplayMemMode::Flat | ReplayMemMode::L1Const(_) => {
@@ -1644,7 +1710,16 @@ fn replay_kernel_with_schedule(
             };
             let mut per_sm = BTreeMap::new();
             for (sm, blocks) in &per_sm_blocks {
-                per_sm.insert(*sm, simulate_sm(blocks, schedule, params, l1_config)?);
+                per_sm.insert(
+                    *sm,
+                    simulate_sm_with_residency(
+                        blocks,
+                        schedule,
+                        params,
+                        shared_memory_residency,
+                        l1_config,
+                    )?,
+                );
             }
             fold_kernel_result(
                 schedule.arch,
@@ -1657,7 +1732,15 @@ fn replay_kernel_with_schedule(
         }
         ReplayMemMode::L1SharedL2 { l1, l2, dram } => {
             let mut l2 = L2Model::new(l2)?;
-            let sys = simulate_kernel_shared(&per_sm_blocks, schedule, params, l1, &mut l2, dram)?;
+            let sys = simulate_kernel_shared_with_residency(
+                &per_sm_blocks,
+                schedule,
+                params,
+                shared_memory_residency,
+                l1,
+                &mut l2,
+                dram,
+            )?;
             require_replay_arch(schedule.arch, sys.arch, "system result")?;
             let system_unmodeled_tails = sys.unmodeled_tails;
             let replay = fold_kernel_result(
@@ -5654,7 +5737,9 @@ mod replay_identity_tests {
     use crate::control_bits::ControlBits;
     use crate::program::{FunctionSchedule, IssueSlot, OpClass};
     use prost::Message;
-    use sim_trace::reader::ADDRESS_CARRYING_TRACE_CONTRACT_ID;
+    use sim_trace::reader::{
+        ADDRESS_CARRYING_TRACE_CONTRACT_ID, SHARED_MEMORY_SPLIT_TRACE_CONTRACT_ID,
+    };
     use std::collections::BTreeMap as StdMap;
 
     #[test]
@@ -5668,6 +5753,68 @@ mod replay_identity_tests {
             Err(ReplayError::ClusterGeometryUnsupported {
                 arch: ArchId::Sm86,
                 cluster: (2, 1, 1),
+            })
+        ));
+    }
+
+    #[test]
+    fn split_shared_memory_total_reaches_architecture_local_residency() {
+        let tmp = tempfile::tempdir().unwrap();
+        write_trace_with(
+            tmp.path(),
+            bind_test_allocation(malformed_global_inst(pb::MemoryOpClass::Global)),
+        );
+        let trace_path = tmp.path().join("dynamic_trace.pb");
+        let mut trace = pb::Trace::decode(std::fs::read(&trace_path).unwrap().as_slice()).unwrap();
+        trace.trace_contract_id = SHARED_MEMORY_SPLIT_TRACE_CONTRACT_ID.to_owned();
+        let kernel = &mut trace
+            .gpu_device
+            .get_mut(&0)
+            .unwrap()
+            .streams
+            .get_mut(&0)
+            .unwrap()
+            .kernels[0];
+        kernel.size_shared_memory = 6_144;
+        kernel.shared_memory_static_bytes = Some(2_048);
+        kernel.shared_memory_dynamic_bytes = Some(4_096);
+        std::fs::write(&trace_path, trace.encode_to_vec()).unwrap();
+
+        let td = TraceDir::open(tmp.path()).unwrap();
+        let loc = td.kernels().next().unwrap();
+        let extracted = extract_per_sm_blocks(
+            &td,
+            &loc,
+            &FunctionSchedule {
+                arch: ArchId::Sm86,
+                function_unique_id: 1,
+                kernel_name: "k".into(),
+                function_name: "f".into(),
+                by_pc: StdMap::new(),
+            },
+            PlacementAuthority::from_arch_card(&sm86_test_card(), ArchId::Sm86).unwrap(),
+            false,
+        )
+        .unwrap();
+        assert_eq!(extracted.shared_memory_residency.bytes_per_cta(), 6_144);
+        assert_eq!(
+            extracted.shared_memory_residency.max_bytes_per_sm(),
+            102_400
+        );
+    }
+
+    #[test]
+    fn missing_architecture_local_shared_memory_capacity_fails_closed() {
+        let path = Path::new("../../arch_profiles/cards/sm_120-laptop.json");
+        let card = ArchCard::load(path).unwrap();
+        assert!(matches!(
+            PlacementAuthority::from_arch_card(&card, ArchId::Sm120),
+            Err(ReplayError::ArchitectureCardSharedMemoryCapacity {
+                arch: ArchId::Sm120,
+                source: CalibError::BlockResearchGap {
+                    block: "l1_geometry",
+                    ..
+                },
             })
         ));
     }
@@ -5701,11 +5848,11 @@ mod replay_identity_tests {
         ));
         assert!(matches!(
             placement_result_with_roster(32, 0, &[(0, 1, 0)], &[]).unwrap_err(),
-            ReplayError::WarpIdentityMismatch {
+            ReplayError::Trace(TraceError::WarpMapKeyMismatch {
                 map_key: 0,
                 warp_id: 1,
                 ..
-            }
+            })
         ));
         assert!(matches!(
             placement_result(64, &[0, 0]).unwrap_err(),
@@ -5808,12 +5955,11 @@ mod replay_identity_tests {
         mismatched.warpid_tb = Some(1);
         assert!(matches!(
             replay_error(mismatched),
-            ReplayError::InstructionWarpIdMismatch {
-                warp_id: 0,
-                record_ix: 0,
-                record_warp_id: 1,
+            ReplayError::Trace(TraceError::WarpidTbMismatch {
+                expected: 0,
+                actual: 1,
                 ..
-            }
+            })
         ));
     }
 
@@ -5870,6 +6016,8 @@ mod replay_identity_tests {
             grid_dim: Some(pb::Dim3d { x: 1, y: 1, z: 1 }),
             block_dim: Some(pb::Dim3d { x: 32, y: 1, z: 1 }),
             cluster_dim: Some(pb::Dim3d { x: 1, y: 1, z: 1 }),
+            shared_memory_static_bytes: None,
+            shared_memory_dynamic_bytes: None,
         };
         let stream = pb::CudaStream {
             id: 0,
@@ -6001,7 +6149,7 @@ mod replay_identity_tests {
             }
             std::fs::write(block_path, block.encode_to_vec()).unwrap();
         }
-        let td = TraceDir::open(tmp.path()).unwrap();
+        let td = TraceDir::open(tmp.path()).map_err(ReplayError::from)?;
         let loc = td.kernels().next().unwrap();
         extract_per_sm_blocks(
             &td,
@@ -6411,6 +6559,8 @@ mod completeness_tests {
             }),
             block_dim: Some(pb::Dim3d { x: 32, y: 1, z: 1 }),
             cluster_dim: Some(pb::Dim3d { x: 1, y: 1, z: 1 }),
+            shared_memory_static_bytes: None,
+            shared_memory_dynamic_bytes: None,
         };
         let stream = pb::CudaStream {
             id: 0,

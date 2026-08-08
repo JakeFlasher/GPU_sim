@@ -144,6 +144,78 @@ corruption: restore their byte-exact committed content with `git restore
 Python protobuf runtime is a separate prerequisite failure resolved by the
 exact `requirements.txt` pin; consumers never generate bindings in place.
 
+### Operator-only external build
+
+Agents do not run this build. After committing every tracked and nonignored
+change, an operator first materializes the exact protobuf lock directly into an
+external, de-aliased prefix. `--ensure-external` is no-repair/no-replace and
+requires an absent destination outside the repository:
+
+```bash
+mkdir -p /tmp/nvbit-protobuf /tmp/nvbit-tracer-candidates /tmp/nvbit-tracer-bundles
+NVBIT_PB_PREFIX=/tmp/nvbit-protobuf/pb-34.1 \
+  bash tools/nvbit_tracer/pinned_build_env.sh --ensure-external
+```
+
+The tracer itself uses a candidate/review/admit flow because `-g3` embeds the
+fresh `/tmp` source root and therefore an exact output digest cannot be known
+before the initial build. Phase 1 is a successful, no-replace candidate build;
+it is not capture authority:
+
+```bash
+.venv/bin/python tools/nvbit_tracer/external_tracer_build.py build-candidate \
+  --repo-root "$(git rev-parse --show-toplevel)" \
+  --build-root /tmp/nvbit-tracer-build-UNIQUE \
+  --bundle-dir /tmp/nvbit-tracer-candidates/sm86-UNIQUE \
+  --git /usr/bin/git --bash /usr/bin/bash --make /usr/bin/make \
+  --nvcc /opt/cuda-13.2/bin/nvcc --ptxas /opt/cuda-13.2/bin/ptxas \
+  --cuobjdump /opt/cuda-13.2/bin/cuobjdump \
+  --host-cxx /usr/bin/g++-14 \
+  --protoc /tmp/nvbit-protobuf/pb-34.1/bin/protoc \
+  --pkg-config /usr/bin/pkg-config \
+  --protobuf-prefix /tmp/nvbit-protobuf/pb-34.1
+```
+
+Phase 2 is an independent review of that successful candidate. The reviewer
+retains the exact `tracer_tool.so` SHA-256 outside the candidate; it must not be
+copied from mutable `artifact_identity.json`, and a hash recovered from a failed
+build is never admissible. Phase 3 supplies that reviewed digest to publish a
+separate final bundle while preserving the candidate:
+
+```bash
+EXPECTED_TRACER_SHA256=64_LOWERCASE_HEX_RETAINED_BY_INDEPENDENT_REVIEW
+.venv/bin/python tools/nvbit_tracer/external_tracer_build.py admit \
+  --repo-root "$(git rev-parse --show-toplevel)" \
+  --candidate-dir /tmp/nvbit-tracer-candidates/sm86-UNIQUE \
+  --bundle-dir /tmp/nvbit-tracer-bundles/sm86-UNIQUE \
+  --cuobjdump /opt/cuda-13.2/bin/cuobjdump \
+  --expected-tracer-sha256 "$EXPECTED_TRACER_SHA256"
+
+.venv/bin/python tools/nvbit_tracer/external_tracer_build.py verify \
+  --repo-root "$(git rev-parse --show-toplevel)" \
+  --bundle-dir /tmp/nvbit-tracer-bundles/sm86-UNIQUE \
+  --cuobjdump /opt/cuda-13.2/bin/cuobjdump \
+  --expected-tracer-sha256 "$EXPECTED_TRACER_SHA256"
+```
+
+Every destination parent must already be an external non-Git directory, and
+candidate, build, handoff, and final names must be unused. Every supplied tool
+and the complete protobuf handoff must be absolute, Make-safe, outside every
+repository/worktree, symlink-free, and composed of single-link regular files.
+The candidate and final bundle each contain four files: sealed source, build,
+and artifact JSON plus `tracer_tool.so`. Only the final bundle has
+`independent_reviewed_candidate_sha256.v1` authority; `verify` rejects candidate
+receipts. The producer binds the exact wildcard/find source sets into argv,
+executes every named tool through retained descriptor aliases, contains and
+reaps the complete descendant process tree across timeout or cancellation,
+continuously monitors extracted source and protobuf input generations, and
+requires a target-free ELF64/EM_X86_64 shared object with only `sm_86` CUDA
+cubins. Linux subreaper/procfs containment is mandatory; the producer never
+falls back to an uncontained child. One absolute timeout covers authority
+capture, hashing, probes, launch, build, inspection, publication, cleanup, and
+final verification. Exit 1 denotes process/deadline failure; exit 2 denotes
+source, tool, schema, identity, or publication authority failure.
+
 ### Host compiler selection (`NVCC_CCBIN`)
 
 `pinned_build_env.sh` sets `NVCC_CCBIN` and `CXX` to `/usr/bin/g++-14`,

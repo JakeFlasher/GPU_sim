@@ -699,11 +699,90 @@ def test_failed_containment_cleanup_supersedes_keyboard_interrupt(
 
     assert containment.finished is True
     assert failure.value.code == executor.NCU_VERSION_PROBE_FAILED
+    assert failure.value.process_cleanup_incomplete is True
     assert failure.value.__cause__ is cleanup_error
     assert any(
         "active process error: synthetic operator interruption" in note
         for note in failure.value.__notes__
     )
+
+
+def test_successful_process_with_failed_containment_cleanup_is_marked(
+    monkeypatch,
+) -> None:
+    cleanup_error = RuntimeError("synthetic successful-process cleanup failure")
+
+    class Process:
+        pid = 4321
+
+    class Containment:
+        def popen(self, _command, **_kwargs):
+            return Process()
+
+        def finish(self):
+            raise cleanup_error
+
+    monkeypatch.setattr(
+        executor.delegated_cgroup.DelegatedCgroupV2,
+        "create",
+        lambda: Containment(),
+    )
+    monkeypatch.setattr(
+        executor,
+        "_collect_bounded",
+        lambda *_args, **_kwargs: executor.NcuActionResult(0, b"ok", b""),
+    )
+
+    with pytest.raises(executor.NcuActionExecutorError) as failure:
+        executor._run_command_bounded(
+            ("/fixture/ncu", "--version"),
+            environment=executor.ncu_action_environment(),
+            working_directory="/",
+            inherited_descriptors=(),
+            timeout_seconds=1,
+            max_output_bytes=1024,
+            timeout_code=executor.NCU_VERSION_PROBE_FAILED,
+            launch_code=executor.NCU_VERSION_PROBE_FAILED,
+            require_cgroup_containment=True,
+        )
+
+    assert failure.value.code == executor.NCU_VERSION_PROBE_FAILED
+    assert failure.value.process_cleanup_incomplete is True
+    assert failure.value.stdout == b"ok"
+    assert failure.value.__cause__ is cleanup_error
+
+
+def test_failed_launch_containment_cleanup_is_marked(monkeypatch) -> None:
+    cleanup_error = RuntimeError("synthetic launch cleanup failure")
+
+    class Containment:
+        def popen(self, _command, **_kwargs):
+            raise OSError("synthetic launch failure")
+
+        def close_after_error(self):
+            raise cleanup_error
+
+    monkeypatch.setattr(
+        executor.delegated_cgroup.DelegatedCgroupV2,
+        "create",
+        lambda: Containment(),
+    )
+
+    with pytest.raises(executor.NcuActionExecutorError) as failure:
+        executor._run_command_bounded(
+            ("/fixture/ncu", "--version"),
+            environment=executor.ncu_action_environment(),
+            working_directory="/",
+            inherited_descriptors=(),
+            timeout_seconds=1,
+            max_output_bytes=1024,
+            timeout_code=executor.NCU_VERSION_PROBE_FAILED,
+            launch_code=executor.NCU_VERSION_PROBE_FAILED,
+            require_cgroup_containment=True,
+        )
+
+    assert failure.value.code == executor.NCU_VERSION_PROBE_FAILED
+    assert failure.value.process_cleanup_incomplete is True
 
 
 def test_failed_process_cleanup_supersedes_keyboard_interrupt(monkeypatch) -> None:
@@ -747,6 +826,7 @@ def test_failed_process_cleanup_supersedes_keyboard_interrupt(monkeypatch) -> No
         )
 
     assert failure.value.code == executor.NCU_ACTION_LAUNCH_FAILED
+    assert failure.value.process_cleanup_incomplete is True
     assert failure.value.process_id == 4321
     assert failure.value.__cause__ is cleanup_error
     assert any(
@@ -754,6 +834,220 @@ def test_failed_process_cleanup_supersedes_keyboard_interrupt(monkeypatch) -> No
         in note
         for note in failure.value.__notes__
     )
+
+
+def test_persistent_descendant_cleanup_failure_still_reaps_leader(
+    monkeypatch,
+) -> None:
+    process = executor.subprocess.Popen(
+        [sys.executable, "-c", "import time; time.sleep(60)"],
+        stdin=executor.subprocess.DEVNULL,
+        stdout=executor.subprocess.PIPE,
+        stderr=executor.subprocess.PIPE,
+        start_new_session=True,
+    )
+
+    class FailingContainment:
+        def kill_all(self):
+            raise RuntimeError("synthetic persistent cgroup.kill failure")
+
+    class InterruptingSelector:
+        def register(self, *_args, **_kwargs):
+            raise KeyboardInterrupt("synthetic output monitor interruption")
+
+        def close(self):
+            return None
+
+    monkeypatch.setattr(
+        executor.selectors,
+        "DefaultSelector",
+        InterruptingSelector,
+    )
+
+    try:
+        with pytest.raises(
+            executor.NcuActionExecutorError,
+            match="retained NCU process cleanup failed",
+        ) as failure:
+            executor._collect_bounded(
+                process,
+                started_at_utc="2026-08-03T00:00:00Z",
+                timeout_seconds=1,
+                max_output_bytes=1024,
+                timeout_code=executor.NCU_VERSION_PROBE_FAILED,
+                containment=FailingContainment(),
+            )
+        assert failure.value.process_cleanup_incomplete is True
+        assert "persistent cgroup.kill failure" in failure.value.detail
+        assert process.poll() is not None
+        with pytest.raises(ChildProcessError):
+            os.waitpid(process.pid, os.WNOHANG)
+    finally:
+        if process.poll() is None:
+            os.killpg(process.pid, executor.signal.SIGKILL)
+            process.wait(timeout=2)
+
+
+@pytest.mark.parametrize("exception_type", (KeyboardInterrupt, SystemExit))
+def test_output_monitor_interruption_reaps_leader(
+    monkeypatch,
+    exception_type,
+) -> None:
+    process = executor.subprocess.Popen(
+        [sys.executable, "-c", "import time; time.sleep(60)"],
+        stdin=executor.subprocess.DEVNULL,
+        stdout=executor.subprocess.PIPE,
+        stderr=executor.subprocess.PIPE,
+        start_new_session=True,
+    )
+
+    class InterruptingSelector:
+        def register(self, *_args, **_kwargs):
+            raise exception_type("synthetic output monitor interruption")
+
+        def close(self):
+            return None
+
+    monkeypatch.setattr(
+        executor.selectors,
+        "DefaultSelector",
+        InterruptingSelector,
+    )
+
+    try:
+        with pytest.raises(exception_type, match="output monitor interruption"):
+            executor._collect_bounded(
+                process,
+                started_at_utc="2026-08-03T00:00:00Z",
+                timeout_seconds=1,
+                max_output_bytes=1024,
+                timeout_code=executor.NCU_VERSION_PROBE_FAILED,
+            )
+        assert process.poll() is not None
+        with pytest.raises(ChildProcessError):
+            os.waitpid(process.pid, os.WNOHANG)
+    finally:
+        if process.poll() is None:
+            os.killpg(process.pid, executor.signal.SIGKILL)
+            process.wait(timeout=2)
+
+
+def test_stalled_containment_creation_uses_action_deadline(monkeypatch) -> None:
+    def stalled_create():
+        time.sleep(60)
+        raise AssertionError("bounded launch did not interrupt cgroup creation")
+
+    monkeypatch.setattr(
+        executor.delegated_cgroup.DelegatedCgroupV2,
+        "create",
+        stalled_create,
+    )
+
+    started = time.monotonic()
+    with pytest.raises(executor.NcuActionExecutorError) as failure:
+        executor._run_command_bounded(
+            ("/fixture/ncu", "--version"),
+            environment=executor.ncu_action_environment(),
+            working_directory="/",
+            inherited_descriptors=(),
+            timeout_seconds=0.05,
+            max_output_bytes=1024,
+            timeout_code=executor.NCU_VERSION_PROBE_FAILED,
+            launch_code=executor.NCU_VERSION_PROBE_FAILED,
+            require_cgroup_containment=True,
+        )
+
+    assert failure.value.code == executor.NCU_VERSION_PROBE_FAILED
+    assert "launch exceeded" in failure.value.detail
+    assert time.monotonic() - started < 1
+
+
+def test_stalled_contained_popen_uses_action_deadline(monkeypatch) -> None:
+    class StalledContainment:
+        def __init__(self):
+            self.closed = False
+
+        def popen(self, _command, **_kwargs):
+            time.sleep(60)
+            raise AssertionError("bounded launch did not interrupt Popen")
+
+        def close_after_error(self):
+            self.closed = True
+
+    containment = StalledContainment()
+    monkeypatch.setattr(
+        executor.delegated_cgroup.DelegatedCgroupV2,
+        "create",
+        lambda: containment,
+    )
+
+    started = time.monotonic()
+    with pytest.raises(executor.NcuActionExecutorError) as failure:
+        executor._run_command_bounded(
+            ("/fixture/ncu", "--version"),
+            environment=executor.ncu_action_environment(),
+            working_directory="/",
+            inherited_descriptors=(),
+            timeout_seconds=0.05,
+            max_output_bytes=1024,
+            timeout_code=executor.NCU_VERSION_PROBE_FAILED,
+            launch_code=executor.NCU_VERSION_PROBE_FAILED,
+            require_cgroup_containment=True,
+        )
+
+    assert failure.value.code == executor.NCU_VERSION_PROBE_FAILED
+    assert "launch exceeded" in failure.value.detail
+    assert containment.closed is True
+    assert time.monotonic() - started < 1
+
+
+def test_launch_and_collection_share_one_deadline(monkeypatch) -> None:
+    clock = [100.0]
+    captured = {}
+
+    class LaunchContext:
+        def __enter__(self):
+            return None
+
+        def __exit__(self, _type, _value, _traceback):
+            return False
+
+    class Process:
+        pid = 4321
+        stdout = None
+        stderr = None
+
+    def popen(_command, **_kwargs):
+        clock[0] = 100.4
+        return Process()
+
+    def collect(_process, **kwargs):
+        captured.update(kwargs)
+        return executor.NcuActionResult(0, b"", b"")
+
+    monkeypatch.setattr(executor.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(
+        executor.nvbit_capture_process,
+        "bounded_launch",
+        lambda _deadline: LaunchContext(),
+    )
+    monkeypatch.setattr(executor.subprocess, "Popen", popen)
+    monkeypatch.setattr(executor, "_collect_bounded", collect)
+
+    result = executor._run_command_bounded(
+        ("/fixture/ncu", "--version"),
+        environment=executor.ncu_action_environment(),
+        working_directory="/",
+        inherited_descriptors=(),
+        timeout_seconds=1,
+        max_output_bytes=1024,
+        timeout_code=executor.NCU_VERSION_PROBE_FAILED,
+        launch_code=executor.NCU_VERSION_PROBE_FAILED,
+    )
+
+    assert result.returncode == 0
+    assert captured["deadline_monotonic"] == 101.0
+    assert captured["deadline_monotonic"] - clock[0] == pytest.approx(0.6)
 
 
 @pytest.mark.parametrize("value", [None, 0, 1, "true"])
@@ -1552,6 +1846,92 @@ def test_process_group_is_never_signaled_after_leader_reap(
     assert state["signals"]
 
 
+def test_output_buffer_allocation_failure_terminates_and_reaps_process(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    original_popen = executor.subprocess.Popen
+    observed = []
+
+    def popen(*args, **kwargs):
+        process = original_popen(*args, **kwargs)
+        observed.append(process)
+        return process
+
+    monkeypatch.setattr(executor.subprocess, "Popen", popen)
+    monkeypatch.setattr(
+        executor,
+        "_new_bounded_output_buffers",
+        lambda: (_ for _ in ()).throw(
+            MemoryError("synthetic bounded-buffer allocation failure")
+        ),
+    )
+
+    with _assert_code(executor.NCU_ACTION_LAUNCH_FAILED) as caught:
+        executor.execute_bounded_command(
+            (sys.executable, "-c", "import time; time.sleep(10)"),
+            environment={"PATH": "/bin:/usr/bin"},
+            working_directory=str(tmp_path),
+            inherited_descriptors=(),
+            timeout_seconds=2,
+            max_output_bytes=1024,
+            timeout_code=executor.NCU_ACTION_TIMEOUT,
+            launch_code=executor.NCU_ACTION_LAUNCH_FAILED,
+        )
+
+    assert len(observed) == 1
+    assert observed[0].poll() is not None
+    assert observed[0].stdout.closed
+    assert observed[0].stderr.closed
+    assert caught.value.process_id == observed[0].pid
+    assert caught.value.stdout == b""
+    assert caught.value.stderr == b""
+
+
+def test_output_materialization_failure_retains_exact_stream_prefixes(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    original_popen = executor.subprocess.Popen
+    original_copy = executor._copy_bounded_stream_prefix
+    observed = []
+
+    def popen(*args, **kwargs):
+        process = original_popen(*args, **kwargs)
+        observed.append(process)
+        return process
+
+    def bounded_copy(buffer: bytearray, length: int) -> bytes:
+        if buffer.startswith(b"abcdefgh") and length > 4:
+            raise MemoryError("synthetic stdout materialization exhaustion")
+        return original_copy(buffer, length)
+
+    monkeypatch.setattr(executor.subprocess, "Popen", popen)
+    monkeypatch.setattr(executor, "_copy_bounded_stream_prefix", bounded_copy)
+
+    with _assert_code(executor.NCU_ACTION_LAUNCH_FAILED) as caught:
+        executor.execute_bounded_command(
+            (
+                sys.executable,
+                "-c",
+                "import os; os.write(1,b'abcdefgh'); os.write(2,b'stderr-evidence')",
+            ),
+            environment={"PATH": "/bin:/usr/bin"},
+            working_directory=str(tmp_path),
+            inherited_descriptors=(),
+            timeout_seconds=2,
+            max_output_bytes=1024,
+            timeout_code=executor.NCU_ACTION_TIMEOUT,
+            launch_code=executor.NCU_ACTION_LAUNCH_FAILED,
+        )
+
+    assert len(observed) == 1
+    assert observed[0].poll() is not None
+    assert observed[0].stdout.closed
+    assert observed[0].stderr.closed
+    assert caught.value.stdout == b"abcd"
+    assert caught.value.stderr == b"stderr-evidence"
+    assert "materialization exhausted memory" in caught.value.detail
+
+
 def test_output_monitor_setup_failure_terminates_and_reaps_process(
     tmp_path: Path, monkeypatch,
 ) -> None:
@@ -1807,10 +2187,12 @@ def test_action_launch_failure_is_typed_after_successful_probe(
         )
 
     monkeypatch.setattr(executor, "_run_bounded", run)
-    with _assert_code(executor.NCU_ACTION_LAUNCH_FAILED):
+    with pytest.raises(executor.NcuActionExecutorError) as failure:
         executor.execute_ncu_action(
             _identity(ncu), ["--echo"], timeout_seconds=1,
         )
+    assert failure.value.code == executor.NCU_ACTION_LAUNCH_FAILED
+    assert failure.value.process_cleanup_incomplete is False
 
 
 @pytest.mark.parametrize("active_error", [False, True])

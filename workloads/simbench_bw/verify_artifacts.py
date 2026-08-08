@@ -90,6 +90,11 @@ from workloads.simbench_bw.phase_cycle_ledger_aggregator import (  # noqa: E402
     PhaseLedgerSchemaInvalid,
     serialize_phase_cycle_ledger,
 )
+from workloads.simbench_bw.phase_cycle_ledger_consumer import (  # noqa: E402
+    NvbitPhaseInjectionOverheadExceeded,
+    PhaseBoundaryMappingUnresolved,
+    admit_phase_cycle_ledger,
+)
 
 
 # Numeric tolerance for cached-ratio consistency checks. The cached
@@ -1184,6 +1189,18 @@ def _verify_active_phase_generation(
                         errors.append(
                             "phase ledger generation file "
                             f"{relative_path} fails schema validation: {exc}"
+                        )
+                        continue
+                    try:
+                        admit_phase_cycle_ledger(ledger)
+                    except (
+                        NvbitPhaseInjectionOverheadExceeded,
+                        PhaseBoundaryMappingUnresolved,
+                    ) as exc:
+                        errors.append(
+                            "phase ledger generation file "
+                            f"{relative_path} is semantically inadmissible: "
+                            f"{exc.TOKEN}: {exc}"
                         )
                         continue
                     if launch_index not in admitted_launch_indices:

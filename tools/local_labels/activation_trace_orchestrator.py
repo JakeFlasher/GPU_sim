@@ -34,6 +34,7 @@ workflow.
 from __future__ import annotations
 
 import argparse
+import contextvars
 import errno
 import fcntl
 import json
@@ -47,14 +48,27 @@ from pathlib import Path
 
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
-_TRACER_SO = _REPO_ROOT / "tools" / "nvbit_tracer" / "tracer_tool" / "tracer_tool.so"
 
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-from tools.nvbit_tracer.runtime_env import tracer_runtime_env  # noqa: E402
+from tools.nvbit_tracer import capture_process as nvbit_process  # noqa: E402
+from tools.nvbit_tracer.external_tracer import (  # noqa: E402
+    EXTERNAL_TRACER_MAX_BYTES,
+    require_external_tracer_authority,
+    verify_retained_tracer_authority,
+)
+from tools.nvbit_tracer.runtime_env import (  # noqa: E402
+    DEFAULT_PB_LIB,
+    default_runtime_manifest_path,
+    retained_tracer_runtime_env,
+    sanitized_capture_environment,
+)
 from tools.nvbit_tracer.trace_admission import (  # noqa: E402
     DEFAULT_TRACE_ADMISSION_LIMITS,
+    EXPECTED_MEMORY_PAYLOAD_CLASSES,
+    EXPECTED_TRACE_CONTRACT_ID,
+    TRACE_ADMISSION_SCOPE,
     TraceAdmission,
     TraceAdmissionError,
     TraceLaunchSummary,
@@ -80,17 +94,12 @@ from tools.local_labels.immutable_artifact import (  # noqa: E402
     retire_regular_file,
 )
 from tools.local_labels.protected_paths import (  # noqa: E402
+    TRUSTED_GIT_EXECUTABLE,
     ProtectedPathError,
     assert_write_allowed,
+    run_retained_git,
 )
 
-
-def _tracer_env(*, retained_descriptor: int | None = None) -> dict:
-    """Return the shared, pinned and dependency-checked tracer environment."""
-    return tracer_runtime_env(
-        _TRACER_SO,
-        retained_descriptor=retained_descriptor,
-    )
 
 # Shapes the orchestrator can produce. The Round-7 widening adds
 # `trace_l2_accuracy_xl` / `trace_l2_accuracy_lg` for portable_lcd
@@ -118,11 +127,147 @@ from tools.local_labels.roster_path_resolver import resolve_cell_root  # noqa: E
 
 _STAGING_ROOT = _REPO_ROOT / "results" / "nvbit_capture_staging"
 _DEFAULT_OUTPUT_ROOT = _STAGING_ROOT / "activation_trace"
+_ACTIVE_RETAINED_GIT: contextvars.ContextVar[object | None] = (
+    contextvars.ContextVar("activation_retained_git", default=None)
+)
 _IDENTITY_MAX_BYTES = 512
 _ARGUMENT_MAX_BYTES = 4096
 _MAX_ACTIVATION_APP_ARGS = 64
 _MAX_ACTIVATION_APP_ARG_BYTES = 64 * 1024
 _DESCRIPTOR_RESOURCE_ERRNOS = frozenset({errno.EMFILE, errno.ENFILE})
+_CAPTURE_RESOURCE_ERRNOS = frozenset({
+    errno.EAGAIN,
+    errno.EMFILE,
+    errno.ENFILE,
+    errno.ENOMEM,
+    errno.ENOSPC,
+})
+_ACTIVATION_CAPTURE_TIMEOUT_SECONDS = 15 * 60
+_ACTIVATION_CAPTURE_MAX_OUTPUT_BYTES = 8 * 1024 * 1024
+_ACTIVATION_CAPTURE_TIMEOUT_CODE = "activation_nvbit_capture_timeout"
+_ACTIVATION_CAPTURE_LAUNCH_CODE = "activation_nvbit_capture_launch_failed"
+_ACTIVATION_CAPTURE_DIAGNOSTIC_BYTES = 500
+
+
+class ActivationCaptureError(RuntimeError):
+    """A typed, byte-preserving activation child failure."""
+
+    TOKEN = "activation_nvbit_capture_failed"
+
+    def __init__(
+        self,
+        detail: str,
+        *,
+        stdout: bytes = b"",
+        stderr: bytes = b"",
+        process_id: int | None = None,
+        observed_output_bytes_lower_bound: int | None = None,
+    ) -> None:
+        self.detail = detail
+        self.stdout = stdout
+        self.stderr = stderr
+        self.process_id = process_id
+        self.observed_output_bytes_lower_bound = observed_output_bytes_lower_bound
+        super().__init__(f"{self.TOKEN}: {detail}")
+
+
+class ActivationCaptureTimeout(ActivationCaptureError):
+    TOKEN = "activation_nvbit_capture_timeout"
+
+
+class ActivationCaptureOutputLimitExceeded(ActivationCaptureError):
+    TOKEN = "activation_nvbit_capture_output_limit"
+
+
+class ActivationCaptureLaunchFailed(ActivationCaptureError):
+    TOKEN = "activation_nvbit_capture_launch_failed"
+
+
+class ActivationCaptureCleanupFailed(ActivationCaptureError):
+    TOKEN = "activation_nvbit_capture_cleanup_failed"
+
+
+class ActivationCaptureNonzero(ActivationCaptureError):
+    TOKEN = "activation_nvbit_capture_nonzero"
+
+    def __init__(self, *, returncode: int, stdout: bytes, stderr: bytes) -> None:
+        self.returncode = returncode
+        diagnostic = _decode_capture_diagnostic(stderr)
+        super().__init__(
+            f"child returned {returncode}; stderr (tail): {diagnostic!r}",
+            stdout=stdout,
+            stderr=stderr,
+        )
+
+
+class ActivationCaptureResourceUnavailable(ImmutableArtifactResourceError):
+    """The activation child could not start or run because of host resources."""
+
+    TOKEN = "activation_nvbit_capture_resource_unavailable"
+
+    def __init__(
+        self,
+        detail: str,
+        *,
+        stdout: bytes = b"",
+        stderr: bytes = b"",
+        process_id: int | None = None,
+        observed_output_bytes_lower_bound: int | None = None,
+    ) -> None:
+        self.detail = detail
+        self.stdout = stdout
+        self.stderr = stderr
+        self.process_id = process_id
+        self.observed_output_bytes_lower_bound = observed_output_bytes_lower_bound
+        super().__init__(f"{VERIFY_RESOURCE_BOUND}: {self.TOKEN}: {detail}")
+
+
+def _decode_capture_diagnostic(
+    payload: bytes,
+    *,
+    max_bytes: int = _ACTIVATION_CAPTURE_DIAGNOSTIC_BYTES,
+) -> str:
+    return payload[-max_bytes:].decode("utf-8", errors="replace")
+
+
+def _capture_resource_failure(error: BaseException) -> bool:
+    pending = [error]
+    seen: set[int] = set()
+    while pending:
+        current = pending.pop()
+        if id(current) in seen:
+            continue
+        seen.add(id(current))
+        if isinstance(current, MemoryError):
+            return True
+        if isinstance(current, OSError) and current.errno in _CAPTURE_RESOURCE_ERRNOS:
+            return True
+        for chained in (current.__cause__, current.__context__):
+            if isinstance(chained, BaseException):
+                pending.append(chained)
+    return False
+
+
+def _map_activation_capture_error(
+    error: nvbit_process.NvbitCaptureProcessError,
+) -> ActivationCaptureError | ActivationCaptureResourceUnavailable:
+    fields = {
+        "stdout": error.stdout,
+        "stderr": error.stderr,
+        "process_id": error.process_id,
+        "observed_output_bytes_lower_bound": (
+            error.observed_output_bytes_lower_bound
+        ),
+    }
+    if error.process_cleanup_incomplete:
+        return ActivationCaptureCleanupFailed(error.detail, **fields)
+    if error.code == nvbit_process.NVBIT_CAPTURE_OUTPUT_LIMIT:
+        return ActivationCaptureOutputLimitExceeded(error.detail, **fields)
+    if error.code == _ACTIVATION_CAPTURE_TIMEOUT_CODE:
+        return ActivationCaptureTimeout(error.detail, **fields)
+    if _capture_resource_failure(error):
+        return ActivationCaptureResourceUnavailable(error.detail, **fields)
+    return ActivationCaptureLaunchFailed(error.detail, **fields)
 
 
 def _raise_if_descriptor_resource_unavailable(
@@ -316,13 +461,21 @@ def _activation_output_plan(
 
 
 def _run_git_subprocess(
-    command: list[str],
+    retained_git: object,
+    arguments: tuple[str, ...],
     *,
     resource_label: str,
-    **kwargs,
+    text: bool = False,
+    check: bool = False,
 ) -> subprocess.CompletedProcess:
     try:
-        return subprocess.run(command, **kwargs)
+        return run_retained_git(
+            retained_git,
+            repo_root=_REPO_ROOT,
+            arguments=arguments,
+            text=text,
+            check=check,
+        )
     except OSError as descriptor_error:
         _raise_if_descriptor_resource_unavailable(
             descriptor_error,
@@ -331,47 +484,103 @@ def _run_git_subprocess(
         raise
 
 
-def _git_head() -> str:
+def _git_head(retained_git: object | None = None) -> str:
+    if retained_git is None:
+        retained_git = _ACTIVE_RETAINED_GIT.get()
+    if retained_git is None:
+        with open_retained_executable(TRUSTED_GIT_EXECUTABLE) as owned_git:
+            return _git_head(owned_git)
     out = _run_git_subprocess(
-        ["git", "rev-parse", "HEAD"],
+        retained_git,
+        ("rev-parse", "--verify", "HEAD"),
         resource_label="Git HEAD subprocess pipe allocation",
-        capture_output=True, text=True, cwd=str(_REPO_ROOT), check=True,
+        text=True,
+        check=True,
     )
     return out.stdout.strip()
 
 
 _SOURCE_COMMIT_AUTHORITY_PATHS = (
     "tools/local_labels/activation_trace_orchestrator.py",
+    "tools/local_labels/delegated_cgroup.py",
     "tools/local_labels/immutable_artifact.py",
+    "tools/local_labels/protected_paths.py",
+    "tools/local_labels/roster_path_resolver.py",
+    "tools/nvbit_tracer/capture_process.py",
+    "tools/nvbit_tracer/external_tracer.py",
+    "tools/nvbit_tracer/import_trace_contract.py",
+    "tools/nvbit_tracer/proto_binding_loader.py",
+    "tools/nvbit_tracer/protobuf_wire_preflight.py",
     "tools/nvbit_tracer/runtime_env.py",
     "tools/nvbit_tracer/trace_admission.py",
+    "workloads/simbench_bw/_pb_generated/address_pb2.py",
+    "workloads/simbench_bw/_pb_generated/cuda_stream_pb2.py",
+    "workloads/simbench_bw/_pb_generated/dim3d_pb2.py",
+    "workloads/simbench_bw/_pb_generated/gpu_device_pb2.py",
+    "workloads/simbench_bw/_pb_generated/instruction_pb2.py",
+    "workloads/simbench_bw/_pb_generated/kernel_pb2.py",
+    "workloads/simbench_bw/_pb_generated/threadblock_pb2.py",
+    "workloads/simbench_bw/_pb_generated/trace_pb2.py",
+    "workloads/simbench_bw/_pb_generated/warp_pb2.py",
 )
 
 
 def _resolve_clean_source_commit(
     source_path: Path,
-    retained_source,
+    retained_authority: dict[str, object],
+    retained_git: object | None = None,
+    *,
+    _legacy_head_call: bool = False,
 ) -> str:
+    if retained_git is None:
+        active_git = _ACTIVE_RETAINED_GIT.get()
+        if active_git is not None:
+            return _resolve_clean_source_commit(
+                source_path,
+                retained_authority,
+                active_git,
+                _legacy_head_call=True,
+            )
+        with open_retained_executable(TRUSTED_GIT_EXECUTABLE) as owned_git:
+            return _resolve_clean_source_commit(
+                source_path,
+                retained_authority,
+                owned_git,
+                _legacy_head_call=True,
+            )
     try:
         source_relative = source_path.relative_to(_REPO_ROOT).as_posix()
     except ValueError as exc:
         raise RuntimeError(
             f"activation source is outside repository: {source_path}"
         ) from exc
-    head = _git_head()
-    relevant_paths = (*_SOURCE_COMMIT_AUTHORITY_PATHS, source_relative)
+    authority_paths = (*_SOURCE_COMMIT_AUTHORITY_PATHS, source_relative)
+    expected = set(authority_paths)
+    if (
+        len(authority_paths) != len(expected)
+        or set(retained_authority) != expected
+        or len(retained_authority) != len(expected)
+    ):
+        missing = sorted(expected - set(retained_authority))
+        extra = sorted(set(retained_authority) - expected)
+        raise RuntimeError(
+            "activation source-commit authority set is incomplete: "
+            f"missing={missing}, extra={extra}"
+        )
+    head = (
+        _git_head() if _legacy_head_call else _git_head(retained_git)
+    )
+    relevant_paths = authority_paths
     status = _run_git_subprocess(
-        [
-            "git",
-            "-C",
-            str(_REPO_ROOT),
+        retained_git,
+        (
             "status",
-            "--porcelain",
+            "--porcelain=v1",
+            "--untracked-files=all",
             "--",
             *relevant_paths,
-        ],
+        ),
         resource_label="Git status subprocess pipe allocation",
-        capture_output=True,
         text=True,
     )
     if status.returncode != 0:
@@ -383,36 +592,48 @@ def _resolve_clean_source_commit(
             "activation source-commit authority is dirty or untracked: "
             f"{status.stdout.strip()!r}"
         )
-    committed_source = _run_git_subprocess(
-        [
-            "git",
-            "-C",
-            str(_REPO_ROOT),
-            "show",
-            f"{head}:{source_relative}",
-        ],
-        resource_label="Git show subprocess pipe allocation",
-        capture_output=True,
+    for relative_path in authority_paths:
+        committed = _run_git_subprocess(
+            retained_git,
+            ("show", f"{head}:{relative_path}"),
+            resource_label="Git show subprocess pipe allocation",
+        )
+        if committed.returncode != 0:
+            raise RuntimeError(
+                f"activation authority is absent from source_commit {head}: "
+                f"{relative_path}"
+            )
+        retained = retained_authority[relative_path]
+        if committed.stdout != retained.read_bytes():
+            raise RuntimeError(
+                "retained activation authority bytes disagree with source_commit "
+                f"for {relative_path}"
+            )
+        retained.verify_unchanged()
+    final_head = (
+        _git_head() if _legacy_head_call else _git_head(retained_git)
     )
-    if committed_source.returncode != 0:
-        raise RuntimeError(
-            f"activation source is absent from source_commit {head}: "
-            f"{source_relative}"
-        )
-    if committed_source.stdout != retained_source.read_bytes():
-        raise RuntimeError(
-            "retained activation source bytes disagree with source_commit"
-        )
-    if _git_head() != head:
+    if final_head != head:
         raise RuntimeError(
             "activation source_commit changed during authority verification"
         )
-    retained_source.verify_unchanged()
     return head
 
 
-def _verify_source_commit_head(source_commit: str) -> None:
-    if _git_head() != source_commit:
+def _verify_retained_source_authority(
+    retained_authority: dict[str, object],
+) -> None:
+    for retained in retained_authority.values():
+        retained.verify_unchanged()
+
+
+def _verify_source_commit_head(
+    source_commit: str, retained_git: object | None = None,
+) -> None:
+    observed_head = (
+        _git_head() if retained_git is None else _git_head(retained_git)
+    )
+    if observed_head != source_commit:
         raise RuntimeError(
             "activation source_commit changed during capture publication"
         )
@@ -523,6 +744,18 @@ def _validate_trace_admission_identities(
         raise RuntimeError(
             f"{producer}: allocations sidecar identity is inconsistent"
         )
+    if admission.admission_scope != TRACE_ADMISSION_SCOPE:
+        raise RuntimeError(
+            f"{producer}: historical-read-only admission cannot mint evidence"
+        )
+    if admission.trace_contract_id != EXPECTED_TRACE_CONTRACT_ID:
+        raise RuntimeError(
+            f"{producer}: forward admission is not the exact split-v2 contract"
+        )
+    if admission.memory_payload_classes != EXPECTED_MEMORY_PAYLOAD_CLASSES:
+        raise RuntimeError(
+            f"{producer}: forward admission capability vector is not canonical"
+        )
     if type(admission.launches) is not tuple:
         raise RuntimeError(f"{producer}: launches must be an exact tuple")
     integer_launch_fields = (
@@ -598,6 +831,8 @@ def _trace_admission_identity_fields(admission: TraceAdmission) -> dict[str, obj
             "trace admission allocations identity is internally inconsistent"
         )
     return {
+        "trace_contract_id": admission.trace_contract_id,
+        "memory_payload_classes": list(admission.memory_payload_classes),
         # Portable content identities and their corresponding retained sizes.
         "dynamic_trace_size_bytes": admission.dynamic_trace_size_bytes,
         "dynamic_trace_sha256": admission.dynamic_trace_sha256,
@@ -904,6 +1139,8 @@ def trace_activation_cell(
     extra_app_args: tuple[str, ...] = (),
     fallback_source: str = "portable_lcd",
     output_root: Path | str = _DEFAULT_OUTPUT_ROOT,
+    tracer_source_path: Path | str | None = None,
+    tracer_sha256: str | None = None,
     _precleared_plan: dict[str, Path] | None = None,
     _retention_stack: ExitStack | None = None,
     _published_locators: list[
@@ -939,6 +1176,11 @@ def trace_activation_cell(
         raise TypeError("_retention_stack must be an ExitStack when provided")
     if _published_locators is not None and type(_published_locators) is not list:
         raise TypeError("_published_locators must be a list when provided")
+    tracer_authority = require_external_tracer_authority(
+        tracer_source_path,
+        tracer_sha256,
+        repo_root=_REPO_ROOT,
+    )
     if shape_point not in _SUPPORTED_SHAPES:
         raise ValueError(
             f"shape_point must be one of {_SUPPORTED_SHAPES}; "
@@ -962,12 +1204,6 @@ def trace_activation_cell(
         name: _assert_staging_output(path, operation=f"recheck {name}")
         for name, path in plan.items()
     }
-    if not _TRACER_SO.is_file():
-        raise FileNotFoundError(
-            f"NVBit tracer .so missing at {_TRACER_SO}; restore the "
-            "byte-exact preserved artifact before capture."
-        )
-
     binary = (
         _REPO_ROOT / "workloads" / "portable_lcd" / slug / f"{slug}_run"
     )
@@ -1012,14 +1248,27 @@ def trace_activation_cell(
         retained_binary = capture_sources.enter_context(
             open_retained_executable(binary)
         )
+        retained_git = capture_sources.enter_context(
+            open_retained_executable(TRUSTED_GIT_EXECUTABLE)
+        )
+        git_token = _ACTIVE_RETAINED_GIT.set(retained_git)
+        capture_sources.callback(_ACTIVE_RETAINED_GIT.reset, git_token)
         retained_tracer = capture_sources.enter_context(
-            open_retained_regular(_TRACER_SO)
+            open_retained_regular(
+                tracer_authority.path,
+                max_bytes=EXTERNAL_TRACER_MAX_BYTES,
+            )
         )
-        retained_source = capture_sources.enter_context(
-            open_retained_regular(source)
-        )
+        verify_retained_tracer_authority(retained_tracer, tracer_authority)
+        source_relative = source.relative_to(_REPO_ROOT).as_posix()
+        retained_authority: dict[str, object] = {}
+        for relative_path in (*_SOURCE_COMMIT_AUTHORITY_PATHS, source_relative):
+            retained_authority[relative_path] = capture_sources.enter_context(
+                open_retained_regular(_REPO_ROOT / relative_path)
+            )
+        retained_source = retained_authority[source_relative]
         head = _require_hex_identity(
-            _resolve_clean_source_commit(source, retained_source),
+            _resolve_clean_source_commit(source, retained_authority),
             label="source_commit",
             length=40,
         )
@@ -1067,54 +1316,69 @@ def trace_activation_cell(
             retained_workload_output = capture_sources.enter_context(
                 PinnedDirectoryReader(workload_output_root)
             )
-            env = _tracer_env(
+            with retained_tracer_runtime_env(
+                retained_tracer.path,
+                base_env=sanitized_capture_environment(),
+                pb_lib=DEFAULT_PB_LIB,
+                runtime_manifest=default_runtime_manifest_path(retained_tracer.path),
                 retained_descriptor=retained_tracer.descriptor,
-            )
-            env["CUDA_INJECTION64_PATH"] = retained_tracer.proc_path
-            env["USER_DEFINED_FOLDERS"] = "1"
-            env["TRACES_FOLDER"] = f"/proc/self/fd/{stage.descriptor}"
-            invocation = [
-                retained_binary.proc_path,
-                *shape_argv,
-                *extra_app_args,
-                "--output_dir",
-                f"/proc/self/fd/{retained_workload_output.descriptor}",
-            ]
+            ) as retained_runtime:
+                env = dict(retained_runtime.environment)
+                env["CUDA_INJECTION64_PATH"] = retained_tracer.proc_path
+                env["USER_DEFINED_FOLDERS"] = "1"
+                env["TRACES_FOLDER"] = f"/proc/self/fd/{stage.descriptor}"
+                invocation = [
+                    retained_binary.proc_path,
+                    *shape_argv,
+                    *extra_app_args,
+                    "--output_dir",
+                    f"/proc/self/fd/{retained_workload_output.descriptor}",
+                ]
+                inherited_descriptors = (
+                    retained_binary.descriptor,
+                    retained_tracer.descriptor,
+                    stage.descriptor,
+                    retained_workload_output.descriptor,
+                    *retained_runtime.pass_fds,
+                )
+                retained_binary.verify_unchanged()
+                retained_tracer.verify_unchanged()
+                _verify_retained_source_authority(retained_authority)
+                _verify_source_commit_head(head)
+                t0 = time.perf_counter()
+                try:
+                    proc = nvbit_process.execute_capture_process(
+                        tuple(invocation),
+                        environment=env,
+                        working_directory=str(binary.parent),
+                        inherited_descriptors=inherited_descriptors,
+                        timeout_seconds=_ACTIVATION_CAPTURE_TIMEOUT_SECONDS,
+                        max_output_bytes=_ACTIVATION_CAPTURE_MAX_OUTPUT_BYTES,
+                        timeout_code=_ACTIVATION_CAPTURE_TIMEOUT_CODE,
+                        launch_code=_ACTIVATION_CAPTURE_LAUNCH_CODE,
+                    )
+                except nvbit_process.NvbitCaptureProcessError as process_error:
+                    mapped = _map_activation_capture_error(process_error)
+                    raise mapped from process_error
+                except (MemoryError, OSError) as process_error:
+                    if _capture_resource_failure(process_error):
+                        raise ActivationCaptureResourceUnavailable(
+                            str(process_error)
+                        ) from process_error
+                    raise ActivationCaptureLaunchFailed(
+                        str(process_error)
+                    ) from process_error
+                t1 = time.perf_counter()
             retained_binary.verify_unchanged()
             retained_tracer.verify_unchanged()
-            retained_source.verify_unchanged()
-            _verify_source_commit_head(head)
-            t0 = time.perf_counter()
-            try:
-                proc = subprocess.run(
-                    invocation,
-                    capture_output=True,
-                    text=True,
-                    env=env,
-                    cwd=str(binary.parent),
-                    pass_fds=(
-                        retained_binary.descriptor,
-                        retained_tracer.descriptor,
-                        stage.descriptor,
-                        retained_workload_output.descriptor,
-                    ),
-                )
-            except OSError as descriptor_error:
-                _raise_if_descriptor_resource_unavailable(
-                    descriptor_error,
-                    label="activation subprocess pipe allocation",
-                )
-                raise
-            t1 = time.perf_counter()
-            retained_binary.verify_unchanged()
-            retained_tracer.verify_unchanged()
-            retained_source.verify_unchanged()
+            _verify_retained_source_authority(retained_authority)
             _verify_source_commit_head(head)
             retained_workload_output.verify_path()
             if proc.returncode != 0:
-                raise RuntimeError(
-                    f"activation binary {binary} returned {proc.returncode}; "
-                    f"stderr (tail): {proc.stderr[-500:]!r}"
+                raise ActivationCaptureNonzero(
+                    returncode=proc.returncode,
+                    stdout=proc.stdout,
+                    stderr=proc.stderr,
                 )
             raw_generation = stage.commit(
                 require_nonempty=True,
@@ -1123,7 +1387,7 @@ def trace_activation_cell(
             _verify_committed_trace_generation(raw_generation)
             retained_binary.verify_unchanged()
             retained_tracer.verify_unchanged()
-            retained_source.verify_unchanged()
+            _verify_retained_source_authority(retained_authority)
             _verify_source_commit_head(head)
 
         traces_folder = raw_generation.path
@@ -1160,9 +1424,8 @@ def trace_activation_cell(
             "trace_pb_path": str(pb_path.relative_to(cell_dir)),
             "trace_bytes": admission.dynamic_trace_size_bytes,
             "wall_time_s": t1 - t0,
-            "tracer_so_path": str(
-                retained_tracer.path.relative_to(_REPO_ROOT),
-            ),
+            "tracer_so_path": str(retained_tracer.path),
+            "tracer_source_kind": tracer_authority.source_kind,
             "nvbit_tracer_build_hash": tracer_build_sha,
             **_trace_admission_identity_fields(admission),
             "expected_record_count": expected,
@@ -1213,7 +1476,7 @@ def trace_activation_cell(
                     trace_sources.verify_unchanged()
                     retained_binary.verify_unchanged()
                     retained_tracer.verify_unchanged()
-                    retained_source.verify_unchanged()
+                    _verify_retained_source_authority(retained_authority)
                     retained_workload_output.verify_path()
                     _verify_source_commit_head(head)
 
@@ -1593,6 +1856,21 @@ def main(argv: list[str] | None = None) -> int:
         ),
     )
     parser.add_argument(
+        "--nvbit-tracer",
+        type=Path,
+        default=None,
+        help=(
+            "Absolute non-Git split-v2 tracer path. Must be paired with "
+            "--nvbit-tracer-sha256; otherwise the explicit external-tracer "
+            "environment pair is required."
+        ),
+    )
+    parser.add_argument(
+        "--nvbit-tracer-sha256",
+        default=None,
+        help="Exact lowercase SHA-256 for --nvbit-tracer.",
+    )
+    parser.add_argument(
         "--output-root",
         type=Path,
         default=_DEFAULT_OUTPUT_ROOT,
@@ -1614,6 +1892,11 @@ def main(argv: list[str] | None = None) -> int:
     )
     extras = tuple(args.app_arg)
     try:
+        tracer_authority = require_external_tracer_authority(
+            args.nvbit_tracer,
+            args.nvbit_tracer_sha256,
+            repo_root=_REPO_ROOT,
+        )
         plans = [
             _activation_output_plan(
                 slug=slug,
@@ -1641,6 +1924,8 @@ def main(argv: list[str] | None = None) -> int:
                 extra_app_args=extras,
                 fallback_source=args.fallback_source,
                 output_root=args.output_root,
+                tracer_source_path=tracer_authority.path,
+                tracer_sha256=tracer_authority.sha256,
                 _precleared_plan=plan,
             )
             print(

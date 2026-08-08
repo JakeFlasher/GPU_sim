@@ -13,10 +13,11 @@ use serde::{Deserialize, Serialize};
 use sim_arch::card::{ArchCard, CalibError};
 use sim_arch::{ArchError, ArchId, Sku};
 use sim_mem::{PchaseCard, PchaseCardError};
-use sim_trace::reader::{ADDRESS_CARRYING_TRACE_CONTRACT_ID, MemoryPayloadContract};
+use sim_trace::reader::MemoryPayloadContract;
 use sim_trace::{
-    AnchoredDir, ArtifactDigestIdentity, CanonicalJsonError, ExecInfo, ExecInfoError, FileIdentity,
-    Sha256Digest, TraceDir, TraceDirSnapshot, TraceError, TraceSnapshotLimits, canonical_json,
+    AnchoredDir, ArtifactDigestIdentity, CanonicalJsonError, ExecInfo, ExecInfoError,
+    FileGenerationIdentity, FileIdentity, Sha256Digest, TraceArtifactIdentity, TraceDir,
+    TraceDirSnapshot, TraceError, TraceSnapshotLimits, canonical_json,
 };
 
 use crate::control_bits::{ControlBitsError, ControlSidecar};
@@ -43,6 +44,7 @@ const MAX_EVIDENCE_SNAPSHOT_BYTES: u64 = 1024 * 1024 * 1024;
 /// trace failures exhaustively.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum ManifestArtifactToken {
+    LaunchEvidenceManifest,
     DynamicTracePb,
     ThreadblockPayload,
     ThreadblockPayloadSortedPathManifest,
@@ -59,6 +61,7 @@ pub enum ManifestArtifactToken {
 impl ManifestArtifactToken {
     pub const fn token(self) -> &'static str {
         match self {
+            Self::LaunchEvidenceManifest => "launch_evidence_manifest",
             Self::DynamicTracePb => "dynamic_trace_pb",
             Self::ThreadblockPayload => "threadblock_payload",
             Self::ThreadblockPayloadSortedPathManifest => {
@@ -124,6 +127,24 @@ pub enum ManifestError {
         artifact: ManifestArtifactToken,
         #[source]
         source: sim_trace::AnchoredReadError,
+    },
+    #[error(
+        "retained artifact generation for {artifact} at {path} could not be rechecked: {source}"
+    )]
+    ArtifactGenerationRead {
+        artifact: ManifestArtifactToken,
+        path: PathBuf,
+        #[source]
+        source: sim_trace::AnchoredReadError,
+    },
+    #[error(
+        "retained artifact generation for {artifact} at {path} changed: expected {expected:?}, got {actual:?}"
+    )]
+    ArtifactGenerationMismatch {
+        artifact: ManifestArtifactToken,
+        path: PathBuf,
+        expected: FileGenerationIdentity,
+        actual: FileGenerationIdentity,
     },
     #[error("manifest artifact {artifact} duplicates another artifact path at {path}")]
     ArtifactPathDuplicate {
@@ -979,6 +1000,108 @@ impl LaunchEvidenceIdentity {
     }
 }
 
+struct RetainedArtifactGeneration {
+    artifact: ManifestArtifactToken,
+    relative_path: PathBuf,
+    expected: FileGenerationIdentity,
+}
+
+/// Exact optional-presence and threadblock-tree claims retained from admission.
+/// Re-capturing through the retained ancestor descriptor detects names that did
+/// not exist during admission as well as roster substitutions that preserve
+/// aggregate count and byte totals.
+struct RetainedTraceInventory {
+    root_relative: PathBuf,
+    limits: TraceSnapshotLimits,
+    expected: TraceArtifactIdentity,
+}
+
+impl RetainedTraceInventory {
+    fn reanchor(&mut self, prefix: &Path) {
+        self.root_relative = prefix.join(&self.root_relative);
+    }
+
+    fn recheck(&self, base: &AnchoredDir) -> Result<(), ManifestError> {
+        let trace_root = base.root().join(&self.root_relative);
+        let snapshot = TraceDirSnapshot::capture_anchored(base, &self.root_relative, self.limits)
+            .map_err(|source| map_trace_snapshot_error(&trace_root, source))?;
+        verify_trace_artifact_identity(&self.expected, snapshot.artifact_identity())
+    }
+}
+
+/// Retained directory capability plus every file generation consumed by admission
+/// and the closed trace inventory, including explicit absence claims.
+struct RetainedEvidenceGeneration {
+    base: AnchoredDir,
+    artifacts: Vec<RetainedArtifactGeneration>,
+    trace_inventory: RetainedTraceInventory,
+}
+
+impl RetainedEvidenceGeneration {
+    fn capture(
+        reader: &AnchoredDir,
+        identities: BTreeMap<FileIdentity, ObservedArtifactGeneration>,
+        trace_inventory: RetainedTraceInventory,
+    ) -> Result<Self, ManifestError> {
+        let mut artifacts = identities
+            .into_values()
+            .map(|observed| {
+                let relative_path = observed
+                    .path
+                    .strip_prefix(reader.root())
+                    .map_err(|_| ManifestError::EdgeUnverifiable {
+                        edge: "retained_artifact_generation",
+                        reason: "admitted artifact path is outside its retained evidence base",
+                    })?
+                    .to_path_buf();
+                Ok(RetainedArtifactGeneration {
+                    artifact: observed.artifact,
+                    relative_path,
+                    expected: observed.generation,
+                })
+            })
+            .collect::<Result<Vec<_>, ManifestError>>()?;
+        artifacts.sort_by(|left, right| left.relative_path.cmp(&right.relative_path));
+        let base = reader.descendant(Path::new(""))?;
+        Ok(Self {
+            base,
+            artifacts,
+            trace_inventory,
+        })
+    }
+
+    fn reanchor(mut self, reader: &AnchoredDir, prefix: &Path) -> Result<Self, ManifestError> {
+        for artifact in &mut self.artifacts {
+            artifact.relative_path = prefix.join(&artifact.relative_path);
+        }
+        self.trace_inventory.reanchor(prefix);
+        self.base = reader.descendant(Path::new(""))?;
+        Ok(self)
+    }
+
+    fn recheck(&self) -> Result<(), ManifestError> {
+        for artifact in &self.artifacts {
+            let actual = self
+                .base
+                .inspect_regular_generation(&artifact.relative_path)
+                .map_err(|source| ManifestError::ArtifactGenerationRead {
+                    artifact: artifact.artifact,
+                    path: artifact.relative_path.clone(),
+                    source,
+                })?;
+            if actual != artifact.expected {
+                return Err(ManifestError::ArtifactGenerationMismatch {
+                    artifact: artifact.artifact,
+                    path: artifact.relative_path.clone(),
+                    expected: artifact.expected,
+                    actual,
+                });
+            }
+        }
+        self.trace_inventory.recheck(&self.base)
+    }
+}
+
 /// Exact snapshotted inputs paired with their self-sealed launch identity.
 pub struct AdmittedLaunchEvidence {
     identity: LaunchEvidenceIdentity,
@@ -986,6 +1109,7 @@ pub struct AdmittedLaunchEvidence {
     schedules: BTreeMap<i32, FunctionSchedule>,
     arch_card: ArchCard,
     pchase_card: PchaseCard,
+    retained_generation: RetainedEvidenceGeneration,
 }
 
 impl AdmittedLaunchEvidence {
@@ -1011,6 +1135,14 @@ impl AdmittedLaunchEvidence {
 
     pub fn pchase_card(&self) -> &PchaseCard {
         &self.pchase_card
+    }
+
+    /// Recheck that every named artifact still denotes the admitted generation.
+    ///
+    /// Replay consumes immutable snapshotted bytes, while publication additionally
+    /// requires these retained name-to-generation edges to remain intact.
+    pub fn recheck_retained_generation(&self) -> Result<(), ManifestError> {
+        self.retained_generation.recheck()
     }
 }
 
@@ -1207,10 +1339,114 @@ fn verify_optional_artifact(
     }
 }
 
+fn verify_retained_digest(
+    artifact: ManifestArtifactToken,
+    expected: ArtifactDigestIdentity,
+    actual: ArtifactDigestIdentity,
+) -> Result<(), ManifestError> {
+    if expected.size_bytes() != actual.size_bytes() {
+        return Err(ManifestError::ArtifactSizeMismatch {
+            artifact,
+            expected: expected.size_bytes(),
+            actual: actual.size_bytes(),
+        });
+    }
+    if expected.sha256() != actual.sha256() {
+        return Err(ManifestError::ArtifactDigestMismatch {
+            artifact,
+            expected: expected.sha256(),
+            actual: actual.sha256(),
+        });
+    }
+    Ok(())
+}
+
+fn verify_retained_optional_digest(
+    artifact: ManifestArtifactToken,
+    expected: Option<ArtifactDigestIdentity>,
+    actual: Option<ArtifactDigestIdentity>,
+) -> Result<(), ManifestError> {
+    match (expected, actual) {
+        (None, None) => Ok(()),
+        (Some(expected), Some(actual)) => verify_retained_digest(artifact, expected, actual),
+        (expected, actual) => Err(ManifestError::ArtifactPresenceMismatch {
+            artifact,
+            expected: expected.is_some(),
+            actual: actual.is_some(),
+        }),
+    }
+}
+
+fn verify_trace_artifact_identity(
+    expected: &TraceArtifactIdentity,
+    actual: &TraceArtifactIdentity,
+) -> Result<(), ManifestError> {
+    verify_retained_digest(
+        ManifestArtifactToken::DynamicTracePb,
+        expected.dynamic_trace_pb(),
+        actual.dynamic_trace_pb(),
+    )?;
+    verify_retained_optional_digest(
+        ManifestArtifactToken::AllocationsJson,
+        expected.allocations_json(),
+        actual.allocations_json(),
+    )?;
+    verify_retained_optional_digest(
+        ManifestArtifactToken::TraceSamplingJson,
+        expected.trace_sampling_json(),
+        actual.trace_sampling_json(),
+    )?;
+    verify_retained_optional_digest(
+        ManifestArtifactToken::StatsCsv,
+        expected.stats_csv(),
+        actual.stats_csv(),
+    )?;
+
+    let expected_payload = expected.threadblock_payload();
+    let actual_payload = actual.threadblock_payload();
+    if expected_payload.file_count() != actual_payload.file_count() {
+        return Err(ManifestError::ArtifactCardinalityMismatch {
+            artifact: ManifestArtifactToken::ThreadblockPayload,
+            expected: expected_payload.file_count(),
+            actual: actual_payload.file_count(),
+        });
+    }
+    if expected_payload.raw_bytes() != actual_payload.raw_bytes() {
+        return Err(ManifestError::ArtifactSizeMismatch {
+            artifact: ManifestArtifactToken::ThreadblockPayload,
+            expected: expected_payload.raw_bytes(),
+            actual: actual_payload.raw_bytes(),
+        });
+    }
+    if expected_payload.sorted_path_manifest_sha256()
+        != actual_payload.sorted_path_manifest_sha256()
+    {
+        return Err(ManifestError::ArtifactDigestMismatch {
+            artifact: ManifestArtifactToken::ThreadblockPayloadSortedPathManifest,
+            expected: expected_payload.sorted_path_manifest_sha256(),
+            actual: actual_payload.sorted_path_manifest_sha256(),
+        });
+    }
+    if expected_payload.sorted_path_stream_sha256() != actual_payload.sorted_path_stream_sha256() {
+        return Err(ManifestError::ArtifactDigestMismatch {
+            artifact: ManifestArtifactToken::ThreadblockPayloadSortedPathStream,
+            expected: expected_payload.sorted_path_stream_sha256(),
+            actual: actual_payload.sorted_path_stream_sha256(),
+        });
+    }
+    Ok(())
+}
+
+struct ObservedArtifactGeneration {
+    artifact: ManifestArtifactToken,
+    path: PathBuf,
+    generation: FileGenerationIdentity,
+}
+
 fn read_manifest_artifact(
     reader: &AnchoredDir,
     base: &Path,
-    file_identities: &mut BTreeMap<FileIdentity, PathBuf>,
+    file_identities: &mut BTreeMap<FileIdentity, ObservedArtifactGeneration>,
     artifact: ManifestArtifactToken,
     expected: &ManifestArtifact,
 ) -> Result<(PathBuf, Vec<u8>, ReadArtifactIdentity), ManifestError> {
@@ -1230,7 +1466,12 @@ fn read_manifest_artifact(
                 source: other,
             },
         })?;
-    insert_manifest_file_identity(file_identities, artifact, file.identity(), path.clone())?;
+    insert_manifest_file_identity(
+        file_identities,
+        artifact,
+        file.generation_identity(),
+        path.clone(),
+    )?;
     let raw = file.into_raw();
     let actual = ReadArtifactIdentity {
         size_bytes: u64::try_from(raw.len()).map_err(|_| ManifestError::ArtifactSizeMismatch {
@@ -1250,16 +1491,58 @@ fn read_manifest_artifact(
     Ok((path, raw, actual))
 }
 
+fn trace_snapshot_artifact_token(
+    trace_root: &Path,
+    path: &Path,
+) -> Result<ManifestArtifactToken, ManifestError> {
+    for (expected, artifact) in [
+        (
+            trace_root.join("dynamic_trace.pb"),
+            ManifestArtifactToken::DynamicTracePb,
+        ),
+        (
+            trace_root.join("extra_info/allocations.json"),
+            ManifestArtifactToken::AllocationsJson,
+        ),
+        (
+            trace_root.join("trace_sampling.json"),
+            ManifestArtifactToken::TraceSamplingJson,
+        ),
+        (
+            trace_root.join("stats.csv"),
+            ManifestArtifactToken::StatsCsv,
+        ),
+    ] {
+        if path == expected {
+            return Ok(artifact);
+        }
+    }
+    if path.starts_with(trace_root.join("threadblocks")) {
+        return Ok(ManifestArtifactToken::ThreadblockPayload);
+    }
+    Err(ManifestError::EdgeUnverifiable {
+        edge: "trace_snapshot_artifact_generation",
+        reason: "snapshotted trace artifact path has no closed manifest role",
+    })
+}
+
 fn insert_manifest_file_identity(
-    identities: &mut BTreeMap<FileIdentity, PathBuf>,
+    identities: &mut BTreeMap<FileIdentity, ObservedArtifactGeneration>,
     artifact: ManifestArtifactToken,
-    identity: FileIdentity,
+    generation: FileGenerationIdentity,
     path: PathBuf,
 ) -> Result<(), ManifestError> {
-    if let Some(first) = identities.insert(identity, path.clone()) {
+    if let Some(first) = identities.insert(
+        generation.file_identity(),
+        ObservedArtifactGeneration {
+            artifact,
+            path: path.clone(),
+            generation,
+        },
+    ) {
         return Err(ManifestError::ArtifactFileAlias {
             artifact,
-            first,
+            first: first.path,
             second: path,
         });
     }
@@ -1281,14 +1564,17 @@ impl From<ReadArtifactIdentity> for SealedArtifact {
     }
 }
 
-fn parse_trace_snapshot(snapshot: TraceDirSnapshot) -> Result<TraceDir, ManifestError> {
+fn parse_trace_snapshot(
+    trace_root: &Path,
+    snapshot: TraceDirSnapshot,
+) -> Result<TraceDir, ManifestError> {
     TraceDir::from_snapshot(snapshot).map_err(|source| match source {
         TraceError::TraceContractUnsupported { .. } => ManifestError::CapabilityMissing { source },
-        other => ManifestError::Trace(other),
+        other => map_trace_snapshot_error(trace_root, other),
     })
 }
 
-fn map_trace_snapshot_error(source: TraceError) -> ManifestError {
+fn map_trace_snapshot_error(trace_root: &Path, source: TraceError) -> ManifestError {
     match source {
         TraceError::SnapshotArtifactPresenceMismatch {
             artifact,
@@ -1338,13 +1624,54 @@ fn map_trace_snapshot_error(source: TraceError) -> ManifestError {
                 actual,
             }),
         },
+        TraceError::TraceArtifactResourceLimitExceeded {
+            path,
+            artifact,
+            resource,
+            observed,
+            limit,
+        } => match ManifestArtifactToken::from_trace_snapshot_token(artifact) {
+            Some(artifact) => ManifestError::ArtifactResourceLimitExceeded {
+                artifact,
+                resource,
+                declared: observed,
+                limit,
+            },
+            None => ManifestError::Trace(TraceError::TraceArtifactResourceLimitExceeded {
+                path,
+                artifact,
+                resource,
+                observed,
+                limit,
+            }),
+        },
+        TraceError::SnapshotArtifactRead { artifact, source } => {
+            match ManifestArtifactToken::from_trace_snapshot_token(artifact) {
+                Some(artifact) => match source {
+                    sim_trace::AnchoredReadError::HardlinkAlias { first, second } => {
+                        ManifestError::ArtifactFileAlias {
+                            artifact,
+                            first,
+                            second,
+                        }
+                    }
+                    source => ManifestError::ArtifactRead { artifact, source },
+                },
+                None => ManifestError::Trace(TraceError::SnapshotArtifactRead { artifact, source }),
+            }
+        }
         TraceError::AnchoredSnapshot(sim_trace::AnchoredReadError::HardlinkAlias {
             first,
             second,
-        }) => ManifestError::ArtifactFileAlias {
-            artifact: ManifestArtifactToken::DynamicTracePb,
-            first,
-            second,
+        }) => match trace_snapshot_artifact_token(trace_root, &second) {
+            Ok(artifact) => ManifestError::ArtifactFileAlias {
+                artifact,
+                first,
+                second,
+            },
+            Err(_) => ManifestError::Trace(TraceError::AnchoredSnapshot(
+                sim_trace::AnchoredReadError::HardlinkAlias { first, second },
+            )),
         },
         other => ManifestError::Trace(other),
     }
@@ -1399,10 +1726,51 @@ pub fn admit_launch_evidence(
     admit_launch_evidence_anchored(&reader, Path::new(manifest_name))
 }
 
-/// Admit launch evidence relative to an already retained manifest-parent anchor.
+/// Admit launch evidence relative to an already retained ancestor anchor.
+///
+/// The returned evidence retains a duplicate of this ancestor capability, not
+/// only a child-directory descriptor, so final publication rechecks traverse the
+/// same run-manifest-relative names that were admitted.
 pub fn admit_launch_evidence_anchored(
     reader: &AnchoredDir,
+    manifest_relative: &Path,
+) -> Result<AdmittedLaunchEvidence, ManifestError> {
+    let components = manifest_relative.components().collect::<Vec<_>>();
+    if components.is_empty()
+        || components
+            .iter()
+            .any(|component| !matches!(component, Component::Normal(_)))
+    {
+        return Err(ManifestError::Anchored(
+            sim_trace::AnchoredReadError::PathInvalid {
+                path: manifest_relative.to_path_buf(),
+            },
+        ));
+    }
+    let manifest_name = manifest_relative.file_name().ok_or_else(|| {
+        ManifestError::Anchored(sim_trace::AnchoredReadError::PathInvalid {
+            path: manifest_relative.to_path_buf(),
+        })
+    })?;
+    let parent = manifest_relative.parent().unwrap_or_else(|| Path::new(""));
+    if parent.as_os_str().is_empty() {
+        return admit_launch_evidence_in_base(
+            reader,
+            Path::new(manifest_name),
+            reader,
+            Path::new(""),
+        );
+    }
+
+    let evidence_reader = reader.descendant(parent)?;
+    admit_launch_evidence_in_base(&evidence_reader, Path::new(manifest_name), reader, parent)
+}
+
+fn admit_launch_evidence_in_base(
+    reader: &AnchoredDir,
     manifest_name: &Path,
+    retained_root: &AnchoredDir,
+    retained_prefix: &Path,
 ) -> Result<AdmittedLaunchEvidence, ManifestError> {
     let mut components = manifest_name.components();
     if !matches!(components.next(), Some(Component::Normal(_)))
@@ -1418,7 +1786,7 @@ pub fn admit_launch_evidence_anchored(
     let base = reader.root().to_path_buf();
     let manifest_path = base.join(manifest_name);
     let manifest_file = reader.read_bounded_regular(manifest_name, MAX_MANIFEST_BYTES)?;
-    let manifest_file_identity = manifest_file.identity();
+    let manifest_file_generation = manifest_file.generation_identity();
     let manifest_raw = manifest_file.into_raw();
     let envelope: ManifestVersionEnvelope =
         serde_json::from_slice(&manifest_raw).map_err(|source| ManifestError::Parse {
@@ -1439,8 +1807,8 @@ pub fn admit_launch_evidence_anchored(
     let mut file_identities = BTreeMap::new();
     insert_manifest_file_identity(
         &mut file_identities,
-        ManifestArtifactToken::DynamicTracePb,
-        manifest_file_identity,
+        ManifestArtifactToken::LaunchEvidenceManifest,
+        manifest_file_generation,
         manifest_path.to_path_buf(),
     )?;
     let artifacts = &manifest.artifacts;
@@ -1612,12 +1980,12 @@ pub fn admit_launch_evidence_anchored(
     );
     let snapshot =
         TraceDirSnapshot::capture_anchored(&reader, trace_root_relative, snapshot_limits)
-            .map_err(map_trace_snapshot_error)?;
-    for (identity, path) in snapshot.file_identities() {
+            .map_err(|source| map_trace_snapshot_error(&trace_root, source))?;
+    for (generation, path) in snapshot.file_generations() {
         insert_manifest_file_identity(
             &mut file_identities,
-            ManifestArtifactToken::DynamicTracePb,
-            identity,
+            trace_snapshot_artifact_token(&trace_root, path)?,
+            generation,
             path.to_path_buf(),
         )?;
     }
@@ -1682,8 +2050,12 @@ pub fn admit_launch_evidence_anchored(
         });
     }
     let trace_identity = trace_artifacts.clone();
-    let trace_dir = parse_trace_snapshot(snapshot)?;
-    if trace_dir.memory_payload_contract() != MemoryPayloadContract::AddressCarryingV1 {
+    let trace_dir = parse_trace_snapshot(&trace_root, snapshot)?;
+    if !matches!(
+        trace_dir.memory_payload_contract(),
+        MemoryPayloadContract::AddressCarryingV1
+            | MemoryPayloadContract::AddressCarryingSharedMemorySplitV2
+    ) {
         return Err(ManifestError::EdgeUnverifiable {
             edge: "trace_contract_id",
             reason: "legacy exclusion traces cannot mint launch evidence identity",
@@ -1959,10 +2331,14 @@ pub fn admit_launch_evidence_anchored(
 
     let binary_digest = match manifest.binary_digest {
         ManifestBinaryDigest::TypedGap { gap } => {
-            if trace_dir.trace().trace_contract_id != ADDRESS_CARRYING_TRACE_CONTRACT_ID {
+            if !matches!(
+                trace_dir.memory_payload_contract(),
+                MemoryPayloadContract::AddressCarryingV1
+                    | MemoryPayloadContract::AddressCarryingSharedMemorySplitV2
+            ) {
                 return Err(ManifestError::EdgeUnverifiable {
                     edge: "binary.digest",
-                    reason: "typed legacy gap is valid only for the current address-carrying trace contract",
+                    reason: "typed binary-digest gap is valid only for an address-carrying trace contract",
                 });
             }
             BinaryDigestIdentity::TypedGap { gap }
@@ -2081,11 +2457,22 @@ pub fn admit_launch_evidence_anchored(
         coverage: coverage_identity,
     };
     let identity = LaunchEvidenceIdentity::seal(payload, trace_bundle, replay_launch)?;
+    let retained_generation = RetainedEvidenceGeneration::capture(
+        reader,
+        file_identities,
+        RetainedTraceInventory {
+            root_relative: trace_root_relative.to_path_buf(),
+            limits: snapshot_limits,
+            expected: trace_identity,
+        },
+    )?
+    .reanchor(retained_root, retained_prefix)?;
     Ok(AdmittedLaunchEvidence {
         identity,
         trace_dir,
         schedules,
         arch_card,
         pchase_card,
+        retained_generation,
     })
 }

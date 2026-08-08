@@ -56,7 +56,7 @@ const THREADBLOCK_LIMITS: ThreadblockLimits = ThreadblockLimits {
 
 #[derive(Debug, Clone, Copy)]
 enum WireValue<'a> {
-    Varint,
+    Varint(u64),
     Fixed64,
     LengthDelimited(&'a [u8]),
     Group,
@@ -70,10 +70,40 @@ struct WireField<'a> {
 }
 
 const KNOWN_FIELD_WIRE_TYPE_MISMATCH: &str = "known protobuf field has incompatible wire type";
+const UINT32_VARINT_OUT_OF_RANGE: &str = "protobuf uint32 field exceeds uint32 range";
+const SIGN_EXTENDED_INT32_MIN: u64 = 0xffff_ffff_8000_0000;
 
 fn require_varint(field: WireField<'_>) -> Result<(), WirePreflightError> {
     match field.value {
-        WireValue::Varint => Ok(()),
+        WireValue::Varint(_) => Ok(()),
+        _ => Err(WirePreflightError::Malformed(
+            KNOWN_FIELD_WIRE_TYPE_MISMATCH,
+        )),
+    }
+}
+
+fn require_uint32(field: WireField<'_>) -> Result<(), WirePreflightError> {
+    match field.value {
+        WireValue::Varint(value) if u32::try_from(value).is_ok() => Ok(()),
+        WireValue::Varint(_) => Err(WirePreflightError::Malformed(UINT32_VARINT_OUT_OF_RANGE)),
+        _ => Err(WirePreflightError::Malformed(
+            KNOWN_FIELD_WIRE_TYPE_MISMATCH,
+        )),
+    }
+}
+
+fn require_shared_memory_int32(field: WireField<'_>) -> Result<(), WirePreflightError> {
+    match field.value {
+        // Protobuf int32 encodes negative values as sign-extended ten-byte
+        // varints. Preserve those for the post-decode nonnegative semantic
+        // check, but reject the over-wide middle range that can truncate to a
+        // valid nonnegative shared-memory size.
+        WireValue::Varint(value)
+            if u32::try_from(value).is_ok() || value >= SIGN_EXTENDED_INT32_MIN =>
+        {
+            Ok(())
+        }
+        WireValue::Varint(_) => Err(WirePreflightError::Malformed(UINT32_VARINT_OUT_OF_RANGE)),
         _ => Err(WirePreflightError::Malformed(
             KNOWN_FIELD_WIRE_TYPE_MISMATCH,
         )),
@@ -91,7 +121,7 @@ fn require_length_delimited(field: WireField<'_>) -> Result<&[u8], WirePreflight
 
 fn require_repeated_varint(field: WireField<'_>) -> Result<Option<&[u8]>, WirePreflightError> {
     match field.value {
-        WireValue::Varint => Ok(None),
+        WireValue::Varint(_) => Ok(None),
         WireValue::LengthDelimited(payload) => Ok(Some(payload)),
         _ => Err(WirePreflightError::Malformed(
             KNOWN_FIELD_WIRE_TYPE_MISMATCH,
@@ -190,10 +220,7 @@ impl<'a> WireCursor<'a> {
         depth: u32,
     ) -> Result<WireValue<'a>, WirePreflightError> {
         match wire_type {
-            0 => {
-                self.read_varint()?;
-                Ok(WireValue::Varint)
-            }
+            0 => Ok(WireValue::Varint(self.read_varint()?)),
             1 => {
                 self.take(8)?;
                 Ok(WireValue::Fixed64)
@@ -344,7 +371,7 @@ fn scan_device(
     let mut cursor = WireCursor::new(raw);
     while let Some(field) = cursor.next_field()? {
         match field.number {
-            1 => require_varint(field)?,
+            1 => require_uint32(field)?,
             2 => {
                 let map_entry = require_length_delimited(field)?;
                 bump(&mut counts.streams, 1, limits.streams, "CUDA streams")?;
@@ -414,9 +441,15 @@ fn scan_kernel(
     limits: RootLimits,
 ) -> Result<(), WirePreflightError> {
     let mut cursor = WireCursor::new(raw);
+    let mut split_fields_seen = [false; 2];
     while let Some(field) = cursor.next_field()? {
         match field.number {
-            1 | 3..=7 => require_varint(field)?,
+            1 | 3 | 5..=7 => require_varint(field)?,
+            // Field 4 is a legacy int32, but valid shared-memory sizes are
+            // nonnegative and participate in the uint32 split-field contract.
+            // Rejecting an over-wide raw varint here prevents generated decoders
+            // from truncating it before the aggregate/split equality check.
+            4 => require_shared_memory_int32(field)?,
             2 => {
                 require_length_delimited(field)?;
             }
@@ -424,6 +457,16 @@ fn scan_kernel(
                 let dimensions = require_length_delimited(field)?;
                 bump_root_node(counts, limits)?;
                 scan_dim3d(dimensions)?;
+            }
+            11..=12 => {
+                require_uint32(field)?;
+                let index = (field.number - 11) as usize;
+                if split_fields_seen[index] {
+                    return Err(WirePreflightError::Malformed(
+                        "duplicate shared-memory split protobuf field",
+                    ));
+                }
+                split_fields_seen[index] = true;
             }
             _ => {}
         }
@@ -545,7 +588,8 @@ fn scan_instruction(
     let mut cursor = WireCursor::new(raw);
     while let Some(field) = cursor.next_field()? {
         match field.number {
-            1..=4 | 6..=13 => require_varint(field)?,
+            1..=3 => require_uint32(field)?,
+            4 | 6..=13 => require_varint(field)?,
             5 => {
                 let address = require_length_delimited(field)?;
                 bump(
@@ -605,7 +649,8 @@ fn scan_address(
     let mut address_lane_values = 0_u64;
     while let Some(field) = cursor.next_field()? {
         match field.number {
-            1..=5 | 7..=8 => require_varint(field)?,
+            2 | 7 => require_uint32(field)?,
+            1 | 3..=5 | 8 => require_varint(field)?,
             6 => match require_repeated_varint(field)? {
                 None => bump_lane_value(&mut address_lane_values, counts, limits)?,
                 Some(packed) => {
@@ -626,7 +671,7 @@ pub(crate) fn preflight_threadblock(raw: &[u8]) -> Result<(), WirePreflightError
 mod tests {
     use super::*;
 
-    fn varint(mut value: usize) -> Vec<u8> {
+    fn varint(mut value: u64) -> Vec<u8> {
         let mut encoded = Vec::new();
         loop {
             let mut byte = (value & 0x7f) as u8;
@@ -643,15 +688,23 @@ mod tests {
 
     fn message_field(number: u8, payload: &[u8]) -> Vec<u8> {
         let mut encoded = vec![number << 3 | 2];
-        encoded.extend(varint(payload.len()));
+        encoded.extend(varint(payload.len() as u64));
         encoded.extend(payload);
         encoded
     }
 
-    fn varint_field(number: u8, value: usize) -> Vec<u8> {
+    fn varint_field(number: u8, value: u64) -> Vec<u8> {
         let mut encoded = vec![number << 3];
         encoded.extend(varint(value));
         encoded
+    }
+
+    fn trace_with_kernel(kernel: &[u8]) -> Vec<u8> {
+        let stream = message_field(2, kernel);
+        let stream_entry = message_field(2, &stream);
+        let device = message_field(2, &stream_entry);
+        let device_entry = message_field(2, &device);
+        message_field(6, &device_entry)
     }
 
     #[test]
@@ -675,6 +728,144 @@ mod tests {
             Err(WirePreflightError::Malformed(
                 KNOWN_FIELD_WIRE_TYPE_MISMATCH,
             ))
+        );
+    }
+
+    #[test]
+    fn kernel_32_bit_fields_reject_overwide_varints_before_decode() {
+        for field_number in [4, 11, 12] {
+            for value in [1_u64 << 32, (1_u64 << 32) + 4_096, 1_u64 << 63] {
+                assert_eq!(
+                    scan_kernel(
+                        &varint_field(field_number, value),
+                        &mut RootCounts::default(),
+                        ROOT_LIMITS,
+                    ),
+                    Err(WirePreflightError::Malformed(UINT32_VARINT_OUT_OF_RANGE)),
+                    "field {field_number} accepted raw varint {value}",
+                );
+            }
+        }
+        for field_number in [11, 12] {
+            assert_eq!(
+                scan_kernel(
+                    &varint_field(field_number, u64::MAX),
+                    &mut RootCounts::default(),
+                    ROOT_LIMITS,
+                ),
+                Err(WirePreflightError::Malformed(UINT32_VARINT_OUT_OF_RANGE)),
+            );
+        }
+        assert_eq!(
+            scan_kernel(
+                &varint_field(4, u64::MAX),
+                &mut RootCounts::default(),
+                ROOT_LIMITS,
+            ),
+            Ok(()),
+        );
+    }
+
+    #[test]
+    fn overwide_legacy_shared_memory_cannot_truncate_to_valid_value() {
+        let kernel = varint_field(4, (1_u64 << 32) + 4_096);
+        assert_eq!(
+            preflight_trace(&trace_with_kernel(&kernel)),
+            Err(WirePreflightError::Malformed(UINT32_VARINT_OUT_OF_RANGE)),
+        );
+    }
+
+    #[test]
+    fn uint32_fields_accept_max_boundary() {
+        let mut kernel = varint_field(11, u64::from(u32::MAX));
+        kernel.extend(varint_field(12, u64::from(u32::MAX)));
+        assert_eq!(
+            scan_kernel(&kernel, &mut RootCounts::default(), ROOT_LIMITS),
+            Ok(()),
+        );
+        assert_eq!(
+            scan_device(
+                &varint_field(1, u64::from(u32::MAX)),
+                &mut RootCounts::default(),
+                ROOT_LIMITS,
+            ),
+            Ok(()),
+        );
+
+        for field_number in 1..=3 {
+            assert_eq!(
+                scan_instruction(
+                    &varint_field(field_number, u64::from(u32::MAX)),
+                    &mut ThreadblockCounts::default(),
+                    THREADBLOCK_LIMITS,
+                ),
+                Ok(()),
+            );
+        }
+        for field_number in [2, 7] {
+            assert_eq!(
+                scan_address(
+                    &varint_field(field_number, u64::from(u32::MAX)),
+                    &mut ThreadblockCounts::default(),
+                    THREADBLOCK_LIMITS,
+                ),
+                Ok(()),
+            );
+        }
+    }
+
+    #[test]
+    fn non_kernel_uint32_fields_reject_overwide_varints() {
+        let overwide = 1_u64 << 32;
+        assert_eq!(
+            scan_device(
+                &varint_field(1, overwide),
+                &mut RootCounts::default(),
+                ROOT_LIMITS,
+            ),
+            Err(WirePreflightError::Malformed(UINT32_VARINT_OUT_OF_RANGE)),
+        );
+        for field_number in 1..=3 {
+            assert_eq!(
+                scan_instruction(
+                    &varint_field(field_number, overwide),
+                    &mut ThreadblockCounts::default(),
+                    THREADBLOCK_LIMITS,
+                ),
+                Err(WirePreflightError::Malformed(UINT32_VARINT_OUT_OF_RANGE)),
+            );
+        }
+        for field_number in [2, 7] {
+            assert_eq!(
+                scan_address(
+                    &varint_field(field_number, overwide),
+                    &mut ThreadblockCounts::default(),
+                    THREADBLOCK_LIMITS,
+                ),
+                Err(WirePreflightError::Malformed(UINT32_VARINT_OUT_OF_RANGE)),
+            );
+        }
+    }
+
+    #[test]
+    fn split_fields_reject_duplicates_and_wrong_wire_types() {
+        let mut duplicate = varint_field(11, 0);
+        duplicate.extend(varint_field(11, 1));
+        assert_eq!(
+            scan_kernel(&duplicate, &mut RootCounts::default(), ROOT_LIMITS),
+            Err(WirePreflightError::Malformed(
+                "duplicate shared-memory split protobuf field",
+            )),
+        );
+        assert_eq!(
+            scan_kernel(
+                &message_field(12, &[]),
+                &mut RootCounts::default(),
+                ROOT_LIMITS,
+            ),
+            Err(WirePreflightError::Malformed(
+                KNOWN_FIELD_WIRE_TYPE_MISMATCH,
+            )),
         );
     }
 

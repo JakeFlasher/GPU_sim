@@ -24,4 +24,9 @@ message kernel {
   // absent or (0,0,0) value as "non-cluster launch" (equivalent to
   // (1,1,1) cluster of one block).
   dim3d cluster_dim = 10;
+  // Presence-bearing components of size_shared_memory. Producers advertising
+  // the sm86_addr_carry_shmem_split_v2 trace contract must write both fields,
+  // including explicit zero values, and their sum must equal field 4.
+  optional uint32 shared_memory_static_bytes = 11;
+  optional uint32 shared_memory_dynamic_bytes = 12;
 }

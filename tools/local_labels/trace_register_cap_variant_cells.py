@@ -38,6 +38,7 @@ by ``--sku`` / ``--arch-dir`` but has only been exercised on sm_86.
 from __future__ import annotations
 
 import argparse
+import errno
 import json
 import os
 import subprocess
@@ -60,8 +61,22 @@ from workloads.simbench_bw.nvbit_trace_summary_adapter import (  # noqa: E402
     NvbitProtobufBindingsMissing,
     emit_admitted_nvbit_trace_summary,
 )
-from tools.nvbit_tracer.runtime_env import tracer_runtime_env  # noqa: E402
+from tools.nvbit_tracer import capture_process as nvbit_process  # noqa: E402
+from tools.nvbit_tracer.external_tracer import (  # noqa: E402
+    EXTERNAL_TRACER_MAX_BYTES,
+    require_external_tracer_authority,
+    verify_retained_tracer_authority,
+)
+from tools.nvbit_tracer.runtime_env import (  # noqa: E402
+    DEFAULT_PB_LIB,
+    default_runtime_manifest_path,
+    retained_tracer_runtime_env,
+    sanitized_capture_environment,
+)
 from tools.nvbit_tracer.trace_admission import (  # noqa: E402
+    EXPECTED_MEMORY_PAYLOAD_CLASSES,
+    EXPECTED_TRACE_CONTRACT_ID,
+    TRACE_ADMISSION_SCOPE,
     TraceAdmission,
     TraceAdmissionError,
     TraceLaunchSummary,
@@ -79,7 +94,9 @@ from tools.local_labels.activation_trace_orchestrator import (  # noqa: E402
     _verify_committed_trace_generation,
 )
 from tools.local_labels.immutable_artifact import (  # noqa: E402
+    VERIFY_RESOURCE_BOUND,
     ImmutableArtifactError,
+    ImmutableArtifactResourceError,
     ImmutableDirectoryGeneration,
     PinnedDirectoryReader,
     create_exclusive_directory_stage,
@@ -95,9 +112,6 @@ from tools.local_labels.protected_paths import (  # noqa: E402
     assert_write_allowed,
 )
 
-_TRACER_SO = (
-    _REPO_ROOT / "tools" / "nvbit_tracer" / "tracer_tool" / "tracer_tool.so"
-)
 _SLUG = "register_spill_local_mem"
 _KERNEL_DIR = _REPO_ROOT / "workloads" / "simbench_bw" / "l1" / _SLUG
 _SHAPES_TOML = (
@@ -110,6 +124,134 @@ _DEVICE_NAME_BY_SKU = {
 }
 _STAGING_ROOT = _REPO_ROOT / "results" / "nvbit_capture_staging"
 _DEFAULT_OUTPUT_ROOT = _STAGING_ROOT / "register_cap_variants"
+_REGISTER_CAP_CAPTURE_TIMEOUT_SECONDS = 15 * 60
+_REGISTER_CAP_CAPTURE_MAX_OUTPUT_BYTES = 8 * 1024 * 1024
+_REGISTER_CAP_CAPTURE_TIMEOUT_CODE = "register_cap_nvbit_capture_timeout"
+_REGISTER_CAP_CAPTURE_LAUNCH_CODE = "register_cap_nvbit_capture_launch_failed"
+_REGISTER_CAP_CAPTURE_DIAGNOSTIC_BYTES = 500
+_REGISTER_CAP_CAPTURE_RESOURCE_ERRNOS = frozenset({
+    errno.EAGAIN,
+    errno.EMFILE,
+    errno.ENFILE,
+    errno.ENOMEM,
+    errno.ENOSPC,
+})
+
+
+class RegisterCapCaptureError(RuntimeError):
+    """A typed, byte-preserving register-cap child failure."""
+
+    TOKEN = "register_cap_nvbit_capture_failed"
+
+    def __init__(
+        self,
+        detail: str,
+        *,
+        stdout: bytes = b"",
+        stderr: bytes = b"",
+        process_id: int | None = None,
+        observed_output_bytes_lower_bound: int | None = None,
+    ) -> None:
+        self.detail = detail
+        self.stdout = stdout
+        self.stderr = stderr
+        self.process_id = process_id
+        self.observed_output_bytes_lower_bound = observed_output_bytes_lower_bound
+        super().__init__(f"{self.TOKEN}: {detail}")
+
+
+class RegisterCapCaptureTimeout(RegisterCapCaptureError):
+    TOKEN = "register_cap_nvbit_capture_timeout"
+
+
+class RegisterCapCaptureOutputLimitExceeded(RegisterCapCaptureError):
+    TOKEN = "register_cap_nvbit_capture_output_limit"
+
+
+class RegisterCapCaptureLaunchFailed(RegisterCapCaptureError):
+    TOKEN = "register_cap_nvbit_capture_launch_failed"
+
+
+class RegisterCapCaptureCleanupFailed(RegisterCapCaptureError):
+    TOKEN = "register_cap_nvbit_capture_cleanup_failed"
+
+
+class RegisterCapCaptureNonzero(RegisterCapCaptureError):
+    TOKEN = "register_cap_nvbit_capture_nonzero"
+
+    def __init__(self, *, returncode: int, stdout: bytes, stderr: bytes) -> None:
+        self.returncode = returncode
+        diagnostic = stderr[-_REGISTER_CAP_CAPTURE_DIAGNOSTIC_BYTES:].decode(
+            "utf-8", errors="replace",
+        )
+        super().__init__(
+            f"child returned {returncode}; stderr (tail): {diagnostic!r}",
+            stdout=stdout,
+            stderr=stderr,
+        )
+
+
+class RegisterCapCaptureResourceUnavailable(ImmutableArtifactResourceError):
+    TOKEN = "register_cap_nvbit_capture_resource_unavailable"
+
+    def __init__(
+        self,
+        detail: str,
+        *,
+        stdout: bytes = b"",
+        stderr: bytes = b"",
+        process_id: int | None = None,
+        observed_output_bytes_lower_bound: int | None = None,
+    ) -> None:
+        self.detail = detail
+        self.stdout = stdout
+        self.stderr = stderr
+        self.process_id = process_id
+        self.observed_output_bytes_lower_bound = observed_output_bytes_lower_bound
+        super().__init__(f"{VERIFY_RESOURCE_BOUND}: {self.TOKEN}: {detail}")
+
+
+def _register_cap_resource_failure(error: BaseException) -> bool:
+    pending = [error]
+    seen: set[int] = set()
+    while pending:
+        current = pending.pop()
+        if id(current) in seen:
+            continue
+        seen.add(id(current))
+        if isinstance(current, MemoryError):
+            return True
+        if (
+            isinstance(current, OSError)
+            and current.errno in _REGISTER_CAP_CAPTURE_RESOURCE_ERRNOS
+        ):
+            return True
+        for chained in (current.__cause__, current.__context__):
+            if isinstance(chained, BaseException):
+                pending.append(chained)
+    return False
+
+
+def _map_register_cap_capture_error(
+    error: nvbit_process.NvbitCaptureProcessError,
+) -> RegisterCapCaptureError | RegisterCapCaptureResourceUnavailable:
+    fields = {
+        "stdout": error.stdout,
+        "stderr": error.stderr,
+        "process_id": error.process_id,
+        "observed_output_bytes_lower_bound": (
+            error.observed_output_bytes_lower_bound
+        ),
+    }
+    if error.process_cleanup_incomplete:
+        return RegisterCapCaptureCleanupFailed(error.detail, **fields)
+    if error.code == nvbit_process.NVBIT_CAPTURE_OUTPUT_LIMIT:
+        return RegisterCapCaptureOutputLimitExceeded(error.detail, **fields)
+    if error.code == _REGISTER_CAP_CAPTURE_TIMEOUT_CODE:
+        return RegisterCapCaptureTimeout(error.detail, **fields)
+    if _register_cap_resource_failure(error):
+        return RegisterCapCaptureResourceUnavailable(error.detail, **fields)
+    return RegisterCapCaptureLaunchFailed(error.detail, **fields)
 
 
 def _assert_staging_output(path: Path | str, *, operation: str) -> Path:
@@ -189,11 +331,14 @@ _PRODUCER_RELPATH = "tools/local_labels/trace_register_cap_variant_cells.py"
 _SOURCE_COMMIT_AUTHORITY_PATHS = (
     _PRODUCER_RELPATH,
     "tools/local_labels/activation_trace_orchestrator.py",
+    "tools/local_labels/delegated_cgroup.py",
     "tools/local_labels/immutable_artifact.py",
     "tools/local_labels/protected_paths.py",
     "tools/local_labels/roster_path_resolver.py",
     "tools/local_labels/variant_identity.py",
     "tools/local_labels/verify_spill_sweep.py",
+    "tools/nvbit_tracer/capture_process.py",
+    "tools/nvbit_tracer/external_tracer.py",
     "tools/nvbit_tracer/import_trace_contract.py",
     "tools/nvbit_tracer/proto_binding_loader.py",
     "tools/nvbit_tracer/protobuf_wire_preflight.py",
@@ -293,16 +438,30 @@ def _run_workload(
     cwd: str,
     *,
     pass_fds: tuple[int, ...] = (),
-) -> subprocess.CompletedProcess[str]:
-    """Run the retained NVBit workload; split out for offline interception."""
-    return subprocess.run(
-        cmd,
-        capture_output=True,
-        text=True,
-        env=env,
-        cwd=cwd,
-        pass_fds=pass_fds,
-    )
+) -> nvbit_process.NvbitCaptureProcessResult:
+    """Run one production workload through mandatory bounded containment."""
+    try:
+        return nvbit_process.execute_capture_process(
+            tuple(cmd),
+            environment=env,
+            working_directory=cwd,
+            inherited_descriptors=pass_fds,
+            timeout_seconds=_REGISTER_CAP_CAPTURE_TIMEOUT_SECONDS,
+            max_output_bytes=_REGISTER_CAP_CAPTURE_MAX_OUTPUT_BYTES,
+            timeout_code=_REGISTER_CAP_CAPTURE_TIMEOUT_CODE,
+            launch_code=_REGISTER_CAP_CAPTURE_LAUNCH_CODE,
+        )
+    except nvbit_process.NvbitCaptureProcessError as process_error:
+        mapped = _map_register_cap_capture_error(process_error)
+        raise mapped from process_error
+    except (MemoryError, OSError) as process_error:
+        if _register_cap_resource_failure(process_error):
+            raise RegisterCapCaptureResourceUnavailable(
+                str(process_error)
+            ) from process_error
+        raise RegisterCapCaptureLaunchFailed(
+            str(process_error)
+        ) from process_error
 
 
 def _require_single_admitted_launch(
@@ -312,6 +471,20 @@ def _require_single_admitted_launch(
 ) -> TraceLaunchSummary:
     """Return launch zero only for an internally consistent singleton trace."""
 
+    if not isinstance(admission, TraceAdmission):
+        raise RuntimeError(f"{producer}: admission must be a TraceAdmission")
+    if admission.admission_scope != TRACE_ADMISSION_SCOPE:
+        raise RuntimeError(
+            f"{producer}: historical-read-only admission cannot mint evidence"
+        )
+    if admission.trace_contract_id != EXPECTED_TRACE_CONTRACT_ID:
+        raise RuntimeError(
+            f"{producer}: forward admission is not the exact split-v2 contract"
+        )
+    if admission.memory_payload_classes != EXPECTED_MEMORY_PAYLOAD_CLASSES:
+        raise RuntimeError(
+            f"{producer}: forward admission capability vector is not canonical"
+        )
     if admission.launch_count != len(admission.launches):
         raise RuntimeError(
             f"{producer}: admitted launch_count {admission.launch_count} "
@@ -341,6 +514,8 @@ def _trace_admission_identity_fields(admission: TraceAdmission) -> dict[str, obj
             "trace admission allocations identity is internally inconsistent"
         )
     return {
+        "trace_contract_id": admission.trace_contract_id,
+        "memory_payload_classes": list(admission.memory_payload_classes),
         # Portable content identities and their corresponding retained sizes.
         "dynamic_trace_size_bytes": admission.dynamic_trace_size_bytes,
         "dynamic_trace_sha256": admission.dynamic_trace_sha256,
@@ -446,6 +621,8 @@ def _build_variant_sidecar(
     source_commit: str,
     trace_pb_relpath: str,
     trace_bytes: int,
+    tracer_source_path: Path,
+    tracer_source_kind: str,
     nvbit_tracer_build_hash: str,
     admission: TraceAdmission,
     wall_time_s: float,
@@ -480,7 +657,8 @@ def _build_variant_sidecar(
         "trace_pb_path": trace_pb_relpath,
         "trace_bytes": int(trace_bytes),
         "wall_time_s": wall_time_s,
-        "tracer_so_path": str(_TRACER_SO.relative_to(_REPO_ROOT)),
+        "tracer_so_path": str(tracer_source_path),
+        "tracer_source_kind": tracer_source_kind,
         "nvbit_tracer_build_hash": nvbit_tracer_build_hash,
         **_trace_admission_identity_fields(admission),
         "expected_record_count": int(expected_record_count),
@@ -519,6 +697,8 @@ def trace_variant_cell(
     seed: int = _DEFAULT_SEED,
     allow_dirty: bool = False,
     output_root: Path | str = _DEFAULT_OUTPUT_ROOT,
+    tracer_source_path: Path | str | None = None,
+    tracer_sha256: str | None = None,
     _precleared_plan: dict[str, Path] | None = None,
 ) -> dict:
     """Run the NVBit tracer against the pre-built per-cap binary for one
@@ -542,6 +722,11 @@ def trace_variant_cell(
             f"trace_register_cap_variant_cells: register_cap "
             f"{register_cap!r} is not a valid build-variant cap: {err}"
         )
+    tracer_authority = require_external_tracer_authority(
+        tracer_source_path,
+        tracer_sha256,
+        repo_root=_REPO_ROOT,
+    )
     plan = _precleared_plan or _variant_output_plan(
         slug=slug,
         shape_point=shape_point,
@@ -554,11 +739,6 @@ def trace_variant_cell(
         name: _assert_staging_output(path, operation=f"recheck {name}")
         for name, path in plan.items()
     }
-    if not _TRACER_SO.is_file():
-        raise FileNotFoundError(
-            f"NVBit tracer .so missing at {_TRACER_SO}; restore the "
-            "byte-exact preserved artifact before capture."
-        )
     binary = _variant_binary_path(slug, cap)
     if not binary.is_file() or not os.access(binary, os.X_OK):
         raise FileNotFoundError(
@@ -585,8 +765,12 @@ def trace_variant_cell(
             open_retained_executable(binary)
         )
         retained_tracer = capture_sources.enter_context(
-            open_retained_regular(_TRACER_SO)
+            open_retained_regular(
+                tracer_authority.path,
+                max_bytes=EXTERNAL_TRACER_MAX_BYTES,
+            )
         )
+        verify_retained_tracer_authority(retained_tracer, tracer_authority)
         retained_shapes = capture_sources.enter_context(
             open_retained_regular(_SHAPES_TOML)
         )
@@ -636,32 +820,35 @@ def trace_variant_cell(
             retained_workload_output = capture_sources.enter_context(
                 PinnedDirectoryReader(workload_attempt)
             )
-            env = tracer_runtime_env(
-                _TRACER_SO,
+            with retained_tracer_runtime_env(
+                retained_tracer.path,
+                base_env=sanitized_capture_environment(),
+                pb_lib=DEFAULT_PB_LIB,
+                runtime_manifest=default_runtime_manifest_path(retained_tracer.path),
                 retained_descriptor=retained_tracer.descriptor,
-            )
-            env["CUDA_INJECTION64_PATH"] = retained_tracer.proc_path
-            env["USER_DEFINED_FOLDERS"] = "1"
-            env["TRACES_FOLDER"] = f"/proc/self/fd/{raw_stage.descriptor}"
-            retained_binary.verify_unchanged()
-            retained_tracer.verify_unchanged()
-            for retained in retained_authority.values():
-                retained.verify_unchanged()
-            _verify_source_commit_head(source_commit)
-            t0 = time.perf_counter()
-            proc = _run_workload(
-                [retained_binary.proc_path, *args],
-                env,
-                str(binary.parent),
-                pass_fds=(
-                    retained_binary.descriptor,
-                    retained_tracer.descriptor,
-                    retained_shapes.descriptor,
-                    raw_stage.descriptor,
-                    retained_workload_output.descriptor,
-                ),
-            )
-            t1 = time.perf_counter()
+            ) as retained_runtime:
+                env = dict(retained_runtime.environment)
+                env["CUDA_INJECTION64_PATH"] = retained_tracer.proc_path
+                env["USER_DEFINED_FOLDERS"] = "1"
+                env["TRACES_FOLDER"] = f"/proc/self/fd/{raw_stage.descriptor}"
+                retained_binary.verify_unchanged()
+                retained_tracer.verify_unchanged()
+                for retained in retained_authority.values():
+                    retained.verify_unchanged()
+                _verify_source_commit_head(source_commit)
+                t0 = time.perf_counter()
+                proc = _run_workload(
+                    [retained_binary.proc_path, *args],
+                    env,
+                    str(binary.parent),
+                    pass_fds=(
+                        retained_binary.descriptor,
+                        retained_tracer.descriptor,
+                        raw_stage.descriptor,
+                        *retained_runtime.pass_fds,
+                    ),
+                )
+                t1 = time.perf_counter()
             retained_binary.verify_unchanged()
             retained_tracer.verify_unchanged()
             for retained in retained_authority.values():
@@ -669,9 +856,16 @@ def trace_variant_cell(
             _verify_source_commit_head(source_commit)
             retained_workload_output.verify_path()
             if proc.returncode != 0:
-                raise RuntimeError(
-                    f"workload {binary} returned {proc.returncode}; "
-                    f"stderr (tail): {proc.stderr[-500:]!r}"
+                if not isinstance(proc.stdout, bytes) or not isinstance(
+                    proc.stderr, bytes
+                ):
+                    raise RuntimeError(
+                        "register-cap production capture did not return byte output"
+                    )
+                raise RegisterCapCaptureNonzero(
+                    returncode=proc.returncode,
+                    stdout=proc.stdout,
+                    stderr=proc.stderr,
                 )
             raw_generation = raw_stage.commit(
                 require_nonempty=True,
@@ -788,6 +982,8 @@ def trace_variant_cell(
                     source_commit=source_commit,
                     trace_pb_relpath=str(pb_path.relative_to(variant_dir)),
                     trace_bytes=admission.dynamic_trace_size_bytes,
+                    tracer_source_path=tracer_authority.path,
+                    tracer_source_kind=tracer_authority.source_kind,
                     nvbit_tracer_build_hash=tracer_build_sha,
                     admission=admission,
                     wall_time_s=t1 - t0,
@@ -932,6 +1128,8 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--sku", default="rtx_3090_ti")
     parser.add_argument("--arch-dir", default="sm_86")
+    parser.add_argument("--nvbit-tracer", type=Path, default=None)
+    parser.add_argument("--nvbit-tracer-sha256", default=None)
     parser.add_argument("--seed", type=int, default=_DEFAULT_SEED)
     parser.add_argument(
         "--allow-dirty", action="store_true",
@@ -968,6 +1166,11 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     try:
+        tracer_authority = require_external_tracer_authority(
+            args.nvbit_tracer,
+            args.nvbit_tracer_sha256,
+            repo_root=_REPO_ROOT,
+        )
         plans = [
             _variant_output_plan(
                 slug=_SLUG,
@@ -994,6 +1197,8 @@ def main(argv: list[str] | None = None) -> int:
                 sku=args.sku, arch_dir=args.arch_dir, seed=args.seed,
                 allow_dirty=args.allow_dirty,
                 output_root=args.output_root,
+                tracer_source_path=tracer_authority.path,
+                tracer_sha256=tracer_authority.sha256,
                 _precleared_plan=plan,
             )
             sys.stderr.write(

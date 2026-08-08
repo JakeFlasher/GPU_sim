@@ -670,7 +670,8 @@ fn artifact_admission_error(
         ManifestArtifactToken::PchaseCard => {
             RunError::configuration_resolution(detail, prerequisite_missing)
         }
-        ManifestArtifactToken::DynamicTracePb
+        ManifestArtifactToken::LaunchEvidenceManifest
+        | ManifestArtifactToken::DynamicTracePb
         | ManifestArtifactToken::ThreadblockPayload
         | ManifestArtifactToken::ThreadblockPayloadSortedPathManifest
         | ManifestArtifactToken::ThreadblockPayloadSortedPathStream
@@ -684,11 +685,23 @@ fn artifact_admission_error(
     }
 }
 
+fn replay_arch_card_placement_prerequisite_missing(error: &ReplayError) -> Option<bool> {
+    match error {
+        ReplayError::ArchitectureCardPlacement { source } => {
+            Some(calib_error_is_unavailable(source))
+        }
+        ReplayError::ArchitectureCardSharedMemoryCapacity { .. }
+        | ReplayError::SharedMemoryCapacityInvalid { .. }
+        | ReplayError::CtaSharedMemoryCapacityExceeded { .. } => Some(true),
+        _ => None,
+    }
+}
+
 fn manifest_error_is_missing(error: &ManifestError) -> bool {
     match error {
-        ManifestError::Anchored(source) | ManifestError::ArtifactRead { source, .. } => {
-            anchored_error_is_missing(source)
-        }
+        ManifestError::Anchored(source)
+        | ManifestError::ArtifactRead { source, .. }
+        | ManifestError::ArtifactGenerationRead { source, .. } => anchored_error_is_missing(source),
         ManifestError::ArtifactPresenceMismatch {
             expected: true,
             actual: false,
@@ -698,8 +711,8 @@ fn manifest_error_is_missing(error: &ManifestError) -> bool {
         ManifestError::CapabilityMissing { .. } => true,
         ManifestError::ArchCard(source) => calib_error_is_unavailable(source),
         ManifestError::PchaseCard(source) => pchase_error_is_unavailable(source),
-        ManifestError::Coverage(ReplayError::ArchitectureCardPlacement { source }) => {
-            calib_error_is_unavailable(source)
+        ManifestError::Coverage(source) => {
+            replay_arch_card_placement_prerequisite_missing(source).unwrap_or(false)
         }
         ManifestError::Parse { .. }
         | ManifestError::SchemaVersionUnsupported { .. }
@@ -709,6 +722,7 @@ fn manifest_error_is_missing(error: &ManifestError) -> bool {
         | ManifestError::ArtifactFileAlias { .. }
         | ManifestError::ArtifactSizeMismatch { .. }
         | ManifestError::ArtifactDigestMismatch { .. }
+        | ManifestError::ArtifactGenerationMismatch { .. }
         | ManifestError::ArtifactPresenceMismatch { .. }
         | ManifestError::ArtifactCardinalityMismatch { .. }
         | ManifestError::ArtifactResourceLimitExceeded { .. }
@@ -723,7 +737,6 @@ fn manifest_error_is_missing(error: &ManifestError) -> bool {
         | ManifestError::Control(_)
         | ManifestError::Program(_)
         | ManifestError::Architecture(_)
-        | ManifestError::Coverage(_)
         | ManifestError::IdentityFieldMissing { .. }
         | ManifestError::IdentityMismatch { .. }
         | ManifestError::LaunchMissing { .. }
@@ -745,6 +758,8 @@ fn launch_evidence_error(path: &Path, source: ManifestError) -> RunError {
         | ManifestError::ArtifactFileAlias { artifact, .. }
         | ManifestError::ArtifactSizeMismatch { artifact, .. }
         | ManifestError::ArtifactDigestMismatch { artifact, .. }
+        | ManifestError::ArtifactGenerationRead { artifact, .. }
+        | ManifestError::ArtifactGenerationMismatch { artifact, .. }
         | ManifestError::ArtifactPresenceMismatch { artifact, .. }
         | ManifestError::ArtifactCardinalityMismatch { artifact, .. }
         | ManifestError::ArtifactResourceLimitExceeded { artifact, .. }
@@ -755,7 +770,9 @@ fn launch_evidence_error(path: &Path, source: ManifestError) -> RunError {
         ManifestError::PchaseCard(_) => {
             RunError::configuration_resolution(detail, prerequisite_missing)
         }
-        ManifestError::Coverage(ReplayError::ArchitectureCardPlacement { .. }) => {
+        ManifestError::Coverage(replay)
+            if replay_arch_card_placement_prerequisite_missing(replay).is_some() =>
+        {
             RunError::arch_card_admission(detail, prerequisite_missing)
         }
         ManifestError::Parse { .. }
@@ -1976,6 +1993,58 @@ mod tests {
         assert_eq!(ordinary_coverage.failure_type(), "TRACE_ADMISSION_FAILED");
         assert_eq!(ordinary_coverage.stage(), "trace_admission");
         assert_eq!(ordinary_coverage.exit_code(), 1);
+    }
+
+    #[test]
+    fn shared_memory_card_authority_failures_are_exact_exit_two_classifications() {
+        let path = Path::new("fixture/launch_evidence.json");
+        let cases = [
+            ManifestError::Coverage(ReplayError::ArchitectureCardSharedMemoryCapacity {
+                arch: ArchId::Sm120,
+                source: CalibError::BlockResearchGap {
+                    arch_id: "sm_120".to_owned(),
+                    block: "l1_geometry",
+                    reason: "fixture gap".to_owned(),
+                    challenge: None,
+                },
+            }),
+            ManifestError::Coverage(ReplayError::SharedMemoryCapacityInvalid {
+                arch: ArchId::Sm86,
+                bytes: 0,
+            }),
+            ManifestError::Coverage(ReplayError::CtaSharedMemoryCapacityExceeded {
+                kernel_id: 1,
+                arch: ArchId::Sm86,
+                bytes_per_cta: 102_401,
+                max_bytes_per_sm: 102_400,
+            }),
+        ];
+        for source in cases {
+            let error = launch_evidence_error(path, source);
+            assert_eq!(error.failure_type(), "ARCH_CARD_ADMISSION_FAILED");
+            assert_eq!(error.stage(), "arch_card_admission");
+            assert_eq!(error.exit_code(), 2);
+
+            let encoded: serde_json::Value =
+                serde_json::from_str(&error.canonical_json().unwrap()).unwrap();
+            assert_eq!(
+                encoded["error"]["failure_type"],
+                "ARCH_CARD_ADMISSION_FAILED"
+            );
+            assert_eq!(encoded["error"]["stage"], "arch_card_admission");
+            assert_eq!(encoded["exit_status"]["exit_code"], 2);
+        }
+
+        let trace_owned = launch_evidence_error(
+            path,
+            ManifestError::Coverage(ReplayError::SharedMemoryDemandInvalid {
+                kernel_id: 1,
+                bytes: -1,
+            }),
+        );
+        assert_eq!(trace_owned.failure_type(), "TRACE_ADMISSION_FAILED");
+        assert_eq!(trace_owned.stage(), "trace_admission");
+        assert_eq!(trace_owned.exit_code(), 1);
     }
 
     #[test]

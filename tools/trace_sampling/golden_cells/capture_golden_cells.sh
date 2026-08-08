@@ -1,7 +1,7 @@
 #!/bin/bash -p
 # Regenerate the real golden traces into guarded active staging.  Historical
-# campaign evidence under data/local_labels/campaign is read-only.  Non-plan
-# NCU collection requires an independently retained v3 campaign preflight:
+# campaign evidence under data/local_labels/campaign is read-only.  Every non-plan
+# collection requires an independently retained v4 campaign preflight:
 #   capture_golden_cells.sh --preflight /abs/preflight.json \
 #     --preflight-sha256 <sha256> [cells...]
 set -euo pipefail
@@ -24,7 +24,6 @@ if [[ "$SCRIPT_SOURCE" != */* ]]; then
   exit 2
 fi
 REPO="$(cd -- "${SCRIPT_SOURCE%/*}/../../.." && pwd -P)"
-SO="$REPO/tools/nvbit_tracer/tracer_tool/tracer_tool.so"
 NVCC=/opt/cuda/bin/nvcc
 CCBIN=g++-14
 CCBIN_SHA256=
@@ -60,6 +59,12 @@ if [[ ! -x "$PYTHON" ]]; then
   echo "capture_golden_cells: Python environment missing: $PYTHON" >&2
   exit 2
 fi
+ATTEMPT_NONCE="$("$PYTHON" -I -S -c 'import secrets; print(secrets.token_hex(16))')"
+if [[ ! "$ATTEMPT_NONCE" =~ ^[0-9a-f]{32}$ ]]; then
+  echo "capture_golden_cells: failed to derive a closed attempt nonce" >&2
+  exit 2
+fi
+ATTEMPT_ID="$$.$ATTEMPT_NONCE"
 
 clear_path() {
   "$PYTHON" - "$REPO" "$1" <<'PY'
@@ -155,15 +160,17 @@ reject_ambient_cuda_selectors() {
 }
 
 resolve_admitted_toolchain() {
-  "$PYTHON" - "$PREFLIGHT" "$PREFLIGHT_SHA256" <<'PY'
+  "$PYTHON" - "$REPO" "$PREFLIGHT" "$PREFLIGHT_SHA256" <<'PY'
 import hashlib
 import json
 import os
 import sys
 from pathlib import Path
 
-path = Path(sys.argv[1])
-expected_sha = sys.argv[2]
+repo = Path(sys.argv[1]).resolve(strict=True)
+path = Path(sys.argv[2])
+expected_sha = sys.argv[3]
+sys.path.insert(0, str(repo))
 try:
     payload = path.read_bytes()
     if hashlib.sha256(payload).hexdigest() != expected_sha:
@@ -190,7 +197,16 @@ try:
     ):
         raise ValueError("admitted compiler hash is not lowercase 64-hex")
     nvcc_sha = hashlib.sha256(Path(nvcc).read_bytes()).hexdigest()
-    tracer_sha = manifest["checks"]["injection_runtime"]["tracer_so_sha256"]
+    injection = manifest["checks"]["injection_runtime"]
+    tracer_kind = injection["tracer_source_kind"]
+    if tracer_kind != "external_non_git_retained_descriptor_v1":
+        raise ValueError("admitted tracer source kind is not live-capable")
+    from tools.local_labels import campaign_preflight
+    tracer_path = campaign_preflight._absolute_external_tracer(
+        Path(injection["tracer_source_path"]),
+        repo_root=repo,
+    )
+    tracer_sha = injection["tracer_so_sha256"]
     if (
         type(tracer_sha) is not str
         or len(tracer_sha) != 64
@@ -201,6 +217,8 @@ try:
     print(ccbin)
     print(ccbin_sha)
     print(nvcc_sha)
+    print(tracer_kind)
+    print(tracer_path)
     print(tracer_sha)
 except (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError) as exc:
     raise SystemExit(f"capture_golden_cells: admitted toolchain unavailable: {exc}") from exc
@@ -353,6 +371,7 @@ expected_preflight_path = Path(sys.argv[3])
 expected_preflight_sha256 = sys.argv[4]
 sys.path.insert(0, str(repo))
 from tools.local_labels import immutable_artifact as immutable
+from tools.local_labels import parse_ncu_metrics
 from tools.nvbit_tracer import trace_admission
 from tools.trace_sampling.golden_cells import golden_ncu_capture
 from tools.trace_sampling.golden_cells import golden_ncu_receipt
@@ -470,18 +489,47 @@ try:
         ),
     )
     observed_admission = trace_admission.require_trace_admission(trace_path)
-    observed_admission_model = {
-        "launch_count": observed_admission.launch_count,
-        "threadblock_count": observed_admission.threadblock_count,
-        "instruction_count": observed_admission.instruction_count,
-        "expected_record_count": observed_admission.expected_record_count,
-        "admitted_record_count": observed_admission.admitted_record_count,
-    }
+    observed_admission_model = golden_ncu_capture._trace_admission_model(
+        observed_admission
+    )
     if observed_admission_model != document["trace_admission"]:
         raise golden_ncu_receipt.GoldenReceiptError(
             "published golden trace admission differs from receipt"
         )
-except (OSError, KeyError, TypeError, immutable.ImmutableArtifactError,
+    artifacts_by_role = {item["role"]: item for item in artifact_model}
+    observation_artifact = artifacts_by_role["ncu_launch_observation"]
+    report_artifact = artifacts_by_role["ncu_report"]
+    observation_path = repo / observation_artifact["relative_path"]
+    with immutable.open_retained_regular(observation_path) as retained_observation:
+        observation_document = immutable.strict_json_loads(
+            retained_observation.read_bytes(),
+            label="published golden NCU launch observation",
+        )
+        parse_ncu_metrics.validate_launch_observation_document(
+            observation_document,
+            requested_launch_skip=document["launch_controls"]["launch_skip"],
+            requested_launch_count=document["launch_controls"]["launch_count"],
+            report_sha256=report_artifact["sha256"],
+        )
+        retained_observation.verify_unchanged()
+    if (
+        observation_document["observation_sha256"]
+        != document["launch_observation_sha256"]
+    ):
+        raise golden_ncu_receipt.GoldenReceiptError(
+            "published golden observation seal differs from receipt"
+        )
+    observed_launch_binding = golden_ncu_capture._bind_ncu_observation_to_trace(
+        observation_document,
+        observed_admission_model,
+        slug=Path(trace_model).parent.name,
+    )
+    if observed_launch_binding != document["launch_binding"]:
+        raise golden_ncu_receipt.GoldenReceiptError(
+            "published golden NCU/trace launch binding differs from receipt"
+        )
+except (OSError, KeyError, TypeError, ValueError,
+        immutable.ImmutableArtifactError,
         golden_ncu_capture.GoldenNcuCaptureError,
         trace_admission.TraceAdmissionError,
         golden_ncu_receipt.GoldenReceiptError) as exc:
@@ -581,7 +629,7 @@ for slug in "${CELLS[@]}"; do
   esac
 done
 
-if (( ! PLAN_ONLY && HAS_NCU )) && [[ -z "$PREFLIGHT" || -z "$PREFLIGHT_SHA256" ]]; then
+if (( ! PLAN_ONLY )) && [[ -z "$PREFLIGHT" || -z "$PREFLIGHT_SHA256" ]]; then
   echo "capture_golden_cells: non-plan capture requires --preflight and --preflight-sha256" >&2
   exit 2
 fi
@@ -599,10 +647,13 @@ fi
 
 # Phase 1: derive and clear the entire batch before runtime probes or mutation.
 GOLDEN="$(clear_path "$OUTPUT_ROOT")"
-declare -A CU BIN OUT COMPILED STAGED NCU_CSV NCU_STDERR NCU_FINAL NCU_STDERR_FINAL \
+declare -A CU CELL_STAGE CELL_FINAL BIN PUBLISHED_BIN OUT PUBLISHED_TRACE COMPILED STAGED \
+                 NCU_CSV NCU_STDERR NCU_FINAL NCU_STDERR_FINAL \
                  NCU_OBSERVATION NCU_RUN_MANIFEST NCU_CAPTURE_MANIFEST NCU_RECEIPT \
                  NCU_OBSERVATION_FINAL NCU_RUN_MANIFEST_FINAL NCU_CAPTURE_MANIFEST_FINAL NCU_RECEIPT_FINAL \
-                 NEEDS_NCU BINARY_SHA256
+                 PUBLISHED_NCU_FINAL PUBLISHED_NCU_STDERR_FINAL PUBLISHED_NCU_OBSERVATION_FINAL \
+                 PUBLISHED_NCU_RUN_MANIFEST_FINAL PUBLISHED_NCU_CAPTURE_MANIFEST_FINAL \
+                 PUBLISHED_NCU_RECEIPT_FINAL NEEDS_NCU BINARY_SHA256
 for slug in "${CELLS[@]}"; do
   case "$slug" in
     gs_stream_copy|gs_stream_reuse|gs_var_stride)
@@ -611,8 +662,11 @@ for slug in "${CELLS[@]}"; do
       cu="$REPO/tools/local_labels/canary/ac4_global_atomic_histogram.cu"; needs_ncu=0 ;;
     *) echo "unknown golden cell: $slug" >&2; exit 2 ;;
   esac
-  cell="$GOLDEN/$slug"
+  final_cell="$GOLDEN/$slug"
+  cell="$GOLDEN/${slug}.staged.${ATTEMPT_ID}"
   for candidate in \
+      "$cell" \
+      "$final_cell" \
       "$cell/${slug}.bin" \
       "$cell/${slug}.bin.staged.$$" \
       "$cell/trace" \
@@ -631,9 +685,13 @@ for slug in "${CELLS[@]}"; do
       "$cell/ncu_collection_receipt.json"; do
     reject_lexical_symlink_components "$candidate"
   done
+  cell="$(clear_path "$cell")"
+  final_cell="$(clear_path "$final_cell")"
   bin="$(clear_path "$cell/${slug}.bin")"
+  published_bin="$(clear_path "$final_cell/${slug}.bin")"
   compiled_candidate="$(clear_path "$cell/${slug}.bin.staged.$$")"
   out="$(clear_path "$cell/trace")"
+  published_trace="$(clear_path "$final_cell/trace")"
   staged_candidate="$(clear_path "$cell/trace.staged.$$")"
   ncu_csv_candidate="$(clear_path "$cell/ncu_l2.csv.staged.$$")"
   ncu_stderr_candidate="$(clear_path "$cell/ncu_l2.stderr.staged.$$")"
@@ -647,10 +705,18 @@ for slug in "${CELLS[@]}"; do
   ncu_run_manifest_final="$(clear_path "$cell/ncu_run_manifest.json")"
   ncu_capture_manifest_final="$(clear_path "$cell/ncu_capture_manifest.json")"
   ncu_receipt_final="$(clear_path "$cell/ncu_collection_receipt.json")"
-  CU["$slug"]="$cu"; BIN["$slug"]="$bin"; COMPILED["$slug"]="$compiled_candidate"; OUT["$slug"]="$out"
-  STAGED["$slug"]="$staged_candidate"; NCU_CSV["$slug"]="$ncu_csv_candidate"
-  NCU_STDERR["$slug"]="$ncu_stderr_candidate"; NCU_FINAL["$slug"]="$ncu_final"
-  NCU_STDERR_FINAL["$slug"]="$ncu_stderr_final"
+  published_ncu_final="$(clear_path "$final_cell/ncu_l2.csv")"
+  published_ncu_stderr_final="$(clear_path "$final_cell/ncu_l2.stderr")"
+  published_ncu_observation_final="$(clear_path "$final_cell/ncu_launch_observation.json")"
+  published_ncu_run_manifest_final="$(clear_path "$final_cell/ncu_run_manifest.json")"
+  published_ncu_capture_manifest_final="$(clear_path "$final_cell/ncu_capture_manifest.json")"
+  published_ncu_receipt_final="$(clear_path "$final_cell/ncu_collection_receipt.json")"
+  CU["$slug"]="$cu"; CELL_STAGE["$slug"]="$cell"; CELL_FINAL["$slug"]="$final_cell"
+  BIN["$slug"]="$bin"; PUBLISHED_BIN["$slug"]="$published_bin"
+  COMPILED["$slug"]="$compiled_candidate"; OUT["$slug"]="$out"
+  PUBLISHED_TRACE["$slug"]="$published_trace"; STAGED["$slug"]="$staged_candidate"
+  NCU_CSV["$slug"]="$ncu_csv_candidate"; NCU_STDERR["$slug"]="$ncu_stderr_candidate"
+  NCU_FINAL["$slug"]="$ncu_final"; NCU_STDERR_FINAL["$slug"]="$ncu_stderr_final"
   NCU_OBSERVATION["$slug"]="$ncu_observation_candidate"
   NCU_RUN_MANIFEST["$slug"]="$ncu_run_manifest_candidate"
   NCU_CAPTURE_MANIFEST["$slug"]="$ncu_capture_manifest_candidate"
@@ -659,20 +725,17 @@ for slug in "${CELLS[@]}"; do
   NCU_RUN_MANIFEST_FINAL["$slug"]="$ncu_run_manifest_final"
   NCU_CAPTURE_MANIFEST_FINAL["$slug"]="$ncu_capture_manifest_final"
   NCU_RECEIPT_FINAL["$slug"]="$ncu_receipt_final"
+  PUBLISHED_NCU_FINAL["$slug"]="$published_ncu_final"
+  PUBLISHED_NCU_STDERR_FINAL["$slug"]="$published_ncu_stderr_final"
+  PUBLISHED_NCU_OBSERVATION_FINAL["$slug"]="$published_ncu_observation_final"
+  PUBLISHED_NCU_RUN_MANIFEST_FINAL["$slug"]="$published_ncu_run_manifest_final"
+  PUBLISHED_NCU_CAPTURE_MANIFEST_FINAL["$slug"]="$published_ncu_capture_manifest_final"
+  PUBLISHED_NCU_RECEIPT_FINAL["$slug"]="$published_ncu_receipt_final"
   NEEDS_NCU["$slug"]="$needs_ncu"
-  # Refuse every final destination before runtime probes, compilation, NVBit,
-  # or NCU.  The later checks close the final symlink-substitution interval.
-  publish_target_check "$bin" binary
-  publish_target_check "$compiled_candidate" artifact
-  publish_target_check "$out" trace
-  if (( needs_ncu )); then
-    publish_target_check "$ncu_final" artifact
-    publish_target_check "$ncu_stderr_final" artifact
-    publish_target_check "$ncu_observation_final" artifact
-    publish_target_check "$ncu_run_manifest_final" artifact
-    publish_target_check "$ncu_capture_manifest_final" artifact
-    publish_target_check "$ncu_receipt_final" artifact
-  fi
+  # The only visible publication target is the complete cell directory.  Every
+  # capture and derived artifact remains under an attempt cell until commit.
+  publish_target_check "$final_cell" cell
+  publish_target_check "$cell" cell
 done
 
 if (( PLAN_ONLY )); then
@@ -683,56 +746,50 @@ fi
 reject_ambient_cuda_selectors
 
 # Trap-visible deletion targets remain empty until the complete plan passed.
-staged=""; compiled=""; ncu_csv=""; ncu_stderr=""; ncu_observation=""
+cell_stage=""; staged=""; compiled=""; ncu_csv=""; ncu_stderr=""; ncu_observation=""
 ncu_run_manifest=""; ncu_capture_manifest=""; ncu_receipt=""
 cleanup() {
-  if [[ -n "$compiled$staged$ncu_csv$ncu_stderr$ncu_observation$ncu_run_manifest$ncu_capture_manifest$ncu_receipt" ]]; then
+  if [[ -n "$cell_stage$compiled$staged$ncu_csv$ncu_stderr$ncu_observation$ncu_run_manifest$ncu_capture_manifest$ncu_receipt" ]]; then
     echo "capture_golden_cells: incomplete artifacts retained in staging" >&2
   fi
 }
 trap cleanup EXIT
 
-if (( HAS_NCU )); then
-  "$PYTHON" "$REPO/tools/trace_sampling/golden_cells/golden_ncu_capture.py" \
-    --validate-only --preflight "$PREFLIGHT" \
-    --preflight-sha256 "$PREFLIGHT_SHA256"
-  mapfile -t ADMITTED_TOOLCHAIN < <(resolve_admitted_toolchain)
-  if (( ${#ADMITTED_TOOLCHAIN[@]} != 5 )); then
-    echo "capture_golden_cells: admitted toolchain output is incomplete" >&2
-    exit 2
-  fi
-  NVCC="${ADMITTED_TOOLCHAIN[0]}"
-  CCBIN="${ADMITTED_TOOLCHAIN[1]}"
-  CCBIN_SHA256="${ADMITTED_TOOLCHAIN[2]}"
-  NVCC_SHA256="${ADMITTED_TOOLCHAIN[3]}"
-  TRACER_SHA256="${ADMITTED_TOOLCHAIN[4]}"
-  verify_admitted_nvcc
-else
-  NVCC="$(realpath -e -- "$NVCC")"
-  CCBIN="$(command -v -- "$CCBIN")"
-  CCBIN="$(realpath -e -- "$CCBIN")"
-  if [[ ! -x "$NVCC" || ! -x "$CCBIN" ]]; then
-    echo "capture_golden_cells: local canary toolchain is unavailable" >&2
-    exit 2
-  fi
-  NVCC_SHA256="$(sha256sum -- "$NVCC" | cut -d' ' -f1)"
-  CCBIN_SHA256="$(sha256sum -- "$CCBIN" | cut -d' ' -f1)"
-  TRACER_SHA256="$(sha256sum -- "$SO" | cut -d' ' -f1)"
+"$PYTHON" "$REPO/tools/trace_sampling/golden_cells/golden_ncu_capture.py" \
+  --validate-only --preflight "$PREFLIGHT" \
+  --preflight-sha256 "$PREFLIGHT_SHA256"
+mapfile -t ADMITTED_TOOLCHAIN < <(resolve_admitted_toolchain)
+if (( ${#ADMITTED_TOOLCHAIN[@]} != 7 )); then
+  echo "capture_golden_cells: admitted toolchain output is incomplete" >&2
+  exit 2
 fi
-
-"$PYTHON" "$REPO/tools/nvbit_tracer/runtime_env.py" \
-  --pb-lib "$REPO/.toolchain/pb/lib" "$SO" >/dev/null
+NVCC="${ADMITTED_TOOLCHAIN[0]}"
+CCBIN="${ADMITTED_TOOLCHAIN[1]}"
+CCBIN_SHA256="${ADMITTED_TOOLCHAIN[2]}"
+NVCC_SHA256="${ADMITTED_TOOLCHAIN[3]}"
+TRACER_SOURCE_KIND="${ADMITTED_TOOLCHAIN[4]}"
+SO="${ADMITTED_TOOLCHAIN[5]}"
+TRACER_SHA256="${ADMITTED_TOOLCHAIN[6]}"
+verify_admitted_nvcc
 
 for slug in "${CELLS[@]}"; do
-  cu="${CU[$slug]}"; bin="${BIN[$slug]}"; compiled="${COMPILED[$slug]}"; out="${OUT[$slug]}"
+  cu="${CU[$slug]}"; cell_stage="${CELL_STAGE[$slug]}"; final_cell="${CELL_FINAL[$slug]}"
+  bin="${BIN[$slug]}"; published_bin="${PUBLISHED_BIN[$slug]}"
+  compiled="${COMPILED[$slug]}"; out="${OUT[$slug]}"; published_trace="${PUBLISHED_TRACE[$slug]}"
   staged="${STAGED[$slug]}"; needs_ncu="${NEEDS_NCU[$slug]}"
-  ncu_csv="${NCU_CSV[$slug]}"; ncu_stderr="${NCU_STDERR[$slug]}"
-  ncu_observation="${NCU_OBSERVATION[$slug]}"
-  ncu_run_manifest="${NCU_RUN_MANIFEST[$slug]}"
-  ncu_capture_manifest="${NCU_CAPTURE_MANIFEST[$slug]}"
-  ncu_receipt="${NCU_RECEIPT[$slug]}"
-  # Re-check the compiler destination immediately before nvcc so a path
-  # created after phase-one planning cannot be overwritten.
+  ncu_csv=""; ncu_stderr=""; ncu_observation=""; ncu_run_manifest=""
+  ncu_capture_manifest=""; ncu_receipt=""
+  if (( needs_ncu )); then
+    ncu_csv="${NCU_CSV[$slug]}"; ncu_stderr="${NCU_STDERR[$slug]}"
+    ncu_observation="${NCU_OBSERVATION[$slug]}"
+    ncu_run_manifest="${NCU_RUN_MANIFEST[$slug]}"
+    ncu_capture_manifest="${NCU_CAPTURE_MANIFEST[$slug]}"
+    ncu_receipt="${NCU_RECEIPT[$slug]}"
+  fi
+  publish_target_check "$final_cell" cell
+  "$PYTHON" "$REPO/tools/trace_sampling/golden_cells/retained_golden_publication.py" \
+    prepare-cell --stage "$cell_stage" --final "$final_cell"
+  # Re-check the attempt-local compiler destinations immediately before nvcc.
   publish_target_check "$bin" binary
   publish_target_check "$compiled" artifact
   compiler_sha256="$(sha256sum -- "$CCBIN" | cut -d' ' -f1)"
@@ -743,12 +800,11 @@ for slug in "${CELLS[@]}"; do
   if (( needs_ncu )); then
     verify_admitted_nvcc
   fi
-  bin_parent="$(clear_path "$(dirname "$bin")")"
-  mkdir -p "$bin_parent"
   "$PYTHON" "$REPO/tools/trace_sampling/golden_cells/retained_nvcc_compile.py" \
     --nvcc "$NVCC" --nvcc-sha256 "$NVCC_SHA256" \
     --compiler "$CCBIN" --compiler-sha256 "$CCBIN_SHA256" \
-    --source "$cu" --output "$compiled"
+    --source "$cu" --preflight "$PREFLIGHT" \
+    --preflight-sha256 "$PREFLIGHT_SHA256" --output "$compiled"
   compiler_sha256="$(sha256sum -- "$CCBIN" | cut -d' ' -f1)"
   if [[ "$compiler_sha256" != "$CCBIN_SHA256" ]]; then
     echo "capture_golden_cells: compiler identity changed during compile: $CCBIN" >&2
@@ -771,76 +827,54 @@ for slug in "${CELLS[@]}"; do
   "$PYTHON" "$REPO/tools/trace_sampling/golden_cells/retained_nvbit_launch.py" \
     --binary "$bin" --binary-sha256 "${BINARY_SHA256[$slug]}" \
     --tracer "$SO" --tracer-sha256 "$TRACER_SHA256" \
+    --tracer-source-kind "$TRACER_SOURCE_KIND" \
+    --preflight-sha256 "$PREFLIGHT_SHA256" \
     --pb-lib "$REPO/.toolchain/pb/lib" --trace-dir "$staged"
-  "$PYTHON" "$REPO/tools/nvbit_tracer/trace_admission.py" "$staged"
+
+  trace_generation_args=(
+    process-cell --staged-trace "$staged" --trace-out "$out"
+    --cell-stage "$cell_stage" --cell-final "$final_cell"
+  )
   if (( needs_ncu )); then
-    ncu_csv="$(clear_path "$ncu_csv")"
-    ncu_stderr="$(clear_path "$ncu_stderr")"
-    ncu_observation="$(clear_path "$ncu_observation")"
-    ncu_run_manifest="$(clear_path "$ncu_run_manifest")"
-    ncu_capture_manifest="$(clear_path "$ncu_capture_manifest")"
-    ncu_receipt="$(clear_path "$ncu_receipt")"
-    "$PYTHON" "$REPO/tools/trace_sampling/golden_cells/golden_ncu_capture.py" \
-      --preflight "$PREFLIGHT" --preflight-sha256 "$PREFLIGHT_SHA256" \
-      --slug "$slug" --binary "$bin" --binary-sha256 "${BINARY_SHA256[$slug]}" \
-        --trace-dir "$staged" \
-      --csv-out "$ncu_csv" --stderr-out "$ncu_stderr" \
-      --observation-out "$ncu_observation" \
-      --run-manifest-out "$ncu_run_manifest" \
-      --capture-manifest-out "$ncu_capture_manifest" \
-      --receipt-out "$ncu_receipt" \
-      --published-trace-dir "$out" \
-      --published-csv-out "${NCU_FINAL[$slug]}" \
-      --published-stderr-out "${NCU_STDERR_FINAL[$slug]}" \
-      --published-observation-out "${NCU_OBSERVATION_FINAL[$slug]}" \
-      --published-run-manifest-out "${NCU_RUN_MANIFEST_FINAL[$slug]}" \
-      --published-capture-manifest-out "${NCU_CAPTURE_MANIFEST_FINAL[$slug]}" \
-      --published-receipt-out "${NCU_RECEIPT_FINAL[$slug]}"
+    trace_generation_args+=(
+      --with-ncu
+      --preflight "$PREFLIGHT" --preflight-sha256 "$PREFLIGHT_SHA256"
+      --slug "$slug" --binary "$bin" --binary-sha256 "${BINARY_SHA256[$slug]}"
+      --csv-out "$ncu_csv" --stderr-out "$ncu_stderr"
+      --observation-out "$ncu_observation"
+      --run-manifest-out "$ncu_run_manifest"
+      --capture-manifest-out "$ncu_capture_manifest"
+      --receipt-out "$ncu_receipt"
+      --cell-csv-out "${NCU_FINAL[$slug]}"
+      --cell-stderr-out "${NCU_STDERR_FINAL[$slug]}"
+      --cell-observation-out "${NCU_OBSERVATION_FINAL[$slug]}"
+      --cell-run-manifest-out "${NCU_RUN_MANIFEST_FINAL[$slug]}"
+      --cell-capture-manifest-out "${NCU_CAPTURE_MANIFEST_FINAL[$slug]}"
+      --cell-receipt-out "${NCU_RECEIPT_FINAL[$slug]}"
+      --published-binary "$published_bin"
+      --declared-trace "$published_trace"
+      --published-csv-out "${PUBLISHED_NCU_FINAL[$slug]}"
+      --published-stderr-out "${PUBLISHED_NCU_STDERR_FINAL[$slug]}"
+      --published-observation-out "${PUBLISHED_NCU_OBSERVATION_FINAL[$slug]}"
+      --published-run-manifest-out "${PUBLISHED_NCU_RUN_MANIFEST_FINAL[$slug]}"
+      --published-capture-manifest-out "${PUBLISHED_NCU_CAPTURE_MANIFEST_FINAL[$slug]}"
+      --published-receipt-out "${PUBLISHED_NCU_RECEIPT_FINAL[$slug]}"
+    )
   fi
-  # Re-admit immediately before publication so post-admission trace mutation
-  # or deletion cannot be published under the earlier admission result.
-  "$PYTHON" "$REPO/tools/nvbit_tracer/trace_admission.py" "$staged"
-  publish_target_check "$out" trace
+  "$PYTHON" "$REPO/tools/trace_sampling/golden_cells/retained_golden_publication.py" \
+    "${trace_generation_args[@]}"
+  staged=""
+  cell_stage=""
   if (( needs_ncu )); then
-    publish_target_check "${NCU_FINAL[$slug]}" artifact
-    publish_target_check "${NCU_STDERR_FINAL[$slug]}" artifact
-    publish_target_check "${NCU_OBSERVATION_FINAL[$slug]}" artifact
-    publish_target_check "${NCU_RUN_MANIFEST_FINAL[$slug]}" artifact
-    publish_target_check "${NCU_CAPTURE_MANIFEST_FINAL[$slug]}" artifact
-    publish_target_check "${NCU_RECEIPT_FINAL[$slug]}" artifact
+    ncu_csv=""; ncu_stderr=""; ncu_observation=""; ncu_run_manifest=""
+    ncu_capture_manifest=""; ncu_receipt=""
   fi
-  out="$(clear_path "$out")"; staged="$(clear_path "$staged")"
-  publish_same_parent_noreplace "$staged" "$out"; staged=""
-  fsync_publication_path "$out"
-  fsync_publication_path "$(dirname "$out")"
-  "$PYTHON" "$REPO/tools/nvbit_tracer/trace_admission.py" "$out"
-  echo "$slug: $(find "$out/threadblocks" -name '*.pb' | wc -l) blocks"
+  fsync_publication_path "$final_cell"
+  "$PYTHON" "$REPO/tools/nvbit_tracer/trace_admission.py" "$published_trace"
+  echo "$slug: $(find "$published_trace/threadblocks" -name '*.pb' | wc -l) blocks"
   if (( needs_ncu )); then
-    ncu_final="$(clear_path "${NCU_FINAL[$slug]}")"
-    ncu_csv="$(clear_path "$ncu_csv")"
-    publish_same_parent_noreplace "$ncu_csv" "$ncu_final"; ncu_csv=""
-    fsync_publication_path "$ncu_final"
-    ncu_stderr_final="$(clear_path "${NCU_STDERR_FINAL[$slug]}")"
-    ncu_stderr="$(clear_path "$ncu_stderr")"
-    publish_same_parent_noreplace "$ncu_stderr" "$ncu_stderr_final"; ncu_stderr=""
-    fsync_publication_path "$ncu_stderr_final"
-    ncu_observation_final="$(clear_path "${NCU_OBSERVATION_FINAL[$slug]}")"
-    ncu_observation="$(clear_path "$ncu_observation")"
-    publish_same_parent_noreplace "$ncu_observation" "$ncu_observation_final"; ncu_observation=""
-    fsync_publication_path "$ncu_observation_final"
-    ncu_run_manifest_final="$(clear_path "${NCU_RUN_MANIFEST_FINAL[$slug]}")"
-    ncu_run_manifest="$(clear_path "$ncu_run_manifest")"
-    publish_same_parent_noreplace "$ncu_run_manifest" "$ncu_run_manifest_final"; ncu_run_manifest=""
-    fsync_publication_path "$ncu_run_manifest_final"
-    ncu_capture_manifest_final="$(clear_path "${NCU_CAPTURE_MANIFEST_FINAL[$slug]}")"
-    ncu_capture_manifest="$(clear_path "$ncu_capture_manifest")"
-    publish_same_parent_noreplace "$ncu_capture_manifest" "$ncu_capture_manifest_final"; ncu_capture_manifest=""
-    fsync_publication_path "$ncu_capture_manifest_final"
-    ncu_receipt_final="$(clear_path "${NCU_RECEIPT_FINAL[$slug]}")"
-    ncu_receipt="$(clear_path "$ncu_receipt")"
-    publish_same_parent_noreplace "$ncu_receipt" "$ncu_receipt_final"; ncu_receipt=""
-    fsync_publication_path "$ncu_receipt_final"
-    verify_published_receipt "$ncu_receipt_final"
-    tail -1 "$ncu_final"
+    published_receipt="${PUBLISHED_NCU_RECEIPT_FINAL[$slug]}"
+    verify_published_receipt "$published_receipt"
+    tail -1 "${PUBLISHED_NCU_FINAL[$slug]}"
   fi
 done

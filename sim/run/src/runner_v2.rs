@@ -231,6 +231,7 @@ impl RunManifestTransport {
 }
 
 struct AdmittedEntryV2 {
+    evidence_path: PathBuf,
     launch_key: LaunchKeyV1,
     binding: ReplayLaunchCoverageBinding,
     evidence: AdmittedLaunchEvidence,
@@ -290,12 +291,23 @@ fn run_manifest_v2_with_transport(
     transport: &RunManifestTransport,
     build_context: &BuildContextV2,
 ) -> Result<SimRunOutput, RunError> {
+    run_manifest_v2_with_before_publication(transport, build_context, || {})
+}
+
+fn run_manifest_v2_with_before_publication<F>(
+    transport: &RunManifestTransport,
+    build_context: &BuildContextV2,
+    before_publication: F,
+) -> Result<SimRunOutput, RunError>
+where
+    F: FnOnce(),
+{
     let path = transport.path();
     let build_identity = build_context.checked_wire()?;
     let (manifest, run_manifest_sha256) = read_manifest_v2(transport)?;
     let arch = ArchId::Sm86;
     let sku = Sku::Rtx3090Ti;
-    let (mut admitted, trace_identity) = admit_all_v2(path, &transport.base, &manifest, arch, sku)?;
+    let (admitted, trace_identity) = admit_all_v2(path, &transport.base, &manifest, arch, sku)?;
     let first = admitted
         .first()
         .ok_or_else(|| manifest_rejected(path, "launches must be nonempty"))?;
@@ -345,7 +357,7 @@ fn run_manifest_v2_with_transport(
         .try_reserve_exact(admitted.len())
         .map_err(result_serialization_error)?;
 
-    for entry in admitted.drain(..) {
+    for entry in &admitted {
         let evidence_sha256 = entry.evidence.identity().seal_sha256();
         let outcome = replay_kernel(
             &entry.evidence,
@@ -375,11 +387,11 @@ fn run_manifest_v2_with_transport(
                     .map_err(wire_emission_error)?;
                 diagnostic_witnesses.push(LaunchDiagnosticWitness {
                     launch_key: entry.launch_key.clone(),
-                    binding: entry.binding,
+                    binding: entry.binding.clone(),
                     diagnostic_last_issue_cycles: predictions.diagnostic_last_issue_cycles(),
                     terminal_modeled_event_time: predictions.terminal_modeled_event_time(),
                 });
-                per_launch_results.push(PerLaunchResultV2::new(entry.launch_key, metrics));
+                per_launch_results.push(PerLaunchResultV2::new(entry.launch_key.clone(), metrics));
                 // `emit_launch` must run while the exact replay result is still borrowed.
                 full_results.push(result);
             }
@@ -452,6 +464,13 @@ fn run_manifest_v2_with_transport(
         aggregate,
         diagnostics,
     )?;
+    before_publication();
+    for entry in &admitted {
+        entry
+            .evidence
+            .recheck_retained_generation()
+            .map_err(|source| launch_evidence_error(&entry.evidence_path, source))?;
+    }
     transport.recheck()?;
     Ok(output)
 }
@@ -487,20 +506,16 @@ fn admit_all_v2(
     for launch in manifest.launches() {
         let relative = Path::new(launch.launch_evidence_manifest_path());
         let path = base.root().join(relative);
-        let parent = relative.parent().unwrap_or_else(|| Path::new(""));
-        let manifest_name = relative.file_name().ok_or_else(|| {
-            manifest_rejected(
+        if relative.file_name().is_none() {
+            return Err(manifest_rejected(
                 manifest_path,
                 format!(
                     "launch evidence path {:?} has no file name",
                     launch.launch_evidence_manifest_path()
                 ),
-            )
-        })?;
-        let launch_base = base.descendant(parent).map_err(|source| {
-            launch_evidence_error(&path, sim_sm::ManifestError::Anchored(source))
-        })?;
-        let evidence = admit_launch_evidence_anchored(&launch_base, Path::new(manifest_name))
+            ));
+        }
+        let evidence = admit_launch_evidence_anchored(base, relative)
             .map_err(|source| launch_evidence_error(&path, source))?;
         let identity = evidence.identity();
         let actual_identity_sha256 = identity.seal_sha256();
@@ -586,6 +601,7 @@ fn admit_all_v2(
             )
         })?;
         admitted.push(AdmittedEntryV2 {
+            evidence_path: path,
             launch_key: launch.launch_key().clone(),
             binding,
             evidence,
@@ -1289,6 +1305,154 @@ mod tests {
         fs::copy(&original, &manifest_path).unwrap();
         let error = transport.recheck().unwrap_err();
         assert!(error.to_string().contains("device/inode identity mismatch"));
+    }
+
+    fn retained_evidence_cases() -> [(&'static str, &'static str, &'static str); 9] {
+        [
+            (
+                "launch_evidence.json",
+                "launch_evidence_manifest",
+                "TRACE_ADMISSION_FAILED",
+            ),
+            (
+                "trace/dynamic_trace.pb",
+                "dynamic_trace_pb",
+                "TRACE_ADMISSION_FAILED",
+            ),
+            (
+                "trace/threadblocks/device_0/stream_0/kernel_1/d_0_s_0_k_1_0,0,0.pb",
+                "threadblock_payload",
+                "TRACE_ADMISSION_FAILED",
+            ),
+            (
+                "trace/extra_info/allocations.json",
+                "allocations_json",
+                "TRACE_ADMISSION_FAILED",
+            ),
+            ("trace/stats.csv", "stats_csv", "TRACE_ADMISSION_FAILED"),
+            (
+                "trace/extra_info/enhanced_execution_info.json",
+                "enhanced_execution_info_json",
+                "TRACE_ADMISSION_FAILED",
+            ),
+            (
+                "control/canary_sm86.control_bits.json",
+                "control_bits_sidecar",
+                "TRACE_ADMISSION_FAILED",
+            ),
+            (
+                "cards/sm_86.json",
+                "arch_card",
+                "ARCH_CARD_ADMISSION_FAILED",
+            ),
+            (
+                "cards/sm_86_static_card.json",
+                "pchase_card",
+                "CONFIGURATION_RESOLUTION_FAILED",
+            ),
+        ]
+    }
+
+    #[test]
+    fn persistent_evidence_substitution_before_publication_fails_typed() {
+        for (index, (relative, token, failure_type)) in
+            retained_evidence_cases().into_iter().enumerate()
+        {
+            let (_temp, manifest_path) = copied_v2_fixture(json!({"mode": "flat"}));
+            let artifact_path = manifest_path.parent().unwrap().join(relative);
+            let displaced = manifest_path
+                .parent()
+                .unwrap()
+                .join(format!("displaced-generation-{index}"));
+            let transport = RunManifestTransport::from_path(&manifest_path).unwrap();
+            let error = run_manifest_v2_with_before_publication(
+                &transport,
+                &fixed_build_context(),
+                move || {
+                    fs::rename(&artifact_path, &displaced).unwrap();
+                    fs::copy(&displaced, &artifact_path).unwrap();
+                },
+            )
+            .unwrap_err();
+
+            assert_eq!(error.failure_type(), failure_type, "artifact {relative}");
+            assert!(
+                error.to_string().contains("retained artifact generation"),
+                "artifact {relative}: {error}"
+            );
+            assert!(
+                error.to_string().contains(token),
+                "artifact {relative}: {error}"
+            );
+        }
+    }
+
+    #[test]
+    fn persistent_evidence_deletion_before_publication_fails_typed() {
+        for (relative, token, failure_type) in retained_evidence_cases() {
+            let (_temp, manifest_path) = copied_v2_fixture(json!({"mode": "flat"}));
+            let artifact_path = manifest_path.parent().unwrap().join(relative);
+            let transport = RunManifestTransport::from_path(&manifest_path).unwrap();
+            let error = run_manifest_v2_with_before_publication(
+                &transport,
+                &fixed_build_context(),
+                move || fs::remove_file(&artifact_path).unwrap(),
+            )
+            .unwrap_err();
+
+            assert_eq!(error.failure_type(), failure_type, "artifact {relative}");
+            assert!(
+                error.to_string().contains("could not be rechecked"),
+                "artifact {relative}: {error}"
+            );
+            assert!(
+                error.to_string().contains(token),
+                "artifact {relative}: {error}"
+            );
+        }
+    }
+
+    #[test]
+    fn absent_optional_evidence_created_before_publication_fails_typed() {
+        let (_temp, manifest_path) = copied_v2_fixture(json!({"mode": "flat"}));
+        let sampling_path = manifest_path
+            .parent()
+            .unwrap()
+            .join("trace/trace_sampling.json");
+        let transport = RunManifestTransport::from_path(&manifest_path).unwrap();
+        let error = run_manifest_v2_with_before_publication(
+            &transport,
+            &fixed_build_context(),
+            move || fs::write(&sampling_path, b"{}").unwrap(),
+        )
+        .unwrap_err();
+
+        assert_eq!(error.failure_type(), "TRACE_ADMISSION_FAILED");
+        assert_eq!(error.stage(), "trace_admission");
+        assert!(error.to_string().contains("trace_sampling_json"));
+        assert!(error.to_string().contains("presence mismatch"));
+    }
+
+    #[test]
+    fn new_threadblock_member_before_publication_fails_typed() {
+        let (_temp, manifest_path) = copied_v2_fixture(json!({"mode": "flat"}));
+        let root = manifest_path.parent().unwrap();
+        let original =
+            root.join("trace/threadblocks/device_0/stream_0/kernel_1/d_0_s_0_k_1_0,0,0.pb");
+        let added = root.join("trace/threadblocks/device_0/stream_0/kernel_1/added.pb");
+        let transport = RunManifestTransport::from_path(&manifest_path).unwrap();
+        let error = run_manifest_v2_with_before_publication(
+            &transport,
+            &fixed_build_context(),
+            move || {
+                fs::copy(&original, &added).unwrap();
+            },
+        )
+        .unwrap_err();
+
+        assert_eq!(error.failure_type(), "TRACE_ADMISSION_FAILED");
+        assert_eq!(error.stage(), "trace_admission");
+        assert!(error.to_string().contains("threadblock_payload"));
     }
 
     #[test]

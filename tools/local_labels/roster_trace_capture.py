@@ -20,6 +20,8 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import contextvars
+import errno
 import json
 import math
 import subprocess
@@ -37,8 +39,7 @@ from tools.local_labels.activation_trace_orchestrator import (  # noqa: E402
     trace_activation_cell,
     _MAX_ACTIVATION_APP_ARGS,
     _MAX_ACTIVATION_APP_ARG_BYTES,
-    _TRACER_SO,
-    _tracer_env,
+    _SOURCE_COMMIT_AUTHORITY_PATHS as _ACTIVATION_SOURCE_COMMIT_AUTHORITY_PATHS,
     _activation_output_plan,
     _assert_staging_output,
     _lock_activation_cell,
@@ -49,7 +50,6 @@ from tools.local_labels.activation_trace_orchestrator import (  # noqa: E402
     _require_hex_identity,
     _require_identity_string,
     _require_nonnegative_integer,
-    _raise_if_descriptor_resource_unavailable,
     _retire_matching_locator,
     _trace_generation_commit_limits,
     _validate_trace_admission_identities,
@@ -75,8 +75,28 @@ from tools.local_labels.immutable_artifact import (  # noqa: E402
     safe_relative_path,
     strict_json_loads,
 )
+from tools.local_labels.protected_paths import (  # noqa: E402
+    TRUSTED_GIT_EXECUTABLE,
+    run_retained_git,
+)
 from tools.local_labels.roster_path_resolver import resolve_cell_root  # noqa: E402
+from tools.nvbit_tracer import capture_process as nvbit_process  # noqa: E402
+from tools.nvbit_tracer.external_tracer import (  # noqa: E402
+    EXTERNAL_TRACER_MAX_BYTES,
+    EXTERNAL_TRACER_SOURCE_KIND,
+    ExternalTracerAuthority,
+    require_external_tracer_authority,
+    verify_retained_tracer_authority,
+)
+from tools.nvbit_tracer.runtime_env import (  # noqa: E402
+    DEFAULT_PB_LIB,
+    default_runtime_manifest_path,
+    retained_tracer_runtime_env,
+    sanitized_capture_environment,
+)
 from tools.nvbit_tracer.trace_admission import (  # noqa: E402
+    EXPECTED_MEMORY_PAYLOAD_CLASSES,
+    EXPECTED_TRACE_CONTRACT_ID,
     TraceAdmission,
     TraceAdmissionError,
     open_admitted_trace_sources,
@@ -86,6 +106,9 @@ from tools.nvbit_tracer.trace_admission import (  # noqa: E402
 
 _DEFAULT_OUTPUT_ROOT = (
     REPO_ROOT / "results" / "nvbit_capture_staging" / "roster_trace_capture"
+)
+_ACTIVE_RETAINED_GIT: contextvars.ContextVar[object | None] = (
+    contextvars.ContextVar("roster_retained_git", default=None)
 )
 
 # One roster transaction retains all cell source/tree capabilities until the
@@ -109,12 +132,317 @@ _MAX_ROSTER_JSON_INTEGER = (1 << 53) - 1
 _ROSTER_DESCRIPTOR_BASE_HEADROOM = 128
 _ROSTER_DESCRIPTOR_HEADROOM_PER_CELL = 128
 _CLOSE_DIAGNOSTIC_BYTES = 400
+_DIRECT_CAPTURE_TIMEOUT_SECONDS = 15 * 60
+_DIRECT_CAPTURE_MAX_OUTPUT_BYTES = 8 * 1024 * 1024
+_DIRECT_CAPTURE_TIMEOUT_CODE = "roster_nvbit_capture_timeout"
+_DIRECT_CAPTURE_LAUNCH_CODE = "roster_nvbit_capture_launch_failed"
+_DIRECT_FAILURE_STREAM_MAX_BYTES = _DIRECT_CAPTURE_MAX_OUTPUT_BYTES
+_DIRECT_CAPTURE_RESOURCE_ERRNOS = frozenset({
+    errno.EAGAIN,
+    errno.EMFILE,
+    errno.ENFILE,
+    errno.ENOMEM,
+    errno.ENOSPC,
+})
+
+
+class RosterDirectCaptureError(RuntimeError):
+    """A typed, byte-preserving direct-roster capture failure."""
+
+    TYPED_REASON = "capture_exception"
+
+    def __init__(
+        self,
+        detail: str,
+        *,
+        stdout: bytes = b"",
+        stderr: bytes = b"",
+        process_id: int | None = None,
+        observed_output_bytes_lower_bound: int | None = None,
+    ) -> None:
+        self.detail = detail
+        self.stdout = stdout
+        self.stderr = stderr
+        self.process_id = process_id
+        self.observed_output_bytes_lower_bound = observed_output_bytes_lower_bound
+        super().__init__(f"{self.TYPED_REASON}: {detail}")
+
+
+class RosterDirectCaptureTimeout(RosterDirectCaptureError):
+    TYPED_REASON = "capture_timeout"
+
+
+class RosterDirectCaptureOutputLimitExceeded(RosterDirectCaptureError):
+    TYPED_REASON = "capture_output_limit"
+
+
+class RosterDirectCaptureLaunchFailed(RosterDirectCaptureError):
+    TYPED_REASON = "capture_launch_failed"
+
+
+class RosterDirectCaptureCleanupFailed(RosterDirectCaptureError):
+    TYPED_REASON = "capture_cleanup_failed"
+
+
+class RosterDirectCaptureNonzero(RosterDirectCaptureError):
+    TYPED_REASON = "capture_nonzero"
+
+    def __init__(
+        self,
+        *,
+        returncode: int,
+        stdout: bytes,
+        stderr: bytes,
+        failure_evidence: tuple[dict, ...] = (),
+    ) -> None:
+        self.returncode = returncode
+        self.failure_evidence = failure_evidence
+        diagnostic = _bounded_diagnostic_text(stderr, max_bytes=300)
+        super().__init__(
+            f"child returned {returncode}; stderr (tail): {diagnostic!r}",
+            stdout=stdout,
+            stderr=stderr,
+        )
+
+
+class RosterDirectCaptureResourceUnavailable(ImmutableArtifactResourceError):
+    TYPED_REASON = "trace_snapshot_resource_unavailable"
+
+    def __init__(
+        self,
+        detail: str,
+        *,
+        stdout: bytes = b"",
+        stderr: bytes = b"",
+        process_id: int | None = None,
+        observed_output_bytes_lower_bound: int | None = None,
+    ) -> None:
+        self.detail = detail
+        self.stdout = stdout
+        self.stderr = stderr
+        self.process_id = process_id
+        self.observed_output_bytes_lower_bound = observed_output_bytes_lower_bound
+        super().__init__(
+            f"{VERIFY_RESOURCE_BOUND}: roster direct capture: {detail}"
+        )
+
+
+def _direct_capture_resource_failure(error: BaseException) -> bool:
+    pending = [error]
+    seen: set[int] = set()
+    while pending:
+        current = pending.pop()
+        if id(current) in seen:
+            continue
+        seen.add(id(current))
+        if isinstance(current, MemoryError):
+            return True
+        if (
+            isinstance(current, OSError)
+            and current.errno in _DIRECT_CAPTURE_RESOURCE_ERRNOS
+        ):
+            return True
+        for chained in (current.__cause__, current.__context__):
+            if isinstance(chained, BaseException):
+                pending.append(chained)
+    return False
+
+
+def _map_direct_capture_error(
+    error: nvbit_process.NvbitCaptureProcessError,
+) -> RosterDirectCaptureError | RosterDirectCaptureResourceUnavailable:
+    fields = {
+        "stdout": error.stdout,
+        "stderr": error.stderr,
+        "process_id": error.process_id,
+        "observed_output_bytes_lower_bound": (
+            error.observed_output_bytes_lower_bound
+        ),
+    }
+    if error.process_cleanup_incomplete:
+        return RosterDirectCaptureCleanupFailed(error.detail, **fields)
+    if error.code == nvbit_process.NVBIT_CAPTURE_OUTPUT_LIMIT:
+        return RosterDirectCaptureOutputLimitExceeded(error.detail, **fields)
+    if error.code == _DIRECT_CAPTURE_TIMEOUT_CODE:
+        return RosterDirectCaptureTimeout(error.detail, **fields)
+    if _direct_capture_resource_failure(error):
+        return RosterDirectCaptureResourceUnavailable(error.detail, **fields)
+    return RosterDirectCaptureLaunchFailed(error.detail, **fields)
 
 
 def _bounded_diagnostic_text(value: object, *, max_bytes: int) -> str:
+    if isinstance(value, bytes):
+        encoded = value[-max_bytes:]
+        return encoded.decode("utf-8", errors="replace")
     text = str(value)
     encoded = text.encode("utf-8", errors="replace")[:max_bytes]
-    return encoded.decode("utf-8", errors="ignore")
+    return encoded.decode("utf-8", errors="replace")
+
+
+def _retain_direct_failure_streams(
+    *,
+    sources: ExitStack,
+    parent: Path,
+    pinned_parent: PinnedDirectoryReader,
+    cell_dir: Path,
+    stdout: bytes,
+    stderr: bytes,
+) -> tuple[dict, ...]:
+    evidence: list[dict] = []
+    for role, payload in (("stdout", stdout), ("stderr", stderr)):
+        if type(payload) is not bytes or len(payload) > _DIRECT_FAILURE_STREAM_MAX_BYTES:
+            raise ValueError(f"direct capture {role} bytes exceed retained bound")
+        retained = sources.enter_context(publish_retained_regular_file(
+            parent,
+            f"capture_nonzero.{role}.bin",
+            payload,
+            pinned_parent=pinned_parent,
+        ))
+        retained.verify_unchanged()
+        evidence.append({
+            "role": role,
+            "path": retained.path.relative_to(cell_dir).as_posix(),
+            "size_bytes": retained.size_bytes,
+            "sha256": retained.sha256,
+        })
+    return tuple(evidence)
+
+
+_DIRECT_SOURCE_COMMIT_AUTHORITY_PATHS = (
+    "tools/local_labels/roster_trace_capture.py",
+    *_ACTIVATION_SOURCE_COMMIT_AUTHORITY_PATHS,
+)
+
+
+def _git_head(retained_git: object | None = None) -> str:
+    if retained_git is None:
+        retained_git = _ACTIVE_RETAINED_GIT.get()
+    if retained_git is None:
+        with open_retained_executable(TRUSTED_GIT_EXECUTABLE) as owned_git:
+            return _git_head(owned_git)
+    result = run_retained_git(
+        retained_git,
+        repo_root=REPO_ROOT,
+        arguments=("rev-parse", "--verify", "HEAD"),
+        text=True,
+    )
+    if result.returncode != 0:
+        raise RuntimeError("cannot resolve roster source_commit from Git HEAD")
+    return _require_hex_identity(
+        result.stdout.strip(), label="roster source_commit", length=40,
+    )
+
+
+def _direct_source_path(binary: Path) -> Path:
+    source_stem = binary.name[:-4] if binary.name.endswith("_run") else binary.name
+    source = binary.with_name(f"{source_stem}.cu")
+    if not source.is_file():
+        raise FileNotFoundError(f"direct roster source is missing: {source}")
+    return source
+
+
+def _resolve_direct_source_commit(
+    source: Path,
+    retained_authority: dict[str, object],
+    retained_git: object | None = None,
+    *,
+    _legacy_head_call: bool = False,
+) -> str:
+    if retained_git is None:
+        active_git = _ACTIVE_RETAINED_GIT.get()
+        if active_git is not None:
+            return _resolve_direct_source_commit(
+                source,
+                retained_authority,
+                active_git,
+                _legacy_head_call=True,
+            )
+        with open_retained_executable(TRUSTED_GIT_EXECUTABLE) as owned_git:
+            return _resolve_direct_source_commit(
+                source,
+                retained_authority,
+                owned_git,
+                _legacy_head_call=True,
+            )
+    try:
+        source_relative = source.relative_to(REPO_ROOT).as_posix()
+    except ValueError as exc:
+        raise RuntimeError(f"direct roster source is outside repository: {source}") from exc
+    authority_paths = (*_DIRECT_SOURCE_COMMIT_AUTHORITY_PATHS, source_relative)
+    expected = set(authority_paths)
+    if (
+        len(authority_paths) != len(expected)
+        or set(retained_authority) != expected
+        or len(retained_authority) != len(expected)
+    ):
+        missing = sorted(expected - set(retained_authority))
+        extra = sorted(set(retained_authority) - expected)
+        raise RuntimeError(
+            "direct roster source-commit authority set is incomplete: "
+            f"missing={missing}, extra={extra}"
+        )
+    source_commit = (
+        _git_head() if _legacy_head_call else _git_head(retained_git)
+    )
+    status = run_retained_git(
+        retained_git,
+        repo_root=REPO_ROOT,
+        arguments=(
+            "status", "--porcelain=v1", "--untracked-files=all", "--",
+            *authority_paths,
+        ),
+        text=True,
+    )
+    if status.returncode != 0:
+        raise RuntimeError("cannot verify direct roster source-commit cleanliness")
+    if status.stdout.strip():
+        raise RuntimeError(
+            "direct roster source-commit authority is dirty or untracked: "
+            f"{status.stdout.strip()!r}"
+        )
+    for relative_path in authority_paths:
+        committed = run_retained_git(
+            retained_git,
+            repo_root=REPO_ROOT,
+            arguments=("show", f"{source_commit}:{relative_path}"),
+        )
+        if committed.returncode != 0:
+            raise RuntimeError(
+                f"direct roster authority is absent from source_commit "
+                f"{source_commit}: {relative_path}"
+            )
+        retained = retained_authority[relative_path]
+        if committed.stdout != retained.read_bytes():
+            raise RuntimeError(
+                "retained direct roster authority bytes disagree with "
+                f"source_commit for {relative_path}"
+            )
+        retained.verify_unchanged()
+    final_head = (
+        _git_head() if _legacy_head_call else _git_head(retained_git)
+    )
+    if final_head != source_commit:
+        raise RuntimeError(
+            "roster source_commit changed during direct authority verification"
+        )
+    return source_commit
+
+
+def _verify_roster_source_commit_head(
+    source_commit: str, retained_git: object | None = None,
+) -> None:
+    observed_head = (
+        _git_head() if retained_git is None else _git_head(retained_git)
+    )
+    if observed_head != source_commit:
+        raise RuntimeError("roster source_commit changed during capture publication")
+
+
+def _verify_retained_direct_authority(
+    retained_authority: dict[str, object],
+) -> None:
+    for retained in retained_authority.values():
+        retained.verify_unchanged()
 
 
 def _raise_roster_resource_error(detail: str) -> None:
@@ -399,8 +727,12 @@ def _activation_capture_record(
     )
     traces_folder = cell_dir / raw_generation["path"]
     identity_keys = (
+        "source_commit",
         "binary_sha256",
         "nvbit_tracer_build_hash",
+        "tracer_source_kind",
+        "trace_contract_id",
+        "memory_payload_classes",
         "trace_admission_sha256",
         "trace_filesystem_generation_sha256",
         "dynamic_trace_size_bytes",
@@ -497,6 +829,7 @@ def _capture_direct(
     *,
     retention_stack: ExitStack | None = None,
     attempt_id: str | None = None,
+    tracer_authority: ExternalTracerAuthority | None = None,
 ) -> dict:
     """Capture one direct cell as immutable, descriptor-bound attempt evidence."""
 
@@ -512,6 +845,10 @@ def _capture_direct(
     )
     if retention_stack is not None and not isinstance(retention_stack, ExitStack):
         raise ValueError("direct capture retention_stack must be an ExitStack")
+    if tracer_authority is None:
+        tracer_authority = require_external_tracer_authority(repo_root=REPO_ROOT)
+    elif not isinstance(tracer_authority, ExternalTracerAuthority):
+        raise ValueError("direct capture tracer_authority is invalid")
     _reject_output_dir_extras(tuple(app_args))
     generation_root = _assert_staging_output(
         traces_folder, operation="prepare direct trace generation root",
@@ -533,11 +870,33 @@ def _capture_direct(
     sources = retained_guard.capture_sources
 
     try:
+        source = _direct_source_path(binary)
+        source_relative = source.relative_to(REPO_ROOT).as_posix()
         retained_binary = sources.enter_context(
             open_retained_executable(binary)
         )
+        retained_git = sources.enter_context(
+            open_retained_executable(TRUSTED_GIT_EXECUTABLE)
+        )
+        git_token = _ACTIVE_RETAINED_GIT.set(retained_git)
+        sources.callback(_ACTIVE_RETAINED_GIT.reset, git_token)
         retained_tracer = sources.enter_context(
-            open_retained_regular(_TRACER_SO)
+            open_retained_regular(
+                tracer_authority.path,
+                max_bytes=EXTERNAL_TRACER_MAX_BYTES,
+            )
+        )
+        verify_retained_tracer_authority(retained_tracer, tracer_authority)
+        retained_authority: dict[str, object] = {}
+        for relative_path in (
+            *_DIRECT_SOURCE_COMMIT_AUTHORITY_PATHS,
+            source_relative,
+        ):
+            retained_authority[relative_path] = sources.enter_context(
+                open_retained_regular(REPO_ROOT / relative_path)
+            )
+        source_commit = _resolve_direct_source_commit(
+            source, retained_authority,
         )
         stage = create_exclusive_directory_stage(generation_root, attempt_id)
         with stage:
@@ -548,45 +907,63 @@ def _capture_direct(
                 PinnedDirectoryReader(workload_attempt)
             )
 
-            env = _tracer_env(
+            with retained_tracer_runtime_env(
+                retained_tracer.path,
+                base_env=sanitized_capture_environment(),
+                pb_lib=DEFAULT_PB_LIB,
+                runtime_manifest=default_runtime_manifest_path(retained_tracer.path),
                 retained_descriptor=retained_tracer.descriptor,
-            )
-            env["CUDA_INJECTION64_PATH"] = retained_tracer.proc_path
-            env["USER_DEFINED_FOLDERS"] = "1"
-            env["TRACES_FOLDER"] = f"/proc/self/fd/{stage.descriptor}"
-            command = [
-                retained_binary.proc_path,
-                *app_args,
-                "--output_dir",
-                f"/proc/self/fd/{retained_workload_output.descriptor}",
-            ]
+            ) as retained_runtime:
+                env = dict(retained_runtime.environment)
+                env["CUDA_INJECTION64_PATH"] = retained_tracer.proc_path
+                env["USER_DEFINED_FOLDERS"] = "1"
+                env["TRACES_FOLDER"] = f"/proc/self/fd/{stage.descriptor}"
+                command = [
+                    retained_binary.proc_path,
+                    *app_args,
+                    "--output_dir",
+                    f"/proc/self/fd/{retained_workload_output.descriptor}",
+                ]
+                inherited_descriptors = (
+                    retained_binary.descriptor,
+                    retained_tracer.descriptor,
+                    stage.descriptor,
+                    retained_workload_output.descriptor,
+                    *retained_runtime.pass_fds,
+                )
+                retained_binary.verify_unchanged()
+                retained_tracer.verify_unchanged()
+                _verify_retained_direct_authority(retained_authority)
+                _verify_roster_source_commit_head(source_commit)
+                retained_workload_output.verify_path()
+                t0 = time.perf_counter()
+                try:
+                    proc = nvbit_process.execute_capture_process(
+                        tuple(command),
+                        environment=env,
+                        working_directory=str(binary.parent),
+                        inherited_descriptors=inherited_descriptors,
+                        timeout_seconds=_DIRECT_CAPTURE_TIMEOUT_SECONDS,
+                        max_output_bytes=_DIRECT_CAPTURE_MAX_OUTPUT_BYTES,
+                        timeout_code=_DIRECT_CAPTURE_TIMEOUT_CODE,
+                        launch_code=_DIRECT_CAPTURE_LAUNCH_CODE,
+                    )
+                except nvbit_process.NvbitCaptureProcessError as process_error:
+                    mapped = _map_direct_capture_error(process_error)
+                    raise mapped from process_error
+                except (MemoryError, OSError) as process_error:
+                    if _direct_capture_resource_failure(process_error):
+                        raise RosterDirectCaptureResourceUnavailable(
+                            str(process_error)
+                        ) from process_error
+                    raise RosterDirectCaptureLaunchFailed(
+                        str(process_error)
+                    ) from process_error
+                elapsed = time.perf_counter() - t0
             retained_binary.verify_unchanged()
             retained_tracer.verify_unchanged()
-            retained_workload_output.verify_path()
-            t0 = time.perf_counter()
-            try:
-                proc = subprocess.run(
-                    command,
-                    capture_output=True,
-                    text=True,
-                    env=env,
-                    cwd=str(binary.parent),
-                    pass_fds=(
-                        retained_binary.descriptor,
-                        retained_tracer.descriptor,
-                        stage.descriptor,
-                        retained_workload_output.descriptor,
-                    ),
-                )
-            except OSError as descriptor_error:
-                _raise_if_descriptor_resource_unavailable(
-                    descriptor_error,
-                    label="direct subprocess execution or pipe allocation",
-                )
-                raise
-            elapsed = time.perf_counter() - t0
-            retained_binary.verify_unchanged()
-            retained_tracer.verify_unchanged()
+            _verify_retained_direct_authority(retained_authority)
+            _verify_roster_source_commit_head(source_commit)
             retained_workload_output.verify_path()
             binary_sha256 = _require_hex_identity(
                 retained_binary.sha256,
@@ -599,30 +976,32 @@ def _capture_direct(
                 length=64,
             )
             if proc.returncode != 0:
-                record = {
-                    "slug": slug,
-                    "ok": False,
-                    "typed_reason": "capture_failed",
-                    "trace_capture_attempt_id": attempt_id,
-                    "raw_trace_stage": str(
-                        stage.staging_path.relative_to(generation_root.parent)
-                    ),
-                    "returncode": proc.returncode,
-                    "stderr_tail": proc.stderr[-300:],
-                    "binary_sha256": binary_sha256,
-                    "nvbit_tracer_build_hash": tracer_build_sha256,
-                }
-            else:
-                raw_generation = stage.commit(
-                    require_nonempty=True,
-                    **_trace_generation_commit_limits(),
+                failure_evidence = _retain_direct_failure_streams(
+                    sources=sources,
+                    parent=workload_attempt,
+                    pinned_parent=retained_workload_output,
+                    cell_dir=generation_root.parent,
+                    stdout=proc.stdout,
+                    stderr=proc.stderr,
                 )
-                retained_guard.raw_generation = raw_generation
-                _verify_committed_trace_generation(raw_generation)
-                retained_binary.verify_unchanged()
-                retained_tracer.verify_unchanged()
-                retained_workload_output.verify_path()
-                record = {}
+                raise RosterDirectCaptureNonzero(
+                    returncode=proc.returncode,
+                    stdout=proc.stdout,
+                    stderr=proc.stderr,
+                    failure_evidence=failure_evidence,
+                )
+            raw_generation = stage.commit(
+                require_nonempty=True,
+                **_trace_generation_commit_limits(),
+            )
+            retained_guard.raw_generation = raw_generation
+            _verify_committed_trace_generation(raw_generation)
+            retained_binary.verify_unchanged()
+            retained_tracer.verify_unchanged()
+            _verify_retained_direct_authority(retained_authority)
+            _verify_roster_source_commit_head(source_commit)
+            retained_workload_output.verify_path()
+            record = {}
 
         if proc.returncode == 0:
             raw_generation_record = _raw_generation_record(
@@ -657,6 +1036,8 @@ def _capture_direct(
                 _verify_committed_trace_generation(raw_generation)
                 retained_binary.verify_unchanged()
                 retained_tracer.verify_unchanged()
+                _verify_retained_direct_authority(retained_authority)
+                _verify_roster_source_commit_head(source_commit)
                 retained_workload_output.verify_path()
                 expected = admission.expected_record_count
                 admitted = admission.admitted_record_count
@@ -674,8 +1055,14 @@ def _capture_direct(
                     "records_expected": expected,
                     "records_admitted": admitted,
                     "drop_count": max(expected - admitted, 0),
+                    "source_commit": source_commit,
                     "binary_sha256": binary_sha256,
                     "nvbit_tracer_build_hash": tracer_build_sha256,
+                    "tracer_source_kind": tracer_authority.source_kind,
+                    "trace_contract_id": admission.trace_contract_id,
+                    "memory_payload_classes": list(
+                        admission.memory_payload_classes
+                    ),
                     "trace_admission_sha256": admission.trace_admission_sha256,
                     "trace_filesystem_generation_sha256": (
                         admission.trace_filesystem_generation_sha256
@@ -701,6 +1088,51 @@ def _capture_direct(
                     "launch_count": admission.launch_count,
                     "launches": launch_records,
                 }
+    except RosterDirectCaptureNonzero as capture_error:
+        record = {
+            "slug": slug,
+            "ok": False,
+            "typed_reason": capture_error.TYPED_REASON,
+            "trace_capture_attempt_id": attempt_id,
+            "raw_trace_stage": str(
+                stage.staging_path.relative_to(generation_root.parent)
+            ),
+            "returncode": capture_error.returncode,
+            "stderr_tail": _bounded_diagnostic_text(
+                capture_error.stderr, max_bytes=300,
+            ),
+            "process_failure_evidence": list(capture_error.failure_evidence),
+            "binary_sha256": binary_sha256,
+            "nvbit_tracer_build_hash": tracer_build_sha256,
+        }
+        retained_guard.bind_failure_record(record)
+        if owns_sources:
+            retained_guard.__exit__(
+                type(capture_error), capture_error, capture_error.__traceback__,
+            )
+        return record
+    except RosterDirectCaptureError as capture_error:
+        diagnostic = capture_error.detail
+        if capture_error.stderr:
+            diagnostic += "; stderr=" + _bounded_diagnostic_text(
+                capture_error.stderr,
+                max_bytes=_CLOSE_DIAGNOSTIC_BYTES,
+            )
+        record = {
+            "slug": slug,
+            "ok": False,
+            "typed_reason": capture_error.TYPED_REASON,
+            "trace_capture_attempt_id": attempt_id,
+            "detail": _bounded_diagnostic_text(
+                diagnostic, max_bytes=_CLOSE_DIAGNOSTIC_BYTES,
+            ),
+        }
+        retained_guard.bind_failure_record(record)
+        if owns_sources:
+            retained_guard.__exit__(
+                type(capture_error), capture_error, capture_error.__traceback__,
+            )
+        return record
     except ImmutableArtifactResourceError as capture_error:
         record = {
             "slug": slug,
@@ -778,8 +1210,12 @@ _LAUNCH_FIELDS = frozenset({
     "inst_count",
 })
 _SUCCESS_IDENTITY_FIELDS = frozenset({
+    "source_commit",
     "binary_sha256",
     "nvbit_tracer_build_hash",
+    "tracer_source_kind",
+    "trace_contract_id",
+    "memory_payload_classes",
     "trace_admission_sha256",
     "trace_filesystem_generation_sha256",
     "dynamic_trace_size_bytes",
@@ -838,6 +1274,7 @@ _DIRECT_PROCESS_FAILURE_FIELDS = frozenset({
     "raw_trace_stage",
     "returncode",
     "stderr_tail",
+    "process_failure_evidence",
     "binary_sha256",
     "nvbit_tracer_build_hash",
     "via",
@@ -861,6 +1298,9 @@ _FAILURE_FIELD_SETS = (
     _DIRECT_PROCESS_FAILURE_FIELDS,
     _DIRECT_ADMISSION_FAILURE_FIELDS,
 )
+_FAILURE_STREAM_EVIDENCE_FIELDS = frozenset({
+    "role", "path", "size_bytes", "sha256",
+})
 _HASH_FIELDS = frozenset({
     "dynamic_trace_sha256",
     "stats_sha256",
@@ -946,6 +1386,78 @@ def _require_bounded_text(value: object, *, label: str, max_bytes: int) -> str:
     if size_bytes > max_bytes:
         raise ValueError(f"{label} exceeds {max_bytes} bytes")
     return value
+
+
+def _validate_failure_stream_evidence(
+    value: object,
+    *,
+    attempt_id: str,
+    label: str,
+) -> list[dict]:
+    if type(value) is not list or len(value) != 2:
+        raise ValueError(f"{label} must contain exact stdout/stderr identities")
+    observed_roles: list[str] = []
+    for index, artifact in enumerate(value):
+        artifact_label = f"{label} {index}"
+        if type(artifact) is not dict:
+            raise ValueError(f"{artifact_label} must be an exact object")
+        _require_exact_field_set(
+            artifact, _FAILURE_STREAM_EVIDENCE_FIELDS, label=artifact_label,
+        )
+        role = artifact["role"]
+        if role not in {"stdout", "stderr"}:
+            raise ValueError(f"{artifact_label} role is invalid")
+        observed_roles.append(role)
+        relative = safe_relative_path(_require_identity_string(
+            artifact["path"], label=f"{artifact_label} path", max_bytes=4096,
+        ))
+        if (
+            len(relative.parts) != 3
+            or relative.parts[1] != attempt_id
+            or relative.parts[2] != f"capture_nonzero.{role}.bin"
+        ):
+            raise ValueError(f"{artifact_label} path identity is invalid")
+        size_bytes = _require_exact_nonnegative_integer(
+            artifact["size_bytes"], label=f"{artifact_label} size_bytes",
+        )
+        if size_bytes > _DIRECT_FAILURE_STREAM_MAX_BYTES:
+            raise ValueError(f"{artifact_label} exceeds retained byte bound")
+        _require_hex_identity(
+            artifact["sha256"], label=f"{artifact_label} sha256", length=64,
+        )
+    if observed_roles != ["stdout", "stderr"]:
+        raise ValueError(f"{label} roles are not canonical")
+    return value
+
+
+def _verify_direct_failure_stream_artifacts(
+    record: dict,
+    *,
+    cell_dir: Path,
+) -> None:
+    evidence = record.get("process_failure_evidence")
+    if evidence is None:
+        return
+    for artifact in evidence:
+        relative = safe_relative_path(artifact["path"])
+        try:
+            with open_retained_regular(
+                cell_dir / relative,
+                max_bytes=_DIRECT_FAILURE_STREAM_MAX_BYTES,
+            ) as retained:
+                if (
+                    retained.size_bytes != artifact["size_bytes"]
+                    or retained.sha256 != artifact["sha256"]
+                ):
+                    raise ImmutableArtifactError(
+                        "direct failure stream artifact identity changed"
+                    )
+        except ImmutableArtifactError:
+            raise
+        except OSError as exc:
+            raise ImmutableArtifactError(
+                "direct failure stream artifact is unavailable"
+            ) from exc
 
 
 def _validate_raw_generation(value: object, *, label: str) -> dict:
@@ -1080,6 +1592,14 @@ def _validate_capture_record(
         _require_exact_field_set(base_record, expected_fields, label=label)
         if base_record["contract_ok"] is not True:
             raise ValueError(f"{label} contract_ok must be exactly true")
+        if base_record["trace_contract_id"] != EXPECTED_TRACE_CONTRACT_ID:
+            raise ValueError(f"{label} trace contract is not split-v2")
+        if base_record["memory_payload_classes"] != list(
+            EXPECTED_MEMORY_PAYLOAD_CLASSES
+        ):
+            raise ValueError(f"{label} capability vector is not canonical")
+        if base_record["tracer_source_kind"] != EXTERNAL_TRACER_SOURCE_KIND:
+            raise ValueError(f"{label} tracer source kind is not external")
     else:
         observed_fields = frozenset(base_record)
         if observed_fields not in _FAILURE_FIELD_SETS:
@@ -1087,6 +1607,13 @@ def _validate_capture_record(
             raise ValueError(
                 f"{label} failure field set is not exact; observed="
                 f"{sorted(observed_fields)}, allowed={allowed}"
+            )
+        if (
+            observed_fields == _DIRECT_PROCESS_FAILURE_FIELDS
+            and base_record["typed_reason"] != "capture_nonzero"
+        ):
+            raise ValueError(
+                f"{label} direct process failure must be capture_nonzero"
             )
 
     slug = _require_identity_string(
@@ -1125,6 +1652,18 @@ def _validate_capture_record(
                 base_record[field], label=f"{label} {field}", max_bytes=4096,
             )
 
+    if "process_failure_evidence" in base_record:
+        _validate_failure_stream_evidence(
+            base_record["process_failure_evidence"],
+            attempt_id=base_record["trace_capture_attempt_id"],
+            label=f"{label} process_failure_evidence",
+        )
+    if "source_commit" in base_record:
+        _require_hex_identity(
+            base_record["source_commit"],
+            label=f"{label} source_commit",
+            length=40,
+        )
     for field in _HASH_FIELDS & base_record.keys():
         value = base_record[field]
         if value is None and field == "allocations_sidecar_sha256":
@@ -1279,12 +1818,51 @@ def _validate_aggregate_manifest(manifest: object, roster: list[dict]) -> dict:
     _require_exact_field_set(
         manifest,
         frozenset({
-            "generated_by", "capture_attempt_id", "host_clock_state", "cells",
+            "generated_by",
+            "capture_attempt_id",
+            "source_commit",
+            "host_clock_state",
+            "tracer_source_kind",
+            "tracer_source_path",
+            "tracer_sha256",
+            "trace_contract_id",
+            "memory_payload_classes",
+            "cells",
         }),
         label="aggregate manifest",
     )
     if manifest["generated_by"] != "roster_trace_capture":
         raise ValueError("aggregate generated_by identity is invalid")
+    source_commit_model = manifest["source_commit"]
+    source_commit = (
+        None
+        if source_commit_model is None
+        else _require_hex_identity(
+            source_commit_model,
+            label="aggregate source_commit",
+            length=40,
+        )
+    )
+    if manifest["tracer_source_kind"] != EXTERNAL_TRACER_SOURCE_KIND:
+        raise ValueError("aggregate tracer source is not external")
+    tracer_source_path = _require_identity_string(
+        manifest["tracer_source_path"],
+        label="aggregate tracer_source_path",
+        max_bytes=4096,
+    )
+    if not Path(tracer_source_path).is_absolute():
+        raise ValueError("aggregate tracer_source_path must be absolute")
+    _require_hex_identity(
+        manifest["tracer_sha256"],
+        label="aggregate tracer_sha256",
+        length=64,
+    )
+    if manifest["trace_contract_id"] != EXPECTED_TRACE_CONTRACT_ID:
+        raise ValueError("aggregate trace contract is not split-v2")
+    if manifest["memory_payload_classes"] != list(
+        EXPECTED_MEMORY_PAYLOAD_CLASSES
+    ):
+        raise ValueError("aggregate capability vector is not canonical")
     _require_identity_string(
         manifest["capture_attempt_id"],
         label="aggregate capture_attempt_id",
@@ -1308,12 +1886,21 @@ def _validate_aggregate_manifest(manifest: object, roster: list[dict]) -> dict:
     for index, (record, row) in enumerate(zip(cells, roster, strict=True)):
         if type(row) is not dict:
             raise ValueError(f"aggregate roster row {index} must be an exact object")
-        _validate_capture_record(
+        validated_record = _validate_capture_record(
             record,
             expected_slug=row["slug"],
             expected_shape_point=row["shape_point"],
             index=index,
         )
+        if validated_record.get("ok"):
+            if source_commit is None:
+                raise ValueError(
+                    "successful aggregate cell requires aggregate source_commit"
+                )
+            if validated_record["source_commit"] != source_commit:
+                raise ValueError(
+                    f"aggregate cell {index} source_commit disagrees with aggregate"
+                )
 
     envelope = dict(manifest)
     envelope["cells"] = []
@@ -1355,6 +1942,7 @@ def _run_roster_capture(
     sku: str,
     arch_dir: str,
     output_root: Path,
+    tracer_authority: ExternalTracerAuthority,
 ) -> int:
     roster = _validate_roster_entries(roster, require_binary=True)
     plans = _validate_plan_vector(plans, expected_cells=len(roster))
@@ -1362,6 +1950,8 @@ def _run_roster_capture(
     arch_dir = _require_identity_string(
         arch_dir, label="roster arch_dir", component=True,
     )
+    if not isinstance(tracer_authority, ExternalTracerAuthority):
+        raise ValueError("roster tracer_authority is invalid")
     _require_roster_descriptor_budget(len(roster))
     _require_roster_manifest_budget(len(roster))
     out = _assert_staging_output(
@@ -1388,6 +1978,13 @@ def _run_roster_capture(
             aggregate_lock = aggregate_lock_owner.enter_context(
                 PinnedDirectoryReader(out.parent)
             )
+            retained_git = aggregate_lock_owner.enter_context(
+                open_retained_executable(TRUSTED_GIT_EXECUTABLE)
+            )
+            aggregate_git_token = _ACTIVE_RETAINED_GIT.set(retained_git)
+            aggregate_lock_owner.callback(
+                _ACTIVE_RETAINED_GIT.reset, aggregate_git_token,
+            )
             _lock_activation_cell(aggregate_lock)
             # The prior aggregate cannot remain active while this rerun retires
             # and replaces its per-cell locators. Preserve it under a hidden name
@@ -1402,7 +1999,15 @@ def _run_roster_capture(
                 manifest = {
                     "generated_by": "roster_trace_capture",
                     "capture_attempt_id": attempt_id,
+                    "source_commit": None,
                     "host_clock_state": _host_clock_state(),
+                    "tracer_source_kind": tracer_authority.source_kind,
+                    "tracer_source_path": str(tracer_authority.path),
+                    "tracer_sha256": tracer_authority.sha256,
+                    "trace_contract_id": EXPECTED_TRACE_CONTRACT_ID,
+                    "memory_payload_classes": list(
+                        EXPECTED_MEMORY_PAYLOAD_CLASSES
+                    ),
                     "cells": [],
                 }
                 failures = 0
@@ -1428,6 +2033,8 @@ def _run_roster_capture(
                                     if item != f"--{cell['shape_point']}"
                                 ),
                                 output_root=output_root,
+                                tracer_source_path=tracer_authority.path,
+                                tracer_sha256=tracer_authority.sha256,
                                 _precleared_plan={
                                     key: value for key, value in plan.items()
                                     if key != "portable"
@@ -1448,6 +2055,7 @@ def _run_roster_capture(
                                 plan["traces_folder"],
                                 plan["workload_output_root"],
                                 retention_stack=retained_sources,
+                                tracer_authority=tracer_authority,
                             )
                             if type(record) is not dict:
                                 raise ValueError(
@@ -1471,6 +2079,19 @@ def _run_roster_capture(
                             expected_shape_point=cell["shape_point"],
                             index=index,
                         )
+                        _verify_direct_failure_stream_artifacts(
+                            record, cell_dir=plan["cell_dir"],
+                        )
+                        if record.get("ok"):
+                            record_source_commit = record["source_commit"]
+                            aggregate_source_commit = manifest["source_commit"]
+                            if aggregate_source_commit is None:
+                                manifest["source_commit"] = record_source_commit
+                            elif aggregate_source_commit != record_source_commit:
+                                raise ValueError(
+                                    "roster cells resolved mixed source_commit "
+                                    "authorities"
+                                )
                     except ImmutableArtifactResourceError as exc:
                         record = {
                             "slug": slug,
@@ -1516,19 +2137,28 @@ def _run_roster_capture(
                         payload,
                     )
                 else:
+                    source_commit = manifest["source_commit"]
+                    if type(source_commit) is not str:
+                        raise RuntimeError(
+                            "successful roster aggregate has no source_commit"
+                        )
+                    _verify_roster_source_commit_head(source_commit)
                     payload = _bounded_manifest_payload(manifest, roster)
                     attempt_path = publish_regular_file(
                         attempt_root,
                         f"{attempt_id}.json",
                         payload,
                     )
+                    _verify_roster_source_commit_head(source_commit)
                     active_locator = publish_retained_regular_file(
                         out.parent, out.name, payload,
                     )
                     active_payload = payload
                     active_locator.verify_unchanged()
+                    _verify_roster_source_commit_head(source_commit)
                     retained_sources.close()
                     retained_sources_closed = True
+                    _verify_roster_source_commit_head(source_commit)
                     # All retained cell closures are now complete. Drain and
                     # close the exact aggregate capability while its publication
                     # lock is still held; a monitor-close mutation is followed by
@@ -1552,6 +2182,9 @@ def _run_roster_capture(
                             (active_locator,),
                             lock_reader=aggregate_lock,
                             closure_callbacks=(
+                                lambda: _verify_roster_source_commit_head(
+                                    source_commit
+                                ),
                                 close_transferred_aggregate_lock,
                             ),
                         )
@@ -1628,6 +2261,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--manifest-out", default=None)
     ap.add_argument("--sku", default="rtx_3090_ti")
     ap.add_argument("--arch-dir", default="sm_86")
+    ap.add_argument("--nvbit-tracer", type=Path, default=None)
+    ap.add_argument("--nvbit-tracer-sha256", default=None)
     ap.add_argument(
         "--output-root", type=Path, default=_DEFAULT_OUTPUT_ROOT,
         help="Active output root below results/nvbit_capture_staging.",
@@ -1635,6 +2270,11 @@ def main(argv: list[str] | None = None) -> int:
     args = ap.parse_args(argv)
 
     try:
+        tracer_authority = require_external_tracer_authority(
+            args.nvbit_tracer,
+            args.nvbit_tracer_sha256,
+            repo_root=REPO_ROOT,
+        )
         roster_snapshot = read_regular_snapshot(
             Path(args.roster), max_bytes=_MAX_ROSTER_INPUT_BYTES,
         )
@@ -1663,6 +2303,7 @@ def main(argv: list[str] | None = None) -> int:
             sku=args.sku,
             arch_dir=args.arch_dir,
             output_root=args.output_root,
+            tracer_authority=tracer_authority,
         )
     except (ImmutableArtifactError, KeyError, OSError, ValueError) as exc:
         print(f"roster_trace_capture: resource refusal: {exc}", file=sys.stderr)

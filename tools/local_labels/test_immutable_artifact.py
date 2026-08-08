@@ -254,19 +254,26 @@ def test_open_retained_file_rejects_ancestor_swap_during_initial_hash(
     swapped = False
 
     def hash_while_ancestor_is_replaced(
-        descriptor: int, *, allow_hardlinks: bool = False,
+        descriptor: int,
+        *,
+        allow_hardlinks: bool = False,
+        max_bytes: int | None = None,
     ) -> tuple[str, int, int]:
         nonlocal swapped
         if swapped:
             return original_hash(
-                descriptor, allow_hardlinks=allow_hardlinks,
+                descriptor,
+                allow_hardlinks=allow_hardlinks,
+                max_bytes=max_bytes,
             )
         swapped = True
         directory.rename(moved)
         directory.mkdir()
         try:
             return original_hash(
-                descriptor, allow_hardlinks=allow_hardlinks,
+                descriptor,
+                allow_hardlinks=allow_hardlinks,
+                max_bytes=max_bytes,
             )
         finally:
             directory.rmdir()
@@ -415,8 +422,14 @@ def test_open_retained_regular_rejects_drift_during_initial_hash(
     report.chmod(0o444)
     original = immutable._hash_fd
 
-    def mutate_after_hash(descriptor, *, allow_hardlinks=False):
-        result = original(descriptor, allow_hardlinks=allow_hardlinks)
+    def mutate_after_hash(
+        descriptor, *, allow_hardlinks=False, max_bytes=None,
+    ):
+        result = original(
+            descriptor,
+            allow_hardlinks=allow_hardlinks,
+            max_bytes=max_bytes,
+        )
         os.pwrite(writer, b"changed after hash", 0)
         return result
 
@@ -504,6 +517,35 @@ def test_retained_regular_close_is_idempotent(
         immutable.ImmutableArtifactError, match="retained regular file is closed",
     ):
         retained.verify_unchanged()
+
+
+def test_open_retained_regular_enforces_strict_initial_byte_ceiling(
+    tmp_path: Path,
+) -> None:
+    report = _regular(tmp_path / "report.ncu-rep", b"12345")
+    before = _open_descriptor_count()
+
+    with pytest.raises(
+        immutable.ImmutableArtifactLimitError,
+        match="exceeds bounded snapshot limit",
+    ):
+        immutable.open_retained_regular(report, max_bytes=4)
+
+    assert _open_descriptor_count() == before
+
+
+def test_retained_regular_read_enforces_strict_byte_ceiling(
+    tmp_path: Path,
+) -> None:
+    report = _regular(tmp_path / "report.ncu-rep", b"12345")
+
+    with immutable.open_retained_regular(report, max_bytes=5) as retained:
+        with pytest.raises(
+            immutable.ImmutableArtifactLimitError,
+            match="exceeds bounded snapshot limit",
+        ):
+            retained.read_bytes(max_bytes=4)
+        assert retained.read_bytes(max_bytes=5) == b"12345"
 
 
 def _reader_tree(tmp_path: Path) -> tuple[Path, Path, Path, bytes]:

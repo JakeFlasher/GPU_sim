@@ -18,9 +18,12 @@ from __future__ import annotations
 import argparse
 import contextlib
 import copy
+import csv
 import errno
 import fcntl
+import functools
 import hashlib
+import io
 import json
 import os
 import re
@@ -30,11 +33,12 @@ import shutil
 import stat
 import subprocess
 import sys
+import threading
 import time
 import uuid
 from collections.abc import Sequence
 from datetime import datetime, timezone
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any, Callable
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -49,6 +53,7 @@ import archive_preparation_failure as prep_archive  # noqa: E402
 import archive_capture_defect_attempt as capture_defect_archive  # noqa: E402
 import capture_budget_route as budget_route  # noqa: E402
 import capture_toolchain_contract as toolchain_contract  # noqa: E402
+from tools.local_labels import delegated_cgroup  # noqa: E402
 from tools.local_labels import immutable_artifact as immutable  # noqa: E402
 from tools.local_labels import label_driver_authority  # noqa: E402
 from tools.local_labels import ncu_action_executor as ncu_executor  # noqa: E402
@@ -58,6 +63,12 @@ from tools.local_labels import ncu_launch_documents  # noqa: E402
 from tools.local_labels import ncu_launch_sidecars  # noqa: E402
 from tools.local_labels import parse_ncu_metrics  # noqa: E402
 from tools.local_labels import sidecar_schema_authority  # noqa: E402
+from tools.nvbit_tracer import capture_process as nvbit_capture_process  # noqa: E402
+from tools.nvbit_tracer import runtime_env as nvbit_runtime_env  # noqa: E402
+from tools.nvbit_tracer import trace_admission  # noqa: E402
+from tools.nvbit_tracer.external_tracer import (  # noqa: E402
+    EXTERNAL_TRACER_MAX_BYTES,
+)
 import ncu_capture_contract  # noqa: E402
 import sol_capture_environment as sol_env  # noqa: E402
 import sol_definition_equivalence as sol_def  # noqa: E402
@@ -68,7 +79,6 @@ from build_sm86_capture_matrix import (  # noqa: E402
     tree_sha256,
     validate_matrix as rederive_capture_matrix,
 )
-from import_trace_contract import validate_trace_dir  # noqa: E402
 from repeatability_matrix_runner import (  # noqa: E402
     DRIVER_ALWAYS_COLLECTED,
     registry_unit_metrics,
@@ -177,6 +187,16 @@ _STORAGE_FAILURE_ERRNOS = frozenset({
 })
 LABEL_DRIVER_STORAGE_MARKER = "LABEL_DRIVER_STORAGE_FAILURE:"
 _FINALIZATION_PARENT_IDENTITY_PREFIX = ".m6-finalization-parent-"
+_CHILD_STDOUT_LIMIT_BYTES = 8 * 1024 * 1024
+_CHILD_STDERR_LIMIT_BYTES = 8 * 1024 * 1024
+_CHILD_PIPE_CHUNK_BYTES = 64 * 1024
+_CHILD_PIPE_CLEANUP_SECONDS = 5.0
+# Control extraction is allowed to materialize one file only within this
+# per-file cap. NCU reports share the importer-owned protocol ceiling.
+_CONTROL_OUTPUT_MAX_BYTES = 256 * 1024 * 1024
+_PROCESS_RESOURCE_ERRNOS = frozenset({
+    errno.EAGAIN, errno.EMFILE, errno.ENFILE, errno.ENOMEM,
+})
 
 
 def _storage_origin(exc: BaseException | None) -> OSError | None:
@@ -690,11 +710,20 @@ def validate_preflight_manifest(
         problems.append(f"expected NCU version authority is invalid: {exc}")
     schema_version = manifest.get("schema_version")
     schema_path: Path | None = None
-    if schema_version == 3:
+    if schema_version == 4:
         schema_path = (
             REPO_ROOT / "workloads" / "simbench_bw" / "schemas"
             / "campaign_preflight_manifest.schema.json"
         )
+    elif schema_version == 3:
+        schema_path = (
+            REPO_ROOT / "workloads" / "simbench_bw" / "schemas"
+            / "campaign_preflight_manifest.v3.schema.json"
+        )
+        if require_fresh:
+            problems.append(
+                "schema_version 3 is historical-only and cannot authorize capture"
+            )
     elif schema_version == 2:
         schema_path = (
             REPO_ROOT / "workloads" / "simbench_bw" / "schemas"
@@ -836,7 +865,7 @@ def validate_preflight_manifest(
                 problems.append("checks.ncu.resolved_path is not canonical absolute")
             if not _is_sha256(ncu.get("executable_sha256")):
                 problems.append("checks.ncu.executable_sha256 is invalid")
-            if schema_version == 3:
+            if schema_version in {3, 4}:
                 if ncu.get("execution_mode") != preflight.NCU_EXECUTION_MODE:
                     problems.append("checks.ncu.execution_mode is invalid")
                 if ncu.get("host_machine") != preflight.NCU_HOST_MACHINE:
@@ -984,17 +1013,55 @@ def validate_preflight_manifest(
     return expected_ncu_identity
 
 
-def validate_live_injection_hashes(manifest: dict, pins: dict) -> None:
+def validate_live_injection_hashes(
+    manifest: dict, pins: dict, *, require_fresh: bool,
+) -> None:
     probe = (manifest.get("checks") or {}).get("injection_runtime") or {}
     inj = pins.get("injection_runtime") or {}
-    tracer = _resolve_repo_path(inj.get("tracer_so_relpath"), "tracer .so")
     smoke = _resolve_repo_path(inj.get("smoke_binary_relpath"), "smoke binary")
+    authorities = [("smoke binary", smoke, "smoke_binary_sha256")]
+    bounded_external_tracer: Path | None = None
+    schema_version = manifest.get("schema_version")
+    if require_fresh:
+        if (
+            schema_version != 4
+            or probe.get("tracer_source_kind")
+            != "external_non_git_retained_descriptor_v1"
+        ):
+            raise ChunkRefusal(
+                "injection_runtime_hash_drift",
+                "fresh capture lacks external split-tracer authority",
+            )
+        try:
+            tracer = preflight._absolute_external_tracer(
+                probe.get("tracer_source_path"), repo_root=REPO_ROOT,
+            )
+        except (OSError, TypeError, ValueError) as exc:
+            raise ChunkRefusal(
+                "injection_runtime_hash_drift",
+                f"external tracer authority is invalid: {exc}",
+            ) from exc
+        authorities.insert(0, ("external tracer .so", tracer, "tracer_so_sha256"))
+        bounded_external_tracer = tracer
+    elif schema_version in {2, 3}:
+        tracer = _resolve_repo_path(inj.get("tracer_so_relpath"), "tracer .so")
+        authorities.insert(0, ("tracer .so", tracer, "tracer_so_sha256"))
     mismatches = []
-    for role, path, field in (
-        ("tracer .so", tracer, "tracer_so_sha256"),
-        ("smoke binary", smoke, "smoke_binary_sha256"),
-    ):
-        actual = sha256_file(path)
+    for role, path, field in authorities:
+        try:
+            if path == bounded_external_tracer:
+                with immutable.open_retained_regular(
+                    path, max_bytes=EXTERNAL_TRACER_MAX_BYTES
+                ) as retained_tracer:
+                    actual = retained_tracer.sha256
+                    retained_tracer.verify_unchanged()
+            else:
+                actual = sha256_file(path)
+        except (OSError, immutable.ImmutableArtifactError) as exc:
+            raise ChunkRefusal(
+                "injection_runtime_hash_drift",
+                f"cannot authenticate {role}: {exc}",
+            ) from exc
         if probe.get(field) != actual:
             mismatches.append(
                 f"{role}: preflight={probe.get(field)!r}, current={actual}"
@@ -2880,6 +2947,8 @@ def _run_logged(
     supervised_executable_identity: ncu_executor.ExpectedExecutableIdentity | None = None,
     supervised_ncu_environment: ncu_executor.NcuCollectionEnvironment | None = None,
     supervised_auxiliary_descriptors: tuple[int, ...] = (),
+    pass_fds: tuple[int, ...] = (),
+    require_cgroup_containment: bool = False,
 ) -> tuple[float, Path, Path]:
     _mkdir_output(
         log_dir, parents=True, exist_ok=True,
@@ -2916,6 +2985,11 @@ def _run_logged(
         raise ChunkRefusal(
             f"{failure_code}_timeout", f"non-positive timeout_s={timeout_s}"
         )
+    if type(require_cgroup_containment) is not bool:
+        raise ChunkRefusal(
+            f"{failure_code}_containment_invalid",
+            "require_cgroup_containment must be an exact boolean",
+        )
     if (monitored_tree is None) != (tree_limit_bytes is None):
         raise ChunkRefusal(
             f"{failure_code}_tree_limit_invalid",
@@ -2946,6 +3020,11 @@ def _run_logged(
             f"{failure_code}_supervision_invalid",
             "auxiliary descriptors require supervised NCU execution",
         )
+    if supervised_ncu_identity is not None and pass_fds:
+        raise ChunkRefusal(
+            f"{failure_code}_supervision_invalid",
+            "ordinary pass_fds cannot be combined with supervised NCU execution",
+        )
     if supervised_ncu_identity is not None:
         if env is not None or monitored_tree is not None:
             raise ChunkRefusal(
@@ -2968,7 +3047,9 @@ def _run_logged(
             separator = b"" if not exc.stderr or exc.stderr.endswith(b"\n") else b"\n"
             diagnostic = exc.stderr + separator + f"{exc}\n".encode()
             write_logs(exc.stdout, diagnostic)
-            if exc.code == ncu_executor.NCU_ACTION_TIMEOUT:
+            if exc.process_cleanup_incomplete:
+                code = f"{failure_code}_cleanup_failed"
+            elif exc.code == ncu_executor.NCU_ACTION_TIMEOUT:
                 code = f"{failure_code}_timeout"
             elif exc.code == ncu_executor.NCU_ACTION_OUTPUT_LIMIT:
                 code = f"{failure_code}_output_limit"
@@ -2997,117 +3078,749 @@ def _run_logged(
             )
         return elapsed, stdout_path, stderr_path
     try:
-        process = subprocess.Popen(
-            command, cwd=cwd, env=env, stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE, start_new_session=True,
-        )
-    except OSError as exc:
-        write_logs(b"", f"{type(exc).__name__}: {exc}\n".encode())
+        stream_state: dict[str, dict[str, Any]] = {
+            "stdout": {
+                "pipe": None,
+                "limit": _CHILD_STDOUT_LIMIT_BYTES,
+                "payload": bytearray(),
+                "observed": 0,
+                "error": None,
+            },
+            "stderr": {
+                "pipe": None,
+                "limit": _CHILD_STDERR_LIMIT_BYTES,
+                "payload": bytearray(),
+                "observed": 0,
+                "error": None,
+            },
+        }
+        output_limit = threading.Event()
+        threads: list[threading.Thread] = []
+        started_threads: list[threading.Thread] = []
+        deadline = time.monotonic() + timeout_s
+    except MemoryError as exc:
+        write_logs(b"", b"MemoryError: bounded output state allocation failed\n")
         raise ChunkRefusal(
-            f"{failure_code}_start_failed", f"{type(exc).__name__}: {exc}"
+            f"{failure_code}_output_resource_unavailable",
+            "could not allocate bounded child output state",
         ) from exc
-
-    def terminate_group() -> tuple[bytes, bytes]:
+    containment: delegated_cgroup.DelegatedCgroupV2 | None = None
+    if require_cgroup_containment:
         try:
-            os.killpg(process.pid, signal.SIGTERM)
-        except ProcessLookupError:
-            pass
-        try:
-            return process.communicate(timeout=5)
-        except subprocess.TimeoutExpired:
+            containment = delegated_cgroup.DelegatedCgroupV2.create()
+        except delegated_cgroup.CgroupContainmentError as exc:
+            write_logs(b"", f"{type(exc).__name__}: {exc}\n".encode())
+            raise ChunkRefusal(
+                f"{failure_code}_containment_unavailable", str(exc),
+            ) from exc
+    popen_arguments = {
+        "cwd": cwd,
+        "env": env,
+        "stdout": subprocess.PIPE,
+        "stderr": subprocess.PIPE,
+        "start_new_session": True,
+        "pass_fds": pass_fds,
+    }
+    process: subprocess.Popen[bytes] | None = None
+    try:
+        with nvbit_capture_process.bounded_launch(deadline):
+            process = (
+                subprocess.Popen(command, **popen_arguments)
+                if containment is None
+                else containment.popen(command, **popen_arguments)
+            )
+    except BaseException as exc:
+        cleanup_errors: list[BaseException] = []
+        if process is not None:
             try:
                 os.killpg(process.pid, signal.SIGKILL)
             except ProcessLookupError:
                 pass
-            return process.communicate()
+            except BaseException as cleanup_error:
+                cleanup_errors.append(cleanup_error)
+        if containment is not None:
+            try:
+                containment.close_after_error()
+            except BaseException as cleanup_error:
+                cleanup_errors.append(cleanup_error)
+            else:
+                containment = None
+        if process is not None:
+            try:
+                process.wait(timeout=_CHILD_PIPE_CLEANUP_SECONDS)
+            except BaseException as cleanup_error:
+                cleanup_errors.append(cleanup_error)
+            for pipe in (process.stdout, process.stderr):
+                if pipe is None:
+                    continue
+                try:
+                    pipe.close()
+                except BaseException as cleanup_error:
+                    cleanup_errors.append(cleanup_error)
+        if cleanup_errors:
+            error = ChunkRefusal(
+                f"{failure_code}_cleanup_failed",
+                "; ".join(
+                    f"{type(error).__name__}: {error}"
+                    for error in cleanup_errors
+                ),
+            )
+            try:
+                error.add_note(
+                    "active launch failure was: "
+                    f"{type(exc).__name__}: {exc}"
+                )
+            except (AttributeError, TypeError):
+                pass
+            raise error from cleanup_errors[0]
+        if not isinstance(exc, Exception):
+            raise
+        if isinstance(exc, MemoryError):
+            write_logs(b"", b"MemoryError: child process allocation failed\n")
+            raise ChunkRefusal(
+                f"{failure_code}_output_resource_unavailable",
+                "could not allocate bounded child process pipes",
+            ) from exc
+        write_logs(b"", f"{type(exc).__name__}: {exc}\n".encode())
+        if isinstance(exc, nvbit_capture_process.CaptureLaunchTimeout):
+            raise ChunkRefusal(
+                f"{failure_code}_timeout",
+                f"launch exceeded timeout_s={timeout_s}: {command[0]}",
+            ) from exc
+        if isinstance(exc, OSError) and exc.errno in _PROCESS_RESOURCE_ERRNOS:
+            raise ChunkRefusal(
+                f"{failure_code}_output_resource_unavailable",
+                "could not allocate child process resources; "
+                f"errno={exc.errno}: {exc}",
+            ) from exc
+        if isinstance(exc, delegated_cgroup.CgroupContainmentError):
+            raise ChunkRefusal(
+                f"{failure_code}_containment_unavailable", str(exc),
+            ) from exc
+        raise ChunkRefusal(
+            f"{failure_code}_start_failed", f"{type(exc).__name__}: {exc}"
+        ) from exc
+    assert process is not None
 
-    deadline = time.monotonic() + timeout_s
-    timeout_error: subprocess.TimeoutExpired | None = None
-    limit_detail: str | None = None
-    try:
-        while True:
+    def finish_containment() -> None:
+        nonlocal containment
+        if containment is None:
+            return
+        active = containment
+        try:
+            active.finish()
+        except BaseException as exc:
+            raise ChunkRefusal(
+                f"{failure_code}_cleanup_failed",
+                f"delegated cgroup cleanup failed: {exc}",
+            ) from exc
+        containment = None
+
+    if process.stdout is None or process.stderr is None:
+        cleanup_failure: BaseException | None = None
+        try:
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            try:
+                process.wait(timeout=_CHILD_PIPE_CLEANUP_SECONDS)
+            except subprocess.TimeoutExpired as exc:
+                cleanup_failure = ChunkRefusal(
+                    f"{failure_code}_cleanup_failed",
+                    "child did not exit after pipe-allocation failure",
+                )
+                cleanup_failure.__cause__ = exc
+        finally:
+            close_errors: list[BaseException] = []
+            for pipe in (process.stdout, process.stderr):
+                if pipe is None:
+                    continue
+                try:
+                    pipe.close()
+                except BaseException as exc:
+                    close_errors.append(exc)
+            if close_errors:
+                if cleanup_failure is None:
+                    cleanup_failure = ChunkRefusal(
+                        f"{failure_code}_output_cleanup_failed",
+                        "; ".join(
+                            f"{type(exc).__name__}: {exc}"
+                            for exc in close_errors
+                        ),
+                    )
+                else:
+                    for exc in close_errors:
+                        try:
+                            cleanup_failure.add_note(
+                                "child pipe cleanup also failed: "
+                                f"{type(exc).__name__}: {exc}"
+                            )
+                        except (AttributeError, TypeError):
+                            pass
+        try:
+            finish_containment()
+        except BaseException as containment_failure:
+            if cleanup_failure is not None:
+                try:
+                    containment_failure.add_note(
+                        f"process cleanup also failed: {cleanup_failure}"
+                    )
+                except (AttributeError, TypeError):
+                    pass
+            raise
+        if cleanup_failure is not None:
+            raise cleanup_failure
+        raise ChunkRefusal(
+            f"{failure_code}_output_resource_unavailable",
+            "child stdout/stderr pipes were not created",
+        )
+
+    stream_state["stdout"]["pipe"] = process.stdout
+    stream_state["stderr"]["pipe"] = process.stderr
+
+    def drain_stream(name: str) -> None:
+        state = stream_state[name]
+        pipe = state["pipe"]
+        try:
+            while True:
+                block = os.read(pipe.fileno(), _CHILD_PIPE_CHUNK_BYTES)
+                if not block:
+                    break
+                state["observed"] += len(block)
+                remaining_bytes = max(
+                    0, state["limit"] - len(state["payload"])
+                )
+                if remaining_bytes:
+                    state["payload"].extend(block[:remaining_bytes])
+                if state["observed"] > state["limit"]:
+                    output_limit.set()
+        except BaseException as exc:
+            state["error"] = exc
+        finally:
+            try:
+                pipe.close()
+            except BaseException as exc:
+                if state["error"] is None:
+                    state["error"] = exc
+
+    def process_group_exists() -> bool:
+        # The session leader may already have exited while descendants still own
+        # inherited stdout/stderr descriptors.  Waiting only on ``process`` would
+        # then abandon both the readers and the surviving process group.
+        process.poll()
+        try:
+            os.killpg(process.pid, 0)
+        except ProcessLookupError:
+            return False
+        except PermissionError:
+            return True
+        return True
+
+    def wait_for_group_exit(timeout: float) -> bool:
+        deadline = time.monotonic() + timeout
+        while process_group_exists():
             remaining = deadline - time.monotonic()
             if remaining <= 0:
-                timeout_error = subprocess.TimeoutExpired(command, timeout_s)
-                break
+                return False
+            time.sleep(min(0.05, remaining))
+        return True
+
+    def terminate_group() -> None:
+        try:
+            os.killpg(process.pid, signal.SIGTERM)
+        except ProcessLookupError:
+            pass
+        if wait_for_group_exit(_CHILD_PIPE_CLEANUP_SECONDS):
             try:
-                stdout, stderr = process.communicate(timeout=min(0.1, remaining))
-                timeout_error = None
-                break
+                process.wait(timeout=_CHILD_PIPE_CLEANUP_SECONDS)
             except subprocess.TimeoutExpired as exc:
-                timeout_error = exc
-                if monitored_tree is not None:
-                    try:
-                        observed_bytes = _trace_tree_bytes(monitored_tree)
-                    except (OSError, ChunkRefusal) as monitor_exc:
-                        stdout, stderr = terminate_group()
-                        storage_origin = _storage_origin(monitor_exc)
-                        if storage_origin is not None:
-                            # The monitored filesystem has reported a closed
-                            # capacity/integrity fault.  Keep captured process
-                            # output in memory and do not attempt log writes to
-                            # that same failed medium.  The supplemental outer
-                            # boundary types the preserved OSError cause and
-                            # records its receipt on the independent runtime fs.
-                            raise ChunkRefusal(
-                                f"{failure_code}_storage_monitor_failed",
-                                f"errno={storage_origin.errno}; "
-                                f"tree={monitored_tree}",
-                            ) from storage_origin
-                        refuse_child_storage(stderr or b"")
-                        write_logs(stdout or b"", stderr or b"")
-                        raise ChunkRefusal(
-                            f"{failure_code}_tree_monitor_failed",
-                            f"{type(monitor_exc).__name__}: {monitor_exc}",
-                        ) from monitor_exc
-                    if observed_bytes > tree_limit_bytes:
-                        limit_detail = (
-                            f"observed={observed_bytes}, limit={tree_limit_bytes}, "
-                            f"tree={monitored_tree}"
-                        )
-                        break
-        if timeout_error is not None:
-            stdout, stderr = terminate_group()
-            refuse_child_storage(stderr or b"")
-            write_logs(stdout or b"", stderr or b"")
-            if limit_detail is not None:
                 raise ChunkRefusal(
-                    f"{failure_code}_tree_limit_exceeded", limit_detail
-                )
+                    f"{failure_code}_cleanup_failed",
+                    "child leader was not reaped after process-group exit",
+                ) from exc
+            return
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        if not wait_for_group_exit(_CHILD_PIPE_CLEANUP_SECONDS):
             raise ChunkRefusal(
-                f"{failure_code}_timeout", f"timeout_s={timeout_s}: {command[0]}"
-            ) from timeout_error
-    except subprocess.TimeoutExpired as exc:
-        stdout, stderr = terminate_group()
-        refuse_child_storage(stderr or b"")
-        write_logs(stdout or b"", stderr or b"")
+                f"{failure_code}_cleanup_failed",
+                "child process group did not exit after SIGKILL",
+            )
+        try:
+            process.wait(timeout=_CHILD_PIPE_CLEANUP_SECONDS)
+        except subprocess.TimeoutExpired as exc:
+            raise ChunkRefusal(
+                f"{failure_code}_cleanup_failed",
+                "child leader was not reaped after SIGKILL",
+            ) from exc
+    def teardown_after_primary(primary: BaseException) -> None:
+        teardown_errors: list[BaseException] = []
+        evidence_errors: list[BaseException] = []
+        try:
+            terminate_group()
+        except BaseException as cleanup_error:
+            teardown_errors.append(cleanup_error)
+        if containment is not None:
+            try:
+                containment.kill_all()
+            except BaseException as cleanup_error:
+                teardown_errors.append(cleanup_error)
+        try:
+            process.wait(timeout=_CHILD_PIPE_CLEANUP_SECONDS)
+        except BaseException as cleanup_error:
+            teardown_errors.append(cleanup_error)
+        for state in stream_state.values():
+            pipe = state["pipe"]
+            try:
+                if pipe is not None and not pipe.closed:
+                    pipe.close()
+            except BaseException as cleanup_error:
+                teardown_errors.append(cleanup_error)
+        for thread in started_threads:
+            try:
+                thread.join(_CHILD_PIPE_CLEANUP_SECONDS)
+            except BaseException as cleanup_error:
+                teardown_errors.append(cleanup_error)
+            if thread.is_alive():
+                teardown_errors.append(RuntimeError(
+                    f"bounded output reader did not exit: {thread.name}"
+                ))
+        try:
+            finish_containment()
+        except BaseException as cleanup_error:
+            teardown_errors.append(cleanup_error)
+        try:
+            write_logs(
+                bytes(stream_state["stdout"]["payload"]),
+                bytes(stream_state["stderr"]["payload"]),
+            )
+        except BaseException as evidence_error:
+            evidence_errors.append(evidence_error)
+        for error in (*teardown_errors, *evidence_errors):
+            try:
+                primary.add_note(
+                    "active capture cleanup also failed: "
+                    f"{type(error).__name__}: {error}"
+                )
+            except (AttributeError, TypeError):
+                pass
+        if teardown_errors:
+            cleanup_failure = ChunkRefusal(
+                f"{failure_code}_cleanup_failed",
+                "; ".join(
+                    f"{type(error).__name__}: {error}"
+                    for error in teardown_errors
+                ),
+            )
+            try:
+                cleanup_failure.add_note(
+                    "active capture failure was: "
+                    f"{type(primary).__name__}: {primary}"
+                )
+            except (AttributeError, TypeError):
+                pass
+            for evidence_error in evidence_errors:
+                try:
+                    cleanup_failure.add_note(
+                        "capture failure evidence retention also failed: "
+                        f"{type(evidence_error).__name__}: {evidence_error}"
+                    )
+                except (AttributeError, TypeError):
+                    pass
+            raise cleanup_failure from teardown_errors[0]
+
+    try:
+        threads = [
+            threading.Thread(
+                target=drain_stream, args=(name,),
+                name=f"capture-{stem}-{name}", daemon=True,
+            )
+            for name in ("stdout", "stderr")
+        ]
+        for thread in threads:
+            thread.start()
+            started_threads.append(thread)
+    except BaseException as exc:
+        if isinstance(exc, (MemoryError, RuntimeError)) or (
+            isinstance(exc, OSError)
+            and exc.errno in _PROCESS_RESOURCE_ERRNOS
+        ):
+            primary: BaseException = ChunkRefusal(
+                f"{failure_code}_output_resource_unavailable",
+                f"could not start bounded output reader: {exc}",
+            )
+        elif isinstance(exc, Exception):
+            primary = ChunkRefusal(
+                f"{failure_code}_output_reader_start_failed",
+                f"could not start bounded output reader: "
+                f"{type(exc).__name__}: {exc}",
+            )
+        else:
+            primary = exc
+        teardown_errors: list[BaseException] = []
+        evidence_errors: list[BaseException] = []
+        try:
+            terminate_group()
+        except BaseException as cleanup_error:
+            teardown_errors.append(cleanup_error)
+        for state in stream_state.values():
+            pipe = state["pipe"]
+            try:
+                if pipe is not None and not pipe.closed:
+                    pipe.close()
+            except BaseException as cleanup_error:
+                teardown_errors.append(cleanup_error)
+        for thread in started_threads:
+            try:
+                thread.join(_CHILD_PIPE_CLEANUP_SECONDS)
+            except BaseException as cleanup_error:
+                teardown_errors.append(cleanup_error)
+            if thread.is_alive():
+                teardown_errors.append(RuntimeError(
+                    f"bounded output reader did not exit: {thread.name}"
+                ))
+        try:
+            startup_stdout = bytes(stream_state["stdout"]["payload"])
+            startup_stderr = bytes(stream_state["stderr"]["payload"])
+            write_logs(startup_stdout, startup_stderr)
+        except BaseException as log_error:
+            evidence_errors.append(log_error)
+        try:
+            finish_containment()
+        except BaseException as cleanup_error:
+            teardown_errors.append(cleanup_error)
+        for cleanup_error in (*teardown_errors, *evidence_errors):
+            try:
+                primary.add_note(
+                    "bounded reader startup cleanup also failed: "
+                    f"{type(cleanup_error).__name__}: {cleanup_error}"
+                )
+            except (AttributeError, TypeError):
+                pass
+        if teardown_errors:
+            cleanup_failure = ChunkRefusal(
+                f"{failure_code}_output_cleanup_failed",
+                "; ".join(
+                    f"{type(error).__name__}: {error}"
+                    for error in teardown_errors
+                ),
+            )
+            try:
+                cleanup_failure.add_note(
+                    "bounded reader startup primary failure was: "
+                    f"{type(primary).__name__}: {primary}"
+                )
+            except (AttributeError, TypeError):
+                pass
+            for evidence_error in evidence_errors:
+                try:
+                    cleanup_failure.add_note(
+                        "startup failure evidence retention also failed: "
+                        f"{type(evidence_error).__name__}: {evidence_error}"
+                    )
+                except (AttributeError, TypeError):
+                    pass
+            raise cleanup_failure from teardown_errors[0]
+        if primary is exc:
+            raise
+        raise primary from exc
+
+    stop_code: str | None = None
+    stop_detail: str | None = None
+    stop_cause: BaseException | None = None
+    suppress_log_write = False
+
+    def monitor_process() -> None:
+        nonlocal stop_code, stop_detail, stop_cause, suppress_log_write
+        while process.poll() is None:
+            if output_limit.is_set():
+                limited = [
+                    f"{name}={state['observed']}/{state['limit']}"
+                    for name, state in stream_state.items()
+                    if state["observed"] > state["limit"]
+                ]
+                stop_code = f"{failure_code}_output_limit"
+                stop_detail = ", ".join(limited) or "child output limit exceeded"
+                break
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                stop_code = f"{failure_code}_timeout"
+                stop_detail = f"timeout_s={timeout_s}: {command[0]}"
+                stop_cause = subprocess.TimeoutExpired(command, timeout_s)
+                break
+            if monitored_tree is not None:
+                try:
+                    observed_bytes = _trace_tree_bytes(monitored_tree)
+                except immutable.ImmutableArtifactLimitError as exc:
+                    stop_code = f"{failure_code}_tree_limit_exceeded"
+                    stop_detail = str(exc)
+                    stop_cause = exc
+                    break
+                except immutable.ImmutableArtifactResourceError as exc:
+                    stop_code = f"{failure_code}_tree_resource_unavailable"
+                    stop_detail = str(exc)
+                    stop_cause = exc
+                    break
+                except (OSError, ChunkRefusal, MemoryError) as exc:
+                    storage_origin = _storage_origin(exc)
+                    if storage_origin is not None:
+                        stop_code = f"{failure_code}_storage_monitor_failed"
+                        stop_detail = (
+                            f"errno={storage_origin.errno}; tree={monitored_tree}"
+                        )
+                        stop_cause = storage_origin
+                        suppress_log_write = True
+                    else:
+                        stop_code = f"{failure_code}_tree_monitor_failed"
+                        stop_detail = f"{type(exc).__name__}: {exc}"
+                        stop_cause = exc
+                    break
+                if observed_bytes > tree_limit_bytes:
+                    stop_code = f"{failure_code}_tree_limit_exceeded"
+                    stop_detail = (
+                        f"observed={observed_bytes}, limit={tree_limit_bytes}, "
+                        f"tree={monitored_tree}"
+                    )
+                    break
+            time.sleep(min(0.05, max(remaining, 0.0)))
+
+    try:
+        monitor_process()
+    except BaseException as primary:
+        teardown_after_primary(primary)
+        raise
+
+    process_group_cleanup_error: BaseException | None = None
+    cleanup_interruption: BaseException | None = None
+    try:
+        if stop_code is not None:
+            terminate_group()
+        else:
+            process.wait()
+            # A descendant can close both inherited pipes before the session leader
+            # exits. Check the process group independently before releasing its PID.
+            if process_group_exists():
+                terminate_group()
+    except BaseException as exc:
+        process_group_cleanup_error = exc
+        if not isinstance(exc, Exception):
+            cleanup_interruption = exc
+    containment_cleanup_error: BaseException | None = None
+    try:
+        finish_containment()
+    except BaseException as exc:
+        containment_cleanup_error = exc
+        if not isinstance(exc, Exception) and cleanup_interruption is None:
+            cleanup_interruption = exc
+        try:
+            finish_containment()
+        except BaseException as retry_error:
+            try:
+                containment_cleanup_error.add_note(
+                    f"delegated cgroup cleanup retry failed: {retry_error}"
+                )
+            except (AttributeError, TypeError):
+                pass
+        else:
+            containment_cleanup_error = None
+    if process_group_cleanup_error is not None:
+        active_process_error = process_group_cleanup_error
+        try:
+            terminate_group()
+            process.wait(timeout=_CHILD_PIPE_CLEANUP_SECONDS)
+        except BaseException as retry_error:
+            try:
+                active_process_error.add_note(
+                    f"process-group cleanup retry failed: {retry_error}"
+                )
+            except (AttributeError, TypeError):
+                pass
+        else:
+            process_group_cleanup_error = None
+    if (
+        process_group_cleanup_error is not None
+        or containment_cleanup_error is not None
+    ):
+        for state in stream_state.values():
+            pipe = state["pipe"]
+            try:
+                if pipe is not None and not pipe.closed:
+                    pipe.close()
+            except BaseException as close_error:
+                if process_group_cleanup_error is None:
+                    process_group_cleanup_error = close_error
+                else:
+                    try:
+                        process_group_cleanup_error.add_note(
+                            f"child pipe cleanup also failed: {close_error}"
+                        )
+                    except (AttributeError, TypeError):
+                        pass
+
+    def join_output_readers() -> list[str]:
+        for thread in started_threads:
+            thread.join(_CHILD_PIPE_CLEANUP_SECONDS)
+        active = [thread.name for thread in started_threads if thread.is_alive()]
+        if active:
+            terminate_group()
+            for thread in started_threads:
+                thread.join(_CHILD_PIPE_CLEANUP_SECONDS)
+            active = [
+                thread.name for thread in started_threads if thread.is_alive()
+            ]
+        return active
+
+    try:
+        lingering = join_output_readers()
+    except BaseException as primary:
+        teardown_after_primary(primary)
+        raise
+    lifecycle_errors = [
+        error
+        for error in (
+            process_group_cleanup_error,
+            containment_cleanup_error,
+        )
+        if error is not None
+    ]
+    if lifecycle_errors:
+        failure = ChunkRefusal(
+            f"{failure_code}_cleanup_failed",
+            "; ".join(
+                f"{type(error).__name__}: {error}"
+                for error in lifecycle_errors
+            ),
+        )
+        if cleanup_interruption is not None:
+            try:
+                failure.add_note(
+                    "active cleanup interruption was: "
+                    f"{type(cleanup_interruption).__name__}: "
+                    f"{cleanup_interruption}"
+                )
+            except (AttributeError, TypeError):
+                pass
+        try:
+            write_logs(
+                bytes(stream_state["stdout"]["payload"]),
+                bytes(stream_state["stderr"]["payload"]),
+            )
+        except BaseException as evidence_error:
+            try:
+                failure.add_note(
+                    "capture cleanup evidence retention also failed: "
+                    f"{type(evidence_error).__name__}: {evidence_error}"
+                )
+            except (AttributeError, TypeError):
+                pass
+        raise failure from lifecycle_errors[0]
+    if cleanup_interruption is not None:
+        try:
+            write_logs(
+                bytes(stream_state["stdout"]["payload"]),
+                bytes(stream_state["stderr"]["payload"]),
+            )
+        except BaseException as evidence_error:
+            try:
+                cleanup_interruption.add_note(
+                    "capture interruption evidence retention also failed: "
+                    f"{type(evidence_error).__name__}: {evidence_error}"
+                )
+            except (AttributeError, TypeError):
+                pass
+        raise cleanup_interruption
+    try:
+        stdout = bytes(stream_state["stdout"]["payload"])
+        stderr = bytes(stream_state["stderr"]["payload"])
+    except MemoryError as exc:
         raise ChunkRefusal(
-            f"{failure_code}_timeout", f"timeout_s={timeout_s}: {command[0]}"
+            f"{failure_code}_output_resource_unavailable",
+            "could not materialize bounded child output",
         ) from exc
+    if stop_code is None and output_limit.is_set():
+        limited = [
+            f"{name}={state['observed']}/{state['limit']}"
+            for name, state in stream_state.items()
+            if state["observed"] > state["limit"]
+        ]
+        stop_code = f"{failure_code}_output_limit"
+        stop_detail = ", ".join(limited) or "child output limit exceeded"
+    if lingering:
+        write_logs(stdout, stderr)
+        raise ChunkRefusal(
+            f"{failure_code}_output_cleanup_failed",
+            f"bounded output readers did not exit: {lingering}",
+        )
+    stream_errors = {
+        name: state["error"]
+        for name, state in stream_state.items()
+        if state["error"] is not None
+    }
+    if stream_errors:
+        resource_errors = {
+            name: exc
+            for name, exc in stream_errors.items()
+            if isinstance(exc, MemoryError) or (
+                isinstance(exc, OSError)
+                and exc.errno in _PROCESS_RESOURCE_ERRNOS
+            )
+        }
+        code = (
+            f"{failure_code}_output_resource_unavailable"
+            if resource_errors else f"{failure_code}_output_read_failed"
+        )
+        write_logs(stdout, stderr)
+        raise ChunkRefusal(
+            code,
+            "; ".join(
+                f"{name}={type(exc).__name__}: {exc}"
+                for name, exc in stream_errors.items()
+            ),
+        )
+    if stop_code is not None:
+        refuse_child_storage(stderr)
+        if not suppress_log_write:
+            write_logs(stdout, stderr)
+        refusal = ChunkRefusal(stop_code, stop_detail or "child execution stopped")
+        if stop_cause is not None:
+            raise refusal from stop_cause
+        raise refusal
+
     elapsed = time.perf_counter() - started
     observed_bytes: int | None = None
     if monitored_tree is not None:
         try:
             observed_bytes = _trace_tree_bytes(monitored_tree)
-        except (OSError, ChunkRefusal) as monitor_exc:
+        except immutable.ImmutableArtifactLimitError as exc:
+            raise ChunkRefusal(
+                f"{failure_code}_tree_limit_exceeded", str(exc)
+            ) from exc
+        except immutable.ImmutableArtifactResourceError as exc:
+            raise ChunkRefusal(
+                f"{failure_code}_tree_resource_unavailable", str(exc)
+            ) from exc
+        except (OSError, MemoryError) as monitor_exc:
             storage_origin = _storage_origin(monitor_exc)
             if storage_origin is not None:
-                # As in the polling path above, do not write captured logs
-                # after a final monitored-tree read reports a storage fault.
                 raise ChunkRefusal(
                     f"{failure_code}_storage_monitor_failed",
                     f"errno={storage_origin.errno}; tree={monitored_tree}",
                 ) from storage_origin
-            raise
+            raise ChunkRefusal(
+                f"{failure_code}_tree_monitor_failed",
+                f"{type(monitor_exc).__name__}: {monitor_exc}",
+            ) from monitor_exc
     refuse_child_storage(stderr)
     write_logs(stdout, stderr)
-    if observed_bytes is not None:
-        if observed_bytes > tree_limit_bytes:
-            raise ChunkRefusal(
-                f"{failure_code}_tree_limit_exceeded",
-                f"observed={observed_bytes}, limit={tree_limit_bytes}, "
-                f"tree={monitored_tree}",
-            )
+    if observed_bytes is not None and observed_bytes > tree_limit_bytes:
+        raise ChunkRefusal(
+            f"{failure_code}_tree_limit_exceeded",
+            f"observed={observed_bytes}, limit={tree_limit_bytes}, "
+            f"tree={monitored_tree}",
+        )
     if process.returncode != 0:
         tail = stderr.decode(errors="replace")[-1200:]
         raise ChunkRefusal(
@@ -5059,7 +5772,9 @@ def _persist_fixture_launch_set_authorities(
                 "retained sidecar schema authority differs"
             )
         retained_report = retained_stack.enter_context(
-            immutable.open_retained_regular(report_path)
+            immutable.open_retained_regular(
+                report_path, max_bytes=parse_ncu_metrics.NCU_REPORT_MAX_BYTES,
+            )
         )
         retained_run_manifest = retained_stack.enter_context(
             immutable.open_retained_regular(run_manifest_path)
@@ -5269,6 +5984,14 @@ def _persist_fixture_launch_set_authorities(
         published_capture_manifest,
         tuple(published_sidecars),
     )
+
+
+def _launch_set_executor_failure_code(
+    error: ncu_executor.NcuActionExecutorError,
+) -> str:
+    if error.process_cleanup_incomplete:
+        return "label_launch_set_collection_cleanup_failed"
+    return f"label_launch_set_collection_{error.code.lower()}"
 
 
 def _execute_launch_set_plan(
@@ -5501,7 +6224,7 @@ def _execute_launch_set_plan(
             retained_target.verify_unchanged()
     except ncu_executor.NcuActionExecutorError as exc:
         raise ChunkRefusal(
-            f"label_launch_set_collection_{exc.code.lower()}", str(exc),
+            _launch_set_executor_failure_code(exc), str(exc),
         ) from exc
     except (OSError, immutable.ImmutableArtifactError) as exc:
         raise ChunkRefusal(
@@ -5528,7 +6251,9 @@ def _execute_launch_set_plan(
     try:
         with contextlib.ExitStack() as retained_stack:
             retained_report = retained_stack.enter_context(
-                immutable.open_retained_regular(report)
+                immutable.open_retained_regular(
+                    report, max_bytes=parse_ncu_metrics.NCU_REPORT_MAX_BYTES,
+                )
             )
             retained_manifest = retained_stack.enter_context(
                 immutable.open_retained_regular(run_manifest)
@@ -5556,10 +6281,12 @@ def _execute_launch_set_plan(
             )
             run_manifest_sha256 = retained_manifest.sha256
             run_manifest_size_bytes = retained_manifest.size_bytes
-            imported, import_error = parse_ncu_metrics._import_report_csv(
-                expected_ncu_identity,
-                report,
-                require_cgroup_containment=production_driver_required,
+            imported, import_error = (
+                parse_ncu_metrics._import_retained_report_csv(
+                    expected_ncu_identity,
+                    retained_report,
+                    require_cgroup_containment=production_driver_required,
+                )
             )
             if import_error is not None or imported is None:
                 raise ChunkRefusal(
@@ -5881,6 +6608,48 @@ def execute_production_launch_set_plan(
     )
 
 
+def _retained_ncu_report_counts(
+    report: Path,
+    needles: Sequence[bytes],
+    *,
+    role: str,
+    storage_code: str,
+) -> tuple[str, tuple[int, ...]]:
+    """Count bindings and hash one bounded retained NCU report generation."""
+    if not isinstance(report, Path) or any(
+        not isinstance(needle, bytes) or not needle for needle in needles
+    ):
+        raise ChunkRefusal(f"{role}_invalid", repr(report))
+    try:
+        with immutable.open_retained_regular(
+            report, max_bytes=parse_ncu_metrics.NCU_REPORT_MAX_BYTES,
+        ) as retained_report:
+            report_bytes = retained_report.read_bytes(
+                max_bytes=parse_ncu_metrics.NCU_REPORT_MAX_BYTES,
+            )
+            report_sha256 = hashlib.sha256(report_bytes).hexdigest()
+            if report_sha256 != retained_report.sha256:
+                raise immutable.ImmutableArtifactError(
+                    "validated NCU report bytes differ from retained identity"
+                )
+            counts = tuple(report_bytes.count(needle) for needle in needles)
+            retained_report.verify_unchanged()
+            return report_sha256, counts
+    except immutable.ImmutableArtifactLimitError as exc:
+        raise ChunkRefusal(f"{role}_limit_exceeded", str(exc)) from exc
+    except (immutable.ImmutableArtifactResourceError, MemoryError) as exc:
+        raise ChunkRefusal(f"{role}_resource_unavailable", str(exc)) from exc
+    except OSError as exc:
+        _raise_typed_storage_failure(
+            exc,
+            code=storage_code,
+            operation=f"{role}_retained_read",
+        )
+        raise ChunkRefusal(f"{role}_unreadable", str(exc)) from exc
+    except immutable.ImmutableArtifactError as exc:
+        raise ChunkRefusal(f"{role}_generation_invalid", str(exc)) from exc
+
+
 def _retained_json_model(
     retained: immutable.RetainedRegular, *, role: str,
 ) -> dict[str, Any]:
@@ -5950,7 +6719,13 @@ def _write_collection_execution_receipt(
             retained_by_role: dict[str, immutable.RetainedRegular] = {}
             for role, path in artifact_inputs:
                 retained = retained_stack.enter_context(
-                    immutable.open_retained_regular(path)
+                    immutable.open_retained_regular(
+                        path,
+                        max_bytes=(
+                            parse_ncu_metrics.NCU_REPORT_MAX_BYTES
+                            if role == "ncu_report" else None
+                        ),
+                    )
                 )
                 retained_by_role[role] = retained
                 try:
@@ -6272,6 +7047,12 @@ def capture_label(
         key: value for key, value in launch_observation.items()
         if key != "observation_sha256"
     }
+    report_sha256, _report_counts = _retained_ncu_report_counts(
+        report,
+        (),
+        role="label_ncu_report",
+        storage_code="label_capture_storage_failure",
+    )
     if (
         launch_observation.get("schema_version") != 1
         or launch_observation.get("kind")
@@ -6280,10 +7061,7 @@ def capture_label(
         or launch_observation.get("requested_launch_skip")
         != label_launch_index
         or launch_observation.get("requested_launch_count") != 1
-        or launch_observation.get("report_sha256") != _sha256_output_file(
-            report, code="label_capture_storage_failure",
-            operation="label_ncu_report_hash",
-        )
+        or launch_observation.get("report_sha256") != report_sha256
         or observation_seal != canonical_sha256(observation_unsealed)
         or not isinstance(launch_observation.get("identity"), dict)
     ):
@@ -6413,23 +7191,751 @@ def capture_label(
     }
 
 
-def _trace_tree_bytes(trace_dir: Path) -> int:
-    total = 0
-    for path in _output_tree_paths(
-        trace_dir, code="trace_generated_output_storage_failure",
-        operation="generated_trace_tree_walk",
-    ):
-        observed = _output_lstat(
-            path, code="trace_generated_output_storage_failure",
-            operation="generated_trace_tree_stat",
+def _raw_trace_file_byte_limit(
+    relative_path: str, limits: dict[str, Any],
+) -> int:
+    global_limit = limits.get("max_file_bytes")
+    path_limits = limits.get("max_file_bytes_by_path") or {}
+    path_limit = path_limits.get(relative_path)
+    if type(global_limit) is not int or global_limit <= 0:
+        raise ChunkRefusal(
+            "trace_inventory_policy_invalid", "shared per-file ceiling is absent"
         )
-        if observed is None:
-            raise ChunkRefusal("trace_artifact_disappeared", str(path))
-        if stat.S_ISLNK(observed.st_mode):
-            raise ChunkRefusal("trace_symlink_refused", str(path))
-        if stat.S_ISREG(observed.st_mode):
-            total += observed.st_size
-    return total
+    if path_limit is None:
+        return global_limit
+    if type(path_limit) is not int or path_limit <= 0:
+        raise ChunkRefusal(
+            "trace_inventory_policy_invalid",
+            f"invalid per-file ceiling for {relative_path!r}",
+        )
+    return min(global_limit, path_limit)
+
+
+def _trace_tree_bytes(trace_dir: Path) -> int:
+    """Incrementally size an active trace without an unbounded path inventory."""
+
+    limits = _raw_trace_generation_policy()
+    stack: list[tuple[Path, str]] = [(trace_dir, "")]
+    file_count = 0
+    directory_count = 1
+    total_bytes = 0
+    total_path_bytes = 0
+    try:
+        while stack:
+            directory, relative_directory = stack.pop()
+            with os.scandir(directory) as entries:
+                for entry in entries:
+                    relative_path = (
+                        f"{relative_directory}/{entry.name}"
+                        if relative_directory else entry.name
+                    )
+                    total_path_bytes += len(os.fsencode(relative_path))
+                    if total_path_bytes > limits["max_total_relative_path_bytes"]:
+                        raise immutable.ImmutableArtifactLimitError(
+                            "trace relative-path bytes exceed shared ceiling: "
+                            f"{total_path_bytes} > "
+                            f"{limits['max_total_relative_path_bytes']}"
+                        )
+                    observed = entry.stat(follow_symlinks=False)
+                    if stat.S_ISLNK(observed.st_mode):
+                        raise ChunkRefusal("trace_symlink_refused", entry.path)
+                    if stat.S_ISDIR(observed.st_mode):
+                        directory_count += 1
+                        if directory_count > limits["max_directories"]:
+                            raise immutable.ImmutableArtifactLimitError(
+                                "trace directory count exceeds shared ceiling: "
+                                f"{directory_count} > "
+                                f"{limits['max_directories']}"
+                            )
+                        stack.append((Path(entry.path), relative_path))
+                        continue
+                    if not stat.S_ISREG(observed.st_mode):
+                        raise ChunkRefusal(
+                            "trace_special_file_refused", entry.path
+                        )
+                    file_count += 1
+                    if file_count > limits["max_files"]:
+                        raise immutable.ImmutableArtifactLimitError(
+                            "trace file count exceeds shared ceiling: "
+                            f"{file_count} > {limits['max_files']}"
+                        )
+                    file_limit = _raw_trace_file_byte_limit(
+                        relative_path, limits,
+                    )
+                    if observed.st_size > file_limit:
+                        raise immutable.ImmutableArtifactLimitError(
+                            "trace file exceeds shared per-file ceiling: "
+                            f"{relative_path}: {observed.st_size} > {file_limit}"
+                        )
+                    total_bytes += observed.st_size
+                    if total_bytes > limits["max_total_file_bytes"]:
+                        raise immutable.ImmutableArtifactLimitError(
+                            "trace bytes exceed shared total ceiling: "
+                            f"{total_bytes} > {limits['max_total_file_bytes']}"
+                        )
+    except MemoryError as exc:
+        raise immutable.ImmutableArtifactResourceError(
+            "VERIFY_RESOURCE_BOUND: active trace sizing exhausted memory"
+        ) from exc
+    except OSError as exc:
+        if exc.errno in {
+            errno.EMFILE, errno.ENFILE, errno.ENOMEM,
+        }:
+            raise immutable.ImmutableArtifactResourceError(
+                "VERIFY_RESOURCE_BOUND: active trace sizing could not retain "
+                f"filesystem resources: {exc}"
+            ) from exc
+        raise
+    return total_bytes
+
+
+def _raw_trace_generation_policy() -> dict[str, Any]:
+    policy = trace_admission.raw_trace_generation_limits(
+        trace_admission.DEFAULT_TRACE_ADMISSION_LIMITS
+    )
+    return {
+        name: (dict(value) if isinstance(value, dict) else int(value))
+        for name, value in policy.items()
+    }
+
+
+def _bounded_raw_trace_tree_limits() -> dict[str, int]:
+    """Use the same complete-generation inventory bounds as admission."""
+
+    policy = _raw_trace_generation_policy()
+    return {
+        name: int(policy[name])
+        for name in (
+            "max_files",
+            "max_directories",
+            "max_total_file_bytes",
+            "max_total_relative_path_bytes",
+        )
+    }
+
+
+def _retained_trace_tree_bytes(tree: immutable.PinnedTreeSnapshot) -> int:
+    return sum(metadata[4] for _relative_path, metadata in tree.files)
+
+
+def _require_trace_tree_per_file_limits(
+    tree: immutable.PinnedTreeSnapshot,
+) -> None:
+    policy = _raw_trace_generation_policy()
+    for relative_path, metadata in tree.files:
+        limit = _raw_trace_file_byte_limit(relative_path, policy)
+        if metadata[4] > limit:
+            raise immutable.ImmutableArtifactLimitError(
+                "trace file exceeds shared per-file ceiling: "
+                f"{relative_path}: {metadata[4]} > {limit}"
+            )
+
+
+class _RetainedTraceGeneration:
+    """One exact trace tree retained across downstream consumer derivation."""
+
+    def __init__(
+        self,
+        path: Path,
+        reader: immutable.PinnedDirectoryReader,
+        tree: immutable.PinnedTreeSnapshot,
+        resources: contextlib.ExitStack,
+    ) -> None:
+        self.path = path
+        self.reader = reader
+        self.tree = tree
+        self._resources = resources
+        self.closed = False
+
+    def verify_unchanged(self) -> None:
+        if self.closed:
+            raise immutable.ImmutableArtifactError(
+                "retained trace generation capability is closed"
+            )
+        self.reader.verify_path()
+        observed = self.reader.snapshot_tree(
+            **_bounded_raw_trace_tree_limits()
+        )
+        _require_trace_tree_per_file_limits(observed)
+        if observed != self.tree:
+            raise immutable.ImmutableArtifactError(
+                "retained trace generation changed during downstream use"
+            )
+        self.reader.verify_path()
+
+    def read_bytes(self, relative_path: str) -> bytes:
+        if self.closed:
+            raise immutable.ImmutableArtifactError(
+                "retained trace generation capability is closed"
+            )
+        metadata = dict(self.tree.files).get(relative_path)
+        if metadata is None:
+            raise ChunkRefusal(
+                "trace_control_source_missing", relative_path
+            )
+        limit = _raw_trace_file_byte_limit(
+            relative_path, _raw_trace_generation_policy()
+        )
+        self.verify_unchanged()
+        snapshot = self.reader.read_snapshot(
+            relative_path,
+            max_bytes=limit,
+            expected_metadata=metadata,
+        )
+        if snapshot.metadata != metadata:
+            raise immutable.ImmutableArtifactError(
+                f"retained trace source changed: {relative_path}"
+            )
+        self.verify_unchanged()
+        return snapshot.payload
+
+    def read_json(self, relative_path: str) -> dict[str, Any]:
+        try:
+            value = json.loads(self.read_bytes(relative_path))
+        except (json.JSONDecodeError, UnicodeError) as exc:
+            raise ChunkRefusal(
+                "trace_control_source_invalid", f"{relative_path}: {exc}"
+            ) from exc
+        if not isinstance(value, dict):
+            raise ChunkRefusal(
+                "trace_control_source_invalid",
+                f"{relative_path}: root is not an object",
+            )
+        return value
+
+    def matching_files(
+        self, *, prefix: str, suffix: str,
+    ) -> tuple[str, ...]:
+        self.verify_unchanged()
+        return tuple(
+            relative_path
+            for relative_path, _metadata in self.tree.files
+            if relative_path.startswith(prefix) and relative_path.endswith(suffix)
+        )
+
+    def close(self) -> None:
+        if self.closed:
+            return
+        self.closed = True
+        self._resources.close()
+
+    def __del__(self) -> None:
+        try:
+            self.close()
+        except BaseException:
+            pass
+
+    def __enter__(self) -> "_RetainedTraceGeneration":
+        try:
+            self.verify_unchanged()
+        except BaseException as error:
+            try:
+                self.close()
+            except BaseException as cleanup_error:
+                try:
+                    error.add_note(
+                        "retained trace generation entry cleanup failed: "
+                        f"{cleanup_error}"
+                    )
+                except (AttributeError, TypeError):
+                    pass
+            raise
+        return self
+
+    def __exit__(
+        self, _type: object, value: BaseException | None, _traceback: object,
+    ) -> bool:
+        if value is not None:
+            try:
+                self.verify_unchanged()
+            except BaseException as verification_error:
+                try:
+                    value.add_note(
+                        "retained trace generation revalidation failed: "
+                        f"{verification_error}"
+                    )
+                except (AttributeError, TypeError):
+                    pass
+            try:
+                self.close()
+            except BaseException as cleanup_error:
+                try:
+                    value.add_note(
+                        "retained trace generation cleanup failed: "
+                        f"{cleanup_error}"
+                    )
+                except (AttributeError, TypeError):
+                    pass
+            return False
+        try:
+            self.verify_unchanged()
+        except BaseException as verification_error:
+            try:
+                self.close()
+            except BaseException as cleanup_error:
+                try:
+                    verification_error.add_note(
+                        "retained trace generation cleanup failed: "
+                        f"{cleanup_error}"
+                    )
+                except (AttributeError, TypeError):
+                    pass
+            raise
+        self.close()
+        return False
+
+
+def _open_retained_trace_generation(path: Path) -> _RetainedTraceGeneration:
+    resources = contextlib.ExitStack()
+    try:
+        reader = resources.enter_context(
+            immutable.PinnedDirectoryReader(path)
+        )
+        tree = resources.enter_context(reader.retain_tree_generation(
+            **_bounded_raw_trace_tree_limits()
+        ))
+        _require_trace_tree_per_file_limits(tree)
+        retained_resources = resources.pop_all()
+        retained = _RetainedTraceGeneration(
+            path, reader, tree, retained_resources,
+        )
+        try:
+            retained.verify_unchanged()
+        except BaseException as error:
+            try:
+                retained.close()
+            except BaseException as cleanup_error:
+                try:
+                    error.add_note(
+                        "retained trace generation post-open cleanup failed: "
+                        f"{cleanup_error}"
+                    )
+                except (AttributeError, TypeError):
+                    pass
+            raise
+        return retained
+    except BaseException as exc:
+        try:
+            resources.close()
+        except BaseException as cleanup_error:
+            try:
+                exc.add_note(
+                    "retained trace generation setup cleanup failed: "
+                    f"{cleanup_error}"
+                )
+            except (AttributeError, TypeError):
+                pass
+        raise
+
+
+def _retained_trace_result_or_close(
+    retained: _RetainedTraceGeneration,
+    build_result: Callable[[], dict[str, Any]],
+) -> dict[str, Any]:
+    """Build a returned owner object or close after any post-open failure."""
+    try:
+        retained.verify_unchanged()
+        return build_result()
+    except BaseException as error:
+        try:
+            retained.close()
+        except BaseException as cleanup_error:
+            try:
+                error.add_note(
+                    "retained trace result cleanup failed: "
+                    f"{cleanup_error}"
+                )
+            except (AttributeError, TypeError):
+                pass
+        raise
+
+
+def _require_retained_trace_matches_immutable_generation(
+    retained: _RetainedTraceGeneration,
+    committed: immutable.ImmutableDirectoryGeneration,
+) -> None:
+    """Bind a retained descriptor tree to the exact stage-commit generation."""
+
+    retained.verify_unchanged()
+    observed_files = {
+        relative_path: metadata[4]
+        for relative_path, metadata in retained.tree.files
+    }
+    expected_files = {
+        item.relative_path: item.size_bytes for item in committed.files
+    }
+    if (
+        retained.path != committed.path
+        or observed_files != expected_files
+        or len(retained.tree.directories) != committed.directory_count
+    ):
+        raise immutable.ImmutableArtifactError(
+            "retained trace tree identity differs from immutable stage commit"
+        )
+    for item in committed.files:
+        payload = retained.read_bytes(item.relative_path)
+        if hashlib.sha256(payload).hexdigest() != item.sha256:
+            raise immutable.ImmutableArtifactError(
+                "retained trace file differs from immutable stage commit: "
+                f"{item.relative_path}"
+            )
+    retained.verify_unchanged()
+
+
+def _translate_trace_generation_error(
+    exc: BaseException, *, context: str,
+) -> ChunkRefusal:
+    storage_origin = _storage_origin(exc)
+    if storage_origin is not None:
+        return ChunkRefusal(
+            "trace_snapshot_storage_failure",
+            f"{context}: errno={storage_origin.errno}; {storage_origin}",
+        )
+    if isinstance(exc, immutable.ImmutableArtifactLimitError):
+        return ChunkRefusal(
+            "trace_inventory_limit_exceeded", f"{context}: {exc}"
+        )
+    if (
+        isinstance(exc, immutable.ImmutableArtifactResourceError)
+        or isinstance(exc, MemoryError)
+        or (
+            isinstance(exc, OSError)
+            and exc.errno in {errno.EMFILE, errno.ENFILE, errno.ENOMEM}
+        )
+    ):
+        return ChunkRefusal(
+            "trace_snapshot_resource_unavailable", f"{context}: {exc}"
+        )
+    return ChunkRefusal("trace_snapshot_changed", f"{context}: {exc}")
+
+
+def _bind_stats_rows_to_root_launches(
+    stats_payload: bytes, root: dict[str, Any],
+) -> dict[str, Any]:
+    """Join stats rows to root launches with every producer identity column."""
+
+    try:
+        text = stats_payload.decode("utf-8")
+        parsed = csv.reader(io.StringIO(text, newline=""))
+        header = [cell.strip() for cell in next(parsed)]
+    except (StopIteration, UnicodeError, csv.Error) as exc:
+        raise ChunkRefusal("trace_stats_identity_invalid", str(exc)) from exc
+    if len(set(header)) != len(header):
+        raise ChunkRefusal(
+            "trace_stats_identity_invalid", "stats header has duplicate columns"
+        )
+    launches = root.get("launches")
+    if not isinstance(launches, list) or not launches:
+        raise ChunkRefusal(
+            "trace_stats_identity_invalid", "root launch inventory is empty"
+        )
+    column_indexes = {name: header.index(name) for name in header}
+    identity_columns = tuple(
+        name for name in (
+            "device_id", "stream_id", "kernel id", "kernel mangled name",
+            "grid_dimX", "grid_dimY", "grid_dimZ", "#blocks",
+            "block_dimX", "block_dimY", "block_dimZ", "#threads",
+        ) if name in column_indexes
+    )
+    if len(launches) > 1 and not identity_columns:
+        raise ChunkRefusal(
+            "trace_stats_multi_launch_identity_unsupported",
+            "stats format has no producer launch identity columns",
+        )
+
+    rows: list[tuple[int, list[str]]] = []
+    try:
+        for line_number, row in enumerate(parsed, start=2):
+            cells = [cell.strip() for cell in row]
+            if not any(cells):
+                continue
+            if len(cells) != len(header):
+                raise ChunkRefusal(
+                    "trace_stats_identity_invalid",
+                    f"stats row {line_number} width differs from header",
+                )
+            rows.append((line_number, cells))
+    except csv.Error as exc:
+        raise ChunkRefusal("trace_stats_identity_invalid", str(exc)) from exc
+    if len(rows) != len(launches):
+        raise ChunkRefusal(
+            "trace_stats_launch_identity_mismatch",
+            f"stats rows={len(rows)}; root launches={len(launches)}",
+        )
+
+    def canonical_root_name(launch: dict[str, Any]) -> str:
+        value = launch.get("kernel_name")
+        if not isinstance(value, str) or not value.endswith("___0"):
+            raise ChunkRefusal(
+                "trace_stats_launch_identity_mismatch",
+                f"invalid root kernel name: {value!r}",
+            )
+        return value[:-4]
+
+    def bounded_int(token: str, *, line_number: int, column: str) -> int:
+        if re.fullmatch(r"-?[0-9]{1,39}", token) is None:
+            raise ChunkRefusal(
+                "trace_stats_identity_invalid",
+                f"row {line_number} column {column!r} is not a bounded integer",
+            )
+        return int(token, 10)
+
+    def stats_kernel_id(token: str, *, line_number: int) -> int:
+        match = re.fullmatch(r"kernel-(0|[1-9][0-9]{0,38})\.trace", token)
+        if match is None:
+            raise ChunkRefusal(
+                "trace_stats_identity_invalid",
+                "row "
+                f"{line_number} column 'kernel id' is not an exact "
+                "kernel-N.trace identity",
+            )
+        return int(match.group(1), 10)
+
+    def launch_value(
+        launch: dict[str, Any], column: str,
+    ) -> str | int:
+        grid = launch.get("grid_dim")
+        block = launch.get("block_dim")
+        if (
+            not isinstance(grid, list) or len(grid) != 3
+            or not isinstance(block, list) or len(block) != 3
+        ):
+            raise ChunkRefusal(
+                "trace_stats_launch_identity_mismatch", repr(launch)
+            )
+        values: dict[str, str | int] = {
+            "device_id": launch.get("device_id"),
+            "stream_id": launch.get("stream_id"),
+            "kernel id": launch.get("kernel_id"),
+            "kernel mangled name": canonical_root_name(launch),
+            "grid_dimX": grid[0],
+            "grid_dimY": grid[1],
+            "grid_dimZ": grid[2],
+            "#blocks": grid[0] * grid[1] * grid[2],
+            "block_dimX": block[0],
+            "block_dimY": block[1],
+            "block_dimZ": block[2],
+            "#threads": block[0] * block[1] * block[2],
+        }
+        return values[column]
+
+    joined: list[dict[str, Any]] = []
+    unmatched = set(range(len(launches)))
+    for row_ordinal, (line_number, cells) in enumerate(rows):
+        candidates: list[int] = []
+        for launch_ordinal in sorted(unmatched):
+            launch = launches[launch_ordinal]
+            if not isinstance(launch, dict):
+                raise ChunkRefusal(
+                    "trace_stats_launch_identity_mismatch", repr(launch)
+                )
+            matches = True
+            for column in identity_columns:
+                token = cells[column_indexes[column]]
+                expected = launch_value(launch, column)
+                if column == "kernel mangled name":
+                    observed: str | int = token
+                elif column == "kernel id":
+                    observed = stats_kernel_id(
+                        token, line_number=line_number,
+                    )
+                else:
+                    observed = bounded_int(
+                        token, line_number=line_number, column=column,
+                    )
+                if observed != expected:
+                    matches = False
+                    break
+            if matches:
+                candidates.append(launch_ordinal)
+        if len(candidates) != 1:
+            raise ChunkRefusal(
+                "trace_stats_launch_identity_mismatch",
+                f"stats row {line_number} matched root launch ordinals {candidates}",
+            )
+        launch_ordinal = candidates[0]
+        unmatched.remove(launch_ordinal)
+        joined.append({
+            "stats_row_ordinal": row_ordinal,
+            "stats_line_number": line_number,
+            "root_launch_ordinal": launch_ordinal,
+            "root_launch_identity": {
+                "device_id": launches[launch_ordinal]["device_id"],
+                "stream_id": launches[launch_ordinal]["stream_id"],
+                "kernel_id": launches[launch_ordinal]["kernel_id"],
+                "kernel_name": launches[launch_ordinal]["kernel_name"],
+                "grid_dim": copy.deepcopy(launches[launch_ordinal]["grid_dim"]),
+                "block_dim": copy.deepcopy(launches[launch_ordinal]["block_dim"]),
+            },
+        })
+    if unmatched:
+        raise ChunkRefusal(
+            "trace_stats_launch_identity_mismatch",
+            f"unmatched root launch ordinals: {sorted(unmatched)}",
+        )
+    binding = {
+        "schema_version": 1,
+        "policy": (
+            "all_available_producer_identity_columns"
+            if identity_columns else "row_count_only_single_launch"
+        ),
+        "identity_columns": list(identity_columns),
+        "stats_sha256": hashlib.sha256(stats_payload).hexdigest(),
+        "rows": joined,
+    }
+    binding["binding_sha256"] = canonical_sha256(binding)
+    return binding
+
+
+def _require_routed_trace_record_generation(
+    route_result: dict,
+    reader: immutable.PinnedDirectoryReader,
+    tree: immutable.PinnedTreeSnapshot,
+) -> None:
+    """Authenticate a routed AC-9 record against one retained output tree."""
+
+    retained = route_result.get("retained") if isinstance(route_result, dict) else None
+    artifacts = retained.get("artifacts") if isinstance(retained, dict) else None
+    if not isinstance(artifacts, list):
+        raise ChunkRefusal(
+            "trace_budget_route_retained_generation_invalid",
+            "route result has no retained artifact inventory",
+        )
+    file_metadata = dict(tree.files)
+    rows: list[dict[str, Any]] = []
+    declared_paths: set[str] = set()
+    for artifact in artifacts:
+        if not isinstance(artifact, dict):
+            raise ChunkRefusal(
+                "trace_budget_route_retained_generation_invalid",
+                "route result contains a non-object retained artifact",
+            )
+        relative_path = artifact.get("relative_path")
+        size_bytes = artifact.get("size_bytes")
+        sha256 = artifact.get("sha256")
+        if (
+            not isinstance(relative_path, str)
+            or relative_path in declared_paths
+            or type(size_bytes) is not int
+            or size_bytes < 0
+            or not isinstance(sha256, str)
+            or len(sha256) != 64
+        ):
+            raise ChunkRefusal(
+                "trace_budget_route_retained_generation_invalid",
+                repr(artifact),
+            )
+        metadata = file_metadata.get(relative_path)
+        if metadata is None or metadata[4] != size_bytes:
+            raise ChunkRefusal(
+                "trace_budget_route_retained_generation_mismatch",
+                f"retained artifact identity changed: {relative_path}",
+            )
+        per_file_limit = _raw_trace_file_byte_limit(
+            relative_path, _raw_trace_generation_policy()
+        )
+        if size_bytes > per_file_limit:
+            raise immutable.ImmutableArtifactLimitError(
+                "routed trace artifact exceeds shared per-file ceiling: "
+                f"{relative_path}: {size_bytes} > {per_file_limit}"
+            )
+        snapshot = reader.read_snapshot(
+            relative_path,
+            max_bytes=per_file_limit,
+            expected_metadata=metadata,
+        )
+        if hashlib.sha256(snapshot.payload).hexdigest() != sha256:
+            raise ChunkRefusal(
+                "trace_budget_route_retained_generation_mismatch",
+                f"retained artifact digest changed: {relative_path}",
+            )
+        declared_paths.add(relative_path)
+        rows.append({
+            "relative_path": relative_path,
+            "size_bytes": size_bytes,
+            "sha256": sha256,
+        })
+    rows.sort(key=lambda row: row["relative_path"])
+    if declared_paths != set(file_metadata):
+        raise ChunkRefusal(
+            "trace_budget_route_retained_generation_mismatch",
+            "retained artifact inventory does not cover the exact routed tree",
+        )
+    total_bytes = sum(row["size_bytes"] for row in rows)
+    if (
+        retained.get("bytes") != total_bytes
+        or retained.get("file_count") != len(rows)
+        or retained.get("tree_sha256") != canonical_sha256(rows)
+    ):
+        raise ChunkRefusal(
+            "trace_budget_route_retained_generation_mismatch",
+            "route result retained summary does not match the exact routed tree",
+        )
+
+
+def _require_relocated_trace_generation(
+    expected: immutable.PinnedTreeSnapshot,
+    observed: immutable.PinnedTreeSnapshot,
+) -> None:
+    """Permit only the root ctime change caused by an authenticated rename."""
+
+    if expected.files != observed.files:
+        raise immutable.ImmutableArtifactError(
+            "retained trace files changed across descriptor-bound publication"
+        )
+    expected_directories = dict(expected.directories)
+    observed_directories = dict(observed.directories)
+    if set(expected_directories) != set(observed_directories):
+        raise immutable.ImmutableArtifactError(
+            "retained trace directories changed across descriptor-bound publication"
+        )
+    for relative_path, expected_metadata in expected_directories.items():
+        observed_metadata = observed_directories[relative_path]
+        if relative_path == ".":
+            if expected_metadata[:6] != observed_metadata[:6]:
+                raise immutable.ImmutableArtifactError(
+                    "retained trace root changed across descriptor-bound publication"
+                )
+        elif expected_metadata != observed_metadata:
+            raise immutable.ImmutableArtifactError(
+                "retained trace child directory changed across descriptor-bound publication: "
+                f"{relative_path}"
+            )
+
+
+@contextlib.contextmanager
+def _authenticated_tracer_runtime_environment(
+    retained_tracer: immutable.RetainedRegular,
+    pb_lib: Path,
+    base_env: dict[str, str] | None,
+    *,
+    phase: str,
+):
+    """Retain exact tracer protobuf-family DSOs through one child phase."""
+
+    try:
+        runtime = nvbit_runtime_env.retained_tracer_runtime_env(
+            retained_tracer.path,
+            base_env=nvbit_runtime_env.sanitized_capture_environment(base_env),
+            pb_lib=pb_lib,
+            runtime_manifest=nvbit_runtime_env.default_runtime_manifest_path(
+                retained_tracer.path
+            ),
+            retained_descriptor=retained_tracer.descriptor,
+        )
+        with runtime:
+            yield runtime
+    except nvbit_runtime_env.TracerRuntimeError as exc:
+        code = {
+            "runtime_dso_limit_exceeded": "trace_runtime_limit_exceeded",
+            "runtime_resource_unavailable": (
+                "trace_runtime_resource_unavailable"
+            ),
+        }.get(exc.reason, "trace_runtime_contract_invalid")
+        raise ChunkRefusal(
+            code,
+            f"phase={phase}; reason={exc.reason}: {exc.detail}",
+        ) from exc
 
 
 def _validate_supplemental_trace_launch_inventory(
@@ -6589,7 +8095,74 @@ def _translate_generated_trace_storage(
 
 def capture_trace(
     *, cell: dict, binary: Path, invocation: dict, budget: Any,
-    cell_dir: Path, pins: dict, expected_tracer_sha256: str,
+    cell_dir: Path, pins: dict, tracer_source_path: Path,
+    expected_tracer_sha256: str,
+    runtime_cwd: Path | None = None,
+    runtime_env: dict[str, str] | None = None,
+    timeout_s: float | None = None,
+    capture_provenance: dict[str, Any] | None = None,
+    phase_env_factory: Callable[[str, float], dict[str, str]] | None = None,
+    phase_result_validator: Callable[[dict[str, str], str], dict] | None = None,
+    all_profiler_roi_launches: bool = False,
+) -> dict:
+    try:
+        canonical_tracer = preflight._absolute_external_tracer(
+            tracer_source_path, repo_root=REPO_ROOT,
+        )
+        with immutable.open_retained_regular(
+            canonical_tracer,
+            max_bytes=EXTERNAL_TRACER_MAX_BYTES,
+        ) as retained_tracer:
+            if retained_tracer.sha256 != expected_tracer_sha256:
+                raise ChunkRefusal(
+                    "injection_runtime_hash_drift",
+                    "external tracer .so differs from preflight authority: "
+                    f"expected={expected_tracer_sha256}; "
+                    f"observed={retained_tracer.sha256}",
+                )
+            result = _capture_trace_with_retained_tracer(
+                cell=cell, binary=binary, invocation=invocation, budget=budget,
+                cell_dir=cell_dir, pins=pins, retained_tracer=retained_tracer,
+                runtime_cwd=runtime_cwd, runtime_env=runtime_env,
+                timeout_s=timeout_s, capture_provenance=capture_provenance,
+                phase_env_factory=phase_env_factory,
+                phase_result_validator=phase_result_validator,
+                all_profiler_roi_launches=all_profiler_roi_launches,
+            )
+            retained_tracer.verify_unchanged()
+            return result
+    except ChunkRefusal:
+        raise
+    except immutable.ImmutableArtifactLimitError as exc:
+        raise ChunkRefusal(
+            "trace_tracer_limit_exceeded", str(exc),
+        ) from exc
+    except immutable.ImmutableArtifactResourceError as exc:
+        raise ChunkRefusal(
+            "trace_tracer_resource_unavailable", str(exc),
+        ) from exc
+    except (OSError, TypeError, ValueError, immutable.ImmutableArtifactError) as exc:
+        raise ChunkRefusal(
+            "trace_tracer_authority_invalid", str(exc),
+        ) from exc
+
+
+@contextlib.contextmanager
+def _retain_pinned_reader_after_success(
+    reader: immutable.PinnedDirectoryReader,
+):
+    """Keep a pin live on success; close it without replacing a primary error."""
+
+    try:
+        yield reader.__enter__()
+    except BaseException as primary:
+        reader.__exit__(type(primary), primary, primary.__traceback__)
+        raise
+
+
+def _capture_trace_with_retained_tracer(
+    *, cell: dict, binary: Path, invocation: dict, budget: Any,
+    cell_dir: Path, pins: dict, retained_tracer: immutable.RetainedRegular,
     runtime_cwd: Path | None = None,
     runtime_env: dict[str, str] | None = None,
     timeout_s: float | None = None,
@@ -6606,389 +8179,798 @@ def capture_trace(
             f"raw_staging_margin_bytes={raw_staging_limit!r}",
         )
     raw_trace_dir = cell_dir / "trace_full_raw"
+    routed_trace_stage = cell_dir / "trace_routed_raw"
     retained_trace_dir = cell_dir / "trace"
     _mkdir_output(
         raw_trace_dir, parents=True, exist_ok=False,
         operation="raw_trace_directory_create",
     )
-    inj = pins["injection_runtime"]
-    tracer_so = _resolve_repo_path(inj["tracer_so_relpath"], "tracer .so")
-    _require_hash(tracer_so, expected_tracer_sha256, "tracer .so before trace")
-    pb_lib = _resolve_repo_path(inj["pb_lib_relpath"], "protobuf runtime")
-    env = dict(runtime_env) if runtime_env is not None else dict(os.environ)
-    env["LD_LIBRARY_PATH"] = (
-        f"{pb_lib}:{env.get('LD_LIBRARY_PATH', '')}".rstrip(":")
-    )
-    env["CUDA_INJECTION64_PATH"] = str(tracer_so)
-    env["USER_DEFINED_FOLDERS"] = "1"
-    env["TRACES_FOLDER"] = str(raw_trace_dir)
-    env["TRACE_SAMPLING_MODE"] = "0"
-    env.pop("TRACE_SAMPLING_SELECTED_BLOCKS", None)
-    is_sol = cell["identity"]["roster_source"] == "sol_execbench"
-    if all_profiler_roi_launches and not is_sol:
-        raise ChunkRefusal(
-            "all_profiler_roi_launches_invalid", repr(cell["identity"])
-        )
-    if is_sol:
-        env["ACTIVE_FROM_START"] = "0"
-        if all_profiler_roi_launches:
-            env.pop("MAX_ACCEPTED_ACTIVE_LAUNCHES", None)
-        else:
-            env["MAX_ACCEPTED_ACTIVE_LAUNCHES"] = "1"
-    else:
-        env["ACTIVE_FROM_START"] = "1"
-        env.pop("MAX_ACCEPTED_ACTIVE_LAUNCHES", None)
-    command = [str(binary), *invocation["trace_app_args"]]
-    if cell["identity"]["roster_source"] == "portable_lcd":
-        command += [
-            "--output_dir", str(cell_dir / "logs" / "trace_workload"),
-        ]
-    trace_timeout = timeout_s if timeout_s is not None else budget.max_wall_time_s
-    trace_deadline = time.monotonic() + trace_timeout
-
-    def remaining(phase: str) -> float:
-        value = trace_deadline - time.monotonic()
-        if value <= 0:
-            raise ChunkRefusal(
-                "trace_route_deadline_exhausted",
-                f"{cell['identity']}: phase={phase}",
-            )
-        return value
-
-    elapsed, stdout_log, stderr_log = _run_logged(
-        command, cwd=runtime_cwd or binary.parent, env=env,
-        timeout_s=remaining("full"),
-        log_dir=cell_dir / "logs", stem="trace", failure_code="trace_target_failed",
-        monitored_tree=raw_trace_dir, tree_limit_bytes=raw_staging_limit,
-    )
-    full_phase_evidence = (
-        phase_result_validator(env, "trace")
-        if phase_result_validator is not None else None
-    )
-    _require_hash(tracer_so, expected_tracer_sha256, "tracer .so after trace")
-    root_pb = raw_trace_dir / "dynamic_trace.pb"
-    stats_csv = raw_trace_dir / "stats.csv"
     try:
-        root = preflight._validate_root_trace(root_pb, REPO_ROOT)
-        launch_contract = _require_capture_launch_contract(invocation)
-        expected_launch_count = (
-            root.get("launch_count")
-            if all_profiler_roi_launches else launch_contract["trace_launch_count"]
-        )
-        if type(expected_launch_count) is not int or expected_launch_count <= 0:
+        generation_reader = immutable.PinnedDirectoryReader(raw_trace_dir)
+    except (OSError, MemoryError, immutable.ImmutableArtifactError) as exc:
+        raise _translate_trace_generation_error(
+            exc, context="full trace output directory pin",
+        ) from exc
+    trace_proc_path = Path(
+        f"/proc/self/fd/{generation_reader.descriptor}"
+    )
+    inj = pins["injection_runtime"]
+    tracer_proc_path = retained_tracer.proc_path
+    tracer_pass_fds = (retained_tracer.descriptor,)
+    tracer_sha256 = retained_tracer.sha256
+    pb_lib = _resolve_repo_path(inj["pb_lib_relpath"], "protobuf runtime")
+    with (
+        _retain_pinned_reader_after_success(generation_reader),
+        _authenticated_tracer_runtime_environment(
+            retained_tracer, pb_lib, runtime_env, phase="full"
+        ) as retained_runtime,
+    ):
+        env = retained_runtime.environment
+        env["CUDA_INJECTION64_PATH"] = tracer_proc_path
+        env["USER_DEFINED_FOLDERS"] = "1"
+        env["TRACES_FOLDER"] = str(trace_proc_path)
+        env["TRACE_SAMPLING_MODE"] = "0"
+        env.pop("TRACE_SAMPLING_SELECTED_BLOCKS", None)
+        is_sol = cell["identity"]["roster_source"] == "sol_execbench"
+        if all_profiler_roi_launches and not is_sol:
             raise ChunkRefusal(
-                "sol_dynamic_launch_inventory_empty", repr(expected_launch_count)
+                "all_profiler_roi_launches_invalid", repr(cell["identity"])
             )
-        contract = validate_trace_dir(raw_trace_dir)
-        threadblocks = _output_tree_paths(
-            raw_trace_dir / "threadblocks",
-            code="trace_generated_output_storage_failure",
-            operation="generated_trace_threadblock_walk", pattern="*.pb",
+        if is_sol:
+            env["ACTIVE_FROM_START"] = "0"
+            if all_profiler_roi_launches:
+                env.pop("MAX_ACCEPTED_ACTIVE_LAUNCHES", None)
+            else:
+                env["MAX_ACCEPTED_ACTIVE_LAUNCHES"] = "1"
+        else:
+            env["ACTIVE_FROM_START"] = "1"
+            env.pop("MAX_ACCEPTED_ACTIVE_LAUNCHES", None)
+        command = [str(binary), *invocation["trace_app_args"]]
+        if cell["identity"]["roster_source"] == "portable_lcd":
+            command += [
+                "--output_dir", str(cell_dir / "logs" / "trace_workload"),
+            ]
+        trace_timeout = timeout_s if timeout_s is not None else budget.max_wall_time_s
+        trace_deadline = time.monotonic() + trace_timeout
+
+        def remaining(phase: str) -> float:
+            value = trace_deadline - time.monotonic()
+            if value <= 0:
+                raise ChunkRefusal(
+                    "trace_route_deadline_exhausted",
+                    f"{cell['identity']}: phase={phase}",
+                )
+            return value
+
+        elapsed, stdout_log, stderr_log = _run_logged(
+            command, cwd=runtime_cwd or binary.parent, env=env,
+            timeout_s=remaining("full"),
+            log_dir=cell_dir / "logs", stem="trace", failure_code="trace_target_failed",
+            monitored_tree=trace_proc_path, tree_limit_bytes=raw_staging_limit,
+            pass_fds=tuple(dict.fromkeys((
+                *tracer_pass_fds,
+                generation_reader.descriptor,
+                *retained_runtime.pass_fds,
+            ))),
+            require_cgroup_containment=True,
         )
-        stats_details = preflight._parse_stats_admission_details(stats_csv)
-        expected, admitted = stats_details["expected"], stats_details["admitted"]
-        coverage = preflight._analyze_full_trace_coverage(
-            raw_trace_dir, root, expected, admitted, stats_details["row_count"],
-            expected_launch_count=expected_launch_count,
+        try:
+            retained_tracer.verify_unchanged()
+        except immutable.ImmutableArtifactResourceError as exc:
+            raise ChunkRefusal(
+                "injection_runtime_resource_unavailable",
+                f"external tracer .so could not be revalidated after trace: {exc}",
+            ) from exc
+        except immutable.ImmutableArtifactLimitError as exc:
+            raise ChunkRefusal(
+                "injection_runtime_limit_exceeded",
+                f"external tracer .so exceeded verification limits: {exc}",
+            ) from exc
+        except immutable.ImmutableArtifactError as exc:
+            raise ChunkRefusal(
+                "injection_runtime_hash_drift",
+                f"external tracer .so changed after trace: {exc}",
+            ) from exc
+        full_phase_evidence = (
+            phase_result_validator(env, "trace")
+            if phase_result_validator is not None else None
         )
+    try:
+        with generation_reader:
+            with contextlib.ExitStack() as generation_monitor:
+                retained_generation = generation_monitor.enter_context(
+                    generation_reader.retain_tree_generation(
+                        **_bounded_raw_trace_tree_limits()
+                    )
+                )
+                admission = trace_admission._require_trace_admission_snapshot(
+                    raw_trace_dir,
+                    limits=trace_admission.DEFAULT_TRACE_ADMISSION_LIMITS,
+                    reader=generation_reader,
+                ).admission
+                with trace_admission.open_admitted_trace_sources(
+                    raw_trace_dir,
+                    expected_admission=admission,
+                    reader=generation_reader,
+                ) as sources:
+                    root = preflight._root_trace_from_admitted_sources(sources)
+                    launch_contract = _require_capture_launch_contract(invocation)
+                    expected_launch_count = (
+                        admission.launch_count
+                        if all_profiler_roi_launches else launch_contract["trace_launch_count"]
+                    )
+                    if type(expected_launch_count) is not int or expected_launch_count <= 0:
+                        raise ChunkRefusal(
+                            "sol_dynamic_launch_inventory_empty", repr(expected_launch_count)
+                        )
+                    coverage = preflight._analyze_admitted_full_trace_coverage(
+                        admission,
+                        root,
+                        retained_generation,
+                        expected_launch_count=expected_launch_count,
+                    )
+                    stats_launch_identity_binding = (
+                        _bind_stats_rows_to_root_launches(
+                            sources.read_stats_snapshot().payload, root,
+                        )
+                    )
+                    sources.verify_unchanged()
+                if root.get("status") != preflight.STATUS_OK:
+                    raise ChunkRefusal("trace_root_invalid", root.get("detail", "unknown"))
+                if admission.threadblock_count <= 0:
+                    raise ChunkRefusal(
+                        "trace_payload_empty", "admission saw zero threadblock protobufs"
+                    )
+                if coverage.get("status") != preflight.STATUS_OK:
+                    raise ChunkRefusal("trace_full_coverage_invalid", coverage.get("detail", ""))
+                try:
+                    if all_profiler_roi_launches:
+                        dynamic_launch_inventory, dynamic_launch_inventory_sha256 = (
+                            _validate_supplemental_trace_launch_inventory(
+                                root, trace_proc_path
+                            )
+                        )
+                    else:
+                        _validate_trace_launch_contract(invocation, root)
+                        dynamic_launch_inventory = None
+                        dynamic_launch_inventory_sha256 = None
+                except OSError as exc:
+                    _translate_generated_trace_storage(
+                        exc, operation="generated_trace_inventory_read",
+                    )
+                    raise
+                expected = admission.expected_record_count
+                admitted = admission.admitted_record_count
+                if expected <= 0:
+                    raise ChunkRefusal(
+                        "trace_stats_invalid", f"expected={expected!r}, admitted={admitted!r}"
+                    )
+                if admitted <= 0 or admitted > expected:
+                    raise ChunkRefusal(
+                        "trace_admission_invalid", f"expected={expected}, admitted={admitted}"
+                    )
+                drop_rate = (expected - admitted) / expected
+                trace_bytes = _retained_trace_tree_bytes(retained_generation)
+                manifest = {
+                    "schema_version": 1,
+                    "identity": cell["identity"],
+                    "captured_at_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                    "command": command,
+                    "binary_sha256": invocation["executable_sha256"],
+                    "tracer_so_sha256": tracer_sha256,
+                    "trace_contract_id": root["trace_contract_id"],
+                    "memory_payload_classes": root["memory_payload_classes"],
+                    "capture_launch_contract": launch_contract,
+                    "launch_scope": (
+                        "all_in_profiler_roi" if all_profiler_roi_launches
+                        else "fixed_capture_launch_contract"
+                    ),
+                    "dynamic_launch_inventory": dynamic_launch_inventory,
+                    "dynamic_launch_inventory_sha256": dynamic_launch_inventory_sha256,
+                    "launch_count": root["launch_count"],
+                    "launches": root["launches"],
+                    "threadblocks_pb_count": admission.threadblock_count,
+                    "trace_admission_sha256": admission.trace_admission_sha256,
+                    "trace_filesystem_generation_sha256": (
+                        admission.trace_filesystem_generation_sha256
+                    ),
+                    "grid_threadblock_count": coverage["grid_threadblock_count"],
+                    "decoded_threadblock_count": coverage["decoded_threadblock_count"],
+                    "decoded_record_count": coverage["decoded_record_count"],
+                    "zero_record_threadblock_count": coverage["zero_record_threadblock_count"],
+                    "stats_row_count": coverage["stats_row_count"],
+                    "stats_launch_identity_binding": stats_launch_identity_binding,
+                    "expected_records": expected,
+                    "admitted_records": admitted,
+                    "drop_rate": drop_rate,
+                    "trace_tree_bytes": trace_bytes,
+                    "max_trace_bytes": budget.max_trace_bytes,
+                    "elapsed_seconds": elapsed,
+                    "sol_phase_evidence": full_phase_evidence,
+                }
+                manifest_path = cell_dir / "trace_capture_manifest.json"
+                _write_output_text(
+                    manifest_path, json.dumps(manifest, indent=2, sort_keys=True) + "\n",
+                    operation="trace_capture_manifest_write",
+                )
+                route_result = None
+                route_result_path = None
+                routed = trace_bytes > budget.max_trace_bytes
+                if not routed:
+                    generation_monitor.close()
+                    with immutable.PinnedDirectoryReader(cell_dir) as publication_parent:
+                        generation_reader.relocate_noreplace(
+                            source_parent=publication_parent,
+                            source_name=raw_trace_dir.name,
+                            destination_parent=publication_parent,
+                            destination_name=retained_trace_dir.name,
+                        )
+                    relocated_generation = generation_reader.snapshot_tree(
+                        **_bounded_raw_trace_tree_limits()
+                    )
+                    _require_relocated_trace_generation(
+                        retained_generation, relocated_generation
+                    )
+                    control_trace_dir = retained_trace_dir
+                else:
+                    if all_profiler_roi_launches:
+                        # Supplemental evidence is comprehensive only when every raw
+                        # launch payload is retained.  Never replace an oversized complete
+                        # trace with metadata and call the row terminally accounted.
+                        raise ChunkRefusal(
+                            "supplemental_full_trace_retention_ceiling_exceeded",
+                            f"trace={trace_bytes}; ceiling={budget.max_trace_bytes}",
+                        )
+                    elif launch_contract["trace_launch_count"] != 1:
+                        raise ChunkRefusal(
+                            "multi_launch_selective_route_unsupported",
+                            "the full cold/evict/warm trace exceeds its 2 GiB cell budget; "
+                            "first-launch-only selective routing would destroy the workload contract",
+                        )
+                    else:
+                        required_provenance = {
+                            "protocol_version", "source_commit", "capture_matrix_sha256",
+                            "preflight_sha256", "pins_sha256", "trace_budget_sha256",
+                            "raw_staging_margin_bytes",
+                        }
+                        missing_provenance = sorted(required_provenance - set(provenance))
+                        if missing_provenance:
+                            raise ChunkRefusal(
+                                "trace_route_provenance_missing", repr(missing_provenance)
+                            )
+                        args_contract = {
+                            "adapter_kind": invocation.get("adapter_kind"),
+                            "trace_app_args": invocation.get("trace_app_args"),
+                            "logical_workload": invocation.get("logical_workload"),
+                            "trace_cardinality_contract": invocation.get(
+                                "trace_cardinality_contract"
+                            ),
+                        }
+                        for additive in ("capture_launch_contract", "matrix_capture_override"):
+                            if additive in invocation:
+                                args_contract[additive] = invocation[additive]
+                        args_hash = canonical_sha256(args_contract)
+                        protocol = {
+                            "protocol_version": provenance["protocol_version"],
+                            "source_commit": provenance["source_commit"],
+                            "authority_cell_sha256": cell["authority_cell_sha256"],
+                            "capture_matrix_sha256": provenance["capture_matrix_sha256"],
+                            "preflight_sha256": provenance["preflight_sha256"],
+                            "pins_sha256": provenance["pins_sha256"],
+                            "trace_budget_sha256": provenance["trace_budget_sha256"],
+                            "capture_manifest_sha256": _sha256_output_file(
+                                manifest_path, code="trace_generated_output_storage_failure",
+                                operation="trace_capture_manifest_hash",
+                            ),
+                            "binary_sha256": invocation["executable_sha256"],
+                            "tracer_so_sha256": tracer_sha256,
+                            "args_hash": args_hash,
+                        }
+
+                        sampling_generations: list[
+                            tuple[
+                                immutable.ImmutableDirectoryGeneration,
+                                _RetainedTraceGeneration,
+                            ]
+                        ] = []
+
+                        def sampling_capture(request: budget_route.CaptureRequest):
+                            phase_tag = request.kind
+                            if request.attempt is not None:
+                                phase_tag += f"_{request.attempt}"
+                            callback_timeout = remaining(phase_tag)
+                            policy = _raw_trace_generation_policy()
+                            try:
+                                with immutable.create_exclusive_directory_stage(
+                                    request.output_dir.parent,
+                                    request.output_dir.name,
+                                ) as stage:
+                                    with _authenticated_tracer_runtime_environment(
+                                        retained_tracer,
+                                        pb_lib,
+                                        (
+                                            phase_env_factory(
+                                                phase_tag, callback_timeout
+                                            )
+                                            if phase_env_factory is not None
+                                            else runtime_env
+                                        ),
+                                        phase=phase_tag,
+                                    ) as retained_callback_runtime:
+                                        callback_env = (
+                                            retained_callback_runtime.environment
+                                        )
+                                        callback_env["CUDA_INJECTION64_PATH"] = (
+                                            tracer_proc_path
+                                        )
+                                        callback_env["USER_DEFINED_FOLDERS"] = "1"
+                                        callback_env["TRACES_FOLDER"] = stage.proc_path
+                                        mode = (
+                                            1 if request.kind
+                                            == "trace_sampling_counting_v2" else 2
+                                        )
+                                        callback_env["TRACE_SAMPLING_MODE"] = str(mode)
+                                        if mode == 2:
+                                            callback_env[
+                                                "TRACE_SAMPLING_SELECTED_BLOCKS"
+                                            ] = ",".join(
+                                                str(block) for block
+                                                in request.selected_block_ids
+                                            )
+                                        else:
+                                            callback_env.pop(
+                                                "TRACE_SAMPLING_SELECTED_BLOCKS", None
+                                            )
+                                        if is_sol:
+                                            callback_env["ACTIVE_FROM_START"] = "0"
+                                            callback_env[
+                                                "MAX_ACCEPTED_ACTIVE_LAUNCHES"
+                                            ] = "1"
+                                        else:
+                                            callback_env["ACTIVE_FROM_START"] = "1"
+                                            callback_env.pop(
+                                                "MAX_ACCEPTED_ACTIVE_LAUNCHES", None
+                                            )
+                                        callback_command = list(command)
+                                        if cell["identity"]["roster_source"] == (
+                                            "portable_lcd"
+                                        ):
+                                            output_index = callback_command.index(
+                                                "--output_dir"
+                                            ) + 1
+                                            callback_command[output_index] = str(
+                                                cell_dir / "logs"
+                                                / f"{phase_tag}_workload"
+                                            )
+                                        _run_logged(
+                                            callback_command,
+                                            cwd=runtime_cwd or binary.parent,
+                                            env=callback_env,
+                                            timeout_s=callback_timeout,
+                                            log_dir=cell_dir / "logs",
+                                            stem=phase_tag,
+                                            failure_code=(
+                                                "trace_sampling_target_failed"
+                                            ),
+                                            monitored_tree=Path(stage.proc_path),
+                                            tree_limit_bytes=(
+                                                request.staging_remaining_bytes
+                                            ),
+                                            pass_fds=tuple(dict.fromkeys((
+                                                *tracer_pass_fds,
+                                                *retained_callback_runtime.pass_fds,
+                                                stage.descriptor,
+                                            ))),
+                                            require_cgroup_containment=True,
+                                        )
+                                        try:
+                                            retained_tracer.verify_unchanged()
+                                        except immutable.ImmutableArtifactResourceError as exc:
+                                            raise ChunkRefusal(
+                                                "injection_runtime_resource_unavailable",
+                                                "external tracer .so could not be "
+                                                f"revalidated after {phase_tag}: {exc}",
+                                            ) from exc
+                                        except immutable.ImmutableArtifactLimitError as exc:
+                                            raise ChunkRefusal(
+                                                "injection_runtime_limit_exceeded",
+                                                "external tracer .so exceeded "
+                                                f"verification limits: {exc}",
+                                            ) from exc
+                                        except immutable.ImmutableArtifactError as exc:
+                                            raise ChunkRefusal(
+                                                "injection_runtime_hash_drift",
+                                                "external tracer .so changed after "
+                                                f"{phase_tag}: {exc}",
+                                            ) from exc
+                                        if phase_result_validator is not None:
+                                            phase_result_validator(
+                                                callback_env, "trace"
+                                            )
+                                    committed = stage.commit(
+                                        max_files=policy["max_files"],
+                                        max_directories=policy["max_directories"],
+                                        max_total_file_bytes=(
+                                            policy["max_total_file_bytes"]
+                                        ),
+                                        max_total_relative_path_bytes=(
+                                            policy[
+                                                "max_total_relative_path_bytes"
+                                            ]
+                                        ),
+                                        max_file_bytes=policy["max_file_bytes"],
+                                        max_file_bytes_by_path=policy[
+                                            "max_file_bytes_by_path"
+                                        ],
+                                    )
+                                retained_sampling = (
+                                    _open_retained_trace_generation(
+                                        request.output_dir
+                                    )
+                                )
+                                try:
+                                    _require_retained_trace_matches_immutable_generation(
+                                        retained_sampling, committed,
+                                    )
+                                except BaseException as exc:
+                                    try:
+                                        retained_sampling.close()
+                                    except BaseException as cleanup_error:
+                                        try:
+                                            exc.add_note(
+                                                "sampling retained-generation cleanup "
+                                                f"failed: {cleanup_error}"
+                                            )
+                                        except (AttributeError, TypeError):
+                                            pass
+                                    raise
+                                sampling_generations.append((
+                                    committed, retained_sampling,
+                                ))
+                            except ChunkRefusal:
+                                raise
+                            except (
+                                immutable.ImmutableArtifactError,
+                                OSError,
+                                MemoryError,
+                            ) as exc:
+                                raise _translate_trace_generation_error(
+                                    exc, context=f"sampling callback {phase_tag}"
+                                ) from exc
+                            return budget_route.CaptureReceipt(
+                                trace_dir=request.output_dir,
+                                request_sha256=request.request_sha256,
+                                binary_sha256=invocation["executable_sha256"],
+                                tracer_so_sha256=tracer_sha256,
+                            )
+
+                        selection_limit = max(1, budget.max_trace_bytes * 3 // 4)
+                        config = budget_route.RouteConfig(
+                            selection_max_raw_bytes=selection_limit,
+                            staging_limit_bytes=provenance["raw_staging_margin_bytes"],
+                            gate_forbidden_policy="typed_unavailable",
+                        )
+                        generation_failure: BaseException | None = None
+                        try:
+                            try:
+                                route_result = budget_route.route_trace_budget(
+                                    trace_proc_path, manifest_path, routed_trace_stage,
+                                    cell_id=cell["identity"]["slug"],
+                                    identity=cell["identity"],
+                                    budget={
+                                        "max_trace_bytes": budget.max_trace_bytes,
+                                        "max_wall_time_s": budget.max_wall_time_s,
+                                        "sampling_policy": budget.sampling_policy,
+                                    },
+                                    protocol=protocol, config=config,
+                                    callbacks=budget_route.RouteCallbacks(
+                                        counting_capture=sampling_capture,
+                                        selective_capture=sampling_capture,
+                                    ),
+                                )
+                            except budget_route.BudgetRouteRefusal as exc:
+                                raise ChunkRefusal(
+                                    f"trace_budget_route_{exc.reason}",
+                                    exc.detail or "",
+                                ) from exc
+                        finally:
+                            for committed, retained_sampling in (
+                                sampling_generations
+                            ):
+                                try:
+                                    _require_retained_trace_matches_immutable_generation(
+                                        retained_sampling, committed,
+                                    )
+                                except BaseException as exc:
+                                    if generation_failure is None:
+                                        generation_failure = exc
+                                try:
+                                    retained_sampling.close()
+                                except BaseException as exc:
+                                    if generation_failure is None:
+                                        generation_failure = exc
+                            if generation_failure is not None:
+                                if isinstance(generation_failure, ChunkRefusal):
+                                    raise generation_failure
+                                if isinstance(generation_failure, (
+                                    immutable.ImmutableArtifactError,
+                                    OSError,
+                                    MemoryError,
+                                )):
+                                    raise _translate_trace_generation_error(
+                                        generation_failure,
+                                        context=(
+                                            "sampling generation route derivation"
+                                        ),
+                                    ) from generation_failure
+                                raise generation_failure
+                        route_result_path = cell_dir / "trace_budget_route.json"
+                        try:
+                            budget_route.write_route_result(route_result, route_result_path)
+                        except OSError as exc:
+                            _raise_typed_storage_failure(
+                                exc, code="capture_output_storage_failure",
+                                operation="trace_budget_route_result_write",
+                            )
+                            raise
+                        control_trace_dir = raw_trace_dir
+
+                def retained_result(retained_generation: immutable.PinnedTreeSnapshot) -> dict:
+                    retained_bytes = _retained_trace_tree_bytes(retained_generation)
+                    if retained_bytes > budget.max_trace_bytes:
+                        raise ChunkRefusal(
+                            "trace_retained_budget_exceeded",
+                            f"retained={retained_bytes}, max={budget.max_trace_bytes}",
+                        )
+                    retained_files = dict(retained_generation.files)
+                    retained_root_metadata = retained_files.get("dynamic_trace.pb")
+                    retained_stats_metadata = retained_files.get("stats.csv")
+                    trace_outcome = (
+                        route_result.get("outcome") if route_result is not None else "admitted"
+                    )
+                    control_generation = _open_retained_trace_generation(
+                        control_trace_dir
+                    )
+                    return _retained_trace_result_or_close(
+                        control_generation,
+                        lambda: {
+                        "_control_trace_generation": control_generation,
+                        "_control_trace_generation_source_path": control_trace_dir,
+                        "manifest": manifest_path,
+                        "route_result_path": route_result_path,
+                        "route_result": route_result,
+                        "trace_dir": retained_trace_dir,
+                        "control_trace_dir": control_trace_dir,
+                        "raw_trace_dir": raw_trace_dir if routed else None,
+                        "root_pb": (
+                            retained_trace_dir / "dynamic_trace.pb"
+                            if retained_root_metadata is not None
+                            and stat.S_ISREG(retained_root_metadata[2]) else None
+                        ),
+                        "stats_csv": (
+                            retained_trace_dir / "stats.csv"
+                            if retained_stats_metadata is not None
+                            and stat.S_ISREG(retained_stats_metadata[2]) else None
+                        ),
+                        "stdout_log": stdout_log,
+                        "stderr_log": stderr_log,
+                        "routed": routed,
+                        "outcome": trace_outcome,
+                        "typed_reason": (
+                            route_result.get("typed_reason")
+                            if route_result is not None else None
+                        ),
+                            "retained_trace_bytes": retained_bytes,
+                            **manifest,
+                        },
+                    )
+
+                if routed:
+                    with immutable.PinnedDirectoryReader(
+                        routed_trace_stage
+                    ) as routed_reader:
+                        with contextlib.ExitStack() as routed_monitor:
+                            routed_generation = routed_monitor.enter_context(
+                                routed_reader.retain_tree_generation(
+                                    **_bounded_raw_trace_tree_limits()
+                                )
+                            )
+                            _require_routed_trace_record_generation(
+                                route_result, routed_reader, routed_generation
+                            )
+                            routed_monitor.close()
+                            with immutable.PinnedDirectoryReader(
+                                cell_dir
+                            ) as publication_parent:
+                                routed_reader.relocate_noreplace(
+                                    source_parent=publication_parent,
+                                    source_name=routed_trace_stage.name,
+                                    destination_parent=publication_parent,
+                                    destination_name=retained_trace_dir.name,
+                                )
+                            published_generation = routed_reader.snapshot_tree(
+                                **_bounded_raw_trace_tree_limits()
+                            )
+                            _require_relocated_trace_generation(
+                                routed_generation, published_generation
+                            )
+                            with routed_reader.retain_tree_generation(
+                                **_bounded_raw_trace_tree_limits()
+                            ) as published_generation:
+                                _require_relocated_trace_generation(
+                                    routed_generation, published_generation
+                                )
+                                return retained_result(published_generation)
+                with generation_reader.retain_tree_generation(
+                    **_bounded_raw_trace_tree_limits()
+                ) as relocated_generation:
+                    _require_relocated_trace_generation(
+                        retained_generation, relocated_generation
+                    )
+                    return retained_result(relocated_generation)
+    except ChunkRefusal:
+        raise
+    except trace_admission.TraceAdmissionError as exc:
+        raise ChunkRefusal(exc.typed_reason, exc.detail) from exc
     except (OSError, preflight.PreflightStorageFailure) as exc:
         _translate_generated_trace_storage(
-            exc, operation="generated_trace_validation_read",
+            exc, operation="generated_trace_generation_use",
         )
         raise
-    if root.get("status") != preflight.STATUS_OK:
-        raise ChunkRefusal("trace_root_invalid", root.get("detail", "unknown"))
-    if not contract.ok:
+    except immutable.ImmutableArtifactLimitError as exc:
+        raise ChunkRefusal("trace_inventory_limit_exceeded", str(exc)) from exc
+    except immutable.ImmutableArtifactResourceError as exc:
         raise ChunkRefusal(
-            contract.typed_reason or "trace_contract_invalid", contract.detail or ""
-        )
-    if not threadblocks:
-        raise ChunkRefusal(
-            "trace_payload_empty", "contract walker saw zero threadblock protobufs"
-        )
-    if coverage.get("status") != preflight.STATUS_OK:
-        raise ChunkRefusal("trace_full_coverage_invalid", coverage.get("detail", ""))
-    try:
-        if all_profiler_roi_launches:
-            dynamic_launch_inventory, dynamic_launch_inventory_sha256 = (
-                _validate_supplemental_trace_launch_inventory(root, raw_trace_dir)
-            )
-        else:
-            _validate_trace_launch_contract(invocation, root)
-            dynamic_launch_inventory = None
-            dynamic_launch_inventory_sha256 = None
-    except OSError as exc:
-        _translate_generated_trace_storage(
-            exc, operation="generated_trace_inventory_read",
-        )
-        raise
-    if type(expected) is not int or type(admitted) is not int or expected <= 0:
-        raise ChunkRefusal(
-            "trace_stats_invalid", f"expected={expected!r}, admitted={admitted!r}"
-        )
-    if admitted <= 0 or admitted > expected:
-        raise ChunkRefusal(
-            "trace_admission_invalid", f"expected={expected}, admitted={admitted}"
-        )
-    drop_rate = (expected - admitted) / expected
-    try:
-        trace_bytes = _trace_tree_bytes(raw_trace_dir)
-    except OSError as exc:
-        _translate_generated_trace_storage(
-            exc, operation="generated_trace_tree_size_read",
-        )
-        raise
-    manifest = {
-        "schema_version": 1,
-        "identity": cell["identity"],
-        "captured_at_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-        "command": command,
-        "binary_sha256": invocation["executable_sha256"],
-        "tracer_so_sha256": sha256_file(tracer_so),
-        "trace_contract_id": root["trace_contract_id"],
-        "memory_payload_classes": root["memory_payload_classes"],
-        "capture_launch_contract": launch_contract,
-        "launch_scope": (
-            "all_in_profiler_roi" if all_profiler_roi_launches
-            else "fixed_capture_launch_contract"
-        ),
-        "dynamic_launch_inventory": dynamic_launch_inventory,
-        "dynamic_launch_inventory_sha256": dynamic_launch_inventory_sha256,
-        "launch_count": root["launch_count"],
-        "launches": root["launches"],
-        "threadblocks_pb_count": len(threadblocks),
-        "grid_threadblock_count": coverage["grid_threadblock_count"],
-        "decoded_threadblock_count": coverage["decoded_threadblock_count"],
-        "decoded_record_count": coverage["decoded_record_count"],
-        "zero_record_threadblock_count": coverage["zero_record_threadblock_count"],
-        "stats_row_count": coverage["stats_row_count"],
-        "expected_records": expected,
-        "admitted_records": admitted,
-        "drop_rate": drop_rate,
-        "trace_tree_bytes": trace_bytes,
-        "max_trace_bytes": budget.max_trace_bytes,
-        "elapsed_seconds": elapsed,
-        "sol_phase_evidence": full_phase_evidence,
-    }
-    manifest_path = cell_dir / "trace_capture_manifest.json"
-    _write_output_text(
-        manifest_path, json.dumps(manifest, indent=2, sort_keys=True) + "\n",
-        operation="trace_capture_manifest_write",
-    )
-    route_result = None
-    route_result_path = None
-    routed = trace_bytes > budget.max_trace_bytes
-    if not routed:
-        _replace_output(
-            raw_trace_dir, retained_trace_dir,
-            operation="retained_trace_directory_publish",
-        )
-        control_trace_dir = retained_trace_dir
-    else:
-        if all_profiler_roi_launches:
-            # Supplemental evidence is comprehensive only when every raw
-            # launch payload is retained.  Never replace an oversized complete
-            # trace with metadata and call the row terminally accounted.
-            raise ChunkRefusal(
-                "supplemental_full_trace_retention_ceiling_exceeded",
-                f"trace={trace_bytes}; ceiling={budget.max_trace_bytes}",
-            )
-        elif launch_contract["trace_launch_count"] != 1:
-            raise ChunkRefusal(
-                "multi_launch_selective_route_unsupported",
-                "the full cold/evict/warm trace exceeds its 2 GiB cell budget; "
-                "first-launch-only selective routing would destroy the workload contract",
-            )
-        else:
-            required_provenance = {
-                "protocol_version", "source_commit", "capture_matrix_sha256",
-                "preflight_sha256", "pins_sha256", "trace_budget_sha256",
-                "raw_staging_margin_bytes",
-            }
-            missing_provenance = sorted(required_provenance - set(provenance))
-            if missing_provenance:
-                raise ChunkRefusal(
-                    "trace_route_provenance_missing", repr(missing_provenance)
-                )
-            args_contract = {
-                "adapter_kind": invocation.get("adapter_kind"),
-                "trace_app_args": invocation.get("trace_app_args"),
-                "logical_workload": invocation.get("logical_workload"),
-                "trace_cardinality_contract": invocation.get(
-                    "trace_cardinality_contract"
-                ),
-            }
-            for additive in ("capture_launch_contract", "matrix_capture_override"):
-                if additive in invocation:
-                    args_contract[additive] = invocation[additive]
-            args_hash = canonical_sha256(args_contract)
-            protocol = {
-                "protocol_version": provenance["protocol_version"],
-                "source_commit": provenance["source_commit"],
-                "authority_cell_sha256": cell["authority_cell_sha256"],
-                "capture_matrix_sha256": provenance["capture_matrix_sha256"],
-                "preflight_sha256": provenance["preflight_sha256"],
-                "pins_sha256": provenance["pins_sha256"],
-                "trace_budget_sha256": provenance["trace_budget_sha256"],
-                "capture_manifest_sha256": _sha256_output_file(
-                    manifest_path, code="trace_generated_output_storage_failure",
-                    operation="trace_capture_manifest_hash",
-                ),
-                "binary_sha256": invocation["executable_sha256"],
-                "tracer_so_sha256": sha256_file(tracer_so),
-                "args_hash": args_hash,
-            }
+            "trace_snapshot_resource_unavailable", str(exc)
+        ) from exc
+    except immutable.ImmutableArtifactError as exc:
+        raise ChunkRefusal("trace_snapshot_changed", str(exc)) from exc
 
-            def sampling_capture(request: budget_route.CaptureRequest):
-                phase_tag = request.kind
-                if request.attempt is not None:
-                    phase_tag += f"_{request.attempt}"
-                callback_timeout = remaining(phase_tag)
-                callback_env = (
-                    phase_env_factory(phase_tag, callback_timeout)
-                    if phase_env_factory is not None
-                    else (
-                        dict(runtime_env) if runtime_env is not None
-                        else dict(os.environ)
-                    )
-                )
-                callback_env["LD_LIBRARY_PATH"] = (
-                    f"{pb_lib}:{callback_env.get('LD_LIBRARY_PATH', '')}".rstrip(":")
-                )
-                callback_env["CUDA_INJECTION64_PATH"] = str(tracer_so)
-                callback_env["USER_DEFINED_FOLDERS"] = "1"
-                callback_env["TRACES_FOLDER"] = str(request.output_dir)
-                mode = 1 if request.kind == "trace_sampling_counting_v2" else 2
-                callback_env["TRACE_SAMPLING_MODE"] = str(mode)
-                if mode == 2:
-                    callback_env["TRACE_SAMPLING_SELECTED_BLOCKS"] = ",".join(
-                        str(block) for block in request.selected_block_ids
-                    )
-                else:
-                    callback_env.pop("TRACE_SAMPLING_SELECTED_BLOCKS", None)
-                if is_sol:
-                    callback_env["ACTIVE_FROM_START"] = "0"
-                    callback_env["MAX_ACCEPTED_ACTIVE_LAUNCHES"] = "1"
-                else:
-                    callback_env["ACTIVE_FROM_START"] = "1"
-                    callback_env.pop("MAX_ACCEPTED_ACTIVE_LAUNCHES", None)
-                _mkdir_output(
-                    request.output_dir, parents=True, exist_ok=False,
-                    operation="trace_sampling_directory_create",
-                )
-                callback_command = list(command)
-                if cell["identity"]["roster_source"] == "portable_lcd":
-                    output_index = callback_command.index("--output_dir") + 1
-                    callback_command[output_index] = str(
-                        cell_dir / "logs" / f"{phase_tag}_workload"
-                    )
-                _run_logged(
-                    callback_command, cwd=runtime_cwd or binary.parent,
-                    env=callback_env, timeout_s=callback_timeout,
-                    log_dir=cell_dir / "logs", stem=phase_tag,
-                    failure_code="trace_sampling_target_failed",
-                    monitored_tree=request.output_dir,
-                    tree_limit_bytes=request.staging_remaining_bytes,
-                )
-                if phase_result_validator is not None:
-                    phase_result_validator(callback_env, "trace")
-                _require_hash(
-                    tracer_so, expected_tracer_sha256,
-                    f"tracer .so after {phase_tag}",
-                )
-                return budget_route.CaptureReceipt(
-                    trace_dir=request.output_dir,
-                    request_sha256=request.request_sha256,
-                    binary_sha256=invocation["executable_sha256"],
-                    tracer_so_sha256=sha256_file(tracer_so),
-                )
 
-            selection_limit = max(1, budget.max_trace_bytes * 3 // 4)
-            config = budget_route.RouteConfig(
-                selection_max_raw_bytes=selection_limit,
-                staging_limit_bytes=provenance["raw_staging_margin_bytes"],
-                gate_forbidden_policy="typed_unavailable",
+_TRACE_CONTROL_GENERATION_KEY = "_control_trace_generation"
+_TRACE_CONTROL_GENERATION_SOURCE_KEY = "_control_trace_generation_source_path"
+_TRACE_PUBLICATION_GENERATION_KEY = "_publication_trace_generation"
+_ROUTED_RAW_EVIDENCE_INVENTORY_KEY = "_routed_full_raw_evidence_inventory"
+
+
+def _require_trace_control_generation(
+    trace: dict[str, Any], *, verify: bool = True,
+) -> _RetainedTraceGeneration:
+    retained = trace.get(_TRACE_CONTROL_GENERATION_KEY)
+    source_path = trace.get(_TRACE_CONTROL_GENERATION_SOURCE_KEY)
+    if (
+        not isinstance(retained, _RetainedTraceGeneration)
+        or not isinstance(source_path, Path)
+        or retained.path != source_path
+    ):
+        raise ChunkRefusal(
+            "trace_control_generation_missing",
+            "downstream control derivation requires the retained full-trace "
+            "generation capability",
+        )
+    if not verify:
+        return retained
+    try:
+        retained.verify_unchanged()
+    except ChunkRefusal:
+        raise
+    except (immutable.ImmutableArtifactError, OSError, MemoryError) as exc:
+        raise _translate_trace_generation_error(
+            exc, context="downstream control source"
+        ) from exc
+    return retained
+
+
+def _authenticated_trace_control_consumer(function: Callable[..., Any]):
+    """Guard the actual control consumer with the retained source generation."""
+
+    @functools.wraps(function)
+    def guarded(*args: Any, **kwargs: Any) -> Any:
+        trace = kwargs.get("trace")
+        if not isinstance(trace, dict):
+            raise ChunkRefusal(
+                "trace_control_generation_missing", "trace argument is absent"
             )
+        retained = _require_trace_control_generation(trace)
+        try:
+            result = function(*args, **kwargs)
+        except BaseException:
             try:
-                route_result = budget_route.route_trace_budget(
-                    raw_trace_dir, manifest_path, retained_trace_dir,
-                    cell_id=cell["identity"]["slug"], identity=cell["identity"],
-                    budget={
-                        "max_trace_bytes": budget.max_trace_bytes,
-                        "max_wall_time_s": budget.max_wall_time_s,
-                        "sampling_policy": budget.sampling_policy,
-                    },
-                    protocol=protocol, config=config,
-                    callbacks=budget_route.RouteCallbacks(
-                        counting_capture=sampling_capture,
-                        selective_capture=sampling_capture,
-                    ),
-                )
-            except budget_route.BudgetRouteRefusal as exc:
-                raise ChunkRefusal(
-                    f"trace_budget_route_{exc.reason}", exc.detail or ""
-                ) from exc
-            route_result_path = cell_dir / "trace_budget_route.json"
-            try:
-                budget_route.write_route_result(route_result, route_result_path)
-            except OSError as exc:
-                _raise_typed_storage_failure(
-                    exc, code="capture_output_storage_failure",
-                    operation="trace_budget_route_result_write",
-                )
+                retained.verify_unchanged()
+            except ChunkRefusal:
                 raise
-            control_trace_dir = raw_trace_dir
+            except (
+                immutable.ImmutableArtifactError, OSError, MemoryError,
+            ) as exc:
+                raise _translate_trace_generation_error(
+                    exc, context=f"{function.__name__} failure revalidation"
+                ) from exc
+            raise
+        try:
+            retained.verify_unchanged()
+        except ChunkRefusal:
+            raise
+        except (
+            immutable.ImmutableArtifactError, OSError, MemoryError,
+        ) as exc:
+            raise _translate_trace_generation_error(
+                exc, context=f"{function.__name__} result derivation"
+            ) from exc
+        return result
 
-    try:
-        retained_bytes = _trace_tree_bytes(retained_trace_dir)
-    except OSError as exc:
-        _translate_generated_trace_storage(
-            exc, operation="retained_trace_tree_size_read",
-        )
-        raise
-    if retained_bytes > budget.max_trace_bytes:
+    return guarded
+
+
+def _release_trace_control_generation(trace: dict[str, Any]) -> None:
+    control = _require_trace_control_generation(trace, verify=False)
+    publication = trace.get(_TRACE_PUBLICATION_GENERATION_KEY)
+    if publication is not None and not isinstance(
+        publication, _RetainedTraceGeneration
+    ):
         raise ChunkRefusal(
-            "trace_retained_budget_exceeded",
-            f"retained={retained_bytes}, max={budget.max_trace_bytes}",
+            "trace_publication_generation_invalid",
+            "publication trace generation capability has an invalid type",
         )
-    retained_root = retained_trace_dir / "dynamic_trace.pb"
-    retained_stats = retained_trace_dir / "stats.csv"
-    retained_root_stat = _output_lstat(
-        retained_root, code="trace_generated_output_storage_failure",
-        operation="retained_trace_root_stat",
-    )
-    retained_stats_stat = _output_lstat(
-        retained_stats, code="trace_generated_output_storage_failure",
-        operation="retained_trace_stats_stat",
-    )
-    trace_outcome = (
-        route_result.get("outcome") if route_result is not None else "admitted"
-    )
-    return {
-        "manifest": manifest_path,
-        "route_result_path": route_result_path,
-        "route_result": route_result,
-        "trace_dir": retained_trace_dir,
-        "control_trace_dir": control_trace_dir,
-        "raw_trace_dir": raw_trace_dir if routed else None,
-        "root_pb": (
-            retained_root if retained_root_stat is not None
-            and stat.S_ISREG(retained_root_stat.st_mode) else None
-        ),
-        "stats_csv": (
-            retained_stats if retained_stats_stat is not None
-            and stat.S_ISREG(retained_stats_stat.st_mode) else None
-        ),
-        "stdout_log": stdout_log,
-        "stderr_log": stderr_log,
-        "routed": routed,
-        "outcome": trace_outcome,
-        "typed_reason": (
-            route_result.get("typed_reason") if route_result is not None else None
-        ),
-        "retained_trace_bytes": retained_bytes,
-        **manifest,
-    }
+    retained_generations: list[_RetainedTraceGeneration] = []
+    for retained in (control, publication):
+        if retained is not None and all(
+            retained is not existing for existing in retained_generations
+        ):
+            retained_generations.append(retained)
+    failure: BaseException | None = None
+    for retained in retained_generations:
+        try:
+            retained.verify_unchanged()
+        except BaseException as exc:
+            if failure is None:
+                failure = exc
+            else:
+                try:
+                    failure.add_note(
+                        "another retained trace generation also changed: "
+                        f"{exc}"
+                    )
+                except (AttributeError, TypeError):
+                    pass
+    for retained in reversed(retained_generations):
+        try:
+            retained.close()
+        except BaseException as cleanup_error:
+            if failure is None:
+                failure = cleanup_error
+            else:
+                try:
+                    failure.add_note(
+                        "retained trace generation cleanup also failed: "
+                        f"{cleanup_error}"
+                    )
+                except (AttributeError, TypeError):
+                    pass
+    trace.pop(_TRACE_CONTROL_GENERATION_KEY, None)
+    trace.pop(_TRACE_CONTROL_GENERATION_SOURCE_KEY, None)
+    trace.pop(_TRACE_PUBLICATION_GENERATION_KEY, None)
+    if failure is None:
+        return
+    if isinstance(failure, ChunkRefusal):
+        raise failure
+    if isinstance(failure, (
+        immutable.ImmutableArtifactError, OSError, MemoryError,
+    )):
+        raise _translate_trace_generation_error(
+            failure, context="downstream trace source release"
+        ) from failure
+    raise failure
+
+
+def _release_trace_control_generation_if_owned(trace: dict[str, Any]) -> None:
+    """Release owned generations, or no-op after an earlier release."""
+    if (
+        _TRACE_CONTROL_GENERATION_KEY not in trace
+        and _TRACE_CONTROL_GENERATION_SOURCE_KEY not in trace
+        and _TRACE_PUBLICATION_GENERATION_KEY not in trace
+    ):
+        return
+    _release_trace_control_generation(trace)
 
 
 def capture_control(
@@ -7005,25 +8987,59 @@ def capture_control(
         log_dir=cell_dir / "logs", stem="control",
         failure_code="control_bits_unavailable",
     )
-    payload = _json_output(
-        out, code="control_bits_storage_failure",
-        operation="direct_control_bits_read",
-    )
-    summary = payload.get("summary") or {}
-    if payload.get("arch") != "sm_86":
-        raise ChunkRefusal("control_arch_mismatch", repr(payload.get("arch")))
-    if summary.get("total_decoded", 0) <= 0:
-        raise ChunkRefusal("control_payload_empty", repr(summary))
-    if summary.get("total_unknown_encoding") != 0:
-        raise ChunkRefusal("control_unknown_encoding", repr(summary))
+    try:
+        with immutable.open_retained_regular(
+            out, max_bytes=_CONTROL_OUTPUT_MAX_BYTES,
+        ) as retained_control:
+            control_bytes = retained_control.read_bytes(
+                max_bytes=_CONTROL_OUTPUT_MAX_BYTES,
+            )
+            try:
+                payload = immutable.strict_json_loads(
+                    control_bytes, label="retained direct control output",
+                )
+            except immutable.ImmutableArtifactError as exc:
+                raise ChunkRefusal(
+                    "control_payload_invalid", str(exc),
+                ) from exc
+            if type(payload) is not dict:
+                raise ChunkRefusal(
+                    "control_payload_invalid", "control output is not an object",
+                )
+            summary = payload.get("summary") or {}
+            if payload.get("arch") != "sm_86":
+                raise ChunkRefusal(
+                    "control_arch_mismatch", repr(payload.get("arch")),
+                )
+            if summary.get("total_decoded", 0) <= 0:
+                raise ChunkRefusal("control_payload_empty", repr(summary))
+            if summary.get("total_unknown_encoding") != 0:
+                raise ChunkRefusal("control_unknown_encoding", repr(summary))
+            control_bits_sha256 = hashlib.sha256(control_bytes).hexdigest()
+            if control_bits_sha256 != retained_control.sha256:
+                raise ChunkRefusal(
+                    "control_generation_changed",
+                    "validated control bytes differ from retained identity",
+                )
+            retained_control.verify_unchanged()
+    except immutable.ImmutableArtifactLimitError as exc:
+        raise ChunkRefusal("control_output_limit_exceeded", str(exc)) from exc
+    except (immutable.ImmutableArtifactResourceError, MemoryError) as exc:
+        raise ChunkRefusal("control_output_resource_unavailable", str(exc)) from exc
+    except OSError as exc:
+        _raise_typed_storage_failure(
+            exc,
+            code="control_bits_storage_failure",
+            operation="direct_control_bits_retained_read",
+        )
+        raise
+    except immutable.ImmutableArtifactError as exc:
+        raise ChunkRefusal("control_generation_changed", str(exc)) from exc
     wrapper = {
         "schema_version": 1,
         "identity": cell["identity"],
         "binary_sha256": invocation["executable_sha256"],
-        "control_bits_sha256": _sha256_output_file(
-            out, code="control_bits_storage_failure",
-            operation="direct_control_bits_hash",
-        ),
+        "control_bits_sha256": control_bits_sha256,
         "toolkit_version": payload.get("toolkit_version"),
         "total_decoded": summary["total_decoded"],
         "total_unknown_encoding": summary["total_unknown_encoding"],
@@ -7079,46 +9095,65 @@ def _runtime_control_instruction_valid(record: Any) -> bool:
     )
 
 
-def _copy_control_evidence(source: Path, destination: Path) -> Path:
-    source_stat = _output_lstat(
-        source, code="sol_control_storage_failure",
-        operation="sol_control_source_evidence_stat",
-    )
-    if (
-        source_stat is None or not stat.S_ISREG(source_stat.st_mode)
-        or source_stat.st_size <= 0
-    ):
-        raise ChunkRefusal("sol_control_evidence_invalid", str(source))
-    _mkdir_output(
-        destination.parent, parents=True, exist_ok=True,
-        code="sol_control_storage_failure",
-        operation="sol_control_evidence_parent_create",
-    )
-    if destination.exists() or destination.is_symlink():
-        raise ChunkRefusal("sol_control_evidence_exists", str(destination))
-    _copy_output_file(
-        source, destination, exclusive=True,
-        code="sol_control_storage_failure",
-        operation="sol_control_evidence_copy",
-    )
-    if _sha256_output_file(
-        destination, code="sol_control_storage_failure",
-        operation="sol_control_destination_evidence_hash",
-    ) != _sha256_output_file(
-        source, code="sol_control_storage_failure",
-        operation="sol_control_source_evidence_hash",
-    ):
-        raise ChunkRefusal("sol_control_evidence_copy_mismatch", str(source))
-    return destination
+def _retained_control_source_bytes(
+    retained: _RetainedTraceGeneration,
+    relative_path: str,
+    *,
+    missing_code: str,
+) -> bytes:
+    """Read one bounded control input through the retained trace generation."""
+
+    metadata = dict(retained.tree.files).get(relative_path)
+    if metadata is None or metadata[4] <= 0:
+        raise ChunkRefusal(missing_code, relative_path)
+    try:
+        payload = retained.read_bytes(relative_path)
+    except ChunkRefusal:
+        raise
+    except (
+        immutable.ImmutableArtifactError, OSError, MemoryError,
+    ) as exc:
+        raise _translate_trace_generation_error(
+            exc, context=f"trace control source {relative_path}",
+        ) from exc
+    if not payload:
+        raise ChunkRefusal(missing_code, relative_path)
+    return payload
 
 
-def _sol_dynamic_trace_pcs(trace_dir: Path) -> set[int]:
-    threadblocks = _output_tree_paths(
-        trace_dir / "threadblocks", code="sol_control_storage_failure",
-        operation="sol_control_threadblock_walk", pattern="*.pb",
+def _retained_control_source_json(
+    retained: _RetainedTraceGeneration,
+    relative_path: str,
+    *,
+    missing_code: str,
+    invalid_code: str,
+) -> tuple[dict[str, Any], bytes]:
+    payload = _retained_control_source_bytes(
+        retained, relative_path, missing_code=missing_code,
+    )
+    try:
+        value = json.loads(payload)
+    except (json.JSONDecodeError, UnicodeError) as exc:
+        raise ChunkRefusal(
+            invalid_code, f"{relative_path}: {exc}",
+        ) from exc
+    if not isinstance(value, dict):
+        raise ChunkRefusal(
+            invalid_code, f"{relative_path}: root is not an object",
+        )
+    return value, payload
+
+
+def _sol_dynamic_trace_pcs(
+    retained: _RetainedTraceGeneration,
+) -> set[int]:
+    threadblocks = retained.matching_files(
+        prefix="threadblocks/", suffix=".pb",
     )
     if not threadblocks:
-        raise ChunkRefusal("sol_control_dynamic_trace_empty", str(trace_dir))
+        raise ChunkRefusal(
+            "sol_control_dynamic_trace_empty", str(retained.path),
+        )
     try:
         threadblock_pb2, _instruction_pb2, _address_pb2 = (
             __import__("import_trace_contract")._import_pb_modules()
@@ -7126,26 +9161,27 @@ def _sol_dynamic_trace_pcs(trace_dir: Path) -> set[int]:
     except Exception as exc:
         raise ChunkRefusal("sol_control_protobuf_bindings_missing", str(exc)) from exc
     pcs: set[int] = set()
-    for path in threadblocks:
-        observed = _output_lstat(
-            path, code="sol_control_storage_failure",
-            operation="sol_control_threadblock_stat",
-        )
-        if observed is None or not stat.S_ISREG(observed.st_mode):
-            raise ChunkRefusal("sol_control_dynamic_trace_invalid", str(path))
+    for relative_path in threadblocks:
         message = threadblock_pb2.threadblock()
         try:
-            message.ParseFromString(_read_output_bytes(
-                path, code="sol_control_storage_failure",
-                operation="sol_control_threadblock_read",
+            message.ParseFromString(_retained_control_source_bytes(
+                retained,
+                relative_path,
+                missing_code="sol_control_dynamic_trace_invalid",
             ))
+        except ChunkRefusal:
+            raise
         except Exception as exc:
-            raise ChunkRefusal("sol_control_dynamic_trace_invalid", str(path)) from exc
+            raise ChunkRefusal(
+                "sol_control_dynamic_trace_invalid", relative_path,
+            ) from exc
         for warp in message.warps.values():
             for instruction in warp.instructions:
                 pcs.add(int(instruction.pc))
     if not pcs:
-        raise ChunkRefusal("sol_control_dynamic_trace_empty", str(trace_dir))
+        raise ChunkRefusal(
+            "sol_control_dynamic_trace_empty", str(retained.path),
+        )
     return pcs
 
 
@@ -7272,6 +9308,23 @@ def _write_control_evidence_bytes(payload: bytes, destination: Path) -> Path:
                 operation="vendor_control_evidence_temp_cleanup",
             )
     return destination
+
+
+def _write_retained_control_evidence(
+    payload: bytes, destination: Path,
+) -> Path:
+    written = _write_control_evidence_bytes(payload, destination)
+    observed = _sha256_output_file(
+        written,
+        code="sol_control_storage_failure",
+        operation="retained_control_evidence_hash",
+    )
+    expected = hashlib.sha256(payload).hexdigest()
+    if observed != expected:
+        raise ChunkRefusal(
+            "sol_control_evidence_copy_mismatch", str(destination),
+        )
+    return written
 
 
 def _validated_sol_static_tools(contract: dict) -> tuple[Path, Path]:
@@ -7453,15 +9506,14 @@ def _sol_static_rebind_controls(
         or not stat.S_ISREG(report_stat.st_mode)
     ):
         raise ChunkRefusal("sol_control_ncu_report_missing", repr(report))
-    report_bytes = _read_output_bytes(
-        report, code="sol_control_storage_failure",
-        operation="sol_control_ncu_report_read",
-    )
     function_bytes = function_name.encode("ascii")
-    raw_occurrences = (
-        report_bytes.count(raw_text) if isinstance(raw_text, bytes) else None
+    report_sha256, report_occurrences = _retained_ncu_report_counts(
+        report,
+        (raw_text, function_bytes),
+        role="sol_control_ncu_report",
+        storage_code="sol_control_storage_failure",
     )
-    function_occurrences = report_bytes.count(function_bytes)
+    raw_occurrences, function_occurrences = report_occurrences
     if (
         contract.get("ncu_report_binding") != "raw_text_section_exactly_once"
         or not isinstance(raw_text, bytes)
@@ -7516,10 +9568,7 @@ def _sol_static_rebind_controls(
         "static_instruction_count": len(records),
         "static_pcs_sha256": canonical_sha256(static_pcs),
         "enhanced_descriptor_pcs_sha256": canonical_sha256(descriptor_pcs),
-        "ncu_report_sha256": _sha256_output_file(
-            report, code="sol_control_storage_failure",
-            operation="sol_control_ncu_report_hash",
-        ),
+        "ncu_report_sha256": report_sha256,
         "ncu_report_raw_text_occurrences": raw_occurrences,
         "ncu_report_function_occurrences": function_occurrences,
         "parser_contract": extracted["parser_contract"],
@@ -7528,6 +9577,7 @@ def _sol_static_rebind_controls(
     return instructions, metadata
 
 
+@_authenticated_trace_control_consumer
 def capture_vendor_control(
     *, cell: dict, invocation: dict, label: dict, trace: dict,
     cell_dir: Path, module_store: Path,
@@ -7536,17 +9586,9 @@ def capture_vendor_control(
     contract = cell.get("control_bits") or {}
     if contract.get("policy") != "post_trace_vendor_module":
         raise ChunkRefusal("vendor_control_policy_invalid", repr(contract))
+    retained_source = _require_trace_control_generation(trace)
     trace_dir = trace.get("control_trace_dir")
-    trace_dir_stat = (
-        _output_lstat(
-            trace_dir, code="sol_control_storage_failure",
-            operation="vendor_control_trace_directory_stat",
-        ) if isinstance(trace_dir, Path) else None
-    )
-    if (
-        not isinstance(trace_dir, Path) or trace_dir_stat is None
-        or not stat.S_ISDIR(trace_dir_stat.st_mode)
-    ):
+    if trace_dir != retained_source.path:
         raise ChunkRefusal("vendor_control_trace_dir_missing", repr(trace_dir))
     if trace.get("launch_count") != 1 or len(trace.get("launches") or []) != 1:
         raise ChunkRefusal("vendor_control_launch_cardinality_invalid", repr(trace))
@@ -7556,21 +9598,12 @@ def capture_vendor_control(
             "vendor_control_runtime_kernel_mismatch", repr(root_launch)
         )
 
-    inventory_source = trace_dir / "extra_info" / "traced_kernel_modules.json"
-    inventory_stat = _output_lstat(
-        inventory_source, code="sol_control_storage_failure",
-        operation="vendor_control_inventory_stat",
-    )
-    if (
-        inventory_stat is None or not stat.S_ISREG(inventory_stat.st_mode)
-        or inventory_stat.st_size <= 0
-    ):
-        raise ChunkRefusal(
-            "vendor_control_module_inventory_missing", str(inventory_source)
-        )
-    inventory = _json_output(
-        inventory_source, code="sol_control_storage_failure",
-        operation="vendor_control_inventory_read",
+    inventory_relative_path = "extra_info/traced_kernel_modules.json"
+    inventory, inventory_payload = _retained_control_source_json(
+        retained_source,
+        inventory_relative_path,
+        missing_code="vendor_control_module_inventory_missing",
+        invalid_code="vendor_control_module_inventory_invalid",
     )
     selection = inventory.get("selection") or {}
     expected_module_identity = {
@@ -7655,8 +9688,8 @@ def capture_vendor_control(
         )
 
     evidence_dir = cell_dir / "control_evidence"
-    inventory_copy = _copy_control_evidence(
-        inventory_source, evidence_dir / "traced_kernel_modules.json"
+    inventory_copy = _write_retained_control_evidence(
+        inventory_payload, evidence_dir / "traced_kernel_modules.json",
     )
     matrix_module = {
         "status": "stable_static_module",
@@ -7728,48 +9761,50 @@ def capture_vendor_control(
         or not stat.S_ISREG(report_stat.st_mode)
     ):
         raise ChunkRefusal("vendor_control_ncu_report_missing", repr(report))
-    report_bytes = _read_output_bytes(
-        report, code="sol_control_storage_failure",
-        operation="vendor_control_ncu_report_read",
-    )
     raw_text = extracted.get("raw_text_bytes")
     if (
         contract.get("ncu_report_binding") != "raw_text_section_exactly_once"
         or not isinstance(raw_text, bytes)
-        or report_bytes.count(raw_text) != 1
-        or report_bytes.count(contract["function_name"].encode("ascii")) <= 0
+        or not raw_text
     ):
         raise ChunkRefusal(
             "vendor_control_ncu_report_binding_mismatch",
+            repr({"raw_occurrences": None, "function_occurrences": None}),
+        )
+    try:
+        function_bytes = contract["function_name"].encode("ascii")
+    except UnicodeEncodeError as exc:
+        raise ChunkRefusal(
+            "vendor_control_ncu_report_binding_mismatch", str(exc),
+        ) from exc
+    report_sha256, report_occurrences = _retained_ncu_report_counts(
+        report,
+        (raw_text, function_bytes),
+        role="vendor_control_ncu_report",
+        storage_code="sol_control_storage_failure",
+    )
+    raw_occurrences, function_occurrences = report_occurrences
+    if raw_occurrences != 1 or function_occurrences <= 0:
+        raise ChunkRefusal(
+            "vendor_control_ncu_report_binding_mismatch",
             repr({
-                "raw_occurrences": (
-                    report_bytes.count(raw_text) if isinstance(raw_text, bytes) else None
-                ),
-                "function_occurrences": report_bytes.count(
-                    contract["function_name"].encode("ascii")
-                ),
+                "raw_occurrences": raw_occurrences,
+                "function_occurrences": function_occurrences,
             }),
         )
 
     raw_copy = _write_control_evidence_bytes(
         raw_text, evidence_dir / contract["text_section_name"]
     )
-    enhanced_source = trace_dir / "extra_info" / "enhanced_execution_info.json"
-    enhanced_stat = _output_lstat(
-        enhanced_source, code="sol_control_storage_failure",
-        operation="vendor_control_enhanced_inventory_stat",
+    enhanced_relative_path = "extra_info/enhanced_execution_info.json"
+    document, enhanced_payload = _retained_control_source_json(
+        retained_source,
+        enhanced_relative_path,
+        missing_code="vendor_control_enhanced_info_missing",
+        invalid_code="vendor_control_enhanced_info_invalid",
     )
-    if (
-        enhanced_stat is None or not stat.S_ISREG(enhanced_stat.st_mode)
-        or enhanced_stat.st_size <= 0
-    ):
-        raise ChunkRefusal("vendor_control_enhanced_info_missing", str(enhanced_source))
-    enhanced_copy = _copy_control_evidence(
-        enhanced_source, evidence_dir / "enhanced_execution_info.json"
-    )
-    document = _json_output(
-        enhanced_copy, code="sol_control_storage_failure",
-        operation="vendor_control_enhanced_copy_read",
+    enhanced_copy = _write_retained_control_evidence(
+        enhanced_payload, evidence_dir / "enhanced_execution_info.json",
     )
     kernels = document.get("kernels")
     if not isinstance(kernels, list) or len(kernels) != 1:
@@ -7826,7 +9861,7 @@ def capture_vendor_control(
         instructions.append(row)
     if not all(_runtime_control_instruction_valid(row) for row in instructions):
         raise ChunkRefusal("vendor_control_instruction_invalid", contract["function_name"])
-    dynamic_pcs = _sol_dynamic_trace_pcs(trace_dir)
+    dynamic_pcs = _sol_dynamic_trace_pcs(retained_source)
     missing_dynamic_pcs = sorted(dynamic_pcs - set(static_pcs))
     if missing_dynamic_pcs:
         raise ChunkRefusal(
@@ -7864,11 +9899,8 @@ def capture_vendor_control(
             enhanced_copy, code="sol_control_storage_failure",
             operation="vendor_control_runtime_inventory_hash",
         ),
-        "ncu_report_sha256": _sha256_output_file(
-            report, code="sol_control_storage_failure",
-            operation="vendor_control_ncu_report_hash",
-        ),
-        "ncu_report_raw_text_occurrences": 1,
+        "ncu_report_sha256": report_sha256,
+        "ncu_report_raw_text_occurrences": raw_occurrences,
         "raw_text_path": raw_copy.relative_to(cell_dir).as_posix(),
         "raw_text_sha256": _sha256_output_file(
             raw_copy, code="sol_control_storage_failure",
@@ -7951,36 +9983,25 @@ def capture_vendor_control(
     }
 
 
+@_authenticated_trace_control_consumer
 def capture_sol_control(
     *, cell: dict, invocation: dict, label: dict, trace: dict, cell_dir: Path,
     module_store: Path,
 ) -> dict:
     """Seal controls for the exact accepted launch or its producer-typed absence."""
+    retained_source = _require_trace_control_generation(trace)
     trace_dir = trace.get("control_trace_dir")
-    if not isinstance(trace_dir, Path):
+    if trace_dir != retained_source.path:
         raise ChunkRefusal("sol_control_trace_dir_missing", repr(trace_dir))
-    trace_dir_stat = _output_lstat(
-        trace_dir, code="sol_control_storage_failure",
-        operation="sol_control_trace_directory_stat",
-    )
-    if trace_dir_stat is None or not stat.S_ISDIR(trace_dir_stat.st_mode):
-        raise ChunkRefusal("sol_control_trace_dir_missing", str(trace_dir))
     if trace.get("launch_count") != 1 or len(trace.get("launches") or []) != 1:
         raise ChunkRefusal("sol_control_launch_cardinality_invalid", repr(trace))
     root_launch = trace["launches"][0]
-    inventory_source = trace_dir / "extra_info" / "traced_kernel_modules.json"
-    inventory_stat = _output_lstat(
-        inventory_source, code="sol_control_storage_failure",
-        operation="sol_control_inventory_stat",
-    )
-    if (
-        inventory_stat is None or not stat.S_ISREG(inventory_stat.st_mode)
-        or inventory_stat.st_size <= 0
-    ):
-        raise ChunkRefusal("sol_control_module_inventory_missing", str(inventory_source))
-    inventory = _json_output(
-        inventory_source, code="sol_control_storage_failure",
-        operation="sol_control_inventory_read",
+    inventory_relative_path = "extra_info/traced_kernel_modules.json"
+    inventory, inventory_payload = _retained_control_source_json(
+        retained_source,
+        inventory_relative_path,
+        missing_code="sol_control_module_inventory_missing",
+        invalid_code="sol_control_module_inventory_invalid",
     )
     expected_module_identity = {
         "stable_key": "sha256",
@@ -8037,8 +10058,8 @@ def capture_sol_control(
     if set(module) != {"status", "reason", "path_at_capture", "basename", "sha256"}:
         raise ChunkRefusal("sol_control_module_identity_invalid", repr(module))
     evidence_dir = cell_dir / "control_evidence"
-    inventory_copy = _copy_control_evidence(
-        inventory_source, evidence_dir / "traced_kernel_modules.json"
+    inventory_copy = _write_retained_control_evidence(
+        inventory_payload, evidence_dir / "traced_kernel_modules.json",
     )
     out = cell_dir / "control_bits.json"
     outcome = SOL_CONTROL_OUTCOMES[0]
@@ -8071,26 +10092,19 @@ def capture_sol_control(
         preserved_module, preserved_module_rel = _preserve_sol_module(
             module, cell_dir=cell_dir, module_store=module_store,
         )
-        source = trace_dir / "extra_info" / "enhanced_execution_info.json"
-        source_stat = _output_lstat(
-            source, code="sol_control_storage_failure",
-            operation="sol_control_enhanced_inventory_stat",
+        enhanced_relative_path = "extra_info/enhanced_execution_info.json"
+        document, enhanced_payload = _retained_control_source_json(
+            retained_source,
+            enhanced_relative_path,
+            missing_code="sol_control_enhanced_info_missing",
+            invalid_code="sol_control_enhanced_info_invalid",
         )
-        if (
-            source_stat is None or not stat.S_ISREG(source_stat.st_mode)
-            or source_stat.st_size <= 0
-        ):
-            raise ChunkRefusal("sol_control_enhanced_info_missing", str(source))
-        source_copy = _copy_control_evidence(
-            source, evidence_dir / "enhanced_execution_info.json"
+        source_copy = _write_retained_control_evidence(
+            enhanced_payload, evidence_dir / "enhanced_execution_info.json",
         )
         source_sha = _sha256_output_file(
             source_copy, code="sol_control_storage_failure",
             operation="sol_control_enhanced_copy_hash",
-        )
-        document = _json_output(
-            source_copy, code="sol_control_storage_failure",
-            operation="sol_control_enhanced_copy_read",
         )
         rows = document.get("kernels")
         if not isinstance(rows, list) or len(rows) != 1:
@@ -8114,7 +10128,7 @@ def capture_sol_control(
             instructions = descriptors
             control_source = "enhanced_runtime_binary"
         else:
-            dynamic_pcs = _sol_dynamic_trace_pcs(trace_dir)
+            dynamic_pcs = _sol_dynamic_trace_pcs(retained_source)
             instructions, static_rebind = _sol_static_rebind_controls(
                 contract=(cell.get("control_bits") or {}).get("static_rebind") or {},
                 preserved_module=preserved_module,
@@ -8132,7 +10146,7 @@ def capture_sol_control(
         if len(set(control_pcs)) != len(control_pcs):
             raise ChunkRefusal("sol_control_pc_duplicate", repr(kernel["kernel_name"]))
         if kernel["is_captured_from_binary"]:
-            dynamic_pcs = _sol_dynamic_trace_pcs(trace_dir)
+            dynamic_pcs = _sol_dynamic_trace_pcs(retained_source)
         missing_dynamic_pcs = sorted(dynamic_pcs - set(control_pcs))
         if missing_dynamic_pcs:
             raise ChunkRefusal(
@@ -8241,10 +10255,11 @@ def _materialize_sol_launch_control_view(
 ) -> dict[str, Any]:
     """Create a hash-bound one-launch view for the existing control decoder.
 
-    The view contains hard links only to the selected launch's protobufs and
-    derived JSON that names its exact producer inventory/source hashes.  The
-    original all-launch trace remains the authoritative inventory.
+    The view contains authenticated copies of only the selected launch's
+    protobufs and derived JSON that names its exact producer inventory/source
+    hashes.  The original all-launch trace remains the authoritative inventory.
     """
+    retained_source = _require_trace_control_generation(trace)
     trace_dir = trace.get("control_trace_dir")
     if not isinstance(trace_dir, Path) or trace_dir.is_symlink() or not trace_dir.is_dir():
         raise ChunkRefusal("sol_control_trace_dir_missing", repr(trace_dir))
@@ -8255,27 +10270,16 @@ def _materialize_sol_launch_control_view(
             or not isinstance(mapping, dict):
         raise ChunkRefusal("sol_dynamic_launch_inventory_invalid", repr(inventory_row))
     view = launch_cell_dir / "control_trace_view"
-    launch_payload = (
-        trace_dir / "threadblocks"
-        / f"device_{root_launch['device_id']}"
-        / f"stream_{root_launch['stream_id']}"
-        / f"kernel_{root_launch['kernel_id']}"
+    payload_prefix = (
+        "threadblocks/"
+        f"device_{root_launch['device_id']}/"
+        f"stream_{root_launch['stream_id']}/"
+        f"kernel_{root_launch['kernel_id']}/"
     )
-    launch_payload_stat = _output_lstat(
-        launch_payload, code="sol_control_storage_failure",
-        operation="sol_control_launch_payload_stat",
+    payload_relpaths = retained_source.matching_files(
+        prefix=payload_prefix, suffix=".pb"
     )
-    payloads = _output_tree_paths(
-        launch_payload, code="sol_control_storage_failure",
-        operation="sol_control_launch_payload_walk", pattern="*.pb",
-    ) if (
-        launch_payload_stat is not None
-        and stat.S_ISDIR(launch_payload_stat.st_mode)
-    ) else []
-    if (
-        launch_payload_stat is None
-        or not stat.S_ISDIR(launch_payload_stat.st_mode) or not payloads
-    ):
+    if not payload_relpaths:
         raise ChunkRefusal(
             "sol_dynamic_launch_payload_missing", repr(root_launch)
         )
@@ -8290,34 +10294,38 @@ def _materialize_sol_launch_control_view(
         code="sol_control_storage_failure",
         operation="sol_control_view_payload_create",
     )
-    for source in payloads:
-        source_stat = _output_lstat(
-            source, code="sol_control_storage_failure",
-            operation="sol_control_view_payload_source_stat",
-        )
-        if source_stat is None or not stat.S_ISREG(source_stat.st_mode):
-            raise ChunkRefusal("sol_control_dynamic_trace_invalid", str(source))
-        _link_output(
-            source, view_payload / source.name,
+    payload_inventory: list[dict[str, Any]] = []
+    destination_names: set[str] = set()
+    for relative_path in payload_relpaths:
+        destination_name = PurePosixPath(relative_path).name
+        if destination_name in destination_names:
+            raise ChunkRefusal(
+                "sol_control_dynamic_trace_invalid",
+                f"duplicate selected payload basename: {destination_name}",
+            )
+        payload = retained_source.read_bytes(relative_path)
+        _write_output_bytes(
+            view_payload / destination_name,
+            payload,
             code="sol_control_storage_failure",
-            operation="sol_control_view_payload_link",
+            operation="sol_control_view_payload_copy",
         )
+        destination_names.add(destination_name)
+        payload_inventory.append({
+            "name": destination_name,
+            "sha256": hashlib.sha256(payload).hexdigest(),
+            "size_bytes": len(payload),
+        })
     extra = view / "extra_info"
     _mkdir_output(
         extra, parents=True, exist_ok=False,
         code="sol_control_storage_failure",
         operation="sol_control_view_extra_create",
     )
-    source_inventory = trace_dir / "extra_info" / "traced_kernel_modules.json"
-    source_enhanced = trace_dir / "extra_info" / "enhanced_execution_info.json"
-    inventory = _json_output(
-        source_inventory, code="sol_control_storage_failure",
-        operation="sol_control_view_source_inventory_read",
-    )
-    enhanced = _json_output(
-        source_enhanced, code="sol_control_storage_failure",
-        operation="sol_control_view_source_enhanced_read",
-    )
+    inventory_relative_path = "extra_info/traced_kernel_modules.json"
+    enhanced_relative_path = "extra_info/enhanced_execution_info.json"
+    inventory = retained_source.read_json(inventory_relative_path)
+    enhanced = retained_source.read_json(enhanced_relative_path)
     kernels = enhanced.get("kernels")
     matching = [
         row for row in (kernels or [])
@@ -8369,29 +10377,14 @@ def _materialize_sol_launch_control_view(
         "kind": "sol_launch_control_view",
         "launch_ordinal": ordinal,
         "launch_identity_sha256": inventory_row["launch_identity_sha256"],
-        "source_inventory_sha256": _sha256_output_file(
-            source_inventory, code="sol_control_storage_failure",
-            operation="sol_control_view_source_inventory_hash",
-        ),
-        "source_enhanced_inventory_sha256": _sha256_output_file(
-            source_enhanced, code="sol_control_storage_failure",
-            operation="sol_control_view_source_enhanced_hash",
-        ),
-        "selected_payload_count": len(payloads),
-        "selected_payload_sha256": canonical_sha256([
-            {
-                "name": path.name,
-                "sha256": _sha256_output_file(
-                    path, code="sol_control_storage_failure",
-                    operation="sol_control_view_payload_hash",
-                ),
-                "size_bytes": _output_lstat(
-                    path, code="sol_control_storage_failure",
-                    operation="sol_control_view_payload_stat",
-                ).st_size,
-            }
-            for path in payloads
-        ]),
+        "source_inventory_sha256": hashlib.sha256(
+            retained_source.read_bytes(inventory_relative_path)
+        ).hexdigest(),
+        "source_enhanced_inventory_sha256": hashlib.sha256(
+            retained_source.read_bytes(enhanced_relative_path)
+        ).hexdigest(),
+        "selected_payload_count": len(payload_inventory),
+        "selected_payload_sha256": canonical_sha256(payload_inventory),
     }
     derivation["derivation_sha256"] = canonical_sha256(derivation)
     derivation_path = launch_cell_dir / "control_view_derivation.json"
@@ -8400,7 +10393,10 @@ def _materialize_sol_launch_control_view(
         code="sol_control_storage_failure",
         operation="sol_control_view_derivation_write",
     )
+    retained_view = _open_retained_trace_generation(view)
     return {
+        _TRACE_CONTROL_GENERATION_KEY: retained_view,
+        _TRACE_CONTROL_GENERATION_SOURCE_KEY: retained_view.path,
         "launch_count": 1,
         "launches": [copy.deepcopy(root_launch)],
         "control_trace_dir": view,
@@ -8410,6 +10406,7 @@ def _materialize_sol_launch_control_view(
     }
 
 
+@_authenticated_trace_control_consumer
 def capture_sol_controls_all_launches(
     *, cell: dict[str, Any], invocation: dict[str, Any],
     labels_by_ordinal: dict[int, dict[str, Any]], trace: dict[str, Any],
@@ -8452,11 +10449,6 @@ def capture_sol_controls_all_launches(
             != row["launch_identity_sha256"]
             or ncu_identity.get("kernel_name")
             != row["module_mapping"]["kernel_name"]
-            or ncu_identity.get("ncu_report_sha256")
-            != _sha256_output_file(
-                label["ncu_report"], code="sol_control_storage_failure",
-                operation="sol_all_launch_ncu_report_hash",
-            )
         ):
             raise ChunkRefusal(
                 "sol_dynamic_launch_ncu_identity_mismatch", repr(ordinal)
@@ -8477,26 +10469,32 @@ def capture_sol_controls_all_launches(
                 "sol_control_ncu_report_missing", repr(report)
             )
         try:
-            report_bytes = _read_output_bytes(
-                report, code="sol_control_storage_failure",
-                operation="sol_all_launch_ncu_report_read",
-            )
             expected_function_bytes = expected_function.encode("ascii")
-        except (OSError, UnicodeEncodeError) as exc:
+        except UnicodeEncodeError as exc:
             raise ChunkRefusal(
                 "sol_control_ncu_report_unreadable", str(exc)
             ) from exc
+        report_sha256, report_occurrences = _retained_ncu_report_counts(
+            report,
+            (expected_function_bytes,),
+            role="sol_all_launch_ncu_report",
+            storage_code="sol_control_storage_failure",
+        )
+        function_occurrences = report_occurrences[0]
+        if ncu_identity.get("ncu_report_sha256") != report_sha256:
+            raise ChunkRefusal(
+                "sol_dynamic_launch_ncu_identity_mismatch", repr(ordinal)
+            )
         if ncu_identity.get("join_policy") == (
             "ordered_report_ordinal_mangled_name_block_grid_device_tuple"
         ):
             report_contains_function = (
                 type(ncu_identity.get("kernel_name_report_occurrences")) is int
                 and ncu_identity["kernel_name_report_occurrences"] > 0
+                and function_occurrences > 0
             )
         else:
-            report_contains_function = (
-                report_bytes.count(expected_function_bytes) > 0
-            )
+            report_contains_function = function_occurrences > 0
         if not report_contains_function:
             raise ChunkRefusal(
                 "sol_dynamic_launch_ncu_identity_mismatch",
@@ -8506,6 +10504,7 @@ def capture_sol_controls_all_launches(
             cell_dir / "control_launches" / f"launch_{ordinal:04d}"
         )
         control_view = launch_cell_dir / "control_trace_view"
+        view: dict[str, Any] | None = None
         control: dict[str, Any] | None = None
         control_error: BaseException | None = None
         try:
@@ -8536,6 +10535,11 @@ def capture_sol_controls_all_launches(
                 ) from (storage_origin or exc)
             raise
         finally:
+            if (
+                isinstance(view, dict)
+                and _TRACE_CONTROL_GENERATION_KEY in view
+            ):
+                _release_trace_control_generation(view)
             if _storage_origin(control_error) is None:
                 if control_view.exists() or control_view.is_symlink():
                     if control_view.is_symlink() or not control_view.is_dir():
@@ -9061,11 +11065,7 @@ def bind_ordered_launch_set_ncu_identity(
     observed_key = _observation_ncu_launch_key(observation)
     report = label.get("ncu_report")
     report_sha256 = (
-        _sha256_output_file(
-            report,
-            code="label_capture_storage_failure",
-            operation="sol_launch_set_report_hash",
-        )
+        ncu_inventory.get("report_sha256")
         if isinstance(report, Path) else None
     )
     ncu_launches = ncu_inventory.get("launches")
@@ -9158,10 +11158,11 @@ def adapt_production_launch_set_labels(
         code="label_capture_storage_failure",
         operation="launch_set_inventory_adapter_read",
     )
-    report_sha256 = _sha256_output_file(
+    report_sha256, _report_counts = _retained_ncu_report_counts(
         report,
-        code="label_capture_storage_failure",
-        operation="launch_set_adapter_report_hash",
+        (),
+        role="launch_set_adapter_report",
+        storage_code="label_capture_storage_failure",
     )
     try:
         ncu_launch_documents.validate_launch_inventory_document(
@@ -9253,25 +11254,24 @@ def bind_unique_ncu_launch_identity(
     ):
         raise ChunkRefusal("sol_control_ncu_report_missing", repr(report))
     try:
-        report_bytes = _read_output_bytes(
-            report, code="label_capture_storage_failure",
-            operation="sol_ncu_identity_report_read",
-        )
         function_bytes = expected_function.encode("ascii")
     except UnicodeEncodeError as exc:
         raise ChunkRefusal(
             "sol_dynamic_launch_ncu_identity_mismatch", str(exc)
         ) from exc
-    occurrences = report_bytes.count(function_bytes)
+    report_sha256, report_occurrences = _retained_ncu_report_counts(
+        report,
+        (function_bytes,),
+        role="sol_ncu_identity_report",
+        storage_code="label_capture_storage_failure",
+    )
+    occurrences = report_occurrences[0]
     observation = label.get("ncu_launch_observation_document") or {}
     observed_key = _observation_ncu_launch_key(observation)
     if (
         occurrences <= 0 or label.get("launch_index") != ordinal
         or observed_key != expected_key
-        or observation.get("report_sha256") != _sha256_output_file(
-            report, code="label_capture_storage_failure",
-            operation="sol_ncu_identity_report_hash",
-        )
+        or observation.get("report_sha256") != report_sha256
     ):
         raise ChunkRefusal(
             "sol_dynamic_launch_ncu_identity_mismatch",
@@ -9293,10 +11293,7 @@ def bind_unique_ncu_launch_identity(
         "device_id": expected_key[3],
         "launch_tuple_inventory_occurrences": 1,
         "kernel_name_report_occurrences": occurrences,
-        "ncu_report_sha256": _sha256_output_file(
-            report, code="label_capture_storage_failure",
-            operation="sol_ncu_identity_binding_report_hash",
-        ),
+        "ncu_report_sha256": report_sha256,
         "ncu_launch_observation_sha256": observation.get(
             "observation_sha256"
         ),
@@ -9440,9 +11437,8 @@ def build_dynamic_launch_completeness(
                 "kernel_name_report_occurrences": observed_identity.get(
                     "kernel_name_report_occurrences"
                 ),
-                "ncu_report_sha256": _sha256_output_file(
-                    label["ncu_report"], code="label_capture_storage_failure",
-                    operation="sol_completeness_report_hash",
+                "ncu_report_sha256": observed_identity.get(
+                    "ncu_report_sha256"
                 ),
                 "ncu_launch_observation_sha256": (
                     label.get("ncu_launch_observation_document") or {}
@@ -9473,9 +11469,8 @@ def build_dynamic_launch_completeness(
             "trace_complete": trace_complete,
             "ncu_label_complete": label_complete,
             "ncu_report_sha256": (
-                _sha256_output_file(
-                    label["ncu_report"], code="label_capture_storage_failure",
-                    operation="sol_completeness_join_report_hash",
+                (label.get("ncu_launch_identity") or {}).get(
+                    "ncu_report_sha256"
                 ) if label is not None else None
             ),
             "ncu_label_typed_reason": (
@@ -9543,24 +11538,114 @@ def build_dynamic_launch_completeness(
     return result
 
 
-def _remove_routed_raw_trace(trace: dict, *, cell_dir: Path) -> None:
+def _retain_routed_raw_trace_evidence(trace: dict, *, cell_dir: Path) -> None:
+    """Retain publication and bind unique full raw trace evidence."""
+
+    control_generation = _require_trace_control_generation(trace)
+    publication = trace.get("trace_dir")
+    if not isinstance(publication, Path):
+        raise ChunkRefusal(
+            "trace_publication_generation_invalid", repr(publication)
+        )
+    publication_generation = trace.get(_TRACE_PUBLICATION_GENERATION_KEY)
+    try:
+        if publication_generation is None:
+            if control_generation.path == publication:
+                publication_generation = control_generation
+            else:
+                publication_generation = _open_retained_trace_generation(
+                    publication
+                )
+            trace[_TRACE_PUBLICATION_GENERATION_KEY] = publication_generation
+        if (
+            not isinstance(publication_generation, _RetainedTraceGeneration)
+            or publication_generation.path != publication
+        ):
+            raise ChunkRefusal(
+                "trace_publication_generation_invalid",
+                "publication trace generation does not match trace_dir",
+            )
+        publication_generation.verify_unchanged()
+    except ChunkRefusal:
+        raise
+    except (
+        immutable.ImmutableArtifactError, OSError, MemoryError,
+    ) as exc:
+        raise _translate_trace_generation_error(
+            exc, context="publication trace generation retention",
+        ) from exc
     if not trace.get("routed"):
         return
     raw = trace.get("raw_trace_dir")
-    expected = cell_dir / "trace_full_raw"
+    publication = trace.get("trace_dir")
+    control_source = trace.get("control_trace_dir")
+    expected_raw = cell_dir / "trace_full_raw"
+    expected_publication = cell_dir / "trace"
     if (
         not isinstance(raw, Path)
-        or raw != expected
+        or raw != expected_raw
+        or control_source != raw
+        or control_generation.path != raw
+        or publication != expected_publication
+        or raw == publication
         or raw.is_symlink()
         or not raw.is_dir()
+        or publication.is_symlink()
+        or not publication.is_dir()
     ):
-        raise ChunkRefusal("trace_raw_cleanup_refused", repr(raw))
-    _rmtree_output(
-        raw, code="trace_raw_cleanup_storage_failure",
-        operation="routed_raw_trace_cleanup",
+        raise ChunkRefusal(
+            "trace_raw_retention_refused",
+            repr({
+                "raw_trace_dir": raw,
+                "control_trace_dir": control_source,
+                "publication_trace_dir": publication,
+            }),
+        )
+    route_result = trace.get("route_result")
+    full_trace = (
+        route_result.get("full_trace")
+        if isinstance(route_result, dict) else None
     )
-    if raw.exists() or raw.is_symlink():
-        raise ChunkRefusal("trace_raw_cleanup_failed", str(raw))
+    if not isinstance(full_trace, dict):
+        raise ChunkRefusal(
+            "trace_raw_retention_route_missing",
+            "routed trace record has no full_trace identity",
+        )
+    try:
+        rows: list[dict[str, Any]] = []
+        for relative_path, metadata in sorted(control_generation.tree.files):
+            payload = control_generation.read_bytes(relative_path)
+            rows.append({
+                "relative_path": relative_path,
+                "size_bytes": metadata[4],
+                "sha256": hashlib.sha256(payload).hexdigest(),
+            })
+        control_generation.verify_unchanged()
+        total_bytes = sum(row["size_bytes"] for row in rows)
+        tree_sha256 = canonical_sha256(rows)
+    except ChunkRefusal:
+        raise
+    except (
+        immutable.ImmutableArtifactError, OSError, MemoryError,
+    ) as exc:
+        raise _translate_trace_generation_error(
+            exc, context="routed full raw evidence retention",
+        ) from exc
+    if (
+        not rows
+        or full_trace.get("tree_bytes") != total_bytes
+        or full_trace.get("tree_sha256") != tree_sha256
+    ):
+        raise ChunkRefusal(
+            "trace_raw_retention_route_mismatch",
+            repr({
+                "expected_tree_bytes": full_trace.get("tree_bytes"),
+                "observed_tree_bytes": total_bytes,
+                "expected_tree_sha256": full_trace.get("tree_sha256"),
+                "observed_tree_sha256": tree_sha256,
+            }),
+        )
+    trace[_ROUTED_RAW_EVIDENCE_INVENTORY_KEY] = rows
 
 
 def inventory_cell_artifacts(
@@ -9696,6 +11781,15 @@ def inventory_cell_artifacts(
                 kind = "trace_threadblock"
             elif rel.parts and rel.parts[0] == "trace":
                 kind = "trace_auxiliary"
+            elif rel.parts and rel.parts[0] == "trace_full_raw":
+                # The route publication remains exclusively under ``trace``.
+                # Full raw bytes are sealed only as non-publication evidence.
+                kind = "trace_auxiliary"
+            elif (
+                rel.parts
+                and rel.parts[0] == ".trace_routed_raw.ac9_work"
+            ):
+                kind = "trace_route_evidence"
             elif rel.parts and rel.parts[0] in {"sol_stage", "sol_requests"}:
                 kind = "sol_capture_evidence"
             elif rel.parts and rel.parts[0] in {
@@ -9714,6 +11808,37 @@ def inventory_cell_artifacts(
                     "artifact_kind_unclassified", f"{path} ({rel.as_posix()})"
                 )
         artifacts.append(artifact_row(path, root=chunk_root, artifact_kind=kind))
+    if trace.get("routed"):
+        expected_raw_inventory = trace.get(
+            _ROUTED_RAW_EVIDENCE_INVENTORY_KEY
+        )
+        raw_prefix = (
+            (cell_dir / "trace_full_raw").relative_to(chunk_root).as_posix()
+            + "/"
+        )
+        actual_raw_inventory = sorted(
+            ({
+                "relative_path": row["relative_path"][len(raw_prefix):],
+                "size_bytes": row["size_bytes"],
+                "sha256": row["sha256"],
+            } for row in artifacts
+             if row["relative_path"].startswith(raw_prefix)),
+            key=lambda row: row["relative_path"],
+        )
+        if (
+            not isinstance(expected_raw_inventory, list)
+            or actual_raw_inventory != expected_raw_inventory
+            or any(
+                row["artifact_kind"] != "trace_auxiliary"
+                for row in artifacts
+                if row["relative_path"].startswith(raw_prefix)
+            )
+        ):
+            raise ChunkRefusal(
+                "trace_raw_evidence_inventory_mismatch",
+                "sealed full raw evidence differs from its retained route "
+                "generation",
+            )
     base_required = {
         "trace_manifest", "control_bits", "control_manifest", "cell_result",
     }
@@ -9733,10 +11858,8 @@ def inventory_cell_artifacts(
         "trace_unsupported", "supplemental_dynamic_launch_set_incomplete",
     }:
         if trace.get("routed"):
-            # A certified budget route intentionally removes the raw trace
-            # tree only after the retained auxiliary payload and route record
-            # are sealed.  Requiring raw root/stats after that cleanup makes
-            # every valid typed-unavailable result impossible to inventory.
+            # The routed publication remains under ``trace`` while the complete
+            # raw generation is retained separately as trace_auxiliary evidence.
             required = base_required | {
                 "trace_auxiliary", "trace_route_record",
             }
@@ -9767,7 +11890,8 @@ def inventory_cell_artifacts(
 
 def capture_cell(
     *, cell: dict, cell_dir: Path, matrix: dict, pins: dict,
-    cell_budgets: Any, expected_tracer_sha256: str,
+    cell_budgets: Any, tracer_source_path: Path,
+    expected_tracer_sha256: str,
     capture_provenance: dict[str, Any],
     expected_ncu_identity: ncu_executor.ExpectedNcuIdentity,
     expected_gpu_uuid_sha256: str,
@@ -9783,6 +11907,77 @@ def capture_cell(
     supplemental_definition_path: Path | None = None,
     launch_set_preflight_manifest: dict[str, Any] | None = None,
     launch_set_registry: Any = None,
+) -> dict:
+    """Run one cell while owning every returned retained trace capability."""
+    trace_owner = contextlib.ExitStack()
+    primary: BaseException | None = None
+    try:
+        result = _capture_cell_with_trace_owner(
+            cell=cell,
+            cell_dir=cell_dir,
+            matrix=matrix,
+            pins=pins,
+            cell_budgets=cell_budgets,
+            tracer_source_path=tracer_source_path,
+            expected_tracer_sha256=expected_tracer_sha256,
+            capture_provenance=capture_provenance,
+            expected_ncu_identity=expected_ncu_identity,
+            expected_gpu_uuid_sha256=expected_gpu_uuid_sha256,
+            selected_host_gpu_index=selected_host_gpu_index,
+            certified_sol_env=certified_sol_env,
+            sol_environment_probe=sol_environment_probe,
+            module_store=module_store,
+            expected_sol_fingerprint_pin=expected_sol_fingerprint_pin,
+            workload_row_binding=workload_row_binding,
+            supplemental_runnability_evidence=(
+                supplemental_runnability_evidence
+            ),
+            runnability_path=runnability_path,
+            supplemental_workload_path=supplemental_workload_path,
+            supplemental_definition_path=supplemental_definition_path,
+            launch_set_preflight_manifest=launch_set_preflight_manifest,
+            launch_set_registry=launch_set_registry,
+            _trace_owner=trace_owner,
+        )
+    except BaseException as exc:
+        primary = exc
+        raise
+    finally:
+        try:
+            trace_owner.close()
+        except BaseException as cleanup_error:
+            if primary is None:
+                raise
+            try:
+                primary.add_note(
+                    "capture cell retained trace cleanup failed: "
+                    f"{type(cleanup_error).__name__}: {cleanup_error}"
+                )
+            except (AttributeError, TypeError):
+                pass
+    return result
+
+
+def _capture_cell_with_trace_owner(
+    *, cell: dict, cell_dir: Path, matrix: dict, pins: dict,
+    cell_budgets: Any, tracer_source_path: Path,
+    expected_tracer_sha256: str,
+    capture_provenance: dict[str, Any],
+    expected_ncu_identity: ncu_executor.ExpectedNcuIdentity,
+    expected_gpu_uuid_sha256: str,
+    selected_host_gpu_index: int,
+    certified_sol_env: dict[str, str] | None,
+    sol_environment_probe: dict[str, Any] | None,
+    module_store: Path,
+    expected_sol_fingerprint_pin: dict[str, Any] | None = None,
+    workload_row_binding: dict[str, Any] | None = None,
+    supplemental_runnability_evidence: dict[str, Any] | None = None,
+    runnability_path: Path | None = None,
+    supplemental_workload_path: Path | None = None,
+    supplemental_definition_path: Path | None = None,
+    launch_set_preflight_manifest: dict[str, Any] | None = None,
+    launch_set_registry: Any = None,
+    _trace_owner: contextlib.ExitStack,
 ) -> dict:
     try:
         ncu_executor.validate_expected_ncu_identity(expected_ncu_identity)
@@ -9996,7 +12191,7 @@ def capture_cell(
         )
         trace = capture_trace(
             cell=cell, binary=binary, invocation=invocation, budget=budget,
-            cell_dir=cell_dir, pins=pins,
+            cell_dir=cell_dir, pins=pins, tracer_source_path=tracer_source_path,
             expected_tracer_sha256=expected_tracer_sha256,
             runtime_cwd=runtime_cwd, runtime_env=trace_env,
             timeout_s=remaining("trace"),
@@ -10004,6 +12199,9 @@ def capture_cell(
             phase_env_factory=phase_env_factory,
             phase_result_validator=phase_validator,
             all_profiler_roi_launches=True,
+        )
+        _trace_owner.callback(
+            _release_trace_control_generation_if_owned, trace,
         )
         _require_hash(
             binary, invocation["executable_sha256"], "binary after trace"
@@ -10158,13 +12356,16 @@ def capture_cell(
             )
         trace = capture_trace(
             cell=cell, binary=binary, invocation=invocation, budget=budget,
-            cell_dir=cell_dir, pins=pins,
+            cell_dir=cell_dir, pins=pins, tracer_source_path=tracer_source_path,
             expected_tracer_sha256=expected_tracer_sha256,
             runtime_cwd=runtime_cwd, runtime_env=trace_env,
             timeout_s=remaining("trace"),
             capture_provenance=capture_provenance,
             phase_env_factory=phase_env_factory,
             phase_result_validator=phase_validator,
+        )
+        _trace_owner.callback(
+            _release_trace_control_generation_if_owned, trace,
         )
         _require_hash(
             binary, invocation["executable_sha256"], "binary after trace"
@@ -10206,7 +12407,7 @@ def capture_cell(
         )
         if supplemental_all_launches else None
     )
-    _remove_routed_raw_trace(trace, cell_dir=cell_dir)
+    _retain_routed_raw_trace_evidence(trace, cell_dir=cell_dir)
     guard_post = live_capture_guard(pins)
     trace_outcome = trace.get("outcome")
     if supplemental_all_launches:
@@ -12231,7 +14432,9 @@ def _validate_referenced_preflight(
         require_fresh=require_fresh,
         admitted_at_utc=admitted_at_utc,
     )
-    validate_live_injection_hashes(manifest, pins)
+    validate_live_injection_hashes(
+        manifest, pins, require_fresh=require_fresh,
+    )
     return manifest, expected_ncu_identity
 
 
@@ -12851,6 +15054,10 @@ def run_chunk(args: argparse.Namespace) -> Path:
             result = capture_cell(
                 cell=cell, cell_dir=cell_dir, matrix=matrix, pins=pins,
                 cell_budgets=cell_budgets,
+                tracer_source_path=Path(
+                    preflight_manifest["checks"]["injection_runtime"]
+                    ["tracer_source_path"]
+                ),
                 expected_tracer_sha256=(
                     preflight_manifest["checks"]["injection_runtime"]
                     ["tracer_so_sha256"]

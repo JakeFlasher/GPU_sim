@@ -795,6 +795,14 @@
       "can_collect": false,
       "category": "runtime_dependency",
       "lifecycle": "active",
+      "path": "tools/nvbit_tracer/external_tracer_build.py",
+      "reason": "External NVBit tracer build authority; trace instrumentation only and never an M5 quantity authority."
+    },
+    {
+      "authority_candidate": false,
+      "can_collect": false,
+      "category": "runtime_dependency",
+      "lifecycle": "active",
       "path": "tools/nvbit_tracer/nvbit_release/core/nvbit.h",
       "reason": "Controller-checked NVBit version header; never an M5 quantity authority."
     },

@@ -8,6 +8,7 @@ import os
 import shutil
 import stat
 import subprocess
+import time
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -127,6 +128,47 @@ def _canonical_launch(
         "block_dim": [128, 1, 1] if block is None else block,
         "grid_dim": [1, 1, 1] if grid is None else grid,
     }
+
+
+def _write_valid_split_trace(root: Path) -> None:
+    bindings = cc.preflight.load_dynamic_trace_bindings()
+    root.mkdir(parents=True, exist_ok=True)
+    trace = bindings.trace_pb2.Trace()
+    trace.trace_contract_id = "sm86_addr_carry_shmem_split_v2"
+    trace.memory_payload_classes.extend([1, 2, 3, 6, 8])
+    device = trace.gpu_device[0]
+    device.id = 0
+    stream = device.streams[0]
+    stream.id = 0
+    kernel = stream.kernels.add()
+    kernel.id = 1
+    kernel.name = "_Z15syntheticKernelv___0"
+    kernel.function_unique_id = 1
+    kernel.grid_dim.x = kernel.grid_dim.y = kernel.grid_dim.z = 1
+    kernel.block_dim.x = 128
+    kernel.block_dim.y = kernel.block_dim.z = 1
+    kernel.size_shared_memory = 6144
+    kernel.shared_memory_static_bytes = 2048
+    kernel.shared_memory_dynamic_bytes = 4096
+    (root / "dynamic_trace.pb").write_bytes(trace.SerializeToString())
+
+    threadblock = bindings.threadblock_pb2.threadblock()
+    threadblock.block_id.x = threadblock.block_id.y = threadblock.block_id.z = 0
+    warp = threadblock.warps[0]
+    warp.id = 0
+    instruction = warp.instructions.add()
+    instruction.pc = instruction.vpc = 0x1000
+    instruction.active_mask = instruction.predicate_mask = 1
+    instruction.function_unique_id = 1
+    instruction.data_width = 4
+    instruction.warpid_tb = 0
+    payload = root / "threadblocks/device_0/stream_0/kernel_1/0.pb"
+    payload.parent.mkdir(parents=True, exist_ok=True)
+    payload.write_bytes(threadblock.SerializeToString())
+    (root / "stats.csv").write_text(
+        "kernel_id,total_insts,total_reported_insts\n1,1,1\n",
+        encoding="utf-8",
+    )
 
 
 def _canonical_observation(
@@ -437,6 +479,7 @@ def test_capture_cell_refuses_identity_mismatch_before_control(tmp_path, monkeyp
             matrix={},
             pins={},
             cell_budgets=object(),
+            tracer_source_path=tmp_path / "external-tracer.so",
             expected_tracer_sha256="9" * 64,
             capture_provenance={
                 "capture_started_at_utc": "2026-07-10T12:00:00Z",
@@ -500,6 +543,7 @@ def test_supplemental_cell_gate_refuses_before_validation_or_capture(
             matrix={},
             pins={},
             cell_budgets=object(),
+            tracer_source_path=tmp_path / "external-tracer.so",
             expected_tracer_sha256="9" * 64,
             capture_provenance={
                 "capture_started_at_utc": "2026-07-10T12:00:00Z",
@@ -666,14 +710,31 @@ def _preflight(root: Path) -> dict:
         "admitted_insts": 4800, "expected_insts": 4800,
         "validator_ok": True, "threadblocks_pb_count": 4,
         "root_trace_ok": True, "root_trace_pb_bytes": 100,
-        "root_trace_contract_id": "sm86_addr_carry_v1",
+        "root_trace_contract_id": "sm86_addr_carry_shmem_split_v2",
         "root_trace_memory_payload_classes": [1, 2, 3, 6, 8],
         "root_trace_launch_count": 1,
+        "root_trace_launches": [{
+            "device_id": 0,
+            "stream_id": 0,
+            "kernel_id": 0,
+            "kernel_name": "preflight_smoke",
+            "grid_dim": [4, 1, 1],
+            "block_dim": [32, 1, 1],
+            "shared_memory_static_bytes": 2048,
+            "shared_memory_dynamic_bytes": 4096,
+        }],
         "full_coverage_ok": True, "grid_threadblock_count": 4,
         "decoded_threadblock_count": 4, "decoded_record_count": 1632,
         "zero_record_threadblock_count": 0,
         "sampling_sidecar_present": False, "stats_row_count": 1,
+        "tracer_source_kind": "external_non_git_retained_descriptor_v1",
+        "tracer_source_path": "/tmp/external-build/tracer_tool.so",
         "tracer_so_sha256": "c" * 64, "smoke_binary_sha256": "d" * 64,
+        "smoke_root_path": str(root / "preflight-smoke"),
+        "smoke_trace_root_path": str(root / "preflight-smoke" / "trace"),
+        "smoke_trace_retention": "preserved_exact_admitted_generation_v1",
+        "trace_admission_sha256": "a" * 64,
+        "trace_filesystem_generation_sha256": "b" * 64,
         "dynamic_trace_pb_sha256": "e" * 64, "stats_csv_sha256": "f" * 64,
     })
     checks["sol_environment"].update({
@@ -712,7 +773,7 @@ def _preflight(root: Path) -> dict:
     })
     generated_at = datetime.now(timezone.utc).isoformat()
     return {
-        "schema_version": 3,
+        "schema_version": 4,
         "captured_at_utc": generated_at,
         "generated_at_utc": generated_at,
         "arch": "sm_86",
@@ -885,9 +946,46 @@ def test_preflight_schema_refusal_never_discloses_raw_gpu_uuid(
     assert raw_uuid not in capsys.readouterr().err
 
 
+def _historical_v3_preflight(root: Path) -> dict:
+    manifest = _preflight(root)
+    manifest["schema_version"] = 3
+    injection = manifest["checks"]["injection_runtime"]
+    injection["root_trace_contract_id"] = "sm86_addr_carry_v1"
+    injection.pop("tracer_source_kind")
+    injection.pop("tracer_source_path")
+    return manifest
+
+
+def test_historical_v3_preflight_is_finalization_only(tmp_path):
+    manifest = _historical_v3_preflight(tmp_path)
+    assert cc.validate_preflight_manifest(
+        manifest,
+        expected_head=HEAD,
+        expected_pins_sha256=SHA,
+        expected_output_root=tmp_path,
+        expected_ncu_version_prefix="2026.1.0",
+        require_fresh=False,
+    ) is None
+    with pytest.raises(
+        cc.ChunkRefusal,
+        match="schema_version 3 is historical-only and cannot authorize capture",
+    ):
+        cc.validate_preflight_manifest(
+            manifest,
+            expected_head=HEAD,
+            expected_pins_sha256=SHA,
+            expected_output_root=tmp_path,
+            expected_ncu_version_prefix="2026.1.0",
+            require_fresh=True,
+        )
+
+
 def _historical_v2_preflight(root: Path) -> dict:
     manifest = _preflight(root)
     manifest["schema_version"] = 2
+    manifest["checks"]["injection_runtime"]["root_trace_contract_id"] = (
+        "sm86_addr_carry_v1"
+    )
     manifest["checks"].pop("device")
     ncu = manifest["checks"]["ncu"]
     ncu["resolved_path"] = ncu["launcher_resolved_path"]
@@ -1113,6 +1211,65 @@ def test_preflight_rederives_and_rejects_contradictory_coverage(tmp_path):
         )
 
 
+def test_fresh_injection_hashes_use_external_preflight_tracer(
+    tmp_path, monkeypatch,
+):
+    tracer = tmp_path / "external-build" / "tracer_tool.so"
+    tracer.parent.mkdir()
+    tracer.write_bytes(b"external split tracer")
+    smoke = tmp_path / "smoke"
+    smoke.write_bytes(b"smoke")
+    manifest = _preflight(tmp_path)
+    injection = manifest["checks"]["injection_runtime"]
+    injection["tracer_source_path"] = str(tracer.resolve())
+    injection["tracer_so_sha256"] = cc.sha256_file(tracer)
+    injection["smoke_binary_sha256"] = cc.sha256_file(smoke)
+
+    def resolve(_relative, role):
+        assert role == "smoke binary"
+        return smoke
+
+    monkeypatch.setattr(cc, "_resolve_repo_path", resolve)
+    monkeypatch.setattr(
+        cc.preflight,
+        "_absolute_external_tracer",
+        lambda path, *, repo_root: Path(path).resolve(strict=True),
+    )
+    real_open = cc.immutable.open_retained_regular
+    real_sha256_file = cc.sha256_file
+
+    def open_bounded(path, **kwargs):
+        if Path(path) == tracer:
+            assert kwargs.get("max_bytes") == cc.EXTERNAL_TRACER_MAX_BYTES
+        return real_open(path, **kwargs)
+
+    def hash_nontracer(path):
+        assert Path(path) != tracer
+        return real_sha256_file(path)
+
+    monkeypatch.setattr(cc.immutable, "open_retained_regular", open_bounded)
+    monkeypatch.setattr(cc, "sha256_file", hash_nontracer)
+    cc.validate_live_injection_hashes(manifest, {}, require_fresh=True)
+
+
+def test_v4_finalization_does_not_reopen_ephemeral_external_tracer(
+    tmp_path, monkeypatch,
+):
+    smoke = tmp_path / "smoke"
+    smoke.write_bytes(b"smoke")
+    manifest = _preflight(tmp_path)
+    injection = manifest["checks"]["injection_runtime"]
+    injection["tracer_source_path"] = str(tmp_path / "absent-tracer.so")
+    injection["smoke_binary_sha256"] = cc.sha256_file(smoke)
+
+    def resolve(_relative, role):
+        assert role == "smoke binary"
+        return smoke
+
+    monkeypatch.setattr(cc, "_resolve_repo_path", resolve)
+    cc.validate_live_injection_hashes(manifest, {}, require_fresh=False)
+
+
 def test_artifact_row_hashes_relative_regular_file(tmp_path):
     root = tmp_path / "root"
     path = root / "nested" / "a.bin"
@@ -1213,7 +1370,230 @@ def test_trace_tree_bytes_refuses_symlink(tmp_path):
         cc._trace_tree_bytes(trace)
 
 
-def test_validate_direct_cell_rehashes_binary_and_requires_explicit_budget(tmp_path, monkeypatch):
+def test_trace_tree_bytes_enforces_directory_and_per_file_limits_before_inventory(
+    tmp_path, monkeypatch,
+):
+    trace = tmp_path / "trace"
+    trace.mkdir()
+    (trace / "one").mkdir()
+    (trace / "two").mkdir()
+    policy = cc._raw_trace_generation_policy()
+    policy["max_directories"] = 2
+    monkeypatch.setattr(cc, "_raw_trace_generation_policy", lambda: policy)
+    with pytest.raises(cc.immutable.ImmutableArtifactLimitError, match="directory count"):
+        cc._trace_tree_bytes(trace)
+
+    shutil.rmtree(trace / "two")
+    payload = trace / "payload.pb"
+    payload.write_bytes(b"1234")
+    policy["max_directories"] = 10
+    policy["max_file_bytes"] = 3
+    with pytest.raises(cc.immutable.ImmutableArtifactLimitError, match="per-file"):
+        cc._trace_tree_bytes(trace)
+
+
+def test_trace_tree_bytes_preserves_resource_failure_taxonomy(
+    tmp_path, monkeypatch,
+):
+    trace = tmp_path / "trace"
+    trace.mkdir()
+    monkeypatch.setattr(
+        cc.os, "scandir", lambda _path: (_ for _ in ()).throw(
+            OSError(errno.EMFILE, "descriptor limit")
+        ),
+    )
+    with pytest.raises(cc.immutable.ImmutableArtifactResourceError):
+        cc._trace_tree_bytes(trace)
+
+
+def test_routed_artifact_read_applies_shared_per_file_ceiling(
+    tmp_path, monkeypatch,
+):
+    routed = tmp_path / "routed"
+    routed.mkdir()
+    artifact = routed / "payload.bin"
+    artifact.write_bytes(b"oversized")
+    monkeypatch.setattr(
+        cc, "_raw_trace_file_byte_limit", lambda _path, _policy: 4,
+    )
+    with cc.immutable.PinnedDirectoryReader(routed) as reader:
+        with reader.retain_tree_generation(
+            **cc._bounded_raw_trace_tree_limits()
+        ) as tree:
+            route_result = {
+                "retained": {
+                    "artifacts": [{
+                        "relative_path": "payload.bin",
+                        "size_bytes": artifact.stat().st_size,
+                        "sha256": cc.sha256_file(artifact),
+                    }],
+                },
+            }
+            with pytest.raises(
+                cc.immutable.ImmutableArtifactLimitError,
+                match="per-file ceiling",
+            ):
+                cc._require_routed_trace_record_generation(
+                    route_result, reader, tree,
+                )
+
+
+def _stats_root_launch(
+    *, device: int, stream: int, kernel: int, name: str,
+) -> dict:
+    return {
+        "device_id": device,
+        "stream_id": stream,
+        "kernel_id": kernel,
+        "kernel_name": f"{name}___0",
+        "grid_dim": [2, 3, 1],
+        "block_dim": [4, 5, 1],
+    }
+
+
+def test_stats_rows_bind_real_tracer_kernel_trace_identity_and_all_columns():
+    root = {
+        "launches": [
+            _stats_root_launch(
+                device=0, stream=7, kernel=11, name="first",
+            ),
+            _stats_root_launch(
+                device=1, stream=8, kernel=12, name="second",
+            ),
+        ],
+    }
+    header = (
+        "device_id,stream_id,kernel id,kernel mangled name,"
+        "grid_dimX,grid_dimY,grid_dimZ,#blocks,"
+        "block_dimX,block_dimY,block_dimZ,#threads,total_insts\n"
+    )
+    stats = (
+        header
+        + "1, 8, kernel-12.trace, second, 2, 3, 1, 6, 4, 5, 1, 20, 100\n"
+        + "0, 7, kernel-11.trace, first, 2, 3, 1, 6, 4, 5, 1, 20, 200\n"
+    ).encode()
+    binding = cc._bind_stats_rows_to_root_launches(stats, root)
+    assert binding["identity_columns"] == [
+        "device_id", "stream_id", "kernel id", "kernel mangled name",
+        "grid_dimX", "grid_dimY", "grid_dimZ", "#blocks",
+        "block_dimX", "block_dimY", "block_dimZ", "#threads",
+    ]
+    assert [row["root_launch_ordinal"] for row in binding["rows"]] == [1, 0]
+
+    wrong_threads = stats.replace(b", 20, 100", b", 21, 100")
+    with pytest.raises(
+        cc.ChunkRefusal, match="trace_stats_launch_identity_mismatch",
+    ):
+        cc._bind_stats_rows_to_root_launches(wrong_threads, root)
+
+
+@pytest.mark.parametrize(
+    "kernel_identity",
+    [
+        "11",
+        "kernel-011.trace",
+        "kernel--1.trace",
+        "kernel-11",
+        "../kernel-11.trace",
+    ],
+)
+def test_stats_kernel_identity_refuses_nonproducer_formats(kernel_identity):
+    root = {
+        "launches": [
+            _stats_root_launch(device=0, stream=0, kernel=11, name="first"),
+        ],
+    }
+    stats = (
+        "kernel id,kernel mangled name,total_insts,total_reported_insts\n"
+        f"{kernel_identity},first,1,1\n"
+    ).encode()
+    with pytest.raises(cc.ChunkRefusal) as caught:
+        cc._bind_stats_rows_to_root_launches(stats, root)
+    assert caught.value.code == "trace_stats_identity_invalid"
+
+
+def test_stats_without_identity_refuse_multi_launch_but_allow_single_launch():
+    launches = [
+        _stats_root_launch(device=0, stream=0, kernel=1, name="one"),
+        _stats_root_launch(device=0, stream=0, kernel=2, name="two"),
+    ]
+    with pytest.raises(cc.ChunkRefusal) as caught:
+        cc._bind_stats_rows_to_root_launches(
+            b"total_insts\n10\n20\n", {"launches": launches},
+        )
+    assert caught.value.code == "trace_stats_multi_launch_identity_unsupported"
+    binding = cc._bind_stats_rows_to_root_launches(
+        b"total_insts\n10\n", {"launches": launches[:1]},
+    )
+    assert binding["policy"] == "row_count_only_single_launch"
+
+
+def test_sampling_generation_detects_mutation_after_immutable_commit(tmp_path):
+    output = tmp_path / "sampling"
+    policy = cc._raw_trace_generation_policy()
+    with cc.immutable.create_exclusive_directory_stage(
+        tmp_path, output.name,
+    ) as stage:
+        (Path(stage.proc_path) / "stats.csv").write_bytes(b"stable")
+        committed = stage.commit(
+            max_files=policy["max_files"],
+            max_directories=policy["max_directories"],
+            max_total_file_bytes=policy["max_total_file_bytes"],
+            max_total_relative_path_bytes=policy[
+                "max_total_relative_path_bytes"
+            ],
+            max_file_bytes=policy["max_file_bytes"],
+            max_file_bytes_by_path=policy["max_file_bytes_by_path"],
+        )
+    retained = cc._open_retained_trace_generation(output)
+    cc._require_retained_trace_matches_immutable_generation(retained, committed)
+    os.chmod(output, 0o755)
+    os.chmod(output / "stats.csv", 0o644)
+    (output / "stats.csv").write_bytes(b"mutated")
+    with pytest.raises(cc.immutable.ImmutableArtifactError):
+        cc._require_retained_trace_matches_immutable_generation(
+            retained, committed,
+        )
+    with pytest.raises(cc.immutable.ImmutableArtifactError):
+        retained.close()
+
+
+def test_authenticated_tracer_runtime_preserves_limit_and_resource_reasons(
+    tmp_path, monkeypatch,
+):
+    retained_tracer = SimpleNamespace(
+        path=tmp_path / "tracer.so", descriptor=7,
+    )
+
+    for reason, expected_code in (
+        ("runtime_dso_limit_exceeded", "trace_runtime_limit_exceeded"),
+        (
+            "runtime_resource_unavailable",
+            "trace_runtime_resource_unavailable",
+        ),
+    ):
+        def refuse_runtime(*_args, **_kwargs):
+            raise cc.nvbit_runtime_env.TracerRuntimeError(reason, "fixture")
+
+        monkeypatch.setattr(
+            cc.nvbit_runtime_env,
+            "retained_tracer_runtime_env",
+            refuse_runtime,
+        )
+        with pytest.raises(cc.ChunkRefusal) as caught:
+            with cc._authenticated_tracer_runtime_environment(
+                retained_tracer,
+                tmp_path,
+                {},
+                phase="fixture",
+            ):
+                pytest.fail("runtime refusal did not stop capture")
+        assert caught.value.code == expected_code
+
+
+def test_validate_direct_cell_rehashes_binary_and_requires_explicit_budget(
+    tmp_path, monkeypatch,
+):
     binary = tmp_path / "run"
     binary.write_text("binary")
     binary.chmod(0o755)
@@ -2527,8 +2907,8 @@ def test_fixture_launch_set_execution_rejects_sidecar_schema_drift(
             self.retained.close()
             return False
 
-    def retain_with_schema_drift(path):
-        retained = real_open(path)
+    def retain_with_schema_drift(path, **kwargs):
+        retained = real_open(path, **kwargs)
         if Path(path) == cc.sidecar_schema_authority.SCHEMA_PATH:
             return DriftingRetainedSchema(retained)
         return retained
@@ -2567,13 +2947,13 @@ def test_fixture_launch_set_execution_rejects_published_sidecar_tamper(
     )
     real_open = cc.immutable.open_retained_regular
 
-    def tamper_before_retention(path):
+    def tamper_before_retention(path, **kwargs):
         path = Path(path)
         if path.name == "label_0_0.json":
             path.chmod(0o600)
             path.write_bytes(b"{}\n")
             path.chmod(0o444)
-        return real_open(path)
+        return real_open(path, **kwargs)
 
     monkeypatch.setattr(
         cc.immutable, "open_retained_regular", tamper_before_retention,
@@ -3991,6 +4371,224 @@ def test_live_guard_refuses_unsettled_clock(monkeypatch):
         cc.live_capture_guard({})
 
 
+@pytest.mark.parametrize("exception_type", (KeyboardInterrupt, SystemExit))
+def test_run_logged_operator_interruption_reaps_and_closes_containment(
+    tmp_path,
+    monkeypatch,
+    exception_type,
+):
+    real_popen = cc.subprocess.Popen
+    real_sleep = cc.time.sleep
+    real_thread = cc.threading.Thread
+    processes = []
+    threads = []
+    containments = []
+    sleep_calls = 0
+
+    class RecordingThread(real_thread):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            threads.append(self)
+
+    class FakeContainment:
+        def __init__(self):
+            self.kill_calls = 0
+            self.finish_calls = 0
+
+        def popen(self, command, **kwargs):
+            process = real_popen(command, **kwargs)
+            processes.append(process)
+            return process
+
+        def kill_all(self):
+            self.kill_calls += 1
+
+        def finish(self):
+            self.finish_calls += 1
+            return None
+
+        def close_after_error(self):
+            self.kill_all()
+
+    def create():
+        value = FakeContainment()
+        containments.append(value)
+        return value
+
+    def interrupt_once(seconds):
+        nonlocal sleep_calls
+        sleep_calls += 1
+        if sleep_calls == 1:
+            raise exception_type("synthetic operator interruption")
+        return real_sleep(seconds)
+
+    monkeypatch.setattr(
+        cc.delegated_cgroup.DelegatedCgroupV2,
+        "create",
+        create,
+    )
+    monkeypatch.setattr(cc.threading, "Thread", RecordingThread)
+    monkeypatch.setattr(cc.time, "sleep", interrupt_once)
+
+    try:
+        with pytest.raises(exception_type, match="synthetic operator interruption"):
+            cc._run_logged(
+                [cc.sys.executable, "-c", "import time; time.sleep(60)"],
+                cwd=tmp_path,
+                env={},
+                timeout_s=5,
+                log_dir=tmp_path / "logs",
+                stem="interrupted",
+                failure_code="probe",
+                require_cgroup_containment=True,
+            )
+        assert len(processes) == 1 and processes[0].poll() is not None
+        assert len(threads) == 2 and not any(thread.is_alive() for thread in threads)
+        assert len(containments) == 1
+        assert containments[0].kill_calls >= 1
+        assert containments[0].finish_calls == 1
+    finally:
+        for process in processes:
+            if process.poll() is None:
+                os.killpg(process.pid, cc.signal.SIGKILL)
+                process.wait(timeout=2)
+
+
+def test_run_logged_interruption_cleanup_failure_takes_precedence(
+    tmp_path,
+    monkeypatch,
+):
+    real_popen = cc.subprocess.Popen
+    real_sleep = cc.time.sleep
+    processes = []
+    sleep_calls = 0
+
+    class FailingContainment:
+        def popen(self, command, **kwargs):
+            process = real_popen(command, **kwargs)
+            processes.append(process)
+            return process
+
+        def kill_all(self):
+            raise RuntimeError("synthetic persistent cgroup.kill failure")
+
+        def finish(self):
+            raise RuntimeError("synthetic persistent cgroup finish failure")
+
+        def close_after_error(self):
+            self.kill_all()
+
+    def interrupt_once(seconds):
+        nonlocal sleep_calls
+        sleep_calls += 1
+        if sleep_calls == 1:
+            raise KeyboardInterrupt("synthetic operator interruption")
+        return real_sleep(seconds)
+
+    monkeypatch.setattr(
+        cc.delegated_cgroup.DelegatedCgroupV2,
+        "create",
+        lambda: FailingContainment(),
+    )
+    monkeypatch.setattr(cc.time, "sleep", interrupt_once)
+
+    try:
+        with pytest.raises(cc.ChunkRefusal) as caught:
+            cc._run_logged(
+                [cc.sys.executable, "-c", "import time; time.sleep(60)"],
+                cwd=tmp_path,
+                env={},
+                timeout_s=5,
+                log_dir=tmp_path / "logs",
+                stem="cleanup-failure",
+                failure_code="probe",
+                require_cgroup_containment=True,
+            )
+        assert caught.value.code == "probe_cleanup_failed"
+        assert "persistent cgroup" in caught.value.detail
+        assert any(
+            "operator interruption" in note
+            for note in caught.value.__notes__
+        )
+        assert len(processes) == 1 and processes[0].poll() is not None
+    finally:
+        for process in processes:
+            if process.poll() is None:
+                os.killpg(process.pid, cc.signal.SIGKILL)
+                process.wait(timeout=2)
+
+
+def test_run_logged_bounds_stalled_contained_launch(tmp_path, monkeypatch):
+    closed = []
+
+    class StalledContainment:
+        def popen(self, _command, **_kwargs):
+            time.sleep(60)
+            pytest.fail("stalled Popen returned after launch deadline")
+
+        def close_after_error(self):
+            closed.append(True)
+
+    monkeypatch.setattr(
+        cc.delegated_cgroup.DelegatedCgroupV2,
+        "create",
+        lambda: StalledContainment(),
+    )
+
+    with pytest.raises(cc.ChunkRefusal) as caught:
+        cc._run_logged(
+            ["/synthetic/stalled-launch"],
+            cwd=tmp_path,
+            env={},
+            timeout_s=0.05,
+            log_dir=tmp_path / "logs",
+            stem="stalled-launch",
+            failure_code="probe",
+            require_cgroup_containment=True,
+        )
+
+    assert caught.value.code == "probe_timeout"
+    assert closed == [True]
+
+
+def test_run_logged_required_nvbit_containment_never_falls_back(
+    tmp_path, monkeypatch,
+):
+    monkeypatch.setattr(
+        cc.delegated_cgroup.DelegatedCgroupV2,
+        "create",
+        lambda: (_ for _ in ()).throw(
+            cc.delegated_cgroup.CgroupContainmentError(
+                "synthetic delegation unavailable"
+            )
+        ),
+    )
+    monkeypatch.setattr(
+        cc.subprocess,
+        "Popen",
+        lambda *_args, **_kwargs: pytest.fail("uncontained launch must not run"),
+    )
+
+    with pytest.raises(cc.ChunkRefusal) as caught:
+        cc._run_logged(
+            ["/synthetic/not-launched"],
+            cwd=tmp_path,
+            env={"CUDA_INJECTION64_PATH": "/proc/self/fd/7"},
+            timeout_s=1,
+            log_dir=tmp_path / "logs",
+            stem="containment",
+            failure_code="trace_target_failed",
+            require_cgroup_containment=True,
+        )
+
+    assert caught.value.code == "trace_target_failed_containment_unavailable"
+    assert "delegation unavailable" in caught.value.detail
+    assert (tmp_path / "logs/containment.stdout.log").read_bytes() == b""
+    assert "delegation unavailable" in (
+        tmp_path / "logs/containment.stderr.log"
+    ).read_text()
+
+
 def test_run_logged_translates_process_start_failure(tmp_path, monkeypatch):
     def fail_start(*_args, **_kwargs):
         raise FileNotFoundError("synthetic executable missing")
@@ -4005,6 +4603,787 @@ def test_run_logged_translates_process_start_failure(tmp_path, monkeypatch):
     assert "FileNotFoundError" in (
         tmp_path / "logs/start.stderr.log"
     ).read_text()
+
+
+@pytest.mark.parametrize(
+    "resource_errno", [errno.EAGAIN, errno.EMFILE, errno.ENFILE, errno.ENOMEM],
+)
+def test_run_logged_types_process_start_resource_exhaustion(
+    tmp_path, monkeypatch, resource_errno,
+):
+    def fail_start(*_args, **_kwargs):
+        raise OSError(resource_errno, "synthetic process resource exhaustion")
+
+    monkeypatch.setattr(cc.subprocess, "Popen", fail_start)
+    with pytest.raises(cc.ChunkRefusal) as caught:
+        cc._run_logged(
+            ["/synthetic/resource-bound"], cwd=tmp_path, env=None, timeout_s=1,
+            log_dir=tmp_path / "logs", stem="resource", failure_code="probe",
+        )
+    assert caught.value.code == "probe_output_resource_unavailable"
+    assert f"errno={resource_errno}" in caught.value.detail
+    assert (tmp_path / "logs/resource.stdout.log").read_bytes() == b""
+    assert "synthetic process resource exhaustion" in (
+        tmp_path / "logs/resource.stderr.log"
+    ).read_text()
+
+
+def test_run_logged_types_process_start_memory_exhaustion(
+    tmp_path, monkeypatch,
+):
+    def fail_start(*_args, **_kwargs):
+        raise MemoryError("synthetic process allocation exhaustion")
+
+    monkeypatch.setattr(cc.subprocess, "Popen", fail_start)
+    with pytest.raises(cc.ChunkRefusal) as caught:
+        cc._run_logged(
+            ["/synthetic/resource-bound"], cwd=tmp_path, env=None,
+            timeout_s=1, log_dir=tmp_path / "logs", stem="memory-resource",
+            failure_code="probe",
+        )
+
+    assert caught.value.code == "probe_output_resource_unavailable"
+    assert (tmp_path / "logs/memory-resource.stdout.log").read_bytes() == b""
+    assert "MemoryError" in (
+        tmp_path / "logs/memory-resource.stderr.log"
+    ).read_text()
+
+
+def test_run_logged_allocates_bounded_state_before_popen(
+    tmp_path, monkeypatch,
+):
+    popen_called = False
+
+    def fail_state_allocation():
+        raise MemoryError("synthetic bounded state allocation exhaustion")
+
+    def unexpected_popen(*_args, **_kwargs):
+        nonlocal popen_called
+        popen_called = True
+        pytest.fail("Popen ran after bounded output state allocation failed")
+
+    monkeypatch.setattr(cc.threading, "Event", fail_state_allocation)
+    monkeypatch.setattr(cc.subprocess, "Popen", unexpected_popen)
+
+    with pytest.raises(cc.ChunkRefusal) as caught:
+        cc._run_logged(
+            ["/synthetic/not-started"], cwd=tmp_path, env=None,
+            timeout_s=1, log_dir=tmp_path / "logs", stem="pre-popen-state",
+            failure_code="probe",
+        )
+
+    assert caught.value.code == "probe_output_resource_unavailable"
+    assert popen_called is False
+    assert (tmp_path / "logs/pre-popen-state.stdout.log").read_bytes() == b""
+    assert "bounded output state allocation failed" in (
+        tmp_path / "logs/pre-popen-state.stderr.log"
+    ).read_text()
+
+
+def test_retained_ncu_report_counts_hashes_the_same_bounded_bytes(
+    tmp_path, monkeypatch,
+):
+    report = tmp_path / "report.ncu-rep"
+    payload = b"kernel_A\0raw-control\0kernel_A"
+    report.write_bytes(payload)
+    report.chmod(0o444)
+    real_path_read_bytes = Path.read_bytes
+
+    def reject_path_read(path: Path) -> bytes:
+        if path == report:
+            pytest.fail("NCU report was reopened through its pathname")
+        return real_path_read_bytes(path)
+
+    monkeypatch.setattr(Path, "read_bytes", reject_path_read)
+    report_sha256, counts = cc._retained_ncu_report_counts(
+        report,
+        (b"kernel_A", b"raw-control"),
+        role="test_ncu_report",
+        storage_code="test_storage_failure",
+    )
+
+    assert report_sha256 == hashlib.sha256(payload).hexdigest()
+    assert counts == (2, 1)
+
+
+def test_retained_ncu_report_counts_refuses_oversize_before_read(
+    tmp_path, monkeypatch,
+):
+    report = tmp_path / "report.ncu-rep"
+    report.write_bytes(b"12345")
+    report.chmod(0o444)
+    monkeypatch.setattr(cc.parse_ncu_metrics, "NCU_REPORT_MAX_BYTES", 4)
+
+    with pytest.raises(cc.ChunkRefusal) as caught:
+        cc._retained_ncu_report_counts(
+            report,
+            (b"1",),
+            role="test_ncu_report",
+            storage_code="test_storage_failure",
+        )
+
+    assert caught.value.code == "test_ncu_report_limit_exceeded"
+
+
+def test_ncu_import_consumes_caller_owned_retained_report(
+    tmp_path, monkeypatch,
+):
+    report = tmp_path / "report.ncu-rep"
+    report.write_bytes(b"retained report bytes")
+    report.chmod(0o444)
+    retained = cc.immutable.open_retained_regular(
+        report, max_bytes=cc.parse_ncu_metrics.NCU_REPORT_MAX_BYTES,
+    )
+    retained_proc_path = retained.proc_path
+    observed = []
+
+    def unexpected_reopen(*_args, **_kwargs):
+        pytest.fail("retained NCU importer reopened the report pathname")
+
+    def execute(_expected, arguments, **kwargs):
+        observed.append((tuple(arguments), kwargs.get("retained_report")))
+        return SimpleNamespace(
+            returncode=1, stdout=b"", stderr=b"synthetic import refusal",
+        )
+
+    monkeypatch.setattr(
+        cc.parse_ncu_metrics.immutable,
+        "open_retained_regular",
+        unexpected_reopen,
+    )
+    monkeypatch.setattr(
+        cc.parse_ncu_metrics.ncu_executor, "execute_ncu_action", execute,
+    )
+    try:
+        imported, error = cc.parse_ncu_metrics._import_retained_report_csv(
+            _expected_ncu_identity(), retained,
+        )
+        os.fstat(retained.descriptor)
+    finally:
+        retained.close()
+
+    assert imported is None
+    assert error is not None and error.typed_reason == "ncu_import_failed"
+    assert len(observed) == 1
+    assert observed[0][1] is retained
+    assert retained_proc_path in observed[0][0]
+
+
+def test_ncu_import_refuses_oversize_report_before_ncu_execution(
+    tmp_path, monkeypatch,
+):
+    report = tmp_path / "report.ncu-rep"
+    report.write_bytes(b"12345")
+    report.chmod(0o444)
+    monkeypatch.setattr(cc.parse_ncu_metrics, "NCU_REPORT_MAX_BYTES", 4)
+
+    def unexpected_execute(*_args, **_kwargs):
+        pytest.fail("NCU executed before oversized report admission")
+
+    monkeypatch.setattr(
+        cc.parse_ncu_metrics.ncu_executor,
+        "execute_ncu_action",
+        unexpected_execute,
+    )
+    imported, error = cc.parse_ncu_metrics._import_report_csv(
+        _expected_ncu_identity(), report,
+    )
+
+    assert imported is None
+    assert error is not None
+    assert error.typed_reason == "ncu_import_report_identity_invalid"
+    assert "bounded snapshot limit" in error.detail
+
+
+def _install_direct_control_output(
+    tmp_path: Path, monkeypatch, payload: bytes,
+) -> tuple[Path, Path]:
+    cell_dir = tmp_path / "cell"
+    cell_dir.mkdir()
+    output = cell_dir / "control_bits.json"
+
+    def run_logged(command, *, log_dir, stem, **_kwargs):
+        assert Path(command[command.index("--out") + 1]) == output
+        output.write_bytes(payload)
+        log_dir.mkdir(parents=True, exist_ok=True)
+        stdout = log_dir / f"{stem}.stdout.log"
+        stderr = log_dir / f"{stem}.stderr.log"
+        stdout.write_bytes(b"")
+        stderr.write_bytes(b"")
+        return 0.01, stdout, stderr
+
+    monkeypatch.setattr(cc, "_run_logged", run_logged)
+    return cell_dir, output
+
+
+def test_capture_control_hashes_exact_retained_bytes(tmp_path, monkeypatch):
+    payload = json.dumps({
+        "arch": "sm_86",
+        "toolkit_version": "13.2",
+        "summary": {"total_decoded": 1, "total_unknown_encoding": 0},
+    }, separators=(",", ":")).encode() + b"\n"
+    cell_dir, output = _install_direct_control_output(
+        tmp_path, monkeypatch, payload,
+    )
+    real_path_read_bytes = Path.read_bytes
+
+    def reject_path_read(path: Path) -> bytes:
+        if path == output:
+            pytest.fail("direct control output was reopened through its pathname")
+        return real_path_read_bytes(path)
+
+    monkeypatch.setattr(Path, "read_bytes", reject_path_read)
+    result = cc.capture_control(
+        cell={"identity": "fixture-cell"}, binary=tmp_path / "binary",
+        invocation={"executable_sha256": "7" * 64}, cell_dir=cell_dir,
+    )
+
+    assert result["control_bits_sha256"] == hashlib.sha256(payload).hexdigest()
+    wrapper = json.loads((cell_dir / "control_capture_manifest.json").read_text())
+    assert wrapper["control_bits_sha256"] == hashlib.sha256(payload).hexdigest()
+
+
+def test_capture_control_refuses_oversize_retained_output(
+    tmp_path, monkeypatch,
+):
+    payload = json.dumps({
+        "arch": "sm_86",
+        "summary": {"total_decoded": 1, "total_unknown_encoding": 0},
+    }).encode()
+    cell_dir, _output = _install_direct_control_output(
+        tmp_path, monkeypatch, payload,
+    )
+    monkeypatch.setattr(cc, "_CONTROL_OUTPUT_MAX_BYTES", len(payload) - 1)
+
+    with pytest.raises(cc.ChunkRefusal) as caught:
+        cc.capture_control(
+            cell={"identity": "fixture-cell"}, binary=tmp_path / "binary",
+            invocation={"executable_sha256": "7" * 64}, cell_dir=cell_dir,
+        )
+
+    assert caught.value.code == "control_output_limit_exceeded"
+    assert not (cell_dir / "control_capture_manifest.json").exists()
+
+
+def test_run_logged_passes_retained_descriptor_to_ordinary_child(tmp_path):
+    payload = tmp_path / "retained.bin"
+    payload.write_bytes(b"descriptor-bound tracer")
+    descriptor = os.open(payload, os.O_RDONLY)
+    try:
+        _elapsed, stdout, _stderr = cc._run_logged(
+            [
+                cc.sys.executable,
+                "-c",
+                (
+                    "import pathlib,sys; "
+                    "sys.stdout.buffer.write(pathlib.Path(sys.argv[1]).read_bytes())"
+                ),
+                f"/proc/self/fd/{descriptor}",
+            ],
+            cwd=tmp_path, env=None, timeout_s=5,
+            log_dir=tmp_path / "logs", stem="descriptor", failure_code="probe",
+            pass_fds=(descriptor,),
+        )
+    finally:
+        os.close(descriptor)
+    assert stdout.read_bytes() == b"descriptor-bound tracer"
+
+
+def test_run_logged_refuses_ordinary_pass_fds_with_ncu_supervision(tmp_path):
+    descriptor = os.open("/dev/null", os.O_RDONLY)
+    try:
+        with pytest.raises(cc.ChunkRefusal) as caught:
+            cc._run_logged(
+                ["/bin/true"], cwd=tmp_path, env=None, timeout_s=5,
+                log_dir=tmp_path / "logs", stem="mixed", failure_code="probe",
+                supervised_ncu_identity=_expected_ncu_identity(),
+                supervised_executable_identity=(
+                    cc.ncu_executor.ExpectedExecutableIdentity(
+                        "/bin/true", "b" * 64, 0o755,
+                    )
+                ),
+                supervised_ncu_environment=cc.ncu_executor.NcuCollectionEnvironment({
+                    "LANG": "C", "LANGUAGE": "C", "LC_ALL": "C",
+                    "PATH": "/usr/local/cuda-13.2/bin:/usr/bin:/bin",
+                    "PWD": str(tmp_path),
+                    "PYTHONNOUSERSITE": "1", "LABEL_DRIVER_GPU_INDEX": "0",
+                    "LABEL_DRIVER_PRESERVE_FAILED_EVIDENCE": "1",
+                }),
+                pass_fds=(descriptor,),
+            )
+    finally:
+        os.close(descriptor)
+    assert caught.value.code == "probe_supervision_invalid"
+    assert "ordinary pass_fds" in caught.value.detail
+
+
+@pytest.mark.parametrize("route_sampling", [False, True])
+def test_capture_trace_binds_external_tracer_descriptor_for_every_phase(
+    tmp_path, monkeypatch, route_sampling,
+):
+    tracer = tmp_path / "external-build" / "tracer_tool.so"
+    tracer.parent.mkdir()
+    tracer.write_bytes(b"retained split-capable tracer")
+    tracer_sha256 = cc.sha256_file(tracer)
+    binary = tmp_path / "target"
+    binary.write_bytes(b"target")
+    cell_dir = tmp_path / "cell"
+    cell_dir.mkdir()
+    pb_lib = tmp_path / "pb-lib"
+    pb_lib.mkdir()
+    invocation = _canonical_launch_invocation()
+    invocation["trace_app_args"] = []
+    invocation["executable_sha256"] = cc.sha256_file(binary)
+    runtime_calls: list[tuple[Path, Path, int]] = []
+    observed_modes: list[str] = []
+    observed_descriptors: list[int] = []
+    observed_output_targets: list[Path] = []
+    hostile_controls = {
+        "LD_PRELOAD": "/hostile/preload.so",
+        "LD_AUDIT": "/hostile/audit.so",
+        "NVBIT_PB_PREFIX": "/hostile/pb",
+        "SIMBENCH_NVBIT_PHASE_INJECT": "hostile",
+        "TRACE_SAMPLING_SIDECAR": "/hostile/sidecar.json",
+        "TOOL_VERBOSE": "99",
+    }
+
+    def resolve(_relative, role):
+        assert role == "protobuf runtime"
+        return pb_lib
+
+    class FixtureRetainedRuntime:
+        def __init__(self, environment: dict[str, str], directory: Path):
+            self._descriptor = os.open(
+                directory, os.O_RDONLY | os.O_DIRECTORY
+            )
+            self.environment = {
+                **environment,
+                "LD_LIBRARY_PATH": f"/proc/self/fd/{self._descriptor}",
+            }
+
+        @property
+        def pass_fds(self):
+            return (self._descriptor,)
+
+        def verify_unchanged(self):
+            os.fstat(self._descriptor)
+
+        def __enter__(self):
+            self.verify_unchanged()
+            return self
+
+        def __exit__(self, _kind, _value, _traceback):
+            self.verify_unchanged()
+            os.close(self._descriptor)
+
+    def tracer_runtime(
+        tracer_so, *, base_env, pb_lib, runtime_manifest, retained_descriptor,
+    ):
+        assert not hostile_controls.keys() & base_env.keys()
+        assert os.pread(retained_descriptor, 4096, 0) == tracer.read_bytes()
+        runtime_calls.append((
+            Path(tracer_so), Path(pb_lib), retained_descriptor,
+        ))
+        return FixtureRetainedRuntime(base_env, Path(pb_lib))
+
+    def run_logged(
+        _command, *, env, log_dir, stem, pass_fds, monitored_tree, **_kwargs
+    ):
+        tracer_descriptor = int(
+            env["CUDA_INJECTION64_PATH"].rsplit("/", 1)[1]
+        )
+        trace_descriptor = int(env["TRACES_FOLDER"].rsplit("/", 1)[1])
+        assert len(pass_fds) == 3
+        assert tracer_descriptor in pass_fds
+        assert trace_descriptor in pass_fds
+        assert monitored_tree == Path(env["TRACES_FOLDER"])
+        assert env["BENIGN_CAPTURE_INPUT"] == "preserved"
+        assert not hostile_controls.keys() & env.keys()
+        assert os.pread(tracer_descriptor, 4096, 0) == tracer.read_bytes()
+        observed_descriptors.append(tracer_descriptor)
+        observed_modes.append(env["TRACE_SAMPLING_MODE"])
+        trace_dir = Path(env["TRACES_FOLDER"])
+        observed_output_targets.append(Path(os.readlink(trace_dir)))
+        _write_valid_split_trace(trace_dir)
+        log_dir.mkdir(parents=True, exist_ok=True)
+        stdout = log_dir / f"{stem}.stdout.log"
+        stderr = log_dir / f"{stem}.stderr.log"
+        stdout.write_bytes(b"")
+        stderr.write_bytes(b"")
+        return 0.01, stdout, stderr
+
+    monkeypatch.setattr(cc, "_resolve_repo_path", resolve)
+    monkeypatch.setattr(cc, "_run_logged", run_logged)
+    monkeypatch.setattr(
+        cc.preflight,
+        "_absolute_external_tracer",
+        lambda path, *, repo_root: Path(path).resolve(strict=True),
+    )
+    monkeypatch.setattr(
+        cc.nvbit_runtime_env, "retained_tracer_runtime_env", tracer_runtime,
+    )
+
+    max_trace_bytes = 10 if route_sampling else 10_000
+    if route_sampling:
+        def route_trace_budget(
+            _raw, _manifest, retained, *, callbacks, **_kwargs,
+        ):
+            for ordinal, kind in enumerate((
+                "trace_sampling_counting_v2",
+                "trace_sampling_selective_v2",
+            )):
+                receipt = (
+                    callbacks.counting_capture
+                    if ordinal == 0 else callbacks.selective_capture
+                )(SimpleNamespace(
+                    kind=kind,
+                    attempt=None,
+                    output_dir=cell_dir / f"sampling-{ordinal}",
+                    selected_block_ids=(0,),
+                    staging_remaining_bytes=10_000,
+                    request_sha256=str(ordinal) * 64,
+                ))
+                assert receipt.tracer_so_sha256 == tracer_sha256
+            (retained / "threadblocks").mkdir(parents=True)
+            (retained / "dynamic_trace.pb").write_bytes(b"r")
+            (retained / "stats.csv").write_bytes(b"s")
+            (retained / "threadblocks" / "0.pb").write_bytes(b"t")
+            artifacts = []
+            for path in sorted(
+                candidate for candidate in retained.rglob("*")
+                if candidate.is_file()
+            ):
+                relative_path = path.relative_to(retained).as_posix()
+                artifacts.append({
+                    "relative_path": relative_path,
+                    "size_bytes": path.stat().st_size,
+                    "sha256": cc.sha256_file(path),
+                    "artifact_kind": "fixture",
+                })
+            inventory = [
+                {
+                    key: artifact[key]
+                    for key in ("relative_path", "size_bytes", "sha256")
+                }
+                for artifact in artifacts
+            ]
+            return {
+                "outcome": "admitted",
+                "retained": {
+                    "bytes": sum(row["size_bytes"] for row in inventory),
+                    "file_count": len(inventory),
+                    "tree_sha256": cc.canonical_sha256(inventory),
+                    "artifacts": artifacts,
+                },
+            }
+
+        monkeypatch.setattr(
+            cc.budget_route, "route_trace_budget", route_trace_budget,
+        )
+        monkeypatch.setattr(
+            cc.budget_route, "write_route_result",
+            lambda result, path: path.write_text(json.dumps(result) + "\n"),
+        )
+
+    result = cc.capture_trace(
+        cell={
+            "identity": {"roster_source": "portable_lcd", "slug": "test"},
+            "authority_cell_sha256": "3" * 64,
+        },
+        binary=binary,
+        invocation=invocation,
+        budget=SimpleNamespace(
+            max_trace_bytes=max_trace_bytes,
+            max_wall_time_s=30,
+            sampling_policy="required",
+        ),
+        cell_dir=cell_dir,
+        pins={"injection_runtime": {
+            "pb_lib_relpath": "pb-lib",
+            "tracer_so_relpath": "protected-repository-tracer.so",
+        }},
+        tracer_source_path=tracer.resolve(),
+        expected_tracer_sha256=tracer_sha256,
+        runtime_env={"BENIGN_CAPTURE_INPUT": "preserved", **hostile_controls},
+        phase_env_factory=lambda _tag, _timeout: {
+            "BENIGN_CAPTURE_INPUT": "preserved",
+            **hostile_controls,
+        },
+        capture_provenance={
+            "protocol_version": "v2.1",
+            "source_commit": HEAD,
+            "capture_matrix_sha256": MATRIX_SHA,
+            "preflight_sha256": "1" * 64,
+            "pins_sha256": SHA,
+            "trace_budget_sha256": "2" * 64,
+            "raw_staging_margin_bytes": 10_000,
+        },
+    )
+    assert result["routed"] is route_sampling
+    assert observed_modes == (["0", "1", "2"] if route_sampling else ["0"])
+    assert observed_output_targets[0] == cell_dir / "trace_full_raw"
+    if route_sampling:
+        assert observed_output_targets[1:] == [
+            cell_dir / ".sampling-0.staging",
+            cell_dir / ".sampling-1.staging",
+        ]
+    assert len(set(observed_descriptors)) == 1
+    assert len(runtime_calls) == len(observed_modes)
+    assert {call[0] for call in runtime_calls} == {tracer.resolve()}
+    assert {call[1] for call in runtime_calls} == {pb_lib}
+    assert {call[2] for call in runtime_calls} == set(observed_descriptors)
+    manifest = json.loads(result["manifest"].read_text())
+    assert manifest["tracer_so_sha256"] == tracer_sha256
+    cc._release_trace_control_generation(result)
+
+
+@pytest.mark.parametrize(
+    "boundary", ["root", "coverage", "sizing", "publication"],
+)
+def test_capture_trace_rejects_byte_equivalent_source_switch(
+    tmp_path, monkeypatch, boundary,
+):
+    tracer = tmp_path / "external-build" / "tracer_tool.so"
+    tracer.parent.mkdir()
+    tracer.write_bytes(b"retained split-capable tracer")
+    binary = tmp_path / "target"
+    binary.write_bytes(b"target")
+    pb_lib = tmp_path / "pb-lib"
+    pb_lib.mkdir()
+    cell_dir = tmp_path / "cell"
+    cell_dir.mkdir()
+    invocation = _canonical_launch_invocation()
+    invocation["trace_app_args"] = []
+    invocation["executable_sha256"] = cc.sha256_file(binary)
+
+    monkeypatch.setattr(
+        cc.preflight,
+        "_absolute_external_tracer",
+        lambda path, *, repo_root: Path(path).resolve(strict=True),
+    )
+    monkeypatch.setattr(
+        cc,
+        "_resolve_repo_path",
+        lambda _relative, role: pb_lib
+        if role == "protobuf runtime" else pytest.fail(role),
+    )
+    class RetainedRuntime:
+        def __init__(self, base_env: dict[str, str], directory: Path):
+            self._descriptor = os.open(
+                directory, os.O_RDONLY | os.O_DIRECTORY
+            )
+            self.environment = {
+                **base_env,
+                "LD_LIBRARY_PATH": f"/proc/self/fd/{self._descriptor}",
+            }
+            self.pass_fds = (self._descriptor,)
+
+        def verify_unchanged(self):
+            os.fstat(self._descriptor)
+
+        def __enter__(self):
+            self.verify_unchanged()
+            return self
+
+        def __exit__(self, _kind, _value, _traceback):
+            self.verify_unchanged()
+            os.close(self._descriptor)
+
+    def retained_runtime(
+        _tracer, *, base_env, pb_lib, runtime_manifest, retained_descriptor,
+    ):
+        os.fstat(retained_descriptor)
+        return RetainedRuntime(base_env, Path(pb_lib))
+
+    monkeypatch.setattr(
+        cc.nvbit_runtime_env,
+        "retained_tracer_runtime_env",
+        retained_runtime,
+    )
+
+    def run_logged(_command, *, env, log_dir, stem, **_kwargs):
+        _write_valid_split_trace(Path(env["TRACES_FOLDER"]))
+        log_dir.mkdir(parents=True, exist_ok=True)
+        stdout = log_dir / f"{stem}.stdout.log"
+        stderr = log_dir / f"{stem}.stderr.log"
+        stdout.write_bytes(b"")
+        stderr.write_bytes(b"")
+        return 0.01, stdout, stderr
+
+    monkeypatch.setattr(cc, "_run_logged", run_logged)
+    switched = False
+
+    def switch_generation() -> None:
+        nonlocal switched
+        if switched:
+            return
+        switched = True
+        trace_root = cell_dir / "trace_full_raw"
+        replacement = cell_dir / "byte-equivalent-replacement"
+        displaced = cell_dir / "displaced-generation"
+        shutil.copytree(trace_root, replacement)
+        trace_root.rename(displaced)
+        replacement.rename(trace_root)
+
+    if boundary == "root":
+        real = cc.preflight._root_trace_from_admitted_sources
+
+        def root_boundary(sources):
+            result = real(sources)
+            switch_generation()
+            return result
+
+        monkeypatch.setattr(
+            cc.preflight, "_root_trace_from_admitted_sources", root_boundary,
+        )
+    elif boundary == "coverage":
+        real = cc.preflight._analyze_admitted_full_trace_coverage
+
+        def coverage_boundary(*args, **kwargs):
+            result = real(*args, **kwargs)
+            switch_generation()
+            return result
+
+        monkeypatch.setattr(
+            cc.preflight,
+            "_analyze_admitted_full_trace_coverage",
+            coverage_boundary,
+        )
+    elif boundary == "sizing":
+        real = cc._retained_trace_tree_bytes
+
+        def sizing_boundary(tree):
+            result = real(tree)
+            switch_generation()
+            return result
+
+        monkeypatch.setattr(cc, "_retained_trace_tree_bytes", sizing_boundary)
+    else:
+        real = cc.immutable.PinnedDirectoryReader.relocate_noreplace
+
+        def publication_boundary(reader, **kwargs):
+            if kwargs.get("source_name") == "trace_full_raw":
+                switch_generation()
+            return real(reader, **kwargs)
+
+        monkeypatch.setattr(
+            cc.immutable.PinnedDirectoryReader,
+            "relocate_noreplace",
+            publication_boundary,
+        )
+
+    with pytest.raises(cc.ChunkRefusal) as caught:
+        cc.capture_trace(
+            cell={
+                "identity": {"roster_source": "portable_lcd", "slug": "test"},
+                "authority_cell_sha256": "3" * 64,
+            },
+            binary=binary,
+            invocation=invocation,
+            budget=SimpleNamespace(
+                max_trace_bytes=10_000,
+                max_wall_time_s=30,
+                sampling_policy="required",
+            ),
+            cell_dir=cell_dir,
+            pins={"injection_runtime": {"pb_lib_relpath": "pb-lib"}},
+            tracer_source_path=tracer.resolve(),
+            expected_tracer_sha256=cc.sha256_file(tracer),
+            runtime_env={"BENIGN_CAPTURE_INPUT": "preserved"},
+            capture_provenance={"raw_staging_margin_bytes": 10_000},
+        )
+
+    assert switched is True
+    assert caught.value.code == "trace_snapshot_changed"
+    assert not (cell_dir / "trace").exists()
+    assert (cell_dir / "trace_full_raw").is_dir()
+    assert (cell_dir / "displaced-generation").is_dir()
+
+
+@pytest.mark.parametrize("error_number", [errno.ENOSPC, errno.EIO, errno.EROFS])
+def test_trace_generation_storage_failures_remain_typed(error_number):
+    cause = OSError(error_number, "injected trace snapshot storage failure")
+    try:
+        raise cc.immutable.ImmutableArtifactError("snapshot failed") from cause
+    except cc.immutable.ImmutableArtifactError as wrapped:
+        refusal = cc._translate_trace_generation_error(
+            wrapped, context="sampling generation commit"
+        )
+
+    assert refusal.code == "trace_snapshot_storage_failure"
+    assert f"errno={error_number}" in refusal.detail
+
+
+def test_capture_trace_types_output_pin_resource_failure_before_launch(
+    tmp_path, monkeypatch,
+):
+    cell_dir = tmp_path / "cell"
+    cell_dir.mkdir()
+    monkeypatch.setattr(
+        cc.immutable,
+        "PinnedDirectoryReader",
+        lambda _path: (_ for _ in ()).throw(
+            cc.immutable.ImmutableArtifactResourceError(
+                "injected trace-root descriptor exhaustion"
+            )
+        ),
+    )
+    monkeypatch.setattr(
+        cc,
+        "_authenticated_tracer_runtime_environment",
+        lambda *_args, **_kwargs: pytest.fail(
+            "runtime authentication started without output pin"
+        ),
+    )
+
+    with pytest.raises(cc.ChunkRefusal) as caught:
+        cc._capture_trace_with_retained_tracer(
+            cell={},
+            binary=tmp_path / "target",
+            invocation={},
+            budget=SimpleNamespace(),
+            cell_dir=cell_dir,
+            pins={},
+            retained_tracer=object(),
+            capture_provenance={"raw_staging_margin_bytes": 4096},
+        )
+
+    assert caught.value.code == "trace_snapshot_resource_unavailable"
+    assert (cell_dir / "trace_full_raw").is_dir()
+
+
+def test_trace_generation_resource_failure_remains_distinct():
+    refusal = cc._translate_trace_generation_error(
+        OSError(errno.EMFILE, "injected descriptor exhaustion"),
+        context="sampling generation commit",
+    )
+    assert refusal.code == "trace_snapshot_resource_unavailable"
+
+
+def test_capture_trace_refuses_external_tracer_digest_mismatch_before_output(
+    tmp_path, monkeypatch,
+):
+    tracer = tmp_path / "external-build" / "tracer_tool.so"
+    tracer.parent.mkdir()
+    tracer.write_bytes(b"unexpected tracer")
+    monkeypatch.setattr(
+        cc.preflight,
+        "_absolute_external_tracer",
+        lambda path, *, repo_root: Path(path).resolve(strict=True),
+    )
+    monkeypatch.setattr(
+        cc, "_capture_trace_with_retained_tracer",
+        lambda **_kwargs: pytest.fail("capture started after tracer hash mismatch"),
+    )
+    cell_dir = tmp_path / "cell"
+    with pytest.raises(cc.ChunkRefusal) as caught:
+        cc.capture_trace(
+            cell={}, binary=tmp_path / "target", invocation={}, budget=object(),
+            cell_dir=cell_dir, pins={}, tracer_source_path=tracer.resolve(),
+            expected_tracer_sha256="0" * 64,
+        )
+    assert caught.value.code == "injection_runtime_hash_drift"
+    assert not cell_dir.exists()
 
 
 def test_run_logged_routes_supervised_ncu_and_writes_logs(
@@ -4098,6 +5477,80 @@ def test_run_logged_types_supervised_ncu_timeout(tmp_path, monkeypatch):
     stderr = (tmp_path / "logs/timeout.stderr.log").read_text()
     assert "partial stderr" in stderr
     assert "NCU_ACTION_TIMEOUT" in stderr
+
+
+@pytest.mark.parametrize(
+    ("cleanup_incomplete", "expected_code"),
+    [
+        (True, "label_launch_set_collection_cleanup_failed"),
+        (False, "label_launch_set_collection_ncu_action_launch_failed"),
+    ],
+)
+def test_launch_set_executor_cleanup_failure_has_process_blocked_suffix(
+    cleanup_incomplete, expected_code,
+):
+    error = cc.ncu_executor.NcuActionExecutorError(
+        cc.ncu_executor.NCU_ACTION_LAUNCH_FAILED,
+        "synthetic launch-set failure",
+        process_cleanup_incomplete=cleanup_incomplete,
+    )
+
+    assert cc._launch_set_executor_failure_code(error) == expected_code
+
+
+@pytest.mark.parametrize(
+    ("cleanup_incomplete", "expected_code"),
+    [
+        (True, "label_capture_failed_cleanup_failed"),
+        (False, "label_capture_failed"),
+    ],
+)
+def test_run_logged_distinguishes_supervised_cleanup_from_launch_failure(
+    tmp_path, monkeypatch, cleanup_incomplete, expected_code,
+):
+    expected = _expected_ncu_identity()
+    expected_driver = cc.ncu_executor.ExpectedExecutableIdentity(
+        "/bin/true", "b" * 64, 0o755,
+    )
+    environment = cc.ncu_executor.NcuCollectionEnvironment({
+        "LANG": "C", "LANGUAGE": "C", "LC_ALL": "C",
+        "PATH": "/usr/local/cuda-13.2/bin:/usr/bin:/bin",
+        "PWD": str(tmp_path), "PYTHONNOUSERSITE": "1",
+        "LABEL_DRIVER_GPU_INDEX": "0",
+        "LABEL_DRIVER_PRESERVE_FAILED_EVIDENCE": "1",
+    })
+
+    def fail(*_args, **_kwargs):
+        error = cc.ncu_executor.NcuActionExecutorError(
+            cc.ncu_executor.NCU_ACTION_LAUNCH_FAILED,
+            "synthetic launch or cleanup failure",
+            process_cleanup_incomplete=cleanup_incomplete,
+        )
+        error.stdout = b"partial stdout"
+        error.stderr = b"partial stderr"
+        raise error
+
+    monkeypatch.setattr(
+        cc.ncu_executor, "execute_ncu_supervised_executable", fail,
+    )
+    with pytest.raises(cc.ChunkRefusal) as caught:
+        cc._run_logged(
+            ["/bin/true", cc.ncu_executor.AUTHORIZED_NCU_PROC_PATH],
+            cwd=tmp_path, env=None, timeout_s=5,
+            log_dir=tmp_path / "logs", stem="launch", failure_code="label_capture_failed",
+            supervised_ncu_identity=expected,
+            supervised_executable_identity=expected_driver,
+            supervised_ncu_environment=environment,
+        )
+
+    assert caught.value.code == expected_code
+    assert isinstance(
+        caught.value.__cause__, cc.ncu_executor.NcuActionExecutorError
+    )
+    assert (tmp_path / "logs/launch.stdout.log").read_bytes() == b"partial stdout"
+    assert b"partial stderr" in (
+        tmp_path / "logs/launch.stderr.log"
+    ).read_bytes()
 
 
 def test_run_logged_types_supervised_driver_authority_failure(
@@ -4204,6 +5657,279 @@ def test_run_logged_kills_process_group_at_tree_limit(tmp_path):
     assert (monitored / "payload.pb").stat().st_size == 4096
     assert (tmp_path / "logs/limited.stdout.log").is_file()
     assert (tmp_path / "logs/limited.stderr.log").is_file()
+
+
+@pytest.mark.parametrize("descriptor", [1, 2])
+def test_run_logged_bounds_fast_child_stdout_and_stderr(
+    tmp_path, monkeypatch, descriptor,
+):
+    monkeypatch.setattr(cc, "_CHILD_STDOUT_LIMIT_BYTES", 64)
+    monkeypatch.setattr(cc, "_CHILD_STDERR_LIMIT_BYTES", 64)
+    command = [
+        cc.sys.executable,
+        "-c",
+        f"import os; os.write({descriptor}, b'x' * 4096)",
+    ]
+    with pytest.raises(cc.ChunkRefusal) as caught:
+        cc._run_logged(
+            command, cwd=tmp_path, env=None, timeout_s=5,
+            log_dir=tmp_path / "logs", stem=f"output-{descriptor}",
+            failure_code="probe",
+        )
+    assert caught.value.code == "probe_output_limit"
+    stdout = (tmp_path / f"logs/output-{descriptor}.stdout.log").read_bytes()
+    stderr = (tmp_path / f"logs/output-{descriptor}.stderr.log").read_bytes()
+    assert len(stdout) <= 64
+    assert len(stderr) <= 64
+    assert len(stdout if descriptor == 1 else stderr) == 64
+
+
+def test_run_logged_types_bounded_output_reader_failure(tmp_path, monkeypatch):
+    original_read = cc.os.read
+    pipe_reads: dict[int, int] = {}
+
+    def fail_pipe_read(descriptor, size):
+        if size == cc._CHILD_PIPE_CHUNK_BYTES:
+            pipe_reads[descriptor] = pipe_reads.get(descriptor, 0) + 1
+            if pipe_reads[descriptor] >= 2:
+                raise OSError(errno.EIO, "injected pipe read failure")
+        return original_read(descriptor, size)
+
+    monkeypatch.setattr(cc.os, "read", fail_pipe_read)
+    with pytest.raises(cc.ChunkRefusal) as caught:
+        cc._run_logged(
+            [
+                cc.sys.executable,
+                "-c",
+                (
+                    "import os,time; os.write(1,b'partial-out'); "
+                    "os.write(2,b'partial-err'); time.sleep(0.05)"
+                ),
+            ],
+            cwd=tmp_path, env=None, timeout_s=5,
+            log_dir=tmp_path / "logs", stem="read-failure",
+            failure_code="probe",
+        )
+    assert caught.value.code == "probe_output_read_failed"
+    assert (
+        tmp_path / "logs/read-failure.stdout.log"
+    ).read_bytes() == b"partial-out"
+    assert (
+        tmp_path / "logs/read-failure.stderr.log"
+    ).read_bytes() == b"partial-err"
+
+
+@pytest.mark.parametrize(
+    "resource_errno", [None, errno.EAGAIN, errno.EMFILE, errno.ENFILE, errno.ENOMEM],
+)
+def test_run_logged_types_output_reader_resource_failure(
+    tmp_path, monkeypatch, resource_errno,
+):
+    original_read = cc.os.read
+
+    def exhaust_pipe_read(descriptor, size):
+        if size == cc._CHILD_PIPE_CHUNK_BYTES:
+            if resource_errno is None:
+                raise MemoryError("injected bounded reader allocation failure")
+            raise OSError(resource_errno, "injected bounded reader resource failure")
+        return original_read(descriptor, size)
+
+    monkeypatch.setattr(cc.os, "read", exhaust_pipe_read)
+    with pytest.raises(cc.ChunkRefusal) as caught:
+        cc._run_logged(
+            [cc.sys.executable, "-c", "pass"],
+            cwd=tmp_path,
+            env=None,
+            timeout_s=5,
+            log_dir=tmp_path / "logs",
+            stem="read-resource-failure",
+            failure_code="probe",
+        )
+    assert caught.value.code == "probe_output_resource_unavailable"
+    assert (tmp_path / "logs/read-resource-failure.stdout.log").is_file()
+    assert (tmp_path / "logs/read-resource-failure.stderr.log").is_file()
+
+
+def test_run_logged_second_reader_start_failure_closes_pipes_and_reaps(
+    tmp_path, monkeypatch,
+):
+    real_popen = cc.subprocess.Popen
+    real_thread = cc.threading.Thread
+    processes = []
+    starts = 0
+
+    def sleeping_child(_command, **kwargs):
+        process = real_popen(
+            [cc.sys.executable, "-c", "import time; time.sleep(60)"],
+            **kwargs,
+        )
+        processes.append(process)
+        return process
+
+    class FailSecondStart(real_thread):
+        def start(self):
+            nonlocal starts
+            starts += 1
+            if starts == 2:
+                raise RuntimeError("synthetic second reader start failure")
+            return super().start()
+
+    monkeypatch.setattr(cc.subprocess, "Popen", sleeping_child)
+    monkeypatch.setattr(cc.threading, "Thread", FailSecondStart)
+
+    with pytest.raises(cc.ChunkRefusal) as caught:
+        cc._run_logged(
+            ["fixture-child"],
+            cwd=tmp_path,
+            env=None,
+            timeout_s=5,
+            log_dir=tmp_path / "logs",
+            stem="reader-start-failure",
+            failure_code="probe",
+        )
+
+    assert caught.value.code == "probe_output_resource_unavailable"
+    assert starts == 2
+    assert len(processes) == 1 and processes[0].poll() is not None
+    assert processes[0].stdout is not None and processes[0].stdout.closed
+    assert processes[0].stderr is not None and processes[0].stderr.closed
+    assert (tmp_path / "logs/reader-start-failure.stdout.log").is_file()
+    assert (tmp_path / "logs/reader-start-failure.stderr.log").is_file()
+
+
+def test_run_logged_reader_start_teardown_failure_is_process_blocked(
+    tmp_path, monkeypatch,
+):
+    real_popen = cc.subprocess.Popen
+    real_thread = cc.threading.Thread
+    real_killpg = cc.os.killpg
+    processes = []
+    starts = 0
+
+    def sleeping_child(_command, **kwargs):
+        process = real_popen(
+            [cc.sys.executable, "-c", "import time; time.sleep(60)"],
+            **kwargs,
+        )
+        processes.append(process)
+        return process
+
+    class FailSecondStart(real_thread):
+        def start(self):
+            nonlocal starts
+            starts += 1
+            if starts == 2:
+                raise RuntimeError("synthetic second reader start failure")
+            return super().start()
+
+    def refuse_cleanup(_pid, _signal):
+        raise OSError(errno.EPERM, "synthetic process-group cleanup refusal")
+
+    monkeypatch.setattr(cc.subprocess, "Popen", sleeping_child)
+    monkeypatch.setattr(cc.threading, "Thread", FailSecondStart)
+    monkeypatch.setattr(cc.os, "killpg", refuse_cleanup)
+    try:
+        with pytest.raises(cc.ChunkRefusal) as caught:
+            cc._run_logged(
+                ["fixture-child"],
+                cwd=tmp_path,
+                env=None,
+                timeout_s=5,
+                log_dir=tmp_path / "logs",
+                stem="reader-start-cleanup-failure",
+                failure_code="probe",
+            )
+
+        assert caught.value.code == "probe_output_cleanup_failed"
+        assert isinstance(caught.value.__cause__, OSError)
+        assert "process-group cleanup refusal" in caught.value.detail
+        assert any(
+            "second reader start failure" in note
+            for note in caught.value.__notes__
+        )
+    finally:
+        monkeypatch.setattr(cc.os, "killpg", real_killpg)
+        for process in processes:
+            if process.poll() is None:
+                real_killpg(process.pid, cc.signal.SIGKILL)
+                process.wait(timeout=2)
+
+
+def test_run_logged_kills_lingering_pipe_holder_after_parent_exit(
+    tmp_path, monkeypatch,
+):
+    monkeypatch.setattr(cc, "_CHILD_PIPE_CLEANUP_SECONDS", 0.1)
+    grandchild = (
+        "import signal,time; "
+        "signal.signal(signal.SIGTERM, signal.SIG_IGN); "
+        "print('ready', flush=True); time.sleep(60)"
+    )
+    parent = (
+        "import subprocess,sys,time; "
+        f"subprocess.Popen([sys.executable, '-c', {grandchild!r}]); "
+        "time.sleep(0.1)"
+    )
+    _elapsed, stdout, _stderr = cc._run_logged(
+        [cc.sys.executable, "-c", parent],
+        cwd=tmp_path,
+        env=None,
+        timeout_s=5,
+        log_dir=tmp_path / "logs",
+        stem="lingering-pipe-holder",
+        failure_code="probe",
+    )
+    assert stdout.read_text() == "ready\n"
+
+
+def test_run_logged_kills_descendant_that_closes_capture_pipes(
+    tmp_path, monkeypatch,
+):
+    monkeypatch.setattr(cc, "_CHILD_PIPE_CLEANUP_SECONDS", 1.0)
+    ready = tmp_path / "descendant.ready"
+    heartbeat = tmp_path / "descendant.heartbeat"
+    grandchild = "\n".join([
+        "import os, signal, time",
+        "from pathlib import Path",
+        f"Path({str(ready)!r}).write_text(str(os.getpid()))",
+        "os.close(1)",
+        "os.close(2)",
+        "signal.signal(signal.SIGTERM, signal.SIG_IGN)",
+        f"stream = open({str(heartbeat)!r}, 'ab', buffering=0)",
+        "while True:",
+        "    stream.write(b'x')",
+        "    time.sleep(0.02)",
+    ])
+    parent = "\n".join([
+        "import subprocess, sys, time",
+        "from pathlib import Path",
+        f"subprocess.Popen([sys.executable, '-c', {grandchild!r}])",
+        f"ready = Path({str(ready)!r})",
+        "while not ready.is_file():",
+        "    time.sleep(0.01)",
+    ])
+    descendant_pid = None
+    try:
+        cc._run_logged(
+            [cc.sys.executable, "-c", parent],
+            cwd=tmp_path,
+            env=None,
+            timeout_s=5,
+            log_dir=tmp_path / "logs",
+            stem="closed-pipe-descendant",
+            failure_code="probe",
+        )
+        descendant_pid = int(ready.read_text())
+        size_after_return = heartbeat.stat().st_size
+        time.sleep(0.15)
+        assert heartbeat.stat().st_size == size_after_return
+    finally:
+        if descendant_pid is None and ready.is_file():
+            descendant_pid = int(ready.read_text())
+        if descendant_pid is not None:
+            try:
+                os.kill(descendant_pid, cc.signal.SIGKILL)
+            except ProcessLookupError:
+                pass
 
 
 @pytest.mark.parametrize("error_number", [errno.ENOSPC, errno.EIO, errno.EROFS])
@@ -4460,6 +6186,9 @@ def test_external_output_root_creation_storage_fault_is_typed(
 ):
     parent = tmp_path / "external-parent"
     parent.mkdir()
+    source_repo = tmp_path / "source-repository"
+    source_repo.mkdir()
+    monkeypatch.setattr(cc, "REPO_ROOT", source_repo)
     output = parent / "campaign"
     real_mkdir = Path.mkdir
 
@@ -5208,6 +6937,7 @@ def _runner_recovery_case(tmp_path: Path, monkeypatch):
     freshness = {path.resolve(): "fresh" for path in preflights.values()}
     validated: list[tuple[Path, bool]] = []
     generated_at = cc._utc_text(datetime.now(timezone.utc) - timedelta(seconds=1))
+    tracer_source_path = (tmp_path / "external-tracer.so").resolve()
 
     def validate_referenced(*, preflight_path, expected_sha256, require_fresh,
                             **_kwargs):
@@ -5221,7 +6951,10 @@ def _runner_recovery_case(tmp_path: Path, monkeypatch):
             "checks": {
                 "device": _current_device_probe(),
                 "sol_environment": probe,
-                "injection_runtime": {"tracer_so_sha256": "4" * 64},
+                "injection_runtime": {
+                    "tracer_source_path": str(tracer_source_path),
+                    "tracer_so_sha256": "4" * 64,
+                },
             },
         }, _expected_ncu_identity())
 
@@ -5229,11 +6962,14 @@ def _runner_recovery_case(tmp_path: Path, monkeypatch):
 
     def fake_capture_cell(
         *, cell, cell_dir, capture_provenance, expected_ncu_identity,
-        expected_gpu_uuid_sha256, selected_host_gpu_index, **_kwargs,
+        expected_gpu_uuid_sha256, selected_host_gpu_index,
+        tracer_source_path: Path, expected_tracer_sha256: str, **_kwargs,
     ):
         assert expected_ncu_identity == _expected_ncu_identity()
         assert expected_gpu_uuid_sha256 == GPU_UUID_SHA256
         assert selected_host_gpu_index == SELECTED_HOST_GPU_INDEX
+        assert tracer_source_path == (tmp_path / "external-tracer.so").resolve()
+        assert expected_tracer_sha256 == "4" * 64
         slug = cell["identity"]["slug"]
         capture_counts[slug] += 1
         payload = cell_dir / "trace.pb"
@@ -5297,6 +7033,11 @@ def _runner_recovery_case(tmp_path: Path, monkeypatch):
         return final_dir
 
     monkeypatch.setattr(cc, "validate_matrix_inputs", lambda *_args, **_kw: {})
+    monkeypatch.setattr(
+        cc,
+        "_assert_external_output_root",
+        lambda path: Path(path).mkdir(parents=True, exist_ok=True),
+    )
     monkeypatch.setattr(cc, "_git_state", lambda: (source_commit, True, ""))
     monkeypatch.setattr(cc, "_validate_referenced_preflight", validate_referenced)
     monkeypatch.setattr(
@@ -6841,11 +8582,11 @@ def test_collection_receipt_rejects_post_publish_byte_substitution(
     )
     real_open = cc.immutable.open_retained_regular
 
-    def substitute_before_retention(path):
+    def substitute_before_retention(path, **kwargs):
         if path == receipt_path:
             document = json.loads(path.read_text())
             path.write_text(json.dumps(document, separators=(",", ":")) + "\n")
-        return real_open(path)
+        return real_open(path, **kwargs)
 
     monkeypatch.setattr(
         cc.immutable, "open_retained_regular", substitute_before_retention,
@@ -7229,7 +8970,10 @@ def _write_sol_module_inventory(
 
 
 def _sol_control_trace_record(trace_dir: Path, log: Path) -> dict:
+    retained = cc._open_retained_trace_generation(trace_dir)
     return {
+        cc._TRACE_CONTROL_GENERATION_KEY: retained,
+        cc._TRACE_CONTROL_GENERATION_SOURCE_KEY: trace_dir,
         "control_trace_dir": trace_dir, "stdout_log": log, "stderr_log": log,
         "launch_count": 1,
         "launches": [{
@@ -7239,7 +8983,309 @@ def _sol_control_trace_record(trace_dir: Path, log: Path) -> dict:
     }
 
 
-def test_runtime_sol_controls_require_exact_module_launch_and_dynamic_pcs(tmp_path):
+def _install_mutable_trace_reopen_trap(monkeypatch, trace_dir: Path) -> list[Path]:
+    real_read = cc._read_output_bytes
+    real_copy = cc._copy_output_file
+    real_hash = cc._sha256_output_file
+    real_path_read_bytes = Path.read_bytes
+    attempts: list[Path] = []
+
+    def refuse_mutable_reopen(path: Path) -> None:
+        candidate = Path(path)
+        if candidate.is_relative_to(trace_dir):
+            attempts.append(candidate)
+            candidate.write_bytes(b"mutable-reopen-poison")
+            raise AssertionError(f"mutable trace path reopened: {candidate}")
+
+    def guarded_read(path: Path, **kwargs):
+        candidate = Path(path)
+        refuse_mutable_reopen(candidate)
+        return real_read(candidate, **kwargs)
+
+    def guarded_copy(source: Path, destination: Path, **kwargs):
+        refuse_mutable_reopen(Path(source))
+        return real_copy(source, destination, **kwargs)
+
+    def guarded_hash(path: Path, **kwargs):
+        candidate = Path(path)
+        refuse_mutable_reopen(candidate)
+        return real_hash(candidate, **kwargs)
+
+    def guarded_path_read_bytes(path: Path) -> bytes:
+        refuse_mutable_reopen(path)
+        return real_path_read_bytes(path)
+
+    monkeypatch.setattr(cc, "_read_output_bytes", guarded_read)
+    monkeypatch.setattr(cc, "_copy_output_file", guarded_copy)
+    monkeypatch.setattr(cc, "_sha256_output_file", guarded_hash)
+    monkeypatch.setattr(Path, "read_bytes", guarded_path_read_bytes)
+    return attempts
+
+
+def test_control_consumer_requires_and_revalidates_retained_trace_generation(
+    tmp_path,
+):
+    trace_dir = tmp_path / "trace"
+    trace_dir.mkdir()
+    source = trace_dir / "source.json"
+    source.write_text("stable")
+
+    @cc._authenticated_trace_control_consumer
+    def mutate_source(*, trace):
+        source.write_text("mutated")
+        return trace
+
+    with pytest.raises(cc.ChunkRefusal) as missing:
+        mutate_source(trace={"control_trace_dir": trace_dir})
+    assert missing.value.code == "trace_control_generation_missing"
+
+    retained = cc._open_retained_trace_generation(trace_dir)
+    trace = {
+        cc._TRACE_CONTROL_GENERATION_KEY: retained,
+        cc._TRACE_CONTROL_GENERATION_SOURCE_KEY: trace_dir,
+        "control_trace_dir": trace_dir,
+    }
+    with pytest.raises(cc.ChunkRefusal) as changed:
+        mutate_source(trace=trace)
+    assert changed.value.code == "trace_snapshot_changed"
+    with pytest.raises(cc.immutable.ImmutableArtifactError):
+        retained.close()
+
+
+def test_retained_trace_entry_failure_closes_generation(tmp_path):
+    trace_dir = tmp_path / "trace"
+    trace_dir.mkdir()
+    source = trace_dir / "source.json"
+    source.write_text("stable")
+    retained = cc._open_retained_trace_generation(trace_dir)
+    descriptor = retained.reader.descriptor
+    source.write_text("mutated")
+
+    with pytest.raises(cc.immutable.ImmutableArtifactError):
+        with retained:
+            pytest.fail("entered a changed retained trace generation")
+
+    assert retained.closed is True
+    with pytest.raises(OSError):
+        os.fstat(descriptor)
+
+
+def test_open_retained_trace_post_transfer_failure_closes_generation(
+    tmp_path, monkeypatch,
+):
+    trace_dir = tmp_path / "trace"
+    trace_dir.mkdir()
+    (trace_dir / "source.json").write_text("stable")
+    real_retained_type = cc._RetainedTraceGeneration
+    created = []
+
+    class FailingRetainedTraceGeneration(real_retained_type):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            self.initial_descriptor = self.reader.descriptor
+            created.append(self)
+
+        def verify_unchanged(self):
+            raise cc.immutable.ImmutableArtifactError(
+                "synthetic post-transfer verification failure"
+            )
+
+    monkeypatch.setattr(
+        cc, "_RetainedTraceGeneration", FailingRetainedTraceGeneration,
+    )
+
+    with pytest.raises(
+        cc.immutable.ImmutableArtifactError,
+        match="synthetic post-transfer verification failure",
+    ):
+        cc._open_retained_trace_generation(trace_dir)
+
+    assert len(created) == 1
+    assert created[0].closed is True
+    with pytest.raises(OSError):
+        os.fstat(created[0].initial_descriptor)
+
+
+def test_retained_trace_result_builder_failure_closes_generation(tmp_path):
+    trace_dir = tmp_path / "trace"
+    trace_dir.mkdir()
+    (trace_dir / "source.json").write_text("stable")
+    retained = cc._open_retained_trace_generation(trace_dir)
+    descriptor = retained.reader.descriptor
+
+    def fail_result():
+        raise ValueError("synthetic retained result construction failure")
+
+    with pytest.raises(
+        ValueError, match="synthetic retained result construction failure",
+    ):
+        cc._retained_trace_result_or_close(retained, fail_result)
+
+    assert retained.closed is True
+    with pytest.raises(OSError):
+        os.fstat(descriptor)
+
+
+def test_release_changed_trace_generation_closes_and_removes_owner_keys(
+    tmp_path,
+):
+    trace_dir = tmp_path / "trace"
+    trace_dir.mkdir()
+    source = trace_dir / "source.json"
+    source.write_text("stable")
+    retained = cc._open_retained_trace_generation(trace_dir)
+    descriptor = retained.reader.descriptor
+    trace = {
+        cc._TRACE_CONTROL_GENERATION_KEY: retained,
+        cc._TRACE_CONTROL_GENERATION_SOURCE_KEY: trace_dir,
+    }
+    source.write_text("mutated")
+
+    with pytest.raises(cc.ChunkRefusal) as caught:
+        cc._release_trace_control_generation(trace)
+
+    assert caught.value.code == "trace_snapshot_changed"
+    assert retained.closed is True
+    assert cc._TRACE_CONTROL_GENERATION_KEY not in trace
+    assert cc._TRACE_CONTROL_GENERATION_SOURCE_KEY not in trace
+    with pytest.raises(OSError):
+        os.fstat(descriptor)
+
+
+def test_release_rejects_replaced_retained_publication_generation(tmp_path):
+    raw = tmp_path / "trace_full_raw"
+    publication = tmp_path / "trace"
+    raw.mkdir()
+    publication.mkdir()
+    (raw / "source.json").write_text("raw")
+    (publication / "selected.json").write_text("selected")
+    control = cc._open_retained_trace_generation(raw)
+    published = cc._open_retained_trace_generation(publication)
+    trace = {
+        cc._TRACE_CONTROL_GENERATION_KEY: control,
+        cc._TRACE_CONTROL_GENERATION_SOURCE_KEY: raw,
+        cc._TRACE_PUBLICATION_GENERATION_KEY: published,
+    }
+    publication.rename(tmp_path / "displaced-trace")
+    publication.mkdir()
+    (publication / "selected.json").write_text("replacement")
+
+    with pytest.raises(cc.ChunkRefusal) as caught:
+        cc._release_trace_control_generation(trace)
+
+    assert caught.value.code == "trace_snapshot_changed"
+    assert control.closed is True
+    assert published.closed is True
+    assert cc._TRACE_CONTROL_GENERATION_KEY not in trace
+    assert cc._TRACE_PUBLICATION_GENERATION_KEY not in trace
+
+
+def test_capture_cell_closes_owned_trace_once_on_downstream_failure(
+    tmp_path, monkeypatch,
+):
+    trace_dir = tmp_path / "trace"
+    trace_dir.mkdir()
+    (trace_dir / "source.json").write_text("stable")
+    retained = cc._open_retained_trace_generation(trace_dir)
+    descriptor = retained.reader.descriptor
+    close_calls = 0
+    real_close = retained.close
+    returned_trace = {
+        cc._TRACE_CONTROL_GENERATION_KEY: retained,
+        cc._TRACE_CONTROL_GENERATION_SOURCE_KEY: trace_dir,
+    }
+
+    def counted_close():
+        nonlocal close_calls
+        close_calls += 1
+        real_close()
+
+    retained.close = counted_close
+
+    def fail_after_trace(*, _trace_owner, **_kwargs):
+        _trace_owner.callback(
+            cc._release_trace_control_generation, returned_trace,
+        )
+        raise RuntimeError("synthetic downstream capture failure")
+
+    monkeypatch.setattr(cc, "_capture_cell_with_trace_owner", fail_after_trace)
+
+    with pytest.raises(
+        RuntimeError, match="synthetic downstream capture failure",
+    ):
+        cc.capture_cell(
+            cell={}, cell_dir=tmp_path / "chunk" / "cells" / "cell",
+            matrix={}, pins={}, cell_budgets=None,
+            tracer_source_path=tmp_path / "tracer.so",
+            expected_tracer_sha256="0" * 64, capture_provenance={},
+            expected_ncu_identity=None, expected_gpu_uuid_sha256="1" * 64,
+            selected_host_gpu_index=0, certified_sol_env=None,
+            sol_environment_probe=None, module_store=tmp_path / "modules",
+        )
+
+    assert close_calls == 1
+    assert retained.closed is True
+    assert cc._TRACE_CONTROL_GENERATION_KEY not in returned_trace
+    assert cc._TRACE_CONTROL_GENERATION_SOURCE_KEY not in returned_trace
+    with pytest.raises(OSError):
+        os.fstat(descriptor)
+
+
+def test_routed_raw_retention_uses_owned_generations_and_binds_mutation(
+    tmp_path,
+):
+    cell_dir = tmp_path / "cell"
+    raw = cell_dir / "trace_full_raw"
+    publication = cell_dir / "trace"
+    raw.mkdir(parents=True)
+    publication.mkdir()
+    (publication / "selected.json").write_text("published")
+    source = raw / "source.json"
+    source.write_text("stable")
+    raw_rows = [{
+        "relative_path": "source.json",
+        "size_bytes": source.stat().st_size,
+        "sha256": cc.sha256_file(source),
+    }]
+    retained = cc._open_retained_trace_generation(raw)
+    trace = {
+        "routed": True,
+        "trace_dir": publication,
+        "control_trace_dir": raw,
+        "raw_trace_dir": raw,
+        "route_result": {
+            "full_trace": {
+                "tree_bytes": source.stat().st_size,
+                "tree_sha256": cc.canonical_sha256(raw_rows),
+            },
+        },
+        cc._TRACE_CONTROL_GENERATION_KEY: retained,
+        cc._TRACE_CONTROL_GENERATION_SOURCE_KEY: raw,
+    }
+    cc._retain_routed_raw_trace_evidence(trace, cell_dir=cell_dir)
+    publication_generation = trace[cc._TRACE_PUBLICATION_GENERATION_KEY]
+    assert publication_generation.path == publication
+    assert publication_generation.closed is False
+    assert raw.is_dir()
+    assert trace[cc._ROUTED_RAW_EVIDENCE_INVENTORY_KEY] == raw_rows
+
+    source.write_text("mutated")
+    with pytest.raises(cc.ChunkRefusal) as changed:
+        cc._retain_routed_raw_trace_evidence(trace, cell_dir=cell_dir)
+    assert changed.value.code == "trace_snapshot_changed"
+    with pytest.raises(cc.ChunkRefusal) as released:
+        cc._release_trace_control_generation(trace)
+    assert released.value.code == "trace_snapshot_changed"
+    assert retained.closed is True
+    assert publication_generation.closed is True
+    assert cc._TRACE_CONTROL_GENERATION_KEY not in trace
+    assert cc._TRACE_PUBLICATION_GENERATION_KEY not in trace
+    assert raw.is_dir()
+
+
+def test_runtime_sol_controls_require_exact_module_launch_and_dynamic_pcs(
+    tmp_path, monkeypatch,
+):
     _, cell = _generated_sol_cell()
     cell_dir = tmp_path / "chunk" / "cells" / "sol__cell"
     trace_dir = cell_dir / "trace"
@@ -7286,11 +9332,16 @@ def test_runtime_sol_controls_require_exact_module_launch_and_dynamic_pcs(tmp_pa
     log = cell_dir / "logs" / "trace.log"
     log.parent.mkdir(parents=True)
     log.write_text("")
+    trace = _sol_control_trace_record(trace_dir, log)
+    mutable_reopens = _install_mutable_trace_reopen_trap(
+        monkeypatch, trace_dir,
+    )
     result = cc.capture_sol_control(
         cell=cell, invocation=cell["invocation"],
-        label={}, trace=_sol_control_trace_record(trace_dir, log),
+        label={}, trace=trace,
         cell_dir=cell_dir, module_store=tmp_path / "module_store",
     )
+    assert mutable_reopens == []
     assert result["outcome"] == bcm.SOL_CONTROL_OUTCOMES[0]
     assert result["total_decoded"] == 1
     payload = json.loads(result["control_bits"].read_text())
@@ -7841,7 +9892,10 @@ def _vendor_control_fixture(
     report.parent.mkdir(parents=True)
     report.write_bytes(function.encode() + b"\0" + raw)
     label = {"ncu_report": report}
+    retained = cc._open_retained_trace_generation(trace_dir)
     trace = {
+        cc._TRACE_CONTROL_GENERATION_KEY: retained,
+        cc._TRACE_CONTROL_GENERATION_SOURCE_KEY: trace_dir,
         "control_trace_dir": trace_dir, "stdout_log": log, "stderr_log": log,
         "launch_count": 1,
         "launches": [{
@@ -7871,10 +9925,14 @@ def test_vendor_runtime_controls_bind_exact_static_section_and_dynamic_pcs(
         cc.sass_extractor, "extract_exact_function_text",
         lambda *_args, **_kwargs: copy.deepcopy(extracted),
     )
+    mutable_reopens = _install_mutable_trace_reopen_trap(
+        monkeypatch, trace["control_trace_dir"],
+    )
     result = cc.capture_vendor_control(
         cell=cell, invocation=invocation, label=label, trace=trace,
         cell_dir=cell_dir, module_store=tmp_path / "module_store",
     )
+    assert mutable_reopens == []
     assert result["outcome"] == cell["control_bits"]["expected_outcome"]
     assert result["total_decoded"] == 2
     payload = json.loads(result["control_bits"].read_text())
@@ -8146,6 +10204,9 @@ def test_capture_cell_sol_typed_route_seals_full_orchestration_without_gpu(
             "counting_phase_evidence": counting_phase,
             "launch_count": 1,
         }) + "\n")
+        raw_inventory, raw_bytes, raw_tree_sha256 = (
+            cc.budget_route._tree_inventory(raw)
+        )
         route_result = {
             "schema_version": 1,
             "kind": "ac9_trace_budget_route",
@@ -8154,6 +10215,11 @@ def test_capture_cell_sol_typed_route_seals_full_orchestration_without_gpu(
             "protocol": {
                 **provenance,
                 "capture_manifest_sha256": cc.sha256_file(trace_manifest),
+            },
+            "full_trace": {
+                "tree_sha256": raw_tree_sha256,
+                "tree_bytes": raw_bytes,
+                "file_count": len(raw_inventory),
             },
             "outcome": "typed_unavailable",
             "typed_reason": "gate_forced",
@@ -8170,7 +10236,10 @@ def test_capture_cell_sol_typed_route_seals_full_orchestration_without_gpu(
         cc.budget_route.write_route_result(route_result, route_path)
         stdout, stderr = write_log("trace")
         events.append("trace_routed")
+        retained_control_generation = cc._open_retained_trace_generation(raw)
         return {
+            cc._TRACE_CONTROL_GENERATION_KEY: retained_control_generation,
+            cc._TRACE_CONTROL_GENERATION_SOURCE_KEY: raw,
             "manifest": trace_manifest,
             "route_result_path": route_path,
             "route_result": route_result,
@@ -8214,19 +10283,27 @@ def test_capture_cell_sol_typed_route_seals_full_orchestration_without_gpu(
         return result
 
     monkeypatch.setattr(cc, "capture_sol_control", tracked_control)
-    real_cleanup = cc._remove_routed_raw_trace
+    real_retention = cc._retain_routed_raw_trace_evidence
 
-    def tracked_cleanup(trace, *, cell_dir):
+    def tracked_retention(trace, *, cell_dir):
         raw = trace["raw_trace_dir"]
+        publication = trace["trace_dir"]
         assert raw.is_dir()
+        assert publication.is_dir()
+        assert raw != publication
         assert (cell_dir / "control_bits.json").is_file()
         assert (cell_dir / "control_capture_manifest.json").is_file()
-        events.append("cleanup_after_control")
-        real_cleanup(trace, cell_dir=cell_dir)
-        assert not raw.exists()
-        events.append("raw_deleted")
+        events.append("retention_after_control")
+        real_retention(trace, cell_dir=cell_dir)
+        assert raw.is_dir()
+        assert publication.is_dir()
+        events.append("raw_retained_as_evidence")
 
-    monkeypatch.setattr(cc, "_remove_routed_raw_trace", tracked_cleanup)
+    monkeypatch.setattr(
+        cc, "_retain_routed_raw_trace_evidence", tracked_retention,
+    )
+    tracer_source_path = (tmp_path / "external-tracer.so").resolve()
+    tracer_source_path.write_bytes(b"split tracer fixture")
 
     result = cc.capture_cell(
         cell=cell,
@@ -8234,6 +10311,7 @@ def test_capture_cell_sol_typed_route_seals_full_orchestration_without_gpu(
         matrix=matrix,
         pins=json.loads(cc.DEFAULT_PINS.read_text()),
         cell_budgets=object(),
+        tracer_source_path=tracer_source_path,
         expected_tracer_sha256="9" * 64,
         capture_provenance=provenance,
         expected_ncu_identity=_expected_ncu_identity(),
@@ -8258,14 +10336,17 @@ def test_capture_cell_sol_typed_route_seals_full_orchestration_without_gpu(
         "trace_routed",
         "control_started_with_raw",
         "control_completed_with_raw",
-        "cleanup_after_control",
-        "raw_deleted",
+        "retention_after_control",
+        "raw_retained_as_evidence",
         "guard_4",
     ]
     assert events.index("control_started_with_raw") < events.index(
         "control_completed_with_raw"
-    ) < events.index("cleanup_after_control") < events.index("raw_deleted")
-    assert not (cell_dir / "trace_full_raw").exists()
+    ) < events.index("retention_after_control") < events.index(
+        "raw_retained_as_evidence"
+    )
+    assert (cell_dir / "trace_full_raw").is_dir()
+    assert (cell_dir / "trace").is_dir()
     attestation = json.loads(
         (cell_dir / "sol_native_env_fingerprint.json").read_text()
     )
@@ -8320,11 +10401,11 @@ def test_capture_cell_sol_typed_route_seals_full_orchestration_without_gpu(
         "control_evidence",
         "control_manifest",
         "execution_log",
-            "label_run_manifest",
-            "label_sidecar",
-            "ncu_collection_receipt",
-            "ncu_launch_observation",
-            "ncu_report",
+        "label_run_manifest",
+        "label_sidecar",
+        "ncu_collection_receipt",
+        "ncu_launch_observation",
+        "ncu_report",
         "sol_capture_evidence",
         "trace_auxiliary",
         "trace_manifest",
@@ -8340,7 +10421,19 @@ def test_capture_cell_sol_typed_route_seals_full_orchestration_without_gpu(
                for path in relative_paths)
     assert any("/sol_requests/trace_full.json" in path
                for path in relative_paths)
-    assert all("trace_full_raw" not in path for path in relative_paths)
+    raw_paths = [
+        path for path in relative_paths if "/trace_full_raw/" in path
+    ]
+    publication_paths = [
+        path for path in relative_paths if "/trace/" in path
+    ]
+    assert raw_paths
+    assert publication_paths
+    assert all(
+        artifact["artifact_kind"] == "trace_auxiliary"
+        for artifact in result["artifacts"]
+        if "/trace_full_raw/" in artifact["relative_path"]
+    )
     route_artifact = next(
         artifact for artifact in result["artifacts"]
         if artifact["artifact_kind"] == "trace_route_record"

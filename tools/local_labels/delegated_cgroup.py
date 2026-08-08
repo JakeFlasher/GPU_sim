@@ -252,6 +252,8 @@ class DelegatedCgroupV2:
             os.close(parent_fd)
             if isinstance(active_error, CgroupContainmentError):
                 raise
+            if not isinstance(active_error, (OSError, ValueError)):
+                raise
             raise CgroupContainmentError(
                 f"cannot create delegated cgroup leaf: {active_error}"
             ) from active_error

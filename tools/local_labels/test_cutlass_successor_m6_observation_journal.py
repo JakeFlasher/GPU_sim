@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 import json
+import tempfile
 from pathlib import Path
 
 import jsonschema
@@ -21,17 +22,17 @@ from tools.local_labels.test_cutlass_successor_capture_admission import (
 GENERATED_AT = "2026-07-23T03:00:00Z"
 STATIC_FILE_HASHES = {
     "tools/local_labels/build_cutlass_successor_m6_determinism_schedule.py":
-        "a52bc0d487b61f4a60f4d6164d75413ac55e7891315e18365eb08d3d3027ae20",
+        "3ec7994056b171d1ede12be4da65d73df9b5b3de09fef84427137d44d946c4a6",
     "tools/local_labels/test_cutlass_successor_m6_determinism_schedule.py":
-        "7c0e1fc2d02fb7d40cf9e908c05409e431ac2f88ae4644b7230b7eefcaa2ff26",
+        "b677c972aed47857fd8c9ec9fb664c5ecd92c5d7dae938f2901525f83dba1024",
     "workloads/simbench_bw/schemas/"
-    "cutlass_successor_m6_determinism_schedule.schema.json":
-        "52af5bfe5a6e88393546ad5f5718b3a49dc93e126f070287c7c49b75d28547ac",
+    "cutlass_successor_m6_determinism_schedule.v2.schema.json":
+        "24f9d638ac50e9565e42d6e78b7923a6b5826841933add65905eb853a07a5888",
 }
 
 
 @pytest.fixture(scope="module")
-def successor_contract(tmp_path_factory):
+def successor_contract():
     original_import = admission._import_ncu_report_csv
     original_sass = admission._sass_kernel_names
     admission._import_ncu_report_csv = lambda _identity, path: (
@@ -43,25 +44,29 @@ def successor_contract(tmp_path_factory):
         _REPORT_IDENTITY["Kernel Name"]
     }
     try:
-        root = tmp_path_factory.mktemp("successor-journal-receipts")
-        _all_pairs(root)
-        schedule = schedule_builder.build_schedule(
-            root,
-            seed=42,
-            generated_at_utc="2026-07-23T01:00:00Z",
-        )
-        policy = journal.derive_metric_policy(schedule)
-        empty = journal.build_journal(
-            schedule,
-            [],
-            created_at_utc=GENERATED_AT,
-        )
-        yield {
-            "schedule": schedule,
-            "policy": policy,
-            "empty": empty,
-            "receipt_root": root,
-        }
+        with tempfile.TemporaryDirectory(
+            prefix="successor-journal-pytest-", dir="/tmp",
+        ) as temporary_root:
+            root = Path(temporary_root) / "receipts"
+            root.mkdir()
+            _all_pairs(root)
+            schedule = schedule_builder.build_schedule(
+                root,
+                seed=42,
+                generated_at_utc="2026-07-23T01:00:00Z",
+            )
+            policy = journal.derive_metric_policy(schedule)
+            empty = journal.build_journal(
+                schedule,
+                [],
+                created_at_utc=GENERATED_AT,
+            )
+            yield {
+                "schedule": schedule,
+                "policy": policy,
+                "empty": empty,
+                "receipt_root": root,
+            }
     finally:
         admission._import_ncu_report_csv = original_import
         admission._sass_kernel_names = original_sass
