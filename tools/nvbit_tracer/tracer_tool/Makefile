@@ -43,7 +43,7 @@ endif
 NVBIT_PATH=../nvbit_release/core
 
 LIBS=-L$(NVBIT_PATH) -lnvbit
-NVCC_PATH=-L $(subst bin/nvcc,lib64,$(shell which nvcc | tr -s /))
+NVCC_PATH=-L$(CUDA_INSTALL_PATH)/lib64
 
 # Protobuf 34.x depends on Abseil; resolve the full transitive closure via
 # pkg-config so the link line follows whatever the host protobuf runtime
