@@ -48,7 +48,7 @@ NVCC_CCBIN?=$(CXX)
 .DEFAULT_GOAL := all
 
 check-pinned-env:
-	@nvcc_release="$$(nvcc --version 2>/dev/null | sed -n 's/.*release \([0-9.]*\).*/\1/p' | head -n 1)"; \
+	@nvcc_release="$$( $(NVCC) --version 2>/dev/null | sed -n 's/.*release \([0-9.]*\).*/\1/p' | head -n 1)"; \
 	protoc_release="$$("$(PROTOC)" --version 2>/dev/null | awk '{print $$2}')"; \
 	host_cxx_major="$$("$(NVCC_CCBIN)" -dumpversion 2>/dev/null | cut -d. -f1)"; \
 	protobuf_version="$$("$(PKG_CONFIG)" $(PKG_CONFIG_FLAGS) --modversion protobuf 2>/dev/null)"; \

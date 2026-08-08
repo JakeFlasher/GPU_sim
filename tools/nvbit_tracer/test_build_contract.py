@@ -191,6 +191,65 @@ def test_top_level_make_default_goal_builds_all() -> None:
     assert ".DEFAULT_GOAL := all" in top_make
 
 
+def test_top_level_make_checks_the_exact_nvcc_command(tmp_path: Path) -> None:
+    ambient_bin = tmp_path / "ambient-bin"
+    _executable(
+        ambient_bin / "nvcc",
+        "printf 'Cuda compilation tools, release 99.9, V99.9.0\\n'\n",
+    )
+    exact_nvcc = _executable(
+        tmp_path / "tools" / "nvcc-retained",
+        "printf 'Cuda compilation tools, release 13.2, V13.2.0\\n'\n",
+    )
+    launcher = tmp_path / "tools" / "nvcc-launcher"
+    launcher.write_text(f'exec "{exact_nvcc}" "$@"\n', encoding="utf-8")
+    protoc = _executable(
+        tmp_path / "tools" / "protoc", "printf 'libprotoc 34.1\\n'\n"
+    )
+    host_cxx = _executable(
+        tmp_path / "tools" / "g++-14", "printf '14.3.1\\n'\n"
+    )
+    pkg_config = _executable(
+        tmp_path / "tools" / "pkg-config",
+        """
+case " $* " in
+  *" --modversion protobuf "*) printf '34.1.0\\n' ;;
+  *" --variable=prefix protobuf "*) printf '%s\\n' "${FAKE_PB_PREFIX}" ;;
+  *) exit 2 ;;
+esac
+""",
+    )
+    pb_prefix = tmp_path / "pb-34.1"
+    env = os.environ.copy()
+    env.update(
+        {
+            "FAKE_PB_PREFIX": str(pb_prefix),
+            "PATH": f"{ambient_bin}:/usr/bin:/bin",
+        }
+    )
+
+    result = subprocess.run(
+        [
+            "/usr/bin/make",
+            "-f",
+            str(NVBIT / "Makefile"),
+            "check-pinned-env",
+            f"NVCC=/usr/bin/bash {launcher} -ccbin={host_cxx}",
+            f"PROTOC={protoc}",
+            f"NVCC_CCBIN={host_cxx}",
+            f"PKG_CONFIG={pkg_config}",
+            "PKG_CONFIG_FLAGS=--define-prefix",
+            f"PB_PREFIX={pb_prefix}",
+        ],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+
+
 def test_sourcing_environment_selects_exact_fake_prefix_tools(
     tmp_path: Path,
 ) -> None:
