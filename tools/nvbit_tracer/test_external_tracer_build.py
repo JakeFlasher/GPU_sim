@@ -659,7 +659,7 @@ def test_production_link_preserves_cuda_driver_dependency() -> None:
 
     assert "NVCC_PATH=-L$(CUDA_INSTALL_PATH)/lib64" in makefile
     assert "$(shell which nvcc" not in makefile
-    assert "-Wl,--no-as-needed -lcuda -Wl,--as-needed" in makefile
+    assert "-Xlinker --no-as-needed -lcuda -Xlinker --as-needed" in makefile
 
 
 @pytest.mark.parametrize("dirty_kind", ["tracked", "staged", "untracked"])

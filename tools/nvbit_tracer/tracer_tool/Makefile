@@ -123,7 +123,7 @@ TRACE_PRINTER = trace_printer
 all: traces_enhanced $(NVBIT_TOOL) trace_printer
 
 $(NVBIT_TOOL): $(OBJECTS) $(HOST_OBJECTS) $(NVBIT_PATH)/libnvbit.a traces_enhanced
-	$(NVCC) -arch=$(ARCH) $(OPTFLAGS) $(OBJECTS) $(HOST_OBJECTS) $(TRACES_ENHANCED_OBJ) $(TRACES_ENHANCED_PROTOCOL_BUFFER_OBJ) $(LIBS) $(NVCC_PATH) -Wl,--no-as-needed -lcuda -Wl,--as-needed -lcudart_static $(PROTOBUF_LIBS) -shared -o $@
+	$(NVCC) -arch=$(ARCH) $(OPTFLAGS) $(OBJECTS) $(HOST_OBJECTS) $(TRACES_ENHANCED_OBJ) $(TRACES_ENHANCED_PROTOCOL_BUFFER_OBJ) $(LIBS) $(NVCC_PATH) -Xlinker --no-as-needed -lcuda -Xlinker --as-needed -lcudart_static $(PROTOBUF_LIBS) -shared -o $@
 
 # allocation_registry.cc is host-only C++ (no CUDA / NVBit / nvcc).
 # Build it with g++ + -fPIC so it can link into the shared tracer .so
