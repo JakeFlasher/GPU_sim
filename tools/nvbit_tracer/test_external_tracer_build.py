@@ -513,6 +513,13 @@ def test_fake_build_publishes_exact_cross_sealed_bundle(fixture: Fixture) -> Non
     assert receipt["artifact_validation"]["cuda"]["architectures"] == ["sm_86"]
     assert "ARCH=sm_86" in receipt["invocation"]["argv"]
     assert "NVBIT_TEMPCOPY_BUILD_OK=1" in receipt["invocation"]["argv"]
+    nvcc_assignment = next(
+        value
+        for value in receipt["invocation"]["argv"]
+        if value.startswith("NVCC=")
+    )
+    cuda_include = fixture.tools.parent / "include"
+    assert f"-I{cuda_include}" in nvcc_assignment
     assert "OBJECTS=tracer_tool.o" in receipt["invocation"]["argv"]
     assert "OBJ=obj/helper.o" in receipt["invocation"]["argv"]
     assert "PROTO_FILES=dynamic_trace/trace.proto" in receipt["invocation"]["argv"]
@@ -1589,6 +1596,31 @@ def test_resealed_invocation_supersets_are_rejected(
     with pytest.raises(
         build.ExternalTracerBuildAuthorityError,
         match="does not satisfy|exact pinned invocation|exact closed contract",
+    ):
+        _admit_fixture(fixture)
+
+
+def test_resealed_invocation_without_cuda_include_is_rejected(
+    fixture: Fixture,
+) -> None:
+    build.build_bundle(fixture.request())
+    _make_bundle_documents_writable(fixture)
+    receipt = _load(fixture.bundle / build.BUILD_RECEIPT_NAME)
+    artifact = _load(fixture.bundle / build.ARTIFACT_IDENTITY_NAME)
+    argv = receipt["invocation"]["argv"]
+    index = next(
+        position
+        for position, value in enumerate(argv)
+        if value.startswith("NVCC=")
+    )
+    cuda_include = f" -I{fixture.tools.parent / 'include'}"
+    assert cuda_include in argv[index]
+    argv[index] = argv[index].replace(cuda_include, "")
+    _rewrite_build_and_artifact(fixture, receipt, artifact)
+
+    with pytest.raises(
+        build.ExternalTracerBuildAuthorityError,
+        match="does not satisfy|exact pinned invocation",
     ):
         _admit_fixture(fixture)
 

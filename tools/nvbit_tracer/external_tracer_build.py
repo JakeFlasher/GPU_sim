@@ -1868,8 +1868,11 @@ def _build_argv(
     external_top: Path,
     private_bin: Path,
     protobuf_prefix: Path,
+    cuda_root: Path,
     source_paths: Iterable[str],
 ) -> tuple[str, ...]:
+    cuda_root = _absolute_lexical(cuda_root, label="CUDA toolkit root")
+    _require_make_safe_path(cuda_root, label="CUDA toolkit root")
     return (
         str(_tool_alias(private_bin, "make")),
         "-C",
@@ -1881,7 +1884,8 @@ def _build_argv(
         f"MAKE={_tool_alias(private_bin, 'make')}",
         "NVCC="
         f"{_tool_alias(private_bin, 'nvcc')} "
-        f"-ccbin={_tool_alias(private_bin, 'host_cxx')} -D_FORCE_INLINES",
+        f"-ccbin={_tool_alias(private_bin, 'host_cxx')} "
+        f"-D_FORCE_INLINES -I{cuda_root / 'include'}",
         f"PTXAS={_tool_alias(private_bin, 'ptxas')}",
         f"CXX={_tool_alias(private_bin, 'host_cxx')}",
         f"NVCC_CCBIN={_tool_alias(private_bin, 'host_cxx')}",
@@ -1908,6 +1912,7 @@ def _run_external_build(
         external_top=external_top,
         private_bin=private_bin,
         protobuf_prefix=protobuf_prefix,
+        cuda_root=request.nvcc.parent.parent,
         source_paths=(entry["path"] for entry in source.entries),
     )
     make = tools.retained["make"]
@@ -2395,6 +2400,7 @@ def _verify_document_invariants(
             external_top=external_top,
             private_bin=private_bin,
             protobuf_prefix=Path(build["protobuf"]["prefix"]),
+            cuda_root=Path(tool_by_role["nvcc"]["path"]).parent.parent,
             source_paths=paths,
         )
     )

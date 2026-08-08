@@ -149,12 +149,25 @@ exact `requirements.txt` pin; consumers never generate bindings in place.
 Agents do not run this build. After committing every tracked and nonignored
 change, an operator first materializes the exact protobuf lock directly into an
 external, de-aliased prefix. `--ensure-external` is no-repair/no-replace and
-requires an absent destination outside the repository:
+requires an absent destination outside the repository. The external builder
+also rejects `/usr/bin/g++-14` on hosts where it is a hard-linked alias. Copy
+the driver and its matching GCC helper tree into one fresh external prefix so
+the retained driver is single-link and can still resolve `cc1plus`:
 
 ```bash
 mkdir -p /tmp/nvbit-protobuf /tmp/nvbit-tracer-candidates /tmp/nvbit-tracer-bundles
 NVBIT_PB_PREFIX=/tmp/nvbit-protobuf/pb-34.1 \
   bash tools/nvbit_tracer/pinned_build_env.sh --ensure-external
+
+HOST_CXX_ROOT=/tmp/nvbit-gcc14-UNIQUE
+GCC14_LIBEXEC_DIR="$(dirname "$(/usr/bin/g++-14 -print-prog-name=cc1plus)")"
+GCC14_LIBEXEC_RELATIVE="${GCC14_LIBEXEC_DIR#/usr/lib/gcc/}"
+mkdir -p "$HOST_CXX_ROOT/bin" \
+  "$HOST_CXX_ROOT/lib/gcc/$(dirname "$GCC14_LIBEXEC_RELATIVE")"
+install -m 0755 /usr/bin/g++-14 "$HOST_CXX_ROOT/bin/g++-14"
+cp -a "$GCC14_LIBEXEC_DIR" \
+  "$HOST_CXX_ROOT/lib/gcc/$(dirname "$GCC14_LIBEXEC_RELATIVE")/"
+test "$(stat -c %h "$HOST_CXX_ROOT/bin/g++-14")" -eq 1
 ```
 
 The tracer itself uses a candidate/review/admit flow because `-g3` embeds the
@@ -163,16 +176,17 @@ before the initial build. Phase 1 is a successful, no-replace candidate build;
 it is not capture authority:
 
 ```bash
-.venv/bin/python tools/nvbit_tracer/external_tracer_build.py build-candidate \
+.venv/bin/python -m tools.nvbit_tracer.external_tracer_build build-candidate \
   --repo-root "$(git rev-parse --show-toplevel)" \
   --build-root /tmp/nvbit-tracer-build-UNIQUE \
   --bundle-dir /tmp/nvbit-tracer-candidates/sm86-UNIQUE \
   --git /usr/bin/git --bash /usr/bin/bash --make /usr/bin/make \
-  --nvcc /opt/cuda-13.2/bin/nvcc --ptxas /opt/cuda-13.2/bin/ptxas \
-  --cuobjdump /opt/cuda-13.2/bin/cuobjdump \
-  --host-cxx /usr/bin/g++-14 \
+  --nvcc /usr/local/cuda-13.2/bin/nvcc \
+  --ptxas /usr/local/cuda-13.2/bin/ptxas \
+  --cuobjdump /usr/local/cuda-13.2/bin/cuobjdump \
+  --host-cxx "$HOST_CXX_ROOT/bin/g++-14" \
   --protoc /tmp/nvbit-protobuf/pb-34.1/bin/protoc \
-  --pkg-config /usr/bin/pkg-config \
+  --pkg-config /usr/bin/pkgconf \
   --protobuf-prefix /tmp/nvbit-protobuf/pb-34.1
 ```
 
@@ -184,17 +198,17 @@ separate final bundle while preserving the candidate:
 
 ```bash
 EXPECTED_TRACER_SHA256=64_LOWERCASE_HEX_RETAINED_BY_INDEPENDENT_REVIEW
-.venv/bin/python tools/nvbit_tracer/external_tracer_build.py admit \
+.venv/bin/python -m tools.nvbit_tracer.external_tracer_build admit \
   --repo-root "$(git rev-parse --show-toplevel)" \
   --candidate-dir /tmp/nvbit-tracer-candidates/sm86-UNIQUE \
   --bundle-dir /tmp/nvbit-tracer-bundles/sm86-UNIQUE \
-  --cuobjdump /opt/cuda-13.2/bin/cuobjdump \
+  --cuobjdump /usr/local/cuda-13.2/bin/cuobjdump \
   --expected-tracer-sha256 "$EXPECTED_TRACER_SHA256"
 
-.venv/bin/python tools/nvbit_tracer/external_tracer_build.py verify \
+.venv/bin/python -m tools.nvbit_tracer.external_tracer_build verify \
   --repo-root "$(git rev-parse --show-toplevel)" \
   --bundle-dir /tmp/nvbit-tracer-bundles/sm86-UNIQUE \
-  --cuobjdump /opt/cuda-13.2/bin/cuobjdump \
+  --cuobjdump /usr/local/cuda-13.2/bin/cuobjdump \
   --expected-tracer-sha256 "$EXPECTED_TRACER_SHA256"
 ```
 
@@ -206,7 +220,9 @@ The candidate and final bundle each contain four files: sealed source, build,
 and artifact JSON plus `tracer_tool.so`. Only the final bundle has
 `independent_reviewed_candidate_sha256.v1` authority; `verify` rejects candidate
 receipts. The producer binds the exact wildcard/find source sets into argv,
-executes every named tool through retained descriptor aliases, contains and
+executes every named tool through retained descriptor aliases, and supplies the
+CUDA include directory derived from the retained nvcc path explicitly because a
+descriptor alias cannot preserve nvcc's toolkit-root inference. It contains and
 reaps the complete descendant process tree across timeout or cancellation,
 continuously monitors extracted source and protobuf input generations, and
 requires a target-free ELF64/EM_X86_64 shared object with only `sm_86` CUDA
