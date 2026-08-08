@@ -63,3 +63,24 @@ def test_tool_init_suppresses_callbacks_during_cuda_setup() -> None:
     assert body.count("skip_callback_flag = false;") == 1
     assert callback_guard_on < context_setup < architecture_query
     assert architecture_query < callback_guard_off < mutex_unlock
+
+
+def test_context_init_establishes_identity_before_application_callbacks() -> None:
+    source = _TRACER_SOURCE.read_text(encoding="utf-8")
+    function_start = source.index("void nvbit_at_ctx_init(CUcontext ctx)")
+    function_end = source.index("void init_context_state(CUcontext ctx)", function_start)
+    body = source[function_start:function_end]
+
+    state_publication = body.index("ctx_state_map[ctx] = ctx_state;")
+    callback_guard_on = body.index("skip_callback_flag = true;")
+    device_count = body.index("initialize_or_validate_device_count(")
+    context_device = body.index("checked_current_context_device_id(")
+    callback_guard_off = body.index("skip_callback_flag = false;")
+    mutex_unlock = body.index("pthread_mutex_unlock(&mutex);")
+
+    assert body.count("skip_callback_flag = true;") == 1
+    assert body.count("skip_callback_flag = false;") == 1
+    assert state_publication < callback_guard_on < device_count < context_device
+    assert context_device < callback_guard_off < mutex_unlock
+    assert "cudaMalloc" not in body
+    assert "cudaGetDeviceCount" not in body

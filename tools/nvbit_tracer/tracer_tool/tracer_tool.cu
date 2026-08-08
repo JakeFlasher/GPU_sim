@@ -349,6 +349,27 @@ static int checked_device_id_value(int device_id, const char *stage) {
   return device_id;
 }
 
+static void initialize_or_validate_device_count(const char *stage) {
+  int observed_num_devices = 0;
+  const CUresult status = cuDeviceGetCount(&observed_num_devices);
+  if (status != CUDA_SUCCESS || observed_num_devices <= 0 ||
+      observed_num_devices > TRACER_MAX_DEVICES) {
+    std::ostringstream detail;
+    detail << "cuDeviceGetCount returned CUresult=" << static_cast<int>(status)
+           << " observed_num_devices=" << observed_num_devices
+           << " TRACER_MAX_DEVICES=" << TRACER_MAX_DEVICES;
+    fail_device_identity(stage, detail.str());
+  }
+  if (num_devices == 0) {
+    num_devices = observed_num_devices;
+  } else if (num_devices != observed_num_devices) {
+    std::ostringstream detail;
+    detail << "observed_num_devices=" << observed_num_devices
+           << " differs from retained num_devices=" << num_devices;
+    fail_device_identity(stage, detail.str());
+  }
+}
+
 static int checked_current_context_device_id(const CTXstate *ctx_state,
                                              const char *stage) {
   CUdevice observed_device = -1;
@@ -4883,21 +4904,22 @@ void nvbit_at_ctx_init(CUcontext ctx) {
   assert(ctx_state_map.find(ctx) == ctx_state_map.end());
   CTXstate* ctx_state = new CTXstate;
   ctx_state_map[ctx] = ctx_state;
+  // Application allocations may occur before NVBit calls nvbit_tool_init at
+  // the first kernel launch. Establish checked non-allocating driver identity
+  // now so those callbacks cannot observe the CTXstate sentinel values. The
+  // guard suppresses the driver queries' own recursive callbacks.
+  skip_callback_flag = true;
+  initialize_or_validate_device_count("nvbit_at_ctx_init/device count");
+  ctx_state->device_id = checked_current_context_device_id(
+      nullptr, "nvbit_at_ctx_init/context device");
+  skip_callback_flag = false;
   pthread_mutex_unlock(&mutex);
 }
 
 void init_context_state(CUcontext ctx) {
+  CTXstate* ctx_state = ctx_state_map[ctx];
   if(is_first_init_context_call) {
     is_first_init_context_call = false;
-    const cudaError_t count_status = cudaGetDeviceCount(&num_devices);
-    if (count_status != cudaSuccess || num_devices <= 0 ||
-        num_devices > TRACER_MAX_DEVICES) {
-      std::ostringstream detail;
-      detail << "cudaGetDeviceCount status=" << static_cast<int>(count_status)
-             << " num_devices=" << num_devices
-             << " TRACER_MAX_DEVICES=" << TRACER_MAX_DEVICES;
-      fail_device_identity("init_context_state/device count", detail.str());
-    }
     const cudaError_t stop_report_status =
         cudaMallocManaged(&stop_report, num_devices * sizeof(bool));
     if (stop_report_status != cudaSuccess || stop_report == nullptr) {
@@ -4917,9 +4939,8 @@ void init_context_state(CUcontext ctx) {
       current_stream_id[i].store(0, std::memory_order_relaxed);
     }
   }
-  CTXstate* ctx_state = ctx_state_map[ctx];
   ctx_state->device_id = checked_current_context_device_id(
-      nullptr, "init_context_state/context device");
+      ctx_state, "init_context_state/context device");
   // Release-store: the recv thread's acquire-load at :1385 must observe
   // WORKING on its very first iteration, which happens strictly after
   // channel_host.init() spawns it below.
