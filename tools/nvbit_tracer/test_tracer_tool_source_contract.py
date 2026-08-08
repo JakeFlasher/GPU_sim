@@ -6,14 +6,11 @@ _TRACER_SOURCE = (
 )
 
 
-def test_static_shared_memory_attribute_fails_closed_before_serialization() -> None:
+def test_static_shared_memory_metadata_fails_closed_before_serialization() -> None:
     source = _TRACER_SOURCE.read_text(encoding="utf-8")
-    attribute = "CU_FUNC_ATTRIBUTE_SHARED_SIZE_BYTES"
-    assert source.count(attribute) == 1
-
-    query = source.index(attribute)
+    query = source.index("nvbit_get_func_config(ctx, kernel_func, &function_config)")
     status_check = source.index(
-        "shmem_static_status != CUDA_SUCCESS", query
+        "function_config.shmem_static_nbytes ==", query
     )
     fatal = source.index(
         "static_shared_memory_attribute_unavailable", status_check
@@ -27,24 +24,22 @@ def test_static_shared_memory_attribute_fails_closed_before_serialization() -> N
         "set_shared_memory_dynamic_bytes", static_setter
     )
 
-    query_line_start = source.rfind("\n", 0, query)
-    query_context = source[source.rfind("\n", 0, query_line_start) : query]
-    assert "CUDA_SAFECALL" not in query_context
-    assert "int shmem_static_nbytes = -1;" in source[:query]
-    assert query < status_check < fatal < process_exit < combined
+    sentinel = source.index("memset(&function_config, 0xff", 0, query)
+    assert source.count("nvbit_get_func_config(ctx, kernel_func, &function_config)") == 1
+    assert sentinel < query < status_check < fatal < process_exit < combined
     assert combined < static_setter < dynamic_setter
 
 
-def test_register_attribute_fails_closed_before_serialization() -> None:
+def test_register_metadata_fails_closed_before_serialization() -> None:
     source = _TRACER_SOURCE.read_text(encoding="utf-8")
-    query = source.index("CU_FUNC_ATTRIBUTE_NUM_REGS")
-    status_check = source.index("nregs_status != CUDA_SUCCESS", query)
+    query = source.index("nvbit_get_func_config(ctx, kernel_func, &function_config)")
+    status_check = source.index("function_config.num_registers ==", query)
     fatal = source.index("register_attribute_unavailable", status_check)
     process_exit = source.index("_exit(EXIT_FAILURE)", fatal)
     setter = source.index("set_number_of_registers", process_exit)
 
-    assert "int nregs = -1;" in source[:query]
-    assert query < status_check < fatal < process_exit < setter
+    sentinel = source.index("memset(&function_config, 0xff", 0, query)
+    assert sentinel < query < status_check < fatal < process_exit < setter
 
 
 def test_tool_init_suppresses_callbacks_during_cuda_setup() -> None:

@@ -3093,31 +3093,36 @@ void nvbit_at_cuda_event(CUcontext ctx, int is_exit, nvbit_api_cuda_t cbid,
         ts_scope_dims_captured = true;
       }
       
-      int nregs = -1;
-      const CUresult nregs_status = cuFuncGetAttribute(
-          &nregs, CU_FUNC_ATTRIBUTE_NUM_REGS, kernel_func);
-      if (nregs_status != CUDA_SUCCESS || nregs < 0) {
+      // The launch callback's CUfunction is NVBit-owned metadata. Querying it
+      // through a directly linked libcuda can return CUDA_ERROR_INVALID_HANDLE
+      // even though NVBit can inspect and instrument the function. Use NVBit's
+      // function-configuration API, which authenticates these fields from the
+      // same function object used by the instrumentation path.
+      func_config_t function_config;
+      memset(&function_config, 0xff, sizeof(function_config));
+      nvbit_get_func_config(ctx, kernel_func, &function_config);
+      if (function_config.num_registers ==
+          std::numeric_limits<uint32_t>::max()) {
         fprintf(stderr,
                 "FATAL: register_attribute_unavailable: "
-                "cuFuncGetAttribute(NUM_REGS) returned CUresult=%d, value=%d; "
-                "refusing to serialize an unauthenticated value.\n",
-                static_cast<int>(nregs_status), nregs);
+                "nvbit_get_func_config did not initialize num_registers; "
+                "refusing to serialize an unauthenticated value.\n");
         fflush(stderr);
         _exit(EXIT_FAILURE);
       }
-
-      int shmem_static_nbytes = -1;
-      const CUresult shmem_static_status = cuFuncGetAttribute(
-          &shmem_static_nbytes, CU_FUNC_ATTRIBUTE_SHARED_SIZE_BYTES, kernel_func);
-      if (shmem_static_status != CUDA_SUCCESS || shmem_static_nbytes < 0) {
+      if (function_config.shmem_static_nbytes ==
+          std::numeric_limits<uint32_t>::max()) {
         fprintf(stderr,
                 "FATAL: static_shared_memory_attribute_unavailable: "
-                "cuFuncGetAttribute(SHARED_SIZE_BYTES) returned CUresult=%d, "
-                "value=%d; refusing to serialize an unauthenticated value.\n",
-                static_cast<int>(shmem_static_status), shmem_static_nbytes);
+                "nvbit_get_func_config did not initialize "
+                "shmem_static_nbytes; refusing to serialize an "
+                "unauthenticated value.\n");
         fflush(stderr);
         _exit(EXIT_FAILURE);
       }
+      const uint32_t nregs = function_config.num_registers;
+      const uint32_t shmem_static_nbytes =
+          function_config.shmem_static_nbytes;
       const uint64_t shmem_combined_nbytes =
           static_cast<uint64_t>(shmem_static_nbytes) +
           static_cast<uint64_t>(shared_mem_bytes);
