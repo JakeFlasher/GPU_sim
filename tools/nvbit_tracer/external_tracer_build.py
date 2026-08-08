@@ -102,11 +102,14 @@ TOOL_ROLES = (
     "protoc",
     "pkg_config",
 )
+TOOL_EXECUTION_KIND = "retained_descriptor_aliases_with_nvcc_argv0.v2"
+NVCC_DESCRIPTOR_ALIAS = "nvcc-retained"
+NVCC_LAUNCHER_NAME = "nvcc-launcher"
 TOOL_ALIASES = {
     "git": "git",
     "bash": "bash",
     "make": "make",
-    "nvcc": "nvcc",
+    "nvcc": NVCC_DESCRIPTOR_ALIAS,
     "ptxas": "ptxas",
     "cuobjdump": "cuobjdump",
     "host_cxx": "g++-14",
@@ -1335,11 +1338,33 @@ def _verify_tools(tools: ToolSet) -> None:
             _authority(f"retained {role} tool drifted: {exc}")
 
 
+def _nvcc_launcher_payload(private_bin: Path, nvcc_path: Path) -> bytes:
+    nvcc = _absolute_lexical(nvcc_path, label="nvcc launcher tool")
+    _require_make_safe_path(nvcc, label="nvcc launcher tool")
+    descriptor_alias = _tool_alias(private_bin, "nvcc")
+    _require_make_safe_path(descriptor_alias, label="nvcc descriptor alias")
+    return f'exec -a {nvcc} {descriptor_alias} "$@"\n'.encode("ascii")
+
+
 def _install_tool_aliases(build_root: Path, tools: ToolSet) -> Path:
     private_bin = build_root / ".task630-tool-bin"
     private_bin.mkdir(mode=0o700)
     for role, alias in TOOL_ALIASES.items():
         os.symlink(tools.retained[role].proc_path, private_bin / alias)
+    launcher = private_bin / NVCC_LAUNCHER_NAME
+    payload = _nvcc_launcher_payload(private_bin, tools.retained["nvcc"].path)
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_CLOEXEC", 0)
+    descriptor = os.open(launcher, flags, 0o400)
+    try:
+        view = memoryview(payload)
+        while view:
+            written = os.write(descriptor, view)
+            if written <= 0:
+                _authority("short write while installing exact nvcc launcher")
+            view = view[written:]
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
     return private_bin
 
 
@@ -1355,7 +1380,10 @@ def _retain_tool_alias_generation(
                 regular_paths=(),
                 recursive_directories=(),
                 filtered_directories={
-                    ".task630-tool-bin": tuple(TOOL_ALIASES.values())
+                    ".task630-tool-bin": (
+                        *TOOL_ALIASES.values(),
+                        NVCC_LAUNCHER_NAME,
+                    )
                 },
             )
         )
@@ -1883,7 +1911,8 @@ def _build_argv(
         f"SHELL={_tool_alias(private_bin, 'bash')}",
         f"MAKE={_tool_alias(private_bin, 'make')}",
         "NVCC="
-        f"{_tool_alias(private_bin, 'nvcc')} "
+        f"{_tool_alias(private_bin, 'bash')} "
+        f"{private_bin / NVCC_LAUNCHER_NAME} "
         f"-ccbin={_tool_alias(private_bin, 'host_cxx')} "
         f"-D_FORCE_INLINES -I{cuda_root / 'include'}",
         f"PTXAS={_tool_alias(private_bin, 'ptxas')}",
@@ -2189,7 +2218,7 @@ def _build_document(
                 "total_size_bytes": protobuf.total_size_bytes,
             },
             "invocation": {
-                "tool_execution": "retained_descriptor_aliases.v1",
+                "tool_execution": TOOL_EXECUTION_KIND,
                 "argv": list(process.argv),
                 "cwd": process.cwd,
                 "environment": [
@@ -2392,8 +2421,8 @@ def _verify_document_invariants(
     )
     tool_by_role = {row["role"]: row for row in tools}
     invocation = build["invocation"]
-    if invocation.get("tool_execution") != "retained_descriptor_aliases.v1":
-        _authority("build receipt does not bind retained-descriptor execution")
+    if invocation.get("tool_execution") != TOOL_EXECUTION_KIND:
+        _authority("build receipt does not bind exact retained-tool execution")
     external_top, _build_root, private_bin = _receipt_build_paths(invocation)
     expected_argv = list(
         _build_argv(

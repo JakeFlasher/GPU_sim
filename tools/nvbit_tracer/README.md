@@ -219,11 +219,15 @@ repository/worktree, symlink-free, and composed of single-link regular files.
 The candidate and final bundle each contain four files: sealed source, build,
 and artifact JSON plus `tracer_tool.so`. Only the final bundle has
 `independent_reviewed_candidate_sha256.v1` authority; `verify` rejects candidate
-receipts. The producer binds the exact wildcard/find source sets into argv,
-executes every named tool through retained descriptor aliases, and supplies the
-CUDA include directory derived from the retained nvcc path explicitly because a
-descriptor alias cannot preserve nvcc's toolkit-root inference. It contains and
-reaps the complete descendant process tree across timeout or cancellation,
+receipts. The producer binds the exact wildcard/find source sets into argv and
+executes every named tool through retained descriptors. A monitored private
+launcher uses retained bash to set nvcc's `argv[0]` back to its authenticated
+lexical toolkit path before executing the retained nvcc descriptor; this keeps
+nvcc's sibling-tool discovery (`cudafe++`, `cicc`, and related toolkit members)
+anchored to the toolkit root selected by that retained identity rather than
+searching ambient `PATH`. The exact invocation also supplies the CUDA include
+directory derived from the retained nvcc path explicitly. It contains and reaps
+the complete descendant process tree across timeout or cancellation,
 continuously monitors extracted source and protobuf input generations, and
 requires a target-free ELF64/EM_X86_64 shared object with only `sm_86` CUDA
 cubins. Linux subreaper/procfs containment is mandatory; the producer never

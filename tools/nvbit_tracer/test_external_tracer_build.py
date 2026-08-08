@@ -493,9 +493,7 @@ def test_fake_build_publishes_exact_cross_sealed_bundle(fixture: Fixture) -> Non
         str(fixture.build_roots[0] / "tools/nvbit_tracer"),
         "all",
     ]
-    assert receipt["invocation"]["tool_execution"] == (
-        "retained_descriptor_aliases.v1"
-    )
+    assert receipt["invocation"]["tool_execution"] == build.TOOL_EXECUTION_KIND
     assert len(receipt["invocation"]["argv"]) == 21
     assert len(receipt["invocation"]["environment"]) == 20
     assert [row["name"] for row in receipt["invocation"]["environment"]] == sorted(
@@ -520,6 +518,16 @@ def test_fake_build_publishes_exact_cross_sealed_bundle(fixture: Fixture) -> Non
     )
     cuda_include = fixture.tools.parent / "include"
     assert f"-I{cuda_include}" in nvcc_assignment
+    private_bin = fixture.build_roots[0] / ".task630-tool-bin"
+    assert nvcc_assignment.startswith(
+        f"NVCC={private_bin / 'bash'} {private_bin / build.NVCC_LAUNCHER_NAME} "
+    )
+    assert (private_bin / build.NVCC_LAUNCHER_NAME).read_bytes() == (
+        build._nvcc_launcher_payload(private_bin, fixture.tools / "nvcc")
+    )
+    assert "exec -a " in (
+        private_bin / build.NVCC_LAUNCHER_NAME
+    ).read_text(encoding="ascii")
     assert "OBJECTS=tracer_tool.o" in receipt["invocation"]["argv"]
     assert "OBJ=obj/helper.o" in receipt["invocation"]["argv"]
     assert "PROTO_FILES=dynamic_trace/trace.proto" in receipt["invocation"]["argv"]
@@ -621,6 +629,58 @@ def test_tool_drift_during_build_is_rejected(fixture: Fixture) -> None:
     with pytest.raises(build.ExternalTracerBuildAuthorityError, match="ptxas tool drifted"):
         build.build_bundle(fixture.request())
     assert not fixture.bundle.exists()
+
+
+def test_nvcc_launcher_drift_during_build_is_rejected(fixture: Fixture) -> None:
+    request = fixture.request()
+    launcher = request.build_root / ".task630-tool-bin" / build.NVCC_LAUNCHER_NAME
+    source = _fake_make_source(
+        body_after_output=(
+            f"launcher = pathlib.Path({str(launcher)!r})\n"
+            "launcher.chmod(0o600)\n"
+            "launcher.write_text('changed launcher')"
+        )
+    )
+    _write_executable(fixture.make, source)
+
+    with pytest.raises(
+        build.ExternalTracerBuildAuthorityError,
+        match="tool-alias generation drifted",
+    ):
+        build.build_bundle(request)
+    assert not fixture.bundle.exists()
+
+
+def test_nvcc_launcher_executes_retained_descriptor(tmp_path: Path) -> None:
+    private_bin = tmp_path / ".task630-tool-bin"
+    private_bin.mkdir()
+    launcher = private_bin / build.NVCC_LAUNCHER_NAME
+    descriptor = os.open("/usr/bin/printf", os.O_RDONLY)
+    try:
+        os.symlink(
+            f"/proc/self/fd/{descriptor}",
+            private_bin / build.NVCC_DESCRIPTOR_ALIAS,
+        )
+        launcher.write_bytes(
+            build._nvcc_launcher_payload(private_bin, Path("/usr/bin/printf"))
+        )
+        result = subprocess.run(
+            [
+                "/usr/bin/bash",
+                str(launcher),
+                "descriptor launcher\\n",
+            ],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            pass_fds=(descriptor,),
+            check=True,
+        )
+    finally:
+        os.close(descriptor)
+
+    assert result.stdout == b"descriptor launcher\n"
+    assert result.stderr == b""
 
 
 def test_child_tool_alias_consumes_retained_descriptor_after_path_swap(
@@ -1596,6 +1656,23 @@ def test_resealed_invocation_supersets_are_rejected(
     with pytest.raises(
         build.ExternalTracerBuildAuthorityError,
         match="does not satisfy|exact pinned invocation|exact closed contract",
+    ):
+        _admit_fixture(fixture)
+
+
+def test_resealed_legacy_nvcc_execution_kind_is_rejected(
+    fixture: Fixture,
+) -> None:
+    build.build_bundle(fixture.request())
+    _make_bundle_documents_writable(fixture)
+    receipt = _load(fixture.bundle / build.BUILD_RECEIPT_NAME)
+    artifact = _load(fixture.bundle / build.ARTIFACT_IDENTITY_NAME)
+    receipt["invocation"]["tool_execution"] = "retained_descriptor_aliases.v1"
+    _rewrite_build_and_artifact(fixture, receipt, artifact)
+
+    with pytest.raises(
+        build.ExternalTracerBuildAuthorityError,
+        match="does not satisfy|exact retained-tool execution",
     ):
         _admit_fixture(fixture)
 

@@ -65,7 +65,7 @@
       "additionalProperties": false,
       "required": ["tool_execution", "argv", "cwd", "environment"],
       "properties": {
-        "tool_execution": {"const": "retained_descriptor_aliases.v1"},
+        "tool_execution": {"const": "retained_descriptor_aliases_with_nvcc_argv0.v2"},
         "argv": {
           "type": "array",
           "minItems": 21,
@@ -79,7 +79,7 @@
             {"const": "NVBIT_TEMPCOPY_BUILD_OK=1"},
             {"type": "string", "pattern": "^SHELL=/tmp/[A-Za-z0-9._+-]+/\\.task630-tool-bin/bash$"},
             {"type": "string", "pattern": "^MAKE=/tmp/[A-Za-z0-9._+-]+/\\.task630-tool-bin/make$"},
-            {"type": "string", "pattern": "^NVCC=/tmp/[A-Za-z0-9._+-]+/\\.task630-tool-bin/nvcc -ccbin=/tmp/[A-Za-z0-9._+-]+/\\.task630-tool-bin/g\\+\\+-14 -D_FORCE_INLINES -I/[A-Za-z0-9._+/-]+/include$"},
+            {"type": "string", "pattern": "^NVCC=/tmp/[A-Za-z0-9._+-]+/\\.task630-tool-bin/bash /tmp/[A-Za-z0-9._+-]+/\\.task630-tool-bin/nvcc-launcher -ccbin=/tmp/[A-Za-z0-9._+-]+/\\.task630-tool-bin/g\\+\\+-14 -D_FORCE_INLINES -I/[A-Za-z0-9._+/-]+/include$"},
             {"type": "string", "pattern": "^PTXAS=/tmp/[A-Za-z0-9._+-]+/\\.task630-tool-bin/ptxas$"},
             {"type": "string", "pattern": "^CXX=/tmp/[A-Za-z0-9._+-]+/\\.task630-tool-bin/g\\+\\+-14$"},
             {"type": "string", "pattern": "^NVCC_CCBIN=/tmp/[A-Za-z0-9._+-]+/\\.task630-tool-bin/g\\+\\+-14$"},
