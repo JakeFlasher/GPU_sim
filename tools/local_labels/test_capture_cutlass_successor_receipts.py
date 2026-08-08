@@ -1609,6 +1609,9 @@ def test_external_nvbit_tracer_is_retained_and_executed_by_descriptor(
         observed["environment"] = environment
         observed["descriptors"] = kwargs["inherited_descriptors"]
         observed["byte_root"] = kwargs["byte_root"]
+        observed["byte_root_descriptor"] = kwargs[
+            "byte_root_descriptor"
+        ]
         observed["trace_target"] = Path(
             os.readlink(environment["TRACES_FOLDER"])
         )
@@ -1667,11 +1670,57 @@ def test_external_nvbit_tracer_is_retained_and_executed_by_descriptor(
     assert observed["byte_root"] == Path(
         observed["environment"]["TRACES_FOLDER"]
     )
+    assert observed["byte_root_descriptor"] in observed["descriptors"]
+    assert observed["byte_root"] == Path(
+        f"/proc/self/fd/{observed['byte_root_descriptor']}"
+    )
     assert observed["trace_target"] == (
         output_root / "nvbit" / "vendor_gemm_cutlass"
     )
     assert len(observed["descriptors"]) == 4
     assert tracer.read_bytes() == tracer_payload
+
+
+def test_capture_inventory_uses_exact_retained_directory_descriptor(
+    tmp_path: Path,
+):
+    trace_root = tmp_path / "trace"
+    trace_root.mkdir()
+    (trace_root / "kernelslist").write_bytes(b"kernel\n")
+    descriptor = os.open(
+        trace_root,
+        os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC,
+    )
+    try:
+        proc_root = Path(f"/proc/self/fd/{descriptor}")
+        inventory = capture._capture_tree_inventory(
+            proc_root,
+            retained_root_descriptor=descriptor,
+        )
+        assert inventory["file_count"] == 1
+        assert inventory["total_bytes"] == len(b"kernel\n")
+
+        with pytest.raises(
+            capture.CaptureError,
+            match="retained root is not exact",
+        ):
+            capture._capture_tree_inventory(
+                trace_root,
+                retained_root_descriptor=descriptor,
+            )
+
+        (trace_root / "escape").symlink_to(tmp_path)
+        with pytest.raises(
+            capture.CaptureError,
+            match="capture output descendant is unsafe",
+        ) as caught:
+            capture._capture_tree_inventory(
+                proc_root,
+                retained_root_descriptor=descriptor,
+            )
+        assert caught.value.code == "capture_inventory_unsafe_entry"
+    finally:
+        os.close(descriptor)
 
 
 def test_post_copy_source_mutation_retains_authenticated_failed_tool(

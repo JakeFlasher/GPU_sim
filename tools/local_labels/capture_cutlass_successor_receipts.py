@@ -94,7 +94,7 @@ CAPTURE_STREAM_READ_BYTES = 64 * 1024
 CAPTURE_PROCESS_POLL_S = 0.05
 CAPTURE_CLEANUP_TIMEOUT_S = 5.0
 CAPTURE_PRODUCER_SELF_SHA256 = (
-    "f0c17d7d6b9d8dedd6c8f21f4b6d1dd46250fc671f1e3c2fd08c8ae3c0e77fdf"
+    "9273bb9b1a50de2478107f8b37a6b16318378a53378a0a68097f8a2d8e0d70d9"
 )
 EXPECTED_TRACE_CONTRACT_ID = admission.TRACE_CONTRACT_ID
 EXPECTED_MEMORY_PAYLOAD_CLASSES = admission.TRACE_MEMORY_PAYLOAD_CLASSES
@@ -1481,6 +1481,7 @@ def _capture_tree_inventory(
     root: Path,
     *,
     byte_budget: int | None = None,
+    retained_root_descriptor: int | None = None,
 ) -> dict[str, Any]:
     """Incrementally inventory a capture tree under admission-owned ceilings."""
 
@@ -1512,19 +1513,38 @@ def _capture_tree_inventory(
     total_path_bytes = 0
     first_file: str | None = None
     try:
-        try:
-            root_metadata = root.lstat()
-        except FileNotFoundError:
-            return {
-                "file_count": 0,
-                "directory_count": 0,
-                "total_bytes": 0,
-                "total_relative_path_bytes": 0,
-                "first_file": None,
-            }
-        if stat.S_ISLNK(root_metadata.st_mode) or not stat.S_ISDIR(
-            root_metadata.st_mode
-        ):
+        if retained_root_descriptor is None:
+            try:
+                root_metadata = root.lstat()
+            except FileNotFoundError:
+                return {
+                    "file_count": 0,
+                    "directory_count": 0,
+                    "total_bytes": 0,
+                    "total_relative_path_bytes": 0,
+                    "first_file": None,
+                }
+            root_is_symlink = stat.S_ISLNK(root_metadata.st_mode)
+        else:
+            if (
+                type(retained_root_descriptor) is not int
+                or retained_root_descriptor < 0
+                or root
+                != Path(f"/proc/self/fd/{retained_root_descriptor}")
+            ):
+                raise CaptureError(
+                    "capture inventory retained root is not exact",
+                    code="capture_inventory_unsafe_entry",
+                )
+            try:
+                root_metadata = os.fstat(retained_root_descriptor)
+            except OSError as exc:
+                raise CaptureError(
+                    f"capture inventory retained root is unavailable: {exc}",
+                    code="capture_inventory_unsafe_entry",
+                ) from exc
+            root_is_symlink = False
+        if root_is_symlink or not stat.S_ISDIR(root_metadata.st_mode):
             raise CaptureError(
                 f"capture output descendant is unsafe: {root}",
                 code="capture_inventory_unsafe_entry",
@@ -1661,8 +1681,15 @@ def _reject_preexisting_output_descendants(
             raise CaptureError(f"pre-existing output artifact must be removed: {path}")
 
 
-def _capture_tree_bytes(root: Path) -> int:
-    return int(_capture_tree_inventory(root)["total_bytes"])
+def _capture_tree_bytes(
+    root: Path,
+    *,
+    retained_root_descriptor: int | None = None,
+) -> int:
+    return int(_capture_tree_inventory(
+        root,
+        retained_root_descriptor=retained_root_descriptor,
+    )["total_bytes"])
 
 
 def _require_capture_tree_budget(root: Path, byte_budget: int) -> None:
@@ -1874,6 +1901,7 @@ def _retain_capture_failure_streams(
 def _run_capture_command(
     command: list[str], env: dict[str, str], cwd: Path, *,
     timeout_s: float = CAPTURE_TIMEOUT_S, byte_root: Path | None = None,
+    byte_root_descriptor: int | None = None,
     byte_budget: int | None = None, failure_root: Path | None = None,
     inherited_descriptors: tuple[int, ...] = (),
     require_cgroup_containment: bool = False,
@@ -1887,6 +1915,31 @@ def _run_capture_command(
         raise CaptureError("capture timeout must be positive")
     if byte_budget is not None and byte_budget <= 0:
         raise CaptureError("capture byte budget must be positive")
+    if byte_root_descriptor is not None:
+        if (
+            type(byte_root_descriptor) is not int
+            or byte_root_descriptor < 0
+            or byte_root is None
+            or byte_budget is None
+            or byte_root != Path(f"/proc/self/fd/{byte_root_descriptor}")
+            or byte_root_descriptor not in inherited_descriptors
+        ):
+            raise CaptureError(
+                "capture byte-root descriptor authority is not exact",
+                code="capture_inventory_unsafe_entry",
+            )
+        try:
+            byte_root_metadata = os.fstat(byte_root_descriptor)
+        except OSError as exc:
+            raise CaptureError(
+                f"capture byte-root descriptor is unavailable: {exc}",
+                code="capture_inventory_unsafe_entry",
+            ) from exc
+        if not stat.S_ISDIR(byte_root_metadata.st_mode):
+            raise CaptureError(
+                "capture byte-root descriptor is not a directory",
+                code="capture_inventory_unsafe_entry",
+            )
     if CAPTURE_STREAM_LIMIT_BYTES <= 0 or CAPTURE_STREAM_READ_BYTES <= 0:
         raise CaptureError("capture stream limits must be positive")
     started = dt.datetime.now(dt.timezone.utc).isoformat().replace("+00:00", "Z")
@@ -1951,12 +2004,21 @@ def _run_capture_command(
         except MemoryError:
             inventory_resource_failed.set()
 
+    def observed_capture_bytes() -> int:
+        assert byte_root is not None
+        if byte_root_descriptor is None:
+            return _capture_tree_bytes(byte_root)
+        return _capture_tree_bytes(
+            byte_root,
+            retained_root_descriptor=byte_root_descriptor,
+        )
+
     def watch_bytes() -> None:
         while not stop_watchdog.wait(0.1):
             if byte_root is None or byte_budget is None:
                 continue
             try:
-                observed_bytes = _capture_tree_bytes(byte_root)
+                observed_bytes = observed_capture_bytes()
                 if observed_bytes > byte_budget:
                     raise CaptureError(
                         "capture trace byte budget exceeded: "
@@ -2621,7 +2683,7 @@ def _run_capture_command(
     if byte_root is not None and byte_budget is not None:
         terminal_inventory_failure: CaptureError | None = None
         try:
-            observed_bytes = _capture_tree_bytes(byte_root)
+            observed_bytes = observed_capture_bytes()
             if observed_bytes > byte_budget:
                 terminal_inventory_failure = budget_failure
         except CaptureError as exc:
@@ -6219,6 +6281,7 @@ def capture_phase(
                         process_cwd,
                         timeout_s=float(row["trace_budget"]["max_wall_time_s"]),
                         byte_root=trace_proc_path,
+                        byte_root_descriptor=retained_trace_reader.descriptor,
                         byte_budget=row["trace_budget"]["max_trace_bytes"],
                         failure_root=failure_root,
                         inherited_descriptors=tuple(dict.fromkeys((
