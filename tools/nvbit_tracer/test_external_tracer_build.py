@@ -103,11 +103,19 @@ def _fake_tracer_elf(
     *,
     cuda_architecture: str = "sm_86",
     machine: int = 62,
+    needed_libraries: tuple[str, ...] = ("libcuda.so.1",),
+    dynamic_string_table_address: int | None = None,
 ) -> bytes:
     text = b"\xc3"
-    dynamic = b"\0" * 16
+    dynamic_size = (len(needed_libraries) + 3) * 16
+    dynamic = bytearray(dynamic_size)
+    dynamic_strings = bytearray(b"\0")
+    needed_offsets: list[int] = []
+    for library in needed_libraries:
+        needed_offsets.append(len(dynamic_strings))
+        dynamic_strings.extend(library.encode("ascii") + b"\0")
     fatbin = f"FAKE_CUDA_ARCH={cuda_architecture}\0".encode("ascii")
-    names = b"\0.shstrtab\0.text\0.dynamic\0.nv_fatbin\0"
+    names = b"\0.shstrtab\0.text\0.dynamic\0.dynstr\0.nv_fatbin\0"
     phoff = 64
     phnum = 2
     cursor = phoff + phnum * 56
@@ -116,12 +124,14 @@ def _fake_tracer_elf(
     cursor = (cursor + 7) & ~7
     dynamic_offset = cursor
     cursor += len(dynamic)
+    dynamic_strings_offset = cursor
+    cursor += len(dynamic_strings)
     fatbin_offset = cursor
     cursor += len(fatbin)
     names_offset = cursor
     cursor += len(names)
     shoff = (cursor + 7) & ~7
-    shnum = 5
+    shnum = 6
     total = shoff + shnum * 64
     payload = bytearray(total)
     ident = b"\x7fELF" + bytes((2, 1, 1, 0)) + b"\0" * 8
@@ -158,16 +168,68 @@ def _fake_tracer_elf(
         len(dynamic),
         8,
     )
+    dynamic_entries = [(1, offset) for offset in needed_offsets]
+    dynamic_entries.extend(
+        [
+            (
+                5,
+                dynamic_strings_offset
+                if dynamic_string_table_address is None
+                else dynamic_string_table_address,
+            ),
+            (10, len(dynamic_strings)),
+            (0, 0),
+        ]
+    )
+    for index, row in enumerate(dynamic_entries):
+        struct.pack_into("<qQ", dynamic, index * 16, *row)
     payload[text_offset : text_offset + len(text)] = text
     payload[dynamic_offset : dynamic_offset + len(dynamic)] = dynamic
+    payload[
+        dynamic_strings_offset : dynamic_strings_offset + len(dynamic_strings)
+    ] = dynamic_strings
     payload[fatbin_offset : fatbin_offset + len(fatbin)] = fatbin
     payload[names_offset : names_offset + len(names)] = names
     section_rows = (
         (0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
         (names.index(b".shstrtab"), 3, 0, 0, names_offset, len(names), 0, 0, 1, 0),
         (names.index(b".text"), 1, 6, 0, text_offset, len(text), 0, 0, 1, 0),
-        (names.index(b".dynamic"), 6, 3, 0, dynamic_offset, len(dynamic), 0, 0, 8, 16),
-        (names.index(b".nv_fatbin"), 1, 2, 0, fatbin_offset, len(fatbin), 0, 0, 8, 0),
+        (
+            names.index(b".dynamic"),
+            6,
+            3,
+            dynamic_offset,
+            dynamic_offset,
+            len(dynamic),
+            4,
+            0,
+            8,
+            16,
+        ),
+        (
+            names.index(b".dynstr"),
+            3,
+            2,
+            dynamic_strings_offset,
+            dynamic_strings_offset,
+            len(dynamic_strings),
+            0,
+            0,
+            1,
+            0,
+        ),
+        (
+            names.index(b".nv_fatbin"),
+            1,
+            2,
+            0,
+            fatbin_offset,
+            len(fatbin),
+            0,
+            0,
+            8,
+            0,
+        ),
     )
     for index, row in enumerate(section_rows):
         struct.pack_into("<IIQQQQIIQQ", payload, shoff + index * 64, *row)
@@ -508,6 +570,9 @@ def test_fake_build_publishes_exact_cross_sealed_bundle(fixture: Fixture) -> Non
         "expected_sha256": hashlib.sha256(_DEFAULT_TRACER).hexdigest(),
     }
     assert receipt["artifact_validation"]["elf"]["machine"] == "EM_X86_64"
+    assert receipt["artifact_validation"]["elf"]["needed_libraries"] == [
+        "libcuda.so.1"
+    ]
     assert receipt["artifact_validation"]["cuda"]["architectures"] == ["sm_86"]
     assert "ARCH=sm_86" in receipt["invocation"]["argv"]
     assert "NVBIT_TEMPCOPY_BUILD_OK=1" in receipt["invocation"]["argv"]
@@ -567,7 +632,7 @@ def test_schemas_are_closed_draft_2020_12() -> None:
     build_schema = json.loads(
         (_SCHEMA_ROOT / build.BUILD_SCHEMA_NAME).read_text(encoding="utf-8")
     )
-    assert build_schema["properties"]["schema_version"]["const"].endswith(".v3")
+    assert build_schema["properties"]["schema_version"]["const"].endswith(".v4")
     invocation = build_schema["properties"]["invocation"]["properties"]
     assert invocation["argv"]["minItems"] == invocation["argv"]["maxItems"] == 21
     assert invocation["argv"]["items"] is False
@@ -579,6 +644,20 @@ def test_schemas_are_closed_draft_2020_12() -> None:
     assert invocation["environment"]["items"] is False
     assert build_schema["properties"]["tools"]["minItems"] == 9
     assert build_schema["properties"]["tools"]["maxItems"] == 9
+    needed = build_schema["properties"]["artifact_validation"]["properties"][
+        "elf"
+    ]["properties"]["needed_libraries"]
+    assert needed["uniqueItems"] is True
+    assert needed["contains"] == {"const": "libcuda.so.1"}
+    assert needed["minContains"] == needed["maxContains"] == 1
+
+
+def test_production_link_preserves_cuda_driver_dependency() -> None:
+    makefile = (
+        _REPO / "tools/nvbit_tracer/tracer_tool/Makefile"
+    ).read_text(encoding="utf-8")
+
+    assert "-Wl,--no-as-needed -lcuda -Wl,--as-needed" in makefile
 
 
 @pytest.mark.parametrize("dirty_kind", ["tracked", "staged", "untracked"])
@@ -908,6 +987,43 @@ def test_wrong_host_elf_architecture_is_rejected(fixture: Fixture) -> None:
         match="EM_X86_64",
     ):
         build.build_bundle(request)
+    assert not fixture.bundle.exists()
+
+
+def test_missing_dynamic_segment_is_rejected(fixture: Fixture) -> None:
+    payload = bytearray(_fake_tracer_elf())
+    struct.pack_into("<I", payload, 64 + 56, 1)
+    _write_executable(fixture.make, _fake_make_source(payload=bytes(payload)))
+
+    with pytest.raises(
+        build.ExternalTracerBuildAuthorityError,
+        match="PT_LOAD and PT_DYNAMIC",
+    ):
+        build.build_bundle(fixture.request())
+    assert not fixture.bundle.exists()
+
+
+def test_missing_cuda_driver_dependency_is_rejected(fixture: Fixture) -> None:
+    payload = _fake_tracer_elf(needed_libraries=("libc.so.6",))
+    _write_executable(fixture.make, _fake_make_source(payload=payload))
+
+    with pytest.raises(
+        build.ExternalTracerBuildAuthorityError,
+        match="required DT_NEEDED CUDA driver dependency libcuda.so.1",
+    ):
+        build.build_bundle(fixture.request())
+    assert not fixture.bundle.exists()
+
+
+def test_malformed_dynamic_string_table_is_rejected(fixture: Fixture) -> None:
+    payload = _fake_tracer_elf(dynamic_string_table_address=1 << 48)
+    _write_executable(fixture.make, _fake_make_source(payload=payload))
+
+    with pytest.raises(
+        build.ExternalTracerBuildAuthorityError,
+        match="string table is not uniquely file-backed",
+    ):
+        build.build_bundle(fixture.request())
     assert not fixture.bundle.exists()
 
 
@@ -1632,6 +1748,25 @@ def test_replaced_tracer_and_fully_resealed_bundle_needs_independent_digest(
     with pytest.raises(
         build.ExternalTracerBuildAuthorityError,
         match="independent caller tracer digest",
+    ):
+        _admit_fixture(fixture)
+
+
+def test_resealed_receipt_cannot_forge_dynamic_dependencies(
+    fixture: Fixture,
+) -> None:
+    build.build_bundle(fixture.request())
+    _make_bundle_documents_writable(fixture)
+    receipt = _load(fixture.bundle / build.BUILD_RECEIPT_NAME)
+    artifact = _load(fixture.bundle / build.ARTIFACT_IDENTITY_NAME)
+    receipt["artifact_validation"]["elf"]["needed_libraries"].append(
+        "libforged.so.1"
+    )
+    _rewrite_build_and_artifact(fixture, receipt, artifact)
+
+    with pytest.raises(
+        build.ExternalTracerBuildAuthorityError,
+        match="target-free artifact validation",
     ):
         _admit_fixture(fixture)
 

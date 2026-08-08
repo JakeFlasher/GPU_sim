@@ -41,7 +41,7 @@ from tools.nvbit_tracer.external_tracer import (
 
 
 SOURCE_SCHEMA_VERSION = "nvbit_external_tracer_source_manifest.v1"
-BUILD_SCHEMA_VERSION = "nvbit_external_tracer_build_receipt.v3"
+BUILD_SCHEMA_VERSION = "nvbit_external_tracer_build_receipt.v4"
 ARTIFACT_SCHEMA_VERSION = "nvbit_external_tracer_artifact_identity.v1"
 SOURCE_SCHEMA_NAME = "nvbit_external_tracer_source_manifest.schema.json"
 BUILD_SCHEMA_NAME = "nvbit_external_tracer_build_receipt.schema.json"
@@ -122,6 +122,10 @@ _SAFE_MAKE_PATH = re.compile(r"/[A-Za-z0-9._+/-]+\Z")
 _CUOBJDUMP_ELF_LINE = re.compile(
     rb"^ELF file[ \t]+[0-9]+:[ \t]+.*\b(sm_[0-9]+[a-z]?)\.cubin[ \t]*$"
 )
+_ELF_NEEDED_LIBRARY = re.compile(r"[A-Za-z0-9][A-Za-z0-9._+-]{0,254}\Z")
+_REQUIRED_ELF_NEEDED_LIBRARY = "libcuda.so.1"
+_MAX_ELF_NEEDED_LIBRARIES = 256
+_MAX_ELF_DYNAMIC_STRING_BYTES = 16 * 1024 * 1024
 _LOCAL_INCLUDE = re.compile(rb"^[ \t]*#[ \t]*include[ \t]*\"([^\"\r\n]+)\"", re.MULTILINE)
 EXTERNAL_QUOTED_HEADERS = frozenset({"cuda.h"})
 MAX_GIT_OUTPUT_BYTES = 64 * 1024 * 1024
@@ -1974,6 +1978,89 @@ def _run_external_build(
     )
 
 
+def _elf_needed_libraries(
+    payload: bytes,
+    program_headers: Sequence[tuple[int, int, int, int, int, int, int, int]],
+) -> list[str]:
+    dynamic_segments = [row for row in program_headers if row[0] == 2]
+    if len(dynamic_segments) != 1:
+        _authority("tracer output must contain exactly one PT_DYNAMIC segment")
+    dynamic = dynamic_segments[0]
+    dynamic_offset, dynamic_size = dynamic[2], dynamic[5]
+    if dynamic_size < 16 or dynamic_size % 16 != 0:
+        _authority("tracer output PT_DYNAMIC table has an invalid size")
+
+    entries: list[tuple[int, int]] = []
+    terminated = False
+    for offset in range(dynamic_offset, dynamic_offset + dynamic_size, 16):
+        tag, value = struct.unpack_from("<qQ", payload, offset)
+        if tag == 0:
+            terminated = True
+            break
+        entries.append((tag, value))
+    if not terminated:
+        _authority("tracer output PT_DYNAMIC table lacks DT_NULL")
+
+    string_tables = [value for tag, value in entries if tag == 5]
+    string_sizes = [value for tag, value in entries if tag == 10]
+    needed_offsets = [value for tag, value in entries if tag == 1]
+    if len(string_tables) != 1 or len(string_sizes) != 1:
+        _authority("tracer output PT_DYNAMIC string-table authority is not exact")
+    string_size = string_sizes[0]
+    if string_size < 1 or string_size > _MAX_ELF_DYNAMIC_STRING_BYTES:
+        _authority("tracer output PT_DYNAMIC string table has an invalid size")
+    if not needed_offsets or len(needed_offsets) > _MAX_ELF_NEEDED_LIBRARIES:
+        _authority("tracer output DT_NEEDED inventory has an invalid size")
+
+    string_address = string_tables[0]
+    mappings: list[int] = []
+    for row in program_headers:
+        (
+            program_type,
+            _flags,
+            file_offset,
+            virtual_address,
+            _physical_address,
+            file_size,
+            _memory_size,
+            _alignment,
+        ) = row
+        if program_type != 1 or string_address < virtual_address:
+            continue
+        delta = string_address - virtual_address
+        if delta <= file_size and string_size <= file_size - delta:
+            mappings.append(file_offset + delta)
+    if len(mappings) != 1:
+        _authority("tracer output PT_DYNAMIC string table is not uniquely file-backed")
+    string_offset = mappings[0]
+    strings = payload[string_offset : string_offset + string_size]
+    if not strings.endswith(b"\0"):
+        _authority("tracer output PT_DYNAMIC string table is unterminated")
+
+    libraries: list[str] = []
+    for needed_offset in needed_offsets:
+        if needed_offset >= len(strings):
+            _authority("tracer output DT_NEEDED offset is out of bounds")
+        end = strings.find(b"\0", needed_offset)
+        if end < 0:
+            _authority("tracer output DT_NEEDED name is unterminated")
+        try:
+            library = strings[needed_offset:end].decode("ascii")
+        except UnicodeDecodeError as exc:
+            _authority(f"tracer output DT_NEEDED name is not ASCII: {exc}")
+        if _ELF_NEEDED_LIBRARY.fullmatch(library) is None:
+            _authority(f"tracer output DT_NEEDED name is unsafe: {library!r}")
+        if library in libraries:
+            _authority(f"tracer output contains duplicate DT_NEEDED library {library!r}")
+        libraries.append(library)
+    if _REQUIRED_ELF_NEEDED_LIBRARY not in libraries:
+        _authority(
+            "tracer output lacks required DT_NEEDED CUDA driver dependency "
+            f"{_REQUIRED_ELF_NEEDED_LIBRARY}"
+        )
+    return libraries
+
+
 def _validate_elf_shared_object(payload: bytes) -> dict[str, Any]:
     if len(payload) < 64:
         _authority("tracer output is too short for an ELF64 header")
@@ -2008,12 +2095,28 @@ def _validate_elf_shared_object(payload: bytes) -> dict[str, Any]:
     if shoff < ehsize or shoff + shnum * shentsize > len(payload):
         _authority("tracer output section-header table is out of bounds")
 
-    program_types = {
-        struct.unpack_from("<I", payload, phoff + index * phentsize)[0]
-        for index in range(phnum)
-    }
+    program_headers: list[tuple[int, int, int, int, int, int, int, int]] = []
+    for index in range(phnum):
+        row = struct.unpack_from("<IIQQQQQQ", payload, phoff + index * phentsize)
+        (
+            program_type,
+            _flags,
+            offset,
+            _virtual,
+            _physical,
+            file_size,
+            memory_size,
+            _alignment,
+        ) = row
+        if offset > len(payload) or file_size > len(payload) - offset:
+            _authority(f"tracer output ELF segment {index} is out of bounds")
+        if memory_size < file_size:
+            _authority(f"tracer output ELF segment {index} has invalid memory size")
+        program_headers.append(row)
+    program_types = {row[0] for row in program_headers}
     if 1 not in program_types or 2 not in program_types:
         _authority("tracer output must contain PT_LOAD and PT_DYNAMIC segments")
+    needed_libraries = _elf_needed_libraries(payload, program_headers)
 
     sections: list[tuple[int, int, int, int]] = []
     for index in range(shnum):
@@ -2055,6 +2158,7 @@ def _validate_elf_shared_object(payload: bytes) -> dict[str, Any]:
         "type": "ET_DYN",
         "machine": "EM_X86_64",
         "cuda_fatbin_section": ".nv_fatbin",
+        "needed_libraries": needed_libraries,
     }
 
 
@@ -2458,14 +2562,40 @@ def _verify_document_invariants(
         artifact["artifact"]["sha256"],
     )
     validation = build["artifact_validation"]
-    if validation.get("elf") != {
+    elf = validation.get("elf")
+    expected_elf_keys = {
+        "class",
+        "data",
+        "type",
+        "machine",
+        "cuda_fatbin_section",
+        "needed_libraries",
+    }
+    if type(elf) is not dict or set(elf) != expected_elf_keys:
+        _authority("build receipt ELF validation facts violate exact contract")
+    expected_elf_facts = {
         "class": "ELF64",
         "data": "little_endian",
         "type": "ET_DYN",
         "machine": "EM_X86_64",
         "cuda_fatbin_section": ".nv_fatbin",
-    }:
+    }
+    if {name: elf[name] for name in expected_elf_facts} != expected_elf_facts:
         _authority("build receipt ELF validation facts violate exact contract")
+    needed_libraries = elf["needed_libraries"]
+    if (
+        type(needed_libraries) is not list
+        or not needed_libraries
+        or len(needed_libraries) > _MAX_ELF_NEEDED_LIBRARIES
+        or any(
+            type(library) is not str
+            or _ELF_NEEDED_LIBRARY.fullmatch(library) is None
+            for library in needed_libraries
+        )
+        or len(needed_libraries) != len(set(needed_libraries))
+        or _REQUIRED_ELF_NEEDED_LIBRARY not in needed_libraries
+    ):
+        _authority("build receipt DT_NEEDED validation facts violate exact contract")
     cuda = validation.get("cuda", {})
     if (
         cuda.get("inspector") != "cuobjdump_13.2_list_elf.v1"
