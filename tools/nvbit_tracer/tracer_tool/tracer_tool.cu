@@ -4951,6 +4951,10 @@ void init_context_state(CUcontext ctx) {
 void nvbit_tool_init(CUcontext ctx) {
   pthread_mutex_lock(&mutex);
   assert(ctx_state_map.find(ctx) != ctx_state_map.end());
+  // Tool-owned CUDA setup calls re-enter nvbit_at_cuda_event. Suppress those
+  // callbacks so the allocation registry never consumes partially initialized
+  // device identity or records tracer-owned managed allocations.
+  skip_callback_flag = true;
   init_context_state(ctx);
   CTXstate* ctx_state = ctx_state_map[ctx];
   // Resolve binary_version per-context from the current CUDA device's
@@ -4979,6 +4983,7 @@ void nvbit_tool_init(CUcontext ctx) {
           "(ctx=%p)\n",
           ctx_state->binary_version, (void*)ctx);
   fflush(stderr);
+  skip_callback_flag = false;
   pthread_mutex_unlock(&mutex);
 }
 

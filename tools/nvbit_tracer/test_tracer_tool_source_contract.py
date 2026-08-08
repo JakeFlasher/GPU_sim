@@ -45,3 +45,21 @@ def test_register_attribute_fails_closed_before_serialization() -> None:
 
     assert "int nregs = -1;" in source[:query]
     assert query < status_check < fatal < process_exit < setter
+
+
+def test_tool_init_suppresses_callbacks_during_cuda_setup() -> None:
+    source = _TRACER_SOURCE.read_text(encoding="utf-8")
+    function_start = source.index("void nvbit_tool_init(CUcontext ctx)")
+    function_end = source.index("void nvbit_at_ctx_term(CUcontext ctx)", function_start)
+    body = source[function_start:function_end]
+
+    callback_guard_on = body.index("skip_callback_flag = true;")
+    context_setup = body.index("init_context_state(ctx);")
+    architecture_query = body.index("resolve_binary_version_for_current_device()")
+    callback_guard_off = body.index("skip_callback_flag = false;")
+    mutex_unlock = body.index("pthread_mutex_unlock(&mutex);")
+
+    assert body.count("skip_callback_flag = true;") == 1
+    assert body.count("skip_callback_flag = false;") == 1
+    assert callback_guard_on < context_setup < architecture_query
+    assert architecture_query < callback_guard_off < mutex_unlock
