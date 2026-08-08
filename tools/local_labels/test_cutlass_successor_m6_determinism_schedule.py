@@ -17,7 +17,10 @@ from tools.local_labels.test_cutlass_successor_capture_admission import (
     MATRIX,
     _REPORT_IDENTITY,
     _all_pairs,
+    _mutate_dynamic_trace_artifact,
+    _mutate_json_artifact,
     _receipt,
+    _rewrite,
     _row_for_report_path,
     _row_report_csv,
 )
@@ -240,6 +243,80 @@ def test_all_pairs_build_exact_deterministic_schedule(tmp_path: Path, monkeypatc
         assert sum(
             slot["cell_id"] == cell["cell_id"] for slot in first["tier2_candidates"]
         ) == 10
+
+
+def test_schedule_preserves_observed_geometry_distinct_from_declarations(
+    tmp_path: Path,
+    monkeypatch,
+):
+    targets: tuple[Path, Path] | None = None
+    for index, row in enumerate(MATRIX["rows"]):
+        ncu_target = _receipt(tmp_path, row, "ncu", index)
+        nvbit_target = _receipt(tmp_path, row, "nvbit", index)
+        if index == 0:
+            targets = (ncu_target, nvbit_target)
+
+    assert targets is not None
+    row = MATRIX["rows"][0]
+    ncu_target, nvbit_target = targets
+    observed_grid = [1, 1, 1]
+    observed_block = [256, 1, 1]
+    declared = row["shape"]["trace_shape"]["launch_config"]
+    assert observed_grid != declared["grid"]
+    assert observed_block != declared["block"]
+
+    for target in targets:
+        document = json.loads(target.read_text())
+        launch = document["receipt"]["launch_identity"]
+        launch["grid_dim"] = observed_grid
+        launch["block_dim"] = observed_block
+        launch["launch_identity_sha256"] = admission.canonical_sha({
+            key: value
+            for key, value in launch.items()
+            if key != "launch_identity_sha256"
+        })
+        _rewrite(target, document)
+
+    def mutate_observation(value: dict) -> None:
+        value["identity"]["Grid Size"] = "1,1,1"
+        value["identity"]["Block Size"] = "256,1,1"
+        value.pop("observation_sha256")
+        value["observation_sha256"] = admission.canonical_sha(value)
+
+    _mutate_json_artifact(
+        tmp_path,
+        ncu_target,
+        "ncu_launch_observation",
+        mutate_observation,
+    )
+
+    def import_report(_identity, path: Path):
+        report_row = _row_for_report_path(path)
+        report = _row_report_csv(report_row)
+        if report_row["matrix_key"] == row["matrix_key"]:
+            report = _row_report_csv(
+                report_row,
+                block=observed_block,
+                grid=observed_grid,
+            )
+        return report, admission.sha256_bytes(path.read_bytes()), None
+
+    monkeypatch.setattr(admission, "_import_ncu_report_csv", import_report)
+
+    def mutate_trace(trace) -> None:
+        kernel = trace.gpu_device[0].streams[0].kernels[0]
+        kernel.grid_dim.x, kernel.grid_dim.y, kernel.grid_dim.z = observed_grid
+        kernel.block_dim.x, kernel.block_dim.y, kernel.block_dim.z = observed_block
+
+    _mutate_dynamic_trace_artifact(tmp_path, nvbit_target, mutate_trace)
+
+    document = _build(tmp_path)
+    cell = next(
+        cell for cell in document["cells"]
+        if cell["matrix_key"] == row["matrix_key"]
+    )
+    assert cell["launch_identity"]["grid_dim"] == observed_grid
+    assert cell["launch_identity"]["block_dim"] == observed_block
 
 
 def test_historical_v2_receipts_cannot_build_active_schedule(tmp_path: Path):

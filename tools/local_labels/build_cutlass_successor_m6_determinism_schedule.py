@@ -472,7 +472,6 @@ def _cell(matrix_row: Mapping[str, Any], ready: Mapping[str, Any]) -> dict[str, 
     launch = ready["launch_identity"]
     static = matrix_row["static_launch_inventory"]
     shape = matrix_row["shape"]
-    launch_config = shape["trace_shape"]["launch_config"]
     nvbit_receipt = dict(ready["nvbit_receipt"])
     nvbit_tool = nvbit_receipt.get("nvbit_tool")
     nvbit_schema_authority = nvbit_receipt.get("schema_authority")
@@ -493,10 +492,8 @@ def _cell(matrix_row: Mapping[str, Any], ready: Mapping[str, Any]) -> dict[str, 
         _fail("SUCCESSOR_M6_BINARY_IDENTITY", str(matrix_row["matrix_key"]))
     if launch["kernel_signature_sha256"] != identity["kernel_signature_sha256"]:
         _fail("SUCCESSOR_M6_LAUNCH_IDENTITY", str(matrix_row["matrix_key"]))
-    if launch["grid_dim"] != launch_config["grid"] or launch[
-        "block_dim"
-    ] != launch_config["block"]:
-        _fail("SUCCESSOR_M6_LAUNCH_GEOMETRY", str(matrix_row["matrix_key"]))
+    # The matrix launch_config is declared-only. Admission above independently
+    # rederived and joined the NCU/NVBit geometry carried by launch_identity.
     cell = {
         "cell_id": matrix_row["matrix_key"],
         "matrix_key": matrix_row["matrix_key"],
