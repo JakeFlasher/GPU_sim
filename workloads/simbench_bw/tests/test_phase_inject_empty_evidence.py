@@ -1059,10 +1059,15 @@ def test_tracer_phase_record_filename_uses_repeat_environment(
         flags=re.DOTALL,
     )
     assert "checked_stored_context_device_id(" in executable_source
+    assert executable_source.count("cuDeviceGetCount(") == 1
+    assert "cudaGetDeviceCount(" not in executable_source
     assert re.search(
-        r"const\s+cudaError_t\s+count_status\s*=\s*"
-        r"cudaGetDeviceCount\(&num_devices\)\s*;",
+        r"int\s+observed_num_devices\s*=\s*0\s*;\s*"
+        r"const\s+CUresult\s+status\s*=\s*"
+        r"cuDeviceGetCount\(&observed_num_devices\)\s*;.*?"
+        r"status\s*!=\s*CUDA_SUCCESS",
         executable_source,
+        flags=re.DOTALL,
     )
     makefile = (
         REPO_ROOT
