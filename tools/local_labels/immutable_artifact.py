@@ -1794,6 +1794,46 @@ class PinnedDirectoryReader:
     def descriptor(self) -> int:
         return self._root.descriptor
 
+    @_translate_descriptor_resource_errors("pinned directory metadata read")
+    def directory_metadata_snapshot(
+        self, relative_path: str = ".",
+    ) -> MetadataSnapshot:
+        """Return one descriptor-relative directory's stable metadata."""
+        self.verify_path()
+        if relative_path == ".":
+            before = _snapshot_fields(os.fstat(self._root.descriptor))
+            if not stat.S_ISDIR(before[2]):
+                raise ImmutableArtifactError(
+                    "pinned directory reader root is not a directory"
+                )
+            self.verify_path()
+            after = _snapshot_fields(os.fstat(self._root.descriptor))
+            if after != before:
+                raise ImmutableArtifactError(
+                    "pinned directory root changed during metadata read"
+                )
+            return before
+        relative = safe_relative_path(relative_path)
+        directory = _open_pinned_relative_directory(
+            self._root.descriptor, relative.parts,
+        )
+        try:
+            before = _snapshot_fields(os.fstat(directory.descriptor))
+            if not stat.S_ISDIR(before[2]):
+                raise ImmutableArtifactError(
+                    "descriptor-relative metadata target is not a directory"
+                )
+            directory.verify_path()
+            self.verify_path()
+            after = _snapshot_fields(os.fstat(directory.descriptor))
+            if after != before:
+                raise ImmutableArtifactError(
+                    "descriptor-relative directory changed during metadata read"
+                )
+            return before
+        finally:
+            directory.close()
+
     def path_chain_nodes(self) -> tuple[tuple[str, int, int, int], ...]:
         """Return the ordered lexical directory chain's stable node identity."""
         self.verify_path()
@@ -5795,6 +5835,10 @@ class PinnedPathSetMonitor:
                 "protected input nested ancestor chain is invalid"
             )
         for depth in range(1, len(descriptors)):
+            self._watch_named_children(
+                descriptors[depth - 1],
+                (names[depth - 1],),
+            )
             self._remember_nested_directory(
                 names[:depth], descriptors[depth],
             )
@@ -5840,16 +5884,41 @@ class PinnedPathSetMonitor:
         self._named_watches.pop(watch, None)
 
     def _watch_regular(self, relative_path: str) -> None:
-        pinned = _open_relative_regular_at(self._root.descriptor, relative_path)
+        relative = safe_relative_path(relative_path)
+        descriptors = [os.dup(self._root.descriptor)]
         try:
-            self._remember_nested_chain(
-                pinned.directory_descriptors,
-                pinned.directory_names,
+            for index, part in enumerate(relative.parts[:-1]):
+                self._watch_named_children(descriptors[-1], (part,))
+                try:
+                    descriptors.append(_open_dir_at(descriptors[-1], part))
+                except OSError as exc:
+                    raise ImmutableArtifactError(
+                        "required regular-file ancestor is not a no-follow "
+                        f"directory: {relative_path}"
+                    ) from exc
+                self._remember_nested_directory(
+                    relative.parts[: index + 1], descriptors[-1],
+                )
+            self._watch_named_children(
+                descriptors[-1], (relative.parts[-1],),
             )
-            self._watch_regular_descriptor(pinned.descriptor)
-            pinned.verify_path()
+            pinned = _open_relative_regular_at(
+                self._root.descriptor, relative_path,
+            )
+            try:
+                self._remember_nested_chain(
+                    pinned.directory_descriptors,
+                    pinned.directory_names,
+                )
+                self._watch_regular_descriptor(pinned.descriptor)
+                pinned.verify_path()
+            finally:
+                pinned.close()
         finally:
-            pinned.close()
+            _close_descriptors(
+                reversed(descriptors),
+                label="required regular monitor traversal close",
+            )
 
     def _watch_named_children(
         self, descriptor: int, names: Iterable[str],
@@ -5965,10 +6034,15 @@ class PinnedPathSetMonitor:
     def _watch_filtered_directory(
         self, relative_path: str, names: Iterable[str],
     ) -> None:
-        relative = safe_relative_path(relative_path)
-        directory = _open_pinned_relative_directory(
-            self._root.descriptor, relative.parts,
-        )
+        if relative_path == ".":
+            directory = _PinnedDirectory(
+                (os.dup(self._root.descriptor),), ()
+            )
+        else:
+            relative = safe_relative_path(relative_path)
+            directory = _open_pinned_relative_directory(
+                self._root.descriptor, relative.parts,
+            )
         try:
             self._remember_nested_chain(
                 directory.descriptors, directory.names,
@@ -7912,8 +7986,15 @@ class ExclusiveDirectoryStage:
 def create_exclusive_directory_stage(
     output_root: Path,
     final_name: str,
+    *,
+    pinned_root: PinnedDirectoryReader | None = None,
 ) -> ExclusiveDirectoryStage:
-    """Create one exclusive hidden stage without reusing any prior pathname."""
+    """Create one exclusive hidden stage without reusing any prior pathname.
+
+    ``pinned_root`` optionally supplies an already monitored output-root
+    capability. The stage duplicates that exact directory chain and never
+    reopens the output pathname.
+    """
     _validate_publication_name(final_name)
     staging_name = f".{final_name}.staging"
     if len(os.fsencode(staging_name)) > 255:
@@ -7921,8 +8002,50 @@ def create_exclusive_directory_stage(
             f"{NAMESPACE_NAME_OVERFLOW}: external generation staging name"
         )
     root_path = Path(os.path.abspath(os.fspath(output_root)))
-    ensure_directory(root_path)
-    root = _open_pinned_directory(root_path)
+    if pinned_root is None:
+        ensure_directory(root_path)
+        root = _open_pinned_directory(root_path)
+    else:
+        if not isinstance(pinned_root, PinnedDirectoryReader):
+            raise TypeError("pinned_root must be a PinnedDirectoryReader")
+        pinned_root.verify_path()
+        retained_root = pinned_root._root
+        retained_path = Path(os.path.sep).joinpath(*retained_root.names)
+        if retained_path != root_path:
+            raise ImmutableArtifactError(
+                "exclusive directory stage pinned root path disagrees"
+            )
+        descriptors: list[int] = []
+        candidate_root: _PinnedDirectory | None = None
+        try:
+            for value in retained_root.descriptors:
+                descriptors.append(os.dup(value))
+            candidate_root = _PinnedDirectory(
+                tuple(descriptors), retained_root.names
+            )
+            descriptors = []
+            candidate_root.verify_path()
+            pinned_root.verify_path()
+            root = candidate_root
+            candidate_root = None
+        finally:
+            closers: list[Callable[[], None]] = []
+            if candidate_root is not None:
+                closers.append(candidate_root.close)
+            if descriptors:
+                closers.append(
+                    lambda: _close_descriptors(
+                        reversed(descriptors),
+                        label=(
+                            "exclusive directory stage pinned-root duplication"
+                        ),
+                    )
+                )
+            if closers:
+                _close_callables(
+                    closers,
+                    label="exclusive directory stage pinned-root verification",
+                )
     stage: _PinnedDirectory | None = None
     try:
         root.verify_path()

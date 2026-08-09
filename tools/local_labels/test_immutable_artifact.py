@@ -637,6 +637,70 @@ def test_protected_input_monitor_ignores_unrelated_ancestor_churn_while_arming(
     assert mutated is True
 
 
+def test_protected_input_monitor_rejects_required_leaf_mutation_while_arming(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = tmp_path / "protected"
+    root.mkdir()
+    leaf = _regular(root / "value", b"identity")
+    original_watch = immutable._DirectoryMutationMonitor.watch_regular
+    mutated = False
+
+    def mutate_before_leaf_watch(self, descriptor: int) -> int:
+        nonlocal mutated
+        if not mutated:
+            mutated = True
+            leaf.chmod(0o644)
+            leaf.write_bytes(b"transient")
+            leaf.write_bytes(b"identity")
+            leaf.chmod(0o444)
+        return original_watch(self, descriptor)
+
+    monkeypatch.setattr(
+        immutable._DirectoryMutationMonitor,
+        "watch_regular",
+        mutate_before_leaf_watch,
+    )
+    with pytest.raises(
+        immutable.ImmutableArtifactError,
+        match="protected input path changed",
+    ):
+        immutable.PinnedPathSetMonitor(
+            root,
+            regular_paths=("value",),
+            recursive_directories=(),
+        )
+    assert mutated is True
+
+
+def test_protected_input_monitor_supports_filtered_root_name(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "protected"
+    git_directory = root / ".git"
+    git_directory.mkdir(parents=True)
+    displaced = root / ".git-original"
+    monitor = immutable.PinnedPathSetMonitor(
+        root,
+        regular_paths=(),
+        recursive_directories=(),
+        filtered_directories={".": (".git",)},
+    )
+    try:
+        git_directory.rename(displaced)
+        git_directory.mkdir()
+        git_directory.rmdir()
+        displaced.rename(git_directory)
+        with pytest.raises(
+            immutable.ImmutableArtifactError,
+            match="protected input path changed",
+        ):
+            monitor.verify_unchanged()
+    finally:
+        monitor.close()
+
+
 def test_protected_input_monitor_revalidates_nested_ancestor_identity(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -670,6 +734,37 @@ def test_protected_input_monitor_revalidates_nested_ancestor_identity(
         monitor.close()
 
 
+def test_protected_input_monitor_detects_nested_ancestor_swap_restore(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "protected"
+    nested = root / "a" / "b"
+    nested.mkdir(parents=True)
+    _regular(nested / "value", b"original")
+    displaced = root / "a" / "b-original"
+    monitor = immutable.PinnedPathSetMonitor(
+        root,
+        regular_paths=("a/b/value",),
+        recursive_directories=(),
+    )
+    try:
+        nested.rename(displaced)
+        nested.mkdir()
+        _regular(nested / "value", b"replacement")
+        assert (nested / "value").read_bytes() == b"replacement"
+        (nested / "value").unlink()
+        nested.rmdir()
+        displaced.rename(nested)
+
+        with pytest.raises(
+            immutable.ImmutableArtifactError,
+            match="protected input path changed",
+        ):
+            monitor.verify_unchanged()
+    finally:
+        monitor.close()
+
+
 def test_protected_input_monitor_entry_failure_closes_descriptors(
     tmp_path: Path,
 ) -> None:
@@ -689,7 +784,8 @@ def test_protected_input_monitor_entry_failure_closes_descriptors(
         os.pwrite(writer, b"mutated", 0)
 
         with pytest.raises(
-            immutable.ImmutableArtifactError, match="protected input tree changed",
+            immutable.ImmutableArtifactError,
+            match="protected input (?:tree|path) changed",
         ):
             with monitor:
                 pytest.fail("body reached after failed entry verification")
@@ -2319,6 +2415,8 @@ def test_pinned_directory_reader_exposes_stable_tree_snapshot(
                 require_readonly_directories=True,
             )
             regular = reader.read_snapshot("branch/value")
+            root_metadata = reader.directory_metadata_snapshot()
+            branch_metadata = reader.directory_metadata_snapshot("branch")
             reader.verify_regular("branch/value", regular.metadata)
         absolute_regular = immutable.read_regular_snapshot(leaf)
         absolute_identity = immutable.snapshot_regular_identity(leaf)
@@ -2327,6 +2425,12 @@ def test_pinned_directory_reader_exposes_stable_tree_snapshot(
         assert absolute_identity == regular.metadata
         assert regular.metadata == immutable._snapshot_fields(
             leaf.stat(follow_symlinks=False)
+        )
+        assert root_metadata == immutable._snapshot_fields(
+            root.stat(follow_symlinks=False)
+        )
+        assert branch_metadata == immutable._snapshot_fields(
+            branch.stat(follow_symlinks=False)
         )
         assert tuple(path for path, _metadata in snapshot.files) == (
             "branch/value",
@@ -4595,6 +4699,150 @@ def test_stage_creation_translates_late_descriptor_exhaustion(
     # was committed.
     assert (root / ".attempt-fixed.staging").is_dir()
     assert not (root / "attempt-fixed").exists()
+
+
+def test_stage_uses_retained_output_root_without_reopening_path(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = tmp_path / "generations"
+    root.mkdir()
+    with immutable.PinnedDirectoryReader(root) as reader:
+        monkeypatch.setattr(
+            immutable,
+            "_open_pinned_directory",
+            lambda _path: (_ for _ in ()).throw(
+                AssertionError("pinned output root was reopened")
+            ),
+        )
+        with immutable.create_exclusive_directory_stage(
+            root,
+            "attempt-fixed",
+            pinned_root=reader,
+        ) as stage:
+            (stage.staging_path / "value").write_bytes(b"captured")
+            committed = stage.commit(max_files=2, max_directories=2)
+        reader.verify_path()
+
+    assert committed.path == root / "attempt-fixed"
+    assert (committed.path / "value").read_bytes() == b"captured"
+
+
+def test_pinned_output_root_candidate_verification_failure_closes_duplicates(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = tmp_path / "generations"
+    root.mkdir()
+    with immutable.PinnedDirectoryReader(root) as reader:
+        retained_root = reader._root
+        baseline = _open_descriptor_count()
+        original_verify = immutable._PinnedDirectory.verify_path
+
+        def reject_duplicated_candidate(value):
+            if value is not retained_root and value.names == retained_root.names:
+                raise immutable.ImmutableArtifactError(
+                    "planted duplicated candidate verification failure"
+                )
+            return original_verify(value)
+
+        monkeypatch.setattr(
+            immutable._PinnedDirectory,
+            "verify_path",
+            reject_duplicated_candidate,
+        )
+        with pytest.raises(
+            immutable.ImmutableArtifactError,
+            match="duplicated candidate verification failure",
+        ):
+            immutable.create_exclusive_directory_stage(
+                root,
+                "attempt-fixed",
+                pinned_root=reader,
+            )
+        assert _open_descriptor_count() == baseline
+
+    assert not (root / ".attempt-fixed.staging").exists()
+
+
+def test_pinned_output_root_second_reader_verification_closes_duplicates(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = tmp_path / "generations"
+    root.mkdir()
+    with immutable.PinnedDirectoryReader(root) as reader:
+        baseline = _open_descriptor_count()
+        original_verify = reader.verify_path
+        calls = 0
+
+        def reject_second_verification():
+            nonlocal calls
+            calls += 1
+            if calls == 2:
+                raise immutable.ImmutableArtifactError(
+                    "planted borrowed reader verification failure"
+                )
+            return original_verify()
+
+        monkeypatch.setattr(reader, "verify_path", reject_second_verification)
+        with pytest.raises(
+            immutable.ImmutableArtifactError,
+            match="borrowed reader verification failure",
+        ):
+            immutable.create_exclusive_directory_stage(
+                root,
+                "attempt-fixed",
+                pinned_root=reader,
+            )
+        assert _open_descriptor_count() == baseline
+
+    assert not (root / ".attempt-fixed.staging").exists()
+
+
+def test_stage_rejects_pinned_output_root_for_different_path(
+    tmp_path: Path,
+) -> None:
+    retained_root = tmp_path / "retained"
+    requested_root = tmp_path / "requested"
+    retained_root.mkdir()
+    requested_root.mkdir()
+
+    with immutable.PinnedDirectoryReader(retained_root) as reader:
+        with pytest.raises(
+            immutable.ImmutableArtifactError,
+            match="pinned root path disagrees",
+        ):
+            immutable.create_exclusive_directory_stage(
+                requested_root,
+                "attempt-fixed",
+                pinned_root=reader,
+            )
+
+    assert not (retained_root / ".attempt-fixed.staging").exists()
+    assert not (requested_root / ".attempt-fixed.staging").exists()
+
+
+def test_stage_rejects_replaced_pinned_output_path(tmp_path: Path) -> None:
+    root = tmp_path / "generations"
+    displaced = tmp_path / "displaced"
+    root.mkdir()
+
+    with pytest.raises(
+        immutable.ImmutableArtifactError,
+        match="directory (?:component chain|path) changed",
+    ):
+        with immutable.PinnedDirectoryReader(root) as reader:
+            root.rename(displaced)
+            root.mkdir()
+            immutable.create_exclusive_directory_stage(
+                root,
+                "attempt-fixed",
+                pinned_root=reader,
+            )
+
+    assert not (root / ".attempt-fixed.staging").exists()
+    assert not (displaced / ".attempt-fixed.staging").exists()
 
 
 def test_regular_publication_can_preserve_execute_capability(tmp_path: Path) -> None:
