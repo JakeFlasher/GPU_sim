@@ -73,6 +73,14 @@
     {
       "authority_candidate": false,
       "can_collect": false,
+      "category": "documentation",
+      "lifecycle": "active",
+      "path": "docs/plans/fable_5_consulted_agile_development.md",
+      "reason": "Subordinate P5-P7 roadmap; explicitly grants no M5 scientific authority or collection credit."
+    },
+    {
+      "authority_candidate": false,
+      "can_collect": false,
       "category": "guard",
       "lifecycle": "active",
       "path": "eval/guards/test_targets_not_features_guard.py",
@@ -93,6 +101,14 @@
       "lifecycle": "quarantined",
       "path": "plans/fable5_consultation_and_response/01-m5-rule1-provenance.fable5.response.txt",
       "reason": "Advisory historical response; never repository or scientific authority."
+    },
+    {
+      "authority_candidate": false,
+      "can_collect": false,
+      "category": "documentation",
+      "lifecycle": "active",
+      "path": "plans/fable_5_agile_authority_reconciliation.md",
+      "reason": "Additive roadmap reconciliation preserves M5 external gates and grants no review, hardware, operator, or campaign credit."
     },
     {
       "authority_candidate": false,
