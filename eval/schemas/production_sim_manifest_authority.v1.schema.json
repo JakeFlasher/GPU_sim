@@ -1,0 +1,370 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gpu-simulator.local/eval/schemas/production_sim_manifest_authority.v1.schema.json",
+  "title": "Detached target-free production simulator-manifest authority v1",
+  "description": "Closed identity-only authority for one immutable sim_run_manifest.v2 generation. Fixture mode cannot admit production.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "artifact_kind",
+    "schema_sha256",
+    "contract_mode",
+    "authority_role",
+    "generation_id",
+    "producer_identity",
+    "schema_identities",
+    "source_identity",
+    "build_identity",
+    "manifest_identity",
+    "generation_identity",
+    "model_seal_sha256"
+  ],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "artifact_kind": { "const": "EVALUATOR_PRODUCTION_SIM_MANIFEST_AUTHORITY" },
+    "schema_sha256": { "$ref": "#/$defs/sha256" },
+    "contract_mode": {
+      "enum": ["TARGET_FREE_PRODUCTION", "FIXTURE_ONLY_NON_AUTHORITATIVE"]
+    },
+    "authority_role": {
+      "const": "detached_target_free_sim_run_manifest_authority"
+    },
+    "generation_id": { "$ref": "#/$defs/token" },
+    "producer_identity": { "$ref": "#/$defs/producerIdentity" },
+    "schema_identities": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "authority_schema",
+        "sim_run_manifest_schema",
+        "launch_key_schema",
+        "launch_evidence_schema",
+        "workload_execution_authority_schema"
+      ],
+      "properties": {
+        "authority_schema": { "$ref": "#/$defs/schemaIdentity" },
+        "sim_run_manifest_schema": { "$ref": "#/$defs/schemaIdentity" },
+        "launch_key_schema": { "$ref": "#/$defs/schemaIdentity" },
+        "launch_evidence_schema": { "$ref": "#/$defs/schemaIdentity" },
+        "workload_execution_authority_schema": { "$ref": "#/$defs/schemaIdentity" }
+      }
+    },
+    "source_identity": { "$ref": "#/$defs/sourceIdentity" },
+    "build_identity": { "$ref": "#/$defs/buildIdentity" },
+    "manifest_identity": { "$ref": "#/$defs/manifestIdentity" },
+    "generation_identity": { "$ref": "#/$defs/generationIdentity" },
+    "model_seal_sha256": { "$ref": "#/$defs/sha256" }
+  },
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "token": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9]+(?:[._-][A-Za-z0-9]+)*$"
+    },
+    "relativePath": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^[!-~]+$",
+      "not": {
+        "anyOf": [
+          { "pattern": "^/" },
+          { "pattern": "/$" },
+          { "pattern": "//" },
+          { "pattern": "\\\\" },
+          { "pattern": "(^|/)\\.\\.?(/|$)" }
+        ]
+      }
+    },
+    "fileIdentity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["relative_path", "sha256", "size_bytes"],
+      "properties": {
+        "relative_path": { "$ref": "#/$defs/relativePath" },
+        "sha256": { "$ref": "#/$defs/sha256" },
+        "size_bytes": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 }
+      }
+    },
+    "schemaIdentity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_id", "sha256", "size_bytes"],
+      "properties": {
+        "schema_id": { "type": "string", "minLength": 1, "maxLength": 512 },
+        "sha256": { "$ref": "#/$defs/sha256" },
+        "size_bytes": { "type": "integer", "minimum": 1, "maximum": 16777216 }
+      }
+    },
+    "producerIdentity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "producer_id",
+        "producer_version",
+        "producer_sha256",
+        "producer_size_bytes",
+        "validator_bundle_sha256",
+        "validator_sources"
+      ],
+      "properties": {
+        "producer_id": { "const": "eval.production_manifest" },
+        "producer_version": { "const": 1 },
+        "producer_sha256": { "$ref": "#/$defs/sha256" },
+        "producer_size_bytes": { "type": "integer", "minimum": 1, "maximum": 4194304 },
+        "validator_bundle_sha256": { "$ref": "#/$defs/sha256" },
+        "validator_sources": {
+          "type": "array",
+          "minItems": 6,
+          "maxItems": 16,
+          "items": { "$ref": "#/$defs/fileIdentity" }
+        }
+      }
+    },
+    "launchKey": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "workload_id",
+        "matched_execution_id",
+        "process_launch_ordinal",
+        "kernel_mangled_name",
+        "grid",
+        "block",
+        "device_id",
+        "stream_id",
+        "binary_architecture"
+      ],
+      "properties": {
+        "workload_id": { "type": "string", "minLength": 1 },
+        "matched_execution_id": { "type": "string", "minLength": 1 },
+        "process_launch_ordinal": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
+        "kernel_mangled_name": { "type": "string", "minLength": 1 },
+        "grid": { "$ref": "#/$defs/dim3" },
+        "block": { "$ref": "#/$defs/dim3" },
+        "device_id": { "type": "integer", "minimum": 0, "maximum": 4294967295 },
+        "stream_id": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
+        "binary_architecture": { "const": "sm_86" }
+      }
+    },
+    "dim3": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["x", "y", "z"],
+      "properties": {
+        "x": { "type": "integer", "minimum": 1, "maximum": 4294967295 },
+        "y": { "type": "integer", "minimum": 1, "maximum": 4294967295 },
+        "z": { "type": "integer", "minimum": 1, "maximum": 4294967295 }
+      }
+    },
+    "launchSource": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "launch_key",
+        "launch_key_sha256",
+        "launch_evidence_manifest_path",
+        "launch_evidence_manifest_sha256",
+        "launch_evidence_identity_sha256",
+        "existing_admission_id",
+        "existing_admission_sha256",
+        "source_content_manifest_id",
+        "source_content_manifest_sha256",
+        "retained_input_set_sha256",
+        "control_bits_sha256",
+        "arch_card_sha256",
+        "pchase_card_sha256",
+        "coverage"
+      ],
+      "properties": {
+        "launch_key": { "$ref": "#/$defs/launchKey" },
+        "launch_key_sha256": { "$ref": "#/$defs/sha256" },
+        "launch_evidence_manifest_path": { "$ref": "#/$defs/relativePath" },
+        "launch_evidence_manifest_sha256": { "$ref": "#/$defs/sha256" },
+        "launch_evidence_identity_sha256": { "$ref": "#/$defs/sha256" },
+        "existing_admission_id": { "$ref": "#/$defs/token" },
+        "existing_admission_sha256": { "$ref": "#/$defs/sha256" },
+        "source_content_manifest_id": { "$ref": "#/$defs/token" },
+        "source_content_manifest_sha256": { "$ref": "#/$defs/sha256" },
+        "retained_input_set_sha256": { "$ref": "#/$defs/sha256" },
+        "control_bits_sha256": { "$ref": "#/$defs/sha256" },
+        "arch_card_sha256": { "$ref": "#/$defs/sha256" },
+        "pchase_card_sha256": { "$ref": "#/$defs/sha256" },
+        "coverage": { "const": "EXACT_FULL_UNSAMPLED" }
+      }
+    },
+    "sourceIdentity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "workload_execution_authority",
+        "traced_workload_executable_sha256",
+        "architecture",
+        "launch_count",
+        "launch_roster_sha256",
+        "launches",
+        "replay_configuration_sha256"
+      ],
+      "properties": {
+        "workload_execution_authority": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "contract_mode",
+            "external_admission_status",
+            "payload_sha256",
+            "size_bytes",
+            "model_seal_sha256"
+          ],
+          "properties": {
+            "contract_mode": {
+              "enum": ["TARGET_FREE_PRODUCTION", "FIXTURE_ONLY_V2_NON_AUTHORITATIVE"]
+            },
+            "external_admission_status": {
+              "enum": ["EXTERNALLY_ADMITTED", "FIXTURE_ONLY_NON_AUTHORITATIVE"]
+            },
+            "payload_sha256": { "$ref": "#/$defs/sha256" },
+            "size_bytes": { "type": "integer", "minimum": 1, "maximum": 16777216 },
+            "model_seal_sha256": { "$ref": "#/$defs/sha256" }
+          }
+        },
+        "traced_workload_executable_sha256": { "$ref": "#/$defs/sha256" },
+        "architecture": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["arch_id", "sku"],
+          "properties": {
+            "arch_id": { "const": "sm_86" },
+            "sku": { "const": "rtx_3090_ti" }
+          }
+        },
+        "launch_count": { "type": "integer", "minimum": 1, "maximum": 4096 },
+        "launch_roster_sha256": { "$ref": "#/$defs/sha256" },
+        "launches": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 4096,
+          "items": { "$ref": "#/$defs/launchSource" }
+        },
+        "replay_configuration_sha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "buildIdentity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "build_id",
+        "build_manifest_sha256",
+        "source_tree_sha256",
+        "source_commit",
+        "traced_workload_executable_sha256",
+        "simulator_executable_sha256",
+        "arch_id",
+        "sku"
+      ],
+      "properties": {
+        "status": {
+          "enum": ["EXTERNALLY_AUTHENTICATED", "FIXTURE_ONLY_NON_AUTHORITATIVE"]
+        },
+        "build_id": { "$ref": "#/$defs/token" },
+        "build_manifest_sha256": { "$ref": "#/$defs/sha256" },
+        "source_tree_sha256": { "$ref": "#/$defs/sha256" },
+        "source_commit": {
+          "type": "string",
+          "pattern": "^(?:[0-9a-f]{40}|[0-9a-f]{64})$"
+        },
+        "traced_workload_executable_sha256": { "$ref": "#/$defs/sha256" },
+        "simulator_executable_sha256": { "$ref": "#/$defs/sha256" },
+        "arch_id": { "const": "sm_86" },
+        "sku": { "const": "rtx_3090_ti" }
+      }
+    },
+    "replayMode": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["mode"],
+          "properties": { "mode": { "const": "flat" } }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["mode"],
+          "properties": { "mode": { "const": "l1_const" } }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["mode", "dram_bandwidth"],
+          "properties": {
+            "mode": { "const": "l1_shared_l2" },
+            "dram_bandwidth": { "enum": ["carded", "unmodeled"] }
+          }
+        }
+      ]
+    },
+    "manifestIdentity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "relative_path",
+        "schema_version",
+        "sha256",
+        "size_bytes",
+        "scope",
+        "launch_roster_sha256",
+        "replay_configuration_sha256",
+        "replay_mode"
+      ],
+      "properties": {
+        "relative_path": { "const": "sim_run_manifest.v2.json" },
+        "schema_version": { "const": 2 },
+        "sha256": { "$ref": "#/$defs/sha256" },
+        "size_bytes": { "type": "integer", "minimum": 1, "maximum": 16777216 },
+        "scope": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[!-~]+$"
+        },
+        "launch_roster_sha256": { "$ref": "#/$defs/sha256" },
+        "replay_configuration_sha256": { "$ref": "#/$defs/sha256" },
+        "replay_mode": { "$ref": "#/$defs/replayMode" }
+      }
+    },
+    "generationIdentity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "content_manifest_contract",
+        "content_manifest_sha256",
+        "filesystem_generation_sha256",
+        "file_count",
+        "directory_count",
+        "total_file_bytes",
+        "files"
+      ],
+      "properties": {
+        "content_manifest_contract": { "const": "immutable-directory-generation-v1" },
+        "content_manifest_sha256": { "$ref": "#/$defs/sha256" },
+        "filesystem_generation_sha256": { "$ref": "#/$defs/sha256" },
+        "file_count": { "type": "integer", "minimum": 1, "maximum": 1000016 },
+        "directory_count": { "type": "integer", "minimum": 1, "maximum": 1000032 },
+        "total_file_bytes": { "type": "integer", "minimum": 1 },
+        "files": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 1000016,
+          "items": { "$ref": "#/$defs/fileIdentity" }
+        }
+      }
+    }
+  }
+}

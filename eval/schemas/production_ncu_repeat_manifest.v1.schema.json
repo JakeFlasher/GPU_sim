@@ -1,0 +1,494 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gpu-simulator.local/eval/schemas/production_ncu_repeat_manifest.v1.schema.json",
+  "title": "Production NCU repeat manifest v1",
+  "description": "Closed, externally pinned manifest for one retained Q809 NCU repeat. It binds the independent label source and producer generation, the verified target-free crosswalk, the cohort repeat ordinal, complete nine-field launch keys, and exact report, receipt, CSV, inventory, metrics, and v5 sidecar artifacts.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "artifact_kind",
+    "authority_mode",
+    "repeat_identity",
+    "source_label_identity",
+    "crosswalk_identity",
+    "architecture",
+    "producer_content_manifest",
+    "capture_contract",
+    "launch_bindings",
+    "artifacts"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "production_ncu_repeat_manifest.v1"
+    },
+    "artifact_kind": {
+      "const": "PRODUCTION_NCU_REPEAT_MANIFEST"
+    },
+    "authority_mode": {
+      "const": "EXTERNALLY_PINNED_TARGET_FREE_PRELABEL"
+    },
+    "repeat_identity": {
+      "$ref": "#/$defs/repeatIdentity"
+    },
+    "source_label_identity": {
+      "$ref": "#/$defs/sourceLabelIdentity"
+    },
+    "crosswalk_identity": {
+      "$ref": "#/$defs/crosswalkIdentity"
+    },
+    "architecture": {
+      "$ref": "#/$defs/architecture"
+    },
+    "producer_content_manifest": {
+      "$ref": "#/$defs/producerContentManifest"
+    },
+    "capture_contract": {
+      "$ref": "#/$defs/captureContract"
+    },
+    "launch_bindings": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 1048575,
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/launchBinding"
+      }
+    },
+    "artifacts": {
+      "$ref": "#/$defs/artifacts"
+    }
+  },
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "nonemptyString": {
+      "type": "string",
+      "minLength": 1
+    },
+    "safeRelativePath": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4096,
+      "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*\\\\)(?!.*//).+$"
+    },
+    "repeatIdentity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "repeat_id",
+        "cohort_repeat_ordinal"
+      ],
+      "properties": {
+        "repeat_id": {
+          "$ref": "#/$defs/nonemptyString"
+        },
+        "cohort_repeat_ordinal": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1048575
+        }
+      }
+    },
+    "sourceLabelIdentity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "label_set_id",
+        "label_set_sha256",
+        "source_manifest_id",
+        "source_manifest_sha256"
+      ],
+      "properties": {
+        "label_set_id": {
+          "$ref": "#/$defs/nonemptyString"
+        },
+        "label_set_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "source_manifest_id": {
+          "$ref": "#/$defs/nonemptyString"
+        },
+        "source_manifest_sha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      }
+    },
+    "crosswalkIdentity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "crosswalk_id",
+        "crosswalk_file_sha256",
+        "crosswalk_model_seal_sha256"
+      ],
+      "properties": {
+        "crosswalk_id": {
+          "$ref": "#/$defs/nonemptyString"
+        },
+        "crosswalk_file_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "crosswalk_model_seal_sha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      }
+    },
+    "architecture": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "binary_architecture",
+        "gpu_sku"
+      ],
+      "properties": {
+        "binary_architecture": {
+          "const": "sm_86"
+        },
+        "gpu_sku": {
+          "const": "rtx_3090_ti"
+        }
+      }
+    },
+    "producerContentManifest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "manifest_id",
+        "content_manifest_sha256"
+      ],
+      "properties": {
+        "manifest_id": {
+          "$ref": "#/$defs/nonemptyString"
+        },
+        "content_manifest_sha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      }
+    },
+    "protocol": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "ncu_target_processes",
+        "ncu_filter_mode",
+        "ncu_replay_mode",
+        "ncu_cache_control",
+        "ncu_clock_control",
+        "ncu_profile_from_start",
+        "ncu_launch_skip",
+        "ncu_launch_count"
+      ],
+      "properties": {
+        "ncu_target_processes": {
+          "const": "all"
+        },
+        "ncu_filter_mode": {
+          "const": "global"
+        },
+        "ncu_replay_mode": {
+          "const": "kernel"
+        },
+        "ncu_cache_control": {
+          "const": "all"
+        },
+        "ncu_clock_control": {
+          "const": "none"
+        },
+        "ncu_profile_from_start": {
+          "const": false
+        },
+        "ncu_launch_skip": {
+          "const": 0
+        },
+        "ncu_launch_count": {
+          "type": "integer",
+          "minimum": 2,
+          "maximum": 1048576
+        }
+      }
+    },
+    "sidecarProvenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "device",
+        "slug",
+        "shape_point",
+        "binary_sha256",
+        "profiler_version",
+        "cuda_version",
+        "driver_version",
+        "gpu_uuid_sha256",
+        "warmup_count"
+      ],
+      "properties": {
+        "device": {
+          "const": "sm_86"
+        },
+        "slug": {
+          "$ref": "#/$defs/nonemptyString"
+        },
+        "shape_point": {
+          "$ref": "#/$defs/nonemptyString"
+        },
+        "binary_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "profiler_version": {
+          "$ref": "#/$defs/nonemptyString"
+        },
+        "cuda_version": {
+          "$ref": "#/$defs/nonemptyString"
+        },
+        "driver_version": {
+          "$ref": "#/$defs/nonemptyString"
+        },
+        "gpu_uuid_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "warmup_count": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1048575
+        }
+      }
+    },
+    "metricNames": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 61,
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/nonemptyString"
+      }
+    },
+    "captureContract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "protocol",
+        "percentage_metric_names",
+        "unit_metric_names",
+        "sidecar_provenance"
+      ],
+      "properties": {
+        "protocol": {
+          "$ref": "#/$defs/protocol"
+        },
+        "percentage_metric_names": {
+          "$ref": "#/$defs/metricNames"
+        },
+        "unit_metric_names": {
+          "$ref": "#/$defs/metricNames"
+        },
+        "sidecar_provenance": {
+          "$ref": "#/$defs/sidecarProvenance"
+        }
+      }
+    },
+    "dim3": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "x",
+        "y",
+        "z"
+      ],
+      "properties": {
+        "x": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4294967295
+        },
+        "y": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4294967295
+        },
+        "z": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4294967295
+        }
+      }
+    },
+    "launchKey": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "workload_id",
+        "matched_execution_id",
+        "process_launch_ordinal",
+        "kernel_mangled_name",
+        "grid",
+        "block",
+        "device_id",
+        "stream_id",
+        "binary_architecture"
+      ],
+      "properties": {
+        "workload_id": {
+          "type": "string",
+          "pattern": "^workload-v1-[0-9a-f]{64}$"
+        },
+        "matched_execution_id": {
+          "type": "string",
+          "pattern": "^matched-execution-v1-[0-9a-f]{64}$"
+        },
+        "process_launch_ordinal": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1048575
+        },
+        "kernel_mangled_name": {
+          "$ref": "#/$defs/nonemptyString"
+        },
+        "grid": {
+          "$ref": "#/$defs/dim3"
+        },
+        "block": {
+          "$ref": "#/$defs/dim3"
+        },
+        "device_id": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4294967295
+        },
+        "stream_id": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "binary_architecture": {
+          "const": "sm_86"
+        }
+      }
+    },
+    "launchBinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "cohort_repeat_ordinal",
+        "report_launch_ordinal",
+        "launch_key",
+        "launch_key_sha256",
+        "ncu_record_sha256"
+      ],
+      "properties": {
+        "cohort_repeat_ordinal": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1048575
+        },
+        "report_launch_ordinal": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1048575
+        },
+        "launch_key": {
+          "$ref": "#/$defs/launchKey"
+        },
+        "launch_key_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "ncu_record_sha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      }
+    },
+    "fileBinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "relative_path",
+        "sha256",
+        "size_bytes"
+      ],
+      "properties": {
+        "relative_path": {
+          "$ref": "#/$defs/safeRelativePath"
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "size_bytes": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1073741824
+        }
+      }
+    },
+    "sidecarBinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "report_launch_ordinal",
+        "relative_path",
+        "sha256",
+        "size_bytes"
+      ],
+      "properties": {
+        "report_launch_ordinal": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1048575
+        },
+        "relative_path": {
+          "$ref": "#/$defs/safeRelativePath"
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "size_bytes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 67108864
+        }
+      }
+    },
+    "artifacts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "ncu_report",
+        "details_export_receipt",
+        "details_csv",
+        "details_stderr",
+        "launch_inventory",
+        "launch_metrics",
+        "launch_sidecars"
+      ],
+      "properties": {
+        "ncu_report": {
+          "$ref": "#/$defs/fileBinding"
+        },
+        "details_export_receipt": {
+          "$ref": "#/$defs/fileBinding"
+        },
+        "details_csv": {
+          "$ref": "#/$defs/fileBinding"
+        },
+        "details_stderr": {
+          "$ref": "#/$defs/fileBinding"
+        },
+        "launch_inventory": {
+          "$ref": "#/$defs/fileBinding"
+        },
+        "launch_metrics": {
+          "$ref": "#/$defs/fileBinding"
+        },
+        "launch_sidecars": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 1048575,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/sidecarBinding"
+          }
+        }
+      }
+    }
+  }
+}

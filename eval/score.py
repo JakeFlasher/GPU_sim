@@ -74,10 +74,18 @@ _NOISE_REASON_ORDER = (
     "dispersion_unavailable",
     "rule_not_absolute_interpretable",
 )
+_LABEL_UNAVAILABLE_REASONS = frozenset(
+    {
+        "metric_not_collected",
+        "typed_exclusion",
+    }
+)
 _UNAVAILABLE_ORDER = (
     ("unavailable", "mem_mode_lacks_unit", "l1tex", None, None),
     ("unavailable", "mem_mode_lacks_unit", "lts", None, None),
     ("unavailable", "mem_mode_lacks_unit", "dram", None, None),
+    ("unavailable", "metric_not_collected", None, None, None),
+    ("unavailable", "typed_exclusion", None, None, None),
     ("unavailable", "undefined_fraction", None, "zero_denominator", None),
     ("required_unimplemented", None, None, None, CYCLE_BLOCKER),
 )
@@ -98,6 +106,8 @@ class EvaluatorScoringError(ValueError):
 
 @dataclass(frozen=True, slots=True)
 class EvaluatorBuildIdentity:
+    """Backward-compatible authenticated identity for the synthetic lane."""
+
     evaluator_git_commit: str
     evaluator_git_dirty: bool
     fixture_id: str
@@ -117,7 +127,11 @@ class EvaluatorBuildIdentity:
                 "EVALUATOR_BUILD_IDENTITY_INVALID",
                 "evaluator dirty state is not a boolean",
             )
-        if type(self.fixture_id) is not str or not self.fixture_id:
+        if (
+            type(self.fixture_id) is not str
+            or not self.fixture_id
+            or "\x00" in self.fixture_id
+        ):
             raise EvaluatorScoringError(
                 "EVALUATOR_BUILD_IDENTITY_INVALID",
                 "evaluator fixture id is invalid",
@@ -285,21 +299,66 @@ def score_synthetic_fixture(
         evaluator_build_identity_path, fixture_id=fixture_id
     )
     result = load_result_snapshot(result_path)
-    return _build_accuracy_report(result, labels, evaluator_identity)
-
-
-def _build_accuracy_report(
-    result_snapshot: ResultSnapshot,
-    labels: MatchedLabels,
-    evaluator_identity: EvaluatorBuildIdentity,
-) -> dict[str, Any]:
-    """Build, seal, and self-validate one deterministic admitted report."""
-
     if labels.synthetic_fixture_id != evaluator_identity.fixture_id:
         raise EvaluatorScoringError(
             "SYNTHETIC_FIXTURE_IDENTITY_MISMATCH",
             "label and evaluator build fixtures do not share one identity",
         )
+    if evaluator_identity.evaluator_git_dirty is not True:
+        raise EvaluatorScoringError(
+            "SYNTHETIC_FIXTURE_CLAIMABILITY_INVALID",
+            "synthetic fixture evaluator must remain explicitly unclaimable",
+        )
+    algebra = _score_lane_neutral_algebra(result, labels)
+    validated_result = algebra["result"]
+    registry = algebra["registry"]
+    if not isinstance(registry, MetricRegistry):
+        raise EvaluatorScoringError(
+            "SCORING_ALGEBRA_INVALID",
+            "lane-neutral algebra registry identity is invalid",
+        )
+    report = {
+        "schema_version": "accuracy_report.v1",
+        "report_sha256": "0" * 64,
+        "identities": _report_identities(
+            result,
+            validated_result,
+            labels,
+            evaluator_identity,
+            registry,
+        ),
+        "outcome": {
+            "status": "admitted",
+            "admission": {
+                "status": "admitted",
+                "checks": {
+                    "result_schema": "passed",
+                    "result_seal": "passed",
+                    "registry_projection": "passed",
+                    "architecture": "passed",
+                    "matched_label_schema": "passed",
+                    "matched_label_seal": "passed",
+                    "crosswalk_identity": "passed",
+                    "label_input_availability": "passed",
+                    "units": "passed",
+                },
+                "failures": [],
+            },
+            "comparison_failures": algebra["comparison_failures"],
+            "coverage": algebra["coverage"],
+            "per_metric_family": algebra["per_metric_family"],
+        },
+    }
+    report["report_sha256"] = canonical_sha256(report, "report_sha256")
+    validate_report(report, label_authority=labels.authority)
+    return report
+
+
+def _score_lane_neutral_algebra(
+    result_snapshot: ResultSnapshot,
+    labels: MatchedLabels,
+) -> dict[str, Any]:
+    """Return rows and coverage only; never emit admission or report identity."""
 
     registry = load_metric_registry()
     result = result_snapshot.validated_document()
@@ -348,15 +407,21 @@ def _build_accuracy_report(
                 if label_launch is not None
                 else None
             )
-            label_available = (
-                label_metric is not None and label_metric.outcome_status == "available"
+            label_typed_unavailable = _label_typed_unavailable_key(label_metric)
+            label_admitted = label_metric is not None and (
+                label_metric.outcome_status == "available"
+                or label_typed_unavailable is not None
             )
-            if label_available:
+            if label_admitted:
                 labeled_cells += 1
                 row.n_labeled += 1  # type: ignore[union-attr]
 
-            if label_available and descriptor.key == CYCLE_METRIC_KEY:
+            if label_admitted and descriptor.key == CYCLE_METRIC_KEY:
                 row.unavailable[_CYCLE_UNAVAILABLE_KEY] += 1  # type: ignore[union-attr]
+                continue
+
+            if label_typed_unavailable is not None:
+                row.unavailable[label_typed_unavailable] += 1  # type: ignore[union-attr]
                 continue
 
             failure = _comparison_failure(
@@ -399,48 +464,24 @@ def _build_accuracy_report(
             "candidate dispositions do not partition the full outer cell union",
         )
 
-    report = {
-        "schema_version": "accuracy_report.v1",
-        "report_sha256": "0" * 64,
-        "identities": _report_identities(
-            result_snapshot, result, labels, evaluator_identity, registry
-        ),
-        "outcome": {
-            "status": "admitted",
-            "admission": {
-                "status": "admitted",
-                "checks": {
-                    "result_schema": "passed",
-                    "result_seal": "passed",
-                    "registry_projection": "passed",
-                    "architecture": "passed",
-                    "matched_label_schema": "passed",
-                    "matched_label_seal": "passed",
-                    "crosswalk_identity": "passed",
-                    "label_input_availability": "passed",
-                    "units": "passed",
-                },
-                "failures": [],
-            },
-            "comparison_failures": comparison_failures,
-            "coverage": {
-                "total_cells": total_cells,
-                "labeled_cells": labeled_cells,
-                "unlabeled_cells": total_cells - labeled_cells,
-                "scored_cells": scored_cells,
-                "unavailable_cells": unavailable_cells,
-                "comparison_failure_cells": comparison_failure_cells,
-                "silent_absence_count": 0,
-                "unavailable_by_type": _unavailable_models(
-                    unavailable_counter, include_zero_cycles=True
-                ),
-            },
-            "per_metric_family": per_metric_family,
+    return {
+        "result": result,
+        "registry": registry,
+        "comparison_failures": comparison_failures,
+        "coverage": {
+            "total_cells": total_cells,
+            "labeled_cells": labeled_cells,
+            "unlabeled_cells": total_cells - labeled_cells,
+            "scored_cells": scored_cells,
+            "unavailable_cells": unavailable_cells,
+            "comparison_failure_cells": comparison_failure_cells,
+            "silent_absence_count": 0,
+            "unavailable_by_type": _unavailable_models(
+                unavailable_counter, include_zero_cycles=True
+            ),
         },
+        "per_metric_family": per_metric_family,
     }
-    report["report_sha256"] = canonical_sha256(report, "report_sha256")
-    validate_report(report, label_authority=labels.authority)
-    return report
 
 
 def _verify_input_identities(
@@ -487,6 +528,24 @@ def _verify_input_identities(
                     "matched-label NCU metric contradicts the admitted projection",
                     context={"metric_key": metric.key},
                 )
+
+
+def _label_typed_unavailable_key(
+    metric: LabelMetric | None,
+) -> tuple[Any, ...] | None:
+    if (
+        metric is None
+        or metric.outcome_status != "unavailable"
+        or metric.unavailable_reason not in _LABEL_UNAVAILABLE_REASONS
+    ):
+        return None
+    return (
+        "unavailable",
+        metric.unavailable_reason,
+        None,
+        None,
+        None,
+    )
 
 
 def _comparison_failure(
@@ -731,6 +790,8 @@ def _unavailable_models(
         status, reason, needs, detail, blocking = key
         if status == "required_unimplemented":
             result.append({"status": status, "blocking": blocking, "count": count})
+        elif reason in _LABEL_UNAVAILABLE_REASONS:
+            result.append({"status": status, "reason": reason, "count": count})
         elif reason == "undefined_fraction":
             result.append(
                 {"status": status, "reason": reason, "detail": detail, "count": count}
@@ -755,6 +816,14 @@ def _report_identities(
     evaluator_identity: EvaluatorBuildIdentity,
     registry: MetricRegistry,
 ) -> dict[str, Any]:
+    if (
+        labels.synthetic_fixture_id != evaluator_identity.fixture_id
+        or evaluator_identity.evaluator_git_dirty is not True
+    ):
+        raise EvaluatorScoringError(
+            "SYNTHETIC_FIXTURE_CLAIMABILITY_INVALID",
+            "synthetic report identity must remain fixture-bound and unclaimable",
+        )
     simulator_dirty = result["build_identity"]["sim_git_dirty"]
     evaluator_dirty = evaluator_identity.evaluator_git_dirty
     return {

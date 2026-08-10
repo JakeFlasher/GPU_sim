@@ -1,0 +1,789 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gpu-simulator.invalid/eval/schemas/launch_crosswalk.v2.schema.json",
+  "title": "Target-free launch inventory and crosswalk shape v2",
+  "description": "Closed identity-only fixture algebra and future production shape over the complete nine-field key. Fixture results are always unavailable; production admission requires the separately verified external workload/execution authority and retained namespace evidence plus parser implementation bytes.",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/source_projection"
+    },
+    {
+      "$ref": "#/$defs/inventory"
+    },
+    {
+      "$ref": "#/$defs/crosswalk"
+    }
+  ],
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "minLength": 64,
+      "maxLength": 64,
+      "pattern": "^[0-9a-f]{64}(?![\\s\\S])"
+    },
+    "safe_integer": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "positive_safe_integer": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 9007199254740991
+    },
+    "uint32": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 4294967295
+    },
+    "positive_uint32": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 4294967295
+    },
+    "safe_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}(?![\\s\\S])"
+    },
+    "nonempty_text": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 131071
+    },
+    "namespace": {
+      "enum": [
+        "CANONICAL",
+        "NCU",
+        "NVBIT",
+        "SIMULATOR"
+      ]
+    },
+    "dim3": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "x",
+        "y",
+        "z"
+      ],
+      "properties": {
+        "x": {
+          "$ref": "#/$defs/positive_uint32"
+        },
+        "y": {
+          "$ref": "#/$defs/positive_uint32"
+        },
+        "z": {
+          "$ref": "#/$defs/positive_uint32"
+        }
+      }
+    },
+    "architecture": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "binary_architecture",
+        "gpu_sku"
+      ],
+      "properties": {
+        "binary_architecture": {
+          "$ref": "#/$defs/safe_id"
+        },
+        "gpu_sku": {
+          "$ref": "#/$defs/safe_id"
+        }
+      }
+    },
+    "launch_key": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "workload_id",
+        "matched_execution_id",
+        "process_launch_ordinal",
+        "kernel_mangled_name",
+        "grid",
+        "block",
+        "device_id",
+        "stream_id",
+        "binary_architecture"
+      ],
+      "properties": {
+        "workload_id": {
+          "type": "string",
+          "pattern": "^workload-v1-[0-9a-f]{64}(?![\\s\\S])"
+        },
+        "matched_execution_id": {
+          "type": "string",
+          "pattern": "^matched-execution-v1-[0-9a-f]{64}(?![\\s\\S])"
+        },
+        "process_launch_ordinal": {
+          "$ref": "#/$defs/safe_integer"
+        },
+        "kernel_mangled_name": {
+          "$ref": "#/$defs/nonempty_text"
+        },
+        "grid": {
+          "$ref": "#/$defs/dim3"
+        },
+        "block": {
+          "$ref": "#/$defs/dim3"
+        },
+        "device_id": {
+          "$ref": "#/$defs/uint32"
+        },
+        "stream_id": {
+          "$ref": "#/$defs/safe_integer"
+        },
+        "binary_architecture": {
+          "$ref": "#/$defs/safe_id"
+        }
+      }
+    },
+    "parser_authority": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "authority_id",
+        "authority_sha256"
+      ],
+      "properties": {
+        "authority_id": {
+          "$ref": "#/$defs/safe_id"
+        },
+        "authority_sha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      }
+    },
+    "snapshot_metadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "device",
+        "inode",
+        "mode",
+        "link_count",
+        "size_bytes",
+        "mtime_ns",
+        "ctime_ns"
+      ],
+      "properties": {
+        "device": {
+          "$ref": "#/$defs/decimal"
+        },
+        "inode": {
+          "$ref": "#/$defs/decimal"
+        },
+        "mode": {
+          "$ref": "#/$defs/decimal"
+        },
+        "link_count": {
+          "const": "1"
+        },
+        "size_bytes": {
+          "$ref": "#/$defs/decimal"
+        },
+        "mtime_ns": {
+          "$ref": "#/$defs/decimal"
+        },
+        "ctime_ns": {
+          "$ref": "#/$defs/decimal"
+        }
+      }
+    },
+    "decimal": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^(?:0|[1-9][0-9]*)(?![\\s\\S])"
+    },
+    "snapshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "acquisition",
+        "payload_sha256",
+        "size_bytes",
+        "metadata",
+        "snapshot_identity_sha256"
+      ],
+      "properties": {
+        "acquisition": {
+          "enum": [
+            "PINNED_REGULAR_NOFOLLOW_V1",
+            "FIXTURE_CALLER_BYTES_V1"
+          ]
+        },
+        "payload_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "size_bytes": {
+          "$ref": "#/$defs/safe_integer"
+        },
+        "metadata": {
+          "$ref": "#/$defs/snapshot_metadata"
+        },
+        "snapshot_identity_sha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      }
+    },
+    "native_identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "execution_context_id",
+        "native_launch_id",
+        "native_stream_id",
+        "native_launch_index"
+      ],
+      "properties": {
+        "execution_context_id": {
+          "type": "string",
+          "pattern": "^(?:canonical|ncu|nvbit|simulator)-context-v1-[0-9a-f]{64}(?![\\s\\S])"
+        },
+        "native_launch_id": {
+          "$ref": "#/$defs/safe_id"
+        },
+        "native_stream_id": {
+          "$ref": "#/$defs/safe_integer"
+        },
+        "native_launch_index": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/safe_integer"
+            }
+          ]
+        }
+      }
+    },
+    "ordinal_binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "binding_kind",
+        "authority_model_seal_sha256",
+        "process_launch_ordinal",
+        "native_launch_index_role",
+        "binding_sha256"
+      ],
+      "properties": {
+        "binding_kind": {
+          "const": "EXPLICIT_WORKLOAD_EXECUTION_AUTHORITY_V1"
+        },
+        "authority_model_seal_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "process_launch_ordinal": {
+          "$ref": "#/$defs/safe_integer"
+        },
+        "native_launch_index_role": {
+          "enum": [
+            "NOT_APPLICABLE",
+            "NATIVE_INDEX_ONLY_NOT_PROCESS_ORDINAL"
+          ]
+        },
+        "binding_sha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      }
+    },
+    "source_record": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "launch_key",
+        "kernel_family",
+        "native_identity",
+        "process_ordinal_binding",
+        "record_sha256"
+      ],
+      "properties": {
+        "launch_key": {
+          "$ref": "#/$defs/launch_key"
+        },
+        "kernel_family": {
+          "$ref": "#/$defs/safe_id"
+        },
+        "native_identity": {
+          "$ref": "#/$defs/native_identity"
+        },
+        "process_ordinal_binding": {
+          "$ref": "#/$defs/ordinal_binding"
+        },
+        "record_sha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      }
+    },
+    "source_projection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "artifact_kind",
+        "schema_sha256",
+        "contract_mode",
+        "namespace",
+        "workload_execution_authority_model_seal_sha256",
+        "parser_authority",
+        "adapter_evidence",
+        "execution_context_id",
+        "executable_sha256",
+        "architecture",
+        "kernel_family",
+        "record_count",
+        "records",
+        "model_seal_sha256"
+      ],
+      "properties": {
+        "schema_version": {
+          "const": 2
+        },
+        "artifact_kind": {
+          "const": "EVALUATOR_LAUNCH_SOURCE_V2"
+        },
+        "schema_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "contract_mode": {
+          "enum": [
+            "TARGET_FREE_PRODUCTION",
+            "FIXTURE_ONLY_V2_NON_AUTHORITATIVE"
+          ]
+        },
+        "namespace": {
+          "$ref": "#/$defs/namespace"
+        },
+        "workload_execution_authority_model_seal_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "parser_authority": {
+          "$ref": "#/$defs/parser_authority"
+        },
+        "adapter_evidence": {
+          "$ref": "#/$defs/adapter_evidence"
+        },
+        "execution_context_id": {
+          "type": "string",
+          "pattern": "^(?:canonical|ncu|nvbit|simulator)-context-v1-[0-9a-f]{64}(?![\\s\\S])"
+        },
+        "executable_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "architecture": {
+          "$ref": "#/$defs/architecture"
+        },
+        "kernel_family": {
+          "$ref": "#/$defs/safe_id"
+        },
+        "record_count": {
+          "$ref": "#/$defs/positive_safe_integer"
+        },
+        "records": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/source_record"
+          }
+        },
+        "model_seal_sha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      }
+    },
+    "source_descriptor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "payload_sha256",
+        "payload_snapshot",
+        "source_model_seal_sha256",
+        "adapter_evidence",
+        "parser_authority",
+        "execution_context_id"
+      ],
+      "properties": {
+        "payload_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "payload_snapshot": {
+          "$ref": "#/$defs/snapshot"
+        },
+        "source_model_seal_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "adapter_evidence": {
+          "$ref": "#/$defs/adapter_evidence"
+        },
+        "parser_authority": {
+          "$ref": "#/$defs/parser_authority"
+        },
+        "execution_context_id": {
+          "type": "string",
+          "pattern": "^(?:canonical|ncu|nvbit|simulator)-context-v1-[0-9a-f]{64}(?![\\s\\S])"
+        }
+      }
+    },
+    "inventory": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "artifact_kind",
+        "schema_sha256",
+        "contract_mode",
+        "namespace",
+        "workload_execution_authority_model_seal_sha256",
+        "source",
+        "executable_sha256",
+        "architecture",
+        "kernel_family",
+        "launch_count",
+        "launch_key_sha256s",
+        "records",
+        "model_seal_sha256"
+      ],
+      "properties": {
+        "schema_version": {
+          "const": 2
+        },
+        "artifact_kind": {
+          "const": "EVALUATOR_LAUNCH_INVENTORY_V2"
+        },
+        "schema_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "contract_mode": {
+          "enum": [
+            "TARGET_FREE_PRODUCTION",
+            "FIXTURE_ONLY_V2_NON_AUTHORITATIVE"
+          ]
+        },
+        "namespace": {
+          "$ref": "#/$defs/namespace"
+        },
+        "workload_execution_authority_model_seal_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "source": {
+          "$ref": "#/$defs/source_descriptor"
+        },
+        "executable_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "architecture": {
+          "$ref": "#/$defs/architecture"
+        },
+        "kernel_family": {
+          "$ref": "#/$defs/safe_id"
+        },
+        "launch_count": {
+          "$ref": "#/$defs/positive_safe_integer"
+        },
+        "launch_key_sha256s": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/sha256"
+          }
+        },
+        "records": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/source_record"
+          }
+        },
+        "model_seal_sha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      }
+    },
+    "bijection_member": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "inventory_model_seal_sha256",
+        "record_sha256"
+      ],
+      "properties": {
+        "inventory_model_seal_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "record_sha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      }
+    },
+    "bijection_members": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "canonical",
+        "ncu",
+        "nvbit",
+        "simulator"
+      ],
+      "properties": {
+        "canonical": {
+          "$ref": "#/$defs/bijection_member"
+        },
+        "ncu": {
+          "$ref": "#/$defs/bijection_member"
+        },
+        "nvbit": {
+          "$ref": "#/$defs/bijection_member"
+        },
+        "simulator": {
+          "$ref": "#/$defs/bijection_member"
+        }
+      }
+    },
+    "bijection_row": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "launch_key",
+        "launch_key_sha256",
+        "kernel_family",
+        "members"
+      ],
+      "properties": {
+        "launch_key": {
+          "$ref": "#/$defs/launch_key"
+        },
+        "launch_key_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "kernel_family": {
+          "$ref": "#/$defs/safe_id"
+        },
+        "members": {
+          "$ref": "#/$defs/bijection_members"
+        }
+      }
+    },
+    "outcome": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/fixture_outcome"
+        },
+        {
+          "$ref": "#/$defs/production_outcome"
+        }
+      ]
+    },
+    "inventory_map": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "canonical",
+        "ncu",
+        "nvbit",
+        "simulator"
+      ],
+      "properties": {
+        "canonical": {
+          "$ref": "#/$defs/inventory"
+        },
+        "ncu": {
+          "$ref": "#/$defs/inventory"
+        },
+        "nvbit": {
+          "$ref": "#/$defs/inventory"
+        },
+        "simulator": {
+          "$ref": "#/$defs/inventory"
+        }
+      }
+    },
+    "crosswalk": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "artifact_kind",
+        "schema_sha256",
+        "contract_mode",
+        "workload_execution_authority_model_seal_sha256",
+        "workload_id",
+        "matched_execution_id",
+        "executable_sha256",
+        "architecture",
+        "kernel_family",
+        "launch_count",
+        "inventories",
+        "bijection",
+        "bijection_sha256",
+        "outcome",
+        "model_seal_sha256"
+      ],
+      "properties": {
+        "schema_version": {
+          "const": 2
+        },
+        "artifact_kind": {
+          "const": "EVALUATOR_LAUNCH_CROSSWALK"
+        },
+        "schema_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "contract_mode": {
+          "enum": [
+            "TARGET_FREE_PRODUCTION",
+            "FIXTURE_ONLY_V2_NON_AUTHORITATIVE"
+          ]
+        },
+        "workload_execution_authority_model_seal_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "workload_id": {
+          "type": "string",
+          "pattern": "^workload-v1-[0-9a-f]{64}(?![\\s\\S])"
+        },
+        "matched_execution_id": {
+          "type": "string",
+          "pattern": "^matched-execution-v1-[0-9a-f]{64}(?![\\s\\S])"
+        },
+        "executable_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "architecture": {
+          "$ref": "#/$defs/architecture"
+        },
+        "kernel_family": {
+          "$ref": "#/$defs/safe_id"
+        },
+        "launch_count": {
+          "$ref": "#/$defs/positive_safe_integer"
+        },
+        "inventories": {
+          "$ref": "#/$defs/inventory_map"
+        },
+        "bijection": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/bijection_row"
+          }
+        },
+        "bijection_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "outcome": {
+          "$ref": "#/$defs/outcome"
+        },
+        "model_seal_sha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "contract_mode": {
+                "const": "FIXTURE_ONLY_V2_NON_AUTHORITATIVE"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "outcome": {
+                "$ref": "#/$defs/fixture_outcome"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "contract_mode": {
+                "const": "TARGET_FREE_PRODUCTION"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "outcome": {
+                "$ref": "#/$defs/production_outcome"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "retained_binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "payload_sha256",
+        "payload_snapshot"
+      ],
+      "properties": {
+        "payload_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "payload_snapshot": {
+          "$ref": "#/$defs/snapshot"
+        }
+      }
+    },
+    "adapter_evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "underlying_evidence",
+        "parser_implementation"
+      ],
+      "properties": {
+        "underlying_evidence": {
+          "$ref": "#/$defs/retained_binding"
+        },
+        "parser_implementation": {
+          "$ref": "#/$defs/retained_binding"
+        }
+      }
+    },
+    "fixture_outcome": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "reason_codes"
+      ],
+      "properties": {
+        "status": {
+          "const": "UNAVAILABLE"
+        },
+        "reason_codes": {
+          "const": [
+            "FIXTURE_ONLY_V2_CROSSWALK"
+          ]
+        }
+      }
+    },
+    "production_outcome": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "reason_codes"
+      ],
+      "properties": {
+        "status": {
+          "const": "ADMITTED"
+        },
+        "reason_codes": {
+          "const": []
+        }
+      }
+    }
+  }
+}

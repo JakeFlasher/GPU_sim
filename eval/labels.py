@@ -165,7 +165,7 @@ class MatchedLabels:
     binary_architecture: str
     gpu_sku: str
     launches: tuple[MatchedLaunch, ...]
-    synthetic_fixture_id: str
+    synthetic_fixture_id: str | None
 
     @property
     def authority(self) -> MatchedLabelAuthority:
@@ -302,7 +302,9 @@ def _validate_synthetic_authority(
     )
 
 
-def _freeze_labels(document: dict[str, Any], *, fixture_id: str) -> MatchedLabels:
+def _freeze_labels(
+    document: dict[str, Any], *, fixture_id: str | None
+) -> MatchedLabels:
     launches = tuple(_freeze_launch(launch) for launch in document["launches"])
     source = document["source_label_identity"]
     crosswalk = document["crosswalk_identity"]

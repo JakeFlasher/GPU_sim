@@ -270,6 +270,109 @@ def test_unavailable_label_is_explicit_comparison_failure(
     )
 
 
+@pytest.mark.parametrize("reason", ("metric_not_collected", "typed_exclusion"))
+def test_production_label_unavailability_is_typed_accounting(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    reason: str,
+) -> None:
+    def make_label_typed_unavailable(labels: dict[str, object]) -> None:
+        metric = labels["launches"][0]["metrics"][1]
+        metric["outcome"] = {
+            "status": "unavailable",
+            "value": None,
+            "reason": reason,
+        }
+        if reason == "metric_not_collected":
+            rule = metric["repeat_metadata"]["dispersion"]["rule"]
+            metric["repeat_metadata"]["dispersion"] = {
+                "status": "unavailable",
+                "rule": rule,
+                "reason": "source_dispersion_null",
+            }
+
+    labels_path, authority_path = _write_label_bundle(
+        tmp_path,
+        monkeypatch,
+        make_label_typed_unavailable,
+    )
+    report = _score_with_labels(labels_path, authority_path)
+    outcome = report["outcome"]
+    row = _row(report, "traffic_gmem_ld_sectors")
+
+    assert row["n_labeled"] == 1
+    assert row["n_scored"] == 0
+    assert row["n_unavailable"] == 1
+    assert row["unavailable_by_type"] == [
+        {"status": "unavailable", "reason": reason, "count": 1}
+    ]
+    assert outcome["coverage"] == {
+        "total_cells": 8,
+        "labeled_cells": 8,
+        "unlabeled_cells": 0,
+        "scored_cells": 6,
+        "unavailable_cells": 2,
+        "comparison_failure_cells": 0,
+        "silent_absence_count": 0,
+        "unavailable_by_type": [
+            {"status": "unavailable", "reason": reason, "count": 1},
+            {
+                "status": "required_unimplemented",
+                "blocking": "aggregation_semantics_study",
+                "count": 1,
+            },
+        ],
+    }
+    assert outcome["comparison_failures"] == []
+
+
+def test_noisy_cycle_label_remains_required_unimplemented(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def make_cycle_label_noisy(labels: dict[str, object]) -> None:
+        metric = labels["launches"][0]["metrics"][-1]
+        assert metric["metric_key"] == "exec_cycles_gpc_max"
+        metric["outcome"] = {
+            "status": "unavailable",
+            "value": None,
+            "reason": "typed_exclusion",
+        }
+        metric["repeat_metadata"]["dispersion"]["scalar"] = 1.0
+
+    labels_path, authority_path = _write_label_bundle(
+        tmp_path,
+        monkeypatch,
+        make_cycle_label_noisy,
+    )
+    report = _score_with_labels(labels_path, authority_path)
+    outcome = report["outcome"]
+    row = _row(report, "exec_cycles_gpc_max")
+
+    assert row["n_labeled"] == 1
+    assert row["n_scored"] == 0
+    assert row["n_unavailable"] == 1
+    assert row["unavailable_by_type"] == [
+        {
+            "status": "required_unimplemented",
+            "blocking": "aggregation_semantics_study",
+            "count": 1,
+        }
+    ]
+    assert row["summary"] == {
+        "kind": "cycle",
+        "status": "required_unimplemented",
+        "blocking": "aggregation_semantics_study",
+    }
+    assert outcome["coverage"]["labeled_cells"] == 8
+    assert outcome["coverage"]["unavailable_cells"] == 1
+    assert outcome["coverage"]["comparison_failure_cells"] == 0
+    assert outcome["comparison_failures"] == []
+    assert outcome["coverage"]["unavailable_by_type"] == row[
+        "unavailable_by_type"
+    ]
+
+
 def test_zero_denominator_fraction_is_typed_unavailable(tmp_path: Path) -> None:
     def make_fraction_undefined(result: dict[str, object]) -> None:
         for parent in (result["launches"][0], result["aggregate"]):

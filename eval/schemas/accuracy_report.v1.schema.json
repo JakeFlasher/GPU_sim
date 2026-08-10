@@ -1294,6 +1294,29 @@
         }
       }
     },
+    "labelOutcomeUnavailable": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "reason",
+        "count"
+      ],
+      "properties": {
+        "status": {
+          "const": "unavailable"
+        },
+        "reason": {
+          "enum": [
+            "metric_not_collected",
+            "typed_exclusion"
+          ]
+        },
+        "count": {
+          "$ref": "#/$defs/u64"
+        }
+      }
+    },
     "requiredCyclesUnavailable": {
       "type": "object",
       "additionalProperties": false,
@@ -1323,6 +1346,9 @@
           },
           {
             "$ref": "#/$defs/undefinedFraction"
+          },
+          {
+            "$ref": "#/$defs/labelOutcomeUnavailable"
           },
           {
             "$ref": "#/$defs/requiredCyclesUnavailable"

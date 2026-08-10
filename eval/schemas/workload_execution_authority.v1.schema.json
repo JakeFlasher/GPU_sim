@@ -1,0 +1,461 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gpu-simulator.invalid/eval/schemas/workload_execution_authority.v1.schema.json",
+  "title": "Target-free workload/execution authority shape v1",
+  "description": "Target-free identity algebra. Production use additionally requires a detached pre-label admission whose trust anchor is external to this self-sealed model; the fixture mode is explicitly non-authoritative.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "artifact_kind",
+    "schema_sha256",
+    "contract_mode",
+    "external_admission",
+    "issuance_claim",
+    "workload_id",
+    "matched_execution_id",
+    "executable_sha256",
+    "argv",
+    "shape",
+    "architecture",
+    "kernel_family",
+    "source_contracts",
+    "expected_launch_count",
+    "expected_launch_roster",
+    "model_seal_sha256"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "artifact_kind": {
+      "const": "EVALUATOR_WORKLOAD_EXECUTION_AUTHORITY"
+    },
+    "schema_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "contract_mode": {
+      "enum": [
+        "TARGET_FREE_PRODUCTION",
+        "FIXTURE_ONLY_V2_NON_AUTHORITATIVE"
+      ]
+    },
+    "external_admission": {
+      "$ref": "#/$defs/external_admission"
+    },
+    "issuance_claim": {
+      "$ref": "#/$defs/issuance"
+    },
+    "workload_id": {
+      "type": "string",
+      "pattern": "^workload-v1-[0-9a-f]{64}(?![\\s\\S])"
+    },
+    "matched_execution_id": {
+      "type": "string",
+      "pattern": "^matched-execution-v1-[0-9a-f]{64}(?![\\s\\S])"
+    },
+    "executable_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "argv": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 4096,
+      "items": {
+        "$ref": "#/$defs/nonempty_text"
+      }
+    },
+    "shape": {
+      "type": "array",
+      "maxItems": 4096,
+      "items": {
+        "$ref": "#/$defs/nonempty_text"
+      }
+    },
+    "architecture": {
+      "$ref": "#/$defs/architecture"
+    },
+    "kernel_family": {
+      "$ref": "#/$defs/safe_id"
+    },
+    "source_contracts": {
+      "$ref": "#/$defs/source_contracts"
+    },
+    "expected_launch_count": {
+      "$ref": "#/$defs/positive_safe_integer"
+    },
+    "expected_launch_roster": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 9007199254740991,
+      "items": {
+        "$ref": "#/$defs/expected_launch"
+      }
+    },
+    "model_seal_sha256": {
+      "$ref": "#/$defs/sha256"
+    }
+  },
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "minLength": 64,
+      "maxLength": 64,
+      "pattern": "^[0-9a-f]{64}(?![\\s\\S])"
+    },
+    "safe_integer": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "positive_safe_integer": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 9007199254740991
+    },
+    "uint32": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 4294967295
+    },
+    "positive_uint32": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 4294967295
+    },
+    "safe_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}(?![\\s\\S])"
+    },
+    "nonempty_text": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 131071
+    },
+    "namespace": {
+      "enum": [
+        "CANONICAL",
+        "NCU",
+        "NVBIT",
+        "SIMULATOR"
+      ]
+    },
+    "dim3": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "x",
+        "y",
+        "z"
+      ],
+      "properties": {
+        "x": {
+          "$ref": "#/$defs/positive_uint32"
+        },
+        "y": {
+          "$ref": "#/$defs/positive_uint32"
+        },
+        "z": {
+          "$ref": "#/$defs/positive_uint32"
+        }
+      }
+    },
+    "architecture": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "binary_architecture",
+        "gpu_sku"
+      ],
+      "properties": {
+        "binary_architecture": {
+          "$ref": "#/$defs/safe_id"
+        },
+        "gpu_sku": {
+          "$ref": "#/$defs/safe_id"
+        }
+      }
+    },
+    "issuance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "phase",
+        "input_policy",
+        "execution_nonce",
+        "workload_id_rule",
+        "matched_execution_id_rule"
+      ],
+      "properties": {
+        "phase": {
+          "const": "BEFORE_LABEL_COLLECTION"
+        },
+        "input_policy": {
+          "const": "TARGET_FREE_NO_LABEL_OR_PREDICTION_INPUTS"
+        },
+        "execution_nonce": {
+          "$ref": "#/$defs/safe_id"
+        },
+        "workload_id_rule": {
+          "const": "SHA256_CANONICAL_WORKLOAD_V1"
+        },
+        "matched_execution_id_rule": {
+          "const": "SHA256_CANONICAL_MATCHED_EXECUTION_V1"
+        }
+      }
+    },
+    "source_contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "namespace",
+        "parser_authority_id",
+        "parser_authority_sha256",
+        "execution_context_id",
+        "ordinal_binding_policy"
+      ],
+      "properties": {
+        "namespace": {
+          "$ref": "#/$defs/namespace"
+        },
+        "parser_authority_id": {
+          "$ref": "#/$defs/safe_id"
+        },
+        "parser_authority_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "execution_context_id": {
+          "type": "string",
+          "pattern": "^(?:canonical|ncu|nvbit|simulator)-context-v1-[0-9a-f]{64}(?![\\s\\S])"
+        },
+        "ordinal_binding_policy": {
+          "const": "EXPLICIT_WORKLOAD_EXECUTION_AUTHORITY_V1"
+        }
+      }
+    },
+    "source_contracts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "canonical",
+        "ncu",
+        "nvbit",
+        "simulator"
+      ],
+      "properties": {
+        "canonical": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/source_contract"
+            },
+            {
+              "properties": {
+                "namespace": {
+                  "const": "CANONICAL"
+                }
+              }
+            }
+          ]
+        },
+        "ncu": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/source_contract"
+            },
+            {
+              "properties": {
+                "namespace": {
+                  "const": "NCU"
+                }
+              }
+            }
+          ]
+        },
+        "nvbit": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/source_contract"
+            },
+            {
+              "properties": {
+                "namespace": {
+                  "const": "NVBIT"
+                }
+              }
+            }
+          ]
+        },
+        "simulator": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/source_contract"
+            },
+            {
+              "properties": {
+                "namespace": {
+                  "const": "SIMULATOR"
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    "launch_key": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "workload_id",
+        "matched_execution_id",
+        "process_launch_ordinal",
+        "kernel_mangled_name",
+        "grid",
+        "block",
+        "device_id",
+        "stream_id",
+        "binary_architecture"
+      ],
+      "properties": {
+        "workload_id": {
+          "type": "string",
+          "pattern": "^workload-v1-[0-9a-f]{64}(?![\\s\\S])"
+        },
+        "matched_execution_id": {
+          "type": "string",
+          "pattern": "^matched-execution-v1-[0-9a-f]{64}(?![\\s\\S])"
+        },
+        "process_launch_ordinal": {
+          "$ref": "#/$defs/safe_integer"
+        },
+        "kernel_mangled_name": {
+          "$ref": "#/$defs/nonempty_text"
+        },
+        "grid": {
+          "$ref": "#/$defs/dim3"
+        },
+        "block": {
+          "$ref": "#/$defs/dim3"
+        },
+        "device_id": {
+          "$ref": "#/$defs/uint32"
+        },
+        "stream_id": {
+          "$ref": "#/$defs/safe_integer"
+        },
+        "binary_architecture": {
+          "$ref": "#/$defs/safe_id"
+        }
+      }
+    },
+    "expected_launch": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "launch_key",
+        "kernel_family"
+      ],
+      "properties": {
+        "launch_key": {
+          "$ref": "#/$defs/launch_key"
+        },
+        "kernel_family": {
+          "$ref": "#/$defs/safe_id"
+        }
+      }
+    },
+    "fixture_external_admission": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "detached_admission_sha256",
+        "trust_anchor_id",
+        "trust_anchor_sha256"
+      ],
+      "properties": {
+        "status": {
+          "const": "FIXTURE_ONLY_NON_AUTHORITATIVE"
+        },
+        "detached_admission_sha256": {
+          "type": "null"
+        },
+        "trust_anchor_id": {
+          "type": "null"
+        },
+        "trust_anchor_sha256": {
+          "type": "null"
+        }
+      }
+    },
+    "production_external_admission": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "detached_admission_sha256",
+        "trust_anchor_id",
+        "trust_anchor_sha256"
+      ],
+      "properties": {
+        "status": {
+          "const": "EXTERNALLY_ADMITTED"
+        },
+        "detached_admission_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "trust_anchor_id": {
+          "$ref": "#/$defs/safe_id"
+        },
+        "trust_anchor_sha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      }
+    },
+    "external_admission": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/fixture_external_admission"
+        },
+        {
+          "$ref": "#/$defs/production_external_admission"
+        }
+      ]
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "contract_mode": {
+            "const": "FIXTURE_ONLY_V2_NON_AUTHORITATIVE"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "external_admission": {
+            "$ref": "#/$defs/fixture_external_admission"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "contract_mode": {
+            "const": "TARGET_FREE_PRODUCTION"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "external_admission": {
+            "$ref": "#/$defs/production_external_admission"
+          }
+        }
+      }
+    }
+  ]
+}

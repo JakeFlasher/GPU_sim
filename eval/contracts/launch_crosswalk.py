@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import Enum
 from types import MappingProxyType
@@ -694,7 +695,7 @@ def create_launch_inventory(
     del source_payload, candidates, schema_bytes, schema_snapshot
     if not isinstance(source, SourceArtifactDescriptor):
         raise ImmutableArtifactError("launch inventory source is invalid")
-    source.snapshot.require_production_acquisition("production launch source")
+    source.snapshot.require_production_acquisition("fixture v2 launch source")
     raise authority_unavailable(
         AuthorityBlockerCode.LAUNCH_PARSER_AUTHORITY_UNAVAILABLE,
         "no namespace-specific production launch parser authority is installed",
@@ -855,7 +856,7 @@ def evaluate_launch_crosswalk(
 ) -> dict[str, Any]:
     raise authority_unavailable(
         AuthorityBlockerCode.LAUNCH_PARSER_AUTHORITY_UNAVAILABLE,
-        "production crosswalk evaluation has no installed namespace parser authority",
+        "fixture v2 crosswalk evaluation has no installed namespace parser authority",
     )
 
 
@@ -970,7 +971,7 @@ def verify_launch_crosswalk_model(
     del model
     raise authority_unavailable(
         AuthorityBlockerCode.LAUNCH_PARSER_AUTHORITY_UNAVAILABLE,
-        "production crosswalk verification has no installed namespace parser authority",
+        "fixture v2 crosswalk verification has no installed namespace parser authority",
     )
 
 
@@ -1079,7 +1080,7 @@ def load_launch_crosswalk(
     del payload
     raise authority_unavailable(
         AuthorityBlockerCode.LAUNCH_PARSER_AUTHORITY_UNAVAILABLE,
-        "production crosswalk loading has no installed namespace parser authority",
+        "fixture v2 crosswalk loading has no installed namespace parser authority",
     )
 
 
@@ -1491,3 +1492,1681 @@ def _nonnegative_integer(value: object, label: str) -> int:
     if type(value) is not int or not 0 <= value <= _MAX_SAFE_INTEGER:
         raise ImmutableArtifactError(f"{label} must be a nonnegative safe integer")
     return value
+
+
+# Additive production authority and crosswalk v2. The fixture-only v1 constants,
+# wire models, and entry points above intentionally remain byte-for-byte stable.
+WORKLOAD_EXECUTION_AUTHORITY_SCHEMA_VERSION = 1
+WORKLOAD_EXECUTION_AUTHORITY_ARTIFACT_KIND = (
+    "EVALUATOR_WORKLOAD_EXECUTION_AUTHORITY"
+)
+WORKLOAD_EXECUTION_AUTHORITY_SCHEMA_ID = (
+    "https://gpu-simulator.invalid/eval/schemas/"
+    "workload_execution_authority.v1.schema.json"
+)
+WORKLOAD_EXECUTION_AUTHORITY_SCHEMA_SHA256 = (
+    "5d8d9f752b94ac879e26684bd09d0149e10ff62cc2b29b07e40bc938767a696f"
+)
+CROSSWALK_V2_SCHEMA_VERSION = 2
+CROSSWALK_V2_ARTIFACT_KIND = ARTIFACT_KIND
+CROSSWALK_V2_SCHEMA_ID = (
+    "https://gpu-simulator.invalid/eval/schemas/launch_crosswalk.v2.schema.json"
+)
+CROSSWALK_V2_SCHEMA_SHA256 = (
+    "08d4bcfb54b27bc84e88aa7ab6b62de469aa335a825beeda162789ac64bad5a3"
+)
+PRODUCTION_SOURCE_ARTIFACT_KIND = "EVALUATOR_LAUNCH_SOURCE_V2"
+PRODUCTION_INVENTORY_ARTIFACT_KIND = "EVALUATOR_LAUNCH_INVENTORY_V2"
+PRODUCTION_CONTRACT_MODE = "TARGET_FREE_PRODUCTION"
+V2_FIXTURE_CONTRACT_MODE = "FIXTURE_ONLY_V2_NON_AUTHORITATIVE"
+V2_FIXTURE_CROSSWALK_REASON = "FIXTURE_ONLY_V2_CROSSWALK"
+EXPLICIT_ORDINAL_BINDING = "EXPLICIT_WORKLOAD_EXECUTION_AUTHORITY_V1"
+NATIVE_INDEX_NOT_ORDINAL = "NATIVE_INDEX_ONLY_NOT_PROCESS_ORDINAL"
+NATIVE_INDEX_NOT_APPLICABLE = "NOT_APPLICABLE"
+_WORKLOAD_ID_RULE = "SHA256_CANONICAL_WORKLOAD_V1"
+_MATCHED_EXECUTION_ID_RULE = "SHA256_CANONICAL_MATCHED_EXECUTION_V1"
+_WORKLOAD_ID = re.compile(r"workload-v1-[0-9a-f]{64}\Z")
+_MATCHED_EXECUTION_ID = re.compile(r"matched-execution-v1-[0-9a-f]{64}\Z")
+_CONTEXT_ID = re.compile(
+    r"(?:canonical|ncu|nvbit|simulator)-context-v1-[0-9a-f]{64}\Z"
+)
+_FORBIDDEN_TARGET_FIELDS = frozenset(
+    {
+        "label",
+        "labels",
+        "metric",
+        "metrics",
+        "metric_name",
+        "metric_names",
+        "metric_value",
+        "metric_values",
+        "ncu_metric",
+        "ncu_metrics",
+        "observed_value",
+        "predicted_value",
+        "prediction",
+        "predictions",
+        "score",
+        "scores",
+        "target_value",
+        "target_values",
+        "unit_tagged_metrics",
+    }
+)
+# No current M1 artifact is externally admitted, no pre-label trust anchor is
+# installed, and no namespace adapter implementation is independently pinned.
+# Every public production-v2 path checks these immutable registries before
+# reading caller data. Structural fixture algebra uses separately named APIs.
+CURRENT_M1_WORKLOAD_EXECUTION_AUTHORITIES = MappingProxyType({})
+PRODUCTION_WORKLOAD_EXECUTION_ADMISSION_AUTHORITIES = MappingProxyType({})
+PRODUCTION_PRELABEL_TRUST_ANCHORS = MappingProxyType({})
+PRODUCTION_NAMESPACE_ADAPTER_AUTHORITIES = MappingProxyType({})
+
+
+@dataclass(frozen=True, slots=True)
+class ProductionParserAuthority:
+    """One independently pinned identity-only namespace parser."""
+
+    namespace: LaunchNamespace
+    authority_id: str
+    authority_sha256: str
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.namespace, LaunchNamespace):
+            raise ImmutableArtifactError("parser authority namespace is invalid")
+        _require_role(self.authority_id)
+        require_sha256(self.authority_sha256, "parser authority SHA-256")
+
+    def to_model(self) -> dict[str, Any]:
+        return {
+            "authority_id": self.authority_id,
+            "authority_sha256": self.authority_sha256,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class V2FixtureRetainedInput:
+    """Exact retained bytes used only by non-authoritative v2 algebra tests."""
+
+    payload: bytes
+    snapshot: RetainedPayloadSnapshot
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.snapshot, RetainedPayloadSnapshot):
+            raise ImmutableArtifactError("fixture retained input snapshot is invalid")
+        self.snapshot.require_fixture_acquisition("fixture v2 retained input")
+        self.snapshot.verify_payload(self.payload)
+
+    def to_model(self) -> dict[str, Any]:
+        return {
+            "payload_sha256": self.snapshot.payload_sha256,
+            "payload_snapshot": self.snapshot.to_model(),
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class V2FixtureAdapterEvidence:
+    """Underlying evidence and parser implementation bound to one adapter."""
+
+    underlying_evidence: V2FixtureRetainedInput
+    parser_implementation: V2FixtureRetainedInput
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.underlying_evidence, V2FixtureRetainedInput):
+            raise ImmutableArtifactError("underlying fixture evidence is invalid")
+        if not isinstance(self.parser_implementation, V2FixtureRetainedInput):
+            raise ImmutableArtifactError("fixture parser implementation is invalid")
+
+    def to_model(self) -> dict[str, Any]:
+        return {
+            "underlying_evidence": self.underlying_evidence.to_model(),
+            "parser_implementation": self.parser_implementation.to_model(),
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class V2FixtureSourceInput:
+    """Source projection and exact adapter inputs used to derive it."""
+
+    source_projection: V2FixtureRetainedInput
+    adapter_evidence: V2FixtureAdapterEvidence
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.source_projection, V2FixtureRetainedInput):
+            raise ImmutableArtifactError("fixture source projection is invalid")
+        if not isinstance(self.adapter_evidence, V2FixtureAdapterEvidence):
+            raise ImmutableArtifactError("fixture adapter evidence is invalid")
+
+
+@dataclass(frozen=True, slots=True)
+class ExpectedProductionLaunch:
+    """One pre-label launch-roster row, before cohort IDs are derived."""
+
+    process_launch_ordinal: int
+    kernel_mangled_name: str
+    grid: tuple[int, int, int]
+    block: tuple[int, int, int]
+    device_id: int
+    stream_id: int
+    binary_architecture: str
+
+    def __post_init__(self) -> None:
+        _require_ordinal(self.process_launch_ordinal)
+        _require_text(self.kernel_mangled_name, "kernel_mangled_name")
+        _require_uint32_dimension(self.grid, "grid")
+        _require_uint32_dimension(self.block, "block")
+        _require_uint32(self.device_id, "device_id")
+        _require_ordinal_value(self.stream_id, "stream_id")
+        _require_role(self.binary_architecture)
+
+    def to_identity_model(self) -> dict[str, Any]:
+        return {
+            "process_launch_ordinal": self.process_launch_ordinal,
+            "kernel_mangled_name": self.kernel_mangled_name,
+            "grid": _dim3_model(self.grid),
+            "block": _dim3_model(self.block),
+            "device_id": self.device_id,
+            "stream_id": self.stream_id,
+            "binary_architecture": self.binary_architecture,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class CompleteLaunchKey:
+    """The exact nine-field key used by fixture v2 crosswalk v2."""
+
+    workload_id: str
+    matched_execution_id: str
+    process_launch_ordinal: int
+    kernel_mangled_name: str
+    grid: tuple[int, int, int]
+    block: tuple[int, int, int]
+    device_id: int
+    stream_id: int
+    binary_architecture: str
+
+    def __post_init__(self) -> None:
+        if type(self.workload_id) is not str or _WORKLOAD_ID.fullmatch(
+            self.workload_id
+        ) is None:
+            raise ImmutableArtifactError("workload_id is invalid")
+        if type(self.matched_execution_id) is not str or _MATCHED_EXECUTION_ID.fullmatch(
+            self.matched_execution_id
+        ) is None:
+            raise ImmutableArtifactError("matched_execution_id is invalid")
+        ExpectedProductionLaunch(
+            process_launch_ordinal=self.process_launch_ordinal,
+            kernel_mangled_name=self.kernel_mangled_name,
+            grid=self.grid,
+            block=self.block,
+            device_id=self.device_id,
+            stream_id=self.stream_id,
+            binary_architecture=self.binary_architecture,
+        )
+
+    def to_model(self) -> dict[str, Any]:
+        return {
+            "workload_id": self.workload_id,
+            "matched_execution_id": self.matched_execution_id,
+            "process_launch_ordinal": self.process_launch_ordinal,
+            "kernel_mangled_name": self.kernel_mangled_name,
+            "grid": _dim3_model(self.grid),
+            "block": _dim3_model(self.block),
+            "device_id": self.device_id,
+            "stream_id": self.stream_id,
+            "binary_architecture": self.binary_architecture,
+        }
+
+    @property
+    def sha256(self) -> str:
+        return sha256_bytes(canonical_json_bytes(self.to_model()))
+
+    @classmethod
+    def from_model(cls, value: object) -> "CompleteLaunchKey":
+        require_exact_keys(
+            value,
+            {
+                "workload_id",
+                "matched_execution_id",
+                "process_launch_ordinal",
+                "kernel_mangled_name",
+                "grid",
+                "block",
+                "device_id",
+                "stream_id",
+                "binary_architecture",
+            },
+            "complete launch key",
+        )
+        assert isinstance(value, dict)
+        return cls(
+            workload_id=value["workload_id"],
+            matched_execution_id=value["matched_execution_id"],
+            process_launch_ordinal=value["process_launch_ordinal"],
+            kernel_mangled_name=value["kernel_mangled_name"],
+            grid=_dim3_from_model(value["grid"], "grid"),
+            block=_dim3_from_model(value["block"], "block"),
+            device_id=value["device_id"],
+            stream_id=value["stream_id"],
+            binary_architecture=value["binary_architecture"],
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class ProductionLaunchObservation:
+    """One identity-only source row with an explicit pre-label ordinal binding."""
+
+    launch_key: CompleteLaunchKey
+    kernel_family: str
+    native_context_id: str
+    native_launch_id: str
+    native_stream_id: int
+    native_launch_index: int | None
+    native_launch_index_role: str
+    authority_model_seal_sha256: str
+    binding_sha256: str
+    record_sha256: str
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.launch_key, CompleteLaunchKey):
+            raise ImmutableArtifactError("production observation launch key is invalid")
+        _require_role(self.kernel_family)
+        _require_context_id(self.native_context_id)
+        _require_role(self.native_launch_id)
+        _require_ordinal_value(self.native_stream_id, "native_stream_id")
+        if self.native_stream_id != self.launch_key.stream_id:
+            raise ImmutableArtifactError(
+                "native stream does not equal the complete launch-key stream"
+            )
+        if self.native_launch_index is None:
+            if self.native_launch_index_role != NATIVE_INDEX_NOT_APPLICABLE:
+                raise ImmutableArtifactError("absent native launch index has an invalid role")
+        else:
+            _require_ordinal_value(self.native_launch_index, "native_launch_index")
+            if self.native_launch_index_role != NATIVE_INDEX_NOT_ORDINAL:
+                raise ImmutableArtifactError(
+                    "native launch index may not be treated as process ordinal"
+                )
+        require_sha256(
+            self.authority_model_seal_sha256,
+            "ordinal-binding authority model seal",
+        )
+        require_sha256(self.binding_sha256, "ordinal binding SHA-256")
+        require_sha256(self.record_sha256, "source record SHA-256")
+        if self.binding_sha256 != _observation_binding_sha256(self):
+            raise ImmutableArtifactError("ordinal binding SHA-256 mismatch")
+        if self.record_sha256 != _observation_record_sha256(self):
+            raise ImmutableArtifactError("source record SHA-256 mismatch")
+
+    @classmethod
+    def create(
+        cls,
+        *,
+        launch_key: CompleteLaunchKey,
+        kernel_family: str,
+        native_context_id: str,
+        native_launch_id: str,
+        native_stream_id: int,
+        authority_model_seal_sha256: str,
+        native_launch_index: int | None = None,
+    ) -> "ProductionLaunchObservation":
+        role = (
+            NATIVE_INDEX_NOT_APPLICABLE
+            if native_launch_index is None
+            else NATIVE_INDEX_NOT_ORDINAL
+        )
+        values = {
+            "launch_key": launch_key,
+            "kernel_family": kernel_family,
+            "native_context_id": native_context_id,
+            "native_launch_id": native_launch_id,
+            "native_stream_id": native_stream_id,
+            "native_launch_index": native_launch_index,
+            "native_launch_index_role": role,
+            "authority_model_seal_sha256": authority_model_seal_sha256,
+        }
+        binding_sha256 = _observation_binding_from_values(values)
+        record_sha256 = _observation_record_from_values(values, binding_sha256)
+        return cls(**values, binding_sha256=binding_sha256, record_sha256=record_sha256)
+
+    def to_model(self) -> dict[str, Any]:
+        return {
+            "launch_key": self.launch_key.to_model(),
+            "kernel_family": self.kernel_family,
+            "native_identity": {
+                "execution_context_id": self.native_context_id,
+                "native_launch_id": self.native_launch_id,
+                "native_stream_id": self.native_stream_id,
+                "native_launch_index": self.native_launch_index,
+            },
+            "process_ordinal_binding": {
+                "binding_kind": EXPLICIT_ORDINAL_BINDING,
+                "authority_model_seal_sha256": self.authority_model_seal_sha256,
+                "process_launch_ordinal": self.launch_key.process_launch_ordinal,
+                "native_launch_index_role": self.native_launch_index_role,
+                "binding_sha256": self.binding_sha256,
+            },
+            "record_sha256": self.record_sha256,
+        }
+
+    @classmethod
+    def from_model(cls, value: object) -> "ProductionLaunchObservation":
+        require_exact_keys(
+            value,
+            {
+                "launch_key",
+                "kernel_family",
+                "native_identity",
+                "process_ordinal_binding",
+                "record_sha256",
+            },
+            "fixture v2 source record",
+        )
+        assert isinstance(value, dict)
+        native = value["native_identity"]
+        binding = value["process_ordinal_binding"]
+        require_exact_keys(
+            native,
+            {
+                "execution_context_id",
+                "native_launch_id",
+                "native_stream_id",
+                "native_launch_index",
+            },
+            "native launch identity",
+        )
+        require_exact_keys(
+            binding,
+            {
+                "binding_kind",
+                "authority_model_seal_sha256",
+                "process_launch_ordinal",
+                "native_launch_index_role",
+                "binding_sha256",
+            },
+            "process ordinal binding",
+        )
+        assert isinstance(native, dict) and isinstance(binding, dict)
+        if binding["binding_kind"] != EXPLICIT_ORDINAL_BINDING:
+            raise ImmutableArtifactError(
+                "process ordinal lacks explicit workload-execution authority"
+            )
+        key = CompleteLaunchKey.from_model(value["launch_key"])
+        if binding["process_launch_ordinal"] != key.process_launch_ordinal:
+            raise ImmutableArtifactError("ordinal binding disagrees with launch key")
+        return cls(
+            launch_key=key,
+            kernel_family=value["kernel_family"],
+            native_context_id=native["execution_context_id"],
+            native_launch_id=native["native_launch_id"],
+            native_stream_id=native["native_stream_id"],
+            native_launch_index=native["native_launch_index"],
+            native_launch_index_role=binding["native_launch_index_role"],
+            authority_model_seal_sha256=binding[
+                "authority_model_seal_sha256"
+            ],
+            binding_sha256=binding["binding_sha256"],
+            record_sha256=value["record_sha256"],
+        )
+
+
+# Explicit fixture aliases prevent structural algebra types from being mistaken
+# for installed production authority.
+FixtureV2ParserAuthority = ProductionParserAuthority
+FixtureV2ExpectedLaunch = ExpectedProductionLaunch
+FixtureV2LaunchObservation = ProductionLaunchObservation
+
+
+def create_workload_execution_authority_fixture(
+    *,
+    executable_sha256: str,
+    argv: Sequence[str],
+    shape: Sequence[str],
+    binary_architecture: str,
+    gpu_sku: str,
+    kernel_family: str,
+    expected_launches: Sequence[ExpectedProductionLaunch],
+    execution_nonce: str,
+    parser_authorities: Mapping[LaunchNamespace, ProductionParserAuthority],
+    schema_bytes: bytes,
+    schema_snapshot: RetainedPayloadSnapshot,
+) -> dict[str, Any]:
+    """Derive fixture-only IDs; this is not temporal or trust authority."""
+
+    verify_retained_schema(
+        schema_bytes,
+        schema_snapshot,
+        expected_sha256=WORKLOAD_EXECUTION_AUTHORITY_SCHEMA_SHA256,
+        expected_id=WORKLOAD_EXECUTION_AUTHORITY_SCHEMA_ID,
+    )
+    require_sha256(executable_sha256, "workload executable SHA-256")
+    normalized_argv = _text_sequence(argv, "argv", require_nonempty=True)
+    normalized_shape = _text_sequence(shape, "shape", require_nonempty=False)
+    _require_role(binary_architecture)
+    _require_role(gpu_sku)
+    _require_role(kernel_family)
+    _require_role(execution_nonce)
+    launches = _require_expected_launches(
+        expected_launches, binary_architecture=binary_architecture
+    )
+    authorities = _require_parser_authorities(parser_authorities)
+    workload_core = _workload_core(
+        executable_sha256=executable_sha256,
+        argv=normalized_argv,
+        shape=normalized_shape,
+        binary_architecture=binary_architecture,
+        gpu_sku=gpu_sku,
+        kernel_family=kernel_family,
+        expected_launches=launches,
+    )
+    workload_id = f"workload-v1-{sha256_bytes(canonical_json_bytes(workload_core))}"
+    execution_core = {
+        "workload_id": workload_id,
+        "execution_nonce": execution_nonce,
+        "parser_authorities": {
+            namespace.value.lower(): authorities[namespace].to_model()
+            for namespace in LaunchNamespace
+        },
+    }
+    matched_execution_id = (
+        "matched-execution-v1-"
+        f"{sha256_bytes(canonical_json_bytes(execution_core))}"
+    )
+    source_contracts = {
+        namespace.value.lower(): {
+            "namespace": namespace.value,
+            "parser_authority_id": authorities[namespace].authority_id,
+            "parser_authority_sha256": authorities[namespace].authority_sha256,
+            "execution_context_id": _execution_context_id(
+                matched_execution_id, namespace
+            ),
+            "ordinal_binding_policy": EXPLICIT_ORDINAL_BINDING,
+        }
+        for namespace in LaunchNamespace
+    }
+    roster = [
+        {
+            "launch_key": _complete_key_from_expected(
+                launch,
+                workload_id=workload_id,
+                matched_execution_id=matched_execution_id,
+            ).to_model(),
+            "kernel_family": kernel_family,
+        }
+        for launch in launches
+    ]
+    model = seal_evaluator_model(
+        {
+            "schema_version": WORKLOAD_EXECUTION_AUTHORITY_SCHEMA_VERSION,
+            "artifact_kind": WORKLOAD_EXECUTION_AUTHORITY_ARTIFACT_KIND,
+            "schema_sha256": WORKLOAD_EXECUTION_AUTHORITY_SCHEMA_SHA256,
+            "contract_mode": V2_FIXTURE_CONTRACT_MODE,
+            "external_admission": {
+                "status": "FIXTURE_ONLY_NON_AUTHORITATIVE",
+                "detached_admission_sha256": None,
+                "trust_anchor_id": None,
+                "trust_anchor_sha256": None,
+            },
+            "issuance_claim": {
+                "phase": "BEFORE_LABEL_COLLECTION",
+                "input_policy": "TARGET_FREE_NO_LABEL_OR_PREDICTION_INPUTS",
+                "execution_nonce": execution_nonce,
+                "workload_id_rule": _WORKLOAD_ID_RULE,
+                "matched_execution_id_rule": _MATCHED_EXECUTION_ID_RULE,
+            },
+            "workload_id": workload_id,
+            "matched_execution_id": matched_execution_id,
+            "executable_sha256": executable_sha256,
+            "argv": list(normalized_argv),
+            "shape": list(normalized_shape),
+            "architecture": {
+                "binary_architecture": binary_architecture,
+                "gpu_sku": gpu_sku,
+            },
+            "kernel_family": kernel_family,
+            "source_contracts": source_contracts,
+            "expected_launch_count": len(roster),
+            "expected_launch_roster": roster,
+        }
+    )
+    _reject_target_surface(model, "workload execution authority")
+    verify_workload_execution_authority_fixture_model(
+        model, schema_bytes=schema_bytes, schema_snapshot=schema_snapshot
+    )
+    return model
+
+
+def verify_workload_execution_authority_fixture_model(
+    model: dict[str, Any],
+    *,
+    schema_bytes: bytes,
+    schema_snapshot: RetainedPayloadSnapshot,
+) -> None:
+    verify_evaluator_model(
+        model,
+        expected_schema_version=WORKLOAD_EXECUTION_AUTHORITY_SCHEMA_VERSION,
+        expected_artifact_kind=WORKLOAD_EXECUTION_AUTHORITY_ARTIFACT_KIND,
+        expected_schema_sha256=WORKLOAD_EXECUTION_AUTHORITY_SCHEMA_SHA256,
+        expected_schema_id=WORKLOAD_EXECUTION_AUTHORITY_SCHEMA_ID,
+        schema_bytes=schema_bytes,
+        schema_snapshot=schema_snapshot,
+    )
+    require_exact_keys(model, _WORKLOAD_AUTHORITY_KEYS, "workload execution authority")
+    if model["contract_mode"] != V2_FIXTURE_CONTRACT_MODE:
+        raise ImmutableArtifactError("workload execution authority mode is invalid")
+    if model["external_admission"] != {
+        "status": "FIXTURE_ONLY_NON_AUTHORITATIVE",
+        "detached_admission_sha256": None,
+        "trust_anchor_id": None,
+        "trust_anchor_sha256": None,
+    }:
+        raise ImmutableArtifactError(
+            "fixture workload authority may not claim external admission"
+        )
+    issuance = model["issuance_claim"]
+    require_exact_keys(
+        issuance,
+        {
+            "phase",
+            "input_policy",
+            "execution_nonce",
+            "workload_id_rule",
+            "matched_execution_id_rule",
+        },
+        "workload execution issuance",
+    )
+    assert isinstance(issuance, dict)
+    if issuance != {
+        "phase": "BEFORE_LABEL_COLLECTION",
+        "input_policy": "TARGET_FREE_NO_LABEL_OR_PREDICTION_INPUTS",
+        "execution_nonce": issuance["execution_nonce"],
+        "workload_id_rule": _WORKLOAD_ID_RULE,
+        "matched_execution_id_rule": _MATCHED_EXECUTION_ID_RULE,
+    }:
+        raise ImmutableArtifactError("workload execution issuance policy is invalid")
+    _require_role(issuance["execution_nonce"])
+    require_sha256(model["executable_sha256"], "workload executable SHA-256")
+    argv = _text_sequence(model["argv"], "argv", require_nonempty=True)
+    shape = _text_sequence(model["shape"], "shape", require_nonempty=False)
+    architecture = _architecture_from_model(model["architecture"])
+    _require_role(model["kernel_family"])
+    source_contracts = _parse_source_contracts(model["source_contracts"])
+    raw_roster = model["expected_launch_roster"]
+    if type(raw_roster) is not list or not raw_roster:
+        raise ImmutableArtifactError("expected launch roster must be nonempty")
+    keys: list[CompleteLaunchKey] = []
+    for item in raw_roster:
+        require_exact_keys(item, {"launch_key", "kernel_family"}, "expected launch")
+        assert isinstance(item, dict)
+        if item["kernel_family"] != model["kernel_family"]:
+            raise ImmutableArtifactError("launch kernel family mismatch")
+        keys.append(CompleteLaunchKey.from_model(item["launch_key"]))
+    _require_complete_key_sequence(tuple(keys))
+    if model["expected_launch_count"] != len(keys):
+        raise ImmutableArtifactError("expected launch count mismatch")
+    if any(
+        key.workload_id != model["workload_id"]
+        or key.matched_execution_id != model["matched_execution_id"]
+        or key.binary_architecture != architecture[0]
+        for key in keys
+    ):
+        raise ImmutableArtifactError("expected roster cohort or architecture mismatch")
+    expected_launches = tuple(
+        ExpectedProductionLaunch(
+            process_launch_ordinal=key.process_launch_ordinal,
+            kernel_mangled_name=key.kernel_mangled_name,
+            grid=key.grid,
+            block=key.block,
+            device_id=key.device_id,
+            stream_id=key.stream_id,
+            binary_architecture=key.binary_architecture,
+        )
+        for key in keys
+    )
+    workload_core = _workload_core(
+        executable_sha256=model["executable_sha256"],
+        argv=argv,
+        shape=shape,
+        binary_architecture=architecture[0],
+        gpu_sku=architecture[1],
+        kernel_family=model["kernel_family"],
+        expected_launches=expected_launches,
+    )
+    expected_workload_id = (
+        "workload-v1-" f"{sha256_bytes(canonical_json_bytes(workload_core))}"
+    )
+    if model["workload_id"] != expected_workload_id:
+        raise ImmutableArtifactError("workload_id derivation mismatch")
+    parser_models = {
+        namespace.value.lower(): source_contracts[namespace]["parser_authority"]
+        for namespace in LaunchNamespace
+    }
+    execution_core = {
+        "workload_id": expected_workload_id,
+        "execution_nonce": issuance["execution_nonce"],
+        "parser_authorities": parser_models,
+    }
+    expected_execution_id = (
+        "matched-execution-v1-"
+        f"{sha256_bytes(canonical_json_bytes(execution_core))}"
+    )
+    if model["matched_execution_id"] != expected_execution_id:
+        raise ImmutableArtifactError("matched_execution_id derivation mismatch")
+    contexts: list[str] = []
+    authority_ids: list[str] = []
+    for namespace in LaunchNamespace:
+        contract = source_contracts[namespace]
+        expected_context = _execution_context_id(expected_execution_id, namespace)
+        if contract["execution_context_id"] != expected_context:
+            raise ImmutableArtifactError("source execution context derivation mismatch")
+        contexts.append(contract["execution_context_id"])
+        authority_ids.append(contract["parser_authority"]["authority_id"])
+    if len(set(contexts)) != len(contexts):
+        raise ImmutableArtifactError("source execution contexts alias")
+    if len(set(authority_ids)) != len(authority_ids):
+        raise ImmutableArtifactError("parser authority identities alias across namespaces")
+    _reject_target_surface(model, "workload execution authority")
+
+
+_WORKLOAD_AUTHORITY_KEYS = {
+    "schema_version",
+    "artifact_kind",
+    "schema_sha256",
+    "contract_mode",
+    "external_admission",
+    "issuance_claim",
+    "workload_id",
+    "matched_execution_id",
+    "executable_sha256",
+    "argv",
+    "shape",
+    "architecture",
+    "kernel_family",
+    "source_contracts",
+    "expected_launch_count",
+    "expected_launch_roster",
+    "model_seal_sha256",
+}
+
+
+def load_workload_execution_authority_fixture(
+    payload: bytes,
+    *,
+    schema_bytes: bytes,
+    schema_snapshot: RetainedPayloadSnapshot,
+) -> dict[str, Any]:
+    model = strict_json_object(payload, label="workload execution authority")
+    if canonical_json_bytes(model) != payload:
+        raise ImmutableArtifactError("workload execution authority is not canonical JSON")
+    verify_workload_execution_authority_fixture_model(
+        model, schema_bytes=schema_bytes, schema_snapshot=schema_snapshot
+    )
+    return model
+
+
+def require_current_m1_workload_execution_authority(authority_id: str) -> None:
+    _require_role(authority_id)
+    if authority_id not in CURRENT_M1_WORKLOAD_EXECUTION_AUTHORITIES:
+        raise authority_unavailable(
+            AuthorityBlockerCode.COHORT_AUTHORITY_UNAVAILABLE,
+            "current M1 evidence has no pre-label workload/execution authority",
+        )
+    raise ImmutableArtifactError("registered M1 authority loader is not implemented")
+
+
+def create_launch_source_payload_v2_fixture(
+    *,
+    namespace: LaunchNamespace,
+    workload_execution_authority: dict[str, Any],
+    observations: Sequence[ProductionLaunchObservation],
+    adapter_evidence: V2FixtureAdapterEvidence,
+    schema_bytes: bytes,
+    schema_snapshot: RetainedPayloadSnapshot,
+    authority_schema_bytes: bytes,
+    authority_schema_snapshot: RetainedPayloadSnapshot,
+) -> bytes:
+    """Build a fixture identity projection bound to exact retained inputs."""
+
+    verify_retained_schema(
+        schema_bytes,
+        schema_snapshot,
+        expected_sha256=CROSSWALK_V2_SCHEMA_SHA256,
+        expected_id=CROSSWALK_V2_SCHEMA_ID,
+    )
+    verify_workload_execution_authority_fixture_model(
+        workload_execution_authority,
+        schema_bytes=authority_schema_bytes,
+        schema_snapshot=authority_schema_snapshot,
+    )
+    if not isinstance(namespace, LaunchNamespace):
+        raise ImmutableArtifactError("fixture v2 source namespace is invalid")
+    if not isinstance(adapter_evidence, V2FixtureAdapterEvidence):
+        raise ImmutableArtifactError("fixture v2 adapter evidence is invalid")
+    underlying_evidence = adapter_evidence.underlying_evidence.to_model()
+    parser_implementation = adapter_evidence.parser_implementation.to_model()
+    material = tuple(observations)
+    _require_observations_against_authority(
+        material, namespace, workload_execution_authority
+    )
+    contract = workload_execution_authority["source_contracts"][
+        namespace.value.lower()
+    ]
+    if parser_implementation["payload_sha256"] != contract["parser_authority_sha256"]:
+        raise ImmutableArtifactError(
+            "retained parser implementation does not match predeclared parser identity"
+        )
+    if (
+        namespace is LaunchNamespace.CANONICAL
+        and adapter_evidence.underlying_evidence.payload
+        != canonical_json_bytes(workload_execution_authority)
+    ):
+        raise ImmutableArtifactError(
+            "canonical adapter evidence is not the exact fixture authority bytes"
+        )
+    model = seal_evaluator_model(
+        {
+            "schema_version": CROSSWALK_V2_SCHEMA_VERSION,
+            "artifact_kind": PRODUCTION_SOURCE_ARTIFACT_KIND,
+            "schema_sha256": CROSSWALK_V2_SCHEMA_SHA256,
+            "contract_mode": V2_FIXTURE_CONTRACT_MODE,
+            "namespace": namespace.value,
+            "workload_execution_authority_model_seal_sha256": (
+                workload_execution_authority["model_seal_sha256"]
+            ),
+            "parser_authority": {
+                "authority_id": contract["parser_authority_id"],
+                "authority_sha256": contract["parser_authority_sha256"],
+            },
+            "adapter_evidence": {
+                "underlying_evidence": underlying_evidence,
+                "parser_implementation": parser_implementation,
+            },
+            "execution_context_id": contract["execution_context_id"],
+            "executable_sha256": workload_execution_authority[
+                "executable_sha256"
+            ],
+            "architecture": workload_execution_authority["architecture"],
+            "kernel_family": workload_execution_authority["kernel_family"],
+            "record_count": len(material),
+            "records": [observation.to_model() for observation in material],
+        }
+    )
+    _reject_target_surface(model, "fixture v2 launch source")
+    return canonical_json_bytes(model)
+
+
+def create_launch_inventory_v2_fixture(
+    *,
+    source_input: V2FixtureSourceInput,
+    workload_execution_authority: dict[str, Any],
+    schema_bytes: bytes,
+    schema_snapshot: RetainedPayloadSnapshot,
+    authority_schema_bytes: bytes,
+    authority_schema_snapshot: RetainedPayloadSnapshot,
+) -> dict[str, Any]:
+    """Build a fixture inventory from every retained projection record."""
+
+    if not isinstance(source_input, V2FixtureSourceInput):
+        raise ImmutableArtifactError("fixture v2 source input is invalid")
+    source_model, namespace, observations = _load_launch_source_v2_fixture(
+        source_input=source_input,
+        workload_execution_authority=workload_execution_authority,
+        schema_bytes=schema_bytes,
+        schema_snapshot=schema_snapshot,
+        authority_schema_bytes=authority_schema_bytes,
+        authority_schema_snapshot=authority_schema_snapshot,
+    )
+    inventory = seal_evaluator_model(
+        {
+            "schema_version": CROSSWALK_V2_SCHEMA_VERSION,
+            "artifact_kind": PRODUCTION_INVENTORY_ARTIFACT_KIND,
+            "schema_sha256": CROSSWALK_V2_SCHEMA_SHA256,
+            "contract_mode": V2_FIXTURE_CONTRACT_MODE,
+            "namespace": namespace.value,
+            "workload_execution_authority_model_seal_sha256": (
+                workload_execution_authority["model_seal_sha256"]
+            ),
+            "source": {
+                "payload_sha256": source_input.source_projection.snapshot.payload_sha256,
+                "payload_snapshot": source_input.source_projection.snapshot.to_model(),
+                "source_model_seal_sha256": source_model["model_seal_sha256"],
+                "adapter_evidence": source_model["adapter_evidence"],
+                "parser_authority": source_model["parser_authority"],
+                "execution_context_id": source_model["execution_context_id"],
+            },
+            "executable_sha256": source_model["executable_sha256"],
+            "architecture": source_model["architecture"],
+            "kernel_family": source_model["kernel_family"],
+            "launch_count": len(observations),
+            "launch_key_sha256s": [item.launch_key.sha256 for item in observations],
+            "records": [item.to_model() for item in observations],
+        }
+    )
+    _reject_target_surface(inventory, "production launch inventory")
+    return inventory
+
+
+def verify_launch_inventory_v2_fixture_model(
+    model: dict[str, Any],
+    *,
+    source_input: V2FixtureSourceInput,
+    workload_execution_authority: dict[str, Any],
+    schema_bytes: bytes,
+    schema_snapshot: RetainedPayloadSnapshot,
+    authority_schema_bytes: bytes,
+    authority_schema_snapshot: RetainedPayloadSnapshot,
+) -> None:
+    verify_evaluator_model(
+        model,
+        expected_schema_version=CROSSWALK_V2_SCHEMA_VERSION,
+        expected_artifact_kind=PRODUCTION_INVENTORY_ARTIFACT_KIND,
+        expected_schema_sha256=CROSSWALK_V2_SCHEMA_SHA256,
+        expected_schema_id=CROSSWALK_V2_SCHEMA_ID,
+        schema_bytes=schema_bytes,
+        schema_snapshot=schema_snapshot,
+    )
+    require_exact_keys(model, _V2_INVENTORY_KEYS, "production inventory")
+    expected = create_launch_inventory_v2_fixture(
+        source_input=source_input,
+        workload_execution_authority=workload_execution_authority,
+        schema_bytes=schema_bytes,
+        schema_snapshot=schema_snapshot,
+        authority_schema_bytes=authority_schema_bytes,
+        authority_schema_snapshot=authority_schema_snapshot,
+    )
+    if canonical_json_bytes(model) != canonical_json_bytes(expected):
+        raise ImmutableArtifactError(
+            "production inventory does not match retained complete source"
+        )
+
+
+_V2_INVENTORY_KEYS = {
+    "schema_version",
+    "artifact_kind",
+    "schema_sha256",
+    "contract_mode",
+    "namespace",
+    "workload_execution_authority_model_seal_sha256",
+    "source",
+    "executable_sha256",
+    "architecture",
+    "kernel_family",
+    "launch_count",
+    "launch_key_sha256s",
+    "records",
+    "model_seal_sha256",
+}
+
+
+def evaluate_launch_crosswalk_v2_fixture(
+    *,
+    workload_execution_authority: dict[str, Any],
+    inventories: Mapping[LaunchNamespace, dict[str, Any]],
+    inventory_sources: Mapping[LaunchNamespace, V2FixtureSourceInput],
+    schema_bytes: bytes,
+    schema_snapshot: RetainedPayloadSnapshot,
+    authority_schema_bytes: bytes,
+    authority_schema_snapshot: RetainedPayloadSnapshot,
+) -> dict[str, Any]:
+    """Check fixture-only four-way bijection without admitting production."""
+
+    verify_retained_schema(
+        schema_bytes,
+        schema_snapshot,
+        expected_sha256=CROSSWALK_V2_SCHEMA_SHA256,
+        expected_id=CROSSWALK_V2_SCHEMA_ID,
+    )
+    verify_workload_execution_authority_fixture_model(
+        workload_execution_authority,
+        schema_bytes=authority_schema_bytes,
+        schema_snapshot=authority_schema_snapshot,
+    )
+    normalized_inventories = _require_namespace_mapping(inventories, "inventories")
+    normalized_sources = _require_namespace_mapping(
+        inventory_sources, "inventory_sources"
+    )
+    for namespace in LaunchNamespace:
+        source = normalized_sources[namespace]
+        if not isinstance(source, V2FixtureSourceInput):
+            raise ImmutableArtifactError("fixture inventory source input is invalid")
+        verify_launch_inventory_v2_fixture_model(
+            normalized_inventories[namespace],
+            source_input=source,
+            workload_execution_authority=workload_execution_authority,
+            schema_bytes=schema_bytes,
+            schema_snapshot=schema_snapshot,
+            authority_schema_bytes=authority_schema_bytes,
+            authority_schema_snapshot=authority_schema_snapshot,
+        )
+        if normalized_inventories[namespace]["namespace"] != namespace.value:
+            raise ImmutableArtifactError("inventory is installed under wrong namespace")
+    _require_nonaliased_inventory_contexts(normalized_inventories)
+    expected_roster = workload_execution_authority["expected_launch_roster"]
+    expected_key_models = [item["launch_key"] for item in expected_roster]
+    for namespace in LaunchNamespace:
+        inventory = normalized_inventories[namespace]
+        observed = [item["launch_key"] for item in inventory["records"]]
+        if observed != expected_key_models:
+            raise ImmutableArtifactError(
+                f"{namespace.value} inventory is missing, duplicated, or reordered"
+            )
+        if inventory["launch_count"] != len(expected_key_models):
+            raise ImmutableArtifactError(f"{namespace.value} launch count mismatch")
+        if (
+            inventory["executable_sha256"]
+            != workload_execution_authority["executable_sha256"]
+            or inventory["architecture"]
+            != workload_execution_authority["architecture"]
+        ):
+            raise ImmutableArtifactError(
+                f"{namespace.value} binary or architecture mismatch"
+            )
+    rows: list[dict[str, Any]] = []
+    for index, expected in enumerate(expected_roster):
+        key = CompleteLaunchKey.from_model(expected["launch_key"])
+        rows.append(
+            {
+                "launch_key": key.to_model(),
+                "launch_key_sha256": key.sha256,
+                "kernel_family": expected["kernel_family"],
+                "members": {
+                    namespace.value.lower(): {
+                        "inventory_model_seal_sha256": normalized_inventories[
+                            namespace
+                        ]["model_seal_sha256"],
+                        "record_sha256": normalized_inventories[namespace]["records"][
+                            index
+                        ]["record_sha256"],
+                    }
+                    for namespace in LaunchNamespace
+                },
+            }
+        )
+    crosswalk = seal_evaluator_model(
+        {
+            "schema_version": CROSSWALK_V2_SCHEMA_VERSION,
+            "artifact_kind": CROSSWALK_V2_ARTIFACT_KIND,
+            "schema_sha256": CROSSWALK_V2_SCHEMA_SHA256,
+            "contract_mode": V2_FIXTURE_CONTRACT_MODE,
+            "workload_execution_authority_model_seal_sha256": (
+                workload_execution_authority["model_seal_sha256"]
+            ),
+            "workload_id": workload_execution_authority["workload_id"],
+            "matched_execution_id": workload_execution_authority[
+                "matched_execution_id"
+            ],
+            "executable_sha256": workload_execution_authority[
+                "executable_sha256"
+            ],
+            "architecture": workload_execution_authority["architecture"],
+            "kernel_family": workload_execution_authority["kernel_family"],
+            "launch_count": len(rows),
+            "inventories": {
+                namespace.value.lower(): normalized_inventories[namespace]
+                for namespace in LaunchNamespace
+            },
+            "bijection": rows,
+            "bijection_sha256": sha256_bytes(canonical_json_bytes(rows)),
+            "outcome": ContractOutcome(
+                OutcomeStatus.UNAVAILABLE, (V2_FIXTURE_CROSSWALK_REASON,)
+            ).to_model(),
+        }
+    )
+    _reject_target_surface(crosswalk, "fixture v2 launch crosswalk")
+    return crosswalk
+
+
+def verify_launch_crosswalk_v2_fixture_model(
+    model: dict[str, Any],
+    *,
+    workload_execution_authority: dict[str, Any],
+    inventories: Mapping[LaunchNamespace, dict[str, Any]],
+    inventory_sources: Mapping[LaunchNamespace, V2FixtureSourceInput],
+    schema_bytes: bytes,
+    schema_snapshot: RetainedPayloadSnapshot,
+    authority_schema_bytes: bytes,
+    authority_schema_snapshot: RetainedPayloadSnapshot,
+) -> None:
+    verify_evaluator_model(
+        model,
+        expected_schema_version=CROSSWALK_V2_SCHEMA_VERSION,
+        expected_artifact_kind=CROSSWALK_V2_ARTIFACT_KIND,
+        expected_schema_sha256=CROSSWALK_V2_SCHEMA_SHA256,
+        expected_schema_id=CROSSWALK_V2_SCHEMA_ID,
+        schema_bytes=schema_bytes,
+        schema_snapshot=schema_snapshot,
+    )
+    require_exact_keys(model, _V2_CROSSWALK_KEYS, "fixture v2 crosswalk")
+    outcome = outcome_from_model(
+        model["outcome"],
+        rejected_reasons=frozenset(),
+        unavailable_reasons=frozenset({V2_FIXTURE_CROSSWALK_REASON}),
+    )
+    expected_outcome = ContractOutcome(
+        OutcomeStatus.UNAVAILABLE, (V2_FIXTURE_CROSSWALK_REASON,)
+    )
+    if outcome != expected_outcome:
+        raise ImmutableArtifactError("fixture v2 crosswalk claimed production admission")
+    expected = evaluate_launch_crosswalk_v2_fixture(
+        workload_execution_authority=workload_execution_authority,
+        inventories=inventories,
+        inventory_sources=inventory_sources,
+        schema_bytes=schema_bytes,
+        schema_snapshot=schema_snapshot,
+        authority_schema_bytes=authority_schema_bytes,
+        authority_schema_snapshot=authority_schema_snapshot,
+    )
+    if canonical_json_bytes(model) != canonical_json_bytes(expected):
+        raise ImmutableArtifactError(
+            "fixture v2 crosswalk does not match retained inventories"
+        )
+
+
+_V2_CROSSWALK_KEYS = {
+    "schema_version",
+    "artifact_kind",
+    "schema_sha256",
+    "contract_mode",
+    "workload_execution_authority_model_seal_sha256",
+    "workload_id",
+    "matched_execution_id",
+    "executable_sha256",
+    "architecture",
+    "kernel_family",
+    "launch_count",
+    "inventories",
+    "bijection",
+    "bijection_sha256",
+    "outcome",
+    "model_seal_sha256",
+}
+
+
+def load_launch_crosswalk_v2_fixture(
+    payload: bytes,
+    **verification_inputs: Any,
+) -> dict[str, Any]:
+    model = strict_json_object(payload, label="fixture v2 launch crosswalk")
+    if canonical_json_bytes(model) != payload:
+        raise ImmutableArtifactError("fixture v2 launch crosswalk is not canonical JSON")
+    verify_launch_crosswalk_v2_fixture_model(model, **verification_inputs)
+    return model
+
+
+# Public production-v2 APIs remain fail-closed until independent registries bind
+# a detached pre-label admission, its trust anchor, and retained namespace
+# adapter implementations. They deliberately refuse before inspecting payloads.
+def create_workload_execution_authority(**_inputs: Any) -> dict[str, Any]:
+    _require_production_v2_authorities()
+    raise ImmutableArtifactError("production v2 authority constructor is unavailable")
+
+
+def verify_workload_execution_authority_model(
+    _model: dict[str, Any], **_inputs: Any
+) -> None:
+    _require_production_v2_authorities()
+    raise ImmutableArtifactError("production v2 authority verifier is unavailable")
+
+
+def load_workload_execution_authority(
+    _payload: bytes, **_inputs: Any
+) -> dict[str, Any]:
+    _require_production_v2_authorities()
+    raise ImmutableArtifactError("production v2 authority loader is unavailable")
+
+
+def create_production_launch_source_payload(**_inputs: Any) -> bytes:
+    _require_production_v2_authorities()
+    raise ImmutableArtifactError("production v2 source constructor is unavailable")
+
+
+def create_production_launch_inventory(**_inputs: Any) -> dict[str, Any]:
+    _require_production_v2_authorities()
+    raise ImmutableArtifactError("production v2 inventory constructor is unavailable")
+
+
+def verify_production_launch_inventory_model(
+    _model: dict[str, Any], **_inputs: Any
+) -> None:
+    _require_production_v2_authorities()
+    raise ImmutableArtifactError("production v2 inventory verifier is unavailable")
+
+
+def evaluate_production_launch_crosswalk(**_inputs: Any) -> dict[str, Any]:
+    _require_production_v2_authorities()
+    raise ImmutableArtifactError("production v2 crosswalk evaluator is unavailable")
+
+
+def verify_production_launch_crosswalk_model(
+    _model: dict[str, Any], **_inputs: Any
+) -> None:
+    _require_production_v2_authorities()
+    raise ImmutableArtifactError("production v2 crosswalk verifier is unavailable")
+
+
+def load_production_launch_crosswalk(
+    _payload: bytes, **_inputs: Any
+) -> dict[str, Any]:
+    _require_production_v2_authorities()
+    raise ImmutableArtifactError("production v2 crosswalk loader is unavailable")
+
+
+evaluate_launch_crosswalk_v2 = evaluate_production_launch_crosswalk
+verify_launch_crosswalk_v2_model = verify_production_launch_crosswalk_model
+load_launch_crosswalk_v2 = load_production_launch_crosswalk
+
+
+def _load_launch_source_v2_fixture(
+    *,
+    source_input: V2FixtureSourceInput,
+    workload_execution_authority: dict[str, Any],
+    schema_bytes: bytes,
+    schema_snapshot: RetainedPayloadSnapshot,
+    authority_schema_bytes: bytes,
+    authority_schema_snapshot: RetainedPayloadSnapshot,
+) -> tuple[dict[str, Any], LaunchNamespace, tuple[ProductionLaunchObservation, ...]]:
+    verify_retained_schema(
+        schema_bytes,
+        schema_snapshot,
+        expected_sha256=CROSSWALK_V2_SCHEMA_SHA256,
+        expected_id=CROSSWALK_V2_SCHEMA_ID,
+    )
+    verify_workload_execution_authority_fixture_model(
+        workload_execution_authority,
+        schema_bytes=authority_schema_bytes,
+        schema_snapshot=authority_schema_snapshot,
+    )
+    if not isinstance(source_input, V2FixtureSourceInput):
+        raise ImmutableArtifactError("fixture source input is invalid")
+    source_payload = source_input.source_projection.payload
+    source_snapshot = source_input.source_projection.snapshot
+    source_model = strict_json_object(source_payload, label="fixture v2 launch source")
+    if canonical_json_bytes(source_model) != source_payload:
+        raise ImmutableArtifactError("fixture v2 launch source is not canonical JSON")
+    verify_evaluator_model(
+        source_model,
+        expected_schema_version=CROSSWALK_V2_SCHEMA_VERSION,
+        expected_artifact_kind=PRODUCTION_SOURCE_ARTIFACT_KIND,
+        expected_schema_sha256=CROSSWALK_V2_SCHEMA_SHA256,
+        expected_schema_id=CROSSWALK_V2_SCHEMA_ID,
+        schema_bytes=schema_bytes,
+        schema_snapshot=schema_snapshot,
+    )
+    require_exact_keys(source_model, _V2_SOURCE_KEYS, "fixture v2 source")
+    if source_model["contract_mode"] != V2_FIXTURE_CONTRACT_MODE:
+        raise ImmutableArtifactError("fixture v2 source mode is invalid")
+    try:
+        namespace = LaunchNamespace(source_model["namespace"])
+    except (TypeError, ValueError) as exc:
+        raise ImmutableArtifactError("fixture v2 source namespace is invalid") from exc
+    contract = workload_execution_authority["source_contracts"][
+        namespace.value.lower()
+    ]
+    expected_parser = {
+        "authority_id": contract["parser_authority_id"],
+        "authority_sha256": contract["parser_authority_sha256"],
+    }
+    if source_model["parser_authority"] != expected_parser:
+        raise ImmutableArtifactError("fixture v2 source parser authority mismatch")
+    if (
+        source_model["workload_execution_authority_model_seal_sha256"]
+        != workload_execution_authority["model_seal_sha256"]
+        or source_model["execution_context_id"]
+        != contract["execution_context_id"]
+        or source_model["executable_sha256"]
+        != workload_execution_authority["executable_sha256"]
+        or source_model["architecture"]
+        != workload_execution_authority["architecture"]
+        or source_model["kernel_family"]
+        != workload_execution_authority["kernel_family"]
+    ):
+        raise ImmutableArtifactError("fixture v2 source authority context mismatch")
+    adapter_model = source_input.adapter_evidence.to_model()
+    if source_model["adapter_evidence"] != adapter_model:
+        raise ImmutableArtifactError("fixture adapter evidence binding mismatch")
+    if (
+        adapter_model["parser_implementation"]["payload_sha256"]
+        != contract["parser_authority_sha256"]
+    ):
+        raise ImmutableArtifactError("fixture parser implementation identity mismatch")
+    if (
+        namespace is LaunchNamespace.CANONICAL
+        and source_input.adapter_evidence.underlying_evidence.payload
+        != canonical_json_bytes(workload_execution_authority)
+    ):
+        raise ImmutableArtifactError("canonical fixture evidence bytes mismatch")
+    raw_records = source_model["records"]
+    if type(raw_records) is not list:
+        raise ImmutableArtifactError("fixture v2 source records must be an array")
+    observations = tuple(
+        ProductionLaunchObservation.from_model(item) for item in raw_records
+    )
+    if source_model["record_count"] != len(observations):
+        raise ImmutableArtifactError("fixture v2 source record count mismatch")
+    _require_observations_against_authority(
+        observations, namespace, workload_execution_authority
+    )
+    _reject_target_surface(source_model, "fixture v2 launch source")
+    return source_model, namespace, observations
+
+
+_V2_SOURCE_KEYS = {
+    "schema_version",
+    "artifact_kind",
+    "schema_sha256",
+    "contract_mode",
+    "namespace",
+    "workload_execution_authority_model_seal_sha256",
+    "parser_authority",
+    "adapter_evidence",
+    "execution_context_id",
+    "executable_sha256",
+    "architecture",
+    "kernel_family",
+    "record_count",
+    "records",
+    "model_seal_sha256",
+}
+
+
+def _require_production_v2_authorities() -> None:
+    if (
+        not CURRENT_M1_WORKLOAD_EXECUTION_AUTHORITIES
+        or not PRODUCTION_WORKLOAD_EXECUTION_ADMISSION_AUTHORITIES
+        or not PRODUCTION_PRELABEL_TRUST_ANCHORS
+    ):
+        raise authority_unavailable(
+            AuthorityBlockerCode.COHORT_AUTHORITY_UNAVAILABLE,
+            "production v2 requires a detached externally anchored pre-label "
+            "workload/execution admission; none is installed for current M1",
+        )
+    if not PRODUCTION_NAMESPACE_ADAPTER_AUTHORITIES:
+        raise authority_unavailable(
+            AuthorityBlockerCode.LAUNCH_PARSER_AUTHORITY_UNAVAILABLE,
+            "production v2 namespace adapter authorities are not installed",
+        )
+
+
+def _require_expected_launches(
+    launches: Sequence[ExpectedProductionLaunch], *, binary_architecture: str
+) -> tuple[ExpectedProductionLaunch, ...]:
+    if type(launches) not in {list, tuple} or not launches:
+        raise ImmutableArtifactError("expected launch roster must be a nonempty sequence")
+    material = tuple(launches)
+    if any(not isinstance(item, ExpectedProductionLaunch) for item in material):
+        raise ImmutableArtifactError("expected launch roster contains an invalid row")
+    expected_ordinals = tuple(range(len(material)))
+    observed_ordinals = tuple(item.process_launch_ordinal for item in material)
+    if observed_ordinals != expected_ordinals:
+        raise ImmutableArtifactError(
+            "expected launch roster is missing, duplicated, or reordered"
+        )
+    if any(item.binary_architecture != binary_architecture for item in material):
+        raise ImmutableArtifactError("expected launch architecture mismatch")
+    return material
+
+
+def _require_parser_authorities(
+    values: Mapping[LaunchNamespace, ProductionParserAuthority],
+) -> dict[LaunchNamespace, ProductionParserAuthority]:
+    normalized = _require_namespace_mapping(values, "parser_authorities")
+    result: dict[LaunchNamespace, ProductionParserAuthority] = {}
+    for namespace in LaunchNamespace:
+        authority = normalized[namespace]
+        if (
+            not isinstance(authority, ProductionParserAuthority)
+            or authority.namespace is not namespace
+        ):
+            raise ImmutableArtifactError("parser authority is installed under wrong namespace")
+        result[namespace] = authority
+    ids = [item.authority_id for item in result.values()]
+    if len(ids) != len(set(ids)):
+        raise ImmutableArtifactError("parser authority identities alias across namespaces")
+    return result
+
+
+def _workload_core(
+    *,
+    executable_sha256: str,
+    argv: tuple[str, ...],
+    shape: tuple[str, ...],
+    binary_architecture: str,
+    gpu_sku: str,
+    kernel_family: str,
+    expected_launches: tuple[ExpectedProductionLaunch, ...],
+) -> dict[str, Any]:
+    return {
+        "executable_sha256": executable_sha256,
+        "argv": list(argv),
+        "shape": list(shape),
+        "architecture": {
+            "binary_architecture": binary_architecture,
+            "gpu_sku": gpu_sku,
+        },
+        "kernel_family": kernel_family,
+        "expected_launch_roster": [item.to_identity_model() for item in expected_launches],
+    }
+
+
+def _complete_key_from_expected(
+    launch: ExpectedProductionLaunch,
+    *,
+    workload_id: str,
+    matched_execution_id: str,
+) -> CompleteLaunchKey:
+    return CompleteLaunchKey(
+        workload_id=workload_id,
+        matched_execution_id=matched_execution_id,
+        process_launch_ordinal=launch.process_launch_ordinal,
+        kernel_mangled_name=launch.kernel_mangled_name,
+        grid=launch.grid,
+        block=launch.block,
+        device_id=launch.device_id,
+        stream_id=launch.stream_id,
+        binary_architecture=launch.binary_architecture,
+    )
+
+
+def _execution_context_id(
+    matched_execution_id: str, namespace: LaunchNamespace
+) -> str:
+    digest = sha256_bytes(
+        canonical_json_bytes(
+            {
+                "matched_execution_id": matched_execution_id,
+                "namespace": namespace.value,
+                "context_rule": "DISTINCT_NAMESPACE_EXECUTION_CONTEXT_V1",
+            }
+        )
+    )
+    return f"{namespace.value.lower()}-context-v1-{digest}"
+
+
+def _parse_source_contracts(
+    value: object,
+) -> dict[LaunchNamespace, dict[str, Any]]:
+    require_exact_keys(
+        value,
+        {namespace.value.lower() for namespace in LaunchNamespace},
+        "source contracts",
+    )
+    assert isinstance(value, dict)
+    result: dict[LaunchNamespace, dict[str, Any]] = {}
+    for namespace in LaunchNamespace:
+        contract = value[namespace.value.lower()]
+        require_exact_keys(
+            contract,
+            {
+                "namespace",
+                "parser_authority_id",
+                "parser_authority_sha256",
+                "execution_context_id",
+                "ordinal_binding_policy",
+            },
+            "source contract",
+        )
+        assert isinstance(contract, dict)
+        if (
+            contract["namespace"] != namespace.value
+            or contract["ordinal_binding_policy"] != EXPLICIT_ORDINAL_BINDING
+        ):
+            raise ImmutableArtifactError("source contract namespace or policy mismatch")
+        _require_role(contract["parser_authority_id"])
+        require_sha256(contract["parser_authority_sha256"], "parser authority SHA-256")
+        _require_context_id(contract["execution_context_id"])
+        result[namespace] = {
+            **contract,
+            "parser_authority": {
+                "authority_id": contract["parser_authority_id"],
+                "authority_sha256": contract["parser_authority_sha256"],
+            },
+        }
+    return result
+
+
+def _require_observations_against_authority(
+    observations: tuple[ProductionLaunchObservation, ...],
+    namespace: LaunchNamespace,
+    authority: dict[str, Any],
+) -> None:
+    if not observations:
+        raise ImmutableArtifactError("fixture v2 source inventory must be nonempty")
+    expected = authority["expected_launch_roster"]
+    if len(observations) != len(expected):
+        raise ImmutableArtifactError("fixture v2 source launch cardinality mismatch")
+    context = authority["source_contracts"][namespace.value.lower()][
+        "execution_context_id"
+    ]
+    expected_keys = [row["launch_key"] for row in expected]
+    observed_keys = [item.launch_key.to_model() for item in observations]
+    if observed_keys != expected_keys:
+        raise ImmutableArtifactError(
+            "fixture v2 source is missing, duplicated, or reordered"
+        )
+    native_ids: list[tuple[str, str]] = []
+    native_indices: list[tuple[str, int]] = []
+    for item, expected_row in zip(observations, expected, strict=True):
+        if item.native_context_id != context:
+            raise ImmutableArtifactError("source record execution context mismatch")
+        if item.kernel_family != expected_row["kernel_family"]:
+            raise ImmutableArtifactError("source record kernel family mismatch")
+        if item.authority_model_seal_sha256 != authority["model_seal_sha256"]:
+            raise ImmutableArtifactError("source ordinal binding authority mismatch")
+        native_ids.append((item.native_context_id, item.native_launch_id))
+        if item.native_launch_index is not None:
+            native_indices.append((item.native_context_id, item.native_launch_index))
+    if len(native_ids) != len(set(native_ids)):
+        raise ImmutableArtifactError("duplicate or context-aliased native launch identity")
+    if len(native_indices) != len(set(native_indices)):
+        raise ImmutableArtifactError("duplicate native launch index is ambiguous")
+
+
+def _require_nonaliased_inventory_contexts(
+    inventories: Mapping[LaunchNamespace, dict[str, Any]],
+) -> None:
+    payloads = [inventories[item]["source"]["payload_sha256"] for item in LaunchNamespace]
+    snapshots = [
+        inventories[item]["source"]["payload_snapshot"]["snapshot_identity_sha256"]
+        for item in LaunchNamespace
+    ]
+    evidence_payloads = [
+        inventories[item]["source"]["adapter_evidence"]["underlying_evidence"][
+            "payload_sha256"
+        ]
+        for item in LaunchNamespace
+    ]
+    evidence_snapshots = [
+        inventories[item]["source"]["adapter_evidence"]["underlying_evidence"][
+            "payload_snapshot"
+        ]["snapshot_identity_sha256"]
+        for item in LaunchNamespace
+    ]
+    contexts = [
+        inventories[item]["source"]["execution_context_id"]
+        for item in LaunchNamespace
+    ]
+    for values, label in (
+        (payloads, "source payloads"),
+        (snapshots, "source snapshots"),
+        (evidence_payloads, "underlying evidence payloads"),
+        (evidence_snapshots, "underlying evidence snapshots"),
+        (contexts, "execution contexts"),
+    ):
+        if len(values) != len(set(values)):
+            raise ImmutableArtifactError(f"cross-namespace {label} alias")
+
+
+def _observation_binding_from_values(values: Mapping[str, Any]) -> str:
+    launch_key = values["launch_key"]
+    assert isinstance(launch_key, CompleteLaunchKey)
+    preimage = {
+        "binding_kind": EXPLICIT_ORDINAL_BINDING,
+        "authority_model_seal_sha256": values["authority_model_seal_sha256"],
+        "process_launch_ordinal": launch_key.process_launch_ordinal,
+        "native_launch_index_role": values["native_launch_index_role"],
+        "native_identity": {
+            "execution_context_id": values["native_context_id"],
+            "native_launch_id": values["native_launch_id"],
+            "native_stream_id": values["native_stream_id"],
+            "native_launch_index": values["native_launch_index"],
+        },
+    }
+    return sha256_bytes(canonical_json_bytes(preimage))
+
+
+def _observation_binding_sha256(value: ProductionLaunchObservation) -> str:
+    return _observation_binding_from_values(
+        {
+            "launch_key": value.launch_key,
+            "native_context_id": value.native_context_id,
+            "native_launch_id": value.native_launch_id,
+            "native_stream_id": value.native_stream_id,
+            "native_launch_index": value.native_launch_index,
+            "native_launch_index_role": value.native_launch_index_role,
+            "authority_model_seal_sha256": value.authority_model_seal_sha256,
+        }
+    )
+
+
+def _observation_record_from_values(
+    values: Mapping[str, Any], binding_sha256: str
+) -> str:
+    launch_key = values["launch_key"]
+    assert isinstance(launch_key, CompleteLaunchKey)
+    preimage = {
+        "launch_key": launch_key.to_model(),
+        "kernel_family": values["kernel_family"],
+        "native_identity": {
+            "execution_context_id": values["native_context_id"],
+            "native_launch_id": values["native_launch_id"],
+            "native_stream_id": values["native_stream_id"],
+            "native_launch_index": values["native_launch_index"],
+        },
+        "process_ordinal_binding": {
+            "binding_kind": EXPLICIT_ORDINAL_BINDING,
+            "authority_model_seal_sha256": values["authority_model_seal_sha256"],
+            "process_launch_ordinal": launch_key.process_launch_ordinal,
+            "native_launch_index_role": values["native_launch_index_role"],
+            "binding_sha256": binding_sha256,
+        },
+    }
+    return sha256_bytes(canonical_json_bytes(preimage))
+
+
+def _observation_record_sha256(value: ProductionLaunchObservation) -> str:
+    return _observation_record_from_values(
+        {
+            "launch_key": value.launch_key,
+            "kernel_family": value.kernel_family,
+            "native_context_id": value.native_context_id,
+            "native_launch_id": value.native_launch_id,
+            "native_stream_id": value.native_stream_id,
+            "native_launch_index": value.native_launch_index,
+            "native_launch_index_role": value.native_launch_index_role,
+            "authority_model_seal_sha256": value.authority_model_seal_sha256,
+        },
+        value.binding_sha256,
+    )
+
+
+def _require_complete_key_sequence(keys: tuple[CompleteLaunchKey, ...]) -> None:
+    ordinals = tuple(key.process_launch_ordinal for key in keys)
+    if ordinals != tuple(range(len(keys))):
+        raise ImmutableArtifactError("complete launch keys are missing, duplicated, or reordered")
+    models = [canonical_json_bytes(key.to_model()) for key in keys]
+    if len(models) != len(set(models)):
+        raise ImmutableArtifactError("duplicate complete launch key")
+
+
+def _require_namespace_mapping(value: object, label: str) -> dict[LaunchNamespace, Any]:
+    if not isinstance(value, Mapping) or set(value) != set(LaunchNamespace):
+        raise ImmutableArtifactError(f"{label} must contain exactly four namespace keys")
+    return {namespace: value[namespace] for namespace in LaunchNamespace}
+
+
+def _architecture_from_model(value: object) -> tuple[str, str]:
+    require_exact_keys(value, {"binary_architecture", "gpu_sku"}, "architecture")
+    assert isinstance(value, dict)
+    _require_role(value["binary_architecture"])
+    _require_role(value["gpu_sku"])
+    return value["binary_architecture"], value["gpu_sku"]
+
+
+def _dim3_model(value: tuple[int, int, int]) -> dict[str, int]:
+    _require_uint32_dimension(value, "dim3")
+    return {"x": value[0], "y": value[1], "z": value[2]}
+
+
+def _dim3_from_model(value: object, label: str) -> tuple[int, int, int]:
+    require_exact_keys(value, {"x", "y", "z"}, label)
+    assert isinstance(value, dict)
+    result = (value["x"], value["y"], value["z"])
+    _require_uint32_dimension(result, label)
+    return result
+
+
+def _require_uint32_dimension(value: object, label: str) -> None:
+    if type(value) is not tuple or len(value) != 3:
+        raise ImmutableArtifactError(f"{label} must be an exact three-integer tuple")
+    if any(
+        type(component) is not int or not 1 <= component <= (1 << 32) - 1
+        for component in value
+    ):
+        raise ImmutableArtifactError(
+            f"{label} components must be positive uint32 integers"
+        )
+
+
+def _require_uint32(value: object, label: str) -> int:
+    if type(value) is not int or not 0 <= value <= (1 << 32) - 1:
+        raise ImmutableArtifactError(f"{label} must be a uint32")
+    return value
+
+
+def _require_ordinal_value(value: object, label: str) -> int:
+    if type(value) is not int or not 0 <= value <= _MAX_SAFE_INTEGER:
+        raise ImmutableArtifactError(f"{label} must be a nonnegative safe integer")
+    return value
+
+
+def _require_context_id(value: object) -> str:
+    require_nfc(value, "execution_context_id")
+    if type(value) is not str or _CONTEXT_ID.fullmatch(value) is None:
+        raise ImmutableArtifactError("execution_context_id is invalid")
+    return value
+
+
+def _require_text(value: object, label: str) -> str:
+    require_nfc(value, label)
+    assert isinstance(value, str)
+    if len(value.encode("utf-8")) > 131071:
+        raise ImmutableArtifactError(f"{label} exceeds the encoded size bound")
+    return value
+
+
+def _text_sequence(
+    value: object, label: str, *, require_nonempty: bool
+) -> tuple[str, ...]:
+    if type(value) not in {list, tuple}:
+        raise ImmutableArtifactError(f"{label} must be an ordered list or tuple")
+    material = tuple(value)
+    if require_nonempty and not material:
+        raise ImmutableArtifactError(f"{label} must be nonempty")
+    if len(material) > 4096:
+        raise ImmutableArtifactError(f"{label} exceeds the cardinality bound")
+    for index, item in enumerate(material):
+        _require_text(item, f"{label}[{index}]")
+    return material  # type: ignore[return-value]
+
+
+def _reject_target_surface(value: object, label: str) -> None:
+    if isinstance(value, dict):
+        for key, child in value.items():
+            if type(key) is not str:
+                raise ImmutableArtifactError(f"{label} contains a non-string field")
+            if key.lower() in _FORBIDDEN_TARGET_FIELDS:
+                raise ImmutableArtifactError(f"{label} contains forbidden target field {key}")
+            _reject_target_surface(child, label)
+    elif isinstance(value, list):
+        for child in value:
+            _reject_target_surface(child, label)
