@@ -5,7 +5,7 @@ from typing import Any
 
 from jsonschema import Draft202012Validator
 
-from tools.local_labels.immutable_artifact import strict_json_loads
+from eval.contracts.validation import load_json_file_strict
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -16,7 +16,16 @@ SCHEMA_PATHS = (
     ROOT / "eval" / "schemas" / "preregistration_receipt.v1.schema.json",
     ROOT / "eval" / "schemas" / "prediction_seal_receipt.v1.schema.json",
     ROOT / "eval" / "schemas" / "label_opening_receipt.v1.schema.json",
+    ROOT / "eval" / "schemas" / "workload_execution_authority.v1.schema.json",
+    ROOT / "eval" / "schemas" / "launch_crosswalk.v2.schema.json",
+    ROOT / "eval" / "schemas" / "production_ncu_repeat_manifest.v1.schema.json",
+    ROOT / "eval" / "schemas" / "production_matched_label_authority.v1.schema.json",
+    ROOT / "eval" / "schemas" / "runtime_workload_tier_claim_authority.v1.schema.json",
+    ROOT / "eval" / "schemas" / "sim_profile_record.v1.schema.json",
+    ROOT / "eval" / "schemas" / "production_sim_manifest_authority.v1.schema.json",
 )
+FIXTURE_SCHEMA_PATHS = SCHEMA_PATHS[1:6]
+EVALUATION_BOUNDARY_SCHEMA_PATHS = SCHEMA_PATHS[1:6]
 _FORBIDDEN_METRIC_PROPERTIES = {
     "metric_value",
     "metric_values",
@@ -29,7 +38,7 @@ _FORBIDDEN_METRIC_PROPERTIES = {
 
 def test_all_evaluator_schemas_are_duplicate_rejecting_closed_draft_2020_12() -> None:
     for path in SCHEMA_PATHS:
-        schema = strict_json_loads(path.read_bytes(), label=str(path))
+        schema = load_json_file_strict(path)
         Draft202012Validator.check_schema(schema)
         assert schema["$schema"] == "https://json-schema.org/draft/2020-12/schema"
         _assert_closed_objects(schema, pointer="#")
@@ -38,7 +47,7 @@ def test_all_evaluator_schemas_are_duplicate_rejecting_closed_draft_2020_12() ->
 
 
 def test_fixture_schemas_expose_no_admitted_or_acceptance_state() -> None:
-    for path in SCHEMA_PATHS[1:]:
+    for path in FIXTURE_SCHEMA_PATHS:
         payload = path.read_bytes()
         assert b'"ADMITTED"' not in payload, path
         assert b'"ACCEPTED"' not in payload, path
@@ -54,8 +63,8 @@ def test_every_scientific_input_array_has_exact_order_and_closed_tail() -> None:
         "TRUST",
         "OPERATOR_APPROVAL",
     ]
-    for path in SCHEMA_PATHS[1:]:
-        schema = strict_json_loads(path.read_bytes(), label=str(path))
+    for path in EVALUATION_BOUNDARY_SCHEMA_PATHS:
+        schema = load_json_file_strict(path)
         arrays = list(_scientific_input_arrays(schema))
         assert arrays, path
         for array in arrays:

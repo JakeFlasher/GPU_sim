@@ -41,7 +41,7 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parents[2]
 REGISTRY_RELATIVE = "eval/guards/evaluator_import_surface_registry.v1.json"
 SCHEMA_RELATIVE = "eval/guards/evaluator_import_surface_registry.v1.schema.json"
-REGISTRY_SHA256 = "e3b1fac72331f9fc8a899900f6003dfa188146a4be94981e580b770336f9f0f3"
+REGISTRY_SHA256 = "16571e643b464d0c2e27fced681d736e7698f9cbab6e97c303ddce959a0d2655"
 ENTRYPOINT = "eval/production_evaluator/__init__.py"
 ENTRYPOINT_MODULE = "eval.production_evaluator"
 SCHEMA_ID = (
@@ -88,6 +88,9 @@ EXPECTED_PROHIBITED_EVALUATORS = {
 }
 EXPECTED_NON_EVALUATORS = {
     "eval/bench.py",
+    "eval/production_evaluator_entrypoint.py",
+    "eval/production_manifest.py",
+    "eval/profile.py",
     "sim/run/src/emit.rs",
     "sim/mem/src/l2.rs",
     "sim/sm/src/issue.rs",
@@ -115,15 +118,20 @@ EXPECTED_EVALUATOR_CONTRACTS = {
     "eval/contracts/preregistration_receipt.py",
     "eval/contracts/state_lifetime.py",
     "eval/contracts/validation.py",
+    "eval/production_labels.py",
 }
 EXPECTED_SYNTHETIC_OFFLINE_PROTOTYPE_EVALUATORS = {
     "eval/labels.py",
+    "eval/production_evaluator_fixture.py",
     "eval/registry.py",
     "eval/score.py",
 }
 EXPECTED_EVAL_RUNTIME_SOURCES = {
     ENTRYPOINT,
     "eval/bench.py",
+    "eval/production_evaluator_entrypoint.py",
+    "eval/production_manifest.py",
+    "eval/profile.py",
     *EXPECTED_EVALUATOR_CONTRACTS,
     *EXPECTED_SYNTHETIC_OFFLINE_PROTOTYPE_EVALUATORS,
 }

@@ -39,14 +39,14 @@
       "import_policy": "deny",
       "path": "eval/bench.py",
       "review_status": "reviewed",
-      "sha256": "2e3513cc48e9b08095be241afcc9f8af41267ec6244d072c30a3886b97e18ba6"
+      "sha256": "565e8e8fa4ffbf5fe12e1a1d4167121296df13367443ee8cc4b1948f995ee946"
     },
     {
       "classification": "evaluator_contract",
       "import_policy": "deny",
       "path": "eval/contracts/__init__.py",
       "review_status": "reviewed",
-      "sha256": "246a18e8eb8978b82a3833f0699208940cc637946975dc0df8cf902b73644385"
+      "sha256": "4613aa91381662ac11c53acac8b8f20d70188b0f50028475711c1d990fb8ba35"
     },
     {
       "classification": "evaluator_contract",
@@ -74,7 +74,7 @@
       "import_policy": "deny",
       "path": "eval/contracts/launch_crosswalk.py",
       "review_status": "reviewed",
-      "sha256": "615a0d161acd0b0ae21d3971c5bfb244381fd0f04870cfd6eb1e8532f3baf5f7"
+      "sha256": "236af748dd2daa854030fea4afd0db6ece7e0af9fdeede7532ae7adc31e6c983"
     },
     {
       "classification": "evaluator_contract",
@@ -116,7 +116,7 @@
       "import_policy": "deny",
       "path": "eval/labels.py",
       "review_status": "reviewed",
-      "sha256": "e7d5d06114a6d8546073c1c28369ef03479db5493fed7fd30d0aaba04d2e8c99"
+      "sha256": "8a27cd6289866de88ca61121ded1146d235032104eabe1c80c805e2be1a4fddf"
     },
     {
       "classification": "production_boundary",
@@ -124,6 +124,41 @@
       "path": "eval/production_evaluator/__init__.py",
       "review_status": "reviewed",
       "sha256": "96a7f19d97a7dd49f6a7a9c05bd4fa2de32ed1c3262a0c8efe8db4b422fce5ff"
+    },
+    {
+      "classification": "non_evaluator",
+      "import_policy": "deny",
+      "path": "eval/production_evaluator_entrypoint.py",
+      "review_status": "reviewed",
+      "sha256": "ba802de88c90002ea1638a30f20fb17f589a53208bf07176a0cceb618a737918"
+    },
+    {
+      "classification": "synthetic_offline_prototype_evaluator",
+      "import_policy": "deny",
+      "path": "eval/production_evaluator_fixture.py",
+      "review_status": "reviewed",
+      "sha256": "e9407e1543f0df6ece40cfa5dd37ac735db965fe38a58966edce90c64862fa90"
+    },
+    {
+      "classification": "evaluator_contract",
+      "import_policy": "deny",
+      "path": "eval/production_labels.py",
+      "review_status": "reviewed",
+      "sha256": "5b5899fc08257e7b84198a2110a78da484da33b014d5dc6c2616452eca8a0986"
+    },
+    {
+      "classification": "non_evaluator",
+      "import_policy": "deny",
+      "path": "eval/production_manifest.py",
+      "review_status": "reviewed",
+      "sha256": "05d924731f682afc9c1ad70d9c47264acc2e9e163d13734a58a7225e313ed41b"
+    },
+    {
+      "classification": "non_evaluator",
+      "import_policy": "deny",
+      "path": "eval/profile.py",
+      "review_status": "reviewed",
+      "sha256": "01a6871e6c3fbb166d69820c38ceece07881525d4a8f3abd75db477a279e8fad"
     },
     {
       "classification": "synthetic_offline_prototype_evaluator",
@@ -137,7 +172,7 @@
       "import_policy": "deny",
       "path": "eval/score.py",
       "review_status": "reviewed",
-      "sha256": "ea9d814fc25b14ca8a6b375386e189d84ffd93e6b7c68a9c581a9df13943b308"
+      "sha256": "88656a0378af215750b699d1dc0fc62ac87cbdd6d9e2698980bbc117b01736ed"
     },
     {
       "classification": "non_evaluator",
