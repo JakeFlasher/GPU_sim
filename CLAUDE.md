@@ -34,6 +34,12 @@ separate directional diagnostics, not admissible primary predictions. The seven 
 3. **Silicon-only accuracy claims.** Another simulator may be an evaluation
    comparator, never ground truth. Report per metric and kernel family; do not
    hide failures in aggregate-only summaries.
+
+   **Current scope narrows this permission:** no external simulator comparator is
+   active. NCU supplies the ground-truth labels, and runtime/profile evidence is
+   recorded only for this repository's `sim-run`. Accel-Sim and GPGPU-Sim are
+   inactive preserved references—not baselines, dependencies, gates, or current
+   work—unless the user explicitly reauthorizes them.
 4. **Typed, fail-closed evidence.** Missing authority, unknown versions, dirty
    fixtures, hash mismatches, unsupported architecture paths, and absent
    hardware evidence are explicit failures or typed exclusions—never silent

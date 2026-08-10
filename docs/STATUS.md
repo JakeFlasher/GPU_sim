@@ -1,6 +1,6 @@
 # Project status
 
-Updated 2026-07-30. This file reports implemented and admitted state, not
+Updated 2026-08-09. This file reports implemented and admitted state, not
 aspirational plan completion.
 
 ## Simulator
@@ -19,8 +19,13 @@ aspirational plan completion.
 | Production runner/CLI | Implemented with strict manifests and sealed canonical JSON |
 | Production launch-manifest producer | Missing; checked-in canary is fixture-only |
 | Evaluation join/reporter | Missing |
-| Performance benchmark/gate | Missing |
+| Performance benchmark/gate | Claimable `sim-run` runtime and target-free profiling implemented; current live runtime evidence still pending |
 | sm_120 validation | Deferred until final sm_86 M2 passes and the operator explicitly approves migration |
+
+Current runtime scope records and profiles only this repository's `sim-run`.
+Silicon NCU measurements are the sole ground-truth accuracy baseline. Accel-Sim,
+GPGPU-Sim, and other external simulator rigs are inactive and impose no current
+implementation, comparison, migration, publication, or blocker predicate.
 
 `FullKernelReplayResult.diagnostic_last_issue_cycles` and its separate raw
 `terminal_modeled_event_time` are directional diagnostics. Neither may be
@@ -130,10 +135,11 @@ proven.
   owning provenance and campaign gates.
 - Production M5, M6, and M7 entry points and a distinct M7 completion gate are
   still missing.
-- The simulator still needs the remaining resource/timing scaffolds, a production
-  launch-manifest producer, admitted cycle semantics, evaluation, and the pinned
-  Accel-Sim speed comparison. The offline runner/CLI satisfies none of those
-  external or scientific predicates.
+- The simulator still needs the remaining resource/timing scaffolds, admitted
+  cycle semantics, live NCU-grounded evaluation, and claimable current-host
+  `sim-run` runtime/profile evidence. The offline runner/CLI satisfies none of
+  those external or scientific predicates; no external-simulator comparison is
+  required.
 
 Archive-integrity, offline/frozen-hardware, live-campaign, M7 completion, and
 final M2 are independent gates; passing or authorizing one satisfies none of

@@ -10,6 +10,12 @@ It does not re-litigate the locked operator decisions D1–D8; it verifies their
 fills in the extraction detail the operator asked for ("extract useful scaffolding, tools and
 knowledge base from the legacy branches to refactor the new repo").
 
+**Current-scope supersession (2026-08-09).** The historical external-simulator
+baseline and speed-comparison clauses in this companion audit are non-operative.
+NCU silicon labels are the sole active accuracy baseline, and runtime/profile
+measurement covers only this repository's `sim-run`. Accel-Sim/GPGPU-Sim remain
+contextual prior art unless explicitly reauthorized.
+
 ---
 
 ## 1. Verified ground-truth state (all claims re-checked on disk this session)
@@ -198,10 +204,11 @@ instruments). Refinements from this audit:
 4. **Card schema additions** for `sim/sm`: `int32_datapath` (split vs unified),
    `tensor_fp32_acc_rate_factor` (1.0 PRO / 0.5 GeForce), `l0_icache`, GDDR6X/GDDR7 timing
    block — all microbench-derived or whitepaper-cited (never NCU-fitted; Rule 1).
-5. **Baseline rigs** (`eval/baselines/`): Accel-Sim SM86_RTX3070 (shared traces, speed +
-   accuracy), UPC MICRO'25 artifact (cycles; it ships Blackwell example traces), PPT-GPU
-   (document known memory-model bugs), Nugteren-2014 RDH (in-repo), roofline/SOLAR floor,
-   frozen v5 heads. Sim-FA is related-work only (no artifact overlap with sm_86/sm_120).
+5. **Current runtime/evaluation scope:** NCU labels are the accuracy baseline;
+   record exact runtime/profile evidence for this repository's simulator and use
+   only in-repo analytical/frozen references. The formerly proposed Accel-Sim,
+   UPC, and PPT-GPU executable rigs are inactive historical context. Sim-FA also
+   remains related-work only.
 
 ---
 

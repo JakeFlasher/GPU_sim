@@ -31,7 +31,14 @@ trees performed this session.
 - **Full root + NCU on ALL three targets** (reaffirmed 2026-07-06): clock/memory-clock locking (`nvidia-smi -lgc/-lmc`), persistence mode, and counter-permission setup are **allowed and preferred**, local *and* cloud. The old non-root/counter-less deployment thesis, the cloud-NCU ban, the NCU quarantine, and "no simulator revival" are all **retired**.
 - **The one surviving prohibition — targets-never-features.** NCU / hardware-counter values are prediction *targets and validation references only*; they must never enter simulator inputs, trace features, or calibration constants fitted on the *same cell* being scored. Enforced by the repurposed leakage guard (`deployability` → `model_io_role: target | input | either`).
 - **Execution order — sm_86 first, to completion.** The current dev host **is the RTX 3090 Ti**. Every building block must be soundness-verified on sm_86 (§7 gate) before the repo migrates to the 5060 laptop or the cloud GB202.
-- **Accuracy bar — cycle-accurate *outputs*, not cycle-ticking *implementation*.** Primary target `gpc__cycles_elapsed.max` (operating-state-bound under the recorded capture protocol), with the full NCU metric vector alongside; event-driven engine at 100–1000× cycle-sim speed.
+- **Accuracy bar — cycle-accurate *outputs*, not cycle-ticking *implementation*.** Primary target `gpc__cycles_elapsed.max` (operating-state-bound under the recorded capture protocol), with the full NCU metric vector alongside; event-driven runtime is measured directly for this repository's simulator.
+
+**Current runtime-scope correction (2026-08-09).** NCU silicon labels are the
+sole active accuracy baseline. Runtime and profile evidence are recorded only for
+this repository's `sim-run`. External-simulator baseline rigs, speed ratios, and
+migration/publication gates—including Accel-Sim and GPGPU-Sim—are inactive and
+non-operative unless the user explicitly reauthorizes them. Literature facts
+about those tools remain contextual prior art only.
 
 ---
 
@@ -40,9 +47,8 @@ trees performed this session.
 **Thesis.** An open, event-driven, trace-driven simulator of Ampere/Blackwell SMs and memory hierarchy,
 calibrated per-architecture from microbenchmarks and validated per-metric against NCU on silicon, can
 reproduce the **NCU metric vector** (cycles, L1/L2 sector hit rates, traffic/sector counts, occupancy,
-Speed-of-Light throughputs) at **100–1000×** the speed of cycle-level simulators — a practical
-replacement for Accel-Sim-class tools on modern AI kernels, and the first such tool that reaches
-consumer/workstation Blackwell.
+Speed-of-Light throughputs) with directly measured, claimable runtime and target-free
+before/after profile evidence—while reaching consumer/workstation Blackwell.
 
 **Verified open gaps we occupy** (from the 2026-07-02 adversarial SOTA survey; provenance retained there):
 1. **No open simulator has a validated timing model past sm_86.** Accel-Sim tops out at SM80_A100 / SM86_RTX3070 (~25–32% Ampere error, ~12.5 KIPS → days/workload); GPGPU-Sim 4.x is in maintenance.
@@ -118,7 +124,7 @@ cross_arch_gpu_profiler_suite/
 │   └── ffi/                     #   C++ shim for the existing NVBit wire format
 ├── labels/                      # the NCU label factory (from tools/local_labels): capture→gate→admit, registry
 ├── eval/                        # generalized comparison_runner → per-(kernel,metric,arch) harness + baselines/
-│   ├── baselines/               #   accel-sim (SM86_RTX3070), upc-micro25 artifact, ppt-gpu, profiner, RDH, roofline
+│   ├── baselines/               #   analytical/frozen in-repo references only; external-simulator rigs inactive
 │   └── guards/                  #   test_targets_not_features_guard.py (successor to the NCU static guard)
 ├── benchmarks/                  # sol_execbench + flashinfer_bench runner integration + simbench + portable_lcd
 ├── arch_profiles/               # unchanged + new cards/sm_120-gb202.json; research_gap fields filled in Phase 1
@@ -155,11 +161,11 @@ Milestone gates are **hard**: a phase does not start until the prior gate is gre
 
 ### Phase 2 — Simulator core v0 on sm_86 · **Sep 1 → Oct 31** (overlaps late Phase 1)
 Design per §6. Build order = design-note phases A→E.
-- **GATE M2 (migration gate):** on the sm_86 microbench tier — T1 counts p50 ≤ **1%**; L2 sector hit rate ≤ **v5's 6.4%** geomean; cycles geomean **≤10% target** (**≤15%** UPC-class minimum-publishable floor, per D5) slug-disjoint; ≥ **100×** measured speedup vs Accel-Sim SM86_RTX3070 on shared traces; targets-not-features guard green. **Only after M2 does the repo migrate to the 5060 laptop — and only on explicit operator go-ahead.**
+- **GATE M2 (migration gate):** on the sm_86 microbench tier — T1 counts p50 ≤ **1%**; L2 sector hit rate ≤ **v5's 6.4%** geomean; cycles geomean **≤10% target** (**≤15%** UPC-class minimum-publishable floor, per D5) slug-disjoint; exact claimable `sim-run` runtime/profile evidence recorded with deterministic output bytes and a target-free performance-regression gate; targets-not-features guard green. **Only after M2 does the repo migrate to the 5060 laptop — and only on explicit operator go-ahead.**
 
 ### Phase 3 — Blackwell bring-up + cross-SKU + evaluation harness · **Nov 1 → Dec 20**
 - **3A.** GB206 + GB202 cards drive the *same* engine; per-metric validation. The **GB206-vs-GB202 same-ISA/different-SKU axis is the controlled generalization experiment** (only card inputs change) — a clean MICRO story.
-- **3B. Evaluation harness** (`eval/`): per-(kernel, metric, arch) verdicts. Reporting rules (Accel-Sim template + SIGMETRICS'18 critique): **NRMSE + correlation per metric class; MAE only for never-zero metrics (cycles, inst counts); error distributions per kernel family, never aggregate-only; splits = leave-kernel-family-out + leave-SKU-out; sealed holdout touched once.** Baselines: Accel-Sim SM86_RTX3070, UPC MICRO'25 artifact (cycles), PPT-GPU (document its memory-model bugs), profiner-style + in-repo Nugteren-2014 RDH, roofline/SOLAR analytical floor, frozen v5 heads.
+- **3B. Evaluation harness** (`eval/`): per-(kernel, metric, arch) verdicts. Reporting rules (SIGMETRICS'18 critique): **NRMSE + correlation per metric class; MAE only for never-zero metrics (cycles, inst counts); error distributions per kernel family, never aggregate-only; splits = leave-kernel-family-out + leave-SKU-out; sealed holdout touched once.** NCU silicon labels are the sole active accuracy baseline; report exact `sim-run` runtime/profile evidence separately. Active in-repo references are Nugteren-2014 RDH, roofline/SOLAR analytical floors, and frozen v5 heads. External simulator rigs are inactive.
 - **GATE M3:** ≥ one Blackwell SKU passes the per-metric bars; cross-SKU generalization quantified.
 
 ### Phase 4 — Case studies + ablations + full eval · **Dec 21 → Feb 15**
@@ -208,7 +214,7 @@ reverse-engineered facts + the repo's own failure→fix map (`plans/research/sot
 2. **NCU-metric-*vector* prediction** (cycles + L1/L2 sector hit rates + traffic/sector counts + occupancy + SOL%) under a typed observation-contract emission layer — no prior work predicts sector hit rates or SOL%.
 3. **A GPU NCU counter-repeatability / determinism study** (the missing Weaver/McKee analog) — noise floors that justify every accuracy gate; includes the Blackwell `lts` 115–217% anomaly.
 4. **Same-ISA / cross-SKU generalization** (GB206 vs GB202: only card inputs change) — a controlled test mechanistic models historically fail.
-5. **Speed:** 100–1000× over Accel-Sim/UPC with retained **what-if / variable-fidelity** capability — the black-box predictors cannot do what-if.
+5. **Measured performance:** exact claimable `sim-run` runtime, target-free CPU profiles, and byte-equivalent before/after optimization deltas, with retained **what-if / variable-fidelity** capability.
 6. **A dataset release:** NCU-profiled FlashInfer-Bench + SOL-ExecBench across 3 SKUs / 2 arches.
 
 ---

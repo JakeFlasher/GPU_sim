@@ -8,6 +8,11 @@ The organizing principle is **contract-transition-first**: land the tracer ASYNC
 
 This is a **DATA-COLLECTION campaign only**. Building the M2 eval-join, per-metric reporter, and baseline rigs is explicitly out of scope. No edits to existing validated code except (a) genuine bug fixes, (b) the sanctioned tracer flip plus its lockstep consumer widening, and (c) the sanctioned `freeze_label_bundle.py` widening (DEC-3); new files for the capture corpus (roster JSONs, campaign-manifest + exclusion-ledger tools/schemas, and SOL shape-adjust wrappers) are allowed. No M5 probe, pchase, or calibration implementation is authorized before a separate v2 admission.
 
+**Current runtime-scope correction (2026-08-09):** this campaign produces NCU
+ground-truth labels and simulator-input traces in separate executions. Subsequent
+runtime/profile work covers only this repository's `sim-run`. External simulator
+baseline rigs are inactive and confer no campaign, migration, or evaluation gate.
+
 ## Capture readiness predicates (Q805)
 
 Readiness is four distinct, non-promoting predicates. Each predicate is the
@@ -191,7 +196,7 @@ Sequence the campaign so the denominator is knowable before the expensive work a
 
 ## Future Work / Out of Scope
 
-- FUT-1: Build the M2 eval-join / per-metric reporter (NRMSE + correlation + p90 tails) / baseline rigs (Accel-Sim, UPC MICRO'25, PPT-GPU, Nugteren RDH, SOLAR floor, frozen v5 heads). The campaign produces the corpus these consume.
+- FUT-1: Build the M2 eval-join / per-metric reporter (NRMSE + correlation + p90 tails) for this repository's simulator against admitted NCU labels, alongside exact `sim-run` runtime/profile reporting and in-repo analytical/frozen references. The campaign produces the corpus these consume. External simulator components, including Accel-Sim/GPGPU-Sim, remain inactive and may not be produced, consumed, promoted, or used as a gate without explicit operator reauthorization.
   - Current-loop handoff: AC-8 (the frozen full-roster corpus is the reporter's input contract).
   - Promotion trigger: the next simulator increment that scores predictions against the frozen bundle.
 - FUT-2: BLOCKED. A separately approved card-edit change may transcribe only values produced under a future admitted v2 authority; no current-loop M5 values or card-write handoff exists.

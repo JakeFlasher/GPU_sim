@@ -1,6 +1,7 @@
 # Fable-5 Agile Plan Authority Reconciliation
 
-- Status: implementation reconciliation approved for the current local branch
+- Status: implementation reconciliation approved for the current local branch;
+  external-simulator P6 clauses superseded on 2026-08-09
 - Date: 2026-08-08
 - Base commit: `aaeb5c24c1d627b6e72cb0680679d8026d37e571`
 - Preserved subordinate plan: `docs/plans/fable_5_consulted_agile_development.md`
@@ -19,6 +20,19 @@ This document is implementation sequencing only. It does not admit hardware
 evidence, create scientific authority, authorize M5, promote cycle diagnostics,
 or approve migration to `sm_120`.
 
+## Current runtime-scope correction (2026-08-09)
+
+NCU silicon measurements are the sole ground-truth baseline. Current performance
+work records and profiles only this repository's `sim-run`, seals its predictions
+before label opening, and compares those predictions against admitted NCU labels.
+Accel-Sim and GPGPU-Sim are inactive preserved references: they are not current
+baselines, dependencies, gates, publication claims, or implementation work.
+
+The preserved subordinate plan's baseline-runtime and P6 clauses are historical
+and inactive; they confer no producer, consumer, comparison, admission,
+dependency, or blocker authority. Reactivation requires explicit user
+authorization. The preserved subordinate bytes and SHA-256 remain unchanged.
+
 ## Adopted requirements
 
 The implementation retains:
@@ -28,7 +42,8 @@ The implementation retains:
 - the complete launch-identity crosswalk and fail-closed joins;
 - prediction sealing before label opening;
 - external spawn-to-exit simulator timing with raw repeats and a noise gate;
-- exact, read-only P6 baseline comparison;
+- NCU ground-truth collection followed by exact runtime/profile evidence for this
+  repository's simulator only;
 - profile-before-optimize ordering for P7 O1a then O1b;
 - byte-identical prediction and unchanged-accuracy gates;
 - the accepted `gpc__cycles_elapsed.max` `required_unimplemented` boundary.
@@ -51,13 +66,15 @@ successor protocols publish to fresh paths with explicit provenance.
 
 1. Implement production launch/crosswalk/matched-label/evaluator authority.
 2. Extend P5 with claimable runtime and target-free CPU-profile evidence.
-3. Produce a pinned, immutable Accel-Sim runtime database and implement the P6
-   exact-row consumer; Accel-Sim is a speed comparator only.
+3. Capture admitted NCU ground-truth labels, seal this repository's simulator
+   predictions before label opening, and report its exact runtime plus per-metric,
+   per-kernel-family accuracy.
 4. Apply P7 O1a and profile-gated O1b with byte/accuracy equivalence.
 5. Admit the authorized driver-610.43.03 successor without rewriting the
    historical 610.43.02 protocol.
 6. Complete and externally seal M4 under a clean source commit.
-7. Run production accuracy and final P5/P6 comparison.
+7. Run production NCU-grounded accuracy and final claimable `sim-run` runtime
+   reporting; no external-simulator speed ratio is produced.
 8. Use a separate live owner for the existing M6 schedule/journal/analysis
    contract and publish `M6_DONE.json` only if every active gate closes.
 

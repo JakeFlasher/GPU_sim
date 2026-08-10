@@ -6,6 +6,12 @@ Verdict: **GREEN with one flagged non-blocker** (§2 clock-lock sudo item). The 
 on sm_86; Phase-1 capture at scale may begin. **The 5060-laptop migration stays blocked until
 M2 (simulator gate) per the operator's execution-order directive — M0 alone does not open it.**
 
+**Historical scope note (2026-08-09):** the Accel-Sim speed clause retained in
+§“What M0 does NOT open” records the 2026-07-06 gate definition only. It is not a
+current M2, migration, publication, dependency, comparison, or blocker predicate.
+Current performance evidence is exact runtime/profile data for this repository's
+`sim-run`; NCU silicon labels remain the accuracy baseline.
+
 ## 1. Toolchain pinned + recorded ✅
 
 | Component | Value (verified live this session) |
