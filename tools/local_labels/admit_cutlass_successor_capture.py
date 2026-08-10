@@ -66,7 +66,14 @@ CAPTURE_PRODUCER_SHA256_BY_RECEIPT_VERSION = {
     # v2 receipts were emitted by the final repository-tracer producer before
     # retained external NVBit phase tools became part of the receipt contract.
     2: "a67f4a0f84f5ee73cd3f5998e4da79927ac2bee05148cecd08216ddab5694e86",
-    3: "e67c6166e473488783fbdc515d2247f32448816cadf6ab2543e80d5ae8d8c3b5",
+    3: "09b1e53ba919bf8060bda99db02429aef629df0b0ef38411dbd4e9b3a6639f6b",
+}
+HISTORICAL_CAPTURE_PRODUCER_SHA256_BY_RECEIPT_VERSION = {
+    # Preserve successful v3 receipts emitted before the descriptor-safe NCU
+    # handoff rescan repair. Historical receipt bytes remain independently bound.
+    3: frozenset({
+        "e67c6166e473488783fbdc515d2247f32448816cadf6ab2543e80d5ae8d8c3b5",
+    }),
 }
 ACTIVE_RECEIPT_SCHEMA_VERSION = 3
 RECEIPT_SCHEMA_REL = RECEIPT_SCHEMA_PATHS_BY_VERSION[
@@ -155,7 +162,7 @@ CGROUP_CONTAINMENT_SUPERVISOR_SHA256 = (
     "1b4cbe75929eb6f8f98c55f300c964ba1592fa5547335cdcf2324fe0d4a0d452"
 )
 CAPTURE_PRODUCER_SELF_SHA256_AUTHORITY = (
-    "9273bb9b1a50de2478107f8b37a6b16318378a53378a0a68097f8a2d8e0d70d9"
+    "61a3934b4974848c750fdcc4081f79a6588e7e12043ff11ec285ca7b16f72588"
 )
 NCU_LAUNCHER_PATH = (
     "/usr/local/cuda-13.2/nsight-compute-2026.1.0/ncu"
@@ -384,7 +391,10 @@ def _capture_producer_self_digest(payload: bytes) -> str:
     return declared
 
 
-def _capture_producer_sha256(receipt_schema_version: int) -> str:
+def _capture_producer_sha256(
+    receipt_schema_version: int,
+    observed_sha256: str | None = None,
+) -> str:
     expected_sha256 = CAPTURE_PRODUCER_SHA256_BY_RECEIPT_VERSION.get(
         receipt_schema_version
     )
@@ -393,10 +403,23 @@ def _capture_producer_sha256(receipt_schema_version: int) -> str:
             "unsupported receipt version for capture producer authority: "
             f"{receipt_schema_version!r}"
         )
-    if receipt_schema_version != ACTIVE_RECEIPT_SCHEMA_VERSION:
+    if observed_sha256 is None:
+        observed_sha256 = expected_sha256
+    historical = HISTORICAL_CAPTURE_PRODUCER_SHA256_BY_RECEIPT_VERSION.get(
+        receipt_schema_version,
+        frozenset(),
+    )
+    if observed_sha256 not in {expected_sha256, *historical}:
+        raise AdmissionError(
+            "successor capture producer differs from receipt-version authority"
+        )
+    if (
+        receipt_schema_version != ACTIVE_RECEIPT_SCHEMA_VERSION
+        or observed_sha256 != expected_sha256
+    ):
         # Historical receipt producers are immutable hash authorities.  They
         # are intentionally not substituted with the active producer bytes.
-        return expected_sha256
+        return observed_sha256
 
     source = ROOT / "tools/local_labels/capture_cutlass_successor_receipts.py"
     try:
@@ -1936,7 +1959,10 @@ def _verify_receipt(
             "successor cgroup containment supervisor differs from pinned authority"
         )
     expected_provenance = {
-        "capture_producer_sha256": _capture_producer_sha256(schema_version),
+        "capture_producer_sha256": _capture_producer_sha256(
+            schema_version,
+            receipt["provenance"]["capture_producer_sha256"],
+        ),
         "containment_supervisor_sha256": containment_sha256,
     }
     nvbit_tool: dict[str, Any] | None = None

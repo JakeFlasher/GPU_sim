@@ -658,12 +658,12 @@ def test_label_driver_explicit_launch_set_runs_through_two_descriptors(
         "--launch-count", "3",
     ]
     cell = output / "sm_86" / "boundary-fixture" / "row_0"
+    assert {path.name for path in cell.iterdir()} == {
+        "run_0_launch_set.ncu-rep",
+        "label_run_manifest_0_launch_set.json",
+    }
     assert (cell / "run_0_launch_set.ncu-rep").read_text() == "fake report\n"
     assert (cell / "label_run_manifest_0_launch_set.json").is_file()
-    assert not (cell / "run_0_0.ncu-rep").exists()
-    assert not (cell / "label_run_manifest_0_0.json").exists()
-    assert not (cell / "label_0_0.json").exists()
-    assert not (cell / "run_0_0.launch_observation.json").exists()
 
 
 @pytest.mark.parametrize(

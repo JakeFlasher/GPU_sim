@@ -375,7 +375,7 @@
       "import_policy": "deny",
       "path": "tools/local_labels/test_capture_toolchain_contract.py",
       "review_status": "provisional",
-      "sha256": "21d9faac66d56e92f72b869d5b4f2dcec29d5233c2dbc3b27f8396d7daebc09f"
+      "sha256": "da6469c1762f3e90266ff337f4f127758f8b00bcc5def0c848787fd4390225bd"
     },
     {
       "classification": "unreviewed",

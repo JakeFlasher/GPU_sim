@@ -4699,6 +4699,76 @@ def _write_ncu_handoff(root: Path, row: dict) -> tuple[Path, bytes]:
     return cell, report_payload
 
 
+def test_ncu_namespace_rescan_uses_independent_descriptor(
+    tmp_path: Path,
+    monkeypatch,
+):
+    cell = tmp_path / "ncu-handoff"
+    cell.mkdir()
+    (cell / "report").write_bytes(b"report")
+    (cell / "manifest").write_bytes(b"manifest")
+    real_scandir = capture.immutable._scandir_independent
+    scanned_descriptors = []
+
+    @contextlib.contextmanager
+    def tracked_scandir(descriptor):
+        scanned_descriptors.append(descriptor)
+        with real_scandir(descriptor) as entries:
+            yield entries
+
+    monkeypatch.setattr(
+        capture.immutable,
+        "_scandir_independent",
+        tracked_scandir,
+    )
+    with capture.immutable.PinnedDirectoryReader(cell) as reader:
+        descriptor = reader.descriptor
+        initial = capture._bounded_directory_names(
+            reader,
+            max_entries=2,
+            label="NCU handoff",
+        )
+        (cell / "observation").write_bytes(b"observation")
+        complete = capture._bounded_directory_names(
+            reader,
+            max_entries=3,
+            label="NCU handoff",
+        )
+
+    assert scanned_descriptors == [descriptor, descriptor]
+    assert set(initial) == {"report", "manifest"}
+    assert set(complete) == {"report", "manifest", "observation"}
+
+
+def test_ncu_namespace_independent_scan_failure_is_typed(
+    tmp_path: Path,
+    monkeypatch,
+):
+    cell = tmp_path / "ncu-handoff"
+    cell.mkdir()
+
+    def fail_scan(_descriptor):
+        raise capture.immutable.ImmutableArtifactError(
+            "synthetic independent scan failure"
+        )
+
+    monkeypatch.setattr(
+        capture.immutable,
+        "_scandir_independent",
+        fail_scan,
+    )
+    with capture.immutable.PinnedDirectoryReader(cell) as reader:
+        with pytest.raises(capture.CaptureError) as exc_info:
+            capture._bounded_directory_names(
+                reader,
+                max_entries=0,
+                label="NCU handoff",
+            )
+
+    assert exc_info.value.code == "capture_generation_changed"
+    assert "synthetic independent scan failure" in exc_info.value.detail
+
+
 def test_ncu_manifest_byte_limit_precedes_report_import(
     tmp_path: Path,
     monkeypatch,
@@ -5090,6 +5160,116 @@ def test_late_failure_stream_retires_failure_provenance(
         if path.name.startswith(".failed-regular-")
     ]
     assert len(retired) == 1
+
+
+@pytest.mark.parametrize("failed_artifact", ("observation", "sidecar"))
+def test_ncu_postcommit_failure_preserves_primary_and_provenance(
+    tmp_path: Path,
+    monkeypatch,
+    failed_artifact: str,
+):
+    row, _roster = capture._row_for(MATRIX_KEY, VARIANT_ID)
+    root = tmp_path / "capture"
+    cell, report_payload = _write_ncu_handoff(root, row)
+    identity = capture._ncu_identity_from_authority(_ncu_authority())
+    monkeypatch.setattr(
+        capture.parse_ncu_metrics,
+        "_import_retained_report_csv",
+        lambda *_args, **_kwargs: (
+            capture.parse_ncu_metrics.ImportedReportCsv(
+                text=_ncu_details_csv(row),
+                report_sha256=capture.sha256_bytes(report_payload),
+                report_size_bytes=len(report_payload),
+            ),
+            None,
+        ),
+    )
+    monkeypatch.setattr(
+        capture.admission,
+        "_sass_kernel_names",
+        lambda _row: {"_Zfixture_kernel"},
+    )
+    target_namespace = (
+        capture._NCU_COMPLETE_ARTIFACT_NAMES
+        if failed_artifact == "sidecar"
+        else frozenset({
+            *capture._NCU_INITIAL_ARTIFACT_NAMES,
+            "run_0_launch_set.launch_observation.json",
+        })
+    )
+    real_require_namespace = capture._require_ncu_cell_namespace
+    detail = f"synthetic {failed_artifact} authorization failure"
+
+    def fail_after_namespace(parent, *, expected_names):
+        real_require_namespace(parent, expected_names=expected_names)
+        if expected_names == target_namespace:
+            raise capture.CaptureError(
+                detail,
+                code="capture_generation_changed",
+            )
+
+    monkeypatch.setattr(
+        capture,
+        "_require_ncu_cell_namespace",
+        fail_after_namespace,
+    )
+    generation_stack = contextlib.ExitStack()
+    try:
+        with pytest.raises(capture.CaptureError, match=detail) as exc_info:
+            capture._postprocess_ncu_handoff(
+                root=root,
+                row=row,
+                live=_nvbit_live(),
+                expected_ncu_identity=identity,
+                generation_stack=generation_stack,
+            )
+
+        failure_root = root / "failure"
+        failure_root.mkdir()
+        monkeypatch.setattr(capture, "_boot_id_sha256", lambda: "b" * 64)
+        capture._write_failure_provenance(
+            failure_root,
+            root=root,
+            phase="ncu",
+            row=row,
+            command=["/fixture/target"],
+            live=_nvbit_live(),
+            environment_payload=b"{}\n",
+            default_environment={"LANG": "C"},
+            capture_producer_sha256="c" * 64,
+            containment_supervisor_sha256="d" * 64,
+            phase_tool_sha256="e" * 64,
+            runtime_manifest_sha256=None,
+            action_executor_sha256="f" * 64,
+            error=exc_info.value,
+            generation_stack=generation_stack,
+        )
+    finally:
+        generation_stack.close()
+
+    observation = cell / "run_0_launch_set.launch_observation.json"
+    sidecar = cell / "label_0_0.json"
+    assert observation.exists() is (failed_artifact == "sidecar")
+    assert not sidecar.exists()
+    failed_publications = [
+        path for path in cell.iterdir()
+        if path.name.startswith(".failed-regular-")
+    ]
+    assert len(failed_publications) == 1
+    failed_document = json.loads(failed_publications[0].read_text())
+    if failed_artifact == "observation":
+        assert failed_document["identity"]["Kernel Name"] == "_Zfixture_kernel"
+    else:
+        assert failed_document["unit_tagged_metrics"][0]["unit"] == "cycles"
+
+    provenance = json.loads(
+        (failure_root / "failure_provenance.json").read_text()
+    )
+    assert provenance["failure_code"] == "capture_generation_changed"
+    assert provenance["detail"] == detail
+    roles = [artifact["role"] for artifact in provenance["handoff_artifacts"]]
+    assert roles.count("retained_failed_handoff_artifact") == 1
+    assert ("ncu_launch_observation" in roles) is (failed_artifact == "sidecar")
 
 
 def test_ncu_handoff_is_imported_and_published_as_singleton(

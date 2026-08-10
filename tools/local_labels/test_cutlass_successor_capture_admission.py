@@ -2198,6 +2198,59 @@ def test_receipt_schema_registry_pins_exact_versioned_authorities():
             ).read_bytes()
         )
     )
+    assert admit.HISTORICAL_CAPTURE_PRODUCER_SHA256_BY_RECEIPT_VERSION == {
+        3: frozenset({
+            "e67c6166e473488783fbdc515d2247f32448816cadf6ab2543e80d5ae8d8c3b5",
+        }),
+    }
+
+
+def test_historical_v3_capture_producer_authority_remains_admissible(
+    tmp_path: Path,
+):
+    target = _receipt(
+        tmp_path,
+        MATRIX["rows"][0],
+        "nvbit",
+        0,
+        schema_version=3,
+    )
+    historical = next(iter(
+        admit.HISTORICAL_CAPTURE_PRODUCER_SHA256_BY_RECEIPT_VERSION[3]
+    ))
+    document = json.loads(target.read_text())
+    document["receipt"]["provenance"]["capture_producer_sha256"] = historical
+    _rewrite(target, document)
+
+    overlay = admit.build_overlay(
+        tmp_path,
+        generated_at_utc="2026-07-23T01:00:00Z",
+    )
+
+    assert overlay["rows"]
+    assert admit._capture_producer_sha256(3, historical) == historical
+
+
+def test_unknown_v3_capture_producer_authority_is_rejected(tmp_path: Path):
+    target = _receipt(
+        tmp_path,
+        MATRIX["rows"][0],
+        "nvbit",
+        0,
+        schema_version=3,
+    )
+    document = json.loads(target.read_text())
+    document["receipt"]["provenance"]["capture_producer_sha256"] = "9" * 64
+    _rewrite(target, document)
+
+    with pytest.raises(
+        admit.AdmissionError,
+        match="capture producer differs from receipt-version authority",
+    ):
+        admit.build_overlay(
+            tmp_path,
+            generated_at_utc="2026-07-23T01:00:00Z",
+        )
 
 
 def test_overlay_schema_registry_preserves_v1_and_dispatches_active_v2():
