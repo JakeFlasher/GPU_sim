@@ -10,16 +10,19 @@ import time
 from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Mapping
 
 import pytest
 
-from eval import bench
+from eval import bench, score
 from eval.contracts.validation import (
+    MatchedLabelAuthority,
     canonical_sha256,
     load_json_file_strict,
+    validate_report,
     validate_result,
 )
+from tools.local_labels.immutable_artifact import canonical_json_bytes, seal_model
 
 ROOT = Path(__file__).resolve().parents[2]
 MANIFEST_SOURCE = (
@@ -30,6 +33,7 @@ RESULT_TEMPLATE = (
     Path(__file__).parent
     / "fixtures/runtime_record/sim_result_template.v2.json"
 )
+EVALUATOR_FIXTURES = Path(__file__).parent / "fixtures/evaluator_mvp"
 
 
 @dataclass(frozen=True, slots=True)
@@ -207,6 +211,952 @@ def _alternate_result(inputs: _RuntimeInputs) -> bytes:
     alternate["result_sha256"] = canonical_sha256(alternate, "result_sha256")
     validate_result(alternate)
     return _canonical_line(alternate)
+
+
+def _production_workload_authority(
+    inputs: _RuntimeInputs,
+    *,
+    executable_sha256: str | None = None,
+) -> dict[str, Any]:
+    manifest = load_json_file_strict(inputs.manifest_path)
+    assert isinstance(manifest, dict)
+    original_key = manifest["launches"][0]["launch_key"]
+    launch_identity = {
+        name: deepcopy(original_key[name])
+        for name in (
+            "process_launch_ordinal",
+            "kernel_mangled_name",
+            "grid",
+            "block",
+            "device_id",
+            "stream_id",
+            "binary_architecture",
+        )
+    }
+    schema_bytes = bench.WORKLOAD_EXECUTION_AUTHORITY_SCHEMA_PATH.read_bytes()
+    parser_authorities = {
+        name: {
+            "authority_id": f"claim-test-{name}-parser-v1",
+            "authority_sha256": hashlib.sha256(name.encode("ascii")).hexdigest(),
+        }
+        for name in ("canonical", "ncu", "nvbit", "simulator")
+    }
+    workload_core = {
+        "executable_sha256": (
+            executable_sha256
+            if executable_sha256 is not None
+            else hashlib.sha256(inputs.binary_path.read_bytes()).hexdigest()
+        ),
+        "argv": ["claim-test-workload"],
+        "shape": ["1"],
+        "architecture": {
+            "binary_architecture": manifest["architecture"]["arch_id"],
+            "gpu_sku": manifest["architecture"]["sku"],
+        },
+        "kernel_family": "claim-test-family",
+        "expected_launch_roster": [launch_identity],
+    }
+    workload_id = (
+        "workload-v1-"
+        + hashlib.sha256(canonical_json_bytes(workload_core)).hexdigest()
+    )
+    execution_nonce = "claim-test-execution-v1"
+    execution_core = {
+        "workload_id": workload_id,
+        "execution_nonce": execution_nonce,
+        "parser_authorities": parser_authorities,
+    }
+    matched_execution_id = (
+        "matched-execution-v1-"
+        + hashlib.sha256(canonical_json_bytes(execution_core)).hexdigest()
+    )
+    source_contracts = {}
+    for name, namespace in (
+        ("canonical", "CANONICAL"),
+        ("ncu", "NCU"),
+        ("nvbit", "NVBIT"),
+        ("simulator", "SIMULATOR"),
+    ):
+        context = {
+            "matched_execution_id": matched_execution_id,
+            "namespace": namespace,
+            "context_rule": "DISTINCT_NAMESPACE_EXECUTION_CONTEXT_V1",
+        }
+        source_contracts[name] = {
+            "namespace": namespace,
+            "parser_authority_id": parser_authorities[name]["authority_id"],
+            "parser_authority_sha256": parser_authorities[name]["authority_sha256"],
+            "execution_context_id": (
+                f"{name}-context-v1-"
+                + hashlib.sha256(canonical_json_bytes(context)).hexdigest()
+            ),
+            "ordinal_binding_policy": "EXPLICIT_WORKLOAD_EXECUTION_AUTHORITY_V1",
+        }
+    key = {
+        "workload_id": workload_id,
+        "matched_execution_id": matched_execution_id,
+        **launch_identity,
+    }
+    return seal_model(
+        {
+            "schema_version": 1,
+            "artifact_kind": "EVALUATOR_WORKLOAD_EXECUTION_AUTHORITY",
+            "schema_sha256": hashlib.sha256(schema_bytes).hexdigest(),
+            "contract_mode": "FIXTURE_ONLY_V2_NON_AUTHORITATIVE",
+            "external_admission": {
+                "status": "FIXTURE_ONLY_NON_AUTHORITATIVE",
+                "detached_admission_sha256": None,
+                "trust_anchor_id": None,
+                "trust_anchor_sha256": None,
+            },
+            "issuance_claim": {
+                "phase": "BEFORE_LABEL_COLLECTION",
+                "input_policy": "TARGET_FREE_NO_LABEL_OR_PREDICTION_INPUTS",
+                "execution_nonce": execution_nonce,
+                "workload_id_rule": "SHA256_CANONICAL_WORKLOAD_V1",
+                "matched_execution_id_rule": "SHA256_CANONICAL_MATCHED_EXECUTION_V1",
+            },
+            "workload_id": workload_id,
+            "matched_execution_id": matched_execution_id,
+            "executable_sha256": workload_core["executable_sha256"],
+            "argv": workload_core["argv"],
+            "shape": workload_core["shape"],
+            "architecture": workload_core["architecture"],
+            "kernel_family": workload_core["kernel_family"],
+            "source_contracts": source_contracts,
+            "expected_launch_count": 1,
+            "expected_launch_roster": [
+                {"launch_key": key, "kernel_family": "claim-test-family"}
+            ],
+        }
+    )
+
+
+def _bind_runtime_inputs_to_authority(
+    inputs: _RuntimeInputs, authority: Mapping[str, Any]
+) -> _RuntimeInputs:
+    launch_key = deepcopy(authority["expected_launch_roster"][0]["launch_key"])
+    manifest = load_json_file_strict(inputs.manifest_path)
+    assert isinstance(manifest, dict)
+    manifest["scope"] = "claim-runtime-production:v1"
+    manifest["launches"][0]["launch_key"] = deepcopy(launch_key)
+    inputs.manifest_path.write_text(
+        json.dumps(manifest, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    result = deepcopy(inputs.result_document)
+    result["launches"][0]["launch_key"] = deepcopy(launch_key)
+    result["diagnostics"]["per_launch"][0]["launch_key"] = deepcopy(launch_key)
+    result["configuration_identity"]["run_manifest_sha256"] = (
+        bench._sha256_canonical(manifest)
+    )
+    result["result_sha256"] = canonical_sha256(result, "result_sha256")
+    validate_result(result)
+    return _RuntimeInputs(
+        repo_root=inputs.repo_root,
+        binary_path=inputs.binary_path,
+        manifest_path=inputs.manifest_path,
+        result_document=result,
+        result_bytes=_canonical_line(result),
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class _ClaimFixture:
+    inputs: _RuntimeInputs
+    runtime_path: Path
+    workload_authority_path: Path
+    evaluator_authority_path: Path
+    accuracy_report_path: Path
+    content_manifest_path: Path
+    content_manifest_sha256: str
+    source_authority_path: Path
+    source_authority_sha256: str
+
+
+def _production_accuracy_report(runtime: Mapping[str, Any]) -> dict[str, Any]:
+    report = score.score_synthetic_fixture(
+        EVALUATOR_FIXTURES / "sim_result.v2.json",
+        EVALUATOR_FIXTURES / "matched_labels.v1.json",
+        EVALUATOR_FIXTURES / "synthetic_matched_label_authority.v1.json",
+        EVALUATOR_FIXTURES / "synthetic_evaluator_build_identity.v1.json",
+        fixture_id="evaluator-mvp-canary-v1",
+    )
+    binding = runtime["sim_result_binding"]
+    identities = report["identities"]
+    identities["report_id"] = "production-runtime-claim-v1"
+    identities["result_file_sha256"] = binding["file_sha256"]
+    identities["result_canonical_sha256"] = binding["result_sha256"]
+    identities["arch_card_id"] = binding["arch_card_identity"]["card_id"]
+    identities["arch_card_sha256"] = binding["arch_card_identity"]["card_sha256"]
+    identities["binary_architecture"] = binding["arch_card_identity"]["sm_arch"]
+    identities["gpu_sku"] = binding["arch_card_identity"]["sku"]
+    identities["simulator_git_dirty"] = False
+    identities["simulator_build_claimability"] = {
+        "status": "claimable",
+        "basis": "clean_build",
+    }
+    identities["evaluator_git_dirty"] = False
+    identities["evaluator_build_claimability"] = {
+        "status": "claimable",
+        "basis": "clean_build",
+    }
+    report["report_sha256"] = canonical_sha256(report, "report_sha256")
+    labels = identities["label_binding"]
+    validate_report(
+        report,
+        label_authority=MatchedLabelAuthority(
+            matched_labels_sha256=labels["matched_labels_sha256"],
+            label_set_id=labels["label_set_id"],
+            label_set_sha256=labels["label_set_sha256"],
+            crosswalk_id=labels["crosswalk_id"],
+            crosswalk_sha256=labels["crosswalk_sha256"],
+        ),
+    )
+    return report
+
+
+def _write_json_line(path: Path, document: Mapping[str, Any]) -> None:
+    path.write_bytes(_canonical_line(dict(document)))
+
+
+def _file_manifest_row(role: str, path: Path) -> dict[str, Any]:
+    payload = path.read_bytes()
+    return {
+        "role": role,
+        "path": str(path.absolute()),
+        "size_bytes": len(payload),
+        "sha256": hashlib.sha256(payload).hexdigest(),
+    }
+
+
+def _detached_evaluator_authority(
+    runtime: Mapping[str, Any],
+    workload: Mapping[str, Any],
+    report: Mapping[str, Any],
+    report_path: Path,
+    result: Mapping[str, Any],
+) -> dict[str, Any]:
+    derived = bench._runtime_derived_binding(runtime)
+    labels = report["identities"]["label_binding"]
+    detached_labels = {
+        name: labels[name]
+        for name in (
+            "matched_labels_sha256",
+            "label_set_id",
+            "label_set_sha256",
+            "crosswalk_id",
+            "crosswalk_sha256",
+        )
+    }
+    authority = {
+        "schema_version": "detached_production_evaluator_authority.v1",
+        "authority_id": "claim-test-production-evaluator-v1",
+        "authority_role": "detached_production_accuracy_report_authority",
+        "contract_mode": "FIXTURE_ONLY_NON_AUTHORITATIVE",
+        "admission_status": "admitted",
+        "workload_execution_authority_model_seal_sha256": workload[
+            "model_seal_sha256"
+        ],
+        "result_binding": {
+            "file_sha256": runtime["sim_result_binding"]["file_sha256"],
+            "result_sha256": runtime["sim_result_binding"]["result_sha256"],
+        },
+        "prediction_binding": bench._evaluator_prediction_binding(
+            result,
+            report,
+            detached_labels,
+        ),
+        "report_binding": {
+            "file_sha256": hashlib.sha256(report_path.read_bytes()).hexdigest(),
+            "report_id": report["identities"]["report_id"],
+            "report_sha256": report["report_sha256"],
+        },
+        "label_authority": detached_labels,
+        "bindings": {
+            name: derived[name]
+            for name in bench._EVALUATOR_BINDING_HASH_KEYS
+        },
+        "authority_sha256": "0" * 64,
+    }
+    authority["authority_sha256"] = canonical_sha256(
+        authority, "authority_sha256"
+    )
+    return authority
+
+
+def _claim_content_manifest(
+    fixture_paths: Mapping[str, Path],
+    runtime: Mapping[str, Any],
+    workload: Mapping[str, Any],
+    *,
+    classification: str = "production",
+    admission_status: str = "admitted",
+) -> dict[str, Any]:
+    derived = bench._runtime_derived_binding(runtime)
+    manifest = {
+        "schema_version": "runtime_claim_content_manifest.v1",
+        "manifest_id": "claim-test-external-content-v1",
+        "authority_role": "external_runtime_claim_content_anchor",
+        "workload_tier_authority": {
+            "tier_id": "T-mid",
+            "admission_status": admission_status,
+            "classification": classification,
+            "workload_execution_authority_model_seal_sha256": workload[
+                "model_seal_sha256"
+            ],
+            **{
+                name: derived[name]
+                for name in bench._EVALUATOR_BINDING_HASH_KEYS
+            },
+        },
+        "files": [
+            _file_manifest_row(role, fixture_paths[role])
+            for role in bench._CLAIM_FILE_ROLES
+        ],
+        "manifest_sha256": "0" * 64,
+    }
+    manifest["manifest_sha256"] = canonical_sha256(
+        manifest, "manifest_sha256"
+    )
+    return manifest
+
+
+def _prepare_claim_runtime(
+    tmp_path: Path,
+    *,
+    workload_executable_sha256: str | None = None,
+) -> tuple[_RuntimeInputs, dict[str, Any], dict[str, Any], Path, Path]:
+    original = _runtime_inputs(tmp_path, clean_build=True)
+    workload = _production_workload_authority(
+        original,
+        executable_sha256=workload_executable_sha256,
+    )
+    inputs = _bind_runtime_inputs_to_authority(original, workload)
+    workload_path = tmp_path / "workload-execution-authority.v1.json"
+    workload_path.write_bytes(canonical_json_bytes(workload))
+    runtime_path = tmp_path / "claimable-runtime.v1.json"
+    runtime = _record(
+        inputs,
+        runtime_path,
+        _SyntheticSpawn([inputs.result_bytes], [100] * 6),
+    )
+    return inputs, workload, runtime, workload_path, runtime_path
+
+
+def _write_claim_sidecars(
+    tmp_path: Path,
+    runtime: Mapping[str, Any],
+    workload: Mapping[str, Any],
+    result: Mapping[str, Any],
+) -> tuple[Path, Path]:
+    report = _production_accuracy_report(runtime)
+    report_path = tmp_path / "production-accuracy-report.v1.json"
+    _write_json_line(report_path, report)
+    evaluator = _detached_evaluator_authority(
+        runtime, workload, report, report_path, result
+    )
+    evaluator_path = tmp_path / "detached-evaluator-authority.v1.json"
+    _write_json_line(evaluator_path, evaluator)
+    return report_path, evaluator_path
+
+
+def _fixture_source_authority(
+    inputs: _RuntimeInputs,
+    runtime: Mapping[str, Any],
+) -> dict[str, Any]:
+    producer_path = bench.ROOT / bench._CLAIM_PRODUCER_RELATIVE
+    schema_path = bench.ROOT / bench._CLAIM_SCHEMA_RELATIVE
+    authority = {
+        "schema_version": "runtime_claim_source_authority.v1",
+        "authority_role": "detached_clean_source_gate_authority",
+        "contract_mode": "FIXTURE_ONLY_NON_AUTHORITATIVE",
+        "source_git_commit": runtime["sim_result_binding"]["build_identity"][
+            "sim_git_commit"
+        ],
+        "source_clean": True,
+        "current_source": "matched",
+        "gate": {
+            "content_manifest_sha256": hashlib.sha256(
+                b"fixture-clean-source-gate-content"
+            ).hexdigest(),
+            "receipt_sha256": hashlib.sha256(
+                b"fixture-clean-source-gate-receipt"
+            ).hexdigest(),
+        },
+        "producer_files": {
+            bench._CLAIM_PRODUCER_RELATIVE.as_posix(): {
+                "size_bytes": producer_path.stat().st_size,
+                "sha256": hashlib.sha256(producer_path.read_bytes()).hexdigest(),
+            },
+            bench._CLAIM_SCHEMA_RELATIVE.as_posix(): {
+                "size_bytes": schema_path.stat().st_size,
+                "sha256": hashlib.sha256(schema_path.read_bytes()).hexdigest(),
+            },
+        },
+        "build": {
+            "size_bytes": inputs.binary_path.stat().st_size,
+            "sha256": hashlib.sha256(inputs.binary_path.read_bytes()).hexdigest(),
+            "cargo_profile": "release",
+        },
+        "authority_sha256": "0" * 64,
+    }
+    authority["authority_sha256"] = canonical_sha256(
+        authority, "authority_sha256"
+    )
+    return authority
+
+
+def _claim_fixture(
+    tmp_path: Path,
+    *,
+    classification: str = "production",
+    admission_status: str = "admitted",
+    workload_executable_sha256: str | None = None,
+) -> _ClaimFixture:
+    inputs, workload, runtime, workload_path, runtime_path = (
+        _prepare_claim_runtime(
+            tmp_path,
+            workload_executable_sha256=workload_executable_sha256,
+        )
+    )
+    report_path, evaluator_path = _write_claim_sidecars(
+        tmp_path, runtime, workload, inputs.result_document
+    )
+    source_path = tmp_path / "detached-source-authority.v1.json"
+    _write_json_line(source_path, _fixture_source_authority(inputs, runtime))
+    content_path = tmp_path / "external-content-manifest.v1.json"
+    content = _claim_content_manifest(
+        {
+            "accuracy_report": report_path,
+            "evaluator_authority": evaluator_path,
+            "runtime_record": runtime_path,
+            "source_authority": source_path,
+            "workload_execution_authority": workload_path,
+        },
+        runtime,
+        workload,
+        classification=classification,
+        admission_status=admission_status,
+    )
+    _write_json_line(content_path, content)
+    return _ClaimFixture(
+        inputs,
+        runtime_path,
+        workload_path,
+        evaluator_path,
+        report_path,
+        content_path,
+        hashlib.sha256(content_path.read_bytes()).hexdigest(),
+        source_path,
+        hashlib.sha256(source_path.read_bytes()).hexdigest(),
+    )
+
+
+def _rewrite_claim_content_manifest(
+    path: Path, content: dict[str, Any]
+) -> str:
+    content["manifest_sha256"] = canonical_sha256(content, "manifest_sha256")
+    _write_json_line(path, content)
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _issue_claim(
+    fixture: _ClaimFixture, output: Path
+) -> dict[str, Any]:
+    return bench._claim_runtime_fixture(
+        fixture.runtime_path,
+        output,
+        workload_execution_authority_path=fixture.workload_authority_path,
+        evaluator_authority_path=fixture.evaluator_authority_path,
+        accuracy_report_path=fixture.accuracy_report_path,
+        content_manifest_path=fixture.content_manifest_path,
+        source_authority_path=fixture.source_authority_path,
+        expected_content_manifest_sha256=fixture.content_manifest_sha256,
+        expected_source_authority_sha256=fixture.source_authority_sha256,
+        repo_root=fixture.inputs.repo_root,
+    )
+
+
+
+def test_detached_runtime_claim_requires_all_exact_post_result_evidence(
+    tmp_path: Path,
+) -> None:
+    fixture = _claim_fixture(tmp_path)
+
+    claim = _issue_claim(fixture, tmp_path / "runtime-claim.v1.json")
+
+    assert claim["contract_mode"] == "FIXTURE_ONLY_NON_AUTHORITATIVE"
+    assert claim["claimability"] == {
+        "status": "unclaimable",
+        "reason": bench._FIXTURE_CLAIM_REASON,
+    }
+    assert claim["result_binding"]["status"] == "bound"
+    assert claim["accuracy_binding"]["status"] == "bound"
+    assert claim["content_manifest_anchor"]["external_file_sha256"] == (
+        fixture.content_manifest_sha256
+    )
+    assert bench._load_runtime_claim(
+        tmp_path / "runtime-claim.v1.json",
+        expected_content_manifest_sha256=fixture.content_manifest_sha256,
+        expected_source_authority_sha256=fixture.source_authority_sha256,
+        repo_root=fixture.inputs.repo_root,
+    ) == claim
+
+
+def test_production_runtime_claim_fails_before_caller_authorities_are_opened(
+    tmp_path: Path,
+) -> None:
+    fixture = _claim_fixture(tmp_path)
+    output = tmp_path / "production-claim.json"
+
+    with pytest.raises(
+        bench.RuntimeRecorderError,
+        match="RUNTIME_CLAIM_AUTHORITY_UNAVAILABLE",
+    ):
+        bench._claim_runtime(
+            fixture.runtime_path,
+            output,
+            workload_execution_authority_path=fixture.workload_authority_path,
+            evaluator_authority_path=fixture.evaluator_authority_path,
+            accuracy_report_path=fixture.accuracy_report_path,
+            content_manifest_path=fixture.content_manifest_path,
+            source_authority_path=fixture.source_authority_path,
+            expected_content_manifest_sha256=fixture.content_manifest_sha256,
+            expected_source_authority_sha256=fixture.source_authority_sha256,
+            repo_root=fixture.inputs.repo_root,
+        )
+
+    assert not output.exists()
+    assert not output.with_name(output.name + bench._CLAIM_EVIDENCE_SUFFIX).exists()
+    with pytest.raises(TypeError):
+        bench.PRODUCTION_RUNTIME_SOURCE_AUTHORITIES["self-installed"] = "0" * 64
+
+
+
+def test_claim_cli_emits_canonical_typed_authority_failure(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    result = bench.main(
+        [
+            "claim",
+            str(tmp_path / "malformed-runtime"),
+            str(tmp_path / "claim.json"),
+            "-",
+            "-",
+            "-",
+            "-",
+            "-",
+            "-",
+            "-",
+        ]
+    )
+
+    captured = capsys.readouterr()
+    assert result == 1
+    assert captured.out == ""
+    assert json.loads(captured.err) == {
+        "code": "RUNTIME_CLAIM_AUTHORITY_UNAVAILABLE",
+        "detail": "production runtime claim authorities are not independently installed",
+    }
+    assert captured.err == (
+        json.dumps(
+            json.loads(captured.err),
+            ensure_ascii=False,
+            allow_nan=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        )
+        + "\n"
+    )
+
+
+def test_clean_measured_runtime_without_authorities_is_typed_unclaimable(
+    tmp_path: Path,
+) -> None:
+    inputs = _runtime_inputs(tmp_path, clean_build=True)
+    runtime_path = tmp_path / "measured-no-authority.json"
+    _record(
+        inputs,
+        runtime_path,
+        _SyntheticSpawn([inputs.result_bytes], [100] * 6),
+    )
+
+    claim = bench._claim_runtime_fixture(
+        runtime_path,
+        tmp_path / "missing-authority-claim.json",
+        workload_execution_authority_path=None,
+        evaluator_authority_path=None,
+        accuracy_report_path=None,
+        content_manifest_path=None,
+        source_authority_path=None,
+        expected_content_manifest_sha256=None,
+        expected_source_authority_sha256=None,
+        repo_root=inputs.repo_root,
+    )
+
+    assert claim["claimability"] == {
+        "status": "unclaimable",
+        "reason": "WORKLOAD_EXECUTION_AUTHORITY_UNAVAILABLE",
+    }
+
+
+@pytest.mark.parametrize(
+    ("classification", "admission_status", "reason"),
+    (
+        ("fixture", "admitted", "WORKLOAD_TIER_FIXTURE"),
+        ("production", "unadmitted", "WORKLOAD_TIER_UNADMITTED"),
+    ),
+)
+def test_fixture_or_unadmitted_workload_tier_is_unclaimable(
+    tmp_path: Path,
+    classification: str,
+    admission_status: str,
+    reason: str,
+) -> None:
+    fixture = _claim_fixture(
+        tmp_path,
+        classification=classification,
+        admission_status=admission_status,
+    )
+
+    claim = _issue_claim(fixture, tmp_path / "tier-claim.json")
+
+    assert claim["claimability"] == {"status": "unclaimable", "reason": reason}
+
+
+def _runtime_for_claim_outcome(
+    tmp_path: Path, scenario: str
+) -> tuple[_RuntimeInputs, Path]:
+    inputs = _runtime_inputs(tmp_path, clean_build=scenario != "dirty")
+    if scenario == "dirty":
+        spawn = _SyntheticSpawn([inputs.result_bytes], [100] * 6)
+    elif scenario == "noisy":
+        spawn = _SyntheticSpawn(
+            [inputs.result_bytes],
+            [100, 100, 200, 100, 200, 100, 200, 100, 200, 100],
+        )
+    elif scenario == "failed":
+        spawn = _SyntheticSpawn([b"failed\n"], [100], return_codes=[7])
+    elif scenario == "timeout":
+        spawn = _SyntheticSpawn([b""], [100], return_codes=[-9], timed_out=[True])
+    else:
+        spawn = _SyntheticSpawn(
+            [inputs.result_bytes, _alternate_result(inputs)], [100] * 6
+        )
+    runtime_path = tmp_path / f"{scenario}-runtime.json"
+    _record(inputs, runtime_path, spawn)
+    return inputs, runtime_path
+
+
+@pytest.mark.parametrize(
+    ("scenario", "reason"),
+    (
+        ("dirty", "DIRTY_BUILD_UNCLAIMABLE"),
+        ("noisy", "RUNTIME_NOISY"),
+        ("failed", "RUNTIME_EXECUTION_FAILED"),
+        ("timeout", "RUNTIME_TIMEOUT"),
+        ("nondeterministic", "NONDETERMINISTIC_RESULT"),
+    ),
+)
+def test_nonfinal_runtime_outcomes_remain_typed_unclaimable(
+    tmp_path: Path, scenario: str, reason: str
+) -> None:
+    inputs, runtime_path = _runtime_for_claim_outcome(tmp_path, scenario)
+
+    claim = bench._claim_runtime_fixture(
+        runtime_path,
+        tmp_path / f"{scenario}-claim.json",
+        workload_execution_authority_path=None,
+        evaluator_authority_path=None,
+        accuracy_report_path=None,
+        content_manifest_path=None,
+        source_authority_path=None,
+        expected_content_manifest_sha256=None,
+        expected_source_authority_sha256=None,
+        repo_root=inputs.repo_root,
+    )
+
+    assert claim["claimability"] == {"status": "unclaimable", "reason": reason}
+
+
+def test_runtime_claim_rejects_forged_external_manifest_hash(tmp_path: Path) -> None:
+    fixture = _claim_fixture(tmp_path)
+
+    with pytest.raises(
+        bench.RuntimeRecorderError,
+        match="external content manifest file hash does not match",
+    ):
+        bench._claim_runtime_fixture(
+            fixture.runtime_path,
+            tmp_path / "forged-manifest-claim.json",
+            workload_execution_authority_path=fixture.workload_authority_path,
+            evaluator_authority_path=fixture.evaluator_authority_path,
+            accuracy_report_path=fixture.accuracy_report_path,
+            content_manifest_path=fixture.content_manifest_path,
+            source_authority_path=fixture.source_authority_path,
+            expected_content_manifest_sha256="0" * 64,
+            expected_source_authority_sha256=fixture.source_authority_sha256,
+            repo_root=fixture.inputs.repo_root,
+        )
+
+
+def test_runtime_claim_rejects_forged_evaluator_authority(tmp_path: Path) -> None:
+    fixture = _claim_fixture(tmp_path)
+    evaluator = load_json_file_strict(fixture.evaluator_authority_path)
+    assert isinstance(evaluator, dict)
+    evaluator["report_binding"]["file_sha256"] = "f" * 64
+    evaluator["authority_sha256"] = canonical_sha256(
+        evaluator, "authority_sha256"
+    )
+    _write_json_line(fixture.evaluator_authority_path, evaluator)
+    content = load_json_file_strict(fixture.content_manifest_path)
+    assert isinstance(content, dict)
+    for row in content["files"]:
+        if row["role"] == "evaluator_authority":
+            row.update(
+                _file_manifest_row(
+                    "evaluator_authority", fixture.evaluator_authority_path
+                )
+            )
+    content["manifest_sha256"] = canonical_sha256(content, "manifest_sha256")
+    _write_json_line(fixture.content_manifest_path, content)
+    external_hash = hashlib.sha256(
+        fixture.content_manifest_path.read_bytes()
+    ).hexdigest()
+
+    with pytest.raises(
+        bench.RuntimeRecorderError,
+        match="different accuracy report",
+    ):
+        bench._claim_runtime_fixture(
+            fixture.runtime_path,
+            tmp_path / "forged-evaluator-claim.json",
+            workload_execution_authority_path=fixture.workload_authority_path,
+            evaluator_authority_path=fixture.evaluator_authority_path,
+            accuracy_report_path=fixture.accuracy_report_path,
+            content_manifest_path=fixture.content_manifest_path,
+            source_authority_path=fixture.source_authority_path,
+            expected_content_manifest_sha256=external_hash,
+            expected_source_authority_sha256=fixture.source_authority_sha256,
+            repo_root=fixture.inputs.repo_root,
+        )
+
+
+def test_runtime_claim_rejects_report_result_prediction_semantic_mismatch(
+    tmp_path: Path,
+) -> None:
+    fixture = _claim_fixture(tmp_path)
+    evaluator = load_json_file_strict(fixture.evaluator_authority_path)
+    assert isinstance(evaluator, dict)
+    evaluator["prediction_binding"]["projection_sha256"] = "f" * 64
+    evaluator["authority_sha256"] = canonical_sha256(
+        evaluator, "authority_sha256"
+    )
+    _write_json_line(fixture.evaluator_authority_path, evaluator)
+    content = load_json_file_strict(fixture.content_manifest_path)
+    assert isinstance(content, dict)
+    for row in content["files"]:
+        if row["role"] == "evaluator_authority":
+            row.update(
+                _file_manifest_row(
+                    "evaluator_authority", fixture.evaluator_authority_path
+                )
+            )
+    external_hash = _rewrite_claim_content_manifest(
+        fixture.content_manifest_path, content
+    )
+
+    with pytest.raises(
+        bench.RuntimeRecorderError,
+        match="prediction semantics differ from sealed result",
+    ):
+        bench._claim_runtime_fixture(
+            fixture.runtime_path,
+            tmp_path / "semantic-mismatch-claim.json",
+            workload_execution_authority_path=fixture.workload_authority_path,
+            evaluator_authority_path=fixture.evaluator_authority_path,
+            accuracy_report_path=fixture.accuracy_report_path,
+            content_manifest_path=fixture.content_manifest_path,
+            source_authority_path=fixture.source_authority_path,
+            expected_content_manifest_sha256=external_hash,
+            expected_source_authority_sha256=fixture.source_authority_sha256,
+            repo_root=fixture.inputs.repo_root,
+        )
+
+
+def test_runtime_claim_rejects_workload_executable_mismatch(tmp_path: Path) -> None:
+    fixture = _claim_fixture(
+        tmp_path,
+        workload_executable_sha256="f" * 64,
+    )
+
+    with pytest.raises(
+        bench.RuntimeRecorderError,
+        match="workload authority cohort or architecture differs from runtime",
+    ):
+        _issue_claim(fixture, tmp_path / "wrong-executable-claim.json")
+
+
+def test_runtime_claim_rejects_forged_clean_source_commit(tmp_path: Path) -> None:
+    fixture = _claim_fixture(tmp_path)
+    source = load_json_file_strict(fixture.source_authority_path)
+    assert isinstance(source, dict)
+    source["source_git_commit"] = "f" * 40
+    source["authority_sha256"] = canonical_sha256(source, "authority_sha256")
+    _write_json_line(fixture.source_authority_path, source)
+    content = load_json_file_strict(fixture.content_manifest_path)
+    assert isinstance(content, dict)
+    for row in content["files"]:
+        if row["role"] == "source_authority":
+            row.update(
+                _file_manifest_row("source_authority", fixture.source_authority_path)
+            )
+    external_hash = _rewrite_claim_content_manifest(
+        fixture.content_manifest_path, content
+    )
+    source_hash = hashlib.sha256(
+        fixture.source_authority_path.read_bytes()
+    ).hexdigest()
+
+    with pytest.raises(
+        bench.RuntimeRecorderError,
+        match="does not bind exact producer, schema, commit, and build bytes",
+    ):
+        bench._claim_runtime_fixture(
+            fixture.runtime_path,
+            tmp_path / "forged-source-claim.json",
+            workload_execution_authority_path=fixture.workload_authority_path,
+            evaluator_authority_path=fixture.evaluator_authority_path,
+            accuracy_report_path=fixture.accuracy_report_path,
+            content_manifest_path=fixture.content_manifest_path,
+            source_authority_path=fixture.source_authority_path,
+            expected_content_manifest_sha256=external_hash,
+            expected_source_authority_sha256=source_hash,
+            repo_root=fixture.inputs.repo_root,
+        )
+
+
+def test_runtime_claim_replay_is_detached_from_original_inputs(tmp_path: Path) -> None:
+    fixture = _claim_fixture(tmp_path)
+    output = tmp_path / "detached-replay-claim.json"
+    claim = _issue_claim(fixture, output)
+    runtime = load_json_file_strict(fixture.runtime_path)
+    assert isinstance(runtime, dict)
+    sample_paths = {
+        tmp_path / sample[stream]["path"]
+        for sample in runtime["samples"]
+        for stream in ("stdout", "stderr")
+    }
+    for path in sample_paths:
+        path.unlink()
+    for path in (
+        fixture.inputs.binary_path,
+        fixture.inputs.manifest_path,
+        fixture.runtime_path,
+        fixture.workload_authority_path,
+        fixture.evaluator_authority_path,
+        fixture.accuracy_report_path,
+        fixture.content_manifest_path,
+        fixture.source_authority_path,
+    ):
+        path.unlink()
+
+    assert bench._load_runtime_claim(
+        output,
+        expected_content_manifest_sha256=fixture.content_manifest_sha256,
+        expected_source_authority_sha256=fixture.source_authority_sha256,
+        repo_root=tmp_path / "deleted-checkout",
+    ) == claim
+
+
+@pytest.mark.parametrize(
+    "malformation",
+    ("non_object", "bool_size", "float_size", "string_size", "null_path", "extra_key"),
+)
+def test_runtime_claim_rejects_malformed_content_manifest_rows(
+    tmp_path: Path, malformation: str
+) -> None:
+    fixture = _claim_fixture(tmp_path)
+    content = load_json_file_strict(fixture.content_manifest_path)
+    assert isinstance(content, dict)
+    if malformation == "non_object":
+        content["files"][0] = None
+    elif malformation == "bool_size":
+        content["files"][0]["size_bytes"] = True
+    elif malformation == "float_size":
+        content["files"][0]["size_bytes"] = 1.5
+    elif malformation == "string_size":
+        content["files"][0]["size_bytes"] = "1"
+    elif malformation == "null_path":
+        content["files"][0]["path"] = None
+    else:
+        content["files"][0]["extra"] = "forged"
+    external_hash = _rewrite_claim_content_manifest(
+        fixture.content_manifest_path, content
+    )
+
+    with pytest.raises(bench.RuntimeRecorderError):
+        bench._claim_runtime_fixture(
+            fixture.runtime_path,
+            tmp_path / f"malformed-{malformation}-claim.json",
+            workload_execution_authority_path=fixture.workload_authority_path,
+            evaluator_authority_path=fixture.evaluator_authority_path,
+            accuracy_report_path=fixture.accuracy_report_path,
+            content_manifest_path=fixture.content_manifest_path,
+            source_authority_path=fixture.source_authority_path,
+            expected_content_manifest_sha256=external_hash,
+            expected_source_authority_sha256=fixture.source_authority_sha256,
+            repo_root=fixture.inputs.repo_root,
+        )
+
+
+def test_runtime_claim_rejects_postrecord_result_artifact_tamper(
+    tmp_path: Path,
+) -> None:
+    fixture = _claim_fixture(tmp_path)
+    runtime = load_json_file_strict(fixture.runtime_path)
+    assert isinstance(runtime, dict)
+    artifact = tmp_path / runtime["samples"][0]["stdout"]["path"]
+    payload = artifact.read_bytes()
+    artifact.write_bytes(bytes([payload[0] ^ 1]) + payload[1:])
+
+    with pytest.raises(
+        bench.RuntimeRecorderError,
+        match="RUNTIME_SAMPLE_IDENTITY_MISMATCH",
+    ):
+        _issue_claim(fixture, tmp_path / "tampered-artifact-claim.json")
+
+
+def test_runtime_claim_requires_current_checkout_inputs(tmp_path: Path) -> None:
+    fixture = _claim_fixture(tmp_path)
+    fixture.inputs.binary_path.unlink()
+
+    with pytest.raises(bench.RuntimeRecorderError, match="RUNTIME_INPUT_OPEN_FAILED"):
+        _issue_claim(fixture, tmp_path / "missing-checkout-claim.json")
+
+
+def test_runtime_claim_validator_recomputes_serialized_claimability(
+    tmp_path: Path,
+) -> None:
+    fixture = _claim_fixture(tmp_path)
+    claim = _issue_claim(fixture, tmp_path / "valid-runtime-claim.json")
+    claim["claimability"] = {
+        "status": "unclaimable",
+        "reason": "WORKLOAD_TIER_UNADMITTED",
+    }
+    claim["claim_sha256"] = canonical_sha256(claim, "claim_sha256")
+
+    with pytest.raises(
+        bench.RuntimeRecorderError,
+        match="claimability is not derived",
+    ):
+        bench.validate_runtime_claim(
+            claim,
+            expected_content_manifest_sha256=fixture.content_manifest_sha256,
+            expected_source_authority_sha256=fixture.source_authority_sha256,
+            repo_root=fixture.inputs.repo_root,
+        )
 
 
 def test_public_record_boundary_has_no_binary_or_spawn_override() -> None:

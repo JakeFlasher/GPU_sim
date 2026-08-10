@@ -1,0 +1,493 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gpu-simulator.local/eval/schemas/sim_profile_record.v1.schema.json",
+  "title": "Target-free simulator CPU profile record v1",
+  "description": "Closed identity and artifact manifest for one user-space Linux perf profile of the repository release sim-run executable. It contains no target, score, comparison, or calibration observation surface.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "record_sha256",
+    "created_at_utc",
+    "authority_role",
+    "claimability",
+    "protocol",
+    "profiler_identity",
+    "configuration_isolation",
+    "source_authority",
+    "supervision",
+    "host_identity",
+    "environment",
+    "environment_sha256",
+    "invocations",
+    "inputs",
+    "sim_result_binding",
+    "phase_diagnostics",
+    "artifacts",
+    "publication",
+    "outcome"
+  ],
+  "properties": {
+    "schema_version": {"const": "sim_profile_record.v1"},
+    "record_sha256": {"$ref": "#/$defs/sha256"},
+    "created_at_utc": {"type": "string", "format": "date-time", "pattern": "Z$"},
+    "authority_role": {"const": "target_free_cpu_profile_diagnostic_only"},
+    "claimability": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "basis"],
+      "properties": {
+        "status": {"const": "claimable"},
+        "basis": {"const": "externally_anchored_clean_source_and_matching_clean_release.v1"}
+      }
+    },
+    "protocol": {"$ref": "#/$defs/protocol"},
+    "profiler_identity": {"$ref": "#/$defs/profilerIdentity"},
+    "configuration_isolation": {"$ref": "#/$defs/configurationIsolation"},
+    "source_authority": {"$ref": "#/$defs/sourceAuthority"},
+    "supervision": {"$ref": "#/$defs/supervision"},
+    "host_identity": {"$ref": "#/$defs/hostIdentity"},
+    "environment": {
+      "type": "array",
+      "minItems": 9,
+      "maxItems": 9,
+      "items": {"$ref": "#/$defs/environmentEntry"}
+    },
+    "environment_sha256": {"$ref": "#/$defs/sha256"},
+    "invocations": {"$ref": "#/$defs/invocations"},
+    "inputs": {"$ref": "#/$defs/inputs"},
+    "sim_result_binding": {"$ref": "#/$defs/resultBinding"},
+    "phase_diagnostics": {"$ref": "#/$defs/phaseDiagnostics"},
+    "artifacts": {
+      "type": "array",
+      "minItems": 5,
+      "maxItems": 5,
+      "items": {"$ref": "#/$defs/artifactIdentity"}
+    },
+    "publication": {"$ref": "#/$defs/publication"},
+    "outcome": {"$ref": "#/$defs/outcome"}
+  },
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "nonempty": {"type": "string", "minLength": 1, "maxLength": 4096},
+    "absolutePath": {"type": "string", "minLength": 1, "maxLength": 4096, "pattern": "^/"},
+    "relativePath": {"type": "string", "minLength": 1, "maxLength": 255, "pattern": "^[^/]+$"},
+    "u64": {"type": "integer", "minimum": 0, "maximum": 18446744073709551615},
+    "positiveU64": {"type": "integer", "minimum": 1, "maximum": 18446744073709551615},
+    "fileIdentity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "size_bytes", "sha256"],
+      "properties": {
+        "path": {"$ref": "#/$defs/absolutePath"},
+        "size_bytes": {"$ref": "#/$defs/positiveU64"},
+        "sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "artifactIdentity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "size_bytes", "sha256"],
+      "properties": {
+        "path": {"$ref": "#/$defs/relativePath"},
+        "size_bytes": {"$ref": "#/$defs/u64"},
+        "sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "protocol": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["platform", "event", "call_graph", "frequency_hz", "symbolization", "determinism_gate", "timeout_ns"],
+      "properties": {
+        "platform": {"const": "linux_perf_user_space_only.v1"},
+        "event": {"const": "cycles:u"},
+        "call_graph": {"const": "dwarf"},
+        "frequency_hz": {"const": 999},
+        "symbolization": {"const": "perf_report_stdio_dso_symbol.v1"},
+        "determinism_gate": {"const": "direct_then_profiled_sim_result_byte_identity.v1"},
+        "timeout_ns": {"$ref": "#/$defs/positiveU64"}
+      }
+    },
+    "profilerIdentity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "size_bytes", "sha256", "version", "version_stdout_sha256"],
+      "properties": {
+        "path": {"$ref": "#/$defs/absolutePath"},
+        "size_bytes": {"$ref": "#/$defs/positiveU64"},
+        "sha256": {"$ref": "#/$defs/sha256"},
+        "version": {"type": "string", "pattern": "^perf version [^\\r\\n\\u0000]{1,256}$"},
+        "version_stdout_sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "configurationIsolation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mechanism",
+        "environment_variable",
+        "environment_value",
+        "effective_config_probe",
+        "probe_stdout_sha256",
+        "probe_stderr_sha256"
+      ],
+      "properties": {
+        "mechanism": {"const": "documented_perf_config_dev_null_plus_empty_effective_config_probe.v1"},
+        "environment_variable": {"const": "PERF_CONFIG"},
+        "environment_value": {"const": "/dev/null"},
+        "effective_config_probe": {"const": "perf_config_list_empty.v1"},
+        "probe_stdout_sha256": {"const": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"},
+        "probe_stderr_sha256": {"const": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"}
+      }
+    },
+    "contentIdentity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["size_bytes", "sha256"],
+      "properties": {
+        "size_bytes": {"$ref": "#/$defs/positiveU64"},
+        "sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "sourceAuthority": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "generation_path",
+        "content_manifest_sha256",
+        "filesystem_generation_sha256",
+        "receipt_sha256",
+        "source_git_commit",
+        "source_git_tree",
+        "source_git_branch",
+        "repository_root",
+        "tracked_inputs_manifest_sha256",
+        "checked_out_worktree_manifest_sha256",
+        "producer_commit_files",
+        "current_source",
+        "source_clean",
+        "producer_profile",
+        "producer_schema"
+      ],
+      "properties": {
+        "generation_path": {"$ref": "#/$defs/absolutePath"},
+        "content_manifest_sha256": {"$ref": "#/$defs/sha256"},
+        "filesystem_generation_sha256": {"$ref": "#/$defs/sha256"},
+        "receipt_sha256": {"$ref": "#/$defs/sha256"},
+        "source_git_commit": {"type": "string", "pattern": "^(?:[0-9a-f]{40}|[0-9a-f]{64})$"},
+        "source_git_tree": {"type": "string", "pattern": "^(?:[0-9a-f]{40}|[0-9a-f]{64})$"},
+        "source_git_branch": {
+          "oneOf": [
+            {"type": "string", "minLength": 1, "maxLength": 255},
+            {"type": "null"}
+          ]
+        },
+        "repository_root": {"$ref": "#/$defs/absolutePath"},
+        "tracked_inputs_manifest_sha256": {"$ref": "#/$defs/sha256"},
+        "checked_out_worktree_manifest_sha256": {"$ref": "#/$defs/sha256"},
+        "producer_commit_files": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "eval/profile.py",
+            "eval/schemas/sim_profile_record.v1.schema.json"
+          ],
+          "properties": {
+            "eval/profile.py": {"$ref": "#/$defs/contentIdentity"},
+            "eval/schemas/sim_profile_record.v1.schema.json": {"$ref": "#/$defs/contentIdentity"}
+          }
+        },
+        "current_source": {"const": "matched"},
+        "source_clean": {"const": true},
+        "producer_profile": {"$ref": "#/$defs/fileIdentity"},
+        "producer_schema": {"$ref": "#/$defs/fileIdentity"}
+      }
+    },
+    "exactChildSupervision": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["hierarchy", "executable_transport", "termination"],
+      "properties": {
+        "hierarchy": {"const": "profile_producer_exact_child.v1"},
+        "executable_transport": {
+          "enum": [
+            "inherited_retained_release_inode.v1",
+            "inherited_retained_perf_inode.v1"
+          ]
+        },
+        "termination": {"const": "waitid_wnowait_then_wait4_exact_child.v1"}
+      }
+    },
+    "profileSubjectSupervision": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "hierarchy",
+        "pid_authority",
+        "executable_transport",
+        "producer_pid",
+        "retained_descriptor",
+        "argv_path",
+        "descendant_cleanup",
+        "termination"
+      ],
+      "properties": {
+        "hierarchy": {"const": "perf_spawned_descendant_without_independent_pid_authority.v1"},
+        "pid_authority": {"const": "unavailable_not_claimed"},
+        "executable_transport": {"const": "proc_parent_retained_release_inode.v1"},
+        "producer_pid": {"$ref": "#/$defs/positiveU64"},
+        "retained_descriptor": {"type": "integer", "minimum": 3, "maximum": 2147483647},
+        "argv_path": {"$ref": "#/$defs/absolutePath"},
+        "descendant_cleanup": {"const": "perf_session_process_group_terminated_before_wrapper_wait4.v1"},
+        "termination": {"const": "perf_wrapper_zero_exit_plus_valid_byte_identical_result_and_perf_data.v1"}
+      }
+    },
+    "reportInputSupervision": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["transport", "producer_pid", "retained_descriptor", "argv_path"],
+      "properties": {
+        "transport": {"const": "proc_parent_retained_perf_data_inode.v1"},
+        "producer_pid": {"$ref": "#/$defs/positiveU64"},
+        "retained_descriptor": {"type": "integer", "minimum": 3, "maximum": 2147483647},
+        "argv_path": {"$ref": "#/$defs/absolutePath"}
+      }
+    },
+    "supervision": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["reference_subject", "profile_wrapper", "profile_subject", "report_input"],
+      "properties": {
+        "reference_subject": {"$ref": "#/$defs/exactChildSupervision"},
+        "profile_wrapper": {"$ref": "#/$defs/exactChildSupervision"},
+        "profile_subject": {"$ref": "#/$defs/profileSubjectSupervision"},
+        "report_input": {"$ref": "#/$defs/reportInputSupervision"}
+      }
+    },
+    "hostIdentity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["os_name", "kernel_release", "kernel_version", "machine", "cpu_model", "logical_cpu_count", "affinity_cpus", "host_sha256"],
+      "properties": {
+        "os_name": {"const": "Linux"},
+        "kernel_release": {"$ref": "#/$defs/nonempty"},
+        "kernel_version": {"$ref": "#/$defs/nonempty"},
+        "machine": {"$ref": "#/$defs/nonempty"},
+        "cpu_model": {"$ref": "#/$defs/nonempty"},
+        "logical_cpu_count": {"$ref": "#/$defs/positiveU64"},
+        "affinity_cpus": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 65536,
+          "uniqueItems": true,
+          "items": {"type": "integer", "minimum": 0}
+        },
+        "host_sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "environmentEntry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "value"],
+      "properties": {
+        "name": {"type": "string", "pattern": "^[A-Z][A-Z0-9_]{0,127}$"},
+        "value": {"type": "string", "maxLength": 4096}
+      }
+    },
+    "invocation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["argv", "working_directory", "environment_sha256"],
+      "properties": {
+        "argv": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 16,
+          "items": {"$ref": "#/$defs/nonempty"}
+        },
+        "working_directory": {"$ref": "#/$defs/absolutePath"},
+        "environment_sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "invocations": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["config", "version", "reference", "record", "report"],
+      "properties": {
+        "config": {"$ref": "#/$defs/invocation"},
+        "version": {"$ref": "#/$defs/invocation"},
+        "reference": {"$ref": "#/$defs/invocation"},
+        "record": {"$ref": "#/$defs/invocation"},
+        "report": {"$ref": "#/$defs/invocation"}
+      }
+    },
+    "manifestIdentity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "size_bytes", "sha256", "canonical_sha256", "schema_version", "scope"],
+      "properties": {
+        "path": {"$ref": "#/$defs/absolutePath"},
+        "size_bytes": {"$ref": "#/$defs/positiveU64"},
+        "sha256": {"$ref": "#/$defs/sha256"},
+        "canonical_sha256": {"$ref": "#/$defs/sha256"},
+        "schema_version": {"const": 2},
+        "scope": {"$ref": "#/$defs/nonempty"}
+      }
+    },
+    "inputs": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["binary", "manifest"],
+      "properties": {
+        "binary": {"$ref": "#/$defs/fileIdentity"},
+        "manifest": {"$ref": "#/$defs/manifestIdentity"}
+      }
+    },
+    "claimability": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["status", "basis"],
+          "properties": {
+            "status": {"const": "claimable"},
+            "basis": {"const": "clean_build"}
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["status", "reason"],
+          "properties": {
+            "status": {"const": "unclaimable"},
+            "reason": {"const": "dirty_build"}
+          }
+        }
+      ]
+    },
+    "buildIdentity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sim_git_commit", "sim_git_dirty", "binary_sha256", "rustc_version", "cargo_profile", "claimability"],
+      "properties": {
+        "sim_git_commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+        "sim_git_dirty": {"const": false},
+        "binary_sha256": {"$ref": "#/$defs/sha256"},
+        "rustc_version": {"$ref": "#/$defs/nonempty"},
+        "cargo_profile": {"const": "release"},
+        "claimability": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["status", "basis"],
+          "properties": {
+            "status": {"const": "claimable"},
+            "basis": {"const": "clean_build"}
+          }
+        }
+      }
+    },
+    "traceIdentity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["bundle_id", "bundle_path", "bundle_sha256", "wire_version", "total_size_bytes", "record_count", "instruction_count", "identity_sha256"],
+      "properties": {
+        "bundle_id": {"$ref": "#/$defs/nonempty"},
+        "bundle_path": {"$ref": "#/$defs/nonempty"},
+        "bundle_sha256": {"$ref": "#/$defs/sha256"},
+        "wire_version": {"$ref": "#/$defs/nonempty"},
+        "total_size_bytes": {"$ref": "#/$defs/positiveU64"},
+        "record_count": {"$ref": "#/$defs/positiveU64"},
+        "instruction_count": {"$ref": "#/$defs/positiveU64"},
+        "identity_sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "archCardIdentity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["card_id", "card_sha256", "sm_arch", "sku"],
+      "properties": {
+        "card_id": {"$ref": "#/$defs/nonempty"},
+        "card_sha256": {"$ref": "#/$defs/sha256"},
+        "sm_arch": {"$ref": "#/$defs/nonempty"},
+        "sku": {"$ref": "#/$defs/nonempty"}
+      }
+    },
+    "configurationIdentity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["configuration_id", "run_manifest_sha256", "arch_card_sha256", "pchase_card_sha256", "resolved_configuration_sha256"],
+      "properties": {
+        "configuration_id": {"$ref": "#/$defs/nonempty"},
+        "run_manifest_sha256": {"$ref": "#/$defs/sha256"},
+        "arch_card_sha256": {"$ref": "#/$defs/sha256"},
+        "pchase_card_sha256": {"$ref": "#/$defs/sha256"},
+        "resolved_configuration_sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "resultBinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["file_sha256", "result_sha256", "build_identity", "trace_identity", "arch_card_identity", "configuration_identity", "resolved_configuration_sha256"],
+      "properties": {
+        "file_sha256": {"$ref": "#/$defs/sha256"},
+        "result_sha256": {"$ref": "#/$defs/sha256"},
+        "build_identity": {"$ref": "#/$defs/buildIdentity"},
+        "trace_identity": {"$ref": "#/$defs/traceIdentity"},
+        "arch_card_identity": {"$ref": "#/$defs/archCardIdentity"},
+        "configuration_identity": {"$ref": "#/$defs/configurationIdentity"},
+        "resolved_configuration_sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "phase": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["monotonic_start_ns", "monotonic_stop_ns", "wall_time_ns", "user_cpu_ns", "system_cpu_ns", "peak_rss_kib", "return_code", "timed_out"],
+      "properties": {
+        "monotonic_start_ns": {"$ref": "#/$defs/u64"},
+        "monotonic_stop_ns": {"$ref": "#/$defs/positiveU64"},
+        "wall_time_ns": {"$ref": "#/$defs/positiveU64"},
+        "user_cpu_ns": {"$ref": "#/$defs/u64"},
+        "system_cpu_ns": {"$ref": "#/$defs/u64"},
+        "peak_rss_kib": {"$ref": "#/$defs/u64"},
+        "return_code": {"const": 0},
+        "timed_out": {"const": false}
+      }
+    },
+    "phaseDiagnostics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["role", "config", "version", "reference", "record", "report"],
+      "properties": {
+        "role": {"const": "variable_host_diagnostics_outside_sim_result_v2"},
+        "config": {"$ref": "#/$defs/phase"},
+        "version": {"$ref": "#/$defs/phase"},
+        "reference": {"$ref": "#/$defs/phase"},
+        "record": {"$ref": "#/$defs/phase"},
+        "report": {"$ref": "#/$defs/phase"}
+      }
+    },
+    "publication": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["policy", "generation_name", "record_path", "closed_paths"],
+      "properties": {
+        "policy": {"const": "exclusive_immutable_directory_generation.v1"},
+        "generation_name": {"$ref": "#/$defs/relativePath"},
+        "record_path": {"const": "sim_profile_record.v1.json"},
+        "closed_paths": {
+          "type": "array",
+          "minItems": 6,
+          "maxItems": 6,
+          "uniqueItems": true,
+          "items": {"$ref": "#/$defs/relativePath"}
+        }
+      }
+    },
+    "outcome": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status"],
+      "properties": {"status": {"const": "PROFILE_MEASURED"}}
+    }
+  }
+}

@@ -14,6 +14,7 @@ import json
 import math
 import os
 import platform
+import re
 import secrets
 import select
 import signal
@@ -28,25 +29,52 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from fractions import Fraction
 from pathlib import Path
+from types import MappingProxyType
 from typing import Any, Callable, Mapping, Sequence
 
 from jsonschema import ValidationError
 from jsonschema.validators import validator_for
 from referencing import Registry, Resource
 
+from eval.contracts import launch_crosswalk as _launch_crosswalk
+from eval.contracts._common import EvaluatorAuthorityUnavailable
+from eval.contracts.model_seal import RetainedPayloadSnapshot
 from eval.contracts.validation import (
     ContractValidationError,
+    MatchedLabelAuthority,
     canonical_launch_key_token,
     canonical_sha256,
     load_json_file_strict,
     loads_json_strict,
     schema_document,
     validate_manifest,
+    validate_report,
     validate_result,
+)
+from tools.local_labels.immutable_artifact import (
+    ImmutableArtifactError,
+    ImmutableFile,
+    canonical_json_bytes,
+    inspect_immutable_directory_generation,
+    open_retained_regular,
+    publish_directory,
 )
 
 ROOT = Path(__file__).resolve().parents[1]
 RUNTIME_SCHEMA_PATH = ROOT / "eval/schemas/sim_runtime_record.v1.schema.json"
+RUNTIME_CLAIM_SCHEMA_PATH = (
+    ROOT / "eval/schemas/runtime_workload_tier_claim_authority.v1.schema.json"
+)
+WORKLOAD_EXECUTION_AUTHORITY_SCHEMA_PATH = (
+    ROOT / "eval/schemas/workload_execution_authority.v1.schema.json"
+)
+RUNTIME_CLAIM_SCHEMA_SHA256 = (
+    "47d8e081a745a5cead98374e9b6ec4129e04a683d3b346cf7389a264d9208557"
+)
+MAX_RUNTIME_CLAIM_BYTES = 4 * 1024 * 1024
+MAX_CLAIM_AUTHORITY_BYTES = 16 * 1024 * 1024
+MAX_ACCURACY_REPORT_BYTES = 64 * 1024 * 1024
+MAX_CONTENT_MANIFEST_BYTES = 4 * 1024 * 1024
 RELEASE_BINARY_RELATIVE = Path("sim/target/release/sim-run")
 MAX_BINARY_BYTES = 512 * 1024 * 1024
 MAX_MANIFEST_BYTES = 8 * 1024 * 1024
@@ -67,6 +95,45 @@ _ENVIRONMENT_ITEMS = (
 _EMPTY_SHA256 = hashlib.sha256(b"").hexdigest()
 _RETAINED_MANIFEST_ARGUMENT_PREFIX = "--retained-manifest-fds-v1:"
 _MAX_INHERITED_DESCRIPTOR = 2_147_483_647
+_SHA256_RE = re.compile(r"[0-9a-f]{64}\Z")
+_SAFE_CLAIM_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,255}\Z")
+_CLAIM_FILE_ROLES = (
+    "accuracy_report",
+    "evaluator_authority",
+    "runtime_record",
+    "source_authority",
+    "workload_execution_authority",
+)
+_CLAIM_BASIS = (
+    "clean_committed_release_measured_admitted_tier_sealed_result_and_accuracy_v1"
+)
+_FIXTURE_CLAIM_REASON = "FIXTURE_ONLY_NON_AUTHORITATIVE"
+_CLAIM_EVIDENCE_SUFFIX = ".evidence"
+_CLAIM_PRODUCER_RELATIVE = Path("eval/bench.py")
+_CLAIM_SCHEMA_RELATIVE = Path(
+    "eval/schemas/runtime_workload_tier_claim_authority.v1.schema.json"
+)
+_CLAIM_EVIDENCE_FIXED_NAMES = {
+    "runtime_record": "runtime_record.json",
+    "runtime_binary": "runtime_binary",
+    "runtime_manifest": "runtime_manifest.json",
+    "runtime_result": "runtime_result.json",
+    "workload_execution_authority": "workload_execution_authority.json",
+    "evaluator_authority": "evaluator_authority.json",
+    "accuracy_report": "accuracy_report.json",
+    "content_manifest": "external_content_manifest.json",
+    "source_authority": "source_authority.json",
+    "claim_producer": "claim_producer.py",
+    "claim_schema": "claim_schema.json",
+    "workload_schema": "workload_authority_schema.json",
+}
+
+# Independent trust registries are immutable and intentionally empty for current
+# production evidence. Caller-provided self-seals can exercise only fixture algebra.
+PRODUCTION_RUNTIME_WORKLOAD_AUTHORITIES = MappingProxyType({})
+PRODUCTION_RUNTIME_EVALUATOR_AUTHORITIES = MappingProxyType({})
+PRODUCTION_RUNTIME_SOURCE_AUTHORITIES = MappingProxyType({})
+PRODUCTION_RUNTIME_CONTENT_MANIFEST_PINS = MappingProxyType({})
 
 
 class RuntimeRecorderError(RuntimeError):
@@ -2022,6 +2089,16 @@ _RUNTIME_VALIDATOR = _RUNTIME_VALIDATOR_CLASS(
     _RUNTIME_SCHEMA, registry=_RUNTIME_REGISTRY
 )
 
+_RUNTIME_CLAIM_SCHEMA_BYTES = RUNTIME_CLAIM_SCHEMA_PATH.read_bytes()
+if hashlib.sha256(_RUNTIME_CLAIM_SCHEMA_BYTES).hexdigest() != RUNTIME_CLAIM_SCHEMA_SHA256:
+    raise RuntimeError("runtime claim schema bytes do not match the code pin")
+_RUNTIME_CLAIM_SCHEMA = load_json_file_strict(RUNTIME_CLAIM_SCHEMA_PATH)
+if not isinstance(_RUNTIME_CLAIM_SCHEMA, dict):
+    raise RuntimeError("runtime claim schema root is not an object")
+_RUNTIME_CLAIM_VALIDATOR_CLASS = validator_for(_RUNTIME_CLAIM_SCHEMA)
+_RUNTIME_CLAIM_VALIDATOR_CLASS.check_schema(_RUNTIME_CLAIM_SCHEMA)
+_RUNTIME_CLAIM_VALIDATOR = _RUNTIME_CLAIM_VALIDATOR_CLASS(_RUNTIME_CLAIM_SCHEMA)
+
 
 def _schema_path(error: ValidationError) -> str:
     path = "$"
@@ -2857,6 +2934,2163 @@ def load_runtime_record(path: str | Path) -> dict[str, Any]:
     return _load_runtime_record(path, repo_root=ROOT)
 
 
+# The exploratory runtime wire above is intentionally frozen. Claimability is an
+# evaluator-side, post-result decision published through this detached contract.
+def _claim_contract_error(
+    detail: str,
+    *,
+    code: str = "RUNTIME_CLAIM_INVALID",
+    context: Mapping[str, Any] | None = None,
+) -> None:
+    raise RuntimeRecorderError(code, detail, context=context)
+
+
+def _claim_exact_keys(value: object, expected: set[str], role: str) -> dict[str, Any]:
+    if type(value) is not dict or set(value) != expected:
+        _claim_contract_error(f"{role} fields are not exact")
+    return value
+
+
+def _claim_sha256(value: object, role: str) -> str:
+    if type(value) is not str or _SHA256_RE.fullmatch(value) is None:
+        _claim_contract_error(f"{role} is not lowercase SHA-256")
+    return value
+
+
+def _claim_safe_id(value: object, role: str) -> str:
+    if type(value) is not str or _SAFE_CLAIM_ID_RE.fullmatch(value) is None:
+        _claim_contract_error(f"{role} is not a schema-safe identifier")
+    return value
+
+
+def _claim_file_identity(retained: _RetainedFile) -> dict[str, Any]:
+    return {
+        "path": str(retained.path),
+        "size_bytes": retained.size,
+        "sha256": retained.sha256,
+    }
+
+
+def _decode_claim_object(payload: bytes, *, source: str, role: str) -> dict[str, Any]:
+    try:
+        text = payload.decode("utf-8", errors="strict")
+        value = loads_json_strict(text, source=source)
+    except (
+        UnicodeDecodeError,
+        ContractValidationError,
+        MemoryError,
+        RecursionError,
+    ) as exc:
+        raise RuntimeRecorderError(
+            "RUNTIME_CLAIM_AUTHORITY_INVALID",
+            f"{role} is not strict JSON",
+        ) from exc
+    if type(value) is not dict:
+        _claim_contract_error(f"{role} root is not an object")
+    return value
+
+
+def _load_runtime_claim_evidence(
+    path: str | Path, *, repo_root: Path
+) -> tuple[dict[str, Any], _RetainedFile]:
+    retained = _open_retained_file(
+        path,
+        role="runtime record",
+        maximum_bytes=MAX_RUNTIME_RECORD_BYTES,
+    )
+    try:
+        payload = retained.read_bytes(role="runtime record")
+        preview = _decode_claim_object(
+            payload,
+            source=str(retained.path),
+            role="runtime record",
+        )
+        recorded_input_drift = _is_input_drift_record(preview)
+        document = _load_runtime_record(
+            retained.path,
+            repo_root=repo_root,
+            permit_recorded_input_drift=recorded_input_drift,
+        )
+        if preview != document or payload != _canonical_json_line(document):
+            _claim_contract_error("runtime record bytes changed across claim validation")
+        retained.revalidate(role="runtime record")
+        return document, retained
+    except BaseException:
+        retained.close()
+        raise
+
+
+def _runtime_claimability_reason(document: Mapping[str, Any]) -> str | None:
+    workload = document["workload_identity"]
+    fixture = document["manifest_identity"]["scope"].startswith(
+        "fixture-only/"
+    ) or any(
+        workload_id.startswith("fixture-only.")
+        for workload_id in workload["workload_ids"]
+    )
+    if fixture:
+        return "SYNTHETIC_FIXTURE"
+    binding = document["sim_result_binding"]
+    if binding["status"] == "bound" and binding["build_identity"]["sim_git_dirty"]:
+        return "DIRTY_BUILD_UNCLAIMABLE"
+    status = document["outcome"]["status"]
+    if status == "RUNTIME_NOISY":
+        return "RUNTIME_NOISY"
+    if status == "NONDETERMINISTIC_RESULT":
+        return "NONDETERMINISTIC_RESULT"
+    if status == "RUNTIME_EXECUTION_FAILED":
+        if any(sample["timed_out"] for sample in document["samples"]):
+            return "RUNTIME_TIMEOUT"
+        return "RUNTIME_EXECUTION_FAILED"
+    if status != "MEASURED" or binding["status"] != "bound":
+        return "RUNTIME_PROTOCOL_PARTIAL"
+    build = binding["build_identity"]
+    if (
+        build["cargo_profile"] != "release"
+        or build["claimability"]["status"] != "claimable"
+        or not re.fullmatch(r"[0-9a-f]{40}", build["sim_git_commit"])
+        or build["sim_git_commit"] == "0" * 40
+    ):
+        return "DIRTY_BUILD_UNCLAIMABLE"
+    return None
+
+
+def _runtime_derived_binding(document: Mapping[str, Any]) -> dict[str, Any]:
+    binding = document["sim_result_binding"]
+    if binding["status"] != "bound":
+        _claim_contract_error("runtime result binding is unavailable")
+    workload_ids = document["workload_identity"]["workload_ids"]
+    execution_ids = sorted(
+        {key["matched_execution_id"] for key in document["workload_identity"]["launch_keys"]}
+    )
+    if len(workload_ids) != 1 or len(execution_ids) != 1:
+        _claim_contract_error("claimable runtime must describe one workload execution")
+    architecture = binding["arch_card_identity"]
+    return {
+        "status": "bound",
+        "manifest_canonical_sha256": document["manifest_identity"][
+            "canonical_sha256"
+        ],
+        "trace_identity_sha256": _sha256_canonical(binding["trace_identity"]),
+        "launch_set_sha256": document["workload_identity"]["launch_set_sha256"],
+        "architecture_identity_sha256": _sha256_canonical(architecture),
+        "configuration_identity_sha256": _sha256_canonical(
+            {
+                "identity": binding["configuration_identity"],
+                "resolved": binding["resolved_configuration"],
+            }
+        ),
+        "binary_sha256": binding["build_identity"]["binary_sha256"],
+        "workload_id": workload_ids[0],
+        "matched_execution_id": execution_ids[0],
+        "binary_architecture": architecture["sm_arch"],
+        "gpu_sku": architecture["sku"],
+    }
+
+
+def _load_claim_result(
+    runtime_record_path: Path,
+    document: Mapping[str, Any],
+    *,
+    artifact_path_override: Path | None = None,
+) -> dict[str, Any]:
+    if document["outcome"]["status"] != "MEASURED" or not document["samples"]:
+        _claim_contract_error("final MEASURED result bytes are unavailable")
+    binding = document["sim_result_binding"]
+    if binding["status"] != "bound":
+        _claim_contract_error("final MEASURED result binding is unavailable")
+    identities = {
+        (sample["stdout"]["sha256"], sample["stdout"]["size_bytes"])
+        for sample in document["samples"]
+    }
+    if len(identities) != 1 or next(iter(identities))[0] != binding["file_sha256"]:
+        _claim_contract_error("runtime results are not all byte-identical")
+    artifact = document["samples"][0]["stdout"]
+    artifact_path = (
+        artifact_path_override
+        if artifact_path_override is not None
+        else runtime_record_path.parent / artifact["path"]
+    )
+    retained = _open_retained_file(
+        artifact_path,
+        role="sealed sim-run result",
+        maximum_bytes=MAX_RESULT_STREAM_BYTES,
+    )
+    try:
+        if retained.size != artifact["size_bytes"] or retained.sha256 != artifact["sha256"]:
+            _claim_contract_error("sealed sim-run result artifact identity differs")
+        payload = retained.read_bytes(role="sealed sim-run result")
+        result = _decode_claim_object(
+            payload,
+            source=str(retained.path),
+            role="sealed sim-run result",
+        )
+        try:
+            validate_result(result)
+        except ContractValidationError as exc:
+            raise RuntimeRecorderError(
+                "RUNTIME_CLAIM_INVALID",
+                "sealed sim-run result contract is invalid",
+            ) from exc
+        if payload != _canonical_json_line(result):
+            _claim_contract_error("sealed sim-run result is not canonical JSON")
+        if (
+            hashlib.sha256(payload).hexdigest() != binding["file_sha256"]
+            or result["result_sha256"] != binding["result_sha256"]
+        ):
+            _claim_contract_error("sealed sim-run result hash differs from runtime binding")
+        return result
+    finally:
+        retained.close()
+
+
+def _load_claim_workload_authority(
+    path: str | Path,
+    *,
+    fixture_mode: bool,
+    schema_path: Path = WORKLOAD_EXECUTION_AUTHORITY_SCHEMA_PATH,
+) -> tuple[dict[str, Any], _RetainedFile]:
+    retained = _open_retained_file(
+        path,
+        role="workload execution authority",
+        maximum_bytes=MAX_CLAIM_AUTHORITY_BYTES,
+    )
+    try:
+        payload = retained.read_bytes(role="workload execution authority")
+        schema_bytes, schema_snapshot = RetainedPayloadSnapshot.read_path(
+            schema_path
+        )
+        loader_name = (
+            "load_workload_execution_authority_fixture"
+            if fixture_mode
+            else "load_workload_execution_authority"
+        )
+        loader = getattr(_launch_crosswalk, loader_name, None)
+        if loader is None:
+            _claim_contract_error(
+                "workload execution authority loader is unavailable",
+                code="RUNTIME_CLAIM_AUTHORITY_UNAVAILABLE",
+            )
+        try:
+            authority = loader(
+                payload,
+                schema_bytes=schema_bytes,
+                schema_snapshot=schema_snapshot,
+            )
+        except (EvaluatorAuthorityUnavailable, ImmutableArtifactError) as exc:
+            raise RuntimeRecorderError(
+                "RUNTIME_CLAIM_AUTHORITY_INVALID",
+                "workload execution authority failed detached admission",
+            ) from exc
+        retained.revalidate(role="workload execution authority")
+        return authority, retained
+    except BaseException:
+        retained.close()
+        raise
+
+
+def _require_workload_runtime_binding(
+    authority: Mapping[str, Any],
+    runtime: Mapping[str, Any],
+    derived: Mapping[str, Any],
+) -> None:
+    expected_keys = [
+        deepcopy(row["launch_key"])
+        for row in authority["expected_launch_roster"]
+    ]
+    expected_keys.sort(key=canonical_launch_key_token)
+    if expected_keys != runtime["workload_identity"]["launch_keys"]:
+        _claim_contract_error("workload authority launch roster differs from runtime")
+    if (
+        authority["expected_launch_count"] != runtime["workload_identity"]["launch_count"]
+        or authority["workload_id"] != derived["workload_id"]
+        or authority["matched_execution_id"] != derived["matched_execution_id"]
+        or authority["executable_sha256"]
+        != runtime["invocation"]["binary"]["sha256"]
+        or authority["architecture"]
+        != {
+            "binary_architecture": derived["binary_architecture"],
+            "gpu_sku": derived["gpu_sku"],
+        }
+    ):
+        _claim_contract_error("workload authority cohort or architecture differs from runtime")
+
+_SOURCE_AUTHORITY_KEYS = {
+    "schema_version",
+    "authority_role",
+    "contract_mode",
+    "source_git_commit",
+    "source_clean",
+    "current_source",
+    "gate",
+    "producer_files",
+    "build",
+    "authority_sha256",
+}
+_SOURCE_PRODUCER_FILES = (
+    _CLAIM_PRODUCER_RELATIVE.as_posix(),
+    _CLAIM_SCHEMA_RELATIVE.as_posix(),
+)
+
+
+def _validate_claim_source_authority(
+    authority: dict[str, Any],
+    *,
+    observed_file_sha256: str,
+    expected_file_sha256: str,
+    runtime: Mapping[str, Any],
+    producer_files: Mapping[str, Mapping[str, Any]],
+    binary_identity: Mapping[str, Any],
+    fixture_mode: bool,
+) -> None:
+    _claim_exact_keys(authority, _SOURCE_AUTHORITY_KEYS, "source authority")
+    expected_mode = (
+        "FIXTURE_ONLY_NON_AUTHORITATIVE"
+        if fixture_mode
+        else "TARGET_FREE_PRODUCTION"
+    )
+    if (
+        authority["schema_version"] != "runtime_claim_source_authority.v1"
+        or authority["authority_role"] != "detached_clean_source_gate_authority"
+        or authority["contract_mode"] != expected_mode
+        or authority["source_clean"] is not True
+        or authority["current_source"] != "matched"
+    ):
+        _claim_contract_error("source authority is not current clean authority")
+    commit = authority["source_git_commit"]
+    if type(commit) is not str or re.fullmatch(r"[0-9a-f]{40}", commit) is None:
+        _claim_contract_error("source authority commit is malformed")
+    gate = _claim_exact_keys(
+        authority["gate"],
+        {"content_manifest_sha256", "receipt_sha256"},
+        "source authority gate",
+    )
+    for name, value in gate.items():
+        _claim_sha256(value, f"source authority gate {name}")
+    observed_producers = _claim_exact_keys(
+        authority["producer_files"],
+        set(_SOURCE_PRODUCER_FILES),
+        "source authority producer files",
+    )
+    for relative_path in _SOURCE_PRODUCER_FILES:
+        identity = _claim_exact_keys(
+            observed_producers[relative_path],
+            {"size_bytes", "sha256"},
+            f"source authority producer {relative_path}",
+        )
+        if type(identity["size_bytes"]) is not int or isinstance(
+            identity["size_bytes"], bool
+        ) or identity["size_bytes"] <= 0:
+            _claim_contract_error("source authority producer size is invalid")
+        _claim_sha256(identity["sha256"], "source authority producer hash")
+    build = _claim_exact_keys(
+        authority["build"],
+        {"size_bytes", "sha256", "cargo_profile"},
+        "source authority build",
+    )
+    if (
+        type(build["size_bytes"]) is not int
+        or isinstance(build["size_bytes"], bool)
+        or build["size_bytes"] <= 0
+        or build["cargo_profile"] != "release"
+    ):
+        _claim_contract_error("source authority build identity is invalid")
+    _claim_sha256(build["sha256"], "source authority build hash")
+    _claim_sha256(authority["authority_sha256"], "source authority seal")
+    if authority["authority_sha256"] != canonical_sha256(
+        authority, "authority_sha256"
+    ):
+        _claim_contract_error("source authority seal does not match")
+    _claim_sha256(expected_file_sha256, "external source authority anchor")
+    if observed_file_sha256 != expected_file_sha256:
+        _claim_contract_error("source authority file hash does not match external pin")
+    runtime_build = runtime["sim_result_binding"]["build_identity"]
+    expected_build = {
+        "size_bytes": binary_identity["size_bytes"],
+        "sha256": binary_identity["sha256"],
+        "cargo_profile": runtime_build["cargo_profile"],
+    }
+    if (
+        authority["source_git_commit"] != runtime_build["sim_git_commit"]
+        or authority["producer_files"] != dict(producer_files)
+        or authority["build"] != expected_build
+    ):
+        _claim_contract_error(
+            "source authority does not bind exact producer, schema, commit, and build bytes"
+        )
+
+
+def _source_authority_projection(
+    authority: Mapping[str, Any],
+    retained: _RetainedFile,
+    *,
+    file_identity: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    return {
+        "status": "bound",
+        "file": deepcopy(
+            dict(file_identity)
+            if file_identity is not None
+            else _claim_file_identity(retained)
+        ),
+        "authority_sha256": authority["authority_sha256"],
+        "source_git_commit": authority["source_git_commit"],
+        "contract_mode": authority["contract_mode"],
+    }
+
+
+_DETACHED_EVALUATOR_KEYS = {
+    "schema_version",
+    "authority_id",
+    "authority_role",
+    "contract_mode",
+    "admission_status",
+    "workload_execution_authority_model_seal_sha256",
+    "result_binding",
+    "prediction_binding",
+    "report_binding",
+    "label_authority",
+    "bindings",
+    "authority_sha256",
+}
+_EVALUATOR_BINDING_HASH_KEYS = {
+    "manifest_canonical_sha256",
+    "trace_identity_sha256",
+    "launch_set_sha256",
+    "architecture_identity_sha256",
+    "configuration_identity_sha256",
+}
+
+
+def _load_claim_json_file(
+    path: str | Path,
+    *,
+    role: str,
+    maximum_bytes: int,
+) -> tuple[dict[str, Any], _RetainedFile, bytes]:
+    retained = _open_retained_file(path, role=role, maximum_bytes=maximum_bytes)
+    try:
+        payload = retained.read_bytes(role=role)
+        document = _decode_claim_object(payload, source=str(retained.path), role=role)
+        if payload != _canonical_json_line(document):
+            _claim_contract_error(f"{role} is not canonical JSON")
+        return document, retained, payload
+    except BaseException:
+        retained.close()
+        raise
+
+
+def _result_prediction_projection_sha256(result: Mapping[str, Any]) -> str:
+    return _sha256_canonical(
+        {
+            "schema_version": result["schema_version"],
+            "result_sha256": result["result_sha256"],
+            "aggregate": result["aggregate"],
+            "launches": result["launches"],
+            "arch_card_identity": result["arch_card_identity"],
+            "configuration_identity": result["configuration_identity"],
+        }
+    )
+
+
+def _evaluator_prediction_binding(
+    result: Mapping[str, Any],
+    report: Mapping[str, Any],
+    label_binding: Mapping[str, Any],
+) -> dict[str, str]:
+    projection_sha256 = _result_prediction_projection_sha256(result)
+    report_outcome_sha256 = _sha256_canonical(report["outcome"])
+    return {
+        "projection_sha256": projection_sha256,
+        "report_outcome_sha256": report_outcome_sha256,
+        "semantic_binding_sha256": _sha256_canonical(
+            {
+                "result_prediction_projection_sha256": projection_sha256,
+                "report_outcome_sha256": report_outcome_sha256,
+                "label_authority": dict(label_binding),
+            }
+        ),
+    }
+
+
+def _validate_detached_evaluator_authority(
+    authority: dict[str, Any],
+    report: dict[str, Any],
+    *,
+    report_file_sha256: str,
+    workload_authority: Mapping[str, Any],
+    runtime: Mapping[str, Any],
+    derived: Mapping[str, Any],
+    fixture_mode: bool,
+) -> None:
+    _claim_exact_keys(authority, _DETACHED_EVALUATOR_KEYS, "evaluator authority")
+    expected_mode = (
+        "FIXTURE_ONLY_NON_AUTHORITATIVE"
+        if fixture_mode
+        else "TARGET_FREE_PRODUCTION"
+    )
+    if (
+        authority["schema_version"] != "detached_production_evaluator_authority.v1"
+        or authority["authority_role"]
+        != "detached_production_accuracy_report_authority"
+        or authority["contract_mode"] != expected_mode
+        or authority["admission_status"] != "admitted"
+    ):
+        _claim_contract_error("detached evaluator authority is not admitted production authority")
+    _claim_safe_id(authority["authority_id"], "evaluator authority id")
+    _claim_sha256(authority["authority_sha256"], "evaluator authority seal")
+    if authority["authority_sha256"] != canonical_sha256(
+        authority, "authority_sha256"
+    ):
+        _claim_contract_error("detached evaluator authority seal does not match")
+    if (
+        authority["workload_execution_authority_model_seal_sha256"]
+        != workload_authority["model_seal_sha256"]
+    ):
+        _claim_contract_error("evaluator and workload authorities do not share one cohort")
+
+    result_binding = _claim_exact_keys(
+        authority["result_binding"],
+        {"file_sha256", "result_sha256"},
+        "evaluator result binding",
+    )
+    prediction_binding = _claim_exact_keys(
+        authority["prediction_binding"],
+        {
+            "projection_sha256",
+            "report_outcome_sha256",
+            "semantic_binding_sha256",
+        },
+        "evaluator prediction binding",
+    )
+    report_binding = _claim_exact_keys(
+        authority["report_binding"],
+        {"file_sha256", "report_id", "report_sha256"},
+        "evaluator report binding",
+    )
+    label_binding = _claim_exact_keys(
+        authority["label_authority"],
+        {
+            "matched_labels_sha256",
+            "label_set_id",
+            "label_set_sha256",
+            "crosswalk_id",
+            "crosswalk_sha256",
+        },
+        "evaluator label authority",
+    )
+    binding_hashes = _claim_exact_keys(
+        authority["bindings"],
+        _EVALUATOR_BINDING_HASH_KEYS,
+        "evaluator runtime bindings",
+    )
+    for name, value in (
+        *result_binding.items(),
+        *prediction_binding.items(),
+        *binding_hashes.items(),
+    ):
+        _claim_sha256(value, f"evaluator {name}")
+    _claim_sha256(report_binding["file_sha256"], "accuracy report file hash")
+    _claim_sha256(report_binding["report_sha256"], "accuracy report seal")
+
+
+def _validate_detached_evaluator_report_binding(
+    authority: Mapping[str, Any],
+    report: dict[str, Any],
+    result: Mapping[str, Any],
+    *,
+    report_file_sha256: str,
+    runtime: Mapping[str, Any],
+    derived: Mapping[str, Any],
+) -> None:
+    label_binding = authority["label_authority"]
+    try:
+        independent_labels = MatchedLabelAuthority(
+            matched_labels_sha256=label_binding["matched_labels_sha256"],
+            label_set_id=label_binding["label_set_id"],
+            label_set_sha256=label_binding["label_set_sha256"],
+            crosswalk_id=label_binding["crosswalk_id"],
+            crosswalk_sha256=label_binding["crosswalk_sha256"],
+        )
+        validate_report(report, label_authority=independent_labels)
+    except ContractValidationError as exc:
+        raise RuntimeRecorderError(
+            "RUNTIME_CLAIM_AUTHORITY_INVALID",
+            "accuracy report failed detached evaluator validation",
+        ) from exc
+    identities = report["identities"]
+    report_id = identities["report_id"]
+    if report_id.lower().startswith(("synthetic", "fixture")):
+        _claim_contract_error("accuracy report is fixture-only rather than production")
+    if (
+        report["outcome"]["status"] != "admitted"
+        or identities["simulator_git_dirty"]
+        or identities["evaluator_git_dirty"]
+    ):
+        _claim_contract_error("accuracy report is not a clean admitted production report")
+    runtime_result = runtime["sim_result_binding"]
+    expected_result_binding = {
+        "file_sha256": runtime_result["file_sha256"],
+        "result_sha256": runtime_result["result_sha256"],
+    }
+    expected_report_binding = {
+        "file_sha256": report_file_sha256,
+        "report_id": report_id,
+        "report_sha256": report["report_sha256"],
+    }
+    if authority["result_binding"] != expected_result_binding:
+        _claim_contract_error("evaluator authority names a different sealed result")
+    expected_prediction_binding = _evaluator_prediction_binding(
+        result,
+        report,
+        label_binding,
+    )
+    if authority["prediction_binding"] != expected_prediction_binding:
+        _claim_contract_error(
+            "evaluator authority prediction semantics differ from sealed result"
+        )
+    if authority["report_binding"] != expected_report_binding:
+        _claim_contract_error("evaluator authority names a different accuracy report")
+    if (
+        identities["result_file_sha256"] != runtime_result["file_sha256"]
+        or identities["result_canonical_sha256"] != runtime_result["result_sha256"]
+        or identities["arch_card_sha256"]
+        != runtime_result["arch_card_identity"]["card_sha256"]
+        or identities["binary_architecture"] != derived["binary_architecture"]
+        or identities["gpu_sku"] != derived["gpu_sku"]
+    ):
+        _claim_contract_error("accuracy report does not bind the runtime result identity")
+    expected_hash_bindings = {
+        name: derived[name] for name in _EVALUATOR_BINDING_HASH_KEYS
+    }
+    if authority["bindings"] != expected_hash_bindings:
+        _claim_contract_error("evaluator authority runtime bindings do not match")
+    report_labels = identities["label_binding"]
+    if any(report_labels[name] != value for name, value in label_binding.items()):
+        _claim_contract_error("evaluator authority label binding differs from report")
+
+
+_TIER_AUTHORITY_KEYS = {
+    "tier_id",
+    "admission_status",
+    "classification",
+    "workload_execution_authority_model_seal_sha256",
+    "manifest_canonical_sha256",
+    "trace_identity_sha256",
+    "launch_set_sha256",
+    "architecture_identity_sha256",
+    "configuration_identity_sha256",
+}
+
+
+def _validate_claim_content_manifest_header(manifest: dict[str, Any]) -> None:
+    _claim_exact_keys(
+        manifest,
+        {
+            "schema_version",
+            "manifest_id",
+            "authority_role",
+            "workload_tier_authority",
+            "files",
+            "manifest_sha256",
+        },
+        "runtime claim content manifest",
+    )
+    if (
+        manifest["schema_version"] != "runtime_claim_content_manifest.v1"
+        or manifest["authority_role"] != "external_runtime_claim_content_anchor"
+    ):
+        _claim_contract_error("runtime claim content manifest identity is invalid")
+    _claim_safe_id(manifest["manifest_id"], "content manifest id")
+    _claim_sha256(manifest["manifest_sha256"], "content manifest seal")
+    if manifest["manifest_sha256"] != canonical_sha256(
+        manifest, "manifest_sha256"
+    ):
+        _claim_contract_error("runtime claim content manifest seal does not match")
+
+
+def _validate_claim_content_manifest(
+    manifest: dict[str, Any],
+    *,
+    expected_files: Mapping[str, Mapping[str, Any]],
+    expected_external_sha256: str,
+    observed_external_sha256: str,
+    workload_authority: Mapping[str, Any],
+    derived: Mapping[str, Any],
+) -> dict[str, Any]:
+    _validate_claim_content_manifest_header(manifest)
+    _claim_sha256(expected_external_sha256, "external content manifest anchor")
+    if expected_external_sha256 != observed_external_sha256:
+        _claim_contract_error("external content manifest file hash does not match")
+
+    files = manifest["files"]
+    if (
+        type(files) is not list
+        or len(files) != len(_CLAIM_FILE_ROLES)
+        or any(type(item) is not dict for item in files)
+    ):
+        _claim_contract_error("content manifest file closure is not exact and ordered")
+    if [item["role"] if "role" in item else None for item in files] != list(
+        _CLAIM_FILE_ROLES
+    ):
+        _claim_contract_error("content manifest file closure is not exact and ordered")
+    observed_files: dict[str, dict[str, Any]] = {}
+    for item in files:
+        _claim_exact_keys(
+            item,
+            {"role", "path", "size_bytes", "sha256"},
+            "content manifest file",
+        )
+        role = item["role"]
+        if type(item["path"]) is not str or not item["path"]:
+            _claim_contract_error("content manifest file path is invalid")
+        if item["path"] != os.path.abspath(item["path"]):
+            _claim_contract_error("content manifest file path is not canonical absolute")
+        if (
+            type(item["size_bytes"]) is not int
+            or isinstance(item["size_bytes"], bool)
+            or item["size_bytes"] <= 0
+        ):
+            _claim_contract_error("content manifest file size is invalid")
+        _claim_sha256(item["sha256"], f"content manifest {role} hash")
+        observed_files[role] = {
+            "path": item["path"],
+            "size_bytes": item["size_bytes"],
+            "sha256": item["sha256"],
+        }
+    if observed_files != dict(expected_files):
+        _claim_contract_error("external content manifest does not anchor exact evidence files")
+
+    tier = _claim_exact_keys(
+        manifest["workload_tier_authority"],
+        _TIER_AUTHORITY_KEYS,
+        "workload tier authority",
+    )
+    if tier["tier_id"] not in {"T-mid", "T-big"}:
+        _claim_contract_error("workload tier is not admitted by claim schema")
+    if tier["admission_status"] not in {"admitted", "unadmitted"}:
+        _claim_contract_error("workload tier admission status is invalid")
+    if tier["classification"] not in {"production", "fixture"}:
+        _claim_contract_error("workload tier classification is invalid")
+    for name in _TIER_AUTHORITY_KEYS - {
+        "tier_id",
+        "admission_status",
+        "classification",
+    }:
+        _claim_sha256(tier[name], f"workload tier {name}")
+    expected_tier_bindings = {
+        "workload_execution_authority_model_seal_sha256": workload_authority[
+            "model_seal_sha256"
+        ],
+        **{
+            name: derived[name]
+            for name in _EVALUATOR_BINDING_HASH_KEYS
+        },
+    }
+    if any(tier[name] != value for name, value in expected_tier_bindings.items()):
+        _claim_contract_error("workload tier authority does not bind exact runtime inputs")
+    return tier
+
+
+def _bound_workload_projection(
+    authority: Mapping[str, Any],
+    retained: _RetainedFile,
+    *,
+    file_identity: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    return {
+        "status": "bound",
+        "file": deepcopy(
+            dict(file_identity)
+            if file_identity is not None
+            else _claim_file_identity(retained)
+        ),
+        "model_seal_sha256": authority["model_seal_sha256"],
+        "workload_id": authority["workload_id"],
+        "matched_execution_id": authority["matched_execution_id"],
+        "contract_mode": authority["contract_mode"],
+    }
+
+
+def _bound_accuracy_projection(
+    evaluator: Mapping[str, Any],
+    evaluator_retained: _RetainedFile,
+    report: Mapping[str, Any],
+    report_retained: _RetainedFile,
+    *,
+    evaluator_file_identity: Mapping[str, Any] | None = None,
+    report_file_identity: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    return {
+        "status": "bound",
+        "evaluator_authority_file": deepcopy(
+            dict(evaluator_file_identity)
+            if evaluator_file_identity is not None
+            else _claim_file_identity(evaluator_retained)
+        ),
+        "evaluator_authority_id": evaluator["authority_id"],
+        "evaluator_authority_sha256": evaluator["authority_sha256"],
+        "report_file": deepcopy(
+            dict(report_file_identity)
+            if report_file_identity is not None
+            else _claim_file_identity(report_retained)
+        ),
+        "report_id": report["identities"]["report_id"],
+        "report_sha256": report["report_sha256"],
+    }
+
+
+def _unavailable_claim_components(reason: str) -> dict[str, dict[str, str]]:
+    unavailable = {"status": "unavailable", "reason": reason}
+    return {
+        "source_authority": deepcopy(unavailable),
+        "workload_execution_authority": deepcopy(unavailable),
+        "content_manifest_anchor": deepcopy(unavailable),
+        "accuracy_binding": deepcopy(unavailable),
+    }
+
+
+def _evaluate_bound_claim_evidence(
+    *,
+    runtime_path: Path,
+    runtime: Mapping[str, Any],
+    runtime_retained: _RetainedFile,
+    workload_authority_path: str | Path,
+    evaluator_authority_path: str | Path,
+    accuracy_report_path: str | Path,
+    content_manifest_path: str | Path,
+    source_authority_path: str | Path,
+    expected_content_manifest_sha256: str,
+    expected_source_authority_sha256: str,
+    fixture_mode: bool,
+    source_file_identities: Mapping[str, Mapping[str, Any]] | None = None,
+    result_artifact_path: Path | None = None,
+    producer_path: Path | None = None,
+    claim_schema_path: Path | None = None,
+    binary_path: Path | None = None,
+    workload_schema_path: Path | None = None,
+) -> tuple[dict[str, Any], str | None]:
+    derived = _runtime_derived_binding(runtime)
+    result = _load_claim_result(
+        runtime_path,
+        runtime,
+        artifact_path_override=result_artifact_path,
+    )
+    if result["result_sha256"] != runtime["sim_result_binding"]["result_sha256"]:
+        _claim_contract_error("retained final result seal differs from runtime binding")
+
+    workload, workload_retained = _load_claim_workload_authority(
+        workload_authority_path,
+        fixture_mode=fixture_mode,
+        schema_path=(
+            workload_schema_path or WORKLOAD_EXECUTION_AUTHORITY_SCHEMA_PATH
+        ),
+    )
+    if not fixture_mode:
+        _require_registered_claim_hash(
+            PRODUCTION_RUNTIME_WORKLOAD_AUTHORITIES,
+            workload_retained.sha256,
+            "workload execution authority",
+        )
+    evaluator_retained: _RetainedFile | None = None
+    report_retained: _RetainedFile | None = None
+    content_retained: _RetainedFile | None = None
+    source_retained: _RetainedFile | None = None
+    producer_retained: _RetainedFile | None = None
+    claim_schema_retained: _RetainedFile | None = None
+    binary_retained: _RetainedFile | None = None
+    try:
+        _require_workload_runtime_binding(workload, runtime, derived)
+        source, source_retained, _ = _load_claim_json_file(
+            source_authority_path,
+            role="runtime claim source authority",
+            maximum_bytes=MAX_CLAIM_AUTHORITY_BYTES,
+        )
+        producer_retained = _open_retained_file(
+            producer_path or ROOT / _CLAIM_PRODUCER_RELATIVE,
+            role="runtime claim producer",
+            maximum_bytes=MAX_RUNTIME_RECORD_BYTES,
+        )
+        claim_schema_retained = _open_retained_file(
+            claim_schema_path or ROOT / _CLAIM_SCHEMA_RELATIVE,
+            role="runtime claim schema",
+            maximum_bytes=MAX_RUNTIME_CLAIM_BYTES,
+        )
+        binary_retained = _open_retained_file(
+            binary_path or Path(runtime["invocation"]["binary"]["path"]),
+            role="runtime release executable",
+            maximum_bytes=MAX_BINARY_BYTES,
+            require_executable=(binary_path is None),
+            require_single_link=False,
+        )
+        producer_files = {
+            _CLAIM_PRODUCER_RELATIVE.as_posix(): {
+                "size_bytes": producer_retained.size,
+                "sha256": producer_retained.sha256,
+            },
+            _CLAIM_SCHEMA_RELATIVE.as_posix(): {
+                "size_bytes": claim_schema_retained.size,
+                "sha256": claim_schema_retained.sha256,
+            },
+        }
+        _validate_claim_source_authority(
+            source,
+            observed_file_sha256=source_retained.sha256,
+            expected_file_sha256=expected_source_authority_sha256,
+            runtime=runtime,
+            producer_files=producer_files,
+            binary_identity={
+                "size_bytes": binary_retained.size,
+                "sha256": binary_retained.sha256,
+            },
+            fixture_mode=fixture_mode,
+        )
+        if not fixture_mode:
+            _require_registered_claim_hash(
+                PRODUCTION_RUNTIME_SOURCE_AUTHORITIES,
+                source_retained.sha256,
+                "source authority",
+            )
+        evaluator, evaluator_retained, _ = _load_claim_json_file(
+            evaluator_authority_path,
+            role="detached evaluator authority",
+            maximum_bytes=MAX_CLAIM_AUTHORITY_BYTES,
+        )
+        report, report_retained, _ = _load_claim_json_file(
+            accuracy_report_path,
+            role="accuracy report",
+            maximum_bytes=MAX_ACCURACY_REPORT_BYTES,
+        )
+        if not fixture_mode:
+            _require_registered_claim_hash(
+                PRODUCTION_RUNTIME_EVALUATOR_AUTHORITIES,
+                evaluator_retained.sha256,
+                "detached evaluator authority",
+            )
+        _validate_detached_evaluator_authority(
+            evaluator,
+            report,
+            report_file_sha256=report_retained.sha256,
+            workload_authority=workload,
+            runtime=runtime,
+            derived=derived,
+            fixture_mode=fixture_mode,
+        )
+        _validate_detached_evaluator_report_binding(
+            evaluator,
+            report,
+            result,
+            report_file_sha256=report_retained.sha256,
+            runtime=runtime,
+            derived=derived,
+        )
+        content, content_retained, _ = _load_claim_json_file(
+            content_manifest_path,
+            role="runtime claim content manifest",
+            maximum_bytes=MAX_CONTENT_MANIFEST_BYTES,
+        )
+        if not fixture_mode:
+            _require_registered_claim_hash(
+                PRODUCTION_RUNTIME_CONTENT_MANIFEST_PINS,
+                content_retained.sha256,
+                "runtime claim content manifest",
+            )
+        file_identities = {
+            "accuracy_report": _claim_file_identity(report_retained),
+            "evaluator_authority": _claim_file_identity(evaluator_retained),
+            "runtime_record": _claim_file_identity(runtime_retained),
+            "source_authority": _claim_file_identity(source_retained),
+            "workload_execution_authority": _claim_file_identity(workload_retained),
+        }
+        if source_file_identities is not None:
+            expected_source_roles = set(_CLAIM_FILE_ROLES) | {"content_manifest"}
+            if set(source_file_identities) != expected_source_roles:
+                _claim_contract_error("detached source file identity closure differs")
+            observed_with_content = {
+                **file_identities,
+                "content_manifest": _claim_file_identity(content_retained),
+            }
+            for role, retained_identity in observed_with_content.items():
+                source_identity = source_file_identities[role]
+                if (
+                    source_identity["size_bytes"] != retained_identity["size_bytes"]
+                    or source_identity["sha256"] != retained_identity["sha256"]
+                ):
+                    _claim_contract_error(
+                        f"retained {role} bytes differ from source identity"
+                    )
+            file_identities = {
+                role: deepcopy(dict(source_file_identities[role]))
+                for role in _CLAIM_FILE_ROLES
+            }
+        tier = _validate_claim_content_manifest(
+            content,
+            expected_files=file_identities,
+            expected_external_sha256=expected_content_manifest_sha256,
+            observed_external_sha256=content_retained.sha256,
+            workload_authority=workload,
+            derived=derived,
+        )
+        components = {
+            "source_authority": _source_authority_projection(
+                source,
+                source_retained,
+                file_identity=file_identities["source_authority"],
+            ),
+            "workload_execution_authority": _bound_workload_projection(
+                workload,
+                workload_retained,
+                file_identity=file_identities["workload_execution_authority"],
+            ),
+            "content_manifest_anchor": {
+                "status": "bound",
+                "file": deepcopy(
+                    dict(
+                        source_file_identities.get(
+                            "content_manifest",
+                            _claim_file_identity(content_retained),
+                        )
+                    )
+                )
+                if source_file_identities is not None
+                else _claim_file_identity(content_retained),
+                "manifest_id": content["manifest_id"],
+                "manifest_sha256": content["manifest_sha256"],
+                "external_file_sha256": expected_content_manifest_sha256,
+                "workload_tier_authority": deepcopy(tier),
+            },
+            "result_binding": {
+                "status": "bound",
+                "file_sha256": runtime["sim_result_binding"]["file_sha256"],
+                "result_sha256": runtime["sim_result_binding"]["result_sha256"],
+            },
+            "accuracy_binding": _bound_accuracy_projection(
+                evaluator,
+                evaluator_retained,
+                report,
+                report_retained,
+                evaluator_file_identity=file_identities["evaluator_authority"],
+                report_file_identity=file_identities["accuracy_report"],
+            ),
+            "derived_binding": derived,
+        }
+        reason = (
+            "WORKLOAD_TIER_FIXTURE"
+            if tier["classification"] == "fixture"
+            else "WORKLOAD_TIER_UNADMITTED"
+            if tier["admission_status"] != "admitted"
+            else None
+        )
+        for retained, role in (
+            (workload_retained, "workload execution authority"),
+            (evaluator_retained, "detached evaluator authority"),
+            (report_retained, "accuracy report"),
+            (content_retained, "runtime claim content manifest"),
+            (source_retained, "runtime claim source authority"),
+            (producer_retained, "runtime claim producer"),
+            (claim_schema_retained, "runtime claim schema"),
+            (binary_retained, "runtime release executable"),
+        ):
+            retained.revalidate(role=role)
+        return components, reason
+    finally:
+        workload_retained.close()
+        if evaluator_retained is not None:
+            evaluator_retained.close()
+        if report_retained is not None:
+            report_retained.close()
+        if content_retained is not None:
+            content_retained.close()
+        if source_retained is not None:
+            source_retained.close()
+        if producer_retained is not None:
+            producer_retained.close()
+        if claim_schema_retained is not None:
+            claim_schema_retained.close()
+        if binary_retained is not None:
+            binary_retained.close()
+
+
+def _runtime_record_claim_projection(
+    runtime: Mapping[str, Any], retained: _RetainedFile
+) -> dict[str, Any]:
+    return {
+        "status": "bound",
+        "file": _claim_file_identity(retained),
+        "record_sha256": runtime["record_sha256"],
+        "outcome_status": runtime["outcome"]["status"],
+    }
+
+
+def _missing_claim_authority_reason(
+    *,
+    workload_execution_authority_path: str | Path | None,
+    evaluator_authority_path: str | Path | None,
+    accuracy_report_path: str | Path | None,
+    content_manifest_path: str | Path | None,
+    source_authority_path: str | Path | None,
+    expected_content_manifest_sha256: str | None,
+    expected_source_authority_sha256: str | None,
+) -> str | None:
+    if workload_execution_authority_path is None:
+        return "WORKLOAD_EXECUTION_AUTHORITY_UNAVAILABLE"
+    if source_authority_path is None or expected_source_authority_sha256 is None:
+        return "SOURCE_AUTHORITY_UNAVAILABLE"
+    if evaluator_authority_path is None:
+        return "EVALUATOR_AUTHORITY_UNAVAILABLE"
+    if accuracy_report_path is None:
+        return "ACCURACY_REPORT_UNAVAILABLE"
+    if content_manifest_path is None or expected_content_manifest_sha256 is None:
+        return "CONTENT_MANIFEST_AUTHORITY_UNAVAILABLE"
+    return None
+
+
+def _claimability_model(
+    reason: str | None, *, fixture_mode: bool
+) -> dict[str, str]:
+    if reason is not None:
+        return {"status": "unclaimable", "reason": reason}
+    if fixture_mode:
+        return {"status": "unclaimable", "reason": _FIXTURE_CLAIM_REASON}
+    return {"status": "claimable", "basis": _CLAIM_BASIS}
+
+
+def _build_runtime_claim_document(
+    *,
+    runtime_path: Path,
+    runtime: Mapping[str, Any],
+    runtime_retained: _RetainedFile,
+    workload_execution_authority_path: str | Path | None,
+    evaluator_authority_path: str | Path | None,
+    accuracy_report_path: str | Path | None,
+    content_manifest_path: str | Path | None,
+    source_authority_path: str | Path | None,
+    expected_content_manifest_sha256: str | None,
+    expected_source_authority_sha256: str | None,
+    fixture_mode: bool,
+) -> dict[str, Any]:
+    runtime_reason = _runtime_claimability_reason(runtime)
+    if runtime_reason is not None:
+        components: dict[str, Any] = {
+            **_unavailable_claim_components("runtime_gate_unclaimable"),
+            "result_binding": {
+                "status": "unavailable",
+                "reason": "runtime_gate_unclaimable",
+            },
+            "derived_binding": {
+                "status": "unavailable",
+                "reason": "runtime_gate_unclaimable",
+            },
+        }
+        reason = runtime_reason
+    else:
+        result = _load_claim_result(runtime_path, runtime)
+        derived = _runtime_derived_binding(runtime)
+        if result["result_sha256"] != runtime["sim_result_binding"]["result_sha256"]:
+            _claim_contract_error("final result seal differs from runtime record")
+        missing = _missing_claim_authority_reason(
+            workload_execution_authority_path=workload_execution_authority_path,
+            evaluator_authority_path=evaluator_authority_path,
+            accuracy_report_path=accuracy_report_path,
+            content_manifest_path=content_manifest_path,
+            source_authority_path=source_authority_path,
+            expected_content_manifest_sha256=expected_content_manifest_sha256,
+            expected_source_authority_sha256=expected_source_authority_sha256,
+        )
+        if missing is not None:
+            components = {
+                **_unavailable_claim_components(missing),
+                "result_binding": {
+                    "status": "bound",
+                    "file_sha256": runtime["sim_result_binding"]["file_sha256"],
+                    "result_sha256": runtime["sim_result_binding"]["result_sha256"],
+                },
+                "derived_binding": derived,
+            }
+            reason = missing
+        else:
+            assert workload_execution_authority_path is not None
+            assert evaluator_authority_path is not None
+            assert accuracy_report_path is not None
+            assert content_manifest_path is not None
+            assert source_authority_path is not None
+            assert expected_content_manifest_sha256 is not None
+            assert expected_source_authority_sha256 is not None
+            components, reason = _evaluate_bound_claim_evidence(
+                runtime_path=runtime_path,
+                runtime=runtime,
+                runtime_retained=runtime_retained,
+                workload_authority_path=workload_execution_authority_path,
+                evaluator_authority_path=evaluator_authority_path,
+                accuracy_report_path=accuracy_report_path,
+                content_manifest_path=content_manifest_path,
+                source_authority_path=source_authority_path,
+                expected_content_manifest_sha256=expected_content_manifest_sha256,
+                expected_source_authority_sha256=expected_source_authority_sha256,
+                fixture_mode=fixture_mode,
+            )
+    document: dict[str, Any] = {
+        "schema_version": "runtime_workload_tier_claim_authority.v1",
+        "schema_sha256": RUNTIME_CLAIM_SCHEMA_SHA256,
+        "claim_sha256": "0" * 64,
+        "created_at_utc": _created_at_utc(),
+        "authority_role": "detached_post_result_runtime_claim_authority",
+        "contract_mode": (
+            "FIXTURE_ONLY_NON_AUTHORITATIVE"
+            if fixture_mode
+            else "TARGET_FREE_PRODUCTION"
+        ),
+        "runtime_record_binding": _runtime_record_claim_projection(
+            runtime, runtime_retained
+        ),
+        **components,
+        "claimability": _claimability_model(reason, fixture_mode=fixture_mode),
+    }
+    document["claim_sha256"] = canonical_sha256(document, "claim_sha256")
+    return document
+
+
+def _claim_generation_projection(generation: Any) -> dict[str, Any]:
+    return {
+        "path": str(generation.path),
+        "content_manifest_sha256": generation.content_manifest_sha256,
+        "filesystem_generation_sha256": generation.filesystem_generation_sha256,
+        "file_count": generation.file_count,
+        "directory_count": generation.directory_count,
+        "total_file_bytes": generation.total_file_bytes,
+        "files": [
+            {
+                "path": item.relative_path,
+                "size_bytes": item.size_bytes,
+                "sha256": item.sha256,
+            }
+            for item in generation.files
+        ],
+    }
+
+
+def _publish_claim_evidence_generation(
+    output_path: str | Path,
+    *,
+    runtime: Mapping[str, Any],
+    runtime_record_path: Path,
+    workload_execution_authority_path: str | Path | None,
+    evaluator_authority_path: str | Path | None,
+    accuracy_report_path: str | Path | None,
+    content_manifest_path: str | Path | None,
+    source_authority_path: str | Path | None,
+) -> dict[str, Any]:
+    output = Path(os.path.abspath(os.fspath(output_path)))
+    files = [
+        ImmutableFile.from_path(
+            _CLAIM_EVIDENCE_FIXED_NAMES["runtime_record"], runtime_record_path
+        ),
+        ImmutableFile.from_path(
+            _CLAIM_EVIDENCE_FIXED_NAMES["runtime_binary"],
+            Path(runtime["invocation"]["binary"]["path"]),
+            allow_hardlinks=True,
+        ),
+        ImmutableFile.from_path(
+            _CLAIM_EVIDENCE_FIXED_NAMES["runtime_manifest"],
+            Path(runtime["manifest_identity"]["file"]["path"]),
+        ),
+        ImmutableFile.from_path(
+            _CLAIM_EVIDENCE_FIXED_NAMES["claim_producer"],
+            ROOT / _CLAIM_PRODUCER_RELATIVE,
+        ),
+        ImmutableFile.from_path(
+            _CLAIM_EVIDENCE_FIXED_NAMES["claim_schema"],
+            ROOT / _CLAIM_SCHEMA_RELATIVE,
+        ),
+        ImmutableFile.from_path(
+            _CLAIM_EVIDENCE_FIXED_NAMES["workload_schema"],
+            WORKLOAD_EXECUTION_AUTHORITY_SCHEMA_PATH,
+        ),
+    ]
+    for index, sample in enumerate(runtime["samples"]):
+        for stream_name in ("stdout", "stderr"):
+            artifact = sample[stream_name]
+            source = runtime_record_path.parent / artifact["path"]
+            files.append(
+                ImmutableFile.from_path(
+                    f"samples/{index:04d}.{stream_name}",
+                    source,
+                )
+            )
+    optional_paths = {
+        "workload_execution_authority": workload_execution_authority_path,
+        "evaluator_authority": evaluator_authority_path,
+        "accuracy_report": accuracy_report_path,
+        "content_manifest": content_manifest_path,
+        "source_authority": source_authority_path,
+    }
+    for role, source in optional_paths.items():
+        if source is not None:
+            files.append(
+                ImmutableFile.from_path(
+                    _CLAIM_EVIDENCE_FIXED_NAMES[role], Path(source)
+                )
+            )
+    try:
+        generation_path = publish_directory(
+            output.parent,
+            output.name + _CLAIM_EVIDENCE_SUFFIX,
+            files,
+            accept_existing=False,
+        )
+        generation = inspect_immutable_directory_generation(
+            generation_path,
+            max_files=64,
+            max_directories=2,
+            max_total_file_bytes=(
+                MAX_BINARY_BYTES
+                + MAX_MANIFEST_BYTES
+                + MAX_RUNTIME_RECORD_BYTES
+                + 24 * MAX_RESULT_STREAM_BYTES
+                + 4 * MAX_CLAIM_AUTHORITY_BYTES
+                + MAX_ACCURACY_REPORT_BYTES
+                + MAX_CONTENT_MANIFEST_BYTES
+            ),
+            max_total_relative_path_bytes=8192,
+        )
+    except ImmutableArtifactError as exc:
+        raise RuntimeRecorderError(
+            "RUNTIME_CLAIM_EVIDENCE_PUBLICATION_FAILED",
+            "runtime claim retained evidence generation could not be published",
+        ) from exc
+    return _claim_generation_projection(generation)
+
+
+def _publish_runtime_claim(path: str | Path, document: Mapping[str, Any]) -> Path:
+    absolute = Path(os.path.abspath(os.fspath(path)))
+    if absolute.name in {"", ".", ".."}:
+        _claim_contract_error("runtime claim output name is invalid")
+    parent_fd = _open_directory_no_symlinks(
+        absolute.parent,
+        role="runtime claim output parent",
+        error_code="RUNTIME_OUTPUT_PARENT_INVALID",
+    )
+    try:
+        if _entry_exists(parent_fd, absolute.name):
+            raise RuntimeRecorderError(
+                "RUNTIME_OUTPUT_EXISTS",
+                "runtime claim output already exists",
+                context={"path": str(absolute)},
+            )
+        _publish_exclusive_at(parent_fd, absolute.name, _canonical_json_line(document))
+    finally:
+        os.close(parent_fd)
+    return absolute
+
+
+def _require_production_runtime_claim_authorities() -> None:
+    registries = (
+        PRODUCTION_RUNTIME_WORKLOAD_AUTHORITIES,
+        PRODUCTION_RUNTIME_EVALUATOR_AUTHORITIES,
+        PRODUCTION_RUNTIME_SOURCE_AUTHORITIES,
+        PRODUCTION_RUNTIME_CONTENT_MANIFEST_PINS,
+    )
+    if not all(registries):
+        raise RuntimeRecorderError(
+            "RUNTIME_CLAIM_AUTHORITY_UNAVAILABLE",
+            "production runtime claim authorities are not independently installed",
+        )
+
+
+def _registry_admits_sha256(
+    registry: Mapping[str, Any], observed_sha256: str
+) -> bool:
+    for key, value in registry.items():
+        candidates = (key, value)
+        if any(candidate == observed_sha256 for candidate in candidates):
+            return True
+        if isinstance(value, Mapping) and observed_sha256 in value.values():
+            return True
+    return False
+
+
+def _require_registered_claim_hash(
+    registry: Mapping[str, Any], observed_sha256: str, role: str
+) -> None:
+    if not _registry_admits_sha256(registry, observed_sha256):
+        _claim_contract_error(
+            f"{role} is absent from the immutable production registry",
+            code="RUNTIME_CLAIM_AUTHORITY_UNAVAILABLE",
+        )
+
+
+def _claim_runtime_impl(
+    runtime_record_path: str | Path,
+    output_path: str | Path,
+    *,
+    workload_execution_authority_path: str | Path | None,
+    evaluator_authority_path: str | Path | None,
+    accuracy_report_path: str | Path | None,
+    content_manifest_path: str | Path | None,
+    source_authority_path: str | Path | None,
+    expected_content_manifest_sha256: str | None,
+    expected_source_authority_sha256: str | None,
+    repo_root: Path,
+    fixture_mode: bool,
+) -> dict[str, Any]:
+    runtime, runtime_retained = _load_runtime_claim_evidence(
+        runtime_record_path, repo_root=repo_root
+    )
+    try:
+        document = _build_runtime_claim_document(
+            runtime_path=runtime_retained.path,
+            runtime=runtime,
+            runtime_retained=runtime_retained,
+            workload_execution_authority_path=workload_execution_authority_path,
+            evaluator_authority_path=evaluator_authority_path,
+            accuracy_report_path=accuracy_report_path,
+            content_manifest_path=content_manifest_path,
+            source_authority_path=source_authority_path,
+            expected_content_manifest_sha256=expected_content_manifest_sha256,
+            expected_source_authority_sha256=expected_source_authority_sha256,
+            fixture_mode=fixture_mode,
+        )
+        document["retained_evidence_generation"] = (
+            _publish_claim_evidence_generation(
+                output_path,
+                runtime=runtime,
+                runtime_record_path=runtime_retained.path,
+                workload_execution_authority_path=(
+                    workload_execution_authority_path
+                ),
+                evaluator_authority_path=evaluator_authority_path,
+                accuracy_report_path=accuracy_report_path,
+                content_manifest_path=content_manifest_path,
+                source_authority_path=source_authority_path,
+            )
+        )
+        document["claim_sha256"] = canonical_sha256(document, "claim_sha256")
+        validate_runtime_claim(
+            document,
+            expected_content_manifest_sha256=expected_content_manifest_sha256,
+            expected_source_authority_sha256=expected_source_authority_sha256,
+            repo_root=repo_root,
+        )
+        published = _publish_runtime_claim(output_path, document)
+    finally:
+        runtime_retained.close()
+    loaded = _load_runtime_claim(
+        published,
+        expected_content_manifest_sha256=expected_content_manifest_sha256,
+        expected_source_authority_sha256=expected_source_authority_sha256,
+        repo_root=repo_root,
+    )
+    if loaded != document:
+        _claim_contract_error("published runtime claim did not replay byte-exactly")
+    return document
+
+
+def _translate_claim_input_failures(
+    operation: Callable[[], dict[str, Any]],
+) -> dict[str, Any]:
+    try:
+        return operation()
+    except RuntimeRecorderError:
+        raise
+    except (
+        AttributeError,
+        ContractValidationError,
+        ImmutableArtifactError,
+        KeyError,
+        TypeError,
+        ValueError,
+    ) as exc:
+        raise RuntimeRecorderError(
+            "RUNTIME_CLAIM_INVALID",
+            "runtime claim input is malformed or lacks typed authority",
+        ) from exc
+
+
+def _claim_runtime(
+    runtime_record_path: str | Path,
+    output_path: str | Path,
+    *,
+    workload_execution_authority_path: str | Path | None,
+    evaluator_authority_path: str | Path | None,
+    accuracy_report_path: str | Path | None,
+    content_manifest_path: str | Path | None,
+    source_authority_path: str | Path | None,
+    expected_content_manifest_sha256: str | None,
+    expected_source_authority_sha256: str | None,
+    repo_root: Path,
+) -> dict[str, Any]:
+    _require_production_runtime_claim_authorities()
+    return _translate_claim_input_failures(
+        lambda: _claim_runtime_impl(
+            runtime_record_path,
+            output_path,
+            workload_execution_authority_path=workload_execution_authority_path,
+            evaluator_authority_path=evaluator_authority_path,
+            accuracy_report_path=accuracy_report_path,
+            content_manifest_path=content_manifest_path,
+            source_authority_path=source_authority_path,
+            expected_content_manifest_sha256=expected_content_manifest_sha256,
+            expected_source_authority_sha256=expected_source_authority_sha256,
+            repo_root=repo_root,
+            fixture_mode=False,
+        )
+    )
+
+
+def _claim_runtime_fixture(
+    runtime_record_path: str | Path,
+    output_path: str | Path,
+    *,
+    workload_execution_authority_path: str | Path | None,
+    evaluator_authority_path: str | Path | None,
+    accuracy_report_path: str | Path | None,
+    content_manifest_path: str | Path | None,
+    source_authority_path: str | Path | None,
+    expected_content_manifest_sha256: str | None,
+    expected_source_authority_sha256: str | None,
+    repo_root: Path,
+) -> dict[str, Any]:
+    """Exercise claim algebra without creating production authority."""
+
+    return _translate_claim_input_failures(
+        lambda: _claim_runtime_impl(
+            runtime_record_path,
+            output_path,
+            workload_execution_authority_path=workload_execution_authority_path,
+            evaluator_authority_path=evaluator_authority_path,
+            accuracy_report_path=accuracy_report_path,
+            content_manifest_path=content_manifest_path,
+            source_authority_path=source_authority_path,
+            expected_content_manifest_sha256=expected_content_manifest_sha256,
+            expected_source_authority_sha256=expected_source_authority_sha256,
+            repo_root=repo_root,
+            fixture_mode=True,
+        )
+    )
+
+
+def claim_runtime(
+    runtime_record_path: str | Path,
+    output_path: str | Path,
+    *,
+    workload_execution_authority_path: str | Path | None = None,
+    evaluator_authority_path: str | Path | None = None,
+    accuracy_report_path: str | Path | None = None,
+    content_manifest_path: str | Path | None = None,
+    source_authority_path: str | Path | None = None,
+    content_manifest_sha256: str | None = None,
+    source_authority_sha256: str | None = None,
+) -> dict[str, Any]:
+    """Publish a detached post-result runtime claim assessment.
+
+    Accuracy and label-derived evidence is opened only here, after the runtime
+    record and every simulator result have already been sealed.
+    """
+
+    return _claim_runtime(
+        runtime_record_path,
+        output_path,
+        workload_execution_authority_path=workload_execution_authority_path,
+        evaluator_authority_path=evaluator_authority_path,
+        accuracy_report_path=accuracy_report_path,
+        content_manifest_path=content_manifest_path,
+        source_authority_path=source_authority_path,
+        expected_content_manifest_sha256=content_manifest_sha256,
+        expected_source_authority_sha256=source_authority_sha256,
+        repo_root=ROOT,
+    )
+
+
+_MISSING_CLAIM_REASONS = {
+    "WORKLOAD_EXECUTION_AUTHORITY_UNAVAILABLE",
+    "SOURCE_AUTHORITY_UNAVAILABLE",
+    "EVALUATOR_AUTHORITY_UNAVAILABLE",
+    "ACCURACY_REPORT_UNAVAILABLE",
+    "CONTENT_MANIFEST_AUTHORITY_UNAVAILABLE",
+}
+
+
+def _require_claim_components(
+    document: Mapping[str, Any],
+    expected: Mapping[str, Any],
+    *,
+    reason: str | None,
+) -> None:
+    for name, value in expected.items():
+        if document[name] != value:
+            _claim_contract_error(
+                f"runtime claim {name} is not derived from retained evidence"
+            )
+    if document["claimability"] != _claimability_model(
+        reason,
+        fixture_mode=(document["contract_mode"] == "FIXTURE_ONLY_NON_AUTHORITATIVE"),
+    ):
+        _claim_contract_error(
+            "runtime claimability is not derived from retained evidence"
+        )
+
+
+def _validate_runtime_claim_envelope(document: Any) -> dict[str, Any]:
+    if not isinstance(document, dict):
+        _claim_contract_error("runtime claim root must be an object")
+    try:
+        _RUNTIME_CLAIM_VALIDATOR.validate(document)
+    except ValidationError as exc:
+        _claim_contract_error(
+            exc.message,
+            context={
+                "json_path": _schema_path(exc),
+                "validator": str(exc.validator),
+            },
+        )
+    if document["schema_sha256"] != RUNTIME_CLAIM_SCHEMA_SHA256:
+        _claim_contract_error("runtime claim schema identity is not code-pinned")
+    if document["contract_mode"] == "TARGET_FREE_PRODUCTION":
+        _require_production_runtime_claim_authorities()
+    if document["claim_sha256"] != canonical_sha256(document, "claim_sha256"):
+        _claim_contract_error("runtime claim canonical seal does not match")
+    try:
+        created = datetime.fromisoformat(
+            document["created_at_utc"].replace("Z", "+00:00")
+        )
+    except ValueError as exc:
+        raise RuntimeRecorderError(
+            "RUNTIME_CLAIM_INVALID",
+            "runtime claim creation time is invalid",
+        ) from exc
+    if created.tzinfo is None or created.utcoffset() != timezone.utc.utcoffset(created):
+        _claim_contract_error("runtime claim creation time is not UTC")
+    return document
+
+
+def _expected_early_claim_components() -> dict[str, Any]:
+    return {
+        **_unavailable_claim_components("runtime_gate_unclaimable"),
+        "result_binding": {
+            "status": "unavailable",
+            "reason": "runtime_gate_unclaimable",
+        },
+        "derived_binding": {
+            "status": "unavailable",
+            "reason": "runtime_gate_unclaimable",
+        },
+    }
+
+
+def _expected_final_result_components(
+    runtime: Mapping[str, Any], derived: Mapping[str, Any]
+) -> dict[str, Any]:
+    return {
+        "result_binding": {
+            "status": "bound",
+            "file_sha256": runtime["sim_result_binding"]["file_sha256"],
+            "result_sha256": runtime["sim_result_binding"]["result_sha256"],
+        },
+        "derived_binding": derived,
+    }
+
+
+def _validate_unbound_final_claim(
+    document: Mapping[str, Any],
+    runtime: Mapping[str, Any],
+    derived: Mapping[str, Any],
+) -> None:
+    evidence = (
+        document["source_authority"],
+        document["workload_execution_authority"],
+        document["content_manifest_anchor"],
+        document["accuracy_binding"],
+    )
+    if any(item["status"] != "unavailable" for item in evidence):
+        _claim_contract_error("runtime claim authority evidence is only partially bound")
+    reasons = {item["reason"] for item in evidence}
+    if len(reasons) != 1:
+        _claim_contract_error("missing runtime claim authorities have inconsistent typing")
+    reason = next(iter(reasons))
+    if reason not in _MISSING_CLAIM_REASONS:
+        _claim_contract_error("missing runtime claim authority reason is invalid")
+    expected = {
+        **_unavailable_claim_components(reason),
+        **_expected_final_result_components(runtime, derived),
+    }
+    _require_claim_components(document, expected, reason=reason)
+
+
+def _validate_bound_final_claim(
+    document: Mapping[str, Any],
+    runtime: Mapping[str, Any],
+    runtime_retained: _RetainedFile,
+    *,
+    expected_content_manifest_sha256: str | None,
+    expected_source_authority_sha256: str | None,
+    result_artifact_path: Path,
+    source_file_identities: Mapping[str, Mapping[str, Any]],
+    generation_path: Path,
+) -> None:
+    if expected_content_manifest_sha256 is None:
+        _claim_contract_error("claimable runtime lacks an external content-manifest pin")
+    if expected_source_authority_sha256 is None:
+        _claim_contract_error("claimable runtime lacks an external clean-source pin")
+    source = document["source_authority"]
+    workload = document["workload_execution_authority"]
+    content = document["content_manifest_anchor"]
+    accuracy = document["accuracy_binding"]
+    if any(
+        item["status"] != "bound"
+        for item in (source, workload, content, accuracy)
+    ):
+        _claim_contract_error("runtime claim authority evidence is only partially bound")
+    if content["external_file_sha256"] != expected_content_manifest_sha256:
+        _claim_contract_error("serialized content-manifest pin differs from caller authority")
+    expected, reason = _evaluate_bound_claim_evidence(
+        runtime_path=runtime_retained.path,
+        runtime=runtime,
+        runtime_retained=runtime_retained,
+        workload_authority_path=(
+            generation_path
+            / _CLAIM_EVIDENCE_FIXED_NAMES["workload_execution_authority"]
+        ),
+        evaluator_authority_path=(
+            generation_path / _CLAIM_EVIDENCE_FIXED_NAMES["evaluator_authority"]
+        ),
+        accuracy_report_path=(
+            generation_path / _CLAIM_EVIDENCE_FIXED_NAMES["accuracy_report"]
+        ),
+        content_manifest_path=(
+            generation_path / _CLAIM_EVIDENCE_FIXED_NAMES["content_manifest"]
+        ),
+        source_authority_path=(
+            generation_path / _CLAIM_EVIDENCE_FIXED_NAMES["source_authority"]
+        ),
+        expected_content_manifest_sha256=expected_content_manifest_sha256,
+        expected_source_authority_sha256=expected_source_authority_sha256,
+        fixture_mode=(document["contract_mode"] == "FIXTURE_ONLY_NON_AUTHORITATIVE"),
+        source_file_identities=source_file_identities,
+        result_artifact_path=result_artifact_path,
+        producer_path=(
+            generation_path / _CLAIM_EVIDENCE_FIXED_NAMES["claim_producer"]
+        ),
+        claim_schema_path=(
+            generation_path / _CLAIM_EVIDENCE_FIXED_NAMES["claim_schema"]
+        ),
+        binary_path=(
+            generation_path / _CLAIM_EVIDENCE_FIXED_NAMES["runtime_binary"]
+        ),
+        workload_schema_path=(
+            generation_path / _CLAIM_EVIDENCE_FIXED_NAMES["workload_schema"]
+        ),
+    )
+    _require_claim_components(document, expected, reason=reason)
+
+
+def _validate_final_runtime_claim(
+    document: Mapping[str, Any],
+    runtime: Mapping[str, Any],
+    runtime_retained: _RetainedFile,
+    *,
+    expected_content_manifest_sha256: str | None,
+    expected_source_authority_sha256: str | None,
+    result_artifact_path: Path,
+    source_file_identities: Mapping[str, Mapping[str, Any]],
+    generation_path: Path,
+) -> None:
+    result = _load_claim_result(
+        runtime_retained.path,
+        runtime,
+        artifact_path_override=result_artifact_path,
+    )
+    if result["result_sha256"] != runtime["sim_result_binding"]["result_sha256"]:
+        _claim_contract_error("runtime claim result seal differs from retained result")
+    derived = _runtime_derived_binding(runtime)
+    statuses = {
+        document["source_authority"]["status"],
+        document["workload_execution_authority"]["status"],
+        document["content_manifest_anchor"]["status"],
+        document["accuracy_binding"]["status"],
+    }
+    if statuses == {"unavailable"}:
+        _validate_unbound_final_claim(document, runtime, derived)
+    elif statuses == {"bound"}:
+        _validate_bound_final_claim(
+            document,
+            runtime,
+            runtime_retained,
+            expected_content_manifest_sha256=expected_content_manifest_sha256,
+            expected_source_authority_sha256=expected_source_authority_sha256,
+            result_artifact_path=result_artifact_path,
+            source_file_identities=source_file_identities,
+            generation_path=generation_path,
+        )
+    else:
+        _claim_contract_error("runtime claim authority evidence is only partially bound")
+
+
+def _inspect_claim_evidence_generation(
+    projection: Mapping[str, Any],
+) -> tuple[Path, dict[str, Mapping[str, Any]]]:
+    if type(projection) is not dict:
+        _claim_contract_error("retained evidence generation is malformed")
+    path = projection.get("path")
+    if type(path) is not str or path != os.path.abspath(path):
+        _claim_contract_error("retained evidence generation path is invalid")
+    try:
+        generation = inspect_immutable_directory_generation(
+            Path(path),
+            max_files=64,
+            max_directories=2,
+            max_total_file_bytes=(
+                MAX_BINARY_BYTES
+                + MAX_MANIFEST_BYTES
+                + MAX_RUNTIME_RECORD_BYTES
+                + 24 * MAX_RESULT_STREAM_BYTES
+                + 4 * MAX_CLAIM_AUTHORITY_BYTES
+                + MAX_ACCURACY_REPORT_BYTES
+                + MAX_CONTENT_MANIFEST_BYTES
+            ),
+            max_total_relative_path_bytes=8192,
+        )
+    except ImmutableArtifactError as exc:
+        raise RuntimeRecorderError(
+            "RUNTIME_CLAIM_EVIDENCE_INVALID",
+            "retained runtime claim evidence generation is unavailable",
+        ) from exc
+    observed = _claim_generation_projection(generation)
+    if observed != projection:
+        _claim_contract_error("retained evidence generation identity differs")
+    return generation.path, {
+        item["path"]: item for item in projection["files"]
+    }
+
+
+def _read_claim_generation_file(
+    generation_path: Path,
+    files: Mapping[str, Mapping[str, Any]],
+    relative_path: str,
+    *,
+    maximum_bytes: int,
+) -> bytes:
+    identity = files.get(relative_path)
+    if type(identity) is not dict:
+        _claim_contract_error(f"retained evidence lacks {relative_path}")
+    try:
+        with open_retained_regular(
+            generation_path / relative_path,
+            max_bytes=maximum_bytes,
+        ) as retained:
+            payload = retained.read_bytes(max_bytes=maximum_bytes)
+            observed = {
+                "path": relative_path,
+                "size_bytes": retained.size_bytes,
+                "sha256": retained.sha256,
+            }
+            if observed != identity:
+                _claim_contract_error(
+                    f"retained evidence identity differs for {relative_path}"
+                )
+            retained.verify_unchanged()
+            return payload
+    except RuntimeRecorderError:
+        raise
+    except ImmutableArtifactError as exc:
+        raise RuntimeRecorderError(
+            "RUNTIME_CLAIM_EVIDENCE_INVALID",
+            f"retained evidence file is unavailable: {relative_path}",
+        ) from exc
+
+
+def _validate_detached_runtime_result(
+    result: dict[str, Any],
+    *,
+    result_payload: bytes,
+    runtime: Mapping[str, Any],
+    manifest: Mapping[str, Any],
+    manifest_canonical_sha256: str,
+    binary_sha256: str,
+) -> None:
+    try:
+        validate_result(result)
+    except ContractValidationError as exc:
+        raise RuntimeRecorderError(
+            "RUNTIME_CLAIM_EVIDENCE_INVALID",
+            "retained simulator result contract is invalid",
+        ) from exc
+    if result_payload != _canonical_json_line(result):
+        _claim_contract_error("retained simulator result is not canonical JSON")
+    if result["build_identity"]["binary_sha256"] != binary_sha256:
+        _claim_contract_error("retained simulator result names a different build")
+    configuration = result["configuration_identity"]
+    if (
+        configuration["run_manifest_sha256"] != manifest_canonical_sha256
+        or configuration["resolved_configuration_sha256"]
+        != _sha256_canonical(result["resolved_configuration"])
+        or result["resolved_configuration"]["replay_mode"] != manifest["replay_mode"]
+    ):
+        _claim_contract_error("retained simulator result configuration differs")
+    expected_launches, _ = _launch_projection(manifest)
+    observed_launches = [
+        deepcopy(item["launch_key"]) for item in result["launches"]
+    ]
+    observed_launches.sort(key=canonical_launch_key_token)
+    if observed_launches != expected_launches:
+        _claim_contract_error("retained simulator result launch set differs")
+    file_sha256 = hashlib.sha256(result_payload).hexdigest()
+    expected_binding = _result_binding(result, file_sha256, "result_identity_mismatch")
+    if runtime["sim_result_binding"] != expected_binding:
+        _claim_contract_error("retained simulator result projection differs")
+
+
+def _load_detached_runtime_claim_evidence(
+    document: Mapping[str, Any],
+) -> tuple[dict[str, Any], Path, dict[str, Mapping[str, Any]]]:
+    generation_path, files = _inspect_claim_evidence_generation(
+        document["retained_evidence_generation"]
+    )
+    runtime_payload = _read_claim_generation_file(
+        generation_path,
+        files,
+        _CLAIM_EVIDENCE_FIXED_NAMES["runtime_record"],
+        maximum_bytes=MAX_RUNTIME_RECORD_BYTES,
+    )
+    runtime = _decode_claim_object(
+        runtime_payload,
+        source=str(generation_path / _CLAIM_EVIDENCE_FIXED_NAMES["runtime_record"]),
+        role="retained runtime record",
+    )
+    validate_runtime_record(
+        runtime,
+        permit_terminal_input_drift=_is_input_drift_record(runtime),
+    )
+    if runtime_payload != _canonical_json_line(runtime):
+        _claim_contract_error("retained runtime record is not canonical JSON")
+    runtime_identity = document["runtime_record_binding"]["file"]
+    if (
+        len(runtime_payload) != runtime_identity["size_bytes"]
+        or hashlib.sha256(runtime_payload).hexdigest() != runtime_identity["sha256"]
+    ):
+        _claim_contract_error("retained runtime record bytes differ from source identity")
+
+    binary_payload = _read_claim_generation_file(
+        generation_path,
+        files,
+        _CLAIM_EVIDENCE_FIXED_NAMES["runtime_binary"],
+        maximum_bytes=MAX_BINARY_BYTES,
+    )
+    binary_identity = runtime["invocation"]["binary"]
+    if (
+        len(binary_payload) != binary_identity["size_bytes"]
+        or hashlib.sha256(binary_payload).hexdigest() != binary_identity["sha256"]
+    ):
+        _claim_contract_error("retained runtime executable identity differs")
+    manifest_payload = _read_claim_generation_file(
+        generation_path,
+        files,
+        _CLAIM_EVIDENCE_FIXED_NAMES["runtime_manifest"],
+        maximum_bytes=MAX_MANIFEST_BYTES,
+    )
+    manifest = _decode_claim_object(
+        manifest_payload,
+        source=str(generation_path / _CLAIM_EVIDENCE_FIXED_NAMES["runtime_manifest"]),
+        role="retained run manifest",
+    )
+    try:
+        validate_manifest(manifest)
+    except ContractValidationError as exc:
+        raise RuntimeRecorderError(
+            "RUNTIME_CLAIM_EVIDENCE_INVALID",
+            "retained run manifest is invalid",
+        ) from exc
+    manifest_identity = runtime["manifest_identity"]
+    if (
+        len(manifest_payload) != manifest_identity["file"]["size_bytes"]
+        or hashlib.sha256(manifest_payload).hexdigest()
+        != manifest_identity["file"]["sha256"]
+        or _sha256_canonical(manifest) != manifest_identity["canonical_sha256"]
+        or manifest["scope"] != manifest_identity["scope"]
+    ):
+        _claim_contract_error("retained run manifest identity differs")
+    launch_keys, launch_set_sha256 = _launch_projection(manifest)
+    if (
+        launch_keys != runtime["workload_identity"]["launch_keys"]
+        or launch_set_sha256 != runtime["workload_identity"]["launch_set_sha256"]
+    ):
+        _claim_contract_error("retained manifest launch identity differs")
+
+    parsed_bound_result = False
+    for index, sample in enumerate(runtime["samples"]):
+        for stream_name in ("stdout", "stderr"):
+            relative = f"samples/{index:04d}.{stream_name}"
+            payload = _read_claim_generation_file(
+                generation_path,
+                files,
+                relative,
+                maximum_bytes=MAX_RESULT_STREAM_BYTES,
+            )
+            identity = sample[stream_name]
+            if (
+                len(payload) != identity["size_bytes"]
+                or hashlib.sha256(payload).hexdigest() != identity["sha256"]
+            ):
+                _claim_contract_error("retained runtime sample identity differs")
+            if (
+                stream_name == "stdout"
+                and not parsed_bound_result
+                and runtime["sim_result_binding"]["status"] == "bound"
+                and identity["sha256"]
+                == runtime["sim_result_binding"]["file_sha256"]
+            ):
+                result = _decode_claim_object(
+                    payload,
+                    source=str(generation_path / relative),
+                    role="retained simulator result",
+                )
+                _validate_detached_runtime_result(
+                    result,
+                    result_payload=payload,
+                    runtime=runtime,
+                    manifest=manifest,
+                    manifest_canonical_sha256=manifest_identity["canonical_sha256"],
+                    binary_sha256=binary_identity["sha256"],
+                )
+                parsed_bound_result = True
+    if runtime["sim_result_binding"]["status"] == "bound" and not parsed_bound_result:
+        _claim_contract_error("retained runtime result artifact is unavailable")
+    refreshed = inspect_immutable_directory_generation(
+        generation_path,
+        max_files=64,
+        max_directories=2,
+        max_total_file_bytes=document["retained_evidence_generation"][
+            "total_file_bytes"
+        ],
+        max_total_relative_path_bytes=8192,
+    )
+    if _claim_generation_projection(refreshed) != document["retained_evidence_generation"]:
+        _claim_contract_error("retained evidence generation changed during validation")
+    return runtime, generation_path, files
+
+
+def validate_runtime_claim(
+    document: Any,
+    *,
+    expected_content_manifest_sha256: str | None = None,
+    expected_source_authority_sha256: str | None = None,
+    repo_root: Path = ROOT,
+) -> dict[str, Any]:
+    """Recompute claimability from the current checkout and retained files."""
+
+    document = _validate_runtime_claim_envelope(document)
+    del repo_root
+    runtime_binding = document["runtime_record_binding"]
+    runtime, generation_path, _files = _load_detached_runtime_claim_evidence(
+        document
+    )
+    runtime_retained = _open_retained_file(
+        generation_path / _CLAIM_EVIDENCE_FIXED_NAMES["runtime_record"],
+        role="retained runtime record",
+        maximum_bytes=MAX_RUNTIME_RECORD_BYTES,
+    )
+    try:
+        expected_runtime = _runtime_record_claim_projection(runtime, runtime_retained)
+        expected_runtime["file"] = deepcopy(runtime_binding["file"])
+        if runtime_binding != expected_runtime:
+            _claim_contract_error(
+                "runtime claim record binding differs from retained bytes"
+            )
+        runtime_reason = _runtime_claimability_reason(runtime)
+        if runtime_reason is not None:
+            _require_claim_components(
+                document,
+                _expected_early_claim_components(),
+                reason=runtime_reason,
+            )
+        else:
+            authority_statuses = {
+                document["source_authority"]["status"],
+                document["workload_execution_authority"]["status"],
+                document["content_manifest_anchor"]["status"],
+                document["accuracy_binding"]["status"],
+            }
+            source_file_identities = (
+                {
+                    "accuracy_report": document["accuracy_binding"]["report_file"],
+                    "evaluator_authority": document["accuracy_binding"][
+                        "evaluator_authority_file"
+                    ],
+                    "runtime_record": runtime_binding["file"],
+                    "source_authority": document["source_authority"]["file"],
+                    "workload_execution_authority": document[
+                        "workload_execution_authority"
+                    ]["file"],
+                    "content_manifest": document["content_manifest_anchor"]["file"],
+                }
+                if authority_statuses == {"bound"}
+                else {}
+            )
+            _validate_final_runtime_claim(
+                document,
+                runtime,
+                runtime_retained,
+                expected_content_manifest_sha256=expected_content_manifest_sha256,
+                expected_source_authority_sha256=expected_source_authority_sha256,
+                result_artifact_path=generation_path / "samples/0000.stdout",
+                source_file_identities=source_file_identities,
+                generation_path=generation_path,
+            )
+        runtime_retained.revalidate(role="retained runtime record")
+        return document
+    finally:
+        runtime_retained.close()
+
+
+def _load_runtime_claim(
+    path: str | Path,
+    *,
+    expected_content_manifest_sha256: str | None,
+    expected_source_authority_sha256: str | None,
+    repo_root: Path,
+) -> dict[str, Any]:
+    retained = _open_retained_file(
+        path,
+        role="runtime claim",
+        maximum_bytes=MAX_RUNTIME_CLAIM_BYTES,
+    )
+    try:
+        payload = retained.read_bytes(role="runtime claim")
+        document = _decode_claim_object(
+            payload,
+            source=str(retained.path),
+            role="runtime claim",
+        )
+        validate_runtime_claim(
+            document,
+            expected_content_manifest_sha256=expected_content_manifest_sha256,
+            expected_source_authority_sha256=expected_source_authority_sha256,
+            repo_root=repo_root,
+        )
+        if payload != _canonical_json_line(document):
+            _claim_contract_error("runtime claim is not canonical JSON")
+        retained.revalidate(role="runtime claim")
+        return document
+    finally:
+        retained.close()
+
+
+def load_runtime_claim(
+    path: str | Path,
+    *,
+    content_manifest_sha256: str | None = None,
+    source_authority_sha256: str | None = None,
+) -> dict[str, Any]:
+    """Load a detached claim against independent content and source pins."""
+
+    return _load_runtime_claim(
+        path,
+        expected_content_manifest_sha256=content_manifest_sha256,
+        expected_source_authority_sha256=source_authority_sha256,
+        repo_root=ROOT,
+    )
+
+
+
 def _error_line(error: RuntimeRecorderError) -> str:
     return json.dumps(
         {"code": error.code, "detail": error.detail},
@@ -2867,8 +5101,58 @@ def _error_line(error: RuntimeRecorderError) -> str:
     ) + "\n"
 
 
+def _claim_cli(arguments: Sequence[str]) -> int:
+    (
+        _command,
+        runtime_path,
+        output_path,
+        workload_path,
+        evaluator_path,
+        report_path,
+        content_path,
+        content_sha256,
+        source_path,
+        source_sha256,
+    ) = arguments
+    optional = lambda value: None if value == "-" else value
+    try:
+        claim = claim_runtime(
+            runtime_path,
+            output_path,
+            workload_execution_authority_path=optional(workload_path),
+            evaluator_authority_path=optional(evaluator_path),
+            accuracy_report_path=optional(report_path),
+            content_manifest_path=optional(content_path),
+            source_authority_path=optional(source_path),
+            content_manifest_sha256=optional(content_sha256),
+            source_authority_sha256=optional(source_sha256),
+        )
+    except RuntimeRecorderError as exc:
+        sys.stderr.write(_error_line(exc))
+        return 1
+    message = {
+        "claim_path": str(Path(output_path).absolute()),
+        "claim_sha256": claim["claim_sha256"],
+        "status": claim["claimability"]["status"],
+    }
+    line = json.dumps(
+        message,
+        ensure_ascii=False,
+        allow_nan=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    ) + "\n"
+    if claim["claimability"]["status"] == "claimable":
+        sys.stdout.write(line)
+        return 0
+    sys.stderr.write(line)
+    return 1
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     arguments = list(sys.argv[1:] if argv is None else argv)
+    if len(arguments) == 10 and arguments[0] == "claim":
+        return _claim_cli(arguments)
     if len(arguments) != 3 or arguments[0] != "record":
         error = RuntimeRecorderError(
             "CLI_USAGE_FAILED",
