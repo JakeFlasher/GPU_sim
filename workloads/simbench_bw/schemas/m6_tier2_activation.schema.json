@@ -1,0 +1,69 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "simbench_bw/schemas/m6_tier2_activation.schema.json",
+  "title": "M6 derived Tier-2 activation",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "kind", "schedule_sha256", "tier1_journal_sha256",
+    "derivation", "tier1_terminal_slots", "tier1_terminal_slot_ids_sha256",
+    "trigger_decisions", "trigger_decisions_sha256", "activated_cell_ids",
+    "activated_ordinals", "activated_candidate_slots_sha256", "counts",
+    "activation_sha256"
+  ],
+  "properties": {
+    "schema_version": {"const": 1},
+    "kind": {"const": "m6_derived_tier2_activation_v1"},
+    "schedule_sha256": {"$ref": "#/$defs/sha256"},
+    "tier1_journal_sha256": {"$ref": "#/$defs/sha256"},
+    "derivation": {"const": "m6_trigger_decisions_from_complete_uncensored_tier1_v1"},
+    "tier1_terminal_slots": {"const": 8540},
+    "tier1_terminal_slot_ids_sha256": {"$ref": "#/$defs/sha256"},
+    "trigger_decisions": {
+      "type": "array", "minItems": 122, "maxItems": 122,
+      "items": {"$ref": "#/$defs/decision"}
+    },
+    "trigger_decisions_sha256": {"$ref": "#/$defs/sha256"},
+    "activated_cell_ids": {
+      "type": "array", "maxItems": 122, "uniqueItems": true,
+      "items": {"type": "string", "minLength": 3}
+    },
+    "activated_ordinals": {
+      "type": "array", "maxItems": 1220, "uniqueItems": true,
+      "items": {"type": "integer", "minimum": 8540, "maximum": 9759}
+    },
+    "activated_candidate_slots_sha256": {"$ref": "#/$defs/sha256"},
+    "counts": {
+      "type": "object", "additionalProperties": false,
+      "required": ["tier1_slots", "decisions", "triggered_cells", "activated_tier2_slots"],
+      "properties": {
+        "tier1_slots": {"const": 8540},
+        "decisions": {"const": 122},
+        "triggered_cells": {"type": "integer", "minimum": 0, "maximum": 122},
+        "activated_tier2_slots": {"type": "integer", "minimum": 0, "maximum": 1220}
+      }
+    },
+    "activation_sha256": {"$ref": "#/$defs/sha256"}
+  },
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "decision": {
+      "type": "object", "additionalProperties": false,
+      "required": ["cell_id", "cell_identity_sha256", "triggered", "reason_codes", "evidence_metric_keys", "decision_sha256"],
+      "properties": {
+        "cell_id": {"type": "string", "minLength": 3},
+        "cell_identity_sha256": {"$ref": "#/$defs/sha256"},
+        "triggered": {"type": "boolean"},
+        "reason_codes": {
+          "type": "array", "uniqueItems": true,
+          "items": {"enum": ["boundary_proximity", "discrete_multiple_values", "modality_flag", "out_of_range", "single_point_outlier"]}
+        },
+        "evidence_metric_keys": {
+          "type": "array", "uniqueItems": true,
+          "items": {"type": "string", "minLength": 1}
+        },
+        "decision_sha256": {"$ref": "#/$defs/sha256"}
+      }
+    }
+  }
+}

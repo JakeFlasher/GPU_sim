@@ -1,0 +1,261 @@
+{
+  "$defs": {
+    "attemptRef": {
+      "additionalProperties": false,
+      "properties": {
+        "attempt_id": {
+          "pattern": "^m6-attempt-[0-9a-f]{24}$",
+          "type": "string"
+        },
+        "attempt_sequence": {
+          "maximum": 9007199254740991,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "fresh_process_cost": {
+          "enum": [
+            0,
+            1
+          ]
+        },
+        "ordinal": {
+          "maximum": 9759,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "outcome": {
+          "enum": [
+            "pre_start_failure",
+            "post_start_failure",
+            "observed",
+            "excluded_pre_start",
+            "excluded_post_start"
+          ]
+        },
+        "plan_relative_path": {
+          "$ref": "#/$defs/relativePath"
+        },
+        "plan_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "process_identity_sha256": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/sha256"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "receipt_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "relative_path": {
+          "$ref": "#/$defs/relativePath"
+        },
+        "resume_epoch": {
+          "maximum": 9007199254740991,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "slot_id": {
+          "minLength": 16,
+          "type": "string"
+        },
+        "slot_terminal": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "attempt_sequence",
+        "relative_path",
+        "receipt_sha256",
+        "ordinal",
+        "slot_id",
+        "outcome",
+        "slot_terminal",
+        "fresh_process_cost",
+        "resume_epoch",
+        "plan_relative_path",
+        "plan_sha256",
+        "attempt_id",
+        "process_identity_sha256"
+      ],
+      "type": "object"
+    },
+    "relativePath": {
+      "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*//)(?!.*\\\\).+$",
+      "type": "string"
+    },
+    "sha256": {
+      "pattern": "^[0-9a-f]{64}$",
+      "type": "string"
+    }
+  },
+  "$id": "simbench_bw/schemas/m6_live_ledger_receipt.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "attempt_head_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "attempt_receipts": {
+      "items": {
+        "$ref": "#/$defs/attemptRef"
+      },
+      "maxItems": 9007199254740991,
+      "type": "array"
+    },
+    "checkpoint_kind": {
+      "enum": [
+        "initial",
+        "attempt_append",
+        "tier2_activation",
+        "resume_epoch"
+      ]
+    },
+    "kind": {
+      "const": "m6_live_ledger_receipt_v1"
+    },
+    "ledger_history_sha256s": {
+      "items": {
+        "$ref": "#/$defs/sha256"
+      },
+      "type": "array",
+      "uniqueItems": true
+    },
+    "ledger_receipt_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "ledger_sequence": {
+      "maximum": 9007199254740991,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "previous_ledger_receipt_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "resume_epoch": {
+      "maximum": 9007199254740991,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "schedule_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "schema_version": {
+      "const": 1
+    },
+    "session_authority_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "state": {
+      "additionalProperties": false,
+      "properties": {
+        "active_slots": {
+          "maximum": 9760,
+          "minimum": 8540,
+          "type": "integer"
+        },
+        "lifetime_fresh_processes_started": {
+          "maximum": 9007199254740991,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "next_ordinal": {
+          "oneOf": [
+            {
+              "maximum": 9759,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "post_start_failures": {
+          "maximum": 9007199254740991,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "pre_start_failures": {
+          "maximum": 9007199254740991,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "process_identities_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "resume_epoch_fresh_processes_remaining": {
+          "maximum": 9760,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "resume_epoch_fresh_processes_started": {
+          "maximum": 9760,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "study_complete": {
+          "type": "boolean"
+        },
+        "terminal_prefix_slots": {
+          "maximum": 9760,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "terminal_slot_ids_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "tier1_complete": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "active_slots",
+        "terminal_prefix_slots",
+        "next_ordinal",
+        "tier1_complete",
+        "study_complete",
+        "terminal_slot_ids_sha256",
+        "pre_start_failures",
+        "post_start_failures",
+        "lifetime_fresh_processes_started",
+        "resume_epoch_fresh_processes_started",
+        "resume_epoch_fresh_processes_remaining",
+        "process_identities_sha256"
+      ],
+      "type": "object"
+    },
+    "tier2_activation_sha256": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/sha256"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  },
+  "required": [
+    "schema_version",
+    "kind",
+    "checkpoint_kind",
+    "ledger_sequence",
+    "resume_epoch",
+    "previous_ledger_receipt_sha256",
+    "ledger_history_sha256s",
+    "session_authority_sha256",
+    "schedule_sha256",
+    "tier2_activation_sha256",
+    "attempt_receipts",
+    "attempt_head_sha256",
+    "state",
+    "ledger_receipt_sha256"
+  ],
+  "title": "Immutable M6 live attempt-ledger checkpoint",
+  "type": "object"
+}

@@ -1,0 +1,746 @@
+{
+  "$defs": {
+    "absolutePath": {
+      "pattern": "^/[^\\x00]+$",
+      "type": "string"
+    },
+    "admissionEvidence": {
+      "additionalProperties": false,
+      "properties": {
+        "campaign_lock_ownership": {
+          "$ref": "#/$defs/sealedExternalFile"
+        },
+        "clean_s_p2_receipt": {
+          "$ref": "#/$defs/sealedExternalFile"
+        },
+        "current_source_anchor": {
+          "$ref": "#/$defs/sealedExternalFile"
+        },
+        "live_v1_authority": {
+          "$ref": "#/$defs/externalFile"
+        },
+        "operator_hardware_authority": {
+          "$ref": "#/$defs/sealedExternalFile"
+        },
+        "p1_gate_receipt": {
+          "$ref": "#/$defs/sealedExternalFile"
+        },
+        "successor_matrix": {
+          "$ref": "#/$defs/externalFile"
+        }
+      },
+      "required": [
+        "p1_gate_receipt",
+        "current_source_anchor",
+        "clean_s_p2_receipt",
+        "live_v1_authority",
+        "successor_matrix",
+        "campaign_lock_ownership",
+        "operator_hardware_authority"
+      ],
+      "type": "object"
+    },
+    "admissionPrerequisites": {
+      "additionalProperties": false,
+      "properties": {
+        "campaign_lock_ownership": {
+          "$ref": "#/$defs/campaignLock"
+        },
+        "evidence": {
+          "$ref": "#/$defs/admissionEvidence"
+        },
+        "storage_fault_absent_at_utc": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "trust_anchor": {
+          "$ref": "#/$defs/trustAnchor"
+        }
+      },
+      "required": [
+        "trust_anchor",
+        "evidence",
+        "campaign_lock_ownership",
+        "storage_fault_absent_at_utc"
+      ],
+      "type": "object"
+    },
+    "campaignLock": {
+      "additionalProperties": false,
+      "properties": {
+        "acquired_at_utc": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "expires_at_utc": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "gpu_uuid_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "kind": {
+          "const": "m6_campaign_lock_ownership_v1"
+        },
+        "lock_path": {
+          "$ref": "#/$defs/absolutePath"
+        },
+        "operator_authority_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "output_root": {
+          "$ref": "#/$defs/absolutePath"
+        },
+        "owner_pid": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "owner_start_ticks": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "receipt_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "schema_version": {
+          "const": 1
+        },
+        "source_commit": {
+          "$ref": "#/$defs/commit"
+        },
+        "status": {
+          "const": "pass"
+        },
+        "storage_fault_receipt_path": {
+          "$ref": "#/$defs/absolutePath"
+        }
+      },
+      "required": [
+        "schema_version",
+        "kind",
+        "status",
+        "source_commit",
+        "gpu_uuid_sha256",
+        "output_root",
+        "operator_authority_sha256",
+        "lock_path",
+        "owner_pid",
+        "owner_start_ticks",
+        "acquired_at_utc",
+        "expires_at_utc",
+        "storage_fault_receipt_path",
+        "receipt_sha256"
+      ],
+      "type": "object"
+    },
+    "commit": {
+      "pattern": "^[0-9a-f]{40}$",
+      "type": "string"
+    },
+    "costCeiling": {
+      "additionalProperties": false,
+      "properties": {
+        "max_fresh_processes_per_resume": {
+          "maximum": 9760,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "source": {
+          "const": "schedule.cost_gate.max_new_profiles_per_resume"
+        },
+        "unit": {
+          "const": "fresh_profile_process"
+        }
+      },
+      "required": [
+        "unit",
+        "max_fresh_processes_per_resume",
+        "source"
+      ],
+      "type": "object"
+    },
+    "executableFile": {
+      "additionalProperties": false,
+      "properties": {
+        "mode": {
+          "const": 493
+        },
+        "path": {
+          "$ref": "#/$defs/relativePath"
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "size_bytes": {
+          "minimum": 1,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "path",
+        "sha256",
+        "size_bytes",
+        "mode"
+      ],
+      "type": "object"
+    },
+    "externalFile": {
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "$ref": "#/$defs/absolutePath"
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "size_bytes": {
+          "minimum": 1,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "path",
+        "sha256",
+        "size_bytes"
+      ],
+      "type": "object"
+    },
+    "file": {
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "$ref": "#/$defs/relativePath"
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "size_bytes": {
+          "minimum": 1,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "path",
+        "sha256",
+        "size_bytes"
+      ],
+      "type": "object"
+    },
+    "inputs": {
+      "additionalProperties": false,
+      "properties": {
+        "campaign_protocol_pins": {
+          "$ref": "#/$defs/file"
+        },
+        "matrix": {
+          "$ref": "#/$defs/file"
+        },
+        "metric_registry": {
+          "$ref": "#/$defs/file"
+        },
+        "sidecar_schema": {
+          "$ref": "#/$defs/file"
+        }
+      },
+      "required": [
+        "matrix",
+        "metric_registry",
+        "sidecar_schema",
+        "campaign_protocol_pins"
+      ],
+      "type": "object"
+    },
+    "namedFile": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "path": {
+          "$ref": "#/$defs/relativePath"
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "size_bytes": {
+          "minimum": 1,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "name",
+        "path",
+        "sha256",
+        "size_bytes"
+      ],
+      "type": "object"
+    },
+    "namespace": {
+      "additionalProperties": false,
+      "properties": {
+        "attempts_root": {
+          "$ref": "#/$defs/absolutePath"
+        },
+        "contract": {
+          "const": "external_m6_live_session_no_replace_v1"
+        },
+        "output_root": {
+          "$ref": "#/$defs/absolutePath"
+        },
+        "receipts_root": {
+          "$ref": "#/$defs/absolutePath"
+        },
+        "session_root": {
+          "$ref": "#/$defs/absolutePath"
+        },
+        "tier2_root": {
+          "$ref": "#/$defs/absolutePath"
+        }
+      },
+      "required": [
+        "contract",
+        "output_root",
+        "session_root",
+        "attempts_root",
+        "receipts_root",
+        "tier2_root"
+      ],
+      "type": "object"
+    },
+    "ncuIdentity": {
+      "additionalProperties": false,
+      "properties": {
+        "executable_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "resolved_path": {
+          "$ref": "#/$defs/absolutePath"
+        },
+        "version_line": {
+          "pattern": "^Version\\s+2026\\.1\\.0(?:$|[.\\s(+-])",
+          "type": "string"
+        }
+      },
+      "required": [
+        "resolved_path",
+        "executable_sha256",
+        "version_line"
+      ],
+      "type": "object"
+    },
+    "operatorAuthority": {
+      "additionalProperties": false,
+      "properties": {
+        "allow_hardware_queries": {
+          "const": true
+        },
+        "allow_hardware_spawns": {
+          "const": true
+        },
+        "allow_privileged_commands": {
+          "const": false
+        },
+        "authority_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "type": "string"
+        },
+        "authority_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "authorized_at_utc": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "driver_version": {
+          "const": "610.43.02"
+        },
+        "gpu_uuid_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "kind": {
+          "const": "m6_operator_hardware_authority_v1"
+        },
+        "max_fresh_processes_per_resume": {
+          "maximum": 9760,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "output_root": {
+          "$ref": "#/$defs/absolutePath"
+        },
+        "scope": {
+          "const": "generic_full_cohort_tier1_then_derived_tier2_v1"
+        },
+        "source_commit": {
+          "$ref": "#/$defs/commit"
+        }
+      },
+      "required": [
+        "kind",
+        "authority_id",
+        "authorized_at_utc",
+        "source_commit",
+        "gpu_uuid_sha256",
+        "driver_version",
+        "output_root",
+        "max_fresh_processes_per_resume",
+        "scope",
+        "allow_hardware_queries",
+        "allow_hardware_spawns",
+        "allow_privileged_commands",
+        "authority_sha256"
+      ],
+      "type": "object"
+    },
+    "preflight": {
+      "additionalProperties": false,
+      "properties": {
+        "capture_admitted": {
+          "const": true
+        },
+        "checks_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "driver_version": {
+          "const": "610.43.02"
+        },
+        "generated_at_utc": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "git_head": {
+          "$ref": "#/$defs/commit"
+        },
+        "gpu_uuid_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "matrix_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "output_root": {
+          "$ref": "#/$defs/absolutePath"
+        },
+        "path": {
+          "$ref": "#/$defs/absolutePath"
+        },
+        "phase": {
+          "enum": [
+            "p3",
+            "p4",
+            "session"
+          ]
+        },
+        "pins_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "size_bytes": {
+          "minimum": 1,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "phase",
+        "path",
+        "sha256",
+        "size_bytes",
+        "generated_at_utc",
+        "git_head",
+        "pins_sha256",
+        "matrix_sha256",
+        "checks_sha256",
+        "gpu_uuid_sha256",
+        "driver_version",
+        "output_root",
+        "capture_admitted"
+      ],
+      "type": "object"
+    },
+    "relativePath": {
+      "pattern": "^(?!/)[^\\x00]+$",
+      "type": "string"
+    },
+    "schedule": {
+      "additionalProperties": false,
+      "properties": {
+        "config_identity_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "m4_identity_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "metric_identity_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "path": {
+          "$ref": "#/$defs/absolutePath"
+        },
+        "schedule_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "size_bytes": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "source_identity_sha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      },
+      "required": [
+        "path",
+        "sha256",
+        "size_bytes",
+        "schedule_sha256",
+        "source_identity_sha256",
+        "config_identity_sha256",
+        "metric_identity_sha256",
+        "m4_identity_sha256"
+      ],
+      "type": "object"
+    },
+    "sealedExternalFile": {
+      "additionalProperties": false,
+      "properties": {
+        "model_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "path": {
+          "$ref": "#/$defs/absolutePath"
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "size_bytes": {
+          "minimum": 1,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "path",
+        "sha256",
+        "size_bytes",
+        "model_sha256"
+      ],
+      "type": "object"
+    },
+    "sha256": {
+      "pattern": "^[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "source": {
+      "additionalProperties": false,
+      "properties": {
+        "clean_s_p2_receipt_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "commit": {
+          "$ref": "#/$defs/commit"
+        },
+        "current_source_anchor_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "live_v1_authority_file_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "p1_gate_receipt_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "successor_matrix_file_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "tree": {
+          "$ref": "#/$defs/commit"
+        },
+        "working_tree_clean": {
+          "const": true
+        }
+      },
+      "required": [
+        "commit",
+        "tree",
+        "working_tree_clean",
+        "p1_gate_receipt_sha256",
+        "current_source_anchor_sha256",
+        "clean_s_p2_receipt_sha256",
+        "live_v1_authority_file_sha256",
+        "successor_matrix_file_sha256"
+      ],
+      "type": "object"
+    },
+    "tools": {
+      "additionalProperties": false,
+      "properties": {
+        "campaign_preflight": {
+          "$ref": "#/$defs/file"
+        },
+        "collector": {
+          "$ref": "#/$defs/file"
+        },
+        "immutable_artifact": {
+          "$ref": "#/$defs/file"
+        },
+        "label_driver": {
+          "$ref": "#/$defs/executableFile"
+        },
+        "ncu_action_executor": {
+          "$ref": "#/$defs/file"
+        },
+        "ncu_collection_receipt": {
+          "$ref": "#/$defs/file"
+        }
+      },
+      "required": [
+        "collector",
+        "campaign_preflight",
+        "immutable_artifact",
+        "ncu_action_executor",
+        "ncu_collection_receipt",
+        "label_driver"
+      ],
+      "type": "object"
+    },
+    "trustAnchor": {
+      "additionalProperties": false,
+      "properties": {
+        "model_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "path": {
+          "$ref": "#/$defs/absolutePath"
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "size_bytes": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "trust_anchor_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "sha256",
+        "size_bytes",
+        "model_sha256",
+        "trust_anchor_id"
+      ],
+      "type": "object"
+    }
+  },
+  "$id": "simbench_bw/schemas/m6_live_session_authority.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "admission_prerequisites": {
+      "$ref": "#/$defs/admissionPrerequisites"
+    },
+    "cost_ceiling": {
+      "$ref": "#/$defs/costCeiling"
+    },
+    "driver_version": {
+      "const": "610.43.02"
+    },
+    "gpu_uuid_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "inputs": {
+      "$ref": "#/$defs/inputs"
+    },
+    "issued_at_utc": {
+      "format": "date-time",
+      "type": "string"
+    },
+    "kind": {
+      "const": "m6_live_session_authority_v1"
+    },
+    "namespace": {
+      "$ref": "#/$defs/namespace"
+    },
+    "ncu_identity": {
+      "$ref": "#/$defs/ncuIdentity"
+    },
+    "operator_hardware_authority": {
+      "$ref": "#/$defs/operatorAuthority"
+    },
+    "readiness_preflights": {
+      "items": {
+        "$ref": "#/$defs/preflight"
+      },
+      "maxItems": 3,
+      "minItems": 3,
+      "type": "array"
+    },
+    "schedule": {
+      "$ref": "#/$defs/schedule"
+    },
+    "schema_authorities": {
+      "items": {
+        "$ref": "#/$defs/namedFile"
+      },
+      "maxItems": 5,
+      "minItems": 5,
+      "type": "array",
+      "uniqueItems": true
+    },
+    "schema_version": {
+      "const": 1
+    },
+    "scope": {
+      "const": "generic_full_cohort_tier1_then_derived_tier2_v1"
+    },
+    "session_authority_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "session_id": {
+      "pattern": "^m6-live-[0-9a-f]{24}$",
+      "type": "string"
+    },
+    "source": {
+      "$ref": "#/$defs/source"
+    },
+    "tools": {
+      "$ref": "#/$defs/tools"
+    },
+    "trust_mode": {
+      "enum": [
+        "production_external_trust",
+        "fixture_only_no_production_credit"
+      ]
+    }
+  },
+  "required": [
+    "schema_version",
+    "kind",
+    "trust_mode",
+    "session_id",
+    "issued_at_utc",
+    "source",
+    "admission_prerequisites",
+    "schedule",
+    "inputs",
+    "schema_authorities",
+    "readiness_preflights",
+    "gpu_uuid_sha256",
+    "driver_version",
+    "ncu_identity",
+    "tools",
+    "namespace",
+    "cost_ceiling",
+    "operator_hardware_authority",
+    "scope",
+    "session_authority_sha256"
+  ],
+  "title": "M6 live collection session authority",
+  "type": "object"
+}

@@ -1,0 +1,757 @@
+{
+  "$defs": {
+    "artifact": {
+      "additionalProperties": false,
+      "properties": {
+        "relative_path": {
+          "$ref": "#/$defs/relativePath"
+        },
+        "role": {
+          "enum": [
+            "ncu_report",
+            "label_run_manifest",
+            "ncu_launch_observation",
+            "label_capture_manifest"
+          ]
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "size_bytes": {
+          "minimum": 1,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "role",
+        "relative_path",
+        "sha256",
+        "size_bytes"
+      ],
+      "type": "object"
+    },
+    "relativePath": {
+      "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*//)(?!.*\\\\).+$",
+      "type": "string"
+    },
+    "sha256": {
+      "pattern": "^[0-9a-f]{64}$",
+      "type": "string"
+    }
+  },
+  "$id": "simbench_bw/schemas/m6_live_attempt_receipt.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "outcome": {
+            "const": "pre_start_failure"
+          }
+        },
+        "required": [
+          "outcome"
+        ]
+      },
+      "then": {
+        "properties": {
+          "artifacts": {
+            "maxItems": 0
+          },
+          "collection_receipt": {
+            "type": "null"
+          },
+          "failure": {
+            "not": {
+              "type": "null"
+            }
+          },
+          "failure_stage": {
+            "const": "before_process_start"
+          },
+          "fresh_process_cost": {
+            "const": 0
+          },
+          "process_identity": {
+            "type": "null"
+          },
+          "process_started": {
+            "const": false
+          },
+          "slot_terminal": {
+            "const": false
+          },
+          "started_at_utc": {
+            "type": "null"
+          },
+          "terminal_event_sha256": {
+            "type": "null"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "outcome": {
+            "const": "post_start_failure"
+          }
+        },
+        "required": [
+          "outcome"
+        ]
+      },
+      "then": {
+        "properties": {
+          "failure": {
+            "not": {
+              "type": "null"
+            }
+          },
+          "failure_stage": {
+            "const": "after_process_start"
+          },
+          "fresh_process_cost": {
+            "const": 1
+          },
+          "process_identity": {
+            "not": {
+              "type": "null"
+            }
+          },
+          "process_started": {
+            "const": true
+          },
+          "slot_terminal": {
+            "const": false
+          },
+          "started_at_utc": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "terminal_event_sha256": {
+            "type": "null"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "outcome": {
+            "const": "observed"
+          }
+        },
+        "required": [
+          "outcome"
+        ]
+      },
+      "then": {
+        "properties": {
+          "artifacts": {
+            "maxItems": 4,
+            "minItems": 4
+          },
+          "collection_receipt": {
+            "not": {
+              "type": "null"
+            }
+          },
+          "failure": {
+            "type": "null"
+          },
+          "failure_stage": {
+            "const": "none"
+          },
+          "fresh_process_cost": {
+            "const": 1
+          },
+          "process_identity": {
+            "not": {
+              "type": "null"
+            }
+          },
+          "process_started": {
+            "const": true
+          },
+          "slot_terminal": {
+            "const": true
+          },
+          "started_at_utc": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "terminal_event_sha256": {
+            "$ref": "#/$defs/sha256"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "outcome": {
+            "const": "excluded_pre_start"
+          }
+        },
+        "required": [
+          "outcome"
+        ]
+      },
+      "then": {
+        "properties": {
+          "artifacts": {
+            "maxItems": 0
+          },
+          "collection_receipt": {
+            "type": "null"
+          },
+          "failure": {
+            "not": {
+              "type": "null"
+            }
+          },
+          "failure_stage": {
+            "const": "before_process_start"
+          },
+          "fresh_process_cost": {
+            "const": 0
+          },
+          "process_identity": {
+            "type": "null"
+          },
+          "process_started": {
+            "const": false
+          },
+          "slot_terminal": {
+            "const": true
+          },
+          "started_at_utc": {
+            "type": "null"
+          },
+          "terminal_event_sha256": {
+            "$ref": "#/$defs/sha256"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "outcome": {
+            "const": "excluded_post_start"
+          }
+        },
+        "required": [
+          "outcome"
+        ]
+      },
+      "then": {
+        "properties": {
+          "failure": {
+            "not": {
+              "type": "null"
+            }
+          },
+          "failure_stage": {
+            "const": "after_process_start"
+          },
+          "fresh_process_cost": {
+            "const": 1
+          },
+          "process_identity": {
+            "not": {
+              "type": "null"
+            }
+          },
+          "process_started": {
+            "const": true
+          },
+          "slot_terminal": {
+            "const": true
+          },
+          "started_at_utc": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "terminal_event_sha256": {
+            "$ref": "#/$defs/sha256"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "process_identity": {
+            "properties": {
+              "authority_mode": {
+                "const": "fixture_only_no_production_credit"
+              }
+            },
+            "required": [
+              "authority_mode"
+            ]
+          }
+        },
+        "required": [
+          "process_identity"
+        ]
+      },
+      "then": {
+        "properties": {
+          "process_identity": {
+            "properties": {
+              "producer_executable": {
+                "type": "null"
+              },
+              "producer_executable_sha256": {
+                "type": "null"
+              },
+              "supervisor_authority_id": {
+                "type": "null"
+              },
+              "supervisor_receipt": {
+                "type": "null"
+              },
+              "supervisor_registry_sha256": {
+                "type": "null"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "process_identity": {
+            "properties": {
+              "authority_mode": {
+                "const": "retained_exact_child_receipt"
+              }
+            },
+            "required": [
+              "authority_mode"
+            ]
+          }
+        },
+        "required": [
+          "process_identity"
+        ]
+      },
+      "then": {
+        "properties": {
+          "process_identity": {
+            "properties": {
+              "producer_executable": {
+                "type": "string"
+              },
+              "producer_executable_sha256": {
+                "$ref": "#/$defs/sha256"
+              },
+              "supervisor_authority_id": {
+                "type": "string"
+              },
+              "supervisor_receipt": {
+                "not": {
+                  "type": "null"
+                }
+              },
+              "supervisor_registry_sha256": {
+                "$ref": "#/$defs/sha256"
+              }
+            }
+          }
+        }
+      }
+    }
+  ],
+  "properties": {
+    "artifacts": {
+      "items": {
+        "$ref": "#/$defs/artifact"
+      },
+      "maxItems": 64,
+      "type": "array",
+      "uniqueItems": true
+    },
+    "attempt_id": {
+      "pattern": "^m6-attempt-[0-9a-f]{24}$",
+      "type": "string"
+    },
+    "attempt_sequence": {
+      "maximum": 9007199254740991,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "collection_receipt": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "receipt_seal_sha256": {
+              "$ref": "#/$defs/sha256"
+            },
+            "relative_path": {
+              "$ref": "#/$defs/relativePath"
+            },
+            "sha256": {
+              "$ref": "#/$defs/sha256"
+            },
+            "size_bytes": {
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "relative_path",
+            "sha256",
+            "size_bytes",
+            "receipt_seal_sha256"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "failure": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "code": {
+              "pattern": "^[A-Z0-9_]{3,128}$",
+              "type": "string"
+            },
+            "detail": {
+              "maxLength": 4096,
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          "required": [
+            "code",
+            "detail"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "failure_stage": {
+      "enum": [
+        "before_process_start",
+        "after_process_start",
+        "none"
+      ]
+    },
+    "finished_at_utc": {
+      "format": "date-time",
+      "type": "string"
+    },
+    "fresh_process_cost": {
+      "enum": [
+        0,
+        1
+      ]
+    },
+    "kind": {
+      "const": "m6_live_attempt_receipt_v1"
+    },
+    "ordinal": {
+      "maximum": 9759,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "outcome": {
+      "enum": [
+        "pre_start_failure",
+        "post_start_failure",
+        "observed",
+        "excluded_pre_start",
+        "excluded_post_start"
+      ]
+    },
+    "plan_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "previous_attempt_receipt_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "process_identity": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "authority_mode": {
+              "enum": [
+                "retained_exact_child_receipt",
+                "fixture_only_no_production_credit"
+              ]
+            },
+            "identity_sha256": {
+              "$ref": "#/$defs/sha256"
+            },
+            "launcher_argv": {
+              "items": {
+                "type": "string"
+              },
+              "minItems": 1,
+              "type": "array"
+            },
+            "launcher_executable": {
+              "pattern": "^/",
+              "type": "string"
+            },
+            "launcher_executable_sha256": {
+              "$ref": "#/$defs/sha256"
+            },
+            "pid": {
+              "minimum": 1,
+              "type": "integer"
+            },
+            "plan_sha256": {
+              "$ref": "#/$defs/sha256"
+            },
+            "producer_executable": {
+              "oneOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "pattern": "^/",
+                  "type": "string"
+                }
+              ]
+            },
+            "producer_executable_sha256": {
+              "oneOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "$ref": "#/$defs/sha256"
+                }
+              ]
+            },
+            "start_ticks": {
+              "minimum": 1,
+              "type": "integer"
+            },
+            "started_at_utc": {
+              "format": "date-time",
+              "type": "string"
+            },
+            "supervisor_authority_id": {
+              "oneOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "minLength": 1,
+                  "type": "string"
+                }
+              ]
+            },
+            "supervisor_receipt": {
+              "oneOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "additionalProperties": false,
+                  "properties": {
+                    "path": {
+                      "pattern": "^/",
+                      "type": "string"
+                    },
+                    "receipt_sha256": {
+                      "$ref": "#/$defs/sha256"
+                    },
+                    "sha256": {
+                      "$ref": "#/$defs/sha256"
+                    },
+                    "size_bytes": {
+                      "minimum": 1,
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "path",
+                    "sha256",
+                    "size_bytes",
+                    "receipt_sha256"
+                  ],
+                  "type": "object"
+                }
+              ]
+            },
+            "supervisor_registry_sha256": {
+              "oneOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "$ref": "#/$defs/sha256"
+                }
+              ]
+            },
+            "target_argv": {
+              "items": {
+                "type": "string"
+              },
+              "minItems": 1,
+              "type": "array"
+            },
+            "target_executable": {
+              "pattern": "^/",
+              "type": "string"
+            },
+            "target_executable_sha256": {
+              "$ref": "#/$defs/sha256"
+            },
+            "working_directory": {
+              "pattern": "^/",
+              "type": "string"
+            }
+          },
+          "required": [
+            "pid",
+            "start_ticks",
+            "started_at_utc",
+            "launcher_executable",
+            "launcher_executable_sha256",
+            "target_executable",
+            "target_executable_sha256",
+            "identity_sha256",
+            "authority_mode",
+            "plan_sha256",
+            "launcher_argv",
+            "target_argv",
+            "working_directory",
+            "supervisor_receipt",
+            "supervisor_authority_id",
+            "supervisor_registry_sha256",
+            "producer_executable",
+            "producer_executable_sha256"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "process_started": {
+      "type": "boolean"
+    },
+    "q809_production_matched_label_authority": {
+      "const": false
+    },
+    "receipt_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "resume_epoch": {
+      "maximum": 9007199254740991,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "schedule_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "schema_version": {
+      "const": 1
+    },
+    "session_authority_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "slot_attempt_index": {
+      "maximum": 9007199254740991,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "slot_id": {
+      "minLength": 16,
+      "type": "string"
+    },
+    "slot_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "slot_terminal": {
+      "type": "boolean"
+    },
+    "started_at_utc": {
+      "oneOf": [
+        {
+          "format": "date-time",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "terminal_event_sha256": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/sha256"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "tier2_activation_sha256": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/sha256"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "trust_scope": {
+      "const": "m6_process_integrity_only_not_q809_label_authority"
+    }
+  },
+  "required": [
+    "schema_version",
+    "kind",
+    "trust_scope",
+    "q809_production_matched_label_authority",
+    "resume_epoch",
+    "attempt_sequence",
+    "slot_attempt_index",
+    "previous_attempt_receipt_sha256",
+    "session_authority_sha256",
+    "schedule_sha256",
+    "tier2_activation_sha256",
+    "plan_sha256",
+    "ordinal",
+    "slot_id",
+    "slot_sha256",
+    "attempt_id",
+    "outcome",
+    "failure_stage",
+    "process_started",
+    "slot_terminal",
+    "fresh_process_cost",
+    "process_identity",
+    "started_at_utc",
+    "finished_at_utc",
+    "failure",
+    "artifacts",
+    "collection_receipt",
+    "terminal_event_sha256",
+    "receipt_sha256"
+  ],
+  "title": "Immutable M6 live attempt receipt",
+  "type": "object"
+}
