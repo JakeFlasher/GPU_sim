@@ -55,6 +55,50 @@ MAPPING_ROW_RE = re.compile(
 )
 
 
+_ACTIVE_PATH_REWRITES = (
+    (
+        re.compile(r"(?<![A-Za-z0-9_./-])baselines/"),
+        "workloads/sol_execbench_baselines/",
+    ),
+    (
+        re.compile(r"(?<![A-Za-z0-9_./-])sol-execbench/"),
+        "tools/sol_execbench/",
+    ),
+    (
+        re.compile(r"(?<![A-Za-z0-9_./-])cutlass/"),
+        "third_party/cutlass/",
+    ),
+)
+
+
+def _active_text(text: str) -> str:
+    """Translate pre-rebase repository roots without rewriting nested paths."""
+    for pattern, replacement in _ACTIVE_PATH_REWRITES:
+        text = pattern.sub(replacement, text)
+    return text
+
+
+_NESTED_THIRD_PARTY_CUTLASS_RE = re.compile(
+    r"workloads/sol_execbench_baselines/(?:L1|L2|Quant|FIB)/"
+    r"[A-Za-z0-9_]+/third_party/cutlass/"
+)
+
+
+def _assert_dossier_cutlass_path_contract(problems_dir: Path) -> None:
+    """Reject a third-party CUTLASS root accidentally nested in a solution."""
+    offenders = []
+    for path in sorted(problems_dir.glob("problem_*.md")):
+        if _NESTED_THIRD_PARTY_CUTLASS_RE.search(
+            path.read_text(encoding="utf-8")
+        ):
+            offenders.append(path.name)
+    if offenders:
+        names = ", ".join(offenders)
+        raise RuntimeError(
+            f"solution-local CUTLASS path contains third_party/cutlass: {names}"
+        )
+
+
 FORBIDDEN_SURFACE_BLOCK = """\
   - Python / Triton / CuTe DSL Python / cuTile Python / cudnn_frontend Python / torch.compile submissions (CLAUDE.md Rule 5).
   - NCU / `nv-nsight-cu-cli` / `.ncu-rep`/`.ncu-repz` artefacts on any device, including local 5060 (CLAUDE.md Rule 1).
@@ -303,7 +347,7 @@ def _render(row: dict, repo_root: Path) -> str:
         f"## Cross-references\n\n"
         f"{_cross_references_section(primary, raw_source)}\n"
     )
-    return frontmatter + body
+    return _active_text(frontmatter + body)
 
 
 def _parse_mapping(mapping_path: Path) -> list[dict]:
@@ -362,6 +406,8 @@ def main() -> int:
         written += 1
         if args.limit and written >= args.limit:
             break
+
+    _assert_dossier_cutlass_path_contract(problems_dir)
 
     print(f"Summary: {written} written, {skipped} skipped, "
           f"{len(rows)} total mapping rows.")

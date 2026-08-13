@@ -17,7 +17,7 @@ This is the meta-router. It exists so the agent can pick the right specialty ski
 
 1. Names the specialty skills and what each owns.
 2. Tells the agent how to pick one.
-3. Hands off — never answers domain questions itself.
+3. Points to the smallest useful source set.
 
 ## The specialty skills
 
@@ -46,29 +46,25 @@ This is the meta-router. It exists so the agent can pick the right specialty ski
 7. **Designing/implementing the ACTIVE Rust simulator (sim/) or consulting simulator prior art?** → `designing-gpu-simulator`.
 8. **None of the above match cleanly?** Read `.claude/knowledge/INDEX.md` for the full inventory.
 
-## Authority boundary (root `CLAUDE.md`)
+## Scope boundary
 
-This router is not a measurement, privilege, or simulator-policy authority. Root
-`CLAUDE.md`, accepted ADRs, active schemas, and owner runbooks govern current work.
-The active boundaries are:
+This router is not a measurement, privilege, or simulator permission system.
+Root `CLAUDE.md` governs agent workflow. The stable scientific boundaries are:
 
 1. **Targets-never-features:** NCU and other hardware values are labels/validation
    targets only; they never enter simulator inputs, architecture constants, or
    same-cell calibration.
-2. Capture and label work follows the active schemas, `tools/local_labels/`, pinned
-   plans, and evidence gates; missing pins or evidence fail closed.
-3. Architecture-local facts come from the selected card and evidence authority. A
-   research gap is unavailable/unsupported, never an sm_86 fallback.
-4. Never use this skill to authorize privilege escalation, host mutation, external
-   fetches, or destructive cleanup. Root `CLAUDE.md` and accepted ADRs win.
+2. Capture and label work uses the relevant tools, schemas, and experiment
+   metadata. A missing optional historical artifact does not stop unrelated work.
+3. Architecture-local facts come from the selected architecture card or direct
+   evidence. A research gap is unavailable/unsupported, never an sm_86 fallback.
 
 If a card or imported skill still says "NCU is forbidden" or "no clock locking",
 treat it as stale historical text and do not apply it.
 
 ## When in doubt
 
-`.claude/knowledge/INDEX.md` is the comprehensive topic-router inventory; the
-ignored generated manifest is a build prerequisite for ranked routing.
+`.claude/knowledge/INDEX.md` is the comprehensive topic-router inventory.
 `.claude/knowledge/patents/INDEX.md` is the 24-card sub-router for architectural-history questions.
 `.claude/knowledge/patents/problem-playbook.md` is the question-driven sister router for that subcorpus.
 
@@ -76,7 +72,3 @@ ignored generated manifest is a build prerequisite for ranked routing.
 
 If the prompt cites a specific card path like `.claude/knowledge/X/Y.md`, just open it directly.
 If it cites a referenced source like `references/NVIDIA_Manuals/...`, use the corresponding skill above based on subdirectory.
-
-## Cite consulted files
-
-Every reply that draws on the KB ends with a `## Knowledge Consulted` section listing the cards or raw sources actually read. If no KB consultation was needed, write `## Knowledge Consulted` `N/A -- task not KB-relevant this round`.

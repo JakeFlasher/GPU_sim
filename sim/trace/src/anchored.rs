@@ -1,4 +1,4 @@
-//! Descriptor-anchored, no-follow reads for sealed trace bundles.
+//! Descriptor-anchored, no-follow reads for trace bundles.
 //!
 //! Every relative component is opened beneath one retained directory descriptor.
 //! Regular-file metadata and bytes come from the same descriptor, so path swaps,
@@ -27,7 +27,7 @@ const MAX_TREE_DEPTH: usize = 16;
 const MIN_TREE_ENTRY_BUDGET: u64 = 1_024;
 const TREE_ENTRIES_PER_PAYLOAD: u64 = 8;
 
-/// Stable filesystem identity used to reject hard-link aliases during admission.
+/// Stable filesystem identity used to reject hard-link aliases during loading.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct FileIdentity {
     device: u64,
@@ -38,7 +38,7 @@ pub struct FileIdentity {
 ///
 /// Device/inode alone does not distinguish an in-place overwrite. Size plus the
 /// modification/change timestamps make persistent replacement, deletion, and
-/// same-inode substitution observable at the final publication boundary.
+/// same-inode substitution observable while a bundle is being read.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct FileGenerationIdentity {
     identity: FileIdentity,
@@ -121,7 +121,7 @@ pub struct RetainedFile {
 }
 
 impl RetainedFile {
-    /// Validate an inherited manifest descriptor without allocating another slot.
+    /// Validate an inherited regular-file descriptor without allocating another slot.
     pub fn validate_inherited(raw_fd: u32) -> Result<(), AnchoredReadError> {
         validate_retained_descriptor(raw_fd, RetainedDescriptorKind::Regular)
     }
@@ -195,7 +195,7 @@ pub enum AnchoredReadError {
     HardlinkAlias { first: PathBuf, second: PathBuf },
 }
 
-/// One bundle root retained as a directory descriptor for the whole admission.
+/// One bundle root retained as a directory descriptor for a complete read.
 pub struct AnchoredDir {
     root: PathBuf,
     fd: OwnedFd,
@@ -570,6 +570,7 @@ pub(crate) struct AnchoredTreeFile {
 
 pub(crate) struct AnchoredTree {
     pub(crate) files: Vec<AnchoredTreeFile>,
+    #[cfg_attr(not(feature = "campaign"), allow(dead_code))]
     pub(crate) bytes: u64,
 }
 

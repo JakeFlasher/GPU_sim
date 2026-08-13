@@ -1,31 +1,21 @@
 #!/usr/bin/env python3
 """
-route_query.py — UserPromptSubmit hook smart router.
+route_query.py — opt-in project knowledge router.
 
-Reads a Claude Code UserPromptSubmit JSON event from stdin, classifies the
-prompt against the KB manifest (.claude/kb_manifest.sqlite), and prints a
-reminder block listing the top-N matching cards plus a routing destination.
-The `measurement` destination is retained only as a historical pointer to the
-retired validating skill; current measurement policy is root `CLAUDE.md`, the
-active label schemas, `tools/local_labels/`, and owner runbooks.
-
-Falls through to .claude/hooks/kb_reminder.sh when:
-  - The manifest does not exist (script never been run yet).
-  - FTS5 returns zero matches.
-  - The prompt is empty or unparseable.
-
-Always exits 0. Hooks must not break Claude Code on unexpected input.
+Classifies a prompt against the KB manifest (.claude/kb_manifest.sqlite) and
+prints the top matching cards plus a skill destination. It is an ordinary CLI:
+it is not installed as a Claude/Codex hook and it never intercepts a session.
 
 Usage:
-  echo '{"prompt": "..."}' | python3 scripts/kb/route_query.py [--top N] [--manifest PATH]
+  python3 scripts/kb/route_query.py --prompt "..." [--top N]
+  printf '%s\n' "..." | python3 scripts/kb/route_query.py [--top N]
 
 Skill mapping is loaded from `scripts/kb/routing_contract.py`:
   ptx, inline-ptx        -> interpreting-ptx-isa
   sass                   -> analyzing-sass-nvbit-traces
   cuda, best-practices   -> optimizing-cuda-kernels
   blackwell              -> tuning-blackwell-sm120-kernels
-  measurement            -> validating-nonroot-gpu-measurement (historical pointer;
-                            current policy is root/local-label authority)
+  measurement            -> validating-nonroot-gpu-measurement
   patents                -> reasoning-about-nvidia-architecture-history
   simulator              -> designing-gpu-simulator
   nvcc                   -> compiling-cuda-artifacts
@@ -37,10 +27,8 @@ Skill mapping is loaded from `scripts/kb/routing_contract.py`:
 from __future__ import annotations
 
 import argparse
-import json
 import re
 import sqlite3
-import subprocess
 import sys
 from pathlib import Path
 from typing import Optional
@@ -63,7 +51,7 @@ from routing_contract import SUBCORPUS_TO_SKILL  # noqa: E402
 #   analyzing-sass-nvbit-traces when the failure mode is binary/SASS
 #   (version mismatch, opcode, decode, disassembly). For non-SASS angles
 #   ("preflight manifest detecting NVBit"), measurement remains the historical
-#   subcorpus owner; current capture policy is root/local-label authority.
+#   subcorpus owner.
 # - nvarchsim-vs-this-project.md is owned by designing-gpu-simulator when
 #   the prompt asks about NVArchSim as a baseline / for the new
 #   simulator. For "wall-clock-primary thesis"-style questions it stays
@@ -382,26 +370,8 @@ SKILL_ANTI_ANCHORS: list[tuple[re.Pattern, list[str], float]] = [
 ]
 
 
-def _read_event() -> Optional[str]:
-    try:
-        raw = sys.stdin.read()
-    except Exception:
-        return None
-    if not raw.strip():
-        return None
-    try:
-        ev = json.loads(raw)
-    except json.JSONDecodeError:
-        return None
-    p = ev.get("prompt")
-    if isinstance(p, str) and p.strip():
-        return p
-    return None
-
-
-# Relevance gate now imported from _relevance.py (single source of truth).
-# Both this file and check_kb_usage.py use it; kb_reminder.sh's bash regex
-# is regenerated from the same source via `_relevance.py --emit-bash`.
+# Relevance classification is imported from _relevance.py so the router and
+# its standalone classifier share one implementation.
 
 
 def _compute_subcorpus_boosts(prompt: str) -> dict[str, float]:
@@ -666,35 +636,8 @@ def _tokenize_for_fts(text: str) -> list[str]:
     return out
 
 
-def _fall_through_to_regex_hook(repo_root: Path, raw_event: str) -> None:
-    """Run kb_reminder.sh as the regex-based fallback.
-
-    Used when the FTS5 manifest is missing or returns no matches. Preserves
-    the regex-only behavior as a safety net so the hook never silently
-    misses on a known-relevant prompt.
-    """
-    hook = repo_root / ".claude" / "hooks" / "kb_reminder.sh"
-    if not hook.is_file():
-        return
-    try:
-        subprocess.run(
-            ["bash", str(hook)],
-            input=raw_event,
-            text=True,
-            check=False,
-            timeout=5,
-        )
-    except (subprocess.TimeoutExpired, OSError):
-        return
-
-
 def _format_skill_label(skill: str) -> str:
-    """Render a skill name without presenting a retired pointer as authority."""
-    if skill == "validating-nonroot-gpu-measurement":
-        return (
-            f"`{skill}` (historical pointer; do not apply its rules; consult "
-            "root CLAUDE.md and current local-label runbooks)"
-        )
+    """Render a skill name for the opt-in routing result."""
     return f"`{skill}`"
 
 
@@ -864,7 +807,7 @@ def main() -> int:
         help="Verbose decision trace mode (read prompt from --prompt or stdin).")
     parser.add_argument(
         "--prompt", default=None,
-        help="Prompt to classify (alternative to JSON stdin event).")
+        help="Prompt to classify (otherwise read raw text from stdin).")
     args = parser.parse_args()
 
     repo_root = Path(args.root).resolve()
@@ -884,17 +827,8 @@ def main() -> int:
         print(_explain(prompt, manifest, args.top))
         return 0
 
-    raw = sys.stdin.read()
-    if not raw.strip():
-        return 0
-
-    try:
-        ev = json.loads(raw)
-        prompt = ev.get("prompt", "")
-    except json.JSONDecodeError:
-        prompt = ""
-
-    if not prompt or not isinstance(prompt, str):
+    prompt = args.prompt if args.prompt is not None else sys.stdin.read().strip()
+    if not prompt:
         return 0
 
     # Relevance gate: silently exit if the prompt is not KB-relevant.
@@ -912,7 +846,6 @@ def main() -> int:
         matches = _inject_meta_router_top(matches, args.top, manifest)
 
     if not matches:
-        _fall_through_to_regex_hook(repo_root, raw)
         return 0
 
     skills_seen: list[str] = []
@@ -927,8 +860,4 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    try:
-        sys.exit(main())
-    except Exception:
-        # Hook contract: never break Claude Code on unexpected error.
-        sys.exit(0)
+    sys.exit(main())

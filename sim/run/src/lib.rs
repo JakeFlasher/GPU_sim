@@ -970,7 +970,7 @@ fn issue_configuration_error(component: &'static str, error: IssueError) -> RunE
             let unavailable = matches!(
                 &other,
                 IssueError::ArchitectureUnsupported { .. }
-                    | IssueError::CardedResourceExecutionDeferred { .. }
+                    | IssueError::CardedResourcesNotImplemented { .. }
                     | IssueError::Capability(_)
             );
             configuration_error(component, other, unavailable)
@@ -1197,7 +1197,7 @@ impl From<sim_sm::IssueModelParams> for IssueConfigurationWire {
             read_barrier_latency_cycles: params.read_barrier_latency(),
             max_resident_warps_per_sm: params.max_resident_warps_per_sm(),
             latency_provenance: "architecture_card",
-            issue_hypothesis_provenance: params.resource_lane().provenance(),
+            issue_hypothesis_provenance: params.resource_source().source_label(),
         }
     }
 }

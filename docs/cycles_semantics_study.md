@@ -1,8 +1,16 @@
 # P8 target-free cycles-semantics boundary study
 
+> Retained campaign reference. This document records the historical strict
+> campaign interpretation of cycle metrics. It is not a repository-wide gate,
+> does not restrict direct simulator or NCU/NVBit research, and applies only
+> when the opt-in SOL/campaign skill is deliberately invoked.
+
 **Status:** Target-free boundary record only. This document does not select cycle semantics, does not satisfy the `AggregationSemanticsStudy` blocker, and does not promote cycle emission.
 
-The governing targets-not-features and publication rules are [CLAUDE.md](../CLAUDE.md) and [ADR 0002](decisions/0002-publication-metric-scope.md). This study uses only checked-in policy, contracts, code, architecture metadata, and vendor documentation. It neither reads nor uses silicon target values.
+For the retained campaign path, the applicable metric definitions are in the
+[metric registry](metric-registry.md). This study uses only checked-in code,
+architecture metadata, and vendor documentation. It neither reads nor uses
+silicon target values.
 
 ## D1 — NCU observable contract
 
@@ -26,7 +34,12 @@ Promotion is forbidden until admitted, launch-identity-bound silicon evidence va
 
 ### Target-free findings
 
-The simulator exposes `diagnostic_last_issue_cycles` and `terminal_modeled_event_time` per launch. [ADR 0002](decisions/0002-publication-metric-scope.md) makes both nonbinding diagnostics, and [launch aggregation](../sim/sm/src/replay/aggregation.rs) preserves them in `launch_timing_diagnostics` without composing a launch-set timing scalar. The [cycle emitter](../sim/run/src/emit.rs) receives a counter snapshot that deliberately excludes both diagnostics.
+The campaign simulator exposes `diagnostic_last_issue_cycles` and
+`terminal_modeled_event_time` per launch. Its retained result format treats
+both as nonbinding diagnostics, and [launch aggregation](../sim/sm/src/replay/aggregation.rs)
+preserves them in `launch_timing_diagnostics` without composing a launch-set
+timing scalar. The [cycle emitter](../sim/run/src/emit.rs) receives a counter
+snapshot that deliberately excludes both diagnostics.
 
 ### Hypotheses only
 

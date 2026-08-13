@@ -259,6 +259,19 @@ dependencies = [
 name = "sim-run"
 version = "0.0.1"
 dependencies = [
+ "serde",
+ "serde_json",
+ "sim-arch",
+ "sim-mem",
+ "sim-sm",
+ "sim-trace",
+ "thiserror",
+]
+
+[[package]]
+name = "sim-run-campaign"
+version = "0.0.1"
+dependencies = [
  "prost",
  "serde",
  "serde_json",

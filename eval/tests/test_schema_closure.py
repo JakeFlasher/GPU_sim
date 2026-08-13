@@ -21,7 +21,6 @@ SCHEMA_PATHS = (
     ROOT / "eval" / "schemas" / "production_ncu_repeat_manifest.v1.schema.json",
     ROOT / "eval" / "schemas" / "production_matched_label_authority.v1.schema.json",
     ROOT / "eval" / "schemas" / "runtime_workload_tier_claim_authority.v1.schema.json",
-    ROOT / "eval" / "schemas" / "sim_profile_record.v1.schema.json",
     ROOT / "eval" / "schemas" / "production_sim_manifest_authority.v1.schema.json",
 )
 FIXTURE_SCHEMA_PATHS = SCHEMA_PATHS[1:6]

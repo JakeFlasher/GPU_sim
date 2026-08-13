@@ -1,165 +1,67 @@
 # Event-driven NVIDIA GPU simulator
 
-This repository is being refocused around one goal: build an accurate, fast,
-trace-driven simulator for modern NVIDIA GPUs. The simulator core is written in
-Rust, consumes NVBit SASS/address traces plus static SASS control information,
-and is validated against Nsight Compute (NCU) measurements from real silicon.
+This repository develops a fast, trace-driven simulator for modern NVIDIA
+GPUs. The Rust simulator consumes NVBit SASS/address traces and static SASS
+control information. Nsight Compute (NCU) measurements from real GPUs provide
+independent comparison targets.
 
-The first target is Ampere `sm_86`; Blackwell `sm_120` follows only after the
-`sm_86` **M-SIM-1** gate closes and the operator explicitly approves migration.
-The sole publication-binding headline is `exec_cycles_gpc_max` /
-`gpc__cycles_elapsed.max`: cycle MAPE ≤10% meets the engineering target, >10%
-and ≤15% is floor-only, and >15% is publication failure. The long-term speed
-objective is 100–1000x faster than cycle-ticking simulators; no current
-benchmark substantiates that speed objective yet.
+The active target is Ampere `sm_86` on an RTX 3090 Ti. Blackwell `sm_120`
+support remains exploratory until the Ampere path is useful end to end.
 
-NCU metrics are prediction targets and validation references. They are never
-simulator inputs or per-cell fitted features.
+## Working principles
 
-CUDA authorities are role-specific: canonical C1 workload capture uses nvcc
-13.3, supplemental SOL launch-set v3 uses nvcc 13.2, and the NVBit/tracer
-artifact build is independently pinned to nvcc 13.2. None is a fallback for
-another role.
+Development is research-first. CUDA, NCU, NVBit, GPU execution, clock controls,
+and host administration commands may be used directly when they help answer the
+technical question. Ordinary tests, schema validation, numerical sanity checks,
+and repeated measurements are welcome. They report facts; they do not grant
+permission to continue.
 
-## Authority and documentation
+Project workflow policy is in [AGENTS.md](AGENTS.md). In particular, this
+repository does not use review swarms, external-advisor loops, artifact
+approval ceremonies, cryptographic workflow checks, or phase locks.
 
-The active documentation map is [`docs/README.md`](docs/README.md). Evidence
-manifests and versioned aliases govern byte identity; root `CLAUDE.md` governs
-project policy; `AGENTS.md` is limited to the consultation protocol; current
-state, design, inventory, runbook, and accepted ADRs live under `docs/`. The
-root `ARCHITECTURE.md`, `HANDOFF.md`, `MANIFEST.md`, `MERGE_PROVENANCE.md`, and
-`OPEN_RESEARCH_CHALLENGES.md` are retained historical records and are not
-operational instructions.
+The complete SOL-ExecBench and historical campaign stack remains available as
+an opt-in research capability. Its legacy manifests and checksums are scoped
+experiment data, not repository-wide permission gates.
 
-The knowledge corpus contains 353 non-index content cards plus two physical
-index/router files (`.claude/knowledge/INDEX.md` and `patents/INDEX.md`);
-`_template.md` is excluded. The generated manifest indexes all 355 routable
-Markdown rows.
-
-## Current state
-
-The repository has working Rust libraries for deterministic event scheduling,
-NVBit trace decoding, SM replay, L1/L2/DRAM modeling, architecture-card
-loading, checked launch-set aggregation, and NCU-shaped emission. `sim-run`
-provides the strict manifest-only production composition path and owns the
-in-crate `sim_run::emit` descriptor boundary plus canonical sealed JSON output;
-there is no separate public emitter command. The current offline Rust workspace
-gate passes with three explicitly ignored machine-local evidence
-tests.
-
-This is an offline simulator application boundary, not publication closure:
-
-- the CLI accepts only a versioned run manifest and admitted launch-evidence
-  manifests; there is not yet a production launch-manifest producer;
-- `gpc__cycles_elapsed.max` is a mandatory `required_unimplemented` output until
-  an admitted aggregation-semantics study exists;
-- per-launch last-issue and terminal-event values remain directional diagnostics;
-- the production evaluator and performance benchmark/gate remain incomplete;
-- an offline runner result confers no hardware, campaign, reviewer, or scientific
-  authority.
-
-See [current status](docs/STATUS.md) for the campaign and cleanup state.
-
-## Implemented data path
+## Data path
 
 ```text
-NVBit tracer_tool
-  -> traces_enhanced protobuf
-  -> sim-trace (committed Prost bindings)
-  -> sim-sm replay and issue model
-  -> sim-mem L1 / shared L2 / DRAM model
-  -> sim-engine deterministic event queue
-  -> sim-run (`sim_run::emit` predictions and sealed output)
+CUDA workload
+  ├─ NVBit tracer -> dynamic protobuf trace -> sim-trace
+  │                                      -> sim-sm
+  │                                      -> sim-mem
+  │                                      -> sim-engine
+  │                                      -> sim-run predictions
+  └─ NCU capture --------------------------------------> eval comparison
 ```
 
-NCU capture is a separate label path. Prediction and label artifacts meet only
-in evaluation; labels never flow back into trace, scheduling, memory, or
-calibration inputs.
+NCU values are comparison targets, not simulator inputs.
 
 ## Quick start
 
-The default gates are CPU/offline and do not require a GPU:
-
 ```bash
 cd sim
-cargo fmt --all -- --check
-cargo test --workspace --all-targets
+cargo test --all-targets
 cd ..
 .venv/bin/python -m pytest -q
-.venv/bin/python workloads/simbench_bw/validate.py --all
 ```
 
-The checked-in offline canary exercises the manifest-only CLI without GPU or
-hardware authority:
-
-```bash
-cargo run --quiet --manifest-path sim/Cargo.toml -p sim-run -- \
-  sim/run/tests/fixtures/addr_carry_canary_bundle/run_manifest.v2.json
-```
-
-The command writes one canonical `sim_result.v2` document to stdout. Typed input
-or replay failures write one canonical `sim_error.v2` document to stderr; exit 2
-means a prerequisite is absent, while exit 1 means the supplied run failed
-validation or execution. A blocked binding-cycle metric remains a successful
-per-metric `required_unimplemented` outcome and does not change process success.
-
-The Python default excludes tests marked `campaign_evidence` and
-`hardware_evidence`. Those tests require machine-local artifacts and must run
-through explicit gates; absence must never be interpreted as a pass. Run the
-archive-integrity and frozen machine-local hardware gates separately:
-
-```bash
-tools/dev/campaign_evidence_gate.sh
-tools/dev/hw_evidence_gate.sh
-```
-
-Archive-integrity, offline/frozen-hardware, live-campaign, campaign-M7
-completion, and M-SIM-1 are independent gates; passing or authorizing one
-satisfies none of the others. See [test boundaries](docs/testing.md) before
-interpreting a green offline run.
+Build and run the GPU tools with the commands in
+[docs/runbook_host.md](docs/runbook_host.md). The technical roadmap is
+[plans/micro2027_ncu_sim_execution_plan.md](plans/micro2027_ncu_sim_execution_plan.md).
 
 ## Repository map
 
 | Path | Purpose |
 |---|---|
-| `sim/` | Rust discrete-event simulator workspace |
-| `tools/nvbit_tracer/` | NVBit trace producer, protobuf wire format, and active instrumentation |
-| `tools/local_labels/` | Core NCU capture, admission, provenance, and evidence machinery |
-| `arch_profiles/` | Per-architecture cards and fail-closed gaps |
-| `data/pchase/` | Microbenchmark-derived memory geometry and latency inputs |
-| `tools/sass_control/` | Static SASS control-bit extraction |
-| `tools/cache_predictor/`, `tools/cache_replay/` | Reference/parity models supporting the Rust memory model |
-| `evidence/` | Tracked immutable fixtures, manifests, and historical path aliases |
-| `workloads/` | Core capture workloads plus optional evaluation bundles |
-
-The detailed boundaries are in [architecture](docs/ARCHITECTURE.md) and the
-[component inventory](docs/COMPONENTS.md). Host, toolchain, NVBit, and capture
-commands are in the [host runbook](docs/runbook_host.md).
-
-The active label contract is the three-part v5 authority: the sidecar and
-admitted schemas under `workloads/simbench_bw/schemas/`, plus
-`tools/local_labels/metric_registry.json`. The active measurement-manifest v2
-schema is a separate workload-provenance contract, not a timing label schema.
-
-## Binding decisions
-
-Architecture and evidence decisions are recorded under
-[`docs/decisions/`](docs/decisions/). ADR 0001 accepted
-`CONTINUE_PRESERVE_PINNED`: fresh Task7/H3 continuation may proceed outside RLCR,
-while the historical defect attempt remains zero-credit and reuse-forbidden.
-ADR 0002 accepted `CYCLES_ONLY_BINDING`: cycles are the sole publication
-headline; the seven implemented secondary descriptors remain reported and
-ungated.
-
-Current canonical accounting is 344 cells: 122 runnable, 222 excluded, and
-1/122 defensible runnable credit. The stopped 49-row revision is also
-zero-credit and reuse-forbidden. The interrupted 53/201 SOL runnability attempt
-is separately archived, canonical v1 is restored, and supplemental v3 remains
-separate and live-disabled pending its pinned canary.
-
-The current engineering state is recorded in [STATUS](docs/STATUS.md), and
-binding cleanup/design choices are recorded in [ADRs](docs/decisions/). The
-[simulator execution plan](plans/micro2027_ncu_sim_execution_plan.md) and the
-[sm_86 capture plan](plans/sm86_comprehensive_live_capture_campaign_plan.md)
-are the authoritative execution plans. Accepted ADRs amend them; where an older
-plan statement conflicts with a later accepted ADR, the ADR controls.
+| `sim/` | Rust event engine, trace reader, SM replay, memory model, and runner |
+| `tools/nvbit_tracer/` | NVBit trace producer and protobuf format |
+| `tools/local_labels/` | Direct NCU collection and metric parsing |
+| `tools/sol_execbench/` | Retained SOL-ExecBench source, environment, and data |
+| `tools/sol_baselines_harness/` | Retained optional SOL analytics/campaign stack |
+| `workloads/` | CUDA workloads used for capture and experiments |
+| `arch_profiles/` | Architecture and SKU parameters |
+| `eval/` | Direct numerical comparison of predictions and observations |
+| `docs/` | Current architecture, status, and host commands |
+| `plans/` | Current simulator and capture roadmaps |

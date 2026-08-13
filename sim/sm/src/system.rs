@@ -1627,7 +1627,7 @@ mod tests {
 
     use super::*;
     use crate::control_bits::{ControlBits, DepBarrier, WaitMask};
-    use crate::issue::{AccessKind, IssueResourceLane, ReplayInst, WarpReplay};
+    use crate::issue::{AccessKind, IssueResourceSource, ReplayInst, WarpReplay};
     use crate::program::{IssueSlot, OpClass};
 
     fn cb(stall: u8) -> ControlBits {
@@ -1664,7 +1664,7 @@ mod tests {
     fn params() -> IssueModelParams {
         IssueModelParams {
             arch: ArchId::Sm86,
-            resource_lane: IssueResourceLane::SyntheticTestFixture,
+            resource_source: IssueResourceSource::SyntheticTestFixture,
             l1_hit_latency: 34,
             l1_miss_latency: 244,
             global_flat_latency: 423,

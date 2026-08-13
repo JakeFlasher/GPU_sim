@@ -735,8 +735,8 @@ impl ArchCard {
         Self::parse(path, &raw)
     }
 
-    /// Parse already-snapshotted card bytes through the same sealed admission
-    /// boundary as [`ArchCard::load`].
+    /// Parse already-loaded card bytes through the same validation path as
+    /// [`ArchCard::load`].
     pub fn parse(path: &Path, raw: &[u8]) -> Result<Self, CalibError> {
         let raw: RawArchCard = serde_json::from_slice(raw).map_err(|source| CalibError::Parse {
             path: path.display().to_string(),

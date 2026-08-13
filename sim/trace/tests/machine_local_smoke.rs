@@ -1,8 +1,7 @@
 #![allow(clippy::unwrap_used)] // test binary: unwrap is an assertion
 //! Machine-local smoke test against a real captured trace.
 //!
-//! The M1 trace evidence is gitignored machine-local data, so this test takes
-//! its input from the environment instead of a hard-coded path:
+//! A local captured trace can be supplied through the environment:
 //!
 //! ```sh
 //! SIM_TRACE_SMOKE_DIR=<abs path to a trace_<shape> dir> \
@@ -10,18 +9,17 @@
 //!   real_trace_full_walk -- --ignored --exact --nocapture
 //! ```
 //!
-//! The test is ignored by the ordinary workspace suite and is executed by the
-//! authoritative hardware gate. That gate supplies the environment; a direct
-//! ignored-test invocation without it fails rather than returning green.
+//! The test is ignored by the ordinary workspace suite because capture data is
+//! machine-local. Run it directly whenever a suitable trace is available.
 
 use sim_trace::{TraceDir, visit_memory_access};
 
 #[test]
-#[ignore = "requires machine-local M1 evidence; run tools/dev/hw_evidence_gate.sh"]
+#[ignore = "requires a machine-local captured trace"]
 fn real_trace_full_walk() {
     let dir = std::env::var("SIM_TRACE_SMOKE_DIR")
-        .expect("SIM_TRACE_SMOKE_DIR must be set by tools/dev/hw_evidence_gate.sh");
-    let td = TraceDir::open(&dir).expect("open trace dir");
+        .expect("SIM_TRACE_SMOKE_DIR must point to a captured trace");
+    let td = TraceDir::open_direct(&dir).expect("open trace dir");
     let mut kernels = 0usize;
     let mut blocks = 0usize;
     let mut insts = 0usize;

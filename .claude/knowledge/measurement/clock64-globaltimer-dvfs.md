@@ -8,7 +8,8 @@ Supporting sources:
 Repo touchpoints:
 - `tools/nvbit_tracer/` - optional phase-boundary injection.
 - `workloads/simbench_bw/` - current timing and covariate artifacts.
-Out of scope: NCU counter semantics and the clock-lock pin itself (both live in `measurement/pinned-protocol-v21.md` — clock locking is REQUIRED by pinned protocol v2.1).
+Historical comparison context: `measurement/pinned-protocol-v21.md` records one
+fixed-clock sm_86 regime. It is optional outside reproduction of that dataset.
 Version family: PTX ISA 9.x; sm_120 primary target, sm_86 local smoke target where applicable.
 ---
 
@@ -40,12 +41,11 @@ measurement.
 
 ## Dynamic Clocks
 
-Under pinned protocol v2.1, clocks on the dev host ARE locked
-(`nvidia-smi -pm 1; -lgc 1350; -lmc 10501`; see
-`measurement/pinned-protocol-v21.md`) — cycle conversion against the pinned
-core clock is exact up to throttle events. The DVFS physics below still
-applies to any UNLOCKED context (uncontrolled hosts, pre-pin captures), where
-cycle conversion must be approximate and covariate-aware:
+The historical v2.1 dev-host dataset used
+`nvidia-smi -pm 1; -lgc 1350; -lmc 10501`; see
+`measurement/pinned-protocol-v21.md`. That context makes its cycle conversion
+more stable, subject to throttle events. For unlocked contexts, cycle
+conversion is approximate and should be covariate-aware:
 
 ```text
 cycles_estimate_per_repeat = elapsed_time_per_repeat * read_only_sm_clock_covariate
@@ -61,10 +61,10 @@ not freeze frequency, and they can miss intra-kernel DVFS transitions.
 - Use `%globaltimer` as a diagnostic cross-check, not as the only timing source.
 - Record read-only clock, temperature, power, and throttle-state covariates when
   available.
-- Clock locking and persistence mode are REQUIRED on capture hosts per pinned
-  protocol v2.1 (`nvidia-smi -pm 1; -lgc 1350; -lmc 10501` on the 3090 Ti);
-  never capture labels with free-running clocks, and never mix labels across
-  protocol versions. See `measurement/pinned-protocol-v21.md`.
+- Clock locking and persistence mode can reduce variance where supported.
+  Record the actual clock regime and test comparability before pooling labels
+  from different regimes. See `measurement/pinned-protocol-v21.md` for one
+  historical example.
 
 ## See Also
 

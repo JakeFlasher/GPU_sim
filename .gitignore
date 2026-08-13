@@ -1,65 +1,58 @@
-# Codex CLI workspace marker (runtime transient)
-.codex
-**/.codex
-
-# Claude Code scheduler state / local settings
+# Local agent, editor, and session state
+.codex/
+**/.codex/
+.humanize/
 .claude/scheduled_tasks.json
 .claude/scheduled_tasks.lock
 .claude/settings.local.json
-
-# Humanize loop state — local only, must remain outside version control
-.humanize/
-
-# Operator scratch file — used to draft session-handoff requests in
-# the working directory before invoking the loop. Not project state.
+.claude/kb_manifest.json
+.claude/kb_manifest.sqlite
+.claude/metrics/kb_usage.jsonl
 TODO.md
 
 # Python
 __pycache__/
-*.pyc
-.venv/
+*.py[cod]
 .pytest_cache/
+.ruff_cache/
+.venv/
 
-# H3-preserved NVBit tracer build artifacts. Canonical-worktree rebuild and
-# clean targets are forbidden until the operator closes Task7/H3.
+# Rust and local toolchains
+.toolchain/
+sim/target/
+sim/trace/pbgen/target/
+
+# NVBit/CUDA build outputs
 tools/nvbit_tracer/tracer_tool/*.o
 tools/nvbit_tracer/tracer_tool/*.so
 tools/nvbit_tracer/tracer_tool/trace_printer
+tools/nvbit_tracer/tracer_tool/tests/*_test
 tools/nvbit_tracer/smoketest/backprop_enriched
 tools/nvbit_tracer/smoketest/phase_injection_microbench
-tools/nvbit_tracer/tracer_tool/tests/phase_classifier_test
-tools/nvbit_tracer/tracer_tool/tests/memory_op_class_test
-tools/nvbit_tracer/tracer_tool/tests/memory_op_access_kind_test
-tools/nvbit_tracer/tracer_tool/tests/allocation_registry_test
-tools/nvbit_tracer/tracer_tool/tests/exclusion_aggregator_test
-tools/nvbit_tracer/tracer_tool/tests/path_resolver_test
-# H3-preserved metric-extractor artifacts and optional machine-local provenance.
-# Keep the patterns exact: no global object, shared-library, or test-binary ignores.
-/tools/nvbit_tracer/metric_extractor/metric_extractor.so
-/tools/nvbit_tracer/metric_extractor/metric_extractor.o
-/tools/nvbit_tracer/metric_extractor/inject_funcs.o
-/tools/nvbit_tracer/metric_extractor/test_classifier
-/tools/nvbit_tracer/metric_extractor/test_saturating_counter
-/tools/nvbit_tracer/metric_extractor/test_tier2_marker_metadata
-/tools/nvbit_tracer/metric_extractor/test_tier2_sha256
-/tools/nvbit_tracer/metric_extractor/metric_extractor.provenance.json
+tools/nvbit_tracer/metric_extractor/*.o
+tools/nvbit_tracer/metric_extractor/*.so
+tools/nvbit_tracer/metric_extractor/test_classifier
+tools/nvbit_tracer/metric_extractor/test_saturating_counter
+tools/nvbit_tracer/metric_extractor/test_tier2_marker_metadata
+tools/nvbit_tracer/metric_extractor/test_tier2_sha256
+tools/nvbit_tracer/metric_extractor/metric_extractor.provenance.json
 tools/nvbit_tracer/nvbit_release/tools/instr_count/*.o
 tools/nvbit_tracer/nvbit_release/tools/instr_count/*.so
 tools/nvbit_tracer/nvbit_release/test-apps/vectoradd/vectoradd
 tools/nvbit_tracer/traces_enhanced/obj/
 tools/nvbit_tracer/traces_enhanced/pb_trace/obj/
 
-# Blackwell probe build outputs
+# Other generated native outputs
 tools/blackwell_probes/bin/
 tools/blackwell_probes/tests/*_test
 tools/blackwell_probes/tests/*_test_host_sim
 tools/blackwell_probes/*.o
 tools/blackwell_probes/latency/latency_probes
-
-# Blackwell probe runtime result JSON (regenerated per run)
 tools/blackwell_probes/results/
+tools/local_labels/_sm120_get_l2_cache_size
+tools/local_labels/microfixtures/build/
+tools/pchase/build/
 
-# Compiled AI-kernel binaries (regenerated from workloads/ai-kernels/*.cu)
 workloads/ai-kernels/conv2d
 workloads/ai-kernels/fp8_matmul
 workloads/ai-kernels/fused_residual_layernorm
@@ -73,7 +66,6 @@ workloads/ai-kernels/silu_elementwise
 workloads/ai-kernels/softmax
 workloads/ai-kernels/vector_reduce
 
-# D6 tensor-core microbenchmark build outputs
 workloads/d6_microbenchmarks/fp8_dep_chain
 workloads/d6_microbenchmarks/fp4_dep_chain
 workloads/d6_microbenchmarks/mixed_fp4_fp8
@@ -81,7 +73,6 @@ workloads/d6_microbenchmarks/fp8_saturation
 workloads/d6_microbenchmarks/fp4_saturation
 workloads/d6_microbenchmarks/fp8_gemm_traceable
 
-# Cluster-microbenchmark compiled kernel binaries (regenerated per build)
 workloads/cluster_microbench/cluster_barrier_latency
 workloads/cluster_microbench/cluster_barrier_multiwarp
 workloads/cluster_microbench/cluster_rmsnorm
@@ -92,52 +83,23 @@ workloads/cluster_microbench/dsmem_remote_reduction
 workloads/cluster_microbench/dsmem_ring_bandwidth
 workloads/cluster_microbench/dsmem_smoke
 
-# Runtime-generated measurement outputs (organized by corpus, per source-repo convention)
+# Experiment outputs and large retained local datasets
 traces/
 results/
 dual_source_evidence/
 perturbation_build/
+data/annex/
+data/local_labels/campaign/golden_traces/
 
-# Per-cell raw NCU sidecars from sweep_repeatability_matrix.py runs.
-# The verdict-table.csv + verdict.json + manifests/ + comparison/ artifacts
-# at the sweep root are committed; the per-cell raw sidecar trees
-# (one folder per cohort cell, each holding ~40 .ncu-rep + .json files)
-# are reproducible from the manifests + the binary/trace state at the
-# sweep_id's HEAD. Excluding them keeps the committed footprint small
-# while preserving the headline artifacts a Codex review needs.
-#
-# IMPORTANT: the per-cell-per-config _aggregator_out/ subdirectory
-# (typically 3 small JSON files: label_admitted.json,
-# label_excluded.json, label_repeatability.json) is NOT in the
-# ignore list — the offline selector tool
-# tools/local_labels/select_best_config_labels.py walks those
-# files to rederive the committed selected corpus + verify the
-# source_sha256 audit trail. The narrow patterns below target
-# only the volume offenders (raw .ncu-rep + per-launch JSONs)
-# under cell=*/cfg=*/ so _aggregator_out/ stays trackable.
+# Raw local-label captures. Aggregated campaign files remain trackable.
 data/local_labels/sweeps/**/cell=*/cfg=*/**/*.ncu-rep
 data/local_labels/sweeps/**/cell=*/cfg=*/**/label_*_*.json
-
-# Per-launch NCU sidecars produced by tools/local_labels/label_driver.sh
-# directly under data/local_labels/<device>/<slug>/<shape_point>/.
-# The .ncu-rep files are raw NCU profile dumps (multi-MB each) and
-# the per-launch label_*_*.json + label_run_manifest_*_*.json
-# sidecars are host-local evidence; the canonical aggregate lives at
-# data/local_labels/label_admitted.json and is the project's
-# source-of-truth. The narrow patterns below target the post-R20
-# trace_l2_accuracy_xl labeling-cycle output without touching the
-# pre-existing tracked gemm_hmma_bf16_sm80/correctness_shape/
-# sidecars (already in the index; .gitignore does not untrack).
 data/local_labels/sm_86/*/trace_l2_accuracy_xl/*.ncu-rep
 data/local_labels/sm_86/*/trace_l2_accuracy_xl/label_*_*.json
 data/local_labels/sm_86/*/trace_l2_accuracy_xl/label_run_manifest_*_*.json
-# Same per-launch sidecar pattern for the attention_conv portable_lcd
-# slugs that label at timing_shape (rather than trace_l2_accuracy_xl).
 data/local_labels/sm_86/*/timing_shape/*.ncu-rep
 data/local_labels/sm_86/*/timing_shape/label_*_*.json
 data/local_labels/sm_86/*/timing_shape/label_run_manifest_*_*.json
-# Same per-launch sidecar pattern for the bulk sm_86 NCU re-capture
-# sweep cohort cells at trace_l2_accuracy_lg + correctness_shape.
 data/local_labels/sm_86/*/trace_l2_accuracy_lg/*.ncu-rep
 data/local_labels/sm_86/*/trace_l2_accuracy_lg/label_*_*.json
 data/local_labels/sm_86/*/trace_l2_accuracy_lg/label_run_manifest_*_*.json
@@ -145,46 +107,5 @@ data/local_labels/sm_86/*/correctness_shape/*.ncu-rep
 data/local_labels/sm_86/*/correctness_shape/label_*_*.json
 data/local_labels/sm_86/*/correctness_shape/label_run_manifest_*_*.json
 
-# New model's build artifacts (populate with whatever the new simulator toolchain needs)
-# target/      # Rust
-# build/       # CMake/Make
-# *.o          # generic
-
-# KB manifest (regenerable from .claude/knowledge/ via scripts/kb/build_manifest.py)
-.claude/kb_manifest.sqlite
-.claude/kb_manifest.json
-
-# KB usage metrics (per-session telemetry; rotate or archive as needed)
-.claude/metrics/kb_usage.jsonl
-# Note: .claude/hooks/_gate_regexes.sh is auto-generated from
-# scripts/kb/_relevance.py but IS checked in so the bash fallback works
-# on a fresh clone (regenerable via `python3 scripts/kb/_relevance.py
-# --emit-bash > .claude/hooks/_gate_regexes.sh`).
-
-# Parallel-session LaTeX paper draft (sources + figures + PDF). Not
-# part of this repo's tracked surface during the active RLCR loop;
-# un-ignore selective files outside the loop if the paper draft
-# should be tracked alongside the simulator/non-root-measurement
-# code.
+# Optional local paper tree
 IEEE_conference_latex/
-
-# Compiled CUDA helper binary built on demand by
-# tools/local_labels/sm120_activation_bundle_producer.py to query
-# the live cudaDeviceProp.l2CacheSize value. The .cu source IS
-# tracked; only the compiled binary is host-local.
-tools/local_labels/_sm120_get_l2_cache_size
-tools/local_labels/microfixtures/build/
-tools/pchase/build/
-
-# Salvaged bulk evidence from the legacy trees (2026-07-02) — machine-local, never committed
-data/annex/
-
-# Host-local pinned build toolchain; provision only from the explicit lock via
-# pinned_build_env.sh --ensure. Ordinary sourcing never repairs it.
-.toolchain/
-
-# Rust workspace build output (pbgen/Cargo.lock IS committed — it pins the
-# codegen toolchain that writes the committed bindings)
-sim/target/
-sim/trace/pbgen/target/
-data/local_labels/campaign/golden_traces/

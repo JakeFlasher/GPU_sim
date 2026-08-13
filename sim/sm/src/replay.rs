@@ -44,15 +44,17 @@ use sim_trace::reader::{
     MemoryAccessMeta, MemoryPayloadContract, PreflightedMemoryAccess,
     check_preflighted_allocation_identity, preflight_memory_access,
 };
+use sim_trace::{KernelLoc, TraceDir, TraceError, block_launch_index, kernel_grid};
+#[cfg(feature = "campaign")]
 use sim_trace::{
-    KernelLoc, LosslessFullProvenance, TraceDir, TraceError, TraceSamplingMethod,
-    TraceSamplingSidecar, WaveSegmentSubsetProvenance, block_launch_index, kernel_grid,
+    LosslessFullProvenance, TraceSamplingMethod, TraceSamplingSidecar, WaveSegmentSubsetProvenance,
 };
 
 use sim_mem::{
     CacheOpToken, L2Config, L2Counters, L2Model, MemRole, is_known_untagged_opcode, opcode_head,
 };
 
+#[cfg(feature = "campaign")]
 use crate::evidence::AdmittedLaunchEvidence;
 use crate::issue::{
     AccessKind, BlockReplay, IssueError, IssueModelParams, ReplayInst, SharedMemoryResidency,
@@ -127,7 +129,7 @@ pub enum MemoryRouteError {
         expected: pb::MemoryOpClass,
         got: pb::MemoryOpClass,
     },
-    #[error("static SASS family {family} has no reviewed route on architecture {arch}")]
+    #[error("static SASS family {family} has no implemented route on architecture {arch}")]
     StaticMemoryFamilyUnsupported { family: &'static str, arch: ArchId },
     #[error("operand {operand} carries address_space value {raw} unknown to the committed schema")]
     UnknownAddressSpace { operand: usize, raw: i32 },
@@ -175,7 +177,7 @@ pub enum ReplayError {
         #[source]
         source: sim_arch::ArchError,
     },
-    #[error("architecture-card placement authority is unavailable: {source}")]
+    #[error("architecture-card placement data is unavailable: {source}")]
     ArchitectureCardPlacement {
         #[source]
         source: CalibError,
@@ -211,6 +213,7 @@ pub enum ReplayError {
         sku: Sku,
         sm_count: u32,
     },
+    #[cfg(feature = "campaign")]
     #[error(
         "trace_sampling per_sm_slot_map block {launch_index} declares sm_id {sm_id} outside architecture {arch} SKU {sku:?} range 0..{sm_count}"
     )]
@@ -221,10 +224,12 @@ pub enum ReplayError {
         sku: Sku,
         sm_count: u32,
     },
+    #[cfg(feature = "campaign")]
     #[error(
         "trace_sampling per_sm_slot_map has no placement for observed launch block {launch_index}"
     )]
     SamplingPlacementMissing { launch_index: i64 },
+    #[cfg(feature = "campaign")]
     #[error(
         "launch block {launch_index} traced sm_id {traced_sm_id}, but trace_sampling per_sm_slot_map declares {declared_sm_id}"
     )]
@@ -235,7 +240,7 @@ pub enum ReplayError {
     },
 
     #[error(
-        "memory class {class:?} has no reviewed replay path for architecture {arch}; the \
+        "memory class {class:?} has no implemented replay path for architecture {arch}; the \
          simulator refuses to route it through generic global timing"
     )]
     UnsupportedMemoryPath {
@@ -274,6 +279,7 @@ pub enum ReplayError {
     #[error(
         "admitted launch ({device_id}, {stream_id}, {kernel_id}) is absent from its retained trace snapshot"
     )]
+    #[cfg(feature = "campaign")]
     AdmittedLaunchMissing {
         device_id: i64,
         stream_id: i64,
@@ -423,11 +429,9 @@ pub enum ReplayError {
     CountMismatch { issued: u64, records: u64 },
     #[error("kernel launch grid {grid:?} overflows the u64 block-count domain")]
     GridSizeOverflow { grid: (u32, u32, u32) },
-    #[error(
-        "E_INCOMPLETE_TRACE: {seen}/{grid_total} launch blocks present and no \
-         trace_sampling.json sidecar — an incomplete trace must carry a sampling sidecar"
-    )]
+    #[error("incomplete trace: {seen}/{grid_total} launch blocks present")]
     IncompleteTrace { seen: u64, grid_total: u64 },
+    #[cfg(feature = "campaign")]
     #[error(
         "trace_sampling sidecar original_grid {sidecar:?} != launch gridDim {launch:?} \
          (a subset must NEVER rewrite gridDim)"
@@ -436,15 +440,19 @@ pub enum ReplayError {
         launch: (u32, u32, u32),
         sidecar: (u32, u32, u32),
     },
+    #[cfg(feature = "campaign")]
     #[error("records_seen {records_seen} != trace_sampling sidecar records.captured {captured}")]
     RecordsCapturedMismatch { records_seen: u64, captured: u64 },
+    #[cfg(feature = "campaign")]
     #[error(
         "trace_sampling sidecar selected block membership does not match replayed threadblocks \
          ({seen} seen, {declared} declared)"
     )]
     SelectedBlockMembershipMismatch { seen: u64, declared: u64 },
+    #[cfg(feature = "campaign")]
     #[error("trace_sampling sidecar kernel {sidecar:?} != launch kernel {launch:?}")]
     SamplingKernelMismatch { launch: String, sidecar: String },
+    #[cfg(feature = "campaign")]
     #[error("kernel launch block_dim is absent or degenerate")]
     BlockDimMissing,
     #[error("kernel launch cluster_dim is partially populated or has a negative axis: {cluster:?}")]
@@ -456,6 +464,7 @@ pub enum ReplayError {
         arch: ArchId,
         cluster: (u32, u32, u32),
     },
+    #[cfg(feature = "campaign")]
     #[error("trace_sampling sidecar original_block {sidecar:?} != launch blockDim {launch:?}")]
     BlockDimRewritten {
         launch: (u32, u32, u32),
@@ -519,6 +528,7 @@ pub enum FullCoverageSource {
     UnsampledComplete,
     /// A validated lossless sidecar was present and replay independently observed
     /// every CTA. The sidecar declaration alone never constructs this variant.
+    #[cfg(feature = "campaign")]
     LosslessCompressedFull(LosslessFullProvenance),
 }
 
@@ -546,6 +556,7 @@ impl FullLaunchCoverage {
 
 /// Unforgeable-by-consumers witness that replay observed exactly the block roster
 /// sealed by one validated subset sidecar.
+#[cfg(feature = "campaign")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SampledLaunchCoverage {
     launch: ReplayLaunchCoverageBinding,
@@ -554,6 +565,7 @@ pub struct SampledLaunchCoverage {
     provenance: WaveSegmentSubsetProvenance,
 }
 
+#[cfg(feature = "campaign")]
 impl SampledLaunchCoverage {
     pub fn launch(&self) -> &ReplayLaunchCoverageBinding {
         &self.launch
@@ -665,6 +677,7 @@ impl FullKernelReplayResult {
 /// Counter-only observation over a verified sampled block roster. This type is
 /// intentionally distinct from the full replay payload and contains no per-SM
 /// result, timestamp, cycle count, or timing-result conversion.
+#[cfg(feature = "campaign")]
 #[derive(Debug, Clone)]
 pub struct SampledObservedCounters {
     arch: ArchId,
@@ -677,6 +690,7 @@ pub struct SampledObservedCounters {
     unmodeled_tails: TailFlags,
 }
 
+#[cfg(feature = "campaign")]
 impl SampledObservedCounters {
     pub fn arch(&self) -> ArchId {
         self.arch
@@ -713,6 +727,7 @@ impl SampledObservedCounters {
 
 /// Sampled-observed replay result. No method converts this value into a full or
 /// timing-bearing replay result.
+#[cfg(feature = "campaign")]
 #[derive(Debug, Clone)]
 pub struct SampledKernelReplayResult {
     coverage: SampledLaunchCoverage,
@@ -720,6 +735,7 @@ pub struct SampledKernelReplayResult {
     counters: SampledObservedCounters,
 }
 
+#[cfg(feature = "campaign")]
 impl SampledKernelReplayResult {
     pub fn coverage(&self) -> &SampledLaunchCoverage {
         &self.coverage
@@ -738,10 +754,12 @@ impl SampledKernelReplayResult {
 #[derive(Debug, Clone)]
 pub enum KernelReplayOutcome {
     Full(FullKernelReplayResult),
+    #[cfg(feature = "campaign")]
     SampledObserved(SampledKernelReplayResult),
 }
 
 /// Coverage classification retained by an explicitly unadmitted diagnostic replay.
+#[cfg(feature = "campaign")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UnadmittedCoverage {
     Full,
@@ -766,6 +784,7 @@ pub enum UnadmittedCoverage {
 ///     let _ = aggregate_full_launch_set(declaration, [diagnostic]);
 /// }
 /// ```
+#[cfg(feature = "campaign")]
 #[derive(Debug, Clone)]
 pub struct UnadmittedReplayDiagnostics {
     coverage: UnadmittedCoverage,
@@ -785,6 +804,7 @@ pub struct UnadmittedReplayDiagnostics {
     unmodeled_tails: TailFlags,
 }
 
+#[cfg(feature = "campaign")]
 impl UnadmittedReplayDiagnostics {
     fn from_outcome(outcome: KernelReplayOutcome) -> Self {
         match outcome {
@@ -894,6 +914,7 @@ impl UnadmittedReplayDiagnostics {
 #[derive(Debug)]
 pub(crate) enum ExtractedCoverage {
     Full(FullLaunchCoverage),
+    #[cfg(feature = "campaign")]
     Sampled(SampledLaunchCoverage),
 }
 
@@ -905,17 +926,17 @@ struct ExtractedKernel {
     shared_memory_residency: SharedMemoryResidency,
 }
 
-/// Card-derived spatial-placement authority. Only the architecture/SKU-local SM
+/// Card-derived spatial-placement parameters. Only the architecture/SKU-local SM
 /// range crosses into replay; no label or target value is a simulator input.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct PlacementAuthority {
+struct PlacementConfig {
     arch: ArchId,
     sku: Sku,
     sm_count: u32,
     max_shared_bytes_per_sm: u64,
 }
 
-impl PlacementAuthority {
+impl PlacementConfig {
     fn from_arch_card(card: &ArchCard, expected_arch: ArchId) -> Result<Self, ReplayError> {
         let card_error = |source| ReplayError::ArchitectureCardPlacement { source };
         let arch = card.arch_id().map_err(card_error)?;
@@ -977,6 +998,7 @@ impl PlacementAuthority {
         Ok(())
     }
 
+    #[cfg(feature = "campaign")]
     fn require_declared_sm(self, launch_index: u64, sm_id: u64) -> Result<(), ReplayError> {
         if sm_id >= u64::from(self.sm_count) {
             return Err(ReplayError::SamplingSmIdOutOfRange {
@@ -992,8 +1014,8 @@ impl PlacementAuthority {
 }
 
 #[cfg(test)]
-const fn sm86_test_placement() -> PlacementAuthority {
-    PlacementAuthority {
+const fn sm86_test_placement() -> PlacementConfig {
+    PlacementConfig {
         arch: ArchId::Sm86,
         sku: Sku::Rtx3090Ti,
         sm_count: 84,
@@ -1010,9 +1032,10 @@ fn sm86_test_card() -> ArchCard {
     .expect("committed sm_86 architecture card parses")
 }
 
+#[cfg(feature = "campaign")]
 fn validate_declared_sampling_sm_range(
     declared: impl IntoIterator<Item = (u64, u64)>,
-    placement: PlacementAuthority,
+    placement: PlacementConfig,
 ) -> Result<(), ReplayError> {
     for (launch_index, sm_id) in declared {
         placement.require_declared_sm(launch_index, sm_id)?;
@@ -1020,10 +1043,11 @@ fn validate_declared_sampling_sm_range(
     Ok(())
 }
 
+#[cfg(feature = "campaign")]
 fn validate_sampling_placement(
     sidecar: &TraceSamplingSidecar,
     traced_sm_by_launch_index: &BTreeMap<i64, i32>,
-    placement: PlacementAuthority,
+    placement: PlacementConfig,
 ) -> Result<(), ReplayError> {
     validate_declared_sampling_sm_range(sidecar.declared_block_placements(), placement)?;
     for (&launch_index, &traced_sm_id) in traced_sm_by_launch_index {
@@ -1105,7 +1129,7 @@ fn extract_per_sm_blocks(
     td: &TraceDir,
     loc: &KernelLoc<'_>,
     schedule: &FunctionSchedule,
-    placement: PlacementAuthority,
+    placement: PlacementConfig,
     decode_sectors: bool,
 ) -> Result<ExtractedKernel, ReplayError> {
     let expected_fuid = schedule.function_unique_id;
@@ -1117,10 +1141,13 @@ fn extract_per_sm_blocks(
         .filter(|dim| dim.x > 0 && dim.y > 0 && dim.z > 0)
         .map(|dim| (dim.x as u32, dim.y as u32, dim.z as u32));
     let expected_block_warps = block.map(checked_block_warps).transpose()?;
+    #[cfg(feature = "campaign")]
     let validate_warp_roster = expected_block_warps.is_some()
         && td
             .sampling_sidecar()
             .is_none_or(|sidecar| Some(sidecar.original_block()) == block);
+    #[cfg(not(feature = "campaign"))]
+    let validate_warp_roster = expected_block_warps.is_some();
     let max_resident_warps = schedule
         .arch
         .issue_hypotheses()
@@ -1330,6 +1357,18 @@ fn extract_per_sm_blocks(
         block,
         cluster,
     };
+    #[cfg(not(feature = "campaign"))]
+    let coverage = {
+        if seen != grid_total {
+            return Err(ReplayError::IncompleteTrace { seen, grid_total });
+        }
+        ExtractedCoverage::Full(FullLaunchCoverage {
+            launch,
+            blocks_observed: seen,
+            source: FullCoverageSource::UnsampledComplete,
+        })
+    };
+    #[cfg(feature = "campaign")]
     let coverage = match td.sampling_sidecar() {
         None => {
             if seen != grid_total {
@@ -1413,14 +1452,16 @@ fn extract_per_sm_blocks(
 }
 
 /// Validate every consumed threadblock and classify launch coverage without
-/// running the timing model. This is the coverage edge used by manifest admission.
+/// running the timing model. The campaign feature uses this for its manifest
+/// compatibility path.
+#[cfg(feature = "campaign")]
 pub(crate) fn admit_launch_coverage(
     td: &TraceDir,
     loc: &KernelLoc<'_>,
     schedule: &FunctionSchedule,
     arch_card: &ArchCard,
 ) -> Result<ExtractedCoverage, ReplayError> {
-    let placement = PlacementAuthority::from_arch_card(arch_card, schedule.arch)?;
+    let placement = PlacementConfig::from_arch_card(arch_card, schedule.arch)?;
     require_trace_architecture(td, schedule.arch)?;
     Ok(extract_per_sm_blocks(td, loc, schedule, placement, false)?.coverage)
 }
@@ -1515,6 +1556,7 @@ fn classify_kernel_result(
             configuration,
             replay,
         }),
+        #[cfg(feature = "campaign")]
         ExtractedCoverage::Sampled(coverage) => {
             let FoldedKernelReplay {
                 arch,
@@ -1608,7 +1650,7 @@ impl ReplayConfiguration {
         memory_mode: ReplayMemMode,
     ) -> Result<Self, ReplayError> {
         validate_replay_mode_architecture(issue_params.arch, memory_mode)?;
-        issue_params.require_executable_resource_lane()?;
+        issue_params.validate_resource_source()?;
         Ok(Self {
             issue_params,
             memory_mode,
@@ -1693,7 +1735,7 @@ fn replay_kernel_with_schedule(
     mode: ReplayMemMode,
 ) -> Result<KernelReplayOutcome, ReplayError> {
     let configuration = validate_replay_architecture(schedule, params, mode)?;
-    let placement = PlacementAuthority::from_arch_card(arch_card, schedule.arch)?;
+    let placement = PlacementConfig::from_arch_card(arch_card, schedule.arch)?;
     require_trace_architecture(td, schedule.arch)?;
     let decode_sectors = !matches!(mode, ReplayMemMode::Flat);
     let ExtractedKernel {
@@ -1758,12 +1800,11 @@ fn replay_kernel_with_schedule(
     Ok(classify_kernel_result(coverage, configuration, replay))
 }
 
-/// Replay the one launch sealed into [`AdmittedLaunchEvidence`]. This is the only
-/// public constructor of aggregatable [`KernelReplayOutcome`] values: the trace,
-/// schedule, architecture card, and selected launch were joined transitively by
-/// manifest admission before this boundary.
+/// Replay the one launch represented by [`AdmittedLaunchEvidence`]. This is the
+/// compatibility entry point used by the optional historical campaign runner.
 ///
 /// Caches are fresh per kernel (cold, NCU `--cache-control all` parity).
+#[cfg(feature = "campaign")]
 pub fn replay_kernel(
     evidence: &AdmittedLaunchEvidence,
     params: &IssueModelParams,
@@ -1794,10 +1835,25 @@ pub fn replay_kernel(
     )
 }
 
+/// Replay one launch directly from loaded trace, schedule, architecture-card,
+/// and model inputs. This is the ordinary research entry point; it does not
+/// require an evidence manifest or an admission step.
+pub fn replay_trace_kernel(
+    td: &TraceDir,
+    loc: &KernelLoc<'_>,
+    schedules: &BTreeMap<i32, FunctionSchedule>,
+    arch_card: &ArchCard,
+    params: &IssueModelParams,
+    mode: ReplayMemMode,
+) -> Result<KernelReplayOutcome, ReplayError> {
+    let schedule = lookup_schedule(schedules, loc)?;
+    replay_kernel_with_schedule(td, loc, schedule, arch_card, params, mode)
+}
+
 /// Replay caller-supplied trace/schedule inputs for debugging only. The returned
-/// diagnostics retain counters and directional timestamps but erase the
-/// unforgeable full-replay type, so they cannot enter launch-set aggregation or
-/// certified emission.
+/// diagnostics retain counters and directional timestamps but erase the full
+/// replay type, so they cannot enter the legacy launch-set aggregation API.
+#[cfg(feature = "campaign")]
 pub fn replay_unadmitted_diagnostics(
     td: &TraceDir,
     loc: &KernelLoc<'_>,
@@ -1811,7 +1867,7 @@ pub fn replay_unadmitted_diagnostics(
     Ok(UnadmittedReplayDiagnostics::from_outcome(outcome))
 }
 
-/// Resolve the two special Global routes reviewed on the active sm_86 path.
+/// Resolve the two special Global routes implemented on the active sm_86 path.
 /// The dynamic enum alone is not enough: the static sidecar must prove a
 /// Global ATOM/RED family or LDGSTS role before the record enters replay.
 fn require_sm86_special_role(
@@ -1987,7 +2043,7 @@ fn static_memory_route(
                 class: pb::MemoryOpClass::Atomic,
             })),
         },
-        // Hopper's reducing-load family has no reviewed replay semantics on
+        // Hopper's reducing-load family has no implemented replay semantics on
         // either target. In particular it must never borrow Shared timing when
         // contaminated dynamic metadata claims a Shared route.
         "LDGMC" => Err("LDGMC"),
@@ -4029,7 +4085,7 @@ mod space_routing_tests {
         inst.addresses[0].address_space = Some(pb::MemorySpace::Local as i32);
 
         let flat = classify_flat(&inst, &sched, sched.arch, Path::new("local.pb"), 0, 0)
-            .expect("joined LDL has a reviewed flat Local route");
+            .expect("joined LDL has an implemented flat Local route");
         assert!(matches!(flat, AccessKind::LocalLoad { off: 0, len: 0 }));
 
         let mut sectors = vec![31];
@@ -4044,7 +4100,7 @@ mod space_routing_tests {
             0,
             0,
         )
-        .expect("joined LDL has a reviewed hierarchy Local route");
+        .expect("joined LDL has an implemented hierarchy Local route");
         assert!(matches!(l1, AccessKind::LocalLoad { off: 1, len: 1 }));
         assert_eq!(sectors, vec![31, 0x1000 >> 5]);
         assert_eq!(sector_scratch, vec![0x1000 >> 5]);
@@ -4063,7 +4119,7 @@ mod space_routing_tests {
         inst.addresses[0].address_space = Some(pb::MemorySpace::Local as i32);
 
         let flat = classify_flat(&inst, &sched, sched.arch, Path::new("stl.pb"), 0, 0)
-            .expect("joined STL has a reviewed flat Local route");
+            .expect("joined STL has an implemented flat Local route");
         assert!(matches!(flat, AccessKind::LocalStore { off: 0, len: 0 }));
 
         let mut sectors = Vec::new();
@@ -4078,7 +4134,7 @@ mod space_routing_tests {
             0,
             0,
         )
-        .expect("joined STL has a reviewed hierarchy Local route");
+        .expect("joined STL has an implemented hierarchy Local route");
         assert!(matches!(l1, AccessKind::LocalStore { off: 0, len: 1 }));
         assert_eq!(sectors, vec![0x1000 >> 5]);
         assert_eq!(sector_scratch, sectors);
@@ -4531,7 +4587,7 @@ mod space_routing_tests {
         );
 
         let flat = classify_flat(&inst, &sched, sched.arch, Path::new("zero.pb"), 0, 0)
-            .expect("zero-active shared atomic has a reviewed flat route");
+            .expect("zero-active shared atomic has an implemented flat route");
         assert!(matches!(flat, AccessKind::Shared));
 
         let mut sectors = vec![23];
@@ -5304,7 +5360,7 @@ mod space_routing_tests {
         let inst = async_copy_inst(vec![spaced_address(pb::MemorySpace::Global, 0x1000)]);
 
         let flat = classify_flat(&inst, &sched, sched.arch, Path::new("source.pb"), 0, 0)
-            .expect("source-only LDGSTS has a reviewed flat route");
+            .expect("source-only LDGSTS has an implemented flat route");
         assert!(matches!(
             flat,
             AccessKind::GlobalBypass {
@@ -5326,7 +5382,7 @@ mod space_routing_tests {
             0,
             0,
         )
-        .expect("source-only LDGSTS has a reviewed L1 route");
+        .expect("source-only LDGSTS has an implemented L1 route");
         assert!(matches!(
             l1,
             AccessKind::GlobalBypass {
@@ -5515,7 +5571,7 @@ mod space_routing_tests {
     }
 
     #[test]
-    fn global_atomic_requires_reviewed_sm86_sidecar_role_in_both_modes() {
+    fn global_atomic_requires_sm86_sidecar_role_in_both_modes() {
         let sched = schedule(
             ArchId::Sm86,
             MemRole::BypassLoad(CacheOpToken::Atom),
@@ -5568,7 +5624,7 @@ mod space_routing_tests {
         let mut inst = atomic_inst(Some(pb::MemorySpace::Global));
         inst.function_unique_id = 1;
         let flat = classify_flat(&inst, &sched, sched.arch, Path::new("red.pb"), 0, 0)
-            .expect("reviewed reduction has a global atomic route");
+            .expect("implemented reduction has a global atomic route");
         assert!(matches!(
             flat,
             AccessKind::GlobalReduction { off: 0, len: 0 }
@@ -5586,7 +5642,7 @@ mod space_routing_tests {
             0,
             0,
         )
-        .expect("reviewed reduction retains its static reduction role");
+        .expect("implemented reduction retains its static reduction role");
         assert!(matches!(l1, AccessKind::GlobalReduction { off: 1, len: 1 }));
         assert_eq!(sectors, vec![45, 0x1000 >> 5]);
         assert_eq!(sector_scratch, vec![0x1000 >> 5]);
@@ -5633,7 +5689,7 @@ mod space_routing_tests {
     }
 
     #[test]
-    fn flat_global_async_copy_requires_reviewed_sm86_sidecar_role() {
+    fn flat_global_async_copy_requires_sm86_sidecar_role() {
         let inst = async_copy_inst(vec![spaced_address(pb::MemorySpace::Global, 0x1000)]);
         let sched = schedule(
             ArchId::Sm86,
@@ -5780,7 +5836,7 @@ mod replay_identity_tests {
         kernel.shared_memory_dynamic_bytes = Some(4_096);
         std::fs::write(&trace_path, trace.encode_to_vec()).unwrap();
 
-        let td = TraceDir::open(tmp.path()).unwrap();
+        let td = TraceDir::open_direct(tmp.path()).unwrap();
         let loc = td.kernels().next().unwrap();
         let extracted = extract_per_sm_blocks(
             &td,
@@ -5792,7 +5848,7 @@ mod replay_identity_tests {
                 function_name: "f".into(),
                 by_pc: StdMap::new(),
             },
-            PlacementAuthority::from_arch_card(&sm86_test_card(), ArchId::Sm86).unwrap(),
+            PlacementConfig::from_arch_card(&sm86_test_card(), ArchId::Sm86).unwrap(),
             false,
         )
         .unwrap();
@@ -5808,7 +5864,7 @@ mod replay_identity_tests {
         let path = Path::new("../../arch_profiles/cards/sm_120-laptop.json");
         let card = ArchCard::load(path).unwrap();
         assert!(matches!(
-            PlacementAuthority::from_arch_card(&card, ArchId::Sm120),
+            PlacementConfig::from_arch_card(&card, ArchId::Sm120),
             Err(ReplayError::ArchitectureCardSharedMemoryCapacity {
                 arch: ArchId::Sm120,
                 source: CalibError::BlockResearchGap {
@@ -5915,25 +5971,28 @@ mod replay_identity_tests {
             }
         ));
 
-        // Launch 1 is absent from the observed projection. Range admission still
-        // traverses the complete declared map before any observed-side join.
-        assert!(matches!(
-            validate_declared_sampling_sm_range([(0, 0), (1, 84)], sm86_test_placement())
-                .unwrap_err(),
-            ReplayError::SamplingSmIdOutOfRange {
-                launch_index: 1,
-                sm_id: 84,
-                arch: ArchId::Sm86,
-                sku: Sku::Rtx3090Ti,
-                sm_count: 84,
-            }
-        ));
+        #[cfg(feature = "campaign")]
+        {
+            // Launch 1 is absent from the observed projection. Campaign range
+            // validation still traverses the complete declared map.
+            assert!(matches!(
+                validate_declared_sampling_sm_range([(0, 0), (1, 84)], sm86_test_placement())
+                    .unwrap_err(),
+                ReplayError::SamplingSmIdOutOfRange {
+                    launch_index: 1,
+                    sm_id: 84,
+                    arch: ArchId::Sm86,
+                    sku: Sku::Rtx3090Ti,
+                    sm_count: 84,
+                }
+            ));
+        }
     }
 
     #[test]
     fn architecture_card_must_match_the_replay_schedule() {
         assert!(matches!(
-            PlacementAuthority::from_arch_card(&sm86_test_card(), ArchId::Sm120),
+            PlacementConfig::from_arch_card(&sm86_test_card(), ArchId::Sm120),
             Err(ReplayError::ArchitectureMismatch {
                 component: "architecture card",
                 expected: ArchId::Sm120,
@@ -6149,7 +6208,7 @@ mod replay_identity_tests {
             }
             std::fs::write(block_path, block.encode_to_vec()).unwrap();
         }
-        let td = TraceDir::open(tmp.path()).map_err(ReplayError::from)?;
+        let td = TraceDir::open_direct(tmp.path()).map_err(ReplayError::from)?;
         let loc = td.kernels().next().unwrap();
         extract_per_sm_blocks(
             &td,
@@ -6193,7 +6252,7 @@ mod replay_identity_tests {
     fn replay_error_with_schedule(inst: pb::Instruction, sched: FunctionSchedule) -> ReplayError {
         let tmp = tempfile::tempdir().unwrap();
         write_trace_with(tmp.path(), inst);
-        let td = match TraceDir::open(tmp.path()) {
+        let td = match TraceDir::open_direct(tmp.path()) {
             Ok(trace) => trace,
             Err(error) => return error.into(),
         };
@@ -6438,7 +6497,7 @@ mod replay_identity_tests {
         root.memory_payload_classes.clear();
         std::fs::write(&root_path, root.encode_to_vec()).unwrap();
 
-        let td = TraceDir::open(tmp.path()).unwrap();
+        let td = TraceDir::open_direct(tmp.path()).unwrap();
         assert_eq!(
             td.memory_payload_contract(),
             MemoryPayloadContract::LegacyExclusion
@@ -6485,7 +6544,7 @@ mod replay_identity_tests {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "campaign"))]
 mod completeness_tests {
     //! Reader/replay completeness fail-closed on the path replay ACTUALLY
     //! consumes: an incomplete trace lacking a trace_sampling.json sidecar is
@@ -6495,7 +6554,7 @@ mod completeness_tests {
     //! incomplete coverage.
     use super::*;
     use crate::control_bits::ControlBits;
-    use crate::issue::IssueResourceLane;
+    use crate::issue::IssueResourceSource;
     use crate::program::{FunctionSchedule, IssueSlot, OpClass};
     use prost::Message;
     use std::collections::{BTreeMap as StdMap, BTreeSet as StdSet};
@@ -6850,7 +6909,7 @@ mod completeness_tests {
         };
         let params = IssueModelParams {
             arch: ArchId::Sm86,
-            resource_lane: IssueResourceLane::SyntheticTestFixture,
+            resource_source: IssueResourceSource::SyntheticTestFixture,
             l1_hit_latency: 1,
             l1_miss_latency: 1,
             global_flat_latency: 1,
@@ -6870,6 +6929,7 @@ mod completeness_tests {
     }
 
     #[test]
+    #[cfg(feature = "campaign")]
     fn unadmitted_diagnostics_erase_the_aggregatable_result_type() {
         let tmp = tempfile::tempdir().unwrap();
         write_grid_trace(tmp.path(), 1, 1, &[0], None);

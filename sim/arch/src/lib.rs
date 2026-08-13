@@ -1,10 +1,10 @@
-//! Architecture identity and reviewed capability vocabulary shared by the
+//! Architecture identity and capability vocabulary shared by the
 //! simulator crates.
 //!
 //! Deployment architecture, SKU, and compile-time build tokens are distinct
 //! concepts.  A capability marked as a research gap is never converted into a
 //! value here: consumers must call [`Capability::require`] and handle the
-//! typed error.  This keeps the sm_86 reviewed hypotheses from becoming
+//! typed error. This keeps the sm_86 hypotheses from becoming
 //! accidental sm_120 defaults.
 
 pub mod card;
@@ -63,7 +63,7 @@ impl ArchId {
         }
     }
 
-    /// The bare-LDG default is a reviewed capability, not a generic rule.
+    /// The bare-LDG default is architecture-specific, not a generic rule.
     pub const fn bare_ldg_e_default(self) -> Capability<BareLdgEDefault> {
         match self {
             Self::Sm86 => Capability::available(Self::Sm86, BareLdgEDefault::CacheAtAllLevels),
@@ -74,26 +74,26 @@ impl ArchId {
         }
     }
 
-    /// Packed control decoding is currently available only for the reviewed
+    /// Packed control decoding is currently available only for the implemented
     /// Ampere producer/consumer layout.  Blackwell remains a typed template.
     pub const fn control_layout(self) -> Capability<ControlLayout> {
         match self {
             Self::Sm86 => Capability::available(Self::Sm86, ControlLayout::AmpereHighWordV1),
             Self::Sm120 => Capability::unsupported(
                 Self::Sm120,
-                "no provenance-bound sm_120 control-bit layout exists",
+                "no implemented sm_120 control-bit layout exists",
             ),
         }
     }
 
-    /// Reviewed L1 approximation knobs are architecture-local capabilities.
-    /// A typed card property may resolve through this capability only when its
-    /// deployment architecture has independently reviewed the approximation.
-    pub const fn l1_defaults(self) -> Capability<ReviewedL1Defaults> {
+    /// L1 approximation knobs are architecture-local capabilities. A typed
+    /// card property may resolve through this capability only when the
+    /// deployment architecture defines the approximation.
+    pub const fn l1_defaults(self) -> Capability<L1Defaults> {
         match self {
             Self::Sm86 => Capability::available(
                 Self::Sm86,
-                ReviewedL1Defaults {
+                L1Defaults {
                     mshr_count: 32,
                     replacement: L1Replacement::Lru,
                     set_mapping: L1SetMapping::FullyAssociative,
@@ -101,18 +101,18 @@ impl ArchId {
             ),
             Self::Sm120 => Capability::research_gap(
                 Self::Sm120,
-                "sm_120 L1 MSHR/replacement/set-mapping defaults are unreviewed",
+                "sm_120 L1 MSHR/replacement/set-mapping defaults are not modeled",
             ),
         }
     }
 
-    /// Reviewed L2 defaults are architecture-local hypotheses.  The partial
+    /// L2 defaults are architecture-local hypotheses. The partial
     /// sm_120 card must not inherit these values.
-    pub const fn l2_defaults(self) -> Capability<ReviewedL2Defaults> {
+    pub const fn l2_defaults(self) -> Capability<L2Defaults> {
         match self {
             Self::Sm86 => Capability::available(
                 Self::Sm86,
-                ReviewedL2Defaults {
+                L2Defaults {
                     associativity: 16,
                     replacement: L2Replacement::Lru,
                     slice_hash: L2SliceHash::LineMod,
@@ -122,12 +122,12 @@ impl ArchId {
             ),
             Self::Sm120 => Capability::research_gap(
                 Self::Sm120,
-                "sm_120 L2 associativity/replacement/hash defaults are unreviewed",
+                "sm_120 L2 associativity/replacement/hash defaults are not modeled",
             ),
         }
     }
 
-    /// Non-memory issue knobs are hypotheses reviewed only for sm_86.  The
+    /// Non-memory issue knobs are currently defined only for sm_86. The
     /// occupancy ceiling is deliberately included here so it cannot be
     /// mistaken for a cross-architecture invariant.
     pub const fn issue_hypotheses(self) -> Capability<IssueHypotheses> {
@@ -142,7 +142,7 @@ impl ArchId {
             ),
             Self::Sm120 => Capability::research_gap(
                 Self::Sm120,
-                "sm_120 scheduler/barrier/occupancy hypotheses are unreviewed",
+                "sm_120 scheduler/barrier/occupancy hypotheses are not modeled",
             ),
         }
     }
@@ -401,8 +401,7 @@ pub enum BareLdgEDefault {
 /// Closed simulator-supported card-side declaration subset corresponding to
 /// the runtime bare-LDG capability. `TypedUnavailable` carries no value and can
 /// agree only with a research-gap or unsupported capability state. The card
-/// schema's `bypass` token remains fail-closed until the runtime capability has
-/// an independently reviewed implementation.
+/// schema's `bypass` token remains unavailable until the runtime implements it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BareLdgECardDeclaration {
     CacheAtAllLevels,
@@ -444,7 +443,7 @@ pub enum L1SetMapping {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct ReviewedL1Defaults {
+pub struct L1Defaults {
     pub mshr_count: u32,
     pub replacement: L1Replacement,
     pub set_mapping: L1SetMapping,
@@ -461,7 +460,7 @@ pub enum L2SliceHash {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct ReviewedL2Defaults {
+pub struct L2Defaults {
     pub associativity: u32,
     pub replacement: L2Replacement,
     pub slice_hash: L2SliceHash,
@@ -551,7 +550,7 @@ mod tests {
         );
         assert_eq!(
             ArchId::Sm86.l1_defaults().require("l1_defaults").unwrap(),
-            ReviewedL1Defaults {
+            L1Defaults {
                 mshr_count: 32,
                 replacement: L1Replacement::Lru,
                 set_mapping: L1SetMapping::FullyAssociative,

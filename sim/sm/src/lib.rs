@@ -26,6 +26,7 @@
 //! ```
 
 pub mod control_bits;
+#[cfg(feature = "campaign")]
 pub mod evidence;
 mod issue;
 pub mod program;
@@ -36,6 +37,7 @@ pub use control_bits::{
     BARRIER_NONE, ControlBits, ControlBitsError, ControlDomainError, ControlSidecar, DepBarrier,
     FunctionControl, InstructionControl, WaitMask,
 };
+#[cfg(feature = "campaign")]
 pub use evidence::{
     AdmittedLaunchEvidence, BinaryDigestGap, CanonicalTraceBundlePath, LaunchEvidenceIdentity,
     ManifestArtifactToken, ManifestError, ReplayAuthenticatedLaunchIdentity,
@@ -43,7 +45,7 @@ pub use evidence::{
     TraceBundleIdentity, admit_launch_evidence, admit_launch_evidence_anchored,
 };
 pub use issue::{
-    AccessKind, IssueError, IssueModelParams, IssueResourceLane, MemoryOperation, ReplyTo,
+    AccessKind, IssueError, IssueModelParams, IssueResourceSource, MemoryOperation, ReplyTo,
     SmSimResult, TailFlags,
 };
 pub use program::{FunctionSchedule, IssueSlot, OpClass, ProgramError, build_schedules};
@@ -53,10 +55,13 @@ pub use replay::{
     FullLaunchSetDeclarationError, FullLaunchTimingDiagnostic, KernelReplayOutcome,
     LaunchSetAggregationError, LaunchSetCounterComponent, LaunchSetScalarCounter, LaunchSetScope,
     LaunchSetScopeError, ReplayConfiguration, ReplayError, ReplayLaunchCoverageBinding,
-    ReplayLaunchCoverageBindingError, ReplayMemMode, SampledKernelReplayResult,
-    SampledLaunchCoverage, SampledObservedCounters, UnadmittedCoverage,
-    UnadmittedReplayDiagnostics, aggregate_full_launch_set, replay_kernel,
-    replay_unadmitted_diagnostics,
+    ReplayLaunchCoverageBindingError, ReplayMemMode, aggregate_full_launch_set,
+    replay_trace_kernel,
+};
+#[cfg(feature = "campaign")]
+pub use replay::{
+    SampledKernelReplayResult, SampledLaunchCoverage, SampledObservedCounters, UnadmittedCoverage,
+    UnadmittedReplayDiagnostics, replay_kernel, replay_unadmitted_diagnostics,
 };
 pub use sim_mem::MemRole;
 pub use system::{

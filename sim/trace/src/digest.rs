@@ -443,7 +443,7 @@ pub fn canonical_json_utf8(value: &serde_json::Value) -> Result<String, Canonica
 #[error("canonical JSON rendering failed: {0}")]
 pub struct CanonicalJsonError(String);
 
-#[cfg(test)]
+#[cfg(all(test, feature = "campaign"))]
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;

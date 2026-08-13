@@ -1,7 +1,6 @@
 #![allow(clippy::unwrap_used)] // test binary: unwrap is an assertion
-//! Machine-local smoke: load every real control-bits sidecar produced for
-//! the sm_86 roster. The sidecar directory is machine-local evidence, so the
-//! path comes from the environment:
+//! Machine-local smoke: load every real control-bits sidecar available for
+//! the sm_86 roster. The path comes from the environment:
 //!
 //! ```sh
 //! SIM_CONTROL_BITS_DIR=<dir with *.control_bits.json> \
@@ -12,10 +11,10 @@
 use sim_sm::ControlSidecar;
 
 #[test]
-#[ignore = "requires machine-local M1 evidence; run tools/dev/hw_evidence_gate.sh"]
+#[ignore = "requires machine-local control-bit sidecars"]
 fn real_sidecars_all_load() {
     let dir = std::env::var("SIM_CONTROL_BITS_DIR")
-        .expect("SIM_CONTROL_BITS_DIR must be set by tools/dev/hw_evidence_gate.sh");
+        .expect("SIM_CONTROL_BITS_DIR must point to control-bit sidecars");
     let mut files: Vec<_> = std::fs::read_dir(&dir)
         .expect("read sidecar dir")
         .filter_map(|e| e.ok().map(|e| e.path()))

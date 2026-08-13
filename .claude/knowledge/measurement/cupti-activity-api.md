@@ -9,17 +9,17 @@ Repo touchpoints:
 - `workloads/simbench_bw/cupti_activity_collector.{h,cu}` - current collector implementation.
 - `tools/cloud/preflight.sh` - CUPTI Activity capability probe.
 - `tools/cloud/preflight_manifest.py` - manifest validation.
-Out of scope: NCU counter capture (first-class, but owned by `measurement/pinned-protocol-v21.md`); CUPTI Events/Metrics, CUPTI Profiling, Range Profiler, PM Sampling (removed/redundant CUPTI surfaces — counters come from NCU).
+Related context: NCU is the ordinary counter tool;
+`measurement/pinned-protocol-v21.md` describes one historical fixed-clock
+dataset. Other CUPTI surfaces may be used when supported and relevant.
 Version family: CUDA/CUPTI 13.x.
 ---
 
 # CUPTI Activity API
 
-CUPTI Activity is a corroboration tool alongside first-class NCU: it records
-kernel and transfer timestamps in un-replayed runs, cross-checking NCU-derived
-timing collected under the pinned protocol
-(`measurement/pinned-protocol-v21.md`). It works without admin access to GPU
-hardware counters.
+CUPTI Activity records kernel and transfer timestamps in un-replayed runs and
+can corroborate NCU or CUDA-event timing. It often works without admin access
+to GPU hardware counters.
 
 ## Allowed Activity Kinds
 
@@ -37,22 +37,19 @@ hardware counters.
 The collector should degrade gracefully if a deployment blocks an activity kind,
 and should surface that failure in the sidecar or preflight manifest.
 
-## Removed or Redundant CUPTI Surfaces
+## Other CUPTI surfaces
 
-Do not build counter collection on these CUPTI paths — counter ground truth
-comes from NCU under the pinned protocol (`measurement/pinned-protocol-v21.md`),
-and these surfaces are removed or redundant:
+NCU is usually the simpler counter instrument. Availability of these CUPTI
+surfaces varies by CUDA version and target:
 
-- CUPTI Events and Metrics.
-- CUPTI Profiling API.
-- Range Profiler.
-- PM Sampling.
-- PC sampling.
-- SASS metrics.
-- Instruction execution activity kinds.
+- CUPTI Events and Metrics;
+- CUPTI Profiling API and Range Profiler;
+- PM and PC sampling;
+- SASS metrics; and
+- instruction execution activity kinds.
 
-In CUDA 13.0+, CUPTI Events and Metrics are removed for modern targets. NCU is
-the project's counter instrument on all targets; CUPTI stays timestamp-only.
+In CUDA 13.0+, CUPTI Events and Metrics are removed for modern targets. Check
+the installed CUPTI documentation before choosing a lower-level counter path.
 
 ## Collector Pattern
 

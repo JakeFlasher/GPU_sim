@@ -126,15 +126,15 @@ impl SharedMemoryResidency {
     }
 }
 
-/// Authority lane for scheduler-resource values. The legacy lane is the only
-/// executable one until every field in the strict carded lane is consumed by
-/// the scheduler rather than shadowed by structural constants.
+/// Source of scheduler-resource values. The architecture-default source is
+/// executable; the full card source remains unavailable until every card field
+/// is consumed rather than shadowed by structural constants.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum IssueResourceLane {
+pub enum IssueResourceSource {
     /// Existing sm_86-only 25/8/48 architecture-local hypotheses.
-    LegacyArchitectureHypotheses,
+    ArchitectureDefaults,
     /// Strict architecture-card resources. Construction is supported, but replay
-    /// remains typed-deferred while structural fields are dormant.
+    /// remains unavailable while structural fields are dormant.
     Carded(RequiredIssueResources),
     /// Unit-test-only lane for boundary tests that need synthetic scheduler
     /// values. This variant does not exist in production builds.
@@ -142,10 +142,13 @@ pub enum IssueResourceLane {
     SyntheticTestFixture,
 }
 
-impl IssueResourceLane {
-    pub const fn provenance(self) -> &'static str {
+impl IssueResourceSource {
+    #[cfg(feature = "campaign")]
+    pub const fn source_label(self) -> &'static str {
         match self {
-            Self::LegacyArchitectureHypotheses => "architecture_local_reviewed_hypothesis",
+            // Retained campaign result schema spelling. The direct simulator
+            // does not compile or emit this compatibility field.
+            Self::ArchitectureDefaults => "architecture_local_reviewed_hypothesis",
             Self::Carded(_) => "architecture_card",
             #[cfg(test)]
             Self::SyntheticTestFixture => "synthetic_test_fixture",
@@ -153,15 +156,15 @@ impl IssueResourceLane {
     }
 }
 
-/// Timing parameters. Latencies and issue resources retain distinct authority
-/// lanes: the executable legacy lane combines card latencies with explicit
-/// architecture-local hypotheses, while [`IssueModelParams::from_card`] admits a
-/// complete strict card projection that remains non-executable.
+/// Timing parameters. The executable configuration combines card latencies
+/// with architecture-local defaults. [`IssueModelParams::from_card`] accepts a
+/// complete card projection, but that source is not executable until the
+/// scheduler consumes all of its structural fields.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct IssueModelParams {
     /// Deployment architecture whose card and issue hypotheses produced these parameters.
     pub(crate) arch: ArchId,
-    pub(crate) resource_lane: IssueResourceLane,
+    pub(crate) resource_source: IssueResourceSource,
     /// L1 hit data-ready latency (card `l1_hit_latency_cycles`, ceiled).
     pub(crate) l1_hit_latency: u64,
     /// End-to-end L1-miss/L2-HIT data-ready latency (card
@@ -183,7 +186,7 @@ pub struct IssueModelParams {
     /// Read-dependence barrier clear latency (operand consumption).
     /// Hypothesis knob: source operands are read a few cycles after issue.
     pub(crate) read_barrier_latency: u64,
-    /// Resident-warp ceiling per SM. The reviewed sm_86 hypothesis is 48;
+    /// Resident-warp ceiling per SM. The current sm_86 hypothesis is 48;
     /// template architectures return a typed capability gap until their
     /// occupancy evidence is carded.
     pub(crate) max_resident_warps_per_sm: u32,
@@ -230,7 +233,7 @@ impl IssueModelParams {
         let hypotheses = arch.issue_hypotheses().require("issue_hypotheses")?;
         Ok(Self {
             arch,
-            resource_lane: IssueResourceLane::LegacyArchitectureHypotheses,
+            resource_source: IssueResourceSource::ArchitectureDefaults,
             l1_hit_latency: checked_latency("l1_hit_cycles", l1_hit_cycles)?,
             l1_miss_latency: checked_latency("l2_hit_cycles", l2_hit_cycles)?,
             global_flat_latency: checked_latency("dram_cycles", dram_cycles)?,
@@ -242,10 +245,9 @@ impl IssueModelParams {
     }
 
     /// Construct the strict carded resource lane without a legacy fallback.
-    /// Successful construction proves all five resource blocks and all required
-    /// latency entries came from the same architecture-bound card. It does not
-    /// authorize replay: dormant structural fields must first be wired into the
-    /// scheduler in a separately reviewed increment.
+    /// Successful construction verifies that all five resource blocks and all
+    /// required latency entries came from the same architecture-bound card. It
+    /// cannot run until the scheduler consumes the dormant structural fields.
     pub fn from_card(expected_arch: ArchId, card: &ArchCard) -> Result<Self, IssueError> {
         let arch = card.arch_id()?;
         if arch != expected_arch {
@@ -259,7 +261,7 @@ impl IssueModelParams {
         let resources = card.required_issue_resources()?;
         Ok(Self {
             arch,
-            resource_lane: IssueResourceLane::Carded(resources),
+            resource_source: IssueResourceSource::Carded(resources),
             l1_hit_latency: checked_latency("l1_hit_cycles", latencies.l1_hit)?,
             l1_miss_latency: checked_latency("l2_hit_cycles", latencies.l2_hit)?,
             global_flat_latency: checked_latency("dram_cycles", latencies.dram)?,
@@ -274,8 +276,8 @@ impl IssueModelParams {
         self.arch
     }
 
-    pub const fn resource_lane(&self) -> IssueResourceLane {
-        self.resource_lane
+    pub const fn resource_source(&self) -> IssueResourceSource {
+        self.resource_source
     }
 
     pub const fn l1_hit_latency(&self) -> u64 {
@@ -306,9 +308,9 @@ impl IssueModelParams {
         self.max_resident_warps_per_sm
     }
 
-    pub(crate) fn require_executable_resource_lane(&self) -> Result<(), IssueError> {
-        match self.resource_lane {
-            IssueResourceLane::LegacyArchitectureHypotheses => {
+    pub(crate) fn validate_resource_source(&self) -> Result<(), IssueError> {
+        match self.resource_source {
+            IssueResourceSource::ArchitectureDefaults => {
                 let hypotheses = self.arch.issue_hypotheses().require("issue_hypotheses")?;
                 let fields = [
                     (
@@ -329,7 +331,7 @@ impl IssueModelParams {
                 ];
                 for (field, expected, got) in fields {
                     if got != expected {
-                        return Err(IssueError::LegacyHypothesisDrift {
+                        return Err(IssueError::ArchitectureDefaultMismatch {
                             arch: self.arch,
                             field,
                             expected,
@@ -339,11 +341,11 @@ impl IssueModelParams {
                 }
                 Ok(())
             }
-            IssueResourceLane::Carded(_) => {
-                Err(IssueError::CardedResourceExecutionDeferred { arch: self.arch })
+            IssueResourceSource::Carded(_) => {
+                Err(IssueError::CardedResourcesNotImplemented { arch: self.arch })
             }
             #[cfg(test)]
-            IssueResourceLane::SyntheticTestFixture => Ok(()),
+            IssueResourceSource::SyntheticTestFixture => Ok(()),
         }
     }
 
@@ -376,8 +378,8 @@ impl IssueModelParams {
         )
     }
 
-    /// Validate that an attached L1 uses this parameter set's single
-    /// timing authority. This runs at the system composition root as well
+    /// Validate that an attached L1 uses this parameter set's single timing
+    /// source. This runs at the system composition root as well
     /// as per-core construction so an empty SM map cannot skip the check.
     pub(crate) fn validate_l1_timing(&self, cfg: L1Config) -> Result<(), IssueError> {
         if cfg.hit_latency != self.l1_hit_latency {
@@ -427,19 +429,17 @@ pub enum IssueError {
     #[error("issue model is unsupported for deployment architecture {arch}")]
     ArchitectureUnsupported { arch: ArchId },
     #[error(
-        "carded issue-resource execution is deferred for architecture {arch}: the executor does not yet consume smsp.count, smsp.issue_ports, occupancy.max_blocks, dep_barriers.count/storage, or dual_issue.supported"
+        "carded issue resources are not implemented for architecture {arch}: the executor does not yet consume smsp.count, smsp.issue_ports, occupancy.max_blocks, dep_barriers.count/storage, or dual_issue.supported"
     )]
-    CardedResourceExecutionDeferred { arch: ArchId },
-    #[error(
-        "legacy issue hypothesis drift for architecture {arch}: {field} is {got}, expected reviewed value {expected}"
-    )]
-    LegacyHypothesisDrift {
+    CardedResourcesNotImplemented { arch: ArchId },
+    #[error("architecture-default mismatch for {arch}: {field} is {got}, expected {expected}")]
+    ArchitectureDefaultMismatch {
         arch: ArchId,
         field: &'static str,
         expected: u64,
         got: u64,
     },
-    #[error("strict issue-card admission failed: {0}")]
+    #[error("issue-card validation failed: {0}")]
     Calibration(#[from] CalibError),
     #[error(
         "pc {pc} (block {launch_index}, warp slot {warp_slot}) not in the issue schedule of \
@@ -1565,7 +1565,7 @@ impl<'a> SmCore<'a> {
         shared_memory_residency: SharedMemoryResidency,
         mode: SmMemMode,
     ) -> Result<Self, IssueError> {
-        params.require_executable_resource_lane()?;
+        params.validate_resource_source()?;
         if shared_memory_residency.max_bytes_per_sm() == 0 {
             return Err(IssueError::SharedMemoryCapacityInvalid {
                 arch: params.arch,
@@ -3739,7 +3739,7 @@ mod tests {
     fn params() -> IssueModelParams {
         IssueModelParams {
             arch: ArchId::Sm86,
-            resource_lane: IssueResourceLane::SyntheticTestFixture,
+            resource_source: IssueResourceSource::SyntheticTestFixture,
             l1_hit_latency: 34,
             l1_miss_latency: 244,
             global_flat_latency: 400,
@@ -3762,7 +3762,7 @@ mod tests {
         let mut value: serde_json::Value =
             serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
         // Fixture-only sentinels. Matching legacy values exercises lane
-        // separation; it does not confer architecture-card authority on them.
+        // separation; it does not turn them into architecture-card values.
         value["smsp"] = serde_json::json!({"count": 4, "issue_ports": 1});
         value["occupancy"] = serde_json::json!({
             "max_resident_warps_per_sm": 48,
@@ -3788,13 +3788,13 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            legacy.resource_lane(),
-            IssueResourceLane::LegacyArchitectureHypotheses
+            legacy.resource_source(),
+            IssueResourceSource::ArchitectureDefaults
         );
         assert_eq!(legacy.non_memory_write_barrier_latency, 25);
         assert_eq!(legacy.read_barrier_latency, 8);
         assert_eq!(legacy.max_resident_warps_per_sm, 48);
-        legacy.require_executable_resource_lane().unwrap();
+        legacy.validate_resource_source().unwrap();
 
         assert!(matches!(
             IssueModelParams::from_legacy_card_latencies_for_arch(
@@ -3841,8 +3841,8 @@ mod tests {
             ("max_resident_warps_per_sm", occupancy, 48_u64, 49_u64),
         ] {
             assert!(matches!(
-                params.require_executable_resource_lane(),
-                Err(IssueError::LegacyHypothesisDrift {
+                params.validate_resource_source(),
+                Err(IssueError::ArchitectureDefaultMismatch {
                     arch: ArchId::Sm86,
                     field: got_field,
                     expected: got_expected,
@@ -3857,7 +3857,7 @@ mod tests {
                 crate::replay::ReplayMemMode::Flat,
             ),
             Err(crate::replay::ReplayError::Issue(
-                IssueError::LegacyHypothesisDrift {
+                IssueError::ArchitectureDefaultMismatch {
                     arch: ArchId::Sm86,
                     field: "non_memory_write_barrier_latency",
                     expected: 25,
@@ -3893,7 +3893,7 @@ mod tests {
     fn complete_strict_card_lane_constructs_but_cannot_execute() {
         let strict =
             IssueModelParams::from_card(ArchId::Sm86, &synthetic_carded_issue_resources()).unwrap();
-        let IssueResourceLane::Carded(resources) = strict.resource_lane() else {
+        let IssueResourceSource::Carded(resources) = strict.resource_source() else {
             panic!("strict constructor must preserve its carded lane")
         };
         assert_eq!(resources.smsp.count, 4);
@@ -3909,20 +3909,20 @@ mod tests {
         assert_eq!(strict.max_resident_warps_per_sm, 48);
 
         assert!(matches!(
-            strict.require_executable_resource_lane(),
-            Err(IssueError::CardedResourceExecutionDeferred { arch: ArchId::Sm86 })
+            strict.validate_resource_source(),
+            Err(IssueError::CardedResourcesNotImplemented { arch: ArchId::Sm86 })
         ));
         assert!(matches!(
             crate::replay::ReplayConfiguration::checked(strict, crate::replay::ReplayMemMode::Flat,),
             Err(crate::replay::ReplayError::Issue(
-                IssueError::CardedResourceExecutionDeferred { arch: ArchId::Sm86 }
+                IssueError::CardedResourcesNotImplemented { arch: ArchId::Sm86 }
             ))
         ));
 
         let sched = schedule(Vec::new());
         assert!(matches!(
             SmCore::new(&[], &sched, &strict, SmMemMode::Flat),
-            Err(IssueError::CardedResourceExecutionDeferred { arch: ArchId::Sm86 })
+            Err(IssueError::CardedResourcesNotImplemented { arch: ArchId::Sm86 })
         ));
     }
 

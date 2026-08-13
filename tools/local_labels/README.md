@@ -1,10 +1,28 @@
-# Local Label Pipeline
+# NCU collection and retained local-label campaign
+
+For a new experiment, use the direct wrapper:
+
+```bash
+.venv/bin/python tools/local_labels/collect_ncu.py \
+  --output results/my_run \
+  --metrics gpc__cycles_elapsed.max,smsp__inst_executed.sum \
+  -- /absolute/path/to/workload [arguments]
+```
+
+It accepts an ordinary output directory and requires no campaign descriptor,
+receipt, admission state, or preflight. `metrics.py` and `ncu_csv.py` provide
+small reusable metric and CSV helpers.
+
+## Retained campaign pipeline
+
+The remainder of this page documents the older repeatability/label format,
+which remains available through the opt-in `run-sol-campaign` skill. Its
+quarantine, admission, provenance, receipt, hash, and recovery vocabulary is
+format-specific and does not limit direct NCU execution or unrelated work.
 
 This subtree produces ground-truth cache hit-rate labels on local GPU
 devices (RTX 3090 Ti sm_86 and RTX 5060 laptop sm_120) using Nsight
-Compute. The cloud and server contract still forbids `ncu` on every
-non-local target; the local-label exception is bounded to this
-directory and to the quarantine output path `data/local_labels/`.
+Compute. This compatibility pipeline writes beneath `data/local_labels/`.
 
 ## Components
 

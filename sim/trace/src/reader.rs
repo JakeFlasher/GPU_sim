@@ -8,17 +8,11 @@
 //! <trace_dir>/trace_sampling.json                 # sampling-provenance sidecar
 //! ```
 //!
-//! Both sidecars ARE read here: `allocations.json` feeds the allocation-identity
-//! gate, and `trace_sampling.json` (present for a supported subset or retained
-//! lossless-compression provenance) feeds the completeness gate
-//! (`E_INCOMPLETE_TRACE` / never-rewrite-gridDim).
-//!
-//! Production admission is re-enforced here over one descriptor-anchored
-//! snapshot. The reader validates the root contract, launch identities and
-//! geometry, every payload instruction, allocation/range identity, masks, VPC,
-//! warp/function identity, lane reconstruction, block identity, and optional
-//! producer counters before exposing replay inputs. A malformed record is a
-//! typed error, never a skip.
+//! [`TraceDir::open_direct`] reads ordinary replay inputs and ignores campaign
+//! provenance. With the explicit `campaign` feature, [`TraceDir::open`] retains
+//! the historical sealed-campaign behavior for the opt-in campaign skill. Both
+//! loaders validate protobuf and simulator semantics before exposing replay
+//! inputs.
 
 use std::collections::{BTreeMap, BTreeSet};
 #[cfg(test)]
@@ -28,20 +22,26 @@ use std::path::{Path, PathBuf};
 use prost::Message;
 use serde::de::{DeserializeSeed, IgnoredAny, MapAccess, SeqAccess, Visitor};
 
-use crate::anchored::{
-    AnchoredDir, AnchoredFile, AnchoredReadError, FileGenerationIdentity, FileIdentity,
-};
+use crate::anchored::{AnchoredDir, AnchoredFile, AnchoredReadError};
+#[cfg(feature = "campaign")]
+use crate::anchored::{FileGenerationIdentity, FileIdentity};
+#[cfg(feature = "campaign")]
 use crate::digest::{Sha256, Sha256Digest, canonical_json};
 use crate::lanes::{self, LaneError};
 use crate::pb;
 use crate::wire_preflight::{self, WirePreflightError};
 
 const MIB: u64 = 1024 * 1024;
+const DYNAMIC_TRACE_PB_MAX_BYTES: u64 = 1024 * MIB;
 const ALLOCATIONS_JSON_MAX_BYTES: u64 = 16 * MIB;
+#[cfg(feature = "campaign")]
 const TRACE_SAMPLING_JSON_MAX_BYTES: u64 = 64 * MIB;
 const STATS_CSV_MAX_BYTES: u64 = 64 * MIB;
+const DIRECT_THREADBLOCK_FILE_MAX_COUNT: u64 = 1_000_000;
+const DIRECT_THREADBLOCK_TOTAL_MAX_BYTES: u64 = 32 * 1024 * MIB;
 const ALLOCATION_ENTRY_MAX_COUNT: u64 = 131_072;
 const ALLOCATIONS_JSON_MAX_NODES: u64 = 1 + 7 * ALLOCATION_ENTRY_MAX_COUNT;
+#[cfg(feature = "campaign")]
 const TRACE_SAMPLING_JSON_MAX_NODES: u64 = 1_000_000;
 
 #[derive(Debug, thiserror::Error)]
@@ -335,6 +335,7 @@ pub enum TraceError {
         "allocations sidecar {path} repeats allocation_id {allocation_id} (allocation_id_duplicate)"
     )]
     AllocationIdDuplicate { path: PathBuf, allocation_id: u32 },
+    #[cfg(feature = "campaign")]
     #[error(
         "could not parse trace-sampling sidecar {path}: {message} (sampling_sidecar_malformed)"
     )]
@@ -720,12 +721,14 @@ fn classify_memory_payload_contract(
 }
 
 /// Raw-byte identity of one snapshotted trace artifact.
+#[cfg(feature = "campaign")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ArtifactDigestIdentity {
     size_bytes: u64,
     sha256: Sha256Digest,
 }
 
+#[cfg(feature = "campaign")]
 impl ArtifactDigestIdentity {
     fn from_bytes(bytes: &[u8], path: &Path) -> Result<Self, TraceError> {
         let size_bytes = u64::try_from(bytes.len()).map_err(|_| {
@@ -750,6 +753,7 @@ impl ArtifactDigestIdentity {
 }
 
 /// Deterministic identity of every threadblock payload file in a trace snapshot.
+#[cfg(feature = "campaign")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ThreadblockPayloadIdentity {
     file_count: u64,
@@ -758,6 +762,7 @@ pub struct ThreadblockPayloadIdentity {
     sorted_path_stream_sha256: Sha256Digest,
 }
 
+#[cfg(feature = "campaign")]
 impl ThreadblockPayloadIdentity {
     pub fn file_count(&self) -> u64 {
         self.file_count
@@ -777,6 +782,7 @@ impl ThreadblockPayloadIdentity {
 }
 
 /// Raw identities captured before any trace artifact is decoded.
+#[cfg(feature = "campaign")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TraceArtifactIdentity {
     dynamic_trace_pb: ArtifactDigestIdentity,
@@ -786,6 +792,7 @@ pub struct TraceArtifactIdentity {
     threadblock_payload: ThreadblockPayloadIdentity,
 }
 
+#[cfg(feature = "campaign")]
 impl TraceArtifactIdentity {
     pub fn dynamic_trace_pb(&self) -> ArtifactDigestIdentity {
         self.dynamic_trace_pb
@@ -808,12 +815,14 @@ impl TraceArtifactIdentity {
     }
 }
 
+#[cfg(feature = "campaign")]
 struct VerifiedSamplingPayload {
     by_path: BTreeMap<PathBuf, Vec<u8>>,
     identity: ThreadblockPayloadIdentity,
 }
 
 /// Declared byte/cardinality bounds used before a manifest snapshot reads data.
+#[cfg(feature = "campaign")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TraceSnapshotLimits {
     dynamic_trace_pb_size: u64,
@@ -824,6 +833,7 @@ pub struct TraceSnapshotLimits {
     threadblock_raw_bytes: u64,
 }
 
+#[cfg(feature = "campaign")]
 impl TraceSnapshotLimits {
     pub fn new(
         dynamic_trace_pb_size: u64,
@@ -847,6 +857,7 @@ impl TraceSnapshotLimits {
 /// One-read snapshot used by manifest admission. Artifact identities are
 /// available before parsing, and [`TraceDir::from_snapshot`] consumes these exact
 /// bytes so a hash-then-reopen substitution cannot change replay inputs.
+#[cfg(feature = "campaign")]
 pub struct TraceDirSnapshot {
     root: PathBuf,
     dynamic_trace_pb: Vec<u8>,
@@ -858,6 +869,7 @@ pub struct TraceDirSnapshot {
     file_identities: BTreeMap<FileIdentity, (PathBuf, FileGenerationIdentity)>,
 }
 
+#[cfg(feature = "campaign")]
 impl TraceDirSnapshot {
     pub fn capture(root: impl Into<PathBuf>) -> Result<Self, TraceError> {
         let root = root.into();
@@ -1123,7 +1135,7 @@ impl TraceDirSnapshot {
 fn map_threadblock_tree_read_error(
     root: &Path,
     source: AnchoredReadError,
-    preserve_manifest_artifact_role: bool,
+    _preserve_manifest_artifact_role: bool,
 ) -> TraceError {
     match source {
         AnchoredReadError::Io { path, source }
@@ -1132,7 +1144,8 @@ fn map_threadblock_tree_read_error(
         {
             TraceError::TraceThreadblocksEmpty { dir: path }
         }
-        other if preserve_manifest_artifact_role => {
+        #[cfg(feature = "campaign")]
+        other if _preserve_manifest_artifact_role => {
             map_manifest_snapshot_read_error("threadblock_payload", other)
         }
         other => TraceError::AnchoredSnapshot(other),
@@ -1171,6 +1184,7 @@ fn map_snapshot_read_error(artifact: &'static str, source: AnchoredReadError) ->
     map_snapshot_read_error_with(artifact, source, TraceError::AnchoredSnapshot)
 }
 
+#[cfg(feature = "campaign")]
 fn map_manifest_snapshot_read_error(
     artifact: &'static str,
     source: AnchoredReadError,
@@ -1180,6 +1194,7 @@ fn map_manifest_snapshot_read_error(
     })
 }
 
+#[cfg(feature = "campaign")]
 fn capture_optional_snapshot_artifact(
     reader: &AnchoredDir,
     relative: &Path,
@@ -1472,6 +1487,7 @@ fn map_json_preflight_limit(
     }
 }
 
+#[cfg(feature = "campaign")]
 fn insert_snapshot_file_identity(
     identities: &mut BTreeMap<FileIdentity, (PathBuf, FileGenerationIdentity)>,
     artifact: &'static str,
@@ -1702,14 +1718,14 @@ fn validate_shared_memory_split(
 fn validate_trace_snapshot_semantics(
     root: &Path,
     trace: &pb::Trace,
-    payload: &VerifiedSamplingPayload,
+    payload: &BTreeMap<PathBuf, Vec<u8>>,
     allocations: Option<&AllocationRegistry>,
     memory_payload_contract: MemoryPayloadContract,
 ) -> Result<TraceValidationSummary, TraceError> {
     let mut launch_ids = BTreeSet::new();
     let mut consumed_payloads = BTreeSet::new();
     let mut payloads_by_parent: BTreeMap<&Path, Vec<&Path>> = BTreeMap::new();
-    for path in payload.by_path.keys() {
+    for path in payload.keys() {
         let parent =
             path.parent()
                 .ok_or_else(|| TraceError::ThreadblockPayloadSnapshotInvalid {
@@ -1792,7 +1808,7 @@ fn validate_trace_snapshot_semantics(
                 };
                 let mut block_ids = BTreeSet::new();
                 for &path in paths {
-                    let raw = payload.by_path.get(path).ok_or_else(|| {
+                    let raw = payload.get(path).ok_or_else(|| {
                         TraceError::SamplingPayloadSnapshotMissing {
                             path: path.to_path_buf(),
                         }
@@ -1854,7 +1870,6 @@ fn validate_trace_snapshot_semantics(
         return Err(TraceError::TraceLaunchesEmpty);
     }
     if let Some(path) = payload
-        .by_path
         .keys()
         .find(|path| !consumed_payloads.contains(path.as_path()))
     {
@@ -1872,21 +1887,87 @@ pub struct TraceDir {
     trace: pb::Trace,
     memory_payload_contract: MemoryPayloadContract,
     allocations: Option<AllocationRegistry>,
+    #[cfg(feature = "campaign")]
     sampling: Option<TraceSamplingSidecar>,
     stats: Option<TraceStats>,
     validation: TraceValidationSummary,
-    sampling_payload: VerifiedSamplingPayload,
+    payload_by_path: BTreeMap<PathBuf, Vec<u8>>,
 }
 
 impl TraceDir {
     /// Snapshot and fully validate one trace directory before exposing any
     /// decoded launch or payload. All paths are descriptor-anchored and every
     /// payload included in the snapshot is semantically walked exactly once.
+    #[cfg(feature = "campaign")]
     pub fn open(root: impl Into<PathBuf>) -> Result<Self, TraceError> {
         Self::from_snapshot(TraceDirSnapshot::capture(root)?)
     }
 
+    /// Load a trace directly for interactive research.
+    ///
+    /// This path reads only the simulator inputs, does not read or validate a
+    /// campaign `trace_sampling.json`, and does not calculate artifact digests.
+    /// It retains protobuf, launch, allocation, and payload-semantic checks so
+    /// malformed data cannot silently become a simulation result.
+    pub fn open_direct(root: impl Into<PathBuf>) -> Result<Self, TraceError> {
+        let root = root.into();
+        let reader = AnchoredDir::open(&root)?;
+        let dynamic_trace_pb = reader
+            .read_bounded_regular(Path::new("dynamic_trace.pb"), DYNAMIC_TRACE_PB_MAX_BYTES)?
+            .into_raw();
+        if dynamic_trace_pb.is_empty() {
+            return Err(TraceError::TraceRootEmpty {
+                path: root.join("dynamic_trace.pb"),
+            });
+        }
+        let allocations_json = reader
+            .read_optional_bounded_regular(
+                Path::new("extra_info/allocations.json"),
+                ALLOCATIONS_JSON_MAX_BYTES,
+            )?
+            .map(AnchoredFile::into_raw);
+        let stats_csv = reader
+            .read_optional_bounded_regular(Path::new("stats.csv"), STATS_CSV_MAX_BYTES)?
+            .map(AnchoredFile::into_raw);
+        let tree = reader
+            .read_pb_tree(
+                Path::new("threadblocks"),
+                DIRECT_THREADBLOCK_FILE_MAX_COUNT,
+                DIRECT_THREADBLOCK_TOTAL_MAX_BYTES,
+            )
+            .map_err(|source| map_threadblock_tree_read_error(&root, source, false))?;
+        if tree.files.is_empty() {
+            return Err(TraceError::TraceThreadblocksEmpty {
+                dir: root.join("threadblocks"),
+            });
+        }
+        let mut payload_by_path = BTreeMap::new();
+        for entry in tree.files {
+            let relative = entry.relative.to_str().ok_or_else(|| {
+                TraceError::ThreadblockPayloadSnapshotInvalid {
+                    root: root.clone(),
+                    message: format!("payload path is not UTF-8: {}", entry.relative.display()),
+                }
+            })?;
+            if !safe_payload_manifest_path(relative) {
+                return Err(TraceError::ThreadblockPayloadSnapshotInvalid {
+                    root: root.clone(),
+                    message: format!("payload path is not canonical: {relative:?}"),
+                });
+            }
+            payload_by_path.insert(root.join(relative), entry.file.into_raw());
+        }
+        Self::from_loaded_bytes(
+            root,
+            dynamic_trace_pb,
+            allocations_json,
+            stats_csv,
+            payload_by_path,
+        )
+    }
+
     /// Decode a one-read manifest snapshot without reopening any artifact.
+    #[cfg(feature = "campaign")]
     pub fn from_snapshot(snapshot: TraceDirSnapshot) -> Result<Self, TraceError> {
         let TraceDirSnapshot {
             root,
@@ -1898,6 +1979,34 @@ impl TraceDir {
             identity: _,
             file_identities: _,
         } = snapshot;
+        let sampling_path = root.join("trace_sampling.json");
+        let sampling = trace_sampling_json
+            .as_deref()
+            .map(|raw| TraceSamplingSidecar::parse(&sampling_path, raw))
+            .transpose()?;
+        if let Some(sidecar) = sampling.as_ref() {
+            validate_sampling_payload_snapshot(&root, sidecar, &threadblock_payload)?;
+        }
+        Self::from_loaded_bytes(
+            root,
+            dynamic_trace_pb,
+            allocations_json,
+            stats_csv,
+            threadblock_payload.by_path,
+        )
+        .map(|mut trace| {
+            trace.sampling = sampling;
+            trace
+        })
+    }
+
+    fn from_loaded_bytes(
+        root: PathBuf,
+        dynamic_trace_pb: Vec<u8>,
+        allocations_json: Option<Vec<u8>>,
+        stats_csv: Option<Vec<u8>>,
+        payload_by_path: BTreeMap<PathBuf, Vec<u8>>,
+    ) -> Result<Self, TraceError> {
         let dynamic_path = root.join("dynamic_trace.pb");
         if dynamic_trace_pb.is_empty() {
             return Err(TraceError::TraceRootEmpty { path: dynamic_path });
@@ -1918,18 +2027,10 @@ impl TraceDir {
             .as_deref()
             .map(|raw| AllocationRegistry::parse(&allocations_path, raw))
             .transpose()?;
-        let sampling_path = root.join("trace_sampling.json");
-        let sampling = trace_sampling_json
-            .as_deref()
-            .map(|raw| TraceSamplingSidecar::parse(&sampling_path, raw))
-            .transpose()?;
-        if let Some(sidecar) = sampling.as_ref() {
-            validate_sampling_payload_snapshot(&root, sidecar, &threadblock_payload)?;
-        }
         let validation = validate_trace_snapshot_semantics(
             &root,
             &trace,
-            &threadblock_payload,
+            &payload_by_path,
             allocations.as_ref(),
             memory_payload_contract,
         )?;
@@ -1943,14 +2044,15 @@ impl TraceDir {
             trace,
             memory_payload_contract,
             allocations,
-            sampling,
+            #[cfg(feature = "campaign")]
+            sampling: None,
             stats,
             validation,
-            sampling_payload: threadblock_payload,
+            payload_by_path,
         })
     }
 
-    /// The loaded allocation registry, if the sidecar was present.
+    /// The loaded allocation registry, if `allocations.json` was present.
     pub fn allocations(&self) -> Option<&AllocationRegistry> {
         self.allocations.as_ref()
     }
@@ -1958,6 +2060,7 @@ impl TraceDir {
     /// The validated trace-sampling sidecar (`trace_sampling.json`), if present.
     /// Supported sidecars distinguish sampled-subset provenance from a retained
     /// lossless-compression declaration; neither alone proves full coverage.
+    #[cfg(feature = "campaign")]
     pub fn sampling_sidecar(&self) -> Option<&TraceSamplingSidecar> {
         self.sampling.as_ref()
     }
@@ -2038,8 +2141,7 @@ impl TraceDir {
             .join(format!("stream_{}", loc.stream_id))
             .join(format!("kernel_{}", loc.kernel.id));
         let mut paths: Vec<_> = self
-            .sampling_payload
-            .by_path
+            .payload_by_path
             .keys()
             .filter(|path| path.parent() == Some(dir.as_path()))
             .cloned()
@@ -2051,11 +2153,10 @@ impl TraceDir {
         Ok(paths)
     }
 
-    /// Decode one threadblock path from the immutable descriptor-anchored bytes
-    /// captured and hashed by [`TraceDir::open`]. Paths outside that snapshot fail
-    /// closed.
+    /// Decode one threadblock path from bytes captured by the selected loader.
+    /// Paths outside that read fail as ordinary missing-input errors.
     pub fn read_threadblock(&self, path: &Path) -> Result<pb::Threadblock, TraceError> {
-        let raw = self.sampling_payload.by_path.get(path).ok_or_else(|| {
+        let raw = self.payload_by_path.get(path).ok_or_else(|| {
             TraceError::SamplingPayloadSnapshotMissing {
                 path: path.to_path_buf(),
             }
@@ -2135,6 +2236,7 @@ pub fn kernel_grid(kernel: &pb::Kernel) -> Result<(u32, u32, u32), TraceError> {
 
 /// Method-specific provenance retained from a supported v2 sampling sidecar.
 /// Unsupported schema methods never construct this enum.
+#[cfg(feature = "campaign")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TraceSamplingMethod {
     /// Sealed lossless-compression provenance. Replay must independently observe
@@ -2146,6 +2248,7 @@ pub enum TraceSamplingMethod {
     WaveSegmentStratifiedSubset(WaveSegmentSubsetProvenance),
 }
 
+#[cfg(feature = "campaign")]
 impl TraceSamplingMethod {
     pub fn selected_block_ids(&self) -> Option<&BTreeSet<i64>> {
         match self {
@@ -2162,12 +2265,14 @@ impl TraceSamplingMethod {
 /// Hash identity retained from a sealed lossless-compression sidecar. This
 /// declaration remains distinct from the launch-bound full-coverage witness
 /// that replay establishes from the decoded block roster.
+#[cfg(feature = "campaign")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LosslessFullProvenance {
     selected_block_ids_sha256: String,
     sidecar_sha256: String,
 }
 
+#[cfg(feature = "campaign")]
 impl LosslessFullProvenance {
     pub fn selected_block_ids_sha256(&self) -> &str {
         &self.selected_block_ids_sha256
@@ -2181,6 +2286,7 @@ impl LosslessFullProvenance {
 /// Identity retained from a Python-canonical, deeply validated subset sidecar.
 /// Payload bytes are additionally verified by [`TraceDir::open`] before callers
 /// can obtain this provenance through [`TraceDir::sampling_sidecar`].
+#[cfg(feature = "campaign")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WaveSegmentSubsetProvenance {
     selected_block_ids: BTreeSet<i64>,
@@ -2188,6 +2294,7 @@ pub struct WaveSegmentSubsetProvenance {
     sidecar_sha256: String,
 }
 
+#[cfg(feature = "campaign")]
 impl WaveSegmentSubsetProvenance {
     pub fn selected_block_ids(&self) -> &BTreeSet<i64> {
         &self.selected_block_ids
@@ -2203,6 +2310,7 @@ impl WaveSegmentSubsetProvenance {
 }
 
 /// One canonical entry from `hashes.per_block_raw_sha256_manifest`.
+#[cfg(feature = "campaign")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct PayloadFileManifestEntry {
     size_bytes: u64,
@@ -2212,11 +2320,13 @@ struct PayloadFileManifestEntry {
 /// Full-launch block-to-SM relation retained only after the sidecar parser proves
 /// that every launch index occurs exactly once. This is spatial placement; it is
 /// not evidence of temporal block co-residency.
+#[cfg(feature = "campaign")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct ValidatedPerSmSlotMap {
     sm_by_launch_index: Box<[u64]>,
 }
 
+#[cfg(feature = "campaign")]
 impl ValidatedPerSmSlotMap {
     fn retain(
         roster_by_sm: &BTreeMap<u64, Vec<u64>>,
@@ -2264,6 +2374,7 @@ impl ValidatedPerSmSlotMap {
 /// the closed parser. A sealed lossless declaration is not itself a
 /// full-coverage witness. Launch-bound full versus sampled coverage is
 /// established later by replay after observing block membership and record counts.
+#[cfg(feature = "campaign")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TraceSamplingSidecar {
     cell_id: String,
@@ -2282,6 +2393,7 @@ pub struct TraceSamplingSidecar {
     method: TraceSamplingMethod,
 }
 
+#[cfg(feature = "campaign")]
 impl TraceSamplingSidecar {
     pub fn cell_id(&self) -> &str {
         &self.cell_id
@@ -2351,6 +2463,7 @@ impl TraceSamplingSidecar {
     }
 }
 
+#[cfg(feature = "campaign")]
 fn is_lower_hex_sha256(value: &str) -> bool {
     value.len() == 64
         && value
@@ -2358,6 +2471,7 @@ fn is_lower_hex_sha256(value: &str) -> bool {
             .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
 }
 
+#[cfg(feature = "campaign")]
 const PAYLOAD_FILE_MANIFEST_PREFIX: &str = "trace-payload-file-manifest-v1\n";
 
 fn safe_payload_manifest_path(path: &str) -> bool {
@@ -2393,6 +2507,7 @@ fn safe_payload_manifest_path(path: &str) -> bool {
     saw_payload_component
 }
 
+#[cfg(feature = "campaign")]
 fn parse_payload_file_manifest(
     manifest: &str,
 ) -> Result<BTreeMap<String, PayloadFileManifestEntry>, String> {
@@ -2462,10 +2577,12 @@ fn parse_payload_file_manifest(
     Ok(entries)
 }
 
+#[cfg(feature = "campaign")]
 fn sha256_hex(input: &[u8]) -> String {
     Sha256Digest::of(input).to_string()
 }
 
+#[cfg(feature = "campaign")]
 fn exact_keys(
     object: &serde_json::Map<String, serde_json::Value>,
     required: &[&str],
@@ -2485,6 +2602,7 @@ fn exact_keys(
     Ok(())
 }
 
+#[cfg(feature = "campaign")]
 fn object<'a>(
     value: &'a serde_json::Value,
     context: &str,
@@ -2494,6 +2612,7 @@ fn object<'a>(
         .ok_or_else(|| format!("{context} must be an object"))
 }
 
+#[cfg(feature = "campaign")]
 fn required<'a>(
     object: &'a serde_json::Map<String, serde_json::Value>,
     field: &str,
@@ -2504,6 +2623,7 @@ fn required<'a>(
         .ok_or_else(|| format!("{context} is missing required field {field}"))
 }
 
+#[cfg(feature = "campaign")]
 fn positive_u32(value: &serde_json::Value, context: &str) -> Result<u32, String> {
     let value = value
         .as_u64()
@@ -2513,6 +2633,7 @@ fn positive_u32(value: &serde_json::Value, context: &str) -> Result<u32, String>
     Ok(value)
 }
 
+#[cfg(feature = "campaign")]
 fn parse_dim3(value: &serde_json::Value, context: &str) -> Result<(u32, u32, u32), String> {
     let dim = object(value, context)?;
     exact_keys(dim, &["x", "y", "z"], &["x", "y", "z"], context)?;
@@ -2523,6 +2644,7 @@ fn parse_dim3(value: &serde_json::Value, context: &str) -> Result<(u32, u32, u32
     ))
 }
 
+#[cfg(feature = "campaign")]
 fn canonical_sidecar_sha256(sidecar: &serde_json::Value) -> Result<String, String> {
     let mut unsigned = sidecar.clone();
     let root = unsigned
@@ -2539,6 +2661,7 @@ fn canonical_sidecar_sha256(sidecar: &serde_json::Value) -> Result<String, Strin
     Ok(sha256_hex(canonical.as_bytes()))
 }
 
+#[cfg(feature = "campaign")]
 fn parse_unique_ids(
     value: &serde_json::Value,
     context: &str,
@@ -2562,12 +2685,14 @@ fn parse_unique_ids(
     Ok(ids)
 }
 
+#[cfg(feature = "campaign")]
 fn unsigned(value: &serde_json::Value, context: &str) -> Result<u64, String> {
     value
         .as_u64()
         .ok_or_else(|| format!("{context} must be a nonnegative integer"))
 }
 
+#[cfg(feature = "campaign")]
 fn positive(value: &serde_json::Value, context: &str) -> Result<u64, String> {
     unsigned(value, context).and_then(|value| {
         if value == 0 {
@@ -2578,18 +2703,21 @@ fn positive(value: &serde_json::Value, context: &str) -> Result<u64, String> {
     })
 }
 
+#[cfg(feature = "campaign")]
 fn boolean(value: &serde_json::Value, context: &str) -> Result<bool, String> {
     value
         .as_bool()
         .ok_or_else(|| format!("{context} must be boolean"))
 }
 
+#[cfg(feature = "campaign")]
 fn string<'a>(value: &'a serde_json::Value, context: &str) -> Result<&'a str, String> {
     value
         .as_str()
         .ok_or_else(|| format!("{context} must be a string"))
 }
 
+#[cfg(feature = "campaign")]
 fn nonnegative_number(value: &serde_json::Value, context: &str) -> Result<f64, String> {
     value
         .as_f64()
@@ -2597,6 +2725,7 @@ fn nonnegative_number(value: &serde_json::Value, context: &str) -> Result<f64, S
         .ok_or_else(|| format!("{context} must be a finite nonnegative number"))
 }
 
+#[cfg(feature = "campaign")]
 fn string_array(value: &serde_json::Value, context: &str) -> Result<(), String> {
     let values = value
         .as_array()
@@ -2607,6 +2736,7 @@ fn string_array(value: &serde_json::Value, context: &str) -> Result<(), String> 
     Ok(())
 }
 
+#[cfg(feature = "campaign")]
 fn sampling_cardinalities_match(sample: u64, ids_len: u64) -> bool {
     sample == ids_len
 }
@@ -2614,6 +2744,7 @@ fn sampling_cardinalities_match(sample: u64, ids_len: u64) -> bool {
 /// Convert the complete `u64` domain through two exactly representable `u32`
 /// limbs. The final addition performs the one unavoidable binary64 rounding;
 /// no unchecked integer-to-float narrowing hides which source bits participate.
+#[cfg(feature = "campaign")]
 fn sampling_u64_as_f64(value: u64) -> f64 {
     let bytes = value.to_be_bytes();
     let high = u32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]);
@@ -2621,18 +2752,21 @@ fn sampling_u64_as_f64(value: u64) -> f64 {
     f64::from(high) * 4_294_967_296.0 + f64::from(low)
 }
 
+#[cfg(feature = "campaign")]
 fn relative_close_enough(left: f64, right: f64) -> bool {
     left.is_finite()
         && right.is_finite()
         && (left - right).abs() <= 1e-12 * left.abs().max(right.abs())
 }
 
+#[cfg(feature = "campaign")]
 fn close_enough(left: f64, right: f64) -> bool {
     left.is_finite()
         && right.is_finite()
         && (left - right).abs() <= 1e-12_f64.max(1e-12 * left.abs().max(right.abs()))
 }
 
+#[cfg(feature = "campaign")]
 fn validate_lossless_producer_contract(
     root: &serde_json::Map<String, serde_json::Value>,
     original_grid: (u32, u32, u32),
@@ -3049,6 +3183,7 @@ fn validate_lossless_producer_contract(
     ))
 }
 
+#[cfg(feature = "campaign")]
 fn validate_subset_producer_contract(
     root: &serde_json::Map<String, serde_json::Value>,
     original_grid: (u32, u32, u32),
@@ -3688,6 +3823,7 @@ fn validate_subset_producer_contract(
     ValidatedPerSmSlotMap::retain(&roster_by_sm, grid_total)
 }
 
+#[cfg(feature = "campaign")]
 fn validate_sampling_payload_snapshot(
     root: &Path,
     sidecar: &TraceSamplingSidecar,
@@ -3763,12 +3899,14 @@ fn validate_sampling_payload_snapshot(
     Ok(())
 }
 
+#[cfg(feature = "campaign")]
 impl TraceSamplingSidecar {
     /// Parse `<root>/trace_sampling.json` if present (`Ok(None)` if absent).
     /// This internal stage validates and retains the JSON envelope; callers only
     /// receive it through [`TraceDir::sampling_sidecar`] after `TraceDir::open`
     /// has also bound the decompressed threadblock bytes.
     #[cfg(test)]
+    #[cfg(feature = "campaign")]
     fn load(root: &Path) -> Result<Option<Self>, TraceError> {
         let path = root.join("trace_sampling.json");
         let reader = AnchoredDir::open(root)?;
@@ -5404,6 +5542,7 @@ mod tests {
         ))
     }
 
+    #[cfg(feature = "campaign")]
     fn write_nonselected_second_launch(dir: &Path) -> PathBuf {
         let mut trace = read_synthetic_root(dir);
         let stream = trace
@@ -5432,6 +5571,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "campaign")]
     fn manifest_snapshot_root_allocation_failure_retains_artifact_role() {
         let path = PathBuf::from("trace/dynamic_trace.pb");
         assert!(matches!(
@@ -5497,7 +5637,7 @@ mod tests {
                 _ => unreachable!(),
             }
             write_synthetic_root(tmp.path(), &trace);
-            let error = TraceDir::open(tmp.path()).err().unwrap();
+            let error = TraceDir::open_direct(tmp.path()).err().unwrap();
             let expected = if mutation == "function" {
                 "function_unique_id_invalid"
             } else {
@@ -5525,7 +5665,7 @@ mod tests {
             .unwrap();
         stream.kernels.push(stream.kernels[0].clone());
         write_synthetic_root(tmp.path(), &trace);
-        let error = TraceDir::open(tmp.path()).err().unwrap();
+        let error = TraceDir::open_direct(tmp.path()).err().unwrap();
         assert_eq!(error.typed_reason(), Some("trace_launch_identity_mismatch"));
     }
 
@@ -5558,15 +5698,16 @@ mod tests {
         let second_path = synthetic_threadblock_path(tmp.path(), 2);
         std::fs::create_dir_all(second_path.parent().unwrap()).unwrap();
         std::fs::write(&second_path, threadblock.encode_to_vec()).unwrap();
-        let error = TraceDir::open(tmp.path()).err().unwrap();
+        let error = TraceDir::open_direct(tmp.path()).err().unwrap();
         assert_eq!(error.typed_reason(), Some("warpid_tb_missing"));
 
         std::fs::remove_file(second_path).unwrap();
-        let error = TraceDir::open(tmp.path()).err().unwrap();
+        let error = TraceDir::open_direct(tmp.path()).err().unwrap();
         assert_eq!(error.typed_reason(), Some("trace_launch_payload_missing"));
     }
 
     #[test]
+    #[cfg(feature = "campaign")]
     fn full_snapshot_rejects_warp_map_identity_in_nonselected_launch() {
         let tmp = tempfile::tempdir().unwrap();
         write_synthetic_trace(tmp.path(), 1);
@@ -5592,6 +5733,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "campaign")]
     fn full_snapshot_rejects_instruction_warp_identity_in_nonselected_launch() {
         let tmp = tempfile::tempdir().unwrap();
         write_synthetic_trace(tmp.path(), 1);
@@ -5622,7 +5764,7 @@ mod tests {
         let orphan_path = synthetic_threadblock_path(tmp.path(), 9);
         std::fs::create_dir_all(orphan_path.parent().unwrap()).unwrap();
         std::fs::copy(&first_path, &orphan_path).unwrap();
-        let error = TraceDir::open(tmp.path()).err().unwrap();
+        let error = TraceDir::open_direct(tmp.path()).err().unwrap();
         assert_eq!(error.typed_reason(), Some("trace_payload_orphan"));
 
         std::fs::remove_file(orphan_path).unwrap();
@@ -5630,7 +5772,7 @@ mod tests {
         let mut threadblock = pb::Threadblock::decode(raw.as_slice()).unwrap();
         threadblock.warps.get_mut(&0).unwrap().instructions[0].function_unique_id = 2;
         std::fs::write(first_path, threadblock.encode_to_vec()).unwrap();
-        let error = TraceDir::open(tmp.path()).err().unwrap();
+        let error = TraceDir::open_direct(tmp.path()).err().unwrap();
         assert_eq!(error.typed_reason(), Some("function_unique_id_mismatch"));
     }
 
@@ -5666,7 +5808,7 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         write_synthetic_trace(tmp.path(), 2);
 
-        let td = TraceDir::open(tmp.path()).unwrap();
+        let td = TraceDir::open_direct(tmp.path()).unwrap();
         let kernels: Vec<_> = td.kernels().collect();
         assert_eq!(kernels.len(), 1);
         assert_eq!(kernels[0].kernel.name, "synthetic_kernel");
@@ -5700,14 +5842,29 @@ mod tests {
     }
 
     #[test]
+    fn direct_loader_ignores_campaign_sampling_sidecar() {
+        let tmp = tempfile::tempdir().unwrap();
+        write_synthetic_trace(tmp.path(), 1);
+        std::fs::write(
+            tmp.path().join("trace_sampling.json"),
+            b"this is deliberately not campaign JSON",
+        )
+        .unwrap();
+
+        let trace = TraceDir::open_direct(tmp.path()).unwrap();
+        assert_eq!(trace.validation_summary().launch_count(), 1);
+        assert_eq!(trace.validation_summary().threadblock_count(), 1);
+    }
+
+    #[test]
     fn kernel_locator_is_bound_to_its_trace_root() {
         let first = tempfile::tempdir().unwrap();
         let second = tempfile::tempdir().unwrap();
         write_synthetic_trace(first.path(), 1);
         write_synthetic_trace(second.path(), 1);
 
-        let first_trace = TraceDir::open(first.path()).unwrap();
-        let second_trace = TraceDir::open(second.path()).unwrap();
+        let first_trace = TraceDir::open_direct(first.path()).unwrap();
+        let second_trace = TraceDir::open_direct(second.path()).unwrap();
         let foreign = first_trace.kernels().next().unwrap();
         let error = second_trace.threadblock_paths(&foreign).unwrap_err();
         assert!(matches!(
@@ -5729,7 +5886,7 @@ mod tests {
     fn launch_order_is_numeric_not_lexicographic() {
         let tmp = tempfile::tempdir().unwrap();
         write_synthetic_trace(tmp.path(), 12);
-        let td = TraceDir::open(tmp.path()).unwrap();
+        let td = TraceDir::open_direct(tmp.path()).unwrap();
         let kernels: Vec<_> = td.kernels().collect();
 
         // Filename order goes 0, 1, 10, 11, 2, ...
@@ -5779,7 +5936,7 @@ mod tests {
         )
         .unwrap();
         assert!(matches!(
-            TraceDir::open(tmp.path()),
+            TraceDir::open_direct(tmp.path()),
             Err(TraceError::BlockIdMissing { .. })
         ));
     }
@@ -5799,7 +5956,7 @@ mod tests {
         )
         .unwrap();
         assert!(matches!(
-            TraceDir::open(tmp.path()),
+            TraceDir::open_direct(tmp.path()),
             Err(TraceError::BlockIdOutOfRange {
                 index: 5,
                 grid: 1,
@@ -5901,7 +6058,7 @@ mod tests {
         std::fs::remove_dir_all(tmp.path().join("threadblocks")).unwrap();
 
         assert!(matches!(
-            TraceDir::open(tmp.path()),
+            TraceDir::open_direct(tmp.path()),
             Err(TraceError::TraceThreadblocksEmpty { .. })
         ));
     }
@@ -6662,7 +6819,7 @@ mod tests {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "campaign"))]
 mod sampling_sidecar_tests {
     use super::*;
 

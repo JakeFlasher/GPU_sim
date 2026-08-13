@@ -146,7 +146,7 @@ def _extract_referenced_paths(text: str) -> list[str]:
     ):
         paths.add(m.group(1))
     for m in re.finditer(
-        r"\b((?:references|\.claude/knowledge|\.claude/skills|\.claude/hooks|"
+        r"\b((?:references|\.claude/knowledge|\.claude/skills|"
         r"plans|workloads|tools|scripts|simulator|tests|configs|results)/"
         r"[\w./_-]+\.\w{1,5})\b",
         text,
@@ -159,8 +159,11 @@ def _scan_cards(knowledge_root: Path) -> list[dict]:
     rows = []
     for md_path in sorted(knowledge_root.rglob("*.md")):
         # Templates and scaffolding are authoring inputs, not routable cards.
-        # Keep the manifest and linter's corpus boundary identical.
-        if md_path.name.startswith("_"):
+        # Repository instruction files are likewise not knowledge cards.
+        if md_path.name.startswith("_") or md_path.name in {
+            "AGENTS.md",
+            "CLAUDE.md",
+        }:
             continue
         relpath = md_path.relative_to(knowledge_root.parent.parent)
         # phase 2-rev fix: previously only flagged `is_index` for the root

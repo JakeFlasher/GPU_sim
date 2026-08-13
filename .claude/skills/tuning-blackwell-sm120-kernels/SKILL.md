@@ -5,7 +5,7 @@ description: Tunes CUDA kernels for sm_120 (RTX PRO 6000 Blackwell GB202, cloud 
 
 # Tuning Blackwell SM120 / SM100 Kernels
 
-The primary cloud target is **sm_120 (RTX PRO 6000 Blackwell, GB202, CC 12.0)** measured under the pinned NCU measurement protocol (see `measurement/pinned-protocol-v21.md`). Do not assume Hopper-tuned launch configs carry over.
+The primary cloud target is **sm_120 (RTX PRO 6000 Blackwell, GB202, CC 12.0)**. Measure directly on the selected device; do not assume Hopper-tuned launch configs carry over.
 
 ## Cards
 
@@ -32,7 +32,7 @@ The primary cloud target is **sm_120 (RTX PRO 6000 Blackwell, GB202, CC 12.0)** 
 | Memory | HBM3e | GDDR (consumer/workstation) |
 | Cluster size 16 nonportable | Yes (opt-in) | Probe via launch-test |
 
-A kernel tuned for B200 64-warp occupancy will hit a different floor on SM120's 48-warp cap. Re-measure NCU-first under the pinned protocol, with CUDA events, CUPTI Activity, NVBit/static features, and read-only covariates as corroboration.
+A kernel tuned for B200 64-warp occupancy will hit a different floor on SM120's 48-warp cap. Re-measure with NCU, CUDA events, CUPTI Activity, NVBit/static features, and useful covariates as appropriate.
 
 ## Critical rules for Blackwell-specific work
 
@@ -62,7 +62,7 @@ These are platform-level numbers (NVL72 multiplies again). Match scope when quot
 4. If kernel uses FP4 / MX, ensure `-gencode=arch=compute_120a,code=sm_120a` is set — `blackwell-compatibility.md`.
 5. If kernel uses clusters, re-validate with launch-test on SM120 — `rtx_pro_6000_blackwell_capabilities.md`.
 6. Re-evaluate occupancy with `cudaOccupancyMaxActiveBlocksPerMultiprocessor` and elapsed-time sweeps. Do NOT scale Hopper-tuned launches.
-7. Measure under the pinned NCU measurement protocol — see `measurement/pinned-protocol-v21.md`.
+7. Measure on the target device, repeat noisy cases, and record enough host and tool context to interpret the result.
 
 ## Common pitfall: "I have an RTX 5090, does it support clusters?"
 
@@ -74,9 +74,5 @@ These are platform-level numbers (NVL72 multiplies again). Match scope when quot
 - SASS-level mnemonic decoding → `analyzing-sass-nvbit-traces`.
 - General CUDA tuning (occupancy, coalescing) that applies to all generations → `optimizing-cuda-kernels`.
 - Why TMEM exists at all (patent provenance) → `reasoning-about-nvidia-architecture-history`.
-- Measurement under the pinned NCU protocol → `measurement/pinned-protocol-v21.md`.
+- Historical sm_86 v2.1 measurement context → `measurement/pinned-protocol-v21.md`.
 - nvcc / `-gencode` decisions → `compiling-cuda-artifacts`.
-
-## Cite consulted files
-
-End every reply with `## Knowledge Consulted`.

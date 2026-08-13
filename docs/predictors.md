@@ -13,12 +13,8 @@ posture separate. Its historical results remain useful for diagnostic and
 regression context only; they must not be treated as simulator features, same-cell
 calibration inputs, or current publication claims.
 
-For the historical lane dataflow, see the
-[retained predictor architecture record](../ARCHITECTURE.md#3-the-three-predictor-lanes). For the
-open sm_120 science, see
-[../OPEN_RESEARCH_CHALLENGES.md](../OPEN_RESEARCH_CHALLENGES.md). For why the
-merge kept refuted lanes as evidence, see
-[../MERGE_PROVENANCE.md § 2](../MERGE_PROVENANCE.md#2-what-was-carried-payload--source--curated-frozen-artifacts).
+The implementation and its measured states are recorded below. The active
+simulator architecture is documented in [ARCHITECTURE.md](ARCHITECTURE.md).
 
 ```
                          THE THREE LANES (target · gate · status)
@@ -92,10 +88,9 @@ Gate thresholds live in
 | holdout geomean-rel | **0.05524** | ≤ 0.25 | PASS |
 | admitted cells | **40** (n_fit 34, 6 holdout) | — | `Verified-live-sm_86` |
 
-The per-bucket p90 is **advisory** (not admission-blocking): `memory_stress`
-0.2346 (n=9) and `other` 0.3587 (n=15) exceed 0.15 but do not fail the gate. The
-frozen L2 v5 head is sha-pinned (`sm_86_v5_head.json`,
-`d28665f6…`) — see [../MERGE_PROVENANCE.md § 6](../MERGE_PROVENANCE.md#6-byte-identity-proof-the-validated-lane-is-untouched).
+The per-bucket p90 is **advisory**: `memory_stress` 0.2346 (n=9) and
+`other` 0.3587 (n=15) exceed 0.15 but are not part of the recorded pass
+criterion. The retained L2 v5 head is `data/local_labels/sm_86_v5_head.json`.
 
 ### sm_120 — REFUTED (and *why* the frozenset is frozen)
 
@@ -115,16 +110,16 @@ filter going inert on Blackwell:
    ⇒ every miss forwarded to L2 unfiltered ⇒ L2 hit-rate prediction refuted
 ```
 
-Adding `sm_120` to that frozenset **without live evidence is forbidden**: the
-promotion trigger requires a live 5060 cuobjdump/microbench to document the true
-`.ca`/bypass semantics first. The ArchProfile encodes this fail-closed — the
+Adding `sm_120` to that frozenset should follow a live 5060
+cuobjdump/microbenchmark that documents the true `.ca`/bypass semantics. The
+ArchProfile represents the current unknown explicitly — the
 sm_120 card carries `"bare_ldg_e_default": "unknown_typed_unavailable"`
 (`arch_profiles/cards/sm_120-laptop.json`), so bare `LDG.E` keeps mapping to
 `OTHER`. The `cache_replay` subsystem (`data/local_labels/cache_replay_*.json`)
 is a **non-load-bearing sm_120 ablation**, not a predictor: even its best learned
-arm scores 0.0755 median-abs — still above the 0.055 target — so it cannot rescue
-the lane. Full detail:
-[the open sm_120 L2 challenge](../OPEN_RESEARCH_CHALLENGES.md#sm_120-blackwell-l2-cache-hit-prediction-unsolved).
+arm scores 0.0755 median-abs — still above the 0.055 target — so it does not
+rescue the lane. The next experiment is a live Blackwell load-semantics and
+cache-geometry characterization.
 
 ---
 
@@ -182,8 +177,7 @@ No sm_120 L1 head, no sm_120 L1 predictions exist; the sm_120 card forces
 `cache_layers = ["L2"]` so no L1TEX cell is broadcast (a uniform `["L1","L2"]`
 would flood every sm_120 L1 cell as `join_key_unmatched`). The two Blackwell-only
 classifier tokens are exercised via canned cuobjdump text fixtures only; live
-sm_120 coverage defers to a cross-arch follow-up. See
-[the open sm_120 L1/TEX challenge](../OPEN_RESEARCH_CHALLENGES.md#sm_120-l1tex-uncalibrated).
+sm_120 coverage remains future experimental work.
 
 ---
 
@@ -254,8 +248,7 @@ clearly over), `deploy_ns_terminal_state = research_success`,
 `overall_terminal_state = verdict_falsification`. The cycle headline therefore
 **does not pass**; only the deploy-ns crosswalk closes. **sm_120** has no cycle
 labels and no short-burst anchor → `deferred_requires_sm120_cycle_capture`; the
-refuted OLS is not carried forward. See
-[the open wall-clock challenge](../OPEN_RESEARCH_CHALLENGES.md#wall-clock-prediction-unsolved).
+refuted OLS is not carried forward.
 
 ---
 
@@ -272,9 +265,8 @@ refuted OLS is not carried forward. See
 Every per-arch number a lane touches — SM count, L1/L2 geometry, `griddim_penalty_alpha`,
 `bare_ldg_e_default`, the NVML anchor clocks, `cache_layers` — is an **input card**
 under `arch_profiles/cards/`, resolved by `arch_profiles/loader.py` with
-**fail-closed** behavior on unknown devices (no silent sm_86 fallback). That
-decoupling is the whole point of the merge; see the
-[retained ArchProfile section](../ARCHITECTURE.md#4-the-archprofile-system).
+**fail-closed** behavior on unknown devices (no silent sm_86 fallback). See
+[archprofile.md](archprofile.md) for the current card and resolver design.
 
 The SOL-ExecBench baseline corpus that feeds kernels into these lanes is
 documented at [sol_execbench/README.md](sol_execbench/README.md).

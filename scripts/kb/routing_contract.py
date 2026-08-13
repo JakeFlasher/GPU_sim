@@ -13,8 +13,7 @@ SUBCORPUS_TO_SKILL = {
     "cuda": "optimizing-cuda-kernels",
     "best-practices": "optimizing-cuda-kernels",
     "blackwell": "tuning-blackwell-sm120-kernels",
-    # Retained historical pointer for measurement cards. The runtime formatter
-    # marks it non-authoritative; current policy is root/local-label authority.
+    # Active technical skill for profiler permissions and measurement choices.
     "measurement": "validating-nonroot-gpu-measurement",
     "patents": "reasoning-about-nvidia-architecture-history",
     "simulator": "designing-gpu-simulator",

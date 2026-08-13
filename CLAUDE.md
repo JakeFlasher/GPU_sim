@@ -1,147 +1,59 @@
-# CLAUDE.md — GPU simulator project context
+# GPU simulator project context
 
 ## Mission
 
 Build a fast, event-driven, trace-driven simulator of modern NVIDIA GPUs in
-Rust. Bring up Ampere `sm_86` first, then Blackwell `sm_120`. NVBit/SASS traces
-and architecture cards are simulator inputs; silicon NCU vectors are validation
-targets only.
+Rust. Bring up Ampere `sm_86` first, then Blackwell `sm_120`.
 
-The live dataflow is:
+The intended dataflow is:
 
-`NVBit tracer_tool` → `traces_enhanced` protobuf → committed Prost bindings in
-`sim/trace` → `sim-sm` replay → `sim-mem` → `sim-engine` → NCU-shaped outputs
-from `sim_run::emit` inside `sim-run`.
+`NVBit tracer_tool` -> `traces_enhanced` protobuf -> `sim/trace` -> `sim-sm`
+-> `sim-mem` -> `sim-engine` -> NCU-shaped output from `sim-run`.
 
-M-SIM-1 binds accuracy to `gpc__cycles_elapsed.max`, the sole
-publication-binding headline: MAPE ≤10% meets the engineering target, >10% and
-≤15% is floor-only, and >15% is publication failure. Cycles emission is
-deliberately `required_unimplemented` until a checked-in aggregation-semantics
-study validates the single-launch mapping and selects a multi-launch composition
-rule from admitted silicon evidence. `KernelReplayResult`'s
-`diagnostic_last_issue_cycles` and `terminal_modeled_event_time` fields are
-separate directional diagnostics, not admissible primary predictions. The seven current
-`sim_run::emit` descriptors are secondary, implemented, reported, and ungated.
+NVBit/SASS traces and architecture cards are simulator inputs. NCU silicon
+measurements are validation targets and must not be leaked into features for
+the same scored workload.
 
-## Binding rules
+## Research workflow
 
-1. **Targets, never features.** NCU/hardware-counter values may label and score
-   predictions. They must never enter trace features, simulator configuration,
-   architecture constants, or calibration inputs for the same scored cells.
-2. **NCU-only timing.** The former dual-source duration path is retired. Active
-   timing labels travel as v5 `unit_tagged_metrics`, notably
-   `gpc__cycles_elapsed.max` (`cycles`) and `gpu__time_duration.sum` (`ns`).
-3. **Silicon-only accuracy claims.** Another simulator may be an evaluation
-   comparator, never ground truth. Report per metric and kernel family; do not
-   hide failures in aggregate-only summaries.
+- Work on the simulator, capture tooling, experiments, and evaluation directly.
+- NCU, NVBit, CUDA, Rust, Python, GPU execution, and user-authorized `sudo`
+  commands are available. Use them when they are the appropriate tools.
+- Prefer a small focused test or experiment over repository-wide ceremony.
+- Fix failures locally and continue. Do not start audit/reviewer swarms.
+- Do not create hash gates, immutable receipts, authority/admission chains,
+  frozen candidates, no-execution states, production-disable switches, Fable
+  packaging, RLCR loops, or blocking lifecycle hooks.
+- Do not spawn subagents unless the user explicitly asks for parallel agents.
 
-   **Current scope narrows this permission:** no external simulator comparator is
-   active. NCU supplies the ground-truth labels, and runtime/profile evidence is
-   recorded only for this repository's `sim-run`. Accel-Sim and GPGPU-Sim are
-   inactive preserved references—not baselines, dependencies, gates, or current
-   work—unless the user explicitly reauthorizes them.
-4. **Typed, fail-closed evidence.** Missing authority, unknown versions, dirty
-   fixtures, hash mismatches, unsupported architecture paths, and absent
-   hardware evidence are explicit failures or typed exclusions—never silent
-   passes.
-5. **Architecture-local facts.** Latency, geometry, scheduler, SASS, register,
-   cache, clock, and thermal behavior are per-architecture/per-SKU facts.
-   Consumers must not substitute a different architecture's value for a
-   `research_gap`.
-6. **Additive producer contracts.** Proto enum changes append only; new fields
-   are capability-gated; producer and consumer validation land in lockstep.
-   Schema-version bumps are reserved for breaking wire changes.
-7. **Evidence retention.** Do not destroy possibly unique evidence. Historical
-   ledger rows remain byte-exact. Historical path relocation resolves through
-   the versioned alias table with mandatory SHA-256 equality.
-8. **No history rewrite.** Commit hashes are evidence anchors. Cleanup
-   deletions are HEAD-only and remain recoverable from Git history.
-9. **Privilege boundary.** Never run a sudo command. Give the exact command to
-   the operator. Capture tooling must record relevant driver, CUDA, NCU, clock,
-   cache, replay, and device state.
-10. **Escalation.** `AGENTS.md` is binding. A Fable-5 consultation is permitted
-    only when the user explicitly requests one. Otherwise exhaust safe local
-    evidence and ask the user directly for any required authority or unavailable
-    external fact; do not guess or weaken a gate.
-11. **Subagent concurrency.** Never run more than 10 subagents concurrently.
-    Count known live subagents before spawning, resume interrupted agents rather
-    than duplicating them, and serialize or queue all work beyond the ceiling.
+## Optional retained capabilities
 
-Retired rules must not be revived: the NCU ban/quarantine, the no-driver-root
-thesis, dual-source timing, Rule 5 “no simulator revival,” or the former
-iterative orchestration loop. Archived loop state is migration input, not
-active process state.
+The full SOL-ExecBench and historical measurement-campaign stack is retained
+for future use. Invoke `.claude/skills/run-sol-campaign/SKILL.md` when a user
+requests that work. Its files may use manifests, checksums, receipts, schemas,
+and historical evidence as local data formats, but they do not impose a review,
+freeze, admission, or wait workflow on the simulator or any unrelated task.
 
-## Active authorities
+See `AGENTS.md` for the binding research-first workflow policy.
 
-- The three-part v5 label authority is
-  `workloads/simbench_bw/schemas/local_label_sidecar.schema.json`,
-  `workloads/simbench_bw/schemas/local_label_admitted.schema.json`, and
-  `tools/local_labels/metric_registry.json` (61 metric entries).
-- `workloads/simbench_bw/schemas/measurement_manifest.schema.json` remains the
-  active v2 per-measurement provenance contract. It is not a v5 label schema.
-- Retired duration evidence dispatches explicitly to
-  `workloads/simbench_bw/schemas/historical/duration_admitted.v1.schema.json`;
-  its content hash is frozen. Missing/unknown versions fail closed.
-- `arch_profiles/` and `data/pchase/` hold architecture inputs.
-- `tools/nvbit_tracer/`, `tools/sass_control/`, `tools/cache_replay/`,
-  `tools/cache_predictor/`, and `tools/trace_sampling/` are active simulator
-  instrumentation or calibration inputs.
-- `tools/local_labels/` is the active NCU capture/label factory.
-- `data/local_labels/campaign/`, `data/annex/`, and the external capture and
-  preparation-failure archives are frozen evidence and undeletable in this
-  cleanup.
+## Useful starting points
 
-## Hosts and architecture order
+- `docs/README.md` — documentation map
+- `docs/ARCHITECTURE.md` — project architecture
+- `plans/micro2027_ncu_sim_execution_plan.md` — simulator execution plan
+- `plans/sm86_comprehensive_live_capture_campaign_plan.md` — capture plan
+- `sim/` — Rust simulator workspace
+- `tools/nvbit_tracer/` — NVBit tracer
+- `tools/local_labels/` — NCU capture and label tooling
+- `.claude/skills/run-sol-campaign/` — opt-in SOL/campaign capability
 
-- Current primary host: RTX 3090 Ti (GA102, `sm_86`). Recorded toolchain:
-  driver 610.43.02, NCU 2026.1.0, CUDA 13.3 default and pinned CUDA 13.2 where
-  the capture/build contract requires it.
-- Second target: RTX 5060 laptop (GB206, `sm_120`).
-- Controlled same-ISA cross-SKU target: cloud RTX PRO 6000 (GB202, `sm_120`).
-
-Evidence status is device-specific: `Offline-verified`, `Verified-live-sm_86`,
-`Verified-live-sm_120-gb206`, `Verified-live-sm_120-gb202`, or
-`Cross-arch-verified`. A result on one device never implies verification on
-another.
-
-## Current execution state
-
-M0–M3 are complete. M4 is in progress. M5 has not started; M6/M7 are
-blocked on upstream milestones. The canonical authority contains 344 cells: 122
-runnable and 222 excluded. Current defensible canonical credit is 1/122
-runnable. The stopped 49-row revision and the Task7/H3 capture-defect archive
-are frozen, zero-credit, and reuse-forbidden. The interrupted 53/201 SOL
-runnability attempt is separately archived and canonical v1 is restored.
-Supplemental launch-set v3 is a separate cohort and remains live-disabled until
-a pinned canary passes.
-
-ADR 0001 authorizes Task7/H3 continuation outside RLCR as
-`CONTINUE_PRESERVE_PINNED`; ADR 0002 fixes publication scope as
-`CYCLES_ONLY_BINDING`. ADRs 0003–0006 record later capture-envelope decisions.
-Neither the accepted decisions nor any later decision admits historical evidence
-or weakens a campaign, provenance, or hardware gate.
-
-Authoritative plans:
-
-- `plans/micro2027_ncu_sim_execution_plan.md`
-- `plans/sm86_comprehensive_live_capture_campaign_plan.md`
-
-Authoritative project documentation lives under `docs/`: start with
-[`docs/README.md`](docs/README.md), then use the architecture, component
-inventory, status, host runbook, decisions, testing policy, and durable lessons.
-
-## Default verification
-
-From the repository root:
+Ordinary checks, selected according to the change, include:
 
 ```bash
 (cd sim && cargo fmt --all -- --check)
-(cd sim && cargo test --workspace --all-targets)
-.venv/bin/python -m pytest -q
-.venv/bin/python workloads/simbench_bw/validate.py --all
+(cd sim && cargo test --all-targets)
+.venv/bin/python -m pytest -q <focused paths>
 ```
 
-The default Python suite is self-contained and deselects `campaign_evidence`
-and `hardware_evidence`. Their owner gates must fail when required external
-evidence is absent; absence must never be reported as a pass.
+These checks validate implementation behavior. They are not approval gates and
+must not be expanded into audit protocols.

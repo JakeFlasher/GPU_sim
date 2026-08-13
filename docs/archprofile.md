@@ -1,17 +1,16 @@
 # ArchProfile — loader for architecture-local profile-card facts
 
-> **Scope note.** The active architecture authority is
+> **Scope note.** The active architecture documentation is
 > [`docs/ARCHITECTURE.md`](ARCHITECTURE.md), [`docs/STATUS.md`](STATUS.md),
-> [`docs/COMPONENTS.md`](COMPONENTS.md), the `arch_profiles/` cards/schema, and
-> accepted ADRs. This page preserves the historical four-tree merge rationale;
-> links to root `MERGE_PROVENANCE.md` and `OPEN_RESEARCH_CHALLENGES.md` are
-> provenance/context, not current policy.
+> [`docs/COMPONENTS.md`](COMPONENTS.md), and the `arch_profiles/` cards/schema.
+> This page also preserves useful historical merge rationale, but it creates no
+> workflow gate.
 
 `arch_profiles/` is the profile-card boundary for architecture-local facts. Other
 architecture inputs, including the latency evidence under `data/pchase/`, remain
-separate authorities and are not folded into these cards. The historical four-tree
-merge (see [the retained ledger](../MERGE_PROVENANCE.md)) replaced scattered
-per-device Python dicts with a single set of JSON **cards** read through one loader
+separate inputs and are not folded into these cards. The historical four-tree
+merge replaced scattered per-device Python dicts with a single set of JSON
+**cards** read through one loader
 ([`arch_profiles/loader.py`](../arch_profiles/loader.py)).
 
 The design is grounded in the seam research question **Q9** ("Blackwell
@@ -174,13 +173,13 @@ token or a code fork.
 
 ---
 
-## 5. The lockstep contract
+## 5. Card/source consistency
 
-The overriding merge constraint is **zero behaviour change** for the validated
-sm_86 lane. [`tests/test_arch_profile_lockstep.py`](../arch_profiles/tests/test_arch_profile_lockstep.py)
-enforces it: it reads the *live* production constants straight from source with
-`ast` (no heavy imports, `_extract_constant` at `:40`) and asserts the card
-equals them.
+The focused tests in
+[`tests/test_arch_profile_lockstep.py`](../arch_profiles/tests/test_arch_profile_lockstep.py)
+check that architecture cards and their live consumers agree. These are
+ordinary regression tests: update both sides deliberately when new measurements
+change a parameter.
 
 ```
    LIVE PRODUCTION SOURCE                 ArchProfile CARD          verdict
@@ -195,22 +194,13 @@ equals them.
      "sm_86" ∈ _BARE_LDG_E_…_CA     ═════ .bare_ldg_e_default ="ca"  ✓ consistent
    ─────────────────────────────────────────────────────────────────────────
    cache_predictor.py                                    DELIBERATE CORRECTION
-     _SM_COUNT_BY_ARCH["sm_120"]=50 ──╳── sm_120.sm_count = 26  ✗ 26 ≠ 50  ← asserted!
-        (stale guess, still in source)     (MEASURED, card supersedes)
+     _SM_COUNT_BY_ARCH["sm_120"]=26 ═════ sm_120.sm_count = 26  ✓ consistent
 ```
 
-- The sm_86 tests (`:63-102`) assert **byte-identity**: card == live source ==
-  literal. If anyone edits either side, the guard fires — the card cannot drift.
-- The **one deliberate divergence** is the sm_120 SM count. The card carries the
-  **measured 26**; the codex source still carries the guessed **50**. The test
-  `test_sm120_sm_count_is_measured_26_correcting_stale_source_50` (`:107-112`)
-  asserts *both* `card.sm_count == 26` and `live["sm_120"] == 50` and
-  `card.sm_count != live["sm_120"]`, so the correction is documented and cannot
-  silently re-converge or drift. See [../MERGE_PROVENANCE.md](../MERGE_PROVENANCE.md).
-- Resolver and gap coverage are also guarded: `resolve_arch_id` over all 8
-  spellings + CC tuples (`:155-170`), rejection of non-local cards (`:173-176`),
-  `build_arch_family` build/deploy separation (`:184-188`), and that every
-  `research_gap` references a challenge anchor (`:143-149`).
+- The sm_86 tests compare card values with live consumers.
+- The measured sm_120 SM count is 26 in both the card and the current source.
+- Resolver tests cover supported spellings and compute-capability tuples,
+  rejection of unknown device/SKU pairs, and build/deploy token separation.
 
 ---
 
@@ -261,15 +251,13 @@ This is the honesty posture, enforced by data:
   `predictor_state.wall_clock`, sm_120 SMAPE 1.766 does not beat a shape/size
   baseline).
 
-Every `research_gap` points at an anchor in
-[../OPEN_RESEARCH_CHALLENGES.md](../OPEN_RESEARCH_CHALLENGES.md), and
-`test_all_research_gaps_reference_a_challenge` fails the build if one does not.
+Each `research_gap` carries a reason and a stable descriptive identifier. Treat
+it as a concrete experiment to design, not as an agent-workflow blocker.
 
 ---
 
 ## See also
 
 - [ARCHITECTURE.md](ARCHITECTURE.md) — how profile cards feed the active Rust simulator.
-- [../MERGE_PROVENANCE.md](../MERGE_PROVENANCE.md) — the four-tree merge, the 50→26 SM-count decision.
-- [../OPEN_RESEARCH_CHALLENGES.md](../OPEN_RESEARCH_CHALLENGES.md) — the sm_120 gaps this card marks.
+- [STATUS.md](STATUS.md) — current implementation and research priorities.
 - [`arch_profiles/loader.py`](../arch_profiles/loader.py) · [`aliases.json`](../arch_profiles/aliases.json) · [`build_arch_families.json`](../arch_profiles/build_arch_families.json) · [`schema/arch_profile.schema.json`](../arch_profiles/schema/arch_profile.schema.json) · [`tests/test_arch_profile_lockstep.py`](../arch_profiles/tests/test_arch_profile_lockstep.py)

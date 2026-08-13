@@ -1,24 +1,40 @@
-# Test boundaries
+# Testing
 
-The default test command covers the simulator, trace and label pipeline,
-calibration references, and lightweight SimBench contracts:
+Tests answer whether code behaves as intended. They do not authorize later
+work.
+
+Use the smallest relevant check while iterating:
+
+```bash
+cd sim
+cargo test -p sim-engine
+cargo test -p sim-trace
+cargo test -p sim-sm
+cargo test -p sim-mem
+cargo test -p sim-run
+
+# Optional retained campaign runner and evidence adapter
+cargo test -p sim-run-campaign
+cargo test -p sim-sm --features campaign --test launch_evidence
+```
+
+Python examples:
 
 ```bash
 .venv/bin/python -m pytest -q
+.venv/bin/python -m pytest -q eval/tests/test_direct_score.py
+.venv/bin/python -m pytest -q arch_profiles/tests
+.venv/bin/python -m pytest -q tools/nvbit_tracer/test_capture_process.py
 ```
 
-Tests marked `campaign_evidence` require the immutable external capture archive
-and are run through a gate that fails when the archive is unavailable:
+Before a broad handoff, run the suites touched by the change. Hardware tests
+may use the available GPUs, NCU, NVBit, clocks, and administrative commands.
+A skipped hardware test is simply not executed; it neither passes nor blocks
+unrelated implementation.
 
-```bash
-tools/dev/campaign_evidence_gate.sh
-```
+The full SOL/campaign suites are intentionally excluded from bare `pytest`.
+Invoke them by path through `.claude/skills/run-sol-campaign/SKILL.md` when that
+capability is in scope.
 
-Tests marked `hardware_evidence` require machine-local GPU traces or control-bit
-sidecars. They are excluded from the default CPU gate and must never pass merely
-because evidence is absent. Their hard-failing runner is completed in cleanup
-Stage 5.
-
-The heavy SOL-ExecBench/FlashInfer evaluation bundle has its own environment
-under `tools/sol_execbench/` and is not collected by the default repository
-suite.
+Do not create audit-only test suites that inspect Git state, prompt text,
+reviewer counts, hashes, receipt chains, or workflow status.

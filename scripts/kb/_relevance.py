@@ -1,12 +1,9 @@
 """
-_relevance.py — Single source of truth for the KB-relevance classifier.
+_relevance.py — opt-in KB-relevance classifier.
 
-This module defines the Group A / B / C gate that decides whether a user
-prompt is relevant to the project knowledge base. It is imported by both
-`route_query.py` (UserPromptSubmit hook) and `check_kb_usage.py` (Stop
-hook); the bash fallback in `.claude/hooks/kb_reminder.sh` is generated from
-this module by `python3 scripts/kb/_relevance.py --emit-bash` and delegates
-classification back to this same Python implementation.
+This module defines the Group A / B / C classifier used by the standalone
+`route_query.py` command. It has no hook, Stop-event, or session-enforcement
+behavior.
 
 Group A — fires alone. Specific NVIDIA / project-internal tokens that
 cannot collide with everyday English: instruction mnemonics,
@@ -197,7 +194,7 @@ GROUP_C_SOURCE = (
 )
 
 # ---------------------------------------------------------------------------
-# Compiled patterns (used by route_query.py and check_kb_usage.py).
+# Compiled patterns used by route_query.py and the standalone classifier.
 # ---------------------------------------------------------------------------
 
 GROUP_A = re.compile(GROUP_A_SOURCE, re.IGNORECASE)
@@ -234,7 +231,7 @@ _CODENAME_FP = re.compile(_CODENAME_FP_SOURCE, re.IGNORECASE)
 
 
 def is_kb_relevant(prompt: str) -> bool:
-    """Return True if the prompt should activate the KB router/Stop hook.
+    """Return True if the prompt is relevant to the project knowledge base.
 
     Group A fires alone. Group B (codenames) requires Group C
     (GPU-context word) to fire. This kills the "ada lovelace" /
@@ -255,56 +252,11 @@ def is_kb_relevant(prompt: str) -> bool:
     return False
 
 
-def _emit_bash() -> str:
-    """Emit the sourced bash fallback wrapper for the canonical classifier.
-
-    Bash's POSIX ERE engine cannot faithfully evaluate the Python patterns
-    (which use constructs such as non-capturing groups and word boundaries).
-    The generated wrapper therefore passes the prompt through stdin to this
-    module instead of duplicating or approximating the classifier.
-    """
-    return r'''# Auto-generated from scripts/kb/_relevance.py — DO NOT EDIT BY HAND.
-# Regenerate via: python3 scripts/kb/_relevance.py --emit-bash > .claude/hooks/_gate_regexes.sh
-#
-# This file is meant to be sourced by a bash hook:
-#     source .claude/hooks/_gate_regexes.sh
-#     if kb_gate_is_relevant "$PROMPT"; then ...; fi
-#
-# The Python classifier in scripts/kb/_relevance.py is the canonical source of
-# truth. Bash delegates to it through stdin so long prompts do not collide with
-# the operating system's argv-size limit and no regex dialect can drift.
-
-kb_gate_is_relevant() {
-    # Silent predicate. Returns exit status 0 when the prompt is KB-relevant,
-    # 1 otherwise (including an empty prompt or unavailable Python helper).
-    # No stdout output: UserPromptSubmit hooks show stdout to the agent, so a
-    # stray true/false line would pollute every reminder.
-    local prompt="${1-}"
-    if [ -z "$prompt" ]; then
-        return 1
-    fi
-    # Resolve the Python script path relative to this sourced file:
-    # <repo>/.claude/hooks/_gate_regexes.sh ->
-    # <repo>/scripts/kb/_relevance.py. Avoids depending on git being available
-    # or on a particular working directory.
-    local _hook_dir _repo_root _script result
-    _hook_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-    _repo_root="$(dirname "$(dirname "$_hook_dir")")"
-    _script="$_repo_root/scripts/kb/_relevance.py"
-    result="$(printf '%s' "$prompt" | python3 "$_script" --classify-stdin 2>/dev/null)"
-    [ "$result" = "true" ]
-}
-'''
-
-
-
 if __name__ == "__main__":
     import argparse
     import sys
 
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("--emit-bash", action="store_true",
-                   help="Print the generated bash fallback wrapper.")
     group = p.add_mutually_exclusive_group()
     group.add_argument("--classify", default=None,
                        help="Classify a single prompt (prints 'true'/'false').")
@@ -312,9 +264,7 @@ if __name__ == "__main__":
                        help="Classify UTF-8 prompt text read from stdin.")
     args = p.parse_args()
 
-    if args.emit_bash:
-        print(_emit_bash(), end="")
-    elif args.classify is not None:
+    if args.classify is not None:
         print("true" if is_kb_relevant(args.classify) else "false")
     elif args.classify_stdin:
         print("true" if is_kb_relevant(sys.stdin.read()) else "false")

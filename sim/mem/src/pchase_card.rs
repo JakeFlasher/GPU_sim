@@ -2,15 +2,15 @@
 //! (`data/pchase/sm_86_static_card.json`) — a lockstep port of
 //! `tools/cache_predictor/l1_warp_pool_walker.py`'s card resolvers.
 //!
-//! The resolution CONTRACT is the Python one, verbatim:
+//! The resolver follows the Python implementation's input semantics:
 //! - a `kind: "value"` marker alone is never trusted — the value field must
-//!   exist AND pass the per-resolver audit (positive integral for counts,
+//!   exist AND pass per-field validation (positive integral for counts,
 //!   positive finite for latencies, hit strictly below miss);
 //! - capacity has NO default at all (missing/typed property fails closed)
 //!   and is carveout-aware via the swept
 //!   `l1_capacity_carveout_{pct}_pct_bytes` points;
 //! - a `kind: "typed"` (`geometry_unresolved`) MSHR count resolves through
-//!   the deployment architecture's reviewed L1-default capability;
+//!   the deployment architecture's explicit L1-default capability;
 //! - typed replacement and associativity declarations resolve through that
 //!   same architecture-bound capability, so sm_120 cannot inherit sm_86's LRU
 //!   or fully-associative approximations;
@@ -55,8 +55,8 @@ pub enum PchaseCardError {
     PropertyMissing { property: String },
     #[error("the card property {property} has kind=value but no value field; fail closed")]
     ValueFieldMissing { property: String },
-    #[error("{property} value {raw} fails the audit ({requirement}); fail closed")]
-    ValueAuditFailed {
+    #[error("{property} value {raw} is invalid ({requirement})")]
+    ValueInvalid {
         property: String,
         raw: String,
         requirement: &'static str,
@@ -282,12 +282,12 @@ impl PchaseCard {
         (value != 0).then_some(value)
     }
 
-    /// Audit a card-VALUED integer: positive, mathematically integral, and
+    /// Validate a card-valued integer: positive, mathematically integral, and
     /// not a bool/string masquerading through coercion (the Python
     /// `_card_int` contract without its binary64 narrowing).
     fn card_int(prop: &RawProperty, name: &str) -> Result<u64, PchaseCardError> {
         let raw = Self::require_value(prop, name)?;
-        Self::exact_positive_integer(raw.get()).ok_or_else(|| PchaseCardError::ValueAuditFailed {
+        Self::exact_positive_integer(raw.get()).ok_or_else(|| PchaseCardError::ValueInvalid {
             property: name.to_owned(),
             raw: raw.get().to_owned(),
             requirement: "must be a positive integer representable as u64",
@@ -302,15 +302,14 @@ impl PchaseCard {
             });
         }
         let raw = Self::require_value(prop, name)?;
-        let n = serde_json::from_str::<f64>(raw.get()).map_err(|_| {
-            PchaseCardError::ValueAuditFailed {
+        let n =
+            serde_json::from_str::<f64>(raw.get()).map_err(|_| PchaseCardError::ValueInvalid {
                 property: name.to_owned(),
                 raw: raw.get().to_owned(),
                 requirement: "must be a JSON number representable as finite f64",
-            }
-        })?;
+            })?;
         if !n.is_finite() || n <= 0.0 {
-            return Err(PchaseCardError::ValueAuditFailed {
+            return Err(PchaseCardError::ValueInvalid {
                 property: name.to_owned(),
                 raw: raw.get().to_owned(),
                 requirement: "must be a positive finite latency",
@@ -354,7 +353,7 @@ impl PchaseCard {
     }
 
     /// Resolve MSHR capacity for a typed deployment architecture. A typed
-    /// declaration may consume only that architecture's reviewed L1 defaults;
+    /// declaration may consume only that architecture's explicit L1 defaults;
     /// card-valued counts remain card evidence and do not require a default.
     pub fn resolve_mshr_count_for_arch(&self, arch: ArchId) -> Result<MshrConfig, PchaseCardError> {
         self.require_arch(arch)?;
@@ -363,7 +362,7 @@ impl PchaseCard {
         match prop.kind.as_str() {
             "value" => Ok(MshrConfig {
                 count: u32::try_from(Self::card_int(prop, name)?).map_err(|_| {
-                    PchaseCardError::ValueAuditFailed {
+                    PchaseCardError::ValueInvalid {
                         property: name.to_owned(),
                         raw: prop
                             .value
@@ -383,7 +382,7 @@ impl PchaseCard {
                     sensitivity_note: Some(format!(
                         "the card types mshr_outstanding_misses geometry_unresolved (the \
                          single-thread probe bounds outstanding misses from below without a \
-                         saturation knee), so the walk uses the reviewed {arch} default {}; \
+                         saturation knee), so the walk uses the configured {arch} default {}; \
                          report results at counts [16, 32, 64] for sensitivity",
                         defaults.mshr_count
                     )),
@@ -407,7 +406,7 @@ impl PchaseCard {
             "value" => {
                 let raw = Self::require_value(prop, name)?;
                 let policy = serde_json::from_str::<String>(raw.get()).map_err(|_| {
-                    PchaseCardError::ValueAuditFailed {
+                    PchaseCardError::ValueInvalid {
                         property: name.to_owned(),
                         raw: raw.get().to_owned(),
                         requirement: "must be a policy name string",
@@ -434,7 +433,7 @@ impl PchaseCard {
                     modeled,
                     source: "documented_approximation",
                     note: Some(format!(
-                        "the card types l1_replacement_policy {:?}; {modeled} is the reviewed \
+                        "the card types l1_replacement_policy {:?}; {modeled} is the configured \
                          {arch} approximation pending card evidence",
                         prop.typed_reason.clone().unwrap_or_default()
                     )),
@@ -471,7 +470,7 @@ impl PchaseCard {
                     source: "documented_approximation",
                     note: Some(format!(
                         "the card types l1_associativity_ways {:?}; the {modeled} walk is the \
-                         reviewed {arch} approximation pending card evidence",
+                         configured {arch} approximation pending card evidence",
                         prop.typed_reason.clone().unwrap_or_default()
                     )),
                 })
@@ -735,7 +734,7 @@ mod tests {
         );
         assert!(matches!(
             c3.resolve_line_capacity(None),
-            Err(PchaseCardError::ValueAuditFailed { .. })
+            Err(PchaseCardError::ValueInvalid { .. })
         ));
     }
 
@@ -768,7 +767,7 @@ mod tests {
         ] {
             let error = card_integer(raw).unwrap_err();
             assert!(
-                matches!(error, PchaseCardError::ValueAuditFailed { .. }),
+                matches!(error, PchaseCardError::ValueInvalid { .. }),
                 "{raw}: {error:?}"
             );
         }
@@ -779,7 +778,7 @@ mod tests {
         let raw = "1.00000000000000001";
         assert!(matches!(
             card_integer(raw),
-            Err(PchaseCardError::ValueAuditFailed {
+            Err(PchaseCardError::ValueInvalid {
                 raw: rejected,
                 requirement: "must be a positive integer representable as u64",
                 ..
@@ -812,7 +811,7 @@ mod tests {
         let c = card(r#"{"properties": {"latency": {"kind": "value", "value": 1e309}}}"#);
         assert!(matches!(
             PchaseCard::card_positive_float(c.property("latency").unwrap(), "latency"),
-            Err(PchaseCardError::ValueAuditFailed {
+            Err(PchaseCardError::ValueInvalid {
                 raw,
                 requirement: "must be a JSON number representable as finite f64",
                 ..

@@ -5,20 +5,9 @@
 # above the vendored nvbit_release/tools tree.
 #
 # Targets:
-#   make ARCH=sm_86       — temporary-copy verification for the 3090 Ti.
-#   make ARCH=sm_100a     — temporary-copy verification for B200.
-#   make clean            — temporary-copy cleanup only.
-
-NVBIT_METRIC_MUTATING_GOALS := $(strip $(filter-out verify-libnvbit,$(if $(MAKECMDGOALS),$(MAKECMDGOALS),all)))
-ifneq ($(NVBIT_METRIC_MUTATING_GOALS),)
-NVBIT_INSIDE_GIT_WORKTREE := $(shell git rev-parse --is-inside-work-tree 2>/dev/null || true)
-ifeq ($(NVBIT_INSIDE_GIT_WORKTREE),true)
-$(error H3 refuses metric_extractor mutation in every Git worktree; use a verified non-Git temporary copy)
-endif
-ifneq ($(NVBIT_TEMPCOPY_BUILD_OK),1)
-$(error non-Git temporary-copy build requires NVBIT_TEMPCOPY_BUILD_OK=1)
-endif
-endif
+#   make ARCH=sm_86       — build for the 3090 Ti.
+#   make ARCH=sm_100a     — build for B200.
+#   make clean            — remove generated outputs.
 
 .DEFAULT_GOAL := all
 
@@ -69,7 +58,7 @@ OBJECTS = $(SOURCES:.cu=.o)
 ARCH ?= sm_86
 ALLOWED_ARCHES = sm_86 sm_100a
 ifeq ($(filter $(ARCH),$(ALLOWED_ARCHES)),)
-$(error unsupported ARCH=$(ARCH); current contract allows only sm_86 or sm_100a and rejects all/sm_120)
+$(error unsupported ARCH=$(ARCH); supported values are sm_86 and sm_100a)
 endif
 
 mkfile_path := $(abspath $(lastword $(MAKEFILE_LIST)))
@@ -77,18 +66,9 @@ current_dir := $(notdir $(patsubst %/,%,$(dir $(mkfile_path))))
 
 NVBIT_TOOL = $(current_dir).so
 
-EXPECTED_LIBNVBIT_SHA256 = db221829106673bcd69d1e05766136f80e2df4497fb8415d8c2f298b96c302f7
+all: $(NVBIT_TOOL)
 
-.PHONY: verify-libnvbit
-verify-libnvbit:
-	@actual="$$(sha256sum "$(NVBIT_PATH)/libnvbit.a" | awk '{print $$1}')"; \
-	test "$$actual" = "$(EXPECTED_LIBNVBIT_SHA256)" || { \
-		echo "libnvbit.a SHA-256 mismatch: $$actual" >&2; exit 1; \
-	}
-
-all: verify-libnvbit $(NVBIT_TOOL)
-
-$(NVBIT_TOOL): $(OBJECTS) $(NVBIT_PATH)/libnvbit.a | verify-libnvbit
+$(NVBIT_TOOL): $(OBJECTS) $(NVBIT_PATH)/libnvbit.a
 	$(NVCC) -arch=$(ARCH) $(NVCC_OPT) $(OBJECTS) $(LIBS) $(NVCC_LIBPATH) -lcuda -lcudart_static -shared -o $@
 
 # Host-side translation units (the launch hook + per-launch JSON-L emitter

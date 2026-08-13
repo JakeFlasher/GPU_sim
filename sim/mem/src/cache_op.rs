@@ -42,7 +42,7 @@ pub enum CacheOpToken {
 }
 
 /// Port of `derive_l1_eligible`: `true` iff the token stages into the
-/// modeled L1 on architectures whose cache policy is carded (the reviewed
+/// modeled L1 on architectures whose cache policy is carded (the implemented
 /// active path is sm_86; template architectures remain capability-gated).
 pub fn derive_l1_eligible(token: CacheOpToken) -> bool {
     matches!(
@@ -81,7 +81,7 @@ pub fn opcode_head(opcode_text: &str) -> &str {
 
 /// Classify one sidecar `opcode_text` line with a typed deployment
 /// architecture.  Checked consumers receive a research-gap error when a
-/// bare `LDG.E` requires an unreviewed per-architecture default.
+/// bare `LDG.E` requires an architecture-specific default that is unavailable.
 pub fn classify_opcode_for_arch(
     opcode_text: &str,
     arch: ArchId,

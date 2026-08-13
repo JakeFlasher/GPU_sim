@@ -111,7 +111,7 @@ PB_LIB=${PB_LIB:-$repo_root/.toolchain/pb/lib}
 
 if [[ ! -x "$TRACE_PRINTER" ]]; then
     echo "verify_lcd_nvbit_trace.sh: trace_printer not executable: $TRACE_PRINTER" >&2
-    echo "  trace_printer is an ignored host-local artifact, not a tracked file; recover a byte-preserved local copy or set TRACE_PRINTER to a separately verified non-Git temporary-copy artifact; canonical rebuild is forbidden while H3 holds" >&2
+    echo "  build it with: make -C tools/nvbit_tracer" >&2
     exit 2
 fi
 if [[ ! -d "$PB_LIB" ]]; then

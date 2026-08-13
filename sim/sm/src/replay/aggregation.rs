@@ -92,8 +92,8 @@ impl ReplayLaunchCoverageBinding {
     }
 }
 
-/// Canonical launch-set scope token. Scope is identity only; it conveys no
-/// reviewer, campaign, hardware, or scientific authority.
+/// Canonical launch-set scope token. Scope is a label only; it conveys no
+/// scientific claim.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct LaunchSetScope(String);
 
@@ -908,7 +908,7 @@ mod tests {
         L1Config, L1Counters, L2Config, L2Counters, L2Replacement, MemoryOrigin, SliceHash,
     };
 
-    use crate::issue::{IssueModelParams, IssueResourceLane, TailFlags};
+    use crate::issue::{IssueModelParams, IssueResourceSource, TailFlags};
     use crate::system::DramBw;
 
     use super::*;
@@ -917,7 +917,7 @@ mod tests {
     fn params(arch: ArchId) -> IssueModelParams {
         IssueModelParams {
             arch,
-            resource_lane: IssueResourceLane::SyntheticTestFixture,
+            resource_source: IssueResourceSource::SyntheticTestFixture,
             l1_hit_latency: 2,
             l1_miss_latency: 20,
             global_flat_latency: 100,

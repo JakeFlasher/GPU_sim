@@ -1,4 +1,15 @@
-# Track A — Cross-Arch Issue Ledger (bidirectional: sm_86-blocked + sm_120-blocked)
+# Retired cross-architecture campaign ledger
+
+> **Historical, opt-in SOL/campaign material.** The observations, commands, and
+> device-specific gaps below remain useful when a user explicitly invokes the
+> `run-sol-campaign` skill. Every blocked state, loop round, acceptance gate,
+> review requirement, pin, and handoff rule in this file is retired. Nothing in
+> this ledger pauses current simulator work or requires `.humanize`, RLCR,
+> external review, hashes, or a particular Git state. Root `AGENTS.md` controls.
+
+## Historical body
+
+### Track A — Cross-Arch Issue Ledger (bidirectional: sm_86-blocked + sm_120-blocked)
 
 This ledger records every cross-arch-blocked item that is in flight
 or carried over into the current cross-arch development loop. The

@@ -1,0 +1,26 @@
+[package]
+name = "sim-run"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lib]
+name = "sim_direct_run"
+path = "src/lib.rs"
+
+[[bin]]
+name = "sim-run"
+path = "src/main.rs"
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+sim-arch = { path = "../arch" }
+sim-mem = { path = "../mem" }
+sim-sm = { path = "../sm" }
+sim-trace = { path = "../trace" }
+thiserror = { workspace = true }
+
+[lints]
+workspace = true

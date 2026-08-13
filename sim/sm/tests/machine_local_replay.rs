@@ -4,9 +4,7 @@
 //! with the sim-mem L1 attached (cache-op roles come from the sidecar's
 //! own opcode text; geometry from the committed pchase static card).
 //!
-//! The M1 evidence is gitignored machine-local data, so inputs come from
-//! the environment (Rule-1 guard: no annex/label path literals inside
-//! sim/):
+//! Captures are machine-local data, so inputs come from the environment:
 //!
 //! ```sh
 //! SIM_TRACE_SMOKE_DIR=<trace_<shape> dir> \
@@ -17,20 +15,17 @@
 //!
 //! The control-bits sidecar is located from the trace's own metadata (the
 //! exec info's `benchmark_name` minus a trailing `_run` +
-//! `.control_bits.json`). The ordinary workspace suite ignores this test; the
-//! authoritative hardware gate supplies both environment values and executes it
-//! nonvacuously. The raw path returns explicitly unadmitted diagnostics and cannot
-//! construct a launch-set aggregate or certified emission. Missing values on a
-//! direct ignored-test invocation fail.
+//! `.control_bits.json`). The ordinary workspace suite ignores this test because
+//! its input is host-specific. A direct invocation fails clearly if either path
+//! is missing.
 
 use std::path::{Path, PathBuf};
 
-use sim_arch::BuildArch;
 use sim_arch::card::ArchCard;
 use sim_mem::{L2Config, PchaseCard};
 use sim_sm::{
-    CoResidency, ControlSidecar, IssueModelParams, ReplayConfiguration, ReplayMemMode,
-    UnadmittedCoverage, build_schedules, replay_unadmitted_diagnostics,
+    CoResidency, ControlSidecar, IssueModelParams, KernelReplayOutcome, ReplayConfiguration,
+    ReplayMemMode, build_schedules, replay_trace_kernel,
 };
 use sim_trace::{ExecInfo, TraceDir};
 
@@ -156,25 +151,22 @@ fn serialized_replay_configuration_marks_co_residency_modeled() {
 }
 
 #[test]
-#[ignore = "requires machine-local M1 evidence; run tools/dev/hw_evidence_gate.sh"]
+#[ignore = "requires SIM_TRACE_SMOKE_DIR and SIM_CONTROL_BITS_DIR"]
 fn real_trace_replays_under_issue_model() {
     let trace_dir = std::env::var("SIM_TRACE_SMOKE_DIR")
-        .expect("SIM_TRACE_SMOKE_DIR must be set by tools/dev/hw_evidence_gate.sh");
+        .expect("SIM_TRACE_SMOKE_DIR must point to a captured trace");
     let cb_dir = std::env::var("SIM_CONTROL_BITS_DIR")
-        .expect("SIM_CONTROL_BITS_DIR must be set by tools/dev/hw_evidence_gate.sh");
-    let td = TraceDir::open(&trace_dir).expect("open trace dir");
+        .expect("SIM_CONTROL_BITS_DIR must point to control-bit sidecars");
+    let td = TraceDir::open_direct(&trace_dir).expect("open trace dir");
     let exec = ExecInfo::load_from_trace_dir(td.root()).expect("exec info loads");
     let card = sm86_card();
-    let identity = card
-        .identity(BuildArch::Sm86)
-        .expect("sm_86 card identity resolves");
+    let arch = card.arch_id().expect("sm_86 architecture resolves");
     let stem = exec
         .benchmark_name
         .strip_suffix("_run")
         .unwrap_or(&exec.benchmark_name);
     let sidecar_path = Path::new(&cb_dir).join(format!("{stem}.control_bits.json"));
-    let sidecar =
-        ControlSidecar::load_for_arch(&sidecar_path, identity.deploy()).expect("sidecar loads");
+    let sidecar = ControlSidecar::load_for_arch(&sidecar_path, arch).expect("sidecar loads");
 
     let schedules = build_schedules(&exec, &sidecar).expect("(function, pc) join");
 
@@ -182,11 +174,7 @@ fn real_trace_replays_under_issue_model() {
         .required_latencies()
         .expect("sm_86 card has no latency gaps");
     let params = IssueModelParams::from_legacy_card_latencies_for_arch(
-        identity.deploy(),
-        lat.l1_hit,
-        lat.l2_hit,
-        lat.dram,
-        lat.shared,
+        arch, lat.l1_hit, lat.l2_hit, lat.dram, lat.shared,
     )
     .expect("sm_86 issue parameters resolve");
 
@@ -205,9 +193,9 @@ fn real_trace_replays_under_issue_model() {
         ReplayMemMode::Flat
     } else {
         let pchase = sm86_pchase_card();
-        assert_eq!(pchase.arch(), identity.deploy());
+        assert_eq!(pchase.arch(), arch);
         let geometry = pchase
-            .resolve_walk_geometry_for_arch(identity.deploy(), None)
+            .resolve_walk_geometry_for_arch(arch, None)
             .expect("pchase geometry resolves");
         let l1 = params.l1_config(geometry.capacity.line_capacity, geometry.mshr.count);
         if std::env::var("SIM_L2_DISABLE").is_ok() {
@@ -217,7 +205,7 @@ fn real_trace_replays_under_issue_model() {
                 .require_l2_geometry()
                 .expect("sm_86 card l2_geometry present");
             let l2 = L2Config::from_carded_geometry_for_arch(
-                identity.deploy(),
+                arch,
                 g.capacity_bytes,
                 g.line_bytes,
                 g.sector_bytes,
@@ -230,15 +218,13 @@ fn real_trace_replays_under_issue_model() {
             // cannot run the full hierarchy). SIM_DRAM_BW_DISABLE=1 is
             // the latency-only ablation (the pre-covariate model).
             let dram = if std::env::var("SIM_DRAM_BW_DISABLE").is_ok() {
-                sim_sm::DramBw::Unmodeled {
-                    arch: identity.deploy(),
-                }
+                sim_sm::DramBw::Unmodeled { arch }
             } else {
                 let bw = card
                     .require_dram_bandwidth()
                     .expect("sm_86 card dram_bandwidth present");
                 sim_sm::DramBw::Carded {
-                    arch: identity.deploy(),
+                    arch,
                     bytes_per_sec: bw
                         .validated_peak_bytes_per_second()
                         .expect("carded peak rate valid"),
@@ -257,38 +243,27 @@ fn real_trace_replays_under_issue_model() {
     let mut diagnostic_last_issue_cycles = 0_u64;
     let mut sms = 0usize;
     for loc in td.kernels() {
-        let replay = replay_unadmitted_diagnostics(&td, &loc, &schedules, &card, &params, mode)
-            .expect("diagnostic replay");
-        assert_eq!(
-            replay.coverage(),
-            UnadmittedCoverage::Full,
-            "machine-local full replay must not receive sampled coverage {}/{}",
-            replay.blocks_observed(),
-            replay.population_blocks(),
-        );
-        assert_eq!(
-            replay.arch(),
-            identity.deploy(),
-            "every launch diagnostic must retain the composition architecture"
-        );
+        let outcome = replay_trace_kernel(&td, &loc, &schedules, &card, &params, mode)
+            .expect("direct replay");
+        let replay = match outcome {
+            KernelReplayOutcome::Full(replay) => replay,
+            #[cfg(feature = "campaign")]
+            KernelReplayOutcome::SampledObserved(_) => {
+                panic!("complete machine-local trace unexpectedly produced sampled replay")
+            }
+        };
+        assert_eq!(replay.arch(), arch);
         assert_eq!(replay.configuration(), configuration);
         kernels = kernels.checked_add(1).expect("kernel count fits usize");
         records = records
             .checked_add(replay.records_seen())
-            .expect("diagnostic record total fits u64");
+            .expect("record total fits u64");
         issued = issued
             .checked_add(replay.instructions_issued())
-            .expect("diagnostic issue total fits u64");
-        diagnostic_last_issue_cycles = diagnostic_last_issue_cycles.max(
-            replay
-                .diagnostic_last_issue_cycles()
-                .expect("full diagnostics retain the issue frontier"),
-        );
-        sms = sms.max(
-            replay
-                .per_sm_count()
-                .expect("full diagnostics retain the SM count"),
-        );
+            .expect("issue total fits u64");
+        diagnostic_last_issue_cycles =
+            diagnostic_last_issue_cycles.max(replay.diagnostic_last_issue_cycles());
+        sms = sms.max(replay.per_sm().len());
         assert_eq!(replay.instructions_issued(), replay.records_seen());
 
         if let Some(c) = replay.l1() {
@@ -338,12 +313,9 @@ fn real_trace_replays_under_issue_model() {
     eprintln!(
         "smoke: replay kernels={kernels} records={records} issued={issued} \
          diagnostic_last_issue_cycles={diagnostic_last_issue_cycles} sms={sms} \
-         provenance=unadmitted_diagnostic"
+         mode=direct_replay"
     );
 
-    // Raw M1 paths are a hardware smoke diagnostic only. They cannot mint a
-    // `FullKernelReplayResult`, launch-set aggregate, or emission bundle; the
-    // public production replay boundary requires `AdmittedLaunchEvidence`.
     assert!(
         kernels > 0
             && issued > 0

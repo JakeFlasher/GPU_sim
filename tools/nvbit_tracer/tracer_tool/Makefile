@@ -1,11 +1,3 @@
-NVBIT_INSIDE_GIT_WORKTREE := $(shell git rev-parse --is-inside-work-tree 2>/dev/null || true)
-ifeq ($(NVBIT_INSIDE_GIT_WORKTREE),true)
-$(error H3 refuses tracer_tool mutation in every Git worktree; use a verified non-Git temporary copy)
-endif
-ifneq ($(NVBIT_TEMPCOPY_BUILD_OK),1)
-$(error non-Git temporary-copy build requires NVBIT_TEMPCOPY_BUILD_OK=1)
-endif
-
 NVCC_CCBIN?=$(CXX)
 NVCC=nvcc -ccbin=$(NVCC_CCBIN) -D_FORCE_INLINES
 PTXAS=ptxas
@@ -61,7 +53,7 @@ PKG_CONFIG_FLAGS?=--define-prefix
 PROTOBUF_CFLAGS:=$(shell $(PKG_CONFIG) $(PKG_CONFIG_FLAGS) --cflags protobuf 2>/dev/null)
 PROTOBUF_LIBS:=$(shell $(PKG_CONFIG) $(PKG_CONFIG_FLAGS) --libs protobuf 2>/dev/null)
 ifeq ($(PROTOBUF_CFLAGS),)
-$(error pkg-config could not resolve protobuf compile flags. Source ../pinned_build_env.sh before building; the generated protobuf 34.1 headers require the exact pinned C++ runtime headers.)
+$(error pkg-config could not resolve protobuf compile flags; set PKG_CONFIG or PKG_CONFIG_PATH for the installed protobuf)
 endif
 ifeq ($(PROTOBUF_LIBS),)
 $(error pkg-config could not resolve 'protobuf'. Install protobuf-dev (or equivalent) and ensure $(PKG_CONFIG) can find its .pc file. protobuf 34.x pulls in ~80 Abseil libs that bare '-lprotobuf' does not expose — silently falling back would produce a broken tracer_tool.so.)

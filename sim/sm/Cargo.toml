@@ -5,6 +5,10 @@ edition.workspace = true
 license.workspace = true
 repository.workspace = true
 
+[features]
+default = []
+campaign = ["sim-trace/campaign"]
+
 [dependencies]
 sim-arch = { path = "../arch" }
 serde = { workspace = true }
@@ -17,6 +21,11 @@ thiserror = { workspace = true }
 [dev-dependencies]
 prost = { workspace = true }
 tempfile = { workspace = true }
+
+[[test]]
+name = "launch_evidence"
+path = "tests/launch_evidence.rs"
+required-features = ["campaign"]
 
 [lints]
 workspace = true

@@ -1,5 +1,11 @@
 # Sweep Runbook (`sweep_repeatability_matrix.py`)
 
+> **Retained campaign runbook.** Use this only for an explicitly requested
+> historical campaign. Its old binding rules, source pins, acceptance gates,
+> `.humanize` handoffs, and artifact-preservation instructions are not current
+> agent policy. For a new direct capture, prefer `collect_ncu.py` and
+> `docs/runbook_host.md`.
+
 This runbook documents the operator workflow for running the
 parameterized NCU repeatability sweep harness on local hardware
 (RTX 3090 Ti sm_86, RTX 5060 laptop sm_120) and admitting cells into
@@ -19,10 +25,8 @@ the documented command shape lights up the integration test.
 
 ## Source of Truth (read this BEFORE Step 1)
 
-This runbook follows the hybrid source-of-truth +
-verification-target pattern documented in
-`BL-20260504-runbook-self-reference`
-(see `docs/lessons.md`):
+This historical runbook used a hybrid source-of-truth and verification-target
+pattern:
 
 - **Source of truth**: the runbook procedure is read from the
   working branch's HEAD (`5060_dev` HEAD), NOT from a pinned
@@ -47,21 +51,15 @@ pinning a target SHA in a runbook that lives at that same SHA
 produces a self-referential staleness trap. The BitLesson cited
 above records the trap and the fix.
 
-## Critical Rules (binding)
+## Historical campaign settings
 
-- All NCU invocation MUST flow through `tools/local_labels/label_driver.sh`,
-  which writes only into `data/local_labels/`. Per CLAUDE.md
-  Critical Rule 1, the local-label exception bounds NCU artifacts to
-  this quarantine.
+- This sweep invokes NCU through `tools/local_labels/label_driver.sh`, which
+  writes its campaign-format artifacts into `data/local_labels/`.
 - The harness's only output prefix is `data/local_labels/sweeps/`.
   An `--out-root` outside this sub-prefix is rejected at parse time.
-- The `cache_control` axis maps to NCU's read-only
-  `--cache-control all|none` flag. NEVER use `nvidia-smi` to lock
-  clocks, change persistence, power, MIG, or compute mode (CLAUDE.md
-  Critical Rule 2).
-- The `stddev_threshold = 0.03` admission gate in
-  `repeatability_aggregator.py` MUST NOT be loosened. The
-  source-text scanner asserts the literal `0.03` survives.
+- The `cache_control` axis maps to NCU's `--cache-control all|none` flag.
+- The historical default `stddev_threshold` is 0.03. Change experimental
+  thresholds deliberately and report the chosen value.
 
 ## Command syntax
 
@@ -483,14 +481,10 @@ authority:
 
 ### Cross-host transfer
 
-Per CLAUDE.md "Session Handoff" + project `HANDOFF.md`:
+For a cross-host campaign transfer:
 
-- Either `git push` then `git pull` on the 5060 laptop (preferred:
-  preserves immutable history; `.humanize/` and other gitignored
-  loop state will be missing on the receiving end), OR
-- raw `scp -r` (preserves `.humanize/` loop state and built
-  binaries; raw transfer carries stale host artifacts that MUST
-  be rebuilt).
+- Either transfer source with Git, or copy the needed experiment inputs and
+  outputs directly. Rebuild host-specific binaries on the receiving machine.
 
 Tracked artifacts that survive both transports: the 5 sm_86
 admitted cells in `data/local_labels/label_admitted.json`, all
@@ -513,19 +507,14 @@ Laptop GPU` or equivalent). If the output reports compute capability
 
 ### Host-transition artifact handling while Task7/H3 is open
 
-Per CLAUDE.md "Session Handoff" + `HANDOFF.md`'s "Verify CUDA /
-NVBit / NVML environment + rebuild any built artifacts" section:
+After moving to another host, verify CUDA/NVBit/NVML availability and rebuild
+host-specific artifacts:
 
 - Per-slug binaries under `workloads/simbench_bw/l1/<slug>/<slug>`
   and `workloads/portable_lcd/<slug>/<slug>_run`.
-- The NVBit tracer (`tools/nvbit_tracer/tracer_tool/tracer_tool.so`) is a
-  preserved artifact. Verify or byte-exactly restore its pinned bytes; do not
-  rebuild, clean, replace, or repin it in the canonical checkout.
-- Provision an absent exact protobuf prefix only with
-  `bash tools/nvbit_tracer/pinned_build_env.sh --ensure`, then source
-  `tools/nvbit_tracer/pinned_build_env.sh` for verify/export-only behavior.
-  If a build feasibility check is required, use a non-Git temporary copy with
-  `NVBIT_TEMPCOPY_BUILD_OK=1`; never use that sentinel in a Git worktree.
+- Rebuild the NVBit tracer with its Makefile for the current CUDA toolchain.
+- `tools/nvbit_tracer/pinned_build_env.sh` remains a compatibility helper for
+  old campaign invocations; ordinary builds may set tool paths directly.
 
 ### sm_120 candidate cell set
 

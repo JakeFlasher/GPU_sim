@@ -72,13 +72,9 @@ Owns the cross-architecture CUDA performance surface. 7 cuda/ cards + 3 best-pra
   `tools/local_labels/`, and the owner runbook; the historical
   `validating-nonroot-gpu-measurement` skill is not an operational authority.
 
-## Hard rules
+## Scientific boundary
 
 For scored cells, NCU values are prediction targets/labels, never simulator
 features. Follow the current root `CLAUDE.md`, active schemas, and owner runbook
-for capture and replay state; the former pinned v2.1 command wording is retained
-only as historical technical context, not as an instruction.
-
-## Cite consulted files
-
-End every reply with `## Knowledge Consulted`.
+for capture and replay state; the historical v2.1 settings are relevant only
+when reproducing that dataset.

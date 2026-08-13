@@ -809,7 +809,7 @@ fn split_v2_rejects_reversed_and_permuted_capability_vectors() {
         let temp = tempfile::tempdir().unwrap();
         let root = temp.path().join("trace");
         write_case(&root, mutation);
-        let error = TraceDir::open(&root)
+        let error = TraceDir::open_direct(&root)
             .err()
             .expect("reordered split-v2 vector must fail closed");
         match error {
@@ -834,7 +834,7 @@ fn rust_wire_admission_matches_shared_typed_outcomes() {
         let temp = tempfile::tempdir().unwrap();
         let root = temp.path().join("trace");
         write_case(&root, &case.mutation);
-        let actual = match TraceDir::open(&root) {
+        let actual = match TraceDir::open_direct(&root) {
             Ok(_) => None,
             Err(error) => Some(
                 error

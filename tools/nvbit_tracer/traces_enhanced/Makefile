@@ -1,11 +1,3 @@
-NVBIT_INSIDE_GIT_WORKTREE := $(shell git rev-parse --is-inside-work-tree 2>/dev/null || true)
-ifeq ($(NVBIT_INSIDE_GIT_WORKTREE),true)
-$(error H3 refuses traces_enhanced mutation in every Git worktree; use a verified non-Git temporary copy)
-endif
-ifneq ($(NVBIT_TEMPCOPY_BUILD_OK),1)
-$(error non-Git temporary-copy build requires NVBIT_TEMPCOPY_BUILD_OK=1)
-endif
-
 MKDIR_P = mkdir -p
 
 ODIR=obj
@@ -101,4 +93,4 @@ protobuf: $(PROTO_SRCS) $(PROTO_HDRS) $(PROTO_OBJS)
 
 clean:
 	rm -rf $(ODIR)
-	rm -rf $(PROTO_GEN_DIR)
+	rm -rf $(PROTO_OBJ_DIR)

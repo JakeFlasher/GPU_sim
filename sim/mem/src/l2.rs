@@ -31,9 +31,9 @@
 //! here. The sim's geometry comes from the arch card's vendor-documented
 //! `l2_geometry` (capacity, line/sector, slice count); associativity,
 //! slice hash and replacement policy resolve through the deployment
-//! architecture's reviewed `sim-arch` capability. These remain documented
-//! hypotheses to be closed by microbenchmarks—never by label fits—and an
-//! unreviewed architecture receives a typed capability error.
+//! architecture's `sim-arch` capability. These remain documented hypotheses
+//! to be tested by microbenchmarks—never by same-cell label fits—and an
+//! architecture without a model receives a typed capability error.
 //!
 //! Fill timing: the immediate API remains an occupancy-only Python-parity
 //! surface. A separate event discipline tracks pending sectors and makes them
@@ -128,7 +128,7 @@ impl SliceHash {
     }
 }
 
-/// Replacement policy. LRU is the sm_86 reviewed approximation selected
+/// Replacement policy. LRU is the sm_86 approximation selected
 /// through `sim-arch`; SRRIP/BIP are ported so the lockstep differential covers
 /// the full Python surface and a future carded policy can flip the knob without
 /// a re-port.
@@ -152,7 +152,7 @@ pub enum L2ConfigError {
     #[error("capacity {capacity} is below the {line}B line size")]
     CapacityBelowLine { capacity: u64, line: u32 },
     #[error(
-        "line/sector geometry must match the reviewed {expected_line}/{expected_sector} layout \
+        "line/sector geometry must match the configured {expected_line}/{expected_sector} layout \
          (got line={line}, sector={sector})"
     )]
     UnsupportedGranularity {
@@ -231,7 +231,7 @@ pub const L2_WRITE_ALLOCATE_POLICY: &str = "write_allocate_non_inclusive";
 /// so the documented-default provenance is explicit at the call site.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct L2Config {
-    /// Deployment architecture whose reviewed defaults/geometry this config carries.
+    /// Deployment architecture whose defaults/geometry this config carries.
     pub arch: ArchId,
     pub capacity_bytes: u64,
     pub line_bytes: u32,
@@ -243,7 +243,7 @@ pub struct L2Config {
 }
 
 impl L2Config {
-    /// Typed architecture entry point.  Reviewed defaults are obtained from
+    /// Typed architecture entry point. Architecture defaults are obtained from
     /// the shared capability vocabulary; an sm_120 research gap cannot reach
     /// the model as an sm_86 configuration.
     pub fn from_carded_geometry_for_arch(
@@ -2677,8 +2677,8 @@ mod tests {
         ));
     }
 
-    /// Fail-closed gates on the carded constructor: an arch that never
-    /// reviewed the documented defaults, and a card whose write policy
+    /// Input validation on the carded constructor: an architecture without
+    /// documented defaults, and a card whose write policy
     /// is a gap (sm_120-laptop ships `policy: null`) or an unknown
     /// token, must all be typed errors — the store path write-allocates
     /// and must never assume it.

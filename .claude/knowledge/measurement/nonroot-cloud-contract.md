@@ -1,87 +1,49 @@
----
-Use when: deciding what a measurement run must record under the pinned NCU protocol (CLAUDE.md Rule 2); setting up root capabilities (clock lock, persistence, counter permissions) on a new host; diagnosing `ERR_NVGPUCTRPERM` / `CUPTI_ERROR_INSUFFICIENT_PRIVILEGES` on a freshly provisioned cloud instance; understanding what the retired non-root contract was and why pre-2026-07 artifacts look the way they do.
-Primary raw source: `CLAUDE.md` Rules 1-4 (re-founded 2026-07-02) and `plans/micro2027_ncu_sim_execution_plan.md` §1A/§7.
-Supporting sources:
-- NVIDIA `ERR_NVGPUCTRPERM` page: https://developer.nvidia.com/ERR_NVGPUCTRPERM
-- NVIDIA CUPTI permission page: https://developer.nvidia.com/nvidia-development-tools-solutions-err-nvgpuctrperm-cupti
-- `eval/guards/test_targets_not_features_guard.py` - the surviving Rule-1 static guard.
-Repo touchpoints:
-- `tools/local_labels/` - the NCU label factory (capture -> repeatability gate -> admit).
-- `tools/nvbit_tracer/` - SASS/address tracing (the simulator's input).
-- `tools/cloud/` - provisioning/preflight skeleton, repurposed for GB202 bring-up.
-Out of scope: the retired quarantine rules themselves (do not re-apply them).
-Version family: CUDA 13.x, NCU 2026.1.0 pinned; RTX 3090 Ti sm_86 (dev host), RTX 5060 laptop GB206 + cloud RTX PRO 6000 GB202 (sm_120 targets).
----
+# GPU measurement capabilities
 
-# GPU Measurement Contract (post-2026-07-02 re-founding)
+Use this card when bringing up measurement on a new host or interpreting older
+non-root captures. The former repository-wide non-root and no-NCU restrictions
+are retired.
 
-The old non-root/counter-less deployment thesis is **retired**. NCU is a
-first-class ground-truth instrument on every target (local and cloud), root
-operations are allowed and preferred, and the one surviving prohibition is
-Rule 1: **targets-not-features** - NCU/counter values never enter simulator
-inputs, trace features, or calibration constants fitted on the cells being
-scored. Enforced by `eval/guards/test_targets_not_features_guard.py`.
+## Current approach
 
-## The pinned capture protocol (Rule 2)
+Use the tools available on the selected host:
 
-Every NCU capture records, and label admission REQUIRES:
+- NCU for hardware-counter ground truth;
+- CUDA events and CUPTI Activity for elapsed-time observations;
+- NVBit for dynamic SASS/address traces;
+- NVML or `nvidia-smi` for useful clock, power, and thermal context;
+- `cuobjdump`, `nvdisasm`, and `ptxas` for static inspection; and
+- authorized administrative commands when host configuration needs them.
 
-| Pin | Detail |
-|---|---|
-| NCU version | 2026.1.0 on the 3090 Ti host; upgrades are deliberate, recorded protocol bumps |
-| `--clock-control` | Explicit, never default (the default changed `base`->`boost` in NCU 2026.1) |
-| `--cache-control` | Explicit (labels default `all`; the simulator emits cold-cache parity) |
-| `--replay-mode` | Explicit |
-| Driver + CUDA toolkit | e.g. 610.43.02 / CUDA 13.2 (legacy sweeps were 595.71.05 - record the drift) |
-| Clock-lock state | `nvidia-smi -lgc` (+`-lmc` where supported), persistence mode |
-| NVML sidecar | clocks/power/temp/throttle time-series per launch |
+NCU measurements are validation targets. Do not feed a scored workload's
+measured counters into simulator features or tune per-workload constants to
+that same cell.
 
-Root state changes (clock locks, persistence, counter permissions) must be
-recorded in the run sidecar.
+## Host capability troubleshooting
 
-## Tool-combination rules (still binding - interposition, not policy)
+`ERR_NVGPUCTRPERM` or `CUPTI_ERROR_INSUFFICIENT_PRIVILEGES` means the requested
+counter surface is unavailable to the current process. Depending on the host,
+run with appropriate privileges or configure NVIDIA profiling permissions.
+This is a host setup issue; it does not disable other tools or freeze the
+project.
 
-- NVBit uses CUDA driver interposition: **never co-run NVBit with NCU** in the
-  same process. Trace runs and NCU label runs are separate, identically
-  configured runs joined offline by kernel identity + launch index + static
-  signature.
-- Nsight Systems may run in separate runs; do not attach it to an NVBit process.
+Clock locks and persistence mode may reduce variance when supported. On mobile
+or thermally constrained systems, a requested lock can behave as a ceiling, so
+observe actual clocks and temperature. Repeat short or noisy kernels and report
+their dispersion.
 
-## New-host / cloud-instance bring-up (GB202 checklist seed)
+## Tool interaction
 
-1. Counter access: run as root, or set `NVreg_RestrictProfilingToAdminUsers=0`
-   (module reload), or grant CAP_SYS_ADMIN / the R610 capabilities path.
-   Symptoms of missing setup: `ERR_NVGPUCTRPERM` (NCU),
-   `CUPTI_ERROR_INSUFFICIENT_PRIVILEGES` (CUPTI).
-2. `nvidia-smi -pm 1`; verify `-lgc <ref>` sticks. On laptops a lock can act as
-   a *limit* under thermal pressure - keep nvbench-style noise gates (≥10
-   samples, 0.5% rel-stddev stop, kernels ≥20 µs where possible).
-3. Rebuild all compiled artifacts on-host (`tracer_tool.so`, metric_extractor);
-   binaries never transfer (CLAUDE.md session-handoff rule).
-4. Record the full Rule-2 pin set in a first sidecar before any capture at
-   scale. `tools/cloud/preflight.sh` is the probe skeleton to extend (its
-   non-root gating is obsolete; its structure is reusable).
+Run NCU and NVBit in separate matched processes. Both alter execution through
+replay or interposition, and combining them can invalidate the result. Nsight
+Systems is also easiest to interpret in its own run.
 
-## Reading legacy-era artifacts
+## Historical captures
 
-Artifacts produced before 2026-07-02 (sweeps, closures, the sm_120 refutations)
-were captured under the old contract: no clock locking, CUPTI dual-source
-timing, NCU quarantined to `tools/local_labels/`. Their DVFS spread (15.34x on
-the laptop) and `cross_arch_precondition: false` pins are era artifacts, not
-current constraints. The tri-state relax (2026-07-06) lets new closures carry
-`true`/`"pending"` without invalidating frozen historical records.
+Pre-July-2026 datasets include non-root, counter-free, and fixed-regime
+experiments. Their restrictions describe how those bytes were produced, not
+what current research may do. See `pinned-protocol-v21.md` when reproducing the
+specific RTX 3090 Ti v2.1 regime.
 
-## See Also
-
-- `.claude/knowledge/measurement/cupti-activity-api.md` (CUPTI Activity is now
-  corroboration, not the timing label - D8 retired dual-source as ground truth)
-- `.claude/knowledge/measurement/nvbit-injection-playbook.md`
-- `.claude/knowledge/measurement/clock64-globaltimer-dvfs.md`
-- `plans/micro2027_ncu_sim_execution_plan.md` §1A (capture protocol v2), §7 (M0 gate)
-
-## Escalate to Raw When
-
-- A new NCU release changes replay/clock-control semantics (re-pin deliberately).
-- A cloud deployment mode changes NVBit injection, MPS, MIG, vGPU, or
-  confidential-computing behavior.
-- A new CUDA release changes CUPTI availability or NVBit compatibility.
+Current direct entry points are `docs/runbook_host.md`,
+`tools/local_labels/collect_ncu.py`, and `tools/nvbit_tracer/README.md`.

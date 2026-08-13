@@ -2,8 +2,8 @@
 """
 lint_cards.py — Enforce SOL-ExecBench KB card schema and content rules.
 
-Walks `.claude/knowledge/**/*.md` (excluding files whose names start with
-`_`, which are templates/scaffolding), parses YAML-ish frontmatter using
+Walks the SOL authoring subcorpora under `.claude/knowledge/` (excluding files
+whose names start with `_`, which are templates/scaffolding), parses YAML-ish frontmatter using
 the same logic as `build_manifest.py`, and runs three rule classes plus
 several schema checks. Designed to run as a precondition to manifest
 build so cards never enter the FTS5 index in a broken state.
@@ -101,6 +101,12 @@ LATENCY_AUTHORITY_VALUES = {"paper", "leaderboard", "local-checkout"}
 # `cutlass_constructs/` (which carry concrete implementation guidance
 # requiring the same discipline).
 PATTERN_PROBLEM_SUBCORPORA = {"patterns", "problems", "cutlass_constructs"}
+SOL_AUTHORING_SUBCORPORA = {
+    "cutlass_constructs",
+    "patterns",
+    "problems",
+    "sources",
+}
 
 # ---------------------------------------------------------------------------
 # Forbidden-surface clause detection.
@@ -531,7 +537,10 @@ def _check_primary_raw_source_path(
                 f"rule); got `{candidate}`"
             )
             return
-    target = repo_root / candidate
+    active_candidate = _active_repo_candidate(candidate)
+    if _is_optional_external_path(active_candidate):
+        return
+    target = repo_root / active_candidate
     # Accept either a file or a directory citation — `sources/` cards
     # sometimes cite a directory (the entire crawled subtree) as their
     # primary upstream reference.
@@ -554,10 +563,10 @@ def _check_primary_raw_source_path(
 # ---------------------------------------------------------------------------
 
 _REPO_RELATIVE_PREFIXES = (
-    "cutlass/",
+    "third_party/cutlass/",
     "references/",
-    "sol-execbench/",
-    "SOLAR/",
+    "tools/sol_execbench/",
+    "workloads/sol_execbench_baselines/",
     "scripts/",
     ".claude/",
     "plans/",
@@ -565,10 +574,36 @@ _REPO_RELATIVE_PREFIXES = (
 )
 
 _BASELINE_FUTURE_PATH_RE = re.compile(
-    r"^baselines/(?:L1|L2|Quant|FIB)/[A-Za-z0-9_]+/",
+    r"^workloads/sol_execbench_baselines/"
+    r"(?:L1|L2|Quant|FIB)/[A-Za-z0-9_]+/"
+    r"(?:cutlass|cuda_cpp)(?:/|$)",
 )
 
-_REPO_ROOT_FILES = ("AVO.pdf", "SOL-Execbench.pdf", "CLAUDE.md")
+_REPO_ROOT_FILES = ("CLAUDE.md",)
+_OPTIONAL_EXTERNAL_PREFIXES = ("SOLAR/",)
+
+
+def _active_repo_candidate(candidate: str) -> str:
+    """Resolve path spellings retained from the pre-rebase SOL checkout."""
+    exact = {
+        "AVO.pdf": "references/papers/AVO.pdf",
+        "SOL-Execbench.pdf": "references/papers/SOL-Execbench.pdf",
+    }
+    if candidate in exact:
+        return exact[candidate]
+    prefixes = (
+        ("cutlass/", "third_party/cutlass/"),
+        ("sol-execbench/", "tools/sol_execbench/"),
+        ("baselines/", "workloads/sol_execbench_baselines/"),
+    )
+    for old, new in prefixes:
+        if candidate.startswith(old):
+            return new + candidate[len(old):]
+    return candidate
+
+
+def _is_optional_external_path(candidate: str) -> bool:
+    return any(candidate.startswith(prefix) for prefix in _OPTIONAL_EXTERNAL_PREFIXES)
 
 
 def _is_documented_future_baseline_path(candidate: str) -> bool:
@@ -593,8 +628,7 @@ def _looks_repo_relative(candidate: str) -> bool:
         return False
     if candidate in _REPO_ROOT_FILES:
         return True
-    return any(candidate.startswith(p) for p in _REPO_RELATIVE_PREFIXES) or \
-        candidate.startswith("baselines/")
+    return any(candidate.startswith(p) for p in _REPO_RELATIVE_PREFIXES)
 
 
 def _check_supporting_and_touchpoints_paths(
@@ -615,11 +649,14 @@ def _check_supporting_and_touchpoints_paths(
             cand = raw_item.strip().strip("`").strip()
             if not cand:
                 continue
-            if not _looks_repo_relative(cand):
+            active_candidate = _active_repo_candidate(cand)
+            if _is_optional_external_path(active_candidate):
                 continue
-            if _is_documented_future_baseline_path(cand):
+            if not _looks_repo_relative(active_candidate):
                 continue
-            target = repo_root / cand
+            if _is_documented_future_baseline_path(active_candidate):
+                continue
+            target = repo_root / active_candidate
             if not (target.is_file() or target.is_dir()):
                 errors.append(
                     f"{card.rel}: `{field}` item `{cand}` does not "
@@ -664,7 +701,9 @@ def _load_cards(knowledge_root: Path, repo_root: Path) -> list[Card]:
         # Skip template stubs (names starting with `_`).
         if md_path.name.startswith("_"):
             continue
-        cards.append(Card(md_path, repo_root))
+        card = Card(md_path, repo_root)
+        if card.subcorpus in SOL_AUTHORING_SUBCORPORA:
+            cards.append(card)
     return cards
 
 

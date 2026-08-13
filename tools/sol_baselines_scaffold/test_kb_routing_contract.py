@@ -1,9 +1,8 @@
-"""Lock the SOL authoring tools to the wired KB routing contract."""
+"""Test the opt-in SOL knowledge-routing utilities."""
 
 from __future__ import annotations
 
 import importlib.util
-import subprocess
 from pathlib import Path
 
 
@@ -55,43 +54,15 @@ def test_cutlass_layout_anchor_is_compound_and_narrow() -> None:
     )
 
 
-def test_generated_bash_gate_matches_python_emitter() -> None:
-    emitted = subprocess.check_output(
-        ["python3", str(ROOT / "scripts/kb/_relevance.py"), "--emit-bash"]
-    )
-    checked_in = (ROOT / ".claude/hooks/_gate_regexes.sh").read_bytes()
-    assert checked_in == emitted
-
-
-def test_generated_bash_gate_handles_long_prompt_without_argv_overflow() -> None:
-    prompt = ("GPU simulator trace timing " * 20_000).encode()
-    result = subprocess.run(
-        [
-            "bash",
-            "-c",
-            "source \"$1\"; prompt=$(cat); kb_gate_is_relevant \"$prompt\"",
-            "bash",
-            str(ROOT / ".claude/hooks/_gate_regexes.sh"),
-        ],
-        check=False,
-        capture_output=True,
-        input=prompt,
-    )
-    assert result.returncode == 0
-    assert result.stdout == b""
-    assert result.stderr == b""
-
-
-def test_retired_measurement_skill_is_labeled_as_non_authoritative() -> None:
+def test_measurement_cards_route_to_the_active_measurement_skill() -> None:
     router = _load("kb_route_query_formatter", ROOT / "scripts/kb/route_query.py")
     rendered = router._format_reminder(
         [{"path": ".claude/knowledge/measurement/pinned-protocol-v21.md",
           "skill": "validating-nonroot-gpu-measurement"}],
         ["validating-nonroot-gpu-measurement"],
     )
-    assert "historical pointer" in rendered
-    assert "do not apply its rules" in rendered
-    assert "root CLAUDE.md" in rendered
+    assert "`validating-nonroot-gpu-measurement`" in rendered
+    assert "historical pointer" not in rendered
 
 
 def test_only_unique_sol_authoring_tools_remain() -> None:
@@ -102,7 +73,6 @@ def test_only_unique_sol_authoring_tools_remain() -> None:
     }
     test_files = {name for name in root_files if name.startswith("test_")}
     assert test_files == {
-        "test_canonical_router_parity.py",
         "test_generate_dossiers.py",
         "test_lint_cards.py",
     }

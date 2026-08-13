@@ -5,7 +5,7 @@
 > no-clock wording does not govern the active simulator or root measurement
 > protocol. For current project policy use root `CLAUDE.md`,
 > [`docs/README.md`](README.md), and accepted ADRs; for historical subtree context
-> use [`sol_execbench/CLAUDE.md`](sol_execbench/CLAUDE.md) only.
+> use [`sol_execbench/CAMPAIGN_CONTEXT.md`](sol_execbench/CAMPAIGN_CONTEXT.md) only.
 
 SOL-ExecBench is the fourth source tree merged into this suite. It began life as
 `solbench_baseline` — a **counter-free GPU analytics framework** built around
@@ -14,11 +14,10 @@ trees, it is not a cache/wall-clock predictor; it is a **benchmark harness plus 
 label/trace source**. On merge it was *fully dissolved*: its components were
 relocated as whole units across the unified tree and it now shares the suite's
 `arch_profiles/`, `tools/nvbit_tracer/`, `.claude/knowledge/`, and `references/`
-rather than living as a walled module (operator decision, see
-[../MERGE_PROVENANCE.md](../MERGE_PROVENANCE.md) §3).
+rather than living as a walled module.
 
 The dissolved subtree's historical context is retained in
-[sol_execbench/CLAUDE.md](sol_execbench/CLAUDE.md); that file is not current root
+[sol_execbench/CAMPAIGN_CONTEXT.md](sol_execbench/CAMPAIGN_CONTEXT.md); that file is not current root
 policy and does not authorize capture, simulator, or architecture assumptions.
 
 ---
@@ -39,7 +38,7 @@ SOL-ExecBench is **235 GPU kernel-optimization problems** targeting the NVIDIA
 Each solution is graded by the **SOL Score** — a Speed-of-Light-relative metric
 where `T_SOL` is the analytically-derived hardware bound (from NVlabs SOLAR:
 roofline + Orojenesis), `Tb` is the internal scoring baseline, and `Tk` is the
-measured kernel time (`sol_execbench/CLAUDE.md:10-17`):
+measured kernel time (`sol_execbench/CAMPAIGN_CONTEXT.md:10-17`):
 
 ```
              Tb − T_SOL
@@ -51,7 +50,7 @@ S(Tk) = ────────────────────────
 paper's agent baseline achieved overall **median S = 0.732** (L1 0.688, L2 0.761,
 Quant 0.757, FIB 0.789). This suite is **not a leaderboard contender**: template
 hand-ports are functional ports, targeting a reporting band of **SOL 0.3–0.5+**,
-not top-of-board tuning (`sol_execbench/CLAUDE.md:58-79`).
+not top-of-board tuning (`sol_execbench/CAMPAIGN_CONTEXT.md:58-79`).
 
 > The 235 counts above are the *problem-space* definition. The dissolved
 > `workloads/sol_execbench_baselines/{L1,L2,Quant,FIB}/` tree holds the subset of
@@ -82,7 +81,7 @@ A local pass proves compile + smoke-run viability **only** — it does *not*
 validate TCGen05/TMEM codegen, TMA descriptor shapes, cluster/DSMEM behavior,
 register/occupancy/spill pressure, L2 partitioning, HBM3e bandwidth, CUTLASS
 schedule selection, NVFP4/FP8 layout paths, or the 5th-gen tensor cores
-(`sol_execbench/CLAUDE.md:434-445`). The B200 profiling intel is the deliverable;
+(`sol_execbench/CAMPAIGN_CONTEXT.md:434-445`). The B200 profiling intel is the deliverable;
 downstream kernel optimization is out of scope.
 
 > **Historical SOL contract snapshot.** Sections 3–4 preserve the dissolved
@@ -101,7 +100,7 @@ migrate* to the B200 provider. Each is a plugin under
 `tools/sol_baselines_harness/surfaces/`; per-surface availability is recorded in a
 `manifest.json` with an `ok | unavailable | blocked | failed | skipped`
 vocabulary, so a provider-side toolchain gap is *recorded*, never silently
-demoted to "unprofiled" (`sol_execbench/CLAUDE.md:247-338`).
+demoted to "unprofiled" (`sol_execbench/CAMPAIGN_CONTEXT.md:247-338`).
 
 ```
                     native sol-execbench evaluator (subprocess)
@@ -158,7 +157,7 @@ deployed/B200 path), **but** it carries its own operator-authorized
 (`l1tex__t_sector_op_read_hit_rate.pct`, `lts__t_sector_op_read_hit_rate.pct`,
 plus the underlying `…_sectors_op_read_hit.sum` / `…_sectors_op_read.sum`). The
 combined `…_sector_hit_rate.pct` family conflates write-back store traffic and
-**must not** be the label target (`sol_execbench/CLAUDE.md:104-119`).
+**must not** be the label target (`sol_execbench/CAMPAIGN_CONTEXT.md:104-119`).
 
 Those labels feed a **Tier-2 L1/L2 cache-hit predictor** at
 `tools/sol_baselines_harness/metrics/cache_predictor.py` (with
@@ -170,22 +169,20 @@ enforces the **same tiered MAPE gate** as the profiler: **±5 % predictor-friend
 spill-to-local), and **typed-fail-closed** (`predictor_typed_unavailable`) on cells
 it cannot honestly score. This predictor is a direct **sibling** of the profiler's
 cache-hit predictors — same tiered gate, same sm_86/sm_120 dual-arch calibration
-story (`../MERGE_PROVENANCE.md` §1 names it a merge candidate). Its ships a
+story. It ships a
 calibrated model that needs **no NCU at deployment**.
 
 > **Honesty posture (inherited by the whole suite):** the `sm_86` cache
 > prediction is validated; the `sm_120` (Blackwell) predictor path is a
 > **research challenge**, not a shipped claim; wall-clock is **labels + honest
-> refutation only** — no positive predictor claim. See
-> [../OPEN_RESEARCH_CHALLENGES.md](../OPEN_RESEARCH_CHALLENGES.md) and
-> [../ARCHITECTURE.md](../ARCHITECTURE.md).
+> refutation only** — no positive predictor claim. The active simulator design
+> is in [ARCHITECTURE.md](ARCHITECTURE.md).
 
 ---
 
 ## 5. The dissolve map — where each component went
 
-Every solbench component was relocated **as a whole unit** (no re-slicing),
-per [../MERGE_PROVENANCE.md](../MERGE_PROVENANCE.md) §2 integration mechanics.
+Every solbench component was relocated **as a whole unit** (no re-slicing).
 
 ```
    solbench_baseline (origin tree)                unified suite (this tree)
@@ -210,7 +207,7 @@ per [../MERGE_PROVENANCE.md](../MERGE_PROVENANCE.md) §2 integration mechanics.
   references/NVIDIA_Manuals/          ─►  references/             (shared doc mirror)
 ```
 
-Config docs (`docs/sol_execbench/CLAUDE.md`, `pyproject.toml`, `pytest.ini`,
+Config docs (`docs/sol_execbench/CAMPAIGN_CONTEXT.md`, `pyproject.toml`, `pytest.ini`,
 `uv.lock`) were carried under [sol_execbench/](sol_execbench/) so the dissolved
 project's uv-workspace contract is reproducible.
 
@@ -226,18 +223,15 @@ profiler and SOL-ExecBench had been carrying independently:
 | **NVIDIA doc mirror** | `references/NVIDIA_Manuals/` per tree | one shared `references/` |
 | **Knowledge base** | SOL-specific `.claude/knowledge/` | merged unified `.claude/knowledge/` |
 
-Two NCU-quarantine guards now coexist, each owning its subtree: the profiler's
-static guard excludes `third_party/` and the SOL subtrees, delegating to
-SOL-ExecBench's own `test_no_ncu_in_deployed_path.py`, whose scope was repointed
-to `tools/sol_baselines_harness/` + `tools/nvbit_tracer/metric_extractor/` (11
-tests green — [../MERGE_PROVENANCE.md](../MERGE_PROVENANCE.md) §7).
+The retained SOL tests still distinguish deploy-time counter-free paths from
+calibration paths. Those tests describe SOL behavior only and do not restrict
+direct NCU use elsewhere in the repository.
 
 ---
 
 ## See also
 
-- [sol_execbench/CLAUDE.md](sol_execbench/CLAUDE.md) — retained scoped historical SOL-ExecBench context, not current authority
-- [../MERGE_PROVENANCE.md](../MERGE_PROVENANCE.md) — historical §2 dissolve mechanics, §3 operator decisions, and §7 guard reconciliation
-- [ARCHITECTURE.md](ARCHITECTURE.md) — active Rust simulator and ArchProfile boundary; [`../ARCHITECTURE.md`](../ARCHITECTURE.md) is the retained historical merge record
-- [../OPEN_RESEARCH_CHALLENGES.md](../OPEN_RESEARCH_CHALLENGES.md) — sm_120 Blackwell refutations framed as challenges
+- [sol_execbench/CAMPAIGN_CONTEXT.md](sol_execbench/CAMPAIGN_CONTEXT.md) — retained scoped historical SOL-ExecBench context, not current authority
+- [ARCHITECTURE.md](ARCHITECTURE.md) — active Rust simulator and ArchProfile boundary
+- [STATUS.md](STATUS.md) — current research priorities
 - [../README.md](../README.md) — suite overview

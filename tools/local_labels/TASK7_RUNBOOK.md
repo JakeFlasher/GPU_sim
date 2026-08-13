@@ -1,23 +1,27 @@
 # task7 Operator Runbook — sm_86 Local-Label Hardware Acceptance
 
+> **Retained campaign runbook.** Use this only for an explicitly requested
+> historical campaign. Its old source-of-truth pins, acceptance language,
+> `.humanize` references, and cross-host closure rules are informational, not
+> current agent instructions. For a new direct capture, prefer
+> `tools/local_labels/collect_ncu.py` and `docs/runbook_host.md`.
+
 This runbook walks the operator on the **RTX 3090 Ti (sm_86)**
 through `task7`: the AC-2/AC-3 hardware acceptance for local
 labels on Ampere. It is the sm_86 analog of the R10/R11 work
 that was completed on the RTX 5060 laptop (sm_120) for
 `workloads/simbench_bw/l1/fp32_fma_dep_chain/`.
 
-The runbook is the operator-facing companion to the carry-over
-`task7` row recorded in `tools/BLOCKED_ON_3090TI.md` (and in the
-active session's gitignored `goal-tracker.md` under
-`.humanize/rlcr/<session-id>/`).
+The runbook is the operator-facing companion to the historical `task7` row
+recorded in `tools/BLOCKED_ON_3090TI.md`.
 
 ## When to use this runbook
 
 Run this verification when the working directory has been
 pivoted from the 5060 laptop to the 3090 Ti, the operator
 wants to close `task7`, and the device has a working CUDA
-toolkit + NCU installation per CLAUDE.md Rule 1's local-label
-exception. The expected outcome is either an admitted cell at
+toolkit + NCU installation. The expected campaign-format outcome is either an
+admitted cell at
 `data/local_labels/sm_86/<slug>/<shape_point>/` or an excluded
 cell with a typed reason — both are valid AC-2/AC-3 evidence
 (R10/R11 precedent on sm_120: a `label_repeatability_failed`
@@ -26,10 +30,8 @@ firing correctly is what the criterion requires).
 
 ## Source of Truth (read this BEFORE Step 1)
 
-This runbook follows the hybrid source-of-truth +
-verification-target pattern documented in
-`BL-20260504-runbook-self-reference`
-(see `docs/lessons.md`):
+This historical runbook used a hybrid source-of-truth and verification-target
+pattern:
 
 - **Source of truth**: the runbook procedure is read from the
   working branch's HEAD (`5060_dev` HEAD), NOT from a pinned
@@ -69,14 +71,9 @@ BitLesson cited above.
   expected).
 - gcc ≥ 9.0 (project uses C++17).
 - NCU installation (Nsight Compute) — required by
-  `tools/local_labels/label_driver.sh`. Per CLAUDE.md Rule 1:
-  NCU may be invoked on local devices (RTX 3090 Ti sm_86 and
-  RTX 5060 laptop sm_120) ONLY into the quarantine path
-  `data/local_labels/`. The driver code that performs the
-  local invocation lives ONLY under `tools/local_labels/`.
-  No other path in the repository may invoke NCU. The
-  quarantine boundary is enforced by the static guard at
-  `workloads/simbench_bw/tests/test_no_root_or_ncu_static_guard.py`.
+  `tools/local_labels/label_driver.sh`. This legacy driver writes campaign
+  output beneath `data/local_labels/`. Direct experiments may instead use
+  `tools/local_labels/collect_ncu.py` with an operator-chosen output directory.
 - Working NVIDIA driver visible to `nvidia-smi`.
 - The portable_lcd kernel binaries from Round 13 (or a fresh
   build if the working directory is clean). See "Pick a
@@ -358,8 +355,7 @@ The round summary that closes task7 should record:
 
 ## References
 
-- `CLAUDE.md` — project critical rules; Rule 1 local-label
-  exception governing NCU usage on local devices.
+- `docs/runbook_host.md` — current direct NCU and NVBit commands.
 - `tools/local_labels/README.md` — driver-level reference for
   the schema, the denylisted field names, the typed exclusion
   reasons, and the repeatability threshold default.
@@ -374,15 +370,7 @@ The round summary that closes task7 should record:
   for `task11b-task11d-cross-arch-followup` (the NVBit tracer
   cross-arch side); the operator typically runs both runbooks
   in sequence on the 3090 Ti session.
-- The prior 5060 session's `round-10-summary.md` and
-  `round-11-summary.md` (under
-  `.humanize/rlcr/<prior-session-id>/`) — sm_120 precedent (the
-  work on `workloads/simbench_bw/l1/fp32_fma_dep_chain/` whose
-  sm_86 analog is task7). Loop-state summaries are gitignored
-  per the `.humanize/` policy; consult them from the originating
-  worktree if needed.
+- The retained sm_120 records under `data/local_labels/` provide the relevant
+  cross-device precedent.
 - `plans/nonroot_gpu_cache_observability_plan.md` — AC-2 (Local
   labels) and AC-3 (Repeatability) sub-criteria.
-- `docs/lessons.md` —
-  `BL-20260504-runbook-self-reference` documents the
-  no-SHA-pinning pattern this runbook uses.

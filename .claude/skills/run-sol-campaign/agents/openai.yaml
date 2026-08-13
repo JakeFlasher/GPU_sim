@@ -1,0 +1,4 @@
+interface:
+  display_name: "Run SOL Campaign"
+  short_description: "Operate the optional SOL benchmark stack"
+  default_prompt: "Use $run-sol-campaign to run or extend an SOL-ExecBench campaign."

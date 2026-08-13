@@ -10,7 +10,7 @@ use sim_trace::{Sha256Digest, canonical_json_utf8};
 use tempfile::TempDir;
 
 fn binary() -> &'static str {
-    env!("CARGO_BIN_EXE_sim-run")
+    env!("CARGO_BIN_EXE_sim-run-campaign")
 }
 
 fn fixture_root() -> PathBuf {
