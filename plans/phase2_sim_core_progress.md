@@ -1151,3 +1151,608 @@ to `na`).
    MREF addresses (the global source operand) + re-capture; makes
    gemm/conv2d op_ld + the L2 LDGSTS stream scorable. Same campaign
    class as the ATOM/histogram re-capture.
+
+## sm_86 Tensor Core initiation contention (2026-08-13)
+
+Added the first bounded execution-resource model without changing the event
+shape: each SMSP now owns one Tensor Core ready timestamp, tensor issue waits
+for both warp/control readiness and that local timestamp, and idle replay skips
+directly to the combined ready time. Other instruction families remain
+explicitly dispatch-only. Static SASS classification admits only the sidecar
+inventory (`HMMA.16816.F32`, `HMMA.16816.F32.BF16`,
+`HMMA.SP.16832.F32.BF16`, and `IMMA.16816.S8.S8`) and rejects unknown matrix
+forms. Architecture capability values are local to `sm_86` (16, 16, and 8
+cycles respectively); `sm_120` remains a typed research gap.
+
+The dense-HMMA constant was checked independently before implementation: three
+live runs of a two-HMMA probe each reported 2 executed HMMA instructions and 32
+active HMMA-pipe cycles, exactly 16 cycles/instruction. Three warmed live NCU
+validation runs per workload also reported active-cycle/instruction ratios of 16
+for BF16 HMMA, FP16 HMMA, sparse HMMA, and attention, and 8 for INT8 IMMA.
+These NCU measurements were evaluator-side comparisons, not simulator inputs.
+
+| trace | dispatch-only cycles | modeled cycles | median live `gpc__cycles_elapsed.max` | modeled/live |
+|---|---:|---:|---:|---:|
+| BF16 HMMA GEMM | 1,342 | 1,366 | 16,311 | 8.37% |
+| FP16 HMMA GEMM | 1,342 | 1,366 | 16,229 | 8.42% |
+| INT8 IMMA GEMM | 1,094 | 1,119 | 12,801 | 8.74% |
+| sparse BF16 HMMA GEMM | 499 | 499 | 6,995 | 7.13% |
+| BF16 forward attention | 8,131 | 8,259 | 17,998 | 45.89% |
+
+Each runnable tensor trace was replayed twice in flat and shared-L2 modes with
+full instruction coverage and byte-identical repeated JSON. A dispatch-only A/B
+showed that every non-timing field, including all memory counters, remained
+identical; only modeled timing changed. The convolution trace still fails the
+existing authenticated shared-memory-split contract and was not relaxed.
+
+Non-tensor replay stayed byte-identical. Against the post-decode baseline,
+seven-run median wall time changed by -3.89%/-3.69% for Embedding flat/shared-L2
+and -1.72%/-2.17% for SiLU flat/shared-L2; median RSS changed by less than 0.2%.
+Formatting, focused `sim-arch`/`sim-sm` tests, and workspace
+`cargo test --all-targets` pass. The small GEMM timing deltas establish that
+Tensor Core initiation contention is real but not the dominant remaining cycle
+residual; completion/dependency timing and other execution resources remain
+explicit follow-up hypotheses rather than fitted constants.
+
+## sm_86 non-bulk asynchronous-copy completion (2026-08-14)
+
+Implemented the Ampere `LDGSTS` → `LDGDEPBAR` → `DEPBAR.LE SB0, N`
+completion chain. This is an architecture capability, not a generic SASS rule:
+`sm_86` exposes `AmpereLdgstsDepbarV1`, while `sm_120` returns a typed research
+gap. The schedule join accepts exact unpredicated `LDGDEPBAR` commits and
+`DEPBAR.LE SB0, <u32>` waits (decimal or hexadecimal), preserves the full wait
+immediate, and rejects malformed, predicated, unknown, or layout-drifted forms.
+The ordinary write-barrier latency is not applied to `LDGDEPBAR`'s SB0 protocol.
+
+Each traced warp has one open group and a FIFO of committed groups. An
+address-carrying `LDGSTS` adds its global-source completion to the open group;
+`LDGDEPBAR` commits it; and wait-N requires the FIFO prefix older than the newest
+N groups to be complete. Empty commits are immediately complete and consume no
+sequence identity. Flat replay uses the existing global-flat completion,
+constant-L1 replay uses the existing bypass/L2-hit completion, and shared-L2
+replay receives the real L2-hit or DRAM response for every source sector.
+Checked sequence/count/time updates and typed response identities keep failures
+transactional. Scheduler readiness and skip-ahead include group completion
+without a global cycle scan or an event per instruction, and equal-time replies
+retain the engine's `(time, sequence)` order.
+
+Cold protocol state lives in a parallel sparse sidecar owned by `SmCore`.
+Non-async kernels keep the pre-increment 168-byte `WarpState`, a 56-byte
+`IssueSlot`, an empty async sidecar, and a specialized readiness scan that omits
+the wait FIFO walk. A later cold-function preflight experiment increased the
+Embedding-flat median and hardware instruction count, so it was measured and
+reverted rather than retained.
+
+The final host profile also closed the older schedule-lookup deferral:
+`BTreeMap::get` accounted for 6.79% of Embedding-flat samples because every
+dynamic issue repeated the static PC lookup. Each `SmCore` now materializes the
+small authoritative schedule map as a contiguous PC-ordered `(pc, slot)` table
+and binary-searches it. This preserves the B-tree join and typed unknown-PC
+diagnostics, adds no per-record field, and reduced the measured hardware count
+from 7.271B to 6.666B instructions and 1.576B to 1.409B branches.
+
+### Fresh trace and live validation
+
+The live campaign was rerun in the foreground from a rebuilt in-tree tracer into
+`/var/tmp/gpu-simulator-async-copy-live-20260815` on the RTX 3090 Ti at the
+locked 1,350 MHz SM / 10,501 MHz memory clocks. Fresh captures cover the
+cp.async canary, BF16 and FP16 HMMA GEMMs, forward BF16 attention, INT8 IMMA
+GEMM, and sparse BF16 HMMA GEMM. Every executed `LDGSTS` has exactly one dynamic
+`ASYNC_COPY` global-source operand with allocation identity; all six
+`unsupported_memory_path.json` files contain zero async-copy exclusions and all
+six unmapped-range files are empty. Targeted protobuf inspection and complete
+Rust replay accepted every record. The Python admission checker completed for
+the canary, attention, and sparse traces; its 512-block BF16 walk exceeded the
+10-minute foreground bound and was stopped rather than reported as passing.
+Current address-carrying traces clear `async_copy_shared_visibility`; legacy
+traces with omitted payloads remain cardinality-replayable but retain that tail
+and are not timing evidence for this mechanism.
+
+| workload | prior tensor/control-only cycles | flat cycles | shared-L2 cycles | traced source sectors | fresh live `sm__cycles_active.max` | shared/live |
+|---|---:|---:|---:|---:|---:|---:|
+| cp.async canary | 648 | 1,044 | 1,044 | 128 | 2,313 | 45.14% |
+| BF16 HMMA GEMM | 1,366 | 7,946 | 8,445 | 196,608 | 13,964 | 60.48% |
+| BF16 forward attention | 8,259 | 11,976 | 11,976 | 4,352 | 14,801 | 80.91% |
+| FP16 HMMA GEMM | 1,366 | 7,946 | 8,446 | 196,608 | 13,312 | 63.45% |
+| INT8 IMMA GEMM | 1,119 | 7,662 | 6,310 | 196,608 | 10,121 | 62.35% |
+| sparse BF16 HMMA GEMM | 499 | 2,143 | 2,143 | 16,384 | 4,077 | 52.56% |
+
+Thus source completion is now load-bearing: flat modeled time increased by 396,
+6,580, 3,717, 6,580, 6,543, and 1,644 cycles respectively, without a fitted
+latency. The fresh shared-L2 residual against the primary live target ranges
+from -1,269 cycles (canary) to -5,519 cycles (BF16); attention is fractionally
+closest at -2,825 cycles / 80.91%. INT8 is faster in shared-L2 than flat because
+its real traced L2 reuse exposes completion overlap that the fixed flat arm
+cannot represent. This is a model result, not a label-derived constant.
+
+NCU was executed directly against fresh warmed launches, separately from NVBit.
+Secondary `gpc__cycles_elapsed.max` values were 4,415 / 16,142 / 16,960 / 15,506 /
+12,410 / 6,328 in table order. NCU LTS TEX-read sectors were 128 / 161,920 /
+4,352 / 161,920 / 80,960 / 16,384, and DRAM-read sectors were 276 / 8,388 /
+1,632 / 8,380 / 4,292 / 1,728. Long-scoreboard stall percentages were 24.76 /
+76.23 / 35.73 / 77.17 / 68.28 / 57.99; wait stalls were 16.60 / 5.41 / 25.55 /
+5.47 / 6.01 / 6.45. These measurements remain evaluator-side diagnostics only.
+
+All six fresh workloads replayed twice in flat and shared-L2 modes with exact
+instruction cardinality and byte-identical repeated JSON. The foreground
+canary produced 644 records and 1,044 cycles in both modes; shared-L2 counted
+exactly 128 bypass source sectors and cleared the async visibility tail.
+
+### Non-async cost and verification
+
+Embedding and SiLU outputs remain byte-identical to the post-tensor baseline in
+both memory modes. Seven measured runs after one warmup, pinned to CPU 2, gave:
+
+| replay | post-tensor median | final median | change | RSS change |
+|---|---:|---:|---:|---:|
+| Embedding flat | 0.409645 s | 0.394928 s | -3.59% | +0.10% |
+| Embedding shared-L2 | 0.478032 s | 0.479271 s | +0.26% | +0.21% |
+| SiLU flat | 0.142068 s | 0.142736 s | +0.47% | +0.15% |
+| SiLU shared-L2 | 0.165315 s | 0.169493 s | +2.53% | +0.36% |
+
+The saved 3% host-runtime target is met in all four modes; exact JSON hashes are
+unchanged. The final implementation passes all 257 `sim-sm` unit tests (plus
+the serialized replay integration test); focused async tests cover
+flat/L1/L2/DRAM completion, wait-0/wait-1 FIFO behavior, overlap, empty groups,
+deterministic reply order, and nonmutating numeric/response failures. Workspace
+`cargo fmt --all -- --check`, `cargo test --all-targets`, and `git diff --check`
+also pass.
+
+## sm_86 explicit shared-memory bank wavefront timing (2026-08-15)
+
+Added a bounded completion-timing refinement for address-carrying shared loads
+and stores. The trace snapshot now projects effective lane byte intervals onto
+32 four-byte banks, collapses broadcasts at the shared-word address, and stores
+the maximum per-bank distinct-word count as a compact `u32`. Zero remains the
+explicit value for zero-active and uncaptured records. The address-heavy Prost
+tree is still discarded after compaction, and the existing
+`ValidatedMemoryInstruction <= 32 bytes` invariant continues to pass.
+`AccessKind::Shared { wavefronts }` carries the projection to the SM issue
+model.
+
+The timing rule is architecture-local. `sm_86` keeps the carded 23-cycle shared
+dependent-completion latency for one wavefront and adds two checked cycles for
+each additional wavefront; multiplication and timestamp overflow are typed and
+nonmutating. `sm_120` returns a research gap rather than inheriting Ampere bank
+semantics. The increment does not synthesize the uncaptured LDGSTS destination,
+and it does not add an unmeasured shared-memory queue.
+
+### Independent live characterization
+
+The foreground campaign used direct NCU execution at the locked 1,350 MHz SM /
+10,501 MHz memory clocks. The SASS-correlated aggregate
+`sm__sass_l1tex_pipe_lsu_wavefronts_mem_shared.sum` decomposed exactly into the
+per-operation counters in the same NCU invocation:
+
+| workload | total shared wavefronts | explicit LD | LDGSTS | explicit ST | decomposition delta |
+|---|---:|---:|---:|---:|---:|
+| cp.async canary | 64 | 32 | 32 | 0 | 0 |
+| BF16 HMMA GEMM | 294,912 | 98,304 | 196,608 | 0 | 0 |
+| BF16 forward attention | 18,944 | 9,760 | 2,624 | 6,560 | 0 |
+| FP16 HMMA GEMM | 294,912 | 98,304 | 196,608 | 0 | 0 |
+| INT8 IMMA GEMM | 221,184 | 24,576 | 196,608 | 0 | 0 |
+| sparse BF16 HMMA GEMM | 24,576 | 12,288 | 12,288 | 0 | 0 |
+
+An independent address projection over the fresh traces reproduced every
+explicit LD/ST count in the table exactly, including broadcasts, predicated-off
+records, widths 4/8/16 bytes, and attention's shared stores. The canary also
+closed an important boundary: its global LDGSTS source has 128 sectors but only
+32 shared-destination wavefronts, so source-sector count is not a valid generic
+destination-bank proxy.
+
+A separate one-warp dependent volatile-LDS probe generated exactly
+1/2/4/8/16/32 bank wavefronts. Direct clock deltas were
+44/46/50/58/74/106 cycles per load, yielding one exact affine relation over all
+six points: fixed chain cost plus two cycles per wavefront. NCU independently
+reported 32,768 LDS instructions per point, the requested wavefront count per
+instruction, and `wavefronts - 1` bank conflicts. A multi-warp saturation probe
+reached approximately one aggregate shared wavefront per SM cycle; queueing is
+left unmodeled because the current workloads show little MIO/LG throttle and the
+completion-chain increment can be evaluated independently.
+
+### Fresh foreground validation after implementation
+
+NCU was rerun directly in the foreground into
+`/var/tmp/gpu-simulator-shared-wavefront-validation-20260815`; all six fresh
+profiles retained the exact zero-delta decomposition above. The same six
+address-carrying captures were replayed twice in flat and shared-L2 modes from a
+fresh release build. Every pair was byte-identical and every launch retained
+full `instructions_issued == records_seen` cardinality.
+
+| workload | prior flat | wavefront flat | prior shared-L2 | wavefront shared-L2 | fresh live `sm__cycles_active.max` | shared/live |
+|---|---:|---:|---:|---:|---:|---:|
+| cp.async canary | 1,044 | 1,044 | 1,044 | 1,044 | 2,219 | 47.05% |
+| BF16 HMMA GEMM | 7,946 | 7,954 | 8,445 | 8,449 | 13,545 | 62.38% |
+| BF16 forward attention | 11,976 | 12,120 | 11,976 | 12,120 | 14,886 | 81.42% |
+| FP16 HMMA GEMM | 7,946 | 7,954 | 8,446 | 8,450 | 13,040 | 64.80% |
+| INT8 IMMA GEMM | 7,662 | 7,662 | 6,310 | 6,310 | 9,948 | 63.43% |
+| sparse BF16 HMMA GEMM | 2,143 | 2,149 | 2,143 | 2,149 | 4,151 | 51.77% |
+
+The zero deltas are expected where every effective explicit LDS is one
+wavefront; zero-active LDS records also retain the prior fixed behavior. The
+largest exposed dependency effect is attention's +144 cycles in both modes.
+The small GEMM deltas show that bank-wavefront completion is real but mostly
+hidden behind existing overlap; the remaining residual must not be converted
+into workload-fitted shared queueing or an LDGSTS destination guess.
+
+Embedding and SiLU remain byte-identical to the post-async baseline in flat and
+shared-L2 modes. Seven measured runs after one warmup, pinned to CPU 2, changed
+median wall time by -0.41%, -0.32%, -3.08%, and -3.26% respectively; median RSS
+changed by -0.09%, +0.00%, -0.03%, and +0.03%. Thus the increment introduces no
+host-runtime regression. The final battery passes 30 `sim-arch`, 96 `sim-trace`,
+259 `sim-sm`, and all workspace target tests, plus formatting and
+`git diff --check`.
+
+## sm_86 modifier-aware LDGSTS source-cache routing (2026-08-15)
+
+A separate one-warp repeated-source probe established the cache-policy boundary
+before implementation. `cp.async.ca.shared.global` lowered to `LDGSTS.E.128`,
+while `cp.async.cg.shared.global` lowered to `LDGSTS.E.BYPASS.128`. Both variants
+issued 32,768 requests / 524,288 global-source sectors / 131,072 shared
+wavefronts in each of three foreground NCU runs. The ordinary `.E` form sent
+only the 16 cold source sectors to L2 in every run and had a median 1,867,462
+active cycles; `.BYPASS` sent all 524,288 sectors to L2 and had a median
+9,094,114 active cycles. This is direct evidence that `.E` participates in L1
+while the dotted `BYPASS` modifier selects the direct-L2 route. Every `LDGSTS`
+in the current six-workload cohort is non-BYPASS.
+
+The implementation preserves that static policy through schedule construction
+and dynamic replay. An architecture-local capability exposes the characterized
+modifier semantics only for `sm_86`; `sm_120` returns a typed research gap.
+`LDGSTS.E` now uses the same eligible sectored-L1 path as ordinary hierarchy
+loads, while `LDGSTS.E.BYPASS` retains the existing direct `L2Source::Bypass`
+path. Flat mode is unchanged. L1 hits complete the corresponding async-group
+source unit at hit-ready time; misses and merges retain group identity as typed
+fill targets; and MSHR stalls retain it through the FIFO retry queue. Fill
+response preflight aggregates ordinary-barrier and async-group removals before
+any cache, group, retry, or response state mutates. No global cycle scan or
+per-instruction event was added, and the existing commit/wait protocol remains
+the source-completion consumer.
+
+### Fresh foreground traffic and timing validation
+
+The six address-carrying traces were replayed from a fresh release build twice
+in flat and shared-L2 modes. NCU was also rerun directly in the foreground into
+`/var/tmp/gpu-simulator-ldgsts-route-validation-20260815-v1`. The traffic
+comparison below uses silicon global-load sectors only to expose L1 filtering;
+simulator L2 totals also include the workload's other modeled sectors, so their
+change, rather than absolute equality, is the relevant route check.
+
+| workload | NCU L1TEX global-load sectors | NCU L2 TEX-read sectors | silicon-filtered sectors | simulator L2 total, before → after | simulator DRAM read, before → after | NCU DRAM read |
+|---|---:|---:|---:|---:|---:|---:|
+| cp.async canary | 128 | 128 | 0 | 256 → 256 | 128 → 128 | 268 |
+| BF16 HMMA GEMM | 196,608 | 161,920 | 34,688 | 212,992 → 180,096 | 189,672 → 52,904 | 8,372 |
+| BF16 forward attention | 4,352 | 4,352 | 0 | 5,376 → 5,376 | 4,352 → 4,352 | 1,644 |
+| FP16 HMMA GEMM | 196,608 | 161,920 | 34,688 | 212,992 → 182,016 | 189,577 → 53,112 | 8,412 |
+| INT8 IMMA GEMM | 196,608 | 80,960 | 115,648 | 212,992 → 100,736 | 98,304 → 29,184 | 4,280 |
+| sparse BF16 HMMA GEMM | 16,384 | 16,384 | 0 | 20,480 → 20,480 | 16,384 → 13,184 | 1,732 |
+
+All six simulator L1 bypass counts fell to zero. The L2-sector direction now
+matches the independent silicon signal: no source filtering for the canary,
+attention, or sparse GEMM; partial filtering for BF16/FP16; and substantial
+filtering for INT8. DRAM traffic also moved downward where L1/L2 reuse exists,
+although its remaining excess on the GEMMs exposes an L2/DRAM fidelity gap
+rather than a reason to undo the source-cache route.
+
+| workload | unchanged flat cycles | prior shared-L2 | routed shared-L2 | fresh live `sm__cycles_active.max` |
+|---|---:|---:|---:|---:|
+| cp.async canary | 1,044 | 1,044 | 1,044 | 2,232 |
+| BF16 HMMA GEMM | 7,954 | 8,449 | 19,752 | 13,785 |
+| BF16 forward attention | 12,120 | 12,120 | 12,120 | 15,000 |
+| FP16 HMMA GEMM | 7,954 | 8,450 | 19,801 | 13,368 |
+| INT8 IMMA GEMM | 7,662 | 6,310 | 10,730 | 10,047 |
+| sparse BF16 HMMA GEMM | 2,149 | 2,149 | 3,465 | 4,438 |
+
+INT8 moved from substantial underprediction to a 683-cycle overprediction, and
+sparse BF16 moved materially closer. BF16 and FP16 now overpredict by 5,967 and
+6,433 cycles. Their shared-L2 replays report 170,912 and 174,425 L1 MSHR stall
+events respectively under the carded 32-entry model, identifying async-source
+MSHR admission/coalescing as the next independent research target. This newly
+exposed residual must not be hidden by reverting the measured modifier semantics
+or fitting a workload-specific latency.
+
+Every launch retained exact `instructions_issued == records_seen` cardinality,
+and every repeated JSON pair was byte-identical. Unaffected Embedding and SiLU
+outputs also stayed byte-identical in both modes. Seven measured runs after one
+warmup, pinned to CPU 2, changed median wall time by -4.73%, -3.39%, -4.53%, and
+-4.02% for Embedding flat/shared-L2 and SiLU flat/shared-L2 respectively; median
+RSS changed by -0.02%, -0.04%, +0.05%, and +0.07%. The final battery passes 31
+`sim-arch`, 105 `sim-mem`, 96 `sim-trace`, 265 `sim-sm`, and all workspace target
+tests, plus formatting and `git diff --check`. NCU values above remain
+validation diagnostics and were not used as simulator features.
+
+## sm_86 cacheable-LDGSTS L1 fill admission (2026-08-15)
+
+The generic 32-entry L1 MSHR approximation is not an Ampere hardware fact: the
+production P-chase card keeps `mshr_outstanding_misses` as
+`geometry_unresolved`, and no NVIDIA publication found in this investigation
+states an Ampere L1 MSHR depth. A focused foreground microbenchmark under
+`/var/tmp/gpu-simulator-ldgsts-mshr-probe-20260815-v1` therefore bounded
+cacheable-LDGSTS admission independently, without using any scored workload
+cycle label.
+
+One warp issued unrolled `cp.async.ca.shared.global` copies from unique streamed
+source lines, committed once after the batch, and then waited for group zero.
+The full-warp 16-byte-per-lane form lowered to `LDGSTS.E.128`; each instruction
+touched four distinct 128-byte lines. At locked 1,350 MHz SM / 10,501 MHz memory
+clocks, the cache-all LG-throttle median stayed at 5.39% through batch 62 (248
+lines), then rose sharply to 21.56% at batch 63 (252 lines) and 27.20% at batch
+65. The otherwise identical `.BYPASS` control stayed smooth at 5.76%, 5.83%, and
+5.95% for batches 62, 63, and 65.
+
+Two shape controls rule out a simple 63-instruction queue interpretation. A
+full-warp four-byte copy, which lowered to one-line `LDGSTS.E`, changed smoothly
+from 10.15% LG throttle at batch 62 to 10.21%, 10.44%, 10.54%, and 10.89% at
+batches 63, 64, 65, and 68. A half-warp `.E.128` copy touching two lines per
+instruction likewise changed smoothly from 7.60% to 7.73%, 7.76%, 7.92%, and
+8.24%. An eight-byte experiment was excluded because ptxas changed allocation
+from 22 to 40 registers between the relevant batches. The resulting 248-line
+value is deliberately a conservative observed floor, not a claim about the
+physical queue's name, partitioning, or exact maximum.
+
+The architecture capability now supplies that floor only for `sm_86`;
+`sm_120` returns a separate typed research gap. For a finite L1 configuration,
+one cacheable `LDGSTS.E` access uses effective admission
+`max(configured_mshr_count, 248)`. Ordinary global/local loads continue to use
+the unresolved 32-entry working approximation, `.BYPASS` never enters L1, and
+an unlimited ablation remains unlimited. The floor is access-local and does not
+rewrite `L1Config`; all traffic still shares the same physical in-flight-fill
+state. Constant and event L1 APIs carry it explicitly. Shared-L2 issue,
+fill-waiter registration, exact shadow-cache preflight, response accounting,
+retry timing, and FIFO retry drain preserve it through completion. Synthetic
+fixtures use a one-entry floor so the existing retry and numeric-boundary tests
+remain meaningful.
+
+### Fresh foreground and replay validation
+
+A fresh release replay root is
+`/var/tmp/gpu-simulator-ldgsts-admission-validation-20260815-v1`. Each of the six
+address-carrying workloads replayed twice in flat and shared-L2 modes with exact
+`instructions_issued == records_seen` cardinality and byte-identical repeats.
+Fresh NCU runs were also executed synchronously in the foreground at the locked
+clocks; the measurements below are validation diagnostics only.
+
+| workload | routed shared-L2 | admission shared-L2 | L1 stall attempts, before → after | fresh NCU `sm__cycles_active.max` | simulator − NCU |
+|---|---:|---:|---:|---:|---:|
+| cp.async canary | 1,044 | 1,044 | 0 → 0 | 2,232 | -1,188 |
+| BF16 HMMA GEMM | 19,752 | 7,955 | 170,912 → 0 | 12,973 | -5,018 |
+| BF16 forward attention | 12,120 | 12,120 | 0 → 0 | 14,903 | -2,783 |
+| FP16 HMMA GEMM | 19,801 | 7,958 | 174,425 → 0 | 13,335 | -5,377 |
+| INT8 IMMA GEMM | 10,730 | 4,557 | 86,379 → 0 | 9,907 | -5,350 |
+| sparse BF16 HMMA GEMM | 3,465 | 2,149 | 4,456 → 0 | 4,095 | -1,946 |
+
+Flat output hashes are unchanged from the routed baseline. Canary and attention,
+which never hit the generic cap, are also byte-identical in shared-L2 mode. The
+independent floor removes the fabricated retry serialization on the other four
+cells; it intentionally does not optimize against their labels, so the residual
+changes from overprediction to underprediction rather than being tuned toward
+zero.
+
+The number of sectors reaching L2 is unchanged in every workload, confirming
+that admission did not alter the cache-policy route. DRAM outcomes do change
+because removing serialization changes request arrival order at the shared L2:
+BF16 rises from 52,904 to 163,712 modeled read sectors (fresh silicon: 8,408),
+FP16 from 53,112 to 165,632 (8,388), INT8 from 29,184 to 84,352 (4,276), and
+sparse BF16 from 13,184 to 16,384 (1,728). This much larger traffic residual is
+an honest shared-L2/in-flight-miss concurrency gap, not a reason to restore an
+unsupported 32-entry LDGSTS cap.
+
+Unaffected Embedding and SiLU JSON hashes remain byte-identical in flat and
+shared-L2 modes. Two independent seven-run sets pinned to CPU 2 were pooled;
+median wall time changed by +1.84%, +1.97%, +2.18%, and +2.96% for Embedding
+flat/shared-L2 and SiLU flat/shared-L2 respectively, while median RSS changed by
++0.01%, +0.01%, -0.03%, and +0.00%. The 3% host-cost target is met. The final
+battery passes 31 `sim-arch`, 108 `sim-mem`, 96 `sim-trace`, 267 `sim-sm`, and
+all workspace target tests, plus formatting and `git diff --check`.
+
+## sm_86 L2 pending-read coalescing (2026-08-15)
+
+The admission increment exposed a specific lower-level concurrency error: event
+reads treated a requested sector as absent until fill completion, but every read
+of that already-pending sector minted another fill token and charged another DRAM
+fetch. This preserved lookup-miss counting but inflated the six-workload cohort's
+modeled DRAM traffic by as much as 20× once the unsupported L1 serialization was
+removed.
+
+### Independent live characterization
+
+A focused repeated-source `.BYPASS` probe was compiled and profiled synchronously
+in the foreground under
+`/var/tmp/gpu-simulator-l2-pending-probe-20260815-v1`. Each of 1,024 one-warp
+blocks repeatedly issued a 16-byte-per-lane `LDGSTS.E.BYPASS.128` read of the same
+cold per-block source tile inside one open async group. All batch variants used 14
+registers, avoiding a code-generation discontinuity.
+
+| copies in open group | L1TEX source sectors | L2 TEX-read sectors | median DRAM-read sectors |
+|---:|---:|---:|---:|
+| 1 | 16,384 | 16,384 | 16,500 |
+| 2 | 32,768 | 32,768 | 16,500 |
+| 4 | 65,536 | 65,536 | 16,492 |
+| 8 | 131,072 | 131,072 | 16,508 |
+| 16 | 262,144 | 262,144 | 16,508 |
+| 32 | 524,288 | 524,288 | 16,516 |
+
+Thus L1TEX and L2 lookup traffic scale 32× while lower-level traffic remains
+constant: matching `sm_86` pending reads merge onto the original allocation/
+sector fetch. The experiment does not establish a finite L2 MSHR depth, so none
+was added.
+
+### Model and event semantics
+
+`sim-arch` now exposes `AllocationSectorMergeV1` only for `sm_86`; `sm_120`
+returns a typed research gap. The L2 event API gained an opaque
+allocation-generation/sector key and a coalesced transactional access surface.
+A read mask is split into newly missing `fill_mask` sectors and matching
+`pending_merge_mask` sectors. Both remain lookup misses, preserving L2 counters;
+only the new mask mints a fill capability and consumes DRAM service. The older
+distinct-fetch API remains as an explicit compatibility surface rather than
+silently changing all L2 callers.
+
+The shared system keeps a checked
+`HashMap<L2PendingSectorKey, u64>` from each owned pending sector to its original
+ready time. Registration is preflighted before the L2 plan commits; merged reads
+must find every key; fill completion verifies the exact registered timestamp;
+and both matching and stale/evicted completions remove their entries. Duplicate
+registration, missing lookup, missing removal, timestamp mismatch, and a nonempty
+map after queue drain are typed errors. Writes and atomics retain their previous
+immediate-validation and fetch behavior: a write may supersede a pending valid
+bit, but the original lower-level event and response still complete and retire
+its key without resurrecting an evicted allocation.
+
+A response is ready at the maximum of its ordinary L2-hit lower bound, every new
+fetch's latency/bandwidth completion, and every merged sector's original ready
+time. A mixed request can expose its new fill before a later joined response via
+separate `L2Fill` and fill-less `MemResponse` events; equal-time fill+response
+retains the single-event completion-before-delivery ordering. Focused tests cover
+same-cycle and later-cycle merges, mixed masks, opaque generation identity,
+stale eviction, write supersession, missing/colliding/removal state, rollback,
+equal-time ordering, and the `sm_120` boundary.
+
+### Fresh replay and foreground silicon comparison
+
+The final validation root is
+`/var/tmp/gpu-simulator-l2-pending-coalescing-validation-20260815-v1`. A fresh
+release build replayed all six address-carrying workloads twice in flat and
+shared-L2 modes. Every pair is byte-identical and every launch has exact
+`instructions_issued == records_seen` cardinality. NCU was rerun separately and
+synchronously in the foreground on the RTX 3090 Ti at P0, 1,350 MHz SM and
+10,501 MHz memory clocks; those measurements remain evaluator-side targets.
+
+| workload | modeled DRAM before → coalesced | fresh NCU DRAM read | modeled shared-L2 cycles before → after | fresh NCU `sm__cycles_active.max` |
+|---|---:|---:|---:|---:|
+| cp.async canary | 128 → 128 | 268 | 1,044 → 1,044 | 2,248 |
+| BF16 HMMA GEMM | 163,712 → 8,192 | 8,376 | 7,955 → 7,954 | 13,427 |
+| BF16 forward attention | 4,352 → 1,280 | 1,620 | 12,120 → 12,120 | 14,815 |
+| FP16 HMMA GEMM | 165,632 → 8,192 | 8,388 | 7,958 → 7,954 | 13,758 |
+| INT8 IMMA GEMM | 84,352 → 4,096 | 4,276 | 4,557 → 4,550 | 10,009 |
+| sparse BF16 HMMA GEMM | 16,384 → 1,536 | 1,728 | 2,149 → 2,149 | 4,156 |
+
+L2 sector/hit/miss counters are unchanged in every workload, as required: a
+pending merge changes lower-level demand, not lookup classification. The modeled
+DRAM stream is now within 184/196/180/192 sectors of fresh silicon for BF16,
+FP16, INT8, and sparse BF16 respectively, instead of exceeding it by tens or
+hundreds of thousands of sectors. Canary and attention retain larger fixed
+measurement deltas (140 and 340 sectors). No simulator value was derived from
+those same-workload observations. Bandwidth-delayed modeled responses fall from
+351/451/640 to zero on BF16/FP16/INT8 because the duplicate demand was the sole
+cause of the modeled aggregate-server congestion; timing moves by only 0–7
+cycles because merged consumers reuse the original fetch completion.
+
+Unaffected Embedding and SiLU outputs remain byte-identical to the admission
+baseline in both modes. Two independent seven-run sets pinned to CPU 2 were
+pooled; median wall time changed by +2.48%, +2.91%, +1.53%, and +2.22% for
+Embedding flat/shared-L2 and SiLU flat/shared-L2 respectively, meeting the 3%
+host-cost target. A speculative post-campaign change that replaced the second
+typed registration check with a debug-only commit was measured and reverted;
+the final source retains fail-closed duplicate detection and is the implementation
+reported above. The final battery passes 32 `sim-arch`, 8 `sim-engine`, 109
+`sim-mem`, 2 `sim-run`, 273 `sim-sm`, and 96 `sim-trace` tests, all workspace
+targets, formatting, and `git diff --check`.
+
+## sm_86 LDGSTS payload-completion fanout (2026-08-15)
+
+Pending-read coalescing corrected lower-level demand but left async groups visible as
+soon as their last source sector returned. That omitted the independently observable
+cost of delivering an effective `LDGSTS` payload into the async-copy completion
+chain. This increment characterizes and models that cost without using any scored
+workload's cycle label as an input.
+
+### Independent payload characterization
+
+The focused probe root is
+`/var/tmp/gpu-simulator-async-fanout-probe-20260815-v1`. Static-unrolled kernels
+issued 1, 2, 4, 8, 16, or 32 copies in each open group, followed by one commit and
+`wait_group 0`. Compile-time unrolling removed the dynamic copy-loop branch and
+index dependency; register count stayed fixed within each route/shape. Direct clock
+samples and NCU profiles were collected synchronously in the foreground.
+
+For cache-all `LDGSTS.E`, the stable high-fanout slopes were 62.69 effective
+payload B/cycle for 32 lanes × 16 B, 62.66 B/cycle for 16 lanes × 16 B, and 64.12
+B/cycle for 32 lanes × 8 B. The latter two forms carry the same 256-byte payload
+with different active-lane/width shapes and converge to the same rate. For
+`LDGSTS.E.BYPASS`, the corresponding 32-lane and 16-lane 16-byte forms converged
+to 32.80 and 32.50 B/cycle. A separate cache-all source-stride comparison doubled
+unique source sectors from 16 to 32 per 512-byte copy while retaining the payload;
+the completion slope did not double. Effective active-lane payload, not the
+already-modeled deduplicated source-sector count, is therefore the supported local
+work variable.
+
+The architecture values are 64 payload B/cycle for cache-all and 32 payload
+B/cycle for bypass. The probes do not establish a finite queue depth or a
+cross-warp arbitration policy, so neither was introduced.
+
+### Architecture-local model and transactional boundaries
+
+`sim-arch` exposes `LdgstsCompletionThroughput { 64, 32 }` only for `sm_86`;
+`sm_120` returns the typed research gap
+`sm_120 LDGSTS/TMA payload-completion throughput is not modeled`. The issue model
+uses a fixed-point 64-unit service quantum: one unit per cache-all payload byte and
+two units per bypass payload byte. Each copy contributes its effective payload
+exactly once to its open group, independent of sector fanout. The conservative
+group floor is:
+
+`latest source completion + ceil(total committed-group delivery work / 64)`.
+
+This deliberately does not claim overlap between early payload delivery and a
+later source response, a shared global delivery queue, or measured cross-warp
+arbitration. Source cache/L2/DRAM timing and traffic remain separate from this
+completion tail.
+
+The trace reader projects exact payload as the checked sum of each retained source
+operand's width over effective lanes. Exact `u64` values live in a sparse warp-local
+arena; replay narrows them through a typed `u64 -> u32` boundary before constructing
+the dynamic token. Effective source presence is represented by nonzero payload,
+while the static L1 policy remains explicit for predicated-off records. This keeps
+`ValidatedMemoryInstruction` at 24 bytes, `AccessKind` at 16 bytes, and
+`ReplayInst` at 24 bytes, with focused size tests preventing another silent
+per-record widening.
+
+Group count, accumulated work, and completion time are preflighted before mutation.
+Response-side payload-floor overflow is rejected before response, cache, waiter,
+or group state changes. Constant-L1 mode first uses a conservative batch-ready
+bound; near a numeric boundary it replays the selected accesses on an exact shadow
+L1 and publishes neither issue nor cache mutation unless source-ready plus payload
+work fits. Focused tests cover route-local rates, sector-count independence,
+once-per-copy accumulation, mismatches, multiplication/time overflow, response
+rollback, constant-L1 retry rollback, and deterministic equal-time responses.
+
+### Fresh replay, foreground silicon, and host cost
+
+The behavioral validation root is
+`/var/tmp/gpu-simulator-async-payload-validation-20260815-v1`. All six current
+address-carrying workloads were replayed twice in flat and shared-L2 modes. Every
+pair is byte-identical, every launch retains exact
+`instructions_issued == records_seen`, and L1/L2/DRAM traffic is unchanged. NCU
+was run separately and synchronously in the foreground on the RTX 3090 Ti at P0,
+1,350 MHz SM and 10,501 MHz memory clocks; these are evaluator-side targets and
+were not used to select either throughput value.
+
+| workload | shared-L2 cycles before → payload model | fresh NCU `sm__cycles_active.max` | residual |
+|---|---:|---:|---:|
+| cp.async canary | 1,044 → 1,060 | 2,230 | -1,170 |
+| BF16 HMMA GEMM | 7,954 → 8,146 | 13,340 | -5,194 |
+| BF16 forward attention | 12,120 → 12,256 | 14,837 | -2,581 |
+| FP16 HMMA GEMM | 7,954 → 8,146 | 13,311 | -5,165 |
+| INT8 IMMA GEMM | 4,550 → 4,646 | 9,829 | -5,183 |
+| sparse BF16 HMMA GEMM | 2,149 → 2,213 | 4,023 | -1,810 |
+
+INT8 flat mode changes independently from 7,662 to 7,758 cycles; the other five
+flat results equal their shared-L2 cycle result. The remaining underprediction is
+reported as an unresolved overlap/resource residual rather than being fitted away.
+
+A first compact implementation placed a `u64` directly in every dynamic
+`AccessKind`, widening `ReplayInst` from 24 to 32 bytes and producing a measured
+7–9% RSS regression on unaffected workloads. The final sparse-exact/compact-token
+representation was rebuilt and revalidated under
+`/var/tmp/gpu-simulator-async-payload-compact-validation-20260815-v2`; all 24
+repeated workload JSON files are byte-identical to the behaviorally validated
+model. Two independent seven-run Embedding/SiLU sets pinned to CPU 2 also retain
+the exact pre-increment JSON hashes. Against the pooled two-set Task-30 baseline,
+pooled median wall time changes by -0.24%, -0.20%, +0.08%, and -0.68%, while
+median RSS changes by -0.55%, -0.82%, -0.10%, and -0.05% for Embedding
+flat/shared-L2 and SiLU flat/shared-L2 respectively. The widened-token regression
+is removed rather than accepted.
+
+The final battery passes 33 `sim-arch`, 8 `sim-engine`, 110 `sim-mem`, 2
+`sim-run`, 280 `sim-sm`, and 97 `sim-trace` unit tests plus all workspace target
+integrations, formatting, deterministic replay, and `git diff --check`.

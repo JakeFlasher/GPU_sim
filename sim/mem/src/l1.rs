@@ -37,6 +37,7 @@
 //! uses a distinct observer lane and never enters ordinary STG attribution.
 
 use std::collections::{BTreeMap, HashMap};
+use std::num::NonZeroU32;
 
 use sim_arch::ArchId;
 
@@ -904,6 +905,16 @@ impl L1Cache {
         self.line_fills.len() + self.sector_fills.len()
     }
 
+    /// Access-local admission may raise a finite generic approximation to an
+    /// independently measured floor without rewriting the cache configuration.
+    /// An unlimited ablation remains unlimited.
+    fn effective_mshr_count(&self, floor: Option<NonZeroU32>) -> Option<usize> {
+        self.cfg.mshr_count.map(|configured| {
+            let effective = floor.map_or(configured, |floor| configured.max(floor.get()));
+            effective as usize
+        })
+    }
+
     /// Whether `fill` is still owned by this cache's event-mode MSHR state.
     /// Response handlers use this as a fail-closed preflight before consuming
     /// their exact response token or mutating any waiter accounting.
@@ -1086,20 +1097,20 @@ impl L1Cache {
         Ok(())
     }
 
-    /// Conservative, allocation-free headroom proof for an ordered batch of
-    /// constant-mode sector accesses. Starting after the latest existing fill
+    /// Conservative, allocation-free ready-time upper bound for an ordered batch
+    /// of constant-mode sector accesses. Starting after the latest existing fill
     /// and charging one miss arm per selected sector covers fills created by an
-    /// earlier access in the same caller transaction. `false` asks the caller to
+    /// earlier access in the same caller transaction. `None` asks the caller to
     /// classify the batch exactly on a shadow cache.
-    pub fn constant_batch_timing_has_headroom(&self, now: u64, sectors: u64) -> bool {
-        if self.preflight_latch(FillTiming::Constant).is_err()
-            || Self::checked_time_add("hit visibility", now, self.cfg.hit_latency).is_err()
-            || Self::checked_time_add("miss visibility", now, self.cfg.miss_latency).is_err()
-        {
-            return false;
+    pub fn constant_batch_ready_upper_bound(&self, now: u64, sectors: u64) -> Option<u64> {
+        if self.preflight_latch(FillTiming::Constant).is_err() {
+            return None;
         }
+        let hit_ready = Self::checked_time_add("hit visibility", now, self.cfg.hit_latency).ok()?;
+        let miss_ready =
+            Self::checked_time_add("miss visibility", now, self.cfg.miss_latency).ok()?;
         if sectors == 0 {
-            return true;
+            return Some(hit_ready.max(miss_ready));
         }
         let start = self
             .line_fills
@@ -1113,6 +1124,12 @@ impl L1Cache {
             .miss_latency
             .checked_mul(sectors)
             .and_then(|delta| start.checked_add(delta))
+            .map(|batch_miss_ready| batch_miss_ready.max(hit_ready))
+    }
+
+    /// Does the conservative constant-batch ready-time bound fit in u64?
+    pub fn constant_batch_timing_has_headroom(&self, now: u64, sectors: u64) -> bool {
+        self.constant_batch_ready_upper_bound(now, sectors)
             .is_some()
     }
 
@@ -1232,6 +1249,7 @@ impl L1Cache {
         origin: MemoryOrigin,
         sector_id: i64,
         fill_request: FillRequest,
+        mshr_floor: Option<NonZeroU32>,
     ) -> Result<CoreAccess, L1AccessError> {
         let line = sector_id >> 2;
         let sector = (sector_id & 3) as u8;
@@ -1272,8 +1290,8 @@ impl L1Cache {
             return Ok(CoreAccess::SectorMerge { pending });
         }
         // Miss path: needs an MSHR entry (both fill kinds consume capacity).
-        if let Some(cap) = self.cfg.mshr_count
-            && self.mshr_in_use() >= cap as usize
+        if let Some(cap) = self.effective_mshr_count(mshr_floor)
+            && self.mshr_in_use() >= cap
         {
             self.apply_counter_deltas(origin, &[(L1CounterField::StallEvents, 1)])?;
             return Ok(CoreAccess::Stalled);
@@ -1321,9 +1339,15 @@ impl L1Cache {
         sector_id: i64,
         now: u64,
         readiness: Readiness,
+        mshr_floor: Option<NonZeroU32>,
     ) -> Result<SingleOutcome, L1AccessError> {
         self.apply_fills(now)?;
-        match self.access_core(origin, sector_id, FillRequest::Constant { now, readiness })? {
+        match self.access_core(
+            origin,
+            sector_id,
+            FillRequest::Constant { now, readiness },
+            mshr_floor,
+        )? {
             CoreAccess::Hit { ready } => Ok(SingleOutcome::Done(AccessOutcome::Hit, ready)),
             CoreAccess::LineMerge { pending } | CoreAccess::SectorMerge { pending } => {
                 let pending = pending.timed().ok_or(L1AccessError::FillTimingMismatch {
@@ -1363,11 +1387,12 @@ impl L1Cache {
         origin: MemoryOrigin,
         sector_id: i64,
         now: u64,
+        mshr_floor: Option<NonZeroU32>,
     ) -> Result<(AccessOutcome, u64), L1AccessError> {
         self.commit_latch(FillTiming::Constant);
         let mut t = now;
         loop {
-            match self.access_single(origin, sector_id, t, Readiness::Observed)? {
+            match self.access_single(origin, sector_id, t, Readiness::Observed, mshr_floor)? {
                 SingleOutcome::Done(outcome, Some(ready)) => return Ok((outcome, ready)),
                 SingleOutcome::Done(_, None) => {
                     unreachable!("observed constant access omitted its ready time")
@@ -1384,11 +1409,12 @@ impl L1Cache {
         origin: MemoryOrigin,
         sector_id: i64,
         now: u64,
+        mshr_floor: Option<NonZeroU32>,
     ) -> Result<AccessOutcome, L1AccessError> {
         self.commit_latch(FillTiming::Constant);
         let mut t = now;
         loop {
-            match self.access_single(origin, sector_id, t, Readiness::Unobserved)? {
+            match self.access_single(origin, sector_id, t, Readiness::Unobserved, mshr_floor)? {
                 SingleOutcome::Done(outcome, _) => return Ok(outcome),
                 SingleOutcome::Stall { retry_at } => {
                     t = retry_at.max(Self::checked_time_add("stall retry", t, 1)?);
@@ -1418,11 +1444,40 @@ impl L1Cache {
             && self.preflight_constant_access_timing(now).is_ok();
         if !fast_path_safe {
             let mut shadow = self.clone();
-            let outcome = shadow.access_eligible_constant_impl(origin, sector_id, now)?;
+            let outcome = shadow.access_eligible_constant_impl(origin, sector_id, now, None)?;
             *self = shadow;
             return Ok(outcome);
         }
-        self.access_eligible_constant_impl(origin, sector_id, now)
+        self.access_eligible_constant_impl(origin, sector_id, now, None)
+    }
+
+    /// Constant-mode eligible access with a caller-characterized lower bound on
+    /// finite miss admission. The floor applies only to this access; ordinary
+    /// accesses continue to observe [`L1Config::mshr_count`].
+    pub fn access_eligible_with_mshr_floor(
+        &mut self,
+        origin: MemoryOrigin,
+        sector_id: i64,
+        now: u64,
+        mshr_floor: NonZeroU32,
+    ) -> Result<(AccessOutcome, u64), L1AccessError> {
+        self.preflight_latch(FillTiming::Constant)?;
+        let budget = L1MutationBudget {
+            eligible_sectors: 1,
+            recency_touches: 1,
+            new_fills: 1,
+            ..L1MutationBudget::for_origin(origin)
+        };
+        let fast_path_safe = self.preflight_mutation_budget(budget).is_ok()
+            && self.preflight_constant_access_timing(now).is_ok();
+        if !fast_path_safe {
+            let mut shadow = self.clone();
+            let outcome =
+                shadow.access_eligible_constant_impl(origin, sector_id, now, Some(mshr_floor))?;
+            *self = shadow;
+            return Ok(outcome);
+        }
+        self.access_eligible_constant_impl(origin, sector_id, now, Some(mshr_floor))
     }
 
     /// Mutate constant-mode cache state for one eligible sector without
@@ -1447,11 +1502,42 @@ impl L1Cache {
         if !fast_path_safe {
             let mut shadow = self.clone();
             let outcome =
-                shadow.access_eligible_constant_unobserved_impl(origin, sector_id, now)?;
+                shadow.access_eligible_constant_unobserved_impl(origin, sector_id, now, None)?;
             *self = shadow;
             return Ok(outcome);
         }
-        self.access_eligible_constant_unobserved_impl(origin, sector_id, now)
+        self.access_eligible_constant_unobserved_impl(origin, sector_id, now, None)
+    }
+
+    /// Unobserved counterpart to [`Self::access_eligible_with_mshr_floor`].
+    pub fn access_eligible_unobserved_with_mshr_floor(
+        &mut self,
+        origin: MemoryOrigin,
+        sector_id: i64,
+        now: u64,
+        mshr_floor: NonZeroU32,
+    ) -> Result<AccessOutcome, L1AccessError> {
+        self.preflight_latch(FillTiming::Constant)?;
+        let budget = L1MutationBudget {
+            eligible_sectors: 1,
+            recency_touches: 1,
+            new_fills: 1,
+            ..L1MutationBudget::for_origin(origin)
+        };
+        let fast_path_safe = self.preflight_mutation_budget(budget).is_ok()
+            && self.preflight_constant_access_timing(now).is_ok();
+        if !fast_path_safe {
+            let mut shadow = self.clone();
+            let outcome = shadow.access_eligible_constant_unobserved_impl(
+                origin,
+                sector_id,
+                now,
+                Some(mshr_floor),
+            )?;
+            *self = shadow;
+            return Ok(outcome);
+        }
+        self.access_eligible_constant_unobserved_impl(origin, sector_id, now, Some(mshr_floor))
     }
 
     fn access_eligible_event_core(
@@ -1460,9 +1546,15 @@ impl L1Cache {
         sector_id: i64,
         now: u64,
         readiness: Readiness,
+        mshr_floor: Option<NonZeroU32>,
     ) -> Result<CoreAccess, L1AccessError> {
         self.commit_latch(FillTiming::Event);
-        self.access_core(origin, sector_id, FillRequest::Event { now, readiness })
+        self.access_core(
+            origin,
+            sector_id,
+            FillRequest::Event { now, readiness },
+            mshr_floor,
+        )
     }
 
     fn access_eligible_event_impl(
@@ -1470,11 +1562,18 @@ impl L1Cache {
         origin: MemoryOrigin,
         sector_id: i64,
         now: u64,
+        mshr_floor: Option<NonZeroU32>,
     ) -> Result<EvAccess, L1AccessError> {
         let line = sector_id >> 2;
         let sector = (sector_id & 3) as u8;
         Ok(
-            match self.access_eligible_event_core(origin, sector_id, now, Readiness::Observed)? {
+            match self.access_eligible_event_core(
+                origin,
+                sector_id,
+                now,
+                Readiness::Observed,
+                mshr_floor,
+            )? {
                 CoreAccess::Hit { ready: Some(ready) } => EvAccess::Hit { ready },
                 CoreAccess::Hit { ready: None } => {
                     unreachable!("observed event access omitted its ready time")
@@ -1501,11 +1600,18 @@ impl L1Cache {
         origin: MemoryOrigin,
         sector_id: i64,
         now: u64,
+        mshr_floor: Option<NonZeroU32>,
     ) -> Result<EvAccessUnobserved, L1AccessError> {
         let line = sector_id >> 2;
         let sector = (sector_id & 3) as u8;
         Ok(
-            match self.access_eligible_event_core(origin, sector_id, now, Readiness::Unobserved)? {
+            match self.access_eligible_event_core(
+                origin,
+                sector_id,
+                now,
+                Readiness::Unobserved,
+                mshr_floor,
+            )? {
                 CoreAccess::Hit { .. } => EvAccessUnobserved::Hit,
                 CoreAccess::LineMerge { .. } => EvAccessUnobserved::MergedPending {
                     fill: FillKey::Line(line),
@@ -1555,11 +1661,37 @@ impl L1Cache {
         };
         if self.preflight_mutation_budget(budget).is_err() {
             let mut shadow = self.clone();
-            let outcome = shadow.access_eligible_event_impl(origin, sector_id, now)?;
+            let outcome = shadow.access_eligible_event_impl(origin, sector_id, now, None)?;
             *self = shadow;
             return Ok(outcome);
         }
-        self.access_eligible_event_impl(origin, sector_id, now)
+        self.access_eligible_event_impl(origin, sector_id, now, None)
+    }
+
+    /// Event-mode eligible access with a caller-characterized lower bound on
+    /// finite miss admission. The floor applies only to this access.
+    pub fn access_eligible_ev_with_mshr_floor(
+        &mut self,
+        origin: MemoryOrigin,
+        sector_id: i64,
+        now: u64,
+        mshr_floor: NonZeroU32,
+    ) -> Result<EvAccess, L1AccessError> {
+        self.preflight_latch(FillTiming::Event)?;
+        let budget = L1MutationBudget {
+            eligible_sectors: 1,
+            recency_touches: 1,
+            new_fills: 1,
+            ..L1MutationBudget::for_origin(origin)
+        };
+        if self.preflight_mutation_budget(budget).is_err() {
+            let mut shadow = self.clone();
+            let outcome =
+                shadow.access_eligible_event_impl(origin, sector_id, now, Some(mshr_floor))?;
+            *self = shadow;
+            return Ok(outcome);
+        }
+        self.access_eligible_event_impl(origin, sector_id, now, Some(mshr_floor))
     }
 
     /// Event-mode cache mutation when no dependence barrier consumes a hit's
@@ -1579,11 +1711,41 @@ impl L1Cache {
         };
         if self.preflight_mutation_budget(budget).is_err() {
             let mut shadow = self.clone();
-            let outcome = shadow.access_eligible_event_unobserved_impl(origin, sector_id, now)?;
+            let outcome =
+                shadow.access_eligible_event_unobserved_impl(origin, sector_id, now, None)?;
             *self = shadow;
             return Ok(outcome);
         }
-        self.access_eligible_event_unobserved_impl(origin, sector_id, now)
+        self.access_eligible_event_unobserved_impl(origin, sector_id, now, None)
+    }
+
+    /// Unobserved counterpart to [`Self::access_eligible_ev_with_mshr_floor`].
+    pub fn access_eligible_ev_unobserved_with_mshr_floor(
+        &mut self,
+        origin: MemoryOrigin,
+        sector_id: i64,
+        now: u64,
+        mshr_floor: NonZeroU32,
+    ) -> Result<EvAccessUnobserved, L1AccessError> {
+        self.preflight_latch(FillTiming::Event)?;
+        let budget = L1MutationBudget {
+            eligible_sectors: 1,
+            recency_touches: 1,
+            new_fills: 1,
+            ..L1MutationBudget::for_origin(origin)
+        };
+        if self.preflight_mutation_budget(budget).is_err() {
+            let mut shadow = self.clone();
+            let outcome = shadow.access_eligible_event_unobserved_impl(
+                origin,
+                sector_id,
+                now,
+                Some(mshr_floor),
+            )?;
+            *self = shadow;
+            return Ok(outcome);
+        }
+        self.access_eligible_event_unobserved_impl(origin, sector_id, now, Some(mshr_floor))
     }
 
     /// Complete an event-mode fill AT the response event's time. A
@@ -2459,6 +2621,119 @@ mod tests {
         assert_eq!(ready, fill + 244);
         assert_eq!(l1.counters.stall_events, 1);
         counters_invariant(&l1.counters);
+    }
+
+    #[test]
+    fn mshr_floor_is_access_local_in_constant_mode() {
+        let floor = NonZeroU32::new(2).unwrap();
+        let mut observed = cache(8, Some(1));
+        assert_eq!(access(&mut observed, 0, 0).0, AccessOutcome::MissLineAlloc);
+        assert_eq!(
+            observed
+                .access_eligible_with_mshr_floor(MemoryOrigin::Global, 4, 1, floor)
+                .unwrap(),
+            (AccessOutcome::MissLineAlloc, 245)
+        );
+        assert_eq!(observed.counters.stall_events, 0);
+        assert_eq!(observed.cfg.mshr_count, Some(1));
+
+        let (outcome, ready) = access(&mut observed, 8, 2);
+        assert_eq!(outcome, AccessOutcome::MissLineAlloc);
+        assert_eq!(ready, 489);
+        assert_eq!(observed.counters.stall_events, 2);
+
+        let mut unobserved = cache(8, Some(1));
+        assert_eq!(
+            unobserved
+                .access_eligible_unobserved(MemoryOrigin::Global, 0, 0)
+                .unwrap(),
+            AccessOutcome::MissLineAlloc
+        );
+        assert_eq!(
+            unobserved
+                .access_eligible_unobserved_with_mshr_floor(MemoryOrigin::Global, 4, 1, floor,)
+                .unwrap(),
+            AccessOutcome::MissLineAlloc
+        );
+        assert_eq!(unobserved.counters.stall_events, 0);
+        assert_eq!(
+            unobserved
+                .access_eligible_unobserved(MemoryOrigin::Global, 8, 2)
+                .unwrap(),
+            AccessOutcome::MissLineAlloc
+        );
+        assert_eq!(unobserved.counters.stall_events, 2);
+    }
+
+    #[test]
+    fn event_mshr_floor_preserves_merges_and_ordinary_capacity() {
+        let floor_two = NonZeroU32::new(2).unwrap();
+        let floor_three = NonZeroU32::new(3).unwrap();
+        let mut l1 = cache(8, Some(1));
+        assert_eq!(
+            access_ev(&mut l1, 0, 0),
+            EvAccess::MissRequest {
+                fill: FillKey::Line(0)
+            }
+        );
+        assert_eq!(
+            l1.access_eligible_ev_with_mshr_floor(MemoryOrigin::Global, 4, 1, floor_two)
+                .unwrap(),
+            EvAccess::MissRequest {
+                fill: FillKey::Line(1)
+            }
+        );
+        assert_eq!(l1.cfg.mshr_count, Some(1));
+        assert_eq!(
+            access_ev(&mut l1, 5, 2),
+            EvAccess::MergedPending {
+                fill: FillKey::Line(1)
+            },
+            "an in-flight line merges before the finite-capacity check"
+        );
+        assert_eq!(access_ev(&mut l1, 8, 3), EvAccess::Stalled);
+        assert_eq!(
+            l1.access_eligible_ev_unobserved_with_mshr_floor(
+                MemoryOrigin::Global,
+                8,
+                4,
+                floor_three,
+            )
+            .unwrap(),
+            EvAccessUnobserved::MissRequest {
+                fill: FillKey::Line(2)
+            }
+        );
+        assert_eq!(access_ev(&mut l1, 12, 5), EvAccess::Stalled);
+        assert_eq!(l1.counters.stall_events, 2);
+        counters_invariant(&l1.counters);
+    }
+
+    #[test]
+    fn mshr_floor_does_not_limit_unlimited_event_mode() {
+        let floor = NonZeroU32::new(1).unwrap();
+        let mut l1 = cache(8, None);
+        for line in 0..4 {
+            assert_eq!(
+                l1.access_eligible_ev_with_mshr_floor(
+                    MemoryOrigin::Global,
+                    line * 4,
+                    line as u64,
+                    floor,
+                )
+                .unwrap(),
+                EvAccess::MissRequest {
+                    fill: FillKey::Line(line)
+                }
+            );
+        }
+        assert_eq!(
+            access_ev(&mut l1, 16, 4),
+            EvAccess::MissRequest {
+                fill: FillKey::Line(4)
+            }
+        );
+        assert_eq!(l1.counters.stall_events, 0);
     }
 
     #[test]

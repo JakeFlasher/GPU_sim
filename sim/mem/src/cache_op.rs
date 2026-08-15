@@ -21,7 +21,7 @@
 //! appear inside operand syntax); first-token matching cannot
 //! false-match a hypothetical operand.
 
-use sim_arch::{ArchError, ArchId, BareLdgEDefault, CapabilityError};
+use sim_arch::{ArchError, ArchId, BareLdgEDefault, CapabilityError, LdgstsL1CacheSemantics};
 
 /// The closed 12-token vocabulary (schema lockstep with
 /// `cache_op_map.schema.json` and the Python tuple).
@@ -62,12 +62,23 @@ pub fn derive_l1_eligible(token: CacheOpToken) -> bool {
 /// visible to checked consumers rather than becoming a cross-arch default.
 pub const BARE_LDG_E_DEFAULTS_TO_CA: &[&str] = &["sm_86"];
 
+/// Source-cache route encoded by an architecture-supported `LDGSTS` SASS form.
+/// This is separate from [`CacheOpToken`] so the historical 12-token parity
+/// vocabulary remains stable while async-copy completion retains its own type.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LdgstsL1Policy {
+    CacheAtAllLevels,
+    BypassL1,
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum CacheOpError {
     #[error("{0}")]
     Architecture(#[from] ArchError),
     #[error("{0}")]
     Capability(#[from] CapabilityError),
+    #[error("LDGSTS opcode {opcode:?} has no source-cache interpretation on {arch}")]
+    LdgstsOpcodeUnsupported { arch: ArchId, opcode: String },
 }
 
 /// Leading opcode token's head (before the first `.`): the shared
@@ -77,6 +88,44 @@ pub enum CacheOpError {
 pub fn opcode_head(opcode_text: &str) -> &str {
     let opcode = opcode_text.split_whitespace().next().unwrap_or("");
     opcode.split('.').next().unwrap_or("")
+}
+
+/// Classify the global-source L1 route of one `LDGSTS` instruction. Non-LDGSTS
+/// opcodes return `None` without consulting an architecture capability.
+///
+/// On the characterized Ampere form, the first modifier must be `.E` and a
+/// dotted `.BYPASS` component selects the L2-only route. Width and locality
+/// hints are orthogonal. This matches the direct `cp.async.ca`/`cp.async.cg`
+/// lowering and cache-traffic measurement rather than inferring policy from a
+/// workload label.
+pub fn classify_ldgsts_l1_policy(
+    opcode_text: &str,
+    arch: ArchId,
+) -> Result<Option<LdgstsL1Policy>, CacheOpError> {
+    let opcode = opcode_text.split_whitespace().next().unwrap_or("");
+    let mut parts = opcode.split('.');
+    if parts.next() != Some("LDGSTS") {
+        return Ok(None);
+    }
+    let semantics = arch
+        .ldgsts_l1_cache_semantics()
+        .require("ldgsts_l1_cache_semantics")?;
+    if parts.next() != Some("E") {
+        return Err(CacheOpError::LdgstsOpcodeUnsupported {
+            arch,
+            opcode: opcode.to_owned(),
+        });
+    }
+    match semantics {
+        LdgstsL1CacheSemantics::AmpereOptionalBypassModifierV1 => {
+            let bypass = parts.any(|modifier| modifier == "BYPASS");
+            Ok(Some(if bypass {
+                LdgstsL1Policy::BypassL1
+            } else {
+                LdgstsL1Policy::CacheAtAllLevels
+            }))
+        }
+    }
 }
 
 /// Classify one sidecar `opcode_text` line with a typed deployment
@@ -232,6 +281,54 @@ mod tests {
             classify_opcode("TLD.LZ R4, [R8]", "sm_86"),
             Some(CacheOpToken::Tex)
         );
+    }
+
+    #[test]
+    fn sm86_ldgsts_cache_modifier_selects_the_source_l1_route() {
+        for (opcode, expected) in [
+            (
+                "LDGSTS.E.128 [R4], [R32.64]",
+                LdgstsL1Policy::CacheAtAllLevels,
+            ),
+            (
+                "LDGSTS.E.64 [R17], [R2.64]",
+                LdgstsL1Policy::CacheAtAllLevels,
+            ),
+            (
+                "LDGSTS.E.BYPASS.LTC128B.128 [R1], [R2.64]",
+                LdgstsL1Policy::BypassL1,
+            ),
+        ] {
+            assert_eq!(
+                classify_ldgsts_l1_policy(opcode, ArchId::Sm86).unwrap(),
+                Some(expected),
+                "opcode {opcode}"
+            );
+        }
+        assert_eq!(
+            classify_ldgsts_l1_policy("LDG.E R0, [R2.64]", ArchId::Sm120).unwrap(),
+            None,
+            "non-LDGSTS opcodes do not borrow the capability"
+        );
+    }
+
+    #[test]
+    fn ldgsts_cache_policy_fails_typed_on_unknown_forms_and_sm120() {
+        assert!(matches!(
+            classify_ldgsts_l1_policy("LDGSTS.128 [R1], [R2.64]", ArchId::Sm86),
+            Err(CacheOpError::LdgstsOpcodeUnsupported {
+                arch: ArchId::Sm86,
+                opcode,
+            }) if opcode == "LDGSTS.128"
+        ));
+        assert!(matches!(
+            classify_ldgsts_l1_policy("LDGSTS.E.128 [R1], [R2.64]", ArchId::Sm120),
+            Err(CacheOpError::Capability(CapabilityError::ResearchGap {
+                arch: ArchId::Sm120,
+                capability: "ldgsts_l1_cache_semantics",
+                reason,
+            })) if !reason.is_empty()
+        ));
     }
 
     #[test]

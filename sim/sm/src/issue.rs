@@ -14,6 +14,9 @@
 //!   `t + max(stall, 1)`; a set write/read dependence barrier is stamped
 //!   with a clear time; an instruction whose control word carries a wait
 //!   mask cannot issue until every masked barrier has cleared.
+//! - Admitted tensor instructions additionally wait for their SMSP-local
+//!   Tensor Core initiation timeline. Other pipelines remain dispatch-only,
+//!   so independent non-tensor work may issue while the tensor pipe is busy.
 //! - `BAR.*` (classified by the sidecar's opcode text) is a block-wide
 //!   barrier: generation semantics — it releases when every unfinished
 //!   warp of the block is waiting at it (warps that already finished do
@@ -32,14 +35,15 @@
 //! - **L1Shared**: the request/response INVERSION for the shared L2
 //!   (design §6.3): an L1 miss's fill time is NOT knowable at issue —
 //!   the shared L2's state when the request arrives decides L2-hit vs
-//!   DRAM pricing. Misses emit [`MemRequest`]s; the warp's dependence
-//!   barrier tracks PENDING response counts alongside the known clear
-//!   stamp (hardware counter semantics extended to unknown write-backs),
-//!   and [`SmCore::on_response`] completes fills / clears pending units
-//!   at response-event time. MSHR-full accesses park in a retry queue
-//!   drained on the next completion (the event-mode analogue of the
-//!   constant mode's retry-at-earliest-fill; the warp itself keeps
-//!   issuing until a wait mask stops it, like the hardware's LSU replay
+//!   DRAM pricing. Misses emit [`MemRequest`]s; ordinary load barriers
+//!   and non-bulk async-copy groups retain typed completion targets on
+//!   hits, fills, and MSHR retries. [`SmCore::on_response`] completes the
+//!   fill and every target at response-event time. An explicit
+//!   `LDGSTS.E.BYPASS` instead keeps the direct-L2 async response route.
+//!   MSHR-full accesses park in a retry queue drained on the next
+//!   completion (the event-mode analogue of the constant mode's
+//!   retry-at-earliest-fill; the warp itself keeps issuing until a wait
+//!   mask or async-group wait stops it, like the hardware's LSU replay
 //!   path).
 //!
 //! [`SmCore`] is a resumable actor: `advance(horizon)` runs issue cycles
@@ -55,17 +59,18 @@
 
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::num::NonZeroU32;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use sim_arch::ArchId;
 use sim_arch::card::{ArchCard, CalibError, RequiredIssueResources};
+use sim_arch::{ArchId, LdgstsCompletionThroughput, SharedBankProjection};
 use sim_mem::{
     CacheOpToken, EvAccess, EvAccessUnobserved, FillKey, L1AccessError, L1Cache, L1Config,
-    L1Counters, L1MutationBudget, L2OpClass, L2Source, MemoryOrigin,
+    L1Counters, L1MutationBudget, L2OpClass, L2Source, LdgstsL1Policy, MemoryOrigin,
 };
 
 use crate::control_bits::{ControlDomainError, DepBarrier};
-use crate::program::{FunctionSchedule, IssueSlot, OpClass};
+use crate::program::{FunctionSchedule, IssueSlot, OpClass, PipelineClass};
 
 pub use sim_mem::AccessKind;
 
@@ -176,8 +181,13 @@ pub struct IssueModelParams {
     /// `dram_latency_cycles`, ceiled): the DRAM arm of the ladder in
     /// L1Shared mode, and the flat global barrier latency in Flat mode.
     pub(crate) global_flat_latency: u64,
-    /// Shared-class barrier latency (card `shared_latency_cycles`).
+    /// Shared-class base barrier latency (card `shared_latency_cycles`).
     pub(crate) shared_write_barrier_latency: u64,
+    /// Additional dependent completion latency for every shared bank wavefront
+    /// after the first. The trace projection and this timing source are both
+    /// architecture-local; zero-wavefront legacy/predicated records retain the
+    /// base latency.
+    pub(crate) shared_additional_wavefront_latency: u64,
     /// Write-barrier clear latency for non-memory producers (S2R, MUFU,
     /// I2F, HMMA & co). Hypothesis knob: ~20–25 cycles is the
     /// special-register/SFU class in Abdelkhalik et al. (HPEC'22, A100);
@@ -186,6 +196,14 @@ pub struct IssueModelParams {
     /// Read-dependence barrier clear latency (operand consumption).
     /// Hypothesis knob: source operands are read a few cycles after issue.
     pub(crate) read_barrier_latency: u64,
+    /// Access-local lower bound on finite L1 miss admission for cacheable
+    /// `LDGSTS.E` source traffic. Ordinary loads retain the card's unresolved
+    /// MSHR approximation; an unlimited L1 ablation remains unlimited.
+    pub(crate) ldgsts_l1_mshr_floor: NonZeroU32,
+    /// Effective async-copy payload delivery rates. The issue model converts both
+    /// routes into one exact fixed-point work domain per committed group; it does
+    /// not infer payload from deduplicated source-sector count.
+    pub(crate) ldgsts_completion_throughput: LdgstsCompletionThroughput,
     /// Resident-warp ceiling per SM. The current sm_86 hypothesis is 48;
     /// template architectures return a typed capability gap until their
     /// occupancy evidence is carded.
@@ -217,6 +235,45 @@ fn checked_latency(name: &'static str, value: f64) -> Result<u64, IssueError> {
     Ok(rounded as u64)
 }
 
+fn shared_additional_wavefront_latency(arch: ArchId) -> Result<u64, IssueError> {
+    let timing = arch
+        .shared_memory_wavefront_timing()
+        .require("shared_memory_wavefront_timing")?;
+    match timing.projection {
+        SharedBankProjection::Banks32Words4Bytes => {}
+    }
+    Ok(timing.additional_wavefront_latency_cycles)
+}
+
+fn ldgsts_l1_mshr_floor(arch: ArchId) -> Result<NonZeroU32, IssueError> {
+    let admission = arch
+        .ldgsts_l1_fill_admission()
+        .require("ldgsts_l1_fill_admission")?;
+    NonZeroU32::new(admission.minimum_concurrent_line_fills).ok_or(
+        IssueError::InvalidLdgstsL1MshrFloor {
+            arch,
+            floor: admission.minimum_concurrent_line_fills,
+        },
+    )
+}
+
+fn ldgsts_completion_throughput(arch: ArchId) -> Result<LdgstsCompletionThroughput, IssueError> {
+    let throughput = arch
+        .ldgsts_completion_throughput()
+        .require("ldgsts_completion_throughput")?;
+    let cache_all = throughput.cache_all_payload_bytes_per_cycle;
+    let bypass = throughput.bypass_payload_bytes_per_cycle;
+    let common = cache_all.max(bypass);
+    if cache_all == 0 || bypass == 0 || common % cache_all != 0 || common % bypass != 0 {
+        return Err(IssueError::InvalidLdgstsCompletionThroughput {
+            arch,
+            cache_all_bytes_per_cycle: cache_all,
+            bypass_bytes_per_cycle: bypass,
+        });
+    }
+    Ok(throughput)
+}
+
 impl IssueModelParams {
     /// Resolve card latencies plus the retained architecture-local issue
     /// hypotheses. The name is intentionally explicit: this executable lane does
@@ -231,6 +288,9 @@ impl IssueModelParams {
         shared_cycles: f64,
     ) -> Result<Self, IssueError> {
         let hypotheses = arch.issue_hypotheses().require("issue_hypotheses")?;
+        let shared_additional_wavefront_latency = shared_additional_wavefront_latency(arch)?;
+        let ldgsts_l1_mshr_floor = ldgsts_l1_mshr_floor(arch)?;
+        let ldgsts_completion_throughput = ldgsts_completion_throughput(arch)?;
         Ok(Self {
             arch,
             resource_source: IssueResourceSource::ArchitectureDefaults,
@@ -238,8 +298,11 @@ impl IssueModelParams {
             l1_miss_latency: checked_latency("l2_hit_cycles", l2_hit_cycles)?,
             global_flat_latency: checked_latency("dram_cycles", dram_cycles)?,
             shared_write_barrier_latency: checked_latency("shared_cycles", shared_cycles)?,
+            shared_additional_wavefront_latency,
             non_memory_write_barrier_latency: hypotheses.non_memory_write_barrier_latency,
             read_barrier_latency: hypotheses.read_barrier_latency,
+            ldgsts_l1_mshr_floor,
+            ldgsts_completion_throughput,
             max_resident_warps_per_sm: hypotheses.max_resident_warps_per_sm,
         })
     }
@@ -259,6 +322,9 @@ impl IssueModelParams {
         }
         let latencies = card.required_latencies()?;
         let resources = card.required_issue_resources()?;
+        let shared_additional_wavefront_latency = shared_additional_wavefront_latency(arch)?;
+        let ldgsts_l1_mshr_floor = ldgsts_l1_mshr_floor(arch)?;
+        let ldgsts_completion_throughput = ldgsts_completion_throughput(arch)?;
         Ok(Self {
             arch,
             resource_source: IssueResourceSource::Carded(resources),
@@ -266,8 +332,11 @@ impl IssueModelParams {
             l1_miss_latency: checked_latency("l2_hit_cycles", latencies.l2_hit)?,
             global_flat_latency: checked_latency("dram_cycles", latencies.dram)?,
             shared_write_barrier_latency: checked_latency("shared_cycles", latencies.shared)?,
+            shared_additional_wavefront_latency,
             non_memory_write_barrier_latency: resources.barrier_latencies.non_memory_write,
             read_barrier_latency: resources.barrier_latencies.read,
+            ldgsts_l1_mshr_floor,
+            ldgsts_completion_throughput,
             max_resident_warps_per_sm: resources.occupancy.max_resident_warps_per_sm,
         })
     }
@@ -296,12 +365,71 @@ impl IssueModelParams {
         self.shared_write_barrier_latency
     }
 
+    pub const fn shared_additional_wavefront_latency(&self) -> u64 {
+        self.shared_additional_wavefront_latency
+    }
+
     pub const fn non_memory_write_barrier_latency(&self) -> u64 {
         self.non_memory_write_barrier_latency
     }
 
     pub const fn read_barrier_latency(&self) -> u64 {
         self.read_barrier_latency
+    }
+
+    pub const fn ldgsts_l1_mshr_floor(&self) -> NonZeroU32 {
+        self.ldgsts_l1_mshr_floor
+    }
+
+    pub const fn ldgsts_completion_throughput(&self) -> LdgstsCompletionThroughput {
+        self.ldgsts_completion_throughput
+    }
+
+    fn ldgsts_delivery_units_per_cycle(&self) -> u64 {
+        self.ldgsts_completion_throughput
+            .cache_all_payload_bytes_per_cycle
+            .max(
+                self.ldgsts_completion_throughput
+                    .bypass_payload_bytes_per_cycle,
+            )
+    }
+
+    fn ldgsts_delivery_work(
+        &self,
+        l1_policy: LdgstsL1Policy,
+        payload_bytes: u64,
+    ) -> Result<u64, IssueError> {
+        let units_per_cycle = self.ldgsts_delivery_units_per_cycle();
+        let route_rate = match l1_policy {
+            LdgstsL1Policy::CacheAtAllLevels => {
+                self.ldgsts_completion_throughput
+                    .cache_all_payload_bytes_per_cycle
+            }
+            LdgstsL1Policy::BypassL1 => {
+                self.ldgsts_completion_throughput
+                    .bypass_payload_bytes_per_cycle
+            }
+        };
+        let units_per_byte = units_per_cycle / route_rate;
+        payload_bytes
+            .checked_mul(units_per_byte)
+            .ok_or(IssueError::TimeMultiplicationOverflow {
+                operation: "LDGSTS payload-delivery work",
+                lhs: payload_bytes,
+                rhs: units_per_byte,
+            })
+    }
+
+    fn ldgsts_delivery_cycles(&self, work: u64) -> u64 {
+        work.div_ceil(self.ldgsts_delivery_units_per_cycle())
+    }
+
+    fn ldgsts_completion_ready(&self, source_ready: u64, work: u64) -> Result<u64, IssueError> {
+        checked_cycle_add(
+            "LDGSTS payload completion floor",
+            source_ready,
+            self.ldgsts_delivery_cycles(work),
+        )
     }
 
     pub const fn max_resident_warps_per_sm(&self) -> u32 {
@@ -312,7 +440,33 @@ impl IssueModelParams {
         match self.resource_source {
             IssueResourceSource::ArchitectureDefaults => {
                 let hypotheses = self.arch.issue_hypotheses().require("issue_hypotheses")?;
+                let shared_additional_wavefront_latency =
+                    shared_additional_wavefront_latency(self.arch)?;
+                let ldgsts_l1_mshr_floor = ldgsts_l1_mshr_floor(self.arch)?;
+                let ldgsts_completion_throughput = ldgsts_completion_throughput(self.arch)?;
                 let fields = [
+                    (
+                        "shared_additional_wavefront_latency",
+                        shared_additional_wavefront_latency,
+                        self.shared_additional_wavefront_latency,
+                    ),
+                    (
+                        "ldgsts_l1_mshr_floor",
+                        u64::from(ldgsts_l1_mshr_floor.get()),
+                        u64::from(self.ldgsts_l1_mshr_floor.get()),
+                    ),
+                    (
+                        "ldgsts_cache_all_payload_bytes_per_cycle",
+                        ldgsts_completion_throughput.cache_all_payload_bytes_per_cycle,
+                        self.ldgsts_completion_throughput
+                            .cache_all_payload_bytes_per_cycle,
+                    ),
+                    (
+                        "ldgsts_bypass_payload_bytes_per_cycle",
+                        ldgsts_completion_throughput.bypass_payload_bytes_per_cycle,
+                        self.ldgsts_completion_throughput
+                            .bypass_payload_bytes_per_cycle,
+                    ),
                     (
                         "non_memory_write_barrier_latency",
                         hypotheses.non_memory_write_barrier_latency,
@@ -358,12 +512,29 @@ impl IssueModelParams {
         )
     }
 
-    /// Shared-memory visibility (one copy for BOTH memory modes).
-    fn shared_ready(&self, t: u64) -> Result<u64, IssueError> {
-        checked_cycle_add(
-            "shared-memory write-barrier visibility",
+    /// Shared-memory visibility. One effective wavefront retains the carded
+    /// dependent latency; every additional bank wavefront pays the measured
+    /// architecture-local serialization increment. Zero preserves the legacy
+    /// and predicated-off fixed-latency behavior.
+    fn shared_ready(&self, t: u64, wavefronts: u64) -> Result<u64, IssueError> {
+        let additional_wavefronts = wavefronts.saturating_sub(1);
+        let additional_latency = self
+            .shared_additional_wavefront_latency
+            .checked_mul(additional_wavefronts)
+            .ok_or(IssueError::TimeMultiplicationOverflow {
+                operation: "shared-memory additional-wavefront latency",
+                lhs: self.shared_additional_wavefront_latency,
+                rhs: additional_wavefronts,
+            })?;
+        let base_ready = checked_cycle_add(
+            "shared-memory base write-barrier visibility",
             t,
             self.shared_write_barrier_latency,
+        )?;
+        checked_cycle_add(
+            "shared-memory wavefront write-barrier visibility",
+            base_ready,
+            additional_latency,
         )
     }
 
@@ -438,6 +609,26 @@ pub enum IssueError {
         field: &'static str,
         expected: u64,
         got: u64,
+    },
+    #[error(
+        "architecture {arch} has invalid cacheable-LDGSTS L1 miss-admission floor {floor}; expected a positive value"
+    )]
+    InvalidLdgstsL1MshrFloor { arch: ArchId, floor: u32 },
+    #[error(
+        "architecture {arch} has invalid LDGSTS completion throughput: cache-all={cache_all_bytes_per_cycle} B/cycle, bypass={bypass_bytes_per_cycle} B/cycle; rates must be positive and divide their maximum"
+    )]
+    InvalidLdgstsCompletionThroughput {
+        arch: ArchId,
+        cache_all_bytes_per_cycle: u64,
+        bypass_bytes_per_cycle: u64,
+    },
+    #[error(
+        "warp {warp} asynchronous-copy source activity is inconsistent: sectors={sectors}, payload_bytes={payload_bytes}"
+    )]
+    AsyncCopyPayloadMismatch {
+        warp: usize,
+        sectors: u16,
+        payload_bytes: u64,
     },
     #[error("issue-card validation failed: {0}")]
     Calibration(#[from] CalibError),
@@ -548,6 +739,31 @@ pub enum IssueError {
         current: u32,
         remove: u32,
     },
+    #[error("warp {warp} exhausted the asynchronous-copy group sequence domain")]
+    AsyncCopyGroupSequenceExhausted { warp: usize },
+    #[error(
+        "warp {warp} asynchronous-copy group {group:?} pending source count {current} + {add} overflows u32"
+    )]
+    AsyncCopyPendingOverflow {
+        warp: usize,
+        group: AsyncCopyGroupId,
+        current: u32,
+        add: u32,
+    },
+    #[error(
+        "warp {warp} asynchronous-copy group {group:?} pending source count {current} cannot release {remove} unit(s)"
+    )]
+    AsyncCopyPendingUnderflow {
+        warp: usize,
+        group: AsyncCopyGroupId,
+        current: u32,
+        remove: u32,
+    },
+    #[error("warp {warp} has no live asynchronous-copy group {group:?}")]
+    AsyncCopyGroupNotFound {
+        warp: usize,
+        group: AsyncCopyGroupId,
+    },
     #[error("response-owner identity domain is exhausted")]
     ResponseOwnerExhausted,
     #[error("memory responses are invalid for the {mode} memory mode")]
@@ -597,6 +813,12 @@ pub enum IssueError {
         base: u64,
         delta: u64,
     },
+    #[error("{operation}: cycle multiplication {lhs} * {rhs} overflows u64")]
+    TimeMultiplicationOverflow {
+        operation: &'static str,
+        lhs: u64,
+        rhs: u64,
+    },
     #[error("memory response at t={now} precedes the SM clock t={clock}")]
     ResponseBeforeClock { now: u64, clock: u64 },
     #[error("advance horizon t={horizon} precedes the SM clock t={clock}")]
@@ -622,8 +844,8 @@ pub struct TailFlags {
     pub dirty_writeback: bool,
     /// Coherence propagation and invalidation traffic is not modeled.
     pub coherence: bool,
-    /// LDGSTS global-source timing is modeled, but its shared-memory
-    /// destination visibility is not.
+    /// A legacy trace omitted the LDGSTS source payload, so the modeled
+    /// commit/wait chain cannot establish shared-destination visibility.
     pub ldgsts_dst_shared_timing: bool,
 }
 
@@ -661,20 +883,12 @@ impl TailFlags {
                 coherence: true,
                 ldgsts_dst_shared_timing: false,
             },
-            AccessKind::GlobalBypass {
-                token: CacheOpToken::Ldgsts,
-                ..
-            } => Self {
-                red_rmw: false,
-                dirty_writeback: false,
-                coherence: false,
-                ldgsts_dst_shared_timing: true,
-            },
             AccessKind::NonMemory
-            | AccessKind::Shared
+            | AccessKind::Shared { .. }
             | AccessKind::LocalLoad { .. }
             | AccessKind::GlobalEligible { .. }
             | AccessKind::GlobalBypass { .. }
+            | AccessKind::GlobalAsyncCopy { .. }
             | AccessKind::GlobalUntagged { .. } => Self {
                 red_rmw: false,
                 dirty_writeback: false,
@@ -823,8 +1037,8 @@ impl ResponseId {
 /// What the response to one modeled memory request must do at arrival.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ReplyTo {
-    /// Complete this L1 fill (installing the line/sector) and clear the
-    /// fill's registered barrier waiters.
+    /// Complete this L1 fill (installing the line/sector) and resolve its
+    /// registered ordinary-barrier and/or async-copy-group targets.
     L1Fill {
         fill: FillKey,
         response_id: ResponseId,
@@ -834,6 +1048,17 @@ pub enum ReplyTo {
     Warp {
         warp: usize,
         barrier: DepBarrier,
+        response_id: ResponseId,
+    },
+    /// Complete one global-source sector in a warp's non-bulk async-copy
+    /// group. The group may still be open or may have been committed while the
+    /// request was in flight.
+    AsyncCopy {
+        warp: usize,
+        group: AsyncCopyGroupId,
+        /// An unusual static form may also expose the same completion through an
+        /// ordinary dependence barrier; both counters clear atomically.
+        barrier: Option<DepBarrier>,
         response_id: ResponseId,
     },
     /// No SM dependency consumes returned data. Stores and reductions are
@@ -846,7 +1071,9 @@ pub enum ReplyTo {
 impl ReplyTo {
     const fn response_id(self) -> Option<ResponseId> {
         match self {
-            Self::L1Fill { response_id, .. } | Self::Warp { response_id, .. } => Some(response_id),
+            Self::L1Fill { response_id, .. }
+            | Self::Warp { response_id, .. }
+            | Self::AsyncCopy { response_id, .. } => Some(response_id),
             Self::None => None,
         }
     }
@@ -951,10 +1178,11 @@ impl MemRequest {
         match (self.source, self.operation, self.reply) {
             (L2Source::L1Fill, MemoryOperation::Read, ReplyTo::L1Fill { .. } | ReplyTo::None)
             | (
-                L2Source::Bypass | L2Source::Untagged,
+                L2Source::Bypass,
                 MemoryOperation::Read,
-                ReplyTo::Warp { .. } | ReplyTo::None,
+                ReplyTo::Warp { .. } | ReplyTo::AsyncCopy { .. } | ReplyTo::None,
             )
+            | (L2Source::Untagged, MemoryOperation::Read, ReplyTo::Warp { .. } | ReplyTo::None)
             | (L2Source::Bypass, MemoryOperation::Atomic, ReplyTo::Warp { .. } | ReplyTo::None)
             | (
                 L2Source::Store,
@@ -1038,6 +1266,95 @@ fn checked_u32_counter_add(
         .ok_or(IssueError::CounterOverflow { counter })
 }
 
+/// Warp-local identity of one nonempty asynchronous-copy group. The numeric
+/// sequence is intentionally opaque outside the SM actor; shared-memory replies
+/// may route an identity emitted by the actor but cannot construct one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct AsyncCopyGroupId(u64);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct AsyncCopyGroup {
+    id: AsyncCopyGroupId,
+    /// Source sectors whose shared-L2 response time is not known yet.
+    pending_sources: u32,
+    /// Maximum known lower-level source completion time across flat/constant
+    /// copies and shared-L2 responses.
+    source_completion_time: u64,
+    /// Route-weighted effective payload in the architecture capability's common
+    /// fixed-point work domain. This is added once per issued copy, never inferred
+    /// from or duplicated across its source sectors.
+    delivery_work: u64,
+    /// Cached `source_completion_time + ceil(delivery_work / units_per_cycle)`.
+    /// Every mutation checks this sum before publishing group state, leaving the
+    /// scheduler's readiness path infallible.
+    completion_time: u64,
+}
+
+impl AsyncCopyGroup {
+    const fn new(id: AsyncCopyGroupId) -> Self {
+        Self {
+            id,
+            pending_sources: 0,
+            source_completion_time: 0,
+            delivery_work: 0,
+            completion_time: 0,
+        }
+    }
+
+    const fn is_complete_at(self, now: u64) -> bool {
+        self.pending_sources == 0 && self.completion_time <= now
+    }
+
+    fn project_delivery(
+        self,
+        source_ready: u64,
+        work_add: u64,
+        params: &IssueModelParams,
+    ) -> Result<(u64, u64, u64), IssueError> {
+        let delivery_work = checked_u64_counter_add(
+            "asynchronous-copy delivery work",
+            self.delivery_work,
+            work_add,
+        )?;
+        let source_completion_time = self.source_completion_time.max(source_ready);
+        let completion_time =
+            params.ldgsts_completion_ready(source_completion_time, delivery_work)?;
+        Ok((source_completion_time, delivery_work, completion_time))
+    }
+}
+
+/// Allocated only for warps that issue an effective asynchronous-copy source.
+/// Keeping this uncommon state out of every [`WarpState`] preserves the compact
+/// scheduler scan used by workloads with no `LDGSTS` traffic.
+struct AsyncCopyState {
+    /// Non-bulk `cp.async` copies issued since the most recent commit.
+    open_group: Option<AsyncCopyGroup>,
+    /// Nonempty groups closed by `LDGDEPBAR`, in warp program order.
+    committed_groups: VecDeque<AsyncCopyGroup>,
+    /// Next process-local sequence for this warp. `None` means the complete
+    /// u64 domain has been allocated; the final `u64::MAX` identity remains
+    /// valid, but another nonempty group fails closed.
+    next_sequence: Option<u64>,
+}
+
+impl AsyncCopyState {
+    const fn new() -> Self {
+        Self {
+            open_group: None,
+            committed_groups: VecDeque::new(),
+            next_sequence: Some(0),
+        }
+    }
+}
+
+/// Cold sidecar indexed by warp identity. Keeping even the nullable pointer out
+/// of [`WarpState`] preserves that structure's pre-async stride for scheduler
+/// scans while retaining direct, deterministic lookup for source responses.
+#[derive(Default)]
+struct AsyncCopySlot {
+    state: Option<Box<AsyncCopyState>>,
+}
+
 struct WarpState<'a> {
     insts: &'a [ReplayInst],
     sectors: &'a [i64],
@@ -1085,7 +1402,250 @@ impl WarpState<'_> {
         let next = checked_usize_counter_add("warp instruction cursor", self.next, 1)?;
         Ok(next == self.insts.len())
     }
+}
 
+impl AsyncCopySlot {
+    fn preflight_async_copy_add(
+        &self,
+        warp: usize,
+        pending_add: u32,
+        source_ready: u64,
+        delivery_work: u64,
+        params: &IssueModelParams,
+    ) -> Result<AsyncCopyGroupId, IssueError> {
+        let (id, current, group) = match self.state.as_deref() {
+            Some(state) => match state.open_group {
+                Some(group) => (group.id, group.pending_sources, group),
+                None => {
+                    let id = AsyncCopyGroupId(
+                        state
+                            .next_sequence
+                            .ok_or(IssueError::AsyncCopyGroupSequenceExhausted { warp })?,
+                    );
+                    (id, 0, AsyncCopyGroup::new(id))
+                }
+            },
+            None => {
+                let id = AsyncCopyGroupId(0);
+                (id, 0, AsyncCopyGroup::new(id))
+            }
+        };
+        current
+            .checked_add(pending_add)
+            .ok_or(IssueError::AsyncCopyPendingOverflow {
+                warp,
+                group: id,
+                current,
+                add: pending_add,
+            })?;
+        group.project_delivery(source_ready, delivery_work, params)?;
+        Ok(id)
+    }
+
+    fn ensure_open_async_group(&mut self, warp: usize) -> Result<&mut AsyncCopyGroup, IssueError> {
+        let state = self
+            .state
+            .get_or_insert_with(|| Box::new(AsyncCopyState::new()));
+        if state.open_group.is_none() {
+            let sequence = state
+                .next_sequence
+                .ok_or(IssueError::AsyncCopyGroupSequenceExhausted { warp })?;
+            state.next_sequence = sequence.checked_add(1);
+            state.open_group = Some(AsyncCopyGroup::new(AsyncCopyGroupId(sequence)));
+        }
+        state
+            .open_group
+            .as_mut()
+            .ok_or(IssueError::AsyncCopyGroupSequenceExhausted { warp })
+    }
+
+    fn add_known_async_copy(
+        &mut self,
+        warp: usize,
+        source_ready: u64,
+        delivery_work: u64,
+        params: &IssueModelParams,
+    ) -> Result<AsyncCopyGroupId, IssueError> {
+        let id = self.preflight_async_copy_add(warp, 0, source_ready, delivery_work, params)?;
+        let group = self.ensure_open_async_group(warp)?;
+        debug_assert_eq!(group.id, id);
+        let (source_completion_time, delivery_work, completion_time) =
+            group.project_delivery(source_ready, delivery_work, params)?;
+        group.source_completion_time = source_completion_time;
+        group.delivery_work = delivery_work;
+        group.completion_time = completion_time;
+        Ok(id)
+    }
+
+    fn add_pending_async_copy_sources(
+        &mut self,
+        warp: usize,
+        add: u32,
+        delivery_work: u64,
+        params: &IssueModelParams,
+    ) -> Result<AsyncCopyGroupId, IssueError> {
+        let id = self.preflight_async_copy_add(warp, add, 0, delivery_work, params)?;
+        let group = self.ensure_open_async_group(warp)?;
+        debug_assert_eq!(group.id, id);
+        let current = group.pending_sources;
+        let pending_sources =
+            current
+                .checked_add(add)
+                .ok_or(IssueError::AsyncCopyPendingOverflow {
+                    warp,
+                    group: id,
+                    current,
+                    add,
+                })?;
+        let (source_completion_time, delivery_work, completion_time) =
+            group.project_delivery(0, delivery_work, params)?;
+        group.pending_sources = pending_sources;
+        group.source_completion_time = source_completion_time;
+        group.delivery_work = delivery_work;
+        group.completion_time = completion_time;
+        Ok(id)
+    }
+
+    fn async_group(&self, id: AsyncCopyGroupId) -> Option<&AsyncCopyGroup> {
+        let state = self.state.as_deref()?;
+        state
+            .open_group
+            .as_ref()
+            .filter(|group| group.id == id)
+            .or_else(|| state.committed_groups.iter().find(|group| group.id == id))
+    }
+
+    fn async_group_mut(&mut self, id: AsyncCopyGroupId) -> Option<&mut AsyncCopyGroup> {
+        let state = self.state.as_deref_mut()?;
+        if state
+            .open_group
+            .as_ref()
+            .is_some_and(|group| group.id == id)
+        {
+            return state.open_group.as_mut();
+        }
+        state
+            .committed_groups
+            .iter_mut()
+            .find(|group| group.id == id)
+    }
+
+    fn preflight_async_copy_source_completion(
+        &self,
+        warp: usize,
+        id: AsyncCopyGroupId,
+        remove: u32,
+        now: u64,
+        params: &IssueModelParams,
+    ) -> Result<(), IssueError> {
+        let group = self
+            .async_group(id)
+            .ok_or(IssueError::AsyncCopyGroupNotFound { warp, group: id })?;
+        group
+            .pending_sources
+            .checked_sub(remove)
+            .ok_or(IssueError::AsyncCopyPendingUnderflow {
+                warp,
+                group: id,
+                current: group.pending_sources,
+                remove,
+            })?;
+        group.project_delivery(now, 0, params)?;
+        Ok(())
+    }
+
+    fn complete_async_copy_sources(
+        &mut self,
+        warp: usize,
+        id: AsyncCopyGroupId,
+        remove: u32,
+        now: u64,
+        params: &IssueModelParams,
+    ) -> Result<(), IssueError> {
+        self.preflight_async_copy_source_completion(warp, id, remove, now, params)?;
+        let group = self
+            .async_group_mut(id)
+            .ok_or(IssueError::AsyncCopyGroupNotFound { warp, group: id })?;
+        let current = group.pending_sources;
+        let pending_sources =
+            current
+                .checked_sub(remove)
+                .ok_or(IssueError::AsyncCopyPendingUnderflow {
+                    warp,
+                    group: id,
+                    current,
+                    remove,
+                })?;
+        let (source_completion_time, delivery_work, completion_time) =
+            group.project_delivery(now, 0, params)?;
+        group.pending_sources = pending_sources;
+        group.source_completion_time = source_completion_time;
+        group.delivery_work = delivery_work;
+        group.completion_time = completion_time;
+        Ok(())
+    }
+
+    fn commit_async_copy_group(&mut self) {
+        let Some(state) = self.state.as_deref_mut() else {
+            return;
+        };
+        if let Some(group) = state.open_group.take() {
+            state.committed_groups.push_back(group);
+        }
+    }
+
+    fn async_wait_prefix_len(&self, max_pending_groups: u32) -> usize {
+        let retained = usize::try_from(max_pending_groups).unwrap_or(usize::MAX);
+        self.state.as_deref().map_or(0, |state| {
+            state.committed_groups.len().saturating_sub(retained)
+        })
+    }
+
+    /// Earliest known completion of every group older than the newest `N`.
+    /// `None` means at least one required group still has a shared-L2 response
+    /// outstanding, so only an external response event can supply a wake time.
+    #[cold]
+    #[inline(never)]
+    fn async_wait_clear_time(&self, max_pending_groups: u32) -> Option<u64> {
+        let Some(state) = self.state.as_deref() else {
+            return Some(0);
+        };
+        let mut ready = 0;
+        for group in state
+            .committed_groups
+            .iter()
+            .take(self.async_wait_prefix_len(max_pending_groups))
+        {
+            if group.pending_sources != 0 {
+                return None;
+            }
+            ready = ready.max(group.completion_time);
+        }
+        Some(ready)
+    }
+
+    fn consume_async_wait(&mut self, max_pending_groups: u32, now: u64) {
+        let consume = self.async_wait_prefix_len(max_pending_groups);
+        if consume == 0 {
+            return;
+        }
+        let state = self
+            .state
+            .as_deref_mut()
+            .expect("a nonempty wait prefix requires async-copy state");
+        debug_assert!(
+            state
+                .committed_groups
+                .iter()
+                .take(consume)
+                .all(|group| group.is_complete_at(now)),
+            "scheduler issued an asynchronous-copy wait before its required prefix completed"
+        );
+        state.committed_groups.drain(..consume);
+    }
+}
+
+impl WarpState<'_> {
     fn preflight_pending_add(
         &self,
         warp: usize,
@@ -1231,18 +1791,80 @@ impl WarpState<'_> {
         if self.done || self.at_block_barrier {
             return None;
         }
-        self.wait_clear_time().map(|w| self.eligible.max(w))
+        let dependency_ready = self.wait_clear_time()?;
+        Some(self.eligible.max(dependency_ready))
     }
+}
 
-    fn is_ready(&self, t: u64) -> bool {
-        self.ready_at().is_some_and(|r| r <= t)
+fn async_copy_source_count(kind: AccessKind) -> Option<u16> {
+    match kind {
+        AccessKind::GlobalAsyncCopy {
+            len, payload_bytes, ..
+        } if payload_bytes != 0 => Some(len),
+        AccessKind::GlobalAsyncCopy { .. }
+        | AccessKind::NonMemory
+        | AccessKind::Shared { .. }
+        | AccessKind::LocalLoad { .. }
+        | AccessKind::LocalStore { .. }
+        | AccessKind::GlobalEligible { .. }
+        | AccessKind::GlobalBypass { .. }
+        | AccessKind::GlobalUntagged { .. }
+        | AccessKind::GlobalStore { .. }
+        | AccessKind::GlobalReduction { .. } => None,
+    }
+}
+
+fn async_copy_delivery(kind: AccessKind) -> Option<(LdgstsL1Policy, u64)> {
+    match kind {
+        AccessKind::GlobalAsyncCopy {
+            payload_bytes,
+            l1_policy,
+            ..
+        } if payload_bytes != 0 => Some((l1_policy, u64::from(payload_bytes))),
+        AccessKind::GlobalAsyncCopy { .. }
+        | AccessKind::NonMemory
+        | AccessKind::Shared { .. }
+        | AccessKind::LocalLoad { .. }
+        | AccessKind::LocalStore { .. }
+        | AccessKind::GlobalEligible { .. }
+        | AccessKind::GlobalBypass { .. }
+        | AccessKind::GlobalUntagged { .. }
+        | AccessKind::GlobalStore { .. }
+        | AccessKind::GlobalReduction { .. } => None,
+    }
+}
+
+fn validate_async_copy_payload(kind: AccessKind, warp: usize) -> Result<(), IssueError> {
+    if let AccessKind::GlobalAsyncCopy {
+        len, payload_bytes, ..
+    } = kind
+        && len != 0
+        && payload_bytes == 0
+    {
+        return Err(IssueError::AsyncCopyPayloadMismatch {
+            warp,
+            sectors: len,
+            payload_bytes: u64::from(payload_bytes),
+        });
+    }
+    Ok(())
+}
+
+/// `LDGDEPBAR` encodes SB0 in the ordinary write-barrier field, but that bit is
+/// the async-group protocol itself rather than a generic 25-cycle producer.
+fn ordinary_write_barrier(slot: &IssueSlot) -> Option<DepBarrier> {
+    if slot.op_class == OpClass::AsyncCopyCommit {
+        None
+    } else {
+        slot.control.write_barrier
     }
 }
 
 /// Data-ready time for one issued record at time `t` in the Flat/L1Const
 /// modes (fill times known at issue), driving the L1 state/counters when
-/// attached. Producer visibility is computed only when a write barrier consumes
-/// it; cache accesses still run without one because they mutate modeled state.
+/// attached. Producer visibility is computed when either an ordinary write
+/// barrier or an async-copy group consumes it; cache accesses still run without
+/// either observer because they mutate modeled state.
 fn data_ready_time(
     kind: AccessKind,
     sectors: &[i64],
@@ -1250,8 +1872,9 @@ fn data_ready_time(
     params: &IssueModelParams,
     l1: Option<&mut L1Cache>,
     write_barrier: Option<DepBarrier>,
+    observe_async_copy: bool,
 ) -> Result<Option<u64>, IssueError> {
-    let needs_ready = write_barrier.is_some();
+    let needs_ready = write_barrier.is_some() || observe_async_copy;
     match kind {
         AccessKind::NonMemory => {
             if needs_ready {
@@ -1260,9 +1883,9 @@ fn data_ready_time(
                 Ok(None)
             }
         }
-        AccessKind::Shared => {
+        AccessKind::Shared { wavefronts } => {
             if needs_ready {
-                params.shared_ready(t).map(Some)
+                params.shared_ready(t, wavefronts).map(Some)
             } else {
                 Ok(None)
             }
@@ -1314,6 +1937,55 @@ fn data_ready_time(
                 }
             }
             None => {
+                if needs_ready {
+                    checked_cycle_add("flat global visibility", t, params.global_flat_latency)
+                        .map(Some)
+                } else {
+                    Ok(None)
+                }
+            }
+        },
+        AccessKind::GlobalAsyncCopy {
+            off,
+            len,
+            l1_policy,
+            ..
+        } => match (l1, l1_policy) {
+            (Some(l1), LdgstsL1Policy::CacheAtAllLevels) => {
+                let mut ready = needs_ready
+                    .then(|| {
+                        checked_cycle_add("LDGSTS L1 hit-pipeline floor", t, params.l1_hit_latency)
+                    })
+                    .transpose()?;
+                for &sector in &sectors[off..off + usize::from(len)] {
+                    if let Some(current) = &mut ready {
+                        let (_, sector_ready) = l1.access_eligible_with_mshr_floor(
+                            MemoryOrigin::Global,
+                            sector,
+                            t,
+                            params.ldgsts_l1_mshr_floor,
+                        )?;
+                        *current = (*current).max(sector_ready);
+                    } else {
+                        l1.access_eligible_unobserved_with_mshr_floor(
+                            MemoryOrigin::Global,
+                            sector,
+                            t,
+                            params.ldgsts_l1_mshr_floor,
+                        )?;
+                    }
+                }
+                Ok(ready)
+            }
+            (Some(l1), LdgstsL1Policy::BypassL1) => {
+                l1.count_bypass(MemoryOrigin::Global, u64::from(len), false)?;
+                if needs_ready {
+                    params.store_visibility_ready(t).map(Some)
+                } else {
+                    Ok(None)
+                }
+            }
+            (None, _) => {
                 if needs_ready {
                     checked_cycle_add("flat global visibility", t, params.global_flat_latency)
                         .map(Some)
@@ -1379,15 +2051,48 @@ fn data_ready_time(
     }
 }
 
+/// Completion identity carried by an eligible L1 access. Ordinary loads only
+/// observe a dependence barrier; cacheable asynchronous-copy sources also retain
+/// their open group while optionally preserving an ordinary barrier.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FillTarget {
+    Barrier(DepBarrier),
+    AsyncCopy {
+        group: AsyncCopyGroupId,
+        barrier: Option<DepBarrier>,
+    },
+}
+
+impl FillTarget {
+    const fn barrier(self) -> Option<DepBarrier> {
+        match self {
+            Self::Barrier(barrier) => Some(barrier),
+            Self::AsyncCopy { barrier, .. } => barrier,
+        }
+    }
+
+    const fn async_group(self) -> Option<AsyncCopyGroupId> {
+        match self {
+            Self::Barrier(_) => None,
+            Self::AsyncCopy { group, .. } => Some(group),
+        }
+    }
+}
+
 /// An MSHR-stalled remainder of one instruction's sector list, retried
 /// (in FIFO order) whenever a fill completion frees an entry.
 struct Retry {
     warp: usize,
     instruction: usize,
     origin: MemoryOrigin,
-    /// The stalled instruction's optional write-dependence barrier. When
-    /// present, the entry holds one pending unit until fully drained.
-    barrier: Option<DepBarrier>,
+    /// Completion identity of the stalled instruction. A present ordinary
+    /// barrier holds one pending replacement unit until the entry drains;
+    /// asynchronous-copy source units were counted at original issue and retain
+    /// their group identity across every retry.
+    target: Option<FillTarget>,
+    /// Access-local finite-admission floor retained from original issue. Only
+    /// cacheable LDGSTS retries carry one; ordinary hierarchy traffic uses `None`.
+    mshr_floor: Option<NonZeroU32>,
     /// Unresolved slice `warps[warp].sectors[lo..hi]`.
     lo: usize,
     hi: usize,
@@ -1396,27 +2101,27 @@ struct Retry {
 #[derive(Clone, Copy)]
 struct FillWaiter {
     warp: usize,
-    barrier: DepBarrier,
+    target: FillTarget,
     units: u32,
 }
 
-/// Barrier units cleared when one keyed L1 fill completes. Inline for
-/// the dominant single-waiter identity and pre-aggregated by (warp, barrier),
-/// so response preflight never rebuilds ordinary waiter counts in a heap map.
+/// Completion units cleared when one keyed L1 fill completes. Inline for the
+/// dominant single-waiter identity and pre-aggregated by `(warp, target)`, so
+/// response preflight only rebuilds counts when distinct targets share a fill.
 enum Waiters {
     One(FillWaiter),
     Many(Vec<FillWaiter>),
 }
 
 impl Waiters {
-    fn add(&mut self, warp: usize, barrier: DepBarrier) -> Result<(), IssueError> {
+    fn add(&mut self, warp: usize, target: FillTarget) -> Result<(), IssueError> {
         let new_waiter = FillWaiter {
             warp,
-            barrier,
+            target,
             units: 1,
         };
         match self {
-            Self::One(waiter) if waiter.warp == warp && waiter.barrier == barrier => {
+            Self::One(waiter) if waiter.warp == warp && waiter.target == target => {
                 waiter.units = checked_u32_counter_add("fill waiter unit", waiter.units, 1)?;
             }
             Self::One(waiter) => {
@@ -1425,7 +2130,7 @@ impl Waiters {
             Self::Many(waiters) => {
                 if let Some(waiter) = waiters
                     .iter_mut()
-                    .find(|waiter| waiter.warp == warp && waiter.barrier == barrier)
+                    .find(|waiter| waiter.warp == warp && waiter.target == target)
                 {
                     waiter.units = checked_u32_counter_add("fill waiter unit", waiter.units, 1)?;
                 } else {
@@ -1452,12 +2157,56 @@ impl Waiters {
     }
 }
 
-fn accumulate_pending_removal(
-    removals: &mut HashMap<(usize, DepBarrier), u32>,
+fn accumulate_waiter_removals(
+    pending_removals: &mut HashMap<(usize, DepBarrier), u32>,
+    async_removals: &mut HashMap<(usize, AsyncCopyGroupId), u32>,
     waiter: FillWaiter,
 ) -> Result<(), IssueError> {
-    let remove = removals.entry((waiter.warp, waiter.barrier)).or_default();
-    *remove = checked_u32_counter_add("response pending-remove budget", *remove, waiter.units)?;
+    if let Some(barrier) = waiter.target.barrier() {
+        let remove = pending_removals.entry((waiter.warp, barrier)).or_default();
+        *remove = checked_u32_counter_add("response pending-remove budget", *remove, waiter.units)?;
+    }
+    if let Some(group) = waiter.target.async_group() {
+        let remove = async_removals.entry((waiter.warp, group)).or_default();
+        *remove =
+            checked_u32_counter_add("response async-copy remove budget", *remove, waiter.units)?;
+    }
+    Ok(())
+}
+
+fn project_async_copy_removal(
+    projected: &mut HashMap<(usize, AsyncCopyGroupId), u32>,
+    async_copies: &[AsyncCopySlot],
+    warp: usize,
+    group: AsyncCopyGroupId,
+    remove: u32,
+    now: u64,
+    params: &IssueModelParams,
+) -> Result<(), IssueError> {
+    if warp >= async_copies.len() {
+        return Err(IssueError::ResponseWarpOutOfRange {
+            warp,
+            warps: async_copies.len(),
+        });
+    }
+    let current = if let Some(&current) = projected.get(&(warp, group)) {
+        current
+    } else {
+        async_copies[warp].preflight_async_copy_source_completion(warp, group, 0, now, params)?;
+        async_copies[warp]
+            .async_group(group)
+            .ok_or(IssueError::AsyncCopyGroupNotFound { warp, group })?
+            .pending_sources
+    };
+    let next = current
+        .checked_sub(remove)
+        .ok_or(IssueError::AsyncCopyPendingUnderflow {
+            warp,
+            group,
+            current,
+            remove,
+        })?;
+    projected.insert((warp, group), next);
     Ok(())
 }
 
@@ -1529,6 +2278,10 @@ impl MemModel {
 /// semantics and the run-ahead (horizon) contract.
 pub(crate) struct SmCore<'a> {
     schedule: &'a FunctionSchedule,
+    /// Static schedule values in PC order. Contiguous binary search avoids a
+    /// pointer-chasing B-tree lookup for every dynamic issue while preserving
+    /// the schedule map as the authoritative join/diagnostic surface.
+    schedule_slots: Vec<(u64, &'a IssueSlot)>,
     params: IssueModelParams,
     shared_memory_residency: SharedMemoryResidency,
     physical_warp_slots: u32,
@@ -1537,9 +2290,19 @@ pub(crate) struct SmCore<'a> {
     block_live_warps: Vec<u32>,
     instruction_limit: u64,
     warps: Vec<WarpState<'a>>,
+    /// Cold protocol storage parallel to `warps`; entries allocate only after
+    /// an effective asynchronous-copy source is issued.
+    async_copies: Vec<AsyncCopySlot>,
+    /// Construction-time specialization flag. Kernels without async-copy
+    /// sources or controls bypass the protocol path once per scheduler batch,
+    /// not once per issued instruction or resident-warp scan.
+    has_async_copy_protocol: bool,
     block_states: Vec<BlockState>,
     subcore_warps: [Vec<usize>; SUB_CORES],
     hold: [Option<usize>; SUB_CORES],
+    /// Earliest issue time of each SMSP's local Tensor Core. This timeline is
+    /// kernel-local but survives CTA retirement/admission waves on the SM.
+    tensor_pipe_ready: [u64; SUB_CORES],
     unmodeled_tails: TailFlags,
     issued: u64,
     t: u64,
@@ -1587,6 +2350,11 @@ impl<'a> SmCore<'a> {
             .issue_hypotheses()
             .require("physical_warp_slots")?
             .max_resident_warps_per_sm;
+        let schedule_slots = schedule
+            .by_pc
+            .iter()
+            .map(|(&pc, slot)| (pc, slot))
+            .collect::<Vec<_>>();
         // Validate the complete dynamic/static join and every actor-cardinality
         // conversion before constructing mutable replay state. A later block
         // admission must not discover an unknown PC or overflow after earlier
@@ -1594,6 +2362,12 @@ impl<'a> SmCore<'a> {
         let mut block_live_warps = Vec::with_capacity(blocks.len());
         let mut instruction_limit = 0u64;
         let mut arrival_limit = 0u64;
+        let has_async_copy_protocol = schedule.by_pc.values().any(|slot| {
+            matches!(
+                slot.op_class,
+                OpClass::AsyncCopyCommit | OpClass::AsyncCopyWait
+            ) || slot.mem_role == sim_mem::MemRole::BypassLoad(CacheOpToken::Ldgsts)
+        });
         for block in blocks {
             let live_warp_count = block
                 .warps
@@ -1666,7 +2440,13 @@ impl<'a> SmCore<'a> {
                     warp_instructions,
                 )?;
                 for inst in &warp.insts {
-                    let slot = lookup(schedule, inst.pc, block.launch_index, warp.warp_slot)?;
+                    let slot = lookup_dense(
+                        &schedule_slots,
+                        schedule,
+                        inst.pc,
+                        block.launch_index,
+                        warp.warp_slot,
+                    )?;
                     slot.control
                         .validate()
                         .map_err(|source| IssueError::ControlDomain {
@@ -1723,6 +2503,7 @@ impl<'a> SmCore<'a> {
         };
         let mut core = Self {
             schedule,
+            schedule_slots,
             params: *params,
             shared_memory_residency,
             physical_warp_slots,
@@ -1731,9 +2512,12 @@ impl<'a> SmCore<'a> {
             block_live_warps,
             instruction_limit,
             warps: Vec::new(),
+            async_copies: Vec::new(),
+            has_async_copy_protocol,
             block_states: Vec::new(),
             subcore_warps: Default::default(),
             hold: [None; SUB_CORES],
+            tensor_pipe_ready: [0; SUB_CORES],
             unmodeled_tails,
             issued: 0,
             t: 0,
@@ -1912,7 +2696,8 @@ impl<'a> SmCore<'a> {
                         insts: &w.insts,
                         sectors: &w.sectors,
                         next: 0,
-                        next_slot: Some(lookup(
+                        next_slot: Some(lookup_dense(
+                            &self.schedule_slots,
                             self.schedule,
                             w.insts[0].pc,
                             blk.launch_index,
@@ -1941,7 +2726,18 @@ impl<'a> SmCore<'a> {
                 let ix = self.warps.len();
                 self.subcore_warps[subcore].push(ix);
                 self.warps.push(warp);
+                if self.has_async_copy_protocol {
+                    self.async_copies.push(AsyncCopySlot::default());
+                }
             }
+            debug_assert!(
+                if self.has_async_copy_protocol {
+                    self.warps.len() == self.async_copies.len()
+                } else {
+                    self.async_copies.is_empty()
+                },
+                "async-copy sidecar shape must match its construction-time protocol mode"
+            );
             for &slot in &pending_slots {
                 let inserted = self.resident_warp_slots.insert(slot);
                 debug_assert!(
@@ -1972,9 +2768,9 @@ impl<'a> SmCore<'a> {
     // `self.mem` never has to span a `&mut self` call.)
 
     /// Memory interaction of one issued record in L1Shared mode. Returns
-    /// the KNOWN data-ready component (`None` when the record's write
-    /// visibility depends only on in-flight responses); unknown
-    /// components are tracked as barrier-pending units.
+    /// the KNOWN data-ready component (`None` when completion depends only on
+    /// in-flight responses); unknown components remain in ordinary-barrier
+    /// pending units and/or async-copy-group source units.
     fn mem_step_shared(
         &mut self,
         wix: usize,
@@ -1990,6 +2786,7 @@ impl<'a> SmCore<'a> {
             unreachable!("mem_step_shared is only dispatched in shared mode")
         };
         let warps = &mut self.warps;
+        let async_copies = &mut self.async_copies;
         match kind {
             AccessKind::NonMemory => {
                 if write_barrier.is_some() {
@@ -1998,9 +2795,9 @@ impl<'a> SmCore<'a> {
                     Ok(None)
                 }
             }
-            AccessKind::Shared => {
+            AccessKind::Shared { wavefronts } => {
                 if write_barrier.is_some() {
-                    p.shared_ready(t).map(Some)
+                    p.shared_ready(t, wavefronts).map(Some)
                 } else {
                     Ok(None)
                 }
@@ -2017,6 +2814,7 @@ impl<'a> SmCore<'a> {
                 // cleared at advance entry) fold later same-line sectors
                 // into their request mask — one L2 transaction per line
                 // per batch, priced on its worst sector.
+                let target = write_barrier.map(FillTarget::Barrier);
                 let mut known = write_barrier
                     .is_some()
                     .then(|| checked_cycle_add("shared L1 hit-pipeline floor", t, p.l1_hit_latency))
@@ -2027,7 +2825,8 @@ impl<'a> SmCore<'a> {
                         st,
                         warps,
                         wix,
-                        write_barrier,
+                        target,
+                        None,
                         origin,
                         sectors[i],
                         ResponseId::new(st.response_owner, wix, instruction, i),
@@ -2048,7 +2847,8 @@ impl<'a> SmCore<'a> {
                                 warp: wix,
                                 instruction,
                                 origin,
-                                barrier: write_barrier,
+                                target,
+                                mshr_floor: None,
                                 lo: i,
                                 hi: range.end,
                             });
@@ -2059,9 +2859,97 @@ impl<'a> SmCore<'a> {
                 }
                 Ok(known)
             }
-            AccessKind::GlobalBypass { off, len, .. } | AccessKind::GlobalUntagged { off, len } => {
+            AccessKind::GlobalAsyncCopy {
+                off,
+                len,
+                payload_bytes,
+                l1_policy: LdgstsL1Policy::CacheAtAllLevels,
+            } => {
+                let source_active = payload_bytes != 0;
+                let range = off..off + usize::from(len);
+                let delivery_work = p.ldgsts_delivery_work(
+                    LdgstsL1Policy::CacheAtAllLevels,
+                    u64::from(payload_bytes),
+                )?;
+                let async_group = if source_active {
+                    Some(async_copies[wix].add_pending_async_copy_sources(
+                        wix,
+                        u32::from(len),
+                        delivery_work,
+                        &p,
+                    )?)
+                } else {
+                    None
+                };
+                let target = async_group
+                    .map(|group| FillTarget::AsyncCopy {
+                        group,
+                        barrier: write_barrier,
+                    })
+                    .or_else(|| write_barrier.map(FillTarget::Barrier));
+                let mut known = (write_barrier.is_some() || source_active)
+                    .then(|| {
+                        checked_cycle_add(
+                            "LDGSTS shared L1 hit-pipeline floor",
+                            t,
+                            p.l1_hit_latency,
+                        )
+                    })
+                    .transpose()?;
+                for i in range.clone() {
+                    match access_shared(
+                        st,
+                        warps,
+                        wix,
+                        target,
+                        Some(p.ldgsts_l1_mshr_floor),
+                        MemoryOrigin::Global,
+                        sectors[i],
+                        ResponseId::new(st.response_owner, wix, instruction, i),
+                        t,
+                        out,
+                    ) {
+                        Ok(Some(ready)) => {
+                            if let Some(group) = async_group {
+                                async_copies[wix]
+                                    .complete_async_copy_sources(wix, group, 1, ready, &p)?;
+                            }
+                            if let Some(current) = &mut known {
+                                *current = (*current).max(ready);
+                            }
+                        }
+                        Ok(None) => {}
+                        Err(SharedAccessError::Stalled) => {
+                            // Async source units were counted at original issue;
+                            // only the optional ordinary barrier needs a retry
+                            // replacement unit.
+                            warps[wix].add_pending(wix, write_barrier, 1)?;
+                            st.retry.push_back(Retry {
+                                warp: wix,
+                                instruction,
+                                origin: MemoryOrigin::Global,
+                                target,
+                                mshr_floor: Some(p.ldgsts_l1_mshr_floor),
+                                lo: i,
+                                hi: range.end,
+                            });
+                            break;
+                        }
+                        Err(SharedAccessError::Issue(source)) => return Err(source),
+                    }
+                }
+                Ok(known)
+            }
+            AccessKind::GlobalBypass { off, len, .. }
+            | AccessKind::GlobalAsyncCopy {
+                off,
+                len,
+                l1_policy: LdgstsL1Policy::BypassL1,
+                ..
+            }
+            | AccessKind::GlobalUntagged { off, len } => {
                 let origin = MemoryOrigin::Global;
-                let (source, counted, operation) = match kind {
+                let (source, counted, operation, async_copy, payload_bytes) = match kind {
                     // ATOM rides bypass provenance but remains a returning RMW
                     // operation; every other bypass / untagged sector is a read.
                     AccessKind::GlobalBypass { token, .. } => (
@@ -2072,8 +2960,20 @@ impl<'a> SmCore<'a> {
                         } else {
                             MemoryOperation::Read
                         },
+                        token == CacheOpToken::Ldgsts,
+                        0,
                     ),
-                    _ => (L2Source::Untagged, false, MemoryOperation::Read),
+                    AccessKind::GlobalAsyncCopy { payload_bytes, .. } => (
+                        L2Source::Bypass,
+                        true,
+                        MemoryOperation::Read,
+                        payload_bytes != 0,
+                        payload_bytes,
+                    ),
+                    AccessKind::GlobalUntagged { .. } => {
+                        (L2Source::Untagged, false, MemoryOperation::Read, false, 0)
+                    }
+                    _ => unreachable!("match arm admits only bypass, async-copy, or untagged"),
                 };
                 if counted {
                     st.l1.count_bypass(
@@ -2094,13 +2994,38 @@ impl<'a> SmCore<'a> {
                         Ok(None)
                     };
                 }
+                let async_group = if async_copy {
+                    let delivery_work =
+                        p.ldgsts_delivery_work(LdgstsL1Policy::BypassL1, u64::from(payload_bytes))?;
+                    Some(async_copies[wix].add_pending_async_copy_sources(
+                        wix,
+                        u32::from(len),
+                        delivery_work,
+                        &p,
+                    )?)
+                } else {
+                    None
+                };
                 for i in off..off + usize::from(len) {
                     let sector_id = sectors[i];
-                    let reply = if let Some(barrier) = write_barrier {
+                    let response_id = ResponseId::new(st.response_owner, wix, instruction, i);
+                    let reply = if let Some(group) = async_group {
+                        if let Some(barrier) = write_barrier {
+                            warps[wix].add_pending(wix, Some(barrier), 1)?;
+                        }
+                        let reply = ReplyTo::AsyncCopy {
+                            warp: wix,
+                            group,
+                            barrier: write_barrier,
+                            response_id,
+                        };
+                        register_response(st, reply)?;
+                        reply
+                    } else if let Some(barrier) = write_barrier {
                         let reply = ReplyTo::Warp {
                             warp: wix,
                             barrier,
-                            response_id: ResponseId::new(st.response_owner, wix, instruction, i),
+                            response_id,
                         };
                         warps[wix].add_pending(wix, Some(barrier), 1)?;
                         register_response(st, reply)?;
@@ -2169,6 +3094,30 @@ impl<'a> SmCore<'a> {
                 self.warps[warp].preflight_pending_remove(warp, barrier, 1)?;
                 return Ok(());
             }
+            ReplyTo::AsyncCopy {
+                warp,
+                group,
+                barrier,
+                ..
+            } => {
+                if warp >= self.warps.len() {
+                    return Err(IssueError::ResponseWarpOutOfRange {
+                        warp,
+                        warps: self.warps.len(),
+                    });
+                }
+                self.async_copies[warp].preflight_async_copy_source_completion(
+                    warp,
+                    group,
+                    1,
+                    now,
+                    &self.params,
+                )?;
+                if let Some(barrier) = barrier {
+                    self.warps[warp].preflight_pending_remove(warp, barrier, 1)?;
+                }
+                return Ok(());
+            }
             ReplyTo::L1Fill { fill, .. } => {
                 if !st.l1.is_fill_in_flight(fill) {
                     return Err(IssueError::ResponseFillNotInFlight { fill });
@@ -2183,36 +3132,12 @@ impl<'a> SmCore<'a> {
             ReplyTo::None => return Err(IssueError::UnexpectedMutationOnlyResponse),
         };
 
-        if st.retry.is_empty() {
-            if let Some(waiters) = st.fill_waiters.get(&fill) {
-                waiters.try_for_each(|waiter| {
-                    if waiter.warp >= self.warps.len() {
-                        return Err(IssueError::ResponseWarpOutOfRange {
-                            warp: waiter.warp,
-                            warps: self.warps.len(),
-                        });
-                    }
-                    self.warps[waiter.warp].preflight_pending_remove(
-                        waiter.warp,
-                        waiter.barrier,
-                        waiter.units,
-                    )
-                })?;
-            }
-            let budget = L1MutationBudget {
-                recency_touches: 1,
-                ..L1MutationBudget::for_origin(MemoryOrigin::Global)
-            };
-            if st.l1.preflight_mutation_budget(budget).is_err() {
-                let mut shadow = st.l1.clone();
-                shadow.complete_fill(fill)?;
-            }
-            return Ok(());
-        }
-
         let mut removals = HashMap::new();
+        let mut async_removals = HashMap::new();
         if let Some(waiters) = st.fill_waiters.get(&fill) {
-            waiters.try_for_each(|waiter| accumulate_pending_removal(&mut removals, waiter))?;
+            waiters.try_for_each(|waiter| {
+                accumulate_waiter_removals(&mut removals, &mut async_removals, waiter)
+            })?;
         }
 
         let mut projected = HashMap::new();
@@ -2237,10 +3162,35 @@ impl<'a> SmCore<'a> {
                     })?,
             );
         }
+        let mut projected_async = HashMap::new();
+        for (&(warp, group), &remove) in &async_removals {
+            project_async_copy_removal(
+                &mut projected_async,
+                &self.async_copies,
+                warp,
+                group,
+                remove,
+                now,
+                &self.params,
+            )?;
+        }
+
+        if st.retry.is_empty() {
+            let budget = L1MutationBudget {
+                recency_touches: 1,
+                ..L1MutationBudget::for_origin(MemoryOrigin::Global)
+            };
+            if st.l1.preflight_mutation_budget(budget).is_err() {
+                let mut shadow = st.l1.clone();
+                shadow.complete_fill(fill)?;
+            }
+            return Ok(());
+        }
 
         let mut budgets = MemoryOrigin::ALL.map(L1MutationBudget::for_origin);
         budgets[MemoryOrigin::Global.index()].recency_touches = 1;
         let mut pending_budget_fits = true;
+        let mut has_async_retry = false;
         for retry in &st.retry {
             let budget = &mut budgets[retry.origin.index()];
             if retry.warp >= self.warps.len() {
@@ -2249,6 +3199,7 @@ impl<'a> SmCore<'a> {
                     warps: self.warps.len(),
                 });
             }
+            has_async_retry |= retry.target.and_then(FillTarget::async_group).is_some();
             let remaining = retry
                 .hi
                 .checked_sub(retry.lo)
@@ -2293,7 +3244,7 @@ impl<'a> SmCore<'a> {
                     return Err(IssueError::ResponseTokenAlreadyOutstanding { reply });
                 }
             }
-            if let Some(barrier) = retry.barrier {
+            if let Some(barrier) = retry.target.and_then(FillTarget::barrier) {
                 let base = self.warps[retry.warp].barrier_pending[barrier.index()];
                 let current = projected.entry((retry.warp, barrier)).or_insert(base);
                 let before_remove = *current;
@@ -2319,7 +3270,10 @@ impl<'a> SmCore<'a> {
             }
         }
 
-        if st.l1.preflight_mutation_budgets(&budgets).is_ok() && pending_budget_fits {
+        if st.l1.preflight_mutation_budgets(&budgets).is_ok()
+            && pending_budget_fits
+            && !has_async_retry
+        {
             return Ok(());
         }
 
@@ -2342,8 +3296,10 @@ impl<'a> SmCore<'a> {
                     })?,
             );
         }
+        let mut exact_async = projected_async;
         'retries: for retry in &st.retry {
-            if let Some(barrier) = retry.barrier {
+            let barrier = retry.target.and_then(FillTarget::barrier);
+            if let Some(barrier) = barrier {
                 let base = self.warps[retry.warp].barrier_pending[barrier.index()];
                 let current = exact.entry((retry.warp, barrier)).or_insert(base);
                 let before = *current;
@@ -2363,11 +3319,24 @@ impl<'a> SmCore<'a> {
                     retry.origin,
                     sector_id,
                     now,
-                    retry.barrier.is_some(),
+                    retry.target.is_some(),
+                    retry.mshr_floor,
                 )? {
-                    SharedL1Access::Hit { .. } => {}
+                    SharedL1Access::Hit { .. } => {
+                        if let Some(group) = retry.target.and_then(FillTarget::async_group) {
+                            project_async_copy_removal(
+                                &mut exact_async,
+                                &self.async_copies,
+                                retry.warp,
+                                group,
+                                1,
+                                now,
+                                &self.params,
+                            )?;
+                        }
+                    }
                     SharedL1Access::MissRequest { .. } | SharedL1Access::MergedPending { .. } => {
-                        if let Some(barrier) = retry.barrier {
+                        if let Some(barrier) = barrier {
                             let current = exact
                                 .entry((retry.warp, barrier))
                                 .or_insert(self.warps[retry.warp].barrier_pending[barrier.index()]);
@@ -2383,7 +3352,7 @@ impl<'a> SmCore<'a> {
                         }
                     }
                     SharedL1Access::Stalled => {
-                        if let Some(barrier) = retry.barrier {
+                        if let Some(barrier) = barrier {
                             let current = exact
                                 .entry((retry.warp, barrier))
                                 .or_insert(self.warps[retry.warp].barrier_pending[barrier.index()]);
@@ -2414,7 +3383,7 @@ impl<'a> SmCore<'a> {
         if st.retry.is_empty() {
             return Ok(());
         }
-        let observes_hit_ready = st.retry.iter().any(|retry| retry.barrier.is_some());
+        let observes_hit_ready = st.retry.iter().any(|retry| retry.target.is_some());
         let hit_timing_fits =
             !observes_hit_ready || now.checked_add(self.params.l1_hit_latency).is_some();
         let response_timing_fits = now.checked_add(self.params.l1_miss_latency).is_some();
@@ -2431,9 +3400,16 @@ impl<'a> SmCore<'a> {
         'retries: for retry in &st.retry {
             for sector_index in retry.lo..retry.hi {
                 let sector_id = self.warps[retry.warp].sectors[sector_index];
-                match access_shared_l1(&mut shadow, retry.origin, sector_id, now, false)? {
+                match access_shared_l1(
+                    &mut shadow,
+                    retry.origin,
+                    sector_id,
+                    now,
+                    false,
+                    retry.mshr_floor,
+                )? {
                     SharedL1Access::Hit { .. } => {
-                        if retry.barrier.is_some() {
+                        if retry.target.is_some() {
                             checked_cycle_add(
                                 "retry L1 hit visibility",
                                 now,
@@ -2472,7 +3448,9 @@ impl<'a> SmCore<'a> {
             }
         };
         match reply {
-            ReplyTo::Warp { warp, .. } if warp >= self.warps.len() => {
+            ReplyTo::Warp { warp, .. } | ReplyTo::AsyncCopy { warp, .. }
+                if warp >= self.warps.len() =>
+            {
                 return Err(IssueError::ResponseWarpOutOfRange {
                     warp,
                     warps: self.warps.len(),
@@ -2512,6 +3490,7 @@ impl<'a> SmCore<'a> {
         out: &mut Vec<MemRequest>,
     ) -> Result<(), IssueError> {
         self.preflight_response(reply, now)?;
+        let params = self.params;
         let st = match &mut self.mem {
             MemModel::L1Shared(st) => st,
             MemModel::Flat => {
@@ -2529,6 +3508,7 @@ impl<'a> SmCore<'a> {
         // New emission batch (the retry drain below may emit).
         st.line_folds.clear();
         let warps = &mut self.warps;
+        let async_copies = &mut self.async_copies;
         match reply {
             ReplyTo::L1Fill { fill, .. } => {
                 if let FillKey::Line(line) = fill
@@ -2539,24 +3519,108 @@ impl<'a> SmCore<'a> {
                 st.l1.complete_fill(fill)?;
                 if let Some(waiters) = st.fill_waiters.remove(&fill) {
                     waiters.try_for_each(|waiter| {
-                        warps[waiter.warp].clear_pending(
-                            waiter.warp,
-                            waiter.barrier,
-                            waiter.units,
-                            now,
-                        )
+                        if let Some(group) = waiter.target.async_group() {
+                            async_copies[waiter.warp].complete_async_copy_sources(
+                                waiter.warp,
+                                group,
+                                waiter.units,
+                                now,
+                                &params,
+                            )?;
+                        }
+                        if let Some(barrier) = waiter.target.barrier() {
+                            warps[waiter.warp].clear_pending(
+                                waiter.warp,
+                                barrier,
+                                waiter.units,
+                                now,
+                            )?;
+                        }
+                        Ok(())
                     })?;
                 }
                 // The completed fill freed an MSHR entry: retry parked
                 // accesses (FIFO) until one stalls again.
-                drain_retries(st, warps, now, out)?;
+                drain_retries(st, warps, async_copies, now, &params, out)?;
             }
             ReplyTo::Warp { warp, barrier, .. } => {
                 warps[warp].clear_pending(warp, barrier, 1, now)?;
             }
+            ReplyTo::AsyncCopy {
+                warp,
+                group,
+                barrier,
+                ..
+            } => {
+                async_copies[warp].complete_async_copy_sources(warp, group, 1, now, &params)?;
+                if let Some(barrier) = barrier {
+                    warps[warp].clear_pending(warp, barrier, 1, now)?;
+                }
+            }
             ReplyTo::None => return Err(IssueError::UnexpectedMutationOnlyResponse),
         }
         Ok(())
+    }
+
+    /// Earliest issue time after both warp/control dependencies and the next
+    /// instruction's characterized execution resource are available. A missing
+    /// slot remains selectable so the established typed invariant error is
+    /// preserved at the transaction boundary.
+    fn issue_ready_at<const CHECK_ASYNC: bool>(&self, subcore: usize, warp: usize) -> Option<u64> {
+        let mut warp_ready = self.warps[warp].ready_at()?;
+        if CHECK_ASYNC
+            && let Some(IssueSlot {
+                op_class: OpClass::AsyncCopyWait,
+                async_copy_wait_max_pending_groups,
+                ..
+            }) = self.warps[warp].next_slot
+        {
+            let async_ready = self.async_copies[warp]
+                .async_wait_clear_time(*async_copy_wait_max_pending_groups)?;
+            warp_ready = warp_ready.max(async_ready);
+        }
+        let pipeline_ready = match self.warps[warp].next_slot.map(|slot| slot.pipeline_class) {
+            Some(PipelineClass::Tensor { .. }) => self.tensor_pipe_ready[subcore],
+            Some(PipelineClass::DispatchOnly) | None => 0,
+        };
+        Some(warp_ready.max(pipeline_ready))
+    }
+
+    fn is_issue_ready<const CHECK_ASYNC: bool>(
+        &self,
+        subcore: usize,
+        warp: usize,
+        now: u64,
+    ) -> bool {
+        self.issue_ready_at::<CHECK_ASYNC>(subcore, warp)
+            .is_some_and(|ready| ready <= now)
+    }
+
+    fn pick_warps<const CHECK_ASYNC: bool>(&self, now: u64) -> [Option<usize>; SUB_CORES] {
+        std::array::from_fn(|subcore| {
+            // CGGTY pick: held warp while its control state and execution
+            // resource are ready, else youngest fully-ready warp.
+            match self.hold[subcore] {
+                Some(w) if self.is_issue_ready::<CHECK_ASYNC>(subcore, w, now) => Some(w),
+                _ => self.subcore_warps[subcore]
+                    .iter()
+                    .copied()
+                    .filter(|&w| self.is_issue_ready::<CHECK_ASYNC>(subcore, w, now))
+                    .max_by_key(|&w| self.warps[w].arrival),
+            }
+        })
+    }
+
+    fn next_known_issue_time<const CHECK_ASYNC: bool>(&self) -> Option<u64> {
+        let mut next_t: Option<u64> = None;
+        for (subcore, warps) in self.subcore_warps.iter().enumerate() {
+            for &warp in warps {
+                if let Some(ready) = self.issue_ready_at::<CHECK_ASYNC>(subcore, warp) {
+                    next_t = Some(next_t.map_or(ready, |current| current.min(ready)));
+                }
+            }
+        }
+        next_t
     }
 
     /// Run issue cycles strictly BEFORE `horizon`. Emits memory requests
@@ -2614,16 +3678,15 @@ impl<'a> SmCore<'a> {
                 self.t = checked_cycle_add("issue-clock advance", self.t, 1)?;
                 continue;
             }
-            // Nothing ready: skip to the next KNOWN timer (resident warps
-            // only — retired warps left the sub-core lists; warps waiting
-            // on in-flight responses have no computable time and are
-            // excluded).
-            let next_t = self
-                .subcore_warps
-                .iter()
-                .flatten()
-                .filter_map(|&w| self.warps[w].ready_at())
-                .min();
+            // Nothing ready: skip to the next KNOWN warp/resource timer
+            // (resident warps only — retired warps left the sub-core lists;
+            // warps waiting on in-flight responses have no computable time and
+            // are excluded).
+            let next_t = if self.has_async_copy_protocol {
+                self.next_known_issue_time::<true>()
+            } else {
+                self.next_known_issue_time::<false>()
+            };
             match next_t {
                 Some(nt) => {
                     let next_cycle = checked_cycle_add("idle-clock advance", self.t, 1)?;
@@ -2667,10 +3730,15 @@ impl<'a> SmCore<'a> {
         read_barrier: Option<DepBarrier>,
         stall: u8,
         yield_flag: bool,
+        pipeline_class: PipelineClass,
         retires_warp: bool,
+        observe_async_copy: bool,
     ) -> Result<(), IssueError> {
         let t = self.t;
         checked_cycle_add("issue-clock advance", t, 1)?;
+        if let Some(interval) = pipeline_class.initiation_interval_cycles() {
+            checked_cycle_add("tensor-pipeline availability", t, interval)?;
+        }
         if !retires_warp {
             checked_cycle_add("warp stall eligibility", t, u64::from(stall.max(1)))?;
             if yield_flag {
@@ -2685,16 +3753,21 @@ impl<'a> SmCore<'a> {
             )?;
         }
 
-        let needs_ready = write_barrier.is_some();
+        let needs_ready = write_barrier.is_some() || observe_async_copy;
         match kind {
             AccessKind::NonMemory if needs_ready => {
                 self.params.non_memory_ready(t)?;
             }
-            AccessKind::Shared if needs_ready => {
-                self.params.shared_ready(t)?;
+            AccessKind::Shared { wavefronts } if needs_ready => {
+                self.params.shared_ready(t, wavefronts)?;
             }
-            AccessKind::NonMemory | AccessKind::Shared => {}
-            AccessKind::GlobalEligible { .. } | AccessKind::LocalLoad { .. } => match &self.mem {
+            AccessKind::NonMemory | AccessKind::Shared { .. } => {}
+            AccessKind::GlobalEligible { .. }
+            | AccessKind::LocalLoad { .. }
+            | AccessKind::GlobalAsyncCopy {
+                l1_policy: LdgstsL1Policy::CacheAtAllLevels,
+                ..
+            } => match &self.mem {
                 MemModel::Flat if needs_ready => {
                     checked_cycle_add(
                         "flat global visibility",
@@ -2714,27 +3787,31 @@ impl<'a> SmCore<'a> {
                 }
                 MemModel::Flat | MemModel::L1Const(_) | MemModel::L1Shared(_) => {}
             },
-            AccessKind::GlobalBypass { len, .. } | AccessKind::GlobalUntagged { len, .. } => {
-                match &self.mem {
-                    MemModel::Flat if needs_ready => {
-                        checked_cycle_add(
-                            "flat global visibility",
-                            t,
-                            self.params.global_flat_latency,
-                        )?;
-                    }
-                    MemModel::L1Const(_) if needs_ready => {
-                        self.params.store_visibility_ready(t)?;
-                    }
-                    MemModel::L1Shared(_) if len == 0 && needs_ready => {
-                        self.params.store_visibility_ready(t)?;
-                    }
-                    MemModel::L1Shared(_) if len > 0 && needs_ready => {
-                        checked_cycle_add("self-response horizon", t, self.params.l1_miss_latency)?;
-                    }
-                    MemModel::Flat | MemModel::L1Const(_) | MemModel::L1Shared(_) => {}
-                }
+            AccessKind::GlobalBypass { len, .. }
+            | AccessKind::GlobalAsyncCopy {
+                len,
+                l1_policy: LdgstsL1Policy::BypassL1,
+                ..
             }
+            | AccessKind::GlobalUntagged { len, .. } => match &self.mem {
+                MemModel::Flat if needs_ready => {
+                    checked_cycle_add(
+                        "flat global visibility",
+                        t,
+                        self.params.global_flat_latency,
+                    )?;
+                }
+                MemModel::L1Const(_) if needs_ready => {
+                    self.params.store_visibility_ready(t)?;
+                }
+                MemModel::L1Shared(_) if len == 0 && needs_ready => {
+                    self.params.store_visibility_ready(t)?;
+                }
+                MemModel::L1Shared(_) if len > 0 && needs_ready => {
+                    checked_cycle_add("self-response horizon", t, self.params.l1_miss_latency)?;
+                }
+                MemModel::Flat | MemModel::L1Const(_) | MemModel::L1Shared(_) => {}
+            },
             AccessKind::GlobalStore { .. }
             | AccessKind::GlobalReduction { .. }
             | AccessKind::LocalStore { .. } => match &self.mem {
@@ -2763,7 +3840,8 @@ impl<'a> SmCore<'a> {
         let mut budgets = MemoryOrigin::ALL.map(L1MutationBudget::for_origin);
         let mut eligible_sectors = 0u64;
         let mut pending_budget_fits = true;
-        for &wix in picks.iter().flatten() {
+        let mut constant_async_deliveries = [None; SUB_CORES];
+        for (pick_ix, &wix) in picks.iter().flatten().enumerate() {
             let warp = &self.warps[wix];
             let inst = warp
                 .insts
@@ -2774,15 +3852,28 @@ impl<'a> SmCore<'a> {
             let slot = warp
                 .next_slot
                 .ok_or(IssueError::MissingIssueSlot { warp: wix })?;
+            let write_barrier = if self.has_async_copy_protocol {
+                ordinary_write_barrier(slot)
+            } else {
+                slot.control.write_barrier
+            };
             let add_budget = |counter: &'static str, value: &mut u64, add: u64| {
                 *value = checked_u64_counter_add(counter, *value, add)?;
                 Ok::<(), IssueError>(())
             };
             match inst.kind {
                 AccessKind::GlobalEligible { off, len, .. }
-                | AccessKind::LocalLoad { off, len } => {
+                | AccessKind::LocalLoad { off, len }
+                | AccessKind::GlobalAsyncCopy {
+                    off,
+                    len,
+                    l1_policy: LdgstsL1Policy::CacheAtAllLevels,
+                    ..
+                } => {
                     let origin = match inst.kind {
-                        AccessKind::GlobalEligible { .. } => MemoryOrigin::Global,
+                        AccessKind::GlobalEligible { .. } | AccessKind::GlobalAsyncCopy { .. } => {
+                            MemoryOrigin::Global
+                        }
                         AccessKind::LocalLoad { .. } => MemoryOrigin::Local,
                         _ => unreachable!("match arm admits only hierarchy loads"),
                     };
@@ -2800,9 +3891,18 @@ impl<'a> SmCore<'a> {
                     )?;
                     add_budget("L1 recency budget", &mut budget.recency_touches, sectors)?;
                     add_budget("L1 fill budget", &mut budget.new_fills, sectors)?;
+                    if shared.is_none()
+                        && let Some((l1_policy, payload_bytes)) = async_copy_delivery(inst.kind)
+                    {
+                        debug_assert_eq!(l1_policy, LdgstsL1Policy::CacheAtAllLevels);
+                        constant_async_deliveries[pick_ix] = Some((
+                            wix,
+                            self.params.ldgsts_delivery_work(l1_policy, payload_bytes)?,
+                        ));
+                    }
                     if shared.is_some()
                         && warp
-                            .preflight_pending_add(wix, slot.control.write_barrier, u32::from(len))
+                            .preflight_pending_add(wix, write_barrier, u32::from(len))
                             .is_err()
                     {
                         pending_budget_fits = false;
@@ -2850,10 +3950,46 @@ impl<'a> SmCore<'a> {
                         )?;
                     }
                     if let Some(st) = shared
-                        && slot.control.write_barrier.is_some()
+                        && write_barrier.is_some()
                     {
                         if warp
-                            .preflight_pending_add(wix, slot.control.write_barrier, u32::from(len))
+                            .preflight_pending_add(wix, write_barrier, u32::from(len))
+                            .is_err()
+                        {
+                            pending_budget_fits = false;
+                        }
+                        for sector_index in off..off + usize::from(len) {
+                            let response_id =
+                                ResponseId::new(st.response_owner, wix, warp.next, sector_index);
+                            if let Some(&reply) = st
+                                .outstanding_replies
+                                .iter()
+                                .find(|reply| reply.response_id() == Some(response_id))
+                            {
+                                return Err(IssueError::ResponseTokenAlreadyOutstanding { reply });
+                            }
+                        }
+                    }
+                }
+                AccessKind::GlobalAsyncCopy {
+                    off,
+                    len,
+                    payload_bytes,
+                    l1_policy: LdgstsL1Policy::BypassL1,
+                    ..
+                } => {
+                    let budget = &mut budgets[MemoryOrigin::Global.index()];
+                    let sectors = u64::from(len);
+                    add_budget(
+                        "L1 bypass-sector budget",
+                        &mut budget.bypass_sectors,
+                        sectors,
+                    )?;
+                    if let Some(st) = shared
+                        && (write_barrier.is_some() || payload_bytes != 0)
+                    {
+                        if warp
+                            .preflight_pending_add(wix, write_barrier, u32::from(len))
                             .is_err()
                         {
                             pending_budget_fits = false;
@@ -2880,10 +4016,10 @@ impl<'a> SmCore<'a> {
                         sectors,
                     )?;
                     if let Some(st) = shared
-                        && slot.control.write_barrier.is_some()
+                        && write_barrier.is_some()
                     {
                         if warp
-                            .preflight_pending_add(wix, slot.control.write_barrier, u32::from(len))
+                            .preflight_pending_add(wix, write_barrier, u32::from(len))
                             .is_err()
                         {
                             pending_budget_fits = false;
@@ -2924,12 +4060,33 @@ impl<'a> SmCore<'a> {
                     }
                     add_budget("L1 recency budget", &mut budget.recency_touches, sectors)?;
                 }
-                AccessKind::NonMemory | AccessKind::Shared => {}
+                AccessKind::NonMemory | AccessKind::Shared { .. } => {}
             }
         }
 
-        let constant_timing_fits =
-            shared.is_some() || l1.constant_batch_timing_has_headroom(self.t, eligible_sectors);
+        let constant_ready_upper = if shared.is_none() {
+            l1.constant_batch_ready_upper_bound(self.t, eligible_sectors)
+        } else {
+            None
+        };
+        let constant_timing_fits = shared.is_some() || constant_ready_upper.is_some();
+        let constant_async_completion_fits = shared.is_some()
+            || constant_async_deliveries
+                .iter()
+                .flatten()
+                .all(|&(wix, delivery_work)| {
+                    constant_ready_upper.is_some_and(|source_ready| {
+                        self.async_copies[wix]
+                            .preflight_async_copy_add(
+                                wix,
+                                0,
+                                source_ready,
+                                delivery_work,
+                                &self.params,
+                            )
+                            .is_ok()
+                    })
+                });
         let shared_timing_fits = shared.is_none()
             || eligible_sectors == 0
             || (self.t.checked_add(self.params.l1_hit_latency).is_some()
@@ -2937,6 +4094,7 @@ impl<'a> SmCore<'a> {
         if l1.preflight_mutation_budgets(&budgets).is_ok()
             && pending_budget_fits
             && constant_timing_fits
+            && constant_async_completion_fits
             && shared_timing_fits
         {
             return Ok(());
@@ -2952,15 +4110,47 @@ impl<'a> SmCore<'a> {
             let slot = warp
                 .next_slot
                 .ok_or(IssueError::MissingIssueSlot { warp: wix })?;
+            let write_barrier = if self.has_async_copy_protocol {
+                ordinary_write_barrier(slot)
+            } else {
+                slot.control.write_barrier
+            };
             match inst.kind {
                 AccessKind::GlobalEligible { off, len, .. }
-                | AccessKind::LocalLoad { off, len } => {
+                | AccessKind::LocalLoad { off, len }
+                | AccessKind::GlobalAsyncCopy {
+                    off,
+                    len,
+                    l1_policy: LdgstsL1Policy::CacheAtAllLevels,
+                    ..
+                } => {
                     let origin = match inst.kind {
-                        AccessKind::GlobalEligible { .. } => MemoryOrigin::Global,
+                        AccessKind::GlobalEligible { .. } | AccessKind::GlobalAsyncCopy { .. } => {
+                            MemoryOrigin::Global
+                        }
                         AccessKind::LocalLoad { .. } => MemoryOrigin::Local,
                         _ => unreachable!("match arm admits only hierarchy loads"),
                     };
                     let mut pending_add = 0u32;
+                    let async_delivery = async_copy_delivery(inst.kind);
+                    let observe_ready = write_barrier.is_some() || async_delivery.is_some();
+                    let mut async_source_ready = if shared.is_none() && async_delivery.is_some() {
+                        Some(checked_cycle_add(
+                            "LDGSTS L1 hit-pipeline floor",
+                            self.t,
+                            self.params.l1_hit_latency,
+                        )?)
+                    } else {
+                        None
+                    };
+                    let mshr_floor = matches!(
+                        inst.kind,
+                        AccessKind::GlobalAsyncCopy {
+                            l1_policy: LdgstsL1Policy::CacheAtAllLevels,
+                            ..
+                        }
+                    )
+                    .then_some(self.params.ldgsts_l1_mshr_floor);
                     for &sector_id in &warp.sectors[off..off + usize::from(len)] {
                         if shared.is_some() {
                             match access_shared_l1(
@@ -2968,7 +4158,8 @@ impl<'a> SmCore<'a> {
                                 origin,
                                 sector_id,
                                 self.t,
-                                slot.control.write_barrier.is_some(),
+                                observe_ready,
+                                mshr_floor,
                             )? {
                                 SharedL1Access::Hit { .. } => {}
                                 SharedL1Access::MissRequest { .. } => {
@@ -2999,14 +4190,44 @@ impl<'a> SmCore<'a> {
                                     break;
                                 }
                             }
-                        } else if slot.control.write_barrier.is_some() {
-                            shadow.access_eligible(origin, sector_id, self.t)?;
+                        } else if observe_ready {
+                            let (_, ready) = match mshr_floor {
+                                Some(floor) => shadow.access_eligible_with_mshr_floor(
+                                    origin, sector_id, self.t, floor,
+                                )?,
+                                None => shadow.access_eligible(origin, sector_id, self.t)?,
+                            };
+                            if let Some(current) = &mut async_source_ready {
+                                *current = (*current).max(ready);
+                            }
                         } else {
-                            shadow.access_eligible_unobserved(origin, sector_id, self.t)?;
+                            match mshr_floor {
+                                Some(floor) => {
+                                    shadow.access_eligible_unobserved_with_mshr_floor(
+                                        origin, sector_id, self.t, floor,
+                                    )?;
+                                }
+                                None => {
+                                    shadow.access_eligible_unobserved(origin, sector_id, self.t)?;
+                                }
+                            }
                         }
                     }
+                    if let (Some(source_ready), Some((l1_policy, payload_bytes))) =
+                        (async_source_ready, async_delivery)
+                    {
+                        let delivery_work =
+                            self.params.ldgsts_delivery_work(l1_policy, payload_bytes)?;
+                        self.async_copies[wix].preflight_async_copy_add(
+                            wix,
+                            0,
+                            source_ready,
+                            delivery_work,
+                            &self.params,
+                        )?;
+                    }
                     if shared.is_some() {
-                        warp.preflight_pending_add(wix, slot.control.write_barrier, pending_add)?;
+                        warp.preflight_pending_add(wix, write_barrier, pending_add)?;
                     }
                 }
                 AccessKind::GlobalBypass { len, token, .. } => {
@@ -3016,21 +4237,23 @@ impl<'a> SmCore<'a> {
                         token == CacheOpToken::Atom,
                     )?;
                     if shared.is_some() {
-                        warp.preflight_pending_add(
-                            wix,
-                            slot.control.write_barrier,
-                            u32::from(len),
-                        )?;
+                        warp.preflight_pending_add(wix, write_barrier, u32::from(len))?;
+                    }
+                }
+                AccessKind::GlobalAsyncCopy {
+                    len,
+                    l1_policy: LdgstsL1Policy::BypassL1,
+                    ..
+                } => {
+                    shadow.count_bypass(MemoryOrigin::Global, u64::from(len), false)?;
+                    if shared.is_some() {
+                        warp.preflight_pending_add(wix, write_barrier, u32::from(len))?;
                     }
                 }
                 AccessKind::GlobalUntagged { len, .. } => {
                     shadow.count_untagged(MemoryOrigin::Global, u64::from(len))?;
                     if shared.is_some() {
-                        warp.preflight_pending_add(
-                            wix,
-                            slot.control.write_barrier,
-                            u32::from(len),
-                        )?;
+                        warp.preflight_pending_add(wix, write_barrier, u32::from(len))?;
                     }
                 }
                 AccessKind::GlobalStore { off, len }
@@ -3052,7 +4275,7 @@ impl<'a> SmCore<'a> {
                         }
                     }
                 }
-                AccessKind::NonMemory | AccessKind::Shared => {}
+                AccessKind::NonMemory | AccessKind::Shared { .. } => {}
             }
         }
         Ok(())
@@ -3080,12 +4303,6 @@ impl<'a> SmCore<'a> {
         let mut total_retirements = 0usize;
         for &wix in picks.iter().flatten() {
             let warp = &self.warps[wix];
-            let _inst = warp
-                .insts
-                .get(warp.next)
-                .ok_or(IssueError::CounterOverflow {
-                    counter: "warp instruction cursor",
-                })?;
             let retires = warp.next_issue_retires()?;
             let slot = warp
                 .next_slot
@@ -3168,17 +4385,11 @@ impl<'a> SmCore<'a> {
     /// whether anything issued.
     fn issue_cycle(&mut self, out: &mut Vec<MemRequest>) -> Result<bool, IssueError> {
         let t = self.t;
-        let picks: [Option<usize>; SUB_CORES] = std::array::from_fn(|sc| {
-            // CGGTY pick: held warp while ready, else youngest ready.
-            match self.hold[sc] {
-                Some(w) if self.warps[w].is_ready(t) => Some(w),
-                _ => self.subcore_warps[sc]
-                    .iter()
-                    .copied()
-                    .filter(|&w| self.warps[w].is_ready(t))
-                    .max_by_key(|&w| self.warps[w].arrival),
-            }
-        });
+        let picks = if self.has_async_copy_protocol {
+            self.pick_warps::<true>(t)
+        } else {
+            self.pick_warps::<false>(t)
+        };
 
         // A cycle is the caller-visible transaction boundary. Validate every
         // selected instruction's possible timing arms before any sub-core
@@ -3189,13 +4400,58 @@ impl<'a> SmCore<'a> {
                 .next_slot
                 .ok_or(IssueError::MissingIssueSlot { warp: wix })?;
             let retires_warp = w.next_issue_retires()?;
+            let kind = w.insts[w.next].kind;
+            validate_async_copy_payload(kind, wix)?;
+            let write_barrier = if self.has_async_copy_protocol {
+                ordinary_write_barrier(slot)
+            } else {
+                slot.control.write_barrier
+            };
+            let observe_async_copy =
+                self.has_async_copy_protocol && async_copy_source_count(kind).is_some();
+            if observe_async_copy
+                && let Some((l1_policy, payload_bytes)) = async_copy_delivery(kind)
+            {
+                let delivery_work = self.params.ldgsts_delivery_work(l1_policy, payload_bytes)?;
+                let source_ready = match &self.mem {
+                    MemModel::Flat => checked_cycle_add(
+                        "flat async-copy source visibility",
+                        self.t,
+                        self.params.global_flat_latency,
+                    )?,
+                    MemModel::L1Const(_) => checked_cycle_add(
+                        "constant-L1 async-copy source upper bound",
+                        self.t,
+                        self.params.l1_miss_latency,
+                    )?,
+                    MemModel::L1Shared(_) => checked_cycle_add(
+                        "shared-L1 async-copy known-source floor",
+                        self.t,
+                        self.params.l1_hit_latency,
+                    )?,
+                };
+                let pending_add = if matches!(self.mem, MemModel::L1Shared(_)) {
+                    u32::from(async_copy_source_count(kind).unwrap_or(0))
+                } else {
+                    0
+                };
+                self.async_copies[wix].preflight_async_copy_add(
+                    wix,
+                    pending_add,
+                    source_ready,
+                    delivery_work,
+                    &self.params,
+                )?;
+            }
             self.preflight_issue_timing(
-                w.insts[w.next].kind,
-                slot.control.write_barrier,
+                kind,
+                write_barrier,
                 slot.control.read_barrier,
                 slot.control.stall,
                 slot.control.yield_flag,
+                slot.pipeline_class,
                 retires_warp,
+                observe_async_copy,
             )?;
         }
         self.preflight_issue_memory(&picks)?;
@@ -3212,6 +4468,7 @@ impl<'a> SmCore<'a> {
                 launch_index,
                 warp_slot,
                 slot_class,
+                pipeline_class,
                 control,
                 instruction,
                 inst,
@@ -3227,6 +4484,7 @@ impl<'a> SmCore<'a> {
                     w.launch_index,
                     w.warp_slot,
                     slot.op_class,
+                    slot.pipeline_class,
                     slot.control,
                     w.next,
                     w.insts[w.next],
@@ -3234,6 +4492,14 @@ impl<'a> SmCore<'a> {
                     w.next_issue_retires()?,
                 )
             };
+            let write_barrier =
+                if self.has_async_copy_protocol && slot_class == OpClass::AsyncCopyCommit {
+                    None
+                } else {
+                    control.write_barrier
+                };
+            let observe_async_copy =
+                self.has_async_copy_protocol && async_copy_source_count(inst.kind).is_some();
 
             // Memory-model interaction happens at issue time regardless of
             // whether a dependence barrier consumes the ready time.
@@ -3243,7 +4509,7 @@ impl<'a> SmCore<'a> {
                     instruction,
                     inst.kind,
                     warp_sectors,
-                    control.write_barrier,
+                    write_barrier,
                     out,
                 )?
             } else {
@@ -3253,9 +4519,30 @@ impl<'a> SmCore<'a> {
                     t,
                     &self.params,
                     self.mem.const_l1_mut(),
-                    control.write_barrier,
+                    write_barrier,
+                    observe_async_copy,
                 )?
             };
+            if observe_async_copy && let Some(source_ready) = data_ready {
+                let delivery_work = if matches!(self.mem, MemModel::L1Shared(_)) {
+                    0
+                } else if let Some((l1_policy, payload_bytes)) = async_copy_delivery(inst.kind) {
+                    self.params.ldgsts_delivery_work(l1_policy, payload_bytes)?
+                } else {
+                    0
+                };
+                self.async_copies[wix].add_known_async_copy(
+                    wix,
+                    source_ready,
+                    delivery_work,
+                    &self.params,
+                )?;
+            }
+
+            if let Some(interval) = pipeline_class.initiation_interval_cycles() {
+                self.tensor_pipe_ready[sc] =
+                    checked_cycle_add("tensor-pipeline availability", t, interval)?;
+            }
 
             // Yield semantics per the CGGTY paper: the yield bit means
             // "do not issue this warp in the NEXT cycle" — a one-cycle
@@ -3278,7 +4565,7 @@ impl<'a> SmCore<'a> {
             // slow one (miss). Unknown write-backs (in-flight responses)
             // are tracked in `barrier_pending`.
             if let Some(dr) = data_ready {
-                self.warps[wix].stamp_clear(control.write_barrier, dr);
+                self.warps[wix].stamp_clear(write_barrier, dr);
             }
             if let Some(read_barrier) = control.read_barrier {
                 let read_clear = checked_cycle_add(
@@ -3287,6 +4574,21 @@ impl<'a> SmCore<'a> {
                     self.params.read_barrier_latency,
                 )?;
                 self.warps[wix].stamp_clear(Some(read_barrier), read_clear);
+            }
+            if self.has_async_copy_protocol {
+                match slot_class {
+                    OpClass::AsyncCopyCommit => {
+                        self.async_copies[wix].commit_async_copy_group();
+                    }
+                    OpClass::AsyncCopyWait => {
+                        let max_pending_groups = self.warps[wix]
+                            .next_slot
+                            .ok_or(IssueError::MissingIssueSlot { warp: wix })?
+                            .async_copy_wait_max_pending_groups;
+                        self.async_copies[wix].consume_async_wait(max_pending_groups, t);
+                    }
+                    OpClass::BlockBarrier | OpClass::Other => {}
+                }
             }
 
             // Advance the warp's stream.
@@ -3340,8 +4642,13 @@ impl<'a> SmCore<'a> {
                 }
             } else {
                 let next_pc = self.warps[wix].insts[self.warps[wix].next].pc;
-                self.warps[wix].next_slot =
-                    Some(lookup(self.schedule, next_pc, launch_index, warp_slot)?);
+                self.warps[wix].next_slot = Some(lookup_dense(
+                    &self.schedule_slots,
+                    self.schedule,
+                    next_pc,
+                    launch_index,
+                    warp_slot,
+                )?);
             }
             // Single hold write: never hold a yielded or finished warp.
             self.hold[sc] = (!control.yield_flag && !self.warps[wix].done).then_some(wix);
@@ -3377,28 +4684,29 @@ impl<'a> SmCore<'a> {
     }
 }
 
-/// Register a barrier unit that clears when `fill` completes; `None`
-/// carries no dependency.
+/// Register a completion target that clears when `fill` completes. The
+/// asynchronous-copy group already owns its pending source unit; an optional
+/// ordinary barrier is counted here alongside ordinary load barriers.
 fn add_fill_waiter(
     st: &mut SharedL2State,
     warps: &mut [WarpState<'_>],
     fill: FillKey,
     warp: usize,
-    barrier: Option<DepBarrier>,
+    target: Option<FillTarget>,
 ) -> Result<(), IssueError> {
-    let Some(barrier) = barrier else {
+    let Some(target) = target else {
         return Ok(());
     };
-    warps[warp].add_pending(warp, Some(barrier), 1)?;
+    warps[warp].add_pending(warp, target.barrier(), 1)?;
     match st.fill_waiters.entry(fill) {
         Entry::Vacant(v) => {
             v.insert(Waiters::One(FillWaiter {
                 warp,
-                barrier,
+                target,
                 units: 1,
             }));
         }
-        Entry::Occupied(mut o) => o.get_mut().add(warp, barrier)?,
+        Entry::Occupied(mut o) => o.get_mut().add(warp, target)?,
     }
     Ok(())
 }
@@ -3434,23 +4742,32 @@ fn access_shared_l1(
     sector_id: i64,
     now: u64,
     observe_ready: bool,
+    mshr_floor: Option<NonZeroU32>,
 ) -> Result<SharedL1Access, L1AccessError> {
     if observe_ready {
-        return Ok(match l1.access_eligible_ev(origin, sector_id, now)? {
+        let access = match mshr_floor {
+            Some(floor) => l1.access_eligible_ev_with_mshr_floor(origin, sector_id, now, floor)?,
+            None => l1.access_eligible_ev(origin, sector_id, now)?,
+        };
+        return Ok(match access {
             EvAccess::Hit { ready } => SharedL1Access::Hit { ready: Some(ready) },
             EvAccess::MissRequest { fill } => SharedL1Access::MissRequest { fill },
             EvAccess::MergedPending { fill } => SharedL1Access::MergedPending { fill },
             EvAccess::Stalled => SharedL1Access::Stalled,
         });
     }
-    Ok(
-        match l1.access_eligible_ev_unobserved(origin, sector_id, now)? {
-            EvAccessUnobserved::Hit => SharedL1Access::Hit { ready: None },
-            EvAccessUnobserved::MissRequest { fill } => SharedL1Access::MissRequest { fill },
-            EvAccessUnobserved::MergedPending { fill } => SharedL1Access::MergedPending { fill },
-            EvAccessUnobserved::Stalled => SharedL1Access::Stalled,
-        },
-    )
+    let access = match mshr_floor {
+        Some(floor) => {
+            l1.access_eligible_ev_unobserved_with_mshr_floor(origin, sector_id, now, floor)?
+        }
+        None => l1.access_eligible_ev_unobserved(origin, sector_id, now)?,
+    };
+    Ok(match access {
+        EvAccessUnobserved::Hit => SharedL1Access::Hit { ready: None },
+        EvAccessUnobserved::MissRequest { fill } => SharedL1Access::MissRequest { fill },
+        EvAccessUnobserved::MergedPending { fill } => SharedL1Access::MergedPending { fill },
+        EvAccessUnobserved::Stalled => SharedL1Access::Stalled,
+    })
 }
 
 #[derive(Debug)]
@@ -3465,7 +4782,6 @@ impl From<IssueError> for SharedAccessError {
     }
 }
 
-/// Emission surface of one access BATCH (one instruction's sector
 /// One eligible sector access in L1Shared mode at time `now`, emitting a
 /// request on a fresh miss. Returns `Ok(known_ready)` for hits,
 /// `Ok(None)` when the data waits on a response, and
@@ -3488,7 +4804,8 @@ fn access_shared(
     st: &mut SharedL2State,
     warps: &mut [WarpState<'_>],
     wix: usize,
-    barrier: Option<DepBarrier>,
+    target: Option<FillTarget>,
+    mshr_floor: Option<NonZeroU32>,
     origin: MemoryOrigin,
     sector_id: i64,
     response_id: ResponseId,
@@ -3496,8 +4813,15 @@ fn access_shared(
     out: &mut Vec<MemRequest>,
 ) -> Result<Option<u64>, SharedAccessError> {
     let sbit = 1u8 << (sector_id & 3) as u8;
-    match access_shared_l1(&mut st.l1, origin, sector_id, now, barrier.is_some())
-        .map_err(IssueError::from)?
+    match access_shared_l1(
+        &mut st.l1,
+        origin,
+        sector_id,
+        now,
+        target.is_some(),
+        mshr_floor,
+    )
+    .map_err(IssueError::from)?
     {
         SharedL1Access::Hit { ready } => Ok(ready),
         SharedL1Access::MissRequest { fill } => {
@@ -3508,7 +4832,7 @@ fn access_shared(
                 st.fill_masks.insert(line, sbit);
                 st.line_folds.push((line, out.len() - 1));
             }
-            add_fill_waiter(st, warps, fill, wix, barrier)?;
+            add_fill_waiter(st, warps, fill, wix, target)?;
             Ok(None)
         }
         SharedL1Access::MergedPending { fill } => {
@@ -3538,7 +4862,7 @@ fn access_shared(
             }
             // Sector-fill merges need nothing: that sector's fetch was
             // sent with its own request.
-            add_fill_waiter(st, warps, fill, wix, barrier)?;
+            add_fill_waiter(st, warps, fill, wix, target)?;
             Ok(None)
         }
         SharedL1Access::Stalled => Err(SharedAccessError::Stalled),
@@ -3548,16 +4872,19 @@ fn access_shared(
 fn drain_retries(
     st: &mut SharedL2State,
     warps: &mut [WarpState<'_>],
+    async_copies: &mut [AsyncCopySlot],
     now: u64,
+    params: &IssueModelParams,
     out: &mut Vec<MemRequest>,
 ) -> Result<(), IssueError> {
     while let Some(mut r) = st.retry.pop_front() {
         let sectors = warps[r.warp].sectors;
-        // Replace the retry entry's unit atomically with whatever waiter
-        // units this attempt creates. No warp can observe pending state while
-        // a response handler runs; releasing first preserves u32::MAX as a
-        // valid final count instead of requiring a nonexistent transient slot.
-        warps[r.warp].release_pending(r.warp, r.barrier, 1)?;
+        let barrier = r.target.and_then(FillTarget::barrier);
+        // Replace the retry entry's ordinary-barrier unit atomically with
+        // whatever waiter units this attempt creates. Async-copy source units
+        // remain owned by their group until a hit or fill completion resolves
+        // each sector.
+        warps[r.warp].release_pending(r.warp, barrier, 1)?;
         // The whole drain is ONE emission batch (st.line_folds, cleared
         // by on_response): a line fill emitted by an earlier retry
         // entry folds later entries' same-line sectors — same-timestamp
@@ -3567,19 +4894,26 @@ fn drain_retries(
                 st,
                 warps,
                 r.warp,
-                r.barrier,
+                r.target,
+                r.mshr_floor,
                 r.origin,
                 sectors[r.lo],
                 ResponseId::new(st.response_owner, r.warp, r.instruction, r.lo),
                 now,
                 out,
             ) {
-                Ok(Some(ready)) => warps[r.warp].stamp_clear(r.barrier, ready),
+                Ok(Some(ready)) => {
+                    if let Some(group) = r.target.and_then(FillTarget::async_group) {
+                        async_copies[r.warp]
+                            .complete_async_copy_sources(r.warp, group, 1, ready, params)?;
+                    }
+                    warps[r.warp].stamp_clear(barrier, ready);
+                }
                 Ok(None) => {}
                 Err(SharedAccessError::Stalled) => {
                     // Still full: restore the retry entry's replacement unit
                     // and park it; nothing behind it can proceed either.
-                    warps[r.warp].add_pending(r.warp, r.barrier, 1)?;
+                    warps[r.warp].add_pending(r.warp, barrier, 1)?;
                     st.retry.push_front(r);
                     return Ok(());
                 }
@@ -3603,12 +4937,13 @@ fn validate_sector_span(
     let (off, len) = match kind {
         AccessKind::GlobalEligible { off, len, .. }
         | AccessKind::GlobalBypass { off, len, .. }
+        | AccessKind::GlobalAsyncCopy { off, len, .. }
         | AccessKind::GlobalUntagged { off, len }
         | AccessKind::GlobalStore { off, len }
         | AccessKind::GlobalReduction { off, len }
         | AccessKind::LocalLoad { off, len }
         | AccessKind::LocalStore { off, len } => (off, len),
-        AccessKind::NonMemory | AccessKind::Shared => return Ok(()),
+        AccessKind::NonMemory | AccessKind::Shared { .. } => return Ok(()),
     };
     let end = off
         .checked_add(usize::from(len))
@@ -3633,16 +4968,17 @@ fn validate_sector_span(
     Ok(())
 }
 
-fn lookup(
+fn lookup_dense<'a>(
+    schedule_slots: &[(u64, &'a IssueSlot)],
     schedule: &FunctionSchedule,
     pc: u32,
     launch_index: i64,
     warp_slot: i32,
-) -> Result<&IssueSlot, IssueError> {
-    schedule
-        .by_pc
-        .get(&u64::from(pc))
-        .ok_or(IssueError::PcNotInSchedule {
+) -> Result<&'a IssueSlot, IssueError> {
+    schedule_slots
+        .binary_search_by_key(&u64::from(pc), |(slot_pc, _)| *slot_pc)
+        .map(|index| schedule_slots[index].1)
+        .map_err(|_| IssueError::PcNotInSchedule {
             pc,
             launch_index,
             warp_slot,
@@ -3703,7 +5039,7 @@ mod tests {
 
     use super::*;
     use crate::control_bits::{ControlBits, DepBarrier, WaitMask};
-    use crate::program::{FunctionSchedule, IssueSlot, OpClass};
+    use crate::program::{FunctionSchedule, IssueSlot, OpClass, PipelineClass};
 
     fn cb(stall: u8) -> ControlBits {
         ControlBits::new(stall, false, 7, 7, 0, 0).expect("valid test controls")
@@ -3721,8 +5057,30 @@ mod tests {
         IssueSlot {
             control,
             op_class,
-            mem_role: sim_mem::MemRole::None,
+            async_copy_wait_max_pending_groups: 0,
+            pipeline_class: PipelineClass::DispatchOnly,
+            mem_role: if text.trim_start().starts_with("LDGSTS") {
+                sim_mem::MemRole::BypassLoad(CacheOpToken::Ldgsts)
+            } else {
+                sim_mem::MemRole::None
+            },
+            ldgsts_l1_policy: text.trim_start().starts_with("LDGSTS").then_some(
+                if text.split('.').any(|modifier| modifier == "BYPASS") {
+                    LdgstsL1Policy::BypassL1
+                } else {
+                    LdgstsL1Policy::CacheAtAllLevels
+                },
+            ),
             opcode_text: text.to_owned(),
+        }
+    }
+
+    fn tensor_slot(control: ControlBits, text: &str, interval: u64) -> IssueSlot {
+        IssueSlot {
+            pipeline_class: PipelineClass::Tensor {
+                initiation_interval_cycles: interval,
+            },
+            ..slot(control, OpClass::Other, text)
         }
     }
 
@@ -3736,6 +5094,11 @@ mod tests {
         }
     }
 
+    #[test]
+    fn replay_instruction_stays_compact() {
+        assert!(std::mem::size_of::<ReplayInst>() <= 24);
+    }
+
     fn params() -> IssueModelParams {
         IssueModelParams {
             arch: ArchId::Sm86,
@@ -3744,8 +5107,14 @@ mod tests {
             l1_miss_latency: 244,
             global_flat_latency: 400,
             shared_write_barrier_latency: 23,
+            shared_additional_wavefront_latency: 2,
             non_memory_write_barrier_latency: 25,
             read_barrier_latency: 8,
+            ldgsts_l1_mshr_floor: NonZeroU32::new(1).unwrap(),
+            ldgsts_completion_throughput: LdgstsCompletionThroughput {
+                cache_all_payload_bytes_per_cycle: 64,
+                bypass_payload_bytes_per_cycle: 32,
+            },
             max_resident_warps_per_sm: 48,
         }
     }
@@ -3793,6 +5162,7 @@ mod tests {
         );
         assert_eq!(legacy.non_memory_write_barrier_latency, 25);
         assert_eq!(legacy.read_barrier_latency, 8);
+        assert_eq!(legacy.ldgsts_l1_mshr_floor.get(), 248);
         assert_eq!(legacy.max_resident_warps_per_sm, 48);
         legacy.validate_resource_source().unwrap();
 
@@ -3827,6 +5197,8 @@ mod tests {
         non_memory.non_memory_write_barrier_latency += 1;
         let mut read = baseline;
         read.read_barrier_latency += 1;
+        let mut ldgsts_floor = baseline;
+        ldgsts_floor.ldgsts_l1_mshr_floor = NonZeroU32::new(249).unwrap();
         let mut occupancy = baseline;
         occupancy.max_resident_warps_per_sm += 1;
 
@@ -3838,6 +5210,7 @@ mod tests {
                 26_u64,
             ),
             ("read_barrier_latency", read, 8_u64, 9_u64),
+            ("ldgsts_l1_mshr_floor", ldgsts_floor, 248_u64, 249_u64),
             ("max_resident_warps_per_sm", occupancy, 48_u64, 49_u64),
         ] {
             assert!(matches!(
@@ -3906,6 +5279,7 @@ mod tests {
         assert!(!resources.dual_issue_supported);
         assert_eq!(strict.non_memory_write_barrier_latency, 25);
         assert_eq!(strict.read_barrier_latency, 8);
+        assert_eq!(strict.ldgsts_l1_mshr_floor.get(), 248);
         assert_eq!(strict.max_resident_warps_per_sm, 48);
 
         assert!(matches!(
@@ -4146,7 +5520,7 @@ mod tests {
                 0,
                 vec![ReplayInst {
                     pc: 0,
-                    kind: AccessKind::Shared,
+                    kind: AccessKind::Shared { wavefronts: 1 },
                 }],
             )],
         }];
@@ -4177,7 +5551,7 @@ mod tests {
                 0,
                 vec![ReplayInst {
                     pc: 0,
-                    kind: AccessKind::Shared,
+                    kind: AccessKind::Shared { wavefronts: 1 },
                 }],
             )],
         }];
@@ -4548,6 +5922,45 @@ mod tests {
         ));
     }
 
+    #[test]
+    fn constant_cacheable_async_copy_uses_access_local_mshr_floor() {
+        let mut p = params();
+        p.ldgsts_l1_mshr_floor = NonZeroU32::new(2).unwrap();
+        let sectors = [0, 4];
+
+        let mut cacheable = L1Cache::new(p.l1_config(8, 1)).unwrap();
+        assert_eq!(
+            data_ready_time(
+                async_copy_inst(0, 0, 2).kind,
+                &sectors,
+                0,
+                &p,
+                Some(&mut cacheable),
+                None,
+                true,
+            )
+            .unwrap(),
+            Some(244)
+        );
+        assert_eq!(cacheable.counters.stall_events, 0);
+
+        let mut ordinary = L1Cache::new(p.l1_config(8, 1)).unwrap();
+        assert_eq!(
+            data_ready_time(
+                eligible(0, 2),
+                &sectors,
+                0,
+                &p,
+                Some(&mut ordinary),
+                Some(barrier(0)),
+                false,
+            )
+            .unwrap(),
+            Some(488)
+        );
+        assert_eq!(ordinary.counters.stall_events, 1);
+    }
+
     fn l1_config() -> L1Config {
         L1Config {
             arch: ArchId::Sm86,
@@ -4570,6 +5983,50 @@ mod tests {
         ReplayInst {
             pc,
             kind: AccessKind::NonMemory,
+        }
+    }
+
+    fn async_copy_inst_with_policy(
+        pc: u32,
+        off: usize,
+        len: u16,
+        l1_policy: LdgstsL1Policy,
+    ) -> ReplayInst {
+        ReplayInst {
+            pc,
+            kind: AccessKind::GlobalAsyncCopy {
+                off,
+                len,
+                payload_bytes: u32::from(len) * 32,
+                l1_policy,
+            },
+        }
+    }
+
+    fn async_copy_inst(pc: u32, off: usize, len: u16) -> ReplayInst {
+        async_copy_inst_with_policy(pc, off, len, LdgstsL1Policy::CacheAtAllLevels)
+    }
+
+    fn bypass_async_copy_inst(pc: u32, off: usize, len: u16) -> ReplayInst {
+        async_copy_inst_with_policy(pc, off, len, LdgstsL1Policy::BypassL1)
+    }
+
+    fn async_commit_slot() -> IssueSlot {
+        slot(
+            ControlBits::new(1, true, 0, 7, 0, 0).unwrap(),
+            OpClass::AsyncCopyCommit,
+            "LDGDEPBAR",
+        )
+    }
+
+    fn async_wait_slot(max_pending_groups: u32) -> IssueSlot {
+        IssueSlot {
+            async_copy_wait_max_pending_groups: max_pending_groups,
+            ..slot(
+                cb(1),
+                OpClass::AsyncCopyWait,
+                &format!("DEPBAR.LE SB0, {max_pending_groups}"),
+            )
         }
     }
 
@@ -4600,6 +6057,512 @@ mod tests {
     }
 
     #[test]
+    fn flat_async_copy_waits_for_source_completion_without_generic_sb0_latency() {
+        let sched = schedule(vec![
+            (0, slot(cb(1), OpClass::Other, "LDGSTS.E")),
+            (16, async_commit_slot()),
+            (32, async_wait_slot(0)),
+            (48, slot(cb(1), OpClass::Other, "EXIT")),
+        ]);
+        let blocks = vec![BlockReplay {
+            launch_index: 0,
+            warps: vec![WarpReplay {
+                warp_slot: 0,
+                insts: vec![async_copy_inst(0, 0, 1), inst(16), inst(32), inst(48)],
+                sectors: vec![40],
+            }],
+        }];
+        let mut core = SmCore::new(&blocks, &sched, &params(), SmMemMode::Flat).unwrap();
+        let mut out = Vec::new();
+
+        assert_eq!(
+            core.advance(ReplayHorizon::Unbounded, &mut out).unwrap(),
+            Advance::Done
+        );
+        assert!(out.is_empty());
+        assert_eq!(
+            core.result().cycles,
+            403,
+            "wait must issue at source-ready t=400 plus one payload cycle"
+        );
+        assert_eq!(core.warps[0].barrier_clear[0], 0);
+        let async_copy = core.async_copies[0]
+            .state
+            .as_deref()
+            .expect("effective copy allocates protocol state");
+        assert!(async_copy.open_group.is_none());
+        assert!(async_copy.committed_groups.is_empty());
+    }
+
+    #[test]
+    fn async_copy_payload_rate_is_route_local_and_sector_count_independent() {
+        for (policy, opcode, expected_cycles) in [
+            (LdgstsL1Policy::CacheAtAllLevels, "LDGSTS.E", 406),
+            (LdgstsL1Policy::BypassL1, "LDGSTS.E.BYPASS", 410),
+        ] {
+            for len in [1_u16, 16] {
+                let sched = schedule(vec![
+                    (0, slot(cb(1), OpClass::Other, opcode)),
+                    (16, async_commit_slot()),
+                    (32, async_wait_slot(0)),
+                    (48, slot(cb(1), OpClass::Other, "EXIT")),
+                ]);
+                let blocks = vec![BlockReplay {
+                    launch_index: 0,
+                    warps: vec![WarpReplay {
+                        warp_slot: 0,
+                        insts: vec![
+                            ReplayInst {
+                                pc: 0,
+                                kind: AccessKind::GlobalAsyncCopy {
+                                    off: 0,
+                                    len,
+                                    payload_bytes: 256,
+                                    l1_policy: policy,
+                                },
+                            },
+                            inst(16),
+                            inst(32),
+                            inst(48),
+                        ],
+                        sectors: (0..len).map(i64::from).collect(),
+                    }],
+                }];
+
+                let result = simulate_sm(&blocks, &sched, &params(), None).unwrap();
+                assert_eq!(
+                    result.cycles, expected_cycles,
+                    "policy={policy:?}, sectors={len}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn async_copy_group_accumulates_each_copy_payload_once() {
+        for (policy, opcode, expected_cycles) in [
+            (LdgstsL1Policy::CacheAtAllLevels, "LDGSTS.E", 411),
+            (LdgstsL1Policy::BypassL1, "LDGSTS.E.BYPASS", 419),
+        ] {
+            let sched = schedule(vec![
+                (0, slot(cb(1), OpClass::Other, opcode)),
+                (16, slot(cb(1), OpClass::Other, opcode)),
+                (32, async_commit_slot()),
+                (48, async_wait_slot(0)),
+                (64, slot(cb(1), OpClass::Other, "EXIT")),
+            ]);
+            let blocks = vec![BlockReplay {
+                launch_index: 0,
+                warps: vec![WarpReplay {
+                    warp_slot: 0,
+                    insts: vec![
+                        ReplayInst {
+                            pc: 0,
+                            kind: AccessKind::GlobalAsyncCopy {
+                                off: 0,
+                                len: 1,
+                                payload_bytes: 256,
+                                l1_policy: policy,
+                            },
+                        },
+                        ReplayInst {
+                            pc: 16,
+                            kind: AccessKind::GlobalAsyncCopy {
+                                off: 1,
+                                len: 16,
+                                payload_bytes: 256,
+                                l1_policy: policy,
+                            },
+                        },
+                        inst(32),
+                        inst(48),
+                        inst(64),
+                    ],
+                    sectors: (0_i64..17).collect(),
+                }],
+            }];
+
+            let result = simulate_sm(&blocks, &sched, &params(), None).unwrap();
+            assert_eq!(result.cycles, expected_cycles, "policy={policy:?}");
+        }
+    }
+
+    #[test]
+    fn async_copy_payload_failures_reject_issue_before_mutation() {
+        for (payload_bytes, expected_mismatch) in [(0, true), (2, false)] {
+            let sched = schedule(vec![(0, slot(cb(1), OpClass::Other, "LDGSTS.E.BYPASS"))]);
+            let blocks = vec![BlockReplay {
+                launch_index: 0,
+                warps: vec![WarpReplay {
+                    warp_slot: 0,
+                    insts: vec![ReplayInst {
+                        pc: 0,
+                        kind: AccessKind::GlobalAsyncCopy {
+                            off: 0,
+                            len: 1,
+                            payload_bytes,
+                            l1_policy: LdgstsL1Policy::BypassL1,
+                        },
+                    }],
+                    sectors: vec![40],
+                }],
+            }];
+            let mut p = params();
+            if !expected_mismatch {
+                p.ldgsts_completion_throughput = LdgstsCompletionThroughput {
+                    cache_all_payload_bytes_per_cycle: u64::MAX,
+                    bypass_payload_bytes_per_cycle: 1,
+                };
+            }
+            let mut core = shared_core(&blocks, &sched, &p);
+            let before = *core.l1_counters().unwrap();
+            let mut requests = Vec::new();
+
+            let error = core
+                .advance(ReplayHorizon::Unbounded, &mut requests)
+                .unwrap_err();
+            if expected_mismatch {
+                assert!(matches!(
+                    error,
+                    IssueError::AsyncCopyPayloadMismatch {
+                        warp: 0,
+                        sectors: 1,
+                        payload_bytes: 0,
+                    }
+                ));
+            } else {
+                assert!(matches!(
+                    error,
+                    IssueError::TimeMultiplicationOverflow {
+                        operation: "LDGSTS payload-delivery work",
+                        lhs: 2,
+                        rhs: u64::MAX,
+                    }
+                ));
+            }
+            assert_eq!(core.instructions_issued(), 0);
+            assert_eq!(core.warps[0].next, 0);
+            assert!(core.async_copies[0].state.is_none());
+            assert_eq!(*core.l1_counters().unwrap(), before);
+            assert!(requests.is_empty());
+        }
+    }
+
+    #[test]
+    fn flat_async_copy_idle_skips_directly_to_source_completion() {
+        let sched = schedule(vec![
+            (0, slot(cb(1), OpClass::Other, "LDGSTS.E")),
+            (16, async_commit_slot()),
+            (32, async_wait_slot(0)),
+            (48, slot(cb(1), OpClass::Other, "EXIT")),
+        ]);
+        let blocks = vec![BlockReplay {
+            launch_index: 0,
+            warps: vec![WarpReplay {
+                warp_slot: 0,
+                insts: vec![async_copy_inst(0, 0, 1), inst(16), inst(32), inst(48)],
+                sectors: vec![40],
+            }],
+        }];
+        let mut core = SmCore::new(&blocks, &sched, &params(), SmMemMode::Flat).unwrap();
+        let mut out = Vec::new();
+
+        assert_eq!(
+            core.advance(ReplayHorizon::Bounded(402), &mut out).unwrap(),
+            Advance::Idle { wake_at: Some(402) }
+        );
+        assert_eq!(core.now(), 402);
+        assert_eq!(core.instructions_issued(), 3);
+        assert_eq!(core.warps[0].next, 3, "wait must issue at t=401");
+
+        assert_eq!(
+            core.advance(ReplayHorizon::Unbounded, &mut out).unwrap(),
+            Advance::Done
+        );
+        assert_eq!(core.result().cycles, 403);
+    }
+
+    #[test]
+    fn another_warp_fills_an_async_copy_wait_gap() {
+        let sched = schedule(vec![
+            (0, slot(cb(1), OpClass::Other, "LDGSTS.E")),
+            (16, async_commit_slot()),
+            (32, async_wait_slot(0)),
+            (48, slot(cb(1), OpClass::Other, "EXIT")),
+            (64, slot(cb(1), OpClass::Other, "IADD3")),
+            (80, slot(cb(1), OpClass::Other, "IADD3")),
+            (96, slot(cb(1), OpClass::Other, "IADD3")),
+            (112, slot(cb(1), OpClass::Other, "EXIT")),
+        ]);
+        let blocks = vec![BlockReplay {
+            launch_index: 0,
+            warps: vec![
+                warp(0, vec![inst(64), inst(80), inst(96), inst(112)]),
+                WarpReplay {
+                    // Same SMSP and younger, so this warp is held after t=0.
+                    warp_slot: 4,
+                    insts: vec![async_copy_inst(0, 0, 1), inst(16), inst(32), inst(48)],
+                    sectors: vec![40],
+                },
+            ],
+        }];
+        let mut core = SmCore::new(&blocks, &sched, &params(), SmMemMode::Flat).unwrap();
+        let mut out = Vec::new();
+
+        assert_eq!(
+            core.advance(ReplayHorizon::Bounded(6), &mut out).unwrap(),
+            Advance::Idle { wake_at: Some(6) }
+        );
+        assert!(core.warps[0].done, "ready warp did not fill the wait gap");
+        assert_eq!(core.warps[1].next, 2, "async wait issued before t=400");
+        assert_eq!(core.instructions_issued(), 6);
+
+        assert_eq!(
+            core.advance(ReplayHorizon::Unbounded, &mut out).unwrap(),
+            Advance::Done
+        );
+        assert_eq!(core.instructions_issued(), 8);
+        assert_eq!(core.result().cycles, 403);
+    }
+
+    #[test]
+    fn constant_l1_async_copy_uses_eligible_source_route() {
+        let sched = schedule(vec![
+            (0, slot(cb(1), OpClass::Other, "LDGSTS.E")),
+            (16, async_commit_slot()),
+            (32, async_wait_slot(0)),
+            (48, slot(cb(1), OpClass::Other, "EXIT")),
+        ]);
+        let blocks = vec![BlockReplay {
+            launch_index: 0,
+            warps: vec![WarpReplay {
+                warp_slot: 0,
+                insts: vec![async_copy_inst(0, 0, 1), inst(16), inst(32), inst(48)],
+                sectors: vec![40],
+            }],
+        }];
+
+        let result = simulate_sm(&blocks, &sched, &params(), Some(l1_config())).unwrap();
+        assert_eq!(
+            result.cycles, 247,
+            "wait must issue at source-ready t=244 plus one payload cycle"
+        );
+        let counters = result.l1.unwrap();
+        assert_eq!(counters.bypass_sectors, 0);
+        assert_eq!(counters.misses, 1);
+    }
+
+    #[test]
+    fn wait_one_preserves_newest_group_for_a_later_wait_zero() {
+        let sched = schedule(vec![
+            (0, slot(cb(1), OpClass::Other, "LDGSTS.E")),
+            (16, async_commit_slot()),
+            (32, slot(cb(1), OpClass::Other, "LDGSTS.E")),
+            (48, async_commit_slot()),
+            (64, async_wait_slot(1)),
+            (80, async_wait_slot(0)),
+            (96, slot(cb(1), OpClass::Other, "EXIT")),
+        ]);
+        let blocks = vec![BlockReplay {
+            launch_index: 0,
+            warps: vec![WarpReplay {
+                warp_slot: 0,
+                insts: vec![
+                    async_copy_inst(0, 0, 1),
+                    inst(16),
+                    async_copy_inst(32, 1, 1),
+                    inst(48),
+                    inst(64),
+                    inst(80),
+                    inst(96),
+                ],
+                sectors: vec![40, 44],
+            }],
+        }];
+        let mut core = SmCore::new(&blocks, &sched, &params(), SmMemMode::Flat).unwrap();
+        let mut out = Vec::new();
+
+        assert_eq!(
+            core.advance(ReplayHorizon::Bounded(402), &mut out).unwrap(),
+            Advance::Idle { wake_at: Some(402) }
+        );
+        assert_eq!(core.warps[0].next, 5, "wait-1 must issue at t=401");
+        let async_copy = core.async_copies[0].state.as_deref().unwrap();
+        assert_eq!(async_copy.committed_groups.len(), 1);
+        assert_eq!(async_copy.committed_groups[0].completion_time, 404);
+
+        assert_eq!(
+            core.advance(ReplayHorizon::Unbounded, &mut out).unwrap(),
+            Advance::Done
+        );
+        assert_eq!(core.result().cycles, 406);
+        assert!(
+            core.async_copies[0]
+                .state
+                .as_deref()
+                .unwrap()
+                .committed_groups
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn empty_async_copy_commit_is_trivially_complete_and_consumes_no_sequence() {
+        let sched = schedule(vec![
+            (0, async_commit_slot()),
+            (16, async_wait_slot(0)),
+            (32, slot(cb(1), OpClass::Other, "EXIT")),
+        ]);
+        let blocks = vec![BlockReplay {
+            launch_index: 0,
+            warps: vec![warp(0, vec![inst(0), inst(16), inst(32)])],
+        }];
+        let mut core = SmCore::new(&blocks, &sched, &params(), SmMemMode::Flat).unwrap();
+        let mut out = Vec::new();
+
+        assert_eq!(
+            core.advance(ReplayHorizon::Unbounded, &mut out).unwrap(),
+            Advance::Done
+        );
+        assert_eq!(
+            core.result().cycles,
+            4,
+            "the commit yield bit delays wait by one cycle, not by 25"
+        );
+        assert!(
+            core.async_copies[0].state.is_none(),
+            "an empty commit must not allocate or consume protocol state"
+        );
+        assert_eq!(core.warps[0].barrier_clear[0], 0);
+    }
+
+    #[test]
+    fn async_copy_group_sequence_exhaustion_is_nonmutating() {
+        let sched = schedule(vec![
+            (0, slot(cb(1), OpClass::Other, "LDGSTS.E")),
+            (16, slot(cb(1), OpClass::Other, "EXIT")),
+        ]);
+        let blocks = vec![BlockReplay {
+            launch_index: 0,
+            warps: vec![WarpReplay {
+                warp_slot: 0,
+                insts: vec![async_copy_inst(0, 0, 1), inst(16)],
+                sectors: vec![40],
+            }],
+        }];
+        let mut core =
+            SmCore::new(&blocks, &sched, &params(), SmMemMode::L1Const(l1_config())).unwrap();
+        core.async_copies[0].state = Some(Box::new(AsyncCopyState {
+            next_sequence: None,
+            ..AsyncCopyState::new()
+        }));
+        let before = *core.l1_counters().unwrap();
+        let mut out = Vec::new();
+
+        assert!(matches!(
+            core.advance(ReplayHorizon::Unbounded, &mut out),
+            Err(IssueError::AsyncCopyGroupSequenceExhausted { warp: 0 })
+        ));
+        assert_eq!(core.instructions_issued(), 0);
+        assert_eq!(core.now(), 0);
+        assert_eq!(core.warps[0].next, 0);
+        assert_eq!(*core.l1_counters().unwrap(), before);
+        assert!(
+            core.async_copies[0]
+                .state
+                .as_deref()
+                .unwrap()
+                .open_group
+                .is_none()
+        );
+        assert!(out.is_empty());
+    }
+
+    #[test]
+    fn committed_async_groups_preserve_fifo_wait_visibility() {
+        let sched = schedule(vec![(0, async_wait_slot(1))]);
+        let blocks = vec![BlockReplay {
+            launch_index: 0,
+            warps: vec![warp(0, vec![inst(0)])],
+        }];
+        let mut core = SmCore::new(&blocks, &sched, &params(), SmMemMode::Flat).unwrap();
+
+        let p = params();
+        let older = core.async_copies[0]
+            .add_pending_async_copy_sources(0, 1, 0, &p)
+            .unwrap();
+        core.async_copies[0].commit_async_copy_group();
+        let newer = core.async_copies[0]
+            .add_pending_async_copy_sources(0, 1, 0, &p)
+            .unwrap();
+        core.async_copies[0].commit_async_copy_group();
+
+        core.async_copies[0]
+            .complete_async_copy_sources(0, newer, 1, 50, &p)
+            .unwrap();
+        assert_eq!(
+            core.async_copies[0].async_wait_clear_time(1),
+            None,
+            "a newer completion cannot make the required older prefix visible"
+        );
+
+        core.async_copies[0]
+            .complete_async_copy_sources(0, older, 1, 100, &p)
+            .unwrap();
+        assert_eq!(core.async_copies[0].async_wait_clear_time(1), Some(100));
+        core.async_copies[0].consume_async_wait(1, 100);
+        assert_eq!(
+            core.async_copies[0]
+                .state
+                .as_deref()
+                .unwrap()
+                .committed_groups
+                .iter()
+                .map(|group| group.id)
+                .collect::<Vec<_>>(),
+            vec![newer]
+        );
+    }
+
+    #[test]
+    fn async_copy_pending_overflow_rejects_issue_without_mutation() {
+        let sched = schedule(vec![(0, slot(cb(1), OpClass::Other, "LDGSTS.E"))]);
+        let blocks = vec![BlockReplay {
+            launch_index: 0,
+            warps: vec![WarpReplay {
+                warp_slot: 0,
+                insts: vec![async_copy_inst(0, 0, 1)],
+                sectors: vec![40],
+            }],
+        }];
+        let mut core = shared_core(&blocks, &sched, &params());
+        let group = core.async_copies[0]
+            .add_pending_async_copy_sources(0, u32::MAX, 0, &params())
+            .unwrap();
+        let before_group = core.async_copies[0].state.as_deref().unwrap().open_group;
+        let before_l1 = *core.l1_counters().unwrap();
+        let mut requests = Vec::new();
+
+        assert!(matches!(
+            core.advance(ReplayHorizon::Unbounded, &mut requests),
+            Err(IssueError::AsyncCopyPendingOverflow {
+                warp: 0,
+                group: got_group,
+                current: u32::MAX,
+                add: 1,
+            }) if got_group == group
+        ));
+        assert_eq!(core.instructions_issued(), 0);
+        assert_eq!(core.warps[0].next, 0);
+        assert_eq!(
+            core.async_copies[0].state.as_deref().unwrap().open_group,
+            before_group
+        );
+        assert_eq!(*core.l1_counters().unwrap(), before_l1);
+        assert!(requests.is_empty());
+    }
+
+    #[test]
     fn stall_counts_delay_reissue() {
         // stalls 4,4: issues at t=0,4 → cycles 5.
         let sched = schedule(vec![
@@ -4613,6 +6576,188 @@ mod tests {
         let r = simulate_sm(&blocks, &sched, &params(), None).unwrap();
         assert_eq!(r.instructions_issued, 2);
         assert_eq!(r.cycles, 5);
+    }
+
+    #[test]
+    fn same_smsp_tensor_issues_observe_the_initiation_interval() {
+        let sched = schedule(vec![
+            (0, tensor_slot(cb(1), "HMMA.16816.F32", 16)),
+            (16, tensor_slot(cb(1), "HMMA.16816.F32", 16)),
+        ]);
+        let blocks = vec![BlockReplay {
+            launch_index: 0,
+            warps: vec![warp(0, vec![inst(0), inst(16)])],
+        }];
+        let mut core = SmCore::new(&blocks, &sched, &params(), SmMemMode::Flat).unwrap();
+        let mut out = Vec::new();
+
+        assert_eq!(
+            core.advance(ReplayHorizon::Unbounded, &mut out).unwrap(),
+            Advance::Done
+        );
+        assert!(out.is_empty());
+        assert_eq!(core.instructions_issued(), 2);
+        assert_eq!(
+            core.result().cycles,
+            17,
+            "tensor issues must occur at t=0 and t=16"
+        );
+        assert_eq!(core.tensor_pipe_ready, [32, 0, 0, 0]);
+    }
+
+    #[test]
+    fn separate_smsps_have_independent_tensor_timelines() {
+        let sched = schedule(vec![(0, tensor_slot(cb(1), "HMMA.16816.F32.BF16", 16))]);
+        let blocks = vec![BlockReplay {
+            launch_index: 0,
+            warps: vec![warp(0, vec![inst(0)]), warp(1, vec![inst(0)])],
+        }];
+        let mut core = SmCore::new(&blocks, &sched, &params(), SmMemMode::Flat).unwrap();
+        let mut out = Vec::new();
+
+        assert_eq!(
+            core.advance(ReplayHorizon::Unbounded, &mut out).unwrap(),
+            Advance::Done
+        );
+        assert_eq!(core.instructions_issued(), 2);
+        assert_eq!(core.result().cycles, 1, "both SMSPs should issue at t=0");
+        assert_eq!(core.tensor_pipe_ready, [16, 16, 0, 0]);
+    }
+
+    #[test]
+    fn dispatch_only_work_fills_a_tensor_busy_gap() {
+        let sched = schedule(vec![
+            (0, tensor_slot(cb(1), "HMMA.16816.F32", 16)),
+            (16, slot(cb(1), OpClass::Other, "IADD3")),
+            (32, tensor_slot(cb(1), "HMMA.16816.F32", 16)),
+        ]);
+        let blocks = vec![BlockReplay {
+            launch_index: 0,
+            warps: vec![warp(0, vec![inst(0), inst(16), inst(32)])],
+        }];
+        let mut core = SmCore::new(&blocks, &sched, &params(), SmMemMode::Flat).unwrap();
+        let mut out = Vec::new();
+
+        assert_eq!(
+            core.advance(ReplayHorizon::Bounded(2), &mut out).unwrap(),
+            Advance::Idle { wake_at: Some(2) }
+        );
+        assert_eq!(core.instructions_issued(), 2);
+        assert_eq!(core.warps[0].next, 2);
+        assert_eq!(core.tensor_pipe_ready[0], 16);
+
+        assert_eq!(
+            core.advance(ReplayHorizon::Unbounded, &mut out).unwrap(),
+            Advance::Done
+        );
+        assert_eq!(core.result().cycles, 17);
+    }
+
+    #[test]
+    fn blocked_held_tensor_warp_yields_dispatch_to_another_warp() {
+        let sched = schedule(vec![
+            (0, tensor_slot(cb(1), "HMMA.16816.F32", 16)),
+            (16, tensor_slot(cb(1), "HMMA.16816.F32", 16)),
+            (32, slot(cb(1), OpClass::Other, "EXIT")),
+        ]);
+        let blocks = vec![BlockReplay {
+            launch_index: 0,
+            // Warp 4 is younger, so CGGTY picks and holds it at t=0.
+            warps: vec![warp(0, vec![inst(32)]), warp(4, vec![inst(0), inst(16)])],
+        }];
+        let mut core = SmCore::new(&blocks, &sched, &params(), SmMemMode::Flat).unwrap();
+        let mut out = Vec::new();
+
+        assert_eq!(
+            core.advance(ReplayHorizon::Bounded(1), &mut out).unwrap(),
+            Advance::Idle { wake_at: Some(1) }
+        );
+        assert_eq!(core.hold[0], Some(1));
+        assert_eq!(core.warps[1].next, 1);
+
+        assert_eq!(
+            core.advance(ReplayHorizon::Bounded(2), &mut out).unwrap(),
+            Advance::Idle { wake_at: Some(2) }
+        );
+        assert!(core.warps[0].done, "ready dispatch warp was not selected");
+        assert_eq!(core.warps[1].next, 1, "blocked held tensor warp issued");
+        assert_eq!(core.instructions_issued(), 2);
+    }
+
+    #[test]
+    fn tensor_blocked_idle_reports_the_exact_resource_wake_time() {
+        let sched = schedule(vec![
+            (0, tensor_slot(cb(1), "HMMA.16816.F32", 16)),
+            (16, tensor_slot(cb(1), "HMMA.16816.F32", 16)),
+        ]);
+        let blocks = vec![BlockReplay {
+            launch_index: 0,
+            warps: vec![warp(0, vec![inst(0), inst(16)])],
+        }];
+        let mut core = SmCore::new(&blocks, &sched, &params(), SmMemMode::Flat).unwrap();
+        let mut out = Vec::new();
+
+        assert_eq!(
+            core.advance(ReplayHorizon::Bounded(1), &mut out).unwrap(),
+            Advance::Idle { wake_at: Some(1) }
+        );
+        assert_eq!(
+            core.advance(ReplayHorizon::Bounded(16), &mut out).unwrap(),
+            Advance::Idle { wake_at: Some(16) }
+        );
+        assert_eq!(core.instructions_issued(), 1);
+        assert_eq!(core.warps[0].next, 1);
+    }
+
+    #[test]
+    fn tensor_timeline_survives_cta_admission_waves() {
+        let sched = schedule(vec![(0, tensor_slot(cb(1), "HMMA.16816.F32", 16))]);
+        let blocks = vec![
+            BlockReplay {
+                launch_index: 0,
+                warps: vec![warp(0, vec![inst(0)])],
+            },
+            BlockReplay {
+                launch_index: 1,
+                warps: vec![warp(0, vec![inst(0)])],
+            },
+        ];
+        let mut p = params();
+        p.max_resident_warps_per_sm = 1;
+        let r = simulate_sm(&blocks, &sched, &p, None).unwrap();
+
+        assert_eq!(r.instructions_issued, 2);
+        assert_eq!(r.cycles, 17, "second CTA must wait for the t=16 timeline");
+    }
+
+    #[test]
+    fn tensor_timestamp_overflow_rejects_the_cycle_before_mutation() {
+        let sched = schedule(vec![(0, tensor_slot(cb(1), "HMMA.16816.F32", 16))]);
+        let blocks = vec![BlockReplay {
+            launch_index: 0,
+            warps: vec![warp(0, vec![inst(0)])],
+        }];
+        let mut core = SmCore::new(&blocks, &sched, &params(), SmMemMode::Flat).unwrap();
+        core.t = u64::MAX - 15;
+        let before_unfinished = core.unfinished_warps;
+        let before_resident = core.resident_warps;
+        let mut out = Vec::new();
+
+        assert!(matches!(
+            core.advance(ReplayHorizon::Unbounded, &mut out),
+            Err(IssueError::TimeOverflow {
+                operation: "tensor-pipeline availability",
+                base,
+                delta: 16,
+            }) if base == u64::MAX - 15
+        ));
+        assert!(out.is_empty());
+        assert_eq!(core.instructions_issued(), 0);
+        assert_eq!(core.warps[0].next, 0);
+        assert!(!core.warps[0].done);
+        assert_eq!(core.tensor_pipe_ready, [0; SUB_CORES]);
+        assert_eq!(core.unfinished_warps, before_unfinished);
+        assert_eq!(core.resident_warps, before_resident);
     }
 
     #[test]
@@ -4644,6 +6789,75 @@ mod tests {
         let r = simulate_sm(&blocks, &sched, &params(), None).unwrap();
         assert_eq!(r.instructions_issued, 2);
         assert_eq!(r.cycles, 401);
+    }
+
+    #[test]
+    fn shared_bank_wavefronts_extend_dependent_completion_in_both_memory_modes() {
+        let mut load = cb(1);
+        load.write_barrier = Some(barrier(0));
+        let mut consumer = cb(1);
+        consumer.wait_mask = wait_mask(0b000001);
+        let sched = schedule(vec![
+            (0, slot(load, OpClass::Other, "LDS")),
+            (16, slot(consumer, OpClass::Other, "IADD3")),
+        ]);
+        let blocks = |wavefronts| {
+            vec![BlockReplay {
+                launch_index: 0,
+                warps: vec![warp(
+                    0,
+                    vec![
+                        ReplayInst {
+                            pc: 0,
+                            kind: AccessKind::Shared { wavefronts },
+                        },
+                        inst(16),
+                    ],
+                )],
+            }]
+        };
+
+        for l1 in [None, Some(l1_config())] {
+            let one = simulate_sm(&blocks(1), &sched, &params(), l1).unwrap();
+            let four = simulate_sm(&blocks(4), &sched, &params(), l1).unwrap();
+            assert_eq!(one.cycles, 24);
+            assert_eq!(four.cycles, 30);
+            assert_eq!(four.cycles - one.cycles, 3 * 2);
+        }
+    }
+
+    #[test]
+    fn shared_wavefront_latency_multiplication_overflow_is_nonmutating() {
+        let mut load = cb(1);
+        load.write_barrier = Some(barrier(0));
+        let sched = schedule(vec![(0, slot(load, OpClass::Other, "LDS"))]);
+        let blocks = vec![BlockReplay {
+            launch_index: 0,
+            warps: vec![warp(
+                0,
+                vec![ReplayInst {
+                    pc: 0,
+                    kind: AccessKind::Shared { wavefronts: 3 },
+                }],
+            )],
+        }];
+        let mut p = params();
+        p.shared_additional_wavefront_latency = u64::MAX;
+        let mut core = SmCore::new(&blocks, &sched, &p, SmMemMode::Flat).unwrap();
+        let mut out = Vec::new();
+
+        assert!(matches!(
+            core.advance(ReplayHorizon::Unbounded, &mut out),
+            Err(IssueError::TimeMultiplicationOverflow {
+                operation: "shared-memory additional-wavefront latency",
+                lhs: u64::MAX,
+                rhs: 2,
+            })
+        ));
+        assert!(out.is_empty());
+        assert_eq!(core.instructions_issued(), 0);
+        assert_eq!(core.warps[0].next, 0);
+        assert_eq!(core.warps[0].barrier_clear, [0; DEP_BARRIERS]);
     }
 
     #[test]
@@ -5129,6 +7343,714 @@ mod tests {
     }
 
     #[test]
+    fn shared_cacheable_async_copy_completes_all_same_line_fill_waiters() {
+        let sched = schedule(vec![
+            (0, slot(cb(1), OpClass::Other, "LDGSTS.E")),
+            (16, async_commit_slot()),
+            (32, async_wait_slot(0)),
+            (48, slot(cb(1), OpClass::Other, "EXIT")),
+        ]);
+        let blocks = vec![BlockReplay {
+            launch_index: 0,
+            warps: vec![WarpReplay {
+                warp_slot: 0,
+                insts: vec![async_copy_inst(0, 0, 2), inst(16), inst(32), inst(48)],
+                sectors: vec![40, 41],
+            }],
+        }];
+        let mut core = shared_core(&blocks, &sched, &params());
+        let mut requests = Vec::new();
+
+        assert_eq!(
+            core.advance(ReplayHorizon::Unbounded, &mut requests)
+                .unwrap(),
+            Advance::Idle { wake_at: None }
+        );
+        assert_eq!(requests.len(), 1, "same-line sectors fold into one fill");
+        assert_eq!(requests[0].source, L2Source::L1Fill);
+        assert_eq!(requests[0].sector_mask, 0b0011);
+        let ReplyTo::L1Fill { fill, .. } = requests[0].reply else {
+            panic!("cacheable LDGSTS source must ride an L1 fill")
+        };
+        let group = core.async_copies[0]
+            .state
+            .as_deref()
+            .unwrap()
+            .committed_groups[0];
+        assert_eq!(group.pending_sources, 2);
+        let MemModel::L1Shared(st) = &core.mem else {
+            panic!("expected shared mode")
+        };
+        assert!(st.fill_waiters.contains_key(&fill));
+
+        let mut emitted = Vec::new();
+        core.on_response(requests[0].reply, 300, &mut emitted)
+            .unwrap();
+        assert!(emitted.is_empty());
+        assert_eq!(
+            core.async_copies[0]
+                .state
+                .as_deref()
+                .unwrap()
+                .committed_groups[0]
+                .pending_sources,
+            0
+        );
+        assert_eq!(
+            core.async_copies[0]
+                .state
+                .as_deref()
+                .unwrap()
+                .committed_groups[0]
+                .completion_time,
+            301
+        );
+        assert_eq!(
+            core.advance(ReplayHorizon::Unbounded, &mut emitted)
+                .unwrap(),
+            Advance::Done
+        );
+        assert_eq!(core.result().cycles, 303);
+        let counters = core.l1_counters().unwrap();
+        assert_eq!(counters.misses, 2);
+        assert_eq!(counters.merges, 1);
+        assert_eq!(counters.bypass_sectors, 0);
+    }
+
+    #[test]
+    fn shared_cacheable_async_copy_l1_hit_completes_without_a_request() {
+        let sched = schedule(vec![
+            (0, slot(cb(1), OpClass::Other, "LDGSTS.E")),
+            (16, async_commit_slot()),
+            (32, async_wait_slot(0)),
+            (48, slot(cb(1), OpClass::Other, "EXIT")),
+        ]);
+        let blocks = vec![BlockReplay {
+            launch_index: 0,
+            warps: vec![WarpReplay {
+                warp_slot: 0,
+                insts: vec![async_copy_inst(0, 0, 1), inst(16), inst(32), inst(48)],
+                sectors: vec![40],
+            }],
+        }];
+        let mut core = shared_core(&blocks, &sched, &params());
+        let MemModel::L1Shared(st) = &mut core.mem else {
+            panic!("expected shared mode")
+        };
+        let EvAccess::MissRequest { fill } = st
+            .l1
+            .access_eligible_ev(MemoryOrigin::Global, 40, 0)
+            .unwrap()
+        else {
+            panic!("expected cold prefill miss")
+        };
+        st.l1.complete_fill(fill).unwrap();
+        let hits_before = st.l1.counters.hits;
+        let mut requests = Vec::new();
+
+        assert_eq!(
+            core.advance(ReplayHorizon::Unbounded, &mut requests)
+                .unwrap(),
+            Advance::Done
+        );
+        assert!(requests.is_empty());
+        assert_eq!(
+            core.result().cycles,
+            37,
+            "wait must issue at hit-ready t=34 plus one payload cycle"
+        );
+        assert_eq!(core.l1_counters().unwrap().hits, hits_before + 1);
+        assert_eq!(core.outstanding_responses(), 0);
+        assert!(
+            core.async_copies[0]
+                .state
+                .as_deref()
+                .unwrap()
+                .committed_groups
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn shared_cacheable_async_copy_retry_retains_group_identity() {
+        let sched = schedule(vec![
+            (0, slot(cb(1), OpClass::Other, "LDGSTS.E")),
+            (16, async_commit_slot()),
+            (32, async_wait_slot(0)),
+            (48, slot(cb(1), OpClass::Other, "EXIT")),
+        ]);
+        let blocks = vec![BlockReplay {
+            launch_index: 0,
+            warps: vec![WarpReplay {
+                warp_slot: 0,
+                insts: vec![async_copy_inst(0, 0, 2), inst(16), inst(32), inst(48)],
+                sectors: vec![0, 4],
+            }],
+        }];
+        let mut cfg = l1_config();
+        cfg.mshr_count = Some(1);
+        let mut core = SmCore::new(&blocks, &sched, &params(), SmMemMode::L1Shared(cfg)).unwrap();
+        let mut requests = Vec::new();
+
+        assert_eq!(
+            core.advance(ReplayHorizon::Unbounded, &mut requests)
+                .unwrap(),
+            Advance::Idle { wake_at: None }
+        );
+        assert_eq!(requests.len(), 1);
+        let group = core.async_copies[0]
+            .state
+            .as_deref()
+            .unwrap()
+            .committed_groups[0]
+            .id;
+        assert_eq!(
+            core.async_copies[0]
+                .state
+                .as_deref()
+                .unwrap()
+                .committed_groups[0]
+                .pending_sources,
+            2
+        );
+        let MemModel::L1Shared(st) = &core.mem else {
+            panic!("expected shared mode")
+        };
+        assert_eq!(st.retry.len(), 1);
+        assert_eq!(st.retry[0].mshr_floor, NonZeroU32::new(1));
+        assert_eq!(
+            st.retry[0].target.and_then(FillTarget::async_group),
+            Some(group)
+        );
+
+        let mut retried = Vec::new();
+        core.on_response(requests[0].reply, 244, &mut retried)
+            .unwrap();
+        assert_eq!(retried.len(), 1, "freed MSHR must issue the parked line");
+        assert!(matches!(retried[0].reply, ReplyTo::L1Fill { .. }));
+        assert_eq!(
+            core.async_copies[0]
+                .state
+                .as_deref()
+                .unwrap()
+                .committed_groups[0]
+                .pending_sources,
+            1
+        );
+        let MemModel::L1Shared(st) = &core.mem else {
+            panic!("expected shared mode")
+        };
+        assert!(st.retry.is_empty());
+
+        let mut emitted = Vec::new();
+        core.on_response(retried[0].reply, 500, &mut emitted)
+            .unwrap();
+        assert!(emitted.is_empty());
+        assert_eq!(
+            core.advance(ReplayHorizon::Unbounded, &mut emitted)
+                .unwrap(),
+            Advance::Done
+        );
+        assert_eq!(core.result().cycles, 503);
+        assert_eq!(core.outstanding_responses(), 0);
+    }
+
+    #[test]
+    fn shared_cacheable_floor_survives_retry_and_stays_access_local() {
+        let mut p = params();
+        let floor = NonZeroU32::new(2).unwrap();
+        p.ldgsts_l1_mshr_floor = floor;
+        let sched = schedule(vec![
+            (0, slot(cb(1), OpClass::Other, "LDGSTS.E")),
+            (16, async_commit_slot()),
+            (32, async_wait_slot(0)),
+            (48, slot(cb(1), OpClass::Other, "EXIT")),
+        ]);
+        let blocks = vec![BlockReplay {
+            launch_index: 0,
+            warps: vec![WarpReplay {
+                warp_slot: 0,
+                insts: vec![async_copy_inst(0, 0, 3), inst(16), inst(32), inst(48)],
+                sectors: vec![0, 4, 8],
+            }],
+        }];
+        let mut cfg = l1_config();
+        cfg.mshr_count = Some(1);
+        let mut core = SmCore::new(&blocks, &sched, &p, SmMemMode::L1Shared(cfg)).unwrap();
+        let mut requests = Vec::new();
+
+        assert_eq!(
+            core.advance(ReplayHorizon::Unbounded, &mut requests)
+                .unwrap(),
+            Advance::Idle { wake_at: None }
+        );
+        assert_eq!(
+            requests.len(),
+            2,
+            "the floor admits two distinct line fills"
+        );
+        let MemModel::L1Shared(st) = &core.mem else {
+            panic!("expected shared mode")
+        };
+        assert_eq!(st.retry.len(), 1);
+        assert_eq!(st.retry[0].mshr_floor, Some(floor));
+
+        let mut retried = Vec::new();
+        core.on_response(requests[0].reply, 244, &mut retried)
+            .unwrap();
+        assert_eq!(
+            retried.len(),
+            1,
+            "the retained floor must admit the retry while one fill remains"
+        );
+        let MemModel::L1Shared(st) = &core.mem else {
+            panic!("expected shared mode")
+        };
+        assert!(st.retry.is_empty());
+
+        let ordinary_sched = schedule(vec![(0, slot(cb(1), OpClass::Other, "LDG.E"))]);
+        let ordinary_blocks = vec![BlockReplay {
+            launch_index: 0,
+            warps: vec![WarpReplay {
+                warp_slot: 0,
+                insts: vec![ReplayInst {
+                    pc: 0,
+                    kind: eligible(0, 2),
+                }],
+                sectors: vec![0, 4],
+            }],
+        }];
+        let mut ordinary_cfg = l1_config();
+        ordinary_cfg.mshr_count = Some(1);
+        let mut ordinary = SmCore::new(
+            &ordinary_blocks,
+            &ordinary_sched,
+            &p,
+            SmMemMode::L1Shared(ordinary_cfg),
+        )
+        .unwrap();
+        let mut ordinary_requests = Vec::new();
+        assert_eq!(
+            ordinary
+                .advance(ReplayHorizon::Unbounded, &mut ordinary_requests)
+                .unwrap(),
+            Advance::Done
+        );
+        assert_eq!(ordinary_requests.len(), 1);
+        let MemModel::L1Shared(st) = &ordinary.mem else {
+            panic!("expected shared mode")
+        };
+        assert_eq!(st.retry.len(), 1);
+        assert_eq!(st.retry[0].mshr_floor, None);
+    }
+
+    #[test]
+    fn cacheable_async_fill_underflow_preserves_the_response_transaction() {
+        let sched = schedule(vec![(0, slot(cb(1), OpClass::Other, "LDGSTS.E"))]);
+        let blocks = vec![BlockReplay {
+            launch_index: 0,
+            warps: vec![WarpReplay {
+                warp_slot: 0,
+                insts: vec![async_copy_inst(0, 0, 1)],
+                sectors: vec![40],
+            }],
+        }];
+        let mut core = shared_core(&blocks, &sched, &params());
+        let mut requests = Vec::new();
+        assert_eq!(
+            core.advance(ReplayHorizon::Unbounded, &mut requests)
+                .unwrap(),
+            Advance::Done
+        );
+        let reply = requests[0].reply;
+        let ReplyTo::L1Fill { fill, .. } = reply else {
+            panic!("expected L1 fill response")
+        };
+        let group = core.async_copies[0]
+            .state
+            .as_deref_mut()
+            .unwrap()
+            .open_group
+            .as_mut()
+            .unwrap();
+        let group_id = group.id;
+        group.pending_sources = 0;
+        let before_l1 = *core.l1_counters().unwrap();
+        let mut emitted = Vec::new();
+
+        assert!(matches!(
+            core.on_response(reply, 244, &mut emitted),
+            Err(IssueError::AsyncCopyPendingUnderflow {
+                warp: 0,
+                group,
+                current: 0,
+                remove: 1,
+            }) if group == group_id
+        ));
+        assert!(emitted.is_empty());
+        assert_eq!(core.outstanding_responses(), 1);
+        assert_eq!(*core.l1_counters().unwrap(), before_l1);
+        let MemModel::L1Shared(st) = &core.mem else {
+            panic!("expected shared mode")
+        };
+        assert!(st.l1.is_fill_in_flight(fill));
+        assert!(st.fill_waiters.contains_key(&fill));
+    }
+
+    #[test]
+    fn cacheable_async_payload_floor_overflow_preserves_response_state() {
+        let sched = schedule(vec![(0, slot(cb(1), OpClass::Other, "LDGSTS.E"))]);
+        let blocks = vec![BlockReplay {
+            launch_index: 0,
+            warps: vec![WarpReplay {
+                warp_slot: 0,
+                insts: vec![async_copy_inst(0, 0, 1)],
+                sectors: vec![40],
+            }],
+        }];
+        let mut core = shared_core(&blocks, &sched, &params());
+        let mut requests = Vec::new();
+        assert_eq!(
+            core.advance(ReplayHorizon::Unbounded, &mut requests)
+                .unwrap(),
+            Advance::Done
+        );
+        let reply = requests[0].reply;
+        let ReplyTo::L1Fill { fill, .. } = reply else {
+            panic!("expected L1 fill response")
+        };
+        let before_group = core.async_copies[0].state.as_deref().unwrap().open_group;
+        let before_l1 = *core.l1_counters().unwrap();
+        let mut emitted = Vec::new();
+
+        assert!(matches!(
+            core.on_response(reply, u64::MAX, &mut emitted),
+            Err(IssueError::TimeOverflow {
+                operation: "LDGSTS payload completion floor",
+                base: u64::MAX,
+                delta: 1,
+            })
+        ));
+        assert!(emitted.is_empty());
+        assert_eq!(core.outstanding_responses(), 1);
+        assert_eq!(
+            core.async_copies[0].state.as_deref().unwrap().open_group,
+            before_group
+        );
+        assert_eq!(*core.l1_counters().unwrap(), before_l1);
+        let MemModel::L1Shared(st) = &core.mem else {
+            panic!("expected shared mode")
+        };
+        assert!(st.l1.is_fill_in_flight(fill));
+        assert!(st.fill_waiters.contains_key(&fill));
+    }
+
+    #[test]
+    fn shared_async_copy_waits_for_all_sector_responses_out_of_order() {
+        let sched = schedule(vec![
+            (0, slot(cb(1), OpClass::Other, "LDGSTS.E.BYPASS")),
+            (16, async_commit_slot()),
+            (32, async_wait_slot(0)),
+            (48, slot(cb(1), OpClass::Other, "EXIT")),
+        ]);
+        let blocks = vec![BlockReplay {
+            launch_index: 0,
+            warps: vec![WarpReplay {
+                warp_slot: 0,
+                insts: vec![
+                    bypass_async_copy_inst(0, 0, 2),
+                    inst(16),
+                    inst(32),
+                    inst(48),
+                ],
+                sectors: vec![40, 41],
+            }],
+        }];
+        let mut core = shared_core(&blocks, &sched, &params());
+        let mut requests = Vec::new();
+
+        assert_eq!(
+            core.advance(ReplayHorizon::Unbounded, &mut requests)
+                .unwrap(),
+            Advance::Idle { wake_at: None }
+        );
+        assert_eq!(requests.len(), 2);
+        assert!(requests.iter().all(|request| request.has_valid_contract()));
+        let group = match requests[0].reply {
+            ReplyTo::AsyncCopy {
+                warp: 0,
+                group,
+                barrier: None,
+                ..
+            } => group,
+            reply => panic!("unexpected first async-copy reply {reply:?}"),
+        };
+        assert!(matches!(
+            requests[1].reply,
+            ReplyTo::AsyncCopy {
+                warp: 0,
+                group: other,
+                barrier: None,
+                ..
+            } if other == group
+        ));
+        assert_eq!(
+            core.async_copies[0]
+                .state
+                .as_deref()
+                .unwrap()
+                .committed_groups
+                .len(),
+            1
+        );
+        assert_eq!(
+            core.async_copies[0]
+                .state
+                .as_deref()
+                .unwrap()
+                .committed_groups[0]
+                .pending_sources,
+            2
+        );
+
+        let mut emitted = Vec::new();
+        core.on_response(requests[1].reply, 300, &mut emitted)
+            .unwrap();
+        assert!(emitted.is_empty());
+        assert_eq!(
+            core.async_copies[0]
+                .state
+                .as_deref()
+                .unwrap()
+                .committed_groups[0]
+                .pending_sources,
+            1
+        );
+        assert_eq!(
+            core.async_copies[0]
+                .state
+                .as_deref()
+                .unwrap()
+                .committed_groups[0]
+                .completion_time,
+            302
+        );
+        assert!(matches!(
+            core.preflight_response(requests[1].reply, 300),
+            Err(IssueError::ResponseTokenNotOutstanding { .. })
+        ));
+        assert_eq!(
+            core.advance(ReplayHorizon::Unbounded, &mut emitted)
+                .unwrap(),
+            Advance::Idle { wake_at: None }
+        );
+
+        core.on_response(requests[0].reply, 400, &mut emitted)
+            .unwrap();
+        assert_eq!(
+            core.async_copies[0]
+                .state
+                .as_deref()
+                .unwrap()
+                .committed_groups[0]
+                .pending_sources,
+            0
+        );
+        assert_eq!(
+            core.async_copies[0]
+                .state
+                .as_deref()
+                .unwrap()
+                .committed_groups[0]
+                .completion_time,
+            402
+        );
+        assert_eq!(
+            core.advance(ReplayHorizon::Unbounded, &mut emitted)
+                .unwrap(),
+            Advance::Done
+        );
+        assert_eq!(core.result().cycles, 404);
+        assert!(
+            core.async_copies[0]
+                .state
+                .as_deref()
+                .unwrap()
+                .committed_groups
+                .is_empty()
+        );
+        assert_eq!(core.outstanding_responses(), 0);
+        assert!(matches!(
+            core.on_response(requests[0].reply, 404, &mut emitted),
+            Err(IssueError::ResponseTokenNotOutstanding { reply })
+                if reply == requests[0].reply
+        ));
+    }
+
+    #[test]
+    fn async_copy_response_can_complete_an_open_group_before_commit() {
+        let sched = schedule(vec![(0, async_commit_slot())]);
+        let blocks = vec![BlockReplay {
+            launch_index: 0,
+            warps: vec![warp(0, vec![inst(0)])],
+        }];
+        let mut core = shared_core(&blocks, &sched, &params());
+
+        let p = params();
+        let group = core.async_copies[0]
+            .add_pending_async_copy_sources(0, 2, 0, &p)
+            .unwrap();
+        core.async_copies[0]
+            .complete_async_copy_sources(0, group, 2, 91, &p)
+            .unwrap();
+        assert_eq!(
+            core.async_copies[0]
+                .state
+                .as_deref()
+                .unwrap()
+                .open_group
+                .unwrap()
+                .completion_time,
+            91
+        );
+        assert_eq!(
+            core.async_copies[0]
+                .state
+                .as_deref()
+                .unwrap()
+                .open_group
+                .unwrap()
+                .pending_sources,
+            0
+        );
+
+        core.async_copies[0].commit_async_copy_group();
+        assert!(
+            core.async_copies[0]
+                .state
+                .as_deref()
+                .unwrap()
+                .open_group
+                .is_none()
+        );
+        assert_eq!(
+            core.async_copies[0]
+                .state
+                .as_deref()
+                .unwrap()
+                .committed_groups
+                .len(),
+            1
+        );
+        assert!(
+            core.async_copies[0]
+                .state
+                .as_deref()
+                .unwrap()
+                .committed_groups[0]
+                .is_complete_at(91)
+        );
+    }
+
+    #[test]
+    fn async_copy_response_underflow_is_transactional() {
+        let sched = schedule(vec![(0, slot(cb(1), OpClass::Other, "LDGSTS.E.BYPASS"))]);
+        let blocks = vec![BlockReplay {
+            launch_index: 0,
+            warps: vec![WarpReplay {
+                warp_slot: 0,
+                insts: vec![bypass_async_copy_inst(0, 0, 1)],
+                sectors: vec![40],
+            }],
+        }];
+        let mut core = shared_core(&blocks, &sched, &params());
+        let mut requests = Vec::new();
+        assert_eq!(
+            core.advance(ReplayHorizon::Unbounded, &mut requests)
+                .unwrap(),
+            Advance::Done
+        );
+        let reply = requests[0].reply;
+        let ReplyTo::AsyncCopy { group, .. } = reply else {
+            panic!("expected async-copy response")
+        };
+        core.async_copies[0]
+            .state
+            .as_deref_mut()
+            .unwrap()
+            .open_group
+            .as_mut()
+            .expect("issued copy owns an open group")
+            .pending_sources = 0;
+        let before_group = core.async_copies[0].state.as_deref().unwrap().open_group;
+        let mut emitted = Vec::new();
+
+        assert!(matches!(
+            core.on_response(reply, 244, &mut emitted),
+            Err(IssueError::AsyncCopyPendingUnderflow {
+                warp: 0,
+                group: got_group,
+                current: 0,
+                remove: 1,
+            }) if got_group == group
+        ));
+        assert_eq!(
+            core.async_copies[0].state.as_deref().unwrap().open_group,
+            before_group
+        );
+        assert_eq!(core.outstanding_responses(), 1);
+        assert!(emitted.is_empty());
+    }
+
+    #[test]
+    fn async_copy_response_missing_group_is_transactional() {
+        let sched = schedule(vec![(0, slot(cb(1), OpClass::Other, "LDGSTS.E.BYPASS"))]);
+        let blocks = vec![BlockReplay {
+            launch_index: 0,
+            warps: vec![WarpReplay {
+                warp_slot: 0,
+                insts: vec![bypass_async_copy_inst(0, 0, 1)],
+                sectors: vec![40],
+            }],
+        }];
+        let mut core = shared_core(&blocks, &sched, &params());
+        let mut requests = Vec::new();
+        assert_eq!(
+            core.advance(ReplayHorizon::Unbounded, &mut requests)
+                .unwrap(),
+            Advance::Done
+        );
+        let reply = requests[0].reply;
+        let ReplyTo::AsyncCopy { group, .. } = reply else {
+            panic!("expected async-copy response")
+        };
+        core.async_copies[0]
+            .state
+            .as_deref_mut()
+            .unwrap()
+            .open_group = None;
+        let mut emitted = Vec::new();
+
+        assert!(matches!(
+            core.on_response(reply, 244, &mut emitted),
+            Err(IssueError::AsyncCopyGroupNotFound {
+                warp: 0,
+                group: got_group,
+            }) if got_group == group
+        ));
+        assert_eq!(core.outstanding_responses(), 1);
+        assert!(
+            core.async_copies[0]
+                .state
+                .as_deref()
+                .unwrap()
+                .open_group
+                .is_none()
+        );
+        assert!(emitted.is_empty());
+    }
+
+    #[test]
     fn issue_count_overflow_rejects_the_whole_cycle_before_mutation() {
         let sched = schedule(vec![(0, slot(cb(1), OpClass::Other, "EXIT"))]);
         let blocks = vec![BlockReplay {
@@ -5376,6 +8298,61 @@ mod tests {
     }
 
     #[test]
+    fn constant_l1_retry_payload_overflow_rejects_issue_before_cache_mutation() {
+        let sched = schedule(vec![(0, slot(cb(1), OpClass::Other, "LDGSTS.E"))]);
+        let blocks = vec![BlockReplay {
+            launch_index: 0,
+            warps: vec![WarpReplay {
+                warp_slot: 0,
+                insts: vec![ReplayInst {
+                    pc: 0,
+                    kind: AccessKind::GlobalAsyncCopy {
+                        off: 0,
+                        len: 1,
+                        payload_bytes: 128,
+                        l1_policy: LdgstsL1Policy::CacheAtAllLevels,
+                    },
+                }],
+                sectors: vec![8],
+            }],
+        }];
+        let mut p = params();
+        p.l1_hit_latency = 2;
+        p.l1_miss_latency = 10;
+        let cfg = p.l1_config(8, 1);
+        let mut core = SmCore::new(&blocks, &sched, &p, SmMemMode::L1Const(cfg)).unwrap();
+        let MemModel::L1Const(l1) = &mut core.mem else {
+            panic!("expected constant L1 mode");
+        };
+        assert!(matches!(
+            l1.access_eligible(MemoryOrigin::Global, 0, u64::MAX - 21)
+                .unwrap(),
+            (AccessOutcome::MissLineAlloc, ready) if ready == u64::MAX - 11
+        ));
+        core.t = u64::MAX - 20;
+        let before_l1 = *core.l1_counters().unwrap();
+        let mut out = Vec::new();
+
+        assert!(matches!(
+            core.advance(ReplayHorizon::Unbounded, &mut out),
+            Err(IssueError::TimeOverflow {
+                operation: "LDGSTS payload completion floor",
+                base,
+                delta: 2,
+            }) if base == u64::MAX - 1
+        ));
+        assert!(out.is_empty());
+        assert_eq!(core.instructions_issued(), 0);
+        assert_eq!(core.warps[0].next, 0);
+        assert!(core.async_copies[0].state.is_none());
+        assert_eq!(*core.l1_counters().unwrap(), before_l1);
+        let MemModel::L1Const(l1) = &core.mem else {
+            panic!("expected constant L1 mode");
+        };
+        assert!(l1.is_fill_in_flight(FillKey::Line(0)));
+    }
+
+    #[test]
     fn same_cycle_fill_chain_overflow_rejects_all_subcores_before_mutation() {
         let mut load = cb(1);
         load.write_barrier = Some(barrier(0));
@@ -5606,7 +8583,8 @@ mod tests {
             warp: 0,
             instruction: 0,
             origin: MemoryOrigin::Global,
-            barrier: Some(barrier(0)),
+            target: Some(FillTarget::Barrier(barrier(0))),
+            mshr_floor: None,
             lo: 1,
             hi: 2,
         });
@@ -5681,7 +8659,8 @@ mod tests {
             warp: 0,
             instruction: 0,
             origin: MemoryOrigin::Global,
-            barrier: Some(barrier(0)),
+            target: Some(FillTarget::Barrier(barrier(0))),
+            mshr_floor: None,
             lo: 1,
             hi: 3,
         });
@@ -5975,7 +8954,8 @@ mod tests {
             warp: 0,
             instruction: 0,
             origin: MemoryOrigin::Global,
-            barrier: None,
+            target: None,
+            mshr_floor: None,
             lo: 1,
             hi: 2,
         });
@@ -6278,17 +9258,15 @@ mod tests {
     }
 
     #[test]
-    fn ldgsts_marks_only_the_unmodeled_shared_destination_timing_tail() {
+    fn modeled_async_copy_source_does_not_claim_a_visibility_tail() {
         assert_eq!(
-            TailFlags::for_access(AccessKind::GlobalBypass {
+            TailFlags::for_access(AccessKind::GlobalAsyncCopy {
                 off: 0,
                 len: 1,
-                token: CacheOpToken::Ldgsts,
+                payload_bytes: 4,
+                l1_policy: LdgstsL1Policy::CacheAtAllLevels,
             }),
-            TailFlags {
-                ldgsts_dst_shared_timing: true,
-                ..TailFlags::default()
-            }
+            TailFlags::default()
         );
     }
 
@@ -6477,6 +9455,7 @@ mod tests {
                 warps,
                 0,
                 None,
+                None,
                 MemoryOrigin::Local,
                 41,
                 response_id,
@@ -6542,7 +9521,8 @@ mod tests {
                 warp: 0,
                 instruction: 1,
                 origin: MemoryOrigin::Global,
-                barrier: None,
+                target: None,
+                mshr_floor: None,
                 lo: 1,
                 hi: 2,
             });
@@ -6550,7 +9530,8 @@ mod tests {
                 warp: 0,
                 instruction: 2,
                 origin: MemoryOrigin::Local,
-                barrier: None,
+                target: None,
+                mshr_floor: None,
                 lo: 2,
                 hi: 3,
             });

@@ -17,7 +17,9 @@
 use std::collections::BTreeMap;
 
 use sim_arch::{ArchError, ArchId, CapabilityError};
-use sim_mem::{MemRole, mem_role_of_checked, opcode_head};
+use sim_mem::{
+    LdgstsL1Policy, MemRole, classify_ldgsts_l1_policy, mem_role_of_checked, opcode_head,
+};
 use sim_trace::ExecInfo;
 
 use crate::control_bits::{ControlBits, ControlSidecar};
@@ -41,8 +43,41 @@ pub enum ProgramError {
     },
     #[error("schedule control-layout capability is unavailable: {0}")]
     ControlLayoutCapability(#[from] CapabilityError),
+    #[error("tensor-pipeline capability is unavailable: {0}")]
+    TensorPipelineCapability(#[source] CapabilityError),
+    #[error(
+        "tensor instruction {opcode:?} has no execution-pipeline model for architecture {arch}"
+    )]
+    TensorPipelineUnsupported { arch: ArchId, opcode: String },
+    #[error("async-copy group capability is unavailable: {0}")]
+    AsyncCopyGroupCapability(#[source] CapabilityError),
+    #[error(
+        "async-copy control instruction {opcode:?} is predicated by {predicate:?} on {arch}; \
+         divergent group entanglement is not modeled"
+    )]
+    AsyncCopyControlPredicated {
+        arch: ArchId,
+        opcode: String,
+        predicate: String,
+    },
+    #[error(
+        "async-copy control instruction {opcode:?} has unsupported operands or modifiers on {arch}"
+    )]
+    AsyncCopyControlUnsupported { arch: ArchId, opcode: String },
+    #[error(
+        "async-copy control instruction {opcode:?} has control bits {control:?} on {arch}; \
+         expected {expected}"
+    )]
+    AsyncCopyControlLayout {
+        arch: ArchId,
+        opcode: String,
+        control: ControlBits,
+        expected: &'static str,
+    },
     #[error("memory-role classification failed for architecture-aware schedule join: {0}")]
     MemRoleClassification(#[from] sim_mem::MemRoleError),
+    #[error("LDGSTS source-cache classification failed during schedule join: {0}")]
+    LdgstsCacheClassification(#[source] sim_mem::CacheOpError),
     #[error("sidecar arch {arch:?} is not of the form sm_<digits>")]
     SidecarArchUnparseable { arch: String },
     #[error(
@@ -78,14 +113,46 @@ pub enum ProgramError {
 
 /// How the issue model treats an instruction, classified from the sidecar's
 /// nvdisasm `opcode_text` head (never from NVBit's `op_code`).
+#[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OpClass {
     /// `BAR.*` — block-wide barrier: the warp arrives, then waits until
     /// every unfinished warp of its block is waiting (or finished).
     BlockBarrier,
-    /// Everything else: issue timing is fully described by the control
-    /// bits plus (for memory ops) the dynamic record's memory class.
+    /// Ampere `LDGDEPBAR`: close the warp's open non-bulk async-copy group.
+    AsyncCopyCommit,
+    /// Ampere `DEPBAR.LE SB0, N`: wait until no more than the newest `N`
+    /// committed groups remain pending. The full `u32` immediate is stored in
+    /// [`IssueSlot`] so this hot classification remains byte-sized.
+    AsyncCopyWait,
+    /// Everything else. Dependence and dispatch timing still comes from the
+    /// control bits and dynamic memory class; independent execution-resource
+    /// timing, when characterized, is carried by [`PipelineClass`].
     Other,
+}
+
+/// Execution resource an instruction occupies after dispatch. `DispatchOnly`
+/// is an explicit fidelity boundary: the instruction still consumes the
+/// SMSP's single dispatch opportunity, but no execution-unit availability is
+/// invented for pipe families that have not yet been characterized.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PipelineClass {
+    DispatchOnly,
+    Tensor {
+        /// Earliest number of cycles between issues to one SMSP's Tensor Core.
+        initiation_interval_cycles: u64,
+    },
+}
+
+impl PipelineClass {
+    pub const fn initiation_interval_cycles(self) -> Option<u64> {
+        match self {
+            Self::DispatchOnly => None,
+            Self::Tensor {
+                initiation_interval_cycles,
+            } => Some(initiation_interval_cycles),
+        }
+    }
 }
 
 /// Per-pc issue control: the sidecar's decoded control word plus the opcode
@@ -102,7 +169,15 @@ pub enum OpClass {
 pub struct IssueSlot {
     pub(crate) control: ControlBits,
     pub(crate) op_class: OpClass,
+    /// Meaningful only when `op_class == OpClass::AsyncCopyWait`; construction
+    /// validates and preserves the complete `u32` sidecar immediate.
+    pub(crate) async_copy_wait_max_pending_groups: u32,
+    pub(crate) pipeline_class: PipelineClass,
     pub(crate) mem_role: MemRole,
+    /// Present exactly for static `LDGSTS` instructions. The dynamic record
+    /// carries this into async-copy source routing without reparsing SASS in the
+    /// issue loop.
+    pub(crate) ldgsts_l1_policy: Option<LdgstsL1Policy>,
     /// Full nvdisasm text, kept for diagnostics (static tables are small).
     pub(crate) opcode_text: String,
 }
@@ -116,8 +191,20 @@ impl IssueSlot {
         self.op_class
     }
 
+    pub fn async_copy_wait_max_pending_groups(&self) -> Option<u32> {
+        (self.op_class == OpClass::AsyncCopyWait).then_some(self.async_copy_wait_max_pending_groups)
+    }
+
+    pub fn pipeline_class(&self) -> PipelineClass {
+        self.pipeline_class
+    }
+
     pub fn mem_role(&self) -> MemRole {
         self.mem_role
+    }
+
+    pub fn ldgsts_l1_policy(&self) -> Option<LdgstsL1Policy> {
+        self.ldgsts_l1_policy
     }
 
     pub fn opcode_text(&self) -> &str {
@@ -183,12 +270,130 @@ impl FunctionSchedule {
     }
 }
 
-fn classify(opcode_text: &str) -> OpClass {
-    if opcode_head(opcode_text) == "BAR" {
-        OpClass::BlockBarrier
-    } else {
-        OpClass::Other
+fn classify(
+    opcode_text: &str,
+    control: ControlBits,
+    predicate: Option<&str>,
+    arch: ArchId,
+) -> Result<OpClass, ProgramError> {
+    let head = opcode_head(opcode_text);
+    if head == "BAR" {
+        return Ok(OpClass::BlockBarrier);
     }
+    if !matches!(head, "LDGDEPBAR" | "DEPBAR") {
+        return Ok(OpClass::Other);
+    }
+
+    arch.async_copy_group_semantics()
+        .require("async_copy_group_semantics")
+        .map_err(ProgramError::AsyncCopyGroupCapability)?;
+    if let Some(predicate) = predicate {
+        return Err(ProgramError::AsyncCopyControlPredicated {
+            arch,
+            opcode: opcode_text.to_owned(),
+            predicate: predicate.to_owned(),
+        });
+    }
+
+    match head {
+        "LDGDEPBAR" => {
+            if opcode_text.trim() != "LDGDEPBAR" {
+                return Err(ProgramError::AsyncCopyControlUnsupported {
+                    arch,
+                    opcode: opcode_text.to_owned(),
+                });
+            }
+            if control.write_barrier.map(|barrier| barrier.wire()) != Some(0)
+                || control.read_barrier.is_some()
+                || control.wait_mask.bits() != 0
+            {
+                return Err(ProgramError::AsyncCopyControlLayout {
+                    arch,
+                    opcode: opcode_text.to_owned(),
+                    control,
+                    expected: "write barrier SB0, no read barrier, and an empty ordinary wait mask",
+                });
+            }
+            Ok(OpClass::AsyncCopyCommit)
+        }
+        "DEPBAR" => {
+            if parse_async_copy_wait(opcode_text).is_none() {
+                return Err(ProgramError::AsyncCopyControlUnsupported {
+                    arch,
+                    opcode: opcode_text.to_owned(),
+                });
+            };
+            if control.write_barrier.is_some()
+                || control.read_barrier.is_some()
+                || control.wait_mask.bits() != 0
+            {
+                return Err(ProgramError::AsyncCopyControlLayout {
+                    arch,
+                    opcode: opcode_text.to_owned(),
+                    control,
+                    expected: "no ordinary write barrier, read barrier, or wait mask",
+                });
+            }
+            Ok(OpClass::AsyncCopyWait)
+        }
+        _ => unreachable!("dependency-barrier heads were filtered above"),
+    }
+}
+
+fn parse_async_copy_wait(opcode_text: &str) -> Option<u32> {
+    let text = opcode_text.trim();
+    let operands = text.strip_prefix("DEPBAR.LE")?;
+    if operands.is_empty() || !operands.starts_with(char::is_whitespace) {
+        return None;
+    }
+    let mut operands = operands.split(',');
+    if operands.next()?.trim() != "SB0" {
+        return None;
+    }
+    let immediate = operands.next()?.trim();
+    if immediate.is_empty() || operands.next().is_some() {
+        return None;
+    }
+    parse_u32_literal(immediate)
+}
+
+fn parse_u32_literal(text: &str) -> Option<u32> {
+    if let Some(hex) = text.strip_prefix("0x").or_else(|| text.strip_prefix("0X")) {
+        if hex.is_empty() {
+            None
+        } else {
+            u32::from_str_radix(hex, 16).ok()
+        }
+    } else {
+        text.parse().ok()
+    }
+}
+
+fn classify_pipeline(opcode_text: &str, arch: ArchId) -> Result<PipelineClass, ProgramError> {
+    let head = opcode_head(opcode_text);
+    if !matches!(head, "HMMA" | "IMMA" | "BMMA" | "DMMA") {
+        return Ok(PipelineClass::DispatchOnly);
+    }
+
+    let intervals = arch
+        .tensor_issue_intervals()
+        .require("tensor_issue_intervals")
+        .map_err(ProgramError::TensorPipelineCapability)?;
+    let opcode = opcode_text.split_ascii_whitespace().next().unwrap_or("");
+    let initiation_interval_cycles = match opcode {
+        "HMMA.16816.F32" | "HMMA.16816.F32.BF16" => intervals.hmma_16816_f16_bf16,
+        "HMMA.SP.16832.F32.BF16" => intervals.hmma_sparse_16832_f16_bf16,
+        "IMMA.16816.S8.S8" => intervals.imma_16816_s8,
+        _ => {
+            return Err(ProgramError::TensorPipelineUnsupported {
+                arch,
+                opcode: opcode.to_owned(),
+            });
+        }
+    };
+    Ok(PipelineClass::Tensor {
+        initiation_interval_cycles,
+    })
 }
 
 fn sidecar_arch_id(arch: &str) -> Result<ArchId, ProgramError> {
@@ -262,12 +467,30 @@ pub fn build_schedules(
             .iter()
             .map(|(&pc, inst)| {
                 let mem_role = mem_role_of_checked(&inst.opcode_text, sidecar.arch.as_str())?;
+                let ldgsts_l1_policy = classify_ldgsts_l1_policy(&inst.opcode_text, sidecar_arch)
+                    .map_err(ProgramError::LdgstsCacheClassification)?;
+                let op_class = classify(
+                    &inst.opcode_text,
+                    inst.control,
+                    inst.predicate.as_deref(),
+                    sidecar_arch,
+                )?;
+                let pipeline_class = classify_pipeline(&inst.opcode_text, sidecar_arch)?;
+                let async_copy_wait_max_pending_groups =
+                    parse_async_copy_wait(&inst.opcode_text).unwrap_or(0);
+                debug_assert_eq!(
+                    op_class == OpClass::AsyncCopyWait,
+                    parse_async_copy_wait(&inst.opcode_text).is_some()
+                );
                 Ok((
                     pc,
                     IssueSlot {
                         control: inst.control,
-                        op_class: classify(&inst.opcode_text),
+                        op_class,
+                        async_copy_wait_max_pending_groups,
+                        pipeline_class,
                         mem_role,
+                        ldgsts_l1_policy,
                         opcode_text: inst.opcode_text.clone(),
                     },
                 ))
@@ -347,6 +570,7 @@ mod tests {
         assert_eq!(s.by_pc.len(), 3);
         assert_eq!(s.by_pc[&16].op_class, OpClass::BlockBarrier);
         assert_eq!(s.by_pc[&0].op_class, OpClass::Other);
+        assert_eq!(s.by_pc[&0].pipeline_class, PipelineClass::DispatchOnly);
     }
 
     #[test]
@@ -418,6 +642,74 @@ mod tests {
     }
 
     #[test]
+    fn join_stamps_ldgsts_source_cache_policy() {
+        for (opcode, expected) in [
+            (
+                "LDGSTS.E.128 [R1], [R2.64]",
+                LdgstsL1Policy::CacheAtAllLevels,
+            ),
+            (
+                "LDGSTS.E.BYPASS.LTC128B.128 [R1], [R2.64]",
+                LdgstsL1Policy::BypassL1,
+            ),
+        ] {
+            let mut sc = sidecar(&[0]);
+            sc.functions
+                .get_mut("my_kernel")
+                .unwrap()
+                .by_pc
+                .get_mut(&0)
+                .unwrap()
+                .opcode_text = opcode.to_owned();
+            let schedules = build_schedules(&exec_info(&[0]), &sc).unwrap();
+            let slot = &schedules[&1].by_pc[&0];
+            assert_eq!(
+                slot.mem_role,
+                MemRole::BypassLoad(sim_mem::CacheOpToken::Ldgsts)
+            );
+            assert_eq!(slot.ldgsts_l1_policy(), Some(expected));
+        }
+    }
+
+    #[test]
+    fn join_stamps_tensor_pipeline_class_from_sidecar_text() {
+        let mut sc = sidecar(&[0]);
+        sc.functions
+            .get_mut("my_kernel")
+            .unwrap()
+            .by_pc
+            .get_mut(&0)
+            .unwrap()
+            .opcode_text = "HMMA.16816.F32.BF16 R0, R2, R4, R6".to_owned();
+        let schedules = build_schedules(&exec_info(&[0]), &sc).unwrap();
+        assert_eq!(
+            schedules[&1].by_pc[&0].pipeline_class,
+            PipelineClass::Tensor {
+                initiation_interval_cycles: 16,
+            }
+        );
+    }
+
+    #[test]
+    fn schedule_join_rejects_unmodeled_tensor_form() {
+        let mut sc = sidecar(&[0]);
+        sc.functions
+            .get_mut("my_kernel")
+            .unwrap()
+            .by_pc
+            .get_mut(&0)
+            .unwrap()
+            .opcode_text = "HMMA.884.F32 R0, R2, R4, R6".to_owned();
+        assert!(matches!(
+            build_schedules(&exec_info(&[0]), &sc),
+            Err(ProgramError::TensorPipelineUnsupported {
+                arch: ArchId::Sm86,
+                opcode,
+            }) if opcode == "HMMA.884.F32"
+        ));
+    }
+
+    #[test]
     fn sm86_schedule_join_rejects_hopper_redg() {
         let mut sc = sidecar(&[0]);
         sc.functions
@@ -439,19 +731,209 @@ mod tests {
     }
 
     #[test]
-    fn classify_uses_opcode_head_only() {
-        assert_eq!(classify("BAR.SYNC.DEFER_BLOCKING"), OpClass::BlockBarrier);
+    fn block_barrier_classification_uses_opcode_head_only() {
+        let control = ControlBits::new(1, false, 7, 7, 0, 0).unwrap();
         assert_eq!(
-            classify("BAR.RED.AND.DEFER_BLOCKING 0x0"),
+            classify("BAR.SYNC.DEFER_BLOCKING", control, None, ArchId::Sm86).unwrap(),
             OpClass::BlockBarrier
         );
-        // BSSY/BSYNC/WARPSYNC/DEPBAR are NOT block-wide barriers.
-        assert_eq!(classify("BSYNC B0"), OpClass::Other);
-        assert_eq!(classify("BSSY B0, 0x1234"), OpClass::Other);
-        assert_eq!(classify("WARPSYNC 0xffffffff"), OpClass::Other);
-        assert_eq!(classify("DEPBAR.LE SB0, 0x0"), OpClass::Other);
-        assert_eq!(classify("LDG.E R0, [R2.64]"), OpClass::Other);
-        assert_eq!(classify(""), OpClass::Other);
+        assert_eq!(
+            classify(
+                "BAR.RED.AND.DEFER_BLOCKING 0x0",
+                control,
+                None,
+                ArchId::Sm86
+            )
+            .unwrap(),
+            OpClass::BlockBarrier
+        );
+        // BSSY/BSYNC/WARPSYNC are NOT block-wide barriers.
+        for opcode in [
+            "BSYNC B0",
+            "BSSY B0, 0x1234",
+            "WARPSYNC 0xffffffff",
+            "LDG.E R0, [R2.64]",
+            "",
+        ] {
+            assert_eq!(
+                classify(opcode, control, None, ArchId::Sm86).unwrap(),
+                OpClass::Other,
+                "opcode {opcode:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn sm86_async_copy_controls_classify_exact_commit_and_wait_forms() {
+        let commit = ControlBits::new(1, true, 0, 7, 0, 0).unwrap();
+        let wait = ControlBits::new(4, false, 7, 7, 0, 0).unwrap();
+        assert_eq!(
+            classify("LDGDEPBAR", commit, None, ArchId::Sm86).unwrap(),
+            OpClass::AsyncCopyCommit
+        );
+        for (opcode, max_pending_groups) in [
+            ("DEPBAR.LE SB0, 0x0", 0),
+            ("DEPBAR.LE SB0, 0X1", 1),
+            ("DEPBAR.LE SB0, 17", 17),
+            ("  DEPBAR.LE\tSB0,0x00000002  ", 2),
+        ] {
+            assert_eq!(
+                classify(opcode, wait, None, ArchId::Sm86).unwrap(),
+                OpClass::AsyncCopyWait,
+                "opcode {opcode:?}"
+            );
+            assert_eq!(parse_async_copy_wait(opcode), Some(max_pending_groups));
+        }
+    }
+
+    #[test]
+    fn async_copy_control_classifier_rejects_unknown_forms() {
+        let commit = ControlBits::new(1, true, 0, 7, 0, 0).unwrap();
+        let wait = ControlBits::new(4, false, 7, 7, 0, 0).unwrap();
+        for (opcode, control) in [
+            ("LDGDEPBAR.EXTRA", commit),
+            ("LDGDEPBAR R0", commit),
+            ("DEPBAR", wait),
+            ("DEPBAR.GE SB0, 0x0", wait),
+            ("DEPBAR.LE SB1, 0x0", wait),
+            ("DEPBAR.LE SB0, -1", wait),
+            ("DEPBAR.LE SB0, 0x1_0000_0000", wait),
+            ("DEPBAR.LE SB0, 0, 1", wait),
+        ] {
+            assert!(matches!(
+                classify(opcode, control, None, ArchId::Sm86),
+                Err(ProgramError::AsyncCopyControlUnsupported {
+                    arch: ArchId::Sm86,
+                    opcode: rejected,
+                }) if rejected == opcode
+            ));
+        }
+    }
+
+    #[test]
+    fn async_copy_control_classifier_rejects_predication_and_layout_drift() {
+        let commit = ControlBits::new(1, true, 0, 7, 0, 0).unwrap();
+        let wait = ControlBits::new(4, false, 7, 7, 0, 0).unwrap();
+        assert!(matches!(
+            classify("LDGDEPBAR", commit, Some("@P0"), ArchId::Sm86),
+            Err(ProgramError::AsyncCopyControlPredicated {
+                arch: ArchId::Sm86,
+                predicate,
+                ..
+            }) if predicate == "@P0"
+        ));
+        assert!(matches!(
+            classify("DEPBAR.LE SB0, 0x0", wait, Some("@!P1"), ArchId::Sm86),
+            Err(ProgramError::AsyncCopyControlPredicated {
+                arch: ArchId::Sm86,
+                predicate,
+                ..
+            }) if predicate == "@!P1"
+        ));
+
+        for (opcode, control) in [
+            ("LDGDEPBAR", ControlBits::new(1, true, 7, 7, 0, 0).unwrap()),
+            ("LDGDEPBAR", ControlBits::new(1, true, 0, 1, 0, 0).unwrap()),
+            ("LDGDEPBAR", ControlBits::new(1, true, 0, 7, 1, 0).unwrap()),
+            (
+                "DEPBAR.LE SB0, 0x0",
+                ControlBits::new(4, false, 0, 7, 0, 0).unwrap(),
+            ),
+            (
+                "DEPBAR.LE SB0, 0x0",
+                ControlBits::new(4, false, 7, 1, 0, 0).unwrap(),
+            ),
+            (
+                "DEPBAR.LE SB0, 0x0",
+                ControlBits::new(4, false, 7, 7, 1, 0).unwrap(),
+            ),
+        ] {
+            assert!(matches!(
+                classify(opcode, control, None, ArchId::Sm86),
+                Err(ProgramError::AsyncCopyControlLayout {
+                    arch: ArchId::Sm86,
+                    opcode: rejected,
+                    ..
+                }) if rejected == opcode
+            ));
+        }
+    }
+
+    #[test]
+    fn async_copy_classifier_does_not_inherit_ampere_protocol_on_sm120() {
+        let commit = ControlBits::new(1, true, 0, 7, 0, 0).unwrap();
+        assert!(matches!(
+            classify("LDGDEPBAR", commit, None, ArchId::Sm120),
+            Err(ProgramError::AsyncCopyGroupCapability(
+                CapabilityError::ResearchGap {
+                    arch: ArchId::Sm120,
+                    capability: "async_copy_group_semantics",
+                    reason,
+                }
+            )) if !reason.is_empty()
+        ));
+    }
+
+    #[test]
+    fn sm86_tensor_pipeline_classifier_admits_complete_sidecar_inventory() {
+        for (opcode, expected_interval) in [
+            ("HMMA.16816.F32", 16),
+            ("HMMA.16816.F32.BF16", 16),
+            ("HMMA.SP.16832.F32.BF16", 16),
+            ("IMMA.16816.S8.S8", 8),
+        ] {
+            assert_eq!(
+                classify_pipeline(&format!("{opcode} R0, R2, R4, R6"), ArchId::Sm86).unwrap(),
+                PipelineClass::Tensor {
+                    initiation_interval_cycles: expected_interval,
+                },
+                "opcode {opcode}"
+            );
+        }
+    }
+
+    #[test]
+    fn non_tensor_opcode_is_explicitly_dispatch_only() {
+        for opcode in ["IADD3 R0, R1, R2, RZ", "XHMMA.16816.F32 R0", ""] {
+            assert_eq!(
+                classify_pipeline(opcode, ArchId::Sm86).unwrap(),
+                PipelineClass::DispatchOnly,
+                "opcode {opcode:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn unknown_tensor_forms_are_rejected_without_generic_fallback() {
+        for opcode in [
+            "HMMA.884.F32 R0, R2, R4, R6",
+            "HMMA.16816.F32.BF16.EXTRA R0",
+            "IMMA.16816.U8.U8 R0",
+            "BMMA.168256.XOR.POPC R0",
+            "DMMA.884.F64 R0",
+        ] {
+            assert!(matches!(
+                classify_pipeline(opcode, ArchId::Sm86),
+                Err(ProgramError::TensorPipelineUnsupported {
+                    arch: ArchId::Sm86,
+                    opcode: rejected,
+                }) if rejected == opcode.split_ascii_whitespace().next().unwrap()
+            ));
+        }
+    }
+
+    #[test]
+    fn tensor_classifier_does_not_inherit_sm86_intervals_on_sm120() {
+        assert!(matches!(
+            classify_pipeline("HMMA.16816.F32 R0", ArchId::Sm120),
+            Err(ProgramError::TensorPipelineCapability(
+                CapabilityError::ResearchGap {
+                    arch: ArchId::Sm120,
+                    capability: "tensor_issue_intervals",
+                    reason,
+                }
+            )) if !reason.is_empty()
+        ));
     }
 
     #[test]

@@ -38,9 +38,11 @@
 //! Fill timing: the immediate API remains an occupancy-only Python-parity
 //! surface. A separate event discipline tracks pending sectors and makes them
 //! valid only through opaque, allocation-generation-bound completion tokens.
-//! This is visibility/ABA state, not an invented finite L2 MSHR: duplicate
-//! pending reads remain distinct misses and no request coalescing or capacity
-//! limit is introduced.
+//! Pending reads always remain lookup misses. The compatibility event API mints
+//! a distinct fetch, while the coalesced event API splits newly fetched sectors
+//! from allocation/sector-matched pending merges so the system can reuse the
+//! original ready time. This is visibility/ABA state, not an invented finite L2
+//! MSHR capacity.
 
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -484,6 +486,12 @@ enum L2AccessDiscipline {
     Event,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PendingReadPolicy {
+    DistinctFetches,
+    CoalesceByAllocationSector,
+}
+
 impl L2AccessDiscipline {
     const fn name(self) -> &'static str {
         match self {
@@ -491,6 +499,17 @@ impl L2AccessDiscipline {
             Self::Event => "event",
         }
     }
+}
+
+/// Opaque identity of one sector in one event-mode L2 allocation. It carries no
+/// completion authority; the shared system uses it only to join a pending read to
+/// the ready time of the fetch that already owns that allocation/sector.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct L2PendingSectorKey {
+    owner: L2ModelOwner,
+    line_id: i64,
+    generation: L2AllocationGeneration,
+    sector: u8,
 }
 
 /// Opaque capability for completing sectors fetched by one event-mode read.
@@ -501,6 +520,27 @@ pub struct L2FillToken {
     line_id: i64,
     generation: L2AllocationGeneration,
     sector_mask: u8,
+}
+
+impl L2FillToken {
+    /// Sectors whose pending bits this capability may complete.
+    pub const fn sector_mask(self) -> u8 {
+        self.sector_mask
+    }
+
+    /// Identity used to register one authorized sector's pending ready time.
+    pub const fn pending_sector_key(self, sector: u8) -> Option<L2PendingSectorKey> {
+        if sector < 4 && self.sector_mask & (1 << sector) != 0 {
+            Some(L2PendingSectorKey {
+                owner: self.owner,
+                line_id: self.line_id,
+                generation: self.generation,
+                sector,
+            })
+        } else {
+            None
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -528,13 +568,53 @@ impl PreparedL2Fill {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct L2EventMaskPreview {
     pub lookup: L2MaskPreview,
+    owner: L2ModelOwner,
+    line_id: i64,
+    generation: L2AllocationGeneration,
     fill_mask: u8,
+    pending_merge_mask: u8,
 }
 
 impl L2EventMaskPreview {
-    /// Sectors whose read data must become visible at a later completion event.
+    /// Missing read sectors that start a new lower-level fetch. Under the
+    /// distinct-request discipline this includes already-pending sectors; under
+    /// coalescing it excludes [`Self::pending_merge_mask`].
     pub const fn fill_mask(self) -> u8 {
         self.fill_mask
+    }
+
+    /// Requested read sectors already owned by a matching allocation's pending
+    /// lower-level fetch. They remain lookup misses but issue no duplicate fetch.
+    pub const fn pending_merge_mask(self) -> u8 {
+        self.pending_merge_mask
+    }
+
+    /// Opaque identity used to register one newly fetched sector's ready time.
+    pub const fn fill_sector_key(self, sector: u8) -> Option<L2PendingSectorKey> {
+        if sector < 4 && self.fill_mask & (1 << sector) != 0 {
+            Some(L2PendingSectorKey {
+                owner: self.owner,
+                line_id: self.line_id,
+                generation: self.generation,
+                sector,
+            })
+        } else {
+            None
+        }
+    }
+
+    /// Opaque identity used to join one merged sector to its original ready time.
+    pub const fn pending_sector_key(self, sector: u8) -> Option<L2PendingSectorKey> {
+        if sector < 4 && self.pending_merge_mask & (1 << sector) != 0 {
+            Some(L2PendingSectorKey {
+                owner: self.owner,
+                line_id: self.line_id,
+                generation: self.generation,
+                sector,
+            })
+        } else {
+            None
+        }
     }
 }
 
@@ -1095,6 +1175,7 @@ impl L2Model {
         line_id: i64,
         sector_mask: u8,
         class: L2OpClass,
+        pending_read_policy: PendingReadPolicy,
     ) -> Result<
         (
             PreparedMaskAccess,
@@ -1129,6 +1210,7 @@ impl L2Model {
         });
         let mut line_present = resident.is_some();
         let mut valid_mask = resident.map_or(0, |way| ways[way].mask);
+        let mut pending_mask = resident.map_or(0, |way| ways[way].pending_mask);
         let mut allocation_generation = match resident {
             Some(way) => Some(
                 ways[way]
@@ -1144,6 +1226,7 @@ impl L2Model {
         let mut counted_mask = 0u8;
         let mut present_mask = 0u8;
         let mut fill_mask = 0u8;
+        let mut pending_merge_mask = 0u8;
 
         for sector in 0..4u8 {
             let bit = 1u8 << sector;
@@ -1154,6 +1237,7 @@ impl L2Model {
                 .checked_add(1)
                 .ok_or(L2AccessError::ClockOverflow { clock })?;
             let sector_present = line_present && valid_mask & bit != 0;
+            let sector_pending = line_present && pending_mask & bit != 0;
             let counted_hit = sector_present || (line_present && class == L2OpClass::WriteAtomic);
 
             if !line_present {
@@ -1232,10 +1316,18 @@ impl L2Model {
             if sector_present {
                 present_mask |= bit;
             } else if class == L2OpClass::Read {
-                fill_mask |= bit;
+                if sector_pending
+                    && pending_read_policy == PendingReadPolicy::CoalesceByAllocationSector
+                {
+                    pending_merge_mask |= bit;
+                } else {
+                    fill_mask |= bit;
+                }
+                pending_mask |= bit;
             }
             if class == L2OpClass::WriteAtomic {
                 valid_mask |= bit;
+                pending_mask &= !bit;
             }
             line_present = true;
         }
@@ -1249,7 +1341,14 @@ impl L2Model {
             counted_hit_mask: counted_mask,
             present_mask,
         };
-        let event_preview = L2EventMaskPreview { lookup, fill_mask };
+        let event_preview = L2EventMaskPreview {
+            lookup,
+            owner: self.owner,
+            line_id,
+            generation,
+            fill_mask,
+            pending_merge_mask,
+        };
         let prepared_fill = (fill_mask != 0).then_some(PreparedL2Fill {
             owner: self.owner,
             line_id,
@@ -1366,11 +1465,10 @@ impl L2Model {
     /// Event-discipline counterpart to [`Self::access_mask_transactional`].
     /// Read misses allocate/tag the line and set pending bits but remain absent
     /// from physical-presence and hit accounting until the returned opaque fill
-    /// capability is completed. The callback receives only a non-completable
-    /// preview; a fill token is minted after both the callback and cache commit
-    /// succeed, so an aborted callback cannot retain a future-valid capability.
-    /// Writes validate their sectors immediately. Preparation and callback
-    /// failure leave state, discipline, and generation allocation unchanged.
+    /// capability is completed. This compatibility surface keeps duplicate
+    /// pending reads as distinct lower-level fetches. The callback receives only
+    /// a non-completable preview; a fill token is minted after both the callback
+    /// and cache commit succeed. Writes validate their sectors immediately.
     pub fn access_mask_event_transactional<T, E>(
         &mut self,
         line_id: i64,
@@ -1381,8 +1479,52 @@ impl L2Model {
     where
         E: From<L2AccessError>,
     {
+        self.access_mask_event_with_policy(
+            line_id,
+            sector_mask,
+            class,
+            PendingReadPolicy::DistinctFetches,
+            before_commit,
+        )
+    }
+
+    /// Event-mode read access that merges a request for an already-pending sector
+    /// onto the matching allocation-generation/sector. The lookup still counts a
+    /// miss, but [`L2EventMaskPreview::pending_merge_mask`] identifies sectors
+    /// that must reuse the original lower-level ready time instead of issuing a
+    /// duplicate fetch. Preparation and callback failure are transactional.
+    pub fn access_mask_event_coalesced_transactional<T, E>(
+        &mut self,
+        line_id: i64,
+        sector_mask: u8,
+        class: L2OpClass,
+        before_commit: impl FnOnce(L2EventMaskPreview) -> Result<T, E>,
+    ) -> Result<(L2EventMaskAccess, T), E>
+    where
+        E: From<L2AccessError>,
+    {
+        self.access_mask_event_with_policy(
+            line_id,
+            sector_mask,
+            class,
+            PendingReadPolicy::CoalesceByAllocationSector,
+            before_commit,
+        )
+    }
+
+    fn access_mask_event_with_policy<T, E>(
+        &mut self,
+        line_id: i64,
+        sector_mask: u8,
+        class: L2OpClass,
+        pending_read_policy: PendingReadPolicy,
+        before_commit: impl FnOnce(L2EventMaskPreview) -> Result<T, E>,
+    ) -> Result<(L2EventMaskAccess, T), E>
+    where
+        E: From<L2AccessError>,
+    {
         let (prepared, preview, prepared_fill) = self
-            .prepare_event_mask(line_id, sector_mask, class)
+            .prepare_event_mask(line_id, sector_mask, class, pending_read_policy)
             .map_err(E::from)?;
         let value = before_commit(preview)?;
         prepared.commit(self);
@@ -1704,6 +1846,20 @@ mod tests {
         ev(l2, line, sector_mask, L2OpClass::Read)
     }
 
+    fn ev_read_coalesced(
+        l2: &mut L2Model,
+        line: i64,
+        sector_mask: u8,
+    ) -> (L2EventMaskAccess, L2EventMaskPreview) {
+        l2.access_mask_event_coalesced_transactional(
+            line,
+            sector_mask,
+            L2OpClass::Read,
+            |preview| Ok::<_, L2AccessError>(preview),
+        )
+        .unwrap()
+    }
+
     fn resident_way(l2: &L2Model, line: i64) -> &Way {
         let set_key = l2.set_key(line).unwrap();
         l2.sets[set_key]
@@ -1806,6 +1962,57 @@ mod tests {
         assert!(hit.fill.is_none());
         assert_eq!(l2.counters.hits, 1);
         assert_eq!(resident_way(&l2, 3).pending_mask, 0);
+    }
+
+    #[test]
+    fn coalesced_event_reads_split_new_fetches_from_pending_merges() {
+        let mut l2 = L2Model::new(cfg(1024, 2, 1)).unwrap();
+        let (first, first_preview) = ev_read_coalesced(&mut l2, 3, 0b0011);
+        assert_eq!(first_preview.fill_mask(), 0b0011);
+        assert_eq!(first_preview.pending_merge_mask(), 0);
+        let first_token = first.fill.expect("cold read owns both fetches");
+        assert_eq!(first_token.sector_mask(), 0b0011);
+
+        let (second, second_preview) = ev_read_coalesced(&mut l2, 3, 0b0111);
+        assert_eq!(second.lookup.counted_hits, 0);
+        assert_eq!(second.lookup.present_sectors, 0);
+        assert_eq!(second_preview.fill_mask(), 0b0100);
+        assert_eq!(second_preview.pending_merge_mask(), 0b0011);
+        assert_eq!(
+            second_preview.pending_sector_key(0),
+            first_token.pending_sector_key(0)
+        );
+        assert_eq!(
+            second_preview.pending_sector_key(1),
+            first_token.pending_sector_key(1)
+        );
+        assert!(second_preview.pending_sector_key(2).is_none());
+        let second_token = second.fill.expect("new sector owns one fetch");
+        assert_eq!(second_token.sector_mask(), 0b0100);
+        assert_eq!(resident_way(&l2, 3).pending_mask, 0b0111);
+        assert_eq!(l2.counters.misses, 5);
+        assert_eq!(l2.counters.line_misses, 1);
+        assert_eq!(l2.counters.sector_fill_misses, 4);
+
+        assert!(matches!(
+            l2.complete_fill(first_token).unwrap(),
+            L2FillCompletion::Completed {
+                newly_valid_mask: 0b0011,
+                duplicate_mask: 0,
+            }
+        ));
+        assert!(matches!(
+            l2.complete_fill(second_token).unwrap(),
+            L2FillCompletion::Completed {
+                newly_valid_mask: 0b0100,
+                duplicate_mask: 0,
+            }
+        ));
+        let (hit, preview) = ev_read_coalesced(&mut l2, 3, 0b0111);
+        assert_eq!(hit.lookup.counted_hits, 3);
+        assert!(hit.fill.is_none());
+        assert_eq!(preview.fill_mask(), 0);
+        assert_eq!(preview.pending_merge_mask(), 0);
     }
 
     #[test]

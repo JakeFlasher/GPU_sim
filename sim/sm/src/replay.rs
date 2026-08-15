@@ -28,30 +28,42 @@
 //! function CALLs would need per-segment schedules and are rejected typed
 //! until a trace exercises them (none of the 17 M1 traces does).
 //!
-//! Memory discipline: blocks are decoded ONE at a time and compacted
-//! immediately (12-byte records + a per-warp sector arena); the prost tree
-//! is dropped before the next block loads.
+//! Memory discipline: threadblock payloads are decoded and semantically
+//! validated once when `TraceDir` captures the immutable snapshot. The reader
+//! retains compact scheduler/memory metadata plus a per-warp sector arena and
+//! discards the address-heavy Prost tree. Extraction never performs a second
+//! wire walk or lane-address reconstruction.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use sim_arch::card::{ArchCard, CalibError};
 use sim_arch::{ArchId, Sku};
-use sim_mem::{L1Config, L1CounterError, L1Counters, SectorExpansionError, SectorExpansionPlan};
+#[cfg(test)]
+use sim_mem::SectorExpansionPlan;
+use sim_mem::{L1Config, L1CounterError, L1Counters, SectorExpansionError};
+#[cfg(test)]
 use sim_trace::lanes::LANE_INACTIVE_SENTINEL;
 use sim_trace::pb;
 use sim_trace::reader::{
-    MemoryAccessMeta, MemoryPayloadContract, PreflightedMemoryAccess,
-    check_preflighted_allocation_identity, preflight_memory_access,
+    EffectiveDataBytesError, MemoryAccessMeta, MemoryPayloadContract, SharedBankProjectionError,
+    ValidatedMemoryInstruction, ValidatedMemoryRoute, ValidatedMemoryRouteError,
+    ValidatedSectorError, ValidatedSectorErrorPhase, ValidatedSectorPlan, ValidatedWarp,
 };
-use sim_trace::{KernelLoc, TraceDir, TraceError, block_launch_index, kernel_grid};
+#[cfg(test)]
+use sim_trace::reader::{
+    PreflightedMemoryAccess, preflight_memory_access, project_effective_data_bytes,
+    project_shared_bank_wavefronts_32x4,
+};
+use sim_trace::{KernelLoc, TraceDir, TraceError, kernel_grid};
 #[cfg(feature = "campaign")]
 use sim_trace::{
     LosslessFullProvenance, TraceSamplingMethod, TraceSamplingSidecar, WaveSegmentSubsetProvenance,
 };
 
 use sim_mem::{
-    CacheOpToken, L2Config, L2Counters, L2Model, MemRole, is_known_untagged_opcode, opcode_head,
+    CacheOpToken, L2Config, L2Counters, L2Model, LdgstsL1Policy, MemRole, is_known_untagged_opcode,
+    opcode_head,
 };
 
 #[cfg(feature = "campaign")]
@@ -392,6 +404,45 @@ pub enum ReplayError {
         record_ix: usize,
         #[source]
         source: SectorExpansionError,
+    },
+    #[error(
+        "{path}: warp {warp_id} record {record_ix}: effective payload-byte projection failed: {source}"
+    )]
+    EffectiveDataBytes {
+        path: PathBuf,
+        warp_id: i32,
+        record_ix: usize,
+        #[source]
+        source: EffectiveDataBytesError,
+    },
+    #[error(
+        "{path}: warp {warp_id} record {record_ix}: async-copy source/payload mismatch: source_active={source_active}, sectors={sectors}, payload_bytes={payload_bytes}"
+    )]
+    AsyncCopyPayloadMismatch {
+        path: PathBuf,
+        warp_id: i32,
+        record_ix: usize,
+        source_active: bool,
+        sectors: usize,
+        payload_bytes: u64,
+    },
+    #[error(
+        "{path}: warp {warp_id} record {record_ix}: async-copy payload {payload_bytes} bytes exceeds compact replay-token maximum {max_payload_bytes}"
+    )]
+    AsyncCopyPayloadOutOfRange {
+        path: PathBuf,
+        warp_id: i32,
+        record_ix: usize,
+        payload_bytes: u64,
+        max_payload_bytes: u32,
+    },
+    #[error("{path}: warp {warp_id} record {record_ix}: shared-bank projection failed: {source}")]
+    SharedBankProjection {
+        path: PathBuf,
+        warp_id: i32,
+        record_ix: usize,
+        #[source]
+        source: SharedBankProjectionError,
     },
     #[error(
         "{path}: warp {warp_id} record {record_ix}: record count overflows u64 at {accumulated}"
@@ -1165,8 +1216,8 @@ fn extract_per_sm_blocks(
     let mut records_seen: u64 = 0;
 
     for path in td.threadblock_paths(loc)? {
-        let tb = td.read_threadblock(&path)?;
-        let launch_index = block_launch_index(loc.kernel(), &tb, &path)?;
+        let tb = td.validated_threadblock(&path)?;
+        let launch_index = tb.launch_index();
         if !seen_indices.insert(launch_index) {
             return Err(ReplayError::DuplicateLaunchIndex {
                 index: launch_index,
@@ -1176,7 +1227,7 @@ fn extract_per_sm_blocks(
         let admitted_block_warps = expected_block_warps.filter(|_| validate_warp_roster);
         if let Some(expected_block_warps) = admitted_block_warps {
             let actual_block_warps =
-                checked_collection_len("threadblock warp roster", tb.warps.len())?;
+                checked_collection_len("threadblock warp roster", tb.warps().len())?;
             if actual_block_warps != expected_block_warps {
                 return Err(ReplayError::WarpRosterCardinalityMismatch {
                     path,
@@ -1187,8 +1238,9 @@ fn extract_per_sm_blocks(
         }
         let mut block_sm: Option<i32> = None;
         let mut seen_warp_slots = BTreeSet::new();
-        let mut warps = Vec::with_capacity(tb.warps.len());
-        for (&warp_id, warp) in &tb.warps {
+        let mut warps = Vec::with_capacity(tb.warps().len());
+        for warp in tb.warps() {
+            let warp_id = warp.map_key();
             if admitted_block_warps.is_some_and(|expected_block_warps| {
                 warp_id < 0 || u64::try_from(warp_id).unwrap_or(u64::MAX) >= expected_block_warps
             }) {
@@ -1198,25 +1250,18 @@ fn extract_per_sm_blocks(
                     expected_warps: admitted_block_warps.expect("checked as present"),
                 });
             }
-            if warp.id != warp_id {
+            if warp.warp_id() != warp_id {
                 return Err(ReplayError::WarpIdentityMismatch {
                     path,
                     map_key: warp_id,
-                    warp_id: warp.id,
+                    warp_id: warp.warp_id(),
                 });
             }
             let mut warp_slot: Option<i32> = None;
-            let mut insts = Vec::with_capacity(warp.instructions.len());
+            let mut insts = Vec::with_capacity(warp.instructions().len());
             let mut sectors: Vec<i64> = Vec::new();
-            let mut sector_scratch: Vec<i64> = Vec::new();
-            for (record_ix, inst) in warp.instructions.iter().enumerate() {
-                let Some(record_warp_id) = inst.warpid_tb else {
-                    return Err(ReplayError::InstructionWarpIdMissing {
-                        path,
-                        warp_id,
-                        record_ix,
-                    });
-                };
+            for (record_ix, inst) in warp.instructions().enumerate() {
+                let record_warp_id = inst.warpid_tb();
                 if record_warp_id != warp_id {
                     return Err(ReplayError::InstructionWarpIdMismatch {
                         path,
@@ -1226,41 +1271,25 @@ fn extract_per_sm_blocks(
                     });
                 }
                 records_seen = checked_record_count(records_seen, &path, warp_id, record_ix)?;
-                // Complete wire and producer-shape preflight on the path the
-                // simulator consumes. Structural errors govern route errors;
-                // route errors govern the function-identity diagnostic; only a
-                // matching function may then prove each GLOBAL/GENERIC active
-                // record's resolvable, in-range allocation id. The immutable
-                // token is reused by both later passes, so this ordering neither
-                // preflight nor allocates an intermediate payload vector.
-                if decode_sectors {
-                    sector_scratch.clear();
-                }
-                let preflight = preflight_replay_memory(
-                    inst,
+                let preflight = preflight_compact_memory(
+                    inst.memory(),
+                    warp,
                     schedule,
-                    td.memory_payload_contract(),
+                    inst.pc(),
                     &path,
                     warp_id,
                     record_ix,
                 )?;
-                if inst.function_unique_id != expected_fuid {
+                if inst.function_unique_id() != expected_fuid {
                     return Err(ReplayError::MultiFunctionUnsupported {
                         path,
                         warp_id,
                         record_ix,
                         expected: expected_fuid,
-                        found: inst.function_unique_id,
+                        found: inst.function_unique_id(),
                     });
                 }
-                if let Some(preflight) = preflight {
-                    check_preflighted_allocation_identity(
-                        preflight.memory,
-                        td.allocations(),
-                        || format!("{} warp={warp_id} inst={record_ix}", path.display()),
-                    )?;
-                }
-                if let Some(sm) = inst.sm_id {
+                if let Some(sm) = inst.sm_id() {
                     match block_sm {
                         None => block_sm = Some(sm),
                         Some(first) if first != sm => {
@@ -1273,7 +1302,7 @@ fn extract_per_sm_blocks(
                         Some(_) => {}
                     }
                 }
-                if let Some(slot) = inst.warpid_sm {
+                if let Some(slot) = inst.warpid_sm() {
                     match warp_slot {
                         None => warp_slot = Some(slot),
                         Some(first) if first != slot => {
@@ -1288,20 +1317,31 @@ fn extract_per_sm_blocks(
                     }
                 }
                 let kind = if decode_sectors {
-                    classify_with_l1_preflighted(
+                    classify_compact_with_l1(
                         preflight,
+                        warp,
                         schedule,
                         schedule.arch,
                         &mut sectors,
-                        &mut sector_scratch,
                         &path,
                         warp_id,
                         record_ix,
                     )?
                 } else {
-                    classify_flat_preflighted(preflight, schedule, schedule.arch)?
+                    classify_compact_flat(
+                        preflight,
+                        warp,
+                        schedule,
+                        schedule.arch,
+                        &path,
+                        warp_id,
+                        record_ix,
+                    )?
                 };
-                insts.push(ReplayInst { pc: inst.pc, kind });
+                insts.push(ReplayInst {
+                    pc: inst.pc(),
+                    kind,
+                });
             }
             // Fail-closed traced placement: every roster warp must expose its
             // physical slot. An empty warp has no placement witness and cannot be
@@ -1726,6 +1766,26 @@ fn validate_replay_architecture(
     ReplayConfiguration::checked(*params, mode)
 }
 
+fn legacy_async_copy_sms(
+    payload_contract: MemoryPayloadContract,
+    per_sm_blocks: &BTreeMap<i32, Vec<BlockReplay>>,
+) -> BTreeSet<i32> {
+    if payload_contract != MemoryPayloadContract::LegacyExclusion {
+        return BTreeSet::new();
+    }
+    per_sm_blocks
+        .iter()
+        .filter_map(|(&sm, blocks)| {
+            blocks
+                .iter()
+                .flat_map(|block| &block.warps)
+                .flat_map(|warp| &warp.insts)
+                .any(|inst| matches!(inst.kind, AccessKind::GlobalAsyncCopy { .. }))
+                .then_some(sm)
+        })
+        .collect()
+}
+
 fn replay_kernel_with_schedule(
     td: &TraceDir,
     loc: &KernelLoc<'_>,
@@ -1744,6 +1804,7 @@ fn replay_kernel_with_schedule(
         coverage,
         shared_memory_residency,
     } = extract_per_sm_blocks(td, loc, schedule, placement, decode_sectors)?;
+    let legacy_async_copy_sms = legacy_async_copy_sms(td.memory_payload_contract(), &per_sm_blocks);
     let replay = match mode {
         ReplayMemMode::Flat | ReplayMemMode::L1Const(_) => {
             let l1_config = match mode {
@@ -1752,16 +1813,17 @@ fn replay_kernel_with_schedule(
             };
             let mut per_sm = BTreeMap::new();
             for (sm, blocks) in &per_sm_blocks {
-                per_sm.insert(
-                    *sm,
-                    simulate_sm_with_residency(
-                        blocks,
-                        schedule,
-                        params,
-                        shared_memory_residency,
-                        l1_config,
-                    )?,
-                );
+                let mut result = simulate_sm_with_residency(
+                    blocks,
+                    schedule,
+                    params,
+                    shared_memory_residency,
+                    l1_config,
+                )?;
+                if legacy_async_copy_sms.contains(sm) {
+                    result.unmodeled_tails.ldgsts_dst_shared_timing = true;
+                }
+                per_sm.insert(*sm, result);
             }
             fold_kernel_result(
                 schedule.arch,
@@ -1774,7 +1836,7 @@ fn replay_kernel_with_schedule(
         }
         ReplayMemMode::L1SharedL2 { l1, l2, dram } => {
             let mut l2 = L2Model::new(l2)?;
-            let sys = simulate_kernel_shared_with_residency(
+            let mut sys = simulate_kernel_shared_with_residency(
                 &per_sm_blocks,
                 schedule,
                 params,
@@ -1783,6 +1845,14 @@ fn replay_kernel_with_schedule(
                 &mut l2,
                 dram,
             )?;
+            for sm in &legacy_async_copy_sms {
+                if let Some(result) = sys.per_sm.get_mut(sm) {
+                    result.unmodeled_tails.ldgsts_dst_shared_timing = true;
+                }
+            }
+            if !legacy_async_copy_sms.is_empty() {
+                sys.unmodeled_tails.ldgsts_dst_shared_timing = true;
+            }
             require_replay_arch(schedule.arch, sys.arch, "system result")?;
             let system_unmodeled_tails = sys.unmodeled_tails;
             let replay = fold_kernel_result(
@@ -1903,6 +1973,21 @@ fn require_sm86_special_role(
     }
 }
 
+fn require_ldgsts_l1_policy(
+    schedule: &FunctionSchedule,
+    arch: ArchId,
+    pc: u32,
+) -> Result<LdgstsL1Policy, ReplayError> {
+    schedule
+        .by_pc
+        .get(&u64::from(pc))
+        .and_then(|slot| slot.ldgsts_l1_policy)
+        .ok_or(ReplayError::UnsupportedMemoryPath {
+            arch,
+            class: pb::MemoryOpClass::AsyncCopy,
+        })
+}
+
 /// Return the schedule's memory role while rejecting a dynamic global record
 /// whose static sidecar opcode is neither classified nor one of the deliberate
 /// untagged load-family heads. A pc absent from the schedule stays neutral here
@@ -1972,6 +2057,7 @@ impl ReplayMemoryRoute {
     }
 }
 
+#[cfg(test)]
 #[derive(Debug, Clone, Copy)]
 struct ReplayMemoryPreflight<'a> {
     memory: PreflightedMemoryAccess<'a>,
@@ -2245,6 +2331,7 @@ fn validate_static_access_kind(
 /// operand shape; capability-empty legacy traces retain the pre-transition
 /// ATOMIC/ASYNC_COPY fallback. GLOBAL retains its documented absent-space
 /// fallback in both generations.
+#[cfg(test)]
 fn replay_memory_route(
     inst: &pb::Instruction,
     class: pb::MemoryOpClass,
@@ -2418,6 +2505,7 @@ fn replay_memory_route(
     }
 }
 
+#[cfg(test)]
 fn preflight_replay_memory<'a>(
     inst: &'a pb::Instruction,
     schedule: &FunctionSchedule,
@@ -2503,7 +2591,7 @@ fn classify_flat_with_contract(
 ) -> Result<AccessKind, ReplayError> {
     let preflight =
         preflight_replay_memory(inst, schedule, payload_contract, path, warp_id, record_ix)?;
-    classify_flat_preflighted(preflight, schedule, arch)
+    classify_flat_preflighted(preflight, schedule, arch, path, warp_id, record_ix)
 }
 
 /// Flat mode validates the same static operation role as hierarchy replay but
@@ -2527,10 +2615,340 @@ fn flat_global_kind(role: MemRole) -> AccessKind {
     }
 }
 
+#[derive(Clone, Copy)]
+struct CompactReplayMemory<'a> {
+    memory: &'a ValidatedMemoryInstruction,
+    route: ReplayMemoryRoute,
+    pc: u32,
+}
+
+fn compact_shared_kind(memory: &ValidatedMemoryInstruction) -> AccessKind {
+    AccessKind::Shared {
+        wavefronts: u64::from(memory.shared_bank_wavefronts_32x4()),
+    }
+}
+
+#[cfg(test)]
+fn preflighted_shared_kind(
+    memory: PreflightedMemoryAccess<'_>,
+    path: &Path,
+    warp_id: i32,
+    record_ix: usize,
+) -> Result<AccessKind, ReplayError> {
+    let mut word_scratch = Vec::new();
+    let wavefronts =
+        project_shared_bank_wavefronts_32x4(memory, &mut word_scratch).map_err(|source| {
+            ReplayError::SharedBankProjection {
+                path: path.to_path_buf(),
+                warp_id,
+                record_ix,
+                source,
+            }
+        })?;
+    Ok(AccessKind::Shared {
+        wavefronts: u64::from(wavefronts),
+    })
+}
+
+fn compact_memory_route_error(error: &ValidatedMemoryRouteError) -> MemoryRouteError {
+    match *error {
+        ValidatedMemoryRouteError::GlobalOperandCount { got } => {
+            MemoryRouteError::GlobalOperandCount { got }
+        }
+        ValidatedMemoryRouteError::GlobalSpaceInvalid { operand, space } => {
+            MemoryRouteError::GlobalSpaceInvalid { operand, space }
+        }
+        ValidatedMemoryRouteError::SharedLocalOperandCount { got } => {
+            MemoryRouteError::SharedLocalOperandCount { got }
+        }
+        ValidatedMemoryRouteError::SharedLocalSpaceInvalid { operand, space } => {
+            MemoryRouteError::SharedLocalSpaceInvalid { operand, space }
+        }
+        ValidatedMemoryRouteError::AtomicOperandCount { got } => {
+            MemoryRouteError::AtomicOperandCount { got }
+        }
+        ValidatedMemoryRouteError::AtomicSpaceMissing { operand } => {
+            MemoryRouteError::AtomicSpaceMissing { operand }
+        }
+        ValidatedMemoryRouteError::AtomicSpaceUnspecified { operand } => {
+            MemoryRouteError::AtomicSpaceUnspecified { operand }
+        }
+        ValidatedMemoryRouteError::AtomicSpacesConflict => MemoryRouteError::AtomicSpacesConflict,
+        ValidatedMemoryRouteError::AsyncCopySourceCount { got } => {
+            MemoryRouteError::AsyncCopySourceCount { got }
+        }
+        ValidatedMemoryRouteError::AsyncCopySourceSpaceMissing => {
+            MemoryRouteError::AsyncCopySourceSpaceMissing
+        }
+        ValidatedMemoryRouteError::AsyncCopySourceSpaceInvalid { space } => {
+            MemoryRouteError::AsyncCopySourceSpaceInvalid { space }
+        }
+    }
+}
+
+fn preflight_compact_memory<'a>(
+    memory: Option<&'a ValidatedMemoryInstruction>,
+    warp: &'a ValidatedWarp,
+    schedule: &FunctionSchedule,
+    pc: u32,
+    path: &Path,
+    warp_id: i32,
+    record_ix: usize,
+) -> Result<Option<CompactReplayMemory<'a>>, ReplayError> {
+    let Some(memory) = memory else {
+        return Ok(None);
+    };
+    let meta = memory.replay_meta();
+    let route = match warp.memory_route(memory) {
+        Ok(ValidatedMemoryRoute::Global) => ReplayMemoryRoute::Global,
+        Ok(ValidatedMemoryRoute::Local) => ReplayMemoryRoute::Local,
+        Ok(ValidatedMemoryRoute::Shared) => ReplayMemoryRoute::Shared,
+        Ok(ValidatedMemoryRoute::Unsupported) => ReplayMemoryRoute::Unsupported,
+        Err(error) => {
+            return Err(ReplayError::MemoryRoute {
+                path: path.to_path_buf(),
+                warp_id,
+                record_ix,
+                class: meta.op_class,
+                source: compact_memory_route_error(error),
+            });
+        }
+    };
+    validate_replay_access_kind(meta, path, warp_id, record_ix)?;
+    validate_static_memory_route(meta, route, schedule, pc, path, warp_id, record_ix)?;
+    validate_static_access_kind(meta, schedule, pc, path, warp_id, record_ix)?;
+    Ok(Some(CompactReplayMemory { memory, route, pc }))
+}
+
+fn classify_compact_flat(
+    preflight: Option<CompactReplayMemory<'_>>,
+    warp: &ValidatedWarp,
+    schedule: &FunctionSchedule,
+    arch: ArchId,
+    path: &Path,
+    warp_id: i32,
+    record_ix: usize,
+) -> Result<AccessKind, ReplayError> {
+    let Some(preflight) = preflight else {
+        return Ok(AccessKind::NonMemory);
+    };
+    let meta = preflight.memory.replay_meta();
+    match (preflight.route, meta.op_class) {
+        (ReplayMemoryRoute::Shared, _) => Ok(compact_shared_kind(preflight.memory)),
+        (ReplayMemoryRoute::Local, pb::MemoryOpClass::Local) => Ok(
+            match require_known_local_direction(schedule, arch, preflight.pc)? {
+                Some(LocalDirection::Load) => AccessKind::LocalLoad { off: 0, len: 0 },
+                Some(LocalDirection::Store) => AccessKind::LocalStore { off: 0, len: 0 },
+                None => AccessKind::NonMemory,
+            },
+        ),
+        (ReplayMemoryRoute::Local, class) => {
+            Err(ReplayError::UnsupportedMemoryPath { arch, class })
+        }
+        (ReplayMemoryRoute::Unsupported, class) => {
+            Err(ReplayError::UnsupportedMemoryPath { arch, class })
+        }
+        (ReplayMemoryRoute::Global, pb::MemoryOpClass::Global) => {
+            let role = require_known_global_role(schedule, arch, preflight.pc)?;
+            Ok(flat_global_kind(role))
+        }
+        (ReplayMemoryRoute::Global, pb::MemoryOpClass::Atomic) => {
+            require_sm86_special_role(
+                schedule,
+                arch,
+                preflight.pc,
+                preflight.route,
+                pb::MemoryOpClass::Atomic,
+            )?;
+            let role = require_known_global_role(schedule, arch, preflight.pc)?;
+            Ok(flat_global_kind(role))
+        }
+        (ReplayMemoryRoute::Global, pb::MemoryOpClass::AsyncCopy) => {
+            require_sm86_special_role(
+                schedule,
+                arch,
+                preflight.pc,
+                preflight.route,
+                pb::MemoryOpClass::AsyncCopy,
+            )?;
+            require_known_global_role(schedule, arch, preflight.pc)?;
+            let l1_policy = require_ldgsts_l1_policy(schedule, arch, preflight.pc)?;
+            let source_active = match warp.sector_plan(preflight.memory) {
+                ValidatedSectorPlan::Sectors(sectors) => !sectors.is_empty(),
+                ValidatedSectorPlan::Error { error, .. } => {
+                    return Err(deferred_sector_error(error, path, warp_id, record_ix));
+                }
+            };
+            let payload_bytes = warp.effective_data_bytes(preflight.memory);
+            if source_active != (payload_bytes != 0) {
+                return Err(ReplayError::AsyncCopyPayloadMismatch {
+                    path: path.to_path_buf(),
+                    warp_id,
+                    record_ix,
+                    source_active,
+                    sectors: usize::from(source_active),
+                    payload_bytes,
+                });
+            }
+            let payload_bytes = narrow_async_copy_payload(payload_bytes, path, warp_id, record_ix)?;
+            Ok(AccessKind::GlobalAsyncCopy {
+                off: 0,
+                len: 0,
+                payload_bytes,
+                l1_policy,
+            })
+        }
+        (ReplayMemoryRoute::Global, class) => {
+            Err(ReplayError::UnsupportedMemoryPath { arch, class })
+        }
+    }
+}
+
+fn deferred_sector_error(
+    error: &ValidatedSectorError,
+    path: &Path,
+    warp_id: i32,
+    record_ix: usize,
+) -> ReplayError {
+    if let ValidatedSectorError::SectorCountOverflow { sectors } = *error {
+        return ReplayError::SectorCountOverflow {
+            path: path.to_path_buf(),
+            warp_id,
+            record_ix,
+            sectors,
+        };
+    }
+    let source = match *error {
+        ValidatedSectorError::DataWidthInvalid { data_width_bytes } => {
+            SectorExpansionError::DataWidthInvalid { data_width_bytes }
+        }
+        ValidatedSectorError::AddressOverflow {
+            lane,
+            base,
+            data_width_bytes,
+        } => SectorExpansionError::AddressOverflow {
+            lane,
+            base,
+            data_width_bytes,
+        },
+        ValidatedSectorError::UniqueSectorCountOutOfRange { sectors } => {
+            SectorExpansionError::UniqueSectorCountOutOfRange { sectors }
+        }
+        ValidatedSectorError::CardinalityMismatch { expected, produced } => {
+            SectorExpansionError::CardinalityMismatch { expected, produced }
+        }
+        ValidatedSectorError::CapacityUnavailable { buffer, additional } => {
+            SectorExpansionError::CapacityUnavailable { buffer, additional }
+        }
+        ValidatedSectorError::SectorCountOverflow { .. } => unreachable!("handled above"),
+    };
+    ReplayError::SectorExpansion {
+        path: path.to_path_buf(),
+        warp_id,
+        record_ix,
+        source,
+    }
+}
+
+fn classify_compact_with_l1(
+    preflight: Option<CompactReplayMemory<'_>>,
+    warp: &ValidatedWarp,
+    schedule: &FunctionSchedule,
+    arch: ArchId,
+    sectors: &mut Vec<i64>,
+    path: &Path,
+    warp_id: i32,
+    record_ix: usize,
+) -> Result<AccessKind, ReplayError> {
+    let Some(preflight) = preflight else {
+        return Ok(AccessKind::NonMemory);
+    };
+    let meta = preflight.memory.replay_meta();
+    let sector_plan = warp.sector_plan(preflight.memory);
+    if let ValidatedSectorPlan::Error {
+        phase: ValidatedSectorErrorPhase::BeforeStaticRole,
+        error,
+    } = sector_plan
+    {
+        return Err(deferred_sector_error(error, path, warp_id, record_ix));
+    }
+
+    enum StagedHierarchyRole {
+        Global(MemRole),
+        Local(LocalDirection),
+    }
+    let staged_role = match (preflight.route, meta.op_class) {
+        (ReplayMemoryRoute::Shared, _) => {
+            return Ok(compact_shared_kind(preflight.memory));
+        }
+        (ReplayMemoryRoute::Unsupported, class) => {
+            return Err(ReplayError::UnsupportedMemoryPath { arch, class });
+        }
+        (ReplayMemoryRoute::Local, pb::MemoryOpClass::Local) => {
+            let Some(direction) = require_known_local_direction(schedule, arch, preflight.pc)?
+            else {
+                return Ok(AccessKind::NonMemory);
+            };
+            StagedHierarchyRole::Local(direction)
+        }
+        (ReplayMemoryRoute::Local, class) => {
+            return Err(ReplayError::UnsupportedMemoryPath { arch, class });
+        }
+        (ReplayMemoryRoute::Global, pb::MemoryOpClass::Global) => {
+            StagedHierarchyRole::Global(require_known_global_role(schedule, arch, preflight.pc)?)
+        }
+        (
+            ReplayMemoryRoute::Global,
+            class @ (pb::MemoryOpClass::Atomic | pb::MemoryOpClass::AsyncCopy),
+        ) => {
+            require_sm86_special_role(schedule, arch, preflight.pc, preflight.route, class)?;
+            StagedHierarchyRole::Global(require_known_global_role(schedule, arch, preflight.pc)?)
+        }
+        (ReplayMemoryRoute::Global, class) => {
+            return Err(ReplayError::UnsupportedMemoryPath { arch, class });
+        }
+    };
+    let staged = match sector_plan {
+        ValidatedSectorPlan::Sectors(staged) => staged,
+        ValidatedSectorPlan::Error {
+            phase: ValidatedSectorErrorPhase::AfterStaticRole,
+            error,
+        } => return Err(deferred_sector_error(error, path, warp_id, record_ix)),
+        ValidatedSectorPlan::Error {
+            phase: ValidatedSectorErrorPhase::BeforeStaticRole,
+            ..
+        } => unreachable!("handled above"),
+    };
+    match staged_role {
+        StagedHierarchyRole::Global(_role) if meta.op_class == pb::MemoryOpClass::AsyncCopy => {
+            let l1_policy = require_ldgsts_l1_policy(schedule, arch, preflight.pc)?;
+            append_staged_async_copy_sectors(
+                l1_policy,
+                warp.effective_data_bytes(preflight.memory),
+                sectors,
+                staged,
+                path,
+                warp_id,
+                record_ix,
+            )
+        }
+        StagedHierarchyRole::Global(role) => {
+            append_staged_global_sectors(role, sectors, staged, path, warp_id, record_ix)
+        }
+        StagedHierarchyRole::Local(direction) => {
+            append_staged_local_sectors(direction, sectors, staged, path, warp_id, record_ix)
+        }
+    }
+}
+
+#[cfg(test)]
 fn classify_flat_preflighted(
     preflight: Option<ReplayMemoryPreflight<'_>>,
     schedule: &FunctionSchedule,
     arch: ArchId,
+    path: &Path,
+    warp_id: i32,
+    record_ix: usize,
 ) -> Result<AccessKind, ReplayError> {
     let Some(preflight) = preflight else {
         return Ok(AccessKind::NonMemory);
@@ -2538,7 +2956,9 @@ fn classify_flat_preflighted(
     let inst = preflight.memory.instruction();
     let meta = preflight.memory.meta();
     match (preflight.route, meta.op_class) {
-        (ReplayMemoryRoute::Shared, _) => Ok(AccessKind::Shared),
+        (ReplayMemoryRoute::Shared, _) => {
+            preflighted_shared_kind(preflight.memory, path, warp_id, record_ix)
+        }
         (ReplayMemoryRoute::Local, pb::MemoryOpClass::Local) => Ok(
             match require_known_local_direction(schedule, arch, inst.pc)? {
                 Some(LocalDirection::Load) => AccessKind::LocalLoad { off: 0, len: 0 },
@@ -2556,13 +2976,54 @@ fn classify_flat_preflighted(
             let role = require_known_global_role(schedule, arch, inst.pc)?;
             Ok(flat_global_kind(role))
         }
-        (
-            ReplayMemoryRoute::Global,
-            class @ (pb::MemoryOpClass::Atomic | pb::MemoryOpClass::AsyncCopy),
-        ) => {
-            require_sm86_special_role(schedule, arch, inst.pc, preflight.route, class)?;
+        (ReplayMemoryRoute::Global, pb::MemoryOpClass::Atomic) => {
+            require_sm86_special_role(
+                schedule,
+                arch,
+                inst.pc,
+                preflight.route,
+                pb::MemoryOpClass::Atomic,
+            )?;
             let role = require_known_global_role(schedule, arch, inst.pc)?;
             Ok(flat_global_kind(role))
+        }
+        (ReplayMemoryRoute::Global, pb::MemoryOpClass::AsyncCopy) => {
+            require_sm86_special_role(
+                schedule,
+                arch,
+                inst.pc,
+                preflight.route,
+                pb::MemoryOpClass::AsyncCopy,
+            )?;
+            require_known_global_role(schedule, arch, inst.pc)?;
+            let l1_policy = require_ldgsts_l1_policy(schedule, arch, inst.pc)?;
+            let source_active = meta.and_mask != 0 && !inst.addresses.is_empty();
+            let payload_bytes =
+                project_effective_data_bytes(preflight.memory).map_err(|source| {
+                    ReplayError::EffectiveDataBytes {
+                        path: path.to_path_buf(),
+                        warp_id,
+                        record_ix,
+                        source,
+                    }
+                })?;
+            if source_active != (payload_bytes != 0) {
+                return Err(ReplayError::AsyncCopyPayloadMismatch {
+                    path: path.to_path_buf(),
+                    warp_id,
+                    record_ix,
+                    source_active,
+                    sectors: usize::from(source_active),
+                    payload_bytes,
+                });
+            }
+            let payload_bytes = narrow_async_copy_payload(payload_bytes, path, warp_id, record_ix)?;
+            Ok(AccessKind::GlobalAsyncCopy {
+                off: 0,
+                len: 0,
+                payload_bytes,
+                l1_policy,
+            })
         }
         (ReplayMemoryRoute::Global, class) => {
             Err(ReplayError::UnsupportedMemoryPath { arch, class })
@@ -2587,6 +3048,37 @@ fn checked_staged_global_kind(role: MemRole, start: usize, count: usize) -> Opti
         MemRole::Store => AccessKind::GlobalStore { off: start, len },
         MemRole::Reduction => AccessKind::GlobalReduction { off: start, len },
         MemRole::None => AccessKind::GlobalUntagged { off: start, len },
+    })
+}
+
+fn narrow_async_copy_payload(
+    payload_bytes: u64,
+    path: &Path,
+    warp_id: i32,
+    record_ix: usize,
+) -> Result<u32, ReplayError> {
+    u32::try_from(payload_bytes).map_err(|_| ReplayError::AsyncCopyPayloadOutOfRange {
+        path: path.to_path_buf(),
+        warp_id,
+        record_ix,
+        payload_bytes,
+        max_payload_bytes: u32::MAX,
+    })
+}
+
+fn checked_staged_async_copy_kind(
+    l1_policy: LdgstsL1Policy,
+    start: usize,
+    count: usize,
+    payload_bytes: u32,
+) -> Option<AccessKind> {
+    let len = u16::try_from(count).ok()?;
+    start.checked_add(count)?;
+    Some(AccessKind::GlobalAsyncCopy {
+        off: start,
+        len,
+        payload_bytes,
+        l1_policy,
     })
 }
 
@@ -2647,6 +3139,39 @@ fn append_staged_global_sectors(
     let start = sectors.len();
     append_staged_sectors(
         checked_staged_global_kind(role, start, sector_scratch.len()),
+        sectors,
+        sector_scratch,
+        path,
+        warp_id,
+        record_ix,
+    )
+}
+
+fn append_staged_async_copy_sectors(
+    l1_policy: LdgstsL1Policy,
+    payload_bytes: u64,
+    sectors: &mut Vec<i64>,
+    sector_scratch: &[i64],
+    path: &Path,
+    warp_id: i32,
+    record_ix: usize,
+) -> Result<AccessKind, ReplayError> {
+    let start = sectors.len();
+    let count = sector_scratch.len();
+    let source_active = count != 0;
+    if source_active != (payload_bytes != 0) {
+        return Err(ReplayError::AsyncCopyPayloadMismatch {
+            path: path.to_path_buf(),
+            warp_id,
+            record_ix,
+            source_active,
+            sectors: count,
+            payload_bytes,
+        });
+    }
+    let payload_bytes = narrow_async_copy_payload(payload_bytes, path, warp_id, record_ix)?;
+    append_staged_sectors(
+        checked_staged_async_copy_kind(l1_policy, start, count, payload_bytes),
         sectors,
         sector_scratch,
         path,
@@ -2729,6 +3254,7 @@ fn classify_with_l1_with_contract(
     )
 }
 
+#[cfg(test)]
 fn classify_with_l1_preflighted(
     preflight: Option<ReplayMemoryPreflight<'_>>,
     schedule: &FunctionSchedule,
@@ -2778,7 +3304,9 @@ fn classify_with_l1_preflighted(
     }
 
     let staged_role = match (preflight.route, meta.op_class) {
-        (ReplayMemoryRoute::Shared, _) => return Ok(AccessKind::Shared),
+        (ReplayMemoryRoute::Shared, _) => {
+            return preflighted_shared_kind(preflight.memory, path, warp_id, record_ix);
+        }
         (ReplayMemoryRoute::Unsupported, class) => {
             return Err(ReplayError::UnsupportedMemoryPath { arch, class });
         }
@@ -2837,6 +3365,26 @@ fn classify_with_l1_preflighted(
             source,
         })?;
     match staged_role {
+        StagedHierarchyRole::Global(_role) if meta.op_class == pb::MemoryOpClass::AsyncCopy => {
+            let payload_bytes =
+                project_effective_data_bytes(preflight.memory).map_err(|source| {
+                    ReplayError::EffectiveDataBytes {
+                        path: path.to_path_buf(),
+                        warp_id,
+                        record_ix,
+                        source,
+                    }
+                })?;
+            append_staged_async_copy_sectors(
+                require_ldgsts_l1_policy(schedule, arch, inst.pc)?,
+                payload_bytes,
+                sectors,
+                sector_scratch,
+                path,
+                warp_id,
+                record_ix,
+            )
+        }
         StagedHierarchyRole::Global(role) => {
             append_staged_global_sectors(role, sectors, sector_scratch, path, warp_id, record_ix)
         }
@@ -3067,7 +3615,7 @@ mod aggregation_tests {
 mod space_routing_tests {
     use super::*;
     use crate::control_bits::ControlBits;
-    use crate::program::{FunctionSchedule, IssueSlot, OpClass};
+    use crate::program::{FunctionSchedule, IssueSlot, OpClass, PipelineClass};
     use std::collections::BTreeMap;
     use std::path::Path;
 
@@ -3160,7 +3708,15 @@ mod space_routing_tests {
                 IssueSlot {
                     control: ControlBits::new(0, false, 7, 7, 0, 0).expect("valid test controls"),
                     op_class: OpClass::Other,
+                    async_copy_wait_max_pending_groups: 0,
+                    pipeline_class: PipelineClass::DispatchOnly,
                     mem_role: role,
+                    ldgsts_l1_policy: matches!(role, MemRole::BypassLoad(CacheOpToken::Ldgsts))
+                        .then_some(if opcode_text.split('.').any(|part| part == "BYPASS") {
+                            LdgstsL1Policy::BypassL1
+                        } else {
+                            LdgstsL1Policy::CacheAtAllLevels
+                        }),
                     opcode_text: opcode_text.into(),
                 },
             )]),
@@ -4340,7 +4896,7 @@ mod space_routing_tests {
 
         let flat = classify_flat(&inst, &sched, sched.arch, Path::new("zero_shared.pb"), 0, 0)
             .expect("zero-active class-only SHARED retains its legacy route");
-        assert!(matches!(flat, AccessKind::Shared));
+        assert!(matches!(flat, AccessKind::Shared { .. }));
 
         let mut sectors = vec![26];
         let mut sector_scratch = vec![99];
@@ -4355,7 +4911,7 @@ mod space_routing_tests {
             0,
         )
         .expect("zero-active class-only SHARED retains its L1 route");
-        assert!(matches!(l1, AccessKind::Shared));
+        assert!(matches!(l1, AccessKind::Shared { .. }));
         assert_eq!(sectors, vec![26]);
         assert!(sector_scratch.is_empty());
     }
@@ -4588,7 +5144,7 @@ mod space_routing_tests {
 
         let flat = classify_flat(&inst, &sched, sched.arch, Path::new("zero.pb"), 0, 0)
             .expect("zero-active shared atomic has an implemented flat route");
-        assert!(matches!(flat, AccessKind::Shared));
+        assert!(matches!(flat, AccessKind::Shared { .. }));
 
         let mut sectors = vec![23];
         let mut sector_scratch = vec![99];
@@ -4603,7 +5159,7 @@ mod space_routing_tests {
             0,
         )
         .expect("zero-active shared atomic has the same L1 route");
-        assert!(matches!(l1, AccessKind::Shared));
+        assert!(matches!(l1, AccessKind::Shared { .. }));
         assert_eq!(sectors, vec![23]);
         assert!(sector_scratch.is_empty());
     }
@@ -5117,7 +5673,7 @@ mod space_routing_tests {
 
         assert!(matches!(
             classify_flat(&inst, &sched, sched.arch, Path::new("stsm.pb"), 0, 0),
-            Ok(AccessKind::Shared)
+            Ok(AccessKind::Shared { .. })
         ));
         let mut sectors = vec![16];
         let mut sector_scratch = vec![105];
@@ -5132,7 +5688,7 @@ mod space_routing_tests {
                 0,
                 0,
             ),
-            Ok(AccessKind::Shared)
+            Ok(AccessKind::Shared { .. })
         ));
         assert_eq!(sectors, vec![16]);
         assert!(sector_scratch.is_empty());
@@ -5150,10 +5706,11 @@ mod space_routing_tests {
 
         assert!(matches!(
             classify_flat(&inst, &sched, sched.arch, Path::new("legacy_kind.pb"), 0, 0),
-            Ok(AccessKind::GlobalBypass {
+            Ok(AccessKind::GlobalAsyncCopy {
                 off: 0,
                 len: 0,
-                token: CacheOpToken::Ldgsts,
+                payload_bytes: 4,
+                l1_policy: LdgstsL1Policy::CacheAtAllLevels,
             })
         ));
         let mut sectors = vec![11];
@@ -5169,10 +5726,11 @@ mod space_routing_tests {
                 0,
                 0,
             ),
-            Ok(AccessKind::GlobalBypass {
+            Ok(AccessKind::GlobalAsyncCopy {
                 off: 1,
                 len: 1,
-                token: CacheOpToken::Ldgsts,
+                payload_bytes: 4,
+                l1_policy: LdgstsL1Policy::CacheAtAllLevels,
             })
         ));
         assert_eq!(sectors, vec![11, 0x1000 >> 5]);
@@ -5340,14 +5898,49 @@ mod space_routing_tests {
                 0,
                 0,
             ),
-            Ok(AccessKind::GlobalBypass {
+            Ok(AccessKind::GlobalAsyncCopy {
                 off: 1,
                 len: 0,
-                token: CacheOpToken::Ldgsts,
+                payload_bytes: 0,
+                l1_policy: LdgstsL1Policy::CacheAtAllLevels,
             })
         ));
         assert_eq!(async_sectors, vec![21]);
         assert!(async_scratch.is_empty());
+    }
+
+    #[test]
+    fn async_copy_payload_narrowing_is_typed_and_precedes_arena_mutation() {
+        let path = Path::new("payload_overflow.pb");
+        assert_eq!(
+            narrow_async_copy_payload(u64::from(u32::MAX), path, 3, 7).unwrap(),
+            u32::MAX
+        );
+
+        let mut sectors = vec![11];
+        let sector_scratch = vec![29];
+        let payload_bytes = u64::from(u32::MAX) + 1;
+        let error = append_staged_async_copy_sectors(
+            LdgstsL1Policy::CacheAtAllLevels,
+            payload_bytes,
+            &mut sectors,
+            &sector_scratch,
+            path,
+            3,
+            7,
+        )
+        .unwrap_err();
+        assert!(matches!(
+            error,
+            ReplayError::AsyncCopyPayloadOutOfRange {
+                warp_id: 3,
+                record_ix: 7,
+                payload_bytes: got,
+                max_payload_bytes: u32::MAX,
+                ..
+            } if got == payload_bytes
+        ));
+        assert_eq!(sectors, vec![11]);
     }
 
     #[test]
@@ -5363,10 +5956,11 @@ mod space_routing_tests {
             .expect("source-only LDGSTS has an implemented flat route");
         assert!(matches!(
             flat,
-            AccessKind::GlobalBypass {
+            AccessKind::GlobalAsyncCopy {
                 off: 0,
                 len: 0,
-                token: CacheOpToken::Ldgsts,
+                payload_bytes: 4,
+                l1_policy: LdgstsL1Policy::CacheAtAllLevels,
             }
         ));
 
@@ -5385,14 +5979,42 @@ mod space_routing_tests {
         .expect("source-only LDGSTS has an implemented L1 route");
         assert!(matches!(
             l1,
-            AccessKind::GlobalBypass {
+            AccessKind::GlobalAsyncCopy {
                 off: 1,
                 len: 1,
-                token: CacheOpToken::Ldgsts,
+                payload_bytes: 4,
+                l1_policy: LdgstsL1Policy::CacheAtAllLevels,
             }
         ));
         assert_eq!(sectors, vec![29, 0x1000 >> 5]);
         assert_eq!(sector_scratch, vec![0x1000 >> 5]);
+
+        let bypass_sched = schedule(
+            ArchId::Sm86,
+            MemRole::BypassLoad(CacheOpToken::Ldgsts),
+            "LDGSTS.E.BYPASS.128",
+        );
+        let mut bypass_sectors = Vec::new();
+        let mut bypass_scratch = Vec::new();
+        assert!(matches!(
+            classify_with_l1(
+                &inst,
+                &bypass_sched,
+                bypass_sched.arch,
+                &mut bypass_sectors,
+                &mut bypass_scratch,
+                Path::new("bypass_source.pb"),
+                0,
+                0,
+            ),
+            Ok(AccessKind::GlobalAsyncCopy {
+                off: 0,
+                len: 1,
+                payload_bytes: 4,
+                l1_policy: LdgstsL1Policy::BypassL1,
+            })
+        ));
+        assert_eq!(bypass_sectors, vec![0x1000 >> 5]);
     }
 
     #[test]
@@ -5412,10 +6034,11 @@ mod space_routing_tests {
             .expect("zero-active source retains the global route");
         assert!(matches!(
             flat,
-            AccessKind::GlobalBypass {
+            AccessKind::GlobalAsyncCopy {
                 off: 0,
                 len: 0,
-                token: CacheOpToken::Ldgsts,
+                payload_bytes: 0,
+                l1_policy: LdgstsL1Policy::CacheAtAllLevels,
             }
         ));
 
@@ -5434,10 +6057,11 @@ mod space_routing_tests {
         .expect("zero-active source retains the L1 global route");
         assert!(matches!(
             l1,
-            AccessKind::GlobalBypass {
+            AccessKind::GlobalAsyncCopy {
                 off: 1,
                 len: 0,
-                token: CacheOpToken::Ldgsts,
+                payload_bytes: 0,
+                l1_policy: LdgstsL1Policy::CacheAtAllLevels,
             }
         ));
         assert_eq!(sectors, vec![31]);
@@ -5550,7 +6174,7 @@ mod space_routing_tests {
         let mut inst = atomic_inst(Some(pb::MemorySpace::Shared));
         inst.function_unique_id = 1;
         let flat = classify_flat(&inst, &sched, sched.arch, Path::new("t"), 0, 0).unwrap();
-        assert!(matches!(flat, AccessKind::Shared));
+        assert!(matches!(flat, AccessKind::Shared { .. }));
 
         let mut sectors = vec![41];
         let mut sector_scratch = vec![99];
@@ -5565,7 +6189,7 @@ mod space_routing_tests {
             0,
         )
         .unwrap();
-        assert!(matches!(l1, AccessKind::Shared));
+        assert!(matches!(l1, AccessKind::Shared { .. }));
         assert_eq!(sectors, vec![41]);
         assert!(sector_scratch.is_empty());
     }
@@ -5699,10 +6323,11 @@ mod space_routing_tests {
         let k = classify_flat(&inst, &sched, sched.arch, Path::new("t"), 0, 0).unwrap();
         assert!(matches!(
             k,
-            AccessKind::GlobalBypass {
+            AccessKind::GlobalAsyncCopy {
                 off: 0,
                 len: 0,
-                token: CacheOpToken::Ldgsts,
+                payload_bytes: 4,
+                l1_policy: LdgstsL1Policy::CacheAtAllLevels,
             }
         ));
     }
@@ -5791,7 +6416,7 @@ mod replay_identity_tests {
     //! BEFORE replay classification.
     use super::*;
     use crate::control_bits::ControlBits;
-    use crate::program::{FunctionSchedule, IssueSlot, OpClass};
+    use crate::program::{FunctionSchedule, IssueSlot, OpClass, PipelineClass};
     use prost::Message;
     use sim_trace::reader::{
         ADDRESS_CARRYING_TRACE_CONTRACT_ID, SHARED_MEMORY_SPLIT_TRACE_CONTRACT_ID,
@@ -6126,6 +6751,14 @@ mod replay_identity_tests {
         std::fs::write(tb_dir.join("d_0_s_0_k_1_0,0,0.pb"), tb.encode_to_vec()).unwrap();
     }
 
+    fn rewrite_as_legacy_payload(dir: &Path) {
+        let root_path = dir.join("dynamic_trace.pb");
+        let mut root = pb::Trace::decode(std::fs::read(&root_path).unwrap().as_slice()).unwrap();
+        root.trace_contract_id.clear();
+        root.memory_payload_classes.clear();
+        std::fs::write(root_path, root.encode_to_vec()).unwrap();
+    }
+
     fn rewrite_block_warp_roster(
         dir: &std::path::Path,
         block_x: i32,
@@ -6398,7 +7031,10 @@ mod replay_identity_tests {
                 IssueSlot {
                     control: ControlBits::new(0, false, 7, 7, 0, 0).expect("valid test controls"),
                     op_class: OpClass::Other,
+                    async_copy_wait_max_pending_groups: 0,
+                    pipeline_class: PipelineClass::DispatchOnly,
                     mem_role: MemRole::Store,
+                    ldgsts_l1_policy: None,
                     opcode_text: "STG.E [R2.64], R0".into(),
                 },
             )]),
@@ -6431,7 +7067,10 @@ mod replay_identity_tests {
                 IssueSlot {
                     control: ControlBits::new(0, false, 7, 7, 0, 0).expect("valid test controls"),
                     op_class: OpClass::Other,
+                    async_copy_wait_max_pending_groups: 0,
+                    pipeline_class: PipelineClass::DispatchOnly,
                     mem_role: MemRole::Reduction,
+                    ldgsts_l1_policy: None,
                     opcode_text: "RED.E.ADD.STRONG.GPU [R2.64], R0".into(),
                 },
             )]),
@@ -6463,7 +7102,10 @@ mod replay_identity_tests {
                 IssueSlot {
                     control: ControlBits::new(0, false, 7, 7, 0, 0).expect("valid test controls"),
                     op_class: OpClass::Other,
+                    async_copy_wait_max_pending_groups: 0,
+                    pipeline_class: PipelineClass::DispatchOnly,
                     mem_role: MemRole::BypassLoad(CacheOpToken::Atom),
+                    ldgsts_l1_policy: None,
                     opcode_text: "ATOMS.E.ADD".into(),
                 },
             )]),
@@ -6485,17 +7127,194 @@ mod replay_identity_tests {
     }
 
     #[test]
+    fn deferred_sector_failure_survives_compact_snapshot() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut inst = malformed_global_inst(pb::MemoryOpClass::Local);
+        inst.addresses[0].address_space = Some(pb::MemorySpace::Local as i32);
+        inst.addresses[0].allocation_id = None;
+        inst.addresses[0].addrs[0] = i64::MAX;
+        write_trace_with(tmp.path(), inst);
+
+        let td =
+            TraceDir::open_direct(tmp.path()).expect("overflow is deferred to hierarchy replay");
+        let loc = td.kernels().next().unwrap();
+        let error = extract_per_sm_blocks(
+            &td,
+            &loc,
+            &FunctionSchedule {
+                arch: ArchId::Sm86,
+                function_unique_id: 1,
+                kernel_name: "k".into(),
+                function_name: "f".into(),
+                by_pc: StdMap::from([(
+                    16,
+                    IssueSlot {
+                        control: ControlBits::new(0, false, 7, 7, 0, 0)
+                            .expect("valid test controls"),
+                        op_class: OpClass::Other,
+                        async_copy_wait_max_pending_groups: 0,
+                        pipeline_class: PipelineClass::DispatchOnly,
+                        mem_role: MemRole::EligibleLoad(CacheOpToken::Ldl),
+                        ldgsts_l1_policy: None,
+                        opcode_text: "LDL.E".into(),
+                    },
+                )]),
+            },
+            sm86_test_placement(),
+            true,
+        )
+        .unwrap_err();
+        assert!(matches!(
+            error,
+            ReplayError::SectorExpansion {
+                warp_id: 0,
+                record_ix: 0,
+                source: SectorExpansionError::AddressOverflow {
+                    lane: 0,
+                    base: i64::MAX,
+                    data_width_bytes: 4,
+                },
+                ..
+            }
+        ));
+    }
+
+    fn replay_async_copy_tail(mut inst: pb::Instruction, legacy: bool) -> TailFlags {
+        inst.sm_id = Some(0);
+        inst.warpid_sm = Some(0);
+
+        let tmp = tempfile::tempdir().unwrap();
+        write_trace_with(tmp.path(), inst);
+        if legacy {
+            rewrite_as_legacy_payload(tmp.path());
+        }
+
+        let td = TraceDir::open_direct(tmp.path()).expect("async-copy trace opens");
+        assert_eq!(
+            td.memory_payload_contract(),
+            if legacy {
+                MemoryPayloadContract::LegacyExclusion
+            } else {
+                MemoryPayloadContract::AddressCarryingV1
+            }
+        );
+        let loc = td.kernels().next().expect("test kernel exists");
+        let schedules = BTreeMap::from([(
+            1,
+            FunctionSchedule {
+                arch: ArchId::Sm86,
+                function_unique_id: 1,
+                kernel_name: "k".into(),
+                function_name: "f".into(),
+                by_pc: StdMap::from([(
+                    16,
+                    IssueSlot {
+                        control: ControlBits::new(0, false, 7, 7, 0, 0)
+                            .expect("valid test controls"),
+                        op_class: OpClass::Other,
+                        async_copy_wait_max_pending_groups: 0,
+                        pipeline_class: PipelineClass::DispatchOnly,
+                        mem_role: MemRole::BypassLoad(CacheOpToken::Ldgsts),
+                        ldgsts_l1_policy: Some(LdgstsL1Policy::CacheAtAllLevels),
+                        opcode_text: "LDGSTS.E.128 [R1], [R2.64]".into(),
+                    },
+                )]),
+            },
+        )]);
+        let params = IssueModelParams::from_legacy_card_latencies_for_arch(
+            ArchId::Sm86,
+            34.0,
+            244.0,
+            400.0,
+            23.0,
+        )
+        .expect("valid sm_86 test parameters");
+        let outcome = replay_trace_kernel(
+            &td,
+            &loc,
+            &schedules,
+            &sm86_test_card(),
+            &params,
+            ReplayMemMode::Flat,
+        )
+        .expect("async-copy trace replays");
+        match outcome {
+            KernelReplayOutcome::Full(result) => {
+                assert_eq!(result.records_seen(), 1);
+                assert_eq!(result.instructions_issued(), 1);
+                result.unmodeled_tails()
+            }
+            #[cfg(feature = "campaign")]
+            KernelReplayOutcome::SampledObserved(_) => {
+                panic!("complete test trace must produce full coverage")
+            }
+        }
+    }
+
+    #[test]
+    fn current_async_copy_source_clears_folded_visibility_tail() {
+        let inst = bind_test_allocation(malformed_global_inst(pb::MemoryOpClass::AsyncCopy));
+        let tails = replay_async_copy_tail(inst, false);
+        assert_eq!(tails, TailFlags::default());
+    }
+
+    #[test]
+    fn legacy_omitted_async_copy_source_retains_folded_visibility_tail() {
+        let mut inst = malformed_global_inst(pb::MemoryOpClass::AsyncCopy);
+        inst.addresses.clear();
+        let tails = replay_async_copy_tail(inst, true);
+        assert_eq!(
+            tails,
+            TailFlags {
+                ldgsts_dst_shared_timing: true,
+                ..TailFlags::default()
+            }
+        );
+    }
+
+    #[test]
+    fn legacy_route_failure_survives_compact_snapshot() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut inst = malformed_global_inst(pb::MemoryOpClass::Global);
+        inst.addresses.clear();
+        write_trace_with(tmp.path(), inst);
+        rewrite_as_legacy_payload(tmp.path());
+
+        let td =
+            TraceDir::open_direct(tmp.path()).expect("legacy snapshot remains structurally valid");
+        let loc = td.kernels().next().unwrap();
+        let error = extract_per_sm_blocks(
+            &td,
+            &loc,
+            &FunctionSchedule {
+                arch: ArchId::Sm86,
+                function_unique_id: 1,
+                kernel_name: "k".into(),
+                function_name: "f".into(),
+                by_pc: StdMap::new(),
+            },
+            sm86_test_placement(),
+            false,
+        )
+        .unwrap_err();
+        assert!(matches!(
+            error,
+            ReplayError::MemoryRoute {
+                class: pb::MemoryOpClass::Global,
+                source: MemoryRouteError::GlobalOperandCount { got: 0 },
+                ..
+            }
+        ));
+    }
+
+    #[test]
     fn replay_uses_legacy_payload_capability_for_atomic_fallback() {
         let tmp = tempfile::tempdir().unwrap();
         let mut inst = malformed_global_inst(pb::MemoryOpClass::Atomic);
         inst.addresses[0].address_space = None;
         write_trace_with(tmp.path(), inst);
 
-        let root_path = tmp.path().join("dynamic_trace.pb");
-        let mut root = pb::Trace::decode(std::fs::read(&root_path).unwrap().as_slice()).unwrap();
-        root.trace_contract_id.clear();
-        root.memory_payload_classes.clear();
-        std::fs::write(&root_path, root.encode_to_vec()).unwrap();
+        rewrite_as_legacy_payload(tmp.path());
 
         let td = TraceDir::open_direct(tmp.path()).unwrap();
         assert_eq!(
@@ -6513,7 +7332,10 @@ mod replay_identity_tests {
                 IssueSlot {
                     control: ControlBits::new(0, false, 7, 7, 0, 0).expect("valid test controls"),
                     op_class: OpClass::Other,
+                    async_copy_wait_max_pending_groups: 0,
+                    pipeline_class: PipelineClass::DispatchOnly,
                     mem_role: MemRole::BypassLoad(CacheOpToken::Atom),
+                    ldgsts_l1_policy: None,
                     opcode_text: "ATOMG.E.ADD.STRONG.GPU".into(),
                 },
             )]),
@@ -6555,7 +7377,7 @@ mod completeness_tests {
     use super::*;
     use crate::control_bits::ControlBits;
     use crate::issue::IssueResourceSource;
-    use crate::program::{FunctionSchedule, IssueSlot, OpClass};
+    use crate::program::{FunctionSchedule, IssueSlot, OpClass, PipelineClass};
     use prost::Message;
     use std::collections::{BTreeMap as StdMap, BTreeSet as StdSet};
 
@@ -6902,7 +7724,10 @@ mod completeness_tests {
                 IssueSlot {
                     control: ControlBits::new(0, false, 7, 7, 0, 0).unwrap(),
                     op_class: OpClass::Other,
+                    async_copy_wait_max_pending_groups: 0,
+                    pipeline_class: PipelineClass::DispatchOnly,
                     mem_role: MemRole::None,
+                    ldgsts_l1_policy: None,
                     opcode_text: "NOP".into(),
                 },
             )]),
@@ -6914,8 +7739,10 @@ mod completeness_tests {
             l1_miss_latency: 1,
             global_flat_latency: 1,
             shared_write_barrier_latency: 1,
+            shared_additional_wavefront_latency: 2,
             non_memory_write_barrier_latency: 1,
             read_barrier_latency: 1,
+            ldgsts_l1_mshr_floor: std::num::NonZeroU32::new(1).unwrap(),
             max_resident_warps_per_sm: 48,
         };
         replay_kernel_with_schedule(

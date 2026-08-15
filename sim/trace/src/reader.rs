@@ -287,6 +287,18 @@ pub enum TraceError {
         "{record}: data_width={got} is not strictly positive (canonical contract: data_width_invalid)"
     )]
     DataWidthInvalid { record: String, got: i32 },
+    #[error("{record}: effective memory payload-byte projection failed: {source}")]
+    EffectiveDataBytes {
+        record: String,
+        #[source]
+        source: EffectiveDataBytesError,
+    },
+    #[error("{record}: shared-memory 32-bank/4-byte projection failed: {source}")]
+    SharedBankProjection {
+        record: String,
+        #[source]
+        source: SharedBankProjectionError,
+    },
     #[error("{path}: threadblock proto is missing block_id (producer MUST populate it)")]
     BlockIdMissing { path: PathBuf },
     #[error(
@@ -1715,16 +1727,926 @@ fn validate_shared_memory_split(
     Ok(())
 }
 
+/// Dynamic memory route proven from the validated instruction class and operand
+/// spaces. Static SASS routing is still checked by `sim-sm` during replay.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ValidatedMemoryRoute {
+    Global,
+    Local,
+    Shared,
+    Unsupported,
+}
+
+/// Compact, context-free form of dynamic operand-route failures. Replay adds
+/// path/record context and preserves its established typed diagnostics.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ValidatedMemoryRouteError {
+    GlobalOperandCount {
+        got: usize,
+    },
+    GlobalSpaceInvalid {
+        operand: usize,
+        space: pb::MemorySpace,
+    },
+    SharedLocalOperandCount {
+        got: usize,
+    },
+    SharedLocalSpaceInvalid {
+        operand: usize,
+        space: pb::MemorySpace,
+    },
+    AtomicOperandCount {
+        got: usize,
+    },
+    AtomicSpaceMissing {
+        operand: usize,
+    },
+    AtomicSpaceUnspecified {
+        operand: usize,
+    },
+    AtomicSpacesConflict,
+    AsyncCopySourceCount {
+        got: usize,
+    },
+    AsyncCopySourceSpaceMissing,
+    AsyncCopySourceSpaceInvalid {
+        space: pb::MemorySpace,
+    },
+}
+
+#[derive(Debug, Clone, Copy)]
+struct CompactMemoryRoute(u32);
+
+impl CompactMemoryRoute {
+    const GLOBAL: u32 = 0;
+    const ERROR_BASE: u32 = 4;
+
+    const fn ready(route: ValidatedMemoryRoute) -> Self {
+        Self(match route {
+            ValidatedMemoryRoute::Global => Self::GLOBAL,
+            ValidatedMemoryRoute::Local => 1,
+            ValidatedMemoryRoute::Shared => 2,
+            ValidatedMemoryRoute::Unsupported => 3,
+        })
+    }
+
+    fn error(index: usize) -> Self {
+        let index = u32::try_from(index)
+            .unwrap_or_else(|_| unreachable!("validated route error arena exceeded u32"));
+        Self(
+            index
+                .checked_add(Self::ERROR_BASE)
+                .unwrap_or_else(|| unreachable!("validated route error index overflowed")),
+        )
+    }
+}
+
+/// Packed memory-route and protobuf-enum metadata. The wire preflight limits one
+/// threadblock to 1,000,000 instructions, so a route-error arena index plus the
+/// four ready-route discriminants fits in 20 bits. Packing the two small closed
+/// enums into the remaining bits keeps each compact memory record within 24
+/// bytes; exact u64 async payloads live in the sparse owning-warp arena.
+#[derive(Debug, Clone, Copy)]
+struct CompactMemoryMeta(u32);
+
+impl CompactMemoryMeta {
+    const ROUTE_BITS: u32 = 20;
+    const ROUTE_MASK: u32 = (1 << Self::ROUTE_BITS) - 1;
+    const CLASS_SHIFT: u32 = Self::ROUTE_BITS;
+    const CLASS_MASK: u32 = 0xf;
+    const ACCESS_SHIFT: u32 = Self::CLASS_SHIFT + 4;
+    const ACCESS_MASK: u32 = 0x7;
+
+    fn new(
+        op_class: pb::MemoryOpClass,
+        access_kind: Option<pb::MemoryOpAccessKind>,
+        route: CompactMemoryRoute,
+    ) -> Self {
+        if route.0 > Self::ROUTE_MASK {
+            unreachable!("bounded route-error arena exceeded compact encoding");
+        }
+        let access = access_kind.map_or(0, |kind| kind as u32 + 1);
+        debug_assert!((op_class as u32) <= Self::CLASS_MASK);
+        debug_assert!(access <= Self::ACCESS_MASK);
+        Self(route.0 | ((op_class as u32) << Self::CLASS_SHIFT) | (access << Self::ACCESS_SHIFT))
+    }
+
+    const fn route(self) -> CompactMemoryRoute {
+        CompactMemoryRoute(self.0 & Self::ROUTE_MASK)
+    }
+
+    fn op_class(self) -> pb::MemoryOpClass {
+        let encoded = ((self.0 >> Self::CLASS_SHIFT) & Self::CLASS_MASK) as i32;
+        pb::MemoryOpClass::try_from(encoded)
+            .unwrap_or_else(|_| unreachable!("validated memory class escaped compact encoding"))
+    }
+
+    fn access_kind(self) -> Option<pb::MemoryOpAccessKind> {
+        let encoded = (self.0 >> Self::ACCESS_SHIFT) & Self::ACCESS_MASK;
+        if encoded == 0 {
+            return None;
+        }
+        pb::MemoryOpAccessKind::try_from((encoded - 1) as i32)
+            .map(Some)
+            .unwrap_or_else(|_| unreachable!("validated access kind escaped compact encoding"))
+    }
+}
+
+/// Stage at which deferred sector expansion would have failed in the replay
+/// classifier. Retaining the stage preserves its diagnostic precedence relative
+/// to static SASS role checks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ValidatedSectorErrorPhase {
+    BeforeStaticRole,
+    AfterStaticRole,
+}
+
+/// Failure while reducing active lane widths to exact effective payload bytes.
+#[derive(Debug, thiserror::Error, Clone, PartialEq, Eq)]
+pub enum EffectiveDataBytesError {
+    #[error("effective memory payload byte count overflows u64")]
+    Overflow,
+}
+
+/// Failure while reducing explicit shared addresses to the bounded projection
+/// used by the sm_86 bank model. This is an implementation resource boundary,
+/// not a wire-contract reinterpretation.
+#[derive(Debug, thiserror::Error, Clone, PartialEq, Eq)]
+pub enum SharedBankProjectionError {
+    #[error(
+        "lane {lane} spans {words} 4-byte words, exceeding the per-lane projection limit {limit}"
+    )]
+    LaneWordLimit { lane: usize, words: u64, limit: u64 },
+    #[error(
+        "instruction projects {words} 4-byte words, exceeding the per-instruction limit {limit}"
+    )]
+    InstructionWordLimit { words: u64, limit: u64 },
+    #[error("projection scratch could not reserve {additional} additional words")]
+    CapacityUnavailable { additional: usize },
+    #[error("bank {bank} wavefront count overflowed u64")]
+    CountOverflow { bank: u8 },
+}
+
+/// Compact, context-free form of a sector-expansion failure. Replay restores the
+/// path/warp/instruction context when this deferred error is observed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ValidatedSectorError {
+    DataWidthInvalid {
+        data_width_bytes: i32,
+    },
+    AddressOverflow {
+        lane: usize,
+        base: i64,
+        data_width_bytes: i32,
+    },
+    SectorCountOverflow {
+        sectors: usize,
+    },
+    UniqueSectorCountOutOfRange {
+        sectors: u128,
+    },
+    CardinalityMismatch {
+        expected: usize,
+        produced: usize,
+    },
+    CapacityUnavailable {
+        buffer: &'static str,
+        additional: usize,
+    },
+}
+
+#[derive(Debug, Clone, Copy)]
+struct CompactSectorPlan {
+    offset_or_error: usize,
+    len: u16,
+    error_phase: u8,
+}
+
+impl CompactSectorPlan {
+    const READY: u8 = 0;
+    const BEFORE_STATIC_ROLE: u8 = 1;
+    const AFTER_STATIC_ROLE: u8 = 2;
+
+    const fn ready(start: usize, len: u16) -> Self {
+        Self {
+            offset_or_error: start,
+            len,
+            error_phase: Self::READY,
+        }
+    }
+
+    const fn error(phase: ValidatedSectorErrorPhase, index: usize) -> Self {
+        Self {
+            offset_or_error: index,
+            len: 0,
+            error_phase: match phase {
+                ValidatedSectorErrorPhase::BeforeStaticRole => Self::BEFORE_STATIC_ROLE,
+                ValidatedSectorErrorPhase::AfterStaticRole => Self::AFTER_STATIC_ROLE,
+            },
+        }
+    }
+}
+
+/// Borrowed sector payload or deferred expansion failure for one validated
+/// memory instruction.
+#[derive(Debug, Clone, Copy)]
+pub enum ValidatedSectorPlan<'a> {
+    Sectors(&'a [i64]),
+    Error {
+        phase: ValidatedSectorErrorPhase,
+        error: &'a ValidatedSectorError,
+    },
+}
+
+/// Compact memory metadata retained after the full Prost tree has been
+/// validated and discarded. `projection` is route-disjoint: it stores a shared
+/// bank-wavefront count for Shared records or an index into the owning warp's
+/// sparse exact-payload arena for Global async-copy records.
+pub struct ValidatedMemoryInstruction {
+    sectors: CompactSectorPlan,
+    projection: u32,
+    meta: CompactMemoryMeta,
+}
+
+impl ValidatedMemoryInstruction {
+    /// Reconstruct only the metadata replay still consumes. Cache-op and mask
+    /// fields were validated before compaction but need not remain resident.
+    pub fn replay_meta(&self) -> MemoryAccessMeta {
+        MemoryAccessMeta {
+            op_class: self.meta.op_class(),
+            access_kind: self.meta.access_kind(),
+            cache_op: None,
+            and_mask: 0,
+        }
+    }
+
+    /// Maximum distinct 4-byte words targeting one of 32 banks after collapsing
+    /// broadcasts. Zero means the record had no effective shared address.
+    /// Architecture timing must explicitly admit this named projection before
+    /// interpreting it as hardware wavefronts. Callers resolve the record's
+    /// Shared route before reading this route-disjoint projection.
+    pub const fn shared_bank_wavefronts_32x4(&self) -> u32 {
+        self.projection
+    }
+}
+
+/// Compact immutable threadblock produced by the full payload validation walk.
+pub struct ValidatedThreadblock {
+    launch_index: i64,
+    warps: Vec<ValidatedWarp>,
+}
+
+impl ValidatedThreadblock {
+    fn from_message(
+        launch_index: i64,
+        threadblock: pb::Threadblock,
+        payload_contract: MemoryPayloadContract,
+        label: &str,
+    ) -> Result<Self, TraceError> {
+        let warps = threadblock
+            .warps
+            .into_iter()
+            .map(|(map_key, warp)| {
+                ValidatedWarp::from_message(map_key, warp, payload_contract, label)
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(Self {
+            launch_index,
+            warps,
+        })
+    }
+
+    pub const fn launch_index(&self) -> i64 {
+        self.launch_index
+    }
+
+    pub fn warps(&self) -> &[ValidatedWarp] {
+        &self.warps
+    }
+}
+
+/// One validated warp in protobuf map-key order.
+pub struct ValidatedWarp {
+    map_key: i32,
+    warp_id: i32,
+    instructions: Vec<ValidatedInstruction>,
+    memories: Vec<ValidatedMemoryInstruction>,
+    async_payload_bytes: Vec<u64>,
+    route_errors: Vec<ValidatedMemoryRouteError>,
+    sectors: Vec<i64>,
+    sector_errors: Vec<ValidatedSectorError>,
+}
+
+impl ValidatedWarp {
+    fn from_message(
+        map_key: i32,
+        warp: pb::Warp,
+        payload_contract: MemoryPayloadContract,
+        label: &str,
+    ) -> Result<Self, TraceError> {
+        let mut instructions = Vec::with_capacity(warp.instructions.len());
+        let mut memories = Vec::new();
+        let mut async_payload_bytes = Vec::new();
+        let mut route_errors = Vec::new();
+        let mut sectors = Vec::new();
+        let mut sector_errors = Vec::new();
+        let mut shared_word_scratch = Vec::new();
+        for (record_ix, instruction) in warp.instructions.into_iter().enumerate() {
+            let memory_index = if instruction.memory_op_class.is_some() {
+                let no_error_context = || String::new();
+                let preflight = match preflight_memory_access(&instruction, no_error_context) {
+                    Ok(Some(preflight)) => preflight,
+                    Ok(None) | Err(_) => {
+                        unreachable!("validated memory instruction failed compact preflight")
+                    }
+                };
+                let meta = preflight.meta();
+                let resolved_route = compact_memory_route(
+                    &instruction,
+                    meta.op_class,
+                    payload_contract,
+                    meta.and_mask,
+                );
+                let shared_bank_wavefronts_32x4 =
+                    if matches!(resolved_route, Ok(ValidatedMemoryRoute::Shared)) {
+                        project_shared_bank_wavefronts_32x4(preflight, &mut shared_word_scratch)
+                            .map_err(|source| TraceError::SharedBankProjection {
+                                record: format!("{label} warp={map_key} inst={record_ix}"),
+                                source,
+                            })?
+                    } else {
+                        0
+                    };
+                let effective_data_bytes = if meta.op_class == pb::MemoryOpClass::AsyncCopy
+                    && matches!(resolved_route, Ok(ValidatedMemoryRoute::Global))
+                {
+                    project_effective_data_bytes(preflight).map_err(|source| {
+                        TraceError::EffectiveDataBytes {
+                            record: format!("{label} warp={map_key} inst={record_ix}"),
+                            source,
+                        }
+                    })?
+                } else {
+                    0
+                };
+                let projection = if meta.op_class == pb::MemoryOpClass::AsyncCopy
+                    && matches!(resolved_route, Ok(ValidatedMemoryRoute::Global))
+                {
+                    let index = match u32::try_from(async_payload_bytes.len()) {
+                        Ok(index) if index != u32::MAX => index,
+                        Ok(_) | Err(_) => {
+                            unreachable!("validated async-payload arena exceeded u32")
+                        }
+                    };
+                    async_payload_bytes.push(effective_data_bytes);
+                    index
+                } else {
+                    shared_bank_wavefronts_32x4
+                };
+                let sector_plan = if matches!(
+                    resolved_route,
+                    Ok(ValidatedMemoryRoute::Global | ValidatedMemoryRoute::Local)
+                ) {
+                    match compact_sector_vector(preflight) {
+                        Ok(staged) => {
+                            let start = sectors.len();
+                            let len = match u16::try_from(staged.len()) {
+                                Ok(len) => len,
+                                Err(_) => unreachable!("bounded sector vector exceeded u16"),
+                            };
+                            match sectors.try_reserve(staged.len()) {
+                                Ok(()) => {
+                                    sectors.extend_from_slice(&staged);
+                                    CompactSectorPlan::ready(start, len)
+                                }
+                                Err(_) => {
+                                    let index = sector_errors.len();
+                                    sector_errors.push(ValidatedSectorError::CapacityUnavailable {
+                                        buffer: "warp sector arena",
+                                        additional: staged.len(),
+                                    });
+                                    CompactSectorPlan::error(
+                                        ValidatedSectorErrorPhase::AfterStaticRole,
+                                        index,
+                                    )
+                                }
+                            }
+                        }
+                        Err((phase, error)) => {
+                            let index = sector_errors.len();
+                            sector_errors.push(error);
+                            CompactSectorPlan::error(phase, index)
+                        }
+                    }
+                } else {
+                    CompactSectorPlan::ready(sectors.len(), 0)
+                };
+                let route = match resolved_route {
+                    Ok(route) => CompactMemoryRoute::ready(route),
+                    Err(error) => {
+                        let route = CompactMemoryRoute::error(route_errors.len());
+                        route_errors.push(error);
+                        route
+                    }
+                };
+                let memory_index = match u32::try_from(memories.len()) {
+                    Ok(index) if index != u32::MAX => index,
+                    Ok(_) | Err(_) => unreachable!("validated memory arena exceeded u32"),
+                };
+                memories.push(ValidatedMemoryInstruction {
+                    sectors: sector_plan,
+                    projection,
+                    meta: CompactMemoryMeta::new(meta.op_class, meta.access_kind, route),
+                });
+                memory_index
+            } else {
+                u32::MAX
+            };
+            instructions.push(ValidatedInstruction {
+                pc: instruction.pc,
+                function_unique_id: instruction.function_unique_id,
+                warpid_tb: instruction
+                    .warpid_tb
+                    .unwrap_or_else(|| unreachable!("validated instruction lost warpid_tb")),
+                warpid_sm: instruction.warpid_sm,
+                sm_id: instruction.sm_id,
+                memory_index,
+            });
+        }
+        Ok(Self {
+            map_key,
+            warp_id: warp.id,
+            instructions,
+            memories,
+            async_payload_bytes,
+            route_errors,
+            sectors,
+            sector_errors,
+        })
+    }
+
+    pub const fn map_key(&self) -> i32 {
+        self.map_key
+    }
+
+    pub const fn warp_id(&self) -> i32 {
+        self.warp_id
+    }
+
+    pub fn instructions(
+        &self,
+    ) -> impl ExactSizeIterator<Item = ValidatedInstructionRef<'_>> + DoubleEndedIterator + '_ {
+        self.instructions.iter().map(|instruction| {
+            let memory =
+                if instruction.memory_index == u32::MAX {
+                    None
+                } else {
+                    let index = usize::try_from(instruction.memory_index)
+                        .unwrap_or_else(|_| unreachable!("validated memory index escaped usize"));
+                    Some(self.memories.get(index).unwrap_or_else(|| {
+                        unreachable!("validated memory index escaped its arena")
+                    }))
+                };
+            ValidatedInstructionRef {
+                instruction,
+                memory,
+            }
+        })
+    }
+
+    pub fn memory_route<'a>(
+        &'a self,
+        memory: &ValidatedMemoryInstruction,
+    ) -> Result<ValidatedMemoryRoute, &'a ValidatedMemoryRouteError> {
+        match memory.meta.route().0 {
+            0 => Ok(ValidatedMemoryRoute::Global),
+            1 => Ok(ValidatedMemoryRoute::Local),
+            2 => Ok(ValidatedMemoryRoute::Shared),
+            3 => Ok(ValidatedMemoryRoute::Unsupported),
+            encoded => {
+                let index = encoded
+                    .checked_sub(CompactMemoryRoute::ERROR_BASE)
+                    .unwrap_or_else(|| unreachable!("validated route encoding underflowed"));
+                let index = usize::try_from(index)
+                    .unwrap_or_else(|_| unreachable!("validated route error escaped usize"));
+                Err(self
+                    .route_errors
+                    .get(index)
+                    .unwrap_or_else(|| unreachable!("validated route error escaped its arena")))
+            }
+        }
+    }
+
+    /// Sum of active-lane source widths for one Global async-copy record. Exact
+    /// u64 values live in a sparse warp-local arena so ordinary memory metadata
+    /// remains compact. Other routes and operation classes return zero.
+    pub fn effective_data_bytes(&self, memory: &ValidatedMemoryInstruction) -> u64 {
+        if memory.meta.op_class() != pb::MemoryOpClass::AsyncCopy
+            || memory.meta.route().0 != CompactMemoryRoute::GLOBAL
+        {
+            return 0;
+        }
+        let index = usize::try_from(memory.projection)
+            .unwrap_or_else(|_| unreachable!("validated async-payload index escaped usize"));
+        *self
+            .async_payload_bytes
+            .get(index)
+            .unwrap_or_else(|| unreachable!("validated async-payload index escaped its arena"))
+    }
+
+    pub fn sector_plan<'a>(
+        &'a self,
+        memory: &ValidatedMemoryInstruction,
+    ) -> ValidatedSectorPlan<'a> {
+        match memory.sectors.error_phase {
+            CompactSectorPlan::READY => {
+                let start = memory.sectors.offset_or_error;
+                let end = match start.checked_add(usize::from(memory.sectors.len)) {
+                    Some(end) => end,
+                    None => unreachable!("validated sector span overflowed"),
+                };
+                let Some(sectors) = self.sectors.get(start..end) else {
+                    unreachable!("validated sector span escaped its arena")
+                };
+                ValidatedSectorPlan::Sectors(sectors)
+            }
+            code @ (CompactSectorPlan::BEFORE_STATIC_ROLE
+            | CompactSectorPlan::AFTER_STATIC_ROLE) => {
+                let index = memory.sectors.offset_or_error;
+                let Some(error) = self.sector_errors.get(index) else {
+                    unreachable!("validated sector error index escaped its arena")
+                };
+                let phase = if code == CompactSectorPlan::BEFORE_STATIC_ROLE {
+                    ValidatedSectorErrorPhase::BeforeStaticRole
+                } else {
+                    ValidatedSectorErrorPhase::AfterStaticRole
+                };
+                ValidatedSectorPlan::Error { phase, error }
+            }
+            _ => unreachable!("validated sector plan carried an unknown phase"),
+        }
+    }
+}
+
+/// Packed scheduler fields retained from one validated dynamic instruction.
+struct ValidatedInstruction {
+    pc: u32,
+    function_unique_id: i32,
+    warpid_tb: i32,
+    warpid_sm: Option<i32>,
+    sm_id: Option<i32>,
+    memory_index: u32,
+}
+
+/// One instruction borrowed together with the compact memory metadata from its
+/// owning warp. The pairing prevents memory-arena indices from crossing warps.
+#[derive(Clone, Copy)]
+pub struct ValidatedInstructionRef<'a> {
+    instruction: &'a ValidatedInstruction,
+    memory: Option<&'a ValidatedMemoryInstruction>,
+}
+
+impl<'a> ValidatedInstructionRef<'a> {
+    pub const fn pc(&self) -> u32 {
+        self.instruction.pc
+    }
+
+    pub const fn function_unique_id(&self) -> i32 {
+        self.instruction.function_unique_id
+    }
+
+    pub const fn warpid_tb(&self) -> i32 {
+        self.instruction.warpid_tb
+    }
+
+    pub const fn warpid_sm(&self) -> Option<i32> {
+        self.instruction.warpid_sm
+    }
+
+    pub const fn sm_id(&self) -> Option<i32> {
+        self.instruction.sm_id
+    }
+
+    pub const fn memory(self) -> Option<&'a ValidatedMemoryInstruction> {
+        self.memory
+    }
+}
+
+fn compact_memory_route(
+    instruction: &pb::Instruction,
+    class: pb::MemoryOpClass,
+    payload_contract: MemoryPayloadContract,
+    and_mask: u32,
+) -> Result<ValidatedMemoryRoute, ValidatedMemoryRouteError> {
+    let space = |address: &pb::Address| {
+        address
+            .address_space
+            .map(|raw| match pb::MemorySpace::try_from(raw) {
+                Ok(space) => space,
+                Err(_) => unreachable!("validated address carried an unknown space"),
+            })
+    };
+    let zero_effective_mask = and_mask == 0;
+    match class {
+        pb::MemoryOpClass::Unspecified => Ok(ValidatedMemoryRoute::Unsupported),
+        pb::MemoryOpClass::Shared | pb::MemoryOpClass::Local => {
+            if instruction.addresses.is_empty() && !zero_effective_mask {
+                return Err(ValidatedMemoryRouteError::SharedLocalOperandCount { got: 0 });
+            }
+            let expected = if class == pb::MemoryOpClass::Shared {
+                pb::MemorySpace::Shared
+            } else {
+                pb::MemorySpace::Local
+            };
+            for (operand, address) in instruction.addresses.iter().enumerate() {
+                let Some(space) = space(address) else {
+                    continue;
+                };
+                if space != expected {
+                    return Err(ValidatedMemoryRouteError::SharedLocalSpaceInvalid {
+                        operand,
+                        space,
+                    });
+                }
+            }
+            Ok(if class == pb::MemoryOpClass::Shared {
+                ValidatedMemoryRoute::Shared
+            } else {
+                ValidatedMemoryRoute::Local
+            })
+        }
+        pb::MemoryOpClass::Global => {
+            if instruction.addresses.is_empty() && !zero_effective_mask {
+                return Err(ValidatedMemoryRouteError::GlobalOperandCount { got: 0 });
+            }
+            for (operand, address) in instruction.addresses.iter().enumerate() {
+                let Some(space) = space(address) else {
+                    continue;
+                };
+                if !matches!(space, pb::MemorySpace::Global | pb::MemorySpace::Generic) {
+                    return Err(ValidatedMemoryRouteError::GlobalSpaceInvalid { operand, space });
+                }
+            }
+            Ok(ValidatedMemoryRoute::Global)
+        }
+        pb::MemoryOpClass::Atomic => {
+            if payload_contract == MemoryPayloadContract::LegacyExclusion {
+                let mut resolved = None;
+                for (operand, address) in instruction.addresses.iter().enumerate() {
+                    let Some(space) = space(address) else {
+                        continue;
+                    };
+                    let candidate = match space {
+                        pb::MemorySpace::Global | pb::MemorySpace::Generic => {
+                            ValidatedMemoryRoute::Global
+                        }
+                        pb::MemorySpace::Shared => ValidatedMemoryRoute::Shared,
+                        pb::MemorySpace::Local => ValidatedMemoryRoute::Local,
+                        pb::MemorySpace::Unspecified => {
+                            return Err(ValidatedMemoryRouteError::AtomicSpaceUnspecified {
+                                operand,
+                            });
+                        }
+                    };
+                    match resolved {
+                        Some(previous) if previous != candidate => {
+                            return Err(ValidatedMemoryRouteError::AtomicSpacesConflict);
+                        }
+                        None => resolved = Some(candidate),
+                        Some(_) => {}
+                    }
+                }
+                return Ok(resolved.unwrap_or(ValidatedMemoryRoute::Global));
+            }
+            if instruction.addresses.is_empty() && zero_effective_mask {
+                return Ok(ValidatedMemoryRoute::Global);
+            }
+            if instruction.addresses.len() != 1 {
+                return Err(ValidatedMemoryRouteError::AtomicOperandCount {
+                    got: instruction.addresses.len(),
+                });
+            }
+            let Some(space) = space(&instruction.addresses[0]) else {
+                return Err(ValidatedMemoryRouteError::AtomicSpaceMissing { operand: 0 });
+            };
+            match space {
+                pb::MemorySpace::Global | pb::MemorySpace::Generic => {
+                    Ok(ValidatedMemoryRoute::Global)
+                }
+                pb::MemorySpace::Shared => Ok(ValidatedMemoryRoute::Shared),
+                pb::MemorySpace::Local => Ok(ValidatedMemoryRoute::Local),
+                pb::MemorySpace::Unspecified => {
+                    Err(ValidatedMemoryRouteError::AtomicSpaceUnspecified { operand: 0 })
+                }
+            }
+        }
+        pb::MemoryOpClass::AsyncCopy => {
+            if payload_contract == MemoryPayloadContract::LegacyExclusion {
+                for address in &instruction.addresses {
+                    let Some(space) = space(address) else {
+                        continue;
+                    };
+                    if !matches!(space, pb::MemorySpace::Global | pb::MemorySpace::Generic) {
+                        return Err(ValidatedMemoryRouteError::AsyncCopySourceSpaceInvalid {
+                            space,
+                        });
+                    }
+                }
+                return Ok(ValidatedMemoryRoute::Global);
+            }
+            if instruction.addresses.len() != 1 {
+                return Err(ValidatedMemoryRouteError::AsyncCopySourceCount {
+                    got: instruction.addresses.len(),
+                });
+            }
+            let Some(space) = space(&instruction.addresses[0]) else {
+                return Err(ValidatedMemoryRouteError::AsyncCopySourceSpaceMissing);
+            };
+            if !matches!(space, pb::MemorySpace::Global | pb::MemorySpace::Generic) {
+                return Err(ValidatedMemoryRouteError::AsyncCopySourceSpaceInvalid { space });
+            }
+            Ok(ValidatedMemoryRoute::Global)
+        }
+        pb::MemoryOpClass::Texture
+        | pb::MemoryOpClass::Surface
+        | pb::MemoryOpClass::Tma
+        | pb::MemoryOpClass::ClusterDsmem
+        | pb::MemoryOpClass::Tmem => Ok(ValidatedMemoryRoute::Unsupported),
+    }
+}
+
+fn compact_sector_vector(
+    preflight: PreflightedMemoryAccess<'_>,
+) -> Result<Vec<i64>, (ValidatedSectorErrorPhase, ValidatedSectorError)> {
+    let mut intervals = Vec::new();
+    let mut early_error = None;
+    preflight.visit_addresses(|access| {
+        if early_error.is_some() {
+            return;
+        }
+        if access.data_width_bytes <= 0 {
+            early_error = Some(ValidatedSectorError::DataWidthInvalid {
+                data_width_bytes: access.data_width_bytes,
+            });
+            return;
+        }
+        let width_offset = i64::from(access.data_width_bytes) - 1;
+        for (lane, &base) in access.lane_vector.iter().enumerate() {
+            if base == lanes::LANE_INACTIVE_SENTINEL {
+                continue;
+            }
+            let Some(last_address) = base.checked_add(width_offset) else {
+                early_error = Some(ValidatedSectorError::AddressOverflow {
+                    lane,
+                    base,
+                    data_width_bytes: access.data_width_bytes,
+                });
+                return;
+            };
+            if intervals.try_reserve(1).is_err() {
+                early_error = Some(ValidatedSectorError::CapacityUnavailable {
+                    buffer: "sector interval plan",
+                    additional: 1,
+                });
+                return;
+            }
+            intervals.push((base >> 5, last_address >> 5));
+        }
+    });
+    if let Some(error) = early_error {
+        return Err((ValidatedSectorErrorPhase::BeforeStaticRole, error));
+    }
+
+    let mut sorted = Vec::new();
+    sorted.try_reserve(intervals.len()).map_err(|_| {
+        (
+            ValidatedSectorErrorPhase::AfterStaticRole,
+            ValidatedSectorError::CapacityUnavailable {
+                buffer: "sorted sector intervals",
+                additional: intervals.len(),
+            },
+        )
+    })?;
+    sorted.extend_from_slice(&intervals);
+    sorted.sort_unstable();
+    let mut union_count = 0_u128;
+    if let Some(&(initial_first, initial_last)) = sorted.first() {
+        let mut first = initial_first;
+        let mut last = initial_last;
+        for &(next_first, next_last) in &sorted[1..] {
+            if next_first <= last.saturating_add(1) {
+                last = last.max(next_last);
+            } else {
+                union_count += (i128::from(last) - i128::from(first) + 1).unsigned_abs();
+                first = next_first;
+                last = next_last;
+            }
+        }
+        union_count += (i128::from(last) - i128::from(first) + 1).unsigned_abs();
+    }
+    let unique_count = usize::try_from(union_count).map_err(|_| {
+        (
+            ValidatedSectorErrorPhase::AfterStaticRole,
+            ValidatedSectorError::UniqueSectorCountOutOfRange {
+                sectors: union_count,
+            },
+        )
+    })?;
+    if unique_count > usize::from(u16::MAX) {
+        return Err((
+            ValidatedSectorErrorPhase::AfterStaticRole,
+            ValidatedSectorError::SectorCountOverflow {
+                sectors: unique_count,
+            },
+        ));
+    }
+
+    let mut staged = Vec::new();
+    staged.try_reserve(unique_count).map_err(|_| {
+        (
+            ValidatedSectorErrorPhase::AfterStaticRole,
+            ValidatedSectorError::CapacityUnavailable {
+                buffer: "sector staging",
+                additional: unique_count,
+            },
+        )
+    })?;
+    let covered_capacity = intervals.len().min(unique_count);
+    let mut covered: Vec<(i64, i64)> = Vec::new();
+    covered.try_reserve(covered_capacity).map_err(|_| {
+        (
+            ValidatedSectorErrorPhase::AfterStaticRole,
+            ValidatedSectorError::CapacityUnavailable {
+                buffer: "covered sector intervals",
+                additional: covered_capacity,
+            },
+        )
+    })?;
+    for (first, last) in intervals {
+        let start = covered.partition_point(|&(_, covered_last)| covered_last < first);
+        let mut cursor = Some(first);
+        for &(covered_first, covered_last) in &covered[start..] {
+            let Some(next) = cursor else { break };
+            if covered_first > last {
+                break;
+            }
+            if next < covered_first {
+                staged.extend(next..=last.min(covered_first.saturating_sub(1)));
+            }
+            cursor = if covered_last >= last {
+                None
+            } else {
+                covered_last
+                    .checked_add(1)
+                    .map(|after_covered| next.max(after_covered))
+            };
+        }
+        if let Some(next) = cursor {
+            staged.extend(next..=last);
+        }
+
+        let left =
+            covered.partition_point(|&(_, covered_last)| covered_last.saturating_add(1) < first);
+        let right = left
+            + covered[left..]
+                .partition_point(|&(covered_first, _)| covered_first <= last.saturating_add(1));
+        if left == right {
+            covered.insert(left, (first, last));
+        } else {
+            let merged = (first.min(covered[left].0), last.max(covered[right - 1].1));
+            covered[left] = merged;
+            covered.drain(left + 1..right);
+        }
+    }
+    if staged.len() != unique_count {
+        return Err((
+            ValidatedSectorErrorPhase::AfterStaticRole,
+            ValidatedSectorError::CardinalityMismatch {
+                expected: unique_count,
+                produced: staged.len(),
+            },
+        ));
+    }
+    Ok(staged)
+}
+
 fn validate_trace_snapshot_semantics(
     root: &Path,
     trace: &pb::Trace,
     payload: &BTreeMap<PathBuf, Vec<u8>>,
     allocations: Option<&AllocationRegistry>,
     memory_payload_contract: MemoryPayloadContract,
-) -> Result<TraceValidationSummary, TraceError> {
+) -> Result<
+    (
+        TraceValidationSummary,
+        BTreeMap<PathBuf, ValidatedThreadblock>,
+    ),
+    TraceError,
+> {
     let mut launch_ids = BTreeSet::new();
     let mut consumed_payloads = BTreeSet::new();
-    let mut payloads_by_parent: BTreeMap<&Path, Vec<&Path>> = BTreeMap::new();
+    let mut validated_payload = BTreeMap::new();
+    let mut payloads_by_parent: BTreeMap<PathBuf, Vec<PathBuf>> = BTreeMap::new();
     for path in payload.keys() {
         let parent =
             path.parent()
@@ -1732,7 +2654,10 @@ fn validate_trace_snapshot_semantics(
                     root: root.to_path_buf(),
                     message: format!("payload path has no launch parent: {}", path.display()),
                 })?;
-        payloads_by_parent.entry(parent).or_default().push(path);
+        payloads_by_parent
+            .entry(parent.to_path_buf())
+            .or_default()
+            .push(path.clone());
     }
     let mut launch_count = 0_u64;
     let mut threadblock_count = 0_u64;
@@ -1807,16 +2732,12 @@ fn validate_trace_snapshot_semantics(
                     return Err(TraceError::ThreadblocksMissing { dir: launch_dir });
                 };
                 let mut block_ids = BTreeSet::new();
-                for &path in paths {
+                for path in paths {
                     let raw = payload.get(path).ok_or_else(|| {
-                        TraceError::SamplingPayloadSnapshotMissing {
-                            path: path.to_path_buf(),
-                        }
+                        TraceError::SamplingPayloadSnapshotMissing { path: path.clone() }
                     })?;
                     if raw.is_empty() {
-                        return Err(TraceError::ThreadblockRecordsEmpty {
-                            path: path.to_path_buf(),
-                        });
+                        return Err(TraceError::ThreadblockRecordsEmpty { path: path.clone() });
                     }
                     let threadblock = decode_threadblock(raw, path)?;
                     let block_index = block_launch_index(kernel, &threadblock, path)?;
@@ -1850,7 +2771,16 @@ fn validate_trace_snapshot_semantics(
                         memory_payload_contract,
                         kernel.function_unique_id,
                     )?;
-                    consumed_payloads.insert(path);
+                    validated_payload.insert(
+                        path.clone(),
+                        ValidatedThreadblock::from_message(
+                            block_index,
+                            threadblock,
+                            memory_payload_contract,
+                            &path.to_string_lossy(),
+                        )?,
+                    );
+                    consumed_payloads.insert(path.clone());
                     threadblock_count =
                         threadblock_count
                             .checked_add(1)
@@ -1875,11 +2805,14 @@ fn validate_trace_snapshot_semantics(
     {
         return Err(TraceError::ThreadblockPayloadOrphan { path: path.clone() });
     }
-    Ok(TraceValidationSummary {
-        launch_count,
-        threadblock_count,
-        instruction_count,
-    })
+    Ok((
+        TraceValidationSummary {
+            launch_count,
+            threadblock_count,
+            instruction_count,
+        },
+        validated_payload,
+    ))
 }
 
 pub struct TraceDir {
@@ -1892,12 +2825,14 @@ pub struct TraceDir {
     stats: Option<TraceStats>,
     validation: TraceValidationSummary,
     payload_by_path: BTreeMap<PathBuf, Vec<u8>>,
+    threadblock_by_path: BTreeMap<PathBuf, ValidatedThreadblock>,
 }
 
 impl TraceDir {
     /// Snapshot and fully validate one trace directory before exposing any
-    /// decoded launch or payload. All paths are descriptor-anchored and every
-    /// payload included in the snapshot is semantically walked exactly once.
+    /// decoded launch or payload. All paths are descriptor-anchored, every
+    /// included payload is semantically validated, and its decoded tree is then
+    /// compacted before exposure.
     #[cfg(feature = "campaign")]
     pub fn open(root: impl Into<PathBuf>) -> Result<Self, TraceError> {
         Self::from_snapshot(TraceDirSnapshot::capture(root)?)
@@ -2027,7 +2962,7 @@ impl TraceDir {
             .as_deref()
             .map(|raw| AllocationRegistry::parse(&allocations_path, raw))
             .transpose()?;
-        let validation = validate_trace_snapshot_semantics(
+        let (validation, threadblock_by_path) = validate_trace_snapshot_semantics(
             &root,
             &trace,
             &payload_by_path,
@@ -2049,6 +2984,7 @@ impl TraceDir {
             stats,
             validation,
             payload_by_path,
+            threadblock_by_path,
         })
     }
 
@@ -2153,8 +3089,19 @@ impl TraceDir {
         Ok(paths)
     }
 
-    /// Decode one threadblock path from bytes captured by the selected loader.
-    /// Paths outside that read fail as ordinary missing-input errors.
+    /// Borrow the compact threadblock produced by the semantic validation walk.
+    /// Replay uses this view so non-memory Prost instruction trees are not retained
+    /// and no payload is decoded a second time.
+    pub fn validated_threadblock(&self, path: &Path) -> Result<&ValidatedThreadblock, TraceError> {
+        self.threadblock_by_path.get(path).ok_or_else(|| {
+            TraceError::SamplingPayloadSnapshotMissing {
+                path: path.to_path_buf(),
+            }
+        })
+    }
+
+    /// Decode one threadblock from the immutable raw bytes captured by the
+    /// selected loader. Paths outside that snapshot fail as missing inputs.
     pub fn read_threadblock(&self, path: &Path) -> Result<pb::Threadblock, TraceError> {
         let raw = self.payload_by_path.get(path).ok_or_else(|| {
             TraceError::SamplingPayloadSnapshotMissing {
@@ -2171,18 +3118,17 @@ impl TraceDir {
     /// missing `block_id`, out-of-grid coordinates, and duplicates.
     ///
     /// Loads the whole kernel's blocks into memory (fine for the current
-    /// roster; a streaming variant can land with the SM scheduler when
-    /// needed). Blocks decode from the immutable bytes captured and hashed by
-    /// [`TraceDir::open`], so later path replacement cannot change replay under
-    /// already-issued provenance.
+    /// roster; replay uses [`TraceDir::validated_threadblock`] instead). Blocks
+    /// decode from the immutable bytes captured by the loader, so later path
+    /// replacement cannot change the returned content.
     pub fn read_threadblocks_in_launch_order(
         &self,
         loc: &KernelLoc<'_>,
     ) -> Result<Vec<(i64, pb::Threadblock)>, TraceError> {
         let mut blocks = Vec::new();
         for path in self.threadblock_paths(loc)? {
+            let index = self.validated_threadblock(&path)?.launch_index();
             let tb = self.read_threadblock(&path)?;
-            let index = block_launch_index(loc.kernel, &tb, &path)?;
             // Reader-side allocation-identity gate (address-carrying contract): a GLOBAL/GENERIC-
             // space active record must carry a resolvable, in-range allocation
             // id — parity with the Python validator. Fail-closed here so the sim
@@ -4600,6 +5546,132 @@ impl<'a> PreflightedMemoryAccess<'a> {
     }
 }
 
+/// Sum each decoded address operand's per-lane width over its effective lanes.
+/// This preserves payload volume independently of source-sector coalescing.
+pub fn project_effective_data_bytes(
+    preflight: PreflightedMemoryAccess<'_>,
+) -> Result<u64, EffectiveDataBytesError> {
+    let mut bytes = 0_u64;
+    let mut overflowed = false;
+    preflight.visit_addresses(|access| {
+        if overflowed {
+            return;
+        }
+        let active_lanes = access
+            .lane_vector
+            .iter()
+            .filter(|&&address| address != lanes::LANE_INACTIVE_SENTINEL)
+            .count() as u64;
+        let width = match u64::try_from(access.data_width_bytes) {
+            Ok(width) => width,
+            Err(_) => {
+                overflowed = true;
+                return;
+            }
+        };
+        let Some(operand_bytes) = width.checked_mul(active_lanes) else {
+            overflowed = true;
+            return;
+        };
+        let Some(total) = bytes.checked_add(operand_bytes) else {
+            overflowed = true;
+            return;
+        };
+        bytes = total;
+    });
+    if overflowed {
+        Err(EffectiveDataBytesError::Overflow)
+    } else {
+        Ok(bytes)
+    }
+}
+
+const SHARED_BANK_COUNT_32X4: i64 = 32;
+const SHARED_BANK_WORD_BYTES_32X4: i128 = 4;
+const MAX_SHARED_WORDS_PER_LANE: u64 = 1_024;
+const MAX_SHARED_WORDS_PER_INSTRUCTION: u64 = 65_536;
+
+/// Reduce effective shared addresses to the exact bank-wavefront observable for
+/// 32 banks with 4-byte words. Identical word addresses collapse as broadcasts;
+/// the result is the maximum distinct-word count on any bank.
+pub fn project_shared_bank_wavefronts_32x4(
+    preflight: PreflightedMemoryAccess<'_>,
+    word_scratch: &mut Vec<i64>,
+) -> Result<u32, SharedBankProjectionError> {
+    word_scratch.clear();
+    let mut projected_words = 0_u64;
+    let mut failure = None;
+    preflight.visit_addresses(|access| {
+        if failure.is_some() {
+            return;
+        }
+        let width = i128::from(access.data_width_bytes);
+        for (lane, &address) in access.lane_vector.iter().enumerate() {
+            if address == lanes::LANE_INACTIVE_SENTINEL {
+                continue;
+            }
+            let first_word = i128::from(address).div_euclid(SHARED_BANK_WORD_BYTES_32X4);
+            let last_byte = i128::from(address) + width - 1;
+            let last_word = last_byte.div_euclid(SHARED_BANK_WORD_BYTES_32X4);
+            let words = u64::try_from(last_word - first_word + 1)
+                .unwrap_or_else(|_| unreachable!("positive data width produced a negative span"));
+            if words > MAX_SHARED_WORDS_PER_LANE {
+                failure = Some(SharedBankProjectionError::LaneWordLimit {
+                    lane,
+                    words,
+                    limit: MAX_SHARED_WORDS_PER_LANE,
+                });
+                return;
+            }
+            let Some(next_projected_words) = projected_words.checked_add(words) else {
+                failure = Some(SharedBankProjectionError::InstructionWordLimit {
+                    words: u64::MAX,
+                    limit: MAX_SHARED_WORDS_PER_INSTRUCTION,
+                });
+                return;
+            };
+            if next_projected_words > MAX_SHARED_WORDS_PER_INSTRUCTION {
+                failure = Some(SharedBankProjectionError::InstructionWordLimit {
+                    words: next_projected_words,
+                    limit: MAX_SHARED_WORDS_PER_INSTRUCTION,
+                });
+                return;
+            }
+            let additional = usize::try_from(words)
+                .unwrap_or_else(|_| unreachable!("bounded word span escaped usize"));
+            if word_scratch.try_reserve(additional).is_err() {
+                failure = Some(SharedBankProjectionError::CapacityUnavailable { additional });
+                return;
+            }
+            for word in first_word..=last_word {
+                word_scratch.push(
+                    i64::try_from(word)
+                        .unwrap_or_else(|_| unreachable!("i64 byte address word escaped i64")),
+                );
+            }
+            projected_words = next_projected_words;
+        }
+    });
+    if let Some(failure) = failure {
+        return Err(failure);
+    }
+
+    word_scratch.sort_unstable();
+    word_scratch.dedup();
+    let mut bank_words = [0_u64; SHARED_BANK_COUNT_32X4 as usize];
+    for &word in word_scratch.iter() {
+        let bank = word.rem_euclid(SHARED_BANK_COUNT_32X4) as usize;
+        bank_words[bank] = bank_words[bank]
+            .checked_add(1)
+            .ok_or(SharedBankProjectionError::CountOverflow { bank: bank as u8 })?;
+    }
+    let wavefronts = bank_words.into_iter().max().unwrap_or(0);
+    Ok(
+        u32::try_from(wavefronts)
+            .unwrap_or_else(|_| unreachable!("bounded projection escaped u32")),
+    )
+}
+
 /// A memory instruction decoded to what the memory hierarchy consumes —
 /// the ALLOCATING convenience form (one heap `Vec` per memory record).
 /// Hot walk paths (millions of records per kernel) use
@@ -5418,6 +6490,183 @@ mod tests {
         ));
     }
 
+    fn shared_projection_inst(stride_words: i64, width: i32) -> pb::Instruction {
+        pb::Instruction {
+            pc: 32,
+            active_mask: Some(u32::MAX),
+            predicate_mask: Some(u32::MAX),
+            function_unique_id: 1,
+            addresses: vec![pb::Address {
+                data_width: width,
+                compression_format: crate::lanes::FORMAT_LIST_ALL,
+                addrs: (0_i64..32).map(|lane| lane * stride_words * 4).collect(),
+                address_space: Some(pb::MemorySpace::Shared as i32),
+                ..Default::default()
+            }],
+            memory_op_class: Some(pb::MemoryOpClass::Shared as i32),
+            data_width: Some(width),
+            warpid_tb: Some(0),
+            vpc: Some(32),
+            memory_op_access_kind: Some(pb::MemoryOpAccessKind::Load as i32),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn shared_bank_projection_counts_conflicts_width_and_broadcasts() {
+        for (stride_words, width, expected) in [
+            (0, 4, 1),
+            (1, 4, 1),
+            (2, 4, 2),
+            (4, 4, 4),
+            (4, 16, 4),
+            (8, 4, 8),
+            (16, 4, 16),
+            (32, 4, 32),
+        ] {
+            let inst = shared_projection_inst(stride_words, width);
+            let preflight = preflight_memory_access(&inst, || "shared projection".to_owned())
+                .unwrap()
+                .unwrap();
+            let mut scratch = Vec::new();
+            assert_eq!(
+                project_shared_bank_wavefronts_32x4(preflight, &mut scratch).unwrap(),
+                expected,
+                "stride_words={stride_words}, width={width}"
+            );
+        }
+
+        let compact = ValidatedWarp::from_message(
+            0,
+            pb::Warp {
+                id: 0,
+                instructions: vec![shared_projection_inst(4, 4)],
+                ..Default::default()
+            },
+            MemoryPayloadContract::AddressCarryingV1,
+            "compact shared",
+        )
+        .unwrap();
+        let memory = compact.instructions().next().unwrap().memory().unwrap();
+        assert_eq!(memory.shared_bank_wavefronts_32x4(), 4);
+
+        let mut zero_active = shared_projection_inst(32, 4);
+        zero_active.predicate_mask = Some(0);
+        zero_active.addresses[0]
+            .addrs
+            .fill(crate::lanes::LANE_INACTIVE_SENTINEL);
+        let preflight = preflight_memory_access(&zero_active, || "zero shared".to_owned())
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            project_shared_bank_wavefronts_32x4(preflight, &mut Vec::new()).unwrap(),
+            0
+        );
+    }
+
+    fn async_payload_inst(active_lanes: u32, width: i32, stride: i64) -> pb::Instruction {
+        let mask = if active_lanes == 32 {
+            u32::MAX
+        } else {
+            (1_u32 << active_lanes) - 1
+        };
+        let addrs = (0_i64..32)
+            .map(|lane| {
+                if lane < i64::from(active_lanes) {
+                    0x1000 + lane * stride
+                } else {
+                    crate::lanes::LANE_INACTIVE_SENTINEL
+                }
+            })
+            .collect();
+        pb::Instruction {
+            pc: 64,
+            active_mask: Some(mask),
+            predicate_mask: Some(mask),
+            function_unique_id: 1,
+            addresses: vec![pb::Address {
+                data_width: width,
+                compression_format: crate::lanes::FORMAT_LIST_ALL,
+                addrs,
+                address_space: Some(pb::MemorySpace::Global as i32),
+                ..Default::default()
+            }],
+            memory_op_class: Some(pb::MemoryOpClass::AsyncCopy as i32),
+            data_width: Some(width),
+            warpid_tb: Some(0),
+            vpc: Some(64),
+            memory_op_access_kind: Some(pb::MemoryOpAccessKind::AsyncCopy as i32),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn async_payload_projection_is_exact_and_independent_of_unique_sectors() {
+        let repeated = async_payload_inst(16, 16, 0);
+        let spread = async_payload_inst(16, 16, 64);
+        let zero = async_payload_inst(0, 16, 0);
+        for (label, instruction, expected) in [
+            ("repeated", &repeated, 256),
+            ("spread", &spread, 256),
+            ("zero", &zero, 0),
+        ] {
+            let preflight = preflight_memory_access(instruction, || label.to_owned())
+                .unwrap()
+                .unwrap();
+            assert_eq!(project_effective_data_bytes(preflight).unwrap(), expected);
+        }
+
+        let compact = ValidatedWarp::from_message(
+            0,
+            pb::Warp {
+                id: 0,
+                instructions: vec![repeated, spread, zero],
+                ..Default::default()
+            },
+            MemoryPayloadContract::AddressCarryingV1,
+            "compact async payload",
+        )
+        .unwrap();
+        let memories = compact
+            .instructions()
+            .map(|instruction| instruction.memory().unwrap())
+            .collect::<Vec<_>>();
+        assert_eq!(compact.effective_data_bytes(memories[0]), 256);
+        assert_eq!(compact.effective_data_bytes(memories[1]), 256);
+        assert_eq!(compact.effective_data_bytes(memories[2]), 0);
+        assert!(matches!(
+            compact.sector_plan(memories[0]),
+            ValidatedSectorPlan::Sectors(sectors) if sectors.len() == 1
+        ));
+        assert!(matches!(
+            compact.sector_plan(memories[1]),
+            ValidatedSectorPlan::Sectors(sectors) if sectors.len() == 16
+        ));
+        assert!(matches!(
+            compact.sector_plan(memories[2]),
+            ValidatedSectorPlan::Sectors(sectors) if sectors.is_empty()
+        ));
+    }
+
+    #[test]
+    fn shared_bank_projection_word_limit_is_typed() {
+        let mut inst = shared_projection_inst(1, 4_097);
+        inst.active_mask = Some(1);
+        inst.predicate_mask = Some(1);
+        inst.addresses[0].addrs[1..].fill(crate::lanes::LANE_INACTIVE_SENTINEL);
+        let preflight = preflight_memory_access(&inst, || "wide shared".to_owned())
+            .unwrap()
+            .unwrap();
+        assert!(matches!(
+            project_shared_bank_wavefronts_32x4(preflight, &mut Vec::new()),
+            Err(SharedBankProjectionError::LaneWordLimit {
+                lane: 0,
+                words: 1_025,
+                limit: MAX_SHARED_WORDS_PER_LANE,
+            })
+        ));
+    }
+
     fn mem_inst(_bx: i32) -> pb::Instruction {
         pb::Instruction {
             pc: 16,
@@ -5839,6 +7088,66 @@ mod tests {
         }
         assert_eq!(mem_insts, 2);
         assert_eq!(alu_insts, 2);
+    }
+
+    #[test]
+    fn compact_threadblock_is_borrowed_from_the_immutable_snapshot() {
+        let tmp = tempfile::tempdir().unwrap();
+        write_synthetic_trace(tmp.path(), 1);
+
+        let trace = TraceDir::open_direct(tmp.path()).unwrap();
+        let kernel = trace.kernels().next().unwrap();
+        let path = trace.threadblock_paths(&kernel).unwrap().pop().unwrap();
+        let first = trace.validated_threadblock(&path).unwrap();
+        let first_warp = &first.warps()[0];
+        let first_pc = first_warp
+            .instructions()
+            .next()
+            .expect("synthetic warp is nonempty")
+            .pc();
+        let memory = first_warp
+            .instructions()
+            .find_map(|instruction| instruction.memory())
+            .expect("synthetic warp carries memory");
+        assert_eq!(memory.replay_meta().op_class, pb::MemoryOpClass::Global);
+        assert_eq!(
+            first_warp.memory_route(memory),
+            Ok(ValidatedMemoryRoute::Global)
+        );
+        assert!(matches!(
+            first_warp.sector_plan(memory),
+            ValidatedSectorPlan::Sectors(sectors)
+                if sectors == [0x7000_0000_i64 >> 5]
+        ));
+        assert!(
+            first_warp
+                .instructions()
+                .any(|instruction| instruction.memory().is_none())
+        );
+        assert!(std::mem::size_of::<ValidatedInstruction>() <= 32);
+        assert!(std::mem::size_of::<ValidatedMemoryInstruction>() <= 24);
+
+        let mut replacement = pb::Threadblock::decode(std::fs::read(&path).unwrap().as_slice())
+            .expect("synthetic payload decodes");
+        replacement.warps.get_mut(&0).unwrap().instructions[0].pc = first_pc + 4;
+        std::fs::write(&path, replacement.encode_to_vec()).unwrap();
+
+        let second = trace.validated_threadblock(&path).unwrap();
+        assert_eq!(first.launch_index(), 0);
+        assert!(std::ptr::eq(first, second));
+        assert_eq!(
+            second.warps()[0]
+                .instructions()
+                .next()
+                .expect("synthetic warp remains nonempty")
+                .pc(),
+            first_pc
+        );
+        assert_eq!(
+            trace.read_threadblock(&path).unwrap().warps[&0].instructions[0].pc,
+            first_pc
+        );
+        assert_eq!(trace.validation_summary().threadblock_count(), 1);
     }
 
     #[test]

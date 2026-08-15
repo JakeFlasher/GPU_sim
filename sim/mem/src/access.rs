@@ -9,7 +9,8 @@
 use sim_arch::ArchId;
 
 use crate::cache_op::{
-    CacheOpError, CacheOpToken, classify_opcode_for_arch, derive_l1_eligible, opcode_head,
+    CacheOpError, CacheOpToken, LdgstsL1Policy, classify_opcode_for_arch, derive_l1_eligible,
+    opcode_head,
 };
 
 /// Dynamic address-space provenance for hierarchy accounting. This is
@@ -112,8 +113,14 @@ pub fn is_known_untagged_opcode(opcode_text: &str) -> bool {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AccessKind {
     NonMemory,
-    /// Shared-memory class: no L1TEX sector traffic; fixed shared latency.
-    Shared,
+    /// Shared-memory class: no L1TEX sector traffic. `wavefronts` is the
+    /// compact 32-bank/4-byte-word projection of the effective lane addresses;
+    /// zero preserves fixed-latency behavior for zero-active or uncaptured
+    /// payloads. Architecture-local issue timing decides whether this projection
+    /// is executable.
+    Shared {
+        wavefronts: u64,
+    },
     /// Local-memory load (LDL): modeled sectors in the same physical L1/L2
     /// hierarchy as Global traffic, with Local accounting provenance.
     LocalLoad {
@@ -139,6 +146,24 @@ pub enum AccessKind {
         off: usize,
         len: u16,
         token: CacheOpToken,
+    },
+    /// Non-bulk global-to-shared async-copy source. Static classification still
+    /// identifies `LDGSTS` as `MemRole::BypassLoad(Ldgsts)`; this dynamic form
+    /// additionally preserves whether the current trace record has an effective
+    /// source. Effective source presence is encoded by `payload_bytes != 0`,
+    /// including in flat mode where the sector arena is intentionally omitted.
+    GlobalAsyncCopy {
+        off: usize,
+        len: u16,
+        /// Exact active-lane source payload (`active lanes × per-lane width`) in
+        /// bytes. This is independent of the deduplicated source-sector span and
+        /// is zero exactly when the source is ineffective. Replay narrows the
+        /// validated u64 projection at a typed boundary so this field does not
+        /// widen every compact dynamic instruction.
+        payload_bytes: u32,
+        /// Static SASS source-cache route. This remains explicit on a
+        /// predicated-off dynamic record even though its payload is zero.
+        l1_policy: LdgstsL1Policy,
     },
     /// Global-class record whose pc has no recognized hierarchy role: counted
     /// in the unified denominator only.
@@ -168,6 +193,11 @@ mod tests {
 
     fn mem_role_of(opcode_text: &str, arch_token: &str) -> MemRole {
         mem_role_of_checked(opcode_text, arch_token).unwrap()
+    }
+
+    #[test]
+    fn dynamic_access_kind_stays_compact() {
+        assert!(std::mem::size_of::<AccessKind>() <= 16);
     }
 
     #[test]

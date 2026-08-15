@@ -41,8 +41,9 @@ pub use access::{
     is_global_store_opcode, is_known_untagged_opcode, mem_role_of_checked,
 };
 pub use cache_op::{
-    BARE_LDG_E_DEFAULTS_TO_CA, CacheOpError, CacheOpToken, classify_opcode_checked,
-    classify_opcode_for_arch, derive_l1_eligible, opcode_head,
+    BARE_LDG_E_DEFAULTS_TO_CA, CacheOpError, CacheOpToken, LdgstsL1Policy,
+    classify_ldgsts_l1_policy, classify_opcode_checked, classify_opcode_for_arch,
+    derive_l1_eligible, opcode_head,
 };
 pub use l1::{
     AccessOutcome, EvAccess, EvAccessUnobserved, FillKey, L1AccessError, L1Cache, L1Config,
@@ -53,8 +54,8 @@ pub use l1::{
 pub use l2::{
     L2AccessError, L2BuildError, L2Config, L2ConfigError, L2CounterError, L2CounterField,
     L2Counters, L2EventMaskAccess, L2EventMaskPreview, L2FillCompletion, L2FillToken,
-    L2MaskPreview, L2Model, L2OpClass, L2Outcome, L2Replacement, L2SetIndexError, L2SnapshotError,
-    L2Source, SliceHash,
+    L2MaskPreview, L2Model, L2OpClass, L2Outcome, L2PendingSectorKey, L2Replacement,
+    L2SetIndexError, L2SnapshotError, L2Source, SliceHash,
 };
 pub use pchase_card::{
     GeometryPolicyConfig, LatencyConfig, LineCapacityConfig, MshrConfig, PchaseCard,

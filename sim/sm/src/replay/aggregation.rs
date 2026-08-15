@@ -902,8 +902,9 @@ pub fn aggregate_full_launch_set(
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeMap;
+    use std::num::NonZeroU32;
 
-    use sim_arch::ArchId;
+    use sim_arch::{ArchId, LdgstsCompletionThroughput};
     use sim_mem::{
         L1Config, L1Counters, L2Config, L2Counters, L2Replacement, MemoryOrigin, SliceHash,
     };
@@ -922,8 +923,14 @@ mod tests {
             l1_miss_latency: 20,
             global_flat_latency: 100,
             shared_write_barrier_latency: 4,
+            shared_additional_wavefront_latency: 2,
             non_memory_write_barrier_latency: 20,
             read_barrier_latency: 3,
+            ldgsts_l1_mshr_floor: NonZeroU32::new(1).unwrap(),
+            ldgsts_completion_throughput: LdgstsCompletionThroughput {
+                cache_all_payload_bytes_per_cycle: 64,
+                bypass_payload_bytes_per_cycle: 32,
+            },
             max_resident_warps_per_sm: 48,
         }
     }

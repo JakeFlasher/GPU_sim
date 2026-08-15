@@ -17,7 +17,22 @@
 //! - [`replay`] — the trace→SM driver replaying a kernel launch on its
 //!   traced hardware placement (`sm_id` / `warpid_sm`).
 //!
-//! Pipe occupancy models land in later increments (design §6.2).
+//! Tensor Core initiation contention is modeled per SMSP for the admitted
+//! `sm_86` matrix-instruction forms. Other execution pipes remain explicit
+//! dispatch-only fidelity boundaries (design §6.2).
+//!
+//! Non-bulk asynchronous copies retain the source-cache policy encoded by
+//! `sm_86` SASS: `LDGSTS.E` participates in the modeled L1/L2 hierarchy, while
+//! an explicit `LDGSTS.E.BYPASS` uses the direct-L2 path. L1 hits, fills, and
+//! MSHR retries preserve async-group completion identity so `DEPBAR.LE SB0, N`
+//! observes the source completion. On finite caches, cacheable `LDGSTS.E` accesses
+//! also use the independently bounded `sm_86` floor of 248 concurrent line fills;
+//! ordinary hierarchy traffic retains the unresolved 32-entry working
+//! approximation, and an unlimited ablation stays unlimited. In the shared L2,
+//! matching pending `sm_86` TEX reads remain lookup misses but reuse the original
+//! allocation-generation/sector fetch and ready time instead of issuing duplicate
+//! DRAM traffic. No finite L2 MSHR depth is claimed. `sm_120` returns typed research
+//! gaps rather than inheriting either Ampere semantic.
 //!
 //! Low-level shared-system results are intentionally not part of the public API:
 //!
@@ -48,7 +63,9 @@ pub use issue::{
     AccessKind, IssueError, IssueModelParams, IssueResourceSource, MemoryOperation, ReplyTo,
     SmSimResult, TailFlags,
 };
-pub use program::{FunctionSchedule, IssueSlot, OpClass, ProgramError, build_schedules};
+pub use program::{
+    FunctionSchedule, IssueSlot, OpClass, PipelineClass, ProgramError, build_schedules,
+};
 pub use replay::{
     CoResidency, FullCounterEstimatorProvenance, FullCoverageSource, FullKernelReplayResult,
     FullLaunchCoverage, FullLaunchSetCounters, FullLaunchSetDeclaration,

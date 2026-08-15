@@ -127,6 +127,21 @@ impl ArchId {
         }
     }
 
+    /// Behavior of a read that reaches an L2 sector while that allocation's
+    /// lower-level fetch is still pending. This controls fetch/response merging,
+    /// not a finite MSHR depth.
+    pub const fn l2_pending_read_semantics(self) -> Capability<L2PendingReadSemantics> {
+        match self {
+            Self::Sm86 => {
+                Capability::available(Self::Sm86, L2PendingReadSemantics::AllocationSectorMergeV1)
+            }
+            Self::Sm120 => Capability::research_gap(
+                Self::Sm120,
+                "sm_120 L2 pending-read merge semantics are not modeled",
+            ),
+        }
+    }
+
     /// Non-memory issue knobs are currently defined only for sm_86. The
     /// occupancy ceiling is deliberately included here so it cannot be
     /// mistaken for a cross-architecture invariant.
@@ -143,6 +158,118 @@ impl ArchId {
             Self::Sm120 => Capability::research_gap(
                 Self::Sm120,
                 "sm_120 scheduler/barrier/occupancy hypotheses are not modeled",
+            ),
+        }
+    }
+
+    /// Tensor-pipe initiation intervals for the exact matrix instructions
+    /// admitted by the sm_86 control-sidecar corpus. These are GA10x-local:
+    /// one Tensor Core belongs to each SM partition, and the instruction work
+    /// divided by NVIDIA's per-core throughput gives 16 cycles for dense
+    /// HMMA.16816 and sparse HMMA.SP.16832, and 8 cycles for IMMA.16816.S8.
+    pub const fn tensor_issue_intervals(self) -> Capability<TensorIssueIntervals> {
+        match self {
+            Self::Sm86 => Capability::available(
+                Self::Sm86,
+                TensorIssueIntervals {
+                    hmma_16816_f16_bf16: 16,
+                    hmma_sparse_16832_f16_bf16: 16,
+                    imma_16816_s8: 8,
+                },
+            ),
+            Self::Sm120 => Capability::research_gap(
+                Self::Sm120,
+                "sm_120 tensor instruction shapes and per-SMSP throughput are not modeled",
+            ),
+        }
+    }
+
+    /// Static SASS protocol used to close and wait on non-bulk asynchronous
+    /// global-to-shared copy groups. This is a semantic capability rather than
+    /// a latency source: completion timing still comes from the memory model.
+    pub const fn async_copy_group_semantics(self) -> Capability<AsyncCopyGroupSemantics> {
+        match self {
+            Self::Sm86 => {
+                Capability::available(Self::Sm86, AsyncCopyGroupSemantics::AmpereLdgstsDepbarV1)
+            }
+            Self::Sm120 => Capability::research_gap(
+                Self::Sm120,
+                "sm_120 asynchronous-copy SASS group semantics are not modeled",
+            ),
+        }
+    }
+
+    /// L1 route selected by the cache modifier on Ampere non-bulk asynchronous
+    /// copies. `LDGSTS.E` is the cache-at-all-levels lowering, while an explicit
+    /// `.BYPASS` component selects the L2-only route. The destination side of
+    /// the copy is deliberately outside this source-cache capability.
+    pub const fn ldgsts_l1_cache_semantics(self) -> Capability<LdgstsL1CacheSemantics> {
+        match self {
+            Self::Sm86 => Capability::available(
+                Self::Sm86,
+                LdgstsL1CacheSemantics::AmpereOptionalBypassModifierV1,
+            ),
+            Self::Sm120 => Capability::research_gap(
+                Self::Sm120,
+                "sm_120 LDGSTS/TMA source-cache modifier semantics are not modeled",
+            ),
+        }
+    }
+
+    /// Conservative aggregate line-fill admission floor for cacheable non-bulk
+    /// asynchronous copies. This is separate from [`Self::l1_defaults`]: the
+    /// ordinary-load MSHR geometry remains unresolved, while focused LDGSTS
+    /// probes directly bound cacheable async-source concurrency.
+    pub const fn ldgsts_l1_fill_admission(self) -> Capability<LdgstsL1FillAdmission> {
+        match self {
+            Self::Sm86 => Capability::available(
+                Self::Sm86,
+                LdgstsL1FillAdmission {
+                    minimum_concurrent_line_fills: 248,
+                },
+            ),
+            Self::Sm120 => Capability::research_gap(
+                Self::Sm120,
+                "sm_120 LDGSTS/TMA L1 fill-admission semantics are not modeled",
+            ),
+        }
+    }
+
+    /// Effective-payload completion throughput for non-bulk asynchronous copies.
+    /// This is distinct from fill admission and lower-level fetch coalescing: every
+    /// issued copy still has to deliver its active bytes to the shared destination.
+    pub const fn ldgsts_completion_throughput(self) -> Capability<LdgstsCompletionThroughput> {
+        match self {
+            Self::Sm86 => Capability::available(
+                Self::Sm86,
+                LdgstsCompletionThroughput {
+                    cache_all_payload_bytes_per_cycle: 64,
+                    bypass_payload_bytes_per_cycle: 32,
+                },
+            ),
+            Self::Sm120 => Capability::research_gap(
+                Self::Sm120,
+                "sm_120 LDGSTS/TMA payload-completion throughput is not modeled",
+            ),
+        }
+    }
+
+    /// Bank projection and conflict-dependent completion timing for explicit
+    /// shared-memory LDS/STS operands. The base dependent latency remains the
+    /// architecture card's `shared_latency_cycles`; this capability supplies
+    /// only the additional latency of each serialized bank wavefront.
+    pub const fn shared_memory_wavefront_timing(self) -> Capability<SharedMemoryWavefrontTiming> {
+        match self {
+            Self::Sm86 => Capability::available(
+                Self::Sm86,
+                SharedMemoryWavefrontTiming {
+                    projection: SharedBankProjection::Banks32Words4Bytes,
+                    additional_wavefront_latency_cycles: 2,
+                },
+            ),
+            Self::Sm120 => Capability::research_gap(
+                Self::Sm120,
+                "sm_120 shared-memory banking and wavefront timing are not modeled",
             ),
         }
     }
@@ -468,11 +595,86 @@ pub struct L2Defaults {
     pub sector_bytes: u32,
 }
 
+/// Architecture-local handling of TEX reads that find matching L2 data already
+/// in flight from a lower level.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum L2PendingReadSemantics {
+    /// Keep the lookup as a miss, but issue no duplicate DRAM fetch and make the
+    /// new consumer wait on the allocation-generation/sector's original ready
+    /// time. A repeated-source `.BYPASS` probe directly established this on
+    /// `sm_86`: L2 requests scaled 32× while DRAM sectors stayed constant.
+    AllocationSectorMergeV1,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct IssueHypotheses {
     pub non_memory_write_barrier_latency: u64,
     pub read_barrier_latency: u64,
     pub max_resident_warps_per_sm: u32,
+}
+
+/// Per-SMSP initiation intervals for the sm_86 tensor instructions whose
+/// throughput is architecture-backed and whose SASS forms are classified by
+/// `sim-sm`. A separate named field keeps an unsupported matrix shape from
+/// silently inheriting the rate of a superficially similar instruction.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TensorIssueIntervals {
+    pub hmma_16816_f16_bf16: u64,
+    pub hmma_sparse_16832_f16_bf16: u64,
+    pub imma_16816_s8: u64,
+}
+
+/// Architecture-local lowering used for PTX non-bulk `cp.async` groups.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AsyncCopyGroupSemantics {
+    /// `LDGSTS` source copies, `LDGDEPBAR` commits, and
+    /// `DEPBAR.LE SB0, N` waits on Ampere.
+    AmpereLdgstsDepbarV1,
+}
+
+/// Architecture-local source-cache interpretation of Ampere `LDGSTS` SASS.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LdgstsL1CacheSemantics {
+    /// `LDGSTS.E` caches at all levels and an explicit dotted `BYPASS`
+    /// component bypasses L1. Characterized independently with repeated-source
+    /// `cp.async.ca`/`cp.async.cg` probes on sm_86.
+    AmpereOptionalBypassModifierV1,
+}
+
+/// Independently bounded cacheable-LDGSTS fill admission. This is a conservative
+/// floor rather than a claim about the physical queue's exact name or geometry:
+/// full-warp `.E.128` batches showed no route-specific LG throttle through 62
+/// copies (248 distinct 128-byte lines), while the 63rd copy exposed pressure.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LdgstsL1FillAdmission {
+    pub minimum_concurrent_line_fills: u32,
+}
+
+/// Route-local lower bound on effective async-copy payload delivery. Static,
+/// compile-time-unrolled `sm_86` probes held the source tile constant within one
+/// committed group and varied active bytes independently of copy count. Their
+/// large-group slopes converge to 64 B/cycle for cache-all `LDGSTS.E` and
+/// 32 B/cycle for explicit `.BYPASS`; doubling source sectors without changing
+/// payload bytes did not double the slope. These rates do not claim a finite
+/// queue depth or measured cross-warp arbitration policy.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LdgstsCompletionThroughput {
+    pub cache_all_payload_bytes_per_cycle: u64,
+    pub bypass_payload_bytes_per_cycle: u64,
+}
+
+/// Compact trace-side bank projection understood by an architecture timing
+/// capability. Naming the geometry prevents a future architecture from
+/// interpreting an Ampere projection as its own bank layout.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SharedBankProjection {
+    Banks32Words4Bytes,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SharedMemoryWavefrontTiming {
+    pub projection: SharedBankProjection,
+    pub additional_wavefront_latency_cycles: u64,
 }
 
 #[cfg(test)]
@@ -537,9 +739,164 @@ mod tests {
             Err(CapabilityError::ResearchGap { .. })
         ));
         assert!(matches!(
+            ArchId::Sm120
+                .l2_pending_read_semantics()
+                .require("l2_pending_read_semantics"),
+            Err(CapabilityError::ResearchGap {
+                arch: ArchId::Sm120,
+                capability: "l2_pending_read_semantics",
+                reason,
+            }) if !reason.is_empty()
+        ));
+        assert!(matches!(
             ArchId::Sm120.issue_hypotheses().require("issue_hypotheses"),
             Err(CapabilityError::ResearchGap { .. })
         ));
+        assert!(matches!(
+            ArchId::Sm120
+                .tensor_issue_intervals()
+                .require("tensor_issue_intervals"),
+            Err(CapabilityError::ResearchGap {
+                arch: ArchId::Sm120,
+                capability: "tensor_issue_intervals",
+                reason,
+            }) if !reason.is_empty()
+        ));
+        assert!(matches!(
+            ArchId::Sm120
+                .async_copy_group_semantics()
+                .require("async_copy_group_semantics"),
+            Err(CapabilityError::ResearchGap {
+                arch: ArchId::Sm120,
+                capability: "async_copy_group_semantics",
+                reason,
+            }) if !reason.is_empty()
+        ));
+        assert!(matches!(
+            ArchId::Sm120
+                .ldgsts_l1_cache_semantics()
+                .require("ldgsts_l1_cache_semantics"),
+            Err(CapabilityError::ResearchGap {
+                arch: ArchId::Sm120,
+                capability: "ldgsts_l1_cache_semantics",
+                reason,
+            }) if !reason.is_empty()
+        ));
+        assert!(matches!(
+            ArchId::Sm120
+                .ldgsts_l1_fill_admission()
+                .require("ldgsts_l1_fill_admission"),
+            Err(CapabilityError::ResearchGap {
+                arch: ArchId::Sm120,
+                capability: "ldgsts_l1_fill_admission",
+                reason,
+            }) if !reason.is_empty()
+        ));
+        assert!(matches!(
+            ArchId::Sm120
+                .ldgsts_completion_throughput()
+                .require("ldgsts_completion_throughput"),
+            Err(CapabilityError::ResearchGap {
+                arch: ArchId::Sm120,
+                capability: "ldgsts_completion_throughput",
+                reason,
+            }) if !reason.is_empty()
+        ));
+        assert!(matches!(
+            ArchId::Sm120
+                .shared_memory_wavefront_timing()
+                .require("shared_memory_wavefront_timing"),
+            Err(CapabilityError::ResearchGap {
+                arch: ArchId::Sm120,
+                capability: "shared_memory_wavefront_timing",
+                reason,
+            }) if !reason.is_empty()
+        ));
+    }
+
+    #[test]
+    fn sm86_l2_pending_reads_merge_by_allocation_sector() {
+        assert_eq!(
+            ArchId::Sm86
+                .l2_pending_read_semantics()
+                .require("l2_pending_read_semantics")
+                .unwrap(),
+            L2PendingReadSemantics::AllocationSectorMergeV1
+        );
+    }
+
+    #[test]
+    fn sm86_tensor_issue_intervals_are_architecture_local() {
+        assert_eq!(
+            ArchId::Sm86
+                .tensor_issue_intervals()
+                .require("tensor_issue_intervals")
+                .unwrap(),
+            TensorIssueIntervals {
+                hmma_16816_f16_bf16: 16,
+                hmma_sparse_16832_f16_bf16: 16,
+                imma_16816_s8: 8,
+            }
+        );
+    }
+
+    #[test]
+    fn sm86_async_copy_group_semantics_are_architecture_local() {
+        assert_eq!(
+            ArchId::Sm86
+                .async_copy_group_semantics()
+                .require("async_copy_group_semantics")
+                .unwrap(),
+            AsyncCopyGroupSemantics::AmpereLdgstsDepbarV1
+        );
+    }
+
+    #[test]
+    fn sm86_ldgsts_l1_cache_semantics_are_architecture_local() {
+        assert_eq!(
+            ArchId::Sm86
+                .ldgsts_l1_cache_semantics()
+                .require("ldgsts_l1_cache_semantics")
+                .unwrap(),
+            LdgstsL1CacheSemantics::AmpereOptionalBypassModifierV1
+        );
+        assert_eq!(
+            ArchId::Sm86
+                .ldgsts_l1_fill_admission()
+                .require("ldgsts_l1_fill_admission")
+                .unwrap(),
+            LdgstsL1FillAdmission {
+                minimum_concurrent_line_fills: 248,
+            }
+        );
+    }
+
+    #[test]
+    fn sm86_ldgsts_completion_throughput_is_architecture_local() {
+        assert_eq!(
+            ArchId::Sm86
+                .ldgsts_completion_throughput()
+                .require("ldgsts_completion_throughput")
+                .unwrap(),
+            LdgstsCompletionThroughput {
+                cache_all_payload_bytes_per_cycle: 64,
+                bypass_payload_bytes_per_cycle: 32,
+            }
+        );
+    }
+
+    #[test]
+    fn sm86_shared_memory_wavefront_timing_is_architecture_local() {
+        assert_eq!(
+            ArchId::Sm86
+                .shared_memory_wavefront_timing()
+                .require("shared_memory_wavefront_timing")
+                .unwrap(),
+            SharedMemoryWavefrontTiming {
+                projection: SharedBankProjection::Banks32Words4Bytes,
+                additional_wavefront_latency_cycles: 2,
+            }
+        );
     }
 
     #[test]

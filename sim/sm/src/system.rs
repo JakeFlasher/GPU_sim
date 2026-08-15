@@ -9,15 +9,15 @@
 //! - `L2Access` — a request carrying 1..=4 sectors of one 128 B line
 //!   arrives at the shared L2. The engine's `(time, seq)` order IS the
 //!   cross-SM interleaving the timeless Phase-1 replay approximated
-//!   with trace order. The lookup outcome prices the response on the
-//!   measured latency ladder — all sectors present →
-//!   `issue_time + l1_miss_latency` (the card's L1-miss/L2-hit point),
-//!   any sector absent → `issue_time + global_flat_latency` (the
-//!   card's DRAM point) — then the carded aggregate DRAM byte server
-//!   ([`DramBw`]) may push the ready time PAST the latency arm when
-//!   the hierarchy read-miss stream exceeds the locked-operating-point
-//!   rate (it can only ever ADD delay).
-//! - `L2Fill` — installs a reply-less read fetch at its data-ready time.
+//!   with trace order. Every requested pending sector remains an L2 lookup
+//!   miss but, under the architecture-gated sm_86 policy, joins the matching
+//!   allocation-generation/sector's original lower-level fetch. A response
+//!   cannot precede its L2-hit lower bound, any newly fetched sector's DRAM
+//!   latency/bandwidth completion, or any joined sector's registered original
+//!   ready time. The carded aggregate DRAM byte server ([`DramBw`]) can only
+//!   push newly issued fetches later than the fixed latency arm.
+//! - `L2Fill` — installs a reply-less or mixed-request read fetch at its own
+//!   data-ready time, independently of a later joined-sector response.
 //! - `AtomicCompletion` — retains the intrinsic return-completion time of an
 //!   ATOM whose value has no dependence-barrier observer.
 //! - `MemResponse` — first completes any fill carried by the same request,
@@ -34,7 +34,7 @@
 //! same inputs produce bit-identical schedules and counters.
 
 use std::cmp::Reverse;
-use std::collections::{BTreeMap, BinaryHeap};
+use std::collections::{BTreeMap, BinaryHeap, HashMap};
 
 /// Per-SM lower bounds on responses to requests whose `L2Access` has
 /// been SCHEDULED but not yet PROCESSED (so the true response time is
@@ -99,9 +99,12 @@ impl UnpricedBounds {
     }
 }
 
-use sim_arch::ArchId;
+use sim_arch::{ArchId, L2PendingReadSemantics};
 use sim_engine::{EngineError, EventQueue, TargetId};
-use sim_mem::{L1Config, L2Counters, L2FillToken, L2Model, L2Source, MemoryOrigin};
+use sim_mem::{
+    L1Config, L2Counters, L2EventMaskPreview, L2FillToken, L2Model, L2PendingSectorKey, L2Source,
+    MemoryOrigin,
+};
 
 /// Per-actor pending due-times with the one choreography the driver
 /// repeats for responses and wakes: `push` at scheduling, `pop_expect`
@@ -424,6 +427,8 @@ pub enum SystemError {
     #[error(transparent)]
     Engine(#[from] EngineError),
     #[error(transparent)]
+    L2PendingReadCapability(#[from] sim_arch::CapabilityError),
+    #[error(transparent)]
     L2Snapshot(#[from] sim_mem::L2SnapshotError),
     #[error(transparent)]
     L2(#[from] sim_mem::L2AccessError),
@@ -519,6 +524,32 @@ pub enum SystemError {
     UnpricedBoundMissing { sm: usize, bound: u64 },
     #[error("response ready time {ready} precedes lower bound {bound} for SM index {sm}")]
     ResponseBeforeBound { sm: usize, ready: u64, bound: u64 },
+    #[error(
+        "response ready time {response_ready} precedes L2 fill ready time {fill_ready} for sector {sector_id}"
+    )]
+    ResponseBeforeFill {
+        sector_id: i64,
+        response_ready: u64,
+        fill_ready: u64,
+    },
+    #[error("pending L2 sector {key:?} has no registered lower-level ready time")]
+    PendingL2ReadyMissing { key: L2PendingSectorKey },
+    #[error("pending L2 sector {key:?} has no ready-time entry to remove")]
+    PendingL2ReadyRemovalMissing { key: L2PendingSectorKey },
+    #[error(
+        "pending L2 sector {key:?} already has lower-level ready time {ready} during registration"
+    )]
+    PendingL2ReadyAlreadyRegistered { key: L2PendingSectorKey, ready: u64 },
+    #[error(
+        "pending L2 sector {key:?} completed at t={got}, but its registered ready time is t={expected}"
+    )]
+    PendingL2ReadyTimeMismatch {
+        key: L2PendingSectorKey,
+        expected: u64,
+        got: u64,
+    },
+    #[error("event queue drained with {entries} pending L2 sector ready-time entries")]
+    PendingL2ReadyNotDrained { entries: usize },
     #[error("{counter} counter overflows u64")]
     CounterOverflow { counter: &'static str },
 }
@@ -532,6 +563,15 @@ fn require_arch(expected: ArchId, got: ArchId, component: &'static str) -> Resul
         });
     }
     Ok(())
+}
+
+fn require_l2_pending_read_semantics(arch: ArchId) -> Result<(), SystemError> {
+    match arch
+        .l2_pending_read_semantics()
+        .require("l2_pending_read_semantics")?
+    {
+        L2PendingReadSemantics::AllocationSectorMergeV1 => Ok(()),
+    }
 }
 
 #[cfg(test)]
@@ -699,6 +739,93 @@ enum Ev {
         reply: ReplyTo,
         fill: Option<L2FillToken>,
     },
+}
+
+#[derive(Default)]
+struct PendingL2Ready(HashMap<L2PendingSectorKey, u64>);
+
+impl PendingL2Ready {
+    fn merged_ready(&self, preview: L2EventMaskPreview) -> Result<Option<u64>, SystemError> {
+        let mut latest = None;
+        for sector in 0..4 {
+            let Some(key) = preview.pending_sector_key(sector) else {
+                continue;
+            };
+            let ready = self
+                .0
+                .get(&key)
+                .copied()
+                .ok_or(SystemError::PendingL2ReadyMissing { key })?;
+            latest = Some(latest.map_or(ready, |current: u64| current.max(ready)));
+        }
+        Ok(latest)
+    }
+
+    fn preflight_register(&self, preview: L2EventMaskPreview) -> Result<(), SystemError> {
+        for sector in 0..4 {
+            let Some(key) = preview.fill_sector_key(sector) else {
+                continue;
+            };
+            if let Some(&ready) = self.0.get(&key) {
+                return Err(SystemError::PendingL2ReadyAlreadyRegistered { key, ready });
+            }
+        }
+        Ok(())
+    }
+
+    fn register(&mut self, fill: L2FillToken, ready: u64) -> Result<(), SystemError> {
+        for sector in 0..4 {
+            let Some(key) = fill.pending_sector_key(sector) else {
+                continue;
+            };
+            if let Some(&existing_ready) = self.0.get(&key) {
+                return Err(SystemError::PendingL2ReadyAlreadyRegistered {
+                    key,
+                    ready: existing_ready,
+                });
+            }
+        }
+        for sector in 0..4 {
+            if let Some(key) = fill.pending_sector_key(sector) {
+                self.0.insert(key, ready);
+            }
+        }
+        Ok(())
+    }
+
+    fn preflight_remove(&self, fill: L2FillToken, now: u64) -> Result<(), SystemError> {
+        for sector in 0..4 {
+            let Some(key) = fill.pending_sector_key(sector) else {
+                continue;
+            };
+            let ready = self
+                .0
+                .get(&key)
+                .copied()
+                .ok_or(SystemError::PendingL2ReadyRemovalMissing { key })?;
+            if ready != now {
+                return Err(SystemError::PendingL2ReadyTimeMismatch {
+                    key,
+                    expected: ready,
+                    got: now,
+                });
+            }
+        }
+        Ok(())
+    }
+
+    fn commit_remove(&mut self, fill: L2FillToken) {
+        for sector in 0..4 {
+            if let Some(key) = fill.pending_sector_key(sector) {
+                let removed = self.0.remove(&key);
+                debug_assert!(removed.is_some(), "pending L2 removal was preflighted");
+            }
+        }
+    }
+
+    fn len(&self) -> usize {
+        self.0.len()
+    }
 }
 
 struct L2ResponseCommit {
@@ -1065,6 +1192,7 @@ pub(crate) fn simulate_kernel_shared_with_residency(
     require_arch(arch, l2.config().arch, "L2 configuration")?;
     checked_l2_counters(arch, l2)?;
     require_arch(arch, dram.arch(), "DRAM configuration")?;
+    require_l2_pending_read_semantics(arch)?;
     params.validate_l1_timing(l1_config)?;
     // Fail closed on an inverted ladder: every horizon/run-ahead bound
     // below assumes no response can price under the L2-hit arm.
@@ -1128,6 +1256,7 @@ pub(crate) fn simulate_kernel_shared_with_residency(
     // guard could not be told apart from a real spin.
     let mut wake_due = DueTimes::new(cores.len());
     let mut unpriced = UnpricedBounds((0..cores.len()).map(|_| BTreeMap::new()).collect());
+    let mut pending_l2_ready = PendingL2Ready::default();
     let mut l2_by_source = L2SourceSplit::for_arch(arch);
     let mut dram_server = DramServer::new(dram);
     let mut dram_stats = DramStats::for_arch(arch);
@@ -1226,12 +1355,14 @@ pub(crate) fn simulate_kernel_shared_with_residency(
                 // immediately. If insertion fails, the kernel-private L2
                 // snapshot is discarded and the caller-owned model is unchanged.
                 let line = req.sector_id >> 2;
-                let (l2_access, commit) = staged_l2.access_mask_event_transactional(
+                let (l2_access, commit) = staged_l2.access_mask_event_coalesced_transactional(
                     line,
                     req.sector_mask,
                     req.operation.l2_class(),
                     |preview| -> Result<L2SystemCommit, SystemError> {
                         let lookup = preview.lookup;
+                        let merged_ready = pending_l2_ready.merged_ready(preview)?;
+                        pending_l2_ready.preflight_register(preview)?;
                         let requested_sectors = u64::from(lookup.sectors);
                         let counted_hits = u64::from(lookup.counted_hits);
                         let source_ix = req.source as usize;
@@ -1271,10 +1402,12 @@ pub(crate) fn simulate_kernel_shared_with_residency(
                                 })?;
                         }
 
-                        let fetch_mask = if req.operation.fetches_missing_data() {
-                            req.sector_mask & !lookup.present_mask
-                        } else {
-                            0
+                        let fetch_mask = match req.operation {
+                            MemoryOperation::Read => preview.fill_mask(),
+                            operation if operation.fetches_missing_data() => {
+                                req.sector_mask & !lookup.present_mask
+                            }
+                            _ => 0,
                         };
                         let fetch_sectors = u64::from(fetch_mask.count_ones());
                         let origin_fetches =
@@ -1310,6 +1443,36 @@ pub(crate) fn simulate_kernel_shared_with_residency(
                         };
                         let bw_ready = service_preview.map_or(0, |(_, ready)| ready);
 
+                        let fetch_latency_ready = if fetch_sectors > 0 {
+                            let operation = if req.reply != ReplyTo::None {
+                                "DRAM response visibility"
+                            } else if req.operation == MemoryOperation::Atomic {
+                                "unobserved ATOM DRAM completion"
+                            } else {
+                                "DRAM fill visibility"
+                            };
+                            Some(checked_cycle_add(
+                                operation,
+                                req.issue_time,
+                                params.global_flat_latency,
+                            )?)
+                        } else {
+                            None
+                        };
+                        let fill_ready = if preview.fill_mask() != 0 {
+                            Some(
+                                fetch_latency_ready
+                                    .ok_or(SystemError::FillScheduleMismatch {
+                                        sector_id: req.sector_id,
+                                        has_token: true,
+                                        has_ready: false,
+                                    })?
+                                    .max(bw_ready),
+                            )
+                        } else {
+                            None
+                        };
+
                         let response = if req.reply != ReplyTo::None {
                             let response_origin_ix = req.origin.index();
                             let bound = checked_cycle_add(
@@ -1318,15 +1481,9 @@ pub(crate) fn simulate_kernel_shared_with_residency(
                                 params.l1_miss_latency,
                             )?;
                             let unpriced_removal = unpriced.prepare_remove(sm_ix, bound)?;
-                            let latency_ready = if lookup.all_present() {
-                                bound
-                            } else {
-                                checked_cycle_add(
-                                    "DRAM response visibility",
-                                    req.issue_time,
-                                    params.global_flat_latency,
-                                )?
-                            };
+                            let latency_ready = bound
+                                .max(fetch_latency_ready.unwrap_or(0))
+                                .max(merged_ready.unwrap_or(0));
                             let ready = latency_ready.max(bw_ready);
                             if ready < bound {
                                 return Err(SystemError::ResponseBeforeBound {
@@ -1361,36 +1518,18 @@ pub(crate) fn simulate_kernel_shared_with_residency(
 
                         let atomic_completion_ready =
                             if req.operation == MemoryOperation::Atomic && response.is_none() {
-                                let latency_ready = if lookup.all_present() {
-                                    checked_cycle_add(
+                                let latency_ready = match fetch_latency_ready {
+                                    Some(ready) => ready,
+                                    None => checked_cycle_add(
                                         "unobserved ATOM L2-hit completion",
                                         req.issue_time,
                                         params.l1_miss_latency,
-                                    )?
-                                } else {
-                                    checked_cycle_add(
-                                        "unobserved ATOM DRAM completion",
-                                        req.issue_time,
-                                        params.global_flat_latency,
-                                    )?
+                                    )?,
                                 };
                                 Some(latency_ready.max(bw_ready))
                             } else {
                                 None
                             };
-
-                        let fill_ready = match (preview.fill_mask(), response.as_ref()) {
-                            (0, _) => None,
-                            (_, Some(response)) => Some(response.ready),
-                            (_, None) => Some(
-                                checked_cycle_add(
-                                    "DRAM fill visibility",
-                                    req.issue_time,
-                                    params.global_flat_latency,
-                                )?
-                                .max(bw_ready),
-                            ),
-                        };
 
                         Ok(L2SystemCommit {
                             source_ix,
@@ -1417,18 +1556,45 @@ pub(crate) fn simulate_kernel_shared_with_residency(
                         has_ready,
                     });
                 }
-                // Reply-bearing fills travel in one event so completion is
-                // ordered before delivery without relying on two equal-time
-                // sequence numbers. Reply-less read fetches still receive a
-                // fill-only event. An ATOM whose return is unobserved retains a
-                // timing-only completion event; Store/RED need no completion.
+                if let (Some(fill), Some(ready)) = (l2_access.fill, commit.fill_ready) {
+                    pending_l2_ready.register(fill, ready)?;
+                }
+                // A response that becomes ready with its own new fill carries the
+                // token so installation precedes delivery in one event. A mixed
+                // new/pending read can instead finish its new fetch first and wait
+                // longer for an older pending sector; expose that fill at its true
+                // ready time, then deliver a fill-less response.
                 if let Some(response) = commit.response.as_ref() {
+                    let response_fill = match (l2_access.fill, commit.fill_ready) {
+                        (Some(fill), Some(fill_ready)) if fill_ready == response.ready => {
+                            Some(fill)
+                        }
+                        (Some(fill), Some(fill_ready)) if fill_ready < response.ready => {
+                            queue.schedule_at(fill_ready, ev.target, Ev::L2Fill(fill))?;
+                            None
+                        }
+                        (Some(_), Some(fill_ready)) => {
+                            return Err(SystemError::ResponseBeforeFill {
+                                sector_id: req.sector_id,
+                                response_ready: response.ready,
+                                fill_ready,
+                            });
+                        }
+                        (None, None) => None,
+                        _ => {
+                            return Err(SystemError::FillScheduleMismatch {
+                                sector_id: req.sector_id,
+                                has_token,
+                                has_ready,
+                            });
+                        }
+                    };
                     queue.schedule_at(
                         response.ready,
                         ev.target,
                         Ev::MemResponse {
                             reply: req.reply,
-                            fill: l2_access.fill,
+                            fill: response_fill,
                         },
                     )?;
                 } else if let (Some(fill), Some(ready)) = (l2_access.fill, commit.fill_ready) {
@@ -1467,7 +1633,9 @@ pub(crate) fn simulate_kernel_shared_with_residency(
                 spin.on_progress_event(ev.time);
             }
             Ev::L2Fill(fill) => {
+                pending_l2_ready.preflight_remove(fill, ev.time)?;
                 let _completion = staged_l2.complete_fill(fill)?;
+                pending_l2_ready.commit_remove(fill);
                 spin.on_progress_event(ev.time);
             }
             Ev::AtomicCompletion => {
@@ -1475,11 +1643,15 @@ pub(crate) fn simulate_kernel_shared_with_residency(
             }
             Ev::MemResponse { reply, fill } => {
                 if let Some(fill) = fill {
+                    pending_l2_ready.preflight_remove(fill, ev.time)?;
+                }
+                cores[sm_ix].preflight_response(reply, ev.time)?;
+                if let Some(fill) = fill {
                     // `Stale` is an expected no-op after eviction; delivery of
                     // data to the requester remains valid and must continue.
                     let _completion = staged_l2.complete_fill(fill)?;
+                    pending_l2_ready.commit_remove(fill);
                 }
-                cores[sm_ix].preflight_response(reply, ev.time)?;
                 response_due.pop_expect("memory response", sm_ix, ev.time)?;
                 scratch.clear();
                 cores[sm_ix].on_response(reply, ev.time, &mut scratch)?;
@@ -1510,6 +1682,12 @@ pub(crate) fn simulate_kernel_shared_with_residency(
             }
         }
         terminal_event_time = Some(ev.time);
+    }
+
+    if pending_l2_ready.len() != 0 {
+        return Err(SystemError::PendingL2ReadyNotDrained {
+            entries: pending_l2_ready.len(),
+        });
     }
 
     let mut per_sm = BTreeMap::new();
@@ -1619,16 +1797,18 @@ fn run_sm(
 #[allow(clippy::unwrap_used)]
 mod tests {
     use std::collections::BTreeMap;
+    use std::num::NonZeroU32;
 
+    use sim_arch::LdgstsCompletionThroughput;
     use sim_mem::{
         CacheOpToken, L2Config, L2CounterError, L2FillCompletion, L2OpClass, L2Replacement,
-        SliceHash,
+        LdgstsL1Policy, SliceHash,
     };
 
     use super::*;
     use crate::control_bits::{ControlBits, DepBarrier, WaitMask};
     use crate::issue::{AccessKind, IssueResourceSource, ReplayInst, WarpReplay};
-    use crate::program::{IssueSlot, OpClass};
+    use crate::program::{IssueSlot, OpClass, PipelineClass};
 
     fn cb(stall: u8) -> ControlBits {
         ControlBits::new(stall, false, 7, 7, 0, 0).expect("valid test controls")
@@ -1646,8 +1826,28 @@ mod tests {
         IssueSlot {
             control,
             op_class: OpClass::Other,
-            mem_role: sim_mem::MemRole::None,
+            async_copy_wait_max_pending_groups: 0,
+            pipeline_class: PipelineClass::DispatchOnly,
+            mem_role: if text.trim_start().starts_with("LDGSTS") {
+                sim_mem::MemRole::BypassLoad(CacheOpToken::Ldgsts)
+            } else {
+                sim_mem::MemRole::None
+            },
+            ldgsts_l1_policy: text.trim_start().starts_with("LDGSTS").then_some(
+                if text.split('.').any(|modifier| modifier == "BYPASS") {
+                    LdgstsL1Policy::BypassL1
+                } else {
+                    LdgstsL1Policy::CacheAtAllLevels
+                },
+            ),
             opcode_text: text.to_owned(),
+        }
+    }
+
+    fn classified_slot(control: ControlBits, op_class: OpClass, text: &str) -> IssueSlot {
+        IssueSlot {
+            op_class,
+            ..slot(control, text)
         }
     }
 
@@ -1669,8 +1869,14 @@ mod tests {
             l1_miss_latency: 244,
             global_flat_latency: 423,
             shared_write_barrier_latency: 23,
+            shared_additional_wavefront_latency: 2,
             non_memory_write_barrier_latency: 25,
             read_barrier_latency: 8,
+            ldgsts_l1_mshr_floor: NonZeroU32::new(1).unwrap(),
+            ldgsts_completion_throughput: LdgstsCompletionThroughput {
+                cache_all_payload_bytes_per_cycle: 64,
+                bypass_payload_bytes_per_cycle: 32,
+            },
             max_resident_warps_per_sm: 48,
         }
     }
@@ -1792,6 +1998,11 @@ mod tests {
     }
 
     fn dependent_load_blocks(sector: i64) -> Vec<BlockReplay> {
+        dependent_load_span_blocks(vec![sector])
+    }
+
+    fn dependent_load_span_blocks(sectors: Vec<i64>) -> Vec<BlockReplay> {
+        let len = u16::try_from(sectors.len()).unwrap();
         vec![BlockReplay {
             launch_index: 0,
             warps: vec![WarpReplay {
@@ -1801,7 +2012,7 @@ mod tests {
                         pc: 0,
                         kind: AccessKind::GlobalEligible {
                             off: 0,
-                            len: 1,
+                            len,
                             token: CacheOpToken::LdgECa,
                         },
                     },
@@ -1810,7 +2021,7 @@ mod tests {
                         kind: AccessKind::NonMemory,
                     },
                 ],
-                sectors: vec![sector],
+                sectors,
             }],
         }]
     }
@@ -1821,6 +2032,244 @@ mod tests {
         let mut consumer = cb(1);
         consumer.wait_mask = wait_mask(0b000001);
         schedule(vec![(0, slot(load, "LDG.E")), (16, slot(consumer, "EXIT"))])
+    }
+
+    fn async_copy_blocks(with_wait: bool) -> Vec<BlockReplay> {
+        let mut insts = vec![ReplayInst {
+            pc: 0,
+            kind: AccessKind::GlobalAsyncCopy {
+                off: 0,
+                len: 1,
+                payload_bytes: 512,
+                l1_policy: LdgstsL1Policy::BypassL1,
+            },
+        }];
+        if with_wait {
+            insts.extend([
+                ReplayInst {
+                    pc: 16,
+                    kind: AccessKind::NonMemory,
+                },
+                ReplayInst {
+                    pc: 32,
+                    kind: AccessKind::NonMemory,
+                },
+                ReplayInst {
+                    pc: 48,
+                    kind: AccessKind::NonMemory,
+                },
+            ]);
+        }
+        vec![BlockReplay {
+            launch_index: 0,
+            warps: vec![WarpReplay {
+                warp_slot: 0,
+                insts,
+                sectors: vec![40],
+            }],
+        }]
+    }
+
+    fn async_copy_schedule(with_wait: bool) -> FunctionSchedule {
+        let mut slots = vec![(0, slot(cb(1), "LDGSTS.E.BYPASS"))];
+        if with_wait {
+            slots.extend([
+                (
+                    16,
+                    classified_slot(
+                        ControlBits::new(1, true, 0, 7, 0, 0).unwrap(),
+                        OpClass::AsyncCopyCommit,
+                        "LDGDEPBAR",
+                    ),
+                ),
+                (
+                    32,
+                    classified_slot(cb(1), OpClass::AsyncCopyWait, "DEPBAR.LE SB0, 0x0"),
+                ),
+                (48, slot(cb(1), "EXIT")),
+            ]);
+        }
+        schedule(slots)
+    }
+
+    fn cacheable_async_copy_blocks(with_wait: bool) -> Vec<BlockReplay> {
+        let mut blocks = async_copy_blocks(with_wait);
+        let AccessKind::GlobalAsyncCopy { l1_policy, .. } = &mut blocks[0].warps[0].insts[0].kind
+        else {
+            unreachable!("async-copy fixture owns a global async source")
+        };
+        *l1_policy = LdgstsL1Policy::CacheAtAllLevels;
+        blocks
+    }
+
+    fn cacheable_async_copy_schedule(with_wait: bool) -> FunctionSchedule {
+        let mut slots = vec![(0, slot(cb(1), "LDGSTS.E"))];
+        if with_wait {
+            slots.extend([
+                (
+                    16,
+                    classified_slot(
+                        ControlBits::new(1, true, 0, 7, 0, 0).unwrap(),
+                        OpClass::AsyncCopyCommit,
+                        "LDGDEPBAR",
+                    ),
+                ),
+                (
+                    32,
+                    classified_slot(cb(1), OpClass::AsyncCopyWait, "DEPBAR.LE SB0, 0x0"),
+                ),
+                (48, slot(cb(1), "EXIT")),
+            ]);
+        }
+        schedule(slots)
+    }
+
+    #[test]
+    fn cacheable_async_copy_uses_l1_fill_response_path() {
+        let sched = cacheable_async_copy_schedule(true);
+        let per_sm = BTreeMap::from([(0, cacheable_async_copy_blocks(true))]);
+        let mut l2 = l2_model();
+
+        let result = simulate_kernel_shared(
+            &per_sm,
+            &sched,
+            &params(),
+            l1_config(),
+            &mut l2,
+            carded_bw(),
+        )
+        .unwrap();
+
+        assert_eq!(result.per_sm[&0].instructions_issued, 4);
+        assert_eq!(result.per_sm[&0].cycles, 433);
+        let l1 = result.per_sm[&0].l1.unwrap();
+        assert_eq!(l1.misses, 1);
+        assert_eq!(l1.bypass_sectors, 0);
+        assert_eq!(result.l2_by_source.source(L2Source::L1Fill), (1, 0));
+        assert_eq!(result.l2_by_source.source(L2Source::Bypass), (0, 0));
+        assert_eq!(result.dram.read_sectors, 1);
+        assert_eq!(result.terminal_event_time, Some(423));
+    }
+
+    #[test]
+    fn async_copy_wait_uses_dram_miss_response_time() {
+        let sched = async_copy_schedule(true);
+        let per_sm = BTreeMap::from([(0, async_copy_blocks(true))]);
+        let mut l2 = l2_model();
+
+        let result = simulate_kernel_shared(
+            &per_sm,
+            &sched,
+            &params(),
+            l1_config(),
+            &mut l2,
+            carded_bw(),
+        )
+        .unwrap();
+
+        assert_eq!(result.per_sm[&0].instructions_issued, 4);
+        assert_eq!(result.per_sm[&0].cycles, 441);
+        assert_eq!(result.l2_by_source.source(L2Source::Bypass), (1, 0));
+        assert_eq!(result.dram.read_sectors, 1);
+        assert_eq!(result.terminal_event_time, Some(423));
+    }
+
+    #[test]
+    fn async_copy_wait_uses_l2_hit_response_time() {
+        let sched = async_copy_schedule(true);
+        let per_sm = BTreeMap::from([(0, async_copy_blocks(true))]);
+        let mut l2 = l2_model();
+        let warm = l2
+            .access_mask_event_transactional(10, 0b0001, L2OpClass::Read, |_| {
+                Ok::<(), sim_mem::L2AccessError>(())
+            })
+            .unwrap()
+            .0;
+        l2.complete_fill(warm.fill.expect("cold warmup mints a fill"))
+            .unwrap();
+
+        let result = simulate_kernel_shared(
+            &per_sm,
+            &sched,
+            &params(),
+            l1_config(),
+            &mut l2,
+            carded_bw(),
+        )
+        .unwrap();
+
+        assert_eq!(result.per_sm[&0].cycles, 262);
+        assert_eq!(result.l2_by_source.source(L2Source::Bypass), (1, 1));
+        assert_eq!(result.dram.read_sectors, 0);
+        assert_eq!(result.terminal_event_time, Some(244));
+    }
+
+    #[test]
+    fn equal_time_async_copy_responses_are_deterministic() {
+        let sched = async_copy_schedule(true);
+        let run = || {
+            let mut blocks = async_copy_blocks(true);
+            blocks[0].warps[0].insts[0].kind = AccessKind::GlobalAsyncCopy {
+                off: 0,
+                len: 2,
+                payload_bytes: 512,
+                l1_policy: LdgstsL1Policy::BypassL1,
+            };
+            blocks[0].warps[0].sectors = vec![40, 41];
+            let per_sm = BTreeMap::from([(0, blocks)]);
+            let mut l2 = l2_model();
+            simulate_kernel_shared(
+                &per_sm,
+                &sched,
+                &params(),
+                l1_config(),
+                &mut l2,
+                carded_bw(),
+            )
+            .unwrap()
+        };
+
+        // The carded server can service both 32 B reads inside one cycle, so
+        // the fixed 423-cycle DRAM arm gives both response events the same time.
+        // Their queue sequence and final group completion must be reproducible.
+        let first = run();
+        let second = run();
+        for result in [&first, &second] {
+            assert_eq!(result.per_sm[&0].instructions_issued, 4);
+            assert_eq!(result.per_sm[&0].cycles, 441);
+            assert_eq!(result.l2_by_source.source(L2Source::Bypass), (2, 0));
+            assert_eq!(result.dram.read_sectors, 2);
+            assert_eq!(result.dram.bw_delayed_responses, 0);
+            assert_eq!(result.terminal_event_time, Some(423));
+        }
+        assert_eq!(first.l2, second.l2);
+        assert_eq!(first.l2_by_source, second.l2_by_source);
+        assert_eq!(first.dram, second.dram);
+        assert_eq!(first.per_sm[&0].cycles, second.per_sm[&0].cycles);
+        assert_eq!(first.terminal_event_time, second.terminal_event_time);
+    }
+
+    #[test]
+    fn final_async_copy_response_survives_past_issue_frontier() {
+        let sched = async_copy_schedule(false);
+        let per_sm = BTreeMap::from([(0, async_copy_blocks(false))]);
+        let mut l2 = l2_model();
+
+        let result = simulate_kernel_shared(
+            &per_sm,
+            &sched,
+            &params(),
+            l1_config(),
+            &mut l2,
+            carded_bw(),
+        )
+        .unwrap();
+
+        assert_eq!(result.per_sm[&0].cycles, 1);
+        assert_eq!(result.per_sm[&0].instructions_issued, 1);
+        assert_eq!(result.terminal_event_time, Some(423));
+        assert_eq!(result.l2_by_source.source(L2Source::Bypass), (1, 0));
+        assert_eq!(result.dram.read_sectors, 1);
     }
 
     #[test]
@@ -1837,6 +2286,20 @@ mod tests {
                 expected: 244,
                 got: 245,
             }))
+        ));
+    }
+
+    #[test]
+    fn shared_system_does_not_inherit_sm86_pending_reads_on_sm120() {
+        assert!(matches!(
+            require_l2_pending_read_semantics(ArchId::Sm120),
+            Err(SystemError::L2PendingReadCapability(
+                sim_arch::CapabilityError::ResearchGap {
+                    arch: ArchId::Sm120,
+                    capability: "l2_pending_read_semantics",
+                    ..
+                }
+            ))
         ));
     }
 
@@ -2512,11 +2975,10 @@ mod tests {
     }
 
     /// Two same-cycle reads of one absent sector both observe it pending rather
-    /// than valid. FIFO order remains deterministic, but no implicit L2 MSHR or
-    /// request coalescing is invented: each read counts a miss, fetches, and
-    /// carries its own generation-bound completion.
+    /// than valid. They remain distinct L2 lookup misses, but the second read
+    /// joins the allocation/sector's original lower-level fetch and ready time.
     #[test]
-    fn same_cycle_pending_reads_remain_distinct_misses() {
+    fn same_cycle_pending_reads_coalesce_lower_fetch() {
         let sched = load_consumer_schedule();
         let per_sm = BTreeMap::from([(0, dependent_load_blocks(4)), (7, dependent_load_blocks(4))]);
         let mut l2 = l2_model();
@@ -2529,14 +2991,261 @@ mod tests {
             carded_bw(),
         )
         .unwrap();
-        // Both L2 accesses are ordered before either data-ready completion at
-        // t=423. The first completion validates the sector and the second is an
-        // explicit duplicate completion; both SM responses still arrive.
+        // Both lookups are ordered before the original data-ready completion at
+        // t=423. The matching pending sector shares that one fetch; each SM still
+        // receives its own response at the deterministic original completion.
         assert_eq!(r.l2.misses, 2);
         assert_eq!(r.l2.hits, 0);
-        assert_eq!(r.dram.read_sectors, 2);
+        assert_eq!(r.dram.read_sectors, 1);
         assert_eq!(r.per_sm[&0].cycles, 424);
         assert_eq!(r.per_sm[&7].cycles, 424);
+    }
+
+    #[test]
+    fn pending_l2_ready_state_is_generation_sector_typed_and_transactional() {
+        let mut l2 = l2_model();
+        let (first, first_preview) = l2
+            .access_mask_event_coalesced_transactional(1, 0b0001, L2OpClass::Read, |preview| {
+                Ok::<_, sim_mem::L2AccessError>(preview)
+            })
+            .unwrap();
+        let fill = first.fill.expect("cold read owns one lower-level fetch");
+        let key = first_preview
+            .fill_sector_key(0)
+            .expect("fill preview exposes its opaque sector identity");
+        let mut pending = PendingL2Ready::default();
+        pending.preflight_register(first_preview).unwrap();
+        pending.register(fill, 423).unwrap();
+        assert_eq!(pending.len(), 1);
+        assert!(matches!(
+            pending.preflight_register(first_preview),
+            Err(SystemError::PendingL2ReadyAlreadyRegistered {
+                key: duplicate,
+                ready: 423,
+            }) if duplicate == key
+        ));
+        assert_eq!(pending.len(), 1, "collision preflight mutated the map");
+
+        let (_, merge_preview) = l2
+            .access_mask_event_coalesced_transactional(1, 0b0001, L2OpClass::Read, |preview| {
+                Ok::<_, sim_mem::L2AccessError>(preview)
+            })
+            .unwrap();
+        assert_eq!(pending.merged_ready(merge_preview).unwrap(), Some(423));
+        assert!(matches!(
+            pending.preflight_remove(fill, 422),
+            Err(SystemError::PendingL2ReadyTimeMismatch {
+                key: mismatched,
+                expected: 423,
+                got: 422,
+            }) if mismatched == key
+        ));
+        assert_eq!(pending.len(), 1, "time mismatch mutated the map");
+
+        pending.preflight_remove(fill, 423).unwrap();
+        pending.commit_remove(fill);
+        assert_eq!(pending.len(), 0);
+        assert!(matches!(
+            pending.merged_ready(merge_preview),
+            Err(SystemError::PendingL2ReadyMissing { key: missing }) if missing == key
+        ));
+        assert!(matches!(
+            pending.preflight_remove(fill, 423),
+            Err(SystemError::PendingL2ReadyRemovalMissing { key: missing }) if missing == key
+        ));
+    }
+
+    #[test]
+    fn missing_pending_ready_rolls_back_the_kernel_snapshot() {
+        let sched = load_consumer_schedule();
+        let per_sm = BTreeMap::from([(0, dependent_load_blocks(4))]);
+        let mut l2 = l2_model();
+        let pending = l2
+            .access_mask_event_coalesced_transactional(1, 0b0001, L2OpClass::Read, |_| {
+                Ok::<(), sim_mem::L2AccessError>(())
+            })
+            .unwrap()
+            .0
+            .fill
+            .expect("fixture leaves one sector pending");
+        let before = *l2.counters().unwrap();
+
+        let error = simulate_kernel_shared(
+            &per_sm,
+            &sched,
+            &params(),
+            l1_config(),
+            &mut l2,
+            carded_bw(),
+        )
+        .unwrap_err();
+
+        assert!(matches!(error, SystemError::PendingL2ReadyMissing { .. }));
+        assert_eq!(*l2.counters().unwrap(), before);
+        assert_eq!(
+            l2.complete_fill(pending).unwrap(),
+            L2FillCompletion::Completed {
+                newly_valid_mask: 0b0001,
+                duplicate_mask: 0,
+            },
+            "failed replay mutated the caller's pending allocation"
+        );
+    }
+
+    #[test]
+    fn mixed_new_and_pending_mask_fetches_only_new_sectors() {
+        let sched = load_consumer_schedule();
+        let per_sm = BTreeMap::from([
+            (0, dependent_load_span_blocks(vec![4, 5])),
+            (7, dependent_load_span_blocks(vec![4, 5, 6])),
+        ]);
+        let mut l2 = l2_model();
+
+        let result = simulate_kernel_shared(
+            &per_sm,
+            &sched,
+            &params(),
+            l1_config(),
+            &mut l2,
+            carded_bw(),
+        )
+        .unwrap();
+
+        assert_eq!(result.l2.misses, 5, "pending sectors remain lookup misses");
+        assert_eq!(result.l2.hits, 0);
+        assert_eq!(result.l2.line_misses, 1);
+        assert_eq!(result.l2.sector_fill_misses, 4);
+        assert_eq!(result.l2_by_source.source(L2Source::L1Fill), (5, 0));
+        assert_eq!(
+            result.dram.read_sectors, 3,
+            "the second mask fetches only its one new sector"
+        );
+        assert_eq!(result.per_sm[&0].cycles, 424);
+        assert_eq!(result.per_sm[&7].cycles, 424);
+        assert_eq!(
+            l2.preview_mask(1, 0b0111, L2OpClass::Read)
+                .unwrap()
+                .present_sectors,
+            3
+        );
+    }
+
+    #[test]
+    fn later_pending_read_reuses_the_original_ready_time() {
+        let mut load = cb(1);
+        load.write_barrier = Some(barrier(0));
+        let mut consumer = cb(1);
+        consumer.wait_mask = wait_mask(0b000001);
+        let sched = schedule(vec![
+            (0, slot(load, "LDG.E")),
+            (16, slot(consumer, "EXIT")),
+            (64, slot(cb(7), "IADD3")),
+            (80, slot(load, "LDG.E")),
+            (96, slot(consumer, "EXIT")),
+        ]);
+        let delayed = vec![BlockReplay {
+            launch_index: 1,
+            warps: vec![WarpReplay {
+                warp_slot: 0,
+                insts: vec![
+                    ReplayInst {
+                        pc: 64,
+                        kind: AccessKind::NonMemory,
+                    },
+                    ReplayInst {
+                        pc: 80,
+                        kind: AccessKind::GlobalEligible {
+                            off: 0,
+                            len: 1,
+                            token: CacheOpToken::LdgECa,
+                        },
+                    },
+                    ReplayInst {
+                        pc: 96,
+                        kind: AccessKind::NonMemory,
+                    },
+                ],
+                sectors: vec![4],
+            }],
+        }];
+        let per_sm = BTreeMap::from([(0, dependent_load_blocks(4)), (7, delayed)]);
+        let mut l2 = l2_model();
+
+        let result = simulate_kernel_shared(
+            &per_sm,
+            &sched,
+            &params(),
+            l1_config(),
+            &mut l2,
+            carded_bw(),
+        )
+        .unwrap();
+
+        assert_eq!(result.l2.misses, 2);
+        assert_eq!(result.dram.read_sectors, 1);
+        assert_eq!(result.per_sm[&0].cycles, 424);
+        assert_eq!(
+            result.per_sm[&7].cycles, 424,
+            "the delayed lookup joins the t=423 original completion"
+        );
+        assert_eq!(result.terminal_event_time, Some(423));
+    }
+
+    #[test]
+    fn write_supersession_keeps_the_original_read_response_and_removal() {
+        let mut load = cb(1);
+        load.write_barrier = Some(barrier(0));
+        let mut consumer = cb(1);
+        consumer.wait_mask = wait_mask(0b000001);
+        let sched = schedule(vec![
+            (0, slot(load, "LDG.E")),
+            (16, slot(consumer, "EXIT")),
+            (32, slot(cb(1), "STG.E")),
+            (48, slot(cb(1), "EXIT")),
+        ]);
+        let storer = vec![BlockReplay {
+            launch_index: 1,
+            warps: vec![WarpReplay {
+                warp_slot: 0,
+                insts: vec![
+                    ReplayInst {
+                        pc: 32,
+                        kind: AccessKind::GlobalStore { off: 0, len: 1 },
+                    },
+                    ReplayInst {
+                        pc: 48,
+                        kind: AccessKind::NonMemory,
+                    },
+                ],
+                sectors: vec![4],
+            }],
+        }];
+        let per_sm = BTreeMap::from([(0, dependent_load_blocks(4)), (7, storer)]);
+        let mut l2 = l2_model();
+
+        let result = simulate_kernel_shared(
+            &per_sm,
+            &sched,
+            &params(),
+            l1_config(),
+            &mut l2,
+            carded_bw(),
+        )
+        .unwrap();
+
+        assert_eq!((result.l2.misses, result.l2.hits), (1, 1));
+        assert_eq!(result.l2.write_tag_hits, 1);
+        assert_eq!(result.l2_by_source.source(L2Source::L1Fill), (1, 0));
+        assert_eq!(result.l2_by_source.source(L2Source::Store), (1, 1));
+        assert_eq!(result.dram.read_sectors, 1);
+        assert_eq!(result.per_sm[&0].cycles, 424);
+        assert_eq!(
+            l2.preview_mask(1, 0b0001, L2OpClass::Read)
+                .unwrap()
+                .present_sectors,
+            1,
+            "the store-valid sector survives the original read completion"
+        );
     }
 
     #[test]
