@@ -88,7 +88,7 @@ def _write_memory_trace(
 
     root.mkdir()
     trace = trace_pb2.Trace()
-    trace.trace_contract_id = "sm86_addr_carry_shmem_split_v2"
+    trace.trace_contract_id = trace_admission.EXPECTED_TRACE_CONTRACT_ID
     trace.memory_payload_classes.extend([1, 2, 3, 6, 8])
     device = trace.gpu_device[0]
     device.id = 0
@@ -156,7 +156,7 @@ def _write_two_launch_trace(root: Path) -> Path:
     )
     root.mkdir()
     trace = trace_pb2.Trace()
-    trace.trace_contract_id = "sm86_addr_carry_shmem_split_v2"
+    trace.trace_contract_id = trace_admission.EXPECTED_TRACE_CONTRACT_ID
     trace.memory_payload_classes.extend([1, 2, 3, 6, 8])
     device = trace.gpu_device[0]
     device.id = 0

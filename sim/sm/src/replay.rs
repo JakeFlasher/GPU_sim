@@ -38,7 +38,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use sim_arch::card::{ArchCard, CalibError};
-use sim_arch::{ArchId, Sku};
+use sim_arch::{ArchId, LdgstsDestinationWavefrontProjection, Sku};
 #[cfg(test)]
 use sim_mem::SectorExpansionPlan;
 use sim_mem::{L1Config, L1CounterError, L1Counters, SectorExpansionError};
@@ -119,6 +119,12 @@ pub enum MemoryRouteError {
     AsyncCopySourceSpaceMissing,
     #[error("ASYNC_COPY source carries non-global address_space {space:?}")]
     AsyncCopySourceSpaceInvalid { space: pb::MemorySpace },
+    #[error("ASYNC_COPY carries {got} operands; destination-bearing contract expects {expected}")]
+    AsyncCopyOperandCount { got: usize, expected: usize },
+    #[error("ASYNC_COPY destination is missing address_space")]
+    AsyncCopyDestinationSpaceMissing,
+    #[error("ASYNC_COPY destination carries non-shared address_space {space:?}")]
+    AsyncCopyDestinationSpaceInvalid { space: pb::MemorySpace },
     #[error("memory_op_access_kind {got:?} is incompatible; expected {expected}")]
     AccessKindInvalid {
         got: pb::MemoryOpAccessKind,
@@ -427,14 +433,14 @@ pub enum ReplayError {
         payload_bytes: u64,
     },
     #[error(
-        "{path}: warp {warp_id} record {record_ix}: async-copy payload {payload_bytes} bytes exceeds compact replay-token maximum {max_payload_bytes}"
+        "{path}: warp {warp_id} record {record_ix}: async-copy completion work {completion_work} exceeds compact replay-token maximum {max_completion_work}"
     )]
-    AsyncCopyPayloadOutOfRange {
+    AsyncCopyCompletionWorkOutOfRange {
         path: PathBuf,
         warp_id: i32,
         record_ix: usize,
-        payload_bytes: u64,
-        max_payload_bytes: u32,
+        completion_work: u64,
+        max_completion_work: u32,
     },
     #[error("{path}: warp {warp_id} record {record_ix}: shared-bank projection failed: {source}")]
     SharedBankProjection {
@@ -1766,13 +1772,10 @@ fn validate_replay_architecture(
     ReplayConfiguration::checked(*params, mode)
 }
 
-fn legacy_async_copy_sms(
+fn async_copy_destination_fallback_sms(
     payload_contract: MemoryPayloadContract,
     per_sm_blocks: &BTreeMap<i32, Vec<BlockReplay>>,
 ) -> BTreeSet<i32> {
-    if payload_contract != MemoryPayloadContract::LegacyExclusion {
-        return BTreeSet::new();
-    }
     per_sm_blocks
         .iter()
         .filter_map(|(&sm, blocks)| {
@@ -1780,7 +1783,18 @@ fn legacy_async_copy_sms(
                 .iter()
                 .flat_map(|block| &block.warps)
                 .flat_map(|warp| &warp.insts)
-                .any(|inst| matches!(inst.kind, AccessKind::GlobalAsyncCopy { .. }))
+                .any(|inst| {
+                    matches!(inst.kind, AccessKind::GlobalAsyncCopy { .. })
+                        && (payload_contract
+                            != MemoryPayloadContract::AddressCarryingLdgstsDestinationV3
+                            || matches!(
+                                inst.kind,
+                                AccessKind::GlobalAsyncCopy {
+                                    l1_policy: LdgstsL1Policy::BypassL1,
+                                    ..
+                                }
+                            ))
+                })
                 .then_some(sm)
         })
         .collect()
@@ -1804,7 +1818,8 @@ fn replay_kernel_with_schedule(
         coverage,
         shared_memory_residency,
     } = extract_per_sm_blocks(td, loc, schedule, placement, decode_sectors)?;
-    let legacy_async_copy_sms = legacy_async_copy_sms(td.memory_payload_contract(), &per_sm_blocks);
+    let async_copy_destination_fallback_sms =
+        async_copy_destination_fallback_sms(td.memory_payload_contract(), &per_sm_blocks);
     let replay = match mode {
         ReplayMemMode::Flat | ReplayMemMode::L1Const(_) => {
             let l1_config = match mode {
@@ -1820,7 +1835,7 @@ fn replay_kernel_with_schedule(
                     shared_memory_residency,
                     l1_config,
                 )?;
-                if legacy_async_copy_sms.contains(sm) {
+                if async_copy_destination_fallback_sms.contains(sm) {
                     result.unmodeled_tails.ldgsts_dst_shared_timing = true;
                 }
                 per_sm.insert(*sm, result);
@@ -1845,12 +1860,12 @@ fn replay_kernel_with_schedule(
                 &mut l2,
                 dram,
             )?;
-            for sm in &legacy_async_copy_sms {
+            for sm in &async_copy_destination_fallback_sms {
                 if let Some(result) = sys.per_sm.get_mut(sm) {
                     result.unmodeled_tails.ldgsts_dst_shared_timing = true;
                 }
             }
-            if !legacy_async_copy_sms.is_empty() {
+            if !async_copy_destination_fallback_sms.is_empty() {
                 sys.unmodeled_tails.ldgsts_dst_shared_timing = true;
             }
             require_replay_arch(schedule.arch, sys.arch, "system result")?;
@@ -2683,6 +2698,15 @@ fn compact_memory_route_error(error: &ValidatedMemoryRouteError) -> MemoryRouteE
         ValidatedMemoryRouteError::AsyncCopySourceSpaceInvalid { space } => {
             MemoryRouteError::AsyncCopySourceSpaceInvalid { space }
         }
+        ValidatedMemoryRouteError::AsyncCopyOperandCount { got, expected } => {
+            MemoryRouteError::AsyncCopyOperandCount { got, expected }
+        }
+        ValidatedMemoryRouteError::AsyncCopyDestinationSpaceMissing => {
+            MemoryRouteError::AsyncCopyDestinationSpaceMissing
+        }
+        ValidatedMemoryRouteError::AsyncCopyDestinationSpaceInvalid { space } => {
+            MemoryRouteError::AsyncCopyDestinationSpaceInvalid { space }
+        }
     }
 }
 
@@ -2790,11 +2814,19 @@ fn classify_compact_flat(
                     payload_bytes,
                 });
             }
-            let payload_bytes = narrow_async_copy_payload(payload_bytes, path, warp_id, record_ix)?;
+            let completion_work = project_async_copy_completion_work(
+                arch,
+                l1_policy,
+                payload_bytes,
+                warp.ldgsts_destination_wavefronts_128b_32x4(preflight.memory),
+                path,
+                warp_id,
+                record_ix,
+            )?;
             Ok(AccessKind::GlobalAsyncCopy {
                 off: 0,
                 len: 0,
-                payload_bytes,
+                completion_work,
                 l1_policy,
             })
         }
@@ -2923,8 +2955,10 @@ fn classify_compact_with_l1(
         StagedHierarchyRole::Global(_role) if meta.op_class == pb::MemoryOpClass::AsyncCopy => {
             let l1_policy = require_ldgsts_l1_policy(schedule, arch, preflight.pc)?;
             append_staged_async_copy_sectors(
+                arch,
                 l1_policy,
                 warp.effective_data_bytes(preflight.memory),
+                warp.ldgsts_destination_wavefronts_128b_32x4(preflight.memory),
                 sectors,
                 staged,
                 path,
@@ -3017,11 +3051,19 @@ fn classify_flat_preflighted(
                     payload_bytes,
                 });
             }
-            let payload_bytes = narrow_async_copy_payload(payload_bytes, path, warp_id, record_ix)?;
+            let completion_work = project_async_copy_completion_work(
+                arch,
+                l1_policy,
+                payload_bytes,
+                None,
+                path,
+                warp_id,
+                record_ix,
+            )?;
             Ok(AccessKind::GlobalAsyncCopy {
                 off: 0,
                 len: 0,
-                payload_bytes,
+                completion_work,
                 l1_policy,
             })
         }
@@ -3051,18 +3093,94 @@ fn checked_staged_global_kind(role: MemRole, start: usize, count: usize) -> Opti
     })
 }
 
-fn narrow_async_copy_payload(
+fn project_async_copy_completion_work(
+    arch: ArchId,
+    l1_policy: LdgstsL1Policy,
     payload_bytes: u64,
+    destination_wavefronts: Option<u32>,
     path: &Path,
     warp_id: i32,
     record_ix: usize,
 ) -> Result<u32, ReplayError> {
-    u32::try_from(payload_bytes).map_err(|_| ReplayError::AsyncCopyPayloadOutOfRange {
+    let throughput = arch
+        .ldgsts_completion_throughput()
+        .require("ldgsts_completion_throughput")
+        .map_err(IssueError::from)?;
+    let cache_all_rate = throughput.cache_all_payload_bytes_per_cycle;
+    let bypass_rate = throughput.bypass_payload_bytes_per_cycle;
+    let units_per_cycle = cache_all_rate.max(bypass_rate);
+    if cache_all_rate == 0
+        || bypass_rate == 0
+        || units_per_cycle % cache_all_rate != 0
+        || units_per_cycle % bypass_rate != 0
+    {
+        return Err(IssueError::InvalidLdgstsCompletionThroughput {
+            arch,
+            cache_all_bytes_per_cycle: cache_all_rate,
+            bypass_bytes_per_cycle: bypass_rate,
+        }
+        .into());
+    }
+    let route_rate = match l1_policy {
+        LdgstsL1Policy::CacheAtAllLevels => cache_all_rate,
+        LdgstsL1Policy::BypassL1 => bypass_rate,
+    };
+    let units_per_byte = units_per_cycle / route_rate;
+    let payload_work = payload_bytes.checked_mul(units_per_byte).ok_or(
+        IssueError::TimeMultiplicationOverflow {
+            operation: "LDGSTS payload-fallback completion work",
+            lhs: payload_bytes,
+            rhs: units_per_byte,
+        },
+    )?;
+    let completion_work = if l1_policy == LdgstsL1Policy::CacheAtAllLevels {
+        match destination_wavefronts {
+            Some(wavefronts) => {
+                let timing = arch
+                    .ldgsts_destination_wavefront_timing()
+                    .require("ldgsts_destination_wavefront_timing")
+                    .map_err(IssueError::from)?;
+                match timing.projection {
+                    LdgstsDestinationWavefrontProjection::SourceCohorts128BytesBanks32Words4Bytes => {}
+                }
+                if timing.cycles_per_wavefront == 0 {
+                    return Err(IssueError::InvalidLdgstsDestinationWavefrontTiming {
+                        arch,
+                        cycles_per_wavefront: timing.cycles_per_wavefront,
+                    }
+                    .into());
+                }
+                let destination_cycles = timing
+                    .cycles_per_wavefront
+                    .checked_mul(u64::from(wavefronts))
+                    .ok_or(IssueError::TimeMultiplicationOverflow {
+                        operation: "LDGSTS destination-wavefront completion cycles",
+                        lhs: timing.cycles_per_wavefront,
+                        rhs: u64::from(wavefronts),
+                    })?;
+                let destination_work = destination_cycles.checked_mul(units_per_cycle).ok_or(
+                    IssueError::TimeMultiplicationOverflow {
+                        operation: "LDGSTS destination-wavefront completion work",
+                        lhs: destination_cycles,
+                        rhs: units_per_cycle,
+                    },
+                )?;
+                payload_work.max(destination_work)
+            }
+            None => payload_work,
+        }
+    } else {
+        // Focused bypass probes show a different source/destination coupling;
+        // retain the independently established payload fallback until that
+        // projection is characterized rather than importing the cache-all rule.
+        payload_work
+    };
+    u32::try_from(completion_work).map_err(|_| ReplayError::AsyncCopyCompletionWorkOutOfRange {
         path: path.to_path_buf(),
         warp_id,
         record_ix,
-        payload_bytes,
-        max_payload_bytes: u32::MAX,
+        completion_work,
+        max_completion_work: u32::MAX,
     })
 }
 
@@ -3070,14 +3188,14 @@ fn checked_staged_async_copy_kind(
     l1_policy: LdgstsL1Policy,
     start: usize,
     count: usize,
-    payload_bytes: u32,
+    completion_work: u32,
 ) -> Option<AccessKind> {
     let len = u16::try_from(count).ok()?;
     start.checked_add(count)?;
     Some(AccessKind::GlobalAsyncCopy {
         off: start,
         len,
-        payload_bytes,
+        completion_work,
         l1_policy,
     })
 }
@@ -3148,8 +3266,10 @@ fn append_staged_global_sectors(
 }
 
 fn append_staged_async_copy_sectors(
+    arch: ArchId,
     l1_policy: LdgstsL1Policy,
     payload_bytes: u64,
+    destination_wavefronts: Option<u32>,
     sectors: &mut Vec<i64>,
     sector_scratch: &[i64],
     path: &Path,
@@ -3169,9 +3289,17 @@ fn append_staged_async_copy_sectors(
             payload_bytes,
         });
     }
-    let payload_bytes = narrow_async_copy_payload(payload_bytes, path, warp_id, record_ix)?;
+    let completion_work = project_async_copy_completion_work(
+        arch,
+        l1_policy,
+        payload_bytes,
+        destination_wavefronts,
+        path,
+        warp_id,
+        record_ix,
+    )?;
     append_staged_sectors(
-        checked_staged_async_copy_kind(l1_policy, start, count, payload_bytes),
+        checked_staged_async_copy_kind(l1_policy, start, count, completion_work),
         sectors,
         sector_scratch,
         path,
@@ -3376,8 +3504,10 @@ fn classify_with_l1_preflighted(
                     }
                 })?;
             append_staged_async_copy_sectors(
+                arch,
                 require_ldgsts_l1_policy(schedule, arch, inst.pc)?,
                 payload_bytes,
+                None,
                 sectors,
                 sector_scratch,
                 path,
@@ -5709,7 +5839,7 @@ mod space_routing_tests {
             Ok(AccessKind::GlobalAsyncCopy {
                 off: 0,
                 len: 0,
-                payload_bytes: 4,
+                completion_work: 4,
                 l1_policy: LdgstsL1Policy::CacheAtAllLevels,
             })
         ));
@@ -5729,7 +5859,7 @@ mod space_routing_tests {
             Ok(AccessKind::GlobalAsyncCopy {
                 off: 1,
                 len: 1,
-                payload_bytes: 4,
+                completion_work: 4,
                 l1_policy: LdgstsL1Policy::CacheAtAllLevels,
             })
         ));
@@ -5901,7 +6031,7 @@ mod space_routing_tests {
             Ok(AccessKind::GlobalAsyncCopy {
                 off: 1,
                 len: 0,
-                payload_bytes: 0,
+                completion_work: 0,
                 l1_policy: LdgstsL1Policy::CacheAtAllLevels,
             })
         ));
@@ -5910,10 +6040,19 @@ mod space_routing_tests {
     }
 
     #[test]
-    fn async_copy_payload_narrowing_is_typed_and_precedes_arena_mutation() {
-        let path = Path::new("payload_overflow.pb");
+    fn async_copy_completion_work_narrowing_is_typed_and_precedes_arena_mutation() {
+        let path = Path::new("completion_work_overflow.pb");
         assert_eq!(
-            narrow_async_copy_payload(u64::from(u32::MAX), path, 3, 7).unwrap(),
+            project_async_copy_completion_work(
+                ArchId::Sm86,
+                LdgstsL1Policy::CacheAtAllLevels,
+                u64::from(u32::MAX),
+                None,
+                path,
+                3,
+                7,
+            )
+            .unwrap(),
             u32::MAX
         );
 
@@ -5921,8 +6060,10 @@ mod space_routing_tests {
         let sector_scratch = vec![29];
         let payload_bytes = u64::from(u32::MAX) + 1;
         let error = append_staged_async_copy_sectors(
+            ArchId::Sm86,
             LdgstsL1Policy::CacheAtAllLevels,
             payload_bytes,
+            None,
             &mut sectors,
             &sector_scratch,
             path,
@@ -5932,13 +6073,13 @@ mod space_routing_tests {
         .unwrap_err();
         assert!(matches!(
             error,
-            ReplayError::AsyncCopyPayloadOutOfRange {
+            ReplayError::AsyncCopyCompletionWorkOutOfRange {
                 warp_id: 3,
                 record_ix: 7,
-                payload_bytes: got,
-                max_payload_bytes: u32::MAX,
+                completion_work,
+                max_completion_work: u32::MAX,
                 ..
-            } if got == payload_bytes
+            } if completion_work == payload_bytes
         ));
         assert_eq!(sectors, vec![11]);
     }
@@ -5959,7 +6100,7 @@ mod space_routing_tests {
             AccessKind::GlobalAsyncCopy {
                 off: 0,
                 len: 0,
-                payload_bytes: 4,
+                completion_work: 4,
                 l1_policy: LdgstsL1Policy::CacheAtAllLevels,
             }
         ));
@@ -5982,7 +6123,7 @@ mod space_routing_tests {
             AccessKind::GlobalAsyncCopy {
                 off: 1,
                 len: 1,
-                payload_bytes: 4,
+                completion_work: 4,
                 l1_policy: LdgstsL1Policy::CacheAtAllLevels,
             }
         ));
@@ -6010,7 +6151,7 @@ mod space_routing_tests {
             Ok(AccessKind::GlobalAsyncCopy {
                 off: 0,
                 len: 1,
-                payload_bytes: 4,
+                completion_work: 8,
                 l1_policy: LdgstsL1Policy::BypassL1,
             })
         ));
@@ -6037,7 +6178,7 @@ mod space_routing_tests {
             AccessKind::GlobalAsyncCopy {
                 off: 0,
                 len: 0,
-                payload_bytes: 0,
+                completion_work: 0,
                 l1_policy: LdgstsL1Policy::CacheAtAllLevels,
             }
         ));
@@ -6060,7 +6201,7 @@ mod space_routing_tests {
             AccessKind::GlobalAsyncCopy {
                 off: 1,
                 len: 0,
-                payload_bytes: 0,
+                completion_work: 0,
                 l1_policy: LdgstsL1Policy::CacheAtAllLevels,
             }
         ));
@@ -6326,7 +6467,7 @@ mod space_routing_tests {
             AccessKind::GlobalAsyncCopy {
                 off: 0,
                 len: 0,
-                payload_bytes: 4,
+                completion_work: 4,
                 l1_policy: LdgstsL1Policy::CacheAtAllLevels,
             }
         ));
@@ -6419,7 +6560,8 @@ mod replay_identity_tests {
     use crate::program::{FunctionSchedule, IssueSlot, OpClass, PipelineClass};
     use prost::Message;
     use sim_trace::reader::{
-        ADDRESS_CARRYING_TRACE_CONTRACT_ID, SHARED_MEMORY_SPLIT_TRACE_CONTRACT_ID,
+        ADDRESS_CARRYING_TRACE_CONTRACT_ID, LDGSTS_DESTINATION_TRACE_CONTRACT_ID,
+        SHARED_MEMORY_SPLIT_TRACE_CONTRACT_ID,
     };
     use std::collections::BTreeMap as StdMap;
 
@@ -6688,6 +6830,76 @@ mod replay_identity_tests {
         inst
     }
 
+    fn destination_async_copy_inst(transpose_source_pairing: bool) -> pb::Instruction {
+        let source = (0_i64..32)
+            .map(|lane| {
+                let source_index = if transpose_source_pairing {
+                    (lane % 4) * 8 + lane / 4
+                } else {
+                    lane
+                };
+                0x7000_0000 + source_index * 16
+            })
+            .collect();
+        let destination = (0_i64..32).map(|lane| lane * 16).collect();
+        pb::Instruction {
+            pc: 16,
+            active_mask: Some(u32::MAX),
+            predicate_mask: Some(u32::MAX),
+            function_unique_id: 1,
+            vpc: Some(16),
+            sm_id: Some(0),
+            warpid_sm: Some(0),
+            warpid_tb: Some(0),
+            data_width: Some(16),
+            memory_op_class: Some(pb::MemoryOpClass::AsyncCopy as i32),
+            memory_op_access_kind: Some(pb::MemoryOpAccessKind::AsyncCopy as i32),
+            addresses: vec![
+                pb::Address {
+                    data_width: 16,
+                    compression_format: sim_trace::lanes::FORMAT_LIST_ALL,
+                    addrs: source,
+                    allocation_id: Some(1),
+                    address_space: Some(pb::MemorySpace::Global as i32),
+                    ..Default::default()
+                },
+                pb::Address {
+                    data_width: 16,
+                    compression_format: sim_trace::lanes::FORMAT_LIST_ALL,
+                    addrs: destination,
+                    allocation_id: None,
+                    address_space: Some(pb::MemorySpace::Shared as i32),
+                    ..Default::default()
+                },
+            ],
+            ..Default::default()
+        }
+    }
+
+    fn destination_async_schedule(l1_policy: LdgstsL1Policy) -> FunctionSchedule {
+        FunctionSchedule {
+            arch: ArchId::Sm86,
+            function_unique_id: 1,
+            kernel_name: "k".into(),
+            function_name: "f".into(),
+            by_pc: StdMap::from([(
+                16,
+                IssueSlot {
+                    control: ControlBits::new(0, false, 7, 7, 0, 0).expect("valid test controls"),
+                    op_class: OpClass::Other,
+                    async_copy_wait_max_pending_groups: 0,
+                    pipeline_class: PipelineClass::DispatchOnly,
+                    mem_role: MemRole::BypassLoad(CacheOpToken::Ldgsts),
+                    ldgsts_l1_policy: Some(l1_policy),
+                    opcode_text: match l1_policy {
+                        LdgstsL1Policy::CacheAtAllLevels => "LDGSTS.E.128 [R1], [R2.64]".into(),
+                        LdgstsL1Policy::BypassL1 => "LDGSTS.E.BYPASS.128 [R1], [R2.64]".into(),
+                    },
+                },
+            )]),
+        }
+    }
+
     fn write_trace_with(dir: &std::path::Path, inst: pb::Instruction) {
         let kernel = pb::Kernel {
             id: 1,
@@ -6756,6 +6968,23 @@ mod replay_identity_tests {
         let mut root = pb::Trace::decode(std::fs::read(&root_path).unwrap().as_slice()).unwrap();
         root.trace_contract_id.clear();
         root.memory_payload_classes.clear();
+        std::fs::write(root_path, root.encode_to_vec()).unwrap();
+    }
+
+    fn rewrite_as_ldgsts_destination_payload(dir: &Path) {
+        let root_path = dir.join("dynamic_trace.pb");
+        let mut root = pb::Trace::decode(std::fs::read(&root_path).unwrap().as_slice()).unwrap();
+        root.trace_contract_id = LDGSTS_DESTINATION_TRACE_CONTRACT_ID.to_owned();
+        let kernel = &mut root
+            .gpu_device
+            .get_mut(&0)
+            .unwrap()
+            .streams
+            .get_mut(&0)
+            .unwrap()
+            .kernels[0];
+        kernel.shared_memory_static_bytes = Some(0);
+        kernel.shared_memory_dynamic_bytes = Some(0);
         std::fs::write(root_path, root.encode_to_vec()).unwrap();
     }
 
@@ -7179,48 +7408,31 @@ mod replay_identity_tests {
         ));
     }
 
-    fn replay_async_copy_tail(mut inst: pb::Instruction, legacy: bool) -> TailFlags {
+    fn replay_async_copy_tail(
+        mut inst: pb::Instruction,
+        payload_contract: MemoryPayloadContract,
+        l1_policy: LdgstsL1Policy,
+    ) -> TailFlags {
         inst.sm_id = Some(0);
         inst.warpid_sm = Some(0);
 
         let tmp = tempfile::tempdir().unwrap();
         write_trace_with(tmp.path(), inst);
-        if legacy {
-            rewrite_as_legacy_payload(tmp.path());
+        match payload_contract {
+            MemoryPayloadContract::LegacyExclusion => rewrite_as_legacy_payload(tmp.path()),
+            MemoryPayloadContract::AddressCarryingLdgstsDestinationV3 => {
+                rewrite_as_ldgsts_destination_payload(tmp.path());
+            }
+            MemoryPayloadContract::AddressCarryingV1 => {}
+            MemoryPayloadContract::AddressCarryingSharedMemorySplitV2 => {
+                panic!("tail fixture does not emit split-v2 roots")
+            }
         }
 
         let td = TraceDir::open_direct(tmp.path()).expect("async-copy trace opens");
-        assert_eq!(
-            td.memory_payload_contract(),
-            if legacy {
-                MemoryPayloadContract::LegacyExclusion
-            } else {
-                MemoryPayloadContract::AddressCarryingV1
-            }
-        );
+        assert_eq!(td.memory_payload_contract(), payload_contract);
         let loc = td.kernels().next().expect("test kernel exists");
-        let schedules = BTreeMap::from([(
-            1,
-            FunctionSchedule {
-                arch: ArchId::Sm86,
-                function_unique_id: 1,
-                kernel_name: "k".into(),
-                function_name: "f".into(),
-                by_pc: StdMap::from([(
-                    16,
-                    IssueSlot {
-                        control: ControlBits::new(0, false, 7, 7, 0, 0)
-                            .expect("valid test controls"),
-                        op_class: OpClass::Other,
-                        async_copy_wait_max_pending_groups: 0,
-                        pipeline_class: PipelineClass::DispatchOnly,
-                        mem_role: MemRole::BypassLoad(CacheOpToken::Ldgsts),
-                        ldgsts_l1_policy: Some(LdgstsL1Policy::CacheAtAllLevels),
-                        opcode_text: "LDGSTS.E.128 [R1], [R2.64]".into(),
-                    },
-                )]),
-            },
-        )]);
+        let schedules = BTreeMap::from([(1, destination_async_schedule(l1_policy))]);
         let params = IssueModelParams::from_legacy_card_latencies_for_arch(
             ArchId::Sm86,
             34.0,
@@ -7252,17 +7464,92 @@ mod replay_identity_tests {
     }
 
     #[test]
-    fn current_async_copy_source_clears_folded_visibility_tail() {
+    fn destination_v3_projects_cache_all_work_but_preserves_bypass_fallback() {
+        for (transpose, l1_policy, expected_work) in [
+            (false, LdgstsL1Policy::CacheAtAllLevels, 512),
+            (true, LdgstsL1Policy::CacheAtAllLevels, 2_048),
+            (true, LdgstsL1Policy::BypassL1, 1_024),
+        ] {
+            let tmp = tempfile::tempdir().unwrap();
+            write_trace_with(tmp.path(), destination_async_copy_inst(transpose));
+            rewrite_as_ldgsts_destination_payload(tmp.path());
+            let td = TraceDir::open_direct(tmp.path()).expect("destination-v3 trace opens");
+            assert_eq!(
+                td.memory_payload_contract(),
+                MemoryPayloadContract::AddressCarryingLdgstsDestinationV3
+            );
+            let loc = td.kernels().next().unwrap();
+            let schedule = destination_async_schedule(l1_policy);
+
+            for decode_sectors in [false, true] {
+                let extracted = extract_per_sm_blocks(
+                    &td,
+                    &loc,
+                    &schedule,
+                    sm86_test_placement(),
+                    decode_sectors,
+                )
+                .expect("destination-bearing async copy extracts");
+                let warp = &extracted.per_sm_blocks.get(&0).unwrap()[0].warps[0];
+                assert!(matches!(
+                    warp.insts[0].kind,
+                    AccessKind::GlobalAsyncCopy {
+                        completion_work,
+                        l1_policy: got_policy,
+                        ..
+                    } if completion_work == expected_work && got_policy == l1_policy
+                ));
+                assert_eq!(warp.sectors.len(), if decode_sectors { 16 } else { 0 });
+            }
+        }
+
+        assert_eq!(
+            replay_async_copy_tail(
+                destination_async_copy_inst(true),
+                MemoryPayloadContract::AddressCarryingLdgstsDestinationV3,
+                LdgstsL1Policy::CacheAtAllLevels,
+            ),
+            TailFlags::default()
+        );
+        assert_eq!(
+            replay_async_copy_tail(
+                destination_async_copy_inst(true),
+                MemoryPayloadContract::AddressCarryingLdgstsDestinationV3,
+                LdgstsL1Policy::BypassL1,
+            ),
+            TailFlags {
+                ldgsts_dst_shared_timing: true,
+                ..TailFlags::default()
+            }
+        );
+    }
+
+    #[test]
+    fn source_only_async_copy_retains_folded_destination_visibility_tail() {
         let inst = bind_test_allocation(malformed_global_inst(pb::MemoryOpClass::AsyncCopy));
-        let tails = replay_async_copy_tail(inst, false);
-        assert_eq!(tails, TailFlags::default());
+        let tails = replay_async_copy_tail(
+            inst,
+            MemoryPayloadContract::AddressCarryingV1,
+            LdgstsL1Policy::CacheAtAllLevels,
+        );
+        assert_eq!(
+            tails,
+            TailFlags {
+                ldgsts_dst_shared_timing: true,
+                ..TailFlags::default()
+            }
+        );
     }
 
     #[test]
     fn legacy_omitted_async_copy_source_retains_folded_visibility_tail() {
         let mut inst = malformed_global_inst(pb::MemoryOpClass::AsyncCopy);
         inst.addresses.clear();
-        let tails = replay_async_copy_tail(inst, true);
+        let tails = replay_async_copy_tail(
+            inst,
+            MemoryPayloadContract::LegacyExclusion,
+            LdgstsL1Policy::CacheAtAllLevels,
+        );
         assert_eq!(
             tails,
             TailFlags {

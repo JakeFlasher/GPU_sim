@@ -931,6 +931,7 @@ mod tests {
                 cache_all_payload_bytes_per_cycle: 64,
                 bypass_payload_bytes_per_cycle: 32,
             },
+            ldgsts_cache_all_destination_wavefront_cycles: 2,
             max_resident_warps_per_sm: 48,
         }
     }

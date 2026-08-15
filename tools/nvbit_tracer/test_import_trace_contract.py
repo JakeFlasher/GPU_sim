@@ -530,10 +530,6 @@ class TraceContractValidatorNegativeTest(unittest.TestCase):
                 instruction_pb2.MEMORY_OP_CLASS_GLOBAL,
                 address_pb2.MEMORY_SPACE_LOCAL,
             ),
-            (
-                instruction_pb2.MEMORY_OP_CLASS_ASYNC_COPY,
-                address_pb2.MEMORY_SPACE_SHARED,
-            ),
         )
         for op_class, address_space in cases:
             with self.subTest(op_class=op_class, address_space=address_space):
@@ -549,6 +545,21 @@ class TraceContractValidatorNegativeTest(unittest.TestCase):
                     result.typed_reason,
                     "memory_op_class_address_space_conflict",
                 )
+
+    def test_async_copy_shared_operand_is_structurally_compatible(self) -> None:
+        from import_trace_contract import validate_threadblock
+
+        _tb_pb2, instruction_pb2, address_pb2 = _import_pb()
+        tb = _make_threadblock_with_instruction(
+            add_address=True,
+            set_memory_op_class=True,
+            memory_op_class_value=instruction_pb2.MEMORY_OP_CLASS_ASYNC_COPY,
+            address_space_value=address_pb2.MEMORY_SPACE_SHARED,
+        )
+
+        result = validate_threadblock(tb)
+
+        self.assertTrue(result.ok, result)
 
     def test_structural_error_precedes_space_conflict(self) -> None:
         from import_trace_contract import validate_threadblock

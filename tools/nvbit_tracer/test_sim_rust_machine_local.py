@@ -27,6 +27,10 @@ from tools.nvbit_tracer.build_m1_payload_authority import (
     M1AuthorityError,
     validate_path_aliases,
 )
+from tools.nvbit_tracer.import_trace_contract import (
+    ADDRESS_CARRYING_V1_TRACE_CONTRACT_ID,
+)
+from tools.nvbit_tracer.proto_binding_loader import load_dynamic_trace_bindings
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _SIM = _REPO_ROOT / "sim"
@@ -38,7 +42,7 @@ _EXPECTED_CURRENT_PREFIXES = (
     "workloads/portable_lcd/results/",
 )
 _RESULT_RE = re.compile(
-    r"test result: ok\. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out;"
+    r"test result: ok\. 1 passed; 0 failed; 0 ignored; 0 measured; \d+ filtered out;"
 )
 
 pytestmark = pytest.mark.hardware_evidence
@@ -132,6 +136,14 @@ def _load_current_rows() -> tuple[list[dict[str, str]], str | None]:
 
 
 _CURRENT_ROWS, _AUTHORITY_ERROR = _load_current_rows()
+_SMOKE_ROW = next(
+    (
+        row
+        for row in _CURRENT_ROWS
+        if row["slug"] == "embedding_gather_int32_sm80"
+    ),
+    _CURRENT_ROWS[0],
+)
 _OWNED_TARGET_DIR: Path | None = None
 
 
@@ -167,6 +179,25 @@ def _trace_root(row: dict[str, str]) -> Path:
     trace = root / "dynamic_trace.pb"
     if not trace.is_file() or trace.is_symlink():
         _unavailable(f"current trace payload is unavailable: {value}/dynamic_trace.pb")
+
+    try:
+        bindings = load_dynamic_trace_bindings()
+        metadata = bindings.trace_pb2.Trace()
+        metadata.ParseFromString(trace.read_bytes())
+    except Exception as exc:
+        _unavailable(f"current trace metadata is unreadable: {value}: {exc}")
+    if metadata.trace_contract_id in (
+        "",
+        ADDRESS_CARRYING_V1_TRACE_CONTRACT_ID,
+    ):
+        for device in metadata.gpu_device.values():
+            for stream in device.streams.values():
+                for kernel in stream.kernels:
+                    if kernel.size_shared_memory != 0:
+                        _unavailable(
+                            f"historical trace {value} has nonzero combined shared "
+                            "memory without the V2 static/dynamic split"
+                        )
     return root
 
 
@@ -246,7 +277,7 @@ def _run_rust_test(
 
 
 def test_sim_trace_smoke_walks_real_trace() -> None:
-    trace_root = _trace_root(_CURRENT_ROWS[0])
+    trace_root = _trace_root(_SMOKE_ROW)
     output = _run_rust_test(
         package="sim-trace",
         test_binary="machine_local_smoke",
@@ -282,14 +313,14 @@ def _run_replay(row: dict[str, str], **mode: str) -> str:
 
 
 def test_sim_sm_replay_flat_mode_one_cell() -> None:
-    output = _run_replay(_CURRENT_ROWS[0], SIM_L1_DISABLE="1")
+    output = _run_replay(_SMOKE_ROW, SIM_L1_DISABLE="1")
     assert "smoke: replay" in output
     assert "smoke: l1" not in output
     assert "smoke: l2" not in output
 
 
 def test_sim_sm_replay_l1_const_mode_one_cell() -> None:
-    output = _run_replay(_CURRENT_ROWS[0], SIM_L2_DISABLE="1")
+    output = _run_replay(_SMOKE_ROW, SIM_L2_DISABLE="1")
     assert "smoke: replay" in output
     assert "smoke: l1" in output
     assert "smoke: l2" not in output

@@ -1165,11 +1165,10 @@ static const char *op_class_to_schema_string(
  * address-carrying contract transition. A global atomic emits a
  * normal address record and resolves its allocation_id like an
  * ordinary global access; a shared atomic (ATOMS) is admitted but
- * exempt from the global allocation-id rule. An ASYNC_COPY (LDGSTS
- * / cp.async) records only its GLOBAL SOURCE operand (the shared
- * destination is intra-CTA and is skipped in the receiver) — the
- * discriminator is the per-operand memory space (getMemorySpace),
- * not the op class. See plans/sm86_ldgsts_atoms_operand_adjudication.md. */
+ * exempt from the global allocation-id rule. Destination-bearing V3
+ * ASYNC_COPY records both LDGSTS MREFs and uses their structural ordinal to
+ * stamp the GLOBAL source and SHARED destination independently. See
+ * plans/sm86_ldgsts_atoms_operand_adjudication.md. */
 static bool is_excluded_op_class(
     memory_op_class_classifier::Value cls) {
   return cls == memory_op_class_classifier::kTexture ||
@@ -1180,11 +1179,10 @@ static bool is_excluded_op_class(
 }
 
 /* Map an NVBit per-instruction memory space to the wire `address_space`
- * (dynamic_trace::MemorySpace). This is the discriminator the allocation-
- * identity gate keys on — captured from Instr::getMemorySpace() at instrument
- * time. GLOBAL_TO_SHARED (LDGSTS) maps to GLOBAL because the only LDGSTS address
- * record the tracer records is the global source (MREF id=1); the shared
- * destination is not recorded (see the metric_extractor cp.async precedent).
+ * (dynamic_trace::MemorySpace). This is the default discriminator the
+ * allocation-identity gate keys on. GLOBAL_TO_SHARED is instruction-level
+ * provenance and therefore maps to GLOBAL here; destination-bearing LDGSTS
+ * records are refined per MREF ordinal by operand_address_space() below.
  * DISTRIBUTED_SHARED collapses to SHARED (intra-cluster shared, not a global
  * allocation). CONSTANT/TEXTURE/SURFACE/NONE are not reached on the payload
  * path (their classes are excluded) and map to UNSPECIFIED. */
@@ -1204,6 +1202,24 @@ static dynamic_trace::MemorySpace nvbit_memspace_to_proto(
     default:
       return dynamic_trace::MEMORY_SPACE_UNSPECIFIED;
   }
+}
+
+/* Refine instruction-level memory space to an exact operand space. NVBit
+ * exposes LDGSTS as GLOBAL_TO_SHARED at instruction granularity, while its
+ * decoded MREFs are [shared destination, global source]. The injected channel
+ * carries that ordinal in reg_id: 0 -> SHARED, 1 -> GLOBAL. Any other ordinal
+ * stays UNSPECIFIED and fails the V3 ordered-pair contract instead of being
+ * guessed from address values or allocation lookup results. */
+static dynamic_trace::MemorySpace operand_address_space(
+    memory_op_class_classifier::Value cls,
+    dynamic_trace::MemorySpace instruction_space,
+    uint32_t mref_ordinal) {
+  if (cls != memory_op_class_classifier::kAsyncCopy) {
+    return instruction_space;
+  }
+  if (mref_ordinal == 0) return dynamic_trace::MEMORY_SPACE_SHARED;
+  if (mref_ordinal == 1) return dynamic_trace::MEMORY_SPACE_GLOBAL;
+  return dynamic_trace::MEMORY_SPACE_UNSPECIFIED;
 }
 
 /* Whether a wire `address_space` must resolve a global allocation_id and fail
@@ -1232,16 +1248,18 @@ static bool trace_sampling_sector_accesses(
   const bool global_space = space_requires_global_identity(address_space);
   /* GLOBAL has the same documented legacy/current fallback as the protobuf
    * consumer: absent/UNSPECIFIED space is still unambiguously global from the
-   * instruction class.  An explicitly non-global space is contradictory.
-   * ASYNC_COPY is stricter because its one recorded operand is structurally the
-   * GLOBAL source and therefore must carry GLOBAL/GENERIC. */
+   * instruction class. An explicitly non-global space is contradictory.
+   * ASYNC_COPY admits its exact GLOBAL source and SHARED destination, but only
+   * the source contributes L2 sectors. */
   const bool global_class_fallback =
       cls == memory_op_class_classifier::kGlobal &&
       address_space == dynamic_trace::MEMORY_SPACE_UNSPECIFIED;
   if (cls == memory_op_class_classifier::kGlobal &&
       !global_space && !global_class_fallback)
     return false;
-  if (cls == memory_op_class_classifier::kAsyncCopy && !global_space)
+  if (cls == memory_op_class_classifier::kAsyncCopy &&
+      !global_space &&
+      address_space != dynamic_trace::MEMORY_SPACE_SHARED)
     return false;
   if (cls == memory_op_class_classifier::kAtomic && !global_space &&
       address_space != dynamic_trace::MEMORY_SPACE_SHARED &&
@@ -1317,7 +1335,8 @@ static TraceSamplingIdentityResult trace_sampling_identity_result(
       cls == memory_op_class_classifier::kGlobal ||
       (cls == memory_op_class_classifier::kAtomic &&
        space_requires_global_identity(address_space)) ||
-      cls == memory_op_class_classifier::kAsyncCopy;
+      (cls == memory_op_class_classifier::kAsyncCopy &&
+       space_requires_global_identity(address_space));
   const uint32_t mask = record.active_mask & record.predicate_mask;
   if (!result.required || mask == 0) return result;
 
@@ -2232,21 +2251,12 @@ void instrument_function_if_needed(CUcontext ctx, CUfunction func, int device_id
         const InstrType::operand_t *op = instr->getOperand(i);
         if (op->type == InstrType::OperandType::MREF) {
           mem_oper_idx++;
-          // LDGSTS (cp.async) carries two MREFs in SASS order — [shared_dst]
-          // first (ordinal 0), [global_src.64] second (ordinal 1). Record ONLY
-          // the global source: skip instrumenting the shared-destination MREF
-          // (the shared window is intra-CTA and has no global allocation). This
-          // is a STRUCTURAL discriminator (operand ordinal), not an allocation-
-          // lookup outcome, so a global source that later resolves all-zero is
-          // surfaced as a typed unmapped_memory_range by the receiver's gate,
-          // never silently dropped. mem_oper_idx is still advanced so the source
-          // is captured as MREF ordinal 1 — the metric_extractor cp.async
-          // precedent, runtime-tested by calib_cpasync_global_to_shared.
-          if (mem_oper_idx == 0 &&
-              std::string(instr->getOpcode()).find("LDGSTS") !=
-                  std::string::npos) {
-            continue;
-          }
+          // LDGSTS carries [shared_dst] at MREF ordinal 0 and
+          // [global_src.64] at ordinal 1. Instrument both. Calls are emitted in
+          // reverse MREF order below, yielding the V3 wire order
+          // (GLOBAL/GENERIC source, SHARED destination); the ordinal is carried
+          // independently through inst_trace_t::reg_id so the receiver never
+          // infers operand space from an allocation lookup.
           num_mref++;
           per_operand_type[num_of_injects] = traced_operand_instrument(TRACED_REG_TYPE::MEMORY_REF, 0, 0);
           if(op->u.mref.has_desc) {
@@ -2330,7 +2340,9 @@ void instrument_function_if_needed(CUcontext ctx, CUfunction func, int device_id
               }else {
                 nvbit_add_call_arg_const_val32(instr, SECRET_UREG_DESC_NOT_USED);
               }
-              nvbit_add_call_arg_const_val32(instr, SECRET_UREG_DESC_NOT_USED);
+              // Carry the structural MREF ordinal in the otherwise unused
+              // STANDARD_MEM op_reg_val_2 channel slot.
+              nvbit_add_call_arg_const_val32(instr, mem_oper_idx);
               nvbit_add_call_arg_const_val32(instr, SECRET_UREG_DESC_NOT_USED);
               mem_oper_idx--;
             }else if(has_ldc_with_reg || has_ldc_with_ureg) {
@@ -4192,6 +4204,8 @@ void *recv_thread_fun(void *args) {
                 ts_address_space = static_cast<dynamic_trace::MemorySpace>(
                     it_space->second);
               }
+              ts_address_space = operand_address_space(
+                  ts_cls, ts_address_space, ma->reg_id);
               uint64_t record_sector_accesses = 0;
               if (!trace_sampling_sector_accesses(
                       *ma, ts_cls, ts_address_space,
@@ -4344,12 +4358,11 @@ void *recv_thread_fun(void *args) {
           auto kind =
               memory_op_access_kind_classifier::classify(opcode_full);
 
-          /* Per-operand memory space captured at instrument time
-           * (getMemorySpace). The wire `address_space` discriminator: it
-           * decides whether the global allocation-identity gate applies to this
-           * record (GLOBAL/GENERIC) or the record is exempt (SHARED/LOCAL,
-           * allocation_id 0 legit). Absent from the map (e.g. a class never
-           * instrumented for space) stays UNSPECIFIED. */
+          /* Per-operand memory space. The instruction-level map supplies the
+           * ordinary default; LDGSTS is refined from its channel-carried MREF
+           * ordinal so GLOBAL source and SHARED destination cannot be conflated.
+           * The resulting wire discriminator decides whether allocation identity
+           * applies to this record. */
           dynamic_trace::MemorySpace addr_space =
               dynamic_trace::MEMORY_SPACE_UNSPECIFIED;
           {
@@ -4358,6 +4371,7 @@ void *recv_thread_fun(void *args) {
               addr_space =
                   static_cast<dynamic_trace::MemorySpace>(it_space->second);
           }
+          addr_space = operand_address_space(cls, addr_space, ma->reg_id);
 
           /* task11b producer-side typed exclusions: route both
            * the 6 explicit excluded classes (TEXTURE / SURFACE /
@@ -4454,12 +4468,11 @@ void *recv_thread_fun(void *args) {
           // Allocation-identity gate. Plain global loads/stores resolve as
           // before (kGlobal, unconditional — preserves the frozen M1 anchor).
           // A GLOBAL/GENERIC-space atomic resolves the same way; a SHARED
-          // atomic (ATOMS) is exempt and keeps resolved_allocation_id == 0
-          // legitimately. An ASYNC_COPY record is the LDGSTS GLOBAL SOURCE (the
-          // shared destination is never instrumented — structurally skipped at
-          // instrument time), so it runs the gate exactly like a global access:
-          // all-active-lanes-zero is a typed `unmapped_memory_range`, NOT a
-          // silent skip — a missed/unmapped global source fails closed.
+          // atomic (ATOMS) is exempt and keeps resolved_allocation_id == 0.
+          // ASYNC_COPY follows its per-operand space: the LDGSTS global source
+          // resolves exactly like a global access, while its shared destination
+          // is exempt and contributes no allocation identity. An unmapped source
+          // remains a typed `unmapped_memory_range`, never a silent skip.
           TraceSamplingIdentityResult identity =
               ts_identity_available
                   ? ts_identity
@@ -5039,7 +5052,7 @@ void nvbit_at_ctx_term(CUcontext ctx) {
       // address-carrying payload classes and additionally requires every kernel
       // to carry presence-bearing static and dynamic shared-memory components
       // whose sum equals the legacy combined field.
-      dyn_trace.set_trace_contract_id("sm86_addr_carry_shmem_split_v2");
+      dyn_trace.set_trace_contract_id("sm86_addr_carry_ldgsts_dst_v3");
       dyn_trace.add_memory_payload_classes(dynamic_trace::MEMORY_OP_CLASS_GLOBAL);
       dyn_trace.add_memory_payload_classes(dynamic_trace::MEMORY_OP_CLASS_SHARED);
       dyn_trace.add_memory_payload_classes(dynamic_trace::MEMORY_OP_CLASS_LOCAL);

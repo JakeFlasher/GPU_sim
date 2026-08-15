@@ -35,6 +35,9 @@ from tools.local_labels.immutable_artifact import (
     PinnedTreeSnapshot,
 )
 from tools.nvbit_tracer.import_trace_contract import (
+    ADDRESS_CARRYING_V1_TRACE_CONTRACT_ID,
+    LDGSTS_DESTINATION_V3_TRACE_CONTRACT_ID,
+    SHARED_MEMORY_SPLIT_V2_TRACE_CONTRACT_ID,
     AllocationEntry,
     TraceContractRuntimePrerequisiteMissing,
     TraceContractTrackedBindingsCorrupt,
@@ -56,10 +59,15 @@ from tools.nvbit_tracer.protobuf_wire_preflight import (
 )
 
 
-LEGACY_TRACE_CONTRACT_ID = "sm86_addr_carry_v1"
-EXPECTED_TRACE_CONTRACT_ID = "sm86_addr_carry_shmem_split_v2"
+LEGACY_TRACE_CONTRACT_ID = ADDRESS_CARRYING_V1_TRACE_CONTRACT_ID
+SHARED_MEMORY_SPLIT_TRACE_CONTRACT_ID = SHARED_MEMORY_SPLIT_V2_TRACE_CONTRACT_ID
+EXPECTED_TRACE_CONTRACT_ID = LDGSTS_DESTINATION_V3_TRACE_CONTRACT_ID
 SUPPORTED_TRACE_CONTRACT_IDS = frozenset(
-    {LEGACY_TRACE_CONTRACT_ID, EXPECTED_TRACE_CONTRACT_ID}
+    {
+        LEGACY_TRACE_CONTRACT_ID,
+        SHARED_MEMORY_SPLIT_TRACE_CONTRACT_ID,
+        EXPECTED_TRACE_CONTRACT_ID,
+    }
 )
 EXPECTED_MEMORY_PAYLOAD_CLASSES = (1, 2, 3, 6, 8)
 TRACE_ADMISSION_SCOPE = "forward_capture_only"
@@ -302,12 +310,13 @@ class TraceAdmission:
         if self.admission_scope == TRACE_ADMISSION_SCOPE:
             if self.trace_contract_id != EXPECTED_TRACE_CONTRACT_ID:
                 raise ValueError(
-                    "forward trace admission requires the exact split-v2 contract"
+                    "forward trace admission requires the exact LDGSTS "
+                    "destination-v3 contract"
                 )
             if self.memory_payload_classes != EXPECTED_MEMORY_PAYLOAD_CLASSES:
                 raise ValueError(
                     "forward memory_payload_classes must equal the canonical "
-                    "split-v2 vector"
+                    "destination-v3 vector"
                 )
         elif self.admission_scope == HISTORICAL_TRACE_ADMISSION_SCOPE:
             if self.trace_contract_id not in SUPPORTED_TRACE_CONTRACT_IDS:
@@ -1026,6 +1035,12 @@ def _validate_trace_root(
                 "legacy v1 traces are historical-read-only and cannot mint "
                 "new evidence",
             )
+        if root.trace_contract_id == SHARED_MEMORY_SPLIT_TRACE_CONTRACT_ID:
+            raise TraceAdmissionError(
+                "superseded_trace_historical_only",
+                "shared-memory split v2 traces are historical-read-only; "
+                "forward capture requires destination-bearing LDGSTS v3",
+            )
         raise TraceAdmissionError(
             "trace_contract_mismatch",
             f"got {root.trace_contract_id!r}, expected "
@@ -1458,7 +1473,7 @@ def _require_trace_admission_snapshot(
                     message,
                     label=str(path),
                     allocations=allocations,
-                    address_carrying_v1=True,
+                    memory_payload_contract_id=root.trace_contract_id,
                     expected_function_unique_id=int(kernel.function_unique_id),
                 )
                 if not contract.ok:

@@ -1877,6 +1877,7 @@ mod tests {
                 cache_all_payload_bytes_per_cycle: 64,
                 bypass_payload_bytes_per_cycle: 32,
             },
+            ldgsts_cache_all_destination_wavefront_cycles: 2,
             max_resident_warps_per_sm: 48,
         }
     }
@@ -2040,7 +2041,7 @@ mod tests {
             kind: AccessKind::GlobalAsyncCopy {
                 off: 0,
                 len: 1,
-                payload_bytes: 512,
+                completion_work: 1024,
                 l1_policy: LdgstsL1Policy::BypassL1,
             },
         }];
@@ -2094,10 +2095,15 @@ mod tests {
 
     fn cacheable_async_copy_blocks(with_wait: bool) -> Vec<BlockReplay> {
         let mut blocks = async_copy_blocks(with_wait);
-        let AccessKind::GlobalAsyncCopy { l1_policy, .. } = &mut blocks[0].warps[0].insts[0].kind
+        let AccessKind::GlobalAsyncCopy {
+            completion_work,
+            l1_policy,
+            ..
+        } = &mut blocks[0].warps[0].insts[0].kind
         else {
             unreachable!("async-copy fixture owns a global async source")
         };
+        *completion_work = 512;
         *l1_policy = LdgstsL1Policy::CacheAtAllLevels;
         blocks
     }
@@ -2212,7 +2218,7 @@ mod tests {
             blocks[0].warps[0].insts[0].kind = AccessKind::GlobalAsyncCopy {
                 off: 0,
                 len: 2,
-                payload_bytes: 512,
+                completion_work: 1024,
                 l1_policy: LdgstsL1Policy::BypassL1,
             };
             blocks[0].warps[0].sectors = vec![40, 41];

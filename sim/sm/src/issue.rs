@@ -63,7 +63,9 @@ use std::num::NonZeroU32;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use sim_arch::card::{ArchCard, CalibError, RequiredIssueResources};
-use sim_arch::{ArchId, LdgstsCompletionThroughput, SharedBankProjection};
+use sim_arch::{
+    ArchId, LdgstsCompletionThroughput, LdgstsDestinationWavefrontProjection, SharedBankProjection,
+};
 use sim_mem::{
     CacheOpToken, EvAccess, EvAccessUnobserved, FillKey, L1AccessError, L1Cache, L1Config,
     L1Counters, L1MutationBudget, L2OpClass, L2Source, LdgstsL1Policy, MemoryOrigin,
@@ -200,10 +202,14 @@ pub struct IssueModelParams {
     /// `LDGSTS.E` source traffic. Ordinary loads retain the card's unresolved
     /// MSHR approximation; an unlimited L1 ablation remains unlimited.
     pub(crate) ldgsts_l1_mshr_floor: NonZeroU32,
-    /// Effective async-copy payload delivery rates. The issue model converts both
-    /// routes into one exact fixed-point work domain per committed group; it does
-    /// not infer payload from deduplicated source-sector count.
+    /// Effective async-copy payload delivery rates. Replay converts route-local
+    /// payload fallback and any exact destination projection into this model's
+    /// fixed-point work domain before issue.
     pub(crate) ldgsts_completion_throughput: LdgstsCompletionThroughput,
+    /// Independently measured cache-all destination completion time. Each exact
+    /// source-cohort-scoped bank wavefront contributes this many cycles; bypass
+    /// copies retain payload fallback until their distinct projection is known.
+    pub(crate) ldgsts_cache_all_destination_wavefront_cycles: u64,
     /// Resident-warp ceiling per SM. The current sm_86 hypothesis is 48;
     /// template architectures return a typed capability gap until their
     /// occupancy evidence is carded.
@@ -274,6 +280,22 @@ fn ldgsts_completion_throughput(arch: ArchId) -> Result<LdgstsCompletionThroughp
     Ok(throughput)
 }
 
+fn ldgsts_cache_all_destination_wavefront_cycles(arch: ArchId) -> Result<u64, IssueError> {
+    let timing = arch
+        .ldgsts_destination_wavefront_timing()
+        .require("ldgsts_destination_wavefront_timing")?;
+    match timing.projection {
+        LdgstsDestinationWavefrontProjection::SourceCohorts128BytesBanks32Words4Bytes => {}
+    }
+    if timing.cycles_per_wavefront == 0 {
+        return Err(IssueError::InvalidLdgstsDestinationWavefrontTiming {
+            arch,
+            cycles_per_wavefront: timing.cycles_per_wavefront,
+        });
+    }
+    Ok(timing.cycles_per_wavefront)
+}
+
 impl IssueModelParams {
     /// Resolve card latencies plus the retained architecture-local issue
     /// hypotheses. The name is intentionally explicit: this executable lane does
@@ -291,6 +313,8 @@ impl IssueModelParams {
         let shared_additional_wavefront_latency = shared_additional_wavefront_latency(arch)?;
         let ldgsts_l1_mshr_floor = ldgsts_l1_mshr_floor(arch)?;
         let ldgsts_completion_throughput = ldgsts_completion_throughput(arch)?;
+        let ldgsts_cache_all_destination_wavefront_cycles =
+            ldgsts_cache_all_destination_wavefront_cycles(arch)?;
         Ok(Self {
             arch,
             resource_source: IssueResourceSource::ArchitectureDefaults,
@@ -303,6 +327,7 @@ impl IssueModelParams {
             read_barrier_latency: hypotheses.read_barrier_latency,
             ldgsts_l1_mshr_floor,
             ldgsts_completion_throughput,
+            ldgsts_cache_all_destination_wavefront_cycles,
             max_resident_warps_per_sm: hypotheses.max_resident_warps_per_sm,
         })
     }
@@ -325,6 +350,8 @@ impl IssueModelParams {
         let shared_additional_wavefront_latency = shared_additional_wavefront_latency(arch)?;
         let ldgsts_l1_mshr_floor = ldgsts_l1_mshr_floor(arch)?;
         let ldgsts_completion_throughput = ldgsts_completion_throughput(arch)?;
+        let ldgsts_cache_all_destination_wavefront_cycles =
+            ldgsts_cache_all_destination_wavefront_cycles(arch)?;
         Ok(Self {
             arch,
             resource_source: IssueResourceSource::Carded(resources),
@@ -337,6 +364,7 @@ impl IssueModelParams {
             read_barrier_latency: resources.barrier_latencies.read,
             ldgsts_l1_mshr_floor,
             ldgsts_completion_throughput,
+            ldgsts_cache_all_destination_wavefront_cycles,
             max_resident_warps_per_sm: resources.occupancy.max_resident_warps_per_sm,
         })
     }
@@ -385,6 +413,10 @@ impl IssueModelParams {
         self.ldgsts_completion_throughput
     }
 
+    pub const fn ldgsts_cache_all_destination_wavefront_cycles(&self) -> u64 {
+        self.ldgsts_cache_all_destination_wavefront_cycles
+    }
+
     fn ldgsts_delivery_units_per_cycle(&self) -> u64 {
         self.ldgsts_completion_throughput
             .cache_all_payload_bytes_per_cycle
@@ -392,32 +424,6 @@ impl IssueModelParams {
                 self.ldgsts_completion_throughput
                     .bypass_payload_bytes_per_cycle,
             )
-    }
-
-    fn ldgsts_delivery_work(
-        &self,
-        l1_policy: LdgstsL1Policy,
-        payload_bytes: u64,
-    ) -> Result<u64, IssueError> {
-        let units_per_cycle = self.ldgsts_delivery_units_per_cycle();
-        let route_rate = match l1_policy {
-            LdgstsL1Policy::CacheAtAllLevels => {
-                self.ldgsts_completion_throughput
-                    .cache_all_payload_bytes_per_cycle
-            }
-            LdgstsL1Policy::BypassL1 => {
-                self.ldgsts_completion_throughput
-                    .bypass_payload_bytes_per_cycle
-            }
-        };
-        let units_per_byte = units_per_cycle / route_rate;
-        payload_bytes
-            .checked_mul(units_per_byte)
-            .ok_or(IssueError::TimeMultiplicationOverflow {
-                operation: "LDGSTS payload-delivery work",
-                lhs: payload_bytes,
-                rhs: units_per_byte,
-            })
     }
 
     fn ldgsts_delivery_cycles(&self, work: u64) -> u64 {
@@ -444,6 +450,8 @@ impl IssueModelParams {
                     shared_additional_wavefront_latency(self.arch)?;
                 let ldgsts_l1_mshr_floor = ldgsts_l1_mshr_floor(self.arch)?;
                 let ldgsts_completion_throughput = ldgsts_completion_throughput(self.arch)?;
+                let ldgsts_cache_all_destination_wavefront_cycles =
+                    ldgsts_cache_all_destination_wavefront_cycles(self.arch)?;
                 let fields = [
                     (
                         "shared_additional_wavefront_latency",
@@ -466,6 +474,11 @@ impl IssueModelParams {
                         ldgsts_completion_throughput.bypass_payload_bytes_per_cycle,
                         self.ldgsts_completion_throughput
                             .bypass_payload_bytes_per_cycle,
+                    ),
+                    (
+                        "ldgsts_cache_all_destination_wavefront_cycles",
+                        ldgsts_cache_all_destination_wavefront_cycles,
+                        self.ldgsts_cache_all_destination_wavefront_cycles,
                     ),
                     (
                         "non_memory_write_barrier_latency",
@@ -623,12 +636,19 @@ pub enum IssueError {
         bypass_bytes_per_cycle: u64,
     },
     #[error(
-        "warp {warp} asynchronous-copy source activity is inconsistent: sectors={sectors}, payload_bytes={payload_bytes}"
+        "architecture {arch} has invalid cache-all LDGSTS destination timing: {cycles_per_wavefront} cycles per wavefront; expected a positive value"
     )]
-    AsyncCopyPayloadMismatch {
+    InvalidLdgstsDestinationWavefrontTiming {
+        arch: ArchId,
+        cycles_per_wavefront: u64,
+    },
+    #[error(
+        "warp {warp} asynchronous-copy source activity is inconsistent: sectors={sectors}, completion_work={completion_work}"
+    )]
+    AsyncCopyCompletionWorkMismatch {
         warp: usize,
         sectors: u16,
-        payload_bytes: u64,
+        completion_work: u64,
     },
     #[error("issue-card validation failed: {0}")]
     Calibration(#[from] CalibError),
@@ -1799,8 +1819,10 @@ impl WarpState<'_> {
 fn async_copy_source_count(kind: AccessKind) -> Option<u16> {
     match kind {
         AccessKind::GlobalAsyncCopy {
-            len, payload_bytes, ..
-        } if payload_bytes != 0 => Some(len),
+            len,
+            completion_work,
+            ..
+        } if completion_work != 0 => Some(len),
         AccessKind::GlobalAsyncCopy { .. }
         | AccessKind::NonMemory
         | AccessKind::Shared { .. }
@@ -1814,13 +1836,11 @@ fn async_copy_source_count(kind: AccessKind) -> Option<u16> {
     }
 }
 
-fn async_copy_delivery(kind: AccessKind) -> Option<(LdgstsL1Policy, u64)> {
+fn async_copy_completion_work(kind: AccessKind) -> Option<u64> {
     match kind {
         AccessKind::GlobalAsyncCopy {
-            payload_bytes,
-            l1_policy,
-            ..
-        } if payload_bytes != 0 => Some((l1_policy, u64::from(payload_bytes))),
+            completion_work, ..
+        } if completion_work != 0 => Some(u64::from(completion_work)),
         AccessKind::GlobalAsyncCopy { .. }
         | AccessKind::NonMemory
         | AccessKind::Shared { .. }
@@ -1834,17 +1854,19 @@ fn async_copy_delivery(kind: AccessKind) -> Option<(LdgstsL1Policy, u64)> {
     }
 }
 
-fn validate_async_copy_payload(kind: AccessKind, warp: usize) -> Result<(), IssueError> {
+fn validate_async_copy_completion_work(kind: AccessKind, warp: usize) -> Result<(), IssueError> {
     if let AccessKind::GlobalAsyncCopy {
-        len, payload_bytes, ..
+        len,
+        completion_work,
+        ..
     } = kind
         && len != 0
-        && payload_bytes == 0
+        && completion_work == 0
     {
-        return Err(IssueError::AsyncCopyPayloadMismatch {
+        return Err(IssueError::AsyncCopyCompletionWorkMismatch {
             warp,
             sectors: len,
-            payload_bytes: u64::from(payload_bytes),
+            completion_work: u64::from(completion_work),
         });
     }
     Ok(())
@@ -2862,15 +2884,12 @@ impl<'a> SmCore<'a> {
             AccessKind::GlobalAsyncCopy {
                 off,
                 len,
-                payload_bytes,
+                completion_work,
                 l1_policy: LdgstsL1Policy::CacheAtAllLevels,
             } => {
-                let source_active = payload_bytes != 0;
+                let source_active = completion_work != 0;
                 let range = off..off + usize::from(len);
-                let delivery_work = p.ldgsts_delivery_work(
-                    LdgstsL1Policy::CacheAtAllLevels,
-                    u64::from(payload_bytes),
-                )?;
+                let delivery_work = u64::from(completion_work);
                 let async_group = if source_active {
                     Some(async_copies[wix].add_pending_async_copy_sources(
                         wix,
@@ -2949,7 +2968,7 @@ impl<'a> SmCore<'a> {
             }
             | AccessKind::GlobalUntagged { off, len } => {
                 let origin = MemoryOrigin::Global;
-                let (source, counted, operation, async_copy, payload_bytes) = match kind {
+                let (source, counted, operation, async_copy, completion_work) = match kind {
                     // ATOM rides bypass provenance but remains a returning RMW
                     // operation; every other bypass / untagged sector is a read.
                     AccessKind::GlobalBypass { token, .. } => (
@@ -2963,12 +2982,14 @@ impl<'a> SmCore<'a> {
                         token == CacheOpToken::Ldgsts,
                         0,
                     ),
-                    AccessKind::GlobalAsyncCopy { payload_bytes, .. } => (
+                    AccessKind::GlobalAsyncCopy {
+                        completion_work, ..
+                    } => (
                         L2Source::Bypass,
                         true,
                         MemoryOperation::Read,
-                        payload_bytes != 0,
-                        payload_bytes,
+                        completion_work != 0,
+                        completion_work,
                     ),
                     AccessKind::GlobalUntagged { .. } => {
                         (L2Source::Untagged, false, MemoryOperation::Read, false, 0)
@@ -2995,8 +3016,7 @@ impl<'a> SmCore<'a> {
                     };
                 }
                 let async_group = if async_copy {
-                    let delivery_work =
-                        p.ldgsts_delivery_work(LdgstsL1Policy::BypassL1, u64::from(payload_bytes))?;
+                    let delivery_work = u64::from(completion_work);
                     Some(async_copies[wix].add_pending_async_copy_sources(
                         wix,
                         u32::from(len),
@@ -3892,13 +3912,16 @@ impl<'a> SmCore<'a> {
                     add_budget("L1 recency budget", &mut budget.recency_touches, sectors)?;
                     add_budget("L1 fill budget", &mut budget.new_fills, sectors)?;
                     if shared.is_none()
-                        && let Some((l1_policy, payload_bytes)) = async_copy_delivery(inst.kind)
+                        && let Some(completion_work) = async_copy_completion_work(inst.kind)
                     {
-                        debug_assert_eq!(l1_policy, LdgstsL1Policy::CacheAtAllLevels);
-                        constant_async_deliveries[pick_ix] = Some((
-                            wix,
-                            self.params.ldgsts_delivery_work(l1_policy, payload_bytes)?,
+                        debug_assert!(matches!(
+                            inst.kind,
+                            AccessKind::GlobalAsyncCopy {
+                                l1_policy: LdgstsL1Policy::CacheAtAllLevels,
+                                ..
+                            }
                         ));
+                        constant_async_deliveries[pick_ix] = Some((wix, completion_work));
                     }
                     if shared.is_some()
                         && warp
@@ -3974,7 +3997,7 @@ impl<'a> SmCore<'a> {
                 AccessKind::GlobalAsyncCopy {
                     off,
                     len,
-                    payload_bytes,
+                    completion_work,
                     l1_policy: LdgstsL1Policy::BypassL1,
                     ..
                 } => {
@@ -3986,7 +4009,7 @@ impl<'a> SmCore<'a> {
                         sectors,
                     )?;
                     if let Some(st) = shared
-                        && (write_barrier.is_some() || payload_bytes != 0)
+                        && (write_barrier.is_some() || completion_work != 0)
                     {
                         if warp
                             .preflight_pending_add(wix, write_barrier, u32::from(len))
@@ -4132,7 +4155,7 @@ impl<'a> SmCore<'a> {
                         _ => unreachable!("match arm admits only hierarchy loads"),
                     };
                     let mut pending_add = 0u32;
-                    let async_delivery = async_copy_delivery(inst.kind);
+                    let async_delivery = async_copy_completion_work(inst.kind);
                     let observe_ready = write_barrier.is_some() || async_delivery.is_some();
                     let mut async_source_ready = if shared.is_none() && async_delivery.is_some() {
                         Some(checked_cycle_add(
@@ -4213,11 +4236,9 @@ impl<'a> SmCore<'a> {
                             }
                         }
                     }
-                    if let (Some(source_ready), Some((l1_policy, payload_bytes))) =
+                    if let (Some(source_ready), Some(delivery_work)) =
                         (async_source_ready, async_delivery)
                     {
-                        let delivery_work =
-                            self.params.ldgsts_delivery_work(l1_policy, payload_bytes)?;
                         self.async_copies[wix].preflight_async_copy_add(
                             wix,
                             0,
@@ -4401,7 +4422,7 @@ impl<'a> SmCore<'a> {
                 .ok_or(IssueError::MissingIssueSlot { warp: wix })?;
             let retires_warp = w.next_issue_retires()?;
             let kind = w.insts[w.next].kind;
-            validate_async_copy_payload(kind, wix)?;
+            validate_async_copy_completion_work(kind, wix)?;
             let write_barrier = if self.has_async_copy_protocol {
                 ordinary_write_barrier(slot)
             } else {
@@ -4409,10 +4430,7 @@ impl<'a> SmCore<'a> {
             };
             let observe_async_copy =
                 self.has_async_copy_protocol && async_copy_source_count(kind).is_some();
-            if observe_async_copy
-                && let Some((l1_policy, payload_bytes)) = async_copy_delivery(kind)
-            {
-                let delivery_work = self.params.ldgsts_delivery_work(l1_policy, payload_bytes)?;
+            if observe_async_copy && let Some(delivery_work) = async_copy_completion_work(kind) {
                 let source_ready = match &self.mem {
                     MemModel::Flat => checked_cycle_add(
                         "flat async-copy source visibility",
@@ -4526,10 +4544,8 @@ impl<'a> SmCore<'a> {
             if observe_async_copy && let Some(source_ready) = data_ready {
                 let delivery_work = if matches!(self.mem, MemModel::L1Shared(_)) {
                     0
-                } else if let Some((l1_policy, payload_bytes)) = async_copy_delivery(inst.kind) {
-                    self.params.ldgsts_delivery_work(l1_policy, payload_bytes)?
                 } else {
-                    0
+                    async_copy_completion_work(inst.kind).unwrap_or(0)
                 };
                 self.async_copies[wix].add_known_async_copy(
                     wix,
@@ -5115,6 +5131,7 @@ mod tests {
                 cache_all_payload_bytes_per_cycle: 64,
                 bypass_payload_bytes_per_cycle: 32,
             },
+            ldgsts_cache_all_destination_wavefront_cycles: 2,
             max_resident_warps_per_sm: 48,
         }
     }
@@ -5992,12 +6009,17 @@ mod tests {
         len: u16,
         l1_policy: LdgstsL1Policy,
     ) -> ReplayInst {
+        let payload_bytes = u32::from(len) * 32;
+        let completion_work = match l1_policy {
+            LdgstsL1Policy::CacheAtAllLevels => payload_bytes,
+            LdgstsL1Policy::BypassL1 => payload_bytes * 2,
+        };
         ReplayInst {
             pc,
             kind: AccessKind::GlobalAsyncCopy {
                 off,
                 len,
-                payload_bytes: u32::from(len) * 32,
+                completion_work,
                 l1_policy,
             },
         }
@@ -6117,7 +6139,11 @@ mod tests {
                                 kind: AccessKind::GlobalAsyncCopy {
                                     off: 0,
                                     len,
-                                    payload_bytes: 256,
+                                    completion_work: if policy == LdgstsL1Policy::CacheAtAllLevels {
+                                        256
+                                    } else {
+                                        512
+                                    },
                                     l1_policy: policy,
                                 },
                             },
@@ -6161,7 +6187,11 @@ mod tests {
                             kind: AccessKind::GlobalAsyncCopy {
                                 off: 0,
                                 len: 1,
-                                payload_bytes: 256,
+                                completion_work: if policy == LdgstsL1Policy::CacheAtAllLevels {
+                                    256
+                                } else {
+                                    512
+                                },
                                 l1_policy: policy,
                             },
                         },
@@ -6170,7 +6200,11 @@ mod tests {
                             kind: AccessKind::GlobalAsyncCopy {
                                 off: 1,
                                 len: 16,
-                                payload_bytes: 256,
+                                completion_work: if policy == LdgstsL1Policy::CacheAtAllLevels {
+                                    256
+                                } else {
+                                    512
+                                },
                                 l1_policy: policy,
                             },
                         },
@@ -6188,64 +6222,44 @@ mod tests {
     }
 
     #[test]
-    fn async_copy_payload_failures_reject_issue_before_mutation() {
-        for (payload_bytes, expected_mismatch) in [(0, true), (2, false)] {
-            let sched = schedule(vec![(0, slot(cb(1), OpClass::Other, "LDGSTS.E.BYPASS"))]);
-            let blocks = vec![BlockReplay {
-                launch_index: 0,
-                warps: vec![WarpReplay {
-                    warp_slot: 0,
-                    insts: vec![ReplayInst {
-                        pc: 0,
-                        kind: AccessKind::GlobalAsyncCopy {
-                            off: 0,
-                            len: 1,
-                            payload_bytes,
-                            l1_policy: LdgstsL1Policy::BypassL1,
-                        },
-                    }],
-                    sectors: vec![40],
+    fn async_copy_completion_work_mismatch_rejects_issue_before_mutation() {
+        let sched = schedule(vec![(0, slot(cb(1), OpClass::Other, "LDGSTS.E.BYPASS"))]);
+        let blocks = vec![BlockReplay {
+            launch_index: 0,
+            warps: vec![WarpReplay {
+                warp_slot: 0,
+                insts: vec![ReplayInst {
+                    pc: 0,
+                    kind: AccessKind::GlobalAsyncCopy {
+                        off: 0,
+                        len: 1,
+                        completion_work: 0,
+                        l1_policy: LdgstsL1Policy::BypassL1,
+                    },
                 }],
-            }];
-            let mut p = params();
-            if !expected_mismatch {
-                p.ldgsts_completion_throughput = LdgstsCompletionThroughput {
-                    cache_all_payload_bytes_per_cycle: u64::MAX,
-                    bypass_payload_bytes_per_cycle: 1,
-                };
-            }
-            let mut core = shared_core(&blocks, &sched, &p);
-            let before = *core.l1_counters().unwrap();
-            let mut requests = Vec::new();
+                sectors: vec![40],
+            }],
+        }];
+        let mut core = shared_core(&blocks, &sched, &params());
+        let before = *core.l1_counters().unwrap();
+        let mut requests = Vec::new();
 
-            let error = core
-                .advance(ReplayHorizon::Unbounded, &mut requests)
-                .unwrap_err();
-            if expected_mismatch {
-                assert!(matches!(
-                    error,
-                    IssueError::AsyncCopyPayloadMismatch {
-                        warp: 0,
-                        sectors: 1,
-                        payload_bytes: 0,
-                    }
-                ));
-            } else {
-                assert!(matches!(
-                    error,
-                    IssueError::TimeMultiplicationOverflow {
-                        operation: "LDGSTS payload-delivery work",
-                        lhs: 2,
-                        rhs: u64::MAX,
-                    }
-                ));
+        let error = core
+            .advance(ReplayHorizon::Unbounded, &mut requests)
+            .unwrap_err();
+        assert!(matches!(
+            error,
+            IssueError::AsyncCopyCompletionWorkMismatch {
+                warp: 0,
+                sectors: 1,
+                completion_work: 0,
             }
-            assert_eq!(core.instructions_issued(), 0);
-            assert_eq!(core.warps[0].next, 0);
-            assert!(core.async_copies[0].state.is_none());
-            assert_eq!(*core.l1_counters().unwrap(), before);
-            assert!(requests.is_empty());
-        }
+        ));
+        assert_eq!(core.instructions_issued(), 0);
+        assert_eq!(core.warps[0].next, 0);
+        assert!(core.async_copies[0].state.is_none());
+        assert_eq!(*core.l1_counters().unwrap(), before);
+        assert!(requests.is_empty());
     }
 
     #[test]
@@ -8309,7 +8323,7 @@ mod tests {
                     kind: AccessKind::GlobalAsyncCopy {
                         off: 0,
                         len: 1,
-                        payload_bytes: 128,
+                        completion_work: 128,
                         l1_policy: LdgstsL1Policy::CacheAtAllLevels,
                     },
                 }],
@@ -9263,7 +9277,7 @@ mod tests {
             TailFlags::for_access(AccessKind::GlobalAsyncCopy {
                 off: 0,
                 len: 1,
-                payload_bytes: 4,
+                completion_work: 4,
                 l1_policy: LdgstsL1Policy::CacheAtAllLevels,
             }),
             TailFlags::default()

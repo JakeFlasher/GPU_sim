@@ -150,17 +150,17 @@ pub enum AccessKind {
     /// Non-bulk global-to-shared async-copy source. Static classification still
     /// identifies `LDGSTS` as `MemRole::BypassLoad(Ldgsts)`; this dynamic form
     /// additionally preserves whether the current trace record has an effective
-    /// source. Effective source presence is encoded by `payload_bytes != 0`,
+    /// source. Effective source presence is encoded by `completion_work != 0`,
     /// including in flat mode where the sector arena is intentionally omitted.
     GlobalAsyncCopy {
         off: usize,
         len: u16,
-        /// Exact active-lane source payload (`active lanes × per-lane width`) in
-        /// bytes. This is independent of the deduplicated source-sector span and
-        /// is zero exactly when the source is ineffective. Replay narrows the
-        /// validated u64 projection at a typed boundary so this field does not
-        /// widen every compact dynamic instruction.
-        payload_bytes: u32,
+        /// Completion work in the architecture's fixed 64-unit/cycle domain.
+        /// Source-only traces derive this from exact active-lane payload; a
+        /// destination-bearing cache-all trace raises it to the independently
+        /// established source-cohort bank-wavefront floor. Replay performs the
+        /// checked projection before narrowing so this field stays compact.
+        completion_work: u32,
         /// Static SASS source-cache route. This remains explicit on a
         /// predicated-off dynamic record even though its payload is zero.
         l1_policy: LdgstsL1Policy,

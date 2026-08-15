@@ -254,6 +254,30 @@ impl ArchId {
         }
     }
 
+    /// Destination-side projection and local completion timing for cache-all
+    /// non-bulk asynchronous copies. Source transfers are grouped into flexible
+    /// 128-byte cohorts before shared words are projected onto 32 four-byte
+    /// banks. Explicit `.BYPASS` copies are intentionally outside this
+    /// capability until their distinct source/destination coupling is resolved.
+    pub const fn ldgsts_destination_wavefront_timing(
+        self,
+    ) -> Capability<LdgstsDestinationWavefrontTiming> {
+        match self {
+            Self::Sm86 => Capability::available(
+                Self::Sm86,
+                LdgstsDestinationWavefrontTiming {
+                    projection:
+                        LdgstsDestinationWavefrontProjection::SourceCohorts128BytesBanks32Words4Bytes,
+                    cycles_per_wavefront: 2,
+                },
+            ),
+            Self::Sm120 => Capability::research_gap(
+                Self::Sm120,
+                "sm_120 LDGSTS/TMA destination banking and completion timing are not modeled",
+            ),
+        }
+    }
+
     /// Bank projection and conflict-dependent completion timing for explicit
     /// shared-memory LDS/STS operands. The base dependent latency remains the
     /// architecture card's `shared_latency_cycles`; this capability supplies
@@ -663,6 +687,21 @@ pub struct LdgstsCompletionThroughput {
     pub bypass_payload_bytes_per_cycle: u64,
 }
 
+/// Trace-side destination projection admitted for cache-all Ampere `LDGSTS`.
+/// The cohort qualification is part of the projection identity: applying an
+/// aggregate shared-bank projection, or grouping by absolute cache-line
+/// alignment, produces different answers for valid lane/source pairings.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LdgstsDestinationWavefrontProjection {
+    SourceCohorts128BytesBanks32Words4Bytes,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LdgstsDestinationWavefrontTiming {
+    pub projection: LdgstsDestinationWavefrontProjection,
+    pub cycles_per_wavefront: u64,
+}
+
 /// Compact trace-side bank projection understood by an architecture timing
 /// capability. Naming the geometry prevents a future architecture from
 /// interpreting an Ampere projection as its own bank layout.
@@ -804,6 +843,16 @@ mod tests {
         ));
         assert!(matches!(
             ArchId::Sm120
+                .ldgsts_destination_wavefront_timing()
+                .require("ldgsts_destination_wavefront_timing"),
+            Err(CapabilityError::ResearchGap {
+                arch: ArchId::Sm120,
+                capability: "ldgsts_destination_wavefront_timing",
+                reason,
+            }) if !reason.is_empty()
+        ));
+        assert!(matches!(
+            ArchId::Sm120
                 .shared_memory_wavefront_timing()
                 .require("shared_memory_wavefront_timing"),
             Err(CapabilityError::ResearchGap {
@@ -881,6 +930,21 @@ mod tests {
             LdgstsCompletionThroughput {
                 cache_all_payload_bytes_per_cycle: 64,
                 bypass_payload_bytes_per_cycle: 32,
+            }
+        );
+    }
+
+    #[test]
+    fn sm86_ldgsts_destination_wavefront_timing_is_cache_all_local() {
+        assert_eq!(
+            ArchId::Sm86
+                .ldgsts_destination_wavefront_timing()
+                .require("ldgsts_destination_wavefront_timing")
+                .unwrap(),
+            LdgstsDestinationWavefrontTiming {
+                projection:
+                    LdgstsDestinationWavefrontProjection::SourceCohorts128BytesBanks32Words4Bytes,
+                cycles_per_wavefront: 2,
             }
         );
     }

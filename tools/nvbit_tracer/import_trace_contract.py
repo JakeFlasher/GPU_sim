@@ -73,7 +73,9 @@ Neither condition is encoded as trace evidence or repaired by generation.
   an explicit ``address_space`` incompatible with the instruction's
   operation-aware class. GLOBAL accepts GLOBAL/GENERIC, SHARED accepts
   SHARED, LOCAL accepts LOCAL, ATOMIC accepts any concrete effective
-  space, and ASYNC_COPY accepts only its GLOBAL/GENERIC source. An
+  space, and ASYNC_COPY structurally accepts GLOBAL/GENERIC source and SHARED
+  destination spaces. Contract-versioned shape validation fixes their order:
+  V1/V2 require one source, while V3 requires the source/destination pair. An
   absent ``address_space`` retains the legacy class fallback.
 - ``unknown_enum_value``: ``memory_op_class``, ``memory_op_access_kind``,
   ``instruction_cache_op``, or an explicit ``address_space`` carries a number
@@ -232,6 +234,18 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+
+
+ADDRESS_CARRYING_V1_TRACE_CONTRACT_ID = "sm86_addr_carry_v1"
+SHARED_MEMORY_SPLIT_V2_TRACE_CONTRACT_ID = "sm86_addr_carry_shmem_split_v2"
+LDGSTS_DESTINATION_V3_TRACE_CONTRACT_ID = "sm86_addr_carry_ldgsts_dst_v3"
+_ADDRESS_CARRYING_TRACE_CONTRACT_IDS = frozenset(
+    (
+        ADDRESS_CARRYING_V1_TRACE_CONTRACT_ID,
+        SHARED_MEMORY_SPLIT_V2_TRACE_CONTRACT_ID,
+        LDGSTS_DESTINATION_V3_TRACE_CONTRACT_ID,
+    )
+)
 
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -1118,16 +1132,32 @@ def _expected_address_spaces(
     if memory_op_class == instruction_pb2_mod.MEMORY_OP_CLASS_ATOMIC:
         return concrete_spaces, "GLOBAL, GENERIC, SHARED, or LOCAL"
     if memory_op_class == instruction_pb2_mod.MEMORY_OP_CLASS_ASYNC_COPY:
-        return global_spaces, "GLOBAL or GENERIC source"
+        return (
+            frozenset(
+                (
+                    address_pb2_mod.MEMORY_SPACE_GLOBAL,
+                    address_pb2_mod.MEMORY_SPACE_GENERIC,
+                    address_pb2_mod.MEMORY_SPACE_SHARED,
+                )
+            ),
+            "GLOBAL/GENERIC source or SHARED destination",
+        )
     return None
 
 
-def _check_address_carrying_v1_shape(
+def _check_address_carrying_shape(
     inst: Any,
     instruction_pb2_mod: Any,
+    address_pb2_mod: Any,
     record_path: str,
     and_mask: int,
+    trace_contract_id: str,
 ) -> ValidationResult | None:
+    if trace_contract_id not in _ADDRESS_CARRYING_TRACE_CONTRACT_IDS:
+        raise ValueError(
+            f"unsupported address-carrying trace contract {trace_contract_id!r}"
+        )
+
     declared_classes = frozenset(
         (
             instruction_pb2_mod.MEMORY_OP_CLASS_GLOBAL,
@@ -1144,7 +1174,7 @@ def _check_address_carrying_v1_shape(
             typed_reason="memory_payload_class_undeclared",
             detail=(
                 f"{record_path}: memory_op_class={memory_op_class} is not "
-                "declared by the address-carrying v1 payload capability"
+                f"declared by trace contract {trace_contract_id!r}"
             ),
         )
 
@@ -1170,9 +1200,38 @@ def _check_address_carrying_v1_shape(
         else:
             return None
     else:
-        if operand_count != 1:
+        global_spaces = frozenset(
+            (
+                address_pb2_mod.MEMORY_SPACE_GLOBAL,
+                address_pb2_mod.MEMORY_SPACE_GENERIC,
+            )
+        )
+        if trace_contract_id == LDGSTS_DESTINATION_V3_TRACE_CONTRACT_ID:
+            if operand_count != 2:
+                detail = (
+                    "expected exactly the ordered source/destination operand pair"
+                )
+            elif (
+                not inst.addresses[0].HasField("address_space")
+                or inst.addresses[0].address_space not in global_spaces
+            ):
+                detail = (
+                    "operand 0 requires explicit GLOBAL or GENERIC source space"
+                )
+            elif (
+                not inst.addresses[1].HasField("address_space")
+                or inst.addresses[1].address_space
+                != address_pb2_mod.MEMORY_SPACE_SHARED
+            ):
+                detail = "operand 1 requires explicit SHARED destination space"
+            else:
+                return None
+        elif operand_count != 1:
             detail = "expected exactly one source operand"
-        elif not inst.addresses[0].HasField("address_space"):
+        elif (
+            not inst.addresses[0].HasField("address_space")
+            or inst.addresses[0].address_space not in global_spaces
+        ):
             detail = (
                 "the source operand requires explicit GLOBAL or GENERIC space"
             )
@@ -1183,9 +1242,9 @@ def _check_address_carrying_v1_shape(
         ok=False,
         typed_reason="memory_payload_shape_invalid",
         detail=(
-            f"{record_path}: address-carrying v1 memory_op_class="
-            f"{memory_op_class} operand shape is invalid: {detail} "
-            f"(got {operand_count})"
+            f"{record_path}: trace contract {trace_contract_id!r} "
+            f"memory_op_class={memory_op_class} operand shape is invalid: "
+            f"{detail} (got {operand_count})"
         ),
     )
 
@@ -1196,7 +1255,7 @@ def _check_instruction(
     record_path: str,
     allocations: dict[int, AllocationEntry] | None = None,
     address_pb2_mod: Any = None,
-    address_carrying_v1: bool = False,
+    memory_payload_contract_id: str | None = None,
     expected_function_unique_id: int | None = None,
 ) -> ValidationResult | None:
     """Apply the AC4 contract clauses to a single ``instruction``.
@@ -1537,12 +1596,14 @@ def _check_instruction(
             ),
         )
 
-    if address_carrying_v1 and looks_like_memory:
-        shape_error = _check_address_carrying_v1_shape(
+    if memory_payload_contract_id is not None and looks_like_memory:
+        shape_error = _check_address_carrying_shape(
             inst,
             instruction_pb2_mod,
+            address_pb2_mod,
             record_path,
             and_mask,
+            memory_payload_contract_id,
         )
         if shape_error is not None:
             return shape_error
@@ -1690,7 +1751,7 @@ def validate_threadblock(
     *,
     label: str = "threadblock",
     allocations: dict[int, AllocationEntry] | None = None,
-    address_carrying_v1: bool = False,
+    memory_payload_contract_id: str | None = None,
     expected_function_unique_id: int | None = None,
 ) -> ValidationResult:
     """Validate ``tb`` (a parsed ``dynamic_trace.threadblock`` proto)
@@ -1709,12 +1770,13 @@ def validate_threadblock(
     a record carries ``allocation_id != 0`` (in which case
     ``allocations_sidecar_missing`` is returned).
 
-    ``address_carrying_v1`` opts the forward-capture admission path into the
-    payload-generation contract's declared class and operand-shape checks.
-    It defaults to false so historical/offline callers retain their existing
-    legacy contract. ``expected_function_unique_id`` binds each structurally
-    valid instruction to its root launch before forward payload shape and
-    allocation-identity checks.
+    ``memory_payload_contract_id`` opts forward or historical capture admission
+    into the declared class and contract-versioned operand-shape checks. V1 and
+    V2 require one explicit GLOBAL/GENERIC async-copy source; V3 requires the
+    ordered GLOBAL/GENERIC source and SHARED destination pair. It defaults to
+    ``None`` so generic offline callers retain the legacy structural checks.
+    ``expected_function_unique_id`` binds each structurally valid instruction
+    to its root launch before payload-shape and allocation-identity checks.
 
     Returns a ``ValidationResult``. The first record that violates
     the contract short-circuits the walk; remaining records in this
@@ -1734,7 +1796,7 @@ def validate_threadblock(
                 record_path,
                 allocations=allocations,
                 address_pb2_mod=address_pb2_mod,
-                address_carrying_v1=address_carrying_v1,
+                memory_payload_contract_id=memory_payload_contract_id,
                 expected_function_unique_id=expected_function_unique_id,
             )
             if result is not None:

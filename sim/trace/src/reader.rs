@@ -120,7 +120,7 @@ pub enum TraceError {
         limit: u64,
     },
     #[error(
-        "{path}: unsupported trace_contract_id {got:?}; expected empty legacy identity, sm86_addr_carry_v1, or sm86_addr_carry_shmem_split_v2"
+        "{path}: unsupported trace_contract_id {got:?}; expected empty legacy identity, sm86_addr_carry_v1, sm86_addr_carry_shmem_split_v2, or sm86_addr_carry_ldgsts_dst_v3"
     )]
     TraceContractUnsupported { path: PathBuf, got: String },
     #[error(
@@ -298,6 +298,12 @@ pub enum TraceError {
         record: String,
         #[source]
         source: SharedBankProjectionError,
+    },
+    #[error("{record}: LDGSTS destination-wavefront projection failed: {source}")]
+    LdgstsDestinationProjection {
+        record: String,
+        #[source]
+        source: LdgstsDestinationProjectionError,
     },
     #[error("{path}: threadblock proto is missing block_id (producer MUST populate it)")]
     BlockIdMissing { path: PathBuf },
@@ -643,12 +649,27 @@ impl TraceValidationSummary {
 
 pub const ADDRESS_CARRYING_TRACE_CONTRACT_ID: &str = "sm86_addr_carry_v1";
 pub const SHARED_MEMORY_SPLIT_TRACE_CONTRACT_ID: &str = "sm86_addr_carry_shmem_split_v2";
+pub const LDGSTS_DESTINATION_TRACE_CONTRACT_ID: &str = "sm86_addr_carry_ldgsts_dst_v3";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MemoryPayloadContract {
     LegacyExclusion,
     AddressCarryingV1,
     AddressCarryingSharedMemorySplitV2,
+    AddressCarryingLdgstsDestinationV3,
+}
+
+impl MemoryPayloadContract {
+    const fn carries_shared_memory_split(self) -> bool {
+        matches!(
+            self,
+            Self::AddressCarryingSharedMemorySplitV2 | Self::AddressCarryingLdgstsDestinationV3
+        )
+    }
+
+    const fn carries_ldgsts_destination(self) -> bool {
+        matches!(self, Self::AddressCarryingLdgstsDestinationV3)
+    }
 }
 
 const ADDRESS_CARRYING_PAYLOAD_CLASSES: [pb::MemoryOpClass; 5] = [
@@ -658,7 +679,7 @@ const ADDRESS_CARRYING_PAYLOAD_CLASSES: [pb::MemoryOpClass; 5] = [
     pb::MemoryOpClass::Atomic,
     pb::MemoryOpClass::AsyncCopy,
 ];
-const SHARED_MEMORY_SPLIT_V2_PAYLOAD_CAPABILITY_VECTOR: [i32; 5] = [1, 2, 3, 6, 8];
+const ADDRESS_CARRYING_PAYLOAD_CAPABILITY_VECTOR: [i32; 5] = [1, 2, 3, 6, 8];
 
 fn classify_memory_payload_contract(
     trace: &pb::Trace,
@@ -679,6 +700,9 @@ fn classify_memory_payload_contract(
         SHARED_MEMORY_SPLIT_TRACE_CONTRACT_ID => {
             MemoryPayloadContract::AddressCarryingSharedMemorySplitV2
         }
+        LDGSTS_DESTINATION_TRACE_CONTRACT_ID => {
+            MemoryPayloadContract::AddressCarryingLdgstsDestinationV3
+        }
         _ => {
             return Err(TraceError::TraceContractUnsupported {
                 path: path.to_path_buf(),
@@ -687,15 +711,14 @@ fn classify_memory_payload_contract(
         }
     };
 
-    // Split-v2's repeated enum field is an ordered capability vector, not a set.
-    // Keep v1's historical set-based admission below unchanged; the stronger
-    // ordering requirement belongs only to the additive split-v2 contract.
-    if contract == MemoryPayloadContract::AddressCarryingSharedMemorySplitV2
+    // V2 and V3 use the repeated enum field as an ordered capability vector,
+    // not a set. Keep v1's historical set-based admission below unchanged.
+    if contract.carries_shared_memory_split()
         && !trace
             .memory_payload_classes
             .iter()
             .copied()
-            .eq(SHARED_MEMORY_SPLIT_V2_PAYLOAD_CAPABILITY_VECTOR)
+            .eq(ADDRESS_CARRYING_PAYLOAD_CAPABILITY_VECTOR)
     {
         return Err(TraceError::MemoryPayloadCapabilitiesInvalid {
             path: path.to_path_buf(),
@@ -1700,7 +1723,8 @@ fn validate_shared_memory_split(
                 });
             }
         }
-        MemoryPayloadContract::AddressCarryingSharedMemorySplitV2 => {
+        MemoryPayloadContract::AddressCarryingSharedMemorySplitV2
+        | MemoryPayloadContract::AddressCarryingLdgstsDestinationV3 => {
             let (Some(static_bytes), Some(dynamic_bytes)) = (
                 kernel.shared_memory_static_bytes,
                 kernel.shared_memory_dynamic_bytes,
@@ -1770,6 +1794,14 @@ pub enum ValidatedMemoryRouteError {
     },
     AsyncCopySourceSpaceMissing,
     AsyncCopySourceSpaceInvalid {
+        space: pb::MemorySpace,
+    },
+    AsyncCopyOperandCount {
+        got: usize,
+        expected: usize,
+    },
+    AsyncCopyDestinationSpaceMissing,
+    AsyncCopyDestinationSpaceInvalid {
         space: pb::MemorySpace,
     },
 }
@@ -1887,6 +1919,52 @@ pub enum SharedBankProjectionError {
     CountOverflow { bank: u8 },
 }
 
+/// Failure while pairing one cache-all LDGSTS global-source transfer with its
+/// lane-corresponding shared destination and reducing flexible 128-byte source
+/// cohorts to shared-bank wavefronts.
+#[derive(Debug, thiserror::Error, Clone, PartialEq, Eq)]
+pub enum LdgstsDestinationProjectionError {
+    #[error("expected exactly one GLOBAL/GENERIC source operand, got {got}")]
+    SourceOperandCount { got: usize },
+    #[error("expected exactly one SHARED destination operand, got {got}")]
+    DestinationOperandCount { got: usize },
+    #[error(
+        "source and destination operand widths differ: source={source_bytes} bytes, destination={destination_bytes} bytes"
+    )]
+    OperandWidthMismatch {
+        source_bytes: i32,
+        destination_bytes: i32,
+    },
+    #[error("lane {lane} source transfer width {width_bytes} exceeds one 128-byte cohort")]
+    SourceTransferExceedsCohort { lane: usize, width_bytes: u64 },
+    #[error(
+        "lane {lane} source interval overflows the u64 address domain: base=0x{base:x}, width={width_bytes}"
+    )]
+    SourceIntervalOverflow {
+        lane: usize,
+        base: u64,
+        width_bytes: u64,
+    },
+    #[error(
+        "lane {lane} destination interval overflows the i64 address domain: base={base}, width={width_bytes}"
+    )]
+    DestinationIntervalOverflow {
+        lane: usize,
+        base: i64,
+        width_bytes: u64,
+    },
+    #[error(
+        "instruction projects {words} destination words, exceeding the per-instruction limit {limit}"
+    )]
+    InstructionWordLimit { words: u64, limit: u64 },
+    #[error("destination projection scratch could not reserve {additional} additional words")]
+    CapacityUnavailable { additional: usize },
+    #[error("destination bank {bank} wavefront count overflowed u32")]
+    BankWavefrontCountOverflow { bank: u8 },
+    #[error("instruction destination wavefront sum overflowed u32")]
+    WavefrontCountOverflow,
+}
+
 /// Compact, context-free form of a sector-expansion failure. Replay restores the
 /// path/warp/instruction context when this deferred error is observed.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1961,11 +2039,39 @@ pub enum ValidatedSectorPlan<'a> {
 /// Compact memory metadata retained after the full Prost tree has been
 /// validated and discarded. `projection` is route-disjoint: it stores a shared
 /// bank-wavefront count for Shared records or an index into the owning warp's
-/// sparse exact-payload arena for Global async-copy records.
+/// sparse async-copy projection arena for Global async-copy records.
 pub struct ValidatedMemoryInstruction {
     sectors: CompactSectorPlan,
     projection: u32,
     meta: CompactMemoryMeta,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct AsyncCopyProjection {
+    effective_data_bytes: u64,
+    destination_wavefronts: u32,
+}
+
+impl AsyncCopyProjection {
+    const DESTINATION_UNAVAILABLE: u32 = u32::MAX;
+
+    const fn new(effective_data_bytes: u64, destination_wavefronts: Option<u32>) -> Self {
+        Self {
+            effective_data_bytes,
+            destination_wavefronts: match destination_wavefronts {
+                Some(wavefronts) => wavefronts,
+                None => Self::DESTINATION_UNAVAILABLE,
+            },
+        }
+    }
+
+    const fn destination_wavefronts(self) -> Option<u32> {
+        if self.destination_wavefronts == Self::DESTINATION_UNAVAILABLE {
+            None
+        } else {
+            Some(self.destination_wavefronts)
+        }
+    }
 }
 
 impl ValidatedMemoryInstruction {
@@ -2031,7 +2137,7 @@ pub struct ValidatedWarp {
     warp_id: i32,
     instructions: Vec<ValidatedInstruction>,
     memories: Vec<ValidatedMemoryInstruction>,
-    async_payload_bytes: Vec<u64>,
+    async_copy_projections: Vec<AsyncCopyProjection>,
     route_errors: Vec<ValidatedMemoryRouteError>,
     sectors: Vec<i64>,
     sector_errors: Vec<ValidatedSectorError>,
@@ -2046,7 +2152,7 @@ impl ValidatedWarp {
     ) -> Result<Self, TraceError> {
         let mut instructions = Vec::with_capacity(warp.instructions.len());
         let mut memories = Vec::new();
-        let mut async_payload_bytes = Vec::new();
+        let mut async_copy_projections = Vec::new();
         let mut route_errors = Vec::new();
         let mut sectors = Vec::new();
         let mut sector_errors = Vec::new();
@@ -2077,28 +2183,49 @@ impl ValidatedWarp {
                     } else {
                         0
                     };
-                let effective_data_bytes = if meta.op_class == pb::MemoryOpClass::AsyncCopy
-                    && matches!(resolved_route, Ok(ValidatedMemoryRoute::Global))
-                {
-                    project_effective_data_bytes(preflight).map_err(|source| {
-                        TraceError::EffectiveDataBytes {
-                            record: format!("{label} warp={map_key} inst={record_ix}"),
-                            source,
-                        }
+                let is_async_copy_source = meta.op_class == pb::MemoryOpClass::AsyncCopy
+                    && matches!(resolved_route, Ok(ValidatedMemoryRoute::Global));
+                let effective_data_bytes = if is_async_copy_source {
+                    if payload_contract.carries_ldgsts_destination() {
+                        project_operand_effective_data_bytes(preflight, 0)
+                    } else {
+                        project_effective_data_bytes(preflight)
+                    }
+                    .map_err(|source| TraceError::EffectiveDataBytes {
+                        record: format!("{label} warp={map_key} inst={record_ix}"),
+                        source,
                     })?
                 } else {
                     0
                 };
-                let projection = if meta.op_class == pb::MemoryOpClass::AsyncCopy
-                    && matches!(resolved_route, Ok(ValidatedMemoryRoute::Global))
-                {
-                    let index = match u32::try_from(async_payload_bytes.len()) {
+                let destination_wavefronts =
+                    if is_async_copy_source && payload_contract.carries_ldgsts_destination() {
+                        Some(
+                            project_ldgsts_source_cohort_wavefronts_128b_32x4(
+                                preflight,
+                                &mut shared_word_scratch,
+                            )
+                            .map_err(|source| {
+                                TraceError::LdgstsDestinationProjection {
+                                    record: format!("{label} warp={map_key} inst={record_ix}"),
+                                    source,
+                                }
+                            })?,
+                        )
+                    } else {
+                        None
+                    };
+                let projection = if is_async_copy_source {
+                    let index = match u32::try_from(async_copy_projections.len()) {
                         Ok(index) if index != u32::MAX => index,
                         Ok(_) | Err(_) => {
-                            unreachable!("validated async-payload arena exceeded u32")
+                            unreachable!("validated async-copy projection arena exceeded u32")
                         }
                     };
-                    async_payload_bytes.push(effective_data_bytes);
+                    async_copy_projections.push(AsyncCopyProjection::new(
+                        effective_data_bytes,
+                        destination_wavefronts,
+                    ));
                     index
                 } else {
                     shared_bank_wavefronts_32x4
@@ -2107,7 +2234,11 @@ impl ValidatedWarp {
                     resolved_route,
                     Ok(ValidatedMemoryRoute::Global | ValidatedMemoryRoute::Local)
                 ) {
-                    match compact_sector_vector(preflight) {
+                    match compact_sector_vector_for_operand(
+                        preflight,
+                        (is_async_copy_source && payload_contract.carries_ldgsts_destination())
+                            .then_some(0),
+                    ) {
                         Ok(staged) => {
                             let start = sectors.len();
                             let len = match u16::try_from(staged.len()) {
@@ -2178,7 +2309,7 @@ impl ValidatedWarp {
             warp_id: warp.id,
             instructions,
             memories,
-            async_payload_bytes,
+            async_copy_projections,
             route_errors,
             sectors,
             sector_errors,
@@ -2237,21 +2368,39 @@ impl ValidatedWarp {
         }
     }
 
+    fn async_copy_projection(
+        &self,
+        memory: &ValidatedMemoryInstruction,
+    ) -> Option<AsyncCopyProjection> {
+        if memory.meta.op_class() != pb::MemoryOpClass::AsyncCopy
+            || memory.meta.route().0 != CompactMemoryRoute::GLOBAL
+        {
+            return None;
+        }
+        let index = usize::try_from(memory.projection)
+            .unwrap_or_else(|_| unreachable!("validated async-copy index escaped usize"));
+        Some(*self.async_copy_projections.get(index).unwrap_or_else(|| {
+            unreachable!("validated async-copy index escaped its projection arena")
+        }))
+    }
+
     /// Sum of active-lane source widths for one Global async-copy record. Exact
     /// u64 values live in a sparse warp-local arena so ordinary memory metadata
     /// remains compact. Other routes and operation classes return zero.
     pub fn effective_data_bytes(&self, memory: &ValidatedMemoryInstruction) -> u64 {
-        if memory.meta.op_class() != pb::MemoryOpClass::AsyncCopy
-            || memory.meta.route().0 != CompactMemoryRoute::GLOBAL
-        {
-            return 0;
-        }
-        let index = usize::try_from(memory.projection)
-            .unwrap_or_else(|_| unreachable!("validated async-payload index escaped usize"));
-        *self
-            .async_payload_bytes
-            .get(index)
-            .unwrap_or_else(|| unreachable!("validated async-payload index escaped its arena"))
+        self.async_copy_projection(memory)
+            .map_or(0, |projection| projection.effective_data_bytes)
+    }
+
+    /// Exact cache-all LDGSTS destination projection when the trace contract
+    /// carries the lane-paired SHARED operand. `None` preserves the explicit
+    /// source-only fallback boundary; `Some(0)` is an exact zero-active result.
+    pub fn ldgsts_destination_wavefronts_128b_32x4(
+        &self,
+        memory: &ValidatedMemoryInstruction,
+    ) -> Option<u32> {
+        self.async_copy_projection(memory)
+            .and_then(AsyncCopyProjection::destination_wavefronts)
     }
 
     pub fn sector_plan<'a>(
@@ -2454,6 +2603,36 @@ fn compact_memory_route(
                 }
                 return Ok(ValidatedMemoryRoute::Global);
             }
+            if payload_contract.carries_ldgsts_destination() {
+                if instruction.addresses.len() != 2 {
+                    return Err(ValidatedMemoryRouteError::AsyncCopyOperandCount {
+                        got: instruction.addresses.len(),
+                        expected: 2,
+                    });
+                }
+                let Some(source_space) = space(&instruction.addresses[0]) else {
+                    return Err(ValidatedMemoryRouteError::AsyncCopySourceSpaceMissing);
+                };
+                if !matches!(
+                    source_space,
+                    pb::MemorySpace::Global | pb::MemorySpace::Generic
+                ) {
+                    return Err(ValidatedMemoryRouteError::AsyncCopySourceSpaceInvalid {
+                        space: source_space,
+                    });
+                }
+                let Some(destination_space) = space(&instruction.addresses[1]) else {
+                    return Err(ValidatedMemoryRouteError::AsyncCopyDestinationSpaceMissing);
+                };
+                if destination_space != pb::MemorySpace::Shared {
+                    return Err(
+                        ValidatedMemoryRouteError::AsyncCopyDestinationSpaceInvalid {
+                            space: destination_space,
+                        },
+                    );
+                }
+                return Ok(ValidatedMemoryRoute::Global);
+            }
             if instruction.addresses.len() != 1 {
                 return Err(ValidatedMemoryRouteError::AsyncCopySourceCount {
                     got: instruction.addresses.len(),
@@ -2475,13 +2654,14 @@ fn compact_memory_route(
     }
 }
 
-fn compact_sector_vector(
+fn compact_sector_vector_for_operand(
     preflight: PreflightedMemoryAccess<'_>,
+    selected_operand: Option<usize>,
 ) -> Result<Vec<i64>, (ValidatedSectorErrorPhase, ValidatedSectorError)> {
     let mut intervals = Vec::new();
     let mut early_error = None;
-    preflight.visit_addresses(|access| {
-        if early_error.is_some() {
+    preflight.visit_addresses_enumerated(|operand, access| {
+        if early_error.is_some() || selected_operand.is_some_and(|selected| selected != operand) {
             return;
         }
         if access.data_width_bytes <= 0 {
@@ -5527,11 +5707,18 @@ impl<'a> PreflightedMemoryAccess<'a> {
     where
         F: FnMut(&AddressAccess),
     {
+        self.visit_addresses_enumerated(|_, access| sink(access));
+    }
+
+    fn visit_addresses_enumerated<F>(self, mut sink: F)
+    where
+        F: FnMut(usize, &AddressAccess),
+    {
         if self.meta.and_mask == 0 {
             return;
         }
         let no_error_context = || String::new();
-        for addr in &self.inst.addresses {
+        for (operand, addr) in self.inst.addresses.iter().enumerate() {
             let access = match decode_address_access(
                 addr,
                 self.meta.and_mask,
@@ -5541,8 +5728,19 @@ impl<'a> PreflightedMemoryAccess<'a> {
                 Ok(access) => access,
                 Err(_) => unreachable!("preflighted immutable address failed a second decode"),
             };
-            sink(&access);
+            sink(operand, &access);
         }
+    }
+
+    fn decoded_address(self, operand: usize) -> Option<AddressAccess> {
+        let addr = self.inst.addresses.get(operand)?;
+        let no_error_context = || String::new();
+        Some(
+            decode_address_access(addr, self.meta.and_mask, self.inst_width, &no_error_context)
+                .unwrap_or_else(|_| {
+                    unreachable!("preflighted immutable address failed a second decode")
+                }),
+        )
     }
 }
 
@@ -5557,33 +5755,42 @@ pub fn project_effective_data_bytes(
         if overflowed {
             return;
         }
-        let active_lanes = access
-            .lane_vector
-            .iter()
-            .filter(|&&address| address != lanes::LANE_INACTIVE_SENTINEL)
-            .count() as u64;
-        let width = match u64::try_from(access.data_width_bytes) {
-            Ok(width) => width,
-            Err(_) => {
-                overflowed = true;
-                return;
-            }
-        };
-        let Some(operand_bytes) = width.checked_mul(active_lanes) else {
-            overflowed = true;
-            return;
-        };
-        let Some(total) = bytes.checked_add(operand_bytes) else {
-            overflowed = true;
-            return;
-        };
-        bytes = total;
+        match effective_data_bytes_for_access(access) {
+            Ok(operand_bytes) => match bytes.checked_add(operand_bytes) {
+                Some(total) => bytes = total,
+                None => overflowed = true,
+            },
+            Err(EffectiveDataBytesError::Overflow) => overflowed = true,
+        }
     });
     if overflowed {
         Err(EffectiveDataBytesError::Overflow)
     } else {
         Ok(bytes)
     }
+}
+
+fn project_operand_effective_data_bytes(
+    preflight: PreflightedMemoryAccess<'_>,
+    operand: usize,
+) -> Result<u64, EffectiveDataBytesError> {
+    let access = preflight
+        .decoded_address(operand)
+        .unwrap_or_else(|| unreachable!("validated async-copy source operand disappeared"));
+    effective_data_bytes_for_access(&access)
+}
+
+fn effective_data_bytes_for_access(access: &AddressAccess) -> Result<u64, EffectiveDataBytesError> {
+    let active_lanes = access
+        .lane_vector
+        .iter()
+        .filter(|&&address| address != lanes::LANE_INACTIVE_SENTINEL)
+        .count() as u64;
+    let width =
+        u64::try_from(access.data_width_bytes).map_err(|_| EffectiveDataBytesError::Overflow)?;
+    width
+        .checked_mul(active_lanes)
+        .ok_or(EffectiveDataBytesError::Overflow)
 }
 
 const SHARED_BANK_COUNT_32X4: i64 = 32;
@@ -5672,6 +5879,182 @@ pub fn project_shared_bank_wavefronts_32x4(
     )
 }
 
+#[derive(Debug, Clone, Copy)]
+struct LdgstsLaneTransfer {
+    source_start: u64,
+    source_end: u64,
+    destination_first_word: i64,
+    destination_last_word: i64,
+    lane: u8,
+}
+
+fn finish_ldgsts_destination_cohort(
+    word_scratch: &mut Vec<i64>,
+    total_wavefronts: &mut u32,
+) -> Result<(), LdgstsDestinationProjectionError> {
+    word_scratch.sort_unstable();
+    word_scratch.dedup();
+    let mut bank_words = [0_u32; SHARED_BANK_COUNT_32X4 as usize];
+    for &word in word_scratch.iter() {
+        let bank = word.rem_euclid(SHARED_BANK_COUNT_32X4) as usize;
+        bank_words[bank] = bank_words[bank].checked_add(1).ok_or(
+            LdgstsDestinationProjectionError::BankWavefrontCountOverflow { bank: bank as u8 },
+        )?;
+    }
+    let wavefronts = bank_words.into_iter().max().unwrap_or(0);
+    *total_wavefronts = total_wavefronts
+        .checked_add(wavefronts)
+        .ok_or(LdgstsDestinationProjectionError::WavefrontCountOverflow)?;
+    word_scratch.clear();
+    Ok(())
+}
+
+/// Pair each active lane's cache-all LDGSTS source and destination transfer,
+/// form flexible source cohorts whose complete byte span is at most 128 bytes,
+/// and sum each cohort's broadcast-collapsed 32-bank/4-byte wavefront count.
+/// Cohorts are anchored at the smallest uncovered source address rather than at
+/// absolute 128-byte cache-line boundaries.
+pub fn project_ldgsts_source_cohort_wavefronts_128b_32x4(
+    preflight: PreflightedMemoryAccess<'_>,
+    word_scratch: &mut Vec<i64>,
+) -> Result<u32, LdgstsDestinationProjectionError> {
+    let mut source_index = None;
+    let mut source_count = 0_usize;
+    let mut destination_index = None;
+    let mut destination_count = 0_usize;
+    for (operand, address) in preflight.instruction().addresses.iter().enumerate() {
+        let space = address
+            .address_space
+            .and_then(|raw| pb::MemorySpace::try_from(raw).ok());
+        match space {
+            Some(pb::MemorySpace::Global | pb::MemorySpace::Generic) => {
+                source_count += 1;
+                source_index.get_or_insert(operand);
+            }
+            Some(pb::MemorySpace::Shared) => {
+                destination_count += 1;
+                destination_index.get_or_insert(operand);
+            }
+            Some(pb::MemorySpace::Unspecified | pb::MemorySpace::Local) | None => {}
+        }
+    }
+    if source_count != 1 {
+        return Err(LdgstsDestinationProjectionError::SourceOperandCount { got: source_count });
+    }
+    if destination_count != 1 {
+        return Err(LdgstsDestinationProjectionError::DestinationOperandCount {
+            got: destination_count,
+        });
+    }
+    let source = preflight
+        .decoded_address(source_index.expect("count proved source index"))
+        .expect("source index came from instruction addresses");
+    let destination = preflight
+        .decoded_address(destination_index.expect("count proved destination index"))
+        .expect("destination index came from instruction addresses");
+    if source.data_width_bytes != destination.data_width_bytes {
+        return Err(LdgstsDestinationProjectionError::OperandWidthMismatch {
+            source_bytes: source.data_width_bytes,
+            destination_bytes: destination.data_width_bytes,
+        });
+    }
+    let width = u64::try_from(source.data_width_bytes)
+        .unwrap_or_else(|_| unreachable!("preflight admitted a non-positive operand width"));
+
+    const EMPTY_TRANSFER: LdgstsLaneTransfer = LdgstsLaneTransfer {
+        source_start: 0,
+        source_end: 0,
+        destination_first_word: 0,
+        destination_last_word: 0,
+        lane: 0,
+    };
+    let mut transfers = [EMPTY_TRANSFER; lanes::LANES_PER_WARP];
+    let mut transfer_count = 0_usize;
+    for lane in 0..lanes::LANES_PER_WARP {
+        let source_address = source.lane_vector[lane];
+        let destination_address = destination.lane_vector[lane];
+        if source_address == lanes::LANE_INACTIVE_SENTINEL {
+            debug_assert_eq!(destination_address, lanes::LANE_INACTIVE_SENTINEL);
+            continue;
+        }
+        if width > 128 {
+            return Err(
+                LdgstsDestinationProjectionError::SourceTransferExceedsCohort {
+                    lane,
+                    width_bytes: width,
+                },
+            );
+        }
+        let source_start = source_address as u64;
+        let source_end = source_start.checked_add(width).ok_or(
+            LdgstsDestinationProjectionError::SourceIntervalOverflow {
+                lane,
+                base: source_start,
+                width_bytes: width,
+            },
+        )?;
+        let destination_width_offset = i64::try_from(width - 1)
+            .unwrap_or_else(|_| unreachable!("128-byte transfer width escaped i64"));
+        let destination_last_byte = destination_address
+            .checked_add(destination_width_offset)
+            .ok_or(
+                LdgstsDestinationProjectionError::DestinationIntervalOverflow {
+                    lane,
+                    base: destination_address,
+                    width_bytes: width,
+                },
+            )?;
+        transfers[transfer_count] = LdgstsLaneTransfer {
+            source_start,
+            source_end,
+            destination_first_word: destination_address.div_euclid(4),
+            destination_last_word: destination_last_byte.div_euclid(4),
+            lane: lane as u8,
+        };
+        transfer_count += 1;
+    }
+    transfers[..transfer_count].sort_unstable_by_key(|transfer| {
+        (transfer.source_start, transfer.source_end, transfer.lane)
+    });
+
+    word_scratch.clear();
+    let mut cohort_start = None;
+    let mut total_wavefronts = 0_u32;
+    let mut projected_words = 0_u64;
+    for transfer in &transfers[..transfer_count] {
+        if cohort_start.is_some_and(|start| transfer.source_end - start > 128) {
+            finish_ldgsts_destination_cohort(word_scratch, &mut total_wavefronts)?;
+            cohort_start = None;
+        }
+        cohort_start.get_or_insert(transfer.source_start);
+        let words =
+            u64::try_from(transfer.destination_last_word - transfer.destination_first_word + 1)
+                .unwrap_or_else(|_| {
+                    unreachable!("checked destination interval produced negative words")
+                });
+        projected_words = projected_words.checked_add(words).ok_or(
+            LdgstsDestinationProjectionError::InstructionWordLimit {
+                words: u64::MAX,
+                limit: MAX_SHARED_WORDS_PER_INSTRUCTION,
+            },
+        )?;
+        if projected_words > MAX_SHARED_WORDS_PER_INSTRUCTION {
+            return Err(LdgstsDestinationProjectionError::InstructionWordLimit {
+                words: projected_words,
+                limit: MAX_SHARED_WORDS_PER_INSTRUCTION,
+            });
+        }
+        let additional = usize::try_from(words)
+            .unwrap_or_else(|_| unreachable!("bounded destination words escaped usize"));
+        word_scratch
+            .try_reserve(additional)
+            .map_err(|_| LdgstsDestinationProjectionError::CapacityUnavailable { additional })?;
+        word_scratch.extend(transfer.destination_first_word..=transfer.destination_last_word);
+    }
+    finish_ldgsts_destination_cohort(word_scratch, &mut total_wavefronts)?;
+    Ok(total_wavefronts)
+}
+
 /// A memory instruction decoded to what the memory hierarchy consumes —
 /// the ALLOCATING convenience form (one heap `Vec` per memory record).
 /// Hot walk paths (millions of records per kernel) use
@@ -5717,9 +6100,14 @@ fn memory_space_is_compatible(class: pb::MemoryOpClass, space: pb::MemorySpace) 
                 | pb::MemorySpace::Shared
                 | pb::MemorySpace::Local
         ),
-        pb::MemoryOpClass::AsyncCopy => {
-            matches!(space, pb::MemorySpace::Global | pb::MemorySpace::Generic)
-        }
+        // The generic structural pass admits the v3 destination space; the
+        // enclosing payload-contract shape gate subsequently requires the exact
+        // ordered (GLOBAL|GENERIC source, SHARED destination) pair. Historical
+        // source-only contracts retain their stricter one-operand shape there.
+        pb::MemoryOpClass::AsyncCopy => matches!(
+            space,
+            pb::MemorySpace::Global | pb::MemorySpace::Generic | pb::MemorySpace::Shared
+        ),
         pb::MemoryOpClass::Unspecified
         | pb::MemoryOpClass::Texture
         | pb::MemoryOpClass::Surface
@@ -6156,8 +6544,9 @@ fn record_requires_identity(
     }
 }
 
-fn validate_address_carrying_v1_shape(
+fn validate_address_carrying_shape(
     preflight: PreflightedMemoryAccess<'_>,
+    contract: MemoryPayloadContract,
     record: &impl Fn() -> String,
 ) -> Result<(), TraceError> {
     let meta = preflight.meta();
@@ -6196,11 +6585,40 @@ fn validate_address_carrying_v1_shape(
             }
         }
         pb::MemoryOpClass::AsyncCopy => {
-            if operand_count != 1 {
-                return invalid("expected exactly one source operand");
-            }
-            if instruction.addresses[0].address_space.is_none() {
-                return invalid("the source operand requires explicit GLOBAL or GENERIC space");
+            if contract.carries_ldgsts_destination() {
+                if operand_count != 2 {
+                    return invalid(
+                        "expected exactly an ordered GLOBAL/GENERIC source and SHARED destination",
+                    );
+                }
+                let source_space = instruction.addresses[0]
+                    .address_space
+                    .and_then(|raw| pb::MemorySpace::try_from(raw).ok());
+                if !matches!(
+                    source_space,
+                    Some(pb::MemorySpace::Global | pb::MemorySpace::Generic)
+                ) {
+                    return invalid("operand 0 requires explicit GLOBAL or GENERIC source space");
+                }
+                let destination_space = instruction.addresses[1]
+                    .address_space
+                    .and_then(|raw| pb::MemorySpace::try_from(raw).ok());
+                if destination_space != Some(pb::MemorySpace::Shared) {
+                    return invalid("operand 1 requires explicit SHARED destination space");
+                }
+            } else {
+                if operand_count != 1 {
+                    return invalid("expected exactly one source operand");
+                }
+                let source_space = instruction.addresses[0]
+                    .address_space
+                    .and_then(|raw| pb::MemorySpace::try_from(raw).ok());
+                if !matches!(
+                    source_space,
+                    Some(pb::MemorySpace::Global | pb::MemorySpace::Generic)
+                ) {
+                    return invalid("the source operand requires explicit GLOBAL or GENERIC space");
+                }
             }
         }
         pb::MemoryOpClass::Unspecified
@@ -6282,8 +6700,9 @@ pub fn validate_threadblock_contract(
                 payload_contract,
                 MemoryPayloadContract::AddressCarryingV1
                     | MemoryPayloadContract::AddressCarryingSharedMemorySplitV2
+                    | MemoryPayloadContract::AddressCarryingLdgstsDestinationV3
             ) {
-                validate_address_carrying_v1_shape(preflight, &record)?;
+                validate_address_carrying_shape(preflight, payload_contract, &record)?;
             }
             check_preflighted_allocation_identity(preflight, registry, record)?;
         }
@@ -6398,7 +6817,15 @@ mod tests {
     fn split_v2_trace() -> pb::Trace {
         pb::Trace {
             trace_contract_id: SHARED_MEMORY_SPLIT_TRACE_CONTRACT_ID.into(),
-            memory_payload_classes: SHARED_MEMORY_SPLIT_V2_PAYLOAD_CAPABILITY_VECTOR.to_vec(),
+            memory_payload_classes: ADDRESS_CARRYING_PAYLOAD_CAPABILITY_VECTOR.to_vec(),
+            ..Default::default()
+        }
+    }
+
+    fn ldgsts_destination_v3_trace() -> pb::Trace {
+        pb::Trace {
+            trace_contract_id: LDGSTS_DESTINATION_TRACE_CONTRACT_ID.into(),
+            memory_payload_classes: ADDRESS_CARRYING_PAYLOAD_CAPABILITY_VECTOR.to_vec(),
             ..Default::default()
         }
     }
@@ -6422,6 +6849,14 @@ mod tests {
             classify_memory_payload_contract(&split_v2_trace(), Path::new("split-v2.pb"))
                 .expect("canonical ordered split-v2 capability vector"),
             MemoryPayloadContract::AddressCarryingSharedMemorySplitV2
+        );
+        assert_eq!(
+            classify_memory_payload_contract(
+                &ldgsts_destination_v3_trace(),
+                Path::new("ldgsts-destination-v3.pb")
+            )
+            .expect("canonical ordered destination-v3 capability vector"),
+            MemoryPayloadContract::AddressCarryingLdgstsDestinationV3
         );
     }
 
@@ -6645,6 +7080,203 @@ mod tests {
         assert!(matches!(
             compact.sector_plan(memories[2]),
             ValidatedSectorPlan::Sectors(sectors) if sectors.is_empty()
+        ));
+    }
+
+    fn ldgsts_destination_inst(
+        transpose_source_pairing: bool,
+        source_offset: i64,
+    ) -> pb::Instruction {
+        let mut instruction = async_payload_inst(32, 16, 16);
+        instruction.addresses[0].addrs = (0_i64..32)
+            .map(|lane| {
+                let source_index = if transpose_source_pairing {
+                    (lane % 4) * 8 + lane / 4
+                } else {
+                    lane
+                };
+                0x1000 + source_offset + source_index * 16
+            })
+            .collect();
+        instruction.addresses.push(pb::Address {
+            data_width: 16,
+            compression_format: crate::lanes::FORMAT_LIST_ALL,
+            addrs: (0_i64..32).map(|lane| lane * 16).collect(),
+            address_space: Some(pb::MemorySpace::Shared as i32),
+            ..Default::default()
+        });
+        instruction
+    }
+
+    #[test]
+    fn ldgsts_destination_projection_is_source_cohort_scoped_and_pairing_exact() {
+        for (transpose, source_offset, expected) in [(false, 0, 4), (false, 16, 4), (true, 0, 16)] {
+            let instruction = ldgsts_destination_inst(transpose, source_offset);
+            let preflight = preflight_memory_access(&instruction, || "LDGSTS pair".to_owned())
+                .unwrap()
+                .unwrap();
+            assert_eq!(
+                project_ldgsts_source_cohort_wavefronts_128b_32x4(preflight, &mut Vec::new(),)
+                    .unwrap(),
+                expected,
+                "transpose={transpose}, source_offset={source_offset}"
+            );
+        }
+
+        let compact = ValidatedWarp::from_message(
+            0,
+            pb::Warp {
+                id: 0,
+                instructions: vec![
+                    ldgsts_destination_inst(false, 0),
+                    ldgsts_destination_inst(true, 0),
+                ],
+                ..Default::default()
+            },
+            MemoryPayloadContract::AddressCarryingLdgstsDestinationV3,
+            "compact destination-bearing async copy",
+        )
+        .unwrap();
+        let memories = compact
+            .instructions()
+            .map(|instruction| instruction.memory().unwrap())
+            .collect::<Vec<_>>();
+        assert_eq!(compact.effective_data_bytes(memories[0]), 512);
+        assert_eq!(compact.effective_data_bytes(memories[1]), 512);
+        assert_eq!(
+            compact.ldgsts_destination_wavefronts_128b_32x4(memories[0]),
+            Some(4)
+        );
+        assert_eq!(
+            compact.ldgsts_destination_wavefronts_128b_32x4(memories[1]),
+            Some(16)
+        );
+        for memory in memories {
+            assert!(matches!(
+                compact.sector_plan(memory),
+                ValidatedSectorPlan::Sectors(sectors) if sectors.len() == 16
+            ));
+        }
+    }
+
+    #[test]
+    fn source_only_async_copy_retains_explicit_destination_projection_fallback() {
+        let compact = ValidatedWarp::from_message(
+            0,
+            pb::Warp {
+                id: 0,
+                instructions: vec![async_payload_inst(32, 16, 16)],
+                ..Default::default()
+            },
+            MemoryPayloadContract::AddressCarryingSharedMemorySplitV2,
+            "source-only async copy",
+        )
+        .unwrap();
+        let memory = compact.instructions().next().unwrap().memory().unwrap();
+        assert_eq!(compact.effective_data_bytes(memory), 512);
+        assert_eq!(
+            compact.ldgsts_destination_wavefronts_128b_32x4(memory),
+            None
+        );
+    }
+
+    #[test]
+    fn ldgsts_destination_projection_failures_are_typed() {
+        let mut mismatched = ldgsts_destination_inst(false, 0);
+        mismatched.addresses[1].data_width = 8;
+        let preflight = preflight_memory_access(&mismatched, || "width mismatch".to_owned())
+            .unwrap()
+            .unwrap();
+        assert!(matches!(
+            project_ldgsts_source_cohort_wavefronts_128b_32x4(preflight, &mut Vec::new()),
+            Err(LdgstsDestinationProjectionError::OperandWidthMismatch {
+                source_bytes: 16,
+                destination_bytes: 8,
+            })
+        ));
+
+        let mut too_wide = ldgsts_destination_inst(false, 0);
+        too_wide.active_mask = Some(1);
+        too_wide.predicate_mask = Some(1);
+        too_wide.data_width = Some(129);
+        for address in &mut too_wide.addresses {
+            address.data_width = 129;
+            address.addrs[1..].fill(crate::lanes::LANE_INACTIVE_SENTINEL);
+        }
+        let preflight = preflight_memory_access(&too_wide, || "wide transfer".to_owned())
+            .unwrap()
+            .unwrap();
+        assert!(matches!(
+            project_ldgsts_source_cohort_wavefronts_128b_32x4(preflight, &mut Vec::new()),
+            Err(
+                LdgstsDestinationProjectionError::SourceTransferExceedsCohort {
+                    lane: 0,
+                    width_bytes: 129,
+                }
+            )
+        ));
+
+        let mut overflow = ldgsts_destination_inst(false, 0);
+        overflow.active_mask = Some(1);
+        overflow.predicate_mask = Some(1);
+        for address in &mut overflow.addresses {
+            address.addrs[1..].fill(crate::lanes::LANE_INACTIVE_SENTINEL);
+        }
+        overflow.addresses[0].addrs[0] = -2;
+        let preflight = preflight_memory_access(&overflow, || "source overflow".to_owned())
+            .unwrap()
+            .unwrap();
+        assert!(matches!(
+            project_ldgsts_source_cohort_wavefronts_128b_32x4(
+                preflight,
+                &mut Vec::new()
+            ),
+            Err(LdgstsDestinationProjectionError::SourceIntervalOverflow {
+                lane: 0,
+                base,
+                width_bytes: 16,
+            }) if base == u64::MAX - 1
+        ));
+    }
+
+    #[test]
+    fn destination_v3_requires_exact_ordered_async_copy_pair() {
+        let valid = ldgsts_destination_inst(false, 0);
+        let preflight = preflight_memory_access(&valid, || "valid v3".to_owned())
+            .unwrap()
+            .unwrap();
+        validate_address_carrying_shape(
+            preflight,
+            MemoryPayloadContract::AddressCarryingLdgstsDestinationV3,
+            &|| "valid v3".to_owned(),
+        )
+        .unwrap();
+
+        let source_only = async_payload_inst(32, 16, 16);
+        let preflight = preflight_memory_access(&source_only, || "source only".to_owned())
+            .unwrap()
+            .unwrap();
+        assert!(matches!(
+            validate_address_carrying_shape(
+                preflight,
+                MemoryPayloadContract::AddressCarryingLdgstsDestinationV3,
+                &|| "source only".to_owned(),
+            ),
+            Err(TraceError::MemoryPayloadShapeInvalid { got: 1, .. })
+        ));
+
+        let mut reversed = valid;
+        reversed.addresses.reverse();
+        let preflight = preflight_memory_access(&reversed, || "reversed pair".to_owned())
+            .unwrap()
+            .unwrap();
+        assert!(matches!(
+            validate_address_carrying_shape(
+                preflight,
+                MemoryPayloadContract::AddressCarryingLdgstsDestinationV3,
+                &|| "reversed pair".to_owned(),
+            ),
+            Err(TraceError::MemoryPayloadShapeInvalid { .. })
         ));
     }
 
@@ -7683,6 +8315,9 @@ mod tests {
             (pb::MemoryOpClass::Atomic, pb::MemorySpace::Local),
             (pb::MemoryOpClass::AsyncCopy, pb::MemorySpace::Global),
             (pb::MemoryOpClass::AsyncCopy, pb::MemorySpace::Generic),
+            // Structurally admitted for the destination-bearing v3 contract;
+            // validate_address_carrying_shape rejects a lone/shared-first form.
+            (pb::MemoryOpClass::AsyncCopy, pb::MemorySpace::Shared),
         ];
         for (class, space) in cases {
             let inst = identity_inst(class, Some(space), None, 0x40);
@@ -7713,7 +8348,6 @@ mod tests {
             (pb::MemoryOpClass::Local, pb::MemorySpace::Shared),
             (pb::MemoryOpClass::Global, pb::MemorySpace::Shared),
             (pb::MemoryOpClass::Global, pb::MemorySpace::Local),
-            (pb::MemoryOpClass::AsyncCopy, pb::MemorySpace::Shared),
         ];
         for (class, space) in cases {
             let inst = identity_inst(class, Some(space), None, 0x40);

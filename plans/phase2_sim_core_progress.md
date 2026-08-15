@@ -1756,3 +1756,105 @@ is removed rather than accepted.
 The final battery passes 33 `sim-arch`, 8 `sim-engine`, 110 `sim-mem`, 2
 `sim-run`, 280 `sim-sm`, and 97 `sim-trace` unit tests plus all workspace target
 integrations, formatting, deterministic replay, and `git diff --check`.
+
+## sm_86 destination-bearing LDGSTS completion (2026-08-15)
+
+The source-only async-copy payload contract could not distinguish destination
+banking: each `LDGSTS` carried only its global MREF, while the established local
+completion probe showed two cycles per shared-destination wavefront. The tracer
+now emits `sm86_addr_carry_ldgsts_dst_v3` and records both structural MREFs in
+source-first wire order: operand 0 is explicit GLOBAL/GENERIC with allocation
+identity, and operand 1 is explicit SHARED without global identity. Source-sector
+accounting still consumes only operand 0.
+
+A clean in-tree build uses the pinned protobuf 34.1 compiler/runtime and CUDA
+13.2. CUDA 13.3 fails in `cudafe++` while parsing the same modern Abseil headers;
+this is the externally reported CUDA 13.3 parser regression tracked by NVIDIA as
+bug 6302392, not an Abseil source error. The Makefiles now select protobuf from
+`.toolchain/pb` by default and honor `CUDA_INSTALL_PATH` for both `nvcc` and
+`ptxas`, so the successful 13.2 selection is explicit rather than dependent on
+`/opt/cuda`.
+
+### Exact compact projection
+
+For each effective lane, replay pairs the source and destination byte intervals,
+sorts by source address, and greedily forms flexible cohorts whose complete
+source span is at most 128 bytes. Cohorts are anchored at the smallest uncovered
+source address, not absolute cache-line boundaries. Within each cohort,
+destination spans expand to four-byte words, broadcasts are deduplicated, words
+map onto 32 banks, and the largest distinct-word count on any bank is the cohort
+wavefront count. Cohort counts are summed exactly.
+
+The address-heavy projection is computed while the validated Prost tree is
+available. A sparse warp-local arena retains the exact `u64` source payload and
+optional destination wavefront count; `ValidatedMemoryInstruction` carries only
+a compact `u32` arena index, and `AccessKind::GlobalAsyncCopy` carries one `u32`
+completion-work token. Cache-all copies use the maximum of the established
+payload fallback and `wavefronts × 2 cycles × 64 work units/cycle`. Explicit
+bypass copies retain their independent two-work-unit-per-source-byte fallback;
+their destination coupling and all cross-warp completion arbitration remain
+unresolved rather than inheriting the cache-all rule. `sm_120` remains a typed
+research gap.
+
+### Replacement NVBit and NCU campaign
+
+The rebuilt tracer captured all six workloads synchronously into
+`/var/tmp/gpu-simulator-ldgsts-destination-v3-live-20260815-v1`. Every executed
+async-copy record has exactly the ordered two-operand V3 shape, every source has
+allocation identity, no destination has one, and all unsupported/unmapped
+sidecars are empty. Exact source-sector totals are unchanged from V2: 128 /
+196,608 / 4,352 / 196,608 / 196,608 / 16,384 in the table order below. Fresh
+SASS sidecars decode every instruction with zero unknown encodings.
+
+The destination projection was fixed before replacement profiling. Three
+foreground NCU profile sets then supplied evaluator-only wavefront and cycle
+measurements. The trace projection reproduces the silicon LDGSTS shared-wavefront
+counter exactly in every workload and every NCU repeat:
+
+| workload | async records | trace destination wavefronts | NCU LDGSTS shared wavefronts | per-record wavefront histogram |
+|---|---:|---:|---:|---|
+| cp.async canary | 32 | 32 | 32 | 1: 32 |
+| BF16 HMMA GEMM | 16,384 | 196,608 | 196,608 | 8: 8,192; 16: 8,192 |
+| BF16 forward attention | 272 | 2,624 | 2,624 | 4: 144; 16: 128 |
+| FP16 HMMA GEMM | 16,384 | 196,608 | 196,608 | 8: 8,192; 16: 8,192 |
+| INT8 IMMA GEMM | 16,384 | 196,608 | 196,608 | 8: 8,192; 16: 8,192 |
+| sparse BF16 HMMA GEMM | 1,024 | 12,288 | 12,288 | 8: 512; 16: 512 |
+
+All six V3 traces replay twice byte-identically in flat and carded shared-L2
+modes with exact cardinalities (644 / 197,120 / 39,568 / 197,120 / 157,696 /
+19,968 records). Cache-all V3 clears the destination-timing tail. Replaying the
+six V2 source-only captures with the same binary preserves every prior timing and
+traffic field while now correctly retaining that tail; focused V3 bypass tests
+retain it as well.
+
+| workload | source-only shared-L2 | V3 shared-L2 | destination delta | median fresh NCU `sm__cycles_active.max` (range) | V3/NCU |
+|---|---:|---:|---:|---:|---:|
+| cp.async canary | 1,060 | 1,060 | 0 | 2,249 (2,231–2,252) | 47.13% |
+| BF16 HMMA GEMM | 8,146 | 8,722 | +576 | 13,131 (13,003–13,224) | 66.42% |
+| BF16 forward attention | 12,256 | 12,448 | +192 | 14,851 (14,829–15,230) | 83.82% |
+| FP16 HMMA GEMM | 8,146 | 8,722 | +576 | 13,166 (12,988–13,822) | 66.25% |
+| INT8 IMMA GEMM | 4,646 | 5,318 | +672 | 9,673 (9,555–9,814) | 54.98% |
+| sparse BF16 HMMA GEMM | 2,213 | 2,341 | +128 | 4,158 (4,097–4,361) | 56.30% |
+
+INT8 flat mode independently changes from 7,758 to 8,430 cycles; the other five
+flat results equal their V3 shared-L2 result. No NCU cycle or wavefront label is a
+simulator input. The exact wavefront agreement validates the already-selected
+projection, while the remaining cycle residual stays an explicit resource/overlap
+gap.
+
+Embedding and SiLU outputs remain byte-identical to the Task-31 baseline in both
+memory modes. Seven measured runs after one warmup, pinned to CPU 2, changed
+median wall time by -0.44%, +0.75%, +1.12%, and +1.74% for Embedding flat/shared-L2
+and SiLU flat/shared-L2; median RSS changed by less than 0.07%. The 3% host-cost
+target is met.
+
+A broad Python run exposed two stale test assumptions and they were corrected
+without relaxing trace admission: generic ASYNC_COPY structural validation now
+tests SHARED destination compatibility separately, and machine-local smoke tests
+skip historical nonzero-shared-memory captures that lack the required V2 split
+while accepting added Rust tests in the filtered-count diagnostic. The removed
+protobuf hash-gate expectation was also aligned with direct lock shape
+validation. Final checks pass the clean tracer build and host unit tests, 244
+focused destination-contract tests, the full NVBit Python suite (822 passed, 7
+explicit historical-fixture skips, 155 subtests), Rust formatting, all workspace
+target tests, deterministic live replay, and `git diff --check`.

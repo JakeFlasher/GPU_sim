@@ -7,8 +7,11 @@ export CUDA_INSTALL_PATH
 PKG_CONFIG ?= pkg-config
 PKG_CONFIG_FLAGS ?= --define-prefix
 PB_PREFIX ?= $(abspath ../../.toolchain/pb)
-PROTOC ?= protoc
+PKG_CONFIG_PATH ?= $(PB_PREFIX)/lib/pkgconfig
+PROTOC ?= $(PB_PREFIX)/bin/protoc
 NVCC_CCBIN ?= $(CXX)
+
+export PKG_CONFIG PKG_CONFIG_FLAGS PKG_CONFIG_PATH PROTOC
 
 .DEFAULT_GOAL := all
 

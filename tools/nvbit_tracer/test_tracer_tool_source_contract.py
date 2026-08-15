@@ -4,6 +4,9 @@ from pathlib import Path
 _TRACER_SOURCE = (
     Path(__file__).resolve().parent / "tracer_tool" / "tracer_tool.cu"
 )
+_INJECT_SOURCE = (
+    Path(__file__).resolve().parent / "tracer_tool" / "inject_funcs.cu"
+)
 
 
 def test_static_shared_memory_metadata_fails_closed_before_serialization() -> None:
@@ -79,3 +82,25 @@ def test_context_init_establishes_identity_before_application_callbacks() -> Non
     assert context_device < callback_guard_off < mutex_unlock
     assert "cudaMalloc" not in body
     assert "cudaGetDeviceCount" not in body
+
+
+def test_ldgsts_v3_carries_both_mrefs_with_structural_spaces() -> None:
+    tracer = _TRACER_SOURCE.read_text(encoding="utf-8")
+    inject = _INJECT_SOURCE.read_text(encoding="utf-8")
+
+    mref_start = tracer.index(
+        "if (op->type == InstrType::OperandType::MREF)"
+    )
+    mref_end = tracer.index("}else if", mref_start)
+    mref_body = tracer[mref_start:mref_end]
+    assert "continue;" not in mref_body
+    assert "num_mref++;" in mref_body
+
+    assert "ma.reg_id = op_reg_val_2;" in inject
+    assert "nvbit_add_call_arg_const_val32(instr, mem_oper_idx);" in tracer
+    assert "if (mref_ordinal == 0) return dynamic_trace::MEMORY_SPACE_SHARED;" in tracer
+    assert "if (mref_ordinal == 1) return dynamic_trace::MEMORY_SPACE_GLOBAL;" in tracer
+    assert (
+        'dyn_trace.set_trace_contract_id("sm86_addr_carry_ldgsts_dst_v3");'
+        in tracer
+    )

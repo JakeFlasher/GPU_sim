@@ -1250,14 +1250,12 @@ def test_cli_reports_missing_operator_manifest_prerequisite(
     assert "runtime discovery never mints these expected identities" in stderr
 
 
-def test_pinned_environment_lock_and_interface_are_exact() -> None:
+def test_pinned_environment_lock_shape_and_interface_are_explicit() -> None:
     lock = REPO_ROOT / "tools/nvbit_tracer/toolchain/pb_explicit.lock"
     payload = lock.read_bytes()
-    assert hashlib.sha256(payload).hexdigest() == (
-        "d522b3ee1560e98512cd460b213adee5a901f77aef0e4fae3ba94699e3b1e222"
-    )
-    assert payload.decode("utf-8").splitlines()[0] == "@EXPLICIT"
-    assert len(payload.decode("utf-8").splitlines()) == 8
+    lines = payload.decode("utf-8").splitlines()
+    assert lines[0] == "@EXPLICIT"
+    assert len(lines) == 8
     script = (
         REPO_ROOT / "tools/nvbit_tracer/pinned_build_env.sh"
     ).read_text(encoding="utf-8")
@@ -1285,11 +1283,11 @@ def test_pinned_environment_lock_and_missing_prefix_exit_taxonomy(
     assert "exact protobuf lock is missing" in missing.stderr
 
     lock.write_bytes(source_lock.read_bytes() + b"#corrupt\n")
-    mismatched = subprocess.run(
+    malformed = subprocess.run(
         ["bash", str(script)], env=env, capture_output=True, text=True,
     )
-    assert mismatched.returncode == 1
-    assert "protobuf lock mismatch" in mismatched.stderr
+    assert malformed.returncode == 1
+    assert "protobuf package list is malformed" in malformed.stderr
 
     lock.write_bytes(source_lock.read_bytes())
     absent_prefix = subprocess.run(

@@ -112,6 +112,26 @@ def _threadblock_path(trace_dir: Path, kernel_id: int = 0) -> Path:
     )
 
 
+def _set_async_copy_operands(trace_dir: Path, spaces: tuple[int, ...]) -> None:
+    threadblock_pb2, instruction_pb2, _address_pb2 = (
+        import_trace_contract._import_pb_modules()
+    )
+    path = _threadblock_path(trace_dir)
+    threadblock = threadblock_pb2.threadblock()
+    threadblock.ParseFromString(path.read_bytes())
+    instruction = threadblock.warps[0].instructions[0]
+    instruction.memory_op_class = instruction_pb2.MEMORY_OP_CLASS_ASYNC_COPY
+    instruction.active_mask = instruction.predicate_mask = 0
+    instruction.ClearField("addresses")
+    for space in spaces:
+        operand = instruction.addresses.add()
+        operand.data_width = instruction.data_width
+        operand.address_space = space
+        operand.compression_format = 0
+        operand.addrs.extend([-1] * 32)
+    path.write_bytes(threadblock.SerializeToString())
+
+
 def _open_descriptor_count() -> int:
     return len(os.listdir("/proc/self/fd"))
 
@@ -169,6 +189,82 @@ def test_legacy_v1_requires_explicit_historical_read_only_admission(
         expected_admission=historical,
     ) as sources:
         sources.verify_unchanged()
+
+
+def test_shared_memory_split_v2_is_historical_source_only(
+    tmp_path: Path,
+) -> None:
+    trace_dir = _write_trace(
+        tmp_path / "split-v2",
+        trace_contract_id=(
+            trace_admission.SHARED_MEMORY_SPLIT_TRACE_CONTRACT_ID
+        ),
+    )
+    _threadblock_pb2, _instruction_pb2, address_pb2 = (
+        import_trace_contract._import_pb_modules()
+    )
+    _set_async_copy_operands(
+        trace_dir,
+        (address_pb2.MEMORY_SPACE_GLOBAL,),
+    )
+
+    with pytest.raises(TraceAdmissionError) as caught:
+        require_trace_admission(trace_dir)
+    assert caught.value.typed_reason == "superseded_trace_historical_only"
+
+    historical = require_historical_trace_admission(trace_dir)
+    assert historical.trace_contract_id == (
+        trace_admission.SHARED_MEMORY_SPLIT_TRACE_CONTRACT_ID
+    )
+
+
+def test_destination_v3_accepts_ordered_ldgsts_source_destination_pair(
+    tmp_path: Path,
+) -> None:
+    trace_dir = _write_trace(tmp_path / "destination-v3")
+    _threadblock_pb2, _instruction_pb2, address_pb2 = (
+        import_trace_contract._import_pb_modules()
+    )
+    _set_async_copy_operands(
+        trace_dir,
+        (
+            address_pb2.MEMORY_SPACE_GLOBAL,
+            address_pb2.MEMORY_SPACE_SHARED,
+        ),
+    )
+
+    admitted = require_trace_admission(trace_dir)
+    assert admitted.trace_contract_id == trace_admission.EXPECTED_TRACE_CONTRACT_ID
+
+
+@pytest.mark.parametrize(
+    "spaces",
+    [
+        ("global",),
+        ("shared", "global"),
+        ("global", "global"),
+    ],
+)
+def test_destination_v3_rejects_incomplete_or_misordered_ldgsts_pair(
+    tmp_path: Path,
+    spaces: tuple[str, ...],
+) -> None:
+    trace_dir = _write_trace(tmp_path / "destination-v3-invalid")
+    _threadblock_pb2, _instruction_pb2, address_pb2 = (
+        import_trace_contract._import_pb_modules()
+    )
+    values = {
+        "global": address_pb2.MEMORY_SPACE_GLOBAL,
+        "shared": address_pb2.MEMORY_SPACE_SHARED,
+    }
+    _set_async_copy_operands(
+        trace_dir,
+        tuple(values[space] for space in spaces),
+    )
+
+    with pytest.raises(TraceAdmissionError) as caught:
+        require_trace_admission(trace_dir)
+    assert caught.value.typed_reason == "memory_payload_shape_invalid"
 
 
 def test_legacy_v1_retains_historical_set_capability_semantics(

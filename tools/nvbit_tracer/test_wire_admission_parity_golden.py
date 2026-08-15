@@ -7,6 +7,7 @@ from typing import Any
 import pytest
 
 from tools.nvbit_tracer.trace_admission import (
+    EXPECTED_TRACE_CONTRACT_ID,
     TraceAdmissionError,
     _import_pb_modules,
     _import_trace_pb2,
@@ -107,7 +108,7 @@ def _build_case(trace_dir: Path, mutation: str) -> None:
     trace_dir.mkdir()
 
     trace = trace_pb2.Trace()
-    trace.trace_contract_id = "sm86_addr_carry_shmem_split_v2"
+    trace.trace_contract_id = EXPECTED_TRACE_CONTRACT_ID
     trace.memory_payload_classes.extend([1, 2, 3, 6, 8])
     device = trace.gpu_device[0]
     device.id = 0
@@ -190,21 +191,21 @@ def _build_case(trace_dir: Path, mutation: str) -> None:
     elif mutation == "legacy_shared_memory_split_unadvertised":
         trace.trace_contract_id = "sm86_addr_carry_v1"
     elif mutation == "split_shared_memory_matching":
-        trace.trace_contract_id = "sm86_addr_carry_shmem_split_v2"
+        trace.trace_contract_id = EXPECTED_TRACE_CONTRACT_ID
         kernel.size_shared_memory = 6144
         kernel.shared_memory_static_bytes = 2048
         kernel.shared_memory_dynamic_bytes = 4096
     elif mutation == "split_shared_memory_zero":
-        trace.trace_contract_id = "sm86_addr_carry_shmem_split_v2"
+        trace.trace_contract_id = EXPECTED_TRACE_CONTRACT_ID
         kernel.shared_memory_static_bytes = 0
         kernel.shared_memory_dynamic_bytes = 0
     elif mutation == "split_shared_memory_static_only":
-        trace.trace_contract_id = "sm86_addr_carry_shmem_split_v2"
+        trace.trace_contract_id = EXPECTED_TRACE_CONTRACT_ID
         kernel.size_shared_memory = 2048
         kernel.shared_memory_static_bytes = 2048
         kernel.shared_memory_dynamic_bytes = 0
     elif mutation == "split_shared_memory_dynamic_only":
-        trace.trace_contract_id = "sm86_addr_carry_shmem_split_v2"
+        trace.trace_contract_id = EXPECTED_TRACE_CONTRACT_ID
         kernel.size_shared_memory = 4096
         kernel.shared_memory_static_bytes = 0
         kernel.shared_memory_dynamic_bytes = 4096
@@ -216,18 +217,18 @@ def _build_case(trace_dir: Path, mutation: str) -> None:
     elif mutation == "split_shared_memory_missing_dynamic":
         kernel.ClearField("shared_memory_dynamic_bytes")
     elif mutation == "split_shared_memory_mismatch":
-        trace.trace_contract_id = "sm86_addr_carry_shmem_split_v2"
+        trace.trace_contract_id = EXPECTED_TRACE_CONTRACT_ID
         kernel.size_shared_memory = 4096
         kernel.shared_memory_static_bytes = 1024
         kernel.shared_memory_dynamic_bytes = 2048
     elif mutation == "shared_memory_combined_negative":
         kernel.size_shared_memory = -1
     elif mutation == "split_shared_memory_wrong_wire_type":
-        trace.trace_contract_id = "sm86_addr_carry_shmem_split_v2"
+        trace.trace_contract_id = EXPECTED_TRACE_CONTRACT_ID
         kernel.shared_memory_dynamic_bytes = 0
         kernel_wire_suffix = b"\x5a\x00"
     elif mutation == "split_shared_memory_duplicate_field":
-        trace.trace_contract_id = "sm86_addr_carry_shmem_split_v2"
+        trace.trace_contract_id = EXPECTED_TRACE_CONTRACT_ID
         kernel.shared_memory_static_bytes = 0
         kernel.shared_memory_dynamic_bytes = 0
         kernel_wire_suffix = b"\x58\x00"
