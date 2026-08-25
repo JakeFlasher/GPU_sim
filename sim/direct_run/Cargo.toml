@@ -9,6 +9,10 @@ repository.workspace = true
 name = "sim_direct_run"
 path = "src/lib.rs"
 
+[features]
+default = []
+performance-counters = ["sim-sm/performance-counters"]
+
 [[bin]]
 name = "sim-run"
 path = "src/main.rs"
@@ -21,6 +25,9 @@ sim-mem = { path = "../mem" }
 sim-sm = { path = "../sm" }
 sim-trace = { path = "../trace" }
 thiserror = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
 
 [lints]
 workspace = true

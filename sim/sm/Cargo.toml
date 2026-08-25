@@ -8,6 +8,7 @@ repository.workspace = true
 [features]
 default = []
 campaign = ["sim-trace/campaign"]
+performance-counters = []
 
 [dependencies]
 sim-arch = { path = "../arch" }

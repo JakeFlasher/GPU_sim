@@ -1,0 +1,109 @@
+#include <cuda.h>
+
+#include <algorithm>
+#include <cstdint>
+#include <cstdio>
+#include <cstdlib>
+#include <vector>
+
+#define DRIVER_CHECK(call)                                                      \
+    do {                                                                        \
+        const CUresult status = (call);                                         \
+        if (status != CUDA_SUCCESS) {                                           \
+            const char* name = nullptr;                                         \
+            const char* description = nullptr;                                  \
+            cuGetErrorName(status, &name);                                      \
+            cuGetErrorString(status, &description);                             \
+            std::fprintf(stderr, "%s failed: %s (%s)\n", #call,              \
+                         name == nullptr ? "unknown" : name,                   \
+                         description == nullptr ? "no description"             \
+                                                : description);                 \
+            std::exit(1);                                                       \
+        }                                                                       \
+    } while (0)
+
+constexpr int kWarpSize = 32;
+constexpr int kMaxWarps = 16;
+constexpr int kTimestamps = 9;
+constexpr const char* kFunction = "_Z22ibuffer_timeline_probePyPj";
+
+int main(int argc, char** argv) {
+    if (argc != 5) {
+        std::fprintf(stderr, "usage: %s CUBIN WARPS TRIALS VARIANT\n", argv[0]);
+        return 2;
+    }
+    const int warps = std::atoi(argv[2]);
+    const int trials = std::atoi(argv[3]);
+    if (warps < 1 || warps > kMaxWarps || trials < 1 || trials > 32) {
+        return 2;
+    }
+    std::vector<unsigned long long> timeline(warps * kTimestamps);
+    std::vector<std::vector<unsigned long long>> samples(
+        trials, std::vector<unsigned long long>(warps * kTimestamps));
+    std::vector<std::uint32_t> sink(warps);
+
+    DRIVER_CHECK(cuInit(0));
+    CUdevice device;
+    CUcontext context;
+    CUmodule module;
+    CUfunction function;
+    DRIVER_CHECK(cuDeviceGet(&device, 0));
+    DRIVER_CHECK(cuCtxCreate(&context, nullptr, 0, device));
+    DRIVER_CHECK(cuModuleLoad(&module, argv[1]));
+    DRIVER_CHECK(cuModuleGetFunction(&function, module, kFunction));
+
+    CUdeviceptr timeline_device;
+    CUdeviceptr sink_device;
+    DRIVER_CHECK(cuMemAlloc(&timeline_device,
+                            kMaxWarps * kTimestamps * sizeof(unsigned long long)));
+    DRIVER_CHECK(cuMemAlloc(&sink_device,
+                            kMaxWarps * sizeof(std::uint32_t)));
+    void* arguments[] = {&timeline_device, &sink_device};
+    for (int trial = 0; trial < trials; ++trial) {
+        DRIVER_CHECK(cuLaunchKernel(function, 1, 1, 1, warps * kWarpSize, 1, 1,
+                                    0, nullptr, arguments, nullptr));
+        DRIVER_CHECK(cuCtxSynchronize());
+        DRIVER_CHECK(cuMemcpyDtoH(timeline.data(), timeline_device,
+                                  timeline.size() * sizeof(unsigned long long)));
+        samples[trial] = timeline;
+    }
+    DRIVER_CHECK(cuMemcpyDtoH(sink.data(), sink_device,
+                              warps * sizeof(std::uint32_t)));
+
+    bool correct = true;
+    std::uint64_t checksum = 0;
+    for (int warp = 0; warp < warps; ++warp) {
+        correct = correct && sink[warp] == 0x1b0f0000u + warp;
+        checksum = checksum * 131u + sink[warp];
+        for (int index = 1; index < kTimestamps; ++index) {
+            correct = correct &&
+                      samples.back()[warp * kTimestamps + index] >
+                          samples.back()[warp * kTimestamps + index - 1];
+        }
+    }
+
+    std::printf(
+        "{\"variant\":\"%s\",\"warps\":%d,\"instructions\":32,"
+        "\"timestamps_per_warp\":9,\"timeline_cycles\":[",
+        argv[4], warps);
+    for (int trial = 0; trial < trials; ++trial) {
+        const unsigned long long origin =
+            *std::min_element(samples[trial].begin(), samples[trial].end());
+        std::printf("%s[", trial == 0 ? "" : ",");
+        for (int warp = 0; warp < warps; ++warp) {
+            std::printf("%s[", warp == 0 ? "" : ",");
+            for (int index = 0; index < kTimestamps; ++index) {
+                const unsigned long long value =
+                    samples[trial][warp * kTimestamps + index] - origin;
+                std::printf("%s%llu", index == 0 ? "" : ",", value);
+            }
+            std::printf("]");
+        }
+        std::printf("]");
+    }
+    std::printf(
+        "],\"checksum\":%llu,\"correct\":%s}\n",
+        static_cast<unsigned long long>(checksum),
+        correct ? "true" : "false");
+    return correct ? 0 : 1;
+}

@@ -82,6 +82,14 @@ pub enum MemRoleError {
 pub fn mem_role_of_checked(opcode_text: &str, arch_token: &str) -> Result<MemRole, MemRoleError> {
     let arch = ArchId::parse_deploy(arch_token).map_err(CacheOpError::from)?;
     Ok(match classify_opcode_for_arch(opcode_text, arch)? {
+        // CUDA 13.2 lowers an sm_86 `ld.global.ca` to
+        // `LDG.E.STRONG.SM`.  The fixed/L1TEX priority campaign measures
+        // that exact form as an L1 tag hit on GA102.  Keep the literal token
+        // (the same spelling has different Blackwell cache semantics), but
+        // route it through the Ampere L1 hierarchy here.
+        Some(CacheOpToken::LdgEStrongSm) if arch == ArchId::Sm86 => {
+            MemRole::EligibleLoad(CacheOpToken::LdgEStrongSm)
+        }
         Some(token) if derive_l1_eligible(token) => MemRole::EligibleLoad(token),
         Some(token) => MemRole::BypassLoad(token),
         None if is_global_store_opcode(opcode_text) => MemRole::Store,
@@ -110,13 +118,61 @@ pub fn is_known_untagged_opcode(opcode_text: &str) -> bool {
 /// static [`MemRole`] of its pc joined with the record's decoded unique
 /// sectors. Sector payloads (`off`/`len`) index the owning warp's sector
 /// arena.
+pub const ASYNC_COPY_EXACT_DESTINATION_FLAG: u32 = 1 << 31;
+pub const ASYNC_COPY_COMPLETION_VALUE_MASK: u32 = ASYNC_COPY_EXACT_DESTINATION_FLAG - 1;
+
+/// Meaning of the compact `GlobalAsyncCopy::completion_work` token. The tag
+/// preserves exact destination wavefronts without widening [`AccessKind`];
+/// source-only and bypass records retain their established fixed-point work.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AsyncCopyCompletion {
+    Inactive,
+    PayloadWork(u32),
+    ExactDestinationWork(u32),
+}
+
+pub const fn decode_async_copy_completion(token: u32) -> AsyncCopyCompletion {
+    if token == 0 {
+        AsyncCopyCompletion::Inactive
+    } else if token & ASYNC_COPY_EXACT_DESTINATION_FLAG != 0 {
+        AsyncCopyCompletion::ExactDestinationWork(token & ASYNC_COPY_COMPLETION_VALUE_MASK)
+    } else {
+        AsyncCopyCompletion::PayloadWork(token)
+    }
+}
+
+pub const fn encode_async_copy_payload_work(work: u32) -> Option<u32> {
+    if work <= ASYNC_COPY_COMPLETION_VALUE_MASK {
+        Some(work)
+    } else {
+        None
+    }
+}
+
+pub const fn encode_async_copy_destination_work(work: u32) -> Option<u32> {
+    if work == 0 {
+        Some(0)
+    } else if work <= ASYNC_COPY_COMPLETION_VALUE_MASK {
+        Some(ASYNC_COPY_EXACT_DESTINATION_FLAG | work)
+    } else {
+        None
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AccessKind {
     NonMemory,
+    /// A dynamically issued memory instruction whose effective
+    /// `active_mask & predicate_mask` is zero. The scheduler still consumes
+    /// the instruction slot and control-code stall, but the instruction
+    /// creates no memory traffic, result writeback, or dependence-barrier
+    /// producer.
+    PredicatedOffMemory,
     /// Shared-memory class: no L1TEX sector traffic. `wavefronts` is the
     /// compact 32-bank/4-byte-word projection of the effective lane addresses;
-    /// zero preserves fixed-latency behavior for zero-active or uncaptured
-    /// payloads. Architecture-local issue timing decides whether this projection
+    /// zero preserves fixed-latency behavior for uncaptured legacy payloads;
+    /// dynamically zero-active records use [`Self::PredicatedOffMemory`].
+    /// Architecture-local issue timing decides whether this projection
     /// is executable.
     Shared {
         wavefronts: u64,
@@ -146,6 +202,9 @@ pub enum AccessKind {
         off: usize,
         len: u16,
         token: CacheOpToken,
+        /// Exact L2 request topology for global ATOMG. Zero for every other
+        /// bypass token. Derived before compact replay discards lane addresses.
+        l2_requests: u16,
     },
     /// Non-bulk global-to-shared async-copy source. Static classification still
     /// identifies `LDGSTS` as `MemRole::BypassLoad(Ldgsts)`; this dynamic form
@@ -155,11 +214,11 @@ pub enum AccessKind {
     GlobalAsyncCopy {
         off: usize,
         len: u16,
-        /// Completion work in the architecture's fixed 64-unit/cycle domain.
-        /// Source-only traces derive this from exact active-lane payload; a
-        /// destination-bearing cache-all trace raises it to the independently
-        /// established source-cohort bank-wavefront floor. Replay performs the
-        /// checked projection before narrowing so this field stays compact.
+        /// Tagged completion token. Untagged values are work in the
+        /// architecture's fixed 64-unit/cycle domain; the high-bit form stores
+        /// exact destination-derived work that can be inverted to a cache-all
+        /// wavefront count. Replay performs all checked projection before
+        /// packing so this field stays compact.
         completion_work: u32,
         /// Static SASS source-cache route. This remains explicit on a
         /// predicated-off dynamic record even though its payload is zero.
@@ -184,7 +243,26 @@ pub enum AccessKind {
     GlobalReduction {
         off: usize,
         len: u16,
+        /// Exact L2 requests represented by the alias-expanded sector span.
+        l2_requests: u16,
     },
+}
+
+impl AccessKind {
+    /// Exact L2 request count for a global returning atomic or reduction.
+    /// `None` distinguishes non-atomic paths from a fully predicated-off atomic
+    /// whose exact count is `Some(0)`.
+    pub const fn atomic_l2_requests(self) -> Option<u16> {
+        match self {
+            Self::GlobalBypass {
+                token: CacheOpToken::Atom,
+                l2_requests,
+                ..
+            }
+            | Self::GlobalReduction { l2_requests, .. } => Some(l2_requests),
+            _ => None,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -201,6 +279,59 @@ mod tests {
     }
 
     #[test]
+    fn atomic_request_topology_is_typed_and_zero_is_not_non_atomic() {
+        assert_eq!(
+            AccessKind::GlobalBypass {
+                off: 0,
+                len: 4,
+                token: CacheOpToken::Atom,
+                l2_requests: 1,
+            }
+            .atomic_l2_requests(),
+            Some(1)
+        );
+        assert_eq!(
+            AccessKind::GlobalReduction {
+                off: 0,
+                len: 0,
+                l2_requests: 0,
+            }
+            .atomic_l2_requests(),
+            Some(0)
+        );
+        assert_eq!(
+            AccessKind::GlobalBypass {
+                off: 0,
+                len: 4,
+                token: CacheOpToken::LdgECg,
+                l2_requests: 0,
+            }
+            .atomic_l2_requests(),
+            None
+        );
+    }
+
+    #[test]
+    fn async_copy_completion_token_round_trips_both_domains() {
+        let work = encode_async_copy_payload_work(1024).unwrap();
+        assert_eq!(
+            decode_async_copy_completion(work),
+            AsyncCopyCompletion::PayloadWork(1024)
+        );
+        let destination = encode_async_copy_destination_work(2048).unwrap();
+        assert_eq!(
+            decode_async_copy_completion(destination),
+            AsyncCopyCompletion::ExactDestinationWork(2048)
+        );
+        assert_eq!(
+            decode_async_copy_completion(encode_async_copy_destination_work(0).unwrap()),
+            AsyncCopyCompletion::Inactive
+        );
+        assert!(encode_async_copy_payload_work(u32::MAX).is_none());
+        assert!(encode_async_copy_destination_work(u32::MAX).is_none());
+    }
+
+    #[test]
     fn mem_roles_classified_from_sidecar_text() {
         assert_eq!(
             mem_role_of("LDG.E.U16.CONSTANT R0, [R2.64]", "sm_86"),
@@ -209,6 +340,14 @@ mod tests {
         assert_eq!(
             mem_role_of("LDGSTS.E.128 [R1], [R2.64]", "sm_86"),
             MemRole::BypassLoad(CacheOpToken::Ldgsts)
+        );
+        assert_eq!(
+            mem_role_of("LDG.E.STRONG.SM R11, [R2.64]", "sm_86"),
+            MemRole::EligibleLoad(CacheOpToken::LdgEStrongSm)
+        );
+        assert_eq!(
+            mem_role_of("LDG.E.STRONG.SM R11, [R2.64]", "sm_120"),
+            MemRole::BypassLoad(CacheOpToken::LdgEStrongSm)
         );
         assert_eq!(
             mem_role_of("ATOMG.E.CAS.STRONG.GPU PT, R4, [R2.64], R6, R7", "sm_86"),

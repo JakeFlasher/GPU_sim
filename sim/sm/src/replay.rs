@@ -62,19 +62,23 @@ use sim_trace::{
 };
 
 use sim_mem::{
-    CacheOpToken, L2Config, L2Counters, L2Model, LdgstsL1Policy, MemRole, is_known_untagged_opcode,
-    opcode_head,
+    ASYNC_COPY_COMPLETION_VALUE_MASK, CacheOpToken, L2Config, L2Counters, L2Model, LdgstsL1Policy,
+    MemRole, encode_async_copy_destination_work, encode_async_copy_payload_work,
+    is_known_untagged_opcode, opcode_head,
 };
 
 #[cfg(feature = "campaign")]
 use crate::evidence::AdmittedLaunchEvidence;
 use crate::issue::{
-    AccessKind, BlockReplay, IssueError, IssueModelParams, ReplayInst, SharedMemoryResidency,
-    SmSimResult, TailFlags, WarpReplay, simulate_sm_with_residency,
+    AccessKind, BlockReplay, IssueError, IssueModelParams, MemoryAdmissionCandidate,
+    MemoryServiceCandidate, ReplayInst, SharedMemoryResidency, SmSimResult, TailFlags, WarpReplay,
+    simulate_sm_with_residency, validate_memory_admission_candidates,
+    validate_memory_service_candidates,
 };
 use crate::program::FunctionSchedule;
 use crate::system::{
-    DramBw, DramStats, L2SourceSplit, SystemError, simulate_kernel_shared_with_residency,
+    DramBw, DramStats, L2SourceSplit, SystemError,
+    simulate_kernel_shared_with_residency_and_candidates,
 };
 
 mod aggregation;
@@ -165,6 +169,32 @@ pub enum ReplayError {
     L2Config(#[from] sim_mem::L2ConfigError),
     #[error("L2 construction failed: {0}")]
     L2Build(#[from] sim_mem::L2BuildError),
+    #[error("L2 snapshot failed: {0}")]
+    L2Snapshot(#[from] sim_mem::L2SnapshotError),
+    #[error("L2 counter operation failed: {0}")]
+    L2Counters(#[from] sim_mem::L2CounterError),
+    #[error("retained L2 configuration mismatch: expected {expected:?}, got {got:?}")]
+    RetainedL2ConfigurationMismatch { expected: L2Config, got: L2Config },
+    #[error(
+        "retained L2 launch boundary is not fully drained: {pending_sectors} sector(s) remain pending"
+    )]
+    RetainedL2NotDrained { pending_sectors: usize },
+    #[error(
+        "memory-service candidates require L1SharedL2 replay so their issue-time topology is evaluated on the full hierarchy"
+    )]
+    MemoryServiceCandidatesRequireSharedL2,
+    #[error(
+        "memory-service candidates require full launch coverage; sampled replay discards per-SM timing diagnostics"
+    )]
+    MemoryServiceCandidatesRequireFullCoverage,
+    #[error(
+        "memory-admission candidates require L1SharedL2 replay so exact L2 outcomes are available"
+    )]
+    MemoryAdmissionCandidatesRequireSharedL2,
+    #[error(
+        "memory-admission candidates require full launch coverage; sampled replay discards per-SM timing diagnostics"
+    )]
+    MemoryAdmissionCandidatesRequireFullCoverage,
     #[error("SM {sm_id} L1 counter aggregation failed: {source}")]
     L1Aggregation {
         sm_id: i32,
@@ -650,12 +680,67 @@ struct FoldedKernelReplay {
     records_seen: u64,
     per_sm: BTreeMap<i32, SmSimResult>,
     diagnostic_last_issue_cycles: u64,
+    last_processed_system_event_time: Option<u64>,
     terminal_modeled_event_time: Option<u64>,
     l1: Option<L1Counters>,
     l2: Option<L2Counters>,
     l2_by_source: Option<L2SourceSplit>,
     dram: Option<DramStats>,
     unmodeled_tails: TailFlags,
+}
+
+/// Completion knowledge for one fully replayed launch.
+///
+/// `Complete` means every timing-bearing effect known to the replay model is
+/// represented in its event stream. `Incomplete` preserves the event frontier
+/// only as a lower bound and names the known retirement tails that remain
+/// outside that stream. Neither variant includes the profiler launch envelope
+/// required for `gpc__cycles_elapsed.max`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ModeledCompletionFrontier {
+    Complete {
+        cycles: Option<u64>,
+    },
+    Incomplete {
+        lower_bound_cycles: Option<u64>,
+        unmodeled_tails: TailFlags,
+    },
+}
+
+impl ModeledCompletionFrontier {
+    pub const fn lower_bound_cycles(self) -> Option<u64> {
+        match self {
+            Self::Complete { cycles } => cycles,
+            Self::Incomplete {
+                lower_bound_cycles, ..
+            } => lower_bound_cycles,
+        }
+    }
+
+    pub const fn complete_cycles(self) -> Option<u64> {
+        match self {
+            Self::Complete { cycles } => cycles,
+            Self::Incomplete { .. } => None,
+        }
+    }
+
+    pub const fn unmodeled_tails(self) -> TailFlags {
+        match self {
+            Self::Complete { .. } => TailFlags {
+                red_rmw: false,
+                dirty_writeback: false,
+                coherence: false,
+                ldgsts_dst_shared_timing: false,
+            },
+            Self::Incomplete {
+                unmodeled_tails, ..
+            } => unmodeled_tails,
+        }
+    }
+
+    pub const fn is_complete(self) -> bool {
+        matches!(self, Self::Complete { .. })
+    }
 }
 
 /// Full-coverage replay result. This is the only public replay result carrying
@@ -702,12 +787,34 @@ impl FullKernelReplayResult {
         self.replay.diagnostic_last_issue_cycles
     }
 
+    /// Raw timestamp of the final successfully processed shared-system event,
+    /// before it is combined with the issue frontier.
+    pub fn last_processed_modeled_system_event_time(&self) -> Option<u64> {
+        self.replay.last_processed_system_event_time
+    }
+
     /// Maximum timestamp covered by the modeled event set: the checked issue
     /// frontier (`last local issue timestamp + 1`) and any successfully processed
-    /// shared-system event. This remains a directional diagnostic, not an NCU
+    /// shared-system event. If [`Self::modeled_completion_frontier`] is
+    /// incomplete, this raw value is only a lower bound. It is never an NCU
     /// cycle prediction.
     pub fn terminal_modeled_event_time(&self) -> Option<u64> {
         self.replay.terminal_modeled_event_time
+    }
+
+    /// Typed launch-retirement diagnostic. Consumers must distinguish a
+    /// complete modeled frontier from a lower bound with known missing tails.
+    pub fn modeled_completion_frontier(&self) -> ModeledCompletionFrontier {
+        if self.replay.unmodeled_tails.is_empty() {
+            ModeledCompletionFrontier::Complete {
+                cycles: self.replay.terminal_modeled_event_time,
+            }
+        } else {
+            ModeledCompletionFrontier::Incomplete {
+                lower_bound_cycles: self.replay.terminal_modeled_event_time,
+                unmodeled_tails: self.replay.unmodeled_tails,
+            }
+        }
     }
 
     pub fn l1(&self) -> Option<&L1Counters> {
@@ -813,6 +920,28 @@ pub enum KernelReplayOutcome {
     Full(FullKernelReplayResult),
     #[cfg(feature = "campaign")]
     SampledObserved(SampledKernelReplayResult),
+}
+
+impl KernelReplayOutcome {
+    fn l2_counters(&self) -> Option<&L2Counters> {
+        match self {
+            Self::Full(result) => result.l2(),
+            #[cfg(feature = "campaign")]
+            Self::SampledObserved(result) => result.counters().l2(),
+        }
+    }
+
+    /// Consume a coverage-classified result only when it represents the full
+    /// launch. Keeping this match inside `sim-sm` makes ordinary callers stable
+    /// when Cargo feature unification enables the campaign-only sampled
+    /// variant elsewhere in the workspace.
+    pub fn into_full(self) -> Option<FullKernelReplayResult> {
+        match self {
+            Self::Full(result) => Some(result),
+            #[cfg(feature = "campaign")]
+            Self::SampledObserved(_) => None,
+        }
+    }
 }
 
 /// Coverage classification retained by an explicitly unadmitted diagnostic replay.
@@ -1572,6 +1701,7 @@ fn fold_kernel_result(
         records_seen,
         per_sm,
         diagnostic_last_issue_cycles,
+        last_processed_system_event_time,
         terminal_modeled_event_time,
         l1: l1_totals,
         l2,
@@ -1610,6 +1740,7 @@ fn classify_kernel_result(
                 records_seen,
                 per_sm: _,
                 diagnostic_last_issue_cycles: _,
+                last_processed_system_event_time: _,
                 terminal_modeled_event_time: _,
                 l1,
                 l2,
@@ -1685,6 +1816,7 @@ pub enum CoResidency {
 pub struct ReplayConfiguration {
     issue_params: IssueModelParams,
     memory_mode: ReplayMemMode,
+    memory_admission_feedback: Option<MemoryAdmissionCandidate>,
     co_residency: CoResidency,
 }
 
@@ -1700,8 +1832,27 @@ impl ReplayConfiguration {
         Ok(Self {
             issue_params,
             memory_mode,
+            memory_admission_feedback: None,
             co_residency: CoResidency::Modeled,
         })
+    }
+
+    /// Build the structural identity for the timing-active schema-10 lane.
+    /// The candidate's operand-visibility floor must equal the issue model's
+    /// existing read-barrier latency: feedback replaces queue readiness only
+    /// and must not silently introduce (or ignore) a second latency source.
+    pub fn checked_with_memory_admission_feedback(
+        issue_params: IssueModelParams,
+        memory_mode: ReplayMemMode,
+        candidate: MemoryAdmissionCandidate,
+    ) -> Result<Self, ReplayError> {
+        if !matches!(memory_mode, ReplayMemMode::L1SharedL2 { .. }) {
+            return Err(ReplayError::MemoryAdmissionCandidatesRequireSharedL2);
+        }
+        candidate.validate_feedback(issue_params.read_barrier_latency)?;
+        let mut configuration = Self::checked(issue_params, memory_mode)?;
+        configuration.memory_admission_feedback = Some(candidate);
+        Ok(configuration)
     }
 
     pub fn arch(&self) -> ArchId {
@@ -1716,8 +1867,281 @@ impl ReplayConfiguration {
         self.memory_mode
     }
 
+    /// Timing-active finite admission candidate, when schema 10 is enabled.
+    pub fn memory_admission_feedback(&self) -> Option<MemoryAdmissionCandidate> {
+        self.memory_admission_feedback
+    }
+
     pub fn co_residency(&self) -> CoResidency {
         self.co_residency
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct OrderedSessionLaunch {
+    kernel_id: i32,
+    function_unique_id: i32,
+}
+
+/// Typed failures for an ordered same-stream replay session. Session errors
+/// are separate from one-launch replay failures so callers can distinguish a
+/// malformed launch from a launch-chain ownership/order mismatch.
+#[derive(Debug, thiserror::Error)]
+pub enum ReplaySessionError {
+    #[error(transparent)]
+    Replay(#[from] ReplayError),
+    #[error("stream-L2 cache scope requires L1SharedL2 replay mode, got {mode:?}")]
+    SharedL2ModeRequired { mode: ReplayMemMode },
+    #[error("trace stream ({device_id}, {stream_id}) contains no kernel launches")]
+    EmptyStream { device_id: i64, stream_id: i64 },
+    #[error("replay session is bound to trace root {expected}, got {got}")]
+    TraceRootMismatch { expected: PathBuf, got: PathBuf },
+    #[error("replay session is bound to device {expected}, got {got}")]
+    DeviceMismatch { expected: i64, got: i64 },
+    #[error("replay session is bound to stream {expected}, got {got}")]
+    StreamMismatch { expected: i64, got: i64 },
+    #[error("replay session configuration mismatch: expected {expected:?}, got {got:?}")]
+    ConfigurationMismatch {
+        expected: ReplayConfiguration,
+        got: ReplayConfiguration,
+    },
+    #[error(
+        "replay session architecture-card placement mismatch: expected sku={expected_sku:?}, sm_count={expected_sm_count}, max_shared_bytes_per_sm={expected_max_shared_bytes_per_sm}; got sku={got_sku:?}, sm_count={got_sm_count}, max_shared_bytes_per_sm={got_max_shared_bytes_per_sm}"
+    )]
+    ArchitectureCardMismatch {
+        expected_sku: Sku,
+        expected_sm_count: u32,
+        expected_max_shared_bytes_per_sm: u64,
+        got_sku: Sku,
+        got_sm_count: u32,
+        got_max_shared_bytes_per_sm: u64,
+    },
+    #[error(
+        "replay session launch position {position} expects kernel {expected_kernel_id}/function {expected_function_unique_id}, got kernel {got_kernel_id}/function {got_function_unique_id}"
+    )]
+    LaunchOrderMismatch {
+        position: usize,
+        expected_kernel_id: i32,
+        expected_function_unique_id: i32,
+        got_kernel_id: i32,
+        got_function_unique_id: i32,
+    },
+    #[error("replay session already consumed all {completed_launches} launches")]
+    LaunchSequenceComplete { completed_launches: usize },
+    #[error("stream-L2 replay outcome omitted its per-launch L2 counter delta")]
+    LaunchL2CountersMissing,
+    #[error(
+        "stream-L2 cumulative counters do not reconcile: reported={reported:?}, model={model:?}"
+    )]
+    CumulativeL2CounterMismatch {
+        reported: L2Counters,
+        model: L2Counters,
+    },
+}
+
+/// Ordered same-device/same-stream replay state. Only the shared L2 model
+/// survives a successful launch boundary. Per-SM L1, MSHR, scheduler,
+/// dependence, async-copy, pipeline, CTA, event-queue, and DRAM-server state is
+/// rebuilt by the ordinary one-launch system path on every call.
+pub struct StreamL2ReplaySession {
+    trace_root: PathBuf,
+    configuration: ReplayConfiguration,
+    placement: PlacementConfig,
+    device_id: i64,
+    stream_id: i64,
+    expected_launches: Vec<OrderedSessionLaunch>,
+    completed_launches: usize,
+    l2: L2Model,
+    cumulative_reported_l2: L2Counters,
+}
+
+impl StreamL2ReplaySession {
+    /// Bind a session to one trace root and one exact device/stream launch
+    /// sequence. Construction is accepted only for the shared-L2 replay mode.
+    pub fn new(
+        td: &TraceDir,
+        arch_card: &ArchCard,
+        params: &IssueModelParams,
+        mode: ReplayMemMode,
+        device_id: i64,
+        stream_id: i64,
+    ) -> Result<Self, ReplaySessionError> {
+        let configuration = ReplayConfiguration::checked(*params, mode)?;
+        let l2_config = match mode {
+            ReplayMemMode::L1SharedL2 { l2, .. } => l2,
+            _ => return Err(ReplaySessionError::SharedL2ModeRequired { mode }),
+        };
+        require_trace_architecture(td, configuration.arch())?;
+        let placement = PlacementConfig::from_arch_card(arch_card, configuration.arch())?;
+        let expected_launches: Vec<_> = td
+            .kernels()
+            .filter(|loc| loc.device_id() == device_id && loc.stream_id() == stream_id)
+            .map(|loc| OrderedSessionLaunch {
+                kernel_id: loc.kernel().id,
+                function_unique_id: loc.kernel().function_unique_id,
+            })
+            .collect();
+        if expected_launches.is_empty() {
+            return Err(ReplaySessionError::EmptyStream {
+                device_id,
+                stream_id,
+            });
+        }
+        let l2 = L2Model::new(l2_config).map_err(ReplayError::from)?;
+        Ok(Self {
+            trace_root: td.root().to_path_buf(),
+            configuration,
+            placement,
+            device_id,
+            stream_id,
+            expected_launches,
+            completed_launches: 0,
+            l2,
+            cumulative_reported_l2: L2Counters::for_arch(configuration.arch()),
+        })
+    }
+
+    pub fn configuration(&self) -> ReplayConfiguration {
+        self.configuration
+    }
+
+    pub fn device_id(&self) -> i64 {
+        self.device_id
+    }
+
+    pub fn stream_id(&self) -> i64 {
+        self.stream_id
+    }
+
+    pub fn completed_launches(&self) -> usize {
+        self.completed_launches
+    }
+
+    pub fn remaining_launches(&self) -> usize {
+        self.expected_launches.len() - self.completed_launches
+    }
+
+    pub fn is_complete(&self) -> bool {
+        self.completed_launches == self.expected_launches.len()
+    }
+
+    pub fn cumulative_l2_counters(&self) -> L2Counters {
+        self.cumulative_reported_l2
+    }
+
+    pub fn pending_l2_sectors(&self) -> usize {
+        self.l2.pending_sector_count()
+    }
+
+    /// Replay the next launch transactionally. The session cache and cursor are
+    /// committed together only after the launch result, drained-state check,
+    /// per-launch delta, and cumulative-counter reconciliation all succeed.
+    pub fn replay_next(
+        &mut self,
+        td: &TraceDir,
+        loc: &KernelLoc<'_>,
+        schedules: &BTreeMap<i32, FunctionSchedule>,
+        arch_card: &ArchCard,
+        params: &IssueModelParams,
+        mode: ReplayMemMode,
+    ) -> Result<KernelReplayOutcome, ReplaySessionError> {
+        if td.root() != self.trace_root {
+            return Err(ReplaySessionError::TraceRootMismatch {
+                expected: self.trace_root.clone(),
+                got: td.root().to_path_buf(),
+            });
+        }
+        if loc.device_id() != self.device_id {
+            return Err(ReplaySessionError::DeviceMismatch {
+                expected: self.device_id,
+                got: loc.device_id(),
+            });
+        }
+        if loc.stream_id() != self.stream_id {
+            return Err(ReplaySessionError::StreamMismatch {
+                expected: self.stream_id,
+                got: loc.stream_id(),
+            });
+        }
+        let Some(expected_launch) = self.expected_launches.get(self.completed_launches) else {
+            return Err(ReplaySessionError::LaunchSequenceComplete {
+                completed_launches: self.completed_launches,
+            });
+        };
+        if loc.kernel().id != expected_launch.kernel_id
+            || loc.kernel().function_unique_id != expected_launch.function_unique_id
+        {
+            return Err(ReplaySessionError::LaunchOrderMismatch {
+                position: self.completed_launches,
+                expected_kernel_id: expected_launch.kernel_id,
+                expected_function_unique_id: expected_launch.function_unique_id,
+                got_kernel_id: loc.kernel().id,
+                got_function_unique_id: loc.kernel().function_unique_id,
+            });
+        }
+
+        let got_configuration = ReplayConfiguration::checked(*params, mode)?;
+        if got_configuration != self.configuration {
+            return Err(ReplaySessionError::ConfigurationMismatch {
+                expected: self.configuration,
+                got: got_configuration,
+            });
+        }
+        let got_placement = PlacementConfig::from_arch_card(arch_card, self.configuration.arch())?;
+        if got_placement != self.placement {
+            return Err(ReplaySessionError::ArchitectureCardMismatch {
+                expected_sku: self.placement.sku,
+                expected_sm_count: self.placement.sm_count,
+                expected_max_shared_bytes_per_sm: self.placement.max_shared_bytes_per_sm,
+                got_sku: got_placement.sku,
+                got_sm_count: got_placement.sm_count,
+                got_max_shared_bytes_per_sm: got_placement.max_shared_bytes_per_sm,
+            });
+        }
+        if self.l2.pending_sector_count() != 0 {
+            return Err(ReplayError::RetainedL2NotDrained {
+                pending_sectors: self.l2.pending_sector_count(),
+            }
+            .into());
+        }
+
+        let mut staged_l2 = self.l2.try_snapshot().map_err(ReplayError::from)?;
+        let schedule = lookup_schedule(schedules, loc)?;
+        let outcome = replay_kernel_with_schedule_and_l2(
+            td,
+            loc,
+            schedule,
+            arch_card,
+            params,
+            mode,
+            Some(&mut staged_l2),
+        )?;
+        if staged_l2.pending_sector_count() != 0 {
+            return Err(ReplayError::RetainedL2NotDrained {
+                pending_sectors: staged_l2.pending_sector_count(),
+            }
+            .into());
+        }
+        let launch_delta = outcome
+            .l2_counters()
+            .copied()
+            .ok_or(ReplaySessionError::LaunchL2CountersMissing)?;
+        let mut cumulative_reported_l2 = self.cumulative_reported_l2;
+        cumulative_reported_l2
+            .add_checked(&launch_delta)
+            .map_err(ReplayError::from)?;
+        let model_counters = *staged_l2.counters().map_err(ReplayError::from)?;
+        if cumulative_reported_l2 != model_counters {
+            return Err(ReplaySessionError::CumulativeL2CounterMismatch {
+                reported: cumulative_reported_l2,
+                model: model_counters,
+            });
+        }
+
+        self.l2 = staged_l2;
+        self.cumulative_reported_l2 = cumulative_reported_l2;
+        self.completed_launches += 1;
+        Ok(outcome)
     }
 }
 
@@ -1767,9 +2191,15 @@ fn validate_replay_architecture(
     schedule: &FunctionSchedule,
     params: &IssueModelParams,
     mode: ReplayMemMode,
+    memory_admission_feedback: Option<MemoryAdmissionCandidate>,
 ) -> Result<ReplayConfiguration, ReplayError> {
     require_replay_arch(schedule.arch, params.arch, "issue parameters")?;
-    ReplayConfiguration::checked(*params, mode)
+    match memory_admission_feedback {
+        Some(candidate) => {
+            ReplayConfiguration::checked_with_memory_admission_feedback(*params, mode, candidate)
+        }
+        None => ReplayConfiguration::checked(*params, mode),
+    }
 }
 
 fn async_copy_destination_fallback_sms(
@@ -1800,15 +2230,59 @@ fn async_copy_destination_fallback_sms(
         .collect()
 }
 
-fn replay_kernel_with_schedule(
+fn replay_kernel_with_schedule_and_l2(
     td: &TraceDir,
     loc: &KernelLoc<'_>,
     schedule: &FunctionSchedule,
     arch_card: &ArchCard,
     params: &IssueModelParams,
     mode: ReplayMemMode,
+    retained_l2: Option<&mut L2Model>,
 ) -> Result<KernelReplayOutcome, ReplayError> {
-    let configuration = validate_replay_architecture(schedule, params, mode)?;
+    replay_kernel_with_schedule_and_l2_and_candidates(
+        td,
+        loc,
+        schedule,
+        arch_card,
+        params,
+        mode,
+        retained_l2,
+        &[],
+        &[],
+        None,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn replay_kernel_with_schedule_and_l2_and_candidates(
+    td: &TraceDir,
+    loc: &KernelLoc<'_>,
+    schedule: &FunctionSchedule,
+    arch_card: &ArchCard,
+    params: &IssueModelParams,
+    mode: ReplayMemMode,
+    retained_l2: Option<&mut L2Model>,
+    memory_service_candidates: &[MemoryServiceCandidate],
+    memory_admission_candidates: &[MemoryAdmissionCandidate],
+    memory_admission_feedback: Option<MemoryAdmissionCandidate>,
+) -> Result<KernelReplayOutcome, ReplayError> {
+    if !memory_service_candidates.is_empty() && !matches!(mode, ReplayMemMode::L1SharedL2 { .. }) {
+        return Err(ReplayError::MemoryServiceCandidatesRequireSharedL2);
+    }
+    if !memory_admission_candidates.is_empty() && !matches!(mode, ReplayMemMode::L1SharedL2 { .. })
+    {
+        return Err(ReplayError::MemoryAdmissionCandidatesRequireSharedL2);
+    }
+    if memory_admission_feedback.is_some() && !matches!(mode, ReplayMemMode::L1SharedL2 { .. }) {
+        return Err(ReplayError::MemoryAdmissionCandidatesRequireSharedL2);
+    }
+    validate_memory_service_candidates(memory_service_candidates).map_err(IssueError::from)?;
+    validate_memory_admission_candidates(memory_admission_candidates).map_err(IssueError::from)?;
+    if let Some(candidate) = memory_admission_feedback {
+        candidate.validate().map_err(IssueError::from)?;
+    }
+    let configuration =
+        validate_replay_architecture(schedule, params, mode, memory_admission_feedback)?;
     let placement = PlacementConfig::from_arch_card(arch_card, schedule.arch)?;
     require_trace_architecture(td, schedule.arch)?;
     let decode_sectors = !matches!(mode, ReplayMemMode::Flat);
@@ -1818,6 +2292,19 @@ fn replay_kernel_with_schedule(
         coverage,
         shared_memory_residency,
     } = extract_per_sm_blocks(td, loc, schedule, placement, decode_sectors)?;
+    #[cfg(feature = "campaign")]
+    if !memory_service_candidates.is_empty() && matches!(&coverage, ExtractedCoverage::Sampled(_)) {
+        return Err(ReplayError::MemoryServiceCandidatesRequireFullCoverage);
+    }
+    #[cfg(feature = "campaign")]
+    if !memory_admission_candidates.is_empty() && matches!(&coverage, ExtractedCoverage::Sampled(_))
+    {
+        return Err(ReplayError::MemoryAdmissionCandidatesRequireFullCoverage);
+    }
+    #[cfg(feature = "campaign")]
+    if memory_admission_feedback.is_some() && matches!(&coverage, ExtractedCoverage::Sampled(_)) {
+        return Err(ReplayError::MemoryAdmissionCandidatesRequireFullCoverage);
+    }
     let async_copy_destination_fallback_sms =
         async_copy_destination_fallback_sms(td.memory_payload_contract(), &per_sm_blocks);
     let replay = match mode {
@@ -1850,16 +2337,44 @@ fn replay_kernel_with_schedule(
             )?
         }
         ReplayMemMode::L1SharedL2 { l1, l2, dram } => {
-            let mut l2 = L2Model::new(l2)?;
-            let mut sys = simulate_kernel_shared_with_residency(
+            let mut fresh_l2;
+            let l2_model = match retained_l2 {
+                Some(model) => {
+                    if *model.config() != l2 {
+                        return Err(ReplayError::RetainedL2ConfigurationMismatch {
+                            expected: l2,
+                            got: *model.config(),
+                        });
+                    }
+                    model
+                }
+                None => {
+                    fresh_l2 = L2Model::new(l2)?;
+                    &mut fresh_l2
+                }
+            };
+            let pending_sectors = l2_model.pending_sector_count();
+            if pending_sectors != 0 {
+                return Err(ReplayError::RetainedL2NotDrained { pending_sectors });
+            }
+            let counters_before = *l2_model.counters()?;
+            let mut sys = simulate_kernel_shared_with_residency_and_candidates(
                 &per_sm_blocks,
                 schedule,
                 params,
                 shared_memory_residency,
                 l1,
-                &mut l2,
+                l2_model,
                 dram,
+                memory_service_candidates,
+                memory_admission_candidates,
+                memory_admission_feedback,
             )?;
+            let pending_sectors = l2_model.pending_sector_count();
+            if pending_sectors != 0 {
+                return Err(ReplayError::RetainedL2NotDrained { pending_sectors });
+            }
+            let launch_l2 = sys.l2.checked_delta_since(&counters_before)?;
             for sm in &async_copy_destination_fallback_sms {
                 if let Some(result) = sys.per_sm.get_mut(sm) {
                     result.unmodeled_tails.ldgsts_dst_shared_timing = true;
@@ -1876,13 +2391,24 @@ fn replay_kernel_with_schedule(
                 records_seen,
                 true,
                 sys.terminal_event_time,
-                Some((sys.l2, sys.l2_by_source, sys.dram)),
+                Some((launch_l2, sys.l2_by_source, sys.dram)),
             )?;
             require_system_tail_consistency(system_unmodeled_tails, replay.unmodeled_tails)?;
             replay
         }
     };
     Ok(classify_kernel_result(coverage, configuration, replay))
+}
+
+fn replay_kernel_with_schedule(
+    td: &TraceDir,
+    loc: &KernelLoc<'_>,
+    schedule: &FunctionSchedule,
+    arch_card: &ArchCard,
+    params: &IssueModelParams,
+    mode: ReplayMemMode,
+) -> Result<KernelReplayOutcome, ReplayError> {
+    replay_kernel_with_schedule_and_l2(td, loc, schedule, arch_card, params, mode, None)
 }
 
 /// Replay the one launch represented by [`AdmittedLaunchEvidence`]. This is the
@@ -1935,6 +2461,90 @@ pub fn replay_trace_kernel(
     replay_kernel_with_schedule(td, loc, schedule, arch_card, params, mode)
 }
 
+/// Replay one launch while evaluating a bounded set of observational streaming
+/// memory-service hypotheses at the exact issue timestamps. Candidates neither
+/// delay issue nor add events; their per-SM diagnostics expose counterfactual
+/// service busy time, queueing, and terminal completion. This research surface
+/// is intentionally restricted to the full shared-L2 hierarchy mode.
+pub fn replay_trace_kernel_with_memory_service_candidates(
+    td: &TraceDir,
+    loc: &KernelLoc<'_>,
+    schedules: &BTreeMap<i32, FunctionSchedule>,
+    arch_card: &ArchCard,
+    params: &IssueModelParams,
+    mode: ReplayMemMode,
+    memory_service_candidates: &[MemoryServiceCandidate],
+) -> Result<KernelReplayOutcome, ReplayError> {
+    let schedule = lookup_schedule(schedules, loc)?;
+    replay_kernel_with_schedule_and_l2_and_candidates(
+        td,
+        loc,
+        schedule,
+        arch_card,
+        params,
+        mode,
+        None,
+        memory_service_candidates,
+        &[],
+        None,
+    )
+}
+
+/// Replay one launch while evaluating bounded finite operand-admission queues
+/// against exact per-instruction L2 hit/miss outcomes. The evaluator preserves
+/// the observed issue and cache order and emits schema-9 diagnostics only; it
+/// does not alter scheduler timing or hierarchy state.
+pub fn replay_trace_kernel_with_memory_admission_candidates(
+    td: &TraceDir,
+    loc: &KernelLoc<'_>,
+    schedules: &BTreeMap<i32, FunctionSchedule>,
+    arch_card: &ArchCard,
+    params: &IssueModelParams,
+    mode: ReplayMemMode,
+    memory_admission_candidates: &[MemoryAdmissionCandidate],
+) -> Result<KernelReplayOutcome, ReplayError> {
+    let schedule = lookup_schedule(schedules, loc)?;
+    replay_kernel_with_schedule_and_l2_and_candidates(
+        td,
+        loc,
+        schedule,
+        arch_card,
+        params,
+        mode,
+        None,
+        &[],
+        memory_admission_candidates,
+        None,
+    )
+}
+
+/// Replay one launch with one feedback-coupled finite admission candidate.
+/// Unlike schema-9 observation, this lane participates in warp readiness and
+/// therefore may change issue and cache order. It remains explicit opt-in.
+pub fn replay_trace_kernel_with_memory_admission_feedback(
+    td: &TraceDir,
+    loc: &KernelLoc<'_>,
+    schedules: &BTreeMap<i32, FunctionSchedule>,
+    arch_card: &ArchCard,
+    params: &IssueModelParams,
+    mode: ReplayMemMode,
+    memory_admission_feedback: MemoryAdmissionCandidate,
+) -> Result<KernelReplayOutcome, ReplayError> {
+    let schedule = lookup_schedule(schedules, loc)?;
+    replay_kernel_with_schedule_and_l2_and_candidates(
+        td,
+        loc,
+        schedule,
+        arch_card,
+        params,
+        mode,
+        None,
+        &[],
+        &[],
+        Some(memory_admission_feedback),
+    )
+}
+
 /// Replay caller-supplied trace/schedule inputs for debugging only. The returned
 /// diagnostics retain counters and directional timestamps but erase the full
 /// replay type, so they cannot enter the legacy launch-set aggregation API.
@@ -1950,6 +2560,548 @@ pub fn replay_unadmitted_diagnostics(
     let schedule = lookup_schedule(schedules, loc)?;
     let outcome = replay_kernel_with_schedule(td, loc, schedule, arch_card, params, mode)?;
     Ok(UnadmittedReplayDiagnostics::from_outcome(outcome))
+}
+
+#[cfg(test)]
+mod stream_l2_session_tests {
+    use super::*;
+    use crate::control_bits::ControlBits;
+    use crate::issue::IssueResourceSource;
+    use crate::program::{IssueSlot, OpClass, PipelineClass};
+    use prost::Message;
+    use sim_arch::LdgstsCompletionThroughput;
+    use sim_mem::{L1Config, L2Replacement, SliceHash};
+    use sim_trace::lanes::{FORMAT_LIST_ALL, LANE_INACTIVE_SENTINEL};
+    use sim_trace::reader::ADDRESS_CARRYING_TRACE_CONTRACT_ID;
+
+    const BASE: i64 = 0x7000_0000;
+
+    fn params() -> IssueModelParams {
+        IssueModelParams {
+            arch: ArchId::Sm86,
+            resource_source: IssueResourceSource::SyntheticTestFixture,
+            l1_hit_latency: 1,
+            l1_miss_latency: 2,
+            global_flat_latency: 4,
+            shared_write_barrier_latency: 1,
+            shared_additional_wavefront_latency: 2,
+            non_memory_write_barrier_latency: 1,
+            read_barrier_latency: 1,
+            ldgsts_l1_mshr_floor: std::num::NonZeroU32::new(1).unwrap(),
+            ldgsts_completion_throughput: LdgstsCompletionThroughput {
+                cache_all_payload_bytes_per_cycle: 64,
+                bypass_payload_bytes_per_cycle: 32,
+            },
+            ldgsts_cache_all_destination_wavefront_cycles: 2,
+            ldgsts_cache_all_destination_service_wavefronts: 2,
+            ldgsts_cache_all_destination_service_cycles: 3,
+            max_resident_warps_per_sm: 48,
+        }
+    }
+
+    fn shared_mode(associativity: u32, capacity_bytes: u64) -> ReplayMemMode {
+        ReplayMemMode::L1SharedL2 {
+            l1: L1Config {
+                arch: ArchId::Sm86,
+                line_capacity: 1,
+                mshr_count: Some(1),
+                hit_latency: 1,
+                miss_latency: 2,
+            },
+            l2: L2Config {
+                arch: ArchId::Sm86,
+                capacity_bytes,
+                line_bytes: 128,
+                sector_bytes: 32,
+                num_slices: 1,
+                associativity,
+                replacement: L2Replacement::Lru,
+                slice_hash: SliceHash::LineMod,
+            },
+            dram: DramBw::Unmodeled { arch: ArchId::Sm86 },
+        }
+    }
+
+    fn load(function_unique_id: i32, address: i64, width: i32) -> pb::Instruction {
+        let mut addrs = vec![LANE_INACTIVE_SENTINEL; 32];
+        addrs[0] = address;
+        pb::Instruction {
+            pc: 16,
+            active_mask: Some(1),
+            predicate_mask: Some(1),
+            function_unique_id,
+            vpc: Some(16),
+            sm_id: Some(0),
+            warpid_sm: Some(0),
+            warpid_tb: Some(0),
+            data_width: Some(width),
+            memory_op_class: Some(pb::MemoryOpClass::Global as i32),
+            memory_op_access_kind: Some(pb::MemoryOpAccessKind::Load as i32),
+            addresses: vec![pb::Address {
+                data_width: width,
+                compression_format: FORMAT_LIST_ALL,
+                addrs,
+                allocation_id: Some(1),
+                address_space: Some(pb::MemorySpace::Global as i32),
+                ..Default::default()
+            }],
+            ..Default::default()
+        }
+    }
+
+    fn schedule(function_unique_id: i32) -> FunctionSchedule {
+        FunctionSchedule {
+            arch: ArchId::Sm86,
+            function_unique_id,
+            kernel_name: format!("k{function_unique_id}"),
+            function_name: format!("f{function_unique_id}"),
+            by_pc: BTreeMap::from([(
+                16,
+                IssueSlot {
+                    control: ControlBits::new(0, false, 7, 7, 0, 0).unwrap(),
+                    op_class: OpClass::Other,
+                    async_copy_wait_max_pending_groups: 0,
+                    pipeline_class: PipelineClass::DispatchOnly,
+                    mem_role: MemRole::EligibleLoad(CacheOpToken::LdgECa),
+                    ldgsts_l1_policy: None,
+                    fixed_latency_operands:
+                        crate::sass_operands::FixedLatencyOperandStatus::NotApplicable,
+                    clocklo_read: false,
+                    gpu_membar: false,
+                    opcode_text: "LDG.E.CA R0, [R2.64]".into(),
+                },
+            )]),
+        }
+    }
+
+    fn bypass_schedule(function_unique_id: i32) -> FunctionSchedule {
+        let mut schedule = schedule(function_unique_id);
+        let slot = schedule.by_pc.get_mut(&16).unwrap();
+        slot.mem_role = MemRole::BypassLoad(CacheOpToken::LdgECg);
+        slot.opcode_text = "LDG.E.CG R0, [R2.64]".into();
+        schedule
+    }
+
+    fn write_stream(root: &Path, stream_id: i64, launches: &[(i32, i32, Vec<pb::Instruction>)]) {
+        let kernels = launches
+            .iter()
+            .map(|&(kernel_id, function_unique_id, _)| pb::Kernel {
+                id: kernel_id,
+                name: format!("k{function_unique_id}"),
+                function_unique_id,
+                size_shared_memory: 0,
+                number_of_registers: 8,
+                shared_memory_base_address: 0,
+                local_memory_base_address: 0,
+                grid_dim: Some(pb::Dim3d { x: 1, y: 1, z: 1 }),
+                block_dim: Some(pb::Dim3d { x: 32, y: 1, z: 1 }),
+                cluster_dim: Some(pb::Dim3d { x: 1, y: 1, z: 1 }),
+                shared_memory_static_bytes: None,
+                shared_memory_dynamic_bytes: None,
+            })
+            .collect();
+        let stream = pb::CudaStream {
+            id: stream_id,
+            kernels,
+            ordered_cuda_events: Vec::new(),
+        };
+        let device = pb::GpuDevice {
+            id: 0,
+            streams: [(stream_id, stream)].into_iter().collect(),
+        };
+        let trace = pb::Trace {
+            name: "stream-l2-session".into(),
+            binary_version: 86,
+            nvbit_version: "1.8".into(),
+            accelsim_version: 0,
+            is_gathered_registers_values: false,
+            gpu_device: [(0, device)].into_iter().collect(),
+            trace_contract_id: ADDRESS_CARRYING_TRACE_CONTRACT_ID.into(),
+            memory_payload_classes: vec![
+                pb::MemoryOpClass::Global as i32,
+                pb::MemoryOpClass::Shared as i32,
+                pb::MemoryOpClass::Local as i32,
+                pb::MemoryOpClass::Atomic as i32,
+                pb::MemoryOpClass::AsyncCopy as i32,
+            ],
+        };
+        std::fs::write(root.join("dynamic_trace.pb"), trace.encode_to_vec()).unwrap();
+        let extra = root.join("extra_info");
+        std::fs::create_dir_all(&extra).unwrap();
+        std::fs::write(
+            extra.join("allocations.json"),
+            r#"[{"allocation_id":1,"context_id":1,"device_id":0,"base_address":"0x70000000","size_bytes":4096,"alive":true}]"#,
+        )
+        .unwrap();
+        for &(kernel_id, _, ref instructions) in launches {
+            let directory = root.join(format!(
+                "threadblocks/device_0/stream_{stream_id}/kernel_{kernel_id}"
+            ));
+            std::fs::create_dir_all(&directory).unwrap();
+            let block = pb::Threadblock {
+                block_id: Some(pb::Dim3d { x: 0, y: 0, z: 0 }),
+                warps: [(
+                    0,
+                    pb::Warp {
+                        id: 0,
+                        instructions: instructions.clone(),
+                    },
+                )]
+                .into_iter()
+                .collect(),
+            };
+            std::fs::write(
+                directory.join(format!("d_0_s_{stream_id}_k_{kernel_id}_0,0,0.pb")),
+                block.encode_to_vec(),
+            )
+            .unwrap();
+        }
+    }
+
+    fn write_trace(root: &Path, launches: &[(i32, i32, Vec<pb::Instruction>)]) {
+        write_stream(root, 0, launches);
+    }
+
+    fn schedules(functions: &[i32]) -> BTreeMap<i32, FunctionSchedule> {
+        functions
+            .iter()
+            .map(|&function| (function, schedule(function)))
+            .collect()
+    }
+
+    fn full(outcome: KernelReplayOutcome) -> FullKernelReplayResult {
+        outcome.into_full().expect("synthetic trace is complete")
+    }
+
+    #[test]
+    fn stream_l2_converts_a_cold_target_miss_to_a_per_launch_hit_delta() {
+        let tmp = tempfile::tempdir().unwrap();
+        write_trace(
+            tmp.path(),
+            &[
+                (1, 1, vec![load(1, BASE, 4)]),
+                (2, 2, vec![load(2, BASE, 4)]),
+            ],
+        );
+        let trace = TraceDir::open_direct(tmp.path()).unwrap();
+        let locs: Vec<_> = trace.kernels().collect();
+        let schedules = schedules(&[1, 2]);
+        let card = sm86_test_card();
+        let params = params();
+        let mode = shared_mode(2, 256);
+
+        for loc in &locs {
+            let cold =
+                full(replay_trace_kernel(&trace, loc, &schedules, &card, &params, mode).unwrap());
+            assert_eq!(cold.l2().unwrap().hits, 0);
+            assert_eq!(cold.l2().unwrap().misses, 1);
+        }
+
+        let mut session = StreamL2ReplaySession::new(&trace, &card, &params, mode, 0, 0).unwrap();
+        let seed = full(
+            session
+                .replay_next(&trace, &locs[0], &schedules, &card, &params, mode)
+                .unwrap(),
+        );
+        assert_eq!((seed.l2().unwrap().hits, seed.l2().unwrap().misses), (0, 1));
+        assert_eq!(session.pending_l2_sectors(), 0);
+
+        let target = full(
+            session
+                .replay_next(&trace, &locs[1], &schedules, &card, &params, mode)
+                .unwrap(),
+        );
+        assert_eq!(
+            (target.l2().unwrap().hits, target.l2().unwrap().misses),
+            (1, 0)
+        );
+        assert_eq!(target.l1().unwrap().misses, 1, "L1 is fresh per launch");
+        assert_eq!(session.pending_l2_sectors(), 0);
+        assert!(session.is_complete());
+        assert_eq!(session.completed_launches(), 2);
+        assert_eq!(session.remaining_launches(), 0);
+        assert_eq!(
+            (
+                session.cumulative_l2_counters().hits,
+                session.cumulative_l2_counters().misses,
+            ),
+            (1, 1)
+        );
+    }
+
+    #[test]
+    fn partial_sector_handoff_reports_one_hit_and_one_fill_delta() {
+        let tmp = tempfile::tempdir().unwrap();
+        write_trace(
+            tmp.path(),
+            &[
+                (1, 1, vec![load(1, BASE, 4)]),
+                (2, 2, vec![load(2, BASE, 64)]),
+            ],
+        );
+        let trace = TraceDir::open_direct(tmp.path()).unwrap();
+        let locs: Vec<_> = trace.kernels().collect();
+        let schedules = schedules(&[1, 2]);
+        let card = sm86_test_card();
+        let params = params();
+        let mode = shared_mode(2, 256);
+        let mut session = StreamL2ReplaySession::new(&trace, &card, &params, mode, 0, 0).unwrap();
+        session
+            .replay_next(&trace, &locs[0], &schedules, &card, &params, mode)
+            .unwrap();
+        let target = full(
+            session
+                .replay_next(&trace, &locs[1], &schedules, &card, &params, mode)
+                .unwrap(),
+        );
+        let l2 = target.l2().unwrap();
+        assert_eq!((l2.hits, l2.misses), (1, 1));
+        assert_eq!(l2.sector_fill_misses, 1);
+        assert_eq!(
+            (
+                session.cumulative_l2_counters().hits,
+                session.cumulative_l2_counters().misses,
+            ),
+            (1, 2)
+        );
+    }
+
+    #[test]
+    fn replacement_recency_crosses_the_launch_boundary() {
+        let tmp = tempfile::tempdir().unwrap();
+        write_trace(
+            tmp.path(),
+            &[
+                (
+                    1,
+                    1,
+                    vec![load(1, BASE, 4), load(1, BASE + 128, 4), load(1, BASE, 4)],
+                ),
+                (2, 2, vec![load(2, BASE + 256, 4), load(2, BASE + 128, 4)]),
+            ],
+        );
+        let trace = TraceDir::open_direct(tmp.path()).unwrap();
+        let locs: Vec<_> = trace.kernels().collect();
+        let schedules = BTreeMap::from([(1, bypass_schedule(1)), (2, bypass_schedule(2))]);
+        let card = sm86_test_card();
+        let params = params();
+        let mode = shared_mode(2, 256);
+        let mut session = StreamL2ReplaySession::new(&trace, &card, &params, mode, 0, 0).unwrap();
+        session
+            .replay_next(&trace, &locs[0], &schedules, &card, &params, mode)
+            .unwrap();
+        let target = full(
+            session
+                .replay_next(&trace, &locs[1], &schedules, &card, &params, mode)
+                .unwrap(),
+        );
+        assert_eq!(
+            (target.l2().unwrap().hits, target.l2().unwrap().misses),
+            (0, 2),
+            "C must evict LRU B; re-reading B then misses, proving recency survived"
+        );
+    }
+
+    #[test]
+    fn failed_second_launch_preserves_cache_cursor_and_allows_retry() {
+        let tmp = tempfile::tempdir().unwrap();
+        write_trace(
+            tmp.path(),
+            &[
+                (1, 1, vec![load(1, BASE, 4)]),
+                (2, 2, vec![load(2, BASE, 4)]),
+            ],
+        );
+        let trace = TraceDir::open_direct(tmp.path()).unwrap();
+        let locs: Vec<_> = trace.kernels().collect();
+        let first_only = schedules(&[1]);
+        let complete = schedules(&[1, 2]);
+        let card = sm86_test_card();
+        let params = params();
+        let mode = shared_mode(2, 256);
+        let mut session = StreamL2ReplaySession::new(&trace, &card, &params, mode, 0, 0).unwrap();
+        session
+            .replay_next(&trace, &locs[0], &first_only, &card, &params, mode)
+            .unwrap();
+        let before = session.cumulative_l2_counters();
+        assert!(matches!(
+            session.replay_next(&trace, &locs[1], &first_only, &card, &params, mode),
+            Err(ReplaySessionError::Replay(ReplayError::ScheduleMissing {
+                function_unique_id: 2
+            }))
+        ));
+        assert_eq!(session.completed_launches(), 1);
+        assert_eq!(session.cumulative_l2_counters(), before);
+        assert_eq!(session.pending_l2_sectors(), 0);
+
+        let target = full(
+            session
+                .replay_next(&trace, &locs[1], &complete, &card, &params, mode)
+                .unwrap(),
+        );
+        assert_eq!(
+            (target.l2().unwrap().hits, target.l2().unwrap().misses),
+            (1, 0)
+        );
+        assert!(session.is_complete());
+    }
+
+    #[test]
+    fn order_configuration_root_and_stream_mismatches_are_typed_and_nonmutating() {
+        let tmp = tempfile::tempdir().unwrap();
+        write_trace(
+            tmp.path(),
+            &[
+                (1, 1, vec![load(1, BASE, 4)]),
+                (2, 2, vec![load(2, BASE, 4)]),
+            ],
+        );
+        let trace = TraceDir::open_direct(tmp.path()).unwrap();
+        let locs: Vec<_> = trace.kernels().collect();
+        let schedules = schedules(&[1, 2]);
+        let card = sm86_test_card();
+        let params = params();
+        let mode = shared_mode(2, 256);
+        let mut session = StreamL2ReplaySession::new(&trace, &card, &params, mode, 0, 0).unwrap();
+
+        assert!(matches!(
+            session.replay_next(&trace, &locs[1], &schedules, &card, &params, mode),
+            Err(ReplaySessionError::LaunchOrderMismatch { position: 0, .. })
+        ));
+        assert_eq!(session.completed_launches(), 0);
+
+        let wrong_mode = shared_mode(1, 128);
+        assert!(matches!(
+            session.replay_next(&trace, &locs[0], &schedules, &card, &params, wrong_mode),
+            Err(ReplaySessionError::ConfigurationMismatch { .. })
+        ));
+        assert_eq!(session.completed_launches(), 0);
+
+        let other = tempfile::tempdir().unwrap();
+        write_trace(other.path(), &[(1, 1, vec![load(1, BASE, 4)])]);
+        let other_trace = TraceDir::open_direct(other.path()).unwrap();
+        let other_loc = other_trace.kernels().next().unwrap();
+        assert!(matches!(
+            session.replay_next(&other_trace, &other_loc, &schedules, &card, &params, mode),
+            Err(ReplaySessionError::TraceRootMismatch { .. })
+        ));
+
+        let multi = tempfile::tempdir().unwrap();
+        write_stream(multi.path(), 0, &[(1, 1, vec![load(1, BASE, 4)])]);
+        let root_path = multi.path().join("dynamic_trace.pb");
+        let mut root = pb::Trace::decode(std::fs::read(&root_path).unwrap().as_slice()).unwrap();
+        let stream_one = pb::CudaStream {
+            id: 1,
+            kernels: vec![pb::Kernel {
+                id: 3,
+                name: "k1".into(),
+                function_unique_id: 1,
+                size_shared_memory: 0,
+                number_of_registers: 8,
+                shared_memory_base_address: 0,
+                local_memory_base_address: 0,
+                grid_dim: Some(pb::Dim3d { x: 1, y: 1, z: 1 }),
+                block_dim: Some(pb::Dim3d { x: 32, y: 1, z: 1 }),
+                cluster_dim: Some(pb::Dim3d { x: 1, y: 1, z: 1 }),
+                shared_memory_static_bytes: None,
+                shared_memory_dynamic_bytes: None,
+            }],
+            ordered_cuda_events: Vec::new(),
+        };
+        root.gpu_device
+            .get_mut(&0)
+            .unwrap()
+            .streams
+            .insert(1, stream_one);
+        std::fs::write(&root_path, root.encode_to_vec()).unwrap();
+        let stream_one_directory = multi.path().join("threadblocks/device_0/stream_1/kernel_3");
+        std::fs::create_dir_all(&stream_one_directory).unwrap();
+        let stream_one_block = pb::Threadblock {
+            block_id: Some(pb::Dim3d { x: 0, y: 0, z: 0 }),
+            warps: [(
+                0,
+                pb::Warp {
+                    id: 0,
+                    instructions: vec![load(1, BASE, 4)],
+                },
+            )]
+            .into_iter()
+            .collect(),
+        };
+        std::fs::write(
+            stream_one_directory.join("d_0_s_1_k_3_0,0,0.pb"),
+            stream_one_block.encode_to_vec(),
+        )
+        .unwrap();
+        let multi_trace = TraceDir::open_direct(multi.path()).unwrap();
+        let stream_one_loc = multi_trace
+            .kernels()
+            .find(|loc| loc.stream_id() == 1)
+            .unwrap();
+        let mut multi_session =
+            StreamL2ReplaySession::new(&multi_trace, &card, &params, mode, 0, 0).unwrap();
+        assert!(matches!(
+            multi_session.replay_next(
+                &multi_trace,
+                &stream_one_loc,
+                &schedules,
+                &card,
+                &params,
+                mode
+            ),
+            Err(ReplaySessionError::StreamMismatch {
+                expected: 0,
+                got: 1
+            })
+        ));
+        assert_eq!(multi_session.completed_launches(), 0);
+    }
+
+    #[test]
+    fn repeated_stream_sessions_are_deterministic_and_exhaustion_is_typed() {
+        let tmp = tempfile::tempdir().unwrap();
+        write_trace(
+            tmp.path(),
+            &[
+                (1, 1, vec![load(1, BASE, 4)]),
+                (2, 2, vec![load(2, BASE, 4)]),
+            ],
+        );
+        let trace = TraceDir::open_direct(tmp.path()).unwrap();
+        let locs: Vec<_> = trace.kernels().collect();
+        let schedules = schedules(&[1, 2]);
+        let card = sm86_test_card();
+        let params = params();
+        let mode = shared_mode(2, 256);
+
+        let run_once = || {
+            let mut session =
+                StreamL2ReplaySession::new(&trace, &card, &params, mode, 0, 0).unwrap();
+            let results: Vec<_> = locs
+                .iter()
+                .map(|loc| {
+                    let result = full(
+                        session
+                            .replay_next(&trace, loc, &schedules, &card, &params, mode)
+                            .unwrap(),
+                    );
+                    (
+                        result.diagnostic_last_issue_cycles(),
+                        *result.l2().unwrap(),
+                        result.dram().copied(),
+                    )
+                })
+                .collect();
+            assert!(matches!(
+                session.replay_next(&trace, &locs[1], &schedules, &card, &params, mode),
+                Err(ReplaySessionError::LaunchSequenceComplete {
+                    completed_launches: 2
+                })
+            ));
+            (results, session.cumulative_l2_counters())
+        };
+        assert_eq!(run_once(), run_once());
+    }
 }
 
 /// Resolve the two special Global routes implemented on the active sm_86 path.
@@ -2623,9 +3775,14 @@ fn flat_global_kind(role: MemRole) -> AccessKind {
             off: 0,
             len: 0,
             token,
+            l2_requests: 0,
         },
         MemRole::Store => AccessKind::GlobalStore { off: 0, len: 0 },
-        MemRole::Reduction => AccessKind::GlobalReduction { off: 0, len: 0 },
+        MemRole::Reduction => AccessKind::GlobalReduction {
+            off: 0,
+            len: 0,
+            l2_requests: 0,
+        },
         MemRole::None => AccessKind::GlobalUntagged { off: 0, len: 0 },
     }
 }
@@ -2756,6 +3913,9 @@ fn classify_compact_flat(
     let Some(preflight) = preflight else {
         return Ok(AccessKind::NonMemory);
     };
+    if !preflight.memory.has_effective_lanes() {
+        return Ok(AccessKind::PredicatedOffMemory);
+    }
     let meta = preflight.memory.replay_meta();
     match (preflight.route, meta.op_class) {
         (ReplayMemoryRoute::Shared, _) => Ok(compact_shared_kind(preflight.memory)),
@@ -2895,6 +4055,9 @@ fn classify_compact_with_l1(
     let Some(preflight) = preflight else {
         return Ok(AccessKind::NonMemory);
     };
+    if !preflight.memory.has_effective_lanes() {
+        return Ok(AccessKind::PredicatedOffMemory);
+    }
     let meta = preflight.memory.replay_meta();
     let sector_plan = warp.sector_plan(preflight.memory);
     if let ValidatedSectorPlan::Error {
@@ -2989,6 +4152,9 @@ fn classify_flat_preflighted(
     };
     let inst = preflight.memory.instruction();
     let meta = preflight.memory.meta();
+    if meta.and_mask == 0 {
+        return Ok(AccessKind::PredicatedOffMemory);
+    }
     match (preflight.route, meta.op_class) {
         (ReplayMemoryRoute::Shared, _) => {
             preflighted_shared_kind(preflight.memory, path, warp_id, record_ix)
@@ -3073,7 +4239,12 @@ fn classify_flat_preflighted(
     }
 }
 
-fn checked_staged_global_kind(role: MemRole, start: usize, count: usize) -> Option<AccessKind> {
+fn checked_staged_global_kind(
+    role: MemRole,
+    start: usize,
+    count: usize,
+    l2_requests: u16,
+) -> Option<AccessKind> {
     let len = u16::try_from(count).ok()?;
     start.checked_add(count)?;
     Some(match role {
@@ -3086,9 +4257,18 @@ fn checked_staged_global_kind(role: MemRole, start: usize, count: usize) -> Opti
             off: start,
             len,
             token,
+            l2_requests: if token == CacheOpToken::Atom {
+                l2_requests
+            } else {
+                0
+            },
         },
         MemRole::Store => AccessKind::GlobalStore { off: start, len },
-        MemRole::Reduction => AccessKind::GlobalReduction { off: start, len },
+        MemRole::Reduction => AccessKind::GlobalReduction {
+            off: start,
+            len,
+            l2_requests,
+        },
         MemRole::None => AccessKind::GlobalUntagged { off: start, len },
     })
 }
@@ -3133,7 +4313,7 @@ fn project_async_copy_completion_work(
             rhs: units_per_byte,
         },
     )?;
-    let completion_work = if l1_policy == LdgstsL1Policy::CacheAtAllLevels {
+    let exact_destination = if l1_policy == LdgstsL1Policy::CacheAtAllLevels {
         match destination_wavefronts {
             Some(wavefronts) => {
                 let timing = arch
@@ -3165,22 +4345,57 @@ fn project_async_copy_completion_work(
                         rhs: units_per_cycle,
                     },
                 )?;
-                payload_work.max(destination_work)
+                Some((wavefronts, destination_work))
             }
-            None => payload_work,
+            None => None,
         }
     } else {
         // Focused bypass probes show a different source/destination coupling;
         // retain the independently established payload fallback until that
         // projection is characterized rather than importing the cache-all rule.
-        payload_work
+        None
     };
-    u32::try_from(completion_work).map_err(|_| ReplayError::AsyncCopyCompletionWorkOutOfRange {
+    if payload_work != 0
+        && let Some((_wavefronts, destination_work)) = exact_destination
+        && destination_work >= payload_work
+    {
+        let compact = u32::try_from(destination_work).map_err(|_| {
+            ReplayError::AsyncCopyCompletionWorkOutOfRange {
+                path: path.to_path_buf(),
+                warp_id,
+                record_ix,
+                completion_work: destination_work,
+                max_completion_work: ASYNC_COPY_COMPLETION_VALUE_MASK,
+            }
+        })?;
+        return encode_async_copy_destination_work(compact).ok_or(
+            ReplayError::AsyncCopyCompletionWorkOutOfRange {
+                path: path.to_path_buf(),
+                warp_id,
+                record_ix,
+                completion_work: destination_work,
+                max_completion_work: ASYNC_COPY_COMPLETION_VALUE_MASK,
+            },
+        );
+    }
+    let completion_work = exact_destination.map_or(payload_work, |(_, destination_work)| {
+        payload_work.max(destination_work)
+    });
+    let compact = u32::try_from(completion_work).map_err(|_| {
+        ReplayError::AsyncCopyCompletionWorkOutOfRange {
+            path: path.to_path_buf(),
+            warp_id,
+            record_ix,
+            completion_work,
+            max_completion_work: ASYNC_COPY_COMPLETION_VALUE_MASK,
+        }
+    })?;
+    encode_async_copy_payload_work(compact).ok_or(ReplayError::AsyncCopyCompletionWorkOutOfRange {
         path: path.to_path_buf(),
         warp_id,
         record_ix,
         completion_work,
-        max_completion_work: u32::MAX,
+        max_completion_work: ASYNC_COPY_COMPLETION_VALUE_MASK,
     })
 }
 
@@ -3255,14 +4470,44 @@ fn append_staged_global_sectors(
     record_ix: usize,
 ) -> Result<AccessKind, ReplayError> {
     let start = sectors.len();
+    let l2_requests = if matches!(
+        role,
+        MemRole::BypassLoad(CacheOpToken::Atom) | MemRole::Reduction
+    ) {
+        atomic_l2_request_count_128b(sector_scratch)
+    } else {
+        0
+    };
     append_staged_sectors(
-        checked_staged_global_kind(role, start, sector_scratch.len()),
+        checked_staged_global_kind(role, start, sector_scratch.len(), l2_requests),
         sectors,
         sector_scratch,
         path,
         warp_id,
         record_ix,
     )
+}
+
+/// Reconstruct exact L2 atomic request topology from the alias-expanded 32-byte
+/// sector stream. Each request carries sectors from one 128-byte line; repeated
+/// same-word lanes appear as repeated sector ids, so the line requires the
+/// maximum sector multiplicity and distinct lines add.
+fn atomic_l2_request_count_128b(sectors: &[i64]) -> u16 {
+    let mut by_line: BTreeMap<i64, BTreeMap<i64, u16>> = BTreeMap::new();
+    for &sector in sectors {
+        let count = by_line
+            .entry(sector.div_euclid(4))
+            .or_default()
+            .entry(sector)
+            .or_default();
+        *count = count
+            .checked_add(1)
+            .expect("one warp's bounded sector span cannot overflow u16");
+    }
+    let requests = by_line.values().fold(0_u32, |total, line| {
+        total + u32::from(line.values().copied().max().unwrap_or(0))
+    });
+    u16::try_from(requests).expect("atomic L2 requests cannot exceed the bounded sector span")
 }
 
 fn append_staged_async_copy_sectors(
@@ -3398,6 +4643,9 @@ fn classify_with_l1_preflighted(
     };
     let inst = preflight.memory.instruction();
     let meta = preflight.memory.meta();
+    if meta.and_mask == 0 {
+        return Ok(AccessKind::PredicatedOffMemory);
+    }
     let mut sector_plan = SectorExpansionPlan::new();
     let mut sector_error: Option<SectorExpansionError> = None;
     if matches!(
@@ -3533,12 +4781,65 @@ fn classify_with_l1_preflighted(
 mod aggregation_tests {
     use super::*;
 
+    fn feedback_configuration_inputs() -> (IssueModelParams, ReplayMemMode) {
+        let params = IssueModelParams::from_legacy_card_latencies_for_arch(
+            ArchId::Sm86,
+            34.0,
+            244.0,
+            423.0,
+            23.0,
+        )
+        .unwrap();
+        let mode = ReplayMemMode::L1SharedL2 {
+            l1: L1Config {
+                arch: ArchId::Sm86,
+                line_capacity: 1,
+                mshr_count: Some(1),
+                hit_latency: params.l1_hit_latency(),
+                miss_latency: params.l1_miss_latency(),
+            },
+            l2: L2Config {
+                arch: ArchId::Sm86,
+                capacity_bytes: 128,
+                line_bytes: 128,
+                sector_bytes: 32,
+                num_slices: 1,
+                associativity: 1,
+                replacement: sim_mem::L2Replacement::Lru,
+                slice_hash: sim_mem::SliceHash::LineMod,
+            },
+            dram: DramBw::Unmodeled { arch: ArchId::Sm86 },
+        };
+        (params, mode)
+    }
+
+    fn feedback_candidate(admission_latency_cycles: u32) -> MemoryAdmissionCandidate {
+        MemoryAdmissionCandidate {
+            candidate_id: 7,
+            scope: crate::MemoryServiceCandidateScope::Smsp,
+            operation: crate::MemoryServiceCandidateOperation::Store,
+            queue_capacity_instructions: 16,
+            admission_latency_cycles,
+            l2_hit_sector_units: 1,
+            l2_hit_sector_cycles: 1,
+            l2_miss_sector_units: 1,
+            l2_miss_sector_cycles: 10,
+            l2_miss_service_width_sectors: 0,
+            membar_waits_for_service_completion: false,
+            write_completion_latency_cycles: 0,
+            write_completion_request_cycles: 0,
+            write_completion_region_cycles: 0,
+            write_completion_parallel_lanes: 0,
+        }
+    }
+
     fn sm(instructions_issued: u64, l1: Option<L1Counters>) -> SmSimResult {
         SmSimResult {
             instructions_issued,
             cycles: 1,
             l1,
             unmodeled_tails: TailFlags::default(),
+            readiness: crate::ReadinessDiagnostics::default(),
         }
     }
 
@@ -3553,6 +4854,32 @@ mod aggregation_tests {
                 record_ix: 11,
                 accumulated: u64::MAX,
             }) if got == path
+        ));
+    }
+
+    #[test]
+    fn timing_active_feedback_is_part_of_replay_configuration_identity() {
+        let (params, mode) = feedback_configuration_inputs();
+        let ordinary = ReplayConfiguration::checked(params, mode).unwrap();
+        let candidate = feedback_candidate(params.read_barrier_latency() as u32);
+        let feedback =
+            ReplayConfiguration::checked_with_memory_admission_feedback(params, mode, candidate)
+                .unwrap();
+
+        assert_eq!(ordinary.memory_admission_feedback(), None);
+        assert_eq!(feedback.memory_admission_feedback(), Some(candidate));
+        assert_ne!(ordinary, feedback);
+
+        let mismatched = feedback_candidate(candidate.admission_latency_cycles - 1);
+        assert!(matches!(
+            ReplayConfiguration::checked_with_memory_admission_feedback(params, mode, mismatched),
+            Err(ReplayError::Issue(
+                IssueError::MemoryAdmissionFeedbackLatencyMismatch {
+                    candidate_id: 7,
+                    configured_cycles: 7,
+                    issue_model_cycles: 8,
+                }
+            ))
         ));
     }
 
@@ -3603,7 +4930,7 @@ mod aggregation_tests {
         result.cycles = 7;
         let system_dominates = fold_kernel_result(
             ArchId::Sm86,
-            BTreeMap::from([(0, result)]),
+            BTreeMap::from([(0, result.clone())]),
             1,
             false,
             Some(423),
@@ -3615,7 +4942,7 @@ mod aggregation_tests {
 
         let issue_dominates = fold_kernel_result(
             ArchId::Sm86,
-            BTreeMap::from([(0, result)]),
+            BTreeMap::from([(0, result.clone())]),
             1,
             false,
             Some(3),
@@ -3847,6 +5174,10 @@ mod space_routing_tests {
                         } else {
                             LdgstsL1Policy::CacheAtAllLevels
                         }),
+                    fixed_latency_operands:
+                        crate::sass_operands::FixedLatencyOperandStatus::NotApplicable,
+                    clocklo_read: false,
+                    gpu_membar: false,
                     opcode_text: opcode_text.into(),
                 },
             )]),
@@ -4559,16 +5890,26 @@ mod space_routing_tests {
         assert!(sector_scratch.is_empty());
     }
 
+    #[test]
+    fn alias_expanded_sectors_reconstruct_exact_l2_atomic_requests() {
+        assert_eq!(atomic_l2_request_count_128b(&[]), 0);
+        assert_eq!(atomic_l2_request_count_128b(&[0, 1, 2, 3]), 1);
+        assert_eq!(atomic_l2_request_count_128b(&[0, 0, 1, 1]), 2);
+        assert_eq!(atomic_l2_request_count_128b(&[0, 0, 0, 0]), 4);
+        assert_eq!(atomic_l2_request_count_128b(&[0, 4, 8, 12]), 4);
+        assert_eq!(atomic_l2_request_count_128b(&[0, 0, 1, 1, 4, 4, 5, 5]), 4);
+    }
+
     #[cfg(target_pointer_width = "64")]
     #[test]
     fn staged_sector_start_uses_full_usize_domain() {
         let start = usize::try_from(1_u64 << 32).unwrap();
         assert_eq!(
-            checked_staged_global_kind(MemRole::None, start, 1),
+            checked_staged_global_kind(MemRole::None, start, 1, 0),
             Some(AccessKind::GlobalUntagged { off: start, len: 1 })
         );
         assert_eq!(
-            checked_staged_global_kind(MemRole::None, usize::MAX, 1),
+            checked_staged_global_kind(MemRole::None, usize::MAX, 1, 0),
             None
         );
     }
@@ -4679,7 +6020,7 @@ mod space_routing_tests {
     }
 
     #[test]
-    fn zero_active_no_payload_global_retains_legacy_route() {
+    fn zero_active_no_payload_global_becomes_predicated_off_issue() {
         let sched = schedule(ArchId::Sm86, MemRole::None, "LD.E R0, [R2.64]");
         let mut inst = global_inst();
         inst.predicate_mask = Some(0);
@@ -4687,7 +6028,7 @@ mod space_routing_tests {
 
         let flat = classify_flat(&inst, &sched, sched.arch, Path::new("zero_global.pb"), 0, 0)
             .expect("zero-active class-only GLOBAL retains its legacy route");
-        assert!(matches!(flat, AccessKind::GlobalUntagged { .. }));
+        assert_eq!(flat, AccessKind::PredicatedOffMemory);
 
         let mut sectors = vec![23];
         let mut sector_scratch = vec![99];
@@ -4702,7 +6043,7 @@ mod space_routing_tests {
             0,
         )
         .expect("zero-active class-only GLOBAL retains its L1 route");
-        assert!(matches!(l1, AccessKind::GlobalUntagged { off: 1, len: 0 }));
+        assert_eq!(l1, AccessKind::PredicatedOffMemory);
         assert_eq!(sectors, vec![23]);
         assert!(sector_scratch.is_empty());
     }
@@ -5017,7 +6358,7 @@ mod space_routing_tests {
     }
 
     #[test]
-    fn zero_active_no_payload_shared_retains_legacy_route() {
+    fn zero_active_no_payload_shared_becomes_predicated_off_issue() {
         let sched = schedule(ArchId::Sm86, MemRole::None, "LDS");
         let mut inst = global_inst();
         inst.memory_op_class = Some(pb::MemoryOpClass::Shared as i32);
@@ -5026,7 +6367,7 @@ mod space_routing_tests {
 
         let flat = classify_flat(&inst, &sched, sched.arch, Path::new("zero_shared.pb"), 0, 0)
             .expect("zero-active class-only SHARED retains its legacy route");
-        assert!(matches!(flat, AccessKind::Shared { .. }));
+        assert_eq!(flat, AccessKind::PredicatedOffMemory);
 
         let mut sectors = vec![26];
         let mut sector_scratch = vec![99];
@@ -5041,7 +6382,7 @@ mod space_routing_tests {
             0,
         )
         .expect("zero-active class-only SHARED retains its L1 route");
-        assert!(matches!(l1, AccessKind::Shared { .. }));
+        assert_eq!(l1, AccessKind::PredicatedOffMemory);
         assert_eq!(sectors, vec![26]);
         assert!(sector_scratch.is_empty());
     }
@@ -5257,7 +6598,7 @@ mod space_routing_tests {
     }
 
     #[test]
-    fn zero_active_shared_atomic_routes_shared_in_flat_and_l1_modes() {
+    fn zero_active_shared_atomic_becomes_predicated_off_after_route_validation() {
         let mut inst = atomic_inst(Some(pb::MemorySpace::Shared));
         inst.function_unique_id = 1;
         inst.active_mask = Some(1);
@@ -5274,7 +6615,7 @@ mod space_routing_tests {
 
         let flat = classify_flat(&inst, &sched, sched.arch, Path::new("zero.pb"), 0, 0)
             .expect("zero-active shared atomic has an implemented flat route");
-        assert!(matches!(flat, AccessKind::Shared { .. }));
+        assert_eq!(flat, AccessKind::PredicatedOffMemory);
 
         let mut sectors = vec![23];
         let mut sector_scratch = vec![99];
@@ -5289,13 +6630,13 @@ mod space_routing_tests {
             0,
         )
         .expect("zero-active shared atomic has the same L1 route");
-        assert!(matches!(l1, AccessKind::Shared { .. }));
+        assert_eq!(l1, AccessKind::PredicatedOffMemory);
         assert_eq!(sectors, vec![23]);
         assert!(sector_scratch.is_empty());
     }
 
     #[test]
-    fn zero_active_no_payload_atomic_retains_legacy_global_route() {
+    fn zero_active_no_payload_atomic_becomes_predicated_off_issue() {
         let sched = schedule(
             ArchId::Sm86,
             MemRole::BypassLoad(CacheOpToken::Atom),
@@ -5307,14 +6648,7 @@ mod space_routing_tests {
 
         let flat = classify_flat(&inst, &sched, sched.arch, Path::new("zero_atomic.pb"), 0, 0)
             .expect("zero-active no-payload legacy atomic retains its global route");
-        assert!(matches!(
-            flat,
-            AccessKind::GlobalBypass {
-                off: 0,
-                len: 0,
-                token: CacheOpToken::Atom,
-            }
-        ));
+        assert_eq!(flat, AccessKind::PredicatedOffMemory);
 
         let mut sectors = vec![29];
         let mut sector_scratch = vec![99];
@@ -5329,14 +6663,7 @@ mod space_routing_tests {
             0,
         )
         .expect("zero-active no-payload legacy atomic retains its L1 route");
-        assert!(matches!(
-            l1,
-            AccessKind::GlobalBypass {
-                off: 1,
-                len: 0,
-                token: CacheOpToken::Atom,
-            }
-        ));
+        assert_eq!(l1, AccessKind::PredicatedOffMemory);
         assert_eq!(sectors, vec![29]);
         assert!(sector_scratch.is_empty());
     }
@@ -5920,6 +7247,7 @@ mod space_routing_tests {
                 off: 0,
                 len: 0,
                 token: CacheOpToken::Atom,
+                l2_requests: 0,
             })
         ));
         let mut atomic_sectors = vec![20];
@@ -5940,6 +7268,7 @@ mod space_routing_tests {
                 off: 1,
                 len: 1,
                 token: CacheOpToken::Atom,
+                l2_requests: 1,
             })
         ));
         assert_eq!(atomic_sectors, vec![20, 0x1000 >> 5]);
@@ -6046,19 +7375,19 @@ mod space_routing_tests {
             project_async_copy_completion_work(
                 ArchId::Sm86,
                 LdgstsL1Policy::CacheAtAllLevels,
-                u64::from(u32::MAX),
+                u64::from(ASYNC_COPY_COMPLETION_VALUE_MASK),
                 None,
                 path,
                 3,
                 7,
             )
             .unwrap(),
-            u32::MAX
+            ASYNC_COPY_COMPLETION_VALUE_MASK
         );
 
         let mut sectors = vec![11];
         let sector_scratch = vec![29];
-        let payload_bytes = u64::from(u32::MAX) + 1;
+        let payload_bytes = u64::from(ASYNC_COPY_COMPLETION_VALUE_MASK) + 1;
         let error = append_staged_async_copy_sectors(
             ArchId::Sm86,
             LdgstsL1Policy::CacheAtAllLevels,
@@ -6077,7 +7406,7 @@ mod space_routing_tests {
                 warp_id: 3,
                 record_ix: 7,
                 completion_work,
-                max_completion_work: u32::MAX,
+                max_completion_work: ASYNC_COPY_COMPLETION_VALUE_MASK,
                 ..
             } if completion_work == payload_bytes
         ));
@@ -6159,7 +7488,7 @@ mod space_routing_tests {
     }
 
     #[test]
-    fn zero_active_async_copy_source_stays_global_without_arena_append() {
+    fn zero_active_async_copy_source_becomes_predicated_off_without_arena_append() {
         let sched = schedule(
             ArchId::Sm86,
             MemRole::BypassLoad(CacheOpToken::Ldgsts),
@@ -6173,15 +7502,7 @@ mod space_routing_tests {
 
         let flat = classify_flat(&inst, &sched, sched.arch, Path::new("zero_source.pb"), 0, 0)
             .expect("zero-active source retains the global route");
-        assert!(matches!(
-            flat,
-            AccessKind::GlobalAsyncCopy {
-                off: 0,
-                len: 0,
-                completion_work: 0,
-                l1_policy: LdgstsL1Policy::CacheAtAllLevels,
-            }
-        ));
+        assert_eq!(flat, AccessKind::PredicatedOffMemory);
 
         let mut sectors = vec![31];
         let mut sector_scratch = vec![99];
@@ -6196,15 +7517,7 @@ mod space_routing_tests {
             0,
         )
         .expect("zero-active source retains the L1 global route");
-        assert!(matches!(
-            l1,
-            AccessKind::GlobalAsyncCopy {
-                off: 1,
-                len: 0,
-                completion_work: 0,
-                l1_policy: LdgstsL1Policy::CacheAtAllLevels,
-            }
-        ));
+        assert_eq!(l1, AccessKind::PredicatedOffMemory);
         assert_eq!(sectors, vec![31]);
         assert!(sector_scratch.is_empty());
     }
@@ -6351,6 +7664,7 @@ mod space_routing_tests {
                 off: 0,
                 len: 0,
                 token: CacheOpToken::Atom,
+                l2_requests: 0,
             }
         ));
 
@@ -6373,6 +7687,7 @@ mod space_routing_tests {
                 off: 1,
                 len: 1,
                 token: CacheOpToken::Atom,
+                l2_requests: 1,
             }
         ));
         assert_eq!(sectors, vec![43, 0x1000 >> 5]);
@@ -6392,7 +7707,11 @@ mod space_routing_tests {
             .expect("implemented reduction has a global atomic route");
         assert!(matches!(
             flat,
-            AccessKind::GlobalReduction { off: 0, len: 0 }
+            AccessKind::GlobalReduction {
+                off: 0,
+                len: 0,
+                l2_requests: 0,
+            }
         ));
 
         let mut sectors = vec![45];
@@ -6408,7 +7727,14 @@ mod space_routing_tests {
             0,
         )
         .expect("implemented reduction retains its static reduction role");
-        assert!(matches!(l1, AccessKind::GlobalReduction { off: 1, len: 1 }));
+        assert!(matches!(
+            l1,
+            AccessKind::GlobalReduction {
+                off: 1,
+                len: 1,
+                l2_requests: 1,
+            }
+        ));
         assert_eq!(sectors, vec![45, 0x1000 >> 5]);
         assert_eq!(sector_scratch, vec![0x1000 >> 5]);
     }
@@ -6891,6 +8217,10 @@ mod replay_identity_tests {
                     pipeline_class: PipelineClass::DispatchOnly,
                     mem_role: MemRole::BypassLoad(CacheOpToken::Ldgsts),
                     ldgsts_l1_policy: Some(l1_policy),
+                    fixed_latency_operands:
+                        crate::sass_operands::FixedLatencyOperandStatus::NotApplicable,
+                    clocklo_read: false,
+                    gpu_membar: false,
                     opcode_text: match l1_policy {
                         LdgstsL1Policy::CacheAtAllLevels => "LDGSTS.E.128 [R1], [R2.64]".into(),
                         LdgstsL1Policy::BypassL1 => "LDGSTS.E.BYPASS.128 [R1], [R2.64]".into(),
@@ -7264,6 +8594,10 @@ mod replay_identity_tests {
                     pipeline_class: PipelineClass::DispatchOnly,
                     mem_role: MemRole::Store,
                     ldgsts_l1_policy: None,
+                    fixed_latency_operands:
+                        crate::sass_operands::FixedLatencyOperandStatus::NotApplicable,
+                    clocklo_read: false,
+                    gpu_membar: false,
                     opcode_text: "STG.E [R2.64], R0".into(),
                 },
             )]),
@@ -7300,6 +8634,10 @@ mod replay_identity_tests {
                     pipeline_class: PipelineClass::DispatchOnly,
                     mem_role: MemRole::Reduction,
                     ldgsts_l1_policy: None,
+                    fixed_latency_operands:
+                        crate::sass_operands::FixedLatencyOperandStatus::NotApplicable,
+                    clocklo_read: false,
+                    gpu_membar: false,
                     opcode_text: "RED.E.ADD.STRONG.GPU [R2.64], R0".into(),
                 },
             )]),
@@ -7335,6 +8673,10 @@ mod replay_identity_tests {
                     pipeline_class: PipelineClass::DispatchOnly,
                     mem_role: MemRole::BypassLoad(CacheOpToken::Atom),
                     ldgsts_l1_policy: None,
+                    fixed_latency_operands:
+                        crate::sass_operands::FixedLatencyOperandStatus::NotApplicable,
+                    clocklo_read: false,
+                    gpu_membar: false,
                     opcode_text: "ATOMS.E.ADD".into(),
                 },
             )]),
@@ -7385,6 +8727,10 @@ mod replay_identity_tests {
                         pipeline_class: PipelineClass::DispatchOnly,
                         mem_role: MemRole::EligibleLoad(CacheOpToken::Ldl),
                         ldgsts_l1_policy: None,
+                        fixed_latency_operands:
+                            crate::sass_operands::FixedLatencyOperandStatus::NotApplicable,
+                        clocklo_read: false,
+                        gpu_membar: false,
                         opcode_text: "LDL.E".into(),
                     },
                 )]),
@@ -7480,6 +8826,12 @@ mod replay_identity_tests {
             );
             let loc = td.kernels().next().unwrap();
             let schedule = destination_async_schedule(l1_policy);
+            let expected_completion = match l1_policy {
+                LdgstsL1Policy::CacheAtAllLevels => {
+                    encode_async_copy_destination_work(expected_work).unwrap()
+                }
+                LdgstsL1Policy::BypassL1 => encode_async_copy_payload_work(expected_work).unwrap(),
+            };
 
             for decode_sectors in [false, true] {
                 let extracted = extract_per_sm_blocks(
@@ -7497,7 +8849,7 @@ mod replay_identity_tests {
                         completion_work,
                         l1_policy: got_policy,
                         ..
-                    } if completion_work == expected_work && got_policy == l1_policy
+                    } if completion_work == expected_completion && got_policy == l1_policy
                 ));
                 assert_eq!(warp.sectors.len(), if decode_sectors { 16 } else { 0 });
             }
@@ -7623,6 +8975,10 @@ mod replay_identity_tests {
                     pipeline_class: PipelineClass::DispatchOnly,
                     mem_role: MemRole::BypassLoad(CacheOpToken::Atom),
                     ldgsts_l1_policy: None,
+                    fixed_latency_operands:
+                        crate::sass_operands::FixedLatencyOperandStatus::NotApplicable,
+                    clocklo_read: false,
+                    gpu_membar: false,
                     opcode_text: "ATOMG.E.ADD.STRONG.GPU".into(),
                 },
             )]),
@@ -7637,6 +8993,7 @@ mod replay_identity_tests {
                 off: 0,
                 len: 1,
                 token: CacheOpToken::Atom,
+                l2_requests: 1,
             }
         ));
         assert_eq!(warp.sectors, vec![0x7000_0000 >> 5]);
@@ -7998,7 +9355,22 @@ mod completeness_tests {
         extract(dir).map(|_| ())
     }
 
-    fn replay_outcome(dir: &std::path::Path) -> Result<KernelReplayOutcome, ReplayError> {
+    fn replay_outcome_with(
+        dir: &std::path::Path,
+        mode: ReplayMemMode,
+        candidates: &[MemoryServiceCandidate],
+        admission_candidates: &[MemoryAdmissionCandidate],
+    ) -> Result<KernelReplayOutcome, ReplayError> {
+        replay_outcome_with_options(dir, mode, candidates, admission_candidates, None)
+    }
+
+    fn replay_outcome_with_options(
+        dir: &std::path::Path,
+        mode: ReplayMemMode,
+        candidates: &[MemoryServiceCandidate],
+        admission_candidates: &[MemoryAdmissionCandidate],
+        memory_admission_feedback: Option<MemoryAdmissionCandidate>,
+    ) -> Result<KernelReplayOutcome, ReplayError> {
         let td = TraceDir::open(dir)?;
         let loc = td.kernels().next().unwrap();
         let schedule = FunctionSchedule {
@@ -8015,6 +9387,10 @@ mod completeness_tests {
                     pipeline_class: PipelineClass::DispatchOnly,
                     mem_role: MemRole::None,
                     ldgsts_l1_policy: None,
+                    fixed_latency_operands:
+                        crate::sass_operands::FixedLatencyOperandStatus::NotApplicable,
+                    clocklo_read: false,
+                    gpu_membar: false,
                     opcode_text: "NOP".into(),
                 },
             )]),
@@ -8030,16 +9406,31 @@ mod completeness_tests {
             non_memory_write_barrier_latency: 1,
             read_barrier_latency: 1,
             ldgsts_l1_mshr_floor: std::num::NonZeroU32::new(1).unwrap(),
+            ldgsts_completion_throughput: sim_arch::LdgstsCompletionThroughput {
+                cache_all_payload_bytes_per_cycle: 64,
+                bypass_payload_bytes_per_cycle: 32,
+            },
+            ldgsts_cache_all_destination_wavefront_cycles: 2,
+            ldgsts_cache_all_destination_service_wavefronts: 2,
+            ldgsts_cache_all_destination_service_cycles: 3,
             max_resident_warps_per_sm: 48,
         };
-        replay_kernel_with_schedule(
+        replay_kernel_with_schedule_and_l2_and_candidates(
             &td,
             &loc,
             &schedule,
             &sm86_test_card(),
             &params,
-            ReplayMemMode::Flat,
+            mode,
+            None,
+            candidates,
+            admission_candidates,
+            memory_admission_feedback,
         )
+    }
+
+    fn replay_outcome(dir: &std::path::Path) -> Result<KernelReplayOutcome, ReplayError> {
+        replay_outcome_with(dir, ReplayMemMode::Flat, &[], &[])
     }
 
     #[test]
@@ -8187,6 +9578,79 @@ mod completeness_tests {
         assert_eq!(sampled.counters().arch(), ArchId::Sm86);
         assert_eq!(sampled.counters().instructions_issued(), 12);
         assert_eq!(sampled.counters().records_seen(), 12);
+    }
+
+    #[test]
+    fn sampled_replay_rejects_memory_candidates_before_discarding_diagnostics() {
+        let tmp = tempfile::tempdir().unwrap();
+        let sidecar = payload_bound_subset();
+        write_grid_trace(tmp.path(), 60, 1, &SELECTED_BLOCKS, Some(&sidecar));
+        let mode = ReplayMemMode::L1SharedL2 {
+            l1: sim_mem::L1Config {
+                arch: ArchId::Sm86,
+                line_capacity: 1,
+                mshr_count: Some(1),
+                hit_latency: 1,
+                miss_latency: 1,
+            },
+            l2: sim_mem::L2Config {
+                arch: ArchId::Sm86,
+                capacity_bytes: 128,
+                line_bytes: 128,
+                sector_bytes: 32,
+                num_slices: 1,
+                associativity: 1,
+                replacement: sim_mem::L2Replacement::Lru,
+                slice_hash: sim_mem::SliceHash::LineMod,
+            },
+            dram: DramBw::Unmodeled { arch: ArchId::Sm86 },
+        };
+        let candidate = MemoryServiceCandidate {
+            candidate_id: 1,
+            scope: crate::MemoryServiceCandidateScope::Sm,
+            operation: crate::MemoryServiceCandidateOperation::Store,
+            ideal_wavefront_units: 1,
+            ideal_wavefront_cycles: 1,
+            unique_line_units: 0,
+            unique_line_cycles: 0,
+            completion_latency_cycles: 0,
+        };
+
+        assert!(matches!(
+            replay_outcome_with(tmp.path(), mode, &[candidate], &[]),
+            Err(ReplayError::MemoryServiceCandidatesRequireFullCoverage)
+        ));
+
+        let admission = MemoryAdmissionCandidate {
+            candidate_id: 2,
+            scope: crate::MemoryServiceCandidateScope::Sm,
+            operation: crate::MemoryServiceCandidateOperation::Store,
+            queue_capacity_instructions: 4,
+            admission_latency_cycles: 8,
+            l2_hit_sector_units: 1,
+            l2_hit_sector_cycles: 1,
+            l2_miss_sector_units: 1,
+            l2_miss_sector_cycles: 10,
+            l2_miss_service_width_sectors: 0,
+            membar_waits_for_service_completion: false,
+            write_completion_latency_cycles: 0,
+            write_completion_request_cycles: 0,
+            write_completion_region_cycles: 0,
+            write_completion_parallel_lanes: 0,
+        };
+        assert!(matches!(
+            replay_outcome_with(tmp.path(), mode, &[], &[admission]),
+            Err(ReplayError::MemoryAdmissionCandidatesRequireFullCoverage)
+        ));
+
+        let feedback = MemoryAdmissionCandidate {
+            admission_latency_cycles: 1,
+            ..admission
+        };
+        assert!(matches!(
+            replay_outcome_with_options(tmp.path(), mode, &[], &[], Some(feedback)),
+            Err(ReplayError::MemoryAdmissionCandidatesRequireFullCoverage)
+        ));
     }
 
     #[test]

@@ -3,15 +3,29 @@
 //! The runner accepts ordinary input paths. It deliberately has no admission
 //! manifest, artifact digest, receipt, publication, or approval layer.
 
+mod prepared;
+
+pub use prepared::{
+    CoverageAdmission, KernelKey, KernelSelector, PreparedLaunchIdentity, PreparedReplay,
+};
+
+use std::io::Read;
 use std::path::PathBuf;
 use std::str::FromStr;
+#[cfg(feature = "performance-counters")]
+use std::time::Instant;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use sim_arch::card::ArchCard;
-use sim_mem::{L1Counters, L2Config, L2Counters, PchaseCard};
+use sim_mem::{L1Counters, L2Config, L2Counters, L2Source, PchaseCard};
 use sim_sm::{
-    ControlSidecar, DramBw, DramStats, IssueModelParams, KernelReplayOutcome, ReplayMemMode,
-    TailFlags, build_schedules, replay_trace_kernel,
+    ControlSidecar, DramBw, DramStats, FullKernelReplayResult, IssueModelParams, L2SourceSplit,
+    MAX_MEMORY_ADMISSION_CANDIDATES, MAX_MEMORY_SERVICE_CANDIDATES, MemoryAdmissionCandidate,
+    MemoryServiceCandidate, ModeledCompletionFrontier, ReadinessDiagnostics, ReplayMemMode,
+    StreamL2ReplaySession, TailFlags, build_schedules, replay_trace_kernel,
+    replay_trace_kernel_with_memory_admission_candidates,
+    replay_trace_kernel_with_memory_admission_feedback,
+    replay_trace_kernel_with_memory_service_candidates,
 };
 use sim_trace::{ExecInfo, TraceDir};
 
@@ -48,6 +62,39 @@ impl FromStr for MemoryMode {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CacheScope {
+    /// Existing behavior: every launch receives a fresh cache hierarchy.
+    Launch,
+    /// Ordered same-device/same-stream launches retain only fully drained L2
+    /// replacement and valid-sector state.
+    StreamL2,
+}
+
+impl CacheScope {
+    pub const fn token(self) -> &'static str {
+        match self {
+            Self::Launch => "launch",
+            Self::StreamL2 => "stream-l2",
+        }
+    }
+}
+
+impl FromStr for CacheScope {
+    type Err = RunError;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value {
+            "launch" => Ok(Self::Launch),
+            "stream-l2" => Ok(Self::StreamL2),
+            _ => Err(RunError::new(
+                "arguments",
+                format!("unknown cache scope {value:?}; use launch or stream-l2"),
+            )),
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct RunConfig {
     pub trace_dir: PathBuf,
@@ -55,9 +102,34 @@ pub struct RunConfig {
     pub arch_card: PathBuf,
     pub pchase_card: Option<PathBuf>,
     pub memory_mode: MemoryMode,
+    pub cache_scope: CacheScope,
     pub carded_dram_bandwidth: bool,
     pub kernel_id: Option<i32>,
+    /// Optional schema-1 bounded candidate document. Candidate evaluation is
+    /// observational and available only for launch-scoped full-hierarchy replay.
+    pub memory_service_candidates: Option<PathBuf>,
+    /// Optional schema-1 finite operand-admission candidate document.
+    pub memory_admission_candidates: Option<PathBuf>,
+    /// Optional schema-1 document containing exactly one timing-active finite
+    /// admission candidate.
+    pub memory_admission_feedback: Option<PathBuf>,
 }
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct MemoryServiceCandidateDocument {
+    schema_version: u32,
+    candidates: Vec<MemoryServiceCandidate>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct MemoryAdmissionCandidateDocument {
+    schema_version: u32,
+    candidates: Vec<MemoryAdmissionCandidate>,
+}
+
+const MAX_CANDIDATE_FILE_BYTES: u64 = 64 * 1024;
 
 #[derive(Debug, thiserror::Error)]
 #[error("{stage}: {detail}")]
@@ -73,17 +145,204 @@ impl RunError {
             detail: detail.into(),
         }
     }
+
+    pub const fn stage(&self) -> &'static str {
+        self.stage
+    }
+
+    pub fn detail(&self) -> &str {
+        &self.detail
+    }
 }
 
 fn at<E: std::fmt::Display>(stage: &'static str) -> impl FnOnce(E) -> RunError {
     move |error| RunError::new(stage, error.to_string())
 }
 
+fn parse_memory_service_candidates(bytes: &[u8]) -> Result<Vec<MemoryServiceCandidate>, RunError> {
+    if u64::try_from(bytes.len()).unwrap_or(u64::MAX) > MAX_CANDIDATE_FILE_BYTES {
+        return Err(RunError::new(
+            "memory-service candidates",
+            format!(
+                "candidate document exceeds {} bytes",
+                MAX_CANDIDATE_FILE_BYTES
+            ),
+        ));
+    }
+    let document: MemoryServiceCandidateDocument =
+        serde_json::from_slice(bytes).map_err(at("memory-service candidates"))?;
+    if document.schema_version != 1 {
+        return Err(RunError::new(
+            "memory-service candidates",
+            format!(
+                "unsupported schema_version {}; expected 1",
+                document.schema_version
+            ),
+        ));
+    }
+    if document.candidates.is_empty() {
+        return Err(RunError::new(
+            "memory-service candidates",
+            "candidate list must not be empty",
+        ));
+    }
+    if document.candidates.len() > MAX_MEMORY_SERVICE_CANDIDATES {
+        return Err(RunError::new(
+            "memory-service candidates",
+            format!(
+                "candidate list has {} entries; maximum is {}",
+                document.candidates.len(),
+                MAX_MEMORY_SERVICE_CANDIDATES
+            ),
+        ));
+    }
+    for (index, candidate) in document.candidates.iter().copied().enumerate() {
+        candidate
+            .validate()
+            .map_err(at("memory-service candidates"))?;
+        if document.candidates[..index]
+            .iter()
+            .any(|prior| prior.candidate_id == candidate.candidate_id)
+        {
+            return Err(RunError::new(
+                "memory-service candidates",
+                format!("candidate id {} is duplicated", candidate.candidate_id),
+            ));
+        }
+    }
+    Ok(document.candidates)
+}
+
+fn load_memory_service_candidates(
+    path: Option<&PathBuf>,
+) -> Result<Option<Vec<MemoryServiceCandidate>>, RunError> {
+    path.map(|path| {
+        let file = std::fs::File::open(path).map_err(at("memory-service candidates"))?;
+        let mut bytes = Vec::new();
+        file.take(MAX_CANDIDATE_FILE_BYTES + 1)
+            .read_to_end(&mut bytes)
+            .map_err(at("memory-service candidates"))?;
+        parse_memory_service_candidates(&bytes)
+    })
+    .transpose()
+}
+
+fn parse_memory_admission_candidates(
+    bytes: &[u8],
+) -> Result<Vec<MemoryAdmissionCandidate>, RunError> {
+    parse_memory_admission_document(bytes, "memory-admission candidates", false)
+}
+
+fn parse_memory_admission_feedback(bytes: &[u8]) -> Result<MemoryAdmissionCandidate, RunError> {
+    let candidates = parse_memory_admission_document(bytes, "memory-admission feedback", true)?;
+    Ok(candidates[0])
+}
+
+fn parse_memory_admission_document(
+    bytes: &[u8],
+    stage: &'static str,
+    require_exactly_one: bool,
+) -> Result<Vec<MemoryAdmissionCandidate>, RunError> {
+    if u64::try_from(bytes.len()).unwrap_or(u64::MAX) > MAX_CANDIDATE_FILE_BYTES {
+        return Err(RunError::new(
+            stage,
+            format!(
+                "candidate document exceeds {} bytes",
+                MAX_CANDIDATE_FILE_BYTES
+            ),
+        ));
+    }
+    let document: MemoryAdmissionCandidateDocument =
+        serde_json::from_slice(bytes).map_err(at(stage))?;
+    if document.schema_version != 1 {
+        return Err(RunError::new(
+            stage,
+            format!(
+                "unsupported schema_version {}; expected 1",
+                document.schema_version
+            ),
+        ));
+    }
+    if require_exactly_one && document.candidates.len() != 1 {
+        return Err(RunError::new(
+            stage,
+            format!(
+                "feedback document must contain exactly one candidate, got {}",
+                document.candidates.len()
+            ),
+        ));
+    }
+    if document.candidates.is_empty() {
+        return Err(RunError::new(stage, "candidate list must not be empty"));
+    }
+    if document.candidates.len() > MAX_MEMORY_ADMISSION_CANDIDATES {
+        return Err(RunError::new(
+            stage,
+            format!(
+                "candidate list has {} entries; maximum is {}",
+                document.candidates.len(),
+                MAX_MEMORY_ADMISSION_CANDIDATES
+            ),
+        ));
+    }
+    for (index, candidate) in document.candidates.iter().copied().enumerate() {
+        candidate.validate().map_err(at(stage))?;
+        if document.candidates[..index]
+            .iter()
+            .any(|prior| prior.candidate_id == candidate.candidate_id)
+        {
+            return Err(RunError::new(
+                stage,
+                format!("candidate id {} is duplicated", candidate.candidate_id),
+            ));
+        }
+    }
+    Ok(document.candidates)
+}
+
+fn load_memory_admission_candidates(
+    path: Option<&PathBuf>,
+) -> Result<Option<Vec<MemoryAdmissionCandidate>>, RunError> {
+    path.map(|path| {
+        let file = std::fs::File::open(path).map_err(at("memory-admission candidates"))?;
+        let mut bytes = Vec::new();
+        file.take(MAX_CANDIDATE_FILE_BYTES + 1)
+            .read_to_end(&mut bytes)
+            .map_err(at("memory-admission candidates"))?;
+        parse_memory_admission_candidates(&bytes)
+    })
+    .transpose()
+}
+
+fn load_memory_admission_feedback(
+    path: Option<&PathBuf>,
+) -> Result<Option<MemoryAdmissionCandidate>, RunError> {
+    path.map(|path| {
+        let file = std::fs::File::open(path).map_err(at("memory-admission feedback"))?;
+        let mut bytes = Vec::new();
+        file.take(MAX_CANDIDATE_FILE_BYTES + 1)
+            .read_to_end(&mut bytes)
+            .map_err(at("memory-admission feedback"))?;
+        parse_memory_admission_feedback(&bytes)
+    })
+    .transpose()
+}
+
 #[derive(Debug, Serialize)]
 pub struct RunReport {
+    pub schema_version: u32,
+    pub simulator_version: &'static str,
     pub architecture: String,
     pub memory_mode: &'static str,
+    pub cache_scope: &'static str,
+    pub carded_dram_bandwidth: bool,
+    pub memory_service_candidate_count: usize,
+    pub memory_admission_candidate_count: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub memory_admission_feedback_candidate_id: Option<u8>,
     pub launches: Vec<LaunchReport>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cache_session: Option<CacheSessionReport>,
 }
 
 #[derive(Debug, Serialize)]
@@ -100,6 +359,24 @@ pub struct LaunchReport {
     pub counters: CounterReport,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub timing: Option<TimingReport>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cache_handoff: Option<CacheHandoffReport>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct CacheHandoffReport {
+    pub scope: &'static str,
+    pub sequence_index: usize,
+    pub seeded_by_kernel_ids: Vec<i32>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct CacheSessionReport {
+    pub scope: &'static str,
+    pub device_id: i64,
+    pub stream_id: i64,
+    pub completed_launches: usize,
+    pub cumulative_l2: L2CounterReport,
 }
 
 #[derive(Debug, Serialize)]
@@ -113,7 +390,29 @@ pub struct CoverageReport {
 #[derive(Debug, Serialize)]
 pub struct TimingReport {
     pub diagnostic_last_issue_cycles: u64,
+    pub last_processed_modeled_system_event_time: Option<u64>,
     pub terminal_modeled_event_time: Option<u64>,
+    pub completion_frontier: CompletionFrontierReport,
+    pub readiness: ReadinessReport,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(tag = "status", rename_all = "snake_case")]
+pub enum CompletionFrontierReport {
+    Complete {
+        cycles: Option<u64>,
+    },
+    IncompleteUnmodeledRetirementTails {
+        lower_bound_cycles: Option<u64>,
+        unmodeled_tails: TailReport,
+    },
+}
+
+#[derive(Debug, Serialize)]
+pub struct ReadinessReport {
+    pub schema_version: u32,
+    #[serde(flatten)]
+    pub diagnostics: ReadinessDiagnostics,
 }
 
 #[derive(Debug, Serialize)]
@@ -124,6 +423,8 @@ pub struct CounterReport {
     pub l1: Option<L1CounterReport>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub l2: Option<L2CounterReport>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub l2_by_source: Option<L2SourceCounterReport>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub dram: Option<DramCounterReport>,
     pub unmodeled_tails: TailReport,
@@ -151,6 +452,43 @@ pub struct L2CounterReport {
 }
 
 #[derive(Debug, Serialize)]
+pub struct L2SourceCounterReport {
+    pub l1_fill: L2SourceLaneReport,
+    pub bypass: L2SourceLaneReport,
+    pub untagged: L2SourceLaneReport,
+    pub store: L2SourceLaneReport,
+}
+
+#[derive(Debug, Serialize)]
+pub struct L2SourceLaneReport {
+    pub sectors: u64,
+    pub hits: u64,
+}
+
+fn l2_source_counter_report(value: &L2SourceSplit) -> L2SourceCounterReport {
+    let lane = |source| {
+        let (sectors, hits) = value.source(source);
+        L2SourceLaneReport { sectors, hits }
+    };
+    L2SourceCounterReport {
+        l1_fill: lane(L2Source::L1Fill),
+        bypass: lane(L2Source::Bypass),
+        untagged: lane(L2Source::Untagged),
+        store: lane(L2Source::Store),
+    }
+}
+
+fn l2_counter_report(value: &L2Counters) -> L2CounterReport {
+    L2CounterReport {
+        hits: value.hits,
+        misses: value.misses,
+        line_misses: value.line_misses,
+        sector_fill_misses: value.sector_fill_misses,
+        write_tag_hits: value.write_tag_hits,
+    }
+}
+
+#[derive(Debug, Serialize)]
 pub struct DramCounterReport {
     pub read_sectors: u64,
     pub bandwidth_delayed_responses: u64,
@@ -164,11 +502,36 @@ pub struct TailReport {
     pub async_copy_shared_visibility: bool,
 }
 
+fn tail_report(tails: TailFlags) -> TailReport {
+    TailReport {
+        reduction_read_modify_write: tails.red_rmw,
+        dirty_writeback: tails.dirty_writeback,
+        coherence: tails.coherence,
+        async_copy_shared_visibility: tails.ldgsts_dst_shared_timing,
+    }
+}
+
+fn completion_frontier_report(value: ModeledCompletionFrontier) -> CompletionFrontierReport {
+    match value {
+        ModeledCompletionFrontier::Complete { cycles } => {
+            CompletionFrontierReport::Complete { cycles }
+        }
+        ModeledCompletionFrontier::Incomplete {
+            lower_bound_cycles,
+            unmodeled_tails,
+        } => CompletionFrontierReport::IncompleteUnmodeledRetirementTails {
+            lower_bound_cycles,
+            unmodeled_tails: tail_report(unmodeled_tails),
+        },
+    }
+}
+
 fn counters(
     instructions_issued: u64,
     records_seen: u64,
     l1: Option<&L1Counters>,
     l2: Option<&L2Counters>,
+    l2_by_source: Option<&L2SourceSplit>,
     dram: Option<&DramStats>,
     tails: TailFlags,
 ) -> CounterReport {
@@ -185,24 +548,76 @@ fn counters(
             store_sectors: value.store_sectors,
             reduction_sectors: value.reduction_sectors,
         }),
-        l2: l2.map(|value| L2CounterReport {
-            hits: value.hits,
-            misses: value.misses,
-            line_misses: value.line_misses,
-            sector_fill_misses: value.sector_fill_misses,
-            write_tag_hits: value.write_tag_hits,
-        }),
+        l2: l2.map(l2_counter_report),
+        l2_by_source: l2_by_source.map(l2_source_counter_report),
         dram: dram.map(|value| DramCounterReport {
             read_sectors: value.read_sectors,
             bandwidth_delayed_responses: value.bw_delayed_responses,
         }),
-        unmodeled_tails: TailReport {
-            reduction_read_modify_write: tails.red_rmw,
-            dirty_writeback: tails.dirty_writeback,
-            coherence: tails.coherence,
-            async_copy_shared_visibility: tails.ldgsts_dst_shared_timing,
-        },
+        unmodeled_tails: tail_report(tails),
     }
+}
+
+fn launch_report(
+    result: FullKernelReplayResult,
+    cache_handoff: Option<CacheHandoffReport>,
+    expected_memory_admission_feedback: Option<MemoryAdmissionCandidate>,
+) -> Result<LaunchReport, RunError> {
+    let configured_memory_admission_feedback = result.configuration().memory_admission_feedback();
+    if configured_memory_admission_feedback != expected_memory_admission_feedback {
+        return Err(RunError::new(
+            "replay configuration",
+            format!(
+                "timing-active memory-admission feedback identity differs: expected {expected_memory_admission_feedback:?}, got {configured_memory_admission_feedback:?}"
+            ),
+        ));
+    }
+    let binding = result.coverage().launch().clone();
+    let coverage = CoverageReport {
+        kind: "full",
+        blocks_observed: result.coverage().blocks_observed(),
+        population_blocks: Some(result.coverage().blocks_observed()),
+    };
+    let counter_report = counters(
+        result.instructions_issued(),
+        result.records_seen(),
+        result.l1(),
+        result.l2(),
+        result.l2_by_source(),
+        result.dram(),
+        result.unmodeled_tails(),
+    );
+    let mut readiness = ReadinessDiagnostics::default();
+    for per_sm in result.per_sm().values() {
+        readiness
+            .add_checked(&per_sm.readiness)
+            .map_err(at("readiness aggregation"))?;
+    }
+    let readiness_schema_version = readiness.schema_version();
+    let timing = Some(TimingReport {
+        diagnostic_last_issue_cycles: result.diagnostic_last_issue_cycles(),
+        last_processed_modeled_system_event_time: result.last_processed_modeled_system_event_time(),
+        terminal_modeled_event_time: result.terminal_modeled_event_time(),
+        completion_frontier: completion_frontier_report(result.modeled_completion_frontier()),
+        readiness: ReadinessReport {
+            schema_version: readiness_schema_version,
+            diagnostics: readiness,
+        },
+    });
+    Ok(LaunchReport {
+        device_id: binding.device_id(),
+        stream_id: binding.stream_id(),
+        kernel_id: binding.kernel_id(),
+        function_unique_id: binding.function_unique_id(),
+        kernel_name: binding.kernel_mangled_name().to_owned(),
+        grid: binding.grid(),
+        block: binding.block(),
+        cluster: binding.cluster(),
+        coverage,
+        counters: counter_report,
+        timing,
+        cache_handoff,
+    })
 }
 
 fn resolve_mode(
@@ -269,6 +684,87 @@ fn resolve_mode(
 }
 
 pub fn run(config: &RunConfig) -> Result<RunReport, RunError> {
+    #[cfg(feature = "performance-counters")]
+    let total_started = Instant::now();
+    #[cfg(feature = "performance-counters")]
+    let performance_enabled = std::env::var_os("SIM_RUN_PERFORMANCE_COUNTERS").is_some();
+    let candidate_inputs = usize::from(config.memory_service_candidates.is_some())
+        + usize::from(config.memory_admission_candidates.is_some())
+        + usize::from(config.memory_admission_feedback.is_some());
+    if candidate_inputs > 1 {
+        return Err(RunError::new(
+            "arguments",
+            "memory-service, memory-admission, and feedback candidate files are mutually exclusive",
+        ));
+    }
+    if config.cache_scope == CacheScope::StreamL2 && config.memory_mode != MemoryMode::L1L2 {
+        return Err(RunError::new(
+            "arguments",
+            "--cache-scope stream-l2 requires --mode l1-l2",
+        ));
+    }
+    if config.cache_scope == CacheScope::StreamL2 && config.kernel_id.is_some() {
+        return Err(RunError::new(
+            "arguments",
+            "--kernel-id cannot skip launches in --cache-scope stream-l2",
+        ));
+    }
+    if config.memory_service_candidates.is_some() && config.memory_mode != MemoryMode::L1L2 {
+        return Err(RunError::new(
+            "arguments",
+            "--memory-service-candidates requires --mode l1-l2",
+        ));
+    }
+    if config.memory_service_candidates.is_some() && config.cache_scope != CacheScope::Launch {
+        return Err(RunError::new(
+            "arguments",
+            "--memory-service-candidates currently requires --cache-scope launch",
+        ));
+    }
+    if config.memory_admission_candidates.is_some() && config.memory_mode != MemoryMode::L1L2 {
+        return Err(RunError::new(
+            "arguments",
+            "--memory-admission-candidates requires --mode l1-l2",
+        ));
+    }
+    if config.memory_admission_candidates.is_some() && config.cache_scope != CacheScope::Launch {
+        return Err(RunError::new(
+            "arguments",
+            "--memory-admission-candidates currently requires --cache-scope launch",
+        ));
+    }
+    if config.memory_admission_feedback.is_some() && config.memory_mode != MemoryMode::L1L2 {
+        return Err(RunError::new(
+            "arguments",
+            "--memory-admission-feedback requires --mode l1-l2",
+        ));
+    }
+    if config.memory_admission_feedback.is_some() && config.cache_scope != CacheScope::Launch {
+        return Err(RunError::new(
+            "arguments",
+            "--memory-admission-feedback currently requires --cache-scope launch",
+        ));
+    }
+    let memory_service_candidates =
+        load_memory_service_candidates(config.memory_service_candidates.as_ref())?;
+    let memory_admission_candidates =
+        load_memory_admission_candidates(config.memory_admission_candidates.as_ref())?;
+    let memory_admission_feedback =
+        load_memory_admission_feedback(config.memory_admission_feedback.as_ref())?;
+    let specialized_loader_requested = std::env::var_os("SIM_RUN_RETAIN_RAW_TRACE_PAYLOAD")
+        .is_some()
+        || std::env::var_os("SIM_RUN_STREAM_TRACE_PAYLOAD").is_some();
+    let performance_diagnostics_requested =
+        std::env::var_os("SIM_RUN_PERFORMANCE_COUNTERS").is_some();
+    if candidate_inputs == 0
+        && config.cache_scope == CacheScope::Launch
+        && config.kernel_id.is_none()
+        && !specialized_loader_requested
+        && !performance_diagnostics_requested
+    {
+        return PreparedReplay::prepare(config, CoverageAdmission::ExistingDirectBehavior)?
+            .replay_all_report();
+    }
     let arch_card = ArchCard::load(&config.arch_card).map_err(at("architecture card"))?;
     let arch = arch_card.arch_id().map_err(at("architecture card"))?;
     let latencies = arch_card
@@ -284,53 +780,50 @@ pub fn run(config: &RunConfig) -> Result<RunReport, RunError> {
     .map_err(at("issue configuration"))?;
     let mode = resolve_mode(config, &arch_card, issue)?;
 
-    let trace = TraceDir::open_direct(&config.trace_dir).map_err(at("trace"))?;
+    #[cfg(feature = "performance-counters")]
+    let setup_ns = total_started.elapsed().as_nanos();
+    #[cfg(feature = "performance-counters")]
+    let trace_started = Instant::now();
+    #[cfg(feature = "performance-counters")]
+    let retain_raw_trace_payload = std::env::var_os("SIM_RUN_RETAIN_RAW_TRACE_PAYLOAD").is_some();
+    #[cfg(feature = "performance-counters")]
+    let stream_trace_payload = std::env::var_os("SIM_RUN_STREAM_TRACE_PAYLOAD").is_some();
+    #[cfg(not(feature = "performance-counters"))]
+    let retain_raw_trace_payload = false;
+    #[cfg(not(feature = "performance-counters"))]
+    let stream_trace_payload = false;
+    let trace = if retain_raw_trace_payload {
+        TraceDir::open_direct(&config.trace_dir)
+    } else if stream_trace_payload {
+        TraceDir::open_direct_streaming(&config.trace_dir)
+    } else {
+        TraceDir::open_direct_compact(&config.trace_dir)
+    }
+    .map_err(at("trace"))?;
+    #[cfg(feature = "performance-counters")]
+    let trace_ns = trace_started.elapsed().as_nanos();
+    #[cfg(feature = "performance-counters")]
+    let exec_started = Instant::now();
     let exec = ExecInfo::load_from_trace_dir(trace.root()).map_err(at("execution info"))?;
+    #[cfg(feature = "performance-counters")]
+    let exec_ns = exec_started.elapsed().as_nanos();
+    #[cfg(feature = "performance-counters")]
+    let control_started = Instant::now();
     let control =
         ControlSidecar::load_for_arch(&config.control_bits, arch).map_err(at("control bits"))?;
+    #[cfg(feature = "performance-counters")]
+    let control_ns = control_started.elapsed().as_nanos();
+    #[cfg(feature = "performance-counters")]
+    let schedule_started = Instant::now();
     let schedules = build_schedules(&exec, &control).map_err(at("schedule"))?;
+    #[cfg(feature = "performance-counters")]
+    let schedule_ns = schedule_started.elapsed().as_nanos();
 
-    let mut launches = Vec::new();
-    for loc in trace
+    let kernel_locs: Vec<_> = trace
         .kernels()
         .filter(|loc| config.kernel_id.is_none_or(|id| loc.kernel().id == id))
-    {
-        let outcome = replay_trace_kernel(&trace, &loc, &schedules, &arch_card, &issue, mode)
-            .map_err(at("replay"))?;
-        let KernelReplayOutcome::Full(result) = outcome;
-        let binding = result.coverage().launch().clone();
-        let coverage = CoverageReport {
-            kind: "full",
-            blocks_observed: result.coverage().blocks_observed(),
-            population_blocks: Some(result.coverage().blocks_observed()),
-        };
-        let counter_report = counters(
-            result.instructions_issued(),
-            result.records_seen(),
-            result.l1(),
-            result.l2(),
-            result.dram(),
-            result.unmodeled_tails(),
-        );
-        let timing = Some(TimingReport {
-            diagnostic_last_issue_cycles: result.diagnostic_last_issue_cycles(),
-            terminal_modeled_event_time: result.terminal_modeled_event_time(),
-        });
-        launches.push(LaunchReport {
-            device_id: binding.device_id(),
-            stream_id: binding.stream_id(),
-            kernel_id: binding.kernel_id(),
-            function_unique_id: binding.function_unique_id(),
-            kernel_name: binding.kernel_mangled_name().to_owned(),
-            grid: binding.grid(),
-            block: binding.block(),
-            cluster: binding.cluster(),
-            coverage,
-            counters: counter_report,
-            timing,
-        });
-    }
-    if launches.is_empty() {
+        .collect();
+    if kernel_locs.is_empty() {
         return Err(RunError::new(
             "replay",
             match config.kernel_id {
@@ -339,11 +832,115 @@ pub fn run(config: &RunConfig) -> Result<RunReport, RunError> {
             },
         ));
     }
-    Ok(RunReport {
+
+    let mut launches = Vec::with_capacity(kernel_locs.len());
+    #[cfg(feature = "performance-counters")]
+    let replay_started = Instant::now();
+    let cache_session = match config.cache_scope {
+        CacheScope::Launch => {
+            for loc in kernel_locs {
+                let outcome = if let Some(candidate) = memory_admission_feedback {
+                    replay_trace_kernel_with_memory_admission_feedback(
+                        &trace, &loc, &schedules, &arch_card, &issue, mode, candidate,
+                    )
+                } else if let Some(candidates) = memory_admission_candidates.as_deref() {
+                    replay_trace_kernel_with_memory_admission_candidates(
+                        &trace, &loc, &schedules, &arch_card, &issue, mode, candidates,
+                    )
+                } else if let Some(candidates) = memory_service_candidates.as_deref() {
+                    replay_trace_kernel_with_memory_service_candidates(
+                        &trace, &loc, &schedules, &arch_card, &issue, mode, candidates,
+                    )
+                } else {
+                    replay_trace_kernel(&trace, &loc, &schedules, &arch_card, &issue, mode)
+                }
+                .map_err(at("replay"))?;
+                let result = outcome.into_full().ok_or_else(|| {
+                    RunError::new(
+                        "replay",
+                        "direct timing replay requires complete launch coverage",
+                    )
+                })?;
+                launches.push(launch_report(result, None, memory_admission_feedback)?);
+            }
+            None
+        }
+        CacheScope::StreamL2 => {
+            let first = kernel_locs[0];
+            if kernel_locs.iter().any(|loc| {
+                loc.device_id() != first.device_id() || loc.stream_id() != first.stream_id()
+            }) {
+                return Err(RunError::new(
+                    "arguments",
+                    "--cache-scope stream-l2 requires every launch in the trace to belong to one device and stream",
+                ));
+            }
+            let mut session = StreamL2ReplaySession::new(
+                &trace,
+                &arch_card,
+                &issue,
+                mode,
+                first.device_id(),
+                first.stream_id(),
+            )
+            .map_err(at("replay session"))?;
+            let mut seeded_by_kernel_ids = Vec::new();
+            for (sequence_index, loc) in kernel_locs.into_iter().enumerate() {
+                let outcome = session
+                    .replay_next(&trace, &loc, &schedules, &arch_card, &issue, mode)
+                    .map_err(at("replay session"))?;
+                let result = outcome.into_full().ok_or_else(|| {
+                    RunError::new(
+                        "replay",
+                        "direct timing replay requires complete launch coverage",
+                    )
+                })?;
+                launches.push(launch_report(
+                    result,
+                    Some(CacheHandoffReport {
+                        scope: config.cache_scope.token(),
+                        sequence_index,
+                        seeded_by_kernel_ids: seeded_by_kernel_ids.clone(),
+                    }),
+                    None,
+                )?);
+                seeded_by_kernel_ids.push(loc.kernel().id);
+            }
+            Some(CacheSessionReport {
+                scope: config.cache_scope.token(),
+                device_id: session.device_id(),
+                stream_id: session.stream_id(),
+                completed_launches: session.completed_launches(),
+                cumulative_l2: l2_counter_report(&session.cumulative_l2_counters()),
+            })
+        }
+    };
+    #[cfg(feature = "performance-counters")]
+    let replay_ns = replay_started.elapsed().as_nanos();
+    let report = RunReport {
+        schema_version: 1,
+        simulator_version: env!("CARGO_PKG_VERSION"),
         architecture: arch.token().to_owned(),
         memory_mode: config.memory_mode.token(),
+        cache_scope: config.cache_scope.token(),
+        carded_dram_bandwidth: config.carded_dram_bandwidth,
+        memory_service_candidate_count: memory_service_candidates.as_ref().map_or(0, Vec::len),
+        memory_admission_candidate_count: memory_admission_candidates.as_ref().map_or(0, Vec::len),
+        memory_admission_feedback_candidate_id: memory_admission_feedback
+            .map(|candidate| candidate.candidate_id),
         launches,
-    })
+        cache_session,
+    };
+    #[cfg(feature = "performance-counters")]
+    if performance_enabled {
+        eprintln!(
+            "SIM_PHASE_PERF setup_ns={setup_ns} trace_ns={trace_ns} exec_ns={exec_ns} \
+             control_ns={control_ns} schedule_ns={schedule_ns} replay_ns={replay_ns} \
+             run_total_ns={}",
+            total_started.elapsed().as_nanos(),
+        );
+    }
+    Ok(report)
 }
 
 #[cfg(test)]
@@ -359,24 +956,333 @@ mod tests {
             arch_card: root.join("cards/sm_86.json"),
             pchase_card: Some(root.join("cards/sm_86_static_card.json")),
             memory_mode: mode,
+            cache_scope: CacheScope::Launch,
             carded_dram_bandwidth: false,
             kernel_id: None,
+            memory_service_candidates: None,
+            memory_admission_candidates: None,
+            memory_admission_feedback: None,
         }
     }
 
     #[test]
     fn direct_flat_replay_runs_fixture() {
         let report = run(&fixture(MemoryMode::Flat)).unwrap();
+        assert_eq!(report.schema_version, 1);
+        assert_eq!(report.simulator_version, env!("CARGO_PKG_VERSION"));
         assert_eq!(report.architecture, "sm_86");
+        assert_eq!(report.cache_scope, "launch");
+        assert!(!report.carded_dram_bandwidth);
+        assert_eq!(report.memory_service_candidate_count, 0);
+        assert_eq!(report.memory_admission_candidate_count, 0);
+        assert_eq!(report.memory_admission_feedback_candidate_id, None);
         assert_eq!(report.launches.len(), 1);
         assert_eq!(report.launches[0].counters.instructions_issued, 54);
         assert_eq!(report.launches[0].coverage.blocks_observed, 1);
-        assert!(report.launches[0].timing.is_some());
+        let timing = report.launches[0].timing.as_ref().unwrap();
+        assert_eq!(timing.readiness.schema_version, 1);
+        let json = serde_json::to_value(&report).unwrap();
+        let readiness = &json["launches"][0]["timing"]["readiness"];
+        assert_eq!(readiness["schema_version"], 1);
+        assert!(readiness.get("limiting_cycles").is_some());
+        assert!(readiness.get("constraint_exposure_cycles").is_some());
+        assert!(readiness.get("async_groups").is_some());
+        assert!(readiness.get("cta_barriers").is_some());
+        assert_eq!(
+            json["launches"][0]["timing"]["completion_frontier"]["status"],
+            "incomplete_unmodeled_retirement_tails"
+        );
+        assert!(
+            json["launches"][0]["timing"]["completion_frontier"]["lower_bound_cycles"]
+                .as_u64()
+                .is_some_and(|cycles| cycles > 0)
+        );
+        assert!(json.get("cache_session").is_none());
+        assert!(json["launches"][0].get("cache_handoff").is_none());
     }
 
     #[test]
     fn mode_tokens_are_explicit() {
         assert_eq!("l1-l2".parse::<MemoryMode>().unwrap(), MemoryMode::L1L2);
         assert!("admitted".parse::<MemoryMode>().is_err());
+        assert_eq!(
+            "stream-l2".parse::<CacheScope>().unwrap(),
+            CacheScope::StreamL2
+        );
+        assert!("global".parse::<CacheScope>().is_err());
+    }
+
+    #[test]
+    fn report_configuration_distinguishes_carded_dram() {
+        let unmodeled = run(&fixture(MemoryMode::L1L2)).unwrap();
+        let mut carded_config = fixture(MemoryMode::L1L2);
+        carded_config.carded_dram_bandwidth = true;
+        let carded = run(&carded_config).unwrap();
+
+        assert!(!unmodeled.carded_dram_bandwidth);
+        assert!(carded.carded_dram_bandwidth);
+        assert_ne!(
+            serde_json::to_vec(&unmodeled).unwrap(),
+            serde_json::to_vec(&carded).unwrap()
+        );
+    }
+
+    #[test]
+    fn memory_service_candidate_document_is_strict_and_versioned() {
+        let candidates = parse_memory_service_candidates(
+            br#"{
+                "schema_version": 1,
+                "candidates": [{
+                    "candidate_id": 7,
+                    "scope": "sm",
+                    "operation": "store",
+                    "ideal_wavefront_units": 1,
+                    "ideal_wavefront_cycles": 2,
+                    "unique_line_units": 0,
+                    "unique_line_cycles": 0,
+                    "completion_latency_cycles": 423
+                }]
+            }"#,
+        )
+        .unwrap();
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(candidates[0].candidate_id, 7);
+        assert!(
+            parse_memory_service_candidates(br#"{"schema_version":2,"candidates":[]}"#)
+                .unwrap_err()
+                .to_string()
+                .contains("expected 1")
+        );
+        assert!(
+            parse_memory_service_candidates(br#"{"schema_version":1,"candidates":[]}"#)
+                .unwrap_err()
+                .to_string()
+                .contains("must not be empty")
+        );
+        assert!(
+            parse_memory_service_candidates(&vec![b' '; 65 * 1024])
+                .unwrap_err()
+                .to_string()
+                .contains("exceeds 65536 bytes")
+        );
+
+        let candidate = r#"{
+            "candidate_id": 1,
+            "scope": "sm",
+            "operation": "store",
+            "ideal_wavefront_units": 1,
+            "ideal_wavefront_cycles": 1,
+            "unique_line_units": 0,
+            "unique_line_cycles": 0,
+            "completion_latency_cycles": 0
+        }"#;
+        let oversized = format!(
+            "{{\"schema_version\":1,\"candidates\":[{}]}}",
+            std::iter::repeat_n(candidate, MAX_MEMORY_SERVICE_CANDIDATES + 1)
+                .collect::<Vec<_>>()
+                .join(",")
+        );
+        assert!(
+            parse_memory_service_candidates(oversized.as_bytes())
+                .unwrap_err()
+                .to_string()
+                .contains("maximum is 16")
+        );
+        let duplicate =
+            format!("{{\"schema_version\":1,\"candidates\":[{candidate},{candidate}]}}");
+        assert!(
+            parse_memory_service_candidates(duplicate.as_bytes())
+                .unwrap_err()
+                .to_string()
+                .contains("duplicated")
+        );
+    }
+
+    #[test]
+    fn memory_service_candidates_require_launch_scoped_full_hierarchy() {
+        let mut config = fixture(MemoryMode::Flat);
+        config.memory_service_candidates = Some(PathBuf::from("candidate.json"));
+        assert!(
+            run(&config)
+                .unwrap_err()
+                .to_string()
+                .contains("requires --mode l1-l2")
+        );
+
+        config.memory_mode = MemoryMode::L1L2;
+        config.cache_scope = CacheScope::StreamL2;
+        assert!(
+            run(&config)
+                .unwrap_err()
+                .to_string()
+                .contains("requires --cache-scope launch")
+        );
+    }
+
+    #[test]
+    fn memory_admission_candidate_document_and_scope_are_strict() {
+        let candidates = parse_memory_admission_candidates(
+            br#"{
+                "schema_version": 1,
+                "candidates": [{
+                    "candidate_id": 3,
+                    "scope": "smsp",
+                    "operation": "store",
+                    "queue_capacity_instructions": 8,
+                    "admission_latency_cycles": 8,
+                    "l2_hit_sector_units": 1,
+                    "l2_hit_sector_cycles": 1,
+                    "l2_miss_sector_units": 1,
+                    "l2_miss_sector_cycles": 10
+                }]
+            }"#,
+        )
+        .unwrap();
+        assert_eq!(candidates[0].candidate_id, 3);
+
+        let mut config = fixture(MemoryMode::Flat);
+        config.memory_admission_candidates = Some(PathBuf::from("admission.json"));
+        assert!(
+            run(&config)
+                .unwrap_err()
+                .to_string()
+                .contains("requires --mode l1-l2")
+        );
+        config.memory_mode = MemoryMode::L1L2;
+        config.cache_scope = CacheScope::StreamL2;
+        assert!(
+            run(&config)
+                .unwrap_err()
+                .to_string()
+                .contains("requires --cache-scope launch")
+        );
+
+        let mut feedback = fixture(MemoryMode::Flat);
+        feedback.memory_admission_feedback = Some(PathBuf::from("feedback.json"));
+        assert!(
+            run(&feedback)
+                .unwrap_err()
+                .to_string()
+                .contains("--memory-admission-feedback requires --mode l1-l2")
+        );
+
+        let mut conflicting = fixture(MemoryMode::L1L2);
+        conflicting.memory_admission_candidates = Some(PathBuf::from("admission.json"));
+        conflicting.memory_admission_feedback = Some(PathBuf::from("feedback.json"));
+        assert!(
+            run(&conflicting)
+                .unwrap_err()
+                .to_string()
+                .contains("mutually exclusive")
+        );
+    }
+
+    #[test]
+    fn memory_admission_feedback_enforces_exactly_one_before_candidate_validation() {
+        let empty = parse_memory_admission_feedback(br#"{"schema_version":1,"candidates":[]}"#)
+            .unwrap_err();
+        assert_eq!(empty.stage(), "memory-admission feedback");
+        assert!(empty.detail().contains("exactly one candidate, got 0"));
+
+        let two = parse_memory_admission_feedback(
+            br#"{
+                "schema_version": 1,
+                "candidates": [
+                    {
+                        "candidate_id": 3,
+                        "scope": "sm",
+                        "operation": "store",
+                        "queue_capacity_instructions": 8,
+                        "admission_latency_cycles": 8,
+                        "l2_hit_sector_units": 1,
+                        "l2_hit_sector_cycles": 1,
+                        "l2_miss_sector_units": 1,
+                        "l2_miss_sector_cycles": 10
+                    },
+                    {
+                        "candidate_id": 3,
+                        "scope": "sm",
+                        "operation": "load",
+                        "queue_capacity_instructions": 0,
+                        "admission_latency_cycles": 0,
+                        "l2_hit_sector_units": 0,
+                        "l2_hit_sector_cycles": 0,
+                        "l2_miss_sector_units": 0,
+                        "l2_miss_sector_cycles": 0
+                    }
+                ]
+            }"#,
+        )
+        .unwrap_err();
+        assert_eq!(two.stage(), "memory-admission feedback");
+        assert!(two.detail().contains("exactly one candidate, got 2"));
+
+        let malformed = parse_memory_admission_feedback(b"{").unwrap_err();
+        assert_eq!(malformed.stage(), "memory-admission feedback");
+    }
+
+    #[test]
+    fn candidate_mutual_exclusion_precedes_individual_mode_gates() {
+        let mut config = fixture(MemoryMode::Flat);
+        config.memory_service_candidates = Some(PathBuf::from("service.json"));
+        config.memory_admission_feedback = Some(PathBuf::from("feedback.json"));
+        let error = run(&config).unwrap_err();
+        assert_eq!(error.stage(), "arguments");
+        assert!(error.detail().contains("mutually exclusive"));
+    }
+
+    #[test]
+    fn stream_l2_scope_emits_explicit_session_metadata() {
+        let mut config = fixture(MemoryMode::L1L2);
+        config.cache_scope = CacheScope::StreamL2;
+        let report = run(&config).unwrap();
+        assert_eq!(report.launches.len(), 1);
+        let handoff = report.launches[0].cache_handoff.as_ref().unwrap();
+        assert_eq!(handoff.scope, "stream-l2");
+        assert_eq!(handoff.sequence_index, 0);
+        assert!(handoff.seeded_by_kernel_ids.is_empty());
+        let session = report.cache_session.as_ref().unwrap();
+        assert_eq!(session.scope, "stream-l2");
+        assert_eq!(session.completed_launches, 1);
+        let launch_l2 = report.launches[0].counters.l2.as_ref().unwrap();
+        let source_split = report.launches[0].counters.l2_by_source.as_ref().unwrap();
+        let source_sectors = source_split.l1_fill.sectors
+            + source_split.bypass.sectors
+            + source_split.untagged.sectors
+            + source_split.store.sectors;
+        let source_hits = source_split.l1_fill.hits
+            + source_split.bypass.hits
+            + source_split.untagged.hits
+            + source_split.store.hits;
+        assert_eq!(source_sectors, launch_l2.hits + launch_l2.misses);
+        assert_eq!(source_hits, launch_l2.hits);
+        assert_eq!(session.cumulative_l2.hits, launch_l2.hits);
+        assert_eq!(session.cumulative_l2.misses, launch_l2.misses);
+        assert_eq!(
+            session.cumulative_l2.sector_fill_misses,
+            launch_l2.sector_fill_misses
+        );
+    }
+
+    #[test]
+    fn stream_l2_scope_rejects_nonshared_mode_and_launch_filter() {
+        let mut nonshared = fixture(MemoryMode::Flat);
+        nonshared.cache_scope = CacheScope::StreamL2;
+        assert!(
+            run(&nonshared)
+                .unwrap_err()
+                .to_string()
+                .contains("requires --mode l1-l2")
+        );
+
+        let mut filtered = fixture(MemoryMode::L1L2);
+        filtered.cache_scope = CacheScope::StreamL2;
+        filtered.kernel_id = Some(1);
+        assert!(
+            run(&filtered)
+                .unwrap_err()
+                .to_string()
+                .contains("cannot skip launches")
+        );
     }
 }

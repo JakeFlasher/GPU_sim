@@ -1,0 +1,132 @@
+#include <cuda.h>
+
+#include <cstdint>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <vector>
+
+#define DRIVER_CHECK(call)                                                      \
+    do {                                                                        \
+        const CUresult status = (call);                                         \
+        if (status != CUDA_SUCCESS) {                                           \
+            const char* name = nullptr;                                         \
+            const char* description = nullptr;                                  \
+            cuGetErrorName(status, &name);                                      \
+            cuGetErrorString(status, &description);                             \
+            std::fprintf(stderr, "%s failed: %s (%s)\n", #call,              \
+                         name == nullptr ? "unknown" : name,                   \
+                         description == nullptr ? "no description"             \
+                                                : description);                 \
+            std::exit(1);                                                       \
+        }                                                                       \
+    } while (0)
+
+constexpr int kWarpSize = 32;
+constexpr int kMaxWarps = 16;
+constexpr const char* kFixedFunction =
+    "_Z22footprint_fixed_searchPyPjPKj";
+constexpr const char* kGlobalFunction =
+    "_Z23footprint_global_searchPyPjPKjS2_";
+
+int main(int argc, char** argv) {
+    if (argc != 8) {
+        std::fprintf(stderr,
+                     "usage: %s CUBIN fixed|global WARPS GENERATIONS TRIALS "
+                     "VARIANT UNROLL\n",
+                     argv[0]);
+        return 2;
+    }
+    const bool fixed = std::strcmp(argv[2], "fixed") == 0;
+    const bool global = std::strcmp(argv[2], "global") == 0;
+    const int warps = std::atoi(argv[3]);
+    const int generations = std::atoi(argv[4]);
+    const int trials = std::atoi(argv[5]);
+    const int unroll = std::atoi(argv[7]);
+    if ((!fixed && !global) || warps < 1 || warps > kMaxWarps ||
+        (generations != 64 && generations != 1024) || trials < 1 ||
+        trials > 32 ||
+        (unroll != 1 && unroll != 2 && unroll != 4 && unroll != 8)) {
+        return 2;
+    }
+    const int threads = warps * kWarpSize;
+    std::vector<std::uint32_t> inputs(threads, 0x12345678u);
+    std::vector<std::uint32_t> zeros(threads, 0);
+    std::vector<std::uint32_t> sink(warps);
+    std::vector<std::vector<unsigned long long>> samples(
+        trials, std::vector<unsigned long long>(warps));
+
+    DRIVER_CHECK(cuInit(0));
+    CUdevice device;
+    CUcontext context;
+    CUmodule module;
+    CUfunction function;
+    DRIVER_CHECK(cuDeviceGet(&device, 0));
+    DRIVER_CHECK(cuCtxCreate(&context, nullptr, 0, device));
+    DRIVER_CHECK(cuModuleLoad(&module, argv[1]));
+    DRIVER_CHECK(cuModuleGetFunction(
+        &function, module, fixed ? kFixedFunction : kGlobalFunction));
+
+    CUdeviceptr elapsed_device;
+    CUdeviceptr sink_device;
+    CUdeviceptr inputs_device;
+    CUdeviceptr zeros_device;
+    DRIVER_CHECK(cuMemAlloc(&elapsed_device,
+                            kMaxWarps * sizeof(unsigned long long)));
+    DRIVER_CHECK(cuMemAlloc(&sink_device,
+                            kMaxWarps * sizeof(std::uint32_t)));
+    DRIVER_CHECK(cuMemAlloc(&inputs_device,
+                            inputs.size() * sizeof(std::uint32_t)));
+    DRIVER_CHECK(cuMemAlloc(&zeros_device,
+                            zeros.size() * sizeof(std::uint32_t)));
+    DRIVER_CHECK(cuMemcpyHtoD(inputs_device, inputs.data(),
+                              inputs.size() * sizeof(std::uint32_t)));
+    DRIVER_CHECK(cuMemcpyHtoD(zeros_device, zeros.data(),
+                              zeros.size() * sizeof(std::uint32_t)));
+
+    for (int trial = 0; trial < trials; ++trial) {
+        void* fixed_args[] = {&elapsed_device, &sink_device, &zeros_device};
+        void* global_args[] = {
+            &elapsed_device, &sink_device, &inputs_device, &zeros_device};
+        DRIVER_CHECK(cuLaunchKernel(
+            function, 1, 1, 1, threads, 1, 1, 0, nullptr,
+            fixed ? fixed_args : global_args, nullptr));
+        DRIVER_CHECK(cuCtxSynchronize());
+        DRIVER_CHECK(cuMemcpyDtoH(samples[trial].data(), elapsed_device,
+                                  warps * sizeof(unsigned long long)));
+    }
+    DRIVER_CHECK(cuMemcpyDtoH(sink.data(), sink_device,
+                              warps * sizeof(std::uint32_t)));
+    std::uint32_t fixed_expected = 0;
+    for (int generation = 0; generation < generations; ++generation) {
+        const std::uint32_t value = fixed_expected + 4u;
+        fixed_expected = fixed_expected * 1664524u + value;
+    }
+    const std::uint32_t expected = fixed
+        ? fixed_expected
+        : static_cast<std::uint32_t>(generations * 0x12345678ull);
+    bool correct = true;
+    std::uint64_t checksum = 0;
+    for (std::uint32_t value : sink) {
+        correct = correct && value == expected;
+        checksum = checksum * 131u + value;
+    }
+
+    std::printf(
+        "{\"variant\":\"%s\",\"kind\":\"%s\",\"unroll\":%d,"
+        "\"warps\":%d,\"generations\":%d,\"samples_cycles\":[",
+        argv[6], argv[2], unroll, warps, generations);
+    for (int trial = 0; trial < trials; ++trial) {
+        std::printf("%s[", trial == 0 ? "" : ",");
+        for (int warp = 0; warp < warps; ++warp) {
+            std::printf("%s%llu", warp == 0 ? "" : ",",
+                        samples[trial][warp]);
+        }
+        std::printf("]");
+    }
+    std::printf(
+        "],\"expected\":\"%08x\",\"checksum\":%llu,\"correct\":%s}\n",
+        expected, static_cast<unsigned long long>(checksum),
+        correct ? "true" : "false");
+    return correct ? 0 : 1;
+}

@@ -1,0 +1,165 @@
+{
+  "schema_version": 1,
+  "candidates": [
+    {
+      "candidate_id": 1,
+      "scope": "sm",
+      "operation": "store",
+      "ideal_wavefront_units": 0,
+      "ideal_wavefront_cycles": 0,
+      "unique_line_units": 1,
+      "unique_line_cycles": 8,
+      "completion_latency_cycles": 0
+    },
+    {
+      "candidate_id": 2,
+      "scope": "sm",
+      "operation": "store",
+      "ideal_wavefront_units": 0,
+      "ideal_wavefront_cycles": 0,
+      "unique_line_units": 1,
+      "unique_line_cycles": 10,
+      "completion_latency_cycles": 0
+    },
+    {
+      "candidate_id": 3,
+      "scope": "sm",
+      "operation": "store",
+      "ideal_wavefront_units": 0,
+      "ideal_wavefront_cycles": 0,
+      "unique_line_units": 1,
+      "unique_line_cycles": 12,
+      "completion_latency_cycles": 0
+    },
+    {
+      "candidate_id": 4,
+      "scope": "sm",
+      "operation": "store",
+      "ideal_wavefront_units": 1,
+      "ideal_wavefront_cycles": 40,
+      "unique_line_units": 0,
+      "unique_line_cycles": 0,
+      "completion_latency_cycles": 0
+    },
+    {
+      "candidate_id": 5,
+      "scope": "sm",
+      "operation": "store",
+      "ideal_wavefront_units": 1,
+      "ideal_wavefront_cycles": 20,
+      "unique_line_units": 1,
+      "unique_line_cycles": 5,
+      "completion_latency_cycles": 0
+    },
+    {
+      "candidate_id": 6,
+      "scope": "smsp",
+      "operation": "store",
+      "ideal_wavefront_units": 0,
+      "ideal_wavefront_cycles": 0,
+      "unique_line_units": 1,
+      "unique_line_cycles": 10,
+      "completion_latency_cycles": 0
+    },
+    {
+      "candidate_id": 7,
+      "scope": "smsp",
+      "operation": "store",
+      "ideal_wavefront_units": 0,
+      "ideal_wavefront_cycles": 0,
+      "unique_line_units": 1,
+      "unique_line_cycles": 40,
+      "completion_latency_cycles": 0
+    },
+    {
+      "candidate_id": 8,
+      "scope": "smsp",
+      "operation": "store",
+      "ideal_wavefront_units": 1,
+      "ideal_wavefront_cycles": 40,
+      "unique_line_units": 0,
+      "unique_line_cycles": 0,
+      "completion_latency_cycles": 0
+    },
+    {
+      "candidate_id": 9,
+      "scope": "sm",
+      "operation": "reduction",
+      "ideal_wavefront_units": 0,
+      "ideal_wavefront_cycles": 0,
+      "unique_line_units": 1,
+      "unique_line_cycles": 14,
+      "completion_latency_cycles": 0
+    },
+    {
+      "candidate_id": 10,
+      "scope": "sm",
+      "operation": "reduction",
+      "ideal_wavefront_units": 0,
+      "ideal_wavefront_cycles": 0,
+      "unique_line_units": 1,
+      "unique_line_cycles": 16,
+      "completion_latency_cycles": 0
+    },
+    {
+      "candidate_id": 11,
+      "scope": "sm",
+      "operation": "reduction",
+      "ideal_wavefront_units": 0,
+      "ideal_wavefront_cycles": 0,
+      "unique_line_units": 1,
+      "unique_line_cycles": 18,
+      "completion_latency_cycles": 0
+    },
+    {
+      "candidate_id": 12,
+      "scope": "sm",
+      "operation": "reduction",
+      "ideal_wavefront_units": 1,
+      "ideal_wavefront_cycles": 64,
+      "unique_line_units": 0,
+      "unique_line_cycles": 0,
+      "completion_latency_cycles": 0
+    },
+    {
+      "candidate_id": 13,
+      "scope": "sm",
+      "operation": "reduction",
+      "ideal_wavefront_units": 1,
+      "ideal_wavefront_cycles": 32,
+      "unique_line_units": 1,
+      "unique_line_cycles": 8,
+      "completion_latency_cycles": 0
+    },
+    {
+      "candidate_id": 14,
+      "scope": "smsp",
+      "operation": "reduction",
+      "ideal_wavefront_units": 0,
+      "ideal_wavefront_cycles": 0,
+      "unique_line_units": 1,
+      "unique_line_cycles": 16,
+      "completion_latency_cycles": 0
+    },
+    {
+      "candidate_id": 15,
+      "scope": "smsp",
+      "operation": "reduction",
+      "ideal_wavefront_units": 0,
+      "ideal_wavefront_cycles": 0,
+      "unique_line_units": 1,
+      "unique_line_cycles": 64,
+      "completion_latency_cycles": 0
+    },
+    {
+      "candidate_id": 16,
+      "scope": "smsp",
+      "operation": "reduction",
+      "ideal_wavefront_units": 1,
+      "ideal_wavefront_cycles": 64,
+      "unique_line_units": 0,
+      "unique_line_cycles": 0,
+      "completion_latency_cycles": 0
+    }
+  ]
+}

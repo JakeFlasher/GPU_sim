@@ -23,6 +23,7 @@ use sim_mem::{
 use sim_trace::ExecInfo;
 
 use crate::control_bits::{ControlBits, ControlSidecar};
+use crate::sass_operands::{FixedLatencyOperandStatus, project_fixed_latency_operands};
 
 #[derive(Debug, thiserror::Error)]
 pub enum ProgramError {
@@ -45,6 +46,10 @@ pub enum ProgramError {
     ControlLayoutCapability(#[from] CapabilityError),
     #[error("tensor-pipeline capability is unavailable: {0}")]
     TensorPipelineCapability(#[source] CapabilityError),
+    #[error("CTA-barrier issue capability is unavailable: {0}")]
+    CtaBarrierPipelineCapability(#[source] CapabilityError),
+    #[error("branch-resolution capability is unavailable: {0}")]
+    BranchPipelineCapability(#[source] CapabilityError),
     #[error(
         "tensor instruction {opcode:?} has no execution-pipeline model for architecture {arch}"
     )]
@@ -138,6 +143,17 @@ pub enum OpClass {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PipelineClass {
     DispatchOnly,
+    Branch {
+        next_issue_interval_cycles: u64,
+    },
+    Barrier {
+        /// Earliest cycles between warp arrivals admitted by the one
+        /// SM-shared CTA-barrier issue server.
+        warp_initiation_interval_cycles: u64,
+        /// Additional issue-only re-arm for the next generation of the same
+        /// CTA. Ordinary post-rendezvous work is never delayed by this value.
+        generation_rearm_cycles: u64,
+    },
     Tensor {
         /// Earliest number of cycles between issues to one SMSP's Tensor Core.
         initiation_interval_cycles: u64,
@@ -148,6 +164,13 @@ impl PipelineClass {
     pub const fn initiation_interval_cycles(self) -> Option<u64> {
         match self {
             Self::DispatchOnly => None,
+            Self::Branch {
+                next_issue_interval_cycles,
+            } => Some(next_issue_interval_cycles),
+            Self::Barrier {
+                warp_initiation_interval_cycles,
+                ..
+            } => Some(warp_initiation_interval_cycles),
             Self::Tensor {
                 initiation_interval_cycles,
             } => Some(initiation_interval_cycles),
@@ -178,8 +201,27 @@ pub struct IssueSlot {
     /// carries this into async-copy source routing without reparsing SASS in the
     /// issue loop.
     pub(crate) ldgsts_l1_policy: Option<LdgstsL1Policy>,
+    /// Static exact-family register/source/reuse projection. This is diagnostic
+    /// input only until Control/Allocate timing passes live transfer.
+    pub(crate) fixed_latency_operands: FixedLatencyOperandStatus,
+    /// Static phase markers used in dynamic readiness checks. Sidecar SASS is
+    /// canonical ASCII, so classify once instead of reparsing on every scan.
+    pub(crate) clocklo_read: bool,
+    pub(crate) gpu_membar: bool,
     /// Full nvdisasm text, kept for diagnostics (static tables are small).
     pub(crate) opcode_text: String,
+}
+
+pub(crate) fn is_clocklo_opcode_text(text: &str) -> bool {
+    let text = text.trim_ascii();
+    text.starts_with("CS2R ")
+        && text
+            .rsplit_once(',')
+            .is_some_and(|(_, source)| source.trim_ascii() == "SR_CLOCKLO")
+}
+
+pub(crate) fn is_gpu_membar_opcode_text(text: &str) -> bool {
+    text.split_ascii_whitespace().next() == Some("MEMBAR.SC.GPU")
 }
 
 impl IssueSlot {
@@ -205,6 +247,18 @@ impl IssueSlot {
 
     pub fn ldgsts_l1_policy(&self) -> Option<LdgstsL1Policy> {
         self.ldgsts_l1_policy
+    }
+
+    pub fn fixed_latency_operands(&self) -> &FixedLatencyOperandStatus {
+        &self.fixed_latency_operands
+    }
+
+    pub(crate) const fn is_clocklo_read(&self) -> bool {
+        self.clocklo_read
+    }
+
+    pub(crate) const fn is_gpu_membar(&self) -> bool {
+        self.gpu_membar
     }
 
     pub fn opcode_text(&self) -> &str {
@@ -369,8 +423,48 @@ fn parse_u32_literal(text: &str) -> Option<u32> {
     }
 }
 
-fn classify_pipeline(opcode_text: &str, arch: ArchId) -> Result<PipelineClass, ProgramError> {
+fn classify_pipeline(
+    pc: u64,
+    opcode_text: &str,
+    control: ControlBits,
+    predicate: Option<&str>,
+    arch: ArchId,
+) -> Result<PipelineClass, ProgramError> {
     let head = opcode_head(opcode_text);
+    if head == "BAR" {
+        let issue = arch
+            .cta_barrier_issue()
+            .require("cta_barrier_issue")
+            .map_err(ProgramError::CtaBarrierPipelineCapability)?;
+        return Ok(PipelineClass::Barrier {
+            warp_initiation_interval_cycles: issue.warp_initiation_interval_cycles,
+            generation_rearm_cycles: issue.generation_rearm_cycles,
+        });
+    }
+    let opcode = opcode_text.split_ascii_whitespace().next().unwrap_or("");
+    let branch_target = opcode_text
+        .strip_prefix("BRA ")
+        .and_then(parse_u32_literal)
+        .map(u64::from);
+    if let Some(target) = branch_target
+        && target != pc
+        && predicate.is_some()
+        && control.stall == 5
+        && control.yield_flag
+    {
+        let timing = arch
+            .branch_resolution()
+            .require("branch_resolution")
+            .map_err(ProgramError::BranchPipelineCapability)?;
+        let next_issue_interval_cycles = if target > pc {
+            timing.next_issue_interval_cycles
+        } else {
+            timing.uniform_backward_target_resolution_cycles
+        };
+        return Ok(PipelineClass::Branch {
+            next_issue_interval_cycles,
+        });
+    }
     if !matches!(head, "HMMA" | "IMMA" | "BMMA" | "DMMA") {
         return Ok(PipelineClass::DispatchOnly);
     }
@@ -379,7 +473,6 @@ fn classify_pipeline(opcode_text: &str, arch: ArchId) -> Result<PipelineClass, P
         .tensor_issue_intervals()
         .require("tensor_issue_intervals")
         .map_err(ProgramError::TensorPipelineCapability)?;
-    let opcode = opcode_text.split_ascii_whitespace().next().unwrap_or("");
     let initiation_interval_cycles = match opcode {
         "HMMA.16816.F32" | "HMMA.16816.F32.BF16" => intervals.hmma_16816_f16_bf16,
         "HMMA.SP.16832.F32.BF16" => intervals.hmma_sparse_16832_f16_bf16,
@@ -475,9 +568,17 @@ pub fn build_schedules(
                     inst.predicate.as_deref(),
                     sidecar_arch,
                 )?;
-                let pipeline_class = classify_pipeline(&inst.opcode_text, sidecar_arch)?;
+                let pipeline_class = classify_pipeline(
+                    pc,
+                    &inst.opcode_text,
+                    inst.control,
+                    inst.predicate.as_deref(),
+                    sidecar_arch,
+                )?;
                 let async_copy_wait_max_pending_groups =
                     parse_async_copy_wait(&inst.opcode_text).unwrap_or(0);
+                let fixed_latency_operands =
+                    project_fixed_latency_operands(&inst.opcode_text, inst.control, sidecar_arch);
                 debug_assert_eq!(
                     op_class == OpClass::AsyncCopyWait,
                     parse_async_copy_wait(&inst.opcode_text).is_some()
@@ -491,6 +592,9 @@ pub fn build_schedules(
                         pipeline_class,
                         mem_role,
                         ldgsts_l1_policy,
+                        fixed_latency_operands,
+                        clocklo_read: is_clocklo_opcode_text(&inst.opcode_text),
+                        gpu_membar: is_gpu_membar_opcode_text(&inst.opcode_text),
                         opcode_text: inst.opcode_text.clone(),
                     },
                 ))
@@ -519,6 +623,16 @@ mod tests {
 
     use super::*;
     use crate::control_bits::{FunctionControl, InstructionControl};
+
+    fn classify_pipeline_test(opcode: &str, arch: ArchId) -> Result<PipelineClass, ProgramError> {
+        classify_pipeline(
+            0,
+            opcode,
+            ControlBits::new(1, false, 7, 7, 0, 0).unwrap(),
+            None,
+            arch,
+        )
+    }
 
     fn exec_info(pcs: &[u64]) -> ExecInfo {
         ExecInfo {
@@ -569,8 +683,44 @@ mod tests {
         assert_eq!(s.function_name, "my_kernel");
         assert_eq!(s.by_pc.len(), 3);
         assert_eq!(s.by_pc[&16].op_class, OpClass::BlockBarrier);
+        assert_eq!(
+            s.by_pc[&16].pipeline_class,
+            PipelineClass::Barrier {
+                warp_initiation_interval_cycles: 2,
+                generation_rearm_cycles: 0,
+            }
+        );
         assert_eq!(s.by_pc[&0].op_class, OpClass::Other);
         assert_eq!(s.by_pc[&0].pipeline_class, PipelineClass::DispatchOnly);
+        let FixedLatencyOperandStatus::Projected(operands) = s.by_pc[&0].fixed_latency_operands()
+        else {
+            panic!("IADD3 operand projection is missing")
+        };
+        assert_eq!(operands.sm86_regular_source_bank_reads(), [1, 1]);
+        assert!(matches!(
+            s.by_pc[&16].fixed_latency_operands(),
+            FixedLatencyOperandStatus::NotApplicable
+        ));
+    }
+
+    #[test]
+    fn operand_projection_gap_is_retained_without_changing_dispatch_timing() {
+        let mut sc = sidecar(&[0]);
+        let instruction = sc
+            .functions
+            .get_mut("my_kernel")
+            .unwrap()
+            .by_pc
+            .get_mut(&0)
+            .unwrap();
+        instruction.control = ControlBits::new(1, false, 7, 7, 0, 1).unwrap();
+        let schedules = build_schedules(&exec_info(&[0]), &sc).unwrap();
+        let slot = &schedules[&1].by_pc[&0];
+        assert_eq!(slot.pipeline_class, PipelineClass::DispatchOnly);
+        assert!(matches!(
+            slot.fixed_latency_operands(),
+            FixedLatencyOperandStatus::Gap(_)
+        ));
     }
 
     #[test]
@@ -687,6 +837,53 @@ mod tests {
             PipelineClass::Tensor {
                 initiation_interval_cycles: 16,
             }
+        );
+    }
+
+    #[test]
+    fn exact_forward_and_uniform_backward_branches_use_distinct_intervals() {
+        let branch_control = ControlBits::new(5, true, 7, 7, 0, 0).unwrap();
+        assert_eq!(
+            classify_pipeline(0, "BRA 0x20", branch_control, Some("@P0"), ArchId::Sm86,).unwrap(),
+            PipelineClass::Branch {
+                next_issue_interval_cycles: 10,
+            }
+        );
+        assert_eq!(
+            classify_pipeline(0x20, "BRA 0x0", branch_control, Some("@P0"), ArchId::Sm86,).unwrap(),
+            PipelineClass::Branch {
+                next_issue_interval_cycles: 3,
+            }
+        );
+        assert_eq!(
+            classify_pipeline(0, "BRA 0x20", branch_control, None, ArchId::Sm86).unwrap(),
+            PipelineClass::DispatchOnly
+        );
+        assert_eq!(
+            classify_pipeline(0x20, "BRA 0x20", branch_control, Some("@P0"), ArchId::Sm86,)
+                .unwrap(),
+            PipelineClass::DispatchOnly
+        );
+        assert!(matches!(
+            classify_pipeline(
+                0,
+                "BRA 0x20",
+                branch_control,
+                Some("@P0"),
+                ArchId::Sm120,
+            ),
+            Err(ProgramError::BranchPipelineCapability(
+                CapabilityError::ResearchGap {
+                    arch: ArchId::Sm120,
+                    capability: "branch_resolution",
+                    reason,
+                }
+            )) if !reason.is_empty()
+        ));
+
+        assert_eq!(
+            classify_pipeline_test("IMAD R0, R0, R1, R2", ArchId::Sm86).unwrap(),
+            PipelineClass::DispatchOnly
         );
     }
 
@@ -883,7 +1080,7 @@ mod tests {
             ("IMMA.16816.S8.S8", 8),
         ] {
             assert_eq!(
-                classify_pipeline(&format!("{opcode} R0, R2, R4, R6"), ArchId::Sm86).unwrap(),
+                classify_pipeline_test(&format!("{opcode} R0, R2, R4, R6"), ArchId::Sm86).unwrap(),
                 PipelineClass::Tensor {
                     initiation_interval_cycles: expected_interval,
                 },
@@ -896,7 +1093,7 @@ mod tests {
     fn non_tensor_opcode_is_explicitly_dispatch_only() {
         for opcode in ["IADD3 R0, R1, R2, RZ", "XHMMA.16816.F32 R0", ""] {
             assert_eq!(
-                classify_pipeline(opcode, ArchId::Sm86).unwrap(),
+                classify_pipeline_test(opcode, ArchId::Sm86).unwrap(),
                 PipelineClass::DispatchOnly,
                 "opcode {opcode:?}"
             );
@@ -913,7 +1110,7 @@ mod tests {
             "DMMA.884.F64 R0",
         ] {
             assert!(matches!(
-                classify_pipeline(opcode, ArchId::Sm86),
+                classify_pipeline_test(opcode, ArchId::Sm86),
                 Err(ProgramError::TensorPipelineUnsupported {
                     arch: ArchId::Sm86,
                     opcode: rejected,
@@ -925,7 +1122,7 @@ mod tests {
     #[test]
     fn tensor_classifier_does_not_inherit_sm86_intervals_on_sm120() {
         assert!(matches!(
-            classify_pipeline("HMMA.16816.F32 R0", ArchId::Sm120),
+            classify_pipeline_test("HMMA.16816.F32 R0", ArchId::Sm120),
             Err(ProgramError::TensorPipelineCapability(
                 CapabilityError::ResearchGap {
                     arch: ArchId::Sm120,

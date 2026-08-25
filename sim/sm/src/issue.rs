@@ -17,6 +17,11 @@
 //! - Admitted tensor instructions additionally wait for their SMSP-local
 //!   Tensor Core initiation timeline. Other pipelines remain dispatch-only,
 //!   so independent non-tensor work may issue while the tensor pipe is busy.
+//! - Exact predicated stall-5/yield branches carry architecture-local
+//!   readiness: ten cycles for the characterized forward construction and
+//!   three target-resolution cycles for uniform backward loops. The latter is
+//!   shorter than the encoded stall and is therefore diagnostic unless a
+//!   later fetch model exposes it.
 //! - `BAR.*` (classified by the sidecar's opcode text) is a block-wide
 //!   barrier: generation semantics — it releases when every unfinished
 //!   warp of the block is waiting at it (warps that already finished do
@@ -59,20 +64,24 @@
 
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::num::NonZeroU32;
+use std::num::{NonZeroU32, NonZeroU128};
 use std::sync::atomic::{AtomicU64, Ordering};
 
+use serde::{Deserialize, Serialize};
 use sim_arch::card::{ArchCard, CalibError, RequiredIssueResources};
 use sim_arch::{
-    ArchId, LdgstsCompletionThroughput, LdgstsDestinationWavefrontProjection, SharedBankProjection,
+    ArchId, CtaBarrierIssue, FixedL1TexWritebackPriority, LdgstsCompletionThroughput,
+    LdgstsDestinationWavefrontProjection, SharedBankProjection,
 };
 use sim_mem::{
-    CacheOpToken, EvAccess, EvAccessUnobserved, FillKey, L1AccessError, L1Cache, L1Config,
-    L1Counters, L1MutationBudget, L2OpClass, L2Source, LdgstsL1Policy, MemoryOrigin,
+    AsyncCopyCompletion, CacheOpToken, EvAccess, EvAccessUnobserved, FillKey, L1AccessError,
+    L1Cache, L1Config, L1Counters, L1MutationBudget, L2OpClass, L2Source, LdgstsL1Policy, MemRole,
+    MemoryOrigin, decode_async_copy_completion,
 };
 
 use crate::control_bits::{ControlDomainError, DepBarrier};
 use crate::program::{FunctionSchedule, IssueSlot, OpClass, PipelineClass};
+use crate::sass_operands::{FixedLatencyOpcode, FixedLatencyOperandStatus};
 
 pub use sim_mem::AccessKind;
 
@@ -210,6 +219,9 @@ pub struct IssueModelParams {
     /// source-cohort-scoped bank wavefront contributes this many cycles; bypass
     /// copies retain payload fallback until their distinct projection is known.
     pub(crate) ldgsts_cache_all_destination_wavefront_cycles: u64,
+    /// Rational aggregate cache-all destination service shared by one SM.
+    pub(crate) ldgsts_cache_all_destination_service_wavefronts: u64,
+    pub(crate) ldgsts_cache_all_destination_service_cycles: u64,
     /// Resident-warp ceiling per SM. The current sm_86 hypothesis is 48;
     /// template architectures return a typed capability gap until their
     /// occupancy evidence is carded.
@@ -296,6 +308,23 @@ fn ldgsts_cache_all_destination_wavefront_cycles(arch: ArchId) -> Result<u64, Is
     Ok(timing.cycles_per_wavefront)
 }
 
+fn ldgsts_cache_all_destination_service_rate(arch: ArchId) -> Result<(u64, u64), IssueError> {
+    let timing = arch
+        .ldgsts_destination_wavefront_timing()
+        .require("ldgsts_destination_wavefront_timing")?;
+    if timing.aggregate_service_wavefronts == 0 || timing.aggregate_service_cycles == 0 {
+        return Err(IssueError::InvalidLdgstsDestinationWavefrontThroughput {
+            arch,
+            service_wavefronts: timing.aggregate_service_wavefronts,
+            service_cycles: timing.aggregate_service_cycles,
+        });
+    }
+    Ok((
+        timing.aggregate_service_wavefronts,
+        timing.aggregate_service_cycles,
+    ))
+}
+
 impl IssueModelParams {
     /// Resolve card latencies plus the retained architecture-local issue
     /// hypotheses. The name is intentionally explicit: this executable lane does
@@ -315,6 +344,10 @@ impl IssueModelParams {
         let ldgsts_completion_throughput = ldgsts_completion_throughput(arch)?;
         let ldgsts_cache_all_destination_wavefront_cycles =
             ldgsts_cache_all_destination_wavefront_cycles(arch)?;
+        let (
+            ldgsts_cache_all_destination_service_wavefronts,
+            ldgsts_cache_all_destination_service_cycles,
+        ) = ldgsts_cache_all_destination_service_rate(arch)?;
         Ok(Self {
             arch,
             resource_source: IssueResourceSource::ArchitectureDefaults,
@@ -328,6 +361,8 @@ impl IssueModelParams {
             ldgsts_l1_mshr_floor,
             ldgsts_completion_throughput,
             ldgsts_cache_all_destination_wavefront_cycles,
+            ldgsts_cache_all_destination_service_wavefronts,
+            ldgsts_cache_all_destination_service_cycles,
             max_resident_warps_per_sm: hypotheses.max_resident_warps_per_sm,
         })
     }
@@ -352,6 +387,10 @@ impl IssueModelParams {
         let ldgsts_completion_throughput = ldgsts_completion_throughput(arch)?;
         let ldgsts_cache_all_destination_wavefront_cycles =
             ldgsts_cache_all_destination_wavefront_cycles(arch)?;
+        let (
+            ldgsts_cache_all_destination_service_wavefronts,
+            ldgsts_cache_all_destination_service_cycles,
+        ) = ldgsts_cache_all_destination_service_rate(arch)?;
         Ok(Self {
             arch,
             resource_source: IssueResourceSource::Carded(resources),
@@ -365,6 +404,8 @@ impl IssueModelParams {
             ldgsts_l1_mshr_floor,
             ldgsts_completion_throughput,
             ldgsts_cache_all_destination_wavefront_cycles,
+            ldgsts_cache_all_destination_service_wavefronts,
+            ldgsts_cache_all_destination_service_cycles,
             max_resident_warps_per_sm: resources.occupancy.max_resident_warps_per_sm,
         })
     }
@@ -417,6 +458,14 @@ impl IssueModelParams {
         self.ldgsts_cache_all_destination_wavefront_cycles
     }
 
+    pub const fn ldgsts_cache_all_destination_service_wavefronts(&self) -> u64 {
+        self.ldgsts_cache_all_destination_service_wavefronts
+    }
+
+    pub const fn ldgsts_cache_all_destination_service_cycles(&self) -> u64 {
+        self.ldgsts_cache_all_destination_service_cycles
+    }
+
     fn ldgsts_delivery_units_per_cycle(&self) -> u64 {
         self.ldgsts_completion_throughput
             .cache_all_payload_bytes_per_cycle
@@ -438,6 +487,17 @@ impl IssueModelParams {
         )
     }
 
+    fn ldgsts_destination_service_cycles(&self, wavefronts: u64) -> Result<u64, IssueError> {
+        let scaled = wavefronts
+            .checked_mul(self.ldgsts_cache_all_destination_service_cycles)
+            .ok_or(IssueError::TimeMultiplicationOverflow {
+                operation: "LDGSTS aggregate destination-wavefront work",
+                lhs: wavefronts,
+                rhs: self.ldgsts_cache_all_destination_service_cycles,
+            })?;
+        Ok(scaled.div_ceil(self.ldgsts_cache_all_destination_service_wavefronts))
+    }
+
     pub const fn max_resident_warps_per_sm(&self) -> u32 {
         self.max_resident_warps_per_sm
     }
@@ -452,6 +512,10 @@ impl IssueModelParams {
                 let ldgsts_completion_throughput = ldgsts_completion_throughput(self.arch)?;
                 let ldgsts_cache_all_destination_wavefront_cycles =
                     ldgsts_cache_all_destination_wavefront_cycles(self.arch)?;
+                let (
+                    ldgsts_cache_all_destination_service_wavefronts,
+                    ldgsts_cache_all_destination_service_cycles,
+                ) = ldgsts_cache_all_destination_service_rate(self.arch)?;
                 let fields = [
                     (
                         "shared_additional_wavefront_latency",
@@ -479,6 +543,16 @@ impl IssueModelParams {
                         "ldgsts_cache_all_destination_wavefront_cycles",
                         ldgsts_cache_all_destination_wavefront_cycles,
                         self.ldgsts_cache_all_destination_wavefront_cycles,
+                    ),
+                    (
+                        "ldgsts_cache_all_destination_service_wavefronts",
+                        ldgsts_cache_all_destination_service_wavefronts,
+                        self.ldgsts_cache_all_destination_service_wavefronts,
+                    ),
+                    (
+                        "ldgsts_cache_all_destination_service_cycles",
+                        ldgsts_cache_all_destination_service_cycles,
+                        self.ldgsts_cache_all_destination_service_cycles,
                     ),
                     (
                         "non_memory_write_barrier_latency",
@@ -613,6 +687,13 @@ pub enum IssueError {
     #[error("issue model is unsupported for deployment architecture {arch}")]
     ArchitectureUnsupported { arch: ArchId },
     #[error(
+        "one function declares inconsistent CTA-barrier pipeline configurations: expected {expected:?}, got {got:?}"
+    )]
+    BarrierPipelineConfigurationMismatch {
+        expected: CtaBarrierIssue,
+        got: CtaBarrierIssue,
+    },
+    #[error(
         "carded issue resources are not implemented for architecture {arch}: the executor does not yet consume smsp.count, smsp.issue_ports, occupancy.max_blocks, dep_barriers.count/storage, or dual_issue.supported"
     )]
     CardedResourcesNotImplemented { arch: ArchId },
@@ -641,6 +722,21 @@ pub enum IssueError {
     InvalidLdgstsDestinationWavefrontTiming {
         arch: ArchId,
         cycles_per_wavefront: u64,
+    },
+    #[error(
+        "architecture {arch} has invalid cache-all LDGSTS destination throughput: {service_wavefronts} wavefronts per {service_cycles} SM cycles; both terms must be positive"
+    )]
+    InvalidLdgstsDestinationWavefrontThroughput {
+        arch: ArchId,
+        service_wavefronts: u64,
+        service_cycles: u64,
+    },
+    #[error(
+        "cache-all LDGSTS exact destination work {completion_work} is not an integral multiple of {work_per_wavefront} work units per wavefront"
+    )]
+    InvalidAsyncCopyDestinationWork {
+        completion_work: u64,
+        work_per_wavefront: u64,
     },
     #[error(
         "warp {warp} asynchronous-copy source activity is inconsistent: sectors={sectors}, completion_work={completion_work}"
@@ -693,6 +789,16 @@ pub enum IssueError {
         len: u16,
         end: usize,
         sectors: usize,
+    },
+    #[error(
+        "pc {pc} (block {launch_index}, warp slot {warp_slot}) has incoherent atomic topology: sector transactions={sectors}, L2 requests={l2_requests}"
+    )]
+    AtomicRequestTopologyInvalid {
+        pc: u32,
+        launch_index: i64,
+        warp_slot: i32,
+        sectors: u16,
+        l2_requests: u16,
     },
     #[error("block {launch_index} has {warps} live warps, which does not fit in u32")]
     LiveWarpCountOutOfRange { launch_index: i64, warps: usize },
@@ -850,6 +956,28 @@ pub enum IssueError {
     L1Access(#[from] L1AccessError),
     #[error("L1 configuration is invalid: {0}")]
     L1Config(#[from] sim_mem::L1ConfigError),
+    #[error("memory-service candidate configuration is invalid: {0}")]
+    MemoryServiceCandidate(#[from] MemoryServiceCandidateError),
+    #[error("memory-admission candidate configuration is invalid: {0}")]
+    MemoryAdmissionCandidate(#[from] MemoryAdmissionCandidateError),
+    #[error("feedback admission queue on subcore {subcore} is full at t={time}")]
+    MemoryAdmissionFeedbackQueueFull { subcore: usize, time: u64 },
+    #[error(
+        "feedback admission candidate {candidate_id} declares operand-visibility latency {configured_cycles} cycles, but the active issue model uses {issue_model_cycles} cycles"
+    )]
+    MemoryAdmissionFeedbackLatencyMismatch {
+        candidate_id: u8,
+        configured_cycles: u32,
+        issue_model_cycles: u64,
+    },
+    #[error("feedback admission reservation is absent for warp {warp} instruction {instruction}")]
+    MemoryAdmissionFeedbackReservationMissing { warp: u32, instruction: u32 },
+    #[error(
+        "feedback admission reservation was already priced for warp {warp} instruction {instruction}"
+    )]
+    MemoryAdmissionFeedbackAlreadyPriced { warp: u32, instruction: u32 },
+    #[error("issue diagnostic update failed: {0}")]
+    ReadinessDiagnostic(#[from] ReadinessCounterError),
 }
 
 /// Memory-hierarchy effects deliberately outside the modeled event stream.
@@ -870,6 +998,12 @@ pub struct TailFlags {
 }
 
 impl TailFlags {
+    /// True only when replay has no known timing-bearing hierarchy effect
+    /// outside the modeled event stream.
+    pub const fn is_empty(self) -> bool {
+        !self.red_rmw && !self.dirty_writeback && !self.coherence && !self.ldgsts_dst_shared_timing
+    }
+
     pub const fn union(self, other: Self) -> Self {
         Self {
             red_rmw: self.red_rmw || other.red_rmw,
@@ -904,6 +1038,7 @@ impl TailFlags {
                 ldgsts_dst_shared_timing: false,
             },
             AccessKind::NonMemory
+            | AccessKind::PredicatedOffMemory
             | AccessKind::Shared { .. }
             | AccessKind::LocalLoad { .. }
             | AccessKind::GlobalEligible { .. }
@@ -943,8 +1078,2377 @@ impl MemoryOperation {
     }
 }
 
-/// Result of replaying one SM's blocks to completion.
+#[derive(Debug, thiserror::Error, Clone, Copy, PartialEq, Eq)]
+pub enum ReadinessCounterError {
+    #[error(
+        "readiness diagnostic counter {field} overflowed while adding {addend} to {accumulated}"
+    )]
+    Overflow {
+        field: &'static str,
+        accumulated: u64,
+        addend: u64,
+    },
+    #[error("memory-service candidate configuration differs at index {index}")]
+    MemoryServiceCandidateMismatch { index: usize },
+    #[error("memory-admission candidate configuration differs at index {index}")]
+    MemoryAdmissionCandidateMismatch { index: usize },
+}
+
+fn checked_readiness_add(
+    field: &'static str,
+    accumulated: u64,
+    addend: u64,
+) -> Result<u64, ReadinessCounterError> {
+    accumulated
+        .checked_add(addend)
+        .ok_or(ReadinessCounterError::Overflow {
+            field,
+            accumulated,
+            addend,
+        })
+}
+
+const fn is_zero_u64(value: &u64) -> bool {
+    *value == 0
+}
+
+const fn is_zero_u32(value: &u32) -> bool {
+    *value == 0
+}
+
+const fn is_zero_u16(value: &u16) -> bool {
+    *value == 0
+}
+
+const fn is_false(value: &bool) -> bool {
+    !*value
+}
+
+/// Exclusive and overlapping readiness delay by causal simulator relation.
+///
+/// `ReadinessDiagnostics::limiting_cycles` is exclusive: one deterministic
+/// cause owns each issued instruction's pre-ready delay. `constraint_exposure`
+/// retains every active relation and may overlap, so its fields must not be
+/// summed as elapsed kernel time. `eligible_not_selected` is the delay after a
+/// warp's complete issue frontier was ready but before the scheduler selected
+/// it.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
+pub struct ReadinessCauseCycles {
+    pub control_stall: u64,
+    pub dependence_counter_read: u64,
+    #[serde(skip_serializing_if = "is_zero_u64")]
+    pub dependence_counter_global_load_operand_read: u64,
+    #[serde(skip_serializing_if = "is_zero_u64")]
+    pub dependence_counter_global_store_operand_read: u64,
+    #[serde(skip_serializing_if = "is_zero_u64")]
+    pub dependence_counter_global_atomic_operand_read: u64,
+    #[serde(skip_serializing_if = "is_zero_u64")]
+    pub dependence_counter_global_reduction_operand_read: u64,
+    pub dependence_counter_non_memory_write: u64,
+    pub dependence_counter_shared_write: u64,
+    pub dependence_counter_l1tex: u64,
+    pub dependence_counter_unknown_origin: u64,
+    pub async_source: u64,
+    pub async_destination_local: u64,
+    pub async_destination_sm_service: u64,
+    pub cta_barrier_rendezvous: u64,
+    #[serde(skip_serializing_if = "is_zero_u64")]
+    pub pipeline_barrier: u64,
+    #[serde(skip_serializing_if = "is_zero_u64")]
+    pub pipeline_branch: u64,
+    pub pipeline_tensor: u64,
+    #[serde(skip_serializing_if = "is_zero_u64")]
+    pub memory_admission_queue: u64,
+    #[serde(skip_serializing_if = "is_zero_u64")]
+    pub memory_write_completion: u64,
+    pub eligible_not_selected: u64,
+}
+
+impl ReadinessCauseCycles {
+    fn add_checked(&mut self, addend: &Self) -> Result<(), ReadinessCounterError> {
+        let mut next = *self;
+        macro_rules! add {
+            ($field:ident) => {
+                next.$field = checked_readiness_add(
+                    concat!("readiness.", stringify!($field)),
+                    next.$field,
+                    addend.$field,
+                )?;
+            };
+        }
+        add!(control_stall);
+        add!(dependence_counter_read);
+        add!(dependence_counter_global_load_operand_read);
+        add!(dependence_counter_global_store_operand_read);
+        add!(dependence_counter_global_atomic_operand_read);
+        add!(dependence_counter_global_reduction_operand_read);
+        add!(dependence_counter_non_memory_write);
+        add!(dependence_counter_shared_write);
+        add!(dependence_counter_l1tex);
+        add!(dependence_counter_unknown_origin);
+        add!(async_source);
+        add!(async_destination_local);
+        add!(async_destination_sm_service);
+        add!(cta_barrier_rendezvous);
+        add!(pipeline_barrier);
+        add!(pipeline_branch);
+        add!(pipeline_tensor);
+        add!(memory_admission_queue);
+        add!(memory_write_completion);
+        add!(eligible_not_selected);
+        *self = next;
+        Ok(())
+    }
+}
+
+fn observe_readiness_constraint(
+    projected: &mut ReadinessDiagnostics,
+    base: u64,
+    until: u64,
+    cause: ReadinessCause,
+    ready_at: &mut u64,
+    limiting: &mut Option<ReadinessCause>,
+    tied: &mut u64,
+) -> Result<(), IssueError> {
+    if until > base {
+        projected
+            .constraint_exposure_cycles
+            .add_cause(cause, until - base)?;
+    }
+    if until > *ready_at {
+        *ready_at = until;
+        *limiting = (until > base).then_some(cause);
+        *tied = 0;
+    } else if until == *ready_at && until > base {
+        match *limiting {
+            Some(existing) if existing != cause => {
+                *tied = checked_u64_counter_add("tied readiness cause", *tied, 1)?;
+                *limiting = Some(existing.min(cause));
+            }
+            None => *limiting = Some(cause),
+            Some(_) => {}
+        }
+    }
+    Ok(())
+}
+
+fn dependency_origin(kind: AccessKind) -> DependencyOrigin {
+    match kind {
+        AccessKind::NonMemory | AccessKind::PredicatedOffMemory => DependencyOrigin::NonMemoryWrite,
+        AccessKind::Shared { .. } => DependencyOrigin::SharedWrite,
+        AccessKind::LocalLoad { .. }
+        | AccessKind::LocalStore { .. }
+        | AccessKind::GlobalEligible { .. }
+        | AccessKind::GlobalBypass { .. }
+        | AccessKind::GlobalAsyncCopy { .. }
+        | AccessKind::GlobalUntagged { .. }
+        | AccessKind::GlobalStore { .. }
+        | AccessKind::GlobalReduction { .. } => DependencyOrigin::L1Tex,
+    }
+}
+
+fn operand_read_dependency_origin(kind: AccessKind) -> DependencyOrigin {
+    match kind {
+        AccessKind::GlobalBypass {
+            token: CacheOpToken::Atom,
+            ..
+        } => DependencyOrigin::GlobalAtomicOperandRead,
+        AccessKind::GlobalBypass {
+            token: CacheOpToken::Ldgsts,
+            ..
+        } => DependencyOrigin::Read,
+        AccessKind::GlobalEligible { .. }
+        | AccessKind::GlobalUntagged { .. }
+        | AccessKind::GlobalBypass { .. } => DependencyOrigin::GlobalLoadOperandRead,
+        AccessKind::GlobalStore { .. } => DependencyOrigin::GlobalStoreOperandRead,
+        AccessKind::GlobalReduction { .. } => DependencyOrigin::GlobalReductionOperandRead,
+        AccessKind::NonMemory
+        | AccessKind::PredicatedOffMemory
+        | AccessKind::Shared { .. }
+        | AccessKind::LocalLoad { .. }
+        | AccessKind::LocalStore { .. }
+        | AccessKind::GlobalAsyncCopy { .. } => DependencyOrigin::Read,
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
+pub struct AsyncReadinessDiagnostics {
+    pub groups_committed: u64,
+    pub groups_waited: u64,
+    pub source_limited_groups: u64,
+    pub destination_local_limited_groups: u64,
+    pub destination_sm_service_limited_groups: u64,
+    pub source_cycles: u64,
+    pub destination_local_cycles: u64,
+    pub destination_sm_service_cycles: u64,
+    pub completion_hidden_before_wait_cycles: u64,
+}
+
+impl AsyncReadinessDiagnostics {
+    fn add_checked(&mut self, addend: &Self) -> Result<(), ReadinessCounterError> {
+        let mut next = *self;
+        macro_rules! add {
+            ($field:ident) => {
+                next.$field = checked_readiness_add(
+                    concat!("readiness.async_groups.", stringify!($field)),
+                    next.$field,
+                    addend.$field,
+                )?;
+            };
+        }
+        add!(groups_committed);
+        add!(groups_waited);
+        add!(source_limited_groups);
+        add!(destination_local_limited_groups);
+        add!(destination_sm_service_limited_groups);
+        add!(source_cycles);
+        add!(destination_local_cycles);
+        add!(destination_sm_service_cycles);
+        add!(completion_hidden_before_wait_cycles);
+        *self = next;
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
+pub struct CtaBarrierDiagnostics {
+    pub generations: u64,
+    pub total_arrival_spread_cycles: u64,
+    pub max_arrival_spread_cycles: u64,
+    pub total_rendezvous_warp_cycles: u64,
+    pub releases_after_participant_retirement: u64,
+}
+
+impl CtaBarrierDiagnostics {
+    fn add_checked(&mut self, addend: &Self) -> Result<(), ReadinessCounterError> {
+        let mut next = *self;
+        macro_rules! add {
+            ($field:ident) => {
+                next.$field = checked_readiness_add(
+                    concat!("readiness.cta_barriers.", stringify!($field)),
+                    next.$field,
+                    addend.$field,
+                )?;
+            };
+        }
+        add!(generations);
+        add!(total_arrival_spread_cycles);
+        next.max_arrival_spread_cycles = next
+            .max_arrival_spread_cycles
+            .max(addend.max_arrival_spread_cycles);
+        add!(total_rendezvous_warp_cycles);
+        add!(releases_after_participant_retirement);
+        *self = next;
+        Ok(())
+    }
+}
+
+/// Bounded schema-2 diagnostics for the SM-shared CTA-barrier issue server.
+/// Timestamp sums and issue spans preserve first/last-generation information
+/// without retaining an instruction- or cycle-sized event log.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
+pub struct BarrierPipelineDiagnostics {
+    pub instructions_issued: u64,
+    pub issue_server_busy_cycles: u64,
+    pub generations_completed: u64,
+    pub generation_rearm_events: u64,
+    pub first_issue_timestamp_sum: u64,
+    pub last_issue_timestamp_sum: u64,
+    pub total_generation_issue_span_cycles: u64,
+    pub max_generation_issue_span_cycles: u64,
+    pub first_arrival_timestamp_sum: u64,
+    pub last_arrival_timestamp_sum: u64,
+    pub total_generation_arrival_span_cycles: u64,
+    pub max_generation_arrival_span_cycles: u64,
+}
+
+impl BarrierPipelineDiagnostics {
+    pub const fn is_empty(&self) -> bool {
+        self.instructions_issued == 0
+            && self.issue_server_busy_cycles == 0
+            && self.generations_completed == 0
+            && self.generation_rearm_events == 0
+            && self.first_issue_timestamp_sum == 0
+            && self.last_issue_timestamp_sum == 0
+            && self.total_generation_issue_span_cycles == 0
+            && self.max_generation_issue_span_cycles == 0
+            && self.first_arrival_timestamp_sum == 0
+            && self.last_arrival_timestamp_sum == 0
+            && self.total_generation_arrival_span_cycles == 0
+            && self.max_generation_arrival_span_cycles == 0
+    }
+
+    fn add_checked(&mut self, addend: &Self) -> Result<(), ReadinessCounterError> {
+        let mut next = *self;
+        macro_rules! add {
+            ($field:ident) => {
+                next.$field = checked_readiness_add(
+                    concat!("readiness.barrier_pipeline.", stringify!($field)),
+                    next.$field,
+                    addend.$field,
+                )?;
+            };
+        }
+        add!(instructions_issued);
+        add!(issue_server_busy_cycles);
+        add!(generations_completed);
+        add!(generation_rearm_events);
+        add!(first_issue_timestamp_sum);
+        add!(last_issue_timestamp_sum);
+        add!(total_generation_issue_span_cycles);
+        next.max_generation_issue_span_cycles = next
+            .max_generation_issue_span_cycles
+            .max(addend.max_generation_issue_span_cycles);
+        add!(first_arrival_timestamp_sum);
+        add!(last_arrival_timestamp_sum);
+        add!(total_generation_arrival_span_cycles);
+        next.max_generation_arrival_span_cycles = next
+            .max_generation_arrival_span_cycles
+            .max(addend.max_generation_arrival_span_cycles);
+        *self = next;
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
+pub struct ControlPipelineDiagnostics {
+    pub branch_instructions_issued: u64,
+    pub branch_resolution_cycles: u64,
+}
+
+impl ControlPipelineDiagnostics {
+    pub const fn is_empty(&self) -> bool {
+        self.branch_instructions_issued == 0 && self.branch_resolution_cycles == 0
+    }
+
+    fn add_checked(&mut self, addend: &Self) -> Result<(), ReadinessCounterError> {
+        let next = Self {
+            branch_instructions_issued: checked_readiness_add(
+                "readiness.control_pipeline.branch_instructions_issued",
+                self.branch_instructions_issued,
+                addend.branch_instructions_issued,
+            )?,
+            branch_resolution_cycles: checked_readiness_add(
+                "readiness.control_pipeline.branch_resolution_cycles",
+                self.branch_resolution_cycles,
+                addend.branch_resolution_cycles,
+            )?,
+        };
+        *self = next;
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
+pub struct ResultWritebackDiagnostics {
+    pub fixed_over_l1tex_collisions: u64,
+    pub l1tex_deferral_cycles: u64,
+}
+
+/// Issue-time interval carried by kernels that bracket a measured region with
+/// `CS2R ..., SR_CLOCKLO`. This is a simulator diagnostic, not a hardware clock
+/// emulation: it reports scheduler issue timestamps in the same first/last
+/// boundary shape used by in-kernel CLOCK microbenchmarks.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
+pub struct ClockIssueDiagnostics {
+    pub reads_issued: u64,
+    pub warps_with_interval: u64,
+    pub maximum_first_to_last_issue_cycles: u64,
+    #[serde(skip_serializing_if = "is_zero_u64")]
+    pub warps_with_three_reads: u64,
+    #[serde(skip_serializing_if = "is_zero_u64")]
+    pub maximum_first_to_second_issue_cycles: u64,
+    #[serde(skip_serializing_if = "is_zero_u64")]
+    pub maximum_second_to_third_issue_cycles: u64,
+}
+
+/// Trace-derived scalar-global memory work presented by issued warp
+/// instructions. Ideal wavefronts use the exact sm_86 shape observed by the
+/// memory-retirement campaign: ordinary sectors pack four per wavefront, while
+/// ATOM/RED additionally preserve same-sector alias multiplicity. Unique 128 B
+/// lines and exact atomic L2 requests remain separate work dimensions. Hardware may
+/// emit extra output wavefronts on internal replay/conflict; those are not
+/// inferable from lane addresses. This diagnostic activates no timing service.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
+pub struct GlobalMemoryIssueDiagnostics {
+    pub load_instructions: u64,
+    pub store_instructions: u64,
+    pub atomic_instructions: u64,
+    pub reduction_instructions: u64,
+    #[serde(skip_serializing_if = "is_zero_u64")]
+    pub load_operand_read_barrier_instructions: u64,
+    #[serde(skip_serializing_if = "is_zero_u64")]
+    pub store_operand_read_barrier_instructions: u64,
+    #[serde(skip_serializing_if = "is_zero_u64")]
+    pub atomic_operand_read_barrier_instructions: u64,
+    #[serde(skip_serializing_if = "is_zero_u64")]
+    pub reduction_operand_read_barrier_instructions: u64,
+    pub load_sectors: u64,
+    pub store_sectors: u64,
+    pub atomic_sectors: u64,
+    pub reduction_sectors: u64,
+    pub load_unique_lines: u64,
+    pub store_unique_lines: u64,
+    pub atomic_unique_lines: u64,
+    pub reduction_unique_lines: u64,
+    pub atomic_l2_requests: u64,
+    pub reduction_l2_requests: u64,
+    pub load_ideal_wavefronts: u64,
+    pub store_ideal_wavefronts: u64,
+    pub atomic_ideal_wavefronts: u64,
+    pub reduction_ideal_wavefronts: u64,
+    pub first_issue_timestamp_sum: u64,
+    pub last_issue_timestamp_sum: u64,
+    pub total_issue_span_cycles: u64,
+    pub max_issue_span_cycles: u64,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum GlobalMemoryIssueClass {
+    Load,
+    Store,
+    Atomic,
+    Reduction,
+}
+
+fn maximum_sector_multiplicity(sectors: &[i64]) -> u64 {
+    sectors
+        .iter()
+        .enumerate()
+        .map(|(index, sector)| {
+            1 + sectors[index + 1..]
+                .iter()
+                .filter(|candidate| *candidate == sector)
+                .count() as u64
+        })
+        .max()
+        .unwrap_or(0)
+}
+
+fn unique_128b_lines(sectors: &[i64]) -> u64 {
+    sectors
+        .iter()
+        .enumerate()
+        .filter(|(index, sector)| {
+            let line = sector.div_euclid(4);
+            !sectors[..*index]
+                .iter()
+                .any(|prior| prior.div_euclid(4) == line)
+        })
+        .count() as u64
+}
+
+fn projected_global_memory_issue(
+    kind: AccessKind,
+    sector_arena: &[i64],
+) -> Option<(GlobalMemoryIssueClass, u64, u64, u64, u64)> {
+    let atomic_l2_requests = kind.atomic_l2_requests().map(u64::from).unwrap_or(0);
+    let (class, off, len, alias_aware) = match kind {
+        AccessKind::GlobalEligible { off, len, .. } | AccessKind::GlobalUntagged { off, len } => {
+            (GlobalMemoryIssueClass::Load, off, len, false)
+        }
+        AccessKind::GlobalBypass {
+            off,
+            len,
+            token: CacheOpToken::Atom,
+            ..
+        } => (GlobalMemoryIssueClass::Atomic, off, len, true),
+        AccessKind::GlobalBypass {
+            token: CacheOpToken::Ldgsts,
+            ..
+        }
+        | AccessKind::GlobalAsyncCopy { .. } => {
+            // LDGSTS uses its own exact source/destination work domains.
+            return None;
+        }
+        AccessKind::GlobalBypass { off, len, .. } => {
+            (GlobalMemoryIssueClass::Load, off, len, false)
+        }
+        AccessKind::GlobalStore { off, len } => (GlobalMemoryIssueClass::Store, off, len, false),
+        AccessKind::GlobalReduction { off, len, .. } => {
+            (GlobalMemoryIssueClass::Reduction, off, len, true)
+        }
+        AccessKind::NonMemory
+        | AccessKind::PredicatedOffMemory
+        | AccessKind::Shared { .. }
+        | AccessKind::LocalLoad { .. }
+        | AccessKind::LocalStore { .. } => return None,
+    };
+    if len == 0 {
+        return None;
+    }
+    let sectors = &sector_arena[off..off + usize::from(len)];
+    let sector_count = u64::from(len);
+    let packed = sector_count.div_ceil(4);
+    let wavefronts = if alias_aware {
+        packed.max(maximum_sector_multiplicity(sectors))
+    } else {
+        packed
+    };
+    Some((
+        class,
+        sector_count,
+        wavefronts,
+        unique_128b_lines(sectors),
+        atomic_l2_requests,
+    ))
+}
+
+impl GlobalMemoryIssueDiagnostics {
+    const fn has_memory_work(&self) -> bool {
+        self.load_instructions != 0
+            || self.store_instructions != 0
+            || self.atomic_instructions != 0
+            || self.reduction_instructions != 0
+    }
+
+    pub const fn is_empty(&self) -> bool {
+        !self.has_memory_work() && !self.has_operand_read_barriers()
+    }
+
+    pub const fn has_operand_read_barriers(&self) -> bool {
+        self.load_operand_read_barrier_instructions != 0
+            || self.store_operand_read_barrier_instructions != 0
+            || self.atomic_operand_read_barrier_instructions != 0
+            || self.reduction_operand_read_barrier_instructions != 0
+    }
+
+    fn observe(
+        &mut self,
+        class: GlobalMemoryIssueClass,
+        sectors: u64,
+        wavefronts: u64,
+        unique_lines: u64,
+        atomic_l2_requests: u64,
+        operand_read_barrier: bool,
+        now: u64,
+    ) -> Result<(), ReadinessCounterError> {
+        let was_empty = !self.has_memory_work();
+        let mut next = *self;
+        macro_rules! add_class {
+            ($prefix:literal, $instructions:ident, $sector_field:ident, $wavefront_field:ident) => {{
+                next.$instructions = checked_readiness_add(
+                    concat!("readiness.global_memory_issue.", $prefix, "_instructions"),
+                    next.$instructions,
+                    1,
+                )?;
+                next.$sector_field = checked_readiness_add(
+                    concat!("readiness.global_memory_issue.", $prefix, "_sectors"),
+                    next.$sector_field,
+                    sectors,
+                )?;
+                next.$wavefront_field = checked_readiness_add(
+                    concat!(
+                        "readiness.global_memory_issue.",
+                        $prefix,
+                        "_ideal_wavefronts"
+                    ),
+                    next.$wavefront_field,
+                    wavefronts,
+                )?;
+            }};
+        }
+        match class {
+            GlobalMemoryIssueClass::Load => {
+                add_class!(
+                    "load",
+                    load_instructions,
+                    load_sectors,
+                    load_ideal_wavefronts
+                )
+            }
+            GlobalMemoryIssueClass::Store => add_class!(
+                "store",
+                store_instructions,
+                store_sectors,
+                store_ideal_wavefronts
+            ),
+            GlobalMemoryIssueClass::Atomic => add_class!(
+                "atomic",
+                atomic_instructions,
+                atomic_sectors,
+                atomic_ideal_wavefronts
+            ),
+            GlobalMemoryIssueClass::Reduction => add_class!(
+                "reduction",
+                reduction_instructions,
+                reduction_sectors,
+                reduction_ideal_wavefronts
+            ),
+        }
+        if operand_read_barrier {
+            let (field, counter) = match class {
+                GlobalMemoryIssueClass::Load => (
+                    "readiness.global_memory_issue.load_operand_read_barrier_instructions",
+                    &mut next.load_operand_read_barrier_instructions,
+                ),
+                GlobalMemoryIssueClass::Store => (
+                    "readiness.global_memory_issue.store_operand_read_barrier_instructions",
+                    &mut next.store_operand_read_barrier_instructions,
+                ),
+                GlobalMemoryIssueClass::Atomic => (
+                    "readiness.global_memory_issue.atomic_operand_read_barrier_instructions",
+                    &mut next.atomic_operand_read_barrier_instructions,
+                ),
+                GlobalMemoryIssueClass::Reduction => (
+                    "readiness.global_memory_issue.reduction_operand_read_barrier_instructions",
+                    &mut next.reduction_operand_read_barrier_instructions,
+                ),
+            };
+            *counter = checked_readiness_add(field, *counter, 1)?;
+        }
+        match class {
+            GlobalMemoryIssueClass::Load => {
+                next.load_unique_lines = checked_readiness_add(
+                    "readiness.global_memory_issue.load_unique_lines",
+                    next.load_unique_lines,
+                    unique_lines,
+                )?;
+            }
+            GlobalMemoryIssueClass::Store => {
+                next.store_unique_lines = checked_readiness_add(
+                    "readiness.global_memory_issue.store_unique_lines",
+                    next.store_unique_lines,
+                    unique_lines,
+                )?;
+            }
+            GlobalMemoryIssueClass::Atomic => {
+                next.atomic_unique_lines = checked_readiness_add(
+                    "readiness.global_memory_issue.atomic_unique_lines",
+                    next.atomic_unique_lines,
+                    unique_lines,
+                )?;
+                next.atomic_l2_requests = checked_readiness_add(
+                    "readiness.global_memory_issue.atomic_l2_requests",
+                    next.atomic_l2_requests,
+                    atomic_l2_requests,
+                )?;
+            }
+            GlobalMemoryIssueClass::Reduction => {
+                next.reduction_unique_lines = checked_readiness_add(
+                    "readiness.global_memory_issue.reduction_unique_lines",
+                    next.reduction_unique_lines,
+                    unique_lines,
+                )?;
+                next.reduction_l2_requests = checked_readiness_add(
+                    "readiness.global_memory_issue.reduction_l2_requests",
+                    next.reduction_l2_requests,
+                    atomic_l2_requests,
+                )?;
+            }
+        }
+        if was_empty {
+            next.first_issue_timestamp_sum = now;
+        }
+        next.last_issue_timestamp_sum = now;
+        let span = now.saturating_sub(next.first_issue_timestamp_sum);
+        next.total_issue_span_cycles = span;
+        next.max_issue_span_cycles = span;
+        *self = next;
+        Ok(())
+    }
+
+    fn add_checked(&mut self, addend: &Self) -> Result<(), ReadinessCounterError> {
+        let mut next = *self;
+        macro_rules! add {
+            ($field:ident) => {
+                next.$field = checked_readiness_add(
+                    concat!("readiness.global_memory_issue.", stringify!($field)),
+                    next.$field,
+                    addend.$field,
+                )?;
+            };
+        }
+        add!(load_instructions);
+        add!(store_instructions);
+        add!(atomic_instructions);
+        add!(reduction_instructions);
+        add!(load_operand_read_barrier_instructions);
+        add!(store_operand_read_barrier_instructions);
+        add!(atomic_operand_read_barrier_instructions);
+        add!(reduction_operand_read_barrier_instructions);
+        add!(load_sectors);
+        add!(store_sectors);
+        add!(atomic_sectors);
+        add!(reduction_sectors);
+        add!(load_unique_lines);
+        add!(store_unique_lines);
+        add!(atomic_unique_lines);
+        add!(reduction_unique_lines);
+        add!(atomic_l2_requests);
+        add!(reduction_l2_requests);
+        add!(load_ideal_wavefronts);
+        add!(store_ideal_wavefronts);
+        add!(atomic_ideal_wavefronts);
+        add!(reduction_ideal_wavefronts);
+        add!(first_issue_timestamp_sum);
+        add!(last_issue_timestamp_sum);
+        add!(total_issue_span_cycles);
+        next.max_issue_span_cycles = next.max_issue_span_cycles.max(addend.max_issue_span_cycles);
+        *self = next;
+        Ok(())
+    }
+}
+
+pub const MAX_MEMORY_SERVICE_CANDIDATES: usize = 16;
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MemoryServiceCandidateScope {
+    #[default]
+    Sm,
+    Smsp,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MemoryServiceCandidateOperation {
+    #[default]
+    Load,
+    Store,
+    Atomic,
+    Reduction,
+}
+
+/// One opt-in streaming service hypothesis. A `(units, cycles)` pair of
+/// `(0, 0)` disables that work dimension; otherwise both terms must be
+/// positive. Service work is additive and rounded up per issued warp
+/// instruction. `completion_latency_cycles` extends only the observed terminal
+/// timestamp, not the server's next-accept horizon.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MemoryServiceCandidate {
+    pub candidate_id: u8,
+    pub scope: MemoryServiceCandidateScope,
+    pub operation: MemoryServiceCandidateOperation,
+    pub ideal_wavefront_units: u32,
+    pub ideal_wavefront_cycles: u32,
+    pub unique_line_units: u32,
+    pub unique_line_cycles: u32,
+    pub completion_latency_cycles: u32,
+}
+
+impl MemoryServiceCandidate {
+    pub fn validate(self) -> Result<(), MemoryServiceCandidateError> {
+        let ideal_disabled = self.ideal_wavefront_units == 0 && self.ideal_wavefront_cycles == 0;
+        let line_disabled = self.unique_line_units == 0 && self.unique_line_cycles == 0;
+        if (self.ideal_wavefront_units == 0) != (self.ideal_wavefront_cycles == 0) {
+            return Err(MemoryServiceCandidateError::InvalidRate {
+                candidate_id: self.candidate_id,
+                dimension: "ideal_wavefront",
+                units: self.ideal_wavefront_units,
+                cycles: self.ideal_wavefront_cycles,
+            });
+        }
+        if (self.unique_line_units == 0) != (self.unique_line_cycles == 0) {
+            return Err(MemoryServiceCandidateError::InvalidRate {
+                candidate_id: self.candidate_id,
+                dimension: "unique_line",
+                units: self.unique_line_units,
+                cycles: self.unique_line_cycles,
+            });
+        }
+        if ideal_disabled && line_disabled {
+            return Err(MemoryServiceCandidateError::NoServiceWork {
+                candidate_id: self.candidate_id,
+            });
+        }
+        Ok(())
+    }
+
+    const fn matches(self, class: GlobalMemoryIssueClass) -> bool {
+        matches!(
+            (self.operation, class),
+            (
+                MemoryServiceCandidateOperation::Load,
+                GlobalMemoryIssueClass::Load
+            ) | (
+                MemoryServiceCandidateOperation::Store,
+                GlobalMemoryIssueClass::Store
+            ) | (
+                MemoryServiceCandidateOperation::Atomic,
+                GlobalMemoryIssueClass::Atomic
+            ) | (
+                MemoryServiceCandidateOperation::Reduction,
+                GlobalMemoryIssueClass::Reduction
+            )
+        )
+    }
+}
+
+#[derive(Debug, thiserror::Error, Clone, Copy, PartialEq, Eq)]
+pub enum MemoryServiceCandidateError {
+    #[error("candidate set has {count} entries; maximum is {maximum}")]
+    TooMany { count: usize, maximum: usize },
+    #[error("candidate id {candidate_id} is duplicated")]
+    DuplicateId { candidate_id: u8 },
+    #[error(
+        "candidate {candidate_id} {dimension} rate must have both terms zero or both positive (units={units}, cycles={cycles})"
+    )]
+    InvalidRate {
+        candidate_id: u8,
+        dimension: &'static str,
+        units: u32,
+        cycles: u32,
+    },
+    #[error("candidate {candidate_id} enables no service-work dimension")]
+    NoServiceWork { candidate_id: u8 },
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
+pub struct MemoryServiceCandidateResult {
+    pub candidate: MemoryServiceCandidate,
+    pub instructions_observed: u64,
+    pub ideal_wavefronts_observed: u64,
+    pub unique_lines_observed: u64,
+    pub busy_cycles: u64,
+    pub queue_delay_cycles: u64,
+    pub terminal_completion_time: u64,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct MemoryServiceCandidateDiagnostics {
+    count: u8,
+    entries: Option<Box<[MemoryServiceCandidateResult; MAX_MEMORY_SERVICE_CANDIDATES]>>,
+}
+
+impl Serialize for MemoryServiceCandidateDiagnostics {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        self.entries()[..].serialize(serializer)
+    }
+}
+
+impl MemoryServiceCandidateDiagnostics {
+    pub const fn is_empty(&self) -> bool {
+        self.count == 0
+    }
+
+    pub fn entries(&self) -> &[MemoryServiceCandidateResult] {
+        self.entries
+            .as_deref()
+            .map_or(&[], |entries| &entries[..usize::from(self.count)])
+    }
+
+    fn add_checked(&mut self, addend: &Self) -> Result<(), ReadinessCounterError> {
+        if self.is_empty() {
+            *self = addend.clone();
+            return Ok(());
+        }
+        if addend.is_empty() {
+            return Ok(());
+        }
+        if self.count != addend.count {
+            return Err(ReadinessCounterError::MemoryServiceCandidateMismatch { index: 0 });
+        }
+        let mut next = self.clone();
+        for index in 0..usize::from(self.count) {
+            let current = self.entries()[index];
+            let other = addend.entries()[index];
+            if current.candidate != other.candidate {
+                return Err(ReadinessCounterError::MemoryServiceCandidateMismatch { index });
+            }
+            let result = &mut next
+                .entries
+                .as_deref_mut()
+                .expect("nonempty candidate diagnostics own entries")[index];
+            macro_rules! add {
+                ($field:ident) => {
+                    result.$field = checked_readiness_add(
+                        concat!("readiness.memory_service_candidates.", stringify!($field)),
+                        result.$field,
+                        other.$field,
+                    )?;
+                };
+            }
+            add!(instructions_observed);
+            add!(ideal_wavefronts_observed);
+            add!(unique_lines_observed);
+            add!(busy_cycles);
+            add!(queue_delay_cycles);
+            result.terminal_completion_time = result
+                .terminal_completion_time
+                .max(other.terminal_completion_time);
+        }
+        *self = next;
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct MemoryServiceCandidateRuntime {
+    result: MemoryServiceCandidateResult,
+    sm_ready: u64,
+    smsp_ready: [u64; SUB_CORES],
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+struct MemoryServiceCandidateState {
+    count: u8,
+    entries: Option<Box<[MemoryServiceCandidateRuntime; MAX_MEMORY_SERVICE_CANDIDATES]>>,
+}
+
+fn candidate_rate_cycles(work: u64, units: u32, cycles: u32) -> Result<u64, IssueError> {
+    if units == 0 {
+        return Ok(0);
+    }
+    work.checked_mul(u64::from(cycles))
+        .ok_or(IssueError::TimeMultiplicationOverflow {
+            operation: "memory-service candidate work",
+            lhs: work,
+            rhs: u64::from(cycles),
+        })
+        .map(|scaled| scaled.div_ceil(u64::from(units)))
+}
+
+/// Price a fluid rational rate, optionally in fixed-width service quanta.
+/// Width zero preserves the schema-7/9/10 legacy formula. A positive width
+/// charges a complete service quantum for a partially occupied final batch,
+/// making service width independently observable from asymptotic rate.
+fn candidate_rate_cycles_with_width(
+    work: u64,
+    units: u32,
+    cycles: u32,
+    width: u32,
+) -> Result<u64, IssueError> {
+    if width == 0 {
+        return candidate_rate_cycles(work, units, cycles);
+    }
+    let width = u64::from(width);
+    let rounds = work.div_ceil(width);
+    let round_cycles = candidate_rate_cycles(width, units, cycles)?;
+    rounds
+        .checked_mul(round_cycles)
+        .ok_or(IssueError::TimeMultiplicationOverflow {
+            operation: "memory-service candidate fixed-width rounds",
+            lhs: rounds,
+            rhs: round_cycles,
+        })
+}
+
+impl MemoryServiceCandidateState {
+    const fn is_empty(&self) -> bool {
+        self.count == 0
+    }
+
+    fn checked(candidates: &[MemoryServiceCandidate]) -> Result<Self, MemoryServiceCandidateError> {
+        if candidates.len() > MAX_MEMORY_SERVICE_CANDIDATES {
+            return Err(MemoryServiceCandidateError::TooMany {
+                count: candidates.len(),
+                maximum: MAX_MEMORY_SERVICE_CANDIDATES,
+            });
+        }
+        let mut state = Self::default();
+        if !candidates.is_empty() {
+            state.entries = Some(Box::new(
+                [MemoryServiceCandidateRuntime::default(); MAX_MEMORY_SERVICE_CANDIDATES],
+            ));
+        }
+        for (index, &candidate) in candidates.iter().enumerate() {
+            candidate.validate()?;
+            if candidates[..index]
+                .iter()
+                .any(|prior| prior.candidate_id == candidate.candidate_id)
+            {
+                return Err(MemoryServiceCandidateError::DuplicateId {
+                    candidate_id: candidate.candidate_id,
+                });
+            }
+            state
+                .entries
+                .as_deref_mut()
+                .expect("nonempty candidate set owns runtime entries")[index]
+                .result
+                .candidate = candidate;
+        }
+        state.count = candidates.len() as u8;
+        Ok(state)
+    }
+
+    fn diagnostics(&self) -> MemoryServiceCandidateDiagnostics {
+        if self.is_empty() {
+            return MemoryServiceCandidateDiagnostics::default();
+        }
+        let mut entries =
+            Box::new([MemoryServiceCandidateResult::default(); MAX_MEMORY_SERVICE_CANDIDATES]);
+        let runtime_entries = self
+            .entries
+            .as_deref()
+            .expect("nonempty candidate state owns runtime entries");
+        for index in 0..usize::from(self.count) {
+            entries[index] = runtime_entries[index].result;
+        }
+        MemoryServiceCandidateDiagnostics {
+            count: self.count,
+            entries: Some(entries),
+        }
+    }
+
+    fn observe(
+        &mut self,
+        subcore: usize,
+        class: GlobalMemoryIssueClass,
+        ideal_wavefronts: u64,
+        unique_lines: u64,
+        now: u64,
+    ) -> Result<(), IssueError> {
+        let entries = self
+            .entries
+            .as_deref_mut()
+            .expect("observe is called only for a nonempty candidate state");
+        for index in 0..usize::from(self.count) {
+            let runtime = &mut entries[index];
+            let candidate = runtime.result.candidate;
+            if !candidate.matches(class) {
+                continue;
+            }
+            let ideal_cycles = candidate_rate_cycles(
+                ideal_wavefronts,
+                candidate.ideal_wavefront_units,
+                candidate.ideal_wavefront_cycles,
+            )?;
+            let line_cycles = candidate_rate_cycles(
+                unique_lines,
+                candidate.unique_line_units,
+                candidate.unique_line_cycles,
+            )?;
+            let busy = checked_cycle_add(
+                "memory-service candidate additive work",
+                ideal_cycles,
+                line_cycles,
+            )?;
+            let ready = match candidate.scope {
+                MemoryServiceCandidateScope::Sm => runtime.sm_ready,
+                MemoryServiceCandidateScope::Smsp => runtime.smsp_ready[subcore],
+            };
+            let start = now.max(ready);
+            let done = checked_cycle_add("memory-service candidate completion", start, busy)?;
+            match candidate.scope {
+                MemoryServiceCandidateScope::Sm => runtime.sm_ready = done,
+                MemoryServiceCandidateScope::Smsp => runtime.smsp_ready[subcore] = done,
+            }
+            let completion = checked_cycle_add(
+                "memory-service candidate latency",
+                done,
+                u64::from(candidate.completion_latency_cycles),
+            )?;
+            let result = &mut runtime.result;
+            result.instructions_observed = checked_u64_counter_add(
+                "memory-service candidate instructions",
+                result.instructions_observed,
+                1,
+            )?;
+            result.ideal_wavefronts_observed = checked_u64_counter_add(
+                "memory-service candidate ideal wavefronts",
+                result.ideal_wavefronts_observed,
+                ideal_wavefronts,
+            )?;
+            result.unique_lines_observed = checked_u64_counter_add(
+                "memory-service candidate unique lines",
+                result.unique_lines_observed,
+                unique_lines,
+            )?;
+            result.busy_cycles = checked_u64_counter_add(
+                "memory-service candidate busy cycles",
+                result.busy_cycles,
+                busy,
+            )?;
+            result.queue_delay_cycles = checked_u64_counter_add(
+                "memory-service candidate queue delay",
+                result.queue_delay_cycles,
+                start - now,
+            )?;
+            result.terminal_completion_time = result.terminal_completion_time.max(completion);
+        }
+        Ok(())
+    }
+}
+
+pub(crate) fn validate_memory_service_candidates(
+    candidates: &[MemoryServiceCandidate],
+) -> Result<(), MemoryServiceCandidateError> {
+    MemoryServiceCandidateState::checked(candidates).map(|_| ())
+}
+
+pub const MAX_MEMORY_ADMISSION_CANDIDATES: usize = 16;
+pub const MAX_MEMORY_ADMISSION_QUEUE_CAPACITY: u16 = 256;
+pub const MAX_MEMORY_ADMISSION_SERVICE_WIDTH_SECTORS: u32 = 256;
+pub const MAX_WRITE_COMPLETION_PARALLEL_LANES: u16 = 32;
+
+/// One observational finite input-queue hypothesis. Capacity counts waiting
+/// warp instructions; the active instruction resides in the separate shared
+/// downstream server. A queue slot is released at service start, and a same-
+/// cycle dequeue may admit a new instruction. Service follows observed per-SM
+/// issue order. Miss work may optionally use fixed-width service quanta; zero
+/// width retains the legacy fluid rational rate. The observational evaluator
+/// never changes scheduler or cache ordering.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MemoryAdmissionCandidate {
+    pub candidate_id: u8,
+    pub scope: MemoryServiceCandidateScope,
+    pub operation: MemoryServiceCandidateOperation,
+    pub queue_capacity_instructions: u16,
+    pub admission_latency_cycles: u32,
+    pub l2_hit_sector_units: u32,
+    pub l2_hit_sector_cycles: u32,
+    pub l2_miss_sector_units: u32,
+    pub l2_miss_sector_cycles: u32,
+    /// Zero retains fluid rational service. A positive value batches L2-miss
+    /// sectors into fixed-width quanta and charges a full final quantum.
+    #[serde(default, skip_serializing_if = "is_zero_u32")]
+    pub l2_miss_service_width_sectors: u32,
+    /// Opt-in completion lane: the issuing warp's `MEMBAR.SC.GPU` waits for
+    /// its own latest matching write-service completion. Queue admission still
+    /// releases at service start.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub membar_waits_for_service_completion: bool,
+    /// Non-occupying visibility/RMW tail after service done. It changes only
+    /// the per-warp MEMBAR completion frontier, never admission service.
+    #[serde(default, skip_serializing_if = "is_zero_u32")]
+    pub write_completion_latency_cycles: u32,
+    /// Independent post-service RED/STORE completion work. Both dimensions are
+    /// additive; zero disables a dimension.
+    #[serde(default, skip_serializing_if = "is_zero_u32")]
+    pub write_completion_request_cycles: u32,
+    #[serde(default, skip_serializing_if = "is_zero_u32")]
+    pub write_completion_region_cycles: u32,
+    #[serde(default, skip_serializing_if = "is_zero_u16")]
+    pub write_completion_parallel_lanes: u16,
+}
+
+impl MemoryAdmissionCandidate {
+    pub fn validate(self) -> Result<(), MemoryAdmissionCandidateError> {
+        if !matches!(
+            self.operation,
+            MemoryServiceCandidateOperation::Store | MemoryServiceCandidateOperation::Reduction
+        ) {
+            return Err(MemoryAdmissionCandidateError::UnsupportedOperation {
+                candidate_id: self.candidate_id,
+                operation: self.operation,
+            });
+        }
+        if self.queue_capacity_instructions == 0
+            || self.queue_capacity_instructions > MAX_MEMORY_ADMISSION_QUEUE_CAPACITY
+        {
+            return Err(MemoryAdmissionCandidateError::CapacityOutOfRange {
+                candidate_id: self.candidate_id,
+                capacity: self.queue_capacity_instructions,
+                maximum: MAX_MEMORY_ADMISSION_QUEUE_CAPACITY,
+            });
+        }
+        if self.l2_miss_service_width_sectors > MAX_MEMORY_ADMISSION_SERVICE_WIDTH_SECTORS {
+            return Err(MemoryAdmissionCandidateError::ServiceWidthOutOfRange {
+                candidate_id: self.candidate_id,
+                width: self.l2_miss_service_width_sectors,
+                maximum: MAX_MEMORY_ADMISSION_SERVICE_WIDTH_SECTORS,
+            });
+        }
+        if self.write_completion_latency_cycles != 0 && !self.membar_waits_for_service_completion {
+            return Err(
+                MemoryAdmissionCandidateError::CompletionLatencyWithoutMembar {
+                    candidate_id: self.candidate_id,
+                    latency: self.write_completion_latency_cycles,
+                },
+            );
+        }
+        for (dimension, units, cycles) in [
+            (
+                "l2_hit_sector",
+                self.l2_hit_sector_units,
+                self.l2_hit_sector_cycles,
+            ),
+            (
+                "l2_miss_sector",
+                self.l2_miss_sector_units,
+                self.l2_miss_sector_cycles,
+            ),
+        ] {
+            if units == 0 || cycles == 0 {
+                return Err(MemoryAdmissionCandidateError::InvalidRate {
+                    candidate_id: self.candidate_id,
+                    dimension,
+                    units,
+                    cycles,
+                });
+            }
+        }
+        let miss_scaled = u64::from(self.l2_miss_sector_cycles)
+            .checked_mul(u64::from(self.l2_hit_sector_units))
+            .expect("u32 cross product fits u64");
+        let hit_scaled = u64::from(self.l2_hit_sector_cycles)
+            .checked_mul(u64::from(self.l2_miss_sector_units))
+            .expect("u32 cross product fits u64");
+        if miss_scaled < hit_scaled {
+            return Err(MemoryAdmissionCandidateError::MissRateFasterThanHit {
+                candidate_id: self.candidate_id,
+            });
+        }
+        let completion_work =
+            self.write_completion_request_cycles != 0 || self.write_completion_region_cycles != 0;
+        if completion_work && !self.membar_waits_for_service_completion {
+            return Err(MemoryAdmissionCandidateError::CompletionWorkWithoutMembar {
+                candidate_id: self.candidate_id,
+            });
+        }
+        if completion_work
+            && (self.write_completion_parallel_lanes == 0
+                || self.write_completion_parallel_lanes > MAX_WRITE_COMPLETION_PARALLEL_LANES)
+        {
+            return Err(MemoryAdmissionCandidateError::CompletionLanesOutOfRange {
+                candidate_id: self.candidate_id,
+                lanes: self.write_completion_parallel_lanes,
+                maximum: MAX_WRITE_COMPLETION_PARALLEL_LANES,
+            });
+        }
+        if !completion_work && self.write_completion_parallel_lanes != 0 {
+            return Err(MemoryAdmissionCandidateError::CompletionLanesWithoutWork {
+                candidate_id: self.candidate_id,
+                lanes: self.write_completion_parallel_lanes,
+            });
+        }
+        Ok(())
+    }
+
+    pub(crate) fn validate_feedback(self, issue_model_cycles: u64) -> Result<(), IssueError> {
+        self.validate()?;
+        if u64::from(self.admission_latency_cycles) != issue_model_cycles {
+            return Err(IssueError::MemoryAdmissionFeedbackLatencyMismatch {
+                candidate_id: self.candidate_id,
+                configured_cycles: self.admission_latency_cycles,
+                issue_model_cycles,
+            });
+        }
+        Ok(())
+    }
+
+    const fn matches(self, operation: MemoryOperation) -> bool {
+        matches!(
+            (self.operation, operation),
+            (
+                MemoryServiceCandidateOperation::Store,
+                MemoryOperation::Store
+            ) | (
+                MemoryServiceCandidateOperation::Reduction,
+                MemoryOperation::Reduction
+            )
+        )
+    }
+}
+
+#[derive(Debug, thiserror::Error, Clone, Copy, PartialEq, Eq)]
+pub enum MemoryAdmissionCandidateError {
+    #[error("memory-admission candidate set has {count} entries; maximum is {maximum}")]
+    TooMany { count: usize, maximum: usize },
+    #[error("memory-admission candidate id {candidate_id} is duplicated")]
+    DuplicateId { candidate_id: u8 },
+    #[error(
+        "memory-admission candidate {candidate_id} supports only store or reduction, got {operation:?}"
+    )]
+    UnsupportedOperation {
+        candidate_id: u8,
+        operation: MemoryServiceCandidateOperation,
+    },
+    #[error(
+        "memory-admission candidate {candidate_id} queue capacity {capacity} is outside 1..={maximum}"
+    )]
+    CapacityOutOfRange {
+        candidate_id: u8,
+        capacity: u16,
+        maximum: u16,
+    },
+    #[error(
+        "memory-admission candidate {candidate_id} {dimension} rate must have positive terms (units={units}, cycles={cycles})"
+    )]
+    InvalidRate {
+        candidate_id: u8,
+        dimension: &'static str,
+        units: u32,
+        cycles: u32,
+    },
+    #[error("memory-admission candidate {candidate_id} prices an L2 miss faster than a hit")]
+    MissRateFasterThanHit { candidate_id: u8 },
+    #[error(
+        "memory-admission candidate {candidate_id} L2-miss service width {width} exceeds maximum {maximum} sectors"
+    )]
+    ServiceWidthOutOfRange {
+        candidate_id: u8,
+        width: u32,
+        maximum: u32,
+    },
+    #[error(
+        "memory-admission candidate {candidate_id} declares write-completion latency {latency} without enabling MEMBAR completion feedback"
+    )]
+    CompletionLatencyWithoutMembar { candidate_id: u8, latency: u32 },
+    #[error(
+        "memory-admission candidate {candidate_id} declares write-completion work without enabling MEMBAR completion feedback"
+    )]
+    CompletionWorkWithoutMembar { candidate_id: u8 },
+    #[error(
+        "memory-admission candidate {candidate_id} write-completion lanes {lanes} are outside 1..={maximum}"
+    )]
+    CompletionLanesOutOfRange {
+        candidate_id: u8,
+        lanes: u16,
+        maximum: u16,
+    },
+    #[error(
+        "memory-admission candidate {candidate_id} declares {lanes} write-completion lanes without completion work"
+    )]
+    CompletionLanesWithoutWork { candidate_id: u8, lanes: u16 },
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
+pub struct MemoryAdmissionCandidateResult {
+    pub candidate: MemoryAdmissionCandidate,
+    pub instructions_observed: u64,
+    pub l2_hit_sectors_observed: u64,
+    pub l2_miss_sectors_observed: u64,
+    pub service_busy_cycles: u64,
+    pub downstream_queue_delay_cycles: u64,
+    pub queue_full_instructions: u64,
+    pub total_admission_delay_cycles: u64,
+    pub maximum_admission_delay_cycles: u64,
+    pub maximum_warp_admission_delay_cycles: u64,
+    pub terminal_operand_read_clear_time: u64,
+    pub terminal_service_completion_time: u64,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct MemoryAdmissionCandidateDiagnostics {
+    count: u8,
+    entries: Option<Box<[MemoryAdmissionCandidateResult; MAX_MEMORY_ADMISSION_CANDIDATES]>>,
+}
+
+impl Serialize for MemoryAdmissionCandidateDiagnostics {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        self.entries()[..].serialize(serializer)
+    }
+}
+
+impl MemoryAdmissionCandidateDiagnostics {
+    pub const fn is_empty(&self) -> bool {
+        self.count == 0
+    }
+
+    pub fn entries(&self) -> &[MemoryAdmissionCandidateResult] {
+        self.entries
+            .as_deref()
+            .map_or(&[], |entries| &entries[..usize::from(self.count)])
+    }
+
+    fn add_checked(&mut self, addend: &Self) -> Result<(), ReadinessCounterError> {
+        if self.is_empty() {
+            *self = addend.clone();
+            return Ok(());
+        }
+        if addend.is_empty() {
+            return Ok(());
+        }
+        if self.count != addend.count {
+            return Err(ReadinessCounterError::MemoryAdmissionCandidateMismatch { index: 0 });
+        }
+        let mut next = self.clone();
+        for index in 0..usize::from(self.count) {
+            let current = self.entries()[index];
+            let other = addend.entries()[index];
+            if current.candidate != other.candidate {
+                return Err(ReadinessCounterError::MemoryAdmissionCandidateMismatch { index });
+            }
+            let result = &mut next
+                .entries
+                .as_deref_mut()
+                .expect("nonempty admission diagnostics own entries")[index];
+            macro_rules! add {
+                ($field:ident) => {
+                    result.$field = checked_readiness_add(
+                        concat!("readiness.memory_admission_candidates.", stringify!($field)),
+                        result.$field,
+                        other.$field,
+                    )?;
+                };
+            }
+            add!(instructions_observed);
+            add!(l2_hit_sectors_observed);
+            add!(l2_miss_sectors_observed);
+            add!(service_busy_cycles);
+            add!(downstream_queue_delay_cycles);
+            add!(queue_full_instructions);
+            add!(total_admission_delay_cycles);
+            result.maximum_admission_delay_cycles = result
+                .maximum_admission_delay_cycles
+                .max(other.maximum_admission_delay_cycles);
+            result.maximum_warp_admission_delay_cycles = result
+                .maximum_warp_admission_delay_cycles
+                .max(other.maximum_warp_admission_delay_cycles);
+            result.terminal_operand_read_clear_time = result
+                .terminal_operand_read_clear_time
+                .max(other.terminal_operand_read_clear_time);
+            result.terminal_service_completion_time = result
+                .terminal_service_completion_time
+                .max(other.terminal_service_completion_time);
+        }
+        *self = next;
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+struct MemoryAdmissionCandidateRuntime {
+    result: MemoryAdmissionCandidateResult,
+    server_ready: u64,
+    queue_service_starts: [VecDeque<u64>; SUB_CORES],
+    warp_admission_delay: Vec<u64>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct MemoryAdmissionCandidateState {
+    count: u8,
+    entries: Option<Box<[MemoryAdmissionCandidateRuntime; MAX_MEMORY_ADMISSION_CANDIDATES]>>,
+}
+
+impl MemoryAdmissionCandidateState {
+    pub(crate) fn checked(
+        candidates: &[MemoryAdmissionCandidate],
+    ) -> Result<Self, MemoryAdmissionCandidateError> {
+        if candidates.len() > MAX_MEMORY_ADMISSION_CANDIDATES {
+            return Err(MemoryAdmissionCandidateError::TooMany {
+                count: candidates.len(),
+                maximum: MAX_MEMORY_ADMISSION_CANDIDATES,
+            });
+        }
+        let mut state = Self::default();
+        if !candidates.is_empty() {
+            state.entries = Some(Box::new(std::array::from_fn(|_| {
+                MemoryAdmissionCandidateRuntime::default()
+            })));
+        }
+        for (index, &candidate) in candidates.iter().enumerate() {
+            candidate.validate()?;
+            if candidates[..index]
+                .iter()
+                .any(|prior| prior.candidate_id == candidate.candidate_id)
+            {
+                return Err(MemoryAdmissionCandidateError::DuplicateId {
+                    candidate_id: candidate.candidate_id,
+                });
+            }
+            state
+                .entries
+                .as_deref_mut()
+                .expect("nonempty admission candidate set owns runtime entries")[index]
+                .result
+                .candidate = candidate;
+        }
+        state.count = candidates.len() as u8;
+        Ok(state)
+    }
+
+    pub(crate) fn diagnostics(&self) -> MemoryAdmissionCandidateDiagnostics {
+        if self.count == 0 {
+            return MemoryAdmissionCandidateDiagnostics::default();
+        }
+        let mut entries =
+            Box::new([MemoryAdmissionCandidateResult::default(); MAX_MEMORY_ADMISSION_CANDIDATES]);
+        let runtime = self
+            .entries
+            .as_deref()
+            .expect("nonempty admission state owns runtime entries");
+        for index in 0..usize::from(self.count) {
+            entries[index] = runtime[index].result;
+        }
+        MemoryAdmissionCandidateDiagnostics {
+            count: self.count,
+            entries: Some(entries),
+        }
+    }
+
+    pub(crate) fn observe(
+        &mut self,
+        subcore: usize,
+        warp: usize,
+        operation: MemoryOperation,
+        l2_hit_sectors: u64,
+        l2_miss_sectors: u64,
+        now: u64,
+    ) -> Result<(), IssueError> {
+        let entries = self
+            .entries
+            .as_deref_mut()
+            .expect("observe is called only for nonempty admission state");
+        for runtime in &mut entries[..usize::from(self.count)] {
+            let candidate = runtime.result.candidate;
+            if !candidate.matches(operation) {
+                continue;
+            }
+            let hit_cycles = candidate_rate_cycles(
+                l2_hit_sectors,
+                candidate.l2_hit_sector_units,
+                candidate.l2_hit_sector_cycles,
+            )?;
+            let miss_cycles = candidate_rate_cycles_with_width(
+                l2_miss_sectors,
+                candidate.l2_miss_sector_units,
+                candidate.l2_miss_sector_cycles,
+                candidate.l2_miss_service_width_sectors,
+            )?;
+            let busy = checked_cycle_add(
+                "memory-admission candidate service work",
+                hit_cycles,
+                miss_cycles,
+            )?;
+            let queue_index = match candidate.scope {
+                MemoryServiceCandidateScope::Sm => 0,
+                MemoryServiceCandidateScope::Smsp => subcore,
+            };
+            let queue = &mut runtime.queue_service_starts[queue_index];
+            let capacity = usize::from(candidate.queue_capacity_instructions);
+            let released_at = if queue.len() == capacity {
+                queue
+                    .pop_front()
+                    .expect("capacity-sized admission queue has an oldest service start")
+            } else {
+                0
+            };
+            let admitted_at = now.max(released_at);
+            let service_start = admitted_at.max(runtime.server_ready);
+            let service_done = checked_cycle_add(
+                "memory-admission candidate service completion",
+                service_start,
+                busy,
+            )?;
+            let operand_clear = checked_cycle_add(
+                "memory-admission candidate operand-read visibility",
+                admitted_at,
+                u64::from(candidate.admission_latency_cycles),
+            )?;
+            queue.push_back(service_start);
+            debug_assert!(queue.len() <= capacity);
+            runtime.server_ready = service_done;
+
+            if runtime.warp_admission_delay.len() <= warp {
+                runtime.warp_admission_delay.resize(warp + 1, 0);
+            }
+            let admission_delay = admitted_at - now;
+            let warp_delay = checked_u64_counter_add(
+                "memory-admission candidate per-warp delay",
+                runtime.warp_admission_delay[warp],
+                admission_delay,
+            )?;
+            runtime.warp_admission_delay[warp] = warp_delay;
+
+            let result = &mut runtime.result;
+            result.instructions_observed = checked_u64_counter_add(
+                "memory-admission candidate instructions",
+                result.instructions_observed,
+                1,
+            )?;
+            result.l2_hit_sectors_observed = checked_u64_counter_add(
+                "memory-admission candidate L2 hit sectors",
+                result.l2_hit_sectors_observed,
+                l2_hit_sectors,
+            )?;
+            result.l2_miss_sectors_observed = checked_u64_counter_add(
+                "memory-admission candidate L2 miss sectors",
+                result.l2_miss_sectors_observed,
+                l2_miss_sectors,
+            )?;
+            result.service_busy_cycles = checked_u64_counter_add(
+                "memory-admission candidate service busy cycles",
+                result.service_busy_cycles,
+                busy,
+            )?;
+            result.downstream_queue_delay_cycles = checked_u64_counter_add(
+                "memory-admission candidate downstream queue delay",
+                result.downstream_queue_delay_cycles,
+                service_start - admitted_at,
+            )?;
+            result.queue_full_instructions = checked_u64_counter_add(
+                "memory-admission candidate queue-full instructions",
+                result.queue_full_instructions,
+                u64::from(admission_delay != 0),
+            )?;
+            result.total_admission_delay_cycles = checked_u64_counter_add(
+                "memory-admission candidate total admission delay",
+                result.total_admission_delay_cycles,
+                admission_delay,
+            )?;
+            result.maximum_admission_delay_cycles =
+                result.maximum_admission_delay_cycles.max(admission_delay);
+            result.maximum_warp_admission_delay_cycles =
+                result.maximum_warp_admission_delay_cycles.max(warp_delay);
+            result.terminal_operand_read_clear_time =
+                result.terminal_operand_read_clear_time.max(operand_clear);
+            result.terminal_service_completion_time =
+                result.terminal_service_completion_time.max(service_done);
+        }
+        Ok(())
+    }
+}
+
+pub(crate) fn validate_memory_admission_candidates(
+    candidates: &[MemoryAdmissionCandidate],
+) -> Result<(), MemoryAdmissionCandidateError> {
+    MemoryAdmissionCandidateState::checked(candidates).map(|_| ())
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
+pub struct MemoryAdmissionFeedbackDiagnostics {
+    pub candidate: MemoryAdmissionCandidate,
+    pub instructions_admitted: u64,
+    pub l2_hit_sectors_observed: u64,
+    pub l2_miss_sectors_observed: u64,
+    pub service_busy_cycles: u64,
+    pub maximum_waiting_instructions: u64,
+    pub terminal_service_completion_time: u64,
+    #[serde(skip_serializing_if = "is_zero_u64")]
+    pub terminal_write_completion_time: u64,
+    #[serde(skip_serializing_if = "is_zero_u64")]
+    pub write_completion_requests_observed: u64,
+    #[serde(skip_serializing_if = "is_zero_u64")]
+    pub write_completion_regions_observed: u64,
+    #[serde(skip_serializing_if = "is_zero_u64")]
+    pub write_completion_busy_cycles: u64,
+}
+
+impl MemoryAdmissionFeedbackDiagnostics {
+    pub const fn is_empty(&self) -> bool {
+        self.candidate.queue_capacity_instructions == 0
+    }
+
+    fn add_checked(&mut self, addend: &Self) -> Result<(), ReadinessCounterError> {
+        if self.is_empty() {
+            *self = *addend;
+            return Ok(());
+        }
+        if addend.is_empty() {
+            return Ok(());
+        }
+        if self.candidate != addend.candidate {
+            return Err(ReadinessCounterError::MemoryAdmissionCandidateMismatch { index: 0 });
+        }
+        let next = Self {
+            candidate: self.candidate,
+            instructions_admitted: checked_readiness_add(
+                "readiness.memory_admission_feedback.instructions_admitted",
+                self.instructions_admitted,
+                addend.instructions_admitted,
+            )?,
+            l2_hit_sectors_observed: checked_readiness_add(
+                "readiness.memory_admission_feedback.l2_hit_sectors_observed",
+                self.l2_hit_sectors_observed,
+                addend.l2_hit_sectors_observed,
+            )?,
+            l2_miss_sectors_observed: checked_readiness_add(
+                "readiness.memory_admission_feedback.l2_miss_sectors_observed",
+                self.l2_miss_sectors_observed,
+                addend.l2_miss_sectors_observed,
+            )?,
+            service_busy_cycles: checked_readiness_add(
+                "readiness.memory_admission_feedback.service_busy_cycles",
+                self.service_busy_cycles,
+                addend.service_busy_cycles,
+            )?,
+            maximum_waiting_instructions: self
+                .maximum_waiting_instructions
+                .max(addend.maximum_waiting_instructions),
+            terminal_service_completion_time: self
+                .terminal_service_completion_time
+                .max(addend.terminal_service_completion_time),
+            terminal_write_completion_time: self
+                .terminal_write_completion_time
+                .max(addend.terminal_write_completion_time),
+            write_completion_requests_observed: checked_readiness_add(
+                "readiness.memory_admission_feedback.write_completion_requests_observed",
+                self.write_completion_requests_observed,
+                addend.write_completion_requests_observed,
+            )?,
+            write_completion_regions_observed: checked_readiness_add(
+                "readiness.memory_admission_feedback.write_completion_regions_observed",
+                self.write_completion_regions_observed,
+                addend.write_completion_regions_observed,
+            )?,
+            write_completion_busy_cycles: checked_readiness_add(
+                "readiness.memory_admission_feedback.write_completion_busy_cycles",
+                self.write_completion_busy_cycles,
+                addend.write_completion_busy_cycles,
+            )?,
+        };
+        *self = next;
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct MemoryAdmissionFeedbackEntry {
+    warp: u32,
+    instruction: u32,
+    release_at: Option<u64>,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct MemoryAdmissionFeedbackIssue {
+    subcore: usize,
+    warp: usize,
+    instruction: usize,
+    kind: AccessKind,
+    prior_clock_reads: u64,
+    clock_read: bool,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct MemoryAdmissionFeedbackIssuePlan {
+    reservations: [Option<(usize, MemoryAdmissionFeedbackEntry)>; SUB_CORES],
+    second_clock_warps: [Option<usize>; SUB_CORES],
+    instructions_admitted: u64,
+    maximum_waiting_instructions: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct MemoryAdmissionFeedbackState {
+    candidate: MemoryAdmissionCandidate,
+    queues: [VecDeque<MemoryAdmissionFeedbackEntry>; SUB_CORES],
+    server_ready: u64,
+    warp_completion_ready: Vec<u64>,
+    completion_lane_ready: Vec<u64>,
+    clock_second_issue: Vec<Option<u64>>,
+    diagnostics: MemoryAdmissionFeedbackDiagnostics,
+    yield_requested: bool,
+}
+
+impl MemoryAdmissionFeedbackState {
+    pub(crate) fn checked(
+        candidate: MemoryAdmissionCandidate,
+    ) -> Result<Self, MemoryAdmissionCandidateError> {
+        candidate.validate()?;
+        Ok(Self {
+            candidate,
+            queues: std::array::from_fn(|_| VecDeque::new()),
+            server_ready: 0,
+            warp_completion_ready: Vec::new(),
+            completion_lane_ready: vec![0; usize::from(candidate.write_completion_parallel_lanes)],
+            clock_second_issue: Vec::new(),
+            diagnostics: MemoryAdmissionFeedbackDiagnostics {
+                candidate,
+                ..MemoryAdmissionFeedbackDiagnostics::default()
+            },
+            yield_requested: false,
+        })
+    }
+
+    const fn queue_index(&self, subcore: usize) -> usize {
+        match self.candidate.scope {
+            MemoryServiceCandidateScope::Sm => 0,
+            MemoryServiceCandidateScope::Smsp => subcore,
+        }
+    }
+
+    fn matches_kind(&self, kind: AccessKind) -> bool {
+        matches!(
+            (self.candidate.operation, kind),
+            (
+                MemoryServiceCandidateOperation::Store,
+                AccessKind::GlobalStore { len: 1.., .. }
+            ) | (
+                MemoryServiceCandidateOperation::Reduction,
+                AccessKind::GlobalReduction { len: 1.., .. }
+            )
+        )
+    }
+
+    fn reap(&mut self, now: u64) {
+        for queue in &mut self.queues {
+            while queue
+                .front()
+                .and_then(|entry| entry.release_at)
+                .is_some_and(|release| release <= now)
+            {
+                queue.pop_front();
+            }
+        }
+    }
+
+    fn admission_ready_at(&self, subcore: usize, kind: AccessKind) -> Option<u64> {
+        if !self.matches_kind(kind) {
+            return Some(0);
+        }
+        let queue = &self.queues[self.queue_index(subcore)];
+        if queue.len() < usize::from(self.candidate.queue_capacity_instructions) {
+            return Some(0);
+        }
+        queue.front().and_then(|entry| entry.release_at)
+    }
+
+    fn completion_ready_at(&self, warp: usize, slot: &IssueSlot) -> Option<u64> {
+        if !self.candidate.membar_waits_for_service_completion || !is_gpu_membar_issue(slot) {
+            return Some(0);
+        }
+        if self.has_unpriced() {
+            return None;
+        }
+        Some(self.warp_completion_ready.get(warp).copied().unwrap_or(0))
+    }
+
+    fn second_clock_issue(&self, warp: usize) -> Option<u64> {
+        self.clock_second_issue.get(warp).copied().flatten()
+    }
+
+    fn plan_issue(
+        &self,
+        issues: &[Option<MemoryAdmissionFeedbackIssue>; SUB_CORES],
+        now: u64,
+    ) -> Result<MemoryAdmissionFeedbackIssuePlan, IssueError> {
+        let active_lengths: [usize; SUB_CORES] = std::array::from_fn(|queue_index| {
+            self.queues[queue_index]
+                .iter()
+                .filter(|entry| entry.release_at.is_none_or(|release| release > now))
+                .count()
+        });
+        let mut additions = [0usize; SUB_CORES];
+        let mut reservations = [None; SUB_CORES];
+        let mut second_clock_warps = [None; SUB_CORES];
+        let mut instructions_admitted = self.diagnostics.instructions_admitted;
+        let mut maximum_waiting_instructions = self.diagnostics.maximum_waiting_instructions;
+        for (position, issue) in issues.iter().copied().enumerate() {
+            let Some(issue) = issue else { continue };
+            if self.candidate.membar_waits_for_service_completion
+                && issue.prior_clock_reads == 1
+                && issue.clock_read
+            {
+                second_clock_warps[position] = Some(issue.warp);
+            }
+            if !self.matches_kind(issue.kind) {
+                continue;
+            }
+            let queue_index = self.queue_index(issue.subcore);
+            let next_length = active_lengths[queue_index]
+                .checked_add(additions[queue_index])
+                .and_then(|length| length.checked_add(1))
+                .ok_or(IssueError::CounterOverflow {
+                    counter: "feedback admission queue length",
+                })?;
+            if next_length > usize::from(self.candidate.queue_capacity_instructions) {
+                return Err(IssueError::MemoryAdmissionFeedbackQueueFull {
+                    subcore: issue.subcore,
+                    time: now,
+                });
+            }
+            let entry = MemoryAdmissionFeedbackEntry {
+                warp: u32::try_from(issue.warp).map_err(|_| IssueError::CounterOverflow {
+                    counter: "feedback admission warp",
+                })?,
+                instruction: u32::try_from(issue.instruction).map_err(|_| {
+                    IssueError::CounterOverflow {
+                        counter: "feedback admission instruction",
+                    }
+                })?,
+                release_at: None,
+            };
+            instructions_admitted = checked_u64_counter_add(
+                "feedback admission instructions",
+                instructions_admitted,
+                1,
+            )?;
+            additions[queue_index] += 1;
+            maximum_waiting_instructions = maximum_waiting_instructions.max(next_length as u64);
+            reservations[position] = Some((queue_index, entry));
+        }
+        Ok(MemoryAdmissionFeedbackIssuePlan {
+            reservations,
+            second_clock_warps,
+            instructions_admitted,
+            maximum_waiting_instructions,
+        })
+    }
+
+    fn apply_issue(&mut self, plan: MemoryAdmissionFeedbackIssuePlan, now: u64) {
+        self.reap(now);
+        for warp in plan.second_clock_warps.into_iter().flatten() {
+            if self.clock_second_issue.len() <= warp {
+                self.clock_second_issue.resize(warp + 1, None);
+            }
+            self.clock_second_issue[warp] = Some(now);
+        }
+        let mut reserved = false;
+        for (queue_index, entry) in plan.reservations.into_iter().flatten() {
+            debug_assert!(
+                self.queues[queue_index].len()
+                    < usize::from(self.candidate.queue_capacity_instructions)
+            );
+            self.queues[queue_index].push_back(entry);
+            reserved = true;
+        }
+        self.diagnostics.instructions_admitted = plan.instructions_admitted;
+        self.diagnostics.maximum_waiting_instructions = plan.maximum_waiting_instructions;
+        self.yield_requested |= reserved;
+    }
+
+    fn permits_transaction_addition(
+        &self,
+        subcore: usize,
+        kind: AccessKind,
+        additions: &[usize; SUB_CORES],
+        now: u64,
+    ) -> bool {
+        if !self.matches_kind(kind) {
+            return true;
+        }
+        let capacity = usize::from(self.candidate.queue_capacity_instructions);
+        let queue_index = self.queue_index(subcore);
+        let occupied = self.queues[queue_index]
+            .iter()
+            .filter(|entry| entry.release_at.is_none_or(|release| release > now))
+            .count();
+        occupied + additions[queue_index] < capacity
+    }
+
+    fn record_transaction_addition(
+        &self,
+        subcore: usize,
+        kind: AccessKind,
+        additions: &mut [usize; SUB_CORES],
+    ) {
+        if self.matches_kind(kind) {
+            additions[self.queue_index(subcore)] += 1;
+        }
+    }
+
+    #[cfg(test)]
+    fn reserve(
+        &mut self,
+        subcore: usize,
+        warp: usize,
+        instruction: usize,
+        kind: AccessKind,
+        now: u64,
+    ) -> Result<(), IssueError> {
+        if !self.matches_kind(kind) {
+            return Ok(());
+        }
+        self.reap(now);
+        let queue_index = self.queue_index(subcore);
+        let queue = &mut self.queues[queue_index];
+        if queue.len() >= usize::from(self.candidate.queue_capacity_instructions) {
+            return Err(IssueError::MemoryAdmissionFeedbackQueueFull { subcore, time: now });
+        }
+        let entry = MemoryAdmissionFeedbackEntry {
+            warp: u32::try_from(warp).map_err(|_| IssueError::CounterOverflow {
+                counter: "feedback admission warp",
+            })?,
+            instruction: u32::try_from(instruction).map_err(|_| IssueError::CounterOverflow {
+                counter: "feedback admission instruction",
+            })?,
+            release_at: None,
+        };
+        let instructions_admitted = checked_u64_counter_add(
+            "feedback admission instructions",
+            self.diagnostics.instructions_admitted,
+            1,
+        )?;
+        let maximum_waiting_instructions = self
+            .diagnostics
+            .maximum_waiting_instructions
+            .max((queue.len() + 1) as u64);
+
+        queue.push_back(entry);
+        self.diagnostics.instructions_admitted = instructions_admitted;
+        self.diagnostics.maximum_waiting_instructions = maximum_waiting_instructions;
+        self.yield_requested = true;
+        Ok(())
+    }
+
+    pub(crate) fn complete(
+        &mut self,
+        witness: AdmissionRequestWitness,
+        operation: MemoryOperation,
+        hit_sectors: u64,
+        miss_sectors: u64,
+        l2_requests: u64,
+        unique_regions: u64,
+        issue_time: u64,
+    ) -> Result<(), IssueError> {
+        if !self.candidate.matches(operation) {
+            return Ok(());
+        }
+        let queue_index = self.queue_index(usize::from(witness.subcore()));
+        let entry_index = self.queues[queue_index]
+            .iter()
+            .position(|entry| {
+                entry.warp == witness.warp() && entry.instruction == witness.instruction()
+            })
+            .ok_or(IssueError::MemoryAdmissionFeedbackReservationMissing {
+                warp: witness.warp(),
+                instruction: witness.instruction(),
+            })?;
+        if self.queues[queue_index][entry_index].release_at.is_some() {
+            return Err(IssueError::MemoryAdmissionFeedbackAlreadyPriced {
+                warp: witness.warp(),
+                instruction: witness.instruction(),
+            });
+        }
+        let hit_cycles = candidate_rate_cycles(
+            hit_sectors,
+            self.candidate.l2_hit_sector_units,
+            self.candidate.l2_hit_sector_cycles,
+        )?;
+        let miss_cycles = candidate_rate_cycles_with_width(
+            miss_sectors,
+            self.candidate.l2_miss_sector_units,
+            self.candidate.l2_miss_sector_cycles,
+            self.candidate.l2_miss_service_width_sectors,
+        )?;
+        let busy = checked_cycle_add("feedback admission service work", hit_cycles, miss_cycles)?;
+        let service_start = issue_time.max(self.server_ready);
+        let service_done =
+            checked_cycle_add("feedback admission service completion", service_start, busy)?;
+        let l2_hit_sectors_observed = checked_u64_counter_add(
+            "feedback admission L2 hit sectors",
+            self.diagnostics.l2_hit_sectors_observed,
+            hit_sectors,
+        )?;
+        let l2_miss_sectors_observed = checked_u64_counter_add(
+            "feedback admission L2 miss sectors",
+            self.diagnostics.l2_miss_sectors_observed,
+            miss_sectors,
+        )?;
+        let service_busy_cycles = checked_u64_counter_add(
+            "feedback admission service busy cycles",
+            self.diagnostics.service_busy_cycles,
+            busy,
+        )?;
+        let terminal_service_completion_time = self
+            .diagnostics
+            .terminal_service_completion_time
+            .max(service_done);
+        let request_completion_cycles = l2_requests
+            .checked_mul(u64::from(self.candidate.write_completion_request_cycles))
+            .ok_or(IssueError::TimeMultiplicationOverflow {
+                operation: "write-completion request work",
+                lhs: l2_requests,
+                rhs: u64::from(self.candidate.write_completion_request_cycles),
+            })?;
+        let region_completion_cycles = unique_regions
+            .checked_mul(u64::from(self.candidate.write_completion_region_cycles))
+            .ok_or(IssueError::TimeMultiplicationOverflow {
+                operation: "write-completion region work",
+                lhs: unique_regions,
+                rhs: u64::from(self.candidate.write_completion_region_cycles),
+            })?;
+        let write_completion_busy = checked_cycle_add(
+            "write-completion additive work",
+            request_completion_cycles,
+            region_completion_cycles,
+        )?;
+        let completion_lane = if write_completion_busy == 0 {
+            None
+        } else {
+            self.completion_lane_ready
+                .iter()
+                .copied()
+                .enumerate()
+                .min_by_key(|&(index, ready)| (ready, index))
+        };
+        let write_service_done = if let Some((_, lane_ready)) = completion_lane {
+            checked_cycle_add(
+                "write-completion lane service",
+                service_done.max(lane_ready),
+                write_completion_busy,
+            )?
+        } else {
+            service_done
+        };
+        let write_completion_done = if self.candidate.membar_waits_for_service_completion {
+            checked_cycle_add(
+                "feedback write completion visibility",
+                write_service_done,
+                u64::from(self.candidate.write_completion_latency_cycles),
+            )?
+        } else {
+            service_done
+        };
+        let terminal_write_completion_time = if self.candidate.membar_waits_for_service_completion {
+            self.diagnostics
+                .terminal_write_completion_time
+                .max(write_completion_done)
+        } else {
+            self.diagnostics.terminal_write_completion_time
+        };
+        let completion_requests_observed = checked_u64_counter_add(
+            "feedback write-completion requests",
+            self.diagnostics.write_completion_requests_observed,
+            if write_completion_busy == 0 {
+                0
+            } else {
+                l2_requests
+            },
+        )?;
+        let completion_regions_observed = checked_u64_counter_add(
+            "feedback write-completion regions",
+            self.diagnostics.write_completion_regions_observed,
+            if write_completion_busy == 0 {
+                0
+            } else {
+                unique_regions
+            },
+        )?;
+        let completion_busy_cycles = checked_u64_counter_add(
+            "feedback write-completion busy cycles",
+            self.diagnostics.write_completion_busy_cycles,
+            write_completion_busy,
+        )?;
+        let warp = usize::try_from(witness.warp()).map_err(|_| IssueError::CounterOverflow {
+            counter: "feedback completion warp index",
+        })?;
+        let required_warp_slots =
+            checked_usize_counter_add("feedback completion warp slots", warp, 1)?;
+        let warp_completion_ready = self
+            .warp_completion_ready
+            .get(warp)
+            .copied()
+            .unwrap_or(0)
+            .max(write_completion_done);
+
+        self.queues[queue_index][entry_index].release_at = Some(service_start);
+        self.server_ready = service_done;
+        if let Some((lane, _)) = completion_lane {
+            self.completion_lane_ready[lane] = write_service_done;
+        }
+        if self.warp_completion_ready.len() <= warp {
+            self.warp_completion_ready.resize(required_warp_slots, 0);
+        }
+        self.warp_completion_ready[warp] = warp_completion_ready;
+        self.diagnostics.l2_hit_sectors_observed = l2_hit_sectors_observed;
+        self.diagnostics.l2_miss_sectors_observed = l2_miss_sectors_observed;
+        self.diagnostics.service_busy_cycles = service_busy_cycles;
+        self.diagnostics.terminal_service_completion_time = terminal_service_completion_time;
+        self.diagnostics.terminal_write_completion_time = terminal_write_completion_time;
+        self.diagnostics.write_completion_requests_observed = completion_requests_observed;
+        self.diagnostics.write_completion_regions_observed = completion_regions_observed;
+        self.diagnostics.write_completion_busy_cycles = completion_busy_cycles;
+        Ok(())
+    }
+
+    fn has_unpriced(&self) -> bool {
+        self.queues
+            .iter()
+            .flatten()
+            .any(|entry| entry.release_at.is_none())
+    }
+
+    fn take_yield_requested(&mut self) -> bool {
+        std::mem::take(&mut self.yield_requested)
+    }
+
+    pub(crate) const fn diagnostics(&self) -> MemoryAdmissionFeedbackDiagnostics {
+        self.diagnostics
+    }
+}
+
+impl ClockIssueDiagnostics {
+    const fn is_empty(&self) -> bool {
+        self.reads_issued == 0
+    }
+
+    fn add_checked(&mut self, addend: &Self) -> Result<(), ReadinessCounterError> {
+        let next = Self {
+            reads_issued: checked_readiness_add(
+                "readiness.clock_issue.reads_issued",
+                self.reads_issued,
+                addend.reads_issued,
+            )?,
+            warps_with_interval: checked_readiness_add(
+                "readiness.clock_issue.warps_with_interval",
+                self.warps_with_interval,
+                addend.warps_with_interval,
+            )?,
+            maximum_first_to_last_issue_cycles: self
+                .maximum_first_to_last_issue_cycles
+                .max(addend.maximum_first_to_last_issue_cycles),
+            warps_with_three_reads: checked_readiness_add(
+                "readiness.clock_issue.warps_with_three_reads",
+                self.warps_with_three_reads,
+                addend.warps_with_three_reads,
+            )?,
+            maximum_first_to_second_issue_cycles: self
+                .maximum_first_to_second_issue_cycles
+                .max(addend.maximum_first_to_second_issue_cycles),
+            maximum_second_to_third_issue_cycles: self
+                .maximum_second_to_third_issue_cycles
+                .max(addend.maximum_second_to_third_issue_cycles),
+        };
+        *self = next;
+        Ok(())
+    }
+}
+
+impl ResultWritebackDiagnostics {
+    pub const fn is_empty(&self) -> bool {
+        self.fixed_over_l1tex_collisions == 0 && self.l1tex_deferral_cycles == 0
+    }
+
+    fn add_checked(&mut self, addend: &Self) -> Result<(), ReadinessCounterError> {
+        let next = Self {
+            fixed_over_l1tex_collisions: checked_readiness_add(
+                "readiness.result_writeback.fixed_over_l1tex_collisions",
+                self.fixed_over_l1tex_collisions,
+                addend.fixed_over_l1tex_collisions,
+            )?,
+            l1tex_deferral_cycles: checked_readiness_add(
+                "readiness.result_writeback.l1tex_deferral_cycles",
+                self.l1tex_deferral_cycles,
+                addend.l1tex_deferral_cycles,
+            )?,
+        };
+        *self = next;
+        Ok(())
+    }
+}
+
+/// Deterministic causal readiness summary for one SM replay.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub struct ReadinessDiagnostics {
+    pub limiting_cycles: ReadinessCauseCycles,
+    pub constraint_exposure_cycles: ReadinessCauseCycles,
+    pub delayed_ready_issues: u64,
+    pub tied_limiting_causes: u64,
+    pub async_groups: AsyncReadinessDiagnostics,
+    pub cta_barriers: CtaBarrierDiagnostics,
+    #[serde(skip_serializing_if = "BarrierPipelineDiagnostics::is_empty")]
+    pub barrier_pipeline: BarrierPipelineDiagnostics,
+    #[serde(skip_serializing_if = "ControlPipelineDiagnostics::is_empty")]
+    pub control_pipeline: ControlPipelineDiagnostics,
+    #[serde(skip_serializing_if = "ResultWritebackDiagnostics::is_empty")]
+    pub result_writeback: ResultWritebackDiagnostics,
+    #[serde(skip_serializing_if = "ClockIssueDiagnostics::is_empty")]
+    pub clock_issue: ClockIssueDiagnostics,
+    #[serde(skip_serializing_if = "GlobalMemoryIssueDiagnostics::is_empty")]
+    pub global_memory_issue: GlobalMemoryIssueDiagnostics,
+    #[serde(skip_serializing_if = "MemoryServiceCandidateDiagnostics::is_empty")]
+    pub memory_service_candidates: MemoryServiceCandidateDiagnostics,
+    #[serde(skip_serializing_if = "MemoryAdmissionCandidateDiagnostics::is_empty")]
+    pub memory_admission_candidates: MemoryAdmissionCandidateDiagnostics,
+    #[serde(skip_serializing_if = "MemoryAdmissionFeedbackDiagnostics::is_empty")]
+    pub memory_admission_feedback: MemoryAdmissionFeedbackDiagnostics,
+}
+
+impl ReadinessDiagnostics {
+    /// Checked, transactional aggregation across SMs.
+    pub fn add_checked(&mut self, addend: &Self) -> Result<(), ReadinessCounterError> {
+        let mut next = self.clone();
+        next.limiting_cycles.add_checked(&addend.limiting_cycles)?;
+        next.constraint_exposure_cycles
+            .add_checked(&addend.constraint_exposure_cycles)?;
+        next.delayed_ready_issues = checked_readiness_add(
+            "readiness.delayed_ready_issues",
+            next.delayed_ready_issues,
+            addend.delayed_ready_issues,
+        )?;
+        next.tied_limiting_causes = checked_readiness_add(
+            "readiness.tied_limiting_causes",
+            next.tied_limiting_causes,
+            addend.tied_limiting_causes,
+        )?;
+        next.async_groups.add_checked(&addend.async_groups)?;
+        next.cta_barriers.add_checked(&addend.cta_barriers)?;
+        next.barrier_pipeline
+            .add_checked(&addend.barrier_pipeline)?;
+        next.control_pipeline
+            .add_checked(&addend.control_pipeline)?;
+        next.result_writeback
+            .add_checked(&addend.result_writeback)?;
+        next.clock_issue.add_checked(&addend.clock_issue)?;
+        next.global_memory_issue
+            .add_checked(&addend.global_memory_issue)?;
+        next.memory_service_candidates
+            .add_checked(&addend.memory_service_candidates)?;
+        next.memory_admission_candidates
+            .add_checked(&addend.memory_admission_candidates)?;
+        next.memory_admission_feedback
+            .add_checked(&addend.memory_admission_feedback)?;
+        *self = next;
+        Ok(())
+    }
+
+    /// Schema 1 remains byte-compatible without characterized resources;
+    /// schema 2 adds the barrier service, schema 3 adds the exact branch
+    /// resolution relation, and schema 4 adds an observed fixed/L1TEX
+    /// writeback collision. Schema 5 adds an exact CLOCK-boundary issue
+    /// diagnostic when the joined program contains measured CLOCKLO reads.
+    /// Schema 6 adds scalar-global instruction/sector/ideal-wavefront,
+    /// unique-line, exact-atomic-request, and issue-span diagnostics without
+    /// activating a memory service. Schema 7 adds results from an explicitly
+    /// configured, bounded streaming memory-service candidate set; candidates
+    /// remain observational and cannot change issue scheduling. Schema 8
+    /// separates scalar-global operand-consumption/read-barrier producers and
+    /// their consumer delay from the generic fixed read-counter relation.
+    /// Schema 9 adds bounded observational finite admission queues driven by
+    /// exact per-instruction L2 hit/miss outcomes. Schema 10 activates one
+    /// opt-in feedback-coupled queue that participates in warp readiness.
+    /// Schema 11 additionally makes `MEMBAR.SC.GPU` wait on the issuing warp's
+    /// matching write-service completion frontier. Schema 12 adds a
+    /// non-occupying operation-specific visibility/RMW latency after service.
+    /// Schema 13 adds independent request/region completion work over bounded
+    /// parallel lanes.
+    pub const fn schema_version(&self) -> u32 {
+        if !self.memory_admission_feedback.is_empty()
+            && (self
+                .memory_admission_feedback
+                .candidate
+                .write_completion_request_cycles
+                != 0
+                || self
+                    .memory_admission_feedback
+                    .candidate
+                    .write_completion_region_cycles
+                    != 0)
+        {
+            13
+        } else if !self.memory_admission_feedback.is_empty()
+            && self
+                .memory_admission_feedback
+                .candidate
+                .write_completion_latency_cycles
+                != 0
+        {
+            12
+        } else if !self.memory_admission_feedback.is_empty()
+            && self
+                .memory_admission_feedback
+                .candidate
+                .membar_waits_for_service_completion
+        {
+            11
+        } else if !self.memory_admission_feedback.is_empty() {
+            10
+        } else if !self.memory_admission_candidates.is_empty() {
+            9
+        } else if self.global_memory_issue.has_operand_read_barriers() {
+            8
+        } else if !self.memory_service_candidates.is_empty() {
+            7
+        } else if !self.global_memory_issue.is_empty() {
+            6
+        } else if !self.clock_issue.is_empty() {
+            5
+        } else if !self.result_writeback.is_empty() {
+            4
+        } else if !self.control_pipeline.is_empty() {
+            3
+        } else if !self.barrier_pipeline.is_empty() {
+            2
+        } else {
+            1
+        }
+    }
+}
+
+/// Result of replaying one SM's blocks to completion.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SmSimResult {
     /// Exact: one per traced record fed in.
     pub instructions_issued: u64,
@@ -956,6 +3460,65 @@ pub struct SmSimResult {
     pub l1: Option<L1Counters>,
     /// Explicit capability gaps for write-class tails present in this replay.
     pub unmodeled_tails: TailFlags,
+    /// Simulator-internal causal readiness diagnostics. These are not NCU
+    /// sample counts and their overlapping exposure fields are not elapsed
+    /// kernel cycles.
+    pub readiness: ReadinessDiagnostics,
+}
+
+/// Group witness for one sector request belonging to an effective scalar
+/// STORE/RED warp instruction. The system consumes these witnesses only to
+/// reconstruct exact per-instruction L2 hit/miss work for opt-in admission
+/// candidates; they do not affect hierarchy identity or ordering.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct AdmissionRequestWitness(NonZeroU128);
+
+impl AdmissionRequestWitness {
+    const VALID: u128 = 1 << 127;
+    const U16_MASK: u128 = u16::MAX as u128;
+    const U32_MASK: u128 = u32::MAX as u128;
+
+    pub(crate) const fn new(
+        warp: u32,
+        instruction: u32,
+        subcore: u8,
+        request_index: u16,
+        request_count: u16,
+    ) -> Option<Self> {
+        if subcore >= SUB_CORES as u8 || request_count == 0 || request_index >= request_count {
+            return None;
+        }
+        let packed = Self::VALID
+            | warp as u128
+            | ((instruction as u128) << 32)
+            | ((subcore as u128) << 64)
+            | ((request_index as u128) << 66)
+            | ((request_count as u128) << 82);
+        match NonZeroU128::new(packed) {
+            Some(value) => Some(Self(value)),
+            None => None,
+        }
+    }
+
+    pub(crate) const fn warp(self) -> u32 {
+        (self.0.get() & Self::U32_MASK) as u32
+    }
+
+    pub(crate) const fn instruction(self) -> u32 {
+        ((self.0.get() >> 32) & Self::U32_MASK) as u32
+    }
+
+    pub(crate) const fn subcore(self) -> u8 {
+        ((self.0.get() >> 64) & 0b11) as u8
+    }
+
+    pub(crate) const fn request_index(self) -> u16 {
+        ((self.0.get() >> 66) & Self::U16_MASK) as u16
+    }
+
+    pub(crate) const fn request_count(self) -> u16 {
+        ((self.0.get() >> 82) & Self::U16_MASK) as u16
+    }
 }
 
 /// A memory request the SM emits in L1Shared mode. The system layer
@@ -996,6 +3559,7 @@ pub struct MemRequest {
     /// `(source, operation, reply)` combinations before hierarchy mutation.
     pub operation: MemoryOperation,
     pub reply: ReplyTo,
+    pub(crate) admission_witness: Option<AdmissionRequestWitness>,
 }
 
 /// Process-local identity of one live shared-L2 actor. It is deliberately
@@ -1137,6 +3701,7 @@ impl MemRequest {
             source: L2Source::L1Fill,
             operation: MemoryOperation::Read,
             reply: ReplyTo::L1Fill { fill, response_id },
+            admission_witness: None,
         }
     }
 
@@ -1154,6 +3719,7 @@ impl MemRequest {
             source: L2Source::L1Fill,
             operation: MemoryOperation::Read,
             reply: ReplyTo::None,
+            admission_witness: None,
         }
     }
 
@@ -1191,11 +3757,12 @@ impl MemRequest {
             source: L2Source::Store,
             operation,
             reply: ReplyTo::None,
+            admission_witness: None,
         }
     }
 
     pub(crate) fn has_valid_contract(self) -> bool {
-        match (self.source, self.operation, self.reply) {
+        let base = match (self.source, self.operation, self.reply) {
             (L2Source::L1Fill, MemoryOperation::Read, ReplyTo::L1Fill { .. } | ReplyTo::None)
             | (
                 L2Source::Bypass,
@@ -1210,7 +3777,22 @@ impl MemRequest {
                 ReplyTo::None,
             ) => true,
             _ => false,
-        }
+        };
+        let admission = match self.admission_witness {
+            None => true,
+            Some(witness) => {
+                self.source == L2Source::Store
+                    && self.origin == MemoryOrigin::Global
+                    && matches!(
+                        self.operation,
+                        MemoryOperation::Store | MemoryOperation::Reduction
+                    )
+                    && witness.request_count() != 0
+                    && witness.request_index() < witness.request_count()
+                    && usize::from(witness.subcore()) < SUB_CORES
+            }
+        };
+        base && admission
     }
 }
 
@@ -1256,6 +3838,209 @@ pub enum Advance {
 const SUB_CORES: usize = 4;
 const DEP_BARRIERS: usize = 6;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ResultWritebackKind {
+    FixedHadd2 { bank: u8 },
+    L1TexStrongSmU32 { bank: u8 },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct PendingVariableWriteback {
+    subcore: u8,
+    bank: u8,
+    writeback_at: u64,
+    visible_at: u64,
+    warp: usize,
+    barrier: DepBarrier,
+}
+
+#[derive(Debug)]
+struct ResultWritebackState {
+    timing: FixedL1TexWritebackPriority,
+    pending: Vec<PendingVariableWriteback>,
+}
+
+fn scalar_regular_destination_bank(opcode_text: &str) -> Option<u8> {
+    let (_, operands) = opcode_text.trim().split_once(char::is_whitespace)?;
+    let destination = operands.split(',').next()?.trim();
+    let index = destination.strip_prefix('R')?.parse::<u16>().ok()?;
+    Some((index & 1) as u8)
+}
+
+fn is_clocklo_issue(slot: &IssueSlot) -> bool {
+    slot.is_clocklo_read()
+}
+
+fn is_gpu_membar_issue(slot: &IssueSlot) -> bool {
+    slot.is_gpu_membar()
+}
+
+fn result_writeback_kind(slot: &IssueSlot, arch: ArchId) -> Option<ResultWritebackKind> {
+    if arch != ArchId::Sm86 {
+        return None;
+    }
+    if let FixedLatencyOperandStatus::Projected(projection) = slot.fixed_latency_operands()
+        && projection.opcode() == FixedLatencyOpcode::Hadd2
+        && let [destination] = projection.destinations()
+        && let Some(bank) = destination.register().sm86_regular_bank()
+    {
+        return Some(ResultWritebackKind::FixedHadd2 { bank });
+    }
+    if slot.mem_role() == MemRole::EligibleLoad(CacheOpToken::LdgEStrongSm)
+        && slot.opcode_text().split_whitespace().next() == Some("LDG.E.STRONG.SM")
+    {
+        return scalar_regular_destination_bank(slot.opcode_text())
+            .map(|bank| ResultWritebackKind::L1TexStrongSmU32 { bank });
+    }
+    None
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+enum DependencyOrigin {
+    Read,
+    GlobalLoadOperandRead,
+    GlobalStoreOperandRead,
+    GlobalAtomicOperandRead,
+    GlobalReductionOperandRead,
+    NonMemoryWrite,
+    SharedWrite,
+    L1Tex,
+    #[default]
+    Unknown,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum ReadinessCause {
+    DependenceCounterRead,
+    DependenceCounterGlobalLoadOperandRead,
+    DependenceCounterGlobalStoreOperandRead,
+    DependenceCounterGlobalAtomicOperandRead,
+    DependenceCounterGlobalReductionOperandRead,
+    DependenceCounterNonMemoryWrite,
+    DependenceCounterSharedWrite,
+    DependenceCounterL1Tex,
+    DependenceCounterUnknownOrigin,
+    AsyncSource,
+    AsyncDestinationLocal,
+    AsyncDestinationSmService,
+    CtaBarrierRendezvous,
+    PipelineBarrier,
+    PipelineBranch,
+    PipelineTensor,
+    MemoryAdmissionQueue,
+    MemoryWriteCompletion,
+    ControlStall,
+}
+
+impl From<DependencyOrigin> for ReadinessCause {
+    fn from(origin: DependencyOrigin) -> Self {
+        match origin {
+            DependencyOrigin::Read => Self::DependenceCounterRead,
+            DependencyOrigin::GlobalLoadOperandRead => Self::DependenceCounterGlobalLoadOperandRead,
+            DependencyOrigin::GlobalStoreOperandRead => {
+                Self::DependenceCounterGlobalStoreOperandRead
+            }
+            DependencyOrigin::GlobalAtomicOperandRead => {
+                Self::DependenceCounterGlobalAtomicOperandRead
+            }
+            DependencyOrigin::GlobalReductionOperandRead => {
+                Self::DependenceCounterGlobalReductionOperandRead
+            }
+            DependencyOrigin::NonMemoryWrite => Self::DependenceCounterNonMemoryWrite,
+            DependencyOrigin::SharedWrite => Self::DependenceCounterSharedWrite,
+            DependencyOrigin::L1Tex => Self::DependenceCounterL1Tex,
+            DependencyOrigin::Unknown => Self::DependenceCounterUnknownOrigin,
+        }
+    }
+}
+
+impl ReadinessCauseCycles {
+    fn add_cause(&mut self, cause: ReadinessCause, delta: u64) -> Result<(), IssueError> {
+        let (field, counter): (&'static str, &mut u64) = match cause {
+            ReadinessCause::ControlStall => ("control stall readiness", &mut self.control_stall),
+            ReadinessCause::DependenceCounterRead => (
+                "read-dependence counter readiness",
+                &mut self.dependence_counter_read,
+            ),
+            ReadinessCause::DependenceCounterGlobalLoadOperandRead => (
+                "global-load operand-read counter readiness",
+                &mut self.dependence_counter_global_load_operand_read,
+            ),
+            ReadinessCause::DependenceCounterGlobalStoreOperandRead => (
+                "global-store operand-read counter readiness",
+                &mut self.dependence_counter_global_store_operand_read,
+            ),
+            ReadinessCause::DependenceCounterGlobalAtomicOperandRead => (
+                "global-atomic operand-read counter readiness",
+                &mut self.dependence_counter_global_atomic_operand_read,
+            ),
+            ReadinessCause::DependenceCounterGlobalReductionOperandRead => (
+                "global-reduction operand-read counter readiness",
+                &mut self.dependence_counter_global_reduction_operand_read,
+            ),
+            ReadinessCause::DependenceCounterNonMemoryWrite => (
+                "non-memory write-dependence counter readiness",
+                &mut self.dependence_counter_non_memory_write,
+            ),
+            ReadinessCause::DependenceCounterSharedWrite => (
+                "shared write-dependence counter readiness",
+                &mut self.dependence_counter_shared_write,
+            ),
+            ReadinessCause::DependenceCounterL1Tex => (
+                "L1TEX-dependence counter readiness",
+                &mut self.dependence_counter_l1tex,
+            ),
+            ReadinessCause::DependenceCounterUnknownOrigin => (
+                "unknown-origin dependence counter readiness",
+                &mut self.dependence_counter_unknown_origin,
+            ),
+            ReadinessCause::AsyncSource => {
+                ("asynchronous-copy source readiness", &mut self.async_source)
+            }
+            ReadinessCause::AsyncDestinationLocal => (
+                "asynchronous-copy local destination readiness",
+                &mut self.async_destination_local,
+            ),
+            ReadinessCause::AsyncDestinationSmService => (
+                "asynchronous-copy SM destination-service readiness",
+                &mut self.async_destination_sm_service,
+            ),
+            ReadinessCause::CtaBarrierRendezvous => (
+                "CTA barrier rendezvous readiness",
+                &mut self.cta_barrier_rendezvous,
+            ),
+            ReadinessCause::PipelineBarrier => {
+                ("CTA-barrier pipeline readiness", &mut self.pipeline_barrier)
+            }
+            ReadinessCause::PipelineBranch => {
+                ("branch-resolution readiness", &mut self.pipeline_branch)
+            }
+            ReadinessCause::PipelineTensor => {
+                ("tensor-pipeline readiness", &mut self.pipeline_tensor)
+            }
+            ReadinessCause::MemoryAdmissionQueue => (
+                "memory-admission queue readiness",
+                &mut self.memory_admission_queue,
+            ),
+            ReadinessCause::MemoryWriteCompletion => (
+                "memory write-completion readiness",
+                &mut self.memory_write_completion,
+            ),
+        };
+        *counter = checked_u64_counter_add(field, *counter, delta)?;
+        Ok(())
+    }
+
+    fn add_eligible_not_selected(&mut self, delta: u64) -> Result<(), IssueError> {
+        self.eligible_not_selected = checked_u64_counter_add(
+            "eligible-not-selected readiness",
+            self.eligible_not_selected,
+            delta,
+        )?;
+        Ok(())
+    }
+}
+
 fn checked_u64_counter_add(
     counter: &'static str,
     current: u64,
@@ -1295,6 +4080,10 @@ pub struct AsyncCopyGroupId(u64);
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct AsyncCopyGroup {
     id: AsyncCopyGroupId,
+    /// Issue time of the `LDGDEPBAR` that made this group visible to a
+    /// subsequent wait. Zero is also the valid initial-cycle timestamp; the
+    /// group cannot be observed here until it is committed.
+    committed_at: u64,
     /// Source sectors whose shared-L2 response time is not known yet.
     pending_sources: u32,
     /// Maximum known lower-level source completion time across flat/constant
@@ -1304,9 +4093,17 @@ struct AsyncCopyGroup {
     /// fixed-point work domain. This is added once per issued copy, never inferred
     /// from or duplicated across its source sectors.
     delivery_work: u64,
-    /// Cached `source_completion_time + ceil(delivery_work / units_per_cycle)`.
-    /// Every mutation checks this sum before publishing group state, leaving the
-    /// scheduler's readiness path infallible.
+    /// Exact cache-all destination wavefronts accumulated across this committed
+    /// group. Zero retains the payload-only/bypass path.
+    destination_wavefronts: u64,
+    /// The aggregate SM service is assigned once, after commit and after every
+    /// source unit has a known completion time.
+    destination_service_queued: bool,
+    /// Latest completion assigned by the aggregate per-SM destination service.
+    destination_completion_time: u64,
+    /// Maximum of the warp-local dependent-completion floor and the aggregate
+    /// destination-service completion. Every mutation checks this value before
+    /// publishing group state, leaving scheduler readiness infallible.
     completion_time: u64,
 }
 
@@ -1314,32 +4111,68 @@ impl AsyncCopyGroup {
     const fn new(id: AsyncCopyGroupId) -> Self {
         Self {
             id,
+            committed_at: 0,
             pending_sources: 0,
             source_completion_time: 0,
             delivery_work: 0,
+            destination_wavefronts: 0,
+            destination_service_queued: false,
+            destination_completion_time: 0,
             completion_time: 0,
         }
     }
 
     const fn is_complete_at(self, now: u64) -> bool {
-        self.pending_sources == 0 && self.completion_time <= now
+        self.pending_sources == 0
+            && (self.destination_wavefronts == 0 || self.destination_service_queued)
+            && self.completion_time <= now
     }
 
     fn project_delivery(
         self,
         source_ready: u64,
         work_add: u64,
+        destination_wavefronts_add: u64,
         params: &IssueModelParams,
-    ) -> Result<(u64, u64, u64), IssueError> {
+    ) -> Result<(u64, u64, u64, u64), IssueError> {
         let delivery_work = checked_u64_counter_add(
             "asynchronous-copy delivery work",
             self.delivery_work,
             work_add,
         )?;
         let source_completion_time = self.source_completion_time.max(source_ready);
-        let completion_time =
+        let destination_wavefronts = checked_u64_counter_add(
+            "asynchronous-copy destination wavefront",
+            self.destination_wavefronts,
+            destination_wavefronts_add,
+        )?;
+        let local_completion_time =
             params.ldgsts_completion_ready(source_completion_time, delivery_work)?;
-        Ok((source_completion_time, delivery_work, completion_time))
+        let completion_time = local_completion_time.max(self.destination_completion_time);
+        Ok((
+            source_completion_time,
+            delivery_work,
+            destination_wavefronts,
+            completion_time,
+        ))
+    }
+
+    fn local_completion_time(self, params: &IssueModelParams) -> Result<u64, IssueError> {
+        params.ldgsts_completion_ready(self.source_completion_time, self.delivery_work)
+    }
+
+    fn limiting_readiness_cause(
+        self,
+        params: &IssueModelParams,
+    ) -> Result<ReadinessCause, IssueError> {
+        let local = self.local_completion_time(params)?;
+        Ok(if self.destination_completion_time > local {
+            ReadinessCause::AsyncDestinationSmService
+        } else if self.delivery_work != 0 || self.destination_wavefronts != 0 {
+            ReadinessCause::AsyncDestinationLocal
+        } else {
+            ReadinessCause::AsyncSource
+        })
     }
 }
 
@@ -1380,8 +4213,12 @@ struct WarpState<'a> {
     sectors: &'a [i64],
     next: usize,
     next_slot: Option<&'a IssueSlot>,
+    /// Issue/admission timestamp at which `next_slot` became the current
+    /// instruction. Causal readiness delays are measured from this frontier.
+    current_since: u64,
     eligible: u64,
     barrier_clear: [u64; DEP_BARRIERS],
+    barrier_origin: [DependencyOrigin; DEP_BARRIERS],
     /// Outstanding UNKNOWN write-backs per barrier index (L1Shared mode):
     /// hardware barriers are counters, and a response still in flight is
     /// an increment whose decrement time is unknown — a wait on the index
@@ -1398,6 +4235,18 @@ struct WarpState<'a> {
     pos_in_subcore: usize,
     arrival: u64,
     at_block_barrier: bool,
+    /// CTA-release arm for the current post-barrier instruction. This is kept
+    /// separate from compiler-control eligibility so attribution cannot confuse
+    /// a CTA rendezvous with a SASS stall count.
+    cta_barrier_ready: u64,
+    /// Completion of this warp's own arrival through the SM-shared barrier
+    /// service. The CTA arm above carries only other-participant rendezvous.
+    barrier_pipeline_ready: u64,
+    branch_pipeline_ready: u64,
+    block_barrier_dispatch: Option<u64>,
+    block_barrier_arrival: Option<u64>,
+    clock_first_issue: Option<u64>,
+    clock_reads_issued: u64,
     done: bool,
 }
 
@@ -1415,6 +4264,12 @@ struct BlockState {
     /// release scans only the block's own range.
     first_warp: usize,
     admitted_warps: usize,
+    barrier_generation: u64,
+    barrier_first_dispatch: Option<u64>,
+    barrier_first_arrival: Option<u64>,
+    /// Earliest issue time of this CTA's next barrier generation. It gates
+    /// barrier instructions only; ordinary work after rendezvous is unaffected.
+    barrier_rearm_ready: u64,
 }
 
 impl WarpState<'_> {
@@ -1431,6 +4286,7 @@ impl AsyncCopySlot {
         pending_add: u32,
         source_ready: u64,
         delivery_work: u64,
+        destination_wavefronts: u64,
         params: &IssueModelParams,
     ) -> Result<AsyncCopyGroupId, IssueError> {
         let (id, current, group) = match self.state.as_deref() {
@@ -1458,7 +4314,7 @@ impl AsyncCopySlot {
                 current,
                 add: pending_add,
             })?;
-        group.project_delivery(source_ready, delivery_work, params)?;
+        group.project_delivery(source_ready, delivery_work, destination_wavefronts, params)?;
         Ok(id)
     }
 
@@ -1484,15 +4340,24 @@ impl AsyncCopySlot {
         warp: usize,
         source_ready: u64,
         delivery_work: u64,
+        destination_wavefronts: u64,
         params: &IssueModelParams,
     ) -> Result<AsyncCopyGroupId, IssueError> {
-        let id = self.preflight_async_copy_add(warp, 0, source_ready, delivery_work, params)?;
+        let id = self.preflight_async_copy_add(
+            warp,
+            0,
+            source_ready,
+            delivery_work,
+            destination_wavefronts,
+            params,
+        )?;
         let group = self.ensure_open_async_group(warp)?;
         debug_assert_eq!(group.id, id);
-        let (source_completion_time, delivery_work, completion_time) =
-            group.project_delivery(source_ready, delivery_work, params)?;
+        let (source_completion_time, delivery_work, destination_wavefronts, completion_time) =
+            group.project_delivery(source_ready, delivery_work, destination_wavefronts, params)?;
         group.source_completion_time = source_completion_time;
         group.delivery_work = delivery_work;
+        group.destination_wavefronts = destination_wavefronts;
         group.completion_time = completion_time;
         Ok(id)
     }
@@ -1502,9 +4367,17 @@ impl AsyncCopySlot {
         warp: usize,
         add: u32,
         delivery_work: u64,
+        destination_wavefronts: u64,
         params: &IssueModelParams,
     ) -> Result<AsyncCopyGroupId, IssueError> {
-        let id = self.preflight_async_copy_add(warp, add, 0, delivery_work, params)?;
+        let id = self.preflight_async_copy_add(
+            warp,
+            add,
+            0,
+            delivery_work,
+            destination_wavefronts,
+            params,
+        )?;
         let group = self.ensure_open_async_group(warp)?;
         debug_assert_eq!(group.id, id);
         let current = group.pending_sources;
@@ -1517,11 +4390,12 @@ impl AsyncCopySlot {
                     current,
                     add,
                 })?;
-        let (source_completion_time, delivery_work, completion_time) =
-            group.project_delivery(0, delivery_work, params)?;
+        let (source_completion_time, delivery_work, destination_wavefronts, completion_time) =
+            group.project_delivery(0, delivery_work, destination_wavefronts, params)?;
         group.pending_sources = pending_sources;
         group.source_completion_time = source_completion_time;
         group.delivery_work = delivery_work;
+        group.destination_wavefronts = destination_wavefronts;
         group.completion_time = completion_time;
         Ok(id)
     }
@@ -1570,7 +4444,7 @@ impl AsyncCopySlot {
                 current: group.pending_sources,
                 remove,
             })?;
-        group.project_delivery(now, 0, params)?;
+        group.project_delivery(now, 0, 0, params)?;
         Ok(())
     }
 
@@ -1596,21 +4470,26 @@ impl AsyncCopySlot {
                     current,
                     remove,
                 })?;
-        let (source_completion_time, delivery_work, completion_time) =
-            group.project_delivery(now, 0, params)?;
+        let (source_completion_time, delivery_work, destination_wavefronts, completion_time) =
+            group.project_delivery(now, 0, 0, params)?;
         group.pending_sources = pending_sources;
         group.source_completion_time = source_completion_time;
         group.delivery_work = delivery_work;
+        group.destination_wavefronts = destination_wavefronts;
         group.completion_time = completion_time;
         Ok(())
     }
 
-    fn commit_async_copy_group(&mut self) {
+    fn commit_async_copy_group(&mut self, now: u64) -> bool {
         let Some(state) = self.state.as_deref_mut() else {
-            return;
+            return false;
         };
-        if let Some(group) = state.open_group.take() {
+        if let Some(mut group) = state.open_group.take() {
+            group.committed_at = now;
             state.committed_groups.push_back(group);
+            true
+        } else {
+            false
         }
     }
 
@@ -1637,6 +4516,9 @@ impl AsyncCopySlot {
             .take(self.async_wait_prefix_len(max_pending_groups))
         {
             if group.pending_sources != 0 {
+                return None;
+            }
+            if group.destination_wavefronts != 0 && !group.destination_service_queued {
                 return None;
             }
             ready = ready.max(group.completion_time);
@@ -1751,7 +4633,10 @@ impl WarpState<'_> {
                     current,
                     remove,
                 })?;
-        self.barrier_clear[b] = self.barrier_clear[b].max(now);
+        if now >= self.barrier_clear[b] {
+            self.barrier_clear[b] = now;
+            self.barrier_origin[b] = DependencyOrigin::L1Tex;
+        }
         Ok(())
     }
 
@@ -1782,10 +4667,13 @@ impl WarpState<'_> {
 
     /// Max-accumulate a KNOWN clear stamp on a dependence barrier (counter
     /// semantics: never overwrite); `None` carries no dependency.
-    fn stamp_clear(&mut self, barrier: Option<DepBarrier>, at: u64) {
+    fn stamp_clear(&mut self, barrier: Option<DepBarrier>, at: u64, origin: DependencyOrigin) {
         if let Some(barrier) = barrier {
-            let clear = &mut self.barrier_clear[barrier.index()];
-            *clear = (*clear).max(at);
+            let index = barrier.index();
+            if at >= self.barrier_clear[index] {
+                self.barrier_clear[index] = at;
+                self.barrier_origin[index] = origin;
+            }
         }
     }
 
@@ -1812,7 +4700,13 @@ impl WarpState<'_> {
             return None;
         }
         let dependency_ready = self.wait_clear_time()?;
-        Some(self.eligible.max(dependency_ready))
+        Some(
+            self.eligible
+                .max(dependency_ready)
+                .max(self.cta_barrier_ready)
+                .max(self.barrier_pipeline_ready)
+                .max(self.branch_pipeline_ready),
+        )
     }
 }
 
@@ -1825,6 +4719,7 @@ fn async_copy_source_count(kind: AccessKind) -> Option<u16> {
         } if completion_work != 0 => Some(len),
         AccessKind::GlobalAsyncCopy { .. }
         | AccessKind::NonMemory
+        | AccessKind::PredicatedOffMemory
         | AccessKind::Shared { .. }
         | AccessKind::LocalLoad { .. }
         | AccessKind::LocalStore { .. }
@@ -1840,9 +4735,13 @@ fn async_copy_completion_work(kind: AccessKind) -> Option<u64> {
     match kind {
         AccessKind::GlobalAsyncCopy {
             completion_work, ..
-        } if completion_work != 0 => Some(u64::from(completion_work)),
-        AccessKind::GlobalAsyncCopy { .. }
-        | AccessKind::NonMemory
+        } => match decode_async_copy_completion(completion_work) {
+            AsyncCopyCompletion::Inactive => None,
+            AsyncCopyCompletion::PayloadWork(work)
+            | AsyncCopyCompletion::ExactDestinationWork(work) => Some(u64::from(work)),
+        },
+        AccessKind::NonMemory
+        | AccessKind::PredicatedOffMemory
         | AccessKind::Shared { .. }
         | AccessKind::LocalLoad { .. }
         | AccessKind::LocalStore { .. }
@@ -1852,6 +4751,41 @@ fn async_copy_completion_work(kind: AccessKind) -> Option<u64> {
         | AccessKind::GlobalStore { .. }
         | AccessKind::GlobalReduction { .. } => None,
     }
+}
+
+fn async_copy_destination_wavefronts(
+    kind: AccessKind,
+    params: &IssueModelParams,
+) -> Result<Option<u64>, IssueError> {
+    let AccessKind::GlobalAsyncCopy {
+        completion_work,
+        l1_policy: LdgstsL1Policy::CacheAtAllLevels,
+        ..
+    } = kind
+    else {
+        return Ok(None);
+    };
+    let AsyncCopyCompletion::ExactDestinationWork(work) =
+        decode_async_copy_completion(completion_work)
+    else {
+        return Ok(None);
+    };
+    let work_per_wavefront = params
+        .ldgsts_cache_all_destination_wavefront_cycles
+        .checked_mul(params.ldgsts_delivery_units_per_cycle())
+        .ok_or(IssueError::TimeMultiplicationOverflow {
+            operation: "LDGSTS destination work per wavefront",
+            lhs: params.ldgsts_cache_all_destination_wavefront_cycles,
+            rhs: params.ldgsts_delivery_units_per_cycle(),
+        })?;
+    let work = u64::from(work);
+    if work_per_wavefront == 0 || work % work_per_wavefront != 0 {
+        return Err(IssueError::InvalidAsyncCopyDestinationWork {
+            completion_work: work,
+            work_per_wavefront,
+        });
+    }
+    Ok(Some(work / work_per_wavefront))
 }
 
 fn validate_async_copy_completion_work(kind: AccessKind, warp: usize) -> Result<(), IssueError> {
@@ -1898,6 +4832,7 @@ fn data_ready_time(
 ) -> Result<Option<u64>, IssueError> {
     let needs_ready = write_barrier.is_some() || observe_async_copy;
     match kind {
+        AccessKind::PredicatedOffMemory => Ok(None),
         AccessKind::NonMemory => {
             if needs_ready {
                 params.non_memory_ready(t).map(Some)
@@ -2035,7 +4970,7 @@ fn data_ready_time(
             }
         },
         AccessKind::GlobalStore { off, len }
-        | AccessKind::GlobalReduction { off, len }
+        | AccessKind::GlobalReduction { off, len, .. }
         | AccessKind::LocalStore { off, len } => {
             let origin = match kind {
                 AccessKind::GlobalStore { .. } | AccessKind::GlobalReduction { .. } => {
@@ -2322,10 +5257,27 @@ pub(crate) struct SmCore<'a> {
     block_states: Vec<BlockState>,
     subcore_warps: [Vec<usize>; SUB_CORES],
     hold: [Option<usize>; SUB_CORES],
+    /// Architecture-local CTA-barrier issue resource present when the joined
+    /// function contains a characterized barrier instruction.
+    barrier_issue: Option<CtaBarrierIssue>,
+    /// Earliest cycle at which the one SM-shared barrier server can accept
+    /// another warp arrival.
+    barrier_pipe_ready: u64,
     /// Earliest issue time of each SMSP's local Tensor Core. This timeline is
     /// kernel-local but survives CTA retirement/admission waves on the SM.
     tensor_pipe_ready: [u64; SUB_CORES],
+    /// Earliest free cycle of the cache-all LDGSTS destination service shared
+    /// by every resident warp on this SM.
+    ldgsts_destination_pipe_ready: u64,
+    /// Pending barrier-observed L1-hit result writebacks. Allocated only when
+    /// one joined function contains both the admitted HADD2 producer and the
+    /// admitted sm_86 STRONG.SM scalar load form.
+    result_writebacks: Option<ResultWritebackState>,
     unmodeled_tails: TailFlags,
+    readiness: ReadinessDiagnostics,
+    memory_service_candidates: MemoryServiceCandidateState,
+    emit_admission_witnesses: bool,
+    memory_admission_feedback: Option<Box<MemoryAdmissionFeedbackState>>,
     issued: u64,
     t: u64,
     arrival_stamp: u64,
@@ -2523,6 +5475,52 @@ impl<'a> SmCore<'a> {
                 retry: VecDeque::new(),
             }),
         };
+        let mut barrier_issue = None;
+        for slot in schedule.by_pc.values() {
+            let PipelineClass::Barrier {
+                warp_initiation_interval_cycles,
+                generation_rearm_cycles,
+            } = slot.pipeline_class
+            else {
+                continue;
+            };
+            let declared = CtaBarrierIssue {
+                warp_initiation_interval_cycles,
+                generation_rearm_cycles,
+            };
+            if let Some(expected) = barrier_issue
+                && expected != declared
+            {
+                return Err(IssueError::BarrierPipelineConfigurationMismatch {
+                    expected,
+                    got: declared,
+                });
+            }
+            barrier_issue = Some(declared);
+        }
+        let has_fixed_writeback = schedule.by_pc.values().any(|slot| {
+            matches!(
+                result_writeback_kind(slot, params.arch),
+                Some(ResultWritebackKind::FixedHadd2 { .. })
+            )
+        });
+        let has_variable_writeback = schedule.by_pc.values().any(|slot| {
+            matches!(
+                result_writeback_kind(slot, params.arch),
+                Some(ResultWritebackKind::L1TexStrongSmU32 { .. })
+            )
+        });
+        let result_writebacks = if has_fixed_writeback && has_variable_writeback {
+            Some(ResultWritebackState {
+                timing: params
+                    .arch
+                    .fixed_l1tex_writeback_priority()
+                    .require("fixed_l1tex_writeback_priority")?,
+                pending: Vec::new(),
+            })
+        } else {
+            None
+        };
         let mut core = Self {
             schedule,
             schedule_slots,
@@ -2539,8 +5537,16 @@ impl<'a> SmCore<'a> {
             block_states: Vec::new(),
             subcore_warps: Default::default(),
             hold: [None; SUB_CORES],
+            barrier_issue,
+            barrier_pipe_ready: 0,
             tensor_pipe_ready: [0; SUB_CORES],
+            ldgsts_destination_pipe_ready: 0,
+            result_writebacks,
             unmodeled_tails,
+            readiness: ReadinessDiagnostics::default(),
+            memory_service_candidates: MemoryServiceCandidateState::default(),
+            emit_admission_witnesses: false,
+            memory_admission_feedback: None,
             issued: 0,
             t: 0,
             arrival_stamp: 0,
@@ -2552,6 +5558,56 @@ impl<'a> SmCore<'a> {
         };
         core.admit_blocks(0)?;
         Ok(core)
+    }
+
+    pub(crate) fn install_memory_service_candidates(
+        &mut self,
+        candidates: &[MemoryServiceCandidate],
+    ) -> Result<(), IssueError> {
+        self.memory_service_candidates = MemoryServiceCandidateState::checked(candidates)?;
+        Ok(())
+    }
+
+    pub(crate) fn enable_memory_admission_observations(&mut self) {
+        self.emit_admission_witnesses = true;
+    }
+
+    pub(crate) fn install_memory_admission_feedback(
+        &mut self,
+        candidate: MemoryAdmissionCandidate,
+    ) -> Result<(), IssueError> {
+        candidate.validate_feedback(self.params.read_barrier_latency)?;
+        self.memory_admission_feedback =
+            Some(Box::new(MemoryAdmissionFeedbackState::checked(candidate)?));
+        self.emit_admission_witnesses = true;
+        Ok(())
+    }
+
+    pub(crate) fn complete_memory_admission_feedback(
+        &mut self,
+        witness: AdmissionRequestWitness,
+        operation: MemoryOperation,
+        hit_sectors: u64,
+        miss_sectors: u64,
+        l2_requests: u64,
+        unique_regions: u64,
+        issue_time: u64,
+    ) -> Result<(), IssueError> {
+        self.memory_admission_feedback
+            .as_mut()
+            .ok_or(IssueError::MemoryAdmissionFeedbackReservationMissing {
+                warp: witness.warp(),
+                instruction: witness.instruction(),
+            })?
+            .complete(
+                witness,
+                operation,
+                hit_sectors,
+                miss_sectors,
+                l2_requests,
+                unique_regions,
+                issue_time,
+            )
     }
 
     #[cfg(test)]
@@ -2601,11 +5657,17 @@ impl<'a> SmCore<'a> {
     /// Result snapshot; meaningful once [`Self::advance`] returned
     /// [`Advance::Done`].
     pub(crate) fn result(&self) -> SmSimResult {
+        let mut readiness = self.readiness.clone();
+        readiness.memory_service_candidates = self.memory_service_candidates.diagnostics();
+        if let Some(feedback) = self.memory_admission_feedback.as_ref() {
+            readiness.memory_admission_feedback = feedback.diagnostics();
+        }
         SmSimResult {
             instructions_issued: self.issued,
             cycles: self.t,
             l1: self.mem.l1().map(|c| c.counters),
             unmodeled_tails: self.unmodeled_tails,
+            readiness,
         }
     }
 
@@ -2725,8 +5787,10 @@ impl<'a> SmCore<'a> {
                             blk.launch_index,
                             w.warp_slot,
                         )?),
+                        current_since: t,
                         eligible: t,
                         barrier_clear: [0; DEP_BARRIERS],
+                        barrier_origin: [DependencyOrigin::Unknown; DEP_BARRIERS],
                         barrier_pending: [0; DEP_BARRIERS],
                         block: block_ix,
                         launch_index: blk.launch_index,
@@ -2734,6 +5798,13 @@ impl<'a> SmCore<'a> {
                         pos_in_subcore,
                         arrival,
                         at_block_barrier: false,
+                        cta_barrier_ready: 0,
+                        barrier_pipeline_ready: 0,
+                        branch_pipeline_ready: 0,
+                        block_barrier_dispatch: None,
+                        block_barrier_arrival: None,
+                        clock_first_issue: None,
+                        clock_reads_issued: 0,
                         done: false,
                     },
                 ));
@@ -2775,6 +5846,10 @@ impl<'a> SmCore<'a> {
                 warp_slots: pending_slots.into_boxed_slice(),
                 first_warp,
                 admitted_warps,
+                barrier_generation: 0,
+                barrier_first_dispatch: None,
+                barrier_first_arrival: None,
+                barrier_rearm_ready: 0,
             });
             self.resident_warps = next_resident_warps;
             self.resident_shared_memory_bytes = next_resident_shared_memory_bytes;
@@ -2795,21 +5870,25 @@ impl<'a> SmCore<'a> {
     /// pending units and/or async-copy-group source units.
     fn mem_step_shared(
         &mut self,
+        subcore: usize,
         wix: usize,
         instruction: usize,
         kind: AccessKind,
         sectors: &'a [i64],
         write_barrier: Option<DepBarrier>,
+        destination_wavefronts: u64,
         out: &mut Vec<MemRequest>,
     ) -> Result<Option<u64>, IssueError> {
         let t = self.t;
         let p = self.params;
+        let emit_admission_witnesses = self.emit_admission_witnesses;
         let MemModel::L1Shared(st) = &mut self.mem else {
             unreachable!("mem_step_shared is only dispatched in shared mode")
         };
         let warps = &mut self.warps;
         let async_copies = &mut self.async_copies;
         match kind {
+            AccessKind::PredicatedOffMemory => Ok(None),
             AccessKind::NonMemory => {
                 if write_barrier.is_some() {
                     p.non_memory_ready(t).map(Some)
@@ -2889,12 +5968,13 @@ impl<'a> SmCore<'a> {
             } => {
                 let source_active = completion_work != 0;
                 let range = off..off + usize::from(len);
-                let delivery_work = u64::from(completion_work);
+                let delivery_work = async_copy_completion_work(kind).unwrap_or(0);
                 let async_group = if source_active {
                     Some(async_copies[wix].add_pending_async_copy_sources(
                         wix,
                         u32::from(len),
                         delivery_work,
+                        destination_wavefronts,
                         &p,
                     )?)
                 } else {
@@ -2968,7 +6048,7 @@ impl<'a> SmCore<'a> {
             }
             | AccessKind::GlobalUntagged { off, len } => {
                 let origin = MemoryOrigin::Global;
-                let (source, counted, operation, async_copy, completion_work) = match kind {
+                let (source, counted, operation, async_copy) = match kind {
                     // ATOM rides bypass provenance but remains a returning RMW
                     // operation; every other bypass / untagged sector is a read.
                     AccessKind::GlobalBypass { token, .. } => (
@@ -2980,7 +6060,6 @@ impl<'a> SmCore<'a> {
                             MemoryOperation::Read
                         },
                         token == CacheOpToken::Ldgsts,
-                        0,
                     ),
                     AccessKind::GlobalAsyncCopy {
                         completion_work, ..
@@ -2989,10 +6068,9 @@ impl<'a> SmCore<'a> {
                         true,
                         MemoryOperation::Read,
                         completion_work != 0,
-                        completion_work,
                     ),
                     AccessKind::GlobalUntagged { .. } => {
-                        (L2Source::Untagged, false, MemoryOperation::Read, false, 0)
+                        (L2Source::Untagged, false, MemoryOperation::Read, false)
                     }
                     _ => unreachable!("match arm admits only bypass, async-copy, or untagged"),
                 };
@@ -3016,11 +6094,12 @@ impl<'a> SmCore<'a> {
                     };
                 }
                 let async_group = if async_copy {
-                    let delivery_work = u64::from(completion_work);
+                    let delivery_work = async_copy_completion_work(kind).unwrap_or(0);
                     Some(async_copies[wix].add_pending_async_copy_sources(
                         wix,
                         u32::from(len),
                         delivery_work,
+                        destination_wavefronts,
                         &p,
                     )?)
                 } else {
@@ -3062,12 +6141,13 @@ impl<'a> SmCore<'a> {
                         source,
                         operation,
                         reply,
+                        admission_witness: None,
                     });
                 }
                 Ok(None)
             }
             AccessKind::GlobalStore { off, len }
-            | AccessKind::GlobalReduction { off, len }
+            | AccessKind::GlobalReduction { off, len, .. }
             | AccessKind::LocalStore { off, len } => {
                 let origin = match kind {
                     AccessKind::GlobalStore { .. } | AccessKind::GlobalReduction { .. } => {
@@ -3077,14 +6157,43 @@ impl<'a> SmCore<'a> {
                     _ => unreachable!("match arm admits only hierarchy writes"),
                 };
                 let reduction = matches!(kind, AccessKind::GlobalReduction { .. });
-                for &sector_id in &sectors[off..off + usize::from(len)] {
-                    if reduction {
+                for (request_index, &sector_id) in
+                    sectors[off..off + usize::from(len)].iter().enumerate()
+                {
+                    let mut request = if reduction {
                         st.l1.probe_reduction(origin, sector_id, t)?;
-                        out.push(MemRequest::reduction(t, sector_id));
+                        MemRequest::reduction(t, sector_id)
                     } else {
                         st.l1.probe_store(origin, sector_id, t)?;
-                        out.push(MemRequest::store(t, sector_id, origin));
+                        MemRequest::store(t, sector_id, origin)
+                    };
+                    if origin == MemoryOrigin::Global && emit_admission_witnesses {
+                        request.admission_witness = Some(
+                            AdmissionRequestWitness::new(
+                                u32::try_from(wix).map_err(|_| IssueError::CounterOverflow {
+                                    counter: "memory-admission witness warp",
+                                })?,
+                                u32::try_from(instruction).map_err(|_| {
+                                    IssueError::CounterOverflow {
+                                        counter: "memory-admission witness instruction",
+                                    }
+                                })?,
+                                u8::try_from(subcore).map_err(|_| IssueError::CounterOverflow {
+                                    counter: "memory-admission witness subcore",
+                                })?,
+                                u16::try_from(request_index).map_err(|_| {
+                                    IssueError::CounterOverflow {
+                                        counter: "memory-admission witness request index",
+                                    }
+                                })?,
+                                len,
+                            )
+                            .ok_or(IssueError::CounterOverflow {
+                                counter: "memory-admission witness encoding",
+                            })?,
+                        );
                     }
+                    out.push(request);
                 }
                 // A present write barrier is priced at the L2-hit arm (as in
                 // L1Const); stores and reductions do not wait on responses.
@@ -3582,12 +6691,717 @@ impl<'a> SmCore<'a> {
         Ok(())
     }
 
+    fn project_selected_readiness(
+        &self,
+        subcore: usize,
+        warp_index: usize,
+        now: u64,
+        projected: &mut ReadinessDiagnostics,
+    ) -> Result<(), IssueError> {
+        let warp = &self.warps[warp_index];
+        let slot = warp
+            .next_slot
+            .ok_or(IssueError::MissingIssueSlot { warp: warp_index })?;
+        let kind = warp.insts[warp.next].kind;
+        if let Some((class, sectors, wavefronts, unique_lines, atomic_l2_requests)) =
+            projected_global_memory_issue(kind, warp.sectors)
+        {
+            projected
+                .global_memory_issue
+                .observe(
+                    class,
+                    sectors,
+                    wavefronts,
+                    unique_lines,
+                    atomic_l2_requests,
+                    slot.control.read_barrier.is_some(),
+                    now,
+                )
+                .map_err(|source| match source {
+                    ReadinessCounterError::Overflow { field, .. } => {
+                        IssueError::CounterOverflow { counter: field }
+                    }
+                    mismatch @ (ReadinessCounterError::MemoryServiceCandidateMismatch {
+                        ..
+                    }
+                    | ReadinessCounterError::MemoryAdmissionCandidateMismatch {
+                        ..
+                    }) => IssueError::ReadinessDiagnostic(mismatch),
+                })?;
+        }
+        let base = warp.current_since;
+        let mut ready_at = base;
+        let mut limiting = None;
+        let mut tied = 0;
+
+        if let Some(feedback) = self.memory_admission_feedback.as_ref()
+            && feedback.matches_kind(kind)
+        {
+            let until = feedback
+                .admission_ready_at(subcore, kind)
+                .expect("selected feedback instruction has a priced queue frontier");
+            observe_readiness_constraint(
+                projected,
+                base,
+                until,
+                ReadinessCause::MemoryAdmissionQueue,
+                &mut ready_at,
+                &mut limiting,
+                &mut tied,
+            )?;
+        }
+        if let Some(feedback) = self.memory_admission_feedback.as_ref()
+            && feedback.candidate.membar_waits_for_service_completion
+            && is_gpu_membar_issue(slot)
+        {
+            let until = feedback
+                .completion_ready_at(warp_index, slot)
+                .expect("selected MEMBAR has a priced write-completion frontier");
+            observe_readiness_constraint(
+                projected,
+                base,
+                until,
+                ReadinessCause::MemoryWriteCompletion,
+                &mut ready_at,
+                &mut limiting,
+                &mut tied,
+            )?;
+        }
+
+        observe_readiness_constraint(
+            projected,
+            base,
+            warp.eligible,
+            ReadinessCause::ControlStall,
+            &mut ready_at,
+            &mut limiting,
+            &mut tied,
+        )?;
+        observe_readiness_constraint(
+            projected,
+            base,
+            warp.cta_barrier_ready,
+            ReadinessCause::CtaBarrierRendezvous,
+            &mut ready_at,
+            &mut limiting,
+            &mut tied,
+        )?;
+        observe_readiness_constraint(
+            projected,
+            base,
+            warp.barrier_pipeline_ready,
+            ReadinessCause::PipelineBarrier,
+            &mut ready_at,
+            &mut limiting,
+            &mut tied,
+        )?;
+        observe_readiness_constraint(
+            projected,
+            base,
+            warp.branch_pipeline_ready,
+            ReadinessCause::PipelineBranch,
+            &mut ready_at,
+            &mut limiting,
+            &mut tied,
+        )?;
+
+        for barrier in 0..DEP_BARRIERS {
+            if !slot.control.wait_mask.contains_index(barrier) {
+                continue;
+            }
+            debug_assert_eq!(
+                warp.barrier_pending[barrier], 0,
+                "a selected warp cannot have an unresolved dependence counter"
+            );
+            observe_readiness_constraint(
+                projected,
+                base,
+                warp.barrier_clear[barrier],
+                warp.barrier_origin[barrier].into(),
+                &mut ready_at,
+                &mut limiting,
+                &mut tied,
+            )?;
+        }
+
+        if self.has_async_copy_protocol && slot.op_class == OpClass::AsyncCopyCommit {
+            let commits_nonempty = self.async_copies[warp_index]
+                .state
+                .as_deref()
+                .and_then(|state| state.open_group)
+                .is_some();
+            if commits_nonempty {
+                projected.async_groups.groups_committed = checked_u64_counter_add(
+                    "committed asynchronous-copy group diagnostic",
+                    projected.async_groups.groups_committed,
+                    1,
+                )?;
+            }
+        }
+
+        if self.has_async_copy_protocol && slot.op_class == OpClass::AsyncCopyWait {
+            let prefix = self.async_copies[warp_index]
+                .async_wait_prefix_len(slot.async_copy_wait_max_pending_groups);
+            if let Some(state) = self.async_copies[warp_index].state.as_deref() {
+                for group in state.committed_groups.iter().take(prefix) {
+                    debug_assert!(
+                        group.is_complete_at(now),
+                        "a selected async wait requires a complete committed prefix"
+                    );
+                    let local_completion = group.local_completion_time(&self.params)?;
+                    let cause = group.limiting_readiness_cause(&self.params)?;
+                    observe_readiness_constraint(
+                        projected,
+                        base,
+                        group.completion_time,
+                        cause,
+                        &mut ready_at,
+                        &mut limiting,
+                        &mut tied,
+                    )?;
+
+                    projected.async_groups.groups_waited = checked_u64_counter_add(
+                        "waited asynchronous-copy group diagnostic",
+                        projected.async_groups.groups_waited,
+                        1,
+                    )?;
+                    let source_cycles = group
+                        .source_completion_time
+                        .saturating_sub(group.committed_at);
+                    projected.async_groups.source_cycles = checked_u64_counter_add(
+                        "asynchronous-copy committed-to-source diagnostic",
+                        projected.async_groups.source_cycles,
+                        source_cycles,
+                    )?;
+                    let local_cycles =
+                        local_completion.saturating_sub(group.source_completion_time);
+                    projected.async_groups.destination_local_cycles = checked_u64_counter_add(
+                        "asynchronous-copy local destination diagnostic",
+                        projected.async_groups.destination_local_cycles,
+                        local_cycles,
+                    )?;
+                    let service_cycles = group.completion_time.saturating_sub(local_completion);
+                    projected.async_groups.destination_sm_service_cycles = checked_u64_counter_add(
+                        "asynchronous-copy SM destination-service diagnostic",
+                        projected.async_groups.destination_sm_service_cycles,
+                        service_cycles,
+                    )?;
+                    let hidden = group
+                        .completion_time
+                        .min(base)
+                        .saturating_sub(group.committed_at);
+                    projected.async_groups.completion_hidden_before_wait_cycles =
+                        checked_u64_counter_add(
+                            "asynchronous-copy hidden-before-wait diagnostic",
+                            projected.async_groups.completion_hidden_before_wait_cycles,
+                            hidden,
+                        )?;
+                    let limited_counter = match cause {
+                        ReadinessCause::AsyncSource => {
+                            &mut projected.async_groups.source_limited_groups
+                        }
+                        ReadinessCause::AsyncDestinationLocal => {
+                            &mut projected.async_groups.destination_local_limited_groups
+                        }
+                        ReadinessCause::AsyncDestinationSmService => {
+                            &mut projected.async_groups.destination_sm_service_limited_groups
+                        }
+                        _ => unreachable!("async-group classifier returns an async cause"),
+                    };
+                    *limited_counter = checked_u64_counter_add(
+                        "asynchronous-copy limiting-arm diagnostic",
+                        *limited_counter,
+                        1,
+                    )?;
+                }
+            }
+        }
+
+        if let PipelineClass::Branch {
+            next_issue_interval_cycles,
+        } = slot.pipeline_class
+        {
+            projected.control_pipeline.branch_instructions_issued = checked_u64_counter_add(
+                "branch-pipeline issued-instruction diagnostic",
+                projected.control_pipeline.branch_instructions_issued,
+                1,
+            )?;
+            projected.control_pipeline.branch_resolution_cycles = checked_u64_counter_add(
+                "branch-pipeline resolution-cycle diagnostic",
+                projected.control_pipeline.branch_resolution_cycles,
+                next_issue_interval_cycles,
+            )?;
+        }
+
+        if let PipelineClass::Barrier {
+            warp_initiation_interval_cycles,
+            ..
+        } = slot.pipeline_class
+        {
+            projected.barrier_pipeline.instructions_issued = checked_u64_counter_add(
+                "CTA-barrier pipeline issued-instruction diagnostic",
+                projected.barrier_pipeline.instructions_issued,
+                1,
+            )?;
+            projected.barrier_pipeline.issue_server_busy_cycles = checked_u64_counter_add(
+                "CTA-barrier pipeline busy-cycle diagnostic",
+                projected.barrier_pipeline.issue_server_busy_cycles,
+                warp_initiation_interval_cycles,
+            )?;
+        }
+
+        if matches!(slot.pipeline_class, PipelineClass::Tensor { .. }) {
+            observe_readiness_constraint(
+                projected,
+                base,
+                self.tensor_pipe_ready[subcore],
+                ReadinessCause::PipelineTensor,
+                &mut ready_at,
+                &mut limiting,
+                &mut tied,
+            )?;
+        }
+
+        let effective_ready = ready_at.max(base);
+        if effective_ready > base {
+            projected.limiting_cycles.add_cause(
+                limiting.expect("a post-baseline ready frontier has a cause"),
+                effective_ready - base,
+            )?;
+        }
+        if tied != 0 {
+            projected.tied_limiting_causes = checked_u64_counter_add(
+                "tied limiting readiness cause diagnostic",
+                projected.tied_limiting_causes,
+                tied,
+            )?;
+        }
+        if now > effective_ready {
+            let delayed = now - effective_ready;
+            projected
+                .limiting_cycles
+                .add_eligible_not_selected(delayed)?;
+            projected
+                .constraint_exposure_cycles
+                .add_eligible_not_selected(delayed)?;
+            projected.delayed_ready_issues = checked_u64_counter_add(
+                "delayed ready issue diagnostic",
+                projected.delayed_ready_issues,
+                1,
+            )?;
+        }
+        Ok(())
+    }
+
+    fn project_cta_barrier_diagnostics(
+        &self,
+        picks: &[Option<usize>; SUB_CORES],
+        barrier_arrival_times: &[Option<u64>; SUB_CORES],
+        now: u64,
+        projected: &mut ReadinessDiagnostics,
+    ) -> Result<(), IssueError> {
+        #[derive(Clone, Copy)]
+        struct BlockDelta {
+            block: usize,
+            retirements: usize,
+            arrivals: usize,
+            first_new_arrival: Option<u64>,
+            last_new_arrival: Option<u64>,
+        }
+        let mut deltas: [Option<BlockDelta>; SUB_CORES] = [None; SUB_CORES];
+        for (subcore, pick) in picks.iter().enumerate() {
+            let Some(warp_index) = *pick else { continue };
+            let warp = &self.warps[warp_index];
+            let retires = warp.next_issue_retires()?;
+            let slot = warp
+                .next_slot
+                .ok_or(IssueError::MissingIssueSlot { warp: warp_index })?;
+            let arrives = !retires && slot.op_class == OpClass::BlockBarrier;
+            if !retires && !arrives {
+                continue;
+            }
+            let entry_index = deltas
+                .iter()
+                .position(|entry| entry.is_some_and(|delta| delta.block == warp.block))
+                .or_else(|| deltas.iter().position(Option::is_none))
+                .ok_or(IssueError::CounterOverflow {
+                    counter: "CTA barrier diagnostic block delta",
+                })?;
+            let entry = deltas[entry_index].get_or_insert(BlockDelta {
+                block: warp.block,
+                retirements: 0,
+                arrivals: 0,
+                first_new_arrival: None,
+                last_new_arrival: None,
+            });
+            if retires {
+                entry.retirements = checked_usize_counter_add(
+                    "CTA barrier diagnostic retirement",
+                    entry.retirements,
+                    1,
+                )?;
+            }
+            if arrives {
+                let arrival = barrier_arrival_times[subcore].unwrap_or(now);
+                entry.arrivals =
+                    checked_usize_counter_add("CTA barrier diagnostic arrival", entry.arrivals, 1)?;
+                entry.first_new_arrival = Some(
+                    entry
+                        .first_new_arrival
+                        .map_or(arrival, |current| current.min(arrival)),
+                );
+                entry.last_new_arrival = Some(
+                    entry
+                        .last_new_arrival
+                        .map_or(arrival, |current| current.max(arrival)),
+                );
+            }
+        }
+
+        for delta in deltas.into_iter().flatten() {
+            let state = &self.block_states[delta.block];
+            let unfinished = state.unfinished.checked_sub(delta.retirements).ok_or(
+                IssueError::CounterUnderflow {
+                    counter: "CTA barrier diagnostic unfinished warp",
+                },
+            )?;
+            let waiting = checked_usize_counter_add(
+                "CTA barrier diagnostic waiting warp",
+                state.waiting,
+                delta.arrivals,
+            )?;
+            if waiting == 0 || waiting != unfinished {
+                continue;
+            }
+
+            state
+                .barrier_generation
+                .checked_add(1)
+                .ok_or(IssueError::CounterOverflow {
+                    counter: "CTA barrier generation",
+                })?;
+            let first_issue = state.barrier_first_dispatch.unwrap_or(now);
+            let mut last_issue = if delta.arrivals == 0 {
+                first_issue
+            } else {
+                now
+            };
+            let first_arrival = match (state.barrier_first_arrival, delta.first_new_arrival) {
+                (Some(existing), Some(new)) => existing.min(new),
+                (Some(existing), None) => existing,
+                (None, Some(new)) => new,
+                (None, None) => now,
+            };
+            let mut last_arrival = delta.last_new_arrival.unwrap_or(first_arrival);
+            let first = state.first_warp;
+            let end = checked_usize_counter_add(
+                "CTA barrier diagnostic warp range",
+                first,
+                state.admitted_warps,
+            )?;
+            for warp in &self.warps[first..end] {
+                if !warp.at_block_barrier {
+                    continue;
+                }
+                let dispatch = warp
+                    .block_barrier_dispatch
+                    .ok_or(IssueError::CounterUnderflow {
+                        counter: "CTA barrier dispatch timestamp",
+                    })?;
+                let arrival = warp
+                    .block_barrier_arrival
+                    .ok_or(IssueError::CounterUnderflow {
+                        counter: "CTA barrier arrival timestamp",
+                    })?;
+                last_issue = last_issue.max(dispatch);
+                last_arrival = last_arrival.max(arrival);
+            }
+            let release_at = checked_cycle_add("CTA barrier diagnostic release", last_arrival, 1)?;
+            let mut rendezvous = 0u64;
+            for warp in &self.warps[first..end] {
+                if !warp.at_block_barrier {
+                    continue;
+                }
+                let arrival = warp
+                    .block_barrier_arrival
+                    .ok_or(IssueError::CounterUnderflow {
+                        counter: "CTA barrier arrival timestamp",
+                    })?;
+                rendezvous = checked_u64_counter_add(
+                    "CTA barrier rendezvous warp cycle diagnostic",
+                    rendezvous,
+                    release_at
+                        .checked_sub(arrival)
+                        .ok_or(IssueError::CounterUnderflow {
+                            counter: "CTA barrier rendezvous interval",
+                        })?,
+                )?;
+            }
+            for (subcore, pick) in picks.iter().enumerate() {
+                let Some(warp) = *pick else { continue };
+                if self.warps[warp].block != delta.block
+                    || self.warps[warp].next_issue_retires()?
+                    || self.warps[warp]
+                        .next_slot
+                        .is_none_or(|slot| slot.op_class != OpClass::BlockBarrier)
+                {
+                    continue;
+                }
+                let arrival = barrier_arrival_times[subcore].unwrap_or(now);
+                rendezvous = checked_u64_counter_add(
+                    "CTA barrier rendezvous warp cycle diagnostic",
+                    rendezvous,
+                    release_at
+                        .checked_sub(arrival)
+                        .ok_or(IssueError::CounterUnderflow {
+                            counter: "CTA barrier new-arrival interval",
+                        })?,
+                )?;
+            }
+            let spread =
+                last_arrival
+                    .checked_sub(first_arrival)
+                    .ok_or(IssueError::CounterUnderflow {
+                        counter: "CTA barrier arrival spread",
+                    })?;
+            let issue_span =
+                last_issue
+                    .checked_sub(first_issue)
+                    .ok_or(IssueError::CounterUnderflow {
+                        counter: "CTA barrier issue span",
+                    })?;
+
+            projected.cta_barriers.generations = checked_u64_counter_add(
+                "CTA barrier generation diagnostic",
+                projected.cta_barriers.generations,
+                1,
+            )?;
+            projected.cta_barriers.total_arrival_spread_cycles = checked_u64_counter_add(
+                "CTA barrier total arrival-spread diagnostic",
+                projected.cta_barriers.total_arrival_spread_cycles,
+                spread,
+            )?;
+            projected.cta_barriers.max_arrival_spread_cycles =
+                projected.cta_barriers.max_arrival_spread_cycles.max(spread);
+            projected.cta_barriers.total_rendezvous_warp_cycles = checked_u64_counter_add(
+                "CTA barrier total rendezvous diagnostic",
+                projected.cta_barriers.total_rendezvous_warp_cycles,
+                rendezvous,
+            )?;
+            if delta.retirements != 0 {
+                projected.cta_barriers.releases_after_participant_retirement =
+                    checked_u64_counter_add(
+                        "CTA barrier participant-retirement diagnostic",
+                        projected.cta_barriers.releases_after_participant_retirement,
+                        1,
+                    )?;
+            }
+            projected.barrier_pipeline.generations_completed = checked_u64_counter_add(
+                "CTA-barrier pipeline completed-generation diagnostic",
+                projected.barrier_pipeline.generations_completed,
+                1,
+            )?;
+            if self
+                .barrier_issue
+                .is_some_and(|issue| issue.generation_rearm_cycles != 0)
+            {
+                projected.barrier_pipeline.generation_rearm_events = checked_u64_counter_add(
+                    "CTA-barrier pipeline generation-rearm diagnostic",
+                    projected.barrier_pipeline.generation_rearm_events,
+                    1,
+                )?;
+            }
+            projected.barrier_pipeline.first_issue_timestamp_sum = checked_u64_counter_add(
+                "CTA-barrier pipeline first-issue timestamp diagnostic",
+                projected.barrier_pipeline.first_issue_timestamp_sum,
+                first_issue,
+            )?;
+            projected.barrier_pipeline.last_issue_timestamp_sum = checked_u64_counter_add(
+                "CTA-barrier pipeline last-issue timestamp diagnostic",
+                projected.barrier_pipeline.last_issue_timestamp_sum,
+                last_issue,
+            )?;
+            projected
+                .barrier_pipeline
+                .total_generation_issue_span_cycles = checked_u64_counter_add(
+                "CTA-barrier pipeline generation issue-span diagnostic",
+                projected
+                    .barrier_pipeline
+                    .total_generation_issue_span_cycles,
+                issue_span,
+            )?;
+            projected.barrier_pipeline.max_generation_issue_span_cycles = projected
+                .barrier_pipeline
+                .max_generation_issue_span_cycles
+                .max(issue_span);
+            projected.barrier_pipeline.first_arrival_timestamp_sum = checked_u64_counter_add(
+                "CTA-barrier pipeline first-arrival timestamp diagnostic",
+                projected.barrier_pipeline.first_arrival_timestamp_sum,
+                first_arrival,
+            )?;
+            projected.barrier_pipeline.last_arrival_timestamp_sum = checked_u64_counter_add(
+                "CTA-barrier pipeline last-arrival timestamp diagnostic",
+                projected.barrier_pipeline.last_arrival_timestamp_sum,
+                last_arrival,
+            )?;
+            projected
+                .barrier_pipeline
+                .total_generation_arrival_span_cycles = checked_u64_counter_add(
+                "CTA-barrier pipeline generation arrival-span diagnostic",
+                projected
+                    .barrier_pipeline
+                    .total_generation_arrival_span_cycles,
+                spread,
+            )?;
+            projected
+                .barrier_pipeline
+                .max_generation_arrival_span_cycles = projected
+                .barrier_pipeline
+                .max_generation_arrival_span_cycles
+                .max(spread);
+        }
+        Ok(())
+    }
+
+    fn project_picked_readiness(
+        &self,
+        picks: &[Option<usize>; SUB_CORES],
+        barrier_arrival_times: &[Option<u64>; SUB_CORES],
+        now: u64,
+    ) -> Result<ReadinessDiagnostics, IssueError> {
+        let mut projected = self.readiness.clone();
+        for (subcore, pick) in picks.iter().enumerate() {
+            if let Some(warp) = *pick {
+                self.project_selected_readiness(subcore, warp, now, &mut projected)?;
+                let state = &self.warps[warp];
+                let slot = state
+                    .next_slot
+                    .ok_or(IssueError::MissingIssueSlot { warp })?;
+                if is_clocklo_issue(slot) {
+                    projected.clock_issue.reads_issued = checked_u64_counter_add(
+                        "CLOCKLO reads-issued diagnostic",
+                        projected.clock_issue.reads_issued,
+                        1,
+                    )?;
+                    state
+                        .clock_reads_issued
+                        .checked_add(1)
+                        .ok_or(IssueError::CounterOverflow {
+                            counter: "warp CLOCKLO issue",
+                        })?;
+                    if let Some(first) = state.clock_first_issue {
+                        let interval =
+                            now.checked_sub(first).ok_or(IssueError::CounterUnderflow {
+                                counter: "warp CLOCKLO issue interval",
+                            })?;
+                        if state.clock_reads_issued == 1 {
+                            projected.clock_issue.warps_with_interval = checked_u64_counter_add(
+                                "CLOCKLO warps-with-interval diagnostic",
+                                projected.clock_issue.warps_with_interval,
+                                1,
+                            )?;
+                        }
+                        projected.clock_issue.maximum_first_to_last_issue_cycles = projected
+                            .clock_issue
+                            .maximum_first_to_last_issue_cycles
+                            .max(interval);
+                    }
+                    if self
+                        .memory_admission_feedback
+                        .as_ref()
+                        .is_some_and(|feedback| {
+                            feedback.candidate.membar_waits_for_service_completion
+                        })
+                    {
+                        match state.clock_reads_issued {
+                            1 => {
+                                let first = state.clock_first_issue.ok_or(
+                                    IssueError::CounterUnderflow {
+                                        counter: "first CLOCKLO phase timestamp",
+                                    },
+                                )?;
+                                let interval =
+                                    now.checked_sub(first).ok_or(IssueError::CounterUnderflow {
+                                        counter: "first-to-second CLOCKLO issue interval",
+                                    })?;
+                                projected.clock_issue.maximum_first_to_second_issue_cycles =
+                                    projected
+                                        .clock_issue
+                                        .maximum_first_to_second_issue_cycles
+                                        .max(interval);
+                            }
+                            2 => {
+                                let second = self
+                                    .memory_admission_feedback
+                                    .as_ref()
+                                    .and_then(|feedback| feedback.second_clock_issue(warp))
+                                    .ok_or(IssueError::CounterUnderflow {
+                                        counter: "second CLOCKLO phase timestamp",
+                                    })?;
+                                let interval = now.checked_sub(second).ok_or(
+                                    IssueError::CounterUnderflow {
+                                        counter: "second-to-third CLOCKLO issue interval",
+                                    },
+                                )?;
+                                projected.clock_issue.warps_with_three_reads =
+                                    checked_u64_counter_add(
+                                        "CLOCKLO warps-with-three-reads diagnostic",
+                                        projected.clock_issue.warps_with_three_reads,
+                                        1,
+                                    )?;
+                                projected.clock_issue.maximum_second_to_third_issue_cycles =
+                                    projected
+                                        .clock_issue
+                                        .maximum_second_to_third_issue_cycles
+                                        .max(interval);
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+            }
+        }
+        self.project_cta_barrier_diagnostics(picks, barrier_arrival_times, now, &mut projected)?;
+        Ok(projected)
+    }
+
+    fn project_memory_service_candidates(
+        &self,
+        picks: &[Option<usize>; SUB_CORES],
+        now: u64,
+    ) -> Result<MemoryServiceCandidateState, IssueError> {
+        if self.memory_service_candidates.is_empty() {
+            return Ok(self.memory_service_candidates.clone());
+        }
+        let mut projected = self.memory_service_candidates.clone();
+        for (subcore, pick) in picks.iter().enumerate() {
+            let Some(warp_index) = *pick else { continue };
+            let warp = &self.warps[warp_index];
+            if let Some((class, _, ideal_wavefronts, unique_lines, _)) =
+                projected_global_memory_issue(warp.insts[warp.next].kind, warp.sectors)
+            {
+                projected.observe(subcore, class, ideal_wavefronts, unique_lines, now)?;
+            }
+        }
+        Ok(projected)
+    }
+
     /// Earliest issue time after both warp/control dependencies and the next
     /// instruction's characterized execution resource are available. A missing
     /// slot remains selectable so the established typed invariant error is
     /// preserved at the transaction boundary.
     fn issue_ready_at<const CHECK_ASYNC: bool>(&self, subcore: usize, warp: usize) -> Option<u64> {
         let mut warp_ready = self.warps[warp].ready_at()?;
+        if let Some(feedback) = self.memory_admission_feedback.as_ref() {
+            let state = &self.warps[warp];
+            let admission_ready =
+                feedback.admission_ready_at(subcore, state.insts[state.next].kind)?;
+            warp_ready = warp_ready.max(admission_ready);
+            if let Some(slot) = state.next_slot {
+                let completion_ready = feedback.completion_ready_at(warp, slot)?;
+                warp_ready = warp_ready.max(completion_ready);
+            }
+        }
         if CHECK_ASYNC
             && let Some(IssueSlot {
                 op_class: OpClass::AsyncCopyWait,
@@ -3600,6 +7414,10 @@ impl<'a> SmCore<'a> {
             warp_ready = warp_ready.max(async_ready);
         }
         let pipeline_ready = match self.warps[warp].next_slot.map(|slot| slot.pipeline_class) {
+            Some(PipelineClass::Branch { .. }) => 0,
+            Some(PipelineClass::Barrier { .. }) => {
+                self.block_states[self.warps[warp].block].barrier_rearm_ready
+            }
             Some(PipelineClass::Tensor { .. }) => self.tensor_pipe_ready[subcore],
             Some(PipelineClass::DispatchOnly) | None => 0,
         };
@@ -3631,6 +7449,89 @@ impl<'a> SmCore<'a> {
         })
     }
 
+    /// Pick in stable SMSP order while reserving the transaction's shared
+    /// admission capacity. A candidate rejected by an earlier SMSP's claim is
+    /// not a dispatch bubble: the same SMSP may still issue its held/youngest
+    /// ready non-candidate (or another candidate whose queue has room).
+    fn pick_warps_with_memory_admission<const CHECK_ASYNC: bool>(
+        &self,
+        now: u64,
+    ) -> [Option<usize>; SUB_CORES] {
+        let Some(feedback) = self.memory_admission_feedback.as_ref() else {
+            return self.pick_warps::<CHECK_ASYNC>(now);
+        };
+        let mut additions = [0usize; SUB_CORES];
+        let mut picks = [None; SUB_CORES];
+        for (subcore, pick) in picks.iter_mut().enumerate() {
+            let permitted = |warp: usize| {
+                if !self.is_issue_ready::<CHECK_ASYNC>(subcore, warp, now) {
+                    return false;
+                }
+                let state = &self.warps[warp];
+                feedback.permits_transaction_addition(
+                    subcore,
+                    state.insts[state.next].kind,
+                    &additions,
+                    now,
+                )
+            };
+            let selected = match self.hold[subcore] {
+                Some(warp) if permitted(warp) => Some(warp),
+                _ => self.subcore_warps[subcore]
+                    .iter()
+                    .copied()
+                    .filter(|&warp| permitted(warp))
+                    .max_by_key(|&warp| self.warps[warp].arrival),
+            };
+            if let Some(warp) = selected {
+                let state = &self.warps[warp];
+                feedback.record_transaction_addition(
+                    subcore,
+                    state.insts[state.next].kind,
+                    &mut additions,
+                );
+            }
+            *pick = selected;
+        }
+        picks
+    }
+
+    /// Assign completion timestamps to barrier arrivals dispatched in this
+    /// cycle. SMSP dispatch remains parallel; the one SM-shared service queues
+    /// those arrivals in stable subcore order at its measured initiation rate.
+    fn project_barrier_arrival_times(
+        &self,
+        picks: &[Option<usize>; SUB_CORES],
+        now: u64,
+    ) -> Result<[Option<u64>; SUB_CORES], IssueError> {
+        let mut server_ready = self.barrier_pipe_ready;
+        let mut arrivals = [None; SUB_CORES];
+        for (subcore, pick) in picks.iter().enumerate() {
+            let Some(warp) = *pick else { continue };
+            let slot = self.warps[warp]
+                .next_slot
+                .ok_or(IssueError::MissingIssueSlot { warp })?;
+            let PipelineClass::Barrier {
+                warp_initiation_interval_cycles,
+                ..
+            } = slot.pipeline_class
+            else {
+                continue;
+            };
+            if self.warps[warp].next_issue_retires()? {
+                continue;
+            }
+            let arrival = checked_cycle_add(
+                "CTA-barrier arrival service",
+                server_ready.max(now),
+                warp_initiation_interval_cycles,
+            )?;
+            arrivals[subcore] = Some(arrival);
+            server_ready = arrival;
+        }
+        Ok(arrivals)
+    }
+
     fn next_known_issue_time<const CHECK_ASYNC: bool>(&self) -> Option<u64> {
         let mut next_t: Option<u64> = None;
         for (subcore, warps) in self.subcore_warps.iter().enumerate() {
@@ -3641,6 +7542,81 @@ impl<'a> SmCore<'a> {
             }
         }
         next_t
+    }
+
+    /// Earliest timestamp at which a committed exact-destination group becomes
+    /// eligible to enter the aggregate service. Groups with outstanding source
+    /// responses have no locally known wake time and remain event-driven.
+    fn next_async_copy_destination_source_time(&self) -> Option<u64> {
+        self.async_copies
+            .iter()
+            .filter_map(|slot| slot.state.as_deref())
+            .flat_map(|state| state.committed_groups.iter())
+            .filter(|group| {
+                group.pending_sources == 0
+                    && group.destination_wavefronts != 0
+                    && !group.destination_service_queued
+                    && group.source_completion_time > self.t
+            })
+            .map(|group| group.source_completion_time)
+            .min()
+    }
+
+    /// Assign committed, source-complete cache-all groups to the shared
+    /// destination service. Projection and timestamp arithmetic finish before
+    /// either the pipe or a group is mutated.
+    fn enqueue_ready_async_copy_destinations(&mut self) -> Result<(), IssueError> {
+        if !self.has_async_copy_protocol {
+            return Ok(());
+        }
+        let mut candidates = Vec::new();
+        for (warp, slot) in self.async_copies.iter().enumerate() {
+            let Some(state) = slot.state.as_deref() else {
+                continue;
+            };
+            for group in &state.committed_groups {
+                if group.pending_sources == 0
+                    && group.destination_wavefronts != 0
+                    && !group.destination_service_queued
+                    && group.source_completion_time <= self.t
+                {
+                    candidates.push((
+                        group.source_completion_time,
+                        warp,
+                        group.id,
+                        group.destination_wavefronts,
+                    ));
+                }
+            }
+        }
+        candidates
+            .sort_unstable_by_key(|&(source_ready, warp, group, _)| (source_ready, warp, group.0));
+
+        let mut projected_pipe = self.ldgsts_destination_pipe_ready;
+        let mut assignments = Vec::with_capacity(candidates.len());
+        for (source_ready, warp, group, wavefronts) in candidates {
+            let service_cycles = self.params.ldgsts_destination_service_cycles(wavefronts)?;
+            let start = projected_pipe.max(source_ready);
+            let ready = checked_cycle_add(
+                "LDGSTS aggregate destination-wavefront service",
+                start,
+                service_cycles,
+            )?;
+            projected_pipe = ready;
+            assignments.push((warp, group, ready));
+        }
+
+        for (warp, group_id, ready) in assignments {
+            let group = self.async_copies[warp]
+                .async_group_mut(group_id)
+                .expect("destination-service candidate remains committed");
+            debug_assert!(!group.destination_service_queued);
+            group.destination_service_queued = true;
+            group.destination_completion_time = ready;
+            group.completion_time = group.completion_time.max(ready);
+        }
+        self.ldgsts_destination_pipe_ready = projected_pipe;
+        Ok(())
     }
 
     /// Run issue cycles strictly BEFORE `horizon`. Emits memory requests
@@ -3676,6 +7652,7 @@ impl<'a> SmCore<'a> {
         }
         let mut horizon = horizon;
         while self.unfinished_warps > 0 {
+            self.enqueue_ready_async_copy_destinations()?;
             if horizon.reached(self.t) {
                 return Ok(Advance::Idle {
                     wake_at: Some(self.t),
@@ -3696,6 +7673,15 @@ impl<'a> SmCore<'a> {
             }
             if issued_this_cycle {
                 self.t = checked_cycle_add("issue-clock advance", self.t, 1)?;
+                if self
+                    .memory_admission_feedback
+                    .as_mut()
+                    .is_some_and(|state| state.take_yield_requested())
+                {
+                    return Ok(Advance::Idle {
+                        wake_at: Some(self.t),
+                    });
+                }
                 continue;
             }
             // Nothing ready: skip to the next KNOWN warp/resource timer
@@ -3703,7 +7689,15 @@ impl<'a> SmCore<'a> {
             // warps waiting on in-flight responses have no computable time and
             // are excluded).
             let next_t = if self.has_async_copy_protocol {
-                self.next_known_issue_time::<true>()
+                match (
+                    self.next_known_issue_time::<true>(),
+                    self.next_async_copy_destination_source_time(),
+                ) {
+                    (Some(issue), Some(source)) => Some(issue.min(source)),
+                    (Some(issue), None) => Some(issue),
+                    (None, Some(source)) => Some(source),
+                    (None, None) => None,
+                }
             } else {
                 self.next_known_issue_time::<false>()
             };
@@ -3723,7 +7717,12 @@ impl<'a> SmCore<'a> {
                     }
                     self.t = target;
                 }
-                None if self.outstanding_responses() > 0 => {
+                None if self.outstanding_responses() > 0
+                    || self
+                        .memory_admission_feedback
+                        .as_ref()
+                        .is_some_and(|state| state.has_unpriced()) =>
+                {
                     return Ok(Advance::Idle { wake_at: None });
                 }
                 None => {
@@ -3756,8 +7755,32 @@ impl<'a> SmCore<'a> {
     ) -> Result<(), IssueError> {
         let t = self.t;
         checked_cycle_add("issue-clock advance", t, 1)?;
-        if let Some(interval) = pipeline_class.initiation_interval_cycles() {
-            checked_cycle_add("tensor-pipeline availability", t, interval)?;
+        match pipeline_class {
+            PipelineClass::Branch {
+                next_issue_interval_cycles,
+            } => {
+                checked_cycle_add("branch-pipeline resolution", t, next_issue_interval_cycles)?;
+            }
+            PipelineClass::Barrier {
+                warp_initiation_interval_cycles,
+                ..
+            } => {
+                checked_cycle_add(
+                    "CTA-barrier pipeline availability",
+                    t,
+                    warp_initiation_interval_cycles,
+                )?;
+            }
+            PipelineClass::Tensor {
+                initiation_interval_cycles,
+            } => {
+                checked_cycle_add(
+                    "tensor-pipeline availability",
+                    t,
+                    initiation_interval_cycles,
+                )?;
+            }
+            PipelineClass::DispatchOnly => {}
         }
         if !retires_warp {
             checked_cycle_add("warp stall eligibility", t, u64::from(stall.max(1)))?;
@@ -3765,7 +7788,7 @@ impl<'a> SmCore<'a> {
                 checked_cycle_add("warp yield eligibility", t, 2)?;
             }
         }
-        if read_barrier.is_some() {
+        if !matches!(kind, AccessKind::PredicatedOffMemory) && read_barrier.is_some() {
             checked_cycle_add(
                 "read-dependence barrier visibility",
                 t,
@@ -3781,7 +7804,8 @@ impl<'a> SmCore<'a> {
             AccessKind::Shared { wavefronts } if needs_ready => {
                 self.params.shared_ready(t, wavefronts)?;
             }
-            AccessKind::NonMemory | AccessKind::Shared { .. } => {}
+            AccessKind::NonMemory | AccessKind::PredicatedOffMemory | AccessKind::Shared { .. } => {
+            }
             AccessKind::GlobalEligible { .. }
             | AccessKind::LocalLoad { .. }
             | AccessKind::GlobalAsyncCopy {
@@ -3851,7 +7875,11 @@ impl<'a> SmCore<'a> {
         Ok(())
     }
 
-    fn preflight_issue_memory(&self, picks: &[Option<usize>; SUB_CORES]) -> Result<(), IssueError> {
+    fn preflight_issue_memory(
+        &self,
+        picks: &[Option<usize>; SUB_CORES],
+        async_destination_wavefronts: &[u64; SUB_CORES],
+    ) -> Result<(), IssueError> {
         let (l1, shared) = match &self.mem {
             MemModel::Flat => return Ok(()),
             MemModel::L1Const(l1) => (l1, None),
@@ -3861,7 +7889,8 @@ impl<'a> SmCore<'a> {
         let mut eligible_sectors = 0u64;
         let mut pending_budget_fits = true;
         let mut constant_async_deliveries = [None; SUB_CORES];
-        for (pick_ix, &wix) in picks.iter().flatten().enumerate() {
+        for (subcore, pick) in picks.iter().enumerate() {
+            let Some(wix) = *pick else { continue };
             let warp = &self.warps[wix];
             let inst = warp
                 .insts
@@ -3921,7 +7950,8 @@ impl<'a> SmCore<'a> {
                                 ..
                             }
                         ));
-                        constant_async_deliveries[pick_ix] = Some((wix, completion_work));
+                        constant_async_deliveries[subcore] =
+                            Some((wix, completion_work, async_destination_wavefronts[subcore]));
                     }
                     if shared.is_some()
                         && warp
@@ -4083,7 +8113,9 @@ impl<'a> SmCore<'a> {
                     }
                     add_budget("L1 recency budget", &mut budget.recency_touches, sectors)?;
                 }
-                AccessKind::NonMemory | AccessKind::Shared { .. } => {}
+                AccessKind::NonMemory
+                | AccessKind::PredicatedOffMemory
+                | AccessKind::Shared { .. } => {}
             }
         }
 
@@ -4094,10 +8126,8 @@ impl<'a> SmCore<'a> {
         };
         let constant_timing_fits = shared.is_some() || constant_ready_upper.is_some();
         let constant_async_completion_fits = shared.is_some()
-            || constant_async_deliveries
-                .iter()
-                .flatten()
-                .all(|&(wix, delivery_work)| {
+            || constant_async_deliveries.iter().flatten().all(
+                |&(wix, delivery_work, destination_wavefronts)| {
                     constant_ready_upper.is_some_and(|source_ready| {
                         self.async_copies[wix]
                             .preflight_async_copy_add(
@@ -4105,11 +8135,13 @@ impl<'a> SmCore<'a> {
                                 0,
                                 source_ready,
                                 delivery_work,
+                                destination_wavefronts,
                                 &self.params,
                             )
                             .is_ok()
                     })
-                });
+                },
+            );
         let shared_timing_fits = shared.is_none()
             || eligible_sectors == 0
             || (self.t.checked_add(self.params.l1_hit_latency).is_some()
@@ -4127,7 +8159,8 @@ impl<'a> SmCore<'a> {
         // on a shadow cache. This avoids rejecting valid warm hits while keeping
         // the ordinary hot path allocation-free.
         let mut shadow = l1.clone();
-        for &wix in picks.iter().flatten() {
+        for (subcore, pick) in picks.iter().enumerate() {
+            let Some(wix) = *pick else { continue };
             let warp = &self.warps[wix];
             let inst = warp.insts[warp.next];
             let slot = warp
@@ -4244,6 +8277,7 @@ impl<'a> SmCore<'a> {
                             0,
                             source_ready,
                             delivery_work,
+                            async_destination_wavefronts[subcore],
                             &self.params,
                         )?;
                     }
@@ -4278,7 +8312,7 @@ impl<'a> SmCore<'a> {
                     }
                 }
                 AccessKind::GlobalStore { off, len }
-                | AccessKind::GlobalReduction { off, len }
+                | AccessKind::GlobalReduction { off, len, .. }
                 | AccessKind::LocalStore { off, len } => {
                     let origin = match inst.kind {
                         AccessKind::GlobalStore { .. } | AccessKind::GlobalReduction { .. } => {
@@ -4296,7 +8330,9 @@ impl<'a> SmCore<'a> {
                         }
                     }
                 }
-                AccessKind::NonMemory | AccessKind::Shared { .. } => {}
+                AccessKind::NonMemory
+                | AccessKind::PredicatedOffMemory
+                | AccessKind::Shared { .. } => {}
             }
         }
         Ok(())
@@ -4305,6 +8341,7 @@ impl<'a> SmCore<'a> {
     fn preflight_issue_accounting(
         &self,
         picks: &[Option<usize>; SUB_CORES],
+        barrier_arrival_times: &[Option<u64>; SUB_CORES],
     ) -> Result<u64, IssueError> {
         let issue_add = u64::try_from(picks.iter().flatten().count()).map_err(|_| {
             IssueError::CounterOverflow {
@@ -4368,6 +8405,28 @@ impl<'a> SmCore<'a> {
                     counter: "block barrier waiter",
                 });
             }
+            if waiting > 0 && waiting == unfinished {
+                let mut last_arrival = self.t;
+                for warp in &self.warps[state.first_warp..state.first_warp + state.admitted_warps] {
+                    if let Some(arrival) = warp.block_barrier_arrival {
+                        last_arrival = last_arrival.max(arrival);
+                    }
+                }
+                for (subcore, pick) in picks.iter().enumerate() {
+                    if pick.is_some_and(|warp| self.warps[warp].block == block) {
+                        last_arrival =
+                            last_arrival.max(barrier_arrival_times[subcore].unwrap_or(self.t));
+                    }
+                }
+                checked_cycle_add("block-barrier release", last_arrival, 1)?;
+                if let Some(issue) = self.barrier_issue {
+                    checked_cycle_add(
+                        "CTA-barrier generation re-arm",
+                        last_arrival,
+                        issue.generation_rearm_cycles,
+                    )?;
+                }
+            }
             if unfinished == 0 {
                 for &warp_slot in &state.warp_slots {
                     if !self.resident_warp_slots.contains(&warp_slot) {
@@ -4402,20 +8461,183 @@ impl<'a> SmCore<'a> {
         Ok(next_issued)
     }
 
+    fn preflight_result_writeback_priority(
+        &self,
+        picks: &[Option<usize>; SUB_CORES],
+    ) -> Result<(), IssueError> {
+        let Some(state) = self.result_writebacks.as_ref() else {
+            return Ok(());
+        };
+        let mut collisions = 0u64;
+        let mut deferral_cycles = 0u64;
+        for (subcore, pick) in picks.iter().enumerate() {
+            let Some(wix) = *pick else { continue };
+            let slot = self.warps[wix]
+                .next_slot
+                .ok_or(IssueError::MissingIssueSlot { warp: wix })?;
+            let Some(ResultWritebackKind::FixedHadd2 { bank }) =
+                result_writeback_kind(slot, self.params.arch)
+            else {
+                continue;
+            };
+            let fixed_at = checked_cycle_add(
+                "HADD2 result writeback",
+                self.t,
+                state.timing.hadd2_writeback_cycles,
+            )?;
+            for event in &state.pending {
+                if event.subcore == subcore as u8
+                    && event.bank == bank
+                    && event.writeback_at == fixed_at
+                {
+                    checked_cycle_add(
+                        "deferred L1TEX writeback",
+                        event.writeback_at,
+                        state.timing.variable_deferral_cycles,
+                    )?;
+                    checked_cycle_add(
+                        "deferred L1TEX visibility",
+                        event.visible_at,
+                        state.timing.variable_deferral_cycles,
+                    )?;
+                    collisions = checked_u64_counter_add(
+                        "fixed-over-L1TEX collision preflight",
+                        collisions,
+                        1,
+                    )?;
+                    deferral_cycles = checked_u64_counter_add(
+                        "L1TEX writeback deferral-cycle preflight",
+                        deferral_cycles,
+                        state.timing.variable_deferral_cycles,
+                    )?;
+                }
+            }
+        }
+        checked_u64_counter_add(
+            "fixed-over-L1TEX collision diagnostic",
+            self.readiness.result_writeback.fixed_over_l1tex_collisions,
+            collisions,
+        )?;
+        checked_u64_counter_add(
+            "L1TEX writeback deferral-cycle diagnostic",
+            self.readiness.result_writeback.l1tex_deferral_cycles,
+            deferral_cycles,
+        )?;
+        Ok(())
+    }
+
+    fn register_l1tex_writeback(
+        &mut self,
+        subcore: usize,
+        warp: usize,
+        kind: ResultWritebackKind,
+        barrier: Option<DepBarrier>,
+        visible_at: Option<u64>,
+    ) -> Result<(), IssueError> {
+        let l1_hit_latency = self.params.l1_hit_latency;
+        let (
+            Some(state),
+            ResultWritebackKind::L1TexStrongSmU32 { bank },
+            Some(barrier),
+            Some(visible_at),
+        ) = (self.result_writebacks.as_mut(), kind, barrier, visible_at)
+        else {
+            return Ok(());
+        };
+        let hit_floor = checked_cycle_add("L1 hit-pipeline floor", self.t, l1_hit_latency)?;
+        if visible_at != hit_floor
+            || l1_hit_latency < state.timing.l1tex_writeback_to_visibility_cycles
+        {
+            return Ok(());
+        }
+        let writeback_at = visible_at - state.timing.l1tex_writeback_to_visibility_cycles;
+        state.pending.push(PendingVariableWriteback {
+            subcore: subcore as u8,
+            bank,
+            writeback_at,
+            visible_at,
+            warp,
+            barrier,
+        });
+        Ok(())
+    }
+
+    fn apply_fixed_result_priority(
+        &mut self,
+        subcore: usize,
+        kind: ResultWritebackKind,
+        projected: &mut ReadinessDiagnostics,
+    ) -> Result<(), IssueError> {
+        let (Some(state), ResultWritebackKind::FixedHadd2 { bank }) =
+            (self.result_writebacks.as_mut(), kind)
+        else {
+            return Ok(());
+        };
+        let fixed_at = checked_cycle_add(
+            "HADD2 result writeback",
+            self.t,
+            state.timing.hadd2_writeback_cycles,
+        )?;
+        let (warps, diagnostics) = (&mut self.warps, &mut projected.result_writeback);
+        for event in &mut state.pending {
+            if event.subcore != subcore as u8
+                || event.bank != bank
+                || event.writeback_at != fixed_at
+            {
+                continue;
+            }
+            event.writeback_at = checked_cycle_add(
+                "deferred L1TEX writeback",
+                event.writeback_at,
+                state.timing.variable_deferral_cycles,
+            )?;
+            event.visible_at = checked_cycle_add(
+                "deferred L1TEX visibility",
+                event.visible_at,
+                state.timing.variable_deferral_cycles,
+            )?;
+            warps[event.warp].stamp_clear(
+                Some(event.barrier),
+                event.visible_at,
+                DependencyOrigin::L1Tex,
+            );
+            diagnostics.fixed_over_l1tex_collisions = checked_u64_counter_add(
+                "fixed-over-L1TEX collision diagnostic",
+                diagnostics.fixed_over_l1tex_collisions,
+                1,
+            )?;
+            diagnostics.l1tex_deferral_cycles = checked_u64_counter_add(
+                "L1TEX writeback deferral-cycle diagnostic",
+                diagnostics.l1tex_deferral_cycles,
+                state.timing.variable_deferral_cycles,
+            )?;
+        }
+        Ok(())
+    }
+
     /// One issue cycle at `self.t` across the four sub-cores. Returns
     /// whether anything issued.
     fn issue_cycle(&mut self, out: &mut Vec<MemRequest>) -> Result<bool, IssueError> {
         let t = self.t;
         let picks = if self.has_async_copy_protocol {
-            self.pick_warps::<true>(t)
+            self.pick_warps_with_memory_admission::<true>(t)
         } else {
-            self.pick_warps::<false>(t)
+            self.pick_warps_with_memory_admission::<false>(t)
         };
+        let barrier_arrival_times = self.project_barrier_arrival_times(&picks, t)?;
+        let mut async_destination_wavefronts = [0; SUB_CORES];
+        for (subcore, pick) in picks.iter().enumerate() {
+            let Some(wix) = *pick else { continue };
+            let kind = self.warps[wix].insts[self.warps[wix].next].kind;
+            async_destination_wavefronts[subcore] =
+                async_copy_destination_wavefronts(kind, &self.params)?.unwrap_or(0);
+        }
 
         // A cycle is the caller-visible transaction boundary. Validate every
         // selected instruction's possible timing arms before any sub-core
         // mutates counters, cache state, barriers, requests, or retirement.
-        for wix in picks.iter().flatten().copied() {
+        for (subcore, pick) in picks.iter().enumerate() {
+            let Some(wix) = *pick else { continue };
             let w = &self.warps[wix];
             let slot = w
                 .next_slot
@@ -4458,6 +8680,7 @@ impl<'a> SmCore<'a> {
                     pending_add,
                     source_ready,
                     delivery_work,
+                    async_destination_wavefronts[subcore],
                     &self.params,
                 )?;
             }
@@ -4472,8 +8695,42 @@ impl<'a> SmCore<'a> {
                 observe_async_copy,
             )?;
         }
-        self.preflight_issue_memory(&picks)?;
-        let next_issued = self.preflight_issue_accounting(&picks)?;
+        self.preflight_issue_memory(&picks, &async_destination_wavefronts)?;
+        self.preflight_result_writeback_priority(&picks)?;
+        let next_issued = self.preflight_issue_accounting(&picks, &barrier_arrival_times)?;
+        // Diagnostics are preflighted last so an observational counter can
+        // never mask an established execution/cache/domain error. No mutation
+        // has occurred yet, so a diagnostic overflow remains transactional.
+        let mut projected_readiness =
+            self.project_picked_readiness(&picks, &barrier_arrival_times, t)?;
+        let projected_memory_service_candidates =
+            self.project_memory_service_candidates(&picks, t)?;
+        let memory_admission_feedback_plan =
+            if let Some(feedback) = self.memory_admission_feedback.as_ref() {
+                let mut issues = [None; SUB_CORES];
+                for (subcore, pick) in picks.iter().enumerate() {
+                    let Some(warp) = *pick else { continue };
+                    let state = &self.warps[warp];
+                    let slot = state
+                        .next_slot
+                        .ok_or(IssueError::MissingIssueSlot { warp })?;
+                    issues[subcore] = Some(MemoryAdmissionFeedbackIssue {
+                        subcore,
+                        warp,
+                        instruction: state.next,
+                        kind: state.insts[state.next].kind,
+                        prior_clock_reads: state.clock_reads_issued,
+                        clock_read: is_clocklo_issue(slot),
+                    });
+                }
+                Some(feedback.plan_issue(&issues, t)?)
+            } else {
+                None
+            };
+
+        if let Some(state) = self.result_writebacks.as_mut() {
+            state.pending.retain(|event| event.writeback_at >= t);
+        }
 
         let mut issued_this_cycle = false;
         for (sc, pick) in picks.into_iter().enumerate() {
@@ -4492,6 +8749,8 @@ impl<'a> SmCore<'a> {
                 inst,
                 warp_sectors,
                 retires_warp,
+                result_writeback,
+                clock_read,
             ) = {
                 let w = &self.warps[wix];
                 let slot = w
@@ -4508,14 +8767,21 @@ impl<'a> SmCore<'a> {
                     w.insts[w.next],
                     w.sectors,
                     w.next_issue_retires()?,
+                    result_writeback_kind(slot, self.params.arch),
+                    is_clocklo_issue(slot),
                 )
             };
-            let write_barrier =
-                if self.has_async_copy_protocol && slot_class == OpClass::AsyncCopyCommit {
-                    None
-                } else {
-                    control.write_barrier
-                };
+            let produces_dynamic_effects = !matches!(inst.kind, AccessKind::PredicatedOffMemory);
+            let write_barrier = if !produces_dynamic_effects
+                || (self.has_async_copy_protocol && slot_class == OpClass::AsyncCopyCommit)
+            {
+                None
+            } else {
+                control.write_barrier
+            };
+            let result_writeback = produces_dynamic_effects
+                .then_some(result_writeback)
+                .flatten();
             let observe_async_copy =
                 self.has_async_copy_protocol && async_copy_source_count(inst.kind).is_some();
 
@@ -4523,11 +8789,13 @@ impl<'a> SmCore<'a> {
             // whether a dependence barrier consumes the ready time.
             let data_ready = if matches!(self.mem, MemModel::L1Shared(_)) {
                 self.mem_step_shared(
+                    sc,
                     wix,
                     instruction,
                     inst.kind,
                     warp_sectors,
                     write_barrier,
+                    async_destination_wavefronts[sc],
                     out,
                 )?
             } else {
@@ -4542,24 +8810,46 @@ impl<'a> SmCore<'a> {
                 )?
             };
             if observe_async_copy && let Some(source_ready) = data_ready {
-                let delivery_work = if matches!(self.mem, MemModel::L1Shared(_)) {
-                    0
-                } else {
-                    async_copy_completion_work(inst.kind).unwrap_or(0)
-                };
+                // Shared mode already attached the copy's delivery and exact
+                // destination work to its pending group before walking source
+                // sectors. This second update contributes only the known hit
+                // floor; synchronous modes create the group here instead.
+                let (delivery_work, destination_wavefronts) =
+                    if matches!(self.mem, MemModel::L1Shared(_)) {
+                        (0, 0)
+                    } else {
+                        (
+                            async_copy_completion_work(inst.kind).unwrap_or(0),
+                            async_destination_wavefronts[sc],
+                        )
+                    };
                 self.async_copies[wix].add_known_async_copy(
                     wix,
                     source_ready,
                     delivery_work,
+                    destination_wavefronts,
                     &self.params,
                 )?;
             }
 
-            if let Some(interval) = pipeline_class.initiation_interval_cycles() {
-                self.tensor_pipe_ready[sc] =
-                    checked_cycle_add("tensor-pipeline availability", t, interval)?;
+            match pipeline_class {
+                PipelineClass::Branch { .. } => {}
+                PipelineClass::Barrier { .. } => {
+                    if let Some(arrival) = barrier_arrival_times[sc] {
+                        self.barrier_pipe_ready = arrival;
+                    }
+                }
+                PipelineClass::Tensor {
+                    initiation_interval_cycles,
+                } => {
+                    self.tensor_pipe_ready[sc] = checked_cycle_add(
+                        "tensor-pipeline availability",
+                        t,
+                        initiation_interval_cycles,
+                    )?;
+                }
+                PipelineClass::DispatchOnly => {}
             }
-
             // Yield semantics per the CGGTY paper: the yield bit means
             // "do not issue this warp in the NEXT cycle" — a one-cycle
             // bubble when no other warp is ready — on top of the stall
@@ -4581,20 +8871,51 @@ impl<'a> SmCore<'a> {
             // slow one (miss). Unknown write-backs (in-flight responses)
             // are tracked in `barrier_pending`.
             if let Some(dr) = data_ready {
-                self.warps[wix].stamp_clear(write_barrier, dr);
+                self.warps[wix].stamp_clear(write_barrier, dr, dependency_origin(inst.kind));
             }
-            if let Some(read_barrier) = control.read_barrier {
+            if let Some(result_writeback) = result_writeback {
+                self.register_l1tex_writeback(
+                    sc,
+                    wix,
+                    result_writeback,
+                    write_barrier,
+                    data_ready,
+                )?;
+                self.apply_fixed_result_priority(sc, result_writeback, &mut projected_readiness)?;
+            }
+            if produces_dynamic_effects && let Some(read_barrier) = control.read_barrier {
                 let read_clear = checked_cycle_add(
                     "read-dependence barrier visibility",
                     t,
                     self.params.read_barrier_latency,
                 )?;
-                self.warps[wix].stamp_clear(Some(read_barrier), read_clear);
+                self.warps[wix].stamp_clear(
+                    Some(read_barrier),
+                    read_clear,
+                    operand_read_dependency_origin(inst.kind),
+                );
+            }
+            if clock_read {
+                let warp = &mut self.warps[wix];
+                warp.clock_first_issue.get_or_insert(t);
+                warp.clock_reads_issued = warp
+                    .clock_reads_issued
+                    .checked_add(1)
+                    .expect("CLOCKLO issue counter was preflighted");
             }
             if self.has_async_copy_protocol {
                 match slot_class {
                     OpClass::AsyncCopyCommit => {
-                        self.async_copies[wix].commit_async_copy_group();
+                        let expected_nonempty = self.async_copies[wix]
+                            .state
+                            .as_deref()
+                            .and_then(|state| state.open_group)
+                            .is_some();
+                        let committed = self.async_copies[wix].commit_async_copy_group(t);
+                        debug_assert_eq!(
+                            committed, expected_nonempty,
+                            "async commit mutation disagrees with its pre-issue state"
+                        );
                     }
                     OpClass::AsyncCopyWait => {
                         let max_pending_groups = self.warps[wix]
@@ -4665,6 +8986,18 @@ impl<'a> SmCore<'a> {
                     launch_index,
                     warp_slot,
                 )?);
+                self.warps[wix].current_since = t;
+                self.warps[wix].cta_barrier_ready = 0;
+                self.warps[wix].barrier_pipeline_ready = 0;
+                self.warps[wix].branch_pipeline_ready = 0;
+            }
+            if !retires_warp
+                && let PipelineClass::Branch {
+                    next_issue_interval_cycles,
+                } = pipeline_class
+            {
+                self.warps[wix].branch_pipeline_ready =
+                    checked_cycle_add("branch-pipeline resolution", t, next_issue_interval_cycles)?;
             }
             // Single hold write: never hold a yielded or finished warp.
             self.hold[sc] = (!control.yield_flag && !self.warps[wix].done).then_some(wix);
@@ -4672,7 +9005,16 @@ impl<'a> SmCore<'a> {
             // Block barrier arrival AFTER stream bookkeeping: a finished
             // warp never waits.
             if slot_class == OpClass::BlockBarrier && !self.warps[wix].done {
+                let arrival = barrier_arrival_times[sc].unwrap_or(t);
                 self.warps[wix].at_block_barrier = true;
+                self.warps[wix].block_barrier_dispatch = Some(t);
+                self.warps[wix].block_barrier_arrival = Some(arrival);
+                self.block_states[blk_ix]
+                    .barrier_first_dispatch
+                    .get_or_insert(t);
+                self.block_states[blk_ix]
+                    .barrier_first_arrival
+                    .get_or_insert(arrival);
                 self.block_states[blk_ix].waiting = checked_usize_counter_add(
                     "block barrier waiter",
                     self.block_states[blk_ix].waiting,
@@ -4685,17 +9027,93 @@ impl<'a> SmCore<'a> {
             let bs = &self.block_states[blk_ix];
             if bs.waiting > 0 && bs.waiting == bs.unfinished {
                 let (first, count) = (bs.first_warp, bs.admitted_warps);
+                let mut latest_arrival = 0u64;
+                let mut second_latest_arrival = 0u64;
+                let mut latest_count = 0usize;
+                for warp in &self.warps[first..first + count] {
+                    if !warp.at_block_barrier {
+                        continue;
+                    }
+                    let arrival = warp
+                        .block_barrier_arrival
+                        .expect("barrier waiter owns an arrival timestamp");
+                    if arrival > latest_arrival {
+                        second_latest_arrival = latest_arrival;
+                        latest_arrival = arrival;
+                        latest_count = 1;
+                    } else if arrival == latest_arrival {
+                        latest_count += 1;
+                    } else if arrival > second_latest_arrival {
+                        second_latest_arrival = arrival;
+                    }
+                }
                 self.block_states[blk_ix].waiting = 0;
-                let release_at = checked_cycle_add("block-barrier release", t, 1)?;
+                self.block_states[blk_ix].barrier_generation = self.block_states[blk_ix]
+                    .barrier_generation
+                    .checked_add(1)
+                    .expect("barrier generation was preflighted");
+                self.block_states[blk_ix].barrier_first_dispatch = None;
+                self.block_states[blk_ix].barrier_first_arrival = None;
+                if let Some(issue) = self.barrier_issue {
+                    self.block_states[blk_ix].barrier_rearm_ready = checked_cycle_add(
+                        "CTA-barrier generation re-arm",
+                        latest_arrival,
+                        issue.generation_rearm_cycles,
+                    )?;
+                }
+                let release_at = checked_cycle_add("block-barrier release", latest_arrival, 1)?;
                 for w in &mut self.warps[first..first + count] {
                     if w.at_block_barrier {
+                        let own_arrival = w
+                            .block_barrier_arrival
+                            .expect("barrier waiter owns an arrival timestamp");
+                        let other_arrival = if count <= 1 {
+                            None
+                        } else if own_arrival == latest_arrival && latest_count == 1 {
+                            Some(second_latest_arrival)
+                        } else {
+                            Some(latest_arrival)
+                        };
                         w.at_block_barrier = false;
-                        w.eligible = w.eligible.max(release_at);
+                        w.block_barrier_dispatch = None;
+                        w.block_barrier_arrival = None;
+                        if self.barrier_issue.is_some() {
+                            w.barrier_pipeline_ready = checked_cycle_add(
+                                "CTA-barrier own-arrival release",
+                                own_arrival,
+                                1,
+                            )?;
+                            w.cta_barrier_ready = other_arrival
+                                .map(|arrival| {
+                                    checked_cycle_add(
+                                        "CTA-barrier other-participant rendezvous",
+                                        arrival,
+                                        1,
+                                    )
+                                })
+                                .transpose()?
+                                .unwrap_or(0);
+                            debug_assert_eq!(
+                                w.barrier_pipeline_ready.max(w.cta_barrier_ready),
+                                release_at
+                            );
+                        } else {
+                            w.barrier_pipeline_ready = 0;
+                            w.cta_barrier_ready = release_at;
+                        }
                     }
                 }
             }
         }
         self.issued = next_issued;
+        self.readiness = projected_readiness;
+        self.memory_service_candidates = projected_memory_service_candidates;
+        if let Some(plan) = memory_admission_feedback_plan {
+            self.memory_admission_feedback
+                .as_mut()
+                .expect("feedback issue plan requires installed feedback state")
+                .apply_issue(plan, t);
+        }
         Ok(issued_this_cycle)
     }
 }
@@ -4923,7 +9341,7 @@ fn drain_retries(
                         async_copies[r.warp]
                             .complete_async_copy_sources(r.warp, group, 1, ready, params)?;
                     }
-                    warps[r.warp].stamp_clear(barrier, ready);
+                    warps[r.warp].stamp_clear(barrier, ready, DependencyOrigin::L1Tex);
                 }
                 Ok(None) => {}
                 Err(SharedAccessError::Stalled) => {
@@ -4950,16 +9368,46 @@ fn validate_sector_span(
     launch_index: i64,
     warp_slot: i32,
 ) -> Result<(), IssueError> {
+    let atomic_topology = match kind {
+        AccessKind::GlobalBypass {
+            len,
+            token: CacheOpToken::Atom,
+            l2_requests,
+            ..
+        }
+        | AccessKind::GlobalReduction {
+            len, l2_requests, ..
+        } => Some((len, l2_requests, true)),
+        AccessKind::GlobalBypass {
+            len, l2_requests, ..
+        } if l2_requests != 0 => Some((len, l2_requests, false)),
+        _ => None,
+    };
+    if let Some((sector_transactions, l2_requests, is_atomic)) = atomic_topology
+        && (!is_atomic
+            || (sector_transactions == 0) != (l2_requests == 0)
+            || l2_requests > sector_transactions)
+    {
+        return Err(IssueError::AtomicRequestTopologyInvalid {
+            pc,
+            launch_index,
+            warp_slot,
+            sectors: sector_transactions,
+            l2_requests,
+        });
+    }
     let (off, len) = match kind {
         AccessKind::GlobalEligible { off, len, .. }
         | AccessKind::GlobalBypass { off, len, .. }
         | AccessKind::GlobalAsyncCopy { off, len, .. }
         | AccessKind::GlobalUntagged { off, len }
         | AccessKind::GlobalStore { off, len }
-        | AccessKind::GlobalReduction { off, len }
+        | AccessKind::GlobalReduction { off, len, .. }
         | AccessKind::LocalLoad { off, len }
         | AccessKind::LocalStore { off, len } => (off, len),
-        AccessKind::NonMemory | AccessKind::Shared { .. } => return Ok(()),
+        AccessKind::NonMemory | AccessKind::PredicatedOffMemory | AccessKind::Shared { .. } => {
+            return Ok(());
+        }
     };
     let end = off
         .checked_add(usize::from(len))
@@ -5055,7 +9503,10 @@ mod tests {
 
     use super::*;
     use crate::control_bits::{ControlBits, DepBarrier, WaitMask};
-    use crate::program::{FunctionSchedule, IssueSlot, OpClass, PipelineClass};
+    use crate::program::{
+        FunctionSchedule, IssueSlot, OpClass, PipelineClass, is_clocklo_opcode_text,
+        is_gpu_membar_opcode_text,
+    };
 
     fn cb(stall: u8) -> ControlBits {
         ControlBits::new(stall, false, 7, 7, 0, 0).expect("valid test controls")
@@ -5087,8 +9538,32 @@ mod tests {
                     LdgstsL1Policy::CacheAtAllLevels
                 },
             ),
+            fixed_latency_operands: crate::sass_operands::project_fixed_latency_operands(
+                text,
+                control,
+                ArchId::Sm86,
+            ),
+            clocklo_read: is_clocklo_opcode_text(text),
+            gpu_membar: is_gpu_membar_opcode_text(text),
             opcode_text: text.to_owned(),
         }
+    }
+
+    fn barrier_pipeline_slot(control: ControlBits) -> IssueSlot {
+        let mut result = slot(control, OpClass::BlockBarrier, "BAR.SYNC.DEFER_BLOCKING");
+        result.pipeline_class = PipelineClass::Barrier {
+            warp_initiation_interval_cycles: 2,
+            generation_rearm_cycles: 0,
+        };
+        result
+    }
+
+    fn branch_pipeline_slot(control: ControlBits) -> IssueSlot {
+        let mut result = slot(control, OpClass::Other, "BRA 0x20");
+        result.pipeline_class = PipelineClass::Branch {
+            next_issue_interval_cycles: 10,
+        };
+        result
     }
 
     fn tensor_slot(control: ControlBits, text: &str, interval: u64) -> IssueSlot {
@@ -5115,6 +9590,21 @@ mod tests {
         assert!(std::mem::size_of::<ReplayInst>() <= 24);
     }
 
+    #[test]
+    fn disabled_candidate_storage_stays_off_the_hot_inline_path() {
+        assert!(std::mem::size_of::<MemoryServiceCandidateDiagnostics>() <= 24);
+        assert!(std::mem::size_of::<MemoryServiceCandidateState>() <= 24);
+        assert!(std::mem::size_of::<MemoryAdmissionCandidateDiagnostics>() <= 24);
+        assert!(std::mem::size_of::<MemoryAdmissionCandidateState>() <= 24);
+        assert!(std::mem::size_of::<ReadinessDiagnostics>() <= 1024);
+        assert!(std::mem::size_of::<SmCore<'static>>() <= 3072);
+        assert!(
+            std::mem::size_of::<MemRequest>() <= 96,
+            "MemRequest grew to {} bytes",
+            std::mem::size_of::<MemRequest>()
+        );
+    }
+
     fn params() -> IssueModelParams {
         IssueModelParams {
             arch: ArchId::Sm86,
@@ -5132,6 +9622,8 @@ mod tests {
                 bypass_payload_bytes_per_cycle: 32,
             },
             ldgsts_cache_all_destination_wavefront_cycles: 2,
+            ldgsts_cache_all_destination_service_wavefronts: 2,
+            ldgsts_cache_all_destination_service_cycles: 3,
             max_resident_warps_per_sm: 48,
         }
     }
@@ -5391,6 +9883,7 @@ mod tests {
                 off: 1,
                 len: 1,
                 token: CacheOpToken::LdgECg,
+                l2_requests: 0,
             },
             AccessKind::GlobalUntagged { off: 1, len: 1 },
             AccessKind::GlobalStore { off: 1, len: 1 },
@@ -5406,6 +9899,39 @@ mod tests {
                     len: 1,
                     end: 2,
                     sectors: 1,
+                }
+            ));
+        }
+    }
+
+    #[test]
+    fn atomic_l2_request_topology_is_validated_before_core_construction() {
+        for kind in [
+            AccessKind::GlobalBypass {
+                off: 0,
+                len: 1,
+                token: CacheOpToken::Atom,
+                l2_requests: 0,
+            },
+            AccessKind::GlobalBypass {
+                off: 0,
+                len: 1,
+                token: CacheOpToken::LdgECg,
+                l2_requests: 1,
+            },
+            AccessKind::GlobalReduction {
+                off: 0,
+                len: 1,
+                l2_requests: 2,
+            },
+        ] {
+            assert!(matches!(
+                construction_error(kind, vec![40]),
+                IssueError::AtomicRequestTopologyInvalid {
+                    pc: 0,
+                    launch_index: 7,
+                    warp_slot: 3,
+                    ..
                 }
             ));
         }
@@ -5888,6 +10414,7 @@ mod tests {
                         off: 0,
                         len: 1,
                         token: CacheOpToken::LdgECg,
+                        l2_requests: 0,
                     },
                 }],
                 sectors: vec![0],
@@ -6076,6 +10603,142 @@ mod tests {
         assert_eq!(r.instructions_issued, 3);
         assert_eq!(r.cycles, 3);
         assert!(r.l1.is_none());
+        assert_eq!(r.readiness.limiting_cycles.control_stall, 2);
+        assert_eq!(r.readiness.constraint_exposure_cycles.control_stall, 2);
+        assert_eq!(r.readiness.delayed_ready_issues, 0);
+    }
+
+    #[test]
+    fn phase_opcode_recognition_uses_the_static_sass_ascii_grammar() {
+        let ascii_clock = slot(cb(1), OpClass::Other, "\t CS2R R4, SR_CLOCKLO \r\n");
+        let wrong_source = slot(cb(1), OpClass::Other, "CS2R R4, SR_CLOCKLO64");
+        assert!(is_clocklo_issue(&ascii_clock));
+        assert!(!is_clocklo_issue(&wrong_source));
+
+        let ascii_membar = slot(cb(1), OpClass::Other, "\tMEMBAR.SC.GPU ;");
+        assert!(is_gpu_membar_issue(&ascii_membar));
+    }
+
+    #[test]
+    fn clocklo_issue_interval_matches_the_bracketed_scheduler_region() {
+        let sched = schedule(vec![
+            (0, slot(cb(2), OpClass::Other, "CS2R R4, SR_CLOCKLO")),
+            (16, slot(cb(3), OpClass::Other, "CS2R R8, SRZ")),
+            (32, slot(cb(1), OpClass::Other, "CS2R R6, SR_CLOCKLO")),
+            (48, slot(cb(1), OpClass::Other, "EXIT")),
+        ]);
+        let blocks = vec![BlockReplay {
+            launch_index: 0,
+            warps: vec![warp(0, vec![inst(0), inst(16), inst(32), inst(48)])],
+        }];
+        let result = simulate_sm(&blocks, &sched, &params(), None).unwrap();
+        assert_eq!(result.readiness.clock_issue.reads_issued, 2);
+        assert_eq!(result.readiness.clock_issue.warps_with_interval, 1);
+        assert_eq!(
+            result
+                .readiness
+                .clock_issue
+                .maximum_first_to_last_issue_cycles,
+            5
+        );
+        assert_eq!(result.readiness.schema_version(), 5);
+    }
+
+    fn result_priority_case(load_destination: u16, producer_cycle: u8) -> SmSimResult {
+        let mut load_control = ControlBits::new(15, false, 0, 7, 0, 0).unwrap();
+        load_control.write_barrier = Some(barrier(0));
+        let mut consumer_control = cb(1);
+        consumer_control.wait_mask = wait_mask(0b000001);
+        let mut load_slot = slot(
+            load_control,
+            OpClass::Other,
+            &format!("LDG.E.STRONG.SM R{load_destination}, [R2.64]"),
+        );
+        load_slot.mem_role = MemRole::EligibleLoad(CacheOpToken::LdgEStrongSm);
+        let sched = schedule(vec![
+            (0, load_slot),
+            (
+                16,
+                slot(
+                    cb(producer_cycle - 15),
+                    OpClass::Other,
+                    "IADD3 R10, R10, 0x1, RZ",
+                ),
+            ),
+            (32, slot(cb(1), OpClass::Other, "HADD2 R9, R9, R6")),
+            (
+                48,
+                slot(cb(1), OpClass::Other, "ISETP.NE.AND P0, PT, R10, 0x40, PT"),
+            ),
+            (64, slot(cb(29 - producer_cycle - 2), OpClass::Other, "NOP")),
+            (
+                80,
+                slot(
+                    consumer_control,
+                    OpClass::Other,
+                    "LOP3.LUT R12, R12, R11, R7, 0x96, !PT",
+                ),
+            ),
+        ]);
+        let blocks = vec![BlockReplay {
+            launch_index: 0,
+            warps: vec![WarpReplay {
+                warp_slot: 0,
+                insts: vec![
+                    ReplayInst {
+                        pc: 0,
+                        kind: AccessKind::GlobalEligible {
+                            off: 0,
+                            len: 1,
+                            token: CacheOpToken::LdgEStrongSm,
+                        },
+                    },
+                    inst(16),
+                    inst(32),
+                    inst(48),
+                    inst(64),
+                    inst(80),
+                ],
+                sectors: vec![0],
+            }],
+        }];
+        let mut core =
+            SmCore::new(&blocks, &sched, &params(), SmMemMode::L1Const(l1_config())).unwrap();
+        let l1 = core.mem.const_l1_mut().unwrap();
+        l1.access_eligible_unobserved(MemoryOrigin::Global, 0, 0)
+            .unwrap();
+        l1.access_eligible_unobserved(MemoryOrigin::Global, 0, 244)
+            .unwrap();
+        core.t = 244;
+        let mut out = Vec::new();
+        assert_eq!(
+            core.advance(ReplayHorizon::Unbounded, &mut out).unwrap(),
+            Advance::Done
+        );
+        assert!(out.is_empty());
+        core.result()
+    }
+
+    #[test]
+    fn same_bank_hadd2_defers_only_the_coincident_l1tex_writeback() {
+        let noncollision = result_priority_case(11, 22);
+        let collision = result_priority_case(11, 23);
+        let opposite = result_priority_case(14, 23);
+
+        assert_eq!(noncollision.cycles, 279);
+        assert_eq!(collision.cycles, 280);
+        assert_eq!(opposite.cycles, 279);
+        assert!(noncollision.readiness.result_writeback.is_empty());
+        assert!(opposite.readiness.result_writeback.is_empty());
+        assert_eq!(
+            collision.readiness.result_writeback,
+            ResultWritebackDiagnostics {
+                fixed_over_l1tex_collisions: 1,
+                l1tex_deferral_cycles: 1,
+            }
+        );
+        assert_eq!(collision.readiness.global_memory_issue.load_instructions, 1);
+        assert_eq!(collision.readiness.schema_version(), 6);
     }
 
     #[test]
@@ -6114,6 +10777,30 @@ mod tests {
             .expect("effective copy allocates protocol state");
         assert!(async_copy.open_group.is_none());
         assert!(async_copy.committed_groups.is_empty());
+        assert_eq!(core.result().readiness.async_groups.groups_committed, 1);
+        assert_eq!(core.result().readiness.async_groups.groups_waited, 1);
+        assert_eq!(
+            core.result()
+                .readiness
+                .async_groups
+                .destination_local_limited_groups,
+            1
+        );
+        assert_eq!(core.result().readiness.async_groups.source_cycles, 399);
+        assert_eq!(
+            core.result()
+                .readiness
+                .async_groups
+                .destination_local_cycles,
+            1
+        );
+        assert_eq!(
+            core.result()
+                .readiness
+                .limiting_cycles
+                .async_destination_local,
+            400
+        );
     }
 
     #[test]
@@ -6162,6 +10849,270 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn exact_destination_wavefronts_serialize_across_sm_subcores() {
+        let sched = schedule(vec![
+            (0, slot(cb(1), OpClass::Other, "LDGSTS.E")),
+            (16, async_commit_slot()),
+        ]);
+        let completion_work = sim_mem::encode_async_copy_destination_work(512).unwrap();
+        let blocks = vec![BlockReplay {
+            launch_index: 0,
+            warps: (0..4)
+                .map(|warp_slot| WarpReplay {
+                    warp_slot,
+                    insts: vec![
+                        ReplayInst {
+                            pc: 0,
+                            kind: AccessKind::GlobalAsyncCopy {
+                                off: 0,
+                                len: 1,
+                                completion_work,
+                                l1_policy: LdgstsL1Policy::CacheAtAllLevels,
+                            },
+                        },
+                        inst(16),
+                    ],
+                    sectors: vec![40],
+                })
+                .collect(),
+        }];
+        let mut p = params();
+        p.global_flat_latency = 0;
+        let mut core = SmCore::new(&blocks, &sched, &p, SmMemMode::Flat).unwrap();
+        let mut requests = Vec::new();
+
+        assert!(core.issue_cycle(&mut requests).unwrap());
+        assert!(requests.is_empty());
+        assert_eq!(core.ldgsts_destination_pipe_ready, 0);
+        core.t = 1;
+        assert!(core.issue_cycle(&mut requests).unwrap());
+        core.enqueue_ready_async_copy_destinations().unwrap();
+        assert_eq!(core.ldgsts_destination_pipe_ready, 24);
+        let destination_ready = core
+            .async_copies
+            .iter()
+            .map(|copy| {
+                copy.state
+                    .as_deref()
+                    .unwrap()
+                    .committed_groups
+                    .front()
+                    .copied()
+                    .unwrap()
+                    .destination_completion_time
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(destination_ready, vec![6, 12, 18, 24]);
+        let completion_ready = core
+            .async_copies
+            .iter()
+            .map(|copy| {
+                copy.state
+                    .as_deref()
+                    .unwrap()
+                    .committed_groups
+                    .front()
+                    .copied()
+                    .unwrap()
+                    .completion_time
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(completion_ready, vec![8, 12, 18, 24]);
+    }
+
+    #[test]
+    fn shared_mode_attaches_exact_destination_work_once() {
+        let sched = schedule(vec![(0, slot(cb(1), OpClass::Other, "LDGSTS.E"))]);
+        let blocks = vec![BlockReplay {
+            launch_index: 0,
+            warps: vec![WarpReplay {
+                warp_slot: 0,
+                insts: vec![ReplayInst {
+                    pc: 0,
+                    kind: AccessKind::GlobalAsyncCopy {
+                        off: 0,
+                        len: 1,
+                        completion_work: sim_mem::encode_async_copy_destination_work(128).unwrap(),
+                        l1_policy: LdgstsL1Policy::CacheAtAllLevels,
+                    },
+                }],
+                sectors: vec![40],
+            }],
+        }];
+        let mut core = shared_core(&blocks, &sched, &params());
+        let mut requests = Vec::new();
+
+        assert!(core.issue_cycle(&mut requests).unwrap());
+        let group = core.async_copies[0]
+            .state
+            .as_deref()
+            .unwrap()
+            .open_group
+            .unwrap();
+        assert_eq!(group.destination_wavefronts, 1);
+        assert_eq!(group.delivery_work, 128);
+        assert_eq!(group.pending_sources, 1);
+        assert_eq!(requests.len(), 1);
+    }
+
+    #[test]
+    fn exact_destination_service_waits_for_actual_source_time() {
+        let sched = schedule(vec![
+            (0, slot(cb(1), OpClass::Other, "LDGSTS.E")),
+            (16, async_commit_slot()),
+            (32, async_wait_slot(0)),
+            (48, slot(cb(1), OpClass::Other, "EXIT")),
+        ]);
+        let blocks = vec![BlockReplay {
+            launch_index: 0,
+            warps: vec![WarpReplay {
+                warp_slot: 0,
+                insts: vec![
+                    ReplayInst {
+                        pc: 0,
+                        kind: AccessKind::GlobalAsyncCopy {
+                            off: 0,
+                            len: 1,
+                            completion_work: sim_mem::encode_async_copy_destination_work(128)
+                                .unwrap(),
+                            l1_policy: LdgstsL1Policy::CacheAtAllLevels,
+                        },
+                    },
+                    inst(16),
+                    inst(32),
+                    inst(48),
+                ],
+                sectors: vec![40],
+            }],
+        }];
+        let mut p = params();
+        p.global_flat_latency = 100;
+        let mut core = SmCore::new(&blocks, &sched, &p, SmMemMode::Flat).unwrap();
+        let mut requests = Vec::new();
+
+        assert_eq!(
+            core.advance(ReplayHorizon::Bounded(101), &mut requests)
+                .unwrap(),
+            Advance::Idle { wake_at: Some(101) }
+        );
+        assert_eq!(core.ldgsts_destination_pipe_ready, 102);
+        let group = core.async_copies[0]
+            .state
+            .as_deref()
+            .unwrap()
+            .committed_groups
+            .front()
+            .unwrap();
+        assert!(group.destination_service_queued);
+        assert_eq!(group.destination_completion_time, 102);
+        assert_eq!(
+            core.warps[0].next, 2,
+            "wait issued before service completed"
+        );
+
+        assert_eq!(
+            core.advance(ReplayHorizon::Unbounded, &mut requests)
+                .unwrap(),
+            Advance::Done
+        );
+        assert_eq!(core.result().cycles, 104);
+    }
+
+    #[test]
+    fn exact_destination_pipe_overflow_is_transactional() {
+        let sched = schedule(vec![
+            (0, slot(cb(1), OpClass::Other, "LDGSTS.E")),
+            (16, async_commit_slot()),
+        ]);
+        let blocks = vec![BlockReplay {
+            launch_index: 0,
+            warps: vec![WarpReplay {
+                warp_slot: 0,
+                insts: vec![
+                    ReplayInst {
+                        pc: 0,
+                        kind: AccessKind::GlobalAsyncCopy {
+                            off: 0,
+                            len: 1,
+                            completion_work: sim_mem::encode_async_copy_destination_work(128)
+                                .unwrap(),
+                            l1_policy: LdgstsL1Policy::CacheAtAllLevels,
+                        },
+                    },
+                    inst(16),
+                ],
+                sectors: vec![40],
+            }],
+        }];
+        let mut p = params();
+        p.global_flat_latency = 0;
+        let mut core = SmCore::new(&blocks, &sched, &p, SmMemMode::Flat).unwrap();
+        let mut requests = Vec::new();
+
+        assert!(core.issue_cycle(&mut requests).unwrap());
+        core.t = 1;
+        assert!(core.issue_cycle(&mut requests).unwrap());
+        core.ldgsts_destination_pipe_ready = u64::MAX;
+
+        assert!(matches!(
+            core.enqueue_ready_async_copy_destinations(),
+            Err(IssueError::TimeOverflow {
+                operation: "LDGSTS aggregate destination-wavefront service",
+                base: u64::MAX,
+                delta: 2,
+            })
+        ));
+        assert_eq!(core.ldgsts_destination_pipe_ready, u64::MAX);
+        assert_eq!(core.instructions_issued(), 2);
+        assert_eq!(core.warps[0].next, 2);
+        let group = core.async_copies[0]
+            .state
+            .as_deref()
+            .unwrap()
+            .committed_groups
+            .front()
+            .unwrap();
+        assert!(!group.destination_service_queued);
+        assert_eq!(group.destination_completion_time, 0);
+        assert!(requests.is_empty());
+    }
+
+    #[test]
+    fn malformed_exact_destination_work_rejects_issue_before_mutation() {
+        let sched = schedule(vec![(0, slot(cb(1), OpClass::Other, "LDGSTS.E"))]);
+        let blocks = vec![BlockReplay {
+            launch_index: 0,
+            warps: vec![WarpReplay {
+                warp_slot: 0,
+                insts: vec![ReplayInst {
+                    pc: 0,
+                    kind: AccessKind::GlobalAsyncCopy {
+                        off: 0,
+                        len: 1,
+                        completion_work: sim_mem::encode_async_copy_destination_work(129).unwrap(),
+                        l1_policy: LdgstsL1Policy::CacheAtAllLevels,
+                    },
+                }],
+                sectors: vec![40],
+            }],
+        }];
+        let mut core = SmCore::new(&blocks, &sched, &params(), SmMemMode::Flat).unwrap();
+        let mut requests = Vec::new();
+
+        assert!(matches!(
+            core.issue_cycle(&mut requests),
+            Err(IssueError::InvalidAsyncCopyDestinationWork {
+                completion_work: 129,
+                work_per_wavefront: 128,
+            })
+        ));
+        assert_eq!(core.instructions_issued(), 0);
+        assert_eq!(core.warps[0].next, 0);
+        assert!(core.async_copies[0].state.is_none());
+        assert!(requests.is_empty());
     }
 
     #[test]
@@ -6503,13 +11454,13 @@ mod tests {
 
         let p = params();
         let older = core.async_copies[0]
-            .add_pending_async_copy_sources(0, 1, 0, &p)
+            .add_pending_async_copy_sources(0, 1, 0, 0, &p)
             .unwrap();
-        core.async_copies[0].commit_async_copy_group();
+        assert!(core.async_copies[0].commit_async_copy_group(1));
         let newer = core.async_copies[0]
-            .add_pending_async_copy_sources(0, 1, 0, &p)
+            .add_pending_async_copy_sources(0, 1, 0, 0, &p)
             .unwrap();
-        core.async_copies[0].commit_async_copy_group();
+        assert!(core.async_copies[0].commit_async_copy_group(2));
 
         core.async_copies[0]
             .complete_async_copy_sources(0, newer, 1, 50, &p)
@@ -6551,7 +11502,7 @@ mod tests {
         }];
         let mut core = shared_core(&blocks, &sched, &params());
         let group = core.async_copies[0]
-            .add_pending_async_copy_sources(0, u32::MAX, 0, &params())
+            .add_pending_async_copy_sources(0, u32::MAX, 0, 0, &params())
             .unwrap();
         let before_group = core.async_copies[0].state.as_deref().unwrap().open_group;
         let before_l1 = *core.l1_counters().unwrap();
@@ -6803,6 +11754,13 @@ mod tests {
         let r = simulate_sm(&blocks, &sched, &params(), None).unwrap();
         assert_eq!(r.instructions_issued, 2);
         assert_eq!(r.cycles, 401);
+        assert_eq!(r.readiness.limiting_cycles.dependence_counter_l1tex, 400);
+        assert_eq!(
+            r.readiness
+                .constraint_exposure_cycles
+                .dependence_counter_l1tex,
+            400
+        );
     }
 
     #[test]
@@ -6941,6 +11899,7 @@ mod tests {
                             off: 0,
                             len: 2,
                             token: CacheOpToken::LdgECg,
+                            l2_requests: 0,
                         },
                     },
                     ReplayInst {
@@ -7245,6 +12204,850 @@ mod tests {
         let r = simulate_sm(&blocks, &sched, &params(), None).unwrap();
         assert_eq!(r.instructions_issued, 7);
         assert!(r.cycles >= 15, "cycles={}", r.cycles);
+        assert_eq!(r.readiness.cta_barriers.generations, 1);
+        assert_eq!(r.readiness.cta_barriers.total_arrival_spread_cycles, 12);
+        assert_eq!(r.readiness.cta_barriers.max_arrival_spread_cycles, 12);
+        assert_eq!(r.readiness.cta_barriers.total_rendezvous_warp_cycles, 14);
+        assert_eq!(r.readiness.limiting_cycles.cta_barrier_rendezvous, 14);
+    }
+
+    #[test]
+    fn sm_shared_barrier_service_queues_parallel_smsp_dispatches() {
+        let sched = schedule(vec![
+            (0, barrier_pipeline_slot(cb(1))),
+            (16, slot(cb(1), OpClass::Other, "EXIT")),
+        ]);
+        let blocks = vec![BlockReplay {
+            launch_index: 0,
+            warps: (0..4)
+                .map(|warp_slot| warp(warp_slot, vec![inst(0), inst(16)]))
+                .collect(),
+        }];
+        let result = simulate_sm(&blocks, &sched, &params(), None).unwrap();
+
+        assert_eq!(result.instructions_issued, 8);
+        assert_eq!(result.cycles, 10);
+        assert_eq!(result.readiness.schema_version(), 2);
+        assert_eq!(result.readiness.barrier_pipeline.instructions_issued, 4);
+        assert_eq!(
+            result.readiness.barrier_pipeline.issue_server_busy_cycles,
+            8
+        );
+        assert_eq!(result.readiness.barrier_pipeline.generations_completed, 1);
+        assert_eq!(
+            result
+                .readiness
+                .barrier_pipeline
+                .total_generation_issue_span_cycles,
+            0
+        );
+        assert_eq!(
+            result
+                .readiness
+                .barrier_pipeline
+                .max_generation_issue_span_cycles,
+            0
+        );
+        assert_eq!(
+            result
+                .readiness
+                .barrier_pipeline
+                .total_generation_arrival_span_cycles,
+            6
+        );
+        assert_eq!(
+            result
+                .readiness
+                .barrier_pipeline
+                .max_generation_arrival_span_cycles,
+            6
+        );
+        assert_eq!(result.readiness.cta_barriers.total_arrival_spread_cycles, 6);
+        assert!(result.readiness.constraint_exposure_cycles.pipeline_barrier > 0);
+        assert!(
+            result
+                .readiness
+                .constraint_exposure_cycles
+                .cta_barrier_rendezvous
+                > 0
+        );
+    }
+
+    #[test]
+    fn consecutive_generations_reuse_the_same_shared_barrier_service() {
+        let sched = schedule(vec![
+            (0, barrier_pipeline_slot(cb(1))),
+            (16, barrier_pipeline_slot(cb(1))),
+            (32, slot(cb(1), OpClass::Other, "EXIT")),
+        ]);
+        let blocks = vec![BlockReplay {
+            launch_index: 0,
+            warps: (0..4)
+                .map(|warp_slot| warp(warp_slot, vec![inst(0), inst(16), inst(32)]))
+                .collect(),
+        }];
+        let result = simulate_sm(&blocks, &sched, &params(), None).unwrap();
+
+        assert_eq!(result.instructions_issued, 12);
+        assert_eq!(result.cycles, 19);
+        assert_eq!(result.readiness.barrier_pipeline.instructions_issued, 8);
+        assert_eq!(
+            result.readiness.barrier_pipeline.issue_server_busy_cycles,
+            16
+        );
+        assert_eq!(result.readiness.barrier_pipeline.generations_completed, 2);
+        assert_eq!(result.readiness.barrier_pipeline.generation_rearm_events, 0);
+        assert_eq!(
+            result
+                .readiness
+                .barrier_pipeline
+                .total_generation_issue_span_cycles,
+            0
+        );
+        assert_eq!(
+            result
+                .readiness
+                .barrier_pipeline
+                .total_generation_arrival_span_cycles,
+            12
+        );
+    }
+
+    #[test]
+    fn forward_branch_resolution_extends_only_the_issuing_warps_next_frontier() {
+        let branch_control = ControlBits::new(5, true, 7, 7, 0, 0).unwrap();
+        let sched = schedule(vec![
+            (0, branch_pipeline_slot(branch_control)),
+            (16, slot(cb(1), OpClass::Other, "EXIT")),
+        ]);
+        let blocks = vec![BlockReplay {
+            launch_index: 0,
+            warps: vec![warp(0, vec![inst(0), inst(16)])],
+        }];
+        let result = simulate_sm(&blocks, &sched, &params(), None).unwrap();
+
+        assert_eq!(result.instructions_issued, 2);
+        assert_eq!(result.cycles, 11);
+        assert_eq!(result.readiness.schema_version(), 3);
+        assert_eq!(
+            result.readiness.control_pipeline.branch_instructions_issued,
+            1
+        );
+        assert_eq!(
+            result.readiness.control_pipeline.branch_resolution_cycles,
+            10
+        );
+        assert_eq!(result.readiness.limiting_cycles.pipeline_branch, 10);
+    }
+
+    #[test]
+    fn readiness_aggregation_overflow_is_transactional() {
+        assert_eq!(ReadinessDiagnostics::default().schema_version(), 1);
+        let mut aggregate = ReadinessDiagnostics::default();
+        aggregate.limiting_cycles.control_stall = u64::MAX;
+        aggregate.cta_barriers.max_arrival_spread_cycles = 19;
+        let before = aggregate.clone();
+
+        let mut addend = ReadinessDiagnostics::default();
+        addend.limiting_cycles.control_stall = 1;
+        addend.cta_barriers.max_arrival_spread_cycles = 23;
+
+        assert!(matches!(
+            aggregate.add_checked(&addend),
+            Err(ReadinessCounterError::Overflow {
+                field: "readiness.control_stall",
+                accumulated: u64::MAX,
+                addend: 1,
+            })
+        ));
+        assert_eq!(aggregate, before);
+    }
+
+    #[test]
+    fn scalar_global_output_wavefront_projection_preserves_atomic_aliases() {
+        let unique_line_sectors: Vec<i64> = (0..32).map(|value| value * 4).collect();
+        assert_eq!(
+            projected_global_memory_issue(
+                AccessKind::GlobalStore { off: 0, len: 32 },
+                &unique_line_sectors,
+            ),
+            Some((GlobalMemoryIssueClass::Store, 32, 8, 32, 0))
+        );
+        assert_eq!(
+            projected_global_memory_issue(
+                AccessKind::GlobalReduction {
+                    off: 0,
+                    len: 4,
+                    l2_requests: 1,
+                },
+                &[0, 1, 2, 3],
+            ),
+            Some((GlobalMemoryIssueClass::Reduction, 4, 1, 1, 1))
+        );
+        assert_eq!(
+            projected_global_memory_issue(
+                AccessKind::GlobalReduction {
+                    off: 0,
+                    len: 32,
+                    l2_requests: 32,
+                },
+                &[7; 32],
+            ),
+            Some((GlobalMemoryIssueClass::Reduction, 32, 32, 1, 32))
+        );
+        assert_eq!(
+            projected_global_memory_issue(
+                AccessKind::GlobalBypass {
+                    off: 0,
+                    len: 1,
+                    token: CacheOpToken::Ldgsts,
+                    l2_requests: 0,
+                },
+                &[0],
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn scalar_global_operand_read_origins_are_operation_specific() {
+        assert_eq!(
+            operand_read_dependency_origin(eligible(0, 1)),
+            DependencyOrigin::GlobalLoadOperandRead
+        );
+        assert_eq!(
+            operand_read_dependency_origin(AccessKind::GlobalStore { off: 0, len: 1 }),
+            DependencyOrigin::GlobalStoreOperandRead
+        );
+        assert_eq!(
+            operand_read_dependency_origin(AccessKind::GlobalBypass {
+                off: 0,
+                len: 1,
+                token: CacheOpToken::Atom,
+                l2_requests: 1,
+            }),
+            DependencyOrigin::GlobalAtomicOperandRead
+        );
+        assert_eq!(
+            operand_read_dependency_origin(AccessKind::GlobalReduction {
+                off: 0,
+                len: 1,
+                l2_requests: 1,
+            }),
+            DependencyOrigin::GlobalReductionOperandRead
+        );
+        assert_eq!(
+            operand_read_dependency_origin(async_copy_inst(0, 0, 1).kind),
+            DependencyOrigin::Read
+        );
+    }
+
+    #[test]
+    fn global_memory_issue_diagnostics_aggregate_and_overflow_transactionally() {
+        let mut aggregate = ReadinessDiagnostics::default();
+        aggregate
+            .global_memory_issue
+            .observe(GlobalMemoryIssueClass::Load, 4, 1, 1, 0, false, 10)
+            .unwrap();
+        aggregate
+            .global_memory_issue
+            .observe(GlobalMemoryIssueClass::Store, 32, 8, 32, 0, true, 30)
+            .unwrap();
+        let mut addend = ReadinessDiagnostics::default();
+        addend
+            .global_memory_issue
+            .observe(GlobalMemoryIssueClass::Reduction, 32, 32, 1, 32, true, 7)
+            .unwrap();
+        aggregate.add_checked(&addend).unwrap();
+        assert_eq!(aggregate.global_memory_issue.load_instructions, 1);
+        assert_eq!(aggregate.global_memory_issue.store_ideal_wavefronts, 8);
+        assert_eq!(aggregate.global_memory_issue.reduction_ideal_wavefronts, 32);
+        assert_eq!(aggregate.global_memory_issue.store_unique_lines, 32);
+        assert_eq!(aggregate.global_memory_issue.reduction_l2_requests, 32);
+        assert_eq!(
+            aggregate
+                .global_memory_issue
+                .store_operand_read_barrier_instructions,
+            1
+        );
+        assert_eq!(
+            aggregate
+                .global_memory_issue
+                .reduction_operand_read_barrier_instructions,
+            1
+        );
+        assert_eq!(aggregate.global_memory_issue.total_issue_span_cycles, 20);
+        assert_eq!(aggregate.global_memory_issue.max_issue_span_cycles, 20);
+        assert_eq!(aggregate.schema_version(), 8);
+
+        aggregate.global_memory_issue.store_sectors = u64::MAX;
+        addend.global_memory_issue.store_sectors = 1;
+        let before = aggregate.clone();
+        assert!(matches!(
+            aggregate.add_checked(&addend),
+            Err(ReadinessCounterError::Overflow {
+                field: "readiness.global_memory_issue.store_sectors",
+                accumulated: u64::MAX,
+                addend: 1,
+            })
+        ));
+        assert_eq!(aggregate, before);
+    }
+
+    fn service_candidate(
+        candidate_id: u8,
+        scope: MemoryServiceCandidateScope,
+    ) -> MemoryServiceCandidate {
+        MemoryServiceCandidate {
+            candidate_id,
+            scope,
+            operation: MemoryServiceCandidateOperation::Store,
+            ideal_wavefront_units: 2,
+            ideal_wavefront_cycles: 3,
+            unique_line_units: 1,
+            unique_line_cycles: 1,
+            completion_latency_cycles: 5,
+        }
+    }
+
+    fn admission_candidate(
+        candidate_id: u8,
+        scope: MemoryServiceCandidateScope,
+    ) -> MemoryAdmissionCandidate {
+        MemoryAdmissionCandidate {
+            candidate_id,
+            scope,
+            operation: MemoryServiceCandidateOperation::Store,
+            queue_capacity_instructions: 1,
+            admission_latency_cycles: 8,
+            l2_hit_sector_units: 1,
+            l2_hit_sector_cycles: 1,
+            l2_miss_sector_units: 1,
+            l2_miss_sector_cycles: 4,
+            l2_miss_service_width_sectors: 0,
+            membar_waits_for_service_completion: false,
+            write_completion_latency_cycles: 0,
+            write_completion_request_cycles: 0,
+            write_completion_region_cycles: 0,
+            write_completion_parallel_lanes: 0,
+        }
+    }
+
+    #[test]
+    fn memory_admission_candidate_validation_is_bounded_and_hit_miss_ordered() {
+        let mut candidates = [admission_candidate(0, MemoryServiceCandidateScope::Sm);
+            MAX_MEMORY_ADMISSION_CANDIDATES + 1];
+        for (index, candidate) in candidates.iter_mut().enumerate() {
+            candidate.candidate_id = index as u8;
+        }
+        assert_eq!(
+            MemoryAdmissionCandidateState::checked(&candidates),
+            Err(MemoryAdmissionCandidateError::TooMany {
+                count: MAX_MEMORY_ADMISSION_CANDIDATES + 1,
+                maximum: MAX_MEMORY_ADMISSION_CANDIDATES,
+            })
+        );
+        let mut invalid = admission_candidate(3, MemoryServiceCandidateScope::Sm);
+        invalid.queue_capacity_instructions = 0;
+        assert_eq!(
+            invalid.validate(),
+            Err(MemoryAdmissionCandidateError::CapacityOutOfRange {
+                candidate_id: 3,
+                capacity: 0,
+                maximum: MAX_MEMORY_ADMISSION_QUEUE_CAPACITY,
+            })
+        );
+
+        invalid = admission_candidate(6, MemoryServiceCandidateScope::Sm);
+        invalid.write_completion_latency_cycles = 7;
+        assert_eq!(
+            invalid.validate(),
+            Err(
+                MemoryAdmissionCandidateError::CompletionLatencyWithoutMembar {
+                    candidate_id: 6,
+                    latency: 7,
+                }
+            )
+        );
+        invalid = admission_candidate(7, MemoryServiceCandidateScope::Sm);
+        invalid.write_completion_request_cycles = 1;
+        invalid.write_completion_parallel_lanes = 1;
+        assert_eq!(
+            invalid.validate(),
+            Err(MemoryAdmissionCandidateError::CompletionWorkWithoutMembar { candidate_id: 7 })
+        );
+        invalid.membar_waits_for_service_completion = true;
+        invalid.write_completion_parallel_lanes = 0;
+        assert_eq!(
+            invalid.validate(),
+            Err(MemoryAdmissionCandidateError::CompletionLanesOutOfRange {
+                candidate_id: 7,
+                lanes: 0,
+                maximum: MAX_WRITE_COMPLETION_PARALLEL_LANES,
+            })
+        );
+        invalid.write_completion_request_cycles = 0;
+        invalid.write_completion_parallel_lanes = 1;
+        assert_eq!(
+            invalid.validate(),
+            Err(MemoryAdmissionCandidateError::CompletionLanesWithoutWork {
+                candidate_id: 7,
+                lanes: 1,
+            })
+        );
+        invalid = admission_candidate(4, MemoryServiceCandidateScope::Sm);
+        invalid.l2_miss_sector_cycles = 1;
+        invalid.l2_hit_sector_cycles = 2;
+        assert_eq!(
+            invalid.validate(),
+            Err(MemoryAdmissionCandidateError::MissRateFasterThanHit { candidate_id: 4 })
+        );
+
+        invalid = admission_candidate(5, MemoryServiceCandidateScope::Sm);
+        invalid.l2_miss_service_width_sectors = MAX_MEMORY_ADMISSION_SERVICE_WIDTH_SECTORS + 1;
+        assert_eq!(
+            invalid.validate(),
+            Err(MemoryAdmissionCandidateError::ServiceWidthOutOfRange {
+                candidate_id: 5,
+                width: MAX_MEMORY_ADMISSION_SERVICE_WIDTH_SECTORS + 1,
+                maximum: MAX_MEMORY_ADMISSION_SERVICE_WIDTH_SECTORS,
+            })
+        );
+    }
+
+    #[test]
+    fn memory_admission_miss_width_is_independent_from_asymptotic_rate() {
+        assert_eq!(candidate_rate_cycles_with_width(5, 1, 10, 0).unwrap(), 50);
+        assert_eq!(candidate_rate_cycles_with_width(5, 1, 10, 1).unwrap(), 50);
+        assert_eq!(candidate_rate_cycles_with_width(5, 1, 10, 4).unwrap(), 80);
+        assert_eq!(candidate_rate_cycles_with_width(8, 1, 10, 4).unwrap(), 80);
+
+        let mut candidate = admission_candidate(6, MemoryServiceCandidateScope::Sm);
+        candidate.l2_miss_service_width_sectors = 4;
+        let mut state = MemoryAdmissionCandidateState::checked(&[candidate]).unwrap();
+        state
+            .observe(0, 0, MemoryOperation::Store, 0, 5, 0)
+            .unwrap();
+        let result = state.diagnostics().entries()[0];
+        assert_eq!(result.service_busy_cycles, 32);
+        assert_eq!(result.terminal_service_completion_time, 32);
+
+        let mut completion_candidate = candidate;
+        completion_candidate.membar_waits_for_service_completion = true;
+        completion_candidate.write_completion_latency_cycles = 5;
+        let mut feedback = MemoryAdmissionFeedbackState::checked(completion_candidate).unwrap();
+        feedback
+            .reserve(0, 3, 4, AccessKind::GlobalStore { off: 0, len: 1 }, 0)
+            .unwrap();
+        feedback
+            .complete(
+                AdmissionRequestWitness::new(3, 4, 0, 0, 1).unwrap(),
+                MemoryOperation::Store,
+                0,
+                5,
+                1,
+                1,
+                0,
+            )
+            .unwrap();
+        assert_eq!(feedback.diagnostics().service_busy_cycles, 32);
+        assert_eq!(feedback.diagnostics().terminal_service_completion_time, 32);
+
+        feedback
+            .reserve(1, 4, 5, AccessKind::GlobalStore { off: 0, len: 1 }, 0)
+            .unwrap();
+        feedback
+            .complete(
+                AdmissionRequestWitness::new(4, 5, 1, 0, 1).unwrap(),
+                MemoryOperation::Store,
+                0,
+                5,
+                1,
+                1,
+                0,
+            )
+            .unwrap();
+        let membar = slot(cb(1), OpClass::Other, "MEMBAR.SC.GPU");
+        let ordinary = slot(cb(1), OpClass::Other, "IADD3");
+        assert_eq!(feedback.completion_ready_at(3, &membar), Some(37));
+        assert_eq!(feedback.completion_ready_at(4, &membar), Some(69));
+        assert_eq!(feedback.completion_ready_at(3, &ordinary), Some(0));
+        assert_eq!(feedback.diagnostics().terminal_write_completion_time, 69);
+
+        let mut parallel_candidate = admission_candidate(8, MemoryServiceCandidateScope::Sm);
+        parallel_candidate.l2_miss_sector_cycles = 1;
+        parallel_candidate.membar_waits_for_service_completion = true;
+        parallel_candidate.write_completion_request_cycles = 100;
+        parallel_candidate.write_completion_parallel_lanes = 2;
+        let mut parallel = MemoryAdmissionFeedbackState::checked(parallel_candidate).unwrap();
+        for (warp, subcore) in [(0, 0), (1, 1)] {
+            parallel
+                .reserve(
+                    subcore,
+                    warp,
+                    0,
+                    AccessKind::GlobalStore { off: 0, len: 1 },
+                    0,
+                )
+                .unwrap();
+            parallel
+                .complete(
+                    AdmissionRequestWitness::new(warp as u32, 0, subcore as u8, 0, 1).unwrap(),
+                    MemoryOperation::Store,
+                    0,
+                    1,
+                    1,
+                    1,
+                    0,
+                )
+                .unwrap();
+        }
+        assert_eq!(parallel.completion_ready_at(0, &membar), Some(101));
+        assert_eq!(parallel.completion_ready_at(1, &membar), Some(102));
+        assert_eq!(parallel.diagnostics().write_completion_busy_cycles, 200);
+        assert_eq!(parallel.diagnostics().write_completion_requests_observed, 2);
+        assert_eq!(parallel.diagnostics().write_completion_regions_observed, 2);
+        let readiness = ReadinessDiagnostics {
+            memory_admission_feedback: parallel.diagnostics(),
+            ..ReadinessDiagnostics::default()
+        };
+        assert_eq!(readiness.schema_version(), 13);
+    }
+
+    #[test]
+    fn legacy_admission_candidate_json_omits_zero_service_width() {
+        let candidate = admission_candidate(7, MemoryServiceCandidateScope::Smsp);
+        let encoded = serde_json::to_value(candidate).unwrap();
+        assert!(encoded.get("l2_miss_service_width_sectors").is_none());
+        assert!(encoded.get("membar_waits_for_service_completion").is_none());
+        assert!(encoded.get("write_completion_latency_cycles").is_none());
+        assert!(encoded.get("write_completion_request_cycles").is_none());
+        assert!(encoded.get("write_completion_region_cycles").is_none());
+        assert!(encoded.get("write_completion_parallel_lanes").is_none());
+        let decoded: MemoryAdmissionCandidate = serde_json::from_value(encoded).unwrap();
+        assert_eq!(decoded, candidate);
+
+        let mut widened = candidate;
+        widened.l2_miss_service_width_sectors = 4;
+        let encoded = serde_json::to_value(widened).unwrap();
+        assert_eq!(encoded["l2_miss_service_width_sectors"], 4);
+        assert_eq!(
+            serde_json::from_value::<MemoryAdmissionCandidate>(encoded).unwrap(),
+            widened
+        );
+
+        widened.membar_waits_for_service_completion = true;
+        widened.write_completion_latency_cycles = 17;
+        widened.write_completion_request_cycles = 4;
+        widened.write_completion_parallel_lanes = 2;
+        let encoded = serde_json::to_value(widened).unwrap();
+        assert_eq!(encoded["membar_waits_for_service_completion"], true);
+        assert_eq!(encoded["write_completion_latency_cycles"], 17);
+        assert_eq!(encoded["write_completion_request_cycles"], 4);
+        assert_eq!(encoded["write_completion_parallel_lanes"], 2);
+        assert_eq!(
+            serde_json::from_value::<MemoryAdmissionCandidate>(encoded).unwrap(),
+            widened
+        );
+    }
+
+    #[test]
+    fn memory_admission_candidates_share_service_but_scope_queue_capacity() {
+        let candidates = [
+            admission_candidate(1, MemoryServiceCandidateScope::Sm),
+            admission_candidate(2, MemoryServiceCandidateScope::Smsp),
+        ];
+        let mut state = MemoryAdmissionCandidateState::checked(&candidates).unwrap();
+        state
+            .observe(0, 0, MemoryOperation::Store, 0, 1, 0)
+            .unwrap();
+        state
+            .observe(1, 1, MemoryOperation::Store, 0, 1, 0)
+            .unwrap();
+        state
+            .observe(0, 0, MemoryOperation::Store, 0, 1, 0)
+            .unwrap();
+        let diagnostics = state.diagnostics();
+        let sm = diagnostics.entries()[0];
+        let smsp = diagnostics.entries()[1];
+
+        assert_eq!(sm.instructions_observed, 3);
+        assert_eq!(sm.l2_miss_sectors_observed, 3);
+        assert_eq!(sm.service_busy_cycles, 12);
+        assert_eq!(sm.downstream_queue_delay_cycles, 8);
+        assert_eq!(sm.queue_full_instructions, 1);
+        assert_eq!(sm.total_admission_delay_cycles, 4);
+        assert_eq!(sm.maximum_admission_delay_cycles, 4);
+        assert_eq!(sm.maximum_warp_admission_delay_cycles, 4);
+        assert_eq!(sm.terminal_operand_read_clear_time, 12);
+        assert_eq!(sm.terminal_service_completion_time, 12);
+
+        assert_eq!(smsp.instructions_observed, 3);
+        assert_eq!(smsp.service_busy_cycles, 12);
+        assert_eq!(smsp.downstream_queue_delay_cycles, 12);
+        assert_eq!(smsp.queue_full_instructions, 0);
+        assert_eq!(smsp.total_admission_delay_cycles, 0);
+        assert_eq!(smsp.maximum_warp_admission_delay_cycles, 0);
+        assert_eq!(diagnostics.entries().len(), 2);
+    }
+
+    #[test]
+    fn memory_admission_candidate_aggregation_is_checked_and_schema9() {
+        let candidate = admission_candidate(6, MemoryServiceCandidateScope::Sm);
+        let mut left = MemoryAdmissionCandidateState::checked(&[candidate]).unwrap();
+        left.observe(0, 0, MemoryOperation::Store, 1, 0, 10)
+            .unwrap();
+        let mut right = MemoryAdmissionCandidateState::checked(&[candidate]).unwrap();
+        right
+            .observe(1, 0, MemoryOperation::Store, 0, 1, 20)
+            .unwrap();
+        let mut readiness = ReadinessDiagnostics::default();
+        readiness.memory_admission_candidates = left.diagnostics();
+        let mut addend = ReadinessDiagnostics::default();
+        addend.memory_admission_candidates = right.diagnostics();
+        readiness.add_checked(&addend).unwrap();
+        let result = readiness.memory_admission_candidates.entries()[0];
+        assert_eq!(result.instructions_observed, 2);
+        assert_eq!(result.l2_hit_sectors_observed, 1);
+        assert_eq!(result.l2_miss_sectors_observed, 1);
+        assert_eq!(result.terminal_service_completion_time, 24);
+        assert_eq!(readiness.schema_version(), 9);
+
+        let mismatch = MemoryAdmissionCandidateState::checked(&[admission_candidate(
+            7,
+            MemoryServiceCandidateScope::Sm,
+        )])
+        .unwrap()
+        .diagnostics();
+        let mut bad = ReadinessDiagnostics::default();
+        bad.memory_admission_candidates = mismatch;
+        assert!(matches!(
+            readiness.add_checked(&bad),
+            Err(ReadinessCounterError::MemoryAdmissionCandidateMismatch { index: 0 })
+        ));
+    }
+
+    #[test]
+    fn feedback_admission_reservation_and_pricing_overflows_are_transactional() {
+        let candidate = admission_candidate(8, MemoryServiceCandidateScope::Sm);
+
+        let mut reserve_overflow = MemoryAdmissionFeedbackState::checked(candidate).unwrap();
+        reserve_overflow.diagnostics.instructions_admitted = u64::MAX;
+        let before = reserve_overflow.clone();
+        assert!(matches!(
+            reserve_overflow.reserve(0, 0, 0, AccessKind::GlobalStore { off: 0, len: 1 }, 0,),
+            Err(IssueError::CounterOverflow {
+                counter: "feedback admission instructions"
+            })
+        ));
+        assert_eq!(reserve_overflow, before);
+
+        let mut pricing_overflow = MemoryAdmissionFeedbackState::checked(candidate).unwrap();
+        pricing_overflow
+            .reserve(0, 0, 0, AccessKind::GlobalStore { off: 0, len: 1 }, 0)
+            .unwrap();
+        pricing_overflow.diagnostics.l2_hit_sectors_observed = u64::MAX;
+        let before = pricing_overflow.clone();
+        let witness = AdmissionRequestWitness::new(0, 0, 0, 0, 1).unwrap();
+        assert!(matches!(
+            pricing_overflow.complete(witness, MemoryOperation::Store, 1, 0, 1, 1, 0),
+            Err(IssueError::CounterOverflow {
+                counter: "feedback admission L2 hit sectors"
+            })
+        ));
+        assert_eq!(pricing_overflow, before);
+    }
+
+    #[test]
+    fn feedback_issue_plan_is_transactional_and_accounts_same_cycle_reservations() {
+        let mut candidate = admission_candidate(9, MemoryServiceCandidateScope::Sm);
+        candidate.queue_capacity_instructions = 2;
+        candidate.membar_waits_for_service_completion = true;
+        let mut feedback = MemoryAdmissionFeedbackState::checked(candidate).unwrap();
+        let issues = [
+            Some(MemoryAdmissionFeedbackIssue {
+                subcore: 0,
+                warp: 3,
+                instruction: 7,
+                kind: AccessKind::GlobalStore { off: 0, len: 1 },
+                prior_clock_reads: 1,
+                clock_read: true,
+            }),
+            Some(MemoryAdmissionFeedbackIssue {
+                subcore: 1,
+                warp: 4,
+                instruction: 8,
+                kind: AccessKind::GlobalStore { off: 0, len: 1 },
+                prior_clock_reads: 0,
+                clock_read: false,
+            }),
+            None,
+            None,
+        ];
+        let before = feedback.clone();
+        let plan = feedback.plan_issue(&issues, 11).unwrap();
+        assert_eq!(feedback, before, "preflight must not mutate feedback state");
+        feedback.apply_issue(plan, 11);
+        assert_eq!(feedback.queues[0].len(), 2);
+        assert_eq!(feedback.diagnostics.instructions_admitted, 2);
+        assert_eq!(feedback.diagnostics.maximum_waiting_instructions, 2);
+        assert_eq!(feedback.second_clock_issue(3), Some(11));
+        assert!(feedback.take_yield_requested());
+
+        let mut full = MemoryAdmissionFeedbackState::checked(candidate).unwrap();
+        full.apply_issue(full.plan_issue(&issues, 11).unwrap(), 11);
+        let overflow = [
+            Some(MemoryAdmissionFeedbackIssue {
+                subcore: 2,
+                warp: 5,
+                instruction: 9,
+                kind: AccessKind::GlobalStore { off: 0, len: 1 },
+                prior_clock_reads: 0,
+                clock_read: false,
+            }),
+            None,
+            None,
+            None,
+        ];
+        let before = full.clone();
+        assert!(matches!(
+            full.plan_issue(&overflow, 11),
+            Err(IssueError::MemoryAdmissionFeedbackQueueFull {
+                subcore: 2,
+                time: 11,
+            })
+        ));
+        assert_eq!(full, before);
+    }
+
+    #[test]
+    fn memory_service_candidate_validation_is_bounded_and_unambiguous() {
+        let mut candidates = [service_candidate(0, MemoryServiceCandidateScope::Sm);
+            MAX_MEMORY_SERVICE_CANDIDATES + 1];
+        for (index, candidate) in candidates.iter_mut().enumerate() {
+            candidate.candidate_id = index as u8;
+        }
+        assert_eq!(
+            MemoryServiceCandidateState::checked(&candidates),
+            Err(MemoryServiceCandidateError::TooMany {
+                count: MAX_MEMORY_SERVICE_CANDIDATES + 1,
+                maximum: MAX_MEMORY_SERVICE_CANDIDATES,
+            })
+        );
+        assert_eq!(
+            MemoryServiceCandidateState::checked(&[
+                service_candidate(7, MemoryServiceCandidateScope::Sm),
+                service_candidate(7, MemoryServiceCandidateScope::Smsp),
+            ]),
+            Err(MemoryServiceCandidateError::DuplicateId { candidate_id: 7 })
+        );
+        let mut invalid = service_candidate(8, MemoryServiceCandidateScope::Sm);
+        invalid.unique_line_units = 0;
+        assert_eq!(
+            invalid.validate(),
+            Err(MemoryServiceCandidateError::InvalidRate {
+                candidate_id: 8,
+                dimension: "unique_line",
+                units: 0,
+                cycles: 1,
+            })
+        );
+        invalid.unique_line_cycles = 0;
+        invalid.ideal_wavefront_units = 0;
+        invalid.ideal_wavefront_cycles = 0;
+        assert_eq!(
+            invalid.validate(),
+            Err(MemoryServiceCandidateError::NoServiceWork { candidate_id: 8 })
+        );
+    }
+
+    #[test]
+    fn memory_service_candidates_stream_at_issue_time_by_selected_scope() {
+        let candidates = [
+            service_candidate(1, MemoryServiceCandidateScope::Sm),
+            service_candidate(2, MemoryServiceCandidateScope::Smsp),
+        ];
+        let mut state = MemoryServiceCandidateState::checked(&candidates).unwrap();
+        state
+            .observe(0, GlobalMemoryIssueClass::Store, 4, 2, 10)
+            .unwrap();
+        state
+            .observe(1, GlobalMemoryIssueClass::Store, 4, 2, 12)
+            .unwrap();
+        let diagnostics = state.diagnostics();
+        let sm = diagnostics.entries()[0];
+        let smsp = diagnostics.entries()[1];
+
+        assert_eq!(sm.instructions_observed, 2);
+        assert_eq!(sm.ideal_wavefronts_observed, 8);
+        assert_eq!(sm.unique_lines_observed, 4);
+        assert_eq!(sm.busy_cycles, 16);
+        assert_eq!(sm.queue_delay_cycles, 6);
+        assert_eq!(sm.terminal_completion_time, 31);
+        assert_eq!(smsp.instructions_observed, 2);
+        assert_eq!(smsp.busy_cycles, 16);
+        assert_eq!(smsp.queue_delay_cycles, 0);
+        assert_eq!(smsp.terminal_completion_time, 25);
+    }
+
+    #[test]
+    fn memory_service_candidate_aggregation_is_transactional_and_uses_max_terminal() {
+        let candidate = service_candidate(3, MemoryServiceCandidateScope::Sm);
+        let mut left = MemoryServiceCandidateState::checked(&[candidate]).unwrap();
+        left.observe(0, GlobalMemoryIssueClass::Store, 4, 2, 10)
+            .unwrap();
+        let mut right = MemoryServiceCandidateState::checked(&[candidate]).unwrap();
+        right
+            .observe(0, GlobalMemoryIssueClass::Store, 4, 2, 40)
+            .unwrap();
+        let mut aggregate = left.diagnostics();
+        aggregate.add_checked(&right.diagnostics()).unwrap();
+        assert_eq!(aggregate.entries()[0].instructions_observed, 2);
+        assert_eq!(aggregate.entries()[0].busy_cycles, 16);
+        assert_eq!(aggregate.entries()[0].terminal_completion_time, 53);
+
+        let before = aggregate.clone();
+        let mismatch = MemoryServiceCandidateState::checked(&[service_candidate(
+            4,
+            MemoryServiceCandidateScope::Sm,
+        )])
+        .unwrap()
+        .diagnostics();
+        assert_eq!(
+            aggregate.add_checked(&mismatch),
+            Err(ReadinessCounterError::MemoryServiceCandidateMismatch { index: 0 })
+        );
+        assert_eq!(aggregate, before);
+
+        let mut readiness = ReadinessDiagnostics::default();
+        readiness.memory_service_candidates = aggregate;
+        assert_eq!(readiness.schema_version(), 7);
+    }
+
+    #[test]
+    fn result_writeback_diagnostics_aggregate_and_overflow_transactionally() {
+        let mut aggregate = ReadinessDiagnostics::default();
+        aggregate.result_writeback.fixed_over_l1tex_collisions = 2;
+        aggregate.result_writeback.l1tex_deferral_cycles = 2;
+        let mut addend = ReadinessDiagnostics::default();
+        addend.result_writeback.fixed_over_l1tex_collisions = 3;
+        addend.result_writeback.l1tex_deferral_cycles = 3;
+        aggregate.add_checked(&addend).unwrap();
+        assert_eq!(aggregate.result_writeback.fixed_over_l1tex_collisions, 5);
+        assert_eq!(aggregate.result_writeback.l1tex_deferral_cycles, 5);
+        assert_eq!(aggregate.schema_version(), 4);
+
+        aggregate.result_writeback.l1tex_deferral_cycles = u64::MAX;
+        let before = aggregate.clone();
+        assert!(matches!(
+            aggregate.add_checked(&addend),
+            Err(ReadinessCounterError::Overflow {
+                field: "readiness.result_writeback.l1tex_deferral_cycles",
+                accumulated: u64::MAX,
+                addend: 3,
+            })
+        ));
+        assert_eq!(aggregate, before);
     }
 
     #[test]
@@ -7354,6 +13157,418 @@ mod tests {
         p: &IssueModelParams,
     ) -> SmCore<'a> {
         SmCore::new(blocks, sched, p, SmMemMode::L1Shared(l1_config())).unwrap()
+    }
+
+    #[test]
+    fn feedback_admission_requires_the_issue_models_operand_visibility_latency() {
+        let sched = schedule(vec![(0, slot(cb(1), OpClass::Other, "EXIT"))]);
+        let blocks = vec![BlockReplay {
+            launch_index: 0,
+            warps: vec![warp(0, vec![inst(0)])],
+        }];
+        let mut core = shared_core(&blocks, &sched, &params());
+        let matching = admission_candidate(9, MemoryServiceCandidateScope::Sm);
+        core.install_memory_admission_feedback(matching).unwrap();
+        assert_eq!(
+            core.memory_admission_feedback
+                .as_ref()
+                .unwrap()
+                .diagnostics()
+                .candidate,
+            matching
+        );
+
+        let mut mismatched = matching;
+        mismatched.admission_latency_cycles = 7;
+        assert!(matches!(
+            core.install_memory_admission_feedback(mismatched),
+            Err(IssueError::MemoryAdmissionFeedbackLatencyMismatch {
+                candidate_id: 9,
+                configured_cycles: 7,
+                issue_model_cycles: 8,
+            })
+        ));
+        assert_eq!(
+            core.memory_admission_feedback
+                .as_ref()
+                .unwrap()
+                .diagnostics()
+                .candidate,
+            matching,
+            "a rejected replacement must preserve the installed candidate"
+        );
+    }
+
+    #[test]
+    fn sm_scoped_same_cycle_capacity_denial_repicks_non_candidate_work() {
+        let sched = schedule(vec![
+            (0, slot(cb(1), OpClass::Other, "STG.E")),
+            (16, slot(cb(1), OpClass::Other, "IADD3")),
+        ]);
+        let blocks = vec![BlockReplay {
+            launch_index: 0,
+            warps: vec![
+                // Older ready work on SMSP 1.
+                warp(1, vec![inst(16)]),
+                // Younger STORE on the same SMSP wins the initial CGGTY pick,
+                // but loses the SM-wide one-entry queue to SMSP 0.
+                WarpReplay {
+                    warp_slot: 5,
+                    insts: vec![ReplayInst {
+                        pc: 0,
+                        kind: AccessKind::GlobalStore { off: 0, len: 1 },
+                    }],
+                    sectors: vec![4],
+                },
+                WarpReplay {
+                    warp_slot: 0,
+                    insts: vec![ReplayInst {
+                        pc: 0,
+                        kind: AccessKind::GlobalStore { off: 0, len: 1 },
+                    }],
+                    sectors: vec![0],
+                },
+            ],
+        }];
+        let mut core = shared_core(&blocks, &sched, &params());
+        core.install_memory_admission_feedback(admission_candidate(
+            10,
+            MemoryServiceCandidateScope::Sm,
+        ))
+        .unwrap();
+        let mut requests = Vec::new();
+
+        assert_eq!(
+            core.advance(ReplayHorizon::Unbounded, &mut requests)
+                .unwrap(),
+            Advance::Idle { wake_at: Some(1) }
+        );
+        assert_eq!(core.instructions_issued(), 2);
+        assert_eq!(requests.len(), 1);
+        assert!(
+            core.warps[0].done,
+            "the non-candidate fallback must dispatch"
+        );
+        assert!(
+            !core.warps[1].done,
+            "the capacity-denied younger STORE must remain resident"
+        );
+        assert!(core.warps[2].done, "SMSP 0 owns the queue reservation");
+    }
+
+    #[test]
+    fn installed_memory_service_candidate_observes_real_issue_without_delaying_core() {
+        let sched = schedule(vec![(0, slot(cb(1), OpClass::Other, "STG.E"))]);
+        let blocks = vec![BlockReplay {
+            launch_index: 0,
+            warps: vec![WarpReplay {
+                warp_slot: 0,
+                insts: vec![ReplayInst {
+                    pc: 0,
+                    kind: AccessKind::GlobalStore { off: 0, len: 4 },
+                }],
+                sectors: vec![0, 1, 2, 3],
+            }],
+        }];
+        let candidate = service_candidate(9, MemoryServiceCandidateScope::Sm);
+        let mut core = shared_core(&blocks, &sched, &params());
+        core.install_memory_service_candidates(&[candidate])
+            .unwrap();
+        let mut requests = Vec::new();
+
+        assert_eq!(
+            core.advance(ReplayHorizon::Unbounded, &mut requests)
+                .unwrap(),
+            Advance::Done
+        );
+        let result = core.result();
+        assert_eq!(result.cycles, 1, "candidate must not delay the issue clock");
+        assert_eq!(result.readiness.schema_version(), 7);
+        let observed = result.readiness.memory_service_candidates.entries()[0];
+        assert_eq!(observed.instructions_observed, 1);
+        assert_eq!(observed.ideal_wavefronts_observed, 1);
+        assert_eq!(observed.unique_lines_observed, 1);
+        assert_eq!(observed.busy_cycles, 3);
+        assert_eq!(observed.queue_delay_cycles, 0);
+        assert_eq!(observed.terminal_completion_time, 8);
+    }
+
+    #[test]
+    fn global_store_operand_read_barrier_has_distinct_schema8_attribution() {
+        let mut producer = cb(1);
+        producer.read_barrier = Some(barrier(0));
+        let mut consumer = cb(1);
+        consumer.wait_mask = wait_mask(0b000001);
+        let sched = schedule(vec![
+            (0, slot(producer, OpClass::Other, "STG.E.STRONG.SM")),
+            (16, slot(consumer, OpClass::Other, "EXIT")),
+        ]);
+        let blocks = vec![BlockReplay {
+            launch_index: 0,
+            warps: vec![WarpReplay {
+                warp_slot: 0,
+                insts: vec![
+                    ReplayInst {
+                        pc: 0,
+                        kind: AccessKind::GlobalStore { off: 0, len: 1 },
+                    },
+                    inst(16),
+                ],
+                sectors: vec![0],
+            }],
+        }];
+        let mut core = shared_core(&blocks, &sched, &params());
+        let mut requests = Vec::new();
+
+        assert_eq!(
+            core.advance(ReplayHorizon::Unbounded, &mut requests)
+                .unwrap(),
+            Advance::Done
+        );
+        let result = core.result();
+        assert_eq!(result.cycles, 9);
+        assert_eq!(result.readiness.schema_version(), 8);
+        assert_eq!(
+            result
+                .readiness
+                .global_memory_issue
+                .store_operand_read_barrier_instructions,
+            1
+        );
+        assert_eq!(
+            result
+                .readiness
+                .limiting_cycles
+                .dependence_counter_global_store_operand_read,
+            8
+        );
+        assert_eq!(result.readiness.limiting_cycles.dependence_counter_read, 0);
+    }
+
+    #[test]
+    fn predicated_off_memory_creates_no_dependency_producer() {
+        let mut producer = cb(1);
+        producer.read_barrier = Some(barrier(0));
+        producer.write_barrier = Some(barrier(1));
+        let mut consumer = cb(1);
+        consumer.wait_mask = wait_mask(0b000011);
+        let sched = schedule(vec![
+            (0, slot(producer, OpClass::Other, "STG.E.STRONG.SM")),
+            (16, slot(consumer, OpClass::Other, "EXIT")),
+        ]);
+        let blocks = vec![BlockReplay {
+            launch_index: 0,
+            warps: vec![WarpReplay {
+                warp_slot: 0,
+                insts: vec![
+                    ReplayInst {
+                        pc: 0,
+                        kind: AccessKind::PredicatedOffMemory,
+                    },
+                    inst(16),
+                ],
+                sectors: Vec::new(),
+            }],
+        }];
+        let mut core = shared_core(&blocks, &sched, &params());
+        let mut requests = Vec::new();
+
+        assert_eq!(
+            core.advance(ReplayHorizon::Unbounded, &mut requests)
+                .unwrap(),
+            Advance::Done
+        );
+        assert!(requests.is_empty());
+        let result = core.result();
+        assert_eq!(result.cycles, 2);
+        assert!(result.unmodeled_tails.is_empty());
+        assert!(result.readiness.schema_version() < 8);
+        assert_eq!(result.readiness.global_memory_issue.store_instructions, 0);
+        assert_eq!(
+            result
+                .readiness
+                .global_memory_issue
+                .store_operand_read_barrier_instructions,
+            0
+        );
+        assert_eq!(result.readiness.limiting_cycles.dependence_counter_read, 0);
+        assert_eq!(
+            result
+                .readiness
+                .limiting_cycles
+                .dependence_counter_global_store_operand_read,
+            0
+        );
+    }
+
+    #[test]
+    fn pending_l1tex_writeback_keeps_origin_when_read_barrier_reuses_counter() {
+        let mut producer = cb(1);
+        producer.write_barrier = Some(barrier(0));
+        producer.read_barrier = Some(barrier(0));
+        let mut consumer = cb(1);
+        consumer.wait_mask = wait_mask(0b000001);
+        let sched = schedule(vec![
+            (0, slot(producer, OpClass::Other, "LDG.E.CA")),
+            (16, slot(consumer, OpClass::Other, "EXIT")),
+        ]);
+        let blocks = vec![BlockReplay {
+            launch_index: 0,
+            warps: vec![WarpReplay {
+                warp_slot: 0,
+                insts: vec![
+                    ReplayInst {
+                        pc: 0,
+                        kind: eligible(0, 1),
+                    },
+                    inst(16),
+                ],
+                sectors: vec![0],
+            }],
+        }];
+        let mut core = shared_core(&blocks, &sched, &params());
+        let mut requests = Vec::new();
+
+        assert_eq!(
+            core.advance(ReplayHorizon::Unbounded, &mut requests)
+                .unwrap(),
+            Advance::Idle { wake_at: None }
+        );
+        assert_eq!(requests.len(), 1);
+        let mut sink = Vec::new();
+        core.on_response(requests[0].reply, 300, &mut sink).unwrap();
+        assert_eq!(
+            core.advance(ReplayHorizon::Unbounded, &mut sink).unwrap(),
+            Advance::Done
+        );
+        let result = core.result();
+        assert_eq!(result.cycles, 301);
+        assert_eq!(result.readiness.schema_version(), 8);
+        assert_eq!(
+            result
+                .readiness
+                .global_memory_issue
+                .load_operand_read_barrier_instructions,
+            1
+        );
+        assert_eq!(
+            result.readiness.limiting_cycles.dependence_counter_l1tex,
+            300
+        );
+        assert_eq!(
+            result
+                .readiness
+                .limiting_cycles
+                .dependence_counter_global_load_operand_read,
+            0
+        );
+
+        // Synthetic latency inversion: if the response wins before the fixed
+        // operand-read clear, it must not steal the later read attribution.
+        let mut early_params = params();
+        early_params.l1_hit_latency = 1;
+        let early_l1 = L1Config {
+            hit_latency: 1,
+            ..l1_config()
+        };
+        let mut early = SmCore::new(
+            &blocks,
+            &sched,
+            &early_params,
+            SmMemMode::L1Shared(early_l1),
+        )
+        .unwrap();
+        let mut early_requests = Vec::new();
+        assert_eq!(
+            early
+                .advance(ReplayHorizon::Unbounded, &mut early_requests)
+                .unwrap(),
+            Advance::Idle { wake_at: None }
+        );
+        let mut early_sink = Vec::new();
+        early
+            .on_response(early_requests[0].reply, 1, &mut early_sink)
+            .unwrap();
+        assert_eq!(
+            early
+                .advance(ReplayHorizon::Unbounded, &mut early_sink)
+                .unwrap(),
+            Advance::Done
+        );
+        let early_result = early.result();
+        assert_eq!(early_result.cycles, 9);
+        assert_eq!(
+            early_result
+                .readiness
+                .limiting_cycles
+                .dependence_counter_global_load_operand_read,
+            8
+        );
+        assert_eq!(
+            early_result
+                .readiness
+                .limiting_cycles
+                .dependence_counter_l1tex,
+            0
+        );
+    }
+
+    #[test]
+    fn pending_l1tex_writeback_beats_later_fast_producer_origin() {
+        let mut load = cb(1);
+        load.write_barrier = Some(barrier(0));
+        let mut fixed = cb(1);
+        fixed.write_barrier = Some(barrier(0));
+        let mut consumer = cb(1);
+        consumer.wait_mask = wait_mask(0b000001);
+        let sched = schedule(vec![
+            (0, slot(load, OpClass::Other, "LDG.E.CA")),
+            (16, slot(fixed, OpClass::Other, "IADD3")),
+            (32, slot(consumer, OpClass::Other, "EXIT")),
+        ]);
+        let blocks = vec![BlockReplay {
+            launch_index: 0,
+            warps: vec![WarpReplay {
+                warp_slot: 0,
+                insts: vec![
+                    ReplayInst {
+                        pc: 0,
+                        kind: eligible(0, 1),
+                    },
+                    inst(16),
+                    inst(32),
+                ],
+                sectors: vec![0],
+            }],
+        }];
+        let mut core = shared_core(&blocks, &sched, &params());
+        let mut requests = Vec::new();
+
+        assert_eq!(
+            core.advance(ReplayHorizon::Unbounded, &mut requests)
+                .unwrap(),
+            Advance::Idle { wake_at: None }
+        );
+        assert_eq!(requests.len(), 1);
+        let mut sink = Vec::new();
+        core.on_response(requests[0].reply, 300, &mut sink).unwrap();
+        assert_eq!(
+            core.advance(ReplayHorizon::Unbounded, &mut sink).unwrap(),
+            Advance::Done
+        );
+        let result = core.result();
+        assert_eq!(result.cycles, 301);
+        assert_eq!(
+            result.readiness.limiting_cycles.dependence_counter_l1tex,
+            299
+        );
+        assert_eq!(
+            result
+                .readiness
+                .limiting_cycles
+                .dependence_counter_non_memory_write,
+            0
+        );
     }
 
     #[test]
@@ -7912,7 +14127,7 @@ mod tests {
 
         let p = params();
         let group = core.async_copies[0]
-            .add_pending_async_copy_sources(0, 2, 0, &p)
+            .add_pending_async_copy_sources(0, 2, 0, 0, &p)
             .unwrap();
         core.async_copies[0]
             .complete_async_copy_sources(0, group, 2, 91, &p)
@@ -7938,7 +14153,7 @@ mod tests {
             0
         );
 
-        core.async_copies[0].commit_async_copy_group();
+        assert!(core.async_copies[0].commit_async_copy_group(100));
         assert!(
             core.async_copies[0]
                 .state
@@ -9094,6 +15309,7 @@ mod tests {
                             off: 0,
                             len: 2,
                             token: CacheOpToken::LdgECg,
+                            l2_requests: 0,
                         },
                     },
                     inst(16),
@@ -9158,6 +15374,7 @@ mod tests {
                             off: 0,
                             len: 1,
                             token: CacheOpToken::LdgECg,
+                            l2_requests: 0,
                         },
                     },
                     inst(16),
@@ -9246,6 +15463,7 @@ mod tests {
                         off: 0,
                         len: 1,
                         token: CacheOpToken::LdgECg,
+                        l2_requests: 0,
                     },
                 }],
                 sectors: vec![40],
@@ -9337,7 +15555,11 @@ mod tests {
                 warp_slot: 0,
                 insts: vec![ReplayInst {
                     pc: 0,
-                    kind: AccessKind::GlobalReduction { off: 0, len: 2 },
+                    kind: AccessKind::GlobalReduction {
+                        off: 0,
+                        len: 2,
+                        l2_requests: 1,
+                    },
                 }],
                 sectors: vec![100, 101],
             }],
@@ -9796,6 +16018,7 @@ mod tests {
                             off: 0,
                             len: 1,
                             token: CacheOpToken::Atom,
+                            l2_requests: 1,
                         },
                     },
                     inst(16),

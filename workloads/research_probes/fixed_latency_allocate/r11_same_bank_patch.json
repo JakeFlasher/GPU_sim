@@ -1,0 +1,21 @@
+{
+  "function": "_Z22fixed_latency_allocateILi2EEvPyPj",
+  "patches": [
+    {"pc": "0x120", "destination": 6, "expected_sources": [9, 8, 6], "replacement_sources": [8, 10, 6]},
+    {"pc": "0x130", "destination": 14, "expected_sources": [11, 10, 14], "replacement_sources": [8, 10, 14]},
+    {"pc": "0x150", "destination": 15, "expected_sources": [12, 13, 15], "replacement_sources": [9, 11, 15]},
+    {"pc": "0x160", "destination": 16, "expected_sources": [8, 11, 16], "replacement_sources": [10, 12, 16]},
+    {"pc": "0x170", "destination": 6, "expected_sources": [9, 8, 6], "replacement_sources": [8, 10, 6]},
+    {"pc": "0x180", "destination": 14, "expected_sources": [11, 10, 14], "replacement_sources": [8, 10, 14]},
+    {"pc": "0x190", "destination": 15, "expected_sources": [12, 13, 15], "replacement_sources": [9, 11, 15]},
+    {"pc": "0x1a0", "destination": 16, "expected_sources": [8, 11, 16], "replacement_sources": [10, 12, 16]},
+    {"pc": "0x1b0", "destination": 6, "expected_sources": [9, 8, 6], "replacement_sources": [8, 10, 6]},
+    {"pc": "0x1c0", "destination": 14, "expected_sources": [11, 10, 14], "replacement_sources": [8, 10, 14]},
+    {"pc": "0x1d0", "destination": 15, "expected_sources": [12, 13, 15], "replacement_sources": [9, 11, 15]},
+    {"pc": "0x1e0", "destination": 16, "expected_sources": [8, 11, 16], "replacement_sources": [10, 12, 16]},
+    {"pc": "0x1f0", "destination": 6, "expected_sources": [9, 8, 6], "replacement_sources": [8, 10, 6]},
+    {"pc": "0x200", "destination": 14, "expected_sources": [11, 10, 14], "replacement_sources": [8, 10, 14]},
+    {"pc": "0x210", "destination": 15, "expected_sources": [12, 13, 15], "replacement_sources": [9, 11, 15]},
+    {"pc": "0x220", "destination": 16, "expected_sources": [8, 11, 16], "replacement_sources": [10, 12, 16]}
+  ]
+}

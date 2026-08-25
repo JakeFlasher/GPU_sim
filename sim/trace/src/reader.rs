@@ -187,6 +187,8 @@ pub enum TraceError {
     ThreadblockPayloadSnapshotInvalid { root: PathBuf, message: String },
     #[error("verified sampling payload snapshot is missing expected file {path}")]
     SamplingPayloadSnapshotMissing { path: PathBuf },
+    #[error("raw threadblock payload bytes for {path} were released by the compact replay loader")]
+    RawThreadblockPayloadUnavailable { path: PathBuf },
     #[error(
         "{threadblock}: warp map key {map_key} disagrees with embedded Warp.id {warp_id} (canonical: warp_map_key_mismatch)"
     )]
@@ -660,6 +662,10 @@ pub enum MemoryPayloadContract {
 }
 
 impl MemoryPayloadContract {
+    const fn carries_atomic_addresses(self) -> bool {
+        !matches!(self, Self::LegacyExclusion)
+    }
+
     const fn carries_shared_memory_split(self) -> bool {
         matches!(
             self,
@@ -1848,11 +1854,13 @@ impl CompactMemoryMeta {
     const CLASS_MASK: u32 = 0xf;
     const ACCESS_SHIFT: u32 = Self::CLASS_SHIFT + 4;
     const ACCESS_MASK: u32 = 0x7;
+    const EFFECTIVE_SHIFT: u32 = Self::ACCESS_SHIFT + 3;
 
     fn new(
         op_class: pb::MemoryOpClass,
         access_kind: Option<pb::MemoryOpAccessKind>,
         route: CompactMemoryRoute,
+        has_effective_lanes: bool,
     ) -> Self {
         if route.0 > Self::ROUTE_MASK {
             unreachable!("bounded route-error arena exceeded compact encoding");
@@ -1860,7 +1868,12 @@ impl CompactMemoryMeta {
         let access = access_kind.map_or(0, |kind| kind as u32 + 1);
         debug_assert!((op_class as u32) <= Self::CLASS_MASK);
         debug_assert!(access <= Self::ACCESS_MASK);
-        Self(route.0 | ((op_class as u32) << Self::CLASS_SHIFT) | (access << Self::ACCESS_SHIFT))
+        Self(
+            route.0
+                | ((op_class as u32) << Self::CLASS_SHIFT)
+                | (access << Self::ACCESS_SHIFT)
+                | (u32::from(has_effective_lanes) << Self::EFFECTIVE_SHIFT),
+        )
     }
 
     const fn route(self) -> CompactMemoryRoute {
@@ -1881,6 +1894,10 @@ impl CompactMemoryMeta {
         pb::MemoryOpAccessKind::try_from((encoded - 1) as i32)
             .map(Some)
             .unwrap_or_else(|_| unreachable!("validated access kind escaped compact encoding"))
+    }
+
+    const fn has_effective_lanes(self) -> bool {
+        self.0 & (1 << Self::EFFECTIVE_SHIFT) != 0
     }
 }
 
@@ -2038,8 +2055,9 @@ pub enum ValidatedSectorPlan<'a> {
 
 /// Compact memory metadata retained after the full Prost tree has been
 /// validated and discarded. `projection` is route-disjoint: it stores a shared
-/// bank-wavefront count for Shared records or an index into the owning warp's
-/// sparse async-copy projection arena for Global async-copy records.
+/// bank-wavefront count for Shared records, an index into the owning warp's
+/// sparse async-copy projection arena for Global async-copy records, or the
+/// already-validated allocation id for address-carrying Global atomics.
 pub struct ValidatedMemoryInstruction {
     sectors: CompactSectorPlan,
     projection: u32,
@@ -2082,8 +2100,13 @@ impl ValidatedMemoryInstruction {
             op_class: self.meta.op_class(),
             access_kind: self.meta.access_kind(),
             cache_op: None,
-            and_mask: 0,
+            and_mask: u32::from(self.meta.has_effective_lanes()),
         }
+    }
+
+    /// Whether at least one lane executes this dynamic memory instruction.
+    pub const fn has_effective_lanes(&self) -> bool {
+        self.meta.has_effective_lanes()
     }
 
     /// Maximum distinct 4-byte words targeting one of 32 banks after collapsing
@@ -2093,6 +2116,20 @@ impl ValidatedMemoryInstruction {
     /// Shared route before reading this route-disjoint projection.
     pub const fn shared_bank_wavefronts_32x4(&self) -> u32 {
         self.projection
+    }
+
+    /// Backing allocation identity for an address-carrying global atomic.
+    ///
+    /// The full reader has already required this id to resolve to the
+    /// allocation registry and contain every effective lane address. Zero is
+    /// retained only for predicated-off or legacy/non-atomic records and is
+    /// exposed as `None`. This is timing-neutral identity: it does not assign a
+    /// physical LTS class.
+    pub fn global_atomic_allocation_id(&self) -> Option<u32> {
+        (self.meta.op_class() == pb::MemoryOpClass::Atomic
+            && self.meta.route().0 == CompactMemoryRoute::GLOBAL
+            && self.projection != 0)
+            .then_some(self.projection)
     }
 }
 
@@ -2135,6 +2172,7 @@ impl ValidatedThreadblock {
 pub struct ValidatedWarp {
     map_key: i32,
     warp_id: i32,
+    function_unique_id: i32,
     instructions: Vec<ValidatedInstruction>,
     memories: Vec<ValidatedMemoryInstruction>,
     async_copy_projections: Vec<AsyncCopyProjection>,
@@ -2150,6 +2188,10 @@ impl ValidatedWarp {
         payload_contract: MemoryPayloadContract,
         label: &str,
     ) -> Result<Self, TraceError> {
+        let function_unique_id = warp
+            .instructions
+            .first()
+            .map_or(0, |instruction| instruction.function_unique_id);
         let mut instructions = Vec::with_capacity(warp.instructions.len());
         let mut memories = Vec::new();
         let mut async_copy_projections = Vec::new();
@@ -2215,7 +2257,18 @@ impl ValidatedWarp {
                     } else {
                         None
                     };
-                let projection = if is_async_copy_source {
+                let global_atomic_transactions = meta.op_class == pb::MemoryOpClass::Atomic
+                    && matches!(resolved_route, Ok(ValidatedMemoryRoute::Global))
+                    && payload_contract.carries_atomic_addresses();
+                let projection = if global_atomic_transactions {
+                    preflight
+                        .instruction()
+                        .addresses
+                        .first()
+                        .and_then(|address| address.allocation_id)
+                        .filter(|allocation_id| *allocation_id != 0)
+                        .unwrap_or(0)
+                } else if is_async_copy_source {
                     let index = match u32::try_from(async_copy_projections.len()) {
                         Ok(index) if index != u32::MAX => index,
                         Ok(_) | Err(_) => {
@@ -2234,11 +2287,16 @@ impl ValidatedWarp {
                     resolved_route,
                     Ok(ValidatedMemoryRoute::Global | ValidatedMemoryRoute::Local)
                 ) {
-                    match compact_sector_vector_for_operand(
-                        preflight,
-                        (is_async_copy_source && payload_contract.carries_ldgsts_destination())
-                            .then_some(0),
-                    ) {
+                    let projection = if global_atomic_transactions {
+                        compact_atomic_sector_transaction_vector_32b(preflight)
+                    } else {
+                        compact_sector_vector_for_operand(
+                            preflight,
+                            (is_async_copy_source && payload_contract.carries_ldgsts_destination())
+                                .then_some(0),
+                        )
+                    };
+                    match projection {
                         Ok(staged) => {
                             let start = sectors.len();
                             let len = match u16::try_from(staged.len()) {
@@ -2287,26 +2345,36 @@ impl ValidatedWarp {
                 memories.push(ValidatedMemoryInstruction {
                     sectors: sector_plan,
                     projection,
-                    meta: CompactMemoryMeta::new(meta.op_class, meta.access_kind, route),
+                    meta: CompactMemoryMeta::new(
+                        meta.op_class,
+                        meta.access_kind,
+                        route,
+                        meta.and_mask != 0,
+                    ),
                 });
                 memory_index
             } else {
                 u32::MAX
             };
+            let mut identity_presence = 0_u8;
+            if instruction.sm_id.is_some() {
+                identity_presence |= ValidatedInstruction::SM_ID_PRESENT;
+            }
+            if instruction.warpid_sm.is_some() {
+                identity_presence |= ValidatedInstruction::WARP_SLOT_PRESENT;
+            }
             instructions.push(ValidatedInstruction {
                 pc: instruction.pc,
-                function_unique_id: instruction.function_unique_id,
-                warpid_tb: instruction
-                    .warpid_tb
-                    .unwrap_or_else(|| unreachable!("validated instruction lost warpid_tb")),
-                warpid_sm: instruction.warpid_sm,
-                sm_id: instruction.sm_id,
                 memory_index,
+                sm_id: instruction.sm_id.unwrap_or_default(),
+                warpid_sm: instruction.warpid_sm.unwrap_or_default(),
+                identity_presence,
             });
         }
         Ok(Self {
             map_key,
             warp_id: warp.id,
+            function_unique_id,
             instructions,
             memories,
             async_copy_projections,
@@ -2341,6 +2409,8 @@ impl ValidatedWarp {
             ValidatedInstructionRef {
                 instruction,
                 memory,
+                function_unique_id: self.function_unique_id,
+                warpid_tb: self.map_key,
             }
         })
     }
@@ -2440,11 +2510,15 @@ impl ValidatedWarp {
 /// Packed scheduler fields retained from one validated dynamic instruction.
 struct ValidatedInstruction {
     pc: u32,
-    function_unique_id: i32,
-    warpid_tb: i32,
-    warpid_sm: Option<i32>,
-    sm_id: Option<i32>,
     memory_index: u32,
+    sm_id: i32,
+    warpid_sm: i32,
+    identity_presence: u8,
+}
+
+impl ValidatedInstruction {
+    const SM_ID_PRESENT: u8 = 1 << 0;
+    const WARP_SLOT_PRESENT: u8 = 1 << 1;
 }
 
 /// One instruction borrowed together with the compact memory metadata from its
@@ -2453,6 +2527,8 @@ struct ValidatedInstruction {
 pub struct ValidatedInstructionRef<'a> {
     instruction: &'a ValidatedInstruction,
     memory: Option<&'a ValidatedMemoryInstruction>,
+    function_unique_id: i32,
+    warpid_tb: i32,
 }
 
 impl<'a> ValidatedInstructionRef<'a> {
@@ -2461,19 +2537,27 @@ impl<'a> ValidatedInstructionRef<'a> {
     }
 
     pub const fn function_unique_id(&self) -> i32 {
-        self.instruction.function_unique_id
+        self.function_unique_id
     }
 
     pub const fn warpid_tb(&self) -> i32 {
-        self.instruction.warpid_tb
+        self.warpid_tb
     }
 
     pub const fn warpid_sm(&self) -> Option<i32> {
-        self.instruction.warpid_sm
+        if self.instruction.identity_presence & ValidatedInstruction::WARP_SLOT_PRESENT != 0 {
+            Some(self.instruction.warpid_sm)
+        } else {
+            None
+        }
     }
 
     pub const fn sm_id(&self) -> Option<i32> {
-        self.instruction.sm_id
+        if self.instruction.identity_presence & ValidatedInstruction::SM_ID_PRESENT != 0 {
+            Some(self.instruction.sm_id)
+        } else {
+            None
+        }
     }
 
     pub const fn memory(self) -> Option<&'a ValidatedMemoryInstruction> {
@@ -2810,12 +2894,191 @@ fn compact_sector_vector_for_operand(
     Ok(staged)
 }
 
-fn validate_trace_snapshot_semantics(
-    root: &Path,
-    trace: &pb::Trace,
-    payload: &BTreeMap<PathBuf, Vec<u8>>,
+/// Project one address-carrying global atomic warp instruction onto the
+/// 32-byte sector transactions observed at L1TEX/LTS on sm_86.
+///
+/// Distinct atomic words in one sector share a transaction, while lanes that
+/// alias the same atomic word serialize. Consequently each touched sector is
+/// repeated by the largest exact-address multiplicity among lanes touching
+/// that sector. This retains ordinary coalescing (`lane_word`: four sectors),
+/// distinct-line traffic (`lane_line`: 32 sectors), and same-word
+/// serialization (`warp_word`: one sector repeated 32 times) without retaining
+/// the full lane vector after trace validation.
+fn compact_atomic_sector_transaction_vector_32b(
+    preflight: PreflightedMemoryAccess<'_>,
+) -> Result<Vec<i64>, (ValidatedSectorErrorPhase, ValidatedSectorError)> {
+    let unique = compact_sector_vector_for_operand(preflight, None)?;
+    if unique.is_empty() {
+        return Ok(unique);
+    }
+
+    let mut intervals = Vec::new();
+    let mut early_error = None;
+    preflight.visit_addresses(|access| {
+        if early_error.is_some() {
+            return;
+        }
+        if access.data_width_bytes <= 0 {
+            early_error = Some(ValidatedSectorError::DataWidthInvalid {
+                data_width_bytes: access.data_width_bytes,
+            });
+            return;
+        }
+        let width_offset = i64::from(access.data_width_bytes) - 1;
+        for (lane, &base) in access.lane_vector.iter().enumerate() {
+            if base == lanes::LANE_INACTIVE_SENTINEL {
+                continue;
+            }
+            let Some(last_address) = base.checked_add(width_offset) else {
+                early_error = Some(ValidatedSectorError::AddressOverflow {
+                    lane,
+                    base,
+                    data_width_bytes: access.data_width_bytes,
+                });
+                return;
+            };
+            if intervals.try_reserve(1).is_err() {
+                early_error = Some(ValidatedSectorError::CapacityUnavailable {
+                    buffer: "atomic address intervals",
+                    additional: 1,
+                });
+                return;
+            }
+            intervals.push((base, base >> 5, last_address >> 5));
+        }
+    });
+    if let Some(error) = early_error {
+        return Err((ValidatedSectorErrorPhase::BeforeStaticRole, error));
+    }
+    intervals.sort_unstable();
+
+    let mut multiplicities = Vec::new();
+    multiplicities.try_reserve(unique.len()).map_err(|_| {
+        (
+            ValidatedSectorErrorPhase::AfterStaticRole,
+            ValidatedSectorError::CapacityUnavailable {
+                buffer: "atomic sector multiplicities",
+                additional: unique.len(),
+            },
+        )
+    })?;
+    let mut transaction_count = 0_usize;
+    for &sector in &unique {
+        let mut previous_base = None;
+        let mut aliases = 0_usize;
+        let mut maximum_aliases = 0_usize;
+        for &(base, first_sector, last_sector) in &intervals {
+            if sector < first_sector || sector > last_sector {
+                continue;
+            }
+            if previous_base == Some(base) {
+                aliases += 1;
+            } else {
+                previous_base = Some(base);
+                aliases = 1;
+            }
+            maximum_aliases = maximum_aliases.max(aliases);
+        }
+        debug_assert!(
+            maximum_aliases > 0,
+            "unique atomic sector has no lane interval"
+        );
+        transaction_count = transaction_count.checked_add(maximum_aliases).ok_or((
+            ValidatedSectorErrorPhase::AfterStaticRole,
+            ValidatedSectorError::SectorCountOverflow {
+                sectors: usize::MAX,
+            },
+        ))?;
+        if transaction_count > usize::from(u16::MAX) {
+            return Err((
+                ValidatedSectorErrorPhase::AfterStaticRole,
+                ValidatedSectorError::SectorCountOverflow {
+                    sectors: transaction_count,
+                },
+            ));
+        }
+        multiplicities.push(maximum_aliases);
+    }
+
+    let mut staged = Vec::new();
+    staged.try_reserve(transaction_count).map_err(|_| {
+        (
+            ValidatedSectorErrorPhase::AfterStaticRole,
+            ValidatedSectorError::CapacityUnavailable {
+                buffer: "atomic sector transaction staging",
+                additional: transaction_count,
+            },
+        )
+    })?;
+    for (&sector, &multiplicity) in unique.iter().zip(&multiplicities) {
+        staged.extend(std::iter::repeat_n(sector, multiplicity));
+    }
+    Ok(staged)
+}
+
+struct ValidatedPayload {
+    block_index: i64,
+    records: u64,
+    block: ValidatedThreadblock,
+}
+
+fn validate_threadblock_payload(
+    raw: &[u8],
+    path: &Path,
+    kernel: &pb::Kernel,
     allocations: Option<&AllocationRegistry>,
     memory_payload_contract: MemoryPayloadContract,
+) -> Result<ValidatedPayload, TraceError> {
+    if raw.is_empty() {
+        return Err(TraceError::ThreadblockRecordsEmpty {
+            path: path.to_path_buf(),
+        });
+    }
+    let threadblock = decode_threadblock(raw, path)?;
+    let block_index = block_launch_index(kernel, &threadblock, path)?;
+    let records = threadblock.warps.values().try_fold(0_u64, |total, warp| {
+        let count =
+            u64::try_from(warp.instructions.len()).map_err(|_| TraceError::TraceCountOverflow {
+                counter: "threadblock instruction count",
+            })?;
+        total
+            .checked_add(count)
+            .ok_or(TraceError::TraceCountOverflow {
+                counter: "threadblock instruction count",
+            })
+    })?;
+    if records == 0 {
+        return Err(TraceError::ThreadblockRecordsEmpty {
+            path: path.to_path_buf(),
+        });
+    }
+    let label = path.to_string_lossy();
+    validate_threadblock_contract(
+        &threadblock,
+        &label,
+        allocations,
+        memory_payload_contract,
+        kernel.function_unique_id,
+    )?;
+    let block = ValidatedThreadblock::from_message(
+        block_index,
+        threadblock,
+        memory_payload_contract,
+        &label,
+    )?;
+    Ok(ValidatedPayload {
+        block_index,
+        records,
+        block,
+    })
+}
+
+fn validate_trace_semantics(
+    root: &Path,
+    trace: &pb::Trace,
+    payload_paths: impl IntoIterator<Item = PathBuf>,
+    memory_payload_contract: MemoryPayloadContract,
+    mut validate_payload: impl FnMut(&Path, &pb::Kernel) -> Result<ValidatedPayload, TraceError>,
 ) -> Result<
     (
         TraceValidationSummary,
@@ -2823,11 +3086,12 @@ fn validate_trace_snapshot_semantics(
     ),
     TraceError,
 > {
+    let payload_paths = payload_paths.into_iter().collect::<BTreeSet<_>>();
     let mut launch_ids = BTreeSet::new();
     let mut consumed_payloads = BTreeSet::new();
     let mut validated_payload = BTreeMap::new();
     let mut payloads_by_parent: BTreeMap<PathBuf, Vec<PathBuf>> = BTreeMap::new();
-    for path in payload.keys() {
+    for path in &payload_paths {
         let parent =
             path.parent()
                 .ok_or_else(|| TraceError::ThreadblockPayloadSnapshotInvalid {
@@ -2913,53 +3177,14 @@ fn validate_trace_snapshot_semantics(
                 };
                 let mut block_ids = BTreeSet::new();
                 for path in paths {
-                    let raw = payload.get(path).ok_or_else(|| {
-                        TraceError::SamplingPayloadSnapshotMissing { path: path.clone() }
-                    })?;
-                    if raw.is_empty() {
-                        return Err(TraceError::ThreadblockRecordsEmpty { path: path.clone() });
-                    }
-                    let threadblock = decode_threadblock(raw, path)?;
-                    let block_index = block_launch_index(kernel, &threadblock, path)?;
-                    if !block_ids.insert(block_index) {
+                    let validated = validate_payload(path, kernel)?;
+                    if !block_ids.insert(validated.block_index) {
                         return Err(TraceError::BlockIdDuplicate {
                             path: path.to_path_buf(),
-                            index: block_index,
+                            index: validated.block_index,
                         });
                     }
-                    let records = threadblock.warps.values().try_fold(0_u64, |total, warp| {
-                        let count = u64::try_from(warp.instructions.len()).map_err(|_| {
-                            TraceError::TraceCountOverflow {
-                                counter: "threadblock instruction count",
-                            }
-                        })?;
-                        total
-                            .checked_add(count)
-                            .ok_or(TraceError::TraceCountOverflow {
-                                counter: "threadblock instruction count",
-                            })
-                    })?;
-                    if records == 0 {
-                        return Err(TraceError::ThreadblockRecordsEmpty {
-                            path: path.to_path_buf(),
-                        });
-                    }
-                    validate_threadblock_contract(
-                        &threadblock,
-                        path.to_string_lossy(),
-                        allocations,
-                        memory_payload_contract,
-                        kernel.function_unique_id,
-                    )?;
-                    validated_payload.insert(
-                        path.clone(),
-                        ValidatedThreadblock::from_message(
-                            block_index,
-                            threadblock,
-                            memory_payload_contract,
-                            &path.to_string_lossy(),
-                        )?,
-                    );
+                    validated_payload.insert(path.clone(), validated.block);
                     consumed_payloads.insert(path.clone());
                     threadblock_count =
                         threadblock_count
@@ -2967,7 +3192,7 @@ fn validate_trace_snapshot_semantics(
                             .ok_or(TraceError::TraceCountOverflow {
                                 counter: "threadblock count",
                             })?;
-                    instruction_count = instruction_count.checked_add(records).ok_or(
+                    instruction_count = instruction_count.checked_add(validated.records).ok_or(
                         TraceError::TraceCountOverflow {
                             counter: "instruction count",
                         },
@@ -2979,8 +3204,8 @@ fn validate_trace_snapshot_semantics(
     if launch_count == 0 {
         return Err(TraceError::TraceLaunchesEmpty);
     }
-    if let Some(path) = payload
-        .keys()
+    if let Some(path) = payload_paths
+        .iter()
         .find(|path| !consumed_payloads.contains(path.as_path()))
     {
         return Err(TraceError::ThreadblockPayloadOrphan { path: path.clone() });
@@ -2995,6 +3220,36 @@ fn validate_trace_snapshot_semantics(
     ))
 }
 
+fn validate_trace_snapshot_semantics(
+    root: &Path,
+    trace: &pb::Trace,
+    payload: &BTreeMap<PathBuf, Vec<u8>>,
+    allocations: Option<&AllocationRegistry>,
+    memory_payload_contract: MemoryPayloadContract,
+) -> Result<
+    (
+        TraceValidationSummary,
+        BTreeMap<PathBuf, ValidatedThreadblock>,
+    ),
+    TraceError,
+> {
+    validate_trace_semantics(
+        root,
+        trace,
+        payload.keys().cloned(),
+        memory_payload_contract,
+        |path, kernel| {
+            let raw =
+                payload
+                    .get(path)
+                    .ok_or_else(|| TraceError::SamplingPayloadSnapshotMissing {
+                        path: path.to_path_buf(),
+                    })?;
+            validate_threadblock_payload(raw, path, kernel, allocations, memory_payload_contract)
+        },
+    )
+}
+
 pub struct TraceDir {
     root: PathBuf,
     trace: pb::Trace,
@@ -3005,6 +3260,7 @@ pub struct TraceDir {
     stats: Option<TraceStats>,
     validation: TraceValidationSummary,
     payload_by_path: BTreeMap<PathBuf, Vec<u8>>,
+    raw_payload_retained: bool,
     threadblock_by_path: BTreeMap<PathBuf, ValidatedThreadblock>,
 }
 
@@ -3079,6 +3335,129 @@ impl TraceDir {
             stats_csv,
             payload_by_path,
         )
+    }
+
+    /// Use the complete direct-loader validation path, then release immutable
+    /// raw threadblock protobuf bytes before replay constructs per-SM state.
+    /// Compact validated threadblocks and the canonical path roster remain.
+    pub fn open_direct_compact(root: impl Into<PathBuf>) -> Result<Self, TraceError> {
+        let mut trace = Self::open_direct(root)?;
+        trace.payload_by_path.clear();
+        trace.raw_payload_retained = false;
+        Ok(trace)
+    }
+
+    /// Capture a complete bounded payload roster, then read, validate, and
+    /// compact one exact rostered file generation at a time. Raw payload bytes
+    /// are dropped before the next file is opened. Campaign and raw-retaining
+    /// loaders remain separate APIs.
+    pub fn open_direct_streaming(root: impl Into<PathBuf>) -> Result<Self, TraceError> {
+        let root = root.into();
+        let reader = AnchoredDir::open(&root)?;
+        let dynamic_trace_pb = reader
+            .read_bounded_regular(Path::new("dynamic_trace.pb"), DYNAMIC_TRACE_PB_MAX_BYTES)?
+            .into_raw();
+        if dynamic_trace_pb.is_empty() {
+            return Err(TraceError::TraceRootEmpty {
+                path: root.join("dynamic_trace.pb"),
+            });
+        }
+        let allocations_json = reader
+            .read_optional_bounded_regular(
+                Path::new("extra_info/allocations.json"),
+                ALLOCATIONS_JSON_MAX_BYTES,
+            )?
+            .map(AnchoredFile::into_raw);
+        let stats_csv = reader
+            .read_optional_bounded_regular(Path::new("stats.csv"), STATS_CSV_MAX_BYTES)?
+            .map(AnchoredFile::into_raw);
+        let roster = reader
+            .roster_pb_tree(
+                Path::new("threadblocks"),
+                DIRECT_THREADBLOCK_FILE_MAX_COUNT,
+                DIRECT_THREADBLOCK_TOTAL_MAX_BYTES,
+            )
+            .map_err(|source| map_threadblock_tree_read_error(&root, source, false))?;
+        if roster.files.is_empty() {
+            return Err(TraceError::TraceThreadblocksEmpty {
+                dir: root.join("threadblocks"),
+            });
+        }
+        let mut roster_by_path = BTreeMap::new();
+        for entry in roster.files {
+            let relative = entry.relative.to_str().ok_or_else(|| {
+                TraceError::ThreadblockPayloadSnapshotInvalid {
+                    root: root.clone(),
+                    message: format!("payload path is not UTF-8: {}", entry.relative.display()),
+                }
+            })?;
+            if !safe_payload_manifest_path(relative) {
+                return Err(TraceError::ThreadblockPayloadSnapshotInvalid {
+                    root: root.clone(),
+                    message: format!("payload path is not canonical: {relative:?}"),
+                });
+            }
+            roster_by_path.insert(root.join(relative), (entry.relative, entry.generation));
+        }
+
+        let dynamic_path = root.join("dynamic_trace.pb");
+        wire_preflight::preflight_trace(&dynamic_trace_pb).map_err(|error| {
+            map_wire_preflight_error(&dynamic_path, "dynamic_trace.Trace", error)
+        })?;
+        let trace = pb::Trace::decode(dynamic_trace_pb.as_slice()).map_err(|source| {
+            TraceError::Decode {
+                path: dynamic_path.clone(),
+                message_type: "dynamic_trace.Trace",
+                source,
+            }
+        })?;
+        let memory_payload_contract = classify_memory_payload_contract(&trace, &dynamic_path)?;
+        let allocations_path = root.join("extra_info/allocations.json");
+        let allocations = allocations_json
+            .as_deref()
+            .map(|raw| AllocationRegistry::parse(&allocations_path, raw))
+            .transpose()?;
+        let (validation, threadblock_by_path) = validate_trace_semantics(
+            &root,
+            &trace,
+            roster_by_path.keys().cloned(),
+            memory_payload_contract,
+            |path, kernel| {
+                let (relative, generation) = roster_by_path.get(path).ok_or_else(|| {
+                    TraceError::SamplingPayloadSnapshotMissing {
+                        path: path.to_path_buf(),
+                    }
+                })?;
+                let file = reader
+                    .read_rostered_regular(relative, *generation)
+                    .map_err(|source| map_threadblock_tree_read_error(&root, source, false))?;
+                validate_threadblock_payload(
+                    file.raw(),
+                    path,
+                    kernel,
+                    allocations.as_ref(),
+                    memory_payload_contract,
+                )
+            },
+        )?;
+        let stats_path = root.join("stats.csv");
+        let stats = stats_csv
+            .as_deref()
+            .map(|raw| parse_trace_stats(&stats_path, raw))
+            .transpose()?;
+        Ok(Self {
+            root,
+            trace,
+            memory_payload_contract,
+            allocations,
+            #[cfg(feature = "campaign")]
+            sampling: None,
+            stats,
+            validation,
+            payload_by_path: BTreeMap::new(),
+            raw_payload_retained: false,
+            threadblock_by_path,
+        })
     }
 
     /// Decode a one-read manifest snapshot without reopening any artifact.
@@ -3164,6 +3543,7 @@ impl TraceDir {
             stats,
             validation,
             payload_by_path,
+            raw_payload_retained: true,
             threadblock_by_path,
         })
     }
@@ -3243,9 +3623,11 @@ impl TraceDir {
     /// deterministic FILENAME order — which is NOT flattened-block launch
     /// order (filenames embed unpadded decimal coordinates, so "10" sorts
     /// before "2"). Block identity/order must come from the proto's
-    /// `block_id`: use [`TraceDir::read_threadblocks_in_launch_order`]. The list
-    /// always comes from the descriptor-anchored payload snapshot captured by
-    /// [`TraceDir::open`], never a second directory walk.
+    /// `block_id`: use [`TraceDir::validated_threadblocks_in_launch_order`] for
+    /// replay's compact view, or [`TraceDir::read_threadblocks_in_launch_order`]
+    /// when the selected loader retained raw protobuf bytes. The list always
+    /// comes from the descriptor-anchored payload snapshot captured by the
+    /// loader, never a second directory walk.
     ///
     /// A kernel launch with no snapshotted payload is a typed error.
     pub fn threadblock_paths(&self, loc: &KernelLoc<'_>) -> Result<Vec<PathBuf>, TraceError> {
@@ -3257,7 +3639,7 @@ impl TraceDir {
             .join(format!("stream_{}", loc.stream_id))
             .join(format!("kernel_{}", loc.kernel.id));
         let mut paths: Vec<_> = self
-            .payload_by_path
+            .threadblock_by_path
             .keys()
             .filter(|path| path.parent() == Some(dir.as_path()))
             .cloned()
@@ -3280,9 +3662,39 @@ impl TraceDir {
         })
     }
 
+    /// Borrow every compact validated threadblock for one kernel launch in
+    /// flattened CUDA block order. This works for every loader, including
+    /// [`TraceDir::open_direct_compact`], because it does not require retained
+    /// raw protobuf bytes.
+    pub fn validated_threadblocks_in_launch_order<'a>(
+        &'a self,
+        loc: &KernelLoc<'_>,
+    ) -> Result<Vec<(i64, &'a ValidatedThreadblock)>, TraceError> {
+        let mut blocks = self
+            .threadblock_paths(loc)?
+            .into_iter()
+            .map(|path| {
+                self.validated_threadblock(&path)
+                    .map(|block| (block.launch_index(), block))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        blocks.sort_by_key(|(index, _)| *index);
+        Ok(blocks)
+    }
+
     /// Decode one threadblock from the immutable raw bytes captured by the
     /// selected loader. Paths outside that snapshot fail as missing inputs.
     pub fn read_threadblock(&self, path: &Path) -> Result<pb::Threadblock, TraceError> {
+        if !self.threadblock_by_path.contains_key(path) {
+            return Err(TraceError::SamplingPayloadSnapshotMissing {
+                path: path.to_path_buf(),
+            });
+        }
+        if !self.raw_payload_retained {
+            return Err(TraceError::RawThreadblockPayloadUnavailable {
+                path: path.to_path_buf(),
+            });
+        }
         let raw = self.payload_by_path.get(path).ok_or_else(|| {
             TraceError::SamplingPayloadSnapshotMissing {
                 path: path.to_path_buf(),
@@ -3298,9 +3710,12 @@ impl TraceDir {
     /// missing `block_id`, out-of-grid coordinates, and duplicates.
     ///
     /// Loads the whole kernel's blocks into memory (fine for the current
-    /// roster; replay uses [`TraceDir::validated_threadblock`] instead). Blocks
-    /// decode from the immutable bytes captured by the loader, so later path
-    /// replacement cannot change the returned content.
+    /// roster; replay uses [`TraceDir::validated_threadblock`] instead). This
+    /// raw-decoding API requires a raw-retaining loader; a trace returned by
+    /// [`TraceDir::open_direct_compact`] reports
+    /// [`TraceError::RawThreadblockPayloadUnavailable`]. Blocks decode from the
+    /// immutable bytes captured by the loader, so later path replacement cannot
+    /// change the returned content.
     pub fn read_threadblocks_in_launch_order(
         &self,
         loc: &KernelLoc<'_>,
@@ -6423,6 +6838,35 @@ fn parse_hex_u64(s: &str) -> Option<u64> {
 }
 
 impl AllocationRegistry {
+    /// Return an address's byte offset within a validated allocation.
+    ///
+    /// This exposes allocation-relative identity without exposing or inventing
+    /// a physical address. `None` means the id is unknown, the subtraction
+    /// underflows, or the address is at/after the allocation end.
+    pub fn relative_byte_offset(&self, allocation_id: u32, address: u64) -> Option<u64> {
+        let range = self.by_id.get(&allocation_id)?;
+        let offset = address.checked_sub(range.base)?;
+        (offset < range.size).then_some(offset)
+    }
+
+    /// Return a compact 32-byte sector's offset within a sector-aligned
+    /// allocation.
+    ///
+    /// Global CUDA allocations are sector aligned in admitted traces. A
+    /// malformed/non-aligned synthetic registry fails closed rather than
+    /// silently rounding its base.
+    pub fn relative_sector_offset(&self, allocation_id: u32, absolute_sector: i64) -> Option<u64> {
+        let range = self.by_id.get(&allocation_id)?;
+        if range.base & 31 != 0 {
+            return None;
+        }
+        let sector = u64::try_from(absolute_sector).ok()?;
+        let base_sector = range.base >> 5;
+        let offset = sector.checked_sub(base_sector)?;
+        let byte_offset = offset.checked_mul(32)?;
+        (byte_offset < range.size).then_some(offset)
+    }
+
     /// Load from `<root>/extra_info/allocations.json`. `Ok(None)` if the file is
     /// absent (legacy traces, or traces with no GLOBAL/GENERIC active-lane record
     /// requiring identity). `Err(AllocationsSidecarMalformed)` on bad JSON, a
@@ -6945,6 +7389,157 @@ mod tests {
             memory_op_access_kind: Some(pb::MemoryOpAccessKind::Load as i32),
             ..Default::default()
         }
+    }
+
+    fn atomic_projection_inst<F>(active_mask: u32, address: F) -> pb::Instruction
+    where
+        F: Fn(i64) -> i64,
+    {
+        pb::Instruction {
+            pc: 48,
+            active_mask: Some(active_mask),
+            predicate_mask: Some(active_mask),
+            function_unique_id: 1,
+            addresses: vec![pb::Address {
+                data_width: 4,
+                compression_format: crate::lanes::FORMAT_LIST_ALL,
+                addrs: (0_i64..32)
+                    .map(|lane| {
+                        if active_mask & (1_u32 << lane) != 0 {
+                            address(lane)
+                        } else {
+                            crate::lanes::LANE_INACTIVE_SENTINEL
+                        }
+                    })
+                    .collect(),
+                address_space: Some(pb::MemorySpace::Global as i32),
+                ..Default::default()
+            }],
+            memory_op_class: Some(pb::MemoryOpClass::Atomic as i32),
+            data_width: Some(4),
+            warpid_tb: Some(0),
+            vpc: Some(48),
+            memory_op_access_kind: Some(pb::MemoryOpAccessKind::Atomic as i32),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn global_atomic_sector_projection_preserves_same_word_serialization() {
+        let base = 0x1000_i64;
+        for (label, instruction, expected) in [
+            (
+                "lane_line",
+                atomic_projection_inst(u32::MAX, |lane| base + lane * 128),
+                (0_i64..32).map(|lane| (base + lane * 128) >> 5).collect(),
+            ),
+            (
+                "lane_word",
+                atomic_projection_inst(u32::MAX, |lane| base + lane * 4),
+                vec![base >> 5, (base >> 5) + 1, (base >> 5) + 2, (base >> 5) + 3],
+            ),
+            (
+                "warp_word",
+                atomic_projection_inst(u32::MAX, |_| base),
+                vec![base >> 5; 32],
+            ),
+            (
+                "two_way_alias",
+                atomic_projection_inst(u32::MAX, |lane| base + (lane % 16) * 4),
+                vec![base >> 5, base >> 5, (base >> 5) + 1, (base >> 5) + 1],
+            ),
+            (
+                "one_lane",
+                atomic_projection_inst(1, |_| base),
+                vec![base >> 5],
+            ),
+        ] {
+            let preflight = preflight_memory_access(&instruction, || label.to_owned())
+                .unwrap()
+                .unwrap();
+            assert_eq!(
+                compact_atomic_sector_transaction_vector_32b(preflight).unwrap(),
+                expected,
+                "{label}"
+            );
+        }
+
+        let compact = ValidatedWarp::from_message(
+            0,
+            pb::Warp {
+                id: 0,
+                instructions: vec![atomic_projection_inst(u32::MAX, |_| base)],
+                ..Default::default()
+            },
+            MemoryPayloadContract::AddressCarryingV1,
+            "compact atomic",
+        )
+        .unwrap();
+        let memory = compact.instructions().next().unwrap().memory().unwrap();
+        assert_eq!(memory.global_atomic_allocation_id(), None);
+        assert!(matches!(
+            compact.sector_plan(memory),
+            ValidatedSectorPlan::Sectors(sectors)
+                if sectors == vec![base >> 5; 32].as_slice()
+        ));
+
+        let mut identified = atomic_projection_inst(u32::MAX, |_| base);
+        identified.addresses[0].allocation_id = Some(7);
+        let identified_compact = ValidatedWarp::from_message(
+            0,
+            pb::Warp {
+                id: 0,
+                instructions: vec![identified],
+                ..Default::default()
+            },
+            MemoryPayloadContract::AddressCarryingV1,
+            "identified compact atomic",
+        )
+        .unwrap();
+        let identified_memory = identified_compact
+            .instructions()
+            .next()
+            .unwrap()
+            .memory()
+            .unwrap();
+        assert_eq!(identified_memory.global_atomic_allocation_id(), Some(7));
+        assert!(std::mem::size_of::<ValidatedMemoryInstruction>() <= 24);
+    }
+
+    #[test]
+    fn compact_instruction_identity_preserves_optional_i32_values() {
+        let instruction = |pc, sm_id, warpid_sm| pb::Instruction {
+            pc,
+            active_mask: Some(1),
+            predicate_mask: Some(1),
+            function_unique_id: 7,
+            warpid_tb: Some(3),
+            sm_id,
+            warpid_sm,
+            ..Default::default()
+        };
+        let compact = ValidatedWarp::from_message(
+            3,
+            pb::Warp {
+                id: 3,
+                instructions: vec![
+                    instruction(4, Some(i32::MIN), Some(i32::MAX)),
+                    instruction(8, None, None),
+                ],
+                ..Default::default()
+            },
+            MemoryPayloadContract::LegacyExclusion,
+            "compact identity",
+        )
+        .unwrap();
+        let instructions = compact.instructions().collect::<Vec<_>>();
+        assert_eq!(std::mem::size_of::<ValidatedInstruction>(), 20);
+        assert_eq!(instructions[0].function_unique_id(), 7);
+        assert_eq!(instructions[0].warpid_tb(), 3);
+        assert_eq!(instructions[0].sm_id(), Some(i32::MIN));
+        assert_eq!(instructions[0].warpid_sm(), Some(i32::MAX));
+        assert_eq!(instructions[1].sm_id(), None);
+        assert_eq!(instructions[1].warpid_sm(), None);
     }
 
     #[test]
@@ -7756,7 +8351,7 @@ mod tests {
                 .instructions()
                 .any(|instruction| instruction.memory().is_none())
         );
-        assert!(std::mem::size_of::<ValidatedInstruction>() <= 32);
+        assert!(std::mem::size_of::<ValidatedInstruction>() <= 20);
         assert!(std::mem::size_of::<ValidatedMemoryInstruction>() <= 24);
 
         let mut replacement = pb::Threadblock::decode(std::fs::read(&path).unwrap().as_slice())
@@ -7780,6 +8375,81 @@ mod tests {
             first_pc
         );
         assert_eq!(trace.validation_summary().threadblock_count(), 1);
+    }
+
+    #[test]
+    fn compact_direct_loader_releases_only_raw_payload_bytes() {
+        let tmp = tempfile::tempdir().unwrap();
+        write_synthetic_trace(tmp.path(), 2);
+
+        let raw = TraceDir::open_direct(tmp.path()).unwrap();
+        let compact = TraceDir::open_direct_compact(tmp.path()).unwrap();
+        let streaming = TraceDir::open_direct_streaming(tmp.path()).unwrap();
+        assert_eq!(compact.validation_summary(), raw.validation_summary());
+        assert_eq!(streaming.validation_summary(), raw.validation_summary());
+        assert_eq!(
+            compact.memory_payload_contract(),
+            raw.memory_payload_contract()
+        );
+        assert_eq!(
+            streaming.memory_payload_contract(),
+            raw.memory_payload_contract()
+        );
+        let raw_kernel = raw.kernels().next().unwrap();
+        let compact_kernel = compact.kernels().next().unwrap();
+        let streaming_kernel = streaming.kernels().next().unwrap();
+        let raw_paths = raw.threadblock_paths(&raw_kernel).unwrap();
+        let compact_paths = compact.threadblock_paths(&compact_kernel).unwrap();
+        let streaming_paths = streaming.threadblock_paths(&streaming_kernel).unwrap();
+        assert_eq!(compact_paths, raw_paths);
+        assert_eq!(streaming_paths, raw_paths);
+        assert_eq!(
+            compact
+                .validated_threadblocks_in_launch_order(&compact_kernel)
+                .unwrap()
+                .into_iter()
+                .map(|(index, _)| index)
+                .collect::<Vec<_>>(),
+            vec![0, 1]
+        );
+        for path in raw_paths {
+            let raw_block = raw.validated_threadblock(&path).unwrap();
+            let compact_block = compact.validated_threadblock(&path).unwrap();
+            let streaming_block = streaming.validated_threadblock(&path).unwrap();
+            assert_eq!(compact_block.launch_index(), raw_block.launch_index());
+            assert_eq!(streaming_block.launch_index(), raw_block.launch_index());
+            let instruction_counts = |block: &ValidatedThreadblock| {
+                block
+                    .warps()
+                    .iter()
+                    .map(|warp| warp.instructions().count())
+                    .collect::<Vec<_>>()
+            };
+            assert_eq!(
+                instruction_counts(compact_block),
+                instruction_counts(raw_block)
+            );
+            assert_eq!(
+                instruction_counts(streaming_block),
+                instruction_counts(raw_block)
+            );
+            assert!(raw.read_threadblock(&path).is_ok());
+            assert!(matches!(
+                compact.read_threadblock(&path),
+                Err(TraceError::RawThreadblockPayloadUnavailable { path: missing })
+                    if missing == path
+            ));
+            assert!(matches!(
+                streaming.read_threadblock(&path),
+                Err(TraceError::RawThreadblockPayloadUnavailable { path: missing })
+                    if missing == path
+            ));
+        }
+        let foreign = tmp.path().join("threadblocks/not-in-snapshot.pb");
+        assert!(matches!(
+            compact.read_threadblock(&foreign),
+            Err(TraceError::SamplingPayloadSnapshotMissing { path }) if path == foreign
+        ));
     }
 
     #[test]
@@ -8405,6 +9075,34 @@ mod tests {
             Path::new("t"),
         )
         .unwrap()
+    }
+
+    #[test]
+    fn allocation_registry_projects_checked_relative_offsets() {
+        let registry = registry();
+        assert_eq!(registry.relative_byte_offset(1, 0x7000_0000), Some(0));
+        assert_eq!(registry.relative_byte_offset(1, 0x7000_007f), Some(0x7f));
+        assert_eq!(registry.relative_byte_offset(1, 0x7000_1000), None);
+        assert_eq!(registry.relative_byte_offset(2, 0x7000_0000), None);
+        assert_eq!(
+            registry.relative_sector_offset(1, 0x7000_0040_i64 >> 5),
+            Some(2)
+        );
+        assert_eq!(
+            registry.relative_sector_offset(1, 0x7000_1000_i64 >> 5),
+            None
+        );
+        assert_eq!(registry.relative_sector_offset(1, -1), None);
+
+        let unaligned = AllocationRegistry::from_str(
+            r#"[{"allocation_id":1,"context_id":1,"device_id":0,"base_address":"0x70000001","size_bytes":4096,"alive":true}]"#,
+            Path::new("unaligned"),
+        )
+        .unwrap();
+        assert_eq!(
+            unaligned.relative_sector_offset(1, 0x7000_0020_i64 >> 5),
+            None
+        );
     }
 
     fn identity_inst(

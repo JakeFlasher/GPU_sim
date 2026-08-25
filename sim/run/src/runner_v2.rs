@@ -242,7 +242,9 @@ struct LaunchDiagnosticWitness {
     launch_key: LaunchKeyV1,
     binding: ReplayLaunchCoverageBinding,
     diagnostic_last_issue_cycles: u64,
+    last_processed_modeled_system_event_time: Option<u64>,
     terminal_modeled_event_time: Option<u64>,
+    modeled_completion_frontier: sim_sm::ModeledCompletionFrontier,
 }
 
 #[derive(Serialize)]
@@ -389,7 +391,10 @@ where
                     launch_key: entry.launch_key.clone(),
                     binding: entry.binding.clone(),
                     diagnostic_last_issue_cycles: predictions.diagnostic_last_issue_cycles(),
+                    last_processed_modeled_system_event_time: predictions
+                        .last_processed_modeled_system_event_time(),
                     terminal_modeled_event_time: predictions.terminal_modeled_event_time(),
+                    modeled_completion_frontier: predictions.modeled_completion_frontier(),
                 });
                 per_launch_results.push(PerLaunchResultV2::new(entry.launch_key.clone(), metrics));
                 // `emit_launch` must run while the exact replay result is still borrowed.
@@ -440,6 +445,10 @@ where
                 != witness.diagnostic_last_issue_cycles
             || aggregate_diagnostic.terminal_modeled_event_time()
                 != witness.terminal_modeled_event_time
+            || aggregate_diagnostic.last_processed_modeled_system_event_time()
+                != witness.last_processed_modeled_system_event_time
+            || aggregate_diagnostic.modeled_completion_frontier()
+                != witness.modeled_completion_frontier
         {
             return Err(RunError::emission(
                 "aggregate diagnostics differ from per-launch emission diagnostics",

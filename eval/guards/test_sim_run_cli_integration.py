@@ -31,7 +31,7 @@ SIM_RUN_ARGV = (
     "--manifest-path",
     "sim/Cargo.toml",
     "-p",
-    "sim-run",
+    "sim-run-campaign",
     "--",
 )
 SUBPROCESS_TIMEOUT_SECONDS = 300.0

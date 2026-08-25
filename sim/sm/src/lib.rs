@@ -18,8 +18,31 @@
 //!   traced hardware placement (`sm_id` / `warpid_sm`).
 //!
 //! Tensor Core initiation contention is modeled per SMSP for the admitted
-//! `sm_86` matrix-instruction forms. Other execution pipes remain explicit
-//! dispatch-only fidelity boundaries (design §6.2).
+//! `sm_86` matrix-instruction forms. CTA barrier instructions dispatch through
+//! their SMSPs and feed one SM-shared arrival service at two cycles per warp;
+//! own-arrival completion and other-participant rendezvous remain distinct.
+//! The measured predicated forward-BRA form also carries an architecture-local
+//! ten-cycle minimum next-issue frontier; uniform backward targets carry their
+//! typed three-cycle resolution diagnostic. Address-carrying global atomics
+//! retain alias-expanded sectors and exact L2 request topology. CLOCK-bracketed
+//! probes expose exact first-to-last CLOCKLO issue intervals in readiness schema
+//! 5. Schema 6 adds scalar-global instruction/sector counts, alias-aware ideal
+//! L1TEX wavefronts, unique 128-byte lines, exact atomic requests, and issue
+//! spans without changing scheduling. Schema 7 carries bounded opt-in streaming
+//! service candidates; schema 8 distinguishes scalar-global operand-read
+//! barrier producers and consumer delay. Predicated-off memory records remain
+//! issued scheduler slots but create no traffic, writeback, or dependency
+//! producer. Schema 9 evaluates bounded SM/per-SMSP operand-admission queues
+//! and a shared FIFO service from exact per-instruction L2 hit/miss outcomes.
+//! Schema 10 runs one opt-in feedback candidate that parks full-queue warps,
+//! yields for exact L2 pricing, and reschedules subsequent issue/cache order.
+//! Ordinary replay and schemas 1–9 remain unchanged.
+//! For the exact sm_86 scalar STRONG.SM/HADD2 forms, an SMSP-local same-bank
+//! writeback collision grants HADD2 and delays the barrier-observed load result
+//! by one cycle; readiness schema 4 reports that event. Queue capacity and
+//! other fixed/variable forms remain explicit fidelity boundaries.
+//! Other execution pipes remain explicit dispatch-only fidelity boundaries
+//! (design §6.2).
 //!
 //! Non-bulk asynchronous copies retain the source-cache policy encoded by
 //! `sm_86` SASS: `LDGSTS.E` participates in the modeled L1/L2 hierarchy, while
@@ -46,6 +69,7 @@ pub mod evidence;
 mod issue;
 pub mod program;
 pub mod replay;
+pub mod sass_operands;
 mod system;
 
 pub use control_bits::{
@@ -60,8 +84,17 @@ pub use evidence::{
     TraceBundleIdentity, admit_launch_evidence, admit_launch_evidence_anchored,
 };
 pub use issue::{
-    AccessKind, IssueError, IssueModelParams, IssueResourceSource, MemoryOperation, ReplyTo,
-    SmSimResult, TailFlags,
+    AccessKind, AsyncReadinessDiagnostics, BarrierPipelineDiagnostics, ClockIssueDiagnostics,
+    ControlPipelineDiagnostics, CtaBarrierDiagnostics, GlobalMemoryIssueDiagnostics, IssueError,
+    IssueModelParams, IssueResourceSource, MAX_MEMORY_ADMISSION_CANDIDATES,
+    MAX_MEMORY_ADMISSION_QUEUE_CAPACITY, MAX_MEMORY_ADMISSION_SERVICE_WIDTH_SECTORS,
+    MAX_MEMORY_SERVICE_CANDIDATES, MemoryAdmissionCandidate, MemoryAdmissionCandidateDiagnostics,
+    MemoryAdmissionCandidateError, MemoryAdmissionCandidateResult,
+    MemoryAdmissionFeedbackDiagnostics, MemoryOperation, MemoryServiceCandidate,
+    MemoryServiceCandidateDiagnostics, MemoryServiceCandidateError,
+    MemoryServiceCandidateOperation, MemoryServiceCandidateResult, MemoryServiceCandidateScope,
+    ReadinessCauseCycles, ReadinessCounterError, ReadinessDiagnostics, ReplyTo,
+    ResultWritebackDiagnostics, SmSimResult, TailFlags,
 };
 pub use program::{
     FunctionSchedule, IssueSlot, OpClass, PipelineClass, ProgramError, build_schedules,
@@ -71,14 +104,22 @@ pub use replay::{
     FullLaunchCoverage, FullLaunchSetCounters, FullLaunchSetDeclaration,
     FullLaunchSetDeclarationError, FullLaunchTimingDiagnostic, KernelReplayOutcome,
     LaunchSetAggregationError, LaunchSetCounterComponent, LaunchSetScalarCounter, LaunchSetScope,
-    LaunchSetScopeError, ReplayConfiguration, ReplayError, ReplayLaunchCoverageBinding,
-    ReplayLaunchCoverageBindingError, ReplayMemMode, aggregate_full_launch_set,
-    replay_trace_kernel,
+    LaunchSetScopeError, ModeledCompletionFrontier, ReplayConfiguration, ReplayError,
+    ReplayLaunchCoverageBinding, ReplayLaunchCoverageBindingError, ReplayMemMode,
+    ReplaySessionError, StreamL2ReplaySession, aggregate_full_launch_set, replay_trace_kernel,
+    replay_trace_kernel_with_memory_admission_candidates,
+    replay_trace_kernel_with_memory_admission_feedback,
+    replay_trace_kernel_with_memory_service_candidates,
 };
 #[cfg(feature = "campaign")]
 pub use replay::{
     SampledKernelReplayResult, SampledLaunchCoverage, SampledObservedCounters, UnadmittedCoverage,
     UnadmittedReplayDiagnostics, replay_kernel, replay_unadmitted_diagnostics,
+};
+pub use sass_operands::{
+    FixedLatencyFamily, FixedLatencyOpcode, FixedLatencyOperandGap, FixedLatencyOperandGapReason,
+    FixedLatencyOperandProjection, FixedLatencyOperandStatus, SassRegister, SassRegisterFile,
+    SassRegisterOperand, SassSourceOperand, project_fixed_latency_operands,
 };
 pub use sim_mem::MemRole;
 pub use system::{

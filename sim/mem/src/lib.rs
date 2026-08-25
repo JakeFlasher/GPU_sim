@@ -11,6 +11,9 @@
 //!   partition in lockstep with `l1_cache_op_classifier.py`; the
 //!   classifier's OWN manifest artifacts are not consumed — its section
 //!   extraction mixes fatbin arch slices, see the module doc).
+//!   The token remains literal across architectures; [`access`] applies the
+//!   measured sm_86 exception that CUDA's `LDG.E.STRONG.SM` lowering is L1
+//!   eligible, without changing Blackwell strong-scope routing.
 //! - [`pchase_card`]: geometry/latency resolvers over the committed
 //!   P-chase static card, porting the fail-closed resolution contract
 //!   (capacity has no default; typed gaps resolve only to DOCUMENTED
@@ -37,8 +40,10 @@ pub mod l2;
 pub mod pchase_card;
 
 pub use access::{
-    AccessKind, MemRole, MemRoleError, MemoryOrigin, is_global_reduction_opcode,
-    is_global_store_opcode, is_known_untagged_opcode, mem_role_of_checked,
+    ASYNC_COPY_COMPLETION_VALUE_MASK, AccessKind, AsyncCopyCompletion, MemRole, MemRoleError,
+    MemoryOrigin, decode_async_copy_completion, encode_async_copy_destination_work,
+    encode_async_copy_payload_work, is_global_reduction_opcode, is_global_store_opcode,
+    is_known_untagged_opcode, mem_role_of_checked,
 };
 pub use cache_op::{
     BARE_LDG_E_DEFAULTS_TO_CA, CacheOpError, CacheOpToken, LdgstsL1Policy,

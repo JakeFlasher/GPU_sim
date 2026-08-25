@@ -184,6 +184,91 @@ impl ArchId {
         }
     }
 
+    /// CTA-barrier issue behavior identified independently on a one-CTA,
+    /// memory-free sweep. Ampere admits barrier arrivals through one SM-shared
+    /// server at one warp every two cycles. The separate generation re-arm
+    /// remains zero until a SASS-adjacent consecutive-barrier construction
+    /// distinguishes it from intervening compiler-scheduled control work.
+    pub const fn cta_barrier_issue(self) -> Capability<CtaBarrierIssue> {
+        match self {
+            Self::Sm86 => Capability::available(
+                Self::Sm86,
+                CtaBarrierIssue {
+                    warp_initiation_interval_cycles: 2,
+                    generation_rearm_cycles: 0,
+                },
+            ),
+            Self::Sm120 => Capability::research_gap(
+                Self::Sm120,
+                "sm_120 CTA-barrier issue scope, throughput, and generation re-arm are not measured",
+            ),
+        }
+    }
+
+    /// Branch timing identified by two independent constructions. The exact
+    /// forward-branch length sweep retains its ten-cycle next-issue interval.
+    /// A U1/U2/U4/U8 backward-branch factorial additionally exposes three
+    /// branch-resolving warp cycles per uniform target directly in NCU; that
+    /// target-resolution state is shorter than the compiler's five-cycle BRA
+    /// control stall and therefore does not by itself invent an extra issue
+    /// delay.
+    pub const fn branch_resolution(self) -> Capability<BranchResolution> {
+        match self {
+            Self::Sm86 => Capability::available(
+                Self::Sm86,
+                BranchResolution {
+                    next_issue_interval_cycles: 10,
+                    uniform_backward_target_resolution_cycles: 3,
+                },
+            ),
+            Self::Sm120 => Capability::research_gap(
+                Self::Sm120,
+                "sm_120 branch resolution and next-issue interval are not measured",
+            ),
+        }
+    }
+
+    /// Pairwise cross-warp/CTA global-atomic contention topology. Two aligned
+    /// 32/64-bit words contend exactly when their byte addresses occupy the
+    /// same aligned region. This is a topology fact only: the distributed
+    /// many-region service network and its timing remain unidentified.
+    pub const fn atomic_topology(self) -> Capability<AtomicTopology> {
+        match self {
+            Self::Sm86 => Capability::available(
+                Self::Sm86,
+                AtomicTopology {
+                    cross_warp_contention_region_bytes: 256,
+                },
+            ),
+            Self::Sm120 => Capability::research_gap(
+                Self::Sm120,
+                "sm_120 cross-warp atomic contention region and distributed service are not measured",
+            ),
+        }
+    }
+
+    /// Bank-local arbitration between exact fixed-latency results and scalar
+    /// L1TEX load results. The completion and visibility offsets are separate:
+    /// the compiler-visible dependence frontier trails the physical load
+    /// writeback. A same-cycle HADD2 completion has priority and defers the load
+    /// result by one cycle.
+    pub const fn fixed_l1tex_writeback_priority(self) -> Capability<FixedL1TexWritebackPriority> {
+        match self {
+            Self::Sm86 => Capability::available(
+                Self::Sm86,
+                FixedL1TexWritebackPriority {
+                    hadd2_writeback_cycles: 6,
+                    l1tex_writeback_to_visibility_cycles: 5,
+                    variable_deferral_cycles: 1,
+                },
+            ),
+            Self::Sm120 => Capability::research_gap(
+                Self::Sm120,
+                "sm_120 fixed/L1TEX result priority and completion offsets are not measured",
+            ),
+        }
+    }
+
     /// Static SASS protocol used to close and wait on non-bulk asynchronous
     /// global-to-shared copy groups. This is a semantic capability rather than
     /// a latency source: completion timing still comes from the memory model.
@@ -269,6 +354,8 @@ impl ArchId {
                     projection:
                         LdgstsDestinationWavefrontProjection::SourceCohorts128BytesBanks32Words4Bytes,
                     cycles_per_wavefront: 2,
+                    aggregate_service_wavefronts: 2,
+                    aggregate_service_cycles: 3,
                 },
             ),
             Self::Sm120 => Capability::research_gap(
@@ -648,6 +735,44 @@ pub struct TensorIssueIntervals {
     pub imma_16816_s8: u64,
 }
 
+/// Architecture-local CTA-barrier issue resource. The warp initiation
+/// interval belongs to one server shared by the SM, not one server per SMSP.
+/// `generation_rearm_cycles` gates only a later barrier generation of the same
+/// CTA; it is not a post-rendezvous delay on ordinary instructions.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CtaBarrierIssue {
+    pub warp_initiation_interval_cycles: u64,
+    pub generation_rearm_cycles: u64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BranchResolution {
+    pub next_issue_interval_cycles: u64,
+    pub uniform_backward_target_resolution_cycles: u64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AtomicTopology {
+    pub cross_warp_contention_region_bytes: u32,
+}
+
+impl AtomicTopology {
+    pub fn contention_region(self, byte_address: i64) -> i64 {
+        byte_address.div_euclid(i64::from(self.cross_warp_contention_region_bytes))
+    }
+
+    pub fn same_contention_region(self, left: i64, right: i64) -> bool {
+        self.contention_region(left) == self.contention_region(right)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FixedL1TexWritebackPriority {
+    pub hadd2_writeback_cycles: u64,
+    pub l1tex_writeback_to_visibility_cycles: u64,
+    pub variable_deferral_cycles: u64,
+}
+
 /// Architecture-local lowering used for PTX non-bulk `cp.async` groups.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AsyncCopyGroupSemantics {
@@ -699,7 +824,13 @@ pub enum LdgstsDestinationWavefrontProjection {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct LdgstsDestinationWavefrontTiming {
     pub projection: LdgstsDestinationWavefrontProjection,
+    /// Dependent completion floor for one warp's committed group.
     pub cycles_per_wavefront: u64,
+    /// Rational sustained destination service shared by the resident warps of
+    /// one SM: `aggregate_service_wavefronts` complete every
+    /// `aggregate_service_cycles` cycles.
+    pub aggregate_service_wavefronts: u64,
+    pub aggregate_service_cycles: u64,
 }
 
 /// Compact trace-side bank projection understood by an architecture timing
@@ -890,6 +1021,112 @@ mod tests {
     }
 
     #[test]
+    fn sm86_cta_barrier_issue_is_sm_shared_and_architecture_local() {
+        assert_eq!(
+            ArchId::Sm86
+                .cta_barrier_issue()
+                .require("cta_barrier_issue")
+                .unwrap(),
+            CtaBarrierIssue {
+                warp_initiation_interval_cycles: 2,
+                generation_rearm_cycles: 0,
+            }
+        );
+        assert!(matches!(
+            ArchId::Sm120
+                .cta_barrier_issue()
+                .require("cta_barrier_issue"),
+            Err(CapabilityError::ResearchGap {
+                arch: ArchId::Sm120,
+                capability: "cta_barrier_issue",
+                reason,
+            }) if !reason.is_empty()
+        ));
+    }
+
+    #[test]
+    fn sm86_branch_resolution_is_architecture_local() {
+        assert_eq!(
+            ArchId::Sm86
+                .branch_resolution()
+                .require("branch_resolution")
+                .unwrap(),
+            BranchResolution {
+                next_issue_interval_cycles: 10,
+                uniform_backward_target_resolution_cycles: 3,
+            }
+        );
+        assert!(matches!(
+            ArchId::Sm120
+                .branch_resolution()
+                .require("branch_resolution"),
+            Err(CapabilityError::ResearchGap {
+                arch: ArchId::Sm120,
+                capability: "branch_resolution",
+                reason,
+            }) if !reason.is_empty()
+        ));
+    }
+
+    #[test]
+    fn sm86_atomic_topology_is_architecture_local_and_timing_free() {
+        assert_eq!(
+            ArchId::Sm86
+                .atomic_topology()
+                .require("atomic_topology")
+                .unwrap(),
+            AtomicTopology {
+                cross_warp_contention_region_bytes: 256,
+            }
+        );
+        assert!(matches!(
+            ArchId::Sm120
+                .atomic_topology()
+                .require("atomic_topology"),
+            Err(CapabilityError::ResearchGap {
+                arch: ArchId::Sm120,
+                capability: "atomic_topology",
+                reason,
+            }) if !reason.is_empty()
+        ));
+        let topology = ArchId::Sm86
+            .atomic_topology()
+            .require("atomic_topology")
+            .unwrap();
+        assert!(topology.same_contention_region(0, 252));
+        assert!(!topology.same_contention_region(0, 256));
+        assert!(topology.same_contention_region(128, 252));
+        assert!(!topology.same_contention_region(128, 256));
+        assert!(topology.same_contention_region(-256, -1));
+        assert!(!topology.same_contention_region(-1, 0));
+    }
+
+    #[test]
+    fn sm86_fixed_l1tex_writeback_priority_is_architecture_local() {
+        assert_eq!(
+            ArchId::Sm86
+                .fixed_l1tex_writeback_priority()
+                .require("fixed_l1tex_writeback_priority")
+                .unwrap(),
+            FixedL1TexWritebackPriority {
+                hadd2_writeback_cycles: 6,
+                l1tex_writeback_to_visibility_cycles: 5,
+                variable_deferral_cycles: 1,
+            }
+        );
+        assert!(matches!(
+            ArchId::Sm120
+                .fixed_l1tex_writeback_priority()
+                .require("fixed_l1tex_writeback_priority"),
+            Err(CapabilityError::ResearchGap {
+                arch: ArchId::Sm120,
+                capability: "fixed_l1tex_writeback_priority",
+                reason,
+            }) if !reason.is_empty()
+        ));
+    }
+
+    #[test]
     fn sm86_async_copy_group_semantics_are_architecture_local() {
         assert_eq!(
             ArchId::Sm86
@@ -945,6 +1182,8 @@ mod tests {
                 projection:
                     LdgstsDestinationWavefrontProjection::SourceCohorts128BytesBanks32Words4Bytes,
                 cycles_per_wavefront: 2,
+                aggregate_service_wavefronts: 2,
+                aggregate_service_cycles: 3,
             }
         );
     }

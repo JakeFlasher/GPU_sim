@@ -745,6 +745,14 @@ pub enum L2CounterError {
     Architecture(#[from] sim_arch::ArchitectureProvenanceError),
     #[error("L2 counter '{field}' overflows u64 during aggregation")]
     Overflow { field: L2CounterField },
+    #[error(
+        "L2 counter '{field}' underflows while computing a launch delta: current={current}, baseline={baseline}"
+    )]
+    Underflow {
+        field: L2CounterField,
+        current: u64,
+        baseline: u64,
+    },
     #[error("L2 counter total overflows u64: hits={hits}, misses={misses}")]
     TotalOverflow { hits: u64, misses: u64 },
 }
@@ -756,6 +764,20 @@ fn checked_counter_add(
 ) -> Result<u64, L2CounterError> {
     left.checked_add(right)
         .ok_or(L2CounterError::Overflow { field })
+}
+
+fn checked_counter_sub(
+    field: L2CounterField,
+    current: u64,
+    baseline: u64,
+) -> Result<u64, L2CounterError> {
+    current
+        .checked_sub(baseline)
+        .ok_or(L2CounterError::Underflow {
+            field,
+            current,
+            baseline,
+        })
 }
 
 impl Default for L2Counters {
@@ -827,6 +849,38 @@ impl L2Counters {
         self.sector_fill_misses = sector_fill_misses;
         self.write_tag_hits = write_tag_hits;
         Ok(())
+    }
+
+    /// Compute checked per-launch counters from a cumulative cache-model
+    /// snapshot. Both values must carry the same architecture provenance and
+    /// every current field must be monotonic relative to `baseline`.
+    pub fn checked_delta_since(&self, baseline: &L2Counters) -> Result<L2Counters, L2CounterError> {
+        let current_arch = self
+            .arch
+            .ok_or(sim_arch::ArchitectureProvenanceError::Unbound {
+                component: "L2 counters",
+            })?;
+        require_counter_arch(current_arch, baseline)?;
+        Ok(L2Counters {
+            arch: Some(current_arch),
+            hits: checked_counter_sub(L2CounterField::Hits, self.hits, baseline.hits)?,
+            misses: checked_counter_sub(L2CounterField::Misses, self.misses, baseline.misses)?,
+            line_misses: checked_counter_sub(
+                L2CounterField::LineMisses,
+                self.line_misses,
+                baseline.line_misses,
+            )?,
+            sector_fill_misses: checked_counter_sub(
+                L2CounterField::SectorFillMisses,
+                self.sector_fill_misses,
+                baseline.sector_fill_misses,
+            )?,
+            write_tag_hits: checked_counter_sub(
+                L2CounterField::WriteTagHits,
+                self.write_tag_hits,
+                baseline.write_tag_hits,
+            )?,
+        })
     }
 
     pub fn total(&self) -> Result<u64, L2CounterError> {
@@ -937,6 +991,16 @@ impl L2Model {
     pub fn counters(&self) -> Result<&L2Counters, L2CounterError> {
         self.validate_counter_architecture()?;
         Ok(&self.counters)
+    }
+
+    /// Number of event-mode sectors requested but not yet completed. A launch
+    /// boundary may carry replacement/valid-sector state only when this is zero.
+    pub fn pending_sector_count(&self) -> usize {
+        self.sets
+            .iter()
+            .flat_map(|ways| ways.iter())
+            .map(|way| way.pending_mask.count_ones() as usize)
+            .sum()
     }
 
     fn validate_counter_architecture(&self) -> Result<(), L2CounterError> {
@@ -3168,6 +3232,65 @@ mod tests {
         assert_eq!(total.sector_fill_misses, 17);
         assert_eq!(total.write_tag_hits, 19);
         assert_eq!(total.total().unwrap(), 24);
+    }
+
+    #[test]
+    fn counter_delta_is_checked_architecture_bound_and_recomposes() {
+        let mut baseline = L2Counters::for_arch(ArchId::Sm86);
+        baseline.hits = 3;
+        baseline.misses = 5;
+        baseline.line_misses = 2;
+        baseline.sector_fill_misses = 3;
+        baseline.write_tag_hits = 1;
+
+        let mut current = baseline;
+        current.hits = 13;
+        current.misses = 16;
+        current.line_misses = 14;
+        current.sector_fill_misses = 16;
+        current.write_tag_hits = 15;
+
+        let delta = current.checked_delta_since(&baseline).unwrap();
+        assert_eq!(delta.arch(), Some(ArchId::Sm86));
+        assert_eq!(delta.hits, 10);
+        assert_eq!(delta.misses, 11);
+        assert_eq!(delta.line_misses, 12);
+        assert_eq!(delta.sector_fill_misses, 13);
+        assert_eq!(delta.write_tag_hits, 14);
+        let mut recomposed = baseline;
+        recomposed.add_checked(&delta).unwrap();
+        assert_eq!(recomposed, current);
+
+        let wrong_arch = L2Counters::for_arch(ArchId::Sm120);
+        assert!(matches!(
+            current.checked_delta_since(&wrong_arch),
+            Err(L2CounterError::Architecture(
+                sim_arch::ArchitectureProvenanceError::Mismatch { .. }
+            ))
+        ));
+
+        let mut regressed = current;
+        regressed.sector_fill_misses = baseline.sector_fill_misses - 1;
+        assert_eq!(
+            regressed.checked_delta_since(&baseline),
+            Err(L2CounterError::Underflow {
+                field: L2CounterField::SectorFillMisses,
+                current: 2,
+                baseline: 3,
+            })
+        );
+    }
+
+    #[test]
+    fn pending_sector_count_tracks_event_fill_completion() {
+        let mut l2 = L2Model::new(cfg(1024, 2, 1)).unwrap();
+        assert_eq!(l2.pending_sector_count(), 0);
+        let access = ev_read(&mut l2, 3, 0b0101);
+        assert_eq!(l2.pending_sector_count(), 2);
+        l2.complete_fill_mask(access.fill.unwrap(), 0b0001).unwrap();
+        assert_eq!(l2.pending_sector_count(), 1);
+        l2.complete_fill_mask(access.fill.unwrap(), 0b0100).unwrap();
+        assert_eq!(l2.pending_sector_count(), 0);
     }
 
     #[test]

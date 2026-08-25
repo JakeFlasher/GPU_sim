@@ -1858,3 +1858,1259 @@ validation. Final checks pass the clean tracer build and host unit tests, 244
 focused destination-contract tests, the full NVBit Python suite (822 passed, 7
 explicit historical-fixture skips, 155 subtests), Rust formatting, all workspace
 target tests, deterministic live replay, and `git diff --check`.
+
+## sm_86 aggregate LDGSTS destination service (2026-08-17)
+
+The exact V3 projection closed per-warp destination banking but explicitly left
+cross-warp arbitration unresolved. A fresh six-workload foreground campaign and
+an independent W1–W8 contention probe now close that bounded milestone. Complete
+machine-local evidence and commands are retained under
+`results/captures/sm86_cycle_residual_20260817_v1`; its compact analysis is
+`analysis/README.md`.
+
+### Fresh full campaign and tooling repair
+
+The tracer was rebuilt with CUDA 13.2 and protobuf 34.1, then all six current
+cycle-residual workloads passed correctness and full NVBit capture. The captures
+carry 644 / 197,120 / 197,120 / 157,696 / 19,968 / 39,568 records for canary,
+BF16, FP16, INT8, sparse BF16, and attention respectively. Every workload has
+full block coverage, exact `instructions_issued == records_seen`, zero
+unsupported/unmapped/cross-allocation records, and zero unknown SASS control
+encodings.
+
+NCU 2026.1 was run separately in the foreground with base clock control: one
+broad profile, three focused repeats, and one SourceCounters follow-up per
+workload. The focused repeats have at most 1.332% selected-cycle CV. Their median
+`gpc__cycles_elapsed.max` values are 4,346 / 14,474 / 14,608 / 11,897 / 6,146 /
+16,657, while median `sm__cycles_active.max` is 2,245 / 12,265 / 12,434 / 9,722 /
+3,891 / 14,510. LDGSTS wavefront counts are exact in every repeat (32 / 196,608 /
+196,608 / 196,608 / 12,288 / 2,624); median L2 source sectors are 128 / 161,920 /
+161,920 / 80,960 / 16,384 / 4,352.
+
+This run exposed two local analysis defects rather than hiding them in ad-hoc
+notebooks. `tools/local_labels/ncu_csv.py` now admits both historical long NCU CSV
+and the 2026.1 wide header/units/kernel-row form with strict shape, unit-row,
+duplicate-column, finite-number, and kernel-ID checks. `eval/direct_score.py` now
+implements the keyed-object join promised by its README: numeric-only shared-key
+join, deterministic ordering, two-sided coverage, and non-finite rejection, while
+retaining positional arrays.
+
+SourceCounters localizes the broad long-scoreboard pressure at the dependent CTA
+barrier immediately following the async wait: 349/349 BF16, 320/320 FP16, 219/231
+INT8, 62/62 sparse-BF16, and 53/53 attention long-scoreboard samples land on
+`BAR.SYNC.DEFER_BLOCKING`; the remaining 12 INT8 samples land on two dependent
+IADD instructions. This is consistent with NCU's documented attribution of one
+stall reason to the active dependent instruction. The canary is too short for a
+useful source sample even though its broad profile reports long-scoreboard
+pressure.
+
+### Independent W1–W8 service characterization
+
+The new probe issues eight 512-byte cache-all copies per group from W resident
+warps to disjoint shared destinations while reusing one warmed 512-byte source.
+It retains 14 registers with no spills. Five fresh host repetitions, each with
+seven 16,384-group samples, establish median maximum-warp cycles per group of
+127.018 / 146.017 / 183.014 / 232.015 / 252.518 / 287.025 / 343.519 / 403.018
+for W1 through W8. Three NCU repeats per W report 524,288 × W exact LDGSTS
+wavefronts and median active-SM cycles of 2,082,167 / 2,393,444 / 3,032,440 /
+3,802,475 / 3,884,482 / 4,752,852 / 5,629,013 / 6,702,212.
+
+The high-contention aggregate rate is therefore 0.63–0.67 destination wavefronts
+per active SM cycle. The architecture capability uses the independently selected
+rational value **two wavefronts per three cycles**. The earlier one-wavefront per
+cycle trial was falsified: it inherited an explicit-LDS slope that does not
+transfer to LDGSTS. It changed only INT8 materially and missed the observed
+contention curve.
+
+A 64-group CUDA variant was captured with NVBit for every W and replayed twice
+byte-identically. The final model predicts 9,627 / 9,659 / 9,770 / 12,842 /
+15,914 / 18,986 / 22,058 / 25,130 total cycles. Including the fixed
+prologue/epilogue in the per-group quotient, W5–W8 errors against the long live
+probe are -1.53%, +3.36%, +0.33%, and -2.57%. The transition at W3–W4 still
+contains overlap not represented by this single-server model; it was not fitted
+away.
+
+### Source-ready committed-group queue
+
+`sim-arch` retains the existing two-cycle warp-local dependent floor per exact
+destination wavefront and now exposes the separate rational aggregate service
+rate only for `sm_86`; `sm_120` remains a typed research gap. The compact
+completion token uses its high bit to distinguish exact cache-all destination
+work from payload fallback without widening `AccessKind` or `ReplayInst`.
+
+Exact wavefronts accumulate in the open async-copy group. A group enters the one
+per-SM destination queue only after `LDGDEPBAR` commits it, every source unit has
+completed, and the actual last-source timestamp is reached. The idle scheduler
+includes that timestamp as a known wake event, so future source completions cannot
+reserve the pipe ahead of a group that becomes ready earlier. Required waits
+remain ineligible until their committed prefix has both a destination assignment
+and a completed local/aggregate maximum. Candidate projection and checked time
+arithmetic complete before either group or pipe state mutates. Explicit bypass
+copies retain their separately measured payload fallback.
+
+A reduced trace exposed one shared-L2 integration defect during development:
+exact destination work was attached during source admission and then attached a
+second time when the known L1 floor was recorded. Shared mode now adds only that
+known timestamp on the second update; a focused test pins once-only destination
+and payload accounting.
+
+### Replacement replay and remaining residual
+
+| workload | prior shared-L2 | aggregate-service shared-L2 | median fresh NCU SM active | new / NCU |
+|---|---:|---:|---:|---:|
+| cp.async canary | 1,060 | 1,092 | 2,245 | 48.64% |
+| BF16 HMMA GEMM | 8,722 | 8,906 | 12,265 | 72.61% |
+| FP16 HMMA GEMM | 8,722 | 8,906 | 12,434 | 71.63% |
+| INT8 IMMA GEMM | 5,318 | 5,846 | 9,722 | 60.13% |
+| sparse BF16 HMMA GEMM | 2,341 | 2,365 | 3,891 | 60.78% |
+| BF16 forward attention | 12,448 | 12,448 | 14,510 | 85.79% |
+
+All flat and shared-L2 pairs are byte-identical across repeated replay with
+unchanged traffic and exact instruction cardinality. Against SM-active medians,
+the keyed 6/6 score improves from MAE 2,742.67, RMSE 2,994.04, MAPE 35.145% to
+MAE 2,584.00, RMSE 2,788.76, MAPE 33.403%. No NCU cycle label is a simulator
+input.
+
+The nearest remaining research target is now specifically the barrier-coupled
+source/overlap residual, not destination projection or aggregate service: vary
+async source latency while holding exact destination work and CTA shape fixed,
+then separate L1TEX dependency completion from CTA barrier synchronization and
+scheduler eligibility. No privileged command was needed anywhere in this
+campaign.
+
+Final checks pass Rust formatting, `git diff --check`, all workspace targets
+(34 `sim-arch`, 8 `sim-engine`, 111 `sim-mem`, 286 `sim-sm`, 101 `sim-trace`,
+both `sim-run` targets, and all active integrations), default workspace Clippy,
+and 12 focused Python parser/evaluator tests. The repaired parser reads all 54
+campaign NCU CSVs (21,108 numeric metric values), and a final release rebuild
+reproduces all six saved shared-L2 outputs exactly. The stricter
+`clippy -D warnings` mode exposes only pre-existing Rust-1.96 lints in untouched
+`sim/trace` code and unchanged `sim-arch` lines; those unrelated rewrites were
+not folded into this measured milestone.
+
+## Next milestone configured from the complete notes study (2026-08-17)
+
+An in-depth reconciliation of `/home/jakeshea/GPU_sims_notes` with the current
+code and live residual is recorded in
+`docs/gpu_sims_notes_research_synthesis_20260817.md`. Excluding the imported
+Vortex checkout, the studied corpus contains 23 authored Markdown documents and
+127 readable PDFs spanning 2,616 pages. The older simulator presentation, trace
+synthesis work, CounterTrace proposal, primary simulator papers, and relevant
+MICRO 2026 drafts converge on completion-to-readiness-to-synchronization as the
+next essential relation to preserve.
+
+The configured milestone is
+`docs/sm86_causal_readiness_milestone.md`: add event-driven causal readiness,
+CTA barrier-generation/arrival-spread, async source-versus-destination, and
+eligible-not-selected diagnostics; then run a bounded 36-cell factorial
+NCU/NVBit/SASS experiment. The primary cells vary source locality and an
+independent overlap gap while holding exact LDGSTS destination work and CTA
+shape fixed. Held-out L2, W2/W8, and producer/consumer cells prevent a
+workload-specific latency fit.
+
+No fixed CTA-barrier latency is assumed. A timing rule enters the sm_86 model
+only if it predicts held-out sign and ordering; otherwise the readiness layer
+remains a useful component and the experiment falsifies that rule. A generic
+register scoreboard is explicitly out of scope because the modern NVIDIA path
+uses compiler dependence counters. No privileged command was required to
+configure the milestone.
+
+## sm_86 causal readiness and async/barrier transfer (2026-08-17)
+
+The configured milestone is complete. `sim-sm` now exports a checked,
+versioned causal-readiness aggregate while preserving event-driven timing. The
+implementation retains compiler-dependence producer origin, async-copy commit
+and waited-prefix state, source/local-destination/SM-service limiting arms, CTA
+barrier generation and arrival spread, rendezvous warp-cycles, Tensor-pipeline
+readiness, and eligible-but-not-selected delay. `sim-direct-run` emits the
+aggregate as readiness schema 1. Focused tests cover repeated barriers,
+asymmetric arrival, async wait-prefix selection, ties, unresolved completions,
+aggregation overflow, and the typed `sm_120` architecture gap.
+
+The instrumentation does not alter simulated timing. All 36 final traces and
+the six production traces replay twice to byte-identical JSON with exact
+`instructions_issued == records_seen`. The production predictions remain
+1,092 / 8,906 / 8,906 / 5,846 / 2,365 / 12,448 cycles; keyed coverage is 6/6,
+MAE 2,584.00, RMSE 2,788.76, and active-SM MAPE 33.403%.
+
+### Final live campaign
+
+The compile-time-specialized `async_barrier_overlap` probe uses five protocols:
+baseline, barrier-only, async-wait, async-wait-plus-barrier, and a warp-0
+producer/all-warp barrier. Each async group has eight 512-byte cache-all
+copies. L1 reuse, 2 MiB L2 rotation, and 64 MiB DRAM streaming vary source
+route while exact destination work remains fixed. A 14-SASS-instruction
+dependent chain independently measures 63.9998 base-clock cycles/group.
+
+The final v4 root contains 36 passing correctness cells, 112 foreground NCU
+profiles, seven SourceCounters sentinels, 36 separate 64-group NVBit captures,
+and long/trace SASS sidecars. Every capture has one full CTA, exact tracer
+cardinality, correct output, and zero unsupported, unmapped, or
+cross-allocation records. Both sidecars decode all 504 static instructions
+with zero unknown encodings; every target kernel has zero spill loads/stores.
+Only `w4_c10_l2_g64` and `w4_c11_l2_g64` remain above 2% active-cycle CV after
+five repeats (7.388% and 5.103%); their bimodal samples are retained rather
+than averaged away.
+
+At W4 and gap 0, async-wait costs 269.14 / 398.79 / 631.63 cycles/group for
+L1/L2/DRAM. Adding a CTA barrier produces 272.11 / 490.13 / 722.60. After
+subtracting the 18.00-cycle barrier-only control, the interactions are -15.03,
++73.34, and +72.97 cycles/group. The independent gap is almost completely
+hidden behind async completion, establishing real overlap rather than an
+additive wait delay.
+
+The held-out transfer test rejects a fixed barrier rule. Barrier-only cost is
+14.00 / 18.00 / 28.00 cycles/group at W2/W4/W8. DRAM interactions are +1.78 /
++72.97 / +230.53, and L1 interactions are -10.97 / -15.03 / +24.00. Thus the
+W4 value changes by more than two orders of magnitude at the held-out widths
+and even changes sign for L1. No CTA timing parameter was promoted.
+
+SourceCounters also prevents a false causal reading: c11 long-scoreboard
+samples land on the active `BAR.SYNC.DEFER_BLOCKING` instruction after the
+async wait, whereas c10 samples land on the following loop predicate. Barrier
+samples land on the post-BAR branch. This is dependent-PC attribution, not
+evidence that BAR created the L1TEX latency.
+
+The readiness diagnostics predict the useful direction. In the asymmetric c12
+trace, simulated DRAM has much larger arrival spread and rendezvous exposure
+than L1, and both grow with CTA width; W8 also exposes selection loss. But the
+target-only 64-group trace excludes the prewarm launch and does not wrap the
+2 MiB region, so cold replay makes L2 and DRAM identical. This identifies a
+launch-chain cache-state gap rather than permission to inject NCU route labels.
+
+Median process-level host replay changed from 3.216 to 3.391 ms (+5.44%) on the
+tiny non-async control and from 15.388 to 15.132 ms (-1.66%) on the async
+sentinel. The +0.175 ms small-process change exceeds the percentage target but
+is accepted as a measured instrumentation tradeoff; the representative async
+path does not regress.
+
+The reproducible reducer is
+`workloads/research_probes/async_barrier_overlap/analyze.py`, and its final
+report is
+`results/captures/sm86_async_barrier_readiness_20260817_v4/analysis/README.md`.
+Earlier v1-v3 roots remain as documented failed probe constructions.
+
+### Successor milestone
+
+The next bounded target is
+`docs/sm86_barrier_pipeline_cache_handoff_milestone.md`. It first exposes an
+opt-in same-stream replay session that carries only fully drained L2 state from
+a traced prewarm launch into a target launch while retaining cold-per-launch as
+the default. It then uses a 33-cell W1-W16 barrier-only sweep to select among
+dispatch-only, per-SMSP, per-SM, and rational shared barrier-issue resources.
+Barrier issue, CTA arrival, and rendezvous release remain separate. Warm
+L1/L2/DRAM async transfer and bounded multi-CTA contention are held-out
+validation, and `sm_120` remains a typed gap.
+
+No privileged command was required for implementation, NCU, NVBit, clock
+control, or analysis.
+
+### Final reproducibility and workspace closure
+
+The final reducer now fails closed on the integrity claims used by its report.
+For every matrix cell it validates the exact NCU application-replay/base-clock
+command, contiguous three-or-five-repeat policy, seven-trial correctness
+payload, one-CTA NVBit geometry, target payload, total/reported cardinality,
+active-launch selection contract, nonempty trace size, and empty unsupported,
+unmapped, and cross-allocation sidecars. It directly compares both simulator
+JSON files, checks full coverage, issued/record cardinality, and readiness
+schema 1, and emits those fields per cell in `analysis/cells.csv`. The static
+checks require both 504-instruction control sidecars to have zero unknown
+encodings and all five specialized protocol kernels to have zero stack/local
+allocation. The same reducer directly verifies the six production replay
+pairs, their full coverage/cardinality/schema, and their agreement with the
+saved predictions.
+
+The regenerated `analysis/summary.json` reports every integrity predicate
+true, 36/36 byte-identical campaign replay pairs, and 6/6 byte-identical
+production replay pairs. The promotion decision and all numerical results are
+unchanged.
+
+Final ordinary checks pass:
+
+- `cargo test --workspace --all-targets` across the complete feature-unified
+  Rust workspace;
+- `cargo fmt --all --check` and `git diff --check`;
+- 12 focused Python parser/scoring tests and Python bytecode compilation of
+  the campaign and reducer;
+- a release `sim-run` rebuild, followed by two final-release replays of all 36
+  saved campaign traces and byte comparison of all six production pairs; and
+- a live CUDA correctness/resource smoke run on the RTX 3090 Ti.
+
+`cargo clippy --workspace --all-targets` exits successfully with advisory
+warnings from existing test unwraps and Rust 1.96 lints; it is not described as
+warning-free. Feature-unified testing also exposed and fixed a refutable
+campaign-outcome match, a stale campaign-gated issue-model fixture, and stale
+end-to-end traffic expectations for the intentionally corrected cache-all
+LDGSTS source route.
+
+## Launch-chain L2 handoff — Stage 1 complete (2026-08-17)
+
+The first stage of
+`docs/sm86_barrier_pipeline_cache_handoff_milestone.md` is implemented.
+`StreamL2ReplaySession` owns one exact same-device/same-stream launch sequence
+and retains only drained L2 replacement and valid-sector state. It snapshots
+before each launch and atomically commits the cache and sequence cursor after
+all replay, counter, and drained-boundary checks pass. Existing launch replay
+continues to construct a fresh L2.
+
+`L2Counters::checked_delta_since` makes retained-model counters safe to expose
+as per-launch values, while `L2Model::pending_sector_count` enforces the
+no-in-flight boundary. The direct runner adds opt-in `--cache-scope stream-l2`,
+rejects filtering or mixed streams, and emits explicit launch-seed and
+cumulative-session metadata. Synthetic tests exercise warm hits, partial
+sectors, replacement recency, rollback/retry, typed binding mismatches,
+counter reconciliation, and determinism.
+
+The first live two-launch NVBit trace is
+`results/captures/sm86_launch_chain_cache_20260817_v1/nvbit/w4_c10_l2_g0`.
+It contains the 2 MiB prewarm and W4 c10 target in one device-0/stream-0 trace.
+Cold and retained replay preserve identical target L1 traffic. Retained L2
+converts exactly 1,024 target sectors from miss to hit, removes 1,024 target
+DRAM read sectors, and changes terminal modeled time from 35,010 to 23,554
+cycles. Repeated outputs are byte-identical, and a release rerun of all 36
+predecessor cells preserves all 72 cold-launch JSON outputs byte-for-byte.
+
+This closes the construction gap that previously collapsed L2 and DRAM source
+cells. The next active work is the predeclared W1-W16 barrier-only
+identification sweep and architecture-local barrier issue resource; no fixed
+rendezvous latency is promoted from the handoff result.
+
+## sm_86 barrier pipeline, warm routes, and multi-CTA transfer (2026-08-17)
+
+The successor milestone is complete. A 33-cell, seven-trial barrier-only sweep
+collected 99 base-clock application-replay NCU profiles, six SourceCounters
+profiles, 33 independent NVBit traces, complete SASS/resource sidecars, and 33
+byte-identical replay pairs. W1-W8 follow an exact two-cycle-per-added-warp
+law. The selected mechanism keeps SMSP dispatch parallel and queues CTA
+barrier arrivals through one SM-shared service at two cycles per warp. It
+predicts all W1-W16 width shapes with 0.103 cycles/generation MAE and the five
+held-out widths with 0.091 MAE.
+
+Readiness schema 2 retains accepted barrier instructions, service busy work,
+dispatch and arrival timestamp sums/spans, own-arrival completion,
+other-participant rendezvous, and scheduler-selection loss. `sm_120` fails with
+a typed missing capability. The b20 width slope transfers with 0.007
+cycles/generation MAE, but its 19.016-cycle common residual is inseparable from
+four ptxas-scheduled dispatch-only instructions between the BARs. No re-arm or
+post-release latency was added.
+
+The coupled campaign collected 62 NCU profiles, four SourceCounters profiles,
+and 18 launch-chain NVBit captures. Every L2 seed converts exactly 1,024 target
+sectors from miss to hit and removes 1,024 DRAM reads. Live L1/L2/DRAM ordering
+holds in every W2/W4/W8 c10/c11 group; warm replay preserves nondecreasing
+ordering in all six. The barrier resource adds only about two cycles/group to
+c11 because async completion already staggers barrier arrivals, proving that
+barrier throughput is not a substitute for the remaining coupled magnitude.
+
+The multi-CTA campaign holds eight warps and 96 KiB per SM constant across
+1×8, 2×4, and 4×2 CTA shapes. Six cells produced 18 NCU profiles, three
+SourceCounters profiles, six full NVBit captures, and exact 1/2/4-block
+placement on all 84 SMs. Hardware and replay share the CTA-shape ordering with
+0.032 cycles/generation slope MAE; a common 4.004-cycle residual remains and no
+CTA-count correction is fitted.
+
+All 36 predecessor traces replay twice with unchanged traffic. Five of six
+production predictions are unchanged; attention moves from 12,448 to 12,456
+cycles toward its 14,510-cycle observation. Coverage remains 6/6, MAE is
+2,582.67, RMSE is 2,787.77, and MAPE is 33.394%. The representative async host
+replay changes by +2.27% (+0.343 ms); the tiny process-level control changes by
++13.51% but only +0.458 ms. The next configured component is execution-port,
+dependent ALU, branch/control, and dual-issue characterization.
+
+Final ordinary checks pass the complete feature-unified Rust workspace (35
+`sim-arch`, 8 `sim-engine`, 113 `sim-mem`, 324 `sim-sm`, 138 `sim-trace`, and
+all runner/integration targets), formatting, diff integrity, workspace Clippy
+with advisory pre-existing lints, 12 focused Python tests, compilation and
+execution of every new reducer, and live one-/multi-CTA CUDA smokes. No sudo or
+other privileged command was required.
+
+## sm_86 issue-port and exact branch resolution (2026-08-17)
+
+The configured issue/control milestone is complete. The spill-free probe uses
+45 compile-time specializations over five chain lengths and dependent carry
+IADD, IMAD, LOP3, real forward branches, independent variants, and mixed
+IADD/FFMA work. Its 68 cells produced 204 base-clock NCU profiles, 14
+SourceCounters profiles, 68 NVBit captures, 5,136 decoded SASS instructions
+per binary, and deterministic dispatch/final replays. All correctness,
+coverage, cardinality, exclusion-sidecar, and three-repeat CV checks pass.
+
+NCU maps carry/logic work to ALU and IMAD/FFMA to FMA, but every cell reports
+exactly one instruction per issue-active cycle. Compiler controls already
+predict dependent scalar length slopes. Broad ALU/FMA and narrower IADD/carry
+initiation candidates reduce some W8 identification residuals but fail
+independent/mixed or multi-CTA transfer; no scalar interval or dual issue is
+retained.
+
+One exact rule transfers. Predicated forward BRA with control stall 5 and yield
+set requires a ten-cycle minimum next-issue interval. The model checks the
+function-relative target and leaves backward loops untouched. Readiness schema
+3 adds branch issue/resolution and causal exposure. Branch slope MAE falls from
+5.033 to 0.033 cycles, b11 skew MAE falls from 16.228 to 5.718
+cycles/generation, every traffic counter is unchanged, and production improves
+to MAE 2,559.00, RMSE 2,768.93, and 33.128% MAPE at 6/6 coverage.
+
+The next target is now sharply bounded: W1/W3/W4 have one warp per SMSP and no
+math throttle/not-selected samples, while W8 has two and incurs family-specific
+4-92.5 cycle/generation penalties. The successor studies scheduler arbitration
+and port queues rather than fitting an opcode latency.
+
+Final checks pass the complete feature-unified Rust workspace (36 `sim-arch`,
+8 `sim-engine`, 113 `sim-mem`, 326 `sim-sm`, 138 `sim-trace`, and all
+runner/integration targets), formatting, diff integrity, workspace Clippy with
+advisory existing lints, 12 focused Python tests, all reducers, final release
+cohort replay, and live CUDA correctness. Representative async process replay
+changes by −0.20%. No sudo command was needed.
+
+## sm_86 scheduler contention and half-warp service boundary (2026-08-17)
+
+The configured scheduler milestone is complete. The new spill-free
+`smsp_scheduler_contention` probe uses 52 compile-time specializations over
+dependent/independent carry, bare IMAD, LOP3, six reversed cross-family pairs,
+four nominal phase bodies, and W4/W8/W12/W16 placement. Approximate
+`nanosleep` was rejected during probe design; the retained phase uses traced
+warp-vote/compare issue slots behind warp-uniform forward branches and a
+matched q00 control.
+
+The frozen 99-cell campaign produced 693 correctness executions, 297
+base-clock application-replay NCU profiles, 21 SourceCounters profiles, 99
+independent NVBit captures, 3,322,744 replay records, and complete static
+sidecars. No NCU cell exceeds 2% active-cycle CV; every issue ratio is exactly
+1.0. Both long/trace binaries decode 6,624/6,624 SASS instructions across all
+52 functions with zero unknown controls, spills, or local memory. Physical
+slot sets, cardinality, coverage, exclusion sidecars, and deterministic replay
+all pass.
+
+W12/W16 active time approaches a two-cycle half-warp service bound derived
+from the executed pipe census: mean absolute distance is 1.26
+cycles/generation for eight ALU-dominant cells and 4.41 for four bare-IMAD
+cells. NCU also proves that bare `IMAD` is FMA work while `IMAD.MOV`,
+`IMAD.WIDE`, and `IMAD.X` are not. This corrects the overly broad family used
+by an earlier rejected candidate.
+
+Ten scheduler/resource shapes were replayed twice over every cell: strict
+ALU/FMA II=2, oldest fallback, ALU-only, rational FMA, cyclic ALU burst,
+one-/two-/three-waiter reservation windows, unbounded service drain, and a
+queue-plus-drain composition. The cyclic candidate reduces W8 same-family MAE
+from 29.14 to 2.28 and held-out same-family MAE from 58.15 to 19.91
+cycles/generation. It still changes W4 no-contention behavior, overprices W12,
+and reduces reversed-family sign transfer from 13/18 to 10/18. No candidate is
+promoted. After removing candidate code and rebuilding release, all 198
+restored outputs are byte-identical to the original baseline; schemas remain
+1–3 and production remains at 33.128% MAPE.
+
+The complete result is
+`results/captures/sm86_smsp_scheduler_contention_20260817_v1/analysis/README.md`.
+The next milestone is
+`docs/sm86_control_allocate_register_file_milestone.md`: first project trusted
+SASS registers/widths/reuse flags, then isolate Control/Allocate staging,
+future execution reservation, two-bank reads, compiler-managed reuse entries,
+and result-queue pressure. No privileged command was required.
+
+## sm_86 operand projection and exact register-bank campaign (2026-08-17)
+
+The first Control/Allocate slice is complete. `sim-sm` now projects exact
+IADD3/IADD3.X/LOP3.LUT/bare-IMAD/FFMA/FADD/FMUL operands from the trusted
+control-sidecar SASS text. The immutable projection retains regular/uniform and
+predicate register identities, consecutive-register spans, unary modifiers,
+data/predicate source positions, textual reuse, and sm_86 two-bank demand.
+Textual reuse must agree with the separately decoded four-bit control mask;
+unsupported target syntax retains a typed gap and acquires no timing.
+
+The corpus auditor covers 13,141 target instructions across all 26 retained
+sm_86 sidecars with zero gaps: 8,285 scalar-ALU and 4,856 FMA-family records,
+including 4,342 exact bare IMADs while excluding IMAD.MOV/WIDE/X. All 198 prior
+scheduler outputs remain byte-identical after projection is stored in each
+joined issue slot.
+
+The new `fixed_latency_allocate` probe compiles six native layouts and a CUDA
+Driver API cubin launcher. Because nvcc recolors registers to avoid a decisive
+conflict, a bounded patcher changes only the three register fields in sixteen
+selected r11 IMAD low words. It validates every original destination/source,
+opcode encoding, reuse mask, PC, and section bound before writing. The long and
+trace patches each change 28 bytes; all high/control words and every nonselected
+byte remain identical. Disassembly and the Rust projection prove sixteen
+three-on-one-bank, reuse-zero IMADs. A full CuAssembler ELF round trip was
+explicitly rejected after CUDA-13 metadata/descriptor changes made its output
+non-loadable; it is not part of the campaign path.
+
+The frozen 28-cell campaign contains 196 correctness executions, 86 NCU
+profiles, nine SourceCounters reports, 28 NVBit captures, and 303,960 replay
+records. Every issue ratio is 1.0; only the tiny W8 control remains above 2% CV
+after the specified five repeats (4.10%). The exact binary pair preserves all
+instruction/FMA counts and replay traffic. Its live three-on-one-bank penalty
+is 7.00/14.00/21.56/34.83 cycles/generation at W4/W8/W12/W16. W4 adds
+dispatch-stall and wait with zero math throttle; higher occupancy adds math
+throttle while not-selected changes little.
+
+Three stage candidates were captured twice on all cells. Flexible placement of
+one bank read per cycle across a three-cycle Control→Allocate window predicts
+the W8/W12 bank deltas within 0.31/0.47 cycles and improves native absolute
+timing, but exposes only 2/7 W4 cycles and misses W16 by 5.31. Fixed operand
+slots collapse the bank differential; an extra Allocate hold overprices
+multi-warp cells. All candidate timing code was removed, and 56 restored files
+are byte-identical to baseline. Only operand projection remains. The next probe
+varies destination-consumer distance to identify the missing result-completion
+arm. No sudo command was required.
+
+## sm_86 exact completion-distance and staged-Allocate closure (2026-08-17)
+
+The follow-on `fixed_latency_completion` probe isolates the interaction between
+three-cycle register reads and the compiler's fixed-latency schedule. Four
+functions hold sixteen bare IMADs per generation while varying the carried RAW
+distance over 1/2/4/8. Eight runtime-loaded factor registers hold equal values
+that the compiler cannot coalesce statically. A checked cubin patch therefore
+selects different physical factor registers without changing any result.
+
+Both long and trace cubins have a matched `split`/`bank3` pair. Across four
+functions, 64 selected instructions retain identical PC, opcode, predicate,
+destination, carried addend/RAW edge, high/control word, resource declaration,
+and reuse mask zero. The pair differs in exactly 64 first/second-source bytes:
+split reads 2+1 across the two banks, while bank3 reads three distinct registers
+from the carried-addend bank. All six native/patched cubins decode 424/424
+instructions over five functions with no unknown controls, spills, or local
+memory. The Rust auditor projects 2,544 records with zero gaps.
+
+The frozen W4/W8/W12/W16 matrix has 32 cells, 224 correctness executions, 96
+base-clock NCU profiles, 12 SourceCounters profiles, 32 independent NVBit
+captures, and 408,320 replay records. Maximum active-cycle CV is 1.58%; every
+issue ratio is 1.0; issued/executed/FMA counts and replay traffic match within
+every pair. Live bank3 penalties by RAW distance are:
+
+| warps | distance 1 | distance 2 | distance 4 | distance 8 |
+|---:|---:|---:|---:|---:|
+| 4 | -0.03 | 2.00 | 8.00 | 7.00 |
+| 8 | 18.00 | 7.47 | 16.00 | 16.00 |
+| 12 | 32.53 | 9.94 | 23.33 | 24.66 |
+| 16 | 44.77 | 13.65 | 30.00 | 34.00 |
+
+The direct distance-1 dependency hides the bank treatment at W4, while the
+same treatment is exposed by interwarp contention at W8-W16. Distance 2's
+alternating physical banks is consistently cheaper than the paired/sustained
+bank phases at distances 4/8. Short-scoreboard treatment deltas remain zero;
+the signal lies in Allocate/dispatch/math/wait interaction rather than a
+generic hardware RAW scoreboard.
+
+Five executable compositions were captured twice over every cell: staged
+Control/Allocate with flexible reads, the reference-style dispatch hold,
+Allocate+Control conflict hold, Allocate-failure-only hold, and issuer-local
+completion exposure. The issuer-local candidate has the best overall treatment
+MAE at 2.906 cycles/generation and predicts W4 distance 1/2/4 within
+0.03/0.00/0.00 cycles. It misses W8 distance 4 by 9.13 cycles and has 6.94
+cycles/generation absolute MAE. Replaying the two best stage shapes on the
+prior 99 scheduler cells changes all-scored MAE only from 37.62 to 37.25/37.22;
+held-out cross-family MAE remains 46.83. Future execution-slot reservation
+does not change this homogeneous-IMAD treatment, and the identical destination
+stream cannot identify result-queue capacity.
+
+No timing component is promoted. Candidate code was removed, the default
+release simulator rebuilt, and all 64 restored completion outputs are
+byte-identical to the original production baseline. Static operand projection
+remains. The configured successor separates RFC allocate/hit/retention/
+position/eviction from mixed-latency result bypass, bounded result queues, and
+per-bank writeback priority in
+`docs/sm86_reuse_result_queue_milestone.md`. No sudo command was required.
+
+## sm_86 compiler-managed register-file cache (2026-08-17)
+
+The `fixed_latency_reuse` probe closes the RFC identity slice. Five functions
+execute sixteen independent loop-carried bare-IMAD streams. Eight factor
+registers are loaded from distinct runtime addresses but hold equal values, so
+a checked cubin patch can change source identities and reuse controls without
+changing results. Canonical Yield is set identically in both variants because
+CUDA 13.2 nvdisasm does not admit/display patched reuse modifiers on this IMAD
+form when Yield is clear.
+
+The long and trace pairs patch 80 instructions over u10 allocation-without-hit,
+u11 paired-hit, u12 retention, u20 position movement, and u22 eviction. Each
+pair preserves PC, opcode, destination, predicate, stall/dependence controls,
+per-instruction source-bank demand, resources, instruction count, and runtime
+values. All six native/patched cubins decode 560/560 instructions over five
+functions with no unknown controls, spills, or local memory. The Rust auditor
+projects 1,440 fixed-latency instructions across 3,360 records with zero gaps.
+
+The frozen 40-cell campaign contains 280 correctness executions, 120
+base-clock application-replay NCU profiles, 16 SourceCounters profiles, 40
+independent NVBit captures, and 518,400 replay records. Maximum active-cycle CV
+is 0.645%; every issue ratio is 1.0 and every pair preserves issued/executed/
+FMA and replay traffic. Live B−A deltas are:
+
+| protocol | W4 | W8 | W12 | W16 |
+|---|---:|---:|---:|---:|
+| u10 allocation/no-hit | 0.00 | 0.00 | 0.00 | 0.00 |
+| u11 paired hit | -1.00 | -2.00 | -2.96 | -3.10 |
+| u12 retained hit | -2.00 | -6.33 | -10.13 | -9.11 |
+| u20 moved position | +2.00 | +6.33 | +10.09 | +9.34 |
+| u22 eviction | +0.05 | +0.05 | -0.35 | +1.57 |
+
+The driver-level u22 difference remains approximately zero, so its larger
+profiled-width values are not treated as a stable eviction timing effect.
+Short-scoreboard deltas remain zero. Hit/retention/position effects instead
+move wait, math throttle, and scheduler exposure while u10 proves that setting
+a reuse bit without a later hit has no standalone cost.
+
+Five RFC shapes were replayed twice over all cells: the published shared
+warp-tagged bank/position organization, untagged state, issuer-local exposure,
+an Allocate-failure hold, and a per-warp upper bound. Untagged state falsely
+accelerates exact-zero u10 by 5.34/7.27/9.78 cycles at W8/W12/W16; per-warp
+state overpredicts u11 by as much as 14.98 cycles. This supports a shared entry
+per bank/source position carrying a warp/register tag.
+
+The best active composition has 1.451 cycles/generation RFC treatment-delta
+MAE but 6.474 absolute MAE. On predecessor transfer it reaches 2.238 held-out
+MAE on the original bank cohort, misses completion-distance held-out widths at
+5.543 MAE, and leaves the 99-cell scheduler at 37.331 all-scored MAE versus
+37.618 production. No RFC timing is promoted. Candidate code was removed,
+release rebuilt, and all 80 restored RFC outputs are byte-identical to
+production. The full retained corpus now contains 42 sidecars, 38,696 records,
+16,313 projected targets, and zero gaps.
+
+The configured successor isolates mixed-latency completion coincidence,
+bypass, result-queue depth, destination-bank retirement, and fixed-versus-load
+writeback priority in `docs/sm86_result_writeback_queue_milestone.md`. No sudo
+command was required.
+
+## sm_86 HADD2 projection and opposite-bank result-pacing pilot (2026-08-17)
+
+The first result/writeback slice is complete. `sass_operands` now admits exact
+`HADD2` as a fixed-latency Half-family producer with one regular destination
+and two sources; `HADD2_32I` and unvalidated modifiers remain typed
+unavailable. Six long/trace native and patched cubins decode 384/384 controls
+and project 108 fixed-latency instructions, including 24 HADD2, with zero gaps.
+The retained 48-sidecar corpus covers 39,080 records and 16,421 fixed-latency
+projections with zero gaps.
+
+The checked pair changes only four HADD2 control words. Both variants clear
+yield and reuse so CUDA 13.2 disassembly agrees with the encoded flags;
+`collision` uses stall 1 and `separated` stall 3. All instruction PCs, opcodes,
+operands, predicates, dependence controls, runtime values, resources, and host
+results otherwise match. The eight W4/W8/W12/W16 cells produced 56 correctness
+executions, 56 base-clock NCU profiles, four SourceCounters profiles, eight
+NVBit captures, and 84,480 deterministic replay records. Every issue ratio is
+1.0 and all issued/executed/ALU/FMA/FP16 counts match within pairs.
+
+Separated-minus-collision live deltas are +4.000/-1.014/-1.048/-1.791
+cycles/generation at W4/W8/W12/W16. Production replay predicts
++8.000/+4.000/+0.953/+8.062, leaving 5.217 treatment-delta MAE and 5.486
+absolute MAE. W4 has no math, dispatch, or not-selected treatment signal; at
+W8 and above, extra spacing reduces those multiwarp pressures and reverses the
+timing sign. Short-scoreboard deltas remain zero.
+
+This is not queue identification: all four HADD2/FFMA destinations target
+opposite banks, only three neighborhoods are instruction-adjacent, and the
+stall treatment changes issue pacing. No result/bypass/writeback state is
+promoted. A temporary CUDA-13.2 CUAssembler round trip was also rejected after
+the new ELF ABI/note sections and an incomplete sm_86 instruction repository
+prevented reconstruction of `LDG.E [R*.64]`; it is not a campaign dependency.
+
+The next exact slice balances HADD2→FFMA versus FFMA→HADD2 and same versus
+opposite destination banks under identical controls and pipe work, with a
+same-latency pacing control. Queue depth, bypass, and L1TEX priority remain
+deferred until that slice yields a completion-specific residual. Full evidence
+is in
+`results/captures/sm86_fixed_latency_result_queue_20260817_v1/analysis/README.md`.
+No privileged command was required.
+
+## sm_86 balanced result order and global-phase localization (2026-08-17)
+
+The `fixed_latency_result_order` slice removes the first pilot's issue-spacing
+confound. Two 48-instruction, 15-register functions differ only by adjacent
+HADD2/FFMA order at fixed opposite-bank destinations R11/R4; controls and
+consumers match. HF aligns five-/four-cycle completion while FH separates it
+by two cycles. Four cubins decode 384/384 controls and project 88 targets with
+zero gaps.
+
+The adaptive 14-cell campaign contains 98 correctness executions, 110 NCU
+profiles, eight SourceCounters profiles, 14 NVBit captures, and 77,900 replay
+records. HF-minus-FH is 0.000/-0.001/+0.056 cycles/generation at W4/W8/W12,
+and replay is exactly zero at all widths. W13/W14/W15 place a fourth warp on
+one/two/three modeled scheduler partitions; their HF slow-regime frequencies
+are 0/7, 1/11, and 1/11. W16 fills the fourth partition and rises to 8/11.
+Thus the W16 bimodality is SM-wide scheduler/completion phase, not a simple
+four-warp SMSP-local queue threshold. No timing is promoted.
+
+## sm_86 compiler-native same-bank two-result bypass (2026-08-17)
+
+The follow-on `fixed_latency_result_same_bank` construction requires no SASS
+register patch. Complementary in-place allocations produce HF and FH at
+relative PCs 0xe0/0xf0 with destination stream R4/R8 (bank 0), equal 16-register
+resources, matching per-opcode source-bank demand, and byte-identical timed
+consumers. Pre-clock pads equalize allocation; the sole post-clock difference
+is a checked commutative oracle permutation. A bounded patch clears two yield
+bytes and no register field.
+
+Its eight-cell campaign contains 56 correctness executions, 56 NCU profiles,
+eight SourceCounters profiles, eight NVBit captures, and 37,920 replay records.
+Same-bank HF-minus-FH is -0.0005/+0.0002 cycles/generation at W4/W8, with exact
+count equality and null stall deltas. This independently identifies hardware
+accommodation and forwarding of two same-cycle fixed results into one bank.
+The result is timing-neutral, so it adds no active queue state.
+
+Held-out W12 reaches +0.798 cycles/generation versus +0.056 for the matched
+opposite-bank pair: a +0.742 bank-specific onset with dispatch/wait movement
+and zero short-scoreboard delta. It cannot distinguish queue occupancy/pop
+width from bank retirement, while W16 is excluded by the global phase. The
+retained corpus now covers 56 sidecars, 39,848 records, 16,597 projections,
+and zero gaps. The next exact slice holds work constant while crossing 2/3/4
+and 7/8/9 single-warp same-bank completion cohorts. No sudo was required.
+
+## sm_86 result-reservation capacity feasibility (2026-08-17)
+
+Primary-source inspection establishes that the reference queue reserves a slot
+at fixed-result issue and frees it after writeback; its configured hypothesis
+is eight slots with one pop per cycle. The retained
+`fixed_latency_result_capacity` probe uses an admitted HMMA.16816 anchor plus a
+17-result reservation run. A common stall-15 BAR drains prior work and one
+identical stall 15 moves after reservation 7, 8, or 9, preserving instruction
+work, values, static stall sum, and baseline terminal issue time.
+
+The nine-cell W1/W4/W8 campaign contains 63 correctness executions, 63 NCU
+profiles, six SourceCounters profiles, nine NVBit captures, and 61,269 replay
+records. W1/W4 b9-minus-b8 are null. W8 measures `b8−b7=+0.164` and
+`b9−b8=+1.126` cycles/generation with increased dispatch pressure, while
+production predicts `−1.969` for the b9 step. The cell is retained as a useful
+multiwarp reservation canary, but Tensor/BAR phase and the nonzero b8 step
+prevent a direct queue-size claim.
+
+An experimental per-SMSP issue-reservation queue with capacity eight,
+latency-tagged completion, and one pop per cycle compiles and passes all 310
+`sim-sm` tests, but changes none of 18 capacity replay outputs. It is removed
+without predecessor transfer. Production is rebuilt, and all 18 restored
+outputs are byte-identical. The retained corpus reaches 64 sidecars, 40,424
+records, 16,805 projections, and zero gaps. Queue size/pop width remain
+unidentified; the fixed-result versus L1TEX writeback successor is completed
+below. No sudo was required.
+
+## sm_86 fixed-over-L1TEX writeback priority (2026-08-17)
+
+The `fixed_latency_result_load_priority` probe separates the load dependency
+from the fixed-result oracle. Its timed scalar `LDG.E.STRONG.SM` writes R11 and
+HADD2 writes R9 (bank 1). The opposite control completely renames the load
+producer and sole consumer to compiler-declared unused R14 (bank 0); R15 is
+present in native SASS, proving the replacement lies inside the 18-register
+allocation. Timing pairs move one stall cycle between IADD3 and NOP so HADD2
+issues at relative cycle 22 or 23 while the load consumer stays at cycle 29.
+Only two control bytes differ, the selected stall sum is 46, and a 15-cycle
+post-load gap keeps the fixed consumer safe at every width.
+
+The 20-cell W1/W4/W8/W12/W16 campaign contains 140 correctness executions, 60
+base-clock NCU profiles, eight SourceCounters profiles, 20 independent NVBit
+captures, and 88,396 replay records. All counts match and every issue ratio is
+1.0. Maximum active-cycle CV is 1.424%. Every profile reports exactly 4,096
+timed L1 lookup hits and eight setup misses per warp. W1/W4 same-bank
+collision-minus-noncollision is exactly +1.000 driver cycles/generation, while
+the opposite-bank shifts are exactly zero. W1 NCU difference-in-differences is
++0.990; same-bank long-scoreboard pressure changes by about +0.1245 versus
+about +0.001 for opposite-bank controls.
+
+This also closes an independent memory-route bug. CUDA 13.2 lowers the sm_86
+`ld.global.ca` form to `LDG.E.STRONG.SM`; the architecture-independent
+Blackwell-oriented token partition previously sent it around modeled L1.
+Replay now preserves the literal token but treats it as L1 eligible only on
+sm_86. The promoted result state is deliberately narrow: barrier-observed
+scalar STRONG.SM L1 hits are tracked by SMSP and destination bank; exact HADD2
+arrives six issue cycles after dispatch, wins a same-cycle collision, and
+defers load visibility by one cycle. Readiness schema 4 emits bounded collision
+and deferral counts only when the event occurs.
+
+The candidate reproduces W1/W4 exactly, improves the raw same-pair treatment at
+W8, and closely predicts W12. Across all five widths, same-pair delta MAE falls
+from 1.058 to 0.305 cycles/generation. W8+ opposite controls reveal a separate
+generic producer-shift/scheduler phase, and W16 remains the prior global phase
+sentinel. Queue capacity and fixed/fixed retirement width therefore remain
+inactive.
+
+All 40 flat campaign outputs, 234 outputs across Allocate, completion, RFC,
+result-pacing, and capacity predecessors, and 12 production outputs are
+byte-identical. Production remains 6/6 at MAE 2,559.00, RMSE 2,768.93, and
+33.128% MAPE. A 200-sample host check shows no replay-time regression. The
+retained static corpus now has 74 sidecars, 40,904 records, 16,905 projections,
+and zero gaps. The fixed-result consumer bypass successor is completed below.
+No sudo was required.
+
+## sm_86 fixed-result consumer bypass frontier (2026-08-17)
+
+The `fixed_latency_result_bypass` campaign reproduces the MICRO 2025 Listing 3
+availability distinction with local correctness oracles. A loop-carried LOP3
+producer and fixed LOP3 consumer fail all seven distance-3 checksum trials and
+are correct at distance 4. A single-shot global canary places an IADD3-produced
+value in the high half of the next load address: distance 4 raises
+`CUDA_ERROR_ILLEGAL_ADDRESS` in seven fresh CUDA contexts, while distance 5
+passes seven trials. This identifies fixed-result bypass one cycle before a
+variable global instruction can safely read the register value.
+
+The valid campaign compares fixed d4/d5 and global d5/d6 with equal work and
+equal selected static stall sums. Its 20 W1/W4/W8/W12/W16 cells contain 140
+correctness executions, 60 NCU profiles, eight SourceCounters profiles, 20
+NVBit captures, and 83,558 deterministic replay records. Maximum active-cycle
+CV is 1.545%. W1/W4 driver deltas are null within 0.001 cycles/generation;
+W8+ returns to the independent producer-shift phase and does not transfer in
+production replay.
+
+Exact `IMAD.IADD` is now admitted as a four-operand FMA-family fixed form;
+MOV/WIDE/X and other modifiers remain excluded. Thirteen spill-free cubins
+decode 1,352/1,352 controls and project 169 targets with zero gaps. The full
+corpus reaches 87 sidecars, 42,256 records, and 17,078 projections. No active
+bypass timing is added: control-driven replay does not execute register values,
+and a hardware scoreboard that delays invalid schedules would contradict the
+observed wrong-value/fault behavior. The next experiment localizes the generic
+W8+ producer shift independently from bypass and bank priority. No sudo was
+required.
+
+## sm_86 dense producer-shift/front-end localization (2026-08-17)
+
+The `fixed_latency_producer_shift` campaign reuses the valid fixed d4/d5 and
+global d5/d6 pairs at every width W4–W16. Physical slots map to SMSPs by modulo
+four, so W5/W9/W13 add the second/third/fourth warp to SMSP0 and subsequent
+widths fill SMSP1–3. Its 52 cells contain 364 correctness executions, 160 NCU
+profiles, 32 SourceCounters profiles, 52 NVBit captures, and 264,940 replay
+records. `w10_global_late` alone exceeded 2% initial CV; four extra profiles
+reduce it to 1.486%, and final maximum campaign CV is 1.599%.
+
+The phase begins at W5, not when all four partitions reach W8. Fixed NCU deltas
+remain near +1.42 cycles/generation across W5–W8 while driver maxima vary with
+the critical warp. Global deltas change sign across partial and complete
+second-, third-, and fourth-warp cohorts. Most fixed cells have negligible
+dispatch, scoreboard, and wait movement, excluding result-bank, dependency,
+and one global queue-threshold explanations. The surviving locus is per-SMSP
+instruction-frontier/fetch phase.
+
+Ten bounded reference-inspired models were scored over all 26 treatment
+deltas. Each has one fetch/decode per SMSP per cycle, greedy/highest-warp
+selection, an IBuffer capacity in {1,2,3,4,8}, and either stop or continue fetch
+at an unresolved backward branch. The best capacity-4 continue candidate
+improves driver delta MAE from 2.115 to 0.904 and NCU-active MAE from 2.161 to
+0.799. It nevertheless overprices fixed W9–W12 and misses the positive global
+W13–W16 regime. The paper/reference three-entry shape also fails. Selecting
+capacity by warp cohort or instruction family would be a forbidden correction,
+so no front-end timing is retained.
+
+Eight reused cubins decode 832/832 controls and project 104 targets with zero
+gaps. The retained corpus reaches 95 sidecars, 43,088 records, and 17,182
+projections. The next probe uses branch-free unrolled bodies and several static
+instruction footprints to separate IBuffer refill/prefetch from branch
+redirection. No sudo was required.
+
+## sm_86 branch-frequency/static-footprint factorial (2026-08-17)
+
+The completed `fixed_latency_front_end_footprint` campaign contains 96
+U1/U2/U4/U8 × W4/W5/W8/W9/W13/W16 cells, 672 correctness executions, 320
+general NCU profiles, 96 direct front-end profiles, 32 SourceCounters profiles,
+96 NVBit captures, and 381,480 replay records. Eight paired cells were expanded
+to seven repeats. Every pair has exact executed counts, issue ratio 1.0, and
+exact fixed/global L1 traffic.
+
+Direct NCU counts exactly `1024/U × warps` uniform branch targets and no
+divergent targets. Branch-resolving cost is 3.013–3.167 warp-cycles per target
+(median 3.052) independently of U and instruction family. Pair differences
+move `no_instruction`, not branch resolution. A 24-candidate model sweep
+selects stop-at-branch and three cycles with 0.0188 counter MAE, but selects a
+one-entry effective IBuffer and misses the large U1 phases; no IBuffer capacity
+is promoted.
+
+The typed sm_86 branch capability now distinguishes the prior ten-cycle exact
+forward-branch next-issue interval from three-cycle uniform backward-target
+resolution. On the measured loops, the compiler's five-cycle BRA stall remains
+binding, so timing does not change; replay diagnostics exactly equal
+`64/U × warps` issues and three cycles per issue. Full Rust workspace tests
+pass, focused Python checks pass, and an interleaved 200-sample-per-arm host A/B
+finds no replay-time regression. All six production predictions remain
+unchanged at 33.128% MAPE. The retained corpus reaches 135 sidecars, 47,488
+records, and 18,372 projections with zero gaps. The next slice is a
+paper-style branch-free independent-instruction fetch/decode probe with
+controlled stall/yield cadence. No sudo was required.
+
+## sm_86 branch-free IBuffer timeline (2026-08-18)
+
+The completed `front_end_ibuffer_depth` campaign reconstructs the MICRO 2025
+CLOCK timeline with eight branch-free CS2R-plus-three-NOP groups. Its 32 cells
+contain 224 correctness executions, 144 NCU profiles, seven SourceCounters
+profiles, 32 NVBit captures, 21,358 trace records, and 32 deterministic replay
+pairs. Seventeen legal W16 cubins sweep stall/yield across indices 0–7; the
+index-one trio transfers across W1/W4/W5/W8/W12.
+
+Both absolute and treatment CLOCK objectives select capacity two only after
+pending fetches reserve IBuffer entries before response/decode. The complete
+front-end candidate is rejected: the two objectives require incompatible
+instruction-cache parameters, exact event-order accuracy is below 15%, and
+the reference capacity-three/prefetch-eight model is worse. No IBuffer or
+instruction-cache timing is promoted. The retained corpus reaches 153
+sidecars, 48,784 records, and 18,426 projections with zero gaps. The next slice
+is returning-atomic dependency completion and same-line serialization. No sudo
+was required.
+
+## sm_86 atomic completion and sector serialization (2026-08-18)
+
+The completed `atomic_completion_serialization` campaign crosses ATOMG/RED,
+four address layouts, and W1/W4/W8/W16. It contains 448 correctness executions,
+96 NCU profiles, eight SourceCounters profiles, 32 NVBit captures, 101,587
+records, and 32 deterministic replay pairs. Maximum active-cycle CV is 2.095%
+and robust MAD is 0.077%.
+
+NCU identifies exact atomic transaction formation: lane-line and same-word
+warp arms both generate 32 sectors per warp instruction; distinct lane words
+inside one line generate four; CUDA's compiler-aggregated global-word form
+elects one lane and generates one. Replay's former unique-sector reduction
+undercounted same-word ATOMG/RED by 32x. The compact trace reader now preserves
+exact-address multiplicity and every campaign replay sector count is exact.
+
+Timing rejects a separate same-address penalty because the 32-sector
+lane-line/warp-word pair is cycle-equivalent. SourceCounters place ATOMG delay
+at its write-barrier consumer and RED service delay at the branch waiting on
+its read barrier. A two-cycle/sector ATOMG plus 268-cycle return-tail and
+9/8-cycle/sector RED candidate fits W4/W8 and transfers to W16 at 1.715% MAPE.
+It remains inactive until runtime-address alias degrees 2/4/8/16, exact replay
+CLOCK bounds, and service sharing are adversarially tested. The retained corpus
+reaches 169 sidecars, 49,440 records, and 18,508 projections with zero gaps. No
+sudo was required.
+
+## sm_86 adversarial atomic alias/request topology (2026-08-18)
+
+The 138-cell `atomic_alias_adversarial` successor removes compiler-known
+addresses with a volatile runtime index table and a pre-timing CTA barrier. It
+crosses ATOMG/RED, 32/64-bit words, alias degrees 1/2/4/8/16/32, grouped versus
+scattered lanes, dense/128/256-byte layouts, and cross-warp spacings. Evidence
+contains 1,932 correctness executions, 278 general NCU profiles, 34
+SourceCounters profiles, 12 return-path profiles, 138 NVBit captures, 486,668
+records, and 138 byte-identical replay pairs. Maximum W16 CV is 1.047%; MAD is
+0.606%.
+
+Aliases 1/2/4 can have the same four L2 sectors but one/two/four L2 requests.
+This raises the old sector-only model to 14.903% MAPE and 45.635% maximum error.
+Replay now reconstructs exact L2 request count from alias-expanded sector ids,
+validates request/sector coherence, and reports exact first-to-last CLOCKLO
+issue intervals in readiness schema 5.
+
+Within one SM, RED is identified as one cycle per L2 sector plus one cycle per
+L2 request; full-warp single-word RED has an eight-request-per-cycle fast path.
+The rule reaches 0.0140% W16 long-NCU MAPE and 1.837% W4/W8/W16 trace transfer
+MAPE. It is not activated because ATOMG 64-bit alias-16 is non-monotonic and
+cross-SM service is not local. No sudo was required.
+
+## sm_86 multi-SM atomic service/address mapping (2026-08-18)
+
+The 106-cell `atomic_multism_service` campaign uses 1–168 one-warp CTAs,
+coarse direct/permuted spacing, and a 27-point B84 fine sweep. It contains
+1,484 correctness executions, 162 NCU profiles, 14 SourceCounters profiles,
+106 NVBit captures, 2,668,105 records in 7,678 block payloads, and 106
+deterministic replay pairs. NVBit places B84 on all 84 SMs and B168 as exactly
+two CTAs per SM. Maximum expanded-cell CV is 1.482%; MAD is 0.891%.
+
+B84 shared versus 4096-byte-spaced traffic differs by 7.36x for ATOMG and
+17.15x for RED under identical count work. A per-SM-only queue has 45.6% MAPE
+and 99.3% maximum error. Well-distributed B84/B168 RED bounds about 23.52
+effective atomic units, but 72 ordinary-cache hash candidates fail: the best
+has 42.1% fine-sweep and 73.7% block-count-transfer MAPE. GA102 shows no
+4096-versus-4100 page-offset penalty, and direct/permuted address order is null.
+No global hash, spacing correction, or atomic timing queue is promoted. A
+pairwise collision graph is required to return to timing. The retained corpus
+reaches 181 sidecars, 49,968 records, and 18,562 projections with zero gaps. No
+sudo was required.
+
+## sm_86 pairwise atomic contention closure (2026-08-18)
+
+The final two-address oracle contains 544 cells and 3,808 correct executions.
+It sweeps address zero against every aligned word below 128 bytes and every
+128-byte line through 32 KiB, then sweeps every four-byte absolute base phase
+for deltas 128/256/260/4096. Same-region and independent clusters are fully
+separated, and `floor(a/256) == floor(b/256)` classifies all 544 pairs with zero
+errors. Collision median is 155,280 cycles; independent median is 69,157.
+
+`sim-arch` now carries a typed sm_86 256-byte cross-warp/CTA atomic contention
+region; sm_120 remains a research gap. This is topology only. Many-region B84
+throughput continues to vary inside the independent-pair class, so no timing
+queue or address hash is invented. No sudo was required.
+
+## sm_86 finite L1TEX admission candidates (2026-08-18)
+
+The completed 100-cell admission/backpressure corpus now has a third replay
+lane: 100 deterministic schema-9 pairs evaluating 16 finite candidates. STORE
+and RED each cross SM/per-SMSP waiting queues at capacities 4/8/16/32. One
+SM-shared FIFO downstream server consumes exact per-instruction L2 hit/miss
+sectors reconstructed from ordered STORE/RED requests. Queue slots release at
+service start and same-cycle dequeue/admission is allowed. Candidate state is
+boxed and absent from ordinary replay; stripping schema-9 diagnostics restores
+every base output.
+
+Shallow depths 1–16 select STORE per-SMSP capacity 16 and RED SM capacity 32
+(tied with RED per-SMSP capacity 8), but held-out deep-burst issue errors reach
+23,166/31,250 cycles. Summed per-warp open-loop admission delays reach
+170,887/355,145-cycle all-cell MAE because the preserved trace does not shift
+later demand. No capacity or scope advances.
+
+Exact hit/miss service is a stronger but capacity-independent completion
+hypothesis: all-cell GPC MAE is 990.6 STORE and 1,308.6 RED, improving on the
+frozen line-only 1,389.8/2,331.0 without identifying a queue. The next bounded
+implementation must run one feedback-coupled candidate at a time, park a warp
+on full admission, and reschedule later issue and cache order. No sudo was
+required.
+
+## sm_86 feedback-coupled L1TEX admission (2026-08-18)
+
+Readiness schema 10 now activates one finite candidate per launch. The issue
+transaction capacity-filters matching SMSP picks, reserves queue entries, and
+yields after candidate issue. Ordered L2 request groups price exact hit/miss
+work before the re-armed SM wake. A full queue is a real readiness constraint;
+later warp issue and cache access order shift in the executable hierarchy.
+Ordinary replay owns no feedback state or witnesses.
+
+Candidates 7, 12, and 14 were replayed over all 100 cells in 300 deterministic
+pairs. On the strict 20-cell selection holdout, like-for-like last-issue MAE
+falls from 9,761.5 to 3,446.4 cycles for STORE and from 17,010.4 to
+3,441.6/3,499.5 for RED. Terminal GPC MAE falls from 7,623.9 to 1,336.7 STORE
+and from 15,703.8 to 2,016.2/1,969.8 RED.
+
+The earlier cache attribution was cross-lane. Aggregate Store-source outcomes
+change in six STORE and seven/nine RED cells, but exact RED candidate outcomes
+change in zero cells; STORE target attribution is inseparable from common
+instrumentation stores. The result establishes executable feedback and
+downstream ordering, not a target-operation cache-outcome change.
+
+The adversarial pass also removes false SMSP dispatch bubbles after shared
+capacity denial, rejects candidate/read-barrier latency disagreement, makes
+feedback part of replay configuration identity, and makes reservation/service
+counter updates transactional. All 1,189 active replay pairs were regenerated
+against the repaired release binary and passed exact schema/config/freshness and
+byte-twin validation.
+
+Deep burst remains underpredicted by 23–28k issue cycles and CTA/spacing
+transfer remains incomplete. The feedback mechanism is retained as opt-in;
+capacities and 10/16-cycle miss rates are not architecture defaults. The next
+bounded experiment holds feedback fixed and varies only miss service
+rate/width. No sudo was required.
+
+## sm_86 feedback miss-service rate/width (2026-08-19)
+
+Schema 10 now supports an optional fixed L2-miss service quantum. Width zero
+preserves the prior fluid `ceil(work*cycles/units)` result and serialization;
+positive width charges `ceil(work/width)` complete service rounds. The field is
+bounded at 256 sectors and participates in candidate/replay identity.
+
+The retained sweep crosses 16 STORE and 20 RED configurations. Five shallow
+unique-line cells select calibration-Pareto rates; all widths at those rates
+advance to 20 held-out cells. STORE retains rate 10. RED rates 12 and 16 are
+calibration-Pareto, but rate 12 fails transfer and rate 16 returns to the
+predecessor. Width two trades only 8–11 issue-MAE cycles for a completion
+regression; widths four/eight fail address-topology transfer. No candidate
+improves both issue and service completion, so no rate or width is promoted.
+
+Raw system terminal equals last issue in every predecessor holdout row. The
+observed native-issue and NCU-GPC deltas nevertheless differ by 2,569.8 STORE
+and 2,466.6 RED cycles on average. This proves that further one-frontier tuning
+cannot solve the joint target. The next bounded component keeps admission
+feedback fixed and introduces a separate write-class completion candidate;
+STORE/RED retirement remains typed incomplete. The active replay corpus now has
+2,989 deterministic pairs. No sudo was required.
+
+## sm_86 write-class completion feedback (2026-08-19)
+
+Readiness schema 11 separates admission from completion without changing the
+predecessor queue or rate. Each priced STORE/RED updates the issuing warp's
+service-done frontier; that warp's `MEMBAR.SC.GPU` waits on the frontier while
+the admission slot still releases at service start. Three CLOCKLO reads expose
+issue and fence phases, and all new state remains in the boxed opt-in lane.
+
+Two frozen candidates run over all 100 cells in 200 deterministic pairs. On the
+strict holdout, STORE fence MAE falls from 2,860.9 to 496.4 cycles and keeps
+service/GPC MAE at 1,124.8. RED fence MAE falls from 6,246.4 to 3,872.3 and
+service/GPC MAE remains 1,466.0, but deep burst and CTA/spacing residuals remain
+too large. Exact RED target outcomes do not change; aggregate changes are later
+instrumentation stores. The mechanism advances opt-in, while STORE dirty
+visibility/coherence and RED RMW completion stay typed incomplete.
+
+The active corpus now contains 3,189 deterministic replay pairs. The next
+bounded component keeps schema-11 admission/fence structure and evaluates
+separate STORE visibility versus RED RMW completion dimensions. No sudo was
+required.
+
+## sm_86 operation-specific write-completion latency (2026-08-19)
+
+Schema 12 adds a non-occupying `write_completion_latency_cycles` after service
+done. It affects only the per-warp MEMBAR frontier; admission server occupancy,
+queue release, and cache order remain unchanged. A nonzero latency without
+schema-11 completion feedback fails typed validation, and zero remains schema
+11/byte compatible.
+
+STORE latencies 0/512/1024/1536/2048 and RED latencies
+0/1024/2048/3072/4096 use five-cell fence/GPC Pareto calibration. On holdout,
+STORE zero dominates every positive tail. RED exhibits a strict trade:
+3,072 cycles improves fence MAE from 3,872.3 to 2,512.8 but worsens GPC MAE
+from 1,466.0 to 3,534.7. No candidate improves both targets, so no completion
+latency is promoted.
+
+The active corpus now contains 3,719 deterministic pairs. STORE retains schema
+11 with zero tail. The next bounded component must model work-dependent RED RMW
+request/region completion and bounded parallelism rather than another constant;
+retirement remains typed incomplete. No sudo was required.
+
+## sm_86 RED RMW completion work and parallelism (2026-08-19)
+
+Readiness schema 13 now retains exact L2 request count and unique 256-byte
+region count for each priced write instruction. Optional additive work runs on
+one to 32 independent completion lanes after admission service. It moves only
+the issuing warp's MEMBAR frontier; admission occupancy, queue release, cache
+order, and the optional non-occupying fixed tail remain separate. Invalid
+work/MEMBAR/lane combinations fail typed validation.
+
+The frozen RED sweep crosses request rates 2/4/8, region rates 4/8/16, and
+lanes 1/2/4 in 1,800 deterministic schema-13 pairs. All configurations advance
+from shallow calibration because line-unique cells have two requests per region
+and do not expose lane pressure. On the strict holdout, candidate 214 (four
+cycles/request, one lane) improves the predecessor's fence/GPC MAEs only
+3,872.3→3,818.0 and 1,466.0→1,462.6. Candidate 218 trades a lower 3,797.2 fence
+MAE for a worse 1,477.2 GPC MAE. Candidate 214 loses its joint improvement under
+the retained repeat-sensitivity labels, whose scale is orders larger than the
+central gain.
+
+Schema 13 remains an opt-in exact-work discriminator, but no basis, rate, or
+width becomes an architecture default. STORE stays schema 11 and RED numerical
+completion remains typed incomplete. The active corpus contains 5,519 pairs
+after final regeneration. The next milestone profiles simulator event
+throughput and optimizes the dominant paths without changing modeled bytes. No
+sudo or new GPU capture was required.
+
+## Simulator event throughput and feedback hot paths (2026-08-19)
+
+Twelve retained full-coverage traces now have one warm-up plus seven pinned-CPU
+measurements, exact event-kind/queue counters, decode/replay/serialization phase
+timing, and sampled `perf` profiles. Optimized release cost spans 0.222–3.131
+seconds, 0.571–3.518 million modeled instructions/s, 0.001–0.813 million
+events/s, and 41.1–582.7 MiB peak RSS. The wide event-rate range is structural:
+one event-driven SM wake can batch many instructions, whereas memory operations
+emit hierarchy work.
+
+Baseline profiles did not support a queue-first rewrite. Ordinary RED heap-pop
+self cost was about 4.6%; schema 11/13 instead spent 18–20% repeatedly parsing
+static CLOCKLO/MEMBAR text, and feedback issue transactions cloned boxed queue
+state. `IssueSlot` now stores those two static classifications. Feedback issue
+preflights a four-SMSP reservation/clock plan and applies it only after all
+other issue work succeeds. Focused transactional tests and direct ordinary/
+schema-10/11/13 comparisons preserve exact bytes.
+
+Matched schema-10/11/13 wall time falls 3.263→3.080, 4.342→3.131, and
+4.396→3.106 seconds (1.06×/1.39×/1.42×). Ordinary medians improve 0.7–1.3%.
+The final workspace and feature suites pass, as do 52 affected Python tests;
+all 5,519 active pairs were regenerated and validated against the optimized
+default binary.
+The next measured target is memory: ordinary deep RED schedules 695,604 events,
+reaches a 695,520-entry queue, and has 695,339 adjacent same-cycle events.
+Deterministic same-time batching or ordered source merging should be tested
+before a timing wheel. No sudo or GPU recapture was required.
+
+## Deterministic same-cycle reply-less write batching (2026-08-20)
+
+The shared-system queue now represents consecutive same-SM/same-time
+reply-less STORE/RED requests from one emission with one physical event. Its
+handler executes the existing request transaction in exact stored order.
+Loads, responses, fills, ATOMG, mixed timestamps, cross-SM order, and
+timing-active feedback retain individual events. Feature diagnostics now split
+logical requests from physical queue entries.
+
+Deep STORE/RED retain 695,604 logical events but use 22,260 queue events; maximum
+depth falls 695,520→22,176 (96.8%). Matched alternating A/B runs improve wall
+time about 10% and RSS about 7%. Arrival STORE improves 9.1%/10.3%, reused STORE
+12.4%/16.6%, and gap64 1.4%/1.9%. Maximum cohort timing regression is 0.5%.
+Feedback uses no batches and remains within 0.15%. Every A/B output is
+byte-identical, and a later injected error inside a batch rolls back earlier
+kernel-private mutations.
+
+The final workspace and both feature suites pass, as do 53 affected Python
+tests. All 5,519 active replay pairs were regenerated and validated against the
+batching binary.
+
+The next measured target is full-snapshot trace lifetime: the gap-heavy case
+still reaches about 571 MiB and spends roughly half its run loading the trace.
+No sudo or GPU recapture was required.
+
+## Compact direct trace-payload lifetime (2026-08-20)
+
+Direct `sim-run` now performs the existing complete descriptor-anchored read,
+wire preflight, decode, allocation/semantic validation, and compact conversion,
+then releases raw threadblock protobuf bytes before constructing replay state.
+`TraceDir::open_direct` and campaign snapshots retain raw bytes; a compact
+loader reports a typed raw-payload-unavailable error and never reopens a path.
+
+Matched alternating raw/compact runs require byte-identical JSON. Peak RSS falls
+on every case: gap64 571.2→403.6 MiB, ordinary RED 397.5→304.6, STORE
+391.3→300.1, ATOMG 346.9→250.4, schema 13 332.1→239.2, and arrival STORE
+89.2→67.2. Reductions span 5.2–29.3%; maximum timing regression is 0.34%.
+
+The final workspace, feature, and campaign-enabled trace suites pass with 53
+affected Python tests. All 5,519 active replay pairs were regenerated and
+validated against the compact-loader binary.
+
+The optional successor is true one-file-at-a-time direct validation. It must
+first preserve the existing structural/resource-before-semantic error order and
+descriptor-anchored generation identity; campaign snapshots remain out of
+scope. No sudo or GPU recapture was required.
+
+## sm_86 GA102 address-to-LTS mapping (2026-08-20)
+
+The fixed-allocation atomic driver now supports weighted CTA groups, batched
+query files, 128-byte region strides, and controlled allocation prefixes. A
+105-CTA anchor plus binary candidate weights recovers six exact collision bits
+from one LTS maximum. Exhaustive 256-line discovery produces 48 transitive
+classes at each of three allocation prefixes.
+
+A dedicated 49-CTA kernel advances the oracle again: the anchor executes 48 RED
+generations while one representative from each class executes 0–47. One
+profiled launch therefore identifies one address class. Nine official reports
+contain 196,096 single-pass NCU actions, including a 65,535-line dense fit and
+32,768-line disjoint high-address holdout. The weighted, wide, and encoded
+oracles agree exactly on every overlap.
+
+All retained address hashes, IPOLY64, and SplitMix64 remain at chance. A
+fit-exact 65,536-entry lookup has only 13.37% high-address collision recall.
+Three local parity invariants collapse to one with high addresses, consistent
+with a hidden physical-page component. No simulator hash or timing service is
+activated. The next bounded discriminator maps one CUDA VMM physical
+allocation at multiple virtual aliases. No sudo command was required.
+
+## sm_86 CUDA-VMM physical/virtual alias discriminator (2026-08-20)
+
+CUDA VMM maps one physical 2 MiB handle through seven proxies separated by
+2 MiB. A 121-profile read campaign is retained but cannot identify slices:
+even one pointer places only 8.05% of read sectors in the busiest LTS instance.
+Read replication/merging invalidates the read-maximum oracle.
+
+The replacement uses sequential RED, one proxy per synchronized kernel. Every
+report first decodes 48 non-aliased representatives exactly, then classifies
+seven aliases. Across eight physical offsets, 56 reports, and 3,080 profiled
+RED actions, every action conserves 37,632 sectors and all 392 alias
+observations preserve class. Classes change with physical offset, not with a
+14 MiB virtual span.
+
+Exact GA102 atomic LTS identity therefore depends on translated physical
+allocation state. Absolute virtual-address hashing is rejected as the wrong
+domain; no hash or timing queue is activated. No sudo command was required.
+
+A dense successor adds 16,432 profiled RED launches and rotates every 128-byte
+offset in one 2 MiB VMM physical allocation across the aliases. Its 16,384
+classes form exactly the same collision partition as the independent
+`cuMemAlloc` corpus, modulo one fixed permutation of class labels. Allocation-
+relative collision identity is therefore transferable inside that physical
+granule even though absolute slice phase is hidden.
+
+An 82,015-action extension maps every offset through 8 MiB plus the disjoint
+32 MiB high holdout. Each 2 MiB granule transfers exactly, but an 8 MiB range
+needs different permutations per granule and retains only 55.51% of collisions
+under one phase. Seven 432-action reports then classify eight distinct physical
+handles: all eight maps are stable and distinct, and four cover only 32 classes
+with the canonical representatives. Allocation ID plus relative offset is not
+a universal LTS key; physical granule phase is the missing state.
+
+The phase maps reduce to two families. Standard granules alternate
+`[0,1,0,1]`; eight handles use `[0,1,0,1,1,0,1,0]`, evenly split. Phase zero/
+one score 100%/75% pair collision recall and both classify all 220 local
+triplets. The latent phase is not trace-derived, so this remains evaluation
+logic and simulator timing is unchanged.
+
+The compact trace keeps one timing-neutral prerequisite without growing its
+24-byte memory record: the route-disjoint projection word, previously unused
+for global atomics, now preserves the already-validated allocation ID.
+`AllocationRegistry` exposes checked relative byte/sector offsets. Cache state,
+event order, and all timing paths remain unchanged.
+
+The release simulator and all 5,519 active replay pairs were refreshed after
+this timing-neutral trace change. The exact freshness, nested configuration,
+schema, deterministic-twin, and byte validator passes.

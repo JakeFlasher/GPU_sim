@@ -15,6 +15,7 @@
 
 use std::cmp::Reverse;
 use std::collections::BinaryHeap;
+use std::num::NonZeroU64;
 
 /// Simulation time in cycles of the modeled clock domain.
 pub type Time = u64;
@@ -116,6 +117,19 @@ impl<K> EventQueue<K> {
 
     /// Schedule at absolute time `at` (>= now, or a typed error).
     pub fn schedule_at(&mut self, at: Time, target: TargetId, kind: K) -> Result<u64, EngineError> {
+        self.schedule_at_spanning(at, target, kind, NonZeroU64::MIN)
+    }
+
+    /// Schedule one physical event while reserving `sequence_span` logical
+    /// insertion positions. The event owns the first position and later events
+    /// begin after the reserved span.
+    pub fn schedule_at_spanning(
+        &mut self,
+        at: Time,
+        target: TargetId,
+        kind: K,
+        sequence_span: NonZeroU64,
+    ) -> Result<u64, EngineError> {
         if at < self.now {
             return Err(EngineError::SchedulePast {
                 requested: at,
@@ -123,13 +137,18 @@ impl<K> EventQueue<K> {
             });
         }
         let (seq, next_seq) = match self.next_seq {
-            NextSequence::Available(seq) => (
-                seq,
-                match seq.checked_add(1) {
-                    Some(next) => NextSequence::Available(next),
-                    None => NextSequence::Exhausted,
-                },
-            ),
+            NextSequence::Available(seq) => {
+                let last = seq
+                    .checked_add(sequence_span.get() - 1)
+                    .ok_or(EngineError::SeqOverflow { next_seq: u64::MAX })?;
+                (
+                    seq,
+                    match last.checked_add(1) {
+                        Some(next) => NextSequence::Available(next),
+                        None => NextSequence::Exhausted,
+                    },
+                )
+            }
             NextSequence::Exhausted => {
                 return Err(EngineError::SeqOverflow { next_seq: u64::MAX });
             }
@@ -301,6 +320,40 @@ mod tests {
         assert_eq!(q.next_seq, NextSequence::Exhausted);
         assert_eq!(q.pop().unwrap().unwrap().seq, u64::MAX - 1);
         assert_eq!(q.pop().unwrap().unwrap().seq, u64::MAX);
+    }
+
+    #[test]
+    fn sequence_spans_preserve_logical_capacity_and_fifo() {
+        let mut q = EventQueue::new();
+        assert_eq!(
+            q.schedule_at_spanning(
+                0,
+                TargetId(0),
+                Kind::IssueBatch,
+                NonZeroU64::new(4).unwrap(),
+            ),
+            Ok(0)
+        );
+        assert_eq!(q.schedule_at(0, TargetId(1), Kind::Drain), Ok(4));
+        assert_eq!(q.pop().unwrap().unwrap().target, TargetId(0));
+        assert_eq!(q.pop().unwrap().unwrap().target, TargetId(1));
+
+        let mut near_limit = EventQueue::new();
+        near_limit.next_seq = NextSequence::Available(u64::MAX - 1);
+        assert_eq!(
+            near_limit.schedule_at_spanning(
+                0,
+                TargetId(0),
+                Kind::IssueBatch,
+                NonZeroU64::new(3).unwrap(),
+            ),
+            Err(EngineError::SeqOverflow { next_seq: u64::MAX })
+        );
+        assert!(near_limit.is_empty());
+        assert_eq!(
+            near_limit.schedule_at(0, TargetId(1), Kind::Drain),
+            Ok(u64::MAX - 1)
+        );
     }
 
     #[test]

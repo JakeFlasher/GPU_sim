@@ -1,0 +1,1343 @@
+{
+  "all_changes_inside_selected_control_words": true,
+  "architecture": "sm_86",
+  "equal_static_stall_sum_within_pairs": true,
+  "exact_producer_consumer_bodies": {
+    "fixed": 8,
+    "global": 8
+  },
+  "functions": {
+    "fixed": "_Z22footprint_fixed_searchPyPjPKj",
+    "global": "_Z23footprint_global_searchPyPjPKjS2_"
+  },
+  "input": "fixed_latency_front_end_footprint_u8_native.cubin",
+  "one_backward_branch_per_unrolled_group": true,
+  "pair_differences": {
+    "fixed_bypass_to_fixed_retired": 16,
+    "global_frontier_to_global_late": 14
+  },
+  "schema_version": 1,
+  "unroll": 8,
+  "variants": {
+    "fixed_bypass": {
+      "bodies": [
+        {
+          "compensator_opcode": "IMAD R11, R11, 0x19660c, R9",
+          "compensator_pc": 224,
+          "compensator_stall": 6,
+          "consumer_opcode": "LOP3.LUT R9, R9, R4, RZ, 0x3c, !PT",
+          "consumer_pc": 192,
+          "distance": 4,
+          "intervening_pcs": [
+            176
+          ],
+          "ordinal": 0,
+          "producer_opcode": "IADD3 R9, R11, 0x4, RZ",
+          "producer_pc": 160,
+          "producer_stall": 3
+        },
+        {
+          "compensator_opcode": "IMAD R11, R11, 0x19660c, R6",
+          "compensator_pc": 336,
+          "compensator_stall": 6,
+          "consumer_opcode": "LOP3.LUT R6, R6, R4, R9, 0x78, !PT",
+          "consumer_pc": 304,
+          "distance": 4,
+          "intervening_pcs": [
+            288
+          ],
+          "ordinal": 1,
+          "producer_opcode": "IADD3 R6, R11, 0x4, RZ",
+          "producer_pc": 272,
+          "producer_stall": 3
+        },
+        {
+          "compensator_opcode": "IMAD R11, R11, 0x19660c, R9",
+          "compensator_pc": 448,
+          "compensator_stall": 6,
+          "consumer_opcode": "LOP3.LUT R9, R9, R4, RZ, 0x3c, !PT",
+          "consumer_pc": 416,
+          "distance": 4,
+          "intervening_pcs": [
+            400
+          ],
+          "ordinal": 2,
+          "producer_opcode": "IADD3 R9, R11, 0x4, RZ",
+          "producer_pc": 384,
+          "producer_stall": 3
+        },
+        {
+          "compensator_opcode": "IMAD R11, R11, 0x19660c, R6",
+          "compensator_pc": 528,
+          "compensator_stall": 6,
+          "consumer_opcode": "LOP3.LUT R6, R6, R4, R9, 0x78, !PT",
+          "consumer_pc": 496,
+          "distance": 4,
+          "intervening_pcs": [],
+          "ordinal": 3,
+          "producer_opcode": "IADD3 R6, R11, 0x4, RZ",
+          "producer_pc": 480,
+          "producer_stall": 4
+        },
+        {
+          "compensator_opcode": "IMAD R11, R11, 0x19660c, R9",
+          "compensator_pc": 576,
+          "compensator_stall": 6,
+          "consumer_opcode": "LOP3.LUT R9, R9, R4, RZ, 0x3c, !PT",
+          "consumer_pc": 560,
+          "distance": 4,
+          "intervening_pcs": [],
+          "ordinal": 4,
+          "producer_opcode": "IADD3 R9, R11, 0x4, RZ",
+          "producer_pc": 544,
+          "producer_stall": 4
+        },
+        {
+          "compensator_opcode": "IMAD R11, R11, 0x19660c, R6",
+          "compensator_pc": 640,
+          "compensator_stall": 6,
+          "consumer_opcode": "LOP3.LUT R6, R6, R4, R9, 0x78, !PT",
+          "consumer_pc": 608,
+          "distance": 4,
+          "intervening_pcs": [],
+          "ordinal": 5,
+          "producer_opcode": "IADD3 R6, R11, 0x4, RZ",
+          "producer_pc": 592,
+          "producer_stall": 4
+        },
+        {
+          "compensator_opcode": "IMAD R11, R11, 0x19660c, R9",
+          "compensator_pc": 688,
+          "compensator_stall": 6,
+          "consumer_opcode": "LOP3.LUT R9, R9, R4, RZ, 0x3c, !PT",
+          "consumer_pc": 672,
+          "distance": 4,
+          "intervening_pcs": [],
+          "ordinal": 6,
+          "producer_opcode": "IADD3 R9, R11, 0x4, RZ",
+          "producer_pc": 656,
+          "producer_stall": 4
+        },
+        {
+          "compensator_opcode": "IMAD R11, R11, 0x19660c, R6",
+          "compensator_pc": 752,
+          "compensator_stall": 6,
+          "consumer_opcode": "LOP3.LUT R6, R6, R4, R9, 0x78, !PT",
+          "consumer_pc": 720,
+          "distance": 4,
+          "intervening_pcs": [],
+          "ordinal": 7,
+          "producer_opcode": "IADD3 R6, R11, 0x4, RZ",
+          "producer_pc": 704,
+          "producer_stall": 4
+        }
+      ],
+      "body_count_between_branches": 8,
+      "changed_bytes_from_native": 14,
+      "controls": [
+        {
+          "final_stall": 3,
+          "native_control": {
+            "read_barrier": 7,
+            "reuse": 0,
+            "stall": 1,
+            "wait_mask": 0,
+            "write_barrier": 7,
+            "yield_flag": 1
+          },
+          "opcode_text": "IADD3 R9, R11, 0x4, RZ",
+          "pc": 160
+        },
+        {
+          "final_stall": 1,
+          "native_control": {
+            "read_barrier": 7,
+            "reuse": 0,
+            "stall": 6,
+            "wait_mask": 0,
+            "write_barrier": 7,
+            "yield_flag": 0
+          },
+          "opcode_text": "NOP",
+          "pc": 176
+        },
+        {
+          "final_stall": 6,
+          "native_control": {
+            "read_barrier": 7,
+            "reuse": 0,
+            "stall": 1,
+            "wait_mask": 0,
+            "write_barrier": 7,
+            "yield_flag": 1
+          },
+          "opcode_text": "IMAD R11, R11, 0x19660c, R9",
+          "pc": 224
+        },
+        {
+          "final_stall": 3,
+          "native_control": {
+            "read_barrier": 7,
+            "reuse": 0,
+            "stall": 1,
+            "wait_mask": 0,
+            "write_barrier": 7,
+            "yield_flag": 1
+          },
+          "opcode_text": "IADD3 R6, R11, 0x4, RZ",
+          "pc": 272
+        },
+        {
+          "final_stall": 1,
+          "native_control": {
+            "read_barrier": 7,
+            "reuse": 0,
+            "stall": 6,
+            "wait_mask": 0,
+            "write_barrier": 7,
+            "yield_flag": 0
+          },
+          "opcode_text": "NOP",
+          "pc": 288
+        },
+        {
+          "final_stall": 6,
+          "native_control": {
+            "read_barrier": 7,
+            "reuse": 0,
+            "stall": 1,
+            "wait_mask": 0,
+            "write_barrier": 7,
+            "yield_flag": 1
+          },
+          "opcode_text": "IMAD R11, R11, 0x19660c, R6",
+          "pc": 336
+        },
+        {
+          "final_stall": 3,
+          "native_control": {
+            "read_barrier": 7,
+            "reuse": 0,
+            "stall": 1,
+            "wait_mask": 0,
+            "write_barrier": 7,
+            "yield_flag": 1
+          },
+          "opcode_text": "IADD3 R9, R11, 0x4, RZ",
+          "pc": 384
+        },
+        {
+          "final_stall": 1,
+          "native_control": {
+            "read_barrier": 7,
+            "reuse": 0,
+            "stall": 6,
+            "wait_mask": 0,
+            "write_barrier": 7,
+            "yield_flag": 0
+          },
+          "opcode_text": "NOP",
+          "pc": 400
+        },
+        {
+          "final_stall": 6,
+          "native_control": {
+            "read_barrier": 7,
+            "reuse": 0,
+            "stall": 1,
+            "wait_mask": 0,
+            "write_barrier": 7,
+            "yield_flag": 1
+          },
+          "opcode_text": "IMAD R11, R11, 0x19660c, R9",
+          "pc": 448
+        },
+        {
+          "final_stall": 4,
+          "native_control": {
+            "read_barrier": 7,
+            "reuse": 0,
+            "stall": 4,
+            "wait_mask": 0,
+            "write_barrier": 7,
+            "yield_flag": 0
+          },
+          "opcode_text": "IADD3 R6, R11, 0x4, RZ",
+          "pc": 480
+        },
+        {
+          "final_stall": 6,
+          "native_control": {
+            "read_barrier": 7,
+            "reuse": 0,
+            "stall": 5,
+            "wait_mask": 0,
+            "write_barrier": 7,
+            "yield_flag": 0
+          },
+          "opcode_text": "IMAD R11, R11, 0x19660c, R6",
+          "pc": 528
+        },
+        {
+          "final_stall": 4,
+          "native_control": {
+            "read_barrier": 7,
+            "reuse": 0,
+            "stall": 4,
+            "wait_mask": 0,
+            "write_barrier": 7,
+            "yield_flag": 0
+          },
+          "opcode_text": "IADD3 R9, R11, 0x4, RZ",
+          "pc": 544
+        },
+        {
+          "final_stall": 6,
+          "native_control": {
+            "read_barrier": 7,
+            "reuse": 0,
+            "stall": 5,
+            "wait_mask": 0,
+            "write_barrier": 7,
+            "yield_flag": 0
+          },
+          "opcode_text": "IMAD R11, R11, 0x19660c, R9",
+          "pc": 576
+        },
+        {
+          "final_stall": 4,
+          "native_control": {
+            "read_barrier": 7,
+            "reuse": 0,
+            "stall": 4,
+            "wait_mask": 0,
+            "write_barrier": 7,
+            "yield_flag": 0
+          },
+          "opcode_text": "IADD3 R6, R11, 0x4, RZ",
+          "pc": 592
+        },
+        {
+          "final_stall": 6,
+          "native_control": {
+            "read_barrier": 7,
+            "reuse": 0,
+            "stall": 5,
+            "wait_mask": 0,
+            "write_barrier": 7,
+            "yield_flag": 0
+          },
+          "opcode_text": "IMAD R11, R11, 0x19660c, R6",
+          "pc": 640
+        },
+        {
+          "final_stall": 4,
+          "native_control": {
+            "read_barrier": 7,
+            "reuse": 0,
+            "stall": 4,
+            "wait_mask": 0,
+            "write_barrier": 7,
+            "yield_flag": 0
+          },
+          "opcode_text": "IADD3 R9, R11, 0x4, RZ",
+          "pc": 656
+        },
+        {
+          "final_stall": 6,
+          "native_control": {
+            "read_barrier": 7,
+            "reuse": 0,
+            "stall": 5,
+            "wait_mask": 0,
+            "write_barrier": 7,
+            "yield_flag": 0
+          },
+          "opcode_text": "IMAD R11, R11, 0x19660c, R9",
+          "pc": 688
+        },
+        {
+          "final_stall": 4,
+          "native_control": {
+            "read_barrier": 7,
+            "reuse": 0,
+            "stall": 4,
+            "wait_mask": 0,
+            "write_barrier": 7,
+            "yield_flag": 0
+          },
+          "opcode_text": "IADD3 R6, R11, 0x4, RZ",
+          "pc": 704
+        },
+        {
+          "final_stall": 6,
+          "native_control": {
+            "read_barrier": 7,
+            "reuse": 0,
+            "stall": 1,
+            "wait_mask": 0,
+            "write_barrier": 7,
+            "yield_flag": 1
+          },
+          "opcode_text": "IMAD R11, R11, 0x19660c, R6",
+          "pc": 752
+        }
+      ],
+      "kind": "fixed",
+      "neutral_body_ordinals": [],
+      "output": "fixed_latency_front_end_footprint_u8_fixed_bypass.cubin",
+      "patched_body_count_between_branches": 8,
+      "producer_consumer_distance": 4,
+      "selected_stall_sum": 80
+    },
+    "fixed_retired": {
+      "bodies": [
+        {
+          "compensator_opcode": "IMAD R11, R11, 0x19660c, R9",
+          "compensator_pc": 224,
+          "compensator_stall": 5,
+          "consumer_opcode": "LOP3.LUT R9, R9, R4, RZ, 0x3c, !PT",
+          "consumer_pc": 192,
+          "distance": 5,
+          "intervening_pcs": [
+            176
+          ],
+          "ordinal": 0,
+          "producer_opcode": "IADD3 R9, R11, 0x4, RZ",
+          "producer_pc": 160,
+          "producer_stall": 4
+        },
+        {
+          "compensator_opcode": "IMAD R11, R11, 0x19660c, R6",
+          "compensator_pc": 336,
+          "compensator_stall": 5,
+          "consumer_opcode": "LOP3.LUT R6, R6, R4, R9, 0x78, !PT",
+          "consumer_pc": 304,
+          "distance": 5,
+          "intervening_pcs": [
+            288
+          ],
+          "ordinal": 1,
+          "producer_opcode": "IADD3 R6, R11, 0x4, RZ",
+          "producer_pc": 272,
+          "producer_stall": 4
+        },
+        {
+          "compensator_opcode": "IMAD R11, R11, 0x19660c, R9",
+          "compensator_pc": 448,
+          "compensator_stall": 5,
+          "consumer_opcode": "LOP3.LUT R9, R9, R4, RZ, 0x3c, !PT",
+          "consumer_pc": 416,
+          "distance": 5,
+          "intervening_pcs": [
+            400
+          ],
+          "ordinal": 2,
+          "producer_opcode": "IADD3 R9, R11, 0x4, RZ",
+          "producer_pc": 384,
+          "producer_stall": 4
+        },
+        {
+          "compensator_opcode": "IMAD R11, R11, 0x19660c, R6",
+          "compensator_pc": 528,
+          "compensator_stall": 5,
+          "consumer_opcode": "LOP3.LUT R6, R6, R4, R9, 0x78, !PT",
+          "consumer_pc": 496,
+          "distance": 5,
+          "intervening_pcs": [],
+          "ordinal": 3,
+          "producer_opcode": "IADD3 R6, R11, 0x4, RZ",
+          "producer_pc": 480,
+          "producer_stall": 5
+        },
+        {
+          "compensator_opcode": "IMAD R11, R11, 0x19660c, R9",
+          "compensator_pc": 576,
+          "compensator_stall": 5,
+          "consumer_opcode": "LOP3.LUT R9, R9, R4, RZ, 0x3c, !PT",
+          "consumer_pc": 560,
+          "distance": 5,
+          "intervening_pcs": [],
+          "ordinal": 4,
+          "producer_opcode": "IADD3 R9, R11, 0x4, RZ",
+          "producer_pc": 544,
+          "producer_stall": 5
+        },
+        {
+          "compensator_opcode": "IMAD R11, R11, 0x19660c, R6",
+          "compensator_pc": 640,
+          "compensator_stall": 5,
+          "consumer_opcode": "LOP3.LUT R6, R6, R4, R9, 0x78, !PT",
+          "consumer_pc": 608,
+          "distance": 5,
+          "intervening_pcs": [],
+          "ordinal": 5,
+          "producer_opcode": "IADD3 R6, R11, 0x4, RZ",
+          "producer_pc": 592,
+          "producer_stall": 5
+        },
+        {
+          "compensator_opcode": "IMAD R11, R11, 0x19660c, R9",
+          "compensator_pc": 688,
+          "compensator_stall": 5,
+          "consumer_opcode": "LOP3.LUT R9, R9, R4, RZ, 0x3c, !PT",
+          "consumer_pc": 672,
+          "distance": 5,
+          "intervening_pcs": [],
+          "ordinal": 6,
+          "producer_opcode": "IADD3 R9, R11, 0x4, RZ",
+          "producer_pc": 656,
+          "producer_stall": 5
+        },
+        {
+          "compensator_opcode": "IMAD R11, R11, 0x19660c, R6",
+          "compensator_pc": 752,
+          "compensator_stall": 5,
+          "consumer_opcode": "LOP3.LUT R6, R6, R4, R9, 0x78, !PT",
+          "consumer_pc": 720,
+          "distance": 5,
+          "intervening_pcs": [],
+          "ordinal": 7,
+          "producer_opcode": "IADD3 R6, R11, 0x4, RZ",
+          "producer_pc": 704,
+          "producer_stall": 5
+        }
+      ],
+      "body_count_between_branches": 8,
+      "changed_bytes_from_native": 15,
+      "controls": [
+        {
+          "final_stall": 4,
+          "native_control": {
+            "read_barrier": 7,
+            "reuse": 0,
+            "stall": 1,
+            "wait_mask": 0,
+            "write_barrier": 7,
+            "yield_flag": 1
+          },
+          "opcode_text": "IADD3 R9, R11, 0x4, RZ",
+          "pc": 160
+        },
+        {
+          "final_stall": 1,
+          "native_control": {
+            "read_barrier": 7,
+            "reuse": 0,
+            "stall": 6,
+            "wait_mask": 0,
+            "write_barrier": 7,
+            "yield_flag": 0
+          },
+          "opcode_text": "NOP",
+          "pc": 176
+        },
+        {
+          "final_stall": 5,
+          "native_control": {
+            "read_barrier": 7,
+            "reuse": 0,
+            "stall": 1,
+            "wait_mask": 0,
+            "write_barrier": 7,
+            "yield_flag": 1
+          },
+          "opcode_text": "IMAD R11, R11, 0x19660c, R9",
+          "pc": 224
+        },
+        {
+          "final_stall": 4,
+          "native_control": {
+            "read_barrier": 7,
+            "reuse": 0,
+            "stall": 1,
+            "wait_mask": 0,
+            "write_barrier": 7,
+            "yield_flag": 1
+          },
+          "opcode_text": "IADD3 R6, R11, 0x4, RZ",
+          "pc": 272
+        },
+        {
+          "final_stall": 1,
+          "native_control": {
+            "read_barrier": 7,
+            "reuse": 0,
+            "stall": 6,
+            "wait_mask": 0,
+            "write_barrier": 7,
+            "yield_flag": 0
+          },
+          "opcode_text": "NOP",
+          "pc": 288
+        },
+        {
+          "final_stall": 5,
+          "native_control": {
+            "read_barrier": 7,
+            "reuse": 0,
+            "stall": 1,
+            "wait_mask": 0,
+            "write_barrier": 7,
+            "yield_flag": 1
+          },
+          "opcode_text": "IMAD R11, R11, 0x19660c, R6",
+          "pc": 336
+        },
+        {
+          "final_stall": 4,
+          "native_control": {
+            "read_barrier": 7,
+            "reuse": 0,
+            "stall": 1,
+            "wait_mask": 0,
+            "write_barrier": 7,
+            "yield_flag": 1
+          },
+          "opcode_text": "IADD3 R9, R11, 0x4, RZ",
+          "pc": 384
+        },
+        {
+          "final_stall": 1,
+          "native_control": {
+            "read_barrier": 7,
+            "reuse": 0,
+            "stall": 6,
+            "wait_mask": 0,
+            "write_barrier": 7,
+            "yield_flag": 0
+          },
+          "opcode_text": "NOP",
+          "pc": 400
+        },
+        {
+          "final_stall": 5,
+          "native_control": {
+            "read_barrier": 7,
+            "reuse": 0,
+            "stall": 1,
+            "wait_mask": 0,
+            "write_barrier": 7,
+            "yield_flag": 1
+          },
+          "opcode_text": "IMAD R11, R11, 0x19660c, R9",
+          "pc": 448
+        },
+        {
+          "final_stall": 5,
+          "native_control": {
+            "read_barrier": 7,
+            "reuse": 0,
+            "stall": 4,
+            "wait_mask": 0,
+            "write_barrier": 7,
+            "yield_flag": 0
+          },
+          "opcode_text": "IADD3 R6, R11, 0x4, RZ",
+          "pc": 480
+        },
+        {
+          "final_stall": 5,
+          "native_control": {
+            "read_barrier": 7,
+            "reuse": 0,
+            "stall": 5,
+            "wait_mask": 0,
+            "write_barrier": 7,
+            "yield_flag": 0
+          },
+          "opcode_text": "IMAD R11, R11, 0x19660c, R6",
+          "pc": 528
+        },
+        {
+          "final_stall": 5,
+          "native_control": {
+            "read_barrier": 7,
+            "reuse": 0,
+            "stall": 4,
+            "wait_mask": 0,
+            "write_barrier": 7,
+            "yield_flag": 0
+          },
+          "opcode_text": "IADD3 R9, R11, 0x4, RZ",
+          "pc": 544
+        },
+        {
+          "final_stall": 5,
+          "native_control": {
+            "read_barrier": 7,
+            "reuse": 0,
+            "stall": 5,
+            "wait_mask": 0,
+            "write_barrier": 7,
+            "yield_flag": 0
+          },
+          "opcode_text": "IMAD R11, R11, 0x19660c, R9",
+          "pc": 576
+        },
+        {
+          "final_stall": 5,
+          "native_control": {
+            "read_barrier": 7,
+            "reuse": 0,
+            "stall": 4,
+            "wait_mask": 0,
+            "write_barrier": 7,
+            "yield_flag": 0
+          },
+          "opcode_text": "IADD3 R6, R11, 0x4, RZ",
+          "pc": 592
+        },
+        {
+          "final_stall": 5,
+          "native_control": {
+            "read_barrier": 7,
+            "reuse": 0,
+            "stall": 5,
+            "wait_mask": 0,
+            "write_barrier": 7,
+            "yield_flag": 0
+          },
+          "opcode_text": "IMAD R11, R11, 0x19660c, R6",
+          "pc": 640
+        },
+        {
+          "final_stall": 5,
+          "native_control": {
+            "read_barrier": 7,
+            "reuse": 0,
+            "stall": 4,
+            "wait_mask": 0,
+            "write_barrier": 7,
+            "yield_flag": 0
+          },
+          "opcode_text": "IADD3 R9, R11, 0x4, RZ",
+          "pc": 656
+        },
+        {
+          "final_stall": 5,
+          "native_control": {
+            "read_barrier": 7,
+            "reuse": 0,
+            "stall": 5,
+            "wait_mask": 0,
+            "write_barrier": 7,
+            "yield_flag": 0
+          },
+          "opcode_text": "IMAD R11, R11, 0x19660c, R9",
+          "pc": 688
+        },
+        {
+          "final_stall": 5,
+          "native_control": {
+            "read_barrier": 7,
+            "reuse": 0,
+            "stall": 4,
+            "wait_mask": 0,
+            "write_barrier": 7,
+            "yield_flag": 0
+          },
+          "opcode_text": "IADD3 R6, R11, 0x4, RZ",
+          "pc": 704
+        },
+        {
+          "final_stall": 5,
+          "native_control": {
+            "read_barrier": 7,
+            "reuse": 0,
+            "stall": 1,
+            "wait_mask": 0,
+            "write_barrier": 7,
+            "yield_flag": 1
+          },
+          "opcode_text": "IMAD R11, R11, 0x19660c, R6",
+          "pc": 752
+        }
+      ],
+      "kind": "fixed",
+      "neutral_body_ordinals": [],
+      "output": "fixed_latency_front_end_footprint_u8_fixed_retired.cubin",
+      "patched_body_count_between_branches": 8,
+      "producer_consumer_distance": 5,
+      "selected_stall_sum": 80
+    },
+    "global_frontier": {
+      "bodies": [
+        {
+          "compensator_opcode": "LOP3.LUT R19, R18, R14, R11, 0x80, !PT",
+          "compensator_pc": 336,
+          "compensator_stall": 12,
+          "consumer_opcode": "LDG.E R18, [R12.64]",
+          "consumer_pc": 304,
+          "distance": 5,
+          "intervening_pcs": [],
+          "ordinal": 1,
+          "producer_opcode": "IMAD.IADD R13, R5, 0x1, R13",
+          "producer_pc": 288,
+          "producer_stall": 5
+        },
+        {
+          "compensator_opcode": "LOP3.LUT R17, R19, R20, RZ, 0xc0, !PT",
+          "compensator_pc": 432,
+          "compensator_stall": 12,
+          "consumer_opcode": "LDG.E R20, [R14.64]",
+          "consumer_pc": 384,
+          "distance": 5,
+          "intervening_pcs": [],
+          "ordinal": 2,
+          "producer_opcode": "IADD3 R15, R5, R19, RZ",
+          "producer_pc": 368,
+          "producer_stall": 5
+        },
+        {
+          "compensator_opcode": "LOP3.LUT R19, R21, R19, R20, 0x80, !PT",
+          "compensator_pc": 496,
+          "compensator_stall": 12,
+          "consumer_opcode": "LDG.E R21, [R16.64]",
+          "consumer_pc": 464,
+          "distance": 5,
+          "intervening_pcs": [],
+          "ordinal": 3,
+          "producer_opcode": "IMAD.IADD R17, R5, 0x1, R17",
+          "producer_pc": 448,
+          "producer_stall": 5
+        },
+        {
+          "compensator_opcode": "LOP3.LUT R15, R19, R10, RZ, 0xc0, !PT",
+          "compensator_pc": 560,
+          "compensator_stall": 12,
+          "consumer_opcode": "LDG.E R10, [R12.64]",
+          "consumer_pc": 528,
+          "distance": 5,
+          "intervening_pcs": [],
+          "ordinal": 4,
+          "producer_opcode": "IADD3 R13, R5, R19, RZ",
+          "producer_pc": 512,
+          "producer_stall": 5
+        },
+        {
+          "compensator_opcode": "LOP3.LUT R19, R15, R19, R10, 0x80, !PT",
+          "compensator_pc": 624,
+          "compensator_stall": 12,
+          "consumer_opcode": "LDG.E R15, [R14.64]",
+          "consumer_pc": 592,
+          "distance": 5,
+          "intervening_pcs": [],
+          "ordinal": 5,
+          "producer_opcode": "IMAD.IADD R15, R5, 0x1, R15",
+          "producer_pc": 576,
+          "producer_stall": 5
+        },
+        {
+          "compensator_opcode": "LOP3.LUT R13, R19, R16, RZ, 0xc0, !PT",
+          "compensator_pc": 704,
+          "compensator_stall": 12,
+          "consumer_opcode": "LDG.E R16, [R16.64]",
+          "consumer_pc": 656,
+          "distance": 5,
+          "intervening_pcs": [],
+          "ordinal": 6,
+          "producer_opcode": "IMAD.IADD R17, R5, 0x1, R19",
+          "producer_pc": 640,
+          "producer_stall": 5
+        },
+        {
+          "compensator_opcode": "LOP3.LUT R14, R13, R19, R16, 0x80, !PT",
+          "compensator_pc": 832,
+          "compensator_stall": 12,
+          "consumer_opcode": "LDG.E R13, [R12.64]",
+          "consumer_pc": 736,
+          "distance": 5,
+          "intervening_pcs": [],
+          "ordinal": 7,
+          "producer_opcode": "IMAD.IADD R13, R5, 0x1, R13",
+          "producer_pc": 720,
+          "producer_stall": 5
+        }
+      ],
+      "body_count_between_branches": 8,
+      "changed_bytes_from_native": 9,
+      "controls": [
+        {
+          "final_stall": 5,
+          "native_control": {
+            "read_barrier": 7,
+            "reuse": 0,
+            "stall": 5,
+            "wait_mask": 0,
+            "write_barrier": 7,
+            "yield_flag": 0
+          },
+          "opcode_text": "IMAD.IADD R13, R5, 0x1, R13",
+          "pc": 288
+        },
+        {
+          "final_stall": 12,
+          "native_control": {
+            "read_barrier": 7,
+            "reuse": 0,
+            "stall": 1,
+            "wait_mask": 4,
+            "write_barrier": 7,
+            "yield_flag": 1
+          },
+          "opcode_text": "LOP3.LUT R19, R18, R14, R11, 0x80, !PT",
+          "pc": 336
+        },
+        {
+          "final_stall": 5,
+          "native_control": {
+            "read_barrier": 7,
+            "reuse": 0,
+            "stall": 5,
+            "wait_mask": 0,
+            "write_barrier": 7,
+            "yield_flag": 0
+          },
+          "opcode_text": "IADD3 R15, R5, R19, RZ",
+          "pc": 368
+        },
+        {
+          "final_stall": 12,
+          "native_control": {
+            "read_barrier": 7,
+            "reuse": 0,
+            "stall": 5,
+            "wait_mask": 4,
+            "write_barrier": 7,
+            "yield_flag": 0
+          },
+          "opcode_text": "LOP3.LUT R17, R19, R20, RZ, 0xc0, !PT",
+          "pc": 432
+        },
+        {
+          "final_stall": 5,
+          "native_control": {
+            "read_barrier": 7,
+            "reuse": 0,
+            "stall": 5,
+            "wait_mask": 0,
+            "write_barrier": 7,
+            "yield_flag": 0
+          },
+          "opcode_text": "IMAD.IADD R17, R5, 0x1, R17",
+          "pc": 448
+        },
+        {
+          "final_stall": 12,
+          "native_control": {
+            "read_barrier": 7,
+            "reuse": 0,
+            "stall": 4,
+            "wait_mask": 4,
+            "write_barrier": 7,
+            "yield_flag": 0
+          },
+          "opcode_text": "LOP3.LUT R19, R21, R19, R20, 0x80, !PT",
+          "pc": 496
+        },
+        {
+          "final_stall": 5,
+          "native_control": {
+            "read_barrier": 7,
+            "reuse": 0,
+            "stall": 5,
+            "wait_mask": 0,
+            "write_barrier": 7,
+            "yield_flag": 0
+          },
+          "opcode_text": "IADD3 R13, R5, R19, RZ",
+          "pc": 512
+        },
+        {
+          "final_stall": 12,
+          "native_control": {
+            "read_barrier": 7,
+            "reuse": 0,
+            "stall": 5,
+            "wait_mask": 4,
+            "write_barrier": 7,
+            "yield_flag": 0
+          },
+          "opcode_text": "LOP3.LUT R15, R19, R10, RZ, 0xc0, !PT",
+          "pc": 560
+        },
+        {
+          "final_stall": 5,
+          "native_control": {
+            "read_barrier": 7,
+            "reuse": 0,
+            "stall": 6,
+            "wait_mask": 0,
+            "write_barrier": 7,
+            "yield_flag": 0
+          },
+          "opcode_text": "IMAD.IADD R15, R5, 0x1, R15",
+          "pc": 576
+        },
+        {
+          "final_stall": 12,
+          "native_control": {
+            "read_barrier": 7,
+            "reuse": 0,
+            "stall": 5,
+            "wait_mask": 4,
+            "write_barrier": 7,
+            "yield_flag": 0
+          },
+          "opcode_text": "LOP3.LUT R19, R15, R19, R10, 0x80, !PT",
+          "pc": 624
+        },
+        {
+          "final_stall": 5,
+          "native_control": {
+            "read_barrier": 7,
+            "reuse": 0,
+            "stall": 5,
+            "wait_mask": 0,
+            "write_barrier": 7,
+            "yield_flag": 0
+          },
+          "opcode_text": "IMAD.IADD R17, R5, 0x1, R19",
+          "pc": 640
+        },
+        {
+          "final_stall": 12,
+          "native_control": {
+            "read_barrier": 7,
+            "reuse": 0,
+            "stall": 5,
+            "wait_mask": 4,
+            "write_barrier": 7,
+            "yield_flag": 0
+          },
+          "opcode_text": "LOP3.LUT R13, R19, R16, RZ, 0xc0, !PT",
+          "pc": 704
+        },
+        {
+          "final_stall": 5,
+          "native_control": {
+            "read_barrier": 7,
+            "reuse": 0,
+            "stall": 6,
+            "wait_mask": 0,
+            "write_barrier": 7,
+            "yield_flag": 0
+          },
+          "opcode_text": "IMAD.IADD R13, R5, 0x1, R13",
+          "pc": 720
+        },
+        {
+          "final_stall": 12,
+          "native_control": {
+            "read_barrier": 7,
+            "reuse": 0,
+            "stall": 1,
+            "wait_mask": 0,
+            "write_barrier": 7,
+            "yield_flag": 1
+          },
+          "opcode_text": "LOP3.LUT R14, R13, R19, R16, 0x80, !PT",
+          "pc": 832
+        }
+      ],
+      "kind": "global",
+      "neutral_body_ordinals": [
+        0
+      ],
+      "output": "fixed_latency_front_end_footprint_u8_global_frontier.cubin",
+      "patched_body_count_between_branches": 7,
+      "producer_consumer_distance": 5,
+      "selected_stall_sum": 119
+    },
+    "global_late": {
+      "bodies": [
+        {
+          "compensator_opcode": "LOP3.LUT R19, R18, R14, R11, 0x80, !PT",
+          "compensator_pc": 336,
+          "compensator_stall": 11,
+          "consumer_opcode": "LDG.E R18, [R12.64]",
+          "consumer_pc": 304,
+          "distance": 6,
+          "intervening_pcs": [],
+          "ordinal": 1,
+          "producer_opcode": "IMAD.IADD R13, R5, 0x1, R13",
+          "producer_pc": 288,
+          "producer_stall": 6
+        },
+        {
+          "compensator_opcode": "LOP3.LUT R17, R19, R20, RZ, 0xc0, !PT",
+          "compensator_pc": 432,
+          "compensator_stall": 11,
+          "consumer_opcode": "LDG.E R20, [R14.64]",
+          "consumer_pc": 384,
+          "distance": 6,
+          "intervening_pcs": [],
+          "ordinal": 2,
+          "producer_opcode": "IADD3 R15, R5, R19, RZ",
+          "producer_pc": 368,
+          "producer_stall": 6
+        },
+        {
+          "compensator_opcode": "LOP3.LUT R19, R21, R19, R20, 0x80, !PT",
+          "compensator_pc": 496,
+          "compensator_stall": 11,
+          "consumer_opcode": "LDG.E R21, [R16.64]",
+          "consumer_pc": 464,
+          "distance": 6,
+          "intervening_pcs": [],
+          "ordinal": 3,
+          "producer_opcode": "IMAD.IADD R17, R5, 0x1, R17",
+          "producer_pc": 448,
+          "producer_stall": 6
+        },
+        {
+          "compensator_opcode": "LOP3.LUT R15, R19, R10, RZ, 0xc0, !PT",
+          "compensator_pc": 560,
+          "compensator_stall": 11,
+          "consumer_opcode": "LDG.E R10, [R12.64]",
+          "consumer_pc": 528,
+          "distance": 6,
+          "intervening_pcs": [],
+          "ordinal": 4,
+          "producer_opcode": "IADD3 R13, R5, R19, RZ",
+          "producer_pc": 512,
+          "producer_stall": 6
+        },
+        {
+          "compensator_opcode": "LOP3.LUT R19, R15, R19, R10, 0x80, !PT",
+          "compensator_pc": 624,
+          "compensator_stall": 11,
+          "consumer_opcode": "LDG.E R15, [R14.64]",
+          "consumer_pc": 592,
+          "distance": 6,
+          "intervening_pcs": [],
+          "ordinal": 5,
+          "producer_opcode": "IMAD.IADD R15, R5, 0x1, R15",
+          "producer_pc": 576,
+          "producer_stall": 6
+        },
+        {
+          "compensator_opcode": "LOP3.LUT R13, R19, R16, RZ, 0xc0, !PT",
+          "compensator_pc": 704,
+          "compensator_stall": 11,
+          "consumer_opcode": "LDG.E R16, [R16.64]",
+          "consumer_pc": 656,
+          "distance": 6,
+          "intervening_pcs": [],
+          "ordinal": 6,
+          "producer_opcode": "IMAD.IADD R17, R5, 0x1, R19",
+          "producer_pc": 640,
+          "producer_stall": 6
+        },
+        {
+          "compensator_opcode": "LOP3.LUT R14, R13, R19, R16, 0x80, !PT",
+          "compensator_pc": 832,
+          "compensator_stall": 11,
+          "consumer_opcode": "LDG.E R13, [R12.64]",
+          "consumer_pc": 736,
+          "distance": 6,
+          "intervening_pcs": [],
+          "ordinal": 7,
+          "producer_opcode": "IMAD.IADD R13, R5, 0x1, R13",
+          "producer_pc": 720,
+          "producer_stall": 6
+        }
+      ],
+      "body_count_between_branches": 8,
+      "changed_bytes_from_native": 12,
+      "controls": [
+        {
+          "final_stall": 6,
+          "native_control": {
+            "read_barrier": 7,
+            "reuse": 0,
+            "stall": 5,
+            "wait_mask": 0,
+            "write_barrier": 7,
+            "yield_flag": 0
+          },
+          "opcode_text": "IMAD.IADD R13, R5, 0x1, R13",
+          "pc": 288
+        },
+        {
+          "final_stall": 11,
+          "native_control": {
+            "read_barrier": 7,
+            "reuse": 0,
+            "stall": 1,
+            "wait_mask": 4,
+            "write_barrier": 7,
+            "yield_flag": 1
+          },
+          "opcode_text": "LOP3.LUT R19, R18, R14, R11, 0x80, !PT",
+          "pc": 336
+        },
+        {
+          "final_stall": 6,
+          "native_control": {
+            "read_barrier": 7,
+            "reuse": 0,
+            "stall": 5,
+            "wait_mask": 0,
+            "write_barrier": 7,
+            "yield_flag": 0
+          },
+          "opcode_text": "IADD3 R15, R5, R19, RZ",
+          "pc": 368
+        },
+        {
+          "final_stall": 11,
+          "native_control": {
+            "read_barrier": 7,
+            "reuse": 0,
+            "stall": 5,
+            "wait_mask": 4,
+            "write_barrier": 7,
+            "yield_flag": 0
+          },
+          "opcode_text": "LOP3.LUT R17, R19, R20, RZ, 0xc0, !PT",
+          "pc": 432
+        },
+        {
+          "final_stall": 6,
+          "native_control": {
+            "read_barrier": 7,
+            "reuse": 0,
+            "stall": 5,
+            "wait_mask": 0,
+            "write_barrier": 7,
+            "yield_flag": 0
+          },
+          "opcode_text": "IMAD.IADD R17, R5, 0x1, R17",
+          "pc": 448
+        },
+        {
+          "final_stall": 11,
+          "native_control": {
+            "read_barrier": 7,
+            "reuse": 0,
+            "stall": 4,
+            "wait_mask": 4,
+            "write_barrier": 7,
+            "yield_flag": 0
+          },
+          "opcode_text": "LOP3.LUT R19, R21, R19, R20, 0x80, !PT",
+          "pc": 496
+        },
+        {
+          "final_stall": 6,
+          "native_control": {
+            "read_barrier": 7,
+            "reuse": 0,
+            "stall": 5,
+            "wait_mask": 0,
+            "write_barrier": 7,
+            "yield_flag": 0
+          },
+          "opcode_text": "IADD3 R13, R5, R19, RZ",
+          "pc": 512
+        },
+        {
+          "final_stall": 11,
+          "native_control": {
+            "read_barrier": 7,
+            "reuse": 0,
+            "stall": 5,
+            "wait_mask": 4,
+            "write_barrier": 7,
+            "yield_flag": 0
+          },
+          "opcode_text": "LOP3.LUT R15, R19, R10, RZ, 0xc0, !PT",
+          "pc": 560
+        },
+        {
+          "final_stall": 6,
+          "native_control": {
+            "read_barrier": 7,
+            "reuse": 0,
+            "stall": 6,
+            "wait_mask": 0,
+            "write_barrier": 7,
+            "yield_flag": 0
+          },
+          "opcode_text": "IMAD.IADD R15, R5, 0x1, R15",
+          "pc": 576
+        },
+        {
+          "final_stall": 11,
+          "native_control": {
+            "read_barrier": 7,
+            "reuse": 0,
+            "stall": 5,
+            "wait_mask": 4,
+            "write_barrier": 7,
+            "yield_flag": 0
+          },
+          "opcode_text": "LOP3.LUT R19, R15, R19, R10, 0x80, !PT",
+          "pc": 624
+        },
+        {
+          "final_stall": 6,
+          "native_control": {
+            "read_barrier": 7,
+            "reuse": 0,
+            "stall": 5,
+            "wait_mask": 0,
+            "write_barrier": 7,
+            "yield_flag": 0
+          },
+          "opcode_text": "IMAD.IADD R17, R5, 0x1, R19",
+          "pc": 640
+        },
+        {
+          "final_stall": 11,
+          "native_control": {
+            "read_barrier": 7,
+            "reuse": 0,
+            "stall": 5,
+            "wait_mask": 4,
+            "write_barrier": 7,
+            "yield_flag": 0
+          },
+          "opcode_text": "LOP3.LUT R13, R19, R16, RZ, 0xc0, !PT",
+          "pc": 704
+        },
+        {
+          "final_stall": 6,
+          "native_control": {
+            "read_barrier": 7,
+            "reuse": 0,
+            "stall": 6,
+            "wait_mask": 0,
+            "write_barrier": 7,
+            "yield_flag": 0
+          },
+          "opcode_text": "IMAD.IADD R13, R5, 0x1, R13",
+          "pc": 720
+        },
+        {
+          "final_stall": 11,
+          "native_control": {
+            "read_barrier": 7,
+            "reuse": 0,
+            "stall": 1,
+            "wait_mask": 0,
+            "write_barrier": 7,
+            "yield_flag": 1
+          },
+          "opcode_text": "LOP3.LUT R14, R13, R19, R16, 0x80, !PT",
+          "pc": 832
+        }
+      ],
+      "kind": "global",
+      "neutral_body_ordinals": [
+        0
+      ],
+      "output": "fixed_latency_front_end_footprint_u8_global_late.cubin",
+      "patched_body_count_between_branches": 7,
+      "producer_consumer_distance": 6,
+      "selected_stall_sum": 119
+    }
+  }
+}

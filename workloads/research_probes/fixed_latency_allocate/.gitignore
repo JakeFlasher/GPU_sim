@@ -1,0 +1,6 @@
+fixed_latency_allocate
+fixed_latency_allocate_trace
+fixed_latency_allocate_driver
+*.cubin
+*.cuasm
+*.cuasm~

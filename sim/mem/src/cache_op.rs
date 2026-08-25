@@ -41,9 +41,11 @@ pub enum CacheOpToken {
     Other,
 }
 
-/// Port of `derive_l1_eligible`: `true` iff the token stages into the
-/// modeled L1 on architectures whose cache policy is carded (the implemented
-/// active path is sm_86; template architectures remain capability-gated).
+/// Port of the predictor manifest's architecture-neutral
+/// `derive_l1_eligible` partition. Simulator routing may refine a literal token
+/// by architecture: [`crate::access::mem_role_of_checked`] admits the measured
+/// sm_86 `LDG.E.STRONG.SM` lowering into L1 while Blackwell retains the
+/// manifest's strong-scope bypass behavior.
 pub fn derive_l1_eligible(token: CacheOpToken) -> bool {
     matches!(
         token,

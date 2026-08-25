@@ -23,8 +23,12 @@ sudo -n true
 ```bash
 cd sim
 cargo build
+cargo build --release -p sim-run
 cargo test --all-targets
 ```
+
+Research campaign simulator actions run the same release build incrementally
+before replay and reject cached JSON that predates the binary or its inputs.
 
 ## Build the NVBit tracer
 

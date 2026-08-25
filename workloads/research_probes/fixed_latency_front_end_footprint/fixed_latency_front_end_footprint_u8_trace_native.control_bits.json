@@ -1,0 +1,2481 @@
+{
+ "arch": "sm_86",
+ "functions": {
+  "_Z23footprint_global_searchPyPjPKjS2_": [
+   {
+    "pc": 0,
+    "predicate": null,
+    "opcode_text": "IMAD.MOV.U32 R1, RZ, RZ, c[0x0][0x28]",
+    "low_word": "0x00000a00ff017624",
+    "high_word": "0x000fe400078e00ff",
+    "control": {
+     "stall": 2,
+     "yield_flag": 1,
+     "write_barrier": 7,
+     "read_barrier": 7,
+     "wait_mask": 0,
+     "reuse": 0
+    },
+    "status": "decoded"
+   },
+   {
+    "pc": 16,
+    "predicate": null,
+    "opcode_text": "S2R R9, SR_TID.X",
+    "low_word": "0x0000000000097919",
+    "high_word": "0x000e220000002100",
+    "control": {
+     "stall": 1,
+     "yield_flag": 1,
+     "write_barrier": 0,
+     "read_barrier": 7,
+     "wait_mask": 0,
+     "reuse": 0
+    },
+    "status": "decoded"
+   },
+   {
+    "pc": 32,
+    "predicate": null,
+    "opcode_text": "IMAD.MOV.U32 R0, RZ, RZ, 0x4",
+    "low_word": "0x00000004ff007424",
+    "high_word": "0x000fe200078e00ff",
+    "control": {
+     "stall": 1,
+     "yield_flag": 1,
+     "write_barrier": 7,
+     "read_barrier": 7,
+     "wait_mask": 0,
+     "reuse": 0
+    },
+    "status": "decoded"
+   },
+   {
+    "pc": 48,
+    "predicate": null,
+    "opcode_text": "ULDC.64 UR4, c[0x0][0x118]",
+    "low_word": "0x0000460000047ab9",
+    "high_word": "0x000fc60000000a00",
+    "control": {
+     "stall": 3,
+     "yield_flag": 0,
+     "write_barrier": 7,
+     "read_barrier": 7,
+     "wait_mask": 0,
+     "reuse": 0
+    },
+    "status": "decoded"
+   },
+   {
+    "pc": 64,
+    "predicate": null,
+    "opcode_text": "IMAD.WIDE.U32 R2, R9, R0, c[0x0][0x178]",
+    "low_word": "0x00005e0009027625",
+    "high_word": "0x001fca00078e0000",
+    "control": {
+     "stall": 5,
+     "yield_flag": 0,
+     "write_barrier": 7,
+     "read_barrier": 7,
+     "wait_mask": 1,
+     "reuse": 0
+    },
+    "status": "decoded"
+   },
+   {
+    "pc": 80,
+    "predicate": null,
+    "opcode_text": "LDG.E R14, [R2.64]",
+    "low_word": "0x00000004020e7981",
+    "high_word": "0x000162000c1e1900",
+    "control": {
+     "stall": 1,
+     "yield_flag": 1,
+     "write_barrier": 5,
+     "read_barrier": 0,
+     "wait_mask": 0,
+     "reuse": 0
+    },
+    "status": "decoded"
+   },
+   {
+    "pc": 96,
+    "predicate": null,
+    "opcode_text": "SHF.R.U32.HI R7, RZ, 0x5, R9",
+    "low_word": "0x00000005ff077819",
+    "high_word": "0x000fe20000011609",
+    "control": {
+     "stall": 1,
+     "yield_flag": 1,
+     "write_barrier": 7,
+     "read_barrier": 7,
+     "wait_mask": 0,
+     "reuse": 0
+    },
+    "status": "decoded"
+   },
+   {
+    "pc": 112,
+    "predicate": null,
+    "opcode_text": "IMAD.WIDE.U32 R4, R9, R0, c[0x0][0x170]",
+    "low_word": "0x00005c0009047625",
+    "high_word": "0x000fc800078e0000",
+    "control": {
+     "stall": 4,
+     "yield_flag": 0,
+     "write_barrier": 7,
+     "read_barrier": 7,
+     "wait_mask": 0,
+     "reuse": 0
+    },
+    "status": "decoded"
+   },
+   {
+    "pc": 128,
+    "predicate": null,
+    "opcode_text": "CS2R R2, SR_CLOCKLO",
+    "low_word": "0x0000000000027805",
+    "high_word": "0x001fc60000015000",
+    "control": {
+     "stall": 3,
+     "yield_flag": 0,
+     "write_barrier": 7,
+     "read_barrier": 7,
+     "wait_mask": 1,
+     "reuse": 0
+    },
+    "status": "decoded"
+   },
+   {
+    "pc": 144,
+    "predicate": null,
+    "opcode_text": "IMAD.MOV.U32 R8, RZ, RZ, RZ",
+    "low_word": "0x000000ffff087224",
+    "high_word": "0x000fe400078e00ff",
+    "control": {
+     "stall": 2,
+     "yield_flag": 1,
+     "write_barrier": 7,
+     "read_barrier": 7,
+     "wait_mask": 0,
+     "reuse": 0
+    },
+    "status": "decoded"
+   },
+   {
+    "pc": 160,
+    "predicate": null,
+    "opcode_text": "IMAD.MOV.U32 R6, RZ, RZ, RZ",
+    "low_word": "0x000000ffff067224",
+    "high_word": "0x000fe400078e00ff",
+    "control": {
+     "stall": 2,
+     "yield_flag": 1,
+     "write_barrier": 7,
+     "read_barrier": 7,
+     "wait_mask": 0,
+     "reuse": 0
+    },
+    "status": "decoded"
+   },
+   {
+    "pc": 176,
+    "predicate": null,
+    "opcode_text": "IADD3 R11, R5, R14, RZ",
+    "low_word": "0x0000000e050b7210",
+    "high_word": "0x020fe20007ffe0ff",
+    "control": {
+     "stall": 1,
+     "yield_flag": 1,
+     "write_barrier": 7,
+     "read_barrier": 7,
+     "wait_mask": 32,
+     "reuse": 0
+    },
+    "status": "decoded"
+   },
+   {
+    "pc": 192,
+    "predicate": null,
+    "opcode_text": "IMAD.MOV.U32 R10, RZ, RZ, R4",
+    "low_word": "0x000000ffff0a7224",
+    "high_word": "0x000fe200078e0004",
+    "control": {
+     "stall": 1,
+     "yield_flag": 1,
+     "write_barrier": 7,
+     "read_barrier": 7,
+     "wait_mask": 0,
+     "reuse": 0
+    },
+    "status": "decoded"
+   },
+   {
+    "pc": 208,
+    "predicate": null,
+    "opcode_text": "NOP",
+    "low_word": "0x0000000000007918",
+    "high_word": "0x000fcc0000000000",
+    "control": {
+     "stall": 6,
+     "yield_flag": 0,
+     "write_barrier": 7,
+     "read_barrier": 7,
+     "wait_mask": 0,
+     "reuse": 0
+    },
+    "status": "decoded"
+   },
+   {
+    "pc": 224,
+    "predicate": null,
+    "opcode_text": "LDG.E R11, [R10.64]",
+    "low_word": "0x000000040a0b7981",
+    "high_word": "0x000ea2000c1e1900",
+    "control": {
+     "stall": 1,
+     "yield_flag": 1,
+     "write_barrier": 2,
+     "read_barrier": 7,
+     "wait_mask": 0,
+     "reuse": 0
+    },
+    "status": "decoded"
+   },
+   {
+    "pc": 240,
+    "predicate": null,
+    "opcode_text": "IMAD.MOV.U32 R12, RZ, RZ, R4",
+    "low_word": "0x000000ffff0c7224",
+    "high_word": "0x000fe200078e0004",
+    "control": {
+     "stall": 1,
+     "yield_flag": 1,
+     "write_barrier": 7,
+     "read_barrier": 7,
+     "wait_mask": 0,
+     "reuse": 0
+    },
+    "status": "decoded"
+   },
+   {
+    "pc": 256,
+    "predicate": null,
+    "opcode_text": "NOP",
+    "low_word": "0x0000000000007918",
+    "high_word": "0x000fcc0000000000",
+    "control": {
+     "stall": 6,
+     "yield_flag": 0,
+     "write_barrier": 7,
+     "read_barrier": 7,
+     "wait_mask": 0,
+     "reuse": 0
+    },
+    "status": "decoded"
+   },
+   {
+    "pc": 272,
+    "predicate": null,
+    "opcode_text": "LOP3.LUT R13, R14, R11, RZ, 0xc0, !PT",
+    "low_word": "0x0000000b0e0d7212",
+    "high_word": "0x004fca00078ec0ff",
+    "control": {
+     "stall": 5,
+     "yield_flag": 0,
+     "write_barrier": 7,
+     "read_barrier": 7,
+     "wait_mask": 4,
+     "reuse": 0
+    },
+    "status": "decoded"
+   },
+   {
+    "pc": 288,
+    "predicate": null,
+    "opcode_text": "IMAD.IADD R13, R5, 0x1, R13",
+    "low_word": "0x00000001050d7824",
+    "high_word": "0x000fca00078e020d",
+    "control": {
+     "stall": 5,
+     "yield_flag": 0,
+     "write_barrier": 7,
+     "read_barrier": 7,
+     "wait_mask": 0,
+     "reuse": 0
+    },
+    "status": "decoded"
+   },
+   {
+    "pc": 304,
+    "predicate": null,
+    "opcode_text": "LDG.E R18, [R12.64]",
+    "low_word": "0x000000040c127981",
+    "high_word": "0x000ea2000c1e1900",
+    "control": {
+     "stall": 1,
+     "yield_flag": 1,
+     "write_barrier": 2,
+     "read_barrier": 7,
+     "wait_mask": 0,
+     "reuse": 0
+    },
+    "status": "decoded"
+   },
+   {
+    "pc": 320,
+    "predicate": null,
+    "opcode_text": "NOP",
+    "low_word": "0x0000000000007918",
+    "high_word": "0x000fcc0000000000",
+    "control": {
+     "stall": 6,
+     "yield_flag": 0,
+     "write_barrier": 7,
+     "read_barrier": 7,
+     "wait_mask": 0,
+     "reuse": 0
+    },
+    "status": "decoded"
+   },
+   {
+    "pc": 336,
+    "predicate": null,
+    "opcode_text": "LOP3.LUT R19, R18, R14, R11, 0x80, !PT",
+    "low_word": "0x0000000e12137212",
+    "high_word": "0x004fe200078e800b",
+    "control": {
+     "stall": 1,
+     "yield_flag": 1,
+     "write_barrier": 7,
+     "read_barrier": 7,
+     "wait_mask": 4,
+     "reuse": 0
+    },
+    "status": "decoded"
+   },
+   {
+    "pc": 352,
+    "predicate": null,
+    "opcode_text": "IMAD.MOV.U32 R14, RZ, RZ, R4",
+    "low_word": "0x000000ffff0e7224",
+    "high_word": "0x000fc600078e0004",
+    "control": {
+     "stall": 3,
+     "yield_flag": 0,
+     "write_barrier": 7,
+     "read_barrier": 7,
+     "wait_mask": 0,
+     "reuse": 0
+    },
+    "status": "decoded"
+   },
+   {
+    "pc": 368,
+    "predicate": null,
+    "opcode_text": "IADD3 R15, R5, R19, RZ",
+    "low_word": "0x00000013050f7210",
+    "high_word": "0x000fca0007ffe0ff",
+    "control": {
+     "stall": 5,
+     "yield_flag": 0,
+     "write_barrier": 7,
+     "read_barrier": 7,
+     "wait_mask": 0,
+     "reuse": 0
+    },
+    "status": "decoded"
+   },
+   {
+    "pc": 384,
+    "predicate": null,
+    "opcode_text": "LDG.E R20, [R14.64]",
+    "low_word": "0x000000040e147981",
+    "high_word": "0x000ea2000c1e1900",
+    "control": {
+     "stall": 1,
+     "yield_flag": 1,
+     "write_barrier": 2,
+     "read_barrier": 7,
+     "wait_mask": 0,
+     "reuse": 0
+    },
+    "status": "decoded"
+   },
+   {
+    "pc": 400,
+    "predicate": null,
+    "opcode_text": "IMAD.MOV.U32 R16, RZ, RZ, R4",
+    "low_word": "0x000000ffff107224",
+    "high_word": "0x000fe200078e0004",
+    "control": {
+     "stall": 1,
+     "yield_flag": 1,
+     "write_barrier": 7,
+     "read_barrier": 7,
+     "wait_mask": 0,
+     "reuse": 0
+    },
+    "status": "decoded"
+   },
+   {
+    "pc": 416,
+    "predicate": null,
+    "opcode_text": "NOP",
+    "low_word": "0x0000000000007918",
+    "high_word": "0x000fcc0000000000",
+    "control": {
+     "stall": 6,
+     "yield_flag": 0,
+     "write_barrier": 7,
+     "read_barrier": 7,
+     "wait_mask": 0,
+     "reuse": 0
+    },
+    "status": "decoded"
+   },
+   {
+    "pc": 432,
+    "predicate": null,
+    "opcode_text": "LOP3.LUT R17, R19, R20, RZ, 0xc0, !PT",
+    "low_word": "0x0000001413117212",
+    "high_word": "0x004fca00078ec0ff",
+    "control": {
+     "stall": 5,
+     "yield_flag": 0,
+     "write_barrier": 7,
+     "read_barrier": 7,
+     "wait_mask": 4,
+     "reuse": 0
+    },
+    "status": "decoded"
+   },
+   {
+    "pc": 448,
+    "predicate": null,
+    "opcode_text": "IMAD.IADD R17, R5, 0x1, R17",
+    "low_word": "0x0000000105117824",
+    "high_word": "0x000fca00078e0211",
+    "control": {
+     "stall": 5,
+     "yield_flag": 0,
+     "write_barrier": 7,
+     "read_barrier": 7,
+     "wait_mask": 0,
+     "reuse": 0
+    },
+    "status": "decoded"
+   },
+   {
+    "pc": 464,
+    "predicate": null,
+    "opcode_text": "LDG.E R21, [R16.64]",
+    "low_word": "0x0000000410157981",
+    "high_word": "0x000ea2000c1e1900",
+    "control": {
+     "stall": 1,
+     "yield_flag": 1,
+     "write_barrier": 2,
+     "read_barrier": 7,
+     "wait_mask": 0,
+     "reuse": 0
+    },
+    "status": "decoded"
+   },
+   {
+    "pc": 480,
+    "predicate": null,
+    "opcode_text": "NOP",
+    "low_word": "0x0000000000007918",
+    "high_word": "0x000fcc0000000000",
+    "control": {
+     "stall": 6,
+     "yield_flag": 0,
+     "write_barrier": 7,
+     "read_barrier": 7,
+     "wait_mask": 0,
+     "reuse": 0
+    },
+    "status": "decoded"
+   },
+   {
+    "pc": 496,
+    "predicate": null,
+    "opcode_text": "LOP3.LUT R19, R21, R19, R20, 0x80, !PT",
+    "low_word": "0x0000001315137212",
+    "high_word": "0x004fc800078e8014",
+    "control": {
+     "stall": 4,
+     "yield_flag": 0,
+     "write_barrier": 7,
+     "read_barrier": 7,
+     "wait_mask": 4,
+     "reuse": 0
+    },
+    "status": "decoded"
+   },
+   {
+    "pc": 512,
+    "predicate": null,
+    "opcode_text": "IADD3 R13, R5, R19, RZ",
+    "low_word": "0x00000013050d7210",
+    "high_word": "0x000fca0007ffe0ff",
+    "control": {
+     "stall": 5,
+     "yield_flag": 0,
+     "write_barrier": 7,
+     "read_barrier": 7,
+     "wait_mask": 0,
+     "reuse": 0
+    },
+    "status": "decoded"
+   },
+   {
+    "pc": 528,
+    "predicate": null,
+    "opcode_text": "LDG.E R10, [R12.64]",
+    "low_word": "0x000000040c0a7981",
+    "high_word": "0x000ea2000c1e1900",
+    "control": {
+     "stall": 1,
+     "yield_flag": 1,
+     "write_barrier": 2,
+     "read_barrier": 7,
+     "wait_mask": 0,
+     "reuse": 0
+    },
+    "status": "decoded"
+   },
+   {
+    "pc": 544,
+    "predicate": null,
+    "opcode_text": "NOP",
+    "low_word": "0x0000000000007918",
+    "high_word": "0x000fcc0000000000",
+    "control": {
+     "stall": 6,
+     "yield_flag": 0,
+     "write_barrier": 7,
+     "read_barrier": 7,
+     "wait_mask": 0,
+     "reuse": 0
+    },
+    "status": "decoded"
+   },
+   {
+    "pc": 560,
+    "predicate": null,
+    "opcode_text": "LOP3.LUT R15, R19, R10, RZ, 0xc0, !PT",
+    "low_word": "0x0000000a130f7212",
+    "high_word": "0x004fca00078ec0ff",
+    "control": {
+     "stall": 5,
+     "yield_flag": 0,
+     "write_barrier": 7,
+     "read_barrier": 7,
+     "wait_mask": 4,
+     "reuse": 0
+    },
+    "status": "decoded"
+   },
+   {
+    "pc": 576,
+    "predicate": null,
+    "opcode_text": "IMAD.IADD R15, R5, 0x1, R15",
+    "low_word": "0x00000001050f7824",
+    "high_word": "0x000fcc00078e020f",
+    "control": {
+     "stall": 6,
+     "yield_flag": 0,
+     "write_barrier": 7,
+     "read_barrier": 7,
+     "wait_mask": 0,
+     "reuse": 0
+    },
+    "status": "decoded"
+   },
+   {
+    "pc": 592,
+    "predicate": null,
+    "opcode_text": "LDG.E R15, [R14.64]",
+    "low_word": "0x000000040e0f7981",
+    "high_word": "0x000ea2000c1e1900",
+    "control": {
+     "stall": 1,
+     "yield_flag": 1,
+     "write_barrier": 2,
+     "read_barrier": 7,
+     "wait_mask": 0,
+     "reuse": 0
+    },
+    "status": "decoded"
+   },
+   {
+    "pc": 608,
+    "predicate": null,
+    "opcode_text": "NOP",
+    "low_word": "0x0000000000007918",
+    "high_word": "0x000fcc0000000000",
+    "control": {
+     "stall": 6,
+     "yield_flag": 0,
+     "write_barrier": 7,
+     "read_barrier": 7,
+     "wait_mask": 0,
+     "reuse": 0
+    },
+    "status": "decoded"
+   },
+   {
+    "pc": 624,
+    "predicate": null,
+    "opcode_text": "LOP3.LUT R19, R15, R19, R10, 0x80, !PT",
+    "low_word": "0x000000130f137212",
+    "high_word": "0x004fca00078e800a",
+    "control": {
+     "stall": 5,
+     "yield_flag": 0,
+     "write_barrier": 7,
+     "read_barrier": 7,
+     "wait_mask": 4,
+     "reuse": 0
+    },
+    "status": "decoded"
+   },
+   {
+    "pc": 640,
+    "predicate": null,
+    "opcode_text": "IMAD.IADD R17, R5, 0x1, R19",
+    "low_word": "0x0000000105117824",
+    "high_word": "0x000fca00078e0213",
+    "control": {
+     "stall": 5,
+     "yield_flag": 0,
+     "write_barrier": 7,
+     "read_barrier": 7,
+     "wait_mask": 0,
+     "reuse": 0
+    },
+    "status": "decoded"
+   },
+   {
+    "pc": 656,
+    "predicate": null,
+    "opcode_text": "LDG.E R16, [R16.64]",
+    "low_word": "0x0000000410107981",
+    "high_word": "0x000ea2000c1e1900",
+    "control": {
+     "stall": 1,
+     "yield_flag": 1,
+     "write_barrier": 2,
+     "read_barrier": 7,
+     "wait_mask": 0,
+     "reuse": 0
+    },
+    "status": "decoded"
+   },
+   {
+    "pc": 672,
+    "predicate": null,
+    "opcode_text": "NOP",
+    "low_word": "0x0000000000007918",
+    "high_word": "0x000fcc0000000000",
+    "control": {
+     "stall": 6,
+     "yield_flag": 0,
+     "write_barrier": 7,
+     "read_barrier": 7,
+     "wait_mask": 0,
+     "reuse": 0
+    },
+    "status": "decoded"
+   },
+   {
+    "pc": 688,
+    "predicate": null,
+    "opcode_text": "IADD3 R8, R8, 0x1, RZ",
+    "low_word": "0x0000000108087810",
+    "high_word": "0x000fe40007ffe0ff",
+    "control": {
+     "stall": 2,
+     "yield_flag": 1,
+     "write_barrier": 7,
+     "read_barrier": 7,
+     "wait_mask": 0,
+     "reuse": 0
+    },
+    "status": "decoded"
+   },
+   {
+    "pc": 704,
+    "predicate": null,
+    "opcode_text": "LOP3.LUT R13, R19, R16, RZ, 0xc0, !PT",
+    "low_word": "0x00000010130d7212",
+    "high_word": "0x004fca00078ec0ff",
+    "control": {
+     "stall": 5,
+     "yield_flag": 0,
+     "write_barrier": 7,
+     "read_barrier": 7,
+     "wait_mask": 4,
+     "reuse": 0
+    },
+    "status": "decoded"
+   },
+   {
+    "pc": 720,
+    "predicate": null,
+    "opcode_text": "IMAD.IADD R13, R5, 0x1, R13",
+    "low_word": "0x00000001050d7824",
+    "high_word": "0x000fcc00078e020d",
+    "control": {
+     "stall": 6,
+     "yield_flag": 0,
+     "write_barrier": 7,
+     "read_barrier": 7,
+     "wait_mask": 0,
+     "reuse": 0
+    },
+    "status": "decoded"
+   },
+   {
+    "pc": 736,
+    "predicate": null,
+    "opcode_text": "LDG.E R13, [R12.64]",
+    "low_word": "0x000000040c0d7981",
+    "high_word": "0x000ea2000c1e1900",
+    "control": {
+     "stall": 1,
+     "yield_flag": 1,
+     "write_barrier": 2,
+     "read_barrier": 7,
+     "wait_mask": 0,
+     "reuse": 0
+    },
+    "status": "decoded"
+   },
+   {
+    "pc": 752,
+    "predicate": null,
+    "opcode_text": "ISETP.NE.AND P0, PT, R8, 0x8, PT",
+    "low_word": "0x000000080800780c",
+    "high_word": "0x000fe40003f05270",
+    "control": {
+     "stall": 2,
+     "yield_flag": 1,
+     "write_barrier": 7,
+     "read_barrier": 7,
+     "wait_mask": 0,
+     "reuse": 0
+    },
+    "status": "decoded"
+   },
+   {
+    "pc": 768,
+    "predicate": null,
+    "opcode_text": "IADD3 R6, R18, R6, R11",
+    "low_word": "0x0000000612067210",
+    "high_word": "0x000fc80007ffe00b",
+    "control": {
+     "stall": 4,
+     "yield_flag": 0,
+     "write_barrier": 7,
+     "read_barrier": 7,
+     "wait_mask": 0,
+     "reuse": 0
+    },
+    "status": "decoded"
+   },
+   {
+    "pc": 784,
+    "predicate": null,
+    "opcode_text": "IADD3 R6, R21, R6, R20",
+    "low_word": "0x0000000615067210",
+    "high_word": "0x000fc80007ffe014",
+    "control": {
+     "stall": 4,
+     "yield_flag": 0,
+     "write_barrier": 7,
+     "read_barrier": 7,
+     "wait_mask": 0,
+     "reuse": 0
+    },
+    "status": "decoded"
+   },
+   {
+    "pc": 800,
+    "predicate": null,
+    "opcode_text": "IADD3 R6, R15, R6, R10",
+    "low_word": "0x000000060f067210",
+    "high_word": "0x000fc80007ffe00a",
+    "control": {
+     "stall": 4,
+     "yield_flag": 0,
+     "write_barrier": 7,
+     "read_barrier": 7,
+     "wait_mask": 0,
+     "reuse": 0
+    },
+    "status": "decoded"
+   },
+   {
+    "pc": 816,
+    "predicate": null,
+    "opcode_text": "IADD3 R6, R13.reuse, R6, R16.reuse",
+    "low_word": "0x000000060d067210",
+    "high_word": "0x144fe40007ffe010",
+    "control": {
+     "stall": 2,
+     "yield_flag": 1,
+     "write_barrier": 7,
+     "read_barrier": 7,
+     "wait_mask": 4,
+     "reuse": 5
+    },
+    "status": "decoded"
+   },
+   {
+    "pc": 832,
+    "predicate": null,
+    "opcode_text": "LOP3.LUT R14, R13, R19, R16, 0x80, !PT",
+    "low_word": "0x000000130d0e7212",
+    "high_word": "0x000fe200078e8010",
+    "control": {
+     "stall": 1,
+     "yield_flag": 1,
+     "write_barrier": 7,
+     "read_barrier": 7,
+     "wait_mask": 0,
+     "reuse": 0
+    },
+    "status": "decoded"
+   },
+   {
+    "pc": 848,
+    "predicate": "@P0",
+    "opcode_text": "BRA 0xb0",
+    "low_word": "0xfffffd5000000947",
+    "high_word": "0x000fea000383ffff",
+    "control": {
+     "stall": 5,
+     "yield_flag": 1,
+     "write_barrier": 7,
+     "read_barrier": 7,
+     "wait_mask": 0,
+     "reuse": 0
+    },
+    "status": "decoded"
+   },
+   {
+    "pc": 864,
+    "predicate": null,
+    "opcode_text": "CS2R R4, SR_CLOCKLO",
+    "low_word": "0x0000000000047805",
+    "high_word": "0x000fe40000015000",
+    "control": {
+     "stall": 2,
+     "yield_flag": 1,
+     "write_barrier": 7,
+     "read_barrier": 7,
+     "wait_mask": 0,
+     "reuse": 0
+    },
+    "status": "decoded"
+   },
+   {
+    "pc": 880,
+    "predicate": null,
+    "opcode_text": "LOP3.LUT P0, RZ, R9, 0x1f, RZ, 0xc0, !PT",
+    "low_word": "0x0000001f09ff7812",
+    "high_word": "0x000fda000780c0ff",
+    "control": {
+     "stall": 13,
+     "yield_flag": 0,
+     "write_barrier": 7,
+     "read_barrier": 7,
+     "wait_mask": 0,
+     "reuse": 0
+    },
+    "status": "decoded"
+   },
+   {
+    "pc": 896,
+    "predicate": "@P0",
+    "opcode_text": "EXIT",
+    "low_word": "0x000000000000094d",
+    "high_word": "0x000fea0003800000",
+    "control": {
+     "stall": 5,
+     "yield_flag": 1,
+     "write_barrier": 7,
+     "read_barrier": 7,
+     "wait_mask": 0,
+     "reuse": 0
+    },
+    "status": "decoded"
+   },
+   {
+    "pc": 912,
+    "predicate": null,
+    "opcode_text": "IADD3 R8, P0, -R2, R4, RZ",
+    "low_word": "0x0000000402087210",
+    "high_word": "0x000fe40007f1e1ff",
+    "control": {
+     "stall": 2,
+     "yield_flag": 1,
+     "write_barrier": 7,
+     "read_barrier": 7,
+     "wait_mask": 0,
+     "reuse": 0
+    },
+    "status": "decoded"
+   },
+   {
+    "pc": 928,
+    "predicate": null,
+    "opcode_text": "MOV R2, 0x8",
+    "low_word": "0x0000000800027802",
+    "high_word": "0x000fc60000000f00",
+    "control": {
+     "stall": 3,
+     "yield_flag": 0,
+     "write_barrier": 7,
+     "read_barrier": 7,
+     "wait_mask": 0,
+     "reuse": 0
+    },
+    "status": "decoded"
+   },
+   {
+    "pc": 944,
+    "predicate": null,
+    "opcode_text": "IMAD.X R9, R5, 0x1, ~R3, P0",
+    "low_word": "0x0000000105097824",
+    "high_word": "0x000fe400000e0e03",
+    "control": {
+     "stall": 2,
+     "yield_flag": 1,
+     "write_barrier": 7,
+     "read_barrier": 7,
+     "wait_mask": 0,
+     "reuse": 0
+    },
+    "status": "decoded"
+   },
+   {
+    "pc": 960,
+    "predicate": null,
+    "opcode_text": "IMAD.WIDE.U32 R2, R7, R2, c[0x0][0x160]",
+    "low_word": "0x0000580007027625",
+    "high_word": "0x000fc800078e0002",
+    "control": {
+     "stall": 4,
+     "yield_flag": 0,
+     "write_barrier": 7,
+     "read_barrier": 7,
+     "wait_mask": 0,
+     "reuse": 0
+    },
+    "status": "decoded"
+   },
+   {
+    "pc": 976,
+    "predicate": null,
+    "opcode_text": "IMAD.WIDE R4, R7, R0, c[0x0][0x168]",
+    "low_word": "0x00005a0007047625",
+    "high_word": "0x000fe200078e0200",
+    "control": {
+     "stall": 1,
+     "yield_flag": 1,
+     "write_barrier": 7,
+     "read_barrier": 7,
+     "wait_mask": 0,
+     "reuse": 0
+    },
+    "status": "decoded"
+   },
+   {
+    "pc": 992,
+    "predicate": null,
+    "opcode_text": "STG.E.64 [R2.64], R8",
+    "low_word": "0x0000000802007986",
+    "high_word": "0x000fe8000c101b04",
+    "control": {
+     "stall": 4,
+     "yield_flag": 1,
+     "write_barrier": 7,
+     "read_barrier": 7,
+     "wait_mask": 0,
+     "reuse": 0
+    },
+    "status": "decoded"
+   },
+   {
+    "pc": 1008,
+    "predicate": null,
+    "opcode_text": "STG.E [R4.64], R6",
+    "low_word": "0x0000000604007986",
+    "high_word": "0x000fe2000c101904",
+    "control": {
+     "stall": 1,
+     "yield_flag": 1,
+     "write_barrier": 7,
+     "read_barrier": 7,
+     "wait_mask": 0,
+     "reuse": 0
+    },
+    "status": "decoded"
+   },
+   {
+    "pc": 1024,
+    "predicate": null,
+    "opcode_text": "EXIT",
+    "low_word": "0x000000000000794d",
+    "high_word": "0x000fea0003800000",
+    "control": {
+     "stall": 5,
+     "yield_flag": 1,
+     "write_barrier": 7,
+     "read_barrier": 7,
+     "wait_mask": 0,
+     "reuse": 0
+    },
+    "status": "decoded"
+   },
+   {
+    "pc": 1040,
+    "predicate": null,
+    "opcode_text": "BRA 0x410",
+    "low_word": "0xfffffff000007947",
+    "high_word": "0x000fc0000383ffff",
+    "control": {
+     "stall": 0,
+     "yield_flag": 0,
+     "write_barrier": 7,
+     "read_barrier": 7,
+     "wait_mask": 0,
+     "reuse": 0
+    },
+    "status": "decoded"
+   },
+   {
+    "pc": 1056,
+    "predicate": null,
+    "opcode_text": "NOP",
+    "low_word": "0x0000000000007918",
+    "high_word": "0x000fc00000000000",
+    "control": {
+     "stall": 0,
+     "yield_flag": 0,
+     "write_barrier": 7,
+     "read_barrier": 7,
+     "wait_mask": 0,
+     "reuse": 0
+    },
+    "status": "decoded"
+   },
+   {
+    "pc": 1072,
+    "predicate": null,
+    "opcode_text": "NOP",
+    "low_word": "0x0000000000007918",
+    "high_word": "0x000fc00000000000",
+    "control": {
+     "stall": 0,
+     "yield_flag": 0,
+     "write_barrier": 7,
+     "read_barrier": 7,
+     "wait_mask": 0,
+     "reuse": 0
+    },
+    "status": "decoded"
+   },
+   {
+    "pc": 1088,
+    "predicate": null,
+    "opcode_text": "NOP",
+    "low_word": "0x0000000000007918",
+    "high_word": "0x000fc00000000000",
+    "control": {
+     "stall": 0,
+     "yield_flag": 0,
+     "write_barrier": 7,
+     "read_barrier": 7,
+     "wait_mask": 0,
+     "reuse": 0
+    },
+    "status": "decoded"
+   },
+   {
+    "pc": 1104,
+    "predicate": null,
+    "opcode_text": "NOP",
+    "low_word": "0x0000000000007918",
+    "high_word": "0x000fc00000000000",
+    "control": {
+     "stall": 0,
+     "yield_flag": 0,
+     "write_barrier": 7,
+     "read_barrier": 7,
+     "wait_mask": 0,
+     "reuse": 0
+    },
+    "status": "decoded"
+   },
+   {
+    "pc": 1120,
+    "predicate": null,
+    "opcode_text": "NOP",
+    "low_word": "0x0000000000007918",
+    "high_word": "0x000fc00000000000",
+    "control": {
+     "stall": 0,
+     "yield_flag": 0,
+     "write_barrier": 7,
+     "read_barrier": 7,
+     "wait_mask": 0,
+     "reuse": 0
+    },
+    "status": "decoded"
+   },
+   {
+    "pc": 1136,
+    "predicate": null,
+    "opcode_text": "NOP",
+    "low_word": "0x0000000000007918",
+    "high_word": "0x000fc00000000000",
+    "control": {
+     "stall": 0,
+     "yield_flag": 0,
+     "write_barrier": 7,
+     "read_barrier": 7,
+     "wait_mask": 0,
+     "reuse": 0
+    },
+    "status": "decoded"
+   },
+   {
+    "pc": 1152,
+    "predicate": null,
+    "opcode_text": "NOP",
+    "low_word": "0x0000000000007918",
+    "high_word": "0x000fc00000000000",
+    "control": {
+     "stall": 0,
+     "yield_flag": 0,
+     "write_barrier": 7,
+     "read_barrier": 7,
+     "wait_mask": 0,
+     "reuse": 0
+    },
+    "status": "decoded"
+   },
+   {
+    "pc": 1168,
+    "predicate": null,
+    "opcode_text": "NOP",
+    "low_word": "0x0000000000007918",
+    "high_word": "0x000fc00000000000",
+    "control": {
+     "stall": 0,
+     "yield_flag": 0,
+     "write_barrier": 7,
+     "read_barrier": 7,
+     "wait_mask": 0,
+     "reuse": 0
+    },
+    "status": "decoded"
+   },
+   {
+    "pc": 1184,
+    "predicate": null,
+    "opcode_text": "NOP",
+    "low_word": "0x0000000000007918",
+    "high_word": "0x000fc00000000000",
+    "control": {
+     "stall": 0,
+     "yield_flag": 0,
+     "write_barrier": 7,
+     "read_barrier": 7,
+     "wait_mask": 0,
+     "reuse": 0
+    },
+    "status": "decoded"
+   },
+   {
+    "pc": 1200,
+    "predicate": null,
+    "opcode_text": "NOP",
+    "low_word": "0x0000000000007918",
+    "high_word": "0x000fc00000000000",
+    "control": {
+     "stall": 0,
+     "yield_flag": 0,
+     "write_barrier": 7,
+     "read_barrier": 7,
+     "wait_mask": 0,
+     "reuse": 0
+    },
+    "status": "decoded"
+   },
+   {
+    "pc": 1216,
+    "predicate": null,
+    "opcode_text": "NOP",
+    "low_word": "0x0000000000007918",
+    "high_word": "0x000fc00000000000",
+    "control": {
+     "stall": 0,
+     "yield_flag": 0,
+     "write_barrier": 7,
+     "read_barrier": 7,
+     "wait_mask": 0,
+     "reuse": 0
+    },
+    "status": "decoded"
+   },
+   {
+    "pc": 1232,
+    "predicate": null,
+    "opcode_text": "NOP",
+    "low_word": "0x0000000000007918",
+    "high_word": "0x000fc00000000000",
+    "control": {
+     "stall": 0,
+     "yield_flag": 0,
+     "write_barrier": 7,
+     "read_barrier": 7,
+     "wait_mask": 0,
+     "reuse": 0
+    },
+    "status": "decoded"
+   },
+   {
+    "pc": 1248,
+    "predicate": null,
+    "opcode_text": "NOP",
+    "low_word": "0x0000000000007918",
+    "high_word": "0x000fc00000000000",
+    "control": {
+     "stall": 0,
+     "yield_flag": 0,
+     "write_barrier": 7,
+     "read_barrier": 7,
+     "wait_mask": 0,
+     "reuse": 0
+    },
+    "status": "decoded"
+   },
+   {
+    "pc": 1264,
+    "predicate": null,
+    "opcode_text": "NOP",
+    "low_word": "0x0000000000007918",
+    "high_word": "0x000fc00000000000",
+    "control": {
+     "stall": 0,
+     "yield_flag": 0,
+     "write_barrier": 7,
+     "read_barrier": 7,
+     "wait_mask": 0,
+     "reuse": 0
+    },
+    "status": "decoded"
+   }
+  ],
+  "_Z22footprint_fixed_searchPyPjPKj": [
+   {
+    "pc": 0,
+    "predicate": null,
+    "opcode_text": "IMAD.MOV.U32 R1, RZ, RZ, c[0x0][0x28]",
+    "low_word": "0x00000a00ff017624",
+    "high_word": "0x000fe400078e00ff",
+    "control": {
+     "stall": 2,
+     "yield_flag": 1,
+     "write_barrier": 7,
+     "read_barrier": 7,
+     "wait_mask": 0,
+     "reuse": 0
+    },
+    "status": "decoded"
+   },
+   {
+    "pc": 16,
+    "predicate": null,
+    "opcode_text": "S2R R7, SR_TID.X",
+    "low_word": "0x0000000000077919",
+    "high_word": "0x000e220000002100",
+    "control": {
+     "stall": 1,
+     "yield_flag": 1,
+     "write_barrier": 0,
+     "read_barrier": 7,
+     "wait_mask": 0,
+     "reuse": 0
+    },
+    "status": "decoded"
+   },
+   {
+    "pc": 32,
+    "predicate": null,
+    "opcode_text": "IMAD.MOV.U32 R0, RZ, RZ, 0x4",
+    "low_word": "0x00000004ff007424",
+    "high_word": "0x000fe200078e00ff",
+    "control": {
+     "stall": 1,
+     "yield_flag": 1,
+     "write_barrier": 7,
+     "read_barrier": 7,
+     "wait_mask": 0,
+     "reuse": 0
+    },
+    "status": "decoded"
+   },
+   {
+    "pc": 48,
+    "predicate": null,
+    "opcode_text": "ULDC.64 UR4, c[0x0][0x118]",
+    "low_word": "0x0000460000047ab9",
+    "high_word": "0x000fc60000000a00",
+    "control": {
+     "stall": 3,
+     "yield_flag": 0,
+     "write_barrier": 7,
+     "read_barrier": 7,
+     "wait_mask": 0,
+     "reuse": 0
+    },
+    "status": "decoded"
+   },
+   {
+    "pc": 64,
+    "predicate": null,
+    "opcode_text": "IMAD.WIDE.U32 R2, R7, R0, c[0x0][0x170]",
+    "low_word": "0x00005c0007027625",
+    "high_word": "0x001fca00078e0000",
+    "control": {
+     "stall": 5,
+     "yield_flag": 0,
+     "write_barrier": 7,
+     "read_barrier": 7,
+     "wait_mask": 1,
+     "reuse": 0
+    },
+    "status": "decoded"
+   },
+   {
+    "pc": 80,
+    "predicate": null,
+    "opcode_text": "LDG.E R4, [R2.64]",
+    "low_word": "0x0000000402047981",
+    "high_word": "0x000162000c1e1900",
+    "control": {
+     "stall": 1,
+     "yield_flag": 1,
+     "write_barrier": 5,
+     "read_barrier": 0,
+     "wait_mask": 0,
+     "reuse": 0
+    },
+    "status": "decoded"
+   },
+   {
+    "pc": 96,
+    "predicate": null,
+    "opcode_text": "SHF.R.U32.HI R5, RZ, 0x5, R7",
+    "low_word": "0x00000005ff057819",
+    "high_word": "0x000fc60000011607",
+    "control": {
+     "stall": 3,
+     "yield_flag": 0,
+     "write_barrier": 7,
+     "read_barrier": 7,
+     "wait_mask": 0,
+     "reuse": 0
+    },
+    "status": "decoded"
+   },
+   {
+    "pc": 112,
+    "predicate": null,
+    "opcode_text": "CS2R R2, SR_CLOCKLO",
+    "low_word": "0x0000000000027805",
+    "high_word": "0x001fc80000015000",
+    "control": {
+     "stall": 4,
+     "yield_flag": 0,
+     "write_barrier": 7,
+     "read_barrier": 7,
+     "wait_mask": 1,
+     "reuse": 0
+    },
+    "status": "decoded"
+   },
+   {
+    "pc": 128,
+    "predicate": null,
+    "opcode_text": "IMAD.MOV.U32 R8, RZ, RZ, RZ",
+    "low_word": "0x000000ffff087224",
+    "high_word": "0x000fe400078e00ff",
+    "control": {
+     "stall": 2,
+     "yield_flag": 1,
+     "write_barrier": 7,
+     "read_barrier": 7,
+     "wait_mask": 0,
+     "reuse": 0
+    },
+    "status": "decoded"
+   },
+   {
+    "pc": 144,
+    "predicate": null,
+    "opcode_text": "IMAD.MOV.U32 R11, RZ, RZ, RZ",
+    "low_word": "0x000000ffff0b7224",
+    "high_word": "0x000fca00078e00ff",
+    "control": {
+     "stall": 5,
+     "yield_flag": 0,
+     "write_barrier": 7,
+     "read_barrier": 7,
+     "wait_mask": 0,
+     "reuse": 0
+    },
+    "status": "decoded"
+   },
+   {
+    "pc": 160,
+    "predicate": null,
+    "opcode_text": "IADD3 R9, R11, 0x4, RZ",
+    "low_word": "0x000000040b097810",
+    "high_word": "0x000fe20007ffe0ff",
+    "control": {
+     "stall": 1,
+     "yield_flag": 1,
+     "write_barrier": 7,
+     "read_barrier": 7,
+     "wait_mask": 0,
+     "reuse": 0
+    },
+    "status": "decoded"
+   },
+   {
+    "pc": 176,
+    "predicate": null,
+    "opcode_text": "NOP",
+    "low_word": "0x0000000000007918",
+    "high_word": "0x000fcc0000000000",
+    "control": {
+     "stall": 6,
+     "yield_flag": 0,
+     "write_barrier": 7,
+     "read_barrier": 7,
+     "wait_mask": 0,
+     "reuse": 0
+    },
+    "status": "decoded"
+   },
+   {
+    "pc": 192,
+    "predicate": null,
+    "opcode_text": "LOP3.LUT R9, R9, R4, RZ, 0x3c, !PT",
+    "low_word": "0x0000000409097212",
+    "high_word": "0x020fe200078e3cff",
+    "control": {
+     "stall": 1,
+     "yield_flag": 1,
+     "write_barrier": 7,
+     "read_barrier": 7,
+     "wait_mask": 32,
+     "reuse": 0
+    },
+    "status": "decoded"
+   },
+   {
+    "pc": 208,
+    "predicate": null,
+    "opcode_text": "NOP",
+    "low_word": "0x0000000000007918",
+    "high_word": "0x000fcc0000000000",
+    "control": {
+     "stall": 6,
+     "yield_flag": 0,
+     "write_barrier": 7,
+     "read_barrier": 7,
+     "wait_mask": 0,
+     "reuse": 0
+    },
+    "status": "decoded"
+   },
+   {
+    "pc": 224,
+    "predicate": null,
+    "opcode_text": "IMAD R11, R11, 0x19660c, R9",
+    "low_word": "0x0019660c0b0b7824",
+    "high_word": "0x000fe200078e0209",
+    "control": {
+     "stall": 1,
+     "yield_flag": 1,
+     "write_barrier": 7,
+     "read_barrier": 7,
+     "wait_mask": 0,
+     "reuse": 0
+    },
+    "status": "decoded"
+   },
+   {
+    "pc": 240,
+    "predicate": null,
+    "opcode_text": "IADD3 R8, R8, 0x1, RZ",
+    "low_word": "0x0000000108087810",
+    "high_word": "0x000fe20007ffe0ff",
+    "control": {
+     "stall": 1,
+     "yield_flag": 1,
+     "write_barrier": 7,
+     "read_barrier": 7,
+     "wait_mask": 0,
+     "reuse": 0
+    },
+    "status": "decoded"
+   },
+   {
+    "pc": 256,
+    "predicate": null,
+    "opcode_text": "NOP",
+    "low_word": "0x0000000000007918",
+    "high_word": "0x000fcc0000000000",
+    "control": {
+     "stall": 6,
+     "yield_flag": 0,
+     "write_barrier": 7,
+     "read_barrier": 7,
+     "wait_mask": 0,
+     "reuse": 0
+    },
+    "status": "decoded"
+   },
+   {
+    "pc": 272,
+    "predicate": null,
+    "opcode_text": "IADD3 R6, R11, 0x4, RZ",
+    "low_word": "0x000000040b067810",
+    "high_word": "0x000fe20007ffe0ff",
+    "control": {
+     "stall": 1,
+     "yield_flag": 1,
+     "write_barrier": 7,
+     "read_barrier": 7,
+     "wait_mask": 0,
+     "reuse": 0
+    },
+    "status": "decoded"
+   },
+   {
+    "pc": 288,
+    "predicate": null,
+    "opcode_text": "NOP",
+    "low_word": "0x0000000000007918",
+    "high_word": "0x000fcc0000000000",
+    "control": {
+     "stall": 6,
+     "yield_flag": 0,
+     "write_barrier": 7,
+     "read_barrier": 7,
+     "wait_mask": 0,
+     "reuse": 0
+    },
+    "status": "decoded"
+   },
+   {
+    "pc": 304,
+    "predicate": null,
+    "opcode_text": "LOP3.LUT R6, R6, R4, R9, 0x78, !PT",
+    "low_word": "0x0000000406067212",
+    "high_word": "0x000fe200078e7809",
+    "control": {
+     "stall": 1,
+     "yield_flag": 1,
+     "write_barrier": 7,
+     "read_barrier": 7,
+     "wait_mask": 0,
+     "reuse": 0
+    },
+    "status": "decoded"
+   },
+   {
+    "pc": 320,
+    "predicate": null,
+    "opcode_text": "NOP",
+    "low_word": "0x0000000000007918",
+    "high_word": "0x000fcc0000000000",
+    "control": {
+     "stall": 6,
+     "yield_flag": 0,
+     "write_barrier": 7,
+     "read_barrier": 7,
+     "wait_mask": 0,
+     "reuse": 0
+    },
+    "status": "decoded"
+   },
+   {
+    "pc": 336,
+    "predicate": null,
+    "opcode_text": "IMAD R11, R11, 0x19660c, R6",
+    "low_word": "0x0019660c0b0b7824",
+    "high_word": "0x000fe200078e0206",
+    "control": {
+     "stall": 1,
+     "yield_flag": 1,
+     "write_barrier": 7,
+     "read_barrier": 7,
+     "wait_mask": 0,
+     "reuse": 0
+    },
+    "status": "decoded"
+   },
+   {
+    "pc": 352,
+    "predicate": null,
+    "opcode_text": "LOP3.LUT R4, R6, R4, R9, 0x80, !PT",
+    "low_word": "0x0000000406047212",
+    "high_word": "0x000fe200078e8009",
+    "control": {
+     "stall": 1,
+     "yield_flag": 1,
+     "write_barrier": 7,
+     "read_barrier": 7,
+     "wait_mask": 0,
+     "reuse": 0
+    },
+    "status": "decoded"
+   },
+   {
+    "pc": 368,
+    "predicate": null,
+    "opcode_text": "NOP",
+    "low_word": "0x0000000000007918",
+    "high_word": "0x000fcc0000000000",
+    "control": {
+     "stall": 6,
+     "yield_flag": 0,
+     "write_barrier": 7,
+     "read_barrier": 7,
+     "wait_mask": 0,
+     "reuse": 0
+    },
+    "status": "decoded"
+   },
+   {
+    "pc": 384,
+    "predicate": null,
+    "opcode_text": "IADD3 R9, R11, 0x4, RZ",
+    "low_word": "0x000000040b097810",
+    "high_word": "0x000fe20007ffe0ff",
+    "control": {
+     "stall": 1,
+     "yield_flag": 1,
+     "write_barrier": 7,
+     "read_barrier": 7,
+     "wait_mask": 0,
+     "reuse": 0
+    },
+    "status": "decoded"
+   },
+   {
+    "pc": 400,
+    "predicate": null,
+    "opcode_text": "NOP",
+    "low_word": "0x0000000000007918",
+    "high_word": "0x000fcc0000000000",
+    "control": {
+     "stall": 6,
+     "yield_flag": 0,
+     "write_barrier": 7,
+     "read_barrier": 7,
+     "wait_mask": 0,
+     "reuse": 0
+    },
+    "status": "decoded"
+   },
+   {
+    "pc": 416,
+    "predicate": null,
+    "opcode_text": "LOP3.LUT R9, R9, R4, RZ, 0x3c, !PT",
+    "low_word": "0x0000000409097212",
+    "high_word": "0x000fe200078e3cff",
+    "control": {
+     "stall": 1,
+     "yield_flag": 1,
+     "write_barrier": 7,
+     "read_barrier": 7,
+     "wait_mask": 0,
+     "reuse": 0
+    },
+    "status": "decoded"
+   },
+   {
+    "pc": 432,
+    "predicate": null,
+    "opcode_text": "NOP",
+    "low_word": "0x0000000000007918",
+    "high_word": "0x000fcc0000000000",
+    "control": {
+     "stall": 6,
+     "yield_flag": 0,
+     "write_barrier": 7,
+     "read_barrier": 7,
+     "wait_mask": 0,
+     "reuse": 0
+    },
+    "status": "decoded"
+   },
+   {
+    "pc": 448,
+    "predicate": null,
+    "opcode_text": "IMAD R11, R11, 0x19660c, R9",
+    "low_word": "0x0019660c0b0b7824",
+    "high_word": "0x000fe200078e0209",
+    "control": {
+     "stall": 1,
+     "yield_flag": 1,
+     "write_barrier": 7,
+     "read_barrier": 7,
+     "wait_mask": 0,
+     "reuse": 0
+    },
+    "status": "decoded"
+   },
+   {
+    "pc": 464,
+    "predicate": null,
+    "opcode_text": "ISETP.NE.AND P0, PT, R8, 0x8, PT",
+    "low_word": "0x000000080800780c",
+    "high_word": "0x000fc80003f05270",
+    "control": {
+     "stall": 4,
+     "yield_flag": 0,
+     "write_barrier": 7,
+     "read_barrier": 7,
+     "wait_mask": 0,
+     "reuse": 0
+    },
+    "status": "decoded"
+   },
+   {
+    "pc": 480,
+    "predicate": null,
+    "opcode_text": "IADD3 R6, R11, 0x4, RZ",
+    "low_word": "0x000000040b067810",
+    "high_word": "0x000fc80007ffe0ff",
+    "control": {
+     "stall": 4,
+     "yield_flag": 0,
+     "write_barrier": 7,
+     "read_barrier": 7,
+     "wait_mask": 0,
+     "reuse": 0
+    },
+    "status": "decoded"
+   },
+   {
+    "pc": 496,
+    "predicate": null,
+    "opcode_text": "LOP3.LUT R6, R6, R4, R9, 0x78, !PT",
+    "low_word": "0x0000000406067212",
+    "high_word": "0x000fc800078e7809",
+    "control": {
+     "stall": 4,
+     "yield_flag": 0,
+     "write_barrier": 7,
+     "read_barrier": 7,
+     "wait_mask": 0,
+     "reuse": 0
+    },
+    "status": "decoded"
+   },
+   {
+    "pc": 512,
+    "predicate": null,
+    "opcode_text": "LOP3.LUT R4, R6, R4, R9, 0x80, !PT",
+    "low_word": "0x0000000406047212",
+    "high_word": "0x000fe200078e8009",
+    "control": {
+     "stall": 1,
+     "yield_flag": 1,
+     "write_barrier": 7,
+     "read_barrier": 7,
+     "wait_mask": 0,
+     "reuse": 0
+    },
+    "status": "decoded"
+   },
+   {
+    "pc": 528,
+    "predicate": null,
+    "opcode_text": "IMAD R11, R11, 0x19660c, R6",
+    "low_word": "0x0019660c0b0b7824",
+    "high_word": "0x000fca00078e0206",
+    "control": {
+     "stall": 5,
+     "yield_flag": 0,
+     "write_barrier": 7,
+     "read_barrier": 7,
+     "wait_mask": 0,
+     "reuse": 0
+    },
+    "status": "decoded"
+   },
+   {
+    "pc": 544,
+    "predicate": null,
+    "opcode_text": "IADD3 R9, R11, 0x4, RZ",
+    "low_word": "0x000000040b097810",
+    "high_word": "0x000fc80007ffe0ff",
+    "control": {
+     "stall": 4,
+     "yield_flag": 0,
+     "write_barrier": 7,
+     "read_barrier": 7,
+     "wait_mask": 0,
+     "reuse": 0
+    },
+    "status": "decoded"
+   },
+   {
+    "pc": 560,
+    "predicate": null,
+    "opcode_text": "LOP3.LUT R9, R9, R4, RZ, 0x3c, !PT",
+    "low_word": "0x0000000409097212",
+    "high_word": "0x000fca00078e3cff",
+    "control": {
+     "stall": 5,
+     "yield_flag": 0,
+     "write_barrier": 7,
+     "read_barrier": 7,
+     "wait_mask": 0,
+     "reuse": 0
+    },
+    "status": "decoded"
+   },
+   {
+    "pc": 576,
+    "predicate": null,
+    "opcode_text": "IMAD R11, R11, 0x19660c, R9",
+    "low_word": "0x0019660c0b0b7824",
+    "high_word": "0x000fca00078e0209",
+    "control": {
+     "stall": 5,
+     "yield_flag": 0,
+     "write_barrier": 7,
+     "read_barrier": 7,
+     "wait_mask": 0,
+     "reuse": 0
+    },
+    "status": "decoded"
+   },
+   {
+    "pc": 592,
+    "predicate": null,
+    "opcode_text": "IADD3 R6, R11, 0x4, RZ",
+    "low_word": "0x000000040b067810",
+    "high_word": "0x000fc80007ffe0ff",
+    "control": {
+     "stall": 4,
+     "yield_flag": 0,
+     "write_barrier": 7,
+     "read_barrier": 7,
+     "wait_mask": 0,
+     "reuse": 0
+    },
+    "status": "decoded"
+   },
+   {
+    "pc": 608,
+    "predicate": null,
+    "opcode_text": "LOP3.LUT R6, R6, R4, R9, 0x78, !PT",
+    "low_word": "0x0000000406067212",
+    "high_word": "0x000fc800078e7809",
+    "control": {
+     "stall": 4,
+     "yield_flag": 0,
+     "write_barrier": 7,
+     "read_barrier": 7,
+     "wait_mask": 0,
+     "reuse": 0
+    },
+    "status": "decoded"
+   },
+   {
+    "pc": 624,
+    "predicate": null,
+    "opcode_text": "LOP3.LUT R4, R6, R4, R9, 0x80, !PT",
+    "low_word": "0x0000000406047212",
+    "high_word": "0x000fe200078e8009",
+    "control": {
+     "stall": 1,
+     "yield_flag": 1,
+     "write_barrier": 7,
+     "read_barrier": 7,
+     "wait_mask": 0,
+     "reuse": 0
+    },
+    "status": "decoded"
+   },
+   {
+    "pc": 640,
+    "predicate": null,
+    "opcode_text": "IMAD R11, R11, 0x19660c, R6",
+    "low_word": "0x0019660c0b0b7824",
+    "high_word": "0x000fca00078e0206",
+    "control": {
+     "stall": 5,
+     "yield_flag": 0,
+     "write_barrier": 7,
+     "read_barrier": 7,
+     "wait_mask": 0,
+     "reuse": 0
+    },
+    "status": "decoded"
+   },
+   {
+    "pc": 656,
+    "predicate": null,
+    "opcode_text": "IADD3 R9, R11, 0x4, RZ",
+    "low_word": "0x000000040b097810",
+    "high_word": "0x000fc80007ffe0ff",
+    "control": {
+     "stall": 4,
+     "yield_flag": 0,
+     "write_barrier": 7,
+     "read_barrier": 7,
+     "wait_mask": 0,
+     "reuse": 0
+    },
+    "status": "decoded"
+   },
+   {
+    "pc": 672,
+    "predicate": null,
+    "opcode_text": "LOP3.LUT R9, R9, R4, RZ, 0x3c, !PT",
+    "low_word": "0x0000000409097212",
+    "high_word": "0x000fca00078e3cff",
+    "control": {
+     "stall": 5,
+     "yield_flag": 0,
+     "write_barrier": 7,
+     "read_barrier": 7,
+     "wait_mask": 0,
+     "reuse": 0
+    },
+    "status": "decoded"
+   },
+   {
+    "pc": 688,
+    "predicate": null,
+    "opcode_text": "IMAD R11, R11, 0x19660c, R9",
+    "low_word": "0x0019660c0b0b7824",
+    "high_word": "0x000fca00078e0209",
+    "control": {
+     "stall": 5,
+     "yield_flag": 0,
+     "write_barrier": 7,
+     "read_barrier": 7,
+     "wait_mask": 0,
+     "reuse": 0
+    },
+    "status": "decoded"
+   },
+   {
+    "pc": 704,
+    "predicate": null,
+    "opcode_text": "IADD3 R6, R11, 0x4, RZ",
+    "low_word": "0x000000040b067810",
+    "high_word": "0x000fc80007ffe0ff",
+    "control": {
+     "stall": 4,
+     "yield_flag": 0,
+     "write_barrier": 7,
+     "read_barrier": 7,
+     "wait_mask": 0,
+     "reuse": 0
+    },
+    "status": "decoded"
+   },
+   {
+    "pc": 720,
+    "predicate": null,
+    "opcode_text": "LOP3.LUT R6, R6, R4, R9, 0x78, !PT",
+    "low_word": "0x0000000406067212",
+    "high_word": "0x000fc800078e7809",
+    "control": {
+     "stall": 4,
+     "yield_flag": 0,
+     "write_barrier": 7,
+     "read_barrier": 7,
+     "wait_mask": 0,
+     "reuse": 0
+    },
+    "status": "decoded"
+   },
+   {
+    "pc": 736,
+    "predicate": null,
+    "opcode_text": "LOP3.LUT R4, R6, R4, R9, 0x80, !PT",
+    "low_word": "0x0000000406047212",
+    "high_word": "0x000fe200078e8009",
+    "control": {
+     "stall": 1,
+     "yield_flag": 1,
+     "write_barrier": 7,
+     "read_barrier": 7,
+     "wait_mask": 0,
+     "reuse": 0
+    },
+    "status": "decoded"
+   },
+   {
+    "pc": 752,
+    "predicate": null,
+    "opcode_text": "IMAD R11, R11, 0x19660c, R6",
+    "low_word": "0x0019660c0b0b7824",
+    "high_word": "0x000fe200078e0206",
+    "control": {
+     "stall": 1,
+     "yield_flag": 1,
+     "write_barrier": 7,
+     "read_barrier": 7,
+     "wait_mask": 0,
+     "reuse": 0
+    },
+    "status": "decoded"
+   },
+   {
+    "pc": 768,
+    "predicate": "@P0",
+    "opcode_text": "BRA 0xa0",
+    "low_word": "0xfffffd9000000947",
+    "high_word": "0x000fea000383ffff",
+    "control": {
+     "stall": 5,
+     "yield_flag": 1,
+     "write_barrier": 7,
+     "read_barrier": 7,
+     "wait_mask": 0,
+     "reuse": 0
+    },
+    "status": "decoded"
+   },
+   {
+    "pc": 784,
+    "predicate": null,
+    "opcode_text": "CS2R R8, SR_CLOCKLO",
+    "low_word": "0x0000000000087805",
+    "high_word": "0x000fe40000015000",
+    "control": {
+     "stall": 2,
+     "yield_flag": 1,
+     "write_barrier": 7,
+     "read_barrier": 7,
+     "wait_mask": 0,
+     "reuse": 0
+    },
+    "status": "decoded"
+   },
+   {
+    "pc": 800,
+    "predicate": null,
+    "opcode_text": "LOP3.LUT P0, RZ, R7, 0x1f, RZ, 0xc0, !PT",
+    "low_word": "0x0000001f07ff7812",
+    "high_word": "0x000fda000780c0ff",
+    "control": {
+     "stall": 13,
+     "yield_flag": 0,
+     "write_barrier": 7,
+     "read_barrier": 7,
+     "wait_mask": 0,
+     "reuse": 0
+    },
+    "status": "decoded"
+   },
+   {
+    "pc": 816,
+    "predicate": "@P0",
+    "opcode_text": "EXIT",
+    "low_word": "0x000000000000094d",
+    "high_word": "0x000fea0003800000",
+    "control": {
+     "stall": 5,
+     "yield_flag": 1,
+     "write_barrier": 7,
+     "read_barrier": 7,
+     "wait_mask": 0,
+     "reuse": 0
+    },
+    "status": "decoded"
+   },
+   {
+    "pc": 832,
+    "predicate": null,
+    "opcode_text": "IADD3 R6, P0, -R2, R8, RZ",
+    "low_word": "0x0000000802067210",
+    "high_word": "0x000fe20007f1e1ff",
+    "control": {
+     "stall": 1,
+     "yield_flag": 1,
+     "write_barrier": 7,
+     "read_barrier": 7,
+     "wait_mask": 0,
+     "reuse": 0
+    },
+    "status": "decoded"
+   },
+   {
+    "pc": 848,
+    "predicate": null,
+    "opcode_text": "IMAD.MOV.U32 R2, RZ, RZ, 0x8",
+    "low_word": "0x00000008ff027424",
+    "high_word": "0x000fc800078e00ff",
+    "control": {
+     "stall": 4,
+     "yield_flag": 0,
+     "write_barrier": 7,
+     "read_barrier": 7,
+     "wait_mask": 0,
+     "reuse": 0
+    },
+    "status": "decoded"
+   },
+   {
+    "pc": 864,
+    "predicate": null,
+    "opcode_text": "IMAD.X R7, R9, 0x1, ~R3, P0",
+    "low_word": "0x0000000109077824",
+    "high_word": "0x000fe400000e0e03",
+    "control": {
+     "stall": 2,
+     "yield_flag": 1,
+     "write_barrier": 7,
+     "read_barrier": 7,
+     "wait_mask": 0,
+     "reuse": 0
+    },
+    "status": "decoded"
+   },
+   {
+    "pc": 880,
+    "predicate": null,
+    "opcode_text": "IMAD.WIDE.U32 R2, R5, R2, c[0x0][0x160]",
+    "low_word": "0x0000580005027625",
+    "high_word": "0x000fc800078e0002",
+    "control": {
+     "stall": 4,
+     "yield_flag": 0,
+     "write_barrier": 7,
+     "read_barrier": 7,
+     "wait_mask": 0,
+     "reuse": 0
+    },
+    "status": "decoded"
+   },
+   {
+    "pc": 896,
+    "predicate": null,
+    "opcode_text": "IMAD.WIDE R4, R5, R0, c[0x0][0x168]",
+    "low_word": "0x00005a0005047625",
+    "high_word": "0x000fe200078e0200",
+    "control": {
+     "stall": 1,
+     "yield_flag": 1,
+     "write_barrier": 7,
+     "read_barrier": 7,
+     "wait_mask": 0,
+     "reuse": 0
+    },
+    "status": "decoded"
+   },
+   {
+    "pc": 912,
+    "predicate": null,
+    "opcode_text": "STG.E.64 [R2.64], R6",
+    "low_word": "0x0000000602007986",
+    "high_word": "0x000fe8000c101b04",
+    "control": {
+     "stall": 4,
+     "yield_flag": 1,
+     "write_barrier": 7,
+     "read_barrier": 7,
+     "wait_mask": 0,
+     "reuse": 0
+    },
+    "status": "decoded"
+   },
+   {
+    "pc": 928,
+    "predicate": null,
+    "opcode_text": "STG.E [R4.64], R11",
+    "low_word": "0x0000000b04007986",
+    "high_word": "0x000fe2000c101904",
+    "control": {
+     "stall": 1,
+     "yield_flag": 1,
+     "write_barrier": 7,
+     "read_barrier": 7,
+     "wait_mask": 0,
+     "reuse": 0
+    },
+    "status": "decoded"
+   },
+   {
+    "pc": 944,
+    "predicate": null,
+    "opcode_text": "EXIT",
+    "low_word": "0x000000000000794d",
+    "high_word": "0x000fea0003800000",
+    "control": {
+     "stall": 5,
+     "yield_flag": 1,
+     "write_barrier": 7,
+     "read_barrier": 7,
+     "wait_mask": 0,
+     "reuse": 0
+    },
+    "status": "decoded"
+   },
+   {
+    "pc": 960,
+    "predicate": null,
+    "opcode_text": "BRA 0x3c0",
+    "low_word": "0xfffffff000007947",
+    "high_word": "0x000fc0000383ffff",
+    "control": {
+     "stall": 0,
+     "yield_flag": 0,
+     "write_barrier": 7,
+     "read_barrier": 7,
+     "wait_mask": 0,
+     "reuse": 0
+    },
+    "status": "decoded"
+   },
+   {
+    "pc": 976,
+    "predicate": null,
+    "opcode_text": "NOP",
+    "low_word": "0x0000000000007918",
+    "high_word": "0x000fc00000000000",
+    "control": {
+     "stall": 0,
+     "yield_flag": 0,
+     "write_barrier": 7,
+     "read_barrier": 7,
+     "wait_mask": 0,
+     "reuse": 0
+    },
+    "status": "decoded"
+   },
+   {
+    "pc": 992,
+    "predicate": null,
+    "opcode_text": "NOP",
+    "low_word": "0x0000000000007918",
+    "high_word": "0x000fc00000000000",
+    "control": {
+     "stall": 0,
+     "yield_flag": 0,
+     "write_barrier": 7,
+     "read_barrier": 7,
+     "wait_mask": 0,
+     "reuse": 0
+    },
+    "status": "decoded"
+   },
+   {
+    "pc": 1008,
+    "predicate": null,
+    "opcode_text": "NOP",
+    "low_word": "0x0000000000007918",
+    "high_word": "0x000fc00000000000",
+    "control": {
+     "stall": 0,
+     "yield_flag": 0,
+     "write_barrier": 7,
+     "read_barrier": 7,
+     "wait_mask": 0,
+     "reuse": 0
+    },
+    "status": "decoded"
+   },
+   {
+    "pc": 1024,
+    "predicate": null,
+    "opcode_text": "NOP",
+    "low_word": "0x0000000000007918",
+    "high_word": "0x000fc00000000000",
+    "control": {
+     "stall": 0,
+     "yield_flag": 0,
+     "write_barrier": 7,
+     "read_barrier": 7,
+     "wait_mask": 0,
+     "reuse": 0
+    },
+    "status": "decoded"
+   },
+   {
+    "pc": 1040,
+    "predicate": null,
+    "opcode_text": "NOP",
+    "low_word": "0x0000000000007918",
+    "high_word": "0x000fc00000000000",
+    "control": {
+     "stall": 0,
+     "yield_flag": 0,
+     "write_barrier": 7,
+     "read_barrier": 7,
+     "wait_mask": 0,
+     "reuse": 0
+    },
+    "status": "decoded"
+   },
+   {
+    "pc": 1056,
+    "predicate": null,
+    "opcode_text": "NOP",
+    "low_word": "0x0000000000007918",
+    "high_word": "0x000fc00000000000",
+    "control": {
+     "stall": 0,
+     "yield_flag": 0,
+     "write_barrier": 7,
+     "read_barrier": 7,
+     "wait_mask": 0,
+     "reuse": 0
+    },
+    "status": "decoded"
+   },
+   {
+    "pc": 1072,
+    "predicate": null,
+    "opcode_text": "NOP",
+    "low_word": "0x0000000000007918",
+    "high_word": "0x000fc00000000000",
+    "control": {
+     "stall": 0,
+     "yield_flag": 0,
+     "write_barrier": 7,
+     "read_barrier": 7,
+     "wait_mask": 0,
+     "reuse": 0
+    },
+    "status": "decoded"
+   },
+   {
+    "pc": 1088,
+    "predicate": null,
+    "opcode_text": "NOP",
+    "low_word": "0x0000000000007918",
+    "high_word": "0x000fc00000000000",
+    "control": {
+     "stall": 0,
+     "yield_flag": 0,
+     "write_barrier": 7,
+     "read_barrier": 7,
+     "wait_mask": 0,
+     "reuse": 0
+    },
+    "status": "decoded"
+   },
+   {
+    "pc": 1104,
+    "predicate": null,
+    "opcode_text": "NOP",
+    "low_word": "0x0000000000007918",
+    "high_word": "0x000fc00000000000",
+    "control": {
+     "stall": 0,
+     "yield_flag": 0,
+     "write_barrier": 7,
+     "read_barrier": 7,
+     "wait_mask": 0,
+     "reuse": 0
+    },
+    "status": "decoded"
+   },
+   {
+    "pc": 1120,
+    "predicate": null,
+    "opcode_text": "NOP",
+    "low_word": "0x0000000000007918",
+    "high_word": "0x000fc00000000000",
+    "control": {
+     "stall": 0,
+     "yield_flag": 0,
+     "write_barrier": 7,
+     "read_barrier": 7,
+     "wait_mask": 0,
+     "reuse": 0
+    },
+    "status": "decoded"
+   },
+   {
+    "pc": 1136,
+    "predicate": null,
+    "opcode_text": "NOP",
+    "low_word": "0x0000000000007918",
+    "high_word": "0x000fc00000000000",
+    "control": {
+     "stall": 0,
+     "yield_flag": 0,
+     "write_barrier": 7,
+     "read_barrier": 7,
+     "wait_mask": 0,
+     "reuse": 0
+    },
+    "status": "decoded"
+   }
+  ]
+ },
+ "skipped_arch_sections": [],
+ "parser_contract": {
+  "supported_toolkit_versions": [
+   "V13.2"
+  ],
+  "supported_arches": [
+   "sm_80",
+   "sm_86"
+  ],
+  "control_layout": {
+   "source": "high_word >> 41 (23 bits)",
+   "stall": "bits 0:3",
+   "yield_flag": "bit 4",
+   "write_barrier": "bits 5:7 (7 = none)",
+   "read_barrier": "bits 8:10 (7 = none)",
+   "wait_mask": "bits 11:16",
+   "reuse": "bits 17:20",
+   "reserved_must_be_zero": "bits 21:22"
+  }
+ },
+ "toolkit_version": "V13.2",
+ "binary": "fixed_latency_front_end_footprint_u8_trace_native.cubin",
+ "summary": {
+  "functions": {
+   "_Z23footprint_global_searchPyPjPKjS2_": {
+    "instructions": 80,
+    "decoded": 80,
+    "unknown_encoding": 0,
+    "stall_cycles_static_sum": 221
+   },
+   "_Z22footprint_fixed_searchPyPjPKj": {
+    "instructions": 72,
+    "decoded": 72,
+    "unknown_encoding": 0,
+    "stall_cycles_static_sum": 203
+   }
+  },
+  "total_decoded": 152,
+  "total_unknown_encoding": 0
+ }
+}

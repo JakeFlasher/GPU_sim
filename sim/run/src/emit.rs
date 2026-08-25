@@ -48,7 +48,7 @@ use sim_mem::{L1CounterError, L1Counters, L1OriginCounters, L2Counters, MemoryOr
 use sim_sm::{
     DramStats, FullCounterEstimatorProvenance, FullKernelReplayResult, FullLaunchCoverage,
     FullLaunchSetCounters, FullLaunchTimingDiagnostic, L2SourceSplit, LaunchSetScope,
-    ReplayConfiguration, SystemCounterError, TailFlags,
+    ModeledCompletionFrontier, ReplayConfiguration, SystemCounterError, TailFlags,
 };
 
 /// The exact counter fields the emission layer reads, borrowed. The type is
@@ -673,7 +673,9 @@ pub struct FullLaunchPredictions {
     configuration: ReplayConfiguration,
     coverage: FullLaunchCoverage,
     diagnostic_last_issue_cycles: u64,
+    last_processed_modeled_system_event_time: Option<u64>,
     terminal_modeled_event_time: Option<u64>,
+    modeled_completion_frontier: ModeledCompletionFrontier,
     unmodeled_tails: TailFlags,
     metrics: [MetricPrediction; EMITTED_METRIC_COUNT],
 }
@@ -697,10 +699,18 @@ impl FullLaunchPredictions {
         self.diagnostic_last_issue_cycles
     }
 
+    pub fn last_processed_modeled_system_event_time(&self) -> Option<u64> {
+        self.last_processed_modeled_system_event_time
+    }
+
     /// Maximum timestamp covered by the modeled event set. This remains
     /// diagnostic metadata and has no conversion into [`BindingCycles`].
     pub fn terminal_modeled_event_time(&self) -> Option<u64> {
         self.terminal_modeled_event_time
+    }
+
+    pub fn modeled_completion_frontier(&self) -> ModeledCompletionFrontier {
+        self.modeled_completion_frontier
     }
 
     pub fn unmodeled_tails(&self) -> TailFlags {
@@ -1590,7 +1600,9 @@ pub fn emit_launch(result: &FullKernelReplayResult) -> Result<FullLaunchPredicti
         configuration: result.configuration(),
         coverage: result.coverage().clone(),
         diagnostic_last_issue_cycles: result.diagnostic_last_issue_cycles(),
+        last_processed_modeled_system_event_time: result.last_processed_modeled_system_event_time(),
         terminal_modeled_event_time: result.terminal_modeled_event_time(),
+        modeled_completion_frontier: result.modeled_completion_frontier(),
         unmodeled_tails: result.unmodeled_tails(),
         metrics,
     })

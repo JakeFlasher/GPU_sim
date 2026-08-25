@@ -1,0 +1,8 @@
+fixed_latency_result_same_bank_driver
+fixed_latency_result_same_bank_native.cubin
+fixed_latency_result_same_bank.cubin
+fixed_latency_result_same_bank_trace_native.cubin
+fixed_latency_result_same_bank_trace.cubin
+*.control_bits.json
+*.patch.json
+

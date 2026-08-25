@@ -81,6 +81,10 @@ impl FileGenerationIdentity {
     pub fn file_identity(self) -> FileIdentity {
         self.identity
     }
+
+    pub fn size_bytes(self) -> u64 {
+        self.size_bytes
+    }
 }
 
 /// Bytes and metadata read from one retained regular-file descriptor.
@@ -181,6 +185,8 @@ pub enum AnchoredReadError {
     },
     #[error("descriptor-anchored artifact {path} changed while its bytes were read")]
     ChangedWhileReading { path: PathBuf },
+    #[error("descriptor-anchored artifact {path} changed after its roster was captured")]
+    ChangedSinceRoster { path: PathBuf },
     #[error("could not reserve {bytes} bytes for descriptor-anchored artifact {path}")]
     AllocationFailed { path: PathBuf, bytes: u64 },
     #[error("threadblock payload traversal exceeds depth {limit} at {path}")]
@@ -386,6 +392,188 @@ impl AnchoredDir {
         })
     }
 
+    /// Capture a complete bounded `.pb` roster without retaining payload
+    /// bytes. Every leaf is opened through the retained root, checked as a
+    /// regular readable file, and bound to its exact generation. Callers may
+    /// later read one member at a time with [`Self::read_rostered_regular`].
+    pub(crate) fn roster_pb_tree(
+        &self,
+        relative: &Path,
+        maximum_files: u64,
+        maximum_bytes: u64,
+    ) -> Result<AnchoredTreeRoster, AnchoredReadError> {
+        let directory =
+            self.open_directory(relative, false)?
+                .ok_or_else(|| AnchoredReadError::Io {
+                    path: self.root.join(relative),
+                    source: std::io::Error::from(std::io::ErrorKind::NotFound),
+                })?;
+        let entry_limit = maximum_files
+            .checked_mul(TREE_ENTRIES_PER_PAYLOAD)
+            .and_then(|value| value.checked_add(MIN_TREE_ENTRY_BUDGET))
+            .unwrap_or(u64::MAX);
+        let mut state = RosterState {
+            files: Vec::new(),
+            identities: BTreeMap::new(),
+            entries_seen: 0,
+            entry_limit,
+            maximum_files,
+            maximum_bytes,
+            bytes_seen: 0,
+        };
+        self.roster_pb_tree_from(directory, relative, 0, &mut state)?;
+        state
+            .files
+            .sort_by(|left, right| left.relative.cmp(&right.relative));
+        Ok(AnchoredTreeRoster {
+            files: state.files,
+            bytes: state.bytes_seen,
+        })
+    }
+
+    fn roster_pb_tree_from(
+        &self,
+        directory: OwnedFd,
+        relative: &Path,
+        depth: usize,
+        state: &mut RosterState,
+    ) -> Result<(), AnchoredReadError> {
+        if depth > MAX_TREE_DEPTH {
+            return Err(AnchoredReadError::TreeDepthExceeded {
+                path: self.root.join(relative),
+                limit: MAX_TREE_DEPTH,
+            });
+        }
+        let mut entries = Dir::read_from(&directory).map_err(|source| AnchoredReadError::Io {
+            path: self.root.join(relative),
+            source: source.into(),
+        })?;
+        while let Some(entry) = entries.next() {
+            let entry = entry.map_err(|source| AnchoredReadError::Io {
+                path: self.root.join(relative),
+                source: source.into(),
+            })?;
+            let name_bytes = entry.file_name().to_bytes();
+            if matches!(name_bytes, b"." | b"..") {
+                continue;
+            }
+            state.entries_seen = state.entries_seen.checked_add(1).ok_or(
+                AnchoredReadError::TreeEntryLimitExceeded {
+                    path: self.root.join(relative),
+                    limit: state.entry_limit,
+                },
+            )?;
+            if state.entries_seen > state.entry_limit {
+                return Err(AnchoredReadError::TreeEntryLimitExceeded {
+                    path: self.root.join(relative),
+                    limit: state.entry_limit,
+                });
+            }
+            let name = OsStr::from_bytes(name_bytes);
+            let child_relative = relative.join(name);
+            let child_path = self.root.join(&child_relative);
+            let stat = statat(&directory, name, AtFlags::SYMLINK_NOFOLLOW).map_err(|source| {
+                AnchoredReadError::Io {
+                    path: child_path.clone(),
+                    source: source.into(),
+                }
+            })?;
+            let file_type = FileType::from_raw_mode(stat.st_mode);
+            let pb_named = Path::new(name)
+                .extension()
+                .is_some_and(|extension| extension == "pb")
+                || name == ".pb";
+            match file_type {
+                FileType::Directory => {
+                    if pb_named {
+                        return Err(AnchoredReadError::NotRegular { path: child_path });
+                    }
+                    let child = openat(&directory, name, DIRECTORY_FLAGS, Mode::empty()).map_err(
+                        |source| AnchoredReadError::Io {
+                            path: child_path,
+                            source: source.into(),
+                        },
+                    )?;
+                    self.roster_pb_tree_from(child, &child_relative, depth + 1, state)?;
+                }
+                FileType::RegularFile if pb_named => {
+                    let next_file_count = u64::try_from(state.files.len())
+                        .unwrap_or(u64::MAX)
+                        .saturating_add(1);
+                    if next_file_count > state.maximum_files {
+                        return Err(AnchoredReadError::TreeFileLimitExceeded {
+                            limit: state.maximum_files,
+                        });
+                    }
+                    let fd =
+                        openat(&directory, name, FILE_FLAGS, Mode::empty()).map_err(|source| {
+                            AnchoredReadError::Io {
+                                path: child_path.clone(),
+                                source: source.into(),
+                            }
+                        })?;
+                    let remaining = state
+                        .maximum_bytes
+                        .checked_sub(state.bytes_seen)
+                        .ok_or_else(|| AnchoredReadError::TreeByteLimitExceeded {
+                            path: child_path.clone(),
+                            limit: state.maximum_bytes,
+                        })?;
+                    let generation = inspect_opened_regular(fd, child_path.clone(), remaining)
+                        .map_err(|error| match error {
+                            AnchoredReadError::SizeLimitExceeded { .. } => {
+                                AnchoredReadError::TreeByteLimitExceeded {
+                                    path: child_path.clone(),
+                                    limit: state.maximum_bytes,
+                                }
+                            }
+                            other => other,
+                        })?;
+                    let next_bytes = state
+                        .bytes_seen
+                        .checked_add(generation.size_bytes())
+                        .ok_or_else(|| AnchoredReadError::TreeByteLimitExceeded {
+                            path: child_path,
+                            limit: state.maximum_bytes,
+                        })?;
+                    if let Some(first) = state
+                        .identities
+                        .insert(generation.file_identity(), child_relative.clone())
+                    {
+                        return Err(AnchoredReadError::HardlinkAlias {
+                            first: self.root.join(first),
+                            second: self.root.join(child_relative),
+                        });
+                    }
+                    state.bytes_seen = next_bytes;
+                    state.files.push(AnchoredTreeRosterFile {
+                        relative: child_relative,
+                        generation,
+                    });
+                }
+                FileType::RegularFile => {}
+                _ => return Err(AnchoredReadError::NotRegular { path: child_path }),
+            }
+        }
+        Ok(())
+    }
+
+    /// Read one previously rostered file through the retained root and reject
+    /// replacement or in-place mutation before exposing its bytes.
+    pub(crate) fn read_rostered_regular(
+        &self,
+        relative: &Path,
+        expected: FileGenerationIdentity,
+    ) -> Result<AnchoredFile, AnchoredReadError> {
+        let file = self.read_exact_regular(relative, expected.size_bytes())?;
+        if file.generation_identity() != expected {
+            return Err(AnchoredReadError::ChangedSinceRoster {
+                path: self.root.join(relative),
+            });
+        }
+        Ok(file)
+    }
+
     fn read_pb_tree_from(
         &self,
         directory: OwnedFd,
@@ -574,8 +762,29 @@ pub(crate) struct AnchoredTree {
     pub(crate) bytes: u64,
 }
 
+pub(crate) struct AnchoredTreeRosterFile {
+    pub(crate) relative: PathBuf,
+    pub(crate) generation: FileGenerationIdentity,
+}
+
+pub(crate) struct AnchoredTreeRoster {
+    pub(crate) files: Vec<AnchoredTreeRosterFile>,
+    #[allow(dead_code)]
+    pub(crate) bytes: u64,
+}
+
 struct TreeState {
     files: Vec<AnchoredTreeFile>,
+    identities: BTreeMap<FileIdentity, PathBuf>,
+    entries_seen: u64,
+    entry_limit: u64,
+    maximum_files: u64,
+    maximum_bytes: u64,
+    bytes_seen: u64,
+}
+
+struct RosterState {
+    files: Vec<AnchoredTreeRosterFile>,
     identities: BTreeMap<FileIdentity, PathBuf>,
     entries_seen: u64,
     entry_limit: u64,
@@ -734,6 +943,30 @@ fn regular_identity(fd: OwnedFd, path: PathBuf) -> Result<FileIdentity, Anchored
     })
 }
 
+fn inspect_opened_regular(
+    fd: OwnedFd,
+    path: PathBuf,
+    maximum_size: u64,
+) -> Result<FileGenerationIdentity, AnchoredReadError> {
+    let file = File::from(fd);
+    let metadata = file.metadata().map_err(|source| AnchoredReadError::Io {
+        path: path.clone(),
+        source,
+    })?;
+    if !metadata.is_file() {
+        return Err(AnchoredReadError::NotRegular { path });
+    }
+    let size = metadata.len();
+    if size > maximum_size {
+        return Err(AnchoredReadError::SizeLimitExceeded {
+            path,
+            limit: maximum_size,
+            actual: size,
+        });
+    }
+    Ok(FileGenerationIdentity::from_metadata(&metadata))
+}
+
 fn read_opened_regular(
     fd: OwnedFd,
     path: PathBuf,
@@ -843,6 +1076,47 @@ mod tests {
         assert!(matches!(
             reader.read_pb_tree(Path::new("tree"), 2, 14),
             Err(AnchoredReadError::HardlinkAlias { .. })
+        ));
+        assert!(matches!(
+            reader.roster_pb_tree(Path::new("tree"), 2, 14),
+            Err(AnchoredReadError::HardlinkAlias { .. })
+        ));
+    }
+
+    #[test]
+    fn roster_reads_exact_generations_one_at_a_time() {
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::create_dir(temp.path().join("tree")).unwrap();
+        std::fs::write(temp.path().join("tree/b.pb"), b"second").unwrap();
+        std::fs::write(temp.path().join("tree/a.pb"), b"first").unwrap();
+        let reader = AnchoredDir::open(temp.path()).unwrap();
+        let roster = reader.roster_pb_tree(Path::new("tree"), 2, 11).unwrap();
+        assert_eq!(roster.bytes, 11);
+        assert_eq!(
+            roster
+                .files
+                .iter()
+                .map(|file| file.relative.as_path())
+                .collect::<Vec<_>>(),
+            vec![Path::new("tree/a.pb"), Path::new("tree/b.pb")]
+        );
+        assert_eq!(
+            reader
+                .read_rostered_regular(&roster.files[1].relative, roster.files[1].generation,)
+                .unwrap()
+                .raw(),
+            b"second"
+        );
+
+        std::fs::write(temp.path().join("replacement.pb"), b"other").unwrap();
+        std::fs::rename(
+            temp.path().join("replacement.pb"),
+            temp.path().join("tree/a.pb"),
+        )
+        .unwrap();
+        assert!(matches!(
+            reader.read_rostered_regular(&roster.files[0].relative, roster.files[0].generation,),
+            Err(AnchoredReadError::ChangedSinceRoster { .. })
         ));
     }
 

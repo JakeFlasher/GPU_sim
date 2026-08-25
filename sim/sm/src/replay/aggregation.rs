@@ -15,8 +15,8 @@ use crate::issue::TailFlags;
 use crate::system::{DramStats, L2SourceSplit, SystemCounterError};
 
 use super::{
-    FullKernelReplayResult, FullLaunchCoverage, ReplayConfiguration, ReplayLaunchCoverageBinding,
-    ReplayMemMode,
+    FullKernelReplayResult, FullLaunchCoverage, ModeledCompletionFrontier, ReplayConfiguration,
+    ReplayLaunchCoverageBinding, ReplayMemMode,
 };
 
 /// Declarative launch identity failures. This constructor creates an expected
@@ -211,7 +211,9 @@ pub enum FullCounterEstimatorProvenance {
 pub struct FullLaunchTimingDiagnostic {
     launch: ReplayLaunchCoverageBinding,
     diagnostic_last_issue_cycles: u64,
+    last_processed_modeled_system_event_time: Option<u64>,
     terminal_modeled_event_time: Option<u64>,
+    modeled_completion_frontier: ModeledCompletionFrontier,
 }
 
 impl FullLaunchTimingDiagnostic {
@@ -224,9 +226,17 @@ impl FullLaunchTimingDiagnostic {
         self.diagnostic_last_issue_cycles
     }
 
+    pub fn last_processed_modeled_system_event_time(&self) -> Option<u64> {
+        self.last_processed_modeled_system_event_time
+    }
+
     /// Raw timestamp of the final successfully processed modeled event.
     pub fn terminal_modeled_event_time(&self) -> Option<u64> {
         self.terminal_modeled_event_time
+    }
+
+    pub fn modeled_completion_frontier(&self) -> ModeledCompletionFrontier {
+        self.modeled_completion_frontier
     }
 }
 
@@ -869,7 +879,10 @@ pub fn aggregate_full_launch_set(
         launch_timing_diagnostics.push(FullLaunchTimingDiagnostic {
             launch: launch.clone(),
             diagnostic_last_issue_cycles: result.diagnostic_last_issue_cycles(),
+            last_processed_modeled_system_event_time: result
+                .last_processed_modeled_system_event_time(),
             terminal_modeled_event_time: result.terminal_modeled_event_time(),
+            modeled_completion_frontier: result.modeled_completion_frontier(),
         });
     }
 
@@ -932,6 +945,8 @@ mod tests {
                 bypass_payload_bytes_per_cycle: 32,
             },
             ldgsts_cache_all_destination_wavefront_cycles: 2,
+            ldgsts_cache_all_destination_service_wavefronts: 2,
+            ldgsts_cache_all_destination_service_cycles: 3,
             max_resident_warps_per_sm: 48,
         }
     }
@@ -1025,6 +1040,7 @@ mod tests {
                 records_seen,
                 per_sm: BTreeMap::new(),
                 diagnostic_last_issue_cycles: 999,
+                last_processed_system_event_time: Some(1_234),
                 terminal_modeled_event_time: Some(1_234),
                 l1,
                 l2,
@@ -1049,10 +1065,12 @@ mod tests {
         let second = binding(2);
         let mut second_result = full_result(second.clone(), configuration, 5, 5);
         second_result.replay.diagnostic_last_issue_cycles = 2_002;
+        second_result.replay.last_processed_system_event_time = Some(2_222);
         second_result.replay.terminal_modeled_event_time = Some(2_222);
         second_result.replay.unmodeled_tails.red_rmw = true;
         let mut first_result = full_result(first.clone(), configuration, 3, 3);
         first_result.replay.diagnostic_last_issue_cycles = 1_001;
+        first_result.replay.last_processed_system_event_time = Some(1_111);
         first_result.replay.terminal_modeled_event_time = Some(1_111);
         let aggregate = aggregate_full_launch_set(
             declaration(configuration, [second.clone(), first.clone()]),
@@ -1085,6 +1103,15 @@ mod tests {
             aggregate.launch_timing_diagnostics()[0].terminal_modeled_event_time(),
             Some(1_111)
         );
+        assert_eq!(
+            aggregate.launch_timing_diagnostics()[0].last_processed_modeled_system_event_time(),
+            Some(1_111)
+        );
+        assert!(
+            aggregate.launch_timing_diagnostics()[0]
+                .modeled_completion_frontier()
+                .is_complete()
+        );
         assert_eq!(aggregate.launch_timing_diagnostics()[1].launch(), &second);
         assert_eq!(
             aggregate.launch_timing_diagnostics()[1].diagnostic_last_issue_cycles(),
@@ -1094,6 +1121,13 @@ mod tests {
             aggregate.launch_timing_diagnostics()[1].terminal_modeled_event_time(),
             Some(2_222)
         );
+        assert!(matches!(
+            aggregate.launch_timing_diagnostics()[1].modeled_completion_frontier(),
+            ModeledCompletionFrontier::Incomplete {
+                lower_bound_cycles: Some(2_222),
+                unmodeled_tails,
+            } if unmodeled_tails.red_rmw
+        ));
         assert!(aggregate.unmodeled_tails().red_rmw);
         assert!(aggregate.l1().is_none());
         assert!(aggregate.l2().is_none());
