@@ -133,7 +133,7 @@ candidate is a complete result, not a reason to add a fitted correction.
 
 - Can use: existing `sim-arch`, `sim-sm`, replay/configuration plumbing,
   retained full-coverage traces and NCU labels, one compact Python evaluator,
-  and the existing Humanize RLCR review loop.
+  and focused ordinary checks and review.
 - Cannot use: new GPU execution, NCU/NVBit recapture, workload-name constants,
   rate fitting, per-cell corrections, measured labels as replay inputs,
   absolute/relative address hashes, SHA comparisons, full-corpus regeneration,
