@@ -233,7 +233,7 @@ class EvaluatorTests(unittest.TestCase):
         self.assertEqual({row["campaign"] for row in rows}, {"v4", "coupled"})
         self.assertEqual(len(rows), 2)
 
-        with self.assertRaisesRegex(evaluate.EvaluationError, "non-probe cell"):
+        with self.assertRaisesRegex(evaluate.EvaluationError, "unexpected cell"):
             evaluate.reduce_core(
                 **inputs, accounting_failures={"production:attention": ["drift"]}
             )
@@ -249,21 +249,47 @@ class EvaluatorTests(unittest.TestCase):
         with self.assertRaises(evaluate.EvaluationError):
             evaluate.score_production(observed, predicted)
 
-    def test_production_labels_cannot_change_verdict(self) -> None:
+    def test_production_labels_are_inert_but_accounting_is_exact(self) -> None:
         core = evaluate.reduce_core(**fixture_inputs())
         live = {key: 20_000.0 + index for index, key in enumerate(sorted(evaluate.PRODUCTION_KEYS))}
         baseline = {key: value - 2_000.0 for key, value in live.items()}
         candidate = {key: value - 1_000.0 for key, value in live.items()}
 
         first = evaluate.attach_production(
-            core, live=live, baseline=baseline, candidate=candidate
+            core,
+            live=live,
+            baseline=baseline,
+            candidate=candidate,
+            accounting_failures={
+                "production:int8": ["launch_0:traffic_or_counter_drift"]
+            },
         )
         shifted_live = {key: value * 3.0 for key, value in live.items()}
         second = evaluate.attach_production(
-            core, live=shifted_live, baseline=baseline, candidate=candidate
+            core,
+            live=shifted_live,
+            baseline=baseline,
+            candidate=candidate,
+            accounting_failures={
+                "production:int8": ["launch_0:traffic_or_counter_drift"]
+            },
         )
 
-        self.assertTrue(first["production"]["verdict_inert"])
+        self.assertTrue(first["production"]["timing_labels_verdict_inert"])
+        self.assertTrue(first["production"]["accounting_participates_in_exactness_gate"])
+        self.assertFalse(first["accounting"]["exact"])
+        self.assertIn(
+            "traffic_and_instruction_accounting_exact", first["failed_gates"]
+        )
+        self.assertEqual(
+            first["accounting"]["failed_cells"],
+            [
+                {
+                    "cell": "production:int8",
+                    "failures": ["launch_0:traffic_or_counter_drift"],
+                }
+            ],
+        )
         self.assertEqual(first["verdict"], second["verdict"])
         self.assertEqual(first["failed_gates"], second["failed_gates"])
         self.assertEqual(first["gates"], second["gates"])

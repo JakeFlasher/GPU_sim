@@ -655,6 +655,31 @@ def nonzero_sign(value: float, label: str) -> int:
     return 1 if value > 0.0 else -1
 
 
+def normalized_accounting_failures(
+    failures_by_cell: Mapping[str, Sequence[str]],
+    allowed_cells: set[str],
+) -> list[dict[str, Any]]:
+    require(
+        set(failures_by_cell) <= allowed_cells,
+        "accounting failures contain an unexpected cell",
+    )
+    rows: list[dict[str, Any]] = []
+    for composite_key in sorted(failures_by_cell):
+        failures = failures_by_cell[composite_key]
+        require(
+            isinstance(composite_key, str)
+            and isinstance(failures, Sequence)
+            and not isinstance(failures, (str, bytes))
+            and all(isinstance(failure, str) and failure for failure in failures),
+            "accounting failures are malformed",
+        )
+        if failures:
+            rows.append(
+                {"cell": composite_key, "failures": sorted(set(failures))}
+            )
+    return rows
+
+
 def reduce_core(
     *,
     live_v4: Mapping[str, float],
@@ -686,24 +711,9 @@ def reduce_core(
         *(f"coupled:{key}" for key in COUPLED_KEYS),
         *(f"guard:{key}" for key in GUARD_KEYS),
     }
-    require(
-        set(accounting_failures) <= allowed_accounting_cells,
-        "accounting failures contain a non-probe cell",
+    accounting_rows = normalized_accounting_failures(
+        accounting_failures, allowed_accounting_cells
     )
-    accounting_rows: list[dict[str, Any]] = []
-    for composite_key in sorted(accounting_failures):
-        failures = accounting_failures[composite_key]
-        require(
-            isinstance(composite_key, str)
-            and isinstance(failures, Sequence)
-            and not isinstance(failures, (str, bytes))
-            and all(isinstance(failure, str) and failure for failure in failures),
-            "accounting failures are malformed",
-        )
-        if failures:
-            accounting_rows.append(
-                {"cell": composite_key, "failures": sorted(set(failures))}
-            )
 
     transfer_cells = [
         *(('coupled', key) for key in sorted(COUPLED_KEYS)),
@@ -834,7 +844,7 @@ def reduce_core(
         "gates": gates,
         "failed_gates": failed,
         "verdict": "retained_opt_in" if not failed else "not_retained",
-        "verdict_frozen_before_production": True,
+        "timing_transfer_gates_frozen_before_production": True,
     }
 
 
@@ -878,24 +888,68 @@ def attach_production(
     live: Mapping[str, float],
     baseline: Mapping[str, float],
     candidate: Mapping[str, float],
+    accounting_failures: Mapping[str, Sequence[str]] | None = None,
 ) -> dict[str, Any]:
     before = score_production(live, baseline)
     after = score_production(live, candidate)
     baseline_errors = {row["key"]: row["absolute_error"] for row in before["rows"]}
     candidate_errors = {row["key"]: row["absolute_error"] for row in after["rows"]}
     result = copy.deepcopy(dict(core))
-    frozen = (result.get("verdict"), copy.deepcopy(result.get("failed_gates")), copy.deepcopy(result.get("gates")))
+    gates = result.get("gates")
+    require(isinstance(gates, list), "core gates are malformed")
+    timing_gate_snapshot = copy.deepcopy(
+        [
+            gate
+            for gate in gates
+            if gate.get("name") != "traffic_and_instruction_accounting_exact"
+        ]
+    )
+    result["probe_verdict_before_production_replay"] = result.get("verdict")
+    production_accounting = normalized_accounting_failures(
+        accounting_failures or {},
+        {f"production:{key}" for key in PRODUCTION_KEYS},
+    )
+    accounting = result.get("accounting")
+    require(isinstance(accounting, dict), "core accounting is malformed")
+    prior_rows = accounting.get("failed_cells")
+    require(isinstance(prior_rows, list), "core accounting failures are malformed")
+    all_accounting_rows = sorted(
+        [*prior_rows, *production_accounting], key=lambda row: row["cell"]
+    )
+    accounting["failed_cells"] = all_accounting_rows
+    accounting["exact"] = not all_accounting_rows
+    accounting["production_cells"] = len(PRODUCTION_KEYS)
+    accounting["total_replay_cells"] = accounting["probe_replay_cells"] + len(
+        PRODUCTION_KEYS
+    )
+    for gate in gates:
+        if gate.get("name") == "traffic_and_instruction_accounting_exact":
+            gate["passed"] = not all_accounting_rows
+            break
+    else:
+        raise EvaluationError("core accounting gate is missing")
+    result["failed_gates"] = [gate["name"] for gate in gates if not gate["passed"]]
+    result["verdict"] = (
+        "retained_opt_in" if not result["failed_gates"] else "not_retained"
+    )
     result["production"] = {
-        "verdict_inert": True,
+        "timing_labels_verdict_inert": True,
+        "accounting_participates_in_exactness_gate": True,
         "baseline": before,
         "candidate": after,
         "all_six_absolute_errors_improved": all(
             candidate_errors[key] < baseline_errors[key] for key in PRODUCTION_KEYS
         ),
+        "accounting_failures": production_accounting,
     }
     require(
-        frozen == (result.get("verdict"), result.get("failed_gates"), result.get("gates")),
-        "production scoring changed the frozen verdict",
+        timing_gate_snapshot
+        == [
+            gate
+            for gate in result["gates"]
+            if gate.get("name") != "traffic_and_instruction_accounting_exact"
+        ],
+        "production scoring changed a frozen timing-transfer gate",
     )
     return result
 
@@ -1090,15 +1144,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             live=evidence.live_production,
             baseline=evidence.baseline_production,
             candidate=candidate_production,
-        )
-        result["accounting"]["production_cells"] = len(candidate_production)
-        result["production"]["accounting_failures"] = [
-            {"cell": key, "failures": sorted(set(failures))}
-            for key, failures in sorted(production_accounting.items())
-        ]
-        result["accounting"]["total_replay_cells"] = (
-            result["accounting"]["probe_replay_cells"]
-            + len(candidate_production)
+            accounting_failures=production_accounting,
         )
         write_json(result_path, result)
     except (EvaluationError, OSError, subprocess.TimeoutExpired) as error:

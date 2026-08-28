@@ -1,7 +1,14 @@
 {
   "accounting": {
-    "exact": true,
-    "failed_cells": [],
+    "exact": false,
+    "failed_cells": [
+      {
+        "cell": "production:int8",
+        "failures": [
+          "launch_0:traffic_or_counter_drift"
+        ]
+      }
+    ],
     "probe_replay_cells": 50,
     "production_cells": 6,
     "retained_control_cells": 8,
@@ -80,7 +87,8 @@
     "transfer_mae_strictly_below_baseline",
     "warmed_source_mae_not_above_baseline",
     "coupled_route_order_strict",
-    "v4_corrected_interaction_signs_match"
+    "v4_corrected_interaction_signs_match",
+    "traffic_and_instruction_accounting_exact"
   ],
   "gates": [
     {
@@ -105,7 +113,7 @@
     },
     {
       "name": "traffic_and_instruction_accounting_exact",
-      "passed": true
+      "passed": false
     }
   ],
   "mechanism_sanity": [
@@ -156,6 +164,7 @@
     "live_groups": 16384,
     "simulator_groups": 64
   },
+  "probe_verdict_before_production_replay": "not_retained",
   "production": {
     "accounting_failures": [
       {
@@ -165,6 +174,7 @@
         ]
       }
     ],
+    "accounting_participates_in_exactness_gate": true,
     "all_six_absolute_errors_improved": false,
     "baseline": {
       "coverage": 6,
@@ -254,7 +264,7 @@
         }
       ]
     },
-    "verdict_inert": true
+    "timing_labels_verdict_inert": true
   },
   "route_order": {
     "group_count": 6,
@@ -382,6 +392,7 @@
     ]
   },
   "schema_version": 1,
+  "timing_transfer_gates_frozen_before_production": true,
   "transfer": {
     "baseline_mae_cycles_per_group": 43.8032470703125,
     "candidate_mae_cycles_per_group": 49.43959147135417,
@@ -765,7 +776,6 @@
     ]
   },
   "verdict": "not_retained",
-  "verdict_frozen_before_production": true,
   "warmed_source_guard": {
     "baseline_mae_cycles_per_group": 14.377197265625,
     "candidate_mae_cycles_per_group": 15.037353515625,
