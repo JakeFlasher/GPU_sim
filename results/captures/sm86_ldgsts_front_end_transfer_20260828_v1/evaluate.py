@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""Evaluate the opt-in SM86 LDGSTS front end on retained CPU replay data."""
+"""Historical evaluator for the rejected SM86 LDGSTS front-end candidate.
+
+Replay execution requires corrected checkpoint 96007d6; current mainline
+intentionally has no candidate selector. The pure reduction functions remain
+available here with the terminal result they produced.
+"""
 
 from __future__ import annotations
 

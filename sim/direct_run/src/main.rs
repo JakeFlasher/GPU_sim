@@ -4,13 +4,13 @@ use std::process::ExitCode;
 #[cfg(feature = "performance-counters")]
 use std::time::Instant;
 
-use sim_direct_run::{CacheScope, LdgstsFrontEndMode, MemoryMode, RunConfig, RunError, run};
+use sim_direct_run::{CacheScope, MemoryMode, RunConfig, RunError, run};
 
 const USAGE: &str = "Usage: sim-run --trace DIR --control FILE --arch-card FILE \
 [--pchase-card FILE] [--mode flat|l1|l1-l2] \
 [--cache-scope launch|stream-l2] [--carded-dram] [--kernel-id ID] \
 [--memory-service-candidates FILE] [--memory-admission-candidates FILE] \
-[--memory-admission-feedback FILE] [--ldgsts-front-end ampere-queue-v1]";
+[--memory-admission-feedback FILE]";
 
 fn take_value(
     args: &mut impl Iterator<Item = OsString>,
@@ -32,7 +32,6 @@ fn parse_args(args: impl IntoIterator<Item = OsString>) -> Result<Option<RunConf
     let mut memory_service_candidates = None;
     let mut memory_admission_candidates = None;
     let mut memory_admission_feedback = None;
-    let mut ldgsts_front_end = None;
     let mut args = args.into_iter();
     while let Some(arg) = args.next() {
         match arg.as_os_str() {
@@ -95,27 +94,6 @@ fn parse_args(args: impl IntoIterator<Item = OsString>) -> Result<Option<RunConf
                     "--memory-admission-feedback",
                 )?));
             }
-            value if value == OsStr::new("--ldgsts-front-end") => {
-                if ldgsts_front_end.is_some() {
-                    return Err(RunError::new(
-                        "arguments",
-                        "--ldgsts-front-end may be specified only once",
-                    ));
-                }
-                let raw = take_value(&mut args, "--ldgsts-front-end")?;
-                let raw = raw.to_str().ok_or_else(|| {
-                    RunError::new("arguments", "--ldgsts-front-end must be UTF-8")
-                })?;
-                ldgsts_front_end = Some(match raw {
-                    "ampere-queue-v1" => LdgstsFrontEndMode::AmpereQueueV1,
-                    _ => {
-                        return Err(RunError::new(
-                            "arguments",
-                            format!("unknown LDGSTS front-end {raw:?}; use ampere-queue-v1"),
-                        ));
-                    }
-                });
-            }
             unknown => {
                 return Err(RunError::new(
                     "arguments",
@@ -138,7 +116,6 @@ fn parse_args(args: impl IntoIterator<Item = OsString>) -> Result<Option<RunConf
         memory_service_candidates,
         memory_admission_candidates,
         memory_admission_feedback,
-        ldgsts_front_end: ldgsts_front_end.unwrap_or(LdgstsFrontEndMode::Disabled),
     }))
 }
 
@@ -214,7 +191,6 @@ mod tests {
         ];
         let default = parse_args(base.clone()).unwrap().unwrap();
         assert_eq!(default.cache_scope, CacheScope::Launch);
-        assert_eq!(default.ldgsts_front_end, LdgstsFrontEndMode::Disabled);
 
         let configured = parse_args(
             base.into_iter()
@@ -223,46 +199,6 @@ mod tests {
         .unwrap()
         .unwrap();
         assert_eq!(configured.cache_scope, CacheScope::StreamL2);
-    }
-
-    #[test]
-    fn ldgsts_front_end_selection_is_exact_and_single() {
-        let base = [
-            OsString::from("--trace"),
-            OsString::from("trace"),
-            OsString::from("--control"),
-            OsString::from("control"),
-            OsString::from("--arch-card"),
-            OsString::from("card"),
-        ];
-        let configured = parse_args(base.clone().into_iter().chain([
-            OsString::from("--ldgsts-front-end"),
-            OsString::from("ampere-queue-v1"),
-        ]))
-        .unwrap()
-        .unwrap();
-        assert_eq!(
-            configured.ldgsts_front_end,
-            LdgstsFrontEndMode::AmpereQueueV1
-        );
-
-        let unknown = parse_args(base.clone().into_iter().chain([
-            OsString::from("--ldgsts-front-end"),
-            OsString::from("ampere_queue_v1"),
-        ]))
-        .unwrap_err();
-        assert_eq!(unknown.stage(), "arguments");
-        assert!(unknown.detail().contains("unknown LDGSTS front-end"));
-
-        let duplicate = parse_args(base.into_iter().chain([
-            OsString::from("--ldgsts-front-end"),
-            OsString::from("ampere-queue-v1"),
-            OsString::from("--ldgsts-front-end"),
-            OsString::from("ampere-queue-v1"),
-        ]))
-        .unwrap_err();
-        assert_eq!(duplicate.stage(), "arguments");
-        assert!(duplicate.detail().contains("only once"));
     }
 
     #[test]

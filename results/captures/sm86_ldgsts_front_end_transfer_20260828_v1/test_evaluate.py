@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Focused tests for the retained LDGSTS front-end evaluator."""
+"""Focused tests archived with the rejected LDGSTS front-end evaluator."""
 
 from __future__ import annotations
 

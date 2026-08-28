@@ -16,15 +16,13 @@ use std::str::FromStr;
 use std::time::Instant;
 
 use serde::{Deserialize, Serialize};
-use sim_arch::{ArchId, card::ArchCard};
+use sim_arch::card::ArchCard;
 use sim_mem::{L1Counters, L2Config, L2Counters, L2Source, PchaseCard};
-pub use sim_sm::LdgstsFrontEndMode;
 use sim_sm::{
     ControlSidecar, DramBw, DramStats, FullKernelReplayResult, IssueModelParams, L2SourceSplit,
     MAX_MEMORY_ADMISSION_CANDIDATES, MAX_MEMORY_SERVICE_CANDIDATES, MemoryAdmissionCandidate,
     MemoryServiceCandidate, ModeledCompletionFrontier, ReadinessDiagnostics, ReplayMemMode,
     StreamL2ReplaySession, TailFlags, build_schedules, replay_trace_kernel,
-    replay_trace_kernel_with_ldgsts_front_end,
     replay_trace_kernel_with_memory_admission_candidates,
     replay_trace_kernel_with_memory_admission_feedback,
     replay_trace_kernel_with_memory_service_candidates,
@@ -97,10 +95,6 @@ impl FromStr for CacheScope {
     }
 }
 
-fn ldgsts_front_end_disabled(mode: &LdgstsFrontEndMode) -> bool {
-    *mode == LdgstsFrontEndMode::Disabled
-}
-
 #[derive(Debug, Clone)]
 pub struct RunConfig {
     pub trace_dir: PathBuf,
@@ -119,9 +113,6 @@ pub struct RunConfig {
     /// Optional schema-1 document containing exactly one timing-active finite
     /// admission candidate.
     pub memory_admission_feedback: Option<PathBuf>,
-    /// Explicit paper-derived LDGSTS ingress candidate. Disabled is the
-    /// compatibility/default path.
-    pub ldgsts_front_end: LdgstsFrontEndMode,
 }
 
 #[derive(Debug, Deserialize)]
@@ -344,8 +335,6 @@ pub struct RunReport {
     pub architecture: String,
     pub memory_mode: &'static str,
     pub cache_scope: &'static str,
-    #[serde(skip_serializing_if = "ldgsts_front_end_disabled")]
-    pub ldgsts_front_end: LdgstsFrontEndMode,
     pub carded_dram_bandwidth: bool,
     pub memory_service_candidate_count: usize,
     pub memory_admission_candidate_count: usize,
@@ -573,7 +562,6 @@ fn launch_report(
     result: FullKernelReplayResult,
     cache_handoff: Option<CacheHandoffReport>,
     expected_memory_admission_feedback: Option<MemoryAdmissionCandidate>,
-    expected_ldgsts_front_end: LdgstsFrontEndMode,
 ) -> Result<LaunchReport, RunError> {
     let configured_memory_admission_feedback = result.configuration().memory_admission_feedback();
     if configured_memory_admission_feedback != expected_memory_admission_feedback {
@@ -581,15 +569,6 @@ fn launch_report(
             "replay configuration",
             format!(
                 "timing-active memory-admission feedback identity differs: expected {expected_memory_admission_feedback:?}, got {configured_memory_admission_feedback:?}"
-            ),
-        ));
-    }
-    let configured_ldgsts_front_end = result.configuration().ldgsts_front_end();
-    if configured_ldgsts_front_end != expected_ldgsts_front_end {
-        return Err(RunError::new(
-            "replay configuration",
-            format!(
-                "LDGSTS front-end identity differs: expected {expected_ldgsts_front_end:?}, got {configured_ldgsts_front_end:?}"
             ),
         ));
     }
@@ -711,12 +690,11 @@ pub fn run(config: &RunConfig) -> Result<RunReport, RunError> {
     let performance_enabled = std::env::var_os("SIM_RUN_PERFORMANCE_COUNTERS").is_some();
     let candidate_inputs = usize::from(config.memory_service_candidates.is_some())
         + usize::from(config.memory_admission_candidates.is_some())
-        + usize::from(config.memory_admission_feedback.is_some())
-        + usize::from(config.ldgsts_front_end != LdgstsFrontEndMode::Disabled);
+        + usize::from(config.memory_admission_feedback.is_some());
     if candidate_inputs > 1 {
         return Err(RunError::new(
             "arguments",
-            "memory-service, memory-admission, feedback, and LDGSTS front-end candidates are mutually exclusive",
+            "memory-service, memory-admission, and feedback candidate files are mutually exclusive",
         ));
     }
     if config.cache_scope == CacheScope::StreamL2 && config.memory_mode != MemoryMode::L1L2 {
@@ -767,14 +745,6 @@ pub fn run(config: &RunConfig) -> Result<RunReport, RunError> {
             "--memory-admission-feedback currently requires --cache-scope launch",
         ));
     }
-    if config.ldgsts_front_end != LdgstsFrontEndMode::Disabled
-        && config.memory_mode != MemoryMode::L1L2
-    {
-        return Err(RunError::new(
-            "arguments",
-            "--ldgsts-front-end requires --mode l1-l2",
-        ));
-    }
     let memory_service_candidates =
         load_memory_service_candidates(config.memory_service_candidates.as_ref())?;
     let memory_admission_candidates =
@@ -797,15 +767,6 @@ pub fn run(config: &RunConfig) -> Result<RunReport, RunError> {
     }
     let arch_card = ArchCard::load(&config.arch_card).map_err(at("architecture card"))?;
     let arch = arch_card.arch_id().map_err(at("architecture card"))?;
-    if config.ldgsts_front_end != LdgstsFrontEndMode::Disabled && arch != ArchId::Sm86 {
-        return Err(RunError::new(
-            "arguments",
-            format!(
-                "--ldgsts-front-end ampere-queue-v1 requires sm_86, got {}",
-                arch.token()
-            ),
-        ));
-    }
     let latencies = arch_card
         .required_latencies()
         .map_err(at("architecture latencies"))?;
@@ -878,17 +839,7 @@ pub fn run(config: &RunConfig) -> Result<RunReport, RunError> {
     let cache_session = match config.cache_scope {
         CacheScope::Launch => {
             for loc in kernel_locs {
-                let outcome = if config.ldgsts_front_end != LdgstsFrontEndMode::Disabled {
-                    replay_trace_kernel_with_ldgsts_front_end(
-                        &trace,
-                        &loc,
-                        &schedules,
-                        &arch_card,
-                        &issue,
-                        mode,
-                        config.ldgsts_front_end,
-                    )
-                } else if let Some(candidate) = memory_admission_feedback {
+                let outcome = if let Some(candidate) = memory_admission_feedback {
                     replay_trace_kernel_with_memory_admission_feedback(
                         &trace, &loc, &schedules, &arch_card, &issue, mode, candidate,
                     )
@@ -910,12 +861,7 @@ pub fn run(config: &RunConfig) -> Result<RunReport, RunError> {
                         "direct timing replay requires complete launch coverage",
                     )
                 })?;
-                launches.push(launch_report(
-                    result,
-                    None,
-                    memory_admission_feedback,
-                    config.ldgsts_front_end,
-                )?);
+                launches.push(launch_report(result, None, memory_admission_feedback)?);
             }
             None
         }
@@ -929,28 +875,19 @@ pub fn run(config: &RunConfig) -> Result<RunReport, RunError> {
                     "--cache-scope stream-l2 requires every launch in the trace to belong to one device and stream",
                 ));
             }
-            let mut session = StreamL2ReplaySession::new_with_ldgsts_front_end(
+            let mut session = StreamL2ReplaySession::new(
                 &trace,
                 &arch_card,
                 &issue,
                 mode,
                 first.device_id(),
                 first.stream_id(),
-                config.ldgsts_front_end,
             )
             .map_err(at("replay session"))?;
             let mut seeded_by_kernel_ids = Vec::new();
             for (sequence_index, loc) in kernel_locs.into_iter().enumerate() {
                 let outcome = session
-                    .replay_next_with_ldgsts_front_end(
-                        &trace,
-                        &loc,
-                        &schedules,
-                        &arch_card,
-                        &issue,
-                        mode,
-                        config.ldgsts_front_end,
-                    )
+                    .replay_next(&trace, &loc, &schedules, &arch_card, &issue, mode)
                     .map_err(at("replay session"))?;
                 let result = outcome.into_full().ok_or_else(|| {
                     RunError::new(
@@ -966,7 +903,6 @@ pub fn run(config: &RunConfig) -> Result<RunReport, RunError> {
                         seeded_by_kernel_ids: seeded_by_kernel_ids.clone(),
                     }),
                     None,
-                    config.ldgsts_front_end,
                 )?);
                 seeded_by_kernel_ids.push(loc.kernel().id);
             }
@@ -987,7 +923,6 @@ pub fn run(config: &RunConfig) -> Result<RunReport, RunError> {
         architecture: arch.token().to_owned(),
         memory_mode: config.memory_mode.token(),
         cache_scope: config.cache_scope.token(),
-        ldgsts_front_end: config.ldgsts_front_end,
         carded_dram_bandwidth: config.carded_dram_bandwidth,
         memory_service_candidate_count: memory_service_candidates.as_ref().map_or(0, Vec::len),
         memory_admission_candidate_count: memory_admission_candidates.as_ref().map_or(0, Vec::len),
@@ -1027,7 +962,6 @@ mod tests {
             memory_service_candidates: None,
             memory_admission_candidates: None,
             memory_admission_feedback: None,
-            ldgsts_front_end: LdgstsFrontEndMode::Disabled,
         }
     }
 
@@ -1038,7 +972,6 @@ mod tests {
         assert_eq!(report.simulator_version, env!("CARGO_PKG_VERSION"));
         assert_eq!(report.architecture, "sm_86");
         assert_eq!(report.cache_scope, "launch");
-        assert_eq!(report.ldgsts_front_end, LdgstsFrontEndMode::Disabled);
         assert!(!report.carded_dram_bandwidth);
         assert_eq!(report.memory_service_candidate_count, 0);
         assert_eq!(report.memory_admission_candidate_count, 0);
@@ -1077,35 +1010,6 @@ mod tests {
             CacheScope::StreamL2
         );
         assert!("global".parse::<CacheScope>().is_err());
-    }
-
-    #[test]
-    fn ldgsts_front_end_requires_full_hierarchy_and_resolves_for_both_cache_scopes() {
-        let mut flat = fixture(MemoryMode::Flat);
-        flat.ldgsts_front_end = LdgstsFrontEndMode::AmpereQueueV1;
-        let error = run(&flat).unwrap_err();
-        assert_eq!(error.stage(), "arguments");
-        assert!(error.detail().contains("requires --mode l1-l2"));
-
-        let mut launch = fixture(MemoryMode::L1L2);
-        launch.ldgsts_front_end = LdgstsFrontEndMode::AmpereQueueV1;
-        let launch_report = run(&launch).unwrap();
-        assert_eq!(
-            launch_report.ldgsts_front_end,
-            LdgstsFrontEndMode::AmpereQueueV1
-        );
-        assert_eq!(
-            serde_json::to_value(&launch_report).unwrap()["ldgsts_front_end"],
-            "ampere_queue_v1"
-        );
-
-        launch.cache_scope = CacheScope::StreamL2;
-        let retained_l2 = run(&launch).unwrap();
-        assert_eq!(
-            retained_l2.ldgsts_front_end,
-            LdgstsFrontEndMode::AmpereQueueV1
-        );
-        assert_eq!(retained_l2.cache_scope, "stream-l2");
     }
 
     #[test]

@@ -722,6 +722,24 @@ active pairs pass freshness, schema/configuration identity, and byte-identical
 twin validation. See
 [CUDA-VMM alias discriminator](sm86_atomic_vmm_alias_milestone.md).
 
+The retained-data SM86 LDGSTS front-end test is complete. One frozen
+LDGSTS-only composition of five effective outstanding positions, 4/2-cycle
+local/shared frontiers, and 13/39-cycle boundaries worsens 30-cell transfer
+MAE from 43.803 to 49.440 cycles/group and the W1-W8 guard from 14.377 to
+15.037. It also fails one of six strict route orders and three of ten corrected
+interaction signs. All nine coupled signs pass, the mechanism executes as
+specified, and all 50 probe replays preserve traffic; production int8 changes
+traffic, so all-replay accounting is not exact.
+
+The candidate is rejected and its CLI, timing state, schema-14 diagnostics,
+and derived binaries are retired. Production timing labels are descriptive:
+their 32.901% candidate MAPE does not replace the current 33.128% baseline.
+The exact result and restricted claim are in
+[the LDGSTS front-end decision](../results/captures/sm86_ldgsts_front_end_transfer_20260828_v1/README.md).
+A later prospective discriminator should use a barrier-free burst around depth
+five to separate route-invariant acceptance release from route-sensitive
+backpressure; the rejected composite is not retuned on the consumed labels.
+
 The remaining technical sequence is:
 
 1. add `sm_120` behavior only from architecture-appropriate evidence after the

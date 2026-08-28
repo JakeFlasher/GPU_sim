@@ -18,6 +18,9 @@ These are the current project documents:
 - [sm_86 barrier pipeline and cache-handoff milestone](sm86_barrier_pipeline_cache_handoff_milestone.md):
   completed traced warm L2 state, barrier throughput, coupled route, and
   multi-CTA validation.
+- [sm_86 LDGSTS front-end decision](../results/captures/sm86_ldgsts_front_end_transfer_20260828_v1/README.md):
+  56 CPU replays reject the simplified composite on transfer, guard, route,
+  interaction-sign, and all-replay accounting gates; its active code is retired.
 - [sm_86 execution-port and control-pipeline milestone](sm86_issue_port_control_pipeline_milestone.md):
   completed dependent/independent pipe study, exact forward-branch service,
   and rejected scalar/dual-issue candidates.

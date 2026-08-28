@@ -33,6 +33,14 @@ the route and CTA-shape ordering without a fixed release, re-arm, route, or
 CTA-count constant. Six-workload MAPE is 33.394%. The full result is in
 [`docs/sm86_barrier_pipeline_cache_handoff_milestone.md`](../docs/sm86_barrier_pipeline_cache_handoff_milestone.md).
 
+The **SM86 LDGSTS front-end retained-data discriminator** is complete. A
+paper-derived LDGSTS-only composition of five effective outstanding positions,
+4/2-cycle local/shared frontiers, and 13/39-cycle boundaries fails transfer,
+guard, strict route-order, corrected-sign, and all-replay accounting gates.
+The candidate surface is retired; production stays at the 33.128% baseline.
+See the
+[`not_retained` decision](../results/captures/sm86_ldgsts_front_end_transfer_20260828_v1/README.md).
+
 The **sm_86 execution-port and control-pipeline closure** milestone is complete.
 A 68-cell campaign rejects generic scalar initiation and dual issue, while an
 exact predicated-forward-BRA rule reduces branch slope MAE from 5.033 to 0.033,
@@ -219,6 +227,11 @@ inactive. W16 remains only a phase sentinel outside focused campaigns.
   the modern NVIDIA path.
 - Complete causal readiness attribution before calibrating issue ports or dual
   issue so dependency stalls and scheduler competition cannot be conflated.
+- Complete: frozen CPU replay rejects the simplified LDGSTS front-end
+  composite; no selector or timing state remains active.
+- Next discriminator: a prospective barrier-free depth-1/4/5/6/8 LDGSTS burst
+  crossed with SMSP placement and source route, holding destination work fixed,
+  to distinguish acceptance release from route-sensitive backpressure.
 - Calibrate L1/L2/DRAM geometry and latency from targeted microbenchmarks.
 - Keep hypotheses exposed as configurable parameters until evidence supports a
   default.
