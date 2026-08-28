@@ -64,7 +64,7 @@
 
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::num::{NonZeroU32, NonZeroU128};
+use std::num::{NonZeroU32, NonZeroU64, NonZeroU128};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use serde::{Deserialize, Serialize};
@@ -692,6 +692,10 @@ pub enum IssueError {
         arch: ArchId,
     },
     #[error(
+        "cannot change the LDGSTS front-end mode while {responses} direct async response(s) are outstanding"
+    )]
+    LdgstsFrontEndResponsesOutstanding { responses: usize },
+    #[error(
         "one function declares inconsistent CTA-barrier pipeline configurations: expected {expected:?}, got {got:?}"
     )]
     BarrierPipelineConfigurationMismatch {
@@ -913,6 +917,8 @@ pub enum IssueError {
     ResponseWarpOutOfRange { warp: usize, warps: usize },
     #[error("memory response token {reply:?} was not emitted or is no longer outstanding")]
     ResponseTokenNotOutstanding { reply: ReplyTo },
+    #[error("asynchronous-copy response {response_id:?} lost its source-timing ticket")]
+    AsyncCopyResponseTimingMissing { response_id: ResponseId },
     #[error(
         "memory response targets warp {warp} dependence barrier {barrier}, which is not pending"
     )]
@@ -3931,6 +3937,43 @@ pub(crate) struct LdgstsFrontEndTiming {
     pub(crate) source_floor: u64,
 }
 
+/// Issue-local source timing retained until an LDGSTS sector reaches its
+/// terminal hit or response. Direct responses retain it in actor-owned state
+/// keyed by their existing response identity, keeping [`MemRequest`] compact.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+struct LdgstsSourceTiming {
+    excess_delay: u64,
+    source_floor: NonZeroU64,
+}
+
+impl LdgstsFrontEndTiming {
+    fn source_timing(self) -> LdgstsSourceTiming {
+        LdgstsSourceTiming {
+            excess_delay: self.excess_delay,
+            source_floor: NonZeroU64::new(self.source_floor)
+                .expect("the LDGSTS source floor includes a nonzero fixed latency"),
+        }
+    }
+}
+
+/// Compose the candidate's issue-side excess with one existing hierarchy
+/// completion. The full card latency is charged exactly once; the candidate
+/// contributes only its excess and its independently anchored source floor.
+fn ldgsts_source_ready(
+    existing_ready: u64,
+    timing: Option<LdgstsSourceTiming>,
+) -> Result<u64, IssueError> {
+    let Some(timing) = timing else {
+        return Ok(existing_ready);
+    };
+    let delayed = checked_cycle_add(
+        "LDGSTS front-end excess source delay",
+        existing_ready,
+        timing.excess_delay,
+    )?;
+    Ok(delayed.max(timing.source_floor.get()))
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct LdgstsFrontEndState {
     local_ready: [u64; SUB_CORES],
@@ -4086,6 +4129,7 @@ fn is_effective_ldgsts_front_end_token(kind: AccessKind) -> bool {
     matches!(
         kind,
         AccessKind::GlobalAsyncCopy {
+            len: 1..,
             completion_work: 1..,
             ..
         }
@@ -5271,6 +5315,7 @@ enum FillTarget {
     AsyncCopy {
         group: AsyncCopyGroupId,
         barrier: Option<DepBarrier>,
+        source_timing: Option<LdgstsSourceTiming>,
     },
 }
 
@@ -5286,6 +5331,13 @@ impl FillTarget {
         match self {
             Self::Barrier(_) => None,
             Self::AsyncCopy { group, .. } => Some(group),
+        }
+    }
+
+    const fn source_timing(self) -> Option<LdgstsSourceTiming> {
+        match self {
+            Self::Barrier(_) => None,
+            Self::AsyncCopy { source_timing, .. } => source_timing,
         }
     }
 }
@@ -5370,28 +5422,28 @@ impl Waiters {
 
 fn accumulate_waiter_removals(
     pending_removals: &mut HashMap<(usize, DepBarrier), u32>,
-    async_removals: &mut HashMap<(usize, AsyncCopyGroupId), u32>,
     waiter: FillWaiter,
 ) -> Result<(), IssueError> {
     if let Some(barrier) = waiter.target.barrier() {
         let remove = pending_removals.entry((waiter.warp, barrier)).or_default();
         *remove = checked_u32_counter_add("response pending-remove budget", *remove, waiter.units)?;
     }
-    if let Some(group) = waiter.target.async_group() {
-        let remove = async_removals.entry((waiter.warp, group)).or_default();
-        *remove =
-            checked_u32_counter_add("response async-copy remove budget", *remove, waiter.units)?;
-    }
     Ok(())
 }
 
+#[derive(Debug, Clone, Copy)]
+struct ProjectedAsyncRemoval {
+    units: u32,
+    source_ready: u64,
+}
+
 fn project_async_copy_removal(
-    projected: &mut HashMap<(usize, AsyncCopyGroupId), u32>,
+    projected: &mut HashMap<(usize, AsyncCopyGroupId), ProjectedAsyncRemoval>,
     async_copies: &[AsyncCopySlot],
     warp: usize,
     group: AsyncCopyGroupId,
     remove: u32,
-    now: u64,
+    source_ready: u64,
     params: &IssueModelParams,
 ) -> Result<(), IssueError> {
     if warp >= async_copies.len() {
@@ -5400,14 +5452,16 @@ fn project_async_copy_removal(
             warps: async_copies.len(),
         });
     }
-    let current = if let Some(&current) = projected.get(&(warp, group)) {
-        current
+    let group_state = async_copies[warp]
+        .async_group(group)
+        .ok_or(IssueError::AsyncCopyGroupNotFound { warp, group })?;
+    let (current, projected_source_ready) = if let Some(&current) = projected.get(&(warp, group)) {
+        (current.units, current.source_ready.max(source_ready))
     } else {
-        async_copies[warp].preflight_async_copy_source_completion(warp, group, 0, now, params)?;
-        async_copies[warp]
-            .async_group(group)
-            .ok_or(IssueError::AsyncCopyGroupNotFound { warp, group })?
-            .pending_sources
+        (
+            group_state.pending_sources,
+            group_state.source_completion_time.max(source_ready),
+        )
     };
     let next = current
         .checked_sub(remove)
@@ -5417,7 +5471,14 @@ fn project_async_copy_removal(
             current,
             remove,
         })?;
-    projected.insert((warp, group), next);
+    group_state.project_delivery(projected_source_ready, 0, 0, params)?;
+    projected.insert(
+        (warp, group),
+        ProjectedAsyncRemoval {
+            units: next,
+            source_ready: projected_source_ready,
+        },
+    );
     Ok(())
 }
 
@@ -5429,6 +5490,10 @@ struct SharedL2State {
     response_owner: ResponseOwner,
     /// Exact response-bearing request tokens still expected from the system.
     outstanding_replies: HashSet<ReplyTo>,
+    /// Issue-local timing for direct asynchronous-copy responses while the
+    /// candidate is enabled. The outer option keeps disabled replay allocation-
+    /// and lookup-free without growing the public request record.
+    direct_async_source_timings: Option<HashMap<ResponseId, Option<LdgstsSourceTiming>>>,
     /// Barrier units cleared when the keyed L1 fill completes.
     fill_waiters: HashMap<FillKey, Waiters>,
     /// Per in-flight LINE fill: the sector bits already sent to the L2
@@ -5727,6 +5792,7 @@ impl<'a> SmCore<'a> {
                 l1: L1Cache::new(cfg)?,
                 response_owner: allocate_response_owner()?,
                 outstanding_replies: HashSet::new(),
+                direct_async_source_timings: None,
                 fill_waiters: HashMap::new(),
                 fill_masks: HashMap::new(),
                 line_folds: Vec::new(),
@@ -5831,7 +5897,28 @@ impl<'a> SmCore<'a> {
         &mut self,
         mode: LdgstsFrontEndMode,
     ) -> Result<(), IssueError> {
-        self.ldgsts_front_end = match mode {
+        let current_mode = if self.ldgsts_front_end.is_some() {
+            LdgstsFrontEndMode::AmpereQueueV1
+        } else {
+            LdgstsFrontEndMode::Disabled
+        };
+        if mode == current_mode {
+            return Ok(());
+        }
+        let direct_responses = match &self.mem {
+            MemModel::L1Shared(st) => st
+                .outstanding_replies
+                .iter()
+                .filter(|reply| matches!(reply, ReplyTo::AsyncCopy { .. }))
+                .count(),
+            MemModel::Flat | MemModel::L1Const(_) => 0,
+        };
+        if direct_responses != 0 {
+            return Err(IssueError::LdgstsFrontEndResponsesOutstanding {
+                responses: direct_responses,
+            });
+        }
+        let front_end = match mode {
             LdgstsFrontEndMode::Disabled => None,
             LdgstsFrontEndMode::AmpereQueueV1 if self.params.arch == ArchId::Sm86 => {
                 Some(Box::default())
@@ -5843,6 +5930,16 @@ impl<'a> SmCore<'a> {
                 });
             }
         };
+        if let MemModel::L1Shared(st) = &mut self.mem {
+            match mode {
+                LdgstsFrontEndMode::Disabled => st.direct_async_source_timings = None,
+                LdgstsFrontEndMode::AmpereQueueV1 => {
+                    st.direct_async_source_timings
+                        .get_or_insert_with(HashMap::new);
+                }
+            }
+        }
+        self.ldgsts_front_end = front_end;
         Ok(())
     }
 
@@ -6157,6 +6254,7 @@ impl<'a> SmCore<'a> {
         kind: AccessKind,
         sectors: &'a [i64],
         write_barrier: Option<DepBarrier>,
+        ldgsts_source_timing: Option<LdgstsSourceTiming>,
         destination_wavefronts: u64,
         out: &mut Vec<MemRequest>,
     ) -> Result<Option<u64>, IssueError> {
@@ -6265,15 +6363,17 @@ impl<'a> SmCore<'a> {
                     .map(|group| FillTarget::AsyncCopy {
                         group,
                         barrier: write_barrier,
+                        source_timing: ldgsts_source_timing,
                     })
                     .or_else(|| write_barrier.map(FillTarget::Barrier));
                 let mut known = (write_barrier.is_some() || source_active)
                     .then(|| {
-                        checked_cycle_add(
+                        let existing = checked_cycle_add(
                             "LDGSTS shared L1 hit-pipeline floor",
                             t,
                             p.l1_hit_latency,
-                        )
+                        )?;
+                        ldgsts_source_ready(existing, ldgsts_source_timing)
                     })
                     .transpose()?;
                 for i in range.clone() {
@@ -6290,6 +6390,7 @@ impl<'a> SmCore<'a> {
                         out,
                     ) {
                         Ok(Some(ready)) => {
+                            let ready = ldgsts_source_ready(ready, ldgsts_source_timing)?;
                             if let Some(group) = async_group {
                                 async_copies[wix]
                                     .complete_async_copy_sources(wix, group, 1, ready, &p)?;
@@ -6400,6 +6501,15 @@ impl<'a> SmCore<'a> {
                             response_id,
                         };
                         register_response(st, reply)?;
+                        if let Some(timings) = st.direct_async_source_timings.as_mut() {
+                            let previous = timings.insert(response_id, ldgsts_source_timing);
+                            debug_assert!(
+                                previous.is_none(),
+                                "a new direct async response owns a fresh timing identity"
+                            );
+                        } else {
+                            debug_assert!(ldgsts_source_timing.is_none());
+                        }
                         reply
                     } else if let Some(barrier) = write_barrier {
                         let reply = ReplyTo::Warp {
@@ -6508,7 +6618,7 @@ impl<'a> SmCore<'a> {
                 warp,
                 group,
                 barrier,
-                ..
+                response_id,
             } => {
                 if warp >= self.warps.len() {
                     return Err(IssueError::ResponseWarpOutOfRange {
@@ -6516,11 +6626,23 @@ impl<'a> SmCore<'a> {
                         warps: self.warps.len(),
                     });
                 }
+                let source_timing = st
+                    .direct_async_source_timings
+                    .as_ref()
+                    .map(|timings| {
+                        timings
+                            .get(&response_id)
+                            .copied()
+                            .ok_or(IssueError::AsyncCopyResponseTimingMissing { response_id })
+                    })
+                    .transpose()?
+                    .flatten();
+                let source_ready = ldgsts_source_ready(now, source_timing)?;
                 self.async_copies[warp].preflight_async_copy_source_completion(
                     warp,
                     group,
                     1,
-                    now,
+                    source_ready,
                     &self.params,
                 )?;
                 if let Some(barrier) = barrier {
@@ -6543,11 +6665,8 @@ impl<'a> SmCore<'a> {
         };
 
         let mut removals = HashMap::new();
-        let mut async_removals = HashMap::new();
         if let Some(waiters) = st.fill_waiters.get(&fill) {
-            waiters.try_for_each(|waiter| {
-                accumulate_waiter_removals(&mut removals, &mut async_removals, waiter)
-            })?;
+            waiters.try_for_each(|waiter| accumulate_waiter_removals(&mut removals, waiter))?;
         }
 
         let mut projected = HashMap::new();
@@ -6573,16 +6692,22 @@ impl<'a> SmCore<'a> {
             );
         }
         let mut projected_async = HashMap::new();
-        for (&(warp, group), &remove) in &async_removals {
-            project_async_copy_removal(
-                &mut projected_async,
-                &self.async_copies,
-                warp,
-                group,
-                remove,
-                now,
-                &self.params,
-            )?;
+        if let Some(waiters) = st.fill_waiters.get(&fill) {
+            waiters.try_for_each(|waiter| {
+                let Some(group) = waiter.target.async_group() else {
+                    return Ok(());
+                };
+                let source_ready = ldgsts_source_ready(now, waiter.target.source_timing())?;
+                project_async_copy_removal(
+                    &mut projected_async,
+                    &self.async_copies,
+                    waiter.warp,
+                    group,
+                    waiter.units,
+                    source_ready,
+                    &self.params,
+                )
+            })?;
         }
 
         if st.retry.is_empty() {
@@ -6732,15 +6857,19 @@ impl<'a> SmCore<'a> {
                     retry.target.is_some(),
                     retry.mshr_floor,
                 )? {
-                    SharedL1Access::Hit { .. } => {
+                    SharedL1Access::Hit { ready } => {
                         if let Some(group) = retry.target.and_then(FillTarget::async_group) {
+                            let source_ready = ldgsts_source_ready(
+                                ready.expect("an observed retry hit carries readiness"),
+                                retry.target.and_then(FillTarget::source_timing),
+                            )?;
                             project_async_copy_removal(
                                 &mut exact_async,
                                 &self.async_copies,
                                 retry.warp,
                                 group,
                                 1,
-                                now,
+                                source_ready,
                                 &self.params,
                             )?;
                         }
@@ -6793,9 +6922,14 @@ impl<'a> SmCore<'a> {
         if st.retry.is_empty() {
             return Ok(());
         }
-        let observes_hit_ready = st.retry.iter().any(|retry| retry.target.is_some());
-        let hit_timing_fits =
-            !observes_hit_ready || now.checked_add(self.params.l1_hit_latency).is_some();
+        let hit_ready = now.checked_add(self.params.l1_hit_latency);
+        let hit_timing_fits = st.retry.iter().all(|retry| {
+            retry.target.is_none()
+                || hit_ready.is_some_and(|ready| {
+                    ldgsts_source_ready(ready, retry.target.and_then(FillTarget::source_timing))
+                        .is_ok()
+                })
+        });
         let response_timing_fits = now.checked_add(self.params.l1_miss_latency).is_some();
         if hit_timing_fits && response_timing_fits {
             return Ok(());
@@ -6815,15 +6949,15 @@ impl<'a> SmCore<'a> {
                     retry.origin,
                     sector_id,
                     now,
-                    false,
+                    retry.target.is_some(),
                     retry.mshr_floor,
                 )? {
-                    SharedL1Access::Hit { .. } => {
+                    SharedL1Access::Hit { ready } => {
                         if retry.target.is_some() {
-                            checked_cycle_add(
-                                "retry L1 hit visibility",
-                                now,
-                                self.params.l1_hit_latency,
+                            let ready = ready.expect("an observed retry hit carries readiness");
+                            ldgsts_source_ready(
+                                ready,
+                                retry.target.and_then(FillTarget::source_timing),
                             )?;
                         }
                     }
@@ -6929,12 +7063,13 @@ impl<'a> SmCore<'a> {
                 st.l1.complete_fill(fill)?;
                 if let Some(waiters) = st.fill_waiters.remove(&fill) {
                     waiters.try_for_each(|waiter| {
+                        let source_ready = ldgsts_source_ready(now, waiter.target.source_timing())?;
                         if let Some(group) = waiter.target.async_group() {
                             async_copies[waiter.warp].complete_async_copy_sources(
                                 waiter.warp,
                                 group,
                                 waiter.units,
-                                now,
+                                source_ready,
                                 &params,
                             )?;
                         }
@@ -6943,7 +7078,7 @@ impl<'a> SmCore<'a> {
                                 waiter.warp,
                                 barrier,
                                 waiter.units,
-                                now,
+                                source_ready,
                             )?;
                         }
                         Ok(())
@@ -6960,11 +7095,27 @@ impl<'a> SmCore<'a> {
                 warp,
                 group,
                 barrier,
-                ..
+                response_id,
             } => {
-                async_copies[warp].complete_async_copy_sources(warp, group, 1, now, &params)?;
+                let source_timing = st
+                    .direct_async_source_timings
+                    .as_mut()
+                    .map(|timings| {
+                        timings
+                            .remove(&response_id)
+                            .expect("response preflight proved the async timing ticket exists")
+                    })
+                    .flatten();
+                let source_ready = ldgsts_source_ready(now, source_timing)?;
+                async_copies[warp].complete_async_copy_sources(
+                    warp,
+                    group,
+                    1,
+                    source_ready,
+                    &params,
+                )?;
                 if let Some(barrier) = barrier {
-                    warps[warp].clear_pending(warp, barrier, 1, now)?;
+                    warps[warp].clear_pending(warp, barrier, 1, source_ready)?;
                 }
             }
             ReplyTo::None => return Err(IssueError::UnexpectedMutationOnlyResponse),
@@ -8080,6 +8231,7 @@ impl<'a> SmCore<'a> {
         kind: AccessKind,
         write_barrier: Option<DepBarrier>,
         read_barrier: Option<DepBarrier>,
+        ldgsts_timing: Option<LdgstsFrontEndTiming>,
         stall: u8,
         yield_flag: bool,
         pipeline_class: PipelineClass,
@@ -8121,7 +8273,10 @@ impl<'a> SmCore<'a> {
                 checked_cycle_add("warp yield eligibility", t, 2)?;
             }
         }
-        if !matches!(kind, AccessKind::PredicatedOffMemory) && read_barrier.is_some() {
+        if !matches!(kind, AccessKind::PredicatedOffMemory)
+            && read_barrier.is_some()
+            && ldgsts_timing.is_none()
+        {
             checked_cycle_add(
                 "read-dependence barrier visibility",
                 t,
@@ -8205,6 +8360,46 @@ impl<'a> SmCore<'a> {
                 MemModel::Flat | MemModel::L1Const(_) | MemModel::L1Shared(_) => {}
             },
         }
+        if let Some(timing) = ldgsts_timing {
+            let source_timing = Some(timing.source_timing());
+            let existing_ready = match (&self.mem, kind) {
+                (MemModel::Flat, AccessKind::GlobalAsyncCopy { .. }) => Some(checked_cycle_add(
+                    "flat async-copy source visibility",
+                    t,
+                    self.params.global_flat_latency,
+                )?),
+                (
+                    MemModel::L1Const(_) | MemModel::L1Shared(_),
+                    AccessKind::GlobalAsyncCopy {
+                        l1_policy: LdgstsL1Policy::CacheAtAllLevels,
+                        ..
+                    },
+                ) => Some(checked_cycle_add(
+                    "LDGSTS L1 hit-pipeline floor",
+                    t,
+                    self.params.l1_hit_latency,
+                )?),
+                (
+                    MemModel::L1Const(_),
+                    AccessKind::GlobalAsyncCopy {
+                        l1_policy: LdgstsL1Policy::BypassL1,
+                        ..
+                    },
+                ) => Some(self.params.store_visibility_ready(t)?),
+                (
+                    MemModel::L1Shared(_),
+                    AccessKind::GlobalAsyncCopy {
+                        len: 0,
+                        l1_policy: LdgstsL1Policy::BypassL1,
+                        ..
+                    },
+                ) if needs_ready => Some(self.params.store_visibility_ready(t)?),
+                _ => None,
+            };
+            if let Some(existing_ready) = existing_ready {
+                ldgsts_source_ready(existing_ready, source_timing)?;
+            }
+        }
         Ok(())
     }
 
@@ -8212,6 +8407,7 @@ impl<'a> SmCore<'a> {
         &self,
         picks: &[Option<usize>; SUB_CORES],
         async_destination_wavefronts: &[u64; SUB_CORES],
+        ldgsts_front_end_timings: &[Option<LdgstsFrontEndTiming>; SUB_CORES],
     ) -> Result<(), IssueError> {
         let (l1, shared) = match &self.mem {
             MemModel::Flat => return Ok(()),
@@ -8224,6 +8420,8 @@ impl<'a> SmCore<'a> {
         let mut constant_async_deliveries = [None; SUB_CORES];
         for (subcore, pick) in picks.iter().enumerate() {
             let Some(wix) = *pick else { continue };
+            let source_timing =
+                ldgsts_front_end_timings[subcore].map(LdgstsFrontEndTiming::source_timing);
             let warp = &self.warps[wix];
             let inst = warp
                 .insts
@@ -8283,8 +8481,12 @@ impl<'a> SmCore<'a> {
                                 ..
                             }
                         ));
-                        constant_async_deliveries[subcore] =
-                            Some((wix, completion_work, async_destination_wavefronts[subcore]));
+                        constant_async_deliveries[subcore] = Some((
+                            wix,
+                            completion_work,
+                            async_destination_wavefronts[subcore],
+                            source_timing,
+                        ));
                     }
                     if shared.is_some()
                         && warp
@@ -8460,18 +8662,20 @@ impl<'a> SmCore<'a> {
         let constant_timing_fits = shared.is_some() || constant_ready_upper.is_some();
         let constant_async_completion_fits = shared.is_some()
             || constant_async_deliveries.iter().flatten().all(
-                |&(wix, delivery_work, destination_wavefronts)| {
+                |&(wix, delivery_work, destination_wavefronts, source_timing)| {
                     constant_ready_upper.is_some_and(|source_ready| {
-                        self.async_copies[wix]
-                            .preflight_async_copy_add(
-                                wix,
-                                0,
-                                source_ready,
-                                delivery_work,
-                                destination_wavefronts,
-                                &self.params,
-                            )
-                            .is_ok()
+                        ldgsts_source_ready(source_ready, source_timing).is_ok_and(|source_ready| {
+                            self.async_copies[wix]
+                                .preflight_async_copy_add(
+                                    wix,
+                                    0,
+                                    source_ready,
+                                    delivery_work,
+                                    destination_wavefronts,
+                                    &self.params,
+                                )
+                                .is_ok()
+                        })
                     })
                 },
             );
@@ -8494,6 +8698,8 @@ impl<'a> SmCore<'a> {
         let mut shadow = l1.clone();
         for (subcore, pick) in picks.iter().enumerate() {
             let Some(wix) = *pick else { continue };
+            let source_timing =
+                ldgsts_front_end_timings[subcore].map(LdgstsFrontEndTiming::source_timing);
             let warp = &self.warps[wix];
             let inst = warp.insts[warp.next];
             let slot = warp
@@ -8550,7 +8756,11 @@ impl<'a> SmCore<'a> {
                                 observe_ready,
                                 mshr_floor,
                             )? {
-                                SharedL1Access::Hit { .. } => {}
+                                SharedL1Access::Hit { ready } => {
+                                    if let Some(ready) = ready {
+                                        ldgsts_source_ready(ready, source_timing)?;
+                                    }
+                                }
                                 SharedL1Access::MissRequest { .. } => {
                                     checked_cycle_add(
                                         "self-response horizon",
@@ -8605,6 +8815,7 @@ impl<'a> SmCore<'a> {
                     if let (Some(source_ready), Some(delivery_work)) =
                         (async_source_ready, async_delivery)
                     {
+                        let source_ready = ldgsts_source_ready(source_ready, source_timing)?;
                         self.async_copies[wix].preflight_async_copy_add(
                             wix,
                             0,
@@ -8965,6 +9176,11 @@ impl<'a> SmCore<'a> {
             async_destination_wavefronts[subcore] =
                 async_copy_destination_wavefronts(kind, &self.params)?.unwrap_or(0);
         }
+        let (projected_ldgsts_front_end, ldgsts_front_end_timings) =
+            match self.project_ldgsts_front_end(&picks, t)? {
+                Some((state, timings)) => (Some(state), timings),
+                None => (None, [None; SUB_CORES]),
+            };
 
         // A cycle is the caller-visible transaction boundary. Validate every
         // selected instruction's possible timing arms before any sub-core
@@ -8985,8 +9201,9 @@ impl<'a> SmCore<'a> {
             };
             let observe_async_copy =
                 self.has_async_copy_protocol && async_copy_source_count(kind).is_some();
+            let ldgsts_timing = ldgsts_front_end_timings[subcore];
             if observe_async_copy && let Some(delivery_work) = async_copy_completion_work(kind) {
-                let source_ready = match &self.mem {
+                let existing_source_ready = match &self.mem {
                     MemModel::Flat => checked_cycle_add(
                         "flat async-copy source visibility",
                         self.t,
@@ -9003,6 +9220,10 @@ impl<'a> SmCore<'a> {
                         self.params.l1_hit_latency,
                     )?,
                 };
+                let source_ready = ldgsts_source_ready(
+                    existing_source_ready,
+                    ldgsts_timing.map(LdgstsFrontEndTiming::source_timing),
+                )?;
                 let pending_add = if matches!(self.mem, MemModel::L1Shared(_)) {
                     u32::from(async_copy_source_count(kind).unwrap_or(0))
                 } else {
@@ -9021,6 +9242,7 @@ impl<'a> SmCore<'a> {
                 kind,
                 write_barrier,
                 slot.control.read_barrier,
+                ldgsts_timing,
                 slot.control.stall,
                 slot.control.yield_flag,
                 slot.pipeline_class,
@@ -9028,7 +9250,11 @@ impl<'a> SmCore<'a> {
                 observe_async_copy,
             )?;
         }
-        self.preflight_issue_memory(&picks, &async_destination_wavefronts)?;
+        self.preflight_issue_memory(
+            &picks,
+            &async_destination_wavefronts,
+            &ldgsts_front_end_timings,
+        )?;
         self.preflight_result_writeback_priority(&picks)?;
         let next_issued = self.preflight_issue_accounting(&picks, &barrier_arrival_times)?;
         // Diagnostics are preflighted last so an observational counter can
@@ -9038,11 +9264,6 @@ impl<'a> SmCore<'a> {
             self.project_picked_readiness(&picks, &barrier_arrival_times, t)?;
         let projected_memory_service_candidates =
             self.project_memory_service_candidates(&picks, t)?;
-        let (projected_ldgsts_front_end, _ldgsts_front_end_timings) =
-            match self.project_ldgsts_front_end(&picks, t)? {
-                Some((state, timings)) => (Some(state), timings),
-                None => (None, [None; SUB_CORES]),
-            };
         let memory_admission_feedback_plan =
             if let Some(feedback) = self.memory_admission_feedback.as_ref() {
                 let mut issues = [None; SUB_CORES];
@@ -9122,6 +9343,8 @@ impl<'a> SmCore<'a> {
                 .flatten();
             let observe_async_copy =
                 self.has_async_copy_protocol && async_copy_source_count(inst.kind).is_some();
+            let ldgsts_timing = ldgsts_front_end_timings[sc];
+            let ldgsts_source_timing = ldgsts_timing.map(LdgstsFrontEndTiming::source_timing);
 
             // Memory-model interaction happens at issue time regardless of
             // whether a dependence barrier consumes the ready time.
@@ -9133,6 +9356,7 @@ impl<'a> SmCore<'a> {
                     inst.kind,
                     warp_sectors,
                     write_barrier,
+                    ldgsts_source_timing,
                     async_destination_wavefronts[sc],
                     out,
                 )?
@@ -9146,6 +9370,8 @@ impl<'a> SmCore<'a> {
                     write_barrier,
                     observe_async_copy,
                 )?
+                .map(|ready| ldgsts_source_ready(ready, ldgsts_source_timing))
+                .transpose()?
             };
             if observe_async_copy && let Some(source_ready) = data_ready {
                 // Shared mode already attached the copy's delivery and exact
@@ -9222,11 +9448,15 @@ impl<'a> SmCore<'a> {
                 self.apply_fixed_result_priority(sc, result_writeback, &mut projected_readiness)?;
             }
             if produces_dynamic_effects && let Some(read_barrier) = control.read_barrier {
-                let read_clear = checked_cycle_add(
-                    "read-dependence barrier visibility",
-                    t,
-                    self.params.read_barrier_latency,
-                )?;
+                let read_clear = if let Some(timing) = ldgsts_timing {
+                    timing.accept_at
+                } else {
+                    checked_cycle_add(
+                        "read-dependence barrier visibility",
+                        t,
+                        self.params.read_barrier_latency,
+                    )?
+                };
                 self.warps[wix].stamp_clear(
                     Some(read_barrier),
                     read_clear,
@@ -9678,6 +9908,8 @@ fn drain_retries(
                 out,
             ) {
                 Ok(Some(ready)) => {
+                    let ready =
+                        ldgsts_source_ready(ready, r.target.and_then(FillTarget::source_timing))?;
                     if let Some(group) = r.target.and_then(FillTarget::async_group) {
                         async_copies[r.warp]
                             .complete_async_copy_sources(r.warp, group, 1, ready, params)?;
@@ -9944,6 +10176,14 @@ mod tests {
         assert!(!is_effective_ldgsts_front_end_token(effective_ldgsts_kind(
             0
         )));
+        assert!(!is_effective_ldgsts_front_end_token(
+            AccessKind::GlobalAsyncCopy {
+                off: 0,
+                len: 0,
+                completion_work: 1,
+                l1_policy: LdgstsL1Policy::CacheAtAllLevels,
+            }
+        ));
         assert!(is_effective_ldgsts_front_end_token(effective_ldgsts_kind(
             1
         )));
@@ -9961,6 +10201,13 @@ mod tests {
         core.install_ldgsts_front_end(LdgstsFrontEndMode::Disabled)
             .unwrap();
         assert!(core.ldgsts_front_end.is_none());
+
+        let shared =
+            SmCore::new(&blocks, &sched, &params(), SmMemMode::L1Shared(l1_config())).unwrap();
+        let MemModel::L1Shared(st) = &shared.mem else {
+            unreachable!()
+        };
+        assert!(st.direct_async_source_timings.is_none());
     }
 
     #[test]
@@ -10147,6 +10394,546 @@ mod tests {
         assert_eq!(result.readiness.ldgsts_front_end.issued_tokens, 8);
         assert_eq!(result.readiness.ldgsts_front_end.queue_blocked_issues, 3);
         assert_eq!(result.readiness.ldgsts_front_end.maximum_occupancy, 5);
+    }
+
+    #[test]
+    fn ldgsts_front_end_congested_war_clears_at_shared_acceptance() {
+        let mut control = cb(1);
+        control.read_barrier = Some(barrier(0));
+        control.write_barrier = Some(barrier(1));
+        let sched = schedule(vec![(
+            0,
+            slot(control, OpClass::Other, "LDGSTS.E.128 [R1], [R2.64]"),
+        )]);
+        let blocks = vec![BlockReplay {
+            launch_index: 0,
+            warps: vec![WarpReplay {
+                warp_slot: 0,
+                insts: vec![async_copy_inst(0, 0, 1); 2],
+                sectors: vec![40],
+            }],
+        }];
+        let mut core = shared_core(&blocks, &sched, &params());
+        let MemModel::L1Shared(st) = &mut core.mem else {
+            panic!("expected shared mode")
+        };
+        let EvAccess::MissRequest { fill } = st
+            .l1
+            .access_eligible_ev(MemoryOrigin::Global, 40, 0)
+            .unwrap()
+        else {
+            panic!("expected cold prefill miss")
+        };
+        st.l1.complete_fill(fill).unwrap();
+        core.install_ldgsts_front_end(LdgstsFrontEndMode::AmpereQueueV1)
+            .unwrap();
+        let mut requests = Vec::new();
+
+        assert_eq!(
+            core.advance(ReplayHorizon::Unbounded, &mut requests)
+                .unwrap(),
+            Advance::Done
+        );
+        assert!(requests.is_empty());
+        assert_eq!(core.warps[0].barrier_clear[0], 17);
+        assert_eq!(core.warps[0].barrier_clear[1], 43);
+        assert_eq!(core.params.read_barrier_latency, 8);
+    }
+
+    #[test]
+    fn ldgsts_front_end_l1_hit_uses_floor_without_double_charging_card_latency() {
+        let sched = schedule(vec![(
+            0,
+            slot(cb(1), OpClass::Other, "LDGSTS.E.128 [R1], [R2.64]"),
+        )]);
+        let blocks = vec![BlockReplay {
+            launch_index: 0,
+            warps: vec![WarpReplay {
+                warp_slot: 0,
+                insts: vec![async_copy_inst(0, 0, 1)],
+                sectors: vec![40],
+            }],
+        }];
+        let mut core = shared_core(&blocks, &sched, &params());
+        let MemModel::L1Shared(st) = &mut core.mem else {
+            panic!("expected shared mode")
+        };
+        let EvAccess::MissRequest { fill } = st
+            .l1
+            .access_eligible_ev(MemoryOrigin::Global, 40, 0)
+            .unwrap()
+        else {
+            panic!("expected cold prefill miss")
+        };
+        st.l1.complete_fill(fill).unwrap();
+        core.install_ldgsts_front_end(LdgstsFrontEndMode::AmpereQueueV1)
+            .unwrap();
+
+        assert_eq!(
+            core.advance(ReplayHorizon::Unbounded, &mut Vec::new())
+                .unwrap(),
+            Advance::Done
+        );
+        let group = core.async_copies[0]
+            .state
+            .as_deref()
+            .unwrap()
+            .open_group
+            .unwrap();
+        assert_eq!(group.pending_sources, 0);
+        assert_eq!(group.source_completion_time, 39);
+        assert_eq!(group.delivery_work, 32);
+        assert_eq!(group.destination_wavefronts, 0);
+        assert_eq!(group.completion_time, 40);
+    }
+
+    #[test]
+    fn ldgsts_front_end_fill_and_merged_waiters_keep_distinct_issue_tickets() {
+        let sched = schedule(vec![(
+            0,
+            slot(cb(1), OpClass::Other, "LDGSTS.E.128 [R1], [R2.64]"),
+        )]);
+        let blocks = vec![BlockReplay {
+            launch_index: 0,
+            warps: vec![WarpReplay {
+                warp_slot: 0,
+                insts: vec![async_copy_inst(0, 0, 1); 2],
+                sectors: vec![40],
+            }],
+        }];
+        let mut core = shared_core(&blocks, &sched, &params());
+        core.install_ldgsts_front_end(LdgstsFrontEndMode::AmpereQueueV1)
+            .unwrap();
+        let mut requests = Vec::new();
+
+        assert_eq!(
+            core.advance(ReplayHorizon::Unbounded, &mut requests)
+                .unwrap(),
+            Advance::Done
+        );
+        assert_eq!(requests.len(), 1);
+        assert_eq!(requests[0].issue_time, 0);
+        let mut emitted = Vec::new();
+        core.on_response(requests[0].reply, 100, &mut emitted)
+            .unwrap();
+        assert!(emitted.is_empty());
+        let group = core.async_copies[0]
+            .state
+            .as_deref()
+            .unwrap()
+            .open_group
+            .unwrap();
+        assert_eq!(group.pending_sources, 0);
+        assert_eq!(group.source_completion_time, 103);
+        assert_eq!(group.delivery_work, 64);
+        assert_eq!(group.completion_time, 104);
+    }
+
+    #[test]
+    fn ldgsts_front_end_bypass_replies_compose_without_delaying_requests() {
+        let sched = schedule(vec![(
+            0,
+            slot(cb(1), OpClass::Other, "LDGSTS.E.128.BYPASS [R1], [R2.64]"),
+        )]);
+        let blocks = vec![BlockReplay {
+            launch_index: 0,
+            warps: vec![WarpReplay {
+                warp_slot: 0,
+                insts: vec![bypass_async_copy_inst(0, 0, 1); 2],
+                sectors: vec![40],
+            }],
+        }];
+        let mut core = shared_core(&blocks, &sched, &params());
+        core.install_ldgsts_front_end(LdgstsFrontEndMode::AmpereQueueV1)
+            .unwrap();
+        let mut requests = Vec::new();
+
+        assert_eq!(
+            core.advance(ReplayHorizon::Unbounded, &mut requests)
+                .unwrap(),
+            Advance::Done
+        );
+        assert_eq!(requests.len(), 2);
+        assert_eq!(
+            requests
+                .iter()
+                .map(|request| request.issue_time)
+                .collect::<Vec<_>>(),
+            [0, 1]
+        );
+        let MemModel::L1Shared(st) = &core.mem else {
+            unreachable!()
+        };
+        let timings = st.direct_async_source_timings.as_ref().unwrap();
+        assert_eq!(timings.len(), 2);
+        assert_eq!(
+            timings[&requests[0].reply.response_id().unwrap()]
+                .unwrap()
+                .excess_delay,
+            0
+        );
+        assert_eq!(
+            timings[&requests[1].reply.response_id().unwrap()]
+                .unwrap()
+                .excess_delay,
+            3
+        );
+        let mut emitted = Vec::new();
+        core.on_response(requests[0].reply, 100, &mut emitted)
+            .unwrap();
+        core.on_response(requests[1].reply, 100, &mut emitted)
+            .unwrap();
+        let group = core.async_copies[0]
+            .state
+            .as_deref()
+            .unwrap()
+            .open_group
+            .unwrap();
+        assert_eq!(group.pending_sources, 0);
+        assert_eq!(group.source_completion_time, 103);
+        assert_eq!(group.delivery_work, 128);
+        assert_eq!(group.completion_time, 105);
+        let MemModel::L1Shared(st) = &core.mem else {
+            unreachable!()
+        };
+        assert!(
+            st.direct_async_source_timings
+                .as_ref()
+                .is_some_and(HashMap::is_empty)
+        );
+    }
+
+    #[test]
+    fn ldgsts_front_end_active_mode_tracks_legacy_reply_without_candidate_ticket() {
+        let sched = schedule(vec![(
+            0,
+            slot(cb(1), OpClass::Other, "LDGSTS.E [R1], [R2.64]"),
+        )]);
+        let blocks = vec![BlockReplay {
+            launch_index: 0,
+            warps: vec![WarpReplay {
+                warp_slot: 0,
+                insts: vec![ReplayInst {
+                    pc: 0,
+                    kind: AccessKind::GlobalBypass {
+                        off: 0,
+                        len: 1,
+                        token: CacheOpToken::Ldgsts,
+                        l2_requests: 0,
+                    },
+                }],
+                sectors: vec![40],
+            }],
+        }];
+        let mut core = shared_core(&blocks, &sched, &params());
+        core.install_ldgsts_front_end(LdgstsFrontEndMode::AmpereQueueV1)
+            .unwrap();
+        let mut requests = Vec::new();
+
+        assert_eq!(
+            core.advance(ReplayHorizon::Unbounded, &mut requests)
+                .unwrap(),
+            Advance::Done
+        );
+        assert_eq!(requests.len(), 1);
+        assert_eq!(
+            core.result().readiness.ldgsts_front_end.issued_tokens,
+            0,
+            "legacy GlobalBypass LDGSTS remains outside candidate token selection"
+        );
+        let MemModel::L1Shared(st) = &core.mem else {
+            unreachable!()
+        };
+        let timings = st.direct_async_source_timings.as_ref().unwrap();
+        assert_eq!(
+            timings.get(&requests[0].reply.response_id().unwrap()),
+            Some(&None)
+        );
+
+        core.on_response(requests[0].reply, 100, &mut Vec::new())
+            .unwrap();
+        let group = core.async_copies[0]
+            .state
+            .as_deref()
+            .unwrap()
+            .open_group
+            .unwrap();
+        assert_eq!(group.pending_sources, 0);
+        assert_eq!(group.source_completion_time, 100);
+    }
+
+    #[test]
+    fn ldgsts_front_end_disable_rejects_inflight_direct_reply_transactionally() {
+        let sched = schedule(vec![(
+            0,
+            slot(cb(1), OpClass::Other, "LDGSTS.E.128.BYPASS [R1], [R2.64]"),
+        )]);
+        let blocks = vec![BlockReplay {
+            launch_index: 0,
+            warps: vec![WarpReplay {
+                warp_slot: 0,
+                insts: vec![bypass_async_copy_inst(0, 0, 1)],
+                sectors: vec![40],
+            }],
+        }];
+        let mut core = shared_core(&blocks, &sched, &params());
+        core.install_ldgsts_front_end(LdgstsFrontEndMode::AmpereQueueV1)
+            .unwrap();
+        let mut requests = Vec::new();
+        assert_eq!(
+            core.advance(ReplayHorizon::Unbounded, &mut requests)
+                .unwrap(),
+            Advance::Done
+        );
+
+        core.install_ldgsts_front_end(LdgstsFrontEndMode::AmpereQueueV1)
+            .unwrap();
+        assert!(matches!(
+            core.install_ldgsts_front_end(LdgstsFrontEndMode::Disabled),
+            Err(IssueError::LdgstsFrontEndResponsesOutstanding { responses: 1 })
+        ));
+        assert!(core.ldgsts_front_end.is_some());
+        assert_eq!(core.outstanding_responses(), 1);
+        let MemModel::L1Shared(st) = &core.mem else {
+            unreachable!()
+        };
+        assert_eq!(
+            st.direct_async_source_timings.as_ref().map(HashMap::len),
+            Some(1)
+        );
+
+        core.on_response(requests[0].reply, 100, &mut Vec::new())
+            .unwrap();
+        core.install_ldgsts_front_end(LdgstsFrontEndMode::Disabled)
+            .unwrap();
+        assert!(core.ldgsts_front_end.is_none());
+        let MemModel::L1Shared(st) = &core.mem else {
+            unreachable!()
+        };
+        assert!(st.direct_async_source_timings.is_none());
+    }
+
+    #[test]
+    fn ldgsts_front_end_enable_rejects_disabled_inflight_direct_reply() {
+        let sched = schedule(vec![(
+            0,
+            slot(cb(1), OpClass::Other, "LDGSTS.E.128.BYPASS [R1], [R2.64]"),
+        )]);
+        let blocks = vec![BlockReplay {
+            launch_index: 0,
+            warps: vec![WarpReplay {
+                warp_slot: 0,
+                insts: vec![bypass_async_copy_inst(0, 0, 1)],
+                sectors: vec![40],
+            }],
+        }];
+        let mut core = shared_core(&blocks, &sched, &params());
+        let mut requests = Vec::new();
+        assert_eq!(
+            core.advance(ReplayHorizon::Unbounded, &mut requests)
+                .unwrap(),
+            Advance::Done
+        );
+
+        core.install_ldgsts_front_end(LdgstsFrontEndMode::Disabled)
+            .unwrap();
+        assert!(matches!(
+            core.install_ldgsts_front_end(LdgstsFrontEndMode::AmpereQueueV1),
+            Err(IssueError::LdgstsFrontEndResponsesOutstanding { responses: 1 })
+        ));
+        assert!(core.ldgsts_front_end.is_none());
+        assert_eq!(core.outstanding_responses(), 1);
+        let MemModel::L1Shared(st) = &core.mem else {
+            unreachable!()
+        };
+        assert!(st.direct_async_source_timings.is_none());
+
+        core.on_response(requests[0].reply, 100, &mut Vec::new())
+            .unwrap();
+        core.install_ldgsts_front_end(LdgstsFrontEndMode::AmpereQueueV1)
+            .unwrap();
+        assert!(core.ldgsts_front_end.is_some());
+        let MemModel::L1Shared(st) = &core.mem else {
+            unreachable!()
+        };
+        assert!(
+            st.direct_async_source_timings
+                .as_ref()
+                .is_some_and(HashMap::is_empty)
+        );
+    }
+
+    #[test]
+    fn ldgsts_front_end_retry_hit_retains_and_composes_source_ticket() {
+        let sched = schedule(vec![(
+            0,
+            slot(cb(1), OpClass::Other, "LDGSTS.E.128 [R1], [R2.64]"),
+        )]);
+        let blocks = vec![BlockReplay {
+            launch_index: 0,
+            warps: vec![WarpReplay {
+                warp_slot: 0,
+                insts: vec![async_copy_inst(0, 0, 1)],
+                sectors: vec![40],
+            }],
+        }];
+        let p = params();
+        let mut core = shared_core(&blocks, &sched, &p);
+        let MemModel::L1Shared(st) = &mut core.mem else {
+            panic!("expected shared mode")
+        };
+        let EvAccess::MissRequest { fill } = st
+            .l1
+            .access_eligible_ev(MemoryOrigin::Global, 40, 0)
+            .unwrap()
+        else {
+            panic!("expected cold prefill miss")
+        };
+        st.l1.complete_fill(fill).unwrap();
+        let group = core.async_copies[0]
+            .add_pending_async_copy_sources(0, 1, 32, 0, &p)
+            .unwrap();
+        let source_timing = LdgstsSourceTiming {
+            excess_delay: 3,
+            source_floor: NonZeroU64::new(43).unwrap(),
+        };
+        let MemModel::L1Shared(st) = &mut core.mem else {
+            unreachable!()
+        };
+        st.retry.push_back(Retry {
+            warp: 0,
+            instruction: 0,
+            origin: MemoryOrigin::Global,
+            target: Some(FillTarget::AsyncCopy {
+                group,
+                barrier: None,
+                source_timing: Some(source_timing),
+            }),
+            mshr_floor: Some(p.ldgsts_l1_mshr_floor),
+            lo: 0,
+            hi: 1,
+        });
+        assert_eq!(
+            st.retry[0].target.and_then(FillTarget::source_timing),
+            Some(source_timing)
+        );
+
+        let mut emitted = Vec::new();
+        let (mem, warps, async_copies) = (&mut core.mem, &mut core.warps, &mut core.async_copies);
+        let MemModel::L1Shared(st) = mem else {
+            unreachable!()
+        };
+        drain_retries(st, warps, async_copies, 100, &p, &mut emitted).unwrap();
+        assert!(emitted.is_empty());
+        let group = core.async_copies[0]
+            .state
+            .as_deref()
+            .unwrap()
+            .open_group
+            .unwrap();
+        assert_eq!(group.pending_sources, 0);
+        assert_eq!(group.source_completion_time, 137);
+        assert_eq!(group.completion_time, 138);
+    }
+
+    #[test]
+    fn ldgsts_front_end_retry_overflow_rejects_response_transactionally() {
+        let sched = schedule(vec![(
+            0,
+            slot(cb(1), OpClass::Other, "LDGSTS.E.128 [R1], [R2.64]"),
+        )]);
+        let blocks = vec![BlockReplay {
+            launch_index: 0,
+            warps: vec![WarpReplay {
+                warp_slot: 0,
+                insts: vec![async_copy_inst(0, 0, 1)],
+                sectors: vec![40],
+            }],
+        }];
+        let p = params();
+        let mut core = shared_core(&blocks, &sched, &p);
+        let reply = {
+            let MemModel::L1Shared(st) = &mut core.mem else {
+                panic!("expected shared mode")
+            };
+            let EvAccess::MissRequest { fill: warm_fill } = st
+                .l1
+                .access_eligible_ev(MemoryOrigin::Global, 40, 0)
+                .unwrap()
+            else {
+                panic!("expected warm-line prefill miss")
+            };
+            st.l1.complete_fill(warm_fill).unwrap();
+            let EvAccess::MissRequest { fill } = st
+                .l1
+                .access_eligible_ev(MemoryOrigin::Global, 0, 0)
+                .unwrap()
+            else {
+                panic!("expected trigger fill miss")
+            };
+            let request = MemRequest::l1_fill(
+                0,
+                0,
+                MemoryOrigin::Global,
+                fill,
+                ResponseId::new(st.response_owner, 0, 99, 0),
+            );
+            register_response(st, request.reply).unwrap();
+            let FillKey::Line(line) = fill else {
+                panic!("expected line fill")
+            };
+            st.fill_masks.insert(line, 1);
+            request.reply
+        };
+        let group = core.async_copies[0]
+            .add_pending_async_copy_sources(0, 1, 32, 0, &p)
+            .unwrap();
+        let MemModel::L1Shared(st) = &mut core.mem else {
+            unreachable!()
+        };
+        st.retry.push_back(Retry {
+            warp: 0,
+            instruction: 0,
+            origin: MemoryOrigin::Global,
+            target: Some(FillTarget::AsyncCopy {
+                group,
+                barrier: None,
+                source_timing: Some(LdgstsSourceTiming {
+                    excess_delay: 1,
+                    source_floor: NonZeroU64::new(39).unwrap(),
+                }),
+            }),
+            mshr_floor: Some(p.ldgsts_l1_mshr_floor),
+            lo: 0,
+            hi: 1,
+        });
+        let before_l1 = *core.l1_counters().unwrap();
+        let before_group = core.async_copies[0].state.as_deref().unwrap().open_group;
+        let mut emitted = Vec::new();
+
+        assert!(matches!(
+            core.on_response(reply, u64::MAX - p.l1_hit_latency, &mut emitted),
+            Err(IssueError::TimeOverflow {
+                operation: "LDGSTS front-end excess source delay",
+                base: u64::MAX,
+                delta: 1,
+            })
+        ));
+        assert!(emitted.is_empty());
+        assert_eq!(core.outstanding_responses(), 1);
+        assert_eq!(*core.l1_counters().unwrap(), before_l1);
+        assert_eq!(
+            core.async_copies[0].state.as_deref().unwrap().open_group,
+            before_group
+        );
+        let MemModel::L1Shared(st) = &core.mem else {
+            unreachable!()
+        };
+        assert_eq!(st.retry.len(), 1);
+        let ReplyTo::L1Fill { fill, .. } = reply else {
+            unreachable!()
+        };
+        assert!(st.l1.is_fill_in_flight(fill));
     }
 
     #[test]
