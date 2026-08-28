@@ -686,6 +686,11 @@ pub(crate) enum SmMemMode {
 pub enum IssueError {
     #[error("issue model is unsupported for deployment architecture {arch}")]
     ArchitectureUnsupported { arch: ArchId },
+    #[error("LDGSTS front-end mode {mode} is unsupported for deployment architecture {arch}")]
+    LdgstsFrontEndArchitectureUnsupported {
+        mode: LdgstsFrontEndMode,
+        arch: ArchId,
+    },
     #[error(
         "one function declares inconsistent CTA-barrier pipeline configurations: expected {expected:?}, got {got:?}"
     )]
@@ -962,6 +967,8 @@ pub enum IssueError {
     MemoryAdmissionCandidate(#[from] MemoryAdmissionCandidateError),
     #[error("feedback admission queue on subcore {subcore} is full at t={time}")]
     MemoryAdmissionFeedbackQueueFull { subcore: usize, time: u64 },
+    #[error("LDGSTS front-end queue on subcore {subcore} is full at t={time}")]
+    LdgstsFrontEndQueueFull { subcore: usize, time: u64 },
     #[error(
         "feedback admission candidate {candidate_id} declares operand-visibility latency {configured_cycles} cycles, but the active issue model uses {issue_model_cycles} cycles"
     )]
@@ -1282,6 +1289,68 @@ pub struct AsyncReadinessDiagnostics {
     pub destination_local_cycles: u64,
     pub destination_sm_service_cycles: u64,
     pub completion_hidden_before_wait_cycles: u64,
+}
+
+/// Selects the optional instruction-side ingress model for effective
+/// non-bulk global-to-shared copies. The default deliberately retains the
+/// established scheduler and allocates no queue state.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LdgstsFrontEndMode {
+    #[default]
+    Disabled,
+    AmpereQueueV1,
+}
+
+impl std::fmt::Display for LdgstsFrontEndMode {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(match self {
+            Self::Disabled => "disabled",
+            Self::AmpereQueueV1 => "ampere_queue_v1",
+        })
+    }
+}
+
+/// Compact aggregate for the opt-in LDGSTS instruction-side ingress model.
+/// It intentionally keeps no per-instruction event log.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
+pub struct LdgstsFrontEndDiagnostics {
+    pub issued_tokens: u64,
+    pub queue_blocked_issues: u64,
+    pub excess_delay_cycles: u64,
+    pub maximum_occupancy: u64,
+}
+
+impl LdgstsFrontEndDiagnostics {
+    pub const fn is_empty(&self) -> bool {
+        self.issued_tokens == 0
+            && self.queue_blocked_issues == 0
+            && self.excess_delay_cycles == 0
+            && self.maximum_occupancy == 0
+    }
+
+    fn add_checked(&mut self, addend: &Self) -> Result<(), ReadinessCounterError> {
+        let next = Self {
+            issued_tokens: checked_readiness_add(
+                "readiness.ldgsts_front_end.issued_tokens",
+                self.issued_tokens,
+                addend.issued_tokens,
+            )?,
+            queue_blocked_issues: checked_readiness_add(
+                "readiness.ldgsts_front_end.queue_blocked_issues",
+                self.queue_blocked_issues,
+                addend.queue_blocked_issues,
+            )?,
+            excess_delay_cycles: checked_readiness_add(
+                "readiness.ldgsts_front_end.excess_delay_cycles",
+                self.excess_delay_cycles,
+                addend.excess_delay_cycles,
+            )?,
+            maximum_occupancy: self.maximum_occupancy.max(addend.maximum_occupancy),
+        };
+        *self = next;
+        Ok(())
+    }
 }
 
 impl AsyncReadinessDiagnostics {
@@ -3334,6 +3403,8 @@ pub struct ReadinessDiagnostics {
     pub memory_admission_candidates: MemoryAdmissionCandidateDiagnostics,
     #[serde(skip_serializing_if = "MemoryAdmissionFeedbackDiagnostics::is_empty")]
     pub memory_admission_feedback: MemoryAdmissionFeedbackDiagnostics,
+    #[serde(skip_serializing_if = "LdgstsFrontEndDiagnostics::is_empty")]
+    pub ldgsts_front_end: LdgstsFrontEndDiagnostics,
 }
 
 impl ReadinessDiagnostics {
@@ -3370,6 +3441,8 @@ impl ReadinessDiagnostics {
             .add_checked(&addend.memory_admission_candidates)?;
         next.memory_admission_feedback
             .add_checked(&addend.memory_admission_feedback)?;
+        next.ldgsts_front_end
+            .add_checked(&addend.ldgsts_front_end)?;
         *self = next;
         Ok(())
     }
@@ -3393,9 +3466,12 @@ impl ReadinessDiagnostics {
     /// matching write-service completion frontier. Schema 12 adds a
     /// non-occupying operation-specific visibility/RMW latency after service.
     /// Schema 13 adds independent request/region completion work over bounded
-    /// parallel lanes.
+    /// parallel lanes. Schema 14 adds the opt-in Ampere LDGSTS front-end
+    /// aggregate.
     pub const fn schema_version(&self) -> u32 {
-        if !self.memory_admission_feedback.is_empty()
+        if !self.ldgsts_front_end.is_empty() {
+            14
+        } else if !self.memory_admission_feedback.is_empty()
             && (self
                 .memory_admission_feedback
                 .candidate
@@ -3837,6 +3913,184 @@ pub enum Advance {
 
 const SUB_CORES: usize = 4;
 const DEP_BARRIERS: usize = 6;
+const LDGSTS_FRONT_END_CAPACITY: usize = 5;
+const LDGSTS_FRONT_END_LOCAL_INITIATION_CYCLES: u64 = 4;
+const LDGSTS_FRONT_END_WAR_VISIBILITY_CYCLES: u64 = 13;
+const LDGSTS_FRONT_END_SHARED_ACCEPTANCE_CYCLES: u64 = 2;
+const LDGSTS_FRONT_END_SOURCE_FLOOR_CYCLES: u64 = 39;
+
+/// Transaction ticket produced for one effective LDGSTS issue. The queue
+/// milestone consumes `accept_at` for capacity and diagnostics only; the
+/// response milestone may compose `excess_delay` and `source_floor` with the
+/// existing hierarchy result without re-projecting shared state.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct LdgstsFrontEndTiming {
+    pub(crate) local_start_at: u64,
+    pub(crate) accept_at: u64,
+    pub(crate) excess_delay: u64,
+    pub(crate) source_floor: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct LdgstsFrontEndState {
+    local_ready: [u64; SUB_CORES],
+    shared_ready: u64,
+    releases: [VecDeque<u64>; SUB_CORES],
+    diagnostics: LdgstsFrontEndDiagnostics,
+}
+
+impl Default for LdgstsFrontEndState {
+    fn default() -> Self {
+        Self {
+            local_ready: [0; SUB_CORES],
+            shared_ready: 0,
+            releases: std::array::from_fn(|_| VecDeque::new()),
+            diagnostics: LdgstsFrontEndDiagnostics::default(),
+        }
+    }
+}
+
+impl LdgstsFrontEndState {
+    /// Earliest issue timestamp after the five effective outstanding positions
+    /// are considered. An entry is resident exactly while `now < accept_at`.
+    fn issue_ready_at(&self, subcore: usize, now: u64) -> u64 {
+        let active = self.releases[subcore]
+            .iter()
+            .copied()
+            .filter(|&release| now < release);
+        if active.clone().count() < LDGSTS_FRONT_END_CAPACITY {
+            now
+        } else {
+            active
+                .min()
+                .expect("a full LDGSTS front end has an earliest release")
+        }
+    }
+
+    /// Project one token transactionally. Same-cycle callers additionally
+    /// project the SMSP-ordered batch on a clone of the whole front end.
+    #[cfg(test)]
+    fn project_issue(
+        &mut self,
+        subcore: usize,
+        issue_at: u64,
+        requested_at: u64,
+    ) -> Result<LdgstsFrontEndTiming, IssueError> {
+        let mut projected = self.clone();
+        let timing = projected.project_issue_in_place(subcore, issue_at, requested_at)?;
+        *self = projected;
+        Ok(timing)
+    }
+
+    fn project_issue_in_place(
+        &mut self,
+        subcore: usize,
+        issue_at: u64,
+        requested_at: u64,
+    ) -> Result<LdgstsFrontEndTiming, IssueError> {
+        let capacity_ready = self.issue_ready_at(subcore, requested_at);
+        let was_capacity_bound = capacity_ready > requested_at;
+        if issue_at < capacity_ready {
+            return Err(IssueError::LdgstsFrontEndQueueFull {
+                subcore,
+                time: issue_at,
+            });
+        }
+        let queue = &mut self.releases[subcore];
+        while queue.front().is_some_and(|&release| release <= issue_at) {
+            queue.pop_front();
+        }
+        if queue.len() >= LDGSTS_FRONT_END_CAPACITY {
+            return Err(IssueError::LdgstsFrontEndQueueFull {
+                subcore,
+                time: issue_at,
+            });
+        }
+
+        let local_start_at = issue_at.max(self.local_ready[subcore]);
+        let next_local_ready = checked_cycle_add(
+            "LDGSTS front-end local initiation",
+            local_start_at,
+            LDGSTS_FRONT_END_LOCAL_INITIATION_CYCLES,
+        )?;
+        let local_visible_at = checked_cycle_add(
+            "LDGSTS front-end WAR visibility",
+            local_start_at,
+            LDGSTS_FRONT_END_WAR_VISIBILITY_CYCLES,
+        )?;
+        let accept_at = local_visible_at.max(self.shared_ready);
+        let next_shared_ready = checked_cycle_add(
+            "LDGSTS front-end shared acceptance",
+            accept_at,
+            LDGSTS_FRONT_END_SHARED_ACCEPTANCE_CYCLES,
+        )?;
+        let uncontended_accept_at = checked_cycle_add(
+            "LDGSTS front-end uncontended WAR visibility",
+            issue_at,
+            LDGSTS_FRONT_END_WAR_VISIBILITY_CYCLES,
+        )?;
+        let excess_delay =
+            accept_at
+                .checked_sub(uncontended_accept_at)
+                .ok_or(IssueError::CounterUnderflow {
+                    counter: "LDGSTS front-end excess delay",
+                })?;
+        let source_floor = checked_cycle_add(
+            "LDGSTS front-end source completion floor",
+            checked_cycle_add(
+                "LDGSTS front-end uncontended source completion floor",
+                issue_at,
+                LDGSTS_FRONT_END_SOURCE_FLOOR_CYCLES,
+            )?,
+            excess_delay,
+        )?;
+        let next_issued_tokens = checked_u64_counter_add(
+            "LDGSTS front-end issued-token diagnostic",
+            self.diagnostics.issued_tokens,
+            1,
+        )?;
+        let next_queue_blocked_issues = checked_u64_counter_add(
+            "LDGSTS front-end queue-block diagnostic",
+            self.diagnostics.queue_blocked_issues,
+            u64::from(was_capacity_bound),
+        )?;
+        let next_excess_delay_cycles = checked_u64_counter_add(
+            "LDGSTS front-end excess-delay diagnostic",
+            self.diagnostics.excess_delay_cycles,
+            excess_delay,
+        )?;
+        let next_occupancy =
+            u64::try_from(queue.len() + 1).map_err(|_| IssueError::CounterOverflow {
+                counter: "LDGSTS front-end occupancy diagnostic",
+            })?;
+
+        self.local_ready[subcore] = next_local_ready;
+        self.shared_ready = next_shared_ready;
+        queue.push_back(accept_at);
+        self.diagnostics = LdgstsFrontEndDiagnostics {
+            issued_tokens: next_issued_tokens,
+            queue_blocked_issues: next_queue_blocked_issues,
+            excess_delay_cycles: next_excess_delay_cycles,
+            maximum_occupancy: self.diagnostics.maximum_occupancy.max(next_occupancy),
+        };
+        Ok(LdgstsFrontEndTiming {
+            local_start_at,
+            accept_at,
+            excess_delay,
+            source_floor,
+        })
+    }
+}
+
+fn is_effective_ldgsts_front_end_token(kind: AccessKind) -> bool {
+    matches!(
+        kind,
+        AccessKind::GlobalAsyncCopy {
+            completion_work: 1..,
+            ..
+        }
+    )
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ResultWritebackKind {
@@ -5269,6 +5523,10 @@ pub(crate) struct SmCore<'a> {
     /// Earliest free cycle of the cache-all LDGSTS destination service shared
     /// by every resident warp on this SM.
     ldgsts_destination_pipe_ready: u64,
+    /// Default-off instruction-side ingress candidate. `None` is the disabled
+    /// representation, so ordinary replay owns neither queue storage nor a
+    /// candidate-state allocation.
+    ldgsts_front_end: Option<Box<LdgstsFrontEndState>>,
     /// Pending barrier-observed L1-hit result writebacks. Allocated only when
     /// one joined function contains both the admitted HADD2 producer and the
     /// admitted sm_86 STRONG.SM scalar load form.
@@ -5541,6 +5799,7 @@ impl<'a> SmCore<'a> {
             barrier_pipe_ready: 0,
             tensor_pipe_ready: [0; SUB_CORES],
             ldgsts_destination_pipe_ready: 0,
+            ldgsts_front_end: None,
             result_writebacks,
             unmodeled_tails,
             readiness: ReadinessDiagnostics::default(),
@@ -5565,6 +5824,25 @@ impl<'a> SmCore<'a> {
         candidates: &[MemoryServiceCandidate],
     ) -> Result<(), IssueError> {
         self.memory_service_candidates = MemoryServiceCandidateState::checked(candidates)?;
+        Ok(())
+    }
+
+    pub(crate) fn install_ldgsts_front_end(
+        &mut self,
+        mode: LdgstsFrontEndMode,
+    ) -> Result<(), IssueError> {
+        self.ldgsts_front_end = match mode {
+            LdgstsFrontEndMode::Disabled => None,
+            LdgstsFrontEndMode::AmpereQueueV1 if self.params.arch == ArchId::Sm86 => {
+                Some(Box::default())
+            }
+            LdgstsFrontEndMode::AmpereQueueV1 => {
+                return Err(IssueError::LdgstsFrontEndArchitectureUnsupported {
+                    mode,
+                    arch: self.params.arch,
+                });
+            }
+        };
         Ok(())
     }
 
@@ -5661,6 +5939,9 @@ impl<'a> SmCore<'a> {
         readiness.memory_service_candidates = self.memory_service_candidates.diagnostics();
         if let Some(feedback) = self.memory_admission_feedback.as_ref() {
             readiness.memory_admission_feedback = feedback.diagnostics();
+        }
+        if let Some(front_end) = self.ldgsts_front_end.as_ref() {
+            readiness.ldgsts_front_end = front_end.diagnostics;
         }
         SmSimResult {
             instructions_issued: self.issued,
@@ -7386,11 +7667,52 @@ impl<'a> SmCore<'a> {
         Ok(projected)
     }
 
+    fn project_ldgsts_front_end(
+        &self,
+        picks: &[Option<usize>; SUB_CORES],
+        now: u64,
+    ) -> Result<
+        Option<(
+            Box<LdgstsFrontEndState>,
+            [Option<LdgstsFrontEndTiming>; SUB_CORES],
+        )>,
+        IssueError,
+    > {
+        let Some(current) = self.ldgsts_front_end.as_ref() else {
+            return Ok(None);
+        };
+        if !picks.iter().flatten().any(|&warp| {
+            let state = &self.warps[warp];
+            is_effective_ldgsts_front_end_token(state.insts[state.next].kind)
+        }) {
+            return Ok(None);
+        }
+
+        let mut projected = current.clone();
+        let mut timings = [None; SUB_CORES];
+        for (subcore, pick) in picks.iter().enumerate() {
+            let Some(warp) = *pick else { continue };
+            let state = &self.warps[warp];
+            if is_effective_ldgsts_front_end_token(state.insts[state.next].kind) {
+                let requested_at = self
+                    .issue_ready_without_ldgsts_front_end::<false>(subcore, warp)
+                    .unwrap_or(now);
+                timings[subcore] =
+                    Some(projected.project_issue_in_place(subcore, now, requested_at)?);
+            }
+        }
+        Ok(Some((projected, timings)))
+    }
+
     /// Earliest issue time after both warp/control dependencies and the next
     /// instruction's characterized execution resource are available. A missing
     /// slot remains selectable so the established typed invariant error is
     /// preserved at the transaction boundary.
-    fn issue_ready_at<const CHECK_ASYNC: bool>(&self, subcore: usize, warp: usize) -> Option<u64> {
+    fn issue_ready_without_ldgsts_front_end<const CHECK_ASYNC: bool>(
+        &self,
+        subcore: usize,
+        warp: usize,
+    ) -> Option<u64> {
         let mut warp_ready = self.warps[warp].ready_at()?;
         if let Some(feedback) = self.memory_admission_feedback.as_ref() {
             let state = &self.warps[warp];
@@ -7422,6 +7744,17 @@ impl<'a> SmCore<'a> {
             Some(PipelineClass::DispatchOnly) | None => 0,
         };
         Some(warp_ready.max(pipeline_ready))
+    }
+
+    fn issue_ready_at<const CHECK_ASYNC: bool>(&self, subcore: usize, warp: usize) -> Option<u64> {
+        let mut ready = self.issue_ready_without_ldgsts_front_end::<CHECK_ASYNC>(subcore, warp)?;
+        if let Some(front_end) = self.ldgsts_front_end.as_ref() {
+            let state = &self.warps[warp];
+            if is_effective_ldgsts_front_end_token(state.insts[state.next].kind) {
+                ready = front_end.issue_ready_at(subcore, ready);
+            }
+        }
+        Some(ready)
     }
 
     fn is_issue_ready<const CHECK_ASYNC: bool>(
@@ -8705,6 +9038,11 @@ impl<'a> SmCore<'a> {
             self.project_picked_readiness(&picks, &barrier_arrival_times, t)?;
         let projected_memory_service_candidates =
             self.project_memory_service_candidates(&picks, t)?;
+        let (projected_ldgsts_front_end, _ldgsts_front_end_timings) =
+            match self.project_ldgsts_front_end(&picks, t)? {
+                Some((state, timings)) => (Some(state), timings),
+                None => (None, [None; SUB_CORES]),
+            };
         let memory_admission_feedback_plan =
             if let Some(feedback) = self.memory_admission_feedback.as_ref() {
                 let mut issues = [None; SUB_CORES];
@@ -9108,6 +9446,9 @@ impl<'a> SmCore<'a> {
         self.issued = next_issued;
         self.readiness = projected_readiness;
         self.memory_service_candidates = projected_memory_service_candidates;
+        if let Some(state) = projected_ldgsts_front_end {
+            self.ldgsts_front_end = Some(state);
+        }
         if let Some(plan) = memory_admission_feedback_plan {
             self.memory_admission_feedback
                 .as_mut()
@@ -9583,6 +9924,229 @@ mod tests {
             function_name: "k".to_owned(),
             by_pc: slots.into_iter().collect::<BTreeMap<_, _>>(),
         }
+    }
+
+    fn effective_ldgsts_kind(completion_work: u32) -> AccessKind {
+        AccessKind::GlobalAsyncCopy {
+            off: 0,
+            len: u16::from(completion_work != 0),
+            completion_work,
+            l1_policy: LdgstsL1Policy::CacheAtAllLevels,
+        }
+    }
+
+    #[test]
+    fn ldgsts_front_end_default_owns_no_state_and_ignores_inactive_records() {
+        assert_eq!(LdgstsFrontEndMode::default(), LdgstsFrontEndMode::Disabled);
+        assert!(!is_effective_ldgsts_front_end_token(
+            AccessKind::PredicatedOffMemory
+        ));
+        assert!(!is_effective_ldgsts_front_end_token(effective_ldgsts_kind(
+            0
+        )));
+        assert!(is_effective_ldgsts_front_end_token(effective_ldgsts_kind(
+            1
+        )));
+
+        let sched = schedule(Vec::new());
+        let blocks = Vec::new();
+        let mut core = SmCore::new(&blocks, &sched, &params(), SmMemMode::Flat).unwrap();
+        assert!(core.ldgsts_front_end.is_none());
+        core.install_ldgsts_front_end(LdgstsFrontEndMode::Disabled)
+            .unwrap();
+        assert!(core.ldgsts_front_end.is_none());
+        core.install_ldgsts_front_end(LdgstsFrontEndMode::AmpereQueueV1)
+            .unwrap();
+        assert!(core.ldgsts_front_end.is_some());
+        core.install_ldgsts_front_end(LdgstsFrontEndMode::Disabled)
+            .unwrap();
+        assert!(core.ldgsts_front_end.is_none());
+    }
+
+    #[test]
+    fn one_smsp_ldgsts_front_end_matches_frozen_issue_vector_and_equations() {
+        let mut state = LdgstsFrontEndState::default();
+        let mut issued = Vec::new();
+        let mut timings = Vec::new();
+        let mut requested_at = 0;
+        while issued.len() < 8 {
+            let issue_at = state.issue_ready_at(0, requested_at);
+            issued.push(issue_at);
+            timings.push(state.project_issue(0, issue_at, requested_at).unwrap());
+            requested_at = issue_at + 1;
+        }
+
+        assert_eq!(issued, [0, 1, 2, 3, 4, 13, 17, 21]);
+        assert_eq!(
+            timings
+                .iter()
+                .map(|timing| timing.local_start_at)
+                .collect::<Vec<_>>(),
+            [0, 4, 8, 12, 16, 20, 24, 28]
+        );
+        assert_eq!(
+            timings
+                .iter()
+                .map(|timing| timing.accept_at)
+                .collect::<Vec<_>>(),
+            [13, 17, 21, 25, 29, 33, 37, 41]
+        );
+        assert_eq!(
+            timings
+                .iter()
+                .map(|timing| timing.excess_delay)
+                .collect::<Vec<_>>(),
+            [0, 3, 6, 9, 12, 7, 7, 7]
+        );
+        assert_eq!(
+            timings
+                .iter()
+                .map(|timing| timing.source_floor)
+                .collect::<Vec<_>>(),
+            [39, 43, 47, 51, 55, 59, 63, 67]
+        );
+        assert_eq!(
+            state.diagnostics,
+            LdgstsFrontEndDiagnostics {
+                issued_tokens: 8,
+                queue_blocked_issues: 3,
+                excess_delay_cycles: 51,
+                maximum_occupancy: 5,
+            }
+        );
+    }
+
+    #[test]
+    fn four_smsp_ldgsts_front_end_matches_frozen_shared_acceptance_vector() {
+        let mut state = LdgstsFrontEndState::default();
+        let mut issued: [Vec<u64>; SUB_CORES] = std::array::from_fn(|_| Vec::new());
+        let mut first_cycle_timings = [None; SUB_CORES];
+        let mut requested_at = [0; SUB_CORES];
+
+        for now in 0..=35 {
+            for subcore in 0..SUB_CORES {
+                if issued[subcore].len() == 8
+                    || state.issue_ready_at(subcore, requested_at[subcore]) > now
+                {
+                    continue;
+                }
+                issued[subcore].push(now);
+                let timing = state
+                    .project_issue(subcore, now, requested_at[subcore])
+                    .unwrap();
+                requested_at[subcore] = now + 1;
+                if now == 0 {
+                    first_cycle_timings[subcore] = Some(timing);
+                }
+            }
+        }
+
+        for subcore in 0..SUB_CORES {
+            assert_eq!(&issued[subcore][..5], [0, 1, 2, 3, 4]);
+        }
+        assert_eq!(
+            issued.map(|cycles| [cycles[5], cycles[6], cycles[7]]),
+            [[13, 21, 29], [15, 23, 31], [17, 25, 33], [19, 27, 35]]
+        );
+        assert_eq!(
+            first_cycle_timings.map(|timing| timing.unwrap().local_start_at),
+            [0, 0, 0, 0]
+        );
+        assert_eq!(
+            first_cycle_timings.map(|timing| timing.unwrap().accept_at),
+            [13, 15, 17, 19]
+        );
+        assert_eq!(
+            first_cycle_timings.map(|timing| timing.unwrap().excess_delay),
+            [0, 2, 4, 6]
+        );
+        assert_eq!(state.diagnostics.issued_tokens, 32);
+        assert_eq!(state.diagnostics.queue_blocked_issues, 12);
+        assert_eq!(state.diagnostics.maximum_occupancy, 5);
+    }
+
+    #[test]
+    fn ldgsts_front_end_rejection_is_transactional() {
+        let mut full = LdgstsFrontEndState::default();
+        for now in 0..5 {
+            full.project_issue(0, now, now).unwrap();
+        }
+        let before_full = full.clone();
+        assert!(matches!(
+            full.project_issue(0, 5, 5),
+            Err(IssueError::LdgstsFrontEndQueueFull {
+                subcore: 0,
+                time: 5,
+            })
+        ));
+        assert_eq!(full, before_full);
+
+        let mut overflow = LdgstsFrontEndState::default();
+        let before_overflow = overflow.clone();
+        assert!(matches!(
+            overflow.project_issue(0, u64::MAX, u64::MAX),
+            Err(IssueError::TimeOverflow { .. })
+        ));
+        assert_eq!(overflow, before_overflow);
+    }
+
+    #[test]
+    fn ldgsts_front_end_sparse_gap_does_not_report_a_capacity_block() {
+        let mut state = LdgstsFrontEndState::default();
+        for now in 0..5 {
+            state.project_issue(0, now, now).unwrap();
+        }
+        assert_eq!(state.diagnostics.queue_blocked_issues, 0);
+
+        state.project_issue(0, 100, 100).unwrap();
+        assert_eq!(state.diagnostics.queue_blocked_issues, 0);
+    }
+
+    #[test]
+    fn sm_core_commits_ldgsts_front_end_readiness_only_when_enabled() {
+        let sched = schedule(vec![(
+            0,
+            slot(cb(1), OpClass::Other, "LDGSTS.E.128 [R1], [R2.64]"),
+        )]);
+        let inst = ReplayInst {
+            pc: 0,
+            kind: effective_ldgsts_kind(1),
+        };
+        let blocks = vec![BlockReplay {
+            launch_index: 0,
+            warps: vec![WarpReplay {
+                warp_slot: 0,
+                insts: vec![inst; 8],
+                sectors: vec![0],
+            }],
+        }];
+
+        let mut ordinary = SmCore::new(&blocks, &sched, &params(), SmMemMode::Flat).unwrap();
+        assert_eq!(
+            ordinary
+                .advance(ReplayHorizon::Unbounded, &mut Vec::new())
+                .unwrap(),
+            Advance::Done
+        );
+        assert_eq!(ordinary.result().cycles, 8);
+        assert!(ordinary.result().readiness.ldgsts_front_end.is_empty());
+
+        let mut modeled = SmCore::new(&blocks, &sched, &params(), SmMemMode::Flat).unwrap();
+        modeled
+            .install_ldgsts_front_end(LdgstsFrontEndMode::AmpereQueueV1)
+            .unwrap();
+        assert_eq!(
+            modeled
+                .advance(ReplayHorizon::Unbounded, &mut Vec::new())
+                .unwrap(),
+            Advance::Done
+        );
+        let result = modeled.result();
+        assert_eq!(result.cycles, 22);
+        assert_eq!(result.readiness.schema_version(), 14);
+        assert_eq!(result.readiness.ldgsts_front_end.issued_tokens, 8);
+        assert_eq!(result.readiness.ldgsts_front_end.queue_blocked_issues, 3);
+        assert_eq!(result.readiness.ldgsts_front_end.maximum_occupancy, 5);
     }
 
     #[test]

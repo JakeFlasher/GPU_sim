@@ -9,7 +9,8 @@ use sim_sm::{
 use sim_trace::{AnchoredDir, ExecInfo, TraceDir, kernel_grid, pb};
 
 use super::{
-    CacheScope, LaunchReport, RunConfig, RunError, RunReport, at, launch_report, resolve_mode,
+    CacheScope, LaunchReport, LdgstsFrontEndMode, RunConfig, RunError, RunReport, at,
+    launch_report, resolve_mode,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -251,7 +252,7 @@ impl PreparedReplay {
                 "prepared timing replay requires full launch coverage",
             )
         })?;
-        launch_report(result, None, None)
+        launch_report(result, None, None, LdgstsFrontEndMode::Disabled)
     }
 
     /// Replay one launch and wrap it in the same configuration-bearing report
@@ -278,6 +279,7 @@ impl PreparedReplay {
             architecture: self.architecture.clone(),
             memory_mode: self.memory_mode,
             cache_scope: CacheScope::Launch.token(),
+            ldgsts_front_end: LdgstsFrontEndMode::Disabled,
             carded_dram_bandwidth: self.carded_dram_bandwidth,
             memory_service_candidate_count: 0,
             memory_admission_candidate_count: 0,
@@ -324,6 +326,7 @@ fn require_launch_cold_ordinary(config: &RunConfig) -> Result<(), RunError> {
     if config.memory_service_candidates.is_some()
         || config.memory_admission_candidates.is_some()
         || config.memory_admission_feedback.is_some()
+        || config.ldgsts_front_end != LdgstsFrontEndMode::Disabled
     {
         return Err(RunError::new(
             "prepared replay",
@@ -385,6 +388,7 @@ mod tests {
             memory_service_candidates: None,
             memory_admission_candidates: None,
             memory_admission_feedback: None,
+            ldgsts_front_end: LdgstsFrontEndMode::Disabled,
         }
     }
 

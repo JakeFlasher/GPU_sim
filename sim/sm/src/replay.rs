@@ -70,15 +70,16 @@ use sim_mem::{
 #[cfg(feature = "campaign")]
 use crate::evidence::AdmittedLaunchEvidence;
 use crate::issue::{
-    AccessKind, BlockReplay, IssueError, IssueModelParams, MemoryAdmissionCandidate,
-    MemoryServiceCandidate, ReplayInst, SharedMemoryResidency, SmSimResult, TailFlags, WarpReplay,
-    simulate_sm_with_residency, validate_memory_admission_candidates,
-    validate_memory_service_candidates,
+    AccessKind, BlockReplay, IssueError, IssueModelParams, LdgstsFrontEndMode,
+    MemoryAdmissionCandidate, MemoryServiceCandidate, ReplayInst, SharedMemoryResidency,
+    SmSimResult, TailFlags, WarpReplay, simulate_sm_with_residency,
+    validate_memory_admission_candidates, validate_memory_service_candidates,
 };
 use crate::program::FunctionSchedule;
 use crate::system::{
     DramBw, DramStats, L2SourceSplit, SystemError,
     simulate_kernel_shared_with_residency_and_candidates,
+    simulate_kernel_shared_with_residency_and_candidates_and_ldgsts_front_end,
 };
 
 mod aggregation;
@@ -195,6 +196,18 @@ pub enum ReplayError {
         "memory-admission candidates require full launch coverage; sampled replay discards per-SM timing diagnostics"
     )]
     MemoryAdmissionCandidatesRequireFullCoverage,
+    #[error("LDGSTS front-end {mode:?} requires sm_86 replay, got {arch}")]
+    LdgstsFrontEndArchitectureUnsupported {
+        mode: LdgstsFrontEndMode,
+        arch: ArchId,
+    },
+    #[error("LDGSTS front-end {front_end:?} requires L1SharedL2 replay, got {mode:?}")]
+    LdgstsFrontEndRequiresSharedL2 {
+        front_end: LdgstsFrontEndMode,
+        mode: ReplayMemMode,
+    },
+    #[error("LDGSTS front-end replay requires full launch coverage")]
+    LdgstsFrontEndRequiresFullCoverage,
     #[error("SM {sm_id} L1 counter aggregation failed: {source}")]
     L1Aggregation {
         sm_id: i32,
@@ -1817,6 +1830,7 @@ pub struct ReplayConfiguration {
     issue_params: IssueModelParams,
     memory_mode: ReplayMemMode,
     memory_admission_feedback: Option<MemoryAdmissionCandidate>,
+    ldgsts_front_end: LdgstsFrontEndMode,
     co_residency: CoResidency,
 }
 
@@ -1827,14 +1841,12 @@ impl ReplayConfiguration {
         issue_params: IssueModelParams,
         memory_mode: ReplayMemMode,
     ) -> Result<Self, ReplayError> {
-        validate_replay_mode_architecture(issue_params.arch, memory_mode)?;
-        issue_params.validate_resource_source()?;
-        Ok(Self {
+        Self::checked_with_options(
             issue_params,
             memory_mode,
-            memory_admission_feedback: None,
-            co_residency: CoResidency::Modeled,
-        })
+            None,
+            LdgstsFrontEndMode::Disabled,
+        )
     }
 
     /// Build the structural identity for the timing-active schema-10 lane.
@@ -1846,13 +1858,46 @@ impl ReplayConfiguration {
         memory_mode: ReplayMemMode,
         candidate: MemoryAdmissionCandidate,
     ) -> Result<Self, ReplayError> {
-        if !matches!(memory_mode, ReplayMemMode::L1SharedL2 { .. }) {
-            return Err(ReplayError::MemoryAdmissionCandidatesRequireSharedL2);
+        Self::checked_with_options(
+            issue_params,
+            memory_mode,
+            Some(candidate),
+            LdgstsFrontEndMode::Disabled,
+        )
+    }
+
+    /// Build a replay identity with the explicit LDGSTS ingress candidate.
+    /// Disabled preserves the ordinary identity and timing path.
+    pub fn checked_with_ldgsts_front_end(
+        issue_params: IssueModelParams,
+        memory_mode: ReplayMemMode,
+        ldgsts_front_end: LdgstsFrontEndMode,
+    ) -> Result<Self, ReplayError> {
+        Self::checked_with_options(issue_params, memory_mode, None, ldgsts_front_end)
+    }
+
+    fn checked_with_options(
+        issue_params: IssueModelParams,
+        memory_mode: ReplayMemMode,
+        memory_admission_feedback: Option<MemoryAdmissionCandidate>,
+        ldgsts_front_end: LdgstsFrontEndMode,
+    ) -> Result<Self, ReplayError> {
+        validate_ldgsts_front_end(issue_params.arch, memory_mode, ldgsts_front_end)?;
+        validate_replay_mode_architecture(issue_params.arch, memory_mode)?;
+        issue_params.validate_resource_source()?;
+        if let Some(candidate) = memory_admission_feedback {
+            if !matches!(memory_mode, ReplayMemMode::L1SharedL2 { .. }) {
+                return Err(ReplayError::MemoryAdmissionCandidatesRequireSharedL2);
+            }
+            candidate.validate_feedback(issue_params.read_barrier_latency)?;
         }
-        candidate.validate_feedback(issue_params.read_barrier_latency)?;
-        let mut configuration = Self::checked(issue_params, memory_mode)?;
-        configuration.memory_admission_feedback = Some(candidate);
-        Ok(configuration)
+        Ok(Self {
+            issue_params,
+            memory_mode,
+            memory_admission_feedback,
+            ldgsts_front_end,
+            co_residency: CoResidency::Modeled,
+        })
     }
 
     pub fn arch(&self) -> ArchId {
@@ -1870,6 +1915,10 @@ impl ReplayConfiguration {
     /// Timing-active finite admission candidate, when schema 10 is enabled.
     pub fn memory_admission_feedback(&self) -> Option<MemoryAdmissionCandidate> {
         self.memory_admission_feedback
+    }
+
+    pub fn ldgsts_front_end(&self) -> LdgstsFrontEndMode {
+        self.ldgsts_front_end
     }
 
     pub fn co_residency(&self) -> CoResidency {
@@ -1966,7 +2015,28 @@ impl StreamL2ReplaySession {
         device_id: i64,
         stream_id: i64,
     ) -> Result<Self, ReplaySessionError> {
-        let configuration = ReplayConfiguration::checked(*params, mode)?;
+        Self::new_with_ldgsts_front_end(
+            td,
+            arch_card,
+            params,
+            mode,
+            device_id,
+            stream_id,
+            LdgstsFrontEndMode::Disabled,
+        )
+    }
+
+    pub fn new_with_ldgsts_front_end(
+        td: &TraceDir,
+        arch_card: &ArchCard,
+        params: &IssueModelParams,
+        mode: ReplayMemMode,
+        device_id: i64,
+        stream_id: i64,
+        ldgsts_front_end: LdgstsFrontEndMode,
+    ) -> Result<Self, ReplaySessionError> {
+        let configuration =
+            ReplayConfiguration::checked_with_ldgsts_front_end(*params, mode, ldgsts_front_end)?;
         let l2_config = match mode {
             ReplayMemMode::L1SharedL2 { l2, .. } => l2,
             _ => return Err(ReplaySessionError::SharedL2ModeRequired { mode }),
@@ -2045,6 +2115,27 @@ impl StreamL2ReplaySession {
         params: &IssueModelParams,
         mode: ReplayMemMode,
     ) -> Result<KernelReplayOutcome, ReplaySessionError> {
+        self.replay_next_with_ldgsts_front_end(
+            td,
+            loc,
+            schedules,
+            arch_card,
+            params,
+            mode,
+            LdgstsFrontEndMode::Disabled,
+        )
+    }
+
+    pub fn replay_next_with_ldgsts_front_end(
+        &mut self,
+        td: &TraceDir,
+        loc: &KernelLoc<'_>,
+        schedules: &BTreeMap<i32, FunctionSchedule>,
+        arch_card: &ArchCard,
+        params: &IssueModelParams,
+        mode: ReplayMemMode,
+        ldgsts_front_end: LdgstsFrontEndMode,
+    ) -> Result<KernelReplayOutcome, ReplaySessionError> {
         if td.root() != self.trace_root {
             return Err(ReplaySessionError::TraceRootMismatch {
                 expected: self.trace_root.clone(),
@@ -2080,7 +2171,8 @@ impl StreamL2ReplaySession {
             });
         }
 
-        let got_configuration = ReplayConfiguration::checked(*params, mode)?;
+        let got_configuration =
+            ReplayConfiguration::checked_with_ldgsts_front_end(*params, mode, ldgsts_front_end)?;
         if got_configuration != self.configuration {
             return Err(ReplaySessionError::ConfigurationMismatch {
                 expected: self.configuration,
@@ -2107,7 +2199,7 @@ impl StreamL2ReplaySession {
 
         let mut staged_l2 = self.l2.try_snapshot().map_err(ReplayError::from)?;
         let schedule = lookup_schedule(schedules, loc)?;
-        let outcome = replay_kernel_with_schedule_and_l2(
+        let outcome = replay_kernel_with_schedule_and_l2_and_ldgsts_front_end(
             td,
             loc,
             schedule,
@@ -2115,6 +2207,7 @@ impl StreamL2ReplaySession {
             params,
             mode,
             Some(&mut staged_l2),
+            ldgsts_front_end,
         )?;
         if staged_l2.pending_sector_count() != 0 {
             return Err(ReplayError::RetainedL2NotDrained {
@@ -2187,19 +2280,43 @@ fn validate_replay_mode_architecture(arch: ArchId, mode: ReplayMemMode) -> Resul
     Ok(())
 }
 
+fn validate_ldgsts_front_end(
+    arch: ArchId,
+    memory_mode: ReplayMemMode,
+    ldgsts_front_end: LdgstsFrontEndMode,
+) -> Result<(), ReplayError> {
+    if ldgsts_front_end == LdgstsFrontEndMode::Disabled {
+        return Ok(());
+    }
+    if arch != ArchId::Sm86 {
+        return Err(ReplayError::LdgstsFrontEndArchitectureUnsupported {
+            mode: ldgsts_front_end,
+            arch,
+        });
+    }
+    if !matches!(memory_mode, ReplayMemMode::L1SharedL2 { .. }) {
+        return Err(ReplayError::LdgstsFrontEndRequiresSharedL2 {
+            front_end: ldgsts_front_end,
+            mode: memory_mode,
+        });
+    }
+    Ok(())
+}
+
 fn validate_replay_architecture(
     schedule: &FunctionSchedule,
     params: &IssueModelParams,
     mode: ReplayMemMode,
     memory_admission_feedback: Option<MemoryAdmissionCandidate>,
+    ldgsts_front_end: LdgstsFrontEndMode,
 ) -> Result<ReplayConfiguration, ReplayError> {
     require_replay_arch(schedule.arch, params.arch, "issue parameters")?;
-    match memory_admission_feedback {
-        Some(candidate) => {
-            ReplayConfiguration::checked_with_memory_admission_feedback(*params, mode, candidate)
-        }
-        None => ReplayConfiguration::checked(*params, mode),
-    }
+    ReplayConfiguration::checked_with_options(
+        *params,
+        mode,
+        memory_admission_feedback,
+        ldgsts_front_end,
+    )
 }
 
 fn async_copy_destination_fallback_sms(
@@ -2239,6 +2356,29 @@ fn replay_kernel_with_schedule_and_l2(
     mode: ReplayMemMode,
     retained_l2: Option<&mut L2Model>,
 ) -> Result<KernelReplayOutcome, ReplayError> {
+    replay_kernel_with_schedule_and_l2_and_ldgsts_front_end(
+        td,
+        loc,
+        schedule,
+        arch_card,
+        params,
+        mode,
+        retained_l2,
+        LdgstsFrontEndMode::Disabled,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn replay_kernel_with_schedule_and_l2_and_ldgsts_front_end(
+    td: &TraceDir,
+    loc: &KernelLoc<'_>,
+    schedule: &FunctionSchedule,
+    arch_card: &ArchCard,
+    params: &IssueModelParams,
+    mode: ReplayMemMode,
+    retained_l2: Option<&mut L2Model>,
+    ldgsts_front_end: LdgstsFrontEndMode,
+) -> Result<KernelReplayOutcome, ReplayError> {
     replay_kernel_with_schedule_and_l2_and_candidates(
         td,
         loc,
@@ -2250,6 +2390,7 @@ fn replay_kernel_with_schedule_and_l2(
         &[],
         &[],
         None,
+        ldgsts_front_end,
     )
 }
 
@@ -2265,6 +2406,7 @@ fn replay_kernel_with_schedule_and_l2_and_candidates(
     memory_service_candidates: &[MemoryServiceCandidate],
     memory_admission_candidates: &[MemoryAdmissionCandidate],
     memory_admission_feedback: Option<MemoryAdmissionCandidate>,
+    ldgsts_front_end: LdgstsFrontEndMode,
 ) -> Result<KernelReplayOutcome, ReplayError> {
     if !memory_service_candidates.is_empty() && !matches!(mode, ReplayMemMode::L1SharedL2 { .. }) {
         return Err(ReplayError::MemoryServiceCandidatesRequireSharedL2);
@@ -2281,8 +2423,13 @@ fn replay_kernel_with_schedule_and_l2_and_candidates(
     if let Some(candidate) = memory_admission_feedback {
         candidate.validate().map_err(IssueError::from)?;
     }
-    let configuration =
-        validate_replay_architecture(schedule, params, mode, memory_admission_feedback)?;
+    let configuration = validate_replay_architecture(
+        schedule,
+        params,
+        mode,
+        memory_admission_feedback,
+        ldgsts_front_end,
+    )?;
     let placement = PlacementConfig::from_arch_card(arch_card, schedule.arch)?;
     require_trace_architecture(td, schedule.arch)?;
     let decode_sectors = !matches!(mode, ReplayMemMode::Flat);
@@ -2304,6 +2451,12 @@ fn replay_kernel_with_schedule_and_l2_and_candidates(
     #[cfg(feature = "campaign")]
     if memory_admission_feedback.is_some() && matches!(&coverage, ExtractedCoverage::Sampled(_)) {
         return Err(ReplayError::MemoryAdmissionCandidatesRequireFullCoverage);
+    }
+    #[cfg(feature = "campaign")]
+    if ldgsts_front_end != LdgstsFrontEndMode::Disabled
+        && matches!(&coverage, ExtractedCoverage::Sampled(_))
+    {
+        return Err(ReplayError::LdgstsFrontEndRequiresFullCoverage);
     }
     let async_copy_destination_fallback_sms =
         async_copy_destination_fallback_sms(td.memory_payload_contract(), &per_sm_blocks);
@@ -2358,18 +2511,37 @@ fn replay_kernel_with_schedule_and_l2_and_candidates(
                 return Err(ReplayError::RetainedL2NotDrained { pending_sectors });
             }
             let counters_before = *l2_model.counters()?;
-            let mut sys = simulate_kernel_shared_with_residency_and_candidates(
-                &per_sm_blocks,
-                schedule,
-                params,
-                shared_memory_residency,
-                l1,
-                l2_model,
-                dram,
-                memory_service_candidates,
-                memory_admission_candidates,
-                memory_admission_feedback,
-            )?;
+            let mut sys = match ldgsts_front_end {
+                LdgstsFrontEndMode::Disabled => {
+                    simulate_kernel_shared_with_residency_and_candidates(
+                        &per_sm_blocks,
+                        schedule,
+                        params,
+                        shared_memory_residency,
+                        l1,
+                        l2_model,
+                        dram,
+                        memory_service_candidates,
+                        memory_admission_candidates,
+                        memory_admission_feedback,
+                    )?
+                }
+                LdgstsFrontEndMode::AmpereQueueV1 => {
+                    simulate_kernel_shared_with_residency_and_candidates_and_ldgsts_front_end(
+                        &per_sm_blocks,
+                        schedule,
+                        params,
+                        shared_memory_residency,
+                        l1,
+                        l2_model,
+                        dram,
+                        memory_service_candidates,
+                        memory_admission_candidates,
+                        memory_admission_feedback,
+                        ldgsts_front_end,
+                    )?
+                }
+            };
             let pending_sectors = l2_model.pending_sector_count();
             if pending_sectors != 0 {
                 return Err(ReplayError::RetainedL2NotDrained { pending_sectors });
@@ -2487,6 +2659,7 @@ pub fn replay_trace_kernel_with_memory_service_candidates(
         memory_service_candidates,
         &[],
         None,
+        LdgstsFrontEndMode::Disabled,
     )
 }
 
@@ -2515,6 +2688,7 @@ pub fn replay_trace_kernel_with_memory_admission_candidates(
         &[],
         memory_admission_candidates,
         None,
+        LdgstsFrontEndMode::Disabled,
     )
 }
 
@@ -2542,6 +2716,31 @@ pub fn replay_trace_kernel_with_memory_admission_feedback(
         &[],
         &[],
         Some(memory_admission_feedback),
+        LdgstsFrontEndMode::Disabled,
+    )
+}
+
+/// Replay one full-coverage Ampere L1/L2 launch with the explicit LDGSTS
+/// ingress candidate. The selector is part of the returned replay identity.
+pub fn replay_trace_kernel_with_ldgsts_front_end(
+    td: &TraceDir,
+    loc: &KernelLoc<'_>,
+    schedules: &BTreeMap<i32, FunctionSchedule>,
+    arch_card: &ArchCard,
+    params: &IssueModelParams,
+    mode: ReplayMemMode,
+    ldgsts_front_end: LdgstsFrontEndMode,
+) -> Result<KernelReplayOutcome, ReplayError> {
+    let schedule = lookup_schedule(schedules, loc)?;
+    replay_kernel_with_schedule_and_l2_and_ldgsts_front_end(
+        td,
+        loc,
+        schedule,
+        arch_card,
+        params,
+        mode,
+        None,
+        ldgsts_front_end,
     )
 }
 
@@ -2827,6 +3026,57 @@ mod stream_l2_session_tests {
             ),
             (1, 1)
         );
+    }
+
+    #[test]
+    fn stream_l2_session_binds_ldgsts_front_end_identity() {
+        let tmp = tempfile::tempdir().unwrap();
+        write_trace(tmp.path(), &[(1, 1, vec![load(1, BASE, 4)])]);
+        let trace = TraceDir::open_direct(tmp.path()).unwrap();
+        let loc = trace.kernels().next().unwrap();
+        let schedules = schedules(&[1]);
+        let card = sm86_test_card();
+        let params = params();
+        let mode = shared_mode(2, 256);
+        let mut session = StreamL2ReplaySession::new_with_ldgsts_front_end(
+            &trace,
+            &card,
+            &params,
+            mode,
+            0,
+            0,
+            LdgstsFrontEndMode::AmpereQueueV1,
+        )
+        .unwrap();
+
+        assert_eq!(
+            session.configuration().ldgsts_front_end(),
+            LdgstsFrontEndMode::AmpereQueueV1
+        );
+        assert!(matches!(
+            session.replay_next(&trace, &loc, &schedules, &card, &params, mode),
+            Err(ReplaySessionError::ConfigurationMismatch { .. })
+        ));
+        assert_eq!(session.completed_launches(), 0);
+
+        let result = full(
+            session
+                .replay_next_with_ldgsts_front_end(
+                    &trace,
+                    &loc,
+                    &schedules,
+                    &card,
+                    &params,
+                    mode,
+                    LdgstsFrontEndMode::AmpereQueueV1,
+                )
+                .unwrap(),
+        );
+        assert_eq!(
+            result.configuration().ldgsts_front_end(),
+            LdgstsFrontEndMode::AmpereQueueV1
+        );
+        assert_eq!(session.completed_launches(), 1);
     }
 
     #[test]
@@ -4880,6 +5130,44 @@ mod aggregation_tests {
                     issue_model_cycles: 8,
                 }
             ))
+        ));
+    }
+
+    #[test]
+    fn ldgsts_front_end_is_default_off_architecture_scoped_and_part_of_identity() {
+        let (params, mode) = feedback_configuration_inputs();
+        let ordinary = ReplayConfiguration::checked(params, mode).unwrap();
+        let active = ReplayConfiguration::checked_with_ldgsts_front_end(
+            params,
+            mode,
+            LdgstsFrontEndMode::AmpereQueueV1,
+        )
+        .unwrap();
+
+        assert_eq!(ordinary.ldgsts_front_end(), LdgstsFrontEndMode::Disabled);
+        assert_eq!(active.ldgsts_front_end(), LdgstsFrontEndMode::AmpereQueueV1);
+        assert_ne!(ordinary, active);
+        assert!(matches!(
+            ReplayConfiguration::checked_with_ldgsts_front_end(
+                params,
+                ReplayMemMode::Flat,
+                LdgstsFrontEndMode::AmpereQueueV1,
+            ),
+            Err(ReplayError::LdgstsFrontEndRequiresSharedL2 { .. })
+        ));
+
+        let mut sm120 = params;
+        sm120.arch = ArchId::Sm120;
+        assert!(matches!(
+            ReplayConfiguration::checked_with_ldgsts_front_end(
+                sm120,
+                ReplayMemMode::Flat,
+                LdgstsFrontEndMode::AmpereQueueV1,
+            ),
+            Err(ReplayError::LdgstsFrontEndArchitectureUnsupported {
+                arch: ArchId::Sm120,
+                ..
+            })
         ));
     }
 
@@ -9371,6 +9659,24 @@ mod completeness_tests {
         admission_candidates: &[MemoryAdmissionCandidate],
         memory_admission_feedback: Option<MemoryAdmissionCandidate>,
     ) -> Result<KernelReplayOutcome, ReplayError> {
+        replay_outcome_with_all_options(
+            dir,
+            mode,
+            candidates,
+            admission_candidates,
+            memory_admission_feedback,
+            LdgstsFrontEndMode::Disabled,
+        )
+    }
+
+    fn replay_outcome_with_all_options(
+        dir: &std::path::Path,
+        mode: ReplayMemMode,
+        candidates: &[MemoryServiceCandidate],
+        admission_candidates: &[MemoryAdmissionCandidate],
+        memory_admission_feedback: Option<MemoryAdmissionCandidate>,
+        ldgsts_front_end: LdgstsFrontEndMode,
+    ) -> Result<KernelReplayOutcome, ReplayError> {
         let td = TraceDir::open(dir)?;
         let loc = td.kernels().next().unwrap();
         let schedule = FunctionSchedule {
@@ -9426,6 +9732,7 @@ mod completeness_tests {
             candidates,
             admission_candidates,
             memory_admission_feedback,
+            ldgsts_front_end,
         )
     }
 
@@ -9650,6 +9957,17 @@ mod completeness_tests {
         assert!(matches!(
             replay_outcome_with_options(tmp.path(), mode, &[], &[], Some(feedback)),
             Err(ReplayError::MemoryAdmissionCandidatesRequireFullCoverage)
+        ));
+        assert!(matches!(
+            replay_outcome_with_all_options(
+                tmp.path(),
+                mode,
+                &[],
+                &[],
+                None,
+                LdgstsFrontEndMode::AmpereQueueV1,
+            ),
+            Err(ReplayError::LdgstsFrontEndRequiresFullCoverage)
         ));
     }
 

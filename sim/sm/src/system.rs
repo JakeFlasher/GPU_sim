@@ -372,10 +372,10 @@ impl L2SourceSplit {
 }
 
 use crate::issue::{
-    AdmissionRequestWitness, Advance, BlockReplay, IssueError, IssueModelParams, MemRequest,
-    MemoryAdmissionCandidate, MemoryAdmissionCandidateState, MemoryOperation,
-    MemoryServiceCandidate, ReplayHorizon, ReplyTo, SharedMemoryResidency, SmCore, SmMemMode,
-    SmSimResult, TailFlags, checked_cycle_add, validate_memory_admission_candidates,
+    AdmissionRequestWitness, Advance, BlockReplay, IssueError, IssueModelParams,
+    LdgstsFrontEndMode, MemRequest, MemoryAdmissionCandidate, MemoryAdmissionCandidateState,
+    MemoryOperation, MemoryServiceCandidate, ReplayHorizon, ReplyTo, SharedMemoryResidency, SmCore,
+    SmMemMode, SmSimResult, TailFlags, checked_cycle_add, validate_memory_admission_candidates,
     validate_memory_service_candidates,
 };
 use crate::program::FunctionSchedule;
@@ -1526,6 +1526,35 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates(
     memory_admission_candidates: &[MemoryAdmissionCandidate],
     memory_admission_feedback: Option<MemoryAdmissionCandidate>,
 ) -> Result<SystemResult, SystemError> {
+    simulate_kernel_shared_with_residency_and_candidates_and_ldgsts_front_end(
+        per_sm_blocks,
+        schedule,
+        params,
+        shared_memory_residency,
+        l1_config,
+        l2,
+        dram,
+        memory_service_candidates,
+        memory_admission_candidates,
+        memory_admission_feedback,
+        LdgstsFrontEndMode::Disabled,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn simulate_kernel_shared_with_residency_and_candidates_and_ldgsts_front_end(
+    per_sm_blocks: &BTreeMap<i32, Vec<BlockReplay>>,
+    schedule: &FunctionSchedule,
+    params: &IssueModelParams,
+    shared_memory_residency: SharedMemoryResidency,
+    l1_config: L1Config,
+    l2: &mut L2Model,
+    dram: DramBw,
+    memory_service_candidates: &[MemoryServiceCandidate],
+    memory_admission_candidates: &[MemoryAdmissionCandidate],
+    memory_admission_feedback: Option<MemoryAdmissionCandidate>,
+    ldgsts_front_end: LdgstsFrontEndMode,
+) -> Result<SystemResult, SystemError> {
     let arch = schedule.arch;
     require_arch(arch, params.arch, "issue parameters")?;
     require_arch(arch, l1_config.arch, "L1 configuration")?;
@@ -1578,6 +1607,7 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates(
                 shared_memory_residency,
                 SmMemMode::L1Shared(l1_config),
             )?;
+            core.install_ldgsts_front_end(ldgsts_front_end)?;
             core.install_memory_service_candidates(memory_service_candidates)?;
             if !memory_admission_candidates.is_empty() {
                 core.enable_memory_admission_observations();
