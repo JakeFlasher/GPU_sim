@@ -3,7 +3,8 @@
 
 The implemented live phases are deliberately serial: one process owns the RTX
 3090 Ti at a time, and a direct bundle becomes resumable only after all raw
-outputs are complete.  NCU is prospective in Round 0: ``ncu --dry-run`` prints
+outputs are complete.  NCU remains prospective in the current round:
+``ncu --dry-run`` prints
 its command stream without touching the GPU or the output tree.
 """
 
@@ -23,7 +24,7 @@ from contextlib import AbstractContextManager
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Iterable, Sequence
+from typing import Iterable, Mapping, Sequence
 
 
 HERE = Path(__file__).resolve().parent
@@ -49,6 +50,7 @@ NVIDIA_SMI = os.environ.get("NVIDIA_SMI", "nvidia-smi")
 
 MEASURED_BURSTS = 16_384
 FIXED_WARMUP = 64
+TIMING_SCHEMA = 2
 DIRECT_REPETITIONS = 7
 NCU_BASE_REPETITIONS = 3
 NCU_EXTENDED_REPETITIONS = 5
@@ -115,6 +117,7 @@ class Cell:
         return {
             **asdict(self),
             "key": self.key,
+            "timing_schema": TIMING_SCHEMA,
             "arms": ["enabled", "off"],
             "bursts": MEASURED_BURSTS,
             "warmup": FIXED_WARMUP,
@@ -328,6 +331,33 @@ def compact_predicate_positions(depth: int) -> list[int]:
         depth >= 8,
     )
     return [0] + [index + 1 for index, enabled in enumerate(predicates) if enabled]
+
+
+EXPECTED_RUNTIME_PREDICATES: tuple[str | None, ...] = (
+    None,
+    "@P0",
+    "@P1",
+    "@P2",
+    "@P3",
+    "@P4",
+    "@P5",
+    "@P6",
+)
+
+
+def normalize_runtime_predicate_shape(
+    predicates: object,
+) -> tuple[str | None, ...] | None:
+    """Normalize only the intentional third-position polarity spelling."""
+
+    if not isinstance(predicates, (list, tuple)) or len(predicates) != 8:
+        return None
+    values = tuple(predicates)
+    if values[3] == "@!P2":
+        values = values[:3] + ("@P2",) + values[4:]
+    if values != EXPECTED_RUNTIME_PREDICATES:
+        return None
+    return values
 
 
 def selected_cells(selector: str | None) -> list[Cell]:
@@ -639,6 +669,13 @@ def target_command(
     ]
 
 
+def sass_pc(row: Mapping[str, object]) -> int:
+    """Sort malformed sidecar rows without raising from the report builder."""
+
+    value = row.get("pc")
+    return value if isinstance(value, int) and not isinstance(value, bool) else -1
+
+
 def first_drain_clock(
     rows: Sequence[dict[str, object]],
     lower_pc: int,
@@ -651,22 +688,24 @@ def first_drain_clock(
     later loop clock as the drain sample.
     """
 
+    ordered_rows = sorted(rows, key=sass_pc)
+    depbars = [
+        row
+        for row in ordered_rows
+        if isinstance(row.get("pc"), int)
+        and row["pc"] > lower_pc
+        and "DEPBAR" in str(row.get("opcode_text", ""))
+    ]
     first_depbar = next(
-        (
-            row
-            for row in sorted(rows, key=lambda item: int(item.get("pc", -1)))
-            if isinstance(row.get("pc"), int)
-            and row["pc"] > lower_pc
-            and "DEPBAR" in str(row.get("opcode_text", ""))
-        ),
-        None,
+        (row for row in depbars if "DEPBAR.LE" in str(row.get("opcode_text", ""))),
+        depbars[0] if depbars else None,
     )
     if not isinstance(first_depbar, dict) or not isinstance(first_depbar.get("pc"), int):
         return None
     return next(
         (
             row
-            for row in sorted(rows, key=lambda item: int(item.get("pc", -1)))
+            for row in ordered_rows
             if isinstance(row.get("pc"), int)
             and row["pc"] > first_depbar["pc"]
             and "SR_CLOCKLO" in str(row.get("opcode_text", ""))
@@ -769,6 +808,7 @@ def validate_summary(
     bindings = {
         "mode": mode,
         "assay": next(iter(assays)),
+        "timing_schema": TIMING_SCHEMA,
         "bursts": bursts,
         "warmup": warmup,
         "repetition": repetition,
@@ -853,8 +893,10 @@ def emit_manifest(output: Path, *, gpu: str = "0") -> None:
             "restore": "reset locks by default; observed-frequency re-lock is explicit",
         },
         "raw_effects": {
+            "timing_schema": TIMING_SCHEMA,
             "issue": "issue_on - issue_off",
-            "completion": "drain_on - drain_off (fields are post-issue intervals)",
+            "completion": "(drain_on - issue_on) - (drain_off - issue_off)",
+            "drain_field": "endpoint duration from each arm start",
             "independent_unit": "process repetition",
         },
         "execution_surfaces": {
@@ -1138,7 +1180,7 @@ def summarize_target_variants(sidecar: dict[str, object]) -> list[dict[str, obje
         issue_clock = next(
             (
                 row
-                for row in sorted(clocks, key=lambda item: int(item.get("pc", -1)))
+                for row in sorted(clocks, key=sass_pc)
                 if pcs
                 and isinstance(row.get("pc"), int)
                 and row["pc"] > max(pcs)
@@ -1188,6 +1230,9 @@ def summarize_target_variants(sidecar: dict[str, object]) -> list[dict[str, obje
                 "target_opcode": target_opcode,
                 "target_in_function": len(loads),
                 "target_predicates": [row.get("predicate") for row in loads],
+                "normalized_predicate_shape": normalize_runtime_predicate_shape(
+                    [row.get("predicate") for row in loads]
+                ),
                 "target_pc_contiguous": bool(
                     pcs
                     and pcs == list(range(pcs[0], pcs[0] + 16 * len(pcs), 16))
@@ -1201,7 +1246,8 @@ def summarize_target_variants(sidecar: dict[str, object]) -> list[dict[str, obje
                     row.get("control", {}).get("wait_mask")
                     for row in clocks
                     if isinstance(row.get("control"), dict)
-                    and row.get("control", {}).get("wait_mask")
+                    and isinstance(row.get("control", {}).get("wait_mask"), int)
+                    and not isinstance(row.get("control", {}).get("wait_mask"), bool)
                 ],
                 "endpoint_clock_wait_masks": [
                     row.get("control", {}).get("wait_mask")
@@ -1304,7 +1350,7 @@ def summarize_direct_zero_gap(sidecar: dict[str, object]) -> list[dict[str, obje
         issue_clock = next(
             (
                 row
-                for row in sorted(clocks, key=lambda item: int(item.get("pc", -1)))
+                for row in sorted(clocks, key=sass_pc)
                 if isinstance(row.get("pc"), int)
                 and row["pc"] > group[-1]
                 and "LDGDEPBAR" not in str(row.get("opcode_text", ""))
@@ -1337,7 +1383,18 @@ def summarize_direct_zero_gap(sidecar: dict[str, object]) -> list[dict[str, obje
                     for row in window
                     if isinstance(row.get("control"), dict)
                 ],
-                "target_predicates": [row.get("predicate") for row in window],
+                "target_predicates": [
+                    row.get("predicate")
+                    for row in window
+                    if "LDGSTS" in str(row.get("opcode_text", ""))
+                ],
+                "normalized_predicate_shape": normalize_runtime_predicate_shape(
+                    [
+                        row.get("predicate")
+                        for row in window
+                        if "LDGSTS" in str(row.get("opcode_text", ""))
+                    ]
+                ),
                 "issue_clock_wait_masks": [
                     issue_clock.get("control", {}).get("wait_mask")
                 ]
@@ -1490,8 +1547,7 @@ def run_static(output: Path, *, force: bool) -> None:
                         for item in zero_gap
                     ),
                     "zero_gap_predicate_shapes_observed_count": sum(
-                        item["target_predicates"]
-                        == [None, "@P0", "@P1", "@P2", "@P3", "@P4", "@P5", "@P6"]
+                        item["normalized_predicate_shape"] is not None
                         for item in zero_gap
                     ),
                     "zero_gap_target_endpoint_clean_observed_count": sum(
@@ -1531,6 +1587,7 @@ def run_static(output: Path, *, force: bool) -> None:
                             int(mask)
                             for item in gapped
                             for mask in item["all_clock_wait_masks"]
+                            if int(mask) != 0
                         }
                     ),
                     "direct_zero_gap_groups_observed_count": len(direct_zero_gap),
@@ -1543,8 +1600,7 @@ def run_static(output: Path, *, force: bool) -> None:
                         for item in direct_zero_gap
                     ),
                     "direct_zero_gap_predicate_shapes_observed_count": sum(
-                        item["target_predicates"]
-                        == [None, "@P0", "@P1", "@P2", "@P3", "@P4", "@P5", "@P6"]
+                        item["normalized_predicate_shape"] is not None
                         for item in direct_zero_gap
                     ),
                     "direct_zero_gap_symbol_present": direct_symbol_present,
@@ -1775,6 +1831,8 @@ def dry_run(
 
 
 def self_test() -> None:
+    if sass_pc({"pc": None}) != -1 or sass_pc({"pc": 16}) != 16:
+        raise CampaignError("malformed SASS PC sort key is not fail-closed")
     cells = configured_cells()
     roles: dict[str, int] = {}
     for item in cells:
@@ -1817,6 +1875,18 @@ def self_test() -> None:
         for depth, positions in expected_predicate_positions.items()
     ):
         raise CampaignError("frozen predicate depth map is inconsistent")
+    if normalize_runtime_predicate_shape(list(EXPECTED_RUNTIME_PREDICATES)) != EXPECTED_RUNTIME_PREDICATES:
+        raise CampaignError("canonical runtime predicate shape was rejected")
+    negated_shape = list(EXPECTED_RUNTIME_PREDICATES)
+    negated_shape[3] = "@!P2"
+    if normalize_runtime_predicate_shape(negated_shape) != EXPECTED_RUNTIME_PREDICATES:
+        raise CampaignError("intentional third-predicate polarity was not normalized")
+    for invalid_shape in (
+        [*EXPECTED_RUNTIME_PREDICATES[:3], "@!P1", *EXPECTED_RUNTIME_PREDICATES[4:]],
+        [*EXPECTED_RUNTIME_PREDICATES[:2], *EXPECTED_RUNTIME_PREDICATES[3:]],
+    ):
+        if normalize_runtime_predicate_shape(invalid_shape) is not None:
+            raise CampaignError("invalid runtime predicate shape was accepted")
 
     route_expected = [
         cell("ldgsts", 1, route, depth, 0).key

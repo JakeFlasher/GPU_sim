@@ -37,6 +37,7 @@ constexpr int kDefaultBursts = 16384;
 constexpr int kDefaultWarmup = 64;
 constexpr int kMaxBursts = 16384;
 constexpr int kMaxRepetitions = 7;
+constexpr int kTimingSchema = 2;
 constexpr int kArmOrderBlock = 64;
 constexpr std::size_t kL2Chunks = 1024;
 constexpr std::size_t kChunksPerWarp =
@@ -88,6 +89,7 @@ struct WarpState {
 
 struct ArmSample {
     std::uint32_t issue_cycles;
+    // Endpoint duration from the arm start (not the post-issue interval).
     std::uint32_t drain_cycles;
     unsigned long long gaps_low;
     unsigned long long gaps_high;
@@ -246,7 +248,9 @@ __device__ __forceinline__ ArmSample ldgsts_runtime_g0_body(
     sample.smid_before = smid_before;
     sample.smid_after = smid_after;
     sample.issue_cycles = narrow_cycles(issue_end - start);
-    sample.drain_cycles = narrow_cycles(drain_end - issue_end);
+    // Keep the drain endpoint relative to the same arm start as issue_cycles;
+    // the reducer can then form the post-issue completion interval explicitly.
+    sample.drain_cycles = narrow_cycles(drain_end - start);
     return sample;
 }
 
@@ -294,7 +298,7 @@ __device__ __forceinline__ ArmSample ldgsts_active_body(
     const unsigned long long drain_end = read_clock();
     sample.smid_after = read_smid();
     sample.issue_cycles = narrow_cycles(issue_end - start);
-    sample.drain_cycles = narrow_cycles(drain_end - issue_end);
+    sample.drain_cycles = narrow_cycles(drain_end - start);
     return sample;
 }
 
@@ -310,7 +314,7 @@ __device__ __noinline__ ArmSample ldgsts_empty_body() {
     const unsigned long long drain_end = read_clock();
     sample.smid_after = read_smid();
     sample.issue_cycles = narrow_cycles(issue_end - start);
-    sample.drain_cycles = narrow_cycles(drain_end - issue_end);
+    sample.drain_cycles = narrow_cycles(drain_end - start);
     return sample;
 }
 
@@ -333,7 +337,7 @@ __device__ __noinline__ ArmSample ldgsts_gap_reference_body() {
     const unsigned long long drain_end = read_clock();
     sample.smid_after = read_smid();
     sample.issue_cycles = narrow_cycles(issue_end - start);
-    sample.drain_cycles = narrow_cycles(drain_end - issue_end);
+    sample.drain_cycles = narrow_cycles(drain_end - start);
     return sample;
 }
 
@@ -410,7 +414,7 @@ __device__ __forceinline__ ArmSample ldg_active_body(
     sample.smid_before = smid_before;
     sample.smid_after = smid_after;
     sample.issue_cycles = narrow_cycles(issue_end - start);
-    sample.drain_cycles = narrow_cycles(drain_end - issue_end);
+    sample.drain_cycles = narrow_cycles(drain_end - start);
     return sample;
 }
 
@@ -449,7 +453,7 @@ __device__ __noinline__ ArmSample ldg_empty_body() {
     const unsigned long long drain_end = read_clock();
     sample.smid_after = read_smid();
     sample.issue_cycles = narrow_cycles(issue_end - start);
-    sample.drain_cycles = narrow_cycles(drain_end - issue_end);
+    sample.drain_cycles = narrow_cycles(drain_end - start);
     return sample;
 }
 
@@ -1295,11 +1299,12 @@ int main(int argc, char** argv) {
                     correct = correct && record_correct;
                     std::printf(
                         "{\"type\":\"paired\",\"cell\":\"%s\","
+                        "\"timing_schema\":%d,"
                         "\"burst\":%d,\"warp\":%d,\"arm_order\":\"%s\","
                         "\"issue_on\":%u,\"issue_off\":%u,"
                         "\"drain_on\":%u,\"drain_off\":%u,"
                         "\"gaps_on\":",
-                        cell.key.c_str(), burst, warp,
+                        cell.key.c_str(), kTimingSchema, burst, warp,
                         record.words[15] == 0 ? "on_off" : "off_on",
                         record.words[0], record.words[2], record.words[1],
                         record.words[3]);
@@ -1329,9 +1334,9 @@ int main(int argc, char** argv) {
         mode == kDirect ? "direct" : mode == kNcu ? "ncu" : "correctness";
     const char* assay_name = assay == kLdgsts ? "ldgsts" : "ldg";
     std::printf(
-        "{\"type\":\"summary\",\"mode\":\"%s\",\"assay\":\"%s\","
+        "{\"type\":\"summary\",\"timing_schema\":%d,\"mode\":\"%s\",\"assay\":\"%s\","
         "\"cell_keys\":[",
-        mode_name, assay_name);
+        kTimingSchema, mode_name, assay_name);
     for (std::size_t index = 0; index < cells.size(); ++index) {
         std::printf("%s\"%s\"", index == 0 ? "" : ",",
                     cells[index].key.c_str());

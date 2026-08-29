@@ -7,7 +7,8 @@ physical queue or that a dependency latency releases an entry.
 
 ## Current boundary
 
-Round 0 provides the fixed target/campaign scaffold and pure analyzer logic.
+Rounds 0–1 provide the fixed target/campaign scaffold and pure offline analyzer
+logic.
 The generated executable is intentionally ignored by the sibling `.gitignore`.
 Only synthetic fixtures are consumed by `analyze.py`; it does not discover a
 capture tree, invoke CUDA, open an NCU report, or infer a result. Run the local
@@ -24,16 +25,24 @@ PYTHONDONTWRITEBYTECODE=1 python3 \
   workloads/research_probes/ldgsts_burst_release/campaign.py ncu --dry-run
 ```
 
-The NCU command is prospective only in Round 0. Its exact metric, application-
+The NCU command is still prospective in this scaffold. Its exact metric, application-
 replay, cache/clock-control, detailed-instance, preflight, and repeat commands
 are available through `ncu --dry-run`; a non-dry `ncu` action exits clearly
-until the later static/NCU implementation is added.
+until the later live NCU implementation is added.
 
-The Round-0 analyzer fixtures check the exact matrix, paired-row schema,
-process-level effects, achieved-gap matching, and hard threshold boundaries.
-NCU work/route/SMSP admission and the staged W1/W4/L2 decision table are
-reserved for the later live-analysis phase. There is no fitted timing
-constant.
+The analyzer fixtures check the exact matrix, timing-schema-2 paired rows,
+process-level effects, P/S/K/R contrasts, achieved-gap matching, staged
+W1/W4/L2 status precedence, and hard threshold boundaries. NCU work/route/SMSP
+admission and live direct collection remain reserved for a later phase. There
+is no fitted timing constant. Raw captures from the earlier post-issue drain
+encoding are intentionally incompatible with timing schema 2 and are not
+silently mixed.
+
+The pure reducer surface is `reduce_pskr()` (or `reduce_slot_pskr()` for one
+W4 slot), followed by `classify_identification()`, `classify_placement()`,
+`classify_l2()`, and `classify_staged()`. These functions accept only validated
+process reductions and explicit admission flags; they do not read files,
+invoke NCU, or infer live evidence.
 
 ## Frozen matrix and reduction
 
@@ -58,14 +67,15 @@ For process `j`, burst `b`, and warp slot `s`, the primary effects are:
 
 ```text
 dI = issue_on - issue_off
-dC = drain_on - drain_off
+dC = (drain_on - issue_on) - (drain_off - issue_off)
 ```
 
-`drain_*` is already the interval from issue-end to drain-end. Bursts are
-reduced to one median per process and slot before `P=E5-E4`, `S=E6-E5`,
-`K=S-P`, and `R=Edram-El1` are formed within matched repetitions. Seven
-processes are the independent units. W4 slots remain four separate vectors;
-neither bursts nor slots are pooled into extra replicates.
+`drain_*` is the endpoint duration from the same arm start as `issue_*`, so the
+post-issue interval is made explicit once. Bursts are reduced to one median per
+process and slot before `P=E5-E4`, `S=E6-E5`, `K=S-P`, and `R=Edram-El1` are
+formed within matched repetitions. Seven processes are the independent units.
+W4 slots remain four separate vectors; neither bursts nor slots are pooled into
+extra replicates.
 
 The frozen predicates are `MAD <= 0.5`, operational equality at absolute
 median `<= 1`, positive material response at median `> 2`, and route ordering
