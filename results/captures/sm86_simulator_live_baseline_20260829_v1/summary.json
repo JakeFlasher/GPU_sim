@@ -1,0 +1,68 @@
+{
+  "schema_version": 1,
+  "captured_at": "2026-08-29T07:17:25-04:00",
+  "architecture": "sm_86",
+  "gpu": "NVIDIA GeForce RTX 3090 Ti",
+  "driver": "610.57.04",
+  "clock_mhz": {
+    "graphics": 1350,
+    "memory": 10501
+  },
+  "tool_versions": {
+    "cuda": "13.3.73",
+    "ncu": "2026.1.0.0",
+    "nvbit": "1.8",
+    "rust": "1.96.1"
+  },
+  "cases": {
+    "async_barrier_c11_l1_w4": {
+      "correctness": true,
+      "trace_groups": 64,
+      "ncu": {
+        "gpc_cycles_elapsed_max": 4460056,
+        "sm_cycles_active_max": 4458462,
+        "smsp_instructions": 2293904
+      },
+      "simulator": {
+        "records": 9104,
+        "terminal_modeled_cycles": 20522,
+        "completion_status": "incomplete_unmodeled_retirement_tails",
+        "dirty_writeback_tail": true,
+        "coherence_tail": true,
+        "deterministic_twin": true
+      },
+      "static_auxiliary_parser": "skipped_input_over_64KiB"
+    },
+    "barrier_pipeline_b10_w8": {
+      "correctness": true,
+      "trace_generations": 64,
+      "ncu": {
+        "gpc_cycles_elapsed_max": 822279,
+        "sm_cycles_active_max": 820222,
+        "smsp_instructions": 917688
+      },
+      "simulator": {
+        "records": 3768,
+        "terminal_modeled_cycles": 2979,
+        "completion_status": "incomplete_unmodeled_retirement_tails",
+        "dirty_writeback_tail": true,
+        "coherence_tail": true,
+        "deterministic_twin": true
+      },
+      "static_auxiliary_parser": "completed_with_256KiB_ceiling"
+    }
+  },
+  "freshness_probe": {
+    "full_validator_exit": 1,
+    "full_validator_failure": "retained_outputs_precede_current_input_mtimes",
+    "representative_pair": "launch_cycle_semantics/b1_control_i0_c1",
+    "representative_pair_regenerated": true,
+    "representative_pair_identity_helper": "pass",
+    "full_pair_count": 5519
+  },
+  "scope": {
+    "ncu_values_used_as_simulator_inputs": false,
+    "jade_or_cpu_gpu_cosim_changed": false,
+    "sm120_changed": false
+  }
+}
