@@ -4,7 +4,7 @@
   "repository_revision_at_capture": "b915ec6b3df2973e87119c63e438c8bb5f77be44",
   "handoff_revision": "80e1aa8e1b6033298bc081822f5c8f6e8685f800",
   "candidate_revision": "8cae7c6f37e378ac54e4c5fe5f7acd3f38991480",
-  "correction_revision": "0a66748501d47c483c3d55c256362eff6bb721da",
+  "correction_revision": "1e3012c2bfba851f82c7be42da8c68b6f90e36f5",
   "campaign_manifest": "results/captures/sm86_simulator_live_baseline_20260829_v2/campaign_manifest.json",
   "raw_evidence_archive": "results/captures/sm86_simulator_live_baseline_20260829_v2/evidence/raw_cohort.tar.zst",
   "semantic_replay_report": "results/captures/sm86_simulator_live_baseline_20260829_v2/semantic_replay_report.json.zst",
