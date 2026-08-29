@@ -644,7 +644,9 @@ def reduce_pskr(
     if active_warps is None:
         active_warps = 4 if slot > 0 else 1
     require(
-        active_warps in {1, 4} and slot < active_warps,
+        _is_int(active_warps)
+        and active_warps in {1, 4}
+        and slot < active_warps,
         "invalid active-warp/slot pair",
     )
 
@@ -1095,7 +1097,10 @@ def classify_placement(
     ):
         return StageResult("invalid", ("placement must retain exactly four warp slots",))
     if isinstance(w1_effects, PSKR) and (
-        w1_effects.active_warps != 1 or w1_effects.slot != 0
+        not _is_int(w1_effects.active_warps)
+        or not _is_int(w1_effects.slot)
+        or w1_effects.active_warps != 1
+        or w1_effects.slot != 0
     ):
         return StageResult("invalid", ("W1 baseline provenance mismatch",))
 
@@ -1110,7 +1115,10 @@ def classify_placement(
         try:
             source_effects = effects_by_slot[slot]
             if isinstance(source_effects, PSKR) and (
-                source_effects.active_warps != 4 or source_effects.slot != slot
+                not _is_int(source_effects.active_warps)
+                or not _is_int(source_effects.slot)
+                or source_effects.active_warps != 4
+                or source_effects.slot != slot
             ):
                 raise AnalysisError(
                     f"slot provenance mismatch: expected W4 slot {slot}, "
