@@ -52,6 +52,30 @@ def _global_memory_error(
     label: str,
 ) -> tuple[str | None, dict[str, Any]]:
     expected_values = _expected_global_memory(expected)
+    required_fields = (
+        "load_instructions",
+        "store_instructions",
+        "atomic_instructions",
+        "reduction_instructions",
+        "load_sectors",
+        "store_sectors",
+        "atomic_sectors",
+        "reduction_sectors",
+    )
+    malformed = {
+        key: memory.get(key)
+        for key in required_fields
+        if type(memory.get(key)) is not int or memory.get(key) < 0
+    }
+    if malformed:
+        return (
+            f"{label}: global_memory_issue has malformed or negative fields {malformed}",
+            {
+                "status": "malformed",
+                "malformed_fields": malformed,
+                "expected": expected_values,
+            },
+        )
     observed = {
         key: _int(memory.get(key))
         for key in (

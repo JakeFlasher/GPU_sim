@@ -17,9 +17,14 @@
       "required_diagnostic_rows": 6,
       "residual_max_cycles": 3867,
       "residual_min_cycles": 1650,
-      "residual_score_cycles": 12839,
+      "residual_score_cycles": 42468,
       "retirement_tail_rows": 5,
-      "rows": 6
+      "rows": 6,
+      "selection_dimensions": [
+        "sm_completion_gap_cycles",
+        "gpc_completion_gap_cycles",
+        "gpc_launch_envelope_cycles"
+      ]
     },
     "manifest": {
       "campaign_id": "sm86_simulator_live_baseline_20260829_v2",
@@ -42,9 +47,9 @@
         "gemm_sparse_2to4_bf16_sm80",
         "flash_attn_fwd_bf16_sm80"
       ],
-      "reason": "Typed dirty-writeback/coherence tails occur in 5/5 comparable rows; the summed repeat-stable residual is 12839 cycles, but a scalar offset cannot separate retirement from launch or async/barrier behavior.",
+      "reason": "Typed dirty-writeback/coherence tails occur in 5/5 comparable rows; the summed repeat-stable residual is 42468 across the SM-completion, GPC-completion, and GPC-launch-envelope dimensions; a scalar offset cannot separate retirement from launch or async/barrier behavior.",
       "selection": "next_discriminator",
-      "selection_score": 12839
+      "selection_score": 42468
     },
     {
       "candidate": "async_destination_service",
@@ -97,7 +102,7 @@
     ],
     "decision": "no-go",
     "next_action": "Run the matched store-free/barrier-free async-source discriminator with an independent retirement/frontier observable before changing simulator timing state.",
-    "reason": "Live residuals are repeat-stable across 6 rows, while the simulator reports dirty-writeback/coherence tails in every comparable row (5/5); the observations do not identify one architecture-local latency.",
+    "reason": "Live residuals are repeat-stable across 6 rows, while the simulator reports dirty-writeback/coherence tails in every comparable row (5/5); the multi-frontier selection vector includes SM-active completion, GPC completion, and launch-envelope gaps, but the observations do not identify one architecture-local latency.",
     "seam": "cycle scalar completion/retirement mapping",
     "selected_diagnostic": "dirty_writeback_coherence_retirement"
   },
@@ -177,16 +182,55 @@
       },
       "residual": {
         "baseline_cycles": 4437940,
+        "gpc_elapsed_gaps": {
+          "baseline_launch_envelope_cycles": 1594,
+          "baseline_vs_completion_lower_bound_cycles": 4439534,
+          "baseline_vs_last_issue_cycles": 4439534,
+          "baseline_vs_last_modeled_event_cycles": 4439537,
+          "repeat_2_launch_envelope_cycles": 1579,
+          "repeat_2_vs_completion_lower_bound_cycles": 4439509,
+          "repeat_2_vs_last_issue_cycles": 4439509,
+          "repeat_2_vs_last_modeled_event_cycles": 4439512
+        },
         "interpretable": false,
-        "metric": "NCU sm__cycles_active.max minus simulator terminal lower bound",
+        "metric": "multi-frontier SM-active and GPC elapsed comparison",
         "repeat_2_cycles": 4437930,
-        "repeat_delta_cycles": -10
+        "repeat_delta_cycles": -10,
+        "selection_vector": {
+          "gpc_completion_gap_cycles": 4439534,
+          "gpc_launch_envelope_cycles": 1594,
+          "sm_completion_gap_cycles": 4437940
+        },
+        "sm_active_gaps": {
+          "baseline_vs_completion_lower_bound_cycles": 4437940,
+          "baseline_vs_last_issue_cycles": 4437940,
+          "baseline_vs_last_modeled_event_cycles": 4437943,
+          "repeat_2_vs_completion_lower_bound_cycles": 4437930,
+          "repeat_2_vs_last_issue_cycles": 4437930,
+          "repeat_2_vs_last_modeled_event_cycles": 4437933
+        }
       },
       "simulator": {
+        "completion_frontier": {
+          "lower_bound_cycles": 20522,
+          "status": "incomplete_unmodeled_retirement_tails",
+          "unmodeled_tails": {
+            "async_copy_shared_visibility": false,
+            "coherence": true,
+            "dirty_writeback": true,
+            "reduction_read_modify_write": false
+          }
+        },
         "completion_status": "incomplete_unmodeled_retirement_tails",
         "instructions_issued": 9104,
+        "last_issue_cycles": 20522,
+        "last_modeled_event_cycles": 20519,
         "readiness_schema": 8,
         "records_seen": 9104,
+        "semantic_validation": {
+          "passed": true,
+          "semantic_launches": 2
+        },
         "sha256": "0fe08416424fb88d78c329658981f6211aa3e8003cb04354005f39c93e7041a8",
         "tails": {
           "async_copy_shared_visibility": false,
@@ -288,17 +332,57 @@
       },
       "residual": {
         "baseline_cycles": 2770,
+        "gpc_elapsed_gaps": {
+          "baseline_launch_envelope_cycles": 1665,
+          "baseline_vs_completion_lower_bound_cycles": 4435,
+          "baseline_vs_last_issue_cycles": 4435,
+          "baseline_vs_last_modeled_event_cycles": 4438,
+          "repeat_2_launch_envelope_cycles": 1756,
+          "repeat_2_vs_completion_lower_bound_cycles": 4586,
+          "repeat_2_vs_last_issue_cycles": 4586,
+          "repeat_2_vs_last_modeled_event_cycles": 4589
+        },
         "interpretable": true,
-        "metric": "NCU sm__cycles_active.max minus simulator terminal lower bound",
-        "rank_by_baseline_cycles": 2,
+        "metric": "multi-frontier SM-active and GPC elapsed comparison",
+        "rank_by_multi_frontier_score": 2,
         "repeat_2_cycles": 2830,
-        "repeat_delta_cycles": 60
+        "repeat_delta_cycles": 60,
+        "selection_score": 8870,
+        "selection_vector": {
+          "gpc_completion_gap_cycles": 4435,
+          "gpc_launch_envelope_cycles": 1665,
+          "sm_completion_gap_cycles": 2770
+        },
+        "sm_active_gaps": {
+          "baseline_vs_completion_lower_bound_cycles": 2770,
+          "baseline_vs_last_issue_cycles": 2770,
+          "baseline_vs_last_modeled_event_cycles": 2773,
+          "repeat_2_vs_completion_lower_bound_cycles": 2830,
+          "repeat_2_vs_last_issue_cycles": 2830,
+          "repeat_2_vs_last_modeled_event_cycles": 2833
+        }
       },
       "simulator": {
+        "completion_frontier": {
+          "lower_bound_cycles": 8915,
+          "status": "incomplete_unmodeled_retirement_tails",
+          "unmodeled_tails": {
+            "async_copy_shared_visibility": false,
+            "coherence": true,
+            "dirty_writeback": true,
+            "reduction_read_modify_write": false
+          }
+        },
         "completion_status": "incomplete_unmodeled_retirement_tails",
         "instructions_issued": 197120,
+        "last_issue_cycles": 8915,
+        "last_modeled_event_cycles": 8912,
         "readiness_schema": 6,
         "records_seen": 197120,
+        "semantic_validation": {
+          "passed": true,
+          "semantic_launches": 2
+        },
         "sha256": "6a0e8c56f229e1d5a66732964592a46cde929ddda9e4dfe080254345a86836be",
         "tails": {
           "async_copy_shared_visibility": false,
@@ -400,17 +484,57 @@
       },
       "residual": {
         "baseline_cycles": 2624,
+        "gpc_elapsed_gaps": {
+          "baseline_launch_envelope_cycles": 1672,
+          "baseline_vs_completion_lower_bound_cycles": 4296,
+          "baseline_vs_last_issue_cycles": 4296,
+          "baseline_vs_last_modeled_event_cycles": 4299,
+          "repeat_2_launch_envelope_cycles": 1743,
+          "repeat_2_vs_completion_lower_bound_cycles": 4322,
+          "repeat_2_vs_last_issue_cycles": 4322,
+          "repeat_2_vs_last_modeled_event_cycles": 4325
+        },
         "interpretable": true,
-        "metric": "NCU sm__cycles_active.max minus simulator terminal lower bound",
-        "rank_by_baseline_cycles": 3,
+        "metric": "multi-frontier SM-active and GPC elapsed comparison",
+        "rank_by_multi_frontier_score": 3,
         "repeat_2_cycles": 2579,
-        "repeat_delta_cycles": -45
+        "repeat_delta_cycles": -45,
+        "selection_score": 8592,
+        "selection_vector": {
+          "gpc_completion_gap_cycles": 4296,
+          "gpc_launch_envelope_cycles": 1672,
+          "sm_completion_gap_cycles": 2624
+        },
+        "sm_active_gaps": {
+          "baseline_vs_completion_lower_bound_cycles": 2624,
+          "baseline_vs_last_issue_cycles": 2624,
+          "baseline_vs_last_modeled_event_cycles": 2627,
+          "repeat_2_vs_completion_lower_bound_cycles": 2579,
+          "repeat_2_vs_last_issue_cycles": 2579,
+          "repeat_2_vs_last_modeled_event_cycles": 2582
+        }
       },
       "simulator": {
+        "completion_frontier": {
+          "lower_bound_cycles": 8915,
+          "status": "incomplete_unmodeled_retirement_tails",
+          "unmodeled_tails": {
+            "async_copy_shared_visibility": false,
+            "coherence": true,
+            "dirty_writeback": true,
+            "reduction_read_modify_write": false
+          }
+        },
         "completion_status": "incomplete_unmodeled_retirement_tails",
         "instructions_issued": 197120,
+        "last_issue_cycles": 8915,
+        "last_modeled_event_cycles": 8912,
         "readiness_schema": 6,
         "records_seen": 197120,
+        "semantic_validation": {
+          "passed": true,
+          "semantic_launches": 2
+        },
         "sha256": "09dfd91172ce1c3742a5d6f20b3f4a60883441d02fa320426cc32611ec11db05",
         "tails": {
           "async_copy_shared_visibility": false,
@@ -512,17 +636,57 @@
       },
       "residual": {
         "baseline_cycles": 3867,
+        "gpc_elapsed_gaps": {
+          "baseline_launch_envelope_cycles": 1691,
+          "baseline_vs_completion_lower_bound_cycles": 5558,
+          "baseline_vs_last_issue_cycles": 5558,
+          "baseline_vs_last_modeled_event_cycles": 5561,
+          "repeat_2_launch_envelope_cycles": 1678,
+          "repeat_2_vs_completion_lower_bound_cycles": 5552,
+          "repeat_2_vs_last_issue_cycles": 5552,
+          "repeat_2_vs_last_modeled_event_cycles": 5555
+        },
         "interpretable": true,
-        "metric": "NCU sm__cycles_active.max minus simulator terminal lower bound",
-        "rank_by_baseline_cycles": 1,
+        "metric": "multi-frontier SM-active and GPC elapsed comparison",
+        "rank_by_multi_frontier_score": 1,
         "repeat_2_cycles": 3874,
-        "repeat_delta_cycles": 7
+        "repeat_delta_cycles": 7,
+        "selection_score": 11116,
+        "selection_vector": {
+          "gpc_completion_gap_cycles": 5558,
+          "gpc_launch_envelope_cycles": 1691,
+          "sm_completion_gap_cycles": 3867
+        },
+        "sm_active_gaps": {
+          "baseline_vs_completion_lower_bound_cycles": 3867,
+          "baseline_vs_last_issue_cycles": 3867,
+          "baseline_vs_last_modeled_event_cycles": 3870,
+          "repeat_2_vs_completion_lower_bound_cycles": 3874,
+          "repeat_2_vs_last_issue_cycles": 3874,
+          "repeat_2_vs_last_modeled_event_cycles": 3877
+        }
       },
       "simulator": {
+        "completion_frontier": {
+          "lower_bound_cycles": 5867,
+          "status": "incomplete_unmodeled_retirement_tails",
+          "unmodeled_tails": {
+            "async_copy_shared_visibility": false,
+            "coherence": true,
+            "dirty_writeback": true,
+            "reduction_read_modify_write": false
+          }
+        },
         "completion_status": "incomplete_unmodeled_retirement_tails",
         "instructions_issued": 157696,
+        "last_issue_cycles": 5867,
+        "last_modeled_event_cycles": 5864,
         "readiness_schema": 6,
         "records_seen": 157696,
+        "semantic_validation": {
+          "passed": true,
+          "semantic_launches": 2
+        },
         "sha256": "9cfb26e02dc5b6384f420b5bf0e69982fc57979208dd1fa6cb37473683c8a71d",
         "tails": {
           "async_copy_shared_visibility": false,
@@ -624,17 +788,57 @@
       },
       "residual": {
         "baseline_cycles": 1650,
+        "gpc_elapsed_gaps": {
+          "baseline_launch_envelope_cycles": 1715,
+          "baseline_vs_completion_lower_bound_cycles": 3365,
+          "baseline_vs_last_issue_cycles": 3365,
+          "baseline_vs_last_modeled_event_cycles": 3368,
+          "repeat_2_launch_envelope_cycles": 1685,
+          "repeat_2_vs_completion_lower_bound_cycles": 3369,
+          "repeat_2_vs_last_issue_cycles": 3369,
+          "repeat_2_vs_last_modeled_event_cycles": 3372
+        },
         "interpretable": true,
-        "metric": "NCU sm__cycles_active.max minus simulator terminal lower bound",
-        "rank_by_baseline_cycles": 5,
+        "metric": "multi-frontier SM-active and GPC elapsed comparison",
+        "rank_by_multi_frontier_score": 5,
         "repeat_2_cycles": 1684,
-        "repeat_delta_cycles": 34
+        "repeat_delta_cycles": 34,
+        "selection_score": 6730,
+        "selection_vector": {
+          "gpc_completion_gap_cycles": 3365,
+          "gpc_launch_envelope_cycles": 1715,
+          "sm_completion_gap_cycles": 1650
+        },
+        "sm_active_gaps": {
+          "baseline_vs_completion_lower_bound_cycles": 1650,
+          "baseline_vs_last_issue_cycles": 1650,
+          "baseline_vs_last_modeled_event_cycles": 1653,
+          "repeat_2_vs_completion_lower_bound_cycles": 1684,
+          "repeat_2_vs_last_issue_cycles": 1684,
+          "repeat_2_vs_last_modeled_event_cycles": 1687
+        }
       },
       "simulator": {
+        "completion_frontier": {
+          "lower_bound_cycles": 2375,
+          "status": "incomplete_unmodeled_retirement_tails",
+          "unmodeled_tails": {
+            "async_copy_shared_visibility": false,
+            "coherence": true,
+            "dirty_writeback": true,
+            "reduction_read_modify_write": false
+          }
+        },
         "completion_status": "incomplete_unmodeled_retirement_tails",
         "instructions_issued": 19968,
+        "last_issue_cycles": 2375,
+        "last_modeled_event_cycles": 2372,
         "readiness_schema": 6,
         "records_seen": 19968,
+        "semantic_validation": {
+          "passed": true,
+          "semantic_launches": 2
+        },
         "sha256": "e696061560374a3b9649f8db293ccbb036da05df968b9651a33749fe4e2f476b",
         "tails": {
           "async_copy_shared_visibility": false,
@@ -736,17 +940,57 @@
       },
       "residual": {
         "baseline_cycles": 1928,
+        "gpc_elapsed_gaps": {
+          "baseline_launch_envelope_cycles": 1652,
+          "baseline_vs_completion_lower_bound_cycles": 3580,
+          "baseline_vs_last_issue_cycles": 3580,
+          "baseline_vs_last_modeled_event_cycles": 3583,
+          "repeat_2_launch_envelope_cycles": 1635,
+          "repeat_2_vs_completion_lower_bound_cycles": 3300,
+          "repeat_2_vs_last_issue_cycles": 3300,
+          "repeat_2_vs_last_modeled_event_cycles": 3303
+        },
         "interpretable": true,
-        "metric": "NCU sm__cycles_active.max minus simulator terminal lower bound",
-        "rank_by_baseline_cycles": 4,
+        "metric": "multi-frontier SM-active and GPC elapsed comparison",
+        "rank_by_multi_frontier_score": 4,
         "repeat_2_cycles": 1665,
-        "repeat_delta_cycles": -263
+        "repeat_delta_cycles": -263,
+        "selection_score": 7160,
+        "selection_vector": {
+          "gpc_completion_gap_cycles": 3580,
+          "gpc_launch_envelope_cycles": 1652,
+          "sm_completion_gap_cycles": 1928
+        },
+        "sm_active_gaps": {
+          "baseline_vs_completion_lower_bound_cycles": 1928,
+          "baseline_vs_last_issue_cycles": 1928,
+          "baseline_vs_last_modeled_event_cycles": 1931,
+          "repeat_2_vs_completion_lower_bound_cycles": 1665,
+          "repeat_2_vs_last_issue_cycles": 1665,
+          "repeat_2_vs_last_modeled_event_cycles": 1668
+        }
       },
       "simulator": {
+        "completion_frontier": {
+          "lower_bound_cycles": 12551,
+          "status": "incomplete_unmodeled_retirement_tails",
+          "unmodeled_tails": {
+            "async_copy_shared_visibility": false,
+            "coherence": true,
+            "dirty_writeback": true,
+            "reduction_read_modify_write": false
+          }
+        },
         "completion_status": "incomplete_unmodeled_retirement_tails",
         "instructions_issued": 39568,
+        "last_issue_cycles": 12551,
+        "last_modeled_event_cycles": 12548,
         "readiness_schema": 6,
         "records_seen": 39568,
+        "semantic_validation": {
+          "passed": true,
+          "semantic_launches": 2
+        },
         "sha256": "59b327ae59e64aeba7c4e8470a68699c32e9eeeb333894c314b66e03e3460c3e",
         "tails": {
           "async_copy_shared_visibility": false,

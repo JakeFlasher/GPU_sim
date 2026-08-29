@@ -261,7 +261,7 @@
     "timeout_seconds": 180,
     "exit_code": 0,
     "report": "closure_report.json",
-    "report_sha256": "2a58ca60bcc80ed6989ff8c7836ca6e3e0b82c97efc18ef7abcfc9d0ea7c0abe",
+    "report_sha256": "4c7c979c3ca0b83d6e681e572d3fd58ab0f9f626e3f57516249e75983be69410",
     "live_repeat_root": "evidence/raw/ncu_repeat/rep-2",
     "live_repeat_count_per_cell": 1,
     "simulator_twin_policy": "byte-identical replay-1/replay-2"

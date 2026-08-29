@@ -19,7 +19,14 @@ def _rows() -> list[dict[str, object]]:
                 "top_readiness_causes": [{"cause": "control_stall", "limiting_cycles": 1}],
                 "tails": {"dirty_writeback": True, "coherence": True},
             },
-            "residual": {"baseline_cycles": index + 1},
+            "residual": {
+                "baseline_cycles": index + 1,
+                "selection_vector": {
+                    "sm_completion_gap_cycles": index + 1,
+                    "gpc_completion_gap_cycles": 2,
+                    "gpc_launch_envelope_cycles": 3,
+                },
+            },
         }
         for index in range(2)
     ]
@@ -30,7 +37,8 @@ def test_decision_is_derived_from_validated_rows() -> None:
     assert decision["decision"] == "no-go"
     assert decision["selected_diagnostic"] == "dirty_writeback_coherence_retirement"
     assert validation["decision_eligible"] is True
-    assert ranking[0]["selection_score"] == 3
+    assert validation["residual_score_cycles"] == 13
+    assert ranking[0]["selection_score"] == 13
 
 
 def test_unstable_repeat_is_not_silently_converted_to_no_go() -> None:

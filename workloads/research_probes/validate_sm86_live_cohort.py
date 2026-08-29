@@ -296,7 +296,7 @@ def _validate_correctness_stage(
     if _sha256(environment_record) != environment_hash:
         raise ValueError(f"{cell_id}: correctness environment hash does not match artifact")
     environment_doc = json.load(open(environment_record))
-    if not isinstance(environment_doc, Mapping) or environment_doc.get("schema_version") != 1:
+    if not isinstance(environment_doc, Mapping) or type(environment_doc.get("schema_version")) is not int or environment_doc.get("schema_version") != 1:
         raise ValueError(f"{cell_id}: correctness environment record schema is unsupported")
     if environment_doc.get("argv") != argv or environment_doc.get("effective_argv") != argv:
         raise ValueError(f"{cell_id}: correctness environment argv differs from manifest")
@@ -432,7 +432,7 @@ def _validate_nvbit_stage(
     if not isinstance(binding_hash, str) or len(binding_hash) != 64 or _sha256(binding_path) != binding_hash:
         raise ValueError(f"{cell_id}: NVBit binding sidecar hash does not match")
     binding = json.load(open(binding_path))
-    if not isinstance(binding, Mapping) or binding.get("schema_version") != 1:
+    if not isinstance(binding, Mapping) or type(binding.get("schema_version")) is not int or binding.get("schema_version") != 1:
         raise ValueError(f"{cell_id}: NVBit binding sidecar schema is unsupported")
     if binding.get("cell") != cell_id or binding.get("trace_root") != output:
         raise ValueError(f"{cell_id}: NVBit binding sidecar root identity differs")
@@ -534,7 +534,7 @@ def _validate_replay_binding(
     if not isinstance(binding_hash, str) or len(binding_hash) != 64 or _sha256(binding_path) != binding_hash:
         raise ValueError(f"{cell_id}: replay binding hash does not match artifact")
     binding = json.load(open(binding_path))
-    if not isinstance(binding, Mapping) or binding.get("schema_version") != 1 or binding.get("cell") != cell_id:
+    if not isinstance(binding, Mapping) or type(binding.get("schema_version")) is not int or binding.get("schema_version") != 1 or binding.get("cell") != cell_id:
         raise ValueError(f"{cell_id}: replay binding schema or cell identity is malformed")
     if binding.get("command") != simulator.get("argv"):
         raise ValueError(f"{cell_id}: replay binding command differs from manifest")
@@ -563,6 +563,8 @@ def _validate_replay_binding(
     output_records = binding.get("outputs")
     if not isinstance(output_records, list) or len(output_records) != 2:
         raise ValueError(f"{cell_id}: replay binding output identities are missing")
+    if outputs[0] == outputs[1]:
+        raise ValueError(f"{cell_id}: replay binding output paths must be distinct")
     for index, (record, expected_path) in enumerate(zip(output_records, outputs)):
         if not isinstance(record, Mapping) or record.get("path") != expected_path:
             raise ValueError(f"{cell_id}: replay binding output path differs at index {index}")
@@ -598,7 +600,7 @@ def _validate_host_preflight(
         host = json.load(open(host_record_path))
     except (OSError, json.JSONDecodeError) as exc:
         raise ValueError(f"host preflight record is not valid JSON: {host_record_path}") from exc
-    if not isinstance(host, Mapping) or host.get("schema_version") != 2:
+    if not isinstance(host, Mapping) or type(host.get("schema_version")) is not int or host.get("schema_version") != 2:
         raise ValueError("host preflight record schema is unsupported")
     binding = host.get("revision_binding")
     if not isinstance(binding, Mapping):
@@ -858,24 +860,40 @@ def _validate_cell(
     simulator_argv = simulator.get("argv")
     if not isinstance(simulator_argv, list):
         raise ValueError(f"{cell_id}: simulator argv is missing")
+    if simulator_argv[0:1] != ["sim/target/release/sim-run"]:
+        raise ValueError(f"{cell_id}: simulator argv is not the current sim-run")
     if not any(_campaign_argv_matches(token, nvbit.get("output")) for token in simulator_argv) or not any(
         _campaign_argv_matches(token, static.get("control")) for token in simulator_argv
     ):
         raise ValueError(f"{cell_id}: simulator argv is not bound to trace/control inputs")
-    for option, expected in (("--trace", nvbit.get("output")), ("--control", static.get("control"))):
+    for option, expected in (
+        ("--trace", nvbit.get("output")),
+        ("--control", static.get("control")),
+        ("--arch-card", "arch_profiles/cards/sm_86.json"),
+        ("--pchase-card", "data/pchase/sm_86_static_card.json"),
+        ("--mode", "l1-l2"),
+    ):
+        if simulator_argv.count(option) != 1:
+            raise ValueError(f"{cell_id}: simulator argv must contain exactly one {option}")
         try:
             option_index = simulator_argv.index(option)
         except ValueError as exc:
             raise ValueError(f"{cell_id}: simulator argv is missing {option}") from exc
-        if option_index + 1 >= len(simulator_argv) or not _campaign_argv_matches(
-            simulator_argv[option_index + 1], expected
-        ):
+        actual = simulator_argv[option_index + 1] if option_index + 1 < len(simulator_argv) else None
+        matches = (
+            _campaign_argv_matches(actual, expected)
+            if option in {"--trace", "--control"}
+            else actual == expected
+        )
+        if not matches:
             raise ValueError(f"{cell_id}: simulator {option} input is misbound")
     outputs = simulator.get("outputs")
     if not isinstance(outputs, list) or len(outputs) != 2:
         raise ValueError(f"{cell_id}: simulator twin outputs are missing")
     if any(not isinstance(path, str) for path in outputs):
         raise ValueError(f"{cell_id}: simulator replay output paths are malformed")
+    if outputs[0] == outputs[1]:
+        raise ValueError(f"{cell_id}: simulator replay output paths must be distinct")
     first = _assert_file(root, outputs[0], f"{cell_id}/simulator.replay-1")
     second = _assert_file(root, outputs[1], f"{cell_id}/simulator.replay-2")
     expected_output_prefix = f"evidence/raw/simulator/{cell_id}/"
@@ -1068,7 +1086,7 @@ def validate(manifest_path: Path, report_path: Path | None) -> int:
     if _sha256(closure_report_path) != closure_analysis.get("report_sha256"):
         raise ValueError("closure analysis report SHA-256 does not match manifest")
     closure_report = json.load(open(closure_report_path))
-    if not isinstance(closure_report, Mapping) or closure_report.get("schema_version") != 1:
+    if not isinstance(closure_report, Mapping) or type(closure_report.get("schema_version")) is not int or closure_report.get("schema_version") != 1:
         raise ValueError("closure analysis report schema is unsupported")
     analysis = closure_report.get("analysis")
     if not isinstance(analysis, Mapping) or analysis.get("decision") != "no-go":
@@ -1085,6 +1103,13 @@ def validate(manifest_path: Path, report_path: Path | None) -> int:
         or input_validation.get("retirement_tail_rows") != 5
     ):
         raise ValueError("closure analysis lacks complete data-dependent validation")
+    required_dimensions = {
+        "sm_completion_gap_cycles",
+        "gpc_completion_gap_cycles",
+        "gpc_launch_envelope_cycles",
+    }
+    if set(input_validation.get("selection_dimensions", ())) != required_dimensions:
+        raise ValueError("closure analysis selection is not multi-frontier")
     closure_rows = closure_report.get("rows")
     if not isinstance(closure_rows, list) or len(closure_rows) != 6:
         raise ValueError("closure analysis must contain one row per cohort cell")
@@ -1104,6 +1129,28 @@ def validate(manifest_path: Path, report_path: Path | None) -> int:
         for row in closure_rows
     ):
         raise ValueError("closure analysis rows lack repeatability or simulator-twin evidence")
+    for row in closure_rows:
+        simulator_row = row["simulator"]
+        residual = row.get("residual")
+        if (
+            not isinstance(simulator_row.get("last_issue_cycles"), int)
+            or isinstance(simulator_row.get("last_issue_cycles"), bool)
+            or (
+                simulator_row.get("last_modeled_event_cycles") is not None
+                and (
+                    not isinstance(simulator_row.get("last_modeled_event_cycles"), int)
+                    or isinstance(simulator_row.get("last_modeled_event_cycles"), bool)
+                )
+            )
+            or not isinstance(simulator_row.get("completion_frontier"), Mapping)
+            or not isinstance(residual, Mapping)
+            or residual.get("metric") != "multi-frontier SM-active and GPC elapsed comparison"
+            or not isinstance(residual.get("sm_active_gaps"), Mapping)
+            or not isinstance(residual.get("gpc_elapsed_gaps"), Mapping)
+            or set(residual.get("selection_vector", {})) != required_dimensions
+            or simulator_row.get("semantic_validation", {}).get("passed") is not True
+        ):
+            raise ValueError("closure analysis row lacks the required typed frontiers/gaps")
     if analysis.get("ncu_values_used_as_simulator_inputs") is not False:
         raise ValueError("closure analysis violates the NCU input boundary")
     candidate_ranking = closure_report.get("candidate_ranking")

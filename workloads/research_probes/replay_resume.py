@@ -180,7 +180,7 @@ def candidate_configurations(
         "candidates",
     }:
         raise RuntimeError(f"candidate document fields are invalid: {path}")
-    if document.get("schema_version") != 1:
+    if type(document.get("schema_version")) is not int or document.get("schema_version") != 1:
         raise RuntimeError(f"candidate document schema_version is not 1: {path}")
     candidates = document.get("candidates")
     if not isinstance(candidates, list) or not candidates:
@@ -534,7 +534,7 @@ def _report_error(
         root_keys.add("cache_session")
     if set(document) != root_keys:
         return "result root fields differ from direct schema 1"
-    if document.get("schema_version") != 1:
+    if type(document.get("schema_version")) is not int or document.get("schema_version") != 1:
         return "result schema_version is not 1"
     if document.get("simulator_version") != simulator_package_version():
         return "result simulator_version differs from the current package"

@@ -12,11 +12,18 @@ import argparse
 import csv
 import hashlib
 import json
+import sys
 from pathlib import Path
 from typing import Any, Mapping
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+from workloads.research_probes import replay_resume
+from workloads.research_probes.semantic_replay_validation import (
+    validate_replay_document,
+)
 DEFAULT_MANIFEST = (
     REPO_ROOT
     / "results/captures/sm86_simulator_live_baseline_20260829_v2/campaign_manifest.json"
@@ -85,6 +92,19 @@ def _campaign_file(root: Path, relative: object, label: str) -> Path:
     return path
 
 
+def _campaign_dir(root: Path, relative: object, label: str) -> Path:
+    if not isinstance(relative, str) or not relative:
+        raise ValueError(f"{label}: missing campaign-relative directory")
+    path = (root / relative).resolve()
+    try:
+        path.relative_to(root.resolve())
+    except ValueError as exc:
+        raise ValueError(f"{label}: path escapes campaign root: {relative}") from exc
+    if not path.is_dir():
+        raise ValueError(f"{label}: directory is missing: {relative}")
+    return path
+
+
 def _label(path: Path) -> str:
     try:
         return str(path.resolve().relative_to(REPO_ROOT.resolve()))
@@ -146,13 +166,46 @@ def _replay_summary(path: Path) -> dict[str, Any]:
     tails = counters.get("unmodeled_tails")
     if not isinstance(tails, Mapping):
         tails = frontier.get("unmodeled_tails", {})
+    issue = timing.get("diagnostic_last_issue_cycles")
+    last_event = timing.get("last_processed_modeled_system_event_time")
     terminal = timing.get("terminal_modeled_event_time")
+    if not isinstance(issue, int) or isinstance(issue, bool):
+        raise ValueError(f"{path}: diagnostic last-issue frontier is malformed")
+    if last_event is not None and (
+        not isinstance(last_event, int) or isinstance(last_event, bool)
+    ):
+        raise ValueError(f"{path}: last-modeled-event frontier is malformed")
     if not isinstance(terminal, int) or isinstance(terminal, bool):
         raise ValueError(f"{path}: terminal modeled event time is malformed")
+    if not isinstance(frontier.get("status"), str):
+        raise ValueError(f"{path}: completion frontier status is malformed")
+    lower_bound = frontier.get("lower_bound_cycles")
+    if lower_bound is not None and (
+        not isinstance(lower_bound, int) or isinstance(lower_bound, bool)
+    ):
+        raise ValueError(f"{path}: completion frontier lower bound is malformed")
+    typed_tails = frontier.get("unmodeled_tails")
+    if not isinstance(typed_tails, Mapping) or any(
+        not isinstance(typed_tails.get(name), bool)
+        for name in (
+            "reduction_read_modify_write",
+            "dirty_writeback",
+            "coherence",
+            "async_copy_shared_visibility",
+        )
+    ):
+        raise ValueError(f"{path}: completion frontier typed tails are malformed")
     return {
+        "last_issue_cycles": issue,
+        "last_modeled_event_cycles": last_event,
         "terminal_lower_bound_cycles": terminal,
         "completion_status": frontier.get("status"),
-        "tails": dict(tails),
+        "completion_frontier": {
+            "status": frontier.get("status"),
+            "lower_bound_cycles": lower_bound,
+            "unmodeled_tails": dict(typed_tails),
+        },
+        "tails": dict(typed_tails),
         "readiness_schema": readiness.get("schema_version"),
         "top_readiness_causes": _top_causes(readiness),
         "instructions_issued": counters.get("instructions_issued"),
@@ -178,22 +231,45 @@ def _validate_replay_binding(
     if simulator.get("replay_binding_sha256") != _sha256(binding_path):
         raise ValueError(f"{slug}: replay binding hash does not match")
     binding = json.loads(binding_path.read_text(encoding="utf-8"))
-    if not isinstance(binding, Mapping) or binding.get("schema_version") != 1 or binding.get("cell") != slug:
+    if not isinstance(binding, Mapping) or type(binding.get("schema_version")) is not int or binding.get("schema_version") != 1 or binding.get("cell") != slug:
         raise ValueError(f"{slug}: replay binding schema is malformed")
     freshness = binding.get("freshness")
     if not isinstance(freshness, Mapping) or freshness.get("mode") != "content_bound":
         raise ValueError(f"{slug}: replay binding freshness mode is unsupported")
     if binding.get("command") != simulator.get("argv"):
         raise ValueError(f"{slug}: replay binding command differs")
-    binary = Path(str(simulator.get("binary_path", "")))
+    argv = simulator.get("argv")
+    if not isinstance(argv, list) or argv[:1] != ["sim/target/release/sim-run"]:
+        raise ValueError(f"{slug}: simulator command is not the current sim-run")
+    for option, expected in (
+        ("--trace", nvbit.get("output")),
+        ("--control", static.get("control")),
+        ("--arch-card", "arch_profiles/cards/sm_86.json"),
+        ("--pchase-card", "data/pchase/sm_86_static_card.json"),
+        ("--mode", "l1-l2"),
+    ):
+        if argv.count(option) != 1:
+            raise ValueError(f"{slug}: simulator command must contain one {option}")
+        index = argv.index(option)
+        if index + 1 >= len(argv):
+            raise ValueError(f"{slug}: simulator command has no value for {option}")
+        actual = argv[index + 1]
+        if option in {"--trace", "--control"}:
+            if not _campaign_token_matches(actual, str(expected), root):
+                raise ValueError(f"{slug}: simulator command input is misbound for {option}")
+        elif actual != expected:
+            raise ValueError(f"{slug}: simulator command value differs for {option}")
+    binary = REPO_ROOT / str(simulator.get("binary_path", ""))
     if not binary.is_file() or simulator.get("binary_sha256") != _sha256(binary):
         raise ValueError(f"{slug}: simulator binary identity is not current")
     inputs = binding.get("inputs")
     if not isinstance(inputs, Mapping):
         raise ValueError(f"{slug}: replay binding inputs are missing")
+    trace_path = _campaign_dir(root, nvbit.get("output"), f"{slug}.trace")
+    control_path = _campaign_file(root, static.get("control"), f"{slug}.control")
     input_paths = {
-        "trace": (nvbit.get("output"), root / str(nvbit.get("output", "")), _tree_sha256(root / str(nvbit.get("output", "")))),
-        "control": (static.get("control"), root / str(static.get("control", "")), _sha256(root / str(static.get("control", "")))),
+        "trace": (nvbit.get("output"), trace_path, _tree_sha256(trace_path)),
+        "control": (static.get("control"), control_path, _sha256(control_path)),
         "architecture_card": ("arch_profiles/cards/sm_86.json", REPO_ROOT / "arch_profiles/cards/sm_86.json", _sha256(REPO_ROOT / "arch_profiles/cards/sm_86.json")),
         "pchase_card": ("data/pchase/sm_86_static_card.json", REPO_ROOT / "data/pchase/sm_86_static_card.json", _sha256(REPO_ROOT / "data/pchase/sm_86_static_card.json")),
     }
@@ -204,10 +280,48 @@ def _validate_replay_binding(
     output_records = binding.get("outputs")
     if not isinstance(output_records, list) or len(output_records) != 2:
         raise ValueError(f"{slug}: replay binding outputs are missing")
+    if outputs[0] == outputs[1]:
+        raise ValueError(f"{slug}: replay output paths must be distinct")
     for record, expected in zip(output_records, outputs):
         output_path = _campaign_file(root, expected, f"{slug}.replay")
         if not isinstance(record, Mapping) or record.get("path") != expected or record.get("sha256") != _sha256(output_path):
             raise ValueError(f"{slug}: replay binding output mismatch")
+
+
+def _validate_replay_semantics(
+    root: Path,
+    cell: Mapping[str, Any],
+    trace: Path,
+    outputs: list[str],
+) -> dict[str, Any]:
+    slug = str(cell["id"])
+    grid = cell.get("expected_grid")
+    block = cell.get("expected_block")
+    if not isinstance(grid, list) or not isinstance(block, list):
+        raise ValueError(f"{slug}: replay semantic geometry is missing")
+    try:
+        expected_launches = replay_resume.expected_launches_from_trace(
+            trace, grid=grid, block=block
+        )
+        expectation = replay_resume.ReplayExpectation(
+            launches=expected_launches, carded_dram=False
+        )
+    except (RuntimeError, ValueError) as exc:
+        raise ValueError(f"{slug}: cannot derive replay expectation: {exc}") from exc
+    semantic_launches = 0
+    for relative in outputs:
+        path = _campaign_file(root, relative, f"{slug}.replay")
+        error = replay_resume.direct_replay_schema_error(path, expectation)
+        if error is not None:
+            raise ValueError(f"{slug}: strict replay schema failed: {error}")
+        document = replay_resume.load_json_strict(path)
+        if not isinstance(document, Mapping):
+            raise ValueError(f"{slug}: replay root is not an object")
+        rows, errors = validate_replay_document(document, trace, label=slug)
+        if errors:
+            raise ValueError(f"{slug}: semantic replay errors: {'; '.join(errors[:3])}")
+        semantic_launches += len(rows)
+    return {"passed": True, "semantic_launches": semantic_launches}
 
 
 def _campaign_token_matches(token: object, relative: str, root: Path) -> bool:
@@ -395,9 +509,14 @@ def _derive_decision(
             "insufficient_evidence: dirty_writeback/coherence retirement tails "
             "are not observed across every comparable row"
         )
-    residual_score = sum(
-        max(int(row["residual"]["baseline_cycles"]), 0) for row in comparable
-    )
+    for row in comparable:
+        vector = row["residual"].get("selection_vector", {})
+        row["residual"]["selection_score"] = sum(
+            abs(int(value))
+            for value in vector.values()
+            if isinstance(value, int) and not isinstance(value, bool)
+        )
+    residual_score = sum(row["residual"]["selection_score"] for row in comparable)
     residuals = [row["residual"]["baseline_cycles"] for row in comparable]
     tail_cells = [row["cell"] for row in tail_rows]
     service_cells = [
@@ -425,7 +544,8 @@ def _derive_decision(
             "reason": (
                 f"Typed dirty-writeback/coherence tails occur in {len(tail_cells)}/"
                 f"{len(comparable)} comparable rows; the summed repeat-stable residual "
-                f"is {residual_score} cycles, but a scalar offset cannot separate "
+                f"is {residual_score} across the SM-completion, GPC-completion, and "
+                "GPC-launch-envelope dimensions; a scalar offset cannot separate "
                 "retirement from launch or async/barrier behavior."
             ),
         },
@@ -458,6 +578,11 @@ def _derive_decision(
         "retirement_tail_rows": len(tail_rows),
         "required_diagnostic_rows": len(rows) - len(missing_diagnostics),
         "residual_score_cycles": residual_score,
+        "selection_dimensions": [
+            "sm_completion_gap_cycles",
+            "gpc_completion_gap_cycles",
+            "gpc_launch_envelope_cycles",
+        ],
         "residual_min_cycles": min(residuals),
         "residual_max_cycles": max(residuals),
         "decision_eligible": True,
@@ -466,11 +591,12 @@ def _derive_decision(
         "decision": "no-go",
         "seam": "cycle scalar completion/retirement mapping",
         "selected_diagnostic": "dirty_writeback_coherence_retirement",
-        "reason": (
+            "reason": (
             f"Live residuals are repeat-stable across {len(rows)} rows, while the "
             f"simulator reports dirty-writeback/coherence tails in every comparable "
-            f"row ({len(tail_rows)}/{len(comparable)}); the observations do not identify "
-            "one architecture-local latency."
+            f"row ({len(tail_rows)}/{len(comparable)}); the multi-frontier selection "
+            "vector includes SM-active completion, GPC completion, and launch-envelope "
+            "gaps, but the observations do not identify one architecture-local latency."
         ),
         "next_action": "Run the matched store-free/barrier-free async-source discriminator with an independent retirement/frontier observable before changing simulator timing state.",
         "claim_limits": [
@@ -510,36 +636,95 @@ def analyze(manifest_path: Path, output_path: Path) -> int:
         if not isinstance(stages, Mapping):
             raise ValueError(f"{slug}: stages are missing")
         live = _repeat_metrics(root, cell, stages["ncu"], TRUSTED_NCU_IDENTITY)
-        replay_one = _campaign_file(root, stages["simulator"]["outputs"][0], f"{slug}.replay")
-        replay_two = _campaign_file(root, stages["simulator"]["outputs"][1], f"{slug}.replay_twin")
+        simulator_stage = stages["simulator"]
+        outputs = simulator_stage.get("outputs")
+        if not isinstance(outputs, list) or len(outputs) != 2 or any(
+            not isinstance(item, str) for item in outputs
+        ):
+            raise ValueError(f"{slug}: simulator replay output list is malformed")
+        if outputs[0] == outputs[1]:
+            raise ValueError(f"{slug}: simulator replay output paths must be distinct")
+        replay_one = _campaign_file(root, outputs[0], f"{slug}.replay")
+        replay_two = _campaign_file(root, outputs[1], f"{slug}.replay_twin")
+        trace = _campaign_dir(root, stages["nvbit"].get("output"), f"{slug}.trace")
         _validate_replay_binding(
             root,
             cell,
             stages["nvbit"],
             stages["static_control"],
-            stages["simulator"],
-            [stages["simulator"]["outputs"][0], stages["simulator"]["outputs"][1]],
+            simulator_stage,
+            outputs,
         )
+        semantic_validation = _validate_replay_semantics(root, cell, trace, outputs)
         sim = _replay_summary(replay_one)
         if replay_one.read_bytes() != replay_two.read_bytes():
             raise ValueError(f"{slug}: simulator twins differ")
         sim["twin_sha256"] = _sha256(replay_two)
         sim["twin_byte_identical"] = True
+        sim["semantic_validation"] = semantic_validation
         comparable = slug != "cp_async_canary"
+        issue = sim["last_issue_cycles"]
+        last_event = sim["last_modeled_event_cycles"]
         baseline_sm = live["baseline"]["sm__cycles_active.max"]
         repeat_sm = live["repeat_2"]["sm__cycles_active.max"]
+        baseline_gpc = live["baseline"]["gpc__cycles_elapsed.max"]
+        repeat_gpc = live["repeat_2"]["gpc__cycles_elapsed.max"]
         terminal = sim["terminal_lower_bound_cycles"]
+        sm_gap = {
+            "baseline_vs_last_issue_cycles": baseline_sm - issue,
+            "repeat_2_vs_last_issue_cycles": repeat_sm - issue,
+            "baseline_vs_last_modeled_event_cycles": (
+                None if last_event is None else baseline_sm - last_event
+            ),
+            "repeat_2_vs_last_modeled_event_cycles": (
+                None if last_event is None else repeat_sm - last_event
+            ),
+            "baseline_vs_completion_lower_bound_cycles": baseline_sm - terminal,
+            "repeat_2_vs_completion_lower_bound_cycles": repeat_sm - terminal,
+        }
+        gpc_gap = {
+            "baseline_vs_last_issue_cycles": baseline_gpc - issue,
+            "repeat_2_vs_last_issue_cycles": repeat_gpc - issue,
+            "baseline_vs_last_modeled_event_cycles": (
+                None if last_event is None else baseline_gpc - last_event
+            ),
+            "repeat_2_vs_last_modeled_event_cycles": (
+                None if last_event is None else repeat_gpc - last_event
+            ),
+            "baseline_vs_completion_lower_bound_cycles": baseline_gpc - terminal,
+            "repeat_2_vs_completion_lower_bound_cycles": repeat_gpc - terminal,
+            "baseline_launch_envelope_cycles": baseline_gpc - baseline_sm,
+            "repeat_2_launch_envelope_cycles": repeat_gpc - repeat_sm,
+        }
+        selection_vector = {
+            "sm_completion_gap_cycles": sm_gap[
+                "baseline_vs_completion_lower_bound_cycles"
+            ],
+            "gpc_completion_gap_cycles": gpc_gap[
+                "baseline_vs_completion_lower_bound_cycles"
+            ],
+            "gpc_launch_envelope_cycles": gpc_gap[
+                "baseline_launch_envelope_cycles"
+            ],
+        }
         row: dict[str, Any] = {
             "cell": slug,
             "comparable_to_simulator_timing": comparable,
             "live": live,
             "simulator": sim,
             "residual": {
-                "metric": "NCU sm__cycles_active.max minus simulator terminal lower bound",
-                "baseline_cycles": baseline_sm - terminal,
-                "repeat_2_cycles": repeat_sm - terminal,
+                "metric": "multi-frontier SM-active and GPC elapsed comparison",
+                "baseline_cycles": sm_gap[
+                    "baseline_vs_completion_lower_bound_cycles"
+                ],
+                "repeat_2_cycles": sm_gap[
+                    "repeat_2_vs_completion_lower_bound_cycles"
+                ],
                 "repeat_delta_cycles": repeat_sm - baseline_sm,
                 "interpretable": comparable,
+                "sm_active_gaps": sm_gap,
+                "gpc_elapsed_gaps": gpc_gap,
+                "selection_vector": selection_vector,
             },
             "artifacts": [
                 {"path": _label(replay_one), "sha256": _sha256(replay_one)},
@@ -548,15 +733,14 @@ def analyze(manifest_path: Path, output_path: Path) -> int:
         }
         rows.append(row)
 
+    candidate_ranking, validation, decision = _derive_decision(rows)
     comparable_rows = [row for row in rows if row["comparable_to_simulator_timing"]]
     ranked = sorted(
         comparable_rows,
-        key=lambda row: (-row["residual"]["baseline_cycles"], row["cell"]),
+        key=lambda row: (-row["residual"]["selection_score"], row["cell"]),
     )
     for rank, row in enumerate(ranked, start=1):
-        row["residual"]["rank_by_baseline_cycles"] = rank
-
-    candidate_ranking, validation, decision = _derive_decision(rows)
+        row["residual"]["rank_by_multi_frontier_score"] = rank
     report = {
         "schema_version": 1,
         "analysis": {
@@ -577,7 +761,7 @@ def analyze(manifest_path: Path, output_path: Path) -> int:
             },
             "repeat_root": "evidence/raw/ncu_repeat/rep-2",
             "decision": "no-go",
-            "selected_diagnostic": "dirty_writeback_coherence_retirement",
+            "selected_diagnostic": decision["selected_diagnostic"],
             "next_discriminator": "matched store-free/barrier-free async-source pair with an independent retirement observable",
             "repeatability_basis": "Two independent application-replay NCU captures per cell; simulator twins are byte-identical.",
             "held_out_discriminator": "not_run; the next pair is intentionally held out to avoid selecting a timing seam from the scored cohort.",

@@ -143,12 +143,15 @@ machine-readable values in `summary.json`.
 
 ## Residual and closure decision
 
-The portable simulator terminal values are typed lower bounds, not cycle
-predictions. They trail NCU `sm__cycles_active.max` by 2,770 / 2,624 / 3,867 /
-1,650 / 1,928 cycles for BF16, FP16, INT8, sparse BF16, and attention. All
-five expose `dirty_writeback=true` and `coherence=true` in
-`incomplete_unmodeled_retirement_tails`. GPC elapsed also includes a launch
-envelope not represented by the direct event frontier.
+The portable simulator issue, last-modeled-event, and completion-frontier
+values are typed lower bounds, not cycle predictions. The closure report keeps
+separate SM-active and GPC-elapsed gaps for each frontier; its multi-frontier
+selection vector is the SM-completion gap, GPC-completion gap, and measured
+GPC launch-envelope gap. The five comparable rows trail NCU
+`sm__cycles_active.max` by 2,770 / 2,624 / 3,867 / 1,650 / 1,928 cycles at
+the completion lower bound for BF16, FP16, INT8, sparse BF16, and attention.
+All five expose `dirty_writeback=true` and `coherence=true` in
+`incomplete_unmodeled_retirement_tails`.
 
 This is a reproducible **no-go** for a timing scalar patch in this round. A
 fixed latency, per-workload offset, or NCU-derived card value would conflate

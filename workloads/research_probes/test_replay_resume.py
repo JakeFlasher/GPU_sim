@@ -298,6 +298,17 @@ def test_direct_schema_rejects_empty_or_duplicate_launch_population(
         first, second, [dependency], expectation
     )
 
+
+def test_direct_schema_rejects_boolean_schema_version(tmp_path: Path) -> None:
+    expectation = REPLAY.ReplayExpectation(
+        launches=(_launch(),), carded_dram=False
+    )
+    document = _report(expectation)
+    document["schema_version"] = True
+    result = tmp_path / "replay.json"
+    result.write_text(json.dumps(document), encoding="utf-8")
+    assert "schema_version" in REPLAY.direct_replay_schema_error(result, expectation)
+
 def test_resume_rejects_gutted_counters_and_malformed_nested_timing(
     tmp_path: Path,
 ) -> None:
