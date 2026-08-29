@@ -1,0 +1,733 @@
+{
+  "analysis": {
+    "command": [
+      ".venv/bin/python",
+      "workloads/research_probes/analyze_sm86_live_closure.py",
+      "--manifest",
+      "results/captures/sm86_simulator_live_baseline_20260829_v2/campaign_manifest.json",
+      "--output",
+      "results/captures/sm86_simulator_live_baseline_20260829_v2/closure_report.json"
+    ],
+    "decision": "no-go",
+    "held_out_discriminator": "not_run; the next pair is intentionally held out to avoid selecting a timing seam from the scored cohort.",
+    "manifest": {
+      "campaign_id": "sm86_simulator_live_baseline_20260829_v2",
+      "candidate_revision": "8cae7c6f37e378ac54e4c5fe5f7acd3f38991480",
+      "path": "results/captures/sm86_simulator_live_baseline_20260829_v2/campaign_manifest.json"
+    },
+    "ncu_values_used_as_simulator_inputs": false,
+    "next_discriminator": "matched store-free/barrier-free async-source pair with an independent retirement observable",
+    "repeat_root": "evidence/raw/ncu_repeat/rep-2",
+    "repeatability_basis": "Two independent application-replay NCU captures per cell; simulator twins are byte-identical.",
+    "selected_diagnostic": "dirty_writeback_coherence_retirement"
+  },
+  "candidate_ranking": [
+    {
+      "candidate": "dirty_writeback_coherence_retirement",
+      "evidence_cells": [
+        "cp_async_canary",
+        "gemm_hmma_bf16_sm80",
+        "gemm_hmma_fp16_sm80",
+        "gemm_imma_int8_sm80",
+        "gemm_sparse_2to4_bf16_sm80",
+        "flash_attn_fwd_bf16_sm80"
+      ],
+      "reason": "Every cohort replay exposes both typed tails; a scalar completion offset cannot separate them from launch or async/barrier behavior.",
+      "selection": "next_discriminator"
+    },
+    {
+      "candidate": "async_destination_service",
+      "evidence_cells": [
+        "cp_async_canary",
+        "gemm_hmma_bf16_sm80",
+        "gemm_hmma_fp16_sm80",
+        "gemm_imma_int8_sm80",
+        "gemm_sparse_2to4_bf16_sm80"
+      ],
+      "reason": "It is a dominant modeled readiness cause in some cells, but no independent silicon observable isolates it from retirement tails.",
+      "selection": "candidate_not_admitted"
+    },
+    {
+      "candidate": "control_and_barrier_readiness",
+      "evidence_cells": [
+        "cp_async_canary",
+        "gemm_hmma_bf16_sm80",
+        "gemm_hmma_fp16_sm80",
+        "gemm_imma_int8_sm80",
+        "gemm_sparse_2to4_bf16_sm80",
+        "flash_attn_fwd_bf16_sm80"
+      ],
+      "reason": "The readiness counters are modeled diagnostics, not an independent live timing label.",
+      "selection": "candidate_not_admitted"
+    },
+    {
+      "candidate": "launch_envelope",
+      "evidence_cells": [
+        "cp_async_canary",
+        "gemm_hmma_bf16_sm80",
+        "gemm_hmma_fp16_sm80",
+        "gemm_imma_int8_sm80",
+        "gemm_sparse_2to4_bf16_sm80",
+        "flash_attn_fwd_bf16_sm80"
+      ],
+      "reason": "GPC elapsed includes launch work not represented by the direct event frontier; it is not a simulator-local latency.",
+      "selection": "candidate_not_admitted"
+    }
+  ],
+  "decision": {
+    "claim_limits": [
+      "No cycle-accuracy claim",
+      "No NCU leakage into simulator inputs",
+      "No cross-architecture inference",
+      "No JADE/HETR or CPU-GPU co-simulation change"
+    ],
+    "decision": "no-go",
+    "next_action": "Run the matched store-free/barrier-free async-source discriminator with an independent retirement/frontier observable before changing simulator timing state.",
+    "reason": "Live residuals are repeat-stable at the measured envelope, but the simulator reports dirty-writeback/coherence tails for every comparable cell and the observations do not identify one architecture-local latency.",
+    "seam": "cycle scalar completion/retirement mapping"
+  },
+  "rows": [
+    {
+      "artifacts": [
+        {
+          "path": "results/captures/sm86_simulator_live_baseline_20260829_v2/evidence/raw/simulator/cp_async_canary/replay-1.json",
+          "sha256": "0fe08416424fb88d78c329658981f6211aa3e8003cb04354005f39c93e7041a8"
+        },
+        {
+          "path": "results/captures/sm86_simulator_live_baseline_20260829_v2/evidence/raw/simulator/cp_async_canary/replay-2.json",
+          "sha256": "0fe08416424fb88d78c329658981f6211aa3e8003cb04354005f39c93e7041a8"
+        }
+      ],
+      "cell": "cp_async_canary",
+      "comparable_to_simulator_timing": false,
+      "live": {
+        "baseline": {
+          "gpc__cycles_elapsed.max": 4460056,
+          "sm__cycles_active.max": 4458462,
+          "smsp__inst_executed.sum": 2293904
+        },
+        "baseline_csv": {
+          "path": "results/captures/sm86_simulator_live_baseline_20260829_v2/evidence/raw/ncu/cp_async_canary/ncu.csv",
+          "sha256": "dfe2a7d3cea862c5ca1333a3804edbb24af8e792f3475779180acb687459b7bc"
+        },
+        "delta_repeat_minus_baseline": {
+          "gpc__cycles_elapsed.max": -25,
+          "sm__cycles_active.max": -10,
+          "smsp__inst_executed.sum": 0
+        },
+        "max_relative_delta": 5.61e-06,
+        "repeat_2": {
+          "gpc__cycles_elapsed.max": 4460031,
+          "sm__cycles_active.max": 4458452,
+          "smsp__inst_executed.sum": 2293904
+        },
+        "repeat_csv": {
+          "path": "results/captures/sm86_simulator_live_baseline_20260829_v2/evidence/raw/ncu_repeat/rep-2/cp_async_canary/ncu.csv",
+          "sha256": "44f8ffb047612325b51894efa6164cee804e8454b048cee12a9997d756491a34"
+        },
+        "repeat_metadata": {
+          "argv": [
+            "/usr/local/cuda-13.2/nsight-compute-2026.1.0/ncu",
+            "--force-overwrite",
+            "--export",
+            "results/captures/sm86_simulator_live_baseline_20260829_v2/evidence/raw/ncu_repeat/rep-2/cp_async_canary/ncu-report",
+            "--launch-skip",
+            "1",
+            "--launch-count",
+            "1",
+            "--replay-mode",
+            "application",
+            "--clock-control",
+            "none",
+            "--metrics",
+            "gpc__cycles_elapsed.max,sm__cycles_active.max,smsp__inst_executed.sum",
+            "workloads/research_probes/async_barrier_overlap/async_barrier_overlap",
+            "c11",
+            "l1",
+            "0",
+            "4",
+            "3"
+          ],
+          "finished_at": "2026-08-29T16:47:30.382469+00:00",
+          "path": "results/captures/sm86_simulator_live_baseline_20260829_v2/evidence/raw/ncu_repeat/rep-2/cp_async_canary/metadata.json",
+          "sha256": "c8cc41cd25aa81d624ed9c4bf705bd104cd62df50828e5276309b56e0c9a1c84",
+          "started_at": "2026-08-29T16:47:29.401016+00:00"
+        },
+        "stable_within_five_percent": true
+      },
+      "residual": {
+        "baseline_cycles": 4437940,
+        "interpretable": false,
+        "metric": "NCU sm__cycles_active.max minus simulator terminal lower bound",
+        "repeat_2_cycles": 4437930,
+        "repeat_delta_cycles": -10
+      },
+      "simulator": {
+        "completion_status": "incomplete_unmodeled_retirement_tails",
+        "instructions_issued": 9104,
+        "readiness_schema": 8,
+        "records_seen": 9104,
+        "sha256": "0fe08416424fb88d78c329658981f6211aa3e8003cb04354005f39c93e7041a8",
+        "tails": {
+          "async_copy_shared_visibility": false,
+          "coherence": true,
+          "dirty_writeback": true,
+          "reduction_read_modify_write": false
+        },
+        "terminal_lower_bound_cycles": 20522,
+        "top_readiness_causes": [
+          {
+            "cause": "async_destination_sm_service",
+            "limiting_cycles": 31032
+          },
+          {
+            "cause": "control_stall",
+            "limiting_cycles": 24936
+          },
+          {
+            "cause": "cta_barrier_rendezvous",
+            "limiting_cycles": 17984
+          }
+        ],
+        "twin_byte_identical": true,
+        "twin_sha256": "0fe08416424fb88d78c329658981f6211aa3e8003cb04354005f39c93e7041a8"
+      }
+    },
+    {
+      "artifacts": [
+        {
+          "path": "results/captures/sm86_simulator_live_baseline_20260829_v2/evidence/raw/simulator/gemm_hmma_bf16_sm80/replay-1.json",
+          "sha256": "6a0e8c56f229e1d5a66732964592a46cde929ddda9e4dfe080254345a86836be"
+        },
+        {
+          "path": "results/captures/sm86_simulator_live_baseline_20260829_v2/evidence/raw/simulator/gemm_hmma_bf16_sm80/replay-2.json",
+          "sha256": "6a0e8c56f229e1d5a66732964592a46cde929ddda9e4dfe080254345a86836be"
+        }
+      ],
+      "cell": "gemm_hmma_bf16_sm80",
+      "comparable_to_simulator_timing": true,
+      "live": {
+        "baseline": {
+          "gpc__cycles_elapsed.max": 13350,
+          "sm__cycles_active.max": 11685,
+          "smsp__inst_executed.sum": 197120
+        },
+        "baseline_csv": {
+          "path": "results/captures/sm86_simulator_live_baseline_20260829_v2/evidence/raw/ncu/gemm_hmma_bf16_sm80/ncu.csv",
+          "sha256": "fb3857c397e8544c20a318aab5c69bef5720c9cb0da5499c5ee67ff4ddc40e1a"
+        },
+        "delta_repeat_minus_baseline": {
+          "gpc__cycles_elapsed.max": 151,
+          "sm__cycles_active.max": 60,
+          "smsp__inst_executed.sum": 0
+        },
+        "max_relative_delta": 0.01131086,
+        "repeat_2": {
+          "gpc__cycles_elapsed.max": 13501,
+          "sm__cycles_active.max": 11745,
+          "smsp__inst_executed.sum": 197120
+        },
+        "repeat_csv": {
+          "path": "results/captures/sm86_simulator_live_baseline_20260829_v2/evidence/raw/ncu_repeat/rep-2/gemm_hmma_bf16_sm80/ncu.csv",
+          "sha256": "1bccf525b0eff5c062ecd73af064d3c297c882924cec9cc7cdba78a5d3279c89"
+        },
+        "repeat_metadata": {
+          "argv": [
+            "/usr/local/cuda-13.2/nsight-compute-2026.1.0/ncu",
+            "--force-overwrite",
+            "--export",
+            "results/captures/sm86_simulator_live_baseline_20260829_v2/evidence/raw/ncu_repeat/rep-2/gemm_hmma_bf16_sm80/ncu-report",
+            "--launch-skip",
+            "1",
+            "--launch-count",
+            "1",
+            "--replay-mode",
+            "application",
+            "--clock-control",
+            "none",
+            "--metrics",
+            "gpc__cycles_elapsed.max,sm__cycles_active.max,smsp__inst_executed.sum,lts__t_sectors_srcunit_tex_op_read.sum,dram__sectors_read.sum,sm__pipe_tensor_cycles_active.sum",
+            "workloads/portable_lcd/gemm_hmma_bf16_sm80/gemm_hmma_bf16_sm80_run",
+            "--timing_shape",
+            "--warmup",
+            "1",
+            "--reps",
+            "1"
+          ],
+          "finished_at": "2026-08-29T16:47:31.657884+00:00",
+          "path": "results/captures/sm86_simulator_live_baseline_20260829_v2/evidence/raw/ncu_repeat/rep-2/gemm_hmma_bf16_sm80/metadata.json",
+          "sha256": "9e1e6e9cbc7c51ec5bba854f10eefb15196570f02e9fa9ca2c31e13d14d6d74a",
+          "started_at": "2026-08-29T16:47:30.634457+00:00"
+        },
+        "stable_within_five_percent": true
+      },
+      "residual": {
+        "baseline_cycles": 2770,
+        "interpretable": true,
+        "metric": "NCU sm__cycles_active.max minus simulator terminal lower bound",
+        "rank_by_baseline_cycles": 2,
+        "repeat_2_cycles": 2830,
+        "repeat_delta_cycles": 60
+      },
+      "simulator": {
+        "completion_status": "incomplete_unmodeled_retirement_tails",
+        "instructions_issued": 197120,
+        "readiness_schema": 6,
+        "records_seen": 197120,
+        "sha256": "6a0e8c56f229e1d5a66732964592a46cde929ddda9e4dfe080254345a86836be",
+        "tails": {
+          "async_copy_shared_visibility": false,
+          "coherence": true,
+          "dirty_writeback": true,
+          "reduction_read_modify_write": false
+        },
+        "terminal_lower_bound_cycles": 8915,
+        "top_readiness_causes": [
+          {
+            "cause": "async_destination_local",
+            "limiting_cycles": 2184390
+          },
+          {
+            "cause": "async_destination_sm_service",
+            "limiting_cycles": 1637994
+          },
+          {
+            "cause": "control_stall",
+            "limiting_cycles": 611840
+          }
+        ],
+        "twin_byte_identical": true,
+        "twin_sha256": "6a0e8c56f229e1d5a66732964592a46cde929ddda9e4dfe080254345a86836be"
+      }
+    },
+    {
+      "artifacts": [
+        {
+          "path": "results/captures/sm86_simulator_live_baseline_20260829_v2/evidence/raw/simulator/gemm_hmma_fp16_sm80/replay-1.json",
+          "sha256": "09dfd91172ce1c3742a5d6f20b3f4a60883441d02fa320426cc32611ec11db05"
+        },
+        {
+          "path": "results/captures/sm86_simulator_live_baseline_20260829_v2/evidence/raw/simulator/gemm_hmma_fp16_sm80/replay-2.json",
+          "sha256": "09dfd91172ce1c3742a5d6f20b3f4a60883441d02fa320426cc32611ec11db05"
+        }
+      ],
+      "cell": "gemm_hmma_fp16_sm80",
+      "comparable_to_simulator_timing": true,
+      "live": {
+        "baseline": {
+          "gpc__cycles_elapsed.max": 13211,
+          "sm__cycles_active.max": 11539,
+          "smsp__inst_executed.sum": 197120
+        },
+        "baseline_csv": {
+          "path": "results/captures/sm86_simulator_live_baseline_20260829_v2/evidence/raw/ncu/gemm_hmma_fp16_sm80/ncu.csv",
+          "sha256": "a9681782617ecf36e30a57beefeb88a20be15089c2a1495be1ffe97633df2e27"
+        },
+        "delta_repeat_minus_baseline": {
+          "gpc__cycles_elapsed.max": 26,
+          "sm__cycles_active.max": -45,
+          "smsp__inst_executed.sum": 0
+        },
+        "max_relative_delta": 0.00389982,
+        "repeat_2": {
+          "gpc__cycles_elapsed.max": 13237,
+          "sm__cycles_active.max": 11494,
+          "smsp__inst_executed.sum": 197120
+        },
+        "repeat_csv": {
+          "path": "results/captures/sm86_simulator_live_baseline_20260829_v2/evidence/raw/ncu_repeat/rep-2/gemm_hmma_fp16_sm80/ncu.csv",
+          "sha256": "b5c9787a81d47ca80677edbfdad12fc31af83f2321ae4b7249db1636f723d74e"
+        },
+        "repeat_metadata": {
+          "argv": [
+            "/usr/local/cuda-13.2/nsight-compute-2026.1.0/ncu",
+            "--force-overwrite",
+            "--export",
+            "results/captures/sm86_simulator_live_baseline_20260829_v2/evidence/raw/ncu_repeat/rep-2/gemm_hmma_fp16_sm80/ncu-report",
+            "--launch-skip",
+            "1",
+            "--launch-count",
+            "1",
+            "--replay-mode",
+            "application",
+            "--clock-control",
+            "none",
+            "--metrics",
+            "gpc__cycles_elapsed.max,sm__cycles_active.max,smsp__inst_executed.sum,lts__t_sectors_srcunit_tex_op_read.sum,dram__sectors_read.sum,sm__pipe_tensor_cycles_active.sum",
+            "workloads/portable_lcd/gemm_hmma_fp16_sm80/gemm_hmma_fp16_sm80_run",
+            "--timing_shape",
+            "--warmup",
+            "1",
+            "--reps",
+            "1"
+          ],
+          "finished_at": "2026-08-29T16:47:32.840784+00:00",
+          "path": "results/captures/sm86_simulator_live_baseline_20260829_v2/evidence/raw/ncu_repeat/rep-2/gemm_hmma_fp16_sm80/metadata.json",
+          "sha256": "3b15d372ec0121e90c3fdc15d9617e4ec95fcace05f37162a3174c81be8349f2",
+          "started_at": "2026-08-29T16:47:31.895855+00:00"
+        },
+        "stable_within_five_percent": true
+      },
+      "residual": {
+        "baseline_cycles": 2624,
+        "interpretable": true,
+        "metric": "NCU sm__cycles_active.max minus simulator terminal lower bound",
+        "rank_by_baseline_cycles": 3,
+        "repeat_2_cycles": 2579,
+        "repeat_delta_cycles": -45
+      },
+      "simulator": {
+        "completion_status": "incomplete_unmodeled_retirement_tails",
+        "instructions_issued": 197120,
+        "readiness_schema": 6,
+        "records_seen": 197120,
+        "sha256": "09dfd91172ce1c3742a5d6f20b3f4a60883441d02fa320426cc32611ec11db05",
+        "tails": {
+          "async_copy_shared_visibility": false,
+          "coherence": true,
+          "dirty_writeback": true,
+          "reduction_read_modify_write": false
+        },
+        "terminal_lower_bound_cycles": 8915,
+        "top_readiness_causes": [
+          {
+            "cause": "async_destination_local",
+            "limiting_cycles": 2115180
+          },
+          {
+            "cause": "async_destination_sm_service",
+            "limiting_cycles": 1707204
+          },
+          {
+            "cause": "control_stall",
+            "limiting_cycles": 611840
+          }
+        ],
+        "twin_byte_identical": true,
+        "twin_sha256": "09dfd91172ce1c3742a5d6f20b3f4a60883441d02fa320426cc32611ec11db05"
+      }
+    },
+    {
+      "artifacts": [
+        {
+          "path": "results/captures/sm86_simulator_live_baseline_20260829_v2/evidence/raw/simulator/gemm_imma_int8_sm80/replay-1.json",
+          "sha256": "9cfb26e02dc5b6384f420b5bf0e69982fc57979208dd1fa6cb37473683c8a71d"
+        },
+        {
+          "path": "results/captures/sm86_simulator_live_baseline_20260829_v2/evidence/raw/simulator/gemm_imma_int8_sm80/replay-2.json",
+          "sha256": "9cfb26e02dc5b6384f420b5bf0e69982fc57979208dd1fa6cb37473683c8a71d"
+        }
+      ],
+      "cell": "gemm_imma_int8_sm80",
+      "comparable_to_simulator_timing": true,
+      "live": {
+        "baseline": {
+          "gpc__cycles_elapsed.max": 11425,
+          "sm__cycles_active.max": 9734,
+          "smsp__inst_executed.sum": 157696
+        },
+        "baseline_csv": {
+          "path": "results/captures/sm86_simulator_live_baseline_20260829_v2/evidence/raw/ncu/gemm_imma_int8_sm80/ncu.csv",
+          "sha256": "94ca070ddcc72dc5dc2fbd3a4c4bd4309be32050ba4ddd3ad3cca0e65378698a"
+        },
+        "delta_repeat_minus_baseline": {
+          "gpc__cycles_elapsed.max": -6,
+          "sm__cycles_active.max": 7,
+          "smsp__inst_executed.sum": 0
+        },
+        "max_relative_delta": 0.00071913,
+        "repeat_2": {
+          "gpc__cycles_elapsed.max": 11419,
+          "sm__cycles_active.max": 9741,
+          "smsp__inst_executed.sum": 157696
+        },
+        "repeat_csv": {
+          "path": "results/captures/sm86_simulator_live_baseline_20260829_v2/evidence/raw/ncu_repeat/rep-2/gemm_imma_int8_sm80/ncu.csv",
+          "sha256": "2dac0178559aa4c81169aed9c16ec219d2d5df53855f08009b04518ac5f364cc"
+        },
+        "repeat_metadata": {
+          "argv": [
+            "/usr/local/cuda-13.2/nsight-compute-2026.1.0/ncu",
+            "--force-overwrite",
+            "--export",
+            "results/captures/sm86_simulator_live_baseline_20260829_v2/evidence/raw/ncu_repeat/rep-2/gemm_imma_int8_sm80/ncu-report",
+            "--launch-skip",
+            "1",
+            "--launch-count",
+            "1",
+            "--replay-mode",
+            "application",
+            "--clock-control",
+            "none",
+            "--metrics",
+            "gpc__cycles_elapsed.max,sm__cycles_active.max,smsp__inst_executed.sum,lts__t_sectors_srcunit_tex_op_read.sum,dram__sectors_read.sum,sm__pipe_tensor_cycles_active.sum",
+            "workloads/portable_lcd/gemm_imma_int8_sm80/gemm_imma_int8_sm80_run",
+            "--timing_shape",
+            "--warmup",
+            "1",
+            "--reps",
+            "1"
+          ],
+          "finished_at": "2026-08-29T16:47:34.002027+00:00",
+          "path": "results/captures/sm86_simulator_live_baseline_20260829_v2/evidence/raw/ncu_repeat/rep-2/gemm_imma_int8_sm80/metadata.json",
+          "sha256": "efda354fb6e3205e804e1efe0359bba42dca55d95d8549e96db422d0a8a573ad",
+          "started_at": "2026-08-29T16:47:33.088827+00:00"
+        },
+        "stable_within_five_percent": true
+      },
+      "residual": {
+        "baseline_cycles": 3867,
+        "interpretable": true,
+        "metric": "NCU sm__cycles_active.max minus simulator terminal lower bound",
+        "rank_by_baseline_cycles": 1,
+        "repeat_2_cycles": 3874,
+        "repeat_delta_cycles": 7
+      },
+      "simulator": {
+        "completion_status": "incomplete_unmodeled_retirement_tails",
+        "instructions_issued": 157696,
+        "readiness_schema": 6,
+        "records_seen": 157696,
+        "sha256": "9cfb26e02dc5b6384f420b5bf0e69982fc57979208dd1fa6cb37473683c8a71d",
+        "tails": {
+          "async_copy_shared_visibility": false,
+          "coherence": true,
+          "dirty_writeback": true,
+          "reduction_read_modify_write": false
+        },
+        "terminal_lower_bound_cycles": 5867,
+        "top_readiness_causes": [
+          {
+            "cause": "async_destination_sm_service",
+            "limiting_cycles": 1345984
+          },
+          {
+            "cause": "async_destination_local",
+            "limiting_cycles": 981070
+          },
+          {
+            "cause": "control_stall",
+            "limiting_cycles": 481792
+          }
+        ],
+        "twin_byte_identical": true,
+        "twin_sha256": "9cfb26e02dc5b6384f420b5bf0e69982fc57979208dd1fa6cb37473683c8a71d"
+      }
+    },
+    {
+      "artifacts": [
+        {
+          "path": "results/captures/sm86_simulator_live_baseline_20260829_v2/evidence/raw/simulator/gemm_sparse_2to4_bf16_sm80/replay-1.json",
+          "sha256": "e696061560374a3b9649f8db293ccbb036da05df968b9651a33749fe4e2f476b"
+        },
+        {
+          "path": "results/captures/sm86_simulator_live_baseline_20260829_v2/evidence/raw/simulator/gemm_sparse_2to4_bf16_sm80/replay-2.json",
+          "sha256": "e696061560374a3b9649f8db293ccbb036da05df968b9651a33749fe4e2f476b"
+        }
+      ],
+      "cell": "gemm_sparse_2to4_bf16_sm80",
+      "comparable_to_simulator_timing": true,
+      "live": {
+        "baseline": {
+          "gpc__cycles_elapsed.max": 5740,
+          "sm__cycles_active.max": 4025,
+          "smsp__inst_executed.sum": 19968
+        },
+        "baseline_csv": {
+          "path": "results/captures/sm86_simulator_live_baseline_20260829_v2/evidence/raw/ncu/gemm_sparse_2to4_bf16_sm80/ncu.csv",
+          "sha256": "a9e1478d83599abc181a104bb6e112618e37b24e88a4060a9070be286d748416"
+        },
+        "delta_repeat_minus_baseline": {
+          "gpc__cycles_elapsed.max": 4,
+          "sm__cycles_active.max": 34,
+          "smsp__inst_executed.sum": 0
+        },
+        "max_relative_delta": 0.0084472,
+        "repeat_2": {
+          "gpc__cycles_elapsed.max": 5744,
+          "sm__cycles_active.max": 4059,
+          "smsp__inst_executed.sum": 19968
+        },
+        "repeat_csv": {
+          "path": "results/captures/sm86_simulator_live_baseline_20260829_v2/evidence/raw/ncu_repeat/rep-2/gemm_sparse_2to4_bf16_sm80/ncu.csv",
+          "sha256": "c3352f6c36bfa086fecc4b53140349e88a750f072daf5a8ca68ad2d17be12eeb"
+        },
+        "repeat_metadata": {
+          "argv": [
+            "/usr/local/cuda-13.2/nsight-compute-2026.1.0/ncu",
+            "--force-overwrite",
+            "--export",
+            "results/captures/sm86_simulator_live_baseline_20260829_v2/evidence/raw/ncu_repeat/rep-2/gemm_sparse_2to4_bf16_sm80/ncu-report",
+            "--launch-skip",
+            "1",
+            "--launch-count",
+            "1",
+            "--replay-mode",
+            "application",
+            "--clock-control",
+            "none",
+            "--metrics",
+            "gpc__cycles_elapsed.max,sm__cycles_active.max,smsp__inst_executed.sum,lts__t_sectors_srcunit_tex_op_read.sum,dram__sectors_read.sum,sm__pipe_tensor_cycles_active.sum",
+            "workloads/portable_lcd/gemm_sparse_2to4_bf16_sm80/gemm_sparse_2to4_bf16_sm80_run",
+            "--timing_shape",
+            "--warmup",
+            "1",
+            "--reps",
+            "1"
+          ],
+          "finished_at": "2026-08-29T16:47:35.155820+00:00",
+          "path": "results/captures/sm86_simulator_live_baseline_20260829_v2/evidence/raw/ncu_repeat/rep-2/gemm_sparse_2to4_bf16_sm80/metadata.json",
+          "sha256": "8d33fd10ba141b6a066f0c3264051a7a3a92931fa7b8bf1d8f2824490060363d",
+          "started_at": "2026-08-29T16:47:34.254456+00:00"
+        },
+        "stable_within_five_percent": true
+      },
+      "residual": {
+        "baseline_cycles": 1650,
+        "interpretable": true,
+        "metric": "NCU sm__cycles_active.max minus simulator terminal lower bound",
+        "rank_by_baseline_cycles": 5,
+        "repeat_2_cycles": 1684,
+        "repeat_delta_cycles": 34
+      },
+      "simulator": {
+        "completion_status": "incomplete_unmodeled_retirement_tails",
+        "instructions_issued": 19968,
+        "readiness_schema": 6,
+        "records_seen": 19968,
+        "sha256": "e696061560374a3b9649f8db293ccbb036da05df968b9651a33749fe4e2f476b",
+        "tails": {
+          "async_copy_shared_visibility": false,
+          "coherence": true,
+          "dirty_writeback": true,
+          "reduction_read_modify_write": false
+        },
+        "terminal_lower_bound_cycles": 2375,
+        "top_readiness_causes": [
+          {
+            "cause": "async_destination_local",
+            "limiting_cycles": 210216
+          },
+          {
+            "cause": "control_stall",
+            "limiting_cycles": 57600
+          },
+          {
+            "cause": "async_destination_sm_service",
+            "limiting_cycles": 26872
+          }
+        ],
+        "twin_byte_identical": true,
+        "twin_sha256": "e696061560374a3b9649f8db293ccbb036da05df968b9651a33749fe4e2f476b"
+      }
+    },
+    {
+      "artifacts": [
+        {
+          "path": "results/captures/sm86_simulator_live_baseline_20260829_v2/evidence/raw/simulator/flash_attn_fwd_bf16_sm80/replay-1.json",
+          "sha256": "59b327ae59e64aeba7c4e8470a68699c32e9eeeb333894c314b66e03e3460c3e"
+        },
+        {
+          "path": "results/captures/sm86_simulator_live_baseline_20260829_v2/evidence/raw/simulator/flash_attn_fwd_bf16_sm80/replay-2.json",
+          "sha256": "59b327ae59e64aeba7c4e8470a68699c32e9eeeb333894c314b66e03e3460c3e"
+        }
+      ],
+      "cell": "flash_attn_fwd_bf16_sm80",
+      "comparable_to_simulator_timing": true,
+      "live": {
+        "baseline": {
+          "gpc__cycles_elapsed.max": 16131,
+          "sm__cycles_active.max": 14479,
+          "smsp__inst_executed.sum": 39568
+        },
+        "baseline_csv": {
+          "path": "results/captures/sm86_simulator_live_baseline_20260829_v2/evidence/raw/ncu/flash_attn_fwd_bf16_sm80/ncu.csv",
+          "sha256": "3d2773117036ca31b38205ad87efdd8fab680901a53caf8bdae119f049a33e82"
+        },
+        "delta_repeat_minus_baseline": {
+          "gpc__cycles_elapsed.max": -280,
+          "sm__cycles_active.max": -263,
+          "smsp__inst_executed.sum": 0
+        },
+        "max_relative_delta": 0.01816424,
+        "repeat_2": {
+          "gpc__cycles_elapsed.max": 15851,
+          "sm__cycles_active.max": 14216,
+          "smsp__inst_executed.sum": 39568
+        },
+        "repeat_csv": {
+          "path": "results/captures/sm86_simulator_live_baseline_20260829_v2/evidence/raw/ncu_repeat/rep-2/flash_attn_fwd_bf16_sm80/ncu.csv",
+          "sha256": "7cf5c3c57692baecf8e7dc86ce5888a35739023dffac2a6aeb0554825e8fddb5"
+        },
+        "repeat_metadata": {
+          "argv": [
+            "/usr/local/cuda-13.2/nsight-compute-2026.1.0/ncu",
+            "--force-overwrite",
+            "--export",
+            "results/captures/sm86_simulator_live_baseline_20260829_v2/evidence/raw/ncu_repeat/rep-2/flash_attn_fwd_bf16_sm80/ncu-report",
+            "--launch-skip",
+            "1",
+            "--launch-count",
+            "1",
+            "--replay-mode",
+            "application",
+            "--clock-control",
+            "none",
+            "--metrics",
+            "gpc__cycles_elapsed.max,sm__cycles_active.max,smsp__inst_executed.sum,lts__t_sectors_srcunit_tex_op_read.sum,dram__sectors_read.sum,sm__pipe_tensor_cycles_active.sum",
+            "workloads/portable_lcd/flash_attn_fwd_bf16_sm80/flash_attn_fwd_bf16_sm80_run",
+            "--timing_shape",
+            "--warmup",
+            "1",
+            "--reps",
+            "1"
+          ],
+          "finished_at": "2026-08-29T16:47:36.321315+00:00",
+          "path": "results/captures/sm86_simulator_live_baseline_20260829_v2/evidence/raw/ncu_repeat/rep-2/flash_attn_fwd_bf16_sm80/metadata.json",
+          "sha256": "3398ac404a2b5c36891a6a83135e92c075b724592d9c703e4eecf5e45dfe39ac",
+          "started_at": "2026-08-29T16:47:35.406628+00:00"
+        },
+        "stable_within_five_percent": true
+      },
+      "residual": {
+        "baseline_cycles": 1928,
+        "interpretable": true,
+        "metric": "NCU sm__cycles_active.max minus simulator terminal lower bound",
+        "rank_by_baseline_cycles": 4,
+        "repeat_2_cycles": 1665,
+        "repeat_delta_cycles": -263
+      },
+      "simulator": {
+        "completion_status": "incomplete_unmodeled_retirement_tails",
+        "instructions_issued": 39568,
+        "readiness_schema": 6,
+        "records_seen": 39568,
+        "sha256": "59b327ae59e64aeba7c4e8470a68699c32e9eeeb333894c314b66e03e3460c3e",
+        "tails": {
+          "async_copy_shared_visibility": false,
+          "coherence": true,
+          "dirty_writeback": true,
+          "reduction_read_modify_write": false
+        },
+        "terminal_lower_bound_cycles": 12551,
+        "top_readiness_causes": [
+          {
+            "cause": "control_stall",
+            "limiting_cycles": 106656
+          },
+          {
+            "cause": "async_destination_local",
+            "limiting_cycles": 65008
+          },
+          {
+            "cause": "dependence_counter_non_memory_write",
+            "limiting_cycles": 12832
+          }
+        ],
+        "twin_byte_identical": true,
+        "twin_sha256": "59b327ae59e64aeba7c4e8470a68699c32e9eeeb333894c314b66e03e3460c3e"
+      }
+    }
+  ],
+  "schema_version": 1
+}

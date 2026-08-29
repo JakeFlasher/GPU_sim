@@ -4,6 +4,7 @@ import importlib.util
 import json
 import os
 import sys
+import time
 from copy import deepcopy
 from pathlib import Path
 
@@ -267,6 +268,35 @@ def test_resume_requires_strict_dependency_freshness_and_exact_root(tmp_path: Pa
         result, [dependency], expectation
     )
 
+
+@pytest.mark.parametrize("launches", [[], [None, None]])
+def test_direct_schema_rejects_empty_or_duplicate_launch_population(
+    tmp_path: Path, launches: list[object]
+) -> None:
+    """The fresh-cohort validator's strict helper cannot accept tautological coverage."""
+
+    dependency = tmp_path / "input"
+    dependency.write_text("input", encoding="utf-8")
+    dependency_mtime = time.time_ns()
+    os.utime(dependency, ns=(dependency_mtime, dependency_mtime))
+    expectation = REPLAY.ReplayExpectation(
+        launches=(_launch(),), carded_dram=False
+    )
+    valid = _report(expectation)
+    if not launches:
+        invalid = dict(valid)
+        invalid["launches"] = []
+    else:
+        invalid = dict(valid)
+        invalid["launches"] = [valid["launches"][0], valid["launches"][0]]
+    first = tmp_path / "replay-1.json"
+    second = tmp_path / "replay-2.json"
+    result_mtime = dependency_mtime + 1_000_000
+    _write_with_mtime(first, invalid, result_mtime)
+    _write_with_mtime(second, invalid, result_mtime)
+    assert "launch count differs" in REPLAY.replay_pair_error(
+        first, second, [dependency], expectation
+    )
 
 def test_resume_rejects_gutted_counters_and_malformed_nested_timing(
     tmp_path: Path,

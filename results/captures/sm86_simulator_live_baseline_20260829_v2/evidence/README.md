@@ -18,3 +18,9 @@ comparison-only observations.
 `../live_cohort_semantic_report.json` is the independent six-cell validator
 result; it is intentionally kept outside the compressed raw archive so a
 reviewer can inspect the pass/fail summary without extraction.
+
+`../closure_report.json` is the bounded residual-selection record. It links
+the canonical and repeated NCU CSVs, simulator twin hashes, typed readiness
+causes, and the no-go/next-discriminator decision. `host.json` and the
+`host_preflight/` transcripts bind the host/tool commands to the campaign
+input hashes.

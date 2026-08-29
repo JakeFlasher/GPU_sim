@@ -1,0 +1,15 @@
+==WARNING== Note: Running with unmodified GPU clocks. If not controlled otherwise, profiling results may be inconsistent.
+==PROF== Connected to process 3513134 (/home/jakeshea/GPU_simulator_rebase/workloads/portable_lcd/flash_attn_fwd_bf16_sm80/flash_attn_fwd_bf16_sm80_run)
+==PROF== Profiling "flash_attn_fwd_bf16_sm80_kernel" - 0 (1/1): Application replay pass 1
+{
+  "slug": "flash_attn_fwd_bf16_sm80",
+  "mode": "timing",
+  "shape_point": "timing_00",
+  "BH": 4, "Sq": 64, "Sk": 128, "D": 16,
+  "reps": 1, "warmup": 1,
+  "mean_ms": 234.212570, "cv_pct": 0.000000,
+  "manifest": "results/flash_attn_fwd_bf16_sm80/manifest.json"
+}
+==PROF== Disconnected from process 3513134
+==PROF== Creating report from application replay data: 0%...100%
+==PROF== Report: /home/jakeshea/GPU_simulator_rebase/results/captures/sm86_simulator_live_baseline_20260829_v2/evidence/raw/ncu_repeat/rep-2/flash_attn_fwd_bf16_sm80/ncu-report.ncu-rep

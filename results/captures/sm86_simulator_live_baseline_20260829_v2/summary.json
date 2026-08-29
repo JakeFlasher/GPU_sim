@@ -3,13 +3,16 @@
   "captured_at": "2026-08-29T11:32:56Z",
   "repository_revision_at_capture": "b915ec6b3df2973e87119c63e438c8bb5f77be44",
   "handoff_revision": "80e1aa8e1b6033298bc081822f5c8f6e8685f800",
+  "candidate_revision": "8cae7c6f37e378ac54e4c5fe5f7acd3f38991480",
   "campaign_manifest": "results/captures/sm86_simulator_live_baseline_20260829_v2/campaign_manifest.json",
   "raw_evidence_archive": "results/captures/sm86_simulator_live_baseline_20260829_v2/evidence/raw_cohort.tar.zst",
   "semantic_replay_report": "results/captures/sm86_simulator_live_baseline_20260829_v2/semantic_replay_report.json.zst",
   "semantic_validation_summary": "results/captures/sm86_simulator_live_baseline_20260829_v2/semantic_replay_summary.json",
   "live_cohort_semantic_report": "results/captures/sm86_simulator_live_baseline_20260829_v2/live_cohort_semantic_report.json",
   "live_cohort_semantic_report_sha256": "b761eddf8b3335165cd6ae010471496c8cdb1809782d259f7732b531f69af426",
-  "raw_evidence_archive_sha256": "74fc90e4af4f4ad9eb6e688ea0769edbad39e55b273c9eae9e603cdb7a1149ef",
+  "closure_report": "results/captures/sm86_simulator_live_baseline_20260829_v2/closure_report.json",
+  "closure_report_sha256": "7585e68a986219ed805bcc9cff7a20a40b6a8a2c9eaa8db41abcc597c765f727",
+  "raw_evidence_archive_sha256": "4f343143a969b6e68be16a509ab5f7331832c25f347246fe9108900f2ddbaafc",
   "architecture": "sm_86",
   "gpu": "NVIDIA GeForce RTX 3090 Ti",
   "driver": "610.57.04",
@@ -156,6 +159,9 @@
     "decision": "no-go",
     "seam": "cycle scalar completion/retirement mapping",
     "reason": "The live residual is repeatable, but every cohort cell that writes global state reports typed dirty_writeback/coherence tails; NCU SM-active/GPC envelopes include launch and retirement behavior absent from the modeled event stream. The data do not identify one architecture-local latency without an in-scope store-free/barrier-free discriminator.",
-    "next_discriminator": "Capture a matched store-free, barrier-free async-source pair with an independent retirement/frontier observable before adding timing state or a scalar correction."
+    "next_discriminator": "Capture a matched store-free, barrier-free async-source pair with an independent retirement/frontier observable before adding timing state or a scalar correction.",
+    "closure_analysis_command": ".venv/bin/python workloads/research_probes/analyze_sm86_live_closure.py --manifest results/captures/sm86_simulator_live_baseline_20260829_v2/campaign_manifest.json --output results/captures/sm86_simulator_live_baseline_20260829_v2/closure_report.json",
+    "live_repeatability": "independent NCU application-replay repeat per cell; all six remain within 5% on gpc/SM/instruction metrics",
+    "selection_record": "closure_report.json"
   }
 }

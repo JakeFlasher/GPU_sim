@@ -1,0 +1,7 @@
+==WARNING== Note: Running with unmodified GPU clocks. If not controlled otherwise, profiling results may be inconsistent.
+==PROF== Connected to process 3510896 (/home/jakeshea/GPU_simulator_rebase/workloads/research_probes/async_barrier_overlap/async_barrier_overlap)
+==PROF== Profiling "async_barrier_overlap" - 0 (1/1): Application replay pass 1
+{"protocol":"c11_wait_barrier","locality":"l1_reuse","gap_cycles":0,"warps":4,"groups":16384,"copies_per_group":8,"payload_bytes_per_copy":512,"region_bytes":512,"source_stride":0,"samples_cycles":[[4457483,4457481,4457479,4457477],[4456813,4456811,4456809,4456807],[4424046,4424044,4424042,4424040]],"checksum":5025747196710545408,"accumulator_checksum":4030157372363762,"correct":true}
+==PROF== Disconnected from process 3510896
+==PROF== Creating report from application replay data: 0%...100%
+==PROF== Report: /home/jakeshea/GPU_simulator_rebase/results/captures/sm86_simulator_live_baseline_20260829_v2/evidence/raw/ncu_repeat/rep-2/cp_async_canary/ncu-report.ncu-rep

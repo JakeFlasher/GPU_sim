@@ -1,0 +1,33 @@
+{
+  "cell": "cp_async_canary",
+  "repeat_index": 2,
+  "argv": [
+    ".venv/bin/python",
+    "tools/local_labels/collect_ncu.py",
+    "--ncu",
+    "/usr/local/cuda-13.2/nsight-compute-2026.1.0/ncu",
+    "--output",
+    "results/captures/sm86_simulator_live_baseline_20260829_v2/evidence/raw/ncu_repeat/rep-2/cp_async_canary",
+    "--metrics",
+    "gpc__cycles_elapsed.max,sm__cycles_active.max,smsp__inst_executed.sum",
+    "--launch-skip",
+    "1",
+    "--launch-count",
+    "1",
+    "--replay-mode",
+    "application",
+    "--clock-control",
+    "none",
+    "--",
+    "workloads/research_probes/async_barrier_overlap/async_barrier_overlap",
+    "c11",
+    "l1",
+    "0",
+    "4",
+    "3"
+  ],
+  "return_code": 0,
+  "elapsed_seconds": 1.23,
+  "stdout": "results/captures/sm86_simulator_live_baseline_20260829_v2/evidence/raw/ncu_repeat/rep-2/cp_async_canary\n",
+  "stderr": ""
+}
