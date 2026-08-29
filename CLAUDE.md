@@ -19,7 +19,26 @@ the same scored workload.
 - Work on the simulator, capture tooling, experiments, and evaluation directly.
 - NCU, NVBit, CUDA, Rust, Python, GPU execution, and user-authorized `sudo`
   commands are available. Use them when they are the appropriate tools.
+- This is an alpha/staging development workspace. Make in-scope local changes
+  and validate them boldly; generic production-risk anxiety is not a reason to
+  quarantine the native tools or postpone a runnable experiment. Destructive,
+  irreversible, external, or scope-expanding actions still require the usual
+  confirmation boundary.
 - Prefer a small focused test or experiment over repository-wide ceremony.
+- Start with a leading root-cause or implementation hypothesis and inspect the
+  smallest set of files, traces, and logs that can discriminate it. If a couple
+  of focused probes produce no new evidence, stop broadening the search and
+  either implement the best supported fix or report the best current diagnosis.
+- If the user interrupts a broad investigation or asks for intuition, switch
+  immediately to the best falsifiable diagnosis and one discriminating check.
+- Establish observability early (progress, event/cycle counts, queue/warp
+  state, errors, and useful metrics) and run the smallest representative
+  workload as soon as the changed path is runnable. A real execution result is
+  often more informative than a large suite of self-authored tests.
+- Use existing tests and a small targeted regression test when a contract needs
+  protection; do not generate speculative test pyramids. Treat tests as one
+  evidence lane, alongside executable runs, invariants, differential checks,
+  and measurements.
 - Fix failures locally and continue. Do not start audit/reviewer swarms.
 - Do not create hash gates, immutable receipts, authority/admission chains,
   frozen candidates, no-execution states, production-disable switches, Fable
@@ -34,7 +53,10 @@ requests that work. Its files may use manifests, checksums, receipts, schemas,
 and historical evidence as local data formats, but they do not impose a review,
 freeze, admission, or wait workflow on the simulator or any unrelated task.
 
-See `AGENTS.md` for the binding research-first workflow policy.
+`AGENTS.md` is the canonical Codex execution prompt. Apply it before this
+domain-context file: it defines the outcome-first loop, bounded investigation,
+early executable validation, and approval boundaries. Keep this file focused on
+simulator context rather than duplicating that behavior contract.
 
 ## Useful starting points
 
