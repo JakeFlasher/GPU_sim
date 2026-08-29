@@ -4,6 +4,9 @@ This directory records the current RTX 3090 Ti `sm_86` live cohort and the
 corresponding release `sim-run` diagnostics. Raw traces, NCU reports, static
 sidecars, and replay JSON remain in the local capture roots named in the
 campaign log; this tracked summary is the portable index and claim boundary.
+The complete per-cell command/status/identity record is
+[`campaign_manifest.json`](campaign_manifest.json); the bounded raw evidence
+is retained in [`evidence/raw_cohort.tar.zst`](evidence/raw_cohort.tar.zst).
 
 ## Outcome
 
@@ -27,6 +30,13 @@ The first direct portable NVBit attempt deliberately used
 launches. That artifact is invalid for this cohort. The corrected command uses
 `ACTIVE_FROM_START=1` because these binaries do not emit profiler start/stop
 markers; the async research probe remains profiler-marked and uses 0.
+
+The active replay validator now derives trace instruction/sector invariants and
+records per-launch readiness, modeled-event, completion-frontier, and typed-tail
+diagnostics. The compact summary is
+[`semantic_replay_summary.json`](semantic_replay_summary.json); the complete
+per-launch report is the compressed
+`semantic_replay_report.json.zst` referenced there.
 
 ## Reproduction commands
 

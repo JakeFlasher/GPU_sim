@@ -9,11 +9,13 @@ import json
 import sys
 from functools import cache
 from pathlib import Path
-from typing import Iterator, Sequence
+from typing import Any, Iterator, Sequence
 
 
 HERE = Path(__file__).resolve().parent
 REPO_ROOT = HERE.parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 EXPECTED_PAIR_COUNT = 5_519
 SIMULATOR_CRATES = ("arch", "engine", "mem", "sm", "trace", "direct_run")
 
@@ -40,6 +42,9 @@ ARRIVAL = load_module(
 )
 ADMISSION = load_module(
     "validated_admission_campaign", HERE / "l1tex_admission_backpressure/campaign.py"
+)
+from workloads.research_probes.semantic_replay_validation import (  # noqa: E402
+    validate_replay_document,
 )
 
 
@@ -100,6 +105,109 @@ def _known_supplemental_replay_directory(path: Path, root: Path) -> bool:
     return False
 
 
+def _supplemental_descriptor(
+    path: Path, root: Path
+) -> tuple[str, int, str] | None:
+    """Return the candidate family/id/cell encoded by a supplemental path."""
+
+    try:
+        relative = path.resolve().relative_to(root.resolve())
+    except ValueError:
+        return None
+    if len(relative.parts) != 2:
+        return None
+    directory, cell_key = relative.parts
+    if cell_key not in _admission_cell_keys():
+        return None
+    families = (
+        ("service", "simulator-memory-admission-feedback-service-", 0),
+        ("write-completion", "simulator-memory-write-completion-feedback-", 1),
+        ("red-rmw", "simulator-red-rmw-completion-", 2),
+    )
+    candidate_sets = _supplemental_candidate_ids()
+    for family, prefix, index in families:
+        if not directory.startswith(prefix):
+            continue
+        try:
+            candidate_id = int(directory[len(prefix) :])
+        except ValueError:
+            return None
+        if candidate_id not in candidate_sets[index]:
+            return None
+        return family, candidate_id, cell_key
+    return None
+
+
+def _supplemental_pair_spec(
+    path: Path, root: Path, binary: Path
+) -> tuple[Path, Path, list[Path], Any, Path] | None:
+    """Build the same replay expectation used by the owning campaign."""
+
+    descriptor = _supplemental_descriptor(path, root)
+    if descriptor is None:
+        return None
+    family, candidate_id, cell_key = descriptor
+    cell = next(
+        (candidate for candidate in ADMISSION.configured_cells() if candidate.key == cell_key),
+        None,
+    )
+    if cell is None:
+        return None
+    trace = root / "nvbit" / cell_key
+    control = root / "sass/l1tex_admission_backpressure_trace.control_bits.json"
+    arch_card = REPO_ROOT / "arch_profiles/cards/sm_86.json"
+    pchase_card = REPO_ROOT / "data/pchase/sm_86_static_card.json"
+    launches = REPLAY.expected_launches_from_trace(
+        trace,
+        grid=(cell.blocks, 1, 1),
+        block=(cell.warps * 32, 1, 1),
+    )
+    if family == "service":
+        source_file, candidate = ADMISSION.validated_feedback_service_sweep()[candidate_id]
+        candidate_file = (
+            root
+            / "metadata/memory_admission_feedback_service_singletons"
+            / f"candidate-{candidate_id}.json"
+        )
+        source_snapshot = root / "metadata" / source_file.name
+        dependencies = [
+            *_ordinary_dependencies(binary, control, trace),
+            source_file,
+            source_snapshot,
+            candidate_file,
+        ]
+    elif family == "write-completion":
+        candidate_file, candidate = ADMISSION.validated_write_completion_feedback()[candidate_id]
+        snapshot = root / f"metadata/memory_write_completion_feedback_{candidate_id}.json"
+        dependencies = [
+            *_ordinary_dependencies(binary, control, trace),
+            candidate_file,
+            snapshot,
+        ]
+    else:
+        source_file, candidate = ADMISSION.validated_red_rmw_completion_sweep()[candidate_id]
+        candidate_file = (
+            root
+            / "metadata/red_rmw_completion_singletons"
+            / f"candidate-{candidate_id}.json"
+        )
+        source_snapshot = root / "metadata" / source_file.name
+        dependencies = [
+            *_ordinary_dependencies(binary, control, trace),
+            source_file,
+            source_snapshot,
+            candidate_file,
+        ]
+    expectation = REPLAY.ReplayExpectation(
+        launches=launches,
+        carded_dram=False,
+        feedback_candidate=candidate,
+    )
+    first = path / "replay-1.json"
+    second = path / "replay-2.json"
+    return first, second, dependencies, expectation, trace
+
+
 def _pair(
     root: Path,
     directory: str,
@@ -115,6 +223,72 @@ def replay_result_directories(root: Path) -> set[Path]:
         for name in ("replay-1.json", "replay-2.json")
         for path in root.rglob(name)
     }
+
+
+def _validate_pair(
+    label: str,
+    first: Path,
+    second: Path,
+    dependencies: Sequence[Path],
+    expectation: Any,
+    trace: Path,
+    semantic_rows: list[dict[str, Any]],
+) -> str | None:
+    """Run structural, freshness, twin, and trace-semantic validation."""
+
+    error = REPLAY.replay_pair_error(first, second, dependencies, expectation)
+    if error is not None:
+        return error
+    try:
+        document = REPLAY.load_json_strict(first)
+    except (OSError, UnicodeDecodeError, ValueError, json.JSONDecodeError) as exc:
+        return f"{first}: result is not strict JSON: {exc}"
+    if not isinstance(document, dict):
+        return f"{first}: result root is not an object"
+    rows, semantic_errors = validate_replay_document(document, trace, label=label)
+    try:
+        trace_path = str(trace.resolve().relative_to(REPO_ROOT.resolve()))
+    except ValueError:
+        trace_path = str(trace)
+    for row in rows:
+        row["trace_path"] = trace_path
+        expected = row.get("trace_expected")
+        if isinstance(expected, dict) and isinstance(expected.get("trace_dir"), str):
+            try:
+                expected["trace_dir"] = str(
+                    Path(expected["trace_dir"])
+                    .resolve()
+                    .relative_to(REPO_ROOT.resolve())
+                )
+            except ValueError:
+                pass
+    semantic_rows.extend(rows)
+    if semantic_errors:
+        return "; ".join(semantic_errors[:3])
+    return None
+
+
+def _validate_supplemental_directory(
+    path: Path,
+    root: Path,
+    binary: Path,
+    semantic_rows: list[dict[str, Any]],
+) -> str | None:
+    """Validate a recognized supplemental directory before classifying it."""
+
+    spec = _supplemental_pair_spec(path, root, binary)
+    if spec is None:
+        return "supplemental replay path could not be resolved"
+    first, second, dependencies, expectation, trace = spec
+    return _validate_pair(
+        f"supplemental/{path.parent.name}/{path.name}",
+        first,
+        second,
+        dependencies,
+        expectation,
+        trace,
+        semantic_rows,
+    )
 
 
 def _ordinary_dependencies(
@@ -466,6 +640,11 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument(
         "--admission-root", type=Path, default=ADMISSION.DEFAULT_OUTPUT
     )
+    result.add_argument(
+        "--semantic-report",
+        type=Path,
+        help="optional JSON report containing per-pair trace and readiness diagnostics",
+    )
     return result
 
 
@@ -521,17 +700,36 @@ def main(argv: Sequence[str] | None = None) -> int:
         total = 0
         failures: list[str] = []
         expected_directories: set[Path] = set()
+        semantic_rows: list[dict[str, Any]] = []
+        group_counts: dict[str, int] = {}
+        group_roots = {
+            "launch": args.launch_root.resolve(),
+            "retirement": args.retirement_root.resolve(),
+            "arrival": args.arrival_root.resolve(),
+            "admission": args.admission_root.resolve(),
+            "admission-service-sweep": args.admission_root.resolve(),
+            "write-completion": args.admission_root.resolve(),
+            "red-rmw-completion": args.admission_root.resolve(),
+        }
         for group_name, pairs in groups:
             group_count = 0
             for label, first, second, dependencies, expectation in pairs:
                 group_count += 1
                 total += 1
                 expected_directories.add(first.parent.resolve())
-                error = REPLAY.replay_pair_error(
-                    first, second, dependencies, expectation
+                trace = group_roots[group_name] / "nvbit" / first.parent.name
+                error = _validate_pair(
+                    label,
+                    first,
+                    second,
+                    dependencies,
+                    expectation,
+                    trace,
+                    semantic_rows,
                 )
                 if error is not None:
                     failures.append(f"{label}: {error}")
+            group_counts[group_name] = group_count
             print(f"{group_name}: {group_count} replay pairs")
         actual_directories = set().union(
             replay_result_directories(args.launch_root.resolve()),
@@ -542,17 +740,27 @@ def main(argv: Sequence[str] | None = None) -> int:
         supplemental = {
             path
             for path in actual_directories - expected_directories
-            if _known_supplemental_replay_directory(
-                path, args.admission_root.resolve()
-            )
+            if _known_supplemental_replay_directory(path, args.admission_root.resolve())
         }
+        supplemental_validated = 0
+        for extra in sorted(supplemental):
+            error = _validate_supplemental_directory(
+                extra,
+                args.admission_root.resolve(),
+                binary,
+                semantic_rows,
+            )
+            if error is not None:
+                failures.append(f"supplemental/{extra.parent.name}/{extra.name}: {error}")
+            else:
+                supplemental_validated += 1
         for extra in sorted(
             actual_directories - expected_directories - supplemental
         ):
             failures.append(f"unexpected inactive replay directory: {extra}")
         if supplemental:
             print(
-                f"ignored {len(supplemental)} known supplemental full-campaign replay directories"
+                f"validated {supplemental_validated} known supplemental full-campaign replay directories"
             )
     except (OSError, RuntimeError, ValueError, json.JSONDecodeError) as error:
         print(f"active replay validation: {error}", file=sys.stderr)
@@ -561,6 +769,24 @@ def main(argv: Sequence[str] | None = None) -> int:
     if total != EXPECTED_PAIR_COUNT:
         failures.append(
             f"active replay matrix has {total} pairs, expected {EXPECTED_PAIR_COUNT}"
+        )
+    if args.semantic_report is not None:
+        report_path = args.semantic_report.expanduser().resolve()
+        report_path.parent.mkdir(parents=True, exist_ok=True)
+        report = {
+            "schema_version": 1,
+            "validator": "workloads/research_probes/validate_active_replay_pairs.py",
+            "active_pair_count": total,
+            "group_counts": group_counts,
+            "semantic_launch_count": len(semantic_rows),
+            "supplemental_directory_count": len(supplemental),
+            "passed": not failures,
+            "failures": failures,
+            "rows": semantic_rows,
+        }
+        report_path.write_text(
+            json.dumps(report, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
         )
     if failures:
         for failure in failures[:20]:

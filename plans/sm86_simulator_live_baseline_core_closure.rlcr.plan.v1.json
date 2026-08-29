@@ -25,6 +25,12 @@
       "description": "One simulator-core gap is either fixed with the smallest architecture-local change and an untouched-cell validation, or falsified with a reproducible no-go and next discriminator; the handoff explains the causal mechanism and keeps JADE/HETR, sm_120, and rejected candidates unchanged.",
       "required": true,
       "required_checks": ["core-closure-report", "scope-guard"]
+    },
+    {
+      "id": "AC-5",
+      "description": "The final handoff states the causal mechanism or remaining uncertainty, exact commands and observed results, reproducibility metadata, claim limits, the next GPU-simulator action, and the explicit JADE/HETR, CPU-GPU, sm_120, and rejected-candidate scope exclusions.",
+      "required": true,
+      "required_checks": ["core-closure-report", "scope-guard"]
     }
   ]
 }

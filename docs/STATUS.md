@@ -34,10 +34,15 @@ replay corpus initially reported 5,519 timestamp-stale outputs. Its simulator
 matrices are now regenerated with the current release binary and twin-byte
 checks; the authoritative validator reports 5,519 fresh, schema-matched,
 byte-identical active pairs plus 2,070 known supplemental full-campaign
-candidate directories. Fresh live residuals remain typed lower bounds with dirty-writeback and
-coherence tails, so this round records a no-go for a scalar timing correction;
+candidate directories. Fresh live residuals remain typed lower bounds with
+dirty-writeback and coherence tails, so this round records a no-go for a
+scalar timing correction;
 the next discriminator is a store-free/barrier-free async-source pair with an
-independent retirement observable.
+independent retirement observable. The durable per-cell manifest, compressed
+raw evidence bundle, and 7,765-launch semantic replay report are linked from
+the baseline handoff; the validator now checks trace-derived instruction and
+sector conservation plus readiness/frontier invariants for the active and
+supplemental replay sets.
 
 The 2026-08-17
 [causal-readiness milestone](sm86_causal_readiness_milestone.md) is complete.
