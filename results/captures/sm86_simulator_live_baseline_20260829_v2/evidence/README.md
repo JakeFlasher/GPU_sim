@@ -11,13 +11,13 @@ From the campaign directory, materialize the paths named by that manifest in a
 clean checkout:
 
 ```bash
-zstd -dc evidence/raw_cohort.tar.zst | tar --touch -xf - -C evidence
-find evidence/raw/simulator -type f -name 'replay-*.json' -exec touch {} +
+zstd -dc evidence/raw_cohort.tar.zst | tar -xf - -C evidence
 ```
 
-The second line advances only the materialized replay timestamps so the
-freshness helper can distinguish an extracted candidate from older checkout
-inputs; content and input identities remain hash-bound.
+The fresh-cohort validator uses the per-cell `replay_binding.json` sidecars to
+bind replay bytes to the exact simulator binary, trace tree, control sidecar,
+architecture card, and pchase card. It therefore does not rely on or rewrite
+filesystem timestamps after archive extraction.
 
 The archive is evidence retention, not simulator input. NCU values remain
 comparison-only observations.

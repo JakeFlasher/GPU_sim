@@ -163,10 +163,15 @@
             "4",
             "3"
           ],
+          "contract_validated": true,
           "finished_at": "2026-08-29T16:47:30.382469+00:00",
           "path": "results/captures/sm86_simulator_live_baseline_20260829_v2/evidence/raw/ncu_repeat/rep-2/cp_async_canary/metadata.json",
           "sha256": "c8cc41cd25aa81d624ed9c4bf705bd104cd62df50828e5276309b56e0c9a1c84",
           "started_at": "2026-08-29T16:47:29.401016+00:00"
+        },
+        "repeat_report": {
+          "path": "results/captures/sm86_simulator_live_baseline_20260829_v2/evidence/raw/ncu_repeat/rep-2/cp_async_canary/ncu-report.ncu-rep",
+          "sha256": "b04b41c82a4da5b62abf13e3fd42565f0f41d4bfa2e10785ce93ed29e5c58f78"
         },
         "stable_within_five_percent": true
       },
@@ -269,10 +274,15 @@
             "--reps",
             "1"
           ],
+          "contract_validated": true,
           "finished_at": "2026-08-29T16:47:31.657884+00:00",
           "path": "results/captures/sm86_simulator_live_baseline_20260829_v2/evidence/raw/ncu_repeat/rep-2/gemm_hmma_bf16_sm80/metadata.json",
           "sha256": "9e1e6e9cbc7c51ec5bba854f10eefb15196570f02e9fa9ca2c31e13d14d6d74a",
           "started_at": "2026-08-29T16:47:30.634457+00:00"
+        },
+        "repeat_report": {
+          "path": "results/captures/sm86_simulator_live_baseline_20260829_v2/evidence/raw/ncu_repeat/rep-2/gemm_hmma_bf16_sm80/ncu-report.ncu-rep",
+          "sha256": "c7bd4fffd3e6ea17074d551ee293985665f85ba27e7e16585df6e8b35810fd9b"
         },
         "stable_within_five_percent": true
       },
@@ -376,10 +386,15 @@
             "--reps",
             "1"
           ],
+          "contract_validated": true,
           "finished_at": "2026-08-29T16:47:32.840784+00:00",
           "path": "results/captures/sm86_simulator_live_baseline_20260829_v2/evidence/raw/ncu_repeat/rep-2/gemm_hmma_fp16_sm80/metadata.json",
           "sha256": "3b15d372ec0121e90c3fdc15d9617e4ec95fcace05f37162a3174c81be8349f2",
           "started_at": "2026-08-29T16:47:31.895855+00:00"
+        },
+        "repeat_report": {
+          "path": "results/captures/sm86_simulator_live_baseline_20260829_v2/evidence/raw/ncu_repeat/rep-2/gemm_hmma_fp16_sm80/ncu-report.ncu-rep",
+          "sha256": "787dc828d748aff74a116f82889e4710f68448bce581bebf754034bbe1a25277"
         },
         "stable_within_five_percent": true
       },
@@ -483,10 +498,15 @@
             "--reps",
             "1"
           ],
+          "contract_validated": true,
           "finished_at": "2026-08-29T16:47:34.002027+00:00",
           "path": "results/captures/sm86_simulator_live_baseline_20260829_v2/evidence/raw/ncu_repeat/rep-2/gemm_imma_int8_sm80/metadata.json",
           "sha256": "efda354fb6e3205e804e1efe0359bba42dca55d95d8549e96db422d0a8a573ad",
           "started_at": "2026-08-29T16:47:33.088827+00:00"
+        },
+        "repeat_report": {
+          "path": "results/captures/sm86_simulator_live_baseline_20260829_v2/evidence/raw/ncu_repeat/rep-2/gemm_imma_int8_sm80/ncu-report.ncu-rep",
+          "sha256": "f0518795765a673b52c5f5a65757626720f56d7fdd1037cd41f254079ee8171e"
         },
         "stable_within_five_percent": true
       },
@@ -590,10 +610,15 @@
             "--reps",
             "1"
           ],
+          "contract_validated": true,
           "finished_at": "2026-08-29T16:47:35.155820+00:00",
           "path": "results/captures/sm86_simulator_live_baseline_20260829_v2/evidence/raw/ncu_repeat/rep-2/gemm_sparse_2to4_bf16_sm80/metadata.json",
           "sha256": "8d33fd10ba141b6a066f0c3264051a7a3a92931fa7b8bf1d8f2824490060363d",
           "started_at": "2026-08-29T16:47:34.254456+00:00"
+        },
+        "repeat_report": {
+          "path": "results/captures/sm86_simulator_live_baseline_20260829_v2/evidence/raw/ncu_repeat/rep-2/gemm_sparse_2to4_bf16_sm80/ncu-report.ncu-rep",
+          "sha256": "985899c9d58e9c950fb3732215e7fad89e3f5a3329f085a8a61eb3d2cb79e6c9"
         },
         "stable_within_five_percent": true
       },
@@ -697,10 +722,15 @@
             "--reps",
             "1"
           ],
+          "contract_validated": true,
           "finished_at": "2026-08-29T16:47:36.321315+00:00",
           "path": "results/captures/sm86_simulator_live_baseline_20260829_v2/evidence/raw/ncu_repeat/rep-2/flash_attn_fwd_bf16_sm80/metadata.json",
           "sha256": "3398ac404a2b5c36891a6a83135e92c075b724592d9c703e4eecf5e45dfe39ac",
           "started_at": "2026-08-29T16:47:35.406628+00:00"
+        },
+        "repeat_report": {
+          "path": "results/captures/sm86_simulator_live_baseline_20260829_v2/evidence/raw/ncu_repeat/rep-2/flash_attn_fwd_bf16_sm80/ncu-report.ncu-rep",
+          "sha256": "98b18925ff91fa6c624219ff8108f3ae1ff1ca64220fb883b0fced2a70ab4c47"
         },
         "stable_within_five_percent": true
       },

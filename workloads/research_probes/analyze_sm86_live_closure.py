@@ -26,6 +26,11 @@ METRICS = (
     "sm__cycles_active.max",
     "smsp__inst_executed.sum",
 )
+TRUSTED_NCU_IDENTITY = {
+    "path": "/usr/local/cuda-13.2/nsight-compute-2026.1.0/ncu",
+    "version": "2026.1.0.0",
+    "sha256": "a44ff2c735c4dcf66c78f3f430155805d6a0b1f74f26331f98ecec03bfbf3f1a",
+}
 CAUSE_NAMES = (
     "control_stall",
     "dependence_counter_read",
@@ -47,6 +52,23 @@ def _sha256(path: Path) -> str:
     with path.open("rb") as stream:
         for chunk in iter(lambda: stream.read(1024 * 1024), b""):
             digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _tree_sha256(path: Path) -> str:
+    if path.is_file():
+        return _sha256(path)
+    files = sorted(item for item in path.rglob("*") if item.is_file())
+    if not files:
+        raise ValueError(f"input tree has no files: {path}")
+    digest = hashlib.sha256()
+    for item in files:
+        relative = item.relative_to(path).as_posix().encode("utf-8")
+        payload_hash = _sha256(item).encode("ascii")
+        digest.update(len(relative).to_bytes(8, "big"))
+        digest.update(relative)
+        digest.update(len(payload_hash).to_bytes(8, "big"))
+        digest.update(payload_hash)
     return digest.hexdigest()
 
 
@@ -139,6 +161,55 @@ def _replay_summary(path: Path) -> dict[str, Any]:
     }
 
 
+def _validate_replay_binding(
+    root: Path,
+    cell: Mapping[str, Any],
+    nvbit: Mapping[str, Any],
+    static: Mapping[str, Any],
+    simulator: Mapping[str, Any],
+    outputs: list[str],
+) -> None:
+    slug = str(cell["id"])
+    relative = simulator.get("replay_binding")
+    expected_relative = f"evidence/raw/simulator/{slug}/replay_binding.json"
+    if relative != expected_relative:
+        raise ValueError(f"{slug}: replay binding path is not the simulator cell binding")
+    binding_path = _campaign_file(root, relative, f"{slug}.replay_binding")
+    if simulator.get("replay_binding_sha256") != _sha256(binding_path):
+        raise ValueError(f"{slug}: replay binding hash does not match")
+    binding = json.loads(binding_path.read_text(encoding="utf-8"))
+    if not isinstance(binding, Mapping) or binding.get("schema_version") != 1 or binding.get("cell") != slug:
+        raise ValueError(f"{slug}: replay binding schema is malformed")
+    freshness = binding.get("freshness")
+    if not isinstance(freshness, Mapping) or freshness.get("mode") != "content_bound":
+        raise ValueError(f"{slug}: replay binding freshness mode is unsupported")
+    if binding.get("command") != simulator.get("argv"):
+        raise ValueError(f"{slug}: replay binding command differs")
+    binary = Path(str(simulator.get("binary_path", "")))
+    if not binary.is_file() or simulator.get("binary_sha256") != _sha256(binary):
+        raise ValueError(f"{slug}: simulator binary identity is not current")
+    inputs = binding.get("inputs")
+    if not isinstance(inputs, Mapping):
+        raise ValueError(f"{slug}: replay binding inputs are missing")
+    input_paths = {
+        "trace": (nvbit.get("output"), root / str(nvbit.get("output", "")), _tree_sha256(root / str(nvbit.get("output", "")))),
+        "control": (static.get("control"), root / str(static.get("control", "")), _sha256(root / str(static.get("control", "")))),
+        "architecture_card": ("arch_profiles/cards/sm_86.json", REPO_ROOT / "arch_profiles/cards/sm_86.json", _sha256(REPO_ROOT / "arch_profiles/cards/sm_86.json")),
+        "pchase_card": ("data/pchase/sm_86_static_card.json", REPO_ROOT / "data/pchase/sm_86_static_card.json", _sha256(REPO_ROOT / "data/pchase/sm_86_static_card.json")),
+    }
+    for name, (expected_path, _path, expected_hash) in input_paths.items():
+        record = inputs.get(name)
+        if not isinstance(record, Mapping) or record.get("path") != expected_path or record.get("sha256") != expected_hash:
+            raise ValueError(f"{slug}: replay binding input mismatch for {name}")
+    output_records = binding.get("outputs")
+    if not isinstance(output_records, list) or len(output_records) != 2:
+        raise ValueError(f"{slug}: replay binding outputs are missing")
+    for record, expected in zip(output_records, outputs):
+        output_path = _campaign_file(root, expected, f"{slug}.replay")
+        if not isinstance(record, Mapping) or record.get("path") != expected or record.get("sha256") != _sha256(output_path):
+            raise ValueError(f"{slug}: replay binding output mismatch")
+
+
 def _campaign_token_matches(token: object, relative: str, root: Path) -> bool:
     if not isinstance(token, str):
         return False
@@ -155,6 +226,7 @@ def _repeat_command_contract(
     cell: Mapping[str, Any],
     stage: Mapping[str, Any],
     repeat_dir: str,
+    ncu_identity: Mapping[str, str],
 ) -> tuple[list[str], list[str]]:
     """Return expected NCU argv and the indices whose paths may be normalized."""
 
@@ -164,6 +236,8 @@ def _repeat_command_contract(
         raise ValueError(f"{cell.get('id')}: canonical NCU argv is malformed")
     if not isinstance(tool, str) or not tool:
         raise ValueError(f"{cell.get('id')}: canonical NCU tool path is missing")
+    if tool != ncu_identity.get("path"):
+        raise ValueError(f"{cell.get('id')}: canonical NCU tool path is not the trusted toolchain")
     try:
         output_index = source.index("--output")
         separator = source.index("--", output_index)
@@ -197,9 +271,12 @@ def _validate_repeat_metadata(
     stage: Mapping[str, Any],
     repeat_dir: str,
     metadata: Mapping[str, Any],
+    ncu_identity: Mapping[str, str],
 ) -> None:
     slug = str(cell["id"])
-    expected_command, target = _repeat_command_contract(root, cell, stage, repeat_dir)
+    expected_command, target = _repeat_command_contract(
+        root, cell, stage, repeat_dir, ncu_identity
+    )
     command = metadata.get("command")
     if not isinstance(command, list) or any(not isinstance(item, str) for item in command):
         raise ValueError(f"{slug}: repeated NCU metadata command is missing")
@@ -211,19 +288,24 @@ def _validate_repeat_metadata(
                 raise ValueError(f"{slug}: repeated NCU export path is misbound")
         elif actual != expected:
             raise ValueError(f"{slug}: repeated NCU command differs at argv[{index}]")
-    if metadata.get("return_code") != 0:
-        raise ValueError(f"{slug}: repeated NCU command did not exit zero")
+    return_code = metadata.get("return_code")
+    if isinstance(return_code, bool) or not isinstance(return_code, int) or return_code != 0:
+        raise ValueError(f"{slug}: repeated NCU return_code is malformed or nonzero")
     expected_csv = repeat_dir + "/ncu.csv"
     expected_report = repeat_dir + "/ncu-report.ncu-rep"
     for key, expected in (("csv", expected_csv), ("report", expected_report)):
         if not _campaign_token_matches(metadata.get(key), expected, root):
             raise ValueError(f"{slug}: repeated NCU metadata {key} path is misbound")
+    _campaign_file(root, expected_report, f"{slug}.ncu_repeat.report")
     if target[0] != cell.get("binary", {}).get("path"):
         raise ValueError(f"{slug}: repeated NCU target binary differs")
 
 
 def _repeat_metrics(
-    root: Path, cell: Mapping[str, Any], stage: Mapping[str, Any]
+    root: Path,
+    cell: Mapping[str, Any],
+    stage: Mapping[str, Any],
+    ncu_identity: Mapping[str, str],
 ) -> dict[str, Any]:
     slug = str(cell["id"])
     baseline_csv = _campaign_file(root, stage.get("csv"), f"{slug}.ncu")
@@ -234,10 +316,13 @@ def _repeat_metrics(
     repeat_metadata = _campaign_file(
         root, repeat_dir + "/metadata.json", f"{slug}.ncu_repeat.metadata"
     )
+    repeat_report = _campaign_file(
+        root, repeat_dir + "/ncu-report.ncu-rep", f"{slug}.ncu_repeat.report"
+    )
     metadata = json.loads(repeat_metadata.read_text(encoding="utf-8"))
     if not isinstance(metadata, Mapping):
         raise ValueError(f"{slug}: repeated NCU metadata is malformed")
-    _validate_repeat_metadata(root, cell, stage, repeat_dir, metadata)
+    _validate_repeat_metadata(root, cell, stage, repeat_dir, metadata, ncu_identity)
     baseline_row = _ncu_row(baseline_csv)
     repeat_row = _ncu_row(repeat_csv)
     if any(name not in repeat_row for name in METRICS):
@@ -256,6 +341,7 @@ def _repeat_metrics(
         "stable_within_five_percent": max_relative <= 0.05,
         "baseline_csv": {"path": _label(baseline_csv), "sha256": _sha256(baseline_csv)},
         "repeat_csv": {"path": _label(repeat_csv), "sha256": _sha256(repeat_csv)},
+        "repeat_report": {"path": _label(repeat_report), "sha256": _sha256(repeat_report)},
         "repeat_metadata": {
             "path": _label(repeat_metadata),
             "sha256": _sha256(repeat_metadata),
@@ -403,6 +489,14 @@ def analyze(manifest_path: Path, output_path: Path) -> int:
     document = json.loads(manifest_path.read_text(encoding="utf-8"))
     if not isinstance(document, Mapping) or document.get("schema_version") != "sm86.live.campaign.v2":
         raise ValueError("unsupported campaign manifest")
+    declared_ncu = document.get("ncu_identity")
+    if not isinstance(declared_ncu, Mapping) or any(
+        declared_ncu.get(key) != value for key, value in TRUSTED_NCU_IDENTITY.items()
+    ):
+        raise ValueError("manifest NCU identity is not the trusted toolchain")
+    ncu_path = Path(TRUSTED_NCU_IDENTITY["path"])
+    if not ncu_path.is_file() or _sha256(ncu_path) != TRUSTED_NCU_IDENTITY["sha256"]:
+        raise ValueError("trusted NCU executable identity cannot be verified")
     cells = document.get("cells")
     if not isinstance(cells, list) or len(cells) != 6:
         raise ValueError("closure analysis requires six cohort cells")
@@ -415,9 +509,17 @@ def analyze(manifest_path: Path, output_path: Path) -> int:
         stages = cell.get("stages")
         if not isinstance(stages, Mapping):
             raise ValueError(f"{slug}: stages are missing")
-        live = _repeat_metrics(root, cell, stages["ncu"])
+        live = _repeat_metrics(root, cell, stages["ncu"], TRUSTED_NCU_IDENTITY)
         replay_one = _campaign_file(root, stages["simulator"]["outputs"][0], f"{slug}.replay")
         replay_two = _campaign_file(root, stages["simulator"]["outputs"][1], f"{slug}.replay_twin")
+        _validate_replay_binding(
+            root,
+            cell,
+            stages["nvbit"],
+            stages["static_control"],
+            stages["simulator"],
+            [stages["simulator"]["outputs"][0], stages["simulator"]["outputs"][1]],
+        )
         sim = _replay_summary(replay_one)
         if replay_one.read_bytes() != replay_two.read_bytes():
             raise ValueError(f"{slug}: simulator twins differ")

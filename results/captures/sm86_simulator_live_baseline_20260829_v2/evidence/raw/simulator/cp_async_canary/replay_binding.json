@@ -1,0 +1,54 @@
+{
+  "cell": "cp_async_canary",
+  "command": [
+    "sim/target/release/sim-run",
+    "--trace",
+    "results/captures/sm86_simulator_live_baseline_20260829_v2/evidence/raw/nvbit/cp_async_canary",
+    "--control",
+    "results/captures/sm86_simulator_live_baseline_20260829_v2/evidence/raw/static/cp_async_canary/control_bits.json",
+    "--arch-card",
+    "arch_profiles/cards/sm_86.json",
+    "--pchase-card",
+    "data/pchase/sm_86_static_card.json",
+    "--mode",
+    "l1-l2"
+  ],
+  "freshness": {
+    "mode": "content_bound",
+    "reason": "archive extraction may rewrite mtimes; input/output hashes and strict schema are authoritative",
+    "timestamp_authority": "not_used"
+  },
+  "inputs": {
+    "architecture_card": {
+      "path": "arch_profiles/cards/sm_86.json",
+      "sha256": "12c72f8b16ac369fe8ab877f39850bfc1e5cbb3b16d0b2d45a43b14c66ffe1da"
+    },
+    "control": {
+      "path": "evidence/raw/static/cp_async_canary/control_bits.json",
+      "sha256": "5c0eeab9035ea60d1a70018c59983eb36759e67f56adc3f7b6cda6cda010259d"
+    },
+    "pchase_card": {
+      "path": "data/pchase/sm_86_static_card.json",
+      "sha256": "e87d2e208f5326a8083d1a54799864953a62ed1fece1b628583cf8d5cafc581d"
+    },
+    "trace": {
+      "path": "evidence/raw/nvbit/cp_async_canary",
+      "sha256": "f7b3687600a10292a492c0bb894b96bcfe5502b9f5a82a0265023c46898bce40"
+    }
+  },
+  "outputs": [
+    {
+      "path": "evidence/raw/simulator/cp_async_canary/replay-1.json",
+      "sha256": "0fe08416424fb88d78c329658981f6211aa3e8003cb04354005f39c93e7041a8"
+    },
+    {
+      "path": "evidence/raw/simulator/cp_async_canary/replay-2.json",
+      "sha256": "0fe08416424fb88d78c329658981f6211aa3e8003cb04354005f39c93e7041a8"
+    }
+  ],
+  "schema_version": 1,
+  "simulator_binary": {
+    "path": "sim/target/release/sim-run",
+    "sha256": "6cb0d05f0d447c0cd6ee2e30353c0f1e89d464462458912478c826860f15f9a4"
+  }
+}

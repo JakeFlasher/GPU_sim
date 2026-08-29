@@ -738,6 +738,25 @@ def replay_pair_error(
     return None
 
 
+def direct_replay_schema_error(
+    path: Path, expectation: ReplayExpectation
+) -> str | None:
+    """Validate a replay's strict direct schema without filesystem mtimes.
+
+    Archive materialization may legitimately rewrite timestamps.  Callers
+    that use this helper must bind the replay bytes and every simulator input
+    by content hash before accepting the result.
+    """
+
+    if not path.is_file() or path.stat().st_size == 0:
+        return "result file is missing or empty"
+    try:
+        document = load_json_strict(path)
+    except (OSError, UnicodeDecodeError, ValueError, json.JSONDecodeError) as error:
+        return f"result is not strict JSON: {error}"
+    return _report_error(document, expectation)
+
+
 def load_replay_pair(
     first: Path,
     second: Path,

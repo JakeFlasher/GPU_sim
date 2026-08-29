@@ -1,0 +1,54 @@
+{
+  "cell": "flash_attn_fwd_bf16_sm80",
+  "command": [
+    "sim/target/release/sim-run",
+    "--trace",
+    "results/captures/sm86_simulator_live_baseline_20260829_v2/evidence/raw/nvbit/flash_attn_fwd_bf16_sm80",
+    "--control",
+    "results/captures/sm86_simulator_live_baseline_20260829_v2/evidence/raw/static/flash_attn_fwd_bf16_sm80/flash_attn_fwd_bf16_sm80.control_bits.json",
+    "--arch-card",
+    "arch_profiles/cards/sm_86.json",
+    "--pchase-card",
+    "data/pchase/sm_86_static_card.json",
+    "--mode",
+    "l1-l2"
+  ],
+  "freshness": {
+    "mode": "content_bound",
+    "reason": "archive extraction may rewrite mtimes; input/output hashes and strict schema are authoritative",
+    "timestamp_authority": "not_used"
+  },
+  "inputs": {
+    "architecture_card": {
+      "path": "arch_profiles/cards/sm_86.json",
+      "sha256": "12c72f8b16ac369fe8ab877f39850bfc1e5cbb3b16d0b2d45a43b14c66ffe1da"
+    },
+    "control": {
+      "path": "evidence/raw/static/flash_attn_fwd_bf16_sm80/flash_attn_fwd_bf16_sm80.control_bits.json",
+      "sha256": "4338d595723d3ac8d5e69d2db8e446f07a300008c66d495e1c80048ee53314bb"
+    },
+    "pchase_card": {
+      "path": "data/pchase/sm_86_static_card.json",
+      "sha256": "e87d2e208f5326a8083d1a54799864953a62ed1fece1b628583cf8d5cafc581d"
+    },
+    "trace": {
+      "path": "evidence/raw/nvbit/flash_attn_fwd_bf16_sm80",
+      "sha256": "e12125054e4a29675b24d13e37cad20274ed3f5188539e784b25597dfb02d684"
+    }
+  },
+  "outputs": [
+    {
+      "path": "evidence/raw/simulator/flash_attn_fwd_bf16_sm80/replay-1.json",
+      "sha256": "59b327ae59e64aeba7c4e8470a68699c32e9eeeb333894c314b66e03e3460c3e"
+    },
+    {
+      "path": "evidence/raw/simulator/flash_attn_fwd_bf16_sm80/replay-2.json",
+      "sha256": "59b327ae59e64aeba7c4e8470a68699c32e9eeeb333894c314b66e03e3460c3e"
+    }
+  ],
+  "schema_version": 1,
+  "simulator_binary": {
+    "path": "sim/target/release/sim-run",
+    "sha256": "6cb0d05f0d447c0cd6ee2e30353c0f1e89d464462458912478c826860f15f9a4"
+  }
+}

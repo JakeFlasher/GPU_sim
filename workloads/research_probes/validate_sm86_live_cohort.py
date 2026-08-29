@@ -40,6 +40,11 @@ _CURRENT_TIMEOUTS = {
     "static_control": 300,
     "simulator": 900,
 }
+_TRUSTED_NCU_IDENTITY = {
+    "path": "/usr/local/cuda-13.2/nsight-compute-2026.1.0/ncu",
+    "version": "2026.1.0.0",
+    "sha256": "a44ff2c735c4dcf66c78f3f430155805d6a0b1f74f26331f98ecec03bfbf3f1a",
+}
 
 _CORRECTNESS_INJECTION_VARIABLES = frozenset(
     {
@@ -121,6 +126,27 @@ def _sha256(path: Path) -> str:
     with path.open("rb") as stream:
         for chunk in iter(lambda: stream.read(1024 * 1024), b""):
             digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _tree_sha256(path: Path) -> str:
+    """Hash a directory's relative file names and bytes independent of mtimes."""
+
+    if path.is_file():
+        return _sha256(path)
+    if not path.is_dir():
+        raise ValueError(f"cannot hash missing input tree: {path}")
+    digest = hashlib.sha256()
+    files = sorted(item for item in path.rglob("*") if item.is_file())
+    if not files:
+        raise ValueError(f"input tree has no files: {path}")
+    for item in files:
+        relative = item.relative_to(path).as_posix().encode("utf-8")
+        payload_hash = _sha256(item).encode("ascii")
+        digest.update(len(relative).to_bytes(8, "big"))
+        digest.update(relative)
+        digest.update(len(payload_hash).to_bytes(8, "big"))
+        digest.update(payload_hash)
     return digest.hexdigest()
 
 
@@ -486,6 +512,81 @@ def _validate_nvbit_stage(
     return trace, stat, mapping_doc, execution
 
 
+def _validate_replay_binding(
+    root: Path,
+    cell_id: str,
+    simulator: Mapping[str, Any],
+    nvbit: Mapping[str, Any],
+    static: Mapping[str, Any],
+    trace: Path,
+    control: Path,
+    arch_card: Path,
+    pchase_card: Path,
+    outputs: list[str],
+) -> Mapping[str, Any]:
+    """Verify immutable replay/input identities without trusting timestamps."""
+
+    binding_relative = simulator.get("replay_binding")
+    if binding_relative != f"evidence/raw/simulator/{cell_id}/replay_binding.json":
+        raise ValueError(f"{cell_id}: replay binding path is not under the simulator cell")
+    binding_path = _assert_file(root, binding_relative, f"{cell_id}.replay_binding")
+    binding_hash = simulator.get("replay_binding_sha256")
+    if not isinstance(binding_hash, str) or len(binding_hash) != 64 or _sha256(binding_path) != binding_hash:
+        raise ValueError(f"{cell_id}: replay binding hash does not match artifact")
+    binding = json.load(open(binding_path))
+    if not isinstance(binding, Mapping) or binding.get("schema_version") != 1 or binding.get("cell") != cell_id:
+        raise ValueError(f"{cell_id}: replay binding schema or cell identity is malformed")
+    if binding.get("command") != simulator.get("argv"):
+        raise ValueError(f"{cell_id}: replay binding command differs from manifest")
+    freshness = binding.get("freshness")
+    if not isinstance(freshness, Mapping) or freshness.get("mode") != "content_bound":
+        raise ValueError(f"{cell_id}: replay binding freshness mode is not content_bound")
+    simulator_binary = _assert_file(REPO_ROOT, simulator.get("binary_path"), f"{cell_id}.simulator_binary")
+    if simulator.get("binary_sha256") != _sha256(simulator_binary):
+        raise ValueError(f"{cell_id}: replay binding simulator binary hash differs")
+    binary_record = binding.get("simulator_binary")
+    if not isinstance(binary_record, Mapping) or binary_record.get("path") != simulator.get("binary_path") or binary_record.get("sha256") != simulator.get("binary_sha256"):
+        raise ValueError(f"{cell_id}: replay binding simulator identity differs")
+    inputs = binding.get("inputs")
+    if not isinstance(inputs, Mapping):
+        raise ValueError(f"{cell_id}: replay binding input identities are missing")
+    expected_inputs = {
+        "trace": (nvbit.get("output"), _tree_sha256(trace)),
+        "control": (static.get("control"), _sha256(control)),
+        "architecture_card": ("arch_profiles/cards/sm_86.json", _sha256(arch_card)),
+        "pchase_card": ("data/pchase/sm_86_static_card.json", _sha256(pchase_card)),
+    }
+    for name, (expected_path, expected_hash) in expected_inputs.items():
+        record = inputs.get(name)
+        if not isinstance(record, Mapping) or record.get("path") != expected_path or record.get("sha256") != expected_hash:
+            raise ValueError(f"{cell_id}: replay binding input identity differs for {name}")
+    output_records = binding.get("outputs")
+    if not isinstance(output_records, list) or len(output_records) != 2:
+        raise ValueError(f"{cell_id}: replay binding output identities are missing")
+    for index, (record, expected_path) in enumerate(zip(output_records, outputs)):
+        if not isinstance(record, Mapping) or record.get("path") != expected_path:
+            raise ValueError(f"{cell_id}: replay binding output path differs at index {index}")
+        output_path = _assert_file(root, expected_path, f"{cell_id}.replay-{index + 1}")
+        if record.get("sha256") != _sha256(output_path):
+            raise ValueError(f"{cell_id}: replay binding output hash differs at index {index}")
+    return binding
+
+
+def _bound_replay_pair_error(
+    first: Path, second: Path, expectation: Any
+) -> str | None:
+    for path in (first, second):
+        error = replay_resume.direct_replay_schema_error(path, expectation)
+        if error is not None:
+            return f"{path}: {error}"
+    try:
+        if first.read_bytes() != second.read_bytes():
+            return "replay pair is not byte-identical"
+    except OSError as error:
+        return f"could not read replay pair: {error}"
+    return None
+
+
 def _validate_host_preflight(
     root: Path,
     host_record_path: Path,
@@ -525,6 +626,7 @@ def _validate_host_preflight(
         "tracer_dso_sha256": repository.get("tracer_dso_sha256"),
         "architecture_card_sha256": repository.get("architecture_card_sha256"),
         "pchase_card_sha256": repository.get("pchase_card_sha256"),
+        "ncu_sha256": repository.get("ncu_sha256"),
     }
     for key, expected in expected_hashes.items():
         if not isinstance(expected, str) or binding.get(key) != expected:
@@ -577,7 +679,7 @@ def _validate_host_preflight(
         "cargo_version": ["cargo", "--version"],
         "sudo_noninteractive": ["sudo", "-n", "true"],
         "git_revision": ["git", "rev-parse", "HEAD"],
-        "input_hashes": ["sha256sum", "sim/target/release/sim-run", "tools/nvbit_tracer/tracer_tool/tracer_tool.so", "arch_profiles/cards/sm_86.json", "data/pchase/sm_86_static_card.json"],
+        "input_hashes": ["sha256sum", "sim/target/release/sim-run", "tools/nvbit_tracer/tracer_tool/tracer_tool.so", "arch_profiles/cards/sm_86.json", "data/pchase/sm_86_static_card.json", "/usr/local/cuda-13.2/nsight-compute-2026.1.0/ncu"],
     }
     allowed_nonzero = {"sudo_noninteractive"}
     seen: set[str] = set()
@@ -628,7 +730,7 @@ def _validate_host_preflight(
         "ncu_version": ["Version 2026.1.0.0"],
         "rust_version": ["rustc 1.96.1"],
         "cargo_version": ["cargo 1.96.1"],
-        "input_hashes": [binding.get("simulator_binary_sha256"), binding.get("tracer_dso_sha256"), binding.get("architecture_card_sha256"), binding.get("pchase_card_sha256")],
+        "input_hashes": [binding.get("simulator_binary_sha256"), binding.get("tracer_dso_sha256"), binding.get("architecture_card_sha256"), binding.get("pchase_card_sha256"), binding.get("ncu_sha256")],
     }
     for name, markers in expected_markers.items():
         if any(not isinstance(marker, str) or marker not in output_text.get(name, "") for marker in markers):
@@ -640,6 +742,7 @@ def _validate_cell(
     cell: Mapping[str, Any],
     defaults: Mapping[str, Any],
     tracer_sha256: str | None = None,
+    ncu_identity: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     cell_id = cell.get("id")
     if not isinstance(cell_id, str) or not cell_id:
@@ -688,6 +791,8 @@ def _validate_cell(
     ncu_argv = ncu.get("argv")
     if not isinstance(ncu_argv, list) or binary.get("path") not in ncu_argv:
         raise ValueError(f"{cell_id}: NCU argv is not bound to the cell binary")
+    if not isinstance(ncu_identity, Mapping) or ncu.get("tool_path") != ncu_identity.get("path"):
+        raise ValueError(f"{cell_id}: NCU stage is not bound to the trusted toolchain")
     ncu_csv = _assert_file(
         root,
         ncu["csv"],
@@ -769,6 +874,8 @@ def _validate_cell(
     outputs = simulator.get("outputs")
     if not isinstance(outputs, list) or len(outputs) != 2:
         raise ValueError(f"{cell_id}: simulator twin outputs are missing")
+    if any(not isinstance(path, str) for path in outputs):
+        raise ValueError(f"{cell_id}: simulator replay output paths are malformed")
     first = _assert_file(root, outputs[0], f"{cell_id}/simulator.replay-1")
     second = _assert_file(root, outputs[1], f"{cell_id}/simulator.replay-2")
     expected_output_prefix = f"evidence/raw/simulator/{cell_id}/"
@@ -852,19 +959,28 @@ def _validate_cell(
         raise ValueError(f"{cell_id}: simulator binary hash differs from current sim-run")
     if simulator_argv[0] != simulator_path:
         raise ValueError(f"{cell_id}: simulator argv is not bound to current sim-run")
-    dependencies = [
-        simulator_binary,
-        control,
-        _assert_file(REPO_ROOT, "arch_profiles/cards/sm_86.json", f"{cell_id}.arch_card"),
-        _assert_file(REPO_ROOT, "data/pchase/sm_86_static_card.json", f"{cell_id}.pchase_card"),
+    arch_card = _assert_file(
+        REPO_ROOT, "arch_profiles/cards/sm_86.json", f"{cell_id}.arch_card"
+    )
+    pchase_card = _assert_file(
+        REPO_ROOT, "data/pchase/sm_86_static_card.json", f"{cell_id}.pchase_card"
+    )
+    _validate_replay_binding(
+        root,
+        cell_id,
+        simulator,
+        nvbit,
+        static,
         trace,
-    ]
+        control,
+        arch_card,
+        pchase_card,
+        outputs,
+    )
     expectation = replay_resume.ReplayExpectation(
         launches=expected_launches, carded_dram=False
     )
-    replay_error = replay_resume.replay_pair_error(
-        first, second, dependencies, expectation
-    )
+    replay_error = _bound_replay_pair_error(first, second, expectation)
     if replay_error is not None:
         raise ValueError(f"{cell_id}: strict direct replay validation failed: {replay_error}")
     semantic_rows, semantic_errors = validate_replay_document(
@@ -920,6 +1036,16 @@ def validate(manifest_path: Path, report_path: Path | None) -> int:
     tools = document.get("tools")
     if not isinstance(tools, Mapping):
         raise ValueError("manifest toolchain record is missing")
+    ncu_identity = document.get("ncu_identity")
+    if not isinstance(ncu_identity, Mapping) or any(
+        ncu_identity.get(key) != value for key, value in _TRUSTED_NCU_IDENTITY.items()
+    ):
+        raise ValueError("manifest NCU identity is not the trusted toolchain")
+    ncu_executable = Path(_TRUSTED_NCU_IDENTITY["path"])
+    if not ncu_executable.is_file():
+        raise ValueError("trusted NCU executable is missing")
+    if _sha256(ncu_executable) != _TRUSTED_NCU_IDENTITY["sha256"]:
+        raise ValueError("manifest NCU executable hash does not match the trusted toolchain")
     host_record_path = _assert_file(root, host.get("preflight_record"), "host.preflight_record")
     _validate_host_preflight(root, host_record_path, repository, host, tools)
     bundle = document.get("evidence_bundle")
@@ -1012,6 +1138,7 @@ def validate(manifest_path: Path, report_path: Path | None) -> int:
             cell,
             timeouts,
             repository.get("tracer_dso_sha256"),
+            ncu_identity,
         )
         for cell in cells
     ]

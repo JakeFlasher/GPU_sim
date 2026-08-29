@@ -12,6 +12,7 @@
     "tracer_dso_sha256": "dda89ee6857058b3f6dc2a01d73a2dc926b876d8e343b7457c779efd82fed007",
     "architecture_card_sha256": "12c72f8b16ac369fe8ab877f39850bfc1e5cbb3b16d0b2d45a43b14c66ffe1da",
     "pchase_card_sha256": "e87d2e208f5326a8083d1a54799864953a62ed1fece1b628583cf8d5cafc581d",
+    "ncu_sha256": "a44ff2c735c4dcf66c78f3f430155805d6a0b1f74f26331f98ecec03bfbf3f1a",
     "relation": "The captured live binaries, tracer, simulator, and cards are identified by these hashes. candidate_revision is the immutable source revision used by the host commands; correction_revision records the later validator/closure-evidence correction and does not claim a new GPU capture."
   },
   "commands": [
@@ -82,7 +83,7 @@
     },
     {
       "name": "input_hashes",
-      "argv": ["sha256sum", "sim/target/release/sim-run", "tools/nvbit_tracer/tracer_tool/tracer_tool.so", "arch_profiles/cards/sm_86.json", "data/pchase/sm_86_static_card.json"],
+      "argv": ["sha256sum", "sim/target/release/sim-run", "tools/nvbit_tracer/tracer_tool/tracer_tool.so", "arch_profiles/cards/sm_86.json", "data/pchase/sm_86_static_card.json", "/usr/local/cuda-13.2/nsight-compute-2026.1.0/ncu"],
       "timeout_seconds": 30,
       "return_code": 0,
       "output_path": "evidence/host_preflight/input_hashes.stdout.txt",
