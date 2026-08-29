@@ -314,6 +314,9 @@ def validate_replay_document(
         global_traffic_applicable = any(
             value != 0
             for value in (
+                expected.global_load_instructions,
+                expected.global_store_instructions,
+                expected.global_atomic_instructions,
                 expected.global_load_sectors,
                 expected.global_store_sectors,
                 expected.global_atomic_sectors,

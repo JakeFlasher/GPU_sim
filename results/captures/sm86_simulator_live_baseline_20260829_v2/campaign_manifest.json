@@ -59,7 +59,7 @@
     "size_bytes": 522602,
     "member_root": "raw/",
     "contains": ["correctness", "ncu", "nvbit", "static", "simulator", "stage stdout/stderr and metadata"],
-    "materialization": "The same raw/ tree is present in this alpha worktree for immediate inspection. From a clean checkout, extract with: zstd -dc evidence/raw_cohort.tar.zst | tar -xf -"
+    "materialization": "The same evidence/raw/ tree is present in this alpha worktree for immediate inspection. From the campaign directory in a clean checkout, run: zstd -dc evidence/raw_cohort.tar.zst | tar --touch -xf - -C evidence; then find evidence/raw/simulator -type f -name 'replay-*.json' -exec touch {} +. The second step advances only materialized replay timestamps; hashes still bind the immutable payloads."
   },
   "command_normalization": {
     "cwd": ".",

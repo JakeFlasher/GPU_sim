@@ -139,21 +139,109 @@ def _replay_summary(path: Path) -> dict[str, Any]:
     }
 
 
-def _repeat_metrics(root: Path, slug: str, stage: Mapping[str, Any]) -> dict[str, Any]:
-    baseline_csv = _campaign_file(root, stage.get("csv"), f"{slug}.ncu")
-    repeat_csv = _campaign_file(
-        root, f"evidence/raw/ncu_repeat/rep-2/{slug}/ncu.csv", f"{slug}.ncu_repeat"
-    )
-    repeat_metadata = _campaign_file(
-        root,
-        f"evidence/raw/ncu_repeat/rep-2/{slug}/metadata.json",
-        f"{slug}.ncu_repeat.metadata",
-    )
-    metadata = json.loads(repeat_metadata.read_text(encoding="utf-8"))
+def _campaign_token_matches(token: object, relative: str, root: Path) -> bool:
+    if not isinstance(token, str):
+        return False
+    candidates = {
+        relative,
+        "results/captures/sm86_simulator_live_baseline_20260829_v2/" + relative,
+        str((root / relative).resolve()),
+    }
+    return token in candidates
+
+
+def _repeat_command_contract(
+    root: Path,
+    cell: Mapping[str, Any],
+    stage: Mapping[str, Any],
+    repeat_dir: str,
+) -> tuple[list[str], list[str]]:
+    """Return expected NCU argv and the indices whose paths may be normalized."""
+
+    source = stage.get("argv")
+    tool = stage.get("tool_path")
+    if not isinstance(source, list) or any(not isinstance(item, str) for item in source):
+        raise ValueError(f"{cell.get('id')}: canonical NCU argv is malformed")
+    if not isinstance(tool, str) or not tool:
+        raise ValueError(f"{cell.get('id')}: canonical NCU tool path is missing")
+    try:
+        output_index = source.index("--output")
+        separator = source.index("--", output_index)
+    except ValueError as exc:
+        raise ValueError(f"{cell.get('id')}: canonical NCU argv lacks output/target separator") from exc
+    if output_index + 1 >= separator:
+        raise ValueError(f"{cell.get('id')}: canonical NCU output path is malformed")
+    target = source[separator + 1 :]
+    if not target or target[0] != cell.get("binary", {}).get("path"):
+        raise ValueError(f"{cell.get('id')}: canonical NCU target is not the cell binary")
+    def option_value(name: str) -> str | None:
+        try:
+            index = source.index(name)
+        except ValueError:
+            return None
+        if index + 1 >= separator:
+            raise ValueError(f"{cell.get('id')}: canonical NCU option {name} has no value")
+        return source[index + 1]
+    command = [tool, "--force-overwrite", "--export", repeat_dir + "/ncu-report"]
+    for name in ("--launch-skip", "--launch-count", "--replay-mode", "--clock-control", "--metrics"):
+        value = option_value(name)
+        if value is not None:
+            command.extend((name, value))
+    command.extend(target)
+    return command, target
+
+
+def _validate_repeat_metadata(
+    root: Path,
+    cell: Mapping[str, Any],
+    stage: Mapping[str, Any],
+    repeat_dir: str,
+    metadata: Mapping[str, Any],
+) -> None:
+    slug = str(cell["id"])
+    expected_command, target = _repeat_command_contract(root, cell, stage, repeat_dir)
+    command = metadata.get("command")
+    if not isinstance(command, list) or any(not isinstance(item, str) for item in command):
+        raise ValueError(f"{slug}: repeated NCU metadata command is missing")
+    if len(command) != len(expected_command):
+        raise ValueError(f"{slug}: repeated NCU command length differs from the cell contract")
+    for index, (actual, expected) in enumerate(zip(command, expected_command)):
+        if index == 3:  # --export value
+            if not _campaign_token_matches(actual, expected, root):
+                raise ValueError(f"{slug}: repeated NCU export path is misbound")
+        elif actual != expected:
+            raise ValueError(f"{slug}: repeated NCU command differs at argv[{index}]")
     if metadata.get("return_code") != 0:
         raise ValueError(f"{slug}: repeated NCU command did not exit zero")
+    expected_csv = repeat_dir + "/ncu.csv"
+    expected_report = repeat_dir + "/ncu-report.ncu-rep"
+    for key, expected in (("csv", expected_csv), ("report", expected_report)):
+        if not _campaign_token_matches(metadata.get(key), expected, root):
+            raise ValueError(f"{slug}: repeated NCU metadata {key} path is misbound")
+    if target[0] != cell.get("binary", {}).get("path"):
+        raise ValueError(f"{slug}: repeated NCU target binary differs")
+
+
+def _repeat_metrics(
+    root: Path, cell: Mapping[str, Any], stage: Mapping[str, Any]
+) -> dict[str, Any]:
+    slug = str(cell["id"])
+    baseline_csv = _campaign_file(root, stage.get("csv"), f"{slug}.ncu")
+    repeat_dir = f"evidence/raw/ncu_repeat/rep-2/{slug}"
+    repeat_csv = _campaign_file(
+        root, repeat_dir + "/ncu.csv", f"{slug}.ncu_repeat"
+    )
+    repeat_metadata = _campaign_file(
+        root, repeat_dir + "/metadata.json", f"{slug}.ncu_repeat.metadata"
+    )
+    metadata = json.loads(repeat_metadata.read_text(encoding="utf-8"))
+    if not isinstance(metadata, Mapping):
+        raise ValueError(f"{slug}: repeated NCU metadata is malformed")
+    _validate_repeat_metadata(root, cell, stage, repeat_dir, metadata)
     baseline_row = _ncu_row(baseline_csv)
     repeat_row = _ncu_row(repeat_csv)
+    if any(name not in repeat_row for name in METRICS):
+        raise ValueError(f"{slug}: repeated NCU CSV does not contain the canonical metric set")
     baseline = {name: _metric(baseline_row, name) for name in METRICS}
     repeat = {name: _metric(repeat_row, name) for name in METRICS}
     deltas = {name: repeat[name] - baseline[name] for name in METRICS}
@@ -174,6 +262,7 @@ def _repeat_metrics(root: Path, slug: str, stage: Mapping[str, Any]) -> dict[str
             "argv": metadata.get("command"),
             "started_at": metadata.get("started_at"),
             "finished_at": metadata.get("finished_at"),
+            "contract_validated": True,
         },
     }
 
@@ -326,7 +415,7 @@ def analyze(manifest_path: Path, output_path: Path) -> int:
         stages = cell.get("stages")
         if not isinstance(stages, Mapping):
             raise ValueError(f"{slug}: stages are missing")
-        live = _repeat_metrics(root, slug, stages["ncu"])
+        live = _repeat_metrics(root, cell, stages["ncu"])
         replay_one = _campaign_file(root, stages["simulator"]["outputs"][0], f"{slug}.replay")
         replay_two = _campaign_file(root, stages["simulator"]["outputs"][1], f"{slug}.replay_twin")
         sim = _replay_summary(replay_one)

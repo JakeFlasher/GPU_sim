@@ -43,8 +43,10 @@ _CURRENT_TIMEOUTS = {
 
 _CORRECTNESS_INJECTION_VARIABLES = frozenset(
     {
+        "BASH_ENV",
         "CUDA_INJECTION32_PATH",
         "CUDA_INJECTION64_PATH",
+        "CUDA_VISIBLE_DEVICES",
         "DYNAMIC_KERNEL_LIMIT_END",
         "DYNAMIC_KERNEL_LIMIT_START",
         "ENHANCED_TRACER_MAX_PARSER_INPUT_KB",
@@ -60,6 +62,7 @@ _CORRECTNESS_INJECTION_VARIABLES = frozenset(
         "TOOL_VERBOSE",
         "TRACES_FOLDER",
         "USER_DEFINED_FOLDERS",
+        "NVBIT_TRACE_FOLDER",
     }
 )
 _EXPECTED_COHORT_IDS = frozenset(
@@ -276,6 +279,11 @@ def _validate_correctness_stage(
     effective_environment = environment_doc.get("environment")
     if not isinstance(effective_environment, Mapping):
         raise ValueError(f"{cell_id}: effective correctness environment is missing")
+    expected_environment_keys = {"HOME", "LANG", "LC_ALL", "PATH", "LD_LIBRARY_PATH"}
+    if set(effective_environment) != expected_environment_keys:
+        raise ValueError(f"{cell_id}: correctness environment is not the exact minimal environment")
+    if effective_environment.get("LANG") != "C" or effective_environment.get("LC_ALL") != "C":
+        raise ValueError(f"{cell_id}: correctness locale is not deterministic")
     leaked = sorted(_CORRECTNESS_INJECTION_VARIABLES.intersection(effective_environment))
     if leaked:
         raise ValueError(f"{cell_id}: profiler variables leaked into correctness environment: {leaked}")
@@ -710,6 +718,11 @@ def _validate_cell(
 
     static = stages["static_control"]
     control = _assert_file(root, static["control"], f"{cell_id}/static.control")
+    control_hash = static.get("control_sha256")
+    if not isinstance(control_hash, str) or len(control_hash) != 64:
+        raise ValueError(f"{cell_id}: static control hash is missing")
+    if _sha256(control) != control_hash:
+        raise ValueError(f"{cell_id}: static control hash does not match artifact")
     control_doc = json.load(open(control))
     decoded = sum(
         1
@@ -890,6 +903,17 @@ def validate(manifest_path: Path, report_path: Path | None) -> int:
     )
     if _sha256(simulator_binary) != simulator_record.get("sha256"):
         raise ValueError("manifest simulator binary SHA-256 does not match")
+    card_paths = {
+        "architecture_card_sha256": "arch_profiles/cards/sm_86.json",
+        "pchase_card_sha256": "data/pchase/sm_86_static_card.json",
+    }
+    for hash_key, card_path in card_paths.items():
+        expected_hash = repository.get(hash_key)
+        if not isinstance(expected_hash, str) or len(expected_hash) != 64:
+            raise ValueError(f"manifest {hash_key} is missing")
+        card = _assert_file(REPO_ROOT, card_path, f"repository.{hash_key}")
+        if _sha256(card) != expected_hash:
+            raise ValueError(f"manifest {hash_key} does not match the current card")
     host = document.get("host")
     if not isinstance(host, Mapping):
         raise ValueError("manifest host preflight record is missing")

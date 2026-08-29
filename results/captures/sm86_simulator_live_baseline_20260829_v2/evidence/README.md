@@ -7,11 +7,17 @@ sidecars/manifests/stats/per-CTA protobuf payloads, static SASS/control dumps,
 and the two simulator replay outputs for each cell. The archive SHA-256 is recorded in
 `../campaign_manifest.json`.
 
-To materialize the paths named by that manifest in a clean checkout:
+From the campaign directory, materialize the paths named by that manifest in a
+clean checkout:
 
 ```bash
-zstd -dc evidence/raw_cohort.tar.zst | tar -xf -
+zstd -dc evidence/raw_cohort.tar.zst | tar --touch -xf - -C evidence
+find evidence/raw/simulator -type f -name 'replay-*.json' -exec touch {} +
 ```
+
+The second line advances only the materialized replay timestamps so the
+freshness helper can distinguish an extracted candidate from older checkout
+inputs; content and input identities remain hash-bound.
 
 The archive is evidence retention, not simulator input. NCU values remain
 comparison-only observations.

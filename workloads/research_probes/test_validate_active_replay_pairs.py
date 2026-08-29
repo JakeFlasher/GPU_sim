@@ -240,3 +240,55 @@ def test_global_memory_diagnostic_is_required_when_trace_has_global_traffic(
         document, tmp_path, label="global-fixture"
     )
     assert any("global_memory_issue diagnostic is required" in error for error in errors)
+
+
+def test_global_instruction_without_sectors_still_requires_diagnostic(
+    monkeypatch, tmp_path: Path
+) -> None:
+    expected = LaunchTraceInvariants(
+        device_id=0,
+        stream_id=0,
+        kernel_id=1,
+        blocks=2,
+        warps=2,
+        instructions=2,
+        memory_instructions=0,
+        load_instructions=0,
+        store_instructions=0,
+        atomic_instructions=0,
+        async_copy_instructions=0,
+        global_load_instructions=0,
+        global_store_instructions=1,
+        global_atomic_instructions=0,
+        global_load_sectors=0,
+        global_store_sectors=0,
+        global_atomic_sectors=0,
+        async_source_sectors=0,
+        local_load_sectors=0,
+        local_store_sectors=0,
+        shared_sectors=0,
+    )
+    monkeypatch.setattr(
+        SEMANTIC,
+        "derive_trace_invariants",
+        lambda _path: TraceInvariants(trace_dir=str(tmp_path), launches=(expected,)),
+    )
+    expectation = VALIDATOR.REPLAY.ReplayExpectation(
+        launches=(REPLAY_HELPERS._launch(),), carded_dram=False
+    )
+    document = REPLAY_HELPERS._report(expectation)
+    document["launches"][0]["timing"]["readiness"]["global_memory_issue"] = {
+        "load_instructions": 0,
+        "store_instructions": 1,
+        "atomic_instructions": 0,
+        "reduction_instructions": 0,
+        "load_sectors": 0,
+        "store_sectors": 0,
+        "atomic_sectors": 0,
+        "reduction_sectors": 0,
+    }
+    del document["launches"][0]["timing"]["readiness"]["global_memory_issue"]
+    _rows, errors = SEMANTIC.validate_replay_document(
+        document, tmp_path, label="global-instruction-fixture"
+    )
+    assert any("global_memory_issue diagnostic is required" in error for error in errors)
