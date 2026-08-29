@@ -4,7 +4,7 @@
   "captured_at_utc": "2026-08-29T11:32:56Z",
   "repository": {
     "capture_revision": "b915ec6b3df2973e87119c63e438c8bb5f77be44",
-    "handoff_revision": "d191f0882b92a863852324aa45f544e2f5fb51c3",
+    "handoff_revision": "c2635d916d45e7dca105de09e4a2ff20695cfc35",
     "branch": "GPUSim_main",
     "simulator_binary": {
       "path": "sim/target/release/sim-run",
