@@ -1,4 +1,23 @@
 {
+  "acceptance_criteria": {
+    "AC-3": {
+      "evidence": [
+        "strict direct replay schema validation",
+        "trace-derived instruction and traffic conservation",
+        "byte-identical simulator twins",
+        "typed completion frontiers and multi-frontier gaps",
+        "fresh retained-corpus validation"
+      ],
+      "status": "pass"
+    },
+    "AC-4": {
+      "evidence": "repeat-stable live observations and typed simulator tails do not isolate one architecture-local latency",
+      "mode": "falsified_no_go",
+      "next_discriminator": "Run the matched store-free/barrier-free async-source discriminator with an independent retirement/frontier observable before changing simulator timing state.",
+      "selected_diagnostic": "dirty_writeback_coherence_retirement",
+      "status": "pass"
+    }
+  },
   "analysis": {
     "command": [
       ".venv/bin/python",
@@ -11,20 +30,20 @@
     "decision": "no-go",
     "held_out_discriminator": "not_run; the next pair is intentionally held out to avoid selecting a timing seam from the scored cohort.",
     "input_validation": {
+      "aggregate_score_used": false,
       "comparable_rows": 5,
       "decision_eligible": true,
+      "frontiers_remain_independent": true,
       "repeat_stable_rows": 6,
       "required_diagnostic_rows": 6,
-      "residual_max_cycles": 3867,
-      "residual_min_cycles": 1650,
-      "residual_score_cycles": 42468,
       "retirement_tail_rows": 5,
       "rows": 6,
       "selection_dimensions": [
         "sm_completion_gap_cycles",
         "gpc_completion_gap_cycles",
         "gpc_launch_envelope_cycles"
-      ]
+      ],
+      "selection_rule": "mechanism_local_typed_tail_precedence"
     },
     "manifest": {
       "campaign_id": "sm86_simulator_live_baseline_20260829_v2",
@@ -37,9 +56,27 @@
     "repeatability_basis": "Two independent application-replay NCU captures per cell; simulator twins are byte-identical.",
     "selected_diagnostic": "dirty_writeback_coherence_retirement"
   },
-  "candidate_ranking": [
+  "candidate_evidence": [
     {
       "candidate": "dirty_writeback_coherence_retirement",
+      "evidence_basis": {
+        "aggregate_score_used": false,
+        "frontier_dimensions": [
+          "sm_completion_gap_cycles",
+          "gpc_completion_gap_cycles",
+          "gpc_launch_envelope_cycles"
+        ],
+        "frontiers_remain_independent": true,
+        "independent_live_observable": false,
+        "typed_tail_coverage": {
+          "denominator": 5,
+          "numerator": 5
+        },
+        "typed_tail_flags": [
+          "dirty_writeback",
+          "coherence"
+        ]
+      },
       "evidence_cells": [
         "gemm_hmma_bf16_sm80",
         "gemm_hmma_fp16_sm80",
@@ -47,12 +84,22 @@
         "gemm_sparse_2to4_bf16_sm80",
         "flash_attn_fwd_bf16_sm80"
       ],
-      "reason": "Typed dirty-writeback/coherence tails occur in 5/5 comparable rows; the summed repeat-stable residual is 42468 across the SM-completion, GPC-completion, and GPC-launch-envelope dimensions; a scalar offset cannot separate retirement from launch or async/barrier behavior.",
+      "reason": "Typed dirty-writeback/coherence tails occur in 5/5 comparable rows.  The mechanism-local rule gives precedence to a typed retirement-tail witness that spans the independent SM-completion, GPC-completion, and GPC-launch-envelope frontiers; no scalar or cross-dimension score is used, and no independent live observable separates retirement from launch or async/barrier behavior.",
       "selection": "next_discriminator",
-      "selection_score": 42468
+      "selection_rule": "mechanism_local_typed_tail_precedence"
     },
     {
       "candidate": "async_destination_service",
+      "evidence_basis": {
+        "aggregate_score_used": false,
+        "frontier_dimensions": [
+          "sm_completion_gap_cycles",
+          "gpc_completion_gap_cycles",
+          "gpc_launch_envelope_cycles"
+        ],
+        "frontiers_remain_independent": true,
+        "independent_live_observable": false
+      },
       "evidence_cells": [
         "cp_async_canary",
         "gemm_hmma_bf16_sm80",
@@ -62,10 +109,20 @@
       ],
       "reason": "A modeled readiness cause is present, but no independent silicon observable isolates it from retirement tails.",
       "selection": "candidate_not_admitted",
-      "selection_score": 5
+      "selection_rule": "mechanism_local_typed_tail_precedence"
     },
     {
       "candidate": "control_and_barrier_readiness",
+      "evidence_basis": {
+        "aggregate_score_used": false,
+        "frontier_dimensions": [
+          "sm_completion_gap_cycles",
+          "gpc_completion_gap_cycles",
+          "gpc_launch_envelope_cycles"
+        ],
+        "frontiers_remain_independent": true,
+        "independent_live_observable": false
+      },
       "evidence_cells": [
         "cp_async_canary",
         "gemm_hmma_bf16_sm80",
@@ -76,10 +133,20 @@
       ],
       "reason": "Readiness counters are modeled diagnostics, not an independent live timing label.",
       "selection": "candidate_not_admitted",
-      "selection_score": 6
+      "selection_rule": "mechanism_local_typed_tail_precedence"
     },
     {
       "candidate": "launch_envelope",
+      "evidence_basis": {
+        "aggregate_score_used": false,
+        "frontier_dimensions": [
+          "sm_completion_gap_cycles",
+          "gpc_completion_gap_cycles",
+          "gpc_launch_envelope_cycles"
+        ],
+        "frontiers_remain_independent": true,
+        "independent_live_observable": false
+      },
       "evidence_cells": [
         "cp_async_canary",
         "gemm_hmma_bf16_sm80",
@@ -90,7 +157,7 @@
       ],
       "reason": "GPC elapsed includes launch work not represented by the direct event frontier; it is not a simulator-local latency.",
       "selection": "candidate_not_admitted",
-      "selection_score": 6
+      "selection_rule": "mechanism_local_typed_tail_precedence"
     }
   ],
   "decision": {
@@ -102,9 +169,10 @@
     ],
     "decision": "no-go",
     "next_action": "Run the matched store-free/barrier-free async-source discriminator with an independent retirement/frontier observable before changing simulator timing state.",
-    "reason": "Live residuals are repeat-stable across 6 rows, while the simulator reports dirty-writeback/coherence tails in every comparable row (5/5); the multi-frontier selection vector includes SM-active completion, GPC completion, and launch-envelope gaps, but the observations do not identify one architecture-local latency.",
-    "seam": "cycle scalar completion/retirement mapping",
-    "selected_diagnostic": "dirty_writeback_coherence_retirement"
+    "reason": "Live residuals are repeat-stable across 6 rows, while the simulator reports dirty-writeback/coherence tails in every comparable row (5/5); the multi-frontier selection vector includes SM-active completion, GPC completion, and launch-envelope gaps and is retained component-wise.  The typed-tail witness is selected by mechanism-local precedence, but the observations do not identify one architecture-local latency.",
+    "seam": "completion/retirement frontier mapping",
+    "selected_diagnostic": "dirty_writeback_coherence_retirement",
+    "selection_rule": "mechanism_local_typed_tail_precedence"
   },
   "rows": [
     {
@@ -181,37 +249,55 @@
         "stable_within_five_percent": true
       },
       "residual": {
-        "baseline_cycles": 4437940,
+        "frontier_reference": {
+          "exact_cycles": null,
+          "kind": "lower_bound",
+          "lower_bound_cycles": 20522,
+          "reference_cycles": 20522
+        },
         "gpc_elapsed_gaps": {
           "baseline_launch_envelope_cycles": 1594,
-          "baseline_vs_completion_lower_bound_cycles": 4439534,
+          "baseline_vs_completion_frontier_cycles": 4439534,
           "baseline_vs_last_issue_cycles": 4439534,
           "baseline_vs_last_modeled_event_cycles": 4439537,
           "repeat_2_launch_envelope_cycles": 1579,
-          "repeat_2_vs_completion_lower_bound_cycles": 4439509,
+          "repeat_2_vs_completion_frontier_cycles": 4439509,
           "repeat_2_vs_last_issue_cycles": 4439509,
           "repeat_2_vs_last_modeled_event_cycles": 4439512
         },
         "interpretable": false,
         "metric": "multi-frontier SM-active and GPC elapsed comparison",
-        "repeat_2_cycles": 4437930,
-        "repeat_delta_cycles": -10,
+        "selection_basis": {
+          "aggregate_score_used": false,
+          "eligible_for_selection": false,
+          "frontier_dimensions": [
+            "sm_completion_gap_cycles",
+            "gpc_completion_gap_cycles",
+            "gpc_launch_envelope_cycles"
+          ],
+          "independent_dimensions": true,
+          "mechanism_evidence": [],
+          "rule": "mechanism_local_typed_tail_precedence"
+        },
         "selection_vector": {
           "gpc_completion_gap_cycles": 4439534,
           "gpc_launch_envelope_cycles": 1594,
           "sm_completion_gap_cycles": 4437940
         },
         "sm_active_gaps": {
-          "baseline_vs_completion_lower_bound_cycles": 4437940,
+          "baseline_vs_completion_frontier_cycles": 4437940,
           "baseline_vs_last_issue_cycles": 4437940,
           "baseline_vs_last_modeled_event_cycles": 4437943,
-          "repeat_2_vs_completion_lower_bound_cycles": 4437930,
+          "repeat_2_vs_completion_frontier_cycles": 4437930,
           "repeat_2_vs_last_issue_cycles": 4437930,
           "repeat_2_vs_last_modeled_event_cycles": 4437933
         }
       },
       "simulator": {
+        "completion_cycles": null,
         "completion_frontier": {
+          "cycles": null,
+          "kind": "lower_bound",
           "lower_bound_cycles": 20522,
           "status": "incomplete_unmodeled_retirement_tails",
           "unmodeled_tails": {
@@ -221,6 +307,9 @@
             "reduction_read_modify_write": false
           }
         },
+        "completion_kind": "lower_bound",
+        "completion_lower_bound_cycles": 20522,
+        "completion_reference_cycles": 20522,
         "completion_status": "incomplete_unmodeled_retirement_tails",
         "instructions_issued": 9104,
         "last_issue_cycles": 20522,
@@ -239,6 +328,7 @@
           "reduction_read_modify_write": false
         },
         "terminal_lower_bound_cycles": 20522,
+        "terminal_modeled_event_cycles": 20522,
         "top_readiness_causes": [
           {
             "cause": "async_destination_sm_service",
@@ -331,39 +421,58 @@
         "stable_within_five_percent": true
       },
       "residual": {
-        "baseline_cycles": 2770,
+        "frontier_reference": {
+          "exact_cycles": null,
+          "kind": "lower_bound",
+          "lower_bound_cycles": 8915,
+          "reference_cycles": 8915
+        },
         "gpc_elapsed_gaps": {
           "baseline_launch_envelope_cycles": 1665,
-          "baseline_vs_completion_lower_bound_cycles": 4435,
+          "baseline_vs_completion_frontier_cycles": 4435,
           "baseline_vs_last_issue_cycles": 4435,
           "baseline_vs_last_modeled_event_cycles": 4438,
           "repeat_2_launch_envelope_cycles": 1756,
-          "repeat_2_vs_completion_lower_bound_cycles": 4586,
+          "repeat_2_vs_completion_frontier_cycles": 4586,
           "repeat_2_vs_last_issue_cycles": 4586,
           "repeat_2_vs_last_modeled_event_cycles": 4589
         },
         "interpretable": true,
         "metric": "multi-frontier SM-active and GPC elapsed comparison",
-        "rank_by_multi_frontier_score": 2,
-        "repeat_2_cycles": 2830,
-        "repeat_delta_cycles": 60,
-        "selection_score": 8870,
+        "selection_basis": {
+          "aggregate_score_used": false,
+          "eligible_for_selection": true,
+          "frontier_dimensions": [
+            "sm_completion_gap_cycles",
+            "gpc_completion_gap_cycles",
+            "gpc_launch_envelope_cycles"
+          ],
+          "independent_dimensions": true,
+          "mechanism_evidence": [
+            "dirty_writeback",
+            "coherence"
+          ],
+          "rule": "mechanism_local_typed_tail_precedence"
+        },
         "selection_vector": {
           "gpc_completion_gap_cycles": 4435,
           "gpc_launch_envelope_cycles": 1665,
           "sm_completion_gap_cycles": 2770
         },
         "sm_active_gaps": {
-          "baseline_vs_completion_lower_bound_cycles": 2770,
+          "baseline_vs_completion_frontier_cycles": 2770,
           "baseline_vs_last_issue_cycles": 2770,
           "baseline_vs_last_modeled_event_cycles": 2773,
-          "repeat_2_vs_completion_lower_bound_cycles": 2830,
+          "repeat_2_vs_completion_frontier_cycles": 2830,
           "repeat_2_vs_last_issue_cycles": 2830,
           "repeat_2_vs_last_modeled_event_cycles": 2833
         }
       },
       "simulator": {
+        "completion_cycles": null,
         "completion_frontier": {
+          "cycles": null,
+          "kind": "lower_bound",
           "lower_bound_cycles": 8915,
           "status": "incomplete_unmodeled_retirement_tails",
           "unmodeled_tails": {
@@ -373,6 +482,9 @@
             "reduction_read_modify_write": false
           }
         },
+        "completion_kind": "lower_bound",
+        "completion_lower_bound_cycles": 8915,
+        "completion_reference_cycles": 8915,
         "completion_status": "incomplete_unmodeled_retirement_tails",
         "instructions_issued": 197120,
         "last_issue_cycles": 8915,
@@ -391,6 +503,7 @@
           "reduction_read_modify_write": false
         },
         "terminal_lower_bound_cycles": 8915,
+        "terminal_modeled_event_cycles": 8915,
         "top_readiness_causes": [
           {
             "cause": "async_destination_local",
@@ -483,39 +596,58 @@
         "stable_within_five_percent": true
       },
       "residual": {
-        "baseline_cycles": 2624,
+        "frontier_reference": {
+          "exact_cycles": null,
+          "kind": "lower_bound",
+          "lower_bound_cycles": 8915,
+          "reference_cycles": 8915
+        },
         "gpc_elapsed_gaps": {
           "baseline_launch_envelope_cycles": 1672,
-          "baseline_vs_completion_lower_bound_cycles": 4296,
+          "baseline_vs_completion_frontier_cycles": 4296,
           "baseline_vs_last_issue_cycles": 4296,
           "baseline_vs_last_modeled_event_cycles": 4299,
           "repeat_2_launch_envelope_cycles": 1743,
-          "repeat_2_vs_completion_lower_bound_cycles": 4322,
+          "repeat_2_vs_completion_frontier_cycles": 4322,
           "repeat_2_vs_last_issue_cycles": 4322,
           "repeat_2_vs_last_modeled_event_cycles": 4325
         },
         "interpretable": true,
         "metric": "multi-frontier SM-active and GPC elapsed comparison",
-        "rank_by_multi_frontier_score": 3,
-        "repeat_2_cycles": 2579,
-        "repeat_delta_cycles": -45,
-        "selection_score": 8592,
+        "selection_basis": {
+          "aggregate_score_used": false,
+          "eligible_for_selection": true,
+          "frontier_dimensions": [
+            "sm_completion_gap_cycles",
+            "gpc_completion_gap_cycles",
+            "gpc_launch_envelope_cycles"
+          ],
+          "independent_dimensions": true,
+          "mechanism_evidence": [
+            "dirty_writeback",
+            "coherence"
+          ],
+          "rule": "mechanism_local_typed_tail_precedence"
+        },
         "selection_vector": {
           "gpc_completion_gap_cycles": 4296,
           "gpc_launch_envelope_cycles": 1672,
           "sm_completion_gap_cycles": 2624
         },
         "sm_active_gaps": {
-          "baseline_vs_completion_lower_bound_cycles": 2624,
+          "baseline_vs_completion_frontier_cycles": 2624,
           "baseline_vs_last_issue_cycles": 2624,
           "baseline_vs_last_modeled_event_cycles": 2627,
-          "repeat_2_vs_completion_lower_bound_cycles": 2579,
+          "repeat_2_vs_completion_frontier_cycles": 2579,
           "repeat_2_vs_last_issue_cycles": 2579,
           "repeat_2_vs_last_modeled_event_cycles": 2582
         }
       },
       "simulator": {
+        "completion_cycles": null,
         "completion_frontier": {
+          "cycles": null,
+          "kind": "lower_bound",
           "lower_bound_cycles": 8915,
           "status": "incomplete_unmodeled_retirement_tails",
           "unmodeled_tails": {
@@ -525,6 +657,9 @@
             "reduction_read_modify_write": false
           }
         },
+        "completion_kind": "lower_bound",
+        "completion_lower_bound_cycles": 8915,
+        "completion_reference_cycles": 8915,
         "completion_status": "incomplete_unmodeled_retirement_tails",
         "instructions_issued": 197120,
         "last_issue_cycles": 8915,
@@ -543,6 +678,7 @@
           "reduction_read_modify_write": false
         },
         "terminal_lower_bound_cycles": 8915,
+        "terminal_modeled_event_cycles": 8915,
         "top_readiness_causes": [
           {
             "cause": "async_destination_local",
@@ -635,39 +771,58 @@
         "stable_within_five_percent": true
       },
       "residual": {
-        "baseline_cycles": 3867,
+        "frontier_reference": {
+          "exact_cycles": null,
+          "kind": "lower_bound",
+          "lower_bound_cycles": 5867,
+          "reference_cycles": 5867
+        },
         "gpc_elapsed_gaps": {
           "baseline_launch_envelope_cycles": 1691,
-          "baseline_vs_completion_lower_bound_cycles": 5558,
+          "baseline_vs_completion_frontier_cycles": 5558,
           "baseline_vs_last_issue_cycles": 5558,
           "baseline_vs_last_modeled_event_cycles": 5561,
           "repeat_2_launch_envelope_cycles": 1678,
-          "repeat_2_vs_completion_lower_bound_cycles": 5552,
+          "repeat_2_vs_completion_frontier_cycles": 5552,
           "repeat_2_vs_last_issue_cycles": 5552,
           "repeat_2_vs_last_modeled_event_cycles": 5555
         },
         "interpretable": true,
         "metric": "multi-frontier SM-active and GPC elapsed comparison",
-        "rank_by_multi_frontier_score": 1,
-        "repeat_2_cycles": 3874,
-        "repeat_delta_cycles": 7,
-        "selection_score": 11116,
+        "selection_basis": {
+          "aggregate_score_used": false,
+          "eligible_for_selection": true,
+          "frontier_dimensions": [
+            "sm_completion_gap_cycles",
+            "gpc_completion_gap_cycles",
+            "gpc_launch_envelope_cycles"
+          ],
+          "independent_dimensions": true,
+          "mechanism_evidence": [
+            "dirty_writeback",
+            "coherence"
+          ],
+          "rule": "mechanism_local_typed_tail_precedence"
+        },
         "selection_vector": {
           "gpc_completion_gap_cycles": 5558,
           "gpc_launch_envelope_cycles": 1691,
           "sm_completion_gap_cycles": 3867
         },
         "sm_active_gaps": {
-          "baseline_vs_completion_lower_bound_cycles": 3867,
+          "baseline_vs_completion_frontier_cycles": 3867,
           "baseline_vs_last_issue_cycles": 3867,
           "baseline_vs_last_modeled_event_cycles": 3870,
-          "repeat_2_vs_completion_lower_bound_cycles": 3874,
+          "repeat_2_vs_completion_frontier_cycles": 3874,
           "repeat_2_vs_last_issue_cycles": 3874,
           "repeat_2_vs_last_modeled_event_cycles": 3877
         }
       },
       "simulator": {
+        "completion_cycles": null,
         "completion_frontier": {
+          "cycles": null,
+          "kind": "lower_bound",
           "lower_bound_cycles": 5867,
           "status": "incomplete_unmodeled_retirement_tails",
           "unmodeled_tails": {
@@ -677,6 +832,9 @@
             "reduction_read_modify_write": false
           }
         },
+        "completion_kind": "lower_bound",
+        "completion_lower_bound_cycles": 5867,
+        "completion_reference_cycles": 5867,
         "completion_status": "incomplete_unmodeled_retirement_tails",
         "instructions_issued": 157696,
         "last_issue_cycles": 5867,
@@ -695,6 +853,7 @@
           "reduction_read_modify_write": false
         },
         "terminal_lower_bound_cycles": 5867,
+        "terminal_modeled_event_cycles": 5867,
         "top_readiness_causes": [
           {
             "cause": "async_destination_sm_service",
@@ -787,39 +946,58 @@
         "stable_within_five_percent": true
       },
       "residual": {
-        "baseline_cycles": 1650,
+        "frontier_reference": {
+          "exact_cycles": null,
+          "kind": "lower_bound",
+          "lower_bound_cycles": 2375,
+          "reference_cycles": 2375
+        },
         "gpc_elapsed_gaps": {
           "baseline_launch_envelope_cycles": 1715,
-          "baseline_vs_completion_lower_bound_cycles": 3365,
+          "baseline_vs_completion_frontier_cycles": 3365,
           "baseline_vs_last_issue_cycles": 3365,
           "baseline_vs_last_modeled_event_cycles": 3368,
           "repeat_2_launch_envelope_cycles": 1685,
-          "repeat_2_vs_completion_lower_bound_cycles": 3369,
+          "repeat_2_vs_completion_frontier_cycles": 3369,
           "repeat_2_vs_last_issue_cycles": 3369,
           "repeat_2_vs_last_modeled_event_cycles": 3372
         },
         "interpretable": true,
         "metric": "multi-frontier SM-active and GPC elapsed comparison",
-        "rank_by_multi_frontier_score": 5,
-        "repeat_2_cycles": 1684,
-        "repeat_delta_cycles": 34,
-        "selection_score": 6730,
+        "selection_basis": {
+          "aggregate_score_used": false,
+          "eligible_for_selection": true,
+          "frontier_dimensions": [
+            "sm_completion_gap_cycles",
+            "gpc_completion_gap_cycles",
+            "gpc_launch_envelope_cycles"
+          ],
+          "independent_dimensions": true,
+          "mechanism_evidence": [
+            "dirty_writeback",
+            "coherence"
+          ],
+          "rule": "mechanism_local_typed_tail_precedence"
+        },
         "selection_vector": {
           "gpc_completion_gap_cycles": 3365,
           "gpc_launch_envelope_cycles": 1715,
           "sm_completion_gap_cycles": 1650
         },
         "sm_active_gaps": {
-          "baseline_vs_completion_lower_bound_cycles": 1650,
+          "baseline_vs_completion_frontier_cycles": 1650,
           "baseline_vs_last_issue_cycles": 1650,
           "baseline_vs_last_modeled_event_cycles": 1653,
-          "repeat_2_vs_completion_lower_bound_cycles": 1684,
+          "repeat_2_vs_completion_frontier_cycles": 1684,
           "repeat_2_vs_last_issue_cycles": 1684,
           "repeat_2_vs_last_modeled_event_cycles": 1687
         }
       },
       "simulator": {
+        "completion_cycles": null,
         "completion_frontier": {
+          "cycles": null,
+          "kind": "lower_bound",
           "lower_bound_cycles": 2375,
           "status": "incomplete_unmodeled_retirement_tails",
           "unmodeled_tails": {
@@ -829,6 +1007,9 @@
             "reduction_read_modify_write": false
           }
         },
+        "completion_kind": "lower_bound",
+        "completion_lower_bound_cycles": 2375,
+        "completion_reference_cycles": 2375,
         "completion_status": "incomplete_unmodeled_retirement_tails",
         "instructions_issued": 19968,
         "last_issue_cycles": 2375,
@@ -847,6 +1028,7 @@
           "reduction_read_modify_write": false
         },
         "terminal_lower_bound_cycles": 2375,
+        "terminal_modeled_event_cycles": 2375,
         "top_readiness_causes": [
           {
             "cause": "async_destination_local",
@@ -939,39 +1121,58 @@
         "stable_within_five_percent": true
       },
       "residual": {
-        "baseline_cycles": 1928,
+        "frontier_reference": {
+          "exact_cycles": null,
+          "kind": "lower_bound",
+          "lower_bound_cycles": 12551,
+          "reference_cycles": 12551
+        },
         "gpc_elapsed_gaps": {
           "baseline_launch_envelope_cycles": 1652,
-          "baseline_vs_completion_lower_bound_cycles": 3580,
+          "baseline_vs_completion_frontier_cycles": 3580,
           "baseline_vs_last_issue_cycles": 3580,
           "baseline_vs_last_modeled_event_cycles": 3583,
           "repeat_2_launch_envelope_cycles": 1635,
-          "repeat_2_vs_completion_lower_bound_cycles": 3300,
+          "repeat_2_vs_completion_frontier_cycles": 3300,
           "repeat_2_vs_last_issue_cycles": 3300,
           "repeat_2_vs_last_modeled_event_cycles": 3303
         },
         "interpretable": true,
         "metric": "multi-frontier SM-active and GPC elapsed comparison",
-        "rank_by_multi_frontier_score": 4,
-        "repeat_2_cycles": 1665,
-        "repeat_delta_cycles": -263,
-        "selection_score": 7160,
+        "selection_basis": {
+          "aggregate_score_used": false,
+          "eligible_for_selection": true,
+          "frontier_dimensions": [
+            "sm_completion_gap_cycles",
+            "gpc_completion_gap_cycles",
+            "gpc_launch_envelope_cycles"
+          ],
+          "independent_dimensions": true,
+          "mechanism_evidence": [
+            "dirty_writeback",
+            "coherence"
+          ],
+          "rule": "mechanism_local_typed_tail_precedence"
+        },
         "selection_vector": {
           "gpc_completion_gap_cycles": 3580,
           "gpc_launch_envelope_cycles": 1652,
           "sm_completion_gap_cycles": 1928
         },
         "sm_active_gaps": {
-          "baseline_vs_completion_lower_bound_cycles": 1928,
+          "baseline_vs_completion_frontier_cycles": 1928,
           "baseline_vs_last_issue_cycles": 1928,
           "baseline_vs_last_modeled_event_cycles": 1931,
-          "repeat_2_vs_completion_lower_bound_cycles": 1665,
+          "repeat_2_vs_completion_frontier_cycles": 1665,
           "repeat_2_vs_last_issue_cycles": 1665,
           "repeat_2_vs_last_modeled_event_cycles": 1668
         }
       },
       "simulator": {
+        "completion_cycles": null,
         "completion_frontier": {
+          "cycles": null,
+          "kind": "lower_bound",
           "lower_bound_cycles": 12551,
           "status": "incomplete_unmodeled_retirement_tails",
           "unmodeled_tails": {
@@ -981,6 +1182,9 @@
             "reduction_read_modify_write": false
           }
         },
+        "completion_kind": "lower_bound",
+        "completion_lower_bound_cycles": 12551,
+        "completion_reference_cycles": 12551,
         "completion_status": "incomplete_unmodeled_retirement_tails",
         "instructions_issued": 39568,
         "last_issue_cycles": 12551,
@@ -999,6 +1203,7 @@
           "reduction_read_modify_write": false
         },
         "terminal_lower_bound_cycles": 12551,
+        "terminal_modeled_event_cycles": 12551,
         "top_readiness_causes": [
           {
             "cause": "control_stall",

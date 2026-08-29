@@ -261,17 +261,21 @@
     "timeout_seconds": 180,
     "exit_code": 0,
     "report": "closure_report.json",
-    "report_sha256": "4c7c979c3ca0b83d6e681e572d3fd58ab0f9f626e3f57516249e75983be69410",
+    "report_sha256": "146204c51d796816236a26999c9ae3a66188d883e3c61a0a3967ea9f90a88ed8",
     "live_repeat_root": "evidence/raw/ncu_repeat/rep-2",
     "live_repeat_count_per_cell": 1,
     "simulator_twin_policy": "byte-identical replay-1/replay-2"
   },
   "closure": {
     "decision": "no-go",
-    "seam": "cycle scalar completion/retirement mapping",
+    "seam": "completion/retirement frontier mapping",
     "mechanism": "The measured SM-active/GPC envelopes include launch and dirty-writeback/coherence retirement behavior that the typed event frontier does not model; async/barrier readiness is observable but not uniquely separable from those tails.",
     "next_discriminator": "A matched store-free/barrier-free async-source pair with an independent retirement observable.",
-    "claim_limits": ["No cycle-accuracy claim", "No NCU leakage into simulator inputs", "No cross-architecture inference", "No JADE/HETR or CPU-GPU co-simulation change"]
+    "claim_limits": ["No cycle-accuracy claim", "No NCU leakage into simulator inputs", "No cross-architecture inference", "No JADE/HETR or CPU-GPU co-simulation change"],
+    "selection_rule": "mechanism_local_typed_tail_precedence",
+    "frontiers_remain_independent": true,
+    "aggregate_score_used": false,
+    "acceptance_criteria": {"AC-3": "pass", "AC-4": "pass"}
   },
   "scope": {
     "ncu_values_used_as_simulator_inputs": false,

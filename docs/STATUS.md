@@ -36,7 +36,9 @@ checks; the authoritative validator reports 5,519 fresh, schema-matched,
 byte-identical active pairs plus 2,070 known supplemental full-campaign
 candidate directories. Fresh live residuals remain typed lower bounds with
 dirty-writeback and coherence tails, so this round records a no-go for a
-scalar timing correction;
+scalar timing correction. The closure report preserves independent
+SM-completion, GPC-completion, and GPC-launch-envelope gaps and selects the
+next discriminator by typed mechanism-local precedence;
 the next discriminator is a store-free/barrier-free async-source pair with an
 independent retirement observable. The durable per-cell manifest, compressed
 raw evidence bundle, and 7,765-launch semantic replay report are linked from

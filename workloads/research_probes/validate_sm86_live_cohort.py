@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import copy
 import hashlib
 import json
 import sys
@@ -25,6 +26,7 @@ from workloads.research_probes.semantic_replay_validation import (
     validate_replay_document,
 )
 from workloads.research_probes import replay_resume as replay_resume
+from workloads.research_probes import analyze_sm86_live_closure as closure_analyzer
 from workloads.research_probes.trace_invariants import derive_trace_invariants
 
 
@@ -739,6 +741,71 @@ def _validate_host_preflight(
             raise ValueError(f"host preflight {name}: recorded output does not contain the bound value")
 
 
+def _path_label(path: Path) -> str:
+    """Use the same stable path spelling as the closure analyzer."""
+
+    try:
+        return str(path.resolve().relative_to(REPO_ROOT.resolve()))
+    except ValueError:
+        return str(path.resolve())
+
+
+def _closure_core(document: Mapping[str, Any]) -> Mapping[str, Any]:
+    """Return report content that is derived from artifacts, not invocation paths."""
+
+    value = copy.deepcopy(document)
+    analysis = value.get("analysis")
+    if isinstance(analysis, Mapping):
+        analysis.pop("command", None)
+        manifest = analysis.get("manifest")
+        if isinstance(manifest, Mapping):
+            manifest.pop("path", None)
+    return value
+
+
+def _validate_closure_report_against_artifacts(
+    manifest_path: Path,
+    manifest: Mapping[str, Any],
+    report_path: Path,
+    report: Mapping[str, Any],
+) -> None:
+    """Recompute closure rows and decision instead of trusting a report hash.
+
+    The manifest's report hash authenticates bytes, but it does not establish
+    that those bytes still describe the current NCU/replay artifacts.  Rebuild
+    the report from those artifacts and compare every derived section.  Keep
+    invocation/path checks separate so a copied campaign has an unambiguous
+    binding to the manifest it is validating.
+    """
+
+    analysis = report.get("analysis")
+    if not isinstance(analysis, Mapping):
+        raise ValueError("closure analysis is missing its analysis section")
+    manifest_binding = analysis.get("manifest")
+    if not isinstance(manifest_binding, Mapping):
+        raise ValueError("closure analysis manifest binding is missing")
+    expected_manifest_label = _path_label(manifest_path)
+    if manifest_binding.get("path") != expected_manifest_label:
+        raise ValueError("closure analysis manifest path is not bound to this manifest")
+    if manifest_binding.get("campaign_id") != manifest.get("campaign_id"):
+        raise ValueError("closure analysis campaign identity differs from manifest")
+    expected = closure_analyzer.build_report(manifest_path, report_path)
+    if not isinstance(expected, Mapping):
+        raise ValueError("closure analyzer did not produce a report object")
+    if report.get("analysis", {}).get("command") != expected.get("analysis", {}).get("command"):
+        raise ValueError("closure analysis command is not bound to this manifest/output")
+    if _closure_core(report) != _closure_core(expected):
+        differing = [
+            key
+            for key in ("schema_version", "analysis", "candidate_evidence", "rows", "decision", "acceptance_criteria")
+            if report.get(key) != expected.get(key)
+        ]
+        raise ValueError(
+            "closure analysis is not reproducible from current artifacts"
+            + (f" (differing sections: {', '.join(differing)})" if differing else "")
+        )
+
+
 def _validate_cell(
     root: Path,
     cell: Mapping[str, Any],
@@ -1110,6 +1177,13 @@ def validate(manifest_path: Path, report_path: Path | None) -> int:
     }
     if set(input_validation.get("selection_dimensions", ())) != required_dimensions:
         raise ValueError("closure analysis selection is not multi-frontier")
+    if (
+        input_validation.get("selection_rule")
+        != "mechanism_local_typed_tail_precedence"
+        or input_validation.get("frontiers_remain_independent") is not True
+        or input_validation.get("aggregate_score_used") is not False
+    ):
+        raise ValueError("closure analysis does not preserve independent frontier selection")
     closure_rows = closure_report.get("rows")
     if not isinstance(closure_rows, list) or len(closure_rows) != 6:
         raise ValueError("closure analysis must contain one row per cohort cell")
@@ -1143,25 +1217,90 @@ def validate(manifest_path: Path, report_path: Path | None) -> int:
                 )
             )
             or not isinstance(simulator_row.get("completion_frontier"), Mapping)
+            or simulator_row.get("completion_frontier", {}).get("kind")
+            not in {"exact", "lower_bound"}
+            or simulator_row.get("completion_kind")
+            not in {"exact", "lower_bound"}
             or not isinstance(residual, Mapping)
             or residual.get("metric") != "multi-frontier SM-active and GPC elapsed comparison"
             or not isinstance(residual.get("sm_active_gaps"), Mapping)
             or not isinstance(residual.get("gpc_elapsed_gaps"), Mapping)
+            or not isinstance(residual.get("frontier_reference"), Mapping)
+            or not isinstance(residual.get("selection_basis"), Mapping)
+            or residual.get("selection_basis", {}).get("independent_dimensions") is not True
+            or residual.get("selection_basis", {}).get("aggregate_score_used") is not False
             or set(residual.get("selection_vector", {})) != required_dimensions
             or simulator_row.get("semantic_validation", {}).get("passed") is not True
+            or "selection_score" in residual
+            or "rank_by_multi_frontier_score" in residual
         ):
             raise ValueError("closure analysis row lacks the required typed frontiers/gaps")
+        for gap_name in ("sm_active_gaps", "gpc_elapsed_gaps"):
+            gaps = residual[gap_name]
+            if any(
+                key not in gaps
+                for key in (
+                    "baseline_vs_last_issue_cycles",
+                    "repeat_2_vs_last_issue_cycles",
+                    "baseline_vs_last_modeled_event_cycles",
+                    "repeat_2_vs_last_modeled_event_cycles",
+                    "baseline_vs_completion_frontier_cycles",
+                    "repeat_2_vs_completion_frontier_cycles",
+                )
+            ):
+                raise ValueError("closure analysis row omits a typed frontier gap")
+        tails = simulator_row["completion_frontier"].get("unmodeled_tails")
+        if not isinstance(tails, Mapping) or set(tails) != {
+            "reduction_read_modify_write",
+            "dirty_writeback",
+            "coherence",
+            "async_copy_shared_visibility",
+        } or any(type(value) is not bool for value in tails.values()):
+            raise ValueError("closure analysis row has malformed typed tails")
+        frontier = simulator_row["completion_frontier"]
+        if frontier["kind"] == "exact":
+            if frontier.get("lower_bound_cycles") is not None or any(tails.values()):
+                raise ValueError("closure analysis exact frontier carries an incomplete tail")
+            if frontier.get("cycles") is not None and (
+                not isinstance(frontier.get("cycles"), int)
+                or isinstance(frontier.get("cycles"), bool)
+            ):
+                raise ValueError("closure analysis exact frontier cycles are malformed")
+        elif frontier.get("kind") == "lower_bound":
+            if frontier.get("cycles") is not None:
+                raise ValueError("closure analysis lower-bound frontier carries exact cycles")
+            lower_bound = frontier.get("lower_bound_cycles")
+            if lower_bound is not None and (
+                not isinstance(lower_bound, int) or isinstance(lower_bound, bool)
+            ):
+                raise ValueError("closure analysis lower-bound frontier is malformed")
     if analysis.get("ncu_values_used_as_simulator_inputs") is not False:
         raise ValueError("closure analysis violates the NCU input boundary")
-    candidate_ranking = closure_report.get("candidate_ranking")
-    if not isinstance(candidate_ranking, list) or not any(
+    candidate_evidence = closure_report.get("candidate_evidence")
+    if not isinstance(candidate_evidence, list) or not any(
         isinstance(candidate, Mapping)
         and candidate.get("candidate") == "dirty_writeback_coherence_retirement"
         and candidate.get("selection") == "next_discriminator"
+        and candidate.get("selection_rule")
+        == "mechanism_local_typed_tail_precedence"
+        and isinstance(candidate.get("evidence_basis"), Mapping)
+        and candidate["evidence_basis"].get("aggregate_score_used") is False
+        and candidate["evidence_basis"].get("frontiers_remain_independent") is True
         and isinstance(candidate.get("reason"), str)
-        for candidate in candidate_ranking
+        for candidate in candidate_evidence
     ):
         raise ValueError("closure analysis diagnostic selection record is missing")
+    acceptance = closure_report.get("acceptance_criteria")
+    ac3 = acceptance.get("AC-3") if isinstance(acceptance, Mapping) else None
+    ac4 = acceptance.get("AC-4") if isinstance(acceptance, Mapping) else None
+    if (
+        not isinstance(ac3, Mapping)
+        or ac3.get("status") != "pass"
+        or not isinstance(ac4, Mapping)
+        or ac4.get("status") != "pass"
+        or ac4.get("mode") != "falsified_no_go"
+    ):
+        raise ValueError("closure analysis does not explicitly pass AC-3 and AC-4")
     cells = document.get("cells")
     if not isinstance(cells, list) or len(cells) != 6:
         raise ValueError("manifest must contain exactly six cohort cells")
@@ -1189,6 +1328,9 @@ def validate(manifest_path: Path, report_path: Path | None) -> int:
         )
         for cell in cells
     ]
+    _validate_closure_report_against_artifacts(
+        manifest_path, document, closure_report_path, closure_report
+    )
     try:
         manifest_label = str(manifest_path.relative_to(REPO_ROOT))
     except ValueError:

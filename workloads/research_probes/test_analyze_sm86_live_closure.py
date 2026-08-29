@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 from copy import deepcopy
+import importlib.util
+import json
+from pathlib import Path
 
 import pytest
 
@@ -37,8 +40,33 @@ def test_decision_is_derived_from_validated_rows() -> None:
     assert decision["decision"] == "no-go"
     assert decision["selected_diagnostic"] == "dirty_writeback_coherence_retirement"
     assert validation["decision_eligible"] is True
-    assert validation["residual_score_cycles"] == 13
-    assert ranking[0]["selection_score"] == 13
+    assert validation["aggregate_score_used"] is False
+    assert validation["selection_rule"] == "mechanism_local_typed_tail_precedence"
+    assert "residual_score_cycles" not in validation
+    assert all("selection_score" not in candidate for candidate in ranking)
+    assert all(
+        candidate["evidence_basis"]["aggregate_score_used"] is False
+        for candidate in ranking
+    )
+
+
+def test_frontier_vector_is_preserved_without_scalar_ranking() -> None:
+    rows = _rows()
+    rows[0]["residual"]["selection_vector"] = {
+        "sm_completion_gap_cycles": 10_000_000,
+        "gpc_completion_gap_cycles": 1,
+        "gpc_launch_envelope_cycles": 2,
+    }
+    ranking, validation, decision = _derive_decision(rows)
+    assert decision["selection_rule"] == "mechanism_local_typed_tail_precedence"
+    assert validation["selection_dimensions"] == [
+        "sm_completion_gap_cycles",
+        "gpc_completion_gap_cycles",
+        "gpc_launch_envelope_cycles",
+    ]
+    assert validation["frontiers_remain_independent"] is True
+    assert all("selection_score" not in candidate for candidate in ranking)
+    assert rows[0]["residual"]["selection_vector"]["sm_completion_gap_cycles"] == 10_000_000
 
 
 def test_unstable_repeat_is_not_silently_converted_to_no_go() -> None:
@@ -134,3 +162,29 @@ def test_repeat_metadata_requires_report_artifact(tmp_path) -> None:
             metadata,
             ANALYZER.TRUSTED_NCU_IDENTITY,
         )
+
+
+def test_replay_summary_accepts_complete_frontier(tmp_path: Path) -> None:
+    helper_path = Path(__file__).with_name("test_replay_resume.py")
+    spec = importlib.util.spec_from_file_location("replay_summary_fixture", helper_path)
+    assert spec is not None and spec.loader is not None
+    helper = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(helper)
+    expectation = helper.REPLAY.ReplayExpectation(
+        launches=(helper._launch(),), carded_dram=False
+    )
+    document = helper._report(expectation)
+    path = tmp_path / "complete.json"
+    path.write_text(json.dumps(document), encoding="utf-8")
+    summary = ANALYZER._replay_summary(path)
+    assert summary["completion_status"] == "complete"
+    assert summary["completion_kind"] == "exact"
+    assert summary["completion_cycles"] == 1
+    assert summary["completion_lower_bound_cycles"] is None
+    assert summary["completion_reference_cycles"] == 1
+    assert summary["tails"] == {
+        "reduction_read_modify_write": False,
+        "dirty_writeback": False,
+        "coherence": False,
+        "async_copy_shared_visibility": False,
+    }

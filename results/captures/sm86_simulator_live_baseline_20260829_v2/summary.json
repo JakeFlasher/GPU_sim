@@ -12,7 +12,7 @@
   "live_cohort_semantic_report": "results/captures/sm86_simulator_live_baseline_20260829_v2/live_cohort_semantic_report.json",
   "live_cohort_semantic_report_sha256": "b761eddf8b3335165cd6ae010471496c8cdb1809782d259f7732b531f69af426",
   "closure_report": "results/captures/sm86_simulator_live_baseline_20260829_v2/closure_report.json",
-  "closure_report_sha256": "4c7c979c3ca0b83d6e681e572d3fd58ab0f9f626e3f57516249e75983be69410",
+  "closure_report_sha256": "146204c51d796816236a26999c9ae3a66188d883e3c61a0a3967ea9f90a88ed8",
   "raw_evidence_archive_sha256": "7a966f192e47c9513edaeb41cbb3536bf4b2b76ebbdfbbe99963d5160b692c5f",
   "architecture": "sm_86",
   "gpu": "NVIDIA GeForce RTX 3090 Ti",
@@ -165,12 +165,16 @@
   },
   "core_closure": {
     "decision": "no-go",
-    "seam": "cycle scalar completion/retirement mapping",
+    "seam": "completion/retirement frontier mapping",
     "reason": "The live residual is repeatable, but every cohort cell that writes global state reports typed dirty_writeback/coherence tails; NCU SM-active/GPC envelopes include launch and retirement behavior absent from the modeled event stream. The data do not identify one architecture-local latency without an in-scope store-free/barrier-free discriminator.",
     "next_discriminator": "Capture a matched store-free, barrier-free async-source pair with an independent retirement/frontier observable before adding timing state or a scalar correction.",
     "closure_analysis_command": ".venv/bin/python workloads/research_probes/analyze_sm86_live_closure.py --manifest results/captures/sm86_simulator_live_baseline_20260829_v2/campaign_manifest.json --output results/captures/sm86_simulator_live_baseline_20260829_v2/closure_report.json",
     "live_repeatability": "independent NCU application-replay repeat per cell; all six remain within 5% on gpc/SM/instruction metrics",
     "selection_dimensions": ["sm_completion_gap_cycles", "gpc_completion_gap_cycles", "gpc_launch_envelope_cycles"],
-    "selection_record": "closure_report.json"
+    "selection_record": "closure_report.json",
+    "selection_rule": "mechanism_local_typed_tail_precedence",
+    "frontiers_remain_independent": true,
+    "aggregate_score_used": false,
+    "acceptance_criteria": {"AC-3": "pass", "AC-4": "pass"}
   }
 }

@@ -146,6 +146,11 @@ evidence lane rather than the deliverable:
 - NCU silicon measurements are independent validation targets. Never leak
   measurements from a scored workload into its features, tuning, implementation
   choices, or training data.
+- Keep independent simulator/live frontiers (issue, modeled-event,
+  completion, launch envelope, and typed tails) as separate evidence. Do not
+  sum or otherwise collapse them into a scalar selection score; choose a
+  mechanism-local or explicitly partial-order discriminator and state the
+  rationale.
 - Separate a hypothesis from an observation and label inference or uncertainty
   explicitly when reporting results.
 

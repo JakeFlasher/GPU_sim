@@ -29,5 +29,8 @@ competing workflow or weaken higher-priority instructions.
   cards are inputs; NCU silicon measurements are independent targets and must
   never become hidden features, tuning inputs, implementation inputs, or
   training data for the scored workload.
+- Preserve independent issue, modeled-event, completion, launch-envelope, and
+  typed-tail frontiers as separate evidence. Never turn them into a summed
+  scalar selection score; use a mechanism-local or explicit partial-order rule.
 - At handoff, include the causal mechanism for a nontrivial fix, commands and
   observed results, uncertainty/caveats, and the next concrete action if any.

@@ -28,6 +28,9 @@ reviewer can inspect the pass/fail summary without extraction.
 
 `../closure_report.json` is the bounded residual-selection record. It links
 the canonical and repeated NCU CSVs, simulator twin hashes, typed readiness
-causes, and the no-go/next-discriminator decision. `host.json` and the
+causes, independent frontier gaps, explicit AC-3/AC-4 status, and the
+no-go/next-discriminator decision. The live-cohort validator recomputes this
+report from the current artifacts, so changing the report and its manifest
+hash alone cannot make stale evidence pass. `host.json` and the
 `host_preflight/` transcripts bind the host/tool commands to the campaign
 input hashes.
