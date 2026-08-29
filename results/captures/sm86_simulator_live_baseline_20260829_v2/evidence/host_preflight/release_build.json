@@ -1,0 +1,30 @@
+{
+  "argv": [
+    "cargo",
+    "build",
+    "--release",
+    "--manifest-path",
+    "sim/Cargo.toml",
+    "-p",
+    "sim-run"
+  ],
+  "binary": {
+    "path": "sim/target/release/sim-run",
+    "sha256": "6cb0d05f0d447c0cd6ee2e30353c0f1e89d464462458912478c826860f15f9a4",
+    "size_bytes": 2583912
+  },
+  "cwd": ".",
+  "duration_seconds": 0.183564,
+  "finished_at": "2026-08-29T21:52:52.997362+00:00",
+  "kind": "release_build",
+  "repository_revision": "c8fbc14ca0071597f844885109be75d7c463f7f1",
+  "return_code": 0,
+  "schema_version": 1,
+  "started_at": "2026-08-29T21:52:52.815599+00:00",
+  "stderr": "evidence/host_preflight/release_build/stderr.txt",
+  "stderr_sha256": "a70da5408e7a6da7efe97b23011504833b16a7875bda14543f2504b5b8c7d97a",
+  "stdout": "evidence/host_preflight/release_build/stdout.txt",
+  "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "timed_out": false,
+  "timeout_seconds": 1800
+}

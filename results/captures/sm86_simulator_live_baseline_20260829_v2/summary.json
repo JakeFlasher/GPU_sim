@@ -7,7 +7,7 @@
   "correction_revision": "f6e53a34844cae6ddd57cbdfed073a52db03a08b",
   "campaign_manifest": "results/captures/sm86_simulator_live_baseline_20260829_v2/campaign_manifest.json",
   "release_build_record": "results/captures/sm86_simulator_live_baseline_20260829_v2/evidence/host_preflight/release_build.json",
-  "release_build_record_sha256": "e71f8d0c4779359d879e39b747fd5ad15be3848ab2e533e8edc62089d047d9cd",
+  "release_build_record_sha256": "45493bedcee7218d5a125571af10505ceb3e383e4eb9fcc258d8ef7ad99e01b5",
   "raw_evidence_archive": "results/captures/sm86_simulator_live_baseline_20260829_v2/evidence/raw_cohort.tar.zst",
   "semantic_replay_report": "results/captures/sm86_simulator_live_baseline_20260829_v2/semantic_replay_report.json.zst",
   "semantic_validation_summary": "results/captures/sm86_simulator_live_baseline_20260829_v2/semantic_replay_summary.json",
