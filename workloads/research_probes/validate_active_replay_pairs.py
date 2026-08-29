@@ -7,6 +7,7 @@ import argparse
 import importlib.util
 import json
 import sys
+from functools import cache
 from pathlib import Path
 from typing import Iterator, Sequence
 
@@ -40,6 +41,63 @@ ARRIVAL = load_module(
 ADMISSION = load_module(
     "validated_admission_campaign", HERE / "l1tex_admission_backpressure/campaign.py"
 )
+
+
+@cache
+def _supplemental_candidate_ids() -> tuple[frozenset[int], ...]:
+    return (
+        frozenset(ADMISSION.validated_feedback_service_sweep()),
+        frozenset(ADMISSION.validated_write_completion_feedback()),
+        frozenset(ADMISSION.validated_red_rmw_completion_sweep()),
+    )
+
+
+@cache
+def _admission_cell_keys() -> frozenset[str]:
+    return frozenset(cell.key for cell in ADMISSION.configured_cells())
+
+
+def _known_supplemental_replay_directory(path: Path, root: Path) -> bool:
+    """Recognize valid full-campaign outputs outside the active matrix.
+
+    The admission campaign can deliberately replay every cell for every
+    candidate in its exploratory service/write-completion sweeps.  The active
+    5,519-pair matrix keeps only the frozen transfer subset, while those extra
+    candidate directories are still useful, deterministic research artifacts.
+    Keep the strict active-pair validation unchanged, but do not misclassify a
+    known, well-shaped supplemental directory as a stale/unknown replay.
+    """
+
+    try:
+        relative = path.resolve().relative_to(root.resolve())
+    except ValueError:
+        return False
+    if len(relative.parts) != 2:
+        return False
+    directory, cell_key = relative.parts
+    if cell_key not in _admission_cell_keys():
+        return False
+
+    prefixes_and_ids = tuple(
+        zip(
+            (
+                "simulator-memory-admission-feedback-service-",
+                "simulator-memory-write-completion-feedback-",
+                "simulator-red-rmw-completion-",
+            ),
+            _supplemental_candidate_ids(),
+        )
+    )
+    for prefix, candidate_ids in prefixes_and_ids:
+        if not directory.startswith(prefix):
+            continue
+        suffix = directory[len(prefix) :]
+        try:
+            candidate_id = int(suffix)
+        except ValueError:
+            return False
+        return candidate_id in candidate_ids
+    return False
 
 
 def _pair(
@@ -481,8 +539,21 @@ def main(argv: Sequence[str] | None = None) -> int:
             replay_result_directories(args.arrival_root.resolve()),
             replay_result_directories(args.admission_root.resolve()),
         )
-        for extra in sorted(actual_directories - expected_directories):
+        supplemental = {
+            path
+            for path in actual_directories - expected_directories
+            if _known_supplemental_replay_directory(
+                path, args.admission_root.resolve()
+            )
+        }
+        for extra in sorted(
+            actual_directories - expected_directories - supplemental
+        ):
             failures.append(f"unexpected inactive replay directory: {extra}")
+        if supplemental:
+            print(
+                f"ignored {len(supplemental)} known supplemental full-campaign replay directories"
+            )
     except (OSError, RuntimeError, ValueError, json.JSONDecodeError) as error:
         print(f"active replay validation: {error}", file=sys.stderr)
         return 2

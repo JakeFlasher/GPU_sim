@@ -274,9 +274,16 @@ OUT="$PWD/workloads/portable_lcd/<slug>/traces"
 mkdir -p "$OUT"
 LD_LIBRARY_PATH="$PB_LIB${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
   CUDA_INJECTION64_PATH="$PWD/tools/nvbit_tracer/tracer_tool/tracer_tool.so" \
-  USER_DEFINED_FOLDERS=1 TRACES_FOLDER="$OUT" \
+  USER_DEFINED_FOLDERS=1 TRACES_FOLDER="$OUT" ACTIVE_FROM_START=1 \
   workloads/portable_lcd/<slug>/<slug>_run --correctness_shape --reps 1
 ```
+
+The portable LCD runners do not issue `cuProfilerStart`/`cuProfilerStop`
+markers, so `ACTIVE_FROM_START=1` is required for a capture to accept their
+kernel launch. With the default marker-gated setting (`0`), the process can
+still exit successfully while producing a zero-launch trace; treat that as a
+failed capture. Research probes that explicitly bracket a region with CUDA
+profiler markers may use `ACTIVE_FROM_START=0` instead.
 
 The tracer emits the following layout under
 `workloads/portable_lcd/<slug>/traces/`:

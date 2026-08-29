@@ -1,0 +1,119 @@
+# SM86 simulator live baseline and core-closure handoff — 2026-08-29
+
+This directory records the current RTX 3090 Ti `sm_86` live cohort and the
+corresponding release `sim-run` diagnostics. Raw traces, NCU reports, static
+sidecars, and replay JSON remain in the local capture roots named in the
+campaign log; this tracked summary is the portable index and claim boundary.
+
+## Outcome
+
+The six-cell GPU-only cohort completed separate correctness, NCU, NVBit,
+static-control, and simulator stages. Every correctness run exited 0. Each
+portable NVBit capture has one exact accepted launch, full block coverage, and
+`total_insts == total_reported_insts`; the five portable simulator replays have
+full coverage and `smsp__inst_executed.sum == sim instructions`. Every simulator
+cell replayed twice to identical JSON bytes. NCU values were comparison targets
+only and were not passed to `sim-run`, cards, or tuning.
+
+The raw traces also pass the LCD layout verifier when its documented
+post-processing steps are applied on a copy: `pad_dynamic_trace_pb.py` raises
+the fixed manifest to 1,026 bytes and `emit_lcd_per_cta_tb_json.py` emits one
+identity sentinel per CTA. Canonical traces remain sentinel-free and pass the
+pinned forward-admission consumer; this keeps metadata projections from being
+mistaken for protobuf payloads.
+
+The first direct portable NVBit attempt deliberately used
+`ACTIVE_FROM_START=0` and produced a successful process exit with zero accepted
+launches. That artifact is invalid for this cohort. The corrected command uses
+`ACTIVE_FROM_START=1` because these binaries do not emit profiler start/stop
+markers; the async research probe remains profiler-marked and uses 0.
+
+## Reproduction commands
+
+Correctness (one per portable cell):
+
+```bash
+workloads/portable_lcd/<slug>/<slug>_run \
+  --correctness_shape --seed 42 --warmup 1 --reps 1 --output_dir <out>
+```
+
+NCU is a separate application-replay process (no simulator input):
+
+```bash
+.venv/bin/python tools/local_labels/collect_ncu.py \
+  --output <ncu-out> \
+  --metrics gpc__cycles_elapsed.max,sm__cycles_active.max,\
+smsp__inst_executed.sum,lts__t_sectors_srcunit_tex_op_read.sum,\
+dram__sectors_read.sum,sm__pipe_tensor_cycles_active.sum \
+  --launch-skip 1 --launch-count 1 --replay-mode application \
+  --clock-control none -- \
+  workloads/portable_lcd/<slug>/<slug>_run --timing_shape --warmup 1 --reps 1
+```
+
+NVBit uses the preserved tracer and a bounded enhanced-parser ceiling:
+
+```bash
+env LD_LIBRARY_PATH="$PWD/.toolchain/pb/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+  CUDA_INJECTION64_PATH="$PWD/tools/nvbit_tracer/tracer_tool/tracer_tool.so" \
+  USER_DEFINED_FOLDERS=1 TRACES_FOLDER=<trace-out> ACTIVE_FROM_START=1 \
+  DYNAMIC_KERNEL_LIMIT_START=0 DYNAMIC_KERNEL_LIMIT_END=1 \
+  SKIP_ENHANCED_TRACER=0 ENHANCED_TRACER_MAX_PARSER_INPUT_KB=256 \
+  ENHANCED_TRACER_PER_CUBIN_TIMEOUT_S=45 \
+  workloads/portable_lcd/<slug>/<slug>_run --timing_shape --warmup 0 --reps 1
+```
+
+Static control data and replay:
+
+```bash
+.venv/bin/python tools/sass_control/emit_control_bits_sidecar.py \
+  --binary workloads/portable_lcd/<slug>/<slug>_run --arch sm_86 \
+  --out <control.json> --toolkit-bindir /usr/local/cuda-13.2/bin
+sim/target/release/sim-run --trace <trace-out> --control <control.json> \
+  --arch-card arch_profiles/cards/sm_86.json \
+  --pchase-card data/pchase/sm_86_static_card.json --mode l1-l2
+```
+
+The async canary was run separately through
+`async_barrier_overlap c11 l1 0 4 1` (correctness), a profiler-marked NVBit
+capture, NCU target `... c11 l1 0 4 3`, and the same release replay. See the
+machine-readable values in `summary.json`.
+
+## Residual and closure decision
+
+The portable simulator terminal values are typed lower bounds, not cycle
+predictions. They trail NCU `sm__cycles_active.max` by 2,770 / 2,624 / 3,867 /
+1,650 / 1,928 cycles for BF16, FP16, INT8, sparse BF16, and attention. All
+five expose `dirty_writeback=true` and `coherence=true` in
+`incomplete_unmodeled_retirement_tails`. GPC elapsed also includes a launch
+envelope not represented by the direct event frontier.
+
+This is a reproducible **no-go** for a timing scalar patch in this round. A
+fixed latency, per-workload offset, or NCU-derived card value would conflate
+unmodeled retirement/coherence with async/barrier overlap and violate the
+simulator's evidence boundary. The next discriminator is a matched
+store-free/barrier-free async-source pair with an independent retirement
+observable. No simulator timing code, JADE/HETR code, CPU-GPU bridge,
+`sm_120` behavior, or rejected candidate was changed here.
+
+## Freshness refresh
+
+The initial active-pair validator found 5,519 retained JSON outputs older than
+their current checkout inputs. This was timestamp staleness, not a semantic
+replay failure: one launch-cycle pair was regenerated immediately and passed
+the identity helper. The release simulator then regenerated the launch,
+retirement, arrival, admission, service-candidate, admission-candidate, and
+feedback/sweep matrices with deterministic twin checks. The final validator
+reports `5,519` fresh, schema-matched, byte-identical active pairs. It also
+sees `2,070` known supplemental candidate directories produced by the full
+exploratory sweep; those are classified separately rather than deleted or
+treated as a workflow failure.
+
+## Claim limits
+
+The cohort demonstrates a working, deterministic `sm_86` trace-to-replay path
+and exposes the remaining causal frontier. It does not claim cycle accuracy,
+cross-architecture support, or complete writeback/coherence modeling. The
+portable NVBit manifest is intentionally small; payload bytes live in the
+per-CTA protobuf files. The LCD sentinel projection must be validated on a
+copy, because adding `tb_*.json` sentinels to a canonical trace makes the
+forward admission consumer reject the tree as non-payload input.

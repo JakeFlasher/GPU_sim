@@ -16,8 +16,14 @@ Capture:
 mkdir -p traces/example
 CUDA_INJECTION64_PATH="$PWD/tools/nvbit_tracer/tracer_tool/tracer_tool.so" \
 TRACES_FOLDER="$PWD/traces/example" \
+ACTIVE_FROM_START=1 \
   /absolute/path/to/cuda-program [arguments]
 ```
+
+Use `ACTIVE_FROM_START=1` for ordinary binaries that do not call
+`cuProfilerStart`/`cuProfilerStop`. Otherwise NVBit can exit with status 0 but
+accept no launches. Set it to `0` only when the workload deliberately emits
+profiler markers and the capture is meant to be marker-gated.
 
 Read:
 

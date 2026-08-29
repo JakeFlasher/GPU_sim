@@ -14,6 +14,31 @@ stable modeled traffic, deterministic output, and 33.128% MAPE against median
 `sm__cycles_active.max`. This is a live residual to explain, not a final cycle
 accuracy claim.
 
+## Current GPU-only live baseline (2026-08-29)
+
+The active focus is now the event-driven GPU simulator on the local RTX 3090
+Ti (`sm_86`); JADE/HETR and CPU-GPU co-simulation remain deferred. A fresh
+six-cell cohort (cp.async canary, BF16/FP16 HMMA, INT8 IMMA, sparse BF16 HMMA,
+and BF16 forward attention) has completed separate correctness, NCU, NVBit,
+static-control, and release `sim-run` stages. Portable traces have one exact
+accepted launch, full CTA coverage, exact reported-instruction counts, and
+deterministic simulator twins. NCU observations remain held-out comparison
+targets and are not simulator inputs. The machine-readable handoff is
+[the 2026-08-29 SM86 baseline](../results/captures/sm86_simulator_live_baseline_20260829_v2/README.md).
+
+The first portable NVBit invocation exposed an activation-contract trap:
+`ACTIVE_FROM_START=0` can exit 0 while accepting zero launches when a binary
+does not emit profiler markers. The canonical cohort command therefore uses
+`ACTIVE_FROM_START=1`; zero-launch artifacts are rejected. The retained active
+replay corpus initially reported 5,519 timestamp-stale outputs. Its simulator
+matrices are now regenerated with the current release binary and twin-byte
+checks; the authoritative validator reports 5,519 fresh, schema-matched,
+byte-identical active pairs plus 2,070 known supplemental full-campaign
+candidate directories. Fresh live residuals remain typed lower bounds with dirty-writeback and
+coherence tails, so this round records a no-go for a scalar timing correction;
+the next discriminator is a store-free/barrier-free async-source pair with an
+independent retirement observable.
+
 The 2026-08-17
 [causal-readiness milestone](sm86_causal_readiness_milestone.md) is complete.
 Reason-tagged dependency, async-copy, CTA-generation/arrival-spread, and
