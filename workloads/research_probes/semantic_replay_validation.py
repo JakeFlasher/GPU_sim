@@ -127,31 +127,45 @@ def _async_source_error(
     if expected.async_source_sectors == 0:
         return None, {
             "status": "not_applicable",
+            "promotion_eligible": True,
             "expected_async_source_sectors": 0,
         }
     l1 = counters.get("l1")
     if not isinstance(l1, Mapping):
         return f"{label}: async-source invariant has no L1 counters", {
             "status": "unavailable",
+            "promotion_eligible": False,
             "expected_async_source_sectors": expected.async_source_sectors,
         }
     observed = _int(l1.get("hits")) + _int(l1.get("misses"))
-    # A bypass route contributes to the same trace-visible source total.  The
-    # active async cohort has no atomic source traffic; mixed atomic/async
-    # traces are reported as ambiguous rather than assigned a false equality.
-    ambiguous = expected.global_atomic_sectors != 0
+    # A bypass route contributes to the same trace-visible source total.  A
+    # mixed atomic/async trace has no exact attribution invariant in this
+    # schema, so it is explicitly unknown and must not be promoted as passed.
+    ambiguous = bool(
+        expected.global_atomic_sectors != 0
+        or getattr(expected, "global_atomic_instructions", 0) != 0
+    )
     if not ambiguous:
         observed += _int(l1.get("bypass_sectors"))
     expected_total = expected.global_load_sectors + expected.async_source_sectors
     snapshot = {
-        "status": "ambiguous" if ambiguous else "checked",
+        "status": "unknown" if ambiguous else "checked",
+        "promotion_eligible": not ambiguous,
+        "unknown_reason": (
+            "atomic and async-source sectors share the observed L1 lane"
+            if ambiguous
+            else None
+        ),
         "expected_async_source_sectors": expected.async_source_sectors,
         "expected_l1_read_sectors": expected_total,
         "observed_l1_read_sectors": observed,
         "passed": None if ambiguous else observed == expected_total,
     }
     if ambiguous:
-        return None, snapshot
+        return (
+            f"{label}: async-source conservation is unknown for mixed atomic/async traffic",
+            snapshot,
+        )
     if observed != expected_total:
         return f"{label}: trace-derived async_source_sectors mismatch ({snapshot})", snapshot
     return None, snapshot
@@ -417,7 +431,10 @@ def validate_replay_document(
                     "readiness": readiness_snapshot,
                 },
                 "checks": checks,
-                "passed": all(checks.values()),
+                "promotion_eligible": all(checks.values())
+                and async_snapshot.get("promotion_eligible", True),
+                "passed": all(checks.values())
+                and async_snapshot.get("promotion_eligible", True),
             }
         )
     return rows, errors

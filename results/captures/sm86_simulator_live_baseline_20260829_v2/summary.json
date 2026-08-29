@@ -6,13 +6,15 @@
   "candidate_revision": "8cae7c6f37e378ac54e4c5fe5f7acd3f38991480",
   "correction_revision": "f6e53a34844cae6ddd57cbdfed073a52db03a08b",
   "campaign_manifest": "results/captures/sm86_simulator_live_baseline_20260829_v2/campaign_manifest.json",
+  "release_build_record": "results/captures/sm86_simulator_live_baseline_20260829_v2/evidence/host_preflight/release_build.json",
+  "release_build_record_sha256": "e71f8d0c4779359d879e39b747fd5ad15be3848ab2e533e8edc62089d047d9cd",
   "raw_evidence_archive": "results/captures/sm86_simulator_live_baseline_20260829_v2/evidence/raw_cohort.tar.zst",
   "semantic_replay_report": "results/captures/sm86_simulator_live_baseline_20260829_v2/semantic_replay_report.json.zst",
   "semantic_validation_summary": "results/captures/sm86_simulator_live_baseline_20260829_v2/semantic_replay_summary.json",
   "live_cohort_semantic_report": "results/captures/sm86_simulator_live_baseline_20260829_v2/live_cohort_semantic_report.json",
-  "live_cohort_semantic_report_sha256": "b761eddf8b3335165cd6ae010471496c8cdb1809782d259f7732b531f69af426",
+  "live_cohort_semantic_report_sha256": "f90f01bac77264e6ff21c0c2b58489209900bf9cef3060ec3e2fca1afcefa569",
   "closure_report": "results/captures/sm86_simulator_live_baseline_20260829_v2/closure_report.json",
-  "closure_report_sha256": "146204c51d796816236a26999c9ae3a66188d883e3c61a0a3967ea9f90a88ed8",
+  "closure_report_sha256": "b66b103052a47640fda0a36eb2d1670b523dc6e3248bf49609392697a66d3347",
   "raw_evidence_archive_sha256": "7a966f192e47c9513edaeb41cbb3536bf4b2b76ebbdfbbe99963d5160b692c5f",
   "architecture": "sm_86",
   "gpu": "NVIDIA GeForce RTX 3090 Ti",
@@ -175,6 +177,6 @@
     "selection_rule": "mechanism_local_typed_tail_precedence",
     "frontiers_remain_independent": true,
     "aggregate_score_used": false,
-    "acceptance_criteria": {"AC-3": "pass", "AC-4": "pass"}
+    "acceptance_criteria": {"AC-1": "pass", "AC-3": "pass", "AC-4": "pass"}
   }
 }

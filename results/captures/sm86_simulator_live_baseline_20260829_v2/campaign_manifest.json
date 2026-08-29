@@ -32,6 +32,23 @@
     "passwordless_sudo": false,
     "preflight_record": "evidence/host.json"
   },
+  "release_build": {
+    "record": "evidence/host_preflight/release_build.json",
+    "record_sha256": "e71f8d0c4779359d879e39b747fd5ad15be3848ab2e533e8edc62089d047d9cd",
+    "argv": ["cargo", "build", "--release", "--manifest-path", "sim/Cargo.toml", "-p", "sim-run"],
+    "timeout_seconds": 1800,
+    "exit_code": 0,
+    "repository_revision": "c59e41cbe3b303abdddd0d41d17cff6c29d88ae0",
+    "stdout": "evidence/host_preflight/release_build/stdout.txt",
+    "stderr": "evidence/host_preflight/release_build/stderr.txt",
+    "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderr_sha256": "db073818ee343e803727ffd505942b2c27966062c682b273fe90a689e93185e6",
+    "binary": {
+      "path": "sim/target/release/sim-run",
+      "sha256": "6cb0d05f0d447c0cd6ee2e30353c0f1e89d464462458912478c826860f15f9a4",
+      "size_bytes": 2583912
+    }
+  },
   "tools": {
     "cuda_nvcc": "/opt/cuda/bin/nvcc (13.3.73)",
     "ncu": "/usr/local/cuda-13.2/nsight-compute-2026.1.0/ncu (2026.1.0.0)",
@@ -252,7 +269,7 @@
       "timeout_seconds": 600,
       "exit_code": 0,
       "report": "results/captures/sm86_simulator_live_baseline_20260829_v2/live_cohort_semantic_report.json",
-      "report_sha256": "b761eddf8b3335165cd6ae010471496c8cdb1809782d259f7732b531f69af426",
+      "report_sha256": "f90f01bac77264e6ff21c0c2b58489209900bf9cef3060ec3e2fca1afcefa569",
       "semantic_launches": 6
     }
   },
@@ -261,7 +278,7 @@
     "timeout_seconds": 180,
     "exit_code": 0,
     "report": "closure_report.json",
-    "report_sha256": "146204c51d796816236a26999c9ae3a66188d883e3c61a0a3967ea9f90a88ed8",
+    "report_sha256": "b66b103052a47640fda0a36eb2d1670b523dc6e3248bf49609392697a66d3347",
     "live_repeat_root": "evidence/raw/ncu_repeat/rep-2",
     "live_repeat_count_per_cell": 1,
     "simulator_twin_policy": "byte-identical replay-1/replay-2"
@@ -275,7 +292,7 @@
     "selection_rule": "mechanism_local_typed_tail_precedence",
     "frontiers_remain_independent": true,
     "aggregate_score_used": false,
-    "acceptance_criteria": {"AC-3": "pass", "AC-4": "pass"}
+    "acceptance_criteria": {"AC-1": "pass", "AC-3": "pass", "AC-4": "pass"}
   },
   "scope": {
     "ncu_values_used_as_simulator_inputs": false,

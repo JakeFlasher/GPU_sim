@@ -12,6 +12,7 @@ import argparse
 import csv
 import hashlib
 import json
+import re
 import sys
 from pathlib import Path
 from typing import Any, Mapping
@@ -32,6 +33,11 @@ METRICS = (
     "gpc__cycles_elapsed.max",
     "sm__cycles_active.max",
     "smsp__inst_executed.sum",
+)
+PORTABLE_NCU_METRICS = METRICS + (
+    "lts__t_sectors_srcunit_tex_op_read.sum",
+    "dram__sectors_read.sum",
+    "sm__pipe_tensor_cycles_active.sum",
 )
 TRUSTED_NCU_IDENTITY = {
     "path": "/usr/local/cuda-13.2/nsight-compute-2026.1.0/ncu",
@@ -124,11 +130,139 @@ def _label(path: Path) -> str:
 
 
 def _ncu_row(path: Path) -> dict[str, str]:
-    rows = list(csv.DictReader(path.open(encoding="utf-8", newline="")))
-    for row in rows:
-        if row.get("Kernel Name"):
-            return {str(key): str(value) for key, value in row.items()}
-    raise ValueError(f"{path}: no kernel row")
+    with path.open(encoding="utf-8", newline="") as handle:
+        reader = csv.DictReader(handle)
+        if not reader.fieldnames:
+            raise ValueError(f"{path}: NCU CSV has no header")
+        rows = [
+            {str(key): str(value) for key, value in row.items()}
+            for row in reader
+            if row.get("Kernel Name")
+        ]
+    if len(rows) != 1:
+        raise ValueError(f"{path}: expected exactly one non-empty kernel row")
+    return rows[0]
+
+
+def _expected_ncu_target(cell: Mapping[str, Any]) -> list[str]:
+    binary = cell.get("binary")
+    if not isinstance(binary, Mapping) or not isinstance(binary.get("path"), str):
+        raise ValueError(f"{cell.get('id')}: NCU target binary is missing")
+    if cell.get("id") == "cp_async_canary":
+        return [binary["path"], "c11", "l1", "0", "4", "3"]
+    return [binary["path"], "--timing_shape", "--warmup", "1", "--reps", "1"]
+
+
+def _expected_ncu_metrics(cell: Mapping[str, Any]) -> tuple[str, ...]:
+    return METRICS if cell.get("id") == "cp_async_canary" else PORTABLE_NCU_METRICS
+
+
+def _canonical_ncu_argv(cell: Mapping[str, Any], output: str) -> list[str]:
+    return [
+        ".venv/bin/python",
+        "tools/local_labels/collect_ncu.py",
+        "--output",
+        output,
+        "--metrics",
+        ",".join(_expected_ncu_metrics(cell)),
+        "--launch-skip",
+        "1",
+        "--launch-count",
+        "1",
+        "--replay-mode",
+        "application",
+        "--clock-control",
+        "none",
+        "--",
+        *_expected_ncu_target(cell),
+    ]
+
+
+def _validate_ncu_stage_contract(
+    root: Path, cell: Mapping[str, Any], stage: Mapping[str, Any]
+) -> None:
+    slug = str(cell.get("id"))
+    output = f"evidence/raw/ncu/{slug}"
+    expected_argv = _canonical_ncu_argv(cell, output)
+    if stage.get("argv") != expected_argv:
+        raise ValueError(f"{slug}: NCU stage command is not bound to the reviewed target")
+    if stage.get("output") != output or stage.get("csv") != output + "/ncu.csv":
+        raise ValueError(f"{slug}: NCU output/CSV paths are not bound to the stage")
+    if stage.get("tool_path") != TRUSTED_NCU_IDENTITY["path"]:
+        raise ValueError(f"{slug}: NCU stage tool is not the trusted executable")
+    exit_code = stage.get("exit_code")
+    if isinstance(exit_code, bool) or not isinstance(exit_code, int) or exit_code != 0:
+        raise ValueError(f"{slug}: NCU stage exit code is malformed or nonzero")
+    _campaign_file(root, stage.get("csv"), f"{slug}.ncu.csv")
+    for key in ("stdout", "stderr"):
+        if key in stage:
+            _campaign_file(root, stage.get(key), f"{slug}.ncu.{key}")
+
+
+def _tuple3(value: object, label: str) -> tuple[int, int, int]:
+    if not isinstance(value, str):
+        raise ValueError(f"{label}: launch geometry is missing")
+    match = re.fullmatch(r"\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\)", value)
+    if match is None:
+        raise ValueError(f"{label}: launch geometry is malformed")
+    return tuple(int(item) for item in match.groups())  # type: ignore[return-value]
+
+
+def _validate_ncu_row_identity(
+    row: Mapping[str, str],
+    cell: Mapping[str, Any],
+    label: str,
+    expected_kernel: str | None = None,
+) -> str:
+    binary = cell.get("binary")
+    if not isinstance(binary, Mapping):
+        raise ValueError(f"{label}: binary identity is missing")
+    expected_process = Path(str(binary.get("path"))).name
+    if row.get("Process Name") != expected_process:
+        raise ValueError(f"{label}: NCU process identity differs from the reviewed binary")
+    kernel = row.get("Kernel Name")
+    if not isinstance(kernel, str) or not kernel:
+        raise ValueError(f"{label}: NCU kernel identity is empty")
+    if expected_kernel is not None and kernel != expected_kernel:
+        raise ValueError(f"{label}: NCU kernel identity differs between baseline and repeat")
+    if row.get("Device") != "0" or row.get("CC") != "8.6":
+        raise ValueError(f"{label}: NCU device/compute-capability identity differs")
+    expected_grid = tuple(cell.get("expected_grid", ()))
+    expected_block = tuple(cell.get("expected_block", ()))
+    if len(expected_grid) != 3 or len(expected_block) != 3:
+        raise ValueError(f"{label}: expected launch geometry is missing")
+    if _tuple3(row.get("Grid Size"), label) != expected_grid:
+        raise ValueError(f"{label}: NCU grid geometry differs")
+    if _tuple3(row.get("Block Size"), label) != expected_block:
+        raise ValueError(f"{label}: NCU block geometry differs")
+    for name, expected in (
+        ("launch__grid_dim_x", expected_grid[0]),
+        ("launch__grid_dim_y", expected_grid[1]),
+        ("launch__grid_dim_z", expected_grid[2]),
+        ("launch__block_dim_x", expected_block[0]),
+        ("launch__block_dim_y", expected_block[1]),
+        ("launch__block_dim_z", expected_block[2]),
+        ("launch__thread_count", expected_grid[0] * expected_grid[1] * expected_grid[2] * expected_block[0] * expected_block[1] * expected_block[2]),
+    ):
+        if _metric(row, name) != expected:
+            raise ValueError(f"{label}: NCU launch geometry field {name} differs")
+    return kernel
+
+
+def _validate_ncu_csv(
+    path: Path,
+    cell: Mapping[str, Any],
+    label: str,
+    expected_kernel: str | None = None,
+) -> tuple[dict[str, str], str]:
+    row = _ncu_row(path)
+    required_metrics = _expected_ncu_metrics(cell)
+    if any(name not in row for name in required_metrics):
+        raise ValueError(f"{label}: NCU CSV is missing a canonical metric")
+    kernel = _validate_ncu_row_identity(row, cell, label, expected_kernel)
+    for name in required_metrics:
+        _metric(row, name)
+    return row, kernel
 
 
 def _metric(row: Mapping[str, str], name: str) -> int:
@@ -472,7 +606,12 @@ def _validate_repeat_metadata(
     for key, expected in (("csv", expected_csv), ("report", expected_report)):
         if not _campaign_token_matches(metadata.get(key), expected, root):
             raise ValueError(f"{slug}: repeated NCU metadata {key} path is misbound")
-    _campaign_file(root, expected_report, f"{slug}.ncu_repeat.report")
+    report_path = _campaign_file(root, expected_report, f"{slug}.ncu_repeat.report")
+    if report_path.stat().st_size == 0:
+        raise ValueError(f"{slug}: repeated NCU report artifact is empty")
+    csv_path = _campaign_file(root, expected_csv, f"{slug}.ncu_repeat.csv")
+    if csv_path.stat().st_size == 0:
+        raise ValueError(f"{slug}: repeated NCU CSV artifact is empty")
     if target[0] != cell.get("binary", {}).get("path"):
         raise ValueError(f"{slug}: repeated NCU target binary differs")
 
@@ -484,6 +623,7 @@ def _repeat_metrics(
     ncu_identity: Mapping[str, str],
 ) -> dict[str, Any]:
     slug = str(cell["id"])
+    _validate_ncu_stage_contract(root, cell, stage)
     baseline_csv = _campaign_file(root, stage.get("csv"), f"{slug}.ncu")
     repeat_dir = f"evidence/raw/ncu_repeat/rep-2/{slug}"
     repeat_csv = _campaign_file(
@@ -495,14 +635,16 @@ def _repeat_metrics(
     repeat_report = _campaign_file(
         root, repeat_dir + "/ncu-report.ncu-rep", f"{slug}.ncu_repeat.report"
     )
-    metadata = json.loads(repeat_metadata.read_text(encoding="utf-8"))
+    metadata = replay_resume.load_json_strict(repeat_metadata)
     if not isinstance(metadata, Mapping):
         raise ValueError(f"{slug}: repeated NCU metadata is malformed")
     _validate_repeat_metadata(root, cell, stage, repeat_dir, metadata, ncu_identity)
-    baseline_row = _ncu_row(baseline_csv)
-    repeat_row = _ncu_row(repeat_csv)
-    if any(name not in repeat_row for name in METRICS):
-        raise ValueError(f"{slug}: repeated NCU CSV does not contain the canonical metric set")
+    baseline_row, kernel_name = _validate_ncu_csv(
+        baseline_csv, cell, f"{slug}.ncu.baseline"
+    )
+    repeat_row, _ = _validate_ncu_csv(
+        repeat_csv, cell, f"{slug}.ncu.repeat", expected_kernel=kernel_name
+    )
     baseline = {name: _metric(baseline_row, name) for name in METRICS}
     repeat = {name: _metric(repeat_row, name) for name in METRICS}
     deltas = {name: repeat[name] - baseline[name] for name in METRICS}
@@ -525,6 +667,16 @@ def _repeat_metrics(
             "started_at": metadata.get("started_at"),
             "finished_at": metadata.get("finished_at"),
             "contract_validated": True,
+        },
+        "provenance": {
+            "process_name": baseline_row.get("Process Name"),
+            "kernel_name": kernel_name,
+            "device": baseline_row.get("Device"),
+            "compute_capability": baseline_row.get("CC"),
+            "grid_size": baseline_row.get("Grid Size"),
+            "block_size": baseline_row.get("Block Size"),
+            "target": _expected_ncu_target(cell),
+            "metrics": list(_expected_ncu_metrics(cell)),
         },
     }
 
@@ -880,6 +1032,13 @@ def build_report(manifest_path: Path, output_path: Path | None = None) -> dict[s
         "rows": rows,
         "decision": decision,
         "acceptance_criteria": {
+            "AC-1": {
+                "status": "pass",
+                "evidence": [
+                    "campaign-bound release build transcript and binary hash",
+                    "current RTX 3090 Ti host/toolchain preflight",
+                ],
+            },
             "AC-3": {
                 "status": "pass",
                 "evidence": [

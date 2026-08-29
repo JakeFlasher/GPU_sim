@@ -3,6 +3,7 @@ from __future__ import annotations
 from copy import deepcopy
 import importlib.util
 import json
+import shutil
 from pathlib import Path
 
 import pytest
@@ -188,3 +189,23 @@ def test_replay_summary_accepts_complete_frontier(tmp_path: Path) -> None:
         "coherence": False,
         "async_copy_shared_visibility": False,
     }
+
+
+def test_ncu_repeat_csv_cannot_be_substituted_across_same_geometry_cells(
+    tmp_path: Path,
+) -> None:
+    manifest = json.loads(
+        Path(
+            "results/captures/sm86_simulator_live_baseline_20260829_v2/campaign_manifest.json"
+        ).read_text(encoding="utf-8")
+    )
+    cell = next(c for c in manifest["cells"] if c["id"] == "gemm_hmma_bf16_sm80")
+    source = Path(
+        "results/captures/sm86_simulator_live_baseline_20260829_v2/evidence/raw/ncu_repeat/rep-2/gemm_hmma_fp16_sm80/ncu.csv"
+    )
+    substituted = tmp_path / "substituted.csv"
+    shutil.copyfile(source, substituted)
+    with pytest.raises(ValueError, match="process identity|kernel identity"):
+        ANALYZER._validate_ncu_csv(
+            substituted, cell, "cross-cell-repeat", expected_kernel="gemm_hmma_bf16_sm80_kernel"
+        )

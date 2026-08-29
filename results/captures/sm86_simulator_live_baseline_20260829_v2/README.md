@@ -73,6 +73,12 @@ simulator inputs.
 
 ## Reproduction commands
 
+The release simulator build is a separately recorded, campaign-bound step:
+`evidence/host_preflight/release_build.json` contains the exact command,
+finite timeout, exit status, revision, transcript hashes, and resulting
+`sim/target/release/sim-run` hash. The cohort validator checks this record
+against the current binary before accepting any replay.
+
 Correctness (one per portable cell):
 
 ```bash

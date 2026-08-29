@@ -1,5 +1,12 @@
 {
   "acceptance_criteria": {
+    "AC-1": {
+      "evidence": [
+        "campaign-bound release build transcript and binary hash",
+        "current RTX 3090 Ti host/toolchain preflight"
+      ],
+      "status": "pass"
+    },
     "AC-3": {
       "evidence": [
         "strict direct replay schema validation",
@@ -204,6 +211,27 @@
           "smsp__inst_executed.sum": 0
         },
         "max_relative_delta": 5.61e-06,
+        "provenance": {
+          "block_size": "(128, 1, 1)",
+          "compute_capability": "8.6",
+          "device": "0",
+          "grid_size": "(1, 1, 1)",
+          "kernel_name": "void async_barrier_overlap<3>(const char *, char *, unsigned long long *, unsigned int *, int, unsigned long, unsigned long)",
+          "metrics": [
+            "gpc__cycles_elapsed.max",
+            "sm__cycles_active.max",
+            "smsp__inst_executed.sum"
+          ],
+          "process_name": "async_barrier_overlap",
+          "target": [
+            "workloads/research_probes/async_barrier_overlap/async_barrier_overlap",
+            "c11",
+            "l1",
+            "0",
+            "4",
+            "3"
+          ]
+        },
         "repeat_2": {
           "gpc__cycles_elapsed.max": 4460031,
           "sm__cycles_active.max": 4458452,
@@ -376,6 +404,30 @@
           "smsp__inst_executed.sum": 0
         },
         "max_relative_delta": 0.01131086,
+        "provenance": {
+          "block_size": "(32, 1, 1)",
+          "compute_capability": "8.6",
+          "device": "0",
+          "grid_size": "(16, 32, 1)",
+          "kernel_name": "gemm_hmma_bf16_sm80_kernel",
+          "metrics": [
+            "gpc__cycles_elapsed.max",
+            "sm__cycles_active.max",
+            "smsp__inst_executed.sum",
+            "lts__t_sectors_srcunit_tex_op_read.sum",
+            "dram__sectors_read.sum",
+            "sm__pipe_tensor_cycles_active.sum"
+          ],
+          "process_name": "gemm_hmma_bf16_sm80_run",
+          "target": [
+            "workloads/portable_lcd/gemm_hmma_bf16_sm80/gemm_hmma_bf16_sm80_run",
+            "--timing_shape",
+            "--warmup",
+            "1",
+            "--reps",
+            "1"
+          ]
+        },
         "repeat_2": {
           "gpc__cycles_elapsed.max": 13501,
           "sm__cycles_active.max": 11745,
@@ -551,6 +603,30 @@
           "smsp__inst_executed.sum": 0
         },
         "max_relative_delta": 0.00389982,
+        "provenance": {
+          "block_size": "(32, 1, 1)",
+          "compute_capability": "8.6",
+          "device": "0",
+          "grid_size": "(16, 32, 1)",
+          "kernel_name": "gemm_hmma_fp16_sm80_kernel",
+          "metrics": [
+            "gpc__cycles_elapsed.max",
+            "sm__cycles_active.max",
+            "smsp__inst_executed.sum",
+            "lts__t_sectors_srcunit_tex_op_read.sum",
+            "dram__sectors_read.sum",
+            "sm__pipe_tensor_cycles_active.sum"
+          ],
+          "process_name": "gemm_hmma_fp16_sm80_run",
+          "target": [
+            "workloads/portable_lcd/gemm_hmma_fp16_sm80/gemm_hmma_fp16_sm80_run",
+            "--timing_shape",
+            "--warmup",
+            "1",
+            "--reps",
+            "1"
+          ]
+        },
         "repeat_2": {
           "gpc__cycles_elapsed.max": 13237,
           "sm__cycles_active.max": 11494,
@@ -726,6 +802,30 @@
           "smsp__inst_executed.sum": 0
         },
         "max_relative_delta": 0.00071913,
+        "provenance": {
+          "block_size": "(32, 1, 1)",
+          "compute_capability": "8.6",
+          "device": "0",
+          "grid_size": "(16, 32, 1)",
+          "kernel_name": "gemm_imma_int8_sm80_kernel",
+          "metrics": [
+            "gpc__cycles_elapsed.max",
+            "sm__cycles_active.max",
+            "smsp__inst_executed.sum",
+            "lts__t_sectors_srcunit_tex_op_read.sum",
+            "dram__sectors_read.sum",
+            "sm__pipe_tensor_cycles_active.sum"
+          ],
+          "process_name": "gemm_imma_int8_sm80_run",
+          "target": [
+            "workloads/portable_lcd/gemm_imma_int8_sm80/gemm_imma_int8_sm80_run",
+            "--timing_shape",
+            "--warmup",
+            "1",
+            "--reps",
+            "1"
+          ]
+        },
         "repeat_2": {
           "gpc__cycles_elapsed.max": 11419,
           "sm__cycles_active.max": 9741,
@@ -901,6 +1001,30 @@
           "smsp__inst_executed.sum": 0
         },
         "max_relative_delta": 0.0084472,
+        "provenance": {
+          "block_size": "(32, 1, 1)",
+          "compute_capability": "8.6",
+          "device": "0",
+          "grid_size": "(8, 16, 1)",
+          "kernel_name": "gemm_sparse_2to4_bf16_sm80_kernel",
+          "metrics": [
+            "gpc__cycles_elapsed.max",
+            "sm__cycles_active.max",
+            "smsp__inst_executed.sum",
+            "lts__t_sectors_srcunit_tex_op_read.sum",
+            "dram__sectors_read.sum",
+            "sm__pipe_tensor_cycles_active.sum"
+          ],
+          "process_name": "gemm_sparse_2to4_bf16_sm80_run",
+          "target": [
+            "workloads/portable_lcd/gemm_sparse_2to4_bf16_sm80/gemm_sparse_2to4_bf16_sm80_run",
+            "--timing_shape",
+            "--warmup",
+            "1",
+            "--reps",
+            "1"
+          ]
+        },
         "repeat_2": {
           "gpc__cycles_elapsed.max": 5744,
           "sm__cycles_active.max": 4059,
@@ -1076,6 +1200,30 @@
           "smsp__inst_executed.sum": 0
         },
         "max_relative_delta": 0.01816424,
+        "provenance": {
+          "block_size": "(32, 1, 1)",
+          "compute_capability": "8.6",
+          "device": "0",
+          "grid_size": "(4, 4, 1)",
+          "kernel_name": "flash_attn_fwd_bf16_sm80_kernel",
+          "metrics": [
+            "gpc__cycles_elapsed.max",
+            "sm__cycles_active.max",
+            "smsp__inst_executed.sum",
+            "lts__t_sectors_srcunit_tex_op_read.sum",
+            "dram__sectors_read.sum",
+            "sm__pipe_tensor_cycles_active.sum"
+          ],
+          "process_name": "flash_attn_fwd_bf16_sm80_run",
+          "target": [
+            "workloads/portable_lcd/flash_attn_fwd_bf16_sm80/flash_attn_fwd_bf16_sm80_run",
+            "--timing_shape",
+            "--warmup",
+            "1",
+            "--reps",
+            "1"
+          ]
+        },
         "repeat_2": {
           "gpc__cycles_elapsed.max": 15851,
           "sm__cycles_active.max": 14216,

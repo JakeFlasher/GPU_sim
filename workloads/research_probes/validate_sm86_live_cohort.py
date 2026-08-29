@@ -741,6 +741,75 @@ def _validate_host_preflight(
             raise ValueError(f"host preflight {name}: recorded output does not contain the bound value")
 
 
+def _validate_release_build(
+    root: Path, manifest: Mapping[str, Any], repository: Mapping[str, Any]
+) -> None:
+    """Validate the durable release-build transcript and resulting binary."""
+
+    record = manifest.get("release_build")
+    if not isinstance(record, Mapping):
+        raise ValueError("manifest release_build record is missing")
+    record_path = _assert_file(root, record.get("record"), "release_build.record")
+    record_hash = record.get("record_sha256")
+    if not isinstance(record_hash, str) or len(record_hash) != 64 or _sha256(record_path) != record_hash:
+        raise ValueError("release_build record hash does not match artifact")
+    try:
+        document = replay_resume.load_json_strict(record_path)
+    except (OSError, UnicodeDecodeError, ValueError, json.JSONDecodeError) as exc:
+        raise ValueError("release_build record is not strict JSON") from exc
+    if not isinstance(document, Mapping) or type(document.get("schema_version")) is not int or document.get("schema_version") != 1:
+        raise ValueError("release_build record schema is unsupported")
+    expected_argv = ["cargo", "build", "--release", "--manifest-path", "sim/Cargo.toml", "-p", "sim-run"]
+    if document.get("argv") != expected_argv or record.get("argv") != expected_argv:
+        raise ValueError("release_build argv differs from the required release build")
+    timeout = document.get("timeout_seconds")
+    if isinstance(timeout, bool) or not isinstance(timeout, int) or timeout <= 0:
+        raise ValueError("release_build timeout is malformed")
+    if record.get("timeout_seconds") != timeout:
+        raise ValueError("release_build timeout is not bound to its transcript")
+    if isinstance(document.get("return_code"), bool) or document.get("return_code") != 0:
+        raise ValueError("release_build did not exit successfully")
+    if record.get("exit_code") != document.get("return_code"):
+        raise ValueError("release_build exit status differs from its transcript")
+    revision = document.get("repository_revision")
+    if not isinstance(revision, str) or len(revision) != 40 or record.get("repository_revision") != revision:
+        raise ValueError("release_build repository revision is malformed or unbound")
+    for key in ("stdout", "stderr"):
+        path = _assert_file(root, document.get(key), f"release_build.{key}")
+        if record.get(key) != document.get(key):
+            raise ValueError(f"release_build {key} path differs from its transcript")
+        digest = document.get(f"{key}_sha256")
+        if not isinstance(digest, str) or len(digest) != 64 or _sha256(path) != digest:
+            raise ValueError(f"release_build {key} hash does not match artifact")
+        if record.get(f"{key}_sha256") != digest:
+            raise ValueError(f"release_build {key} hash is not bound to its transcript")
+    if not (
+        Path(root / document["stdout"]).read_text(encoding="utf-8", errors="replace").strip()
+        or Path(root / document["stderr"]).read_text(encoding="utf-8", errors="replace").strip()
+    ):
+        raise ValueError("release_build transcript has no inspectable output")
+    binary_record = document.get("binary")
+    manifest_binary = repository.get("simulator_binary")
+    if not isinstance(binary_record, Mapping) or not isinstance(manifest_binary, Mapping):
+        raise ValueError("release_build binary identity is missing")
+    binary = _assert_file(REPO_ROOT, "sim/target/release/sim-run", "release_build.binary")
+    actual_hash = _sha256(binary)
+    if (
+        binary_record.get("path") != "sim/target/release/sim-run"
+        or binary_record.get("sha256") != actual_hash
+        or manifest_binary.get("path") != binary_record.get("path")
+        or manifest_binary.get("sha256") != binary_record.get("sha256")
+        or record.get("binary") != dict(binary_record)
+    ):
+        raise ValueError("release_build binary identity differs from the current release binary")
+    size = binary_record.get("size_bytes")
+    if isinstance(size, bool) or not isinstance(size, int) or size != binary.stat().st_size:
+        raise ValueError("release_build binary size is malformed or stale")
+    for key in ("argv", "timeout_seconds", "repository_revision", "stdout", "stderr", "stdout_sha256", "stderr_sha256", "binary"):
+        if record.get(key) != document.get(key):
+            raise ValueError(f"release_build manifest field {key} differs from its transcript")
+
+
 def _path_label(path: Path) -> str:
     """Use the same stable path spelling as the closure analyzer."""
 
@@ -1133,6 +1202,7 @@ def validate(manifest_path: Path, report_path: Path | None) -> int:
         raise ValueError("manifest NCU executable hash does not match the trusted toolchain")
     host_record_path = _assert_file(root, host.get("preflight_record"), "host.preflight_record")
     _validate_host_preflight(root, host_record_path, repository, host, tools)
+    _validate_release_build(root, document, repository)
     bundle = document.get("evidence_bundle")
     if not isinstance(bundle, Mapping):
         raise ValueError("manifest evidence_bundle is missing")
@@ -1291,16 +1361,19 @@ def validate(manifest_path: Path, report_path: Path | None) -> int:
     ):
         raise ValueError("closure analysis diagnostic selection record is missing")
     acceptance = closure_report.get("acceptance_criteria")
+    ac1 = acceptance.get("AC-1") if isinstance(acceptance, Mapping) else None
     ac3 = acceptance.get("AC-3") if isinstance(acceptance, Mapping) else None
     ac4 = acceptance.get("AC-4") if isinstance(acceptance, Mapping) else None
     if (
-        not isinstance(ac3, Mapping)
+        not isinstance(ac1, Mapping)
+        or ac1.get("status") != "pass"
+        or not isinstance(ac3, Mapping)
         or ac3.get("status") != "pass"
         or not isinstance(ac4, Mapping)
         or ac4.get("status") != "pass"
         or ac4.get("mode") != "falsified_no_go"
     ):
-        raise ValueError("closure analysis does not explicitly pass AC-3 and AC-4")
+        raise ValueError("closure analysis does not explicitly pass AC-1, AC-3, and AC-4")
     cells = document.get("cells")
     if not isinstance(cells, list) or len(cells) != 6:
         raise ValueError("manifest must contain exactly six cohort cells")

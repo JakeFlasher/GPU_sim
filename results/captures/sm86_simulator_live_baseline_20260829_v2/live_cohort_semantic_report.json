@@ -146,7 +146,9 @@
                 "expected_l1_read_sectors": 32768,
                 "observed_l1_read_sectors": 32768,
                 "passed": true,
-                "status": "checked"
+                "promotion_eligible": true,
+                "status": "checked",
+                "unknown_reason": null
               },
               "checks": {
                 "global_atomic_instructions": true,
@@ -184,6 +186,7 @@
             }
           },
           "passed": true,
+          "promotion_eligible": true,
           "trace_expected": {
             "async_copy_instructions": 2048,
             "async_source_sectors": 32768,
@@ -350,7 +353,9 @@
                 "expected_l1_read_sectors": 196608,
                 "observed_l1_read_sectors": 196608,
                 "passed": true,
-                "status": "checked"
+                "promotion_eligible": true,
+                "status": "checked",
+                "unknown_reason": null
               },
               "checks": {
                 "global_atomic_instructions": true,
@@ -388,6 +393,7 @@
             }
           },
           "passed": true,
+          "promotion_eligible": true,
           "trace_expected": {
             "async_copy_instructions": 16384,
             "async_source_sectors": 196608,
@@ -554,7 +560,9 @@
                 "expected_l1_read_sectors": 196608,
                 "observed_l1_read_sectors": 196608,
                 "passed": true,
-                "status": "checked"
+                "promotion_eligible": true,
+                "status": "checked",
+                "unknown_reason": null
               },
               "checks": {
                 "global_atomic_instructions": true,
@@ -592,6 +600,7 @@
             }
           },
           "passed": true,
+          "promotion_eligible": true,
           "trace_expected": {
             "async_copy_instructions": 16384,
             "async_source_sectors": 196608,
@@ -759,7 +768,9 @@
                 "expected_l1_read_sectors": 196608,
                 "observed_l1_read_sectors": 196608,
                 "passed": true,
-                "status": "checked"
+                "promotion_eligible": true,
+                "status": "checked",
+                "unknown_reason": null
               },
               "checks": {
                 "global_atomic_instructions": true,
@@ -797,6 +808,7 @@
             }
           },
           "passed": true,
+          "promotion_eligible": true,
           "trace_expected": {
             "async_copy_instructions": 16384,
             "async_source_sectors": 196608,
@@ -959,7 +971,9 @@
                 "expected_l1_read_sectors": 16384,
                 "observed_l1_read_sectors": 16384,
                 "passed": true,
-                "status": "checked"
+                "promotion_eligible": true,
+                "status": "checked",
+                "unknown_reason": null
               },
               "checks": {
                 "global_atomic_instructions": true,
@@ -997,6 +1011,7 @@
             }
           },
           "passed": true,
+          "promotion_eligible": true,
           "trace_expected": {
             "async_copy_instructions": 1024,
             "async_source_sectors": 16384,
@@ -1162,7 +1177,9 @@
                 "expected_l1_read_sectors": 4352,
                 "observed_l1_read_sectors": 4352,
                 "passed": true,
-                "status": "checked"
+                "promotion_eligible": true,
+                "status": "checked",
+                "unknown_reason": null
               },
               "checks": {
                 "global_atomic_instructions": true,
@@ -1200,6 +1217,7 @@
             }
           },
           "passed": true,
+          "promotion_eligible": true,
           "trace_expected": {
             "async_copy_instructions": 272,
             "async_source_sectors": 4352,
