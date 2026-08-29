@@ -10,6 +10,17 @@
     ],
     "decision": "no-go",
     "held_out_discriminator": "not_run; the next pair is intentionally held out to avoid selecting a timing seam from the scored cohort.",
+    "input_validation": {
+      "comparable_rows": 5,
+      "decision_eligible": true,
+      "repeat_stable_rows": 6,
+      "required_diagnostic_rows": 6,
+      "residual_max_cycles": 3867,
+      "residual_min_cycles": 1650,
+      "residual_score_cycles": 12839,
+      "retirement_tail_rows": 5,
+      "rows": 6
+    },
     "manifest": {
       "campaign_id": "sm86_simulator_live_baseline_20260829_v2",
       "candidate_revision": "8cae7c6f37e378ac54e4c5fe5f7acd3f38991480",
@@ -25,15 +36,15 @@
     {
       "candidate": "dirty_writeback_coherence_retirement",
       "evidence_cells": [
-        "cp_async_canary",
         "gemm_hmma_bf16_sm80",
         "gemm_hmma_fp16_sm80",
         "gemm_imma_int8_sm80",
         "gemm_sparse_2to4_bf16_sm80",
         "flash_attn_fwd_bf16_sm80"
       ],
-      "reason": "Every cohort replay exposes both typed tails; a scalar completion offset cannot separate them from launch or async/barrier behavior.",
-      "selection": "next_discriminator"
+      "reason": "Typed dirty-writeback/coherence tails occur in 5/5 comparable rows; the summed repeat-stable residual is 12839 cycles, but a scalar offset cannot separate retirement from launch or async/barrier behavior.",
+      "selection": "next_discriminator",
+      "selection_score": 12839
     },
     {
       "candidate": "async_destination_service",
@@ -44,8 +55,9 @@
         "gemm_imma_int8_sm80",
         "gemm_sparse_2to4_bf16_sm80"
       ],
-      "reason": "It is a dominant modeled readiness cause in some cells, but no independent silicon observable isolates it from retirement tails.",
-      "selection": "candidate_not_admitted"
+      "reason": "A modeled readiness cause is present, but no independent silicon observable isolates it from retirement tails.",
+      "selection": "candidate_not_admitted",
+      "selection_score": 5
     },
     {
       "candidate": "control_and_barrier_readiness",
@@ -57,8 +69,9 @@
         "gemm_sparse_2to4_bf16_sm80",
         "flash_attn_fwd_bf16_sm80"
       ],
-      "reason": "The readiness counters are modeled diagnostics, not an independent live timing label.",
-      "selection": "candidate_not_admitted"
+      "reason": "Readiness counters are modeled diagnostics, not an independent live timing label.",
+      "selection": "candidate_not_admitted",
+      "selection_score": 6
     },
     {
       "candidate": "launch_envelope",
@@ -71,7 +84,8 @@
         "flash_attn_fwd_bf16_sm80"
       ],
       "reason": "GPC elapsed includes launch work not represented by the direct event frontier; it is not a simulator-local latency.",
-      "selection": "candidate_not_admitted"
+      "selection": "candidate_not_admitted",
+      "selection_score": 6
     }
   ],
   "decision": {
@@ -83,8 +97,9 @@
     ],
     "decision": "no-go",
     "next_action": "Run the matched store-free/barrier-free async-source discriminator with an independent retirement/frontier observable before changing simulator timing state.",
-    "reason": "Live residuals are repeat-stable at the measured envelope, but the simulator reports dirty-writeback/coherence tails for every comparable cell and the observations do not identify one architecture-local latency.",
-    "seam": "cycle scalar completion/retirement mapping"
+    "reason": "Live residuals are repeat-stable across 6 rows, while the simulator reports dirty-writeback/coherence tails in every comparable row (5/5); the observations do not identify one architecture-local latency.",
+    "seam": "cycle scalar completion/retirement mapping",
+    "selected_diagnostic": "dirty_writeback_coherence_retirement"
   },
   "rows": [
     {

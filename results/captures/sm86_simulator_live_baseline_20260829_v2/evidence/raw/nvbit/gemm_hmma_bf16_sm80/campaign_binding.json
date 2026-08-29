@@ -1,0 +1,64 @@
+{
+  "argv": [
+    "workloads/portable_lcd/gemm_hmma_bf16_sm80/gemm_hmma_bf16_sm80_run",
+    "--timing_shape",
+    "--warmup",
+    "0",
+    "--reps",
+    "1"
+  ],
+  "cell": "gemm_hmma_bf16_sm80",
+  "environment": {
+    "ACTIVE_FROM_START": "1",
+    "CUDA_INJECTION64_PATH": "tools/nvbit_tracer/tracer_tool/tracer_tool.so",
+    "DYNAMIC_KERNEL_LIMIT_END": "1",
+    "DYNAMIC_KERNEL_LIMIT_START": "0",
+    "ENHANCED_TRACER_MAX_PARSER_INPUT_KB": "256",
+    "ENHANCED_TRACER_PER_CUBIN_TIMEOUT_S": "45",
+    "LD_LIBRARY_PATH": ".toolchain/pb/lib",
+    "SKIP_ENHANCED_TRACER": "0",
+    "TRACES_FOLDER": "evidence/raw/nvbit/gemm_hmma_bf16_sm80",
+    "USER_DEFINED_FOLDERS": "1"
+  },
+  "geometry": {
+    "block": [
+      32,
+      1,
+      1
+    ],
+    "blocks": 512,
+    "grid": [
+      16,
+      32,
+      1
+    ],
+    "threads_per_block": 32
+  },
+  "hashes": {
+    "dynamic_trace_sha256": "918f57a54ecdc723e077a933bfb8d0311bcb5202c69c11e8dcd625ae162e2697",
+    "execution_info_sha256": "97f04c5ff2b014ebc09cee9ed6f07ec94a4e033da05159797a9196532a9b0567",
+    "mapping_sha256": "4a7e4830b7fe84e8834a201a6f5bbb7c2619345b4474a17a624809205cdfd355",
+    "stats_sha256": "774256c019e5f9da3156298a7b7a43e5eee26ce2ae04edb062b07596fa0a71dd"
+  },
+  "mapping_contract": {
+    "accepted_active_launches": 1,
+    "accepted_channel_records": 422400,
+    "kernel_architecture_version": 86,
+    "kernel_name": "gemm_hmma_bf16_sm80_kernel___0",
+    "mapping_launch_count": 1,
+    "schema_version": 1,
+    "unique_function_id": 1
+  },
+  "paths": {
+    "dynamic_trace": "evidence/raw/nvbit/gemm_hmma_bf16_sm80/dynamic_trace.pb",
+    "execution_info": "evidence/raw/nvbit/gemm_hmma_bf16_sm80/extra_info/enhanced_execution_info.json",
+    "mapping": "evidence/raw/nvbit/gemm_hmma_bf16_sm80/extra_info/traced_kernel_modules.json",
+    "stats": "evidence/raw/nvbit/gemm_hmma_bf16_sm80/stats.csv"
+  },
+  "schema_version": 1,
+  "trace_binary": {
+    "path": "workloads/portable_lcd/gemm_hmma_bf16_sm80/gemm_hmma_bf16_sm80_run",
+    "sha256": "55133e328fc16238d78e3dde335b4ce5789a4b3838fb440da41f489f805a1362"
+  },
+  "trace_root": "evidence/raw/nvbit/gemm_hmma_bf16_sm80"
+}

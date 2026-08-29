@@ -34,12 +34,24 @@ launches. That artifact is invalid for this cohort. The corrected command uses
 `ACTIVE_FROM_START=1` because these binaries do not emit profiler start/stop
 markers; the async research probe remains profiler-marked and uses 0.
 
+Correctness is a separate base-binary lane. All six correctness captures were
+rerun with a minimal CUDA runtime environment and the profiler/injection
+variables explicitly absent; the effective argv/environment records are kept
+next to each stdout/stderr pair. The clean async correctness run uses 16,384
+groups, while its independent NVBit trace intentionally uses the 64-group
+research-probe capture.
+
 The active replay validator now derives trace instruction/sector invariants and
 records per-launch readiness, modeled-event, completion-frontier, and typed-tail
 diagnostics. The compact summary is
 [`semantic_replay_summary.json`](semantic_replay_summary.json); the complete
 per-launch report is the compressed
 `semantic_replay_report.json.zst` referenced there.
+
+Each NVBit root also has a `campaign_binding.json` sidecar. It binds the
+traced-binary hash, injection path, trace output root, dynamic protobuf, stats,
+mapping, enhanced execution metadata, and launch geometry; the fresh validator
+checks those bindings before passing a replay to `sim-run`.
 
 The same semantic checks are applied independently to the six fresh live
 replays by `workloads/research_probes/validate_sm86_live_cohort.py`; its
@@ -75,6 +87,22 @@ dram__sectors_read.sum,sm__pipe_tensor_cycles_active.sum \
   --launch-skip 1 --launch-count 1 --replay-mode application \
   --clock-control none -- \
   workloads/portable_lcd/<slug>/<slug>_run --timing_shape --warmup 1 --reps 1
+```
+
+The correctness lane is intentionally profiler-free. For a portable cell the
+effective command is the first command below; for the async canary it is the
+second:
+
+```bash
+env -i HOME=/home/jakeshea LANG=C LC_ALL=C \
+  PATH=/opt/cuda/bin:/usr/bin:/bin LD_LIBRARY_PATH=/opt/cuda/lib64 \
+  workloads/portable_lcd/<slug>/<slug>_run \
+  --correctness_shape --seed 42 --warmup 1 --reps 1 \
+  --output_dir <out>
+env -i HOME=/home/jakeshea LANG=C LC_ALL=C \
+  PATH=/opt/cuda/bin:/usr/bin:/bin LD_LIBRARY_PATH=/opt/cuda/lib64 \
+  workloads/research_probes/async_barrier_overlap/async_barrier_overlap \
+  c11 l1 0 4 1
 ```
 
 NVBit uses the preserved tracer and a bounded enhanced-parser ceiling:

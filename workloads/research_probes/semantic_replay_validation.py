@@ -311,12 +311,39 @@ def validate_replay_document(
                     f"(expected instructions={expected.instructions}, blocks={expected.blocks})"
                 )
         traffic = launch.get("timing", {}).get("readiness", {}).get("global_memory_issue")
-        traffic_snapshot: dict[str, Any] = {"status": "unavailable"}
+        global_traffic_applicable = any(
+            value != 0
+            for value in (
+                expected.global_load_sectors,
+                expected.global_store_sectors,
+                expected.global_atomic_sectors,
+            )
+        )
+        traffic_snapshot: dict[str, Any]
         if isinstance(traffic, Mapping):
             error, traffic_snapshot = _global_memory_error(traffic, expected, prefix)
             checks["trace_global_memory_conservation"] = error is None
             if error is not None:
                 errors.append(error)
+        elif global_traffic_applicable:
+            traffic_snapshot = {
+                "status": "missing",
+                "applicable": True,
+                "expected": _expected_global_memory(expected),
+            }
+            checks["trace_global_memory_conservation"] = False
+            errors.append(
+                f"{prefix}: global_memory_issue diagnostic is required for trace-derived global traffic"
+            )
+        else:
+            # Keep the inapplicable case explicit in reports.  Silently
+            # omitting this lane made a gutted replay look semantically valid.
+            traffic_snapshot = {
+                "status": "not_applicable",
+                "applicable": False,
+                "expected": _expected_global_memory(expected),
+            }
+            checks["trace_global_memory_conservation"] = True
         async_error, async_snapshot = _async_source_error(counters, expected, prefix)
         traffic_snapshot["async_source"] = async_snapshot
         checks["async_source_conservation"] = async_error is None

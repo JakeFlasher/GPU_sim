@@ -1,0 +1,64 @@
+{
+  "argv": [
+    "workloads/portable_lcd/gemm_sparse_2to4_bf16_sm80/gemm_sparse_2to4_bf16_sm80_run",
+    "--timing_shape",
+    "--warmup",
+    "0",
+    "--reps",
+    "1"
+  ],
+  "cell": "gemm_sparse_2to4_bf16_sm80",
+  "environment": {
+    "ACTIVE_FROM_START": "1",
+    "CUDA_INJECTION64_PATH": "tools/nvbit_tracer/tracer_tool/tracer_tool.so",
+    "DYNAMIC_KERNEL_LIMIT_END": "1",
+    "DYNAMIC_KERNEL_LIMIT_START": "0",
+    "ENHANCED_TRACER_MAX_PARSER_INPUT_KB": "256",
+    "ENHANCED_TRACER_PER_CUBIN_TIMEOUT_S": "45",
+    "LD_LIBRARY_PATH": ".toolchain/pb/lib",
+    "SKIP_ENHANCED_TRACER": "0",
+    "TRACES_FOLDER": "evidence/raw/nvbit/gemm_sparse_2to4_bf16_sm80",
+    "USER_DEFINED_FOLDERS": "1"
+  },
+  "geometry": {
+    "block": [
+      32,
+      1,
+      1
+    ],
+    "blocks": 128,
+    "grid": [
+      8,
+      16,
+      1
+    ],
+    "threads_per_block": 32
+  },
+  "hashes": {
+    "dynamic_trace_sha256": "0be96ac1c47355a913cb604c13e1ddcc5f3f116df9e5abeccb84d8c39321dd49",
+    "execution_info_sha256": "af6a90843ead055efb19083cd003c51fa6227e95a565c272459cd1f8dd1821aa",
+    "mapping_sha256": "cd533701c71cc38bc7d6c606f3db2508249a47e08479cca514845cca28441023",
+    "stats_sha256": "c2ed057ca9d44707da735d3e5e3717e42fce3cf0793e5675b25cc90fa20d377d"
+  },
+  "mapping_contract": {
+    "accepted_active_launches": 1,
+    "accepted_channel_records": 46976,
+    "kernel_architecture_version": 86,
+    "kernel_name": "gemm_sparse_2to4_bf16_sm80_kernel___0",
+    "mapping_launch_count": 1,
+    "schema_version": 1,
+    "unique_function_id": 1
+  },
+  "paths": {
+    "dynamic_trace": "evidence/raw/nvbit/gemm_sparse_2to4_bf16_sm80/dynamic_trace.pb",
+    "execution_info": "evidence/raw/nvbit/gemm_sparse_2to4_bf16_sm80/extra_info/enhanced_execution_info.json",
+    "mapping": "evidence/raw/nvbit/gemm_sparse_2to4_bf16_sm80/extra_info/traced_kernel_modules.json",
+    "stats": "evidence/raw/nvbit/gemm_sparse_2to4_bf16_sm80/stats.csv"
+  },
+  "schema_version": 1,
+  "trace_binary": {
+    "path": "workloads/portable_lcd/gemm_sparse_2to4_bf16_sm80/gemm_sparse_2to4_bf16_sm80_run",
+    "sha256": "abf792ec7d7e7042ca4a4c21ae611577b50b94fad5c1a6ee534b45b13a22e254"
+  },
+  "trace_root": "evidence/raw/nvbit/gemm_sparse_2to4_bf16_sm80"
+}

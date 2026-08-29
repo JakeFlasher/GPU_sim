@@ -12,8 +12,8 @@
   "live_cohort_semantic_report": "results/captures/sm86_simulator_live_baseline_20260829_v2/live_cohort_semantic_report.json",
   "live_cohort_semantic_report_sha256": "b761eddf8b3335165cd6ae010471496c8cdb1809782d259f7732b531f69af426",
   "closure_report": "results/captures/sm86_simulator_live_baseline_20260829_v2/closure_report.json",
-  "closure_report_sha256": "7585e68a986219ed805bcc9cff7a20a40b6a8a2c9eaa8db41abcc597c765f727",
-  "raw_evidence_archive_sha256": "4f343143a969b6e68be16a509ab5f7331832c25f347246fe9108900f2ddbaafc",
+  "closure_report_sha256": "f7404cbbd3974bbd3a64fae61746c7c8ccf47fdc46925aa34cf32d6ecd48bb04",
+  "raw_evidence_archive_sha256": "ac1e492de3d11da0e1e069d0d72966e0748916fc264986de4b2f838f65784fe5",
   "architecture": "sm_86",
   "gpu": "NVIDIA GeForce RTX 3090 Ti",
   "driver": "610.57.04",
@@ -23,6 +23,13 @@
     "nvbit": "1.8",
     "protobuf_runtime": "7.34.1",
     "rust": "1.96.1"
+  },
+  "correctness_capture": {
+    "mode": "clean_base_binary",
+    "profiler_injection_variables_present": false,
+    "environment_records": "evidence/raw/correctness/<cell>/environment.json",
+    "async_correctness_groups": 16384,
+    "async_nvbit_trace_groups": 64
   },
   "cohort": [
     {

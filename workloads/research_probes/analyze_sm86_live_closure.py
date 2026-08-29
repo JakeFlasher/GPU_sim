@@ -178,6 +178,136 @@ def _repeat_metrics(root: Path, slug: str, stage: Mapping[str, Any]) -> dict[str
     }
 
 
+def _derive_decision(
+    rows: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], dict[str, Any], dict[str, Any]]:
+    """Derive the closure decision from validated observations.
+
+    A no-go is only eligible when the live repeat and the simulator diagnostic
+    lanes are present for every comparable row.  Missing or contradictory
+    evidence is an analysis failure, never an implicit no-go.
+    """
+
+    comparable = [row for row in rows if row.get("comparable_to_simulator_timing")]
+    unstable = [
+        row["cell"]
+        for row in rows
+        if row.get("live", {}).get("stable_within_five_percent") is not True
+    ]
+    if unstable:
+        raise ValueError(
+            "insufficient_evidence: live repeat is unstable for " + ", ".join(unstable)
+        )
+    missing_diagnostics = [
+        row["cell"]
+        for row in rows
+        if not isinstance(row.get("simulator", {}).get("readiness_schema"), int)
+        or not row.get("simulator", {}).get("top_readiness_causes")
+    ]
+    if missing_diagnostics:
+        raise ValueError(
+            "insufficient_evidence: required readiness diagnostics are absent for "
+            + ", ".join(missing_diagnostics)
+        )
+    tail_rows = [
+        row
+        for row in comparable
+        if row.get("simulator", {}).get("tails", {}).get("dirty_writeback") is True
+        and row.get("simulator", {}).get("tails", {}).get("coherence") is True
+    ]
+    if not comparable or len(tail_rows) != len(comparable):
+        raise ValueError(
+            "insufficient_evidence: dirty_writeback/coherence retirement tails "
+            "are not observed across every comparable row"
+        )
+    residual_score = sum(
+        max(int(row["residual"]["baseline_cycles"]), 0) for row in comparable
+    )
+    residuals = [row["residual"]["baseline_cycles"] for row in comparable]
+    tail_cells = [row["cell"] for row in tail_rows]
+    service_cells = [
+        row["cell"]
+        for row in rows
+        if any(
+            item.get("cause") == "async_destination_sm_service"
+            for item in row.get("simulator", {}).get("top_readiness_causes", [])
+        )
+    ]
+    control_cells = [
+        row["cell"]
+        for row in rows
+        if any(
+            item.get("cause") in {"control_stall", "cta_barrier_rendezvous"}
+            for item in row.get("simulator", {}).get("top_readiness_causes", [])
+        )
+    ]
+    candidate_ranking = [
+        {
+            "candidate": "dirty_writeback_coherence_retirement",
+            "evidence_cells": tail_cells,
+            "selection": "next_discriminator",
+            "selection_score": residual_score,
+            "reason": (
+                f"Typed dirty-writeback/coherence tails occur in {len(tail_cells)}/"
+                f"{len(comparable)} comparable rows; the summed repeat-stable residual "
+                f"is {residual_score} cycles, but a scalar offset cannot separate "
+                "retirement from launch or async/barrier behavior."
+            ),
+        },
+        {
+            "candidate": "async_destination_service",
+            "evidence_cells": service_cells,
+            "selection": "candidate_not_admitted",
+            "selection_score": len(service_cells),
+            "reason": "A modeled readiness cause is present, but no independent silicon observable isolates it from retirement tails.",
+        },
+        {
+            "candidate": "control_and_barrier_readiness",
+            "evidence_cells": control_cells,
+            "selection": "candidate_not_admitted",
+            "selection_score": len(control_cells),
+            "reason": "Readiness counters are modeled diagnostics, not an independent live timing label.",
+        },
+        {
+            "candidate": "launch_envelope",
+            "evidence_cells": [row["cell"] for row in rows],
+            "selection": "candidate_not_admitted",
+            "selection_score": len(rows),
+            "reason": "GPC elapsed includes launch work not represented by the direct event frontier; it is not a simulator-local latency.",
+        },
+    ]
+    validation = {
+        "rows": len(rows),
+        "comparable_rows": len(comparable),
+        "repeat_stable_rows": len(rows) - len(unstable),
+        "retirement_tail_rows": len(tail_rows),
+        "required_diagnostic_rows": len(rows) - len(missing_diagnostics),
+        "residual_score_cycles": residual_score,
+        "residual_min_cycles": min(residuals),
+        "residual_max_cycles": max(residuals),
+        "decision_eligible": True,
+    }
+    decision = {
+        "decision": "no-go",
+        "seam": "cycle scalar completion/retirement mapping",
+        "selected_diagnostic": "dirty_writeback_coherence_retirement",
+        "reason": (
+            f"Live residuals are repeat-stable across {len(rows)} rows, while the "
+            f"simulator reports dirty-writeback/coherence tails in every comparable "
+            f"row ({len(tail_rows)}/{len(comparable)}); the observations do not identify "
+            "one architecture-local latency."
+        ),
+        "next_action": "Run the matched store-free/barrier-free async-source discriminator with an independent retirement/frontier observable before changing simulator timing state.",
+        "claim_limits": [
+            "No cycle-accuracy claim",
+            "No NCU leakage into simulator inputs",
+            "No cross-architecture inference",
+            "No JADE/HETR or CPU-GPU co-simulation change",
+        ],
+    }
+    return candidate_ranking, validation, decision
+
+
 def analyze(manifest_path: Path, output_path: Path) -> int:
     manifest_path = manifest_path.expanduser().resolve()
     root = manifest_path.parent
@@ -235,34 +365,7 @@ def analyze(manifest_path: Path, output_path: Path) -> int:
     for rank, row in enumerate(ranked, start=1):
         row["residual"]["rank_by_baseline_cycles"] = rank
 
-    # A diagnostic ranking is intentionally distinct from a timing patch.  It
-    # records why the next probe is chosen while preserving the no-go result.
-    candidate_ranking = [
-        {
-            "candidate": "dirty_writeback_coherence_retirement",
-            "evidence_cells": [row["cell"] for row in rows if any(row["simulator"]["tails"].get(name) for name in ("dirty_writeback", "coherence"))],
-            "selection": "next_discriminator",
-            "reason": "Every cohort replay exposes both typed tails; a scalar completion offset cannot separate them from launch or async/barrier behavior.",
-        },
-        {
-            "candidate": "async_destination_service",
-            "evidence_cells": [row["cell"] for row in rows if any(item["cause"] == "async_destination_sm_service" for item in row["simulator"]["top_readiness_causes"])],
-            "selection": "candidate_not_admitted",
-            "reason": "It is a dominant modeled readiness cause in some cells, but no independent silicon observable isolates it from retirement tails.",
-        },
-        {
-            "candidate": "control_and_barrier_readiness",
-            "evidence_cells": [row["cell"] for row in rows if any(item["cause"] in {"control_stall", "cta_barrier_rendezvous"} for item in row["simulator"]["top_readiness_causes"])],
-            "selection": "candidate_not_admitted",
-            "reason": "The readiness counters are modeled diagnostics, not an independent live timing label.",
-        },
-        {
-            "candidate": "launch_envelope",
-            "evidence_cells": [row["cell"] for row in rows],
-            "selection": "candidate_not_admitted",
-            "reason": "GPC elapsed includes launch work not represented by the direct event frontier; it is not a simulator-local latency.",
-        },
-    ]
+    candidate_ranking, validation, decision = _derive_decision(rows)
     report = {
         "schema_version": 1,
         "analysis": {
@@ -288,21 +391,11 @@ def analyze(manifest_path: Path, output_path: Path) -> int:
             "repeatability_basis": "Two independent application-replay NCU captures per cell; simulator twins are byte-identical.",
             "held_out_discriminator": "not_run; the next pair is intentionally held out to avoid selecting a timing seam from the scored cohort.",
             "ncu_values_used_as_simulator_inputs": False,
+            "input_validation": validation,
         },
         "candidate_ranking": candidate_ranking,
         "rows": rows,
-        "decision": {
-            "decision": "no-go",
-            "seam": "cycle scalar completion/retirement mapping",
-            "reason": "Live residuals are repeat-stable at the measured envelope, but the simulator reports dirty-writeback/coherence tails for every comparable cell and the observations do not identify one architecture-local latency.",
-            "next_action": "Run the matched store-free/barrier-free async-source discriminator with an independent retirement/frontier observable before changing simulator timing state.",
-            "claim_limits": [
-                "No cycle-accuracy claim",
-                "No NCU leakage into simulator inputs",
-                "No cross-architecture inference",
-                "No JADE/HETR or CPU-GPU co-simulation change",
-            ],
-        },
+        "decision": decision,
     }
     output_path = output_path.expanduser().resolve()
     output_path.parent.mkdir(parents=True, exist_ok=True)

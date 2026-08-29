@@ -1,0 +1,64 @@
+{
+  "argv": [
+    "workloads/portable_lcd/flash_attn_fwd_bf16_sm80/flash_attn_fwd_bf16_sm80_run",
+    "--timing_shape",
+    "--warmup",
+    "0",
+    "--reps",
+    "1"
+  ],
+  "cell": "flash_attn_fwd_bf16_sm80",
+  "environment": {
+    "ACTIVE_FROM_START": "1",
+    "CUDA_INJECTION64_PATH": "tools/nvbit_tracer/tracer_tool/tracer_tool.so",
+    "DYNAMIC_KERNEL_LIMIT_END": "1",
+    "DYNAMIC_KERNEL_LIMIT_START": "0",
+    "ENHANCED_TRACER_MAX_PARSER_INPUT_KB": "256",
+    "ENHANCED_TRACER_PER_CUBIN_TIMEOUT_S": "45",
+    "LD_LIBRARY_PATH": ".toolchain/pb/lib",
+    "SKIP_ENHANCED_TRACER": "0",
+    "TRACES_FOLDER": "evidence/raw/nvbit/flash_attn_fwd_bf16_sm80",
+    "USER_DEFINED_FOLDERS": "1"
+  },
+  "geometry": {
+    "block": [
+      32,
+      1,
+      1
+    ],
+    "blocks": 16,
+    "grid": [
+      4,
+      4,
+      1
+    ],
+    "threads_per_block": 32
+  },
+  "hashes": {
+    "dynamic_trace_sha256": "3a0bc59d94102b2d629c4a624e11279fbd2bb76805ffb063c8a4b1b7f2174956",
+    "execution_info_sha256": "3e6f6369c77c444300ecaf7e55f6e0a17dbcd96bdec7432eca505a75fa33e21c",
+    "mapping_sha256": "a476a01da39616cef5c77ec204f2163c8620f95854fdc4379eb5736943e2959f",
+    "stats_sha256": "bd17ed899297197b4d5d8e0d8d20c3a0be420a26cf199cb3fa922a222dcc9d0a"
+  },
+  "mapping_contract": {
+    "accepted_active_launches": 1,
+    "accepted_channel_records": 109616,
+    "kernel_architecture_version": 86,
+    "kernel_name": "flash_attn_fwd_bf16_sm80_kernel___0",
+    "mapping_launch_count": 1,
+    "schema_version": 1,
+    "unique_function_id": 1
+  },
+  "paths": {
+    "dynamic_trace": "evidence/raw/nvbit/flash_attn_fwd_bf16_sm80/dynamic_trace.pb",
+    "execution_info": "evidence/raw/nvbit/flash_attn_fwd_bf16_sm80/extra_info/enhanced_execution_info.json",
+    "mapping": "evidence/raw/nvbit/flash_attn_fwd_bf16_sm80/extra_info/traced_kernel_modules.json",
+    "stats": "evidence/raw/nvbit/flash_attn_fwd_bf16_sm80/stats.csv"
+  },
+  "schema_version": 1,
+  "trace_binary": {
+    "path": "workloads/portable_lcd/flash_attn_fwd_bf16_sm80/flash_attn_fwd_bf16_sm80_run",
+    "sha256": "a272cde4fe06763638021de9cee4bea0ee39c52ee3511bce3abdec01b56f5fe1"
+  },
+  "trace_root": "evidence/raw/nvbit/flash_attn_fwd_bf16_sm80"
+}

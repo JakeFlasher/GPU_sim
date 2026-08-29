@@ -13,6 +13,11 @@ from workloads.research_probes.semantic_replay_validation import (
     _async_source_error,
     _global_memory_error,
 )
+from workloads.research_probes import semantic_replay_validation as SEMANTIC
+from workloads.research_probes.trace_invariants import (
+    LaunchTraceInvariants,
+    TraceInvariants,
+)
 
 
 def _load_validator():
@@ -182,3 +187,56 @@ def test_async_source_sector_mutation_is_rejected() -> None:
     counters["l1"]["misses"] = 7
     error, _snapshot = _async_source_error(counters, expected, "async-fixture")
     assert "async_source_sectors mismatch" in error
+
+
+def test_global_memory_diagnostic_is_required_when_trace_has_global_traffic(
+    monkeypatch, tmp_path: Path
+) -> None:
+    expected = LaunchTraceInvariants(
+        device_id=0,
+        stream_id=0,
+        kernel_id=1,
+        blocks=2,
+        warps=2,
+        instructions=2,
+        memory_instructions=0,
+        load_instructions=0,
+        store_instructions=0,
+        atomic_instructions=0,
+        async_copy_instructions=0,
+        global_load_instructions=0,
+        global_store_instructions=0,
+        global_atomic_instructions=0,
+        global_load_sectors=0,
+        global_store_sectors=32,
+        global_atomic_sectors=0,
+        async_source_sectors=0,
+        local_load_sectors=0,
+        local_store_sectors=0,
+        shared_sectors=0,
+    )
+    trace = TraceInvariants(trace_dir=str(tmp_path), launches=(expected,))
+    monkeypatch.setattr(SEMANTIC, "derive_trace_invariants", lambda _path: trace)
+    expectation = VALIDATOR.REPLAY.ReplayExpectation(
+        launches=(REPLAY_HELPERS._launch(),), carded_dram=False
+    )
+    document = REPLAY_HELPERS._report(expectation)
+    document["launches"][0]["timing"]["readiness"]["global_memory_issue"] = {
+        "load_instructions": 0,
+        "store_instructions": 0,
+        "atomic_instructions": 0,
+        "reduction_instructions": 0,
+        "load_sectors": 0,
+        "store_sectors": 32,
+        "atomic_sectors": 0,
+        "reduction_sectors": 0,
+    }
+    rows, errors = SEMANTIC.validate_replay_document(
+        document, tmp_path, label="global-fixture"
+    )
+    assert not errors and rows[0]["checks"]["trace_global_memory_conservation"]
+    del document["launches"][0]["timing"]["readiness"]["global_memory_issue"]
+    _rows, errors = SEMANTIC.validate_replay_document(
+        document, tmp_path, label="global-fixture"
+    )
+    assert any("global_memory_issue diagnostic is required" in error for error in errors)

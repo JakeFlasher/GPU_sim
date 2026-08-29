@@ -1,0 +1,60 @@
+{
+  "argv": [
+    "workloads/research_probes/async_barrier_overlap/async_barrier_overlap_trace",
+    "c11",
+    "l1",
+    "0",
+    "4",
+    "1"
+  ],
+  "cell": "cp_async_canary",
+  "environment": {
+    "ACTIVE_FROM_START": "0",
+    "CUDA_INJECTION64_PATH": "tools/nvbit_tracer/tracer_tool/tracer_tool.so",
+    "LD_LIBRARY_PATH": ".toolchain/pb/lib",
+    "SKIP_ENHANCED_TRACER": "0",
+    "TRACES_FOLDER": "evidence/raw/nvbit/cp_async_canary",
+    "USER_DEFINED_FOLDERS": "1"
+  },
+  "geometry": {
+    "block": [
+      128,
+      1,
+      1
+    ],
+    "blocks": 1,
+    "grid": [
+      1,
+      1,
+      1
+    ],
+    "threads_per_block": 128
+  },
+  "hashes": {
+    "dynamic_trace_sha256": "315d15b5ba5d497e40c0140e29cec3d2bda55bf00bea44755a0b75f7b87e58e1",
+    "execution_info_sha256": "539d3255994f359af15f31f3944e55bd96dd00779ef85c5c2800c348c72e8b30",
+    "mapping_sha256": "762e189d5e872f7a2fd33dd12aeeba2143bf574fb469050702b05e23bb6cae3b",
+    "stats_sha256": "908de4c54486ede8d89c172ff9508ddbf7ebf34d2c83448e6e9163e1f141c689"
+  },
+  "mapping_contract": {
+    "accepted_active_launches": 1,
+    "accepted_channel_records": 26760,
+    "kernel_architecture_version": 86,
+    "kernel_name": "_Z21async_barrier_overlapILi3EEvPKcPcPyPjimm___0",
+    "mapping_launch_count": 1,
+    "schema_version": 1,
+    "unique_function_id": 1
+  },
+  "paths": {
+    "dynamic_trace": "evidence/raw/nvbit/cp_async_canary/dynamic_trace.pb",
+    "execution_info": "evidence/raw/nvbit/cp_async_canary/extra_info/enhanced_execution_info.json",
+    "mapping": "evidence/raw/nvbit/cp_async_canary/extra_info/traced_kernel_modules.json",
+    "stats": "evidence/raw/nvbit/cp_async_canary/stats.csv"
+  },
+  "schema_version": 1,
+  "trace_binary": {
+    "path": "workloads/research_probes/async_barrier_overlap/async_barrier_overlap_trace",
+    "sha256": "f8c2b971f95d274d6351e2dcbbe1a96c77a52678c8ad3abe1ddf6eb8573e11fd"
+  },
+  "trace_root": "evidence/raw/nvbit/cp_async_canary"
+}

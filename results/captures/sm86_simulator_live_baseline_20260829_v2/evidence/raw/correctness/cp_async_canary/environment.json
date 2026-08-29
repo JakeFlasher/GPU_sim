@@ -1,0 +1,52 @@
+{
+  "argv": [
+    "workloads/research_probes/async_barrier_overlap/async_barrier_overlap",
+    "c11",
+    "l1",
+    "0",
+    "4",
+    "1"
+  ],
+  "cleared_instrumentation_variables": [
+    "BASH_ENV",
+    "CUDA_INJECTION32_PATH",
+    "CUDA_INJECTION64_PATH",
+    "CUDA_VISIBLE_DEVICES",
+    "DYNAMIC_KERNEL_LIMIT_END",
+    "DYNAMIC_KERNEL_LIMIT_START",
+    "ENHANCED_TRACER_MAX_PARSER_INPUT_KB",
+    "ENHANCED_TRACER_PER_CUBIN_TIMEOUT_S",
+    "LD_AUDIT",
+    "LD_PRELOAD",
+    "NOBANNER",
+    "NVBIT_CONFIG_FILE",
+    "NVBIT_PB_PREFIX",
+    "NVBIT_TOOL",
+    "NVBIT_TRACE_FOLDER",
+    "SKIP_ENHANCED_TRACER",
+    "TERMINATE_UPON_LIMIT",
+    "TOOL_VERBOSE",
+    "TRACES_FOLDER",
+    "USER_DEFINED_FOLDERS"
+  ],
+  "effective_argv": [
+    "workloads/research_probes/async_barrier_overlap/async_barrier_overlap",
+    "c11",
+    "l1",
+    "0",
+    "4",
+    "1"
+  ],
+  "elapsed_seconds": 0.204933,
+  "environment": {
+    "HOME": "/home/jakeshea",
+    "LANG": "C",
+    "LC_ALL": "C",
+    "LD_LIBRARY_PATH": "/opt/cuda/lib64",
+    "PATH": "/opt/cuda/bin:/usr/bin:/bin"
+  },
+  "mode": "clean_base_binary",
+  "output_contains_instrumentation": false,
+  "return_code": 0,
+  "schema_version": 1
+}
