@@ -35,7 +35,11 @@ DEFAULT_OUTPUT = (
     / "sm86_ldgsts_burst_release_20260828_v1"
 )
 BINARY = HERE / "ldgsts_burst_release"
-CUOBJDUMP = Path(os.environ.get("CUOBJDUMP", "/usr/local/cuda-13.2/bin/cuobjdump"))
+CUDA_BIN = os.environ.get("CUDA_BIN", "/usr/local/cuda-13.2/bin")
+NVCC = Path(os.environ.get("NVCC", str(Path(CUDA_BIN) / "nvcc")))
+CUOBJDUMP = Path(
+    os.environ.get("CUOBJDUMP", str(Path(CUDA_BIN) / "cuobjdump"))
+)
 TOOLKIT_BINDIR = Path(
     os.environ.get("CUDA_TOOLKIT_BINDIR", str(CUOBJDUMP.parent))
 )
@@ -128,6 +132,32 @@ class DirectBundle:
 
     def ordered_keys(self, order: str) -> list[str]:
         keys = [cell.key for cell in self.cells]
+        if self.role == "placement":
+            # Keep the W1 reference phases first even on reverse repetitions;
+            # only the order within each warp-count block is reversed.  The
+            # final W1 phase's wrapper barrier then remains the explicit
+            # rendezvous before W4 enters.
+            w1 = [cell.key for cell in self.cells if cell.warps == 1]
+            w4 = [cell.key for cell in self.cells if cell.warps == 4]
+            if order == "reverse":
+                w1.reverse()
+                w4.reverse()
+            elif order != "forward":
+                raise CampaignError(f"unknown order {order!r}")
+            return w1 + w4
+        if self.role == "route_zero_gap":
+            # Keep the unopened L2 holdout last in both directions.  Reverse
+            # only the already-open L1/DRAM phases; the requested order is
+            # recorded separately in order.json.
+            open_routes = [
+                cell.key for cell in self.cells if cell.route != "l2"
+            ]
+            holdout = [cell.key for cell in self.cells if cell.route == "l2"]
+            if order == "reverse":
+                open_routes.reverse()
+            elif order != "forward":
+                raise CampaignError(f"unknown order {order!r}")
+            return open_routes + holdout
         if order == "reverse":
             keys.reverse()
         elif order != "forward":
@@ -207,7 +237,7 @@ def direct_bundles() -> list[DirectBundle]:
             "route_zero_gap",
             tuple(
                 cell("ldgsts", 1, route, depth, 0)
-                for route in ("l1", "l2", "dram")
+                for route in ("l1", "dram", "l2")
                 for depth in (1, 4, 5, 6, 8)
             ),
         )
@@ -262,12 +292,42 @@ def direct_bundles() -> list[DirectBundle]:
     return bundles
 
 
+def target_cells_for_bundle(
+    bundle: DirectBundle, order: str
+) -> tuple[tuple[Cell, ...], str]:
+    """Map a requested phase order to the target's simple forward/reverse CLI."""
+
+    keys = bundle.ordered_keys(order)
+    canonical = tuple(item.key for item in bundle.cells)
+    if tuple(keys) == canonical:
+        return bundle.cells, order
+    # The placement reverse schedule keeps W1 references before W4.  Materialize
+    # that phase order and ask the CUDA target to consume it in forward order;
+    # reversing the whole 18-cell list would put W4 ahead of its rendezvous.
+    return tuple(cell_index()[key] for key in keys), "forward"
+
+
 def preflight_cells() -> list[Cell]:
     return [
         cell("ldgsts", warps, route, 5, 0)
         for warps in (1, 4)
-        for route in ("l1", "l2", "dram")
+        for route in ("l1", "dram", "l2")
     ]
+
+
+def compact_predicate_positions(depth: int) -> list[int]:
+    """Mirror the seven-predicate SM86 depth map for local contract checks."""
+
+    predicates = (
+        depth > 3,
+        depth >= 4,
+        not depth < 4,
+        depth >= 5,
+        depth > 5,
+        depth > 6,
+        depth >= 8,
+    )
+    return [0] + [index + 1 for index, enabled in enumerate(predicates) if enabled]
 
 
 def selected_cells(selector: str | None) -> list[Cell]:
@@ -417,7 +477,25 @@ def run_small(command: Sequence[str], *, timeout: int = 30) -> subprocess.Comple
     return completed
 
 
-def complete_directory(path: Path, *, kind: str, key: str) -> bool:
+def binary_stamp() -> dict[str, object] | None:
+    """Return a lightweight build identity for resumable capture directories."""
+
+    try:
+        stat = BINARY.stat()
+    except OSError:
+        return None
+    if not BINARY.is_file() or stat.st_size <= 0:
+        return None
+    return {
+        "binary_path": str(BINARY),
+        "binary_mtime_ns": stat.st_mtime_ns,
+        "binary_size_bytes": stat.st_size,
+    }
+
+
+def complete_directory(
+    path: Path, *, kind: str, key: str, current_binary: bool = False
+) -> bool:
     marker = path / "complete.json"
     if not path.is_dir() or not marker.is_file():
         return False
@@ -432,6 +510,10 @@ def complete_directory(path: Path, *, kind: str, key: str) -> bool:
     required = value.get("required_files")
     if not isinstance(required, list) or not required:
         return False
+    if current_binary:
+        stamp = binary_stamp()
+        if stamp is None or any(value.get(field) != expected for field, expected in stamp.items()):
+            return False
     return all(
         isinstance(relative, str)
         and (path / relative).is_file()
@@ -493,7 +575,34 @@ class AtomicDirectory(AbstractContextManager[Path]):
 
     def __exit__(self, exc_type: object, exc: object, traceback: object) -> None:
         if self.stage is not None:
-            shutil.rmtree(self.stage, ignore_errors=True)
+            if exc_type is None:
+                shutil.rmtree(self.stage, ignore_errors=True)
+            else:
+                # Keep failed scientific output available for diagnosis rather
+                # than silently deleting a large raw stream.  Failed siblings
+                # are hidden from normal resume discovery and carry no
+                # completion marker.
+                candidate = self.final.with_name(f"{self.final.name}.failed")
+                suffix = 1
+                while candidate.exists():
+                    candidate = self.final.with_name(
+                        f"{self.final.name}.failed-{suffix}"
+                    )
+                    suffix += 1
+                try:
+                    os.rename(self.stage, candidate)
+                    write_json(
+                        candidate / "failure.json",
+                        {
+                            "failed_at": now(),
+                            "kind": self.kind,
+                            "key": self.key,
+                            "exception_type": getattr(exc_type, "__name__", str(exc_type)),
+                            "exception": str(exc),
+                        },
+                    )
+                except OSError:
+                    shutil.rmtree(self.stage, ignore_errors=True)
             self.stage = None
 
 
@@ -528,6 +637,42 @@ def target_command(
         "--order",
         order,
     ]
+
+
+def first_drain_clock(
+    rows: Sequence[dict[str, object]],
+    lower_pc: int,
+) -> dict[str, object] | None:
+    """Find the clock immediately following this body's first dependency wait.
+
+    A function can contain several loop-carried ``DEPBAR`` instructions.  The
+    timed body ends at the first dependency-barrier sequence after its issue
+    endpoint; using the last barrier in the function would silently report a
+    later loop clock as the drain sample.
+    """
+
+    first_depbar = next(
+        (
+            row
+            for row in sorted(rows, key=lambda item: int(item.get("pc", -1)))
+            if isinstance(row.get("pc"), int)
+            and row["pc"] > lower_pc
+            and "DEPBAR" in str(row.get("opcode_text", ""))
+        ),
+        None,
+    )
+    if not isinstance(first_depbar, dict) or not isinstance(first_depbar.get("pc"), int):
+        return None
+    return next(
+        (
+            row
+            for row in sorted(rows, key=lambda item: int(item.get("pc", -1)))
+            if isinstance(row.get("pc"), int)
+            and row["pc"] > first_depbar["pc"]
+            and "SR_CLOCKLO" in str(row.get("opcode_text", ""))
+        ),
+        None,
+    )
 
 
 def ncu_profile_command(item: Cell, repeat: int, report_base: Path) -> list[str]:
@@ -712,6 +857,15 @@ def emit_manifest(output: Path, *, gpu: str = "0") -> None:
             "completion": "drain_on - drain_off (fields are post-issue intervals)",
             "independent_unit": "process repetition",
         },
+        "execution_surfaces": {
+            "compact_zero_gap": "eight-position seven-predicate body",
+            "compact_predicate_depth_domain": {
+                str(depth): compact_predicate_positions(depth)
+                for depth in (1, 4, 5, 6, 8)
+            },
+            "direct_zero_gap": "same eight-position seven-predicate body",
+            "timing_work_equivalence": "structural zero-gap check is recorded in static report",
+        },
     }
     write_json(output / "metadata" / "matrix.json", matrix)
 
@@ -724,24 +878,32 @@ def emit_manifest(output: Path, *, gpu: str = "0") -> None:
             "--query-gpu=name,uuid,compute_cap,driver_version,persistence_mode,clocks.current.sm,clocks.current.memory",
             "--format=csv,noheader,nounits",
         ],
-        "nvcc": [os.environ.get("NVCC", "/usr/local/cuda-13.2/bin/nvcc"), "--version"],
+        "nvcc": [str(NVCC), "--version"],
         "ncu": [NCU, "--version"],
     }
     for name, command in probes.items():
-        completed = subprocess.run(
-            command,
-            cwd=REPO_ROOT,
-            text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            timeout=30,
-            check=False,
-        )
-        environment[name] = {
-            "command": command,
-            "return_code": completed.returncode,
-            "output": completed.stdout.strip(),
-        }
+        try:
+            completed = subprocess.run(
+                command,
+                cwd=REPO_ROOT,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                timeout=30,
+                check=False,
+            )
+            environment[name] = {
+                "command": command,
+                "return_code": completed.returncode,
+                "output": completed.stdout.strip(),
+            }
+        except subprocess.TimeoutExpired as error:
+            environment[name] = {
+                "command": command,
+                "return_code": None,
+                "timed_out": True,
+                "output": str(error),
+            }
     write_json(output / "metadata" / "environment.json", environment)
 
 
@@ -885,6 +1047,12 @@ class FixedClocks(AbstractContextManager["FixedClocks"]):
         )
         for signum, handler in self.old_handlers.items():
             signal.signal(signum, handler)
+        if restore_errors:
+            print(
+                "warning: fixed-clock restoration was incomplete; see "
+                f"{self.record}",
+                file=sys.stderr,
+            )
         if restore_errors and reason == "success":
             raise CampaignError("clock restoration failed: " + "; ".join(restore_errors))
 
@@ -895,21 +1063,26 @@ class FixedClocks(AbstractContextManager["FixedClocks"]):
 
 def build(output: Path, *, force: bool) -> None:
     final = output / "build"
-    if complete_directory(final, kind="build", key="build") and not force:
+    if (
+        complete_directory(final, kind="build", key="build", current_binary=True)
+        and BINARY.is_file()
+        and BINARY.stat().st_size > 0
+        and not force
+    ):
         print(f"build (existing): {final}")
         return
     manager = AtomicDirectory(final, kind="build", key="build", force=force)
     with manager as stage:
-        run_streamed(["make", "-C", str(HERE)], stage, timeout=600)
+        run_streamed(["make", "-C", str(HERE), "clean", "all"], stage, timeout=600)
         if not BINARY.is_file() or BINARY.stat().st_size == 0:
             raise CampaignError(f"build did not produce {BINARY}")
         write_json(stage / "binary.json", {"path": str(BINARY), "size_bytes": BINARY.stat().st_size})
-        manager.publish(("run.json", "command.json", "binary.json"))
+        manager.publish(("run.json", "command.json", "binary.json"), **(binary_stamp() or {}))
     print(f"build: {final}")
 
 
 def control_sidecar_command(destination: Path) -> list[str]:
-    """Return the pinned, read-only control-bit extraction command."""
+    """Return the pinned control-bit extraction command."""
 
     return [
         sys.executable,
@@ -931,7 +1104,7 @@ def summarize_target_variants(sidecar: dict[str, object]) -> list[dict[str, obje
     functions = sidecar.get("functions")
     if not isinstance(functions, dict):
         return []
-    pattern = re.compile(r"_Z9run_cellsILb1ELi0ELi(\d+)ELi(\d+)EE")
+    pattern = re.compile(r"_Z9run_cellsILb1ELi([01])ELi(\d+)ELi(\d+)EE")
     variants: list[dict[str, object]] = []
     for name, raw_rows in functions.items():
         if not isinstance(name, str) or not isinstance(raw_rows, list):
@@ -939,9 +1112,12 @@ def summarize_target_variants(sidecar: dict[str, object]) -> list[dict[str, obje
         match = pattern.search(name)
         if match is None:
             continue
-        depth, gap = (int(value) for value in match.groups())
+        assay_id, depth, gap = (int(value) for value in match.groups())
+        target_opcode = "LDGSTS" if assay_id == 0 else "LDG.E"
         rows = [row for row in raw_rows if isinstance(row, dict)]
-        loads = [row for row in rows if "LDGSTS" in str(row.get("opcode_text", ""))]
+        loads = [
+            row for row in rows if target_opcode in str(row.get("opcode_text", ""))
+        ]
         pcs = [row.get("pc") for row in loads if isinstance(row.get("pc"), int)]
         between: list[dict[str, object]] = []
         if pcs:
@@ -956,37 +1132,241 @@ def summarize_target_variants(sidecar: dict[str, object]) -> list[dict[str, obje
             for row in rows
             if "SR_CLOCKLO" in str(row.get("opcode_text", ""))
         ]
+        clock_pcs = [row.get("pc") for row in clocks if isinstance(row.get("pc"), int)]
+        before_target = [pc for pc in clock_pcs if pcs and pc < min(pcs)]
+        after_target = [pc for pc in clock_pcs if pcs and pc > max(pcs)]
+        issue_clock = next(
+            (
+                row
+                for row in sorted(clocks, key=lambda item: int(item.get("pc", -1)))
+                if pcs
+                and isinstance(row.get("pc"), int)
+                and row["pc"] > max(pcs)
+                and "LDGDEPBAR" not in str(row.get("opcode_text", ""))
+                and "DEPBAR" not in str(row.get("opcode_text", ""))
+            ),
+            None,
+        )
+        drain_clock = first_drain_clock(
+            rows,
+            issue_clock["pc"]
+            if isinstance(issue_clock, dict) and isinstance(issue_clock.get("pc"), int)
+            else (max(pcs) if pcs else -1),
+        )
+        timed_low = max(before_target) if before_target else None
+        timed_high = (
+            drain_clock.get("pc")
+            if isinstance(drain_clock, dict) and isinstance(drain_clock.get("pc"), int)
+            else (max(pcs) if pcs else None)
+        )
+        pre_target_rows = [
+            row
+            for row in rows
+            if before_target
+            and isinstance(row.get("pc"), int)
+            and max(before_target) < row["pc"] < min(pcs)
+        ]
         variants.append(
             {
                 "function": name,
+                "surface": "compact",
+                "body_variant": (
+                    "runtime_predicated_8"
+                    if assay_id == 0
+                    and gap == 0
+                    and len(loads) == 8
+                    and any(row.get("predicate") for row in loads)
+                    else "compile_time_prefix"
+                    if assay_id == 0 and gap == 0
+                    else "ldg_control"
+                    if assay_id == 1
+                    else "compile_time_gap_variant"
+                ),
+                "assay": "ldgsts" if assay_id == 0 else "ldg",
                 "depth": depth,
                 "gap": gap,
-                "ldgsts_in_function": len(loads),
-                "ldgsts_pc_contiguous": bool(
+                "target_opcode": target_opcode,
+                "target_in_function": len(loads),
+                "target_predicates": [row.get("predicate") for row in loads],
+                "target_pc_contiguous": bool(
                     pcs
                     and pcs == list(range(pcs[0], pcs[0] + 16 * len(pcs), 16))
                 ),
-                "branch_or_call_between_ldgsts": any(
+                "branch_or_call_between_targets": any(
                     any(token in str(row.get("opcode_text", "")) for token in ("BRA", "CALL"))
                     for row in between
                 ),
                 "clock_count": len(clocks),
-                "clock_wait_masks": [
+                "all_clock_wait_masks": [
                     row.get("control", {}).get("wait_mask")
                     for row in clocks
                     if isinstance(row.get("control"), dict)
                     and row.get("control", {}).get("wait_mask")
+                ],
+                "endpoint_clock_wait_masks": [
+                    row.get("control", {}).get("wait_mask")
+                    for row in clocks
+                    if isinstance(row.get("pc"), int)
+                    and (
+                        (before_target and row["pc"] == max(before_target))
+                        or (after_target and row["pc"] == min(after_target))
+                    )
+                    and isinstance(row.get("control"), dict)
+                ],
+                "start_clock_wait_masks": [
+                    row.get("control", {}).get("wait_mask")
+                    for row in clocks
+                    if before_target
+                    and isinstance(row.get("pc"), int)
+                    and row["pc"] == max(before_target)
+                    and isinstance(row.get("control"), dict)
+                ],
+                "issue_clock_wait_masks": [
+                    issue_clock.get("control", {}).get("wait_mask")
+                ]
+                if isinstance(issue_clock, dict)
+                and isinstance(issue_clock.get("control"), dict)
+                else [],
+                "drain_clock_wait_masks": [
+                    drain_clock.get("control", {}).get("wait_mask")
+                ]
+                if isinstance(drain_clock, dict)
+                and isinstance(drain_clock.get("control"), dict)
+                else [],
+                "barrier_pcs": [
+                    row.get("pc")
+                    for row in rows
+                    if str(row.get("opcode_text", "")).startswith("BAR.")
+                    and isinstance(row.get("pc"), int)
+                ],
+                "cta_barriers_in_timed_window": [
+                    row.get("pc")
+                    for row in rows
+                    if timed_low is not None
+                    and timed_high is not None
+                    and isinstance(row.get("pc"), int)
+                    and timed_low <= row["pc"] <= timed_high
+                    and "BAR.SYNC" in str(row.get("opcode_text", ""))
+                ],
+                "pre_target_predicated_off_rows": [
+                    row.get("opcode_text")
+                    for row in pre_target_rows
+                    if "@!PT" in str(row.get("predicate", ""))
+                ],
+                "predicate_setup_before_target": [
+                    row.get("opcode_text")
+                    for row in rows
+                    if pcs
+                    and isinstance(row.get("pc"), int)
+                    and row["pc"] < min(pcs)
+                    and "ISETP" in str(row.get("opcode_text", ""))
                 ],
             }
         )
     return sorted(variants, key=lambda item: (int(item["gap"]), int(item["depth"])))
 
 
+def summarize_direct_zero_gap(sidecar: dict[str, object]) -> list[dict[str, object]]:
+    """Describe contiguous LDGSTS groups in the specialized direct entry."""
+
+    functions = sidecar.get("functions")
+    if not isinstance(functions, dict):
+        return []
+    name = "_Z9run_cellsILb0ELi0ELi0ELi0"
+    raw_rows = next(
+        (value for key, value in functions.items() if isinstance(key, str) and name in key),
+        None,
+    )
+    if not isinstance(raw_rows, list):
+        return []
+    rows = [row for row in raw_rows if isinstance(row, dict)]
+    loads = [row for row in rows if "LDGSTS" in str(row.get("opcode_text", ""))]
+    pcs = sorted({row["pc"] for row in loads if isinstance(row.get("pc"), int)})
+    groups: list[list[int]] = []
+    for pc in pcs:
+        if not groups or pc != groups[-1][-1] + 16:
+            groups.append([pc])
+        else:
+            groups[-1].append(pc)
+    result: list[dict[str, object]] = []
+    for group in groups:
+        if len(group) not in {1, 4, 5, 6, 8}:
+            continue
+        window = [
+            row
+            for row in rows
+            if isinstance(row.get("pc"), int)
+            and group[0] <= row["pc"] <= group[-1]
+        ]
+        clocks = [
+            row for row in rows if "SR_CLOCKLO" in str(row.get("opcode_text", ""))
+        ]
+        issue_clock = next(
+            (
+                row
+                for row in sorted(clocks, key=lambda item: int(item.get("pc", -1)))
+                if isinstance(row.get("pc"), int)
+                and row["pc"] > group[-1]
+                and "LDGDEPBAR" not in str(row.get("opcode_text", ""))
+                and "DEPBAR" not in str(row.get("opcode_text", ""))
+            ),
+            None,
+        )
+        drain_clock = first_drain_clock(
+            rows,
+            issue_clock["pc"] if isinstance(issue_clock, dict) and isinstance(issue_clock.get("pc"), int) else group[-1],
+        )
+        result.append(
+            {
+                "count": len(group),
+                "surface": "direct",
+                "body_variant": (
+                    "runtime_predicated_8"
+                    if any(row.get("predicate") for row in window)
+                    else "compile_time_prefix"
+                ),
+                "pc_start": group[0],
+                "pc_end": group[-1],
+                "contiguous": group == list(range(group[0], group[0] + 16 * len(group), 16)),
+                "branch_or_call_between_targets": any(
+                    any(token in str(row.get("opcode_text", "")) for token in ("BRA", "CALL"))
+                    for row in window
+                ),
+                "wait_masks_on_targets": [
+                    row.get("control", {}).get("wait_mask")
+                    for row in window
+                    if isinstance(row.get("control"), dict)
+                ],
+                "target_predicates": [row.get("predicate") for row in window],
+                "issue_clock_wait_masks": [
+                    issue_clock.get("control", {}).get("wait_mask")
+                ]
+                if isinstance(issue_clock, dict)
+                and isinstance(issue_clock.get("control"), dict)
+                else [],
+                "drain_clock_wait_masks": [
+                    drain_clock.get("control", {}).get("wait_mask")
+                ]
+                if isinstance(drain_clock, dict)
+                and isinstance(drain_clock.get("control"), dict)
+                else [],
+                "pre_target_predicated_off_rows": [
+                    row.get("opcode_text")
+                    for row in rows
+                    if isinstance(row.get("pc"), int)
+                    and group[0] - 64 <= row["pc"] < group[0]
+                    and "@!PT" in str(row.get("predicate", ""))
+                ],
+            }
+        )
+    return result
+
+
 def run_static(output: Path, *, force: bool) -> None:
     if not BINARY.is_file():
         raise CampaignError(f"build first; binary is missing: {BINARY}")
     final = output / "static"
-    if complete_directory(final, kind="static", key="static") and not force:
+    if complete_directory(final, kind="static", key="static", current_binary=True) and not force:
         print(f"static (existing): {final}")
         return
     manager = AtomicDirectory(final, kind="static", key="static", force=force)
@@ -997,20 +1377,41 @@ def run_static(output: Path, *, force: bool) -> None:
             shutil.copyfile(destination / "stdout.txt", stage / name)
         control_path = stage / "control_bits.json"
         control_command = control_sidecar_command(control_path)
-        started = now()
-        completed = subprocess.run(
-            control_command,
-            cwd=REPO_ROOT,
-            text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            timeout=120,
-            check=False,
+        replay_command = list(control_command)
+        replay_command[replay_command.index("--out") + 1] = str(
+            (output / "static" / "control_bits.json").resolve()
         )
+        started = now()
+        try:
+            completed = subprocess.run(
+                control_command,
+                cwd=REPO_ROOT,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                timeout=120,
+                check=False,
+            )
+        except subprocess.TimeoutExpired as error:
+            write_json(
+                stage / "control-sidecar-run.json",
+                {
+                    "command": command_record(control_command),
+                    "replay_command": command_record(replay_command),
+                    "started_at": started,
+                    "finished_at": now(),
+                    "return_code": None,
+                    "timed_out": True,
+                    "stdout": (error.stdout or "") if isinstance(error.stdout, str) else "",
+                    "stderr": (error.stderr or "") if isinstance(error.stderr, str) else "",
+                },
+            )
+            raise CampaignError("control-bit sidecar timed out") from error
         write_json(
             stage / "control-sidecar-run.json",
             {
                 "command": command_record(control_command),
+                "replay_command": command_record(replay_command),
                 "started_at": started,
                 "finished_at": now(),
                 "return_code": completed.returncode,
@@ -1035,6 +1436,23 @@ def run_static(output: Path, *, force: bool) -> None:
         functions = summary.get("functions")
         if not isinstance(functions, dict) or not functions:
             raise CampaignError(f"control-bit sidecar has no decoded functions: {control_path}")
+        target_variants = summarize_target_variants(sidecar)
+        direct_zero_gap = summarize_direct_zero_gap(sidecar)
+        direct_symbol_present = any(
+            isinstance(name, str)
+            and "_Z9run_cellsILb0ELi0ELi0ELi0" in name
+            for name in sidecar.get("functions", {})
+        ) if isinstance(sidecar.get("functions"), dict) else False
+        zero_gap = [
+            item
+            for item in target_variants
+            if item["assay"] == "ldgsts" and item["gap"] == 0
+        ]
+        gapped = [
+            item
+            for item in target_variants
+            if item["assay"] == "ldgsts" and item["gap"] != 0
+        ]
         write_json(
             stage / "static-report.json",
             {
@@ -1062,7 +1480,77 @@ def run_static(output: Path, *, force: bool) -> None:
                         if isinstance(value, dict)
                     },
                 },
-                "target_variants": summarize_target_variants(sidecar),
+                "target_variants": target_variants,
+                "direct_zero_gap_groups": direct_zero_gap,
+                "findings": {
+                    "zero_gap_ldgsts_variants": len(zero_gap),
+                    "zero_gap_target_contiguous_observed_count": sum(
+                        bool(item["target_pc_contiguous"])
+                        and not item["branch_or_call_between_targets"]
+                        for item in zero_gap
+                    ),
+                    "zero_gap_predicate_shapes_observed_count": sum(
+                        item["target_predicates"]
+                        == [None, "@P0", "@P1", "@P2", "@P3", "@P4", "@P5", "@P6"]
+                        for item in zero_gap
+                    ),
+                    "zero_gap_target_endpoint_clean_observed_count": sum(
+                        bool(item["target_pc_contiguous"])
+                        and not item["branch_or_call_between_targets"]
+                        and not item["cta_barriers_in_timed_window"]
+                        and len(item["issue_clock_wait_masks"]) == 1
+                        and len(item["drain_clock_wait_masks"]) == 1
+                        and all(
+                            mask == 0
+                            for mask in (
+                                item["issue_clock_wait_masks"]
+                                + item["drain_clock_wait_masks"]
+                            )
+                        )
+                        for item in zero_gap
+                    ),
+                    "zero_gap_endpoint_wait_masks_observed": sorted(
+                        {
+                            int(mask)
+                            for item in zero_gap
+                            for mask in (
+                                item["issue_clock_wait_masks"]
+                                + item["drain_clock_wait_masks"]
+                            )
+                        }
+                    ),
+                    "zero_gap_start_wait_masks_observed": sorted(
+                        {
+                            int(mask)
+                            for item in zero_gap
+                            for mask in item["start_clock_wait_masks"]
+                        }
+                    ),
+                    "gapped_clock_wait_masks_observed": sorted(
+                        {
+                            int(mask)
+                            for item in gapped
+                            for mask in item["all_clock_wait_masks"]
+                        }
+                    ),
+                    "direct_zero_gap_groups_observed_count": len(direct_zero_gap),
+                    "direct_zero_gap_target_clean_observed_count": sum(
+                        bool(item["contiguous"])
+                        and not item["branch_or_call_between_targets"]
+                        and len(item["issue_clock_wait_masks"]) == 1
+                        and len(item["drain_clock_wait_masks"]) == 1
+                        and all(mask == 0 for mask in item["wait_masks_on_targets"])
+                        for item in direct_zero_gap
+                    ),
+                    "direct_zero_gap_predicate_shapes_observed_count": sum(
+                        item["target_predicates"]
+                        == [None, "@P0", "@P1", "@P2", "@P3", "@P4", "@P5", "@P6"]
+                        for item in direct_zero_gap
+                    ),
+                    "direct_zero_gap_symbol_present": direct_symbol_present,
+                    "unknown_control_encodings": summary.get("total_unknown_encoding"),
+                    "interpretation": "observational; no pass/fail status is inferred",
+                },
                 "interpretation": (
                     "Descriptive build evidence only; it is not a permission token "
                     "or a substitute for scientific review of a live cell."
@@ -1079,7 +1567,7 @@ def run_static(output: Path, *, force: bool) -> None:
                 "sass/run.json",
                 "resources/run.json",
             ),
-            binary=str(BINARY),
+            **(binary_stamp() or {"binary_path": str(BINARY)}),
         )
     print(f"static: {final}")
 
@@ -1087,7 +1575,7 @@ def run_static(output: Path, *, force: bool) -> None:
 def run_correctness(output: Path, cells: Sequence[Cell], *, force: bool) -> None:
     for index, item in enumerate(cells, 1):
         final = output / "correctness" / item.key
-        if complete_directory(final, kind="correctness", key=item.key) and not force:
+        if complete_directory(final, kind="correctness", key=item.key, current_binary=True) and not force:
             print(f"correctness {index:02d}/{len(cells):02d} {item.key} (existing)")
             continue
         manager = AtomicDirectory(final, kind="correctness", key=item.key, force=force)
@@ -1111,14 +1599,17 @@ def run_correctness(output: Path, cells: Sequence[Cell], *, force: bool) -> None
                 warmup=4,
             )
             write_json(stage / "summary.json", summary)
-            manager.publish(("stdout.jsonl", "run.json", "summary.json"))
+            manager.publish(
+                ("stdout.jsonl", "run.json", "summary.json"),
+                **(binary_stamp() or {"binary_path": str(BINARY)}),
+            )
         print(f"correctness {index:02d}/{len(cells):02d} {item.key}", flush=True)
 
 
 def run_direct(output: Path, bundles: Sequence[DirectBundle], *, force: bool) -> None:
     for index, bundle in enumerate(bundles, 1):
         final = output / "direct" / bundle.key
-        if complete_directory(final, kind="direct_bundle", key=bundle.key) and not force:
+        if complete_directory(final, kind="direct_bundle", key=bundle.key, current_binary=True) and not force:
             print(f"direct {index:02d}/{len(bundles):02d} {bundle.key} (existing)")
             continue
         manager = AtomicDirectory(final, kind="direct_bundle", key=bundle.key, force=force)
@@ -1127,20 +1618,21 @@ def run_direct(output: Path, bundles: Sequence[DirectBundle], *, force: bool) ->
             required: list[str] = []
             for repeat, order in enumerate(ORDER_SCHEDULE, 1):
                 repeat_dir = stage / f"repeat-{repeat}"
+                effective_cells, target_order = target_cells_for_bundle(bundle, order)
                 command = target_command(
                     mode="direct",
-                    cells=bundle.cells,
+                    cells=effective_cells,
                     repetition=repeat,
-                    order=order,
+                    order=target_order,
                 )
                 run_streamed(command, repeat_dir, timeout=1800, stdout_name="raw.jsonl")
-                expected = list(bundle.cells) if order == "forward" else list(reversed(bundle.cells))
+                expected = list(effective_cells)
                 summary = validate_summary(
                     repeat_dir / "raw.jsonl",
                     expected,
                     mode="direct",
                     repetition=repeat,
-                    order=order,
+                    order=target_order,
                     bursts=MEASURED_BURSTS,
                     warmup=FIXED_WARMUP,
                 )
@@ -1150,7 +1642,8 @@ def run_direct(output: Path, bundles: Sequence[DirectBundle], *, force: bool) ->
                         "repetition": repeat,
                         "order": order,
                         "canonical_cells": [item.key for item in bundle.cells],
-                        "effective_cells": bundle.ordered_keys(order),
+                        "effective_cells": [item.key for item in effective_cells],
+                        "target_order": target_order,
                         "arm_order_seed": repeat,
                     }
                 )
@@ -1163,10 +1656,18 @@ def run_direct(output: Path, bundles: Sequence[DirectBundle], *, force: bool) ->
             manager.publish(
                 required,
                 role=bundle.role,
+                body_variant=(
+                    "runtime_predicated_8"
+                    if bundle.role in {"route_zero_gap", "placement"}
+                    else "direct_ldg_control"
+                    if bundle.role == "clock_assay"
+                    else "direct_gapped_or_control"
+                ),
                 repetitions=DIRECT_REPETITIONS,
                 canonical_cells=[item.key for item in bundle.cells],
                 analysis_cells=bundle.canonical_keys,
                 reference_cells=bundle.reference_keys,
+                **(binary_stamp() or {"binary_path": str(BINARY)}),
             )
         print(f"direct {index:02d}/{len(bundles):02d} {bundle.key}", flush=True)
 
@@ -1205,7 +1706,12 @@ def dry_run(
         )
     if action == "direct":
         commands.extend(
-            target_command(mode="direct", cells=bundle.cells, repetition=repeat, order=order)
+            target_command(
+                mode="direct",
+                cells=target_cells_for_bundle(bundle, order)[0],
+                repetition=repeat,
+                order=target_cells_for_bundle(bundle, order)[1],
+            )
             for bundle in bundles
             for repeat, order in enumerate(ORDER_SCHEDULE, 1)
         )
@@ -1299,14 +1805,31 @@ def self_test() -> None:
         raise CampaignError("five direct bundle keys/order are not frozen")
     if [len(bundle.cells) for bundle in bundles] != [15, 6, 6, 18, 4]:
         raise CampaignError("direct phase counts must be 15/6/6/18/4")
+    expected_predicate_positions = {
+        1: [0],
+        4: [0, 1, 2, 3],
+        5: [0, 1, 2, 3, 4],
+        6: [0, 1, 2, 3, 4, 5],
+        8: list(range(8)),
+    }
+    if any(
+        compact_predicate_positions(depth) != positions
+        for depth, positions in expected_predicate_positions.items()
+    ):
+        raise CampaignError("frozen predicate depth map is inconsistent")
 
     route_expected = [
         cell("ldgsts", 1, route, depth, 0).key
-        for route in ("l1", "l2", "dram")
+        for route in ("l1", "dram", "l2")
         for depth in (1, 4, 5, 6, 8)
     ]
     if [item.key for item in bundles[0].cells] != route_expected:
         raise CampaignError("zero-gap bundle must retain every route/depth in one CTA")
+    reverse_route = bundles[0].ordered_keys("reverse")
+    if any(cell_index()[key].route == "l2" for key in reverse_route[:-5]) or not all(
+        cell_index()[key].route == "l2" for key in reverse_route[-5:]
+    ):
+        raise CampaignError("reverse route order must keep the L2 holdout last")
     for bundle, gap in zip(bundles[1:3], (16, 64), strict=True):
         expected = [
             cell("ldgsts", 1, route, depth, gap).key
@@ -1323,6 +1846,14 @@ def self_test() -> None:
     ]
     if [item.key for item in bundles[3].cells] != placement_expected:
         raise CampaignError("placement phases must be frozen W1 references then W4 evidence")
+    reverse_placement = bundles[3].ordered_keys("reverse")
+    if not all(cell_index()[key].warps == 1 for key in reverse_placement[:9]) or not all(
+        cell_index()[key].warps == 4 for key in reverse_placement[9:]
+    ):
+        raise CampaignError("reverse placement order must keep W1 before W4")
+    effective, target_order = target_cells_for_bundle(bundles[3], "reverse")
+    if target_order != "forward" or [item.key for item in effective] != reverse_placement:
+        raise CampaignError("placement reverse schedule was not materialized safely")
     canonical = [key for bundle in bundles for key in bundle.canonical_keys]
     if len(canonical) != 40 or set(canonical) != set(cell_index()):
         raise CampaignError("each logical cell must have exactly one canonical direct source")
@@ -1342,6 +1873,32 @@ def self_test() -> None:
     export = ncu_export_command(Path("report.ncu-rep"), Path("ncu.csv"))
     if "--print-metric-instances" not in export or export[export.index("--print-metric-instances") + 1] != "details":
         raise CampaignError("NCU export must retain detailed metric instances")
+    synthetic_rows = [
+        {"pc": 100, "opcode_text": "LDGSTS.E.128", "control": {"wait_mask": 0}},
+        {"pc": 116, "opcode_text": "CS2R R1, SR_CLOCKLO", "control": {"wait_mask": 0}},
+        {"pc": 132, "opcode_text": "LDGDEPBAR", "control": {"wait_mask": 0}},
+        {"pc": 148, "opcode_text": "DEPBAR.LE SB0, 0x0", "control": {"wait_mask": 0}},
+        {"pc": 164, "opcode_text": "CS2R R2, SR_CLOCKLO", "control": {"wait_mask": 0}},
+        {"pc": 800, "opcode_text": "DEPBAR.LE SB0, 0x0", "control": {"wait_mask": 0}},
+        {"pc": 816, "opcode_text": "CS2R R3, SR_CLOCKLO", "control": {"wait_mask": 8}},
+    ]
+    drain = first_drain_clock(synthetic_rows, 116)
+    if not isinstance(drain, dict) or drain.get("pc") != 164:
+        raise CampaignError("drain-clock helper selected a later loop barrier")
+    with tempfile.TemporaryDirectory() as temporary:
+        root = Path(temporary)
+        try:
+            with AtomicDirectory(root / "failed-cell", kind="smoke", key="failed-cell", force=False) as stage:
+                write_json(stage / "raw.jsonl", {"partial": True})
+                raise RuntimeError("intentional self-test failure")
+        except RuntimeError as error:
+            if str(error) != "intentional self-test failure":
+                raise
+        failed = sorted(root.glob("failed-cell.failed*"))
+        if len(failed) != 1 or not (failed[0] / "raw.jsonl").is_file() or not (
+            failed[0] / "failure.json"
+        ).is_file():
+            raise CampaignError("failed campaign output was not retained for diagnosis")
     print(
         json.dumps(
             {

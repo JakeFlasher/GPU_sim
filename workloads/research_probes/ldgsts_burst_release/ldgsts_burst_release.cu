@@ -7,6 +7,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -35,6 +36,7 @@ constexpr std::size_t kSharedDestinationBytes =
 constexpr int kDefaultBursts = 16384;
 constexpr int kDefaultWarmup = 64;
 constexpr int kMaxBursts = 16384;
+constexpr int kMaxRepetitions = 7;
 constexpr int kArmOrderBlock = 64;
 constexpr std::size_t kL2Chunks = 1024;
 constexpr std::size_t kChunksPerWarp =
@@ -187,42 +189,67 @@ __device__ __forceinline__ void copy_position(unsigned destination,
                  : "memory");
 }
 
-#define CP_ASYNC_1 "cp.async.ca.shared.global [%5], [%13], 16;\n\t"
-#define CP_ASYNC_2 "cp.async.ca.shared.global [%6], [%14], 16;\n\t"
-#define CP_ASYNC_3 "cp.async.ca.shared.global [%7], [%15], 16;\n\t"
-#define CP_ASYNC_4 "cp.async.ca.shared.global [%8], [%16], 16;\n\t"
-#define CP_ASYNC_5 "cp.async.ca.shared.global [%9], [%17], 16;\n\t"
-#define CP_ASYNC_6 "cp.async.ca.shared.global [%10], [%18], 16;\n\t"
-#define CP_ASYNC_7 "cp.async.ca.shared.global [%11], [%19], 16;\n\t"
-#define CP_ASYNC_8 "cp.async.ca.shared.global [%12], [%20], 16;\n\t"
-#define CP_ASYNC_PREFIX_1 CP_ASYNC_1
-#define CP_ASYNC_PREFIX_4 CP_ASYNC_1 CP_ASYNC_2 CP_ASYNC_3 CP_ASYNC_4
-#define CP_ASYNC_PREFIX_5 CP_ASYNC_PREFIX_4 CP_ASYNC_5
-#define CP_ASYNC_PREFIX_6 CP_ASYNC_PREFIX_5 CP_ASYNC_6
-#define CP_ASYNC_PREFIX_8 CP_ASYNC_PREFIX_6 CP_ASYNC_7 CP_ASYNC_8
-
-#define LDGSTS_G0_ASM(PREFIX)                                                   \
-    asm volatile("mov.u32 %3, %smid;\n\t"                                   \
-                 "mov.u64 %0, %clock64;\n\t" PREFIX                         \
+// A single zero-gap body keeps all eight static positions.  CUDA 13.2 emits
+// guarded CFGs when predicates are reused, so each conditional position gets a
+// distinct predicate and a deliberately different but equivalent comparison.
+// The supported depth domain is {1,4,5,6,8}; position zero is unpredicated in
+// the enabled body, while the paired off arm uses the empty reference.
+#define LDGSTS_RUNTIME_G0_ASM()                                               \
+    asm volatile("{ .reg .pred p0,p1,p2,p3,p4,p5,p6;\n\t"                  \
+                 ".reg .u32 depth_local, lane_local;\n\t"                    \
+                 "mov.u32 depth_local, %21;\n\t"                            \
+                 "mov.u32 lane_local, %laneid;\n\t"                         \
+                 "xor.b32 depth_local, depth_local, lane_local;\n\t"          \
+                 "xor.b32 depth_local, depth_local, lane_local;\n\t"          \
+                 "setp.gt.s32 p0, depth_local, 3;\n\t"                       \
+                 "setp.ge.s32 p1, depth_local, 4;\n\t"                       \
+                 "setp.lt.s32 p2, depth_local, 4;\n\t"                       \
+                 "setp.ge.s32 p3, depth_local, 5;\n\t"                       \
+                 "setp.gt.s32 p4, depth_local, 5;\n\t"                       \
+                 "setp.gt.s32 p5, depth_local, 6;\n\t"                       \
+                 "setp.ge.s32 p6, depth_local, 8;\n\t"                       \
+                 "mov.u32 %3, %smid;\n\t"                                   \
+                 "mov.u64 %0, %clock64;\n\t"                                \
+                 "cp.async.ca.shared.global [%13], [%5], 16;\n\t"          \
+                 "@p0 cp.async.ca.shared.global [%14], [%6], 16;\n\t"       \
+                 "@p1 cp.async.ca.shared.global [%15], [%7], 16;\n\t"       \
+                 "@!p2 cp.async.ca.shared.global [%16], [%8], 16;\n\t"      \
+                 "@p3 cp.async.ca.shared.global [%17], [%9], 16;\n\t"       \
+                 "@p4 cp.async.ca.shared.global [%18], [%10], 16;\n\t"      \
+                 "@p5 cp.async.ca.shared.global [%19], [%11], 16;\n\t"      \
+                 "@p6 cp.async.ca.shared.global [%20], [%12], 16;\n\t"      \
                  "mov.u64 %1, %clock64;\n\t"                                \
                  "cp.async.commit_group;\n\t"                                \
-                 "cp.async.wait_group 0;\n\t"                                 \
+                 "cp.async.wait_group 0;\n\t"                              \
                  "mov.u64 %2, %clock64;\n\t"                                \
-                 "mov.u32 %4, %smid;"                                         \
+                 "mov.u32 %4, %smid; }"                                      \
                  : "=l"(start), "=l"(issue_end), "=l"(drain_end),          \
                    "=r"(smid_before), "=r"(smid_after)                       \
-                 : "r"(d0), "r"(d1), "r"(d2), "r"(d3), "r"(d4),         \
-                   "r"(d5), "r"(d6), "r"(d7), "l"(s0), "l"(s1),         \
-                   "l"(s2), "l"(s3), "l"(s4), "l"(s5), "l"(s6),         \
-                   "l"(s7)                                                     \
+                 : "l"(s0), "l"(s1), "l"(s2), "l"(s3), "l"(s4),         \
+                   "l"(s5), "l"(s6), "l"(s7), "r"(d0), "r"(d1),         \
+                   "r"(d2), "r"(d3), "r"(d4), "r"(d5), "r"(d6),         \
+                   "r"(d7), "r"(depth)                                       \
                  : "memory")
 
-// CUDA 13.2 lowers runtime predicates around cp.async into guarded CFGs.  To
-// keep the measured issue path auditable, the recovery uses one compile-time
-// specialization per supported depth/gap.  Each zero-gap body is
-// a contiguous unconditional prefix; the wrapper supplies the empty paired
-// reference.  This is deliberately a source-level limitation, not a claim
-// that predicate-ignorant eight-position work was achieved.
+__device__ __forceinline__ ArmSample ldgsts_runtime_g0_body(
+    int depth, unsigned d0, unsigned d1, unsigned d2, unsigned d3,
+    unsigned d4, unsigned d5, unsigned d6, unsigned d7, const char* s0,
+    const char* s1, const char* s2, const char* s3, const char* s4,
+    const char* s5, const char* s6, const char* s7) {
+    unsigned long long start;
+    unsigned long long issue_end;
+    unsigned long long drain_end;
+    std::uint32_t smid_before;
+    std::uint32_t smid_after;
+    LDGSTS_RUNTIME_G0_ASM();
+    ArmSample sample{};
+    sample.smid_before = smid_before;
+    sample.smid_after = smid_after;
+    sample.issue_cycles = narrow_cycles(issue_end - start);
+    sample.drain_cycles = narrow_cycles(drain_end - issue_end);
+    return sample;
+}
+
 template <int Depth, int Gap>
 __device__ __forceinline__ ArmSample ldgsts_active_body(
     unsigned d0, unsigned d1, unsigned d2, unsigned d3, unsigned d4,
@@ -232,32 +259,8 @@ __device__ __forceinline__ ArmSample ldgsts_active_body(
     static_assert(Depth == 1 || Depth == 4 || Depth == 5 || Depth == 6 ||
                       Depth == 8,
                   "unsupported LDGSTS depth");
-    static_assert(Gap == 0 || Gap == 16 || Gap == 64,
+    static_assert(Gap == 16 || Gap == 64,
                   "unsupported LDGSTS gap");
-    if constexpr (Gap == 0) {
-        unsigned long long start;
-        unsigned long long issue_end;
-        unsigned long long drain_end;
-        std::uint32_t smid_before;
-        std::uint32_t smid_after;
-        if constexpr (Depth == 1) {
-            LDGSTS_G0_ASM(CP_ASYNC_PREFIX_1);
-        } else if constexpr (Depth == 4) {
-            LDGSTS_G0_ASM(CP_ASYNC_PREFIX_4);
-        } else if constexpr (Depth == 5) {
-            LDGSTS_G0_ASM(CP_ASYNC_PREFIX_5);
-        } else if constexpr (Depth == 6) {
-            LDGSTS_G0_ASM(CP_ASYNC_PREFIX_6);
-        } else {
-            LDGSTS_G0_ASM(CP_ASYNC_PREFIX_8);
-        }
-        ArmSample sample{};
-        sample.smid_before = smid_before;
-        sample.smid_after = smid_after;
-        sample.issue_cycles = narrow_cycles(issue_end - start);
-        sample.drain_cycles = narrow_cycles(drain_end - issue_end);
-        return sample;
-    }
     ArmSample sample{};
     sample.smid_before = read_smid();
     const unsigned long long start = read_clock();
@@ -295,20 +298,7 @@ __device__ __forceinline__ ArmSample ldgsts_active_body(
     return sample;
 }
 
-#undef LDGSTS_G0_ASM
-#undef CP_ASYNC_PREFIX_8
-#undef CP_ASYNC_PREFIX_6
-#undef CP_ASYNC_PREFIX_5
-#undef CP_ASYNC_PREFIX_4
-#undef CP_ASYNC_PREFIX_1
-#undef CP_ASYNC_8
-#undef CP_ASYNC_7
-#undef CP_ASYNC_6
-#undef CP_ASYNC_5
-#undef CP_ASYNC_4
-#undef CP_ASYNC_3
-#undef CP_ASYNC_2
-#undef CP_ASYNC_1
+#undef LDGSTS_RUNTIME_G0_ASM
 
 __device__ __noinline__ ArmSample ldgsts_empty_body() {
     ArmSample sample{};
@@ -346,6 +336,9 @@ __device__ __noinline__ ArmSample ldgsts_gap_reference_body() {
     sample.drain_cycles = narrow_cycles(drain_end - issue_end);
     return sample;
 }
+
+#define LDGSTS_ARGS                                                           \
+    d0, d1, d2, d3, d4, d5, d6, d7, s0, s1, s2, s3, s4, s5, s6, s7
 
 #define LDG_REGISTERS                                                         \
     ".reg .u32 a0,a1,a2,a3,b0,b1,b2,b3,c0,c1,c2,c3,d0,d1,d2,d3,"           \
@@ -460,24 +453,25 @@ __device__ __noinline__ ArmSample ldg_empty_body() {
     return sample;
 }
 
-// Compact (NCU/correctness) launches bind assay/depth/gap at compile time.
-// The selected zero-gap specialization is unconditional at the instruction
-// sequence: one inline-asm block contains contiguous LDGSTS positions with no
-// call or branch between them. Gapped variants retain clock-spin samples only
-// between consecutive positions. Direct mode deliberately keeps its runtime
-// dispatcher so multi-cell bundles stay one CTA launch.
+// Compact (NCU/correctness) launches bind assay/gap at compile time.  The
+// zero-gap path keeps depth runtime-controlled in one inline-asm block with
+// eight contiguous LDGSTS positions and no call or branch between them.
+// Gapped variants retain clock-spin samples only between consecutive
+// positions. Direct mode deliberately keeps its runtime dispatcher so
+// multi-cell bundles stay one CTA launch.
 template <int FixedAssay, int FixedDepth, int FixedGap>
 __device__ __forceinline__ ArmSample dispatch_compact_body(
-    bool active, unsigned d0, unsigned d1, unsigned d2, unsigned d3,
+    bool active, int runtime_depth, unsigned d0, unsigned d1, unsigned d2,
+    unsigned d3,
     unsigned d4, unsigned d5, unsigned d6, unsigned d7, const char* s0,
     const char* s1, const char* s2, const char* s3, const char* s4,
     const char* s5, const char* s6, const char* s7) {
     if constexpr (FixedAssay == kLdgsts) {
         if constexpr (FixedGap == 0) {
             if (!active) return ldgsts_empty_body();
-            return ldgsts_active_body<FixedDepth, 0>(
-                d0, d1, d2, d3, d4, d5, d6, d7, s0, s1, s2, s3, s4, s5,
-                s6, s7);
+            return ldgsts_runtime_g0_body(
+                runtime_depth, d0, d1, d2, d3, d4, d5, d6, d7, s0, s1, s2,
+                s3, s4, s5, s6, s7);
         } else {
             if (!active)
                 return ldgsts_gap_reference_body<FixedDepth, FixedGap>();
@@ -493,9 +487,6 @@ __device__ __forceinline__ ArmSample dispatch_compact_body(
             s7);
     }
 }
-
-#define LDGSTS_ARGS                                                           \
-    d0, d1, d2, d3, d4, d5, d6, d7, s0, s1, s2, s3, s4, s5, s6, s7
 
 __device__ __forceinline__ ArmSample dispatch_ldgsts_body(
     bool active, int depth, int gap, unsigned d0, unsigned d1, unsigned d2,
@@ -514,11 +505,9 @@ __device__ __forceinline__ ArmSample dispatch_ldgsts_body(
         return ldgsts_gap_reference_body<6, 64>();
     }
     if (gap == 0) {
-        if (depth == 1) return ldgsts_active_body<1, 0>(LDGSTS_ARGS);
-        if (depth == 4) return ldgsts_active_body<4, 0>(LDGSTS_ARGS);
-        if (depth == 5) return ldgsts_active_body<5, 0>(LDGSTS_ARGS);
-        if (depth == 6) return ldgsts_active_body<6, 0>(LDGSTS_ARGS);
-        return ldgsts_active_body<8, 0>(LDGSTS_ARGS);
+        return ldgsts_runtime_g0_body(
+            depth, d0, d1, d2, d3, d4, d5, d6, d7, s0, s1, s2, s3, s4, s5,
+            s6, s7);
     }
     if (gap == 16) {
         if (depth == 4) return ldgsts_active_body<4, 16>(LDGSTS_ARGS);
@@ -732,8 +721,8 @@ __global__ void prewarm_source(const char* source, CellSpec cell,
     if (token != 0) atomicXor(sink, token);
 }
 
-template <bool Compact, int FixedAssay = 0, int FixedDepth = 0,
-          int FixedGap = 0>
+template <bool Compact, int FixedAssay = -1, int FixedDepth = -1,
+          int FixedGap = -1>
 __global__ void run_cells(const char* source, const CellSpec* cells,
                           CellSpec compact_cell, int cell_count, int assay,
                           int measured_bursts, int warmup_bursts,
@@ -745,10 +734,6 @@ __global__ void run_cells(const char* source, const CellSpec* cells,
 
     for (int cell_index = 0; cell_index < cell_count; ++cell_index) {
         CellSpec cell = Compact ? compact_cell : cells[cell_index];
-        if constexpr (Compact) {
-            cell.depth = FixedDepth;
-            cell.gap_cycles = FixedGap;
-        }
         const int selected_assay = assay;
         initialize_destinations(destinations);
         if constexpr (!Compact) prewarm_cell(source, cell);
@@ -824,11 +809,12 @@ __global__ void run_cells(const char* source, const CellSpec* cells,
                 for (int sequence = 0; sequence < 2; ++sequence) {
                     const bool enabled = (sequence == 0) == enabled_first;
                     ArmSample sample;
-                    if constexpr (Compact) {
+                    if constexpr (Compact || FixedAssay >= 0) {
                         sample = dispatch_compact_body<
                             FixedAssay, FixedDepth, FixedGap>(
-                            enabled, on_d0, on_d1, on_d2, on_d3, on_d4, on_d5,
-                            on_d6, on_d7, s0, s1, s2, s3, s4, s5, s6, s7);
+                            enabled, cell.depth, on_d0, on_d1, on_d2, on_d3,
+                            on_d4, on_d5, on_d6, on_d7, s0, s1, s2, s3, s4,
+                            s5, s6, s7);
                     } else if (selected_assay == kLdgsts) {
                         sample = dispatch_ldgsts_body(
                             enabled, cell.depth, cell.gap_cycles, on_d0, on_d1,
@@ -949,10 +935,27 @@ bool parse_cell(const std::string& key, int assay, HostCell* cell) {
          (depth != 4 && depth != 5 && depth != 6 && depth != 8))) {
         return false;
     }
-    if (assay == kLdgsts && gap != 0 &&
-        (depth != 4 && depth != 5 && depth != 6)) {
-        return false;
-    }
+    const char* canonical_assay = assay == kLdgsts ? "ldgsts" : "ldg";
+    const char* canonical_route = route == kL1 ? "l1" :
+                                  route == kL2 ? "l2" : "dram";
+    char canonical[64]{};
+    std::snprintf(canonical, sizeof(canonical), "%s_w%d_%s_d%d_g%d",
+                  canonical_assay, warps, canonical_route, depth, gap);
+    if (key != canonical) return false;
+    const bool frozen =
+        assay == kLdg
+            ? (warps == 1 && route == kL1 && depth >= 4 && depth <= 8 &&
+               (depth == 4 || depth == 5 || depth == 6 || depth == 8) &&
+               gap == 0)
+            : (warps == 4
+                   ? (depth == 4 || depth == 5 || depth == 6) && gap == 0
+                   : (gap == 0 &&
+                      (depth == 1 || depth == 4 || depth == 5 || depth == 6 ||
+                       depth == 8) &&
+                      (route == kL1 || route == kL2 || route == kDram)) ||
+                         (gap != 0 && (route == kL1 || route == kDram) &&
+                          (depth == 4 || depth == 5 || depth == 6)));
+    if (!frozen) return false;
     cell->key = key;
     cell->spec = {route, depth, warps, gap};
     return true;
@@ -1138,7 +1141,8 @@ int main(int argc, char** argv) {
         }
     }
     if (mode < 0 || assay < 0 || cells_text.empty() || bursts < 1 ||
-        bursts > kMaxBursts || warmup < 0 || warmup > kMaxBursts) {
+        bursts > kMaxBursts || warmup < 0 || warmup > kMaxBursts ||
+        repetition < 1 || repetition > kMaxRepetitions) {
         usage(argv[0]);
         return 2;
     }
@@ -1152,9 +1156,25 @@ int main(int argc, char** argv) {
         }
         cells.push_back(cell);
     }
+    std::set<std::string> unique_keys;
+    for (const HostCell& cell : cells) {
+        if (!unique_keys.insert(cell.key).second) {
+            std::fprintf(stderr, "duplicate cell key: %s\n", cell.key.c_str());
+            return 2;
+        }
+    }
     if (cells.empty() ||
         ((mode == kNcu || mode == kCorrectness) && cells.size() != 1)) {
         return 2;
+    }
+    if (mode == kDirect) {
+        std::set<int> gaps;
+        for (const HostCell& cell : cells) gaps.insert(cell.spec.gap_cycles);
+        if (gaps.size() != 1) {
+            std::fprintf(stderr,
+                         "direct invocation must keep one gap schedule\n");
+            return 2;
+        }
     }
     if (reverse) std::reverse(cells.begin(), cells.end());
 
@@ -1228,10 +1248,20 @@ int main(int argc, char** argv) {
         CUDA_CHECK(cudaGetLastError());
         CUDA_CHECK(cudaDeviceSynchronize());
     } else {
-        run_cells<false, 0, 0, 0><<<1, kThreads>>>(
-            source, device_cells, CellSpec{},
-            static_cast<int>(host_specs.size()), assay, bursts, warmup,
-            repetition, device_records, device_states);
+        const bool all_zero_gap = std::all_of(
+            host_specs.begin(), host_specs.end(),
+            [](const CellSpec& spec) { return spec.gap_cycles == 0; });
+        if (all_zero_gap && assay == kLdgsts) {
+            run_cells<false, kLdgsts, 0, 0><<<1, kThreads>>>(
+                source, device_cells, CellSpec{},
+                static_cast<int>(host_specs.size()), assay, bursts, warmup,
+                repetition, device_records, device_states);
+        } else {
+            run_cells<false><<<1, kThreads>>>(
+                source, device_cells, CellSpec{},
+                static_cast<int>(host_specs.size()), assay, bursts, warmup,
+                repetition, device_records, device_states);
+        }
         CUDA_CHECK(cudaGetLastError());
         CUDA_CHECK(cudaDeviceSynchronize());
     }
