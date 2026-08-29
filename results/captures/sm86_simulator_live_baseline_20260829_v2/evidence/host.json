@@ -6,12 +6,13 @@
     "capture_revision": "b915ec6b3df2973e87119c63e438c8bb5f77be44",
     "evidence_source_revision": "80e1aa8e1b6033298bc081822f5c8f6e8685f800",
     "candidate_revision": "8cae7c6f37e378ac54e4c5fe5f7acd3f38991480",
+    "correction_revision": "0a66748501d47c483c3d55c256362eff6bb721da",
     "working_tree_revision_at_preflight": "8cae7c6f37e378ac54e4c5fe5f7acd3f38991480",
     "simulator_binary_sha256": "6cb0d05f0d447c0cd6ee2e30353c0f1e89d464462458912478c826860f15f9a4",
     "tracer_dso_sha256": "dda89ee6857058b3f6dc2a01d73a2dc926b876d8e343b7457c779efd82fed007",
     "architecture_card_sha256": "12c72f8b16ac369fe8ab877f39850bfc1e5cbb3b16d0b2d45a43b14c66ffe1da",
     "pchase_card_sha256": "e87d2e208f5326a8083d1a54799864953a62ed1fece1b628583cf8d5cafc581d",
-    "relation": "The captured live binaries, tracer, simulator, and cards are identified by these hashes. The candidate revision is the immutable source revision for the validator/evidence handoff; the later metadata commit may update only this binding record."
+    "relation": "The captured live binaries, tracer, simulator, and cards are identified by these hashes. candidate_revision is the immutable source revision used by the host commands; correction_revision records the later validator/closure-evidence correction and does not claim a new GPU capture."
   },
   "commands": [
     {

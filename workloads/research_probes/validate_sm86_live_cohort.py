@@ -114,7 +114,12 @@ def _validate_host_preflight(
     binding = host.get("revision_binding")
     if not isinstance(binding, Mapping):
         raise ValueError("host preflight revision binding is missing")
-    for key in ("capture_revision", "evidence_source_revision", "candidate_revision"):
+    for key in (
+        "capture_revision",
+        "evidence_source_revision",
+        "candidate_revision",
+        "correction_revision",
+    ):
         value = binding.get(key)
         if not isinstance(value, str) or len(value) != 40:
             raise ValueError(f"host preflight revision binding {key} is malformed")
@@ -122,6 +127,8 @@ def _validate_host_preflight(
         raise ValueError("host preflight capture revision differs from manifest")
     if binding.get("candidate_revision") != repository.get("candidate_revision"):
         raise ValueError("host preflight candidate revision differs from manifest")
+    if binding.get("correction_revision") != repository.get("correction_revision"):
+        raise ValueError("host preflight correction revision differs from manifest")
     simulator_identity = repository.get("simulator_binary")
     if not isinstance(simulator_identity, Mapping):
         raise ValueError("manifest simulator binary identity is malformed")
@@ -418,7 +425,12 @@ def validate(manifest_path: Path, report_path: Path | None) -> int:
     repository = document.get("repository")
     if not isinstance(repository, Mapping):
         raise ValueError("manifest repository identity is missing")
-    for revision_key in ("capture_revision", "handoff_revision", "candidate_revision"):
+    for revision_key in (
+        "capture_revision",
+        "handoff_revision",
+        "candidate_revision",
+        "correction_revision",
+    ):
         revision = repository.get(revision_key)
         if not isinstance(revision, str) or len(revision) != 40:
             raise ValueError(f"manifest repository {revision_key} is malformed")
