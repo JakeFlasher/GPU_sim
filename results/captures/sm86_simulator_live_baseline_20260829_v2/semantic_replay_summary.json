@@ -25,8 +25,8 @@
   "full_per_launch_report": {
     "path": "results/captures/sm86_simulator_live_baseline_20260829_v2/semantic_replay_report.json.zst",
     "format": "zstd-compressed JSON",
-    "sha256": "46a722271b15d3dbe151d09db1f0acde60e24a220dff874e098bbcb3843648a6",
-    "uncompressed_sha256": "600737bf21d2341768deaef4befbaee29ce0fa1514ceb7e6af88084d0e53cdeb",
+    "sha256": "cff576c7ae816553af1e3453e146a312fd325b74a01769a1f28f9d749679ed7a",
+    "uncompressed_sha256": "33be3e9d9a02f8930824c5dfe8eb56db964f48e57e63d447b775ee4e1591e210",
     "extract_command": "zstd -dc semantic_replay_report.json.zst > semantic_replay_report.json"
   }
 }

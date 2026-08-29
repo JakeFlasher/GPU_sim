@@ -10,6 +10,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from workloads.research_probes.semantic_replay_validation import (
+    _async_source_error,
     _global_memory_error,
 )
 
@@ -167,3 +168,17 @@ def test_trace_derived_traffic_mutation_is_rejected() -> None:
     memory["store_sectors"] = 13
     error, _snapshot = _global_memory_error(memory, expected, "fixture")
     assert "global_store_sectors mismatch" in error
+
+
+def test_async_source_sector_mutation_is_rejected() -> None:
+    expected = SimpleNamespace(
+        global_load_sectors=0,
+        global_atomic_sectors=0,
+        async_source_sectors=32,
+    )
+    counters = {"l1": {"hits": 24, "misses": 8, "bypass_sectors": 0}}
+    error, snapshot = _async_source_error(counters, expected, "async-fixture")
+    assert error is None and snapshot["passed"] is True
+    counters["l1"]["misses"] = 7
+    error, _snapshot = _async_source_error(counters, expected, "async-fixture")
+    assert "async_source_sectors mismatch" in error

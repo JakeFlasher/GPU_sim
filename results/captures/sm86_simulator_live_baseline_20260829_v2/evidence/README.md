@@ -14,3 +14,7 @@ zstd -dc evidence/raw_cohort.tar.zst | tar -xf -
 
 The archive is evidence retention, not simulator input. NCU values remain
 comparison-only observations.
+
+`../live_cohort_semantic_report.json` is the independent six-cell validator
+result; it is intentionally kept outside the compressed raw archive so a
+reviewer can inspect the pass/fail summary without extraction.

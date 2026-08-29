@@ -81,14 +81,56 @@ def _global_memory_error(
         + observed["reduction_sectors"]
         == expected_values["atomic_sectors"],
     }
-    for name, passed in checks.items():
-        if not passed:
-            return (
-                f"{label}: trace-derived {name} mismatch "
-                f"(observed={observed}, expected={expected_values})",
-                {"observed": observed, "expected": expected_values, "checks": checks},
-            )
-    return None, {"observed": observed, "expected": expected_values, "checks": checks}
+    error = next(
+        (
+            f"{label}: trace-derived {name} mismatch "
+            f"(observed={observed}, expected={expected_values})"
+            for name, passed in checks.items()
+            if not passed
+        ),
+        None,
+    )
+    return error, {"observed": observed, "expected": expected_values, "checks": checks}
+
+
+def _async_source_error(
+    counters: Mapping[str, Any],
+    expected: LaunchTraceInvariants,
+    label: str,
+) -> tuple[str | None, dict[str, Any]]:
+    """Check the source-sector conservation lane for cacheable async copies."""
+
+    if expected.async_source_sectors == 0:
+        return None, {
+            "status": "not_applicable",
+            "expected_async_source_sectors": 0,
+        }
+    l1 = counters.get("l1")
+    if not isinstance(l1, Mapping):
+        return f"{label}: async-source invariant has no L1 counters", {
+            "status": "unavailable",
+            "expected_async_source_sectors": expected.async_source_sectors,
+        }
+    observed = _int(l1.get("hits")) + _int(l1.get("misses"))
+    # A bypass route contributes to the same trace-visible source total.  The
+    # active async cohort has no atomic source traffic; mixed atomic/async
+    # traces are reported as ambiguous rather than assigned a false equality.
+    ambiguous = expected.global_atomic_sectors != 0
+    if not ambiguous:
+        observed += _int(l1.get("bypass_sectors"))
+    expected_total = expected.global_load_sectors + expected.async_source_sectors
+    snapshot = {
+        "status": "ambiguous" if ambiguous else "checked",
+        "expected_async_source_sectors": expected.async_source_sectors,
+        "expected_l1_read_sectors": expected_total,
+        "observed_l1_read_sectors": observed,
+        "passed": None if ambiguous else observed == expected_total,
+    }
+    if ambiguous:
+        return None, snapshot
+    if observed != expected_total:
+        return f"{label}: trace-derived async_source_sectors mismatch ({snapshot})", snapshot
+    return None, snapshot
 
 
 def _hierarchy_error(counters: Mapping[str, Any], label: str) -> tuple[str | None, dict[str, Any]]:
@@ -275,6 +317,11 @@ def validate_replay_document(
             checks["trace_global_memory_conservation"] = error is None
             if error is not None:
                 errors.append(error)
+        async_error, async_snapshot = _async_source_error(counters, expected, prefix)
+        traffic_snapshot["async_source"] = async_snapshot
+        checks["async_source_conservation"] = async_error is None
+        if async_error is not None:
+            errors.append(async_error)
         hierarchy_error, hierarchy_snapshot = _hierarchy_error(counters, prefix)
         checks["hierarchy_conservation"] = hierarchy_error is None
         if hierarchy_error is not None:

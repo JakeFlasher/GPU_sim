@@ -38,6 +38,12 @@ diagnostics. The compact summary is
 per-launch report is the compressed
 `semantic_replay_report.json.zst` referenced there.
 
+The same semantic checks are applied independently to the six fresh live
+replays by `workloads/research_probes/validate_sm86_live_cohort.py`; its
+per-cell report is `live_cohort_semantic_report.json`. Every recorded stage has
+a finite watchdog (correctness 180 s, NCU 900 s, NVBit 900 s, static control
+300 s, simulator 900 s; retained-corpus validation 1,800 s).
+
 ## Reproduction commands
 
 Correctness (one per portable cell):

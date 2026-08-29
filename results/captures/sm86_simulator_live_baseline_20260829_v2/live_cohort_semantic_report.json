@@ -1,0 +1,1232 @@
+{
+  "cell_count": 6,
+  "manifest": "results/captures/sm86_simulator_live_baseline_20260829_v2/campaign_manifest.json",
+  "ncu_values_used_as_simulator_inputs": false,
+  "passed": true,
+  "rows": [
+    {
+      "cell": "cp_async_canary",
+      "checks": {
+        "correctness": true,
+        "ncu": true,
+        "nvbit": true,
+        "simulator_semantics": true,
+        "static_control": true
+      },
+      "semantic_launches": [
+        {
+          "checks": {
+            "async_source_conservation": true,
+            "coverage_full": true,
+            "hierarchy_conservation": true,
+            "instruction_conservation": true,
+            "readiness_conservation": true,
+            "record_conservation": true,
+            "trace_global_memory_conservation": true
+          },
+          "identity": {
+            "device_id": 0,
+            "kernel_id": 1,
+            "stream_id": 0
+          },
+          "label": "cp_async_canary",
+          "launch_index": 0,
+          "observed": {
+            "coverage": {
+              "blocks_observed": 1,
+              "kind": "full",
+              "population_blocks": 1
+            },
+            "dram": {
+              "read_sectors": 16
+            },
+            "hierarchy": {
+              "checks": {
+                "dram_misses_bounded": true,
+                "line_misses_bounded": true,
+                "sector_fill_misses_bounded": true,
+                "source_hit_conservation": true,
+                "source_sector_conservation": true,
+                "write_tag_hits_bounded": true
+              },
+              "observed": {
+                "dram_read_sectors": 16,
+                "l2_hits": 54,
+                "l2_line_misses": 22,
+                "l2_sector_fill_misses": 12,
+                "l2_total": 88,
+                "l2_write_tag_hits": 48,
+                "source_hits": 54,
+                "source_sectors": 88
+              }
+            },
+            "instructions_issued": 9104,
+            "l1": {
+              "hits": 32256,
+              "merges": 508,
+              "misses": 512,
+              "stall_events": 0
+            },
+            "l2": {
+              "hits": 54,
+              "line_misses": 22,
+              "misses": 34,
+              "sector_fill_misses": 12
+            },
+            "readiness": {
+              "async_groups": {
+                "completion_hidden_before_wait_cycles": 4608,
+                "destination_local_cycles": 16384,
+                "destination_local_limited_groups": 64,
+                "destination_sm_service_cycles": 15360,
+                "destination_sm_service_limited_groups": 192,
+                "groups_committed": 256,
+                "groups_waited": 256,
+                "source_cycles": 9120,
+                "source_limited_groups": 0
+              },
+              "checks": {
+                "async_cause_groups_bounded": true,
+                "async_waits_le_commits": true,
+                "barrier_generation_conservation": true,
+                "frontier_lower_bound_matches_terminal": true,
+                "frontier_tail_flags_match": true,
+                "last_event_le_terminal": true,
+                "terminal_ge_issue": true
+              },
+              "constraint_exposure_cycles": {
+                "async_destination_local": 5224,
+                "async_destination_sm_service": 31032,
+                "control_stall": 27268,
+                "cta_barrier_rendezvous": 18018,
+                "dependence_counter_global_store_operand_read": 12,
+                "dependence_counter_non_memory_write": 80,
+                "dependence_counter_shared_write": 76,
+                "pipeline_barrier": 792,
+                "pipeline_branch": 3328
+              },
+              "cta_barriers": {
+                "generations": 65,
+                "max_arrival_spread_cycles": 128,
+                "releases_after_participant_retirement": 0,
+                "total_arrival_spread_cycles": 8198,
+                "total_rendezvous_warp_cycles": 17680
+              },
+              "limiting_cycles": {
+                "async_destination_local": 5224,
+                "async_destination_sm_service": 31032,
+                "control_stall": 24936,
+                "cta_barrier_rendezvous": 17984,
+                "dependence_counter_non_memory_write": 80,
+                "dependence_counter_shared_write": 76,
+                "pipeline_barrier": 192,
+                "pipeline_branch": 2560
+              },
+              "readiness_schema": 8,
+              "timing": {
+                "completion_frontier": {
+                  "lower_bound_cycles": 20522,
+                  "status": "incomplete_unmodeled_retirement_tails",
+                  "unmodeled_tails": {
+                    "async_copy_shared_visibility": false,
+                    "coherence": true,
+                    "dirty_writeback": true,
+                    "reduction_read_modify_write": false
+                  }
+                },
+                "issue": 20522,
+                "last_event": 20519,
+                "terminal": 20522
+              }
+            },
+            "records_seen": 9104,
+            "traffic": {
+              "async_source": {
+                "expected_async_source_sectors": 32768,
+                "expected_l1_read_sectors": 32768,
+                "observed_l1_read_sectors": 32768,
+                "passed": true,
+                "status": "checked"
+              },
+              "checks": {
+                "global_atomic_instructions": true,
+                "global_atomic_sectors": true,
+                "global_load_instructions": true,
+                "global_load_sectors": true,
+                "global_store_instructions": true,
+                "global_store_sectors": true
+              },
+              "expected": {
+                "async_source_sectors": 32768,
+                "atomic_instructions": 0,
+                "atomic_sectors": 0,
+                "load_instructions": 0,
+                "load_sectors": 0,
+                "store_instructions": 12,
+                "store_sectors": 72
+              },
+              "observed": {
+                "atomic_instructions": 0,
+                "atomic_sectors": 0,
+                "load_instructions": 0,
+                "load_sectors": 0,
+                "reduction_instructions": 0,
+                "reduction_sectors": 0,
+                "store_instructions": 12,
+                "store_sectors": 72
+              }
+            },
+            "unmodeled_tails": {
+              "async_copy_shared_visibility": false,
+              "coherence": true,
+              "dirty_writeback": true,
+              "reduction_read_modify_write": false
+            }
+          },
+          "passed": true,
+          "trace_expected": {
+            "async_copy_instructions": 2048,
+            "async_source_sectors": 32768,
+            "atomic_instructions": 0,
+            "blocks": 1,
+            "device_id": 0,
+            "global_atomic_instructions": 0,
+            "global_atomic_sectors": 0,
+            "global_load_instructions": 0,
+            "global_load_sectors": 0,
+            "global_store_instructions": 12,
+            "global_store_sectors": 72,
+            "instructions": 9104,
+            "kernel_id": 1,
+            "load_instructions": 4,
+            "local_load_sectors": 0,
+            "local_store_sectors": 0,
+            "memory_instructions": 2832,
+            "shared_sectors": 64,
+            "store_instructions": 12,
+            "stream_id": 0,
+            "warps": 4
+          }
+        }
+      ]
+    },
+    {
+      "cell": "gemm_hmma_bf16_sm80",
+      "checks": {
+        "correctness": true,
+        "ncu": true,
+        "nvbit": true,
+        "simulator_semantics": true,
+        "static_control": true
+      },
+      "semantic_launches": [
+        {
+          "checks": {
+            "async_source_conservation": true,
+            "coverage_full": true,
+            "hierarchy_conservation": true,
+            "instruction_conservation": true,
+            "readiness_conservation": true,
+            "record_conservation": true,
+            "trace_global_memory_conservation": true
+          },
+          "identity": {
+            "device_id": 0,
+            "kernel_id": 1,
+            "stream_id": 0
+          },
+          "label": "gemm_hmma_bf16_sm80",
+          "launch_index": 0,
+          "observed": {
+            "coverage": {
+              "blocks_observed": 512,
+              "kind": "full",
+              "population_blocks": 512
+            },
+            "dram": {
+              "read_sectors": 8192
+            },
+            "hierarchy": {
+              "checks": {
+                "dram_misses_bounded": true,
+                "line_misses_bounded": true,
+                "sector_fill_misses_bounded": true,
+                "source_hit_conservation": true,
+                "source_sector_conservation": true,
+                "write_tag_hits_bounded": true
+              },
+              "observed": {
+                "dram_read_sectors": 8192,
+                "l2_hits": 14336,
+                "l2_line_misses": 4096,
+                "l2_sector_fill_misses": 164224,
+                "l2_total": 182656,
+                "l2_write_tag_hits": 6144,
+                "source_hits": 14336,
+                "source_sectors": 182656
+              }
+            },
+            "instructions_issued": 197120,
+            "l1": {
+              "hits": 0,
+              "merges": 30336,
+              "misses": 196608,
+              "stall_events": 0
+            },
+            "l2": {
+              "hits": 14336,
+              "line_misses": 4096,
+              "misses": 168320,
+              "sector_fill_misses": 164224
+            },
+            "readiness": {
+              "async_groups": {
+                "completion_hidden_before_wait_cycles": 45056,
+                "destination_local_cycles": 393216,
+                "destination_local_limited_groups": 4734,
+                "destination_sm_service_cycles": 144032,
+                "destination_sm_service_limited_groups": 3458,
+                "groups_committed": 8192,
+                "groups_waited": 8192,
+                "source_cycles": 3330192,
+                "source_limited_groups": 0
+              },
+              "checks": {
+                "async_cause_groups_bounded": true,
+                "async_waits_le_commits": true,
+                "barrier_generation_conservation": true,
+                "frontier_lower_bound_matches_terminal": true,
+                "frontier_tail_flags_match": true,
+                "last_event_le_terminal": true,
+                "terminal_ge_issue": true
+              },
+              "constraint_exposure_cycles": {
+                "async_destination_local": 2184390,
+                "async_destination_sm_service": 1637994,
+                "control_stall": 639488,
+                "dependence_counter_non_memory_write": 3584,
+                "dependence_counter_shared_write": 53248,
+                "eligible_not_selected": 176,
+                "pipeline_barrier": 49152,
+                "pipeline_branch": 16384
+              },
+              "cta_barriers": {
+                "generations": 16384,
+                "max_arrival_spread_cycles": 0,
+                "releases_after_participant_retirement": 0,
+                "total_arrival_spread_cycles": 0,
+                "total_rendezvous_warp_cycles": 16384
+              },
+              "limiting_cycles": {
+                "async_destination_local": 2184390,
+                "async_destination_sm_service": 1637994,
+                "control_stall": 611840,
+                "dependence_counter_non_memory_write": 3584,
+                "dependence_counter_shared_write": 53248,
+                "eligible_not_selected": 176,
+                "pipeline_branch": 10240
+              },
+              "readiness_schema": 6,
+              "timing": {
+                "completion_frontier": {
+                  "lower_bound_cycles": 8915,
+                  "status": "incomplete_unmodeled_retirement_tails",
+                  "unmodeled_tails": {
+                    "async_copy_shared_visibility": false,
+                    "coherence": true,
+                    "dirty_writeback": true,
+                    "reduction_read_modify_write": false
+                  }
+                },
+                "issue": 8915,
+                "last_event": 8912,
+                "terminal": 8915
+              }
+            },
+            "records_seen": 197120,
+            "traffic": {
+              "async_source": {
+                "expected_async_source_sectors": 196608,
+                "expected_l1_read_sectors": 196608,
+                "observed_l1_read_sectors": 196608,
+                "passed": true,
+                "status": "checked"
+              },
+              "checks": {
+                "global_atomic_instructions": true,
+                "global_atomic_sectors": true,
+                "global_load_instructions": true,
+                "global_load_sectors": true,
+                "global_store_instructions": true,
+                "global_store_sectors": true
+              },
+              "expected": {
+                "async_source_sectors": 196608,
+                "atomic_instructions": 0,
+                "atomic_sectors": 0,
+                "load_instructions": 0,
+                "load_sectors": 0,
+                "store_instructions": 2048,
+                "store_sectors": 16384
+              },
+              "observed": {
+                "atomic_instructions": 0,
+                "atomic_sectors": 0,
+                "load_instructions": 0,
+                "load_sectors": 0,
+                "reduction_instructions": 0,
+                "reduction_sectors": 0,
+                "store_instructions": 2048,
+                "store_sectors": 16384
+              }
+            },
+            "unmodeled_tails": {
+              "async_copy_shared_visibility": false,
+              "coherence": true,
+              "dirty_writeback": true,
+              "reduction_read_modify_write": false
+            }
+          },
+          "passed": true,
+          "trace_expected": {
+            "async_copy_instructions": 16384,
+            "async_source_sectors": 196608,
+            "atomic_instructions": 0,
+            "blocks": 512,
+            "device_id": 0,
+            "global_atomic_instructions": 0,
+            "global_atomic_sectors": 0,
+            "global_load_instructions": 0,
+            "global_load_sectors": 0,
+            "global_store_instructions": 2048,
+            "global_store_sectors": 16384,
+            "instructions": 197120,
+            "kernel_id": 1,
+            "load_instructions": 49152,
+            "local_load_sectors": 0,
+            "local_store_sectors": 0,
+            "memory_instructions": 92160,
+            "shared_sectors": 393216,
+            "store_instructions": 2048,
+            "stream_id": 0,
+            "warps": 512
+          }
+        }
+      ]
+    },
+    {
+      "cell": "gemm_hmma_fp16_sm80",
+      "checks": {
+        "correctness": true,
+        "ncu": true,
+        "nvbit": true,
+        "simulator_semantics": true,
+        "static_control": true
+      },
+      "semantic_launches": [
+        {
+          "checks": {
+            "async_source_conservation": true,
+            "coverage_full": true,
+            "hierarchy_conservation": true,
+            "instruction_conservation": true,
+            "readiness_conservation": true,
+            "record_conservation": true,
+            "trace_global_memory_conservation": true
+          },
+          "identity": {
+            "device_id": 0,
+            "kernel_id": 1,
+            "stream_id": 0
+          },
+          "label": "gemm_hmma_fp16_sm80",
+          "launch_index": 0,
+          "observed": {
+            "coverage": {
+              "blocks_observed": 512,
+              "kind": "full",
+              "population_blocks": 512
+            },
+            "dram": {
+              "read_sectors": 8192
+            },
+            "hierarchy": {
+              "checks": {
+                "dram_misses_bounded": true,
+                "line_misses_bounded": true,
+                "sector_fill_misses_bounded": true,
+                "source_hit_conservation": true,
+                "source_sector_conservation": true,
+                "write_tag_hits_bounded": true
+              },
+              "observed": {
+                "dram_read_sectors": 8192,
+                "l2_hits": 14336,
+                "l2_line_misses": 4096,
+                "l2_sector_fill_misses": 161792,
+                "l2_total": 180224,
+                "l2_write_tag_hits": 6144,
+                "source_hits": 14336,
+                "source_sectors": 180224
+              }
+            },
+            "instructions_issued": 197120,
+            "l1": {
+              "hits": 0,
+              "merges": 32768,
+              "misses": 196608,
+              "stall_events": 0
+            },
+            "l2": {
+              "hits": 14336,
+              "line_misses": 4096,
+              "misses": 165888,
+              "sector_fill_misses": 161792
+            },
+            "readiness": {
+              "async_groups": {
+                "completion_hidden_before_wait_cycles": 45056,
+                "destination_local_cycles": 393216,
+                "destination_local_limited_groups": 4584,
+                "destination_sm_service_cycles": 152672,
+                "destination_sm_service_limited_groups": 3608,
+                "groups_committed": 8192,
+                "groups_waited": 8192,
+                "source_cycles": 3321552,
+                "source_limited_groups": 0
+              },
+              "checks": {
+                "async_cause_groups_bounded": true,
+                "async_waits_le_commits": true,
+                "barrier_generation_conservation": true,
+                "frontier_lower_bound_matches_terminal": true,
+                "frontier_tail_flags_match": true,
+                "last_event_le_terminal": true,
+                "terminal_ge_issue": true
+              },
+              "constraint_exposure_cycles": {
+                "async_destination_local": 2115180,
+                "async_destination_sm_service": 1707204,
+                "control_stall": 639488,
+                "dependence_counter_non_memory_write": 3584,
+                "dependence_counter_shared_write": 53248,
+                "eligible_not_selected": 176,
+                "pipeline_barrier": 49152,
+                "pipeline_branch": 16384
+              },
+              "cta_barriers": {
+                "generations": 16384,
+                "max_arrival_spread_cycles": 0,
+                "releases_after_participant_retirement": 0,
+                "total_arrival_spread_cycles": 0,
+                "total_rendezvous_warp_cycles": 16384
+              },
+              "limiting_cycles": {
+                "async_destination_local": 2115180,
+                "async_destination_sm_service": 1707204,
+                "control_stall": 611840,
+                "dependence_counter_non_memory_write": 3584,
+                "dependence_counter_shared_write": 53248,
+                "eligible_not_selected": 176,
+                "pipeline_branch": 10240
+              },
+              "readiness_schema": 6,
+              "timing": {
+                "completion_frontier": {
+                  "lower_bound_cycles": 8915,
+                  "status": "incomplete_unmodeled_retirement_tails",
+                  "unmodeled_tails": {
+                    "async_copy_shared_visibility": false,
+                    "coherence": true,
+                    "dirty_writeback": true,
+                    "reduction_read_modify_write": false
+                  }
+                },
+                "issue": 8915,
+                "last_event": 8912,
+                "terminal": 8915
+              }
+            },
+            "records_seen": 197120,
+            "traffic": {
+              "async_source": {
+                "expected_async_source_sectors": 196608,
+                "expected_l1_read_sectors": 196608,
+                "observed_l1_read_sectors": 196608,
+                "passed": true,
+                "status": "checked"
+              },
+              "checks": {
+                "global_atomic_instructions": true,
+                "global_atomic_sectors": true,
+                "global_load_instructions": true,
+                "global_load_sectors": true,
+                "global_store_instructions": true,
+                "global_store_sectors": true
+              },
+              "expected": {
+                "async_source_sectors": 196608,
+                "atomic_instructions": 0,
+                "atomic_sectors": 0,
+                "load_instructions": 0,
+                "load_sectors": 0,
+                "store_instructions": 2048,
+                "store_sectors": 16384
+              },
+              "observed": {
+                "atomic_instructions": 0,
+                "atomic_sectors": 0,
+                "load_instructions": 0,
+                "load_sectors": 0,
+                "reduction_instructions": 0,
+                "reduction_sectors": 0,
+                "store_instructions": 2048,
+                "store_sectors": 16384
+              }
+            },
+            "unmodeled_tails": {
+              "async_copy_shared_visibility": false,
+              "coherence": true,
+              "dirty_writeback": true,
+              "reduction_read_modify_write": false
+            }
+          },
+          "passed": true,
+          "trace_expected": {
+            "async_copy_instructions": 16384,
+            "async_source_sectors": 196608,
+            "atomic_instructions": 0,
+            "blocks": 512,
+            "device_id": 0,
+            "global_atomic_instructions": 0,
+            "global_atomic_sectors": 0,
+            "global_load_instructions": 0,
+            "global_load_sectors": 0,
+            "global_store_instructions": 2048,
+            "global_store_sectors": 16384,
+            "instructions": 197120,
+            "kernel_id": 1,
+            "load_instructions": 49152,
+            "local_load_sectors": 0,
+            "local_store_sectors": 0,
+            "memory_instructions": 92160,
+            "shared_sectors": 393216,
+            "store_instructions": 2048,
+            "stream_id": 0,
+            "warps": 512
+          }
+        }
+      ]
+    },
+    {
+      "cell": "gemm_imma_int8_sm80",
+      "checks": {
+        "correctness": true,
+        "ncu": true,
+        "nvbit": true,
+        "simulator_semantics": true,
+        "static_control": true
+      },
+      "semantic_launches": [
+        {
+          "checks": {
+            "async_source_conservation": true,
+            "coverage_full": true,
+            "hierarchy_conservation": true,
+            "instruction_conservation": true,
+            "readiness_conservation": true,
+            "record_conservation": true,
+            "trace_global_memory_conservation": true
+          },
+          "identity": {
+            "device_id": 0,
+            "kernel_id": 1,
+            "stream_id": 0
+          },
+          "label": "gemm_imma_int8_sm80",
+          "launch_index": 0,
+          "observed": {
+            "coverage": {
+              "blocks_observed": 512,
+              "kind": "full",
+              "population_blocks": 512
+            },
+            "dram": {
+              "read_sectors": 4096
+            },
+            "hierarchy": {
+              "checks": {
+                "dram_misses_bounded": true,
+                "line_misses_bounded": true,
+                "sector_fill_misses_bounded": true,
+                "source_hit_conservation": true,
+                "source_sector_conservation": true,
+                "write_tag_hits_bounded": true
+              },
+              "observed": {
+                "dram_read_sectors": 4096,
+                "l2_hits": 14432,
+                "l2_line_misses": 3072,
+                "l2_sector_fill_misses": 81504,
+                "l2_total": 99008,
+                "l2_write_tag_hits": 6144,
+                "source_hits": 14432,
+                "source_sectors": 99008
+              }
+            },
+            "instructions_issued": 157696,
+            "l1": {
+              "hits": 98304,
+              "merges": 15680,
+              "misses": 98304,
+              "stall_events": 0
+            },
+            "l2": {
+              "hits": 14432,
+              "line_misses": 3072,
+              "misses": 84576,
+              "sector_fill_misses": 81504
+            },
+            "readiness": {
+              "async_groups": {
+                "completion_hidden_before_wait_cycles": 63544,
+                "destination_local_cycles": 393216,
+                "destination_local_limited_groups": 3007,
+                "destination_sm_service_cycles": 223414,
+                "destination_sm_service_limited_groups": 5185,
+                "groups_committed": 8192,
+                "groups_waited": 8192,
+                "source_cycles": 1773968,
+                "source_limited_groups": 0
+              },
+              "checks": {
+                "async_cause_groups_bounded": true,
+                "async_waits_le_commits": true,
+                "barrier_generation_conservation": true,
+                "frontier_lower_bound_matches_terminal": true,
+                "frontier_tail_flags_match": true,
+                "last_event_le_terminal": true,
+                "terminal_ge_issue": true
+              },
+              "constraint_exposure_cycles": {
+                "async_destination_local": 981070,
+                "async_destination_sm_service": 1345984,
+                "control_stall": 509440,
+                "dependence_counter_non_memory_write": 6656,
+                "dependence_counter_shared_write": 49152,
+                "eligible_not_selected": 802,
+                "pipeline_barrier": 49152,
+                "pipeline_branch": 16384,
+                "pipeline_tensor": 84
+              },
+              "cta_barriers": {
+                "generations": 16384,
+                "max_arrival_spread_cycles": 0,
+                "releases_after_participant_retirement": 0,
+                "total_arrival_spread_cycles": 0,
+                "total_rendezvous_warp_cycles": 16384
+              },
+              "limiting_cycles": {
+                "async_destination_local": 981070,
+                "async_destination_sm_service": 1345984,
+                "control_stall": 481792,
+                "dependence_counter_non_memory_write": 6656,
+                "dependence_counter_shared_write": 49152,
+                "eligible_not_selected": 802,
+                "pipeline_branch": 10240
+              },
+              "readiness_schema": 6,
+              "timing": {
+                "completion_frontier": {
+                  "lower_bound_cycles": 5867,
+                  "status": "incomplete_unmodeled_retirement_tails",
+                  "unmodeled_tails": {
+                    "async_copy_shared_visibility": false,
+                    "coherence": true,
+                    "dirty_writeback": true,
+                    "reduction_read_modify_write": false
+                  }
+                },
+                "issue": 5867,
+                "last_event": 5864,
+                "terminal": 5867
+              }
+            },
+            "records_seen": 157696,
+            "traffic": {
+              "async_source": {
+                "expected_async_source_sectors": 196608,
+                "expected_l1_read_sectors": 196608,
+                "observed_l1_read_sectors": 196608,
+                "passed": true,
+                "status": "checked"
+              },
+              "checks": {
+                "global_atomic_instructions": true,
+                "global_atomic_sectors": true,
+                "global_load_instructions": true,
+                "global_load_sectors": true,
+                "global_store_instructions": true,
+                "global_store_sectors": true
+              },
+              "expected": {
+                "async_source_sectors": 196608,
+                "atomic_instructions": 0,
+                "atomic_sectors": 0,
+                "load_instructions": 0,
+                "load_sectors": 0,
+                "store_instructions": 2048,
+                "store_sectors": 16384
+              },
+              "observed": {
+                "atomic_instructions": 0,
+                "atomic_sectors": 0,
+                "load_instructions": 0,
+                "load_sectors": 0,
+                "reduction_instructions": 0,
+                "reduction_sectors": 0,
+                "store_instructions": 2048,
+                "store_sectors": 16384
+              }
+            },
+            "unmodeled_tails": {
+              "async_copy_shared_visibility": false,
+              "coherence": true,
+              "dirty_writeback": true,
+              "reduction_read_modify_write": false
+            }
+          },
+          "passed": true,
+          "trace_expected": {
+            "async_copy_instructions": 16384,
+            "async_source_sectors": 196608,
+            "atomic_instructions": 0,
+            "blocks": 512,
+            "device_id": 0,
+            "global_atomic_instructions": 0,
+            "global_atomic_sectors": 0,
+            "global_load_instructions": 0,
+            "global_load_sectors": 0,
+            "global_store_instructions": 2048,
+            "global_store_sectors": 16384,
+            "instructions": 157696,
+            "kernel_id": 1,
+            "load_instructions": 24576,
+            "local_load_sectors": 0,
+            "local_store_sectors": 0,
+            "memory_instructions": 67584,
+            "shared_sectors": 98304,
+            "store_instructions": 2048,
+            "stream_id": 0,
+            "warps": 512
+          }
+        }
+      ]
+    },
+    {
+      "cell": "gemm_sparse_2to4_bf16_sm80",
+      "checks": {
+        "correctness": true,
+        "ncu": true,
+        "nvbit": true,
+        "simulator_semantics": true,
+        "static_control": true
+      },
+      "semantic_launches": [
+        {
+          "checks": {
+            "async_source_conservation": true,
+            "coverage_full": true,
+            "hierarchy_conservation": true,
+            "instruction_conservation": true,
+            "readiness_conservation": true,
+            "record_conservation": true,
+            "trace_global_memory_conservation": true
+          },
+          "identity": {
+            "device_id": 0,
+            "kernel_id": 1,
+            "stream_id": 0
+          },
+          "label": "gemm_sparse_2to4_bf16_sm80",
+          "launch_index": 0,
+          "observed": {
+            "coverage": {
+              "blocks_observed": 128,
+              "kind": "full",
+              "population_blocks": 128
+            },
+            "dram": {
+              "read_sectors": 1536
+            },
+            "hierarchy": {
+              "checks": {
+                "dram_misses_bounded": true,
+                "line_misses_bounded": true,
+                "sector_fill_misses_bounded": true,
+                "source_hit_conservation": true,
+                "source_sector_conservation": true,
+                "write_tag_hits_bounded": true
+              },
+              "observed": {
+                "dram_read_sectors": 1536,
+                "l2_hits": 3584,
+                "l2_line_misses": 896,
+                "l2_sector_fill_misses": 16000,
+                "l2_total": 20480,
+                "l2_write_tag_hits": 1536,
+                "source_hits": 3584,
+                "source_sectors": 20480
+              }
+            },
+            "instructions_issued": 19968,
+            "l1": {
+              "hits": 0,
+              "merges": 2048,
+              "misses": 16384,
+              "stall_events": 0
+            },
+            "l2": {
+              "hits": 3584,
+              "line_misses": 896,
+              "misses": 16896,
+              "sector_fill_misses": 16000
+            },
+            "readiness": {
+              "async_groups": {
+                "completion_hidden_before_wait_cycles": 2816,
+                "destination_local_cycles": 24576,
+                "destination_local_limited_groups": 456,
+                "destination_sm_service_cycles": 1344,
+                "destination_sm_service_limited_groups": 56,
+                "groups_committed": 512,
+                "groups_waited": 512,
+                "source_cycles": 213984,
+                "source_limited_groups": 0
+              },
+              "checks": {
+                "async_cause_groups_bounded": true,
+                "async_waits_le_commits": true,
+                "barrier_generation_conservation": true,
+                "frontier_lower_bound_matches_terminal": true,
+                "frontier_tail_flags_match": true,
+                "last_event_le_terminal": true,
+                "terminal_ge_issue": true
+              },
+              "constraint_exposure_cycles": {
+                "async_destination_local": 210216,
+                "async_destination_sm_service": 26872,
+                "control_stall": 60928,
+                "dependence_counter_shared_write": 4608,
+                "pipeline_barrier": 3072,
+                "pipeline_branch": 2944
+              },
+              "cta_barriers": {
+                "generations": 1024,
+                "max_arrival_spread_cycles": 0,
+                "releases_after_participant_retirement": 0,
+                "total_arrival_spread_cycles": 0,
+                "total_rendezvous_warp_cycles": 1024
+              },
+              "limiting_cycles": {
+                "async_destination_local": 210216,
+                "async_destination_sm_service": 26872,
+                "control_stall": 57600,
+                "dependence_counter_shared_write": 4608,
+                "pipeline_branch": 2560
+              },
+              "readiness_schema": 6,
+              "timing": {
+                "completion_frontier": {
+                  "lower_bound_cycles": 2375,
+                  "status": "incomplete_unmodeled_retirement_tails",
+                  "unmodeled_tails": {
+                    "async_copy_shared_visibility": false,
+                    "coherence": true,
+                    "dirty_writeback": true,
+                    "reduction_read_modify_write": false
+                  }
+                },
+                "issue": 2375,
+                "last_event": 2372,
+                "terminal": 2375
+              }
+            },
+            "records_seen": 19968,
+            "traffic": {
+              "async_source": {
+                "expected_async_source_sectors": 16384,
+                "expected_l1_read_sectors": 16384,
+                "observed_l1_read_sectors": 16384,
+                "passed": true,
+                "status": "checked"
+              },
+              "checks": {
+                "global_atomic_instructions": true,
+                "global_atomic_sectors": true,
+                "global_load_instructions": true,
+                "global_load_sectors": true,
+                "global_store_instructions": true,
+                "global_store_sectors": true
+              },
+              "expected": {
+                "async_source_sectors": 16384,
+                "atomic_instructions": 0,
+                "atomic_sectors": 0,
+                "load_instructions": 0,
+                "load_sectors": 0,
+                "store_instructions": 512,
+                "store_sectors": 4096
+              },
+              "observed": {
+                "atomic_instructions": 0,
+                "atomic_sectors": 0,
+                "load_instructions": 0,
+                "load_sectors": 0,
+                "reduction_instructions": 0,
+                "reduction_sectors": 0,
+                "store_instructions": 512,
+                "store_sectors": 4096
+              }
+            },
+            "unmodeled_tails": {
+              "async_copy_shared_visibility": false,
+              "coherence": true,
+              "dirty_writeback": true,
+              "reduction_read_modify_write": false
+            }
+          },
+          "passed": true,
+          "trace_expected": {
+            "async_copy_instructions": 1024,
+            "async_source_sectors": 16384,
+            "atomic_instructions": 0,
+            "blocks": 128,
+            "device_id": 0,
+            "global_atomic_instructions": 0,
+            "global_atomic_sectors": 0,
+            "global_load_instructions": 0,
+            "global_load_sectors": 0,
+            "global_store_instructions": 512,
+            "global_store_sectors": 4096,
+            "instructions": 19968,
+            "kernel_id": 1,
+            "load_instructions": 4096,
+            "local_load_sectors": 0,
+            "local_store_sectors": 0,
+            "memory_instructions": 7168,
+            "shared_sectors": 32768,
+            "store_instructions": 512,
+            "stream_id": 0,
+            "warps": 128
+          }
+        }
+      ]
+    },
+    {
+      "cell": "flash_attn_fwd_bf16_sm80",
+      "checks": {
+        "correctness": true,
+        "ncu": true,
+        "nvbit": true,
+        "simulator_semantics": true,
+        "static_control": true
+      },
+      "semantic_launches": [
+        {
+          "checks": {
+            "async_source_conservation": true,
+            "coverage_full": true,
+            "hierarchy_conservation": true,
+            "instruction_conservation": true,
+            "readiness_conservation": true,
+            "record_conservation": true,
+            "trace_global_memory_conservation": true
+          },
+          "identity": {
+            "device_id": 0,
+            "kernel_id": 1,
+            "stream_id": 0
+          },
+          "label": "flash_attn_fwd_bf16_sm80",
+          "launch_index": 0,
+          "observed": {
+            "coverage": {
+              "blocks_observed": 16,
+              "kind": "full",
+              "population_blocks": 16
+            },
+            "dram": {
+              "read_sectors": 1280
+            },
+            "hierarchy": {
+              "checks": {
+                "dram_misses_bounded": true,
+                "line_misses_bounded": true,
+                "sector_fill_misses_bounded": true,
+                "source_hit_conservation": true,
+                "source_sector_conservation": true,
+                "write_tag_hits_bounded": true
+              },
+              "observed": {
+                "dram_read_sectors": 1280,
+                "l2_hits": 960,
+                "l2_line_misses": 384,
+                "l2_sector_fill_misses": 4032,
+                "l2_total": 5376,
+                "l2_write_tag_hits": 192,
+                "source_hits": 960,
+                "source_sectors": 5376
+              }
+            },
+            "instructions_issued": 39568,
+            "l1": {
+              "hits": 0,
+              "merges": 1728,
+              "misses": 4352,
+              "stall_events": 0
+            },
+            "l2": {
+              "hits": 960,
+              "line_misses": 384,
+              "misses": 4416,
+              "sector_fill_misses": 4032
+            },
+            "readiness": {
+              "async_groups": {
+                "completion_hidden_before_wait_cycles": 576,
+                "destination_local_cycles": 5248,
+                "destination_local_limited_groups": 144,
+                "destination_sm_service_cycles": 0,
+                "destination_sm_service_limited_groups": 0,
+                "groups_committed": 144,
+                "groups_waited": 144,
+                "source_cycles": 60336,
+                "source_limited_groups": 0
+              },
+              "checks": {
+                "async_cause_groups_bounded": true,
+                "async_waits_le_commits": true,
+                "barrier_generation_conservation": true,
+                "frontier_lower_bound_matches_terminal": true,
+                "frontier_tail_flags_match": true,
+                "last_event_le_terminal": true,
+                "terminal_ge_issue": true
+              },
+              "constraint_exposure_cycles": {
+                "async_destination_local": 65008,
+                "control_stall": 114896,
+                "dependence_counter_non_memory_write": 12832,
+                "dependence_counter_shared_write": 9808,
+                "pipeline_barrier": 1584,
+                "pipeline_branch": 3040,
+                "pipeline_tensor": 4096
+              },
+              "cta_barriers": {
+                "generations": 528,
+                "max_arrival_spread_cycles": 0,
+                "releases_after_participant_retirement": 0,
+                "total_arrival_spread_cycles": 0,
+                "total_rendezvous_warp_cycles": 528
+              },
+              "limiting_cycles": {
+                "async_destination_local": 65008,
+                "control_stall": 106656,
+                "dependence_counter_non_memory_write": 12832,
+                "dependence_counter_shared_write": 8784,
+                "pipeline_barrier": 384,
+                "pipeline_branch": 3040,
+                "pipeline_tensor": 4096
+              },
+              "readiness_schema": 6,
+              "timing": {
+                "completion_frontier": {
+                  "lower_bound_cycles": 12551,
+                  "status": "incomplete_unmodeled_retirement_tails",
+                  "unmodeled_tails": {
+                    "async_copy_shared_visibility": false,
+                    "coherence": true,
+                    "dirty_writeback": true,
+                    "reduction_read_modify_write": false
+                  }
+                },
+                "issue": 12551,
+                "last_event": 12548,
+                "terminal": 12551
+              }
+            },
+            "records_seen": 39568,
+            "traffic": {
+              "async_source": {
+                "expected_async_source_sectors": 4352,
+                "expected_l1_read_sectors": 4352,
+                "observed_l1_read_sectors": 4352,
+                "passed": true,
+                "status": "checked"
+              },
+              "checks": {
+                "global_atomic_instructions": true,
+                "global_atomic_sectors": true,
+                "global_load_instructions": true,
+                "global_load_sectors": true,
+                "global_store_instructions": true,
+                "global_store_sectors": true
+              },
+              "expected": {
+                "async_source_sectors": 4352,
+                "atomic_instructions": 0,
+                "atomic_sectors": 0,
+                "load_instructions": 0,
+                "load_sectors": 0,
+                "store_instructions": 128,
+                "store_sectors": 1024
+              },
+              "observed": {
+                "atomic_instructions": 0,
+                "atomic_sectors": 0,
+                "load_instructions": 0,
+                "load_sectors": 0,
+                "reduction_instructions": 0,
+                "reduction_sectors": 0,
+                "store_instructions": 128,
+                "store_sectors": 1024
+              }
+            },
+            "unmodeled_tails": {
+              "async_copy_shared_visibility": false,
+              "coherence": true,
+              "dirty_writeback": true,
+              "reduction_read_modify_write": false
+            }
+          },
+          "passed": true,
+          "trace_expected": {
+            "async_copy_instructions": 272,
+            "async_source_sectors": 4352,
+            "atomic_instructions": 0,
+            "blocks": 16,
+            "device_id": 0,
+            "global_atomic_instructions": 0,
+            "global_atomic_sectors": 0,
+            "global_load_instructions": 0,
+            "global_load_sectors": 0,
+            "global_store_instructions": 128,
+            "global_store_sectors": 1024,
+            "instructions": 39568,
+            "kernel_id": 1,
+            "load_instructions": 3104,
+            "local_load_sectors": 0,
+            "local_store_sectors": 0,
+            "memory_instructions": 5376,
+            "shared_sectors": 38496,
+            "store_instructions": 1568,
+            "stream_id": 0,
+            "warps": 16
+          }
+        }
+      ]
+    }
+  ],
+  "schema_version": 1,
+  "semantic_launch_count": 6
+}

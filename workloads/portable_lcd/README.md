@@ -260,7 +260,7 @@ not build or clean it in a Git worktree:
 
 ```bash
 printf '%s  %s\n' \
-  de47b3af6a18ae69287f61ff149dbdb03b4baf6ca8e33f03d2a2221a0482ee5d \
+  dda89ee6857058b3f6dc2a01d73a2dc926b876d8e343b7457c779efd82fed007 \
   tools/nvbit_tracer/tracer_tool/tracer_tool.so | sha256sum -c -
 source tools/nvbit_tracer/pinned_build_env.sh
 ```
