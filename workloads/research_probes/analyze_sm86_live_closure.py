@@ -36,9 +36,19 @@ METRICS = (
     "sm__cycles_active.max",
     "smsp__inst_executed.sum",
 )
-PORTABLE_NCU_METRICS = METRICS + (
+TRAFFIC_NCU_METRICS = (
     "lts__t_sectors_srcunit_tex_op_read.sum",
     "dram__sectors_read.sum",
+)
+CP_ASYNC_TRAFFIC_NCU_METRICS = (
+    # L1TEX request counters are attributable to the async-source kernel.
+    # DRAM/LTS aggregate counters also include the probe's prewarm and are not
+    # stable kernel-local traffic labels for this cell.
+    "l1tex__t_sectors_pipe_lsu_mem_global_op_ld.sum",
+    "l1tex__t_sectors_pipe_lsu_mem_global_op_st.sum",
+)
+CP_ASYNC_NCU_METRICS = METRICS + CP_ASYNC_TRAFFIC_NCU_METRICS
+PORTABLE_NCU_METRICS = METRICS + TRAFFIC_NCU_METRICS + (
     "sm__pipe_tensor_cycles_active.sum",
 )
 TRUSTED_NCU_IDENTITY = {
@@ -169,7 +179,7 @@ def _expected_ncu_target(cell: Mapping[str, Any]) -> list[str]:
 
 
 def _expected_ncu_metrics(cell: Mapping[str, Any]) -> tuple[str, ...]:
-    return METRICS if cell.get("id") == "cp_async_canary" else PORTABLE_NCU_METRICS
+    return CP_ASYNC_NCU_METRICS if cell.get("id") == "cp_async_canary" else PORTABLE_NCU_METRICS
 
 
 def _canonical_ncu_argv(cell: Mapping[str, Any], output: str) -> list[str]:
@@ -593,29 +603,41 @@ def _repeat_command_contract(
         raise ValueError(f"{cell.get('id')}: canonical NCU tool path is missing")
     if tool != ncu_identity.get("path"):
         raise ValueError(f"{cell.get('id')}: canonical NCU tool path is not the trusted toolchain")
-    try:
-        output_index = source.index("--output")
-        separator = source.index("--", output_index)
-    except ValueError as exc:
-        raise ValueError(f"{cell.get('id')}: canonical NCU argv lacks output/target separator") from exc
+    if source.count("--output") != 1 or source.count("--") != 1:
+        raise ValueError(
+            f"{cell.get('id')}: canonical NCU argv must contain exactly one --output and --"
+        )
+    output_index = source.index("--output")
+    separator = source.index("--")
     if output_index + 1 >= separator:
         raise ValueError(f"{cell.get('id')}: canonical NCU output path is malformed")
     target = source[separator + 1 :]
     if not target or target[0] != cell.get("binary", {}).get("path"):
         raise ValueError(f"{cell.get('id')}: canonical NCU target is not the cell binary")
-    def option_value(name: str) -> str | None:
-        try:
-            index = source.index(name)
-        except ValueError:
-            return None
-        if index + 1 >= separator:
+
+    canonical_options = (
+        "--launch-skip",
+        "--launch-count",
+        "--replay-mode",
+        "--clock-control",
+        "--metrics",
+    )
+
+    def option_value(name: str) -> str:
+        positions = [index for index, token in enumerate(source[:separator]) if token == name]
+        if len(positions) != 1:
+            raise ValueError(
+                f"{cell.get('id')}: canonical NCU option {name} must appear exactly once"
+            )
+        index = positions[0]
+        if index + 1 >= separator or source[index + 1].startswith("--"):
             raise ValueError(f"{cell.get('id')}: canonical NCU option {name} has no value")
         return source[index + 1]
+
+    values = {name: option_value(name) for name in canonical_options}
     command = [tool, "--force-overwrite", "--export", repeat_dir + "/ncu-report"]
-    for name in ("--launch-skip", "--launch-count", "--replay-mode", "--clock-control", "--metrics"):
-        value = option_value(name)
-        if value is not None:
-            command.extend((name, value))
+    for name in canonical_options:
+        command.extend((name, values[name]))
     command.extend(target)
     return command, target
 
@@ -635,6 +657,9 @@ def _validate_repeat_metadata(
     command = metadata.get("command")
     if not isinstance(command, list) or any(not isinstance(item, str) for item in command):
         raise ValueError(f"{slug}: repeated NCU metadata command is missing")
+    for option in ("--launch-skip", "--launch-count", "--replay-mode", "--clock-control", "--metrics"):
+        if command.count(option) != 1:
+            raise ValueError(f"{slug}: repeated NCU command must contain exactly one {option}")
     if len(command) != len(expected_command):
         raise ValueError(f"{slug}: repeated NCU command length differs from the cell contract")
     for index, (actual, expected) in enumerate(zip(command, expected_command)):
@@ -690,11 +715,12 @@ def _repeat_metrics(
     repeat_row, _ = _validate_ncu_csv(
         repeat_csv, cell, f"{slug}.ncu.repeat", expected_kernel=kernel_name
     )
-    baseline = {name: _metric(baseline_row, name) for name in METRICS}
-    repeat = {name: _metric(repeat_row, name) for name in METRICS}
-    deltas = {name: repeat[name] - baseline[name] for name in METRICS}
+    comparison_metrics = _expected_ncu_metrics(cell)
+    baseline = {name: _metric(baseline_row, name) for name in comparison_metrics}
+    repeat = {name: _metric(repeat_row, name) for name in comparison_metrics}
+    deltas = {name: repeat[name] - baseline[name] for name in comparison_metrics}
     max_relative = max(
-        abs(deltas[name]) / max(abs(baseline[name]), 1) for name in METRICS
+        abs(deltas[name]) / max(abs(baseline[name]), 1) for name in comparison_metrics
     )
     return {
         "baseline": baseline,

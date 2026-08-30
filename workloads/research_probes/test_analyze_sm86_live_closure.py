@@ -166,6 +166,50 @@ def test_repeat_metadata_requires_report_artifact(tmp_path) -> None:
         )
 
 
+@pytest.mark.parametrize(
+    "option",
+    ["--launch-skip", "--launch-count", "--replay-mode", "--clock-control", "--metrics"],
+)
+def test_repeat_command_requires_each_canonical_option(tmp_path, option: str) -> None:
+    cell, stage, repeat_dir, _metadata = _repeat_fixture(tmp_path)
+    index = stage["argv"].index(option)
+    stage["argv"] = stage["argv"][:index] + stage["argv"][index + 2 :]
+    with pytest.raises(ValueError, match="must appear exactly once"):
+        ANALYZER._repeat_command_contract(
+            tmp_path, cell, stage, repeat_dir, ANALYZER.TRUSTED_NCU_IDENTITY
+        )
+
+
+@pytest.mark.parametrize(
+    ("option", "replacement"),
+    [
+        ("--launch-skip", "2"),
+        ("--launch-count", "2"),
+        ("--replay-mode", "kernel"),
+        ("--clock-control", "boost"),
+        ("--metrics", "gpc__cycles_elapsed.max"),
+    ],
+)
+def test_repeat_metadata_rejects_canonical_option_mutation(
+    tmp_path, option: str, replacement: str
+) -> None:
+    cell, stage, repeat_dir, metadata = _repeat_fixture(tmp_path)
+    command = list(metadata["command"])
+    index = command.index(option)
+    command[index + 1] = replacement
+    metadata["command"] = command
+    (tmp_path / repeat_dir / "ncu.csv").write_text("csv", encoding="utf-8")
+    with pytest.raises(ValueError, match="repeated NCU command differs"):
+        ANALYZER._validate_repeat_metadata(
+            tmp_path,
+            cell,
+            stage,
+            repeat_dir,
+            metadata,
+            ANALYZER.TRUSTED_NCU_IDENTITY,
+        )
+
+
 def test_replay_summary_accepts_complete_frontier(tmp_path: Path) -> None:
     helper_path = Path(__file__).with_name("test_replay_resume.py")
     spec = importlib.util.spec_from_file_location("replay_summary_fixture", helper_path)

@@ -13,7 +13,7 @@
     "--clock-control",
     "none",
     "--metrics",
-    "gpc__cycles_elapsed.max,sm__cycles_active.max,smsp__inst_executed.sum",
+    "gpc__cycles_elapsed.max,sm__cycles_active.max,smsp__inst_executed.sum,l1tex__t_sectors_pipe_lsu_mem_global_op_ld.sum,l1tex__t_sectors_pipe_lsu_mem_global_op_st.sum",
     "workloads/research_probes/async_barrier_overlap/async_barrier_overlap",
     "c11",
     "l1",
@@ -24,6 +24,6 @@
   "return_code": 0,
   "report": "results/captures/sm86_simulator_live_baseline_20260829_v2/evidence/raw/ncu_repeat/rep-2/cp_async_canary/ncu-report.ncu-rep",
   "csv": "results/captures/sm86_simulator_live_baseline_20260829_v2/evidence/raw/ncu_repeat/rep-2/cp_async_canary/ncu.csv",
-  "started_at": "2026-08-29T16:47:29.401016+00:00",
-  "finished_at": "2026-08-29T16:47:30.382469+00:00"
+  "started_at": "2026-08-30T11:41:17.234949+00:00",
+  "finished_at": "2026-08-30T11:41:18.127872+00:00"
 }

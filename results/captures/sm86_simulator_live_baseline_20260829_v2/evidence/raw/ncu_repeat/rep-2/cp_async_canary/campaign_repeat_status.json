@@ -9,7 +9,7 @@
     "--output",
     "results/captures/sm86_simulator_live_baseline_20260829_v2/evidence/raw/ncu_repeat/rep-2/cp_async_canary",
     "--metrics",
-    "gpc__cycles_elapsed.max,sm__cycles_active.max,smsp__inst_executed.sum",
+    "gpc__cycles_elapsed.max,sm__cycles_active.max,smsp__inst_executed.sum,l1tex__t_sectors_pipe_lsu_mem_global_op_ld.sum,l1tex__t_sectors_pipe_lsu_mem_global_op_st.sum",
     "--launch-skip",
     "1",
     "--launch-count",
@@ -27,7 +27,7 @@
     "3"
   ],
   "return_code": 0,
-  "elapsed_seconds": 1.23,
+  "elapsed_seconds": 0.91,
   "stdout": "results/captures/sm86_simulator_live_baseline_20260829_v2/evidence/raw/ncu_repeat/rep-2/cp_async_canary\n",
   "stderr": ""
 }

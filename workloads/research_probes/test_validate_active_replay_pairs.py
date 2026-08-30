@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
+import hashlib
 import importlib.util
 import json
 import os
@@ -67,6 +69,87 @@ def test_nvbit_expected_argv_is_cell_bound() -> None:
     altered = list(expected)
     altered[-1] = "2"
     assert altered != expected
+
+
+def _live_manifest_cell(cell_id: str) -> tuple[Path, dict[str, object], dict[str, object]]:
+    root = Path("results/captures/sm86_simulator_live_baseline_20260829_v2")
+    manifest = json.loads((root / "campaign_manifest.json").read_text(encoding="utf-8"))
+    cell = next(cell for cell in manifest["cells"] if cell["id"] == cell_id)
+    return root, cell, manifest["repository"]
+
+
+@pytest.mark.parametrize(
+    ("key", "value"),
+    [
+        ("LD_PRELOAD", "/tmp/untrusted.so"),
+        ("CUDA_VISIBLE_DEVICES", "1"),
+        ("UNAPPROVED_FLAG", "1"),
+        ("LD_LIBRARY_PATH", "/tmp/untrusted-libs"),
+    ],
+)
+def test_nvbit_environment_allowlist_rejects_unbound_values(key: str, value: str) -> None:
+    root, cell, repository = _live_manifest_cell("gemm_hmma_bf16_sm80")
+    stage = deepcopy(cell["stages"]["nvbit"])
+    stage["env"][key] = value
+    with pytest.raises(ValueError, match="environment"):
+        LIVE_VALIDATOR._validate_nvbit_stage(
+            root,
+            cell,
+            cell["binary"],
+            stage,
+            repository["tracer_dso_sha256"],
+        )
+
+
+def test_current_nvbit_environment_matches_exact_allowlist() -> None:
+    root, cell, repository = _live_manifest_cell("gemm_hmma_bf16_sm80")
+    LIVE_VALIDATOR._validate_nvbit_stage(
+        root,
+        cell,
+        cell["binary"],
+        cell["stages"]["nvbit"],
+        repository["tracer_dso_sha256"],
+    )
+
+
+def test_static_control_producer_and_schema_are_pinned(tmp_path: Path) -> None:
+    root, cell, _repository = _live_manifest_cell("gemm_hmma_bf16_sm80")
+    static = deepcopy(cell["stages"]["static_control"])
+    trace_binary = cell["binary"].get("trace_path", cell["binary"]["path"])
+    trace_hash = cell["binary"].get("trace_sha256", cell["binary"]["sha256"])
+    LIVE_VALIDATOR._validate_static_control_stage(
+        root, cell, static, trace_binary, trace_hash
+    )
+
+    for field in ("argv", "cuobjdump_argv"):
+        altered = deepcopy(static)
+        altered[field] = list(altered[field])
+        altered[field][-1] = "sm_80" if field == "argv" else "wrong-binary"
+        with pytest.raises(ValueError, match="canonical"):
+            LIVE_VALIDATOR._validate_static_control_stage(
+                root, cell, altered, trace_binary, trace_hash
+            )
+
+    source = root / static["control"]
+    original = json.loads(source.read_text(encoding="utf-8"))
+    for mutation in ("arch", "toolkit_version", "parser_contract"):
+        altered_doc = deepcopy(original)
+        if mutation == "arch":
+            altered_doc["arch"] = "sm_80"
+        elif mutation == "toolkit_version":
+            altered_doc["toolkit_version"] = "V13.3"
+        else:
+            altered_doc["parser_contract"]["control_layout"]["stall"] = "bits 1:4"
+        control = tmp_path / f"{mutation}.json"
+        control.write_text(json.dumps(altered_doc), encoding="utf-8")
+        altered = deepcopy(static)
+        altered["control"] = control.name
+        altered["control_sha256"] = hashlib.sha256(control.read_bytes()).hexdigest()
+        altered["argv"] = LIVE_VALIDATOR._expected_static_argv(cell, trace_binary, control.name)
+        with pytest.raises(ValueError, match="arch/toolkit/parser|schema"):
+            LIVE_VALIDATOR._validate_static_control_stage(
+                tmp_path, cell, altered, trace_binary, trace_hash
+            )
 
 
 def _load_replay_test_helpers():

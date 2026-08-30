@@ -219,20 +219,24 @@
       "comparable_to_simulator_timing": false,
       "live": {
         "baseline": {
-          "gpc__cycles_elapsed.max": 4460056,
-          "sm__cycles_active.max": 4458462,
+          "gpc__cycles_elapsed.max": 4460142,
+          "l1tex__t_sectors_pipe_lsu_mem_global_op_ld.sum": 8388608,
+          "l1tex__t_sectors_pipe_lsu_mem_global_op_st.sum": 72,
+          "sm__cycles_active.max": 4458497,
           "smsp__inst_executed.sum": 2293904
         },
         "baseline_csv": {
           "path": "results/captures/sm86_simulator_live_baseline_20260829_v2/evidence/raw/ncu/cp_async_canary/ncu.csv",
-          "sha256": "dfe2a7d3cea862c5ca1333a3804edbb24af8e792f3475779180acb687459b7bc"
+          "sha256": "5ea3cb9f941162642de6eda9c9e5f3bb7f3aad69010af97f8d24384bc300f79f"
         },
         "delta_repeat_minus_baseline": {
-          "gpc__cycles_elapsed.max": -25,
-          "sm__cycles_active.max": -10,
+          "gpc__cycles_elapsed.max": -22,
+          "l1tex__t_sectors_pipe_lsu_mem_global_op_ld.sum": 0,
+          "l1tex__t_sectors_pipe_lsu_mem_global_op_st.sum": 0,
+          "sm__cycles_active.max": -12,
           "smsp__inst_executed.sum": 0
         },
-        "max_relative_delta": 5.61e-06,
+        "max_relative_delta": 4.93e-06,
         "provenance": {
           "block_size": "(128, 1, 1)",
           "compute_capability": "8.6",
@@ -242,7 +246,9 @@
           "metrics": [
             "gpc__cycles_elapsed.max",
             "sm__cycles_active.max",
-            "smsp__inst_executed.sum"
+            "smsp__inst_executed.sum",
+            "l1tex__t_sectors_pipe_lsu_mem_global_op_ld.sum",
+            "l1tex__t_sectors_pipe_lsu_mem_global_op_st.sum"
           ],
           "process_name": "async_barrier_overlap",
           "target": [
@@ -255,13 +261,15 @@
           ]
         },
         "repeat_2": {
-          "gpc__cycles_elapsed.max": 4460031,
-          "sm__cycles_active.max": 4458452,
+          "gpc__cycles_elapsed.max": 4460120,
+          "l1tex__t_sectors_pipe_lsu_mem_global_op_ld.sum": 8388608,
+          "l1tex__t_sectors_pipe_lsu_mem_global_op_st.sum": 72,
+          "sm__cycles_active.max": 4458485,
           "smsp__inst_executed.sum": 2293904
         },
         "repeat_csv": {
           "path": "results/captures/sm86_simulator_live_baseline_20260829_v2/evidence/raw/ncu_repeat/rep-2/cp_async_canary/ncu.csv",
-          "sha256": "44f8ffb047612325b51894efa6164cee804e8454b048cee12a9997d756491a34"
+          "sha256": "925e88109d5733d01f870fbd731597fda6aae214cffcdcdd49518e1ae62cff84"
         },
         "repeat_metadata": {
           "argv": [
@@ -278,7 +286,7 @@
             "--clock-control",
             "none",
             "--metrics",
-            "gpc__cycles_elapsed.max,sm__cycles_active.max,smsp__inst_executed.sum",
+            "gpc__cycles_elapsed.max,sm__cycles_active.max,smsp__inst_executed.sum,l1tex__t_sectors_pipe_lsu_mem_global_op_ld.sum,l1tex__t_sectors_pipe_lsu_mem_global_op_st.sum",
             "workloads/research_probes/async_barrier_overlap/async_barrier_overlap",
             "c11",
             "l1",
@@ -287,14 +295,14 @@
             "3"
           ],
           "contract_validated": true,
-          "finished_at": "2026-08-29T16:47:30.382469+00:00",
+          "finished_at": "2026-08-30T11:41:18.127872+00:00",
           "path": "results/captures/sm86_simulator_live_baseline_20260829_v2/evidence/raw/ncu_repeat/rep-2/cp_async_canary/metadata.json",
-          "sha256": "c8cc41cd25aa81d624ed9c4bf705bd104cd62df50828e5276309b56e0c9a1c84",
-          "started_at": "2026-08-29T16:47:29.401016+00:00"
+          "sha256": "32bcc8ec1fea44f1462d61c964fcc1e80b39b346907b467a3300fe4539585c08",
+          "started_at": "2026-08-30T11:41:17.234949+00:00"
         },
         "repeat_report": {
           "path": "results/captures/sm86_simulator_live_baseline_20260829_v2/evidence/raw/ncu_repeat/rep-2/cp_async_canary/ncu-report.ncu-rep",
-          "sha256": "b04b41c82a4da5b62abf13e3fd42565f0f41d4bfa2e10785ce93ed29e5c58f78"
+          "sha256": "eabbfd525ca5834f7ab1e402697fa6fac8e6f29b1a77b815ffbdced91fca8c3c"
         },
         "stable_within_five_percent": true
       },
@@ -306,14 +314,14 @@
           "reference_cycles": 20522
         },
         "gpc_elapsed_gaps": {
-          "baseline_launch_envelope_cycles": 1594,
-          "baseline_vs_completion_frontier_cycles": 4439534,
-          "baseline_vs_last_issue_cycles": 4439534,
-          "baseline_vs_last_modeled_event_cycles": 4439537,
-          "repeat_2_launch_envelope_cycles": 1579,
-          "repeat_2_vs_completion_frontier_cycles": 4439509,
-          "repeat_2_vs_last_issue_cycles": 4439509,
-          "repeat_2_vs_last_modeled_event_cycles": 4439512
+          "baseline_launch_envelope_cycles": 1645,
+          "baseline_vs_completion_frontier_cycles": 4439620,
+          "baseline_vs_last_issue_cycles": 4439620,
+          "baseline_vs_last_modeled_event_cycles": 4439623,
+          "repeat_2_launch_envelope_cycles": 1635,
+          "repeat_2_vs_completion_frontier_cycles": 4439598,
+          "repeat_2_vs_last_issue_cycles": 4439598,
+          "repeat_2_vs_last_modeled_event_cycles": 4439601
         },
         "interpretable": false,
         "metric": "multi-frontier SM-active and GPC elapsed comparison",
@@ -330,17 +338,17 @@
           "rule": "mechanism_local_typed_tail_precedence"
         },
         "selection_vector": {
-          "gpc_completion_gap_cycles": 4439534,
-          "gpc_launch_envelope_cycles": 1594,
-          "sm_completion_gap_cycles": 4437940
+          "gpc_completion_gap_cycles": 4439620,
+          "gpc_launch_envelope_cycles": 1645,
+          "sm_completion_gap_cycles": 4437975
         },
         "sm_active_gaps": {
-          "baseline_vs_completion_frontier_cycles": 4437940,
-          "baseline_vs_last_issue_cycles": 4437940,
-          "baseline_vs_last_modeled_event_cycles": 4437943,
-          "repeat_2_vs_completion_frontier_cycles": 4437930,
-          "repeat_2_vs_last_issue_cycles": 4437930,
-          "repeat_2_vs_last_modeled_event_cycles": 4437933
+          "baseline_vs_completion_frontier_cycles": 4437975,
+          "baseline_vs_last_issue_cycles": 4437975,
+          "baseline_vs_last_modeled_event_cycles": 4437978,
+          "repeat_2_vs_completion_frontier_cycles": 4437963,
+          "repeat_2_vs_last_issue_cycles": 4437963,
+          "repeat_2_vs_last_modeled_event_cycles": 4437966
         }
       },
       "simulator": {
@@ -412,8 +420,11 @@
       "comparable_to_simulator_timing": true,
       "live": {
         "baseline": {
+          "dram__sectors_read.sum": 8364,
           "gpc__cycles_elapsed.max": 13350,
+          "lts__t_sectors_srcunit_tex_op_read.sum": 160128,
           "sm__cycles_active.max": 11685,
+          "sm__pipe_tensor_cycles_active.sum": 131072,
           "smsp__inst_executed.sum": 197120
         },
         "baseline_csv": {
@@ -421,11 +432,14 @@
           "sha256": "fb3857c397e8544c20a318aab5c69bef5720c9cb0da5499c5ee67ff4ddc40e1a"
         },
         "delta_repeat_minus_baseline": {
+          "dram__sectors_read.sum": 0,
           "gpc__cycles_elapsed.max": 151,
+          "lts__t_sectors_srcunit_tex_op_read.sum": 4224,
           "sm__cycles_active.max": 60,
+          "sm__pipe_tensor_cycles_active.sum": 0,
           "smsp__inst_executed.sum": 0
         },
-        "max_relative_delta": 0.01131086,
+        "max_relative_delta": 0.0263789,
         "provenance": {
           "block_size": "(32, 1, 1)",
           "compute_capability": "8.6",
@@ -451,8 +465,11 @@
           ]
         },
         "repeat_2": {
+          "dram__sectors_read.sum": 8364,
           "gpc__cycles_elapsed.max": 13501,
+          "lts__t_sectors_srcunit_tex_op_read.sum": 164352,
           "sm__cycles_active.max": 11745,
+          "sm__pipe_tensor_cycles_active.sum": 131072,
           "smsp__inst_executed.sum": 197120
         },
         "repeat_csv": {
@@ -611,8 +628,11 @@
       "comparable_to_simulator_timing": true,
       "live": {
         "baseline": {
+          "dram__sectors_read.sum": 8364,
           "gpc__cycles_elapsed.max": 13211,
+          "lts__t_sectors_srcunit_tex_op_read.sum": 164480,
           "sm__cycles_active.max": 11539,
+          "sm__pipe_tensor_cycles_active.sum": 131072,
           "smsp__inst_executed.sum": 197120
         },
         "baseline_csv": {
@@ -620,11 +640,14 @@
           "sha256": "a9681782617ecf36e30a57beefeb88a20be15089c2a1495be1ffe97633df2e27"
         },
         "delta_repeat_minus_baseline": {
+          "dram__sectors_read.sum": 96,
           "gpc__cycles_elapsed.max": 26,
+          "lts__t_sectors_srcunit_tex_op_read.sum": -1792,
           "sm__cycles_active.max": -45,
+          "sm__pipe_tensor_cycles_active.sum": 0,
           "smsp__inst_executed.sum": 0
         },
-        "max_relative_delta": 0.00389982,
+        "max_relative_delta": 0.01147776,
         "provenance": {
           "block_size": "(32, 1, 1)",
           "compute_capability": "8.6",
@@ -650,8 +673,11 @@
           ]
         },
         "repeat_2": {
+          "dram__sectors_read.sum": 8460,
           "gpc__cycles_elapsed.max": 13237,
+          "lts__t_sectors_srcunit_tex_op_read.sum": 162688,
           "sm__cycles_active.max": 11494,
+          "sm__pipe_tensor_cycles_active.sum": 131072,
           "smsp__inst_executed.sum": 197120
         },
         "repeat_csv": {
@@ -810,8 +836,11 @@
       "comparable_to_simulator_timing": true,
       "live": {
         "baseline": {
+          "dram__sectors_read.sum": 4268,
           "gpc__cycles_elapsed.max": 11425,
+          "lts__t_sectors_srcunit_tex_op_read.sum": 81664,
           "sm__cycles_active.max": 9734,
+          "sm__pipe_tensor_cycles_active.sum": 65536,
           "smsp__inst_executed.sum": 157696
         },
         "baseline_csv": {
@@ -819,11 +848,14 @@
           "sha256": "94ca070ddcc72dc5dc2fbd3a4c4bd4309be32050ba4ddd3ad3cca0e65378698a"
         },
         "delta_repeat_minus_baseline": {
+          "dram__sectors_read.sum": 0,
           "gpc__cycles_elapsed.max": -6,
+          "lts__t_sectors_srcunit_tex_op_read.sum": 2240,
           "sm__cycles_active.max": 7,
+          "sm__pipe_tensor_cycles_active.sum": 0,
           "smsp__inst_executed.sum": 0
         },
-        "max_relative_delta": 0.00071913,
+        "max_relative_delta": 0.02742947,
         "provenance": {
           "block_size": "(32, 1, 1)",
           "compute_capability": "8.6",
@@ -849,8 +881,11 @@
           ]
         },
         "repeat_2": {
+          "dram__sectors_read.sum": 4268,
           "gpc__cycles_elapsed.max": 11419,
+          "lts__t_sectors_srcunit_tex_op_read.sum": 83904,
           "sm__cycles_active.max": 9741,
+          "sm__pipe_tensor_cycles_active.sum": 65536,
           "smsp__inst_executed.sum": 157696
         },
         "repeat_csv": {
@@ -1009,8 +1044,11 @@
       "comparable_to_simulator_timing": true,
       "live": {
         "baseline": {
+          "dram__sectors_read.sum": 1716,
           "gpc__cycles_elapsed.max": 5740,
+          "lts__t_sectors_srcunit_tex_op_read.sum": 16384,
           "sm__cycles_active.max": 4025,
+          "sm__pipe_tensor_cycles_active.sum": 8192,
           "smsp__inst_executed.sum": 19968
         },
         "baseline_csv": {
@@ -1018,8 +1056,11 @@
           "sha256": "a9e1478d83599abc181a104bb6e112618e37b24e88a4060a9070be286d748416"
         },
         "delta_repeat_minus_baseline": {
+          "dram__sectors_read.sum": 0,
           "gpc__cycles_elapsed.max": 4,
+          "lts__t_sectors_srcunit_tex_op_read.sum": 0,
           "sm__cycles_active.max": 34,
+          "sm__pipe_tensor_cycles_active.sum": 0,
           "smsp__inst_executed.sum": 0
         },
         "max_relative_delta": 0.0084472,
@@ -1048,8 +1089,11 @@
           ]
         },
         "repeat_2": {
+          "dram__sectors_read.sum": 1716,
           "gpc__cycles_elapsed.max": 5744,
+          "lts__t_sectors_srcunit_tex_op_read.sum": 16384,
           "sm__cycles_active.max": 4059,
+          "sm__pipe_tensor_cycles_active.sum": 8192,
           "smsp__inst_executed.sum": 19968
         },
         "repeat_csv": {
@@ -1208,8 +1252,11 @@
       "comparable_to_simulator_timing": true,
       "live": {
         "baseline": {
+          "dram__sectors_read.sum": 1596,
           "gpc__cycles_elapsed.max": 16131,
+          "lts__t_sectors_srcunit_tex_op_read.sum": 4352,
           "sm__cycles_active.max": 14479,
+          "sm__pipe_tensor_cycles_active.sum": 8192,
           "smsp__inst_executed.sum": 39568
         },
         "baseline_csv": {
@@ -1217,8 +1264,11 @@
           "sha256": "3d2773117036ca31b38205ad87efdd8fab680901a53caf8bdae119f049a33e82"
         },
         "delta_repeat_minus_baseline": {
+          "dram__sectors_read.sum": 0,
           "gpc__cycles_elapsed.max": -280,
+          "lts__t_sectors_srcunit_tex_op_read.sum": 0,
           "sm__cycles_active.max": -263,
+          "sm__pipe_tensor_cycles_active.sum": 0,
           "smsp__inst_executed.sum": 0
         },
         "max_relative_delta": 0.01816424,
@@ -1247,8 +1297,11 @@
           ]
         },
         "repeat_2": {
+          "dram__sectors_read.sum": 1596,
           "gpc__cycles_elapsed.max": 15851,
+          "lts__t_sectors_srcunit_tex_op_read.sum": 4352,
           "sm__cycles_active.max": 14216,
+          "sm__pipe_tensor_cycles_active.sum": 8192,
           "smsp__inst_executed.sum": 39568
         },
         "repeat_csv": {

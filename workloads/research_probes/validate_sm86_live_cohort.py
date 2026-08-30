@@ -129,6 +129,22 @@ _EXPECTED_GPU_IDENTITY = {
     "compute_capability": "8.6",
     "driver_version": "610.57.04",
 }
+_EXPECTED_STATIC_TOOLKIT_BINDIR = "/usr/local/cuda-13.2/bin"
+_EXPECTED_STATIC_TOOLKIT_VERSION = "V13.2"
+_EXPECTED_STATIC_PARSER_CONTRACT = {
+    "supported_toolkit_versions": ["V13.2"],
+    "supported_arches": ["sm_80", "sm_86"],
+    "control_layout": {
+        "source": "high_word >> 41 (23 bits)",
+        "stall": "bits 0:3",
+        "yield_flag": "bit 4",
+        "write_barrier": "bits 5:7 (7 = none)",
+        "read_barrier": "bits 8:10 (7 = none)",
+        "wait_mask": "bits 11:16",
+        "reuse": "bits 17:20",
+        "reserved_must_be_zero": "bits 21:22",
+    },
+}
 
 
 def _is_exact_zero(value: object) -> bool:
@@ -147,6 +163,52 @@ def _expected_nvbit_argv(cell: Mapping[str, Any]) -> list[str]:
     if cell.get("id") == "cp_async_canary":
         return [trace_path, "c11", "l1", "0", "4", "1"]
     return [trace_path, "--timing_shape", "--warmup", "0", "--reps", "1"]
+
+
+def _expected_nvbit_environment(cell: Mapping[str, Any], output: str) -> dict[str, str]:
+    """Return the complete, deterministic environment for one NVBit capture."""
+
+    expected = {
+        "LD_LIBRARY_PATH": ".toolchain/pb/lib",
+        "CUDA_INJECTION64_PATH": "tools/nvbit_tracer/tracer_tool/tracer_tool.so",
+        "USER_DEFINED_FOLDERS": "1",
+        "TRACES_FOLDER": output,
+        "ACTIVE_FROM_START": "0" if cell.get("id") == "cp_async_canary" else "1",
+        "SKIP_ENHANCED_TRACER": "0",
+    }
+    if cell.get("id") != "cp_async_canary":
+        expected.update(
+            {
+                "DYNAMIC_KERNEL_LIMIT_START": "0",
+                "DYNAMIC_KERNEL_LIMIT_END": "1",
+                "ENHANCED_TRACER_MAX_PARSER_INPUT_KB": "256",
+                "ENHANCED_TRACER_PER_CUBIN_TIMEOUT_S": "45",
+            }
+        )
+    return expected
+
+
+def _expected_static_argv(cell: Mapping[str, Any], binary: str, control: str) -> list[str]:
+    return [
+        ".venv/bin/python",
+        "tools/sass_control/emit_control_bits_sidecar.py",
+        "--binary",
+        binary,
+        "--arch",
+        "sm_86",
+        "--out",
+        control,
+        "--toolkit-bindir",
+        _EXPECTED_STATIC_TOOLKIT_BINDIR,
+    ]
+
+
+def _expected_cuobjdump_argv(binary: str) -> list[str]:
+    return [
+        f"{_EXPECTED_STATIC_TOOLKIT_BINDIR}/cuobjdump",
+        "--dump-sass",
+        binary,
+    ]
 
 
 def _sha256(path: Path) -> str:
@@ -421,13 +483,15 @@ def _validate_nvbit_stage(
         raise ValueError(f"{cell_id}: traced binary identity is malformed")
     if stage.get("trace_binary_path") != trace_binary or stage.get("trace_binary_sha256") != trace_binary_hash:
         raise ValueError(f"{cell_id}: NVBit traced-binary binding differs from the cell binary")
-    expected_active = "0" if cell_id == "cp_async_canary" else "1"
-    expected_environment = {
-        "CUDA_INJECTION64_PATH": "tools/nvbit_tracer/tracer_tool/tracer_tool.so",
-        "TRACES_FOLDER": output,
-        "USER_DEFINED_FOLDERS": "1",
-        "ACTIVE_FROM_START": expected_active,
-    }
+    if any(not isinstance(key, str) or not isinstance(value, str) for key, value in environment.items()):
+        raise ValueError(f"{cell_id}: NVBit environment keys and values must be strings")
+    expected_environment = _expected_nvbit_environment(cell, output)
+    if set(environment) != set(expected_environment):
+        extra = sorted(set(environment) - set(expected_environment))
+        missing = sorted(set(expected_environment) - set(environment))
+        raise ValueError(
+            f"{cell_id}: NVBit environment allowlist differs (extra={extra}, missing={missing})"
+        )
     for key, expected in expected_environment.items():
         if environment.get(key) != expected:
             raise ValueError(f"{cell_id}: NVBit environment {key} is not bound to this cell")
@@ -945,6 +1009,92 @@ def _validate_closure_report_against_artifacts(
         )
 
 
+def _validate_static_control_stage(
+    root: Path,
+    cell: Mapping[str, Any],
+    stage: Mapping[str, Any],
+    trace_binary: str,
+    trace_binary_hash: str,
+) -> tuple[Path, Mapping[str, Any], int]:
+    """Validate the producer, parser contract, and decoded control schema."""
+
+    cell_id = str(cell["id"])
+    control_relative = stage.get("control")
+    if not isinstance(control_relative, str):
+        raise ValueError(f"{cell_id}: static control path is missing")
+    if stage.get("argv") != _expected_static_argv(cell, trace_binary, control_relative):
+        raise ValueError(f"{cell_id}: static-control producer argv is not canonical")
+    if stage.get("cuobjdump_argv") != _expected_cuobjdump_argv(trace_binary):
+        raise ValueError(f"{cell_id}: static-control cuobjdump argv is not canonical")
+    control = _assert_file(root, control_relative, f"{cell_id}/static.control")
+    control_hash = stage.get("control_sha256")
+    if not isinstance(control_hash, str) or len(control_hash) != 64:
+        raise ValueError(f"{cell_id}: static control hash is missing")
+    if _sha256(control) != control_hash:
+        raise ValueError(f"{cell_id}: static control hash does not match artifact")
+    try:
+        control_doc = replay_resume.load_json_strict(control)
+    except (OSError, UnicodeDecodeError, ValueError, json.JSONDecodeError) as exc:
+        raise ValueError(f"{cell_id}: static control sidecar is not strict JSON") from exc
+    if not isinstance(control_doc, Mapping):
+        raise ValueError(f"{cell_id}: static control sidecar is malformed")
+    if set(control_doc) != {
+        "arch",
+        "skipped_arch_sections",
+        "parser_contract",
+        "toolkit_version",
+        "binary",
+        "functions",
+        "summary",
+    }:
+        raise ValueError(f"{cell_id}: static control sidecar schema is not canonical")
+    if (
+        control_doc.get("arch") != "sm_86"
+        or control_doc.get("toolkit_version") != _EXPECTED_STATIC_TOOLKIT_VERSION
+        or control_doc.get("binary") != trace_binary
+        or control_doc.get("parser_contract") != _EXPECTED_STATIC_PARSER_CONTRACT
+    ):
+        raise ValueError(f"{cell_id}: static control arch/toolkit/parser contract is not pinned to SM86")
+    skipped = control_doc.get("skipped_arch_sections")
+    if not isinstance(skipped, list) or any(not isinstance(item, str) for item in skipped):
+        raise ValueError(f"{cell_id}: static control skipped-arch record is malformed")
+    if "sm_86" in skipped:
+        raise ValueError(f"{cell_id}: static control skipped the required SM86 section")
+    functions = control_doc.get("functions")
+    if not isinstance(functions, Mapping) or not functions:
+        raise ValueError(f"{cell_id}: static control has no decoded function schema")
+    decoded = 0
+    for function_name, records in functions.items():
+        if not isinstance(function_name, str) or not function_name or not isinstance(records, list) or not records:
+            raise ValueError(f"{cell_id}: static control function record is malformed")
+        for record in records:
+            if not isinstance(record, Mapping) or record.get("status") != "decoded" or not isinstance(record.get("control"), Mapping):
+                raise ValueError(f"{cell_id}: static control contains an untyped instruction record")
+            decoded += 1
+    summary = control_doc.get("summary")
+    if not isinstance(summary, Mapping) or set(summary) != {"functions", "total_decoded", "total_unknown_encoding"}:
+        raise ValueError(f"{cell_id}: static control summary schema is malformed")
+    summary_functions = summary.get("functions")
+    if not isinstance(summary_functions, Mapping) or set(summary_functions) != set(functions):
+        raise ValueError(f"{cell_id}: static control summary function set differs")
+    for function_name, records in functions.items():
+        function_summary = summary_functions.get(function_name)
+        if (
+            not isinstance(function_summary, Mapping)
+            or set(function_summary) != {"instructions", "decoded", "unknown_encoding", "stall_cycles_static_sum"}
+            or function_summary.get("instructions") != len(records)
+            or function_summary.get("decoded") != len(records)
+            or function_summary.get("unknown_encoding") != 0
+            or type(function_summary.get("stall_cycles_static_sum")) is not int
+        ):
+            raise ValueError(f"{cell_id}: static control function summary is malformed")
+    if summary.get("total_decoded") != decoded or summary.get("total_unknown_encoding") != 0:
+        raise ValueError(f"{cell_id}: static control decoded/unknown totals are inconsistent")
+    if stage.get("decoded_instructions") != decoded:
+        raise ValueError(f"{cell_id}: static decoded instruction count is not bound to the sidecar")
+    return control, control_doc, decoded
+
+
 def _validate_cell(
     root: Path,
     cell: Mapping[str, Any],
@@ -1010,6 +1160,11 @@ def _validate_cell(
     ncu_observed = ncu.get("observed")
     if not isinstance(ncu_observed, Mapping):
         raise ValueError(f"{cell_id}: NCU observed metrics are missing")
+    expected_ncu_metrics = set(closure_analyzer._expected_ncu_metrics(cell))
+    if set(ncu_observed) != expected_ncu_metrics:
+        raise ValueError(
+            f"{cell_id}: NCU observed metrics must contain the complete canonical set"
+        )
     for metric, expected in ncu_observed.items():
         if metric not in ncu_row:
             raise ValueError(f"{cell_id}: NCU metric is absent: {metric}")
@@ -1030,21 +1185,9 @@ def _validate_cell(
     row["checks"]["nvbit"] = True
 
     static = stages["static_control"]
-    control = _assert_file(root, static["control"], f"{cell_id}/static.control")
-    control_hash = static.get("control_sha256")
-    if not isinstance(control_hash, str) or len(control_hash) != 64:
-        raise ValueError(f"{cell_id}: static control hash is missing")
-    if _sha256(control) != control_hash:
-        raise ValueError(f"{cell_id}: static control hash does not match artifact")
-    control_doc = json.load(open(control))
-    decoded = sum(
-        1
-        for entries in control_doc.get("functions", {}).values()
-        for entry in entries
-        if entry.get("status") == "decoded"
+    control, control_doc, decoded = _validate_static_control_stage(
+        root, cell, static, str(trace_binary), str(trace_binary_hash)
     )
-    if decoded <= 0:
-        raise ValueError(f"{cell_id}: static control sidecar has no decoded instructions")
     static_binary = static.get("binary_path")
     static_hash = static.get("binary_sha256")
     if static_binary != trace_binary:

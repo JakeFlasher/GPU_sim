@@ -148,8 +148,13 @@ Closure analysis (bounded, after the independent live repeat):
 
 The async canary was run separately through
 `async_barrier_overlap c11 l1 0 4 1` (correctness), a profiler-marked NVBit
-capture, NCU target `... c11 l1 0 4 3`, and the same release replay. See the
-machine-readable values in `summary.json`.
+capture, NCU target `... c11 l1 0 4 3`, and the same release replay. Its NCU
+stage records the kernel-local L1TEX global-load/store request-sector counters
+(`l1tex__t_sectors_pipe_lsu_mem_global_op_{ld,st}.sum`) in addition to timing
+and instruction metrics; aggregate DRAM/LTS counters are deliberately not used
+for this prewarmed async probe because they include traffic outside the target
+kernel. See the machine-readable values in `summary.json` and
+`closure_report.json`.
 
 ## Residual and closure decision
 
