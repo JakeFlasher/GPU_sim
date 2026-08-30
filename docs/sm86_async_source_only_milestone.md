@@ -33,9 +33,9 @@ CUDA_VISIBLE_DEVICES=0 workloads/research_probes/async_source_only/async_source_
 The static sidecar reports 10 functions, 464 decoded instructions, and zero
 unknown encodings; the target functions contain no `STG`, `RED`, `ATOM`, or
 `BAR` instructions. Marker-scoped retained-runtime captures were made for
-depths 4 and 8 in both routes. Each complete root has one payload and one
+depths 1, 4, and 8 in both routes. Each complete root has one payload and one
 accepted launch. Three NCU application-replay profiles were collected for each
-of the four cells with `--clock-control none --cache-control none`; NCU remains
+of the six cells with `--clock-control none --cache-control none`; NCU remains
 a comparison target and is not passed to `sim-run`.
 
 ## Observed frontiers
@@ -46,14 +46,17 @@ frontiers, not a summed score.
 
 | route | depth | NCU SM active | NCU GPC elapsed | simulator terminal | simulator frontier | typed tails |
 |---|---:|---:|---:|---:|---|---|
+| L1 (`.ca`) | 1 | 6,844 | 8,671 | 5,020 | complete | none |
 | L1 (`.ca`) | 4 | 8,410 | 10,238 | 7,450 | complete | none |
 | L1 (`.ca`) | 8 | 10,573 | 12,397 | 10,527 | complete | none |
+| DRAM/bypass (`.cg`) | 1 | 19,119 | 20,940 | 30,740 | incomplete lower bound | async-copy shared visibility |
 | DRAM/bypass (`.cg`) | 4 | 34,266 | 36,137 | 34,642 | incomplete lower bound | async-copy shared visibility |
 | DRAM/bypass (`.cg`) | 8 | 37,964 | 39,837 | 39,827 | incomplete lower bound | async-copy shared visibility |
 
 Traffic and instruction observations are internally consistent across the
-pair: depth 4 has 256 LDGSTS warp instructions, 4,096 source sectors, and
-1,024 shared-destination wavefronts; depth 8 doubles each quantity. L1 route
+pair: depth 1 has 64 LDGSTS warp instructions, 1,024 source sectors, and 256
+shared-destination wavefronts; depth 4 has 256 instructions, 4,096 source
+sectors, and 1,024 wavefronts; depth 8 doubles the depth-4 quantities. L1 route
 labels show 4,032 hits/64 misses at depth 4; DRAM labels show 4,096 L1 misses
 and 4,096 modeled DRAM read sectors. Replay twins are byte-identical for every
 captured cell.
@@ -82,6 +85,8 @@ do not promote a bypass destination constant. JADE/HETR, CPU-GPU co-simulation,
 
 - Probe binary SHA-256: `d196d98e76007716dc2c998c1ff2e422c7e5a627457457c1cd2798036d3cc88b`
 - Source-only control sidecar SHA-256: `d7770c9a0cbe8175d69a8b42cb03263b87cd2e1c442d7ae0bdfb062e9c09ca78`
+- L1 depth-1 trace SHA-256: `5b2386b3f477415efc2b1c10ebb5ef384f8d68cecca85aa735d61543b7cc6457`
+- DRAM depth-1 trace SHA-256: `1824ff3ab3c3ba1bd1cb4e615dd3c13f8694d97413edef4904fde5658323e635`
 - L1 depth-4 trace SHA-256: `eb60c6bc17e66d700c22001cfe840042cbcdbba5371753e0e451958e314f665e`
 - DRAM depth-4 trace SHA-256: `aafae75d5c522fff7a45604222b12040dd831f185ebcbc0fad62c03d08b9bf3d`
 - L1 depth-8 trace SHA-256: `e60f7ec6692877514d89f7d6d19b6bcf40903b18d26478b340e8f7f8f8f2f03d`

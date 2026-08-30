@@ -15,7 +15,7 @@ from typing import Any, Mapping, Sequence
 
 
 ROUTES = ("l1", "dram")
-DEPTHS = (4, 8)
+DEPTHS = (1, 4, 8)
 REPO_ROOT = Path(__file__).resolve().parents[3]
 METRICS = (
     "gpc__cycles_elapsed.max",
