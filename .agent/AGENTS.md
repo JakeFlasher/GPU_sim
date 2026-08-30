@@ -32,5 +32,7 @@ competing workflow or weaken higher-priority instructions.
 - Preserve independent issue, modeled-event, completion, launch-envelope, and
   typed-tail frontiers as separate evidence. Never turn them into a summed
   scalar selection score; use a mechanism-local or explicit partial-order rule.
+- Treat mtime freshness as insufficient for retained replays; bind simulator,
+  card, trace/control, and output bytes to a content-identity record.
 - At handoff, include the causal mechanism for a nontrivial fix, commands and
   observed results, uncertainty/caveats, and the next concrete action if any.

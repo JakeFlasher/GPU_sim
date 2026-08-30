@@ -151,6 +151,9 @@ evidence lane rather than the deliverable:
   sum or otherwise collapse them into a scalar selection score; choose a
   mechanism-local or explicitly partial-order discriminator and state the
   rationale.
+- For retained replay corpora, filesystem freshness is only a secondary
+  signal: bind the exact simulator binary, cards, trace/control inputs, and
+  replay outputs by content identity before treating a scan as fresh.
 - Separate a hypothesis from an observation and label inference or uncertainty
   explicitly when reporting results.
 

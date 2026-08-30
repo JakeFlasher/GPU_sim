@@ -34,16 +34,16 @@
   },
   "release_build": {
     "record": "evidence/host_preflight/release_build.json",
-    "record_sha256": "c57f7da8b7869c899b23ca4510c5f756337307b3c549e4ff7e37d16c10174e60",
+    "record_sha256": "87b6da55fd0982b8815c74b5b079af310fe60890c1e9a666409505d8e69de745",
     "argv": ["cargo", "build", "--release", "--manifest-path", "sim/Cargo.toml", "-p", "sim-run"],
     "timeout_seconds": 1800,
     "exit_code": 0,
     "repository_revision": "8cae7c6f37e378ac54e4c5fe5f7acd3f38991480",
-    "reviewed_worktree_revision": "2c39d84636feadb2a44338842e6fbc4d2423b8c1",
+    "reviewed_worktree_revision": "9e8b92c748b100d98f8cc7c389a2949f79344b06",
     "stdout": "evidence/host_preflight/release_build/candidate.stdout.txt",
     "stderr": "evidence/host_preflight/release_build/candidate.stderr.txt",
     "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-    "stderr_sha256": "6bfa9e18ffdef821c711a542cfebd7db0982665615563e5a191285e489609c6f",
+    "stderr_sha256": "7a7bb64a28cdda9b91e6e27f41be455104d929b5d7ad6dd5beca75fc5a47f1f4",
     "binary": {
       "path": "sim/target/release/sim-run",
       "sha256": "6cb0d05f0d447c0cd6ee2e30353c0f1e89d464462458912478c826860f15f9a4",
@@ -63,7 +63,7 @@
   },
   "active_replay_binding": {
     "path": "evidence/sm86_active_replay_binding.json",
-    "sha256": "ac080acc0248406e30ac8cb811205b290f99305f40439aa1e29e5528b50e1616",
+    "sha256": "b08b0f2ce84be2f80d8e47327b7f6b2276bba08398dee18a861789401ff381fe",
     "active_pair_count": 5519,
     "supplemental_pair_count": 2070,
     "regeneration_command": [".venv/bin/python", "workloads/research_probes/build_active_replay_binding.py", "--output", "evidence/sm86_active_replay_binding.json"]

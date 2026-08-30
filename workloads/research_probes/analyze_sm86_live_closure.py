@@ -491,6 +491,12 @@ def _validate_replay_binding(
     output_records = binding.get("outputs")
     if not isinstance(output_records, list) or len(output_records) != 2:
         raise ValueError(f"{slug}: replay binding outputs are missing")
+    expected_outputs = [
+        f"evidence/raw/simulator/{slug}/replay-1.json",
+        f"evidence/raw/simulator/{slug}/replay-2.json",
+    ]
+    if outputs != expected_outputs:
+        raise ValueError(f"{slug}: replay output paths are not canonical")
     if outputs[0] == outputs[1]:
         raise ValueError(f"{slug}: replay output paths must be distinct")
     for record, expected in zip(output_records, outputs):
