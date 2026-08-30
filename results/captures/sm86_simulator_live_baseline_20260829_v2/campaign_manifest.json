@@ -34,12 +34,12 @@
   },
   "release_build": {
     "record": "evidence/host_preflight/release_build.json",
-    "record_sha256": "2f5e26fa33ac9ce5e636df8ace21517832117c5c3de8b4dfb246973bdb309655",
+    "record_sha256": "ecc921035085a394bacac3e26bf1668b04da63b2375a513f39b56604fa14a9b5",
     "argv": ["cargo", "build", "--release", "--manifest-path", "sim/Cargo.toml", "-p", "sim-run"],
     "timeout_seconds": 1800,
     "exit_code": 0,
     "repository_revision": "8cae7c6f37e378ac54e4c5fe5f7acd3f38991480",
-    "reviewed_worktree_revision": "af88956eff85ab958fc8f5852132cb367d1a860e",
+    "reviewed_worktree_revision": "bf6cdac14a1f7e28f63d727548343ac84ff7fb27",
     "stdout": "evidence/host_preflight/release_build/candidate.stdout.txt",
     "stderr": "evidence/host_preflight/release_build/candidate.stderr.txt",
     "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
@@ -63,7 +63,7 @@
   },
   "active_replay_binding": {
     "path": "evidence/sm86_active_replay_binding.json",
-    "sha256": "693818e093e4456c9293d6108b0491a373293e29a289ad0f6a07a434755d7c4b",
+    "sha256": "4316083b8b61f53f3b7bb8ff4f9d78eabae2cc21538acaa9bc2ba1a26a6128db",
     "active_pair_count": 5519,
     "supplemental_pair_count": 2070,
     "regeneration_command": [".venv/bin/python", "workloads/research_probes/build_active_replay_binding.py", "--output", "evidence/sm86_active_replay_binding.json"]
