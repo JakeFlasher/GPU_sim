@@ -33,7 +33,7 @@
     },
     "trace": {
       "path": "evidence/raw/nvbit/gemm_hmma_fp16_sm80",
-      "sha256": "968279f30dcce2068361ae8d53919f61b178e9008031e5caff3e76ac71316614"
+      "sha256": "ca5f0f54b36854802d398e33cc6e005193563158b645645c6554368e39f53dd6"
     }
   },
   "outputs": [

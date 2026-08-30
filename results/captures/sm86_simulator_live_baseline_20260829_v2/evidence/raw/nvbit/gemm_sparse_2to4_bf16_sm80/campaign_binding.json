@@ -8,6 +8,7 @@
     "1"
   ],
   "cell": "gemm_sparse_2to4_bf16_sm80",
+  "cleanup_complete": true,
   "environment": {
     "ACTIVE_FROM_START": "1",
     "CUDA_INJECTION64_PATH": "tools/nvbit_tracer/tracer_tool/tracer_tool.so",
@@ -25,7 +26,7 @@
     "USER_DEFINED_FOLDERS": "1"
   },
   "environment_record": "evidence/raw/nvbit/gemm_sparse_2to4_bf16_sm80/environment.json",
-  "environment_sha256": "4d0f58803872a2a9b15704d4875ec0d6417483f91bc79d4d685cbc398d801205",
+  "environment_sha256": "104b8101d0e7ce6b5c7801546fb0563892ce76690d9331e715fffc3ca696c467",
   "geometry": {
     "block": [
       32,
@@ -63,6 +64,9 @@
     "stats": "evidence/raw/nvbit/gemm_sparse_2to4_bf16_sm80/stats.csv"
   },
   "schema_version": 1,
+  "timeout_policy": "process_group_terminate_reap_v1",
+  "timeout_policy_version": 1,
+  "timeout_seconds": 900,
   "trace_binary": {
     "path": "workloads/portable_lcd/gemm_sparse_2to4_bf16_sm80/gemm_sparse_2to4_bf16_sm80_run",
     "sha256": "abf792ec7d7e7042ca4a4c21ae611577b50b94fad5c1a6ee534b45b13a22e254"

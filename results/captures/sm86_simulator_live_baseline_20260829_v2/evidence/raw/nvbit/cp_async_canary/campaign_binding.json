@@ -8,6 +8,7 @@
     "1"
   ],
   "cell": "cp_async_canary",
+  "cleanup_complete": true,
   "environment": {
     "ACTIVE_FROM_START": "0",
     "CUDA_INJECTION64_PATH": "tools/nvbit_tracer/tracer_tool/tracer_tool.so",
@@ -21,7 +22,7 @@
     "USER_DEFINED_FOLDERS": "1"
   },
   "environment_record": "evidence/raw/nvbit/cp_async_canary/environment.json",
-  "environment_sha256": "7975cb563a674525c442f7f07374404600733a9214e972346b8d71b02b2b0fb1",
+  "environment_sha256": "2ec9732859f9fa297ed9ddba32fadaac5fd12494f0c3893fbe7fc0c83a3f93e0",
   "geometry": {
     "block": [
       128,
@@ -59,6 +60,9 @@
     "stats": "evidence/raw/nvbit/cp_async_canary/stats.csv"
   },
   "schema_version": 1,
+  "timeout_policy": "process_group_terminate_reap_v1",
+  "timeout_policy_version": 1,
+  "timeout_seconds": 900,
   "trace_binary": {
     "path": "workloads/research_probes/async_barrier_overlap/async_barrier_overlap_trace",
     "sha256": "f8c2b971f95d274d6351e2dcbbe1a96c77a52678c8ad3abe1ddf6eb8573e11fd"

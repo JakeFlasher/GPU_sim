@@ -18,8 +18,8 @@
   "live_cohort_semantic_report": "results/captures/sm86_simulator_live_baseline_20260829_v2/live_cohort_semantic_report.json",
   "live_cohort_semantic_report_sha256": "f90f01bac77264e6ff21c0c2b58489209900bf9cef3060ec3e2fca1afcefa569",
   "closure_report": "results/captures/sm86_simulator_live_baseline_20260829_v2/closure_report.json",
-  "closure_report_sha256": "9c1255cbc2ca5ebf7bc1ac72804025b8a395d47fcca1acdbd11282e39891e686",
-  "raw_evidence_archive_sha256": "36d8dffe2201bd13e19553cc991b22c3aac92f1dd396bfaee7f70e82c8640d78",
+  "closure_report_sha256": "d8e806505becb722161d4c5c9e5a04c85a4972fa82161e9580f8ec26e41a6c4f",
+  "raw_evidence_archive_sha256": "e594870a621fbf4d876d3e368f44307483d604fd2e40e24cf6d06059708af6f8",
   "architecture": "sm_86",
   "gpu": "NVIDIA GeForce RTX 3090 Ti",
   "driver": "610.57.04",
@@ -43,13 +43,13 @@
     {
       "name": "cp.async canary",
       "workload": "async_barrier_overlap",
-      "arguments": "matched stages (64 groups): c11 l1 0 4 1; separate 16,384-group correctness/NCU scaling observation: c11 l1 0 4 3",
+      "arguments": "matched stages (64 groups): async_barrier_overlap_trace c11 l1 0 4 1; separate 16,384-group correctness: async_barrier_overlap c11 l1 0 4 1; separate 16,384-group NCU scaling: async_barrier_overlap c11 l1 0 4 3",
       "trace_activation": "profiler-marked ACTIVE_FROM_START=0",
       "trace_groups": 64,
       "trace_thread_instructions": 26760,
       "sim_instructions": 9104,
-      "ncu_gpc_cycles": 20973,
-      "ncu_sm_active_cycles": 19369,
+      "ncu_gpc_cycles": 21013,
+      "ncu_sm_active_cycles": 19376,
       "ncu_smsp_instructions": 9104,
       "ncu_global_load_request_sectors": 32768,
       "ncu_global_store_request_sectors": 72,
@@ -61,7 +61,27 @@
       "sim_dram_read_sectors": 16,
       "sim_completion": "incomplete_unmodeled_retirement_tails",
       "deterministic_twin": true,
-      "correctness": true
+      "correctness": true,
+      "cell": "cp_async_canary",
+      "sim_records_seen": 9104,
+      "frontier_gaps": {
+        "gpc_completion_gap_cycles": 491,
+        "gpc_launch_envelope_cycles": 1637,
+        "sm_completion_gap_cycles": -1146
+      },
+      "typed_tails": {
+        "async_copy_shared_visibility": false,
+        "coherence": true,
+        "dirty_writeback": true,
+        "reduction_read_modify_write": false
+      },
+      "correctness_binary": "workloads/research_probes/async_barrier_overlap/async_barrier_overlap_trace",
+      "correctness_binary_sha256": "f8c2b971f95d274d6351e2dcbbe1a96c77a52678c8ad3abe1ddf6eb8573e11fd",
+      "correctness_group_count": 64,
+      "async_matched_ncu_groups": 64,
+      "async_matched_correctness_groups": 64,
+      "async_scaling_observation_ncu_groups": 16384,
+      "async_scaling_observation_correctness_groups": 16384
     },
     {
       "name": "BF16 HMMA GEMM",
@@ -71,15 +91,32 @@
       "trace_blocks": 512,
       "trace_thread_instructions": 422400,
       "sim_instructions": 197120,
-      "ncu_gpc_cycles": 13415,
-      "ncu_sm_active_cycles": 11756,
+      "ncu_gpc_cycles": 13324,
+      "ncu_sm_active_cycles": 11639,
       "ncu_smsp_instructions": 197120,
       "sim_terminal_lower_bound_cycles": 8915,
       "sim_dram_read_sectors": 8192,
       "sim_completion": "incomplete_unmodeled_retirement_tails",
       "static_control_instructions": 192,
       "deterministic_twin": true,
-      "correctness": true
+      "correctness": true,
+      "cell": "gemm_hmma_bf16_sm80",
+      "sim_records_seen": 197120,
+      "frontier_gaps": {
+        "gpc_completion_gap_cycles": 4409,
+        "gpc_launch_envelope_cycles": 1685,
+        "sm_completion_gap_cycles": 2724
+      },
+      "typed_tails": {
+        "async_copy_shared_visibility": false,
+        "coherence": true,
+        "dirty_writeback": true,
+        "reduction_read_modify_write": false
+      },
+      "correctness_binary": "workloads/portable_lcd/gemm_hmma_bf16_sm80/gemm_hmma_bf16_sm80_run",
+      "correctness_binary_sha256": "55133e328fc16238d78e3dde335b4ce5789a4b3838fb440da41f489f805a1362",
+      "correctness_group_count": null,
+      "ncu_global_load_request_sectors": null
     },
     {
       "name": "FP16 HMMA GEMM",
@@ -89,15 +126,32 @@
       "trace_blocks": 512,
       "trace_thread_instructions": 422400,
       "sim_instructions": 197120,
-      "ncu_gpc_cycles": 13468,
-      "ncu_sm_active_cycles": 11769,
+      "ncu_gpc_cycles": 13408,
+      "ncu_sm_active_cycles": 11693,
       "ncu_smsp_instructions": 197120,
       "sim_terminal_lower_bound_cycles": 8915,
       "sim_dram_read_sectors": 8192,
       "sim_completion": "incomplete_unmodeled_retirement_tails",
       "static_control_instructions": 192,
       "deterministic_twin": true,
-      "correctness": true
+      "correctness": true,
+      "cell": "gemm_hmma_fp16_sm80",
+      "sim_records_seen": 197120,
+      "frontier_gaps": {
+        "gpc_completion_gap_cycles": 4493,
+        "gpc_launch_envelope_cycles": 1715,
+        "sm_completion_gap_cycles": 2778
+      },
+      "typed_tails": {
+        "async_copy_shared_visibility": false,
+        "coherence": true,
+        "dirty_writeback": true,
+        "reduction_read_modify_write": false
+      },
+      "correctness_binary": "workloads/portable_lcd/gemm_hmma_fp16_sm80/gemm_hmma_fp16_sm80_run",
+      "correctness_binary_sha256": "829927c7f57d7c46f0a8e51c7de6bb8c7eb7d8de1e963a33e5e9afee7839a750",
+      "correctness_group_count": null,
+      "ncu_global_load_request_sectors": null
     },
     {
       "name": "INT8 IMMA GEMM",
@@ -107,15 +161,32 @@
       "trace_blocks": 512,
       "trace_thread_instructions": 334848,
       "sim_instructions": 157696,
-      "ncu_gpc_cycles": 11331,
-      "ncu_sm_active_cycles": 9628,
+      "ncu_gpc_cycles": 11022,
+      "ncu_sm_active_cycles": 9320,
       "ncu_smsp_instructions": 157696,
-      "sim_terminal_lower_bound_cycles": 5867,
+      "sim_terminal_lower_bound_cycles": 5821,
       "sim_dram_read_sectors": 4096,
       "sim_completion": "incomplete_unmodeled_retirement_tails",
       "static_control_instructions": 184,
       "deterministic_twin": true,
-      "correctness": true
+      "correctness": true,
+      "cell": "gemm_imma_int8_sm80",
+      "sim_records_seen": 157696,
+      "frontier_gaps": {
+        "gpc_completion_gap_cycles": 5201,
+        "gpc_launch_envelope_cycles": 1702,
+        "sm_completion_gap_cycles": 3499
+      },
+      "typed_tails": {
+        "async_copy_shared_visibility": false,
+        "coherence": true,
+        "dirty_writeback": true,
+        "reduction_read_modify_write": false
+      },
+      "correctness_binary": "workloads/portable_lcd/gemm_imma_int8_sm80/gemm_imma_int8_sm80_run",
+      "correctness_binary_sha256": "44b362cf4d503e1eb4b2791046d2084288b12fc1fc7fde9674a6d538a4b16e4a",
+      "correctness_group_count": null,
+      "ncu_global_load_request_sectors": null
     },
     {
       "name": "sparse BF16 HMMA GEMM",
@@ -125,15 +196,32 @@
       "trace_blocks": 128,
       "trace_thread_instructions": 46976,
       "sim_instructions": 19968,
-      "ncu_gpc_cycles": 5678,
-      "ncu_sm_active_cycles": 3990,
+      "ncu_gpc_cycles": 5701,
+      "ncu_sm_active_cycles": 4020,
       "ncu_smsp_instructions": 19968,
       "sim_terminal_lower_bound_cycles": 2375,
       "sim_dram_read_sectors": 1536,
       "sim_completion": "incomplete_unmodeled_retirement_tails",
       "static_control_instructions": 200,
       "deterministic_twin": true,
-      "correctness": true
+      "correctness": true,
+      "cell": "gemm_sparse_2to4_bf16_sm80",
+      "sim_records_seen": 19968,
+      "frontier_gaps": {
+        "gpc_completion_gap_cycles": 3326,
+        "gpc_launch_envelope_cycles": 1681,
+        "sm_completion_gap_cycles": 1645
+      },
+      "typed_tails": {
+        "async_copy_shared_visibility": false,
+        "coherence": true,
+        "dirty_writeback": true,
+        "reduction_read_modify_write": false
+      },
+      "correctness_binary": "workloads/portable_lcd/gemm_sparse_2to4_bf16_sm80/gemm_sparse_2to4_bf16_sm80_run",
+      "correctness_binary_sha256": "abf792ec7d7e7042ca4a4c21ae611577b50b94fad5c1a6ee534b45b13a22e254",
+      "correctness_group_count": null,
+      "ncu_global_load_request_sectors": null
     },
     {
       "name": "BF16 forward attention",
@@ -143,15 +231,32 @@
       "trace_blocks": 16,
       "trace_thread_instructions": 109616,
       "sim_instructions": 39568,
-      "ncu_gpc_cycles": 15951,
-      "ncu_sm_active_cycles": 14320,
+      "ncu_gpc_cycles": 15836,
+      "ncu_sm_active_cycles": 14198,
       "ncu_smsp_instructions": 39568,
       "sim_terminal_lower_bound_cycles": 12551,
       "sim_dram_read_sectors": 1280,
       "sim_completion": "incomplete_unmodeled_retirement_tails",
       "static_control_instructions": 480,
       "deterministic_twin": true,
-      "correctness": true
+      "correctness": true,
+      "cell": "flash_attn_fwd_bf16_sm80",
+      "sim_records_seen": 39568,
+      "frontier_gaps": {
+        "gpc_completion_gap_cycles": 3285,
+        "gpc_launch_envelope_cycles": 1638,
+        "sm_completion_gap_cycles": 1647
+      },
+      "typed_tails": {
+        "async_copy_shared_visibility": false,
+        "coherence": true,
+        "dirty_writeback": true,
+        "reduction_read_modify_write": false
+      },
+      "correctness_binary": "workloads/portable_lcd/flash_attn_fwd_bf16_sm80/flash_attn_fwd_bf16_sm80_run",
+      "correctness_binary_sha256": "a272cde4fe06763638021de9cee4bea0ee39c52ee3511bce3abdec01b56f5fe1",
+      "correctness_group_count": null,
+      "ncu_global_load_request_sectors": null
     }
   ],
   "invariants": {
@@ -161,7 +266,8 @@
     "cp_async_matched_across_ncu_nvbit_static_simulator": true,
     "ncu_values_used_as_simulator_inputs": false,
     "jade_or_cpu_gpu_cosim_changed": false,
-    "sm120_changed": false
+    "sm120_changed": false,
+    "cp_async_matched_correctness": true
   },
   "freshness": {
     "initial_validator_exit": 1,
@@ -182,18 +288,40 @@
   "core_closure": {
     "decision": "no-go",
     "seam": "completion/retirement frontier mapping",
-    "reason": "The live residual is repeatable, but every cohort cell that writes global state reports typed dirty_writeback/coherence tails; NCU SM-active/GPC envelopes include launch and retirement behavior absent from the modeled event stream. The data do not identify one architecture-local latency without an in-scope store-free/barrier-free discriminator.",
-    "next_discriminator": "Capture a matched store-free, barrier-free async-source pair with an independent retirement/frontier observable before adding timing state or a scalar correction.",
-    "next_discriminator_manifest": {"path": "plans/sm86_ldgsts_burst_release_next_discriminator.json", "sha256": "0457578507997d732a98a6f5b85be1ce3a7af21fdc58ffea610abd58be95b008"},
+    "reason": "Live residuals are repeat-stable across 6 rows, while the simulator reports dirty-writeback/coherence tails in every comparable row (6/6); the multi-frontier selection vector includes SM-active completion, GPC completion, and launch-envelope gaps and is retained component-wise.  The typed-tail witness is selected by mechanism-local precedence, but the observations do not identify one architecture-local latency.",
+    "next_discriminator": "Run the matched store-free/barrier-free async-source discriminator with an independent retirement/frontier observable before changing simulator timing state.",
+    "next_discriminator_manifest": {
+      "path": "plans/sm86_ldgsts_burst_release_next_discriminator.json",
+      "sha256": "0457578507997d732a98a6f5b85be1ce3a7af21fdc58ffea610abd58be95b008"
+    },
     "closure_analysis_command": ".venv/bin/python workloads/research_probes/analyze_sm86_live_closure.py --manifest results/captures/sm86_simulator_live_baseline_20260829_v2/campaign_manifest.json --output results/captures/sm86_simulator_live_baseline_20260829_v2/closure_report.json",
     "live_repeatability": "independent NCU application-replay repeat per cell; all six remain within 5% on gpc/SM/instruction metrics",
-    "selection_dimensions": ["sm_completion_gap_cycles", "gpc_completion_gap_cycles", "gpc_launch_envelope_cycles"],
+    "selection_dimensions": [
+      "sm_completion_gap_cycles",
+      "gpc_completion_gap_cycles",
+      "gpc_launch_envelope_cycles"
+    ],
     "selection_record": "closure_report.json",
     "selection_rule": "mechanism_local_typed_tail_precedence",
     "matched_comparable_rows": 6,
     "retirement_tail_rows": 6,
     "frontiers_remain_independent": true,
     "aggregate_score_used": false,
-    "acceptance_criteria": {"AC-1": "pass", "AC-2": "pass", "AC-3": "pass", "AC-4": "pass", "AC-5": "pass"}
-  }
+    "acceptance_criteria": {
+      "AC-1": "pass",
+      "AC-2": "pass",
+      "AC-3": "pass",
+      "AC-4": "pass",
+      "AC-5": "pass"
+    }
+  },
+  "handoff_consistency_validator": {
+    "path": "workloads/research_probes/validate_sm86_handoff.py",
+    "argv": [
+      ".venv/bin/python",
+      "workloads/research_probes/validate_sm86_handoff.py"
+    ],
+    "status": "pass"
+  },
+  "raw_evidence_archive_size_bytes": 539986
 }

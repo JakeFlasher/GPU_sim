@@ -33,7 +33,7 @@
     },
     "trace": {
       "path": "evidence/raw/nvbit/gemm_imma_int8_sm80",
-      "sha256": "80d669220ba94de3e935d425c671179c36f7ed482b8fc7ccf6ac6418397f4e7d"
+      "sha256": "66ab2305c26388e56670a977831336011a3ad27b7dd52631498b6aad67835ddd"
     }
   },
   "outputs": [

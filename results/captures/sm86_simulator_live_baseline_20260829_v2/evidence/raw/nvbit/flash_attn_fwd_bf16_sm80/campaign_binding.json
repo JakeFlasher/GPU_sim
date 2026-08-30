@@ -8,6 +8,7 @@
     "1"
   ],
   "cell": "flash_attn_fwd_bf16_sm80",
+  "cleanup_complete": true,
   "environment": {
     "ACTIVE_FROM_START": "1",
     "CUDA_INJECTION64_PATH": "tools/nvbit_tracer/tracer_tool/tracer_tool.so",
@@ -25,7 +26,7 @@
     "USER_DEFINED_FOLDERS": "1"
   },
   "environment_record": "evidence/raw/nvbit/flash_attn_fwd_bf16_sm80/environment.json",
-  "environment_sha256": "c98fcf5e6a03016aa3136526688dc9f3b92e1348b57b35af17b61600c40975a4",
+  "environment_sha256": "0504470f8ed54ebca9375b724d2dddbf4cb87f17e391525ac73bf589f0f0db7c",
   "geometry": {
     "block": [
       32,
@@ -63,6 +64,9 @@
     "stats": "evidence/raw/nvbit/flash_attn_fwd_bf16_sm80/stats.csv"
   },
   "schema_version": 1,
+  "timeout_policy": "process_group_terminate_reap_v1",
+  "timeout_policy_version": 1,
+  "timeout_seconds": 900,
   "trace_binary": {
     "path": "workloads/portable_lcd/flash_attn_fwd_bf16_sm80/flash_attn_fwd_bf16_sm80_run",
     "sha256": "a272cde4fe06763638021de9cee4bea0ee39c52ee3511bce3abdec01b56f5fe1"

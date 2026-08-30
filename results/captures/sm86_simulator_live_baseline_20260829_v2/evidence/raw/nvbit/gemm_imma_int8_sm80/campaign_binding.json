@@ -8,6 +8,7 @@
     "1"
   ],
   "cell": "gemm_imma_int8_sm80",
+  "cleanup_complete": true,
   "environment": {
     "ACTIVE_FROM_START": "1",
     "CUDA_INJECTION64_PATH": "tools/nvbit_tracer/tracer_tool/tracer_tool.so",
@@ -25,7 +26,7 @@
     "USER_DEFINED_FOLDERS": "1"
   },
   "environment_record": "evidence/raw/nvbit/gemm_imma_int8_sm80/environment.json",
-  "environment_sha256": "3b6dd284bbd668ed2331094916de0fe4c8cd5422e5e7ce9475edaee2bdaf48f2",
+  "environment_sha256": "f57b60bd9207f16084f2e2a3602152302c3c406964866e3af37af828293bdc07",
   "geometry": {
     "block": [
       32,
@@ -63,6 +64,9 @@
     "stats": "evidence/raw/nvbit/gemm_imma_int8_sm80/stats.csv"
   },
   "schema_version": 1,
+  "timeout_policy": "process_group_terminate_reap_v1",
+  "timeout_policy_version": 1,
+  "timeout_seconds": 900,
   "trace_binary": {
     "path": "workloads/portable_lcd/gemm_imma_int8_sm80/gemm_imma_int8_sm80_run",
     "sha256": "44b362cf4d503e1eb4b2791046d2084288b12fc1fc7fde9674a6d538a4b16e4a"

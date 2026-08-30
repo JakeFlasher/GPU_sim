@@ -31,23 +31,77 @@ DEFAULT_OUTPUT_ROOT = "results/captures/sm86_simulator_live_baseline_20260829_v2
 DEFAULT_TIMEOUT_SECONDS = 900
 MAX_TIMEOUT_SECONDS = 3600
 TERMINATION_GRACE_SECONDS = 5
+TIMEOUT_POLICY = "process_group_terminate_reap_v1"
+TIMEOUT_POLICY_VERSION = 1
 
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def _terminate(process: subprocess.Popen[str]) -> None:
-    if process.poll() is not None:
-        return
-    try:
-        os.killpg(process.pid, signal.SIGTERM)
-        process.wait(timeout=TERMINATION_GRACE_SECONDS)
-    except (OSError, subprocess.TimeoutExpired):
+def _terminate(process: subprocess.Popen[str]) -> bool:
+    """Terminate the complete capture process group and reap its leader.
+
+    A timed-out ``communicate`` may have observed an exited leader while a
+    descendant still owns stdout/stderr.  Always signal the group; polling the
+    leader first would leak that descendant and can retain CUDA resources.
+    """
+
+    cleanup_ok = True
+    if os.name == "nt":
+        with suppress(OSError, subprocess.TimeoutExpired):
+            taskkill = subprocess.run(
+                ["taskkill", "/PID", str(process.pid), "/T", "/F"],
+                check=False,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=TERMINATION_GRACE_SECONDS,
+            )
+            if taskkill.returncode not in (0, 128, 255) and process.poll() is None:
+                cleanup_ok = False
         with suppress(OSError):
-            os.killpg(process.pid, signal.SIGKILL)
+            process.terminate()
+        if process.poll() is None:
+            cleanup_ok = False
         with suppress(subprocess.TimeoutExpired):
             process.wait(timeout=TERMINATION_GRACE_SECONDS)
+        if process.poll() is None:
+            cleanup_ok = False
+        with suppress(OSError):
+            process.kill()
+        with suppress(subprocess.TimeoutExpired):
+            process.wait(timeout=TERMINATION_GRACE_SECONDS)
+        if process.poll() is None:
+            cleanup_ok = False
+        return cleanup_ok
+
+    try:
+        os.killpg(process.pid, signal.SIGTERM)
+    except ProcessLookupError:
+        pass
+    except OSError:
+        cleanup_ok = False
+    with suppress(subprocess.TimeoutExpired):
+        process.wait(timeout=TERMINATION_GRACE_SECONDS)
+    if process.poll() is None:
+        cleanup_ok = False
+    try:
+        os.killpg(process.pid, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+    except OSError:
+        cleanup_ok = False
+    with suppress(subprocess.TimeoutExpired):
+        process.wait(timeout=TERMINATION_GRACE_SECONDS)
+    if process.poll() is None:
+        cleanup_ok = False
+    return cleanup_ok
+
+
+def _text_output(value: object) -> str:
+    if isinstance(value, bytes):
+        return value.decode(errors="replace")
+    return value if isinstance(value, str) else ""
 
 
 def _cell(cell_id: str) -> dict[str, object]:
@@ -85,27 +139,40 @@ def capture(cell_id: str, output_root: Path, timeout_seconds: int) -> int:
     environment["TRACES_FOLDER"] = str(destination.resolve())
     started = _now()
     timed_out = False
+    cleanup_complete = True
     try:
-        process = subprocess.Popen(
-            argv,
-            cwd=REPO_ROOT,
-            env=environment,
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            start_new_session=True,
-        )
+        popen_kwargs: dict[str, object] = {
+            "cwd": REPO_ROOT,
+            "env": environment,
+            "stdin": subprocess.DEVNULL,
+            "stdout": subprocess.PIPE,
+            "stderr": subprocess.PIPE,
+            "text": True,
+        }
+        if os.name == "nt":
+            popen_kwargs["creationflags"] = getattr(
+                subprocess, "CREATE_NEW_PROCESS_GROUP", 0
+            )
+        else:
+            popen_kwargs["start_new_session"] = True
+        process = subprocess.Popen(argv, **popen_kwargs)
         try:
             stdout, stderr = process.communicate(timeout=timeout_seconds)
         except subprocess.TimeoutExpired as exc:
             timed_out = True
-            _terminate(process)
+            cleanup_complete = _terminate(process)
             try:
                 stdout, stderr = process.communicate(timeout=TERMINATION_GRACE_SECONDS)
             except subprocess.TimeoutExpired:
-                stdout = exc.output or ""
-                stderr = exc.stderr or ""
+                cleanup_complete = _terminate(process) and cleanup_complete
+                stdout = _text_output(exc.output)
+                stderr = _text_output(exc.stderr)
+                if process.stdout is not None:
+                    process.stdout.close()
+                if process.stderr is not None:
+                    process.stderr.close()
+        stdout = _text_output(stdout)
+        stderr = _text_output(stderr)
         return_code = process.returncode if process.returncode is not None else -signal.SIGTERM
     except OSError as exc:
         stdout = ""
@@ -126,6 +193,10 @@ def capture(cell_id: str, output_root: Path, timeout_seconds: int) -> int:
         "forbidden_variables_absent": sorted(_NVBIT_FORBIDDEN_ENVIRONMENT_CONTROLS),
         "return_code": return_code,
         "timed_out": timed_out,
+        "cleanup_complete": cleanup_complete,
+        "timeout_seconds": timeout_seconds,
+        "timeout_policy": TIMEOUT_POLICY,
+        "timeout_policy_version": TIMEOUT_POLICY_VERSION,
         "started_at": started,
         "finished_at": _now(),
     }

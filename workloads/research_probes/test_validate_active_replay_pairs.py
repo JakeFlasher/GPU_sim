@@ -139,6 +139,10 @@ def test_nvbit_effective_environment_record_rejects_inherited_controls(tmp_path:
         ),
         "return_code": 0,
         "timed_out": False,
+        "cleanup_complete": True,
+        "timeout_seconds": 900,
+        "timeout_policy": "process_group_terminate_reap_v1",
+        "timeout_policy_version": 1,
         "started_at": "2026-08-30T00:00:00+00:00",
         "finished_at": "2026-08-30T00:00:01+00:00",
     }
@@ -163,6 +167,105 @@ def test_cp_async_ncu_target_is_the_matched_trace_binary() -> None:
         "4",
         "1",
     ]
+
+
+def test_cp_async_matched_execution_requires_exact_correctness_stage() -> None:
+    root, cell, repository = _live_manifest_cell("cp_async_canary")
+    manifest = json.loads((root / "campaign_manifest.json").read_text(encoding="utf-8"))
+    defaults = manifest["stage_timeouts_seconds"]
+    LIVE_VALIDATOR._validate_cell(
+        root,
+        cell,
+        defaults,
+        repository["tracer_dso_sha256"],
+        manifest["ncu_identity"],
+    )
+
+    missing = deepcopy(cell)
+    del missing["stages"]["correctness"]
+    with pytest.raises(ValueError, match="stage set is incomplete"):
+        LIVE_VALIDATOR._validate_cell(
+            root,
+            missing,
+            defaults,
+            repository["tracer_dso_sha256"],
+            manifest["ncu_identity"],
+        )
+
+    wrong_binary = deepcopy(cell)
+    wrong_binary["stages"]["correctness"]["binary_path"] = cell["binary"]["path"]
+    with pytest.raises(ValueError, match="correctness binary identity"):
+        LIVE_VALIDATOR._validate_cell(
+            root,
+            wrong_binary,
+            defaults,
+            repository["tracer_dso_sha256"],
+            manifest["ncu_identity"],
+        )
+
+
+def test_nvbit_timeout_override_is_rejected_by_the_campaign_contract(
+    tmp_path: Path,
+) -> None:
+    root, cell, _repository = _live_manifest_cell("gemm_hmma_bf16_sm80")
+    stage = deepcopy(cell["stages"]["nvbit"])
+    output = stage["output"]
+    source = root / stage["environment_record"]
+    destination = tmp_path / stage["environment_record"]
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    record = json.loads(source.read_text(encoding="utf-8"))
+    expected = LIVE_VALIDATOR._expected_nvbit_environment(cell, output, root=tmp_path)
+    record["environment"] = expected
+    record["effective_environment"] = expected
+    record["timeout_seconds"] = 901
+    destination.write_text(json.dumps(record), encoding="utf-8")
+    stage["environment_record"] = str(Path(stage["environment_record"]))
+    stage["environment_sha256"] = hashlib.sha256(destination.read_bytes()).hexdigest()
+    with pytest.raises(ValueError, match="sanitized contract|timeout policy"):
+        LIVE_VALIDATOR._validate_nvbit_environment_record(
+            tmp_path,
+            cell,
+            stage,
+            stage["argv"],
+            output,
+            expected,
+        )
+
+
+def _scaling_fixture(tmp_path: Path) -> tuple[Path, dict[str, object]]:
+    source_root, source_cell, _repository = _live_manifest_cell("cp_async_canary")
+    for relative in (
+        "evidence/raw/correctness/cp_async_canary",
+        "evidence/raw/ncu_scaling/cp_async_canary_16384",
+    ):
+        shutil.copytree(source_root / relative, tmp_path / relative)
+    return tmp_path, deepcopy(source_cell)
+
+
+@pytest.mark.parametrize("mutation", ["export_status", "empty_csv", "timeout"])
+def test_cp_async_scaling_observation_validates_export_and_csv_contract(
+    tmp_path: Path, mutation: str
+) -> None:
+    root, cell = _scaling_fixture(tmp_path)
+    scaling_ncu = cell["scaling_observation"]["ncu"]
+    if mutation == "export_status":
+        metadata_path = root / scaling_ncu["metadata"]
+        metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+        metadata["export_return_code"] = 1
+        metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
+        scaling_ncu["metadata_sha256"] = hashlib.sha256(metadata_path.read_bytes()).hexdigest()
+    elif mutation == "timeout":
+        metadata_path = root / scaling_ncu["metadata"]
+        metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+        metadata["timeout_seconds"] = 901
+        metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
+        scaling_ncu["metadata_sha256"] = hashlib.sha256(metadata_path.read_bytes()).hexdigest()
+    else:
+        csv_path = root / scaling_ncu["csv"]
+        csv_path.write_text("", encoding="utf-8")
+        scaling_ncu["csv_sha256"] = hashlib.sha256(csv_path.read_bytes()).hexdigest()
+    with pytest.raises(ValueError):
+        LIVE_VALIDATOR._validate_cp_async_scaling_observation(root, cell)
 
 
 def test_ncu_capture_metadata_is_bound_to_trusted_executable(tmp_path: Path) -> None:

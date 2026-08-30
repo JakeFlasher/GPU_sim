@@ -49,6 +49,12 @@ _TRUSTED_NCU_IDENTITY = {
     "version": "2026.1.0.0",
     "sha256": "a44ff2c735c4dcf66c78f3f430155805d6a0b1f74f26331f98ecec03bfbf3f1a",
 }
+_CP_ASYNC_MATCHED_GROUPS = 64
+_CP_ASYNC_SCALING_GROUPS = 16_384
+_CP_ASYNC_ARGUMENTS = ["c11", "l1", "0", "4", "1"]
+_CP_ASYNC_SCALING_NCU_ARGUMENTS = ["c11", "l1", "0", "4", "3"]
+_NVBIT_TIMEOUT_POLICY = "process_group_terminate_reap_v1"
+_NVBIT_TIMEOUT_POLICY_VERSION = 1
 
 _CORRECTNESS_INJECTION_VARIABLES = frozenset(
     {
@@ -299,7 +305,9 @@ def _assert_file(root: Path, relative: object, label: str) -> Path:
     return path
 
 
-def _expected_ncu_capture_argv(cell: Mapping[str, Any], output: str) -> list[str]:
+def _expected_ncu_capture_argv(
+    cell: Mapping[str, Any], output: str, target: list[str] | None = None
+) -> list[str]:
     """Build the exact low-level NCU argv emitted by collect_ncu.py."""
 
     return [
@@ -317,7 +325,7 @@ def _expected_ncu_capture_argv(cell: Mapping[str, Any], output: str) -> list[str
         "none",
         "--metrics",
         ",".join(closure_analyzer._expected_ncu_metrics(cell)),
-        *closure_analyzer._expected_ncu_target(cell),
+        *(target or closure_analyzer._expected_ncu_target(cell)),
     ]
 
 
@@ -352,7 +360,7 @@ def _ncu_argv_matches(actual: object, expected: list[str], root: Path) -> bool:
     path_tokens = {
         index
         for index, token in enumerate(expected)
-        if token.startswith(("evidence/raw/ncu/", "workloads/"))
+        if token.startswith(("evidence/raw/", "workloads/"))
     }
     for index, (observed, required) in enumerate(zip(actual, expected)):
         if index in path_tokens and not _ncu_path_token_matches(observed, required, root):
@@ -367,13 +375,26 @@ def _ncu_result_path_matches(actual: object, expected: str, root: Path) -> bool:
 
 
 def _validate_ncu_capture_provenance(
-    root: Path, cell: Mapping[str, Any], stage: Mapping[str, Any]
+    root: Path,
+    cell: Mapping[str, Any],
+    stage: Mapping[str, Any],
+    *,
+    output: str | None = None,
+    target_cell: Mapping[str, Any] | None = None,
+    target: list[str] | None = None,
+    timeout_seconds: int | None = None,
+    label: str | None = None,
 ) -> None:
     """Bind baseline NCU metadata/transcripts to the trusted executable."""
 
     slug = str(cell["id"])
-    output = f"evidence/raw/ncu/{slug}"
-    expected_command = _expected_ncu_capture_argv(cell, output)
+    output = output or f"evidence/raw/ncu/{slug}"
+    command_cell = target_cell or cell
+    timeout_seconds = (
+        _CURRENT_TIMEOUTS["ncu"] if timeout_seconds is None else timeout_seconds
+    )
+    label = label or slug
+    expected_command = _expected_ncu_capture_argv(command_cell, output, target)
     expected_paths = {
         "report": output + "/ncu-report.ncu-rep",
         "csv": output + "/ncu.csv",
@@ -383,25 +404,25 @@ def _validate_ncu_capture_provenance(
     }
     for key, expected in expected_paths.items():
         if stage.get(key) != expected:
-            raise ValueError(f"{slug}: NCU {key} path is not canonical")
+            raise ValueError(f"{label}: NCU {key} path is not canonical")
     paths = {
-        key: _assert_file(root, relative, f"{slug}.ncu.{key}")
+        key: _assert_file(root, relative, f"{label}.ncu.{key}")
         for key, relative in expected_paths.items()
     }
     for key, path in paths.items():
         digest_key = f"{key}_sha256"
         digest = stage.get(digest_key)
         if not isinstance(digest, str) or len(digest) != 64 or _sha256(path) != digest:
-            raise ValueError(f"{slug}: NCU {digest_key} does not match artifact")
+            raise ValueError(f"{label}: NCU {digest_key} does not match artifact")
     for key in ("report", "csv"):
         if paths[key].stat().st_size == 0:
-            raise ValueError(f"{slug}: NCU baseline {key} artifact is empty")
+            raise ValueError(f"{label}: NCU baseline {key} artifact is empty")
     try:
         metadata = replay_resume.load_json_strict(paths["metadata"])
     except (OSError, UnicodeDecodeError, ValueError, json.JSONDecodeError) as exc:
-        raise ValueError(f"{slug}: NCU metadata is not strict JSON") from exc
+        raise ValueError(f"{label}: NCU metadata is not strict JSON") from exc
     if not isinstance(metadata, Mapping):
-        raise ValueError(f"{slug}: NCU metadata is malformed")
+        raise ValueError(f"{label}: NCU metadata is malformed")
     if (
         not _ncu_argv_matches(metadata.get("command"), expected_command, root)
         or not _is_exact_zero(metadata.get("return_code"))
@@ -409,13 +430,13 @@ def _validate_ncu_capture_provenance(
         or not _ncu_result_path_matches(metadata.get("csv"), output + "/ncu.csv", root)
         or not isinstance(metadata.get("started_at"), str)
         or not isinstance(metadata.get("finished_at"), str)
-        or metadata.get("timeout_seconds") != _CURRENT_TIMEOUTS["ncu"]
+        or metadata.get("timeout_seconds") != timeout_seconds
         or metadata.get("timed_out") is not False
         or metadata.get("export_return_code") != 0
         or metadata.get("export_timed_out") is not False
     ):
         raise ValueError(
-            f"{slug}: NCU metadata command or result is not bound to the trusted executable"
+            f"{label}: NCU metadata command or result is not bound to the trusted executable"
         )
     try:
         recorded_command = shlex.split(paths["command_file"].read_text(encoding="utf-8"))
@@ -423,14 +444,14 @@ def _validate_ncu_capture_provenance(
             paths["export_command_file"].read_text(encoding="utf-8")
         )
     except ValueError as exc:
-        raise ValueError(f"{slug}: NCU command transcript is malformed") from exc
+        raise ValueError(f"{label}: NCU command transcript is malformed") from exc
     if not _ncu_argv_matches(recorded_command, expected_command, root):
-        raise ValueError(f"{slug}: NCU command.txt differs from the canonical executable/argv")
+        raise ValueError(f"{label}: NCU command.txt differs from the canonical executable/argv")
     expected_export = _expected_ncu_export_argv(output)
     if not _ncu_argv_matches(metadata.get("export_command"), expected_export, root):
-        raise ValueError(f"{slug}: NCU metadata export command is not canonical")
+        raise ValueError(f"{label}: NCU metadata export command is not canonical")
     if not _ncu_argv_matches(recorded_export, expected_export, root):
-        raise ValueError(f"{slug}: NCU export command differs from the canonical executable/argv")
+        raise ValueError(f"{label}: NCU export command differs from the canonical executable/argv")
 
 
 def _campaign_argv_matches(token: object, relative: object) -> bool:
@@ -487,20 +508,52 @@ def _validate_correctness_stage(
     cell: Mapping[str, Any],
     binary: Mapping[str, Any],
     stage: Mapping[str, Any],
+    *,
+    binary_path_override: str | None = None,
+    binary_sha256_override: str | None = None,
+    expected_groups: int | None = None,
 ) -> Mapping[str, Any]:
-    """Validate a clean base-binary correctness invocation and its output."""
+    """Validate a clean correctness invocation and bind its exact binary.
+
+    The async canary has two intentionally distinct binaries: the matched
+    64-group trace binary and the retained 16,384-group scaling binary.  The
+    optional override lets the latter be validated with the same strict
+    contract without allowing it to masquerade as the matched stage.
+    """
 
     cell_id = str(cell["id"])
-    binary_path = binary.get("path")
+    base_binary_path = binary.get("path")
+    if not isinstance(base_binary_path, str):
+        raise ValueError(f"{cell_id}: correctness base binary identity is malformed")
+    if cell_id == "cp_async_canary":
+        binary_path = binary_path_override or binary.get("trace_path")
+        expected_binary_hash = binary_sha256_override or binary.get("trace_sha256")
+        expected_groups = (
+            _CP_ASYNC_SCALING_GROUPS
+            if binary_path_override is not None
+            else _CP_ASYNC_MATCHED_GROUPS
+        ) if expected_groups is None else expected_groups
+    else:
+        binary_path = binary_path_override or base_binary_path
+        expected_binary_hash = binary_sha256_override or binary.get("sha256")
+    if not isinstance(binary_path, str) or not isinstance(expected_binary_hash, str):
+        raise ValueError(f"{cell_id}: correctness binary identity is malformed")
     argv = stage.get("argv")
-    if not isinstance(binary_path, str) or not isinstance(argv, list) or any(
+    if not isinstance(argv, list) or any(
         not isinstance(item, str) for item in argv
     ):
         raise ValueError(f"{cell_id}: correctness binary/argv identity is malformed")
+    # Every durable correctness stage records the binary identity explicitly;
+    # this prevents a base/scaling result from being silently substituted for
+    # the matched trace workload.
+    if stage.get("binary_path") != binary_path or stage.get("binary_sha256") != expected_binary_hash:
+        raise ValueError(f"{cell_id}: correctness binary identity is not bound to the expected workload")
+    if cell_id == "cp_async_canary" and stage.get("group_count") != expected_groups:
+        raise ValueError(f"{cell_id}: correctness group count is not bound to the expected binary")
     output_dir = None
     expected_repo_relative: list[str] | None = None
     if cell_id == "cp_async_canary":
-        expected = [binary_path, "c11", "l1", "0", "4", "1"]
+        expected = [binary_path, *_CP_ASYNC_ARGUMENTS]
     else:
         stdout_path = stage.get("stdout")
         if not isinstance(stdout_path, str):
@@ -534,8 +587,11 @@ def _validate_correctness_stage(
             raise ValueError(f"{cell_id}: correctness {key} does not match artifact")
 
     environment = stage.get("environment")
-    if not isinstance(environment, Mapping) or environment.get("mode") != "clean_base_binary":
-        raise ValueError(f"{cell_id}: correctness environment is not clean_base_binary")
+    if not isinstance(environment, Mapping) or environment.get("mode") not in {
+        "clean_base_binary",
+        "clean_trace_binary_matched_execution",
+    }:
+        raise ValueError(f"{cell_id}: correctness environment is not a clean binary run")
     environment_record = _assert_file(
         root, environment.get("record"), f"{cell_id}/correctness.environment"
     )
@@ -551,6 +607,12 @@ def _validate_correctness_stage(
         raise ValueError(f"{cell_id}: correctness environment argv differs from manifest")
     if not _is_exact_zero(environment_doc.get("return_code")) or environment_doc.get("output_contains_instrumentation") is not False:
         raise ValueError(f"{cell_id}: correctness environment record is not a clean successful run")
+    if cell_id == "cp_async_canary" and (
+        environment_doc.get("binary_path") != binary_path
+        or environment_doc.get("binary_sha256") != expected_binary_hash
+        or environment_doc.get("group_count") != expected_groups
+    ):
+        raise ValueError(f"{cell_id}: correctness environment binary/group identity is not bound")
     effective_environment = environment_doc.get("environment")
     if not isinstance(effective_environment, Mapping):
         raise ValueError(f"{cell_id}: effective correctness environment is missing")
@@ -573,7 +635,7 @@ def _validate_correctness_stage(
             "locality": "l1_reuse",
             "gap_cycles": 0,
             "warps": 4,
-            "groups": 16384,
+            "groups": expected_groups,
             "copies_per_group": 8,
             "payload_bytes_per_copy": 512,
             "region_bytes": 512,
@@ -622,6 +684,7 @@ def _validate_nvbit_environment_record(
     argv: list[str],
     output: str,
     expected_environment: Mapping[str, str],
+    expected_timeout: int = _CURRENT_TIMEOUTS["nvbit"],
 ) -> None:
     """Verify the effective child environment captured at NVBit launch."""
 
@@ -649,6 +712,10 @@ def _validate_nvbit_environment_record(
         "forbidden_variables_absent",
         "return_code",
         "timed_out",
+        "cleanup_complete",
+        "timeout_seconds",
+        "timeout_policy",
+        "timeout_policy_version",
         "started_at",
         "finished_at",
     }:
@@ -662,12 +729,19 @@ def _validate_nvbit_environment_record(
         or record.get("launch_mode") != "env_i_exact_allowlist"
         or not _is_exact_zero(record.get("return_code"))
         or record.get("timed_out") is not False
+        or record.get("cleanup_complete") is not True
         or not isinstance(record.get("started_at"), str)
         or not isinstance(record.get("finished_at"), str)
         or record.get("environment") != dict(expected_environment)
         or record.get("effective_environment") != dict(expected_environment)
     ):
         raise ValueError(f"{cell_id}: NVBit effective environment is not the sanitized contract")
+    if (
+        record.get("timeout_seconds") != expected_timeout
+        or record.get("timeout_policy") != _NVBIT_TIMEOUT_POLICY
+        or record.get("timeout_policy_version") != _NVBIT_TIMEOUT_POLICY_VERSION
+    ):
+        raise ValueError(f"{cell_id}: NVBit timeout policy is not bound to the stage contract")
     absent = record.get("forbidden_variables_absent")
     if not isinstance(absent, list) or set(absent) != set(_NVBIT_FORBIDDEN_ENVIRONMENT_CONTROLS):
         raise ValueError(f"{cell_id}: NVBit forbidden-environment absence record is malformed")
@@ -679,6 +753,7 @@ def _validate_nvbit_stage(
     binary: Mapping[str, Any],
     stage: Mapping[str, Any],
     tracer_sha256: str | None = None,
+    expected_timeout: int = _CURRENT_TIMEOUTS["nvbit"],
 ) -> tuple[Path, dict[str, str], Mapping[str, Any], Mapping[str, Any]]:
     """Validate the trace root and every auxiliary file as one capture unit."""
 
@@ -719,6 +794,7 @@ def _validate_nvbit_stage(
         argv,
         output,
         expected_environment,
+        expected_timeout,
     )
     if not isinstance(environment.get("CUDA_INJECTION64_PATH"), str):
         raise ValueError(f"{cell_id}: NVBit tracer path is missing")
@@ -757,6 +833,13 @@ def _validate_nvbit_stage(
         raise ValueError(f"{cell_id}: NVBit binding sidecar schema is unsupported")
     if binding.get("cell") != cell_id or binding.get("trace_root") != output:
         raise ValueError(f"{cell_id}: NVBit binding sidecar root identity differs")
+    if (
+        binding.get("timeout_seconds") != expected_timeout
+        or binding.get("timeout_policy") != _NVBIT_TIMEOUT_POLICY
+        or binding.get("timeout_policy_version") != _NVBIT_TIMEOUT_POLICY_VERSION
+        or binding.get("cleanup_complete") is not True
+    ):
+        raise ValueError(f"{cell_id}: NVBit timeout policy is not bound to the stage contract")
     environment_record = output + "/environment.json"
     if (
         binding.get("environment_record") != environment_record
@@ -1331,13 +1414,43 @@ def _validate_static_control_stage(
 def _validate_cp_async_scaling_observation(
     root: Path, cell: Mapping[str, Any]
 ) -> None:
-    """Keep the 16,384-group async run explicit and outside the matched cell."""
+    """Validate the 16,384-group async run as a complete separate observation.
+
+    The long binary is useful for scale, but it is not allowed to stand in for
+    the matched 64-group cell.  Validate its correctness result and the full
+    NCU capture/export contract (including the CSV identity) before retaining
+    any of its values in the handoff.
+    """
 
     if cell.get("id") != "cp_async_canary":
         return
     record = cell.get("scaling_observation")
-    if not isinstance(record, Mapping) or record.get("classification") != "separate_scaling_observation_not_in_matched_cohort" or record.get("group_count") != 16_384:
+    if (
+        not isinstance(record, Mapping)
+        or record.get("classification")
+        != "separate_scaling_observation_not_in_matched_cohort"
+        or record.get("group_count") != _CP_ASYNC_SCALING_GROUPS
+    ):
         raise ValueError("cp_async_canary: 16,384-group scaling observation is not classified")
+
+    binary = cell.get("binary")
+    if not isinstance(binary, Mapping):
+        raise ValueError("cp_async_canary: base binary identity is missing")
+    scaling_correctness = record.get("correctness")
+    if not isinstance(scaling_correctness, Mapping):
+        raise ValueError("cp_async_canary: scaling correctness record is missing")
+    _validate_correctness_stage(
+        root,
+        cell,
+        binary,
+        scaling_correctness,
+        binary_path_override=binary.get("path"),
+        binary_sha256_override=binary.get("sha256"),
+        expected_groups=_CP_ASYNC_SCALING_GROUPS,
+    )
+    if scaling_correctness.get("status") != "correctness_pass":
+        raise ValueError("cp_async_canary: scaling correctness status is not a pass")
+
     ncu = record.get("ncu")
     if not isinstance(ncu, Mapping):
         raise ValueError("cp_async_canary: scaling NCU observation is missing")
@@ -1356,22 +1469,41 @@ def _validate_cp_async_scaling_observation(
         digest = ncu.get(key + "_sha256")
         if not isinstance(digest, str) or len(digest) != 64 or _sha256(_assert_file(root, ncu[key], f"cp_async_canary.scaling.{key}")) != digest:
             raise ValueError(f"cp_async_canary: scaling NCU {key} hash does not match")
-    try:
-        metadata = replay_resume.load_json_strict(_assert_file(root, ncu["metadata"], "cp_async_canary.scaling.metadata"))
-    except (OSError, UnicodeDecodeError, ValueError, json.JSONDecodeError) as exc:
-        raise ValueError("cp_async_canary: scaling NCU metadata is not strict JSON") from exc
-    expected_command = [
-        _TRUSTED_NCU_IDENTITY["path"],
-        "--force-overwrite",
-        "--export",
-        expected_root + "/ncu-report",
-        "--launch-skip", "1", "--launch-count", "1",
-        "--replay-mode", "application", "--clock-control", "none",
-        "--metrics", ",".join(closure_analyzer.CP_ASYNC_NCU_METRICS),
-        cell["binary"]["path"], "c11", "l1", "0", "4", "3",
+    scaling_cell = copy.deepcopy(dict(cell))
+    scaling_binary = dict(binary)
+    scaling_binary["trace_path"] = binary.get("path")
+    scaling_binary["trace_sha256"] = binary.get("sha256")
+    scaling_cell["binary"] = scaling_binary
+    scaling_target = [
+        str(binary.get("path")),
+        *_CP_ASYNC_SCALING_NCU_ARGUMENTS,
     ]
-    if not isinstance(metadata, Mapping) or not _ncu_argv_matches(metadata.get("command"), expected_command, root) or not _is_exact_zero(metadata.get("return_code")) or metadata.get("timed_out") is not False:
-        raise ValueError("cp_async_canary: scaling NCU metadata command is not bound")
+    _validate_ncu_capture_provenance(
+        root,
+        cell,
+        ncu,
+        output=expected_root,
+        target_cell=scaling_cell,
+        target=scaling_target,
+        timeout_seconds=_CURRENT_TIMEOUTS["ncu"],
+        label="cp_async_canary.scaling",
+    )
+    csv_path = _assert_file(root, ncu["csv"], "cp_async_canary.scaling.csv")
+    csv_row, _kernel = closure_analyzer._validate_ncu_csv(
+        csv_path,
+        scaling_cell,
+        "cp_async_canary.scaling.csv",
+    )
+    observed = ncu.get("observed")
+    if not isinstance(observed, Mapping) or set(observed) != set(
+        closure_analyzer.CP_ASYNC_NCU_METRICS
+    ):
+        raise ValueError("cp_async_canary: scaling NCU observed metrics are incomplete")
+    for metric in closure_analyzer.CP_ASYNC_NCU_METRICS:
+        if closure_analyzer._metric(csv_row, metric) != int(observed[metric]):
+            raise ValueError(
+                f"cp_async_canary: scaling NCU observed metric differs: {metric}"
+            )
 
 
 def _validate_cp_async_matched_execution(cell: Mapping[str, Any]) -> None:
@@ -1382,9 +1514,9 @@ def _validate_cp_async_matched_execution(cell: Mapping[str, Any]) -> None:
     expected = {
         "binary_path": binary.get("trace_path") if isinstance(binary, Mapping) else None,
         "binary_sha256": binary.get("trace_sha256") if isinstance(binary, Mapping) else None,
-        "arguments": ["c11", "l1", "0", "4", "1"],
-        "group_count": 64,
-        "stages": ["ncu", "nvbit", "static_control", "simulator"],
+        "arguments": list(_CP_ASYNC_ARGUMENTS),
+        "group_count": _CP_ASYNC_MATCHED_GROUPS,
+        "stages": ["correctness", "ncu", "nvbit", "static_control", "simulator"],
     }
     if matched != expected:
         raise ValueError("cp_async_canary: matched 64-group stage provenance is malformed")
@@ -1476,8 +1608,18 @@ def _validate_cell(
     row["checks"]["ncu"] = True
 
     nvbit = stages["nvbit"]
+    nvbit_timeout = _check_timeout(nvbit, f"{cell_id}/nvbit", defaults)
+    if nvbit_timeout != _CURRENT_TIMEOUTS["nvbit"]:
+        raise ValueError(
+            f"{cell_id}/nvbit: timeout override {nvbit_timeout} is outside the campaign contract"
+        )
     trace, stat, mapping, execution = _validate_nvbit_stage(
-        root, cell, binary, nvbit, tracer_sha256
+        root,
+        cell,
+        binary,
+        nvbit,
+        tracer_sha256,
+        expected_timeout=nvbit_timeout,
     )
     trace_binary = binary.get("trace_path", binary.get("path"))
     trace_binary_hash = binary.get("trace_sha256", binary.get("sha256"))

@@ -34,6 +34,7 @@ class CaptureResult:
 DEFAULT_TIMEOUT_SECONDS = 900
 MAX_TIMEOUT_SECONDS = 36_000
 TERMINATION_GRACE_SECONDS = 5
+TIMEOUT_POLICY = "process_group_terminate_reap_v1"
 
 
 @dataclass(slots=True)
@@ -42,29 +43,77 @@ class BoundedProcessResult:
     stdout: str
     stderr: str
     timed_out: bool
+    process_group_cleanup: bool
 
 
-def _terminate_process(process: subprocess.Popen[str]) -> None:
-    """Terminate a process group and reap it after a bounded timeout."""
+def _text_output(value: object) -> str:
+    """Normalize ``TimeoutExpired``'s bytes-or-text partial output."""
 
-    if process.poll() is not None:
-        return
-    try:
-        if os.name == "nt":
+    if isinstance(value, bytes):
+        return value.decode(errors="replace")
+    return value if isinstance(value, str) else ""
+
+
+def _terminate_process(process: subprocess.Popen[str]) -> bool:
+    """Terminate the whole process group, even after its leader has exited.
+
+    ``communicate`` can time out solely because a descendant still owns one of
+    the captured pipes.  In that case ``process.poll()`` is already non-None,
+    so checking it here would leak the descendant.  Signal the group
+    unconditionally, then perform a bounded leader reap.  Windows uses a
+    process-group creation flag plus ``taskkill /T`` for the equivalent tree
+    operation when available.
+    """
+
+    cleanup_ok = True
+    if os.name == "nt":
+        with suppress(OSError, subprocess.TimeoutExpired):
+            taskkill = subprocess.run(
+                ["taskkill", "/PID", str(process.pid), "/T", "/F"],
+                check=False,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=TERMINATION_GRACE_SECONDS,
+            )
+            if taskkill.returncode not in (0, 128, 255) and process.poll() is None:
+                cleanup_ok = False
+        with suppress(OSError):
             process.terminate()
-        else:
-            os.killpg(process.pid, signal.SIGTERM)
-        process.wait(timeout=TERMINATION_GRACE_SECONDS)
-    except (OSError, subprocess.TimeoutExpired):
-        try:
-            if os.name == "nt":
-                process.kill()
-            else:
-                os.killpg(process.pid, signal.SIGKILL)
-        except OSError:
-            pass
+        if process.poll() is None:
+            cleanup_ok = False
         with suppress(subprocess.TimeoutExpired):
             process.wait(timeout=TERMINATION_GRACE_SECONDS)
+        if process.poll() is None:
+            cleanup_ok = False
+        with suppress(OSError):
+            process.kill()
+        with suppress(subprocess.TimeoutExpired):
+            process.wait(timeout=TERMINATION_GRACE_SECONDS)
+        return cleanup_ok and process.poll() is not None
+
+    # The child is launched in a new session, making its PID the process-group
+    # ID.  Do not gate these calls on poll(): descendants may still hold pipes.
+    try:
+        os.killpg(process.pid, signal.SIGTERM)
+    except ProcessLookupError:
+        pass
+    except OSError:
+        cleanup_ok = False
+    with suppress(subprocess.TimeoutExpired):
+        process.wait(timeout=TERMINATION_GRACE_SECONDS)
+    if process.poll() is None:
+        cleanup_ok = False
+    try:
+        os.killpg(process.pid, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+    except OSError:
+        cleanup_ok = False
+    with suppress(subprocess.TimeoutExpired):
+        process.wait(timeout=TERMINATION_GRACE_SECONDS)
+    if process.poll() is None:
+        cleanup_ok = False
+    return cleanup_ok
 
 
 def _run_bounded(
@@ -76,14 +125,19 @@ def _run_bounded(
     """Run one NCU subprocess with a process-group deadline."""
 
     try:
-        process = subprocess.Popen(
-            list(command),
-            env=environment,
-            text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            start_new_session=os.name != "nt",
-        )
+        popen_kwargs: dict[str, object] = {
+            "env": environment,
+            "text": True,
+            "stdout": subprocess.PIPE,
+            "stderr": subprocess.PIPE,
+        }
+        if os.name == "nt":
+            popen_kwargs["creationflags"] = getattr(
+                subprocess, "CREATE_NEW_PROCESS_GROUP", 0
+            )
+        else:
+            popen_kwargs["start_new_session"] = True
+        process = subprocess.Popen(list(command), **popen_kwargs)
     except OSError as exc:
         raise CaptureError(f"unable to launch NCU command: {exc}") from exc
     try:
@@ -93,23 +147,28 @@ def _run_bounded(
             stdout,
             stderr,
             False,
+            True,
         )
     except subprocess.TimeoutExpired as exc:
-        _terminate_process(process)
+        cleanup_complete = _terminate_process(process)
         try:
             stdout, stderr = process.communicate(timeout=TERMINATION_GRACE_SECONDS)
         except subprocess.TimeoutExpired:
-            stdout = exc.output or ""
-            stderr = exc.stderr or ""
+            # A descendant that escaped the group must not make cleanup
+            # unbounded.  Close our pipe ends after the second bounded reap.
+            cleanup_complete = _terminate_process(process) and cleanup_complete
+            stdout = _text_output(exc.output)
+            stderr = _text_output(exc.stderr)
             if process.stdout is not None:
                 process.stdout.close()
             if process.stderr is not None:
                 process.stderr.close()
         return BoundedProcessResult(
             process.returncode if process.returncode is not None else -signal.SIGTERM,
-            stdout,
-            stderr,
+            _text_output(stdout),
+            _text_output(stderr),
             True,
+            cleanup_complete,
         )
 
 
@@ -226,6 +285,8 @@ def collect(
         timeout_seconds=timeout_seconds,
         timed_out=completed.timed_out,
         timeout_stage="capture" if completed.timed_out else None,
+        timeout_policy=TIMEOUT_POLICY,
+        process_group_cleanup=completed.process_group_cleanup,
         export_command=None,
         export_return_code=None,
         export_timed_out=False,
@@ -268,6 +329,8 @@ def collect(
         timeout_seconds=timeout_seconds,
         timed_out=exported.timed_out,
         timeout_stage="export" if exported.timed_out else None,
+        timeout_policy=TIMEOUT_POLICY,
+        process_group_cleanup=exported.process_group_cleanup,
         export_command=export_command,
         export_return_code=exported.return_code,
         export_timed_out=exported.timed_out,

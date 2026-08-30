@@ -33,7 +33,7 @@
     },
     "trace": {
       "path": "evidence/raw/nvbit/cp_async_canary",
-      "sha256": "d6af479874cb6cb7c30fa5dcb52363199e0ed5d8a356f612f33943de307275ce"
+      "sha256": "8c264a52ffca378f9ee05edb05af856114e8af432711385b93c5b917421d3287"
     }
   },
   "outputs": [

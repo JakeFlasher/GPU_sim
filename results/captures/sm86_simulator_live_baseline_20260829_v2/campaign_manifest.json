@@ -6,7 +6,7 @@
     "capture_revision": "b915ec6b3df2973e87119c63e438c8bb5f77be44",
     "handoff_revision": "80e1aa8e1b6033298bc081822f5c8f6e8685f800",
     "candidate_revision": "8cae7c6f37e378ac54e4c5fe5f7acd3f38991480",
-  "correction_revision": "e507d69264b0e5781f1fe70a331d5c7c1cf616f8",
+    "correction_revision": "e507d69264b0e5781f1fe70a331d5c7c1cf616f8",
     "branch": "GPUSim_main",
     "simulator_binary": {
       "path": "sim/target/release/sim-run",
@@ -110,8 +110,8 @@
   "evidence_bundle": {
     "path": "evidence/raw_cohort.tar.zst",
     "format": "zstd-compressed deterministic tar",
-    "sha256": "36d8dffe2201bd13e19553cc991b22c3aac92f1dd396bfaee7f70e82c8640d78",
-    "size_bytes": 534080,
+    "sha256": "e594870a621fbf4d876d3e368f44307483d604fd2e40e24cf6d06059708af6f8",
+    "size_bytes": 539986,
     "member_root": "raw/",
     "contains": [
       "correctness",
@@ -162,27 +162,34 @@
       "stages": {
         "correctness": {
           "argv": [
-            "workloads/research_probes/async_barrier_overlap/async_barrier_overlap",
+            "workloads/research_probes/async_barrier_overlap/async_barrier_overlap_trace",
             "c11",
             "l1",
             "0",
             "4",
             "1"
           ],
+          "binary_path": "workloads/research_probes/async_barrier_overlap/async_barrier_overlap_trace",
+          "binary_sha256": "f8c2b971f95d274d6351e2dcbbe1a96c77a52678c8ad3abe1ddf6eb8573e11fd",
+          "group_count": 64,
+          "execution_class": "matched_trace_binary",
           "exit_code": 0,
-          "stdout": "evidence/raw/correctness/cp_async_canary/stdout.txt",
-          "stderr": "evidence/raw/correctness/cp_async_canary/stderr.txt",
-          "stdout_sha256": "133eff4d7d999b289895cdd42218a1e0c7a87e7f76a032dd5981a4b69e201370",
+          "stdout": "evidence/raw/correctness/cp_async_canary_matched_64/stdout.txt",
+          "stderr": "evidence/raw/correctness/cp_async_canary_matched_64/stderr.txt",
+          "stdout_sha256": "b3ab28779802dd1f81fafd592e1a125d4814a3b1ae0ae4d4a61214127bd7f961",
           "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
           "environment": {
-            "mode": "clean_base_binary",
-            "record": "evidence/raw/correctness/cp_async_canary/environment.json",
-            "record_sha256": "7f4ed63a729db45081eabe83fae39fd955158e67b948ac6d708e6f9ac859de6c"
+            "mode": "clean_trace_binary_matched_execution",
+            "record": "evidence/raw/correctness/cp_async_canary_matched_64/environment.json",
+            "record_sha256": "119c99366ee19e9c99a0a1466f92f89000dd202efb7253e8ba22d4c6fa70153e"
           },
           "observed": {
             "correct": true,
-            "groups": 16384
-          }
+            "groups": 64,
+            "copies_per_group": 8,
+            "payload_bytes_per_copy": 512
+          },
+          "timeout_seconds": 180
         },
         "ncu": {
           "argv": [
@@ -233,7 +240,8 @@
           },
           "report": "evidence/raw/ncu/cp_async_canary/ncu-report.ncu-rep",
           "report_sha256": "28652a23a99bb4e1bdb3271fca1572d6f160a9c2cee4b2fd987847ae6968d3f3",
-          "csv_sha256": "9350346920a995e609a71f28c09c2ec7ce70155030d8988844be6963a0a2e957"
+          "csv_sha256": "9350346920a995e609a71f28c09c2ec7ce70155030d8988844be6963a0a2e957",
+          "timeout_seconds": 900
         },
         "nvbit": {
           "env": {
@@ -264,7 +272,7 @@
           "stats": "evidence/raw/nvbit/cp_async_canary/stats.csv",
           "mapping": "evidence/raw/nvbit/cp_async_canary/extra_info/traced_kernel_modules.json",
           "binding": "evidence/raw/nvbit/cp_async_canary/campaign_binding.json",
-          "binding_sha256": "e69fc48ae7ed24730d22d4ffe12b7a319493813451531303426e558644fc71a6",
+          "binding_sha256": "200bbb36f2df04043f06264566c5eb874ddcf1bba2906df59c258db5bce7faf0",
           "trace_binary_path": "workloads/research_probes/async_barrier_overlap/async_barrier_overlap_trace",
           "trace_binary_sha256": "f8c2b971f95d274d6351e2dcbbe1a96c77a52678c8ad3abe1ddf6eb8573e11fd",
           "observed": {
@@ -274,7 +282,10 @@
             "enhanced_parser": "typed skip for generated input over 64KiB"
           },
           "environment_record": "evidence/raw/nvbit/cp_async_canary/environment.json",
-          "environment_sha256": "7975cb563a674525c442f7f07374404600733a9214e972346b8d71b02b2b0fb1"
+          "environment_sha256": "2ec9732859f9fa297ed9ddba32fadaac5fd12494f0c3893fbe7fc0c83a3f93e0",
+          "timeout_seconds": 900,
+          "timeout_policy": "process_group_terminate_reap_v1",
+          "timeout_policy_version": 1
         },
         "static_control": {
           "argv": [
@@ -299,7 +310,8 @@
           "exit_code": 0,
           "control": "evidence/raw/static/cp_async_canary/control_bits.json",
           "control_sha256": "5c0eeab9035ea60d1a70018c59983eb36759e67f56adc3f7b6cda6cda010259d",
-          "decoded_instructions": 504
+          "decoded_instructions": 504,
+          "timeout_seconds": 300
         },
         "simulator": {
           "argv": [
@@ -318,7 +330,7 @@
           "binary_path": "sim/target/release/sim-run",
           "binary_sha256": "6cb0d05f0d447c0cd6ee2e30353c0f1e89d464462458912478c826860f15f9a4",
           "replay_binding": "evidence/raw/simulator/cp_async_canary/replay_binding.json",
-          "replay_binding_sha256": "c95d6c9cff30a632c8756d196f9c3ba3126badaf007186f053a4e31a7d91ae18",
+          "replay_binding_sha256": "709e4901b8038d02a007880cb4e67c849dfc2f4620fcfeac91456af6a5500ee3",
           "exit_code": 0,
           "outputs": [
             "evidence/raw/simulator/cp_async_canary/replay-1.json",
@@ -330,7 +342,8 @@
             "terminal_modeled_event_time": 20522,
             "completion": "incomplete_unmodeled_retirement_tails",
             "deterministic_twin": true
-          }
+          },
+          "timeout_seconds": 900
         }
       },
       "limitations": [
@@ -349,6 +362,7 @@
         ],
         "group_count": 64,
         "stages": [
+          "correctness",
           "ncu",
           "nvbit",
           "static_control",
@@ -359,15 +373,33 @@
         "classification": "separate_scaling_observation_not_in_matched_cohort",
         "group_count": 16384,
         "correctness": {
-          "binary_path": "workloads/research_probes/async_barrier_overlap/async_barrier_overlap",
-          "arguments": [
+          "argv": [
+            "workloads/research_probes/async_barrier_overlap/async_barrier_overlap",
             "c11",
             "l1",
             "0",
             "4",
             "1"
           ],
-          "output": "evidence/raw/correctness/cp_async_canary",
+          "exit_code": 0,
+          "stdout": "evidence/raw/correctness/cp_async_canary/stdout.txt",
+          "stderr": "evidence/raw/correctness/cp_async_canary/stderr.txt",
+          "stdout_sha256": "133eff4d7d999b289895cdd42218a1e0c7a87e7f76a032dd5981a4b69e201370",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "environment": {
+            "mode": "clean_base_binary",
+            "record": "evidence/raw/correctness/cp_async_canary/environment.json",
+            "record_sha256": "cdc0e488e69bcb1c2fe162105cfaa5db87fd92ab948dd0f8f43595d9e639e230"
+          },
+          "observed": {
+            "correct": true,
+            "groups": 16384
+          },
+          "binary_path": "workloads/research_probes/async_barrier_overlap/async_barrier_overlap",
+          "binary_sha256": "7eb4a26cd14e2763ef5014a9ab1e0e5a63421698b5366356edd3fab8b6cd1239",
+          "group_count": 16384,
+          "execution_class": "scaling_observation",
+          "timeout_seconds": 180,
           "status": "correctness_pass"
         },
         "ncu": {
@@ -396,8 +428,33 @@
             "3"
           ],
           "binary_path": "workloads/research_probes/async_barrier_overlap/async_barrier_overlap",
-          "binary_sha256": "7eb4a26cd14e2763ef5014a9ab1e0e5a63421698b5366356edd3fab8b6cd1239"
-        }
+          "binary_sha256": "7eb4a26cd14e2763ef5014a9ab1e0e5a63421698b5366356edd3fab8b6cd1239",
+          "observed": {
+            "gpc__cycles_elapsed.max": 4460035,
+            "sm__cycles_active.max": 4458395,
+            "smsp__inst_executed.sum": 2293904,
+            "l1tex__t_sectors_pipe_lsu_mem_global_op_ld.sum": 8388608,
+            "l1tex__t_sectors_pipe_lsu_mem_global_op_st.sum": 72
+          },
+          "group_count": 16384,
+          "arguments": [
+            "c11",
+            "l1",
+            "0",
+            "4",
+            "3"
+          ],
+          "status": "capture_and_export_pass"
+        },
+        "binary_path": "workloads/research_probes/async_barrier_overlap/async_barrier_overlap",
+        "binary_sha256": "7eb4a26cd14e2763ef5014a9ab1e0e5a63421698b5366356edd3fab8b6cd1239",
+        "arguments": [
+          "c11",
+          "l1",
+          "0",
+          "4",
+          "1"
+        ]
       }
     },
     {
@@ -446,7 +503,11 @@
           "observed": {
             "correctness_ok": true,
             "max_abs_err": 0.0055666
-          }
+          },
+          "binary_path": "workloads/portable_lcd/gemm_hmma_bf16_sm80/gemm_hmma_bf16_sm80_run",
+          "binary_sha256": "55133e328fc16238d78e3dde335b4ce5789a4b3838fb440da41f489f805a1362",
+          "execution_class": "base_binary",
+          "timeout_seconds": 180
         },
         "ncu": {
           "argv": [
@@ -496,7 +557,8 @@
           "export_command_file_sha256": "6aff7fb4de004da8a33d3a7cece608d7284ec64519bcc882628224e654a6188a",
           "report": "evidence/raw/ncu/gemm_hmma_bf16_sm80/ncu-report.ncu-rep",
           "report_sha256": "282dcbfc7e70f39630f5886b66e81e384ea783a03bb5f8a373ca3fcd417f91c7",
-          "csv_sha256": "0240d42d628de877f6240e21104d4a081e2112fa1cb3687191ac8c94592c9851"
+          "csv_sha256": "0240d42d628de877f6240e21104d4a081e2112fa1cb3687191ac8c94592c9851",
+          "timeout_seconds": 900
         },
         "nvbit": {
           "env": {
@@ -529,7 +591,7 @@
           "stats": "evidence/raw/nvbit/gemm_hmma_bf16_sm80/stats.csv",
           "mapping": "evidence/raw/nvbit/gemm_hmma_bf16_sm80/extra_info/traced_kernel_modules.json",
           "binding": "evidence/raw/nvbit/gemm_hmma_bf16_sm80/campaign_binding.json",
-          "binding_sha256": "91538edbc8290ba52f3d6f49914e11520d1b59f092b43b1145195340b5ca9190",
+          "binding_sha256": "88473f946582016cd4c5c3480187cc48ccc3c686bf8f10c27c5caa87c521ce6d",
           "trace_binary_path": "workloads/portable_lcd/gemm_hmma_bf16_sm80/gemm_hmma_bf16_sm80_run",
           "trace_binary_sha256": "55133e328fc16238d78e3dde335b4ce5789a4b3838fb440da41f489f805a1362",
           "observed": {
@@ -540,7 +602,10 @@
             "dynamic_trace_sha256": "0a29149eca49ef2a2c061a2c2cf095b23571db251fff91ebf5be83d451d67bad"
           },
           "environment_record": "evidence/raw/nvbit/gemm_hmma_bf16_sm80/environment.json",
-          "environment_sha256": "ea4e1497a957fe8f18a229c25a07447358b28ccad1d97bd9efb3f48da74946b8"
+          "environment_sha256": "cfc02740ed121ed1322f6805adf848e46fb2806180463327aeea0b2b2059a22a",
+          "timeout_seconds": 900,
+          "timeout_policy": "process_group_terminate_reap_v1",
+          "timeout_policy_version": 1
         },
         "static_control": {
           "argv": [
@@ -565,7 +630,8 @@
           "exit_code": 0,
           "control": "evidence/raw/static/gemm_hmma_bf16_sm80/gemm_hmma_bf16_sm80.control_bits.json",
           "control_sha256": "e6e11b8fb7368c6b095429185b87cc767bf792bc85379574a5b2f59cdb4527d0",
-          "decoded_instructions": 192
+          "decoded_instructions": 192,
+          "timeout_seconds": 300
         },
         "simulator": {
           "argv": [
@@ -584,7 +650,7 @@
           "binary_path": "sim/target/release/sim-run",
           "binary_sha256": "6cb0d05f0d447c0cd6ee2e30353c0f1e89d464462458912478c826860f15f9a4",
           "replay_binding": "evidence/raw/simulator/gemm_hmma_bf16_sm80/replay_binding.json",
-          "replay_binding_sha256": "df4640ac992e306c6fd8031e9a402e0b45e8571e2b0c56e87e07718edb19a80e",
+          "replay_binding_sha256": "43fe335d2e051bdce69e0284b70a1ed9c349a5354e67387f758184d108ac2c36",
           "exit_code": 0,
           "outputs": [
             "evidence/raw/simulator/gemm_hmma_bf16_sm80/replay-1.json",
@@ -596,7 +662,8 @@
             "terminal_modeled_event_time": 8915,
             "completion": "incomplete_unmodeled_retirement_tails",
             "deterministic_twin": true
-          }
+          },
+          "timeout_seconds": 900
         }
       },
       "limitations": [
@@ -649,7 +716,11 @@
           "observed": {
             "correctness_ok": true,
             "max_abs_err": 0.000647739
-          }
+          },
+          "binary_path": "workloads/portable_lcd/gemm_hmma_fp16_sm80/gemm_hmma_fp16_sm80_run",
+          "binary_sha256": "829927c7f57d7c46f0a8e51c7de6bb8c7eb7d8de1e963a33e5e9afee7839a750",
+          "execution_class": "base_binary",
+          "timeout_seconds": 180
         },
         "ncu": {
           "argv": [
@@ -699,7 +770,8 @@
           "export_command_file_sha256": "48bfe90450cbf205663da8cc5b1ff73c2324da0ac2a5b81c906cf13f87cfb036",
           "report": "evidence/raw/ncu/gemm_hmma_fp16_sm80/ncu-report.ncu-rep",
           "report_sha256": "f52c1acaeb3b8c0a627c5bab7c474a3825ab0b52ec2108b81204c8e4a252db4e",
-          "csv_sha256": "3ab604b839181540dfb4474d109f7ebfe2f7f6bc703092facbbf7a929a75b2c4"
+          "csv_sha256": "3ab604b839181540dfb4474d109f7ebfe2f7f6bc703092facbbf7a929a75b2c4",
+          "timeout_seconds": 900
         },
         "nvbit": {
           "env": {
@@ -732,7 +804,7 @@
           "stats": "evidence/raw/nvbit/gemm_hmma_fp16_sm80/stats.csv",
           "mapping": "evidence/raw/nvbit/gemm_hmma_fp16_sm80/extra_info/traced_kernel_modules.json",
           "binding": "evidence/raw/nvbit/gemm_hmma_fp16_sm80/campaign_binding.json",
-          "binding_sha256": "423b5d53181dd3a6d87fd572f1e572fb93d4384dda4c95502001357e471c9267",
+          "binding_sha256": "e634cb61d2a519218bb2c1e2ea4ac15f8fa2c3715a4302680c3eeb894378f1a8",
           "trace_binary_path": "workloads/portable_lcd/gemm_hmma_fp16_sm80/gemm_hmma_fp16_sm80_run",
           "trace_binary_sha256": "829927c7f57d7c46f0a8e51c7de6bb8c7eb7d8de1e963a33e5e9afee7839a750",
           "observed": {
@@ -743,7 +815,10 @@
             "dynamic_trace_sha256": "709ca5d1a3e38b366e10c51ba04b90fe15a993b8729e523b95e4db96fc1a1668"
           },
           "environment_record": "evidence/raw/nvbit/gemm_hmma_fp16_sm80/environment.json",
-          "environment_sha256": "0491d6aec72c96b106c96b10024a17a9376309783e320a5cd437c6a9421b1bcd"
+          "environment_sha256": "ad1664abdd465f8f9e31d698de3ff69e7f2ea3d6782d075752347f76b0e14115",
+          "timeout_seconds": 900,
+          "timeout_policy": "process_group_terminate_reap_v1",
+          "timeout_policy_version": 1
         },
         "static_control": {
           "argv": [
@@ -768,7 +843,8 @@
           "exit_code": 0,
           "control": "evidence/raw/static/gemm_hmma_fp16_sm80/gemm_hmma_fp16_sm80.control_bits.json",
           "control_sha256": "a6bcf296fa6242fe14aed663f30952472bfee36c276b65a25d0508d24bbbce67",
-          "decoded_instructions": 192
+          "decoded_instructions": 192,
+          "timeout_seconds": 300
         },
         "simulator": {
           "argv": [
@@ -787,7 +863,7 @@
           "binary_path": "sim/target/release/sim-run",
           "binary_sha256": "6cb0d05f0d447c0cd6ee2e30353c0f1e89d464462458912478c826860f15f9a4",
           "replay_binding": "evidence/raw/simulator/gemm_hmma_fp16_sm80/replay_binding.json",
-          "replay_binding_sha256": "919e917698ae06e955a151db2f1b0fbbb6dccf57da5b3942ac1d4f05f09afbee",
+          "replay_binding_sha256": "6e48476c0b1cd47e9a39de1c76ae302c8a957f9c7c08308433b9ee2cfea3a633",
           "exit_code": 0,
           "outputs": [
             "evidence/raw/simulator/gemm_hmma_fp16_sm80/replay-1.json",
@@ -799,7 +875,8 @@
             "terminal_modeled_event_time": 8915,
             "completion": "incomplete_unmodeled_retirement_tails",
             "deterministic_twin": true
-          }
+          },
+          "timeout_seconds": 900
         }
       },
       "limitations": [
@@ -852,7 +929,11 @@
           "observed": {
             "correctness_ok": true,
             "max_abs_err": 0
-          }
+          },
+          "binary_path": "workloads/portable_lcd/gemm_imma_int8_sm80/gemm_imma_int8_sm80_run",
+          "binary_sha256": "44b362cf4d503e1eb4b2791046d2084288b12fc1fc7fde9674a6d538a4b16e4a",
+          "execution_class": "base_binary",
+          "timeout_seconds": 180
         },
         "ncu": {
           "argv": [
@@ -902,7 +983,8 @@
           "export_command_file_sha256": "f70eba2bfe76f62f83b42b1012bcb2501ebcf01d76924fc8131292c2c0a0788f",
           "report": "evidence/raw/ncu/gemm_imma_int8_sm80/ncu-report.ncu-rep",
           "report_sha256": "fe2c2166bc007a025c765e098e06683511ee9670f4bf385d499f384efeec59c3",
-          "csv_sha256": "c1c9b7dc4226ffe7afbd4de83297ea794afe4471229e79dd1a2e5067f99c66ec"
+          "csv_sha256": "c1c9b7dc4226ffe7afbd4de83297ea794afe4471229e79dd1a2e5067f99c66ec",
+          "timeout_seconds": 900
         },
         "nvbit": {
           "env": {
@@ -935,7 +1017,7 @@
           "stats": "evidence/raw/nvbit/gemm_imma_int8_sm80/stats.csv",
           "mapping": "evidence/raw/nvbit/gemm_imma_int8_sm80/extra_info/traced_kernel_modules.json",
           "binding": "evidence/raw/nvbit/gemm_imma_int8_sm80/campaign_binding.json",
-          "binding_sha256": "385fca9af19ccf5fac05697122c2eeb4f8a1426ba2bc0a4d328ce86b2fdafd2a",
+          "binding_sha256": "a8395e569782eceded2c26d15200da80b340766640abe1901c533ec2bbb8a16a",
           "trace_binary_path": "workloads/portable_lcd/gemm_imma_int8_sm80/gemm_imma_int8_sm80_run",
           "trace_binary_sha256": "44b362cf4d503e1eb4b2791046d2084288b12fc1fc7fde9674a6d538a4b16e4a",
           "observed": {
@@ -946,7 +1028,10 @@
             "dynamic_trace_sha256": "771775a01a1787fda1d764243fbd8cc3fd955a06c415a00fd9bf5140bcaaa787"
           },
           "environment_record": "evidence/raw/nvbit/gemm_imma_int8_sm80/environment.json",
-          "environment_sha256": "3b6dd284bbd668ed2331094916de0fe4c8cd5422e5e7ce9475edaee2bdaf48f2"
+          "environment_sha256": "f57b60bd9207f16084f2e2a3602152302c3c406964866e3af37af828293bdc07",
+          "timeout_seconds": 900,
+          "timeout_policy": "process_group_terminate_reap_v1",
+          "timeout_policy_version": 1
         },
         "static_control": {
           "argv": [
@@ -971,7 +1056,8 @@
           "exit_code": 0,
           "control": "evidence/raw/static/gemm_imma_int8_sm80/gemm_imma_int8_sm80.control_bits.json",
           "control_sha256": "003c1c9d70fe9115acba74ce40999a2a74e0500cf8cd107ad822c6c3ea1d011c",
-          "decoded_instructions": 184
+          "decoded_instructions": 184,
+          "timeout_seconds": 300
         },
         "simulator": {
           "argv": [
@@ -990,7 +1076,7 @@
           "binary_path": "sim/target/release/sim-run",
           "binary_sha256": "6cb0d05f0d447c0cd6ee2e30353c0f1e89d464462458912478c826860f15f9a4",
           "replay_binding": "evidence/raw/simulator/gemm_imma_int8_sm80/replay_binding.json",
-          "replay_binding_sha256": "5a80c67b5a14e77051baa73de1326203fa33cb70a1987a071af3c4391d4c9364",
+          "replay_binding_sha256": "cf42f9a6bd9e0124f123b3ed0bd71d9c1f949bfbc9c26ee53fcba4de6a23c0f5",
           "exit_code": 0,
           "outputs": [
             "evidence/raw/simulator/gemm_imma_int8_sm80/replay-1.json",
@@ -1002,7 +1088,8 @@
             "terminal_modeled_event_time": 5821,
             "completion": "incomplete_unmodeled_retirement_tails",
             "deterministic_twin": true
-          }
+          },
+          "timeout_seconds": 900
         }
       },
       "limitations": [
@@ -1055,7 +1142,11 @@
           "observed": {
             "correctness_ok": true,
             "max_abs_err": 0.00195117
-          }
+          },
+          "binary_path": "workloads/portable_lcd/gemm_sparse_2to4_bf16_sm80/gemm_sparse_2to4_bf16_sm80_run",
+          "binary_sha256": "abf792ec7d7e7042ca4a4c21ae611577b50b94fad5c1a6ee534b45b13a22e254",
+          "execution_class": "base_binary",
+          "timeout_seconds": 180
         },
         "ncu": {
           "argv": [
@@ -1105,7 +1196,8 @@
           "export_command_file_sha256": "9bb540367728d89d822820e33d44ac22ce94fc9beeffd5a3fbc7259bcb7910d2",
           "report": "evidence/raw/ncu/gemm_sparse_2to4_bf16_sm80/ncu-report.ncu-rep",
           "report_sha256": "48a8d5622835d380819572236de0d81caa72de8178955b965471b0c96d31ba8b",
-          "csv_sha256": "f7286699f1109c1bbb7c76925043d5a43d89a6e78ee823ecf2adae899a781df6"
+          "csv_sha256": "f7286699f1109c1bbb7c76925043d5a43d89a6e78ee823ecf2adae899a781df6",
+          "timeout_seconds": 900
         },
         "nvbit": {
           "env": {
@@ -1138,7 +1230,7 @@
           "stats": "evidence/raw/nvbit/gemm_sparse_2to4_bf16_sm80/stats.csv",
           "mapping": "evidence/raw/nvbit/gemm_sparse_2to4_bf16_sm80/extra_info/traced_kernel_modules.json",
           "binding": "evidence/raw/nvbit/gemm_sparse_2to4_bf16_sm80/campaign_binding.json",
-          "binding_sha256": "a65b195b13577ced5bfbffe3648c25d954e6286af90bdf72679eb9dfabd24106",
+          "binding_sha256": "fcbb3681253da6e94fa4e3c3c23ed5fab6595b8eb1c23712707b7be38b0b5226",
           "trace_binary_path": "workloads/portable_lcd/gemm_sparse_2to4_bf16_sm80/gemm_sparse_2to4_bf16_sm80_run",
           "trace_binary_sha256": "abf792ec7d7e7042ca4a4c21ae611577b50b94fad5c1a6ee534b45b13a22e254",
           "observed": {
@@ -1149,7 +1241,10 @@
             "dynamic_trace_sha256": "bfcccfa62fde738d509ba42490b3b6093416b5df543a1d0825b62ac4c76a4853"
           },
           "environment_record": "evidence/raw/nvbit/gemm_sparse_2to4_bf16_sm80/environment.json",
-          "environment_sha256": "4d0f58803872a2a9b15704d4875ec0d6417483f91bc79d4d685cbc398d801205"
+          "environment_sha256": "104b8101d0e7ce6b5c7801546fb0563892ce76690d9331e715fffc3ca696c467",
+          "timeout_seconds": 900,
+          "timeout_policy": "process_group_terminate_reap_v1",
+          "timeout_policy_version": 1
         },
         "static_control": {
           "argv": [
@@ -1174,7 +1269,8 @@
           "exit_code": 0,
           "control": "evidence/raw/static/gemm_sparse_2to4_bf16_sm80/gemm_sparse_2to4_bf16_sm80.control_bits.json",
           "control_sha256": "af453066612c025e372027f05d93f8755ce9965e34632002dba48fe8678f9e4b",
-          "decoded_instructions": 200
+          "decoded_instructions": 200,
+          "timeout_seconds": 300
         },
         "simulator": {
           "argv": [
@@ -1193,7 +1289,7 @@
           "binary_path": "sim/target/release/sim-run",
           "binary_sha256": "6cb0d05f0d447c0cd6ee2e30353c0f1e89d464462458912478c826860f15f9a4",
           "replay_binding": "evidence/raw/simulator/gemm_sparse_2to4_bf16_sm80/replay_binding.json",
-          "replay_binding_sha256": "f8c386290960489b99da9c8bc3fce727282ef07f30796260e3b91b69ad30da41",
+          "replay_binding_sha256": "e129954147876861fea2d6c9795a89c97d1129066b3f2c0cb8e7fe2d743902a5",
           "exit_code": 0,
           "outputs": [
             "evidence/raw/simulator/gemm_sparse_2to4_bf16_sm80/replay-1.json",
@@ -1205,7 +1301,8 @@
             "terminal_modeled_event_time": 2375,
             "completion": "incomplete_unmodeled_retirement_tails",
             "deterministic_twin": true
-          }
+          },
+          "timeout_seconds": 900
         }
       },
       "limitations": [
@@ -1258,7 +1355,11 @@
           "observed": {
             "correctness_ok": true,
             "max_abs_err": 0.000353724
-          }
+          },
+          "binary_path": "workloads/portable_lcd/flash_attn_fwd_bf16_sm80/flash_attn_fwd_bf16_sm80_run",
+          "binary_sha256": "a272cde4fe06763638021de9cee4bea0ee39c52ee3511bce3abdec01b56f5fe1",
+          "execution_class": "base_binary",
+          "timeout_seconds": 180
         },
         "ncu": {
           "argv": [
@@ -1308,7 +1409,8 @@
           "export_command_file_sha256": "2f85ee90bea992729027a80613ae91f64926f5cef8c817122febda49f0c33b50",
           "report": "evidence/raw/ncu/flash_attn_fwd_bf16_sm80/ncu-report.ncu-rep",
           "report_sha256": "7454c75f25054b7ddca7636e62285e8fb601fa97a75ef5dcf3ae47dfbd704ccb",
-          "csv_sha256": "0fb5812e3a557a4225bf7143c74785101bf6c7b11a0edc5a1bc97db2ae3d104f"
+          "csv_sha256": "0fb5812e3a557a4225bf7143c74785101bf6c7b11a0edc5a1bc97db2ae3d104f",
+          "timeout_seconds": 900
         },
         "nvbit": {
           "env": {
@@ -1341,7 +1443,7 @@
           "stats": "evidence/raw/nvbit/flash_attn_fwd_bf16_sm80/stats.csv",
           "mapping": "evidence/raw/nvbit/flash_attn_fwd_bf16_sm80/extra_info/traced_kernel_modules.json",
           "binding": "evidence/raw/nvbit/flash_attn_fwd_bf16_sm80/campaign_binding.json",
-          "binding_sha256": "1985456c75f07c0121a04a6ce6bf637c5ddbeb99f9ee7fb8a73921cf8d518013",
+          "binding_sha256": "d0f322c59b29622c7c3d74dc1f59b7c0917e07443944d13491b851c51d12c054",
           "trace_binary_path": "workloads/portable_lcd/flash_attn_fwd_bf16_sm80/flash_attn_fwd_bf16_sm80_run",
           "trace_binary_sha256": "a272cde4fe06763638021de9cee4bea0ee39c52ee3511bce3abdec01b56f5fe1",
           "observed": {
@@ -1352,7 +1454,10 @@
             "dynamic_trace_sha256": "6c7d939c2789556b172cc2c3bff065dbbbb3ea179d80b19fc5c36e06963bb3bc"
           },
           "environment_record": "evidence/raw/nvbit/flash_attn_fwd_bf16_sm80/environment.json",
-          "environment_sha256": "c98fcf5e6a03016aa3136526688dc9f3b92e1348b57b35af17b61600c40975a4"
+          "environment_sha256": "0504470f8ed54ebca9375b724d2dddbf4cb87f17e391525ac73bf589f0f0db7c",
+          "timeout_seconds": 900,
+          "timeout_policy": "process_group_terminate_reap_v1",
+          "timeout_policy_version": 1
         },
         "static_control": {
           "argv": [
@@ -1377,7 +1482,8 @@
           "exit_code": 0,
           "control": "evidence/raw/static/flash_attn_fwd_bf16_sm80/flash_attn_fwd_bf16_sm80.control_bits.json",
           "control_sha256": "4338d595723d3ac8d5e69d2db8e446f07a300008c66d495e1c80048ee53314bb",
-          "decoded_instructions": 480
+          "decoded_instructions": 480,
+          "timeout_seconds": 300
         },
         "simulator": {
           "argv": [
@@ -1396,7 +1502,7 @@
           "binary_path": "sim/target/release/sim-run",
           "binary_sha256": "6cb0d05f0d447c0cd6ee2e30353c0f1e89d464462458912478c826860f15f9a4",
           "replay_binding": "evidence/raw/simulator/flash_attn_fwd_bf16_sm80/replay_binding.json",
-          "replay_binding_sha256": "ba581f03bdf99d8d2b27c43e78a1432dd3cfb2a8577edfa14e6067bf5586d835",
+          "replay_binding_sha256": "5be668784ce74a133180b8b30cebf4616dd45c42f322e88b1c941fbc87a0de49",
           "exit_code": 0,
           "outputs": [
             "evidence/raw/simulator/flash_attn_fwd_bf16_sm80/replay-1.json",
@@ -1408,7 +1514,8 @@
             "terminal_modeled_event_time": 12551,
             "completion": "incomplete_unmodeled_retirement_tails",
             "deterministic_twin": true
-          }
+          },
+          "timeout_seconds": 900
         }
       },
       "limitations": [
@@ -1464,7 +1571,7 @@
     "timeout_seconds": 180,
     "exit_code": 0,
     "report": "closure_report.json",
-    "report_sha256": "9c1255cbc2ca5ebf7bc1ac72804025b8a395d47fcca1acdbd11282e39891e686",
+    "report_sha256": "d8e806505becb722161d4c5c9e5a04c85a4972fa82161e9580f8ec26e41a6c4f",
     "live_repeat_root": "evidence/raw/ncu_repeat/rep-2",
     "live_repeat_count_per_cell": 1,
     "simulator_twin_policy": "byte-identical replay-1/replay-2"
@@ -1500,5 +1607,13 @@
     "jade_or_cpu_gpu_cosim_changed": false,
     "sm120_changed": false,
     "rejected_candidates_reopened": false
+  },
+  "handoff_consistency": {
+    "validator": "workloads/research_probes/validate_sm86_handoff.py",
+    "argv": [
+      ".venv/bin/python",
+      "workloads/research_probes/validate_sm86_handoff.py"
+    ],
+    "status": "required_before_handoff"
   }
 }

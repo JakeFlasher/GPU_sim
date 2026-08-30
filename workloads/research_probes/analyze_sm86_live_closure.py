@@ -1154,6 +1154,7 @@ def build_report(manifest_path: Path, output_path: Path | None = None) -> dict[s
                 "status": "pass",
                 "evidence": [
                     "six unique provenance-bound correctness, NCU, NVBit, static-control, and simulator stages",
+                    "cp.async correctness is the exact 64-group trace binary; the 16,384-group run is scaling-only",
                     "NCU observations are comparison-only and absent from simulator inputs",
                 ],
             },
