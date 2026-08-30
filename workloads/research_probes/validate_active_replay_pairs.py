@@ -55,7 +55,7 @@ from workloads.research_probes.semantic_replay_validation import (  # noqa: E402
 from workloads.research_probes import active_replay_binding as CONTENT_BINDING  # noqa: E402
 
 CONTENT_BINDING_PATH = REPO_ROOT / "evidence/sm86_active_replay_binding.json"
-CONTENT_BINDING_SHA256 = "b08b0f2ce84be2f80d8e47327b7f6b2276bba08398dee18a861789401ff381fe"
+CONTENT_BINDING_SHA256 = "a6d22bc9d401218a60c372afb6de147708a5a8b6d46e90db7100ef2b61cc7118"
 
 
 @cache
