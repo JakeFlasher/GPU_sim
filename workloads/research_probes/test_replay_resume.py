@@ -309,6 +309,57 @@ def test_direct_schema_rejects_boolean_schema_version(tmp_path: Path) -> None:
     result.write_text(json.dumps(document), encoding="utf-8")
     assert "schema_version" in REPLAY.direct_replay_schema_error(result, expectation)
 
+
+@pytest.mark.parametrize(
+    "frontier",
+    [
+        {"status": "complete", "cycles": 2},
+        {"status": "complete", "cycles": None},
+        {
+            "status": "incomplete_unmodeled_retirement_tails",
+            "lower_bound_cycles": 2,
+            "unmodeled_tails": {
+                "reduction_read_modify_write": False,
+                "dirty_writeback": True,
+                "coherence": True,
+                "async_copy_shared_visibility": False,
+            },
+        },
+    ],
+)
+def test_completion_frontier_must_match_terminal_event(
+    tmp_path: Path, frontier: dict[str, object]
+) -> None:
+    expectation = REPLAY.ReplayExpectation(
+        launches=(_launch(),), carded_dram=False
+    )
+    document = _report(expectation)
+    # Keep the frontier under the launch's timing object.
+    document["launches"][0]["timing"]["completion_frontier"] = frontier
+    path = tmp_path / "frontier.json"
+    path.write_text(json.dumps(document), encoding="utf-8")
+    error = REPLAY.direct_replay_schema_error(path, expectation)
+    assert error is not None
+    assert "match" in error
+
+
+def test_matching_incomplete_frontier_is_accepted(tmp_path: Path) -> None:
+    expectation = REPLAY.ReplayExpectation(
+        launches=(_launch(),), carded_dram=False
+    )
+    document = _report(expectation)
+    tails = document["launches"][0]["counters"]["unmodeled_tails"]
+    tails["dirty_writeback"] = True
+    tails["coherence"] = True
+    document["launches"][0]["timing"]["completion_frontier"] = {
+        "status": "incomplete_unmodeled_retirement_tails",
+        "lower_bound_cycles": 1,
+        "unmodeled_tails": tails,
+    }
+    path = tmp_path / "frontier-matching.json"
+    path.write_text(json.dumps(document), encoding="utf-8")
+    assert REPLAY.direct_replay_schema_error(path, expectation) is None
+
 def test_resume_rejects_gutted_counters_and_malformed_nested_timing(
     tmp_path: Path,
 ) -> None:

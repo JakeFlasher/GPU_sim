@@ -297,7 +297,7 @@
     "timeout_seconds": 180,
     "exit_code": 0,
     "report": "closure_report.json",
-    "report_sha256": "e19e929cbd2c3ef7eca6631c5943f83a17160fc6f9beb51b9ef02c3dbc8a2e79",
+    "report_sha256": "29f82083a275845973526b7ff822b917dac0be0bbc2da92cd13be2594669a550",
     "live_repeat_root": "evidence/raw/ncu_repeat/rep-2",
     "live_repeat_count_per_cell": 1,
     "simulator_twin_policy": "byte-identical replay-1/replay-2"
@@ -312,7 +312,7 @@
     "selection_rule": "mechanism_local_typed_tail_precedence",
     "frontiers_remain_independent": true,
     "aggregate_score_used": false,
-    "acceptance_criteria": {"AC-1": "pass", "AC-3": "pass", "AC-4": "pass"}
+    "acceptance_criteria": {"AC-1": "pass", "AC-2": "pass", "AC-3": "pass", "AC-4": "pass", "AC-5": "pass"}
   },
   "scope": {
     "ncu_values_used_as_simulator_inputs": false,

@@ -18,7 +18,7 @@
   "live_cohort_semantic_report": "results/captures/sm86_simulator_live_baseline_20260829_v2/live_cohort_semantic_report.json",
   "live_cohort_semantic_report_sha256": "f90f01bac77264e6ff21c0c2b58489209900bf9cef3060ec3e2fca1afcefa569",
   "closure_report": "results/captures/sm86_simulator_live_baseline_20260829_v2/closure_report.json",
-  "closure_report_sha256": "e19e929cbd2c3ef7eca6631c5943f83a17160fc6f9beb51b9ef02c3dbc8a2e79",
+  "closure_report_sha256": "29f82083a275845973526b7ff822b917dac0be0bbc2da92cd13be2594669a550",
   "raw_evidence_archive_sha256": "7a966f192e47c9513edaeb41cbb3536bf4b2b76ebbdfbbe99963d5160b692c5f",
   "architecture": "sm_86",
   "gpu": "NVIDIA GeForce RTX 3090 Ti",
@@ -182,6 +182,6 @@
     "selection_rule": "mechanism_local_typed_tail_precedence",
     "frontiers_remain_independent": true,
     "aggregate_score_used": false,
-    "acceptance_criteria": {"AC-1": "pass", "AC-3": "pass", "AC-4": "pass"}
+    "acceptance_criteria": {"AC-1": "pass", "AC-2": "pass", "AC-3": "pass", "AC-4": "pass", "AC-5": "pass"}
   }
 }

@@ -7,6 +7,13 @@
       ],
       "status": "pass"
     },
+    "AC-2": {
+      "evidence": [
+        "six unique provenance-bound correctness, NCU, NVBit, static-control, and simulator stages",
+        "NCU observations are comparison-only and absent from simulator inputs"
+      ],
+      "status": "pass"
+    },
     "AC-3": {
       "evidence": [
         "strict direct replay schema validation",
@@ -26,6 +33,13 @@
       "mode": "falsified_no_go",
       "next_discriminator": "Run the matched store-free/barrier-free async-source discriminator with an independent retirement/frontier observable before changing simulator timing state.",
       "selected_diagnostic": "dirty_writeback_coherence_retirement",
+      "status": "pass"
+    },
+    "AC-5": {
+      "evidence": [
+        "reproducible commands, outputs, claim limits, and next GPU-simulator action are recorded",
+        "JADE/HETR, CPU-GPU co-simulation, sm_120, and rejected candidates remain excluded"
+      ],
       "status": "pass"
     }
   },

@@ -502,6 +502,11 @@ def _timing_error(value: object, label: str) -> str | None:
             frontier["cycles"] is not None and not _is_u64(frontier["cycles"])
         ):
             return f"{label}.completion_frontier complete payload is malformed"
+        if frontier["cycles"] != value["terminal_modeled_event_time"]:
+            return (
+                f"{label}.completion_frontier cycles do not match "
+                "terminal_modeled_event_time"
+            )
     elif status == "incomplete_unmodeled_retirement_tails":
         if set(frontier) != {"status", "lower_bound_cycles", "unmodeled_tails"}:
             return f"{label}.completion_frontier incomplete fields differ"
@@ -515,6 +520,11 @@ def _timing_error(value: object, label: str) -> str | None:
         )
         if error is not None:
             return error
+        if frontier["lower_bound_cycles"] != value["terminal_modeled_event_time"]:
+            return (
+                f"{label}.completion_frontier lower_bound_cycles do not match "
+                "terminal_modeled_event_time"
+            )
     else:
         return f"{label}.completion_frontier status is malformed"
     return _readiness_error(value["readiness"], f"{label}.readiness")

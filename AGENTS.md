@@ -154,6 +154,9 @@ evidence lane rather than the deliverable:
 - For retained replay corpora, filesystem freshness is only a secondary
   signal: bind the exact simulator binary, cards, trace/control inputs, and
   replay outputs by content identity before treating a scan as fresh.
+- For host-specific claims, pin the expected GPU name, UUID, compute capability,
+  driver, and device index; a self-consistent manifest is not independent
+  hardware identity.
 - Separate a hypothesis from an observation and label inference or uncertainty
   explicitly when reporting results.
 

@@ -240,7 +240,15 @@ def _validate_ncu_row_identity(
         raise ValueError(f"{label}: NCU kernel identity is empty")
     if expected_kernel is not None and kernel != expected_kernel:
         raise ValueError(f"{label}: NCU kernel identity differs between baseline and repeat")
-    if row.get("Device") != "0" or row.get("CC") != "8.6":
+    if (
+        row.get("Device") != "0"
+        or row.get("CC") != "8.6"
+        or row.get("device__attribute_device_index") != "0"
+        or row.get("device__attribute_display_name")
+        != "NVIDIA GeForce RTX 3090 Ti"
+        or row.get("device__attribute_compute_capability_major") != "8"
+        or row.get("device__attribute_compute_capability_minor") != "6"
+    ):
         raise ValueError(f"{label}: NCU device/compute-capability identity differs")
     expected_grid = tuple(cell.get("expected_grid", ()))
     expected_block = tuple(cell.get("expected_block", ()))
@@ -356,6 +364,10 @@ def _replay_summary(path: Path) -> dict[str, Any]:
         ):
             raise ValueError(f"{path}: complete frontier cycles are malformed")
         completion_cycles = cycles
+        if completion_cycles != terminal:
+            raise ValueError(
+                f"{path}: complete frontier cycles do not match terminal modeled event"
+            )
         if any(counter_tails.values()):
             raise ValueError(
                 f"{path}: complete frontier must have all counter typed tails false"
@@ -370,6 +382,10 @@ def _replay_summary(path: Path) -> dict[str, Any]:
             not isinstance(lower_bound, int) or isinstance(lower_bound, bool) or lower_bound < 0
         ):
             raise ValueError(f"{path}: completion frontier lower bound is malformed")
+        if lower_bound != terminal:
+            raise ValueError(
+                f"{path}: incomplete frontier lower bound does not match terminal modeled event"
+            )
         frontier_tails = frontier.get("unmodeled_tails")
         if not isinstance(frontier_tails, Mapping) or set(frontier_tails) != set(TAIL_KEYS):
             raise ValueError(f"{path}: completion frontier typed tails are malformed")
@@ -1081,6 +1097,13 @@ def build_report(manifest_path: Path, output_path: Path | None = None) -> dict[s
                     "current RTX 3090 Ti host/toolchain preflight",
                 ],
             },
+            "AC-2": {
+                "status": "pass",
+                "evidence": [
+                    "six unique provenance-bound correctness, NCU, NVBit, static-control, and simulator stages",
+                    "NCU observations are comparison-only and absent from simulator inputs",
+                ],
+            },
             "AC-3": {
                 "status": "pass",
                 "evidence": [
@@ -1098,6 +1121,13 @@ def build_report(manifest_path: Path, output_path: Path | None = None) -> dict[s
                 "next_discriminator": decision["next_action"],
                 "manifest": next_discriminator,
                 "evidence": "repeat-stable live observations and typed simulator tails do not isolate one architecture-local latency",
+            },
+            "AC-5": {
+                "status": "pass",
+                "evidence": [
+                    "reproducible commands, outputs, claim limits, and next GPU-simulator action are recorded",
+                    "JADE/HETR, CPU-GPU co-simulation, sm_120, and rejected candidates remain excluded",
+                ],
             },
         },
     }

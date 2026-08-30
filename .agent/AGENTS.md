@@ -34,5 +34,7 @@ competing workflow or weaken higher-priority instructions.
   scalar selection score; use a mechanism-local or explicit partial-order rule.
 - Treat mtime freshness as insufficient for retained replays; bind simulator,
   card, trace/control, and output bytes to a content-identity record.
+- Pin host-specific GPU name/UUID/compute capability/driver/index instead of
+  accepting a self-declared hardware identity.
 - At handoff, include the causal mechanism for a nontrivial fix, commands and
   observed results, uncertainty/caveats, and the next concrete action if any.

@@ -258,12 +258,14 @@ def _readiness_error(launch: Mapping[str, Any], label: str) -> tuple[str | None,
     frontier_tails = frontier.get("unmodeled_tails")
     if frontier.get("status") == "incomplete_unmodeled_retirement_tails":
         checks["frontier_tail_flags_match"] = tails == frontier_tails
-        if terminal_value is not None:
-            checks["frontier_lower_bound_matches_terminal"] = _int(
-                frontier.get("lower_bound_cycles")
-            ) == terminal_value
+        checks["frontier_lower_bound_matches_terminal"] = (
+            frontier.get("lower_bound_cycles") == terminal_value
+        )
     elif frontier.get("status") == "complete":
         checks["complete_frontier_has_no_tails"] = not any(tails.values()) if isinstance(tails, Mapping) else False
+        checks["complete_frontier_matches_terminal"] = (
+            frontier.get("cycles") == terminal_value
+        )
 
     for name, passed in checks.items():
         if not passed:

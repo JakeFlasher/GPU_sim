@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 import importlib.util
+import csv
 import json
 import shutil
 from pathlib import Path
@@ -209,3 +210,20 @@ def test_ncu_repeat_csv_cannot_be_substituted_across_same_geometry_cells(
         ANALYZER._validate_ncu_csv(
             substituted, cell, "cross-cell-repeat", expected_kernel="gemm_hmma_bf16_sm80_kernel"
         )
+
+
+def test_ncu_identity_rejects_another_compute_capability_86_gpu() -> None:
+    manifest = json.loads(
+        Path(
+            "results/captures/sm86_simulator_live_baseline_20260829_v2/campaign_manifest.json"
+        ).read_text(encoding="utf-8")
+    )
+    cell = next(c for c in manifest["cells"] if c["id"] == "gemm_hmma_bf16_sm80")
+    path = Path(
+        "results/captures/sm86_simulator_live_baseline_20260829_v2/evidence/raw/ncu/gemm_hmma_bf16_sm80/ncu.csv"
+    )
+    row = next(row for row in csv.DictReader(path.open(newline="")) if row.get("Kernel Name"))
+    altered = dict(row)
+    altered["device__attribute_display_name"] = "NVIDIA A40"
+    with pytest.raises(ValueError, match="device/compute-capability identity"):
+        ANALYZER._validate_ncu_row_identity(altered, cell, "hardware-fixture")

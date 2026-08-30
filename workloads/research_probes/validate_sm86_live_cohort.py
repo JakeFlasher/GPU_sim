@@ -122,6 +122,13 @@ _EXPECTED_CELL_SPECS: dict[str, dict[str, Any]] = {
         "block": [32, 1, 1],
     },
 }
+_EXPECTED_GPU_IDENTITY = {
+    "index": 0,
+    "name": "NVIDIA GeForce RTX 3090 Ti",
+    "uuid": "GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c",
+    "compute_capability": "8.6",
+    "driver_version": "610.57.04",
+}
 
 
 def _is_exact_zero(value: object) -> bool:
@@ -669,13 +676,25 @@ def _validate_host_preflight(
     gpu = host.get("gpu")
     if not isinstance(gpu, Mapping):
         raise ValueError("host preflight GPU record is missing")
+    if type(gpu.get("index")) is not int:
+        raise ValueError("host preflight GPU index is malformed")
     for key, expected in (
-        ("name", manifest_host.get("device")),
-        ("compute_capability", manifest_host.get("compute_capability")),
-        ("driver_version", manifest_host.get("driver")),
+        ("index", _EXPECTED_GPU_IDENTITY["index"]),
+        ("name", _EXPECTED_GPU_IDENTITY["name"]),
+        ("uuid", _EXPECTED_GPU_IDENTITY["uuid"]),
+        ("compute_capability", _EXPECTED_GPU_IDENTITY["compute_capability"]),
+        ("driver_version", _EXPECTED_GPU_IDENTITY["driver_version"]),
     ):
         if gpu.get(key) != expected:
-            raise ValueError(f"host preflight GPU field {key} differs from manifest")
+            raise ValueError(f"host preflight GPU field {key} differs from the pinned RTX 3090 Ti")
+    if (
+        type(manifest_host.get("gpu_index")) is not int
+        or manifest_host.get("gpu_index") != _EXPECTED_GPU_IDENTITY["index"]
+        or manifest_host.get("device") != _EXPECTED_GPU_IDENTITY["name"]
+        or manifest_host.get("compute_capability") != _EXPECTED_GPU_IDENTITY["compute_capability"]
+        or manifest_host.get("driver") != _EXPECTED_GPU_IDENTITY["driver_version"]
+    ):
+        raise ValueError("manifest host identity differs from the pinned RTX 3090 Ti")
     toolchain = host.get("toolchain")
     if not isinstance(toolchain, Mapping):
         raise ValueError("host preflight toolchain record is missing")
@@ -759,8 +778,16 @@ def _validate_host_preflight(
         for command in commands
     }
     expected_markers = {
-        "gpu_query": [manifest_host.get("device"), manifest_host.get("compute_capability"), manifest_host.get("driver")],
-        "gpu_list": [manifest_host.get("device")],
+        "gpu_query": [
+            _EXPECTED_GPU_IDENTITY["name"],
+            _EXPECTED_GPU_IDENTITY["uuid"],
+            _EXPECTED_GPU_IDENTITY["compute_capability"],
+            _EXPECTED_GPU_IDENTITY["driver_version"],
+        ],
+        "gpu_list": [
+            f"GPU {_EXPECTED_GPU_IDENTITY['index']}: {_EXPECTED_GPU_IDENTITY['name']}",
+            _EXPECTED_GPU_IDENTITY["uuid"],
+        ],
         "nvcc_version": ["V13.3.73"],
         "ncu_version": ["Version 2026.1.0.0"],
         "rust_version": ["rustc 1.96.1"],
@@ -1447,19 +1474,25 @@ def validate(manifest_path: Path, report_path: Path | None) -> int:
         raise ValueError("closure analysis diagnostic selection record is missing")
     acceptance = closure_report.get("acceptance_criteria")
     ac1 = acceptance.get("AC-1") if isinstance(acceptance, Mapping) else None
+    ac2 = acceptance.get("AC-2") if isinstance(acceptance, Mapping) else None
     ac3 = acceptance.get("AC-3") if isinstance(acceptance, Mapping) else None
     ac4 = acceptance.get("AC-4") if isinstance(acceptance, Mapping) else None
+    ac5 = acceptance.get("AC-5") if isinstance(acceptance, Mapping) else None
     if (
         not isinstance(ac1, Mapping)
         or ac1.get("status") != "pass"
+        or not isinstance(ac2, Mapping)
+        or ac2.get("status") != "pass"
         or not isinstance(ac3, Mapping)
         or ac3.get("status") != "pass"
         or not isinstance(ac4, Mapping)
         or ac4.get("status") != "pass"
         or ac4.get("mode") != "falsified_no_go"
         or ac4.get("manifest") != analysis_next
+        or not isinstance(ac5, Mapping)
+        or ac5.get("status") != "pass"
     ):
-        raise ValueError("closure analysis does not explicitly pass AC-1, AC-3, and AC-4")
+        raise ValueError("closure analysis does not explicitly pass AC-1 through AC-5")
     cells = document.get("cells")
     if not isinstance(cells, list) or len(cells) != 6:
         raise ValueError("manifest must contain exactly six cohort cells")

@@ -175,7 +175,7 @@ paths, and pass/falsify/unknown rules are pinned in
 [`plans/sm86_ldgsts_burst_release_next_discriminator.json`](../../../plans/sm86_ldgsts_burst_release_next_discriminator.json).
 The manifest is explicitly `prospective_not_run`; no simulator timing code, JADE/HETR code, CPU-GPU bridge,
 `sm_120` behavior, or rejected candidate was changed here.
-The machine-readable frontier table, explicit AC-3/AC-4 status, and
+The machine-readable frontier table, explicit AC-1 through AC-5 status, and
 repeatability evidence are in
 [`closure_report.json`](closure_report.json).
 
