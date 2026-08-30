@@ -511,7 +511,7 @@
     "--output",
     "evidence/sm86_active_replay_binding.json"
   ],
-  "repository_revision": "a5eff5deb6fc6d88cfee03070aabfd1b1b15402b",
+  "repository_revision": "af88956eff85ab958fc8f5852132cb367d1a860e",
   "schema_version": 1,
   "simulator_binary": {
     "path": "sim/target/release/sim-run",
