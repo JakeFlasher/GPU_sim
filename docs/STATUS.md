@@ -70,6 +70,16 @@ smoke produced a complete trace and two byte-identical simulator replays;
 those are pipeline-only evidence, not matrix timing results. No simulator
 timing state was changed. JADE/HETR and CPU-GPU co-simulation remain deferred.
 
+The follow-on store-free async-source slice is recorded in
+[the source-only discriminator report](sm86_async_source_only_milestone.md).
+Its marker-scoped L1 traces have complete simulator frontiers with no typed
+retirement tails; the matched `.cg`/DRAM traces retain only the existing
+`async_copy_shared_visibility` lower-bound flag, and the live/simulated
+frontiers do not support applying the cache-all destination service rule to
+bypass copies. This is a second no-go for a timing patch, not a reason to fit a
+constant. The next GPU-only action is a route-controlled bypass-destination
+visibility witness with fixed clocks and an independent delivery observable.
+
 The 2026-08-17
 [causal-readiness milestone](sm86_causal_readiness_milestone.md) is complete.
 Reason-tagged dependency, async-copy, CTA-generation/arrival-spread, and

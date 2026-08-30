@@ -16,6 +16,25 @@ The current focus is the GPU simulator itself. JADE/HETR, CPU-GPU co-simulation,
 and unrelated host-integration work are explicitly deferred. `sm_120` remains
 out of this milestone until the documented Ampere transition criterion is met.
 
+## Current closure state (2026-08-30)
+
+The retained six-workload baseline and the follow-on LDGSTS discriminator both
+remain non-promoting. The LDGSTS run found a flat zero-gap issue frontier and a
+missing independent LDG knee; its strict admission is closed. A smaller
+marker-scoped store-free async-source slice then supplied the next useful
+simulator check: L1 (`.ca`) traces complete without dirty-writeback, coherence,
+or async-visibility tails, while `.cg`/DRAM traces retain only the existing
+typed `async_copy_shared_visibility` lower bound. The live/simulated depth-4/8
+frontiers do not justify applying the cache-all destination service rule to
+bypass copies. The detailed result is
+[`docs/sm86_async_source_only_milestone.md`](../docs/sm86_async_source_only_milestone.md).
+
+The next GPU-only discriminator is therefore a route-controlled bypass
+destination/visibility witness with fixed clocks and an independent delivery
+observable. Until that evidence exists, keep the current typed lower-bound
+behavior and do not add a bypass timing constant or alter the scored simulator
+defaults.
+
 ## Acceptance Criteria
 
 - AC-1: A current-host preflight and release build are recorded for the RTX

@@ -8,7 +8,8 @@
     "analysis": "results/captures/sm86_ldgsts_burst_release_20260830_v4/analysis/report.json",
     "terminal_reason": "The independent LDG clock assay had no positive K knee; raw gap pauses, NCU counter deviations, unavailable fixed-clock lock, and a bounded NVBit timeout keep the strict successor gate closed.",
     "simulator_replay": "smoke_only_byte_identical",
-    "simulator_smoke": "results/captures/sm86_ldgsts_burst_release_20260830_v4/simulator/smoke5_ldgsts_w1_l1_d4_b64"
+    "simulator_smoke": "results/captures/sm86_ldgsts_burst_release_20260830_v4/simulator/smoke5_ldgsts_w1_l1_d4_b64",
+    "follow_on_slice": "docs/sm86_async_source_only_milestone.md"
   },
   "purpose": "Separate the SM86 LDGSTS issue frontier from post-issue completion/retirement before changing simulator timing state.",
   "working_directory": ".",

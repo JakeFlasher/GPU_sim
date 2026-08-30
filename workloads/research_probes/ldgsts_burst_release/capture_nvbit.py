@@ -126,6 +126,8 @@ def capture(
     destination: Path,
     *,
     cell: str,
+    binary: Path = BINARY,
+    target_args: Sequence[str] | None = None,
     gpu: str,
     bursts: int,
     warmup: int,
@@ -135,8 +137,9 @@ def capture(
     skip_enhanced: bool,
     mode: str,
 ) -> int:
-    if not BINARY.is_file() or not os.access(BINARY, os.X_OK):
-        raise RuntimeError(f"target binary is not executable: {BINARY}")
+    binary = binary.resolve()
+    if not binary.is_file() or not os.access(binary, os.X_OK):
+        raise RuntimeError(f"target binary is not executable: {binary}")
     if not TRACER.is_file() or not RUNTIME_MANIFEST.is_file():
         raise RuntimeError("retained tracer or runtime manifest is missing")
     destination = destination.resolve()
@@ -145,16 +148,20 @@ def capture(
             raise RuntimeError(f"capture destination is nonempty: {destination}")
     else:
         destination.mkdir(parents=True, exist_ok=False)
-    argv = [
-        str(BINARY),
-        "--mode", mode,
-        "--assay", "ldgsts",
-        "--cells", cell,
-        "--bursts", str(bursts),
-        "--warmup", str(warmup),
-        "--repetition", str(repetition),
-        "--order", order,
-    ]
+    argv = (
+        [str(binary), *target_args]
+        if target_args is not None
+        else [
+            str(binary),
+            "--mode", mode,
+            "--assay", "ldgsts",
+            "--cells", cell,
+            "--bursts", str(bursts),
+            "--warmup", str(warmup),
+            "--repetition", str(repetition),
+            "--order", order,
+        ]
+    )
     logical_environment = {
         "CUDA_VISIBLE_DEVICES": gpu,
         "CUDA_INJECTION64_PATH": str(TRACER),
@@ -181,12 +188,12 @@ def capture(
     tracer_sha256: str | None = None
     try:
         with (
-            open_retained_executable(BINARY) as binary,
+            open_retained_executable(binary) as retained_binary,
             open_retained_regular(TRACER) as tracer,
             open_retained_regular(RUNTIME_MANIFEST) as manifest,
             PinnedDirectoryReader(destination) as trace_root,
         ):
-            binary_sha256 = binary.sha256
+            binary_sha256 = retained_binary.sha256
             tracer_sha256 = tracer.sha256
             runtime_manifest_sha256 = sha256_file(RUNTIME_MANIFEST)
             with retained_tracer_runtime_env(
@@ -221,13 +228,13 @@ def capture(
                 )
                 try:
                     result = capture_process.execute_capture_process(
-                        (binary.proc_path, *argv[1:]),
+                        (retained_binary.proc_path, *argv[1:]),
                         environment=effective_environment,
                         working_directory=str(REPO_ROOT),
                         inherited_descriptors=tuple(
                             dict.fromkeys(
                                 (
-                                    binary.descriptor,
+                                    retained_binary.descriptor,
                                     tracer.descriptor,
                                     manifest.descriptor,
                                     trace_root.descriptor,
@@ -243,7 +250,7 @@ def capture(
                 except BaseException as error:
                     failure = error
                 runtime.verify_unchanged()
-            binary.verify_unchanged()
+            retained_binary.verify_unchanged()
             tracer.verify_unchanged()
     except BaseException as error:
         if failure is None:
@@ -302,7 +309,7 @@ def capture(
         "order": order,
         "mode": mode,
         "skip_enhanced_tracer": skip_enhanced,
-        "binary": {"path": str(BINARY), "sha256": binary_sha256},
+        "binary": {"path": str(binary), "sha256": binary_sha256},
         "tracer": {"path": str(TRACER), "sha256": tracer_sha256},
         "runtime_manifest": {"path": str(RUNTIME_MANIFEST), "sha256": runtime_manifest_sha256},
         "runtime_dso_closure_sha256": closure_hash(runtime_dso_closure),
@@ -336,6 +343,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--cell", default="ldgsts_w1_l1_d4_g0")
+    parser.add_argument("--binary", type=Path, default=BINARY)
+    parser.add_argument(
+        "--target-args",
+        nargs=argparse.REMAINDER,
+        help="use these complete target arguments instead of the built-in LDGSTS command",
+    )
     parser.add_argument("--gpu", default="0")
     parser.add_argument("--bursts", type=int, default=16_384)
     parser.add_argument("--warmup", type=int, default=64)
@@ -353,6 +366,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return capture(
             args.output,
             cell=args.cell,
+            binary=args.binary,
+            target_args=args.target_args,
             gpu=args.gpu,
             bursts=args.bursts,
             warmup=args.warmup,
