@@ -201,6 +201,36 @@ def _validate_summary(
         raise ValueError("summary/cp_async_canary: matched and scaling command variants are not explicit")
     if cp.get("async_matched_ncu_groups") != 64 or cp.get("async_scaling_observation_ncu_groups") != 16_384:
         raise ValueError("summary/cp_async_canary: group-count provenance is incomplete")
+    correctness_capture = summary.get("correctness_capture")
+    cp_manifest = next(item for item in manifest["cells"] if item["id"] == "cp_async_canary")
+    if not isinstance(correctness_capture, Mapping):
+        raise ValueError("summary correctness_capture is missing")
+    matched_capture = correctness_capture.get("matched_cp_async")
+    scaling_capture = correctness_capture.get("scaling_cp_async")
+    if not isinstance(matched_capture, Mapping) or not isinstance(scaling_capture, Mapping):
+        raise ValueError("summary must distinguish matched and scaling cp.async correctness")
+    expected_matched = cp_manifest["stages"]["correctness"]
+    expected_scaling = cp_manifest["scaling_observation"]["correctness"]
+    for label, record, expected_stage, expected_groups in (
+        ("matched_cp_async", matched_capture, expected_matched, 64),
+        ("scaling_cp_async", scaling_capture, expected_scaling, 16_384),
+    ):
+        if (
+            record.get("binary") != expected_stage.get("binary_path")
+            or record.get("binary_sha256") != expected_stage.get("binary_sha256")
+            or record.get("arguments") != expected_stage.get("argv", [])[1:]
+            or record.get("group_count") != expected_groups
+            or record.get("environment") != expected_stage.get("environment", {}).get("record")
+        ):
+            raise ValueError(f"summary correctness_capture/{label} is not bound to the manifest")
+        for path_key in ("environment", "stdout", "stderr"):
+            path_value = record.get(path_key)
+            if not isinstance(path_value, str) or not (
+                manifest_path.parent / path_value
+            ).is_file():
+                raise ValueError(
+                    f"summary correctness_capture/{label}/{path_key} is missing"
+                )
     core = summary.get("core_closure")
     analysis = closure.get("analysis")
     validation = analysis.get("input_validation") if isinstance(analysis, Mapping) else None
@@ -239,6 +269,18 @@ def _relative_label(path: Path) -> str:
 
 
 def _validate_manifest(manifest: Mapping[str, Any]) -> None:
+    authority = manifest.get("runtime_authority")
+    if (
+        not isinstance(authority, Mapping)
+        or not isinstance(authority.get("path"), str)
+        or not isinstance(authority.get("sha256"), str)
+        or not isinstance(authority.get("dso_closure"), Mapping)
+        or authority.get("dso_count") != len(authority.get("dso_closure", {}))
+    ):
+        raise ValueError("manifest NVBit runtime authority is missing or malformed")
+    authority_path = Path(str(authority["path"]))
+    if not authority_path.is_file() or _sha256(authority_path) != authority["sha256"]:
+        raise ValueError("manifest NVBit runtime authority hash is stale")
     cells = manifest.get("cells")
     if not isinstance(cells, list) or [cell.get("id") for cell in cells if isinstance(cell, Mapping)] != list(EXPECTED_IDS):
         raise ValueError("manifest cells differ from the canonical six-cell order")
@@ -259,6 +301,12 @@ def _validate_manifest(manifest: Mapping[str, Any]) -> None:
             correctness = stages["correctness"]
             if correctness.get("binary_path") != cell["binary"].get("trace_path") or correctness.get("group_count") != 64:
                 raise ValueError("manifest/cp_async_canary: correctness is not bound to the 64-group trace binary")
+            required_limitation = (
+                "Matched NCU and simulator stages both use 64 groups; only the separate "
+                "16,384-group scaling observation uses 16,384 groups."
+            )
+            if required_limitation not in cell.get("limitations", []):
+                raise ValueError("manifest/cp_async_canary: group-count limitation text is stale")
 
 
 def validate(

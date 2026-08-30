@@ -419,11 +419,11 @@
       "artifacts": [
         {
           "path": "results/captures/sm86_simulator_live_baseline_20260829_v2/evidence/raw/simulator/gemm_hmma_bf16_sm80/replay-1.json",
-          "sha256": "ffaab78b2cd05cdf1d1bc6bdbdea98cd49cfe621e1942ed9f268b029eb6fa198"
+          "sha256": "d17da743dcbc24577e55f455994c8f516190d20972bd0c41abc581193505c372"
         },
         {
           "path": "results/captures/sm86_simulator_live_baseline_20260829_v2/evidence/raw/simulator/gemm_hmma_bf16_sm80/replay-2.json",
-          "sha256": "ffaab78b2cd05cdf1d1bc6bdbdea98cd49cfe621e1942ed9f268b029eb6fa198"
+          "sha256": "d17da743dcbc24577e55f455994c8f516190d20972bd0c41abc581193505c372"
         }
       ],
       "cell": "gemm_hmma_bf16_sm80",
@@ -601,7 +601,7 @@
           "passed": true,
           "semantic_launches": 2
         },
-        "sha256": "ffaab78b2cd05cdf1d1bc6bdbdea98cd49cfe621e1942ed9f268b029eb6fa198",
+        "sha256": "d17da743dcbc24577e55f455994c8f516190d20972bd0c41abc581193505c372",
         "tails": {
           "async_copy_shared_visibility": false,
           "coherence": true,
@@ -613,11 +613,11 @@
         "top_readiness_causes": [
           {
             "cause": "async_destination_local",
-            "limiting_cycles": 2115180
+            "limiting_cycles": 2170548
           },
           {
             "cause": "async_destination_sm_service",
-            "limiting_cycles": 1707204
+            "limiting_cycles": 1651836
           },
           {
             "cause": "control_stall",
@@ -625,18 +625,18 @@
           }
         ],
         "twin_byte_identical": true,
-        "twin_sha256": "ffaab78b2cd05cdf1d1bc6bdbdea98cd49cfe621e1942ed9f268b029eb6fa198"
+        "twin_sha256": "d17da743dcbc24577e55f455994c8f516190d20972bd0c41abc581193505c372"
       }
     },
     {
       "artifacts": [
         {
           "path": "results/captures/sm86_simulator_live_baseline_20260829_v2/evidence/raw/simulator/gemm_hmma_fp16_sm80/replay-1.json",
-          "sha256": "c7189ce5e36fb368a4e6a7a8b512a5baca9ff786cac67f8756ef99dc5e8e36f4"
+          "sha256": "f5f31bc2ddc5d9edf2380430ce75a20b74c00dd341af45e7e8e87f16f636bb07"
         },
         {
           "path": "results/captures/sm86_simulator_live_baseline_20260829_v2/evidence/raw/simulator/gemm_hmma_fp16_sm80/replay-2.json",
-          "sha256": "c7189ce5e36fb368a4e6a7a8b512a5baca9ff786cac67f8756ef99dc5e8e36f4"
+          "sha256": "f5f31bc2ddc5d9edf2380430ce75a20b74c00dd341af45e7e8e87f16f636bb07"
         }
       ],
       "cell": "gemm_hmma_fp16_sm80",
@@ -814,7 +814,7 @@
           "passed": true,
           "semantic_launches": 2
         },
-        "sha256": "c7189ce5e36fb368a4e6a7a8b512a5baca9ff786cac67f8756ef99dc5e8e36f4",
+        "sha256": "f5f31bc2ddc5d9edf2380430ce75a20b74c00dd341af45e7e8e87f16f636bb07",
         "tails": {
           "async_copy_shared_visibility": false,
           "coherence": true,
@@ -826,11 +826,11 @@
         "top_readiness_causes": [
           {
             "cause": "async_destination_local",
-            "limiting_cycles": 2108259
+            "limiting_cycles": 2163627
           },
           {
             "cause": "async_destination_sm_service",
-            "limiting_cycles": 1714125
+            "limiting_cycles": 1658757
           },
           {
             "cause": "control_stall",
@@ -838,18 +838,18 @@
           }
         ],
         "twin_byte_identical": true,
-        "twin_sha256": "c7189ce5e36fb368a4e6a7a8b512a5baca9ff786cac67f8756ef99dc5e8e36f4"
+        "twin_sha256": "f5f31bc2ddc5d9edf2380430ce75a20b74c00dd341af45e7e8e87f16f636bb07"
       }
     },
     {
       "artifacts": [
         {
           "path": "results/captures/sm86_simulator_live_baseline_20260829_v2/evidence/raw/simulator/gemm_imma_int8_sm80/replay-1.json",
-          "sha256": "b85782f885c80f82f4200108a37411cad116db0330bb0e0e4bec256591679c88"
+          "sha256": "98146a4b20b059119a83bfab31dc059ffa17142d4ccc9601ba0d469b1ce55a89"
         },
         {
           "path": "results/captures/sm86_simulator_live_baseline_20260829_v2/evidence/raw/simulator/gemm_imma_int8_sm80/replay-2.json",
-          "sha256": "b85782f885c80f82f4200108a37411cad116db0330bb0e0e4bec256591679c88"
+          "sha256": "98146a4b20b059119a83bfab31dc059ffa17142d4ccc9601ba0d469b1ce55a89"
         }
       ],
       "cell": "gemm_imma_int8_sm80",
@@ -956,18 +956,18 @@
         "frontier_reference": {
           "exact_cycles": null,
           "kind": "lower_bound",
-          "lower_bound_cycles": 5821,
-          "reference_cycles": 5821
+          "lower_bound_cycles": 5867,
+          "reference_cycles": 5867
         },
         "gpc_elapsed_gaps": {
           "baseline_launch_envelope_cycles": 1702,
-          "baseline_vs_completion_frontier_cycles": 5201,
-          "baseline_vs_last_issue_cycles": 5201,
-          "baseline_vs_last_modeled_event_cycles": 5204,
+          "baseline_vs_completion_frontier_cycles": 5155,
+          "baseline_vs_last_issue_cycles": 5155,
+          "baseline_vs_last_modeled_event_cycles": 5158,
           "repeat_2_launch_envelope_cycles": 1667,
-          "repeat_2_vs_completion_frontier_cycles": 5472,
-          "repeat_2_vs_last_issue_cycles": 5472,
-          "repeat_2_vs_last_modeled_event_cycles": 5475
+          "repeat_2_vs_completion_frontier_cycles": 5426,
+          "repeat_2_vs_last_issue_cycles": 5426,
+          "repeat_2_vs_last_modeled_event_cycles": 5429
         },
         "interpretable": true,
         "metric": "multi-frontier SM-active and GPC elapsed comparison",
@@ -987,17 +987,17 @@
           "rule": "mechanism_local_typed_tail_precedence"
         },
         "selection_vector": {
-          "gpc_completion_gap_cycles": 5201,
+          "gpc_completion_gap_cycles": 5155,
           "gpc_launch_envelope_cycles": 1702,
-          "sm_completion_gap_cycles": 3499
+          "sm_completion_gap_cycles": 3453
         },
         "sm_active_gaps": {
-          "baseline_vs_completion_frontier_cycles": 3499,
-          "baseline_vs_last_issue_cycles": 3499,
-          "baseline_vs_last_modeled_event_cycles": 3502,
-          "repeat_2_vs_completion_frontier_cycles": 3805,
-          "repeat_2_vs_last_issue_cycles": 3805,
-          "repeat_2_vs_last_modeled_event_cycles": 3808
+          "baseline_vs_completion_frontier_cycles": 3453,
+          "baseline_vs_last_issue_cycles": 3453,
+          "baseline_vs_last_modeled_event_cycles": 3456,
+          "repeat_2_vs_completion_frontier_cycles": 3759,
+          "repeat_2_vs_last_issue_cycles": 3759,
+          "repeat_2_vs_last_modeled_event_cycles": 3762
         }
       },
       "simulator": {
@@ -1005,7 +1005,7 @@
         "completion_frontier": {
           "cycles": null,
           "kind": "lower_bound",
-          "lower_bound_cycles": 5821,
+          "lower_bound_cycles": 5867,
           "status": "incomplete_unmodeled_retirement_tails",
           "unmodeled_tails": {
             "async_copy_shared_visibility": false,
@@ -1015,35 +1015,35 @@
           }
         },
         "completion_kind": "lower_bound",
-        "completion_lower_bound_cycles": 5821,
-        "completion_reference_cycles": 5821,
+        "completion_lower_bound_cycles": 5867,
+        "completion_reference_cycles": 5867,
         "completion_status": "incomplete_unmodeled_retirement_tails",
         "instructions_issued": 157696,
-        "last_issue_cycles": 5821,
-        "last_modeled_event_cycles": 5818,
+        "last_issue_cycles": 5867,
+        "last_modeled_event_cycles": 5864,
         "readiness_schema": 6,
         "records_seen": 157696,
         "semantic_validation": {
           "passed": true,
           "semantic_launches": 2
         },
-        "sha256": "b85782f885c80f82f4200108a37411cad116db0330bb0e0e4bec256591679c88",
+        "sha256": "98146a4b20b059119a83bfab31dc059ffa17142d4ccc9601ba0d469b1ce55a89",
         "tails": {
           "async_copy_shared_visibility": false,
           "coherence": true,
           "dirty_writeback": true,
           "reduction_read_modify_write": false
         },
-        "terminal_lower_bound_cycles": 5821,
-        "terminal_modeled_event_cycles": 5821,
+        "terminal_lower_bound_cycles": 5867,
+        "terminal_modeled_event_cycles": 5867,
         "top_readiness_causes": [
           {
             "cause": "async_destination_sm_service",
-            "limiting_cycles": 1395643
+            "limiting_cycles": 1359847
           },
           {
             "cause": "async_destination_local",
-            "limiting_cycles": 933376
+            "limiting_cycles": 967643
           },
           {
             "cause": "control_stall",
@@ -1051,7 +1051,7 @@
           }
         ],
         "twin_byte_identical": true,
-        "twin_sha256": "b85782f885c80f82f4200108a37411cad116db0330bb0e0e4bec256591679c88"
+        "twin_sha256": "98146a4b20b059119a83bfab31dc059ffa17142d4ccc9601ba0d469b1ce55a89"
       }
     },
     {

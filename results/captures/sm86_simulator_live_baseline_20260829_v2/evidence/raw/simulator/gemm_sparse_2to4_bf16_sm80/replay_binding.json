@@ -33,7 +33,7 @@
     },
     "trace": {
       "path": "evidence/raw/nvbit/gemm_sparse_2to4_bf16_sm80",
-      "sha256": "2e9dcb5816b54d359e46f26af146e8b0345b854e00f65a7c7c09f9b76a678b79"
+      "sha256": "8b9d0ed8b03d8c6c40e3d6b01ada5188018b58537684618b61b6ffce7e06297c"
     }
   },
   "outputs": [

@@ -18,8 +18,8 @@
   "live_cohort_semantic_report": "results/captures/sm86_simulator_live_baseline_20260829_v2/live_cohort_semantic_report.json",
   "live_cohort_semantic_report_sha256": "f90f01bac77264e6ff21c0c2b58489209900bf9cef3060ec3e2fca1afcefa569",
   "closure_report": "results/captures/sm86_simulator_live_baseline_20260829_v2/closure_report.json",
-  "closure_report_sha256": "d8e806505becb722161d4c5c9e5a04c85a4972fa82161e9580f8ec26e41a6c4f",
-  "raw_evidence_archive_sha256": "e594870a621fbf4d876d3e368f44307483d604fd2e40e24cf6d06059708af6f8",
+  "closure_report_sha256": "12d9e494ddfc9186cef066522544b9710178b4128c7f39d058780d44abecbc68",
+  "raw_evidence_archive_sha256": "4b0a5a6390de6045f02fe6ab1a78a93099f9fb311d773e185a30646b18e4f5c9",
   "architecture": "sm_86",
   "gpu": "NVIDIA GeForce RTX 3090 Ti",
   "driver": "610.57.04",
@@ -31,13 +31,41 @@
     "rust": "1.96.1"
   },
   "correctness_capture": {
-    "mode": "clean_base_binary",
+    "mode": "profiler_free_clean_environment",
     "profiler_injection_variables_present": false,
-    "environment_records": "evidence/raw/correctness/<cell>/environment.json",
-    "async_correctness_groups": 16384,
-    "async_nvbit_trace_groups": 64,
-    "async_matched_ncu_groups": 64,
-    "async_scaling_observation_ncu_groups": 16384
+    "portable_environment_records": "evidence/raw/correctness/<cell>/environment.json",
+    "matched_cp_async": {
+      "binary": "workloads/research_probes/async_barrier_overlap/async_barrier_overlap_trace",
+      "binary_sha256": "f8c2b971f95d274d6351e2dcbbe1a96c77a52678c8ad3abe1ddf6eb8573e11fd",
+      "arguments": [
+        "c11",
+        "l1",
+        "0",
+        "4",
+        "1"
+      ],
+      "group_count": 64,
+      "environment": "evidence/raw/correctness/cp_async_canary_matched_64/environment.json",
+      "stdout": "evidence/raw/correctness/cp_async_canary_matched_64/stdout.txt",
+      "stderr": "evidence/raw/correctness/cp_async_canary_matched_64/stderr.txt",
+      "status": "correctness_pass"
+    },
+    "scaling_cp_async": {
+      "binary": "workloads/research_probes/async_barrier_overlap/async_barrier_overlap",
+      "binary_sha256": "7eb4a26cd14e2763ef5014a9ab1e0e5a63421698b5366356edd3fab8b6cd1239",
+      "arguments": [
+        "c11",
+        "l1",
+        "0",
+        "4",
+        "1"
+      ],
+      "group_count": 16384,
+      "environment": "evidence/raw/correctness/cp_async_canary/environment.json",
+      "stdout": "evidence/raw/correctness/cp_async_canary/stdout.txt",
+      "stderr": "evidence/raw/correctness/cp_async_canary/stderr.txt",
+      "status": "correctness_pass"
+    }
   },
   "cohort": [
     {
@@ -164,7 +192,7 @@
       "ncu_gpc_cycles": 11022,
       "ncu_sm_active_cycles": 9320,
       "ncu_smsp_instructions": 157696,
-      "sim_terminal_lower_bound_cycles": 5821,
+      "sim_terminal_lower_bound_cycles": 5867,
       "sim_dram_read_sectors": 4096,
       "sim_completion": "incomplete_unmodeled_retirement_tails",
       "static_control_instructions": 184,
@@ -173,9 +201,9 @@
       "cell": "gemm_imma_int8_sm80",
       "sim_records_seen": 157696,
       "frontier_gaps": {
-        "gpc_completion_gap_cycles": 5201,
+        "gpc_completion_gap_cycles": 5155,
         "gpc_launch_envelope_cycles": 1702,
-        "sm_completion_gap_cycles": 3499
+        "sm_completion_gap_cycles": 3453
       },
       "typed_tails": {
         "async_copy_shared_visibility": false,
@@ -323,5 +351,12 @@
     ],
     "status": "pass"
   },
-  "raw_evidence_archive_size_bytes": 539986
+  "raw_evidence_archive_size_bytes": 545757,
+  "nvbit_runtime_authority": {
+    "path": "/home/jakeshea/GPU_simulator_rebase/tools/nvbit_tracer/tracer_tool.nvbit-runtime-manifest.json",
+    "sha256": "22f97e9e64496b7fbd269a39f259b11003f26a3ec077988fd7de2a2f65983b21",
+    "dso_count": 55,
+    "dso_closure_sha256": "9a40158751cb9a470cc5a1183079c8bc2d3fc3c19d50e2d38568095be9f37ca9",
+    "policy": "retained_tracer_runtime_env_with_manifest_and_descriptors_v1"
+  }
 }

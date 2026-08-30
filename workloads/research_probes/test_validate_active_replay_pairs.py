@@ -143,6 +143,23 @@ def test_nvbit_effective_environment_record_rejects_inherited_controls(tmp_path:
         "timeout_seconds": 900,
         "timeout_policy": "process_group_terminate_reap_v1",
         "timeout_policy_version": 1,
+        "runtime_manifest_path": LIVE_VALIDATOR._EXPECTED_RUNTIME_MANIFEST_PATH,
+        "runtime_manifest_sha256": hashlib.sha256(
+            Path(LIVE_VALIDATOR._EXPECTED_RUNTIME_MANIFEST_PATH).read_bytes()
+        ).hexdigest(),
+        "runtime_dso_closure": {
+            str(row["soname"]): str(row["sha256"])
+            for row in json.loads(
+                Path(LIVE_VALIDATOR._EXPECTED_RUNTIME_MANIFEST_PATH).read_text()
+            )["dsos"]
+        },
+        "runtime_dso_closure_sha256": "0" * 64,
+        "runtime_error": None,
+        "output_contract_version": 1,
+        "required_outputs": list(LIVE_VALIDATOR._NVBIT_REQUIRED_OUTPUTS),
+        "payload_file_count": 1,
+        "output_contract_passed": True,
+        "output_contract_error": None,
         "started_at": "2026-08-30T00:00:00+00:00",
         "finished_at": "2026-08-30T00:00:01+00:00",
     }
@@ -151,7 +168,12 @@ def test_nvbit_effective_environment_record_rejects_inherited_controls(tmp_path:
         "environment_record": output + "/environment.json",
         "environment_sha256": hashlib.sha256(record_path.read_bytes()).hexdigest(),
     }
-    with pytest.raises(ValueError, match="sanitized contract"):
+    record["runtime_dso_closure_sha256"] = LIVE_VALIDATOR._runtime_closure_sha256(
+        record["runtime_dso_closure"]
+    )
+    record_path.write_text(json.dumps(record), encoding="utf-8")
+    stage["environment_sha256"] = hashlib.sha256(record_path.read_bytes()).hexdigest()
+    with pytest.raises(ValueError, match="effective environment"):
         LIVE_VALIDATOR._validate_nvbit_environment_record(
             tmp_path, cell, stage, argv, output, environment
         )
@@ -204,6 +226,16 @@ def test_cp_async_matched_execution_requires_exact_correctness_stage() -> None:
         )
 
 
+def test_cp_async_limitation_must_match_structured_group_provenance() -> None:
+    _root, cell, _repository = _live_manifest_cell("cp_async_canary")
+    altered = deepcopy(cell)
+    altered["limitations"][0] = (
+        "Trace binary uses 64 groups while the NCU target uses 16384 groups; "
+        "raw cycle totals are not directly comparable."
+    )
+    with pytest.raises(ValueError, match="limitation"):
+        LIVE_VALIDATOR._validate_cp_async_matched_execution(altered)
+
 def test_nvbit_timeout_override_is_rejected_by_the_campaign_contract(
     tmp_path: Path,
 ) -> None:
@@ -216,7 +248,10 @@ def test_nvbit_timeout_override_is_rejected_by_the_campaign_contract(
     record = json.loads(source.read_text(encoding="utf-8"))
     expected = LIVE_VALIDATOR._expected_nvbit_environment(cell, output, root=tmp_path)
     record["environment"] = expected
-    record["effective_environment"] = expected
+    effective = dict(expected)
+    effective["LD_LIBRARY_PATH"] = "/proc/self/fd/1"
+    effective["CUDA_INJECTION64_PATH"] = "/proc/self/fd/2"
+    record["effective_environment"] = effective
     record["timeout_seconds"] = 901
     destination.write_text(json.dumps(record), encoding="utf-8")
     stage["environment_record"] = str(Path(stage["environment_record"]))

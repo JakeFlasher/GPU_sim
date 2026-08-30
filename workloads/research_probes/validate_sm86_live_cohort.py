@@ -30,6 +30,8 @@ from workloads.research_probes.semantic_replay_validation import (
 from workloads.research_probes import replay_resume as replay_resume
 from workloads.research_probes import analyze_sm86_live_closure as closure_analyzer
 from workloads.research_probes.trace_invariants import derive_trace_invariants
+from tools.local_labels import immutable_artifact
+from tools.nvbit_tracer import runtime_env
 
 
 DEFAULT_MANIFEST = (
@@ -55,6 +57,17 @@ _CP_ASYNC_ARGUMENTS = ["c11", "l1", "0", "4", "1"]
 _CP_ASYNC_SCALING_NCU_ARGUMENTS = ["c11", "l1", "0", "4", "3"]
 _NVBIT_TIMEOUT_POLICY = "process_group_terminate_reap_v1"
 _NVBIT_TIMEOUT_POLICY_VERSION = 1
+_NVBIT_OUTPUT_CONTRACT_VERSION = 1
+_NVBIT_REQUIRED_OUTPUTS = (
+    "dynamic_trace.pb",
+    "stats.csv",
+    "extra_info/traced_kernel_modules.json",
+    "extra_info/enhanced_execution_info.json",
+)
+_EXPECTED_TRACER_PATH = REPO_ROOT / "tools/nvbit_tracer/tracer_tool/tracer_tool.so"
+_EXPECTED_RUNTIME_MANIFEST_PATH = str(
+    runtime_env.default_runtime_manifest_path(_EXPECTED_TRACER_PATH)
+)
 
 _CORRECTNESS_INJECTION_VARIABLES = frozenset(
     {
@@ -248,6 +261,54 @@ def _sha256(path: Path) -> str:
         for chunk in iter(lambda: stream.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def _runtime_closure_sha256(closure: Mapping[str, str]) -> str:
+    payload = json.dumps(sorted(closure.items()), separators=(",", ":")).encode()
+    return hashlib.sha256(payload).hexdigest()
+
+
+def _validate_runtime_authority_record(
+    record: Mapping[str, Any],
+    *,
+    tracer_sha256: str,
+) -> None:
+    """Validate the authenticated runtime manifest and its DSO closure."""
+
+    if record.get("runtime_manifest_path") != _EXPECTED_RUNTIME_MANIFEST_PATH:
+        raise ValueError("NVBit runtime manifest path is not the retained authority")
+    manifest_path = Path(_EXPECTED_RUNTIME_MANIFEST_PATH)
+    if not manifest_path.is_file():
+        raise ValueError("NVBit runtime manifest authority is missing")
+    manifest_hash = record.get("runtime_manifest_sha256")
+    if not isinstance(manifest_hash, str) or _sha256(manifest_path) != manifest_hash:
+        raise ValueError("NVBit runtime manifest hash does not match")
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        immutable_artifact.verify_model_seal(manifest)
+    except (OSError, ValueError, RuntimeError, json.JSONDecodeError) as exc:
+        raise ValueError("NVBit runtime manifest is not authenticated JSON") from exc
+    if not isinstance(manifest, Mapping):
+        raise ValueError("NVBit runtime manifest is malformed")
+    tracer = manifest.get("tracer")
+    if not isinstance(tracer, Mapping) or tracer.get("sha256") != tracer_sha256:
+        raise ValueError("NVBit runtime manifest tracer identity differs")
+    rows = manifest.get("dsos")
+    if not isinstance(rows, list) or not rows:
+        raise ValueError("NVBit runtime manifest DSO closure is empty")
+    expected_closure = {
+        str(row["soname"]): str(row["sha256"])
+        for row in rows
+        if isinstance(row, Mapping) and isinstance(row.get("soname"), str)
+        and isinstance(row.get("sha256"), str)
+    }
+    observed_closure = record.get("runtime_dso_closure")
+    if not isinstance(observed_closure, Mapping) or {
+        str(key): str(value) for key, value in observed_closure.items()
+    } != expected_closure:
+        raise ValueError("NVBit runtime DSO closure differs from the authority")
+    if record.get("runtime_dso_closure_sha256") != _runtime_closure_sha256(expected_closure):
+        raise ValueError("NVBit runtime DSO closure hash does not match")
 
 
 def _tree_sha256(path: Path) -> str:
@@ -716,6 +777,16 @@ def _validate_nvbit_environment_record(
         "timeout_seconds",
         "timeout_policy",
         "timeout_policy_version",
+        "runtime_manifest_path",
+        "runtime_manifest_sha256",
+        "runtime_dso_closure",
+        "runtime_dso_closure_sha256",
+        "runtime_error",
+        "output_contract_version",
+        "required_outputs",
+        "payload_file_count",
+        "output_contract_passed",
+        "output_contract_error",
         "started_at",
         "finished_at",
     }:
@@ -733,15 +804,40 @@ def _validate_nvbit_environment_record(
         or not isinstance(record.get("started_at"), str)
         or not isinstance(record.get("finished_at"), str)
         or record.get("environment") != dict(expected_environment)
-        or record.get("effective_environment") != dict(expected_environment)
     ):
         raise ValueError(f"{cell_id}: NVBit effective environment is not the sanitized contract")
+    effective = record.get("effective_environment")
+    if not isinstance(effective, Mapping) or set(effective) != set(expected_environment):
+        raise ValueError(f"{cell_id}: NVBit effective environment key set is malformed")
+    for key in ("HOME", "LANG", "LC_ALL", "PATH", "TRACES_FOLDER"):
+        if effective.get(key) != expected_environment.get(key):
+            raise ValueError(f"{cell_id}: NVBit effective environment {key} differs")
+    if (
+        not isinstance(effective.get("LD_LIBRARY_PATH"), str)
+        or not effective["LD_LIBRARY_PATH"].startswith("/proc/self/fd/")
+        or not isinstance(effective.get("CUDA_INJECTION64_PATH"), str)
+        or not effective["CUDA_INJECTION64_PATH"].startswith("/proc/self/fd/")
+    ):
+        raise ValueError(f"{cell_id}: NVBit effective environment is not descriptor-backed")
     if (
         record.get("timeout_seconds") != expected_timeout
         or record.get("timeout_policy") != _NVBIT_TIMEOUT_POLICY
         or record.get("timeout_policy_version") != _NVBIT_TIMEOUT_POLICY_VERSION
     ):
         raise ValueError(f"{cell_id}: NVBit timeout policy is not bound to the stage contract")
+    tracer_path = expected_environment.get("CUDA_INJECTION64_PATH")
+    tracer_digest = _sha256(REPO_ROOT / tracer_path) if isinstance(tracer_path, str) else ""
+    _validate_runtime_authority_record(record, tracer_sha256=tracer_digest)
+    if (
+        record.get("runtime_error") is not None
+        or record.get("output_contract_version") != _NVBIT_OUTPUT_CONTRACT_VERSION
+        or record.get("required_outputs") != list(_NVBIT_REQUIRED_OUTPUTS)
+        or not isinstance(record.get("payload_file_count"), int)
+        or record.get("payload_file_count") <= 0
+        or record.get("output_contract_passed") is not True
+        or record.get("output_contract_error") is not None
+    ):
+        raise ValueError(f"{cell_id}: NVBit output contract is incomplete")
     absent = record.get("forbidden_variables_absent")
     if not isinstance(absent, list) or set(absent) != set(_NVBIT_FORBIDDEN_ENVIRONMENT_CONTROLS):
         raise ValueError(f"{cell_id}: NVBit forbidden-environment absence record is malformed")
@@ -850,6 +946,39 @@ def _validate_nvbit_stage(
         raise ValueError(f"{cell_id}: NVBit binding effective-environment identity differs")
     if binding.get("argv") != argv or binding.get("environment") != dict(environment):
         raise ValueError(f"{cell_id}: NVBit binding sidecar command/environment differs")
+    environment_doc = replay_resume.load_json_strict(
+        _assert_file(root, environment_record, f"{cell_id}.nvbit.environment")
+    )
+    for key in (
+        "runtime_manifest_path",
+        "runtime_manifest_sha256",
+        "runtime_dso_closure",
+        "runtime_dso_closure_sha256",
+        "output_contract_version",
+        "required_outputs",
+        "payload_file_count",
+        "output_contract_passed",
+    ):
+        if binding.get(key) != environment_doc.get(key):
+            raise ValueError(f"{cell_id}: NVBit binding {key} differs from the capture record")
+    for key in (
+        "runtime_manifest_path",
+        "runtime_manifest_sha256",
+        "runtime_dso_closure_sha256",
+        "output_contract_version",
+        "required_outputs",
+        "payload_file_count",
+        "output_contract_passed",
+    ):
+        if stage.get(key) != environment_doc.get(key):
+            raise ValueError(f"{cell_id}: NVBit stage {key} differs from the capture record")
+    for relative in _NVBIT_REQUIRED_OUTPUTS:
+        artifact = _assert_file(root, output + "/" + relative, f"{cell_id}.nvbit.{relative}")
+        if artifact.stat().st_size == 0:
+            raise ValueError(f"{cell_id}: NVBit required output is empty: {relative}")
+    payloads = list((_assert_file(root, output + "/dynamic_trace.pb", f"{cell_id}.nvbit.dynamic_trace").parent / "threadblocks").rglob("*.pb"))
+    if len(payloads) != environment_doc.get("payload_file_count") or not payloads:
+        raise ValueError(f"{cell_id}: NVBit payload-file count is not bound")
     bound_binary = binding.get("trace_binary")
     if not isinstance(bound_binary, Mapping) or bound_binary.get("path") != trace_binary or bound_binary.get("sha256") != trace_binary_hash:
         raise ValueError(f"{cell_id}: NVBit binding sidecar binary identity differs")
@@ -1520,6 +1649,19 @@ def _validate_cp_async_matched_execution(cell: Mapping[str, Any]) -> None:
     }
     if matched != expected:
         raise ValueError("cp_async_canary: matched 64-group stage provenance is malformed")
+    limitations = cell.get("limitations")
+    required_limitation = (
+        "Matched NCU and simulator stages both use 64 groups; only the separate "
+        "16,384-group scaling observation uses 16,384 groups."
+    )
+    if not isinstance(limitations, list) or required_limitation not in limitations:
+        raise ValueError("cp_async_canary: group-count limitation text is stale")
+    if any(
+        isinstance(item, str)
+        and "NCU target uses 16384 groups" in item
+        for item in limitations
+    ):
+        raise ValueError("cp_async_canary: limitation contradicts matched provenance")
 
 
 def _validate_cell(
@@ -1863,6 +2005,21 @@ def validate(manifest_path: Path, report_path: Path | None) -> int:
         raise ValueError("trusted NCU executable is missing")
     if _sha256(ncu_executable) != _TRUSTED_NCU_IDENTITY["sha256"]:
         raise ValueError("manifest NCU executable hash does not match the trusted toolchain")
+    runtime_authority = document.get("runtime_authority")
+    if not isinstance(runtime_authority, Mapping):
+        raise ValueError("manifest NVBit runtime authority is missing")
+    authority_record = {
+        "runtime_manifest_path": runtime_authority.get("path"),
+        "runtime_manifest_sha256": runtime_authority.get("sha256"),
+        "runtime_dso_closure": runtime_authority.get("dso_closure"),
+        "runtime_dso_closure_sha256": runtime_authority.get("dso_closure_sha256"),
+    }
+    _validate_runtime_authority_record(
+        authority_record,
+        tracer_sha256=str(repository.get("tracer_dso_sha256", "")),
+    )
+    if runtime_authority.get("dso_count") != len(authority_record["runtime_dso_closure"]):
+        raise ValueError("manifest NVBit runtime authority DSO count is stale")
     host_record_path = _assert_file(root, host.get("preflight_record"), "host.preflight_record")
     _validate_host_preflight(root, host_record_path, repository, host, tools)
     _validate_release_build(root, document, repository)

@@ -4,6 +4,8 @@
 from __future__ import annotations
 
 import argparse
+import csv
+import hashlib
 import json
 import os
 import shlex
@@ -13,6 +15,7 @@ import sys
 from contextlib import suppress
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Mapping
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
@@ -24,7 +27,12 @@ from workloads.research_probes.validate_sm86_live_cohort import (
     _expected_nvbit_argv,
     _expected_nvbit_environment,
 )
-from tools.nvbit_tracer.runtime_env import sanitized_capture_environment
+from tools.local_labels.immutable_artifact import open_retained_regular
+from tools.nvbit_tracer.runtime_env import (
+    TracerRuntimeError,
+    default_runtime_manifest_path,
+    retained_tracer_runtime_env,
+)
 
 
 DEFAULT_OUTPUT_ROOT = "results/captures/sm86_simulator_live_baseline_20260829_v2"
@@ -33,6 +41,120 @@ MAX_TIMEOUT_SECONDS = 3600
 TERMINATION_GRACE_SECONDS = 5
 TIMEOUT_POLICY = "process_group_terminate_reap_v1"
 TIMEOUT_POLICY_VERSION = 1
+OUTPUT_CONTRACT_VERSION = 1
+REQUIRED_OUTPUTS = (
+    "dynamic_trace.pb",
+    "stats.csv",
+    "extra_info/traced_kernel_modules.json",
+    "extra_info/enhanced_execution_info.json",
+)
+TRACER_PATH = REPO_ROOT / "tools/nvbit_tracer/tracer_tool/tracer_tool.so"
+PB_LIB_PATH = REPO_ROOT / ".toolchain/pb/lib"
+RUNTIME_MANIFEST_PATH = default_runtime_manifest_path(TRACER_PATH)
+
+
+def _runtime_closure_sha256(closure: Mapping[str, str]) -> str:
+    payload = json.dumps(sorted(closure.items()), separators=(",", ":")).encode()
+    return hashlib.sha256(payload).hexdigest()
+
+
+def _logical_environment(
+    cell: Mapping[str, object], relative_output: str, destination: Path
+) -> dict[str, str]:
+    environment = _expected_nvbit_environment(cell, relative_output, root=REPO_ROOT)
+    environment["TRACES_FOLDER"] = str(destination.resolve())
+    return environment
+
+
+def _effective_environment(
+    runtime: object,
+    retained_tracer: object,
+    logical: Mapping[str, str],
+    destination: Path,
+) -> dict[str, str]:
+    """Compose the child environment from authenticated descriptor paths."""
+
+    environment = dict(getattr(runtime, "environment"))
+    environment["CUDA_INJECTION64_PATH"] = str(
+        getattr(retained_tracer, "proc_path")
+    )
+    environment["USER_DEFINED_FOLDERS"] = logical["USER_DEFINED_FOLDERS"]
+    environment["TRACES_FOLDER"] = str(destination.resolve())
+    environment["ACTIVE_FROM_START"] = logical["ACTIVE_FROM_START"]
+    environment["SKIP_ENHANCED_TRACER"] = logical["SKIP_ENHANCED_TRACER"]
+    if "DYNAMIC_KERNEL_LIMIT_START" in logical:
+        environment["DYNAMIC_KERNEL_LIMIT_START"] = logical[
+            "DYNAMIC_KERNEL_LIMIT_START"
+        ]
+        environment["DYNAMIC_KERNEL_LIMIT_END"] = logical["DYNAMIC_KERNEL_LIMIT_END"]
+        environment["ENHANCED_TRACER_MAX_PARSER_INPUT_KB"] = logical[
+            "ENHANCED_TRACER_MAX_PARSER_INPUT_KB"
+        ]
+        environment["ENHANCED_TRACER_PER_CUBIN_TIMEOUT_S"] = logical[
+            "ENHANCED_TRACER_PER_CUBIN_TIMEOUT_S"
+        ]
+    return environment
+
+
+def _output_contract(destination: Path) -> dict[str, object]:
+    """Check the complete NVBit artifact set before reporting success."""
+
+    missing = [
+        relative
+        for relative in REQUIRED_OUTPUTS
+        if not (destination / relative).is_file()
+        or (destination / relative).stat().st_size == 0
+    ]
+    payloads = sorted(
+        path
+        for path in (destination / "threadblocks").rglob("*.pb")
+        if path.is_file() and path.stat().st_size > 0
+    ) if (destination / "threadblocks").is_dir() else []
+    errors: list[str] = []
+    if missing:
+        errors.append("missing or empty outputs: " + ", ".join(missing))
+    if not payloads:
+        errors.append("no non-empty threadblocks/*.pb payload files")
+    if not errors:
+        try:
+            rows = []
+            with (destination / "stats.csv").open(
+                encoding="utf-8", newline=""
+            ) as handle:
+                for raw in csv.DictReader(handle):
+                    row = {
+                        str(key).strip(): str(value).strip()
+                        for key, value in raw.items()
+                    }
+                    if row.get("kernel mangled name"):
+                        rows.append(row)
+            if len(rows) != 1:
+                errors.append("stats.csv must contain exactly one kernel row")
+            elif rows[0].get("total_insts") != rows[0].get("total_reported_insts"):
+                errors.append("stats.csv total_insts differs from total_reported_insts")
+            mapping = json.loads(
+                (destination / "extra_info/traced_kernel_modules.json").read_text()
+            )
+            execution = json.loads(
+                (destination / "extra_info/enhanced_execution_info.json").read_text()
+            )
+            if not isinstance(mapping, Mapping) or not isinstance(
+                mapping.get("launches"), list
+            ) or len(mapping["launches"]) != 1:
+                errors.append("traced-kernel mapping must contain one launch")
+            if not isinstance(execution, Mapping) or not isinstance(
+                execution.get("kernels"), list
+            ) or len(execution["kernels"]) != 1:
+                errors.append("enhanced execution metadata must contain one kernel")
+        except (OSError, ValueError, json.JSONDecodeError, csv.Error) as exc:
+            errors.append(f"auxiliary output schema error: {exc}")
+    return {
+        "version": OUTPUT_CONTRACT_VERSION,
+        "required_outputs": list(REQUIRED_OUTPUTS),
+        "payload_file_count": len(payloads),
+        "passed": not errors,
+        "error": "; ".join(errors) if errors else None,
+    }
 
 
 def _now() -> str:
@@ -131,53 +253,115 @@ def capture(cell_id: str, output_root: Path, timeout_seconds: int) -> int:
         )
     destination.mkdir(parents=True, exist_ok=True)
     argv = _expected_nvbit_argv(cell)
-    # Call the shared sanitizer first so loader/tracer controls from the
-    # parent can never flow into the child; the exact contract below then
-    # restricts the sanitized result to the small reproducible allowlist.
-    sanitized_capture_environment(dict(os.environ))
-    environment = _expected_nvbit_environment(cell, relative_output)
-    environment["TRACES_FOLDER"] = str(destination.resolve())
+    # Keep the durable logical contract separate from the descriptor-backed
+    # effective environment.  The latter contains /proc/self/fd paths whose
+    # numbers are intentionally ephemeral and must never be treated as a
+    # portable artifact identity.
+    logical_environment = _logical_environment(cell, relative_output, destination)
+    effective_environment = dict(logical_environment)
     started = _now()
     timed_out = False
     cleanup_complete = True
+    runtime_manifest_path: str | None = None
+    runtime_manifest_sha256: str | None = None
+    runtime_dso_closure: dict[str, str] = {}
+    runtime_dso_closure_sha256: str | None = None
+    runtime_error: str | None = None
+    output_contract: dict[str, object] = {
+        "version": OUTPUT_CONTRACT_VERSION,
+        "required_outputs": list(REQUIRED_OUTPUTS),
+        "payload_file_count": 0,
+        "passed": False,
+        "error": "capture did not reach output validation",
+    }
     try:
-        popen_kwargs: dict[str, object] = {
-            "cwd": REPO_ROOT,
-            "env": environment,
-            "stdin": subprocess.DEVNULL,
-            "stdout": subprocess.PIPE,
-            "stderr": subprocess.PIPE,
-            "text": True,
-        }
-        if os.name == "nt":
-            popen_kwargs["creationflags"] = getattr(
-                subprocess, "CREATE_NEW_PROCESS_GROUP", 0
-            )
-        else:
-            popen_kwargs["start_new_session"] = True
-        process = subprocess.Popen(argv, **popen_kwargs)
-        try:
-            stdout, stderr = process.communicate(timeout=timeout_seconds)
-        except subprocess.TimeoutExpired as exc:
-            timed_out = True
-            cleanup_complete = _terminate(process)
-            try:
-                stdout, stderr = process.communicate(timeout=TERMINATION_GRACE_SECONDS)
-            except subprocess.TimeoutExpired:
-                cleanup_complete = _terminate(process) and cleanup_complete
-                stdout = _text_output(exc.output)
-                stderr = _text_output(exc.stderr)
-                if process.stdout is not None:
-                    process.stdout.close()
-                if process.stderr is not None:
-                    process.stderr.close()
-        stdout = _text_output(stdout)
-        stderr = _text_output(stderr)
-        return_code = process.returncode if process.returncode is not None else -signal.SIGTERM
+        with open_retained_regular(TRACER_PATH) as retained_tracer:
+            with open_retained_regular(RUNTIME_MANIFEST_PATH) as retained_manifest:
+                with retained_tracer_runtime_env(
+                    retained_tracer.path,
+                    base_env={
+                        "HOME": "/home/jakeshea",
+                        "LANG": "C",
+                        "LC_ALL": "C",
+                        "PATH": "/usr/local/cuda-13.2/bin:/opt/cuda/bin:/usr/bin:/bin",
+                    },
+                    pb_lib=PB_LIB_PATH,
+                    runtime_manifest=RUNTIME_MANIFEST_PATH,
+                    retained_descriptor=retained_tracer.descriptor,
+                    retained_manifest_descriptor=retained_manifest.descriptor,
+                ) as retained_runtime:
+                    retained_runtime.verify_unchanged()
+                    runtime_manifest_path = str(retained_runtime.runtime_manifest_path)
+                    runtime_manifest_sha256 = retained_runtime.runtime_manifest_sha256
+                    runtime_dso_closure = dict(retained_runtime.dso_sha256)
+                    runtime_dso_closure_sha256 = _runtime_closure_sha256(
+                        runtime_dso_closure
+                    )
+                    effective_environment = _effective_environment(
+                        retained_runtime,
+                        retained_tracer,
+                        logical_environment,
+                        destination,
+                    )
+                    popen_kwargs: dict[str, object] = {
+                        "cwd": REPO_ROOT,
+                        "env": effective_environment,
+                        "stdin": subprocess.DEVNULL,
+                        "stdout": subprocess.PIPE,
+                        "stderr": subprocess.PIPE,
+                        "text": True,
+                    }
+                    if os.name == "nt":
+                        popen_kwargs["creationflags"] = getattr(
+                            subprocess, "CREATE_NEW_PROCESS_GROUP", 0
+                        )
+                    else:
+                        popen_kwargs["start_new_session"] = True
+                        popen_kwargs["pass_fds"] = tuple(
+                            dict.fromkeys(
+                                (
+                                    retained_tracer.descriptor,
+                                    retained_manifest.descriptor,
+                                    *retained_runtime.pass_fds,
+                                )
+                            )
+                        )
+                    process = subprocess.Popen(argv, **popen_kwargs)
+                    try:
+                        stdout, stderr = process.communicate(timeout=timeout_seconds)
+                    except subprocess.TimeoutExpired as exc:
+                        timed_out = True
+                        cleanup_complete = _terminate(process)
+                        try:
+                            stdout, stderr = process.communicate(
+                                timeout=TERMINATION_GRACE_SECONDS
+                            )
+                        except subprocess.TimeoutExpired:
+                            cleanup_complete = _terminate(process) and cleanup_complete
+                            stdout = _text_output(exc.output)
+                            stderr = _text_output(exc.stderr)
+                            if process.stdout is not None:
+                                process.stdout.close()
+                            if process.stderr is not None:
+                                process.stderr.close()
+                    stdout = _text_output(stdout)
+                    stderr = _text_output(stderr)
+                    return_code = (
+                        process.returncode
+                        if process.returncode is not None
+                        else -signal.SIGTERM
+                    )
+                    retained_runtime.verify_unchanged()
     except OSError as exc:
         stdout = ""
         stderr = str(exc)
         return_code = 127
+        runtime_error = str(exc)
+    except TracerRuntimeError as exc:
+        stdout = ""
+        stderr = f"runtime provenance: {exc}"
+        return_code = 126
+        runtime_error = f"{exc.reason}: {exc.detail}"
     (destination / "stdout.txt").write_text(stdout, encoding="utf-8")
     (destination / "stderr.txt").write_text(stderr, encoding="utf-8")
     (destination / "command.txt").write_text(shlex.join(argv) + "\n", encoding="utf-8")
@@ -188,8 +372,8 @@ def capture(cell_id: str, output_root: Path, timeout_seconds: int) -> int:
         "argv": argv,
         "output": relative_output,
         "launch_mode": "env_i_exact_allowlist",
-        "environment": environment,
-        "effective_environment": environment,
+        "environment": logical_environment,
+        "effective_environment": effective_environment,
         "forbidden_variables_absent": sorted(_NVBIT_FORBIDDEN_ENVIRONMENT_CONTROLS),
         "return_code": return_code,
         "timed_out": timed_out,
@@ -197,6 +381,16 @@ def capture(cell_id: str, output_root: Path, timeout_seconds: int) -> int:
         "timeout_seconds": timeout_seconds,
         "timeout_policy": TIMEOUT_POLICY,
         "timeout_policy_version": TIMEOUT_POLICY_VERSION,
+        "runtime_manifest_path": runtime_manifest_path,
+        "runtime_manifest_sha256": runtime_manifest_sha256,
+        "runtime_dso_closure": runtime_dso_closure,
+        "runtime_dso_closure_sha256": runtime_dso_closure_sha256,
+        "runtime_error": runtime_error,
+        "output_contract_version": OUTPUT_CONTRACT_VERSION,
+        "required_outputs": list(REQUIRED_OUTPUTS),
+        "payload_file_count": 0,
+        "output_contract_passed": False,
+        "output_contract_error": "capture did not reach output validation",
         "started_at": started,
         "finished_at": _now(),
     }
@@ -207,10 +401,26 @@ def capture(cell_id: str, output_root: Path, timeout_seconds: int) -> int:
     trace = destination / "dynamic_trace.pb"
     if timed_out:
         raise RuntimeError(f"{cell_id}: NVBit capture timed out after {timeout_seconds}s")
+    if runtime_error is not None:
+        raise RuntimeError(f"{cell_id}: NVBit runtime provenance failed: {runtime_error}")
     if return_code != 0:
         raise RuntimeError(f"{cell_id}: NVBit capture exited {return_code}; see {destination / 'stderr.txt'}")
-    if not trace.is_file() or trace.stat().st_size == 0:
-        raise RuntimeError(f"{cell_id}: NVBit capture produced no dynamic trace")
+    output_contract = _output_contract(destination)
+    environment_record.update(
+        {
+            "payload_file_count": output_contract["payload_file_count"],
+            "output_contract_passed": output_contract["passed"],
+            "output_contract_error": output_contract["error"],
+        }
+    )
+    (destination / "environment.json").write_text(
+        json.dumps(environment_record, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    if output_contract["passed"] is not True:
+        raise RuntimeError(
+            f"{cell_id}: NVBit output contract failed: {output_contract['error']}"
+        )
     print(f"captured {cell_id}: {trace.stat().st_size} dynamic-trace bytes")
     return 0
 
