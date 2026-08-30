@@ -47,6 +47,29 @@ the baseline handoff; the exact prospective follow-up contract is pinned in
 sector conservation plus readiness/frontier invariants for the active and
 supplemental replay sets.
 
+## SM86 LDGSTS burst-release discriminator (2026-08-30)
+
+The standalone 40-cell barrier-free LDGSTS campaign has now run its repaired
+build/static, correctness, seven-repetition direct, and 120-profile trusted-NCU
+stages. The retained reduction is
+[the v4 live report](../results/captures/sm86_ldgsts_burst_release_20260830_v4/analysis/README.md).
+The gapped target was tightened to one inline-PTX copy/clock region so static
+issue/gap/drain wait masks are zero and normal achieved short/long gaps land in
+the frozen windows. A few raw scheduler pauses and three NCU LTS conservation
+deviations remain explicitly retained, not clipped.
+
+The measured issue frontier is flat at zero gap (`K=0` for L1, L2, and DRAM;
+`R=0` across depths), while the independent post-issue completion frontier is
+strongly route/depth ordered (L2-minus-L1 rises from roughly 179 to 267 cycles).
+The separate LDG control has no positive knee (`P=4`, `S=4`, `K=0`), so the
+frozen identification gate is `invalid_clock_assay`/no-model rather than a
+timing candidate. The external fixed-clock lock was unavailable because
+non-interactive sudo requires a password. The full 16,384-burst NVBit capture
+timed out before a complete trace, while a marker-scoped 64-burst NCU-mode
+smoke produced a complete trace and two byte-identical simulator replays;
+those are pipeline-only evidence, not matrix timing results. No simulator
+timing state was changed. JADE/HETR and CPU-GPU co-simulation remain deferred.
+
 The 2026-08-17
 [causal-readiness milestone](sm86_causal_readiness_milestone.md) is complete.
 Reason-tagged dependency, async-copy, CTA-generation/arrival-spread, and

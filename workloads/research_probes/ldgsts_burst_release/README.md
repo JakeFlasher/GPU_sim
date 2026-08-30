@@ -1,27 +1,27 @@
 # LDGSTS barrier-free burst assay
 
-The exact prospective execution contract for the next GPU-only discriminator
-is tracked at
+The execution contract for this GPU-only discriminator is tracked at
 [`plans/sm86_ldgsts_burst_release_next_discriminator.json`](../../../plans/sm86_ldgsts_burst_release_next_discriminator.json).
 It pins the source/binary, enabled-versus-off arms, 40-cell geometry, bounded
 correctness/NVBit/NCU/static/sim-run commands, output paths, independent issue
-and drain/%smid observables, and explicit pass/falsify/unknown rules. Its
-status is `prospective_not_run`; the current SM86 closure deliberately holds
-these measurements out of the scored cohort.
+and drain/%smid observables, and explicit pass/falsify/unknown rules. The live
+run is retained outside the scored simulator cohort at
+`results/captures/sm86_ldgsts_burst_release_20260830_v4/analysis/`.
 
 This prospective `sm_86` probe separates the pre-commit LDGSTS issue interval
 from the post-issue completion interval. It crosses depths around the published
 five-position boundary, but does not assume that software async groups expose a
 physical queue or that a dependency latency releases an entry.
 
-## Current boundary
+## Current boundary and live result
 
-Rounds 0–1 provide the fixed target/campaign scaffold and pure offline analyzer
-logic.
+The target, campaign, strict offline reducer, and streaming live adapter are
+implemented. `campaign.py ncu` performs the frozen three-repeat trusted-NCU
+profiles with application replay and comparison-only metrics; `live_analysis.py`
+consumes the retained direct/NCU trees without loading multi-gigabyte JSONL into
+memory.
 The generated executable is intentionally ignored by the sibling `.gitignore`.
-Only synthetic fixtures are consumed by `analyze.py`; it does not discover a
-capture tree, invoke CUDA, open an NCU report, or infer a result. Run the local
-checks with:
+Run the local checks with:
 
 ```bash
 PYTHONDONTWRITEBYTECODE=1 python3 \
@@ -32,20 +32,29 @@ PYTHONDONTWRITEBYTECODE=1 python3 \
   workloads/research_probes/ldgsts_burst_release/campaign.py direct --dry-run
 PYTHONDONTWRITEBYTECODE=1 python3 \
   workloads/research_probes/ldgsts_burst_release/campaign.py ncu --dry-run
+PYTHONDONTWRITEBYTECODE=1 python3 \
+  workloads/research_probes/ldgsts_burst_release/live_analysis.py \
+  --root results/captures/sm86_ldgsts_burst_release_20260830_v4 --force
 ```
 
-The NCU command is still prospective in this scaffold. Its exact metric, application-
-replay, cache/clock-control, detailed-instance, preflight, and repeat commands
-are available through `ncu --dry-run`; a non-dry `ncu` action exits clearly
-until the later live NCU implementation is added.
+The terminal live observation is a no-cliff issue result: zero-gap LDGSTS
+`P/S/K` and all L1-versus-DRAM issue contrasts are flat and repeat-stable,
+whereas the independently retained post-issue completion contrasts are large
+and route/depth ordered. The independent LDG clock control has `P=4`, `S=4`,
+`K=0`, so the required positive clock-assay knee is absent. The run also retains
+eight raw achieved-gap scheduling outliers and three matched NCU LTS conservation
+deviations; these keep the strict experiment admission closed. The external
+1350/10501 MHz lock could not be applied because non-interactive `sudo` requires
+a password. The full 16,384-burst NVBit capture hit its bounded timeout before
+producing a complete trace. A marker-scoped 64-burst NCU-mode smoke did
+produce a complete trace and two byte-identical simulator replays; those are
+pipeline-only evidence, not matrix timing results.
 
 The analyzer fixtures check the exact matrix, timing-schema-2 paired rows,
 process-level effects, P/S/K/R contrasts, achieved-gap matching, staged
-W1/W4/L2 status precedence, and hard threshold boundaries. NCU work/route/SMSP
-admission and live direct collection remain reserved for a later phase. There
-is no fitted timing constant. Raw captures from the earlier post-issue drain
-encoding are intentionally incompatible with timing schema 2 and are not
-silently mixed.
+W1/W4/L2 status precedence, and hard threshold boundaries. There is no fitted
+timing constant. Raw captures from the earlier post-issue drain encoding are
+intentionally incompatible with timing schema 2 and are not silently mixed.
 
 The pure reducer surface is `reduce_pskr()` (or `reduce_slot_pskr()` for one
 W4 slot), followed by `classify_identification()`, `classify_placement()`,
@@ -104,8 +113,8 @@ round, not a permission token or workflow gate. Correctness and direct actions
 remain explicit campaign commands, never analyzer side effects. When used,
 they run serially on one selected GPU with bounded subprocesses,
 selected-device binding, fixed-clock restoration, and atomic complete-only
-bundle publication. NCU execution is not implemented in Round 0; only its
-dry-run command surface exists. Do not run a live stage concurrently with
+bundle publication. NCU profiles use the trusted executable recorded in each
+cell's metadata and are comparison-only. Do not run a live stage concurrently with
 another GPU campaign.
 If a live subprocess fails, its partial raw directory is retained as a
 `<cell>.failed*` sibling with a small failure record; only directories with a
@@ -124,10 +133,11 @@ before the first target instruction; they are part of the fixed timed body and
 are not silently treated as LDGSTS work. Position zero is unpredicated because
 SM86 exposes seven user predicate registers; the empty off arm is a separate
 paired baseline by design.
-The gapped variants compile and pass small correctness smokes, but their
-generated control sidecar still shows compiler scheduling wait masks on some
-inter-position clock reads; spacing interpretation remains a technical
-follow-up rather than a claim from this scaffold.
+The gapped variants use one inline-PTX target/clock region, so the current
+control sidecar reports zero wait masks on all gapped issue, gap, and drain
+clocks. The 32-bit `%clock` spin keeps nominal short/long achieved delays in
+the frozen windows in normal samples; raw scheduling pauses remain visible in
+the retained stream and are never clipped in the scientific record.
 The report separates the start-clock scheduler mask from the issue/drain
 endpoint masks: current zero-gap issue and drain endpoints and all target rows
 decode with wait mask zero, while a compact start clock may carry a pre-target

@@ -2,6 +2,14 @@
   "schema_version": 1,
   "id": "sm86_ldgsts_burst_release_next_discriminator",
   "status": "prospective_not_run",
+  "attempt": {
+    "status": "invalid_experiment",
+    "evidence_root": "results/captures/sm86_ldgsts_burst_release_20260830_v4",
+    "analysis": "results/captures/sm86_ldgsts_burst_release_20260830_v4/analysis/report.json",
+    "terminal_reason": "The independent LDG clock assay had no positive K knee; raw gap pauses, NCU counter deviations, unavailable fixed-clock lock, and a bounded NVBit timeout keep the strict successor gate closed.",
+    "simulator_replay": "smoke_only_byte_identical",
+    "simulator_smoke": "results/captures/sm86_ldgsts_burst_release_20260830_v4/simulator/smoke5_ldgsts_w1_l1_d4_b64"
+  },
   "purpose": "Separate the SM86 LDGSTS issue frontier from post-issue completion/retirement before changing simulator timing state.",
   "working_directory": ".",
   "architecture": "sm_86",
@@ -69,48 +77,48 @@
     }
   },
   "outputs": {
-    "root": "results/captures/sm86_ldgsts_burst_release_20260830_v1",
-    "build": "results/captures/sm86_ldgsts_burst_release_20260830_v1/build",
-    "correctness": "results/captures/sm86_ldgsts_burst_release_20260830_v1/correctness",
-    "static": "results/captures/sm86_ldgsts_burst_release_20260830_v1/static",
-    "direct": "results/captures/sm86_ldgsts_burst_release_20260830_v1/direct",
-    "nvbit": "results/captures/sm86_ldgsts_burst_release_20260830_v1/nvbit/ldgsts_w1_l1_d4_g0",
-    "ncu": "results/captures/sm86_ldgsts_burst_release_20260830_v1/ncu/ldgsts_w1_l1_d4_g0/repeat-1",
-    "simulator": "results/captures/sm86_ldgsts_burst_release_20260830_v1/simulator/ldgsts_w1_l1_d4_g0"
+    "root": "results/captures/sm86_ldgsts_burst_release_20260830_v4",
+    "build": "results/captures/sm86_ldgsts_burst_release_20260830_v4/build",
+    "correctness": "results/captures/sm86_ldgsts_burst_release_20260830_v4/correctness",
+    "static": "results/captures/sm86_ldgsts_burst_release_20260830_v4/static",
+    "direct": "results/captures/sm86_ldgsts_burst_release_20260830_v4/direct",
+    "nvbit": "results/captures/sm86_ldgsts_burst_release_20260830_v4/nvbit/ldgsts_w1_l1_d4_g0",
+    "ncu": "results/captures/sm86_ldgsts_burst_release_20260830_v4/ncu/ldgsts_w1_l1_d4_g0/repeat-1",
+    "simulator": "results/captures/sm86_ldgsts_burst_release_20260830_v4/simulator/ldgsts_w1_l1_d4_g0"
   },
   "commands": {
     "build": {
       "argv": ["make", "-C", "workloads/research_probes/ldgsts_burst_release", "clean", "all"],
       "timeout_seconds": 600,
-      "stdout": "results/captures/sm86_ldgsts_burst_release_20260830_v1/build/stdout.txt",
-      "stderr": "results/captures/sm86_ldgsts_burst_release_20260830_v1/build/stderr.txt"
+      "stdout": "results/captures/sm86_ldgsts_burst_release_20260830_v4/build/stdout.txt",
+      "stderr": "results/captures/sm86_ldgsts_burst_release_20260830_v4/build/stderr.txt"
     },
     "correctness": {
       "argv": [
         ".venv/bin/python", "workloads/research_probes/ldgsts_burst_release/campaign.py", "correctness",
-        "--output-root", "results/captures/sm86_ldgsts_burst_release_20260830_v1", "--gpu", "0",
+        "--output-root", "results/captures/sm86_ldgsts_burst_release_20260830_v4", "--gpu", "0",
         "--cells", "ldgsts_w1_l1_d4_g0,ldgsts_w4_l1_d4_g0,ldg_w1_l1_d4_g0", "--force"
       ],
       "timeout_seconds": 1800,
-      "outputs": "results/captures/sm86_ldgsts_burst_release_20260830_v1/correctness"
+      "outputs": "results/captures/sm86_ldgsts_burst_release_20260830_v4/correctness"
     },
     "static": {
       "argv": [
         ".venv/bin/python", "workloads/research_probes/ldgsts_burst_release/campaign.py", "static",
-        "--output-root", "results/captures/sm86_ldgsts_burst_release_20260830_v1", "--force"
+        "--output-root", "results/captures/sm86_ldgsts_burst_release_20260830_v4", "--force"
       ],
       "timeout_seconds": 300,
-      "control": "results/captures/sm86_ldgsts_burst_release_20260830_v1/static/control_bits.json"
+      "control": "results/captures/sm86_ldgsts_burst_release_20260830_v4/static/control_bits.json"
     },
     "direct": {
       "argv": [
         ".venv/bin/python", "workloads/research_probes/ldgsts_burst_release/campaign.py", "direct",
-        "--output-root", "results/captures/sm86_ldgsts_burst_release_20260830_v1", "--gpu", "0",
+        "--output-root", "results/captures/sm86_ldgsts_burst_release_20260830_v4", "--gpu", "0",
         "--bundles", "route_zero_gap,spacing_g16,spacing_g64,placement,clock_assay", "--force",
         "--restore-core", "reset", "--restore-memory", "reset"
       ],
       "timeout_seconds": 14400,
-      "outputs": "results/captures/sm86_ldgsts_burst_release_20260830_v1/direct"
+      "outputs": "results/captures/sm86_ldgsts_burst_release_20260830_v4/direct"
     },
     "nvbit": {
       "environment": {
@@ -118,7 +126,7 @@
         "CUDA_INJECTION64_PATH": "tools/nvbit_tracer/tracer_tool/tracer_tool.so",
         "LD_LIBRARY_PATH": ".toolchain/pb/lib",
         "USER_DEFINED_FOLDERS": "1",
-        "TRACES_FOLDER": "results/captures/sm86_ldgsts_burst_release_20260830_v1/nvbit/ldgsts_w1_l1_d4_g0",
+        "TRACES_FOLDER": "results/captures/sm86_ldgsts_burst_release_20260830_v4/nvbit/ldgsts_w1_l1_d4_g0",
         "ACTIVE_FROM_START": "1",
         "SKIP_ENHANCED_TRACER": "0"
       },
@@ -128,13 +136,13 @@
         "--bursts", "16384", "--warmup", "64", "--repetition", "1", "--order", "forward"
       ],
       "timeout_seconds": 900,
-      "trace": "results/captures/sm86_ldgsts_burst_release_20260830_v1/nvbit/ldgsts_w1_l1_d4_g0"
+      "trace": "results/captures/sm86_ldgsts_burst_release_20260830_v4/nvbit/ldgsts_w1_l1_d4_g0"
     },
     "ncu": {
       "environment": {"CUDA_VISIBLE_DEVICES": "0"},
       "argv": [
         "/usr/local/cuda-13.2/nsight-compute-2026.1.0/ncu", "--force-overwrite", "--export",
-        "results/captures/sm86_ldgsts_burst_release_20260830_v1/ncu/ldgsts_w1_l1_d4_g0/repeat-1/ncu-report",
+        "results/captures/sm86_ldgsts_burst_release_20260830_v4/ncu/ldgsts_w1_l1_d4_g0/repeat-1/ncu-report",
         "--profile-from-start", "off", "--launch-count", "1", "--replay-mode", "application",
         "--clock-control", "none", "--cache-control", "none", "--metrics",
         "sm__cycles_active.max,smsp__inst_executed_op_ldgsts.sum,smsp__sass_inst_executed_op_global_ld.sum,sm__sass_l1tex_t_sectors_pipe_lsu_mem_global_op_ldgsts.sum,sm__sass_l1tex_data_pipe_lsu_wavefronts_mem_shared_op_ldgsts.sum,l1tex__t_sectors_pipe_lsu_mem_global_op_ld_lookup_hit.sum,l1tex__t_sectors_pipe_lsu_mem_global_op_ld_lookup_miss.sum,lts__t_sectors_srcunit_tex_op_read_lookup_hit.sum,lts__t_sectors_srcunit_tex_op_read_lookup_miss.sum,dram__sectors_read.sum",
@@ -144,9 +152,9 @@
       ],
       "export_argv": [
         "/usr/local/cuda-13.2/nsight-compute-2026.1.0/ncu", "--import",
-        "results/captures/sm86_ldgsts_burst_release_20260830_v1/ncu/ldgsts_w1_l1_d4_g0/repeat-1/ncu-report.ncu-rep",
+        "results/captures/sm86_ldgsts_burst_release_20260830_v4/ncu/ldgsts_w1_l1_d4_g0/repeat-1/ncu-report.ncu-rep",
         "--csv", "--page", "raw", "--print-metric-instances", "details", "--log-file",
-        "results/captures/sm86_ldgsts_burst_release_20260830_v1/ncu/ldgsts_w1_l1_d4_g0/repeat-1/ncu.csv"
+        "results/captures/sm86_ldgsts_burst_release_20260830_v4/ncu/ldgsts_w1_l1_d4_g0/repeat-1/ncu.csv"
       ],
       "timeout_seconds": 900,
       "comparison_only": true
@@ -154,14 +162,14 @@
     "simulator": {
       "argv": [
         "sim/target/release/sim-run", "--trace",
-        "results/captures/sm86_ldgsts_burst_release_20260830_v1/nvbit/ldgsts_w1_l1_d4_g0",
-        "--control", "results/captures/sm86_ldgsts_burst_release_20260830_v1/static/control_bits.json",
+        "results/captures/sm86_ldgsts_burst_release_20260830_v4/nvbit/ldgsts_w1_l1_d4_g0",
+        "--control", "results/captures/sm86_ldgsts_burst_release_20260830_v4/static/control_bits.json",
         "--arch-card", "arch_profiles/cards/sm_86.json", "--pchase-card", "data/pchase/sm_86_static_card.json",
         "--mode", "l1-l2"
       ],
       "timeout_seconds": 900,
-      "stdout": "results/captures/sm86_ldgsts_burst_release_20260830_v1/simulator/ldgsts_w1_l1_d4_g0/replay.json",
-      "stderr": "results/captures/sm86_ldgsts_burst_release_20260830_v1/simulator/ldgsts_w1_l1_d4_g0/stderr.txt"
+      "stdout": "results/captures/sm86_ldgsts_burst_release_20260830_v4/simulator/ldgsts_w1_l1_d4_g0/replay.json",
+      "stderr": "results/captures/sm86_ldgsts_burst_release_20260830_v4/simulator/ldgsts_w1_l1_d4_g0/stderr.txt"
     }
   },
   "reduction": {

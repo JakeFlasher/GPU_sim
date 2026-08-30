@@ -16,6 +16,27 @@ It does not repair the rejected `ampere_queue_v1` composite. NCU admits route,
 traffic, destination work, and SMSP placement; same-kernel paired `clock64`
 effects decide the mechanism.
 
+## Execution result (2026-08-30)
+
+The repaired target was exercised on the local RTX 3090 Ti in
+`results/captures/sm86_ldgsts_burst_release_20260830_v4/`: static/control,
+correctness, all 35 direct process streams (seven repetitions across the
+40-cell matrix), and 120 trusted-NCU profiles completed. The gapped inline-PTX
+seam removed compiler-added endpoint wait masks and keeps ordinary short/long
+achieved gaps in the declared windows. The compact reduction is in
+`analysis/report.json`.
+
+The measured zero-gap issue frontier is null (`K=0` for L1/L2/DRAM and
+`R=0` across the depth set), while the separately retained completion frontier
+is strongly route/depth ordered. The independent LDG control also has no
+positive knee (`P=4`, `S=4`, `K=0`), so the strict identification result is
+`invalid_clock_assay`/no-model. Eight raw scheduler pauses, three NCU LTS
+conservation deviations, and an unavailable non-interactive clock lock remain
+typed limitations. The full NVBit capture timed out; a marker-scoped 64-burst
+NCU-mode smoke did produce a complete trace and two byte-identical simulator
+replays, but that smoke is pipeline evidence only. No simulator timing state,
+JADE/HETR track, or CPU-GPU co-simulation scope changed.
+
 ## Acceptance Criteria
 
 - AC-1: One fixed target binary exposes separate, trustworthy issue and drain

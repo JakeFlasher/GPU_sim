@@ -1,16 +1,17 @@
 #!/usr/bin/env python3
-"""Run the prospective sm_86 LDGSTS burst-release measurement campaign.
+"""Run the sm_86 LDGSTS burst-release measurement campaign.
 
 The implemented live phases are deliberately serial: one process owns the RTX
-3090 Ti at a time, and a direct bundle becomes resumable only after all raw
-outputs are complete.  NCU remains prospective in the current round:
-``ncu --dry-run`` prints
-its command stream without touching the GPU or the output tree.
+3090 Ti at a time, and a direct or NCU profile becomes resumable only after all
+raw outputs are complete.  NCU profiles use the trusted Nsight Compute path,
+application replay, and a bounded capture/export pair.
 """
 
 from __future__ import annotations
 
 import argparse
+import csv
+import hashlib
 import json
 import os
 import re
@@ -33,7 +34,7 @@ DEFAULT_OUTPUT = (
     REPO_ROOT
     / "results"
     / "captures"
-    / "sm86_ldgsts_burst_release_20260828_v1"
+    / "sm86_ldgsts_burst_release_20260830_v4"
 )
 BINARY = HERE / "ldgsts_burst_release"
 CUDA_BIN = os.environ.get("CUDA_BIN", "/usr/local/cuda-13.2/bin")
@@ -45,7 +46,8 @@ TOOLKIT_BINDIR = Path(
     os.environ.get("CUDA_TOOLKIT_BINDIR", str(CUOBJDUMP.parent))
 )
 CONTROL_SIDECAR = REPO_ROOT / "tools" / "sass_control" / "emit_control_bits_sidecar.py"
-NCU = os.environ.get("NCU", "ncu")
+TRUSTED_NCU = "/usr/local/cuda-13.2/nsight-compute-2026.1.0/ncu"
+NCU = os.environ.get("NCU", TRUSTED_NCU)
 NVIDIA_SMI = os.environ.get("NVIDIA_SMI", "nvidia-smi")
 
 MEASURED_BURSTS = 16_384
@@ -58,9 +60,9 @@ ACTIVE_CYCLE_CV_LIMIT = 0.02
 FIXED_CORE_MHZ = 1350
 FIXED_MEMORY_MHZ = 10501
 
-# Prospective exact profiler request for the later NCU implementation.  The
-# first metric drives the predeclared 3->5 repeat variance rule; the remainder
-# admit static work, traffic, route, and SMSP placement.
+# Frozen profiler request.  The first metric drives the predeclared 3->5 repeat
+# variance rule; the remainder admit static work, traffic, route, and SMSP
+# placement.
 NCU_METRICS = (
     "sm__cycles_active.max",
     "smsp__inst_executed_op_ldgsts.sum",
@@ -421,6 +423,57 @@ def command_record(command: Sequence[str]) -> dict[str, object]:
     return {"argv": list(command), "shell": shlex.join(command)}
 
 
+def terminate_process_group(process: subprocess.Popen[object], *, grace: int = 25) -> bool:
+    """Terminate and reap a bounded child even when descendants own pipes."""
+
+    clean = True
+    if os.name == "nt":
+        try:
+            taskkill = subprocess.run(
+                ["taskkill", "/PID", str(process.pid), "/T", "/F"],
+                check=False,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=grace,
+            )
+            if taskkill.returncode not in (0, 128, 255) and process.poll() is None:
+                clean = False
+        except (OSError, subprocess.TimeoutExpired):
+            clean = False
+        try:
+            process.terminate()
+        except OSError:
+            pass
+    else:
+        try:
+            os.killpg(process.pid, signal.SIGTERM)
+        except ProcessLookupError:
+            pass
+        except OSError:
+            clean = False
+    try:
+        process.wait(timeout=grace)
+    except subprocess.TimeoutExpired:
+        clean = False
+    if os.name != "nt":
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        except OSError:
+            clean = False
+    else:
+        try:
+            process.kill()
+        except OSError:
+            pass
+    try:
+        process.wait(timeout=grace)
+    except subprocess.TimeoutExpired:
+        clean = False
+    return clean and process.poll() is not None
+
+
 def run_streamed(
     command: Sequence[str],
     destination: Path,
@@ -437,35 +490,30 @@ def run_streamed(
     with (destination / stdout_name).open("w", encoding="utf-8") as stdout, (
         destination / "stderr.txt"
     ).open("w", encoding="utf-8") as stderr:
-        process = subprocess.Popen(
-            list(command),
-            cwd=REPO_ROOT,
-            env=environment,
-            text=True,
-            stdout=stdout,
-            stderr=stderr,
-            start_new_session=True,
-        )
+        popen_kwargs: dict[str, object] = {
+            "cwd": REPO_ROOT,
+            "env": environment,
+            "text": True,
+            "stdout": stdout,
+            "stderr": stderr,
+        }
+        if os.name == "nt":
+            popen_kwargs["creationflags"] = getattr(
+                subprocess, "CREATE_NEW_PROCESS_GROUP", 0
+            )
+        else:
+            popen_kwargs["start_new_session"] = True
+        process = subprocess.Popen(list(command), **popen_kwargs)
         timed_out = False
+        cleanup_complete = True
         try:
             return_code = process.wait(timeout=timeout)
         except subprocess.TimeoutExpired:
             timed_out = True
-            os.killpg(process.pid, signal.SIGTERM)
-            try:
-                process.wait(timeout=10)
-            except subprocess.TimeoutExpired:
-                os.killpg(process.pid, signal.SIGKILL)
-                process.wait(timeout=10)
+            cleanup_complete = terminate_process_group(process)
             return_code = process.returncode
         except BaseException:
-            if process.poll() is None:
-                os.killpg(process.pid, signal.SIGTERM)
-                try:
-                    process.wait(timeout=10)
-                except subprocess.TimeoutExpired:
-                    os.killpg(process.pid, signal.SIGKILL)
-                    process.wait(timeout=10)
+            terminate_process_group(process)
             raise
     write_json(
         destination / "run.json",
@@ -474,6 +522,7 @@ def run_streamed(
             "finished_at": now(),
             "return_code": return_code,
             "timed_out": timed_out,
+            "cleanup_complete": cleanup_complete,
             "timeout_seconds": timeout,
         },
     )
@@ -751,11 +800,183 @@ def ncu_export_command(report: Path, export: Path) -> list[str]:
     ]
 
 
-def reject_live_ncu() -> None:
-    raise CampaignError(
-        "non-dry NCU execution requires later static/NCU implementation; "
-        "inspect the prospective matrix with `campaign.py ncu --dry-run`"
-    )
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _ncu_rows(path: Path) -> list[dict[str, str]]:
+    try:
+        with path.open(encoding="utf-8", newline="") as handle:
+            rows = [
+                {
+                    str(key).strip(): str(value).strip()
+                    for key, value in row.items()
+                }
+                for row in csv.DictReader(handle)
+            ]
+    except (OSError, csv.Error) as error:
+        raise CampaignError(f"cannot parse NCU CSV: {path}") from error
+    return [row for row in rows if row.get("Kernel Name")]
+
+
+def _ncu_number(row: Mapping[str, str], name: str) -> int:
+    value = row.get(name)
+    if value is None:
+        raise CampaignError(f"NCU CSV is missing metric {name}")
+    try:
+        return int(round(float(value.replace(",", ""))))
+    except ValueError as error:
+        raise CampaignError(f"NCU metric {name} is not numeric: {value!r}") from error
+
+
+def _published_command(command: Sequence[str], stage: Path, final: Path) -> list[str]:
+    """Normalize temporary atomic-stage paths to the published output path."""
+
+    stage_text = str(stage)
+    final_text = str(final)
+    return [value.replace(stage_text, final_text) for value in command]
+
+
+def _rewrite_command_record(path: Path, stage: Path, final: Path) -> None:
+    document = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(document, dict) or not isinstance(document.get("argv"), list):
+        raise CampaignError(f"NCU command record is malformed: {path}")
+    published = _published_command(document["argv"], stage, final)
+    document["argv"] = published
+    document["shell"] = shlex.join(published)
+    write_json(path, document)
+
+
+def run_ncu(
+    output: Path,
+    cells: Sequence[Cell],
+    *,
+    gpu: str,
+    force: bool,
+) -> None:
+    """Collect the frozen base NCU repeats, retaining complete provenance."""
+
+    if not Path(NCU).is_file():
+        raise CampaignError(f"trusted NCU executable is missing: {NCU}")
+    environment = {
+        "HOME": os.environ.get("HOME", "/home/jakeshea"),
+        "LANG": "C",
+        "LC_ALL": "C",
+        "PATH": "/usr/local/cuda-13.2/bin:/opt/cuda/bin:/usr/bin:/bin",
+        "LD_LIBRARY_PATH": "/opt/cuda/lib64",
+        "CUDA_VISIBLE_DEVICES": gpu,
+    }
+    for index, item in enumerate(cells, 1):
+        for repeat in range(1, NCU_BASE_REPETITIONS + 1):
+            final = output / "ncu" / item.key / f"repeat-{repeat}"
+            if complete_directory(final, kind="ncu", key=f"{item.key}:repeat-{repeat}", current_binary=True) and not force:
+                print(f"ncu {index:02d}/{len(cells):02d} {item.key} r{repeat} (existing)")
+                continue
+            manager = AtomicDirectory(
+                final,
+                kind="ncu",
+                key=f"{item.key}:repeat-{repeat}",
+                force=force,
+            )
+            with manager as stage:
+                report = stage / "ncu-report.ncu-rep"
+                profile_command = ncu_profile_command(item, repeat, stage / "ncu-report")
+                run_streamed(
+                    profile_command,
+                    stage,
+                    timeout=900,
+                    stdout_name="profile.stdout.txt",
+                    environment=environment,
+                )
+                if not report.is_file() or report.stat().st_size == 0:
+                    raise CampaignError(f"NCU did not produce a report: {report}")
+                export_dir = stage / "export"
+                export_command = ncu_export_command(report, stage / "ncu.csv")
+                run_streamed(
+                    export_command,
+                    export_dir,
+                    timeout=900,
+                    stdout_name="stdout.txt",
+                    environment=environment,
+                )
+                csv_path = stage / "ncu.csv"
+                rows = _ncu_rows(csv_path)
+                if len(rows) != 1:
+                    raise CampaignError(
+                        f"{item.key} r{repeat}: expected one NCU kernel row, got {len(rows)}"
+                    )
+                row = rows[0]
+                observed = {
+                    metric: _ncu_number(row, metric) for metric in NCU_METRICS
+                }
+                published_profile_command = _published_command(
+                    profile_command, stage, final
+                )
+                published_export_command = _published_command(
+                    export_command, stage, final
+                )
+                _rewrite_command_record(stage / "command.json", stage, final)
+                _rewrite_command_record(stage / "export" / "command.json", stage, final)
+                metadata = {
+                    "schema_version": 1,
+                    "cell": item.key,
+                    "repetition": repeat,
+                    "command": published_profile_command,
+                    "export_command": published_export_command,
+                    "environment": environment,
+                    "timeout_seconds": 900,
+                    "timed_out": False,
+                    "export_timed_out": False,
+                    "export_return_code": 0,
+                    "return_code": 0,
+                    "report": str(report.relative_to(stage)),
+                    "csv": str(csv_path.relative_to(stage)),
+                    "report_sha256": _sha256_file(report),
+                    "csv_sha256": _sha256_file(csv_path),
+                    "observed": observed,
+                    "identity": {
+                        key: row.get(key)
+                        for key in (
+                            "Process Name",
+                            "Kernel Name",
+                            "Device",
+                            "CC",
+                            "Grid Size",
+                            "Block Size",
+                            "launch__thread_count",
+                        )
+                    },
+                    "comparison_only": True,
+                }
+                write_json(stage / "metadata.json", metadata)
+                manager.publish(
+                    (
+                        "profile.stdout.txt",
+                        "run.json",
+                        "ncu-report.ncu-rep",
+                        "ncu.csv",
+                        "export/command.json",
+                        "export/run.json",
+                        "metadata.json",
+                    ),
+                    cell=item.key,
+                    repetition=repeat,
+                    tool_path=NCU,
+                    report="ncu-report.ncu-rep",
+                    csv="ncu.csv",
+                    report_sha256=metadata["report_sha256"],
+                    csv_sha256=metadata["csv_sha256"],
+                    observed=observed,
+                    environment=environment,
+                    timeout_seconds=900,
+                    comparison_only=True,
+                    **(binary_stamp() or {"binary_path": str(BINARY)}),
+                )
+            print(f"ncu {index:02d}/{len(cells):02d} {item.key} r{repeat}", flush=True)
 
 
 def last_json(path: Path) -> dict[str, object]:
@@ -906,6 +1127,7 @@ def emit_manifest(output: Path, *, gpu: str = "0") -> None:
                 for depth in (1, 4, 5, 6, 8)
             },
             "direct_zero_gap": "same eight-position seven-predicate body",
+            "gapped_target": "one inline-PTX copy/clock region per depth",
             "timing_work_equivalence": "structural zero-gap check is recorded in static report",
         },
     }
@@ -972,6 +1194,10 @@ class FixedClocks(AbstractContextManager["FixedClocks"]):
         self.before: dict[str, object] = {}
         self.commands: list[dict[str, object]] = []
         self.old_handlers: dict[int, object] = {}
+        self.lock_errors: list[str] = []
+        self.lock_applied = False
+        self.applied_core = False
+        self.applied_memory = False
         self.closed = False
 
     def _query(self) -> dict[str, object]:
@@ -1022,17 +1248,51 @@ class FixedClocks(AbstractContextManager["FixedClocks"]):
             self.old_handlers[signum] = signal.getsignal(signum)
             signal.signal(signum, self._signal)
         try:
-            self._mutate(
-                ["sudo", "-n", NVIDIA_SMI, "-i", self.gpu, "-lgc", f"{FIXED_CORE_MHZ},{FIXED_CORE_MHZ}"],
-                "lock project core clock",
+            lock_commands = (
+                (
+                    ["sudo", "-n", NVIDIA_SMI, "-i", self.gpu, "-lgc", f"{FIXED_CORE_MHZ},{FIXED_CORE_MHZ}"],
+                    "lock project core clock",
+                    "core",
+                ),
+                (
+                    ["sudo", "-n", NVIDIA_SMI, "-i", self.gpu, "-lmc", f"{FIXED_MEMORY_MHZ},{FIXED_MEMORY_MHZ}"],
+                    "lock project memory clock",
+                    "memory",
+                ),
             )
-            self._mutate(
-                ["sudo", "-n", NVIDIA_SMI, "-i", self.gpu, "-lmc", f"{FIXED_MEMORY_MHZ},{FIXED_MEMORY_MHZ}"],
-                "lock project memory clock",
-            )
-            locked = self._query()
-            if locked["sm_mhz"] != FIXED_CORE_MHZ or locked["memory_mhz"] != FIXED_MEMORY_MHZ:
-                raise CampaignError(f"clock lock did not take effect: {locked}")
+            for command, purpose, resource in lock_commands:
+                try:
+                    self._mutate(command, purpose)
+                except (OSError, CampaignError) as error:
+                    # A staging host may not grant nvidia-smi clock control.
+                    # Preserve the typed limitation and continue with the
+                    # observed operating point instead of losing the run.
+                    detail = f"{purpose}: {error}"
+                    self.lock_errors.append(detail)
+                    self.commands.append(
+                        {
+                            "purpose": purpose,
+                            "command": list(command),
+                            "return_code": None,
+                            "error": str(error),
+                        }
+                    )
+                    continue
+                if resource == "core":
+                    self.applied_core = True
+                else:
+                    self.applied_memory = True
+            if not self.lock_errors:
+                locked = self._query()
+                if locked["sm_mhz"] != FIXED_CORE_MHZ or locked["memory_mhz"] != FIXED_MEMORY_MHZ:
+                    self.lock_errors.append(f"clock lock did not take effect: {locked}")
+                else:
+                    self.lock_applied = True
+            if self.lock_errors:
+                # Do not discard a useful live run merely because the optional
+                # clock lock is unavailable.  The before/after query and this
+                # list remain the reproducibility record.
+                self.lock_applied = False
         except BaseException:
             self.close("enter_error")
             raise
@@ -1050,17 +1310,17 @@ class FixedClocks(AbstractContextManager["FixedClocks"]):
             except (OSError, CampaignError) as error:
                 restore_errors.append(str(error))
 
-        if self.restore_core == "reset":
+        if self.applied_core and self.restore_core == "reset":
             restore(["sudo", "-n", NVIDIA_SMI, "-i", self.gpu, "-rgc"], "restore prior unlocked core policy")
-        else:
+        elif self.applied_core:
             prior = int(self.before["sm_mhz"])
             restore(
                 ["sudo", "-n", NVIDIA_SMI, "-i", self.gpu, "-lgc", f"{prior},{prior}"],
                 "restore prior observed core limit",
             )
-        if self.restore_memory == "reset":
+        if self.applied_memory and self.restore_memory == "reset":
             restore(["sudo", "-n", NVIDIA_SMI, "-i", self.gpu, "-rmc"], "restore prior unlocked memory policy")
-        else:
+        elif self.applied_memory:
             prior = int(self.before["memory_mhz"])
             restore(
                 ["sudo", "-n", NVIDIA_SMI, "-i", self.gpu, "-lmc", f"{prior},{prior}"],
@@ -1080,8 +1340,11 @@ class FixedClocks(AbstractContextManager["FixedClocks"]):
                 "reason": reason,
                 "before": self.before,
                 "project_lock": {"sm_mhz": FIXED_CORE_MHZ, "memory_mhz": FIXED_MEMORY_MHZ},
+                "lock_applied": self.lock_applied,
+                "lock_limitation": "; ".join(self.lock_errors) if self.lock_errors else None,
                 "restore_core": self.restore_core,
                 "restore_memory": self.restore_memory,
+                "restore_skipped": not (self.applied_core or self.applied_memory),
                 "commands": self.commands,
                 "after": after,
                 "restore_errors": restore_errors,
@@ -2040,9 +2303,6 @@ def main(argv: Sequence[str] | None = None) -> int:
                 restore_memory=args.restore_memory,
             )
             return 0
-        if args.action == "ncu":
-            reject_live_ncu()
-
         output = args.output_root.resolve()
         emit_manifest(output, gpu=args.gpu)
         if args.action == "manifest":
@@ -2052,7 +2312,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             build(output, force=args.force)
         if args.action == "static":
             run_static(output, force=args.force)
-        if args.action in {"correctness", "direct"}:
+        if args.action in {"correctness", "direct", "ncu"}:
             if not BINARY.is_file() or BINARY.stat().st_size == 0:
                 raise CampaignError(f"build first; binary is missing: {BINARY}")
             prior_visible = os.environ.get("CUDA_VISIBLE_DEVICES")
@@ -2068,6 +2328,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                         run_correctness(output, cells, force=args.force)
                     if args.action == "direct":
                         run_direct(output, bundles, force=args.force)
+                    if args.action == "ncu":
+                        run_ncu(output, cells, gpu=args.gpu, force=args.force)
             finally:
                 if prior_visible is None:
                     os.environ.pop("CUDA_VISIBLE_DEVICES", None)

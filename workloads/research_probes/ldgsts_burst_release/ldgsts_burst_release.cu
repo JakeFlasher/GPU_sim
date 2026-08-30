@@ -152,24 +152,24 @@ __device__ __forceinline__ std::uint32_t narrow_cycles(
 // zero-gap timed body and its achieved duration is retained per edge.
 __device__ __forceinline__ std::uint32_t clock_spin(int requested_cycles) {
     if (requested_cycles == 0) return 0;
-    const unsigned long long target =
-        static_cast<unsigned long long>(requested_cycles);
-    unsigned long long achieved;
+    const std::uint32_t target =
+        static_cast<std::uint32_t>(requested_cycles);
+    std::uint32_t achieved;
     asm volatile(
         "{\n\t"
-        ".reg .u64 spin_start, spin_now, spin_elapsed;\n\t"
+        ".reg .u32 spin_start, spin_now, spin_elapsed;\n\t"
         ".reg .pred spin_done;\n\t"
-        "mov.u64 spin_start, %clock64;\n\t"
-        "spin_loop%=: mov.u64 spin_now, %clock64;\n\t"
-        "sub.u64 spin_elapsed, spin_now, spin_start;\n\t"
-        "setp.lt.u64 spin_done, spin_elapsed, %1;\n\t"
+        "mov.u32 spin_start, %clock;\n\t"
+        "spin_loop%=: mov.u32 spin_now, %clock;\n\t"
+        "sub.u32 spin_elapsed, spin_now, spin_start;\n\t"
+        "setp.lt.u32 spin_done, spin_elapsed, %1;\n\t"
         "@spin_done bra.uni spin_loop%=;\n\t"
-        "mov.u64 %0, spin_elapsed;\n\t"
+        "mov.u32 %0, spin_elapsed;\n\t"
         "}"
-        : "=l"(achieved)
-        : "l"(target)
+        : "=r"(achieved)
+        : "r"(target)
         : "memory");
-    return narrow_cycles(achieved);
+    return achieved;
 }
 
 __device__ __forceinline__ void retain_gap(ArmSample* sample, int edge,
@@ -183,6 +183,12 @@ __device__ __forceinline__ void retain_gap(ArmSample* sample, int edge,
     }
 }
 
+// Keep a gapped target's asynchronous copies and endpoint clocks in one
+// inline-PTX region.  When each copy/clock pair is emitted as a separate C++
+// statement, ptxas is free to attach an LDGSTS scoreboard wait to the next
+// clock read.  The zero-gap body already uses this shape; the gapped body
+// needs the same opaque scheduling boundary while retaining one measured
+// clock-spin value per edge.
 __device__ __forceinline__ void copy_position(unsigned destination,
                                                const char* source) {
     asm volatile("cp.async.ca.shared.global [%0], [%1], 16;"
@@ -190,6 +196,101 @@ __device__ __forceinline__ void copy_position(unsigned destination,
                  : "r"(destination), "l"(source)
                  : "memory");
 }
+
+#define LDGSTS_GAP_SPIN(OUTPUT, LABEL, LIMIT_OPERAND)                       \
+    "mov.u32 spin_start, %clock;\n\t"                                \
+    "gap_spin" #LABEL "%=: mov.u32 spin_now, %clock;\n\t"            \
+    "sub.u32 spin_elapsed, spin_now, spin_start;\n\t"                   \
+    "setp.lt.u32 spin_done, spin_elapsed, " #LIMIT_OPERAND ";\n\t"    \
+    "@spin_done bra.uni gap_spin" #LABEL "%=;\n\t"                    \
+    "mov.u32 " #OUTPUT ", spin_elapsed;\n\t"
+
+#define LDGSTS_GAPPED_ASM_4()                                             \
+    asm volatile(                                                           \
+        "{\n\t"                                                        \
+        ".reg .u32 spin_start, spin_now, spin_elapsed;\n\t"             \
+        ".reg .pred spin_done;\n\t"                                   \
+        "mov.u32 %3, %smid;\n\t"                                      \
+        "mov.u64 %0, %clock64;\n\t"                                   \
+        "cp.async.ca.shared.global [%8], [%16], 16;\n\t"              \
+        LDGSTS_GAP_SPIN(%5, 0, %24)                                       \
+        "cp.async.ca.shared.global [%9], [%17], 16;\n\t"              \
+        LDGSTS_GAP_SPIN(%6, 1, %24)                                       \
+        "cp.async.ca.shared.global [%10], [%18], 16;\n\t"             \
+        LDGSTS_GAP_SPIN(%7, 2, %24)                                       \
+        "cp.async.ca.shared.global [%11], [%19], 16;\n\t"             \
+        "mov.u64 %1, %clock64;\n\t"                                   \
+        "cp.async.commit_group;\n\t"                                  \
+        "cp.async.wait_group 0;\n\t"                                  \
+        "mov.u64 %2, %clock64;\n\t"                                   \
+        "mov.u32 %4, %smid; }"                                            \
+        : "=l"(start), "=l"(issue_end), "=l"(drain_end),                \
+          "=r"(smid_before), "=r"(smid_after), "=r"(gap0), "=r"(gap1),  \
+          "=r"(gap2)                                                       \
+        : "r"(d0), "r"(d1), "r"(d2), "r"(d3), "r"(d4), "r"(d5),       \
+          "r"(d6), "r"(d7), "l"(s0), "l"(s1), "l"(s2), "l"(s3),       \
+          "l"(s4), "l"(s5), "l"(s6), "l"(s7), "r"(limit)                 \
+        : "memory")
+
+#define LDGSTS_GAPPED_ASM_5()                                             \
+    asm volatile(                                                           \
+        "{\n\t"                                                        \
+        ".reg .u32 spin_start, spin_now, spin_elapsed;\n\t"             \
+        ".reg .pred spin_done;\n\t"                                   \
+        "mov.u32 %3, %smid;\n\t"                                      \
+        "mov.u64 %0, %clock64;\n\t"                                   \
+        "cp.async.ca.shared.global [%9], [%17], 16;\n\t"              \
+        LDGSTS_GAP_SPIN(%5, 0, %25)                                       \
+        "cp.async.ca.shared.global [%10], [%18], 16;\n\t"             \
+        LDGSTS_GAP_SPIN(%6, 1, %25)                                       \
+        "cp.async.ca.shared.global [%11], [%19], 16;\n\t"             \
+        LDGSTS_GAP_SPIN(%7, 2, %25)                                       \
+        "cp.async.ca.shared.global [%12], [%20], 16;\n\t"             \
+        LDGSTS_GAP_SPIN(%8, 3, %25)                                       \
+        "cp.async.ca.shared.global [%13], [%21], 16;\n\t"             \
+        "mov.u64 %1, %clock64;\n\t"                                   \
+        "cp.async.commit_group;\n\t"                                  \
+        "cp.async.wait_group 0;\n\t"                                  \
+        "mov.u64 %2, %clock64;\n\t"                                   \
+        "mov.u32 %4, %smid; }"                                            \
+        : "=l"(start), "=l"(issue_end), "=l"(drain_end),                \
+          "=r"(smid_before), "=r"(smid_after), "=r"(gap0), "=r"(gap1),  \
+          "=r"(gap2), "=r"(gap3)                                          \
+        : "r"(d0), "r"(d1), "r"(d2), "r"(d3), "r"(d4), "r"(d5),       \
+          "r"(d6), "r"(d7), "l"(s0), "l"(s1), "l"(s2), "l"(s3),       \
+          "l"(s4), "l"(s5), "l"(s6), "l"(s7), "r"(limit)                 \
+        : "memory")
+
+#define LDGSTS_GAPPED_ASM_6()                                             \
+    asm volatile(                                                           \
+        "{\n\t"                                                        \
+        ".reg .u32 spin_start, spin_now, spin_elapsed;\n\t"             \
+        ".reg .pred spin_done;\n\t"                                   \
+        "mov.u32 %3, %smid;\n\t"                                      \
+        "mov.u64 %0, %clock64;\n\t"                                   \
+        "cp.async.ca.shared.global [%10], [%18], 16;\n\t"             \
+        LDGSTS_GAP_SPIN(%5, 0, %26)                                       \
+        "cp.async.ca.shared.global [%11], [%19], 16;\n\t"             \
+        LDGSTS_GAP_SPIN(%6, 1, %26)                                       \
+        "cp.async.ca.shared.global [%12], [%20], 16;\n\t"             \
+        LDGSTS_GAP_SPIN(%7, 2, %26)                                       \
+        "cp.async.ca.shared.global [%13], [%21], 16;\n\t"             \
+        LDGSTS_GAP_SPIN(%8, 3, %26)                                       \
+        "cp.async.ca.shared.global [%14], [%22], 16;\n\t"             \
+        LDGSTS_GAP_SPIN(%9, 4, %26)                                       \
+        "cp.async.ca.shared.global [%15], [%23], 16;\n\t"             \
+        "mov.u64 %1, %clock64;\n\t"                                   \
+        "cp.async.commit_group;\n\t"                                  \
+        "cp.async.wait_group 0;\n\t"                                  \
+        "mov.u64 %2, %clock64;\n\t"                                   \
+        "mov.u32 %4, %smid; }"                                            \
+        : "=l"(start), "=l"(issue_end), "=l"(drain_end),                \
+          "=r"(smid_before), "=r"(smid_after), "=r"(gap0), "=r"(gap1),  \
+          "=r"(gap2), "=r"(gap3), "=r"(gap4)                              \
+        : "r"(d0), "r"(d1), "r"(d2), "r"(d3), "r"(d4), "r"(d5),       \
+          "r"(d6), "r"(d7), "l"(s0), "l"(s1), "l"(s2), "l"(s3),       \
+          "l"(s4), "l"(s5), "l"(s6), "l"(s7), "r"(limit)                 \
+        : "memory")
 
 // A single zero-gap body keeps all eight static positions.  CUDA 13.2 emits
 // guarded CFGs when predicates are reused, so each conditional position gets a
@@ -265,40 +366,34 @@ __device__ __forceinline__ ArmSample ldgsts_active_body(
                   "unsupported LDGSTS depth");
     static_assert(Gap == 16 || Gap == 64,
                   "unsupported LDGSTS gap");
+    unsigned long long start = 0;
+    unsigned long long issue_end = 0;
+    unsigned long long drain_end = 0;
+    std::uint32_t gap0 = 0;
+    std::uint32_t gap1 = 0;
+    std::uint32_t gap2 = 0;
+    std::uint32_t gap3 = 0;
+    std::uint32_t gap4 = 0;
+    const std::uint32_t limit = static_cast<std::uint32_t>(Gap);
+    std::uint32_t smid_before = 0;
+    std::uint32_t smid_after = 0;
+    if constexpr (Depth == 4) {
+        LDGSTS_GAPPED_ASM_4();
+    } else if constexpr (Depth == 5) {
+        LDGSTS_GAPPED_ASM_5();
+    } else {
+        LDGSTS_GAPPED_ASM_6();
+    }
     ArmSample sample{};
-    sample.smid_before = read_smid();
-    const unsigned long long start = read_clock();
-
-    copy_position(d0, s0);
-    if constexpr (Gap != 0 && Depth > 1)
-        retain_gap(&sample, 0, clock_spin(Gap));
-    if constexpr (Depth > 1) copy_position(d1, s1);
-    if constexpr (Gap != 0 && Depth > 2)
-        retain_gap(&sample, 1, clock_spin(Gap));
-    if constexpr (Depth > 2) copy_position(d2, s2);
-    if constexpr (Gap != 0 && Depth > 3)
-        retain_gap(&sample, 2, clock_spin(Gap));
-    if constexpr (Depth > 3) copy_position(d3, s3);
-    if constexpr (Gap != 0 && Depth > 4)
-        retain_gap(&sample, 3, clock_spin(Gap));
-    if constexpr (Depth > 4) copy_position(d4, s4);
-    if constexpr (Gap != 0 && Depth > 5)
-        retain_gap(&sample, 4, clock_spin(Gap));
-    if constexpr (Depth > 5) copy_position(d5, s5);
-    if constexpr (Gap != 0 && Depth > 6)
-        retain_gap(&sample, 5, clock_spin(Gap));
-    if constexpr (Depth > 6) copy_position(d6, s6);
-    if constexpr (Gap != 0 && Depth > 7)
-        retain_gap(&sample, 6, clock_spin(Gap));
-    if constexpr (Depth > 7) copy_position(d7, s7);
-
-    const unsigned long long issue_end = read_clock();
-    asm volatile("cp.async.commit_group;" ::: "memory");
-    asm volatile("cp.async.wait_group 0;" ::: "memory");
-    const unsigned long long drain_end = read_clock();
-    sample.smid_after = read_smid();
+    sample.smid_before = smid_before;
+    sample.smid_after = smid_after;
     sample.issue_cycles = narrow_cycles(issue_end - start);
     sample.drain_cycles = narrow_cycles(drain_end - start);
+    retain_gap(&sample, 0, gap0);
+    retain_gap(&sample, 1, gap1);
+    retain_gap(&sample, 2, gap2);
+    if constexpr (Depth > 4) retain_gap(&sample, 3, gap3);
+    if constexpr (Depth > 5) retain_gap(&sample, 4, gap4);
     return sample;
 }
 
