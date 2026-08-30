@@ -890,6 +890,41 @@ pub enum IssueError {
         warp: usize,
         group: AsyncCopyGroupId,
     },
+    #[error(
+        "warp {warp} asynchronous-copy group {group:?} already observes bypass copy instruction {instruction}"
+    )]
+    AsyncCopyObservationDuplicate {
+        warp: usize,
+        group: AsyncCopyGroupId,
+        instruction: usize,
+    },
+    #[error(
+        "warp {warp} asynchronous-copy group {group:?} has no observed bypass copy instruction {instruction}"
+    )]
+    AsyncCopyObservationNotFound {
+        warp: usize,
+        group: AsyncCopyGroupId,
+        instruction: usize,
+    },
+    #[error(
+        "warp {warp} asynchronous-copy group {group:?} bypass copy instruction {instruction} pending source count {current} cannot release {remove} unit(s)"
+    )]
+    AsyncCopyObservationPendingUnderflow {
+        warp: usize,
+        group: AsyncCopyGroupId,
+        instruction: usize,
+        current: u32,
+        remove: u32,
+    },
+    #[error(
+        "warp {warp} asynchronous-copy group {group:?} bypass copy instruction {instruction} still has {pending} source unit(s) at wait"
+    )]
+    AsyncCopyObservationPendingAtWait {
+        warp: usize,
+        group: AsyncCopyGroupId,
+        instruction: usize,
+        pending: u32,
+    },
     #[error("response-owner identity domain is exhausted")]
     ResponseOwnerExhausted,
     #[error("memory responses are invalid for the {mode} memory mode")]
@@ -992,8 +1027,9 @@ pub struct TailFlags {
     pub dirty_writeback: bool,
     /// Coherence propagation and invalidation traffic is not modeled.
     pub coherence: bool,
-    /// A legacy trace omitted the LDGSTS source payload, so the modeled
-    /// commit/wait chain cannot establish shared-destination visibility.
+    /// The modeled LDGSTS commit/wait chain cannot establish destination
+    /// visibility: either the trace omitted destination payload or the bypass
+    /// route has no promoted per-copy destination timing mechanism.
     pub ldgsts_dst_shared_timing: bool,
 }
 
@@ -1305,6 +1341,55 @@ impl AsyncReadinessDiagnostics {
         add!(destination_local_cycles);
         add!(destination_sm_service_cycles);
         add!(completion_hidden_before_wait_cycles);
+        *self = next;
+        Ok(())
+    }
+}
+
+/// Cold, bypass-only per-copy observation. It is boxed out of the scheduler's
+/// inline readiness object and never participates in issue or wait timing.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
+pub struct BypassAsyncCopyDiagnostics {
+    pub copies_observed: u64,
+    pub destination_wavefronts_observed: u64,
+    pub copy_source_spread_cycles: u64,
+    pub per_copy_completion_cycles: u64,
+    pub group_aggregate_excess_cycles: u64,
+}
+
+impl BypassAsyncCopyDiagnostics {
+    pub const fn is_empty(&self) -> bool {
+        self.copies_observed == 0
+    }
+
+    fn add_checked(&mut self, addend: &Self) -> Result<(), ReadinessCounterError> {
+        let next = Self {
+            copies_observed: checked_readiness_add(
+                "readiness.bypass_async_copies.copies_observed",
+                self.copies_observed,
+                addend.copies_observed,
+            )?,
+            destination_wavefronts_observed: checked_readiness_add(
+                "readiness.bypass_async_copies.destination_wavefronts_observed",
+                self.destination_wavefronts_observed,
+                addend.destination_wavefronts_observed,
+            )?,
+            copy_source_spread_cycles: checked_readiness_add(
+                "readiness.bypass_async_copies.copy_source_spread_cycles",
+                self.copy_source_spread_cycles,
+                addend.copy_source_spread_cycles,
+            )?,
+            per_copy_completion_cycles: checked_readiness_add(
+                "readiness.bypass_async_copies.per_copy_completion_cycles",
+                self.per_copy_completion_cycles,
+                addend.per_copy_completion_cycles,
+            )?,
+            group_aggregate_excess_cycles: checked_readiness_add(
+                "readiness.bypass_async_copies.group_aggregate_excess_cycles",
+                self.group_aggregate_excess_cycles,
+                addend.group_aggregate_excess_cycles,
+            )?,
+        };
         *self = next;
         Ok(())
     }
@@ -3317,6 +3402,8 @@ pub struct ReadinessDiagnostics {
     pub delayed_ready_issues: u64,
     pub tied_limiting_causes: u64,
     pub async_groups: AsyncReadinessDiagnostics,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bypass_async_copies: Option<Box<BypassAsyncCopyDiagnostics>>,
     pub cta_barriers: CtaBarrierDiagnostics,
     #[serde(skip_serializing_if = "BarrierPipelineDiagnostics::is_empty")]
     pub barrier_pipeline: BarrierPipelineDiagnostics,
@@ -3354,6 +3441,13 @@ impl ReadinessDiagnostics {
             addend.tied_limiting_causes,
         )?;
         next.async_groups.add_checked(&addend.async_groups)?;
+        if let Some(addend_bypass) = addend.bypass_async_copies.as_deref() {
+            if let Some(current) = next.bypass_async_copies.as_deref_mut() {
+                current.add_checked(addend_bypass)?;
+            } else {
+                next.bypass_async_copies = Some(Box::new(*addend_bypass));
+            }
+        }
         next.cta_barriers.add_checked(&addend.cta_barriers)?;
         next.barrier_pipeline
             .add_checked(&addend.barrier_pipeline)?;
@@ -3393,9 +3487,12 @@ impl ReadinessDiagnostics {
     /// matching write-service completion frontier. Schema 12 adds a
     /// non-occupying operation-specific visibility/RMW latency after service.
     /// Schema 13 adds independent request/region completion work over bounded
-    /// parallel lanes.
+    /// parallel lanes. Schema 14 adds bypass-only per-copy source/delivery
+    /// observations without changing scheduler timing.
     pub const fn schema_version(&self) -> u32 {
-        if !self.memory_admission_feedback.is_empty()
+        if self.bypass_async_copies.is_some() {
+            14
+        } else if !self.memory_admission_feedback.is_empty()
             && (self
                 .memory_admission_feedback
                 .candidate
@@ -4107,6 +4204,35 @@ struct AsyncCopyGroup {
     completion_time: u64,
 }
 
+/// One bypass LDGSTS instruction retained inside its asynchronous-copy group.
+/// The production readiness path continues to use [`AsyncCopyGroup`]'s
+/// established aggregate fields; this sidecar preserves the event ordering
+/// needed to evaluate a future per-copy delivery model without changing time.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct BypassAsyncCopyObservation {
+    group: AsyncCopyGroupId,
+    instruction: usize,
+    pending_sources: u32,
+    source_completion_time: u64,
+    delivery_work: u64,
+    destination_wavefronts: u64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct BypassAsyncCopyInput {
+    instruction: usize,
+    destination_wavefronts: u64,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct BypassAsyncCopyProjection {
+    copies: u64,
+    destination_wavefronts: u64,
+    source_spread_cycles: u64,
+    per_copy_completion_cycles: u64,
+    group_aggregate_excess_cycles: u64,
+}
+
 impl AsyncCopyGroup {
     const fn new(id: AsyncCopyGroupId) -> Self {
         Self {
@@ -4184,6 +4310,9 @@ struct AsyncCopyState {
     open_group: Option<AsyncCopyGroup>,
     /// Nonempty groups closed by `LDGDEPBAR`, in warp program order.
     committed_groups: VecDeque<AsyncCopyGroup>,
+    /// Bypass-only per-instruction source/delivery state. Entries share the
+    /// owning group's opaque identity and are removed with the waited prefix.
+    bypass_copies: Vec<BypassAsyncCopyObservation>,
     /// Next process-local sequence for this warp. `None` means the complete
     /// u64 domain has been allocated; the final `u64::MAX` identity remains
     /// valid, but another nonempty group fails closed.
@@ -4195,6 +4324,7 @@ impl AsyncCopyState {
         Self {
             open_group: None,
             committed_groups: VecDeque::new(),
+            bypass_copies: Vec::new(),
             next_sequence: Some(0),
         }
     }
@@ -4287,6 +4417,7 @@ impl AsyncCopySlot {
         source_ready: u64,
         delivery_work: u64,
         destination_wavefronts: u64,
+        bypass_copy: Option<BypassAsyncCopyInput>,
         params: &IssueModelParams,
     ) -> Result<AsyncCopyGroupId, IssueError> {
         let (id, current, group) = match self.state.as_deref() {
@@ -4314,6 +4445,19 @@ impl AsyncCopySlot {
                 current,
                 add: pending_add,
             })?;
+        if let Some(copy) = bypass_copy
+            && self.state.as_deref().is_some_and(|state| {
+                state.bypass_copies.iter().any(|existing| {
+                    existing.group == id && existing.instruction == copy.instruction
+                })
+            })
+        {
+            return Err(IssueError::AsyncCopyObservationDuplicate {
+                warp,
+                group: id,
+                instruction: copy.instruction,
+            });
+        }
         group.project_delivery(source_ready, delivery_work, destination_wavefronts, params)?;
         Ok(id)
     }
@@ -4349,6 +4493,7 @@ impl AsyncCopySlot {
             source_ready,
             delivery_work,
             destination_wavefronts,
+            None,
             params,
         )?;
         let group = self.ensure_open_async_group(warp)?;
@@ -4368,6 +4513,7 @@ impl AsyncCopySlot {
         add: u32,
         delivery_work: u64,
         destination_wavefronts: u64,
+        bypass_copy: Option<BypassAsyncCopyInput>,
         params: &IssueModelParams,
     ) -> Result<AsyncCopyGroupId, IssueError> {
         let id = self.preflight_async_copy_add(
@@ -4376,6 +4522,7 @@ impl AsyncCopySlot {
             0,
             delivery_work,
             destination_wavefronts,
+            bypass_copy,
             params,
         )?;
         let group = self.ensure_open_async_group(warp)?;
@@ -4390,13 +4537,31 @@ impl AsyncCopySlot {
                     current,
                     add,
                 })?;
-        let (source_completion_time, delivery_work, destination_wavefronts, completion_time) =
-            group.project_delivery(0, delivery_work, destination_wavefronts, params)?;
+        let (
+            source_completion_time,
+            aggregate_delivery_work,
+            destination_wavefronts,
+            completion_time,
+        ) = group.project_delivery(0, delivery_work, destination_wavefronts, params)?;
         group.pending_sources = pending_sources;
         group.source_completion_time = source_completion_time;
-        group.delivery_work = delivery_work;
+        group.delivery_work = aggregate_delivery_work;
         group.destination_wavefronts = destination_wavefronts;
         group.completion_time = completion_time;
+        if let Some(copy) = bypass_copy {
+            self.state
+                .as_deref_mut()
+                .expect("an observed bypass copy has allocated async-copy state")
+                .bypass_copies
+                .push(BypassAsyncCopyObservation {
+                    group: id,
+                    instruction: copy.instruction,
+                    pending_sources: add,
+                    source_completion_time: 0,
+                    delivery_work,
+                    destination_wavefronts: copy.destination_wavefronts,
+                });
+        }
         Ok(id)
     }
 
@@ -4428,6 +4593,7 @@ impl AsyncCopySlot {
         &self,
         warp: usize,
         id: AsyncCopyGroupId,
+        bypass_instruction: Option<usize>,
         remove: u32,
         now: u64,
         params: &IssueModelParams,
@@ -4445,6 +4611,35 @@ impl AsyncCopySlot {
                 remove,
             })?;
         group.project_delivery(now, 0, 0, params)?;
+        if let Some(instruction) = bypass_instruction {
+            let copy = self
+                .state
+                .as_deref()
+                .and_then(|state| {
+                    state
+                        .bypass_copies
+                        .iter()
+                        .find(|copy| copy.group == id && copy.instruction == instruction)
+                })
+                .ok_or(IssueError::AsyncCopyObservationNotFound {
+                    warp,
+                    group: id,
+                    instruction,
+                })?;
+            copy.pending_sources.checked_sub(remove).ok_or(
+                IssueError::AsyncCopyObservationPendingUnderflow {
+                    warp,
+                    group: id,
+                    instruction,
+                    current: copy.pending_sources,
+                    remove,
+                },
+            )?;
+            params.ldgsts_completion_ready(
+                copy.source_completion_time.max(now),
+                copy.delivery_work,
+            )?;
+        }
         Ok(())
     }
 
@@ -4452,11 +4647,19 @@ impl AsyncCopySlot {
         &mut self,
         warp: usize,
         id: AsyncCopyGroupId,
+        bypass_instruction: Option<usize>,
         remove: u32,
         now: u64,
         params: &IssueModelParams,
     ) -> Result<(), IssueError> {
-        self.preflight_async_copy_source_completion(warp, id, remove, now, params)?;
+        self.preflight_async_copy_source_completion(
+            warp,
+            id,
+            bypass_instruction,
+            remove,
+            now,
+            params,
+        )?;
         let group = self
             .async_group_mut(id)
             .ok_or(IssueError::AsyncCopyGroupNotFound { warp, group: id })?;
@@ -4477,7 +4680,77 @@ impl AsyncCopySlot {
         group.delivery_work = delivery_work;
         group.destination_wavefronts = destination_wavefronts;
         group.completion_time = completion_time;
+        if let Some(instruction) = bypass_instruction {
+            let copy = self
+                .state
+                .as_deref_mut()
+                .and_then(|state| {
+                    state
+                        .bypass_copies
+                        .iter_mut()
+                        .find(|copy| copy.group == id && copy.instruction == instruction)
+                })
+                .expect("bypass observation was validated before aggregate mutation");
+            copy.pending_sources -= remove;
+            copy.source_completion_time = copy.source_completion_time.max(now);
+        }
         Ok(())
+    }
+
+    fn bypass_copy_projection(
+        &self,
+        warp: usize,
+        group: &AsyncCopyGroup,
+        params: &IssueModelParams,
+    ) -> Result<Option<BypassAsyncCopyProjection>, IssueError> {
+        let Some(state) = self.state.as_deref() else {
+            return Ok(None);
+        };
+        let mut copies = 0_u64;
+        let mut destination_wavefronts = 0_u64;
+        let mut earliest_source = u64::MAX;
+        let mut latest_source = 0_u64;
+        let mut per_copy_completion = 0_u64;
+        for copy in state
+            .bypass_copies
+            .iter()
+            .filter(|copy| copy.group == group.id)
+        {
+            if copy.pending_sources != 0 {
+                return Err(IssueError::AsyncCopyObservationPendingAtWait {
+                    warp,
+                    group: group.id,
+                    instruction: copy.instruction,
+                    pending: copy.pending_sources,
+                });
+            }
+            copies = checked_u64_counter_add("observed bypass asynchronous-copy count", copies, 1)?;
+            destination_wavefronts = checked_u64_counter_add(
+                "observed bypass destination wavefronts",
+                destination_wavefronts,
+                copy.destination_wavefronts,
+            )?;
+            earliest_source = earliest_source.min(copy.source_completion_time);
+            latest_source = latest_source.max(copy.source_completion_time);
+            per_copy_completion = per_copy_completion.max(
+                params.ldgsts_completion_ready(copy.source_completion_time, copy.delivery_work)?,
+            );
+        }
+        if copies == 0 {
+            return Ok(None);
+        }
+        let aggregate_completion = group.local_completion_time(params)?;
+        debug_assert!(
+            aggregate_completion >= per_copy_completion,
+            "group-aggregate delivery must upper-bound independent per-copy delivery"
+        );
+        Ok(Some(BypassAsyncCopyProjection {
+            copies,
+            destination_wavefronts,
+            source_spread_cycles: latest_source.saturating_sub(earliest_source),
+            per_copy_completion_cycles: per_copy_completion.saturating_sub(group.committed_at),
+            group_aggregate_excess_cycles: aggregate_completion.saturating_sub(per_copy_completion),
+        }))
     }
 
     fn commit_async_copy_group(&mut self, now: u64) -> bool {
@@ -4543,6 +4816,10 @@ impl AsyncCopySlot {
                 .all(|group| group.is_complete_at(now)),
             "scheduler issued an asynchronous-copy wait before its required prefix completed"
         );
+        let consumed_through = state.committed_groups[consume - 1].id.0;
+        state
+            .bypass_copies
+            .retain(|copy| copy.group.0 > consumed_through);
         state.committed_groups.drain(..consume);
     }
 }
@@ -4739,6 +5016,9 @@ fn async_copy_completion_work(kind: AccessKind) -> Option<u64> {
             AsyncCopyCompletion::Inactive => None,
             AsyncCopyCompletion::PayloadWork(work)
             | AsyncCopyCompletion::ExactDestinationWork(work) => Some(u64::from(work)),
+            AsyncCopyCompletion::PayloadAndObservedDestination { payload_work, .. } => {
+                Some(u64::from(payload_work))
+            }
         },
         AccessKind::NonMemory
         | AccessKind::PredicatedOffMemory
@@ -4750,6 +5030,26 @@ fn async_copy_completion_work(kind: AccessKind) -> Option<u64> {
         | AccessKind::GlobalUntagged { .. }
         | AccessKind::GlobalStore { .. }
         | AccessKind::GlobalReduction { .. } => None,
+    }
+}
+
+fn bypass_async_copy_observed_destination_wavefronts(kind: AccessKind) -> Option<u64> {
+    let AccessKind::GlobalAsyncCopy {
+        completion_work,
+        l1_policy: LdgstsL1Policy::BypassL1,
+        ..
+    } = kind
+    else {
+        return None;
+    };
+    match decode_async_copy_completion(completion_work) {
+        AsyncCopyCompletion::PayloadAndObservedDestination {
+            destination_wavefronts,
+            ..
+        } => Some(u64::from(destination_wavefronts)),
+        AsyncCopyCompletion::Inactive
+        | AsyncCopyCompletion::PayloadWork(_)
+        | AsyncCopyCompletion::ExactDestinationWork(_) => None,
     }
 }
 
@@ -5149,7 +5449,8 @@ fn project_async_copy_removal(
     let current = if let Some(&current) = projected.get(&(warp, group)) {
         current
     } else {
-        async_copies[warp].preflight_async_copy_source_completion(warp, group, 0, now, params)?;
+        async_copies[warp]
+            .preflight_async_copy_source_completion(warp, group, None, 0, now, params)?;
         async_copies[warp]
             .async_group(group)
             .ok_or(IssueError::AsyncCopyGroupNotFound { warp, group })?
@@ -5975,6 +6276,7 @@ impl<'a> SmCore<'a> {
                         u32::from(len),
                         delivery_work,
                         destination_wavefronts,
+                        None,
                         &p,
                     )?)
                 } else {
@@ -6011,7 +6313,7 @@ impl<'a> SmCore<'a> {
                         Ok(Some(ready)) => {
                             if let Some(group) = async_group {
                                 async_copies[wix]
-                                    .complete_async_copy_sources(wix, group, 1, ready, &p)?;
+                                    .complete_async_copy_sources(wix, group, None, 1, ready, &p)?;
                             }
                             if let Some(current) = &mut known {
                                 *current = (*current).max(ready);
@@ -6095,13 +6397,21 @@ impl<'a> SmCore<'a> {
                 }
                 let async_group = if async_copy {
                     let delivery_work = async_copy_completion_work(kind).unwrap_or(0);
-                    Some(async_copies[wix].add_pending_async_copy_sources(
-                        wix,
-                        u32::from(len),
-                        delivery_work,
-                        destination_wavefronts,
-                        &p,
-                    )?)
+                    Some(
+                        async_copies[wix].add_pending_async_copy_sources(
+                            wix,
+                            u32::from(len),
+                            delivery_work,
+                            destination_wavefronts,
+                            Some(BypassAsyncCopyInput {
+                                instruction,
+                                destination_wavefronts:
+                                    bypass_async_copy_observed_destination_wavefronts(kind)
+                                        .unwrap_or(0),
+                            }),
+                            &p,
+                        )?,
+                    )
                 } else {
                     None
                 };
@@ -6227,7 +6537,7 @@ impl<'a> SmCore<'a> {
                 warp,
                 group,
                 barrier,
-                ..
+                response_id,
             } => {
                 if warp >= self.warps.len() {
                     return Err(IssueError::ResponseWarpOutOfRange {
@@ -6238,6 +6548,7 @@ impl<'a> SmCore<'a> {
                 self.async_copies[warp].preflight_async_copy_source_completion(
                     warp,
                     group,
+                    Some(response_id.instruction),
                     1,
                     now,
                     &self.params,
@@ -6652,6 +6963,7 @@ impl<'a> SmCore<'a> {
                             async_copies[waiter.warp].complete_async_copy_sources(
                                 waiter.warp,
                                 group,
+                                None,
                                 waiter.units,
                                 now,
                                 &params,
@@ -6679,9 +6991,16 @@ impl<'a> SmCore<'a> {
                 warp,
                 group,
                 barrier,
-                ..
+                response_id,
             } => {
-                async_copies[warp].complete_async_copy_sources(warp, group, 1, now, &params)?;
+                async_copies[warp].complete_async_copy_sources(
+                    warp,
+                    group,
+                    Some(response_id.instruction),
+                    1,
+                    now,
+                    &params,
+                )?;
                 if let Some(barrier) = barrier {
                     warps[warp].clear_pending(warp, barrier, 1, now)?;
                 }
@@ -6896,6 +7215,22 @@ impl<'a> SmCore<'a> {
                             projected.async_groups.completion_hidden_before_wait_cycles,
                             hidden,
                         )?;
+                    if let Some(observed) = self.async_copies[warp_index].bypass_copy_projection(
+                        warp_index,
+                        group,
+                        &self.params,
+                    )? {
+                        let diagnostics = projected
+                            .bypass_async_copies
+                            .get_or_insert_with(|| Box::new(BypassAsyncCopyDiagnostics::default()));
+                        diagnostics.add_checked(&BypassAsyncCopyDiagnostics {
+                            copies_observed: observed.copies,
+                            destination_wavefronts_observed: observed.destination_wavefronts,
+                            copy_source_spread_cycles: observed.source_spread_cycles,
+                            per_copy_completion_cycles: observed.per_copy_completion_cycles,
+                            group_aggregate_excess_cycles: observed.group_aggregate_excess_cycles,
+                        })?;
+                    }
                     let limited_counter = match cause {
                         ReadinessCause::AsyncSource => {
                             &mut projected.async_groups.source_limited_groups
@@ -8136,6 +8471,7 @@ impl<'a> SmCore<'a> {
                                 source_ready,
                                 delivery_work,
                                 destination_wavefronts,
+                                None,
                                 &self.params,
                             )
                             .is_ok()
@@ -8278,6 +8614,7 @@ impl<'a> SmCore<'a> {
                             source_ready,
                             delivery_work,
                             async_destination_wavefronts[subcore],
+                            None,
                             &self.params,
                         )?;
                     }
@@ -8681,6 +9018,21 @@ impl<'a> SmCore<'a> {
                     source_ready,
                     delivery_work,
                     async_destination_wavefronts[subcore],
+                    (matches!(self.mem, MemModel::L1Shared(_))
+                        && matches!(
+                            kind,
+                            AccessKind::GlobalAsyncCopy {
+                                l1_policy: LdgstsL1Policy::BypassL1,
+                                ..
+                            }
+                        ))
+                    .then_some(BypassAsyncCopyInput {
+                        instruction: w.next,
+                        destination_wavefronts: bypass_async_copy_observed_destination_wavefronts(
+                            kind,
+                        )
+                        .unwrap_or(0),
+                    }),
                     &self.params,
                 )?;
             }
@@ -9339,7 +9691,7 @@ fn drain_retries(
                 Ok(Some(ready)) => {
                     if let Some(group) = r.target.and_then(FillTarget::async_group) {
                         async_copies[r.warp]
-                            .complete_async_copy_sources(r.warp, group, 1, ready, params)?;
+                            .complete_async_copy_sources(r.warp, group, None, 1, ready, params)?;
                     }
                     warps[r.warp].stamp_clear(barrier, ready, DependencyOrigin::L1Tex);
                 }
@@ -11454,16 +11806,16 @@ mod tests {
 
         let p = params();
         let older = core.async_copies[0]
-            .add_pending_async_copy_sources(0, 1, 0, 0, &p)
+            .add_pending_async_copy_sources(0, 1, 0, 0, None, &p)
             .unwrap();
         assert!(core.async_copies[0].commit_async_copy_group(1));
         let newer = core.async_copies[0]
-            .add_pending_async_copy_sources(0, 1, 0, 0, &p)
+            .add_pending_async_copy_sources(0, 1, 0, 0, None, &p)
             .unwrap();
         assert!(core.async_copies[0].commit_async_copy_group(2));
 
         core.async_copies[0]
-            .complete_async_copy_sources(0, newer, 1, 50, &p)
+            .complete_async_copy_sources(0, newer, None, 1, 50, &p)
             .unwrap();
         assert_eq!(
             core.async_copies[0].async_wait_clear_time(1),
@@ -11472,7 +11824,7 @@ mod tests {
         );
 
         core.async_copies[0]
-            .complete_async_copy_sources(0, older, 1, 100, &p)
+            .complete_async_copy_sources(0, older, None, 1, 100, &p)
             .unwrap();
         assert_eq!(core.async_copies[0].async_wait_clear_time(1), Some(100));
         core.async_copies[0].consume_async_wait(1, 100);
@@ -11490,6 +11842,75 @@ mod tests {
     }
 
     #[test]
+    fn bypass_copy_observation_preserves_individual_source_frontiers() {
+        let p = params();
+        let mut slot = AsyncCopySlot::default();
+        let group = slot
+            .add_pending_async_copy_sources(
+                0,
+                2,
+                64,
+                0,
+                Some(BypassAsyncCopyInput {
+                    instruction: 10,
+                    destination_wavefronts: 4,
+                }),
+                &p,
+            )
+            .unwrap();
+        assert_eq!(
+            slot.add_pending_async_copy_sources(
+                0,
+                2,
+                64,
+                0,
+                Some(BypassAsyncCopyInput {
+                    instruction: 20,
+                    destination_wavefronts: 8,
+                }),
+                &p,
+            )
+            .unwrap(),
+            group
+        );
+        assert!(slot.commit_async_copy_group(10));
+
+        slot.complete_async_copy_sources(0, group, Some(10), 1, 30, &p)
+            .unwrap();
+        slot.complete_async_copy_sources(0, group, Some(10), 1, 40, &p)
+            .unwrap();
+        slot.complete_async_copy_sources(0, group, Some(20), 1, 50, &p)
+            .unwrap();
+        slot.complete_async_copy_sources(0, group, Some(20), 1, 70, &p)
+            .unwrap();
+
+        let committed = slot.state.as_deref().unwrap().committed_groups[0];
+        let projected = slot
+            .bypass_copy_projection(0, &committed, &p)
+            .unwrap()
+            .unwrap();
+        let per_copy = p
+            .ldgsts_completion_ready(40, 64)
+            .unwrap()
+            .max(p.ldgsts_completion_ready(70, 64).unwrap());
+        let aggregate = committed.local_completion_time(&p).unwrap();
+        assert_eq!(projected.copies, 2);
+        assert_eq!(projected.destination_wavefronts, 12);
+        assert_eq!(projected.source_spread_cycles, 30);
+        assert_eq!(projected.per_copy_completion_cycles, per_copy - 10);
+        assert_eq!(
+            projected.group_aggregate_excess_cycles,
+            aggregate - per_copy
+        );
+        assert_eq!(slot.async_wait_clear_time(0), Some(aggregate));
+
+        slot.consume_async_wait(0, aggregate);
+        let state = slot.state.as_deref().unwrap();
+        assert!(state.committed_groups.is_empty());
+        assert!(state.bypass_copies.is_empty());
+    }
+
+    #[test]
     fn async_copy_pending_overflow_rejects_issue_without_mutation() {
         let sched = schedule(vec![(0, slot(cb(1), OpClass::Other, "LDGSTS.E"))]);
         let blocks = vec![BlockReplay {
@@ -11502,7 +11923,7 @@ mod tests {
         }];
         let mut core = shared_core(&blocks, &sched, &params());
         let group = core.async_copies[0]
-            .add_pending_async_copy_sources(0, u32::MAX, 0, 0, &params())
+            .add_pending_async_copy_sources(0, u32::MAX, 0, 0, None, &params())
             .unwrap();
         let before_group = core.async_copies[0].state.as_deref().unwrap().open_group;
         let before_l1 = *core.l1_counters().unwrap();
@@ -14127,10 +14548,10 @@ mod tests {
 
         let p = params();
         let group = core.async_copies[0]
-            .add_pending_async_copy_sources(0, 2, 0, 0, &p)
+            .add_pending_async_copy_sources(0, 2, 0, 0, None, &p)
             .unwrap();
         core.async_copies[0]
-            .complete_async_copy_sources(0, group, 2, 91, &p)
+            .complete_async_copy_sources(0, group, None, 2, 91, &p)
             .unwrap();
         assert_eq!(
             core.async_copies[0]

@@ -40,8 +40,9 @@ pub mod l2;
 pub mod pchase_card;
 
 pub use access::{
-    ASYNC_COPY_COMPLETION_VALUE_MASK, AccessKind, AsyncCopyCompletion, MemRole, MemRoleError,
-    MemoryOrigin, decode_async_copy_completion, encode_async_copy_destination_work,
+    ASYNC_COPY_COMPLETION_VALUE_MASK, ASYNC_COPY_COMPOSITE_FIELD_MASK, AccessKind,
+    AsyncCopyCompletion, MemRole, MemRoleError, MemoryOrigin, decode_async_copy_completion,
+    encode_async_copy_destination_work, encode_async_copy_payload_and_destination,
     encode_async_copy_payload_work, is_global_reduction_opcode, is_global_store_opcode,
     is_known_untagged_opcode, mem_role_of_checked,
 };

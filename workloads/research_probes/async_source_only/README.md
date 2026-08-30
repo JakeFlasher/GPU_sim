@@ -83,3 +83,17 @@ PYTHONDONTWRITEBYTECODE=1 python3 \
 The phase assay is live diagnostic evidence, not a simulator input. It
 localizes the bypass layout effect after issue, while its depth shape rejects
 reuse of the cache-all group-aggregate completion rule.
+
+The simulator-side per-copy observation is reduced with:
+
+```bash
+PYTHONDONTWRITEBYTECODE=1 python3 \
+  workloads/research_probes/async_source_only/analyze_per_copy.py \
+  --root results/captures/sm86_async_copy_per_copy_observation_20260830_v2 \
+  --baseline-root results/captures/sm86_async_source_visibility_20260830_v2 \
+  --output results/captures/sm86_async_copy_per_copy_observation_20260830_v2/analysis/report.json
+```
+
+Schema-14 bypass observations retain per-instruction source completion,
+payload work, and trace-projected destination wavefronts. They do not change
+timing or clear the typed visibility tail.

@@ -62,8 +62,9 @@ use sim_trace::{
 };
 
 use sim_mem::{
-    ASYNC_COPY_COMPLETION_VALUE_MASK, CacheOpToken, L2Config, L2Counters, L2Model, LdgstsL1Policy,
-    MemRole, encode_async_copy_destination_work, encode_async_copy_payload_work,
+    ASYNC_COPY_COMPLETION_VALUE_MASK, ASYNC_COPY_COMPOSITE_FIELD_MASK, CacheOpToken, L2Config,
+    L2Counters, L2Model, LdgstsL1Policy, MemRole, encode_async_copy_destination_work,
+    encode_async_copy_payload_and_destination, encode_async_copy_payload_work,
     is_known_untagged_opcode, opcode_head,
 };
 
@@ -4313,6 +4314,31 @@ fn project_async_copy_completion_work(
             rhs: units_per_byte,
         },
     )?;
+    if payload_work != 0
+        && l1_policy == LdgstsL1Policy::BypassL1
+        && let Some(destination_wavefronts) = destination_wavefronts
+    {
+        let payload_work_compact = u32::try_from(payload_work).map_err(|_| {
+            ReplayError::AsyncCopyCompletionWorkOutOfRange {
+                path: path.to_path_buf(),
+                warp_id,
+                record_ix,
+                completion_work: payload_work,
+                max_completion_work: ASYNC_COPY_COMPOSITE_FIELD_MASK,
+            }
+        })?;
+        return encode_async_copy_payload_and_destination(
+            payload_work_compact,
+            destination_wavefronts,
+        )
+        .ok_or(ReplayError::AsyncCopyCompletionWorkOutOfRange {
+            path: path.to_path_buf(),
+            warp_id,
+            record_ix,
+            completion_work: payload_work.max(u64::from(destination_wavefronts)),
+            max_completion_work: ASYNC_COPY_COMPOSITE_FIELD_MASK,
+        });
+    }
     let exact_destination = if l1_policy == LdgstsL1Policy::CacheAtAllLevels {
         match destination_wavefronts {
             Some(wavefronts) => {
@@ -4350,9 +4376,10 @@ fn project_async_copy_completion_work(
             None => None,
         }
     } else {
-        // Focused bypass probes show a different source/destination coupling;
-        // retain the independently established payload fallback until that
-        // projection is characterized rather than importing the cache-all rule.
+        // Focused bypass probes show a different source/destination coupling.
+        // The compact token above retains its trace-derived topology for cold
+        // diagnostics, while production timing continues to use payload work
+        // until a bypass-specific per-copy mechanism is characterized.
         None
     };
     if payload_work != 0
@@ -8810,7 +8837,7 @@ mod replay_identity_tests {
     }
 
     #[test]
-    fn destination_v3_projects_cache_all_work_but_preserves_bypass_fallback() {
+    fn destination_v3_projects_cache_all_work_and_observes_bypass_destination() {
         for (transpose, l1_policy, expected_work) in [
             (false, LdgstsL1Policy::CacheAtAllLevels, 512),
             (true, LdgstsL1Policy::CacheAtAllLevels, 2_048),
@@ -8830,7 +8857,9 @@ mod replay_identity_tests {
                 LdgstsL1Policy::CacheAtAllLevels => {
                     encode_async_copy_destination_work(expected_work).unwrap()
                 }
-                LdgstsL1Policy::BypassL1 => encode_async_copy_payload_work(expected_work).unwrap(),
+                LdgstsL1Policy::BypassL1 => {
+                    encode_async_copy_payload_and_destination(expected_work, 16).unwrap()
+                }
             };
 
             for decode_sectors in [false, true] {

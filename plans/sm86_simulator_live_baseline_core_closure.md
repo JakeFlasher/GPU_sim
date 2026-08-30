@@ -38,10 +38,15 @@ The detailed result is
 [`docs/sm86_async_visibility_phase_milestone.md`](../docs/sm86_async_visibility_phase_milestone.md).
 
 This closes issue replay as the cause and rejects a group-aggregate bypass
-constant. The next GPU-only core slice is to preserve per-copy source and
-destination completion inside an async group, expose that observational
-frontier on the retained layout traces, and promote timing only if it transfers.
-Until then, keep the typed lower bound and scored simulator defaults unchanged.
+constant. Per-copy source replies, payload work, and projected destination
+wavefronts are now preserved in cold replay state and exposed by readiness
+schema 14, with no timing change. The retained result is
+[`docs/sm86_async_per_copy_observation_milestone.md`](../docs/sm86_async_per_copy_observation_milestone.md).
+
+The trace projection separates the layout pair by 2× while live `.cg`
+wavefronts separate it by 4×. The next GPU-only discriminator is one additional
+destination geometry that chooses between those projection shapes. Until that
+transfers, keep the typed lower bound and scored simulator defaults unchanged.
 
 ## Acceptance Criteria
 

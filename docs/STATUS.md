@@ -102,6 +102,17 @@ core change: retain per-copy source/destination completion before group wait.
 The typed bypass tail remains active until that event ordering is implemented
 and independently checked.
 
+That structural change is now complete in
+[the bypass per-copy observation report](sm86_async_per_copy_observation_milestone.md).
+Shared-L2 replay retains each bypass copy's source replies, payload work, and
+trace-projected destination wavefronts in cold state, then reports schema-14
+per-copy/aggregate frontiers without changing time. Eight retained visibility
+traces replay deterministically; cache-all JSON is byte-identical and every
+bypass output is predecessor-identical after removing only the new observation
+and schema number. The trace projection separates compact/conflict by 2× while
+live `.cg` wavefronts separated them by 4×, so the typed tail remains and the
+next action is one projection-discriminating destination geometry.
+
 The 2026-08-17
 [causal-readiness milestone](sm86_causal_readiness_milestone.md) is complete.
 Reason-tagged dependency, async-copy, CTA-generation/arrival-spread, and

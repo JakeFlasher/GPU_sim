@@ -120,20 +120,39 @@ pub fn is_known_untagged_opcode(opcode_text: &str) -> bool {
 /// arena.
 pub const ASYNC_COPY_EXACT_DESTINATION_FLAG: u32 = 1 << 31;
 pub const ASYNC_COPY_COMPLETION_VALUE_MASK: u32 = ASYNC_COPY_EXACT_DESTINATION_FLAG - 1;
+const ASYNC_COPY_COMPOSITE_MARKER_MASK: u32 = 0x3f;
+const ASYNC_COPY_COMPOSITE_MARKER: u32 = ASYNC_COPY_COMPOSITE_MARKER_MASK;
+const ASYNC_COPY_COMPOSITE_PAYLOAD_SHIFT: u32 = 6;
+const ASYNC_COPY_COMPOSITE_DESTINATION_SHIFT: u32 = 18;
+pub const ASYNC_COPY_COMPOSITE_FIELD_MASK: u32 = 0x0fff;
 
-/// Meaning of the compact `GlobalAsyncCopy::completion_work` token. The tag
-/// preserves exact destination wavefronts without widening [`AccessKind`];
-/// source-only and bypass records retain their established fixed-point work.
+/// Meaning of the compact `GlobalAsyncCopy::completion_work` token. Cache-all
+/// records may carry exact timing work. Destination-bearing bypass records
+/// carry payload timing work plus an observational wavefront count; that count
+/// cannot affect timing until a bypass-specific mechanism is characterized.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AsyncCopyCompletion {
     Inactive,
     PayloadWork(u32),
     ExactDestinationWork(u32),
+    PayloadAndObservedDestination {
+        payload_work: u32,
+        destination_wavefronts: u32,
+    },
 }
 
 pub const fn decode_async_copy_completion(token: u32) -> AsyncCopyCompletion {
     if token == 0 {
         AsyncCopyCompletion::Inactive
+    } else if token & ASYNC_COPY_EXACT_DESTINATION_FLAG != 0
+        && token & ASYNC_COPY_COMPOSITE_MARKER_MASK == ASYNC_COPY_COMPOSITE_MARKER
+    {
+        AsyncCopyCompletion::PayloadAndObservedDestination {
+            payload_work: (token >> ASYNC_COPY_COMPOSITE_PAYLOAD_SHIFT)
+                & ASYNC_COPY_COMPOSITE_FIELD_MASK,
+            destination_wavefronts: (token >> ASYNC_COPY_COMPOSITE_DESTINATION_SHIFT)
+                & ASYNC_COPY_COMPOSITE_FIELD_MASK,
+        }
     } else if token & ASYNC_COPY_EXACT_DESTINATION_FLAG != 0 {
         AsyncCopyCompletion::ExactDestinationWork(token & ASYNC_COPY_COMPLETION_VALUE_MASK)
     } else {
@@ -152,8 +171,30 @@ pub const fn encode_async_copy_payload_work(work: u32) -> Option<u32> {
 pub const fn encode_async_copy_destination_work(work: u32) -> Option<u32> {
     if work == 0 {
         Some(0)
-    } else if work <= ASYNC_COPY_COMPLETION_VALUE_MASK {
+    } else if work <= ASYNC_COPY_COMPLETION_VALUE_MASK
+        && work & ASYNC_COPY_COMPOSITE_MARKER_MASK != ASYNC_COPY_COMPOSITE_MARKER
+    {
         Some(ASYNC_COPY_EXACT_DESTINATION_FLAG | work)
+    } else {
+        None
+    }
+}
+
+pub const fn encode_async_copy_payload_and_destination(
+    payload_work: u32,
+    destination_wavefronts: u32,
+) -> Option<u32> {
+    if payload_work == 0 || destination_wavefronts == 0 {
+        None
+    } else if payload_work <= ASYNC_COPY_COMPOSITE_FIELD_MASK
+        && destination_wavefronts <= ASYNC_COPY_COMPOSITE_FIELD_MASK
+    {
+        Some(
+            ASYNC_COPY_EXACT_DESTINATION_FLAG
+                | ASYNC_COPY_COMPOSITE_MARKER
+                | (payload_work << ASYNC_COPY_COMPOSITE_PAYLOAD_SHIFT)
+                | (destination_wavefronts << ASYNC_COPY_COMPOSITE_DESTINATION_SHIFT),
+        )
     } else {
         None
     }
@@ -215,10 +256,10 @@ pub enum AccessKind {
         off: usize,
         len: u16,
         /// Tagged completion token. Untagged values are work in the
-        /// architecture's fixed 64-unit/cycle domain; the high-bit form stores
-        /// exact destination-derived work that can be inverted to a cache-all
-        /// wavefront count. Replay performs all checked projection before
-        /// packing so this field stays compact.
+        /// architecture's fixed 64-unit/cycle domain; tagged forms store either
+        /// exact cache-all destination work or bypass payload work paired with
+        /// an observational destination-wavefront count. Replay performs every
+        /// checked projection before packing so this field stays compact.
         completion_work: u32,
         /// Static SASS source-cache route. This remains explicit on a
         /// predicated-off dynamic record even though its payload is zero.
@@ -323,12 +364,24 @@ mod tests {
             decode_async_copy_completion(destination),
             AsyncCopyCompletion::ExactDestinationWork(2048)
         );
+        let composite = encode_async_copy_payload_and_destination(1024, 32).unwrap();
+        assert_eq!(
+            decode_async_copy_completion(composite),
+            AsyncCopyCompletion::PayloadAndObservedDestination {
+                payload_work: 1024,
+                destination_wavefronts: 32,
+            }
+        );
         assert_eq!(
             decode_async_copy_completion(encode_async_copy_destination_work(0).unwrap()),
             AsyncCopyCompletion::Inactive
         );
         assert!(encode_async_copy_payload_work(u32::MAX).is_none());
         assert!(encode_async_copy_destination_work(u32::MAX).is_none());
+        assert!(
+            encode_async_copy_payload_and_destination(ASYNC_COPY_COMPOSITE_FIELD_MASK + 1, 1,)
+                .is_none()
+        );
     }
 
     #[test]
