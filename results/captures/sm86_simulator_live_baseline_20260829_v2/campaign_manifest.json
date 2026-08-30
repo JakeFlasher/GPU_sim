@@ -34,15 +34,15 @@
   },
   "release_build": {
     "record": "evidence/host_preflight/release_build.json",
-    "record_sha256": "45493bedcee7218d5a125571af10505ceb3e383e4eb9fcc258d8ef7ad99e01b5",
+    "record_sha256": "4ed51f40e05556f76b897a262e12da91bf0f3e5c23e7ecb72ea23af8acafb2cb",
     "argv": ["cargo", "build", "--release", "--manifest-path", "sim/Cargo.toml", "-p", "sim-run"],
     "timeout_seconds": 1800,
     "exit_code": 0,
-    "repository_revision": "c8fbc14ca0071597f844885109be75d7c463f7f1",
+    "repository_revision": "71369ed7273ad940ede54796d721b761c5fdfd0e",
     "stdout": "evidence/host_preflight/release_build/stdout.txt",
     "stderr": "evidence/host_preflight/release_build/stderr.txt",
     "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-    "stderr_sha256": "a70da5408e7a6da7efe97b23011504833b16a7875bda14543f2504b5b8c7d97a",
+    "stderr_sha256": "92434e198f27984c035c376ec77a7cf9e6ebdde782f8ccb1336ae3329b66ddb7",
     "binary": {
       "path": "sim/target/release/sim-run",
       "sha256": "6cb0d05f0d447c0cd6ee2e30353c0f1e89d464462458912478c826860f15f9a4",
