@@ -15,11 +15,17 @@
     "DYNAMIC_KERNEL_LIMIT_START": "0",
     "ENHANCED_TRACER_MAX_PARSER_INPUT_KB": "256",
     "ENHANCED_TRACER_PER_CUBIN_TIMEOUT_S": "45",
+    "HOME": "/home/jakeshea",
+    "LANG": "C",
+    "LC_ALL": "C",
     "LD_LIBRARY_PATH": ".toolchain/pb/lib",
+    "PATH": "/usr/local/cuda-13.2/bin:/opt/cuda/bin:/usr/bin:/bin",
     "SKIP_ENHANCED_TRACER": "0",
-    "TRACES_FOLDER": "evidence/raw/nvbit/flash_attn_fwd_bf16_sm80",
+    "TRACES_FOLDER": "/home/jakeshea/GPU_simulator_rebase/results/captures/sm86_simulator_live_baseline_20260829_v2/evidence/raw/nvbit/flash_attn_fwd_bf16_sm80",
     "USER_DEFINED_FOLDERS": "1"
   },
+  "environment_record": "evidence/raw/nvbit/flash_attn_fwd_bf16_sm80/environment.json",
+  "environment_sha256": "c98fcf5e6a03016aa3136526688dc9f3b92e1348b57b35af17b61600c40975a4",
   "geometry": {
     "block": [
       32,
@@ -35,7 +41,7 @@
     "threads_per_block": 32
   },
   "hashes": {
-    "dynamic_trace_sha256": "3a0bc59d94102b2d629c4a624e11279fbd2bb76805ffb063c8a4b1b7f2174956",
+    "dynamic_trace_sha256": "6c7d939c2789556b172cc2c3bff065dbbbb3ea179d80b19fc5c36e06963bb3bc",
     "execution_info_sha256": "3e6f6369c77c444300ecaf7e55f6e0a17dbcd96bdec7432eca505a75fa33e21c",
     "mapping_sha256": "a476a01da39616cef5c77ec204f2163c8620f95854fdc4379eb5736943e2959f",
     "stats_sha256": "bd17ed899297197b4d5d8e0d8d20c3a0be420a26cf199cb3fa922a222dcc9d0a"
@@ -51,6 +57,7 @@
   },
   "paths": {
     "dynamic_trace": "evidence/raw/nvbit/flash_attn_fwd_bf16_sm80/dynamic_trace.pb",
+    "environment": "evidence/raw/nvbit/flash_attn_fwd_bf16_sm80/environment.json",
     "execution_info": "evidence/raw/nvbit/flash_attn_fwd_bf16_sm80/extra_info/enhanced_execution_info.json",
     "mapping": "evidence/raw/nvbit/flash_attn_fwd_bf16_sm80/extra_info/traced_kernel_modules.json",
     "stats": "evidence/raw/nvbit/flash_attn_fwd_bf16_sm80/stats.csv"

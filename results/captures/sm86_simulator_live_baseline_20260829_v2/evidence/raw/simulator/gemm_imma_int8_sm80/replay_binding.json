@@ -33,17 +33,17 @@
     },
     "trace": {
       "path": "evidence/raw/nvbit/gemm_imma_int8_sm80",
-      "sha256": "a2f1f652ee3534574f8d742a8698686d353a5601c80cc31fcbb63bc1f4579eb8"
+      "sha256": "80d669220ba94de3e935d425c671179c36f7ed482b8fc7ccf6ac6418397f4e7d"
     }
   },
   "outputs": [
     {
       "path": "evidence/raw/simulator/gemm_imma_int8_sm80/replay-1.json",
-      "sha256": "9cfb26e02dc5b6384f420b5bf0e69982fc57979208dd1fa6cb37473683c8a71d"
+      "sha256": "b85782f885c80f82f4200108a37411cad116db0330bb0e0e4bec256591679c88"
     },
     {
       "path": "evidence/raw/simulator/gemm_imma_int8_sm80/replay-2.json",
-      "sha256": "9cfb26e02dc5b6384f420b5bf0e69982fc57979208dd1fa6cb37473683c8a71d"
+      "sha256": "b85782f885c80f82f4200108a37411cad116db0330bb0e0e4bec256591679c88"
     }
   ],
   "schema_version": 1,

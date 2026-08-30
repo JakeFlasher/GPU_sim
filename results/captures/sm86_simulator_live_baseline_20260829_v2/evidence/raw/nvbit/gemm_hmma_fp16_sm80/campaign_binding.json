@@ -15,11 +15,17 @@
     "DYNAMIC_KERNEL_LIMIT_START": "0",
     "ENHANCED_TRACER_MAX_PARSER_INPUT_KB": "256",
     "ENHANCED_TRACER_PER_CUBIN_TIMEOUT_S": "45",
+    "HOME": "/home/jakeshea",
+    "LANG": "C",
+    "LC_ALL": "C",
     "LD_LIBRARY_PATH": ".toolchain/pb/lib",
+    "PATH": "/usr/local/cuda-13.2/bin:/opt/cuda/bin:/usr/bin:/bin",
     "SKIP_ENHANCED_TRACER": "0",
-    "TRACES_FOLDER": "evidence/raw/nvbit/gemm_hmma_fp16_sm80",
+    "TRACES_FOLDER": "/home/jakeshea/GPU_simulator_rebase/results/captures/sm86_simulator_live_baseline_20260829_v2/evidence/raw/nvbit/gemm_hmma_fp16_sm80",
     "USER_DEFINED_FOLDERS": "1"
   },
+  "environment_record": "evidence/raw/nvbit/gemm_hmma_fp16_sm80/environment.json",
+  "environment_sha256": "0491d6aec72c96b106c96b10024a17a9376309783e320a5cd437c6a9421b1bcd",
   "geometry": {
     "block": [
       32,
@@ -35,7 +41,7 @@
     "threads_per_block": 32
   },
   "hashes": {
-    "dynamic_trace_sha256": "65a2c3fb77c36d2957c7b406b82a33d2ade64687fa92ae498b5f3f4bba92c851",
+    "dynamic_trace_sha256": "709ca5d1a3e38b366e10c51ba04b90fe15a993b8729e523b95e4db96fc1a1668",
     "execution_info_sha256": "eab1715f2136aebb5016961c466b2d0cdfb3d852695906e9f7a275cc7007196f",
     "mapping_sha256": "6cb2347d1e3bf0ace1b80f82abf84f3c8aa132b8a25279ba51891cf407dc91b8",
     "stats_sha256": "8ffe146ce9bfeb67210dfce675a4d00a5752854cd8bcc613c3b29f9b7c06fd9c"
@@ -51,6 +57,7 @@
   },
   "paths": {
     "dynamic_trace": "evidence/raw/nvbit/gemm_hmma_fp16_sm80/dynamic_trace.pb",
+    "environment": "evidence/raw/nvbit/gemm_hmma_fp16_sm80/environment.json",
     "execution_info": "evidence/raw/nvbit/gemm_hmma_fp16_sm80/extra_info/enhanced_execution_info.json",
     "mapping": "evidence/raw/nvbit/gemm_hmma_fp16_sm80/extra_info/traced_kernel_modules.json",
     "stats": "evidence/raw/nvbit/gemm_hmma_fp16_sm80/stats.csv"

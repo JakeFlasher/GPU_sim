@@ -133,6 +133,10 @@ def _repeat_fixture(tmp_path):
         "return_code": 0,
         "csv": repeat_dir + "/ncu.csv",
         "report": repeat_dir + "/ncu-report.ncu-rep",
+        "timeout_seconds": 900,
+        "timed_out": False,
+        "export_return_code": 0,
+        "export_timed_out": False,
     }
     return cell, stage, repeat_dir, metadata
 

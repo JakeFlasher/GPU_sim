@@ -113,6 +113,58 @@ def test_current_nvbit_environment_matches_exact_allowlist() -> None:
     )
 
 
+def test_nvbit_effective_environment_record_rejects_inherited_controls(tmp_path: Path) -> None:
+    cell = {
+        "id": "gemm_hmma_bf16_sm80",
+        "binary": {
+            "path": "workloads/portable_lcd/gemm_hmma_bf16_sm80/gemm_hmma_bf16_sm80_run"
+        },
+    }
+    output = "evidence/raw/nvbit/gemm_hmma_bf16_sm80"
+    argv = LIVE_VALIDATOR._expected_nvbit_argv(cell)
+    environment = LIVE_VALIDATOR._expected_nvbit_environment(cell, output, root=tmp_path)
+    record_path = tmp_path / output / "environment.json"
+    record_path.parent.mkdir(parents=True)
+    record = {
+        "schema_version": 1,
+        "kind": "sanitized_nvbit_capture_environment",
+        "cell": cell["id"],
+        "argv": argv,
+        "output": output,
+        "launch_mode": "env_i_exact_allowlist",
+        "environment": environment,
+        "effective_environment": {**environment, "LD_PRELOAD": "/tmp/hostile.so"},
+        "forbidden_variables_absent": sorted(
+            LIVE_VALIDATOR._NVBIT_FORBIDDEN_ENVIRONMENT_CONTROLS
+        ),
+        "return_code": 0,
+        "timed_out": False,
+        "started_at": "2026-08-30T00:00:00+00:00",
+        "finished_at": "2026-08-30T00:00:01+00:00",
+    }
+    record_path.write_text(json.dumps(record), encoding="utf-8")
+    stage = {
+        "environment_record": output + "/environment.json",
+        "environment_sha256": hashlib.sha256(record_path.read_bytes()).hexdigest(),
+    }
+    with pytest.raises(ValueError, match="sanitized contract"):
+        LIVE_VALIDATOR._validate_nvbit_environment_record(
+            tmp_path, cell, stage, argv, output, environment
+        )
+
+
+def test_cp_async_ncu_target_is_the_matched_trace_binary() -> None:
+    _root, cell, _repository = _live_manifest_cell("cp_async_canary")
+    assert LIVE_VALIDATOR.closure_analyzer._expected_ncu_target(cell) == [
+        "workloads/research_probes/async_barrier_overlap/async_barrier_overlap_trace",
+        "c11",
+        "l1",
+        "0",
+        "4",
+        "1",
+    ]
+
+
 def test_ncu_capture_metadata_is_bound_to_trusted_executable(tmp_path: Path) -> None:
     root, cell, _repository = _live_manifest_cell("gemm_hmma_bf16_sm80")
     stage = deepcopy(cell["stages"]["ncu"])
@@ -120,6 +172,8 @@ def test_ncu_capture_metadata_is_bound_to_trusted_executable(tmp_path: Path) -> 
     # The fixture is materialized under the expected campaign-relative paths so
     # the helper exercises hashes and command normalization, not just field types.
     for relative in (
+        stage["report"],
+        stage["csv"],
         stage["metadata"],
         stage["command_file"],
         stage["export_command_file"],
@@ -127,7 +181,7 @@ def test_ncu_capture_metadata_is_bound_to_trusted_executable(tmp_path: Path) -> 
         destination = tmp_path / relative
         destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(root / relative, destination)
-    for key in ("metadata", "command_file", "export_command_file"):
+    for key in ("report", "csv", "metadata", "command_file", "export_command_file"):
         path = tmp_path / stage[key]
         stage[f"{key}_sha256"] = hashlib.sha256(path.read_bytes()).hexdigest()
     metadata_path = tmp_path / stage["metadata"]

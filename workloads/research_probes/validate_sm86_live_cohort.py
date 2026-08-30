@@ -146,6 +146,22 @@ _EXPECTED_STATIC_PARSER_CONTRACT = {
         "reserved_must_be_zero": "bits 21:22",
     },
 }
+_EXPECTED_NVBIT_BASE_ENVIRONMENT = {
+    "HOME": "/home/jakeshea",
+    "LANG": "C",
+    "LC_ALL": "C",
+    "PATH": "/usr/local/cuda-13.2/bin:/opt/cuda/bin:/usr/bin:/bin",
+}
+_NVBIT_FORBIDDEN_ENVIRONMENT_CONTROLS = frozenset(
+    {
+        "CUDA_VISIBLE_DEVICES",
+        "LD_PRELOAD",
+        "LD_AUDIT",
+        "NVBIT_CONFIG_FILE",
+        "NVBIT_TOOL",
+        "NVBIT_PB_PREFIX",
+    }
+)
 
 
 def _is_exact_zero(value: object) -> bool:
@@ -166,14 +182,22 @@ def _expected_nvbit_argv(cell: Mapping[str, Any]) -> list[str]:
     return [trace_path, "--timing_shape", "--warmup", "0", "--reps", "1"]
 
 
-def _expected_nvbit_environment(cell: Mapping[str, Any], output: str) -> dict[str, str]:
+def _expected_nvbit_environment(
+    cell: Mapping[str, Any], output: str, *, root: Path = REPO_ROOT
+) -> dict[str, str]:
     """Return the complete, deterministic environment for one NVBit capture."""
 
+    trace_folder = (
+        output
+        if Path(output).is_absolute()
+        else str((root / output).resolve())
+    )
     expected = {
+        **_EXPECTED_NVBIT_BASE_ENVIRONMENT,
         "LD_LIBRARY_PATH": ".toolchain/pb/lib",
         "CUDA_INJECTION64_PATH": "tools/nvbit_tracer/tracer_tool/tracer_tool.so",
         "USER_DEFINED_FOLDERS": "1",
-        "TRACES_FOLDER": output,
+        "TRACES_FOLDER": trace_folder,
         "ACTIVE_FROM_START": "0" if cell.get("id") == "cp_async_canary" else "1",
         "SKIP_ENHANCED_TRACER": "0",
     }
@@ -315,7 +339,11 @@ def _ncu_path_token_matches(actual: object, expected: str, root: Path) -> bool:
 
     if not isinstance(actual, str):
         return False
-    return actual in {expected, str((root / expected).resolve())}
+    return actual in {
+        expected,
+        str((root / expected).resolve()),
+        str((REPO_ROOT / expected).resolve()),
+    }
 
 
 def _ncu_argv_matches(actual: object, expected: list[str], root: Path) -> bool:
@@ -324,7 +352,7 @@ def _ncu_argv_matches(actual: object, expected: list[str], root: Path) -> bool:
     path_tokens = {
         index
         for index, token in enumerate(expected)
-        if token.startswith("evidence/raw/ncu/")
+        if token.startswith(("evidence/raw/ncu/", "workloads/"))
     }
     for index, (observed, required) in enumerate(zip(actual, expected)):
         if index in path_tokens and not _ncu_path_token_matches(observed, required, root):
@@ -347,6 +375,8 @@ def _validate_ncu_capture_provenance(
     output = f"evidence/raw/ncu/{slug}"
     expected_command = _expected_ncu_capture_argv(cell, output)
     expected_paths = {
+        "report": output + "/ncu-report.ncu-rep",
+        "csv": output + "/ncu.csv",
         "metadata": output + "/metadata.json",
         "command_file": output + "/command.txt",
         "export_command_file": output + "/export_command.txt",
@@ -363,6 +393,9 @@ def _validate_ncu_capture_provenance(
         digest = stage.get(digest_key)
         if not isinstance(digest, str) or len(digest) != 64 or _sha256(path) != digest:
             raise ValueError(f"{slug}: NCU {digest_key} does not match artifact")
+    for key in ("report", "csv"):
+        if paths[key].stat().st_size == 0:
+            raise ValueError(f"{slug}: NCU baseline {key} artifact is empty")
     try:
         metadata = replay_resume.load_json_strict(paths["metadata"])
     except (OSError, UnicodeDecodeError, ValueError, json.JSONDecodeError) as exc:
@@ -376,6 +409,10 @@ def _validate_ncu_capture_provenance(
         or not _ncu_result_path_matches(metadata.get("csv"), output + "/ncu.csv", root)
         or not isinstance(metadata.get("started_at"), str)
         or not isinstance(metadata.get("finished_at"), str)
+        or metadata.get("timeout_seconds") != _CURRENT_TIMEOUTS["ncu"]
+        or metadata.get("timed_out") is not False
+        or metadata.get("export_return_code") != 0
+        or metadata.get("export_timed_out") is not False
     ):
         raise ValueError(
             f"{slug}: NCU metadata command or result is not bound to the trusted executable"
@@ -390,6 +427,8 @@ def _validate_ncu_capture_provenance(
     if not _ncu_argv_matches(recorded_command, expected_command, root):
         raise ValueError(f"{slug}: NCU command.txt differs from the canonical executable/argv")
     expected_export = _expected_ncu_export_argv(output)
+    if not _ncu_argv_matches(metadata.get("export_command"), expected_export, root):
+        raise ValueError(f"{slug}: NCU metadata export command is not canonical")
     if not _ncu_argv_matches(recorded_export, expected_export, root):
         raise ValueError(f"{slug}: NCU export command differs from the canonical executable/argv")
 
@@ -576,6 +615,64 @@ def _validate_correctness_stage(
     return result
 
 
+def _validate_nvbit_environment_record(
+    root: Path,
+    cell: Mapping[str, Any],
+    stage: Mapping[str, Any],
+    argv: list[str],
+    output: str,
+    expected_environment: Mapping[str, str],
+) -> None:
+    """Verify the effective child environment captured at NVBit launch."""
+
+    cell_id = str(cell["id"])
+    relative = output + "/environment.json"
+    if stage.get("environment_record") != relative:
+        raise ValueError(f"{cell_id}: NVBit effective-environment record path is not canonical")
+    record_path = _assert_file(root, relative, f"{cell_id}.nvbit.environment")
+    digest = stage.get("environment_sha256")
+    if not isinstance(digest, str) or len(digest) != 64 or _sha256(record_path) != digest:
+        raise ValueError(f"{cell_id}: NVBit effective-environment hash does not match")
+    try:
+        record = replay_resume.load_json_strict(record_path)
+    except (OSError, UnicodeDecodeError, ValueError, json.JSONDecodeError) as exc:
+        raise ValueError(f"{cell_id}: NVBit effective-environment record is not strict JSON") from exc
+    if not isinstance(record, Mapping) or set(record) != {
+        "schema_version",
+        "kind",
+        "cell",
+        "argv",
+        "output",
+        "launch_mode",
+        "environment",
+        "effective_environment",
+        "forbidden_variables_absent",
+        "return_code",
+        "timed_out",
+        "started_at",
+        "finished_at",
+    }:
+        raise ValueError(f"{cell_id}: NVBit effective-environment schema is malformed")
+    if (
+        record.get("schema_version") != 1
+        or record.get("kind") != "sanitized_nvbit_capture_environment"
+        or record.get("cell") != cell_id
+        or record.get("argv") != argv
+        or record.get("output") != output
+        or record.get("launch_mode") != "env_i_exact_allowlist"
+        or not _is_exact_zero(record.get("return_code"))
+        or record.get("timed_out") is not False
+        or not isinstance(record.get("started_at"), str)
+        or not isinstance(record.get("finished_at"), str)
+        or record.get("environment") != dict(expected_environment)
+        or record.get("effective_environment") != dict(expected_environment)
+    ):
+        raise ValueError(f"{cell_id}: NVBit effective environment is not the sanitized contract")
+    absent = record.get("forbidden_variables_absent")
+    if not isinstance(absent, list) or set(absent) != set(_NVBIT_FORBIDDEN_ENVIRONMENT_CONTROLS):
+        raise ValueError(f"{cell_id}: NVBit forbidden-environment absence record is malformed")
+
+
 def _validate_nvbit_stage(
     root: Path,
     cell: Mapping[str, Any],
@@ -605,7 +702,7 @@ def _validate_nvbit_stage(
         raise ValueError(f"{cell_id}: NVBit traced-binary binding differs from the cell binary")
     if any(not isinstance(key, str) or not isinstance(value, str) for key, value in environment.items()):
         raise ValueError(f"{cell_id}: NVBit environment keys and values must be strings")
-    expected_environment = _expected_nvbit_environment(cell, output)
+    expected_environment = _expected_nvbit_environment(cell, output, root=root)
     if set(environment) != set(expected_environment):
         extra = sorted(set(environment) - set(expected_environment))
         missing = sorted(set(expected_environment) - set(environment))
@@ -615,6 +712,14 @@ def _validate_nvbit_stage(
     for key, expected in expected_environment.items():
         if environment.get(key) != expected:
             raise ValueError(f"{cell_id}: NVBit environment {key} is not bound to this cell")
+    _validate_nvbit_environment_record(
+        root,
+        cell,
+        stage,
+        argv,
+        output,
+        expected_environment,
+    )
     if not isinstance(environment.get("CUDA_INJECTION64_PATH"), str):
         raise ValueError(f"{cell_id}: NVBit tracer path is missing")
     tracer_path = _assert_file(
@@ -652,6 +757,14 @@ def _validate_nvbit_stage(
         raise ValueError(f"{cell_id}: NVBit binding sidecar schema is unsupported")
     if binding.get("cell") != cell_id or binding.get("trace_root") != output:
         raise ValueError(f"{cell_id}: NVBit binding sidecar root identity differs")
+    environment_record = output + "/environment.json"
+    if (
+        binding.get("environment_record") != environment_record
+        or binding.get("environment_sha256") != _sha256(
+            _assert_file(root, environment_record, f"{cell_id}.nvbit.environment")
+        )
+    ):
+        raise ValueError(f"{cell_id}: NVBit binding effective-environment identity differs")
     if binding.get("argv") != argv or binding.get("environment") != dict(environment):
         raise ValueError(f"{cell_id}: NVBit binding sidecar command/environment differs")
     bound_binary = binding.get("trace_binary")
@@ -659,7 +772,7 @@ def _validate_nvbit_stage(
         raise ValueError(f"{cell_id}: NVBit binding sidecar binary identity differs")
     paths = binding.get("paths")
     expected_execution = output + "/extra_info/enhanced_execution_info.json"
-    if not isinstance(paths, Mapping) or paths.get("dynamic_trace") != output + "/dynamic_trace.pb" or paths.get("stats") != expected_stats or paths.get("mapping") != expected_mapping or paths.get("execution_info") != expected_execution:
+    if not isinstance(paths, Mapping) or paths.get("dynamic_trace") != output + "/dynamic_trace.pb" or paths.get("stats") != expected_stats or paths.get("mapping") != expected_mapping or paths.get("execution_info") != expected_execution or paths.get("environment") != environment_record:
         raise ValueError(f"{cell_id}: NVBit binding sidecar auxiliary paths differ")
     hashes = binding.get("hashes")
     if not isinstance(hashes, Mapping):
@@ -1215,6 +1328,68 @@ def _validate_static_control_stage(
     return control, control_doc, decoded
 
 
+def _validate_cp_async_scaling_observation(
+    root: Path, cell: Mapping[str, Any]
+) -> None:
+    """Keep the 16,384-group async run explicit and outside the matched cell."""
+
+    if cell.get("id") != "cp_async_canary":
+        return
+    record = cell.get("scaling_observation")
+    if not isinstance(record, Mapping) or record.get("classification") != "separate_scaling_observation_not_in_matched_cohort" or record.get("group_count") != 16_384:
+        raise ValueError("cp_async_canary: 16,384-group scaling observation is not classified")
+    ncu = record.get("ncu")
+    if not isinstance(ncu, Mapping):
+        raise ValueError("cp_async_canary: scaling NCU observation is missing")
+    expected_root = "evidence/raw/ncu_scaling/cp_async_canary_16384"
+    for key, suffix in (
+        ("metadata", "/metadata.json"),
+        ("command_file", "/command.txt"),
+        ("export_command_file", "/export_command.txt"),
+        ("report", "/ncu-report.ncu-rep"),
+        ("csv", "/ncu.csv"),
+    ):
+        if ncu.get(key) != expected_root + suffix:
+            raise ValueError(f"cp_async_canary: scaling NCU {key} path is not canonical")
+        _assert_file(root, ncu[key], f"cp_async_canary.scaling.{key}")
+    for key in ("metadata", "command_file", "export_command_file", "report", "csv"):
+        digest = ncu.get(key + "_sha256")
+        if not isinstance(digest, str) or len(digest) != 64 or _sha256(_assert_file(root, ncu[key], f"cp_async_canary.scaling.{key}")) != digest:
+            raise ValueError(f"cp_async_canary: scaling NCU {key} hash does not match")
+    try:
+        metadata = replay_resume.load_json_strict(_assert_file(root, ncu["metadata"], "cp_async_canary.scaling.metadata"))
+    except (OSError, UnicodeDecodeError, ValueError, json.JSONDecodeError) as exc:
+        raise ValueError("cp_async_canary: scaling NCU metadata is not strict JSON") from exc
+    expected_command = [
+        _TRUSTED_NCU_IDENTITY["path"],
+        "--force-overwrite",
+        "--export",
+        expected_root + "/ncu-report",
+        "--launch-skip", "1", "--launch-count", "1",
+        "--replay-mode", "application", "--clock-control", "none",
+        "--metrics", ",".join(closure_analyzer.CP_ASYNC_NCU_METRICS),
+        cell["binary"]["path"], "c11", "l1", "0", "4", "3",
+    ]
+    if not isinstance(metadata, Mapping) or not _ncu_argv_matches(metadata.get("command"), expected_command, root) or not _is_exact_zero(metadata.get("return_code")) or metadata.get("timed_out") is not False:
+        raise ValueError("cp_async_canary: scaling NCU metadata command is not bound")
+
+
+def _validate_cp_async_matched_execution(cell: Mapping[str, Any]) -> None:
+    if cell.get("id") != "cp_async_canary":
+        return
+    binary = cell.get("binary")
+    matched = cell.get("matched_execution")
+    expected = {
+        "binary_path": binary.get("trace_path") if isinstance(binary, Mapping) else None,
+        "binary_sha256": binary.get("trace_sha256") if isinstance(binary, Mapping) else None,
+        "arguments": ["c11", "l1", "0", "4", "1"],
+        "group_count": 64,
+        "stages": ["ncu", "nvbit", "static_control", "simulator"],
+    }
+    if matched != expected:
+        raise ValueError("cp_async_canary: matched 64-group stage provenance is malformed")
+
+
 def _validate_cell(
     root: Path,
     cell: Mapping[str, Any],
@@ -1226,6 +1401,8 @@ def _validate_cell(
     if not isinstance(cell_id, str) or not cell_id:
         raise ValueError("cell has no id")
     _validate_cell_identity(cell)
+    _validate_cp_async_matched_execution(cell)
+    _validate_cp_async_scaling_observation(root, cell)
     binary = cell.get("binary")
     if not isinstance(binary, Mapping):
         raise ValueError(f"{cell_id}: binary record is missing")
@@ -1267,7 +1444,8 @@ def _validate_cell(
 
     ncu = stages["ncu"]
     ncu_argv = ncu.get("argv")
-    if not isinstance(ncu_argv, list) or binary.get("path") not in ncu_argv:
+    expected_ncu_target = closure_analyzer._expected_ncu_target(cell)
+    if not isinstance(ncu_argv, list) or expected_ncu_target[0] not in ncu_argv:
         raise ValueError(f"{cell_id}: NCU argv is not bound to the cell binary")
     if not isinstance(ncu_identity, Mapping) or ncu.get("tool_path") != ncu_identity.get("path"):
         raise ValueError(f"{cell_id}: NCU stage is not bound to the trusted toolchain")
@@ -1613,7 +1791,7 @@ def validate(manifest_path: Path, report_path: Path | None) -> int:
         or input_validation.get("decision_eligible") is not True
         or input_validation.get("repeat_stable_rows") != 6
         or input_validation.get("required_diagnostic_rows") != 6
-        or input_validation.get("retirement_tail_rows") != 5
+        or input_validation.get("retirement_tail_rows") != 6
     ):
         raise ValueError("closure analysis lacks complete data-dependent validation")
     required_dimensions = {

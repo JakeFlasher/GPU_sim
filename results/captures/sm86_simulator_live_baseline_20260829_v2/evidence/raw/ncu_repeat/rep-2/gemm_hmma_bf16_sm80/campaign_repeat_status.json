@@ -4,6 +4,8 @@
   "argv": [
     ".venv/bin/python",
     "tools/local_labels/collect_ncu.py",
+    "--timeout",
+    "900",
     "--ncu",
     "/usr/local/cuda-13.2/nsight-compute-2026.1.0/ncu",
     "--output",

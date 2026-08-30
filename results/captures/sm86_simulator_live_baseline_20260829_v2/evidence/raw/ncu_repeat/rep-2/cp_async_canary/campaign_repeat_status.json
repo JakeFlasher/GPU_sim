@@ -4,6 +4,8 @@
   "argv": [
     ".venv/bin/python",
     "tools/local_labels/collect_ncu.py",
+    "--timeout",
+    "900",
     "--ncu",
     "/usr/local/cuda-13.2/nsight-compute-2026.1.0/ncu",
     "--output",
@@ -19,12 +21,12 @@
     "--clock-control",
     "none",
     "--",
-    "workloads/research_probes/async_barrier_overlap/async_barrier_overlap",
+    "workloads/research_probes/async_barrier_overlap/async_barrier_overlap_trace",
     "c11",
     "l1",
     "0",
     "4",
-    "3"
+    "1"
   ],
   "return_code": 0,
   "elapsed_seconds": 0.91,

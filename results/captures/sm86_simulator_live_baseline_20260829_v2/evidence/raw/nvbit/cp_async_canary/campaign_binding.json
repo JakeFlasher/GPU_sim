@@ -11,11 +11,17 @@
   "environment": {
     "ACTIVE_FROM_START": "0",
     "CUDA_INJECTION64_PATH": "tools/nvbit_tracer/tracer_tool/tracer_tool.so",
+    "HOME": "/home/jakeshea",
+    "LANG": "C",
+    "LC_ALL": "C",
     "LD_LIBRARY_PATH": ".toolchain/pb/lib",
+    "PATH": "/usr/local/cuda-13.2/bin:/opt/cuda/bin:/usr/bin:/bin",
     "SKIP_ENHANCED_TRACER": "0",
-    "TRACES_FOLDER": "evidence/raw/nvbit/cp_async_canary",
+    "TRACES_FOLDER": "/home/jakeshea/GPU_simulator_rebase/results/captures/sm86_simulator_live_baseline_20260829_v2/evidence/raw/nvbit/cp_async_canary",
     "USER_DEFINED_FOLDERS": "1"
   },
+  "environment_record": "evidence/raw/nvbit/cp_async_canary/environment.json",
+  "environment_sha256": "7975cb563a674525c442f7f07374404600733a9214e972346b8d71b02b2b0fb1",
   "geometry": {
     "block": [
       128,
@@ -31,7 +37,7 @@
     "threads_per_block": 128
   },
   "hashes": {
-    "dynamic_trace_sha256": "315d15b5ba5d497e40c0140e29cec3d2bda55bf00bea44755a0b75f7b87e58e1",
+    "dynamic_trace_sha256": "cc25647e3cd9905e4e6f5154ab063c6f1ab0996ee93d5403b26924c312eb15ea",
     "execution_info_sha256": "539d3255994f359af15f31f3944e55bd96dd00779ef85c5c2800c348c72e8b30",
     "mapping_sha256": "762e189d5e872f7a2fd33dd12aeeba2143bf574fb469050702b05e23bb6cae3b",
     "stats_sha256": "908de4c54486ede8d89c172ff9508ddbf7ebf34d2c83448e6e9163e1f141c689"
@@ -47,6 +53,7 @@
   },
   "paths": {
     "dynamic_trace": "evidence/raw/nvbit/cp_async_canary/dynamic_trace.pb",
+    "environment": "evidence/raw/nvbit/cp_async_canary/environment.json",
     "execution_info": "evidence/raw/nvbit/cp_async_canary/extra_info/enhanced_execution_info.json",
     "mapping": "evidence/raw/nvbit/cp_async_canary/extra_info/traced_kernel_modules.json",
     "stats": "evidence/raw/nvbit/cp_async_canary/stats.csv"

@@ -24,6 +24,21 @@
   "return_code": 0,
   "report": "/home/jakeshea/GPU_simulator_rebase/results/captures/sm86_simulator_live_baseline_20260829_v2/evidence/raw/ncu_repeat/rep-2/gemm_hmma_bf16_sm80/ncu-report.ncu-rep",
   "csv": "/home/jakeshea/GPU_simulator_rebase/results/captures/sm86_simulator_live_baseline_20260829_v2/evidence/raw/ncu_repeat/rep-2/gemm_hmma_bf16_sm80/ncu.csv",
-  "started_at": "2026-08-30T13:22:49.734006+00:00",
-  "finished_at": "2026-08-30T13:22:50.609975+00:00"
+  "started_at": "2026-08-30T14:13:05.560182+00:00",
+  "finished_at": "2026-08-30T14:13:06.411230+00:00",
+  "timeout_seconds": 900,
+  "timed_out": false,
+  "timeout_stage": null,
+  "export_command": [
+    "/usr/local/cuda-13.2/nsight-compute-2026.1.0/ncu",
+    "--import",
+    "/home/jakeshea/GPU_simulator_rebase/results/captures/sm86_simulator_live_baseline_20260829_v2/evidence/raw/ncu_repeat/rep-2/gemm_hmma_bf16_sm80/ncu-report.ncu-rep",
+    "--csv",
+    "--page",
+    "raw",
+    "--log-file",
+    "/home/jakeshea/GPU_simulator_rebase/results/captures/sm86_simulator_live_baseline_20260829_v2/evidence/raw/ncu_repeat/rep-2/gemm_hmma_bf16_sm80/ncu.csv"
+  ],
+  "export_return_code": 0,
+  "export_timed_out": false
 }

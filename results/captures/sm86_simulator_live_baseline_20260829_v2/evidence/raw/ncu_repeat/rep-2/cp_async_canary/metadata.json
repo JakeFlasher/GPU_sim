@@ -14,16 +14,31 @@
     "none",
     "--metrics",
     "gpc__cycles_elapsed.max,sm__cycles_active.max,smsp__inst_executed.sum,l1tex__t_sectors_pipe_lsu_mem_global_op_ld.sum,l1tex__t_sectors_pipe_lsu_mem_global_op_st.sum",
-    "workloads/research_probes/async_barrier_overlap/async_barrier_overlap",
+    "workloads/research_probes/async_barrier_overlap/async_barrier_overlap_trace",
     "c11",
     "l1",
     "0",
     "4",
-    "3"
+    "1"
   ],
   "return_code": 0,
   "report": "/home/jakeshea/GPU_simulator_rebase/results/captures/sm86_simulator_live_baseline_20260829_v2/evidence/raw/ncu_repeat/rep-2/cp_async_canary/ncu-report.ncu-rep",
   "csv": "/home/jakeshea/GPU_simulator_rebase/results/captures/sm86_simulator_live_baseline_20260829_v2/evidence/raw/ncu_repeat/rep-2/cp_async_canary/ncu.csv",
-  "started_at": "2026-08-30T13:22:48.565450+00:00",
-  "finished_at": "2026-08-30T13:22:49.492801+00:00"
+  "started_at": "2026-08-30T14:13:04.413265+00:00",
+  "finished_at": "2026-08-30T14:13:05.311974+00:00",
+  "timeout_seconds": 900,
+  "timed_out": false,
+  "timeout_stage": null,
+  "export_command": [
+    "/usr/local/cuda-13.2/nsight-compute-2026.1.0/ncu",
+    "--import",
+    "/home/jakeshea/GPU_simulator_rebase/results/captures/sm86_simulator_live_baseline_20260829_v2/evidence/raw/ncu_repeat/rep-2/cp_async_canary/ncu-report.ncu-rep",
+    "--csv",
+    "--page",
+    "raw",
+    "--log-file",
+    "/home/jakeshea/GPU_simulator_rebase/results/captures/sm86_simulator_live_baseline_20260829_v2/evidence/raw/ncu_repeat/rep-2/cp_async_canary/ncu.csv"
+  ],
+  "export_return_code": 0,
+  "export_timed_out": false
 }

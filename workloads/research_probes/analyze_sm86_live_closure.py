@@ -174,7 +174,10 @@ def _expected_ncu_target(cell: Mapping[str, Any]) -> list[str]:
     if not isinstance(binary, Mapping) or not isinstance(binary.get("path"), str):
         raise ValueError(f"{cell.get('id')}: NCU target binary is missing")
     if cell.get("id") == "cp_async_canary":
-        return [binary["path"], "c11", "l1", "0", "4", "3"]
+        trace_path = binary.get("trace_path")
+        if not isinstance(trace_path, str):
+            raise ValueError("cp_async_canary: matched NCU trace binary is missing")
+        return [trace_path, "c11", "l1", "0", "4", "1"]
     return [binary["path"], "--timing_shape", "--warmup", "1", "--reps", "1"]
 
 
@@ -188,6 +191,8 @@ def _canonical_ncu_argv(cell: Mapping[str, Any], output: str) -> list[str]:
         "tools/local_labels/collect_ncu.py",
         "--ncu",
         TRUSTED_NCU_IDENTITY["path"],
+        "--timeout",
+        "900",
         "--output",
         output,
         "--metrics",
@@ -244,7 +249,7 @@ def _validate_ncu_row_identity(
     binary = cell.get("binary")
     if not isinstance(binary, Mapping):
         raise ValueError(f"{label}: binary identity is missing")
-    expected_process = Path(str(binary.get("path"))).name
+    expected_process = Path(str(_expected_ncu_target(cell)[0])).name
     if row.get("Process Name") != expected_process:
         raise ValueError(f"{label}: NCU process identity differs from the reviewed binary")
     kernel = row.get("Kernel Name")
@@ -584,6 +589,7 @@ def _campaign_token_matches(token: object, relative: str, root: Path) -> bool:
         relative,
         "results/captures/sm86_simulator_live_baseline_20260829_v2/" + relative,
         str((root / relative).resolve()),
+        str((REPO_ROOT / relative).resolve()),
     }
     return token in candidates
 
@@ -614,7 +620,8 @@ def _repeat_command_contract(
     if output_index + 1 >= separator:
         raise ValueError(f"{cell.get('id')}: canonical NCU output path is malformed")
     target = source[separator + 1 :]
-    if not target or target[0] != cell.get("binary", {}).get("path"):
+    expected_target = _expected_ncu_target(cell)
+    if target != expected_target:
         raise ValueError(f"{cell.get('id')}: canonical NCU target is not the cell binary")
 
     canonical_options = (
@@ -665,14 +672,23 @@ def _validate_repeat_metadata(
     if len(command) != len(expected_command):
         raise ValueError(f"{slug}: repeated NCU command length differs from the cell contract")
     for index, (actual, expected) in enumerate(zip(command, expected_command)):
-        if index == 3:  # --export value
-            if not _campaign_token_matches(actual, expected, root):
-                raise ValueError(f"{slug}: repeated NCU export path is misbound")
-        elif actual != expected:
-            raise ValueError(f"{slug}: repeated NCU command differs at argv[{index}]")
+        if actual == expected:
+            continue
+        if index in {3} and _campaign_token_matches(actual, expected, root):
+            continue
+        if expected.startswith(("evidence/raw/ncu/", "workloads/")) and _campaign_token_matches(actual, expected, root):
+            continue
+        raise ValueError(f"{slug}: repeated NCU command differs at argv[{index}]")
     return_code = metadata.get("return_code")
     if isinstance(return_code, bool) or not isinstance(return_code, int) or return_code != 0:
         raise ValueError(f"{slug}: repeated NCU return_code is malformed or nonzero")
+    if (
+        metadata.get("timeout_seconds") != 900
+        or metadata.get("timed_out") is not False
+        or metadata.get("export_return_code") != 0
+        or metadata.get("export_timed_out") is not False
+    ):
+        raise ValueError(f"{slug}: repeated NCU timeout status is malformed")
     expected_csv = repeat_dir + "/ncu.csv"
     expected_report = repeat_dir + "/ncu-report.ncu-rep"
     for key, expected in (("csv", expected_csv), ("report", expected_report)):
@@ -684,7 +700,7 @@ def _validate_repeat_metadata(
     csv_path = _campaign_file(root, expected_csv, f"{slug}.ncu_repeat.csv")
     if csv_path.stat().st_size == 0:
         raise ValueError(f"{slug}: repeated NCU CSV artifact is empty")
-    if target[0] != cell.get("binary", {}).get("path"):
+    if target != _expected_ncu_target(cell):
         raise ValueError(f"{slug}: repeated NCU target binary differs")
 
 
@@ -1024,7 +1040,9 @@ def build_report(manifest_path: Path, output_path: Path | None = None) -> dict[s
         sim["twin_sha256"] = _sha256(replay_two)
         sim["twin_byte_identical"] = True
         sim["semantic_validation"] = semantic_validation
-        comparable = slug != "cp_async_canary"
+        # The cp.async NCU stage is now the same 64-group trace binary and
+        # arguments as NVBit/static/sim-run, so it is a matched comparison row.
+        comparable = True
         issue = sim["last_issue_cycles"]
         last_event = sim["last_modeled_event_cycles"]
         baseline_sm = live["baseline"]["sm__cycles_active.max"]

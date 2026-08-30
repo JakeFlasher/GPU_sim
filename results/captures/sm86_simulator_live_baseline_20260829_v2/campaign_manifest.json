@@ -35,7 +35,15 @@
   "release_build": {
     "record": "evidence/host_preflight/release_build.json",
     "record_sha256": "ecc921035085a394bacac3e26bf1668b04da63b2375a513f39b56604fa14a9b5",
-    "argv": ["cargo", "build", "--release", "--manifest-path", "sim/Cargo.toml", "-p", "sim-run"],
+    "argv": [
+      "cargo",
+      "build",
+      "--release",
+      "--manifest-path",
+      "sim/Cargo.toml",
+      "-p",
+      "sim-run"
+    ],
     "timeout_seconds": 1800,
     "exit_code": 0,
     "repository_revision": "8cae7c6f37e378ac54e4c5fe5f7acd3f38991480",
@@ -66,7 +74,12 @@
     "sha256": "4316083b8b61f53f3b7bb8ff4f9d78eabae2cc21538acaa9bc2ba1a26a6128db",
     "active_pair_count": 5519,
     "supplemental_pair_count": 2070,
-    "regeneration_command": [".venv/bin/python", "workloads/research_probes/build_active_replay_binding.py", "--output", "evidence/sm86_active_replay_binding.json"]
+    "regeneration_command": [
+      ".venv/bin/python",
+      "workloads/research_probes/build_active_replay_binding.py",
+      "--output",
+      "evidence/sm86_active_replay_binding.json"
+    ]
   },
   "tools": {
     "cuda_nvcc": "/opt/cuda/bin/nvcc (13.3.73)",
@@ -97,10 +110,17 @@
   "evidence_bundle": {
     "path": "evidence/raw_cohort.tar.zst",
     "format": "zstd-compressed deterministic tar",
-    "sha256": "196d36d4910cd4f5530ef48557d52fd00a8c05cc160bfa35117e72665a266a57",
-    "size_bytes": 521879,
+    "sha256": "36d8dffe2201bd13e19553cc991b22c3aac92f1dd396bfaee7f70e82c8640d78",
+    "size_bytes": 534080,
     "member_root": "raw/",
-    "contains": ["correctness", "ncu", "nvbit", "static", "simulator", "stage stdout/stderr and metadata"],
+    "contains": [
+      "correctness",
+      "ncu",
+      "nvbit",
+      "static",
+      "simulator",
+      "stage stdout/stderr and metadata"
+    ],
     "materialization": "The same evidence/raw/ tree is present in this alpha worktree for immediate inspection. From the campaign directory in a clean checkout, run: zstd -dc evidence/raw_cohort.tar.zst | tar -xf - -C evidence. Per-cell replay_binding.json sidecars bind replay bytes to the exact simulator binary and all replay inputs, so timestamp manipulation is neither required nor used."
   },
   "command_normalization": {
@@ -123,8 +143,16 @@
       "id": "cp_async_canary",
       "workload": "async_barrier_overlap",
       "architecture": "sm_86",
-      "expected_grid": [1, 1, 1],
-      "expected_block": [128, 1, 1],
+      "expected_grid": [
+        1,
+        1,
+        1
+      ],
+      "expected_block": [
+        128,
+        1,
+        1
+      ],
       "binary": {
         "path": "workloads/research_probes/async_barrier_overlap/async_barrier_overlap",
         "sha256": "7eb4a26cd14e2763ef5014a9ab1e0e5a63421698b5366356edd3fab8b6cd1239",
@@ -133,17 +161,57 @@
       },
       "stages": {
         "correctness": {
-          "argv": ["workloads/research_probes/async_barrier_overlap/async_barrier_overlap", "c11", "l1", "0", "4", "1"],
+          "argv": [
+            "workloads/research_probes/async_barrier_overlap/async_barrier_overlap",
+            "c11",
+            "l1",
+            "0",
+            "4",
+            "1"
+          ],
           "exit_code": 0,
           "stdout": "evidence/raw/correctness/cp_async_canary/stdout.txt",
           "stderr": "evidence/raw/correctness/cp_async_canary/stderr.txt",
           "stdout_sha256": "133eff4d7d999b289895cdd42218a1e0c7a87e7f76a032dd5981a4b69e201370",
           "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-          "environment": {"mode": "clean_base_binary", "record": "evidence/raw/correctness/cp_async_canary/environment.json", "record_sha256": "7f4ed63a729db45081eabe83fae39fd955158e67b948ac6d708e6f9ac859de6c"},
-          "observed": {"correct": true, "groups": 16384}
+          "environment": {
+            "mode": "clean_base_binary",
+            "record": "evidence/raw/correctness/cp_async_canary/environment.json",
+            "record_sha256": "7f4ed63a729db45081eabe83fae39fd955158e67b948ac6d708e6f9ac859de6c"
+          },
+          "observed": {
+            "correct": true,
+            "groups": 16384
+          }
         },
         "ncu": {
-          "argv": [".venv/bin/python", "tools/local_labels/collect_ncu.py", "--ncu", "/usr/local/cuda-13.2/nsight-compute-2026.1.0/ncu", "--output", "evidence/raw/ncu/cp_async_canary", "--metrics", "gpc__cycles_elapsed.max,sm__cycles_active.max,smsp__inst_executed.sum,l1tex__t_sectors_pipe_lsu_mem_global_op_ld.sum,l1tex__t_sectors_pipe_lsu_mem_global_op_st.sum", "--launch-skip", "1", "--launch-count", "1", "--replay-mode", "application", "--clock-control", "none", "--", "workloads/research_probes/async_barrier_overlap/async_barrier_overlap", "c11", "l1", "0", "4", "3"],
+          "argv": [
+            ".venv/bin/python",
+            "tools/local_labels/collect_ncu.py",
+            "--ncu",
+            "/usr/local/cuda-13.2/nsight-compute-2026.1.0/ncu",
+            "--timeout",
+            "900",
+            "--output",
+            "evidence/raw/ncu/cp_async_canary",
+            "--metrics",
+            "gpc__cycles_elapsed.max,sm__cycles_active.max,smsp__inst_executed.sum,l1tex__t_sectors_pipe_lsu_mem_global_op_ld.sum,l1tex__t_sectors_pipe_lsu_mem_global_op_st.sum",
+            "--launch-skip",
+            "1",
+            "--launch-count",
+            "1",
+            "--replay-mode",
+            "application",
+            "--clock-control",
+            "none",
+            "--",
+            "workloads/research_probes/async_barrier_overlap/async_barrier_overlap_trace",
+            "c11",
+            "l1",
+            "0",
+            "4",
+            "1"
+          ],
           "tool_path": "/usr/local/cuda-13.2/nsight-compute-2026.1.0/ncu",
           "exit_code": 0,
           "output": "evidence/raw/ncu/cp_async_canary",
@@ -151,17 +219,44 @@
           "stderr": "evidence/raw/ncu/cp_async_canary/ncu.stderr.txt",
           "csv": "evidence/raw/ncu/cp_async_canary/ncu.csv",
           "metadata": "evidence/raw/ncu/cp_async_canary/metadata.json",
-          "metadata_sha256": "0069a2638120d3d34e238ac0f47e75b1afe74f066ffbce951107915b2c0520ee",
+          "metadata_sha256": "63eb67ec371b31e282de511558eaab5aecf5676172e19e1a593a1c13dd0a7b28",
           "command_file": "evidence/raw/ncu/cp_async_canary/command.txt",
-          "command_file_sha256": "2261f68ebd95f40ff0b4dfd389e1741747b1b0b07b9b43d3c8eb88d6487d0743",
+          "command_file_sha256": "c8f6308b8d79d8ec66a4140a885ad23ffba95ac0a25dcf72b3eb0979aa5cb4f0",
           "export_command_file": "evidence/raw/ncu/cp_async_canary/export_command.txt",
           "export_command_file_sha256": "ee757538e601bfd29338d46a9d05a255d00c50b7af5c6af5ed94e35be493474a",
-          "observed": {"gpc__cycles_elapsed.max": 4460035, "sm__cycles_active.max": 4458395, "smsp__inst_executed.sum": 2293904, "l1tex__t_sectors_pipe_lsu_mem_global_op_ld.sum": 8388608, "l1tex__t_sectors_pipe_lsu_mem_global_op_st.sum": 72}
+          "observed": {
+            "gpc__cycles_elapsed.max": 21013,
+            "sm__cycles_active.max": 19376,
+            "smsp__inst_executed.sum": 9104,
+            "l1tex__t_sectors_pipe_lsu_mem_global_op_ld.sum": 32768,
+            "l1tex__t_sectors_pipe_lsu_mem_global_op_st.sum": 72
+          },
+          "report": "evidence/raw/ncu/cp_async_canary/ncu-report.ncu-rep",
+          "report_sha256": "28652a23a99bb4e1bdb3271fca1572d6f160a9c2cee4b2fd987847ae6968d3f3",
+          "csv_sha256": "9350346920a995e609a71f28c09c2ec7ce70155030d8988844be6963a0a2e957"
         },
         "nvbit": {
-          "env": {"LD_LIBRARY_PATH": ".toolchain/pb/lib", "CUDA_INJECTION64_PATH": "tools/nvbit_tracer/tracer_tool/tracer_tool.so", "USER_DEFINED_FOLDERS": "1", "TRACES_FOLDER": "evidence/raw/nvbit/cp_async_canary", "ACTIVE_FROM_START": "0", "SKIP_ENHANCED_TRACER": "0"},
+          "env": {
+            "HOME": "/home/jakeshea",
+            "LANG": "C",
+            "LC_ALL": "C",
+            "PATH": "/usr/local/cuda-13.2/bin:/opt/cuda/bin:/usr/bin:/bin",
+            "LD_LIBRARY_PATH": ".toolchain/pb/lib",
+            "CUDA_INJECTION64_PATH": "tools/nvbit_tracer/tracer_tool/tracer_tool.so",
+            "USER_DEFINED_FOLDERS": "1",
+            "TRACES_FOLDER": "/home/jakeshea/GPU_simulator_rebase/results/captures/sm86_simulator_live_baseline_20260829_v2/evidence/raw/nvbit/cp_async_canary",
+            "ACTIVE_FROM_START": "0",
+            "SKIP_ENHANCED_TRACER": "0"
+          },
           "tracer_sha256": "dda89ee6857058b3f6dc2a01d73a2dc926b876d8e343b7457c779efd82fed007",
-          "argv": ["workloads/research_probes/async_barrier_overlap/async_barrier_overlap_trace", "c11", "l1", "0", "4", "1"],
+          "argv": [
+            "workloads/research_probes/async_barrier_overlap/async_barrier_overlap_trace",
+            "c11",
+            "l1",
+            "0",
+            "4",
+            "1"
+          ],
           "exit_code": 0,
           "output": "evidence/raw/nvbit/cp_async_canary",
           "stdout": "evidence/raw/nvbit/cp_async_canary/stdout.txt",
@@ -169,133 +264,1187 @@
           "stats": "evidence/raw/nvbit/cp_async_canary/stats.csv",
           "mapping": "evidence/raw/nvbit/cp_async_canary/extra_info/traced_kernel_modules.json",
           "binding": "evidence/raw/nvbit/cp_async_canary/campaign_binding.json",
-          "binding_sha256": "ca5cfbcf9838352d9a49d0d6035f262f68128ae1d2de3c40b40ddae337c9d06c",
+          "binding_sha256": "e69fc48ae7ed24730d22d4ffe12b7a319493813451531303426e558644fc71a6",
           "trace_binary_path": "workloads/research_probes/async_barrier_overlap/async_barrier_overlap_trace",
           "trace_binary_sha256": "f8c2b971f95d274d6351e2dcbbe1a96c77a52678c8ad3abe1ddf6eb8573e11fd",
-          "observed": {"accepted_launches": 1, "trace_records": 26760, "dynamic_trace_sha256": "315d15b5ba5d497e40c0140e29cec3d2bda55bf00bea44755a0b75f7b87e58e1", "enhanced_parser": "typed skip for generated input over 64KiB"}
+          "observed": {
+            "accepted_launches": 1,
+            "trace_records": 26760,
+            "dynamic_trace_sha256": "cc25647e3cd9905e4e6f5154ab063c6f1ab0996ee93d5403b26924c312eb15ea",
+            "enhanced_parser": "typed skip for generated input over 64KiB"
+          },
+          "environment_record": "evidence/raw/nvbit/cp_async_canary/environment.json",
+          "environment_sha256": "7975cb563a674525c442f7f07374404600733a9214e972346b8d71b02b2b0fb1"
         },
         "static_control": {
-          "argv": [".venv/bin/python", "tools/sass_control/emit_control_bits_sidecar.py", "--binary", "workloads/research_probes/async_barrier_overlap/async_barrier_overlap_trace", "--arch", "sm_86", "--out", "evidence/raw/static/cp_async_canary/control_bits.json", "--toolkit-bindir", "/usr/local/cuda-13.2/bin"],
-      "binary_path": "workloads/research_probes/async_barrier_overlap/async_barrier_overlap_trace",
-      "binary_sha256": "f8c2b971f95d274d6351e2dcbbe1a96c77a52678c8ad3abe1ddf6eb8573e11fd",
-      "cuobjdump_argv": [
-        "/usr/local/cuda-13.2/bin/cuobjdump",
-        "--dump-sass",
-        "workloads/research_probes/async_barrier_overlap/async_barrier_overlap_trace"
-      ],
-      "exit_code": 0,
+          "argv": [
+            ".venv/bin/python",
+            "tools/sass_control/emit_control_bits_sidecar.py",
+            "--binary",
+            "workloads/research_probes/async_barrier_overlap/async_barrier_overlap_trace",
+            "--arch",
+            "sm_86",
+            "--out",
+            "evidence/raw/static/cp_async_canary/control_bits.json",
+            "--toolkit-bindir",
+            "/usr/local/cuda-13.2/bin"
+          ],
+          "binary_path": "workloads/research_probes/async_barrier_overlap/async_barrier_overlap_trace",
+          "binary_sha256": "f8c2b971f95d274d6351e2dcbbe1a96c77a52678c8ad3abe1ddf6eb8573e11fd",
+          "cuobjdump_argv": [
+            "/usr/local/cuda-13.2/bin/cuobjdump",
+            "--dump-sass",
+            "workloads/research_probes/async_barrier_overlap/async_barrier_overlap_trace"
+          ],
+          "exit_code": 0,
           "control": "evidence/raw/static/cp_async_canary/control_bits.json",
           "control_sha256": "5c0eeab9035ea60d1a70018c59983eb36759e67f56adc3f7b6cda6cda010259d",
           "decoded_instructions": 504
         },
         "simulator": {
-          "argv": ["sim/target/release/sim-run", "--trace", "results/captures/sm86_simulator_live_baseline_20260829_v2/evidence/raw/nvbit/cp_async_canary", "--control", "results/captures/sm86_simulator_live_baseline_20260829_v2/evidence/raw/static/cp_async_canary/control_bits.json", "--arch-card", "arch_profiles/cards/sm_86.json", "--pchase-card", "data/pchase/sm_86_static_card.json", "--mode", "l1-l2"],
+          "argv": [
+            "sim/target/release/sim-run",
+            "--trace",
+            "results/captures/sm86_simulator_live_baseline_20260829_v2/evidence/raw/nvbit/cp_async_canary",
+            "--control",
+            "results/captures/sm86_simulator_live_baseline_20260829_v2/evidence/raw/static/cp_async_canary/control_bits.json",
+            "--arch-card",
+            "arch_profiles/cards/sm_86.json",
+            "--pchase-card",
+            "data/pchase/sm_86_static_card.json",
+            "--mode",
+            "l1-l2"
+          ],
           "binary_path": "sim/target/release/sim-run",
           "binary_sha256": "6cb0d05f0d447c0cd6ee2e30353c0f1e89d464462458912478c826860f15f9a4",
           "replay_binding": "evidence/raw/simulator/cp_async_canary/replay_binding.json",
-          "replay_binding_sha256": "21047522f75b32ca8e7012933f8baa396e18d955b14f03a58131343560df2c0c",
+          "replay_binding_sha256": "c95d6c9cff30a632c8756d196f9c3ba3126badaf007186f053a4e31a7d91ae18",
           "exit_code": 0,
-          "outputs": ["evidence/raw/simulator/cp_async_canary/replay-1.json", "evidence/raw/simulator/cp_async_canary/replay-2.json"],
-          "observed": {"instructions_issued": 9104, "records_seen": 9104, "terminal_modeled_event_time": 20522, "completion": "incomplete_unmodeled_retirement_tails", "deterministic_twin": true}
+          "outputs": [
+            "evidence/raw/simulator/cp_async_canary/replay-1.json",
+            "evidence/raw/simulator/cp_async_canary/replay-2.json"
+          ],
+          "observed": {
+            "instructions_issued": 9104,
+            "records_seen": 9104,
+            "terminal_modeled_event_time": 20522,
+            "completion": "incomplete_unmodeled_retirement_tails",
+            "deterministic_twin": true
+          }
         }
       },
-      "limitations": ["Trace binary uses 64 groups while the NCU target uses 16384 groups; raw cycle totals are not directly comparable.", "NCU traffic is represented by kernel-local L1TEX global-load/store request-sector counters; aggregate DRAM/LTS counters include prewarm traffic and are not used as async-kernel labels."]
+      "limitations": [
+        "Trace binary uses 64 groups while the NCU target uses 16384 groups; raw cycle totals are not directly comparable.",
+        "NCU traffic is represented by kernel-local L1TEX global-load/store request-sector counters; aggregate DRAM/LTS counters include prewarm traffic and are not used as async-kernel labels."
+      ],
+      "matched_execution": {
+        "binary_path": "workloads/research_probes/async_barrier_overlap/async_barrier_overlap_trace",
+        "binary_sha256": "f8c2b971f95d274d6351e2dcbbe1a96c77a52678c8ad3abe1ddf6eb8573e11fd",
+        "arguments": [
+          "c11",
+          "l1",
+          "0",
+          "4",
+          "1"
+        ],
+        "group_count": 64,
+        "stages": [
+          "ncu",
+          "nvbit",
+          "static_control",
+          "simulator"
+        ]
+      },
+      "scaling_observation": {
+        "classification": "separate_scaling_observation_not_in_matched_cohort",
+        "group_count": 16384,
+        "correctness": {
+          "binary_path": "workloads/research_probes/async_barrier_overlap/async_barrier_overlap",
+          "arguments": [
+            "c11",
+            "l1",
+            "0",
+            "4",
+            "1"
+          ],
+          "output": "evidence/raw/correctness/cp_async_canary",
+          "status": "correctness_pass"
+        },
+        "ncu": {
+          "metadata": "evidence/raw/ncu_scaling/cp_async_canary_16384/metadata.json",
+          "metadata_sha256": "c5a9ff8ac089027dbf129227b6f80afc59ee045f451e2de93776a5ae1b9a3f02",
+          "command_file": "evidence/raw/ncu_scaling/cp_async_canary_16384/command.txt",
+          "command_file_sha256": "edf560d1f83a63118e18229d4883aef37f3a5a6c244f61725a8a326208ea4c52",
+          "export_command_file": "evidence/raw/ncu_scaling/cp_async_canary_16384/export_command.txt",
+          "export_command_file_sha256": "b7a1e222aad09cfbfddb95430cc77f7bfd7cc425360ce73fd6145e87b0211ef0",
+          "report": "evidence/raw/ncu_scaling/cp_async_canary_16384/ncu-report.ncu-rep",
+          "report_sha256": "819f3c5bc1b50949999a83e33f636c4b6b366addb871ad61ff72b58a95e7b4a1",
+          "csv": "evidence/raw/ncu_scaling/cp_async_canary_16384/ncu.csv",
+          "csv_sha256": "c3f805853d5b2f2c3c94317bc8cd710767754f0c1a8f3ffcbc4201df185ece65",
+          "metrics": [
+            "gpc__cycles_elapsed.max",
+            "sm__cycles_active.max",
+            "smsp__inst_executed.sum",
+            "l1tex__t_sectors_pipe_lsu_mem_global_op_ld.sum",
+            "l1tex__t_sectors_pipe_lsu_mem_global_op_st.sum"
+          ],
+          "target_arguments": [
+            "c11",
+            "l1",
+            "0",
+            "4",
+            "3"
+          ],
+          "binary_path": "workloads/research_probes/async_barrier_overlap/async_barrier_overlap",
+          "binary_sha256": "7eb4a26cd14e2763ef5014a9ab1e0e5a63421698b5366356edd3fab8b6cd1239"
+        }
+      }
     },
     {
       "id": "gemm_hmma_bf16_sm80",
       "workload": "gemm_hmma_bf16_sm80",
       "architecture": "sm_86",
-      "expected_grid": [16, 32, 1],
-      "expected_block": [32, 1, 1],
-      "binary": {"path": "workloads/portable_lcd/gemm_hmma_bf16_sm80/gemm_hmma_bf16_sm80_run", "sha256": "55133e328fc16238d78e3dde335b4ce5789a4b3838fb440da41f489f805a1362"},
-      "stages": {
-        "correctness": {"argv": ["workloads/portable_lcd/gemm_hmma_bf16_sm80/gemm_hmma_bf16_sm80_run", "--correctness_shape", "--seed", "42", "--warmup", "1", "--reps", "1", "--output_dir", "results/captures/sm86_simulator_live_baseline_20260829_v2/evidence/raw/correctness/gemm_hmma_bf16_sm80"], "exit_code": 0, "stdout": "evidence/raw/correctness/gemm_hmma_bf16_sm80/stdout.txt", "stderr": "evidence/raw/correctness/gemm_hmma_bf16_sm80/stderr.txt", "stdout_sha256": "88c7c510ac185a5dfd00578f5e2e0844f3daf042d1087d72f0477ede16d86036", "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", "environment": {"mode": "clean_base_binary", "record": "evidence/raw/correctness/gemm_hmma_bf16_sm80/environment.json", "record_sha256": "3cac14fdbcfd4e92b778e5fbb6f55ed6f16780be247d2917e333073c8552a11a"}, "manifest": "evidence/raw/correctness/gemm_hmma_bf16_sm80/gemm_hmma_bf16_sm80/manifest.json", "observed": {"correctness_ok": true, "max_abs_err": 0.0055666}},
-        "ncu": {"argv": [".venv/bin/python", "tools/local_labels/collect_ncu.py", "--ncu", "/usr/local/cuda-13.2/nsight-compute-2026.1.0/ncu", "--output", "evidence/raw/ncu/gemm_hmma_bf16_sm80", "--metrics", "gpc__cycles_elapsed.max,sm__cycles_active.max,smsp__inst_executed.sum,lts__t_sectors_srcunit_tex_op_read.sum,dram__sectors_read.sum,sm__pipe_tensor_cycles_active.sum", "--launch-skip", "1", "--launch-count", "1", "--replay-mode", "application", "--clock-control", "none", "--", "workloads/portable_lcd/gemm_hmma_bf16_sm80/gemm_hmma_bf16_sm80_run", "--timing_shape", "--warmup", "1", "--reps", "1"], "tool_path": "/usr/local/cuda-13.2/nsight-compute-2026.1.0/ncu", "exit_code": 0, "output": "evidence/raw/ncu/gemm_hmma_bf16_sm80", "csv": "evidence/raw/ncu/gemm_hmma_bf16_sm80/ncu.csv", "observed": {"gpc__cycles_elapsed.max": 13415, "sm__cycles_active.max": 11756, "smsp__inst_executed.sum": 197120, "lts__t_sectors_srcunit_tex_op_read.sum": 164736, "dram__sectors_read.sum": 8364, "sm__pipe_tensor_cycles_active.sum": 131072}, "metadata": "evidence/raw/ncu/gemm_hmma_bf16_sm80/metadata.json", "metadata_sha256": "9e9f38521580a39fe9f79d706ad2ba3ab5120ef3e1f5f51ffb2934052d950032", "command_file": "evidence/raw/ncu/gemm_hmma_bf16_sm80/command.txt", "command_file_sha256": "13775c642f60dc751d2f372f4a0acf18dd468fce7ffa94bcbedf0d595a6610d9", "export_command_file": "evidence/raw/ncu/gemm_hmma_bf16_sm80/export_command.txt", "export_command_file_sha256": "6aff7fb4de004da8a33d3a7cece608d7284ec64519bcc882628224e654a6188a"},
-        "nvbit": {"env": {"LD_LIBRARY_PATH": ".toolchain/pb/lib", "CUDA_INJECTION64_PATH": "tools/nvbit_tracer/tracer_tool/tracer_tool.so", "USER_DEFINED_FOLDERS": "1", "TRACES_FOLDER": "evidence/raw/nvbit/gemm_hmma_bf16_sm80", "ACTIVE_FROM_START": "1", "DYNAMIC_KERNEL_LIMIT_START": "0", "DYNAMIC_KERNEL_LIMIT_END": "1", "SKIP_ENHANCED_TRACER": "0", "ENHANCED_TRACER_MAX_PARSER_INPUT_KB": "256", "ENHANCED_TRACER_PER_CUBIN_TIMEOUT_S": "45"}, "tracer_sha256": "dda89ee6857058b3f6dc2a01d73a2dc926b876d8e343b7457c779efd82fed007", "argv": ["workloads/portable_lcd/gemm_hmma_bf16_sm80/gemm_hmma_bf16_sm80_run", "--timing_shape", "--warmup", "0", "--reps", "1"], "exit_code": 0, "output": "evidence/raw/nvbit/gemm_hmma_bf16_sm80", "stats": "evidence/raw/nvbit/gemm_hmma_bf16_sm80/stats.csv", "mapping": "evidence/raw/nvbit/gemm_hmma_bf16_sm80/extra_info/traced_kernel_modules.json", "binding": "evidence/raw/nvbit/gemm_hmma_bf16_sm80/campaign_binding.json", "binding_sha256": "8836b7656d351f0a27c475294d872535ca2a0e5481144a1917415362f4400950", "trace_binary_path": "workloads/portable_lcd/gemm_hmma_bf16_sm80/gemm_hmma_bf16_sm80_run", "trace_binary_sha256": "55133e328fc16238d78e3dde335b4ce5789a4b3838fb440da41f489f805a1362", "observed": {"accepted_launches": 1, "trace_blocks": 512, "trace_thread_instructions": 422400, "trace_payload_records": 422400, "dynamic_trace_sha256": "918f57a54ecdc723e077a933bfb8d0311bcb5202c69c11e8dcd625ae162e2697"}},
-        "static_control": {"argv": [".venv/bin/python", "tools/sass_control/emit_control_bits_sidecar.py", "--binary", "workloads/portable_lcd/gemm_hmma_bf16_sm80/gemm_hmma_bf16_sm80_run", "--arch", "sm_86", "--out", "evidence/raw/static/gemm_hmma_bf16_sm80/gemm_hmma_bf16_sm80.control_bits.json", "--toolkit-bindir", "/usr/local/cuda-13.2/bin"], "binary_path": "workloads/portable_lcd/gemm_hmma_bf16_sm80/gemm_hmma_bf16_sm80_run", "binary_sha256": "55133e328fc16238d78e3dde335b4ce5789a4b3838fb440da41f489f805a1362", "cuobjdump_argv": ["/usr/local/cuda-13.2/bin/cuobjdump", "--dump-sass", "workloads/portable_lcd/gemm_hmma_bf16_sm80/gemm_hmma_bf16_sm80_run"], "exit_code": 0, "control": "evidence/raw/static/gemm_hmma_bf16_sm80/gemm_hmma_bf16_sm80.control_bits.json", "control_sha256": "e6e11b8fb7368c6b095429185b87cc767bf792bc85379574a5b2f59cdb4527d0", "decoded_instructions": 192},
-        "simulator": {"argv": ["sim/target/release/sim-run", "--trace", "results/captures/sm86_simulator_live_baseline_20260829_v2/evidence/raw/nvbit/gemm_hmma_bf16_sm80", "--control", "results/captures/sm86_simulator_live_baseline_20260829_v2/evidence/raw/static/gemm_hmma_bf16_sm80/gemm_hmma_bf16_sm80.control_bits.json", "--arch-card", "arch_profiles/cards/sm_86.json", "--pchase-card", "data/pchase/sm_86_static_card.json", "--mode", "l1-l2"], "binary_path": "sim/target/release/sim-run", "binary_sha256": "6cb0d05f0d447c0cd6ee2e30353c0f1e89d464462458912478c826860f15f9a4", "replay_binding": "evidence/raw/simulator/gemm_hmma_bf16_sm80/replay_binding.json", "replay_binding_sha256": "532a6596e77e8e7a8a298507cc4919e9c67864cbf9f81b5b62fc923df67b17a2", "exit_code": 0, "outputs": ["evidence/raw/simulator/gemm_hmma_bf16_sm80/replay-1.json", "evidence/raw/simulator/gemm_hmma_bf16_sm80/replay-2.json"], "observed": {"instructions_issued": 197120, "records_seen": 197120, "terminal_modeled_event_time": 8915, "completion": "incomplete_unmodeled_retirement_tails", "deterministic_twin": true}}
+      "expected_grid": [
+        16,
+        32,
+        1
+      ],
+      "expected_block": [
+        32,
+        1,
+        1
+      ],
+      "binary": {
+        "path": "workloads/portable_lcd/gemm_hmma_bf16_sm80/gemm_hmma_bf16_sm80_run",
+        "sha256": "55133e328fc16238d78e3dde335b4ce5789a4b3838fb440da41f489f805a1362"
       },
-      "limitations": ["NCU SM-active is a measured target; simulator terminal time is a lower bound with dirty_writeback/coherence tails."]
+      "stages": {
+        "correctness": {
+          "argv": [
+            "workloads/portable_lcd/gemm_hmma_bf16_sm80/gemm_hmma_bf16_sm80_run",
+            "--correctness_shape",
+            "--seed",
+            "42",
+            "--warmup",
+            "1",
+            "--reps",
+            "1",
+            "--output_dir",
+            "results/captures/sm86_simulator_live_baseline_20260829_v2/evidence/raw/correctness/gemm_hmma_bf16_sm80"
+          ],
+          "exit_code": 0,
+          "stdout": "evidence/raw/correctness/gemm_hmma_bf16_sm80/stdout.txt",
+          "stderr": "evidence/raw/correctness/gemm_hmma_bf16_sm80/stderr.txt",
+          "stdout_sha256": "88c7c510ac185a5dfd00578f5e2e0844f3daf042d1087d72f0477ede16d86036",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "environment": {
+            "mode": "clean_base_binary",
+            "record": "evidence/raw/correctness/gemm_hmma_bf16_sm80/environment.json",
+            "record_sha256": "3cac14fdbcfd4e92b778e5fbb6f55ed6f16780be247d2917e333073c8552a11a"
+          },
+          "manifest": "evidence/raw/correctness/gemm_hmma_bf16_sm80/gemm_hmma_bf16_sm80/manifest.json",
+          "observed": {
+            "correctness_ok": true,
+            "max_abs_err": 0.0055666
+          }
+        },
+        "ncu": {
+          "argv": [
+            ".venv/bin/python",
+            "tools/local_labels/collect_ncu.py",
+            "--ncu",
+            "/usr/local/cuda-13.2/nsight-compute-2026.1.0/ncu",
+            "--timeout",
+            "900",
+            "--output",
+            "evidence/raw/ncu/gemm_hmma_bf16_sm80",
+            "--metrics",
+            "gpc__cycles_elapsed.max,sm__cycles_active.max,smsp__inst_executed.sum,lts__t_sectors_srcunit_tex_op_read.sum,dram__sectors_read.sum,sm__pipe_tensor_cycles_active.sum",
+            "--launch-skip",
+            "1",
+            "--launch-count",
+            "1",
+            "--replay-mode",
+            "application",
+            "--clock-control",
+            "none",
+            "--",
+            "workloads/portable_lcd/gemm_hmma_bf16_sm80/gemm_hmma_bf16_sm80_run",
+            "--timing_shape",
+            "--warmup",
+            "1",
+            "--reps",
+            "1"
+          ],
+          "tool_path": "/usr/local/cuda-13.2/nsight-compute-2026.1.0/ncu",
+          "exit_code": 0,
+          "output": "evidence/raw/ncu/gemm_hmma_bf16_sm80",
+          "csv": "evidence/raw/ncu/gemm_hmma_bf16_sm80/ncu.csv",
+          "observed": {
+            "gpc__cycles_elapsed.max": 13324,
+            "sm__cycles_active.max": 11639,
+            "smsp__inst_executed.sum": 197120,
+            "lts__t_sectors_srcunit_tex_op_read.sum": 164736,
+            "dram__sectors_read.sum": 8364,
+            "sm__pipe_tensor_cycles_active.sum": 131072
+          },
+          "metadata": "evidence/raw/ncu/gemm_hmma_bf16_sm80/metadata.json",
+          "metadata_sha256": "632b4cce2417458a2d7b52db1d62ee2f7057bf01ce7a5ec032509ea594fb2763",
+          "command_file": "evidence/raw/ncu/gemm_hmma_bf16_sm80/command.txt",
+          "command_file_sha256": "13775c642f60dc751d2f372f4a0acf18dd468fce7ffa94bcbedf0d595a6610d9",
+          "export_command_file": "evidence/raw/ncu/gemm_hmma_bf16_sm80/export_command.txt",
+          "export_command_file_sha256": "6aff7fb4de004da8a33d3a7cece608d7284ec64519bcc882628224e654a6188a",
+          "report": "evidence/raw/ncu/gemm_hmma_bf16_sm80/ncu-report.ncu-rep",
+          "report_sha256": "282dcbfc7e70f39630f5886b66e81e384ea783a03bb5f8a373ca3fcd417f91c7",
+          "csv_sha256": "0240d42d628de877f6240e21104d4a081e2112fa1cb3687191ac8c94592c9851"
+        },
+        "nvbit": {
+          "env": {
+            "HOME": "/home/jakeshea",
+            "LANG": "C",
+            "LC_ALL": "C",
+            "PATH": "/usr/local/cuda-13.2/bin:/opt/cuda/bin:/usr/bin:/bin",
+            "LD_LIBRARY_PATH": ".toolchain/pb/lib",
+            "CUDA_INJECTION64_PATH": "tools/nvbit_tracer/tracer_tool/tracer_tool.so",
+            "USER_DEFINED_FOLDERS": "1",
+            "TRACES_FOLDER": "/home/jakeshea/GPU_simulator_rebase/results/captures/sm86_simulator_live_baseline_20260829_v2/evidence/raw/nvbit/gemm_hmma_bf16_sm80",
+            "ACTIVE_FROM_START": "1",
+            "SKIP_ENHANCED_TRACER": "0",
+            "DYNAMIC_KERNEL_LIMIT_START": "0",
+            "DYNAMIC_KERNEL_LIMIT_END": "1",
+            "ENHANCED_TRACER_MAX_PARSER_INPUT_KB": "256",
+            "ENHANCED_TRACER_PER_CUBIN_TIMEOUT_S": "45"
+          },
+          "tracer_sha256": "dda89ee6857058b3f6dc2a01d73a2dc926b876d8e343b7457c779efd82fed007",
+          "argv": [
+            "workloads/portable_lcd/gemm_hmma_bf16_sm80/gemm_hmma_bf16_sm80_run",
+            "--timing_shape",
+            "--warmup",
+            "0",
+            "--reps",
+            "1"
+          ],
+          "exit_code": 0,
+          "output": "evidence/raw/nvbit/gemm_hmma_bf16_sm80",
+          "stats": "evidence/raw/nvbit/gemm_hmma_bf16_sm80/stats.csv",
+          "mapping": "evidence/raw/nvbit/gemm_hmma_bf16_sm80/extra_info/traced_kernel_modules.json",
+          "binding": "evidence/raw/nvbit/gemm_hmma_bf16_sm80/campaign_binding.json",
+          "binding_sha256": "91538edbc8290ba52f3d6f49914e11520d1b59f092b43b1145195340b5ca9190",
+          "trace_binary_path": "workloads/portable_lcd/gemm_hmma_bf16_sm80/gemm_hmma_bf16_sm80_run",
+          "trace_binary_sha256": "55133e328fc16238d78e3dde335b4ce5789a4b3838fb440da41f489f805a1362",
+          "observed": {
+            "accepted_launches": 1,
+            "trace_blocks": 512,
+            "trace_thread_instructions": 422400,
+            "trace_payload_records": 422400,
+            "dynamic_trace_sha256": "0a29149eca49ef2a2c061a2c2cf095b23571db251fff91ebf5be83d451d67bad"
+          },
+          "environment_record": "evidence/raw/nvbit/gemm_hmma_bf16_sm80/environment.json",
+          "environment_sha256": "ea4e1497a957fe8f18a229c25a07447358b28ccad1d97bd9efb3f48da74946b8"
+        },
+        "static_control": {
+          "argv": [
+            ".venv/bin/python",
+            "tools/sass_control/emit_control_bits_sidecar.py",
+            "--binary",
+            "workloads/portable_lcd/gemm_hmma_bf16_sm80/gemm_hmma_bf16_sm80_run",
+            "--arch",
+            "sm_86",
+            "--out",
+            "evidence/raw/static/gemm_hmma_bf16_sm80/gemm_hmma_bf16_sm80.control_bits.json",
+            "--toolkit-bindir",
+            "/usr/local/cuda-13.2/bin"
+          ],
+          "binary_path": "workloads/portable_lcd/gemm_hmma_bf16_sm80/gemm_hmma_bf16_sm80_run",
+          "binary_sha256": "55133e328fc16238d78e3dde335b4ce5789a4b3838fb440da41f489f805a1362",
+          "cuobjdump_argv": [
+            "/usr/local/cuda-13.2/bin/cuobjdump",
+            "--dump-sass",
+            "workloads/portable_lcd/gemm_hmma_bf16_sm80/gemm_hmma_bf16_sm80_run"
+          ],
+          "exit_code": 0,
+          "control": "evidence/raw/static/gemm_hmma_bf16_sm80/gemm_hmma_bf16_sm80.control_bits.json",
+          "control_sha256": "e6e11b8fb7368c6b095429185b87cc767bf792bc85379574a5b2f59cdb4527d0",
+          "decoded_instructions": 192
+        },
+        "simulator": {
+          "argv": [
+            "sim/target/release/sim-run",
+            "--trace",
+            "results/captures/sm86_simulator_live_baseline_20260829_v2/evidence/raw/nvbit/gemm_hmma_bf16_sm80",
+            "--control",
+            "results/captures/sm86_simulator_live_baseline_20260829_v2/evidence/raw/static/gemm_hmma_bf16_sm80/gemm_hmma_bf16_sm80.control_bits.json",
+            "--arch-card",
+            "arch_profiles/cards/sm_86.json",
+            "--pchase-card",
+            "data/pchase/sm_86_static_card.json",
+            "--mode",
+            "l1-l2"
+          ],
+          "binary_path": "sim/target/release/sim-run",
+          "binary_sha256": "6cb0d05f0d447c0cd6ee2e30353c0f1e89d464462458912478c826860f15f9a4",
+          "replay_binding": "evidence/raw/simulator/gemm_hmma_bf16_sm80/replay_binding.json",
+          "replay_binding_sha256": "df4640ac992e306c6fd8031e9a402e0b45e8571e2b0c56e87e07718edb19a80e",
+          "exit_code": 0,
+          "outputs": [
+            "evidence/raw/simulator/gemm_hmma_bf16_sm80/replay-1.json",
+            "evidence/raw/simulator/gemm_hmma_bf16_sm80/replay-2.json"
+          ],
+          "observed": {
+            "instructions_issued": 197120,
+            "records_seen": 197120,
+            "terminal_modeled_event_time": 8915,
+            "completion": "incomplete_unmodeled_retirement_tails",
+            "deterministic_twin": true
+          }
+        }
+      },
+      "limitations": [
+        "NCU SM-active is a measured target; simulator terminal time is a lower bound with dirty_writeback/coherence tails."
+      ]
     },
     {
       "id": "gemm_hmma_fp16_sm80",
       "workload": "gemm_hmma_fp16_sm80",
       "architecture": "sm_86",
-      "expected_grid": [16, 32, 1],
-      "expected_block": [32, 1, 1],
-      "binary": {"path": "workloads/portable_lcd/gemm_hmma_fp16_sm80/gemm_hmma_fp16_sm80_run", "sha256": "829927c7f57d7c46f0a8e51c7de6bb8c7eb7d8de1e963a33e5e9afee7839a750"},
-      "stages": {
-        "correctness": {"argv": ["workloads/portable_lcd/gemm_hmma_fp16_sm80/gemm_hmma_fp16_sm80_run", "--correctness_shape", "--seed", "42", "--warmup", "1", "--reps", "1", "--output_dir", "results/captures/sm86_simulator_live_baseline_20260829_v2/evidence/raw/correctness/gemm_hmma_fp16_sm80"], "exit_code": 0, "stdout": "evidence/raw/correctness/gemm_hmma_fp16_sm80/stdout.txt", "stderr": "evidence/raw/correctness/gemm_hmma_fp16_sm80/stderr.txt", "stdout_sha256": "4164f0a4ab902e591ced0d9e4439ee76c9446bcdab24e6b0a77a7e129a1edc21", "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", "environment": {"mode": "clean_base_binary", "record": "evidence/raw/correctness/gemm_hmma_fp16_sm80/environment.json", "record_sha256": "ee6be19e1eead1d99bf2a836c86454f49d9beef6ef4733512774d199f68b35f9"}, "manifest": "evidence/raw/correctness/gemm_hmma_fp16_sm80/gemm_hmma_fp16_sm80/manifest.json", "observed": {"correctness_ok": true, "max_abs_err": 0.000647739}},
-        "ncu": {"argv": [".venv/bin/python", "tools/local_labels/collect_ncu.py", "--ncu", "/usr/local/cuda-13.2/nsight-compute-2026.1.0/ncu", "--output", "evidence/raw/ncu/gemm_hmma_fp16_sm80", "--metrics", "gpc__cycles_elapsed.max,sm__cycles_active.max,smsp__inst_executed.sum,lts__t_sectors_srcunit_tex_op_read.sum,dram__sectors_read.sum,sm__pipe_tensor_cycles_active.sum", "--launch-skip", "1", "--launch-count", "1", "--replay-mode", "application", "--clock-control", "none", "--", "workloads/portable_lcd/gemm_hmma_fp16_sm80/gemm_hmma_fp16_sm80_run", "--timing_shape", "--warmup", "1", "--reps", "1"], "tool_path": "/usr/local/cuda-13.2/nsight-compute-2026.1.0/ncu", "exit_code": 0, "output": "evidence/raw/ncu/gemm_hmma_fp16_sm80", "csv": "evidence/raw/ncu/gemm_hmma_fp16_sm80/ncu.csv", "observed": {"gpc__cycles_elapsed.max": 13468, "sm__cycles_active.max": 11769, "smsp__inst_executed.sum": 197120, "lts__t_sectors_srcunit_tex_op_read.sum": 168832, "dram__sectors_read.sum": 17348, "sm__pipe_tensor_cycles_active.sum": 131072}, "metadata": "evidence/raw/ncu/gemm_hmma_fp16_sm80/metadata.json", "metadata_sha256": "e4c6a0ef0412a999dab8a0eaeaada26be27742ea1a55d77776c8e0bdd543f60f", "command_file": "evidence/raw/ncu/gemm_hmma_fp16_sm80/command.txt", "command_file_sha256": "17b9fca9c2226c11710c127e91cd4ad0440943f94d6021c2878a113bc01b560d", "export_command_file": "evidence/raw/ncu/gemm_hmma_fp16_sm80/export_command.txt", "export_command_file_sha256": "48bfe90450cbf205663da8cc5b1ff73c2324da0ac2a5b81c906cf13f87cfb036"},
-        "nvbit": {"env": {"LD_LIBRARY_PATH": ".toolchain/pb/lib", "CUDA_INJECTION64_PATH": "tools/nvbit_tracer/tracer_tool/tracer_tool.so", "USER_DEFINED_FOLDERS": "1", "TRACES_FOLDER": "evidence/raw/nvbit/gemm_hmma_fp16_sm80", "ACTIVE_FROM_START": "1", "DYNAMIC_KERNEL_LIMIT_START": "0", "DYNAMIC_KERNEL_LIMIT_END": "1", "SKIP_ENHANCED_TRACER": "0", "ENHANCED_TRACER_MAX_PARSER_INPUT_KB": "256", "ENHANCED_TRACER_PER_CUBIN_TIMEOUT_S": "45"}, "tracer_sha256": "dda89ee6857058b3f6dc2a01d73a2dc926b876d8e343b7457c779efd82fed007", "argv": ["workloads/portable_lcd/gemm_hmma_fp16_sm80/gemm_hmma_fp16_sm80_run", "--timing_shape", "--warmup", "0", "--reps", "1"], "exit_code": 0, "output": "evidence/raw/nvbit/gemm_hmma_fp16_sm80", "stats": "evidence/raw/nvbit/gemm_hmma_fp16_sm80/stats.csv", "mapping": "evidence/raw/nvbit/gemm_hmma_fp16_sm80/extra_info/traced_kernel_modules.json", "binding": "evidence/raw/nvbit/gemm_hmma_fp16_sm80/campaign_binding.json", "binding_sha256": "7bd7c2b10b5a17ed4a6abf6bbc38edbc4635c189a9820935ee2070579167841a", "trace_binary_path": "workloads/portable_lcd/gemm_hmma_fp16_sm80/gemm_hmma_fp16_sm80_run", "trace_binary_sha256": "829927c7f57d7c46f0a8e51c7de6bb8c7eb7d8de1e963a33e5e9afee7839a750", "observed": {"accepted_launches": 1, "trace_blocks": 512, "trace_thread_instructions": 422400, "trace_payload_records": 422400, "dynamic_trace_sha256": "65a2c3fb77c36d2957c7b406b82a33d2ade64687fa92ae498b5f3f4bba92c851"}},
-        "static_control": {"argv": [".venv/bin/python", "tools/sass_control/emit_control_bits_sidecar.py", "--binary", "workloads/portable_lcd/gemm_hmma_fp16_sm80/gemm_hmma_fp16_sm80_run", "--arch", "sm_86", "--out", "evidence/raw/static/gemm_hmma_fp16_sm80/gemm_hmma_fp16_sm80.control_bits.json", "--toolkit-bindir", "/usr/local/cuda-13.2/bin"], "binary_path": "workloads/portable_lcd/gemm_hmma_fp16_sm80/gemm_hmma_fp16_sm80_run", "binary_sha256": "829927c7f57d7c46f0a8e51c7de6bb8c7eb7d8de1e963a33e5e9afee7839a750", "cuobjdump_argv": ["/usr/local/cuda-13.2/bin/cuobjdump", "--dump-sass", "workloads/portable_lcd/gemm_hmma_fp16_sm80/gemm_hmma_fp16_sm80_run"], "exit_code": 0, "control": "evidence/raw/static/gemm_hmma_fp16_sm80/gemm_hmma_fp16_sm80.control_bits.json", "control_sha256": "a6bcf296fa6242fe14aed663f30952472bfee36c276b65a25d0508d24bbbce67", "decoded_instructions": 192},
-        "simulator": {"argv": ["sim/target/release/sim-run", "--trace", "results/captures/sm86_simulator_live_baseline_20260829_v2/evidence/raw/nvbit/gemm_hmma_fp16_sm80", "--control", "results/captures/sm86_simulator_live_baseline_20260829_v2/evidence/raw/static/gemm_hmma_fp16_sm80/gemm_hmma_fp16_sm80.control_bits.json", "--arch-card", "arch_profiles/cards/sm_86.json", "--pchase-card", "data/pchase/sm_86_static_card.json", "--mode", "l1-l2"], "binary_path": "sim/target/release/sim-run", "binary_sha256": "6cb0d05f0d447c0cd6ee2e30353c0f1e89d464462458912478c826860f15f9a4", "replay_binding": "evidence/raw/simulator/gemm_hmma_fp16_sm80/replay_binding.json", "replay_binding_sha256": "2719a128dfb66e8ec25d7b38c31e7d41f902e34bf723832eecdf7e4b155e68a3", "exit_code": 0, "outputs": ["evidence/raw/simulator/gemm_hmma_fp16_sm80/replay-1.json", "evidence/raw/simulator/gemm_hmma_fp16_sm80/replay-2.json"], "observed": {"instructions_issued": 197120, "records_seen": 197120, "terminal_modeled_event_time": 8915, "completion": "incomplete_unmodeled_retirement_tails", "deterministic_twin": true}}
+      "expected_grid": [
+        16,
+        32,
+        1
+      ],
+      "expected_block": [
+        32,
+        1,
+        1
+      ],
+      "binary": {
+        "path": "workloads/portable_lcd/gemm_hmma_fp16_sm80/gemm_hmma_fp16_sm80_run",
+        "sha256": "829927c7f57d7c46f0a8e51c7de6bb8c7eb7d8de1e963a33e5e9afee7839a750"
       },
-      "limitations": ["NCU SM-active is a measured target; simulator terminal time is a lower bound with dirty_writeback/coherence tails."]
+      "stages": {
+        "correctness": {
+          "argv": [
+            "workloads/portable_lcd/gemm_hmma_fp16_sm80/gemm_hmma_fp16_sm80_run",
+            "--correctness_shape",
+            "--seed",
+            "42",
+            "--warmup",
+            "1",
+            "--reps",
+            "1",
+            "--output_dir",
+            "results/captures/sm86_simulator_live_baseline_20260829_v2/evidence/raw/correctness/gemm_hmma_fp16_sm80"
+          ],
+          "exit_code": 0,
+          "stdout": "evidence/raw/correctness/gemm_hmma_fp16_sm80/stdout.txt",
+          "stderr": "evidence/raw/correctness/gemm_hmma_fp16_sm80/stderr.txt",
+          "stdout_sha256": "4164f0a4ab902e591ced0d9e4439ee76c9446bcdab24e6b0a77a7e129a1edc21",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "environment": {
+            "mode": "clean_base_binary",
+            "record": "evidence/raw/correctness/gemm_hmma_fp16_sm80/environment.json",
+            "record_sha256": "ee6be19e1eead1d99bf2a836c86454f49d9beef6ef4733512774d199f68b35f9"
+          },
+          "manifest": "evidence/raw/correctness/gemm_hmma_fp16_sm80/gemm_hmma_fp16_sm80/manifest.json",
+          "observed": {
+            "correctness_ok": true,
+            "max_abs_err": 0.000647739
+          }
+        },
+        "ncu": {
+          "argv": [
+            ".venv/bin/python",
+            "tools/local_labels/collect_ncu.py",
+            "--ncu",
+            "/usr/local/cuda-13.2/nsight-compute-2026.1.0/ncu",
+            "--timeout",
+            "900",
+            "--output",
+            "evidence/raw/ncu/gemm_hmma_fp16_sm80",
+            "--metrics",
+            "gpc__cycles_elapsed.max,sm__cycles_active.max,smsp__inst_executed.sum,lts__t_sectors_srcunit_tex_op_read.sum,dram__sectors_read.sum,sm__pipe_tensor_cycles_active.sum",
+            "--launch-skip",
+            "1",
+            "--launch-count",
+            "1",
+            "--replay-mode",
+            "application",
+            "--clock-control",
+            "none",
+            "--",
+            "workloads/portable_lcd/gemm_hmma_fp16_sm80/gemm_hmma_fp16_sm80_run",
+            "--timing_shape",
+            "--warmup",
+            "1",
+            "--reps",
+            "1"
+          ],
+          "tool_path": "/usr/local/cuda-13.2/nsight-compute-2026.1.0/ncu",
+          "exit_code": 0,
+          "output": "evidence/raw/ncu/gemm_hmma_fp16_sm80",
+          "csv": "evidence/raw/ncu/gemm_hmma_fp16_sm80/ncu.csv",
+          "observed": {
+            "gpc__cycles_elapsed.max": 13408,
+            "sm__cycles_active.max": 11693,
+            "smsp__inst_executed.sum": 197120,
+            "lts__t_sectors_srcunit_tex_op_read.sum": 169088,
+            "dram__sectors_read.sum": 8468,
+            "sm__pipe_tensor_cycles_active.sum": 131072
+          },
+          "metadata": "evidence/raw/ncu/gemm_hmma_fp16_sm80/metadata.json",
+          "metadata_sha256": "5d3d0d84c781ac67b4c3dd3c60a2ee58e458b8a9f1fc02e7dfebe3f8a5e009a5",
+          "command_file": "evidence/raw/ncu/gemm_hmma_fp16_sm80/command.txt",
+          "command_file_sha256": "17b9fca9c2226c11710c127e91cd4ad0440943f94d6021c2878a113bc01b560d",
+          "export_command_file": "evidence/raw/ncu/gemm_hmma_fp16_sm80/export_command.txt",
+          "export_command_file_sha256": "48bfe90450cbf205663da8cc5b1ff73c2324da0ac2a5b81c906cf13f87cfb036",
+          "report": "evidence/raw/ncu/gemm_hmma_fp16_sm80/ncu-report.ncu-rep",
+          "report_sha256": "f52c1acaeb3b8c0a627c5bab7c474a3825ab0b52ec2108b81204c8e4a252db4e",
+          "csv_sha256": "3ab604b839181540dfb4474d109f7ebfe2f7f6bc703092facbbf7a929a75b2c4"
+        },
+        "nvbit": {
+          "env": {
+            "HOME": "/home/jakeshea",
+            "LANG": "C",
+            "LC_ALL": "C",
+            "PATH": "/usr/local/cuda-13.2/bin:/opt/cuda/bin:/usr/bin:/bin",
+            "LD_LIBRARY_PATH": ".toolchain/pb/lib",
+            "CUDA_INJECTION64_PATH": "tools/nvbit_tracer/tracer_tool/tracer_tool.so",
+            "USER_DEFINED_FOLDERS": "1",
+            "TRACES_FOLDER": "/home/jakeshea/GPU_simulator_rebase/results/captures/sm86_simulator_live_baseline_20260829_v2/evidence/raw/nvbit/gemm_hmma_fp16_sm80",
+            "ACTIVE_FROM_START": "1",
+            "SKIP_ENHANCED_TRACER": "0",
+            "DYNAMIC_KERNEL_LIMIT_START": "0",
+            "DYNAMIC_KERNEL_LIMIT_END": "1",
+            "ENHANCED_TRACER_MAX_PARSER_INPUT_KB": "256",
+            "ENHANCED_TRACER_PER_CUBIN_TIMEOUT_S": "45"
+          },
+          "tracer_sha256": "dda89ee6857058b3f6dc2a01d73a2dc926b876d8e343b7457c779efd82fed007",
+          "argv": [
+            "workloads/portable_lcd/gemm_hmma_fp16_sm80/gemm_hmma_fp16_sm80_run",
+            "--timing_shape",
+            "--warmup",
+            "0",
+            "--reps",
+            "1"
+          ],
+          "exit_code": 0,
+          "output": "evidence/raw/nvbit/gemm_hmma_fp16_sm80",
+          "stats": "evidence/raw/nvbit/gemm_hmma_fp16_sm80/stats.csv",
+          "mapping": "evidence/raw/nvbit/gemm_hmma_fp16_sm80/extra_info/traced_kernel_modules.json",
+          "binding": "evidence/raw/nvbit/gemm_hmma_fp16_sm80/campaign_binding.json",
+          "binding_sha256": "423b5d53181dd3a6d87fd572f1e572fb93d4384dda4c95502001357e471c9267",
+          "trace_binary_path": "workloads/portable_lcd/gemm_hmma_fp16_sm80/gemm_hmma_fp16_sm80_run",
+          "trace_binary_sha256": "829927c7f57d7c46f0a8e51c7de6bb8c7eb7d8de1e963a33e5e9afee7839a750",
+          "observed": {
+            "accepted_launches": 1,
+            "trace_blocks": 512,
+            "trace_thread_instructions": 422400,
+            "trace_payload_records": 422400,
+            "dynamic_trace_sha256": "709ca5d1a3e38b366e10c51ba04b90fe15a993b8729e523b95e4db96fc1a1668"
+          },
+          "environment_record": "evidence/raw/nvbit/gemm_hmma_fp16_sm80/environment.json",
+          "environment_sha256": "0491d6aec72c96b106c96b10024a17a9376309783e320a5cd437c6a9421b1bcd"
+        },
+        "static_control": {
+          "argv": [
+            ".venv/bin/python",
+            "tools/sass_control/emit_control_bits_sidecar.py",
+            "--binary",
+            "workloads/portable_lcd/gemm_hmma_fp16_sm80/gemm_hmma_fp16_sm80_run",
+            "--arch",
+            "sm_86",
+            "--out",
+            "evidence/raw/static/gemm_hmma_fp16_sm80/gemm_hmma_fp16_sm80.control_bits.json",
+            "--toolkit-bindir",
+            "/usr/local/cuda-13.2/bin"
+          ],
+          "binary_path": "workloads/portable_lcd/gemm_hmma_fp16_sm80/gemm_hmma_fp16_sm80_run",
+          "binary_sha256": "829927c7f57d7c46f0a8e51c7de6bb8c7eb7d8de1e963a33e5e9afee7839a750",
+          "cuobjdump_argv": [
+            "/usr/local/cuda-13.2/bin/cuobjdump",
+            "--dump-sass",
+            "workloads/portable_lcd/gemm_hmma_fp16_sm80/gemm_hmma_fp16_sm80_run"
+          ],
+          "exit_code": 0,
+          "control": "evidence/raw/static/gemm_hmma_fp16_sm80/gemm_hmma_fp16_sm80.control_bits.json",
+          "control_sha256": "a6bcf296fa6242fe14aed663f30952472bfee36c276b65a25d0508d24bbbce67",
+          "decoded_instructions": 192
+        },
+        "simulator": {
+          "argv": [
+            "sim/target/release/sim-run",
+            "--trace",
+            "results/captures/sm86_simulator_live_baseline_20260829_v2/evidence/raw/nvbit/gemm_hmma_fp16_sm80",
+            "--control",
+            "results/captures/sm86_simulator_live_baseline_20260829_v2/evidence/raw/static/gemm_hmma_fp16_sm80/gemm_hmma_fp16_sm80.control_bits.json",
+            "--arch-card",
+            "arch_profiles/cards/sm_86.json",
+            "--pchase-card",
+            "data/pchase/sm_86_static_card.json",
+            "--mode",
+            "l1-l2"
+          ],
+          "binary_path": "sim/target/release/sim-run",
+          "binary_sha256": "6cb0d05f0d447c0cd6ee2e30353c0f1e89d464462458912478c826860f15f9a4",
+          "replay_binding": "evidence/raw/simulator/gemm_hmma_fp16_sm80/replay_binding.json",
+          "replay_binding_sha256": "919e917698ae06e955a151db2f1b0fbbb6dccf57da5b3942ac1d4f05f09afbee",
+          "exit_code": 0,
+          "outputs": [
+            "evidence/raw/simulator/gemm_hmma_fp16_sm80/replay-1.json",
+            "evidence/raw/simulator/gemm_hmma_fp16_sm80/replay-2.json"
+          ],
+          "observed": {
+            "instructions_issued": 197120,
+            "records_seen": 197120,
+            "terminal_modeled_event_time": 8915,
+            "completion": "incomplete_unmodeled_retirement_tails",
+            "deterministic_twin": true
+          }
+        }
+      },
+      "limitations": [
+        "NCU SM-active is a measured target; simulator terminal time is a lower bound with dirty_writeback/coherence tails."
+      ]
     },
     {
       "id": "gemm_imma_int8_sm80",
       "workload": "gemm_imma_int8_sm80",
       "architecture": "sm_86",
-      "expected_grid": [16, 32, 1],
-      "expected_block": [32, 1, 1],
-      "binary": {"path": "workloads/portable_lcd/gemm_imma_int8_sm80/gemm_imma_int8_sm80_run", "sha256": "44b362cf4d503e1eb4b2791046d2084288b12fc1fc7fde9674a6d538a4b16e4a"},
-      "stages": {
-        "correctness": {"argv": ["workloads/portable_lcd/gemm_imma_int8_sm80/gemm_imma_int8_sm80_run", "--correctness_shape", "--seed", "42", "--warmup", "1", "--reps", "1", "--output_dir", "results/captures/sm86_simulator_live_baseline_20260829_v2/evidence/raw/correctness/gemm_imma_int8_sm80"], "exit_code": 0, "stdout": "evidence/raw/correctness/gemm_imma_int8_sm80/stdout.txt", "stderr": "evidence/raw/correctness/gemm_imma_int8_sm80/stderr.txt", "stdout_sha256": "b5d03a371ac1ca008ce96319a16348d9f546c275f4ef677113bfdc90f88925dc", "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", "environment": {"mode": "clean_base_binary", "record": "evidence/raw/correctness/gemm_imma_int8_sm80/environment.json", "record_sha256": "162015df69d0c9955aa0fb450dafdfb57b6a636af4f88389f4cd520e1704bfe5"}, "manifest": "evidence/raw/correctness/gemm_imma_int8_sm80/gemm_imma_int8_sm80/manifest.json", "observed": {"correctness_ok": true, "max_abs_err": 0}},
-        "ncu": {"argv": [".venv/bin/python", "tools/local_labels/collect_ncu.py", "--ncu", "/usr/local/cuda-13.2/nsight-compute-2026.1.0/ncu", "--output", "evidence/raw/ncu/gemm_imma_int8_sm80", "--metrics", "gpc__cycles_elapsed.max,sm__cycles_active.max,smsp__inst_executed.sum,lts__t_sectors_srcunit_tex_op_read.sum,dram__sectors_read.sum,sm__pipe_tensor_cycles_active.sum", "--launch-skip", "1", "--launch-count", "1", "--replay-mode", "application", "--clock-control", "none", "--", "workloads/portable_lcd/gemm_imma_int8_sm80/gemm_imma_int8_sm80_run", "--timing_shape", "--warmup", "1", "--reps", "1"], "tool_path": "/usr/local/cuda-13.2/nsight-compute-2026.1.0/ncu", "exit_code": 0, "output": "evidence/raw/ncu/gemm_imma_int8_sm80", "csv": "evidence/raw/ncu/gemm_imma_int8_sm80/ncu.csv", "observed": {"gpc__cycles_elapsed.max": 11331, "sm__cycles_active.max": 9628, "smsp__inst_executed.sum": 157696, "lts__t_sectors_srcunit_tex_op_read.sum": 81344, "dram__sectors_read.sum": 4268, "sm__pipe_tensor_cycles_active.sum": 65536}, "metadata": "evidence/raw/ncu/gemm_imma_int8_sm80/metadata.json", "metadata_sha256": "36c9686582c36df73f78e91ece6de8d9e3cd6f0c2f355ebb68ceec5c153c4ca1", "command_file": "evidence/raw/ncu/gemm_imma_int8_sm80/command.txt", "command_file_sha256": "00fa33fce26cf84657e02afb72828c9cb95a25d42cd612883ac010c9e8f8b363", "export_command_file": "evidence/raw/ncu/gemm_imma_int8_sm80/export_command.txt", "export_command_file_sha256": "f70eba2bfe76f62f83b42b1012bcb2501ebcf01d76924fc8131292c2c0a0788f"},
-        "nvbit": {"env": {"LD_LIBRARY_PATH": ".toolchain/pb/lib", "CUDA_INJECTION64_PATH": "tools/nvbit_tracer/tracer_tool/tracer_tool.so", "USER_DEFINED_FOLDERS": "1", "TRACES_FOLDER": "evidence/raw/nvbit/gemm_imma_int8_sm80", "ACTIVE_FROM_START": "1", "DYNAMIC_KERNEL_LIMIT_START": "0", "DYNAMIC_KERNEL_LIMIT_END": "1", "SKIP_ENHANCED_TRACER": "0", "ENHANCED_TRACER_MAX_PARSER_INPUT_KB": "256", "ENHANCED_TRACER_PER_CUBIN_TIMEOUT_S": "45"}, "tracer_sha256": "dda89ee6857058b3f6dc2a01d73a2dc926b876d8e343b7457c779efd82fed007", "argv": ["workloads/portable_lcd/gemm_imma_int8_sm80/gemm_imma_int8_sm80_run", "--timing_shape", "--warmup", "0", "--reps", "1"], "exit_code": 0, "output": "evidence/raw/nvbit/gemm_imma_int8_sm80", "stats": "evidence/raw/nvbit/gemm_imma_int8_sm80/stats.csv", "mapping": "evidence/raw/nvbit/gemm_imma_int8_sm80/extra_info/traced_kernel_modules.json", "binding": "evidence/raw/nvbit/gemm_imma_int8_sm80/campaign_binding.json", "binding_sha256": "e3a901a9ada4d56ee1c819b66a29381a7e68ca06c14f05bad1b368cd75f27a04", "trace_binary_path": "workloads/portable_lcd/gemm_imma_int8_sm80/gemm_imma_int8_sm80_run", "trace_binary_sha256": "44b362cf4d503e1eb4b2791046d2084288b12fc1fc7fde9674a6d538a4b16e4a", "observed": {"accepted_launches": 1, "trace_blocks": 512, "trace_thread_instructions": 334848, "trace_payload_records": 334848, "dynamic_trace_sha256": "6a85618c22b0e02c964bb3f9307fa8b927dc458025c6cd5fdc51ef46b6dcb25b"}},
-        "static_control": {"argv": [".venv/bin/python", "tools/sass_control/emit_control_bits_sidecar.py", "--binary", "workloads/portable_lcd/gemm_imma_int8_sm80/gemm_imma_int8_sm80_run", "--arch", "sm_86", "--out", "evidence/raw/static/gemm_imma_int8_sm80/gemm_imma_int8_sm80.control_bits.json", "--toolkit-bindir", "/usr/local/cuda-13.2/bin"], "binary_path": "workloads/portable_lcd/gemm_imma_int8_sm80/gemm_imma_int8_sm80_run", "binary_sha256": "44b362cf4d503e1eb4b2791046d2084288b12fc1fc7fde9674a6d538a4b16e4a", "cuobjdump_argv": ["/usr/local/cuda-13.2/bin/cuobjdump", "--dump-sass", "workloads/portable_lcd/gemm_imma_int8_sm80/gemm_imma_int8_sm80_run"], "exit_code": 0, "control": "evidence/raw/static/gemm_imma_int8_sm80/gemm_imma_int8_sm80.control_bits.json", "control_sha256": "003c1c9d70fe9115acba74ce40999a2a74e0500cf8cd107ad822c6c3ea1d011c", "decoded_instructions": 184},
-        "simulator": {"argv": ["sim/target/release/sim-run", "--trace", "results/captures/sm86_simulator_live_baseline_20260829_v2/evidence/raw/nvbit/gemm_imma_int8_sm80", "--control", "results/captures/sm86_simulator_live_baseline_20260829_v2/evidence/raw/static/gemm_imma_int8_sm80/gemm_imma_int8_sm80.control_bits.json", "--arch-card", "arch_profiles/cards/sm_86.json", "--pchase-card", "data/pchase/sm_86_static_card.json", "--mode", "l1-l2"], "binary_path": "sim/target/release/sim-run", "binary_sha256": "6cb0d05f0d447c0cd6ee2e30353c0f1e89d464462458912478c826860f15f9a4", "replay_binding": "evidence/raw/simulator/gemm_imma_int8_sm80/replay_binding.json", "replay_binding_sha256": "8c106b795be17bfe502d930d4f64fe784a3662fe0f7b5e5ddf7f43eab795e82b", "exit_code": 0, "outputs": ["evidence/raw/simulator/gemm_imma_int8_sm80/replay-1.json", "evidence/raw/simulator/gemm_imma_int8_sm80/replay-2.json"], "observed": {"instructions_issued": 157696, "records_seen": 157696, "terminal_modeled_event_time": 5867, "completion": "incomplete_unmodeled_retirement_tails", "deterministic_twin": true}}
+      "expected_grid": [
+        16,
+        32,
+        1
+      ],
+      "expected_block": [
+        32,
+        1,
+        1
+      ],
+      "binary": {
+        "path": "workloads/portable_lcd/gemm_imma_int8_sm80/gemm_imma_int8_sm80_run",
+        "sha256": "44b362cf4d503e1eb4b2791046d2084288b12fc1fc7fde9674a6d538a4b16e4a"
       },
-      "limitations": ["NCU SM-active is a measured target; simulator terminal time is a lower bound with dirty_writeback/coherence tails."]
+      "stages": {
+        "correctness": {
+          "argv": [
+            "workloads/portable_lcd/gemm_imma_int8_sm80/gemm_imma_int8_sm80_run",
+            "--correctness_shape",
+            "--seed",
+            "42",
+            "--warmup",
+            "1",
+            "--reps",
+            "1",
+            "--output_dir",
+            "results/captures/sm86_simulator_live_baseline_20260829_v2/evidence/raw/correctness/gemm_imma_int8_sm80"
+          ],
+          "exit_code": 0,
+          "stdout": "evidence/raw/correctness/gemm_imma_int8_sm80/stdout.txt",
+          "stderr": "evidence/raw/correctness/gemm_imma_int8_sm80/stderr.txt",
+          "stdout_sha256": "b5d03a371ac1ca008ce96319a16348d9f546c275f4ef677113bfdc90f88925dc",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "environment": {
+            "mode": "clean_base_binary",
+            "record": "evidence/raw/correctness/gemm_imma_int8_sm80/environment.json",
+            "record_sha256": "162015df69d0c9955aa0fb450dafdfb57b6a636af4f88389f4cd520e1704bfe5"
+          },
+          "manifest": "evidence/raw/correctness/gemm_imma_int8_sm80/gemm_imma_int8_sm80/manifest.json",
+          "observed": {
+            "correctness_ok": true,
+            "max_abs_err": 0
+          }
+        },
+        "ncu": {
+          "argv": [
+            ".venv/bin/python",
+            "tools/local_labels/collect_ncu.py",
+            "--ncu",
+            "/usr/local/cuda-13.2/nsight-compute-2026.1.0/ncu",
+            "--timeout",
+            "900",
+            "--output",
+            "evidence/raw/ncu/gemm_imma_int8_sm80",
+            "--metrics",
+            "gpc__cycles_elapsed.max,sm__cycles_active.max,smsp__inst_executed.sum,lts__t_sectors_srcunit_tex_op_read.sum,dram__sectors_read.sum,sm__pipe_tensor_cycles_active.sum",
+            "--launch-skip",
+            "1",
+            "--launch-count",
+            "1",
+            "--replay-mode",
+            "application",
+            "--clock-control",
+            "none",
+            "--",
+            "workloads/portable_lcd/gemm_imma_int8_sm80/gemm_imma_int8_sm80_run",
+            "--timing_shape",
+            "--warmup",
+            "1",
+            "--reps",
+            "1"
+          ],
+          "tool_path": "/usr/local/cuda-13.2/nsight-compute-2026.1.0/ncu",
+          "exit_code": 0,
+          "output": "evidence/raw/ncu/gemm_imma_int8_sm80",
+          "csv": "evidence/raw/ncu/gemm_imma_int8_sm80/ncu.csv",
+          "observed": {
+            "gpc__cycles_elapsed.max": 11022,
+            "sm__cycles_active.max": 9320,
+            "smsp__inst_executed.sum": 157696,
+            "lts__t_sectors_srcunit_tex_op_read.sum": 78592,
+            "dram__sectors_read.sum": 4268,
+            "sm__pipe_tensor_cycles_active.sum": 65536
+          },
+          "metadata": "evidence/raw/ncu/gemm_imma_int8_sm80/metadata.json",
+          "metadata_sha256": "c435bb1502ae45d737194fd787b3d4ea5ab771095795e2b751976e90f221b17f",
+          "command_file": "evidence/raw/ncu/gemm_imma_int8_sm80/command.txt",
+          "command_file_sha256": "00fa33fce26cf84657e02afb72828c9cb95a25d42cd612883ac010c9e8f8b363",
+          "export_command_file": "evidence/raw/ncu/gemm_imma_int8_sm80/export_command.txt",
+          "export_command_file_sha256": "f70eba2bfe76f62f83b42b1012bcb2501ebcf01d76924fc8131292c2c0a0788f",
+          "report": "evidence/raw/ncu/gemm_imma_int8_sm80/ncu-report.ncu-rep",
+          "report_sha256": "fe2c2166bc007a025c765e098e06683511ee9670f4bf385d499f384efeec59c3",
+          "csv_sha256": "c1c9b7dc4226ffe7afbd4de83297ea794afe4471229e79dd1a2e5067f99c66ec"
+        },
+        "nvbit": {
+          "env": {
+            "HOME": "/home/jakeshea",
+            "LANG": "C",
+            "LC_ALL": "C",
+            "PATH": "/usr/local/cuda-13.2/bin:/opt/cuda/bin:/usr/bin:/bin",
+            "LD_LIBRARY_PATH": ".toolchain/pb/lib",
+            "CUDA_INJECTION64_PATH": "tools/nvbit_tracer/tracer_tool/tracer_tool.so",
+            "USER_DEFINED_FOLDERS": "1",
+            "TRACES_FOLDER": "/home/jakeshea/GPU_simulator_rebase/results/captures/sm86_simulator_live_baseline_20260829_v2/evidence/raw/nvbit/gemm_imma_int8_sm80",
+            "ACTIVE_FROM_START": "1",
+            "SKIP_ENHANCED_TRACER": "0",
+            "DYNAMIC_KERNEL_LIMIT_START": "0",
+            "DYNAMIC_KERNEL_LIMIT_END": "1",
+            "ENHANCED_TRACER_MAX_PARSER_INPUT_KB": "256",
+            "ENHANCED_TRACER_PER_CUBIN_TIMEOUT_S": "45"
+          },
+          "tracer_sha256": "dda89ee6857058b3f6dc2a01d73a2dc926b876d8e343b7457c779efd82fed007",
+          "argv": [
+            "workloads/portable_lcd/gemm_imma_int8_sm80/gemm_imma_int8_sm80_run",
+            "--timing_shape",
+            "--warmup",
+            "0",
+            "--reps",
+            "1"
+          ],
+          "exit_code": 0,
+          "output": "evidence/raw/nvbit/gemm_imma_int8_sm80",
+          "stats": "evidence/raw/nvbit/gemm_imma_int8_sm80/stats.csv",
+          "mapping": "evidence/raw/nvbit/gemm_imma_int8_sm80/extra_info/traced_kernel_modules.json",
+          "binding": "evidence/raw/nvbit/gemm_imma_int8_sm80/campaign_binding.json",
+          "binding_sha256": "385fca9af19ccf5fac05697122c2eeb4f8a1426ba2bc0a4d328ce86b2fdafd2a",
+          "trace_binary_path": "workloads/portable_lcd/gemm_imma_int8_sm80/gemm_imma_int8_sm80_run",
+          "trace_binary_sha256": "44b362cf4d503e1eb4b2791046d2084288b12fc1fc7fde9674a6d538a4b16e4a",
+          "observed": {
+            "accepted_launches": 1,
+            "trace_blocks": 512,
+            "trace_thread_instructions": 334848,
+            "trace_payload_records": 334848,
+            "dynamic_trace_sha256": "771775a01a1787fda1d764243fbd8cc3fd955a06c415a00fd9bf5140bcaaa787"
+          },
+          "environment_record": "evidence/raw/nvbit/gemm_imma_int8_sm80/environment.json",
+          "environment_sha256": "3b6dd284bbd668ed2331094916de0fe4c8cd5422e5e7ce9475edaee2bdaf48f2"
+        },
+        "static_control": {
+          "argv": [
+            ".venv/bin/python",
+            "tools/sass_control/emit_control_bits_sidecar.py",
+            "--binary",
+            "workloads/portable_lcd/gemm_imma_int8_sm80/gemm_imma_int8_sm80_run",
+            "--arch",
+            "sm_86",
+            "--out",
+            "evidence/raw/static/gemm_imma_int8_sm80/gemm_imma_int8_sm80.control_bits.json",
+            "--toolkit-bindir",
+            "/usr/local/cuda-13.2/bin"
+          ],
+          "binary_path": "workloads/portable_lcd/gemm_imma_int8_sm80/gemm_imma_int8_sm80_run",
+          "binary_sha256": "44b362cf4d503e1eb4b2791046d2084288b12fc1fc7fde9674a6d538a4b16e4a",
+          "cuobjdump_argv": [
+            "/usr/local/cuda-13.2/bin/cuobjdump",
+            "--dump-sass",
+            "workloads/portable_lcd/gemm_imma_int8_sm80/gemm_imma_int8_sm80_run"
+          ],
+          "exit_code": 0,
+          "control": "evidence/raw/static/gemm_imma_int8_sm80/gemm_imma_int8_sm80.control_bits.json",
+          "control_sha256": "003c1c9d70fe9115acba74ce40999a2a74e0500cf8cd107ad822c6c3ea1d011c",
+          "decoded_instructions": 184
+        },
+        "simulator": {
+          "argv": [
+            "sim/target/release/sim-run",
+            "--trace",
+            "results/captures/sm86_simulator_live_baseline_20260829_v2/evidence/raw/nvbit/gemm_imma_int8_sm80",
+            "--control",
+            "results/captures/sm86_simulator_live_baseline_20260829_v2/evidence/raw/static/gemm_imma_int8_sm80/gemm_imma_int8_sm80.control_bits.json",
+            "--arch-card",
+            "arch_profiles/cards/sm_86.json",
+            "--pchase-card",
+            "data/pchase/sm_86_static_card.json",
+            "--mode",
+            "l1-l2"
+          ],
+          "binary_path": "sim/target/release/sim-run",
+          "binary_sha256": "6cb0d05f0d447c0cd6ee2e30353c0f1e89d464462458912478c826860f15f9a4",
+          "replay_binding": "evidence/raw/simulator/gemm_imma_int8_sm80/replay_binding.json",
+          "replay_binding_sha256": "5a80c67b5a14e77051baa73de1326203fa33cb70a1987a071af3c4391d4c9364",
+          "exit_code": 0,
+          "outputs": [
+            "evidence/raw/simulator/gemm_imma_int8_sm80/replay-1.json",
+            "evidence/raw/simulator/gemm_imma_int8_sm80/replay-2.json"
+          ],
+          "observed": {
+            "instructions_issued": 157696,
+            "records_seen": 157696,
+            "terminal_modeled_event_time": 5821,
+            "completion": "incomplete_unmodeled_retirement_tails",
+            "deterministic_twin": true
+          }
+        }
+      },
+      "limitations": [
+        "NCU SM-active is a measured target; simulator terminal time is a lower bound with dirty_writeback/coherence tails."
+      ]
     },
     {
       "id": "gemm_sparse_2to4_bf16_sm80",
       "workload": "gemm_sparse_2to4_bf16_sm80",
       "architecture": "sm_86",
-      "expected_grid": [8, 16, 1],
-      "expected_block": [32, 1, 1],
-      "binary": {"path": "workloads/portable_lcd/gemm_sparse_2to4_bf16_sm80/gemm_sparse_2to4_bf16_sm80_run", "sha256": "abf792ec7d7e7042ca4a4c21ae611577b50b94fad5c1a6ee534b45b13a22e254"},
-      "stages": {
-        "correctness": {"argv": ["workloads/portable_lcd/gemm_sparse_2to4_bf16_sm80/gemm_sparse_2to4_bf16_sm80_run", "--correctness_shape", "--seed", "42", "--warmup", "1", "--reps", "1", "--output_dir", "results/captures/sm86_simulator_live_baseline_20260829_v2/evidence/raw/correctness/gemm_sparse_2to4_bf16_sm80"], "exit_code": 0, "stdout": "evidence/raw/correctness/gemm_sparse_2to4_bf16_sm80/stdout.txt", "stderr": "evidence/raw/correctness/gemm_sparse_2to4_bf16_sm80/stderr.txt", "stdout_sha256": "0cf49f780248dd6e60d3e842289951a8568aa014916713a69071374659b35846", "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", "environment": {"mode": "clean_base_binary", "record": "evidence/raw/correctness/gemm_sparse_2to4_bf16_sm80/environment.json", "record_sha256": "797df506420d15678dbd082e1fa3c01459eb64f8095e0eae320379bd060a9fec"}, "manifest": "evidence/raw/correctness/gemm_sparse_2to4_bf16_sm80/gemm_sparse_2to4_bf16_sm80/manifest.json", "observed": {"correctness_ok": true, "max_abs_err": 0.00195117}},
-        "ncu": {"argv": [".venv/bin/python", "tools/local_labels/collect_ncu.py", "--ncu", "/usr/local/cuda-13.2/nsight-compute-2026.1.0/ncu", "--output", "evidence/raw/ncu/gemm_sparse_2to4_bf16_sm80", "--metrics", "gpc__cycles_elapsed.max,sm__cycles_active.max,smsp__inst_executed.sum,lts__t_sectors_srcunit_tex_op_read.sum,dram__sectors_read.sum,sm__pipe_tensor_cycles_active.sum", "--launch-skip", "1", "--launch-count", "1", "--replay-mode", "application", "--clock-control", "none", "--", "workloads/portable_lcd/gemm_sparse_2to4_bf16_sm80/gemm_sparse_2to4_bf16_sm80_run", "--timing_shape", "--warmup", "1", "--reps", "1"], "tool_path": "/usr/local/cuda-13.2/nsight-compute-2026.1.0/ncu", "exit_code": 0, "output": "evidence/raw/ncu/gemm_sparse_2to4_bf16_sm80", "csv": "evidence/raw/ncu/gemm_sparse_2to4_bf16_sm80/ncu.csv", "observed": {"gpc__cycles_elapsed.max": 5678, "sm__cycles_active.max": 3990, "smsp__inst_executed.sum": 19968, "lts__t_sectors_srcunit_tex_op_read.sum": 16384, "dram__sectors_read.sum": 1756, "sm__pipe_tensor_cycles_active.sum": 8192}, "metadata": "evidence/raw/ncu/gemm_sparse_2to4_bf16_sm80/metadata.json", "metadata_sha256": "b40d554848e4748247815c022aaaedbbd8c02d9f497656d442bfa6136d658d9c", "command_file": "evidence/raw/ncu/gemm_sparse_2to4_bf16_sm80/command.txt", "command_file_sha256": "3601831156a380b2cf5db25bc57403fac7ea2f194cd778c758bfcbf9e9f327fd", "export_command_file": "evidence/raw/ncu/gemm_sparse_2to4_bf16_sm80/export_command.txt", "export_command_file_sha256": "9bb540367728d89d822820e33d44ac22ce94fc9beeffd5a3fbc7259bcb7910d2"},
-        "nvbit": {"env": {"LD_LIBRARY_PATH": ".toolchain/pb/lib", "CUDA_INJECTION64_PATH": "tools/nvbit_tracer/tracer_tool/tracer_tool.so", "USER_DEFINED_FOLDERS": "1", "TRACES_FOLDER": "evidence/raw/nvbit/gemm_sparse_2to4_bf16_sm80", "ACTIVE_FROM_START": "1", "DYNAMIC_KERNEL_LIMIT_START": "0", "DYNAMIC_KERNEL_LIMIT_END": "1", "SKIP_ENHANCED_TRACER": "0", "ENHANCED_TRACER_MAX_PARSER_INPUT_KB": "256", "ENHANCED_TRACER_PER_CUBIN_TIMEOUT_S": "45"}, "tracer_sha256": "dda89ee6857058b3f6dc2a01d73a2dc926b876d8e343b7457c779efd82fed007", "argv": ["workloads/portable_lcd/gemm_sparse_2to4_bf16_sm80/gemm_sparse_2to4_bf16_sm80_run", "--timing_shape", "--warmup", "0", "--reps", "1"], "exit_code": 0, "output": "evidence/raw/nvbit/gemm_sparse_2to4_bf16_sm80", "stats": "evidence/raw/nvbit/gemm_sparse_2to4_bf16_sm80/stats.csv", "mapping": "evidence/raw/nvbit/gemm_sparse_2to4_bf16_sm80/extra_info/traced_kernel_modules.json", "binding": "evidence/raw/nvbit/gemm_sparse_2to4_bf16_sm80/campaign_binding.json", "binding_sha256": "b3851b8e5f3bc5ae6d908d1d8a4e178c2278c7ac2aea6c88ac6122c62a83649f", "trace_binary_path": "workloads/portable_lcd/gemm_sparse_2to4_bf16_sm80/gemm_sparse_2to4_bf16_sm80_run", "trace_binary_sha256": "abf792ec7d7e7042ca4a4c21ae611577b50b94fad5c1a6ee534b45b13a22e254", "observed": {"accepted_launches": 1, "trace_blocks": 128, "trace_thread_instructions": 46976, "trace_payload_records": 46976, "dynamic_trace_sha256": "0be96ac1c47355a913cb604c13e1ddcc5f3f116df9e5abeccb84d8c39321dd49"}},
-        "static_control": {"argv": [".venv/bin/python", "tools/sass_control/emit_control_bits_sidecar.py", "--binary", "workloads/portable_lcd/gemm_sparse_2to4_bf16_sm80/gemm_sparse_2to4_bf16_sm80_run", "--arch", "sm_86", "--out", "evidence/raw/static/gemm_sparse_2to4_bf16_sm80/gemm_sparse_2to4_bf16_sm80.control_bits.json", "--toolkit-bindir", "/usr/local/cuda-13.2/bin"], "binary_path": "workloads/portable_lcd/gemm_sparse_2to4_bf16_sm80/gemm_sparse_2to4_bf16_sm80_run", "binary_sha256": "abf792ec7d7e7042ca4a4c21ae611577b50b94fad5c1a6ee534b45b13a22e254", "cuobjdump_argv": ["/usr/local/cuda-13.2/bin/cuobjdump", "--dump-sass", "workloads/portable_lcd/gemm_sparse_2to4_bf16_sm80/gemm_sparse_2to4_bf16_sm80_run"], "exit_code": 0, "control": "evidence/raw/static/gemm_sparse_2to4_bf16_sm80/gemm_sparse_2to4_bf16_sm80.control_bits.json", "control_sha256": "af453066612c025e372027f05d93f8755ce9965e34632002dba48fe8678f9e4b", "decoded_instructions": 200},
-        "simulator": {"argv": ["sim/target/release/sim-run", "--trace", "results/captures/sm86_simulator_live_baseline_20260829_v2/evidence/raw/nvbit/gemm_sparse_2to4_bf16_sm80", "--control", "results/captures/sm86_simulator_live_baseline_20260829_v2/evidence/raw/static/gemm_sparse_2to4_bf16_sm80/gemm_sparse_2to4_bf16_sm80.control_bits.json", "--arch-card", "arch_profiles/cards/sm_86.json", "--pchase-card", "data/pchase/sm_86_static_card.json", "--mode", "l1-l2"], "binary_path": "sim/target/release/sim-run", "binary_sha256": "6cb0d05f0d447c0cd6ee2e30353c0f1e89d464462458912478c826860f15f9a4", "replay_binding": "evidence/raw/simulator/gemm_sparse_2to4_bf16_sm80/replay_binding.json", "replay_binding_sha256": "f00a4a4889c6fd3056bd4451021f51fd37c86a7789933477a86139666d1ad809", "exit_code": 0, "outputs": ["evidence/raw/simulator/gemm_sparse_2to4_bf16_sm80/replay-1.json", "evidence/raw/simulator/gemm_sparse_2to4_bf16_sm80/replay-2.json"], "observed": {"instructions_issued": 19968, "records_seen": 19968, "terminal_modeled_event_time": 2375, "completion": "incomplete_unmodeled_retirement_tails", "deterministic_twin": true}}
+      "expected_grid": [
+        8,
+        16,
+        1
+      ],
+      "expected_block": [
+        32,
+        1,
+        1
+      ],
+      "binary": {
+        "path": "workloads/portable_lcd/gemm_sparse_2to4_bf16_sm80/gemm_sparse_2to4_bf16_sm80_run",
+        "sha256": "abf792ec7d7e7042ca4a4c21ae611577b50b94fad5c1a6ee534b45b13a22e254"
       },
-      "limitations": ["NCU SM-active is a measured target; simulator terminal time is a lower bound with dirty_writeback/coherence tails."]
+      "stages": {
+        "correctness": {
+          "argv": [
+            "workloads/portable_lcd/gemm_sparse_2to4_bf16_sm80/gemm_sparse_2to4_bf16_sm80_run",
+            "--correctness_shape",
+            "--seed",
+            "42",
+            "--warmup",
+            "1",
+            "--reps",
+            "1",
+            "--output_dir",
+            "results/captures/sm86_simulator_live_baseline_20260829_v2/evidence/raw/correctness/gemm_sparse_2to4_bf16_sm80"
+          ],
+          "exit_code": 0,
+          "stdout": "evidence/raw/correctness/gemm_sparse_2to4_bf16_sm80/stdout.txt",
+          "stderr": "evidence/raw/correctness/gemm_sparse_2to4_bf16_sm80/stderr.txt",
+          "stdout_sha256": "0cf49f780248dd6e60d3e842289951a8568aa014916713a69071374659b35846",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "environment": {
+            "mode": "clean_base_binary",
+            "record": "evidence/raw/correctness/gemm_sparse_2to4_bf16_sm80/environment.json",
+            "record_sha256": "797df506420d15678dbd082e1fa3c01459eb64f8095e0eae320379bd060a9fec"
+          },
+          "manifest": "evidence/raw/correctness/gemm_sparse_2to4_bf16_sm80/gemm_sparse_2to4_bf16_sm80/manifest.json",
+          "observed": {
+            "correctness_ok": true,
+            "max_abs_err": 0.00195117
+          }
+        },
+        "ncu": {
+          "argv": [
+            ".venv/bin/python",
+            "tools/local_labels/collect_ncu.py",
+            "--ncu",
+            "/usr/local/cuda-13.2/nsight-compute-2026.1.0/ncu",
+            "--timeout",
+            "900",
+            "--output",
+            "evidence/raw/ncu/gemm_sparse_2to4_bf16_sm80",
+            "--metrics",
+            "gpc__cycles_elapsed.max,sm__cycles_active.max,smsp__inst_executed.sum,lts__t_sectors_srcunit_tex_op_read.sum,dram__sectors_read.sum,sm__pipe_tensor_cycles_active.sum",
+            "--launch-skip",
+            "1",
+            "--launch-count",
+            "1",
+            "--replay-mode",
+            "application",
+            "--clock-control",
+            "none",
+            "--",
+            "workloads/portable_lcd/gemm_sparse_2to4_bf16_sm80/gemm_sparse_2to4_bf16_sm80_run",
+            "--timing_shape",
+            "--warmup",
+            "1",
+            "--reps",
+            "1"
+          ],
+          "tool_path": "/usr/local/cuda-13.2/nsight-compute-2026.1.0/ncu",
+          "exit_code": 0,
+          "output": "evidence/raw/ncu/gemm_sparse_2to4_bf16_sm80",
+          "csv": "evidence/raw/ncu/gemm_sparse_2to4_bf16_sm80/ncu.csv",
+          "observed": {
+            "gpc__cycles_elapsed.max": 5701,
+            "sm__cycles_active.max": 4020,
+            "smsp__inst_executed.sum": 19968,
+            "lts__t_sectors_srcunit_tex_op_read.sum": 16384,
+            "dram__sectors_read.sum": 1716,
+            "sm__pipe_tensor_cycles_active.sum": 8192
+          },
+          "metadata": "evidence/raw/ncu/gemm_sparse_2to4_bf16_sm80/metadata.json",
+          "metadata_sha256": "c79ee8dc3cf35c2e0fe2d359d22ca2bea439a30f7425544112fe2304436bc1f6",
+          "command_file": "evidence/raw/ncu/gemm_sparse_2to4_bf16_sm80/command.txt",
+          "command_file_sha256": "3601831156a380b2cf5db25bc57403fac7ea2f194cd778c758bfcbf9e9f327fd",
+          "export_command_file": "evidence/raw/ncu/gemm_sparse_2to4_bf16_sm80/export_command.txt",
+          "export_command_file_sha256": "9bb540367728d89d822820e33d44ac22ce94fc9beeffd5a3fbc7259bcb7910d2",
+          "report": "evidence/raw/ncu/gemm_sparse_2to4_bf16_sm80/ncu-report.ncu-rep",
+          "report_sha256": "48a8d5622835d380819572236de0d81caa72de8178955b965471b0c96d31ba8b",
+          "csv_sha256": "f7286699f1109c1bbb7c76925043d5a43d89a6e78ee823ecf2adae899a781df6"
+        },
+        "nvbit": {
+          "env": {
+            "HOME": "/home/jakeshea",
+            "LANG": "C",
+            "LC_ALL": "C",
+            "PATH": "/usr/local/cuda-13.2/bin:/opt/cuda/bin:/usr/bin:/bin",
+            "LD_LIBRARY_PATH": ".toolchain/pb/lib",
+            "CUDA_INJECTION64_PATH": "tools/nvbit_tracer/tracer_tool/tracer_tool.so",
+            "USER_DEFINED_FOLDERS": "1",
+            "TRACES_FOLDER": "/home/jakeshea/GPU_simulator_rebase/results/captures/sm86_simulator_live_baseline_20260829_v2/evidence/raw/nvbit/gemm_sparse_2to4_bf16_sm80",
+            "ACTIVE_FROM_START": "1",
+            "SKIP_ENHANCED_TRACER": "0",
+            "DYNAMIC_KERNEL_LIMIT_START": "0",
+            "DYNAMIC_KERNEL_LIMIT_END": "1",
+            "ENHANCED_TRACER_MAX_PARSER_INPUT_KB": "256",
+            "ENHANCED_TRACER_PER_CUBIN_TIMEOUT_S": "45"
+          },
+          "tracer_sha256": "dda89ee6857058b3f6dc2a01d73a2dc926b876d8e343b7457c779efd82fed007",
+          "argv": [
+            "workloads/portable_lcd/gemm_sparse_2to4_bf16_sm80/gemm_sparse_2to4_bf16_sm80_run",
+            "--timing_shape",
+            "--warmup",
+            "0",
+            "--reps",
+            "1"
+          ],
+          "exit_code": 0,
+          "output": "evidence/raw/nvbit/gemm_sparse_2to4_bf16_sm80",
+          "stats": "evidence/raw/nvbit/gemm_sparse_2to4_bf16_sm80/stats.csv",
+          "mapping": "evidence/raw/nvbit/gemm_sparse_2to4_bf16_sm80/extra_info/traced_kernel_modules.json",
+          "binding": "evidence/raw/nvbit/gemm_sparse_2to4_bf16_sm80/campaign_binding.json",
+          "binding_sha256": "a65b195b13577ced5bfbffe3648c25d954e6286af90bdf72679eb9dfabd24106",
+          "trace_binary_path": "workloads/portable_lcd/gemm_sparse_2to4_bf16_sm80/gemm_sparse_2to4_bf16_sm80_run",
+          "trace_binary_sha256": "abf792ec7d7e7042ca4a4c21ae611577b50b94fad5c1a6ee534b45b13a22e254",
+          "observed": {
+            "accepted_launches": 1,
+            "trace_blocks": 128,
+            "trace_thread_instructions": 46976,
+            "trace_payload_records": 46976,
+            "dynamic_trace_sha256": "bfcccfa62fde738d509ba42490b3b6093416b5df543a1d0825b62ac4c76a4853"
+          },
+          "environment_record": "evidence/raw/nvbit/gemm_sparse_2to4_bf16_sm80/environment.json",
+          "environment_sha256": "4d0f58803872a2a9b15704d4875ec0d6417483f91bc79d4d685cbc398d801205"
+        },
+        "static_control": {
+          "argv": [
+            ".venv/bin/python",
+            "tools/sass_control/emit_control_bits_sidecar.py",
+            "--binary",
+            "workloads/portable_lcd/gemm_sparse_2to4_bf16_sm80/gemm_sparse_2to4_bf16_sm80_run",
+            "--arch",
+            "sm_86",
+            "--out",
+            "evidence/raw/static/gemm_sparse_2to4_bf16_sm80/gemm_sparse_2to4_bf16_sm80.control_bits.json",
+            "--toolkit-bindir",
+            "/usr/local/cuda-13.2/bin"
+          ],
+          "binary_path": "workloads/portable_lcd/gemm_sparse_2to4_bf16_sm80/gemm_sparse_2to4_bf16_sm80_run",
+          "binary_sha256": "abf792ec7d7e7042ca4a4c21ae611577b50b94fad5c1a6ee534b45b13a22e254",
+          "cuobjdump_argv": [
+            "/usr/local/cuda-13.2/bin/cuobjdump",
+            "--dump-sass",
+            "workloads/portable_lcd/gemm_sparse_2to4_bf16_sm80/gemm_sparse_2to4_bf16_sm80_run"
+          ],
+          "exit_code": 0,
+          "control": "evidence/raw/static/gemm_sparse_2to4_bf16_sm80/gemm_sparse_2to4_bf16_sm80.control_bits.json",
+          "control_sha256": "af453066612c025e372027f05d93f8755ce9965e34632002dba48fe8678f9e4b",
+          "decoded_instructions": 200
+        },
+        "simulator": {
+          "argv": [
+            "sim/target/release/sim-run",
+            "--trace",
+            "results/captures/sm86_simulator_live_baseline_20260829_v2/evidence/raw/nvbit/gemm_sparse_2to4_bf16_sm80",
+            "--control",
+            "results/captures/sm86_simulator_live_baseline_20260829_v2/evidence/raw/static/gemm_sparse_2to4_bf16_sm80/gemm_sparse_2to4_bf16_sm80.control_bits.json",
+            "--arch-card",
+            "arch_profiles/cards/sm_86.json",
+            "--pchase-card",
+            "data/pchase/sm_86_static_card.json",
+            "--mode",
+            "l1-l2"
+          ],
+          "binary_path": "sim/target/release/sim-run",
+          "binary_sha256": "6cb0d05f0d447c0cd6ee2e30353c0f1e89d464462458912478c826860f15f9a4",
+          "replay_binding": "evidence/raw/simulator/gemm_sparse_2to4_bf16_sm80/replay_binding.json",
+          "replay_binding_sha256": "f8c386290960489b99da9c8bc3fce727282ef07f30796260e3b91b69ad30da41",
+          "exit_code": 0,
+          "outputs": [
+            "evidence/raw/simulator/gemm_sparse_2to4_bf16_sm80/replay-1.json",
+            "evidence/raw/simulator/gemm_sparse_2to4_bf16_sm80/replay-2.json"
+          ],
+          "observed": {
+            "instructions_issued": 19968,
+            "records_seen": 19968,
+            "terminal_modeled_event_time": 2375,
+            "completion": "incomplete_unmodeled_retirement_tails",
+            "deterministic_twin": true
+          }
+        }
+      },
+      "limitations": [
+        "NCU SM-active is a measured target; simulator terminal time is a lower bound with dirty_writeback/coherence tails."
+      ]
     },
     {
       "id": "flash_attn_fwd_bf16_sm80",
       "workload": "flash_attn_fwd_bf16_sm80",
       "architecture": "sm_86",
-      "expected_grid": [4, 4, 1],
-      "expected_block": [32, 1, 1],
-      "binary": {"path": "workloads/portable_lcd/flash_attn_fwd_bf16_sm80/flash_attn_fwd_bf16_sm80_run", "sha256": "a272cde4fe06763638021de9cee4bea0ee39c52ee3511bce3abdec01b56f5fe1"},
-      "stages": {
-        "correctness": {"argv": ["workloads/portable_lcd/flash_attn_fwd_bf16_sm80/flash_attn_fwd_bf16_sm80_run", "--correctness_shape", "--seed", "42", "--warmup", "1", "--reps", "1", "--output_dir", "results/captures/sm86_simulator_live_baseline_20260829_v2/evidence/raw/correctness/flash_attn_fwd_bf16_sm80"], "exit_code": 0, "stdout": "evidence/raw/correctness/flash_attn_fwd_bf16_sm80/stdout.txt", "stderr": "evidence/raw/correctness/flash_attn_fwd_bf16_sm80/stderr.txt", "stdout_sha256": "f73c6920c3c52e2a1e87ac68702fc161d8b81045b9cbeede9604110bd77a87f9", "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", "environment": {"mode": "clean_base_binary", "record": "evidence/raw/correctness/flash_attn_fwd_bf16_sm80/environment.json", "record_sha256": "504dda321059f9e9c93b01eb490f3d0dd072765df6d7cacd5354c505bdb3d950"}, "manifest": "evidence/raw/correctness/flash_attn_fwd_bf16_sm80/flash_attn_fwd_bf16_sm80/manifest.json", "observed": {"correctness_ok": true, "max_abs_err": 0.000353724}},
-        "ncu": {"argv": [".venv/bin/python", "tools/local_labels/collect_ncu.py", "--ncu", "/usr/local/cuda-13.2/nsight-compute-2026.1.0/ncu", "--output", "evidence/raw/ncu/flash_attn_fwd_bf16_sm80", "--metrics", "gpc__cycles_elapsed.max,sm__cycles_active.max,smsp__inst_executed.sum,lts__t_sectors_srcunit_tex_op_read.sum,dram__sectors_read.sum,sm__pipe_tensor_cycles_active.sum", "--launch-skip", "1", "--launch-count", "1", "--replay-mode", "application", "--clock-control", "none", "--", "workloads/portable_lcd/flash_attn_fwd_bf16_sm80/flash_attn_fwd_bf16_sm80_run", "--timing_shape", "--warmup", "1", "--reps", "1"], "tool_path": "/usr/local/cuda-13.2/nsight-compute-2026.1.0/ncu", "exit_code": 0, "output": "evidence/raw/ncu/flash_attn_fwd_bf16_sm80", "csv": "evidence/raw/ncu/flash_attn_fwd_bf16_sm80/ncu.csv", "observed": {"gpc__cycles_elapsed.max": 15951, "sm__cycles_active.max": 14320, "smsp__inst_executed.sum": 39568, "lts__t_sectors_srcunit_tex_op_read.sum": 4352, "dram__sectors_read.sum": 1596, "sm__pipe_tensor_cycles_active.sum": 8192}, "metadata": "evidence/raw/ncu/flash_attn_fwd_bf16_sm80/metadata.json", "metadata_sha256": "f43f1b0dc9873ce69bd64b5a72671da4ac9cf36bedb7176fc6071f729d76c3b1", "command_file": "evidence/raw/ncu/flash_attn_fwd_bf16_sm80/command.txt", "command_file_sha256": "51f9c4f73cb7779349546189b683895015bc1ef0f31f7950c452523e2e44f4b5", "export_command_file": "evidence/raw/ncu/flash_attn_fwd_bf16_sm80/export_command.txt", "export_command_file_sha256": "2f85ee90bea992729027a80613ae91f64926f5cef8c817122febda49f0c33b50"},
-        "nvbit": {"env": {"LD_LIBRARY_PATH": ".toolchain/pb/lib", "CUDA_INJECTION64_PATH": "tools/nvbit_tracer/tracer_tool/tracer_tool.so", "USER_DEFINED_FOLDERS": "1", "TRACES_FOLDER": "evidence/raw/nvbit/flash_attn_fwd_bf16_sm80", "ACTIVE_FROM_START": "1", "DYNAMIC_KERNEL_LIMIT_START": "0", "DYNAMIC_KERNEL_LIMIT_END": "1", "SKIP_ENHANCED_TRACER": "0", "ENHANCED_TRACER_MAX_PARSER_INPUT_KB": "256", "ENHANCED_TRACER_PER_CUBIN_TIMEOUT_S": "45"}, "tracer_sha256": "dda89ee6857058b3f6dc2a01d73a2dc926b876d8e343b7457c779efd82fed007", "argv": ["workloads/portable_lcd/flash_attn_fwd_bf16_sm80/flash_attn_fwd_bf16_sm80_run", "--timing_shape", "--warmup", "0", "--reps", "1"], "exit_code": 0, "output": "evidence/raw/nvbit/flash_attn_fwd_bf16_sm80", "stats": "evidence/raw/nvbit/flash_attn_fwd_bf16_sm80/stats.csv", "mapping": "evidence/raw/nvbit/flash_attn_fwd_bf16_sm80/extra_info/traced_kernel_modules.json", "binding": "evidence/raw/nvbit/flash_attn_fwd_bf16_sm80/campaign_binding.json", "binding_sha256": "e09906d65b5df589767e31042bcbdb3724614f248204c590d4ef9619315e3772", "trace_binary_path": "workloads/portable_lcd/flash_attn_fwd_bf16_sm80/flash_attn_fwd_bf16_sm80_run", "trace_binary_sha256": "a272cde4fe06763638021de9cee4bea0ee39c52ee3511bce3abdec01b56f5fe1", "observed": {"accepted_launches": 1, "trace_blocks": 16, "trace_thread_instructions": 109616, "trace_payload_records": 109616, "dynamic_trace_sha256": "3a0bc59d94102b2d629c4a624e11279fbd2bb76805ffb063c8a4b1b7f2174956"}},
-        "static_control": {"argv": [".venv/bin/python", "tools/sass_control/emit_control_bits_sidecar.py", "--binary", "workloads/portable_lcd/flash_attn_fwd_bf16_sm80/flash_attn_fwd_bf16_sm80_run", "--arch", "sm_86", "--out", "evidence/raw/static/flash_attn_fwd_bf16_sm80/flash_attn_fwd_bf16_sm80.control_bits.json", "--toolkit-bindir", "/usr/local/cuda-13.2/bin"], "binary_path": "workloads/portable_lcd/flash_attn_fwd_bf16_sm80/flash_attn_fwd_bf16_sm80_run", "binary_sha256": "a272cde4fe06763638021de9cee4bea0ee39c52ee3511bce3abdec01b56f5fe1", "cuobjdump_argv": ["/usr/local/cuda-13.2/bin/cuobjdump", "--dump-sass", "workloads/portable_lcd/flash_attn_fwd_bf16_sm80/flash_attn_fwd_bf16_sm80_run"], "exit_code": 0, "control": "evidence/raw/static/flash_attn_fwd_bf16_sm80/flash_attn_fwd_bf16_sm80.control_bits.json", "control_sha256": "4338d595723d3ac8d5e69d2db8e446f07a300008c66d495e1c80048ee53314bb", "decoded_instructions": 480},
-        "simulator": {"argv": ["sim/target/release/sim-run", "--trace", "results/captures/sm86_simulator_live_baseline_20260829_v2/evidence/raw/nvbit/flash_attn_fwd_bf16_sm80", "--control", "results/captures/sm86_simulator_live_baseline_20260829_v2/evidence/raw/static/flash_attn_fwd_bf16_sm80/flash_attn_fwd_bf16_sm80.control_bits.json", "--arch-card", "arch_profiles/cards/sm_86.json", "--pchase-card", "data/pchase/sm_86_static_card.json", "--mode", "l1-l2"], "binary_path": "sim/target/release/sim-run", "binary_sha256": "6cb0d05f0d447c0cd6ee2e30353c0f1e89d464462458912478c826860f15f9a4", "replay_binding": "evidence/raw/simulator/flash_attn_fwd_bf16_sm80/replay_binding.json", "replay_binding_sha256": "e5c6b3efc214ba4b65d6aafe0b2733163db7b77d002e02509b1b5d593573bcd9", "exit_code": 0, "outputs": ["evidence/raw/simulator/flash_attn_fwd_bf16_sm80/replay-1.json", "evidence/raw/simulator/flash_attn_fwd_bf16_sm80/replay-2.json"], "observed": {"instructions_issued": 39568, "records_seen": 39568, "terminal_modeled_event_time": 12551, "completion": "incomplete_unmodeled_retirement_tails", "deterministic_twin": true}}
+      "expected_grid": [
+        4,
+        4,
+        1
+      ],
+      "expected_block": [
+        32,
+        1,
+        1
+      ],
+      "binary": {
+        "path": "workloads/portable_lcd/flash_attn_fwd_bf16_sm80/flash_attn_fwd_bf16_sm80_run",
+        "sha256": "a272cde4fe06763638021de9cee4bea0ee39c52ee3511bce3abdec01b56f5fe1"
       },
-      "limitations": ["NCU SM-active is a measured target; simulator terminal time is a lower bound with dirty_writeback/coherence tails."]
+      "stages": {
+        "correctness": {
+          "argv": [
+            "workloads/portable_lcd/flash_attn_fwd_bf16_sm80/flash_attn_fwd_bf16_sm80_run",
+            "--correctness_shape",
+            "--seed",
+            "42",
+            "--warmup",
+            "1",
+            "--reps",
+            "1",
+            "--output_dir",
+            "results/captures/sm86_simulator_live_baseline_20260829_v2/evidence/raw/correctness/flash_attn_fwd_bf16_sm80"
+          ],
+          "exit_code": 0,
+          "stdout": "evidence/raw/correctness/flash_attn_fwd_bf16_sm80/stdout.txt",
+          "stderr": "evidence/raw/correctness/flash_attn_fwd_bf16_sm80/stderr.txt",
+          "stdout_sha256": "f73c6920c3c52e2a1e87ac68702fc161d8b81045b9cbeede9604110bd77a87f9",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "environment": {
+            "mode": "clean_base_binary",
+            "record": "evidence/raw/correctness/flash_attn_fwd_bf16_sm80/environment.json",
+            "record_sha256": "504dda321059f9e9c93b01eb490f3d0dd072765df6d7cacd5354c505bdb3d950"
+          },
+          "manifest": "evidence/raw/correctness/flash_attn_fwd_bf16_sm80/flash_attn_fwd_bf16_sm80/manifest.json",
+          "observed": {
+            "correctness_ok": true,
+            "max_abs_err": 0.000353724
+          }
+        },
+        "ncu": {
+          "argv": [
+            ".venv/bin/python",
+            "tools/local_labels/collect_ncu.py",
+            "--ncu",
+            "/usr/local/cuda-13.2/nsight-compute-2026.1.0/ncu",
+            "--timeout",
+            "900",
+            "--output",
+            "evidence/raw/ncu/flash_attn_fwd_bf16_sm80",
+            "--metrics",
+            "gpc__cycles_elapsed.max,sm__cycles_active.max,smsp__inst_executed.sum,lts__t_sectors_srcunit_tex_op_read.sum,dram__sectors_read.sum,sm__pipe_tensor_cycles_active.sum",
+            "--launch-skip",
+            "1",
+            "--launch-count",
+            "1",
+            "--replay-mode",
+            "application",
+            "--clock-control",
+            "none",
+            "--",
+            "workloads/portable_lcd/flash_attn_fwd_bf16_sm80/flash_attn_fwd_bf16_sm80_run",
+            "--timing_shape",
+            "--warmup",
+            "1",
+            "--reps",
+            "1"
+          ],
+          "tool_path": "/usr/local/cuda-13.2/nsight-compute-2026.1.0/ncu",
+          "exit_code": 0,
+          "output": "evidence/raw/ncu/flash_attn_fwd_bf16_sm80",
+          "csv": "evidence/raw/ncu/flash_attn_fwd_bf16_sm80/ncu.csv",
+          "observed": {
+            "gpc__cycles_elapsed.max": 15836,
+            "sm__cycles_active.max": 14198,
+            "smsp__inst_executed.sum": 39568,
+            "lts__t_sectors_srcunit_tex_op_read.sum": 4352,
+            "dram__sectors_read.sum": 1596,
+            "sm__pipe_tensor_cycles_active.sum": 8192
+          },
+          "metadata": "evidence/raw/ncu/flash_attn_fwd_bf16_sm80/metadata.json",
+          "metadata_sha256": "2763634da90f85c3b7909eff8beaccad64ea10a147755d6898784d159ee5547a",
+          "command_file": "evidence/raw/ncu/flash_attn_fwd_bf16_sm80/command.txt",
+          "command_file_sha256": "51f9c4f73cb7779349546189b683895015bc1ef0f31f7950c452523e2e44f4b5",
+          "export_command_file": "evidence/raw/ncu/flash_attn_fwd_bf16_sm80/export_command.txt",
+          "export_command_file_sha256": "2f85ee90bea992729027a80613ae91f64926f5cef8c817122febda49f0c33b50",
+          "report": "evidence/raw/ncu/flash_attn_fwd_bf16_sm80/ncu-report.ncu-rep",
+          "report_sha256": "7454c75f25054b7ddca7636e62285e8fb601fa97a75ef5dcf3ae47dfbd704ccb",
+          "csv_sha256": "0fb5812e3a557a4225bf7143c74785101bf6c7b11a0edc5a1bc97db2ae3d104f"
+        },
+        "nvbit": {
+          "env": {
+            "HOME": "/home/jakeshea",
+            "LANG": "C",
+            "LC_ALL": "C",
+            "PATH": "/usr/local/cuda-13.2/bin:/opt/cuda/bin:/usr/bin:/bin",
+            "LD_LIBRARY_PATH": ".toolchain/pb/lib",
+            "CUDA_INJECTION64_PATH": "tools/nvbit_tracer/tracer_tool/tracer_tool.so",
+            "USER_DEFINED_FOLDERS": "1",
+            "TRACES_FOLDER": "/home/jakeshea/GPU_simulator_rebase/results/captures/sm86_simulator_live_baseline_20260829_v2/evidence/raw/nvbit/flash_attn_fwd_bf16_sm80",
+            "ACTIVE_FROM_START": "1",
+            "SKIP_ENHANCED_TRACER": "0",
+            "DYNAMIC_KERNEL_LIMIT_START": "0",
+            "DYNAMIC_KERNEL_LIMIT_END": "1",
+            "ENHANCED_TRACER_MAX_PARSER_INPUT_KB": "256",
+            "ENHANCED_TRACER_PER_CUBIN_TIMEOUT_S": "45"
+          },
+          "tracer_sha256": "dda89ee6857058b3f6dc2a01d73a2dc926b876d8e343b7457c779efd82fed007",
+          "argv": [
+            "workloads/portable_lcd/flash_attn_fwd_bf16_sm80/flash_attn_fwd_bf16_sm80_run",
+            "--timing_shape",
+            "--warmup",
+            "0",
+            "--reps",
+            "1"
+          ],
+          "exit_code": 0,
+          "output": "evidence/raw/nvbit/flash_attn_fwd_bf16_sm80",
+          "stats": "evidence/raw/nvbit/flash_attn_fwd_bf16_sm80/stats.csv",
+          "mapping": "evidence/raw/nvbit/flash_attn_fwd_bf16_sm80/extra_info/traced_kernel_modules.json",
+          "binding": "evidence/raw/nvbit/flash_attn_fwd_bf16_sm80/campaign_binding.json",
+          "binding_sha256": "1985456c75f07c0121a04a6ce6bf637c5ddbeb99f9ee7fb8a73921cf8d518013",
+          "trace_binary_path": "workloads/portable_lcd/flash_attn_fwd_bf16_sm80/flash_attn_fwd_bf16_sm80_run",
+          "trace_binary_sha256": "a272cde4fe06763638021de9cee4bea0ee39c52ee3511bce3abdec01b56f5fe1",
+          "observed": {
+            "accepted_launches": 1,
+            "trace_blocks": 16,
+            "trace_thread_instructions": 109616,
+            "trace_payload_records": 109616,
+            "dynamic_trace_sha256": "6c7d939c2789556b172cc2c3bff065dbbbb3ea179d80b19fc5c36e06963bb3bc"
+          },
+          "environment_record": "evidence/raw/nvbit/flash_attn_fwd_bf16_sm80/environment.json",
+          "environment_sha256": "c98fcf5e6a03016aa3136526688dc9f3b92e1348b57b35af17b61600c40975a4"
+        },
+        "static_control": {
+          "argv": [
+            ".venv/bin/python",
+            "tools/sass_control/emit_control_bits_sidecar.py",
+            "--binary",
+            "workloads/portable_lcd/flash_attn_fwd_bf16_sm80/flash_attn_fwd_bf16_sm80_run",
+            "--arch",
+            "sm_86",
+            "--out",
+            "evidence/raw/static/flash_attn_fwd_bf16_sm80/flash_attn_fwd_bf16_sm80.control_bits.json",
+            "--toolkit-bindir",
+            "/usr/local/cuda-13.2/bin"
+          ],
+          "binary_path": "workloads/portable_lcd/flash_attn_fwd_bf16_sm80/flash_attn_fwd_bf16_sm80_run",
+          "binary_sha256": "a272cde4fe06763638021de9cee4bea0ee39c52ee3511bce3abdec01b56f5fe1",
+          "cuobjdump_argv": [
+            "/usr/local/cuda-13.2/bin/cuobjdump",
+            "--dump-sass",
+            "workloads/portable_lcd/flash_attn_fwd_bf16_sm80/flash_attn_fwd_bf16_sm80_run"
+          ],
+          "exit_code": 0,
+          "control": "evidence/raw/static/flash_attn_fwd_bf16_sm80/flash_attn_fwd_bf16_sm80.control_bits.json",
+          "control_sha256": "4338d595723d3ac8d5e69d2db8e446f07a300008c66d495e1c80048ee53314bb",
+          "decoded_instructions": 480
+        },
+        "simulator": {
+          "argv": [
+            "sim/target/release/sim-run",
+            "--trace",
+            "results/captures/sm86_simulator_live_baseline_20260829_v2/evidence/raw/nvbit/flash_attn_fwd_bf16_sm80",
+            "--control",
+            "results/captures/sm86_simulator_live_baseline_20260829_v2/evidence/raw/static/flash_attn_fwd_bf16_sm80/flash_attn_fwd_bf16_sm80.control_bits.json",
+            "--arch-card",
+            "arch_profiles/cards/sm_86.json",
+            "--pchase-card",
+            "data/pchase/sm_86_static_card.json",
+            "--mode",
+            "l1-l2"
+          ],
+          "binary_path": "sim/target/release/sim-run",
+          "binary_sha256": "6cb0d05f0d447c0cd6ee2e30353c0f1e89d464462458912478c826860f15f9a4",
+          "replay_binding": "evidence/raw/simulator/flash_attn_fwd_bf16_sm80/replay_binding.json",
+          "replay_binding_sha256": "ba581f03bdf99d8d2b27c43e78a1432dd3cfb2a8577edfa14e6067bf5586d835",
+          "exit_code": 0,
+          "outputs": [
+            "evidence/raw/simulator/flash_attn_fwd_bf16_sm80/replay-1.json",
+            "evidence/raw/simulator/flash_attn_fwd_bf16_sm80/replay-2.json"
+          ],
+          "observed": {
+            "instructions_issued": 39568,
+            "records_seen": 39568,
+            "terminal_modeled_event_time": 12551,
+            "completion": "incomplete_unmodeled_retirement_tails",
+            "deterministic_twin": true
+          }
+        }
+      },
+      "limitations": [
+        "NCU SM-active is a measured target; simulator terminal time is a lower bound with dirty_writeback/coherence tails."
+      ]
     }
   ],
   "retained_replay_refresh": {
-    "validator_argv": [".venv/bin/python", "workloads/research_probes/validate_active_replay_pairs.py"],
+    "validator_argv": [
+      ".venv/bin/python",
+      "workloads/research_probes/validate_active_replay_pairs.py"
+    ],
     "validator_exit_code": 0,
     "active_pair_count": 5519,
     "known_supplemental_directory_count": 2070,
     "result": "validated 5519 fresh, schema-matched, byte-identical replay pairs",
-    "semantic_validator_argv": [".venv/bin/python", "workloads/research_probes/validate_active_replay_pairs.py", "--semantic-report", "results/captures/sm86_simulator_live_baseline_20260829_v2/semantic_replay_report.json"],
+    "semantic_validator_argv": [
+      ".venv/bin/python",
+      "workloads/research_probes/validate_active_replay_pairs.py",
+      "--semantic-report",
+      "results/captures/sm86_simulator_live_baseline_20260829_v2/semantic_replay_report.json"
+    ],
     "semantic_validator_exit_code": 0,
     "semantic_report": "results/captures/sm86_simulator_live_baseline_20260829_v2/semantic_replay_report.json.zst",
     "semantic_report_sha256": "cff576c7ae816553af1e3453e146a312fd325b74a01769a1f28f9d749679ed7a",
     "semantic_report_rows": 7765,
     "validator_timeout_seconds": 1800,
     "fresh_cohort_validator": {
-      "argv": [".venv/bin/python", "workloads/research_probes/validate_sm86_live_cohort.py", "--manifest", "results/captures/sm86_simulator_live_baseline_20260829_v2/campaign_manifest.json", "--report", "results/captures/sm86_simulator_live_baseline_20260829_v2/live_cohort_semantic_report.json"],
+      "argv": [
+        ".venv/bin/python",
+        "workloads/research_probes/validate_sm86_live_cohort.py",
+        "--manifest",
+        "results/captures/sm86_simulator_live_baseline_20260829_v2/campaign_manifest.json",
+        "--report",
+        "results/captures/sm86_simulator_live_baseline_20260829_v2/live_cohort_semantic_report.json"
+      ],
       "timeout_seconds": 600,
       "exit_code": 0,
       "report": "results/captures/sm86_simulator_live_baseline_20260829_v2/live_cohort_semantic_report.json",
@@ -304,11 +1453,18 @@
     }
   },
   "closure_analysis": {
-    "argv": [".venv/bin/python", "workloads/research_probes/analyze_sm86_live_closure.py", "--manifest", "results/captures/sm86_simulator_live_baseline_20260829_v2/campaign_manifest.json", "--output", "results/captures/sm86_simulator_live_baseline_20260829_v2/closure_report.json"],
+    "argv": [
+      ".venv/bin/python",
+      "workloads/research_probes/analyze_sm86_live_closure.py",
+      "--manifest",
+      "results/captures/sm86_simulator_live_baseline_20260829_v2/campaign_manifest.json",
+      "--output",
+      "results/captures/sm86_simulator_live_baseline_20260829_v2/closure_report.json"
+    ],
     "timeout_seconds": 180,
     "exit_code": 0,
     "report": "closure_report.json",
-      "report_sha256": "435e487c6b572468f4e4f40a32e23e0e197a124e035732ba7c3f375960b311db",
+    "report_sha256": "9c1255cbc2ca5ebf7bc1ac72804025b8a395d47fcca1acdbd11282e39891e686",
     "live_repeat_root": "evidence/raw/ncu_repeat/rep-2",
     "live_repeat_count_per_cell": 1,
     "simulator_twin_policy": "byte-identical replay-1/replay-2"
@@ -318,12 +1474,26 @@
     "seam": "completion/retirement frontier mapping",
     "mechanism": "The measured SM-active/GPC envelopes include launch and dirty-writeback/coherence retirement behavior that the typed event frontier does not model; async/barrier readiness is observable but not uniquely separable from those tails.",
     "next_discriminator": "A matched store-free/barrier-free async-source pair with an independent retirement observable.",
-    "next_discriminator_manifest": {"path": "plans/sm86_ldgsts_burst_release_next_discriminator.json", "sha256": "0457578507997d732a98a6f5b85be1ce3a7af21fdc58ffea610abd58be95b008"},
-    "claim_limits": ["No cycle-accuracy claim", "No NCU leakage into simulator inputs", "No cross-architecture inference", "No JADE/HETR or CPU-GPU co-simulation change"],
+    "next_discriminator_manifest": {
+      "path": "plans/sm86_ldgsts_burst_release_next_discriminator.json",
+      "sha256": "0457578507997d732a98a6f5b85be1ce3a7af21fdc58ffea610abd58be95b008"
+    },
+    "claim_limits": [
+      "No cycle-accuracy claim",
+      "No NCU leakage into simulator inputs",
+      "No cross-architecture inference",
+      "No JADE/HETR or CPU-GPU co-simulation change"
+    ],
     "selection_rule": "mechanism_local_typed_tail_precedence",
     "frontiers_remain_independent": true,
     "aggregate_score_used": false,
-    "acceptance_criteria": {"AC-1": "pass", "AC-2": "pass", "AC-3": "pass", "AC-4": "pass", "AC-5": "pass"}
+    "acceptance_criteria": {
+      "AC-1": "pass",
+      "AC-2": "pass",
+      "AC-3": "pass",
+      "AC-4": "pass",
+      "AC-5": "pass"
+    }
   },
   "scope": {
     "ncu_values_used_as_simulator_inputs": false,

@@ -18,8 +18,8 @@
   "live_cohort_semantic_report": "results/captures/sm86_simulator_live_baseline_20260829_v2/live_cohort_semantic_report.json",
   "live_cohort_semantic_report_sha256": "f90f01bac77264e6ff21c0c2b58489209900bf9cef3060ec3e2fca1afcefa569",
   "closure_report": "results/captures/sm86_simulator_live_baseline_20260829_v2/closure_report.json",
-  "closure_report_sha256": "435e487c6b572468f4e4f40a32e23e0e197a124e035732ba7c3f375960b311db",
-  "raw_evidence_archive_sha256": "196d36d4910cd4f5530ef48557d52fd00a8c05cc160bfa35117e72665a266a57",
+  "closure_report_sha256": "9c1255cbc2ca5ebf7bc1ac72804025b8a395d47fcca1acdbd11282e39891e686",
+  "raw_evidence_archive_sha256": "36d8dffe2201bd13e19553cc991b22c3aac92f1dd396bfaee7f70e82c8640d78",
   "architecture": "sm_86",
   "gpu": "NVIDIA GeForce RTX 3090 Ti",
   "driver": "610.57.04",
@@ -35,20 +35,23 @@
     "profiler_injection_variables_present": false,
     "environment_records": "evidence/raw/correctness/<cell>/environment.json",
     "async_correctness_groups": 16384,
-    "async_nvbit_trace_groups": 64
+    "async_nvbit_trace_groups": 64,
+    "async_matched_ncu_groups": 64,
+    "async_scaling_observation_ncu_groups": 16384
   },
   "cohort": [
     {
       "name": "cp.async canary",
       "workload": "async_barrier_overlap",
-      "arguments": "c11 l1 0 4 1/3",
+      "arguments": "matched stages (64 groups): c11 l1 0 4 1; separate 16,384-group correctness/NCU scaling observation: c11 l1 0 4 3",
       "trace_activation": "profiler-marked ACTIVE_FROM_START=0",
       "trace_groups": 64,
       "trace_thread_instructions": 26760,
       "sim_instructions": 9104,
-      "ncu_gpc_cycles": 4460035,
-      "ncu_sm_active_cycles": 4458395,
-      "ncu_global_load_request_sectors": 8388608,
+      "ncu_gpc_cycles": 20973,
+      "ncu_sm_active_cycles": 19369,
+      "ncu_smsp_instructions": 9104,
+      "ncu_global_load_request_sectors": 32768,
       "ncu_global_store_request_sectors": 72,
       "ncu_traffic_metrics": [
         "l1tex__t_sectors_pipe_lsu_mem_global_op_ld.sum",
@@ -155,6 +158,7 @@
     "portable_ncu_smsp_equals_sim_instructions": true,
     "all_portable_traces_full_coverage": true,
     "all_portable_trace_launches_exactly_one": true,
+    "cp_async_matched_across_ncu_nvbit_static_simulator": true,
     "ncu_values_used_as_simulator_inputs": false,
     "jade_or_cpu_gpu_cosim_changed": false,
     "sm120_changed": false
@@ -186,6 +190,8 @@
     "selection_dimensions": ["sm_completion_gap_cycles", "gpc_completion_gap_cycles", "gpc_launch_envelope_cycles"],
     "selection_record": "closure_report.json",
     "selection_rule": "mechanism_local_typed_tail_precedence",
+    "matched_comparable_rows": 6,
+    "retirement_tail_rows": 6,
     "frontiers_remain_independent": true,
     "aggregate_score_used": false,
     "acceptance_criteria": {"AC-1": "pass", "AC-2": "pass", "AC-3": "pass", "AC-4": "pass", "AC-5": "pass"}

@@ -33,7 +33,7 @@
     },
     "trace": {
       "path": "evidence/raw/nvbit/flash_attn_fwd_bf16_sm80",
-      "sha256": "e12125054e4a29675b24d13e37cad20274ed3f5188539e784b25597dfb02d684"
+      "sha256": "2f36112dc52ec141527ff935ea46a369d4aba5d8bf68424165d0fb9bfbd927f2"
     }
   },
   "outputs": [
