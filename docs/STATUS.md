@@ -77,8 +77,19 @@ retirement tails; the matched `.cg`/DRAM traces retain only the existing
 `async_copy_shared_visibility` lower-bound flag, and the live/simulated
 frontiers do not support applying the cache-all destination service rule to
 bypass copies. This is a second no-go for a timing patch, not a reason to fit a
-constant. The next GPU-only action is a route-controlled bypass-destination
-visibility witness with fixed clocks and an independent delivery observable.
+constant.
+
+That route-controlled witness is now complete in
+[the destination-visibility report](sm86_async_source_visibility_milestone.md).
+Its fixed-source compact/conflict pair preserves exact LDGSTS instruction,
+source-sector, and L1 hit/miss counts across five repeats. The existing L1
+destination model transfers within 1.01% on both depth 4 and held-out depth 8;
+bypass has repeat-positive live deltas of 1,737 and 2,917 cycles while current
+replays correctly remain identical behind the typed visibility tail. Since
+whole-kernel active time cannot assign that delta to issue replay versus
+post-source delivery, no bypass timing was promoted. The next GPU-only action
+is a three-frontier issue/post-issue/post-wait clock assay on the same layout
+pair.
 
 The 2026-08-17
 [causal-readiness milestone](sm86_causal_readiness_milestone.md) is complete.

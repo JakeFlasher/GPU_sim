@@ -18,22 +18,24 @@ out of this milestone until the documented Ampere transition criterion is met.
 
 ## Current closure state (2026-08-30)
 
-The retained six-workload baseline and the follow-on LDGSTS discriminator both
-remain non-promoting. The LDGSTS run found a flat zero-gap issue frontier and a
-missing independent LDG knee; its strict admission is closed. A smaller
-marker-scoped store-free async-source slice then supplied the next useful
-simulator check: L1 (`.ca`) traces complete without dirty-writeback, coherence,
-or async-visibility tails, while `.cg`/DRAM traces retain only the existing
-typed `async_copy_shared_visibility` lower bound. The live/simulated depth-4/8
-frontiers do not justify applying the cache-all destination service rule to
-bypass copies. The detailed result is
-[`docs/sm86_async_source_only_milestone.md`](../docs/sm86_async_source_only_milestone.md).
+The retained six-workload baseline and the follow-on LDGSTS burst assay remain
+non-promoting. The smaller store-free async-source slice first removed global
+store/barrier tails. Its route-controlled destination-layout successor now
+holds source addresses and traffic exact while changing only shared topology.
+Across depth 4 and held-out depth 8, the cache-all model predicts the live
+layout delta within 1.01%; bypass shows a repeat-positive 4.58%/6.39% live
+effect while current replays remain layout-identical behind the typed
+`async_copy_shared_visibility` boundary. The detailed records are
+[`docs/sm86_async_source_only_milestone.md`](../docs/sm86_async_source_only_milestone.md)
+and
+[`docs/sm86_async_source_visibility_milestone.md`](../docs/sm86_async_source_visibility_milestone.md).
 
-The next GPU-only discriminator is therefore a route-controlled bypass
-destination/visibility witness with fixed clocks and an independent delivery
-observable. Until that evidence exists, keep the current typed lower-bound
-behavior and do not add a bypass timing constant or alter the scored simulator
-defaults.
+The bypass effect is real but whole-kernel active time does not separate
+LDGSTS issue replay from coupled delivery or post-source shared visibility.
+The next GPU-only discriminator is a pre-issue/post-issue/post-wait clock split
+on the fixed-source layout pair. Until that mechanism-local frontier exists,
+keep the typed lower bound and do not add a bypass timing constant or alter the
+scored simulator defaults.
 
 ## Acceptance Criteria
 

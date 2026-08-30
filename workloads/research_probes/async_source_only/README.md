@@ -1,12 +1,19 @@
-# Store-free async-source probe
+# Store-free async-source and destination-layout probe
 
-This small SM86 probe is the next discriminator for the simulator's typed
-retirement tails. Its target kernel is one warp with fixed-depth
-`cp.async.ca` (L1) or `cp.async.cg` (streaming/DRAM) positions, one
-`commit_group`/`wait_group 0`, volatile shared reads, and no target-kernel
-global store or CTA barrier. Host source initialization is outside the
-profiler markers. The empty inline asm at kernel end keeps the clock/token
-live without creating a result store.
+This SM86 probe isolates asynchronous global-to-shared copy behavior without
+a target-kernel global store or CTA barrier. The current visibility pair keeps
+one 32-thread warp, source addresses, source work, 32 KiB shared allocation,
+registers, and static instruction shape fixed. `--layout compact` uses a
+32-byte shared lane stride; `--layout conflict` uses 64 bytes. Both use a
+4 KiB destination-position stride. The sparse but identical 32-byte source
+lane stride makes source-sector work equal while the destination wavefront
+topology changes.
+
+Each loop group issues fixed-depth `cp.async.ca` (L1) or `cp.async.cg`
+(bypass/DRAM) positions, commits, executes `wait_group 0`, and performs the
+same warp-uniform shared broadcast. Host source initialization is outside the
+profiler markers. The empty inline asm at kernel end keeps clocks/token live
+without adding a result store.
 
 Build and run a bounded marker-scoped smoke:
 
@@ -14,17 +21,29 @@ Build and run a bounded marker-scoped smoke:
 make -C workloads/research_probes/async_source_only clean all
 CUDA_VISIBLE_DEVICES=0 \
   workloads/research_probes/async_source_only/async_source_only \
-  --groups 64 --depth 4 --route l1 --markers on
+  --groups 64 --depth 4 --route l1 --layout compact --markers on
+CUDA_VISIBLE_DEVICES=0 \
+  workloads/research_probes/async_source_only/async_source_only \
+  --groups 64 --depth 4 --route l1 --layout conflict --markers on
 ```
 
-For an NVBit capture, use the shared `capture_nvbit.py` helper (the capture is a pipeline
-smoke, not a replacement for the frozen LDGSTS matrix). NCU values remain
-comparison-only; the only simulator inputs are the complete NVBit trace, its
-static control sidecar, and the SM86 cards. A clean result can remove the
-global-store/coherence confound from the simulator comparison, but it cannot
-prove a physical queue release event or justify a timing constant by itself.
+For an NVBit capture, use the shared `capture_nvbit.py` helper. NCU values
+remain comparison-only; the simulator receives only the complete NVBit trace,
+static control sidecar, and SM86 cards. The layout result identifies a bypass
+destination effect, but whole-kernel active cycles do not distinguish issue
+replay from post-source visibility and therefore are not a timing constant.
 
-The retained depth-4/depth-8 L1 and DRAM slice is reduced with:
+Reduce the retained five-repeat depth-4/depth-8 layout slice with:
+
+```bash
+PYTHONDONTWRITEBYTECODE=1 python3 \
+  workloads/research_probes/async_source_only/analyze_visibility.py \
+  --root results/captures/sm86_async_source_visibility_20260830_v2 \
+  --output results/captures/sm86_async_source_visibility_20260830_v2/analysis/report.json
+```
+
+The original contiguous-source discriminator remains immutable under its
+recorded binary hash and is reduced from the predecessor evidence root with:
 
 ```bash
 PYTHONDONTWRITEBYTECODE=1 python3 \
