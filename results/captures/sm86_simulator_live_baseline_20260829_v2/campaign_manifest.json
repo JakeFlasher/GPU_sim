@@ -49,6 +49,11 @@
       "size_bytes": 2583912
     }
   },
+  "next_discriminator": {
+    "path": "plans/sm86_ldgsts_burst_release_next_discriminator.json",
+    "sha256": "0457578507997d732a98a6f5b85be1ce3a7af21fdc58ffea610abd58be95b008",
+    "status": "prospective_not_run"
+  },
   "tools": {
     "cuda_nvcc": "/opt/cuda/bin/nvcc (13.3.73)",
     "ncu": "/usr/local/cuda-13.2/nsight-compute-2026.1.0/ncu (2026.1.0.0)",
@@ -278,7 +283,7 @@
     "timeout_seconds": 180,
     "exit_code": 0,
     "report": "closure_report.json",
-    "report_sha256": "b66b103052a47640fda0a36eb2d1670b523dc6e3248bf49609392697a66d3347",
+    "report_sha256": "e19e929cbd2c3ef7eca6631c5943f83a17160fc6f9beb51b9ef02c3dbc8a2e79",
     "live_repeat_root": "evidence/raw/ncu_repeat/rep-2",
     "live_repeat_count_per_cell": 1,
     "simulator_twin_policy": "byte-identical replay-1/replay-2"
@@ -288,6 +293,7 @@
     "seam": "completion/retirement frontier mapping",
     "mechanism": "The measured SM-active/GPC envelopes include launch and dirty-writeback/coherence retirement behavior that the typed event frontier does not model; async/barrier readiness is observable but not uniquely separable from those tails.",
     "next_discriminator": "A matched store-free/barrier-free async-source pair with an independent retirement observable.",
+    "next_discriminator_manifest": {"path": "plans/sm86_ldgsts_burst_release_next_discriminator.json", "sha256": "0457578507997d732a98a6f5b85be1ce3a7af21fdc58ffea610abd58be95b008"},
     "claim_limits": ["No cycle-accuracy claim", "No NCU leakage into simulator inputs", "No cross-architecture inference", "No JADE/HETR or CPU-GPU co-simulation change"],
     "selection_rule": "mechanism_local_typed_tail_precedence",
     "frontiers_remain_independent": true,

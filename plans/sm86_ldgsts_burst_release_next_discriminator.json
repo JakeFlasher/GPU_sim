@@ -1,0 +1,199 @@
+{
+  "schema_version": 1,
+  "id": "sm86_ldgsts_burst_release_next_discriminator",
+  "status": "prospective_not_run",
+  "purpose": "Separate the SM86 LDGSTS issue frontier from post-issue completion/retirement before changing simulator timing state.",
+  "working_directory": ".",
+  "architecture": "sm_86",
+  "hardware": {
+    "gpu": "NVIDIA GeForce RTX 3090 Ti",
+    "compute_capability": "8.6",
+    "device_index": 0,
+    "observed_core_mhz": 1350,
+    "observed_memory_mhz": 10501,
+    "clock_control": "none unless the campaign's bounded lock succeeds; record an unavailable sudo lock as a typed limitation"
+  },
+  "source": {
+    "cuda": "workloads/research_probes/ldgsts_burst_release/ldgsts_burst_release.cu",
+    "binary": "workloads/research_probes/ldgsts_burst_release/ldgsts_burst_release",
+    "pairing": {
+      "enabled_device_body": "ldgsts_active_body<Depth, Gap>",
+      "off_device_body": "ldgsts_empty_body()",
+      "enabled_arm": "the first N runtime-predicated cp.async.ca.shared.global positions in the single static body",
+      "off_arm": "the matched empty-reference arm with the same clocks, warp schedule, and output record",
+      "timed_region": "one issue endpoint before commit/wait and one drain endpoint after commit/wait; no CTA BAR.SYNC in the timed body",
+      "independent_retirement_observable": [
+        "drain_on - issue_on",
+        "drain_off - issue_off",
+        "smid_on_before",
+        "smid_on_after",
+        "smid_off_before",
+        "smid_off_after"
+      ],
+      "raw_record_fields": [
+        "issue_on",
+        "issue_off",
+        "drain_on",
+        "drain_off",
+        "smid_on_before",
+        "smid_on_after",
+        "smid_off_before",
+        "smid_off_after",
+        "error_mask",
+        "correct"
+      ]
+    }
+  },
+  "matrix": {
+    "cell_count": 40,
+    "cell_selector": "ldgsts_w1_l1_d1_g0,ldgsts_w1_l1_d4_g0,ldgsts_w1_l1_d5_g0,ldgsts_w1_l1_d6_g0,ldgsts_w1_l1_d8_g0,ldgsts_w1_dram_d1_g0,ldgsts_w1_dram_d4_g0,ldgsts_w1_dram_d5_g0,ldgsts_w1_dram_d6_g0,ldgsts_w1_dram_d8_g0,ldgsts_w1_l1_d4_g16,ldgsts_w1_l1_d4_g64,ldgsts_w1_l1_d5_g16,ldgsts_w1_l1_d5_g64,ldgsts_w1_l1_d6_g16,ldgsts_w1_l1_d6_g64,ldgsts_w1_dram_d4_g16,ldgsts_w1_dram_d4_g64,ldgsts_w1_dram_d5_g16,ldgsts_w1_dram_d5_g64,ldgsts_w1_dram_d6_g16,ldgsts_w1_dram_d6_g64,ldgsts_w1_l2_d1_g0,ldgsts_w1_l2_d4_g0,ldgsts_w1_l2_d5_g0,ldgsts_w1_l2_d6_g0,ldgsts_w1_l2_d8_g0,ldgsts_w4_l1_d4_g0,ldgsts_w4_l1_d5_g0,ldgsts_w4_l1_d6_g0,ldgsts_w4_l2_d4_g0,ldgsts_w4_l2_d5_g0,ldgsts_w4_l2_d6_g0,ldgsts_w4_dram_d4_g0,ldgsts_w4_dram_d5_g0,ldgsts_w4_dram_d6_g0,ldg_w1_l1_d4_g0,ldg_w1_l1_d5_g0,ldg_w1_l1_d6_g0,ldg_w1_l1_d8_g0",
+    "roles": {
+      "identification": "W1, L1/DRAM, depths 1/4/5/6/8, gap 0",
+      "spacing": "W1, L1/DRAM, depths 4/5/6, gaps 16/64",
+      "route_holdout": "W1, L2, depths 1/4/5/6/8, gap 0",
+      "placement": "W4, L1/L2/DRAM, depths 4/5/6, gap 0",
+      "clock_assay": "independent LDG control, W1 L1, depths 4/5/6/8"
+    },
+    "active_warps": [1, 4],
+    "routes": ["l1", "l2", "dram"],
+    "depths": [1, 4, 5, 6, 8],
+    "gaps_cycles": [0, 16, 64],
+    "bursts": 16384,
+    "warmup_bursts": 64,
+    "direct_repetitions": 7,
+    "order_schedule": ["forward", "reverse", "forward", "reverse", "forward", "reverse", "forward"],
+    "launch_geometry": {
+      "cta_count": 1,
+      "threads_per_cta": 128,
+      "shared_bytes": 32768
+    }
+  },
+  "outputs": {
+    "root": "results/captures/sm86_ldgsts_burst_release_20260830_v1",
+    "build": "results/captures/sm86_ldgsts_burst_release_20260830_v1/build",
+    "correctness": "results/captures/sm86_ldgsts_burst_release_20260830_v1/correctness",
+    "static": "results/captures/sm86_ldgsts_burst_release_20260830_v1/static",
+    "direct": "results/captures/sm86_ldgsts_burst_release_20260830_v1/direct",
+    "nvbit": "results/captures/sm86_ldgsts_burst_release_20260830_v1/nvbit/ldgsts_w1_l1_d4_g0",
+    "ncu": "results/captures/sm86_ldgsts_burst_release_20260830_v1/ncu/ldgsts_w1_l1_d4_g0/repeat-1",
+    "simulator": "results/captures/sm86_ldgsts_burst_release_20260830_v1/simulator/ldgsts_w1_l1_d4_g0"
+  },
+  "commands": {
+    "build": {
+      "argv": ["make", "-C", "workloads/research_probes/ldgsts_burst_release", "clean", "all"],
+      "timeout_seconds": 600,
+      "stdout": "results/captures/sm86_ldgsts_burst_release_20260830_v1/build/stdout.txt",
+      "stderr": "results/captures/sm86_ldgsts_burst_release_20260830_v1/build/stderr.txt"
+    },
+    "correctness": {
+      "argv": [
+        ".venv/bin/python", "workloads/research_probes/ldgsts_burst_release/campaign.py", "correctness",
+        "--output-root", "results/captures/sm86_ldgsts_burst_release_20260830_v1", "--gpu", "0",
+        "--cells", "ldgsts_w1_l1_d4_g0,ldgsts_w4_l1_d4_g0,ldg_w1_l1_d4_g0", "--force"
+      ],
+      "timeout_seconds": 1800,
+      "outputs": "results/captures/sm86_ldgsts_burst_release_20260830_v1/correctness"
+    },
+    "static": {
+      "argv": [
+        ".venv/bin/python", "workloads/research_probes/ldgsts_burst_release/campaign.py", "static",
+        "--output-root", "results/captures/sm86_ldgsts_burst_release_20260830_v1", "--force"
+      ],
+      "timeout_seconds": 300,
+      "control": "results/captures/sm86_ldgsts_burst_release_20260830_v1/static/control_bits.json"
+    },
+    "direct": {
+      "argv": [
+        ".venv/bin/python", "workloads/research_probes/ldgsts_burst_release/campaign.py", "direct",
+        "--output-root", "results/captures/sm86_ldgsts_burst_release_20260830_v1", "--gpu", "0",
+        "--bundles", "route_zero_gap,spacing_g16,spacing_g64,placement,clock_assay", "--force",
+        "--restore-core", "reset", "--restore-memory", "reset"
+      ],
+      "timeout_seconds": 14400,
+      "outputs": "results/captures/sm86_ldgsts_burst_release_20260830_v1/direct"
+    },
+    "nvbit": {
+      "environment": {
+        "CUDA_VISIBLE_DEVICES": "0",
+        "CUDA_INJECTION64_PATH": "tools/nvbit_tracer/tracer_tool/tracer_tool.so",
+        "LD_LIBRARY_PATH": ".toolchain/pb/lib",
+        "USER_DEFINED_FOLDERS": "1",
+        "TRACES_FOLDER": "results/captures/sm86_ldgsts_burst_release_20260830_v1/nvbit/ldgsts_w1_l1_d4_g0",
+        "ACTIVE_FROM_START": "1",
+        "SKIP_ENHANCED_TRACER": "0"
+      },
+      "argv": [
+        "workloads/research_probes/ldgsts_burst_release/ldgsts_burst_release",
+        "--mode", "direct", "--assay", "ldgsts", "--cells", "ldgsts_w1_l1_d4_g0",
+        "--bursts", "16384", "--warmup", "64", "--repetition", "1", "--order", "forward"
+      ],
+      "timeout_seconds": 900,
+      "trace": "results/captures/sm86_ldgsts_burst_release_20260830_v1/nvbit/ldgsts_w1_l1_d4_g0"
+    },
+    "ncu": {
+      "environment": {"CUDA_VISIBLE_DEVICES": "0"},
+      "argv": [
+        "/usr/local/cuda-13.2/nsight-compute-2026.1.0/ncu", "--force-overwrite", "--export",
+        "results/captures/sm86_ldgsts_burst_release_20260830_v1/ncu/ldgsts_w1_l1_d4_g0/repeat-1/ncu-report",
+        "--profile-from-start", "off", "--launch-count", "1", "--replay-mode", "application",
+        "--clock-control", "none", "--cache-control", "none", "--metrics",
+        "sm__cycles_active.max,smsp__inst_executed_op_ldgsts.sum,smsp__sass_inst_executed_op_global_ld.sum,sm__sass_l1tex_t_sectors_pipe_lsu_mem_global_op_ldgsts.sum,sm__sass_l1tex_data_pipe_lsu_wavefronts_mem_shared_op_ldgsts.sum,l1tex__t_sectors_pipe_lsu_mem_global_op_ld_lookup_hit.sum,l1tex__t_sectors_pipe_lsu_mem_global_op_ld_lookup_miss.sum,lts__t_sectors_srcunit_tex_op_read_lookup_hit.sum,lts__t_sectors_srcunit_tex_op_read_lookup_miss.sum,dram__sectors_read.sum",
+        "workloads/research_probes/ldgsts_burst_release/ldgsts_burst_release",
+        "--mode", "ncu", "--assay", "ldgsts", "--cells", "ldgsts_w1_l1_d4_g0",
+        "--bursts", "16384", "--warmup", "64", "--repetition", "1", "--order", "forward"
+      ],
+      "export_argv": [
+        "/usr/local/cuda-13.2/nsight-compute-2026.1.0/ncu", "--import",
+        "results/captures/sm86_ldgsts_burst_release_20260830_v1/ncu/ldgsts_w1_l1_d4_g0/repeat-1/ncu-report.ncu-rep",
+        "--csv", "--page", "raw", "--print-metric-instances", "details", "--log-file",
+        "results/captures/sm86_ldgsts_burst_release_20260830_v1/ncu/ldgsts_w1_l1_d4_g0/repeat-1/ncu.csv"
+      ],
+      "timeout_seconds": 900,
+      "comparison_only": true
+    },
+    "simulator": {
+      "argv": [
+        "sim/target/release/sim-run", "--trace",
+        "results/captures/sm86_ldgsts_burst_release_20260830_v1/nvbit/ldgsts_w1_l1_d4_g0",
+        "--control", "results/captures/sm86_ldgsts_burst_release_20260830_v1/static/control_bits.json",
+        "--arch-card", "arch_profiles/cards/sm_86.json", "--pchase-card", "data/pchase/sm_86_static_card.json",
+        "--mode", "l1-l2"
+      ],
+      "timeout_seconds": 900,
+      "stdout": "results/captures/sm86_ldgsts_burst_release_20260830_v1/simulator/ldgsts_w1_l1_d4_g0/replay.json",
+      "stderr": "results/captures/sm86_ldgsts_burst_release_20260830_v1/simulator/ldgsts_w1_l1_d4_g0/stderr.txt"
+    }
+  },
+  "reduction": {
+    "primary": "dI = issue_on - issue_off",
+    "secondary": "dC = (drain_on - issue_on) - (drain_off - issue_off)",
+    "independent_unit": "process repetition; retain seven paired repetitions",
+    "route_admission": "use NCU L1 lookup, LTS hit/miss, and DRAM sectors only as labels; do not infer route from cache operator",
+    "retirement_frontier": "report issue endpoint and drain endpoint separately; never replace them with issue-plus-drain scalar timing"
+  },
+  "decision_rule": {
+    "pass_or_identify": [
+      "all correctness outputs are true and all seven process repetitions retain smid_before == smid_after",
+      "issue and drain endpoints decode with no wait mask in the static report",
+      "W1 L1/DRAM depth response is repeat-stable (MAD <= 0.5) and materially changes at the predeclared boundary",
+      "route and placement effects remain consistent in the declared independent NCU labels",
+      "the issue and post-issue completion effects point to one mechanism-local frontier without fitting a per-workload constant"
+    ],
+    "falsify_or_no_go": [
+      "no material issue response (median <= 2 cycles) or no repeat-stable depth knee",
+      "issue and drain effects disagree across repetitions or route order cannot be established",
+      "SMID migration, incomplete trace/control/static evidence, or an unresolved output-store confound",
+      "the observed effect cannot distinguish route-invariant acceptance from route-sensitive completion"
+    ],
+    "unknown_gate": "mixed or missing attribution, unavailable clock lock, or any failed bounded stage is reported as unknown and is not promoted into simulator timing"
+  },
+  "evidence_boundary": {
+    "ncu_values_used_as_simulator_inputs": false,
+    "simulator_inputs": ["NVBit trace", "static control sidecar", "sm_86 architecture card", "sm_86 pchase card"],
+    "claim_limits": [
+      "This is a GA102 burst issue/completion discriminator, not a queue-size or physical-stage proof.",
+      "A negative or unknown result leaves current simulator timing unchanged.",
+      "No JADE/HETR, CPU-GPU co-simulation, sm_120, or rejected-candidate scope is changed."
+    ]
+  }
+}

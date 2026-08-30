@@ -1,5 +1,14 @@
 # LDGSTS barrier-free burst assay
 
+The exact prospective execution contract for the next GPU-only discriminator
+is tracked at
+[`plans/sm86_ldgsts_burst_release_next_discriminator.json`](../../../plans/sm86_ldgsts_burst_release_next_discriminator.json).
+It pins the source/binary, enabled-versus-off arms, 40-cell geometry, bounded
+correctness/NVBit/NCU/static/sim-run commands, output paths, independent issue
+and drain/%smid observables, and explicit pass/falsify/unknown rules. Its
+status is `prospective_not_run`; the current SM86 closure deliberately holds
+these measurements out of the scored cohort.
+
 This prospective `sm_86` probe separates the pre-commit LDGSTS issue interval
 from the post-issue completion interval. It crosses depths around the published
 five-position boundary, but does not assume that software async groups expose a

@@ -42,7 +42,8 @@ next discriminator by typed mechanism-local precedence;
 the next discriminator is a store-free/barrier-free async-source pair with an
 independent retirement observable. The durable per-cell manifest, compressed
 raw evidence bundle, and 7,765-launch semantic replay report are linked from
-the baseline handoff; the validator now checks trace-derived instruction and
+the baseline handoff; the exact prospective follow-up contract is pinned in
+`plans/sm86_ldgsts_burst_release_next_discriminator.json`; the validator now checks trace-derived instruction and
 sector conservation plus readiness/frontier invariants for the active and
 supplemental replay sets.
 

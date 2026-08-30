@@ -9,6 +9,8 @@ import sys
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 from workloads.research_probes.semantic_replay_validation import (
     _async_source_error,
     _global_memory_error,
@@ -31,6 +33,40 @@ def _load_validator():
 
 
 VALIDATOR = _load_validator()
+
+
+def _load_live_cohort_validator():
+    path = Path(__file__).with_name("validate_sm86_live_cohort.py")
+    spec = importlib.util.spec_from_file_location("tested_live_cohort_validator", path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+LIVE_VALIDATOR = _load_live_cohort_validator()
+
+
+@pytest.mark.parametrize("value", [False, 0.0, "0", 1, None])
+def test_stage_success_requires_exact_integer_zero(value: object) -> None:
+    assert LIVE_VALIDATOR._is_exact_zero(value) is False
+    assert LIVE_VALIDATOR._is_exact_zero(0) is True
+
+
+def test_nvbit_expected_argv_is_cell_bound() -> None:
+    cell = {
+        "id": "gemm_hmma_bf16_sm80",
+        "binary": {
+            "path": "workloads/portable_lcd/gemm_hmma_bf16_sm80/gemm_hmma_bf16_sm80_run",
+            "trace_path": "workloads/portable_lcd/gemm_hmma_bf16_sm80/gemm_hmma_bf16_sm80_run",
+        },
+    }
+    expected = LIVE_VALIDATOR._expected_nvbit_argv(cell)
+    assert expected[-5:] == ["--timing_shape", "--warmup", "0", "--reps", "1"]
+    altered = list(expected)
+    altered[-1] = "2"
+    assert altered != expected
 
 
 def _load_replay_test_helpers():

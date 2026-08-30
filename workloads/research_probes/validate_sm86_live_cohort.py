@@ -123,6 +123,24 @@ _EXPECTED_CELL_SPECS: dict[str, dict[str, Any]] = {
 }
 
 
+def _is_exact_zero(value: object) -> bool:
+    """JSON success statuses must be integer zero, never bool/float zero."""
+
+    return type(value) is int and value == 0
+
+
+def _expected_nvbit_argv(cell: Mapping[str, Any]) -> list[str]:
+    binary = cell.get("binary")
+    if not isinstance(binary, Mapping):
+        raise ValueError(f"{cell.get('id')}: NVBit binary identity is missing")
+    trace_path = binary.get("trace_path", binary.get("path"))
+    if not isinstance(trace_path, str):
+        raise ValueError(f"{cell.get('id')}: NVBit traced binary path is missing")
+    if cell.get("id") == "cp_async_canary":
+        return [trace_path, "c11", "l1", "0", "4", "1"]
+    return [trace_path, "--timing_shape", "--warmup", "0", "--reps", "1"]
+
+
 def _sha256(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as stream:
@@ -302,7 +320,7 @@ def _validate_correctness_stage(
         raise ValueError(f"{cell_id}: correctness environment record schema is unsupported")
     if environment_doc.get("argv") != argv or environment_doc.get("effective_argv") != argv:
         raise ValueError(f"{cell_id}: correctness environment argv differs from manifest")
-    if environment_doc.get("return_code") != 0 or environment_doc.get("output_contains_instrumentation") is not False:
+    if not _is_exact_zero(environment_doc.get("return_code")) or environment_doc.get("output_contains_instrumentation") is not False:
         raise ValueError(f"{cell_id}: correctness environment record is not a clean successful run")
     effective_environment = environment_doc.get("environment")
     if not isinstance(effective_environment, Mapping):
@@ -385,6 +403,10 @@ def _validate_nvbit_stage(
     output = stage.get("output")
     if not isinstance(argv, list) or any(not isinstance(item, str) for item in argv):
         raise ValueError(f"{cell_id}: NVBit argv is malformed")
+    if argv != _expected_nvbit_argv(cell):
+        raise ValueError(f"{cell_id}: NVBit argv is not bound to the canonical cell arguments")
+    if not _is_exact_zero(stage.get("exit_code")):
+        raise ValueError(f"{cell_id}: NVBit exit_code is malformed or nonzero")
     if not isinstance(environment, Mapping) or not isinstance(output, str) or not output:
         raise ValueError(f"{cell_id}: NVBit environment/output binding is missing")
     if not isinstance(trace_binary, str) or not isinstance(trace_binary_hash, str):
@@ -767,9 +789,9 @@ def _validate_release_build(
         raise ValueError("release_build timeout is malformed")
     if record.get("timeout_seconds") != timeout:
         raise ValueError("release_build timeout is not bound to its transcript")
-    if isinstance(document.get("return_code"), bool) or document.get("return_code") != 0:
+    if not _is_exact_zero(document.get("return_code")):
         raise ValueError("release_build did not exit successfully")
-    if record.get("exit_code") != document.get("return_code"):
+    if not _is_exact_zero(record.get("exit_code")) or record.get("exit_code") != document.get("return_code"):
         raise ValueError("release_build exit status differs from its transcript")
     revision = document.get("repository_revision")
     if not isinstance(revision, str) or len(revision) != 40 or record.get("repository_revision") != revision:
@@ -913,7 +935,7 @@ def _validate_cell(
         if not isinstance(stage, Mapping):
             raise ValueError(f"{cell_id}/{stage_name}: stage record is malformed")
         _check_timeout(stage, f"{cell_id}/{stage_name}", defaults)
-        if stage.get("exit_code") != 0:
+        if not _is_exact_zero(stage.get("exit_code")):
             raise ValueError(f"{cell_id}/{stage_name}: exit_code is not zero")
         for key in ("stdout", "stderr", "csv", "stats", "mapping", "control"):
             if key in stage:
@@ -1203,6 +1225,18 @@ def validate(manifest_path: Path, report_path: Path | None) -> int:
     host_record_path = _assert_file(root, host.get("preflight_record"), "host.preflight_record")
     _validate_host_preflight(root, host_record_path, repository, host, tools)
     _validate_release_build(root, document, repository)
+    next_discriminator = document.get("next_discriminator")
+    if (
+        not isinstance(next_discriminator, Mapping)
+        or next_discriminator.get("path") != closure_analyzer.NEXT_DISCRIMINATOR_PATH
+        or next_discriminator.get("status") != "prospective_not_run"
+    ):
+        raise ValueError("manifest next-discriminator contract is missing")
+    next_path = _assert_file(
+        REPO_ROOT, next_discriminator.get("path"), "next_discriminator.contract"
+    )
+    if next_discriminator.get("sha256") != _sha256(next_path):
+        raise ValueError("manifest next-discriminator contract hash does not match")
     bundle = document.get("evidence_bundle")
     if not isinstance(bundle, Mapping):
         raise ValueError("manifest evidence_bundle is missing")
@@ -1215,7 +1249,7 @@ def validate(manifest_path: Path, report_path: Path | None) -> int:
     if not isinstance(closure_analysis, Mapping):
         raise ValueError("manifest closure_analysis is missing")
     _check_timeout(closure_analysis, "closure_analysis", {"closure_analysis": 180})
-    if closure_analysis.get("exit_code") != 0:
+    if not _is_exact_zero(closure_analysis.get("exit_code")):
         raise ValueError("closure analysis did not exit zero")
     closure_report_path = _assert_file(
         root, closure_analysis.get("report"), "closure_analysis.report"
@@ -1231,6 +1265,12 @@ def validate(manifest_path: Path, report_path: Path | None) -> int:
     analysis_manifest = analysis.get("manifest")
     if not isinstance(analysis_manifest, Mapping) or analysis_manifest.get("candidate_revision") != repository.get("candidate_revision"):
         raise ValueError("closure analysis candidate revision differs from manifest")
+    analysis_next = analysis.get("next_discriminator_manifest")
+    if analysis_next != {
+        "path": next_discriminator.get("path"),
+        "sha256": next_discriminator.get("sha256"),
+    }:
+        raise ValueError("closure analysis next-discriminator binding differs from manifest")
     input_validation = analysis.get("input_validation")
     if (
         not isinstance(input_validation, Mapping)
@@ -1372,6 +1412,7 @@ def validate(manifest_path: Path, report_path: Path | None) -> int:
         or not isinstance(ac4, Mapping)
         or ac4.get("status") != "pass"
         or ac4.get("mode") != "falsified_no_go"
+        or ac4.get("manifest") != analysis_next
     ):
         raise ValueError("closure analysis does not explicitly pass AC-1, AC-3, and AC-4")
     cells = document.get("cells")

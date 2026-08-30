@@ -29,6 +29,7 @@ DEFAULT_MANIFEST = (
     REPO_ROOT
     / "results/captures/sm86_simulator_live_baseline_20260829_v2/campaign_manifest.json"
 )
+NEXT_DISCRIMINATOR_PATH = "plans/sm86_ldgsts_burst_release_next_discriminator.json"
 METRICS = (
     "gpc__cycles_elapsed.max",
     "sm__cycles_active.max",
@@ -94,6 +95,19 @@ def _tree_sha256(path: Path) -> str:
         digest.update(len(payload_hash).to_bytes(8, "big"))
         digest.update(payload_hash)
     return digest.hexdigest()
+
+
+def _next_discriminator_binding(document: Mapping[str, Any]) -> dict[str, str]:
+    record = document.get("next_discriminator")
+    if not isinstance(record, Mapping) or record.get("path") != NEXT_DISCRIMINATOR_PATH:
+        raise ValueError("manifest next-discriminator contract is missing or misbound")
+    path = REPO_ROOT / NEXT_DISCRIMINATOR_PATH
+    if not path.is_file():
+        raise ValueError("tracked next-discriminator contract is missing")
+    digest = _sha256(path)
+    if record.get("sha256") != digest:
+        raise ValueError("manifest next-discriminator contract hash does not match")
+    return {"path": NEXT_DISCRIMINATOR_PATH, "sha256": digest}
 
 
 def _campaign_file(root: Path, relative: object, label: str) -> Path:
@@ -885,6 +899,7 @@ def build_report(manifest_path: Path, output_path: Path | None = None) -> dict[s
     document = json.loads(manifest_path.read_text(encoding="utf-8"))
     if not isinstance(document, Mapping) or document.get("schema_version") != "sm86.live.campaign.v2":
         raise ValueError("unsupported campaign manifest")
+    next_discriminator = _next_discriminator_binding(document)
     declared_ncu = document.get("ncu_identity")
     if not isinstance(declared_ncu, Mapping) or any(
         declared_ncu.get(key) != value for key, value in TRUSTED_NCU_IDENTITY.items()
@@ -1023,6 +1038,7 @@ def build_report(manifest_path: Path, output_path: Path | None = None) -> dict[s
             "decision": "no-go",
             "selected_diagnostic": decision["selected_diagnostic"],
             "next_discriminator": "matched store-free/barrier-free async-source pair with an independent retirement observable",
+            "next_discriminator_manifest": next_discriminator,
             "repeatability_basis": "Two independent application-replay NCU captures per cell; simulator twins are byte-identical.",
             "held_out_discriminator": "not_run; the next pair is intentionally held out to avoid selecting a timing seam from the scored cohort.",
             "ncu_values_used_as_simulator_inputs": False,
@@ -1054,6 +1070,7 @@ def build_report(manifest_path: Path, output_path: Path | None = None) -> dict[s
                 "mode": "falsified_no_go",
                 "selected_diagnostic": decision["selected_diagnostic"],
                 "next_discriminator": decision["next_action"],
+                "manifest": next_discriminator,
                 "evidence": "repeat-stable live observations and typed simulator tails do not isolate one architecture-local latency",
             },
         },

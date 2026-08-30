@@ -170,7 +170,10 @@ fixed latency, per-workload offset, or NCU-derived card value would conflate
 unmodeled retirement/coherence with async/barrier overlap and violate the
 simulator's evidence boundary. The next discriminator is a matched
 store-free/barrier-free async-source pair with an independent retirement
-observable. No simulator timing code, JADE/HETR code, CPU-GPU bridge,
+observable. Its exact prospective source, 40-cell matrix, commands, output
+paths, and pass/falsify/unknown rules are pinned in
+[`plans/sm86_ldgsts_burst_release_next_discriminator.json`](../../../plans/sm86_ldgsts_burst_release_next_discriminator.json).
+The manifest is explicitly `prospective_not_run`; no simulator timing code, JADE/HETR code, CPU-GPU bridge,
 `sm_120` behavior, or rejected candidate was changed here.
 The machine-readable frontier table, explicit AC-3/AC-4 status, and
 repeatability evidence are in
