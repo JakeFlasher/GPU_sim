@@ -113,6 +113,16 @@ and schema number. The trace projection separates compact/conflict by 2× while
 live `.cg` wavefronts separated them by 4×, so the typed tail remains and the
 next action is one projection-discriminating destination geometry.
 
+That geometry is now complete in
+[the bypass projection discriminator](sm86_async_bypass_projection_milestone.md).
+The severe layout doubles the cache-all trace projection and produces the
+expected +128.992-cycle drain step on L1. On `.cg`, conflict and severe both
+report 8,192 NCU destination wavefronts, yet severe retains a +4.013-cycle
+drain step in all nine repeats. Thus neither the cache-all projection nor the
+live wavefront counter is a sufficient scalar bypass coordinate. No timing or
+tail state is changed; further work requires a multidimensional per-copy
+topology rather than another fitted constant.
+
 The 2026-08-17
 [causal-readiness milestone](sm86_causal_readiness_milestone.md) is complete.
 Reason-tagged dependency, async-copy, CTA-generation/arrival-spread, and

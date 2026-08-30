@@ -94,12 +94,12 @@ unchanged, and the report status is
 ## Decision and next slice
 
 Per-copy event ordering is now representable and inspectable, but bypass
-destination projection remains underidentified. The next narrow discriminator
-is one additional fixed-source destination geometry that separates the
-cache-all source-cohort projection from the observed `.cg` wavefront
-multiplier. Only after that projection transfers should a per-copy completion
-rate be evaluated against the L2 depth holdouts. JADE/HETR, CPU-GPU
-co-simulation, `sm_120`, and scored timing defaults remain unchanged.
+destination projection remains underidentified. The follow-on severe geometry
+is recorded in
+[the bypass projection milestone](sm86_async_bypass_projection_milestone.md):
+it falsifies both available scalar projections, so no per-copy completion rate
+is promoted. JADE/HETR, CPU-GPU co-simulation, `sm_120`, and scored timing
+defaults remain unchanged.
 
 ## Content identities
 

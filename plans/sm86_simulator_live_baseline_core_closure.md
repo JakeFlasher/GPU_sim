@@ -44,9 +44,15 @@ schema 14, with no timing change. The retained result is
 [`docs/sm86_async_per_copy_observation_milestone.md`](../docs/sm86_async_per_copy_observation_milestone.md).
 
 The trace projection separates the layout pair by 2× while live `.cg`
-wavefronts separate it by 4×. The next GPU-only discriminator is one additional
-destination geometry that chooses between those projection shapes. Until that
-transfers, keep the typed lower bound and scored simulator defaults unchanged.
+wavefronts separate it by 4×. The additional severe geometry is now complete:
+cache-all transfers exactly, while bypass conflict/severe have equal NCU
+wavefront counts but a repeat-stable +4.013-cycle drain difference. See
+[`docs/sm86_async_bypass_projection_milestone.md`](../docs/sm86_async_bypass_projection_milestone.md).
+
+This falsifies both scalar projection choices. Keep the typed lower bound and
+scored defaults unchanged. Any later bypass timing slice must preserve
+source-cohort/destination-line fanout separately from bank multiplicity and
+apply it per copy; do not fit another scalar to these three consumed layouts.
 
 ## Acceptance Criteria
 

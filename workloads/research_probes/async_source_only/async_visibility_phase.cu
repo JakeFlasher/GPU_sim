@@ -23,12 +23,12 @@ constexpr int kWarpSize = 32;
 constexpr int kPositions = 8;
 constexpr std::size_t kSourcePositionStride = 1024;
 constexpr std::size_t kSourceLaneStride = 32;
-constexpr std::size_t kCompactPositionStride = 4096;
+constexpr std::size_t kDestinationPositionStride = 4096;
 constexpr std::size_t kCompactLaneStride = 32;
-constexpr std::size_t kConflictPositionStride = 4096;
 constexpr std::size_t kConflictLaneStride = 64;
+constexpr std::size_t kSevereLaneStride = 128;
 constexpr std::size_t kDestinationBytes =
-    kPositions * kConflictPositionStride;
+    kPositions * kDestinationPositionStride;
 constexpr int kDefaultGroups = 8192;
 constexpr int kMaxGroups = 65536;
 
@@ -61,15 +61,16 @@ __device__ __forceinline__ void copy_cg(unsigned destination,
                  : "memory");
 }
 
-template <bool Conflict>
+template <int Layout>
 __device__ __forceinline__ unsigned destination_offset(int lane) {
-    constexpr std::size_t lane_stride = Conflict
-        ? kConflictLaneStride
-        : kCompactLaneStride;
+    static_assert(Layout >= 0 && Layout <= 2);
+    constexpr std::size_t lane_stride = Layout == 0
+        ? kCompactLaneStride
+        : (Layout == 1 ? kConflictLaneStride : kSevereLaneStride);
     return static_cast<unsigned>(lane * lane_stride);
 }
 
-template <int Depth, bool Bypass, bool Streaming, bool Conflict>
+template <int Depth, bool Bypass, bool Streaming, int Layout>
 __global__ void visibility_phase_kernel(const char* source, int groups,
                                         PhaseResult* result) {
     __shared__ __align__(16) char destination[kDestinationBytes];
@@ -77,9 +78,9 @@ __global__ void visibility_phase_kernel(const char* source, int groups,
     const int lane = static_cast<int>(threadIdx.x);
     const char* base = source;
     const unsigned destination_base = static_cast<unsigned>(
-        __cvta_generic_to_shared(destination + destination_offset<Conflict>(lane)));
-    constexpr unsigned destination_stride = static_cast<unsigned>(
-        Conflict ? kConflictPositionStride : kCompactPositionStride);
+        __cvta_generic_to_shared(destination + destination_offset<Layout>(lane)));
+    constexpr unsigned destination_stride =
+        static_cast<unsigned>(kDestinationPositionStride);
     unsigned long long issue_cycles = 0;
     unsigned long long wait_cycles = 0;
     unsigned long long total_cycles = 0;
@@ -153,37 +154,46 @@ __global__ void visibility_phase_kernel(const char* source, int groups,
     }
 }
 
-template <int Depth, bool Bypass, bool Streaming, bool Conflict>
+template <int Depth, bool Bypass, bool Streaming, int Layout>
 void launch(const char* source, int groups, PhaseResult* result) {
-    visibility_phase_kernel<Depth, Bypass, Streaming, Conflict>
+    visibility_phase_kernel<Depth, Bypass, Streaming, Layout>
         <<<1, kWarpSize>>>(source, groups, result);
 }
 
-template <bool Bypass, bool Streaming, bool Conflict>
+template <bool Bypass, bool Streaming, int Layout>
 void launch_depth(int depth, const char* source, int groups, PhaseResult* result) {
     switch (depth) {
-        case 1: launch<1, Bypass, Streaming, Conflict>(source, groups, result); return;
-        case 2: launch<2, Bypass, Streaming, Conflict>(source, groups, result); return;
-        case 4: launch<4, Bypass, Streaming, Conflict>(source, groups, result); return;
-        case 8: launch<8, Bypass, Streaming, Conflict>(source, groups, result); return;
+        case 1: launch<1, Bypass, Streaming, Layout>(source, groups, result); return;
+        case 2: launch<2, Bypass, Streaming, Layout>(source, groups, result); return;
+        case 4: launch<4, Bypass, Streaming, Layout>(source, groups, result); return;
+        case 8: launch<8, Bypass, Streaming, Layout>(source, groups, result); return;
         default: break;
     }
     std::fprintf(stderr, "unsupported depth: %d\n", depth);
     std::exit(2);
 }
 
-void launch_for(int depth, bool bypass, bool streaming, bool conflict,
-                const char* source,
-                int groups, PhaseResult* result) {
+template <bool Bypass, bool Streaming>
+void launch_layout(int depth, int layout, const char* source, int groups,
+                   PhaseResult* result) {
+    switch (layout) {
+        case 0: launch_depth<Bypass, Streaming, 0>(depth, source, groups, result); return;
+        case 1: launch_depth<Bypass, Streaming, 1>(depth, source, groups, result); return;
+        case 2: launch_depth<Bypass, Streaming, 2>(depth, source, groups, result); return;
+        default: break;
+    }
+    std::fprintf(stderr, "unsupported layout index: %d\n", layout);
+    std::exit(2);
+}
+
+void launch_for(int depth, bool bypass, bool streaming, int layout,
+                const char* source, int groups, PhaseResult* result) {
     if (bypass && streaming) {
-        if (conflict) launch_depth<true, true, true>(depth, source, groups, result);
-        else launch_depth<true, true, false>(depth, source, groups, result);
+        launch_layout<true, true>(depth, layout, source, groups, result);
     } else if (bypass) {
-        if (conflict) launch_depth<true, false, true>(depth, source, groups, result);
-        else launch_depth<true, false, false>(depth, source, groups, result);
+        launch_layout<true, false>(depth, layout, source, groups, result);
     } else {
-        if (conflict) launch_depth<false, false, true>(depth, source, groups, result);
-        else launch_depth<false, false, false>(depth, source, groups, result);
+        launch_layout<false, false>(depth, layout, source, groups, result);
     }
 }
 
@@ -199,7 +209,7 @@ int main(int argc, char** argv) {
     int depth = 4;
     bool bypass = false;
     bool streaming = false;
-    bool conflict = false;
+    int layout = 0;
     bool profiler_marked = false;
     for (int i = 1; i < argc; ++i) {
         if (i + 1 >= argc) return 2;
@@ -218,9 +228,10 @@ int main(int argc, char** argv) {
                 streaming = true;
             } else return 2;
         } else if (std::strcmp(argv[i], "--layout") == 0) {
-            const char* layout = argv[++i];
-            if (std::strcmp(layout, "compact") == 0) conflict = false;
-            else if (std::strcmp(layout, "conflict") == 0) conflict = true;
+            const char* value = argv[++i];
+            if (std::strcmp(value, "compact") == 0) layout = 0;
+            else if (std::strcmp(value, "conflict") == 0) layout = 1;
+            else if (std::strcmp(value, "severe") == 0) layout = 2;
             else return 2;
         } else if (std::strcmp(argv[i], "--markers") == 0) {
             const char* value = argv[++i];
@@ -253,7 +264,7 @@ int main(int argc, char** argv) {
     CUDA_CHECK(cudaDeviceSynchronize());
 
     if (profiler_marked) CUDA_CHECK(cudaProfilerStart());
-    launch_for(depth, bypass, streaming, conflict, source, groups, device_result);
+    launch_for(depth, bypass, streaming, layout, source, groups, device_result);
     CUDA_CHECK(cudaGetLastError());
     CUDA_CHECK(cudaDeviceSynchronize());
     if (profiler_marked) CUDA_CHECK(cudaProfilerStop());
@@ -267,7 +278,7 @@ int main(int argc, char** argv) {
         "\"sum_consistent\":%s,\"result_store_after_intervals\":true,"
         "\"token\":%u,\"correct\":true}\n",
         depth, streaming ? "dram" : (bypass ? "l2" : "l1"),
-        conflict ? "conflict" : "compact",
+        layout == 0 ? "compact" : (layout == 1 ? "conflict" : "severe"),
         groups, host_result.issue_cycles, host_result.wait_cycles,
         host_result.total_cycles,
         host_result.issue_cycles + host_result.wait_cycles == host_result.total_cycles

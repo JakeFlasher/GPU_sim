@@ -97,3 +97,13 @@ PYTHONDONTWRITEBYTECODE=1 python3 \
 Schema-14 bypass observations retain per-instruction source completion,
 payload work, and trace-projected destination wavefronts. They do not change
 timing or clear the typed visibility tail.
+
+`--layout severe` adds a 128-byte destination lane stride for the follow-on
+projection discriminator. Reduce its three-layout L1/L2 campaign with:
+
+```bash
+PYTHONDONTWRITEBYTECODE=1 python3 \
+  workloads/research_probes/async_source_only/analyze_projection.py \
+  --root results/captures/sm86_async_bypass_projection_20260830_v1 \
+  --output results/captures/sm86_async_bypass_projection_20260830_v1/analysis/report.json
+```
