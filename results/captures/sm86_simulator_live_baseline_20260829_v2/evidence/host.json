@@ -6,7 +6,7 @@
     "capture_revision": "b915ec6b3df2973e87119c63e438c8bb5f77be44",
     "evidence_source_revision": "80e1aa8e1b6033298bc081822f5c8f6e8685f800",
     "candidate_revision": "8cae7c6f37e378ac54e4c5fe5f7acd3f38991480",
-    "correction_revision": "e507d69264b0e5781f1fe70a331d5c7c1cf616f8",
+    "correction_revision": "53c2bf279ec752fdf1c46a7fefe655ef0851f3cd",
     "working_tree_revision_at_preflight": "8cae7c6f37e378ac54e4c5fe5f7acd3f38991480",
     "simulator_binary_sha256": "6cb0d05f0d447c0cd6ee2e30353c0f1e89d464462458912478c826860f15f9a4",
     "tracer_dso_sha256": "dda89ee6857058b3f6dc2a01d73a2dc926b876d8e343b7457c779efd82fed007",
@@ -18,7 +18,11 @@
   "commands": [
     {
       "name": "gpu_query",
-      "argv": ["nvidia-smi", "--query-gpu=index,name,uuid,compute_cap,driver_version,clocks.current.graphics,clocks.current.memory,temperature.gpu", "--format=csv,noheader,nounits"],
+      "argv": [
+        "nvidia-smi",
+        "--query-gpu=index,name,uuid,compute_cap,driver_version,clocks.current.graphics,clocks.current.memory,temperature.gpu",
+        "--format=csv,noheader,nounits"
+      ],
       "timeout_seconds": 30,
       "return_code": 0,
       "output_path": "evidence/host_preflight/gpu_query.stdout.txt",
@@ -26,7 +30,10 @@
     },
     {
       "name": "gpu_list",
-      "argv": ["nvidia-smi", "-L"],
+      "argv": [
+        "nvidia-smi",
+        "-L"
+      ],
       "timeout_seconds": 30,
       "return_code": 0,
       "output_path": "evidence/host_preflight/gpu_list.stdout.txt",
@@ -34,7 +41,10 @@
     },
     {
       "name": "nvcc_version",
-      "argv": ["/opt/cuda/bin/nvcc", "--version"],
+      "argv": [
+        "/opt/cuda/bin/nvcc",
+        "--version"
+      ],
       "timeout_seconds": 30,
       "return_code": 0,
       "output_path": "evidence/host_preflight/nvcc_version.stdout.txt",
@@ -42,7 +52,10 @@
     },
     {
       "name": "ncu_version",
-      "argv": ["/usr/local/cuda-13.2/nsight-compute-2026.1.0/ncu", "--version"],
+      "argv": [
+        "/usr/local/cuda-13.2/nsight-compute-2026.1.0/ncu",
+        "--version"
+      ],
       "timeout_seconds": 30,
       "return_code": 0,
       "output_path": "evidence/host_preflight/ncu_version.stdout.txt",
@@ -50,7 +63,10 @@
     },
     {
       "name": "rust_version",
-      "argv": ["rustc", "--version"],
+      "argv": [
+        "rustc",
+        "--version"
+      ],
       "timeout_seconds": 30,
       "return_code": 0,
       "output_path": "evidence/host_preflight/rust_version.stdout.txt",
@@ -58,7 +74,10 @@
     },
     {
       "name": "cargo_version",
-      "argv": ["cargo", "--version"],
+      "argv": [
+        "cargo",
+        "--version"
+      ],
       "timeout_seconds": 30,
       "return_code": 0,
       "output_path": "evidence/host_preflight/cargo_version.stdout.txt",
@@ -66,7 +85,11 @@
     },
     {
       "name": "sudo_noninteractive",
-      "argv": ["sudo", "-n", "true"],
+      "argv": [
+        "sudo",
+        "-n",
+        "true"
+      ],
       "timeout_seconds": 10,
       "return_code": 1,
       "output_path": "evidence/host_preflight/sudo_noninteractive.stdout.txt",
@@ -75,7 +98,11 @@
     },
     {
       "name": "git_revision",
-      "argv": ["git", "rev-parse", "HEAD"],
+      "argv": [
+        "git",
+        "rev-parse",
+        "HEAD"
+      ],
       "timeout_seconds": 10,
       "return_code": 0,
       "output_path": "evidence/host_preflight/git_revision.stdout.txt",
@@ -83,7 +110,14 @@
     },
     {
       "name": "input_hashes",
-      "argv": ["sha256sum", "sim/target/release/sim-run", "tools/nvbit_tracer/tracer_tool/tracer_tool.so", "arch_profiles/cards/sm_86.json", "data/pchase/sm_86_static_card.json", "/usr/local/cuda-13.2/nsight-compute-2026.1.0/ncu"],
+      "argv": [
+        "sha256sum",
+        "sim/target/release/sim-run",
+        "tools/nvbit_tracer/tracer_tool/tracer_tool.so",
+        "arch_profiles/cards/sm_86.json",
+        "data/pchase/sm_86_static_card.json",
+        "/usr/local/cuda-13.2/nsight-compute-2026.1.0/ncu"
+      ],
       "timeout_seconds": 30,
       "return_code": 0,
       "output_path": "evidence/host_preflight/input_hashes.stdout.txt",
