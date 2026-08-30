@@ -6,7 +6,7 @@
     "capture_revision": "b915ec6b3df2973e87119c63e438c8bb5f77be44",
     "handoff_revision": "80e1aa8e1b6033298bc081822f5c8f6e8685f800",
     "candidate_revision": "8cae7c6f37e378ac54e4c5fe5f7acd3f38991480",
-    "correction_revision": "8e8bd92d84c61670190145836f4beb410e24a981",
+    "correction_revision": "aa0347188b5168764fd1cbc5e79a836736f51707",
     "branch": "GPUSim_main",
     "simulator_binary": {
       "path": "sim/target/release/sim-run",

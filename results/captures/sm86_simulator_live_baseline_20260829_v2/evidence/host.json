@@ -6,7 +6,7 @@
     "capture_revision": "b915ec6b3df2973e87119c63e438c8bb5f77be44",
     "evidence_source_revision": "80e1aa8e1b6033298bc081822f5c8f6e8685f800",
     "candidate_revision": "8cae7c6f37e378ac54e4c5fe5f7acd3f38991480",
-    "correction_revision": "8e8bd92d84c61670190145836f4beb410e24a981",
+    "correction_revision": "aa0347188b5168764fd1cbc5e79a836736f51707",
     "working_tree_revision_at_preflight": "8cae7c6f37e378ac54e4c5fe5f7acd3f38991480",
     "simulator_binary_sha256": "6cb0d05f0d447c0cd6ee2e30353c0f1e89d464462458912478c826860f15f9a4",
     "tracer_dso_sha256": "dda89ee6857058b3f6dc2a01d73a2dc926b876d8e343b7457c779efd82fed007",
