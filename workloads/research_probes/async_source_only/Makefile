@@ -4,10 +4,13 @@ NVCC_FLAGS ?= -std=c++17 -O3 -arch=sm_86 -lineinfo -Xptxas=-v
 
 .PHONY: all clean
 
-all: async_source_only
+all: async_source_only async_visibility_phase
 
 async_source_only: async_source_only.cu
 	$(NVCC) $(NVCC_FLAGS) -o $@ $<
 
+async_visibility_phase: async_visibility_phase.cu
+	$(NVCC) $(NVCC_FLAGS) -o $@ $<
+
 clean:
-	rm -f async_source_only
+	rm -f async_source_only async_visibility_phase

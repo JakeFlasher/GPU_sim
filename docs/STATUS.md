@@ -88,8 +88,19 @@ bypass has repeat-positive live deltas of 1,737 and 2,917 cycles while current
 replays correctly remain identical behind the typed visibility tail. Since
 whole-kernel active time cannot assign that delta to issue replay versus
 post-source delivery, no bypass timing was promoted. The next GPU-only action
-is a three-frontier issue/post-issue/post-wait clock assay on the same layout
+was a three-frontier issue/post-issue/post-wait clock assay on the same layout
 pair.
+
+That phase assay is now complete in
+[the async-visibility phase report](sm86_async_visibility_phase_milestone.md).
+Across depths 1/2/4/8 and L1/L2/DRAM source routes, all 108 compact/conflict
+issue deltas are exactly zero and all 108 drain deltas are positive. The
+cache-all control follows an exact 16-cycles-per-depth differential, while
+L2-hit bypass stays near 11–14 cycles per group across the eightfold depth
+range. This falsifies a group-aggregate bypass constant and localizes the next
+core change: retain per-copy source/destination completion before group wait.
+The typed bypass tail remains active until that event ordering is implemented
+and independently checked.
 
 The 2026-08-17
 [causal-readiness milestone](sm86_causal_readiness_milestone.md) is complete.

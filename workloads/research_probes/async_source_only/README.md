@@ -56,3 +56,30 @@ The capture helper is shared with the LDGSTS probe as
 `workloads/research_probes/ldgsts_burst_release/capture_nvbit.py`; pass
 `--binary .../async_source_only`, `--mode ncu`, and the probe arguments after
 `--target-args`.
+
+## Three-frontier phase assay
+
+`async_visibility_phase` uses the same fixed-source layouts but records three
+live clock frontiers per copy group: before LDGSTS issue, after the last
+LDGSTS, and after `wait_group 0`. Its only global result store occurs after all
+measured intervals. Routes are cache-all `l1`, bypass with a repeated L2-hit
+footprint (`l2`), and streaming bypass (`dram`).
+
+```bash
+make -C workloads/research_probes/async_source_only async_visibility_phase
+CUDA_VISIBLE_DEVICES=0 \
+  workloads/research_probes/async_source_only/async_visibility_phase \
+  --groups 8192 --depth 4 --route l2 --layout compact --markers off
+CUDA_VISIBLE_DEVICES=0 \
+  workloads/research_probes/async_source_only/async_visibility_phase \
+  --groups 8192 --depth 4 --route l2 --layout conflict --markers off
+
+PYTHONDONTWRITEBYTECODE=1 python3 \
+  workloads/research_probes/async_source_only/analyze_phase.py \
+  --root results/captures/sm86_async_visibility_phase_20260830_v3 \
+  --output results/captures/sm86_async_visibility_phase_20260830_v3/analysis/report.json
+```
+
+The phase assay is live diagnostic evidence, not a simulator input. It
+localizes the bypass layout effect after issue, while its depth shape rejects
+reuse of the cache-all group-aggregate completion rule.

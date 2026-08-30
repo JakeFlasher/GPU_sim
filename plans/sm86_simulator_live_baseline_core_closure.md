@@ -30,12 +30,18 @@ effect while current replays remain layout-identical behind the typed
 and
 [`docs/sm86_async_source_visibility_milestone.md`](../docs/sm86_async_source_visibility_milestone.md).
 
-The bypass effect is real but whole-kernel active time does not separate
-LDGSTS issue replay from coupled delivery or post-source shared visibility.
-The next GPU-only discriminator is a pre-issue/post-issue/post-wait clock split
-on the fixed-source layout pair. Until that mechanism-local frontier exists,
-keep the typed lower bound and do not add a bypass timing constant or alter the
-scored simulator defaults.
+The follow-on three-frontier phase assay now separates those mechanisms. All
+108 compact/conflict issue deltas are zero; all 108 post-issue drain deltas are
+positive. Cache-all scales linearly with depth as the current model predicts,
+whereas L2-hit bypass remains near 11–14 cycles per group over depths 1–8.
+The detailed result is
+[`docs/sm86_async_visibility_phase_milestone.md`](../docs/sm86_async_visibility_phase_milestone.md).
+
+This closes issue replay as the cause and rejects a group-aggregate bypass
+constant. The next GPU-only core slice is to preserve per-copy source and
+destination completion inside an async group, expose that observational
+frontier on the retained layout traces, and promote timing only if it transfers.
+Until then, keep the typed lower bound and scored simulator defaults unchanged.
 
 ## Acceptance Criteria
 
