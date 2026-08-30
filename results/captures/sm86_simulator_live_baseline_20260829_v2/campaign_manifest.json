@@ -34,25 +34,39 @@
   },
   "release_build": {
     "record": "evidence/host_preflight/release_build.json",
-    "record_sha256": "4ed51f40e05556f76b897a262e12da91bf0f3e5c23e7ecb72ea23af8acafb2cb",
+    "record_sha256": "c57f7da8b7869c899b23ca4510c5f756337307b3c549e4ff7e37d16c10174e60",
     "argv": ["cargo", "build", "--release", "--manifest-path", "sim/Cargo.toml", "-p", "sim-run"],
     "timeout_seconds": 1800,
     "exit_code": 0,
-    "repository_revision": "71369ed7273ad940ede54796d721b761c5fdfd0e",
-    "stdout": "evidence/host_preflight/release_build/stdout.txt",
-    "stderr": "evidence/host_preflight/release_build/stderr.txt",
+    "repository_revision": "8cae7c6f37e378ac54e4c5fe5f7acd3f38991480",
+    "reviewed_worktree_revision": "2c39d84636feadb2a44338842e6fbc4d2423b8c1",
+    "stdout": "evidence/host_preflight/release_build/candidate.stdout.txt",
+    "stderr": "evidence/host_preflight/release_build/candidate.stderr.txt",
     "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-    "stderr_sha256": "92434e198f27984c035c376ec77a7cf9e6ebdde782f8ccb1336ae3329b66ddb7",
+    "stderr_sha256": "6bfa9e18ffdef821c711a542cfebd7db0982665615563e5a191285e489609c6f",
     "binary": {
       "path": "sim/target/release/sim-run",
       "sha256": "6cb0d05f0d447c0cd6ee2e30353c0f1e89d464462458912478c826860f15f9a4",
       "size_bytes": 2583912
+    },
+    "candidate_binary_sha256": "6cb0d05f0d447c0cd6ee2e30353c0f1e89d464462458912478c826860f15f9a4",
+    "current_binary_sha256": "6cb0d05f0d447c0cd6ee2e30353c0f1e89d464462458912478c826860f15f9a4",
+    "source_equivalence": {
+      "sim_paths_changed_since_candidate": [],
+      "method": "clean detached worktree build at repository candidate_revision; candidate and reviewed release binaries are byte-identical"
     }
   },
   "next_discriminator": {
     "path": "plans/sm86_ldgsts_burst_release_next_discriminator.json",
     "sha256": "0457578507997d732a98a6f5b85be1ce3a7af21fdc58ffea610abd58be95b008",
     "status": "prospective_not_run"
+  },
+  "active_replay_binding": {
+    "path": "evidence/sm86_active_replay_binding.json",
+    "sha256": "ac080acc0248406e30ac8cb811205b290f99305f40439aa1e29e5528b50e1616",
+    "active_pair_count": 5519,
+    "supplemental_pair_count": 2070,
+    "regeneration_command": [".venv/bin/python", "workloads/research_probes/build_active_replay_binding.py", "--output", "evidence/sm86_active_replay_binding.json"]
   },
   "tools": {
     "cuda_nvcc": "/opt/cuda/bin/nvcc (13.3.73)",

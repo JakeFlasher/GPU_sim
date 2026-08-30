@@ -190,7 +190,9 @@ feedback/sweep matrices with deterministic twin checks. The final validator
 reports `5,519` fresh, schema-matched, byte-identical active pairs. It also
 sees `2,070` known supplemental candidate directories produced by the full
 exploratory sweep; those are classified separately rather than deleted or
-treated as a workflow failure.
+treated as a workflow failure. The validator also recomputes the content-bound
+aggregate in [`evidence/sm86_active_replay_binding.json`](../../../evidence/sm86_active_replay_binding.json),
+so freshness cannot be manufactured by changing timestamps alone.
 
 ## Claim limits
 

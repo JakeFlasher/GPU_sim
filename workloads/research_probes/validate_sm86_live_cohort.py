@@ -14,6 +14,7 @@ import csv
 import copy
 import hashlib
 import json
+import os
 import sys
 from pathlib import Path
 from typing import Any, Mapping
@@ -595,6 +596,14 @@ def _validate_replay_binding(
         output_path = _assert_file(root, expected_path, f"{cell_id}.replay-{index + 1}")
         if record.get("sha256") != _sha256(output_path):
             raise ValueError(f"{cell_id}: replay binding output hash differs at index {index}")
+    try:
+        if os.path.samefile(
+            _assert_file(root, outputs[0], f"{cell_id}.replay-1"),
+            _assert_file(root, outputs[1], f"{cell_id}.replay-2"),
+        ):
+            raise ValueError(f"{cell_id}: replay binding outputs resolve to one file")
+    except OSError as exc:
+        raise ValueError(f"{cell_id}: replay binding output identity is unreadable") from exc
     return binding
 
 
@@ -796,6 +805,10 @@ def _validate_release_build(
     revision = document.get("repository_revision")
     if not isinstance(revision, str) or len(revision) != 40 or record.get("repository_revision") != revision:
         raise ValueError("release_build repository revision is malformed or unbound")
+    if revision != repository.get("candidate_revision"):
+        raise ValueError("release_build was not built from the campaign candidate revision")
+    if document.get("timed_out") is not False:
+        raise ValueError("release_build transcript is timed out or lacks a false timed_out marker")
     for key in ("stdout", "stderr"):
         path = _assert_file(root, document.get(key), f"release_build.{key}")
         if record.get(key) != document.get(key):
@@ -816,6 +829,14 @@ def _validate_release_build(
         raise ValueError("release_build binary identity is missing")
     binary = _assert_file(REPO_ROOT, "sim/target/release/sim-run", "release_build.binary")
     actual_hash = _sha256(binary)
+    equivalence = document.get("source_equivalence")
+    if (
+        document.get("candidate_binary_sha256") != actual_hash
+        or document.get("current_binary_sha256") != actual_hash
+        or not isinstance(equivalence, Mapping)
+        or equivalence.get("sim_paths_changed_since_candidate") != []
+    ):
+        raise ValueError("release_build candidate/current binary equivalence is not proven")
     if (
         binary_record.get("path") != "sim/target/release/sim-run"
         or binary_record.get("sha256") != actual_hash
@@ -827,7 +848,7 @@ def _validate_release_build(
     size = binary_record.get("size_bytes")
     if isinstance(size, bool) or not isinstance(size, int) or size != binary.stat().st_size:
         raise ValueError("release_build binary size is malformed or stale")
-    for key in ("argv", "timeout_seconds", "repository_revision", "stdout", "stderr", "stdout_sha256", "stderr_sha256", "binary"):
+    for key in ("argv", "timeout_seconds", "repository_revision", "reviewed_worktree_revision", "stdout", "stderr", "stdout_sha256", "stderr_sha256", "binary", "candidate_binary_sha256", "current_binary_sha256", "source_equivalence"):
         if record.get(key) != document.get(key):
             raise ValueError(f"release_build manifest field {key} differs from its transcript")
 
@@ -1050,8 +1071,12 @@ def _validate_cell(
         raise ValueError(f"{cell_id}: simulator twin outputs are missing")
     if any(not isinstance(path, str) for path in outputs):
         raise ValueError(f"{cell_id}: simulator replay output paths are malformed")
-    if outputs[0] == outputs[1]:
-        raise ValueError(f"{cell_id}: simulator replay output paths must be distinct")
+    expected_outputs = [
+        f"evidence/raw/simulator/{cell_id}/replay-1.json",
+        f"evidence/raw/simulator/{cell_id}/replay-2.json",
+    ]
+    if outputs != expected_outputs:
+        raise ValueError(f"{cell_id}: simulator replay output paths are not canonical")
     first = _assert_file(root, outputs[0], f"{cell_id}/simulator.replay-1")
     second = _assert_file(root, outputs[1], f"{cell_id}/simulator.replay-2")
     expected_output_prefix = f"evidence/raw/simulator/{cell_id}/"
@@ -1059,6 +1084,11 @@ def _validate_cell(
         raise ValueError(f"{cell_id}: simulator replay outputs are outside the cell directory")
     if first.read_bytes() != second.read_bytes():
         raise ValueError(f"{cell_id}: simulator twins differ")
+    try:
+        if os.path.samefile(first, second):
+            raise ValueError(f"{cell_id}: simulator twin paths resolve to one file")
+    except OSError as exc:
+        raise ValueError(f"{cell_id}: simulator twin file identity is unreadable") from exc
     replay_document = json.load(open(first))
     expected_grid = cell.get("expected_grid")
     expected_block = cell.get("expected_block")
@@ -1237,6 +1267,21 @@ def validate(manifest_path: Path, report_path: Path | None) -> int:
     )
     if next_discriminator.get("sha256") != _sha256(next_path):
         raise ValueError("manifest next-discriminator contract hash does not match")
+    active_binding_record = document.get("active_replay_binding")
+    if not isinstance(active_binding_record, Mapping):
+        raise ValueError("manifest active replay content binding is missing")
+    active_binding_path = _assert_file(
+        REPO_ROOT, active_binding_record.get("path"), "active_replay_binding"
+    )
+    if active_binding_record.get("sha256") != _sha256(active_binding_path):
+        raise ValueError("manifest active replay content binding hash does not match")
+    active_binding_doc = replay_resume.load_json_strict(active_binding_path)
+    if (
+        not isinstance(active_binding_doc, Mapping)
+        or active_binding_doc.get("active_pair_count") != 5519
+        or active_binding_doc.get("supplemental_pair_count") != 2070
+    ):
+        raise ValueError("manifest active replay content binding counts are malformed")
     bundle = document.get("evidence_bundle")
     if not isinstance(bundle, Mapping):
         raise ValueError("manifest evidence_bundle is missing")

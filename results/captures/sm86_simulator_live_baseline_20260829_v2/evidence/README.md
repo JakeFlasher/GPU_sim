@@ -22,6 +22,12 @@ filesystem timestamps after archive extraction.
 The archive is evidence retention, not simulator input. NCU values remain
 comparison-only observations.
 
+The retained 5,519-pair simulator corpus has a separate content binding at
+[`evidence/sm86_active_replay_binding.json`](../../../evidence/sm86_active_replay_binding.json).
+It records current simulator/card/input hashes and aggregate roots over the
+active and 2,070 supplemental pairs; `validate_active_replay_pairs.py`
+recomputes those identities during its normal freshness scan.
+
 `../live_cohort_semantic_report.json` is the independent six-cell validator
 result; it is intentionally kept outside the compressed raw archive so a
 reviewer can inspect the pass/fail summary without extraction.

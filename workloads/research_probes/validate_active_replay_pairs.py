@@ -1,11 +1,17 @@
 #!/usr/bin/env python3
-"""Read-only validation of the active launch/memory replay-pair corpus."""
+"""Read-only validation of the active launch/memory replay-pair corpus.
+
+The scan combines timestamp freshness with the tracked content binding in
+``evidence/sm86_active_replay_binding.json``; mtimes alone are never enough to
+admit a retained replay.
+"""
 
 from __future__ import annotations
 
 import argparse
 import importlib.util
 import json
+import os
 import sys
 from functools import cache
 from pathlib import Path
@@ -46,6 +52,10 @@ ADMISSION = load_module(
 from workloads.research_probes.semantic_replay_validation import (  # noqa: E402
     validate_replay_document,
 )
+from workloads.research_probes import active_replay_binding as CONTENT_BINDING  # noqa: E402
+
+CONTENT_BINDING_PATH = REPO_ROOT / "evidence/sm86_active_replay_binding.json"
+CONTENT_BINDING_SHA256 = "ac080acc0248406e30ac8cb811205b290f99305f40439aa1e29e5528b50e1616"
 
 
 @cache
@@ -225,17 +235,46 @@ def replay_result_directories(root: Path) -> set[Path]:
     }
 
 
+def _load_content_binding(path: Path, binary: Path) -> CONTENT_BINDING.ContentBinding:
+    if not path.is_file():
+        raise ValueError(f"active replay content binding is missing: {path}")
+    if path == CONTENT_BINDING_PATH and CONTENT_BINDING.sha256(path) != CONTENT_BINDING_SHA256:
+        raise ValueError("active replay content binding hash does not match the pinned record")
+    document = REPLAY.load_json_strict(path)
+    if not isinstance(document, dict):
+        raise ValueError("active replay content binding root is malformed")
+    return CONTENT_BINDING.ContentBinding(document, binary=binary)
+
+
 def _validate_pair(
     label: str,
+    group: str,
     first: Path,
     second: Path,
     dependencies: Sequence[Path],
     expectation: Any,
     trace: Path,
     semantic_rows: list[dict[str, Any]],
+    content_binding: CONTENT_BINDING.ContentBinding | None = None,
 ) -> str | None:
     """Run structural, freshness, twin, and trace-semantic validation."""
 
+    if not first.is_file() or not second.is_file():
+        # Let the shared replay validator return its precise missing/empty
+        # diagnostic; same-file checks require both paths to exist.
+        pass
+    else:
+        try:
+            if first.resolve() == second.resolve() or os.path.samefile(first, second):
+                return "replay pair paths resolve to one file"
+        except OSError as exc:
+            return f"replay pair file identity is unreadable: {exc}"
+    if content_binding is not None:
+        content_error = content_binding.check_pair(
+            group, label, first, second, dependencies
+        )
+        if content_error is not None:
+            return content_error
     error = REPLAY.replay_pair_error(first, second, dependencies, expectation)
     if error is not None:
         return error
@@ -273,6 +312,7 @@ def _validate_supplemental_directory(
     root: Path,
     binary: Path,
     semantic_rows: list[dict[str, Any]],
+    content_binding: CONTENT_BINDING.ContentBinding | None = None,
 ) -> str | None:
     """Validate a recognized supplemental directory before classifying it."""
 
@@ -282,12 +322,14 @@ def _validate_supplemental_directory(
     first, second, dependencies, expectation, trace = spec
     return _validate_pair(
         f"supplemental/{path.parent.name}/{path.name}",
+        "supplemental",
         first,
         second,
         dependencies,
         expectation,
         trace,
         semantic_rows,
+        content_binding,
     )
 
 
@@ -645,6 +687,12 @@ def parser() -> argparse.ArgumentParser:
         type=Path,
         help="optional JSON report containing per-pair trace and readiness diagnostics",
     )
+    result.add_argument(
+        "--content-binding",
+        type=Path,
+        default=CONTENT_BINDING_PATH,
+        help="content-identity aggregate for the retained replay corpus",
+    )
     return result
 
 
@@ -676,6 +724,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         return 2
     try:
+        content_binding = _load_content_binding(
+            args.content_binding.expanduser().resolve(), binary
+        )
         groups = (
             ("launch", launch_pairs(args.launch_root.resolve(), binary)),
             (
@@ -720,12 +771,14 @@ def main(argv: Sequence[str] | None = None) -> int:
                 trace = group_roots[group_name] / "nvbit" / first.parent.name
                 error = _validate_pair(
                     label,
+                    group_name,
                     first,
                     second,
                     dependencies,
                     expectation,
                     trace,
                     semantic_rows,
+                    content_binding,
                 )
                 if error is not None:
                     failures.append(f"{label}: {error}")
@@ -749,6 +802,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 args.admission_root.resolve(),
                 binary,
                 semantic_rows,
+                content_binding,
             )
             if error is not None:
                 failures.append(f"supplemental/{extra.parent.name}/{extra.name}: {error}")
@@ -762,6 +816,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(
                 f"validated {supplemental_validated} known supplemental full-campaign replay directories"
             )
+        group_counts["supplemental"] = supplemental_validated
+        failures.extend(content_binding.finish(group_counts))
     except (OSError, RuntimeError, ValueError, json.JSONDecodeError) as error:
         print(f"active replay validation: {error}", file=sys.stderr)
         return 2
@@ -776,6 +832,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         report = {
             "schema_version": 1,
             "validator": "workloads/research_probes/validate_active_replay_pairs.py",
+            "content_binding": {
+                "path": str(args.content_binding.expanduser().resolve()),
+                "sha256": CONTENT_BINDING.sha256(args.content_binding.expanduser().resolve()),
+                "corpus_root": content_binding.document.get("corpus_root"),
+                "active_pair_count": content_binding.document.get("active_pair_count"),
+                "supplemental_pair_count": content_binding.document.get("supplemental_pair_count"),
+            },
             "active_pair_count": total,
             "group_counts": group_counts,
             "semantic_launch_count": len(semantic_rows),

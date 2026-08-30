@@ -12,6 +12,7 @@ import argparse
 import csv
 import hashlib
 import json
+import os
 import re
 import sys
 from pathlib import Path
@@ -496,6 +497,14 @@ def _validate_replay_binding(
         output_path = _campaign_file(root, expected, f"{slug}.replay")
         if not isinstance(record, Mapping) or record.get("path") != expected or record.get("sha256") != _sha256(output_path):
             raise ValueError(f"{slug}: replay binding output mismatch")
+    try:
+        if os.path.samefile(
+            _campaign_file(root, outputs[0], f"{slug}.replay"),
+            _campaign_file(root, outputs[1], f"{slug}.replay_twin"),
+        ):
+            raise ValueError(f"{slug}: replay binding outputs resolve to one file")
+    except OSError as exc:
+        raise ValueError(f"{slug}: replay binding output identity is unreadable") from exc
 
 
 def _validate_replay_semantics(
@@ -929,6 +938,12 @@ def build_report(manifest_path: Path, output_path: Path | None = None) -> dict[s
             raise ValueError(f"{slug}: simulator replay output list is malformed")
         if outputs[0] == outputs[1]:
             raise ValueError(f"{slug}: simulator replay output paths must be distinct")
+        expected_outputs = [
+            f"evidence/raw/simulator/{slug}/replay-1.json",
+            f"evidence/raw/simulator/{slug}/replay-2.json",
+        ]
+        if outputs != expected_outputs:
+            raise ValueError(f"{slug}: simulator replay output paths are not canonical")
         replay_one = _campaign_file(root, outputs[0], f"{slug}.replay")
         replay_two = _campaign_file(root, outputs[1], f"{slug}.replay_twin")
         trace = _campaign_dir(root, stages["nvbit"].get("output"), f"{slug}.trace")
@@ -944,6 +959,11 @@ def build_report(manifest_path: Path, output_path: Path | None = None) -> dict[s
         sim = _replay_summary(replay_one)
         if replay_one.read_bytes() != replay_two.read_bytes():
             raise ValueError(f"{slug}: simulator twins differ")
+        try:
+            if os.path.samefile(replay_one, replay_two):
+                raise ValueError(f"{slug}: simulator twin paths resolve to one file")
+        except OSError as exc:
+            raise ValueError(f"{slug}: simulator twin file identity is unreadable") from exc
         sim["twin_sha256"] = _sha256(replay_two)
         sim["twin_byte_identical"] = True
         sim["semantic_validation"] = semantic_validation
