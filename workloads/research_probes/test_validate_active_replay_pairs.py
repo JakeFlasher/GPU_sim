@@ -184,6 +184,50 @@ def test_supplemental_pair_rejects_mismatch_stale_and_schema(
     )
 
 
+def test_content_bound_pair_does_not_require_replay_mtime_after_inputs(
+    monkeypatch, tmp_path: Path
+) -> None:
+    expectation = VALIDATOR.REPLAY.ReplayExpectation(
+        launches=(REPLAY_HELPERS._launch(),), carded_dram=False
+    )
+    first = tmp_path / "replay-1.json"
+    second = tmp_path / "replay-2.json"
+    dependency = tmp_path / "control.json"
+    trace = tmp_path / "trace"
+    replay = REPLAY_HELPERS._report(expectation)
+    first.write_text(json.dumps(replay), encoding="utf-8")
+    second.write_text(json.dumps(replay), encoding="utf-8")
+    dependency.write_text("input", encoding="utf-8")
+    os.utime(dependency, ns=(2_000_000_000, 2_000_000_000))
+    os.utime(first, ns=(1_000_000_000, 1_000_000_000))
+    os.utime(second, ns=(1_000_000_000, 1_000_000_000))
+    monkeypatch.setattr(
+        VALIDATOR,
+        "validate_replay_document",
+        lambda *args, **kwargs: ([{}], []),
+    )
+
+    class Binding:
+        def check_pair(self, *args, **kwargs):
+            return None
+
+    rows: list[dict[str, object]] = []
+    assert (
+        VALIDATOR._validate_pair(
+            "stale-bound",
+            "retirement",
+            first,
+            second,
+            [dependency],
+            expectation,
+            trace,
+            rows,
+            Binding(),
+        )
+        is None
+    )
+
+
 def test_trace_derived_traffic_mutation_is_rejected() -> None:
     expected = SimpleNamespace(
         global_load_instructions=2,

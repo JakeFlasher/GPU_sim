@@ -26,7 +26,8 @@ The retained 5,519-pair simulator corpus has a separate content binding at
 [`evidence/sm86_active_replay_binding.json`](../../../evidence/sm86_active_replay_binding.json).
 It records current simulator/card/input hashes and aggregate roots over the
 active and 2,070 supplemental pairs; `validate_active_replay_pairs.py`
-recomputes those identities during its normal freshness scan.
+recomputes those identities during its normal scan; replay mtimes are ignored
+after the content binding is verified.
 
 `../live_cohort_semantic_report.json` is the independent six-cell validator
 result; it is intentionally kept outside the compressed raw archive so a

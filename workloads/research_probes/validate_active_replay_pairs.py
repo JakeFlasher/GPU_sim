@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Read-only validation of the active launch/memory replay-pair corpus.
 
-The scan combines timestamp freshness with the tracked content binding in
-``evidence/sm86_active_replay_binding.json``; mtimes alone are never enough to
-admit a retained replay.
+The scan uses the tracked content binding in
+``evidence/sm86_active_replay_binding.json`` for replay/input identity; replay
+mtimes are not used once that binding is validated.  A separate binary-build
+freshness check still protects the simulator executable.
 """
 
 from __future__ import annotations
@@ -257,7 +258,11 @@ def _validate_pair(
     semantic_rows: list[dict[str, Any]],
     content_binding: CONTENT_BINDING.ContentBinding | None = None,
 ) -> str | None:
-    """Run structural, freshness, twin, and trace-semantic validation."""
+    """Run content-bound structural, twin, and trace-semantic validation.
+
+    Content-bound pairs use direct schema validation rather than replay mtime
+    ordering; the binary-build freshness check remains enforced at startup.
+    """
 
     if not first.is_file() or not second.is_file():
         # Let the shared replay validator return its precise missing/empty
@@ -275,7 +280,20 @@ def _validate_pair(
         )
         if content_error is not None:
             return content_error
-    error = REPLAY.replay_pair_error(first, second, dependencies, expectation)
+    if content_binding is not None:
+        error = None
+        for path in (first, second):
+            error = REPLAY.direct_replay_schema_error(path, expectation)
+            if error is not None:
+                break
+        if error is None:
+            try:
+                if first.read_bytes() != second.read_bytes():
+                    error = "replay pair is not byte-identical"
+            except OSError as exc:
+                error = f"could not read replay pair: {exc}"
+    else:
+        error = REPLAY.replay_pair_error(first, second, dependencies, expectation)
     if error is not None:
         return error
     try:
