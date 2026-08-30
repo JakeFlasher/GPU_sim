@@ -4,7 +4,7 @@
   "repository_revision_at_capture": "b915ec6b3df2973e87119c63e438c8bb5f77be44",
   "handoff_revision": "80e1aa8e1b6033298bc081822f5c8f6e8685f800",
   "candidate_revision": "8cae7c6f37e378ac54e4c5fe5f7acd3f38991480",
-  "correction_revision": "5a4460e6eec908b99c1e2ac10e8642727ebea31e",
+  "correction_revision": "e507d69264b0e5781f1fe70a331d5c7c1cf616f8",
   "campaign_manifest": "results/captures/sm86_simulator_live_baseline_20260829_v2/campaign_manifest.json",
   "next_discriminator_manifest": "plans/sm86_ldgsts_burst_release_next_discriminator.json",
   "next_discriminator_manifest_sha256": "0457578507997d732a98a6f5b85be1ce3a7af21fdc58ffea610abd58be95b008",
