@@ -7,6 +7,7 @@ import hashlib
 import importlib.util
 import json
 import os
+import shutil
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -110,6 +111,32 @@ def test_current_nvbit_environment_matches_exact_allowlist() -> None:
         cell["stages"]["nvbit"],
         repository["tracer_dso_sha256"],
     )
+
+
+def test_ncu_capture_metadata_is_bound_to_trusted_executable(tmp_path: Path) -> None:
+    root, cell, _repository = _live_manifest_cell("gemm_hmma_bf16_sm80")
+    stage = deepcopy(cell["stages"]["ncu"])
+    source = root / stage["metadata"]
+    # The fixture is materialized under the expected campaign-relative paths so
+    # the helper exercises hashes and command normalization, not just field types.
+    for relative in (
+        stage["metadata"],
+        stage["command_file"],
+        stage["export_command_file"],
+    ):
+        destination = tmp_path / relative
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(root / relative, destination)
+    for key in ("metadata", "command_file", "export_command_file"):
+        path = tmp_path / stage[key]
+        stage[f"{key}_sha256"] = hashlib.sha256(path.read_bytes()).hexdigest()
+    metadata_path = tmp_path / stage["metadata"]
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    metadata["command"][0] = "ncu"
+    metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
+    stage["metadata_sha256"] = hashlib.sha256(metadata_path.read_bytes()).hexdigest()
+    with pytest.raises(ValueError, match="trusted executable"):
+        LIVE_VALIDATOR._validate_ncu_capture_provenance(tmp_path, cell, stage)
 
 
 def test_static_control_producer_and_schema_are_pinned(tmp_path: Path) -> None:

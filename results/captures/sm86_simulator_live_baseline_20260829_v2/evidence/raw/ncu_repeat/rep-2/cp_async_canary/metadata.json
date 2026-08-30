@@ -3,7 +3,7 @@
     "/usr/local/cuda-13.2/nsight-compute-2026.1.0/ncu",
     "--force-overwrite",
     "--export",
-    "results/captures/sm86_simulator_live_baseline_20260829_v2/evidence/raw/ncu_repeat/rep-2/cp_async_canary/ncu-report",
+    "/home/jakeshea/GPU_simulator_rebase/results/captures/sm86_simulator_live_baseline_20260829_v2/evidence/raw/ncu_repeat/rep-2/cp_async_canary/ncu-report",
     "--launch-skip",
     "1",
     "--launch-count",
@@ -22,8 +22,8 @@
     "3"
   ],
   "return_code": 0,
-  "report": "results/captures/sm86_simulator_live_baseline_20260829_v2/evidence/raw/ncu_repeat/rep-2/cp_async_canary/ncu-report.ncu-rep",
-  "csv": "results/captures/sm86_simulator_live_baseline_20260829_v2/evidence/raw/ncu_repeat/rep-2/cp_async_canary/ncu.csv",
-  "started_at": "2026-08-30T11:41:17.234949+00:00",
-  "finished_at": "2026-08-30T11:41:18.127872+00:00"
+  "report": "/home/jakeshea/GPU_simulator_rebase/results/captures/sm86_simulator_live_baseline_20260829_v2/evidence/raw/ncu_repeat/rep-2/cp_async_canary/ncu-report.ncu-rep",
+  "csv": "/home/jakeshea/GPU_simulator_rebase/results/captures/sm86_simulator_live_baseline_20260829_v2/evidence/raw/ncu_repeat/rep-2/cp_async_canary/ncu.csv",
+  "started_at": "2026-08-30T13:22:48.565450+00:00",
+  "finished_at": "2026-08-30T13:22:49.492801+00:00"
 }

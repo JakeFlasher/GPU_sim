@@ -133,17 +133,21 @@ def collect(
     if not report.is_file():
         raise CaptureError(f"NCU completed but did not create {report}")
 
+    export_command = [
+        ncu,
+        "--import",
+        str(report),
+        "--csv",
+        "--page",
+        "raw",
+        "--log-file",
+        str(csv_path),
+    ]
+    (output / "export_command.txt").write_text(
+        shlex.join(export_command) + "\n", encoding="utf-8"
+    )
     exported = subprocess.run(
-        [
-            ncu,
-            "--import",
-            str(report),
-            "--csv",
-            "--page",
-            "raw",
-            "--log-file",
-            str(csv_path),
-        ],
+        export_command,
         env=environment,
         text=True,
         stdout=subprocess.PIPE,

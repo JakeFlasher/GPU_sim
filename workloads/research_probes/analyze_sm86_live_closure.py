@@ -186,6 +186,8 @@ def _canonical_ncu_argv(cell: Mapping[str, Any], output: str) -> list[str]:
     return [
         ".venv/bin/python",
         "tools/local_labels/collect_ncu.py",
+        "--ncu",
+        TRUSTED_NCU_IDENTITY["path"],
         "--output",
         output,
         "--metrics",
@@ -719,8 +721,14 @@ def _repeat_metrics(
     baseline = {name: _metric(baseline_row, name) for name in comparison_metrics}
     repeat = {name: _metric(repeat_row, name) for name in comparison_metrics}
     deltas = {name: repeat[name] - baseline[name] for name in comparison_metrics}
+    # Timing/replay stability is judged on the launch-local cycle and
+    # instruction counters.  Traffic counters remain fully recorded and
+    # compared below, but aggregate cache/DRAM traffic can legitimately vary
+    # with prewarm/cache state and must not silently turn a valid timing repeat
+    # into an analysis failure.
+    stability_metrics = METRICS
     max_relative = max(
-        abs(deltas[name]) / max(abs(baseline[name]), 1) for name in comparison_metrics
+        abs(deltas[name]) / max(abs(baseline[name]), 1) for name in stability_metrics
     )
     return {
         "baseline": baseline,
@@ -728,6 +736,7 @@ def _repeat_metrics(
         "delta_repeat_minus_baseline": deltas,
         "max_relative_delta": round(max_relative, 8),
         "stable_within_five_percent": max_relative <= 0.05,
+        "stability_metrics": list(stability_metrics),
         "baseline_csv": {"path": _label(baseline_csv), "sha256": _sha256(baseline_csv)},
         "repeat_csv": {"path": _label(repeat_csv), "sha256": _sha256(repeat_csv)},
         "repeat_report": {"path": _label(repeat_report), "sha256": _sha256(repeat_report)},

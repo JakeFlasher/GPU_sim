@@ -15,6 +15,7 @@ import copy
 import hashlib
 import json
 import os
+import shlex
 import sys
 from pathlib import Path
 from typing import Any, Mapping
@@ -272,6 +273,125 @@ def _assert_file(root: Path, relative: object, label: str) -> Path:
     if not path.is_file():
         raise ValueError(f"{label}: artifact is missing: {relative}")
     return path
+
+
+def _expected_ncu_capture_argv(cell: Mapping[str, Any], output: str) -> list[str]:
+    """Build the exact low-level NCU argv emitted by collect_ncu.py."""
+
+    return [
+        _TRUSTED_NCU_IDENTITY["path"],
+        "--force-overwrite",
+        "--export",
+        output + "/ncu-report",
+        "--launch-skip",
+        "1",
+        "--launch-count",
+        "1",
+        "--replay-mode",
+        "application",
+        "--clock-control",
+        "none",
+        "--metrics",
+        ",".join(closure_analyzer._expected_ncu_metrics(cell)),
+        *closure_analyzer._expected_ncu_target(cell),
+    ]
+
+
+def _expected_ncu_export_argv(output: str) -> list[str]:
+    return [
+        _TRUSTED_NCU_IDENTITY["path"],
+        "--import",
+        output + "/ncu-report.ncu-rep",
+        "--csv",
+        "--page",
+        "raw",
+        "--log-file",
+        output + "/ncu.csv",
+    ]
+
+
+def _ncu_path_token_matches(actual: object, expected: str, root: Path) -> bool:
+    """Accept the canonical relative spelling or its absolute checkout path."""
+
+    if not isinstance(actual, str):
+        return False
+    return actual in {expected, str((root / expected).resolve())}
+
+
+def _ncu_argv_matches(actual: object, expected: list[str], root: Path) -> bool:
+    if not isinstance(actual, list) or len(actual) != len(expected):
+        return False
+    path_tokens = {
+        index
+        for index, token in enumerate(expected)
+        if token.startswith("evidence/raw/ncu/")
+    }
+    for index, (observed, required) in enumerate(zip(actual, expected)):
+        if index in path_tokens and not _ncu_path_token_matches(observed, required, root):
+            return False
+        if index not in path_tokens and observed != required:
+            return False
+    return True
+
+
+def _ncu_result_path_matches(actual: object, expected: str, root: Path) -> bool:
+    return _ncu_path_token_matches(actual, expected, root)
+
+
+def _validate_ncu_capture_provenance(
+    root: Path, cell: Mapping[str, Any], stage: Mapping[str, Any]
+) -> None:
+    """Bind baseline NCU metadata/transcripts to the trusted executable."""
+
+    slug = str(cell["id"])
+    output = f"evidence/raw/ncu/{slug}"
+    expected_command = _expected_ncu_capture_argv(cell, output)
+    expected_paths = {
+        "metadata": output + "/metadata.json",
+        "command_file": output + "/command.txt",
+        "export_command_file": output + "/export_command.txt",
+    }
+    for key, expected in expected_paths.items():
+        if stage.get(key) != expected:
+            raise ValueError(f"{slug}: NCU {key} path is not canonical")
+    paths = {
+        key: _assert_file(root, relative, f"{slug}.ncu.{key}")
+        for key, relative in expected_paths.items()
+    }
+    for key, path in paths.items():
+        digest_key = f"{key}_sha256"
+        digest = stage.get(digest_key)
+        if not isinstance(digest, str) or len(digest) != 64 or _sha256(path) != digest:
+            raise ValueError(f"{slug}: NCU {digest_key} does not match artifact")
+    try:
+        metadata = replay_resume.load_json_strict(paths["metadata"])
+    except (OSError, UnicodeDecodeError, ValueError, json.JSONDecodeError) as exc:
+        raise ValueError(f"{slug}: NCU metadata is not strict JSON") from exc
+    if not isinstance(metadata, Mapping):
+        raise ValueError(f"{slug}: NCU metadata is malformed")
+    if (
+        not _ncu_argv_matches(metadata.get("command"), expected_command, root)
+        or not _is_exact_zero(metadata.get("return_code"))
+        or not _ncu_result_path_matches(metadata.get("report"), output + "/ncu-report.ncu-rep", root)
+        or not _ncu_result_path_matches(metadata.get("csv"), output + "/ncu.csv", root)
+        or not isinstance(metadata.get("started_at"), str)
+        or not isinstance(metadata.get("finished_at"), str)
+    ):
+        raise ValueError(
+            f"{slug}: NCU metadata command or result is not bound to the trusted executable"
+        )
+    try:
+        recorded_command = shlex.split(paths["command_file"].read_text(encoding="utf-8"))
+        recorded_export = shlex.split(
+            paths["export_command_file"].read_text(encoding="utf-8")
+        )
+    except ValueError as exc:
+        raise ValueError(f"{slug}: NCU command transcript is malformed") from exc
+    if not _ncu_argv_matches(recorded_command, expected_command, root):
+        raise ValueError(f"{slug}: NCU command.txt differs from the canonical executable/argv")
+    expected_export = _expected_ncu_export_argv(output)
+    if not _ncu_argv_matches(recorded_export, expected_export, root):
+        raise ValueError(f"{slug}: NCU export command differs from the canonical executable/argv")
 
 
 def _campaign_argv_matches(token: object, relative: object) -> bool:
@@ -1156,6 +1276,7 @@ def _validate_cell(
         ncu["csv"],
         f"{cell_id}/ncu.csv",
     )
+    _validate_ncu_capture_provenance(root, cell, ncu)
     ncu_row = _kernel_row(ncu_csv)
     ncu_observed = ncu.get("observed")
     if not isinstance(ncu_observed, Mapping):

@@ -90,6 +90,7 @@ NCU is a separate application-replay process (no simulator input):
 
 ```bash
 .venv/bin/python tools/local_labels/collect_ncu.py \
+  --ncu /usr/local/cuda-13.2/nsight-compute-2026.1.0/ncu \
   --output <ncu-out> \
   --metrics gpc__cycles_elapsed.max,sm__cycles_active.max,\
 smsp__inst_executed.sum,lts__t_sectors_srcunit_tex_op_read.sum,\

@@ -219,24 +219,24 @@
       "comparable_to_simulator_timing": false,
       "live": {
         "baseline": {
-          "gpc__cycles_elapsed.max": 4460142,
+          "gpc__cycles_elapsed.max": 4460035,
           "l1tex__t_sectors_pipe_lsu_mem_global_op_ld.sum": 8388608,
           "l1tex__t_sectors_pipe_lsu_mem_global_op_st.sum": 72,
-          "sm__cycles_active.max": 4458497,
+          "sm__cycles_active.max": 4458395,
           "smsp__inst_executed.sum": 2293904
         },
         "baseline_csv": {
           "path": "results/captures/sm86_simulator_live_baseline_20260829_v2/evidence/raw/ncu/cp_async_canary/ncu.csv",
-          "sha256": "5ea3cb9f941162642de6eda9c9e5f3bb7f3aad69010af97f8d24384bc300f79f"
+          "sha256": "c3f805853d5b2f2c3c94317bc8cd710767754f0c1a8f3ffcbc4201df185ece65"
         },
         "delta_repeat_minus_baseline": {
-          "gpc__cycles_elapsed.max": -22,
+          "gpc__cycles_elapsed.max": 78,
           "l1tex__t_sectors_pipe_lsu_mem_global_op_ld.sum": 0,
           "l1tex__t_sectors_pipe_lsu_mem_global_op_st.sum": 0,
-          "sm__cycles_active.max": -12,
+          "sm__cycles_active.max": 114,
           "smsp__inst_executed.sum": 0
         },
-        "max_relative_delta": 4.93e-06,
+        "max_relative_delta": 2.557e-05,
         "provenance": {
           "block_size": "(128, 1, 1)",
           "compute_capability": "8.6",
@@ -261,22 +261,22 @@
           ]
         },
         "repeat_2": {
-          "gpc__cycles_elapsed.max": 4460120,
+          "gpc__cycles_elapsed.max": 4460113,
           "l1tex__t_sectors_pipe_lsu_mem_global_op_ld.sum": 8388608,
           "l1tex__t_sectors_pipe_lsu_mem_global_op_st.sum": 72,
-          "sm__cycles_active.max": 4458485,
+          "sm__cycles_active.max": 4458509,
           "smsp__inst_executed.sum": 2293904
         },
         "repeat_csv": {
           "path": "results/captures/sm86_simulator_live_baseline_20260829_v2/evidence/raw/ncu_repeat/rep-2/cp_async_canary/ncu.csv",
-          "sha256": "925e88109d5733d01f870fbd731597fda6aae214cffcdcdd49518e1ae62cff84"
+          "sha256": "eeb842d50e21721fcf069a07fdc2f48ddebde83c2c3917add327205681f04f1c"
         },
         "repeat_metadata": {
           "argv": [
             "/usr/local/cuda-13.2/nsight-compute-2026.1.0/ncu",
             "--force-overwrite",
             "--export",
-            "results/captures/sm86_simulator_live_baseline_20260829_v2/evidence/raw/ncu_repeat/rep-2/cp_async_canary/ncu-report",
+            "/home/jakeshea/GPU_simulator_rebase/results/captures/sm86_simulator_live_baseline_20260829_v2/evidence/raw/ncu_repeat/rep-2/cp_async_canary/ncu-report",
             "--launch-skip",
             "1",
             "--launch-count",
@@ -295,15 +295,20 @@
             "3"
           ],
           "contract_validated": true,
-          "finished_at": "2026-08-30T11:41:18.127872+00:00",
+          "finished_at": "2026-08-30T13:22:49.492801+00:00",
           "path": "results/captures/sm86_simulator_live_baseline_20260829_v2/evidence/raw/ncu_repeat/rep-2/cp_async_canary/metadata.json",
-          "sha256": "32bcc8ec1fea44f1462d61c964fcc1e80b39b346907b467a3300fe4539585c08",
-          "started_at": "2026-08-30T11:41:17.234949+00:00"
+          "sha256": "c4c43166899adf1100cbb573317962045e7d11f21ba90027dd8a3f9f380bb220",
+          "started_at": "2026-08-30T13:22:48.565450+00:00"
         },
         "repeat_report": {
           "path": "results/captures/sm86_simulator_live_baseline_20260829_v2/evidence/raw/ncu_repeat/rep-2/cp_async_canary/ncu-report.ncu-rep",
-          "sha256": "eabbfd525ca5834f7ab1e402697fa6fac8e6f29b1a77b815ffbdced91fca8c3c"
+          "sha256": "46e114aea00ce50769f86248269e8adb5c23489fbb4a1ad0f405135eb1a533d3"
         },
+        "stability_metrics": [
+          "gpc__cycles_elapsed.max",
+          "sm__cycles_active.max",
+          "smsp__inst_executed.sum"
+        ],
         "stable_within_five_percent": true
       },
       "residual": {
@@ -314,14 +319,14 @@
           "reference_cycles": 20522
         },
         "gpc_elapsed_gaps": {
-          "baseline_launch_envelope_cycles": 1645,
-          "baseline_vs_completion_frontier_cycles": 4439620,
-          "baseline_vs_last_issue_cycles": 4439620,
-          "baseline_vs_last_modeled_event_cycles": 4439623,
-          "repeat_2_launch_envelope_cycles": 1635,
-          "repeat_2_vs_completion_frontier_cycles": 4439598,
-          "repeat_2_vs_last_issue_cycles": 4439598,
-          "repeat_2_vs_last_modeled_event_cycles": 4439601
+          "baseline_launch_envelope_cycles": 1640,
+          "baseline_vs_completion_frontier_cycles": 4439513,
+          "baseline_vs_last_issue_cycles": 4439513,
+          "baseline_vs_last_modeled_event_cycles": 4439516,
+          "repeat_2_launch_envelope_cycles": 1604,
+          "repeat_2_vs_completion_frontier_cycles": 4439591,
+          "repeat_2_vs_last_issue_cycles": 4439591,
+          "repeat_2_vs_last_modeled_event_cycles": 4439594
         },
         "interpretable": false,
         "metric": "multi-frontier SM-active and GPC elapsed comparison",
@@ -338,17 +343,17 @@
           "rule": "mechanism_local_typed_tail_precedence"
         },
         "selection_vector": {
-          "gpc_completion_gap_cycles": 4439620,
-          "gpc_launch_envelope_cycles": 1645,
-          "sm_completion_gap_cycles": 4437975
+          "gpc_completion_gap_cycles": 4439513,
+          "gpc_launch_envelope_cycles": 1640,
+          "sm_completion_gap_cycles": 4437873
         },
         "sm_active_gaps": {
-          "baseline_vs_completion_frontier_cycles": 4437975,
-          "baseline_vs_last_issue_cycles": 4437975,
-          "baseline_vs_last_modeled_event_cycles": 4437978,
-          "repeat_2_vs_completion_frontier_cycles": 4437963,
-          "repeat_2_vs_last_issue_cycles": 4437963,
-          "repeat_2_vs_last_modeled_event_cycles": 4437966
+          "baseline_vs_completion_frontier_cycles": 4437873,
+          "baseline_vs_last_issue_cycles": 4437873,
+          "baseline_vs_last_modeled_event_cycles": 4437876,
+          "repeat_2_vs_completion_frontier_cycles": 4437987,
+          "repeat_2_vs_last_issue_cycles": 4437987,
+          "repeat_2_vs_last_modeled_event_cycles": 4437990
         }
       },
       "simulator": {
@@ -421,25 +426,25 @@
       "live": {
         "baseline": {
           "dram__sectors_read.sum": 8364,
-          "gpc__cycles_elapsed.max": 13350,
-          "lts__t_sectors_srcunit_tex_op_read.sum": 160128,
-          "sm__cycles_active.max": 11685,
+          "gpc__cycles_elapsed.max": 13415,
+          "lts__t_sectors_srcunit_tex_op_read.sum": 164736,
+          "sm__cycles_active.max": 11756,
           "sm__pipe_tensor_cycles_active.sum": 131072,
           "smsp__inst_executed.sum": 197120
         },
         "baseline_csv": {
           "path": "results/captures/sm86_simulator_live_baseline_20260829_v2/evidence/raw/ncu/gemm_hmma_bf16_sm80/ncu.csv",
-          "sha256": "fb3857c397e8544c20a318aab5c69bef5720c9cb0da5499c5ee67ff4ddc40e1a"
+          "sha256": "9a64dc3da6935b8483cf5a19ce3a8549497ffe9bcd740dd2d1dc58d193926af3"
         },
         "delta_repeat_minus_baseline": {
-          "dram__sectors_read.sum": 0,
-          "gpc__cycles_elapsed.max": 151,
-          "lts__t_sectors_srcunit_tex_op_read.sum": 4224,
-          "sm__cycles_active.max": 60,
+          "dram__sectors_read.sum": 44,
+          "gpc__cycles_elapsed.max": 10,
+          "lts__t_sectors_srcunit_tex_op_read.sum": -7936,
+          "sm__cycles_active.max": -4,
           "sm__pipe_tensor_cycles_active.sum": 0,
           "smsp__inst_executed.sum": 0
         },
-        "max_relative_delta": 0.0263789,
+        "max_relative_delta": 0.00074543,
         "provenance": {
           "block_size": "(32, 1, 1)",
           "compute_capability": "8.6",
@@ -465,23 +470,23 @@
           ]
         },
         "repeat_2": {
-          "dram__sectors_read.sum": 8364,
-          "gpc__cycles_elapsed.max": 13501,
-          "lts__t_sectors_srcunit_tex_op_read.sum": 164352,
-          "sm__cycles_active.max": 11745,
+          "dram__sectors_read.sum": 8408,
+          "gpc__cycles_elapsed.max": 13425,
+          "lts__t_sectors_srcunit_tex_op_read.sum": 156800,
+          "sm__cycles_active.max": 11752,
           "sm__pipe_tensor_cycles_active.sum": 131072,
           "smsp__inst_executed.sum": 197120
         },
         "repeat_csv": {
           "path": "results/captures/sm86_simulator_live_baseline_20260829_v2/evidence/raw/ncu_repeat/rep-2/gemm_hmma_bf16_sm80/ncu.csv",
-          "sha256": "1bccf525b0eff5c062ecd73af064d3c297c882924cec9cc7cdba78a5d3279c89"
+          "sha256": "bce9f814eb3debbc3261fca81b57486569bbd0c643417994433ef37ebfc2e5d7"
         },
         "repeat_metadata": {
           "argv": [
             "/usr/local/cuda-13.2/nsight-compute-2026.1.0/ncu",
             "--force-overwrite",
             "--export",
-            "results/captures/sm86_simulator_live_baseline_20260829_v2/evidence/raw/ncu_repeat/rep-2/gemm_hmma_bf16_sm80/ncu-report",
+            "/home/jakeshea/GPU_simulator_rebase/results/captures/sm86_simulator_live_baseline_20260829_v2/evidence/raw/ncu_repeat/rep-2/gemm_hmma_bf16_sm80/ncu-report",
             "--launch-skip",
             "1",
             "--launch-count",
@@ -500,15 +505,20 @@
             "1"
           ],
           "contract_validated": true,
-          "finished_at": "2026-08-29T16:47:31.657884+00:00",
+          "finished_at": "2026-08-30T13:22:50.609975+00:00",
           "path": "results/captures/sm86_simulator_live_baseline_20260829_v2/evidence/raw/ncu_repeat/rep-2/gemm_hmma_bf16_sm80/metadata.json",
-          "sha256": "9e1e6e9cbc7c51ec5bba854f10eefb15196570f02e9fa9ca2c31e13d14d6d74a",
-          "started_at": "2026-08-29T16:47:30.634457+00:00"
+          "sha256": "213fa45c56ef8258b7d51c6341af9489edb150387b9cbdb7b28cbdef3020d475",
+          "started_at": "2026-08-30T13:22:49.734006+00:00"
         },
         "repeat_report": {
           "path": "results/captures/sm86_simulator_live_baseline_20260829_v2/evidence/raw/ncu_repeat/rep-2/gemm_hmma_bf16_sm80/ncu-report.ncu-rep",
-          "sha256": "c7bd4fffd3e6ea17074d551ee293985665f85ba27e7e16585df6e8b35810fd9b"
+          "sha256": "41053f1e56aaa8a91c031c083c6a1ac534e160cfc1ab91d6d500d1db49d5a9c3"
         },
+        "stability_metrics": [
+          "gpc__cycles_elapsed.max",
+          "sm__cycles_active.max",
+          "smsp__inst_executed.sum"
+        ],
         "stable_within_five_percent": true
       },
       "residual": {
@@ -519,14 +529,14 @@
           "reference_cycles": 8915
         },
         "gpc_elapsed_gaps": {
-          "baseline_launch_envelope_cycles": 1665,
-          "baseline_vs_completion_frontier_cycles": 4435,
-          "baseline_vs_last_issue_cycles": 4435,
-          "baseline_vs_last_modeled_event_cycles": 4438,
-          "repeat_2_launch_envelope_cycles": 1756,
-          "repeat_2_vs_completion_frontier_cycles": 4586,
-          "repeat_2_vs_last_issue_cycles": 4586,
-          "repeat_2_vs_last_modeled_event_cycles": 4589
+          "baseline_launch_envelope_cycles": 1659,
+          "baseline_vs_completion_frontier_cycles": 4500,
+          "baseline_vs_last_issue_cycles": 4500,
+          "baseline_vs_last_modeled_event_cycles": 4503,
+          "repeat_2_launch_envelope_cycles": 1673,
+          "repeat_2_vs_completion_frontier_cycles": 4510,
+          "repeat_2_vs_last_issue_cycles": 4510,
+          "repeat_2_vs_last_modeled_event_cycles": 4513
         },
         "interpretable": true,
         "metric": "multi-frontier SM-active and GPC elapsed comparison",
@@ -546,17 +556,17 @@
           "rule": "mechanism_local_typed_tail_precedence"
         },
         "selection_vector": {
-          "gpc_completion_gap_cycles": 4435,
-          "gpc_launch_envelope_cycles": 1665,
-          "sm_completion_gap_cycles": 2770
+          "gpc_completion_gap_cycles": 4500,
+          "gpc_launch_envelope_cycles": 1659,
+          "sm_completion_gap_cycles": 2841
         },
         "sm_active_gaps": {
-          "baseline_vs_completion_frontier_cycles": 2770,
-          "baseline_vs_last_issue_cycles": 2770,
-          "baseline_vs_last_modeled_event_cycles": 2773,
-          "repeat_2_vs_completion_frontier_cycles": 2830,
-          "repeat_2_vs_last_issue_cycles": 2830,
-          "repeat_2_vs_last_modeled_event_cycles": 2833
+          "baseline_vs_completion_frontier_cycles": 2841,
+          "baseline_vs_last_issue_cycles": 2841,
+          "baseline_vs_last_modeled_event_cycles": 2844,
+          "repeat_2_vs_completion_frontier_cycles": 2837,
+          "repeat_2_vs_last_issue_cycles": 2837,
+          "repeat_2_vs_last_modeled_event_cycles": 2840
         }
       },
       "simulator": {
@@ -628,26 +638,26 @@
       "comparable_to_simulator_timing": true,
       "live": {
         "baseline": {
-          "dram__sectors_read.sum": 8364,
-          "gpc__cycles_elapsed.max": 13211,
-          "lts__t_sectors_srcunit_tex_op_read.sum": 164480,
-          "sm__cycles_active.max": 11539,
+          "dram__sectors_read.sum": 17348,
+          "gpc__cycles_elapsed.max": 13468,
+          "lts__t_sectors_srcunit_tex_op_read.sum": 168832,
+          "sm__cycles_active.max": 11769,
           "sm__pipe_tensor_cycles_active.sum": 131072,
           "smsp__inst_executed.sum": 197120
         },
         "baseline_csv": {
           "path": "results/captures/sm86_simulator_live_baseline_20260829_v2/evidence/raw/ncu/gemm_hmma_fp16_sm80/ncu.csv",
-          "sha256": "a9681782617ecf36e30a57beefeb88a20be15089c2a1495be1ffe97633df2e27"
+          "sha256": "3cd8e945571520c7c233b0ec8223a68449d282ea57a9fdf6307f8dac9ccf1b61"
         },
         "delta_repeat_minus_baseline": {
-          "dram__sectors_read.sum": 96,
-          "gpc__cycles_elapsed.max": 26,
-          "lts__t_sectors_srcunit_tex_op_read.sum": -1792,
-          "sm__cycles_active.max": -45,
+          "dram__sectors_read.sum": -8984,
+          "gpc__cycles_elapsed.max": 85,
+          "lts__t_sectors_srcunit_tex_op_read.sum": -5120,
+          "sm__cycles_active.max": 54,
           "sm__pipe_tensor_cycles_active.sum": 0,
           "smsp__inst_executed.sum": 0
         },
-        "max_relative_delta": 0.01147776,
+        "max_relative_delta": 0.00631126,
         "provenance": {
           "block_size": "(32, 1, 1)",
           "compute_capability": "8.6",
@@ -673,23 +683,23 @@
           ]
         },
         "repeat_2": {
-          "dram__sectors_read.sum": 8460,
-          "gpc__cycles_elapsed.max": 13237,
-          "lts__t_sectors_srcunit_tex_op_read.sum": 162688,
-          "sm__cycles_active.max": 11494,
+          "dram__sectors_read.sum": 8364,
+          "gpc__cycles_elapsed.max": 13553,
+          "lts__t_sectors_srcunit_tex_op_read.sum": 163712,
+          "sm__cycles_active.max": 11823,
           "sm__pipe_tensor_cycles_active.sum": 131072,
           "smsp__inst_executed.sum": 197120
         },
         "repeat_csv": {
           "path": "results/captures/sm86_simulator_live_baseline_20260829_v2/evidence/raw/ncu_repeat/rep-2/gemm_hmma_fp16_sm80/ncu.csv",
-          "sha256": "b5c9787a81d47ca80677edbfdad12fc31af83f2321ae4b7249db1636f723d74e"
+          "sha256": "4af00739f76dcb9e1b192fca8dfceb530e2822fd14d18b4fc5dba08417661220"
         },
         "repeat_metadata": {
           "argv": [
             "/usr/local/cuda-13.2/nsight-compute-2026.1.0/ncu",
             "--force-overwrite",
             "--export",
-            "results/captures/sm86_simulator_live_baseline_20260829_v2/evidence/raw/ncu_repeat/rep-2/gemm_hmma_fp16_sm80/ncu-report",
+            "/home/jakeshea/GPU_simulator_rebase/results/captures/sm86_simulator_live_baseline_20260829_v2/evidence/raw/ncu_repeat/rep-2/gemm_hmma_fp16_sm80/ncu-report",
             "--launch-skip",
             "1",
             "--launch-count",
@@ -708,15 +718,20 @@
             "1"
           ],
           "contract_validated": true,
-          "finished_at": "2026-08-29T16:47:32.840784+00:00",
+          "finished_at": "2026-08-30T13:22:51.715216+00:00",
           "path": "results/captures/sm86_simulator_live_baseline_20260829_v2/evidence/raw/ncu_repeat/rep-2/gemm_hmma_fp16_sm80/metadata.json",
-          "sha256": "3b15d372ec0121e90c3fdc15d9617e4ec95fcace05f37162a3174c81be8349f2",
-          "started_at": "2026-08-29T16:47:31.895855+00:00"
+          "sha256": "37a69cbe6aa6c0b8a2622a8eecc6a212565627ad7e8fc763f3c1ac48906a7d46",
+          "started_at": "2026-08-30T13:22:50.854491+00:00"
         },
         "repeat_report": {
           "path": "results/captures/sm86_simulator_live_baseline_20260829_v2/evidence/raw/ncu_repeat/rep-2/gemm_hmma_fp16_sm80/ncu-report.ncu-rep",
-          "sha256": "787dc828d748aff74a116f82889e4710f68448bce581bebf754034bbe1a25277"
+          "sha256": "ccd038550be71fd24c5d2355655768ff1921bf4100b01fe87690cb9bae5ef003"
         },
+        "stability_metrics": [
+          "gpc__cycles_elapsed.max",
+          "sm__cycles_active.max",
+          "smsp__inst_executed.sum"
+        ],
         "stable_within_five_percent": true
       },
       "residual": {
@@ -727,14 +742,14 @@
           "reference_cycles": 8915
         },
         "gpc_elapsed_gaps": {
-          "baseline_launch_envelope_cycles": 1672,
-          "baseline_vs_completion_frontier_cycles": 4296,
-          "baseline_vs_last_issue_cycles": 4296,
-          "baseline_vs_last_modeled_event_cycles": 4299,
-          "repeat_2_launch_envelope_cycles": 1743,
-          "repeat_2_vs_completion_frontier_cycles": 4322,
-          "repeat_2_vs_last_issue_cycles": 4322,
-          "repeat_2_vs_last_modeled_event_cycles": 4325
+          "baseline_launch_envelope_cycles": 1699,
+          "baseline_vs_completion_frontier_cycles": 4553,
+          "baseline_vs_last_issue_cycles": 4553,
+          "baseline_vs_last_modeled_event_cycles": 4556,
+          "repeat_2_launch_envelope_cycles": 1730,
+          "repeat_2_vs_completion_frontier_cycles": 4638,
+          "repeat_2_vs_last_issue_cycles": 4638,
+          "repeat_2_vs_last_modeled_event_cycles": 4641
         },
         "interpretable": true,
         "metric": "multi-frontier SM-active and GPC elapsed comparison",
@@ -754,17 +769,17 @@
           "rule": "mechanism_local_typed_tail_precedence"
         },
         "selection_vector": {
-          "gpc_completion_gap_cycles": 4296,
-          "gpc_launch_envelope_cycles": 1672,
-          "sm_completion_gap_cycles": 2624
+          "gpc_completion_gap_cycles": 4553,
+          "gpc_launch_envelope_cycles": 1699,
+          "sm_completion_gap_cycles": 2854
         },
         "sm_active_gaps": {
-          "baseline_vs_completion_frontier_cycles": 2624,
-          "baseline_vs_last_issue_cycles": 2624,
-          "baseline_vs_last_modeled_event_cycles": 2627,
-          "repeat_2_vs_completion_frontier_cycles": 2579,
-          "repeat_2_vs_last_issue_cycles": 2579,
-          "repeat_2_vs_last_modeled_event_cycles": 2582
+          "baseline_vs_completion_frontier_cycles": 2854,
+          "baseline_vs_last_issue_cycles": 2854,
+          "baseline_vs_last_modeled_event_cycles": 2857,
+          "repeat_2_vs_completion_frontier_cycles": 2908,
+          "repeat_2_vs_last_issue_cycles": 2908,
+          "repeat_2_vs_last_modeled_event_cycles": 2911
         }
       },
       "simulator": {
@@ -837,25 +852,25 @@
       "live": {
         "baseline": {
           "dram__sectors_read.sum": 4268,
-          "gpc__cycles_elapsed.max": 11425,
-          "lts__t_sectors_srcunit_tex_op_read.sum": 81664,
-          "sm__cycles_active.max": 9734,
+          "gpc__cycles_elapsed.max": 11331,
+          "lts__t_sectors_srcunit_tex_op_read.sum": 81344,
+          "sm__cycles_active.max": 9628,
           "sm__pipe_tensor_cycles_active.sum": 65536,
           "smsp__inst_executed.sum": 157696
         },
         "baseline_csv": {
           "path": "results/captures/sm86_simulator_live_baseline_20260829_v2/evidence/raw/ncu/gemm_imma_int8_sm80/ncu.csv",
-          "sha256": "94ca070ddcc72dc5dc2fbd3a4c4bd4309be32050ba4ddd3ad3cca0e65378698a"
+          "sha256": "29147a7aa6a8f8070095df3fee9cb3ca13916a65201d958935a4f2d91303aef7"
         },
         "delta_repeat_minus_baseline": {
-          "dram__sectors_read.sum": 0,
-          "gpc__cycles_elapsed.max": -6,
-          "lts__t_sectors_srcunit_tex_op_read.sum": 2240,
-          "sm__cycles_active.max": 7,
+          "dram__sectors_read.sum": 72,
+          "gpc__cycles_elapsed.max": 156,
+          "lts__t_sectors_srcunit_tex_op_read.sum": 1536,
+          "sm__cycles_active.max": 188,
           "sm__pipe_tensor_cycles_active.sum": 0,
           "smsp__inst_executed.sum": 0
         },
-        "max_relative_delta": 0.02742947,
+        "max_relative_delta": 0.01952638,
         "provenance": {
           "block_size": "(32, 1, 1)",
           "compute_capability": "8.6",
@@ -881,23 +896,23 @@
           ]
         },
         "repeat_2": {
-          "dram__sectors_read.sum": 4268,
-          "gpc__cycles_elapsed.max": 11419,
-          "lts__t_sectors_srcunit_tex_op_read.sum": 83904,
-          "sm__cycles_active.max": 9741,
+          "dram__sectors_read.sum": 4340,
+          "gpc__cycles_elapsed.max": 11487,
+          "lts__t_sectors_srcunit_tex_op_read.sum": 82880,
+          "sm__cycles_active.max": 9816,
           "sm__pipe_tensor_cycles_active.sum": 65536,
           "smsp__inst_executed.sum": 157696
         },
         "repeat_csv": {
           "path": "results/captures/sm86_simulator_live_baseline_20260829_v2/evidence/raw/ncu_repeat/rep-2/gemm_imma_int8_sm80/ncu.csv",
-          "sha256": "2dac0178559aa4c81169aed9c16ec219d2d5df53855f08009b04518ac5f364cc"
+          "sha256": "d83bf19974911a6e5175967ce801896970415644b9800beb5ec4c7939c2b63fc"
         },
         "repeat_metadata": {
           "argv": [
             "/usr/local/cuda-13.2/nsight-compute-2026.1.0/ncu",
             "--force-overwrite",
             "--export",
-            "results/captures/sm86_simulator_live_baseline_20260829_v2/evidence/raw/ncu_repeat/rep-2/gemm_imma_int8_sm80/ncu-report",
+            "/home/jakeshea/GPU_simulator_rebase/results/captures/sm86_simulator_live_baseline_20260829_v2/evidence/raw/ncu_repeat/rep-2/gemm_imma_int8_sm80/ncu-report",
             "--launch-skip",
             "1",
             "--launch-count",
@@ -916,15 +931,20 @@
             "1"
           ],
           "contract_validated": true,
-          "finished_at": "2026-08-29T16:47:34.002027+00:00",
+          "finished_at": "2026-08-30T13:22:52.794494+00:00",
           "path": "results/captures/sm86_simulator_live_baseline_20260829_v2/evidence/raw/ncu_repeat/rep-2/gemm_imma_int8_sm80/metadata.json",
-          "sha256": "efda354fb6e3205e804e1efe0359bba42dca55d95d8549e96db422d0a8a573ad",
-          "started_at": "2026-08-29T16:47:33.088827+00:00"
+          "sha256": "34b9c6b59b4d8b103fc15d1fdaaece2cd9245c3bd244f9bbf7f0fb2bd3f9f0ed",
+          "started_at": "2026-08-30T13:22:51.959018+00:00"
         },
         "repeat_report": {
           "path": "results/captures/sm86_simulator_live_baseline_20260829_v2/evidence/raw/ncu_repeat/rep-2/gemm_imma_int8_sm80/ncu-report.ncu-rep",
-          "sha256": "f0518795765a673b52c5f5a65757626720f56d7fdd1037cd41f254079ee8171e"
+          "sha256": "cae90bd50d4ebe0e6273eccae7015977dc763192ec5d8274e9384501cb7d36ed"
         },
+        "stability_metrics": [
+          "gpc__cycles_elapsed.max",
+          "sm__cycles_active.max",
+          "smsp__inst_executed.sum"
+        ],
         "stable_within_five_percent": true
       },
       "residual": {
@@ -935,14 +955,14 @@
           "reference_cycles": 5867
         },
         "gpc_elapsed_gaps": {
-          "baseline_launch_envelope_cycles": 1691,
-          "baseline_vs_completion_frontier_cycles": 5558,
-          "baseline_vs_last_issue_cycles": 5558,
-          "baseline_vs_last_modeled_event_cycles": 5561,
-          "repeat_2_launch_envelope_cycles": 1678,
-          "repeat_2_vs_completion_frontier_cycles": 5552,
-          "repeat_2_vs_last_issue_cycles": 5552,
-          "repeat_2_vs_last_modeled_event_cycles": 5555
+          "baseline_launch_envelope_cycles": 1703,
+          "baseline_vs_completion_frontier_cycles": 5464,
+          "baseline_vs_last_issue_cycles": 5464,
+          "baseline_vs_last_modeled_event_cycles": 5467,
+          "repeat_2_launch_envelope_cycles": 1671,
+          "repeat_2_vs_completion_frontier_cycles": 5620,
+          "repeat_2_vs_last_issue_cycles": 5620,
+          "repeat_2_vs_last_modeled_event_cycles": 5623
         },
         "interpretable": true,
         "metric": "multi-frontier SM-active and GPC elapsed comparison",
@@ -962,17 +982,17 @@
           "rule": "mechanism_local_typed_tail_precedence"
         },
         "selection_vector": {
-          "gpc_completion_gap_cycles": 5558,
-          "gpc_launch_envelope_cycles": 1691,
-          "sm_completion_gap_cycles": 3867
+          "gpc_completion_gap_cycles": 5464,
+          "gpc_launch_envelope_cycles": 1703,
+          "sm_completion_gap_cycles": 3761
         },
         "sm_active_gaps": {
-          "baseline_vs_completion_frontier_cycles": 3867,
-          "baseline_vs_last_issue_cycles": 3867,
-          "baseline_vs_last_modeled_event_cycles": 3870,
-          "repeat_2_vs_completion_frontier_cycles": 3874,
-          "repeat_2_vs_last_issue_cycles": 3874,
-          "repeat_2_vs_last_modeled_event_cycles": 3877
+          "baseline_vs_completion_frontier_cycles": 3761,
+          "baseline_vs_last_issue_cycles": 3761,
+          "baseline_vs_last_modeled_event_cycles": 3764,
+          "repeat_2_vs_completion_frontier_cycles": 3949,
+          "repeat_2_vs_last_issue_cycles": 3949,
+          "repeat_2_vs_last_modeled_event_cycles": 3952
         }
       },
       "simulator": {
@@ -1044,26 +1064,26 @@
       "comparable_to_simulator_timing": true,
       "live": {
         "baseline": {
-          "dram__sectors_read.sum": 1716,
-          "gpc__cycles_elapsed.max": 5740,
+          "dram__sectors_read.sum": 1756,
+          "gpc__cycles_elapsed.max": 5678,
           "lts__t_sectors_srcunit_tex_op_read.sum": 16384,
-          "sm__cycles_active.max": 4025,
+          "sm__cycles_active.max": 3990,
           "sm__pipe_tensor_cycles_active.sum": 8192,
           "smsp__inst_executed.sum": 19968
         },
         "baseline_csv": {
           "path": "results/captures/sm86_simulator_live_baseline_20260829_v2/evidence/raw/ncu/gemm_sparse_2to4_bf16_sm80/ncu.csv",
-          "sha256": "a9e1478d83599abc181a104bb6e112618e37b24e88a4060a9070be286d748416"
+          "sha256": "fadf2867fc78fff8fcfede925048c0fe6e65628f6c4b5d2b445c200ea3519049"
         },
         "delta_repeat_minus_baseline": {
-          "dram__sectors_read.sum": 0,
-          "gpc__cycles_elapsed.max": 4,
+          "dram__sectors_read.sum": -40,
+          "gpc__cycles_elapsed.max": -26,
           "lts__t_sectors_srcunit_tex_op_read.sum": 0,
-          "sm__cycles_active.max": 34,
+          "sm__cycles_active.max": -44,
           "sm__pipe_tensor_cycles_active.sum": 0,
           "smsp__inst_executed.sum": 0
         },
-        "max_relative_delta": 0.0084472,
+        "max_relative_delta": 0.01102757,
         "provenance": {
           "block_size": "(32, 1, 1)",
           "compute_capability": "8.6",
@@ -1090,22 +1110,22 @@
         },
         "repeat_2": {
           "dram__sectors_read.sum": 1716,
-          "gpc__cycles_elapsed.max": 5744,
+          "gpc__cycles_elapsed.max": 5652,
           "lts__t_sectors_srcunit_tex_op_read.sum": 16384,
-          "sm__cycles_active.max": 4059,
+          "sm__cycles_active.max": 3946,
           "sm__pipe_tensor_cycles_active.sum": 8192,
           "smsp__inst_executed.sum": 19968
         },
         "repeat_csv": {
           "path": "results/captures/sm86_simulator_live_baseline_20260829_v2/evidence/raw/ncu_repeat/rep-2/gemm_sparse_2to4_bf16_sm80/ncu.csv",
-          "sha256": "c3352f6c36bfa086fecc4b53140349e88a750f072daf5a8ca68ad2d17be12eeb"
+          "sha256": "eb3ce64cc54e20d7a8ccbf8eba3fb3f2c7ec7b5c1ff9361c222bfebe53780bee"
         },
         "repeat_metadata": {
           "argv": [
             "/usr/local/cuda-13.2/nsight-compute-2026.1.0/ncu",
             "--force-overwrite",
             "--export",
-            "results/captures/sm86_simulator_live_baseline_20260829_v2/evidence/raw/ncu_repeat/rep-2/gemm_sparse_2to4_bf16_sm80/ncu-report",
+            "/home/jakeshea/GPU_simulator_rebase/results/captures/sm86_simulator_live_baseline_20260829_v2/evidence/raw/ncu_repeat/rep-2/gemm_sparse_2to4_bf16_sm80/ncu-report",
             "--launch-skip",
             "1",
             "--launch-count",
@@ -1124,15 +1144,20 @@
             "1"
           ],
           "contract_validated": true,
-          "finished_at": "2026-08-29T16:47:35.155820+00:00",
+          "finished_at": "2026-08-30T13:22:53.890721+00:00",
           "path": "results/captures/sm86_simulator_live_baseline_20260829_v2/evidence/raw/ncu_repeat/rep-2/gemm_sparse_2to4_bf16_sm80/metadata.json",
-          "sha256": "8d33fd10ba141b6a066f0c3264051a7a3a92931fa7b8bf1d8f2824490060363d",
-          "started_at": "2026-08-29T16:47:34.254456+00:00"
+          "sha256": "7c2f2da9371d5f447bea8cab0e02e85458740178b3b5aa669bf07cdf83d3870b",
+          "started_at": "2026-08-30T13:22:53.049975+00:00"
         },
         "repeat_report": {
           "path": "results/captures/sm86_simulator_live_baseline_20260829_v2/evidence/raw/ncu_repeat/rep-2/gemm_sparse_2to4_bf16_sm80/ncu-report.ncu-rep",
-          "sha256": "985899c9d58e9c950fb3732215e7fad89e3f5a3329f085a8a61eb3d2cb79e6c9"
+          "sha256": "27dd53fe790ca20497f2c8be0f268113dcfbc77b44aae1724a4579163f3948f5"
         },
+        "stability_metrics": [
+          "gpc__cycles_elapsed.max",
+          "sm__cycles_active.max",
+          "smsp__inst_executed.sum"
+        ],
         "stable_within_five_percent": true
       },
       "residual": {
@@ -1143,14 +1168,14 @@
           "reference_cycles": 2375
         },
         "gpc_elapsed_gaps": {
-          "baseline_launch_envelope_cycles": 1715,
-          "baseline_vs_completion_frontier_cycles": 3365,
-          "baseline_vs_last_issue_cycles": 3365,
-          "baseline_vs_last_modeled_event_cycles": 3368,
-          "repeat_2_launch_envelope_cycles": 1685,
-          "repeat_2_vs_completion_frontier_cycles": 3369,
-          "repeat_2_vs_last_issue_cycles": 3369,
-          "repeat_2_vs_last_modeled_event_cycles": 3372
+          "baseline_launch_envelope_cycles": 1688,
+          "baseline_vs_completion_frontier_cycles": 3303,
+          "baseline_vs_last_issue_cycles": 3303,
+          "baseline_vs_last_modeled_event_cycles": 3306,
+          "repeat_2_launch_envelope_cycles": 1706,
+          "repeat_2_vs_completion_frontier_cycles": 3277,
+          "repeat_2_vs_last_issue_cycles": 3277,
+          "repeat_2_vs_last_modeled_event_cycles": 3280
         },
         "interpretable": true,
         "metric": "multi-frontier SM-active and GPC elapsed comparison",
@@ -1170,17 +1195,17 @@
           "rule": "mechanism_local_typed_tail_precedence"
         },
         "selection_vector": {
-          "gpc_completion_gap_cycles": 3365,
-          "gpc_launch_envelope_cycles": 1715,
-          "sm_completion_gap_cycles": 1650
+          "gpc_completion_gap_cycles": 3303,
+          "gpc_launch_envelope_cycles": 1688,
+          "sm_completion_gap_cycles": 1615
         },
         "sm_active_gaps": {
-          "baseline_vs_completion_frontier_cycles": 1650,
-          "baseline_vs_last_issue_cycles": 1650,
-          "baseline_vs_last_modeled_event_cycles": 1653,
-          "repeat_2_vs_completion_frontier_cycles": 1684,
-          "repeat_2_vs_last_issue_cycles": 1684,
-          "repeat_2_vs_last_modeled_event_cycles": 1687
+          "baseline_vs_completion_frontier_cycles": 1615,
+          "baseline_vs_last_issue_cycles": 1615,
+          "baseline_vs_last_modeled_event_cycles": 1618,
+          "repeat_2_vs_completion_frontier_cycles": 1571,
+          "repeat_2_vs_last_issue_cycles": 1571,
+          "repeat_2_vs_last_modeled_event_cycles": 1574
         }
       },
       "simulator": {
@@ -1253,25 +1278,25 @@
       "live": {
         "baseline": {
           "dram__sectors_read.sum": 1596,
-          "gpc__cycles_elapsed.max": 16131,
+          "gpc__cycles_elapsed.max": 15951,
           "lts__t_sectors_srcunit_tex_op_read.sum": 4352,
-          "sm__cycles_active.max": 14479,
+          "sm__cycles_active.max": 14320,
           "sm__pipe_tensor_cycles_active.sum": 8192,
           "smsp__inst_executed.sum": 39568
         },
         "baseline_csv": {
           "path": "results/captures/sm86_simulator_live_baseline_20260829_v2/evidence/raw/ncu/flash_attn_fwd_bf16_sm80/ncu.csv",
-          "sha256": "3d2773117036ca31b38205ad87efdd8fab680901a53caf8bdae119f049a33e82"
+          "sha256": "35910152da7d54fb10d8f1f9cedd56be39944d7bea55ee1822e15714103e7828"
         },
         "delta_repeat_minus_baseline": {
           "dram__sectors_read.sum": 0,
-          "gpc__cycles_elapsed.max": -280,
+          "gpc__cycles_elapsed.max": -117,
           "lts__t_sectors_srcunit_tex_op_read.sum": 0,
-          "sm__cycles_active.max": -263,
+          "sm__cycles_active.max": -122,
           "sm__pipe_tensor_cycles_active.sum": 0,
           "smsp__inst_executed.sum": 0
         },
-        "max_relative_delta": 0.01816424,
+        "max_relative_delta": 0.00851955,
         "provenance": {
           "block_size": "(32, 1, 1)",
           "compute_capability": "8.6",
@@ -1298,22 +1323,22 @@
         },
         "repeat_2": {
           "dram__sectors_read.sum": 1596,
-          "gpc__cycles_elapsed.max": 15851,
+          "gpc__cycles_elapsed.max": 15834,
           "lts__t_sectors_srcunit_tex_op_read.sum": 4352,
-          "sm__cycles_active.max": 14216,
+          "sm__cycles_active.max": 14198,
           "sm__pipe_tensor_cycles_active.sum": 8192,
           "smsp__inst_executed.sum": 39568
         },
         "repeat_csv": {
           "path": "results/captures/sm86_simulator_live_baseline_20260829_v2/evidence/raw/ncu_repeat/rep-2/flash_attn_fwd_bf16_sm80/ncu.csv",
-          "sha256": "7cf5c3c57692baecf8e7dc86ce5888a35739023dffac2a6aeb0554825e8fddb5"
+          "sha256": "eb2f092e908ed4ade1158346b24489baf7ef7d12b29e6783860049ed66eef8a4"
         },
         "repeat_metadata": {
           "argv": [
             "/usr/local/cuda-13.2/nsight-compute-2026.1.0/ncu",
             "--force-overwrite",
             "--export",
-            "results/captures/sm86_simulator_live_baseline_20260829_v2/evidence/raw/ncu_repeat/rep-2/flash_attn_fwd_bf16_sm80/ncu-report",
+            "/home/jakeshea/GPU_simulator_rebase/results/captures/sm86_simulator_live_baseline_20260829_v2/evidence/raw/ncu_repeat/rep-2/flash_attn_fwd_bf16_sm80/ncu-report",
             "--launch-skip",
             "1",
             "--launch-count",
@@ -1332,15 +1357,20 @@
             "1"
           ],
           "contract_validated": true,
-          "finished_at": "2026-08-29T16:47:36.321315+00:00",
+          "finished_at": "2026-08-30T13:22:54.979061+00:00",
           "path": "results/captures/sm86_simulator_live_baseline_20260829_v2/evidence/raw/ncu_repeat/rep-2/flash_attn_fwd_bf16_sm80/metadata.json",
-          "sha256": "3398ac404a2b5c36891a6a83135e92c075b724592d9c703e4eecf5e45dfe39ac",
-          "started_at": "2026-08-29T16:47:35.406628+00:00"
+          "sha256": "404e64b285335af855457df7a1f05e4692ed730863cdb10a9a9b90c33d0d7af9",
+          "started_at": "2026-08-30T13:22:54.133141+00:00"
         },
         "repeat_report": {
           "path": "results/captures/sm86_simulator_live_baseline_20260829_v2/evidence/raw/ncu_repeat/rep-2/flash_attn_fwd_bf16_sm80/ncu-report.ncu-rep",
-          "sha256": "98b18925ff91fa6c624219ff8108f3ae1ff1ca64220fb883b0fced2a70ab4c47"
+          "sha256": "ad6eaf9caf539cf4a26a21cebc5ed9633f79f7852da30d8ee4932826c947fd7f"
         },
+        "stability_metrics": [
+          "gpc__cycles_elapsed.max",
+          "sm__cycles_active.max",
+          "smsp__inst_executed.sum"
+        ],
         "stable_within_five_percent": true
       },
       "residual": {
@@ -1351,14 +1381,14 @@
           "reference_cycles": 12551
         },
         "gpc_elapsed_gaps": {
-          "baseline_launch_envelope_cycles": 1652,
-          "baseline_vs_completion_frontier_cycles": 3580,
-          "baseline_vs_last_issue_cycles": 3580,
-          "baseline_vs_last_modeled_event_cycles": 3583,
-          "repeat_2_launch_envelope_cycles": 1635,
-          "repeat_2_vs_completion_frontier_cycles": 3300,
-          "repeat_2_vs_last_issue_cycles": 3300,
-          "repeat_2_vs_last_modeled_event_cycles": 3303
+          "baseline_launch_envelope_cycles": 1631,
+          "baseline_vs_completion_frontier_cycles": 3400,
+          "baseline_vs_last_issue_cycles": 3400,
+          "baseline_vs_last_modeled_event_cycles": 3403,
+          "repeat_2_launch_envelope_cycles": 1636,
+          "repeat_2_vs_completion_frontier_cycles": 3283,
+          "repeat_2_vs_last_issue_cycles": 3283,
+          "repeat_2_vs_last_modeled_event_cycles": 3286
         },
         "interpretable": true,
         "metric": "multi-frontier SM-active and GPC elapsed comparison",
@@ -1378,17 +1408,17 @@
           "rule": "mechanism_local_typed_tail_precedence"
         },
         "selection_vector": {
-          "gpc_completion_gap_cycles": 3580,
-          "gpc_launch_envelope_cycles": 1652,
-          "sm_completion_gap_cycles": 1928
+          "gpc_completion_gap_cycles": 3400,
+          "gpc_launch_envelope_cycles": 1631,
+          "sm_completion_gap_cycles": 1769
         },
         "sm_active_gaps": {
-          "baseline_vs_completion_frontier_cycles": 1928,
-          "baseline_vs_last_issue_cycles": 1928,
-          "baseline_vs_last_modeled_event_cycles": 1931,
-          "repeat_2_vs_completion_frontier_cycles": 1665,
-          "repeat_2_vs_last_issue_cycles": 1665,
-          "repeat_2_vs_last_modeled_event_cycles": 1668
+          "baseline_vs_completion_frontier_cycles": 1769,
+          "baseline_vs_last_issue_cycles": 1769,
+          "baseline_vs_last_modeled_event_cycles": 1772,
+          "repeat_2_vs_completion_frontier_cycles": 1647,
+          "repeat_2_vs_last_issue_cycles": 1647,
+          "repeat_2_vs_last_modeled_event_cycles": 1650
         }
       },
       "simulator": {

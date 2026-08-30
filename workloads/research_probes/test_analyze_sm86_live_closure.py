@@ -98,6 +98,8 @@ def _repeat_fixture(tmp_path):
         "argv": [
             ".venv/bin/python",
             "tools/local_labels/collect_ncu.py",
+            "--ncu",
+            ANALYZER.TRUSTED_NCU_IDENTITY["path"],
             "--output",
             "evidence/raw/ncu/gemm_hmma_bf16_sm80",
             "--metrics",
