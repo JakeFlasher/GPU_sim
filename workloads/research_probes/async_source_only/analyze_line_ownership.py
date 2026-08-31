@@ -534,6 +534,35 @@ def expected_ncu_command(
         raise AnalysisError(f"{directory}: NCU identity mismatch")
 
 
+def require_coordinate_completion_contract(
+    observed: Mapping[str, Any],
+    expected: Mapping[str, Any],
+    context: Path,
+) -> None:
+    if not same_json(dict(observed), dict(expected)):
+        raise AnalysisError(f"{context}: full producer completion mismatch")
+
+
+def require_coordinate_bundle_contract(
+    observed: Mapping[str, Any],
+    *,
+    orientation: str,
+    repetition: int,
+    families: Mapping[str, Mapping[str, Any]],
+    context: Path,
+) -> None:
+    try:
+        expected = ncu_producer.bundle_document(
+            ncu_producer.Cell(orientation), repetition, families
+        )
+    except (KeyError, TypeError, ncu_producer.CampaignError) as error:
+        raise AnalysisError(
+            f"{context}: cannot reconstruct producer bundle: {error}"
+        ) from error
+    if not same_json(dict(observed), expected):
+        raise AnalysisError(f"{context}: full producer bundle mismatch")
+
+
 def validate_family(
     directory: Path,
     family: str,
@@ -551,9 +580,50 @@ def validate_family(
     if absent:
         raise FileNotFoundError(", ".join(absent))
     command = read_json(paths["command.json"])
+    expected_ncu_command(command, directory, family, orientation, repetition, binary)
     if ACTIVE_CONTRACT.generation_id == "source_line_ownership_v1":
         complete = read_json(paths["complete.json"])
+        # Preserve the predecessor path while reusing its timestamp-bearing
+        # manifest validator.
+        try:
+            ncu_producer.validate_run_manifest(
+                paths["profile.run.json"], "ncu_profile", command, directory
+            )
+            ncu_producer.validate_run_manifest(
+                paths["import.run.json"], "ncu_import", command, directory
+            )
+        except ncu_producer.CampaignError as error:
+            raise AnalysisError(
+                f"{directory}: invalid run manifest: {error}"
+            ) from error
     else:
+        ncu = command.get("ncu")
+        if (
+            not isinstance(ncu, Mapping)
+            or not isinstance(ncu.get("path"), str)
+            or not isinstance(ncu.get("version"), str)
+        ):
+            raise AnalysisError(f"{directory}: malformed NCU identity")
+        context = ncu_producer.support.Preflight(
+            binary=dict(binary),
+            device=dict(EXPECTED_DEVICE),
+            ncu_path=ncu["path"],
+            ncu_version=ncu["version"],
+            environment=dict(EXPECTED_ENVIRONMENT),
+        )
+        try:
+            complete = ncu_producer.validate_retained_family(
+                directory,
+                context,
+                ncu_producer.Cell(orientation),
+                repetition,
+                family,
+                int(command["timeout_seconds"]),
+            )
+        except (KeyError, TypeError, ValueError, ncu_producer.CampaignError) as error:
+            raise AnalysisError(
+                f"{directory}: full producer completion contract failed: {error}"
+            ) from error
         target_contract = expected_target_contract(
             orientation,
             TRACE_GROUPS,
@@ -561,19 +631,14 @@ def validate_family(
             expected_order(repetition),
         )
         try:
-            complete = ncu_producer.read_structural_complete(
+            observed_complete = ncu_producer.read_structural_complete(
                 paths["complete.json"], target_contract
             )
         except ncu_producer.CampaignError as error:
             raise AnalysisError(str(error)) from error
-    expected_ncu_command(command, directory, family, orientation, repetition, binary)
-    # The producer owns the exact timestamp-bearing manifest schema. Reuse its
-    # validator rather than creating a second provenance implementation.
-    try:
-        ncu_producer.validate_run_manifest(paths["profile.run.json"], "ncu_profile", command, directory)
-        ncu_producer.validate_run_manifest(paths["import.run.json"], "ncu_import", command, directory)
-    except ncu_producer.CampaignError as error:
-        raise AnalysisError(f"{directory}: invalid run manifest: {error}") from error
+        require_coordinate_completion_contract(
+            observed_complete, complete, paths["complete.json"]
+        )
     expected_files = {name: sha256(path) for name, path in paths.items() if name != "complete.json"}
     if not same_json(complete.get("files"), expected_files) or complete.get(
         "valid"
@@ -622,7 +687,7 @@ def validate_family(
         and not same_json(complete.get("target_result"), payload)
     ):
         raise AnalysisError(f"{directory}: completion target projection mismatch")
-    return {"family": family, "values_by_variant": values, "rows": summaries, "files": expected_files, "target": payload}
+    return {"family": family, "values_by_variant": values, "rows": summaries, "files": expected_files, "target": payload, "producer_complete": complete}
 
 
 def validate_bundle(root: Path, orientation: str, repetition: int, binary: Mapping[str, Any]) -> dict[str, Any]:
@@ -632,6 +697,17 @@ def validate_bundle(root: Path, orientation: str, repetition: int, binary: Mappi
     if not bundle_path.is_file():
         raise FileNotFoundError(str(bundle_path))
     bundle = read_json(bundle_path)
+    if ACTIVE_CONTRACT.generation_id != "source_line_ownership_v1":
+        require_coordinate_bundle_contract(
+            bundle,
+            orientation=orientation,
+            repetition=repetition,
+            families={
+                family: families[family]["producer_complete"]
+                for family in FAMILIES
+            },
+            context=bundle_path,
+        )
     values = {family: families[family]["values_by_variant"] for family in FAMILIES}
     hit_delta = abs(values["lts_hit"][VARIANTS[0]] - values["lts_hit"][VARIANTS[1]])
     miss_delta = abs(values["lts_miss"][VARIANTS[0]] - values["lts_miss"][VARIANTS[1]])

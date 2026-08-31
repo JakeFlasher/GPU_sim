@@ -344,6 +344,94 @@ print(json.dumps({{
             },
         )
 
+    def test_full_coordinate_ncu_completion_and_bundle_contracts(self) -> None:
+        output = json.loads(
+            self.run_python(
+                f"""
+import copy
+import json
+import sys
+from pathlib import Path
+sys.path.insert(0, {str(HERE)!r})
+import analyze_line_coordinates as coordinate
+
+analysis = coordinate.base
+producer = analysis.ncu_producer
+variants = coordinate.CONTRACT.variants
+values = {{
+    "global_ld": dict.fromkeys(variants, 64),
+    "ldgsts": dict.fromkeys(variants, 64),
+    "shared_wavefronts": dict.fromkeys(variants, 1280),
+    "lts_total": dict.fromkeys(variants, 3584),
+    "lts_hit": dict.fromkeys(variants, 1536),
+    "lts_miss": dict.fromkeys(variants, 2048),
+    "dram": dict.fromkeys(variants, 2304),
+}}
+families = {{
+    family: {{
+        "summary": {{"values_by_variant": values[family]}},
+        "files": {{"command.json": family + "-digest"}},
+    }}
+    for family in producer.FAMILIES
+}}
+bundle = producer.bundle_document(
+    producer.Cell("first_line_early"), 1, families
+)
+analysis.require_coordinate_bundle_contract(
+    bundle,
+    orientation="first_line_early",
+    repetition=1,
+    families=families,
+    context=Path("bundle.json"),
+)
+
+complete = {{
+    "schema_version": 1,
+    "valid": True,
+    "binding": {{"family": "global_ld"}},
+    "files": {{"command.json": "digest"}},
+    "summary": {{"values_by_variant": values["global_ld"]}},
+    "target_result": {{
+        "correct": True,
+        "early_fanout": {{"correct": True, "mismatches": 0}},
+        "late_fanout": {{"correct": True, "mismatches": 0}},
+    }},
+}}
+analysis.require_coordinate_completion_contract(
+    complete, complete, Path("complete.json")
+)
+
+mutations = []
+bad_complete = copy.deepcopy(complete)
+bad_complete["summary"]["values_by_variant"]["early_fanout"] += 1
+mutations.append(("complete", bad_complete))
+mutations.append(("bundle", {{"valid": True}}))
+bad_bundle = copy.deepcopy(bundle)
+bad_bundle["campaign_contract"]["fixed_depth"] = 2
+mutations.append(("bundle", bad_bundle))
+rejected = 0
+for kind, document in mutations:
+    try:
+        if kind == "complete":
+            analysis.require_coordinate_completion_contract(
+                document, complete, Path("complete.json")
+            )
+        else:
+            analysis.require_coordinate_bundle_contract(
+                document,
+                orientation="first_line_early",
+                repetition=1,
+                families=families,
+                context=Path("bundle.json"),
+            )
+    except analysis.AnalysisError:
+        rejected += 1
+print(json.dumps({{"rejected": rejected, "total": len(mutations)}}))
+"""
+            )
+        )
+        self.assertEqual(output, {"rejected": 3, "total": 3})
+
     def test_label_projection_is_bound_to_admitted_bytes_and_reports_partial_access(
         self,
     ) -> None:
@@ -1341,19 +1429,31 @@ print(json.dumps({{
         output = json.loads(
             self.run_python(
                 f"""
-import contextlib
+import dataclasses
 import hashlib
-import io
 import json
 import sys
+import tempfile
+from pathlib import Path
 sys.path.insert(0, {str(HERE)!r})
 import analyze_line_coordinates as a
 
-root = a.CONTRACT.evidence_root
+parent = Path(tempfile.mkdtemp())
+root = parent / "root"
+root.mkdir()
+contract = dataclasses.replace(
+    a.CONTRACT,
+    evidence_root=root,
+    aggregate_report=parent / "aggregate.json",
+)
 contract_path = root / "campaign_contract.json"
 authorization = a.execution.smoke_authorization_path(root)
 canonical_output = root / "analysis/report.json"
 canonical_md = root / "analysis/report.md"
+canonical_output.parent.mkdir()
+contract_path.write_text(json.dumps(contract.to_json()), encoding="utf-8")
+authorization.write_text("smoke authorization", encoding="utf-8")
+contract.aggregate_report.write_text("aggregate", encoding="utf-8")
 
 def digest(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
@@ -1368,13 +1468,12 @@ for output_path, output_md in (
     (canonical_output, authorization),
 ):
     try:
-        a.run(
+        a.validate_publication_paths(
+            contract,
             root,
             output_path,
             output_md,
-            a.CONTRACT.aggregate_report,
-            smoke_only=False,
-            publish=True,
+            contract.aggregate_report,
         )
     except a.base.AnalysisError:
         rejected += 1
@@ -1382,26 +1481,30 @@ after = {{
     "contract": digest(contract_path),
     "authorization": digest(authorization),
 }}
-with contextlib.redirect_stdout(io.StringIO()):
-    canonical_rc = a.run(
-        root,
-        canonical_output,
-        canonical_md,
-        a.CONTRACT.aggregate_report,
-        smoke_only=False,
-        publish=False,
-    )
+canonical = a.validate_publication_paths(
+    contract,
+    root,
+    canonical_output,
+    canonical_md,
+    contract.aggregate_report,
+)
 print(json.dumps({{
     "rejected": rejected,
     "hashes_unchanged": before == after,
-    "canonical_rc": canonical_rc,
+    "canonical_admitted": canonical == (
+        canonical_output, canonical_md, contract.aggregate_report
+    ),
 }}))
 """
             )
         )
         self.assertEqual(
             output,
-            {"rejected": 2, "hashes_unchanged": True, "canonical_rc": 0},
+            {
+                "rejected": 2,
+                "hashes_unchanged": True,
+                "canonical_admitted": True,
+            },
         )
 
 if __name__ == "__main__":
