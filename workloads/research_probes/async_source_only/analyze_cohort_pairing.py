@@ -5,7 +5,9 @@ The live assay changes only the pairing between slow source cohorts and
 expensive destination cohorts.  Schema 17 predicts the paired wait delta from
 exact source-response/cohort identity.  This reducer applies the predeclared
 identification/holdout split and never treats the retained uniform-cohort
-issue-spacing corpus as authorization to change timing.
+issue-spacing corpus as authorization to change timing.  A complete,
+internally consistent invalid/no-go assay is a scientific result and exits
+successfully; nonzero exits are reserved for missing or corrupt evidence.
 """
 
 from __future__ import annotations
@@ -1579,10 +1581,11 @@ def run(
     elif not admission_passed:
         status = "invalid_cohort_pairing_assay_no_timing_promotion"
         decision = (
-            "The completed matched-marginal assay failed at least one admission invariant; "
-            "do not relabel the source mix or promote timing, and retain the typed tail."
+            "The completed, internally consistent matched-marginal assay failed at least "
+            "one admission invariant; this is a closed invalid/no-go scientific result. "
+            "Do not relabel the source mix or promote timing, and retain the typed tail."
         )
-        exit_code = 1
+        exit_code = 0
     elif not transfer_passed:
         status = "pass_cohort_pairing_no_timing_promotion"
         decision = (
