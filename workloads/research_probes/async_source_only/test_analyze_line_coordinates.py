@@ -1188,5 +1188,72 @@ print(json.dumps({{
         )
         self.assertEqual(output, "rejected")
 
+    def test_publication_aliases_fail_before_protected_evidence_mutation(self) -> None:
+        output = json.loads(
+            self.run_python(
+                f"""
+import contextlib
+import hashlib
+import io
+import json
+import sys
+sys.path.insert(0, {str(HERE)!r})
+import analyze_line_coordinates as a
+
+root = a.CONTRACT.evidence_root
+contract_path = root / "campaign_contract.json"
+authorization = a.execution.smoke_authorization_path(root)
+canonical_output = root / "analysis/report.json"
+canonical_md = root / "analysis/report.md"
+
+def digest(path):
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+before = {{
+    "contract": digest(contract_path),
+    "authorization": digest(authorization),
+}}
+rejected = 0
+for output_path, output_md in (
+    (contract_path, canonical_md),
+    (canonical_output, authorization),
+):
+    try:
+        a.run(
+            root,
+            output_path,
+            output_md,
+            a.CONTRACT.aggregate_report,
+            smoke_only=False,
+            publish=True,
+        )
+    except a.base.AnalysisError:
+        rejected += 1
+after = {{
+    "contract": digest(contract_path),
+    "authorization": digest(authorization),
+}}
+with contextlib.redirect_stdout(io.StringIO()):
+    canonical_rc = a.run(
+        root,
+        canonical_output,
+        canonical_md,
+        a.CONTRACT.aggregate_report,
+        smoke_only=False,
+        publish=False,
+    )
+print(json.dumps({{
+    "rejected": rejected,
+    "hashes_unchanged": before == after,
+    "canonical_rc": canonical_rc,
+}}))
+"""
+            )
+        )
+        self.assertEqual(
+            output,
+            {"rejected": 2, "hashes_unchanged": True, "canonical_rc": 0},
+        )
+
 if __name__ == "__main__":
     unittest.main()

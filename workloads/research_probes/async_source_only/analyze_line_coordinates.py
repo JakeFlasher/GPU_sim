@@ -8,6 +8,7 @@ import hashlib
 import json
 import math
 import re
+import stat
 import statistics
 import sys
 from pathlib import Path
@@ -679,6 +680,61 @@ def outcome(
     return "complete_line_coordinates_signal", "Both frozen orientations show the material ownership signal.", 0
 
 
+def validate_publication_paths(
+    contract: Any,
+    root: Path,
+    output: Path,
+    output_md: Path,
+    aggregate: Path,
+) -> tuple[Path, Path, Path]:
+    """Freeze publications before any retained evidence is opened."""
+
+    output = contract.require_allowed_path(output)
+    output_md = contract.require_allowed_path(output_md)
+    aggregate = contract.require_allowed_path(aggregate)
+    expected_output = root / "analysis/report.json"
+    expected_output_md = root / "analysis/report.md"
+    expected_aggregate = contract.require_allowed_path(contract.aggregate_report)
+    expected = (expected_output, expected_output_md, expected_aggregate)
+    observed = (output, output_md, aggregate)
+    if observed != expected:
+        raise base.AnalysisError(
+            f"coordinate publication paths {observed} != frozen {expected}"
+        )
+    if len(set(observed)) != len(observed):
+        raise base.AnalysisError("coordinate publication paths must be distinct")
+    protected = {
+        root / "campaign_contract.json",
+        execution.smoke_authorization_path(root),
+    }
+    aliases = sorted(str(path) for path in set(observed) & protected)
+    if aliases:
+        raise base.AnalysisError(
+            f"coordinate publication aliases retained evidence: {aliases}"
+        )
+    for path in observed:
+        cursor = path.parent
+        while True:
+            if cursor.is_symlink():
+                raise base.AnalysisError(
+                    f"coordinate publication ancestor is a symlink: {cursor}"
+                )
+            if cursor == cursor.parent:
+                break
+            cursor = cursor.parent
+        if path.is_symlink():
+            raise base.AnalysisError(
+                f"coordinate publication is a symlink: {path}"
+            )
+        if path.exists():
+            metadata = path.lstat()
+            if not stat.S_ISREG(metadata.st_mode) or metadata.st_nlink != 1:
+                raise base.AnalysisError(
+                    f"coordinate publication is not one regular file: {path}"
+                )
+    return observed
+
+
 def run(
     root: Path,
     output: Path,
@@ -690,16 +746,11 @@ def run(
 ) -> int:
     contract = begin_campaign()
     root = contract.require_allowed_path(root)
-    contract.require_allowed_path(output)
-    contract.require_allowed_path(output_md)
-    contract.require_allowed_path(aggregate)
     if root != contract.require_allowed_path(contract.evidence_root):
         raise base.AnalysisError(f"coordinate root {root} != frozen {contract.evidence_root}")
-    if aggregate != contract.require_allowed_path(contract.aggregate_report):
-        raise base.AnalysisError(
-            f"coordinate aggregate {aggregate} != frozen "
-            f"{contract.aggregate_report}"
-        )
+    output, output_md, aggregate = validate_publication_paths(
+        contract, root, output, output_md, aggregate
+    )
     validate_evidence_tree(contract, root)
     authorization = execution.smoke_authorization_path(root)
     if smoke_only and publish:
