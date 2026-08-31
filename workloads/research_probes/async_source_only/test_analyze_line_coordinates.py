@@ -609,6 +609,71 @@ print(json.dumps({{
             },
         )
 
+    def test_coordinate_ncu_rejects_invalid_bundle_in_both_modes(self) -> None:
+        output = json.loads(
+            self.run_python(
+                f"""
+import json
+import sys
+import tempfile
+from pathlib import Path
+from types import SimpleNamespace
+from unittest import mock
+sys.path.insert(0, {str(HERE)!r})
+import analyze_line_coordinates as coordinate
+
+ncu = coordinate.base.ncu_producer
+cell = ncu.Cell("first_line_early")
+helper_rejections = 0
+for invalid in (False, None, 0, 1, 1.0):
+    try:
+        ncu.require_valid_reconstructed_bundle({{"valid": invalid}}, cell, 1)
+    except ncu.CampaignError:
+        helper_rejections += 1
+
+root = Path(tempfile.mkdtemp())
+return_codes = []
+write_calls = []
+for validate_only in (True, False):
+    argv = ["--root", str(root), "--smoke"]
+    if validate_only:
+        argv.append("--validate-only")
+    with mock.patch.object(
+        ncu.campaign_contract,
+        "require_canonical_evidence_root",
+        return_value=root,
+    ), mock.patch.object(
+        ncu.campaign_contract, "validate_evidence_tree"
+    ), mock.patch.object(
+        ncu, "preflight", return_value=SimpleNamespace()
+    ), mock.patch.object(
+        ncu, "command_document", return_value={{}}
+    ), mock.patch.object(
+        ncu, "validate_retained_family", return_value={{}}
+    ), mock.patch.object(
+        ncu, "bundle_document", return_value={{"valid": False}}
+    ), mock.patch.object(
+        ncu, "write_json"
+    ) as write_json, mock.patch("builtins.print"):
+        return_codes.append(ncu.main(argv))
+        write_calls.append(write_json.call_count)
+print(json.dumps({{
+    "helper_rejections": helper_rejections,
+    "return_codes": return_codes,
+    "write_calls": write_calls,
+}}))
+"""
+            )
+        )
+        self.assertEqual(
+            output,
+            {
+                "helper_rejections": 5,
+                "return_codes": [1, 1],
+                "write_calls": [0, 0],
+            },
+        )
+
     def test_label_projection_is_bound_to_admitted_bytes_and_reports_partial_access(
         self,
     ) -> None:

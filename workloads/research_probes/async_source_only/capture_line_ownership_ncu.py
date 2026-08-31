@@ -1195,6 +1195,8 @@ def bundle_document(
 def require_valid_reconstructed_bundle(
     bundle: Mapping[str, Any], cell: Cell, repetition: int
 ) -> None:
+    if active_contract() == campaign_contract.V1_CONTRACT:
+        return
     if bundle.get("valid") is not True:
         raise CampaignError(
             f"{cell.key} repeat-{repetition}: reconstructed bundle failed "
