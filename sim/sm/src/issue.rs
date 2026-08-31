@@ -1512,6 +1512,21 @@ pub struct BypassAsyncCopyDiagnostics {
     pub cohort_candidate_earlier_than_group_aggregate_cycles: u64,
     pub cohort_candidate_later_than_production_cycles: u64,
     pub cohort_candidate_earlier_than_production_cycles: u64,
+    /// Groups with an exact cohort response envelope projected by the
+    /// timing-neutral reservation-overlap observation.
+    pub cohort_overlap_groups_observed: u64,
+    /// Sum across copies of each physical response envelope,
+    /// `max(last_response) - min(first_response)`.
+    pub cohort_response_envelope_cycles: u64,
+    /// Sum across cohorts of frozen topology work hidden before that cohort's
+    /// first response, measured from the earliest response in its copy.
+    pub cohort_topology_prearrival_hidden_cycles: u64,
+    /// Sum across cohorts of the remaining frozen topology work hidden by that
+    /// cohort's first-to-last response stream.
+    pub cohort_topology_stream_hidden_cycles: u64,
+    /// Sum across groups of the maximum residual topology exposure across
+    /// cohorts and copies. This observation never participates in readiness.
+    pub cohort_topology_residual_exposure_cycles: u64,
 }
 
 impl BypassAsyncCopyDiagnostics {
@@ -1710,6 +1725,31 @@ impl BypassAsyncCopyDiagnostics {
                 "readiness.bypass_async_copies.cohort_candidate_earlier_than_production_cycles",
                 self.cohort_candidate_earlier_than_production_cycles,
                 addend.cohort_candidate_earlier_than_production_cycles,
+            )?,
+            cohort_overlap_groups_observed: checked_readiness_add(
+                "readiness.bypass_async_copies.cohort_overlap_groups_observed",
+                self.cohort_overlap_groups_observed,
+                addend.cohort_overlap_groups_observed,
+            )?,
+            cohort_response_envelope_cycles: checked_readiness_add(
+                "readiness.bypass_async_copies.cohort_response_envelope_cycles",
+                self.cohort_response_envelope_cycles,
+                addend.cohort_response_envelope_cycles,
+            )?,
+            cohort_topology_prearrival_hidden_cycles: checked_readiness_add(
+                "readiness.bypass_async_copies.cohort_topology_prearrival_hidden_cycles",
+                self.cohort_topology_prearrival_hidden_cycles,
+                addend.cohort_topology_prearrival_hidden_cycles,
+            )?,
+            cohort_topology_stream_hidden_cycles: checked_readiness_add(
+                "readiness.bypass_async_copies.cohort_topology_stream_hidden_cycles",
+                self.cohort_topology_stream_hidden_cycles,
+                addend.cohort_topology_stream_hidden_cycles,
+            )?,
+            cohort_topology_residual_exposure_cycles: checked_readiness_add(
+                "readiness.bypass_async_copies.cohort_topology_residual_exposure_cycles",
+                self.cohort_topology_residual_exposure_cycles,
+                addend.cohort_topology_residual_exposure_cycles,
             )?,
         };
         *self = next;
@@ -3817,8 +3857,16 @@ impl ReadinessDiagnostics {
     /// payload-arrival order for acceptance widths 1, 2, 4, 8, and 16.
     /// Schema 17 joins exact source-sector responses to flexible destination
     /// cohorts and reports a parameter-free source/topology-overlap candidate.
+    /// Schema 18 adds a first-response-anchored, timing-neutral destination
+    /// reservation-exposure score over those exact cohorts.
     pub fn schema_version(&self) -> u32 {
         if self
+            .bypass_async_copies
+            .as_deref()
+            .is_some_and(|diagnostics| diagnostics.cohort_overlap_groups_observed != 0)
+        {
+            18
+        } else if self
             .bypass_async_copies
             .as_deref()
             .is_some_and(|diagnostics| diagnostics.cohort_groups_observed != 0)
@@ -4634,6 +4682,11 @@ struct BypassAsyncCopyProjection {
     cohort_candidate_earlier_than_group_aggregate_cycles: u64,
     cohort_candidate_later_than_production_cycles: u64,
     cohort_candidate_earlier_than_production_cycles: u64,
+    cohort_overlap_groups_observed: u64,
+    cohort_response_envelope_cycles: u64,
+    cohort_topology_prearrival_hidden_cycles: u64,
+    cohort_topology_stream_hidden_cycles: u64,
+    cohort_topology_residual_exposure_cycles: u64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -5493,6 +5546,14 @@ impl AsyncCopySlot {
         let mut cohort_response_span = 0_u64;
         let mut cohort_topology_penalty = 0_u64;
         let mut cohort_candidate_completion = 0_u64;
+        // Each physical response envelope is counted once per copy. Hidden
+        // work sums every cohort. Residual exposure instead follows the frozen
+        // score's cohort -> copy -> group maximum; cross-group aggregation
+        // happens in readiness diagnostics.
+        let mut cohort_response_envelope = 0_u64;
+        let mut cohort_topology_prearrival_hidden = 0_u64;
+        let mut cohort_topology_stream_hidden = 0_u64;
+        let mut cohort_topology_residual_exposure = 0_u64;
         for copy in state
             .bypass_copies
             .iter()
@@ -5581,6 +5642,8 @@ impl AsyncCopySlot {
             if !copy.cohorts.is_empty() {
                 cohort_copies =
                     checked_u64_counter_add("observed bypass cohort copy count", cohort_copies, 1)?;
+                let mut cohort_anchor: Option<u64> = None;
+                let mut cohort_envelope_end = 0_u64;
                 for (cohort_index, cohort) in copy.cohorts.iter().enumerate() {
                     if cohort.pending_sources != 0 {
                         return Err(IssueError::AsyncCopyCohortPendingAtWait {
@@ -5609,6 +5672,43 @@ impl AsyncCopySlot {
                             got: 0,
                         },
                     )?;
+                    debug_assert!(last >= first);
+                    cohort_anchor = Some(cohort_anchor.map_or(first, |anchor| anchor.min(first)));
+                    cohort_envelope_end = cohort_envelope_end.max(last);
+                }
+                let cohort_anchor = cohort_anchor.expect("active cohort list is nonempty");
+
+                let mut copy_residual_exposure = 0_u64;
+                for (cohort_index, cohort) in copy.cohorts.iter().enumerate() {
+                    let first = cohort
+                        .first_source_response
+                        .expect("cohort response presence was validated");
+                    let last = cohort.last_source_response.ok_or(
+                        IssueError::AsyncCopyCohortProjectionInvalid {
+                            warp,
+                            instruction: copy.instruction,
+                            field: "cohort last source response",
+                            expected: 1,
+                            got: 0,
+                        },
+                    )?;
+                    let prearrival_window = first.saturating_sub(cohort_anchor);
+                    let response_stream = last.saturating_sub(first);
+                    let prearrival_hidden = cohort.topology_penalty.min(prearrival_window);
+                    let topology_after_prearrival = cohort.topology_penalty - prearrival_hidden;
+                    let stream_hidden = topology_after_prearrival.min(response_stream);
+                    let residual_exposure = topology_after_prearrival - stream_hidden;
+                    cohort_topology_prearrival_hidden = checked_u64_counter_add(
+                        "observed bypass cohort topology prearrival hidden work",
+                        cohort_topology_prearrival_hidden,
+                        prearrival_hidden,
+                    )?;
+                    cohort_topology_stream_hidden = checked_u64_counter_add(
+                        "observed bypass cohort topology stream hidden work",
+                        cohort_topology_stream_hidden,
+                        stream_hidden,
+                    )?;
+                    copy_residual_exposure = copy_residual_exposure.max(residual_exposure);
                     let memberships = copy
                         .sector_membership_masks
                         .iter()
@@ -5641,6 +5741,13 @@ impl AsyncCopySlot {
                     cohort_candidate_completion =
                         cohort_candidate_completion.max(payload_ready.max(topology_ready));
                 }
+                cohort_response_envelope = checked_u64_counter_add(
+                    "observed bypass cohort response envelope",
+                    cohort_response_envelope,
+                    cohort_envelope_end.saturating_sub(cohort_anchor),
+                )?;
+                cohort_topology_residual_exposure =
+                    cohort_topology_residual_exposure.max(copy_residual_exposure);
             }
         }
         if copies == 0 {
@@ -5708,6 +5815,11 @@ impl AsyncCopySlot {
             cohort_candidate_earlier_than_production_cycles: group
                 .completion_time
                 .saturating_sub(cohort_candidate_completion),
+            cohort_overlap_groups_observed: u64::from(cohort_copies != 0),
+            cohort_response_envelope_cycles: cohort_response_envelope,
+            cohort_topology_prearrival_hidden_cycles: cohort_topology_prearrival_hidden,
+            cohort_topology_stream_hidden_cycles: cohort_topology_stream_hidden,
+            cohort_topology_residual_exposure_cycles: cohort_topology_residual_exposure,
         }))
     }
 
@@ -8303,6 +8415,15 @@ impl<'a> SmCore<'a> {
                                 .cohort_candidate_later_than_production_cycles,
                             cohort_candidate_earlier_than_production_cycles: observed
                                 .cohort_candidate_earlier_than_production_cycles,
+                            cohort_overlap_groups_observed: observed.cohort_overlap_groups_observed,
+                            cohort_response_envelope_cycles: observed
+                                .cohort_response_envelope_cycles,
+                            cohort_topology_prearrival_hidden_cycles: observed
+                                .cohort_topology_prearrival_hidden_cycles,
+                            cohort_topology_stream_hidden_cycles: observed
+                                .cohort_topology_stream_hidden_cycles,
+                            cohort_topology_residual_exposure_cycles: observed
+                                .cohort_topology_residual_exposure_cycles,
                         })?;
                     }
                     let limited_counter = match cause {
@@ -13106,6 +13227,92 @@ mod tests {
         }
     }
 
+    fn paired_reservation_projection(
+        slow_expensive: bool,
+    ) -> (BypassAsyncCopyProjection, Option<u64>) {
+        let compact = AsyncCopyCohortDescriptor {
+            payload_bytes: 32,
+            destination_lines: 1,
+            bank_wavefronts: 1,
+            bypass_wavefronts: 1,
+        };
+        let severe = AsyncCopyCohortDescriptor {
+            payload_bytes: 32,
+            destination_lines: 4,
+            bank_wavefronts: 4,
+            bypass_wavefronts: 4,
+        };
+        let descriptors = if slow_expensive {
+            [compact, severe]
+        } else {
+            [severe, compact]
+        };
+        let masks = [0b01, 0b10];
+        let p = params();
+        let mut slot = AsyncCopySlot::default();
+        let group = slot
+            .add_pending_async_copy_sources(
+                0,
+                2,
+                128,
+                0,
+                Some(BypassAsyncCopyInput {
+                    instruction: 10,
+                    sector_off: 20,
+                    sector_len: 2,
+                    source_cohorts: 2,
+                    destination_lines: 5,
+                    max_bank_wavefronts: 4,
+                    max_bypass_wavefronts: 4,
+                    cohorts: Some(&descriptors),
+                    sector_membership_masks: Some(&masks),
+                }),
+                &p,
+            )
+            .unwrap();
+        assert!(slot.commit_async_copy_group(10));
+        for (sector_index, now) in [(20, 20), (21, 40)] {
+            slot.complete_async_copy_sources(
+                0,
+                group,
+                Some(ResponseId::new(ResponseOwner(1), 0, 10, sector_index)),
+                1,
+                now,
+                &p,
+            )
+            .unwrap();
+        }
+        let committed = slot.state.as_deref().unwrap().committed_groups[0];
+        let projection = slot
+            .bypass_copy_projection(0, &committed, &p, 45)
+            .unwrap()
+            .unwrap();
+        (projection, slot.async_wait_clear_time(0))
+    }
+
+    #[test]
+    fn bypass_cohort_reservation_score_reproduces_negative_swapped_pairing() {
+        let (slow_expensive, expensive_wait) = paired_reservation_projection(true);
+        let (slow_cheap, cheap_wait) = paired_reservation_projection(false);
+
+        assert_eq!(
+            expensive_wait, cheap_wait,
+            "observation must not alter timing"
+        );
+        assert_eq!(slow_expensive.cohort_response_envelope_cycles, 20);
+        assert_eq!(slow_cheap.cohort_response_envelope_cycles, 20);
+        assert_eq!(slow_expensive.cohort_topology_prearrival_hidden_cycles, 18);
+        assert_eq!(slow_cheap.cohort_topology_prearrival_hidden_cycles, 0);
+        assert_eq!(slow_expensive.cohort_topology_stream_hidden_cycles, 0);
+        assert_eq!(slow_cheap.cohort_topology_stream_hidden_cycles, 0);
+        assert_eq!(slow_expensive.cohort_topology_residual_exposure_cycles, 0);
+        assert_eq!(slow_cheap.cohort_topology_residual_exposure_cycles, 18);
+        let paired_score = i64::try_from(slow_expensive.cohort_topology_residual_exposure_cycles)
+            .unwrap()
+            - i64::try_from(slow_cheap.cohort_topology_residual_exposure_cycles).unwrap();
+        assert_eq!(paired_score, -18);
+    }
+
     #[test]
     fn bypass_cohort_observation_handles_out_of_order_and_multi_cohort_responses() {
         let p = params();
@@ -13185,6 +13392,11 @@ mod tests {
         );
         assert_eq!(projected.cohort_candidate_later_than_production_cycles, 0);
         assert_eq!(projected.cohort_candidate_earlier_than_production_cycles, 1);
+        assert_eq!(projected.cohort_overlap_groups_observed, 1);
+        assert_eq!(projected.cohort_response_envelope_cycles, 20);
+        assert_eq!(projected.cohort_topology_prearrival_hidden_cycles, 0);
+        assert_eq!(projected.cohort_topology_stream_hidden_cycles, 10);
+        assert_eq!(projected.cohort_topology_residual_exposure_cycles, 0);
         assert_eq!(slot.async_wait_clear_time(0), Some(52));
     }
 
@@ -13307,15 +13519,22 @@ mod tests {
                 cohort_response_memberships_observed: 12,
                 cohort_candidate_completion_cycles: 30,
                 cohort_candidate_exposure_cycles: 10,
+                cohort_overlap_groups_observed: 1,
+                cohort_response_envelope_cycles: 24,
+                cohort_topology_prearrival_hidden_cycles: 8,
+                cohort_topology_stream_hidden_cycles: 4,
+                // Schema 18 is selected by observed groups, not a nonzero
+                // residual score.
+                cohort_topology_residual_exposure_cycles: 0,
                 ..BypassAsyncCopyDiagnostics::default()
             })),
             ..ReadinessDiagnostics::default()
         };
-        assert_eq!(observation.schema_version(), 17);
+        assert_eq!(observation.schema_version(), 18);
         let mut aggregate = ReadinessDiagnostics::default();
         aggregate.add_checked(&observation).unwrap();
         aggregate.add_checked(&observation).unwrap();
-        let aggregate_pipeline = aggregate.bypass_async_copies.unwrap();
+        let aggregate_pipeline = aggregate.bypass_async_copies.as_deref().unwrap();
         assert_eq!(aggregate_pipeline.pipeline_groups_observed, 2);
         assert_eq!(aggregate_pipeline.pipeline_q1_completion_cycles, 76);
         assert_eq!(aggregate_pipeline.pipeline_q1_exposure_cycles, 36);
@@ -13324,6 +13543,40 @@ mod tests {
         assert_eq!(aggregate_pipeline.cohort_response_memberships_observed, 24);
         assert_eq!(aggregate_pipeline.cohort_candidate_completion_cycles, 60);
         assert_eq!(aggregate_pipeline.cohort_candidate_exposure_cycles, 20);
+        assert_eq!(aggregate_pipeline.cohort_overlap_groups_observed, 2);
+        assert_eq!(aggregate_pipeline.cohort_response_envelope_cycles, 48);
+        assert_eq!(
+            aggregate_pipeline.cohort_topology_prearrival_hidden_cycles,
+            16
+        );
+        assert_eq!(aggregate_pipeline.cohort_topology_stream_hidden_cycles, 8);
+        assert_eq!(
+            aggregate_pipeline.cohort_topology_residual_exposure_cycles,
+            0
+        );
+
+        aggregate
+            .bypass_async_copies
+            .as_deref_mut()
+            .unwrap()
+            .cohort_topology_residual_exposure_cycles = u64::MAX;
+        let before = aggregate.clone();
+        let overflow = ReadinessDiagnostics {
+            bypass_async_copies: Some(Box::new(BypassAsyncCopyDiagnostics {
+                cohort_topology_residual_exposure_cycles: 1,
+                ..BypassAsyncCopyDiagnostics::default()
+            })),
+            ..ReadinessDiagnostics::default()
+        };
+        assert!(matches!(
+            aggregate.add_checked(&overflow),
+            Err(ReadinessCounterError::Overflow {
+                field: "readiness.bypass_async_copies.cohort_topology_residual_exposure_cycles",
+                accumulated: u64::MAX,
+                addend: 1,
+            })
+        ));
+        assert_eq!(aggregate, before);
     }
 
     #[test]
