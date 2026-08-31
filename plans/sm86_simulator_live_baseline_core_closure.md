@@ -54,6 +54,15 @@ scored defaults unchanged. Any later bypass timing slice must preserve
 source-cohort/destination-line fanout separately from bank multiplicity and
 apply it per copy; do not fit another scalar to these three consumed layouts.
 
+The orthogonal skew slice and schema-15 implementation now preserve those
+dimensions separately. The trace-derived proxy matches all compact/conflict/
+skew/severe NCU topology counts, but the timing-neutral local candidate fails
+depth transfer. See
+[`docs/sm86_async_bypass_multidim_milestone.md`](../docs/sm86_async_bypass_multidim_milestone.md).
+No bypass timing or tail removal is promoted. A future core slice requires an
+arrival-spacing discriminator for a pipelined per-copy/cohort service; the
+consumed local-latency candidate must not be activated or retuned.
+
 ## Acceptance Criteria
 
 - AC-1: A current-host preflight and release build are recorded for the RTX

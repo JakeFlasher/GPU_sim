@@ -1936,9 +1936,36 @@ pub enum SharedBankProjectionError {
     CountOverflow { bank: u8 },
 }
 
-/// Failure while pairing one cache-all LDGSTS global-source transfer with its
+/// Compact per-instruction LDGSTS source/destination topology derived only
+/// from the lane-paired trace operands. Timing policy remains outside the
+/// trace reader.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct LdgstsDestinationTopology {
+    /// Number of flexible 128-byte source cohorts formed by the active lane
+    /// transfers. Zero is the exact result for a predicated-off instruction.
+    pub source_cohorts: u32,
+    /// Sum of distinct 128-byte destination lines touched independently by
+    /// each source cohort.
+    pub destination_line_fanout_total: u32,
+    /// Largest distinct destination-line fanout of any one source cohort.
+    pub destination_line_fanout_max: u32,
+    /// Existing cache-all projection: the sum, over source cohorts, of the
+    /// maximum distinct 4-byte-word multiplicity on any of 32 shared banks.
+    pub cache_all_bank_wavefronts_total: u32,
+    /// Largest cache-all bank-word multiplicity of any one source cohort.
+    pub cache_all_bank_wavefronts_max: u32,
+    /// Trace-derived bypass projection. For each source cohort this adds
+    /// `min(active transfers, destination lines * bank wavefronts)` before
+    /// summing, so line fanout and bank multiplicity are not collapsed before
+    /// their cohort-local interaction is observed.
+    pub bypass_wavefronts_total: u32,
+    /// Largest cohort-local contribution to `bypass_wavefronts_total`.
+    pub bypass_wavefronts_max: u32,
+}
+
+/// Failure while pairing one LDGSTS global-source transfer with its
 /// lane-corresponding shared destination and reducing flexible 128-byte source
-/// cohorts to shared-bank wavefronts.
+/// cohorts to destination-line and shared-bank topology.
 #[derive(Debug, thiserror::Error, Clone, PartialEq, Eq)]
 pub enum LdgstsDestinationProjectionError {
     #[error("expected exactly one GLOBAL/GENERIC source operand, got {got}")]
@@ -1980,6 +2007,19 @@ pub enum LdgstsDestinationProjectionError {
     BankWavefrontCountOverflow { bank: u8 },
     #[error("instruction destination wavefront sum overflowed u32")]
     WavefrontCountOverflow,
+    #[error("instruction source-cohort count overflowed u32")]
+    SourceCohortCountOverflow,
+    #[error("instruction destination-line fanout sum overflowed u32")]
+    DestinationLineFanoutOverflow,
+    #[error(
+        "cohort bypass projection overflowed u32: destination-line fanout {destination_lines} * bank wavefronts {bank_wavefronts}"
+    )]
+    BypassWavefrontProductOverflow {
+        destination_lines: u32,
+        bank_wavefronts: u32,
+    },
+    #[error("instruction bypass destination-wavefront sum overflowed u32")]
+    BypassWavefrontCountOverflow,
 }
 
 /// Compact, context-free form of a sector-expansion failure. Replay restores the
@@ -2067,28 +2107,78 @@ pub struct ValidatedMemoryInstruction {
 #[derive(Debug, Clone, Copy)]
 struct AsyncCopyProjection {
     effective_data_bytes: u64,
-    destination_wavefronts: u32,
+    destination_topology: CompactLdgstsDestinationTopology,
 }
 
-impl AsyncCopyProjection {
-    const DESTINATION_UNAVAILABLE: u32 = u32::MAX;
+#[derive(Debug, Clone, Copy)]
+struct CompactLdgstsDestinationTopology {
+    source_cohorts: u8,
+    destination_line_fanout_total: u8,
+    destination_line_fanout_max: u8,
+    cache_all_bank_wavefronts_total: u8,
+    cache_all_bank_wavefronts_max: u8,
+    bypass_wavefronts_total: u8,
+    bypass_wavefronts_max: u8,
+}
 
-    const fn new(effective_data_bytes: u64, destination_wavefronts: Option<u32>) -> Self {
+impl CompactLdgstsDestinationTopology {
+    const UNAVAILABLE: u8 = u8::MAX;
+
+    fn new(topology: Option<LdgstsDestinationTopology>) -> Self {
+        let Some(topology) = topology else {
+            return Self {
+                source_cohorts: Self::UNAVAILABLE,
+                destination_line_fanout_total: 0,
+                destination_line_fanout_max: 0,
+                cache_all_bank_wavefronts_total: 0,
+                cache_all_bank_wavefronts_max: 0,
+                bypass_wavefronts_total: 0,
+                bypass_wavefronts_max: 0,
+            };
+        };
+        let compact = |value: u32| {
+            u8::try_from(value).expect("one 32-lane LDGSTS topology fits the compact u8 domain")
+        };
         Self {
-            effective_data_bytes,
-            destination_wavefronts: match destination_wavefronts {
-                Some(wavefronts) => wavefronts,
-                None => Self::DESTINATION_UNAVAILABLE,
-            },
+            source_cohorts: compact(topology.source_cohorts),
+            destination_line_fanout_total: compact(topology.destination_line_fanout_total),
+            destination_line_fanout_max: compact(topology.destination_line_fanout_max),
+            cache_all_bank_wavefronts_total: compact(topology.cache_all_bank_wavefronts_total),
+            cache_all_bank_wavefronts_max: compact(topology.cache_all_bank_wavefronts_max),
+            bypass_wavefronts_total: compact(topology.bypass_wavefronts_total),
+            bypass_wavefronts_max: compact(topology.bypass_wavefronts_max),
         }
     }
 
-    const fn destination_wavefronts(self) -> Option<u32> {
-        if self.destination_wavefronts == Self::DESTINATION_UNAVAILABLE {
-            None
-        } else {
-            Some(self.destination_wavefronts)
+    const fn expand(self) -> Option<LdgstsDestinationTopology> {
+        if self.source_cohorts == Self::UNAVAILABLE {
+            return None;
         }
+        Some(LdgstsDestinationTopology {
+            source_cohorts: self.source_cohorts as u32,
+            destination_line_fanout_total: self.destination_line_fanout_total as u32,
+            destination_line_fanout_max: self.destination_line_fanout_max as u32,
+            cache_all_bank_wavefronts_total: self.cache_all_bank_wavefronts_total as u32,
+            cache_all_bank_wavefronts_max: self.cache_all_bank_wavefronts_max as u32,
+            bypass_wavefronts_total: self.bypass_wavefronts_total as u32,
+            bypass_wavefronts_max: self.bypass_wavefronts_max as u32,
+        })
+    }
+}
+
+impl AsyncCopyProjection {
+    fn new(
+        effective_data_bytes: u64,
+        destination_topology: Option<LdgstsDestinationTopology>,
+    ) -> Self {
+        Self {
+            effective_data_bytes,
+            destination_topology: CompactLdgstsDestinationTopology::new(destination_topology),
+        }
+    }
+
+    const fn destination_topology(self) -> Option<LdgstsDestinationTopology> {
+        self.destination_topology.expand()
     }
 }
 
@@ -2240,10 +2330,10 @@ impl ValidatedWarp {
                 } else {
                     0
                 };
-                let destination_wavefronts =
+                let destination_topology =
                     if is_async_copy_source && payload_contract.carries_ldgsts_destination() {
                         Some(
-                            project_ldgsts_source_cohort_wavefronts_128b_32x4(
+                            project_ldgsts_source_cohort_topology_128b_32x4(
                                 preflight,
                                 &mut shared_word_scratch,
                             )
@@ -2277,7 +2367,7 @@ impl ValidatedWarp {
                     };
                     async_copy_projections.push(AsyncCopyProjection::new(
                         effective_data_bytes,
-                        destination_wavefronts,
+                        destination_topology,
                     ));
                     index
                 } else {
@@ -2462,15 +2552,26 @@ impl ValidatedWarp {
             .map_or(0, |projection| projection.effective_data_bytes)
     }
 
-    /// Exact cache-all LDGSTS destination projection when the trace contract
-    /// carries the lane-paired SHARED operand. `None` preserves the explicit
-    /// source-only fallback boundary; `Some(0)` is an exact zero-active result.
+    /// Exact LDGSTS source/destination topology when the trace contract carries
+    /// the lane-paired SHARED operand. `None` preserves the explicit source-only
+    /// fallback boundary; `Some(default())` is an exact zero-active result.
+    pub fn ldgsts_destination_topology_128b_32x4(
+        &self,
+        memory: &ValidatedMemoryInstruction,
+    ) -> Option<LdgstsDestinationTopology> {
+        self.async_copy_projection(memory)
+            .and_then(AsyncCopyProjection::destination_topology)
+    }
+
+    /// Compatibility view of the established cache-all bank-wavefront total.
+    /// New bypass work must consume the multidimensional topology above rather
+    /// than treating this scalar as a transferable completion coordinate.
     pub fn ldgsts_destination_wavefronts_128b_32x4(
         &self,
         memory: &ValidatedMemoryInstruction,
     ) -> Option<u32> {
-        self.async_copy_projection(memory)
-            .and_then(AsyncCopyProjection::destination_wavefronts)
+        self.ldgsts_destination_topology_128b_32x4(memory)
+            .map(|topology| topology.cache_all_bank_wavefronts_total)
     }
 
     pub fn sector_plan<'a>(
@@ -6303,36 +6404,80 @@ struct LdgstsLaneTransfer {
     lane: u8,
 }
 
+const LDGSTS_DESTINATION_LINE_WORDS_128B: i64 = 128 / 4;
+
 fn finish_ldgsts_destination_cohort(
     word_scratch: &mut Vec<i64>,
-    total_wavefronts: &mut u32,
+    active_transfers: u32,
+    topology: &mut LdgstsDestinationTopology,
 ) -> Result<(), LdgstsDestinationProjectionError> {
+    if active_transfers == 0 {
+        debug_assert!(word_scratch.is_empty());
+        return Ok(());
+    }
     word_scratch.sort_unstable();
     word_scratch.dedup();
     let mut bank_words = [0_u32; SHARED_BANK_COUNT_32X4 as usize];
+    let mut destination_lines = 0_u32;
+    let mut previous_line = None;
     for &word in word_scratch.iter() {
+        let line = word.div_euclid(LDGSTS_DESTINATION_LINE_WORDS_128B);
+        if previous_line != Some(line) {
+            destination_lines = destination_lines
+                .checked_add(1)
+                .ok_or(LdgstsDestinationProjectionError::DestinationLineFanoutOverflow)?;
+            previous_line = Some(line);
+        }
         let bank = word.rem_euclid(SHARED_BANK_COUNT_32X4) as usize;
         bank_words[bank] = bank_words[bank].checked_add(1).ok_or(
             LdgstsDestinationProjectionError::BankWavefrontCountOverflow { bank: bank as u8 },
         )?;
     }
-    let wavefronts = bank_words.into_iter().max().unwrap_or(0);
-    *total_wavefronts = total_wavefronts
-        .checked_add(wavefronts)
-        .ok_or(LdgstsDestinationProjectionError::WavefrontCountOverflow)?;
+    let bank_wavefronts = bank_words.into_iter().max().unwrap_or(0);
+    let bypass_product = destination_lines.checked_mul(bank_wavefronts).ok_or(
+        LdgstsDestinationProjectionError::BypassWavefrontProductOverflow {
+            destination_lines,
+            bank_wavefronts,
+        },
+    )?;
+    let bypass_wavefronts = active_transfers.min(bypass_product);
+    let next = LdgstsDestinationTopology {
+        source_cohorts: topology
+            .source_cohorts
+            .checked_add(1)
+            .ok_or(LdgstsDestinationProjectionError::SourceCohortCountOverflow)?,
+        destination_line_fanout_total: topology
+            .destination_line_fanout_total
+            .checked_add(destination_lines)
+            .ok_or(LdgstsDestinationProjectionError::DestinationLineFanoutOverflow)?,
+        destination_line_fanout_max: topology.destination_line_fanout_max.max(destination_lines),
+        cache_all_bank_wavefronts_total: topology
+            .cache_all_bank_wavefronts_total
+            .checked_add(bank_wavefronts)
+            .ok_or(LdgstsDestinationProjectionError::WavefrontCountOverflow)?,
+        cache_all_bank_wavefronts_max: topology.cache_all_bank_wavefronts_max.max(bank_wavefronts),
+        bypass_wavefronts_total: topology
+            .bypass_wavefronts_total
+            .checked_add(bypass_wavefronts)
+            .ok_or(LdgstsDestinationProjectionError::BypassWavefrontCountOverflow)?,
+        bypass_wavefronts_max: topology.bypass_wavefronts_max.max(bypass_wavefronts),
+    };
+    *topology = next;
     word_scratch.clear();
     Ok(())
 }
 
-/// Pair each active lane's cache-all LDGSTS source and destination transfer,
-/// form flexible source cohorts whose complete byte span is at most 128 bytes,
-/// and sum each cohort's broadcast-collapsed 32-bank/4-byte wavefront count.
+/// Pair each active lane's LDGSTS source and destination transfer, form
+/// flexible source cohorts whose complete byte span is at most 128 bytes, and
+/// retain destination-line fanout separately from 32-bank/4-byte-word
+/// multiplicity. The bypass projection is derived inside each cohort before
+/// aggregation; it is an observational topology coordinate, not a timing rule.
 /// Cohorts are anchored at the smallest uncovered source address rather than at
 /// absolute 128-byte cache-line boundaries.
-pub fn project_ldgsts_source_cohort_wavefronts_128b_32x4(
+pub fn project_ldgsts_source_cohort_topology_128b_32x4(
     preflight: PreflightedMemoryAccess<'_>,
     word_scratch: &mut Vec<i64>,
-) -> Result<u32, LdgstsDestinationProjectionError> {
+) -> Result<LdgstsDestinationTopology, LdgstsDestinationProjectionError> {
     let mut source_index = None;
     let mut source_count = 0_usize;
     let mut destination_index = None;
@@ -6434,14 +6579,19 @@ pub fn project_ldgsts_source_cohort_wavefronts_128b_32x4(
 
     word_scratch.clear();
     let mut cohort_start = None;
-    let mut total_wavefronts = 0_u32;
+    let mut cohort_active_transfers = 0_u32;
+    let mut topology = LdgstsDestinationTopology::default();
     let mut projected_words = 0_u64;
     for transfer in &transfers[..transfer_count] {
         if cohort_start.is_some_and(|start| transfer.source_end - start > 128) {
-            finish_ldgsts_destination_cohort(word_scratch, &mut total_wavefronts)?;
+            finish_ldgsts_destination_cohort(word_scratch, cohort_active_transfers, &mut topology)?;
             cohort_start = None;
+            cohort_active_transfers = 0;
         }
         cohort_start.get_or_insert(transfer.source_start);
+        cohort_active_transfers = cohort_active_transfers
+            .checked_add(1)
+            .expect("one source cohort cannot exceed the 32-lane warp");
         let words =
             u64::try_from(transfer.destination_last_word - transfer.destination_first_word + 1)
                 .unwrap_or_else(|_| {
@@ -6466,8 +6616,19 @@ pub fn project_ldgsts_source_cohort_wavefronts_128b_32x4(
             .map_err(|_| LdgstsDestinationProjectionError::CapacityUnavailable { additional })?;
         word_scratch.extend(transfer.destination_first_word..=transfer.destination_last_word);
     }
-    finish_ldgsts_destination_cohort(word_scratch, &mut total_wavefronts)?;
-    Ok(total_wavefronts)
+    finish_ldgsts_destination_cohort(word_scratch, cohort_active_transfers, &mut topology)?;
+    Ok(topology)
+}
+
+/// Compatibility wrapper for the established cache-all bank-wavefront scalar.
+pub fn project_ldgsts_source_cohort_wavefronts_128b_32x4(
+    preflight: PreflightedMemoryAccess<'_>,
+    word_scratch: &mut Vec<i64>,
+) -> Result<u32, LdgstsDestinationProjectionError> {
+    Ok(
+        project_ldgsts_source_cohort_topology_128b_32x4(preflight, word_scratch)?
+            .cache_all_bank_wavefronts_total,
+    )
 }
 
 /// A memory instruction decoded to what the memory hierarchy consumes —
@@ -7703,18 +7864,78 @@ mod tests {
         instruction
     }
 
+    fn ldgsts_destination_layout_inst(destination_lane_stride: i64) -> pb::Instruction {
+        let mut instruction = async_payload_inst(32, 16, 32);
+        instruction.addresses.push(pb::Address {
+            data_width: 16,
+            compression_format: crate::lanes::FORMAT_LIST_ALL,
+            addrs: (0_i64..32)
+                .map(|lane| lane * destination_lane_stride)
+                .collect(),
+            address_space: Some(pb::MemorySpace::Shared as i32),
+            ..Default::default()
+        });
+        instruction
+    }
+
     #[test]
     fn ldgsts_destination_projection_is_source_cohort_scoped_and_pairing_exact() {
-        for (transpose, source_offset, expected) in [(false, 0, 4), (false, 16, 4), (true, 0, 16)] {
+        for (transpose, source_offset, expected) in [
+            (
+                false,
+                0,
+                LdgstsDestinationTopology {
+                    source_cohorts: 4,
+                    destination_line_fanout_total: 4,
+                    destination_line_fanout_max: 1,
+                    cache_all_bank_wavefronts_total: 4,
+                    cache_all_bank_wavefronts_max: 1,
+                    bypass_wavefronts_total: 4,
+                    bypass_wavefronts_max: 1,
+                },
+            ),
+            (
+                false,
+                16,
+                LdgstsDestinationTopology {
+                    source_cohorts: 4,
+                    destination_line_fanout_total: 4,
+                    destination_line_fanout_max: 1,
+                    cache_all_bank_wavefronts_total: 4,
+                    cache_all_bank_wavefronts_max: 1,
+                    bypass_wavefronts_total: 4,
+                    bypass_wavefronts_max: 1,
+                },
+            ),
+            (
+                true,
+                0,
+                LdgstsDestinationTopology {
+                    source_cohorts: 4,
+                    destination_line_fanout_total: 16,
+                    destination_line_fanout_max: 4,
+                    cache_all_bank_wavefronts_total: 16,
+                    cache_all_bank_wavefronts_max: 4,
+                    bypass_wavefronts_total: 32,
+                    bypass_wavefronts_max: 8,
+                },
+            ),
+        ] {
             let instruction = ldgsts_destination_inst(transpose, source_offset);
             let preflight = preflight_memory_access(&instruction, || "LDGSTS pair".to_owned())
                 .unwrap()
                 .unwrap();
             assert_eq!(
-                project_ldgsts_source_cohort_wavefronts_128b_32x4(preflight, &mut Vec::new(),)
+                project_ldgsts_source_cohort_topology_128b_32x4(preflight, &mut Vec::new())
                     .unwrap(),
                 expected,
                 "transpose={transpose}, source_offset={source_offset}"
+            );
+            assert_eq!(
+                project_ldgsts_source_cohort_wavefronts_128b_32x4(preflight, &mut Vec::new(),)
+                    .unwrap(),
+                expected.cache_all_bank_wavefronts_total,
+                "compatibility wrapper transpose={transpose}, source_offset={source_offset}"
             );
         }
 
@@ -7739,6 +7960,30 @@ mod tests {
         assert_eq!(compact.effective_data_bytes(memories[0]), 512);
         assert_eq!(compact.effective_data_bytes(memories[1]), 512);
         assert_eq!(
+            compact.ldgsts_destination_topology_128b_32x4(memories[0]),
+            Some(LdgstsDestinationTopology {
+                source_cohorts: 4,
+                destination_line_fanout_total: 4,
+                destination_line_fanout_max: 1,
+                cache_all_bank_wavefronts_total: 4,
+                cache_all_bank_wavefronts_max: 1,
+                bypass_wavefronts_total: 4,
+                bypass_wavefronts_max: 1,
+            })
+        );
+        assert_eq!(
+            compact.ldgsts_destination_topology_128b_32x4(memories[1]),
+            Some(LdgstsDestinationTopology {
+                source_cohorts: 4,
+                destination_line_fanout_total: 16,
+                destination_line_fanout_max: 4,
+                cache_all_bank_wavefronts_total: 16,
+                cache_all_bank_wavefronts_max: 4,
+                bypass_wavefronts_total: 32,
+                bypass_wavefronts_max: 8,
+            })
+        );
+        assert_eq!(
             compact.ldgsts_destination_wavefronts_128b_32x4(memories[0]),
             Some(4)
         );
@@ -7752,6 +7997,87 @@ mod tests {
                 ValidatedSectorPlan::Sectors(sectors) if sectors.len() == 16
             ));
         }
+    }
+
+    #[test]
+    fn ldgsts_destination_topology_separates_compact_skew_conflict_and_severe() {
+        for (label, destination_lane_stride, expected) in [
+            (
+                "compact",
+                32,
+                LdgstsDestinationTopology {
+                    source_cohorts: 8,
+                    destination_line_fanout_total: 8,
+                    destination_line_fanout_max: 1,
+                    cache_all_bank_wavefronts_total: 8,
+                    cache_all_bank_wavefronts_max: 1,
+                    bypass_wavefronts_total: 8,
+                    bypass_wavefronts_max: 1,
+                },
+            ),
+            (
+                "skew",
+                96,
+                LdgstsDestinationTopology {
+                    source_cohorts: 8,
+                    destination_line_fanout_total: 24,
+                    destination_line_fanout_max: 3,
+                    cache_all_bank_wavefronts_total: 8,
+                    cache_all_bank_wavefronts_max: 1,
+                    bypass_wavefronts_total: 24,
+                    bypass_wavefronts_max: 3,
+                },
+            ),
+            (
+                "conflict",
+                64,
+                LdgstsDestinationTopology {
+                    source_cohorts: 8,
+                    destination_line_fanout_total: 16,
+                    destination_line_fanout_max: 2,
+                    cache_all_bank_wavefronts_total: 16,
+                    cache_all_bank_wavefronts_max: 2,
+                    bypass_wavefronts_total: 32,
+                    bypass_wavefronts_max: 4,
+                },
+            ),
+            (
+                "severe",
+                128,
+                LdgstsDestinationTopology {
+                    source_cohorts: 8,
+                    destination_line_fanout_total: 32,
+                    destination_line_fanout_max: 4,
+                    cache_all_bank_wavefronts_total: 32,
+                    cache_all_bank_wavefronts_max: 4,
+                    bypass_wavefronts_total: 32,
+                    bypass_wavefronts_max: 4,
+                },
+            ),
+        ] {
+            let instruction = ldgsts_destination_layout_inst(destination_lane_stride);
+            let preflight = preflight_memory_access(&instruction, || label.to_owned())
+                .unwrap()
+                .unwrap();
+            assert_eq!(
+                project_ldgsts_source_cohort_topology_128b_32x4(preflight, &mut Vec::new(),)
+                    .unwrap(),
+                expected,
+                "layout={label}"
+            );
+            assert_eq!(
+                project_ldgsts_source_cohort_wavefronts_128b_32x4(preflight, &mut Vec::new(),)
+                    .unwrap(),
+                expected.cache_all_bank_wavefronts_total,
+                "cache-all compatibility layout={label}"
+            );
+        }
+    }
+
+    #[test]
+    fn async_copy_projection_keeps_multidimensional_topology_compact() {
+        assert!(std::mem::size_of::<AsyncCopyProjection>() <= 16);
+        assert!(std::mem::size_of::<CompactLdgstsDestinationTopology>() <= 8);
     }
 
     #[test]

@@ -120,11 +120,20 @@ pub fn is_known_untagged_opcode(opcode_text: &str) -> bool {
 /// arena.
 pub const ASYNC_COPY_EXACT_DESTINATION_FLAG: u32 = 1 << 31;
 pub const ASYNC_COPY_COMPLETION_VALUE_MASK: u32 = ASYNC_COPY_EXACT_DESTINATION_FLAG - 1;
-const ASYNC_COPY_COMPOSITE_MARKER_MASK: u32 = 0x3f;
-const ASYNC_COPY_COMPOSITE_MARKER: u32 = ASYNC_COPY_COMPOSITE_MARKER_MASK;
-const ASYNC_COPY_COMPOSITE_PAYLOAD_SHIFT: u32 = 6;
-const ASYNC_COPY_COMPOSITE_DESTINATION_SHIFT: u32 = 18;
-pub const ASYNC_COPY_COMPOSITE_FIELD_MASK: u32 = 0x0fff;
+const ASYNC_COPY_COMPOSITE_MARKER: u32 = 1;
+const ASYNC_COPY_COMPOSITE_PAYLOAD_SHIFT: u32 = 1;
+const ASYNC_COPY_COMPOSITE_PAYLOAD_MASK: u32 = 0xff;
+const ASYNC_COPY_COMPOSITE_PAYLOAD_GRANULARITY: u32 = 8;
+const ASYNC_COPY_COMPOSITE_COHORT_SHIFT: u32 = 9;
+const ASYNC_COPY_COMPOSITE_COHORT_MASK: u32 = 0x1f;
+const ASYNC_COPY_COMPOSITE_LINES_SHIFT: u32 = 14;
+const ASYNC_COPY_COMPOSITE_LINES_MASK: u32 = 0x3f;
+const ASYNC_COPY_COMPOSITE_BANK_SHIFT: u32 = 20;
+const ASYNC_COPY_COMPOSITE_BANK_MASK: u32 = 0x1f;
+const ASYNC_COPY_COMPOSITE_BYPASS_SHIFT: u32 = 25;
+const ASYNC_COPY_COMPOSITE_BYPASS_MASK: u32 = 0x1f;
+pub const ASYNC_COPY_COMPOSITE_PAYLOAD_WORK_MAX: u32 =
+    ASYNC_COPY_COMPOSITE_PAYLOAD_MASK * ASYNC_COPY_COMPOSITE_PAYLOAD_GRANULARITY;
 
 /// Meaning of the compact `GlobalAsyncCopy::completion_work` token. Cache-all
 /// records may carry exact timing work. Destination-bearing bypass records
@@ -135,9 +144,12 @@ pub enum AsyncCopyCompletion {
     Inactive,
     PayloadWork(u32),
     ExactDestinationWork(u32),
-    PayloadAndObservedDestination {
+    PayloadAndObservedTopology {
         payload_work: u32,
-        destination_wavefronts: u32,
+        source_cohorts: u32,
+        destination_lines: u32,
+        max_bank_wavefronts: u32,
+        max_bypass_wavefronts: u32,
     },
 }
 
@@ -145,13 +157,24 @@ pub const fn decode_async_copy_completion(token: u32) -> AsyncCopyCompletion {
     if token == 0 {
         AsyncCopyCompletion::Inactive
     } else if token & ASYNC_COPY_EXACT_DESTINATION_FLAG != 0
-        && token & ASYNC_COPY_COMPOSITE_MARKER_MASK == ASYNC_COPY_COMPOSITE_MARKER
+        && token & ASYNC_COPY_COMPOSITE_MARKER != 0
     {
-        AsyncCopyCompletion::PayloadAndObservedDestination {
-            payload_work: (token >> ASYNC_COPY_COMPOSITE_PAYLOAD_SHIFT)
-                & ASYNC_COPY_COMPOSITE_FIELD_MASK,
-            destination_wavefronts: (token >> ASYNC_COPY_COMPOSITE_DESTINATION_SHIFT)
-                & ASYNC_COPY_COMPOSITE_FIELD_MASK,
+        AsyncCopyCompletion::PayloadAndObservedTopology {
+            payload_work: ((token >> ASYNC_COPY_COMPOSITE_PAYLOAD_SHIFT)
+                & ASYNC_COPY_COMPOSITE_PAYLOAD_MASK)
+                * ASYNC_COPY_COMPOSITE_PAYLOAD_GRANULARITY,
+            source_cohorts: ((token >> ASYNC_COPY_COMPOSITE_COHORT_SHIFT)
+                & ASYNC_COPY_COMPOSITE_COHORT_MASK)
+                + 1,
+            destination_lines: ((token >> ASYNC_COPY_COMPOSITE_LINES_SHIFT)
+                & ASYNC_COPY_COMPOSITE_LINES_MASK)
+                + 1,
+            max_bank_wavefronts: ((token >> ASYNC_COPY_COMPOSITE_BANK_SHIFT)
+                & ASYNC_COPY_COMPOSITE_BANK_MASK)
+                + 1,
+            max_bypass_wavefronts: ((token >> ASYNC_COPY_COMPOSITE_BYPASS_SHIFT)
+                & ASYNC_COPY_COMPOSITE_BYPASS_MASK)
+                + 1,
         }
     } else if token & ASYNC_COPY_EXACT_DESTINATION_FLAG != 0 {
         AsyncCopyCompletion::ExactDestinationWork(token & ASYNC_COPY_COMPLETION_VALUE_MASK)
@@ -171,29 +194,43 @@ pub const fn encode_async_copy_payload_work(work: u32) -> Option<u32> {
 pub const fn encode_async_copy_destination_work(work: u32) -> Option<u32> {
     if work == 0 {
         Some(0)
-    } else if work <= ASYNC_COPY_COMPLETION_VALUE_MASK
-        && work & ASYNC_COPY_COMPOSITE_MARKER_MASK != ASYNC_COPY_COMPOSITE_MARKER
-    {
+    } else if work <= ASYNC_COPY_COMPLETION_VALUE_MASK && work & ASYNC_COPY_COMPOSITE_MARKER == 0 {
         Some(ASYNC_COPY_EXACT_DESTINATION_FLAG | work)
     } else {
         None
     }
 }
 
-pub const fn encode_async_copy_payload_and_destination(
+pub const fn encode_async_copy_payload_and_topology(
     payload_work: u32,
-    destination_wavefronts: u32,
+    source_cohorts: u32,
+    destination_lines: u32,
+    max_bank_wavefronts: u32,
+    max_bypass_wavefronts: u32,
 ) -> Option<u32> {
-    if payload_work == 0 || destination_wavefronts == 0 {
+    if payload_work == 0
+        || payload_work % ASYNC_COPY_COMPOSITE_PAYLOAD_GRANULARITY != 0
+        || source_cohorts == 0
+        || destination_lines == 0
+        || max_bank_wavefronts == 0
+        || max_bypass_wavefronts == 0
+    {
         None
-    } else if payload_work <= ASYNC_COPY_COMPOSITE_FIELD_MASK
-        && destination_wavefronts <= ASYNC_COPY_COMPOSITE_FIELD_MASK
+    } else if payload_work <= ASYNC_COPY_COMPOSITE_PAYLOAD_WORK_MAX
+        && source_cohorts <= ASYNC_COPY_COMPOSITE_COHORT_MASK + 1
+        && destination_lines <= ASYNC_COPY_COMPOSITE_LINES_MASK + 1
+        && max_bank_wavefronts <= ASYNC_COPY_COMPOSITE_BANK_MASK + 1
+        && max_bypass_wavefronts <= ASYNC_COPY_COMPOSITE_BYPASS_MASK + 1
     {
         Some(
             ASYNC_COPY_EXACT_DESTINATION_FLAG
                 | ASYNC_COPY_COMPOSITE_MARKER
-                | (payload_work << ASYNC_COPY_COMPOSITE_PAYLOAD_SHIFT)
-                | (destination_wavefronts << ASYNC_COPY_COMPOSITE_DESTINATION_SHIFT),
+                | ((payload_work / ASYNC_COPY_COMPOSITE_PAYLOAD_GRANULARITY)
+                    << ASYNC_COPY_COMPOSITE_PAYLOAD_SHIFT)
+                | ((source_cohorts - 1) << ASYNC_COPY_COMPOSITE_COHORT_SHIFT)
+                | ((destination_lines - 1) << ASYNC_COPY_COMPOSITE_LINES_SHIFT)
+                | ((max_bank_wavefronts - 1) << ASYNC_COPY_COMPOSITE_BANK_SHIFT)
+                | ((max_bypass_wavefronts - 1) << ASYNC_COPY_COMPOSITE_BYPASS_SHIFT),
         )
     } else {
         None
@@ -364,12 +401,15 @@ mod tests {
             decode_async_copy_completion(destination),
             AsyncCopyCompletion::ExactDestinationWork(2048)
         );
-        let composite = encode_async_copy_payload_and_destination(1024, 32).unwrap();
+        let composite = encode_async_copy_payload_and_topology(1024, 8, 24, 1, 3).unwrap();
         assert_eq!(
             decode_async_copy_completion(composite),
-            AsyncCopyCompletion::PayloadAndObservedDestination {
+            AsyncCopyCompletion::PayloadAndObservedTopology {
                 payload_work: 1024,
-                destination_wavefronts: 32,
+                source_cohorts: 8,
+                destination_lines: 24,
+                max_bank_wavefronts: 1,
+                max_bypass_wavefronts: 3,
             }
         );
         assert_eq!(
@@ -378,10 +418,9 @@ mod tests {
         );
         assert!(encode_async_copy_payload_work(u32::MAX).is_none());
         assert!(encode_async_copy_destination_work(u32::MAX).is_none());
-        assert!(
-            encode_async_copy_payload_and_destination(ASYNC_COPY_COMPOSITE_FIELD_MASK + 1, 1,)
-                .is_none()
-        );
+        assert!(encode_async_copy_payload_and_topology(1025, 8, 24, 1, 3).is_none());
+        assert!(encode_async_copy_payload_and_topology(1024, 33, 24, 1, 3).is_none());
+        assert!(encode_async_copy_payload_and_topology(1024, 8, 65, 1, 3).is_none());
     }
 
     #[test]

@@ -21,15 +21,15 @@
 
 constexpr int kWarpSize = 32;
 constexpr int kPositions = 8;
-constexpr std::size_t kPayloadBytes = 16;
 constexpr std::size_t kSourcePositionStride = 1024;
 constexpr std::size_t kSourceLaneStride = 32;
-constexpr std::size_t kCompactPositionStride = 4096;
+constexpr std::size_t kDestinationPositionStride = 4096;
 constexpr std::size_t kCompactLaneStride = 32;
-constexpr std::size_t kConflictPositionStride = 4096;
 constexpr std::size_t kConflictLaneStride = 64;
+constexpr std::size_t kSevereLaneStride = 128;
+constexpr std::size_t kSkewLaneStride = 96;
 constexpr std::size_t kDestinationBytes =
-    kPositions * kConflictPositionStride;
+    kPositions * kDestinationPositionStride;
 constexpr int kDefaultGroups = 64;
 constexpr int kMaxGroups = 16384;
 
@@ -49,36 +49,35 @@ __device__ __forceinline__ void copy_cg(unsigned destination,
                  : "memory");
 }
 
-template <bool Conflict>
-__device__ __forceinline__ unsigned destination_offset(int position,
-                                                        int lane) {
-    constexpr std::size_t position_stride = Conflict
-        ? kConflictPositionStride
-        : kCompactPositionStride;
-    constexpr std::size_t lane_stride = Conflict
-        ? kConflictLaneStride
-        : kCompactLaneStride;
-    return static_cast<unsigned>(position * position_stride + lane * lane_stride);
+template <int Layout>
+__device__ __forceinline__ unsigned destination_offset(int lane) {
+    static_assert(Layout >= 0 && Layout <= 3);
+    constexpr std::size_t lane_stride = Layout == 0
+        ? kCompactLaneStride
+        : (Layout == 1
+               ? kConflictLaneStride
+               : (Layout == 2 ? kSevereLaneStride : kSkewLaneStride));
+    return static_cast<unsigned>(lane * lane_stride);
 }
 
-template <int Depth, bool Dram, bool Conflict>
+template <int Depth, bool Bypass, bool Streaming, int Layout>
 __global__ void source_only_kernel(const char* source, int groups) {
-    // Both layout variants reserve exactly 32 KiB.  Only the per-position and
+    // Every layout reserves exactly 32 KiB.  Only the per-position and
     // per-lane destination mapping changes, so occupancy/resource allocation
-    // cannot explain a compact-versus-conflict timing difference.
+    // cannot explain a layout timing difference.
     __shared__ __align__(16) char destination[kDestinationBytes];
     if (threadIdx.x >= kWarpSize) return;
     const int lane = static_cast<int>(threadIdx.x);
     const char* base = source;
     std::uint32_t token = 0x6a09e667u ^ static_cast<std::uint32_t>(lane);
     const unsigned destination_base = static_cast<unsigned>(
-        __cvta_generic_to_shared(destination + destination_offset<Conflict>(0, lane)));
-    constexpr unsigned destination_stride = static_cast<unsigned>(
-        Conflict ? kConflictPositionStride : kCompactPositionStride);
+        __cvta_generic_to_shared(destination + destination_offset<Layout>(lane)));
+    constexpr unsigned destination_stride =
+        static_cast<unsigned>(kDestinationPositionStride);
     const unsigned long long start = clock64();
 #pragma unroll 1
     for (int group = 0; group < groups; ++group) {
-        const std::size_t source_group = Dram
+        const std::size_t source_group = Streaming
             ? static_cast<std::size_t>(group) * Depth * kSourcePositionStride
             : 0u;
         const char* s0 = base + source_group + 0u * kSourcePositionStride +
@@ -97,7 +96,7 @@ __global__ void source_only_kernel(const char* source, int groups) {
                          lane * kSourceLaneStride;
         const char* s7 = base + source_group + 7u * kSourcePositionStride +
                          lane * kSourceLaneStride;
-        if constexpr (Dram) {
+        if constexpr (Bypass) {
             if constexpr (Depth > 0) copy_cg(destination_base + 0u * destination_stride, s0);
             if constexpr (Depth > 1) copy_cg(destination_base + 1u * destination_stride, s1);
             if constexpr (Depth > 2) copy_cg(destination_base + 2u * destination_stride, s2);
@@ -133,33 +132,47 @@ __global__ void source_only_kernel(const char* source, int groups) {
     asm volatile("" : : "l"(start), "l"(stop), "r"(token) : "memory");
 }
 
-template <int Depth, bool Dram, bool Conflict>
+template <int Depth, bool Bypass, bool Streaming, int Layout>
 void launch(const char* source, int groups) {
-    source_only_kernel<Depth, Dram, Conflict><<<1, kWarpSize>>>(source, groups);
+    source_only_kernel<Depth, Bypass, Streaming, Layout>
+        <<<1, kWarpSize>>>(source, groups);
 }
 
-template <bool Dram, bool Conflict>
+template <bool Bypass, bool Streaming, int Layout>
 void launch_depth(int depth, const char* source, int groups) {
     switch (depth) {
-        case 1: launch<1, Dram, Conflict>(source, groups); return;
-        case 4: launch<4, Dram, Conflict>(source, groups); return;
-        case 5: launch<5, Dram, Conflict>(source, groups); return;
-        case 6: launch<6, Dram, Conflict>(source, groups); return;
-        case 8: launch<8, Dram, Conflict>(source, groups); return;
+        case 1: launch<1, Bypass, Streaming, Layout>(source, groups); return;
+        case 4: launch<4, Bypass, Streaming, Layout>(source, groups); return;
+        case 5: launch<5, Bypass, Streaming, Layout>(source, groups); return;
+        case 6: launch<6, Bypass, Streaming, Layout>(source, groups); return;
+        case 8: launch<8, Bypass, Streaming, Layout>(source, groups); return;
         default: break;
     }
     std::fprintf(stderr, "unsupported depth: %d\n", depth);
     std::exit(2);
 }
 
-void launch_for(int depth, bool dram, bool conflict, const char* source,
-                int groups) {
-    if (dram) {
-        if (conflict) launch_depth<true, true>(depth, source, groups);
-        else launch_depth<true, false>(depth, source, groups);
+template <bool Bypass, bool Streaming>
+void launch_layout(int depth, int layout, const char* source, int groups) {
+    switch (layout) {
+        case 0: launch_depth<Bypass, Streaming, 0>(depth, source, groups); return;
+        case 1: launch_depth<Bypass, Streaming, 1>(depth, source, groups); return;
+        case 2: launch_depth<Bypass, Streaming, 2>(depth, source, groups); return;
+        case 3: launch_depth<Bypass, Streaming, 3>(depth, source, groups); return;
+        default: break;
+    }
+    std::fprintf(stderr, "unsupported layout index: %d\n", layout);
+    std::exit(2);
+}
+
+void launch_for(int depth, bool bypass, bool streaming, int layout,
+                const char* source, int groups) {
+    if (bypass && streaming) {
+        launch_layout<true, true>(depth, layout, source, groups);
+    } else if (bypass) {
+        launch_layout<true, false>(depth, layout, source, groups);
     } else {
-        if (conflict) launch_depth<false, true>(depth, source, groups);
-        else launch_depth<false, false>(depth, source, groups);
+        launch_layout<false, false>(depth, layout, source, groups);
     }
 }
 
@@ -173,8 +186,9 @@ int parse_int(const char* text) {
 int main(int argc, char** argv) {
     int groups = kDefaultGroups;
     int depth = 4;
-    bool dram = false;
-    bool conflict = false;
+    bool bypass = false;
+    bool streaming = false;
+    int layout = 0;
     bool profiler_marked = true;
     for (int i = 1; i < argc; ++i) {
         if (i + 1 >= argc) return 2;
@@ -182,8 +196,16 @@ int main(int argc, char** argv) {
         else if (std::strcmp(argv[i], "--depth") == 0) depth = parse_int(argv[++i]);
         else if (std::strcmp(argv[i], "--route") == 0) {
             const char* route = argv[++i];
-            if (std::strcmp(route, "l1") == 0) dram = false;
-            else if (std::strcmp(route, "dram") == 0) dram = true;
+            if (std::strcmp(route, "l1") == 0) {
+                bypass = false;
+                streaming = false;
+            } else if (std::strcmp(route, "l2") == 0) {
+                bypass = true;
+                streaming = false;
+            } else if (std::strcmp(route, "dram") == 0) {
+                bypass = true;
+                streaming = true;
+            }
             else return 2;
         } else if (std::strcmp(argv[i], "--markers") == 0) {
             const char* value = argv[++i];
@@ -191,16 +213,18 @@ int main(int argc, char** argv) {
             else if (std::strcmp(value, "off") == 0) profiler_marked = false;
             else return 2;
         } else if (std::strcmp(argv[i], "--layout") == 0) {
-            const char* layout = argv[++i];
-            if (std::strcmp(layout, "compact") == 0) conflict = false;
-            else if (std::strcmp(layout, "conflict") == 0) conflict = true;
+            const char* value = argv[++i];
+            if (std::strcmp(value, "compact") == 0) layout = 0;
+            else if (std::strcmp(value, "conflict") == 0) layout = 1;
+            else if (std::strcmp(value, "severe") == 0) layout = 2;
+            else if (std::strcmp(value, "skew") == 0) layout = 3;
             else return 2;
         } else return 2;
     }
     if (groups < 1 || depth < 1 ||
         (depth != 1 && depth != 4 && depth != 5 && depth != 6 && depth != 8)) return 2;
 
-    const std::size_t chunks = dram
+    const std::size_t chunks = streaming
         ? static_cast<std::size_t>(groups) * depth
         : static_cast<std::size_t>(kPositions);
     std::vector<std::uint32_t> host_source(
@@ -216,7 +240,7 @@ int main(int argc, char** argv) {
                           cudaMemcpyHostToDevice));
     CUDA_CHECK(cudaDeviceSynchronize());
     if (profiler_marked) CUDA_CHECK(cudaProfilerStart());
-    launch_for(depth, dram, conflict, source, groups);
+    launch_for(depth, bypass, streaming, layout, source, groups);
     CUDA_CHECK(cudaGetLastError());
     CUDA_CHECK(cudaDeviceSynchronize());
     if (profiler_marked) CUDA_CHECK(cudaProfilerStop());
@@ -228,10 +252,17 @@ int main(int argc, char** argv) {
         "\"destination_lane_stride\":%zu,"
         "\"global_store_target\":false,\"cta_barrier_target\":false,"
         "\"correct\":true}\n",
-        depth, dram ? "dram" : "l1", conflict ? "conflict" : "compact",
+        depth, streaming ? "dram" : (bypass ? "l2" : "l1"),
+        layout == 0
+            ? "compact"
+            : (layout == 1 ? "conflict" : (layout == 2 ? "severe" : "skew")),
         groups, kSourcePositionStride, kSourceLaneStride, kDestinationBytes,
-        conflict ? kConflictPositionStride : kCompactPositionStride,
-        conflict ? kConflictLaneStride : kCompactLaneStride);
+        kDestinationPositionStride,
+        layout == 0
+            ? kCompactLaneStride
+            : (layout == 1
+                   ? kConflictLaneStride
+                   : (layout == 2 ? kSevereLaneStride : kSkewLaneStride)));
     CUDA_CHECK(cudaFree(source));
     return 0;
 }

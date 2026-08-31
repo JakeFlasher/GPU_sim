@@ -27,6 +27,7 @@ constexpr std::size_t kDestinationPositionStride = 4096;
 constexpr std::size_t kCompactLaneStride = 32;
 constexpr std::size_t kConflictLaneStride = 64;
 constexpr std::size_t kSevereLaneStride = 128;
+constexpr std::size_t kSkewLaneStride = 96;
 constexpr std::size_t kDestinationBytes =
     kPositions * kDestinationPositionStride;
 constexpr int kDefaultGroups = 8192;
@@ -63,10 +64,12 @@ __device__ __forceinline__ void copy_cg(unsigned destination,
 
 template <int Layout>
 __device__ __forceinline__ unsigned destination_offset(int lane) {
-    static_assert(Layout >= 0 && Layout <= 2);
+    static_assert(Layout >= 0 && Layout <= 3);
     constexpr std::size_t lane_stride = Layout == 0
         ? kCompactLaneStride
-        : (Layout == 1 ? kConflictLaneStride : kSevereLaneStride);
+        : (Layout == 1
+               ? kConflictLaneStride
+               : (Layout == 2 ? kSevereLaneStride : kSkewLaneStride));
     return static_cast<unsigned>(lane * lane_stride);
 }
 
@@ -180,6 +183,7 @@ void launch_layout(int depth, int layout, const char* source, int groups,
         case 0: launch_depth<Bypass, Streaming, 0>(depth, source, groups, result); return;
         case 1: launch_depth<Bypass, Streaming, 1>(depth, source, groups, result); return;
         case 2: launch_depth<Bypass, Streaming, 2>(depth, source, groups, result); return;
+        case 3: launch_depth<Bypass, Streaming, 3>(depth, source, groups, result); return;
         default: break;
     }
     std::fprintf(stderr, "unsupported layout index: %d\n", layout);
@@ -232,6 +236,7 @@ int main(int argc, char** argv) {
             if (std::strcmp(value, "compact") == 0) layout = 0;
             else if (std::strcmp(value, "conflict") == 0) layout = 1;
             else if (std::strcmp(value, "severe") == 0) layout = 2;
+            else if (std::strcmp(value, "skew") == 0) layout = 3;
             else return 2;
         } else if (std::strcmp(argv[i], "--markers") == 0) {
             const char* value = argv[++i];
@@ -278,7 +283,9 @@ int main(int argc, char** argv) {
         "\"sum_consistent\":%s,\"result_store_after_intervals\":true,"
         "\"token\":%u,\"correct\":true}\n",
         depth, streaming ? "dram" : (bypass ? "l2" : "l1"),
-        layout == 0 ? "compact" : (layout == 1 ? "conflict" : "severe"),
+        layout == 0
+            ? "compact"
+            : (layout == 1 ? "conflict" : (layout == 2 ? "severe" : "skew")),
         groups, host_result.issue_cycles, host_result.wait_cycles,
         host_result.total_cycles,
         host_result.issue_cycles + host_result.wait_cycles == host_result.total_cycles

@@ -123,6 +123,17 @@ live wavefront counter is a sufficient scalar bypass coordinate. No timing or
 tail state is changed; further work requires a multidimensional per-copy
 topology rather than another fitted constant.
 
+That multidimensional slice is now complete in
+[the schema-15 bypass topology report](sm86_async_bypass_multidim_milestone.md).
+The orthogonal 96-byte skew layout separates destination-line fanout from bank
+multiplicity. A trace-derived cohort-local product/cap proxy matches all four
+independent NCU wavefront counts, and schema 15 preserves both coordinates plus
+a timing-neutral per-copy candidate. The candidate fits depth 4 at 0.384
+cycles/group MAE but fails untouched depths at 3.137 MAE (maximum 4.987), so it
+does not gate waits and the typed visibility tail remains. All eight new traces
+replay deterministically and all predecessor timing/traffic output is unchanged
+after removing only the new observation.
+
 The 2026-08-17
 [causal-readiness milestone](sm86_causal_readiness_milestone.md) is complete.
 Reason-tagged dependency, async-copy, CTA-generation/arrival-spread, and

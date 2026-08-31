@@ -101,6 +101,11 @@ it falsifies both available scalar projections, so no per-copy completion rate
 is promoted. JADE/HETR, CPU-GPU co-simulation, `sm_120`, and scored timing
 defaults remain unchanged.
 
+Schema 15 subsequently adds the separated line-fanout/bank coordinates and a
+timing-neutral candidate in
+[the multidimensional bypass milestone](sm86_async_bypass_multidim_milestone.md).
+The candidate fails depth transfer and remains observational.
+
 ## Content identities
 
 - Release `sim-run`: `8e41dd19ea4a376e81e25969664f6bde9094a4caa1e06c11cd7f278588a28cc7`

@@ -85,6 +85,11 @@ multiplicity—and an event rule that overlaps each copy with its own source
 response. This milestone stops here rather than fitting a nonlinear scalar to
 three layouts.
 
+The follow-on orthogonal skew layout and schema-15 result are recorded in
+[the multidimensional bypass milestone](sm86_async_bypass_multidim_milestone.md).
+They validate a trace-derived multidimensional proxy but reject its
+latency-only timing candidate on untouched depths.
+
 ## Reproduction
 
 ```bash

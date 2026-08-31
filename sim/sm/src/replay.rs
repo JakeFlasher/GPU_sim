@@ -46,9 +46,10 @@ use sim_mem::{L1Config, L1CounterError, L1Counters, SectorExpansionError};
 use sim_trace::lanes::LANE_INACTIVE_SENTINEL;
 use sim_trace::pb;
 use sim_trace::reader::{
-    EffectiveDataBytesError, MemoryAccessMeta, MemoryPayloadContract, SharedBankProjectionError,
-    ValidatedMemoryInstruction, ValidatedMemoryRoute, ValidatedMemoryRouteError,
-    ValidatedSectorError, ValidatedSectorErrorPhase, ValidatedSectorPlan, ValidatedWarp,
+    EffectiveDataBytesError, LdgstsDestinationTopology, MemoryAccessMeta, MemoryPayloadContract,
+    SharedBankProjectionError, ValidatedMemoryInstruction, ValidatedMemoryRoute,
+    ValidatedMemoryRouteError, ValidatedSectorError, ValidatedSectorErrorPhase,
+    ValidatedSectorPlan, ValidatedWarp,
 };
 #[cfg(test)]
 use sim_trace::reader::{
@@ -62,9 +63,9 @@ use sim_trace::{
 };
 
 use sim_mem::{
-    ASYNC_COPY_COMPLETION_VALUE_MASK, ASYNC_COPY_COMPOSITE_FIELD_MASK, CacheOpToken, L2Config,
-    L2Counters, L2Model, LdgstsL1Policy, MemRole, encode_async_copy_destination_work,
-    encode_async_copy_payload_and_destination, encode_async_copy_payload_work,
+    ASYNC_COPY_COMPLETION_VALUE_MASK, ASYNC_COPY_COMPOSITE_PAYLOAD_WORK_MAX, CacheOpToken,
+    L2Config, L2Counters, L2Model, LdgstsL1Policy, MemRole, encode_async_copy_destination_work,
+    encode_async_copy_payload_and_topology, encode_async_copy_payload_work,
     is_known_untagged_opcode, opcode_head,
 };
 
@@ -3979,7 +3980,7 @@ fn classify_compact_flat(
                 arch,
                 l1_policy,
                 payload_bytes,
-                warp.ldgsts_destination_wavefronts_128b_32x4(preflight.memory),
+                warp.ldgsts_destination_topology_128b_32x4(preflight.memory),
                 path,
                 warp_id,
                 record_ix,
@@ -4122,7 +4123,7 @@ fn classify_compact_with_l1(
                 arch,
                 l1_policy,
                 warp.effective_data_bytes(preflight.memory),
-                warp.ldgsts_destination_wavefronts_128b_32x4(preflight.memory),
+                warp.ldgsts_destination_topology_128b_32x4(preflight.memory),
                 sectors,
                 staged,
                 path,
@@ -4278,7 +4279,7 @@ fn project_async_copy_completion_work(
     arch: ArchId,
     l1_policy: LdgstsL1Policy,
     payload_bytes: u64,
-    destination_wavefronts: Option<u32>,
+    destination_topology: Option<LdgstsDestinationTopology>,
     path: &Path,
     warp_id: i32,
     record_ix: usize,
@@ -4316,7 +4317,7 @@ fn project_async_copy_completion_work(
     )?;
     if payload_work != 0
         && l1_policy == LdgstsL1Policy::BypassL1
-        && let Some(destination_wavefronts) = destination_wavefronts
+        && let Some(topology) = destination_topology
     {
         let payload_work_compact = u32::try_from(payload_work).map_err(|_| {
             ReplayError::AsyncCopyCompletionWorkOutOfRange {
@@ -4324,24 +4325,31 @@ fn project_async_copy_completion_work(
                 warp_id,
                 record_ix,
                 completion_work: payload_work,
-                max_completion_work: ASYNC_COPY_COMPOSITE_FIELD_MASK,
+                max_completion_work: ASYNC_COPY_COMPOSITE_PAYLOAD_WORK_MAX,
             }
         })?;
-        return encode_async_copy_payload_and_destination(
+        return encode_async_copy_payload_and_topology(
             payload_work_compact,
-            destination_wavefronts,
+            topology.source_cohorts,
+            topology.destination_line_fanout_total,
+            topology.cache_all_bank_wavefronts_max,
+            topology.bypass_wavefronts_max,
         )
         .ok_or(ReplayError::AsyncCopyCompletionWorkOutOfRange {
             path: path.to_path_buf(),
             warp_id,
             record_ix,
-            completion_work: payload_work.max(u64::from(destination_wavefronts)),
-            max_completion_work: ASYNC_COPY_COMPOSITE_FIELD_MASK,
+            completion_work: payload_work
+                .max(u64::from(topology.destination_line_fanout_total))
+                .max(u64::from(topology.cache_all_bank_wavefronts_max))
+                .max(u64::from(topology.bypass_wavefronts_max)),
+            max_completion_work: ASYNC_COPY_COMPOSITE_PAYLOAD_WORK_MAX,
         });
     }
     let exact_destination = if l1_policy == LdgstsL1Policy::CacheAtAllLevels {
-        match destination_wavefronts {
-            Some(wavefronts) => {
+        match destination_topology {
+            Some(topology) => {
+                let wavefronts = topology.cache_all_bank_wavefronts_total;
                 let timing = arch
                     .ldgsts_destination_wavefront_timing()
                     .require("ldgsts_destination_wavefront_timing")
@@ -4541,7 +4549,7 @@ fn append_staged_async_copy_sectors(
     arch: ArchId,
     l1_policy: LdgstsL1Policy,
     payload_bytes: u64,
-    destination_wavefronts: Option<u32>,
+    destination_topology: Option<LdgstsDestinationTopology>,
     sectors: &mut Vec<i64>,
     sector_scratch: &[i64],
     path: &Path,
@@ -4565,7 +4573,7 @@ fn append_staged_async_copy_sectors(
         arch,
         l1_policy,
         payload_bytes,
-        destination_wavefronts,
+        destination_topology,
         path,
         warp_id,
         record_ix,
@@ -8858,7 +8866,7 @@ mod replay_identity_tests {
                     encode_async_copy_destination_work(expected_work).unwrap()
                 }
                 LdgstsL1Policy::BypassL1 => {
-                    encode_async_copy_payload_and_destination(expected_work, 16).unwrap()
+                    encode_async_copy_payload_and_topology(expected_work, 4, 16, 4, 8).unwrap()
                 }
             };
 

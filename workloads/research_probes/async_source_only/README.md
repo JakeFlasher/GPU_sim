@@ -107,3 +107,19 @@ PYTHONDONTWRITEBYTECODE=1 python3 \
   --root results/captures/sm86_async_bypass_projection_20260830_v1 \
   --output results/captures/sm86_async_bypass_projection_20260830_v1/analysis/report.json
 ```
+
+`--layout skew` adds the orthogonal 96-byte stride. The final multidimensional
+campaign separates source-cohort destination-line fanout from bank
+multiplicity and reduces with:
+
+```bash
+PYTHONDONTWRITEBYTECODE=1 python3 \
+  workloads/research_probes/async_source_only/analyze_multidim.py \
+  --root results/captures/sm86_async_bypass_multidim_20260830_v1 \
+  --baseline-root results/captures/sm86_async_source_visibility_20260830_v2 \
+  --output results/captures/sm86_async_bypass_multidim_20260830_v1/analysis/report.json
+```
+
+Schema 15 reports the separated topology and a timing-neutral per-copy local
+candidate. The candidate fails depth transfer, so production timing and the
+typed bypass tail remain unchanged.

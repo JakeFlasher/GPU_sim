@@ -1351,10 +1351,23 @@ impl AsyncReadinessDiagnostics {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
 pub struct BypassAsyncCopyDiagnostics {
     pub copies_observed: u64,
+    /// Compatibility projection: source cohorts multiplied by each copy's
+    /// maximum bank multiplicity. Exact for the retained uniform cohorts.
     pub destination_wavefronts_observed: u64,
+    /// Source cohorts multiplied by each copy's maximum bypass projection.
+    /// Exact for the retained uniform cohorts.
+    pub bypass_wavefronts_observed: u64,
+    pub source_cohorts_observed: u64,
+    pub destination_lines_observed: u64,
+    pub max_bank_wavefronts_sum: u64,
+    pub max_bypass_wavefronts_sum: u64,
     pub copy_source_spread_cycles: u64,
     pub per_copy_completion_cycles: u64,
     pub group_aggregate_excess_cycles: u64,
+    pub topology_candidate_penalty_cycles: u64,
+    pub topology_candidate_completion_cycles: u64,
+    pub topology_candidate_later_cycles: u64,
+    pub topology_candidate_earlier_cycles: u64,
 }
 
 impl BypassAsyncCopyDiagnostics {
@@ -1374,6 +1387,31 @@ impl BypassAsyncCopyDiagnostics {
                 self.destination_wavefronts_observed,
                 addend.destination_wavefronts_observed,
             )?,
+            bypass_wavefronts_observed: checked_readiness_add(
+                "readiness.bypass_async_copies.bypass_wavefronts_observed",
+                self.bypass_wavefronts_observed,
+                addend.bypass_wavefronts_observed,
+            )?,
+            source_cohorts_observed: checked_readiness_add(
+                "readiness.bypass_async_copies.source_cohorts_observed",
+                self.source_cohorts_observed,
+                addend.source_cohorts_observed,
+            )?,
+            destination_lines_observed: checked_readiness_add(
+                "readiness.bypass_async_copies.destination_lines_observed",
+                self.destination_lines_observed,
+                addend.destination_lines_observed,
+            )?,
+            max_bank_wavefronts_sum: checked_readiness_add(
+                "readiness.bypass_async_copies.max_bank_wavefronts_sum",
+                self.max_bank_wavefronts_sum,
+                addend.max_bank_wavefronts_sum,
+            )?,
+            max_bypass_wavefronts_sum: checked_readiness_add(
+                "readiness.bypass_async_copies.max_bypass_wavefronts_sum",
+                self.max_bypass_wavefronts_sum,
+                addend.max_bypass_wavefronts_sum,
+            )?,
             copy_source_spread_cycles: checked_readiness_add(
                 "readiness.bypass_async_copies.copy_source_spread_cycles",
                 self.copy_source_spread_cycles,
@@ -1388,6 +1426,26 @@ impl BypassAsyncCopyDiagnostics {
                 "readiness.bypass_async_copies.group_aggregate_excess_cycles",
                 self.group_aggregate_excess_cycles,
                 addend.group_aggregate_excess_cycles,
+            )?,
+            topology_candidate_penalty_cycles: checked_readiness_add(
+                "readiness.bypass_async_copies.topology_candidate_penalty_cycles",
+                self.topology_candidate_penalty_cycles,
+                addend.topology_candidate_penalty_cycles,
+            )?,
+            topology_candidate_completion_cycles: checked_readiness_add(
+                "readiness.bypass_async_copies.topology_candidate_completion_cycles",
+                self.topology_candidate_completion_cycles,
+                addend.topology_candidate_completion_cycles,
+            )?,
+            topology_candidate_later_cycles: checked_readiness_add(
+                "readiness.bypass_async_copies.topology_candidate_later_cycles",
+                self.topology_candidate_later_cycles,
+                addend.topology_candidate_later_cycles,
+            )?,
+            topology_candidate_earlier_cycles: checked_readiness_add(
+                "readiness.bypass_async_copies.topology_candidate_earlier_cycles",
+                self.topology_candidate_earlier_cycles,
+                addend.topology_candidate_earlier_cycles,
             )?,
         };
         *self = next;
@@ -3488,9 +3546,17 @@ impl ReadinessDiagnostics {
     /// non-occupying operation-specific visibility/RMW latency after service.
     /// Schema 13 adds independent request/region completion work over bounded
     /// parallel lanes. Schema 14 adds bypass-only per-copy source/delivery
-    /// observations without changing scheduler timing.
-    pub const fn schema_version(&self) -> u32 {
-        if self.bypass_async_copies.is_some() {
+    /// observations without changing scheduler timing. Schema 15 separates
+    /// source-cohort destination-line fanout, bank multiplicity, and a
+    /// timing-neutral per-copy topology candidate.
+    pub fn schema_version(&self) -> u32 {
+        if self
+            .bypass_async_copies
+            .as_deref()
+            .is_some_and(|diagnostics| diagnostics.source_cohorts_observed != 0)
+        {
+            15
+        } else if self.bypass_async_copies.is_some() {
             14
         } else if !self.memory_admission_feedback.is_empty()
             && (self
@@ -4215,23 +4281,44 @@ struct BypassAsyncCopyObservation {
     pending_sources: u32,
     source_completion_time: u64,
     delivery_work: u64,
-    destination_wavefronts: u64,
+    source_cohorts: u64,
+    destination_lines: u64,
+    max_bank_wavefronts: u64,
+    max_bypass_wavefronts: u64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct BypassAsyncCopyInput {
     instruction: usize,
-    destination_wavefronts: u64,
+    source_cohorts: u64,
+    destination_lines: u64,
+    max_bank_wavefronts: u64,
+    max_bypass_wavefronts: u64,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 struct BypassAsyncCopyProjection {
     copies: u64,
-    destination_wavefronts: u64,
+    bank_wavefront_upper_bound: u64,
+    bypass_wavefront_upper_bound: u64,
+    source_cohorts: u64,
+    destination_lines: u64,
+    max_bank_wavefronts_sum: u64,
+    max_bypass_wavefronts_sum: u64,
     source_spread_cycles: u64,
     per_copy_completion_cycles: u64,
     group_aggregate_excess_cycles: u64,
+    topology_candidate_penalty_cycles: u64,
+    topology_candidate_completion_cycles: u64,
+    topology_candidate_later_cycles: u64,
+    topology_candidate_earlier_cycles: u64,
 }
+
+// Timing-neutral local-latency candidate selected on conflict/severe and
+// tested on skew. Readiness never consumes these coefficients; schema 15
+// reports the resulting frontier so failed depth transfer remains visible.
+const BYPASS_TOPOLOGY_CANDIDATE_WAVEFRONT_CYCLES: u64 = 4;
+const BYPASS_TOPOLOGY_CANDIDATE_BANK_CYCLES: u64 = 2;
 
 impl AsyncCopyGroup {
     const fn new(id: AsyncCopyGroupId) -> Self {
@@ -4559,7 +4646,10 @@ impl AsyncCopySlot {
                     pending_sources: add,
                     source_completion_time: 0,
                     delivery_work,
-                    destination_wavefronts: copy.destination_wavefronts,
+                    source_cohorts: copy.source_cohorts,
+                    destination_lines: copy.destination_lines,
+                    max_bank_wavefronts: copy.max_bank_wavefronts,
+                    max_bypass_wavefronts: copy.max_bypass_wavefronts,
                 });
         }
         Ok(id)
@@ -4707,10 +4797,17 @@ impl AsyncCopySlot {
             return Ok(None);
         };
         let mut copies = 0_u64;
-        let mut destination_wavefronts = 0_u64;
+        let mut bank_wavefront_upper_bound = 0_u64;
+        let mut bypass_wavefront_upper_bound = 0_u64;
+        let mut source_cohorts = 0_u64;
+        let mut destination_lines = 0_u64;
+        let mut max_bank_wavefronts_sum = 0_u64;
+        let mut max_bypass_wavefronts_sum = 0_u64;
         let mut earliest_source = u64::MAX;
         let mut latest_source = 0_u64;
         let mut per_copy_completion = 0_u64;
+        let mut topology_candidate_completion = 0_u64;
+        let mut topology_candidate_penalty_cycles = 0_u64;
         for copy in state
             .bypass_copies
             .iter()
@@ -4725,16 +4822,96 @@ impl AsyncCopySlot {
                 });
             }
             copies = checked_u64_counter_add("observed bypass asynchronous-copy count", copies, 1)?;
-            destination_wavefronts = checked_u64_counter_add(
-                "observed bypass destination wavefronts",
-                destination_wavefronts,
-                copy.destination_wavefronts,
+            source_cohorts = checked_u64_counter_add(
+                "observed bypass source cohorts",
+                source_cohorts,
+                copy.source_cohorts,
+            )?;
+            destination_lines = checked_u64_counter_add(
+                "observed bypass destination lines",
+                destination_lines,
+                copy.destination_lines,
+            )?;
+            max_bank_wavefronts_sum = checked_u64_counter_add(
+                "observed bypass maximum bank wavefronts",
+                max_bank_wavefronts_sum,
+                copy.max_bank_wavefronts,
+            )?;
+            max_bypass_wavefronts_sum = checked_u64_counter_add(
+                "observed bypass maximum projected wavefronts",
+                max_bypass_wavefronts_sum,
+                copy.max_bypass_wavefronts,
+            )?;
+            let bank_upper = copy
+                .source_cohorts
+                .checked_mul(copy.max_bank_wavefronts)
+                .ok_or(IssueError::TimeMultiplicationOverflow {
+                    operation: "bypass observed bank-wavefront upper bound",
+                    lhs: copy.source_cohorts,
+                    rhs: copy.max_bank_wavefronts,
+                })?;
+            bank_wavefront_upper_bound = checked_u64_counter_add(
+                "bypass observed bank-wavefront upper bound",
+                bank_wavefront_upper_bound,
+                bank_upper,
+            )?;
+            let bypass_upper = copy
+                .source_cohorts
+                .checked_mul(copy.max_bypass_wavefronts)
+                .ok_or(IssueError::TimeMultiplicationOverflow {
+                    operation: "bypass observed projected-wavefront upper bound",
+                    lhs: copy.source_cohorts,
+                    rhs: copy.max_bypass_wavefronts,
+                })?;
+            bypass_wavefront_upper_bound = checked_u64_counter_add(
+                "bypass observed projected-wavefront upper bound",
+                bypass_wavefront_upper_bound,
+                bypass_upper,
             )?;
             earliest_source = earliest_source.min(copy.source_completion_time);
             latest_source = latest_source.max(copy.source_completion_time);
-            per_copy_completion = per_copy_completion.max(
-                params.ldgsts_completion_ready(copy.source_completion_time, copy.delivery_work)?,
-            );
+            let payload_completion =
+                params.ldgsts_completion_ready(copy.source_completion_time, copy.delivery_work)?;
+            per_copy_completion = per_copy_completion.max(payload_completion);
+            let topology_penalty =
+                if copy.max_bypass_wavefronts == 0 || copy.max_bank_wavefronts == 0 {
+                    0
+                } else {
+                    let wavefront_penalty = copy
+                        .max_bypass_wavefronts
+                        .saturating_sub(1)
+                        .checked_mul(BYPASS_TOPOLOGY_CANDIDATE_WAVEFRONT_CYCLES)
+                        .ok_or(IssueError::TimeMultiplicationOverflow {
+                            operation: "bypass topology candidate wavefront penalty",
+                            lhs: copy.max_bypass_wavefronts.saturating_sub(1),
+                            rhs: BYPASS_TOPOLOGY_CANDIDATE_WAVEFRONT_CYCLES,
+                        })?;
+                    let bank_penalty = copy
+                        .max_bank_wavefronts
+                        .saturating_sub(1)
+                        .checked_mul(BYPASS_TOPOLOGY_CANDIDATE_BANK_CYCLES)
+                        .ok_or(IssueError::TimeMultiplicationOverflow {
+                            operation: "bypass topology candidate bank penalty",
+                            lhs: copy.max_bank_wavefronts.saturating_sub(1),
+                            rhs: BYPASS_TOPOLOGY_CANDIDATE_BANK_CYCLES,
+                        })?;
+                    checked_cycle_add(
+                        "bypass topology candidate local penalty",
+                        wavefront_penalty,
+                        bank_penalty,
+                    )?
+                };
+            topology_candidate_penalty_cycles = checked_u64_counter_add(
+                "bypass topology candidate penalty diagnostic",
+                topology_candidate_penalty_cycles,
+                topology_penalty,
+            )?;
+            let candidate_completion = checked_cycle_add(
+                "bypass topology candidate per-copy completion",
+                payload_completion,
+                topology_penalty,
+            )?;
+            topology_candidate_completion = topology_candidate_completion.max(candidate_completion);
         }
         if copies == 0 {
             return Ok(None);
@@ -4746,10 +4923,22 @@ impl AsyncCopySlot {
         );
         Ok(Some(BypassAsyncCopyProjection {
             copies,
-            destination_wavefronts,
+            bank_wavefront_upper_bound,
+            bypass_wavefront_upper_bound,
+            source_cohorts,
+            destination_lines,
+            max_bank_wavefronts_sum,
+            max_bypass_wavefronts_sum,
             source_spread_cycles: latest_source.saturating_sub(earliest_source),
             per_copy_completion_cycles: per_copy_completion.saturating_sub(group.committed_at),
             group_aggregate_excess_cycles: aggregate_completion.saturating_sub(per_copy_completion),
+            topology_candidate_penalty_cycles,
+            topology_candidate_completion_cycles: topology_candidate_completion
+                .saturating_sub(group.committed_at),
+            topology_candidate_later_cycles: topology_candidate_completion
+                .saturating_sub(aggregate_completion),
+            topology_candidate_earlier_cycles: aggregate_completion
+                .saturating_sub(topology_candidate_completion),
         }))
     }
 
@@ -5016,7 +5205,7 @@ fn async_copy_completion_work(kind: AccessKind) -> Option<u64> {
             AsyncCopyCompletion::Inactive => None,
             AsyncCopyCompletion::PayloadWork(work)
             | AsyncCopyCompletion::ExactDestinationWork(work) => Some(u64::from(work)),
-            AsyncCopyCompletion::PayloadAndObservedDestination { payload_work, .. } => {
+            AsyncCopyCompletion::PayloadAndObservedTopology { payload_work, .. } => {
                 Some(u64::from(payload_work))
             }
         },
@@ -5033,7 +5222,10 @@ fn async_copy_completion_work(kind: AccessKind) -> Option<u64> {
     }
 }
 
-fn bypass_async_copy_observed_destination_wavefronts(kind: AccessKind) -> Option<u64> {
+fn bypass_async_copy_observed_topology(
+    kind: AccessKind,
+    instruction: usize,
+) -> Option<BypassAsyncCopyInput> {
     let AccessKind::GlobalAsyncCopy {
         completion_work,
         l1_policy: LdgstsL1Policy::BypassL1,
@@ -5043,10 +5235,19 @@ fn bypass_async_copy_observed_destination_wavefronts(kind: AccessKind) -> Option
         return None;
     };
     match decode_async_copy_completion(completion_work) {
-        AsyncCopyCompletion::PayloadAndObservedDestination {
-            destination_wavefronts,
+        AsyncCopyCompletion::PayloadAndObservedTopology {
+            source_cohorts,
+            destination_lines,
+            max_bank_wavefronts,
+            max_bypass_wavefronts,
             ..
-        } => Some(u64::from(destination_wavefronts)),
+        } => Some(BypassAsyncCopyInput {
+            instruction,
+            source_cohorts: u64::from(source_cohorts),
+            destination_lines: u64::from(destination_lines),
+            max_bank_wavefronts: u64::from(max_bank_wavefronts),
+            max_bypass_wavefronts: u64::from(max_bypass_wavefronts),
+        }),
         AsyncCopyCompletion::Inactive
         | AsyncCopyCompletion::PayloadWork(_)
         | AsyncCopyCompletion::ExactDestinationWork(_) => None,
@@ -6397,21 +6598,24 @@ impl<'a> SmCore<'a> {
                 }
                 let async_group = if async_copy {
                     let delivery_work = async_copy_completion_work(kind).unwrap_or(0);
-                    Some(
-                        async_copies[wix].add_pending_async_copy_sources(
-                            wix,
-                            u32::from(len),
-                            delivery_work,
-                            destination_wavefronts,
-                            Some(BypassAsyncCopyInput {
-                                instruction,
-                                destination_wavefronts:
-                                    bypass_async_copy_observed_destination_wavefronts(kind)
-                                        .unwrap_or(0),
-                            }),
-                            &p,
-                        )?,
-                    )
+                    Some(async_copies[wix].add_pending_async_copy_sources(
+                        wix,
+                        u32::from(len),
+                        delivery_work,
+                        destination_wavefronts,
+                        Some(
+                            bypass_async_copy_observed_topology(kind, instruction).unwrap_or(
+                                BypassAsyncCopyInput {
+                                    instruction,
+                                    source_cohorts: 0,
+                                    destination_lines: 0,
+                                    max_bank_wavefronts: 0,
+                                    max_bypass_wavefronts: 0,
+                                },
+                            ),
+                        ),
+                        &p,
+                    )?)
                 } else {
                     None
                 };
@@ -7225,10 +7429,23 @@ impl<'a> SmCore<'a> {
                             .get_or_insert_with(|| Box::new(BypassAsyncCopyDiagnostics::default()));
                         diagnostics.add_checked(&BypassAsyncCopyDiagnostics {
                             copies_observed: observed.copies,
-                            destination_wavefronts_observed: observed.destination_wavefronts,
+                            destination_wavefronts_observed: observed.bank_wavefront_upper_bound,
+                            bypass_wavefronts_observed: observed.bypass_wavefront_upper_bound,
+                            source_cohorts_observed: observed.source_cohorts,
+                            destination_lines_observed: observed.destination_lines,
+                            max_bank_wavefronts_sum: observed.max_bank_wavefronts_sum,
+                            max_bypass_wavefronts_sum: observed.max_bypass_wavefronts_sum,
                             copy_source_spread_cycles: observed.source_spread_cycles,
                             per_copy_completion_cycles: observed.per_copy_completion_cycles,
                             group_aggregate_excess_cycles: observed.group_aggregate_excess_cycles,
+                            topology_candidate_penalty_cycles: observed
+                                .topology_candidate_penalty_cycles,
+                            topology_candidate_completion_cycles: observed
+                                .topology_candidate_completion_cycles,
+                            topology_candidate_later_cycles: observed
+                                .topology_candidate_later_cycles,
+                            topology_candidate_earlier_cycles: observed
+                                .topology_candidate_earlier_cycles,
                         })?;
                     }
                     let limited_counter = match cause {
@@ -9026,13 +9243,17 @@ impl<'a> SmCore<'a> {
                                 ..
                             }
                         ))
-                    .then_some(BypassAsyncCopyInput {
-                        instruction: w.next,
-                        destination_wavefronts: bypass_async_copy_observed_destination_wavefronts(
-                            kind,
-                        )
-                        .unwrap_or(0),
-                    }),
+                    .then_some(
+                        bypass_async_copy_observed_topology(kind, w.next).unwrap_or(
+                            BypassAsyncCopyInput {
+                                instruction: w.next,
+                                source_cohorts: 0,
+                                destination_lines: 0,
+                                max_bank_wavefronts: 0,
+                                max_bypass_wavefronts: 0,
+                            },
+                        ),
+                    ),
                     &self.params,
                 )?;
             }
@@ -11444,7 +11665,7 @@ mod tests {
                     kind: AccessKind::GlobalAsyncCopy {
                         off: 0,
                         len: 1,
-                        completion_work: sim_mem::encode_async_copy_destination_work(129).unwrap(),
+                        completion_work: sim_mem::encode_async_copy_destination_work(130).unwrap(),
                         l1_policy: LdgstsL1Policy::CacheAtAllLevels,
                     },
                 }],
@@ -11457,7 +11678,7 @@ mod tests {
         assert!(matches!(
             core.issue_cycle(&mut requests),
             Err(IssueError::InvalidAsyncCopyDestinationWork {
-                completion_work: 129,
+                completion_work: 130,
                 work_per_wavefront: 128,
             })
         ));
@@ -11853,7 +12074,10 @@ mod tests {
                 0,
                 Some(BypassAsyncCopyInput {
                     instruction: 10,
-                    destination_wavefronts: 4,
+                    source_cohorts: 8,
+                    destination_lines: 8,
+                    max_bank_wavefronts: 1,
+                    max_bypass_wavefronts: 1,
                 }),
                 &p,
             )
@@ -11866,7 +12090,10 @@ mod tests {
                 0,
                 Some(BypassAsyncCopyInput {
                     instruction: 20,
-                    destination_wavefronts: 8,
+                    source_cohorts: 8,
+                    destination_lines: 16,
+                    max_bank_wavefronts: 2,
+                    max_bypass_wavefronts: 4,
                 }),
                 &p,
             )
@@ -11895,13 +12122,22 @@ mod tests {
             .max(p.ldgsts_completion_ready(70, 64).unwrap());
         let aggregate = committed.local_completion_time(&p).unwrap();
         assert_eq!(projected.copies, 2);
-        assert_eq!(projected.destination_wavefronts, 12);
+        assert_eq!(projected.source_cohorts, 16);
+        assert_eq!(projected.destination_lines, 24);
+        assert_eq!(projected.max_bank_wavefronts_sum, 3);
+        assert_eq!(projected.max_bypass_wavefronts_sum, 5);
+        assert_eq!(projected.bank_wavefront_upper_bound, 24);
+        assert_eq!(projected.bypass_wavefront_upper_bound, 40);
         assert_eq!(projected.source_spread_cycles, 30);
         assert_eq!(projected.per_copy_completion_cycles, per_copy - 10);
         assert_eq!(
             projected.group_aggregate_excess_cycles,
             aggregate - per_copy
         );
+        assert_eq!(projected.topology_candidate_penalty_cycles, 14);
+        assert_eq!(projected.topology_candidate_completion_cycles, 75);
+        assert_eq!(projected.topology_candidate_later_cycles, 13);
+        assert_eq!(projected.topology_candidate_earlier_cycles, 0);
         assert_eq!(slot.async_wait_clear_time(0), Some(aggregate));
 
         slot.consume_async_wait(0, aggregate);
