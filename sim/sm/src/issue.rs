@@ -79,7 +79,7 @@ use sim_mem::{
     MemoryOrigin, decode_async_copy_completion,
 };
 
-use crate::control_bits::{ControlDomainError, DepBarrier};
+use crate::control_bits::{ControlDomainError, DepBarrier, WaitMask};
 use crate::program::{FunctionSchedule, IssueSlot, OpClass, PipelineClass};
 use crate::sass_operands::{FixedLatencyOpcode, FixedLatencyOperandStatus};
 
@@ -102,6 +102,67 @@ pub(crate) struct WarpReplay {
     pub(crate) warp_slot: i32,
     pub(crate) insts: Vec<ReplayInst>,
     pub(crate) sectors: Vec<i64>,
+    /// Sparse, cold LDGSTS source-cohort projection. Only destination-bearing
+    /// records allocate this arena; the hot [`ReplayInst`] stays unchanged.
+    pub(crate) async_copy_cohorts: Option<Box<AsyncCopyCohortReplay>>,
+}
+
+/// Exact trace-derived topology of one flexible 128-byte LDGSTS source cohort.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct AsyncCopyCohortDescriptor {
+    pub(crate) payload_bytes: u32,
+    pub(crate) destination_lines: u32,
+    pub(crate) bank_wavefronts: u32,
+    pub(crate) bypass_wavefronts: u32,
+}
+
+/// Sparse arena span for one dynamic LDGSTS record.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct AsyncCopyCohortSpan {
+    pub(crate) instruction: usize,
+    pub(crate) sector_off: usize,
+    pub(crate) sector_len: u16,
+    pub(crate) cohort_off: usize,
+    pub(crate) cohort_len: u8,
+    pub(crate) membership_off: usize,
+}
+
+/// One cold allocation per warp, indexed sparsely by dynamic instruction.
+#[derive(Debug, Default)]
+pub(crate) struct AsyncCopyCohortReplay {
+    pub(crate) spans: Vec<AsyncCopyCohortSpan>,
+    pub(crate) cohorts: Vec<AsyncCopyCohortDescriptor>,
+    pub(crate) sector_membership_masks: Vec<u32>,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct AsyncCopyCohortView<'a> {
+    sector_off: usize,
+    sector_len: u16,
+    cohorts: &'a [AsyncCopyCohortDescriptor],
+    sector_membership_masks: &'a [u32],
+}
+
+impl AsyncCopyCohortReplay {
+    fn view(&self, instruction: usize) -> Option<AsyncCopyCohortView<'_>> {
+        let span = self
+            .spans
+            .binary_search_by_key(&instruction, |span| span.instruction)
+            .ok()
+            .map(|index| self.spans[index])?;
+        let cohort_end = span.cohort_off.checked_add(usize::from(span.cohort_len))?;
+        let membership_end = span
+            .membership_off
+            .checked_add(usize::from(span.sector_len))?;
+        Some(AsyncCopyCohortView {
+            sector_off: span.sector_off,
+            sector_len: span.sector_len,
+            cohorts: self.cohorts.get(span.cohort_off..cohort_end)?,
+            sector_membership_masks: self
+                .sector_membership_masks
+                .get(span.membership_off..membership_end)?,
+        })
+    }
 }
 
 /// One traced block assigned to this SM, in launch order.
@@ -925,6 +986,47 @@ pub enum IssueError {
         instruction: usize,
         pending: u32,
     },
+    #[error(
+        "warp {warp} bypass-copy instruction {instruction} has invalid cohort projection {field}: expected {expected}, got {got}"
+    )]
+    AsyncCopyCohortProjectionInvalid {
+        warp: usize,
+        instruction: usize,
+        field: &'static str,
+        expected: u64,
+        got: u64,
+    },
+    #[error(
+        "warp {warp} asynchronous-copy group {group:?} bypass copy instruction {instruction} source sector {sector_index} is outside cohort-membership span {sector_off}..{sector_end}"
+    )]
+    AsyncCopyCohortSectorOutOfRange {
+        warp: usize,
+        group: AsyncCopyGroupId,
+        instruction: usize,
+        sector_index: usize,
+        sector_off: usize,
+        sector_end: usize,
+    },
+    #[error(
+        "warp {warp} asynchronous-copy group {group:?} bypass copy instruction {instruction} cohort {cohort} has no pending membership for source sector {sector_index}"
+    )]
+    AsyncCopyCohortPendingUnderflow {
+        warp: usize,
+        group: AsyncCopyGroupId,
+        instruction: usize,
+        sector_index: usize,
+        cohort: usize,
+    },
+    #[error(
+        "warp {warp} asynchronous-copy group {group:?} bypass copy instruction {instruction} cohort {cohort} still has {pending} source membership(s) at wait"
+    )]
+    AsyncCopyCohortPendingAtWait {
+        warp: usize,
+        group: AsyncCopyGroupId,
+        instruction: usize,
+        cohort: usize,
+        pending: u32,
+    },
     #[error("response-owner identity domain is exhausted")]
     ResponseOwnerExhausted,
     #[error("memory responses are invalid for the {mode} memory mode")]
@@ -1391,6 +1493,25 @@ pub struct BypassAsyncCopyDiagnostics {
     pub pipeline_q16_completion_cycles: u64,
     /// Candidate completion still exposed when the wait became current.
     pub pipeline_q16_exposure_cycles: u64,
+    /// Groups with an exact trace-derived source-sector/cohort join.
+    pub cohort_groups_observed: u64,
+    pub cohort_copies_observed: u64,
+    /// Source-sector-to-cohort memberships (a sector may count more than once).
+    pub cohort_response_memberships_observed: u64,
+    /// Sum of each cohort's first-to-last source-response span.
+    pub cohort_response_span_cycles: u64,
+    /// Sum of the frozen topology penalties across observed cohorts.
+    pub cohort_topology_penalty_cycles: u64,
+    /// Candidate completion measured from group commit.
+    pub cohort_candidate_completion_cycles: u64,
+    /// Candidate completion still exposed when the wait became current.
+    pub cohort_candidate_exposure_cycles: u64,
+    pub cohort_candidate_later_than_per_copy_cycles: u64,
+    pub cohort_candidate_earlier_than_per_copy_cycles: u64,
+    pub cohort_candidate_later_than_group_aggregate_cycles: u64,
+    pub cohort_candidate_earlier_than_group_aggregate_cycles: u64,
+    pub cohort_candidate_later_than_production_cycles: u64,
+    pub cohort_candidate_earlier_than_production_cycles: u64,
 }
 
 impl BypassAsyncCopyDiagnostics {
@@ -1524,6 +1645,71 @@ impl BypassAsyncCopyDiagnostics {
                 "readiness.bypass_async_copies.pipeline_q16_exposure_cycles",
                 self.pipeline_q16_exposure_cycles,
                 addend.pipeline_q16_exposure_cycles,
+            )?,
+            cohort_groups_observed: checked_readiness_add(
+                "readiness.bypass_async_copies.cohort_groups_observed",
+                self.cohort_groups_observed,
+                addend.cohort_groups_observed,
+            )?,
+            cohort_copies_observed: checked_readiness_add(
+                "readiness.bypass_async_copies.cohort_copies_observed",
+                self.cohort_copies_observed,
+                addend.cohort_copies_observed,
+            )?,
+            cohort_response_memberships_observed: checked_readiness_add(
+                "readiness.bypass_async_copies.cohort_response_memberships_observed",
+                self.cohort_response_memberships_observed,
+                addend.cohort_response_memberships_observed,
+            )?,
+            cohort_response_span_cycles: checked_readiness_add(
+                "readiness.bypass_async_copies.cohort_response_span_cycles",
+                self.cohort_response_span_cycles,
+                addend.cohort_response_span_cycles,
+            )?,
+            cohort_topology_penalty_cycles: checked_readiness_add(
+                "readiness.bypass_async_copies.cohort_topology_penalty_cycles",
+                self.cohort_topology_penalty_cycles,
+                addend.cohort_topology_penalty_cycles,
+            )?,
+            cohort_candidate_completion_cycles: checked_readiness_add(
+                "readiness.bypass_async_copies.cohort_candidate_completion_cycles",
+                self.cohort_candidate_completion_cycles,
+                addend.cohort_candidate_completion_cycles,
+            )?,
+            cohort_candidate_exposure_cycles: checked_readiness_add(
+                "readiness.bypass_async_copies.cohort_candidate_exposure_cycles",
+                self.cohort_candidate_exposure_cycles,
+                addend.cohort_candidate_exposure_cycles,
+            )?,
+            cohort_candidate_later_than_per_copy_cycles: checked_readiness_add(
+                "readiness.bypass_async_copies.cohort_candidate_later_than_per_copy_cycles",
+                self.cohort_candidate_later_than_per_copy_cycles,
+                addend.cohort_candidate_later_than_per_copy_cycles,
+            )?,
+            cohort_candidate_earlier_than_per_copy_cycles: checked_readiness_add(
+                "readiness.bypass_async_copies.cohort_candidate_earlier_than_per_copy_cycles",
+                self.cohort_candidate_earlier_than_per_copy_cycles,
+                addend.cohort_candidate_earlier_than_per_copy_cycles,
+            )?,
+            cohort_candidate_later_than_group_aggregate_cycles: checked_readiness_add(
+                "readiness.bypass_async_copies.cohort_candidate_later_than_group_aggregate_cycles",
+                self.cohort_candidate_later_than_group_aggregate_cycles,
+                addend.cohort_candidate_later_than_group_aggregate_cycles,
+            )?,
+            cohort_candidate_earlier_than_group_aggregate_cycles: checked_readiness_add(
+                "readiness.bypass_async_copies.cohort_candidate_earlier_than_group_aggregate_cycles",
+                self.cohort_candidate_earlier_than_group_aggregate_cycles,
+                addend.cohort_candidate_earlier_than_group_aggregate_cycles,
+            )?,
+            cohort_candidate_later_than_production_cycles: checked_readiness_add(
+                "readiness.bypass_async_copies.cohort_candidate_later_than_production_cycles",
+                self.cohort_candidate_later_than_production_cycles,
+                addend.cohort_candidate_later_than_production_cycles,
+            )?,
+            cohort_candidate_earlier_than_production_cycles: checked_readiness_add(
+                "readiness.bypass_async_copies.cohort_candidate_earlier_than_production_cycles",
+                self.cohort_candidate_earlier_than_production_cycles,
+                addend.cohort_candidate_earlier_than_production_cycles,
             )?,
         };
         *self = next;
@@ -3629,8 +3815,16 @@ impl ReadinessDiagnostics {
     /// timing-neutral per-copy topology candidate. Schema 16 adds
     /// timing-neutral pipelined destination candidates over stable per-copy
     /// payload-arrival order for acceptance widths 1, 2, 4, 8, and 16.
+    /// Schema 17 joins exact source-sector responses to flexible destination
+    /// cohorts and reports a parameter-free source/topology-overlap candidate.
     pub fn schema_version(&self) -> u32 {
         if self
+            .bypass_async_copies
+            .as_deref()
+            .is_some_and(|diagnostics| diagnostics.cohort_groups_observed != 0)
+        {
+            17
+        } else if self
             .bypass_async_copies
             .as_deref()
             .is_some_and(|diagnostics| diagnostics.pipeline_groups_observed != 0)
@@ -4360,7 +4554,7 @@ struct AsyncCopyGroup {
 /// The production readiness path continues to use [`AsyncCopyGroup`]'s
 /// established aggregate fields; this sidecar preserves the event ordering
 /// needed to evaluate a future per-copy delivery model without changing time.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct BypassAsyncCopyObservation {
     group: AsyncCopyGroupId,
     instruction: usize,
@@ -4371,15 +4565,34 @@ struct BypassAsyncCopyObservation {
     destination_lines: u64,
     max_bank_wavefronts: u64,
     max_bypass_wavefronts: u64,
+    sector_off: usize,
+    sector_membership_masks: Box<[u32]>,
+    cohorts: Box<[BypassAsyncCopyCohortObservation]>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct BypassAsyncCopyInput {
+struct BypassAsyncCopyInput<'a> {
     instruction: usize,
+    sector_off: usize,
+    sector_len: u16,
     source_cohorts: u64,
     destination_lines: u64,
     max_bank_wavefronts: u64,
     max_bypass_wavefronts: u64,
+    cohorts: Option<&'a [AsyncCopyCohortDescriptor]>,
+    sector_membership_masks: Option<&'a [u32]>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct BypassAsyncCopyCohortObservation {
+    pending_sources: u32,
+    first_source_response: Option<u64>,
+    last_source_response: Option<u64>,
+    payload_work: u64,
+    destination_lines: u64,
+    bank_wavefronts: u64,
+    bypass_wavefronts: u64,
+    topology_penalty: u64,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -4408,6 +4621,19 @@ struct BypassAsyncCopyProjection {
     pipeline_q8_exposure_cycles: u64,
     pipeline_q16_completion_cycles: u64,
     pipeline_q16_exposure_cycles: u64,
+    cohort_groups_observed: u64,
+    cohort_copies_observed: u64,
+    cohort_response_memberships_observed: u64,
+    cohort_response_span_cycles: u64,
+    cohort_topology_penalty_cycles: u64,
+    cohort_candidate_completion_cycles: u64,
+    cohort_candidate_exposure_cycles: u64,
+    cohort_candidate_later_than_per_copy_cycles: u64,
+    cohort_candidate_earlier_than_per_copy_cycles: u64,
+    cohort_candidate_later_than_group_aggregate_cycles: u64,
+    cohort_candidate_earlier_than_group_aggregate_cycles: u64,
+    cohort_candidate_later_than_production_cycles: u64,
+    cohort_candidate_earlier_than_production_cycles: u64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -4423,6 +4649,36 @@ struct BypassPipelineCopyCandidate {
 const BYPASS_TOPOLOGY_CANDIDATE_WAVEFRONT_CYCLES: u64 = 4;
 const BYPASS_TOPOLOGY_CANDIDATE_BANK_CYCLES: u64 = 2;
 const BYPASS_PIPELINE_CANDIDATE_Q: [u64; 5] = [1, 2, 4, 8, 16];
+
+fn bypass_topology_candidate_penalty(
+    bypass_wavefronts: u64,
+    bank_wavefronts: u64,
+) -> Result<u64, IssueError> {
+    if bypass_wavefronts == 0 || bank_wavefronts == 0 {
+        return Ok(0);
+    }
+    let wavefront_penalty = bypass_wavefronts
+        .saturating_sub(1)
+        .checked_mul(BYPASS_TOPOLOGY_CANDIDATE_WAVEFRONT_CYCLES)
+        .ok_or(IssueError::TimeMultiplicationOverflow {
+            operation: "bypass topology candidate wavefront penalty",
+            lhs: bypass_wavefronts.saturating_sub(1),
+            rhs: BYPASS_TOPOLOGY_CANDIDATE_WAVEFRONT_CYCLES,
+        })?;
+    let bank_penalty = bank_wavefronts
+        .saturating_sub(1)
+        .checked_mul(BYPASS_TOPOLOGY_CANDIDATE_BANK_CYCLES)
+        .ok_or(IssueError::TimeMultiplicationOverflow {
+            operation: "bypass topology candidate bank penalty",
+            lhs: bank_wavefronts.saturating_sub(1),
+            rhs: BYPASS_TOPOLOGY_CANDIDATE_BANK_CYCLES,
+        })?;
+    checked_cycle_add(
+        "bypass topology candidate local penalty",
+        wavefront_penalty,
+        bank_penalty,
+    )
+}
 
 fn bypass_pipeline_candidate_completion(
     copies: &[BypassPipelineCopyCandidate],
@@ -4568,16 +4824,18 @@ struct AsyncCopySlot {
 struct WarpState<'a> {
     insts: &'a [ReplayInst],
     sectors: &'a [i64],
+    async_copy_cohorts: Option<&'a AsyncCopyCohortReplay>,
     next: usize,
     next_slot: Option<&'a IssueSlot>,
     /// Issue/admission timestamp at which `next_slot` became the current
     /// instruction. Causal readiness delays are measured from this frontier.
     current_since: u64,
     eligible: u64,
-    /// Compiler-emitted `DEPBAR.LE SB1..SB5, 0x0` operand for the current
-    /// instruction. This is cached when `next_slot` changes so scheduler scans
-    /// use the ordinary barrier counter/clear path without reparsing SASS.
-    ordinary_dependency_wait: Option<DepBarrier>,
+    /// Compiler-emitted `DEPBAR.LE SB1..SB5, 0x0[, {..}]` operands for the
+    /// current instruction. This is cached when `next_slot` changes so
+    /// scheduler scans use the ordinary barrier counter/clear path without
+    /// reparsing SASS.
+    ordinary_dependency_wait_mask: WaitMask,
     barrier_clear: [u64; DEP_BARRIERS],
     barrier_origin: [DependencyOrigin; DEP_BARRIERS],
     /// Outstanding UNKNOWN write-backs per barrier index (L1Shared mode):
@@ -4640,6 +4898,203 @@ impl WarpState<'_> {
     }
 }
 
+fn invalid_cohort_projection(
+    warp: usize,
+    instruction: usize,
+    field: &'static str,
+    expected: u64,
+    got: u64,
+) -> IssueError {
+    IssueError::AsyncCopyCohortProjectionInvalid {
+        warp,
+        instruction,
+        field,
+        expected,
+        got,
+    }
+}
+
+fn build_bypass_cohort_observation(
+    warp: usize,
+    pending_add: u32,
+    delivery_work: u64,
+    input: BypassAsyncCopyInput<'_>,
+    params: &IssueModelParams,
+) -> Result<(Box<[u32]>, Box<[BypassAsyncCopyCohortObservation]>), IssueError> {
+    let (Some(descriptors), Some(masks)) = (input.cohorts, input.sector_membership_masks) else {
+        if input.cohorts.is_some() != input.sector_membership_masks.is_some() {
+            return Err(invalid_cohort_projection(
+                warp,
+                input.instruction,
+                "paired cohort descriptor/membership presence",
+                1,
+                0,
+            ));
+        }
+        return Ok((Box::new([]), Box::new([])));
+    };
+    let sector_len = usize::from(input.sector_len);
+    if masks.len() != sector_len {
+        return Err(invalid_cohort_projection(
+            warp,
+            input.instruction,
+            "source-sector membership count",
+            u64::from(input.sector_len),
+            u64::try_from(masks.len()).unwrap_or(u64::MAX),
+        ));
+    }
+    if u32::from(input.sector_len) != pending_add {
+        return Err(invalid_cohort_projection(
+            warp,
+            input.instruction,
+            "pending source-sector count",
+            u64::from(input.sector_len),
+            u64::from(pending_add),
+        ));
+    }
+    if descriptors.is_empty() || descriptors.len() > u32::BITS as usize {
+        return Err(invalid_cohort_projection(
+            warp,
+            input.instruction,
+            "cohort count in u32 membership domain",
+            input.source_cohorts,
+            u64::try_from(descriptors.len()).unwrap_or(u64::MAX),
+        ));
+    }
+    let descriptor_count = u64::try_from(descriptors.len()).unwrap_or(u64::MAX);
+    if descriptor_count != input.source_cohorts {
+        return Err(invalid_cohort_projection(
+            warp,
+            input.instruction,
+            "source cohort count",
+            input.source_cohorts,
+            descriptor_count,
+        ));
+    }
+
+    let allowed_mask = if descriptors.len() == u32::BITS as usize {
+        u32::MAX
+    } else {
+        (1_u32 << descriptors.len()) - 1
+    };
+    let mut pending = vec![0_u32; descriptors.len()];
+    for &mask in masks {
+        if mask == 0 || mask & !allowed_mask != 0 {
+            return Err(invalid_cohort_projection(
+                warp,
+                input.instruction,
+                "source-sector cohort mask",
+                u64::from(allowed_mask),
+                u64::from(mask),
+            ));
+        }
+        for (cohort, count) in pending.iter_mut().enumerate() {
+            if mask & (1_u32 << cohort) != 0 {
+                *count = count.checked_add(1).ok_or(IssueError::CounterOverflow {
+                    counter: "bypass cohort pending source membership",
+                })?;
+            }
+        }
+    }
+
+    let common_rate = params.ldgsts_delivery_units_per_cycle();
+    let bypass_rate = params
+        .ldgsts_completion_throughput
+        .bypass_payload_bytes_per_cycle;
+    debug_assert!(bypass_rate != 0 && common_rate % bypass_rate == 0);
+    let work_per_byte = common_rate / bypass_rate;
+    let mut payload_work_sum = 0_u64;
+    let mut destination_lines_sum = 0_u64;
+    let mut max_bank_wavefronts = 0_u64;
+    let mut max_bypass_wavefronts = 0_u64;
+    let mut cohorts = Vec::with_capacity(descriptors.len());
+    for (&descriptor, pending_sources) in descriptors.iter().zip(pending) {
+        if pending_sources == 0 {
+            return Err(invalid_cohort_projection(
+                warp,
+                input.instruction,
+                "cohort source-sector membership",
+                1,
+                0,
+            ));
+        }
+        if descriptor.payload_bytes == 0
+            || descriptor.destination_lines == 0
+            || descriptor.bank_wavefronts == 0
+            || descriptor.bypass_wavefronts == 0
+        {
+            return Err(invalid_cohort_projection(
+                warp,
+                input.instruction,
+                "nonzero active cohort descriptor",
+                1,
+                0,
+            ));
+        }
+        let payload_work = u64::from(descriptor.payload_bytes)
+            .checked_mul(work_per_byte)
+            .ok_or(IssueError::TimeMultiplicationOverflow {
+                operation: "bypass cohort payload work",
+                lhs: u64::from(descriptor.payload_bytes),
+                rhs: work_per_byte,
+            })?;
+        payload_work_sum = checked_u64_counter_add(
+            "bypass cohort payload work sum",
+            payload_work_sum,
+            payload_work,
+        )?;
+        destination_lines_sum = checked_u64_counter_add(
+            "bypass cohort destination line sum",
+            destination_lines_sum,
+            u64::from(descriptor.destination_lines),
+        )?;
+        max_bank_wavefronts = max_bank_wavefronts.max(u64::from(descriptor.bank_wavefronts));
+        max_bypass_wavefronts = max_bypass_wavefronts.max(u64::from(descriptor.bypass_wavefronts));
+        cohorts.push(BypassAsyncCopyCohortObservation {
+            pending_sources,
+            first_source_response: None,
+            last_source_response: None,
+            payload_work,
+            destination_lines: u64::from(descriptor.destination_lines),
+            bank_wavefronts: u64::from(descriptor.bank_wavefronts),
+            bypass_wavefronts: u64::from(descriptor.bypass_wavefronts),
+            topology_penalty: bypass_topology_candidate_penalty(
+                u64::from(descriptor.bypass_wavefronts),
+                u64::from(descriptor.bank_wavefronts),
+            )?,
+        });
+    }
+    for (field, expected, got) in [
+        ("exact cohort payload work", delivery_work, payload_work_sum),
+        (
+            "exact cohort destination line sum",
+            input.destination_lines,
+            destination_lines_sum,
+        ),
+        (
+            "exact cohort maximum bank wavefronts",
+            input.max_bank_wavefronts,
+            max_bank_wavefronts,
+        ),
+        (
+            "exact cohort maximum bypass wavefronts",
+            input.max_bypass_wavefronts,
+            max_bypass_wavefronts,
+        ),
+    ] {
+        if expected != got {
+            return Err(invalid_cohort_projection(
+                warp,
+                input.instruction,
+                field,
+                expected,
+                got,
+            ));
+        }
+    }
+    Ok((masks.into(), cohorts.into_boxed_slice()))
+}
+
 impl AsyncCopySlot {
     fn preflight_async_copy_add(
         &self,
@@ -4648,7 +5103,7 @@ impl AsyncCopySlot {
         source_ready: u64,
         delivery_work: u64,
         destination_wavefronts: u64,
-        bypass_copy: Option<BypassAsyncCopyInput>,
+        bypass_copy: Option<BypassAsyncCopyInput<'_>>,
         params: &IssueModelParams,
     ) -> Result<AsyncCopyGroupId, IssueError> {
         let (id, current, group) = match self.state.as_deref() {
@@ -4688,6 +5143,9 @@ impl AsyncCopySlot {
                 group: id,
                 instruction: copy.instruction,
             });
+        }
+        if let Some(copy) = bypass_copy {
+            build_bypass_cohort_observation(warp, pending_add, delivery_work, copy, params)?;
         }
         group.project_delivery(source_ready, delivery_work, destination_wavefronts, params)?;
         Ok(id)
@@ -4744,7 +5202,7 @@ impl AsyncCopySlot {
         add: u32,
         delivery_work: u64,
         destination_wavefronts: u64,
-        bypass_copy: Option<BypassAsyncCopyInput>,
+        bypass_copy: Option<BypassAsyncCopyInput<'_>>,
         params: &IssueModelParams,
     ) -> Result<AsyncCopyGroupId, IssueError> {
         let id = self.preflight_async_copy_add(
@@ -4780,6 +5238,8 @@ impl AsyncCopySlot {
         group.destination_wavefronts = destination_wavefronts;
         group.completion_time = completion_time;
         if let Some(copy) = bypass_copy {
+            let (sector_membership_masks, cohorts) =
+                build_bypass_cohort_observation(warp, add, delivery_work, copy, params)?;
             self.state
                 .as_deref_mut()
                 .expect("an observed bypass copy has allocated async-copy state")
@@ -4794,6 +5254,9 @@ impl AsyncCopySlot {
                     destination_lines: copy.destination_lines,
                     max_bank_wavefronts: copy.max_bank_wavefronts,
                     max_bypass_wavefronts: copy.max_bypass_wavefronts,
+                    sector_off: copy.sector_off,
+                    sector_membership_masks,
+                    cohorts,
                 });
         }
         Ok(id)
@@ -4827,7 +5290,7 @@ impl AsyncCopySlot {
         &self,
         warp: usize,
         id: AsyncCopyGroupId,
-        bypass_instruction: Option<usize>,
+        bypass_response: Option<ResponseId>,
         remove: u32,
         now: u64,
         params: &IssueModelParams,
@@ -4845,7 +5308,8 @@ impl AsyncCopySlot {
                 remove,
             })?;
         group.project_delivery(now, 0, 0, params)?;
-        if let Some(instruction) = bypass_instruction {
+        if let Some(response) = bypass_response {
+            let instruction = response.instruction;
             let copy = self
                 .state
                 .as_deref()
@@ -4873,6 +5337,55 @@ impl AsyncCopySlot {
                 copy.source_completion_time.max(now),
                 copy.delivery_work,
             )?;
+            if !copy.cohorts.is_empty() {
+                let sector_end = copy
+                    .sector_off
+                    .checked_add(copy.sector_membership_masks.len())
+                    .ok_or(IssueError::CounterOverflow {
+                        counter: "bypass cohort membership span",
+                    })?;
+                let relative = response
+                    .sector_index
+                    .checked_sub(copy.sector_off)
+                    .filter(|&index| index < copy.sector_membership_masks.len())
+                    .ok_or(IssueError::AsyncCopyCohortSectorOutOfRange {
+                        warp,
+                        group: id,
+                        instruction,
+                        sector_index: response.sector_index,
+                        sector_off: copy.sector_off,
+                        sector_end,
+                    })?;
+                let membership = copy.sector_membership_masks[relative];
+                for (cohort_index, cohort) in copy.cohorts.iter().enumerate() {
+                    if membership & (1_u32 << cohort_index) == 0 {
+                        continue;
+                    }
+                    let pending = cohort.pending_sources.checked_sub(1).ok_or(
+                        IssueError::AsyncCopyCohortPendingUnderflow {
+                            warp,
+                            group: id,
+                            instruction,
+                            sector_index: response.sector_index,
+                            cohort: cohort_index,
+                        },
+                    )?;
+                    let first = cohort
+                        .first_source_response
+                        .map_or(now, |first| first.min(now));
+                    let last = cohort
+                        .last_source_response
+                        .map_or(now, |last| last.max(now));
+                    if pending == 0 {
+                        params.ldgsts_completion_ready(last, cohort.payload_work)?;
+                        checked_cycle_add(
+                            "bypass cohort topology-ready candidate",
+                            first,
+                            cohort.topology_penalty,
+                        )?;
+                    }
+                }
+            }
         }
         Ok(())
     }
@@ -4881,7 +5394,7 @@ impl AsyncCopySlot {
         &mut self,
         warp: usize,
         id: AsyncCopyGroupId,
-        bypass_instruction: Option<usize>,
+        bypass_response: Option<ResponseId>,
         remove: u32,
         now: u64,
         params: &IssueModelParams,
@@ -4889,7 +5402,7 @@ impl AsyncCopySlot {
         self.preflight_async_copy_source_completion(
             warp,
             id,
-            bypass_instruction,
+            bypass_response,
             remove,
             now,
             params,
@@ -4914,7 +5427,8 @@ impl AsyncCopySlot {
         group.delivery_work = delivery_work;
         group.destination_wavefronts = destination_wavefronts;
         group.completion_time = completion_time;
-        if let Some(instruction) = bypass_instruction {
+        if let Some(response) = bypass_response {
+            let instruction = response.instruction;
             let copy = self
                 .state
                 .as_deref_mut()
@@ -4927,6 +5441,26 @@ impl AsyncCopySlot {
                 .expect("bypass observation was validated before aggregate mutation");
             copy.pending_sources -= remove;
             copy.source_completion_time = copy.source_completion_time.max(now);
+            if !copy.cohorts.is_empty() {
+                let relative = response.sector_index - copy.sector_off;
+                let membership = copy.sector_membership_masks[relative];
+                for (cohort_index, cohort) in copy.cohorts.iter_mut().enumerate() {
+                    if membership & (1_u32 << cohort_index) == 0 {
+                        continue;
+                    }
+                    cohort.pending_sources -= 1;
+                    cohort.first_source_response = Some(
+                        cohort
+                            .first_source_response
+                            .map_or(now, |first| first.min(now)),
+                    );
+                    cohort.last_source_response = Some(
+                        cohort
+                            .last_source_response
+                            .map_or(now, |last| last.max(now)),
+                    );
+                }
+            }
         }
         Ok(())
     }
@@ -4954,6 +5488,11 @@ impl AsyncCopySlot {
         let mut topology_candidate_completion = 0_u64;
         let mut topology_candidate_penalty_cycles = 0_u64;
         let mut pipeline_copies = Vec::new();
+        let mut cohort_copies = 0_u64;
+        let mut cohort_response_memberships = 0_u64;
+        let mut cohort_response_span = 0_u64;
+        let mut cohort_topology_penalty = 0_u64;
+        let mut cohort_candidate_completion = 0_u64;
         for copy in state
             .bypass_copies
             .iter()
@@ -5019,34 +5558,10 @@ impl AsyncCopySlot {
             let payload_completion =
                 params.ldgsts_completion_ready(copy.source_completion_time, copy.delivery_work)?;
             per_copy_completion = per_copy_completion.max(payload_completion);
-            let topology_penalty =
-                if copy.max_bypass_wavefronts == 0 || copy.max_bank_wavefronts == 0 {
-                    0
-                } else {
-                    let wavefront_penalty = copy
-                        .max_bypass_wavefronts
-                        .saturating_sub(1)
-                        .checked_mul(BYPASS_TOPOLOGY_CANDIDATE_WAVEFRONT_CYCLES)
-                        .ok_or(IssueError::TimeMultiplicationOverflow {
-                            operation: "bypass topology candidate wavefront penalty",
-                            lhs: copy.max_bypass_wavefronts.saturating_sub(1),
-                            rhs: BYPASS_TOPOLOGY_CANDIDATE_WAVEFRONT_CYCLES,
-                        })?;
-                    let bank_penalty = copy
-                        .max_bank_wavefronts
-                        .saturating_sub(1)
-                        .checked_mul(BYPASS_TOPOLOGY_CANDIDATE_BANK_CYCLES)
-                        .ok_or(IssueError::TimeMultiplicationOverflow {
-                            operation: "bypass topology candidate bank penalty",
-                            lhs: copy.max_bank_wavefronts.saturating_sub(1),
-                            rhs: BYPASS_TOPOLOGY_CANDIDATE_BANK_CYCLES,
-                        })?;
-                    checked_cycle_add(
-                        "bypass topology candidate local penalty",
-                        wavefront_penalty,
-                        bank_penalty,
-                    )?
-                };
+            let topology_penalty = bypass_topology_candidate_penalty(
+                copy.max_bypass_wavefronts,
+                copy.max_bank_wavefronts,
+            )?;
             topology_candidate_penalty_cycles = checked_u64_counter_add(
                 "bypass topology candidate penalty diagnostic",
                 topology_candidate_penalty_cycles,
@@ -5063,6 +5578,70 @@ impl AsyncCopySlot {
                 payload_completion,
                 topology_penalty,
             });
+            if !copy.cohorts.is_empty() {
+                cohort_copies =
+                    checked_u64_counter_add("observed bypass cohort copy count", cohort_copies, 1)?;
+                for (cohort_index, cohort) in copy.cohorts.iter().enumerate() {
+                    if cohort.pending_sources != 0 {
+                        return Err(IssueError::AsyncCopyCohortPendingAtWait {
+                            warp,
+                            group: group.id,
+                            instruction: copy.instruction,
+                            cohort: cohort_index,
+                            pending: cohort.pending_sources,
+                        });
+                    }
+                    let first = cohort.first_source_response.ok_or(
+                        IssueError::AsyncCopyCohortProjectionInvalid {
+                            warp,
+                            instruction: copy.instruction,
+                            field: "cohort first source response",
+                            expected: 1,
+                            got: 0,
+                        },
+                    )?;
+                    let last = cohort.last_source_response.ok_or(
+                        IssueError::AsyncCopyCohortProjectionInvalid {
+                            warp,
+                            instruction: copy.instruction,
+                            field: "cohort last source response",
+                            expected: 1,
+                            got: 0,
+                        },
+                    )?;
+                    let memberships = copy
+                        .sector_membership_masks
+                        .iter()
+                        .filter(|&&mask| mask & (1_u32 << cohort_index) != 0)
+                        .count();
+                    cohort_response_memberships = checked_u64_counter_add(
+                        "observed bypass cohort response memberships",
+                        cohort_response_memberships,
+                        u64::try_from(memberships).map_err(|_| IssueError::CounterOverflow {
+                            counter: "observed bypass cohort response memberships",
+                        })?,
+                    )?;
+                    cohort_response_span = checked_u64_counter_add(
+                        "observed bypass cohort response span",
+                        cohort_response_span,
+                        last.saturating_sub(first),
+                    )?;
+                    cohort_topology_penalty = checked_u64_counter_add(
+                        "observed bypass cohort topology penalty",
+                        cohort_topology_penalty,
+                        cohort.topology_penalty,
+                    )?;
+                    let payload_ready =
+                        params.ldgsts_completion_ready(last, cohort.payload_work)?;
+                    let topology_ready = checked_cycle_add(
+                        "bypass cohort topology-ready candidate",
+                        first,
+                        cohort.topology_penalty,
+                    )?;
+                    cohort_candidate_completion =
+                        cohort_candidate_completion.max(payload_ready.max(topology_ready));
+                }
+            }
         }
         if copies == 0 {
             return Ok(None);
@@ -5108,6 +5687,27 @@ impl AsyncCopySlot {
                 .saturating_sub(group.committed_at),
             pipeline_q16_exposure_cycles: pipeline_candidate_completion[4]
                 .saturating_sub(wait_base),
+            cohort_groups_observed: u64::from(cohort_copies != 0),
+            cohort_copies_observed: cohort_copies,
+            cohort_response_memberships_observed: cohort_response_memberships,
+            cohort_response_span_cycles: cohort_response_span,
+            cohort_topology_penalty_cycles: cohort_topology_penalty,
+            cohort_candidate_completion_cycles: cohort_candidate_completion
+                .saturating_sub(group.committed_at),
+            cohort_candidate_exposure_cycles: cohort_candidate_completion.saturating_sub(wait_base),
+            cohort_candidate_later_than_per_copy_cycles: cohort_candidate_completion
+                .saturating_sub(per_copy_completion),
+            cohort_candidate_earlier_than_per_copy_cycles: per_copy_completion
+                .saturating_sub(cohort_candidate_completion),
+            cohort_candidate_later_than_group_aggregate_cycles: cohort_candidate_completion
+                .saturating_sub(aggregate_completion),
+            cohort_candidate_earlier_than_group_aggregate_cycles: aggregate_completion
+                .saturating_sub(cohort_candidate_completion),
+            cohort_candidate_later_than_production_cycles: cohort_candidate_completion
+                .saturating_sub(group.completion_time),
+            cohort_candidate_earlier_than_production_cycles: group
+                .completion_time
+                .saturating_sub(cohort_candidate_completion),
         }))
     }
 
@@ -5328,8 +5928,12 @@ impl WarpState<'_> {
                 t = t.max(self.barrier_clear[b]);
             }
         }
-        if let Some(barrier) = self.ordinary_dependency_wait {
-            let b = barrier.index();
+        for b in 0..DEP_BARRIERS {
+            if !self.ordinary_dependency_wait_mask.contains_index(b)
+                || slot.control.wait_mask.contains_index(b)
+            {
+                continue;
+            }
             if self.barrier_pending[b] > 0 {
                 return None;
             }
@@ -5402,8 +6006,11 @@ fn async_copy_completion_work(kind: AccessKind) -> Option<u64> {
 fn bypass_async_copy_observed_topology(
     kind: AccessKind,
     instruction: usize,
-) -> Option<BypassAsyncCopyInput> {
+    exact: Option<AsyncCopyCohortView<'_>>,
+) -> Option<BypassAsyncCopyInput<'_>> {
     let AccessKind::GlobalAsyncCopy {
+        off,
+        len,
         completion_work,
         l1_policy: LdgstsL1Policy::BypassL1,
         ..
@@ -5420,10 +6027,14 @@ fn bypass_async_copy_observed_topology(
             ..
         } => Some(BypassAsyncCopyInput {
             instruction,
+            sector_off: exact.map_or(off, |view| view.sector_off),
+            sector_len: exact.map_or(len, |view| view.sector_len),
             source_cohorts: u64::from(source_cohorts),
             destination_lines: u64::from(destination_lines),
             max_bank_wavefronts: u64::from(max_bank_wavefronts),
             max_bypass_wavefronts: u64::from(max_bypass_wavefronts),
+            cohorts: exact.map(|view| view.cohorts),
+            sector_membership_masks: exact.map(|view| view.sector_membership_masks),
         }),
         AsyncCopyCompletion::Inactive
         | AsyncCopyCompletion::PayloadWork(_)
@@ -6465,11 +7076,12 @@ impl<'a> SmCore<'a> {
                     WarpState {
                         insts: &w.insts,
                         sectors: &w.sectors,
+                        async_copy_cohorts: w.async_copy_cohorts.as_deref(),
                         next: 0,
                         next_slot: Some(next_slot),
                         current_since: t,
                         eligible: t,
-                        ordinary_dependency_wait: next_slot.ordinary_dependency_wait_barrier(),
+                        ordinary_dependency_wait_mask: next_slot.ordinary_dependency_wait_mask(),
                         barrier_clear: [0; DEP_BARRIERS],
                         barrier_origin: [DependencyOrigin::Unknown; DEP_BARRIERS],
                         barrier_pending: [0; DEP_BARRIERS],
@@ -6777,24 +7389,36 @@ impl<'a> SmCore<'a> {
                 }
                 let async_group = if async_copy {
                     let delivery_work = async_copy_completion_work(kind).unwrap_or(0);
-                    Some(async_copies[wix].add_pending_async_copy_sources(
-                        wix,
-                        u32::from(len),
-                        delivery_work,
-                        destination_wavefronts,
-                        Some(
-                            bypass_async_copy_observed_topology(kind, instruction).unwrap_or(
-                                BypassAsyncCopyInput {
+                    let exact_cohorts = warps[wix]
+                        .async_copy_cohorts
+                        .and_then(|sidecar| sidecar.view(instruction));
+                    Some(
+                        async_copies[wix].add_pending_async_copy_sources(
+                            wix,
+                            u32::from(len),
+                            delivery_work,
+                            destination_wavefronts,
+                            Some(
+                                bypass_async_copy_observed_topology(
+                                    kind,
                                     instruction,
+                                    exact_cohorts,
+                                )
+                                .unwrap_or(BypassAsyncCopyInput {
+                                    instruction,
+                                    sector_off: off,
+                                    sector_len: len,
                                     source_cohorts: 0,
                                     destination_lines: 0,
                                     max_bank_wavefronts: 0,
                                     max_bypass_wavefronts: 0,
-                                },
+                                    cohorts: None,
+                                    sector_membership_masks: None,
+                                }),
                             ),
-                        ),
-                        &p,
-                    )?)
+                            &p,
+                        )?,
+                    )
                 } else {
                     None
                 };
@@ -6931,7 +7555,7 @@ impl<'a> SmCore<'a> {
                 self.async_copies[warp].preflight_async_copy_source_completion(
                     warp,
                     group,
-                    Some(response_id.instruction),
+                    Some(response_id),
                     1,
                     now,
                     &self.params,
@@ -7379,7 +8003,7 @@ impl<'a> SmCore<'a> {
                 async_copies[warp].complete_async_copy_sources(
                     warp,
                     group,
-                    Some(response_id.instruction),
+                    Some(response_id),
                     1,
                     now,
                     &params,
@@ -7525,10 +8149,12 @@ impl<'a> SmCore<'a> {
                 &mut tied,
             )?;
         }
-        if let Some(barrier) = warp.ordinary_dependency_wait
-            && !slot.control.wait_mask.contains(barrier)
-        {
-            let barrier = barrier.index();
+        for barrier in 0..DEP_BARRIERS {
+            if !warp.ordinary_dependency_wait_mask.contains_index(barrier)
+                || slot.control.wait_mask.contains_index(barrier)
+            {
+                continue;
+            }
             debug_assert_eq!(
                 warp.barrier_pending[barrier], 0,
                 "a selected explicit dependency-barrier wait cannot have an unresolved counter"
@@ -7655,6 +8281,28 @@ impl<'a> SmCore<'a> {
                             pipeline_q8_exposure_cycles: observed.pipeline_q8_exposure_cycles,
                             pipeline_q16_completion_cycles: observed.pipeline_q16_completion_cycles,
                             pipeline_q16_exposure_cycles: observed.pipeline_q16_exposure_cycles,
+                            cohort_groups_observed: observed.cohort_groups_observed,
+                            cohort_copies_observed: observed.cohort_copies_observed,
+                            cohort_response_memberships_observed: observed
+                                .cohort_response_memberships_observed,
+                            cohort_response_span_cycles: observed.cohort_response_span_cycles,
+                            cohort_topology_penalty_cycles: observed.cohort_topology_penalty_cycles,
+                            cohort_candidate_completion_cycles: observed
+                                .cohort_candidate_completion_cycles,
+                            cohort_candidate_exposure_cycles: observed
+                                .cohort_candidate_exposure_cycles,
+                            cohort_candidate_later_than_per_copy_cycles: observed
+                                .cohort_candidate_later_than_per_copy_cycles,
+                            cohort_candidate_earlier_than_per_copy_cycles: observed
+                                .cohort_candidate_earlier_than_per_copy_cycles,
+                            cohort_candidate_later_than_group_aggregate_cycles: observed
+                                .cohort_candidate_later_than_group_aggregate_cycles,
+                            cohort_candidate_earlier_than_group_aggregate_cycles: observed
+                                .cohort_candidate_earlier_than_group_aggregate_cycles,
+                            cohort_candidate_later_than_production_cycles: observed
+                                .cohort_candidate_later_than_production_cycles,
+                            cohort_candidate_earlier_than_production_cycles: observed
+                                .cohort_candidate_earlier_than_production_cycles,
                         })?;
                     }
                     let limited_counter = match cause {
@@ -9453,15 +10101,26 @@ impl<'a> SmCore<'a> {
                             }
                         ))
                     .then_some(
-                        bypass_async_copy_observed_topology(kind, w.next).unwrap_or(
-                            BypassAsyncCopyInput {
-                                instruction: w.next,
-                                source_cohorts: 0,
-                                destination_lines: 0,
-                                max_bank_wavefronts: 0,
-                                max_bypass_wavefronts: 0,
+                        bypass_async_copy_observed_topology(
+                            kind,
+                            w.next,
+                            w.async_copy_cohorts
+                                .and_then(|sidecar| sidecar.view(w.next)),
+                        )
+                        .unwrap_or(BypassAsyncCopyInput {
+                            instruction: w.next,
+                            sector_off: match kind {
+                                AccessKind::GlobalAsyncCopy { off, .. } => off,
+                                _ => 0,
                             },
-                        ),
+                            sector_len: async_copy_source_count(kind).unwrap_or(0),
+                            source_cohorts: 0,
+                            destination_lines: 0,
+                            max_bank_wavefronts: 0,
+                            max_bypass_wavefronts: 0,
+                            cohorts: None,
+                            sector_membership_masks: None,
+                        }),
                     ),
                     &self.params,
                 )?;
@@ -9706,9 +10365,9 @@ impl<'a> SmCore<'a> {
                             .async_copy_wait_max_pending_groups;
                         self.async_copies[wix].consume_async_wait(max_pending_groups, t);
                     }
-                    // `Other` includes explicit SB1..SB5 DEPBAR waits. Their
-                    // readiness was enforced through the ordinary barrier
-                    // state above; they never mutate asynchronous-copy groups.
+                    // `Other` includes explicit SB1..SB5 DEPBAR operand sets.
+                    // Readiness was enforced through ordinary barrier state;
+                    // they never mutate asynchronous-copy groups.
                     OpClass::BlockBarrier | OpClass::Other => {}
                 }
             }
@@ -9719,7 +10378,7 @@ impl<'a> SmCore<'a> {
             if retires_warp {
                 self.warps[wix].done = true;
                 self.warps[wix].next_slot = None;
-                self.warps[wix].ordinary_dependency_wait = None;
+                self.warps[wix].ordinary_dependency_wait_mask = WaitMask::NONE;
                 self.unfinished_warps =
                     self.unfinished_warps
                         .checked_sub(1)
@@ -9773,8 +10432,8 @@ impl<'a> SmCore<'a> {
                     warp_slot,
                 )?;
                 self.warps[wix].next_slot = Some(next_slot);
-                self.warps[wix].ordinary_dependency_wait =
-                    next_slot.ordinary_dependency_wait_barrier();
+                self.warps[wix].ordinary_dependency_wait_mask =
+                    next_slot.ordinary_dependency_wait_mask();
                 self.warps[wix].current_since = t;
                 self.warps[wix].cta_barrier_ready = 0;
                 self.warps[wix].barrier_pipeline_ready = 0;
@@ -10648,6 +11307,7 @@ mod tests {
         let blocks = vec![BlockReplay {
             launch_index: 7,
             warps: vec![WarpReplay {
+                async_copy_cohorts: None,
                 warp_slot: 3,
                 insts: vec![ReplayInst { pc: 0, kind }],
                 sectors,
@@ -10762,6 +11422,7 @@ mod tests {
         let blocks = vec![BlockReplay {
             launch_index: 0,
             warps: vec![WarpReplay {
+                async_copy_cohorts: None,
                 warp_slot: 0,
                 insts: vec![ReplayInst {
                     pc: 0,
@@ -10915,6 +11576,7 @@ mod tests {
         let blocks = vec![BlockReplay {
             launch_index: 0,
             warps: vec![WarpReplay {
+                async_copy_cohorts: None,
                 warp_slot: 0,
                 insts: vec![ReplayInst {
                     pc: 0,
@@ -10976,6 +11638,7 @@ mod tests {
         let blocks = vec![BlockReplay {
             launch_index: 0,
             warps: vec![WarpReplay {
+                async_copy_cohorts: None,
                 warp_slot: 0,
                 insts: vec![ReplayInst {
                     pc: 0,
@@ -11037,6 +11700,7 @@ mod tests {
         let blocks = vec![BlockReplay {
             launch_index: 0,
             warps: vec![WarpReplay {
+                async_copy_cohorts: None,
                 warp_slot: 0,
                 insts: vec![ReplayInst {
                     pc: 0,
@@ -11196,6 +11860,7 @@ mod tests {
         let blocks = vec![BlockReplay {
             launch_index: 0,
             warps: vec![WarpReplay {
+                async_copy_cohorts: None,
                 warp_slot: 0,
                 insts: vec![ReplayInst {
                     pc: 0,
@@ -11370,6 +12035,7 @@ mod tests {
 
     fn warp(slot_ix: i32, insts: Vec<ReplayInst>) -> WarpReplay {
         WarpReplay {
+            async_copy_cohorts: None,
             warp_slot: slot_ix,
             insts,
             sectors: Vec::new(),
@@ -11472,6 +12138,7 @@ mod tests {
         let blocks = vec![BlockReplay {
             launch_index: 0,
             warps: vec![WarpReplay {
+                async_copy_cohorts: None,
                 warp_slot: 0,
                 insts: vec![
                     ReplayInst {
@@ -11541,6 +12208,7 @@ mod tests {
         let blocks = vec![BlockReplay {
             launch_index: 0,
             warps: vec![WarpReplay {
+                async_copy_cohorts: None,
                 warp_slot: 0,
                 insts: vec![async_copy_inst(0, 0, 1), inst(16), inst(32), inst(48)],
                 sectors: vec![40],
@@ -11608,6 +12276,7 @@ mod tests {
                 let blocks = vec![BlockReplay {
                     launch_index: 0,
                     warps: vec![WarpReplay {
+                        async_copy_cohorts: None,
                         warp_slot: 0,
                         insts: vec![
                             ReplayInst {
@@ -11651,6 +12320,7 @@ mod tests {
             launch_index: 0,
             warps: (0..4)
                 .map(|warp_slot| WarpReplay {
+                    async_copy_cohorts: None,
                     warp_slot,
                     insts: vec![
                         ReplayInst {
@@ -11718,6 +12388,7 @@ mod tests {
         let blocks = vec![BlockReplay {
             launch_index: 0,
             warps: vec![WarpReplay {
+                async_copy_cohorts: None,
                 warp_slot: 0,
                 insts: vec![ReplayInst {
                     pc: 0,
@@ -11758,6 +12429,7 @@ mod tests {
         let blocks = vec![BlockReplay {
             launch_index: 0,
             warps: vec![WarpReplay {
+                async_copy_cohorts: None,
                 warp_slot: 0,
                 insts: vec![
                     ReplayInst {
@@ -11819,6 +12491,7 @@ mod tests {
         let blocks = vec![BlockReplay {
             launch_index: 0,
             warps: vec![WarpReplay {
+                async_copy_cohorts: None,
                 warp_slot: 0,
                 insts: vec![
                     ReplayInst {
@@ -11875,6 +12548,7 @@ mod tests {
         let blocks = vec![BlockReplay {
             launch_index: 0,
             warps: vec![WarpReplay {
+                async_copy_cohorts: None,
                 warp_slot: 0,
                 insts: vec![ReplayInst {
                     pc: 0,
@@ -11920,6 +12594,7 @@ mod tests {
             let blocks = vec![BlockReplay {
                 launch_index: 0,
                 warps: vec![WarpReplay {
+                    async_copy_cohorts: None,
                     warp_slot: 0,
                     insts: vec![
                         ReplayInst {
@@ -11967,6 +12642,7 @@ mod tests {
         let blocks = vec![BlockReplay {
             launch_index: 0,
             warps: vec![WarpReplay {
+                async_copy_cohorts: None,
                 warp_slot: 0,
                 insts: vec![ReplayInst {
                     pc: 0,
@@ -12013,6 +12689,7 @@ mod tests {
         let blocks = vec![BlockReplay {
             launch_index: 0,
             warps: vec![WarpReplay {
+                async_copy_cohorts: None,
                 warp_slot: 0,
                 insts: vec![async_copy_inst(0, 0, 1), inst(16), inst(32), inst(48)],
                 sectors: vec![40],
@@ -12053,6 +12730,7 @@ mod tests {
             warps: vec![
                 warp(0, vec![inst(64), inst(80), inst(96), inst(112)]),
                 WarpReplay {
+                    async_copy_cohorts: None,
                     // Same SMSP and younger, so this warp is held after t=0.
                     warp_slot: 4,
                     insts: vec![async_copy_inst(0, 0, 1), inst(16), inst(32), inst(48)],
@@ -12090,6 +12768,7 @@ mod tests {
         let blocks = vec![BlockReplay {
             launch_index: 0,
             warps: vec![WarpReplay {
+                async_copy_cohorts: None,
                 warp_slot: 0,
                 insts: vec![async_copy_inst(0, 0, 1), inst(16), inst(32), inst(48)],
                 sectors: vec![40],
@@ -12120,6 +12799,7 @@ mod tests {
         let blocks = vec![BlockReplay {
             launch_index: 0,
             warps: vec![WarpReplay {
+                async_copy_cohorts: None,
                 warp_slot: 0,
                 insts: vec![
                     async_copy_inst(0, 0, 1),
@@ -12199,6 +12879,7 @@ mod tests {
         let blocks = vec![BlockReplay {
             launch_index: 0,
             warps: vec![WarpReplay {
+                async_copy_cohorts: None,
                 warp_slot: 0,
                 insts: vec![async_copy_inst(0, 0, 1), inst(16)],
                 sectors: vec![40],
@@ -12290,10 +12971,14 @@ mod tests {
                 0,
                 Some(BypassAsyncCopyInput {
                     instruction: 10,
+                    sector_off: 0,
+                    sector_len: 2,
                     source_cohorts: 8,
                     destination_lines: 8,
                     max_bank_wavefronts: 1,
                     max_bypass_wavefronts: 1,
+                    cohorts: None,
+                    sector_membership_masks: None,
                 }),
                 &p,
             )
@@ -12306,10 +12991,14 @@ mod tests {
                 0,
                 Some(BypassAsyncCopyInput {
                     instruction: 20,
+                    sector_off: 2,
+                    sector_len: 2,
                     source_cohorts: 8,
                     destination_lines: 16,
                     max_bank_wavefronts: 2,
                     max_bypass_wavefronts: 4,
+                    cohorts: None,
+                    sector_membership_masks: None,
                 }),
                 &p,
             )
@@ -12318,14 +13007,42 @@ mod tests {
         );
         assert!(slot.commit_async_copy_group(10));
 
-        slot.complete_async_copy_sources(0, group, Some(10), 1, 30, &p)
-            .unwrap();
-        slot.complete_async_copy_sources(0, group, Some(10), 1, 40, &p)
-            .unwrap();
-        slot.complete_async_copy_sources(0, group, Some(20), 1, 50, &p)
-            .unwrap();
-        slot.complete_async_copy_sources(0, group, Some(20), 1, 70, &p)
-            .unwrap();
+        slot.complete_async_copy_sources(
+            0,
+            group,
+            Some(ResponseId::new(ResponseOwner(1), 0, 10, 0)),
+            1,
+            30,
+            &p,
+        )
+        .unwrap();
+        slot.complete_async_copy_sources(
+            0,
+            group,
+            Some(ResponseId::new(ResponseOwner(1), 0, 10, 1)),
+            1,
+            40,
+            &p,
+        )
+        .unwrap();
+        slot.complete_async_copy_sources(
+            0,
+            group,
+            Some(ResponseId::new(ResponseOwner(1), 0, 20, 2)),
+            1,
+            50,
+            &p,
+        )
+        .unwrap();
+        slot.complete_async_copy_sources(
+            0,
+            group,
+            Some(ResponseId::new(ResponseOwner(1), 0, 20, 3)),
+            1,
+            70,
+            &p,
+        )
+        .unwrap();
 
         let committed = slot.state.as_deref().unwrap().committed_groups[0];
         let projected = slot
@@ -12370,6 +13087,171 @@ mod tests {
         let state = slot.state.as_deref().unwrap();
         assert!(state.committed_groups.is_empty());
         assert!(state.bypass_copies.is_empty());
+    }
+
+    fn exact_two_cohort_input<'a>(
+        descriptors: &'a [AsyncCopyCohortDescriptor],
+        masks: &'a [u32],
+    ) -> BypassAsyncCopyInput<'a> {
+        BypassAsyncCopyInput {
+            instruction: 10,
+            sector_off: 20,
+            sector_len: 3,
+            source_cohorts: 2,
+            destination_lines: 3,
+            max_bank_wavefronts: 2,
+            max_bypass_wavefronts: 3,
+            cohorts: Some(descriptors),
+            sector_membership_masks: Some(masks),
+        }
+    }
+
+    #[test]
+    fn bypass_cohort_observation_handles_out_of_order_and_multi_cohort_responses() {
+        let p = params();
+        let descriptors = [
+            AsyncCopyCohortDescriptor {
+                payload_bytes: 32,
+                destination_lines: 1,
+                bank_wavefronts: 1,
+                bypass_wavefronts: 1,
+            },
+            AsyncCopyCohortDescriptor {
+                payload_bytes: 32,
+                destination_lines: 2,
+                bank_wavefronts: 2,
+                bypass_wavefronts: 3,
+            },
+        ];
+        let masks = [0b01, 0b11, 0b10];
+        let mut slot = AsyncCopySlot::default();
+        let group = slot
+            .add_pending_async_copy_sources(
+                0,
+                3,
+                128,
+                0,
+                Some(exact_two_cohort_input(&descriptors, &masks)),
+                &p,
+            )
+            .unwrap();
+        assert!(slot.commit_async_copy_group(10));
+
+        // Sector identities complete 2, 0, 1. The final sector belongs to
+        // both cohorts but decrements the production group/copy only once.
+        for (sector_index, now) in [(22, 30), (20, 40), (21, 50)] {
+            slot.complete_async_copy_sources(
+                0,
+                group,
+                Some(ResponseId::new(ResponseOwner(1), 0, 10, sector_index)),
+                1,
+                now,
+                &p,
+            )
+            .unwrap();
+        }
+        let state = slot.state.as_deref().unwrap();
+        let committed = state.committed_groups[0];
+        let copy = &state.bypass_copies[0];
+        assert_eq!(committed.pending_sources, 0);
+        assert_eq!(copy.pending_sources, 0);
+        assert_eq!(copy.cohorts[0].pending_sources, 0);
+        assert_eq!(copy.cohorts[0].first_source_response, Some(40));
+        assert_eq!(copy.cohorts[0].last_source_response, Some(50));
+        assert_eq!(copy.cohorts[1].pending_sources, 0);
+        assert_eq!(copy.cohorts[1].first_source_response, Some(30));
+        assert_eq!(copy.cohorts[1].last_source_response, Some(50));
+
+        let projected = slot
+            .bypass_copy_projection(0, &committed, &p, 45)
+            .unwrap()
+            .unwrap();
+        assert_eq!(projected.cohort_groups_observed, 1);
+        assert_eq!(projected.cohort_copies_observed, 1);
+        assert_eq!(projected.cohort_response_memberships_observed, 4);
+        assert_eq!(projected.cohort_response_span_cycles, 30);
+        assert_eq!(projected.cohort_topology_penalty_cycles, 10);
+        assert_eq!(projected.cohort_candidate_completion_cycles, 41);
+        assert_eq!(projected.cohort_candidate_exposure_cycles, 6);
+        assert_eq!(projected.cohort_candidate_later_than_per_copy_cycles, 0);
+        assert_eq!(projected.cohort_candidate_earlier_than_per_copy_cycles, 1);
+        assert_eq!(
+            projected.cohort_candidate_later_than_group_aggregate_cycles,
+            0
+        );
+        assert_eq!(
+            projected.cohort_candidate_earlier_than_group_aggregate_cycles,
+            1
+        );
+        assert_eq!(projected.cohort_candidate_later_than_production_cycles, 0);
+        assert_eq!(projected.cohort_candidate_earlier_than_production_cycles, 1);
+        assert_eq!(slot.async_wait_clear_time(0), Some(52));
+    }
+
+    #[test]
+    fn bypass_cohort_validation_is_transactional_at_issue_and_response() {
+        let p = params();
+        let descriptors = [
+            AsyncCopyCohortDescriptor {
+                payload_bytes: 32,
+                destination_lines: 1,
+                bank_wavefronts: 1,
+                bypass_wavefronts: 1,
+            },
+            AsyncCopyCohortDescriptor {
+                payload_bytes: 32,
+                destination_lines: 2,
+                bank_wavefronts: 2,
+                bypass_wavefronts: 3,
+            },
+        ];
+        let mut slot = AsyncCopySlot::default();
+        let invalid_masks = [0b01, 0b100, 0b10];
+        assert!(matches!(
+            slot.add_pending_async_copy_sources(
+                0,
+                3,
+                128,
+                0,
+                Some(exact_two_cohort_input(&descriptors, &invalid_masks)),
+                &p,
+            ),
+            Err(IssueError::AsyncCopyCohortProjectionInvalid {
+                field: "source-sector cohort mask",
+                ..
+            })
+        ));
+        assert!(slot.state.is_none());
+
+        let masks = [0b01, 0b11, 0b10];
+        let group = slot
+            .add_pending_async_copy_sources(
+                0,
+                3,
+                128,
+                0,
+                Some(exact_two_cohort_input(&descriptors, &masks)),
+                &p,
+            )
+            .unwrap();
+        let before_group = slot.state.as_deref().unwrap().open_group.unwrap();
+        let before_copy = slot.state.as_deref().unwrap().bypass_copies[0].clone();
+        assert!(matches!(
+            slot.complete_async_copy_sources(
+                0,
+                group,
+                Some(ResponseId::new(ResponseOwner(1), 0, 10, 99)),
+                1,
+                30,
+                &p,
+            ),
+            Err(IssueError::AsyncCopyCohortSectorOutOfRange { .. })
+        ));
+        assert_eq!(
+            slot.state.as_deref().unwrap().open_group,
+            Some(before_group)
+        );
+        assert_eq!(slot.state.as_deref().unwrap().bypass_copies[0], before_copy);
     }
 
     #[test]
@@ -12420,11 +13302,16 @@ mod tests {
                 pipeline_groups_observed: 1,
                 pipeline_q1_completion_cycles: 38,
                 pipeline_q1_exposure_cycles: 18,
+                cohort_groups_observed: 1,
+                cohort_copies_observed: 3,
+                cohort_response_memberships_observed: 12,
+                cohort_candidate_completion_cycles: 30,
+                cohort_candidate_exposure_cycles: 10,
                 ..BypassAsyncCopyDiagnostics::default()
             })),
             ..ReadinessDiagnostics::default()
         };
-        assert_eq!(observation.schema_version(), 16);
+        assert_eq!(observation.schema_version(), 17);
         let mut aggregate = ReadinessDiagnostics::default();
         aggregate.add_checked(&observation).unwrap();
         aggregate.add_checked(&observation).unwrap();
@@ -12432,6 +13319,11 @@ mod tests {
         assert_eq!(aggregate_pipeline.pipeline_groups_observed, 2);
         assert_eq!(aggregate_pipeline.pipeline_q1_completion_cycles, 76);
         assert_eq!(aggregate_pipeline.pipeline_q1_exposure_cycles, 36);
+        assert_eq!(aggregate_pipeline.cohort_groups_observed, 2);
+        assert_eq!(aggregate_pipeline.cohort_copies_observed, 6);
+        assert_eq!(aggregate_pipeline.cohort_response_memberships_observed, 24);
+        assert_eq!(aggregate_pipeline.cohort_candidate_completion_cycles, 60);
+        assert_eq!(aggregate_pipeline.cohort_candidate_exposure_cycles, 20);
     }
 
     #[test]
@@ -12440,6 +13332,7 @@ mod tests {
         let blocks = vec![BlockReplay {
             launch_index: 0,
             warps: vec![WarpReplay {
+                async_copy_cohorts: None,
                 warp_slot: 0,
                 insts: vec![async_copy_inst(0, 0, 1)],
                 sectors: vec![40],
@@ -12685,6 +13578,7 @@ mod tests {
         let blocks = vec![BlockReplay {
             launch_index: 0,
             warps: vec![WarpReplay {
+                async_copy_cohorts: None,
                 warp_slot: 0,
                 insts: vec![
                     ReplayInst {
@@ -12749,6 +13643,89 @@ mod tests {
         );
         assert_eq!(result.readiness.async_groups.groups_committed, 0);
         assert_eq!(result.readiness.async_groups.groups_waited, 0);
+    }
+
+    #[test]
+    fn ordinary_depbar_brace_set_waits_for_all_named_scoreboards_without_async_mutation() {
+        // Exact form emitted by the cohort probe: an LDGSTS operand-read
+        // producer on SB1 plus R2UR write producers on SB2/SB3. The encoded
+        // control wait mask is empty; the explicit operands must wait for the
+        // maximum ordinary clear stamp (SB3 at t=27).
+        let mut ldgsts = cb(1);
+        ldgsts.read_barrier = Some(barrier(1));
+        let mut r2ur_sb2 = cb(1);
+        r2ur_sb2.write_barrier = Some(barrier(2));
+        let mut r2ur_sb3 = cb(1);
+        r2ur_sb3.write_barrier = Some(barrier(3));
+        let sched = schedule(vec![
+            (0, slot(ldgsts, OpClass::Other, "LDGSTS.E.BYPASS.128")),
+            (16, slot(r2ur_sb2, OpClass::Other, "R2UR UR4, R2")),
+            (32, slot(r2ur_sb3, OpClass::Other, "R2UR UR5, R3")),
+            (48, slot(cb(7), OpClass::Other, "DEPBAR.LE SB1, 0x0, {3,2}")),
+            // Enables the async protocol sidecar without executing an async
+            // instruction, making accidental SB0 group mutation observable.
+            (64, async_wait_slot(0)),
+        ]);
+        let blocks = vec![BlockReplay {
+            launch_index: 0,
+            warps: vec![warp(0, vec![inst(0), inst(16), inst(32), inst(48)])],
+        }];
+        let mut core = SmCore::new(&blocks, &sched, &params(), SmMemMode::Flat).unwrap();
+        let mut requests = Vec::new();
+
+        assert_eq!(
+            core.advance(ReplayHorizon::Unbounded, &mut requests)
+                .unwrap(),
+            Advance::Done
+        );
+        assert!(requests.is_empty());
+        assert!(core.async_copies[0].state.is_none());
+        let result = core.result();
+        assert_eq!(result.instructions_issued, 4);
+        assert_eq!(result.cycles, 28);
+        assert_eq!(result.readiness.async_groups.groups_committed, 0);
+        assert_eq!(result.readiness.async_groups.groups_waited, 0);
+    }
+
+    #[test]
+    fn async_sb0_wait_composes_with_its_encoded_ordinary_wait_mask() {
+        let run = |async_source_ready: u64| {
+            let mut producer = cb(1);
+            producer.write_barrier = Some(barrier(1));
+            let mut composed_wait = async_wait_slot(0);
+            composed_wait.control.wait_mask = wait_mask(0b000010);
+            let sched = schedule(vec![
+                (0, slot(producer, OpClass::Other, "R2UR UR4, R2")),
+                (16, composed_wait),
+            ]);
+            let blocks = vec![BlockReplay {
+                launch_index: 0,
+                warps: vec![warp(0, vec![inst(0), inst(16)])],
+            }];
+            let p = params();
+            let mut core = SmCore::new(&blocks, &sched, &p, SmMemMode::Flat).unwrap();
+            core.async_copies[0]
+                .add_known_async_copy(0, async_source_ready, 0, 0, &p)
+                .unwrap();
+            assert!(core.async_copies[0].commit_async_copy_group(0));
+            let mut requests = Vec::new();
+            assert_eq!(
+                core.advance(ReplayHorizon::Unbounded, &mut requests)
+                    .unwrap(),
+                Advance::Done
+            );
+            assert!(requests.is_empty());
+            core.result()
+        };
+
+        // The same instruction waits for whichever independently modeled
+        // frontier is later: SB1's ordinary producer at t=25, or SB0's group.
+        let ordinary_limited = run(10);
+        assert_eq!(ordinary_limited.cycles, 26);
+        assert_eq!(ordinary_limited.readiness.async_groups.groups_waited, 1);
+        let async_limited = run(40);
+        assert_eq!(async_limited.cycles, 41);
+        assert_eq!(async_limited.readiness.async_groups.groups_waited, 1);
     }
 
     #[test]
@@ -12839,6 +13816,7 @@ mod tests {
             vec![BlockReplay {
                 launch_index: 0,
                 warps: vec![WarpReplay {
+                    async_copy_cohorts: None,
                     warp_slot: 0,
                     insts: vec![
                         ReplayInst {
@@ -12879,6 +13857,7 @@ mod tests {
         let blocks = vec![BlockReplay {
             launch_index: 0,
             warps: vec![WarpReplay {
+                async_copy_cohorts: None,
                 warp_slot: 0,
                 insts: vec![
                     ReplayInst {
@@ -12951,6 +13930,7 @@ mod tests {
         let blocks = vec![BlockReplay {
             launch_index: 0,
             warps: vec![WarpReplay {
+                async_copy_cohorts: None,
                 warp_slot: 0,
                 insts: vec![
                     ReplayInst {
@@ -14201,6 +15181,7 @@ mod tests {
                 // Younger STORE on the same SMSP wins the initial CGGTY pick,
                 // but loses the SM-wide one-entry queue to SMSP 0.
                 WarpReplay {
+                    async_copy_cohorts: None,
                     warp_slot: 5,
                     insts: vec![ReplayInst {
                         pc: 0,
@@ -14209,6 +15190,7 @@ mod tests {
                     sectors: vec![4],
                 },
                 WarpReplay {
+                    async_copy_cohorts: None,
                     warp_slot: 0,
                     insts: vec![ReplayInst {
                         pc: 0,
@@ -14250,6 +15232,7 @@ mod tests {
         let blocks = vec![BlockReplay {
             launch_index: 0,
             warps: vec![WarpReplay {
+                async_copy_cohorts: None,
                 warp_slot: 0,
                 insts: vec![ReplayInst {
                     pc: 0,
@@ -14294,6 +15277,7 @@ mod tests {
         let blocks = vec![BlockReplay {
             launch_index: 0,
             warps: vec![WarpReplay {
+                async_copy_cohorts: None,
                 warp_slot: 0,
                 insts: vec![
                     ReplayInst {
@@ -14347,6 +15331,7 @@ mod tests {
         let blocks = vec![BlockReplay {
             launch_index: 0,
             warps: vec![WarpReplay {
+                async_copy_cohorts: None,
                 warp_slot: 0,
                 insts: vec![
                     ReplayInst {
@@ -14403,6 +15388,7 @@ mod tests {
         let blocks = vec![BlockReplay {
             launch_index: 0,
             warps: vec![WarpReplay {
+                async_copy_cohorts: None,
                 warp_slot: 0,
                 insts: vec![
                     ReplayInst {
@@ -14517,6 +15503,7 @@ mod tests {
         let blocks = vec![BlockReplay {
             launch_index: 0,
             warps: vec![WarpReplay {
+                async_copy_cohorts: None,
                 warp_slot: 0,
                 insts: vec![
                     ReplayInst {
@@ -14570,6 +15557,7 @@ mod tests {
         let blocks = vec![BlockReplay {
             launch_index: 0,
             warps: vec![WarpReplay {
+                async_copy_cohorts: None,
                 warp_slot: 0,
                 insts: vec![async_copy_inst(0, 0, 2), inst(16), inst(32), inst(48)],
                 sectors: vec![40, 41],
@@ -14645,6 +15633,7 @@ mod tests {
         let blocks = vec![BlockReplay {
             launch_index: 0,
             warps: vec![WarpReplay {
+                async_copy_cohorts: None,
                 warp_slot: 0,
                 insts: vec![async_copy_inst(0, 0, 1), inst(16), inst(32), inst(48)],
                 sectors: vec![40],
@@ -14699,6 +15688,7 @@ mod tests {
         let blocks = vec![BlockReplay {
             launch_index: 0,
             warps: vec![WarpReplay {
+                async_copy_cohorts: None,
                 warp_slot: 0,
                 insts: vec![async_copy_inst(0, 0, 2), inst(16), inst(32), inst(48)],
                 sectors: vec![0, 4],
@@ -14786,6 +15776,7 @@ mod tests {
         let blocks = vec![BlockReplay {
             launch_index: 0,
             warps: vec![WarpReplay {
+                async_copy_cohorts: None,
                 warp_slot: 0,
                 insts: vec![async_copy_inst(0, 0, 3), inst(16), inst(32), inst(48)],
                 sectors: vec![0, 4, 8],
@@ -14829,6 +15820,7 @@ mod tests {
         let ordinary_blocks = vec![BlockReplay {
             launch_index: 0,
             warps: vec![WarpReplay {
+                async_copy_cohorts: None,
                 warp_slot: 0,
                 insts: vec![ReplayInst {
                     pc: 0,
@@ -14867,6 +15859,7 @@ mod tests {
         let blocks = vec![BlockReplay {
             launch_index: 0,
             warps: vec![WarpReplay {
+                async_copy_cohorts: None,
                 warp_slot: 0,
                 insts: vec![async_copy_inst(0, 0, 1)],
                 sectors: vec![40],
@@ -14920,6 +15913,7 @@ mod tests {
         let blocks = vec![BlockReplay {
             launch_index: 0,
             warps: vec![WarpReplay {
+                async_copy_cohorts: None,
                 warp_slot: 0,
                 insts: vec![async_copy_inst(0, 0, 1)],
                 sectors: vec![40],
@@ -14973,6 +15967,7 @@ mod tests {
         let blocks = vec![BlockReplay {
             launch_index: 0,
             warps: vec![WarpReplay {
+                async_copy_cohorts: None,
                 warp_slot: 0,
                 insts: vec![
                     bypass_async_copy_inst(0, 0, 2),
@@ -15175,6 +16170,7 @@ mod tests {
         let blocks = vec![BlockReplay {
             launch_index: 0,
             warps: vec![WarpReplay {
+                async_copy_cohorts: None,
                 warp_slot: 0,
                 insts: vec![bypass_async_copy_inst(0, 0, 1)],
                 sectors: vec![40],
@@ -15225,6 +16221,7 @@ mod tests {
         let blocks = vec![BlockReplay {
             launch_index: 0,
             warps: vec![WarpReplay {
+                async_copy_cohorts: None,
                 warp_slot: 0,
                 insts: vec![bypass_async_copy_inst(0, 0, 1)],
                 sectors: vec![40],
@@ -15332,6 +16329,7 @@ mod tests {
         let blocks = vec![BlockReplay {
             launch_index: 0,
             warps: vec![WarpReplay {
+                async_copy_cohorts: None,
                 warp_slot: 0,
                 insts: vec![ReplayInst {
                     pc: 0,
@@ -15370,6 +16368,7 @@ mod tests {
         let blocks = vec![BlockReplay {
             launch_index: 0,
             warps: vec![WarpReplay {
+                async_copy_cohorts: None,
                 warp_slot: 0,
                 insts: vec![ReplayInst {
                     pc: 0,
@@ -15419,11 +16418,13 @@ mod tests {
             launch_index: 0,
             warps: vec![
                 WarpReplay {
+                    async_copy_cohorts: None,
                     warp_slot: 0,
                     insts: vec![store()],
                     sectors: vec![0],
                 },
                 WarpReplay {
+                    async_copy_cohorts: None,
                     warp_slot: 1,
                     insts: vec![store()],
                     sectors: vec![4],
@@ -15462,6 +16463,7 @@ mod tests {
             launch_index: 0,
             warps: vec![
                 WarpReplay {
+                    async_copy_cohorts: None,
                     warp_slot: 0,
                     insts: vec![ReplayInst {
                         pc: 0,
@@ -15470,6 +16472,7 @@ mod tests {
                     sectors: vec![0],
                 },
                 WarpReplay {
+                    async_copy_cohorts: None,
                     warp_slot: 1,
                     insts: vec![ReplayInst {
                         pc: 0,
@@ -15520,6 +16523,7 @@ mod tests {
         let blocks = vec![BlockReplay {
             launch_index: 0,
             warps: vec![WarpReplay {
+                async_copy_cohorts: None,
                 warp_slot: 0,
                 insts: vec![ReplayInst {
                     pc: 0,
@@ -15578,6 +16582,7 @@ mod tests {
             launch_index: 0,
             warps: vec![
                 WarpReplay {
+                    async_copy_cohorts: None,
                     warp_slot: 0,
                     insts: vec![ReplayInst {
                         pc: 0,
@@ -15586,6 +16591,7 @@ mod tests {
                     sectors: vec![0],
                 },
                 WarpReplay {
+                    async_copy_cohorts: None,
                     warp_slot: 1,
                     insts: vec![ReplayInst {
                         pc: 0,
@@ -15632,6 +16638,7 @@ mod tests {
         let blocks = vec![BlockReplay {
             launch_index: 0,
             warps: vec![WarpReplay {
+                async_copy_cohorts: None,
                 warp_slot: 0,
                 insts: vec![ReplayInst {
                     pc: 0,
@@ -15709,6 +16716,7 @@ mod tests {
         let blocks = vec![BlockReplay {
             launch_index: 0,
             warps: vec![WarpReplay {
+                async_copy_cohorts: None,
                 warp_slot: 0,
                 insts: vec![
                     ReplayInst {
@@ -15770,6 +16778,7 @@ mod tests {
         let blocks = vec![BlockReplay {
             launch_index: 0,
             warps: vec![WarpReplay {
+                async_copy_cohorts: None,
                 warp_slot: 0,
                 insts: vec![
                     ReplayInst {
@@ -15849,6 +16858,7 @@ mod tests {
         let blocks = vec![BlockReplay {
             launch_index: 0,
             warps: vec![WarpReplay {
+                async_copy_cohorts: None,
                 warp_slot: 0,
                 insts: vec![
                     ReplayInst {
@@ -15950,6 +16960,7 @@ mod tests {
         let blocks = vec![BlockReplay {
             launch_index: 0,
             warps: vec![WarpReplay {
+                async_copy_cohorts: None,
                 warp_slot: 0,
                 insts: vec![
                     ReplayInst {
@@ -16029,6 +17040,7 @@ mod tests {
         let blocks = vec![BlockReplay {
             launch_index: 0,
             warps: vec![WarpReplay {
+                async_copy_cohorts: None,
                 warp_slot: 0,
                 insts: vec![
                     ReplayInst {
@@ -16055,6 +17067,7 @@ mod tests {
         let blocks2 = vec![BlockReplay {
             launch_index: 0,
             warps: vec![WarpReplay {
+                async_copy_cohorts: None,
                 warp_slot: 0,
                 insts: vec![
                     ReplayInst {
@@ -16098,6 +17111,7 @@ mod tests {
             (16, slot(consumer, OpClass::Other, "EXIT")),
         ]);
         let mk_warp = |slot_ix: i32| WarpReplay {
+            async_copy_cohorts: None,
             warp_slot: slot_ix,
             insts: vec![
                 ReplayInst {
@@ -16136,6 +17150,7 @@ mod tests {
         let blocks = vec![BlockReplay {
             launch_index: 0,
             warps: vec![WarpReplay {
+                async_copy_cohorts: None,
                 warp_slot: 0,
                 insts: vec![ReplayInst {
                     pc: 0,
@@ -16205,6 +17220,7 @@ mod tests {
             launch_index: 0,
             warps: vec![
                 WarpReplay {
+                    async_copy_cohorts: None,
                     warp_slot: 0,
                     insts: vec![
                         ReplayInst {
@@ -16216,6 +17232,7 @@ mod tests {
                     sectors: vec![0],
                 },
                 WarpReplay {
+                    async_copy_cohorts: None,
                     warp_slot: 1,
                     insts: vec![
                         ReplayInst {
@@ -16289,6 +17306,7 @@ mod tests {
         let blocks = vec![BlockReplay {
             launch_index: 0,
             warps: vec![WarpReplay {
+                async_copy_cohorts: None,
                 warp_slot: 0,
                 insts: vec![
                     ReplayInst {
@@ -16354,6 +17372,7 @@ mod tests {
         let blocks = vec![BlockReplay {
             launch_index: 0,
             warps: vec![WarpReplay {
+                async_copy_cohorts: None,
                 warp_slot: 0,
                 insts: vec![
                     ReplayInst {
@@ -16444,6 +17463,7 @@ mod tests {
         let blocks = vec![BlockReplay {
             launch_index: 0,
             warps: vec![WarpReplay {
+                async_copy_cohorts: None,
                 warp_slot: 0,
                 insts: vec![ReplayInst {
                     pc: 0,
@@ -16499,6 +17519,7 @@ mod tests {
         let blocks = vec![BlockReplay {
             launch_index: 0,
             warps: vec![WarpReplay {
+                async_copy_cohorts: None,
                 warp_slot: 0,
                 insts: vec![
                     ReplayInst {
@@ -16540,6 +17561,7 @@ mod tests {
         let blocks = vec![BlockReplay {
             launch_index: 0,
             warps: vec![WarpReplay {
+                async_copy_cohorts: None,
                 warp_slot: 0,
                 insts: vec![ReplayInst {
                     pc: 0,
@@ -16597,6 +17619,7 @@ mod tests {
         let blocks = vec![BlockReplay {
             launch_index: 0,
             warps: vec![WarpReplay {
+                async_copy_cohorts: None,
                 warp_slot: 0,
                 insts: vec![
                     ReplayInst {
@@ -16645,6 +17668,7 @@ mod tests {
         let blocks = vec![BlockReplay {
             launch_index: 0,
             warps: vec![WarpReplay {
+                async_copy_cohorts: None,
                 warp_slot: 0,
                 insts: vec![ReplayInst {
                     pc: 0,
@@ -16709,6 +17733,7 @@ mod tests {
         let blocks = vec![BlockReplay {
             launch_index: 0,
             warps: vec![WarpReplay {
+                async_copy_cohorts: None,
                 warp_slot: 0,
                 insts: vec![ReplayInst {
                     pc: 0,
@@ -16830,6 +17855,7 @@ mod tests {
         let blocks = vec![BlockReplay {
             launch_index: 0,
             warps: vec![WarpReplay {
+                async_copy_cohorts: None,
                 warp_slot: 0,
                 insts: vec![
                     ReplayInst {
@@ -16905,6 +17931,7 @@ mod tests {
         let blocks = vec![BlockReplay {
             launch_index: 0,
             warps: vec![WarpReplay {
+                async_copy_cohorts: None,
                 warp_slot: 0,
                 insts: vec![
                     ReplayInst {
@@ -16998,6 +18025,7 @@ mod tests {
         let blocks = vec![BlockReplay {
             launch_index: 0,
             warps: vec![WarpReplay {
+                async_copy_cohorts: None,
                 warp_slot: 0,
                 insts: vec![
                     ReplayInst {

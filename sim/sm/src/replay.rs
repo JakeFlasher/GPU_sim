@@ -46,10 +46,10 @@ use sim_mem::{L1Config, L1CounterError, L1Counters, SectorExpansionError};
 use sim_trace::lanes::LANE_INACTIVE_SENTINEL;
 use sim_trace::pb;
 use sim_trace::reader::{
-    EffectiveDataBytesError, LdgstsDestinationTopology, MemoryAccessMeta, MemoryPayloadContract,
-    SharedBankProjectionError, ValidatedMemoryInstruction, ValidatedMemoryRoute,
-    ValidatedMemoryRouteError, ValidatedSectorError, ValidatedSectorErrorPhase,
-    ValidatedSectorPlan, ValidatedWarp,
+    EffectiveDataBytesError, LdgstsDestinationTopology, LdgstsSourceCohort, MemoryAccessMeta,
+    MemoryPayloadContract, SharedBankProjectionError, ValidatedMemoryInstruction,
+    ValidatedMemoryRoute, ValidatedMemoryRouteError, ValidatedSectorError,
+    ValidatedSectorErrorPhase, ValidatedSectorPlan, ValidatedWarp,
 };
 #[cfg(test)]
 use sim_trace::reader::{
@@ -72,10 +72,10 @@ use sim_mem::{
 #[cfg(feature = "campaign")]
 use crate::evidence::AdmittedLaunchEvidence;
 use crate::issue::{
-    AccessKind, BlockReplay, IssueError, IssueModelParams, MemoryAdmissionCandidate,
-    MemoryServiceCandidate, ReplayInst, SharedMemoryResidency, SmSimResult, TailFlags, WarpReplay,
-    simulate_sm_with_residency, validate_memory_admission_candidates,
-    validate_memory_service_candidates,
+    AccessKind, AsyncCopyCohortDescriptor, AsyncCopyCohortReplay, AsyncCopyCohortSpan, BlockReplay,
+    IssueError, IssueModelParams, MemoryAdmissionCandidate, MemoryServiceCandidate, ReplayInst,
+    SharedMemoryResidency, SmSimResult, TailFlags, WarpReplay, simulate_sm_with_residency,
+    validate_memory_admission_candidates, validate_memory_service_candidates,
 };
 use crate::program::FunctionSchedule;
 use crate::system::{
@@ -463,6 +463,27 @@ pub enum ReplayError {
         source_active: bool,
         sectors: usize,
         payload_bytes: u64,
+    },
+    #[error(
+        "{path}: warp {warp_id} record {record_ix}: async-copy cohort projection {field} mismatch: expected {expected}, got {got}"
+    )]
+    AsyncCopyCohortProjectionMismatch {
+        path: PathBuf,
+        warp_id: i32,
+        record_ix: usize,
+        field: &'static str,
+        expected: usize,
+        got: usize,
+    },
+    #[error(
+        "{path}: warp {warp_id} record {record_ix}: async-copy cohort replay arena cannot reserve {additional} additional {buffer} entries"
+    )]
+    AsyncCopyCohortCapacityUnavailable {
+        path: PathBuf,
+        warp_id: i32,
+        record_ix: usize,
+        buffer: &'static str,
+        additional: usize,
     },
     #[error(
         "{path}: warp {warp_id} record {record_ix}: async-copy completion work {completion_work} exceeds compact replay-token maximum {max_completion_work}"
@@ -1397,6 +1418,7 @@ fn extract_per_sm_blocks(
             let mut warp_slot: Option<i32> = None;
             let mut insts = Vec::with_capacity(warp.instructions().len());
             let mut sectors: Vec<i64> = Vec::new();
+            let mut async_copy_cohorts = AsyncCopyCohortReplay::default();
             for (record_ix, inst) in warp.instructions().enumerate() {
                 let record_warp_id = inst.warpid_tb();
                 if record_warp_id != warp_id {
@@ -1460,6 +1482,7 @@ fn extract_per_sm_blocks(
                         schedule,
                         schedule.arch,
                         &mut sectors,
+                        &mut async_copy_cohorts,
                         &path,
                         warp_id,
                         record_ix,
@@ -1503,6 +1526,8 @@ fn extract_per_sm_blocks(
                 warp_slot,
                 insts,
                 sectors,
+                async_copy_cohorts: (!async_copy_cohorts.spans.is_empty())
+                    .then(|| Box::new(async_copy_cohorts)),
             });
         }
         let Some(sm) = block_sm else {
@@ -4050,6 +4075,7 @@ fn classify_compact_with_l1(
     schedule: &FunctionSchedule,
     arch: ArchId,
     sectors: &mut Vec<i64>,
+    async_copy_cohorts: &mut AsyncCopyCohortReplay,
     path: &Path,
     warp_id: i32,
     record_ix: usize,
@@ -4124,7 +4150,10 @@ fn classify_compact_with_l1(
                 l1_policy,
                 warp.effective_data_bytes(preflight.memory),
                 warp.ldgsts_destination_topology_128b_32x4(preflight.memory),
+                warp.ldgsts_source_cohorts_128b_32x4(preflight.memory),
+                warp.ldgsts_source_sector_cohort_masks_128b_32x4(preflight.memory),
                 sectors,
+                async_copy_cohorts,
                 staged,
                 path,
                 warp_id,
@@ -4550,7 +4579,10 @@ fn append_staged_async_copy_sectors(
     l1_policy: LdgstsL1Policy,
     payload_bytes: u64,
     destination_topology: Option<LdgstsDestinationTopology>,
+    source_cohorts: Option<&[LdgstsSourceCohort]>,
+    sector_cohort_masks: Option<&[u32]>,
     sectors: &mut Vec<i64>,
+    cohort_replay: &mut AsyncCopyCohortReplay,
     sector_scratch: &[i64],
     path: &Path,
     warp_id: i32,
@@ -4578,14 +4610,133 @@ fn append_staged_async_copy_sectors(
         warp_id,
         record_ix,
     )?;
-    append_staged_sectors(
-        checked_staged_async_copy_kind(l1_policy, start, count, completion_work),
-        sectors,
-        sector_scratch,
-        path,
+    let overflow = |sectors: usize| ReplayError::SectorCountOverflow {
+        path: path.to_path_buf(),
         warp_id,
         record_ix,
-    )
+        sectors,
+    };
+    let kind = checked_staged_async_copy_kind(l1_policy, start, count, completion_work)
+        .ok_or_else(|| overflow(count))?;
+
+    let cohort_projection = match (source_cohorts, sector_cohort_masks) {
+        (None, None) => None,
+        (Some(cohorts), Some(masks)) => {
+            if masks.len() != count {
+                return Err(ReplayError::AsyncCopyCohortProjectionMismatch {
+                    path: path.to_path_buf(),
+                    warp_id,
+                    record_ix,
+                    field: "source-sector membership count",
+                    expected: count,
+                    got: masks.len(),
+                });
+            }
+            if cohorts.is_empty() || cohorts.len() > u32::BITS as usize {
+                return Err(ReplayError::AsyncCopyCohortProjectionMismatch {
+                    path: path.to_path_buf(),
+                    warp_id,
+                    record_ix,
+                    field: "cohort count in u32 membership domain",
+                    expected: usize::from(source_active),
+                    got: cohorts.len(),
+                });
+            }
+            Some((cohorts, masks))
+        }
+        (Some(cohorts), None) => {
+            return Err(ReplayError::AsyncCopyCohortProjectionMismatch {
+                path: path.to_path_buf(),
+                warp_id,
+                record_ix,
+                field: "paired source-sector cohort masks",
+                expected: count,
+                got: cohorts.len(),
+            });
+        }
+        (None, Some(masks)) => {
+            return Err(ReplayError::AsyncCopyCohortProjectionMismatch {
+                path: path.to_path_buf(),
+                warp_id,
+                record_ix,
+                field: "paired source cohort descriptors",
+                expected: 1,
+                got: masks.len(),
+            });
+        }
+    };
+
+    sectors
+        .try_reserve(count)
+        .map_err(|_| ReplayError::SectorExpansion {
+            path: path.to_path_buf(),
+            warp_id,
+            record_ix,
+            source: SectorExpansionError::CapacityUnavailable {
+                buffer: "warp sector arena",
+                additional: count,
+            },
+        })?;
+    if let Some((cohorts, masks)) = cohort_projection {
+        for (buffer, additional, result) in [
+            (
+                "span",
+                1,
+                cohort_replay.spans.try_reserve(1).map_err(|_| ()),
+            ),
+            (
+                "descriptor",
+                cohorts.len(),
+                cohort_replay
+                    .cohorts
+                    .try_reserve(cohorts.len())
+                    .map_err(|_| ()),
+            ),
+            (
+                "membership-mask",
+                masks.len(),
+                cohort_replay
+                    .sector_membership_masks
+                    .try_reserve(masks.len())
+                    .map_err(|_| ()),
+            ),
+        ] {
+            result.map_err(|_| ReplayError::AsyncCopyCohortCapacityUnavailable {
+                path: path.to_path_buf(),
+                warp_id,
+                record_ix,
+                buffer,
+                additional,
+            })?;
+        }
+    }
+
+    sectors.extend_from_slice(sector_scratch);
+    if let Some((cohorts, masks)) = cohort_projection {
+        let cohort_off = cohort_replay.cohorts.len();
+        let membership_off = cohort_replay.sector_membership_masks.len();
+        cohort_replay
+            .cohorts
+            .extend(cohorts.iter().map(|cohort| AsyncCopyCohortDescriptor {
+                payload_bytes: cohort.payload_bytes,
+                destination_lines: cohort.destination_lines,
+                bank_wavefronts: cohort.bank_wavefronts,
+                bypass_wavefronts: cohort.bypass_wavefronts,
+            }));
+        cohort_replay
+            .sector_membership_masks
+            .extend_from_slice(masks);
+        cohort_replay.spans.push(AsyncCopyCohortSpan {
+            instruction: record_ix,
+            sector_off: start,
+            sector_len: u16::try_from(count).expect("checked async-copy replay kind length"),
+            cohort_off,
+            cohort_len: u8::try_from(cohorts.len())
+                .expect("u32 membership domain fits the u8 cohort span"),
+            membership_off,
+        });
+    }
+    Ok(kind)
 }
 
 fn append_staged_local_sectors(
@@ -4791,7 +4942,10 @@ fn classify_with_l1_preflighted(
                 require_ldgsts_l1_policy(schedule, arch, inst.pc)?,
                 payload_bytes,
                 None,
+                None,
+                None,
                 sectors,
+                &mut AsyncCopyCohortReplay::default(),
                 sector_scratch,
                 path,
                 warp_id,
@@ -7428,7 +7582,10 @@ mod space_routing_tests {
             LdgstsL1Policy::CacheAtAllLevels,
             payload_bytes,
             None,
+            None,
+            None,
             &mut sectors,
+            &mut AsyncCopyCohortReplay::default(),
             &sector_scratch,
             path,
             3,
@@ -7446,6 +7603,105 @@ mod space_routing_tests {
             } if completion_work == payload_bytes
         ));
         assert_eq!(sectors, vec![11]);
+    }
+
+    #[test]
+    fn async_copy_cohort_projection_enters_one_sparse_replay_sidecar_transactionally() {
+        let path = Path::new("cohort_projection.pb");
+        let topology = LdgstsDestinationTopology {
+            source_cohorts: 2,
+            destination_line_fanout_total: 3,
+            destination_line_fanout_max: 2,
+            cache_all_bank_wavefronts_total: 3,
+            cache_all_bank_wavefronts_max: 2,
+            bypass_wavefronts_total: 4,
+            bypass_wavefronts_max: 3,
+        };
+        let cohorts = [
+            LdgstsSourceCohort {
+                payload_bytes: 32,
+                destination_lines: 1,
+                bank_wavefronts: 1,
+                bypass_wavefronts: 1,
+            },
+            LdgstsSourceCohort {
+                payload_bytes: 32,
+                destination_lines: 2,
+                bank_wavefronts: 2,
+                bypass_wavefronts: 3,
+            },
+        ];
+        let masks = [0b01, 0b11, 0b10];
+        let mut sectors = vec![7];
+        let mut sidecar = AsyncCopyCohortReplay::default();
+        let kind = append_staged_async_copy_sectors(
+            ArchId::Sm86,
+            LdgstsL1Policy::BypassL1,
+            64,
+            Some(topology),
+            Some(&cohorts),
+            Some(&masks),
+            &mut sectors,
+            &mut sidecar,
+            &[40, 41, 42],
+            path,
+            3,
+            7,
+        )
+        .unwrap();
+        assert!(matches!(
+            kind,
+            AccessKind::GlobalAsyncCopy {
+                off: 1,
+                len: 3,
+                l1_policy: LdgstsL1Policy::BypassL1,
+                ..
+            }
+        ));
+        assert_eq!(sectors, [7, 40, 41, 42]);
+        assert_eq!(sidecar.spans.len(), 1);
+        let span = sidecar.spans[0];
+        assert_eq!(span.instruction, 7);
+        assert_eq!(span.sector_off, 1);
+        assert_eq!(span.sector_len, 3);
+        assert_eq!(sidecar.sector_membership_masks, masks);
+        assert_eq!(
+            sidecar.cohorts,
+            cohorts.map(|cohort| AsyncCopyCohortDescriptor {
+                payload_bytes: cohort.payload_bytes,
+                destination_lines: cohort.destination_lines,
+                bank_wavefronts: cohort.bank_wavefronts,
+                bypass_wavefronts: cohort.bypass_wavefronts,
+            })
+        );
+
+        let before_sectors = sectors.clone();
+        let before_spans = sidecar.spans.clone();
+        let error = append_staged_async_copy_sectors(
+            ArchId::Sm86,
+            LdgstsL1Policy::BypassL1,
+            64,
+            Some(topology),
+            Some(&cohorts),
+            Some(&masks[..2]),
+            &mut sectors,
+            &mut sidecar,
+            &[50, 51, 52],
+            path,
+            3,
+            8,
+        )
+        .unwrap_err();
+        assert!(matches!(
+            error,
+            ReplayError::AsyncCopyCohortProjectionMismatch {
+                field: "source-sector membership count",
+                ..
+            }
+        ));
+        assert_eq!(sectors, before_sectors);
+        assert_eq!(sidecar.spans, before_spans);
+        assert_eq!(sidecar.sector_membership_masks, masks);
     }
 
     #[test]
@@ -8889,6 +9145,19 @@ mod replay_identity_tests {
                     } if completion_work == expected_completion && got_policy == l1_policy
                 ));
                 assert_eq!(warp.sectors.len(), if decode_sectors { 16 } else { 0 });
+                if decode_sectors {
+                    let cohorts = warp
+                        .async_copy_cohorts
+                        .as_deref()
+                        .expect("destination-v3 extraction retains the cold cohort sidecar");
+                    assert_eq!(cohorts.spans.len(), 1);
+                    assert_eq!(cohorts.spans[0].instruction, 0);
+                    assert_eq!(cohorts.spans[0].sector_len, 16);
+                    assert_eq!(cohorts.cohorts.len(), 4);
+                    assert_eq!(cohorts.sector_membership_masks.len(), 16);
+                } else {
+                    assert!(warp.async_copy_cohorts.is_none());
+                }
             }
         }
 

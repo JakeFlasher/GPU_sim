@@ -2435,6 +2435,7 @@ mod tests {
         let blocks = vec![BlockReplay {
             launch_index: 0,
             warps: vec![WarpReplay {
+                async_copy_cohorts: None,
                 warp_slot: 0,
                 insts: vec![
                     ReplayInst {
@@ -2524,6 +2525,7 @@ mod tests {
         let blocks = vec![BlockReplay {
             launch_index: 0,
             warps: vec![WarpReplay {
+                async_copy_cohorts: None,
                 warp_slot: 0,
                 insts: vec![
                     ReplayInst {
@@ -2636,6 +2638,7 @@ mod tests {
             launch_index: 0,
             warps: (0..4)
                 .map(|warp_slot| WarpReplay {
+                    async_copy_cohorts: None,
                     warp_slot,
                     insts: vec![ReplayInst {
                         pc: 0,
@@ -3032,6 +3035,7 @@ mod tests {
         vec![BlockReplay {
             launch_index: 0,
             warps: vec![WarpReplay {
+                async_copy_cohorts: None,
                 warp_slot: 0,
                 insts: vec![
                     ReplayInst {
@@ -3089,6 +3093,7 @@ mod tests {
         vec![BlockReplay {
             launch_index: 0,
             warps: vec![WarpReplay {
+                async_copy_cohorts: None,
                 warp_slot: 0,
                 insts,
                 sectors: vec![40],
@@ -3510,6 +3515,7 @@ mod tests {
             vec![BlockReplay {
                 launch_index: 0,
                 warps: vec![WarpReplay {
+                    async_copy_cohorts: None,
                     warp_slot: 0,
                     insts: vec![ReplayInst {
                         pc: 0,
@@ -3573,6 +3579,7 @@ mod tests {
             launch_index: 0,
             warps: vec![
                 WarpReplay {
+                    async_copy_cohorts: None,
                     warp_slot: 0,
                     insts: vec![ReplayInst {
                         pc: 0,
@@ -3581,6 +3588,7 @@ mod tests {
                     sectors: vec![4],
                 },
                 WarpReplay {
+                    async_copy_cohorts: None,
                     warp_slot: 1,
                     insts: vec![ReplayInst {
                         pc: 0,
@@ -3635,6 +3643,7 @@ mod tests {
         let blocks = vec![BlockReplay {
             launch_index: 0,
             warps: vec![WarpReplay {
+                async_copy_cohorts: None,
                 warp_slot: 0,
                 insts: vec![
                     ReplayInst {
@@ -3721,6 +3730,7 @@ mod tests {
         let blocks = vec![BlockReplay {
             launch_index: 0,
             warps: vec![WarpReplay {
+                async_copy_cohorts: None,
                 warp_slot: 0,
                 insts: vec![ReplayInst {
                     pc: 0,
@@ -3757,6 +3767,7 @@ mod tests {
         let blocks = vec![BlockReplay {
             launch_index: 0,
             warps: vec![WarpReplay {
+                async_copy_cohorts: None,
                 warp_slot: 0,
                 insts: vec![ReplayInst {
                     pc: 0,
@@ -3798,6 +3809,7 @@ mod tests {
         let blocks = vec![BlockReplay {
             launch_index: 0,
             warps: vec![WarpReplay {
+                async_copy_cohorts: None,
                 warp_slot: 0,
                 insts: vec![
                     ReplayInst {
@@ -3874,6 +3886,7 @@ mod tests {
             launch_index: 0,
             warps: vec![
                 WarpReplay {
+                    async_copy_cohorts: None,
                     warp_slot: 0,
                     insts: vec![ReplayInst {
                         pc: 0,
@@ -3882,6 +3895,7 @@ mod tests {
                     sectors: vec![40],
                 },
                 WarpReplay {
+                    async_copy_cohorts: None,
                     warp_slot: 1,
                     insts: vec![
                         ReplayInst {
@@ -3900,6 +3914,7 @@ mod tests {
                     sectors: vec![40],
                 },
                 WarpReplay {
+                    async_copy_cohorts: None,
                     warp_slot: 2,
                     insts: vec![
                         ReplayInst {
@@ -3995,6 +4010,7 @@ mod tests {
             let blocks = vec![BlockReplay {
                 launch_index: 0,
                 warps: vec![WarpReplay {
+                    async_copy_cohorts: None,
                     warp_slot: 0,
                     insts: vec![ReplayInst { pc: 0, kind }],
                     sectors: vec![4],
@@ -4278,6 +4294,7 @@ mod tests {
         let delayed = vec![BlockReplay {
             launch_index: 1,
             warps: vec![WarpReplay {
+                async_copy_cohorts: None,
                 warp_slot: 0,
                 insts: vec![
                     ReplayInst {
@@ -4338,6 +4355,7 @@ mod tests {
         let storer = vec![BlockReplay {
             launch_index: 1,
             warps: vec![WarpReplay {
+                async_copy_cohorts: None,
                 warp_slot: 0,
                 insts: vec![
                     ReplayInst {
@@ -4560,6 +4578,7 @@ mod tests {
         let blocks = vec![BlockReplay {
             launch_index: 0,
             warps: vec![WarpReplay {
+                async_copy_cohorts: None,
                 warp_slot: 0,
                 insts: vec![
                     ReplayInst {
@@ -4640,6 +4659,7 @@ mod tests {
         let blocks = vec![BlockReplay {
             launch_index: 0,
             warps: vec![WarpReplay {
+                async_copy_cohorts: None,
                 warp_slot: 0,
                 insts: vec![
                     ReplayInst {
@@ -4714,6 +4734,7 @@ mod tests {
         let storer = vec![BlockReplay {
             launch_index: 0,
             warps: vec![WarpReplay {
+                async_copy_cohorts: None,
                 warp_slot: 0,
                 insts: vec![
                     ReplayInst {
@@ -4731,6 +4752,7 @@ mod tests {
         let loader = vec![BlockReplay {
             launch_index: 1,
             warps: vec![WarpReplay {
+                async_copy_cohorts: None,
                 warp_slot: 0,
                 insts: vec![
                     ReplayInst {
@@ -4796,6 +4818,7 @@ mod tests {
         let blocks = vec![BlockReplay {
             launch_index: 0,
             warps: vec![WarpReplay {
+                async_copy_cohorts: None,
                 warp_slot: 0,
                 insts: vec![
                     ReplayInst {
@@ -4861,6 +4884,7 @@ mod tests {
         let blocks = vec![BlockReplay {
             launch_index: 0,
             warps: vec![WarpReplay {
+                async_copy_cohorts: None,
                 warp_slot: 0,
                 insts: vec![ReplayInst {
                     pc: 0,
@@ -4912,6 +4936,7 @@ mod tests {
         let blocks = vec![BlockReplay {
             launch_index: 0,
             warps: vec![WarpReplay {
+                async_copy_cohorts: None,
                 warp_slot: 0,
                 insts: vec![ReplayInst {
                     pc: 0,
@@ -4979,6 +5004,7 @@ mod tests {
         let blocks = vec![BlockReplay {
             launch_index: 0,
             warps: vec![WarpReplay {
+                async_copy_cohorts: None,
                 warp_slot: 0,
                 insts: vec![
                     ReplayInst {

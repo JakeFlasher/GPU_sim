@@ -1963,6 +1963,23 @@ pub struct LdgstsDestinationTopology {
     pub bypass_wavefronts_max: u32,
 }
 
+/// Exact topology and payload work retained for one flexible 128-byte LDGSTS
+/// source cohort. Cohorts are ordered by their smallest uncovered source
+/// address, matching [`project_ldgsts_source_cohort_topology_128b_32x4`].
+/// Timing policy remains outside the trace reader.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct LdgstsSourceCohort {
+    /// Sum of active source-transfer widths assigned to this cohort.
+    pub payload_bytes: u32,
+    /// Distinct 128-byte shared destination lines touched by this cohort.
+    pub destination_lines: u32,
+    /// Maximum distinct 4-byte-word multiplicity on any shared bank.
+    pub bank_wavefronts: u32,
+    /// Cohort-local bypass projection:
+    /// `min(active transfers, destination_lines * bank_wavefronts)`.
+    pub bypass_wavefronts: u32,
+}
+
 /// Failure while pairing one LDGSTS global-source transfer with its
 /// lane-corresponding shared destination and reducing flexible 128-byte source
 /// cohorts to destination-line and shared-bank topology.
@@ -2108,6 +2125,36 @@ pub struct ValidatedMemoryInstruction {
 struct AsyncCopyProjection {
     effective_data_bytes: u64,
     destination_topology: CompactLdgstsDestinationTopology,
+    cohort_span: CompactArenaSpan,
+    source_sector_mask_span: CompactArenaSpan,
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+struct CompactArenaSpan {
+    start: u32,
+    len: u16,
+}
+
+impl CompactArenaSpan {
+    fn new(start: usize, len: usize) -> Self {
+        Self {
+            start: u32::try_from(start)
+                .unwrap_or_else(|_| unreachable!("validated sparse arena exceeded u32")),
+            len: u16::try_from(len)
+                .unwrap_or_else(|_| unreachable!("validated sparse span exceeded u16")),
+        }
+    }
+
+    fn slice<'a, T>(self, arena: &'a [T]) -> &'a [T] {
+        let start = usize::try_from(self.start)
+            .unwrap_or_else(|_| unreachable!("validated sparse span escaped usize"));
+        let end = start
+            .checked_add(usize::from(self.len))
+            .unwrap_or_else(|| unreachable!("validated sparse span overflowed"));
+        arena
+            .get(start..end)
+            .unwrap_or_else(|| unreachable!("validated sparse span escaped its arena"))
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -2170,10 +2217,14 @@ impl AsyncCopyProjection {
     fn new(
         effective_data_bytes: u64,
         destination_topology: Option<LdgstsDestinationTopology>,
+        cohort_span: CompactArenaSpan,
+        source_sector_mask_span: CompactArenaSpan,
     ) -> Self {
         Self {
             effective_data_bytes,
             destination_topology: CompactLdgstsDestinationTopology::new(destination_topology),
+            cohort_span,
+            source_sector_mask_span,
         }
     }
 
@@ -2266,6 +2317,8 @@ pub struct ValidatedWarp {
     instructions: Vec<ValidatedInstruction>,
     memories: Vec<ValidatedMemoryInstruction>,
     async_copy_projections: Vec<AsyncCopyProjection>,
+    ldgsts_source_cohorts: Vec<LdgstsSourceCohort>,
+    ldgsts_source_sector_cohort_masks: Vec<u32>,
     route_errors: Vec<ValidatedMemoryRouteError>,
     sectors: Vec<i64>,
     sector_errors: Vec<ValidatedSectorError>,
@@ -2285,6 +2338,8 @@ impl ValidatedWarp {
         let mut instructions = Vec::with_capacity(warp.instructions.len());
         let mut memories = Vec::new();
         let mut async_copy_projections = Vec::new();
+        let mut ldgsts_source_cohorts = Vec::new();
+        let mut ldgsts_source_sector_cohort_masks = Vec::new();
         let mut route_errors = Vec::new();
         let mut sectors = Vec::new();
         let mut sector_errors = Vec::new();
@@ -2330,11 +2385,35 @@ impl ValidatedWarp {
                 } else {
                     0
                 };
-                let destination_topology =
+                let global_atomic_transactions = meta.op_class == pb::MemoryOpClass::Atomic
+                    && matches!(resolved_route, Ok(ValidatedMemoryRoute::Global))
+                    && payload_contract.carries_atomic_addresses();
+                let sector_projection = if matches!(
+                    resolved_route,
+                    Ok(ValidatedMemoryRoute::Global | ValidatedMemoryRoute::Local)
+                ) {
+                    Some(if global_atomic_transactions {
+                        compact_atomic_sector_transaction_vector_32b(preflight)
+                    } else {
+                        compact_sector_vector_for_operand(
+                            preflight,
+                            (is_async_copy_source && payload_contract.carries_ldgsts_destination())
+                                .then_some(0),
+                        )
+                    })
+                } else {
+                    None
+                };
+                let destination_projection =
                     if is_async_copy_source && payload_contract.carries_ldgsts_destination() {
+                        let source_sectors = sector_projection
+                            .as_ref()
+                            .and_then(|projection| projection.as_ref().ok())
+                            .map_or(&[][..], Vec::as_slice);
                         Some(
-                            project_ldgsts_source_cohort_topology_128b_32x4(
+                            project_ldgsts_source_cohorts_128b_32x4(
                                 preflight,
+                                source_sectors,
                                 &mut shared_word_scratch,
                             )
                             .map_err(|source| {
@@ -2347,9 +2426,6 @@ impl ValidatedWarp {
                     } else {
                         None
                     };
-                let global_atomic_transactions = meta.op_class == pb::MemoryOpClass::Atomic
-                    && matches!(resolved_route, Ok(ValidatedMemoryRoute::Global))
-                    && payload_contract.carries_atomic_addresses();
                 let projection = if global_atomic_transactions {
                     preflight
                         .instruction()
@@ -2365,28 +2441,38 @@ impl ValidatedWarp {
                             unreachable!("validated async-copy projection arena exceeded u32")
                         }
                     };
+                    let cohort_span = CompactArenaSpan::new(
+                        ldgsts_source_cohorts.len(),
+                        destination_projection
+                            .as_ref()
+                            .map_or(0, |projection| projection.cohorts.len()),
+                    );
+                    let source_sector_mask_span = CompactArenaSpan::new(
+                        ldgsts_source_sector_cohort_masks.len(),
+                        destination_projection
+                            .as_ref()
+                            .map_or(0, |projection| projection.source_sector_cohort_masks.len()),
+                    );
+                    let destination_topology = destination_projection
+                        .as_ref()
+                        .map(|projection| projection.topology);
+                    if let Some(destination_projection) = destination_projection {
+                        ldgsts_source_cohorts.extend(destination_projection.cohorts);
+                        ldgsts_source_sector_cohort_masks
+                            .extend(destination_projection.source_sector_cohort_masks);
+                    }
                     async_copy_projections.push(AsyncCopyProjection::new(
                         effective_data_bytes,
                         destination_topology,
+                        cohort_span,
+                        source_sector_mask_span,
                     ));
                     index
                 } else {
                     shared_bank_wavefronts_32x4
                 };
-                let sector_plan = if matches!(
-                    resolved_route,
-                    Ok(ValidatedMemoryRoute::Global | ValidatedMemoryRoute::Local)
-                ) {
-                    let projection = if global_atomic_transactions {
-                        compact_atomic_sector_transaction_vector_32b(preflight)
-                    } else {
-                        compact_sector_vector_for_operand(
-                            preflight,
-                            (is_async_copy_source && payload_contract.carries_ldgsts_destination())
-                                .then_some(0),
-                        )
-                    };
-                    match projection {
+                let sector_plan = if let Some(sector_projection) = sector_projection {
+                    match sector_projection {
                         Ok(staged) => {
                             let start = sectors.len();
                             let len = match u16::try_from(staged.len()) {
@@ -2468,6 +2554,8 @@ impl ValidatedWarp {
             instructions,
             memories,
             async_copy_projections,
+            ldgsts_source_cohorts,
+            ldgsts_source_sector_cohort_masks,
             route_errors,
             sectors,
             sector_errors,
@@ -2561,6 +2649,36 @@ impl ValidatedWarp {
     ) -> Option<LdgstsDestinationTopology> {
         self.async_copy_projection(memory)
             .and_then(AsyncCopyProjection::destination_topology)
+    }
+
+    /// Exact flexible 128-byte source-cohort descriptors for a destination-
+    /// bearing LDGSTS record. `None` is the legacy source-only fallback;
+    /// predicated-off destination-bearing records return `Some(&[])`.
+    pub fn ldgsts_source_cohorts_128b_32x4(
+        &self,
+        memory: &ValidatedMemoryInstruction,
+    ) -> Option<&[LdgstsSourceCohort]> {
+        let projection = self.async_copy_projection(memory)?;
+        projection.destination_topology()?;
+        Some(projection.cohort_span.slice(&self.ldgsts_source_cohorts))
+    }
+
+    /// One cohort-membership bitmask per compact source sector, in the exact
+    /// order returned by [`Self::sector_plan`]. A bit is set when that sector
+    /// intersects source bytes assigned to the corresponding cohort; boundary
+    /// sectors may therefore carry multiple bits. `None` preserves the legacy
+    /// source-only fallback.
+    pub fn ldgsts_source_sector_cohort_masks_128b_32x4(
+        &self,
+        memory: &ValidatedMemoryInstruction,
+    ) -> Option<&[u32]> {
+        let projection = self.async_copy_projection(memory)?;
+        projection.destination_topology()?;
+        Some(
+            projection
+                .source_sector_mask_span
+                .slice(&self.ldgsts_source_sector_cohort_masks),
+        )
     }
 
     /// Compatibility view of the established cache-all bank-wavefront total.
@@ -6399,9 +6517,18 @@ pub fn project_shared_bank_wavefronts_32x4(
 struct LdgstsLaneTransfer {
     source_start: u64,
     source_end: u64,
+    source_first_sector: i64,
+    source_last_sector: i64,
     destination_first_word: i64,
     destination_last_word: i64,
     lane: u8,
+    cohort: u8,
+}
+
+struct ProjectedLdgstsSourceCohorts {
+    topology: LdgstsDestinationTopology,
+    cohorts: Vec<LdgstsSourceCohort>,
+    source_sector_cohort_masks: Vec<u32>,
 }
 
 const LDGSTS_DESTINATION_LINE_WORDS_128B: i64 = 128 / 4;
@@ -6409,10 +6536,12 @@ const LDGSTS_DESTINATION_LINE_WORDS_128B: i64 = 128 / 4;
 fn finish_ldgsts_destination_cohort(
     word_scratch: &mut Vec<i64>,
     active_transfers: u32,
-    topology: &mut LdgstsDestinationTopology,
+    payload_bytes: u32,
+    cohorts: &mut Vec<LdgstsSourceCohort>,
 ) -> Result<(), LdgstsDestinationProjectionError> {
     if active_transfers == 0 {
         debug_assert!(word_scratch.is_empty());
+        debug_assert_eq!(payload_bytes, 0);
         return Ok(());
     }
     word_scratch.sort_unstable();
@@ -6441,43 +6570,57 @@ fn finish_ldgsts_destination_cohort(
         },
     )?;
     let bypass_wavefronts = active_transfers.min(bypass_product);
-    let next = LdgstsDestinationTopology {
-        source_cohorts: topology
-            .source_cohorts
-            .checked_add(1)
-            .ok_or(LdgstsDestinationProjectionError::SourceCohortCountOverflow)?,
-        destination_line_fanout_total: topology
-            .destination_line_fanout_total
-            .checked_add(destination_lines)
-            .ok_or(LdgstsDestinationProjectionError::DestinationLineFanoutOverflow)?,
-        destination_line_fanout_max: topology.destination_line_fanout_max.max(destination_lines),
-        cache_all_bank_wavefronts_total: topology
-            .cache_all_bank_wavefronts_total
-            .checked_add(bank_wavefronts)
-            .ok_or(LdgstsDestinationProjectionError::WavefrontCountOverflow)?,
-        cache_all_bank_wavefronts_max: topology.cache_all_bank_wavefronts_max.max(bank_wavefronts),
-        bypass_wavefronts_total: topology
-            .bypass_wavefronts_total
-            .checked_add(bypass_wavefronts)
-            .ok_or(LdgstsDestinationProjectionError::BypassWavefrontCountOverflow)?,
-        bypass_wavefronts_max: topology.bypass_wavefronts_max.max(bypass_wavefronts),
-    };
-    *topology = next;
+    cohorts
+        .try_reserve(1)
+        .map_err(|_| LdgstsDestinationProjectionError::CapacityUnavailable { additional: 1 })?;
+    cohorts.push(LdgstsSourceCohort {
+        payload_bytes,
+        destination_lines,
+        bank_wavefronts,
+        bypass_wavefronts,
+    });
     word_scratch.clear();
     Ok(())
 }
 
-/// Pair each active lane's LDGSTS source and destination transfer, form
-/// flexible source cohorts whose complete byte span is at most 128 bytes, and
-/// retain destination-line fanout separately from 32-bank/4-byte-word
-/// multiplicity. The bypass projection is derived inside each cohort before
-/// aggregation; it is an observational topology coordinate, not a timing rule.
-/// Cohorts are anchored at the smallest uncovered source address rather than at
-/// absolute 128-byte cache-line boundaries.
-pub fn project_ldgsts_source_cohort_topology_128b_32x4(
-    preflight: PreflightedMemoryAccess<'_>,
-    word_scratch: &mut Vec<i64>,
+fn recompose_ldgsts_destination_topology(
+    cohorts: &[LdgstsSourceCohort],
 ) -> Result<LdgstsDestinationTopology, LdgstsDestinationProjectionError> {
+    let mut topology = LdgstsDestinationTopology {
+        source_cohorts: u32::try_from(cohorts.len())
+            .map_err(|_| LdgstsDestinationProjectionError::SourceCohortCountOverflow)?,
+        ..LdgstsDestinationTopology::default()
+    };
+    for cohort in cohorts {
+        topology.destination_line_fanout_total = topology
+            .destination_line_fanout_total
+            .checked_add(cohort.destination_lines)
+            .ok_or(LdgstsDestinationProjectionError::DestinationLineFanoutOverflow)?;
+        topology.destination_line_fanout_max = topology
+            .destination_line_fanout_max
+            .max(cohort.destination_lines);
+        topology.cache_all_bank_wavefronts_total = topology
+            .cache_all_bank_wavefronts_total
+            .checked_add(cohort.bank_wavefronts)
+            .ok_or(LdgstsDestinationProjectionError::WavefrontCountOverflow)?;
+        topology.cache_all_bank_wavefronts_max = topology
+            .cache_all_bank_wavefronts_max
+            .max(cohort.bank_wavefronts);
+        topology.bypass_wavefronts_total = topology
+            .bypass_wavefronts_total
+            .checked_add(cohort.bypass_wavefronts)
+            .ok_or(LdgstsDestinationProjectionError::BypassWavefrontCountOverflow)?;
+        topology.bypass_wavefronts_max =
+            topology.bypass_wavefronts_max.max(cohort.bypass_wavefronts);
+    }
+    Ok(topology)
+}
+
+fn project_ldgsts_source_cohorts_128b_32x4(
+    preflight: PreflightedMemoryAccess<'_>,
+    source_sectors: &[i64],
+    word_scratch: &mut Vec<i64>,
+) -> Result<ProjectedLdgstsSourceCohorts, LdgstsDestinationProjectionError> {
     let mut source_index = None;
     let mut source_count = 0_usize;
     let mut destination_index = None;
@@ -6520,13 +6663,18 @@ pub fn project_ldgsts_source_cohort_topology_128b_32x4(
     }
     let width = u64::try_from(source.data_width_bytes)
         .unwrap_or_else(|_| unreachable!("preflight admitted a non-positive operand width"));
+    let width_u32 = u32::try_from(width)
+        .unwrap_or_else(|_| unreachable!("one source transfer width escaped u32"));
 
     const EMPTY_TRANSFER: LdgstsLaneTransfer = LdgstsLaneTransfer {
         source_start: 0,
         source_end: 0,
+        source_first_sector: 0,
+        source_last_sector: 0,
         destination_first_word: 0,
         destination_last_word: 0,
         lane: 0,
+        cohort: 0,
     };
     let mut transfers = [EMPTY_TRANSFER; lanes::LANES_PER_WARP];
     let mut transfer_count = 0_usize;
@@ -6567,9 +6715,12 @@ pub fn project_ldgsts_source_cohort_topology_128b_32x4(
         transfers[transfer_count] = LdgstsLaneTransfer {
             source_start,
             source_end,
+            source_first_sector: source_address >> 5,
+            source_last_sector: ((source_end - 1) as i64) >> 5,
             destination_first_word: destination_address.div_euclid(4),
             destination_last_word: destination_last_byte.div_euclid(4),
             lane: lane as u8,
+            cohort: 0,
         };
         transfer_count += 1;
     }
@@ -6580,18 +6731,33 @@ pub fn project_ldgsts_source_cohort_topology_128b_32x4(
     word_scratch.clear();
     let mut cohort_start = None;
     let mut cohort_active_transfers = 0_u32;
-    let mut topology = LdgstsDestinationTopology::default();
+    let mut cohort_payload_bytes = 0_u32;
+    let mut cohort_ordinal = 0_u8;
+    let mut cohorts = Vec::new();
     let mut projected_words = 0_u64;
-    for transfer in &transfers[..transfer_count] {
+    for transfer in &mut transfers[..transfer_count] {
         if cohort_start.is_some_and(|start| transfer.source_end - start > 128) {
-            finish_ldgsts_destination_cohort(word_scratch, cohort_active_transfers, &mut topology)?;
+            finish_ldgsts_destination_cohort(
+                word_scratch,
+                cohort_active_transfers,
+                cohort_payload_bytes,
+                &mut cohorts,
+            )?;
             cohort_start = None;
             cohort_active_transfers = 0;
+            cohort_payload_bytes = 0;
+            cohort_ordinal = cohort_ordinal
+                .checked_add(1)
+                .ok_or(LdgstsDestinationProjectionError::SourceCohortCountOverflow)?;
         }
         cohort_start.get_or_insert(transfer.source_start);
+        transfer.cohort = cohort_ordinal;
         cohort_active_transfers = cohort_active_transfers
             .checked_add(1)
             .expect("one source cohort cannot exceed the 32-lane warp");
+        cohort_payload_bytes = cohort_payload_bytes
+            .checked_add(width_u32)
+            .expect("one source cohort payload cannot exceed 4096 bytes");
         let words =
             u64::try_from(transfer.destination_last_word - transfer.destination_first_word + 1)
                 .unwrap_or_else(|_| {
@@ -6616,8 +6782,59 @@ pub fn project_ldgsts_source_cohort_topology_128b_32x4(
             .map_err(|_| LdgstsDestinationProjectionError::CapacityUnavailable { additional })?;
         word_scratch.extend(transfer.destination_first_word..=transfer.destination_last_word);
     }
-    finish_ldgsts_destination_cohort(word_scratch, cohort_active_transfers, &mut topology)?;
-    Ok(topology)
+    finish_ldgsts_destination_cohort(
+        word_scratch,
+        cohort_active_transfers,
+        cohort_payload_bytes,
+        &mut cohorts,
+    )?;
+
+    let topology = recompose_ldgsts_destination_topology(&cohorts)?;
+    debug_assert_eq!(
+        cohorts
+            .iter()
+            .map(|cohort| u64::from(cohort.payload_bytes))
+            .sum::<u64>(),
+        u64::from(width_u32) * transfer_count as u64
+    );
+
+    let mut source_sector_cohort_masks = Vec::new();
+    source_sector_cohort_masks
+        .try_reserve(source_sectors.len())
+        .map_err(|_| LdgstsDestinationProjectionError::CapacityUnavailable {
+            additional: source_sectors.len(),
+        })?;
+    for &sector in source_sectors {
+        let mut mask = 0_u32;
+        for transfer in &transfers[..transfer_count] {
+            if sector >= transfer.source_first_sector && sector <= transfer.source_last_sector {
+                mask |= 1_u32
+                    .checked_shl(u32::from(transfer.cohort))
+                    .unwrap_or_else(|| unreachable!("32-lane cohort ordinal escaped u32 mask"));
+            }
+        }
+        debug_assert_ne!(mask, 0, "compact source sector must belong to a cohort");
+        source_sector_cohort_masks.push(mask);
+    }
+    Ok(ProjectedLdgstsSourceCohorts {
+        topology,
+        cohorts,
+        source_sector_cohort_masks,
+    })
+}
+
+/// Pair each active lane's LDGSTS source and destination transfer, form
+/// flexible source cohorts whose complete byte span is at most 128 bytes, and
+/// retain destination-line fanout separately from 32-bank/4-byte-word
+/// multiplicity. The bypass projection is derived inside each cohort before
+/// aggregation; it is an observational topology coordinate, not a timing rule.
+/// Cohorts are anchored at the smallest uncovered source address rather than at
+/// absolute 128-byte cache-line boundaries.
+pub fn project_ldgsts_source_cohort_topology_128b_32x4(
+    preflight: PreflightedMemoryAccess<'_>,
+    word_scratch: &mut Vec<i64>,
+) -> Result<LdgstsDestinationTopology, LdgstsDestinationProjectionError> {
+    Ok(project_ldgsts_source_cohorts_128b_32x4(preflight, &[], word_scratch)?.topology)
 }
 
 /// Compatibility wrapper for the established cache-all bank-wavefront scalar.
@@ -7878,6 +8095,86 @@ mod tests {
         instruction
     }
 
+    fn ldgsts_boundary_overlap_inst() -> pb::Instruction {
+        let mut instruction = async_payload_inst(3, 16, 16);
+        instruction.addresses[0].addrs[0] = 0x1008;
+        instruction.addresses[0].addrs[1] = 0x1078;
+        instruction.addresses[0].addrs[2] = 0x1088;
+        instruction.addresses.push(pb::Address {
+            data_width: 16,
+            compression_format: crate::lanes::FORMAT_LIST_ALL,
+            addrs: (0_i64..32)
+                .map(|lane| match lane {
+                    0 => 0,
+                    1 => 128,
+                    2 => 16,
+                    _ => crate::lanes::LANE_INACTIVE_SENTINEL,
+                })
+                .collect(),
+            address_space: Some(pb::MemorySpace::Shared as i32),
+            ..Default::default()
+        });
+        instruction
+    }
+
+    #[test]
+    fn ldgsts_source_sector_masks_preserve_boundary_multi_membership() {
+        let compact = ValidatedWarp::from_message(
+            0,
+            pb::Warp {
+                id: 0,
+                instructions: vec![ldgsts_boundary_overlap_inst()],
+                ..Default::default()
+            },
+            MemoryPayloadContract::AddressCarryingLdgstsDestinationV3,
+            "boundary-overlap destination-bearing async copy",
+        )
+        .unwrap();
+        let memory = compact.instructions().next().unwrap().memory().unwrap();
+
+        assert_eq!(compact.effective_data_bytes(memory), 48);
+        assert_eq!(
+            compact.ldgsts_destination_topology_128b_32x4(memory),
+            Some(LdgstsDestinationTopology {
+                source_cohorts: 2,
+                destination_line_fanout_total: 3,
+                destination_line_fanout_max: 2,
+                cache_all_bank_wavefronts_total: 3,
+                cache_all_bank_wavefronts_max: 2,
+                bypass_wavefronts_total: 3,
+                bypass_wavefronts_max: 2,
+            })
+        );
+        assert_eq!(
+            compact.ldgsts_source_cohorts_128b_32x4(memory),
+            Some(
+                [
+                    LdgstsSourceCohort {
+                        payload_bytes: 32,
+                        destination_lines: 2,
+                        bank_wavefronts: 2,
+                        bypass_wavefronts: 2,
+                    },
+                    LdgstsSourceCohort {
+                        payload_bytes: 16,
+                        destination_lines: 1,
+                        bank_wavefronts: 1,
+                        bypass_wavefronts: 1,
+                    },
+                ]
+                .as_slice()
+            )
+        );
+        assert!(matches!(
+            compact.sector_plan(memory),
+            ValidatedSectorPlan::Sectors(sectors) if sectors == [0x1000 >> 5, 0x1060 >> 5, 0x1080 >> 5]
+        ));
+        assert_eq!(
+            compact.ldgsts_source_sector_cohort_masks_128b_32x4(memory),
+            Some([0b01, 0b01, 0b11].as_slice())
+        );
+    }
+
     #[test]
     fn ldgsts_destination_projection_is_source_cohort_scoped_and_pairing_exact() {
         for (transpose, source_offset, expected) in [
@@ -8072,12 +8369,43 @@ mod tests {
                 "cache-all compatibility layout={label}"
             );
         }
+
+        let compact = ValidatedWarp::from_message(
+            0,
+            pb::Warp {
+                id: 0,
+                instructions: vec![ldgsts_destination_layout_inst(32)],
+                ..Default::default()
+            },
+            MemoryPayloadContract::AddressCarryingLdgstsDestinationV3,
+            "uniform compact destination-bearing async copy",
+        )
+        .unwrap();
+        let memory = compact.instructions().next().unwrap().memory().unwrap();
+        let expected_cohort = LdgstsSourceCohort {
+            payload_bytes: 64,
+            destination_lines: 1,
+            bank_wavefronts: 1,
+            bypass_wavefronts: 1,
+        };
+        assert_eq!(
+            compact.ldgsts_source_cohorts_128b_32x4(memory),
+            Some([expected_cohort; 8].as_slice())
+        );
+        let masks = compact
+            .ldgsts_source_sector_cohort_masks_128b_32x4(memory)
+            .unwrap();
+        assert_eq!(masks.len(), 32);
+        for (cohort, sectors) in masks.chunks_exact(4).enumerate() {
+            assert_eq!(sectors, [1_u32 << cohort; 4]);
+        }
     }
 
     #[test]
     fn async_copy_projection_keeps_multidimensional_topology_compact() {
-        assert!(std::mem::size_of::<AsyncCopyProjection>() <= 16);
+        assert!(std::mem::size_of::<AsyncCopyProjection>() <= 32);
         assert!(std::mem::size_of::<CompactLdgstsDestinationTopology>() <= 8);
+        assert!(std::mem::size_of::<CompactArenaSpan>() <= 8);
     }
 
     #[test]
@@ -8099,6 +8427,45 @@ mod tests {
             compact.ldgsts_destination_wavefronts_128b_32x4(memory),
             None
         );
+        assert_eq!(compact.ldgsts_source_cohorts_128b_32x4(memory), None);
+        assert_eq!(
+            compact.ldgsts_source_sector_cohort_masks_128b_32x4(memory),
+            None
+        );
+
+        let mut predicated_off = ldgsts_destination_layout_inst(32);
+        predicated_off.predicate_mask = Some(0);
+        for address in &mut predicated_off.addresses {
+            address.addrs.fill(crate::lanes::LANE_INACTIVE_SENTINEL);
+        }
+        let compact = ValidatedWarp::from_message(
+            0,
+            pb::Warp {
+                id: 0,
+                instructions: vec![predicated_off],
+                ..Default::default()
+            },
+            MemoryPayloadContract::AddressCarryingLdgstsDestinationV3,
+            "predicated-off destination-bearing async copy",
+        )
+        .unwrap();
+        let memory = compact.instructions().next().unwrap().memory().unwrap();
+        assert_eq!(
+            compact.ldgsts_destination_topology_128b_32x4(memory),
+            Some(LdgstsDestinationTopology::default())
+        );
+        assert_eq!(
+            compact.ldgsts_source_cohorts_128b_32x4(memory),
+            Some([].as_slice())
+        );
+        assert_eq!(
+            compact.ldgsts_source_sector_cohort_masks_128b_32x4(memory),
+            Some([].as_slice())
+        );
+        assert!(matches!(
+            compact.sector_plan(memory),
+            ValidatedSectorPlan::Sectors(sectors) if sectors.is_empty()
+        ));
     }
 
     #[test]

@@ -22,7 +22,7 @@ use sim_mem::{
 };
 use sim_trace::ExecInfo;
 
-use crate::control_bits::{ControlBits, ControlSidecar, DepBarrier};
+use crate::control_bits::{ControlBits, ControlSidecar, DepBarrier, WaitMask};
 use crate::sass_operands::{FixedLatencyOperandStatus, project_fixed_latency_operands};
 
 #[derive(Debug, thiserror::Error)]
@@ -237,15 +237,15 @@ impl IssueSlot {
         (self.op_class == OpClass::AsyncCopyWait).then_some(self.async_copy_wait_max_pending_groups)
     }
 
-    /// Ordinary scoreboard barrier named by a compiler-emitted `DEPBAR`
-    /// operand. Ampere `DEPBAR.LE SB1..SB5, 0x0` does not participate in the
-    /// SB0 asynchronous-copy group protocol: the issue model waits on the
-    /// existing ordinary dependence-barrier counter/clear state and never
+    /// Ordinary scoreboard barriers named by a compiler-emitted `DEPBAR`
+    /// operand. Ampere `DEPBAR.LE SB1..SB5, 0x0[, {..}]` does not participate
+    /// in the SB0 asynchronous-copy group protocol: the issue model waits on
+    /// every listed ordinary dependence-barrier counter/clear state and never
     /// commits or consumes an asynchronous-copy group for this instruction.
-    pub(crate) fn ordinary_dependency_wait_barrier(&self) -> Option<DepBarrier> {
+    pub(crate) fn ordinary_dependency_wait_mask(&self) -> WaitMask {
         match parse_dependency_barrier(&self.opcode_text) {
-            Some(DependencyBarrierOperand::OrdinaryWait(barrier)) => Some(barrier),
-            Some(DependencyBarrierOperand::AsyncCopyWait(_)) | None => None,
+            Some(DependencyBarrierOperand::OrdinaryWait(mask)) => mask,
+            Some(DependencyBarrierOperand::AsyncCopyWait(_)) | None => WaitMask::NONE,
         }
     }
 
@@ -389,23 +389,35 @@ fn classify(
                     opcode: opcode_text.to_owned(),
                 });
             };
-            if control.write_barrier.is_some()
-                || control.read_barrier.is_some()
-                || control.wait_mask.bits() != 0
-            {
-                return Err(ProgramError::AsyncCopyControlLayout {
-                    arch,
-                    opcode: opcode_text.to_owned(),
-                    control,
-                    expected: "no ordinary write barrier, read barrier, or wait mask",
-                });
-            }
             match operand {
-                DependencyBarrierOperand::AsyncCopyWait(_) => Ok(OpClass::AsyncCopyWait),
+                DependencyBarrierOperand::AsyncCopyWait(_) => {
+                    if control.write_barrier.is_some() || control.read_barrier.is_some() {
+                        return Err(ProgramError::AsyncCopyControlLayout {
+                            arch,
+                            opcode: opcode_text.to_owned(),
+                            control,
+                            expected: "no ordinary write or read barrier; an encoded ordinary wait mask may compose with SB0",
+                        });
+                    }
+                    Ok(OpClass::AsyncCopyWait)
+                }
                 // SB1..SB5 are ordinary compiler scoreboards. Their producer
                 // latency and wait timing come from the normal control/barrier
                 // path; only SB0 is the non-bulk async-copy wait protocol.
-                DependencyBarrierOperand::OrdinaryWait(_) => Ok(OpClass::Other),
+                DependencyBarrierOperand::OrdinaryWait(_) => {
+                    if control.write_barrier.is_some()
+                        || control.read_barrier.is_some()
+                        || control.wait_mask.bits() != 0
+                    {
+                        return Err(ProgramError::AsyncCopyControlLayout {
+                            arch,
+                            opcode: opcode_text.to_owned(),
+                            control,
+                            expected: "no ordinary write barrier, read barrier, or encoded wait mask for an explicit ordinary operand set",
+                        });
+                    }
+                    Ok(OpClass::Other)
+                }
             }
         }
         _ => unreachable!("dependency-barrier heads were filtered above"),
@@ -415,22 +427,24 @@ fn classify(
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum DependencyBarrierOperand {
     AsyncCopyWait(u32),
-    OrdinaryWait(DepBarrier),
+    OrdinaryWait(WaitMask),
 }
 
 /// Parse the exact Ampere dependency-barrier operand forms admitted by this
 /// model. SB0 retains the full asynchronous-copy pending-group immediate.
-/// SB1..SB5 are admitted only for the compiler-emitted zero-threshold form;
-/// other scoreboard names, modifiers, thresholds, and operand counts remain
-/// fail-closed.
+/// SB1..SB5 are admitted only for the compiler-emitted zero-threshold form,
+/// optionally followed by one canonical `{n,...}` set of unique scoreboard
+/// ordinals 0..5. SB0 remains exclusive to the async-copy form and therefore
+/// rejects a third operand. Other names, modifiers, thresholds, and operand
+/// shapes remain fail-closed.
 fn parse_dependency_barrier(opcode_text: &str) -> Option<DependencyBarrierOperand> {
     let text = opcode_text.trim();
     let operands = text.strip_prefix("DEPBAR.LE")?;
     if operands.is_empty() || !operands.starts_with(char::is_whitespace) {
         return None;
     }
-    let mut operands = operands.split(',');
-    let barrier = match operands.next()?.trim() {
+    let (primary, tail) = operands.split_once(',')?;
+    let barrier = match primary.trim() {
         "SB0" => DepBarrier::new(0).ok()?,
         "SB1" => DepBarrier::new(1).ok()?,
         "SB2" => DepBarrier::new(2).ok()?,
@@ -439,18 +453,48 @@ fn parse_dependency_barrier(opcode_text: &str) -> Option<DependencyBarrierOperan
         "SB5" => DepBarrier::new(5).ok()?,
         _ => return None,
     };
-    let immediate = operands.next()?.trim();
-    if immediate.is_empty() || operands.next().is_some() {
+    let (immediate, additional) = match tail.split_once(',') {
+        Some((immediate, additional)) => (immediate.trim(), Some(additional.trim())),
+        None => (tail.trim(), None),
+    };
+    if immediate.is_empty() {
         return None;
     }
     let immediate = parse_u32_literal(immediate)?;
     if barrier.wire() == 0 {
-        Some(DependencyBarrierOperand::AsyncCopyWait(immediate))
-    } else if immediate == 0 {
-        Some(DependencyBarrierOperand::OrdinaryWait(barrier))
-    } else {
-        None
+        return additional
+            .is_none()
+            .then_some(DependencyBarrierOperand::AsyncCopyWait(immediate));
     }
+    if immediate != 0 {
+        return None;
+    }
+    let mut bits = 1_u8 << barrier.wire();
+    if let Some(additional) = additional {
+        let members = additional.strip_prefix('{')?.strip_suffix('}')?;
+        if members.is_empty() {
+            return None;
+        }
+        for member in members.split(',') {
+            let wire = match member.trim() {
+                "0" => 0,
+                "1" => 1,
+                "2" => 2,
+                "3" => 3,
+                "4" => 4,
+                "5" => 5,
+                _ => return None,
+            };
+            let bit = 1_u8 << wire;
+            if bits & bit != 0 {
+                return None;
+            }
+            bits |= bit;
+        }
+    }
+    Some(DependencyBarrierOperand::OrdinaryWait(
+        WaitMask::new(bits).ok()?,
+    ))
 }
 
 fn parse_async_copy_wait(opcode_text: &str) -> Option<u32> {
@@ -1030,6 +1074,12 @@ mod tests {
             );
             assert_eq!(parse_async_copy_wait(opcode), Some(max_pending_groups));
         }
+        let composed = ControlBits::new(4, false, 7, 7, 0b001110, 0).unwrap();
+        assert_eq!(
+            classify("DEPBAR.LE SB0, 0x0", composed, None, ArchId::Sm86).unwrap(),
+            OpClass::AsyncCopyWait
+        );
+        assert_eq!(parse_async_copy_wait("DEPBAR.LE SB0, 0x0"), Some(0));
     }
 
     #[test]
@@ -1049,10 +1099,21 @@ mod tests {
             assert_eq!(
                 parse_dependency_barrier(&opcode),
                 Some(DependencyBarrierOperand::OrdinaryWait(
-                    DepBarrier::new(wire).unwrap()
+                    WaitMask::new(1 << wire).unwrap()
                 ))
             );
         }
+        let actual = "DEPBAR.LE SB1, 0x0, {3,2}";
+        assert_eq!(
+            classify(actual, control, None, ArchId::Sm86).unwrap(),
+            OpClass::Other
+        );
+        assert_eq!(
+            parse_dependency_barrier(actual),
+            Some(DependencyBarrierOperand::OrdinaryWait(
+                WaitMask::new(0b001110).unwrap()
+            ))
+        );
     }
 
     #[test]
@@ -1071,6 +1132,15 @@ mod tests {
             ("DEPBAR.LE SB0, -1", wait),
             ("DEPBAR.LE SB0, 0x1_0000_0000", wait),
             ("DEPBAR.LE SB0, 0, 1", wait),
+            ("DEPBAR.LE SB0, 0x0, {3,2}", wait),
+            ("DEPBAR.LE SB1, 0x1, {3,2}", wait),
+            ("DEPBAR.LE SB1, 0x0, {}", wait),
+            ("DEPBAR.LE SB1, 0x0, {3,3}", wait),
+            ("DEPBAR.LE SB1, 0x0, {3,1}", wait),
+            ("DEPBAR.LE SB1, 0x0, {6}", wait),
+            ("DEPBAR.LE SB1, 0x0, {0x3}", wait),
+            ("DEPBAR.LE SB1, 0x0, 3", wait),
+            ("DEPBAR.LE SB1, 0x0, {3,2}, {4}", wait),
         ] {
             assert!(matches!(
                 classify(opcode, control, None, ArchId::Sm86),
@@ -1114,10 +1184,6 @@ mod tests {
             (
                 "DEPBAR.LE SB0, 0x0",
                 ControlBits::new(4, false, 7, 1, 0, 0).unwrap(),
-            ),
-            (
-                "DEPBAR.LE SB0, 0x0",
-                ControlBits::new(4, false, 7, 7, 1, 0).unwrap(),
             ),
             (
                 "DEPBAR.LE SB2, 0x0",
