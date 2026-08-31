@@ -1,0 +1,176 @@
+{
+  "assay": "sm86_async_source_line_ownership",
+  "binary": {
+    "path": "/home/jakeshea/GPU_simulator_rebase/workloads/research_probes/async_source_only/async_source_line_ownership",
+    "sha256": "557e6fb31be9ee243181206ba593ae863300a6aacade6d9b635cf89a1d93d419",
+    "size_bytes": 1105656
+  },
+  "counts": {
+    "direct_cells_read": 0,
+    "ncu_bundles": 1,
+    "ncu_reports": 7,
+    "ncu_rows": 14,
+    "nvbit_cells": 2,
+    "simulator_cells": 2
+  },
+  "criteria": {
+    "holdout_signal": null,
+    "identification_signal": null,
+    "schema18_tie": true,
+    "smoke_passed": false,
+    "static_passed": true,
+    "timing_unchanged": true
+  },
+  "decision": "The frozen shared-wavefront contract fails before timing: both arms report 1,280, not 2,048; direct wait labels remain unread.",
+  "holdout_gate": null,
+  "identification_gate": null,
+  "missing_artifact_count": 0,
+  "mode": "smoke_only",
+  "ncu_bundles": [
+    {
+      "bundle_sha256": "4a8b9445548bf97fc3a914cdd1c6f82efea75575497d7f787871d060499582de",
+      "gates": {
+        "closure_within_tolerance": true,
+        "global_ld_exact": true,
+        "ldgsts_exact": true,
+        "lts_hit_positive": true,
+        "lts_miss_positive": true,
+        "lts_total_exact": true,
+        "paired_hit_within_tolerance": true,
+        "paired_miss_within_tolerance": true,
+        "shared_wavefronts_exact": false
+      },
+      "orientation": "first_line_early",
+      "repetition": 1,
+      "valid": false,
+      "values": {
+        "dram": {
+          "early_fanout": 25436,
+          "late_fanout": 2268
+        },
+        "global_ld": {
+          "early_fanout": 64,
+          "late_fanout": 64
+        },
+        "ldgsts": {
+          "early_fanout": 64,
+          "late_fanout": 64
+        },
+        "lts_hit": {
+          "early_fanout": 1536,
+          "late_fanout": 1536
+        },
+        "lts_miss": {
+          "early_fanout": 2048,
+          "late_fanout": 2048
+        },
+        "lts_total": {
+          "early_fanout": 3584,
+          "late_fanout": 3584
+        },
+        "shared_wavefronts": {
+          "early_fanout": 1280,
+          "late_fanout": 1280
+        }
+      }
+    }
+  ],
+  "nvbit_identities": [
+    {
+      "binary_sha256": "557e6fb31be9ee243181206ba593ae863300a6aacade6d9b635cf89a1d93d419",
+      "cell": "async_source_line_ownership_early_fanout_first_line_early_g64",
+      "trace_sha256": "bbc180e9b9a6f826223868d54024bdcfc054d91f28987d43d370ca6c82d8bad4",
+      "tracer_sha256": "dda89ee6857058b3f6dc2a01d73a2dc926b876d8e343b7457c779efd82fed007",
+      "variant": "early_fanout"
+    },
+    {
+      "binary_sha256": "557e6fb31be9ee243181206ba593ae863300a6aacade6d9b635cf89a1d93d419",
+      "cell": "async_source_line_ownership_late_fanout_first_line_early_g64",
+      "trace_sha256": "dab50b2fd1c114a3d51bc319a2cdad7d83fdaf9fbe9db6d2b21c3244f12cae4c",
+      "tracer_sha256": "dda89ee6857058b3f6dc2a01d73a2dc926b876d8e343b7457c779efd82fed007",
+      "variant": "late_fanout"
+    }
+  ],
+  "replay_identities": [
+    {
+      "aggregate_gates": {
+        "bypass_wavefronts_observed": true,
+        "cohort_copies_observed": true,
+        "cohort_groups_observed": true,
+        "cohort_overlap_groups_observed": true,
+        "cohort_response_memberships_observed": true,
+        "cohort_topology_penalty_cycles": true,
+        "copies_observed": true,
+        "destination_lines_observed": true,
+        "destination_wavefronts_observed": false,
+        "max_bank_wavefronts_sum": true,
+        "max_bypass_wavefronts_sum": true,
+        "source_cohorts_observed": true
+      },
+      "cell": "async_source_line_ownership_early_fanout_first_line_early_g64",
+      "replay_sha256": "61338a8d446d7fd699d2462ff3817908736323bc294cfcedf94997f0427c555e",
+      "schema18": {
+        "cohort_overlap_groups_observed": 64,
+        "cohort_response_envelope_cycles": 11456,
+        "cohort_topology_prearrival_hidden_cycles": 0,
+        "cohort_topology_residual_exposure_cycles": 896,
+        "cohort_topology_stream_hidden_cycles": 4096
+      },
+      "variant": "early_fanout"
+    },
+    {
+      "aggregate_gates": {
+        "bypass_wavefronts_observed": true,
+        "cohort_copies_observed": true,
+        "cohort_groups_observed": true,
+        "cohort_overlap_groups_observed": true,
+        "cohort_response_memberships_observed": true,
+        "cohort_topology_penalty_cycles": true,
+        "copies_observed": true,
+        "destination_lines_observed": true,
+        "destination_wavefronts_observed": false,
+        "max_bank_wavefronts_sum": true,
+        "max_bypass_wavefronts_sum": true,
+        "source_cohorts_observed": true
+      },
+      "cell": "async_source_line_ownership_late_fanout_first_line_early_g64",
+      "replay_sha256": "61338a8d446d7fd699d2462ff3817908736323bc294cfcedf94997f0427c555e",
+      "schema18": {
+        "cohort_overlap_groups_observed": 64,
+        "cohort_response_envelope_cycles": 11456,
+        "cohort_topology_prearrival_hidden_cycles": 0,
+        "cohort_topology_residual_exposure_cycles": 896,
+        "cohort_topology_stream_hidden_cycles": 4096
+      },
+      "variant": "late_fanout"
+    }
+  ],
+  "schema18_prediction": "exact paired tie / zero",
+  "schema_version": 1,
+  "smoke_gates": {
+    "aggregate_topology_exact": false,
+    "ncu_contract_exact": false,
+    "per_lane_ownership_exact": true,
+    "production_paired_tie": true,
+    "schema18_paired_tie": true
+  },
+  "static": {
+    "artifact_errors": [],
+    "artifact_valid": true,
+    "artifacts": {
+      "build": "9976a750c388eee592764dfe3a508bf606541e16f4c6a1b6484a2ea127130885",
+      "command": "b1a55e4e371716993c372ff962c5dcbb4691ae5e7b120fe645dfa6c583533383",
+      "control": "ecc52bebd1e71c21bcf12062cf03c065b348430bf73c40b619fdf70132b262b5",
+      "resources": "d1fa43f23c74fe1d421343b8e5673b3c52b9e68171a118a6a00e922e6f2df63b",
+      "sass": "4898029dd0fb90013a3bdf68940fe131d51600106c21a372deb45c5d70a1ecf7"
+    },
+    "assay_valid": true,
+    "decoded_instructions": 328,
+    "function_count": 2,
+    "scientific_failures": []
+  },
+  "status": "complete_line_ownership_structural_no_go",
+  "timing_promotion_authorized": false,
+  "typed_visibility_tail_required": true,
+  "validation_error_count": 0
+}

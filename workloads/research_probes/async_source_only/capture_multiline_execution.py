@@ -425,14 +425,16 @@ def current_static_binding() -> dict[str, Any]:
 
 
 def static_build_command() -> list[str]:
-    return [
+    command = [
         "make",
         "-B",
         "-C",
         str(HERE),
-        f"NVCC={NVCC}",
-        "async_multiline_response",
     ]
+    if MAKEFILE != HERE / "Makefile":
+        command.extend(("-f", str(MAKEFILE)))
+    command.extend((f"NVCC={NVCC}", BINARY.name))
+    return command
 
 
 def static_control_command(static: Path) -> list[str]:

@@ -311,3 +311,32 @@ wavefronts/copy, while this 32-lane geometry produces 32 payload/bypass
 wavefront observations and 20 destination lines. The final result is therefore
 `complete_response_envelope_structural_no_go`. Do not run or score the full
 matrix under this plan, promote timing, or remove the typed visibility tail.
+
+## Source-line ownership discriminator
+
+`async_source_line_ownership` prospectively swaps whether the preloaded or
+late source line inside each split cohort owns a two-line destination fanout.
+It preserves source/preload vectors and the exact destination address multiset.
+
+Run the mandatory pinned-environment smoke:
+
+```bash
+PYTHONDONTWRITEBYTECODE=1 .venv/bin/python \
+  workloads/research_probes/async_source_only/capture_line_ownership_execution.py \
+  --smoke --phase all --timeout 1800
+CUDA_VISIBLE_DEVICES=0 LANG=C LC_ALL=C PYTHONDONTWRITEBYTECODE=1 \
+  .venv/bin/python \
+  workloads/research_probes/async_source_only/capture_line_ownership_ncu.py \
+  --smoke --timeout 900
+PYTHONDONTWRITEBYTECODE=1 .venv/bin/python \
+  workloads/research_probes/async_source_only/analyze_line_ownership.py \
+  --smoke-only \
+  --aggregate-output data/local_labels/sm86_async_line_ownership_report.json
+```
+
+Per-lane ownership, source work, LTS attribution, schema-18 equality, and
+production equality pass. The frozen shared-wavefront gate does not: NCU
+reports 20/copy, the simulator destination observation reports 24/copy, and
+the bypass projection reports 32/copy. The result is
+`complete_line_ownership_structural_no_go`; wait timing and the second-line
+holdout remain unread, and no simulator state changes.

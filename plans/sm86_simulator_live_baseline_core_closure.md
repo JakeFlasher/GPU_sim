@@ -126,6 +126,15 @@ No production readiness or typed-tail state changes. A successor must freeze
 the actual interface prospectively or build a geometry that satisfies the
 literal 20-wavefront contract.
 
+The follow-on source-line ownership probe is complete in
+[`docs/sm86_async_source_line_ownership_milestone.md`](../docs/sm86_async_source_line_ownership_milestone.md).
+It preserves an exact lane-level ownership swap, but its first smoke resolves
+the supposedly single wavefront coordinate into NCU shared wavefronts 20/copy,
+simulator destination wavefronts 24/copy, bypass projection 32/copy, and 20
+destination lines. Because the prospective plan required the NCU shared metric
+to equal 32/copy, it stops as a structural no-go before timing labels. No
+schema-19 observation or production timing change is justified.
+
 ## Acceptance Criteria
 
 - AC-1: A current-host preflight and release build are recorded for the RTX

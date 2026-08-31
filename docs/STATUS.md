@@ -204,6 +204,17 @@ the final result. Production timing is unchanged and
 prospective contract for the actual 32-wavefront/20-line interface or a new
 geometry that literally produces 20 wavefronts.
 
+The prospective
+[source-line ownership discriminator](sm86_async_source_line_ownership_milestone.md)
+is also complete as a smoke structural no-go. Its fresh traces prove the exact
+early-line/late-line destination ownership permutation, and schema 18 plus
+production fingerprints tie. The smoke then separates three coordinates: NCU
+shared LDGSTS wavefronts are 20/copy, simulator
+`destination_wavefronts_observed` is 24/copy, and the bypass projection is
+32/copy; destination lines are 20/copy. The plan required the NCU shared metric
+to equal 32/copy, so the reducer stops before direct wait timing and does not
+run the second-line holdout. No schema or timing is promoted.
+
 The 2026-08-17
 [causal-readiness milestone](sm86_causal_readiness_milestone.md) is complete.
 Reason-tagged dependency, async-copy, CTA-generation/arrival-spread, and
