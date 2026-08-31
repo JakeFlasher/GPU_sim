@@ -1,0 +1,51 @@
+{
+  "schema_version": "rlcr.plan.v1",
+  "goal": "Retain exact SM86 LDGSTS source-sector/cohort response ordering, evaluate a parameter-free source/topology overlap mechanism, and complete a matched-marginal live GPU pairing assay with an evidence-backed timing-promotion or no-go decision while preserving unrelated simulator behavior.",
+  "criteria": [
+    {
+      "id": "AC-1",
+      "description": "Trace and replay retain exact cohort descriptors and multi-membership source-sector masks, with per-cohort recomposition equal to established copy-wide topology.",
+      "required": true,
+      "required_checks": [
+        "rust-workspace-tests"
+      ]
+    },
+    {
+      "id": "AC-2",
+      "description": "Schema 17 records exact per-cohort response state and the parameter-free overlap candidate on all 22 retained traces without changing production timing, traffic, terminal frontiers, or tails beyond removable observational fields.",
+      "required": true,
+      "required_checks": [
+        "rust-workspace-tests",
+        "replay-determinism"
+      ]
+    },
+    {
+      "id": "AC-3",
+      "description": "The frozen eight-comparison, nine-repeat SM86 cohort-pairing campaign completes with static, NCU, NVBit, device-identity, and matched-marginal admission, or records a concrete invalid or no-go result without relabeling the source mix.",
+      "required": true,
+      "required_checks": [
+        "live-gpu-campaign"
+      ]
+    },
+    {
+      "id": "AC-4",
+      "description": "The frozen identification and holdout reduction either validates every promotion gate or leaves production bypass timing and async_copy_shared_visibility unchanged with a completed, reproducible no-go.",
+      "required": true,
+      "required_checks": [
+        "cohort-response-analysis",
+        "replay-determinism"
+      ]
+    },
+    {
+      "id": "AC-5",
+      "description": "Documentation, commands, content identities, coherent commits, and a clean worktree provide a reproducible GPU-simulator-only handoff without JADE/HETR, CPU-GPU, or SM120 changes.",
+      "required": true,
+      "required_checks": [
+        "rust-workspace-tests",
+        "live-gpu-campaign",
+        "replay-determinism",
+        "cohort-response-analysis"
+      ]
+    }
+  ]
+}
