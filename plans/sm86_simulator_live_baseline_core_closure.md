@@ -16,7 +16,7 @@ The current focus is the GPU simulator itself. JADE/HETR, CPU-GPU co-simulation,
 and unrelated host-integration work are explicitly deferred. `sm_120` remains
 out of this milestone until the documented Ampere transition criterion is met.
 
-## Current closure state (2026-08-30)
+## Current closure state (2026-08-31)
 
 The retained six-workload baseline and the follow-on LDGSTS burst assay remain
 non-promoting. The smaller store-free async-source slice first removed global
@@ -74,6 +74,23 @@ timing/traffic remains normalized-equal. No Q, timing change, or tail removal
 is promoted. The next core slice is a per-cohort source-response
 arrival/service observation; do not activate or retune the consumed local or
 pipelined scalar candidates.
+
+That observation and the first matched-marginal cohort-pairing assay are now
+complete in
+[`docs/sm86_async_cohort_source_response_milestone.md`](../docs/sm86_async_cohort_source_response_milestone.md).
+Schema 17 retains exact source-sector-to-cohort response masks, first/last
+arrivals, and a timing-neutral cohort-local destination candidate. The v1
+capture is excluded for cross-allocation lane spans; v2 uses one aligned source
+pool and produces 16 complete endpoint traces plus deterministic twins. All
+eight live paired medians have zero issue delta and a negative wait delta, while
+the candidate predicts +15.750 cycles/group. This is not an admissible
+reverse-sign mechanism result: although all 16 NCU endpoints have exact work
+and a nonzero L2-hit/L2-miss/DRAM mix, six of eight paired DRAM differences
+exceed the frozen tolerance. Keep production timing and the typed visibility
+tail unchanged. Before testing destination service that overlaps or competes
+ahead of slow-source completion, obtain a strictly paired live recapture with
+defensible DRAM attribution; do not relabel the current source mix or fit a
+replacement scalar.
 
 ## Acceptance Criteria
 

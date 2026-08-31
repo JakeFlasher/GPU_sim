@@ -160,3 +160,51 @@ remain unchanged. The spaced SASS also uses `DEPBAR.LE SB1..SB5, 0x0`; these
 are ordinary scoreboard waits and must not be classified as SB0 async-copy
 group controls. The next probe should expose per-cohort source-response
 arrivals/service rather than fit another scalar latency.
+
+## Matched-marginal cohort-pairing assay
+
+`async_cohort_pairing` keeps each copy's source and destination marginals
+fixed while swapping their pairing. Every copy has four prewarmed small-
+footprint and four cold-ring source cohorts, plus four compact and four severe
+destination cohorts. `slow_expensive` pairs cold source cohorts with severe
+destinations; `slow_cheap` pairs them with compact destinations. The default
+paired invocation uses independent 128 MiB cold regions and a fixed 64-group
+prewarm. A 1 KiB cold step and the admitted group bound keep every measured
+source position within the ring without wraparound. Alternate `--order ab`
+and `--order ba` across direct repeats. The hot footprint and both cold
+regions are aligned subranges of one CUDA allocation so every mixed-lane
+LDGSTS source operand has one tracer allocation identity.
+
+```bash
+make -C workloads/research_probes/async_source_only async_cohort_pairing
+CUDA_VISIBLE_DEVICES=0 \
+  workloads/research_probes/async_source_only/async_cohort_pairing \
+  --groups 8192 --depth 2 --spacing-samples 0 --order ab --markers off
+CUDA_VISIBLE_DEVICES=0 \
+  workloads/research_probes/async_source_only/async_cohort_pairing \
+  --groups 64 --depth 2 --spacing-samples 0 \
+  --variant slow_expensive --markers on
+```
+
+Use endpoint mode for one-variant NCU or NVBit capture. The measured kernel is
+one warp with no CTA barrier; its three clock frontiers precede all result
+stores. Only spacing settings `0` and `4` and depths `1/2/4/8` are admitted.
+
+Reduce the repaired v2 direct/NCU/NVBit/schema-17 campaign with:
+
+```bash
+PYTHONDONTWRITEBYTECODE=1 python3 \
+  workloads/research_probes/async_source_only/analyze_cohort_pairing.py \
+  --root results/captures/sm86_async_cohort_pairing_20260830_v2 \
+  --output results/captures/sm86_async_cohort_pairing_20260830_v2/analysis/report.json
+```
+
+The v1 trace set is excluded because mixed lane sources crossed CUDA
+allocations. V2 repairs tracer identity with one aligned source pool. Its 72
+direct runs are correct and show negative paired wait medians with zero median
+issue deltas, but six of eight NCU pairs violate the frozen DRAM-marginal
+tolerance. The report status is
+`invalid_cohort_pairing_assay_no_timing_promotion`: do not relabel the source
+mix, activate the schema-17 cohort candidate, or remove the typed visibility
+tail. A strict paired recapture with attributable DRAM work is required before
+testing a reverse-sign overlap/competition mechanism.

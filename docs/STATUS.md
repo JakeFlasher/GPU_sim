@@ -149,6 +149,23 @@ six spacing-zero outputs remain normalized-equal to schema 15. The next narrow
 GPU-only action is per-cohort source-response arrival/service observation, not
 another scalar bypass latency.
 
+That per-cohort observation and its first
+[matched-marginal pairing assay](sm86_async_cohort_source_response_milestone.md)
+are now complete. Schema 17 maps every exact source sector to its overlapping
+flexible 128-byte cohorts, records first/last response arrival and cohort-local
+destination topology, and exposes a timing-neutral candidate. It also admits
+the compiler's ordinary `DEPBAR.LE SB1..SB5, 0x0[, {..}]` brace sets while
+keeping SB0 and composed ordinary waits separate. The v1 probe was invalid
+because mixed lanes crossed CUDA allocations; v2 repairs this with one aligned
+source pool. All 72 v2 direct runs are correct, all eight median issue deltas
+are zero, and all paired wait medians are negative. The candidate instead
+predicts +15.750 cycles/group, but six of eight paired NCU comparisons fail the
+frozen DRAM-marginal tolerance. The assay therefore remains invalid: no source
+mix is relabeled, no timing or tail is promoted, and 16 pairing plus 22 retained
+spacing trace twins remain timing-neutral. A strict paired recapture with
+defensible DRAM attribution must pass before testing the reverse-sign
+overlap/competition hypothesis.
+
 The 2026-08-17
 [causal-readiness milestone](sm86_causal_readiness_milestone.md) is complete.
 Reason-tagged dependency, async-copy, CTA-generation/arrival-spread, and
