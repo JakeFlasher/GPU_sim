@@ -285,6 +285,65 @@ print(json.dumps({{
         self.assertFalse(output["paired_delta_retained"])
         self.assertEqual(output["negative_rejections"], 3)
 
+    def test_nvbit_stdout_is_bound_by_payload_manifest(self) -> None:
+        output = json.loads(
+            self.run_python(
+                f"""
+import json
+import sys
+import tempfile
+from pathlib import Path
+sys.path.insert(0, {str(HERE)!r})
+import analyze_line_coordinates as coordinate
+
+execution = coordinate.execution
+destination = Path(tempfile.mkdtemp())
+(destination / "dynamic_trace.pb").write_bytes(b"trace")
+(destination / "stats.csv").write_text("metric,value\\nrecords,1\\n", encoding="utf-8")
+stdout = destination / "stdout.txt"
+stdout.write_text(
+    json.dumps({{
+        "workload": "async_source_line_ownership",
+        "correct": True,
+        "result": {{"correct": True, "mismatches": 0, "issue_cycles": 1}},
+    }}) + "\\n",
+    encoding="utf-8",
+)
+manifest_path = execution.write_trace_payload_manifest(destination)
+initial = execution.validate_trace_payload_manifest(destination)
+stdout.write_text(
+    json.dumps({{
+        "workload": "async_source_line_ownership",
+        "correct": True,
+        "result": {{"correct": True, "mismatches": 0, "issue_cycles": 999}},
+    }}) + "\\n",
+    encoding="utf-8",
+)
+try:
+    execution.validate_trace_payload_manifest(destination)
+except execution.CaptureError:
+    rejected = True
+else:
+    rejected = False
+print(json.dumps({{
+    "stdout_bound": any(
+        entry["path"] == "stdout.txt" for entry in initial["entries"]
+    ),
+    "drift_rejected": rejected,
+    "manifest_preserved": manifest_path.is_file(),
+}}))
+"""
+            )
+        )
+        self.assertEqual(
+            output,
+            {
+                "stdout_bound": True,
+                "drift_rejected": True,
+                "manifest_preserved": True,
+            },
+        )
+
     def test_label_projection_is_bound_to_admitted_bytes_and_reports_partial_access(
         self,
     ) -> None:

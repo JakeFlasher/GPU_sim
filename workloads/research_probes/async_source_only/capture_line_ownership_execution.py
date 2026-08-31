@@ -548,7 +548,11 @@ def trace_payload_manifest_path(destination: Path) -> Path:
 
 
 def trace_payload_files(destination: Path) -> list[Path]:
-    paths = [destination / "dynamic_trace.pb", destination / "stats.csv"]
+    paths = [
+        destination / "dynamic_trace.pb",
+        destination / "stats.csv",
+        destination / "stdout.txt",
+    ]
     paths.extend(sorted((destination / "threadblocks").rglob("*.pb")))
     if (destination / "extra_info").is_dir():
         paths.extend(
@@ -1006,6 +1010,7 @@ def validate_nvbit(
         "complete": destination / "complete.json",
         "payload_manifest": payload_manifest,
         "stats": destination / "stats.csv",
+        "target_stdout": destination / "stdout.txt",
         "trace": destination / "dynamic_trace.pb",
     }
     support.validate_run_manifest(
@@ -1100,6 +1105,7 @@ def capture_nvbit(root: Path, selected_cells: Sequence[Cell], timeout: int) -> N
                 "binding": destination / "campaign_binding.json",
                 "complete": destination / "complete.json",
                 "stats": destination / "stats.csv",
+                "target_stdout": destination / "stdout.txt",
                 "trace": destination / "dynamic_trace.pb",
             }
             support.recorded_run(

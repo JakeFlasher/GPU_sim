@@ -195,6 +195,7 @@ class LineOwnershipAnalyzerTest(unittest.TestCase):
             (root / "extra_info").mkdir()
             (root / "dynamic_trace.pb").write_bytes(b"root")
             (root / "stats.csv").write_text("header\n", encoding="utf-8")
+            (root / "stdout.txt").write_text("{}\n", encoding="utf-8")
             payload = root / "threadblocks/device_0/stream_0/kernel_0/block_0.pb"
             sidecar = root / "extra_info/allocations.json"
             payload.write_bytes(b"payload")

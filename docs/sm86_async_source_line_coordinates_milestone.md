@@ -97,6 +97,11 @@ separate immutable smoke authorization remains under
 erase the evidence that authorized the full run. Predecessor result paths are
 forbidden by the fresh contract and were not used as inputs.
 
+Each NVBit payload manifest now includes the target `stdout.txt` identity as
+well as trace, stats, threadblock protobufs, and sidecars. The wrapper manifest
+also binds stdout directly, and every replay binds the payload manifest, so a
+post-capture target-result substitution is rejected before structural parsing.
+
 Direct result files are provenance-validated before labels. The analyzer then
 selectively decodes issue fields; it lexically skips wait values until the
 issue gate passes. Read flags are set only after a complete successful field
