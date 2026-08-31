@@ -4,7 +4,7 @@
   "criteria": [
     {
       "id": "AC-1",
-      "description": "All 80 focused paired NCU bundles and 320 one-metric reports contain two ordered one-pass rows and pass exact LDGSTS plus attributable local-device LTS hit/miss gates; raw DRAM remains a recorded non-gating background sentinel.",
+      "description": "All 80 focused paired NCU bundles and 400 one-metric reports contain two ordered one-pass rows and pass exact LDGSTS plus attributable local-device LTS total/hit/miss gates; raw DRAM remains a recorded non-gating background sentinel.",
       "required": true,
       "required_checks": ["paired-ncu-attribution"]
     },

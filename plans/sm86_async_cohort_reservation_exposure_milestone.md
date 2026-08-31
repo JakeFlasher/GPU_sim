@@ -77,10 +77,11 @@ invocation. Profile exactly two selected launches in their execution order with:
 --clock-control none
 ```
 
-Each paired observation is a bundle of four focused one-metric profiles:
+Each paired observation is a bundle of five focused one-metric profiles:
 
 ```text
 smsp__inst_executed_op_ldgsts.sum
+lts__t_sectors_srcunit_tex_aperture_device_op_read.sum
 lts__t_sectors_srcunit_tex_aperture_device_op_read_lookup_hit.sum
 lts__t_sectors_srcunit_tex_aperture_device_op_read_lookup_miss.sum
 dram__sectors_read.sum
@@ -93,14 +94,17 @@ not physical DRAM completions.
 
 The metric families are deliberately separate: a bounded pre-plan smoke proved
 that requesting the LTS family together requires four replay passes, while
-each listed metric alone requires exactly one. Combining them would make the
+each listed metric alone requires exactly one. The explicit LTS-total profile
+is the exact requested-work frontier; separately collected hit/miss profiles
+may differ by one cache line across deterministic application launches and are
+reconciled with the already frozen paired tolerance. Combining metrics would make the
 cache state pass-history-dependent under `--cache-control none`.
 
 For every depth `1/2/4/8` and spacing `0/4`, retain ten paired NCU bundles:
 odd repetitions use AB order and even repetitions use BA order. Each report
 inside a bundle uses 64 groups and must contain exactly two target rows with
 IDs 0 and 1. The row-to-variant map comes only from the recorded invocation
-order. This yields 80 bundles and 320 one-pass reports. NCU timing is not a
+order. This yields 80 bundles and 400 one-pass reports. NCU timing is not a
 live timing label.
 
 The timing-blind admission gates are:
@@ -108,8 +112,10 @@ The timing-blind admission gates are:
 - exact v2 probe binary identity, arguments, kernel/grid/block, LDGSTS count,
   source address/32-byte-sector multiset, and destination topology multiset;
 - per row, LDGSTS instructions = `64 * depth`;
-- per row, device-aperture LTS hit + miss sectors = `64 * depth * 32`, with
-  both separately collected populations nonzero;
+- per row, device-aperture LTS-total sectors = `64 * depth * 32` exactly;
+- separately collected hit and miss populations are nonzero and, for each
+  variant, their sum differs from the exact LTS total by no more than the
+  paired tolerance below;
 - per paired repeat, absolute hit and miss deltas are no greater than
   `max(4, ceil(0.01 * 64 * depth * 32))`; and
 - every selected row in every profile reports one replay pass.
@@ -169,7 +175,7 @@ tail selection.
 ### Slice 1: Frozen paired attribution runner
 
 Add a narrow campaign/reducer path that captures the 80 focused NCU bundles
-(320 one-metric reports)
+(400 one-metric reports)
 without changing the probe. Preserve the exact command, order, binary, device
 identity, raw rows, and profiler report per repetition. Run a two-row smoke
 first and fail on the first missing row, replay-pass mismatch, or source-metric
@@ -221,7 +227,7 @@ only if one remains.
 The RLCR candidate commit must attach:
 
 - `rust-workspace-tests`: full Rust workspace library tests.
-- `paired-ncu-attribution`: the retained 80-bundle/320-report campaign passes the exact
+- `paired-ncu-attribution`: the retained 80-bundle/400-report campaign passes the exact
   row/order/replay-pass and attributable LTS gates.
 - `schema18-replay-determinism`: 16 pairing and 22 retained-spacing replay
   twins are deterministic and normalize to schema 17.
@@ -251,7 +257,7 @@ normalization failures remain nonzero errors.
 ## Acceptance criteria
 
 - **AC-1 — Source-attributed paired recapture:** All 80 paired NCU bundles and
-  320 one-metric reports retain two ordered one-pass rows and pass exact LDGSTS/local-device LTS
+  400 one-metric reports retain two ordered one-pass rows and pass exact LDGSTS/local-device LTS
   request-work gates; raw DRAM is reported only as non-gating background.
 - **AC-2 — Timing-neutral schema 18:** The fixed reservation-exposure score is
   checked, additive, deterministic, and never enters production readiness,
