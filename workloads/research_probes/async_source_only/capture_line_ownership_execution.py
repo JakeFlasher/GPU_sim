@@ -26,6 +26,7 @@ from line_ownership_campaign_contract import (
     artifact_identity as contract_artifact_identity,
     read_artifact_json,
     replace_artifact_json,
+    require_canonical_evidence_root,
     strict_json_equal,
     validate_evidence_tree,
     validate_smoke_authorization as validate_contract_smoke_authorization,
@@ -1408,7 +1409,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             raise CaptureError("--timeout must be positive")
         selected_cells = cells(args.smoke, args.cells)
         selected_repetitions = repetitions(args.smoke, args.repeats)
-        root = CAMPAIGN_CONTRACT.require_allowed_path(args.root)
+        root = require_canonical_evidence_root(CAMPAIGN_CONTRACT, args.root)
         if root.exists():
             validate_evidence_tree(CAMPAIGN_CONTRACT, root)
         if args.validate_only:

@@ -1021,6 +1021,96 @@ print(json.dumps({{
             {"execution": 1, "ncu": 1, "link_preserved": True},
         )
 
+    def test_off_contract_parent_is_rejected_before_tree_io(self) -> None:
+        output = json.loads(
+            self.run_python(
+                f"""
+import dataclasses
+import json
+import os
+import sys
+import tempfile
+from pathlib import Path
+from unittest import mock
+sys.path.insert(0, {str(HERE)!r})
+import line_ownership_campaign_contract as c
+
+parent = Path(tempfile.mkdtemp())
+allowed = parent / "allowed"
+forbidden = parent / "forbidden"
+allowed.mkdir()
+forbidden.mkdir()
+(forbidden / "sentinel.json").write_text("sentinel", encoding="utf-8")
+contract = dataclasses.replace(
+    c.COORDINATE_CONTRACT,
+    evidence_root=allowed,
+    aggregate_report=parent / "aggregate.json",
+    forbidden_paths=(forbidden,),
+)
+c.configure_once(contract)
+import capture_line_ownership_execution as execution
+import capture_line_ownership_ncu as ncu
+execution.configure_campaign(contract)
+ncu.configure_contract(contract)
+
+opened = []
+def audit(event, args):
+    if event == "open" and args and isinstance(args[0], (str, bytes)):
+        opened.append(os.fsdecode(args[0]))
+sys.addaudithook(audit)
+
+with mock.patch.object(execution, "validate_evidence_tree") as execution_guard:
+    execution_rc = execution.main([
+        "--root", str(parent), "--smoke", "--validate-only"
+    ])
+    execution_guard_calls = execution_guard.call_count
+with mock.patch.object(c, "validate_evidence_tree") as ncu_guard:
+    ncu_rc = ncu.main([
+        "--root", str(parent), "--smoke", "--validate-only"
+    ])
+    ncu_guard_calls = ncu_guard.call_count
+
+with mock.patch.object(
+    execution,
+    "validate_evidence_tree",
+    side_effect=c.ContractError("canonical reached tree validation"),
+) as canonical_execution_guard:
+    execution.main(["--root", str(allowed), "--smoke", "--validate-only"])
+with mock.patch.object(
+    c,
+    "validate_evidence_tree",
+    side_effect=c.ContractError("canonical reached tree validation"),
+) as canonical_ncu_guard:
+    ncu.main(["--root", str(allowed), "--smoke", "--validate-only"])
+
+forbidden_text = str(forbidden)
+forbidden_opens = sum(
+    path == forbidden_text or path.startswith(forbidden_text + os.sep)
+    for path in opened
+)
+print(json.dumps({{
+    "execution_rc": execution_rc,
+    "ncu_rc": ncu_rc,
+    "off_root_tree_calls": execution_guard_calls + ncu_guard_calls,
+    "canonical_tree_calls": (
+        canonical_execution_guard.call_count + canonical_ncu_guard.call_count
+    ),
+    "forbidden_opens": forbidden_opens,
+}}))
+"""
+            )
+        )
+        self.assertEqual(
+            output,
+            {
+                "execution_rc": 1,
+                "ncu_rc": 1,
+                "off_root_tree_calls": 0,
+                "canonical_tree_calls": 2,
+                "forbidden_opens": 0,
+            },
+        )
+
     def test_postcheck_symlink_swap_cannot_escape_safe_writer(self) -> None:
         output = json.loads(
             self.run_python(

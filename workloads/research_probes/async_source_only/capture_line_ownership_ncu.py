@@ -1219,7 +1219,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         repetitions = [1] if args.smoke else parse_repetitions(args.repeats)
         families = list(FAMILIES) if args.smoke else parse_families(args.families)
-        root = contract.require_allowed_path(args.root)
+        root = campaign_contract.require_canonical_evidence_root(
+            contract, args.root
+        )
         campaign_contract.validate_evidence_tree(contract, root)
         if not args.smoke:
             require_full_campaign_authorization(root, retained_binary(root))

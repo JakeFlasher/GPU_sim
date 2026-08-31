@@ -258,6 +258,22 @@ def validate_evidence_tree(contract: CampaignContract, root: Path) -> None:
         raise ContractError(f"unsafe coordinate evidence tree {checked}: {error}") from error
 
 
+def require_canonical_evidence_root(
+    contract: CampaignContract, root: Path
+) -> Path:
+    """Admit the coordinate root lexically, without touching the filesystem."""
+
+    checked = contract.require_allowed_path(root)
+    if contract != V1_CONTRACT:
+        expected = contract.require_allowed_path(contract.evidence_root)
+        if checked != expected:
+            raise ContractError(
+                f"generation {contract.generation_id} requires root "
+                f"{expected}, got {checked}"
+            )
+    return checked
+
+
 def read_artifact_bytes(contract: CampaignContract, path: Path) -> bytes:
     checked = contract.require_allowed_path(path)
     try:
