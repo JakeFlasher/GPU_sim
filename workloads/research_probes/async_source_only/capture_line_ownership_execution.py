@@ -20,6 +20,12 @@ from line_ownership_campaign_contract import (
     begin_campaign,
     configure_once,
     current_contract,
+    artifact_identity as contract_artifact_identity,
+    read_artifact_json,
+    replace_artifact_json,
+    strict_json_equal,
+    validate_evidence_tree,
+    validate_smoke_authorization as validate_contract_smoke_authorization,
 )
 
 
@@ -75,6 +81,12 @@ _apply_campaign_contract(CAMPAIGN_CONTRACT)
 CaptureError = support.CaptureError
 
 
+def same_json(observed: Any, expected: Any) -> bool:
+    if CAMPAIGN_CONTRACT == V1_CONTRACT:
+        return observed == expected
+    return strict_json_equal(observed, expected)
+
+
 @dataclass(frozen=True)
 class Cell:
     orientation: str
@@ -122,13 +134,19 @@ def validate_campaign_contract_binding(root: Path) -> Path | None:
     if CAMPAIGN_CONTRACT == V1_CONTRACT:
         return None
     resolved = CAMPAIGN_CONTRACT.require_allowed_path(root)
-    if resolved != CAMPAIGN_CONTRACT.evidence_root.resolve():
+    if resolved != CAMPAIGN_CONTRACT.require_allowed_path(
+        CAMPAIGN_CONTRACT.evidence_root
+    ):
         raise CaptureError(
             f"generation {CAMPAIGN_CONTRACT.generation_id} requires root "
             f"{CAMPAIGN_CONTRACT.evidence_root}, got {resolved}"
         )
     record = resolved / "campaign_contract.json"
-    if not record.is_file() or support.read_json(record) != CAMPAIGN_CONTRACT.to_json():
+    try:
+        observed = read_artifact_json(CAMPAIGN_CONTRACT, record)
+    except ContractError as error:
+        raise CaptureError(f"{record}: campaign contract identity mismatch") from error
+    if not strict_json_equal(observed, CAMPAIGN_CONTRACT.to_json()):
         raise CaptureError(f"{record}: campaign contract identity mismatch")
     return record
 
@@ -159,7 +177,7 @@ def campaign_document_fields(
     result = {
         "generation_id": CAMPAIGN_CONTRACT.generation_id,
         "assay": CAMPAIGN_CONTRACT.assay_id,
-        "root": str(root.resolve()),
+        "root": str(CAMPAIGN_CONTRACT.require_allowed_path(root)),
         "campaign_contract": CAMPAIGN_CONTRACT.to_json(),
     }
     if authorized:
@@ -168,7 +186,9 @@ def campaign_document_fields(
             raise CaptureError(
                 f"full artifact requires retained smoke authorization: {authorization}"
             )
-        result["smoke_authorization"] = support.file_identity(authorization)
+        result["smoke_authorization"] = contract_artifact_identity(
+            CAMPAIGN_CONTRACT, authorization
+        )
     return result
 
 
@@ -185,56 +205,23 @@ def require_full_campaign_authorization(
     if report_path is None:
         retained = smoke_authorization_path(root)
         report_path = retained if retained.is_file() else AGGREGATE_REPORT
-    if not report_path.is_file():
+    try:
+        report = read_artifact_json(CAMPAIGN_CONTRACT, report_path)
+    except ContractError as error:
         raise CaptureError(
-            f"full campaign requires a smoke-pass aggregate: {report_path}"
+            f"full campaign requires a smoke-pass aggregate: {report_path}: {error}"
+        ) from error
+    try:
+        return validate_contract_smoke_authorization(
+            report,
+            contract=CAMPAIGN_CONTRACT,
+            root=root,
+            binary=binary,
         )
-    report = support.read_json(report_path)
-    expected_scalars = {
-        "schema_version": 1,
-        "assay": CAMPAIGN_CONTRACT.assay_id,
-        "mode": "smoke_only",
-        "status": CAMPAIGN_CONTRACT.smoke_pass_status,
-        "root": str(root.resolve()),
-        "binary": dict(binary),
-        "timing_promotion_authorized": False,
-        "typed_visibility_tail_required": True,
-        "missing_artifact_count": 0,
-        "validation_error_count": 0,
-    }
-    if CAMPAIGN_CONTRACT != V1_CONTRACT:
-        expected_scalars.update(
-            {
-                "generation_id": CAMPAIGN_CONTRACT.generation_id,
-                "campaign_contract": CAMPAIGN_CONTRACT.to_json(),
-            }
-        )
-    mismatches = {
-        field: {"observed": report.get(field), "expected": value}
-        for field, value in expected_scalars.items()
-        if report.get(field) != value
-    }
-    smoke_gates = report.get("smoke_gates")
-    criteria = report.get("criteria")
-    if (
-        not isinstance(smoke_gates, dict)
-        or not smoke_gates
-        or not all(value is True for value in smoke_gates.values())
-    ):
-        mismatches["smoke_gates"] = {
-            "observed": smoke_gates,
-            "expected": "all true",
-        }
-    if not isinstance(criteria, dict) or criteria.get("smoke_passed") is not True:
-        mismatches["criteria.smoke_passed"] = {
-            "observed": None if not isinstance(criteria, dict) else criteria.get("smoke_passed"),
-            "expected": True,
-        }
-    if mismatches:
+    except ContractError as error:
         raise CaptureError(
-            f"full campaign is not authorized by this root/binary smoke: {mismatches}"
-        )
-    return report
+            f"full campaign is not authorized by this root/binary smoke: {error}"
+        ) from error
 
 
 def bind_campaign_contract(root: Path) -> Path | None:
@@ -243,18 +230,22 @@ def bind_campaign_contract(root: Path) -> Path | None:
     if CAMPAIGN_CONTRACT == V1_CONTRACT:
         return None
     resolved = CAMPAIGN_CONTRACT.require_allowed_path(root)
-    if resolved != CAMPAIGN_CONTRACT.evidence_root.resolve():
+    if resolved != CAMPAIGN_CONTRACT.require_allowed_path(
+        CAMPAIGN_CONTRACT.evidence_root
+    ):
         raise CaptureError(
             f"generation {CAMPAIGN_CONTRACT.generation_id} requires root "
             f"{CAMPAIGN_CONTRACT.evidence_root}, got {resolved}"
         )
     record = resolved / "campaign_contract.json"
     expected = CAMPAIGN_CONTRACT.to_json()
-    if record.is_file():
-        if support.read_json(record) != expected:
+    if record.exists() or record.is_symlink():
+        if not strict_json_equal(
+            read_artifact_json(CAMPAIGN_CONTRACT, record), expected
+        ):
             raise CaptureError(f"{record}: campaign contract identity drift")
     else:
-        support.atomic_write_json(record, expected)
+        replace_artifact_json(CAMPAIGN_CONTRACT, record, expected)
     return validate_campaign_contract_binding(resolved)
 
 
@@ -310,7 +301,7 @@ def validate_trace_payload_manifest(destination: Path) -> dict[str, Any]:
     path = trace_payload_manifest_path(destination)
     observed = support.read_json(path)
     expected = current_trace_payload_manifest(destination)
-    if observed != expected:
+    if not same_json(observed, expected):
         raise CaptureError(f"{path}: trace payload identity drift")
     return observed
 
@@ -456,11 +447,13 @@ def common_target_contract(cell: Cell, groups: int, mode: str) -> dict[str, Any]
 def validate_arm(value: Any, groups: int, context: str) -> None:
     if not isinstance(value, dict) or value.get("correct") is not True:
         raise CaptureError(f"{context}: invalid result arm")
-    if value.get("mismatches") != 0 or value.get("sum_consistent") is not True:
+    if not same_json(value.get("mismatches"), 0) or value.get(
+        "sum_consistent"
+    ) is not True:
         raise CaptureError(f"{context}: correctness/sum invariant failed")
     for field in ("issue_cycles", "wait_cycles", "total_cycles"):
         observed = value.get(field)
-        if not isinstance(observed, int) or observed < 0:
+        if type(observed) is not int or observed < 0:
             raise CaptureError(f"{context}: invalid {field}")
     if value["issue_cycles"] + value["wait_cycles"] != value["total_cycles"]:
         raise CaptureError(f"{context}: cycle sum mismatch")
@@ -481,7 +474,7 @@ def validate_target(
     mismatches = {
         key: {"observed": payload.get(key), "expected": value}
         for key, value in expected.items()
-        if payload.get(key) != value
+        if not same_json(payload.get(key), value)
     }
     if mismatches:
         raise CaptureError(f"target contract mismatch: {mismatches}")
@@ -551,7 +544,7 @@ def validate_direct_provenance(
             authorized=not is_smoke_direct(cell, repetition),
         ),
     }
-    if command_document != expected:
+    if not same_json(command_document, expected):
         raise CaptureError(f"{command_path}: direct binding mismatch")
     return {
         "result": support.file_identity(result_path),
@@ -594,7 +587,7 @@ def capture_direct(
                 validate_direct_provenance(destination, cell, repetition, binary)
                 print(f"direct existing: {cell.short} r{repetition}")
                 continue
-            destination.mkdir(parents=True, exist_ok=True)
+            support.ensure_output_directory(destination)
             command = direct_command(cell, repetition)
             manifest = destination / "direct.run.json"
             support.recorded_run(
@@ -737,10 +730,10 @@ def validate_nvbit(
         "outputs": support.identities(outputs),
         **campaign_document_fields(root, authorized=not is_smoke_endpoint(cell)),
     }
-    if command_document != expected:
+    if not same_json(command_document, expected):
         raise CaptureError(f"{command_path}: NVBit wrapper binding mismatch")
     stdout_payload = None
-    for line in reversed((destination / "stdout.txt").read_text(encoding="utf-8").splitlines()):
+    for line in reversed(support.read_text(destination / "stdout.txt").splitlines()):
         try:
             value = json.loads(line)
         except json.JSONDecodeError:
@@ -770,7 +763,7 @@ def capture_nvbit(root: Path, selected_cells: Sequence[Cell], timeout: int) -> N
                 print(f"nvbit existing: {name}")
                 continue
             run_root = root / "runs/nvbit" / name
-            run_root.mkdir(parents=True, exist_ok=True)
+            support.ensure_output_directory(run_root)
             target_timeout = timeout
             outer_timeout = timeout + 120
             capture, wrapper = nvbit_commands(destination, cell, variant, target_timeout)
@@ -853,7 +846,7 @@ def capture_simulator_build(root: Path, timeout: int) -> None:
     if manifest.is_file():
         validate_simulator_build(root)
         return
-    destination.mkdir(parents=True, exist_ok=True)
+    support.ensure_output_directory(destination)
     support.recorded_run(
         command,
         timeout=timeout,
@@ -907,7 +900,11 @@ def replay_command(root: Path, cell: Cell, variant: str) -> list[str]:
 def validate_replay(root: Path, destination: Path, cell: Cell, variant: str) -> None:
     first = destination / "replay-1.json"
     second = destination / "replay-2.json"
-    if not first.is_file() or not second.is_file() or first.read_bytes() != second.read_bytes():
+    if (
+        not first.is_file()
+        or not second.is_file()
+        or support.read_bytes(first) != support.read_bytes(second)
+    ):
         raise CaptureError(f"{destination}: incomplete or non-deterministic replay twins")
     support.read_json(first)
     command_path = destination / "command.json"
@@ -953,7 +950,7 @@ def validate_replay(root: Path, destination: Path, cell: Cell, variant: str) -> 
         "run_manifests": manifests,
         **campaign_document_fields(root, authorized=not is_smoke_endpoint(cell)),
     }
-    if command_document != expected:
+    if not same_json(command_document, expected):
         raise CaptureError(f"{command_path}: replay binding mismatch")
 
 
@@ -971,7 +968,7 @@ def capture_replay(root: Path, selected_cells: Sequence[Cell], timeout: int) -> 
                 validate_replay(root, destination, cell, variant)
                 print(f"replay existing: {name}")
                 continue
-            destination.mkdir(parents=True, exist_ok=True)
+            support.ensure_output_directory(destination)
             command = replay_command(root, cell, variant)
             inputs = {
                 **campaign_manifest_inputs(
@@ -1077,8 +1074,13 @@ def main(argv: Sequence[str] | None = None) -> int:
             raise CaptureError("--timeout must be positive")
         selected_cells = cells(args.smoke, args.cells)
         selected_repetitions = repetitions(args.smoke, args.repeats)
-        root = args.root.resolve()
-        bind_campaign_contract(root)
+        root = CAMPAIGN_CONTRACT.require_allowed_path(args.root)
+        if root.exists():
+            validate_evidence_tree(CAMPAIGN_CONTRACT, root)
+        if args.validate_only:
+            validate_campaign_contract_binding(root)
+        else:
+            bind_campaign_contract(root)
         full_execution = not args.smoke and (
             args.validate_only
             or args.phase in {"all", "direct", "nvbit", "replay"}
@@ -1107,6 +1109,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             capture_nvbit(root, selected_cells, args.timeout)
         if args.phase in {"all", "replay"}:
             capture_replay(root, selected_cells, args.timeout)
+        validate_evidence_tree(CAMPAIGN_CONTRACT, root)
         return 0
     except (CaptureError, ContractError, OSError, ValueError) as error:
         print(f"line ownership execution capture: {error}", file=sys.stderr)

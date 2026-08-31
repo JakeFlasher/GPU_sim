@@ -4,13 +4,14 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import math
 import re
 import statistics
 import sys
 from pathlib import Path
-from typing import Any, Mapping, Sequence
+from typing import Any, Callable, Mapping, Sequence
 
 HERE = Path(__file__).resolve().parent
 REPO_ROOT = HERE.parents[2]
@@ -24,6 +25,10 @@ from line_ownership_campaign_contract import (  # noqa: E402
     V1_CONTRACT,
     begin_campaign,
     configure_once,
+    read_artifact_bytes,
+    read_artifact_text,
+    replace_artifact_text,
+    validate_evidence_tree,
 )
 
 # Configuration is deliberately the first campaign action. Every imported
@@ -200,12 +205,144 @@ class _SelectiveObjectReader:
 
 
 def read_direct_fields(path: Path, fields: Mapping[str, Any]) -> dict[str, Any]:
-    reader = _SelectiveObjectReader(path.read_text(encoding="utf-8"), path)
+    try:
+        text = read_artifact_text(CONTRACT, path)
+    except (OSError, UnicodeError) as error:
+        raise base.AnalysisError(f"cannot read {path}: {error}") from error
+    return _select_direct_fields(text, path, fields)
+
+
+def _select_direct_fields(
+    text: str, context: Path, fields: Mapping[str, Any]
+) -> dict[str, Any]:
+    reader = _SelectiveObjectReader(text, context)
     result = reader.object(fields)
     reader.whitespace()
     if reader.index != len(reader.text):
-        raise base.AnalysisError(f"{path}: trailing JSON content")
+        raise base.AnalysisError(f"{context}: trailing JSON content")
     return result
+
+
+def read_admitted_direct_fields(
+    path: Path,
+    identity: Mapping[str, Any],
+    fields: Mapping[str, Any],
+    *,
+    on_label_access: Callable[[], None] | None = None,
+) -> dict[str, Any]:
+    """Parse the same immutable result bytes admitted by provenance validation."""
+
+    if not isinstance(identity, Mapping):
+        raise base.AnalysisError(f"{path}: missing admitted result identity")
+    retained_path = identity.get("path")
+    if not isinstance(retained_path, str) or not Path(retained_path).is_absolute():
+        raise base.AnalysisError(f"{path}: invalid admitted result path")
+    admitted_path = CONTRACT.require_allowed_path(Path(retained_path))
+    expected_path = CONTRACT.require_allowed_path(path)
+    if admitted_path != expected_path:
+        raise base.AnalysisError(
+            f"{path}: admitted result path is {admitted_path}"
+        )
+    retained_size = identity.get("size_bytes")
+    if isinstance(retained_size, bool) or not isinstance(retained_size, int):
+        raise base.AnalysisError(f"{path}: invalid admitted result size")
+    retained_sha256 = identity.get("sha256")
+    if not isinstance(retained_sha256, str) or not re.fullmatch(
+        r"[0-9a-f]{64}", retained_sha256
+    ):
+        raise base.AnalysisError(f"{path}: invalid admitted result SHA-256")
+    try:
+        content = read_artifact_bytes(CONTRACT, path)
+    except FileNotFoundError:
+        raise
+    except OSError as error:
+        raise base.AnalysisError(f"cannot read {path}: {error}") from error
+    if len(content) != retained_size:
+        raise base.AnalysisError(
+            f"{path}: result size changed after provenance admission"
+        )
+    if hashlib.sha256(content).hexdigest() != retained_sha256:
+        raise base.AnalysisError(
+            f"{path}: result bytes changed after provenance admission"
+        )
+    try:
+        text = content.decode("utf-8")
+    except UnicodeDecodeError as error:
+        raise base.AnalysisError(f"{path}: result is not UTF-8: {error}") from error
+    if on_label_access is not None:
+        on_label_access()
+    return _select_direct_fields(text, path, fields)
+
+
+def direct_counter(value: Any, context: str) -> int:
+    """Require a finite, non-negative, integer-valued JSON number."""
+
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise base.AnalysisError(f"{context}: expected an integer counter, got {value!r}")
+    if value < 0:
+        raise base.AnalysisError(f"{context}: negative counter {value}")
+    return value
+
+
+def paired_delta(value: Any, context: str) -> float:
+    """Require a finite numeric delta; booleans are not numeric evidence."""
+
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise base.AnalysisError(f"{context}: expected a finite numeric delta")
+    try:
+        result = float(value)
+    except OverflowError as error:
+        raise base.AnalysisError(f"{context}: expected a finite numeric delta") from error
+    if not math.isfinite(result):
+        raise base.AnalysisError(f"{context}: expected a finite numeric delta")
+    return result
+
+
+def new_label_access_state(expected_repetitions: int | None = None) -> dict[str, Any]:
+    return {
+        "state": "not_attempted",
+        "attempted_repetitions": 0,
+        "completed_repetitions": 0,
+        "expected_repetitions": (
+            len(REPETITIONS) if expected_repetitions is None else expected_repetitions
+        ),
+    }
+
+
+def _begin_label_artifact(access: dict[str, Any]) -> None:
+    access["attempted_repetitions"] += 1
+    access["state"] = (
+        "partial" if access["completed_repetitions"] else "attempted"
+    )
+
+
+def _complete_label_artifact(access: dict[str, Any]) -> None:
+    access["completed_repetitions"] += 1
+    access["state"] = (
+        "complete"
+        if access["completed_repetitions"] == access["expected_repetitions"]
+        else "partial"
+    )
+
+
+def summarize_label_access(
+    label_access: Mapping[str, Mapping[str, Any]],
+) -> dict[str, Any]:
+    report: dict[str, Any] = {
+        f"{name}_read": access.get("state") != "not_attempted"
+        for name, access in label_access.items()
+    }
+    if any(
+        access.get("state") in {"attempted", "partial"}
+        for access in label_access.values()
+    ):
+        # The frozen valid report retains only its four boolean fields.  An
+        # invalid read additionally says whether access merely started or
+        # completed a strict subset of admitted repetitions.
+        report["failure_access_state"] = {
+            name: dict(access) for name, access in label_access.items()
+        }
+    return report
 
 
 def validate_nvbit(
@@ -246,17 +383,42 @@ def direct_result_path(root: Path, orientation: str, repetition: int) -> Path:
     return root / "direct" / cell.direct_name / f"repeat-{repetition}/result.json"
 
 
-def read_issue_labels(root: Path, orientation: str) -> dict[str, Any]:
+def _admitted_result_identity(
+    provenance: Mapping[tuple[str, int], Any], orientation: str, repetition: int
+) -> Mapping[str, Any]:
+    admitted = provenance.get((orientation, repetition))
+    if not isinstance(admitted, Mapping) or not isinstance(
+        admitted.get("result"), Mapping
+    ):
+        raise base.AnalysisError(
+            f"{orientation} r{repetition}: no admitted direct-result identity"
+        )
+    return admitted["result"]
+
+
+def read_issue_labels(
+    root: Path,
+    orientation: str,
+    provenance: Mapping[tuple[str, int], Any],
+    access: dict[str, Any],
+) -> dict[str, Any]:
     deltas = []
     for repetition in REPETITIONS:
-        payload = read_direct_fields(
-            direct_result_path(root, orientation, repetition), _ISSUE_FIELDS
+        path = direct_result_path(root, orientation, repetition)
+        payload = read_admitted_direct_fields(
+            path,
+            _admitted_result_identity(provenance, orientation, repetition),
+            _ISSUE_FIELDS,
+            on_label_access=lambda: _begin_label_artifact(access),
         )
         expected_order = base.expected_order(repetition)
+        groups = direct_counter(
+            payload.get("groups"), f"{orientation} r{repetition}: groups"
+        )
         if (
             payload.get("workload") != CONTRACT.workload
             or payload.get("mode") != "pair"
-            or payload.get("groups") != CONTRACT.direct_groups
+            or groups != CONTRACT.direct_groups
             or payload.get("order") != expected_order
             or payload.get("orientation") != orientation
             or payload.get("correct") is not True
@@ -266,35 +428,60 @@ def read_issue_labels(root: Path, orientation: str) -> dict[str, Any]:
         late = payload.get("late_fanout")
         if not isinstance(early, dict) or not isinstance(late, dict):
             raise base.AnalysisError(f"{orientation} r{repetition}: missing arms")
-        if any(
-            arm.get("correct") is not True or arm.get("mismatches") != 0
-            for arm in (early, late)
-        ):
-            raise base.AnalysisError(f"{orientation} r{repetition}: incorrect direct arm")
+        for arm_name, arm in (("early", early), ("late", late)):
+            if arm.get("correct") is not True or direct_counter(
+                arm.get("mismatches"),
+                f"{orientation} r{repetition}: {arm_name} mismatches",
+            ) != 0:
+                raise base.AnalysisError(
+                    f"{orientation} r{repetition}: incorrect direct arm"
+                )
         derived = (
-            base.integer(early.get("issue_cycles"), "early issue")
-            - base.integer(late.get("issue_cycles"), "late issue")
+            direct_counter(
+                early.get("issue_cycles"),
+                f"{orientation} r{repetition}: early issue",
+            )
+            - direct_counter(
+                late.get("issue_cycles"),
+                f"{orientation} r{repetition}: late issue",
+            )
         ) / CONTRACT.direct_groups
-        retained = payload.get("paired_issue_delta_cycles_per_group")
-        if not isinstance(retained, (int, float)) or not math.isclose(
-            float(retained), derived, rel_tol=0.0, abs_tol=1.0e-9
+        retained = paired_delta(
+            payload.get("paired_issue_delta_cycles_per_group"),
+            f"{orientation} r{repetition}: paired issue delta",
+        )
+        if not math.isclose(
+            retained, derived, rel_tol=0.0, abs_tol=1.0e-9
         ):
             raise base.AnalysisError(f"{orientation} r{repetition}: issue delta mismatch")
         deltas.append(derived)
+        _complete_label_artifact(access)
     return {"values": deltas, "median": statistics.median(deltas), "exact_zero": statistics.median(deltas) == 0.0}
 
 
-def read_wait_labels(root: Path, orientation: str) -> dict[str, Any]:
+def read_wait_labels(
+    root: Path,
+    orientation: str,
+    provenance: Mapping[tuple[str, int], Any],
+    access: dict[str, Any],
+) -> dict[str, Any]:
     deltas = []
     for repetition in REPETITIONS:
-        payload = read_direct_fields(
-            direct_result_path(root, orientation, repetition), _WAIT_FIELDS
+        path = direct_result_path(root, orientation, repetition)
+        payload = read_admitted_direct_fields(
+            path,
+            _admitted_result_identity(provenance, orientation, repetition),
+            _WAIT_FIELDS,
+            on_label_access=lambda: _begin_label_artifact(access),
         )
         expected_order = base.expected_order(repetition)
+        groups = direct_counter(
+            payload.get("groups"), f"{orientation} r{repetition}: groups"
+        )
         if (
             payload.get("workload") != CONTRACT.workload
             or payload.get("mode") != "pair"
-            or payload.get("groups") != CONTRACT.direct_groups
+            or groups != CONTRACT.direct_groups
             or payload.get("order") != expected_order
             or payload.get("orientation") != orientation
             or payload.get("correct") is not True
@@ -305,25 +492,48 @@ def read_wait_labels(root: Path, orientation: str) -> dict[str, Any]:
         for arm_name, arm in (("early", early), ("late", late)):
             if (
                 arm.get("correct") is not True
-                or arm.get("mismatches") != 0
+                or direct_counter(
+                    arm.get("mismatches"),
+                    f"{orientation} r{repetition}: {arm_name} mismatches",
+                )
+                != 0
                 or arm.get("sum_consistent") is not True
-                or base.integer(arm.get("issue_cycles"), f"{arm_name} issue")
-                + base.integer(arm.get("wait_cycles"), f"{arm_name} wait")
-                != base.integer(arm.get("total_cycles"), f"{arm_name} total")
+                or direct_counter(
+                    arm.get("issue_cycles"),
+                    f"{orientation} r{repetition}: {arm_name} issue",
+                )
+                + direct_counter(
+                    arm.get("wait_cycles"),
+                    f"{orientation} r{repetition}: {arm_name} wait",
+                )
+                != direct_counter(
+                    arm.get("total_cycles"),
+                    f"{orientation} r{repetition}: {arm_name} total",
+                )
             ):
                 raise base.AnalysisError(
                     f"{orientation} r{repetition}: {arm_name} intervals do not sum"
                 )
         derived = (
-            base.integer(early.get("wait_cycles"), "early wait")
-            - base.integer(late.get("wait_cycles"), "late wait")
+            direct_counter(
+                early.get("wait_cycles"),
+                f"{orientation} r{repetition}: early wait",
+            )
+            - direct_counter(
+                late.get("wait_cycles"),
+                f"{orientation} r{repetition}: late wait",
+            )
         ) / CONTRACT.direct_groups
-        retained = payload.get("paired_wait_delta_cycles_per_group")
-        if not isinstance(retained, (int, float)) or not math.isclose(
-            float(retained), derived, rel_tol=0.0, abs_tol=1.0e-9
+        retained = paired_delta(
+            payload.get("paired_wait_delta_cycles_per_group"),
+            f"{orientation} r{repetition}: paired wait delta",
+        )
+        if not math.isclose(
+            retained, derived, rel_tol=0.0, abs_tol=1.0e-9
         ):
             raise base.AnalysisError(f"{orientation} r{repetition}: wait delta mismatch")
         deltas.append(derived)
+        _complete_label_artifact(access)
     return {
         "values": deltas,
         "median": statistics.median(deltas),
@@ -384,17 +594,19 @@ def run(
     contract.require_allowed_path(output)
     contract.require_allowed_path(output_md)
     contract.require_allowed_path(aggregate)
-    if root != contract.evidence_root.resolve():
+    if root != contract.require_allowed_path(contract.evidence_root):
         raise base.AnalysisError(f"coordinate root {root} != frozen {contract.evidence_root}")
-    if aggregate.resolve() != contract.aggregate_report.resolve():
+    if aggregate != contract.require_allowed_path(contract.aggregate_report):
         raise base.AnalysisError(
-            f"coordinate aggregate {aggregate.resolve()} != frozen "
-            f"{contract.aggregate_report.resolve()}"
+            f"coordinate aggregate {aggregate} != frozen "
+            f"{contract.aggregate_report}"
         )
+    validate_evidence_tree(contract, root)
     authorization = execution.smoke_authorization_path(root)
     if smoke_only and publish:
-        authorization.parent.mkdir(parents=True, exist_ok=True)
-        authorization.write_text(
+        replace_artifact_text(
+            contract,
+            authorization,
             json.dumps(
                 {
                     "schema_version": 1,
@@ -405,7 +617,7 @@ def run(
                 indent=2,
                 sort_keys=True,
             )
-            + "\n"
+            + "\n",
         )
     errors: list[str] = []
     missing: list[str] = []
@@ -414,11 +626,11 @@ def run(
     replays: dict[tuple[str, str], Any] = {}
     provenance: dict[tuple[str, int], Any] = {}
     binary = static = None
-    label_reads = {
-        "identification_issue_read": False,
-        "identification_wait_read": False,
-        "holdout_issue_read": False,
-        "holdout_wait_read": False,
+    label_access = {
+        "identification_issue": new_label_access_state(),
+        "identification_wait": new_label_access_state(),
+        "holdout_issue": new_label_access_state(),
+        "holdout_wait": new_label_access_state(),
     }
     smoke_gates = None
     identification = holdout = None
@@ -537,11 +749,19 @@ def run(
                         errors.append(str(error))
     if smoke_passed and not smoke_only and not errors and not missing and len(bundles) == 20:
         try:
-            issue = read_issue_labels(root, "first_line_early")
-            label_reads["identification_issue_read"] = True
+            issue = read_issue_labels(
+                root,
+                "first_line_early",
+                provenance,
+                label_access["identification_issue"],
+            )
             if issue["exact_zero"]:
-                wait = read_wait_labels(root, "first_line_early")
-                label_reads["identification_wait_read"] = True
+                wait = read_wait_labels(
+                    root,
+                    "first_line_early",
+                    provenance,
+                    label_access["identification_wait"],
+                )
                 identification = {
                     "issue": issue,
                     "wait": wait,
@@ -550,11 +770,19 @@ def run(
             else:
                 identification = {"issue": issue, "wait": None, "signal": False}
             if identification["signal"]:
-                holdout_issue = read_issue_labels(root, "second_line_early")
-                label_reads["holdout_issue_read"] = True
+                holdout_issue = read_issue_labels(
+                    root,
+                    "second_line_early",
+                    provenance,
+                    label_access["holdout_issue"],
+                )
                 if holdout_issue["exact_zero"]:
-                    holdout_wait = read_wait_labels(root, "second_line_early")
-                    label_reads["holdout_wait_read"] = True
+                    holdout_wait = read_wait_labels(
+                        root,
+                        "second_line_early",
+                        provenance,
+                        label_access["holdout_wait"],
+                    )
                     holdout = {
                         "issue": holdout_issue,
                         "wait": holdout_wait,
@@ -570,6 +798,7 @@ def run(
             missing.append(str(error))
         except Exception as error:
             errors.append(str(error))
+    label_reads = summarize_label_access(label_access)
     status, decision, rc = outcome(errors=errors, missing=missing, smoke_only=smoke_only, smoke_passed=smoke_passed, identification=identification, holdout=holdout)
     report = {
         "schema_version": 1,
@@ -601,22 +830,20 @@ def run(
     aggregate_document = deterministic_aggregate(report)
     aggregate_text = json.dumps(aggregate_document, indent=2, sort_keys=True) + "\n"
     aggregate_written = False
+    validate_evidence_tree(contract, root)
     if publish:
-        output.parent.mkdir(parents=True, exist_ok=True)
-        output_md.parent.mkdir(parents=True, exist_ok=True)
-        aggregate.parent.mkdir(parents=True, exist_ok=True)
-        output.write_text(report_text)
-        output_md.write_text(report_md_text)
+        replace_artifact_text(contract, output, report_text)
+        replace_artifact_text(contract, output_md, report_md_text)
         aggregate_written = smoke_only or (
             rc == 0 and status.startswith("complete_line_coordinates_")
         )
         if aggregate_written:
-            aggregate.write_text(aggregate_text)
+            replace_artifact_text(contract, aggregate, aggregate_text)
         if smoke_only:
-            authorization.write_text(aggregate_text)
+            replace_artifact_text(contract, authorization, aggregate_text)
     elif smoke_only and (
         not authorization.is_file()
-        or authorization.read_text(encoding="utf-8") != aggregate_text
+        or read_artifact_text(contract, authorization) != aggregate_text
     ):
         raise base.AnalysisError(
             "retained smoke authorization differs from current smoke validation"
@@ -630,12 +857,14 @@ def run(
         mismatches = [
             str(path)
             for path, expected in retained
-            if not path.is_file() or path.read_text(encoding="utf-8") != expected
+            if not path.is_file()
+            or read_artifact_text(contract, path) != expected
         ]
         if mismatches:
             raise base.AnalysisError(
                 f"retained full reports differ from current validation: {mismatches}"
             )
+    validate_evidence_tree(contract, root)
     print(json.dumps({"status": status, "output": str(output), "aggregate": str(aggregate), "aggregate_written": aggregate_written, "errors": len(errors), "missing": len(set(missing))}, sort_keys=True))
     return rc
 

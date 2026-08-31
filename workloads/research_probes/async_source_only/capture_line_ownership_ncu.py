@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import hashlib
 import io
 import json
 import math
@@ -78,6 +79,83 @@ def configure_contract(
     return configured
 
 
+def _coordinate_artifact(path: Path) -> bool:
+    contract = active_contract()
+    if contract == campaign_contract.V1_CONTRACT:
+        return False
+    candidate = contract.require_allowed_path(path)
+    root = contract.require_allowed_path(contract.evidence_root)
+    aggregate = contract.require_allowed_path(contract.aggregate_report)
+    return candidate == aggregate or candidate == root or root in candidate.parents
+
+
+def same_json(observed: Any, expected: Any) -> bool:
+    if active_contract() == campaign_contract.V1_CONTRACT:
+        return observed == expected
+    return campaign_contract.strict_json_equal(observed, expected)
+
+
+def read_json(path: Path) -> dict[str, Any]:
+    if _coordinate_artifact(path):
+        return campaign_contract.read_artifact_json(active_contract(), path)
+    return support.read_json(path)
+
+
+def read_text(path: Path) -> str:
+    if _coordinate_artifact(path):
+        return campaign_contract.read_artifact_text(active_contract(), path)
+    return path.read_text(encoding="utf-8")
+
+
+def sha256(path: Path) -> str:
+    if _coordinate_artifact(path):
+        return campaign_contract.artifact_identity(active_contract(), path)["sha256"]
+    return support.sha256(path)
+
+
+def file_identity(path: Path, family_directory: Path) -> dict[str, Any]:
+    if _coordinate_artifact(path):
+        payload = campaign_contract.read_artifact_bytes(active_contract(), path)
+        return {
+            "path": str(path.relative_to(family_directory)),
+            "sha256": hashlib.sha256(payload).hexdigest(),
+            "size_bytes": len(payload),
+        }
+    return support.file_identity(path, family_directory)
+
+
+def optional_file_identity(
+    path: Path, family_directory: Path
+) -> dict[str, Any] | None:
+    if not path.is_file():
+        return None
+    return file_identity(path, family_directory)
+
+
+def write_text(path: Path, value: str) -> None:
+    if _coordinate_artifact(path):
+        campaign_contract.replace_artifact_text(active_contract(), path, value)
+    else:
+        support.atomic_write_text(path, value)
+
+
+def write_json(path: Path, value: Any) -> None:
+    if _coordinate_artifact(path):
+        campaign_contract.replace_artifact_json(active_contract(), path, value)
+    else:
+        support.atomic_write_json(path, value)
+
+
+def ensure_output_directory(path: Path) -> None:
+    if _coordinate_artifact(path):
+        try:
+            campaign_contract.ensure_directory(path)
+        except campaign_contract.ImmutableArtifactError as error:
+            raise CampaignError(f"cannot create coordinate directory {path}: {error}") from error
+    else:
+        path.mkdir(parents=True, exist_ok=True)
+
+
 @dataclass(frozen=True)
 class Cell:
     orientation: str
@@ -131,67 +209,34 @@ def require_full_campaign_authorization(
         if retained_authorization.is_file()
         else contract.require_allowed_path(contract.aggregate_report)
     )
-    if not report_path.is_file():
+    try:
+        report = campaign_contract.read_artifact_json(contract, report_path)
+    except campaign_contract.ContractError as error:
         raise CampaignError(
-            f"full campaign requires a smoke-pass aggregate: {report_path}"
+            f"full campaign requires a smoke-pass aggregate: {report_path}: {error}"
+        ) from error
+    try:
+        return campaign_contract.validate_smoke_authorization(
+            report,
+            contract=contract,
+            root=root,
+            binary=binary,
         )
-    report = support.read_json(report_path)
-    expected = {
-        "schema_version": 1,
-        "assay": contract.assay_id,
-        "mode": "smoke_only",
-        "status": contract.smoke_pass_status,
-        "root": str(root.resolve()),
-        "binary": dict(binary),
-        "timing_promotion_authorized": False,
-        "typed_visibility_tail_required": True,
-        "missing_artifact_count": 0,
-        "validation_error_count": 0,
-    }
-    if contract != campaign_contract.V1_CONTRACT:
-        expected.update(
-            {
-                "generation_id": contract.generation_id,
-                "campaign_contract": contract.to_json(),
-            }
-        )
-    mismatches = {
-        field: {"observed": report.get(field), "expected": value}
-        for field, value in expected.items()
-        if report.get(field) != value
-    }
-    smoke_gates = report.get("smoke_gates")
-    criteria = report.get("criteria")
-    if (
-        not isinstance(smoke_gates, dict)
-        or not smoke_gates
-        or not all(value is True for value in smoke_gates.values())
-    ):
-        mismatches["smoke_gates"] = {
-            "observed": smoke_gates,
-            "expected": "all true",
-        }
-    if not isinstance(criteria, dict) or criteria.get("smoke_passed") is not True:
-        mismatches["criteria.smoke_passed"] = {
-            "observed": (
-                None if not isinstance(criteria, dict) else criteria.get("smoke_passed")
-            ),
-            "expected": True,
-        }
-    if mismatches:
+    except campaign_contract.ContractError as error:
         raise CampaignError(
-            f"full campaign is not authorized by this root/binary smoke: {mismatches}"
-        )
-    return report
+            f"full campaign is not authorized by this root/binary smoke: {error}"
+        ) from error
 
 
 def retained_binary(root: Path) -> dict[str, Any]:
-    value = support.read_json(root / "static/command.json").get("binary")
+    value = read_json(root / "static/command.json").get("binary")
     if not isinstance(value, dict):
         raise CampaignError("static command record has no binary identity")
-    if not isinstance(value.get("path"), str) or not isinstance(
-        value.get("sha256"), str
-    ) or not isinstance(value.get("size_bytes"), int):
+    if (
+        not isinstance(value.get("path"), str)
+        or not isinstance(value.get("sha256"), str)
+        or type(value.get("size_bytes")) is not int
+    ):
         raise CampaignError("static command record has malformed binary identity")
     return dict(value)
 
@@ -201,24 +246,34 @@ def preflight(root: Path, ncu: str) -> support.Preflight:
     binary = contract.binary
     root = contract.require_allowed_path(root)
     if contract != campaign_contract.V1_CONTRACT:
-        if root != contract.evidence_root.resolve():
+        if root != contract.require_allowed_path(contract.evidence_root):
             raise CampaignError(
                 f"generation {contract.generation_id} requires root "
                 f"{contract.evidence_root}, got {root}"
             )
         contract_record = root / "campaign_contract.json"
-        if not contract_record.is_file() or support.read_json(
-            contract_record
-        ) != contract.to_json():
+        try:
+            retained_contract = campaign_contract.read_artifact_json(
+                contract, contract_record
+            )
+        except campaign_contract.ContractError as error:
+            raise CampaignError(
+                f"{contract_record}: campaign contract identity mismatch"
+            ) from error
+        if not campaign_contract.strict_json_equal(
+            retained_contract, contract.to_json()
+        ):
             raise CampaignError(f"{contract_record}: campaign contract identity mismatch")
     if not binary.is_file() or not os.access(binary, os.X_OK):
         raise CampaignError(f"probe binary is missing or not executable: {binary}")
-    static_command = support.read_json(root / "static/command.json")
+    static_command = read_json(root / "static/command.json")
     if contract != campaign_contract.V1_CONTRACT:
         static_binding = static_command.get("binding")
         if (
             not isinstance(static_binding, dict)
-            or static_binding.get("campaign_contract") != contract.to_json()
+            or not campaign_contract.strict_json_equal(
+                static_binding.get("campaign_contract"), contract.to_json()
+            )
         ):
             raise CampaignError("static evidence is not bound to the active contract")
     try:
@@ -236,9 +291,9 @@ def preflight(root: Path, ncu: str) -> support.Preflight:
         )
     expected_hash = retained_binary.get("sha256")
     expected_size = retained_binary.get("size_bytes")
-    if not isinstance(expected_hash, str) or not isinstance(expected_size, int):
+    if not isinstance(expected_hash, str) or type(expected_size) is not int:
         raise CampaignError("static command record has malformed binary identity")
-    observed_hash = support.sha256(binary)
+    observed_hash = sha256(binary)
     if observed_hash != expected_hash or binary.stat().st_size != expected_size:
         raise CampaignError("probe binary differs from static evidence")
 
@@ -272,7 +327,7 @@ def preflight(root: Path, ncu: str) -> support.Preflight:
     if len(rows) != 1 or len(rows[0]) != 5:
         raise CampaignError(f"expected one five-field GPU identity row: {rows!r}")
     device = dict(zip(EXPECTED_GPU, (item.strip() for item in rows[0]), strict=True))
-    if device != EXPECTED_GPU:
+    if not same_json(device, EXPECTED_GPU):
         raise CampaignError(f"GPU identity mismatch: {device} != {EXPECTED_GPU}")
 
     return support.Preflight(
@@ -403,8 +458,8 @@ def command_document(
                 raise CampaignError(
                     f"full NCU artifact requires smoke authorization: {authorization}"
                 )
-            document["smoke_authorization"] = (
-                execution_support.support.file_identity(authorization)
+            document["smoke_authorization"] = campaign_contract.artifact_identity(
+                contract, authorization
             )
     return document
 
@@ -488,7 +543,7 @@ def validate_target_output(
         "compute_capability": context.device["compute_capability"],
     }
     for field, expected_value in expected.items():
-        if payload.get(field) != expected_value:
+        if not same_json(payload.get(field), expected_value):
             raise CampaignError(
                 f"target {field}={payload.get(field)!r}, expected {expected_value!r}"
             )
@@ -496,7 +551,7 @@ def validate_target_output(
         result = payload.get(variant)
         if not isinstance(result, dict) or result.get("correct") is not True:
             raise CampaignError(f"target result is not correct for {variant}")
-        if result.get("mismatches") != 0:
+        if not same_json(result.get("mismatches"), 0):
             raise CampaignError(f"target reported mismatches for {variant}")
     return payload
 
@@ -643,12 +698,12 @@ def manifest_inputs(
         "device": dict(command["device"]),
         "ncu": dict(command["ncu"]),
         "environment_overrides": dict(command["environment_overrides"]),
-        "command_record": support.file_identity(
+        "command_record": file_identity(
             family_directory / "command.json", family_directory
         ),
     }
     if include_report_input:
-        inputs["profile_report"] = support.optional_file_identity(
+        inputs["profile_report"] = optional_file_identity(
             family_directory / "profile.ncu-rep", family_directory
         )
     return inputs
@@ -685,12 +740,12 @@ def run_manifest_document(
         "finished_at": run.finished_at,
         "return_code": run.return_code,
         "timed_out": run.timed_out,
-        "stdout": support.file_identity(stdout_path, family_directory),
-        "stderr": support.file_identity(stderr_path, family_directory),
-        "profile_report": support.optional_file_identity(
+        "stdout": file_identity(stdout_path, family_directory),
+        "stderr": file_identity(stderr_path, family_directory),
+        "profile_report": optional_file_identity(
             family_directory / "profile.ncu-rep", family_directory
         ),
-        "csv": support.optional_file_identity(
+        "csv": optional_file_identity(
             family_directory / "ncu.csv", family_directory
         ),
         "inputs": manifest_inputs(
@@ -708,7 +763,7 @@ def validate_run_manifest(
     command: Mapping[str, Any],
     family_directory: Path,
 ) -> dict[str, Any]:
-    observed = support.read_json(path)
+    observed = read_json(path)
     observed_command = observed.get("command")
     timeout = observed.get("configured_timeout_seconds")
     return_code = observed.get("return_code")
@@ -741,7 +796,7 @@ def validate_run_manifest(
         stderr="",
     )
     expected = run_manifest_document(kind, run, command, family_directory)
-    if observed != expected:
+    if not same_json(observed, expected):
         raise CampaignError(f"{path}: manifest or artifact identity mismatch")
     return observed
 
@@ -775,7 +830,7 @@ def complete_document(
             "ncu": dict(command["ncu"]),
         },
         "files": {
-            name: support.sha256(path) for name, path in paths.items()
+            name: sha256(path) for name, path in paths.items()
         },
         "summary": dict(summary),
         "target_result": dict(target),
@@ -809,11 +864,11 @@ def validate_retained_family(
         raise CampaignError(f"{family_directory}: missing {missing}")
     if required["profile.ncu-rep"].stat().st_size == 0:
         raise CampaignError(f"{family_directory}: empty NCU report")
-    command = support.read_json(required["command.json"])
+    command = read_json(required["command.json"])
     expected_command = command_document(
         context, family_directory, cell, repetition, family, timeout
     )
-    if command != expected_command:
+    if not same_json(command, expected_command):
         raise CampaignError(f"{family_directory}: retained command mismatch")
     validate_run_manifest(
         required["profile.run.json"], "ncu_profile", command, family_directory
@@ -822,17 +877,17 @@ def validate_retained_family(
         required["import.run.json"], "ncu_import", command, family_directory
     )
     rows = support.parse_csv_rows(
-        required["ncu.csv"].read_text(encoding="utf-8"), str(required["ncu.csv"])
+        read_text(required["ncu.csv"]), str(required["ncu.csv"])
     )
     summary = validate_rows(rows, cell, repetition, family, context)
     target = validate_target_output(
-        required["profile.stdout.txt"].read_text(encoding="utf-8"),
+        read_text(required["profile.stdout.txt"]),
         cell,
         repetition,
         context,
     )
     expected_complete = complete_document(family_directory, command, summary, target)
-    if support.read_json(required["complete.json"]) != expected_complete:
+    if not same_json(read_json(required["complete.json"]), expected_complete):
         raise CampaignError(f"{family_directory}: completion record mismatch")
     return expected_complete
 
@@ -857,23 +912,23 @@ def execute_family(
         )
     except CampaignError:
         pass
-    family_directory.mkdir(parents=True, exist_ok=True)
+    ensure_output_directory(family_directory)
     command = command_document(
         context, family_directory, cell, repetition, family, timeout
     )
-    support.atomic_write_json(family_directory / "command.json", command)
+    write_json(family_directory / "command.json", command)
     profiled = support.run_captured(
         command["profile_command"],
         timeout=timeout,
         environment=execution_environment(context),
     )
-    support.atomic_write_text(
+    write_text(
         family_directory / "profile.stdout.txt", profiled.stdout
     )
-    support.atomic_write_text(
+    write_text(
         family_directory / "profile.stderr.txt", profiled.stderr
     )
-    support.atomic_write_json(
+    write_json(
         family_directory / "profile.run.json",
         run_manifest_document("ncu_profile", profiled, command, family_directory),
     )
@@ -891,15 +946,15 @@ def execute_family(
         timeout=timeout,
         environment=execution_environment(context),
     )
-    support.atomic_write_text(family_directory / "ncu.csv", imported.stdout)
-    support.atomic_write_text(
+    write_text(family_directory / "ncu.csv", imported.stdout)
+    write_text(
         family_directory / "import.stderr.txt", imported.stderr
     )
-    support.atomic_write_json(
+    write_json(
         family_directory / "profile.run.json",
         run_manifest_document("ncu_profile", profiled, command, family_directory),
     )
-    support.atomic_write_json(
+    write_json(
         family_directory / "import.run.json",
         run_manifest_document("ncu_import", imported, command, family_directory),
     )
@@ -908,14 +963,14 @@ def execute_family(
             f"{family_directory}: import failed: "
             f"return_code={imported.return_code}, timed_out={imported.timed_out}"
         )
-    if support.sha256(active_contract().binary) != context.binary["sha256"]:
+    if sha256(active_contract().binary) != context.binary["sha256"]:
         raise CampaignError(f"{family_directory}: binary changed during capture")
 
     rows = support.parse_csv_rows(imported.stdout, str(family_directory / "ncu.csv"))
     summary = validate_rows(rows, cell, repetition, family, context)
     target = validate_target_output(profiled.stdout, cell, repetition, context)
     complete = complete_document(family_directory, command, summary, target)
-    support.atomic_write_json(family_directory / "complete.json", complete)
+    write_json(family_directory / "complete.json", complete)
     return validate_retained_family(
         family_directory, context, cell, repetition, family, timeout
     )
@@ -1128,6 +1183,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         repetitions = [1] if args.smoke else parse_repetitions(args.repeats)
         families = list(FAMILIES) if args.smoke else parse_families(args.families)
         root = contract.require_allowed_path(args.root)
+        campaign_contract.validate_evidence_tree(contract, root)
         if not args.smoke:
             require_full_campaign_authorization(root, retained_binary(root))
         context = preflight(root, args.ncu)
@@ -1164,6 +1220,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 ),
                 end="",
             )
+            campaign_contract.validate_evidence_tree(contract, root)
             return 0
 
         total = len(planned)
@@ -1234,14 +1291,23 @@ def main(argv: Sequence[str] | None = None) -> int:
                     bundle = bundle_document(cell, repetition, completed)
                     bundle_path = repeat_directory / "bundle.json"
                     if args.validate_only:
-                        if not bundle_path.is_file():
-                            raise CampaignError(f"missing retained bundle: {bundle_path}")
-                        if support.read_json(bundle_path) != bundle:
+                        try:
+                            retained_bundle = campaign_contract.read_artifact_json(
+                                contract, bundle_path
+                            )
+                        except campaign_contract.ContractError as error:
+                            raise CampaignError(
+                                f"missing retained bundle: {bundle_path}: {error}"
+                            ) from error
+                        if not campaign_contract.strict_json_equal(
+                            retained_bundle, bundle
+                        ):
                             raise CampaignError(f"{bundle_path}: bundle mismatch")
                     else:
-                        support.atomic_write_json(bundle_path, bundle)
+                        write_json(bundle_path, bundle)
                 elif args.validate_only and set(families) == set(FAMILIES):
                     raise CampaignError(f"{cell.key} repeat-{repetition}: incomplete bundle")
+        campaign_contract.validate_evidence_tree(contract, root)
         return 0
     except (
         CampaignError,

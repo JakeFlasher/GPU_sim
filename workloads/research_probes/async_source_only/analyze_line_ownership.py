@@ -42,8 +42,13 @@ from analyze_multiline_response import (  # noqa: E402
 import capture_line_ownership_ncu as ncu_producer  # noqa: E402
 from line_ownership_campaign_contract import (  # noqa: E402
     CampaignContract,
+    artifact_identity as contract_artifact_identity,
     begin_campaign,
     current_contract,
+    read_artifact_bytes,
+    read_artifact_json,
+    read_artifact_text,
+    strict_json_equal as contract_strict_json_equal,
 )
 import capture_line_ownership_execution as execution_producer  # noqa: E402
 from tools.nvbit_tracer.import_trace_contract import (  # noqa: E402
@@ -91,6 +96,48 @@ EXPECTED_VALUES = {
     "lts_total": 3584,
 }
 PAIRED_TOLERANCE = 36
+
+_legacy_read_json = read_json
+_legacy_sha256 = sha256
+
+
+def _coordinate_artifact(path: Path) -> bool:
+    if ACTIVE_CONTRACT.generation_id == "source_line_ownership_v1":
+        return False
+    candidate = ACTIVE_CONTRACT.require_allowed_path(path)
+    root = ACTIVE_CONTRACT.require_allowed_path(ACTIVE_CONTRACT.evidence_root)
+    aggregate = ACTIVE_CONTRACT.require_allowed_path(ACTIVE_CONTRACT.aggregate_report)
+    return candidate == aggregate or candidate == root or root in candidate.parents
+
+
+def same_json(observed: Any, expected: Any) -> bool:
+    if ACTIVE_CONTRACT.generation_id == "source_line_ownership_v1":
+        return observed == expected
+    return contract_strict_json_equal(observed, expected)
+
+
+def read_json(path: Path) -> dict[str, Any]:
+    if _coordinate_artifact(path):
+        return read_artifact_json(ACTIVE_CONTRACT, path)
+    return _legacy_read_json(path)
+
+
+def sha256(path: Path) -> str:
+    if _coordinate_artifact(path):
+        return contract_artifact_identity(ACTIVE_CONTRACT, path)["sha256"]
+    return _legacy_sha256(path)
+
+
+def read_text(path: Path) -> str:
+    if _coordinate_artifact(path):
+        return read_artifact_text(ACTIVE_CONTRACT, path)
+    return path.read_text(encoding="utf-8")
+
+
+def read_bytes(path: Path) -> bytes:
+    if _coordinate_artifact(path):
+        return read_artifact_bytes(ACTIVE_CONTRACT, path)
+    return path.read_bytes()
 
 
 
@@ -244,7 +291,7 @@ def validate_target_payload(
     mismatches = {
         field: {"observed": payload.get(field), "expected": value}
         for field, value in expected.items()
-        if payload.get(field) != value
+        if not same_json(payload.get(field), value)
     }
     if mismatches:
         raise AnalysisError(f"target contract mismatch: {mismatches}")
@@ -258,7 +305,7 @@ def validate_target_payload(
 
 
 def load_resources(path: Path) -> dict[str, dict[str, int]]:
-    text = path.read_text(encoding="utf-8")
+    text = read_text(path)
     return {
         match.group("name"): {
             "registers": int(match.group("registers")),
@@ -293,8 +340,8 @@ def static_report(root: Path) -> dict[str, Any]:
         if "source_line_ownership_kernel" in name
     }
     resources = load_resources(paths["resources"])
-    build = paths["build"].read_text(encoding="utf-8")
-    sass = paths["sass"].read_text(encoding="utf-8")
+    build = read_text(paths["build"])
+    sass = read_text(paths["sass"])
     artifact_errors: list[str] = []
     scientific_failures: list[dict[str, Any]] = []
     if len(selected) != 2:
@@ -392,10 +439,14 @@ def expected_ncu_command(
             authorization = execution_producer.smoke_authorization_path(
                 directory.parents[3]
             )
-            expected["smoke_authorization"] = (
-                execution_producer.support.file_identity(authorization)
+            expected["smoke_authorization"] = contract_artifact_identity(
+                ACTIVE_CONTRACT, authorization
             )
-    mismatches = {field: (command.get(field), value) for field, value in expected.items() if command.get(field) != value}
+    mismatches = {
+        field: (command.get(field), value)
+        for field, value in expected.items()
+        if not same_json(command.get(field), value)
+    }
     if mismatches:
         raise AnalysisError(f"{directory}: NCU binding mismatch: {mismatches}")
     ncu = command.get("ncu")
@@ -430,7 +481,9 @@ def validate_family(
     except ncu_producer.CampaignError as error:
         raise AnalysisError(f"{directory}: invalid run manifest: {error}") from error
     expected_files = {name: sha256(path) for name, path in paths.items() if name != "complete.json"}
-    if complete.get("files") != expected_files or complete.get("valid") is not True:
+    if not same_json(complete.get("files"), expected_files) or complete.get(
+        "valid"
+    ) is not True:
         raise AnalysisError(f"{directory}: completion/file identity mismatch")
     binding_fields = (
         "cell", "orientation", "fixed_depth", "fixed_lead_samples", "groups",
@@ -441,7 +494,10 @@ def validate_family(
         binding_fields = (*binding_fields, "campaign_contract")
     if "smoke_authorization" in command:
         binding_fields = (*binding_fields, "smoke_authorization")
-    if complete.get("binding") != {field: command[field] for field in binding_fields}:
+    if not same_json(
+        complete.get("binding"),
+        {field: command[field] for field in binding_fields},
+    ):
         raise AnalysisError(f"{directory}: completion binding mismatch")
     rows = parse_csv_rows(paths["ncu.csv"])
     if len(rows) != 2 or [str(row.get("ID", "")).strip() for row in rows] != ["0", "1"]:
@@ -498,7 +554,7 @@ def lane_ownership_oracle(trace_dir: Path, variant: str, orientation: str) -> di
     sample: dict[str, Any] | None = None
     for pb_path in sorted(first_kernel_dir(trace_dir).rglob("*.pb")):
         tb = bindings.threadblock_pb2.threadblock()
-        tb.ParseFromString(pb_path.read_bytes())
+        tb.ParseFromString(read_bytes(pb_path))
         for warp_id in sorted(tb.warps.keys()):
             for inst in tb.warps[warp_id].instructions:
                 if not inst.HasField("memory_op_class"):
@@ -642,7 +698,7 @@ def nvbit_cell(root: Path, variant: str, orientation: str, binary_sha: str) -> d
         path = base / f"extra_info/{reason}.json"
         if not path.is_file():
             raise FileNotFoundError(str(path))
-        value = json.loads(path.read_text())
+        value = json.loads(read_text(path))
         if value != []:
             raise AnalysisError(f"{name}: nonempty {reason}")
     payload = last_json_object(base / "stdout.txt")
@@ -664,7 +720,7 @@ def replay_cell(root: Path, variant: str, orientation: str) -> dict[str, Any]:
     for path in (first, second, command_path):
         if not path.is_file():
             raise FileNotFoundError(str(path))
-    if first.read_bytes() != second.read_bytes():
+    if read_bytes(first) != read_bytes(second):
         raise AnalysisError(f"{name}: replay twins differ")
     try:
         execution_producer.validate_replay(
@@ -703,7 +759,7 @@ def direct_non_timing_payload(
     mismatches = {
         field: {"observed": payload.get(field), "expected": value}
         for field, value in expected.items()
-        if payload.get(field) != value
+        if not same_json(payload.get(field), value)
     }
     if mismatches:
         raise AnalysisError(f"{path}: direct non-timing contract mismatch: {mismatches}")

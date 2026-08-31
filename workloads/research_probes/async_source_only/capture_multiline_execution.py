@@ -19,6 +19,17 @@ from typing import Any, Mapping, Sequence
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 HERE = Path(__file__).resolve().parent
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from tools.local_labels.immutable_artifact import (  # noqa: E402
+    ImmutableArtifactError,
+    ensure_directory,
+    read_regular,
+    replace_regular_bytes,
+    sha256_file,
+)
+
 DEFAULT_ROOT = (
     REPO_ROOT / "results/captures/sm86_async_multiline_response_20260831_v1"
 )
@@ -73,6 +84,11 @@ class Cell:
 
 
 def sha256(path: Path) -> str:
+    if _coordinate_artifact_path(path):
+        try:
+            return sha256_file(_lexical_absolute(path))[0]
+        except ImmutableArtifactError as error:
+            raise CaptureError(f"cannot hash coordinate artifact {path}: {error}") from error
     digest = hashlib.sha256()
     with path.open("rb") as handle:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
@@ -84,7 +100,32 @@ def json_text(value: Any) -> str:
     return json.dumps(value, indent=2, sort_keys=True) + "\n"
 
 
+def strict_json_equal(observed: Any, expected: Any) -> bool:
+    if type(observed) is not type(expected):
+        return False
+    if isinstance(expected, dict):
+        return set(observed) == set(expected) and all(
+            strict_json_equal(observed[key], expected[key]) for key in expected
+        )
+    if isinstance(expected, (list, tuple)):
+        return len(observed) == len(expected) and all(
+            strict_json_equal(left, right)
+            for left, right in zip(observed, expected, strict=True)
+        )
+    return observed == expected
+
+
 def atomic_write_text(path: Path, value: str) -> None:
+    if _coordinate_artifact_path(path):
+        try:
+            checked = _lexical_absolute(path)
+            ensure_directory(checked.parent)
+            replace_regular_bytes(checked, value.encode("utf-8"))
+        except ImmutableArtifactError as error:
+            raise CaptureError(
+                f"cannot publish coordinate artifact {path}: {error}"
+            ) from error
+        return
     path.parent.mkdir(parents=True, exist_ok=True)
     descriptor, temporary_name = tempfile.mkstemp(
         prefix=f".{path.name}.", suffix=".tmp", dir=path.parent
@@ -104,12 +145,52 @@ def atomic_write_json(path: Path, value: Any) -> None:
 
 def read_json(path: Path) -> dict[str, Any]:
     try:
-        value = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as error:
+        value = json.loads(read_bytes(path))
+    except (OSError, UnicodeError, json.JSONDecodeError) as error:
         raise CaptureError(f"cannot read {path}: {error}") from error
     if not isinstance(value, dict):
         raise CaptureError(f"{path}: expected one JSON object")
     return value
+
+
+def _lexical_absolute(path: Path) -> Path:
+    return Path(os.path.abspath(os.fspath(path)))
+
+
+def _coordinate_artifact_path(path: Path) -> bool:
+    contract = STATIC_CAMPAIGN_CONTRACT
+    if contract is None:
+        return False
+    candidate = _lexical_absolute(path)
+    root = _lexical_absolute(Path(str(contract["evidence_root"])))
+    aggregate = _lexical_absolute(Path(str(contract["aggregate_report"])))
+    return candidate == aggregate or candidate == root or root in candidate.parents
+
+
+def read_bytes(path: Path) -> bytes:
+    if _coordinate_artifact_path(path):
+        try:
+            return read_regular(_lexical_absolute(path))
+        except ImmutableArtifactError as error:
+            raise CaptureError(f"cannot read coordinate artifact {path}: {error}") from error
+    return path.read_bytes()
+
+
+def read_text(path: Path) -> str:
+    try:
+        return read_bytes(path).decode("utf-8")
+    except UnicodeDecodeError as error:
+        raise CaptureError(f"artifact is not UTF-8: {path}") from error
+
+
+def ensure_output_directory(path: Path) -> None:
+    if _coordinate_artifact_path(path):
+        try:
+            ensure_directory(_lexical_absolute(path))
+        except ImmutableArtifactError as error:
+            raise CaptureError(f"cannot create coordinate directory {path}: {error}") from error
+    else:
+        path.mkdir(parents=True, exist_ok=True)
 
 
 @dataclass(frozen=True)
@@ -128,6 +209,14 @@ def utc_now() -> str:
 
 
 def file_identity(path: Path) -> dict[str, Any]:
+    if _coordinate_artifact_path(path):
+        checked = _lexical_absolute(path)
+        payload = read_bytes(checked)
+        return {
+            "path": str(checked),
+            "sha256": hashlib.sha256(payload).hexdigest(),
+            "size_bytes": len(payload),
+        }
     resolved = path.resolve()
     if not resolved.is_file():
         raise CaptureError(f"identity input is missing: {resolved}")
@@ -355,7 +444,7 @@ def validate_run_manifest(
     mismatches = {
         field: {"observed": document.get(field), "expected": value}
         for field, value in expected.items()
-        if document.get(field) != value
+        if not strict_json_equal(document.get(field), value)
     }
     if mismatches or document.get("error") is not None:
         raise CaptureError(
@@ -529,7 +618,7 @@ def validate_static(root: Path) -> dict[str, Any]:
             "move the legacy or incomplete directory aside and recapture"
         )
     binding = current_static_binding()
-    if read_json(binding_path) != binding:
+    if not strict_json_equal(read_json(binding_path), binding):
         raise CaptureError(
             f"{binding_path}: retained static is stale relative to source, Makefile, "
             "control tooling, or CUDA toolchain"
@@ -607,7 +696,7 @@ def validate_static(root: Path) -> dict[str, Any]:
     )
     expected = static_command_document(root, binding)
     observed = read_json(command_path)
-    if observed != expected:
+    if not strict_json_equal(observed, expected):
         raise CaptureError(
             f"{command_path}: stale static command/artifact binding"
         )
@@ -670,11 +759,11 @@ def capture_static(root: Path, timeout: int) -> None:
         validate_static(root)
         print(f"static existing: {static}", flush=True)
         return
-    static.mkdir(parents=True, exist_ok=True)
+    ensure_output_directory(static)
     binding = current_static_binding()
     binding_path = static / "binding.json"
     if binding_path.is_file():
-        if read_json(binding_path) != binding:
+        if not strict_json_equal(read_json(binding_path), binding):
             raise CaptureError(
                 f"{binding_path}: stale retained static must be moved aside before recapture"
             )
