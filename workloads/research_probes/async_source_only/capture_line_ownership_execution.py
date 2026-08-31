@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import sys
@@ -129,6 +130,74 @@ def require_full_campaign_authorization(
             f"full campaign is not authorized by this root/binary smoke: {mismatches}"
         )
     return report
+
+
+def trace_payload_manifest_path(destination: Path) -> Path:
+    return destination / "payload_manifest.json"
+
+
+def trace_payload_files(destination: Path) -> list[Path]:
+    paths = [destination / "dynamic_trace.pb", destination / "stats.csv"]
+    paths.extend(sorted((destination / "threadblocks").rglob("*.pb")))
+    if (destination / "extra_info").is_dir():
+        paths.extend(
+            sorted(
+                path
+                for path in (destination / "extra_info").rglob("*")
+                if path.is_file()
+            )
+        )
+    unique = sorted(set(paths), key=lambda path: path.relative_to(destination).as_posix())
+    if not unique:
+        raise CaptureError(f"{destination}: no trace payload files")
+    for path in unique:
+        if not path.is_file() or path.is_symlink():
+            raise CaptureError(f"{destination}: invalid trace payload {path}")
+    return unique
+
+
+def current_trace_payload_manifest(destination: Path) -> dict[str, Any]:
+    entries = [
+        {
+            "path": path.relative_to(destination).as_posix(),
+            "sha256": support.sha256(path),
+            "size_bytes": path.stat().st_size,
+        }
+        for path in trace_payload_files(destination)
+    ]
+    encoded = json.dumps(entries, sort_keys=True, separators=(",", ":")).encode()
+    return {
+        "schema_version": 1,
+        "kind": "line_ownership_trace_payload_manifest",
+        "entries": entries,
+        "aggregate_sha256": hashlib.sha256(encoded).hexdigest(),
+    }
+
+
+def write_trace_payload_manifest(destination: Path) -> Path:
+    path = trace_payload_manifest_path(destination)
+    support.atomic_write_json(path, current_trace_payload_manifest(destination))
+    return path
+
+
+def validate_trace_payload_manifest(destination: Path) -> dict[str, Any]:
+    path = trace_payload_manifest_path(destination)
+    observed = support.read_json(path)
+    expected = current_trace_payload_manifest(destination)
+    if observed != expected:
+        raise CaptureError(f"{path}: trace payload identity drift")
+    return observed
+
+
+def add_run_manifest_output(
+    manifest_path: Path, name: str, output_path: Path
+) -> None:
+    document = support.read_json(manifest_path)
+    outputs = document.get("outputs")
+    if not isinstance(outputs, dict):
+        raise CaptureError(f"{manifest_path}: missing outputs")
+    outputs[name] = support.file_identity(output_path)
+    support.atomic_write_json(manifest_path, document)
 
 
 def expected_order(repetition: int) -> str:
@@ -294,21 +363,13 @@ def direct_command(cell: Cell, repetition: int) -> list[str]:
     ]
 
 
-def validate_direct(
+def validate_direct_provenance(
     destination: Path,
     cell: Cell,
     repetition: int,
     binary: Mapping[str, Any],
 ) -> dict[str, Any]:
     result_path = destination / "result.json"
-    payload = support.read_json(result_path)
-    validate_target(
-        payload,
-        cell,
-        groups=DIRECT_GROUPS,
-        mode="pair",
-        order=expected_order(repetition),
-    )
     command_path = destination / "command.json"
     command_document = support.read_json(command_path)
     timeout = command_document.get("configured_timeout_seconds")
@@ -337,6 +398,29 @@ def validate_direct(
     }
     if command_document != expected:
         raise CaptureError(f"{command_path}: direct binding mismatch")
+    return {
+        "result": support.file_identity(result_path),
+        "command": support.file_identity(command_path),
+        "run_manifest": support.file_identity(manifest),
+        "stderr": support.file_identity(destination / "stderr.txt"),
+    }
+
+
+def validate_direct(
+    destination: Path,
+    cell: Cell,
+    repetition: int,
+    binary: Mapping[str, Any],
+) -> dict[str, Any]:
+    validate_direct_provenance(destination, cell, repetition, binary)
+    payload = support.read_json(destination / "result.json")
+    validate_target(
+        payload,
+        cell,
+        groups=DIRECT_GROUPS,
+        mode="pair",
+        order=expected_order(repetition),
+    )
     return payload
 
 
@@ -352,7 +436,7 @@ def capture_direct(
             destination = root / "direct" / cell.direct_name / f"repeat-{repetition}"
             result_path = destination / "result.json"
             if result_path.is_file():
-                validate_direct(destination, cell, repetition, binary)
+                validate_direct_provenance(destination, cell, repetition, binary)
                 print(f"direct existing: {cell.short} r{repetition}")
                 continue
             destination.mkdir(parents=True, exist_ok=True)
@@ -381,7 +465,7 @@ def capture_direct(
                     "run_manifest": support.file_identity(manifest),
                 },
             )
-            validate_direct(destination, cell, repetition, binary)
+            validate_direct_provenance(destination, cell, repetition, binary)
             print(f"direct: {cell.short} r{repetition}", flush=True)
 
 
@@ -450,9 +534,12 @@ def validate_nvbit(
         raise CaptureError(f"{command_path}: invalid wrapper timeout")
     capture, wrapper = nvbit_commands(destination, cell, variant, target_timeout)
     manifest = run_root / "wrapper.run.json"
+    payload_manifest = trace_payload_manifest_path(destination)
+    validate_trace_payload_manifest(destination)
     outputs = {
         "binding": destination / "campaign_binding.json",
         "complete": destination / "complete.json",
+        "payload_manifest": payload_manifest,
         "stats": destination / "stats.csv",
         "trace": destination / "dynamic_trace.pb",
     }
@@ -541,6 +628,11 @@ def capture_nvbit(root: Path, selected_cells: Sequence[Cell], timeout: int) -> N
                 output_paths=outputs,
                 environment_value=support.environment(),
             )
+            payload_manifest = write_trace_payload_manifest(destination)
+            add_run_manifest_output(
+                manifest, "payload_manifest", payload_manifest
+            )
+            outputs["payload_manifest"] = payload_manifest
             support.atomic_write_json(
                 run_root / "command.json",
                 {
@@ -649,12 +741,15 @@ def validate_replay(root: Path, destination: Path, cell: Cell, variant: str) -> 
     if not isinstance(timeout, int) or timeout < 1:
         raise CaptureError(f"{command_path}: invalid timeout")
     command = replay_command(root, cell, variant)
+    trace_directory = root / "nvbit" / cell.endpoint_name(variant)
+    validate_trace_payload_manifest(trace_directory)
     inputs = {
         "arch_card": ARCH_CARD,
         "control": root / "static/control_bits.json",
         "pchase_card": PCHASE_CARD,
         "sim_run": SIM_RUN,
-        "trace": root / "nvbit" / cell.endpoint_name(variant) / "dynamic_trace.pb",
+        "trace": trace_directory / "dynamic_trace.pb",
+        "trace_payload_manifest": trace_payload_manifest_path(trace_directory),
     }
     manifests: dict[str, Any] = {}
     for repeat in (1, 2):
@@ -693,6 +788,7 @@ def capture_replay(root: Path, selected_cells: Sequence[Cell], timeout: int) -> 
             trace = root / "nvbit" / name / "dynamic_trace.pb"
             if not trace.is_file():
                 raise CaptureError(f"missing trace: {trace}")
+            validate_trace_payload_manifest(root / "nvbit" / name)
             destination = root / "simulator" / name
             if (destination / "command.json").is_file():
                 validate_replay(root, destination, cell, variant)
@@ -706,6 +802,9 @@ def capture_replay(root: Path, selected_cells: Sequence[Cell], timeout: int) -> 
                 "pchase_card": PCHASE_CARD,
                 "sim_run": SIM_RUN,
                 "trace": trace,
+                "trace_payload_manifest": trace_payload_manifest_path(
+                    root / "nvbit" / name
+                ),
             }
             manifests: dict[str, Any] = {}
             for repeat in (1, 2):
@@ -753,7 +852,7 @@ def validate_selected(
     validate_simulator_build(root)
     for cell in selected_cells:
         for repetition in selected_repetitions:
-            validate_direct(
+            validate_direct_provenance(
                 root / "direct" / cell.direct_name / f"repeat-{repetition}",
                 cell,
                 repetition,

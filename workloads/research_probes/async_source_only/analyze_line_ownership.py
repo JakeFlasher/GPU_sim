@@ -627,7 +627,7 @@ def nvbit_cell(root: Path, variant: str, orientation: str, binary_sha: str) -> d
     payload = last_json_object(base / "stdout.txt")
     validate_target_payload(payload, orientation=orientation, groups=TRACE_GROUPS, mode="endpoint", order="ab", variant=variant)
     ownership = lane_ownership_oracle(base, variant, orientation)
-    return {"cell": name, "variant": variant, "orientation": orientation, "binary_sha256": binary_sha, "tracer_sha256": tracer, "ownership": ownership, "trace_sha256": sha256(base / "dynamic_trace.pb")}
+    return {"cell": name, "variant": variant, "orientation": orientation, "binary_sha256": binary_sha, "tracer_sha256": tracer, "ownership": ownership, "trace_sha256": sha256(base / "dynamic_trace.pb"), "payload_manifest_sha256": sha256(base / "payload_manifest.json")}
 
 
 def production_fingerprint(launch: Mapping[str, Any]) -> dict[str, Any]:
@@ -662,26 +662,90 @@ def replay_cell(root: Path, variant: str, orientation: str) -> dict[str, Any]:
     return {"cell": name, "variant": variant, "orientation": orientation, "aggregate_gates": gates, "schema18": schema, "production": production_fingerprint(launch), "replay_sha256": sha256(first)}
 
 
-def direct_cell(root: Path, orientation: str, repetitions: Sequence[int], binary: Mapping[str, Any]) -> dict[str, Any]:
-    name = paired_cell_name(orientation, DIRECT_GROUPS)
-    payloads = []
+def direct_non_timing_payload(
+    root: Path, orientation: str, repetition: int
+) -> dict[str, Any]:
+    path = (
+        root
+        / "direct"
+        / paired_cell_name(orientation, DIRECT_GROUPS)
+        / f"repeat-{repetition}/result.json"
+    )
+    payload = read_json(path)
+    expected = common_target_contract(orientation, DIRECT_GROUPS, "pair")
+    expected["order"] = expected_order(repetition)
+    mismatches = {
+        field: {"observed": payload.get(field), "expected": value}
+        for field, value in expected.items()
+        if payload.get(field) != value
+    }
+    if mismatches:
+        raise AnalysisError(f"{path}: direct non-timing contract mismatch: {mismatches}")
+    for variant in VARIANTS:
+        arm = payload.get(variant)
+        if (
+            not isinstance(arm, dict)
+            or arm.get("correct") is not True
+            or arm.get("mismatches") != 0
+            or arm.get("sum_consistent") is not True
+        ):
+            raise AnalysisError(f"{path}: invalid correctness for {variant}")
+    return payload
+
+
+def direct_issue_cell(
+    root: Path,
+    orientation: str,
+    repetitions: Sequence[int],
+    binary: Mapping[str, Any],
+) -> dict[str, Any]:
+    issue: list[float] = []
     for repetition in repetitions:
-        directory = root / "direct" / name / f"repeat-{repetition}"
-        path = directory / "result.json"
-        if not path.is_file():
-            raise FileNotFoundError(str(path))
-        try:
-            execution_producer.validate_direct(
-                directory, execution_cell(orientation), repetition, binary
-            )
-        except execution_producer.CaptureError as error:
-            raise AnalysisError(f"{directory}: {error}") from error
-        payload = read_json(path)
-        validate_target_payload(payload, orientation=orientation, groups=DIRECT_GROUPS, mode="pair", order=expected_order(repetition))
-        payloads.append(payload)
-    issue = [float(value["paired_issue_delta_cycles_per_group"]) for value in payloads]
-    wait = [float(value["paired_wait_delta_cycles_per_group"]) for value in payloads]
-    return {"orientation": orientation, "repeat_count": len(payloads), "median_issue_delta_cycles_per_group": statistics.median(issue), "median_wait_delta_cycles_per_group": statistics.median(wait), "negative_wait_repeats": sum(value < 0 for value in wait), "wait_delta_cycles_per_group": wait}
+        validate_direct_artifact(root, orientation, repetition, binary)
+        payload = direct_non_timing_payload(root, orientation, repetition)
+        early = integer(payload["early_fanout"].get("issue_cycles"), "early issue")
+        late = integer(payload["late_fanout"].get("issue_cycles"), "late issue")
+        derived = (early - late) / DIRECT_GROUPS
+        retained = payload.get("paired_issue_delta_cycles_per_group")
+        if not isinstance(retained, (int, float)) or not math.isclose(
+            float(retained), derived, rel_tol=0.0, abs_tol=1.0e-8
+        ):
+            raise AnalysisError("paired issue delta disagrees with arm counters")
+        issue.append(derived)
+    return {
+        "orientation": orientation,
+        "repeat_count": len(issue),
+        "issue_delta_cycles_per_group": issue,
+        "median_issue_delta_cycles_per_group": statistics.median(issue),
+    }
+
+
+def direct_wait_cell(
+    root: Path,
+    orientation: str,
+    repetitions: Sequence[int],
+    binary: Mapping[str, Any],
+) -> dict[str, Any]:
+    wait: list[float] = []
+    for repetition in repetitions:
+        validate_direct_artifact(root, orientation, repetition, binary)
+        payload = direct_non_timing_payload(root, orientation, repetition)
+        early = integer(payload["early_fanout"].get("wait_cycles"), "early wait")
+        late = integer(payload["late_fanout"].get("wait_cycles"), "late wait")
+        derived = (early - late) / DIRECT_GROUPS
+        retained = payload.get("paired_wait_delta_cycles_per_group")
+        if not isinstance(retained, (int, float)) or not math.isclose(
+            float(retained), derived, rel_tol=0.0, abs_tol=1.0e-8
+        ):
+            raise AnalysisError("paired wait delta disagrees with arm counters")
+        wait.append(derived)
+    return {
+        "orientation": orientation,
+        "repeat_count": len(wait),
+        "wait_delta_cycles_per_group": wait,
+        "median_wait_delta_cycles_per_group": statistics.median(wait),
+        "negative_wait_repeats": sum(value < 0 for value in wait),
+    }
 
 
 def validate_direct_artifact(
@@ -701,24 +765,17 @@ def validate_direct_artifact(
     if absent:
         raise FileNotFoundError(", ".join(absent))
     try:
-        execution_producer.validate_direct(
+        files = execution_producer.validate_direct_provenance(
             directory, execution_cell(orientation), repetition, binary
         )
     except execution_producer.CaptureError as error:
         raise AnalysisError(f"{directory}: {error}") from error
-    payload = read_json(required["result"])
-    validate_target_payload(
-        payload,
-        orientation=orientation,
-        groups=DIRECT_GROUPS,
-        mode="pair",
-        order=expected_order(repetition),
-    )
+    direct_non_timing_payload(root, orientation, repetition)
     return {
         "orientation": orientation,
         "repetition": repetition,
-        "correct": True,
-        "files": {name: sha256(path) for name, path in required.items()},
+        "process_completed": True,
+        "files": files,
     }
 
 
@@ -754,6 +811,7 @@ def deterministic_aggregate(report: Mapping[str, Any]) -> dict[str, Any]:
                 "binary_sha256",
                 "tracer_sha256",
                 "trace_sha256",
+                "payload_manifest_sha256",
             )
         }
         for cell in report.get("nvbit_cells", [])
@@ -834,7 +892,8 @@ def run(root: Path, output: Path, output_md: Path, aggregate: Path, *, smoke_onl
     traces: dict[tuple[str, str], Any] = {}
     replays: dict[tuple[str, str], Any] = {}
     direct_artifacts: dict[tuple[str, int], Any] = {}
-    directs: dict[str, Any] = {}
+    direct_issues: dict[str, Any] = {}
+    direct_waits: dict[str, Any] = {}
     smoke = identification = holdout = None
     structural = bool(static and static["artifact_valid"] and not static["assay_valid"])
     if not missing and not errors and not structural and binary:
@@ -848,12 +907,17 @@ def run(root: Path, output: Path, output_md: Path, aggregate: Path, *, smoke_onl
                 replays[(variant, SMOKE_ORIENTATION)] = replay_cell(root, variant, SMOKE_ORIENTATION)
             require_cross_endpoint_tracer_identity(list(traces.values()))
             smoke = smoke_gates(bundles[(SMOKE_ORIENTATION, 1)], traces, replays)
-            # Do not open even the smoke wait payload after an earlier static,
-            # attribution, ownership, or replay gate has already failed.
+            # Direct result bytes are identity-bound above, but issue fields
+            # stay unread until every static/NCU/NVBit/replay gate passes.
             if all(smoke.values()):
-                directs[SMOKE_ORIENTATION] = direct_cell(root, SMOKE_ORIENTATION, (1,), binary)
+                direct_issues[SMOKE_ORIENTATION] = direct_issue_cell(
+                    root, SMOKE_ORIENTATION, (1,), binary
+                )
                 smoke["direct_issue_exact_zero"] = (
-                    directs[SMOKE_ORIENTATION]["median_issue_delta_cycles_per_group"] == 0.0
+                    direct_issues[SMOKE_ORIENTATION][
+                        "median_issue_delta_cycles_per_group"
+                    ]
+                    == 0.0
                 )
             structural = not all(smoke.values())
         except FileNotFoundError as error: missing.append(str(error))
@@ -863,6 +927,17 @@ def run(root: Path, output: Path, output_md: Path, aggregate: Path, *, smoke_onl
     if smoke_passed and not smoke_only and binary:
         for orientation in ORIENTATIONS:
             for repetition in REPETITIONS:
+                if (orientation, repetition) not in direct_artifacts:
+                    try:
+                        direct_artifacts[(orientation, repetition)] = (
+                            validate_direct_artifact(
+                                root, orientation, repetition, binary
+                            )
+                        )
+                    except FileNotFoundError as error:
+                        missing.append(str(error))
+                    except Exception as error:
+                        errors.append(str(error))
                 if (orientation, repetition) not in bundles:
                     try: bundles[(orientation, repetition)] = validate_bundle(root, orientation, repetition, binary)
                     except FileNotFoundError as error: missing.append(str(error))
@@ -887,17 +962,61 @@ def run(root: Path, output: Path, output_md: Path, aggregate: Path, *, smoke_onl
                 structural = structural or a["schema18"] != b["schema18"] or a["production"] != b["production"]
     if smoke_passed and not smoke_only and not structural and not errors and not missing and len(bundles) == 20:
         try:
-            directs[SMOKE_ORIENTATION] = direct_cell(root, SMOKE_ORIENTATION, REPETITIONS, binary)
-            identification = signal_gate(directs[SMOKE_ORIENTATION])
+            direct_issues[SMOKE_ORIENTATION] = direct_issue_cell(
+                root, SMOKE_ORIENTATION, REPETITIONS, binary
+            )
+            issue_passed = (
+                direct_issues[SMOKE_ORIENTATION][
+                    "median_issue_delta_cycles_per_group"
+                ]
+                == 0.0
+            )
+            if issue_passed:
+                direct_waits[SMOKE_ORIENTATION] = direct_wait_cell(
+                    root, SMOKE_ORIENTATION, REPETITIONS, binary
+                )
+                identification = signal_gate(
+                    {
+                        **direct_issues[SMOKE_ORIENTATION],
+                        **direct_waits[SMOKE_ORIENTATION],
+                    }
+                )
+            else:
+                identification = {
+                    "issue_median_exact_zero": False,
+                    "wait_fields_evaluated": False,
+                }
         except Exception as error: errors.append(str(error))
         if identification and all(identification.values()) and not errors:
             try:
-                directs["second_line_early"] = direct_cell(root, "second_line_early", REPETITIONS, binary)
-                holdout = signal_gate(directs["second_line_early"])
+                direct_issues["second_line_early"] = direct_issue_cell(
+                    root, "second_line_early", REPETITIONS, binary
+                )
+                holdout_issue_passed = (
+                    direct_issues["second_line_early"][
+                        "median_issue_delta_cycles_per_group"
+                    ]
+                    == 0.0
+                )
+                if holdout_issue_passed:
+                    direct_waits["second_line_early"] = direct_wait_cell(
+                        root, "second_line_early", REPETITIONS, binary
+                    )
+                    holdout = signal_gate(
+                        {
+                            **direct_issues["second_line_early"],
+                            **direct_waits["second_line_early"],
+                        }
+                    )
+                else:
+                    holdout = {
+                        "issue_median_exact_zero": False,
+                        "wait_fields_evaluated": False,
+                    }
             except Exception as error: errors.append(str(error))
     status, rc = choose_status(errors=errors, missing=missing, structural=structural, smoke_complete=smoke_complete, smoke_passed=smoke_passed, smoke_only=smoke_only, identification=identification, holdout=holdout)
     decision = decision_for_status(status)
-    report = {"schema_version": 1, "assay": "sm86_async_source_line_ownership", "mode": "smoke_only" if smoke_only else "full", "status": status, "decision": decision, "timing_promotion_authorized": False, "typed_visibility_tail_required": True, "binary": binary, "root": str(root), "counts": {"ncu_bundles": len(bundles), "ncu_reports": 7 * len(bundles), "ncu_rows": 14 * len(bundles), "nvbit_cells": len(traces), "simulator_cells": len(replays), "direct_artifacts_validated": len(direct_artifacts), "direct_timing_cells_read": len(directs)}, "smoke_gates": smoke, "identification_gate": identification, "holdout_gate": holdout, "schema18_prediction": "exact paired tie / zero", "static": static, "direct_artifacts": [direct_artifacts[key] for key in sorted(direct_artifacts)], "ncu_bundles": [bundles[key] for key in sorted(bundles)], "nvbit_cells": [traces[key] for key in sorted(traces)], "simulator_cells": [replays[key] for key in sorted(replays)], "direct_cells": [directs[key] for key in sorted(directs)], "criteria": {"static_passed": static.get("assay_valid") if static else None, "smoke_passed": smoke_passed if smoke_complete else None, "schema18_tie": smoke.get("schema18_paired_tie") if smoke else None, "identification_signal": all(identification.values()) if identification else None, "holdout_signal": all(holdout.values()) if holdout else None, "timing_unchanged": True}, "missing_artifacts": sorted(set(missing)), "validation_errors": errors}
+    report = {"schema_version": 1, "assay": "sm86_async_source_line_ownership", "mode": "smoke_only" if smoke_only else "full", "status": status, "decision": decision, "timing_promotion_authorized": False, "typed_visibility_tail_required": True, "binary": binary, "root": str(root), "counts": {"ncu_bundles": len(bundles), "ncu_reports": 7 * len(bundles), "ncu_rows": 14 * len(bundles), "nvbit_cells": len(traces), "simulator_cells": len(replays), "direct_artifacts_validated": len(direct_artifacts), "direct_issue_cells_read": len(direct_issues), "direct_wait_cells_read": len(direct_waits)}, "smoke_gates": smoke, "identification_gate": identification, "holdout_gate": holdout, "schema18_prediction": "exact paired tie / zero", "static": static, "direct_artifacts": [direct_artifacts[key] for key in sorted(direct_artifacts)], "ncu_bundles": [bundles[key] for key in sorted(bundles)], "nvbit_cells": [traces[key] for key in sorted(traces)], "simulator_cells": [replays[key] for key in sorted(replays)], "direct_issue_cells": [direct_issues[key] for key in sorted(direct_issues)], "direct_wait_cells": [direct_waits[key] for key in sorted(direct_waits)], "criteria": {"static_passed": static.get("assay_valid") if static else None, "smoke_passed": smoke_passed if smoke_complete else None, "schema18_tie": smoke.get("schema18_paired_tie") if smoke else None, "identification_signal": all(identification.values()) if identification else None, "holdout_signal": all(holdout.values()) if holdout else None, "timing_unchanged": True}, "missing_artifacts": sorted(set(missing)), "validation_errors": errors}
     output.parent.mkdir(parents=True, exist_ok=True)
     output_md.parent.mkdir(parents=True, exist_ok=True)
     aggregate.parent.mkdir(parents=True, exist_ok=True)

@@ -2,12 +2,13 @@
   "assay": "sm86_async_source_line_ownership",
   "binary": {
     "path": "/home/jakeshea/GPU_simulator_rebase/workloads/research_probes/async_source_only/async_source_line_ownership",
-    "sha256": "557e6fb31be9ee243181206ba593ae863300a6aacade6d9b635cf89a1d93d419",
+    "sha256": "ef7488187c683eeb2bd03d8a60a4797985782700c447746dd3ab26b29bba114d",
     "size_bytes": 1105656
   },
   "counts": {
     "direct_artifacts_validated": 1,
-    "direct_timing_cells_read": 0,
+    "direct_issue_cells_read": 0,
+    "direct_wait_cells_read": 0,
     "ncu_bundles": 1,
     "ncu_reports": 7,
     "ncu_rows": 14,
@@ -25,14 +26,30 @@
   "decision": "The frozen shared-wavefront contract fails before timing: both arms report 1,280, not 2,048; direct wait labels remain unread.",
   "direct_artifacts": [
     {
-      "correct": true,
       "files": {
-        "command": "13cb4e87c8001d797be6c538b02ab01b8221c22c15cc04c4c2aed0e6837a8f0b",
-        "result": "fb5afd2f710bc02c97c666fb5852f20e2c1dcdacc187f7a8202f88385baef870",
-        "run_manifest": "1e5805cbb25abf9c4492181fdf7ca4a60783c6809b121f89f9adf72cc0e5a5e7",
-        "stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        "command": {
+          "path": "/home/jakeshea/GPU_simulator_rebase/results/captures/sm86_async_line_ownership_20260831_v1/direct/async_source_line_ownership_first_line_early_g8192/repeat-1/command.json",
+          "sha256": "c24563a2e397dd0bed07768915b7c850062899daf115ad39e104b50829325e6f",
+          "size_bytes": 959
+        },
+        "result": {
+          "path": "/home/jakeshea/GPU_simulator_rebase/results/captures/sm86_async_line_ownership_20260831_v1/direct/async_source_line_ownership_first_line_early_g8192/repeat-1/result.json",
+          "sha256": "f281144d13835039b5150e3e65b6de37fc975eed24fd5fba4fd485ea0f05e72a",
+          "size_bytes": 2214
+        },
+        "run_manifest": {
+          "path": "/home/jakeshea/GPU_simulator_rebase/results/captures/sm86_async_line_ownership_20260831_v1/direct/async_source_line_ownership_first_line_early_g8192/repeat-1/direct.run.json",
+          "sha256": "84988d0119acd87e9650e3dc019c8de5ac0ad7ff90ed27081be6aa9456057a52",
+          "size_bytes": 2099
+        },
+        "stderr": {
+          "path": "/home/jakeshea/GPU_simulator_rebase/results/captures/sm86_async_line_ownership_20260831_v1/direct/async_source_line_ownership_first_line_early_g8192/repeat-1/stderr.txt",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "size_bytes": 0
+        }
       },
       "orientation": "first_line_early",
+      "process_completed": true,
       "repetition": 1
     }
   ],
@@ -42,7 +59,7 @@
   "mode": "smoke_only",
   "ncu_bundles": [
     {
-      "bundle_sha256": "4a8b9445548bf97fc3a914cdd1c6f82efea75575497d7f787871d060499582de",
+      "bundle_sha256": "dc26b9468724298e7b1dde480670151f5cc083a44536923d7ee1b5f4c8b5c69e",
       "gates": {
         "closure_within_tolerance": true,
         "global_ld_exact": true,
@@ -59,8 +76,8 @@
       "valid": false,
       "values": {
         "dram": {
-          "early_fanout": 25436,
-          "late_fanout": 2268
+          "early_fanout": 2724,
+          "late_fanout": 2300
         },
         "global_ld": {
           "early_fanout": 64,
@@ -91,16 +108,18 @@
   ],
   "nvbit_identities": [
     {
-      "binary_sha256": "557e6fb31be9ee243181206ba593ae863300a6aacade6d9b635cf89a1d93d419",
+      "binary_sha256": "ef7488187c683eeb2bd03d8a60a4797985782700c447746dd3ab26b29bba114d",
       "cell": "async_source_line_ownership_early_fanout_first_line_early_g64",
-      "trace_sha256": "bbc180e9b9a6f826223868d54024bdcfc054d91f28987d43d370ca6c82d8bad4",
+      "payload_manifest_sha256": "bec63b791fa53225eca70115cf96d997e0fbcbfa4445a60d4c6b11c04838c0ab",
+      "trace_sha256": "d696102c9544afa2b7c93f336952834a9f423dca17626aaeceff0993a4fd782a",
       "tracer_sha256": "dda89ee6857058b3f6dc2a01d73a2dc926b876d8e343b7457c779efd82fed007",
       "variant": "early_fanout"
     },
     {
-      "binary_sha256": "557e6fb31be9ee243181206ba593ae863300a6aacade6d9b635cf89a1d93d419",
+      "binary_sha256": "ef7488187c683eeb2bd03d8a60a4797985782700c447746dd3ab26b29bba114d",
       "cell": "async_source_line_ownership_late_fanout_first_line_early_g64",
-      "trace_sha256": "dab50b2fd1c114a3d51bc319a2cdad7d83fdaf9fbe9db6d2b21c3244f12cae4c",
+      "payload_manifest_sha256": "4701fda2ea82e0bcdb9e0b973823b0e37da9e6d84eea924fc8b9617ace77f18b",
+      "trace_sha256": "cce030de86fad905e8a91bec8a277b572d339d4f6a28de924fe14d140be1d927",
       "tracer_sha256": "dda89ee6857058b3f6dc2a01d73a2dc926b876d8e343b7457c779efd82fed007",
       "variant": "late_fanout"
     }
@@ -174,8 +193,8 @@
     "artifact_errors": [],
     "artifact_valid": true,
     "artifacts": {
-      "build": "9976a750c388eee592764dfe3a508bf606541e16f4c6a1b6484a2ea127130885",
-      "command": "b1a55e4e371716993c372ff962c5dcbb4691ae5e7b120fe645dfa6c583533383",
+      "build": "392db09c5210917cb3e47e25004c24741de6503adba769ee60dbed5b4b402768",
+      "command": "0c626d38306e15732911c58d3686b99822accfa539fa55b3022d093bdd9bed5e",
       "control": "ecc52bebd1e71c21bcf12062cf03c065b348430bf73c40b619fdf70132b262b5",
       "resources": "d1fa43f23c74fe1d421343b8e5673b3c52b9e68171a118a6a00e922e6f2df63b",
       "sass": "4898029dd0fb90013a3bdf68940fe131d51600106c21a372deb45c5d70a1ecf7"

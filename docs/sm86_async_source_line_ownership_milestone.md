@@ -18,7 +18,7 @@ even the smoke wait delta, and the full two-orientation campaign does not run.
 The tracked aggregate report is
 [sm86_async_line_ownership_report.json](../data/local_labels/sm86_async_line_ownership_report.json),
 with content digest
-`1165e3829dd938b47591d61481939c72975fcb097afcfe3a2f8606cd79ad801a`.
+`7a49096394c6c24f4753b0a14f9c8fdea9fa35df43b3e23f313643f6dc777952`.
 
 No simulator schema, timing, card, scheduler, traffic, readiness, or tail state
 changes. `async_copy_shared_visibility` remains required.
@@ -86,7 +86,10 @@ The admitted smoke contains:
 
 Every static, direct, NVBit, NCU profile/import, simulator-build, and replay
 invocation has a validated command/timeout/timestamp/status and exact
-input/output identity manifest.
+input/output identity manifest. Each NVBit endpoint additionally carries one
+canonical aggregate over every threadblock protobuf and `extra_info` sidecar;
+replay binds that manifest as an input and validation checks it before parsing
+ownership or replay output.
 
 ### NCU result
 

@@ -10,6 +10,7 @@ from unittest import mock
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import analyze_line_ownership as analysis
 import capture_line_ownership_execution as execution
+import capture_multiline_execution as shared_execution
 
 
 class LineOwnershipAnalyzerTest(unittest.TestCase):
@@ -123,13 +124,112 @@ class LineOwnershipAnalyzerTest(unittest.TestCase):
                 (directory / name).touch()
             with mock.patch.object(
                 analysis.execution_producer,
-                "validate_direct",
+                "validate_direct_provenance",
+                return_value={"result": {"sha256": "x"}},
+            ), mock.patch.object(
+                analysis, "direct_non_timing_payload", return_value={}
+            ), mock.patch.object(
+                analysis,
+                "direct_issue_cell",
+                side_effect=AssertionError("issue fields must stay unopened"),
+            ), mock.patch.object(
+                analysis,
+                "direct_wait_cell",
+                side_effect=AssertionError("wait fields must stay unopened"),
+            ):
+                validated = analysis.validate_direct_artifact(
+                    root, "first_line_early", 1, binary
+                )
+                self.assertTrue(validated["process_completed"])
+
+            with mock.patch.object(
+                analysis.execution_producer,
+                "validate_direct_provenance",
                 side_effect=analysis.execution_producer.CaptureError("corrupt"),
             ):
                 with self.assertRaises(analysis.AnalysisError):
                     analysis.validate_direct_artifact(
                         root, "first_line_early", 1, binary
                     )
+
+    def test_trace_payload_manifest_detects_payload_and_sidecar_drift(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / "threadblocks/device_0/stream_0/kernel_0").mkdir(
+                parents=True
+            )
+            (root / "extra_info").mkdir()
+            (root / "dynamic_trace.pb").write_bytes(b"root")
+            (root / "stats.csv").write_text("header\n", encoding="utf-8")
+            payload = root / "threadblocks/device_0/stream_0/kernel_0/block_0.pb"
+            sidecar = root / "extra_info/allocations.json"
+            payload.write_bytes(b"payload")
+            sidecar.write_text("[]\n", encoding="utf-8")
+            execution.write_trace_payload_manifest(root)
+            execution.validate_trace_payload_manifest(root)
+
+            payload.write_bytes(b"payload\x80\x01\x00")
+            with self.assertRaises(execution.CaptureError):
+                execution.validate_trace_payload_manifest(root)
+            execution.write_trace_payload_manifest(root)
+            sidecar.write_text("[{}]\n", encoding="utf-8")
+            with self.assertRaises(execution.CaptureError):
+                execution.validate_trace_payload_manifest(root)
+
+    def test_paired_deltas_are_derived_from_arm_counters(self) -> None:
+        binary = {"path": "/probe", "sha256": "abc", "size_bytes": 1}
+        issue_payload = {
+            "early_fanout": {"issue_cycles": 100},
+            "late_fanout": {"issue_cycles": 100},
+            "paired_issue_delta_cycles_per_group": -1.0,
+        }
+        with mock.patch.object(
+            analysis, "validate_direct_artifact", return_value={}
+        ), mock.patch.object(
+            analysis, "direct_non_timing_payload", return_value=issue_payload
+        ):
+            with self.assertRaises(analysis.AnalysisError):
+                analysis.direct_issue_cell(
+                    Path("/unused"), "first_line_early", (1,), binary
+                )
+
+        wait_payload = {
+            "early_fanout": {"wait_cycles": 200},
+            "late_fanout": {"wait_cycles": 100},
+            "paired_wait_delta_cycles_per_group": -1.0,
+        }
+        with mock.patch.object(
+            analysis, "validate_direct_artifact", return_value={}
+        ), mock.patch.object(
+            analysis, "direct_non_timing_payload", return_value=wait_payload
+        ):
+            with self.assertRaises(analysis.AnalysisError):
+                analysis.direct_wait_cell(
+                    Path("/unused"), "first_line_early", (1,), binary
+                )
+
+    def test_shared_static_makefile_selection_is_synthetic(self) -> None:
+        with mock.patch.multiple(
+            shared_execution,
+            HERE=Path("/probe"),
+            MAKEFILE=Path("/probe/Makefile"),
+            BINARY=Path("/probe/base_probe"),
+            NVCC=Path("/cuda/nvcc"),
+        ):
+            command = shared_execution.static_build_command()
+            self.assertNotIn("-f", command)
+            self.assertEqual(command[-1], "base_probe")
+        with mock.patch.multiple(
+            shared_execution,
+            HERE=Path("/probe"),
+            MAKEFILE=Path("/probe/Makefile.special"),
+            BINARY=Path("/probe/special_probe"),
+            NVCC=Path("/cuda/nvcc"),
+        ):
+            command = shared_execution.static_build_command()
+            self.assertIn("-f", command)
+            self.assertIn("/probe/Makefile.special", command)
+            self.assertEqual(command[-1], "special_probe")
 
 
 if __name__ == "__main__":
