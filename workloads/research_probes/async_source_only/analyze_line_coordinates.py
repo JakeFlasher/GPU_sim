@@ -371,7 +371,13 @@ def outcome(
 
 
 def run(
-    root: Path, output: Path, output_md: Path, aggregate: Path, *, smoke_only: bool
+    root: Path,
+    output: Path,
+    output_md: Path,
+    aggregate: Path,
+    *,
+    smoke_only: bool,
+    publish: bool = True,
 ) -> int:
     contract = begin_campaign()
     root = contract.require_allowed_path(root)
@@ -386,7 +392,7 @@ def run(
             f"{contract.aggregate_report.resolve()}"
         )
     authorization = execution.smoke_authorization_path(root)
-    if smoke_only:
+    if smoke_only and publish:
         authorization.parent.mkdir(parents=True, exist_ok=True)
         authorization.write_text(
             json.dumps(
@@ -590,20 +596,31 @@ def run(
         "missing_artifacts": sorted(set(missing)),
         "validation_errors": errors,
     }
-    output.parent.mkdir(parents=True, exist_ok=True)
-    output_md.parent.mkdir(parents=True, exist_ok=True)
-    aggregate.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
-    output_md.write_text(f"# Line-coordinate report\n\nStatus: `{status}`\n\n{decision}\n")
     aggregate_document = deterministic_aggregate(report)
     aggregate_text = json.dumps(aggregate_document, indent=2, sort_keys=True) + "\n"
-    aggregate_written = smoke_only or (
-        rc == 0 and status.startswith("complete_line_coordinates_")
-    )
-    if aggregate_written:
-        aggregate.write_text(aggregate_text)
-    if smoke_only:
-        authorization.write_text(aggregate_text)
+    aggregate_written = False
+    if publish:
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output_md.parent.mkdir(parents=True, exist_ok=True)
+        aggregate.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
+        output_md.write_text(
+            f"# Line-coordinate report\n\nStatus: `{status}`\n\n{decision}\n"
+        )
+        aggregate_written = smoke_only or (
+            rc == 0 and status.startswith("complete_line_coordinates_")
+        )
+        if aggregate_written:
+            aggregate.write_text(aggregate_text)
+        if smoke_only:
+            authorization.write_text(aggregate_text)
+    elif smoke_only and (
+        not authorization.is_file()
+        or authorization.read_text(encoding="utf-8") != aggregate_text
+    ):
+        raise base.AnalysisError(
+            "retained smoke authorization differs from current smoke validation"
+        )
     print(json.dumps({"status": status, "output": str(output), "aggregate": str(aggregate), "aggregate_written": aggregate_written, "errors": len(errors), "missing": len(set(missing))}, sort_keys=True))
     return rc
 
@@ -615,10 +632,22 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--output", type=Path)
     parser.add_argument("--output-md", type=Path)
     parser.add_argument("--aggregate-output", type=Path, default=CONTRACT.aggregate_report)
+    parser.add_argument(
+        "--validate-only",
+        action="store_true",
+        help="validate without changing reports; smoke also checks retained authorization",
+    )
     args = parser.parse_args(argv)
     output = args.output or args.root / "analysis/report.json"
     output_md = args.output_md or output.with_suffix(".md")
-    return run(args.root, output, output_md, args.aggregate_output, smoke_only=args.smoke_only)
+    return run(
+        args.root,
+        output,
+        output_md,
+        args.aggregate_output,
+        smoke_only=args.smoke_only,
+        publish=not args.validate_only,
+    )
 
 
 if __name__ == "__main__":
