@@ -1,0 +1,36 @@
+{
+  "schema_version": "rlcr.plan.v1",
+  "goal": "Exercise schema-18 within-cohort response-stream hiding with a fresh SM86 pending-line live-GPU/NVBit/replay assay and produce a bounded transfer or reproducible no-go without changing production timing or the typed visibility tail.",
+  "criteria": [
+    {
+      "id": "AC-1",
+      "description": "The depth 1/2 and lead 0/4/8/16 SM86 probe has exact source, scalar-preload, LDGSTS, and destination work, no spills or local memory, and no preload-result dependency consumed before the post-wait clock.",
+      "required": true,
+      "required_checks": ["response-envelope-static"]
+    },
+    {
+      "id": "AC-2",
+      "description": "The depth-1 lead-16 vertical smoke proves exact nonzero pending-line stream hiding with paired schema-18 score -18 and admitted attributable source work, or records a reproducible structural no-go before the full matrix.",
+      "required": true,
+      "required_checks": ["response-envelope-smoke", "replay-determinism"]
+    },
+    {
+      "id": "AC-3",
+      "description": "If the vertical gate passes, the frozen direct, paired-NCU, NVBit, and schema-18 replay matrix is complete, correctly ordered, attributable, deterministic, and exact on every declared work and topology invariant.",
+      "required": true,
+      "required_checks": ["live-gpu-campaign", "replay-determinism"]
+    },
+    {
+      "id": "AC-4",
+      "description": "The reducer applies static, NCU, NVBit, and replay admission before live labels and emits exactly one complete frozen identification/holdout transfer or no-go status without fitting parameters.",
+      "required": true,
+      "required_checks": ["live-gpu-campaign", "response-envelope-analysis"]
+    },
+    {
+      "id": "AC-5",
+      "description": "Full Rust tests, reports, commands, identities, documentation, commits, required RLCR evidence, and a clean worktree provide a reproducible GPU-simulator-only handoff while production timing and async_copy_shared_visibility remain unchanged.",
+      "required": true,
+      "required_checks": ["rust-workspace-tests", "response-envelope-static", "response-envelope-smoke", "live-gpu-campaign", "replay-determinism", "response-envelope-analysis"]
+    }
+  ]
+}
