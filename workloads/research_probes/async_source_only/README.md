@@ -208,3 +208,56 @@ tolerance. The report status is
 mix, activate the schema-17 cohort candidate, or remove the typed visibility
 tail. A strict paired recapture with attributable DRAM work is required before
 testing a reverse-sign overlap/competition mechanism.
+
+## Source-attributed cohort reservation assay
+
+`capture_cohort_attribution.py` reruns both pairing variants in one application
+under alternating AB/BA order. An initial four-family pre-run was canceled
+because separately replayed LTS hit/miss populations could not establish the
+claimed exact request total. The corrected five-family contract collects
+LDGSTS instructions, L1TEX/local-device LTS hits, misses, exact total sectors,
+and raw DRAM in separate one-pass reports. Raw DRAM is a non-gating
+display/device-background sentinel; attribution stops at requested LTS demand,
+not physical DRAM completion.
+
+Run a two-row smoke, the resumable full matrix, or retained validation with:
+
+```bash
+CUDA_VISIBLE_DEVICES=0 LANG=C LC_ALL=C \
+  PYTHONDONTWRITEBYTECODE=1 python3 \
+  workloads/research_probes/async_source_only/capture_cohort_attribution.py \
+  --smoke --timeout 300
+
+CUDA_VISIBLE_DEVICES=0 LANG=C LC_ALL=C \
+  PYTHONDONTWRITEBYTECODE=1 python3 \
+  workloads/research_probes/async_source_only/capture_cohort_attribution.py \
+  --root results/captures/sm86_async_cohort_reservation_20260831_v1 \
+  --timeout 300
+
+PYTHONDONTWRITEBYTECODE=1 python3 \
+  workloads/research_probes/async_source_only/capture_cohort_attribution.py \
+  --root results/captures/sm86_async_cohort_reservation_20260831_v1 \
+  --validate-only
+```
+
+Reduce the 80-bundle/400-report campaign and its 38 schema-18 replay cells:
+
+```bash
+PYTHONDONTWRITEBYTECODE=1 python3 \
+  workloads/research_probes/async_source_only/analyze_cohort_reservation.py \
+  --root results/captures/sm86_async_cohort_reservation_20260831_v1 \
+  --baseline-root results/captures/sm86_async_cohort_pairing_20260830_v2 \
+  --output results/captures/sm86_async_cohort_reservation_20260831_v1/analysis/report.json \
+  --output-md results/captures/sm86_async_cohort_reservation_20260831_v1/analysis/report.md
+```
+
+Schema 18 observes first-response-anchored prearrival hiding, response-stream
+hiding, and residual topology exposure without changing response or wait
+timing. All 800 ordered NCU rows pass and all 38 replay twins normalize exactly
+to schema 17. The residual score predicts `-17.719` cycles/group for both
+identification cells versus live `-10.322`/`-5.460`; correct signs do not
+compensate for 9.828 MAE and 12.259 maximum error. The report status is
+`complete_cohort_reservation_identification_no_go`; holdout, production
+timing, and `async_copy_shared_visibility` remain untouched. Do not fit a
+scale. A future mechanism check requires independent multi-line cohorts that
+can exercise within-cohort response-stream hiding.

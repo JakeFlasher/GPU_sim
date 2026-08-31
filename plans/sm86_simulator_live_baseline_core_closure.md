@@ -92,6 +92,27 @@ ahead of slow-source completion, obtain a strictly paired live recapture with
 defensible DRAM attribution; do not relabel the current source mix or fit a
 replacement scalar.
 
+The strict recapture and schema-18 reservation-exposure decision are now
+complete in
+[`docs/sm86_async_cohort_reservation_exposure_milestone.md`](../docs/sm86_async_cohort_reservation_exposure_milestone.md).
+The original four-family pre-run was canceled because separately replayed LTS
+hit/miss populations could not provide the exact total-request contract. The
+corrected five-family campaign adds an exact L1TEX-source/local-device-aperture
+LTS-total profile and keeps raw device-wide DRAM non-gating, consistent with
+NVIDIA's documented display/copy/video background limitation on this
+display-active host. All 80 paired bundles, 400 one-pass reports, and 800 rows
+pass; 16 pairing and 22 retained-spacing schema-18 twins normalize exactly to
+schema 17.
+
+The fixed score predicts `-17.71875` cycles/group for both identification
+cells, with the correct sign but 9.828 MAE and 12.259 maximum error against
+live `-10.322`/`-5.460`. It fails before holdout, so the holdout remains
+untouched and production timing plus `async_copy_shared_visibility` remain
+unchanged. This closes the current reservation score. Any future continuation
+must use a fresh multi-line cohort response-envelope assay capable of
+exercising within-cohort stream hiding, with no scale or fit applied to the
+retained score.
+
 ## Acceptance Criteria
 
 - AC-1: A current-host preflight and release build are recorded for the RTX

@@ -166,6 +166,25 @@ spacing trace twins remain timing-neutral. A strict paired recapture with
 defensible DRAM attribution must pass before testing the reverse-sign
 overlap/competition hypothesis.
 
+That recapture and the
+[schema-18 reservation-exposure milestone](sm86_async_cohort_reservation_exposure_milestone.md)
+are now complete. NVIDIA documents that display/copy/video engines share
+L2/DRAM and cannot be isolated from SM traffic by the device-wide counters;
+this host is display-active. The corrected campaign therefore gates on the
+L1TEX-source, local-device-aperture LTS request stream and retains raw DRAM as
+non-gating background. An infeasible four-family pre-run was canceled; the
+final five-family contract adds an exact LTS-total profile. All 80 bundles,
+400 one-pass reports, and 800 ordered rows pass, and all 38 schema-18 replay
+cells normalize exactly to schema 17.
+
+The fixed reservation-exposure score gets the identification signs right but
+not the magnitudes: it predicts `-17.719` cycles/group at both depth-1/2
+spacing-0 cells versus live `-10.322`/`-5.460`, for 9.828 MAE and 12.259
+maximum error. Identification fails, the holdout remains untouched, and no
+timing or tail state is promoted. If this mechanism is revisited, use an
+independent multi-line cohort response-envelope assay that can exercise
+within-cohort stream hiding; do not scale or fit the current score.
+
 The 2026-08-17
 [causal-readiness milestone](sm86_causal_readiness_milestone.md) is complete.
 Reason-tagged dependency, async-copy, CTA-generation/arrival-spread, and
