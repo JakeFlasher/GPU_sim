@@ -596,6 +596,8 @@ def run(
         "missing_artifacts": sorted(set(missing)),
         "validation_errors": errors,
     }
+    report_text = json.dumps(report, indent=2, sort_keys=True) + "\n"
+    report_md_text = f"# Line-coordinate report\n\nStatus: `{status}`\n\n{decision}\n"
     aggregate_document = deterministic_aggregate(report)
     aggregate_text = json.dumps(aggregate_document, indent=2, sort_keys=True) + "\n"
     aggregate_written = False
@@ -603,10 +605,8 @@ def run(
         output.parent.mkdir(parents=True, exist_ok=True)
         output_md.parent.mkdir(parents=True, exist_ok=True)
         aggregate.parent.mkdir(parents=True, exist_ok=True)
-        output.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
-        output_md.write_text(
-            f"# Line-coordinate report\n\nStatus: `{status}`\n\n{decision}\n"
-        )
+        output.write_text(report_text)
+        output_md.write_text(report_md_text)
         aggregate_written = smoke_only or (
             rc == 0 and status.startswith("complete_line_coordinates_")
         )
@@ -621,6 +621,21 @@ def run(
         raise base.AnalysisError(
             "retained smoke authorization differs from current smoke validation"
         )
+    elif not smoke_only:
+        retained = (
+            (output, report_text),
+            (output_md, report_md_text),
+            (aggregate, aggregate_text),
+        )
+        mismatches = [
+            str(path)
+            for path, expected in retained
+            if not path.is_file() or path.read_text(encoding="utf-8") != expected
+        ]
+        if mismatches:
+            raise base.AnalysisError(
+                f"retained full reports differ from current validation: {mismatches}"
+            )
     print(json.dumps({"status": status, "output": str(output), "aggregate": str(aggregate), "aggregate_written": aggregate_written, "errors": len(errors), "missing": len(set(missing))}, sort_keys=True))
     return rc
 
