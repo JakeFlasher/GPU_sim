@@ -858,12 +858,42 @@ def deterministic_aggregate(report: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
-def decision_for_status(status: str) -> str:
+def decision_for_status(
+    status: str,
+    *,
+    static: Mapping[str, Any] | None = None,
+    smoke: Mapping[str, bool] | None = None,
+    bundles: Sequence[Mapping[str, Any]] = (),
+) -> str:
     if status == "complete_line_ownership_structural_no_go":
-        return (
-            "The frozen shared-wavefront contract fails before timing: "
-            "both arms report 1,280, not 2,048; direct wait labels remain unread."
-        )
+        if isinstance(static, Mapping) and static.get("assay_valid") is False:
+            return "The static assay gate fails before live evidence or timing fields."
+        failed = [
+            name for name, passed in (smoke or {}).items() if passed is False
+        ]
+        if "ncu_contract_exact" in failed:
+            for bundle in bundles:
+                values = bundle.get("values")
+                if not isinstance(values, Mapping):
+                    continue
+                observed = values.get("shared_wavefronts")
+                if observed == {"early_fanout": 1280, "late_fanout": 1280}:
+                    return (
+                        "The frozen shared-wavefront contract fails before timing: "
+                        "both NCU arms report 1,280, not 2,048; direct issue and "
+                        "wait labels remain unread."
+                    )
+        if "direct_issue_exact_zero" in failed:
+            return (
+                "The direct issue-control smoke gate fails; wait labels remain unread."
+            )
+        if failed:
+            return (
+                "The smoke fails these structural gates before timing admission: "
+                + ", ".join(sorted(failed))
+                + "."
+            )
+        return "A structural gate fails before timing admission."
     if status == "source_line_ownership_smoke_passed":
         return "The prospective smoke passes and authorizes the frozen full campaign."
     if status == "complete_source_line_ownership_identification_no_go":
@@ -1015,8 +1045,11 @@ def run(root: Path, output: Path, output_md: Path, aggregate: Path, *, smoke_onl
                     }
             except Exception as error: errors.append(str(error))
     status, rc = choose_status(errors=errors, missing=missing, structural=structural, smoke_complete=smoke_complete, smoke_passed=smoke_passed, smoke_only=smoke_only, identification=identification, holdout=holdout)
-    decision = decision_for_status(status)
-    report = {"schema_version": 1, "assay": "sm86_async_source_line_ownership", "mode": "smoke_only" if smoke_only else "full", "status": status, "decision": decision, "timing_promotion_authorized": False, "typed_visibility_tail_required": True, "binary": binary, "root": str(root), "counts": {"ncu_bundles": len(bundles), "ncu_reports": 7 * len(bundles), "ncu_rows": 14 * len(bundles), "nvbit_cells": len(traces), "simulator_cells": len(replays), "direct_artifacts_validated": len(direct_artifacts), "direct_issue_cells_read": len(direct_issues), "direct_wait_cells_read": len(direct_waits)}, "smoke_gates": smoke, "identification_gate": identification, "holdout_gate": holdout, "schema18_prediction": "exact paired tie / zero", "static": static, "direct_artifacts": [direct_artifacts[key] for key in sorted(direct_artifacts)], "ncu_bundles": [bundles[key] for key in sorted(bundles)], "nvbit_cells": [traces[key] for key in sorted(traces)], "simulator_cells": [replays[key] for key in sorted(replays)], "direct_issue_cells": [direct_issues[key] for key in sorted(direct_issues)], "direct_wait_cells": [direct_waits[key] for key in sorted(direct_waits)], "criteria": {"static_passed": static.get("assay_valid") if static else None, "smoke_passed": smoke_passed if smoke_complete else None, "schema18_tie": smoke.get("schema18_paired_tie") if smoke else None, "identification_signal": all(identification.values()) if identification else None, "holdout_signal": all(holdout.values()) if holdout else None, "timing_unchanged": True}, "missing_artifacts": sorted(set(missing)), "validation_errors": errors}
+    ordered_bundles = [bundles[key] for key in sorted(bundles)]
+    decision = decision_for_status(
+        status, static=static, smoke=smoke, bundles=ordered_bundles
+    )
+    report = {"schema_version": 1, "assay": "sm86_async_source_line_ownership", "mode": "smoke_only" if smoke_only else "full", "status": status, "decision": decision, "timing_promotion_authorized": False, "typed_visibility_tail_required": True, "binary": binary, "root": str(root), "counts": {"ncu_bundles": len(bundles), "ncu_reports": 7 * len(bundles), "ncu_rows": 14 * len(bundles), "nvbit_cells": len(traces), "simulator_cells": len(replays), "direct_artifacts_validated": len(direct_artifacts), "direct_issue_cells_read": len(direct_issues), "direct_wait_cells_read": len(direct_waits)}, "smoke_gates": smoke, "identification_gate": identification, "holdout_gate": holdout, "schema18_prediction": "exact paired tie / zero", "static": static, "direct_artifacts": [direct_artifacts[key] for key in sorted(direct_artifacts)], "ncu_bundles": ordered_bundles, "nvbit_cells": [traces[key] for key in sorted(traces)], "simulator_cells": [replays[key] for key in sorted(replays)], "direct_issue_cells": [direct_issues[key] for key in sorted(direct_issues)], "direct_wait_cells": [direct_waits[key] for key in sorted(direct_waits)], "criteria": {"static_passed": static.get("assay_valid") if static else None, "smoke_passed": smoke_passed if smoke_complete else None, "schema18_tie": smoke.get("schema18_paired_tie") if smoke else None, "identification_signal": all(identification.values()) if identification else None, "holdout_signal": all(holdout.values()) if holdout else None, "timing_unchanged": True}, "missing_artifacts": sorted(set(missing)), "validation_errors": errors}
     output.parent.mkdir(parents=True, exist_ok=True)
     output_md.parent.mkdir(parents=True, exist_ok=True)
     aggregate.parent.mkdir(parents=True, exist_ok=True)

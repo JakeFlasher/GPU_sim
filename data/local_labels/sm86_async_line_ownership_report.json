@@ -23,7 +23,7 @@
     "static_passed": true,
     "timing_unchanged": true
   },
-  "decision": "The frozen shared-wavefront contract fails before timing: both arms report 1,280, not 2,048; direct wait labels remain unread.",
+  "decision": "The frozen shared-wavefront contract fails before timing: both NCU arms report 1,280, not 2,048; direct issue and wait labels remain unread.",
   "direct_artifacts": [
     {
       "files": {

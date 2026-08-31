@@ -46,6 +46,39 @@ class LineOwnershipAnalyzerTest(unittest.TestCase):
         self.assertEqual(status, "complete_line_ownership_structural_no_go")
         self.assertEqual(return_code, 0)
 
+    def test_structural_decision_reports_only_observed_reason(self) -> None:
+        static_decision = analysis.decision_for_status(
+            "complete_line_ownership_structural_no_go",
+            static={"assay_valid": False},
+        )
+        self.assertIn("static", static_decision.lower())
+        self.assertNotIn("1,280", static_decision)
+
+        issue_decision = analysis.decision_for_status(
+            "complete_line_ownership_structural_no_go",
+            static={"assay_valid": True},
+            smoke={"direct_issue_exact_zero": False},
+        )
+        self.assertIn("issue", issue_decision.lower())
+        self.assertNotIn("1,280", issue_decision)
+
+        ncu_decision = analysis.decision_for_status(
+            "complete_line_ownership_structural_no_go",
+            static={"assay_valid": True},
+            smoke={"ncu_contract_exact": False},
+            bundles=(
+                {
+                    "values": {
+                        "shared_wavefronts": {
+                            "early_fanout": 1280,
+                            "late_fanout": 1280,
+                        }
+                    }
+                },
+            ),
+        )
+        self.assertIn("1,280", ncu_decision)
+
     def test_identity_and_naming_contract(self) -> None:
         self.assertEqual(
             analysis.endpoint_name("early_fanout", "first_line_early"),
