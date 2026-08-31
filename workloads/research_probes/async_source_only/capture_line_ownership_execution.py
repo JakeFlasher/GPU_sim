@@ -552,8 +552,9 @@ def trace_payload_files(destination: Path) -> list[Path]:
     paths = [
         destination / "dynamic_trace.pb",
         destination / "stats.csv",
-        destination / "stdout.txt",
     ]
+    if CAMPAIGN_CONTRACT != V1_CONTRACT:
+        paths.append(destination / "stdout.txt")
     paths.extend(sorted((destination / "threadblocks").rglob("*.pb")))
     if (destination / "extra_info").is_dir():
         paths.extend(
@@ -614,6 +615,22 @@ def add_run_manifest_output(
         raise CaptureError(f"{manifest_path}: missing outputs")
     outputs[name] = support.file_identity(output_path)
     support.atomic_write_json(manifest_path, document)
+
+
+def nvbit_output_paths(
+    destination: Path, *, include_payload_manifest: bool
+) -> dict[str, Path]:
+    outputs = {
+        "binding": destination / "campaign_binding.json",
+        "complete": destination / "complete.json",
+        "stats": destination / "stats.csv",
+        "trace": destination / "dynamic_trace.pb",
+    }
+    if CAMPAIGN_CONTRACT != V1_CONTRACT:
+        outputs["target_stdout"] = destination / "stdout.txt"
+    if include_payload_manifest:
+        outputs["payload_manifest"] = trace_payload_manifest_path(destination)
+    return outputs
 
 
 def expected_order(repetition: int) -> str:
@@ -1006,14 +1023,7 @@ def validate_nvbit(
     manifest = run_root / "wrapper.run.json"
     payload_manifest = trace_payload_manifest_path(destination)
     validate_trace_payload_manifest(destination)
-    outputs = {
-        "binding": destination / "campaign_binding.json",
-        "complete": destination / "complete.json",
-        "payload_manifest": payload_manifest,
-        "stats": destination / "stats.csv",
-        "target_stdout": destination / "stdout.txt",
-        "trace": destination / "dynamic_trace.pb",
-    }
+    outputs = nvbit_output_paths(destination, include_payload_manifest=True)
     support.validate_run_manifest(
         manifest,
         command=wrapper,
@@ -1102,13 +1112,9 @@ def capture_nvbit(root: Path, selected_cells: Sequence[Cell], timeout: int) -> N
             outer_timeout = timeout + 120
             capture, wrapper = nvbit_commands(destination, cell, variant, target_timeout)
             manifest = run_root / "wrapper.run.json"
-            outputs = {
-                "binding": destination / "campaign_binding.json",
-                "complete": destination / "complete.json",
-                "stats": destination / "stats.csv",
-                "target_stdout": destination / "stdout.txt",
-                "trace": destination / "dynamic_trace.pb",
-            }
+            outputs = nvbit_output_paths(
+                destination, include_payload_manifest=False
+            )
             support.recorded_run(
                 wrapper,
                 timeout=outer_timeout,

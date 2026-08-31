@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import sys
 import tempfile
@@ -15,6 +16,63 @@ import capture_multiline_execution as shared_execution
 
 
 class LineOwnershipAnalyzerTest(unittest.TestCase):
+    def test_v1_deterministic_aggregate_byte_golden(self) -> None:
+        report = {
+            "schema_version": 1,
+            "assay": "v1-fixture",
+            "mode": "smoke_only",
+            "status": "fixture",
+            "decision": "fixture-decision",
+            "binary": {"path": "/probe", "sha256": "b", "size_bytes": 1},
+            "root": "/root",
+            "counts": {"ncu_bundles": 1},
+            "smoke_gates": {"gate": True},
+            "identification_gate": None,
+            "holdout_gate": None,
+            "schema18_prediction": "zero",
+            "criteria": {"smoke_passed": True},
+            "timing_promotion_authorized": False,
+            "typed_visibility_tail_required": True,
+            "static": {"assay_valid": True},
+            "direct_artifacts": [],
+            "ncu_bundles": [],
+            "nvbit_cells": [
+                {
+                    "cell": "z",
+                    "variant": "late",
+                    "binary_sha256": "b",
+                    "tracer_sha256": "t",
+                    "trace_sha256": "x",
+                    "payload_manifest_sha256": "p",
+                    "ownership": {"ignored": True},
+                }
+            ],
+            "simulator_cells": [
+                {
+                    "cell": "z",
+                    "variant": "late",
+                    "aggregate_gates": {"g": True},
+                    "schema18": {"x": 1},
+                    "replay_sha256": "r",
+                    "production": {"ignored": True},
+                }
+            ],
+            "missing_artifacts": [],
+            "validation_errors": [],
+        }
+        encoded = (
+            json.dumps(
+                analysis.deterministic_aggregate(report),
+                indent=2,
+                sort_keys=True,
+            )
+            + "\n"
+        ).encode()
+        self.assertEqual(
+            hashlib.sha256(encoded).hexdigest(),
+            "39f2037e8dfe8612d4c5d30fa1cac16dc667da2bd028492a368ba2fb28eaa382",
+        )
+
     def test_frozen_signal_gate(self) -> None:
         passed = analysis.signal_gate(
             {
@@ -201,7 +259,30 @@ class LineOwnershipAnalyzerTest(unittest.TestCase):
             payload.write_bytes(b"payload")
             sidecar.write_text("[]\n", encoding="utf-8")
             execution.write_trace_payload_manifest(root)
-            execution.validate_trace_payload_manifest(root)
+            manifest = execution.validate_trace_payload_manifest(root)
+            self.assertEqual(
+                [entry["path"] for entry in manifest["entries"]],
+                [
+                    "dynamic_trace.pb",
+                    "extra_info/allocations.json",
+                    "stats.csv",
+                    "threadblocks/device_0/stream_0/kernel_0/block_0.pb",
+                ],
+            )
+            self.assertNotIn(
+                "target_stdout",
+                execution.nvbit_output_paths(
+                    root, include_payload_manifest=False
+                ),
+            )
+            self.assertEqual(
+                set(
+                    execution.nvbit_output_paths(
+                        root, include_payload_manifest=True
+                    )
+                ),
+                {"binding", "complete", "payload_manifest", "stats", "trace"},
+            )
 
             payload.write_bytes(b"payload\x80\x01\x00")
             with self.assertRaises(execution.CaptureError):
