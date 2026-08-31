@@ -1368,6 +1368,29 @@ pub struct BypassAsyncCopyDiagnostics {
     pub topology_candidate_completion_cycles: u64,
     pub topology_candidate_later_cycles: u64,
     pub topology_candidate_earlier_cycles: u64,
+    /// Timing-neutral destination-pipeline groups projected at a wait. The
+    /// candidate fields below are sums across groups, never readiness inputs.
+    pub pipeline_groups_observed: u64,
+    /// Candidate completion measured from group commit for acceptance width 1.
+    pub pipeline_q1_completion_cycles: u64,
+    /// Candidate completion still exposed when the wait became current.
+    pub pipeline_q1_exposure_cycles: u64,
+    /// Candidate completion measured from group commit for acceptance width 2.
+    pub pipeline_q2_completion_cycles: u64,
+    /// Candidate completion still exposed when the wait became current.
+    pub pipeline_q2_exposure_cycles: u64,
+    /// Candidate completion measured from group commit for acceptance width 4.
+    pub pipeline_q4_completion_cycles: u64,
+    /// Candidate completion still exposed when the wait became current.
+    pub pipeline_q4_exposure_cycles: u64,
+    /// Candidate completion measured from group commit for acceptance width 8.
+    pub pipeline_q8_completion_cycles: u64,
+    /// Candidate completion still exposed when the wait became current.
+    pub pipeline_q8_exposure_cycles: u64,
+    /// Candidate completion measured from group commit for acceptance width 16.
+    pub pipeline_q16_completion_cycles: u64,
+    /// Candidate completion still exposed when the wait became current.
+    pub pipeline_q16_exposure_cycles: u64,
 }
 
 impl BypassAsyncCopyDiagnostics {
@@ -1446,6 +1469,61 @@ impl BypassAsyncCopyDiagnostics {
                 "readiness.bypass_async_copies.topology_candidate_earlier_cycles",
                 self.topology_candidate_earlier_cycles,
                 addend.topology_candidate_earlier_cycles,
+            )?,
+            pipeline_groups_observed: checked_readiness_add(
+                "readiness.bypass_async_copies.pipeline_groups_observed",
+                self.pipeline_groups_observed,
+                addend.pipeline_groups_observed,
+            )?,
+            pipeline_q1_completion_cycles: checked_readiness_add(
+                "readiness.bypass_async_copies.pipeline_q1_completion_cycles",
+                self.pipeline_q1_completion_cycles,
+                addend.pipeline_q1_completion_cycles,
+            )?,
+            pipeline_q1_exposure_cycles: checked_readiness_add(
+                "readiness.bypass_async_copies.pipeline_q1_exposure_cycles",
+                self.pipeline_q1_exposure_cycles,
+                addend.pipeline_q1_exposure_cycles,
+            )?,
+            pipeline_q2_completion_cycles: checked_readiness_add(
+                "readiness.bypass_async_copies.pipeline_q2_completion_cycles",
+                self.pipeline_q2_completion_cycles,
+                addend.pipeline_q2_completion_cycles,
+            )?,
+            pipeline_q2_exposure_cycles: checked_readiness_add(
+                "readiness.bypass_async_copies.pipeline_q2_exposure_cycles",
+                self.pipeline_q2_exposure_cycles,
+                addend.pipeline_q2_exposure_cycles,
+            )?,
+            pipeline_q4_completion_cycles: checked_readiness_add(
+                "readiness.bypass_async_copies.pipeline_q4_completion_cycles",
+                self.pipeline_q4_completion_cycles,
+                addend.pipeline_q4_completion_cycles,
+            )?,
+            pipeline_q4_exposure_cycles: checked_readiness_add(
+                "readiness.bypass_async_copies.pipeline_q4_exposure_cycles",
+                self.pipeline_q4_exposure_cycles,
+                addend.pipeline_q4_exposure_cycles,
+            )?,
+            pipeline_q8_completion_cycles: checked_readiness_add(
+                "readiness.bypass_async_copies.pipeline_q8_completion_cycles",
+                self.pipeline_q8_completion_cycles,
+                addend.pipeline_q8_completion_cycles,
+            )?,
+            pipeline_q8_exposure_cycles: checked_readiness_add(
+                "readiness.bypass_async_copies.pipeline_q8_exposure_cycles",
+                self.pipeline_q8_exposure_cycles,
+                addend.pipeline_q8_exposure_cycles,
+            )?,
+            pipeline_q16_completion_cycles: checked_readiness_add(
+                "readiness.bypass_async_copies.pipeline_q16_completion_cycles",
+                self.pipeline_q16_completion_cycles,
+                addend.pipeline_q16_completion_cycles,
+            )?,
+            pipeline_q16_exposure_cycles: checked_readiness_add(
+                "readiness.bypass_async_copies.pipeline_q16_exposure_cycles",
+                self.pipeline_q16_exposure_cycles,
+                addend.pipeline_q16_exposure_cycles,
             )?,
         };
         *self = next;
@@ -3548,9 +3626,17 @@ impl ReadinessDiagnostics {
     /// parallel lanes. Schema 14 adds bypass-only per-copy source/delivery
     /// observations without changing scheduler timing. Schema 15 separates
     /// source-cohort destination-line fanout, bank multiplicity, and a
-    /// timing-neutral per-copy topology candidate.
+    /// timing-neutral per-copy topology candidate. Schema 16 adds
+    /// timing-neutral pipelined destination candidates over stable per-copy
+    /// payload-arrival order for acceptance widths 1, 2, 4, 8, and 16.
     pub fn schema_version(&self) -> u32 {
         if self
+            .bypass_async_copies
+            .as_deref()
+            .is_some_and(|diagnostics| diagnostics.pipeline_groups_observed != 0)
+        {
+            16
+        } else if self
             .bypass_async_copies
             .as_deref()
             .is_some_and(|diagnostics| diagnostics.source_cohorts_observed != 0)
@@ -4312,6 +4398,23 @@ struct BypassAsyncCopyProjection {
     topology_candidate_completion_cycles: u64,
     topology_candidate_later_cycles: u64,
     topology_candidate_earlier_cycles: u64,
+    pipeline_q1_completion_cycles: u64,
+    pipeline_q1_exposure_cycles: u64,
+    pipeline_q2_completion_cycles: u64,
+    pipeline_q2_exposure_cycles: u64,
+    pipeline_q4_completion_cycles: u64,
+    pipeline_q4_exposure_cycles: u64,
+    pipeline_q8_completion_cycles: u64,
+    pipeline_q8_exposure_cycles: u64,
+    pipeline_q16_completion_cycles: u64,
+    pipeline_q16_exposure_cycles: u64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct BypassPipelineCopyCandidate {
+    instruction: usize,
+    payload_completion: u64,
+    topology_penalty: u64,
 }
 
 // Timing-neutral local-latency candidate selected on conflict/severe and
@@ -4319,6 +4422,43 @@ struct BypassAsyncCopyProjection {
 // reports the resulting frontier so failed depth transfer remains visible.
 const BYPASS_TOPOLOGY_CANDIDATE_WAVEFRONT_CYCLES: u64 = 4;
 const BYPASS_TOPOLOGY_CANDIDATE_BANK_CYCLES: u64 = 2;
+const BYPASS_PIPELINE_CANDIDATE_Q: [u64; 5] = [1, 2, 4, 8, 16];
+
+fn bypass_pipeline_candidate_completion(
+    copies: &[BypassPipelineCopyCandidate],
+    q: u64,
+) -> Result<u64, IssueError> {
+    debug_assert!(q != 0, "bypass pipeline acceptance width must be nonzero");
+    let mut next_accept = 0_u64;
+    let mut group_completion = 0_u64;
+    for copy in copies {
+        let start = copy.payload_completion.max(next_accept);
+        let finish = checked_cycle_add(
+            "bypass pipeline candidate per-copy completion",
+            start,
+            copy.topology_penalty,
+        )?;
+        let accept_interval = copy.topology_penalty / q + u64::from(copy.topology_penalty % q != 0);
+        next_accept = checked_cycle_add(
+            "bypass pipeline candidate next acceptance",
+            start,
+            accept_interval,
+        )?;
+        group_completion = group_completion.max(finish);
+    }
+    Ok(group_completion)
+}
+
+fn bypass_pipeline_candidate_completions(
+    copies: &mut [BypassPipelineCopyCandidate],
+) -> Result<[u64; BYPASS_PIPELINE_CANDIDATE_Q.len()], IssueError> {
+    copies.sort_by_key(|copy| (copy.payload_completion, copy.instruction));
+    let mut completions = [0_u64; BYPASS_PIPELINE_CANDIDATE_Q.len()];
+    for (completion, q) in completions.iter_mut().zip(BYPASS_PIPELINE_CANDIDATE_Q) {
+        *completion = bypass_pipeline_candidate_completion(copies, q)?;
+    }
+    Ok(completions)
+}
 
 impl AsyncCopyGroup {
     const fn new(id: AsyncCopyGroupId) -> Self {
@@ -4434,6 +4574,10 @@ struct WarpState<'a> {
     /// instruction. Causal readiness delays are measured from this frontier.
     current_since: u64,
     eligible: u64,
+    /// Compiler-emitted `DEPBAR.LE SB1..SB5, 0x0` operand for the current
+    /// instruction. This is cached when `next_slot` changes so scheduler scans
+    /// use the ordinary barrier counter/clear path without reparsing SASS.
+    ordinary_dependency_wait: Option<DepBarrier>,
     barrier_clear: [u64; DEP_BARRIERS],
     barrier_origin: [DependencyOrigin; DEP_BARRIERS],
     /// Outstanding UNKNOWN write-backs per barrier index (L1Shared mode):
@@ -4792,6 +4936,7 @@ impl AsyncCopySlot {
         warp: usize,
         group: &AsyncCopyGroup,
         params: &IssueModelParams,
+        wait_base: u64,
     ) -> Result<Option<BypassAsyncCopyProjection>, IssueError> {
         let Some(state) = self.state.as_deref() else {
             return Ok(None);
@@ -4808,6 +4953,7 @@ impl AsyncCopySlot {
         let mut per_copy_completion = 0_u64;
         let mut topology_candidate_completion = 0_u64;
         let mut topology_candidate_penalty_cycles = 0_u64;
+        let mut pipeline_copies = Vec::new();
         for copy in state
             .bypass_copies
             .iter()
@@ -4912,10 +5058,17 @@ impl AsyncCopySlot {
                 topology_penalty,
             )?;
             topology_candidate_completion = topology_candidate_completion.max(candidate_completion);
+            pipeline_copies.push(BypassPipelineCopyCandidate {
+                instruction: copy.instruction,
+                payload_completion,
+                topology_penalty,
+            });
         }
         if copies == 0 {
             return Ok(None);
         }
+        let pipeline_candidate_completion =
+            bypass_pipeline_candidate_completions(&mut pipeline_copies)?;
         let aggregate_completion = group.local_completion_time(params)?;
         debug_assert!(
             aggregate_completion >= per_copy_completion,
@@ -4939,6 +5092,22 @@ impl AsyncCopySlot {
                 .saturating_sub(aggregate_completion),
             topology_candidate_earlier_cycles: aggregate_completion
                 .saturating_sub(topology_candidate_completion),
+            pipeline_q1_completion_cycles: pipeline_candidate_completion[0]
+                .saturating_sub(group.committed_at),
+            pipeline_q1_exposure_cycles: pipeline_candidate_completion[0].saturating_sub(wait_base),
+            pipeline_q2_completion_cycles: pipeline_candidate_completion[1]
+                .saturating_sub(group.committed_at),
+            pipeline_q2_exposure_cycles: pipeline_candidate_completion[1].saturating_sub(wait_base),
+            pipeline_q4_completion_cycles: pipeline_candidate_completion[2]
+                .saturating_sub(group.committed_at),
+            pipeline_q4_exposure_cycles: pipeline_candidate_completion[2].saturating_sub(wait_base),
+            pipeline_q8_completion_cycles: pipeline_candidate_completion[3]
+                .saturating_sub(group.committed_at),
+            pipeline_q8_exposure_cycles: pipeline_candidate_completion[3].saturating_sub(wait_base),
+            pipeline_q16_completion_cycles: pipeline_candidate_completion[4]
+                .saturating_sub(group.committed_at),
+            pipeline_q16_exposure_cycles: pipeline_candidate_completion[4]
+                .saturating_sub(wait_base),
         }))
     }
 
@@ -5143,8 +5312,9 @@ impl WarpState<'_> {
         }
     }
 
-    /// Earliest time the pending wait mask clears; `None` while any
-    /// masked barrier has responses outstanding (unknown clear time).
+    /// Earliest time the control wait mask and any explicit ordinary `DEPBAR`
+    /// operand clear; `None` while a required barrier has responses outstanding
+    /// (unknown clear time). SB0 asynchronous-copy waits are handled separately.
     fn wait_clear_time(&self) -> Option<u64> {
         let Some(slot) = self.next_slot else {
             return Some(0);
@@ -5157,6 +5327,13 @@ impl WarpState<'_> {
                 }
                 t = t.max(self.barrier_clear[b]);
             }
+        }
+        if let Some(barrier) = self.ordinary_dependency_wait {
+            let b = barrier.index();
+            if self.barrier_pending[b] > 0 {
+                return None;
+            }
+            t = t.max(self.barrier_clear[b]);
         }
         Some(t)
     }
@@ -6276,21 +6453,23 @@ impl<'a> SmCore<'a> {
                     self.arrival_stamp,
                     arrival_offset,
                 )?;
+                let next_slot = lookup_dense(
+                    &self.schedule_slots,
+                    self.schedule,
+                    w.insts[0].pc,
+                    blk.launch_index,
+                    w.warp_slot,
+                )?;
                 pending_warps.push((
                     subcore,
                     WarpState {
                         insts: &w.insts,
                         sectors: &w.sectors,
                         next: 0,
-                        next_slot: Some(lookup_dense(
-                            &self.schedule_slots,
-                            self.schedule,
-                            w.insts[0].pc,
-                            blk.launch_index,
-                            w.warp_slot,
-                        )?),
+                        next_slot: Some(next_slot),
                         current_since: t,
                         eligible: t,
+                        ordinary_dependency_wait: next_slot.ordinary_dependency_wait_barrier(),
                         barrier_clear: [0; DEP_BARRIERS],
                         barrier_origin: [DependencyOrigin::Unknown; DEP_BARRIERS],
                         barrier_pending: [0; DEP_BARRIERS],
@@ -7346,6 +7525,24 @@ impl<'a> SmCore<'a> {
                 &mut tied,
             )?;
         }
+        if let Some(barrier) = warp.ordinary_dependency_wait
+            && !slot.control.wait_mask.contains(barrier)
+        {
+            let barrier = barrier.index();
+            debug_assert_eq!(
+                warp.barrier_pending[barrier], 0,
+                "a selected explicit dependency-barrier wait cannot have an unresolved counter"
+            );
+            observe_readiness_constraint(
+                projected,
+                base,
+                warp.barrier_clear[barrier],
+                warp.barrier_origin[barrier].into(),
+                &mut ready_at,
+                &mut limiting,
+                &mut tied,
+            )?;
+        }
 
         if self.has_async_copy_protocol && slot.op_class == OpClass::AsyncCopyCommit {
             let commits_nonempty = self.async_copies[warp_index]
@@ -7423,6 +7620,7 @@ impl<'a> SmCore<'a> {
                         warp_index,
                         group,
                         &self.params,
+                        base,
                     )? {
                         let diagnostics = projected
                             .bypass_async_copies
@@ -7446,6 +7644,17 @@ impl<'a> SmCore<'a> {
                                 .topology_candidate_later_cycles,
                             topology_candidate_earlier_cycles: observed
                                 .topology_candidate_earlier_cycles,
+                            pipeline_groups_observed: 1,
+                            pipeline_q1_completion_cycles: observed.pipeline_q1_completion_cycles,
+                            pipeline_q1_exposure_cycles: observed.pipeline_q1_exposure_cycles,
+                            pipeline_q2_completion_cycles: observed.pipeline_q2_completion_cycles,
+                            pipeline_q2_exposure_cycles: observed.pipeline_q2_exposure_cycles,
+                            pipeline_q4_completion_cycles: observed.pipeline_q4_completion_cycles,
+                            pipeline_q4_exposure_cycles: observed.pipeline_q4_exposure_cycles,
+                            pipeline_q8_completion_cycles: observed.pipeline_q8_completion_cycles,
+                            pipeline_q8_exposure_cycles: observed.pipeline_q8_exposure_cycles,
+                            pipeline_q16_completion_cycles: observed.pipeline_q16_completion_cycles,
+                            pipeline_q16_exposure_cycles: observed.pipeline_q16_exposure_cycles,
                         })?;
                     }
                     let limited_counter = match cause {
@@ -9497,6 +9706,9 @@ impl<'a> SmCore<'a> {
                             .async_copy_wait_max_pending_groups;
                         self.async_copies[wix].consume_async_wait(max_pending_groups, t);
                     }
+                    // `Other` includes explicit SB1..SB5 DEPBAR waits. Their
+                    // readiness was enforced through the ordinary barrier
+                    // state above; they never mutate asynchronous-copy groups.
                     OpClass::BlockBarrier | OpClass::Other => {}
                 }
             }
@@ -9507,6 +9719,7 @@ impl<'a> SmCore<'a> {
             if retires_warp {
                 self.warps[wix].done = true;
                 self.warps[wix].next_slot = None;
+                self.warps[wix].ordinary_dependency_wait = None;
                 self.unfinished_warps =
                     self.unfinished_warps
                         .checked_sub(1)
@@ -9552,13 +9765,16 @@ impl<'a> SmCore<'a> {
                 }
             } else {
                 let next_pc = self.warps[wix].insts[self.warps[wix].next].pc;
-                self.warps[wix].next_slot = Some(lookup_dense(
+                let next_slot = lookup_dense(
                     &self.schedule_slots,
                     self.schedule,
                     next_pc,
                     launch_index,
                     warp_slot,
-                )?);
+                )?;
+                self.warps[wix].next_slot = Some(next_slot);
+                self.warps[wix].ordinary_dependency_wait =
+                    next_slot.ordinary_dependency_wait_barrier();
                 self.warps[wix].current_since = t;
                 self.warps[wix].cta_barrier_ready = 0;
                 self.warps[wix].barrier_pipeline_ready = 0;
@@ -12113,7 +12329,7 @@ mod tests {
 
         let committed = slot.state.as_deref().unwrap().committed_groups[0];
         let projected = slot
-            .bypass_copy_projection(0, &committed, &p)
+            .bypass_copy_projection(0, &committed, &p, 80)
             .unwrap()
             .unwrap();
         let per_copy = p
@@ -12138,12 +12354,84 @@ mod tests {
         assert_eq!(projected.topology_candidate_completion_cycles, 75);
         assert_eq!(projected.topology_candidate_later_cycles, 13);
         assert_eq!(projected.topology_candidate_earlier_cycles, 0);
+        assert_eq!(projected.pipeline_q1_completion_cycles, 75);
+        assert_eq!(projected.pipeline_q1_exposure_cycles, 5);
+        assert_eq!(projected.pipeline_q2_completion_cycles, 75);
+        assert_eq!(projected.pipeline_q2_exposure_cycles, 5);
+        assert_eq!(projected.pipeline_q4_completion_cycles, 75);
+        assert_eq!(projected.pipeline_q4_exposure_cycles, 5);
+        assert_eq!(projected.pipeline_q8_completion_cycles, 75);
+        assert_eq!(projected.pipeline_q8_exposure_cycles, 5);
+        assert_eq!(projected.pipeline_q16_completion_cycles, 75);
+        assert_eq!(projected.pipeline_q16_exposure_cycles, 5);
         assert_eq!(slot.async_wait_clear_time(0), Some(aggregate));
 
         slot.consume_async_wait(0, aggregate);
         let state = slot.state.as_deref().unwrap();
         assert!(state.committed_groups.is_empty());
         assert!(state.bypass_copies.is_empty());
+    }
+
+    #[test]
+    fn bypass_pipeline_candidate_tracks_queue_and_idle_arrivals() {
+        let mut copies = vec![
+            BypassPipelineCopyCandidate {
+                instruction: 20,
+                payload_completion: 20,
+                topology_penalty: 4,
+            },
+            BypassPipelineCopyCandidate {
+                instruction: 30,
+                payload_completion: 22,
+                topology_penalty: 6,
+            },
+            BypassPipelineCopyCandidate {
+                instruction: 10,
+                payload_completion: 20,
+                topology_penalty: 8,
+            },
+        ];
+
+        assert_eq!(
+            bypass_pipeline_candidate_completions(&mut copies).unwrap(),
+            [38, 32, 29, 28, 28]
+        );
+        assert_eq!(
+            copies
+                .iter()
+                .map(|copy| (copy.payload_completion, copy.instruction))
+                .collect::<Vec<_>>(),
+            [(20, 10), (20, 20), (22, 30)]
+        );
+
+        copies.push(BypassPipelineCopyCandidate {
+            instruction: 40,
+            payload_completion: 100,
+            topology_penalty: 2,
+        });
+        assert_eq!(
+            bypass_pipeline_candidate_completions(&mut copies).unwrap(),
+            [102; BYPASS_PIPELINE_CANDIDATE_Q.len()]
+        );
+
+        let observation = ReadinessDiagnostics {
+            bypass_async_copies: Some(Box::new(BypassAsyncCopyDiagnostics {
+                copies_observed: 3,
+                pipeline_groups_observed: 1,
+                pipeline_q1_completion_cycles: 38,
+                pipeline_q1_exposure_cycles: 18,
+                ..BypassAsyncCopyDiagnostics::default()
+            })),
+            ..ReadinessDiagnostics::default()
+        };
+        assert_eq!(observation.schema_version(), 16);
+        let mut aggregate = ReadinessDiagnostics::default();
+        aggregate.add_checked(&observation).unwrap();
+        aggregate.add_checked(&observation).unwrap();
+        let aggregate_pipeline = aggregate.bypass_async_copies.unwrap();
+        assert_eq!(aggregate_pipeline.pipeline_groups_observed, 2);
+        assert_eq!(aggregate_pipeline.pipeline_q1_completion_cycles, 76);
+        assert_eq!(aggregate_pipeline.pipeline_q1_exposure_cycles, 36);
     }
 
     #[test]
@@ -12418,6 +12706,49 @@ mod tests {
                 .dependence_counter_l1tex,
             400
         );
+    }
+
+    #[test]
+    fn ordinary_depbar_operand_waits_for_non_memory_producer_without_async_mutation() {
+        // The spacing probe's retained clock reads compile as an S2UR producer
+        // on SB1..SB5 followed by `DEPBAR.LE SBn, 0x0`. The DEPBAR control word
+        // has no wait mask, so the operand itself must consume the ordinary
+        // non-memory producer latency (25 cycles in this fixture).
+        let mut producer = cb(1);
+        producer.write_barrier = Some(barrier(2));
+        let sched = schedule(vec![
+            (0, slot(producer, OpClass::Other, "S2UR UR4, SR_CLOCK")),
+            (16, slot(cb(7), OpClass::Other, "DEPBAR.LE SB2, 0x0")),
+            // Retained only to enable the async protocol sidecar in this
+            // fixture, making absence of accidental group mutation observable.
+            (32, async_wait_slot(0)),
+        ]);
+        let blocks = vec![BlockReplay {
+            launch_index: 0,
+            warps: vec![warp(0, vec![inst(0), inst(16)])],
+        }];
+        let mut core = SmCore::new(&blocks, &sched, &params(), SmMemMode::Flat).unwrap();
+        let mut requests = Vec::new();
+
+        assert_eq!(
+            core.advance(ReplayHorizon::Unbounded, &mut requests)
+                .unwrap(),
+            Advance::Done
+        );
+        assert!(requests.is_empty());
+        assert!(core.async_copies[0].state.is_none());
+        let result = core.result();
+        assert_eq!(result.instructions_issued, 2);
+        assert_eq!(result.cycles, 26);
+        assert_eq!(
+            result
+                .readiness
+                .limiting_cycles
+                .dependence_counter_non_memory_write,
+            25
+        );
+        assert_eq!(result.readiness.async_groups.groups_committed, 0);
+        assert_eq!(result.readiness.async_groups.groups_waited, 0);
     }
 
     #[test]

@@ -59,9 +59,21 @@ dimensions separately. The trace-derived proxy matches all compact/conflict/
 skew/severe NCU topology counts, but the timing-neutral local candidate fails
 depth transfer. See
 [`docs/sm86_async_bypass_multidim_milestone.md`](../docs/sm86_async_bypass_multidim_milestone.md).
-No bypass timing or tail removal is promoted. A future core slice requires an
-arrival-spacing discriminator for a pipelined per-copy/cohort service; the
-consumed local-latency candidate must not be activated or retuned.
+No bypass timing or tail removal is promoted.
+
+That issue-spacing discriminator is now complete in
+[`docs/sm86_async_issue_spacing_milestone.md`](../docs/sm86_async_issue_spacing_milestone.md).
+The campaign retains 52 live cells/468 repeats, 12 NCU endpoints, and 22 NVBit
+traces with schema-16 replay twins. Cache-all provides a strong positive
+spacing response; L2 depth 2 remains nearly flat while depth 8 transitions.
+All `Q={1,2,4,8,16}` candidates tie on the frozen training slice at 3.008
+cycles/group MAE, fail the training bounds, and fail held-out transfer. The
+SB1--SB5 `DEPBAR` compatibility extension uses ordinary dependence-barrier
+readiness without touching SB0 async groups, and spacing-zero predecessor
+timing/traffic remains normalized-equal. No Q, timing change, or tail removal
+is promoted. The next core slice is a per-cohort source-response
+arrival/service observation; do not activate or retune the consumed local or
+pipelined scalar candidates.
 
 ## Acceptance Criteria
 

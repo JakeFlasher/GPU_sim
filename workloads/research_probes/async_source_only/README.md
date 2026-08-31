@@ -123,3 +123,40 @@ PYTHONDONTWRITEBYTECODE=1 python3 \
 Schema 15 reports the separated topology and a timing-neutral per-copy local
 candidate. The candidate fails depth transfer, so production timing and the
 typed bypass tail remain unchanged.
+
+## Issue-spacing assay
+
+`async_issue_spacing` adds compile-time retained clock-sample/XOR spacing
+between copies while preserving the three measured frontiers and placing the
+only global result store after them. It is an issue-spacing manipulation, not
+a direct measurement of individual live source-response arrivals. Layouts are
+the existing compact/conflict/skew/severe geometries; the retained campaign
+uses spacing settings `0/1/2/4/8/16` on selected L2 depths and a cache-all
+depth-4 positive control.
+
+Build and run one representative direct cell:
+
+```bash
+make -C workloads/research_probes/async_source_only async_issue_spacing
+CUDA_VISIBLE_DEVICES=0 \
+  workloads/research_probes/async_source_only/async_issue_spacing \
+  --groups 8192 --depth 2 --route l2 --layout conflict \
+  --spacing-samples 4 --markers off
+```
+
+Reduce the completed direct/NCU/NVBit/schema-16 replay campaign with:
+
+```bash
+PYTHONDONTWRITEBYTECODE=1 python3 \
+  workloads/research_probes/async_source_only/analyze_spacing.py \
+  --root results/captures/sm86_async_issue_spacing_20260830_v1 \
+  --output results/captures/sm86_async_issue_spacing_20260830_v1/analysis/report.json
+```
+
+Schema 16 reports timing-neutral pipelined candidates for
+`Q={1,2,4,8,16}`. Every Q ties on the frozen training slice and none passes
+training or held-out transfer, so production timing and the typed bypass tail
+remain unchanged. The spaced SASS also uses `DEPBAR.LE SB1..SB5, 0x0`; these
+are ordinary scoreboard waits and must not be classified as SB0 async-copy
+group controls. The next probe should expose per-cohort source-response
+arrivals/service rather than fit another scalar latency.

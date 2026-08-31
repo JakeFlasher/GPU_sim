@@ -134,6 +134,21 @@ does not gate waits and the typed visibility tail remains. All eight new traces
 replay deterministically and all predecessor timing/traffic output is unchanged
 after removing only the new observation.
 
+The follow-on
+[issue-spacing milestone](sm86_async_issue_spacing_milestone.md) is also
+complete. Its 52-cell live matrix contains 468 direct repeats, 12 independent
+NCU endpoints, and 22 complete NVBit traces with schema-16 replay twins. The
+cache-all control drains from 63.996 to 15.999 cycles/group, while L2 depth 2
+keeps a nearly flat layout residual and depth 8 shows a distinct spacing
+transition. All five predeclared pipeline-Q candidates tie on the training
+slice at 3.008 cycles/group MAE, none passes the training gate, and the best
+held-out MAE is still 3.407 with a 5.579-cycle maximum. No Q is identified, no
+timing is promoted, and the typed visibility tail remains. The spacing traces
+also required exact SB1--SB5 `DEPBAR` support as ordinary scoreboard waits;
+six spacing-zero outputs remain normalized-equal to schema 15. The next narrow
+GPU-only action is per-cohort source-response arrival/service observation, not
+another scalar bypass latency.
+
 The 2026-08-17
 [causal-readiness milestone](sm86_causal_readiness_milestone.md) is complete.
 Reason-tagged dependency, async-copy, CTA-generation/arrival-spread, and
