@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import json
 import sys
+import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import analyze_line_ownership as analysis
+import capture_line_ownership_execution as execution
 
 
 class LineOwnershipAnalyzerTest(unittest.TestCase):
@@ -51,6 +55,81 @@ class LineOwnershipAnalyzerTest(unittest.TestCase):
             analysis.require_cross_endpoint_tracer_identity(
                 [{"tracer_sha256": "a"}, {"tracer_sha256": "b"}]
             )
+
+    def test_full_campaign_requires_identity_matched_smoke_pass(self) -> None:
+        binary = {"path": "/probe", "sha256": "abc", "size_bytes": 1}
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            report_path = root / "smoke.json"
+            report = {
+                "schema_version": 1,
+                "assay": "sm86_async_source_line_ownership",
+                "mode": "smoke_only",
+                "status": "complete_line_ownership_structural_no_go",
+                "root": str(root),
+                "binary": binary,
+                "timing_promotion_authorized": False,
+                "typed_visibility_tail_required": True,
+                "missing_artifact_count": 0,
+                "validation_error_count": 0,
+                "smoke_gates": {"gate": False},
+                "criteria": {"smoke_passed": False},
+            }
+            report_path.write_text(json.dumps(report), encoding="utf-8")
+            with self.assertRaises(execution.CaptureError):
+                execution.require_full_campaign_authorization(
+                    root, binary, report_path
+                )
+
+            report.update(
+                {
+                    "status": "source_line_ownership_smoke_passed",
+                    "smoke_gates": {"gate": True},
+                    "criteria": {"smoke_passed": True},
+                }
+            )
+            report_path.write_text(json.dumps(report), encoding="utf-8")
+            self.assertEqual(
+                execution.require_full_campaign_authorization(
+                    root, binary, report_path
+                )["status"],
+                "source_line_ownership_smoke_passed",
+            )
+
+    def test_direct_artifact_is_required_before_structural_no_go(self) -> None:
+        binary = {"path": "/probe", "sha256": "abc", "size_bytes": 1}
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            with self.assertRaises(FileNotFoundError):
+                analysis.validate_direct_artifact(
+                    root, "first_line_early", 1, binary
+                )
+
+            directory = (
+                root
+                / "direct"
+                / analysis.paired_cell_name(
+                    "first_line_early", analysis.DIRECT_GROUPS
+                )
+                / "repeat-1"
+            )
+            directory.mkdir(parents=True)
+            for name in (
+                "result.json",
+                "command.json",
+                "direct.run.json",
+                "stderr.txt",
+            ):
+                (directory / name).touch()
+            with mock.patch.object(
+                analysis.execution_producer,
+                "validate_direct",
+                side_effect=analysis.execution_producer.CaptureError("corrupt"),
+            ):
+                with self.assertRaises(analysis.AnalysisError):
+                    analysis.validate_direct_artifact(
+                        root, "first_line_early", 1, binary
+                    )
 
 
 if __name__ == "__main__":

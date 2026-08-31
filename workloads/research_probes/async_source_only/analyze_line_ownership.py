@@ -684,6 +684,44 @@ def direct_cell(root: Path, orientation: str, repetitions: Sequence[int], binary
     return {"orientation": orientation, "repeat_count": len(payloads), "median_issue_delta_cycles_per_group": statistics.median(issue), "median_wait_delta_cycles_per_group": statistics.median(wait), "negative_wait_repeats": sum(value < 0 for value in wait), "wait_delta_cycles_per_group": wait}
 
 
+def validate_direct_artifact(
+    root: Path,
+    orientation: str,
+    repetition: int,
+    binary: Mapping[str, Any],
+) -> dict[str, Any]:
+    directory = root / "direct" / paired_cell_name(orientation, DIRECT_GROUPS) / f"repeat-{repetition}"
+    required = {
+        "result": directory / "result.json",
+        "command": directory / "command.json",
+        "run_manifest": directory / "direct.run.json",
+        "stderr": directory / "stderr.txt",
+    }
+    absent = [str(path) for path in required.values() if not path.is_file()]
+    if absent:
+        raise FileNotFoundError(", ".join(absent))
+    try:
+        execution_producer.validate_direct(
+            directory, execution_cell(orientation), repetition, binary
+        )
+    except execution_producer.CaptureError as error:
+        raise AnalysisError(f"{directory}: {error}") from error
+    payload = read_json(required["result"])
+    validate_target_payload(
+        payload,
+        orientation=orientation,
+        groups=DIRECT_GROUPS,
+        mode="pair",
+        order=expected_order(repetition),
+    )
+    return {
+        "orientation": orientation,
+        "repetition": repetition,
+        "correct": True,
+        "files": {name: sha256(path) for name, path in required.items()},
+    }
+
+
 def signal_gate(cell: Mapping[str, Any]) -> dict[str, bool]:
     return {"issue_median_exact_zero": cell["median_issue_delta_cycles_per_group"] == 0.0, "wait_median_at_most_negative_one": cell["median_wait_delta_cycles_per_group"] <= -1.0, "at_least_eight_negative_repeats": cell["negative_wait_repeats"] >= 8}
 
@@ -691,7 +729,7 @@ def signal_gate(cell: Mapping[str, Any]) -> dict[str, bool]:
 def smoke_gates(bundle: Mapping[str, Any], nvbit: Mapping[tuple[str, str], Mapping[str, Any]], simulator: Mapping[tuple[str, str], Mapping[str, Any]]) -> dict[str, bool]:
     first = simulator[("early_fanout", SMOKE_ORIENTATION)]
     second = simulator[("late_fanout", SMOKE_ORIENTATION)]
-    return {"ncu_contract_exact": bool(bundle["valid"]), "per_lane_ownership_exact": all(value["ownership"]["per_lane_ownership_exact"] and value["ownership"]["preload_vector_exact"] for value in nvbit.values()), "aggregate_topology_exact": all(all(value["aggregate_gates"].values()) for value in simulator.values()), "schema18_paired_tie": first["schema18"] == second["schema18"], "production_paired_tie": first["production"] == second["production"]}
+    return {"direct_artifact_valid": True, "ncu_contract_exact": bool(bundle["valid"]), "per_lane_ownership_exact": all(value["ownership"]["per_lane_ownership_exact"] and value["ownership"]["preload_vector_exact"] for value in nvbit.values()), "aggregate_topology_exact": all(all(value["aggregate_gates"].values()) for value in simulator.values()), "schema18_paired_tie": first["schema18"] == second["schema18"], "production_paired_tie": first["production"] == second["production"]}
 
 
 def choose_status(*, errors: Sequence[str], missing: Sequence[str], structural: bool, smoke_complete: bool, smoke_passed: bool, smoke_only: bool, identification: Mapping[str, bool] | None, holdout: Mapping[str, bool] | None) -> tuple[str, int]:
@@ -741,6 +779,7 @@ def deterministic_aggregate(report: Mapping[str, Any]) -> dict[str, Any]:
             "status",
             "decision",
             "binary",
+            "root",
             "counts",
             "smoke_gates",
             "identification_gate",
@@ -752,6 +791,7 @@ def deterministic_aggregate(report: Mapping[str, Any]) -> dict[str, Any]:
         )
     } | {
         "static": report.get("static"),
+        "direct_artifacts": report.get("direct_artifacts"),
         "ncu_bundles": report.get("ncu_bundles"),
         "nvbit_identities": nvbit,
         "replay_identities": replay,
@@ -793,11 +833,15 @@ def run(root: Path, output: Path, output_md: Path, aggregate: Path, *, smoke_onl
     bundles: dict[tuple[str, int], Any] = {}
     traces: dict[tuple[str, str], Any] = {}
     replays: dict[tuple[str, str], Any] = {}
+    direct_artifacts: dict[tuple[str, int], Any] = {}
     directs: dict[str, Any] = {}
     smoke = identification = holdout = None
     structural = bool(static and static["artifact_valid"] and not static["assay_valid"])
     if not missing and not errors and not structural and binary:
         try:
+            direct_artifacts[(SMOKE_ORIENTATION, 1)] = validate_direct_artifact(
+                root, SMOKE_ORIENTATION, 1, binary
+            )
             bundles[(SMOKE_ORIENTATION, 1)] = validate_bundle(root, SMOKE_ORIENTATION, 1, binary)
             for variant in VARIANTS:
                 traces[(variant, SMOKE_ORIENTATION)] = nvbit_cell(root, variant, SMOKE_ORIENTATION, binary["sha256"])
@@ -853,7 +897,7 @@ def run(root: Path, output: Path, output_md: Path, aggregate: Path, *, smoke_onl
             except Exception as error: errors.append(str(error))
     status, rc = choose_status(errors=errors, missing=missing, structural=structural, smoke_complete=smoke_complete, smoke_passed=smoke_passed, smoke_only=smoke_only, identification=identification, holdout=holdout)
     decision = decision_for_status(status)
-    report = {"schema_version": 1, "assay": "sm86_async_source_line_ownership", "mode": "smoke_only" if smoke_only else "full", "status": status, "decision": decision, "timing_promotion_authorized": False, "typed_visibility_tail_required": True, "binary": binary, "counts": {"ncu_bundles": len(bundles), "ncu_reports": 7 * len(bundles), "ncu_rows": 14 * len(bundles), "nvbit_cells": len(traces), "simulator_cells": len(replays), "direct_cells_read": len(directs)}, "smoke_gates": smoke, "identification_gate": identification, "holdout_gate": holdout, "schema18_prediction": "exact paired tie / zero", "static": static, "ncu_bundles": [bundles[key] for key in sorted(bundles)], "nvbit_cells": [traces[key] for key in sorted(traces)], "simulator_cells": [replays[key] for key in sorted(replays)], "direct_cells": [directs[key] for key in sorted(directs)], "criteria": {"static_passed": static.get("assay_valid") if static else None, "smoke_passed": smoke_passed if smoke_complete else None, "schema18_tie": smoke.get("schema18_paired_tie") if smoke else None, "identification_signal": all(identification.values()) if identification else None, "holdout_signal": all(holdout.values()) if holdout else None, "timing_unchanged": True}, "missing_artifacts": sorted(set(missing)), "validation_errors": errors}
+    report = {"schema_version": 1, "assay": "sm86_async_source_line_ownership", "mode": "smoke_only" if smoke_only else "full", "status": status, "decision": decision, "timing_promotion_authorized": False, "typed_visibility_tail_required": True, "binary": binary, "root": str(root), "counts": {"ncu_bundles": len(bundles), "ncu_reports": 7 * len(bundles), "ncu_rows": 14 * len(bundles), "nvbit_cells": len(traces), "simulator_cells": len(replays), "direct_artifacts_validated": len(direct_artifacts), "direct_timing_cells_read": len(directs)}, "smoke_gates": smoke, "identification_gate": identification, "holdout_gate": holdout, "schema18_prediction": "exact paired tie / zero", "static": static, "direct_artifacts": [direct_artifacts[key] for key in sorted(direct_artifacts)], "ncu_bundles": [bundles[key] for key in sorted(bundles)], "nvbit_cells": [traces[key] for key in sorted(traces)], "simulator_cells": [replays[key] for key in sorted(replays)], "direct_cells": [directs[key] for key in sorted(directs)], "criteria": {"static_passed": static.get("assay_valid") if static else None, "smoke_passed": smoke_passed if smoke_complete else None, "schema18_tie": smoke.get("schema18_paired_tie") if smoke else None, "identification_signal": all(identification.values()) if identification else None, "holdout_signal": all(holdout.values()) if holdout else None, "timing_unchanged": True}, "missing_artifacts": sorted(set(missing)), "validation_errors": errors}
     output.parent.mkdir(parents=True, exist_ok=True)
     output_md.parent.mkdir(parents=True, exist_ok=True)
     aggregate.parent.mkdir(parents=True, exist_ok=True)

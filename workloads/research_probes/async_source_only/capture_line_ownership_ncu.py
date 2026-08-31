@@ -26,6 +26,7 @@ if str(HERE) not in sys.path:
     sys.path.insert(0, str(HERE))
 
 import capture_multiline_response as support
+import capture_line_ownership_execution as execution_support
 
 
 REPO_ROOT = support.REPO_ROOT
@@ -966,6 +967,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         repetitions = [1] if args.smoke else parse_repetitions(args.repeats)
         families = list(FAMILIES) if args.smoke else parse_families(args.families)
         root = args.root.resolve()
+        if not args.smoke:
+            try:
+                execution_support.require_full_campaign_authorization(
+                    root, execution_support.retained_binary(root)
+                )
+            except execution_support.CaptureError as error:
+                raise CampaignError(str(error)) from error
         context = preflight(root, args.ncu)
 
         planned: list[dict[str, Any]] = []

@@ -18,7 +18,7 @@ even the smoke wait delta, and the full two-orientation campaign does not run.
 The tracked aggregate report is
 [sm86_async_line_ownership_report.json](../data/local_labels/sm86_async_line_ownership_report.json),
 with content digest
-`58a4a203ff44d6f41763df74dae25d6af2e77871ecba2b023cad759c50a9a4cf`.
+`1165e3829dd938b47591d61481939c72975fcb097afcfe3a2f8606cd79ad801a`.
 
 No simulator schema, timing, card, scheduler, traffic, readiness, or tail state
 changes. `async_copy_shared_visibility` remains required.
@@ -149,4 +149,7 @@ PYTHONDONTWRITEBYTECODE=1 .venv/bin/python \
 
 The analyzer exits zero only for the completed scientific no-go. Missing,
 malformed, stale, mixed-tracer, manifest-invalid, or replay-inconsistent
-evidence remains nonzero.
+evidence remains nonzero. Both capture CLIs also reject every non-smoke,
+subset, resume, or validation request unless an identity-matched tracked
+aggregate records an explicit smoke pass; this no-go root cannot create any
+full-campaign output.

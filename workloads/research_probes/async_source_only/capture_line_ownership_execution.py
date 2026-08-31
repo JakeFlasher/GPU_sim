@@ -19,6 +19,7 @@ HERE = Path(__file__).resolve().parent
 DEFAULT_ROOT = (
     REPO_ROOT / "results/captures/sm86_async_line_ownership_20260831_v1"
 )
+AGGREGATE_REPORT = REPO_ROOT / "data/local_labels/sm86_async_line_ownership_report.json"
 BINARY = HERE / "async_source_line_ownership"
 SOURCE = HERE / "async_source_line_ownership.cu"
 MAKEFILE = HERE / "Makefile.line_ownership"
@@ -78,6 +79,56 @@ class Cell:
 
 def retained_binary(root: Path) -> dict[str, Any]:
     return support.retained_binary(root)
+
+
+def require_full_campaign_authorization(
+    root: Path,
+    binary: Mapping[str, Any],
+    report_path: Path = AGGREGATE_REPORT,
+) -> dict[str, Any]:
+    if not report_path.is_file():
+        raise CaptureError(
+            f"full campaign requires a smoke-pass aggregate: {report_path}"
+        )
+    report = support.read_json(report_path)
+    expected_scalars = {
+        "schema_version": 1,
+        "assay": "sm86_async_source_line_ownership",
+        "mode": "smoke_only",
+        "status": "source_line_ownership_smoke_passed",
+        "root": str(root.resolve()),
+        "binary": dict(binary),
+        "timing_promotion_authorized": False,
+        "typed_visibility_tail_required": True,
+        "missing_artifact_count": 0,
+        "validation_error_count": 0,
+    }
+    mismatches = {
+        field: {"observed": report.get(field), "expected": value}
+        for field, value in expected_scalars.items()
+        if report.get(field) != value
+    }
+    smoke_gates = report.get("smoke_gates")
+    criteria = report.get("criteria")
+    if (
+        not isinstance(smoke_gates, dict)
+        or not smoke_gates
+        or not all(value is True for value in smoke_gates.values())
+    ):
+        mismatches["smoke_gates"] = {
+            "observed": smoke_gates,
+            "expected": "all true",
+        }
+    if not isinstance(criteria, dict) or criteria.get("smoke_passed") is not True:
+        mismatches["criteria.smoke_passed"] = {
+            "observed": None if not isinstance(criteria, dict) else criteria.get("smoke_passed"),
+            "expected": True,
+        }
+    if mismatches:
+        raise CaptureError(
+            f"full campaign is not authorized by this root/binary smoke: {mismatches}"
+        )
+    return report
 
 
 def expected_order(repetition: int) -> str:
@@ -744,6 +795,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         selected_cells = cells(args.smoke, args.cells)
         selected_repetitions = repetitions(args.smoke, args.repeats)
         root = args.root.resolve()
+        full_execution = not args.smoke and (
+            args.validate_only
+            or args.phase in {"all", "direct", "nvbit", "replay"}
+        )
+        if full_execution:
+            require_full_campaign_authorization(root, retained_binary(root))
         if args.validate_only:
             validate_selected(root, selected_cells, selected_repetitions)
             print(

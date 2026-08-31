@@ -6,7 +6,8 @@
     "size_bytes": 1105656
   },
   "counts": {
-    "direct_cells_read": 0,
+    "direct_artifacts_validated": 1,
+    "direct_timing_cells_read": 0,
     "ncu_bundles": 1,
     "ncu_reports": 7,
     "ncu_rows": 14,
@@ -22,6 +23,19 @@
     "timing_unchanged": true
   },
   "decision": "The frozen shared-wavefront contract fails before timing: both arms report 1,280, not 2,048; direct wait labels remain unread.",
+  "direct_artifacts": [
+    {
+      "correct": true,
+      "files": {
+        "command": "13cb4e87c8001d797be6c538b02ab01b8221c22c15cc04c4c2aed0e6837a8f0b",
+        "result": "fb5afd2f710bc02c97c666fb5852f20e2c1dcdacc187f7a8202f88385baef870",
+        "run_manifest": "1e5805cbb25abf9c4492181fdf7ca4a60783c6809b121f89f9adf72cc0e5a5e7",
+        "stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "orientation": "first_line_early",
+      "repetition": 1
+    }
+  ],
   "holdout_gate": null,
   "identification_gate": null,
   "missing_artifact_count": 0,
@@ -145,10 +159,12 @@
       "variant": "late_fanout"
     }
   ],
+  "root": "/home/jakeshea/GPU_simulator_rebase/results/captures/sm86_async_line_ownership_20260831_v1",
   "schema18_prediction": "exact paired tie / zero",
   "schema_version": 1,
   "smoke_gates": {
     "aggregate_topology_exact": false,
+    "direct_artifact_valid": true,
     "ncu_contract_exact": false,
     "per_lane_ownership_exact": true,
     "production_paired_tie": true,
