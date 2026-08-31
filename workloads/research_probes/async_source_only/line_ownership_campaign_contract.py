@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import os
 import sys
 from dataclasses import asdict, dataclass
@@ -272,10 +273,64 @@ def read_artifact_text(contract: CampaignContract, path: Path) -> str:
         raise ContractError(f"coordinate artifact is not UTF-8: {path}") from error
 
 
+class _StrictJSONError(ValueError):
+    """Internal parse failure for JSON constructs rejected by the contract."""
+
+
+def strict_json_loads(
+    payload: str | bytes | bytearray, *, context: str | Path
+) -> Any:
+    """Decode standards-compliant JSON with unique object keys.
+
+    Python's default decoder silently keeps the last duplicate object key and
+    accepts the non-standard ``NaN``/``Infinity`` constants.  Coordinate
+    evidence is identity-bearing, so both forms are ambiguous and rejected at
+    every nesting level.  V1 callers retain their predecessor decoder by
+    selecting it before calling this coordinate-only helper.
+    """
+
+    def unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+        result: dict[str, Any] = {}
+        for key, value in pairs:
+            if key in result:
+                raise _StrictJSONError(f"duplicate object key {key!r}")
+            result[key] = value
+        return result
+
+    def reject_constant(token: str) -> Any:
+        raise _StrictJSONError(f"non-finite numeric constant {token!r}")
+
+    def require_finite_numbers(value: Any) -> None:
+        if type(value) is float and not math.isfinite(value):
+            raise _StrictJSONError(f"non-finite decoded number {value!r}")
+        if isinstance(value, dict):
+            for nested in value.values():
+                require_finite_numbers(nested)
+        elif isinstance(value, list):
+            for nested in value:
+                require_finite_numbers(nested)
+
+    try:
+        value = json.loads(
+            payload,
+            object_pairs_hook=unique_object,
+            parse_constant=reject_constant,
+        )
+        require_finite_numbers(value)
+        return value
+    except (json.JSONDecodeError, UnicodeDecodeError, _StrictJSONError) as error:
+        raise ContractError(f"{context}: invalid strict JSON: {error}") from error
+
+
 def read_artifact_json(contract: CampaignContract, path: Path) -> dict[str, Any]:
     try:
-        value = json.loads(read_artifact_bytes(contract, path))
-    except json.JSONDecodeError as error:
+        payload = read_artifact_bytes(contract, path)
+        value = (
+            json.loads(payload)
+            if contract == V1_CONTRACT
+            else strict_json_loads(payload, context=path)
+        )
+    except (json.JSONDecodeError, UnicodeDecodeError) as error:
         raise ContractError(f"coordinate artifact is not JSON: {path}: {error}") from error
     if not isinstance(value, dict):
         raise ContractError(f"coordinate artifact is not a JSON object: {path}")

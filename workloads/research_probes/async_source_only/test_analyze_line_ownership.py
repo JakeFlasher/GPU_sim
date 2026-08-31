@@ -5,6 +5,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -240,6 +241,49 @@ class LineOwnershipAnalyzerTest(unittest.TestCase):
                 analysis.direct_wait_cell(
                     Path("/unused"), "first_line_early", (1,), binary
                 )
+
+    def test_v1_target_validation_retains_full_timing_behavior(self) -> None:
+        ncu = analysis.ncu_producer
+        context = SimpleNamespace(device=dict(analysis.EXPECTED_DEVICE))
+        cell = ncu.Cell("first_line_early")
+        payload = ncu.expected_target_output(cell, 1, context)
+
+        def arm() -> dict[str, object]:
+            return {
+                "issue_cycles": 64,
+                "wait_cycles": 128,
+                "total_cycles": 192,
+                "issue_cycles_per_group": 1.0,
+                "wait_cycles_per_group": 2.0,
+                "total_cycles_per_group": 3.0,
+                "token": 1,
+                "mismatches": 0,
+                "sum_consistent": True,
+                "correct": True,
+            }
+
+        payload["early_fanout"] = arm()
+        payload["late_fanout"] = arm()
+        payload["paired_issue_delta_cycles_per_group"] = 0.0
+        payload["paired_wait_delta_cycles_per_group"] = 0.0
+        observed = ncu.validate_target_output(json.dumps(payload), cell, 1, context)
+        self.assertIn("issue_cycles", observed["early_fanout"])
+        analysis.validate_target_payload(
+            observed,
+            orientation="first_line_early",
+            groups=analysis.TRACE_GROUPS,
+            mode="pair",
+            order="ab",
+        )
+        observed["early_fanout"]["issue_cycles"] = "poison"
+        with self.assertRaises(analysis.AnalysisError):
+            analysis.validate_target_payload(
+                observed,
+                orientation="first_line_early",
+                groups=analysis.TRACE_GROUPS,
+                mode="pair",
+                order="ab",
+            )
 
     def test_shared_static_makefile_selection_is_synthetic(self) -> None:
         with mock.patch.multiple(

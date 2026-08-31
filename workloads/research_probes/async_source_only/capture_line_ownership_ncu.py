@@ -464,29 +464,13 @@ def command_document(
     return document
 
 
-def validate_target_output(
-    text: str,
+def expected_target_output(
     cell: Cell,
     repetition: int,
     context: support.Preflight,
 ) -> dict[str, Any]:
     contract = active_contract()
-    payloads: list[dict[str, Any]] = []
-    for line in text.splitlines():
-        if not line.lstrip().startswith("{"):
-            continue
-        try:
-            value = json.loads(line)
-        except json.JSONDecodeError as error:
-            raise CampaignError(f"invalid target JSON: {error}") from error
-        if isinstance(value, dict):
-            payloads.append(value)
-    if len(payloads) != 1:
-        raise CampaignError(
-            f"expected one target JSON from one replay pass, got {len(payloads)}"
-        )
-    payload = payloads[0]
-    expected = {
+    return {
         "workload": active_contract().workload,
         "route": "l2",
         "mode": "pair",
@@ -542,6 +526,42 @@ def validate_target_output(
         "device": context.device["name"],
         "compute_capability": context.device["compute_capability"],
     }
+
+
+def validate_target_output(
+    text: str,
+    cell: Cell,
+    repetition: int,
+    context: support.Preflight,
+) -> dict[str, Any]:
+    contract = active_contract()
+    expected = expected_target_output(cell, repetition, context)
+    payloads: list[dict[str, Any]] = []
+    for line_number, line in enumerate(text.splitlines(), start=1):
+        if not line.lstrip().startswith("{"):
+            continue
+        if contract != campaign_contract.V1_CONTRACT:
+            try:
+                value = execution_support.select_structural_target_json(
+                    line,
+                    expected,
+                    mode="pair",
+                    context=f"NCU target stdout:{line_number}",
+                )
+            except execution_support.StructuralTargetError as error:
+                raise CampaignError(f"invalid target JSON: {error}") from error
+        else:
+            try:
+                value = json.loads(line)
+            except json.JSONDecodeError as error:
+                raise CampaignError(f"invalid target JSON: {error}") from error
+        if isinstance(value, dict):
+            payloads.append(value)
+    if len(payloads) != 1:
+        raise CampaignError(
+            f"expected one target JSON from one replay pass, got {len(payloads)}"
+        )
+    payload = payloads[0]
     for field, expected_value in expected.items():
         if not same_json(payload.get(field), expected_value):
             raise CampaignError(
@@ -837,6 +857,22 @@ def complete_document(
     }
 
 
+def read_structural_complete(
+    path: Path, expected_target: Mapping[str, Any]
+) -> dict[str, Any]:
+    if active_contract() == campaign_contract.V1_CONTRACT:
+        return read_json(path)
+    try:
+        return execution_support.select_structural_complete_json(
+            read_text(path),
+            expected_target,
+            mode="pair",
+            context=str(path),
+        )
+    except execution_support.StructuralTargetError as error:
+        raise CampaignError(f"{path}: invalid structural completion: {error}") from error
+
+
 def validate_retained_family(
     family_directory: Path,
     context: support.Preflight,
@@ -887,7 +923,8 @@ def validate_retained_family(
         context,
     )
     expected_complete = complete_document(family_directory, command, summary, target)
-    if not same_json(read_json(required["complete.json"]), expected_complete):
+    observed_complete = read_structural_complete(required["complete.json"], target)
+    if not same_json(observed_complete, expected_complete):
         raise CampaignError(f"{family_directory}: completion record mismatch")
     return expected_complete
 

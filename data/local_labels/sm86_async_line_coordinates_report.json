@@ -1,4 +1,26 @@
 {
+  "acceptance_criteria": {
+    "AC-4": {
+      "decision_status": "complete_line_coordinates_identification_no_go",
+      "identification_precedes_holdout": true,
+      "label_reads": {
+        "holdout_issue_read": false,
+        "holdout_wait_read": false,
+        "identification_issue_read": true,
+        "identification_wait_read": true
+      },
+      "passed": true
+    },
+    "AC-5": {
+      "counts_exact": true,
+      "missing_artifact_count": 0,
+      "passed": true,
+      "timing_promotion_authorized": false,
+      "timing_unchanged": true,
+      "typed_visibility_tail_required": true,
+      "validation_error_count": 0
+    }
+  },
   "assay": "sm86_async_source_line_ownership_coordinates_v1",
   "binary": {
     "path": "/home/jakeshea/GPU_simulator_rebase/workloads/research_probes/async_source_only/async_source_line_ownership_coordinates",

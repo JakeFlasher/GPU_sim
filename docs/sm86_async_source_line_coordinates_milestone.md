@@ -19,7 +19,7 @@ field is opened.
 The tracked result is
 [sm86_async_line_coordinates_report.json](../data/local_labels/sm86_async_line_coordinates_report.json),
 with content digest
-`3e171f8b5b8a56bec54a36215dbcf811f59e5e1c6c3a31bedd77971d6eb55cd4`.
+`4512d7879a878ac4a8915c18b1fc9d628cc2d106262200a63d04c63aee194838`.
 The retained executable digest is
 `c2c121f725c73725decb655ac006db65912c0dd3e8872786ca3858eb7599a36b`.
 

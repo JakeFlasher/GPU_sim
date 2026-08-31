@@ -42,6 +42,7 @@ from analyze_multiline_response import (  # noqa: E402
 import capture_line_ownership_ncu as ncu_producer  # noqa: E402
 from line_ownership_campaign_contract import (  # noqa: E402
     CampaignContract,
+    ContractError,
     artifact_identity as contract_artifact_identity,
     begin_campaign,
     current_contract,
@@ -49,6 +50,7 @@ from line_ownership_campaign_contract import (  # noqa: E402
     read_artifact_json,
     read_artifact_text,
     strict_json_equal as contract_strict_json_equal,
+    strict_json_loads,
 )
 import capture_line_ownership_execution as execution_producer  # noqa: E402
 from tools.nvbit_tracer.import_trace_contract import (  # noqa: E402
@@ -139,6 +141,14 @@ def read_bytes(path: Path) -> bytes:
         return read_artifact_bytes(ACTIVE_CONTRACT, path)
     return path.read_bytes()
 
+
+def decode_json_value(payload: str | bytes, context: str | Path) -> Any:
+    if ACTIVE_CONTRACT.generation_id == "source_line_ownership_v1":
+        return json.loads(payload)
+    try:
+        return strict_json_loads(payload, context=context)
+    except ContractError as error:
+        raise AnalysisError(f"cannot decode {context}: {error}") from error
 
 
 RESOURCE_RE = re.compile(
@@ -277,6 +287,61 @@ def common_target_contract(orientation: str, groups: int, mode: str) -> dict[str
     }
 
 
+def expected_target_contract(
+    orientation: str, groups: int, mode: str, order: str
+) -> dict[str, Any]:
+    expected = common_target_contract(orientation, groups, mode)
+    expected["order"] = order
+    return expected
+
+
+def select_structural_target_output(
+    path: Path,
+    *,
+    orientation: str,
+    groups: int,
+    mode: str,
+    order: str,
+    exactly_one: bool,
+) -> dict[str, Any]:
+    expected = expected_target_contract(orientation, groups, mode, order)
+    lines = read_text(path).splitlines()
+    if exactly_one:
+        payloads: list[dict[str, Any]] = []
+        for line_number, line in enumerate(lines, start=1):
+            if not line.lstrip().startswith("{"):
+                continue
+            try:
+                payloads.append(
+                    execution_producer.select_structural_target_json(
+                        line,
+                        expected,
+                        mode=mode,
+                        context=f"{path}:{line_number}",
+                    )
+                )
+            except execution_producer.StructuralTargetError as error:
+                raise AnalysisError(str(error)) from error
+        if len(payloads) != 1:
+            raise AnalysisError(
+                f"{path}: expected one target JSON object, got {len(payloads)}"
+            )
+        return payloads[0]
+    for line_number, line in reversed(tuple(enumerate(lines, start=1))):
+        if not line.lstrip().startswith("{"):
+            continue
+        try:
+            return execution_producer.select_structural_target_json(
+                line,
+                expected,
+                mode=mode,
+                context=f"{path}:{line_number}",
+            )
+        except execution_producer.StructuralTargetError as error:
+            raise AnalysisError(str(error)) from error
+    raise AnalysisError(f"{path}: no JSON result object")
+
+
 def validate_target_payload(
     payload: Mapping[str, Any],
     *,
@@ -286,8 +351,7 @@ def validate_target_payload(
     order: str,
     variant: str | None = None,
 ) -> None:
-    expected = common_target_contract(orientation, groups, mode)
-    expected["order"] = order
+    expected = expected_target_contract(orientation, groups, mode, order)
     mismatches = {
         field: {"observed": payload.get(field), "expected": value}
         for field, value in expected.items()
@@ -297,11 +361,27 @@ def validate_target_payload(
         raise AnalysisError(f"target contract mismatch: {mismatches}")
     if mode == "pair":
         for arm in VARIANTS:
-            validate_arm(payload.get(arm), groups, f"target.{arm}")
+            if ACTIVE_CONTRACT.generation_id == "source_line_ownership_v1":
+                validate_arm(payload.get(arm), groups, f"target.{arm}")
+            else:
+                try:
+                    execution_producer.validate_structural_arm(
+                        payload.get(arm), f"target.{arm}"
+                    )
+                except execution_producer.CaptureError as error:
+                    raise AnalysisError(str(error)) from error
     else:
         if payload.get("variant") != variant:
             raise AnalysisError(f"target variant mismatch: {payload.get('variant')!r}")
-        validate_arm(payload.get("result"), groups, f"target.{variant}")
+        if ACTIVE_CONTRACT.generation_id == "source_line_ownership_v1":
+            validate_arm(payload.get("result"), groups, f"target.{variant}")
+        else:
+            try:
+                execution_producer.validate_structural_arm(
+                    payload.get("result"), f"target.{variant}"
+                )
+            except execution_producer.CaptureError as error:
+                raise AnalysisError(str(error)) from error
 
 
 def load_resources(path: Path) -> dict[str, dict[str, int]]:
@@ -471,7 +551,21 @@ def validate_family(
     if absent:
         raise FileNotFoundError(", ".join(absent))
     command = read_json(paths["command.json"])
-    complete = read_json(paths["complete.json"])
+    if ACTIVE_CONTRACT.generation_id == "source_line_ownership_v1":
+        complete = read_json(paths["complete.json"])
+    else:
+        target_contract = expected_target_contract(
+            orientation,
+            TRACE_GROUPS,
+            "pair",
+            expected_order(repetition),
+        )
+        try:
+            complete = ncu_producer.read_structural_complete(
+                paths["complete.json"], target_contract
+            )
+        except ncu_producer.CampaignError as error:
+            raise AnalysisError(str(error)) from error
     expected_ncu_command(command, directory, family, orientation, repetition, binary)
     # The producer owns the exact timestamp-bearing manifest schema. Reuse its
     # validator rather than creating a second provenance implementation.
@@ -511,8 +605,23 @@ def validate_family(
         value = integer(row.get(FAMILY_METRICS[family]), f"{directory}.{family}")
         values[variant] = value
         summaries.append({"id": index, "variant": variant, "metric_value": value})
-    payload = last_json_object(paths["profile.stdout.txt"])
+    if ACTIVE_CONTRACT.generation_id == "source_line_ownership_v1":
+        payload = last_json_object(paths["profile.stdout.txt"])
+    else:
+        payload = select_structural_target_output(
+            paths["profile.stdout.txt"],
+            orientation=orientation,
+            groups=TRACE_GROUPS,
+            mode="pair",
+            order=expected_order(repetition),
+            exactly_one=True,
+        )
     validate_target_payload(payload, orientation=orientation, groups=TRACE_GROUPS, mode="pair", order=expected_order(repetition))
+    if (
+        ACTIVE_CONTRACT.generation_id != "source_line_ownership_v1"
+        and not same_json(complete.get("target_result"), payload)
+    ):
+        raise AnalysisError(f"{directory}: completion target projection mismatch")
     return {"family": family, "values_by_variant": values, "rows": summaries, "files": expected_files, "target": payload}
 
 
@@ -698,10 +807,20 @@ def nvbit_cell(root: Path, variant: str, orientation: str, binary_sha: str) -> d
         path = base / f"extra_info/{reason}.json"
         if not path.is_file():
             raise FileNotFoundError(str(path))
-        value = json.loads(read_text(path))
+        value = decode_json_value(read_text(path), path)
         if value != []:
             raise AnalysisError(f"{name}: nonempty {reason}")
-    payload = last_json_object(base / "stdout.txt")
+    if ACTIVE_CONTRACT.generation_id == "source_line_ownership_v1":
+        payload = last_json_object(base / "stdout.txt")
+    else:
+        payload = select_structural_target_output(
+            base / "stdout.txt",
+            orientation=orientation,
+            groups=TRACE_GROUPS,
+            mode="endpoint",
+            order="ab",
+            exactly_one=False,
+        )
     validate_target_payload(payload, orientation=orientation, groups=TRACE_GROUPS, mode="endpoint", order="ab", variant=variant)
     ownership = lane_ownership_oracle(base, variant, orientation)
     return {"cell": name, "variant": variant, "orientation": orientation, "binary_sha256": binary_sha, "tracer_sha256": tracer, "ownership": ownership, "trace_sha256": sha256(base / "dynamic_trace.pb"), "payload_manifest_sha256": sha256(base / "payload_manifest.json")}

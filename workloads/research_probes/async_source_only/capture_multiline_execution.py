@@ -145,7 +145,21 @@ def atomic_write_json(path: Path, value: Any) -> None:
 
 def read_json(path: Path) -> dict[str, Any]:
     try:
-        value = json.loads(read_bytes(path))
+        payload = read_bytes(path)
+        if _coordinate_artifact_path(path):
+            # Imported lazily so the predecessor multiline/v1 path keeps its
+            # original dependency surface and decoder behavior.
+            from line_ownership_campaign_contract import (
+                ContractError as CampaignContractError,
+                strict_json_loads,
+            )
+
+            try:
+                value = strict_json_loads(payload, context=path)
+            except CampaignContractError as error:
+                raise CaptureError(f"cannot read {path}: {error}") from error
+        else:
+            value = json.loads(payload)
     except (OSError, UnicodeError, json.JSONDecodeError) as error:
         raise CaptureError(f"cannot read {path}: {error}") from error
     if not isinstance(value, dict):

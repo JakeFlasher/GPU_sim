@@ -551,7 +551,106 @@ def deterministic_aggregate(report: Mapping[str, Any]) -> dict[str, Any]:
         "timing_promotion_authorized", "typed_visibility_tail_required",
         "missing_artifact_count", "validation_error_count",
     )
-    return {key: report.get(key) for key in keys}
+    result = {key: report.get(key) for key in keys}
+    if report.get("mode") == "full":
+        result["acceptance_criteria"] = report.get("acceptance_criteria")
+    return result
+
+
+def label_sequence_is_valid(
+    identification: Mapping[str, Any] | None,
+    holdout: Mapping[str, Any] | None,
+    label_reads: Mapping[str, Any],
+) -> bool:
+    if identification is None or "failure_access_state" in label_reads:
+        return False
+    issue = identification.get("issue")
+    if not isinstance(issue, Mapping):
+        return False
+    expected_identification_wait = issue.get("exact_zero") is True
+    if label_reads.get("identification_issue_read") is not True or (
+        label_reads.get("identification_wait_read")
+        is not expected_identification_wait
+    ):
+        return False
+    signal = identification.get("signal") is True
+    if label_reads.get("holdout_issue_read") is not signal:
+        return False
+    if not signal:
+        return holdout is None and label_reads.get("holdout_wait_read") is False
+    if not isinstance(holdout, Mapping):
+        return False
+    holdout_issue = holdout.get("issue")
+    if not isinstance(holdout_issue, Mapping):
+        return False
+    return label_reads.get("holdout_wait_read") is (
+        holdout_issue.get("exact_zero") is True
+    )
+
+
+def full_acceptance_criteria(
+    *,
+    status: str,
+    return_code: int,
+    errors: Sequence[str],
+    missing: Sequence[str],
+    counts: Mapping[str, Any],
+    smoke_gates: Mapping[str, Any] | None,
+    identification: Mapping[str, Any] | None,
+    holdout: Mapping[str, Any] | None,
+    label_reads: Mapping[str, Any],
+) -> dict[str, Any]:
+    complete_statuses = {
+        "complete_line_coordinates_identification_no_go",
+        "complete_line_coordinates_holdout_no_go",
+        "complete_line_coordinates_signal",
+    }
+    counts_exact = base.same_json(
+        dict(counts),
+        {
+            "ncu_bundles": 20,
+            "ncu_reports": 140,
+            "ncu_rows": 280,
+            "nvbit_cells": 4,
+            "simulator_cells": 4,
+            "direct_artifacts_validated": 20,
+        },
+    )
+    structurally_valid = (
+        not errors
+        and not missing
+        and isinstance(smoke_gates, Mapping)
+        and bool(smoke_gates)
+        and all(value is True for value in smoke_gates.values())
+    )
+    ac4_passed = (
+        return_code == 0
+        and status in complete_statuses
+        and label_sequence_is_valid(identification, holdout, label_reads)
+    )
+    ac5_passed = (
+        return_code == 0
+        and status in complete_statuses
+        and structurally_valid
+        and counts_exact
+    )
+    return {
+        "AC-4": {
+            "passed": ac4_passed,
+            "decision_status": status,
+            "identification_precedes_holdout": ac4_passed,
+            "label_reads": dict(label_reads),
+        },
+        "AC-5": {
+            "passed": ac5_passed,
+            "counts_exact": counts_exact,
+            "missing_artifact_count": len(set(missing)),
+            "validation_error_count": len(errors),
+            "timing_unchanged": True,
+            "timing_promotion_authorized": False,
+            "typed_visibility_tail_required": True,
+        },
+    }
 
 
 def outcome(
@@ -800,6 +899,14 @@ def run(
             errors.append(str(error))
     label_reads = summarize_label_access(label_access)
     status, decision, rc = outcome(errors=errors, missing=missing, smoke_only=smoke_only, smoke_passed=smoke_passed, identification=identification, holdout=holdout)
+    counts = {
+        "ncu_bundles": len(bundles),
+        "ncu_reports": 7 * len(bundles),
+        "ncu_rows": 14 * len(bundles),
+        "nvbit_cells": len(traces),
+        "simulator_cells": len(replays),
+        "direct_artifacts_validated": len(provenance),
+    }
     report = {
         "schema_version": 1,
         "generation_id": contract.generation_id,
@@ -810,7 +917,7 @@ def run(
         "root": str(root),
         "binary": binary,
         "decision": decision,
-        "counts": {"ncu_bundles": len(bundles), "ncu_reports": 7 * len(bundles), "ncu_rows": 14 * len(bundles), "nvbit_cells": len(traces), "simulator_cells": len(replays), "direct_artifacts_validated": len(provenance)},
+        "counts": counts,
         "static": static,
         "smoke_gates": smoke_gates,
         "identification_gate": identification,
@@ -825,6 +932,18 @@ def run(
         "missing_artifacts": sorted(set(missing)),
         "validation_errors": errors,
     }
+    if not smoke_only:
+        report["acceptance_criteria"] = full_acceptance_criteria(
+            status=status,
+            return_code=rc,
+            errors=errors,
+            missing=missing,
+            counts=counts,
+            smoke_gates=smoke_gates,
+            identification=identification,
+            holdout=holdout,
+            label_reads=label_reads,
+        )
     report_text = json.dumps(report, indent=2, sort_keys=True) + "\n"
     report_md_text = f"# Line-coordinate report\n\nStatus: `{status}`\n\n{decision}\n"
     aggregate_document = deterministic_aggregate(report)
@@ -865,7 +984,28 @@ def run(
                 f"retained full reports differ from current validation: {mismatches}"
             )
     validate_evidence_tree(contract, root)
-    print(json.dumps({"status": status, "output": str(output), "aggregate": str(aggregate), "aggregate_written": aggregate_written, "errors": len(errors), "missing": len(set(missing))}, sort_keys=True))
+    print(
+        json.dumps(
+            {
+                "status": status,
+                "output": str(output),
+                "aggregate": str(aggregate),
+                "aggregate_written": aggregate_written,
+                "errors": len(errors),
+                "missing": len(set(missing)),
+                "counts": report["counts"],
+                "label_reads": label_reads,
+                "identification_signal": (
+                    None if identification is None else identification["signal"]
+                ),
+                "holdout_signal": None if holdout is None else holdout["signal"],
+                "timing_unchanged": True,
+                "timing_promotion_authorized": False,
+                "acceptance_criteria": report.get("acceptance_criteria"),
+            },
+            sort_keys=True,
+        )
+    )
     return rc
 
 

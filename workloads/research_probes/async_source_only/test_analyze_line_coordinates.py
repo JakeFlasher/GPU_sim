@@ -82,6 +82,25 @@ class LineCoordinateAnalyzerTest(unittest.TestCase):
             ],
         )
 
+    def test_named_ac4_ac5_evidence_is_explicit_and_strict(self) -> None:
+        prefix = f"import sys; sys.path.insert(0, {str(HERE)!r}); "
+        output = json.loads(
+            self.run_python(
+                prefix
+                + "import analyze_line_coordinates as a,json; "
+                + "counts={'ncu_bundles':20,'ncu_reports':140,'ncu_rows':280,'nvbit_cells':4,'simulator_cells':4,'direct_artifacts_validated':20}; "
+                + "reads={'identification_issue_read':True,'identification_wait_read':True,'holdout_issue_read':False,'holdout_wait_read':False}; "
+                + "good=a.full_acceptance_criteria(status='complete_line_coordinates_identification_no_go',return_code=0,errors=[],missing=[],counts=counts,smoke_gates={'all':True},identification={'issue':{'exact_zero':True},'signal':False},holdout=None,label_reads=reads); "
+                + "bad_reads=dict(reads,holdout_issue_read=True); "
+                + "bad=a.full_acceptance_criteria(status='complete_line_coordinates_identification_no_go',return_code=0,errors=[],missing=['missing'],counts=counts,smoke_gates={'all':True},identification={'issue':{'exact_zero':True},'signal':False},holdout=None,label_reads=bad_reads); "
+                + "print(json.dumps({'good':good,'bad':bad},sort_keys=True))"
+            )
+        )
+        self.assertTrue(output["good"]["AC-4"]["passed"])
+        self.assertTrue(output["good"]["AC-5"]["passed"])
+        self.assertFalse(output["bad"]["AC-4"]["passed"])
+        self.assertFalse(output["bad"]["AC-5"]["passed"])
+
     def test_issue_projection_does_not_decode_wait_fields(self) -> None:
         prefix = f"import sys; sys.path.insert(0, {str(HERE)!r}); "
         output = json.loads(
@@ -105,6 +124,166 @@ class LineCoordinateAnalyzerTest(unittest.TestCase):
         self.assertEqual(output["early_fanout"]["issue_cycles"], 2)
         self.assertNotIn("wait_cycles", output["early_fanout"])
         self.assertEqual(output["paired_issue_delta_cycles_per_group"], 0.0)
+
+    def test_structural_target_paths_skip_poisoned_timing_labels(self) -> None:
+        output = json.loads(
+            self.run_python(
+                f"""
+import copy
+import json
+import sys
+from pathlib import Path
+from types import SimpleNamespace
+from unittest import mock
+sys.path.insert(0, {str(HERE)!r})
+import analyze_line_coordinates as coordinate
+
+analysis = coordinate.base
+execution = coordinate.execution
+ncu = analysis.ncu_producer
+context = SimpleNamespace(device=dict(analysis.EXPECTED_DEVICE))
+
+def poisoned_arm():
+    return {{
+        "correct": True,
+        "mismatches": 0,
+        "sum_consistent": True,
+        "issue_cycles": "POISON_TIMING",
+        "wait_cycles": "POISON_TIMING",
+        "total_cycles": "POISON_TIMING",
+        "issue_cycles_per_group": "POISON_TIMING",
+        "wait_cycles_per_group": "POISON_TIMING",
+        "total_cycles_per_group": "POISON_TIMING",
+        "token": "POISON_TIMING",
+    }}
+
+pair_cell = ncu.Cell("first_line_early")
+pair_expected = ncu.expected_target_output(pair_cell, 1, context)
+pair = dict(pair_expected)
+pair["early_fanout"] = poisoned_arm()
+pair["late_fanout"] = poisoned_arm()
+pair["paired_issue_delta_cycles_per_group"] = "POISON_TIMING"
+pair["paired_wait_delta_cycles_per_group"] = "POISON_TIMING"
+pair_text = json.dumps(pair, sort_keys=True)
+
+endpoint_cell = execution.Cell("first")
+endpoint_expected = execution.common_target_contract(
+    endpoint_cell, execution.TRACE_GROUPS, "endpoint"
+)
+endpoint = dict(endpoint_expected)
+endpoint["variant"] = "early_fanout"
+endpoint["order"] = "ab"
+endpoint["result"] = poisoned_arm()
+endpoint_text = json.dumps(endpoint, sort_keys=True)
+
+complete = {{
+    "schema_version": 1,
+    "valid": True,
+    "binding": {{"cell": "synthetic"}},
+    "files": {{"profile.stdout.txt": "synthetic"}},
+    "summary": {{"rows": 2}},
+    "target_result": pair,
+}}
+complete_text = json.dumps(complete, sort_keys=True)
+
+original_raw_decode = json.JSONDecoder.raw_decode
+def reject_poison_decode(decoder, document, index=0):
+    value, end = original_raw_decode(decoder, document, index)
+    if value == "POISON_TIMING":
+        raise AssertionError("timing value was decoded")
+    return value, end
+
+with mock.patch.object(json.JSONDecoder, "raw_decode", reject_poison_decode):
+    ncu_projection = ncu.validate_target_output(pair_text, pair_cell, 1, context)
+    endpoint_projection = execution.select_structural_target_json(
+        endpoint_text,
+        endpoint_expected,
+        mode="endpoint",
+        context="synthetic endpoint",
+    )
+    execution.validate_target(
+        endpoint_projection,
+        endpoint_cell,
+        groups=execution.TRACE_GROUPS,
+        mode="endpoint",
+        variant="early_fanout",
+        structural_only=True,
+    )
+    complete_projection = execution.select_structural_complete_json(
+        complete_text,
+        pair_expected,
+        mode="pair",
+        context="synthetic completion",
+    )
+    with mock.patch.object(analysis, "read_text", return_value=pair_text):
+        analyzer_projection = analysis.select_structural_target_output(
+            Path("synthetic-profile.stdout.txt"),
+            orientation="first_line_early",
+            groups=analysis.TRACE_GROUPS,
+            mode="pair",
+            order="ab",
+            exactly_one=True,
+        )
+    analysis.validate_target_payload(
+        analyzer_projection,
+        orientation="first_line_early",
+        groups=analysis.TRACE_GROUPS,
+        mode="pair",
+        order="ab",
+    )
+
+rejected = 0
+duplicate = endpoint_text.replace(
+    '\"issue_cycles\": \"POISON_TIMING\"',
+    '\"issue_cycles\": 1, \"issue_cycles\": 2',
+    1,
+)
+overflow = endpoint_text.replace(
+    '\"issue_cycles\": \"POISON_TIMING\"',
+    '\"issue_cycles\": 1e999',
+    1,
+)
+for malformed in (duplicate, overflow):
+    try:
+        execution.select_structural_target_json(
+            malformed,
+            endpoint_expected,
+            mode="endpoint",
+            context="malformed endpoint",
+        )
+    except execution.StructuralTargetError:
+        rejected += 1
+bad_mismatch = copy.deepcopy(pair)
+bad_mismatch["early_fanout"]["mismatches"] = True
+try:
+    ncu.validate_target_output(
+        json.dumps(bad_mismatch), pair_cell, 1, context
+    )
+except ncu.CampaignError:
+    rejected += 1
+
+print(json.dumps({{
+    "ncu_arm_fields": sorted(ncu_projection["early_fanout"]),
+    "endpoint_arm_fields": sorted(endpoint_projection["result"]),
+    "complete_arm_fields": sorted(
+        complete_projection["target_result"]["early_fanout"]
+    ),
+    "analyzer_arm_fields": sorted(analyzer_projection["early_fanout"]),
+    "paired_delta_retained": (
+        "paired_issue_delta_cycles_per_group" in ncu_projection
+    ),
+    "negative_rejections": rejected,
+}}, sort_keys=True))
+"""
+            )
+        )
+        expected_fields = ["correct", "mismatches"]
+        self.assertEqual(output["ncu_arm_fields"], expected_fields)
+        self.assertEqual(output["endpoint_arm_fields"], expected_fields)
+        self.assertEqual(output["complete_arm_fields"], expected_fields)
+        self.assertEqual(output["analyzer_arm_fields"], expected_fields)
+        self.assertFalse(output["paired_delta_retained"])
+        self.assertEqual(output["negative_rejections"], 3)
 
     def test_label_projection_is_bound_to_admitted_bytes_and_reports_partial_access(
         self,
@@ -832,6 +1011,170 @@ print(json.dumps({{
         self.assertEqual(
             output,
             {"rejected": True, "target_created": False},
+        )
+
+    def test_coordinate_strict_json_rejects_nested_duplicates_and_nonfinite(
+        self,
+    ) -> None:
+        output = json.loads(
+            self.run_python(
+                f"""
+import json
+import sys
+import tempfile
+from pathlib import Path
+sys.path.insert(0, {str(HERE)!r})
+import line_ownership_campaign_contract as c
+
+root = Path(tempfile.mkdtemp())
+cases = (
+    '{{"binding":{{"timed_out":true,"timed_out":false}}}}',
+    '{{"binding":{{"inputs":[0,1e999]}}}}',
+    '{{"binding":{{"metric":NaN}}}}',
+    '{{"binding":{{"metric":Infinity}}}}',
+    '{{"binding":{{"metric":-Infinity}}}}',
+)
+rejected = 0
+for index, text in enumerate(cases):
+    path = root / f"case-{{index}}.json"
+    path.write_text(text, encoding="utf-8")
+    try:
+        c.read_artifact_json(c.COORDINATE_CONTRACT, path)
+    except c.ContractError:
+        rejected += 1
+print(json.dumps({{"rejected": rejected, "total": len(cases)}}))
+"""
+            )
+        )
+        self.assertEqual(output, {"rejected": 5, "total": 5})
+
+    def test_coordinate_execution_ncu_and_nvbit_reads_use_strict_decoder(
+        self,
+    ) -> None:
+        output = json.loads(
+            self.run_python(
+                f"""
+import dataclasses
+import json
+import sys
+import tempfile
+from pathlib import Path
+sys.path.insert(0, {str(HERE)!r})
+import line_ownership_campaign_contract as c
+
+parent = Path(tempfile.mkdtemp())
+root = parent / "root"
+root.mkdir()
+contract = dataclasses.replace(
+    c.COORDINATE_CONTRACT,
+    evidence_root=root,
+    aggregate_report=parent / "aggregate.json",
+)
+c.configure_once(contract)
+import capture_line_ownership_execution as execution
+import capture_line_ownership_ncu as ncu
+execution.configure_campaign(contract)
+ncu.configure_contract(contract)
+import analyze_line_ownership as analyzer
+
+checks = (
+    (
+        root / "campaign_contract.json",
+        '{{"schema_version":0,"schema_version":1}}',
+        lambda path: c.read_artifact_json(contract, path),
+    ),
+    (
+        root / "analysis/smoke-authorization.json",
+        '{{"criteria":{{"smoke_passed":false,"smoke_passed":true}}}}',
+        lambda path: c.read_artifact_json(contract, path),
+    ),
+    (
+        root / "direct/cell/repeat-1/direct.run.json",
+        '{{"return_code":1,"return_code":0}}',
+        execution.support.read_json,
+    ),
+    (
+        root / "paired_ncu/cell/repeat-1/global_ld/complete.json",
+        '{{"valid":false,"valid":true}}',
+        ncu.read_json,
+    ),
+    (
+        root / "nvbit/cell/campaign_binding.json",
+        '{{"binary":{{"sha256":"bad","sha256":"expected"}}}}',
+        ncu.read_json,
+    ),
+    (
+        root / "nvbit/cell/extra_info/unsupported_memory_path.json",
+        '[{{"valid":false,"valid":true}}]',
+        lambda path: analyzer.decode_json_value(analyzer.read_text(path), path),
+    ),
+    (
+        root / "simulator/cell/replay-1.json",
+        '{{"launches":[{{"timing":{{"cycle":1e999}}}}]}}',
+        execution.support.read_json,
+    ),
+)
+rejected = []
+for path, text, reader in checks:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+    try:
+        reader(path)
+    except (
+        c.ContractError,
+        execution.CaptureError,
+        ncu.CampaignError,
+        analyzer.AnalysisError,
+    ):
+        rejected.append(path.name)
+
+print(json.dumps({{
+    "file_rejections": len(rejected),
+    "file_total": len(checks),
+}}))
+"""
+            )
+        )
+        self.assertEqual(
+            output,
+            {"file_rejections": 7, "file_total": 7},
+        )
+
+    def test_v1_json_decoder_behavior_is_unchanged(self) -> None:
+        output = json.loads(
+            self.run_python(
+                f"""
+import json
+import math
+import sys
+import tempfile
+from pathlib import Path
+sys.path.insert(0, {str(HERE)!r})
+import line_ownership_campaign_contract as c
+import capture_line_ownership_execution as execution
+import capture_line_ownership_ncu as ncu
+
+root = Path(tempfile.mkdtemp())
+path = root / "legacy.json"
+path.write_text(
+    '{{"valid":false,"valid":true,"metric":NaN,"overflow":1e999}}',
+    encoding="utf-8",
+)
+contract_value = c.read_artifact_json(c.V1_CONTRACT, path)
+support_value = execution.support.read_json(path)
+ncu_value = ncu.read_json(path)
+values = (contract_value, support_value, ncu_value)
+print(json.dumps({{
+    "all_last_key_wins": all(value["valid"] is True for value in values),
+    "all_nan": all(math.isnan(value["metric"]) for value in values),
+    "all_overflow": all(math.isinf(value["overflow"]) for value in values),
+}}))
+"""
+            )
+        )
+        self.assertEqual(
+            output,
+            {"all_last_key_wins": True, "all_nan": True, "all_overflow": True},
         )
 
     def test_aggregate_path_is_frozen_before_evidence_reads(self) -> None:

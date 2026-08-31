@@ -6,9 +6,12 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import os
+import re
 import sys
 from dataclasses import dataclass
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
@@ -79,6 +82,297 @@ def configure_campaign(contract: CampaignContract) -> CampaignContract:
 _apply_campaign_contract(CAMPAIGN_CONTRACT)
 
 CaptureError = support.CaptureError
+
+
+class StructuralTargetError(RuntimeError):
+    """Raised when a selectively projected target object is malformed."""
+
+
+_JSON_PRIMITIVE = re.compile(
+    r"(?:true|false|null|-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?)"
+)
+_MAX_FINITE_BINARY64 = Decimal("1.7976931348623157e308")
+
+
+class _SelectiveTargetReader:
+    """Decode selected object fields and only scan unselected JSON values."""
+
+    def __init__(self, text: str, context: str) -> None:
+        self.text = text
+        self.context = context
+        self.index = 0
+
+        def unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+            result: dict[str, Any] = {}
+            for key, value in pairs:
+                if key in result:
+                    raise StructuralTargetError(
+                        f"{self.context}: duplicate JSON key {key!r}"
+                    )
+                result[key] = value
+            return result
+
+        def reject_constant(token: str) -> Any:
+            raise StructuralTargetError(
+                f"{self.context}: non-finite JSON constant {token!r}"
+            )
+
+        self.decoder = json.JSONDecoder(
+            object_pairs_hook=unique_object,
+            parse_constant=reject_constant,
+        )
+
+    def require_finite(self, value: Any) -> None:
+        if type(value) is float and not math.isfinite(value):
+            raise StructuralTargetError(
+                f"{self.context}: non-finite decoded JSON number"
+            )
+        if isinstance(value, dict):
+            for nested in value.values():
+                self.require_finite(nested)
+        elif isinstance(value, list):
+            for nested in value:
+                self.require_finite(nested)
+
+    def whitespace(self) -> None:
+        while self.index < len(self.text) and self.text[self.index].isspace():
+            self.index += 1
+
+    def expect(self, token: str) -> None:
+        self.whitespace()
+        if not self.text.startswith(token, self.index):
+            raise StructuralTargetError(
+                f"{self.context}: expected {token!r} at byte {self.index}"
+            )
+        self.index += len(token)
+
+    def decoded_value(self) -> Any:
+        self.whitespace()
+        try:
+            value, end = self.decoder.raw_decode(self.text, self.index)
+        except (json.JSONDecodeError, ValueError) as error:
+            raise StructuralTargetError(f"{self.context}: {error}") from error
+        self.index = end
+        self.require_finite(value)
+        return value
+
+    def skip_string(self) -> None:
+        self.whitespace()
+        if self.index >= len(self.text) or self.text[self.index] != '"':
+            raise StructuralTargetError(
+                f"{self.context}: expected JSON string at byte {self.index}"
+            )
+        index = self.index + 1
+        while index < len(self.text):
+            character = self.text[index]
+            if character == '"':
+                self.index = index + 1
+                return
+            if ord(character) < 0x20:
+                raise StructuralTargetError(
+                    f"{self.context}: control character in JSON string"
+                )
+            if character == "\\":
+                index += 1
+                if index >= len(self.text):
+                    break
+                escape = self.text[index]
+                if escape == "u":
+                    digits = self.text[index + 1 : index + 5]
+                    if len(digits) != 4 or not re.fullmatch(r"[0-9a-fA-F]{4}", digits):
+                        raise StructuralTargetError(
+                            f"{self.context}: invalid Unicode escape in JSON string"
+                        )
+                    index += 5
+                    continue
+                if escape not in '"\\/bfnrt':
+                    raise StructuralTargetError(
+                        f"{self.context}: invalid JSON string escape {escape!r}"
+                    )
+            index += 1
+        raise StructuralTargetError(f"{self.context}: truncated JSON string")
+
+    def skip_object(self) -> None:
+        self.expect("{")
+        seen: set[str] = set()
+        self.whitespace()
+        if self.index < len(self.text) and self.text[self.index] == "}":
+            self.index += 1
+            return
+        while True:
+            key = self.decoded_value()
+            if not isinstance(key, str):
+                raise StructuralTargetError(f"{self.context}: non-string JSON key")
+            if key in seen:
+                raise StructuralTargetError(
+                    f"{self.context}: duplicate JSON key {key!r}"
+                )
+            seen.add(key)
+            self.expect(":")
+            self.skip_value()
+            self.whitespace()
+            if self.index < len(self.text) and self.text[self.index] == ",":
+                self.index += 1
+                continue
+            self.expect("}")
+            return
+
+    def skip_array(self) -> None:
+        self.expect("[")
+        self.whitespace()
+        if self.index < len(self.text) and self.text[self.index] == "]":
+            self.index += 1
+            return
+        while True:
+            self.skip_value()
+            self.whitespace()
+            if self.index < len(self.text) and self.text[self.index] == ",":
+                self.index += 1
+                continue
+            self.expect("]")
+            return
+
+    def skip_value(self) -> None:
+        self.whitespace()
+        if self.index >= len(self.text):
+            raise StructuralTargetError(f"{self.context}: truncated JSON value")
+        first = self.text[self.index]
+        if first == '"':
+            self.skip_string()
+            return
+        if first == "{":
+            self.skip_object()
+            return
+        if first == "[":
+            self.skip_array()
+            return
+        end = self.index
+        while end < len(self.text) and self.text[end] not in ",]} \t\r\n":
+            end += 1
+        token = self.text[self.index:end]
+        if not _JSON_PRIMITIVE.fullmatch(token):
+            raise StructuralTargetError(
+                f"{self.context}: malformed JSON primitive at byte {self.index}"
+            )
+        if token not in {"true", "false", "null"}:
+            try:
+                numeric = Decimal(token)
+            except InvalidOperation as error:
+                raise StructuralTargetError(
+                    f"{self.context}: invalid JSON number at byte {self.index}"
+                ) from error
+            if not numeric.is_finite() or abs(numeric) > _MAX_FINITE_BINARY64:
+                raise StructuralTargetError(
+                    f"{self.context}: non-finite JSON number at byte {self.index}"
+                )
+        self.index = end
+
+    def object(
+        self, fields: Mapping[str, Any], *, reject_unselected: bool = False
+    ) -> dict[str, Any]:
+        self.expect("{")
+        result: dict[str, Any] = {}
+        seen: set[str] = set()
+        self.whitespace()
+        if self.index < len(self.text) and self.text[self.index] == "}":
+            self.index += 1
+        else:
+            while True:
+                key = self.decoded_value()
+                if not isinstance(key, str):
+                    raise StructuralTargetError(
+                        f"{self.context}: non-string JSON key"
+                    )
+                if key in seen:
+                    raise StructuralTargetError(
+                        f"{self.context}: duplicate JSON key {key!r}"
+                    )
+                seen.add(key)
+                self.expect(":")
+                if key not in fields:
+                    if reject_unselected:
+                        raise StructuralTargetError(
+                            f"{self.context}: unexpected JSON field {key!r}"
+                        )
+                    self.skip_value()
+                elif isinstance(fields[key], Mapping):
+                    result[key] = self.object(fields[key])
+                else:
+                    result[key] = self.decoded_value()
+                self.whitespace()
+                if self.index < len(self.text) and self.text[self.index] == ",":
+                    self.index += 1
+                    continue
+                self.expect("}")
+                break
+        missing = sorted(set(fields) - set(result))
+        if missing:
+            raise StructuralTargetError(
+                f"{self.context}: missing structural JSON fields {missing}"
+            )
+        return result
+
+
+def structural_target_fields(
+    expected: Mapping[str, Any], *, mode: str, context: str
+) -> dict[str, Any]:
+    fields: dict[str, Any] = {field: None for field in expected}
+    arm_fields = {"correct": None, "mismatches": None}
+    if mode == "pair":
+        fields["order"] = None
+        for variant in VARIANTS:
+            fields[variant] = arm_fields
+    elif mode == "endpoint":
+        fields["variant"] = None
+        fields["result"] = arm_fields
+    else:
+        raise StructuralTargetError(f"{context}: unsupported target mode {mode!r}")
+    return fields
+
+
+def select_structural_target_json(
+    text: str,
+    expected: Mapping[str, Any],
+    *,
+    mode: str,
+    context: str,
+) -> dict[str, Any]:
+    """Project identity/topology/correctness without decoding timing labels."""
+
+    fields = structural_target_fields(expected, mode=mode, context=context)
+    reader = _SelectiveTargetReader(text, context)
+    result = reader.object(fields)
+    reader.whitespace()
+    if reader.index != len(reader.text):
+        raise StructuralTargetError(f"{context}: trailing JSON content")
+    return result
+
+
+def select_structural_complete_json(
+    text: str,
+    expected_target: Mapping[str, Any],
+    *,
+    mode: str,
+    context: str,
+) -> dict[str, Any]:
+    """Decode an NCU completion record without decoding nested timing labels."""
+
+    fields = {
+        "schema_version": None,
+        "valid": None,
+        "binding": None,
+        "files": None,
+        "summary": None,
+        "target_result": structural_target_fields(
+            expected_target, mode=mode, context=f"{context}.target_result"
+        ),
+    }
+    reader = _SelectiveTargetReader(text, context)
+    result = reader.object(fields, reject_unselected=True)
+    reader.whitespace()
+    if reader.index != len(reader.text):
+        raise StructuralTargetError(f"{context}: trailing JSON content")
+    return result
 
 
 def same_json(observed: Any, expected: Any) -> bool:
@@ -461,6 +755,14 @@ def validate_arm(value: Any, groups: int, context: str) -> None:
         raise CaptureError(f"{context}: invalid group count")
 
 
+def validate_structural_arm(value: Any, context: str) -> None:
+    if not isinstance(value, dict) or value.get("correct") is not True:
+        raise CaptureError(f"{context}: invalid result arm")
+    mismatches = value.get("mismatches")
+    if type(mismatches) is not int or mismatches != 0:
+        raise CaptureError(f"{context}: correctness mismatch count is not zero")
+
+
 def validate_target(
     payload: Mapping[str, Any],
     cell: Cell,
@@ -469,6 +771,7 @@ def validate_target(
     mode: str,
     order: str = "ab",
     variant: str | None = None,
+    structural_only: bool = False,
 ) -> None:
     expected = common_target_contract(cell, groups, mode)
     mismatches = {
@@ -482,11 +785,17 @@ def validate_target(
         if payload.get("order") != order:
             raise CaptureError("target pair order mismatch")
         for arm in VARIANTS:
-            validate_arm(payload.get(arm), groups, f"target.{arm}")
+            if structural_only:
+                validate_structural_arm(payload.get(arm), f"target.{arm}")
+            else:
+                validate_arm(payload.get(arm), groups, f"target.{arm}")
     else:
         if payload.get("variant") != variant:
             raise CaptureError("target endpoint variant mismatch")
-        validate_arm(payload.get("result"), groups, f"target.{variant}")
+        if structural_only:
+            validate_structural_arm(payload.get("result"), f"target.{variant}")
+        else:
+            validate_arm(payload.get("result"), groups, f"target.{variant}")
 
 
 def direct_command(cell: Cell, repetition: int) -> list[str]:
@@ -733,11 +1042,29 @@ def validate_nvbit(
     if not same_json(command_document, expected):
         raise CaptureError(f"{command_path}: NVBit wrapper binding mismatch")
     stdout_payload = None
-    for line in reversed(support.read_text(destination / "stdout.txt").splitlines()):
-        try:
-            value = json.loads(line)
-        except json.JSONDecodeError:
-            continue
+    structural_only = CAMPAIGN_CONTRACT != V1_CONTRACT
+    target_text = support.read_text(destination / "stdout.txt")
+    expected_target = common_target_contract(cell, TRACE_GROUPS, "endpoint")
+    for line_number, line in reversed(
+        tuple(enumerate(target_text.splitlines(), start=1))
+    ):
+        if structural_only:
+            if not line.lstrip().startswith("{"):
+                continue
+            try:
+                value = select_structural_target_json(
+                    line,
+                    expected_target,
+                    mode="endpoint",
+                    context=f"{destination}/stdout.txt:{line_number}",
+                )
+            except StructuralTargetError as error:
+                raise CaptureError(f"invalid target JSON: {error}") from error
+        else:
+            try:
+                value = json.loads(line)
+            except json.JSONDecodeError:
+                continue
         if isinstance(value, dict):
             stdout_payload = value
             break
@@ -749,6 +1076,7 @@ def validate_nvbit(
         groups=TRACE_GROUPS,
         mode="endpoint",
         variant=variant,
+        structural_only=structural_only,
     )
 
 
