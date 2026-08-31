@@ -40,6 +40,11 @@ from analyze_multiline_response import (  # noqa: E402
     retained_tracer_identity,
 )
 import capture_line_ownership_ncu as ncu_producer  # noqa: E402
+from line_ownership_campaign_contract import (  # noqa: E402
+    CampaignContract,
+    begin_campaign,
+    current_contract,
+)
 import capture_line_ownership_execution as execution_producer  # noqa: E402
 from tools.nvbit_tracer.import_trace_contract import (  # noqa: E402
     LANE_INACTIVE_SENTINEL,
@@ -50,9 +55,10 @@ from tools.nvbit_tracer.proto_binding_loader import (  # noqa: E402
 )
 
 
-DEFAULT_ROOT = REPO_ROOT / "results/captures/sm86_async_line_ownership_20260831_v1"
-DEFAULT_AGGREGATE = REPO_ROOT / "data/local_labels/sm86_async_line_ownership_report.json"
-PROBE_BINARY = HERE / "async_source_line_ownership"
+ACTIVE_CONTRACT: CampaignContract = current_contract()
+DEFAULT_ROOT = ACTIVE_CONTRACT.evidence_root
+DEFAULT_AGGREGATE = ACTIVE_CONTRACT.aggregate_report
+PROBE_BINARY = ACTIVE_CONTRACT.binary
 SIM_RUN = REPO_ROOT / "sim/target/release/sim-run"
 
 TRACE_GROUPS = 64
@@ -81,10 +87,12 @@ FAMILIES = tuple(FAMILY_METRICS)
 EXPECTED_VALUES = {
     "global_ld": 64,
     "ldgsts": 64,
-    "shared_wavefronts": 2048,
+    "shared_wavefronts": ACTIVE_CONTRACT.ncu_shared_wavefronts_per_copy * TRACE_GROUPS,
     "lts_total": 3584,
 }
 PAIRED_TOLERANCE = 36
+
+
 
 RESOURCE_RE = re.compile(
     r"^ Function (?P<name>\S+):\n"
@@ -111,7 +119,7 @@ def row_variants(order: str) -> tuple[str, str]:
 
 
 def paired_cell_name(orientation: str, groups: int = TRACE_GROUPS) -> str:
-    return f"async_source_line_ownership_{orientation}_g{groups}"
+    return f"{ACTIVE_CONTRACT.binary.name}_{orientation}_g{groups}"
 
 
 def endpoint_name(variant: str, orientation: str) -> str:
@@ -189,9 +197,9 @@ def common_target_contract(orientation: str, groups: int, mode: str) -> dict[str
         "ldgsts_instructions_per_copy": 1,
         "ldgsts_sectors_per_copy": 32,
         "unique_ldgsts_lines_per_copy": 12,
-        "payload_wavefronts_per_copy": 32,
-        "projected_bypass_wavefronts_per_copy": 32,
-        "destination_lines_per_copy": 20,
+        "payload_wavefronts_per_copy": ACTIVE_CONTRACT.payload_wavefronts_per_copy,
+        "projected_bypass_wavefronts_per_copy": ACTIVE_CONTRACT.bypass_wavefronts_per_copy,
+        "destination_lines_per_copy": ACTIVE_CONTRACT.destination_lines_per_copy,
         "max_cohort_bank_wavefronts": 3,
         "max_cohort_bypass_wavefronts": 4,
         "cohort_topology_penalty_cycles_per_copy": 120,
@@ -378,6 +386,15 @@ def expected_ncu_command(
         "environment_overrides": EXPECTED_ENVIRONMENT,
         "target_arguments": expected_target_arguments(orientation, repetition),
     }
+    if ACTIVE_CONTRACT.generation_id != "source_line_ownership_v1":
+        expected["campaign_contract"] = ACTIVE_CONTRACT.to_json()
+        if orientation != SMOKE_ORIENTATION or repetition != 1:
+            authorization = execution_producer.smoke_authorization_path(
+                directory.parents[3]
+            )
+            expected["smoke_authorization"] = (
+                execution_producer.support.file_identity(authorization)
+            )
     mismatches = {field: (command.get(field), value) for field, value in expected.items() if command.get(field) != value}
     if mismatches:
         raise AnalysisError(f"{directory}: NCU binding mismatch: {mismatches}")
@@ -420,6 +437,10 @@ def validate_family(
         "repetition", "order", "row_variants", "family", "metric",
         "timeout_seconds", "binary", "device", "ncu", "target_arguments",
     )
+    if "campaign_contract" in command:
+        binding_fields = (*binding_fields, "campaign_contract")
+    if "smoke_authorization" in command:
+        binding_fields = (*binding_fields, "smoke_authorization")
     if complete.get("binding") != {field: command[field] for field in binding_fields}:
         raise AnalysisError(f"{directory}: completion binding mismatch")
     rows = parse_csv_rows(paths["ncu.csv"])
@@ -653,13 +674,18 @@ def replay_cell(root: Path, variant: str, orientation: str) -> dict[str, Any]:
         raise AnalysisError(f"{name}: {error}") from error
     document = read_json(first)
     launch, _, observation = schema_observation(document, 18, name)
-    expected = {"copies_observed": 64, "destination_wavefronts_observed": 2048, "bypass_wavefronts_observed": 2048, "source_cohorts_observed": 512, "destination_lines_observed": 1280, "max_bank_wavefronts_sum": 192, "max_bypass_wavefronts_sum": 256, "cohort_groups_observed": 64, "cohort_copies_observed": 64, "cohort_response_memberships_observed": 2048, "cohort_topology_penalty_cycles": 7680, "cohort_overlap_groups_observed": 64}
+    expected = {"copies_observed": 64, "destination_wavefronts_observed": ACTIVE_CONTRACT.simulator_destination_wavefronts_per_copy * 64, "bypass_wavefronts_observed": ACTIVE_CONTRACT.bypass_wavefronts_per_copy * 64, "source_cohorts_observed": 512, "destination_lines_observed": ACTIVE_CONTRACT.destination_lines_per_copy * 64, "max_bank_wavefronts_sum": 192, "max_bypass_wavefronts_sum": 256, "cohort_groups_observed": 64, "cohort_copies_observed": 64, "cohort_response_memberships_observed": 2048, "cohort_topology_penalty_cycles": 7680, "cohort_overlap_groups_observed": 64}
     gates = {field: observation.get(field) == value for field, value in expected.items()}
     contract = production_contract(launch)
     if not all(contract.values()):
         raise AnalysisError(f"{name}: production/tail contract failed")
     schema = {field: observation.get(field) for field in SCHEMA18_FIELDS}
-    return {"cell": name, "variant": variant, "orientation": orientation, "aggregate_gates": gates, "schema18": schema, "production": production_fingerprint(launch), "replay_sha256": sha256(first)}
+    result = {"cell": name, "variant": variant, "orientation": orientation, "aggregate_gates": gates, "schema18": schema, "production": production_fingerprint(launch), "replay_sha256": sha256(first)}
+    if ACTIVE_CONTRACT.generation_id != "source_line_ownership_v1":
+        # The coordinate-corrected campaign freezes equality over the complete
+        # observation while preserving the accepted v1 report byte shape.
+        result["schema18_complete"] = dict(observation)
+    return result
 
 
 def direct_non_timing_payload(
@@ -906,6 +932,9 @@ def decision_for_status(
 
 
 def run(root: Path, output: Path, output_md: Path, aggregate: Path, *, smoke_only: bool) -> int:
+    locked_contract = begin_campaign()
+    if locked_contract != ACTIVE_CONTRACT:
+        raise AnalysisError("line-ownership analyzer contract changed after import")
     root = root.resolve()
     missing: list[str] = []
     errors: list[str] = []

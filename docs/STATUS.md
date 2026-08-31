@@ -215,6 +215,18 @@ shared LDGSTS wavefronts are 20/copy, simulator
 to equal 32/copy, so the reducer stops before direct wait timing and does not
 run the second-line holdout. No schema or timing is promoted.
 
+The coordinate-corrected successor is complete in the
+[source-line coordinate campaign](sm86_async_source_line_coordinates_milestone.md)
+as `complete_line_coordinates_identification_no_go`. A fresh binary and root
+freeze NCU shared wavefronts 20/copy, simulator destination wavefronts 24/copy,
+bypass projection 32/copy, and destination lines 20/copy as separate exact
+interfaces. All 20 direct pairs, 20 NCU bundles, four per-lane traces, and
+eight replay outputs pass identity and structural admission. Identification
+issue deltas are zero in all ten repeats, but every `early_fanout -
+late_fanout` wait delta is positive (median `+9.435` cycles/group), opposite
+the frozen signal. Holdout timing remains unread; schema 18, production
+timing, and `async_copy_shared_visibility` remain unchanged.
+
 The 2026-08-17
 [causal-readiness milestone](sm86_causal_readiness_milestone.md) is complete.
 Reason-tagged dependency, async-copy, CTA-generation/arrival-spread, and

@@ -26,19 +26,18 @@ if str(HERE) not in sys.path:
     sys.path.insert(0, str(HERE))
 
 import capture_multiline_response as support
+import line_ownership_campaign_contract as campaign_contract
 import capture_line_ownership_execution as execution_support
 
 
 REPO_ROOT = support.REPO_ROOT
-DEFAULT_ROOT = (
-    REPO_ROOT / "results/captures/sm86_async_line_ownership_20260831_v1"
-)
-BINARY = HERE / "async_source_line_ownership"
+DEFAULT_ROOT = campaign_contract.V1_CONTRACT.evidence_root
+BINARY = campaign_contract.V1_CONTRACT.binary
 
 GROUPS = 64
-ORIENTATIONS = ("first_line_early", "second_line_early")
+ORIENTATIONS = campaign_contract.V1_CONTRACT.orientations
 REPETITIONS = tuple(range(1, 11))
-VARIANTS = ("early_fanout", "late_fanout")
+VARIANTS = campaign_contract.V1_CONTRACT.variants
 GPU_INDEX = "0"
 EXPECTED_GPU = dict(support.EXPECTED_GPU)
 DEFAULT_TIMEOUT = 900
@@ -65,47 +64,172 @@ class CampaignError(RuntimeError):
     """Raised for malformed, stale, incomplete, or failed tool evidence."""
 
 
+def active_contract() -> campaign_contract.CampaignContract:
+    return campaign_contract.current_contract()
+
+
+def configure_contract(
+    contract: campaign_contract.CampaignContract,
+) -> campaign_contract.CampaignContract:
+    """Select one immutable generation before any campaign action."""
+
+    configured = campaign_contract.configure_once(contract)
+    execution_support.configure_campaign(configured)
+    return configured
+
+
 @dataclass(frozen=True)
 class Cell:
     orientation: str
 
     @property
     def key(self) -> str:
-        return f"async_source_line_ownership_{self.orientation}_g{GROUPS}"
+        contract = active_contract()
+        return f"{contract.binary.name}_{self.orientation}_g{contract.trace_groups}"
 
 
 def expected_order(repetition: int) -> str:
     return "ab" if repetition % 2 else "ba"
 
 
+def is_smoke_bundle(cell: Cell, repetition: int) -> bool:
+    return cell.orientation == active_contract().orientations[0] and repetition == 1
+
+
 def row_variants(order: str) -> tuple[str, str]:
-    return VARIANTS if order == "ab" else tuple(reversed(VARIANTS))
+    variants = active_contract().variants
+    return variants if order == "ab" else tuple(reversed(variants))
 
 
 def expected_instruction_count() -> int:
-    return GROUPS
+    contract = active_contract()
+    return contract.scalar_ldg_instructions_per_copy * contract.trace_groups
 
 
 def expected_payload_wavefronts() -> int:
-    return 32 * GROUPS
+    contract = active_contract()
+    return contract.ncu_shared_wavefronts_per_copy * contract.trace_groups
 
 
 def expected_lts_total() -> int:
-    return 56 * GROUPS
+    contract = active_contract()
+    return contract.local_device_lts_lookups_per_copy * contract.trace_groups
 
 
 def paired_tolerance() -> int:
     return max(4, math.ceil(0.01 * expected_lts_total()))
 
 
+def require_full_campaign_authorization(
+    root: Path, binary: Mapping[str, Any]
+) -> dict[str, Any]:
+    contract = active_contract()
+    contract.require_allowed_path(root)
+    retained_authorization = root / "analysis/smoke-authorization.json"
+    report_path = (
+        contract.require_allowed_path(retained_authorization)
+        if retained_authorization.is_file()
+        else contract.require_allowed_path(contract.aggregate_report)
+    )
+    if not report_path.is_file():
+        raise CampaignError(
+            f"full campaign requires a smoke-pass aggregate: {report_path}"
+        )
+    report = support.read_json(report_path)
+    expected = {
+        "schema_version": 1,
+        "assay": contract.assay_id,
+        "mode": "smoke_only",
+        "status": contract.smoke_pass_status,
+        "root": str(root.resolve()),
+        "binary": dict(binary),
+        "timing_promotion_authorized": False,
+        "typed_visibility_tail_required": True,
+        "missing_artifact_count": 0,
+        "validation_error_count": 0,
+    }
+    if contract != campaign_contract.V1_CONTRACT:
+        expected.update(
+            {
+                "generation_id": contract.generation_id,
+                "campaign_contract": contract.to_json(),
+            }
+        )
+    mismatches = {
+        field: {"observed": report.get(field), "expected": value}
+        for field, value in expected.items()
+        if report.get(field) != value
+    }
+    smoke_gates = report.get("smoke_gates")
+    criteria = report.get("criteria")
+    if (
+        not isinstance(smoke_gates, dict)
+        or not smoke_gates
+        or not all(value is True for value in smoke_gates.values())
+    ):
+        mismatches["smoke_gates"] = {
+            "observed": smoke_gates,
+            "expected": "all true",
+        }
+    if not isinstance(criteria, dict) or criteria.get("smoke_passed") is not True:
+        mismatches["criteria.smoke_passed"] = {
+            "observed": (
+                None if not isinstance(criteria, dict) else criteria.get("smoke_passed")
+            ),
+            "expected": True,
+        }
+    if mismatches:
+        raise CampaignError(
+            f"full campaign is not authorized by this root/binary smoke: {mismatches}"
+        )
+    return report
+
+
+def retained_binary(root: Path) -> dict[str, Any]:
+    value = support.read_json(root / "static/command.json").get("binary")
+    if not isinstance(value, dict):
+        raise CampaignError("static command record has no binary identity")
+    if not isinstance(value.get("path"), str) or not isinstance(
+        value.get("sha256"), str
+    ) or not isinstance(value.get("size_bytes"), int):
+        raise CampaignError("static command record has malformed binary identity")
+    return dict(value)
+
+
 def preflight(root: Path, ncu: str) -> support.Preflight:
-    if not BINARY.is_file() or not os.access(BINARY, os.X_OK):
-        raise CampaignError(f"probe binary is missing or not executable: {BINARY}")
+    contract = active_contract()
+    binary = contract.binary
+    root = contract.require_allowed_path(root)
+    if contract != campaign_contract.V1_CONTRACT:
+        if root != contract.evidence_root.resolve():
+            raise CampaignError(
+                f"generation {contract.generation_id} requires root "
+                f"{contract.evidence_root}, got {root}"
+            )
+        contract_record = root / "campaign_contract.json"
+        if not contract_record.is_file() or support.read_json(
+            contract_record
+        ) != contract.to_json():
+            raise CampaignError(f"{contract_record}: campaign contract identity mismatch")
+    if not binary.is_file() or not os.access(binary, os.X_OK):
+        raise CampaignError(f"probe binary is missing or not executable: {binary}")
     static_command = support.read_json(root / "static/command.json")
+    if contract != campaign_contract.V1_CONTRACT:
+        static_binding = static_command.get("binding")
+        if (
+            not isinstance(static_binding, dict)
+            or static_binding.get("campaign_contract") != contract.to_json()
+        ):
+            raise CampaignError("static evidence is not bound to the active contract")
+    try:
+        execution_support.validate_campaign_contract_binding(root)
+        execution_support.support.validate_static(root)
+    except execution_support.CaptureError as error:
+        raise CampaignError(f"static evidence validation failed: {error}") from error
     retained_binary = static_command.get("binary")
     if not isinstance(retained_binary, dict):
         raise CampaignError("static command record has no binary identity")
-    expected_path = str(BINARY)
+    expected_path = str(binary)
     if retained_binary.get("path") != expected_path:
         raise CampaignError(
             f"static binary path {retained_binary.get('path')!r} != {expected_path!r}"
@@ -114,8 +238,8 @@ def preflight(root: Path, ncu: str) -> support.Preflight:
     expected_size = retained_binary.get("size_bytes")
     if not isinstance(expected_hash, str) or not isinstance(expected_size, int):
         raise CampaignError("static command record has malformed binary identity")
-    observed_hash = support.sha256(BINARY)
-    if observed_hash != expected_hash or BINARY.stat().st_size != expected_size:
+    observed_hash = support.sha256(binary)
+    if observed_hash != expected_hash or binary.stat().st_size != expected_size:
         raise CampaignError("probe binary differs from static evidence")
 
     ncu_found = shutil.which(ncu)
@@ -171,7 +295,7 @@ def preflight(root: Path, ncu: str) -> support.Preflight:
 def target_arguments(cell: Cell, repetition: int) -> list[str]:
     return [
         "--groups",
-        str(GROUPS),
+        str(active_contract().trace_groups),
         "--orientation",
         cell.orientation,
         "--order",
@@ -215,7 +339,7 @@ def profile_command(
         "--export",
         str(family_directory / "profile"),
         "--force-overwrite",
-        str(BINARY),
+        str(active_contract().binary),
         *target_arguments(cell, repetition),
     ]
 
@@ -245,13 +369,14 @@ def command_document(
     timeout: int,
 ) -> dict[str, Any]:
     order = expected_order(repetition)
-    return {
+    contract = active_contract()
+    document = {
         "schema_version": 1,
         "cell": cell.key,
         "orientation": cell.orientation,
-        "groups": GROUPS,
-        "fixed_depth": 1,
-        "fixed_lead_samples": 16,
+        "groups": contract.trace_groups,
+        "fixed_depth": contract.fixed_depth,
+        "fixed_lead_samples": contract.fixed_lead_samples,
         "repetition": repetition,
         "order": order,
         "row_variants": list(row_variants(order)),
@@ -268,6 +393,20 @@ def command_document(
         ),
         "import_command": import_command(context, family_directory),
     }
+    if contract != campaign_contract.V1_CONTRACT:
+        document["campaign_contract"] = contract.to_json()
+        if not is_smoke_bundle(cell, repetition):
+            authorization = execution_support.smoke_authorization_path(
+                family_directory.parents[3]
+            )
+            if not authorization.is_file():
+                raise CampaignError(
+                    f"full NCU artifact requires smoke authorization: {authorization}"
+                )
+            document["smoke_authorization"] = (
+                execution_support.support.file_identity(authorization)
+            )
+    return document
 
 
 def validate_target_output(
@@ -276,6 +415,7 @@ def validate_target_output(
     repetition: int,
     context: support.Preflight,
 ) -> dict[str, Any]:
+    contract = active_contract()
     payloads: list[dict[str, Any]] = []
     for line in text.splitlines():
         if not line.lstrip().startswith("{"):
@@ -292,37 +432,41 @@ def validate_target_output(
         )
     payload = payloads[0]
     expected = {
-        "workload": "async_source_line_ownership",
+        "workload": active_contract().workload,
         "route": "l2",
         "mode": "pair",
         "order": expected_order(repetition),
         "orientation": cell.orientation,
-        "groups": GROUPS,
-        "warmup_groups": 64,
-        "depth": 1,
-        "lead_clock_samples": 16,
-        "source_cohorts_per_copy": 8,
-        "aligned_source_cohorts_per_copy": 4,
-        "split_source_cohorts_per_copy": 4,
+        "groups": active_contract().trace_groups,
+        "warmup_groups": contract.warmup_groups,
+        "depth": contract.fixed_depth,
+        "lead_clock_samples": contract.fixed_lead_samples,
+        "source_cohorts_per_copy": contract.source_cohorts_per_copy,
+        "aligned_source_cohorts_per_copy": contract.aligned_source_cohorts_per_copy,
+        "split_source_cohorts_per_copy": contract.split_source_cohorts_per_copy,
         "source_sectors_per_cohort": 4,
         "payload_bytes_per_cohort": 64,
         "source_step_stride_bytes": 2048,
         "source_step_max_exclusive_byte": 1968,
         "source_step_guard_bytes": 80,
-        "scalar_ldg_instructions_per_copy": 1,
-        "scalar_ldg_sectors_per_copy": 24,
-        "scalar_preload_lines_per_copy": 8,
-        "ldgsts_instructions_per_copy": 1,
-        "ldgsts_sectors_per_copy": 32,
-        "unique_ldgsts_lines_per_copy": 12,
-        "payload_wavefronts_per_copy": 32,
-        "projected_bypass_wavefronts_per_copy": 32,
-        "destination_lines_per_copy": 20,
-        "max_cohort_bank_wavefronts": 3,
-        "max_cohort_bypass_wavefronts": 4,
-        "cohort_topology_penalty_cycles_per_copy": 120,
-        "response_memberships_per_copy": 32,
-        "local_device_lts_lookups_per_copy": 56,
+        "scalar_ldg_instructions_per_copy": contract.scalar_ldg_instructions_per_copy,
+        "scalar_ldg_sectors_per_copy": contract.scalar_ldg_sectors_per_copy,
+        "scalar_preload_lines_per_copy": contract.scalar_preload_lines_per_copy,
+        "ldgsts_instructions_per_copy": contract.ldgsts_instructions_per_copy,
+        "ldgsts_sectors_per_copy": contract.ldgsts_sectors_per_copy,
+        "unique_ldgsts_lines_per_copy": contract.unique_ldgsts_lines_per_copy,
+        "payload_wavefronts_per_copy": contract.payload_wavefronts_per_copy,
+        "projected_bypass_wavefronts_per_copy": contract.bypass_wavefronts_per_copy,
+        "destination_lines_per_copy": contract.destination_lines_per_copy,
+        "max_cohort_bank_wavefronts": contract.max_cohort_bank_wavefronts,
+        "max_cohort_bypass_wavefronts": contract.max_cohort_bypass_wavefronts,
+        "cohort_topology_penalty_cycles_per_copy": (
+            contract.cohort_topology_penalty_cycles_per_copy
+        ),
+        "response_memberships_per_copy": contract.response_memberships_per_copy,
+        "local_device_lts_lookups_per_copy": (
+            contract.local_device_lts_lookups_per_copy
+        ),
         "source_ring_bytes_per_arm": 32 << 20,
         "source_ring_steps_per_arm": 16384,
         "max_admitted_groups": 16320,
@@ -348,7 +492,7 @@ def validate_target_output(
             raise CampaignError(
                 f"target {field}={payload.get(field)!r}, expected {expected_value!r}"
             )
-    for variant in VARIANTS:
+    for variant in active_contract().variants:
         result = payload.get(variant)
         if not isinstance(result, dict) or result.get("correct") is not True:
             raise CampaignError(f"target result is not correct for {variant}")
@@ -392,7 +536,7 @@ def validate_rows(
         if expected_kernel_fragment(cell) not in kernel.replace(" ", ""):
             raise CampaignError(f"{row_label}: wrong kernel {kernel}")
         expected_strings = {
-            "Process Name": BINARY.name,
+            "Process Name": active_contract().binary.name,
             "Device": GPU_INDEX,
             "CC": context.device["compute_capability"],
             "Grid Size": "(1, 1, 1)",
@@ -463,7 +607,7 @@ def validate_rows(
 
 
 def manifest_binding(command: Mapping[str, Any]) -> dict[str, Any]:
-    return {
+    binding = {
         key: command[key]
         for key in (
             "cell",
@@ -480,6 +624,11 @@ def manifest_binding(command: Mapping[str, Any]) -> dict[str, Any]:
             "target_arguments",
         )
     }
+    if "campaign_contract" in command:
+        binding["campaign_contract"] = dict(command["campaign_contract"])
+    if "smoke_authorization" in command:
+        binding["smoke_authorization"] = dict(command["smoke_authorization"])
+    return binding
 
 
 def manifest_inputs(
@@ -527,7 +676,7 @@ def run_manifest_document(
         raise CampaignError(f"{kind}: executed command differs from command record")
     if run.configured_timeout_seconds != command["timeout_seconds"]:
         raise CampaignError(f"{kind}: timeout differs from command record")
-    return {
+    document = {
         "schema_version": 1,
         "kind": kind,
         "command": list(run.command),
@@ -550,6 +699,7 @@ def run_manifest_document(
             include_report_input=include_report_input,
         ),
     }
+    return document
 
 
 def validate_run_manifest(
@@ -758,7 +908,7 @@ def execute_family(
             f"{family_directory}: import failed: "
             f"return_code={imported.return_code}, timed_out={imported.timed_out}"
         )
-    if support.sha256(BINARY) != context.binary["sha256"]:
+    if support.sha256(active_contract().binary) != context.binary["sha256"]:
         raise CampaignError(f"{family_directory}: binary changed during capture")
 
     rows = support.parse_csv_rows(imported.stdout, str(family_directory / "ncu.csv"))
@@ -783,9 +933,10 @@ def bundle_document(
         for family, document in families.items()
     }
     tolerance = paired_tolerance()
-    hit_delta = abs(values["lts_hit"][VARIANTS[0]] - values["lts_hit"][VARIANTS[1]])
+    variants = active_contract().variants
+    hit_delta = abs(values["lts_hit"][variants[0]] - values["lts_hit"][variants[1]])
     miss_delta = abs(
-        values["lts_miss"][VARIANTS[0]] - values["lts_miss"][VARIANTS[1]]
+        values["lts_miss"][variants[0]] - values["lts_miss"][variants[1]]
     )
     closure = {
         variant: abs(
@@ -793,28 +944,28 @@ def bundle_document(
             + values["lts_miss"][variant]
             - values["lts_total"][variant]
         )
-        for variant in VARIANTS
+        for variant in variants
     }
     gates = {
         "global_ld_exact": all(
             values["global_ld"][variant] == expected_instruction_count()
-            for variant in VARIANTS
+            for variant in variants
         ),
         "ldgsts_exact": all(
             values["ldgsts"][variant] == expected_instruction_count()
-            for variant in VARIANTS
+            for variant in variants
         ),
         "shared_wavefronts_exact": all(
             values["shared_wavefronts"][variant] == expected_payload_wavefronts()
-            for variant in VARIANTS
+            for variant in variants
         ),
         "lts_total_exact": all(
             values["lts_total"][variant] == expected_lts_total()
-            for variant in VARIANTS
+            for variant in variants
         ),
-        "lts_hit_positive": all(values["lts_hit"][variant] > 0 for variant in VARIANTS),
+        "lts_hit_positive": all(values["lts_hit"][variant] > 0 for variant in variants),
         "lts_miss_positive": all(
-            values["lts_miss"][variant] > 0 for variant in VARIANTS
+            values["lts_miss"][variant] > 0 for variant in variants
         ),
         "paired_lts_hit_within_tolerance": hit_delta <= tolerance,
         "paired_lts_miss_within_tolerance": miss_delta <= tolerance,
@@ -825,16 +976,16 @@ def bundle_document(
     }
     background = {
         variant: values["dram"][variant] - values["lts_miss"][variant]
-        for variant in VARIANTS
+        for variant in variants
     }
-    return {
+    document = {
         "schema_version": 1,
         "valid": all(gates.values()),
         "cell": cell.key,
         "orientation": cell.orientation,
-        "groups": GROUPS,
-        "fixed_depth": 1,
-        "fixed_lead_samples": 16,
+        "groups": active_contract().trace_groups,
+        "fixed_depth": active_contract().fixed_depth,
+        "fixed_lead_samples": active_contract().fixed_lead_samples,
         "repetition": repetition,
         "order": expected_order(repetition),
         "row_variants": list(row_variants(expected_order(repetition))),
@@ -849,10 +1000,16 @@ def bundle_document(
         "attribution": {
             "frontier": "l1tex_local_device_aperture_lts_requested_demand",
             "physical_dram_completion_claimed": False,
-            "expected_global_ld_instructions_per_variant": 64,
-            "expected_ldgsts_instructions_per_variant": 64,
-            "expected_shared_payload_wavefronts_per_variant": 2048,
-            "expected_lts_lookup_sectors_per_variant": 3584,
+            "expected_global_ld_instructions_per_variant": (
+                expected_instruction_count()
+            ),
+            "expected_ldgsts_instructions_per_variant": (
+                expected_instruction_count()
+            ),
+            "expected_shared_payload_wavefronts_per_variant": (
+                expected_payload_wavefronts()
+            ),
+            "expected_lts_lookup_sectors_per_variant": expected_lts_total(),
             "paired_tolerance": tolerance,
             "absolute_lts_hit_delta": hit_delta,
             "absolute_lts_miss_delta": miss_delta,
@@ -864,18 +1021,21 @@ def bundle_document(
             "raw_dram_minus_attributed_lts_misses": background,
         },
     }
+    if active_contract() != campaign_contract.V1_CONTRACT:
+        document["campaign_contract"] = active_contract().to_json()
+    return document
 
 
 def parse_orientations(value: str | None) -> list[Cell]:
     if value is None:
-        return [Cell(orientation) for orientation in ORIENTATIONS]
+        return [Cell(orientation) for orientation in active_contract().orientations]
     cells: list[Cell] = []
     for token in value.split(","):
         orientation = token.strip()
-        if orientation not in ORIENTATIONS:
+        if orientation not in active_contract().orientations:
             raise CampaignError(
                 f"invalid orientation {orientation!r}; choose from "
-                f"{','.join(ORIENTATIONS)}"
+                f"{','.join(active_contract().orientations)}"
             )
         cell = Cell(orientation)
         if cell not in cells:
@@ -922,7 +1082,7 @@ def parse_families(value: str | None) -> list[str]:
 
 def parser() -> argparse.ArgumentParser:
     result = argparse.ArgumentParser(description=__doc__)
-    result.add_argument("--root", type=Path, default=DEFAULT_ROOT)
+    result.add_argument("--root", type=Path, default=active_contract().evidence_root)
     result.add_argument(
         "--orientations",
         help="comma-separated first_line_early,second_line_early (default: both)",
@@ -959,21 +1119,17 @@ def main(argv: Sequence[str] | None = None) -> int:
             raise CampaignError("--dry-run and --validate-only are mutually exclusive")
         if args.smoke and (args.orientations or args.repeats or args.families):
             raise CampaignError("--smoke cannot be combined with subset options")
+        contract = campaign_contract.begin_campaign()
         cells = (
-            [Cell("first_line_early")]
+            [Cell(contract.orientations[0])]
             if args.smoke
             else parse_orientations(args.orientations)
         )
         repetitions = [1] if args.smoke else parse_repetitions(args.repeats)
         families = list(FAMILIES) if args.smoke else parse_families(args.families)
-        root = args.root.resolve()
+        root = contract.require_allowed_path(args.root)
         if not args.smoke:
-            try:
-                execution_support.require_full_campaign_authorization(
-                    root, execution_support.retained_binary(root)
-                )
-            except execution_support.CaptureError as error:
-                raise CampaignError(str(error)) from error
+            require_full_campaign_authorization(root, retained_binary(root))
         context = preflight(root, args.ncu)
 
         planned: list[dict[str, Any]] = []
@@ -1087,7 +1243,11 @@ def main(argv: Sequence[str] | None = None) -> int:
                 elif args.validate_only and set(families) == set(FAMILIES):
                     raise CampaignError(f"{cell.key} repeat-{repetition}: incomplete bundle")
         return 0
-    except (CampaignError, support.CampaignError) as error:
+    except (
+        CampaignError,
+        support.CampaignError,
+        campaign_contract.ContractError,
+    ) as error:
         print(f"error: {error}", file=sys.stderr)
         return 1
 

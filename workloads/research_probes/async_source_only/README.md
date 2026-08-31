@@ -340,3 +340,51 @@ reports 20/copy, the simulator destination observation reports 24/copy, and
 the bypass projection reports 32/copy. The result is
 `complete_line_ownership_structural_no_go`; wait timing and the second-line
 holdout remain unread, and no simulator state changes.
+
+## Coordinate-corrected source-line campaign
+
+The fresh `async_source_line_ownership_coordinates` generation reuses the
+unchanged lane mechanism while freezing the four interfaces separately: NCU
+shared wavefronts 20/copy, simulator destination wavefronts 24/copy, bypass
+projection 32/copy, and destination lines 20/copy. Its isolated Makefile,
+binary, evidence root, assay ID, contract record, and report prevent fallback
+to either predecessor result root.
+
+Run the mandatory smoke and its authorization reducer before the full matrix:
+
+```bash
+CUDA_VISIBLE_DEVICES=0 LANG=C LC_ALL=C PYTHONDONTWRITEBYTECODE=1 \
+  .venv/bin/python \
+  workloads/research_probes/async_source_only/capture_line_coordinates_execution.py \
+  --smoke --phase all --timeout 1800
+CUDA_VISIBLE_DEVICES=0 LANG=C LC_ALL=C PYTHONDONTWRITEBYTECODE=1 \
+  .venv/bin/python \
+  workloads/research_probes/async_source_only/capture_line_coordinates_ncu.py \
+  --smoke --timeout 900
+PYTHONDONTWRITEBYTECODE=1 .venv/bin/python \
+  workloads/research_probes/async_source_only/analyze_line_coordinates.py \
+  --smoke-only
+```
+
+Then capture and reduce all ten AB/BA repeats per orientation:
+
+```bash
+CUDA_VISIBLE_DEVICES=0 LANG=C LC_ALL=C PYTHONDONTWRITEBYTECODE=1 \
+  .venv/bin/python \
+  workloads/research_probes/async_source_only/capture_line_coordinates_execution.py \
+  --phase all --timeout 1800
+CUDA_VISIBLE_DEVICES=0 LANG=C LC_ALL=C PYTHONDONTWRITEBYTECODE=1 \
+  .venv/bin/python \
+  workloads/research_probes/async_source_only/capture_line_coordinates_ncu.py \
+  --timeout 900
+PYTHONDONTWRITEBYTECODE=1 .venv/bin/python \
+  workloads/research_probes/async_source_only/analyze_line_coordinates.py
+```
+
+The complete result is `complete_line_coordinates_identification_no_go`.
+All ten issue deltas are zero, but all ten `early_fanout - late_fanout` wait
+deltas are positive, with median `+9.435` cycles/group; the frozen signal
+requires a negative median and at least eight negative repeats. Both holdout
+timing flags remain false. See
+[`docs/sm86_async_source_line_coordinates_milestone.md`](../../../docs/sm86_async_source_line_coordinates_milestone.md)
+for the retained identities, counts, values, and decision.

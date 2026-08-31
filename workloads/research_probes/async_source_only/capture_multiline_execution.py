@@ -44,6 +44,9 @@ VARIANTS = ("span_expensive", "span_cheap")
 REPETITIONS = tuple(range(1, 11))
 TRACE_GROUPS = 64
 DIRECT_GROUPS = 8192
+# Optional immutable generation metadata supplied by a thin campaign wrapper.
+# `None` preserves every predecessor static-binding byte and default.
+STATIC_CAMPAIGN_CONTRACT: Mapping[str, Any] | None = None
 
 
 class CaptureError(RuntimeError):
@@ -400,7 +403,7 @@ def current_static_binding() -> dict[str, Any]:
             raise CaptureError(f"static binding input is missing: {required}")
     make_path = resolve_executable(["make"], environment())
     python_path = Path(sys.executable)
-    return {
+    binding = {
         "schema_version": 2,
         "source": file_identity(SOURCE),
         "makefile": file_identity(MAKEFILE),
@@ -422,6 +425,18 @@ def current_static_binding() -> dict[str, Any]:
         },
         "environment_overrides": environment_overrides(),
     }
+    if STATIC_CAMPAIGN_CONTRACT is not None:
+        binding["campaign_contract"] = dict(STATIC_CAMPAIGN_CONTRACT)
+    return binding
+
+
+def static_campaign_inputs(root: Path) -> dict[str, Path]:
+    if STATIC_CAMPAIGN_CONTRACT is None:
+        return {}
+    record = root.resolve() / "campaign_contract.json"
+    if not record.is_file() or read_json(record) != dict(STATIC_CAMPAIGN_CONTRACT):
+        raise CaptureError(f"{record}: static campaign contract mismatch")
+    return {"campaign_contract": record}
 
 
 def static_build_command() -> list[str]:
@@ -521,6 +536,7 @@ def validate_static(root: Path) -> dict[str, Any]:
         )
     binary = require_binary()
     common_inputs = {
+        **static_campaign_inputs(root),
         "source": SOURCE,
         "makefile": MAKEFILE,
         "nvcc": NVCC,
@@ -553,7 +569,11 @@ def validate_static(root: Path) -> dict[str, Any]:
             timeout=configured,
             stdout_path=static / f"{label}.txt",
             stderr_path=static / f"{label}.stderr.txt",
-            input_paths={"binary": BINARY, "cuobjdump": CUOBJDUMP},
+            input_paths={
+                **static_campaign_inputs(root),
+                "binary": BINARY,
+                "cuobjdump": CUOBJDUMP,
+            },
             output_paths={label: static / f"{label}.txt"},
             environment_value=environment(),
         )
@@ -561,7 +581,11 @@ def validate_static(root: Path) -> dict[str, Any]:
     control_timeout = read_json(control_manifest).get("configured_timeout_seconds")
     if not isinstance(control_timeout, int) or control_timeout < 1:
         raise CaptureError(f"{control_manifest}: invalid configured timeout")
-    control_inputs = {"binary": BINARY, "python": Path(sys.executable)}
+    control_inputs = {
+        **static_campaign_inputs(root),
+        "binary": BINARY,
+        "python": Path(sys.executable),
+    }
     control_inputs.update(
         {
             name: Path(identity["path"])
@@ -678,7 +702,12 @@ def capture_static(root: Path, timeout: int) -> None:
             timeout=configured,
             stdout_path=static / "build.stdout.txt",
             stderr_path=static / "build.stderr.txt",
-            input_paths={"source": SOURCE, "makefile": MAKEFILE, "nvcc": NVCC},
+            input_paths={
+                **static_campaign_inputs(root),
+                "source": SOURCE,
+                "makefile": MAKEFILE,
+                "nvcc": NVCC,
+            },
             output_paths={"binary": BINARY, "build_log": static / "build.log"},
             environment_value=environment(),
         )
@@ -690,7 +719,12 @@ def capture_static(root: Path, timeout: int) -> None:
             stdout_path=static / "build.stdout.txt",
             stderr_path=static / "build.stderr.txt",
             combined_output_path=static / "build.log",
-            input_paths={"source": SOURCE, "makefile": MAKEFILE, "nvcc": NVCC},
+            input_paths={
+                **static_campaign_inputs(root),
+                "source": SOURCE,
+                "makefile": MAKEFILE,
+                "nvcc": NVCC,
+            },
             output_paths={"binary": BINARY, "build_log": static / "build.log"},
             environment_value=environment(),
         )
@@ -721,7 +755,11 @@ def capture_static(root: Path, timeout: int) -> None:
                 timeout=configured,
                 stdout_path=static / output,
                 stderr_path=static / f"{label}.stderr.txt",
-                input_paths={"binary": BINARY, "cuobjdump": CUOBJDUMP},
+                input_paths={
+                    **static_campaign_inputs(root),
+                    "binary": BINARY,
+                    "cuobjdump": CUOBJDUMP,
+                },
                 output_paths={label: static / output},
                 environment_value=environment(),
             )
@@ -732,7 +770,11 @@ def capture_static(root: Path, timeout: int) -> None:
                 manifest_path=static / f"{label}.run.json",
                 stdout_path=static / output,
                 stderr_path=static / f"{label}.stderr.txt",
-                input_paths={"binary": BINARY, "cuobjdump": CUOBJDUMP},
+                input_paths={
+                    **static_campaign_inputs(root),
+                    "binary": BINARY,
+                    "cuobjdump": CUOBJDUMP,
+                },
                 output_paths={label: static / output},
                 environment_value=environment(),
             )
@@ -744,7 +786,11 @@ def capture_static(root: Path, timeout: int) -> None:
         static / "control.stderr.txt",
         static / "control.log",
     )
-    control_inputs = {"binary": BINARY, "python": Path(sys.executable)}
+    control_inputs = {
+        **static_campaign_inputs(root),
+        "binary": BINARY,
+        "python": Path(sys.executable),
+    }
     control_inputs.update(
         {
             name: Path(identity["path"])

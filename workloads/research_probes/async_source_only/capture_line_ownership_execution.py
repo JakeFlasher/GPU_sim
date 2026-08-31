@@ -13,17 +13,24 @@ from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 import capture_multiline_execution as support
+from line_ownership_campaign_contract import (
+    V1_CONTRACT,
+    CampaignContract,
+    ContractError,
+    begin_campaign,
+    configure_once,
+    current_contract,
+)
 
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 HERE = Path(__file__).resolve().parent
-DEFAULT_ROOT = (
-    REPO_ROOT / "results/captures/sm86_async_line_ownership_20260831_v1"
-)
-AGGREGATE_REPORT = REPO_ROOT / "data/local_labels/sm86_async_line_ownership_report.json"
-BINARY = HERE / "async_source_line_ownership"
-SOURCE = HERE / "async_source_line_ownership.cu"
-MAKEFILE = HERE / "Makefile.line_ownership"
+CAMPAIGN_CONTRACT = current_contract()
+DEFAULT_ROOT = CAMPAIGN_CONTRACT.evidence_root
+AGGREGATE_REPORT = CAMPAIGN_CONTRACT.aggregate_report
+BINARY = CAMPAIGN_CONTRACT.binary
+SOURCE = CAMPAIGN_CONTRACT.source
+MAKEFILE = CAMPAIGN_CONTRACT.makefile
 NVBIT_CAPTURE = (
     REPO_ROOT / "workloads/research_probes/ldgsts_burst_release/capture_nvbit.py"
 )
@@ -38,13 +45,32 @@ REPETITIONS = tuple(range(1, 11))
 TRACE_GROUPS = 64
 DIRECT_GROUPS = 8192
 
-# The accepted schema-2 static implementation is intentionally shared. Its
-# build command derives the make target from BINARY.name, so binding these two
-# inputs gives this probe the same stale-source/tool behavior without copying
-# another manifest framework.
-support.BINARY = BINARY
-support.SOURCE = SOURCE
-support.MAKEFILE = MAKEFILE
+def _apply_campaign_contract(contract: CampaignContract) -> None:
+    global CAMPAIGN_CONTRACT, DEFAULT_ROOT, AGGREGATE_REPORT
+    global BINARY, SOURCE, MAKEFILE, TRACE_GROUPS, DIRECT_GROUPS
+    CAMPAIGN_CONTRACT = contract
+    DEFAULT_ROOT = contract.evidence_root
+    AGGREGATE_REPORT = contract.aggregate_report
+    BINARY = contract.binary
+    SOURCE = contract.source
+    MAKEFILE = contract.makefile
+    TRACE_GROUPS = contract.trace_groups
+    DIRECT_GROUPS = contract.direct_groups
+    support.BINARY = BINARY
+    support.SOURCE = SOURCE
+    support.MAKEFILE = MAKEFILE
+    support.STATIC_CAMPAIGN_CONTRACT = (
+        None if contract == V1_CONTRACT else contract.to_json()
+    )
+
+
+def configure_campaign(contract: CampaignContract) -> CampaignContract:
+    configured = configure_once(contract)
+    _apply_campaign_contract(configured)
+    return configured
+
+
+_apply_campaign_contract(CAMPAIGN_CONTRACT)
 
 CaptureError = support.CaptureError
 
@@ -78,15 +104,87 @@ class Cell:
         )
 
 
+def is_smoke_direct(cell: Cell, repetition: int) -> bool:
+    return cell.orientation == "first" and repetition == 1
+
+
+def is_smoke_endpoint(cell: Cell) -> bool:
+    return cell.orientation == "first"
+
+
 def retained_binary(root: Path) -> dict[str, Any]:
     return support.retained_binary(root)
+
+
+def validate_campaign_contract_binding(root: Path) -> Path | None:
+    """Require the retained root to carry the active non-default contract."""
+
+    if CAMPAIGN_CONTRACT == V1_CONTRACT:
+        return None
+    resolved = CAMPAIGN_CONTRACT.require_allowed_path(root)
+    if resolved != CAMPAIGN_CONTRACT.evidence_root.resolve():
+        raise CaptureError(
+            f"generation {CAMPAIGN_CONTRACT.generation_id} requires root "
+            f"{CAMPAIGN_CONTRACT.evidence_root}, got {resolved}"
+        )
+    record = resolved / "campaign_contract.json"
+    if not record.is_file() or support.read_json(record) != CAMPAIGN_CONTRACT.to_json():
+        raise CaptureError(f"{record}: campaign contract identity mismatch")
+    return record
+
+
+def campaign_manifest_inputs(
+    root: Path, *, authorized: bool = False
+) -> dict[str, Path]:
+    record = validate_campaign_contract_binding(root)
+    if record is None:
+        return {}
+    result = {"campaign_contract": record}
+    if authorized:
+        authorization = smoke_authorization_path(root)
+        if not authorization.is_file():
+            raise CaptureError(
+                f"full artifact requires retained smoke authorization: {authorization}"
+            )
+        result["smoke_authorization"] = authorization
+    return result
+
+
+def campaign_document_fields(
+    root: Path, *, authorized: bool = False
+) -> dict[str, Any]:
+    if CAMPAIGN_CONTRACT == V1_CONTRACT:
+        return {}
+    validate_campaign_contract_binding(root)
+    result = {
+        "generation_id": CAMPAIGN_CONTRACT.generation_id,
+        "assay": CAMPAIGN_CONTRACT.assay_id,
+        "root": str(root.resolve()),
+        "campaign_contract": CAMPAIGN_CONTRACT.to_json(),
+    }
+    if authorized:
+        authorization = smoke_authorization_path(root)
+        if not authorization.is_file():
+            raise CaptureError(
+                f"full artifact requires retained smoke authorization: {authorization}"
+            )
+        result["smoke_authorization"] = support.file_identity(authorization)
+    return result
+
+
+def smoke_authorization_path(root: Path) -> Path:
+    return root / "analysis/smoke-authorization.json"
 
 
 def require_full_campaign_authorization(
     root: Path,
     binary: Mapping[str, Any],
-    report_path: Path = AGGREGATE_REPORT,
+    report_path: Path | None = None,
 ) -> dict[str, Any]:
+    validate_campaign_contract_binding(root)
+    if report_path is None:
+        retained = smoke_authorization_path(root)
+        report_path = retained if retained.is_file() else AGGREGATE_REPORT
     if not report_path.is_file():
         raise CaptureError(
             f"full campaign requires a smoke-pass aggregate: {report_path}"
@@ -94,9 +192,9 @@ def require_full_campaign_authorization(
     report = support.read_json(report_path)
     expected_scalars = {
         "schema_version": 1,
-        "assay": "sm86_async_source_line_ownership",
+        "assay": CAMPAIGN_CONTRACT.assay_id,
         "mode": "smoke_only",
-        "status": "source_line_ownership_smoke_passed",
+        "status": CAMPAIGN_CONTRACT.smoke_pass_status,
         "root": str(root.resolve()),
         "binary": dict(binary),
         "timing_promotion_authorized": False,
@@ -104,6 +202,13 @@ def require_full_campaign_authorization(
         "missing_artifact_count": 0,
         "validation_error_count": 0,
     }
+    if CAMPAIGN_CONTRACT != V1_CONTRACT:
+        expected_scalars.update(
+            {
+                "generation_id": CAMPAIGN_CONTRACT.generation_id,
+                "campaign_contract": CAMPAIGN_CONTRACT.to_json(),
+            }
+        )
     mismatches = {
         field: {"observed": report.get(field), "expected": value}
         for field, value in expected_scalars.items()
@@ -130,6 +235,27 @@ def require_full_campaign_authorization(
             f"full campaign is not authorized by this root/binary smoke: {mismatches}"
         )
     return report
+
+
+def bind_campaign_contract(root: Path) -> Path | None:
+    """Bind non-default generation identity without changing v1 artifacts."""
+
+    if CAMPAIGN_CONTRACT == V1_CONTRACT:
+        return None
+    resolved = CAMPAIGN_CONTRACT.require_allowed_path(root)
+    if resolved != CAMPAIGN_CONTRACT.evidence_root.resolve():
+        raise CaptureError(
+            f"generation {CAMPAIGN_CONTRACT.generation_id} requires root "
+            f"{CAMPAIGN_CONTRACT.evidence_root}, got {resolved}"
+        )
+    record = resolved / "campaign_contract.json"
+    expected = CAMPAIGN_CONTRACT.to_json()
+    if record.is_file():
+        if support.read_json(record) != expected:
+            raise CaptureError(f"{record}: campaign contract identity drift")
+    else:
+        support.atomic_write_json(record, expected)
+    return validate_campaign_contract_binding(resolved)
 
 
 def trace_payload_manifest_path(destination: Path) -> Path:
@@ -271,29 +397,48 @@ def target_arguments(
 
 
 def common_target_contract(cell: Cell, groups: int, mode: str) -> dict[str, Any]:
+    contract = CAMPAIGN_CONTRACT
     return {
-        "workload": "async_source_line_ownership",
+        "workload": contract.workload,
         "route": "l2",
         "mode": mode,
         "orientation": cell.orientation_name,
+        "depth": contract.fixed_depth,
         "groups": groups,
-        "warmup_groups": 64,
-        "lead_clock_samples": 16,
-        "source_cohorts_per_copy": 8,
-        "aligned_source_cohorts_per_copy": 4,
-        "split_source_cohorts_per_copy": 4,
-        "source_sectors_per_cohort": 4,
-        "payload_bytes_per_cohort": 64,
-        "scalar_ldg_instructions_per_copy": 1,
-        "scalar_ldg_sectors_per_copy": 24,
-        "scalar_preload_lines_per_copy": 8,
-        "ldgsts_instructions_per_copy": 1,
-        "ldgsts_sectors_per_copy": 32,
-        "unique_ldgsts_lines_per_copy": 12,
-        "payload_wavefronts_per_copy": 32,
-        "projected_bypass_wavefronts_per_copy": 32,
-        "destination_lines_per_copy": 20,
-        "local_device_lts_lookups_per_copy": 56,
+        "warmup_groups": contract.warmup_groups,
+        "lead_clock_samples": contract.fixed_lead_samples,
+        "source_cohorts_per_copy": contract.source_cohorts_per_copy,
+        "aligned_source_cohorts_per_copy": contract.aligned_source_cohorts_per_copy,
+        "split_source_cohorts_per_copy": contract.split_source_cohorts_per_copy,
+        "source_sectors_per_cohort": contract.source_sectors_per_cohort,
+        "payload_bytes_per_cohort": contract.payload_bytes_per_cohort,
+        "source_step_stride_bytes": contract.source_step_stride_bytes,
+        "source_step_max_exclusive_byte": contract.source_step_max_exclusive_byte,
+        "source_step_guard_bytes": contract.source_step_guard_bytes,
+        "scalar_ldg_instructions_per_copy": contract.scalar_ldg_instructions_per_copy,
+        "scalar_ldg_sectors_per_copy": contract.scalar_ldg_sectors_per_copy,
+        "scalar_preload_lines_per_copy": contract.scalar_preload_lines_per_copy,
+        "ldgsts_instructions_per_copy": contract.ldgsts_instructions_per_copy,
+        "ldgsts_sectors_per_copy": contract.ldgsts_sectors_per_copy,
+        "unique_ldgsts_lines_per_copy": contract.unique_ldgsts_lines_per_copy,
+        "payload_wavefronts_per_copy": contract.payload_wavefronts_per_copy,
+        "projected_bypass_wavefronts_per_copy": contract.bypass_wavefronts_per_copy,
+        "destination_lines_per_copy": contract.destination_lines_per_copy,
+        "max_cohort_bank_wavefronts": contract.max_cohort_bank_wavefronts,
+        "max_cohort_bypass_wavefronts": contract.max_cohort_bypass_wavefronts,
+        "cohort_topology_penalty_cycles_per_copy": (
+            contract.cohort_topology_penalty_cycles_per_copy
+        ),
+        "response_memberships_per_copy": contract.response_memberships_per_copy,
+        "local_device_lts_lookups_per_copy": contract.local_device_lts_lookups_per_copy,
+        "source_ring_bytes_per_arm": contract.source_ring_bytes_per_arm,
+        "source_ring_steps_per_arm": contract.source_ring_steps_per_arm,
+        "max_admitted_groups": contract.max_admitted_groups,
+        "source_ring_no_wrap": True,
+        "source_pool_bytes": contract.source_pool_bytes,
+        "source_pool_alignment_bytes": contract.source_pool_alignment_bytes,
+        "source_arm_a_offset_bytes": contract.source_arm_a_offset_bytes,
+        "source_arm_b_offset_bytes": contract.source_arm_b_offset_bytes,
         "source_pool_single_allocation": True,
         "independent_source_arms": True,
         "source_vector_preserved": True,
@@ -382,7 +527,13 @@ def validate_direct_provenance(
         timeout=timeout,
         stdout_path=result_path,
         stderr_path=destination / "stderr.txt",
-        input_paths={"probe_binary": BINARY},
+        input_paths={
+            **campaign_manifest_inputs(
+                destination.parents[2],
+                authorized=not is_smoke_direct(cell, repetition),
+            ),
+            "probe_binary": BINARY,
+        },
         output_paths={"result": result_path},
         environment_value=support.environment(),
     )
@@ -395,6 +546,10 @@ def validate_direct_provenance(
         "command": direct_command(cell, repetition),
         "binary": dict(binary),
         "run_manifest": support.file_identity(manifest),
+        **campaign_document_fields(
+            destination.parents[2],
+            authorized=not is_smoke_direct(cell, repetition),
+        ),
     }
     if command_document != expected:
         raise CaptureError(f"{command_path}: direct binding mismatch")
@@ -448,7 +603,12 @@ def capture_direct(
                 manifest_path=manifest,
                 stdout_path=result_path,
                 stderr_path=destination / "stderr.txt",
-                input_paths={"probe_binary": BINARY},
+                input_paths={
+                    **campaign_manifest_inputs(
+                        root, authorized=not is_smoke_direct(cell, repetition)
+                    ),
+                    "probe_binary": BINARY,
+                },
                 output_paths={"result": result_path},
                 environment_value=support.environment(),
             )
@@ -463,6 +623,9 @@ def capture_direct(
                     "command": command,
                     "binary": binary,
                     "run_manifest": support.file_identity(manifest),
+                    **campaign_document_fields(
+                        root, authorized=not is_smoke_direct(cell, repetition)
+                    ),
                 },
             )
             validate_direct_provenance(destination, cell, repetition, binary)
@@ -550,6 +713,9 @@ def validate_nvbit(
         stdout_path=run_root / "wrapper.stdout.txt",
         stderr_path=run_root / "wrapper.stderr.txt",
         input_paths={
+            **campaign_manifest_inputs(
+                root, authorized=not is_smoke_endpoint(cell)
+            ),
             "capture_helper": NVBIT_CAPTURE,
             "probe_binary": BINARY,
             "tracer": TRACER,
@@ -569,6 +735,7 @@ def validate_nvbit(
         "binary": dict(binary),
         "run_manifest": support.file_identity(manifest),
         "outputs": support.identities(outputs),
+        **campaign_document_fields(root, authorized=not is_smoke_endpoint(cell)),
     }
     if command_document != expected:
         raise CaptureError(f"{command_path}: NVBit wrapper binding mismatch")
@@ -621,6 +788,9 @@ def capture_nvbit(root: Path, selected_cells: Sequence[Cell], timeout: int) -> N
                 stdout_path=run_root / "wrapper.stdout.txt",
                 stderr_path=run_root / "wrapper.stderr.txt",
                 input_paths={
+                    **campaign_manifest_inputs(
+                        root, authorized=not is_smoke_endpoint(cell)
+                    ),
                     "capture_helper": NVBIT_CAPTURE,
                     "probe_binary": BINARY,
                     "tracer": TRACER,
@@ -647,6 +817,9 @@ def capture_nvbit(root: Path, selected_cells: Sequence[Cell], timeout: int) -> N
                     "binary": binary,
                     "run_manifest": support.file_identity(manifest),
                     "outputs": support.identities(outputs),
+                    **campaign_document_fields(
+                        root, authorized=not is_smoke_endpoint(cell)
+                    ),
                 },
             )
             validate_nvbit(root, destination, cell, variant, binary)
@@ -672,6 +845,7 @@ def capture_simulator_build(root: Path, timeout: int) -> None:
     stderr = destination / "stderr.txt"
     command = simulator_build_command()
     inputs = {
+        **campaign_manifest_inputs(root),
         "cargo_manifest": REPO_ROOT / "sim/Cargo.toml",
         "cargo_lock": REPO_ROOT / "sim/Cargo.lock",
     }
@@ -705,6 +879,7 @@ def validate_simulator_build(root: Path) -> None:
         stdout_path=destination / "stdout.txt",
         stderr_path=destination / "stderr.txt",
         input_paths={
+            **campaign_manifest_inputs(root),
             "cargo_manifest": REPO_ROOT / "sim/Cargo.toml",
             "cargo_lock": REPO_ROOT / "sim/Cargo.lock",
         },
@@ -744,6 +919,7 @@ def validate_replay(root: Path, destination: Path, cell: Cell, variant: str) -> 
     trace_directory = root / "nvbit" / cell.endpoint_name(variant)
     validate_trace_payload_manifest(trace_directory)
     inputs = {
+        **campaign_manifest_inputs(root, authorized=not is_smoke_endpoint(cell)),
         "arch_card": ARCH_CARD,
         "control": root / "static/control_bits.json",
         "pchase_card": PCHASE_CARD,
@@ -775,6 +951,7 @@ def validate_replay(root: Path, destination: Path, cell: Cell, variant: str) -> 
         "inputs": support.identities(inputs),
         "outputs": support.identities({"replay_1": first, "replay_2": second}),
         "run_manifests": manifests,
+        **campaign_document_fields(root, authorized=not is_smoke_endpoint(cell)),
     }
     if command_document != expected:
         raise CaptureError(f"{command_path}: replay binding mismatch")
@@ -797,6 +974,9 @@ def capture_replay(root: Path, selected_cells: Sequence[Cell], timeout: int) -> 
             destination.mkdir(parents=True, exist_ok=True)
             command = replay_command(root, cell, variant)
             inputs = {
+                **campaign_manifest_inputs(
+                    root, authorized=not is_smoke_endpoint(cell)
+                ),
                 "arch_card": ARCH_CARD,
                 "control": root / "static/control_bits.json",
                 "pchase_card": PCHASE_CARD,
@@ -837,6 +1017,9 @@ def capture_replay(root: Path, selected_cells: Sequence[Cell], timeout: int) -> 
                         }
                     ),
                     "run_manifests": manifests,
+                    **campaign_document_fields(
+                        root, authorized=not is_smoke_endpoint(cell)
+                    ),
                 },
             )
             validate_replay(root, destination, cell, variant)
@@ -875,6 +1058,7 @@ def validate_selected(
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    _apply_campaign_contract(begin_campaign())
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", type=Path, default=DEFAULT_ROOT)
     parser.add_argument(
@@ -894,6 +1078,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         selected_cells = cells(args.smoke, args.cells)
         selected_repetitions = repetitions(args.smoke, args.repeats)
         root = args.root.resolve()
+        bind_campaign_contract(root)
         full_execution = not args.smoke and (
             args.validate_only
             or args.phase in {"all", "direct", "nvbit", "replay"}
@@ -923,7 +1108,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args.phase in {"all", "replay"}:
             capture_replay(root, selected_cells, args.timeout)
         return 0
-    except (CaptureError, OSError, ValueError) as error:
+    except (CaptureError, ContractError, OSError, ValueError) as error:
         print(f"line ownership execution capture: {error}", file=sys.stderr)
         return 1
 

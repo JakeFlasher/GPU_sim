@@ -1,0 +1,150 @@
+{
+  "assay": "sm86_async_source_line_ownership_coordinates_v1",
+  "binary": {
+    "path": "/home/jakeshea/GPU_simulator_rebase/workloads/research_probes/async_source_only/async_source_line_ownership_coordinates",
+    "sha256": "c2c121f725c73725decb655ac006db65912c0dd3e8872786ca3858eb7599a36b",
+    "size_bytes": 1105656
+  },
+  "campaign_contract": {
+    "aggregate_report": "/home/jakeshea/GPU_simulator_rebase/data/local_labels/sm86_async_line_coordinates_report.json",
+    "aligned_source_cohorts_per_copy": 4,
+    "assay_id": "sm86_async_source_line_ownership_coordinates_v1",
+    "binary": "/home/jakeshea/GPU_simulator_rebase/workloads/research_probes/async_source_only/async_source_line_ownership_coordinates",
+    "bypass_wavefronts_per_copy": 32,
+    "cohort_topology_penalty_cycles_per_copy": 120,
+    "copies_per_group": 1,
+    "destination_lines_per_copy": 20,
+    "direct_groups": 8192,
+    "evidence_root": "/home/jakeshea/GPU_simulator_rebase/results/captures/sm86_async_line_coordinates_20260831_v1",
+    "fixed_depth": 1,
+    "fixed_lead_samples": 16,
+    "forbidden_paths": [
+      "/home/jakeshea/GPU_simulator_rebase/results/captures/sm86_async_line_ownership_20260831_v1",
+      "/home/jakeshea/GPU_simulator_rebase/results/captures/sm86_async_multiline_response_20260831_v1",
+      "/home/jakeshea/GPU_simulator_rebase/data/local_labels/sm86_async_line_ownership_report.json",
+      "/home/jakeshea/GPU_simulator_rebase/data/local_labels/sm86_async_multiline_response_envelope_report.json"
+    ],
+    "generation_id": "source_line_ownership_coordinates_v1",
+    "ldgsts_instructions_per_copy": 1,
+    "ldgsts_sectors_per_copy": 32,
+    "local_device_lts_lookups_per_copy": 56,
+    "makefile": "/home/jakeshea/GPU_simulator_rebase/workloads/research_probes/async_source_only/Makefile.line_ownership_coordinates",
+    "max_admitted_groups": 16320,
+    "max_cohort_bank_wavefronts": 3,
+    "max_cohort_bypass_wavefronts": 4,
+    "ncu_shared_wavefronts_per_copy": 20,
+    "orientations": [
+      "first_line_early",
+      "second_line_early"
+    ],
+    "payload_bytes_per_cohort": 64,
+    "payload_wavefronts_per_copy": 32,
+    "response_memberships_per_copy": 32,
+    "scalar_ldg_instructions_per_copy": 1,
+    "scalar_ldg_sectors_per_copy": 24,
+    "scalar_preload_lines_per_copy": 8,
+    "simulator_destination_wavefronts_per_copy": 24,
+    "smoke_pass_status": "line_coordinates_smoke_passed",
+    "source": "/home/jakeshea/GPU_simulator_rebase/workloads/research_probes/async_source_only/async_source_line_ownership.cu",
+    "source_arm_a_offset_bytes": 0,
+    "source_arm_b_offset_bytes": 33554432,
+    "source_cohorts_per_copy": 8,
+    "source_pool_alignment_bytes": 128,
+    "source_pool_bytes": 67108864,
+    "source_ring_bytes_per_arm": 33554432,
+    "source_ring_steps_per_arm": 16384,
+    "source_sectors_per_cohort": 4,
+    "source_sectors_per_copy": 32,
+    "source_step_guard_bytes": 80,
+    "source_step_max_exclusive_byte": 1968,
+    "source_step_stride_bytes": 2048,
+    "split_source_cohorts_per_copy": 4,
+    "trace_groups": 64,
+    "unique_ldgsts_lines_per_copy": 12,
+    "variants": [
+      "early_fanout",
+      "late_fanout"
+    ],
+    "warmup_groups": 64,
+    "workload": "async_source_line_ownership"
+  },
+  "counts": {
+    "direct_artifacts_validated": 20,
+    "ncu_bundles": 20,
+    "ncu_reports": 140,
+    "ncu_rows": 280,
+    "nvbit_cells": 4,
+    "simulator_cells": 4
+  },
+  "criteria": {
+    "holdout_signal": null,
+    "identification_signal": false,
+    "schema18_tie": true,
+    "smoke_passed": true,
+    "static_passed": true,
+    "timing_unchanged": true
+  },
+  "decision": "Identification did not show the frozen material signal.",
+  "generation_id": "source_line_ownership_coordinates_v1",
+  "holdout_gate": null,
+  "identification_gate": {
+    "issue": {
+      "exact_zero": true,
+      "median": 0.0,
+      "values": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    "signal": false,
+    "wait": {
+      "material": false,
+      "median": 9.43548583984375,
+      "negative_repeats": 0,
+      "values": [
+        9.1650390625,
+        9.7314453125,
+        8.803955078125,
+        9.59423828125,
+        9.3243408203125,
+        10.42431640625,
+        9.546630859375,
+        9.2191162109375,
+        8.692626953125,
+        9.621337890625
+      ]
+    }
+  },
+  "label_reads": {
+    "holdout_issue_read": false,
+    "holdout_wait_read": false,
+    "identification_issue_read": true,
+    "identification_wait_read": true
+  },
+  "missing_artifact_count": 0,
+  "mode": "full",
+  "root": "/home/jakeshea/GPU_simulator_rebase/results/captures/sm86_async_line_coordinates_20260831_v1",
+  "schema18_prediction": "exact paired tie / zero",
+  "schema_version": 1,
+  "smoke_gates": {
+    "aggregate_coordinates_exact": true,
+    "direct_provenance_valid": true,
+    "ncu_contract_exact": true,
+    "per_lane_ownership_exact": true,
+    "production_paired_tie": true,
+    "schema18_paired_tie": true,
+    "static_assay_valid": true
+  },
+  "status": "complete_line_coordinates_identification_no_go",
+  "timing_promotion_authorized": false,
+  "typed_visibility_tail_required": true,
+  "validation_error_count": 0
+}

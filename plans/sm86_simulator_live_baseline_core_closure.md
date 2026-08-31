@@ -135,6 +135,17 @@ destination lines. Because the prospective plan required the NCU shared metric
 to equal 32/copy, it stops as a structural no-go before timing labels. No
 schema-19 observation or production timing change is justified.
 
+The fresh coordinate-corrected continuation is now complete in
+[`docs/sm86_async_source_line_coordinates_milestone.md`](../docs/sm86_async_source_line_coordinates_milestone.md).
+It freezes the four observed interfaces separately and admits the complete
+20-pair direct/NCU matrix plus both orientations' per-lane traces and replay
+twins. The first-line identification issue delta is exactly zero in all ten
+repeats, while every wait delta has the opposite sign from the prospective
+rule (median `+9.435` cycles/group and zero negative repeats). The campaign
+therefore closes as an identification no-go without opening holdout timing.
+No source-line schema, readiness change, coefficient, or timing promotion is
+supported; the typed async-copy visibility tail remains the honest boundary.
+
 ## Acceptance Criteria
 
 - AC-1: A current-host preflight and release build are recorded for the RTX
