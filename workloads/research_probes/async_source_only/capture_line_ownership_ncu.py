@@ -65,6 +65,16 @@ class CampaignError(RuntimeError):
     """Raised for malformed, stale, incomplete, or failed tool evidence."""
 
 
+@dataclass(frozen=True)
+class NcuPreflight:
+    binary: Mapping[str, Any]
+    device: Mapping[str, str]
+    ncu_path: str
+    ncu_version: str
+    ncu_executable: Mapping[str, Any]
+    environment: Mapping[str, str]
+
+
 def active_contract() -> campaign_contract.CampaignContract:
     return campaign_contract.current_contract()
 
@@ -198,6 +208,23 @@ def paired_tolerance() -> int:
     return max(4, math.ceil(0.01 * expected_lts_total()))
 
 
+def ncu_executable_identity(path: Path) -> dict[str, Any]:
+    try:
+        return campaign_contract.artifact_identity(active_contract(), path)
+    except campaign_contract.ContractError as error:
+        raise CampaignError(f"cannot identify NCU executable {path}: {error}") from error
+
+
+def context_ncu_executable(context: support.Preflight | NcuPreflight) -> dict[str, Any]:
+    value = getattr(context, "ncu_executable", None)
+    if not isinstance(value, Mapping):
+        raise CampaignError("coordinate preflight has no NCU executable identity")
+    expected = {"path", "sha256", "size_bytes"}
+    if set(value) != expected:
+        raise CampaignError("coordinate NCU executable identity is malformed")
+    return dict(value)
+
+
 def require_full_campaign_authorization(
     root: Path, binary: Mapping[str, Any]
 ) -> dict[str, Any]:
@@ -241,7 +268,7 @@ def retained_binary(root: Path) -> dict[str, Any]:
     return dict(value)
 
 
-def preflight(root: Path, ncu: str) -> support.Preflight:
+def preflight(root: Path, ncu: str) -> support.Preflight | NcuPreflight:
     contract = active_contract()
     binary = contract.binary
     root = contract.require_allowed_path(root)
@@ -304,6 +331,11 @@ def preflight(root: Path, ncu: str) -> support.Preflight:
     version = support.run_command([ncu_path, "--version"], timeout=30)
     if version.returncode != 0:
         raise CampaignError(f"NCU version query failed: {version.stderr.strip()}")
+    ncu_identity = (
+        ncu_executable_identity(Path(ncu_path))
+        if contract != campaign_contract.V1_CONTRACT
+        else None
+    )
 
     nvidia_smi = shutil.which("nvidia-smi")
     if nvidia_smi is None:
@@ -330,21 +362,25 @@ def preflight(root: Path, ncu: str) -> support.Preflight:
     if not same_json(device, EXPECTED_GPU):
         raise CampaignError(f"GPU identity mismatch: {device} != {EXPECTED_GPU}")
 
-    return support.Preflight(
-        binary={
+    common = {
+        "binary": {
             "path": expected_path,
             "sha256": observed_hash,
             "size_bytes": expected_size,
         },
-        device=device,
-        ncu_path=ncu_path,
-        ncu_version=(version.stdout + version.stderr).strip(),
-        environment={
+        "device": device,
+        "ncu_path": ncu_path,
+        "ncu_version": (version.stdout + version.stderr).strip(),
+        "environment": {
             "CUDA_VISIBLE_DEVICES": GPU_INDEX,
             "LANG": "C",
             "LC_ALL": "C",
         },
-    )
+    }
+    if contract != campaign_contract.V1_CONTRACT:
+        assert ncu_identity is not None
+        return NcuPreflight(ncu_executable=ncu_identity, **common)
+    return support.Preflight(**common)
 
 
 def target_arguments(cell: Cell, repetition: int) -> list[str]:
@@ -450,6 +486,7 @@ def command_document(
     }
     if contract != campaign_contract.V1_CONTRACT:
         document["campaign_contract"] = contract.to_json()
+        document["ncu_executable"] = context_ncu_executable(context)
         if not is_smoke_bundle(cell, repetition):
             authorization = execution_support.smoke_authorization_path(
                 family_directory.parents[3]
@@ -701,6 +738,8 @@ def manifest_binding(command: Mapping[str, Any]) -> dict[str, Any]:
     }
     if "campaign_contract" in command:
         binding["campaign_contract"] = dict(command["campaign_contract"])
+    if "ncu_executable" in command:
+        binding["ncu_executable"] = dict(command["ncu_executable"])
     if "smoke_authorization" in command:
         binding["smoke_authorization"] = dict(command["smoke_authorization"])
     return binding
@@ -722,6 +761,8 @@ def manifest_inputs(
             family_directory / "command.json", family_directory
         ),
     }
+    if "ncu_executable" in command:
+        inputs["ncu_executable"] = dict(command["ncu_executable"])
     if include_report_input:
         inputs["profile_report"] = optional_file_identity(
             family_directory / "profile.ncu-rep", family_directory
@@ -1002,6 +1043,12 @@ def execute_family(
         )
     if sha256(active_contract().binary) != context.binary["sha256"]:
         raise CampaignError(f"{family_directory}: binary changed during capture")
+    if active_contract() != campaign_contract.V1_CONTRACT:
+        current_ncu = ncu_executable_identity(Path(context.ncu_path))
+        if not same_json(current_ncu, context_ncu_executable(context)):
+            raise CampaignError(
+                f"{family_directory}: NCU executable changed during capture"
+            )
 
     rows = support.parse_csv_rows(imported.stdout, str(family_directory / "ncu.csv"))
     summary = validate_rows(rows, cell, repetition, family, context)
@@ -1024,6 +1071,31 @@ def bundle_document(
         family: dict(document["summary"]["values_by_variant"])
         for family, document in families.items()
     }
+    ncu_identity: dict[str, Any] | None = None
+    if active_contract() != campaign_contract.V1_CONTRACT:
+        observed_identities = []
+        for family, family_document in families.items():
+            binding = family_document.get("binding")
+            if not isinstance(binding, Mapping) or not isinstance(
+                binding.get("ncu_executable"), Mapping
+            ):
+                raise CampaignError(
+                    f"{cell.key} repeat-{repetition}/{family}: "
+                    "missing NCU executable identity"
+                )
+            observed_identities.append(dict(binding["ncu_executable"]))
+        ncu_identity = observed_identities[0]
+        if any(
+            not same_json(value, ncu_identity) for value in observed_identities[1:]
+        ):
+            raise CampaignError(
+                f"{cell.key} repeat-{repetition}: mixed NCU executable identities"
+            )
+        current_identity = ncu_executable_identity(Path(str(ncu_identity["path"])))
+        if not same_json(ncu_identity, current_identity):
+            raise CampaignError(
+                f"{cell.key} repeat-{repetition}: NCU executable bytes changed"
+            )
     tolerance = paired_tolerance()
     variants = active_contract().variants
     hit_delta = abs(values["lts_hit"][variants[0]] - values["lts_hit"][variants[1]])
@@ -1115,7 +1187,19 @@ def bundle_document(
     }
     if active_contract() != campaign_contract.V1_CONTRACT:
         document["campaign_contract"] = active_contract().to_json()
+        assert ncu_identity is not None
+        document["ncu_executable"] = ncu_identity
     return document
+
+
+def require_valid_reconstructed_bundle(
+    bundle: Mapping[str, Any], cell: Cell, repetition: int
+) -> None:
+    if bundle.get("valid") is not True:
+        raise CampaignError(
+            f"{cell.key} repeat-{repetition}: reconstructed bundle failed "
+            "one or more required scientific gates"
+        )
 
 
 def parse_orientations(value: str | None) -> list[Cell]:
@@ -1328,6 +1412,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                             pass
                 if set(completed) == set(FAMILIES):
                     bundle = bundle_document(cell, repetition, completed)
+                    require_valid_reconstructed_bundle(bundle, cell, repetition)
                     bundle_path = repeat_directory / "bundle.json"
                     if args.validate_only:
                         try:

@@ -515,6 +515,15 @@ def expected_ncu_command(
     }
     if ACTIVE_CONTRACT.generation_id != "source_line_ownership_v1":
         expected["campaign_contract"] = ACTIVE_CONTRACT.to_json()
+        ncu = command.get("ncu")
+        if not isinstance(ncu, dict) or not isinstance(ncu.get("path"), str):
+            raise AnalysisError(f"{directory}: malformed NCU identity")
+        try:
+            expected["ncu_executable"] = ncu_producer.ncu_executable_identity(
+                Path(ncu["path"])
+            )
+        except ncu_producer.CampaignError as error:
+            raise AnalysisError(f"{directory}: invalid NCU executable: {error}") from error
         if orientation != SMOKE_ORIENTATION or repetition != 1:
             authorization = execution_producer.smoke_authorization_path(
                 directory.parents[3]
@@ -604,11 +613,15 @@ def validate_family(
             or not isinstance(ncu.get("version"), str)
         ):
             raise AnalysisError(f"{directory}: malformed NCU identity")
-        context = ncu_producer.support.Preflight(
+        ncu_executable = command.get("ncu_executable")
+        if not isinstance(ncu_executable, Mapping):
+            raise AnalysisError(f"{directory}: missing NCU executable identity")
+        context = ncu_producer.NcuPreflight(
             binary=dict(binary),
             device=dict(EXPECTED_DEVICE),
             ncu_path=ncu["path"],
             ncu_version=ncu["version"],
+            ncu_executable=dict(ncu_executable),
             environment=dict(EXPECTED_ENVIRONMENT),
         )
         try:
@@ -651,6 +664,8 @@ def validate_family(
     )
     if "campaign_contract" in command:
         binding_fields = (*binding_fields, "campaign_contract")
+    if "ncu_executable" in command:
+        binding_fields = (*binding_fields, "ncu_executable")
     if "smoke_authorization" in command:
         binding_fields = (*binding_fields, "smoke_authorization")
     if not same_json(

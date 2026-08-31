@@ -7,6 +7,7 @@ import hashlib
 import json
 import math
 import os
+import stat
 import sys
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -24,7 +25,6 @@ from tools.local_labels.immutable_artifact import (  # noqa: E402
     PinnedDirectoryReader,
     ensure_directory,
     read_regular,
-    replace_regular_bytes,
 )
 
 
@@ -367,11 +367,105 @@ def replace_artifact_text(
     contract: CampaignContract, path: Path, text: str
 ) -> None:
     checked = contract.require_allowed_path(path)
+    payload = text.encode("utf-8")
+    parent_descriptor = -1
+    temporary_descriptor = -1
+    temporary_name: str | None = None
     try:
         ensure_directory(checked.parent)
-        replace_regular_bytes(checked, text.encode("utf-8"))
+        directory_flags = (
+            os.O_RDONLY
+            | os.O_DIRECTORY
+            | getattr(os, "O_CLOEXEC", 0)
+            | getattr(os, "O_NOFOLLOW", 0)
+        )
+        parent_descriptor = os.open(os.path.sep, directory_flags)
+        for component in checked.parent.parts[1:]:
+            child = os.open(
+                component, directory_flags, dir_fd=parent_descriptor
+            )
+            os.close(parent_descriptor)
+            parent_descriptor = child
+        try:
+            existing = os.stat(
+                checked.name,
+                dir_fd=parent_descriptor,
+                follow_symlinks=False,
+            )
+        except FileNotFoundError:
+            existing = None
+        if existing is not None and (
+            not stat.S_ISREG(existing.st_mode) or existing.st_nlink != 1
+        ):
+            raise ContractError(
+                f"coordinate artifact destination is not one regular file: {checked}"
+            )
+        flags = (
+            os.O_WRONLY
+            | os.O_CREAT
+            | os.O_EXCL
+            | getattr(os, "O_CLOEXEC", 0)
+            | getattr(os, "O_NOFOLLOW", 0)
+        )
+        for _attempt in range(32):
+            candidate = f".{checked.name}.{os.urandom(12).hex()}.tmp"
+            try:
+                temporary_descriptor = os.open(
+                    candidate,
+                    flags,
+                    0o644,
+                    dir_fd=parent_descriptor,
+                )
+                temporary_name = candidate
+                break
+            except FileExistsError:
+                continue
+        if temporary_descriptor < 0 or temporary_name is None:
+            raise ContractError(
+                f"cannot allocate coordinate artifact temporary: {checked}"
+            )
+        offset = 0
+        while offset < len(payload):
+            written = os.write(temporary_descriptor, payload[offset:])
+            if written <= 0:
+                raise ContractError(
+                    f"short coordinate artifact write: {checked}"
+                )
+            offset += written
+        os.fsync(temporary_descriptor)
+        os.replace(
+            temporary_name,
+            checked.name,
+            src_dir_fd=parent_descriptor,
+            dst_dir_fd=parent_descriptor,
+        )
+        temporary_name = None
+        os.fsync(parent_descriptor)
+        observed = os.stat(
+            checked.name,
+            dir_fd=parent_descriptor,
+            follow_symlinks=False,
+        )
+        if (
+            not stat.S_ISREG(observed.st_mode)
+            or observed.st_nlink != 1
+            or observed.st_size != len(payload)
+        ):
+            raise ContractError(
+                f"coordinate artifact publication changed: {checked}"
+            )
     except (ImmutableArtifactError, OSError) as error:
         raise ContractError(f"cannot publish coordinate artifact {checked}: {error}") from error
+    finally:
+        if temporary_descriptor >= 0:
+            os.close(temporary_descriptor)
+        if temporary_name is not None and parent_descriptor >= 0:
+            try:
+                os.unlink(temporary_name, dir_fd=parent_descriptor)
+            except FileNotFoundError:
+                pass
+        if parent_descriptor >= 0:
+            os.close(parent_descriptor)
 
 
 def replace_artifact_json(

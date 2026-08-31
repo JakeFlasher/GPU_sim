@@ -286,6 +286,45 @@ class LineOwnershipAnalyzerTest(unittest.TestCase):
                 order="ab",
             )
 
+    def test_ncu_main_rejects_invalid_reconstructed_bundle_in_both_modes(self) -> None:
+        ncu = analysis.ncu_producer
+        cell = ncu.Cell("first_line_early")
+        for invalid in (False, None, 0, 1, 1.0):
+            with self.assertRaises(ncu.CampaignError):
+                ncu.require_valid_reconstructed_bundle(
+                    {"valid": invalid}, cell, 1
+                )
+        ncu.require_valid_reconstructed_bundle({"valid": True}, cell, 1)
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            return_codes = []
+            for validate_only in (True, False):
+                argv = ["--root", str(root), "--smoke"]
+                if validate_only:
+                    argv.append("--validate-only")
+                with mock.patch.object(
+                    ncu.campaign_contract,
+                    "require_canonical_evidence_root",
+                    return_value=root,
+                ), mock.patch.object(
+                    ncu.campaign_contract, "validate_evidence_tree"
+                ), mock.patch.object(
+                    ncu, "preflight", return_value=SimpleNamespace()
+                ), mock.patch.object(
+                    ncu, "command_document", return_value={}
+                ), mock.patch.object(
+                    ncu, "validate_retained_family", return_value={}
+                ), mock.patch.object(
+                    ncu, "bundle_document", return_value={"valid": False}
+                ), mock.patch.object(
+                    ncu,
+                    "write_json",
+                    side_effect=AssertionError("invalid bundle must not publish"),
+                ), mock.patch("builtins.print"):
+                    return_codes.append(ncu.main(argv))
+        self.assertEqual(return_codes, [1, 1])
+
     def test_shared_static_makefile_selection_is_synthetic(self) -> None:
         with mock.patch.multiple(
             shared_execution,

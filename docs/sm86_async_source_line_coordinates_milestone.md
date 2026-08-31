@@ -89,6 +89,10 @@ byte-identical replay outputs. The run was pinned to device index 0,
 `NVIDIA GeForce RTX 3090 Ti`, UUID
 `GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c`, compute capability 8.6, driver
 610.57.04, and Nsight Compute 2026.1.0.0.
+The retained NCU launcher identity is
+`a44ff2c735c4dcf66c78f3f430155805d6a0b1f74f26331f98ecec03bfbf3f1a`
+at 310 bytes; all 140 command records, 280 profile/import manifests, 140
+completion records, and 20 bundles bind that path/content identity.
 
 The root-level campaign contract, fresh binary, assay ID, and evidence root
 are bound into direct, NVBit, simulator-build, replay, and NCU records. A

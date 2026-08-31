@@ -82,6 +82,22 @@ class LineCoordinateAnalyzerTest(unittest.TestCase):
             ],
         )
 
+    def test_failed_required_smoke_gate_is_invalid_and_not_authorizing(self) -> None:
+        prefix = f"import sys; sys.path.insert(0, {str(HERE)!r}); "
+        output = json.loads(
+            self.run_python(
+                prefix
+                + "import analyze_line_coordinates as a,json; "
+                + "failed=a.outcome(errors=[],missing=[],smoke_only=True,smoke_passed=False,identification=None,holdout=None); "
+                + "passed=a.outcome(errors=[],missing=[],smoke_only=True,smoke_passed=True,identification=None,holdout=None); "
+                + "print(json.dumps({'failed':failed,'failed_authorized':a.smoke_pass_authorized(smoke_only=True,status=failed[0],return_code=failed[2]),'passed_authorized':a.smoke_pass_authorized(smoke_only=True,status=passed[0],return_code=passed[2])}))"
+            )
+        )
+        self.assertEqual(output["failed"][0], "invalid_line_coordinates_campaign")
+        self.assertEqual(output["failed"][2], 1)
+        self.assertFalse(output["failed_authorized"])
+        self.assertTrue(output["passed_authorized"])
+
     def test_named_ac4_ac5_evidence_is_explicit_and_strict(self) -> None:
         prefix = f"import sys; sys.path.insert(0, {str(HERE)!r}); "
         output = json.loads(
@@ -351,6 +367,7 @@ print(json.dumps({{
 import copy
 import json
 import sys
+import tempfile
 from pathlib import Path
 sys.path.insert(0, {str(HERE)!r})
 import analyze_line_coordinates as coordinate
@@ -358,6 +375,9 @@ import analyze_line_coordinates as coordinate
 analysis = coordinate.base
 producer = analysis.ncu_producer
 variants = coordinate.CONTRACT.variants
+ncu_path = Path(tempfile.mkstemp()[1])
+ncu_path.write_bytes(b"coordinate-ncu")
+ncu_identity = producer.ncu_executable_identity(ncu_path)
 values = {{
     "global_ld": dict.fromkeys(variants, 64),
     "ldgsts": dict.fromkeys(variants, 64),
@@ -371,6 +391,7 @@ families = {{
     family: {{
         "summary": {{"values_by_variant": values[family]}},
         "files": {{"command.json": family + "-digest"}},
+        "binding": {{"ncu_executable": ncu_identity}},
     }}
     for family in producer.FAMILIES
 }}
@@ -431,6 +452,162 @@ print(json.dumps({{"rejected": rejected, "total": len(mutations)}}))
             )
         )
         self.assertEqual(output, {"rejected": 3, "total": 3})
+
+    def test_ncu_executable_bytes_are_bound_despite_same_version(self) -> None:
+        output = json.loads(
+            self.run_python(
+                f"""
+import json
+import sys
+import tempfile
+from pathlib import Path
+sys.path.insert(0, {str(HERE)!r})
+import analyze_line_coordinates as coordinate
+
+analysis = coordinate.base
+producer = analysis.ncu_producer
+temporary = Path(tempfile.mkdtemp())
+ncu_path = temporary / "ncu"
+ncu_path.write_bytes(b"AAAA")
+ncu_path.chmod(0o755)
+identity = producer.ncu_executable_identity(ncu_path)
+version = "NVIDIA Nsight Compute " + analysis.EXPECTED_NCU_VERSION
+binary = {{
+    "path": str(coordinate.CONTRACT.binary),
+    "sha256": "a" * 64,
+    "size_bytes": 1,
+}}
+context = producer.NcuPreflight(
+    binary=binary,
+    device=dict(analysis.EXPECTED_DEVICE),
+    ncu_path=str(ncu_path),
+    ncu_version=version,
+    ncu_executable=identity,
+    environment=dict(analysis.EXPECTED_ENVIRONMENT),
+)
+cell = producer.Cell("first_line_early")
+family_directory = (
+    temporary / "paired_ncu" / cell.key / "repeat-1" / "global_ld"
+)
+family_directory.mkdir(parents=True)
+command = producer.command_document(
+    context, family_directory, cell, 1, "global_ld", 321
+)
+(family_directory / "command.json").write_text(
+    json.dumps(command), encoding="utf-8"
+)
+for name, payload in {{
+    "profile.ncu-rep": b"report",
+    "ncu.csv": b"csv",
+    "profile.stdout.txt": b"stdout",
+    "profile.stderr.txt": b"stderr",
+    "import.stderr.txt": b"import-stderr",
+}}.items():
+    (family_directory / name).write_bytes(payload)
+
+def captured(kind):
+    return producer.support.CapturedRun(
+        command=tuple(command[kind + "_command"]),
+        configured_timeout_seconds=321,
+        started_at="2026-08-31T00:00:00+00:00",
+        finished_at="2026-08-31T00:00:01+00:00",
+        return_code=0,
+        timed_out=False,
+        stdout="",
+        stderr="",
+    )
+
+profile_manifest = producer.run_manifest_document(
+    "ncu_profile", captured("profile"), command, family_directory
+)
+import_manifest = producer.run_manifest_document(
+    "ncu_import", captured("import"), command, family_directory
+)
+(family_directory / "profile.run.json").write_text(
+    json.dumps(profile_manifest), encoding="utf-8"
+)
+(family_directory / "import.run.json").write_text(
+    json.dumps(import_manifest), encoding="utf-8"
+)
+complete = producer.complete_document(
+    family_directory,
+    command,
+    {{"values_by_variant": dict.fromkeys(coordinate.CONTRACT.variants, 64)}},
+    {{}},
+)
+values = {{
+    "global_ld": dict.fromkeys(coordinate.CONTRACT.variants, 64),
+    "ldgsts": dict.fromkeys(coordinate.CONTRACT.variants, 64),
+    "shared_wavefronts": dict.fromkeys(coordinate.CONTRACT.variants, 1280),
+    "lts_total": dict.fromkeys(coordinate.CONTRACT.variants, 3584),
+    "lts_hit": dict.fromkeys(coordinate.CONTRACT.variants, 1536),
+    "lts_miss": dict.fromkeys(coordinate.CONTRACT.variants, 2048),
+    "dram": dict.fromkeys(coordinate.CONTRACT.variants, 2304),
+}}
+families = {{
+    family: {{
+        "summary": {{"values_by_variant": values[family]}},
+        "files": {{}},
+        "binding": {{"ncu_executable": identity}},
+    }}
+    for family in producer.FAMILIES
+}}
+bundle = producer.bundle_document(cell, 1, families)
+ncu_path.write_bytes(b"BBBB")
+current = producer.ncu_executable_identity(ncu_path)
+try:
+    analysis.expected_ncu_command(
+        command, family_directory, "global_ld", "first_line_early", 1, binary
+    )
+except analysis.AnalysisError:
+    analyzer_rejected = True
+else:
+    analyzer_rejected = False
+try:
+    producer.bundle_document(cell, 1, families)
+except producer.CampaignError:
+    bundle_rejected = True
+else:
+    bundle_rejected = False
+
+print(json.dumps({{
+    "identity_shape": sorted(identity),
+    "same_size": current["size_bytes"] == identity["size_bytes"],
+    "same_version": command["ncu"]["version"] == version,
+    "command_bound": command["ncu_executable"] == identity,
+    "profile_manifest_bound": (
+        profile_manifest["inputs"]["ncu_executable"] == identity
+        and profile_manifest["inputs"]["binding"]["ncu_executable"] == identity
+    ),
+    "import_manifest_bound": (
+        import_manifest["inputs"]["ncu_executable"] == identity
+        and import_manifest["inputs"]["binding"]["ncu_executable"] == identity
+    ),
+    "completion_bound": complete["binding"]["ncu_executable"] == identity,
+    "bundle_bound": bundle["ncu_executable"] == identity,
+    "bytes_changed": current["sha256"] != identity["sha256"],
+    "analyzer_rejected": analyzer_rejected,
+    "bundle_rejected": bundle_rejected,
+}}, sort_keys=True))
+"""
+            )
+        )
+        self.assertEqual(
+            output,
+            {
+                "analyzer_rejected": True,
+                "bundle_bound": True,
+                "bundle_rejected": True,
+                "bytes_changed": True,
+                "command_bound": True,
+                "completion_bound": True,
+                "identity_shape": ["path", "sha256", "size_bytes"],
+                "import_manifest_bound": True,
+                "profile_manifest_bound": True,
+                "same_size": True,
+                "same_version": True,
+            },
+        )
 
     def test_label_projection_is_bound_to_admitted_bytes_and_reports_partial_access(
         self,

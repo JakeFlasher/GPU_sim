@@ -664,10 +664,12 @@ def outcome(
     if missing:
         return "incomplete_line_coordinates_campaign", "Required evidence is incomplete.", 2
     if smoke_only:
+        if smoke_passed:
+            return CONTRACT.smoke_pass_status, "Fresh coordinate smoke passed.", 0
         return (
-            CONTRACT.smoke_pass_status if smoke_passed else "complete_line_coordinates_structural_no_go",
-            "Fresh coordinate smoke passed." if smoke_passed else "Fresh coordinate smoke failed a scientific gate.",
-            0,
+            "invalid_line_coordinates_campaign",
+            "Fresh coordinate smoke failed a required structural gate.",
+            1,
         )
     if identification is None:
         return "incomplete_line_coordinates_campaign", "Identification labels were not available.", 2
@@ -678,6 +680,14 @@ def outcome(
     if not holdout.get("signal"):
         return "complete_line_coordinates_holdout_no_go", "Identification passed but the untouched holdout did not.", 0
     return "complete_line_coordinates_signal", "Both frozen orientations show the material ownership signal.", 0
+
+
+def smoke_pass_authorized(*, smoke_only: bool, status: str, return_code: int) -> bool:
+    return (
+        smoke_only
+        and return_code == 0
+        and status == CONTRACT.smoke_pass_status
+    )
 
 
 def validate_publication_paths(
@@ -1000,16 +1010,21 @@ def run(
     aggregate_document = deterministic_aggregate(report)
     aggregate_text = json.dumps(aggregate_document, indent=2, sort_keys=True) + "\n"
     aggregate_written = False
+    pass_authorized = smoke_pass_authorized(
+        smoke_only=smoke_only, status=status, return_code=rc
+    )
     validate_evidence_tree(contract, root)
     if publish:
         replace_artifact_text(contract, output, report_text)
         replace_artifact_text(contract, output_md, report_md_text)
-        aggregate_written = smoke_only or (
+        aggregate_written = pass_authorized or (
             rc == 0 and status.startswith("complete_line_coordinates_")
         )
         if aggregate_written:
             replace_artifact_text(contract, aggregate, aggregate_text)
         if smoke_only:
+            # A failed smoke replaces any stale pass token with an explicitly
+            # non-authorizing record, but never publishes the global aggregate.
             replace_artifact_text(contract, authorization, aggregate_text)
     elif smoke_only and (
         not authorization.is_file()
