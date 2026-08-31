@@ -185,6 +185,25 @@ timing or tail state is promoted. If this mechanism is revisited, use an
 independent multi-line cohort response-envelope assay that can exercise
 within-cohort stream hiding; do not scale or fit the current score.
 
+That independent
+[multi-line response-envelope assay](sm86_async_multiline_response_envelope_milestone.md)
+is now complete. Predicated scalar `.cg` requests make all cohort first
+responses equally early while four split cohorts retain a fresh second-line
+response. The depth-1/lead-16 smoke reports a 179-cycle envelope, zero
+prearrival hiding, 72 cycles/copy of severe stream hiding, and residuals zero
+versus 18 exactly as schema 18 predicts. All 80 paired NCU bundles (480
+one-pass reports/960 rows), 16 NVBit traces, and 32 deterministic replay
+outputs pass exact source/topology and production-tail gates.
+
+The mechanism observation succeeds but the timing candidate does not. Every
+depth-1 live sign is negative and every issue median is zero, yet the fixed
+-18 score compares with live medians from -10.143 to -5.979 cycles/group,
+giving 10.587 MAE and 12.021 maximum error. The result is
+`complete_response_envelope_identification_no_go`; depth-2 timing remains
+unopened, production timing is unchanged, and `async_copy_shared_visibility`
+remains required. A successor must distinguish line-local destination
+preparation/service order rather than fit or scale the saturated scalar score.
+
 The 2026-08-17
 [causal-readiness milestone](sm86_causal_readiness_milestone.md) is complete.
 Reason-tagged dependency, async-copy, CTA-generation/arrival-spread, and

@@ -261,3 +261,54 @@ compensate for 9.828 MAE and 12.259 maximum error. The report status is
 timing, and `async_copy_shared_visibility` remain untouched. Do not fit a
 scale. A future mechanism check requires independent multi-line cohorts that
 can exercise within-cohort response-stream hiding.
+
+## Multi-line response-envelope assay
+
+`async_multiline_response` implements that independent mechanism check. Each
+copy has four aligned one-line cohorts and four two-line cohorts. Predicated
+scalar `.cg` loads request every aligned sector plus the first line of every
+split cohort before LDGSTS; their results remain unconsumed until after the
+post-wait clock. `span_expensive` assigns severe destinations to split
+cohorts, while `span_cheap` assigns them to aligned cohorts without changing
+source/preload vectors or destination marginals.
+
+Build and run the mandatory vertical smoke:
+
+```bash
+PYTHONDONTWRITEBYTECODE=1 python3 \
+  workloads/research_probes/async_source_only/capture_multiline_execution.py \
+  --smoke --phase static --timeout 900
+PYTHONDONTWRITEBYTECODE=1 python3 \
+  workloads/research_probes/async_source_only/capture_multiline_execution.py \
+  --smoke --phase direct --timeout 900
+PYTHONDONTWRITEBYTECODE=1 python3 \
+  workloads/research_probes/async_source_only/capture_multiline_execution.py \
+  --smoke --phase nvbit --timeout 900
+PYTHONDONTWRITEBYTECODE=1 python3 \
+  workloads/research_probes/async_source_only/capture_multiline_execution.py \
+  --smoke --phase replay --timeout 1800
+CUDA_VISIBLE_DEVICES=0 LANG=C LC_ALL=C PYTHONDONTWRITEBYTECODE=1 python3 \
+  workloads/research_probes/async_source_only/capture_multiline_response.py \
+  --smoke --timeout 900
+```
+
+Omit `--smoke` to capture the frozen depth `1/2`, lead `0/4/8/16` matrix, then
+reduce it with:
+
+```bash
+PYTHONDONTWRITEBYTECODE=1 python3 \
+  workloads/research_probes/async_source_only/analyze_multiline_response.py \
+  --root results/captures/sm86_async_multiline_response_20260831_v1 \
+  --output results/captures/sm86_async_multiline_response_20260831_v1/analysis/report.json \
+  --output-md results/captures/sm86_async_multiline_response_20260831_v1/analysis/report.md
+```
+
+The retained campaign contains 80 direct pairs, 80 paired NCU bundles/480
+one-pass reports, 16 NVBit traces, and 32 byte-identical schema-18 outputs. The
+pending-line mechanism passes: response envelopes are 21--179 cycles/copy,
+prearrival hiding is zero, and expensive split cohorts fully hide their
+18-cycle topology penalty. The fixed score nevertheless predicts -18 for
+every depth-1 cell versus live medians -10.143 to -5.979, for 10.587 MAE and
+12.021 maximum error. The result is
+`complete_response_envelope_identification_no_go`; depth-2 timing is not
+evaluated, no timing is promoted, and the typed visibility tail remains.

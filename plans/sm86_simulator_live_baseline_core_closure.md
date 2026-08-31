@@ -113,6 +113,20 @@ must use a fresh multi-line cohort response-envelope assay capable of
 exercising within-cohort stream hiding, with no scale or fit applied to the
 retained score.
 
+That fresh multi-line assay is now complete in
+[`docs/sm86_async_multiline_response_envelope_milestone.md`](../docs/sm86_async_multiline_response_envelope_milestone.md).
+Its pending scalar `.cg` requests create 21--179 modeled response-envelope
+cycles per copy while keeping cohort first responses aligned. All 80 paired
+NCU bundles, 16 endpoint traces, 32 deterministic replays, exact work gates,
+and production/tail fingerprints pass. Schema 18 saturates at -18
+cycles/group for all four depth-1 identification cells, but live medians range
+from -10.143 to -5.979; 10.587 MAE and 12.021 maximum error fail the frozen
+bounds. Depth-2 timing remains unopened. This closes schema 18 as a timing
+candidate without changing production readiness or the typed tail. A future
+slice must observe line-local destination preparation/service order or create
+an unsaturated adjacent-preload discriminator; it must not fit these consumed
+labels.
+
 ## Acceptance Criteria
 
 - AC-1: A current-host preflight and release build are recorded for the RTX
