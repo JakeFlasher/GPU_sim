@@ -21,6 +21,8 @@ import sys
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
+import capture_multiline_execution as execution_capture
+import capture_multiline_response as ncu_capture
 from analyze_cohort_reservation import (
     AnalysisError,
     integer,
@@ -36,8 +38,6 @@ DEFAULT_ROOT = REPO_ROOT / "results/captures/sm86_async_multiline_response_20260
 PROBE_BINARY = (
     REPO_ROOT / "workloads/research_probes/async_source_only/async_multiline_response"
 )
-SIM_RUN = REPO_ROOT / "sim/target/release/sim-run"
-
 TRACE_GROUPS = 64
 DIRECT_GROUPS = 8192
 DEPTHS = (1, 2)
@@ -137,6 +137,28 @@ def cell_specs() -> list[tuple[int, int]]:
     return [(depth, lead) for depth in DEPTHS for lead in LEADS]
 
 
+def replay_geometry_expectations(copies: int) -> dict[str, int]:
+    """Frozen trace/replay geometry; scientific mismatches are no-go evidence."""
+
+    return {
+        "copies_observed": copies,
+        # The probe contract freezes 20 destination wavefronts per copy.
+        # Current replay reports 32; that is a structural assay result, not a
+        # value to silently relabel as the intended destination topology.
+        "destination_wavefronts_observed": copies * 20,
+        "bypass_wavefronts_observed": copies * 32,
+        "source_cohorts_observed": copies * 8,
+        "destination_lines_observed": copies * 20,
+        "max_bank_wavefronts_sum": copies * 4,
+        "max_bypass_wavefronts_sum": copies * 4,
+        "cohort_groups_observed": TRACE_GROUPS,
+        "cohort_copies_observed": copies,
+        "cohort_response_memberships_observed": copies * 32,
+        "cohort_topology_penalty_cycles": copies * 72,
+        "cohort_overlap_groups_observed": TRACE_GROUPS,
+    }
+
+
 def endpoint_specs() -> list[tuple[str, int, int]]:
     return [
         (variant, depth, lead)
@@ -188,23 +210,10 @@ def expected_target_arguments(depth: int, lead: int, repetition: int) -> list[st
 
 
 def binary_report(root: Path) -> dict[str, Any]:
-    if not PROBE_BINARY.is_file():
-        raise FileNotFoundError(str(PROBE_BINARY))
-    static_command = read_json(root / "static/command.json")
-    retained = static_command.get("binary")
-    if not isinstance(retained, dict) or not isinstance(retained.get("sha256"), str):
-        raise AnalysisError("static command record has no retained binary identity")
-    expected_sha256 = str(retained["sha256"])
-    observed = sha256(PROBE_BINARY)
-    if observed != expected_sha256:
-        raise AnalysisError(
-            f"probe binary identity mismatch: {observed} != {expected_sha256}"
-        )
-    return {
-        "path": str(PROBE_BINARY),
-        "sha256": observed,
-        "size_bytes": PROBE_BINARY.stat().st_size,
-    }
+    try:
+        return execution_capture.retained_binary(root)
+    except execution_capture.CaptureError as error:
+        raise AnalysisError(str(error)) from error
 
 
 def common_target_contract(
@@ -510,6 +519,9 @@ def validate_ncu_command(
         "environment_overrides": EXPECTED_ENVIRONMENT,
         "target_arguments": expected_target_arguments(depth, lead, repetition),
     }
+    timeout = command.get("timeout_seconds")
+    if not isinstance(timeout, int) or isinstance(timeout, bool) or timeout < 1:
+        raise AnalysisError(f"{directory}: invalid configured NCU timeout {timeout!r}")
     mismatches = {
         field: {"observed": command.get(field), "expected": value}
         for field, value in expected.items()
@@ -589,6 +601,10 @@ def validate_ncu_family(
             "ncu.csv",
             "profile.ncu-rep",
             "profile.stdout.txt",
+            "profile.stderr.txt",
+            "import.stderr.txt",
+            "profile.run.json",
+            "import.run.json",
         )
     }
     absent = [str(path) for path in paths.values() if not path.is_file()]
@@ -599,11 +615,24 @@ def validate_ncu_family(
     command = read_json(paths["command.json"])
     complete = read_json(paths["complete.json"])
     validate_ncu_command(command, directory, family, depth, lead, repetition, binary)
+    try:
+        ncu_capture.validate_run_manifest(
+            paths["profile.run.json"], "ncu_profile", command, directory
+        )
+        ncu_capture.validate_run_manifest(
+            paths["import.run.json"], "ncu_import", command, directory
+        )
+    except ncu_capture.CampaignError as error:
+        raise AnalysisError(f"{directory}: invalid retained run manifest: {error}") from error
     expected_files = {
         "command.json": sha256(paths["command.json"]),
         "profile.ncu-rep": sha256(paths["profile.ncu-rep"]),
         "ncu.csv": sha256(paths["ncu.csv"]),
         "profile.stdout.txt": sha256(paths["profile.stdout.txt"]),
+        "profile.stderr.txt": sha256(paths["profile.stderr.txt"]),
+        "import.stderr.txt": sha256(paths["import.stderr.txt"]),
+        "profile.run.json": sha256(paths["profile.run.json"]),
+        "import.run.json": sha256(paths["import.run.json"]),
     }
     if complete.get("schema_version") != 1 or complete.get("valid") is not True:
         raise AnalysisError(f"{paths['complete.json']}: invalid completion record")
@@ -619,6 +648,7 @@ def validate_ncu_family(
         "row_variants",
         "family",
         "metric",
+        "timeout_seconds",
         "binary",
         "device",
         "ncu",
@@ -852,6 +882,20 @@ def argv_options(argv: Sequence[Any]) -> dict[str, str]:
     return options
 
 
+def retained_tracer_identity(
+    complete: Mapping[str, Any], binding: Mapping[str, Any], context: str
+) -> str:
+    tracer_sha = complete.get("tracer_sha256")
+    bound_tracer = binding.get("tracer")
+    if (
+        not isinstance(tracer_sha, str)
+        or not isinstance(bound_tracer, dict)
+        or bound_tracer.get("sha256") != tracer_sha
+    ):
+        raise AnalysisError(f"{context}: complete/binding tracer identity mismatch")
+    return tracer_sha
+
+
 def nvbit_cell(
     root: Path, variant: str, depth: int, lead: int, expected_binary_sha256: str
 ) -> dict[str, Any]:
@@ -889,6 +933,7 @@ def nvbit_cell(
     binary_sha = complete.get("binary_sha256")
     if binary_sha != expected_binary_sha256 or binary_sha != binding.get("binary", {}).get("sha256"):
         raise AnalysisError(f"{name}: NVBit binary identity mismatch")
+    tracer_sha = retained_tracer_identity(complete, binding, name)
     exclusions: dict[str, Any] = {}
     for reason in (
         "unsupported_memory_path",
@@ -934,12 +979,25 @@ def nvbit_cell(
         "total_instructions": total,
         "trace_bytes": trace_path.stat().st_size,
         "binary_sha256": binary_sha,
-        "tracer_sha256": complete.get("tracer_sha256"),
+        "tracer_sha256": tracer_sha,
         "exclusions": exclusions,
         "trace_sha256": sha256(trace_path),
         "binding_sha256": sha256(binding_path),
         "complete_sha256": sha256(complete_path),
     }
+
+
+def require_cross_endpoint_tracer_identity(
+    cells: Sequence[Mapping[str, Any]],
+) -> str:
+    """Return the one tracer identity or reject the evidence as malformed."""
+
+    identities = {cell.get("tracer_sha256") for cell in cells}
+    if len(identities) != 1 or not all(isinstance(value, str) for value in identities):
+        raise AnalysisError(
+            f"NVBit endpoints do not share one tracer identity: {sorted(map(str, identities))}"
+        )
+    return str(next(iter(identities)))
 
 
 def production_contract(launch: Mapping[str, Any]) -> dict[str, bool]:
@@ -983,52 +1041,22 @@ def replay_cell(root: Path, variant: str, depth: int, lead: int) -> dict[str, An
         raise FileNotFoundError(f"{first}, {second}")
     if first.read_bytes() != second.read_bytes():
         raise AnalysisError(f"{name}: replay twins differ")
-    trace = root / "nvbit" / name / "dynamic_trace.pb"
-    control = root / "static/control_bits.json"
-    command_path = base / "command.json"
-    if not SIM_RUN.is_file() or not trace.is_file() or not control.is_file():
-        raise FileNotFoundError(f"{SIM_RUN}, {trace}, {control}")
-    expected_command = [
-        str(SIM_RUN),
-        "--trace",
-        str(root / "nvbit" / name),
-        "--control",
-        str(control),
-        "--arch-card",
-        str(REPO_ROOT / "arch_profiles/cards/sm_86.json"),
-        "--pchase-card",
-        str(REPO_ROOT / "data/pchase/sm_86_static_card.json"),
-        "--mode",
-        "l1-l2",
-    ]
-    expected_binding = {
-        "schema_version": 1,
-        "command": expected_command,
-        "sim_run": {"path": str(SIM_RUN), "sha256": sha256(SIM_RUN)},
-        "trace_sha256": sha256(trace),
-        "control_sha256": sha256(control),
-    }
-    if read_json(command_path) != expected_binding:
-        raise AnalysisError(f"{name}: replay input/binary binding mismatch")
+    try:
+        execution_capture.validate_replay(
+            root,
+            base,
+            execution_capture.Cell(depth, lead),
+            variant,
+        )
+    except execution_capture.CaptureError as error:
+        raise AnalysisError(f"{name}: {error}") from error
     document = read_json(first)
     launch, _, observation = schema_observation(document, 18, name)
     for field in SCHEMA18_FIELDS:
         integer(observation.get(field), f"{name}.{field}")
     copies = TRACE_GROUPS * depth
-    exact = {
-        "copies_observed": copies,
-        "destination_wavefronts_observed": copies * 32,
-        "bypass_wavefronts_observed": copies * 32,
-        "source_cohorts_observed": copies * 8,
-        "destination_lines_observed": copies * 20,
-        "max_bank_wavefronts_sum": copies * 4,
-        "max_bypass_wavefronts_sum": copies * 4,
-        "cohort_groups_observed": TRACE_GROUPS,
-        "cohort_copies_observed": copies,
-        "cohort_response_memberships_observed": copies * 32,
-        "cohort_topology_penalty_cycles": copies * 72,
-        "cohort_overlap_groups_observed": TRACE_GROUPS,
-    }
+    exact = replay_geometry_expectations(copies)
+    observed_geometry = {field: observation.get(field) for field in exact}
     geometry_gates = {
         field: observation.get(field) == expected for field, expected in exact.items()
     }
@@ -1038,7 +1066,11 @@ def replay_cell(root: Path, variant: str, depth: int, lead: int) -> dict[str, An
     )
     work_gates = {
         "scalar_load_instructions_exact": global_issue.get("load_instructions") == copies,
-        "destination_wavefronts_exact": counters.get("l1", {}).get(
+        "destination_wavefronts_observed_exact": observation.get(
+            "destination_wavefronts_observed"
+        )
+        == copies * 20,
+        "bypass_sector_work_exact": counters.get("l1", {}).get(
             "bypass_sectors"
         )
         == copies * 56,
@@ -1056,6 +1088,8 @@ def replay_cell(root: Path, variant: str, depth: int, lead: int) -> dict[str, An
         "depth": depth,
         "lead_samples": lead,
         "schema_version": 18,
+        "geometry_expected": exact,
+        "geometry_observed": observed_geometry,
         "geometry_gates": geometry_gates,
         "work_gates": work_gates,
         "production_contract": contract,
@@ -1091,22 +1125,15 @@ def direct_cell(
         path = directory / "result.json"
         if not path.is_file():
             raise FileNotFoundError(str(path))
-        command = read_json(directory / "command.json")
-        expected_command = [
-            str(PROBE_BINARY),
-            "--groups",
-            str(DIRECT_GROUPS),
-            "--depth",
-            str(depth),
-            "--lead-samples",
-            str(lead),
-            "--order",
-            expected_order(repetition),
-            "--markers",
-            "off",
-        ]
-        if command.get("command") != expected_command or command.get("binary") != binary:
-            raise AnalysisError(f"{directory}: direct command/binary binding mismatch")
+        try:
+            execution_capture.validate_direct(
+                directory,
+                execution_capture.Cell(depth, lead),
+                repetition,
+                binary,
+            )
+        except execution_capture.CaptureError as error:
+            raise AnalysisError(f"{directory}: {error}") from error
         payload = read_json(path)
         validate_target_payload(
             payload,
@@ -1395,7 +1422,195 @@ def markdown_report(report: Mapping[str, Any]) -> str:
     return "\n".join(lines)
 
 
-def run(root: Path, output_json: Path, output_md: Path) -> int:
+def select_outcome(
+    *,
+    errors: Sequence[str],
+    missing: Sequence[str],
+    structural_no_go: bool,
+    smoke_complete: bool,
+    smoke_passed: bool,
+    smoke_only: bool,
+    full_admitted: bool,
+    score: Mapping[str, Any] | None,
+) -> tuple[str, str, int]:
+    if errors:
+        return (
+            "invalid_response_envelope_campaign",
+            "One or more retained artifacts are malformed, stale, reordered, "
+            "multi-pass, or violate production/tail integrity.",
+            1,
+        )
+    if structural_no_go and not missing:
+        return (
+            "complete_response_envelope_structural_no_go",
+            "A complete static, attribution, response-envelope, destination-"
+            "wavefront, or issue-control gate rejects the assay before timing transfer.",
+            0,
+        )
+    if missing or not smoke_complete:
+        return (
+            "incomplete_response_envelope_campaign",
+            "Required smoke evidence is incomplete.",
+            2,
+        )
+    if smoke_only:
+        if smoke_passed:
+            return (
+                "response_envelope_smoke_passed",
+                "The D1/lead-16 static, attribution, NVBit, replay, and direct "
+                "vertical smoke passes every frozen scientific gate.",
+                0,
+            )
+        return (
+            "complete_response_envelope_structural_no_go",
+            "The complete D1/lead-16 vertical smoke rejects a frozen structural gate.",
+            0,
+        )
+    if not full_admitted or score is None:
+        return (
+            "incomplete_response_envelope_campaign",
+            "Required full-matrix evidence is incomplete.",
+            2,
+        )
+    if not score["identification_passed"]:
+        return (
+            "complete_response_envelope_identification_no_go",
+            "The fixed score fails depth-1 identification; depth-2 timing remains unread.",
+            0,
+        )
+    if not score["transfer_passed"]:
+        return (
+            "complete_response_envelope_holdout_no_go",
+            "The fixed score passes identification but fails the untouched depth-2 holdout.",
+            0,
+        )
+    return (
+        "complete_response_envelope_transfer",
+        "The fixed schema-18 score transfers within the frozen observational bounds; "
+        "production timing remains unchanged in this milestone.",
+        0,
+    )
+
+
+def deterministic_aggregate(report: Mapping[str, Any]) -> dict[str, Any]:
+    smoke_geometry = []
+    for cell in report.get("simulator_cells", []):
+        if cell.get("depth") == 1 and cell.get("lead_samples") == 16:
+            smoke_geometry.append(
+                {
+                    "variant": cell.get("variant"),
+                    "geometry_expected": cell.get("geometry_expected"),
+                    "geometry_observed": cell.get("geometry_observed"),
+                    "geometry_gates": cell.get("geometry_gates"),
+                    "work_gates": cell.get("work_gates"),
+                    "cohort_response_envelope_cycles": cell.get(
+                        "cohort_response_envelope_cycles"
+                    ),
+                    "cohort_topology_prearrival_hidden_cycles": cell.get(
+                        "cohort_topology_prearrival_hidden_cycles"
+                    ),
+                    "cohort_topology_stream_hidden_cycles": cell.get(
+                        "cohort_topology_stream_hidden_cycles"
+                    ),
+                    "cohort_topology_residual_exposure_cycles": cell.get(
+                        "cohort_topology_residual_exposure_cycles"
+                    ),
+                }
+            )
+    smoke_geometry.sort(key=lambda value: str(value["variant"]))
+    static = report.get("static")
+    ncu_identities = [
+        {
+            "cell": item.get("cell"),
+            "repetition": item.get("repetition"),
+            "bundle_sha256": item.get("bundle_sha256"),
+            "families": item.get("families"),
+        }
+        for item in report.get("ncu_bundles", [])
+    ]
+    nvbit_identities = [
+        {
+            key: item.get(key)
+            for key in (
+                "cell",
+                "variant",
+                "binary_sha256",
+                "tracer_sha256",
+                "trace_sha256",
+                "binding_sha256",
+                "complete_sha256",
+            )
+        }
+        for item in report.get("nvbit_cells", [])
+    ]
+    replay_identities = [
+        {
+            key: item.get(key)
+            for key in ("cell", "variant", "replay_sha256")
+        }
+        for item in report.get("simulator_cells", [])
+    ]
+    direct_identities = [
+        {
+            key: item.get(key)
+            for key in ("cell", "depth", "lead_samples", "result_sha256")
+        }
+        for item in report.get("direct_cells", [])
+    ]
+    ncu_identities.sort(
+        key=lambda item: (str(item["cell"]), int(item["repetition"] or 0))
+    )
+    nvbit_identities.sort(
+        key=lambda item: (str(item["cell"]), str(item["variant"]))
+    )
+    replay_identities.sort(
+        key=lambda item: (str(item["cell"]), str(item["variant"]))
+    )
+    direct_identities.sort(key=lambda item: str(item["cell"]))
+    return {
+        "schema_version": 1,
+        "assay": report.get("assay"),
+        "mode": report.get("mode"),
+        "status": report.get("status"),
+        "decision": report.get("decision"),
+        "timing_promotion_authorized": False,
+        "typed_visibility_tail_required": True,
+        "binary": report.get("binary"),
+        "counts": report.get("counts"),
+        "static_gate": (
+            {
+                "artifact_valid": static.get("artifact_valid"),
+                "assay_valid": static.get("assay_valid"),
+                "scientific_failures": static.get("scientific_failures"),
+                "artifacts": static.get("artifacts"),
+            }
+            if isinstance(static, dict)
+            else None
+        ),
+        "smoke_scientific_gates": report.get("smoke_scientific_gates"),
+        "smoke_replay_geometry": smoke_geometry,
+        "evidence_identities": {
+            "direct": direct_identities,
+            "ncu": ncu_identities,
+            "nvbit": nvbit_identities,
+            "replay": replay_identities,
+        },
+        "full_replay_gates": report.get("full_replay_gates"),
+        "score": report.get("score"),
+        "criteria": report.get("criteria"),
+        "missing_artifact_count": len(report.get("missing_artifacts", [])),
+        "validation_error_count": len(report.get("validation_errors", [])),
+    }
+
+
+def run(
+    root: Path,
+    output_json: Path,
+    output_md: Path,
+    *,
+    smoke_only: bool = False,
+    aggregate_output: Path | None = None,
+) -> int:
     root = root.resolve()
     missing: list[str] = []
     errors: list[str] = []
@@ -1442,6 +1657,7 @@ def run(root: Path, output_json: Path, output_md: Path) -> int:
                     root, variant, depth, lead, str(binary["sha256"])
                 )
                 simulator[(variant, depth, lead)] = replay_cell(root, variant, depth, lead)
+            require_cross_endpoint_tracer_identity(list(nvbit.values()))
             smoke_direct = direct_cell(root, depth, lead, (1,), binary)
             direct[(depth, lead)] = smoke_direct
             smoke_gates = smoke_scientific_gates(smoke_bundle, simulator, smoke_direct)
@@ -1454,7 +1670,7 @@ def run(root: Path, output_json: Path, output_md: Path) -> int:
     smoke_passed = smoke_complete and all(smoke_gates.values())
     structural_no_go = static_structural_no_go or (smoke_complete and not smoke_passed)
 
-    if smoke_passed and binary is not None:
+    if smoke_passed and not smoke_only and binary is not None:
         # Complete every attribution/trace/replay lane before direct live labels.
         for depth, lead in cell_specs():
             for repetition in REPETITIONS:
@@ -1489,13 +1705,17 @@ def run(root: Path, output_json: Path, output_md: Path) -> int:
         nvbit_complete = len(nvbit) == 16
         simulator_complete = len(simulator) == 16
         if ncu_complete and nvbit_complete and simulator_complete and not errors and not missing:
+            try:
+                require_cross_endpoint_tracer_identity(list(nvbit.values()))
+            except AnalysisError as error:
+                errors.append(str(error))
+        if ncu_complete and nvbit_complete and simulator_complete and not errors and not missing:
             full_gates = full_replay_gates(simulator)
             full_gates["all_ncu_attribution_bundles_valid"] = all(
                 bundle["valid"] for bundle in ncu.values()
             )
             full_gates["all_nvbit_one_binary"] = (
                 len({cell["binary_sha256"] for cell in nvbit.values()}) == 1
-                and len({cell["tracer_sha256"] for cell in nvbit.values()}) == 1
             )
             structural_no_go = not all(full_gates.values())
 
@@ -1589,41 +1809,16 @@ def run(root: Path, output_json: Path, output_md: Path) -> int:
                                 }
                             )
 
-    if errors:
-        status = "invalid_response_envelope_campaign"
-        decision = (
-            "One or more retained artifacts are malformed, stale, reordered, "
-            "multi-pass, or violate production/tail integrity."
-        )
-        exit_code = 1
-    elif structural_no_go and not missing:
-        status = "complete_response_envelope_structural_no_go"
-        decision = (
-            "A complete static, attribution, response-envelope, or issue-control "
-            "gate rejects the assay before timing transfer."
-        )
-        exit_code = 0
-    elif missing or not smoke_complete or not full_admitted or score is None:
-        status = "incomplete_response_envelope_campaign"
-        decision = "Required smoke or full-matrix evidence is incomplete."
-        exit_code = 2
-    elif not score["identification_passed"]:
-        status = "complete_response_envelope_identification_no_go"
-        decision = (
-            "The fixed score fails depth-1 identification; depth-2 timing remains unread."
-        )
-        exit_code = 0
-    elif not score["transfer_passed"]:
-        status = "complete_response_envelope_holdout_no_go"
-        decision = "The fixed score passes identification but fails the untouched depth-2 holdout."
-        exit_code = 0
-    else:
-        status = "complete_response_envelope_transfer"
-        decision = (
-            "The fixed schema-18 score transfers within the frozen observational bounds; "
-            "production timing remains unchanged in this milestone."
-        )
-        exit_code = 0
+    status, decision, exit_code = select_outcome(
+        errors=errors,
+        missing=missing,
+        structural_no_go=structural_no_go,
+        smoke_complete=smoke_complete,
+        smoke_passed=smoke_passed,
+        smoke_only=smoke_only,
+        full_admitted=full_admitted,
+        score=score,
+    )
 
     criteria: dict[str, bool | None] = {
         "probe_binary_exact": binary is not None,
@@ -1631,15 +1826,17 @@ def run(root: Path, output_json: Path, output_md: Path) -> int:
         "static_assay_gate_passed": static.get("assay_valid") if static else None,
         "vertical_smoke_complete": smoke_complete,
         "vertical_smoke_scientific_gate_passed": smoke_passed if smoke_complete else None,
-        "full_80_bundle_attribution_admitted": (
+        "full_80_bundle_attribution_admitted": (None if smoke_only else (
             len(ncu) == 80 and all(bundle["valid"] for bundle in ncu.values())
             if len(ncu) == 80
             else None
-        ),
-        "full_16_nvbit_traces_complete": len(nvbit) == 16,
-        "full_16_schema18_twins_complete": len(simulator) == 16,
+        )),
+        "full_16_nvbit_traces_complete": None if smoke_only else len(nvbit) == 16,
+        "full_16_schema18_twins_complete": None if smoke_only else len(simulator) == 16,
         "full_replay_scientific_gates_passed": (
-            all(full_gates.values()) if full_gates is not None else None
+            None
+            if smoke_only
+            else (all(full_gates.values()) if full_gates is not None else None)
         ),
         "attribution_preceded_live_labels": True,
         "identification_within_limits": (
@@ -1656,6 +1853,7 @@ def run(root: Path, output_json: Path, output_md: Path) -> int:
     report = {
         "schema_version": 1,
         "assay": "sm86_async_multiline_response_envelope",
+        "mode": "smoke_only" if smoke_only else "full",
         "root": str(root),
         "status": status,
         "decision": decision,
@@ -1705,11 +1903,20 @@ def run(root: Path, output_json: Path, output_md: Path) -> int:
         json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8"
     )
     output_md.write_text(markdown_report(report), encoding="utf-8")
+    if aggregate_output is not None:
+        aggregate_output.parent.mkdir(parents=True, exist_ok=True)
+        aggregate_output.write_text(
+            json.dumps(deterministic_aggregate(report), indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
     print(
         json.dumps(
             {
                 "output_json": str(output_json),
                 "output_md": str(output_md),
+                "aggregate_output": (
+                    str(aggregate_output) if aggregate_output is not None else None
+                ),
                 "status": status,
                 "counts": report["counts"],
                 "missing": len(report["missing_artifacts"]),
@@ -1725,13 +1932,29 @@ def run(root: Path, output_json: Path, output_md: Path) -> int:
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", type=Path, default=DEFAULT_ROOT)
+    parser.add_argument(
+        "--smoke-only",
+        action="store_true",
+        help="consume only static plus D1/lead-16 repeat-1 smoke artifacts",
+    )
     parser.add_argument("--output", "--output-json", dest="output_json", type=Path)
     parser.add_argument("--output-md", type=Path)
+    parser.add_argument(
+        "--aggregate-output",
+        type=Path,
+        help="optional deterministic compact JSON suitable for a tracked path",
+    )
     args = parser.parse_args(argv)
     output_json = args.output_json or args.root / "analysis/report.json"
     output_md = args.output_md or output_json.with_suffix(".md")
     try:
-        return run(args.root, output_json, output_md)
+        return run(
+            args.root,
+            output_json,
+            output_md,
+            smoke_only=args.smoke_only,
+            aggregate_output=args.aggregate_output,
+        )
     except (AnalysisError, OSError, KeyError, TypeError, ValueError) as error:
         print(f"multiline-response analysis: {error}", file=sys.stderr)
         return 1

@@ -292,23 +292,22 @@ CUDA_VISIBLE_DEVICES=0 LANG=C LC_ALL=C PYTHONDONTWRITEBYTECODE=1 python3 \
   --smoke --timeout 900
 ```
 
-Omit `--smoke` to capture the frozen depth `1/2`, lead `0/4/8/16` matrix, then
-reduce it with:
+Run the smoke reducer before any full matrix:
 
 ```bash
 PYTHONDONTWRITEBYTECODE=1 python3 \
   workloads/research_probes/async_source_only/analyze_multiline_response.py \
+  --smoke-only \
   --root results/captures/sm86_async_multiline_response_20260831_v1 \
   --output results/captures/sm86_async_multiline_response_20260831_v1/analysis/report.json \
-  --output-md results/captures/sm86_async_multiline_response_20260831_v1/analysis/report.md
+  --output-md results/captures/sm86_async_multiline_response_20260831_v1/analysis/report.md \
+  --aggregate-output data/local_labels/sm86_async_multiline_response_envelope_report.json
 ```
 
-The retained campaign contains 80 direct pairs, 80 paired NCU bundles/480
-one-pass reports, 16 NVBit traces, and 32 byte-identical schema-18 outputs. The
-pending-line mechanism passes: response envelopes are 21--179 cycles/copy,
-prearrival hiding is zero, and expensive split cohorts fully hide their
-18-cycle topology penalty. The fixed score nevertheless predicts -18 for
-every depth-1 cell versus live medians -10.143 to -5.979, for 10.587 MAE and
-12.021 maximum error. The result is
-`complete_response_envelope_identification_no_go`; depth-2 timing is not
-evaluated, no timing is promoted, and the typed visibility tail remains.
+The pending-line mechanism itself is visible: the depth-1/lead-16 replay has a
+179-cycle envelope, zero prearrival hiding, saturated stream hiding, and
+residuals zero versus 18. The frozen plan also requires 20 destination
+wavefronts/copy, while this 32-lane geometry produces 32 payload/bypass
+wavefront observations and 20 destination lines. The final result is therefore
+`complete_response_envelope_structural_no_go`. Do not run or score the full
+matrix under this plan, promote timing, or remove the typed visibility tail.

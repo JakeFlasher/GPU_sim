@@ -114,18 +114,17 @@ exercising within-cohort stream hiding, with no scale or fit applied to the
 retained score.
 
 That fresh multi-line assay is now complete in
-[`docs/sm86_async_multiline_response_envelope_milestone.md`](../docs/sm86_async_multiline_response_envelope_milestone.md).
-Its pending scalar `.cg` requests create 21--179 modeled response-envelope
-cycles per copy while keeping cohort first responses aligned. All 80 paired
-NCU bundles, 16 endpoint traces, 32 deterministic replays, exact work gates,
-and production/tail fingerprints pass. Schema 18 saturates at -18
-cycles/group for all four depth-1 identification cells, but live medians range
-from -10.143 to -5.979; 10.587 MAE and 12.021 maximum error fail the frozen
-bounds. Depth-2 timing remains unopened. This closes schema 18 as a timing
-candidate without changing production readiness or the typed tail. A future
-slice must observe line-local destination preparation/service order or create
-an unsaturated adjacent-preload discriminator; it must not fit these consumed
-labels.
+[`docs/sm86_async_multiline_response_envelope_milestone.md`](../docs/sm86_async_multiline_response_envelope_milestone.md)
+as a structural no-go. The pending scalar `.cg` path creates the intended
+179-cycle lead-16 response envelope with zero prearrival hiding and saturated
+stream hiding, and its source attribution, trace, replay, issue, and tail gates
+pass. The frozen plan nevertheless requires 20 destination wavefronts per
+copy; the 32-lane implementation produces 32 payload/bypass wavefronts and 20
+destination lines. That exact-work mismatch stops the milestone before timing
+identification. A full matrix captured under an earlier relabeling is excluded.
+No production readiness or typed-tail state changes. A successor must freeze
+the actual interface prospectively or build a geometry that satisfies the
+literal 20-wavefront contract.
 
 ## Acceptance Criteria
 

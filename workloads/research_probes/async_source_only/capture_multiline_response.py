@@ -91,6 +91,18 @@ class Preflight:
     environment: Mapping[str, str]
 
 
+@dataclass(frozen=True)
+class CapturedRun:
+    command: tuple[str, ...]
+    configured_timeout_seconds: int
+    started_at: str
+    finished_at: str
+    return_code: int | None
+    timed_out: bool
+    stdout: str
+    stderr: str
+
+
 def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -101,6 +113,16 @@ def sha256(path: Path) -> str:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def file_identity(path: Path, family_directory: Path) -> dict[str, Any]:
+    if not path.is_file():
+        raise CampaignError(f"artifact is missing: {path}")
+    return {
+        "path": str(path.relative_to(family_directory)),
+        "sha256": sha256(path),
+        "size_bytes": path.stat().st_size,
+    }
 
 
 def json_text(value: Any) -> str:
@@ -188,6 +210,55 @@ def run_command(
         )
     except (OSError, subprocess.TimeoutExpired) as error:
         raise CampaignError(f"command failed before completion: {command}: {error}") from error
+
+
+def timeout_stream(value: str | bytes | None) -> str:
+    if value is None:
+        return ""
+    return value.decode(errors="replace") if isinstance(value, bytes) else value
+
+
+def run_captured(
+    command: Sequence[str],
+    *,
+    timeout: int,
+    environment: Mapping[str, str],
+) -> CapturedRun:
+    started_at = utc_now()
+    try:
+        completed = subprocess.run(
+            list(command),
+            cwd=REPO_ROOT,
+            env=dict(environment),
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=timeout,
+            check=False,
+        )
+        return CapturedRun(
+            command=tuple(command),
+            configured_timeout_seconds=timeout,
+            started_at=started_at,
+            finished_at=utc_now(),
+            return_code=completed.returncode,
+            timed_out=False,
+            stdout=completed.stdout,
+            stderr=completed.stderr,
+        )
+    except subprocess.TimeoutExpired as error:
+        return CapturedRun(
+            command=tuple(command),
+            configured_timeout_seconds=timeout,
+            started_at=started_at,
+            finished_at=utc_now(),
+            return_code=None,
+            timed_out=True,
+            stdout=timeout_stream(error.stdout),
+            stderr=timeout_stream(error.stderr),
+        )
+    except OSError as error:
+        raise CampaignError(f"cannot execute {command}: {error}") from error
 
 
 def preflight(root: Path, ncu: str) -> Preflight:
@@ -331,6 +402,7 @@ def command_document(
     cell: Cell,
     repetition: int,
     family: str,
+    timeout: int,
 ) -> dict[str, Any]:
     order = expected_order(repetition)
     return {
@@ -344,6 +416,7 @@ def command_document(
         "row_variants": list(row_variants(order)),
         "family": family,
         "metric": FAMILY_METRICS[family],
+        "timeout_seconds": timeout,
         "binary": dict(context.binary),
         "device": dict(context.device),
         "ncu": {"path": context.ncu_path, "version": context.ncu_version},
@@ -532,6 +605,153 @@ def validate_rows(
     }
 
 
+def optional_file_identity(
+    path: Path, family_directory: Path
+) -> dict[str, Any] | None:
+    return file_identity(path, family_directory) if path.is_file() else None
+
+
+def manifest_inputs(
+    command: Mapping[str, Any],
+    family_directory: Path,
+    *,
+    include_report_input: bool,
+) -> dict[str, Any]:
+    inputs = {
+        "binding": {
+            key: command[key]
+            for key in (
+                "cell",
+                "depth",
+                "lead_samples",
+                "groups",
+                "repetition",
+                "order",
+                "row_variants",
+                "family",
+                "metric",
+                "timeout_seconds",
+                "target_arguments",
+            )
+        },
+        "binary": dict(command["binary"]),
+        "device": dict(command["device"]),
+        "ncu": dict(command["ncu"]),
+        "environment_overrides": dict(command["environment_overrides"]),
+        "command_record": file_identity(
+            family_directory / "command.json", family_directory
+        ),
+    }
+    if include_report_input:
+        inputs["profile_report"] = optional_file_identity(
+            family_directory / "profile.ncu-rep", family_directory
+        )
+    return inputs
+
+
+def run_manifest_document(
+    kind: str,
+    run: CapturedRun,
+    command: Mapping[str, Any],
+    family_directory: Path,
+) -> dict[str, Any]:
+    if kind == "ncu_profile":
+        expected_command = command["profile_command"]
+        stdout_path = family_directory / "profile.stdout.txt"
+        stderr_path = family_directory / "profile.stderr.txt"
+        include_report_input = False
+    elif kind == "ncu_import":
+        expected_command = command["import_command"]
+        stdout_path = family_directory / "ncu.csv"
+        stderr_path = family_directory / "import.stderr.txt"
+        include_report_input = True
+    else:
+        raise CampaignError(f"unsupported run-manifest kind: {kind}")
+    if list(run.command) != list(expected_command):
+        raise CampaignError(f"{kind}: executed command differs from command record")
+    if run.configured_timeout_seconds != command["timeout_seconds"]:
+        raise CampaignError(f"{kind}: executed timeout differs from command record")
+    return {
+        "schema_version": 1,
+        "kind": kind,
+        "command": list(run.command),
+        "configured_timeout_seconds": run.configured_timeout_seconds,
+        "started_at": run.started_at,
+        "finished_at": run.finished_at,
+        "return_code": run.return_code,
+        "timed_out": run.timed_out,
+        "stdout": file_identity(stdout_path, family_directory),
+        "stderr": file_identity(stderr_path, family_directory),
+        "profile_report": optional_file_identity(
+            family_directory / "profile.ncu-rep", family_directory
+        ),
+        "csv": optional_file_identity(
+            family_directory / "ncu.csv", family_directory
+        ),
+        "inputs": manifest_inputs(
+            command,
+            family_directory,
+            include_report_input=include_report_input,
+        ),
+    }
+
+
+def parse_manifest_time(value: Any, context: str) -> datetime:
+    if not isinstance(value, str):
+        raise CampaignError(f"{context}: timestamp is not a string")
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError as error:
+        raise CampaignError(f"{context}: invalid timestamp {value!r}") from error
+    if parsed.tzinfo is None:
+        raise CampaignError(f"{context}: timestamp has no timezone")
+    return parsed
+
+
+def validate_run_manifest(
+    path: Path,
+    kind: str,
+    command: Mapping[str, Any],
+    family_directory: Path,
+) -> dict[str, Any]:
+    observed = read_json(path)
+    observed_command = observed.get("command")
+    if not isinstance(observed_command, list) or not all(
+        isinstance(item, str) for item in observed_command
+    ):
+        raise CampaignError(f"{path}: command is not a string list")
+    observed_timeout = observed.get("configured_timeout_seconds")
+    if not isinstance(observed_timeout, int) or isinstance(observed_timeout, bool):
+        raise CampaignError(f"{path}: configured timeout is not an integer")
+    observed_return_code = observed.get("return_code")
+    if not isinstance(observed_return_code, int) or isinstance(
+        observed_return_code, bool
+    ):
+        raise CampaignError(f"{path}: return code is not an integer")
+    if observed.get("timed_out") is not False:
+        raise CampaignError(f"{path}: retained run timed out")
+    started = parse_manifest_time(observed.get("started_at"), f"{path} started_at")
+    finished = parse_manifest_time(observed.get("finished_at"), f"{path} finished_at")
+    if finished < started:
+        raise CampaignError(f"{path}: finish precedes start")
+    run = CapturedRun(
+        command=tuple(observed_command),
+        configured_timeout_seconds=observed_timeout,
+        started_at=started.isoformat(),
+        finished_at=finished.isoformat(),
+        return_code=observed_return_code,
+        timed_out=False,
+        stdout="",
+        stderr="",
+    )
+    if run.return_code != 0:
+        raise CampaignError(f"{path}: retained run was not successful")
+    expected = run_manifest_document(kind, run, command, family_directory)
+    if observed != expected:
+        raise CampaignError(f"{path}: run manifest or artifact identity mismatch")
+    return observed
+
+
 def complete_document(
     family_directory: Path,
     command: Mapping[str, Any],
@@ -543,6 +763,10 @@ def complete_document(
         "profile.ncu-rep": family_directory / "profile.ncu-rep",
         "ncu.csv": family_directory / "ncu.csv",
         "profile.stdout.txt": family_directory / "profile.stdout.txt",
+        "profile.stderr.txt": family_directory / "profile.stderr.txt",
+        "import.stderr.txt": family_directory / "import.stderr.txt",
+        "profile.run.json": family_directory / "profile.run.json",
+        "import.run.json": family_directory / "import.run.json",
     }
     return {
         "schema_version": 1,
@@ -559,6 +783,7 @@ def complete_document(
                 "row_variants",
                 "family",
                 "metric",
+                "timeout_seconds",
                 "binary",
                 "device",
                 "ncu",
@@ -577,6 +802,7 @@ def validate_retained_family(
     cell: Cell,
     repetition: int,
     family: str,
+    timeout: int,
 ) -> dict[str, Any]:
     required = {
         name: family_directory / name
@@ -585,6 +811,10 @@ def validate_retained_family(
             "profile.ncu-rep",
             "ncu.csv",
             "profile.stdout.txt",
+            "profile.stderr.txt",
+            "import.stderr.txt",
+            "profile.run.json",
+            "import.run.json",
             "complete.json",
         )
     }
@@ -595,11 +825,23 @@ def validate_retained_family(
         raise CampaignError(f"{family_directory}: empty NCU report")
 
     expected_command = command_document(
-        context, family_directory, cell, repetition, family
+        context, family_directory, cell, repetition, family, timeout
     )
     command = read_json(required["command.json"])
     if command != expected_command:
         raise CampaignError(f"{family_directory}: retained command binding mismatch")
+    validate_run_manifest(
+        required["profile.run.json"],
+        "ncu_profile",
+        command,
+        family_directory,
+    )
+    validate_run_manifest(
+        required["import.run.json"],
+        "ncu_import",
+        command,
+        family_directory,
+    )
     rows = parse_csv_rows(
         required["ncu.csv"].read_text(encoding="utf-8"), str(required["ncu.csv"])
     )
@@ -632,16 +874,17 @@ def execute_family(
 ) -> dict[str, Any]:
     try:
         return validate_retained_family(
-            family_directory, context, cell, repetition, family
+            family_directory, context, cell, repetition, family, timeout
         )
-    except CampaignError as error:
-        replaced_reason = str(error)
+    except CampaignError:
+        pass
 
     family_directory.mkdir(parents=True, exist_ok=True)
-    command = command_document(context, family_directory, cell, repetition, family)
+    command = command_document(
+        context, family_directory, cell, repetition, family, timeout
+    )
     atomic_write_json(family_directory / "command.json", command)
-    started = utc_now()
-    profiled = run_command(
+    profiled = run_captured(
         command["profile_command"],
         timeout=timeout,
         environment=execution_environment(context),
@@ -650,24 +893,20 @@ def execute_family(
     atomic_write_text(family_directory / "profile.stderr.txt", profiled.stderr)
     atomic_write_json(
         family_directory / "profile.run.json",
-        {
-            "started_at": started,
-            "finished_at": utc_now(),
-            "return_code": profiled.returncode,
-            "command": command["profile_command"],
-            "replaced_incomplete_reason": replaced_reason,
-        },
+        run_manifest_document(
+            "ncu_profile", profiled, command, family_directory
+        ),
     )
-    if profiled.returncode != 0:
+    if profiled.timed_out or profiled.return_code != 0:
         raise CampaignError(
-            f"{family_directory}: NCU profile failed with {profiled.returncode}"
+            f"{family_directory}: NCU profile failed: "
+            f"return_code={profiled.return_code}, timed_out={profiled.timed_out}"
         )
     report = family_directory / "profile.ncu-rep"
     if not report.is_file() or report.stat().st_size == 0:
         raise CampaignError(f"{family_directory}: NCU report was not created")
 
-    imported_at = utc_now()
-    imported = run_command(
+    imported = run_captured(
         command["import_command"],
         timeout=timeout,
         environment=execution_environment(context),
@@ -675,17 +914,21 @@ def execute_family(
     atomic_write_text(family_directory / "ncu.csv", imported.stdout)
     atomic_write_text(family_directory / "import.stderr.txt", imported.stderr)
     atomic_write_json(
-        family_directory / "import.run.json",
-        {
-            "started_at": imported_at,
-            "finished_at": utc_now(),
-            "return_code": imported.returncode,
-            "command": command["import_command"],
-        },
+        family_directory / "profile.run.json",
+        run_manifest_document(
+            "ncu_profile", profiled, command, family_directory
+        ),
     )
-    if imported.returncode != 0:
+    atomic_write_json(
+        family_directory / "import.run.json",
+        run_manifest_document(
+            "ncu_import", imported, command, family_directory
+        ),
+    )
+    if imported.timed_out or imported.return_code != 0:
         raise CampaignError(
-            f"{family_directory}: NCU import failed with {imported.returncode}"
+            f"{family_directory}: NCU import failed: "
+            f"return_code={imported.return_code}, timed_out={imported.timed_out}"
         )
     if sha256(BINARY) != context.binary["sha256"]:
         raise CampaignError(f"{family_directory}: probe binary changed during capture")
@@ -696,7 +939,7 @@ def execute_family(
     complete = complete_document(family_directory, command, summary, target)
     atomic_write_json(family_directory / "complete.json", complete)
     return validate_retained_family(
-        family_directory, context, cell, repetition, family
+        family_directory, context, cell, repetition, family, timeout
     )
 
 
@@ -901,6 +1144,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                             cell,
                             repetition,
                             family,
+                            args.timeout,
                         )
                     )
         if args.dry_run:
@@ -933,13 +1177,23 @@ def main(argv: Sequence[str] | None = None) -> int:
                     directory = repeat_directory / family
                     if args.validate_only:
                         document = validate_retained_family(
-                            directory, context, cell, repetition, family
+                            directory,
+                            context,
+                            cell,
+                            repetition,
+                            family,
+                            args.timeout,
                         )
                         state = "valid"
                     else:
                         try:
                             document = validate_retained_family(
-                                directory, context, cell, repetition, family
+                                directory,
+                                context,
+                                cell,
+                                repetition,
+                                family,
+                                args.timeout,
                             )
                             state = "existing"
                         except CampaignError:
@@ -970,6 +1224,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                                 cell,
                                 repetition,
                                 family,
+                                args.timeout,
                             )
                         except CampaignError:
                             pass

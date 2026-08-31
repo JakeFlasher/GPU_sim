@@ -187,22 +187,22 @@ within-cohort stream hiding; do not scale or fit the current score.
 
 That independent
 [multi-line response-envelope assay](sm86_async_multiline_response_envelope_milestone.md)
-is now complete. Predicated scalar `.cg` requests make all cohort first
-responses equally early while four split cohorts retain a fresh second-line
-response. The depth-1/lead-16 smoke reports a 179-cycle envelope, zero
-prearrival hiding, 72 cycles/copy of severe stream hiding, and residuals zero
-versus 18 exactly as schema 18 predicts. All 80 paired NCU bundles (480
-one-pass reports/960 rows), 16 NVBit traces, and 32 deterministic replay
-outputs pass exact source/topology and production-tail gates.
+is now complete as `complete_response_envelope_structural_no_go`. Predicated
+scalar `.cg` requests do create the intended response stream: the
+depth-1/lead-16 smoke reports a 179-cycle envelope, zero prearrival hiding, 72
+stream-hidden cycles/copy, and residuals zero versus 18. Static, source-work,
+NCU attribution, trace completeness, replay determinism, and production-tail
+checks pass.
 
-The mechanism observation succeeds but the timing candidate does not. Every
-depth-1 live sign is negative and every issue median is zero, yet the fixed
--18 score compares with live medians from -10.143 to -5.979 cycles/group,
-giving 10.587 MAE and 12.021 maximum error. The result is
-`complete_response_envelope_identification_no_go`; depth-2 timing remains
-unopened, production timing is unchanged, and `async_copy_shared_visibility`
-remains required. A successor must distinguish line-local destination
-preparation/service order rather than fit or scale the saturated scalar score.
+The frozen plan also requires 20 destination wavefront observations per copy.
+The prescribed 32-lane probe produces 32 payload/bypass wavefront observations
+and 20 unique destination lines. That is an upstream workload-contract
+mismatch, not a terminology change, so the smoke cannot authorize timing
+identification. A full matrix captured before this was caught is excluded from
+the final result. Production timing is unchanged and
+`async_copy_shared_visibility` remains required. Any successor needs a new
+prospective contract for the actual 32-wavefront/20-line interface or a new
+geometry that literally produces 20 wavefronts.
 
 The 2026-08-17
 [causal-readiness milestone](sm86_causal_readiness_milestone.md) is complete.

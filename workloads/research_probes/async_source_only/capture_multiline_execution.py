@@ -7,10 +7,12 @@ import argparse
 import hashlib
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
@@ -21,7 +23,10 @@ DEFAULT_ROOT = (
     REPO_ROOT / "results/captures/sm86_async_multiline_response_20260831_v1"
 )
 BINARY = HERE / "async_multiline_response"
+SOURCE = HERE / "async_multiline_response.cu"
+MAKEFILE = HERE / "Makefile"
 CONTROL_TOOL = REPO_ROOT / "tools/sass_control/emit_control_bits_sidecar.py"
+CONTROL_TOOL_ROOT = CONTROL_TOOL.parent
 NVBIT_CAPTURE = (
     REPO_ROOT
     / "workloads/research_probes/ldgsts_burst_release/capture_nvbit.py"
@@ -30,6 +35,7 @@ SIM_RUN = REPO_ROOT / "sim/target/release/sim-run"
 ARCH_CARD = REPO_ROOT / "arch_profiles/cards/sm_86.json"
 PCHASE_CARD = REPO_ROOT / "data/pchase/sm_86_static_card.json"
 CUDA_BIN = Path(os.environ.get("CUDA_BIN", "/usr/local/cuda-13.2/bin"))
+NVCC = CUDA_BIN / "nvcc"
 CUOBJDUMP = CUDA_BIN / "cuobjdump"
 
 DEPTHS = (1, 2)
@@ -103,12 +109,61 @@ def read_json(path: Path) -> dict[str, Any]:
     return value
 
 
-def run(
+@dataclass(frozen=True)
+class CommandExecution:
+    stdout: str
+    stderr: str
+    return_code: int | None
+    timed_out: bool
+    started_at: str
+    finished_at: str
+    error: str | None = None
+
+
+def utc_now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def file_identity(path: Path) -> dict[str, Any]:
+    resolved = path.resolve()
+    if not resolved.is_file():
+        raise CaptureError(f"identity input is missing: {resolved}")
+    return {
+        "path": str(resolved),
+        "sha256": sha256(resolved),
+        "size_bytes": resolved.stat().st_size,
+    }
+
+
+def identities(paths: Mapping[str, Path]) -> dict[str, dict[str, Any]]:
+    return {name: file_identity(path) for name, path in sorted(paths.items())}
+
+
+def control_tool_identities() -> dict[str, dict[str, Any]]:
+    return identities(
+        {
+            f"sass_control/{path.name}": path
+            for path in sorted(CONTROL_TOOL_ROOT.glob("*.py"))
+            if path.is_file()
+        }
+    )
+
+
+def command_output_text(value: str | bytes | None) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    return value
+
+
+def execute(
     command: Sequence[str],
     *,
     timeout: int,
     environment: Mapping[str, str] | None = None,
-) -> subprocess.CompletedProcess[str]:
+) -> CommandExecution:
+    started_at = utc_now()
     try:
         completed = subprocess.run(
             list(command),
@@ -120,25 +175,195 @@ def run(
             timeout=timeout,
             check=False,
         )
-    except (OSError, subprocess.TimeoutExpired) as error:
-        raise CaptureError(f"command failed before completion: {command}: {error}") from error
-    if completed.returncode != 0:
-        raise CaptureError(
-            f"command exited {completed.returncode}: {command}\n{completed.stderr[-4000:]}"
+        return CommandExecution(
+            stdout=completed.stdout,
+            stderr=completed.stderr,
+            return_code=completed.returncode,
+            timed_out=False,
+            started_at=started_at,
+            finished_at=utc_now(),
         )
-    return completed
+    except subprocess.TimeoutExpired as error:
+        return CommandExecution(
+            stdout=command_output_text(error.stdout),
+            stderr=command_output_text(error.stderr),
+            return_code=None,
+            timed_out=True,
+            started_at=started_at,
+            finished_at=utc_now(),
+            error=str(error),
+        )
+    except OSError as error:
+        return CommandExecution(
+            stdout="",
+            stderr=str(error) + "\n",
+            return_code=None,
+            timed_out=False,
+            started_at=started_at,
+            finished_at=utc_now(),
+            error=str(error),
+        )
+
+
+def resolve_executable(
+    command: Sequence[str], environment_value: Mapping[str, str] | None
+) -> Path:
+    token = command[0]
+    if "/" in token:
+        result = Path(token)
+    else:
+        found = shutil.which(
+            token,
+            path=None if environment_value is None else environment_value.get("PATH"),
+        )
+        if found is None:
+            raise CaptureError(f"command executable is unavailable: {token}")
+        result = Path(found)
+    if not result.is_file():
+        raise CaptureError(f"command executable is unavailable: {result}")
+    return result
+
+
+def environment_overrides() -> dict[str, str]:
+    return {
+        "CUDA_VISIBLE_DEVICES": "0",
+        "LANG": "C",
+        "LC_ALL": "C",
+        "PYTHONDONTWRITEBYTECODE": "1",
+    }
+
+
+def recorded_run(
+    command: Sequence[str],
+    *,
+    timeout: int,
+    manifest_path: Path,
+    stdout_path: Path,
+    stderr_path: Path,
+    input_paths: Mapping[str, Path],
+    output_paths: Mapping[str, Path],
+    environment_value: Mapping[str, str] | None = None,
+    combined_output_path: Path | None = None,
+) -> CommandExecution:
+    execution = execute(command, timeout=timeout, environment=environment_value)
+    atomic_write_text(stdout_path, execution.stdout)
+    atomic_write_text(stderr_path, execution.stderr)
+    if combined_output_path is not None:
+        atomic_write_text(
+            combined_output_path, execution.stdout + execution.stderr
+        )
+    outputs = {
+        name: file_identity(path)
+        for name, path in sorted(output_paths.items())
+        if path.is_file()
+    }
+    manifest: dict[str, Any] = {
+        "schema_version": 1,
+        "command": list(command),
+        "configured_timeout_seconds": timeout,
+        "started_at": execution.started_at,
+        "finished_at": execution.finished_at,
+        "return_code": execution.return_code,
+        "timed_out": execution.timed_out,
+        "executable": file_identity(
+            resolve_executable(command, environment_value)
+        ),
+        "inputs": identities(input_paths),
+        "outputs": outputs,
+        "stdout": file_identity(stdout_path),
+        "stderr": file_identity(stderr_path),
+        "environment_overrides": environment_overrides(),
+    }
+    if execution.error is not None:
+        manifest["error"] = execution.error
+    atomic_write_json(manifest_path, manifest)
+    if execution.timed_out:
+        raise CaptureError(
+            f"command timed out after {timeout}s: {list(command)}; "
+            f"manifest={manifest_path}"
+        )
+    if execution.return_code != 0:
+        raise CaptureError(
+            f"command exited {execution.return_code}: {list(command)}\n"
+            f"{execution.stderr[-4000:]}\nmanifest={manifest_path}"
+        )
+    return execution
+
+
+def run_unrecorded(
+    command: Sequence[str],
+    *,
+    timeout: int,
+    environment_value: Mapping[str, str] | None = None,
+) -> CommandExecution:
+    execution = execute(command, timeout=timeout, environment=environment_value)
+    if execution.timed_out:
+        raise CaptureError(f"command timed out after {timeout}s: {list(command)}")
+    if execution.return_code != 0:
+        raise CaptureError(
+            f"command exited {execution.return_code}: {list(command)}\n"
+            f"{execution.stderr[-4000:]}"
+        )
+    return execution
+
+
+def validate_iso_interval(started_at: Any, finished_at: Any, context: Path) -> None:
+    if not isinstance(started_at, str) or not isinstance(finished_at, str):
+        raise CaptureError(f"{context}: missing ISO start/finish timestamps")
+    try:
+        started = datetime.fromisoformat(started_at)
+        finished = datetime.fromisoformat(finished_at)
+    except ValueError as error:
+        raise CaptureError(f"{context}: invalid ISO timestamp: {error}") from error
+    if started.tzinfo is None or finished.tzinfo is None or finished < started:
+        raise CaptureError(f"{context}: invalid command timestamp interval")
+
+
+def validate_run_manifest(
+    manifest_path: Path,
+    *,
+    command: Sequence[str],
+    timeout: int,
+    stdout_path: Path,
+    stderr_path: Path,
+    input_paths: Mapping[str, Path],
+    output_paths: Mapping[str, Path],
+    environment_value: Mapping[str, str] | None = None,
+) -> dict[str, Any]:
+    document = read_json(manifest_path)
+    validate_iso_interval(
+        document.get("started_at"), document.get("finished_at"), manifest_path
+    )
+    expected = {
+        "schema_version": 1,
+        "command": list(command),
+        "configured_timeout_seconds": timeout,
+        "return_code": 0,
+        "timed_out": False,
+        "executable": file_identity(
+            resolve_executable(command, environment_value)
+        ),
+        "inputs": identities(input_paths),
+        "outputs": identities(output_paths),
+        "stdout": file_identity(stdout_path),
+        "stderr": file_identity(stderr_path),
+        "environment_overrides": environment_overrides(),
+    }
+    mismatches = {
+        field: {"observed": document.get(field), "expected": value}
+        for field, value in expected.items()
+        if document.get(field) != value
+    }
+    if mismatches or document.get("error") is not None:
+        raise CaptureError(
+            f"{manifest_path}: stale or invalid run manifest: {mismatches}"
+        )
+    return document
 
 
 def environment() -> dict[str, str]:
     value = os.environ.copy()
-    value.update(
-        {
-            "CUDA_VISIBLE_DEVICES": "0",
-            "LANG": "C",
-            "LC_ALL": "C",
-            "PYTHONDONTWRITEBYTECODE": "1",
-        }
-    )
+    value.update(environment_overrides())
     return value
 
 
@@ -151,21 +376,222 @@ def require_binary(expected_sha256: str | None = None) -> dict[str, Any]:
             f"probe binary identity mismatch: {observed} != {expected_sha256}"
         )
     return {
-        "path": str(BINARY),
+        "path": str(BINARY.resolve()),
         "sha256": observed,
         "size_bytes": BINARY.stat().st_size,
     }
 
 
+def tool_version(path: Path, *arguments: str) -> dict[str, Any]:
+    command = [str(path), *arguments]
+    execution = run_unrecorded(
+        command, timeout=30, environment_value=environment()
+    )
+    return {
+        "command": command,
+        "stdout": execution.stdout,
+        "stderr": execution.stderr,
+    }
+
+
+def current_static_binding() -> dict[str, Any]:
+    for required in (SOURCE, MAKEFILE, CONTROL_TOOL, NVCC, CUOBJDUMP):
+        if not required.is_file():
+            raise CaptureError(f"static binding input is missing: {required}")
+    make_path = resolve_executable(["make"], environment())
+    python_path = Path(sys.executable)
+    return {
+        "schema_version": 2,
+        "source": file_identity(SOURCE),
+        "makefile": file_identity(MAKEFILE),
+        "control_tools": control_tool_identities(),
+        "toolchain": {
+            "make": file_identity(make_path),
+            "python": {
+                **file_identity(python_path),
+                "version": sys.version,
+            },
+            "nvcc": {
+                **file_identity(NVCC),
+                "version": tool_version(NVCC, "--version"),
+            },
+            "cuobjdump": {
+                **file_identity(CUOBJDUMP),
+                "version": tool_version(CUOBJDUMP, "--version"),
+            },
+        },
+        "environment_overrides": environment_overrides(),
+    }
+
+
+def static_build_command() -> list[str]:
+    return [
+        "make",
+        "-B",
+        "-C",
+        str(HERE),
+        f"NVCC={NVCC}",
+        "async_multiline_response",
+    ]
+
+
+def static_control_command(static: Path) -> list[str]:
+    return [
+        sys.executable,
+        str(CONTROL_TOOL),
+        "--binary",
+        str(BINARY),
+        "--arch",
+        "sm_86",
+        "--toolkit-bindir",
+        str(CUDA_BIN),
+        "--out",
+        str(static / "control_bits.json"),
+    ]
+
+
+def complete_stage_or_absent(paths: Sequence[Path], context: str) -> bool:
+    # Empty stderr/stdout is a valid successful command result; completeness
+    # comes from the manifest's exact hashes, not a nonzero-size heuristic.
+    present = [path.is_file() for path in paths]
+    if all(present):
+        return True
+    if any(path.exists() for path in paths):
+        raise CaptureError(
+            f"{context}: incomplete retained stage must be moved aside before recapture"
+        )
+    return False
+
+
+def static_command_document(root: Path, binding: Mapping[str, Any]) -> dict[str, Any]:
+    static = root / "static"
+    binary = require_binary()
+    artifacts = identities(
+        {
+            "build_log": static / "build.log",
+            "control_bits": static / "control_bits.json",
+            "control_log": static / "control.log",
+            "resources": static / "resources.txt",
+            "sass": static / "sass.txt",
+        }
+    )
+    runs = identities(
+        {
+            "build": static / "build.run.json",
+            "control": static / "control.run.json",
+            "resources": static / "resources.run.json",
+            "sass": static / "sass.run.json",
+        }
+    )
+    return {
+        "schema_version": 2,
+        "binding": dict(binding),
+        "binary": binary,
+        "commands": {
+            "build": static_build_command(),
+            "sass": [str(CUOBJDUMP), "--dump-sass", str(BINARY)],
+            "resources": [
+                str(CUOBJDUMP),
+                "--dump-resource-usage",
+                str(BINARY),
+            ],
+            "control": static_control_command(static),
+        },
+        "artifacts": artifacts,
+        "run_manifests": runs,
+    }
+
+
+def validate_static(root: Path) -> dict[str, Any]:
+    static = root / "static"
+    binding_path = static / "binding.json"
+    command_path = static / "command.json"
+    if not binding_path.is_file() or not command_path.is_file():
+        raise CaptureError(
+            f"{static}: retained static lacks schema-2 binding/command metadata; "
+            "move the legacy or incomplete directory aside and recapture"
+        )
+    binding = current_static_binding()
+    if read_json(binding_path) != binding:
+        raise CaptureError(
+            f"{binding_path}: retained static is stale relative to source, Makefile, "
+            "control tooling, or CUDA toolchain"
+        )
+    binary = require_binary()
+    common_inputs = {
+        "source": SOURCE,
+        "makefile": MAKEFILE,
+        "nvcc": NVCC,
+    }
+    build_manifest = static / "build.run.json"
+    build_timeout = read_json(build_manifest).get("configured_timeout_seconds")
+    if not isinstance(build_timeout, int) or build_timeout < 1:
+        raise CaptureError(f"{build_manifest}: invalid configured timeout")
+    validate_run_manifest(
+        build_manifest,
+        command=static_build_command(),
+        timeout=build_timeout,
+        stdout_path=static / "build.stdout.txt",
+        stderr_path=static / "build.stderr.txt",
+        input_paths=common_inputs,
+        output_paths={"binary": BINARY, "build_log": static / "build.log"},
+        environment_value=environment(),
+    )
+    for label, option in (
+        ("sass", "--dump-sass"),
+        ("resources", "--dump-resource-usage"),
+    ):
+        manifest = static / f"{label}.run.json"
+        configured = read_json(manifest).get("configured_timeout_seconds")
+        if not isinstance(configured, int) or configured < 1:
+            raise CaptureError(f"{manifest}: invalid configured timeout")
+        validate_run_manifest(
+            manifest,
+            command=[str(CUOBJDUMP), option, str(BINARY)],
+            timeout=configured,
+            stdout_path=static / f"{label}.txt",
+            stderr_path=static / f"{label}.stderr.txt",
+            input_paths={"binary": BINARY, "cuobjdump": CUOBJDUMP},
+            output_paths={label: static / f"{label}.txt"},
+            environment_value=environment(),
+        )
+    control_manifest = static / "control.run.json"
+    control_timeout = read_json(control_manifest).get("configured_timeout_seconds")
+    if not isinstance(control_timeout, int) or control_timeout < 1:
+        raise CaptureError(f"{control_manifest}: invalid configured timeout")
+    control_inputs = {"binary": BINARY, "python": Path(sys.executable)}
+    control_inputs.update(
+        {
+            name: Path(identity["path"])
+            for name, identity in binding["control_tools"].items()
+        }
+    )
+    validate_run_manifest(
+        control_manifest,
+        command=static_control_command(static),
+        timeout=control_timeout,
+        stdout_path=static / "control.stdout.txt",
+        stderr_path=static / "control.stderr.txt",
+        input_paths=control_inputs,
+        output_paths={
+            "control_bits": static / "control_bits.json",
+            "control_log": static / "control.log",
+        },
+        environment_value=environment(),
+    )
+    expected = static_command_document(root, binding)
+    observed = read_json(command_path)
+    if observed != expected:
+        raise CaptureError(
+            f"{command_path}: stale static command/artifact binding"
+        )
+    if expected["binary"] != binary:
+        raise CaptureError(f"{static}: retained static binary identity drifted")
+    return binary
+
+
 def retained_binary(root: Path) -> dict[str, Any]:
-    document = read_json(root / "static/command.json")
-    binary = document.get("binary")
-    if not isinstance(binary, dict) or not isinstance(binary.get("sha256"), str):
-        raise CaptureError(f"{root / 'static/command.json'}: missing binary identity")
-    current = require_binary(str(binary["sha256"]))
-    if current != binary:
-        raise CaptureError("retained static binary identity differs from current binary")
-    return current
+    return validate_static(root)
 
 
 def selected_cells(smoke: bool, selector: str | None) -> list[Cell]:
@@ -213,70 +639,154 @@ def selected_repetitions(smoke: bool, selector: str | None) -> list[int]:
 
 def capture_static(root: Path, timeout: int) -> None:
     static = root / "static"
-    retained = tuple(
-        static / name
-        for name in (
-            "control_bits.json",
-            "resources.txt",
-            "sass.txt",
-            "build.log",
-            "command.json",
-        )
-    )
-    if all(path.is_file() and path.stat().st_size > 0 for path in retained):
-        retained_binary(root)
+    command_path = static / "command.json"
+    if command_path.is_file():
+        validate_static(root)
         print(f"static existing: {static}", flush=True)
         return
-    if static.is_dir() and any(static.iterdir()):
-        raise CaptureError(
-            f"incomplete static directory must be moved aside before recapture: {static}"
-        )
     static.mkdir(parents=True, exist_ok=True)
-    build_command = [
-        "make",
-        "-B",
-        "-C",
-        str(HERE),
-        "async_multiline_response",
-    ]
-    built = run(build_command, timeout=timeout, environment=environment())
-    atomic_write_text(static / "build.log", built.stdout + built.stderr)
+    binding = current_static_binding()
+    binding_path = static / "binding.json"
+    if binding_path.is_file():
+        if read_json(binding_path) != binding:
+            raise CaptureError(
+                f"{binding_path}: stale retained static must be moved aside before recapture"
+            )
+    elif any(static.iterdir()):
+        raise CaptureError(
+            f"{static}: unbound legacy/incomplete static must be moved aside before recapture"
+        )
+    else:
+        atomic_write_json(binding_path, binding)
+
+    build_files = (
+        static / "build.run.json",
+        static / "build.stdout.txt",
+        static / "build.stderr.txt",
+        static / "build.log",
+    )
+    if complete_stage_or_absent(build_files, "static build"):
+        manifest = read_json(static / "build.run.json")
+        configured = manifest.get("configured_timeout_seconds")
+        if not isinstance(configured, int) or configured < 1:
+            raise CaptureError(f"{static / 'build.run.json'}: invalid configured timeout")
+        validate_run_manifest(
+            static / "build.run.json",
+            command=static_build_command(),
+            timeout=configured,
+            stdout_path=static / "build.stdout.txt",
+            stderr_path=static / "build.stderr.txt",
+            input_paths={"source": SOURCE, "makefile": MAKEFILE, "nvcc": NVCC},
+            output_paths={"binary": BINARY, "build_log": static / "build.log"},
+            environment_value=environment(),
+        )
+    else:
+        recorded_run(
+            static_build_command(),
+            timeout=timeout,
+            manifest_path=static / "build.run.json",
+            stdout_path=static / "build.stdout.txt",
+            stderr_path=static / "build.stderr.txt",
+            combined_output_path=static / "build.log",
+            input_paths={"source": SOURCE, "makefile": MAKEFILE, "nvcc": NVCC},
+            output_paths={"binary": BINARY, "build_log": static / "build.log"},
+            environment_value=environment(),
+        )
     binary = require_binary()
 
     for option, output in (
         ("--dump-sass", "sass.txt"),
         ("--dump-resource-usage", "resources.txt"),
     ):
-        dumped = run(
-            [str(CUOBJDUMP), option, str(BINARY)],
-            timeout=timeout,
-            environment=environment(),
+        label = output.removesuffix(".txt")
+        command = [str(CUOBJDUMP), option, str(BINARY)]
+        stage_files = (
+            static / f"{label}.run.json",
+            static / output,
+            static / f"{label}.stderr.txt",
         )
-        atomic_write_text(static / output, dumped.stdout + dumped.stderr)
+        if complete_stage_or_absent(stage_files, f"static {label}"):
+            configured = read_json(static / f"{label}.run.json").get(
+                "configured_timeout_seconds"
+            )
+            if not isinstance(configured, int) or configured < 1:
+                raise CaptureError(
+                    f"{static / f'{label}.run.json'}: invalid configured timeout"
+                )
+            validate_run_manifest(
+                static / f"{label}.run.json",
+                command=command,
+                timeout=configured,
+                stdout_path=static / output,
+                stderr_path=static / f"{label}.stderr.txt",
+                input_paths={"binary": BINARY, "cuobjdump": CUOBJDUMP},
+                output_paths={label: static / output},
+                environment_value=environment(),
+            )
+        else:
+            recorded_run(
+                command,
+                timeout=timeout,
+                manifest_path=static / f"{label}.run.json",
+                stdout_path=static / output,
+                stderr_path=static / f"{label}.stderr.txt",
+                input_paths={"binary": BINARY, "cuobjdump": CUOBJDUMP},
+                output_paths={label: static / output},
+                environment_value=environment(),
+            )
 
-    control_command = [
-        sys.executable,
-        str(CONTROL_TOOL),
-        "--binary",
-        str(BINARY),
-        "--arch",
-        "sm_86",
-        "--toolkit-bindir",
-        str(CUDA_BIN),
-        "--out",
-        str(static / "control_bits.json"),
-    ]
-    controlled = run(control_command, timeout=timeout, environment=environment())
-    atomic_write_text(static / "control.log", controlled.stdout + controlled.stderr)
-    atomic_write_json(
-        static / "command.json",
-        {
-            "schema_version": 1,
-            "build": build_command,
-            "control": control_command,
-            "binary": binary,
-        },
+    control_files = (
+        static / "control.run.json",
+        static / "control_bits.json",
+        static / "control.stdout.txt",
+        static / "control.stderr.txt",
+        static / "control.log",
     )
+    control_inputs = {"binary": BINARY, "python": Path(sys.executable)}
+    control_inputs.update(
+        {
+            name: Path(identity["path"])
+            for name, identity in binding["control_tools"].items()
+        }
+    )
+    control_command = static_control_command(static)
+    if complete_stage_or_absent(control_files, "static control"):
+        configured = read_json(static / "control.run.json").get(
+            "configured_timeout_seconds"
+        )
+        if not isinstance(configured, int) or configured < 1:
+            raise CaptureError(f"{static / 'control.run.json'}: invalid configured timeout")
+        validate_run_manifest(
+            static / "control.run.json",
+            command=control_command,
+            timeout=configured,
+            stdout_path=static / "control.stdout.txt",
+            stderr_path=static / "control.stderr.txt",
+            input_paths=control_inputs,
+            output_paths={
+                "control_bits": static / "control_bits.json",
+                "control_log": static / "control.log",
+            },
+            environment_value=environment(),
+        )
+    else:
+        recorded_run(
+            control_command,
+            timeout=timeout,
+            manifest_path=static / "control.run.json",
+            stdout_path=static / "control.stdout.txt",
+            stderr_path=static / "control.stderr.txt",
+            combined_output_path=static / "control.log",
+            input_paths=control_inputs,
+            output_paths={
+                "control_bits": static / "control_bits.json",
+                "control_log": static / "control.log",
+            },
+            environment_value=environment(),
+        )
+    atomic_write_json(command_path, static_command_document(root, binding))
+    if validate_static(root) != binary:
+        raise CaptureError(f"{static}: static binary identity changed during capture")
     print(f"static: {static}", flush=True)
 
 
@@ -328,9 +838,32 @@ def validate_direct(
         arm = payload.get(variant)
         if not isinstance(arm, dict) or arm.get("correct") is not True:
             raise CaptureError(f"{path}: invalid {variant} result")
-    command = read_json(destination / "command.json")
+    command_path = destination / "command.json"
+    command = read_json(command_path)
     expected_command = direct_command(cell, repetition)
-    if command.get("command") != expected_command or command.get("binary") != binary:
+    configured = command.get("configured_timeout_seconds")
+    if not isinstance(configured, int) or configured < 1:
+        raise CaptureError(f"{command_path}: invalid configured timeout")
+    run_manifest = destination / "direct.run.json"
+    validate_run_manifest(
+        run_manifest,
+        command=expected_command,
+        timeout=configured,
+        stdout_path=path,
+        stderr_path=destination / "stderr.txt",
+        input_paths={"probe_binary": BINARY},
+        output_paths={"result": path},
+        environment_value=environment(),
+    )
+    expected_document = {
+        "schema_version": 2,
+        "command": expected_command,
+        "configured_timeout_seconds": configured,
+        "binary": dict(binary),
+        "environment_overrides": environment_overrides(),
+        "run_manifest": file_identity(run_manifest),
+    }
+    if command != expected_document:
         raise CaptureError(f"{destination}: direct command/binary binding mismatch")
 
 
@@ -346,47 +879,146 @@ def capture_direct(
                 / cell.direct_name
                 / f"repeat-{repetition}"
             )
-            result_path = destination / "result.json"
-            if result_path.is_file():
+            stage_files = (
+                destination / "result.json",
+                destination / "stderr.txt",
+                destination / "direct.run.json",
+                destination / "command.json",
+            )
+            if complete_stage_or_absent(stage_files, f"direct {destination}"):
                 validate_direct(destination, cell, repetition, binary)
                 print(f"direct existing: {cell.direct_name}/repeat-{repetition}")
                 continue
             command = direct_command(cell, repetition)
-            completed = run(command, timeout=timeout, environment=environment())
             destination.mkdir(parents=True, exist_ok=True)
-            atomic_write_text(result_path, completed.stdout)
-            atomic_write_text(destination / "stderr.txt", completed.stderr)
+            result_path = destination / "result.json"
+            recorded_run(
+                command,
+                timeout=timeout,
+                manifest_path=destination / "direct.run.json",
+                stdout_path=result_path,
+                stderr_path=destination / "stderr.txt",
+                input_paths={"probe_binary": BINARY},
+                output_paths={"result": result_path},
+                environment_value=environment(),
+            )
             atomic_write_json(
                 destination / "command.json",
                 {
-                    "schema_version": 1,
+                    "schema_version": 2,
                     "command": command,
+                    "configured_timeout_seconds": timeout,
                     "binary": binary,
-                    "environment_overrides": {
-                        "CUDA_VISIBLE_DEVICES": "0",
-                        "LANG": "C",
-                        "LC_ALL": "C",
-                    },
+                    "environment_overrides": environment_overrides(),
+                    "run_manifest": file_identity(destination / "direct.run.json"),
                 },
             )
             validate_direct(destination, cell, repetition, binary)
             print(f"direct: {cell.direct_name}/repeat-{repetition}", flush=True)
 
 
+def nvbit_commands(
+    destination: Path, cell: Cell, variant: str, timeout: int
+) -> tuple[list[str], list[str]]:
+    name = cell.endpoint_name(variant)
+    capture_command = [
+        sys.executable,
+        str(NVBIT_CAPTURE),
+        "--output",
+        str(destination),
+        "--cell",
+        name,
+        "--binary",
+        str(BINARY),
+        "--mode",
+        "ncu",
+        "--gpu",
+        "0",
+        "--timeout",
+        str(timeout),
+        "--target-args",
+        "--groups",
+        str(TRACE_GROUPS),
+        "--depth",
+        str(cell.depth),
+        "--lead-samples",
+        str(cell.lead),
+        "--variant",
+        variant,
+        "--markers",
+        "on",
+    ]
+    return capture_command, [
+        "systemd-run",
+        "--user",
+        "--scope",
+        "--quiet",
+        "-p",
+        "Delegate=yes",
+        *capture_command,
+    ]
+
+
 def validate_nvbit(
-    destination: Path, cell: Cell, variant: str, expected_sha256: str
+    root: Path,
+    destination: Path,
+    cell: Cell,
+    variant: str,
+    binary: Mapping[str, Any],
 ) -> None:
     complete = read_json(destination / "complete.json")
     binding = read_json(destination / "campaign_binding.json")
     expected_name = cell.endpoint_name(variant)
     if complete.get("complete") is not True or complete.get("key") != expected_name:
         raise CaptureError(f"{destination}: invalid NVBit completion record")
-    if complete.get("binary_sha256") != expected_sha256:
+    if complete.get("binary_sha256") != binary["sha256"]:
         raise CaptureError(f"{destination}: wrong NVBit binary")
     if binding.get("cell") != expected_name:
         raise CaptureError(f"{destination}: wrong NVBit binding")
     if binding.get("output_contract", {}).get("passed") is not True:
         raise CaptureError(f"{destination}: failed NVBit output contract")
+    run_root = root / "runs/nvbit" / expected_name
+    command_path = run_root / "command.json"
+    command_document = read_json(command_path)
+    target_timeout = command_document.get("configured_target_timeout_seconds")
+    outer_timeout = command_document.get("configured_timeout_seconds")
+    if not isinstance(target_timeout, int) or target_timeout < 1:
+        raise CaptureError(f"{command_path}: invalid target timeout")
+    if not isinstance(outer_timeout, int) or outer_timeout < target_timeout:
+        raise CaptureError(f"{command_path}: invalid wrapper timeout")
+    capture_command, command = nvbit_commands(
+        destination, cell, variant, target_timeout
+    )
+    run_manifest = run_root / "wrapper.run.json"
+    output_paths = {
+        "campaign_binding": destination / "campaign_binding.json",
+        "complete": destination / "complete.json",
+        "dynamic_trace": destination / "dynamic_trace.pb",
+    }
+    validate_run_manifest(
+        run_manifest,
+        command=command,
+        timeout=outer_timeout,
+        stdout_path=run_root / "wrapper.stdout.txt",
+        stderr_path=run_root / "wrapper.stderr.txt",
+        input_paths={"nvbit_wrapper": NVBIT_CAPTURE, "probe_binary": BINARY},
+        output_paths=output_paths,
+        environment_value=environment(),
+    )
+    expected_document = {
+        "schema_version": 2,
+        "capture_command": capture_command,
+        "command": command,
+        "configured_target_timeout_seconds": target_timeout,
+        "configured_timeout_seconds": outer_timeout,
+        "binary": dict(binary),
+        "nvbit_wrapper": file_identity(NVBIT_CAPTURE),
+        "environment_overrides": environment_overrides(),
+        "outputs": identities(output_paths),
+        "run_manifest": file_identity(run_manifest),
+    }
+    if command_document != expected_document:
+        raise CaptureError(f"{command_path}: stale NVBit wrapper binding")
 
 
 def capture_nvbit(root: Path, cells: Sequence[Cell], timeout: int) -> None:
@@ -396,47 +1028,57 @@ def capture_nvbit(root: Path, cells: Sequence[Cell], timeout: int) -> None:
             name = cell.endpoint_name(variant)
             destination = root / "nvbit" / name
             if (destination / "complete.json").is_file():
-                validate_nvbit(destination, cell, variant, str(binary["sha256"]))
+                validate_nvbit(root, destination, cell, variant, binary)
                 print(f"nvbit existing: {name}")
                 continue
-            capture_command = [
-                sys.executable,
-                str(NVBIT_CAPTURE),
-                "--output",
-                str(destination),
-                "--cell",
-                name,
-                "--binary",
-                str(BINARY),
-                "--mode",
-                "ncu",
-                "--gpu",
-                "0",
-                "--timeout",
-                str(timeout),
-                "--target-args",
-                "--groups",
-                str(TRACE_GROUPS),
-                "--depth",
-                str(cell.depth),
-                "--lead-samples",
-                str(cell.lead),
-                "--variant",
-                variant,
-                "--markers",
-                "on",
-            ]
-            command = [
-                "systemd-run",
-                "--user",
-                "--scope",
-                "--quiet",
-                "-p",
-                "Delegate=yes",
-                *capture_command,
-            ]
-            run(command, timeout=timeout + 120, environment=environment())
-            validate_nvbit(destination, cell, variant, str(binary["sha256"]))
+            run_root = root / "runs/nvbit" / name
+            if destination.exists() and any(destination.iterdir()):
+                raise CaptureError(
+                    f"{destination}: incomplete NVBit output must be moved aside before recapture"
+                )
+            if run_root.exists() and any(run_root.iterdir()):
+                raise CaptureError(
+                    f"{run_root}: incomplete NVBit run record must be moved aside before recapture"
+                )
+            run_root.mkdir(parents=True, exist_ok=True)
+            capture_command, command = nvbit_commands(
+                destination, cell, variant, timeout
+            )
+            outer_timeout = timeout + 120
+            output_paths = {
+                "campaign_binding": destination / "campaign_binding.json",
+                "complete": destination / "complete.json",
+                "dynamic_trace": destination / "dynamic_trace.pb",
+            }
+            recorded_run(
+                command,
+                timeout=outer_timeout,
+                manifest_path=run_root / "wrapper.run.json",
+                stdout_path=run_root / "wrapper.stdout.txt",
+                stderr_path=run_root / "wrapper.stderr.txt",
+                input_paths={
+                    "nvbit_wrapper": NVBIT_CAPTURE,
+                    "probe_binary": BINARY,
+                },
+                output_paths=output_paths,
+                environment_value=environment(),
+            )
+            atomic_write_json(
+                run_root / "command.json",
+                {
+                    "schema_version": 2,
+                    "capture_command": capture_command,
+                    "command": command,
+                    "configured_target_timeout_seconds": timeout,
+                    "configured_timeout_seconds": outer_timeout,
+                    "binary": binary,
+                    "nvbit_wrapper": file_identity(NVBIT_CAPTURE),
+                    "environment_overrides": environment_overrides(),
+                    "outputs": identities(output_paths),
+                    "run_manifest": file_identity(run_root / "wrapper.run.json"),
+                },
+            )
+            validate_nvbit(root, destination, cell, variant, binary)
             print(f"nvbit: {name}", flush=True)
 
 
@@ -450,7 +1092,9 @@ def build_simulator(timeout: int) -> None:
         "-p",
         "sim-run",
     ]
-    run(command, timeout=timeout, environment=environment())
+    run_unrecorded(
+        command, timeout=timeout, environment_value=environment()
+    )
     if not SIM_RUN.is_file() or not os.access(SIM_RUN, os.X_OK):
         raise CaptureError(f"sim-run build did not produce {SIM_RUN}")
 
@@ -483,14 +1127,47 @@ def validate_replay(
     read_json(first)
     trace = root / "nvbit" / cell.endpoint_name(variant) / "dynamic_trace.pb"
     control = root / "static/control_bits.json"
-    expected = {
-        "schema_version": 1,
-        "command": replay_command(root, cell, variant),
-        "sim_run": {"path": str(SIM_RUN), "sha256": sha256(SIM_RUN)},
-        "trace_sha256": sha256(trace),
-        "control_sha256": sha256(control),
+    command_path = destination / "command.json"
+    command_document = read_json(command_path)
+    configured = command_document.get("configured_timeout_seconds")
+    if not isinstance(configured, int) or configured < 1:
+        raise CaptureError(f"{command_path}: invalid configured timeout")
+    command = replay_command(root, cell, variant)
+    input_paths = {
+        "arch_card": ARCH_CARD,
+        "control": control,
+        "pchase_card": PCHASE_CARD,
+        "sim_run": SIM_RUN,
+        "trace": trace,
     }
-    if read_json(destination / "command.json") != expected:
+    for repeat in (1, 2):
+        validate_run_manifest(
+            destination / f"replay-{repeat}.run.json",
+            command=command,
+            timeout=configured,
+            stdout_path=destination / f"replay-{repeat}.json",
+            stderr_path=destination / f"stderr-{repeat}.txt",
+            input_paths=input_paths,
+            output_paths={
+                "replay": destination / f"replay-{repeat}.json"
+            },
+            environment_value=environment(),
+        )
+    expected = {
+        "schema_version": 2,
+        "command": command,
+        "configured_timeout_seconds": configured,
+        "inputs": identities(input_paths),
+        "outputs": identities({"replay_1": first, "replay_2": second}),
+        "run_manifests": identities(
+            {
+                "replay_1": destination / "replay-1.run.json",
+                "replay_2": destination / "replay-2.run.json",
+            }
+        ),
+        "environment_overrides": environment_overrides(),
+    }
+    if command_document != expected:
         raise CaptureError(f"{destination}: replay input/binary binding mismatch")
 
 
@@ -503,29 +1180,86 @@ def capture_replay(root: Path, cells: Sequence[Cell], timeout: int) -> None:
             if not trace.is_file() or trace.stat().st_size == 0:
                 raise CaptureError(f"missing trace for {name}: {trace}")
             destination = root / "simulator" / name
-            if (destination / "replay-1.json").is_file() and (
-                destination / "replay-2.json"
-            ).is_file():
+            if (destination / "command.json").is_file():
                 validate_replay(root, destination, cell, variant)
                 print(f"replay existing: {name}")
                 continue
             destination.mkdir(parents=True, exist_ok=True)
             command = replay_command(root, cell, variant)
+            input_paths = {
+                "arch_card": ARCH_CARD,
+                "control": root / "static/control_bits.json",
+                "pchase_card": PCHASE_CARD,
+                "sim_run": SIM_RUN,
+                "trace": trace,
+            }
             for repeat in (1, 2):
-                completed = run(command, timeout=timeout, environment=environment())
-                atomic_write_text(destination / f"replay-{repeat}.json", completed.stdout)
-                atomic_write_text(destination / f"stderr-{repeat}.txt", completed.stderr)
+                stage_files = (
+                    destination / f"replay-{repeat}.json",
+                    destination / f"stderr-{repeat}.txt",
+                    destination / f"replay-{repeat}.run.json",
+                )
+                if complete_stage_or_absent(
+                    stage_files, f"replay {name} repeat {repeat}"
+                ):
+                    manifest = read_json(
+                        destination / f"replay-{repeat}.run.json"
+                    )
+                    configured = manifest.get("configured_timeout_seconds")
+                    if not isinstance(configured, int) or configured < 1:
+                        raise CaptureError(
+                            f"{destination / f'replay-{repeat}.run.json'}: "
+                            "invalid configured timeout"
+                        )
+                    validate_run_manifest(
+                        destination / f"replay-{repeat}.run.json",
+                        command=command,
+                        timeout=configured,
+                        stdout_path=destination / f"replay-{repeat}.json",
+                        stderr_path=destination / f"stderr-{repeat}.txt",
+                        input_paths=input_paths,
+                        output_paths={
+                            "replay": destination / f"replay-{repeat}.json"
+                        },
+                        environment_value=environment(),
+                    )
+                    if configured != timeout:
+                        raise CaptureError(
+                            f"{destination}: replay twins use different configured timeouts"
+                        )
+                    continue
+                recorded_run(
+                    command,
+                    timeout=timeout,
+                    manifest_path=destination / f"replay-{repeat}.run.json",
+                    stdout_path=destination / f"replay-{repeat}.json",
+                    stderr_path=destination / f"stderr-{repeat}.txt",
+                    input_paths=input_paths,
+                    output_paths={
+                        "replay": destination / f"replay-{repeat}.json"
+                    },
+                    environment_value=environment(),
+                )
             atomic_write_json(
                 destination / "command.json",
                 {
-                    "schema_version": 1,
+                    "schema_version": 2,
                     "command": command,
-                    "sim_run": {
-                        "path": str(SIM_RUN),
-                        "sha256": sha256(SIM_RUN),
-                    },
-                    "trace_sha256": sha256(trace),
-                    "control_sha256": sha256(root / "static/control_bits.json"),
+                    "configured_timeout_seconds": timeout,
+                    "inputs": identities(input_paths),
+                    "outputs": identities(
+                        {
+                            "replay_1": destination / "replay-1.json",
+                            "replay_2": destination / "replay-2.json",
+                        }
+                    ),
+                    "run_manifests": identities(
+                        {
+                            "replay_1": destination / "replay-1.run.json",
+                            "replay_2": destination / "replay-2.run.json",
+                        }
+                    ),
+                    "environment_overrides": environment_overrides(),
                 },
             )
             validate_replay(root, destination, cell, variant)
@@ -553,10 +1287,11 @@ def validate_selected(root: Path, cells: Sequence[Cell], repetitions: Sequence[i
             )
         for variant in VARIANTS:
             validate_nvbit(
+                root,
                 root / "nvbit" / cell.endpoint_name(variant),
                 cell,
                 variant,
-                str(binary["sha256"]),
+                binary,
             )
             validate_replay(
                 root,

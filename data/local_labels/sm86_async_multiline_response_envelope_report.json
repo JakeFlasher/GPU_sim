@@ -1,0 +1,503 @@
+{
+  "assay": "sm86_async_multiline_response_envelope",
+  "binary": {
+    "path": "/home/jakeshea/GPU_simulator_rebase/workloads/research_probes/async_source_only/async_multiline_response",
+    "sha256": "0143a4e126a0356b4d0d2403f5e37c74aaa8f839c057fdbedc3948705ced3d9c",
+    "size_bytes": 1187312
+  },
+  "counts": {
+    "direct_cells_read": 1,
+    "direct_results_read": 1,
+    "ncu_bundles": 1,
+    "ncu_reports": 6,
+    "ncu_rows": 12,
+    "nvbit_cells": 2,
+    "simulator_cells": 2,
+    "simulator_outputs": 4
+  },
+  "criteria": {
+    "attribution_preceded_live_labels": true,
+    "full_16_nvbit_traces_complete": null,
+    "full_16_schema18_twins_complete": null,
+    "full_80_bundle_attribution_admitted": null,
+    "full_replay_scientific_gates_passed": null,
+    "holdout_within_limits": null,
+    "identification_within_limits": null,
+    "probe_binary_exact": true,
+    "production_timing_promotion_disabled": true,
+    "static_artifacts_valid": true,
+    "static_assay_gate_passed": true,
+    "typed_visibility_tail_required": true,
+    "vertical_smoke_complete": true,
+    "vertical_smoke_scientific_gate_passed": false
+  },
+  "decision": "A complete static, attribution, response-envelope, destination-wavefront, or issue-control gate rejects the assay before timing transfer.",
+  "evidence_identities": {
+    "direct": [
+      {
+        "cell": "async_multiline_response_d1_l16_g8192",
+        "depth": 1,
+        "lead_samples": 16,
+        "result_sha256": [
+          "023d8106c94afc4364df5b14bc1fa6bf442be370688066037fba0c0bbb86f183"
+        ]
+      }
+    ],
+    "ncu": [
+      {
+        "bundle_sha256": "b611fc80443774a2f2d5d4ddc9a0e5a3c16799c112dd723979c7ff46258d1f51",
+        "cell": "async_multiline_response_d1_l16_g64",
+        "families": {
+          "dram": {
+            "family": "dram",
+            "files": {
+              "command.json": "13c6c477ec2644ed3c47ca55333a21cb328c5f34f04e4e5564db920140f64ba8",
+              "import.run.json": "20fb1f83e597fc9f6b8bd49c3fd7b82a6eb9c08cab8957c01b3d63f589eb8453",
+              "import.stderr.txt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+              "ncu.csv": "63be18b7443772c3f509a889bab4a8979b4f4f7ef42e7c8a04893d87898ea27a",
+              "profile.ncu-rep": "4b928b0ef82e63b92e86a776ebe8ebf897b684c42323f005ee24f1d6cbc57b2d",
+              "profile.run.json": "9c0a6c6be38e295e192b093f8cf8d6d7e29e0ebc16551b802fe2fa19da43f897",
+              "profile.stderr.txt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+              "profile.stdout.txt": "79308b72819cd60654f37e8bfbe0be87ac499571b8ee3763512cc57bd81c431d"
+            },
+            "metric": "dram__sectors_read.sum",
+            "rows": [
+              {
+                "context": "1",
+                "id": 0,
+                "kernel": "void multiline_response_kernel<1, 16>(const char *, unsigned int, int, bool, MultilineResult *)",
+                "metric_value": 2200,
+                "process_id": "2963593",
+                "profiler_replayer_passes": 1,
+                "stream": "7",
+                "variant": "span_expensive"
+              },
+              {
+                "context": "1",
+                "id": 1,
+                "kernel": "void multiline_response_kernel<1, 16>(const char *, unsigned int, int, bool, MultilineResult *)",
+                "metric_value": 2584,
+                "process_id": "2963593",
+                "profiler_replayer_passes": 1,
+                "stream": "7",
+                "variant": "span_cheap"
+              }
+            ],
+            "scientific_gate": {
+              "exact_expected_value": null,
+              "expected_value": null,
+              "positive_population": null
+            },
+            "values_by_variant": {
+              "span_cheap": 2584,
+              "span_expensive": 2200
+            }
+          },
+          "global_ld": {
+            "family": "global_ld",
+            "files": {
+              "command.json": "a9d7b2addfd635ff105109b95f7fba26cc7f826cca5ab616b48690f70604192e",
+              "import.run.json": "3e58746433e6135d662165cd403e524800716c7446658780f7ebfd31b5e81529",
+              "import.stderr.txt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+              "ncu.csv": "924854bbe8053cacf37a022095c54f22456639f589715d2bf3b2c63f03bc6e9c",
+              "profile.ncu-rep": "cff6d069606f0e5cb3a1f7235abf884bc9c16c70caf8da98bf4eba8e3d1feef3",
+              "profile.run.json": "8d8692aa3e08a961a37da48246f87d6f54a2400a3315a75d1fa144d42a2dfc28",
+              "profile.stderr.txt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+              "profile.stdout.txt": "00993637a298b140b95d3b9b61ee78703f2ac4f96265ed40c95d0a0feb4a4ab2"
+            },
+            "metric": "smsp__inst_executed_op_global_ld.sum",
+            "rows": [
+              {
+                "context": "1",
+                "id": 0,
+                "kernel": "void multiline_response_kernel<1, 16>(const char *, unsigned int, int, bool, MultilineResult *)",
+                "metric_value": 64,
+                "process_id": "2963383",
+                "profiler_replayer_passes": 1,
+                "stream": "7",
+                "variant": "span_expensive"
+              },
+              {
+                "context": "1",
+                "id": 1,
+                "kernel": "void multiline_response_kernel<1, 16>(const char *, unsigned int, int, bool, MultilineResult *)",
+                "metric_value": 64,
+                "process_id": "2963383",
+                "profiler_replayer_passes": 1,
+                "stream": "7",
+                "variant": "span_cheap"
+              }
+            ],
+            "scientific_gate": {
+              "exact_expected_value": true,
+              "expected_value": 64,
+              "positive_population": null
+            },
+            "values_by_variant": {
+              "span_cheap": 64,
+              "span_expensive": 64
+            }
+          },
+          "ldgsts": {
+            "family": "ldgsts",
+            "files": {
+              "command.json": "a4aed7f69662ffb72b54c20058080d623145f8cb45265cbb08b8a3fa0333137e",
+              "import.run.json": "32224a0014673d1f7cb38fbb86fba1438d7a4cb2c1849c43e6a8c41319ca46af",
+              "import.stderr.txt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+              "ncu.csv": "9fe2edb74fdaa39e21b7d351d875bf1fdc09a67605577e220d56610c69e3756e",
+              "profile.ncu-rep": "cc80678c9a16dac13c2958c8cae1b7f8e9d2f1863a8b06a0cf18b8fe8ec611c6",
+              "profile.run.json": "aa103c694673a00c5f64c1f08699f770eb384af791010980e54a5c47db58bf17",
+              "profile.stderr.txt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+              "profile.stdout.txt": "584b70e130ef49c5bbfae17719c8bbb5d8173a248ba50801f1b869c089e9b4d2"
+            },
+            "metric": "smsp__inst_executed_op_ldgsts.sum",
+            "rows": [
+              {
+                "context": "1",
+                "id": 0,
+                "kernel": "void multiline_response_kernel<1, 16>(const char *, unsigned int, int, bool, MultilineResult *)",
+                "metric_value": 64,
+                "process_id": "2963425",
+                "profiler_replayer_passes": 1,
+                "stream": "7",
+                "variant": "span_expensive"
+              },
+              {
+                "context": "1",
+                "id": 1,
+                "kernel": "void multiline_response_kernel<1, 16>(const char *, unsigned int, int, bool, MultilineResult *)",
+                "metric_value": 64,
+                "process_id": "2963425",
+                "profiler_replayer_passes": 1,
+                "stream": "7",
+                "variant": "span_cheap"
+              }
+            ],
+            "scientific_gate": {
+              "exact_expected_value": true,
+              "expected_value": 64,
+              "positive_population": null
+            },
+            "values_by_variant": {
+              "span_cheap": 64,
+              "span_expensive": 64
+            }
+          },
+          "lts_hit": {
+            "family": "lts_hit",
+            "files": {
+              "command.json": "85d913d700547418693bc047c3a29ed646f9818ce848023b57d4be50385c4753",
+              "import.run.json": "a040c6e1ded3dc2d9085884838e4713172825e638d14bd1c4501c1779e9a5a05",
+              "import.stderr.txt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+              "ncu.csv": "41a2274557d44fcb18e72bbd59a6836b654055a56f336d5c9b47da4d34b582e7",
+              "profile.ncu-rep": "f7e2db4beec0053b53e84e599cc893111be658bb3d605a814a638ba706a8dbab",
+              "profile.run.json": "df759b0cb40265e8ededb67325271f46be1a1b3482774bc2b7bcf203491d2146",
+              "profile.stderr.txt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+              "profile.stdout.txt": "f61c527b62162e9e9a1a449c573d79797d09b84defd236fdfc5136d8f5698ac4"
+            },
+            "metric": "lts__t_sectors_srcunit_tex_aperture_device_op_read_lookup_hit.sum",
+            "rows": [
+              {
+                "context": "1",
+                "id": 0,
+                "kernel": "void multiline_response_kernel<1, 16>(const char *, unsigned int, int, bool, MultilineResult *)",
+                "metric_value": 1536,
+                "process_id": "2963509",
+                "profiler_replayer_passes": 1,
+                "stream": "7",
+                "variant": "span_expensive"
+              },
+              {
+                "context": "1",
+                "id": 1,
+                "kernel": "void multiline_response_kernel<1, 16>(const char *, unsigned int, int, bool, MultilineResult *)",
+                "metric_value": 1536,
+                "process_id": "2963509",
+                "profiler_replayer_passes": 1,
+                "stream": "7",
+                "variant": "span_cheap"
+              }
+            ],
+            "scientific_gate": {
+              "exact_expected_value": null,
+              "expected_value": null,
+              "positive_population": true
+            },
+            "values_by_variant": {
+              "span_cheap": 1536,
+              "span_expensive": 1536
+            }
+          },
+          "lts_miss": {
+            "family": "lts_miss",
+            "files": {
+              "command.json": "db1309ec945c0d0658d84596dc43d02c53b8a7f8e73371efa6a4306308bebc9f",
+              "import.run.json": "164428f327f88614e81177f30f6fd2e5068a0ee114a216ce3fc20766f67dac53",
+              "import.stderr.txt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+              "ncu.csv": "fc67d2b07e82696f50e80f143fd64698b727916da16004333c4fa935586cbcd0",
+              "profile.ncu-rep": "2337b2af8c01349048e4b6411d2837e8653638250780bf5b810807914ed79501",
+              "profile.run.json": "3ffb765480fd1f06969d35b97112e7a85614229e0fb6e31f488b79c11db8944c",
+              "profile.stderr.txt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+              "profile.stdout.txt": "6b00a7b1ff6db9daf10d99036b3996f1ff4afaf7956d4a494acf60eafac4bfd4"
+            },
+            "metric": "lts__t_sectors_srcunit_tex_aperture_device_op_read_lookup_miss.sum",
+            "rows": [
+              {
+                "context": "1",
+                "id": 0,
+                "kernel": "void multiline_response_kernel<1, 16>(const char *, unsigned int, int, bool, MultilineResult *)",
+                "metric_value": 2048,
+                "process_id": "2963551",
+                "profiler_replayer_passes": 1,
+                "stream": "7",
+                "variant": "span_expensive"
+              },
+              {
+                "context": "1",
+                "id": 1,
+                "kernel": "void multiline_response_kernel<1, 16>(const char *, unsigned int, int, bool, MultilineResult *)",
+                "metric_value": 2048,
+                "process_id": "2963551",
+                "profiler_replayer_passes": 1,
+                "stream": "7",
+                "variant": "span_cheap"
+              }
+            ],
+            "scientific_gate": {
+              "exact_expected_value": null,
+              "expected_value": null,
+              "positive_population": true
+            },
+            "values_by_variant": {
+              "span_cheap": 2048,
+              "span_expensive": 2048
+            }
+          },
+          "lts_total": {
+            "family": "lts_total",
+            "files": {
+              "command.json": "dccb00728c74de54fb7e939feb4fa615a270a7804c9c29447a1da05626de5a5a",
+              "import.run.json": "f0778113398b6f41bfcff621722cb185df637fdc9ddb19586f4ac252ed780004",
+              "import.stderr.txt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+              "ncu.csv": "092eac2979dea9c9f5864f7efebb2379efe9472735f9d032fe0db8b0dfa86a19",
+              "profile.ncu-rep": "488a3b547bcc62bb3e817d7341c6c7c297f1e02e2418f923c810b2df627db8ab",
+              "profile.run.json": "9d2f28f4d19e2974c46747b437d11a7f441b750cf6b75d96cd7ee2048384ee39",
+              "profile.stderr.txt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+              "profile.stdout.txt": "e32a2aaa536ca9d73a732d5d84887a66775ea640ce2b65b865dcf9eb0c6ff045"
+            },
+            "metric": "lts__t_sectors_srcunit_tex_aperture_device_op_read.sum",
+            "rows": [
+              {
+                "context": "1",
+                "id": 0,
+                "kernel": "void multiline_response_kernel<1, 16>(const char *, unsigned int, int, bool, MultilineResult *)",
+                "metric_value": 3584,
+                "process_id": "2963467",
+                "profiler_replayer_passes": 1,
+                "stream": "7",
+                "variant": "span_expensive"
+              },
+              {
+                "context": "1",
+                "id": 1,
+                "kernel": "void multiline_response_kernel<1, 16>(const char *, unsigned int, int, bool, MultilineResult *)",
+                "metric_value": 3584,
+                "process_id": "2963467",
+                "profiler_replayer_passes": 1,
+                "stream": "7",
+                "variant": "span_cheap"
+              }
+            ],
+            "scientific_gate": {
+              "exact_expected_value": true,
+              "expected_value": 3584,
+              "positive_population": null
+            },
+            "values_by_variant": {
+              "span_cheap": 3584,
+              "span_expensive": 3584
+            }
+          }
+        },
+        "repetition": 1
+      }
+    ],
+    "nvbit": [
+      {
+        "binary_sha256": "0143a4e126a0356b4d0d2403f5e37c74aaa8f839c057fdbedc3948705ced3d9c",
+        "binding_sha256": "84ab3baeab307c244541125e925cb7c58db76ee7b6c50610b346f60ceea7bea8",
+        "cell": "async_multiline_response_span_cheap_d1_l16_g64",
+        "complete_sha256": "287a2225ca7608f0825624bbe496e25ac36ac7edfc58adc5c009aa562329678f",
+        "trace_sha256": "c28db059580de2580493cfd1a25be1c26989e5172fad74ba0e21a61b77ab60d7",
+        "tracer_sha256": "dda89ee6857058b3f6dc2a01d73a2dc926b876d8e343b7457c779efd82fed007",
+        "variant": "span_cheap"
+      },
+      {
+        "binary_sha256": "0143a4e126a0356b4d0d2403f5e37c74aaa8f839c057fdbedc3948705ced3d9c",
+        "binding_sha256": "67f37fc24051d4b68cfa3bd31cb7eed1a9dedfb907593d767c960e3383cefa2c",
+        "cell": "async_multiline_response_span_expensive_d1_l16_g64",
+        "complete_sha256": "cf54a7bca2509e27ad6610f715361fdaafc67dad730b347db6fcb34629d85693",
+        "trace_sha256": "3dfa50c170ea8e8c58acebc5eb32a8de6c5b355833d781d62b85f4a41bace2d3",
+        "tracer_sha256": "dda89ee6857058b3f6dc2a01d73a2dc926b876d8e343b7457c779efd82fed007",
+        "variant": "span_expensive"
+      }
+    ],
+    "replay": [
+      {
+        "cell": "async_multiline_response_span_cheap_d1_l16_g64",
+        "replay_sha256": "0ec65f9d93d0facc731e805c5d4e6374022bcde11f5a1b3e05b77d38e6b5e2bf",
+        "variant": "span_cheap"
+      },
+      {
+        "cell": "async_multiline_response_span_expensive_d1_l16_g64",
+        "replay_sha256": "05f88e5aac1e005b721ab2bb28250b8c50413653d9cfb42a83e7c77da8fb0ca7",
+        "variant": "span_expensive"
+      }
+    ]
+  },
+  "full_replay_gates": null,
+  "missing_artifact_count": 0,
+  "mode": "smoke_only",
+  "schema_version": 1,
+  "score": null,
+  "smoke_replay_geometry": [
+    {
+      "cohort_response_envelope_cycles": 11456,
+      "cohort_topology_prearrival_hidden_cycles": 0,
+      "cohort_topology_residual_exposure_cycles": 1152,
+      "cohort_topology_stream_hidden_cycles": 0,
+      "geometry_expected": {
+        "bypass_wavefronts_observed": 2048,
+        "cohort_copies_observed": 64,
+        "cohort_groups_observed": 64,
+        "cohort_overlap_groups_observed": 64,
+        "cohort_response_memberships_observed": 2048,
+        "cohort_topology_penalty_cycles": 4608,
+        "copies_observed": 64,
+        "destination_lines_observed": 1280,
+        "destination_wavefronts_observed": 1280,
+        "max_bank_wavefronts_sum": 256,
+        "max_bypass_wavefronts_sum": 256,
+        "source_cohorts_observed": 512
+      },
+      "geometry_gates": {
+        "bypass_wavefronts_observed": true,
+        "cohort_copies_observed": true,
+        "cohort_groups_observed": true,
+        "cohort_overlap_groups_observed": true,
+        "cohort_response_memberships_observed": true,
+        "cohort_topology_penalty_cycles": true,
+        "copies_observed": true,
+        "destination_lines_observed": true,
+        "destination_wavefronts_observed": false,
+        "max_bank_wavefronts_sum": true,
+        "max_bypass_wavefronts_sum": true,
+        "source_cohorts_observed": true
+      },
+      "geometry_observed": {
+        "bypass_wavefronts_observed": 2048,
+        "cohort_copies_observed": 64,
+        "cohort_groups_observed": 64,
+        "cohort_overlap_groups_observed": 64,
+        "cohort_response_memberships_observed": 2048,
+        "cohort_topology_penalty_cycles": 4608,
+        "copies_observed": 64,
+        "destination_lines_observed": 1280,
+        "destination_wavefronts_observed": 2048,
+        "max_bank_wavefronts_sum": 256,
+        "max_bypass_wavefronts_sum": 256,
+        "source_cohorts_observed": 512
+      },
+      "variant": "span_cheap",
+      "work_gates": {
+        "bypass_sector_work_exact": true,
+        "destination_wavefronts_observed_exact": false,
+        "l2_bypass_sectors_exact": true,
+        "scalar_load_instructions_exact": true
+      }
+    },
+    {
+      "cohort_response_envelope_cycles": 11456,
+      "cohort_topology_prearrival_hidden_cycles": 0,
+      "cohort_topology_residual_exposure_cycles": 0,
+      "cohort_topology_stream_hidden_cycles": 4608,
+      "geometry_expected": {
+        "bypass_wavefronts_observed": 2048,
+        "cohort_copies_observed": 64,
+        "cohort_groups_observed": 64,
+        "cohort_overlap_groups_observed": 64,
+        "cohort_response_memberships_observed": 2048,
+        "cohort_topology_penalty_cycles": 4608,
+        "copies_observed": 64,
+        "destination_lines_observed": 1280,
+        "destination_wavefronts_observed": 1280,
+        "max_bank_wavefronts_sum": 256,
+        "max_bypass_wavefronts_sum": 256,
+        "source_cohorts_observed": 512
+      },
+      "geometry_gates": {
+        "bypass_wavefronts_observed": true,
+        "cohort_copies_observed": true,
+        "cohort_groups_observed": true,
+        "cohort_overlap_groups_observed": true,
+        "cohort_response_memberships_observed": true,
+        "cohort_topology_penalty_cycles": true,
+        "copies_observed": true,
+        "destination_lines_observed": true,
+        "destination_wavefronts_observed": false,
+        "max_bank_wavefronts_sum": true,
+        "max_bypass_wavefronts_sum": true,
+        "source_cohorts_observed": true
+      },
+      "geometry_observed": {
+        "bypass_wavefronts_observed": 2048,
+        "cohort_copies_observed": 64,
+        "cohort_groups_observed": 64,
+        "cohort_overlap_groups_observed": 64,
+        "cohort_response_memberships_observed": 2048,
+        "cohort_topology_penalty_cycles": 4608,
+        "copies_observed": 64,
+        "destination_lines_observed": 1280,
+        "destination_wavefronts_observed": 2048,
+        "max_bank_wavefronts_sum": 256,
+        "max_bypass_wavefronts_sum": 256,
+        "source_cohorts_observed": 512
+      },
+      "variant": "span_expensive",
+      "work_gates": {
+        "bypass_sector_work_exact": true,
+        "destination_wavefronts_observed_exact": false,
+        "l2_bypass_sectors_exact": true,
+        "scalar_load_instructions_exact": true
+      }
+    }
+  ],
+  "smoke_scientific_gates": {
+    "cheap_residual_eighteen_per_group": true,
+    "cheap_stream_hiding_zero": true,
+    "direct_correct_and_issue_median_zero": true,
+    "envelope_within_18_179_cycles_per_copy": true,
+    "expensive_residual_zero": true,
+    "expensive_stream_hiding_saturated": true,
+    "ncu_attribution_valid": true,
+    "paired_score_negative_eighteen": true,
+    "prearrival_hidden_zero": true,
+    "source_envelope_pair_equal": true,
+    "trace_and_replay_geometry_exact": false
+  },
+  "static_gate": {
+    "artifact_valid": true,
+    "artifacts": {
+      "build": "a7ece31759c3083cd647314e23d5e25e8471fe94c139bb02f33acf807894ee50",
+      "control": "1c42142dfb666c3600cb38805bc5fd4f2bd3fa7e2c613a61fd20d1c756f26212",
+      "resources": "a3fa88f7db74f6f44536b8206056c9ec76a8e890480bdc6d49dee683cbd957bf",
+      "sass": "5a5601c212f03901f61a72d7cc08747031be97bd5a65b9d6775312818627b961"
+    },
+    "assay_valid": true,
+    "scientific_failures": []
+  },
+  "status": "complete_response_envelope_structural_no_go",
+  "timing_promotion_authorized": false,
+  "typed_visibility_tail_required": true,
+  "validation_error_count": 0
+}
