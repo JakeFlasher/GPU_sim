@@ -77,11 +77,19 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _portable_path(path: Path) -> str:
+    resolved = path.resolve()
+    try:
+        return resolved.relative_to(REPO_ROOT.resolve()).as_posix()
+    except ValueError:
+        return str(resolved)
+
+
 def _artifact(path: Path) -> dict[str, object]:
     if not path.is_file() or path.stat().st_size == 0:
         raise CampaignError(f"missing or empty artifact: {path}")
     return {
-        "path": str(path),
+        "path": _portable_path(path),
         "sha256": _sha256(path),
         "size_bytes": path.stat().st_size,
     }
@@ -235,7 +243,7 @@ def _stage_command(
 def _manifest_identity(path: Path) -> dict[str, object]:
     document = _load_json(path)
     return {
-        "path": str(path),
+        "path": _portable_path(path),
         "sha256": _sha256(path),
         "schema_version": document.get("schema_version"),
     }
@@ -433,9 +441,12 @@ def _run_ncu(
         }
         _write_json(destination / "normalized.json", normalized)
         rows.append(normalized)
-    kernels = {str(row["identity"]["Kernel Name"]) for row in rows}
-    if len(kernels) != 1:
-        raise CampaignError(f"{slug}: NCU kernel identity changed across repeats")
+    identities = {
+        json.dumps(row["identity"], sort_keys=True, separators=(",", ":"))
+        for row in rows
+    }
+    if len(identities) != 1:
+        raise CampaignError(f"{slug}: NCU launch identity changed across repeats")
     return {"repeats": rows, "repeat_count": repeats}
 
 
@@ -669,7 +680,7 @@ def _new_manifest(
         "schema_version": 1,
         "benchmark_id": spec["benchmark_id"],
         "created_at": _now(),
-        "output_root": str(output_root),
+        "output_root": _portable_path(output_root),
         "repository": {
             "revision": _git("rev-parse", "HEAD"),
             "branch": _git("branch", "--show-current"),
@@ -682,6 +693,23 @@ def _new_manifest(
         "records": [],
         "scientific_boundary": "NCU values are retained only as comparison targets and never passed to simulator commands or profile inputs.",
     }
+
+
+def normalize_manifest_paths(manifest_path: Path) -> None:
+    """Rewrite only artifact path fields to repository-relative spellings."""
+
+    manifest = _load_json(manifest_path)
+
+    def normalize(value: object, key: str | None = None) -> object:
+        if isinstance(value, dict):
+            return {name: normalize(item, name) for name, item in value.items()}
+        if isinstance(value, list):
+            return [normalize(item) for item in value]
+        if key in {"path", "output_root"} and isinstance(value, str):
+            return _portable_path(Path(value))
+        return value
+
+    _write_json(manifest_path, normalize(manifest))
 
 
 def _parser() -> argparse.ArgumentParser:

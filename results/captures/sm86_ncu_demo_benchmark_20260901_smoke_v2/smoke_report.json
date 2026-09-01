@@ -1,0 +1,1056 @@
+{
+  "campaign": {
+    "path": "/home/jakeshea/GPU_simulator_rebase/results/captures/sm86_ncu_demo_benchmark_20260901_smoke_v2/campaign_manifest.json",
+    "repository": {
+      "branch": "GPUSim_main",
+      "revision": "08c7c9dfb1d93181f5b303220a7ebcf2b380b8c4"
+    },
+    "sha256": "7bcf0f5a76503f0a490e76e24e03b7bc6c549d4b92295110990e3e1025ad6d05",
+    "simulator_binary_sha256": "394640988c9d5c55322a3d06b562ff87cb9d5c7a2ec3aa8562901c6d36e087ae"
+  },
+  "caveats": [
+    "NCU is comparison-only ground truth and is absent from simulator commands and profile inputs.",
+    "Cache rates are launch-global weighted rates derived from NCU hit/miss sector sums; direct per-subunit NCU .pct ratios are not used.",
+    "Every smoke completion frontier is an explicit lower bound with retained unmodeled retirement tails.",
+    "GPU/simulator and NCU/simulator values are named time ratios, not unqualified speedups.",
+    "Smoke results contain one NCU repeat per workload; the final campaign requires three independent repeats."
+  ],
+  "formulas": {
+    "ape_pct": "abs(simulator - ncu) / ncu * 100 when ncu > 0",
+    "gpu_execution_over_simulator_wall": "sum NCU gpu__time_duration.sum seconds / sum simulator median process wall seconds",
+    "hit_rate_pct": "100 * NCU hit sectors / (hit sectors + miss sectors)",
+    "hit_rate_pp_error": "abs(simulator_percent - ncu_percent)",
+    "ncu_profile_wall_over_simulator_wall": "sum mean NCU capture-process wall seconds / sum simulator median process wall seconds",
+    "total_mape": "launch-weighted arithmetic mean over covered launch-metric APE values",
+    "workload_mape": "arithmetic mean over covered launch-metric APE values"
+  },
+  "hardware": {
+    "compute_capability": "8.6",
+    "driver_version": "610.57.04",
+    "index": 0,
+    "name": "NVIDIA GeForce RTX 3090 Ti",
+    "uuid": "GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c"
+  },
+  "report_id": "sm86_ncu_demo_benchmark_v1_smoke_report_v1",
+  "rows": [
+    {
+      "accuracy": {
+        "counter_coverage": 4,
+        "counter_mape_pct": 0.7919621749408983,
+        "counter_metric_count": 4,
+        "issue_frontier_mape_pct": 22.940617166565822,
+        "terminal_lower_bound_mape_pct": 33.31588002094398
+      },
+      "completion_frontier": {
+        "lower_bound_cycles": 8915,
+        "status": "incomplete_unmodeled_retirement_tails",
+        "unmodeled_tails": {
+          "async_copy_shared_visibility": false,
+          "coherence": true,
+          "dirty_writeback": true,
+          "reduction_read_modify_write": false
+        }
+      },
+      "display_name": "BF16 HMMA GEMM snapshot",
+      "functional_analogue": "GPT-style dense BF16 projection kernel",
+      "launches": 1,
+      "metrics": {
+        "dram_read_sectors": {
+          "absolute_error": 268.0,
+          "ape_pct": 3.167848699763593,
+          "ncu": {
+            "coverage": 1,
+            "maximum": 8460.0,
+            "minimum": 8460.0,
+            "repeat_count": 1,
+            "repeat_values": [
+              8460.0
+            ],
+            "status": "measured",
+            "value": 8460.0
+          },
+          "simulator": {
+            "kind": "exact",
+            "status": "predicted",
+            "value": 8192.0
+          }
+        },
+        "global_load_sectors": {
+          "absolute_error": 0.0,
+          "ape_pct": 0.0,
+          "ncu": {
+            "coverage": 1,
+            "maximum": 196608.0,
+            "minimum": 196608.0,
+            "repeat_count": 1,
+            "repeat_values": [
+              196608.0
+            ],
+            "status": "measured",
+            "value": 196608.0
+          },
+          "simulator": {
+            "kind": "exact",
+            "status": "predicted",
+            "value": 196608.0
+          }
+        },
+        "global_store_sectors": {
+          "absolute_error": 0.0,
+          "ape_pct": 0.0,
+          "ncu": {
+            "coverage": 1,
+            "maximum": 16384.0,
+            "minimum": 16384.0,
+            "repeat_count": 1,
+            "repeat_values": [
+              16384.0
+            ],
+            "status": "measured",
+            "value": 16384.0
+          },
+          "simulator": {
+            "kind": "exact",
+            "status": "predicted",
+            "value": 16384.0
+          }
+        },
+        "gpc_elapsed_cycles": {
+          "absolute_error": 4454.0,
+          "ape_pct": 33.31588002094398,
+          "ncu": {
+            "coverage": 1,
+            "maximum": 13369.0,
+            "minimum": 13369.0,
+            "repeat_count": 1,
+            "repeat_values": [
+              13369.0
+            ],
+            "status": "measured",
+            "value": 13369.0
+          },
+          "simulator": {
+            "frontier": {
+              "lower_bound_cycles": 8915,
+              "status": "incomplete_unmodeled_retirement_tails",
+              "unmodeled_tails": {
+                "async_copy_shared_visibility": false,
+                "coherence": true,
+                "dirty_writeback": true,
+                "reduction_read_modify_write": false
+              }
+            },
+            "status": "lower_bound",
+            "value": 8915.0
+          }
+        },
+        "gpu_kernel_duration": {
+          "absolute_error": null,
+          "ape_pct": null,
+          "ncu": {
+            "coverage": 1,
+            "maximum": 9952.0,
+            "minimum": 9952.0,
+            "repeat_count": 1,
+            "repeat_values": [
+              9952.0
+            ],
+            "status": "measured",
+            "value": 9952.0
+          },
+          "simulator": {
+            "status": "not_scored",
+            "value": null
+          }
+        },
+        "instructions": {
+          "absolute_error": 0.0,
+          "ape_pct": 0.0,
+          "ncu": {
+            "coverage": 1,
+            "maximum": 197120.0,
+            "minimum": 197120.0,
+            "repeat_count": 1,
+            "repeat_values": [
+              197120.0
+            ],
+            "status": "measured",
+            "value": 197120.0
+          },
+          "simulator": {
+            "kind": "exact",
+            "status": "predicted",
+            "value": 197120.0
+          }
+        },
+        "l1_read_hit_rate": {
+          "absolute_error": 16.015625,
+          "absolute_percentage_point_error": 16.015625,
+          "ape_pct": 100.0,
+          "ncu": {
+            "coverage": 1,
+            "maximum": 16.015625,
+            "minimum": 16.015625,
+            "repeat_count": 1,
+            "repeat_values": [
+              16.015625
+            ],
+            "status": "measured",
+            "value": 16.015625
+          },
+          "simulator": {
+            "kind": "fraction",
+            "status": "predicted",
+            "value": 0.0
+          }
+        },
+        "l1_unified_hit_rate": {
+          "absolute_error": 18.611497145432693,
+          "absolute_percentage_point_error": 18.611497145432693,
+          "ape_pct": 100.0,
+          "ncu": {
+            "coverage": 1,
+            "maximum": 18.611497145432693,
+            "minimum": 18.611497145432693,
+            "repeat_count": 1,
+            "repeat_values": [
+              18.611497145432693
+            ],
+            "status": "measured",
+            "value": 18.611497145432693
+          },
+          "simulator": {
+            "kind": "fraction",
+            "status": "predicted",
+            "value": 0.0
+          }
+        },
+        "l2_unified_hit_rate": {
+          "absolute_error": 87.43209476962103,
+          "absolute_percentage_point_error": 87.43209476962103,
+          "ape_pct": 91.70930933374028,
+          "ncu": {
+            "coverage": 1,
+            "maximum": 95.3361173525427,
+            "minimum": 95.3361173525427,
+            "repeat_count": 1,
+            "repeat_values": [
+              95.3361173525427
+            ],
+            "status": "measured",
+            "value": 95.3361173525427
+          },
+          "simulator": {
+            "kind": "fraction",
+            "status": "predicted",
+            "value": 7.904022582921666
+          }
+        },
+        "sm_active_cycles": {
+          "absolute_error": 2654.0,
+          "ape_pct": 22.940617166565822,
+          "ncu": {
+            "coverage": 1,
+            "maximum": 11569.0,
+            "minimum": 11569.0,
+            "repeat_count": 1,
+            "repeat_values": [
+              11569.0
+            ],
+            "status": "measured",
+            "value": 11569.0
+          },
+          "simulator": {
+            "status": "issue_only_diagnostic",
+            "value": 8915.0
+          }
+        }
+      },
+      "timing": {
+        "gpu_execution_over_simulator_wall": 1.8490705852104116e-05,
+        "gpu_kernel_seconds": 9.952e-06,
+        "ncu_profile_wall_over_simulator_wall": 3.6360263596865887,
+        "ncu_profile_wall_seconds_mean": 1.956968794,
+        "ncu_profile_wall_seconds_total": 1.956968794,
+        "simulator_twin_wall_seconds_total": 1.0764326770000001,
+        "simulator_wall_seconds": 0.5382163385000001
+      },
+      "workload_id": "gemm_hmma_bf16_sm80"
+    },
+    {
+      "accuracy": {
+        "counter_coverage": 4,
+        "counter_mape_pct": 5.72289156626506,
+        "counter_metric_count": 4,
+        "issue_frontier_mape_pct": 12.402289223897265,
+        "terminal_lower_bound_mape_pct": 21.839581517000873
+      },
+      "completion_frontier": {
+        "lower_bound_cycles": 12551,
+        "status": "incomplete_unmodeled_retirement_tails",
+        "unmodeled_tails": {
+          "async_copy_shared_visibility": false,
+          "coherence": true,
+          "dirty_writeback": true,
+          "reduction_read_modify_write": false
+        }
+      },
+      "display_name": "BF16 FlashAttention forward snapshot",
+      "functional_analogue": "BERT-style attention kernel",
+      "launches": 1,
+      "metrics": {
+        "dram_read_sectors": {
+          "absolute_error": 380.0,
+          "ape_pct": 22.89156626506024,
+          "ncu": {
+            "coverage": 1,
+            "maximum": 1660.0,
+            "minimum": 1660.0,
+            "repeat_count": 1,
+            "repeat_values": [
+              1660.0
+            ],
+            "status": "measured",
+            "value": 1660.0
+          },
+          "simulator": {
+            "kind": "exact",
+            "status": "predicted",
+            "value": 1280.0
+          }
+        },
+        "global_load_sectors": {
+          "absolute_error": 0.0,
+          "ape_pct": 0.0,
+          "ncu": {
+            "coverage": 1,
+            "maximum": 4352.0,
+            "minimum": 4352.0,
+            "repeat_count": 1,
+            "repeat_values": [
+              4352.0
+            ],
+            "status": "measured",
+            "value": 4352.0
+          },
+          "simulator": {
+            "kind": "exact",
+            "status": "predicted",
+            "value": 4352.0
+          }
+        },
+        "global_store_sectors": {
+          "absolute_error": 0.0,
+          "ape_pct": 0.0,
+          "ncu": {
+            "coverage": 1,
+            "maximum": 1024.0,
+            "minimum": 1024.0,
+            "repeat_count": 1,
+            "repeat_values": [
+              1024.0
+            ],
+            "status": "measured",
+            "value": 1024.0
+          },
+          "simulator": {
+            "kind": "exact",
+            "status": "predicted",
+            "value": 1024.0
+          }
+        },
+        "gpc_elapsed_cycles": {
+          "absolute_error": 3507.0,
+          "ape_pct": 21.839581517000873,
+          "ncu": {
+            "coverage": 1,
+            "maximum": 16058.0,
+            "minimum": 16058.0,
+            "repeat_count": 1,
+            "repeat_values": [
+              16058.0
+            ],
+            "status": "measured",
+            "value": 16058.0
+          },
+          "simulator": {
+            "frontier": {
+              "lower_bound_cycles": 12551,
+              "status": "incomplete_unmodeled_retirement_tails",
+              "unmodeled_tails": {
+                "async_copy_shared_visibility": false,
+                "coherence": true,
+                "dirty_writeback": true,
+                "reduction_read_modify_write": false
+              }
+            },
+            "status": "lower_bound",
+            "value": 12551.0
+          }
+        },
+        "gpu_kernel_duration": {
+          "absolute_error": null,
+          "ape_pct": null,
+          "ncu": {
+            "coverage": 1,
+            "maximum": 11936.0,
+            "minimum": 11936.0,
+            "repeat_count": 1,
+            "repeat_values": [
+              11936.0
+            ],
+            "status": "measured",
+            "value": 11936.0
+          },
+          "simulator": {
+            "status": "not_scored",
+            "value": null
+          }
+        },
+        "instructions": {
+          "absolute_error": 0.0,
+          "ape_pct": 0.0,
+          "ncu": {
+            "coverage": 1,
+            "maximum": 39568.0,
+            "minimum": 39568.0,
+            "repeat_count": 1,
+            "repeat_values": [
+              39568.0
+            ],
+            "status": "measured",
+            "value": 39568.0
+          },
+          "simulator": {
+            "kind": "exact",
+            "status": "predicted",
+            "value": 39568.0
+          }
+        },
+        "l1_read_hit_rate": {
+          "absolute_error": 0.0,
+          "absolute_percentage_point_error": 0.0,
+          "ape_pct": null,
+          "ncu": {
+            "coverage": 1,
+            "maximum": 0.0,
+            "minimum": 0.0,
+            "repeat_count": 1,
+            "repeat_values": [
+              0.0
+            ],
+            "status": "measured",
+            "value": 0.0
+          },
+          "simulator": {
+            "kind": "fraction",
+            "status": "predicted",
+            "value": 0.0
+          }
+        },
+        "l1_unified_hit_rate": {
+          "absolute_error": 9.523809523809524,
+          "absolute_percentage_point_error": 9.523809523809524,
+          "ape_pct": 100.0,
+          "ncu": {
+            "coverage": 1,
+            "maximum": 9.523809523809524,
+            "minimum": 9.523809523809524,
+            "repeat_count": 1,
+            "repeat_values": [
+              9.523809523809524
+            ],
+            "status": "measured",
+            "value": 9.523809523809524
+          },
+          "simulator": {
+            "kind": "fraction",
+            "status": "predicted",
+            "value": 0.0
+          }
+        },
+        "l2_unified_hit_rate": {
+          "absolute_error": 67.76651766578898,
+          "absolute_percentage_point_error": 67.76651766578898,
+          "ape_pct": 79.14461639681903,
+          "ncu": {
+            "coverage": 1,
+            "maximum": 85.62366052293184,
+            "minimum": 85.62366052293184,
+            "repeat_count": 1,
+            "repeat_values": [
+              85.62366052293184
+            ],
+            "status": "measured",
+            "value": 85.62366052293184
+          },
+          "simulator": {
+            "kind": "fraction",
+            "status": "predicted",
+            "value": 17.857142857142858
+          }
+        },
+        "sm_active_cycles": {
+          "absolute_error": 1777.0,
+          "ape_pct": 12.402289223897265,
+          "ncu": {
+            "coverage": 1,
+            "maximum": 14328.0,
+            "minimum": 14328.0,
+            "repeat_count": 1,
+            "repeat_values": [
+              14328.0
+            ],
+            "status": "measured",
+            "value": 14328.0
+          },
+          "simulator": {
+            "status": "issue_only_diagnostic",
+            "value": 12551.0
+          }
+        }
+      },
+      "timing": {
+        "gpu_execution_over_simulator_wall": 0.00026499785216532235,
+        "gpu_kernel_seconds": 1.1936e-05,
+        "ncu_profile_wall_over_simulator_wall": 43.25219189090365,
+        "ncu_profile_wall_seconds_mean": 1.948159799,
+        "ncu_profile_wall_seconds_total": 1.948159799,
+        "simulator_twin_wall_seconds_total": 0.09008374899999999,
+        "simulator_wall_seconds": 0.045041874499999995
+      },
+      "workload_id": "flash_attn_fwd_bf16_sm80"
+    },
+    {
+      "accuracy": {
+        "counter_coverage": 4,
+        "counter_mape_pct": 0.3097965863923311,
+        "counter_metric_count": 4,
+        "issue_frontier_mape_pct": 10.67463281055514,
+        "terminal_lower_bound_mape_pct": 17.75465297515357
+      },
+      "completion_frontier": {
+        "lower_bound_cycles": 17941,
+        "status": "incomplete_unmodeled_retirement_tails",
+        "unmodeled_tails": {
+          "async_copy_shared_visibility": false,
+          "coherence": true,
+          "dirty_writeback": true,
+          "reduction_read_modify_write": false
+        }
+      },
+      "display_name": "BF16 LayerNorm forward snapshot",
+      "functional_analogue": "memory-heavy transformer normalization kernel",
+      "launches": 1,
+      "metrics": {
+        "dram_read_sectors": {
+          "absolute_error": 212.0,
+          "ape_pct": 1.2391863455693244,
+          "ncu": {
+            "coverage": 1,
+            "maximum": 17108.0,
+            "minimum": 17108.0,
+            "repeat_count": 1,
+            "repeat_values": [
+              17108.0
+            ],
+            "status": "measured",
+            "value": 17108.0
+          },
+          "simulator": {
+            "kind": "exact",
+            "status": "predicted",
+            "value": 16896.0
+          }
+        },
+        "global_load_sectors": {
+          "absolute_error": 0.0,
+          "ape_pct": 0.0,
+          "ncu": {
+            "coverage": 1,
+            "maximum": 65536.0,
+            "minimum": 65536.0,
+            "repeat_count": 1,
+            "repeat_values": [
+              65536.0
+            ],
+            "status": "measured",
+            "value": 65536.0
+          },
+          "simulator": {
+            "kind": "exact",
+            "status": "predicted",
+            "value": 65536.0
+          }
+        },
+        "global_store_sectors": {
+          "absolute_error": 0.0,
+          "ape_pct": 0.0,
+          "ncu": {
+            "coverage": 1,
+            "maximum": 16384.0,
+            "minimum": 16384.0,
+            "repeat_count": 1,
+            "repeat_values": [
+              16384.0
+            ],
+            "status": "measured",
+            "value": 16384.0
+          },
+          "simulator": {
+            "kind": "exact",
+            "status": "predicted",
+            "value": 16384.0
+          }
+        },
+        "gpc_elapsed_cycles": {
+          "absolute_error": 3873.0,
+          "ape_pct": 17.75465297515357,
+          "ncu": {
+            "coverage": 1,
+            "maximum": 21814.0,
+            "minimum": 21814.0,
+            "repeat_count": 1,
+            "repeat_values": [
+              21814.0
+            ],
+            "status": "measured",
+            "value": 21814.0
+          },
+          "simulator": {
+            "frontier": {
+              "lower_bound_cycles": 17941,
+              "status": "incomplete_unmodeled_retirement_tails",
+              "unmodeled_tails": {
+                "async_copy_shared_visibility": false,
+                "coherence": true,
+                "dirty_writeback": true,
+                "reduction_read_modify_write": false
+              }
+            },
+            "status": "lower_bound",
+            "value": 17941.0
+          }
+        },
+        "gpu_kernel_duration": {
+          "absolute_error": null,
+          "ape_pct": null,
+          "ncu": {
+            "coverage": 1,
+            "maximum": 16192.0,
+            "minimum": 16192.0,
+            "repeat_count": 1,
+            "repeat_values": [
+              16192.0
+            ],
+            "status": "measured",
+            "value": 16192.0
+          },
+          "simulator": {
+            "status": "not_scored",
+            "value": null
+          }
+        },
+        "instructions": {
+          "absolute_error": 0.0,
+          "ape_pct": 0.0,
+          "ncu": {
+            "coverage": 1,
+            "maximum": 451952.0,
+            "minimum": 451952.0,
+            "repeat_count": 1,
+            "repeat_values": [
+              451952.0
+            ],
+            "status": "measured",
+            "value": 451952.0
+          },
+          "simulator": {
+            "kind": "exact",
+            "status": "predicted",
+            "value": 451952.0
+          }
+        },
+        "l1_read_hit_rate": {
+          "absolute_error": 0.0,
+          "absolute_percentage_point_error": 0.0,
+          "ape_pct": 0.0,
+          "ncu": {
+            "coverage": 1,
+            "maximum": 25.0,
+            "minimum": 25.0,
+            "repeat_count": 1,
+            "repeat_values": [
+              25.0
+            ],
+            "status": "measured",
+            "value": 25.0
+          },
+          "simulator": {
+            "kind": "fraction",
+            "status": "predicted",
+            "value": 25.0
+          }
+        },
+        "l1_unified_hit_rate": {
+          "absolute_error": 9.35546875,
+          "absolute_percentage_point_error": 9.35546875,
+          "ape_pct": 31.869594145043244,
+          "ncu": {
+            "coverage": 1,
+            "maximum": 29.35546875,
+            "minimum": 29.35546875,
+            "repeat_count": 1,
+            "repeat_values": [
+              29.35546875
+            ],
+            "status": "measured",
+            "value": 29.35546875
+          },
+          "simulator": {
+            "kind": "fraction",
+            "status": "predicted",
+            "value": 20.0
+          }
+        },
+        "l2_unified_hit_rate": {
+          "absolute_error": 57.85359818450266,
+          "absolute_percentage_point_error": 57.85359818450266,
+          "ape_pct": 75.52334297033944,
+          "ncu": {
+            "coverage": 1,
+            "maximum": 76.60359818450266,
+            "minimum": 76.60359818450266,
+            "repeat_count": 1,
+            "repeat_values": [
+              76.60359818450266
+            ],
+            "status": "measured",
+            "value": 76.60359818450266
+          },
+          "simulator": {
+            "kind": "fraction",
+            "status": "predicted",
+            "value": 18.75
+          }
+        },
+        "sm_active_cycles": {
+          "absolute_error": 2144.0,
+          "ape_pct": 10.67463281055514,
+          "ncu": {
+            "coverage": 1,
+            "maximum": 20085.0,
+            "minimum": 20085.0,
+            "repeat_count": 1,
+            "repeat_values": [
+              20085.0
+            ],
+            "status": "measured",
+            "value": 20085.0
+          },
+          "simulator": {
+            "status": "issue_only_diagnostic",
+            "value": 17941.0
+          }
+        }
+      },
+      "timing": {
+        "gpu_execution_over_simulator_wall": 7.137988207264969e-05,
+        "gpu_kernel_seconds": 1.6192e-05,
+        "ncu_profile_wall_over_simulator_wall": 8.563889002740456,
+        "ncu_profile_wall_seconds_mean": 1.942655083,
+        "ncu_profile_wall_seconds_total": 1.942655083,
+        "simulator_twin_wall_seconds_total": 0.453685255,
+        "simulator_wall_seconds": 0.2268426275
+      },
+      "workload_id": "layernorm_fwd_bf16_sm80"
+    },
+    {
+      "accuracy": {
+        "counter_coverage": 4,
+        "counter_mape_pct": 1.186046511627907,
+        "counter_metric_count": 4,
+        "issue_frontier_mape_pct": 40.05949938448913,
+        "terminal_lower_bound_mape_pct": 49.24426685198054
+      },
+      "completion_frontier": {
+        "lower_bound_cycles": 5843,
+        "status": "incomplete_unmodeled_retirement_tails",
+        "unmodeled_tails": {
+          "async_copy_shared_visibility": false,
+          "coherence": true,
+          "dirty_writeback": true,
+          "reduction_read_modify_write": false
+        }
+      },
+      "display_name": "INT8 IMMA GEMM snapshot",
+      "functional_analogue": "quantized inference matrix kernel",
+      "launches": 1,
+      "metrics": {
+        "dram_read_sectors": {
+          "absolute_error": 204.0,
+          "ape_pct": 4.744186046511628,
+          "ncu": {
+            "coverage": 1,
+            "maximum": 4300.0,
+            "minimum": 4300.0,
+            "repeat_count": 1,
+            "repeat_values": [
+              4300.0
+            ],
+            "status": "measured",
+            "value": 4300.0
+          },
+          "simulator": {
+            "kind": "exact",
+            "status": "predicted",
+            "value": 4096.0
+          }
+        },
+        "global_load_sectors": {
+          "absolute_error": 0.0,
+          "ape_pct": 0.0,
+          "ncu": {
+            "coverage": 1,
+            "maximum": 196608.0,
+            "minimum": 196608.0,
+            "repeat_count": 1,
+            "repeat_values": [
+              196608.0
+            ],
+            "status": "measured",
+            "value": 196608.0
+          },
+          "simulator": {
+            "kind": "exact",
+            "status": "predicted",
+            "value": 196608.0
+          }
+        },
+        "global_store_sectors": {
+          "absolute_error": 0.0,
+          "ape_pct": 0.0,
+          "ncu": {
+            "coverage": 1,
+            "maximum": 16384.0,
+            "minimum": 16384.0,
+            "repeat_count": 1,
+            "repeat_values": [
+              16384.0
+            ],
+            "status": "measured",
+            "value": 16384.0
+          },
+          "simulator": {
+            "kind": "exact",
+            "status": "predicted",
+            "value": 16384.0
+          }
+        },
+        "gpc_elapsed_cycles": {
+          "absolute_error": 5669.0,
+          "ape_pct": 49.24426685198054,
+          "ncu": {
+            "coverage": 1,
+            "maximum": 11512.0,
+            "minimum": 11512.0,
+            "repeat_count": 1,
+            "repeat_values": [
+              11512.0
+            ],
+            "status": "measured",
+            "value": 11512.0
+          },
+          "simulator": {
+            "frontier": {
+              "lower_bound_cycles": 5843,
+              "status": "incomplete_unmodeled_retirement_tails",
+              "unmodeled_tails": {
+                "async_copy_shared_visibility": false,
+                "coherence": true,
+                "dirty_writeback": true,
+                "reduction_read_modify_write": false
+              }
+            },
+            "status": "lower_bound",
+            "value": 5843.0
+          }
+        },
+        "gpu_kernel_duration": {
+          "absolute_error": null,
+          "ape_pct": null,
+          "ncu": {
+            "coverage": 1,
+            "maximum": 8576.0,
+            "minimum": 8576.0,
+            "repeat_count": 1,
+            "repeat_values": [
+              8576.0
+            ],
+            "status": "measured",
+            "value": 8576.0
+          },
+          "simulator": {
+            "status": "not_scored",
+            "value": null
+          }
+        },
+        "instructions": {
+          "absolute_error": 0.0,
+          "ape_pct": 0.0,
+          "ncu": {
+            "coverage": 1,
+            "maximum": 157696.0,
+            "minimum": 157696.0,
+            "repeat_count": 1,
+            "repeat_values": [
+              157696.0
+            ],
+            "status": "measured",
+            "value": 157696.0
+          },
+          "simulator": {
+            "kind": "exact",
+            "status": "predicted",
+            "value": 157696.0
+          }
+        },
+        "l1_read_hit_rate": {
+          "absolute_error": 7.12890625,
+          "absolute_percentage_point_error": 7.12890625,
+          "ape_pct": 12.478632478632479,
+          "ncu": {
+            "coverage": 1,
+            "maximum": 57.12890625,
+            "minimum": 57.12890625,
+            "repeat_count": 1,
+            "repeat_values": [
+              57.12890625
+            ],
+            "status": "measured",
+            "value": 57.12890625
+          },
+          "simulator": {
+            "kind": "fraction",
+            "status": "predicted",
+            "value": 50.0
+          }
+        },
+        "l1_unified_hit_rate": {
+          "absolute_error": 10.368934044471153,
+          "absolute_percentage_point_error": 10.368934044471153,
+          "ape_pct": 18.344699266544286,
+          "ncu": {
+            "coverage": 1,
+            "maximum": 56.52278019831731,
+            "minimum": 56.52278019831731,
+            "repeat_count": 1,
+            "repeat_values": [
+              56.52278019831731
+            ],
+            "status": "measured",
+            "value": 56.52278019831731
+          },
+          "simulator": {
+            "kind": "fraction",
+            "status": "predicted",
+            "value": 46.15384615384615
+          }
+        },
+        "l2_unified_hit_rate": {
+          "absolute_error": 80.93919355866878,
+          "absolute_percentage_point_error": 80.93919355866878,
+          "ape_pct": 84.6827898877203,
+          "ncu": {
+            "coverage": 1,
+            "maximum": 95.57927137968045,
+            "minimum": 95.57927137968045,
+            "repeat_count": 1,
+            "repeat_values": [
+              95.57927137968045
+            ],
+            "status": "measured",
+            "value": 95.57927137968045
+          },
+          "simulator": {
+            "kind": "fraction",
+            "status": "predicted",
+            "value": 14.640077821011674
+          }
+        },
+        "sm_active_cycles": {
+          "absolute_error": 3905.0,
+          "ape_pct": 40.05949938448913,
+          "ncu": {
+            "coverage": 1,
+            "maximum": 9748.0,
+            "minimum": 9748.0,
+            "repeat_count": 1,
+            "repeat_values": [
+              9748.0
+            ],
+            "status": "measured",
+            "value": 9748.0
+          },
+          "simulator": {
+            "status": "issue_only_diagnostic",
+            "value": 5843.0
+          }
+        }
+      },
+      "timing": {
+        "gpu_execution_over_simulator_wall": 2.278718150308785e-05,
+        "gpu_kernel_seconds": 8.576e-06,
+        "ncu_profile_wall_over_simulator_wall": 5.03652716243527,
+        "ncu_profile_wall_seconds_mean": 1.895506776,
+        "ncu_profile_wall_seconds_total": 1.895506776,
+        "simulator_twin_wall_seconds_total": 0.752703883,
+        "simulator_wall_seconds": 0.3763519415
+      },
+      "workload_id": "gemm_imma_int8_sm80"
+    }
+  ],
+  "schema_version": 1,
+  "status": "smoke",
+  "total": {
+    "accuracy": {
+      "counter_coverage": 16,
+      "counter_mape_pct": 2.0026742098065493,
+      "counter_metric_launch_pairs": 16,
+      "hit_rates": {
+        "l1_read_hit_rate": {
+          "coverage": 3,
+          "launches": 4,
+          "mape_pct": 37.49287749287749,
+          "mean_absolute_percentage_point_error": 5.7861328125
+        },
+        "l1_unified_hit_rate": {
+          "coverage": 4,
+          "launches": 4,
+          "mape_pct": 62.55357335289688,
+          "mean_absolute_percentage_point_error": 11.964927365928343
+        },
+        "l2_unified_hit_rate": {
+          "coverage": 4,
+          "launches": 4,
+          "mape_pct": 82.76501464715477,
+          "mean_absolute_percentage_point_error": 73.49785104464536
+        }
+      },
+      "issue_frontier_coverage": 4,
+      "issue_frontier_mape_pct": 21.519259646376838,
+      "terminal_lower_bound_coverage": 4,
+      "terminal_lower_bound_mape_pct": 30.53859534126974
+    },
+    "launches": 4,
+    "timing": {
+      "gpu_execution_over_simulator_wall": 3.9323941675413423e-05,
+      "gpu_kernel_seconds": 4.6656e-05,
+      "ncu_profile_wall_over_simulator_wall": 6.52642108432428,
+      "ncu_profile_wall_seconds_campaign_total": 7.743290452,
+      "ncu_profile_wall_seconds_mean_sum": 7.743290452,
+      "simulator_wall_seconds": 1.1864527820000002
+    },
+    "workloads": 4
+  }
+}

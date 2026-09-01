@@ -29,12 +29,14 @@ def test_ncu_repeat_mean_preserves_raw_values() -> None:
         [
             {"metrics": {"m": {"status": "measured", "value": 10.0}}},
             {"metrics": {"m": {"status": "measured", "value": 14.0}}},
+            {"metrics": {"m": {"status": "measured", "value": 100.0}}},
         ],
         "m",
     )
-    assert summary["value"] == 12.0
-    assert summary["repeat_values"] == [10.0, 14.0]
-    assert summary["coverage"] == 2
+    assert summary["value"] == 14.0
+    assert summary["mean"] == 124.0 / 3.0
+    assert summary["repeat_values"] == [10.0, 14.0, 100.0]
+    assert summary["coverage"] == 3
 
 
 def test_total_time_ratios_use_summed_numerators_and_denominators() -> None:
@@ -64,6 +66,11 @@ def test_total_time_ratios_use_summed_numerators_and_denominators() -> None:
                 "terminal_lower_bound_mape_pct": scale,
                 "issue_frontier_mape_pct": scale,
             },
+            "workload_id": f"row-{scale}",
+            "ncu_repeatability": {
+                "max_relative_range_pct": scale,
+                "max_relative_range_metric": "m",
+            },
             "metrics": metrics,
         }
 
@@ -76,3 +83,20 @@ def test_total_time_ratios_use_summed_numerators_and_denominators() -> None:
 def test_missing_percentage_formats_without_a_percent_suffix() -> None:
     assert report._pct(None) == "n/a"
     assert report._pct(12.5) == "12.50%"
+
+
+def test_caveats_distinguish_smoke_from_final_repeats() -> None:
+    assert any("one NCU repeat" in note for note in report._caveats("smoke"))
+    assert any("three independent" in note for note in report._caveats("final"))
+    assert all("Every smoke" not in note for note in report._caveats("final"))
+
+
+def test_report_campaign_path_is_repository_relative() -> None:
+    path = report.REPO_ROOT / "results/captures/example/campaign_manifest.json"
+    assert report._portable_path(path) == "results/captures/example/campaign_manifest.json"
+
+
+def test_absent_optional_archive_is_explicit(tmp_path) -> None:
+    campaign_path = tmp_path / "campaign_manifest.json"
+    campaign_path.write_text("{}", encoding="utf-8")
+    assert report._evidence_archive(campaign_path) is None

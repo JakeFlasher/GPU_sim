@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "role": "deterministic_materialization_of_evidence_raw",
+  "archive": {
+    "path": "results/captures/sm86_ncu_demo_benchmark_20260901_smoke_v2/evidence/raw_campaign.tar.zst",
+    "sha256": "c6c2bf41f72b16eee9f5619797582bdabfa4f10eee69de4dbaa74c1bd0f86f6d",
+    "size_bytes": 519460,
+    "decompressed_tar_bytes": 35461120,
+    "member_count": 1299,
+    "format": "zstd-compressed deterministic tar"
+  },
+  "member_root": "evidence/raw",
+  "materialization_command": "zstd -dc evidence/raw_campaign.tar.zst | tar -xf - -C ."
+}

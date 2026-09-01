@@ -160,3 +160,8 @@ def test_kernel_join_only_removes_tracer_function_suffix() -> None:
         == "gemm_hmma_bf16_sm80_kernel"
     )
     assert campaign._normalized_kernel_name("kernel__part") == "kernel__part"
+
+
+def test_repository_artifacts_use_portable_paths() -> None:
+    path = campaign.REPO_ROOT / "arch_profiles/cards/sm_86.json"
+    assert campaign._portable_path(path) == "arch_profiles/cards/sm_86.json"

@@ -47,6 +47,14 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _portable_path(path: Path) -> str:
+    resolved = path.resolve()
+    try:
+        return resolved.relative_to(REPO_ROOT.resolve()).as_posix()
+    except ValueError:
+        return str(resolved)
+
+
 def _load(path: Path) -> dict[str, Any]:
     try:
         value = json.loads(path.read_text(encoding="utf-8"))
@@ -113,6 +121,24 @@ def _input_document(manifest: Mapping[str, Any], name: str) -> dict[str, Any]:
     if record.get("sha256") != _sha256(path):
         raise ReportError(f"campaign input {name!r} SHA-256 differs")
     return _load(path)
+
+
+def _evidence_archive(campaign_path: Path) -> dict[str, Any] | None:
+    manifest_path = campaign_path.parent / "evidence" / "archive_manifest.json"
+    if not manifest_path.is_file():
+        return None
+    document = _load(manifest_path)
+    if document.get("schema_version") != 1 or document.get("member_root") != "evidence/raw":
+        raise ReportError("evidence archive manifest contract differs")
+    archive = document.get("archive")
+    if not isinstance(archive, Mapping):
+        raise ReportError("evidence archive identity is missing")
+    _verify_artifact(archive, "evidence archive")
+    return {
+        "manifest_path": _portable_path(manifest_path),
+        "manifest_sha256": _sha256(manifest_path),
+        **document,
+    }
 
 
 def _record_index(
@@ -192,14 +218,25 @@ def _ncu_metric(
             values.append(_finite(value, f"NCU metric {metric}"))
     if values and len(values) != len(repeats):
         raise ReportError(f"NCU metric {metric!r} has inconsistent repeat coverage")
+    mean = None if not values else _mean(values)
+    median = None if not values else float(statistics.median(values))
+    relative_range = (
+        None
+        if mean in (None, 0.0)
+        else (max(values) - min(values)) / float(mean) * 100.0
+    )
     return {
         "status": "measured" if values else statuses[0],
-        "value": None if not values else _mean(values),
+        "value": median,
+        "reduction": "median",
+        "mean": mean,
+        "median": median,
         "repeat_values": values,
         "repeat_count": len(repeats),
         "coverage": len(values),
         "minimum": None if not values else min(values),
         "maximum": None if not values else max(values),
+        "relative_range_pct": relative_range,
     }
 
 
@@ -335,6 +372,12 @@ def _row(
     if not math.isclose(simulator_wall, statistics.median(twin_walls), rel_tol=0, abs_tol=1e-12):
         raise ReportError(f"{workload_id}: simulator wall is not the twin median")
     counter_apes = [comparisons[metric]["ape_pct"] for metric in COUNTER_IDS]
+    repeat_spreads = [
+        (comparison["ncu"]["relative_range_pct"], metric_id)
+        for metric_id, comparison in comparisons.items()
+        if comparison["ncu"]["relative_range_pct"] is not None
+    ]
+    max_spread, max_spread_metric = max(repeat_spreads, default=(None, None))
     return {
         "workload_id": workload_id,
         "display_name": workload["display_name"],
@@ -357,6 +400,11 @@ def _row(
             "counter_metric_count": len(counter_apes),
         },
         "completion_frontier": dict(frontier),
+        "ncu_repeatability": {
+            "repeat_count": len(repeats),
+            "max_relative_range_pct": max_spread,
+            "max_relative_range_metric": max_spread_metric,
+        },
         "metrics": comparisons,
     }
 
@@ -383,6 +431,10 @@ def _totals(rows: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
             "coverage": sum(value is not None for value in mape),
             "launches": len(rows),
         }
+    worst_repeatability = max(
+        rows,
+        key=lambda row: float(row["ncu_repeatability"]["max_relative_range_pct"] or -1.0),
+    )
     return {
         "workloads": len(rows),
         "launches": sum(int(row["launches"]) for row in rows),
@@ -404,7 +456,28 @@ def _totals(rows: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
             "counter_metric_launch_pairs": len(counter),
             "hit_rates": hit_summaries,
         },
+        "ncu_repeatability": {
+            "max_relative_range_pct": worst_repeatability["ncu_repeatability"]["max_relative_range_pct"],
+            "workload_id": worst_repeatability["workload_id"],
+            "metric_id": worst_repeatability["ncu_repeatability"]["max_relative_range_metric"],
+        },
     }
+
+
+def _caveats(status: str) -> list[str]:
+    phase = "smoke" if status == "smoke" else "final"
+    repeat_note = (
+        "Smoke results contain one NCU repeat per workload; the final campaign requires three independent repeats."
+        if status == "smoke"
+        else "Final results contain three independent application-replay NCU repeats per workload; raw repeat values remain in JSON."
+    )
+    return [
+        "NCU is comparison-only ground truth and is absent from simulator commands and profile inputs.",
+        "Cache rates are launch-global weighted rates derived from NCU hit/miss sector sums; direct per-subunit NCU .pct ratios are not used.",
+        f"Every {phase} completion frontier is an explicit lower bound with retained unmodeled retirement tails.",
+        "GPU/simulator and NCU/simulator values are named time ratios, not unqualified speedups.",
+        repeat_note,
+    ]
 
 
 def build_report(campaign_path: Path) -> dict[str, Any]:
@@ -436,18 +509,21 @@ def build_report(campaign_path: Path) -> dict[str, Any]:
     }
     if len(simulator_hashes) != 1:
         raise ReportError("simulator binary identity changed within the campaign")
+    status = "smoke" if len(rows) == 4 else "final"
     return {
         "schema_version": 1,
         "report_id": f"{campaign['benchmark_id']}_{'smoke' if len(rows) == 4 else 'final'}_report_v1",
-        "status": "smoke" if len(rows) == 4 else "final",
+        "status": status,
         "campaign": {
-            "path": str(campaign_path.resolve()),
+            "path": _portable_path(campaign_path),
             "sha256": _sha256(campaign_path),
             "repository": campaign["repository"],
             "simulator_binary_sha256": next(iter(simulator_hashes)),
         },
+        "evidence_archive": _evidence_archive(campaign_path),
         "hardware": host,
         "formulas": {
+            "ncu_repeat_reduction": "median of independent NCU repeats; raw values, mean, min, max, and relative range retained",
             "ape_pct": "abs(simulator - ncu) / ncu * 100 when ncu > 0",
             "hit_rate_pct": "100 * NCU hit sectors / (hit sectors + miss sectors)",
             "hit_rate_pp_error": "abs(simulator_percent - ncu_percent)",
@@ -458,13 +534,7 @@ def build_report(campaign_path: Path) -> dict[str, Any]:
         },
         "rows": rows,
         "total": _totals(rows),
-        "caveats": [
-            "NCU is comparison-only ground truth and is absent from simulator commands and profile inputs.",
-            "Cache rates are launch-global weighted rates derived from NCU hit/miss sector sums; direct per-subunit NCU .pct ratios are not used.",
-            "Every smoke completion frontier is an explicit lower bound with retained unmodeled retirement tails.",
-            "GPU/simulator and NCU/simulator values are named time ratios, not unqualified speedups.",
-            "Smoke results contain one NCU repeat per workload; the final campaign requires three independent repeats.",
-        ],
+        "caveats": _caveats(status),
     }
 
 
@@ -487,8 +557,8 @@ def render_markdown(report: Mapping[str, Any]) -> str:
     lines = [
         f"# SM86 NCU-grounded simulator {report['status']} report",
         "",
-        f"Revision: `{report['campaign']['repository']['revision']}` on `{report['campaign']['repository']['branch']}`.  ",
-        f"GPU: `{report['hardware']['name']}` (`{report['hardware']['uuid']}`, CC {report['hardware']['compute_capability']}, driver {report['hardware']['driver_version']}).  ",
+        f"Revision: `{report['campaign']['repository']['revision']}` on `{report['campaign']['repository']['branch']}`.",
+        f"GPU: `{report['hardware']['name']}` (`{report['hardware']['uuid']}`, CC {report['hardware']['compute_capability']}, driver {report['hardware']['driver_version']}).",
         f"Simulator: `{report['campaign']['simulator_binary_sha256']}`.",
         "",
         "## Primary accuracy and cost",
@@ -524,6 +594,21 @@ def render_markdown(report: Mapping[str, Any]) -> str:
             counter=_fmt(total["accuracy"]["counter_mape_pct"]),
         )
     )
+    lines.extend(
+        [
+            "",
+            f"NCU profiler campaign wall across retained repeats: {_fmt(total['timing']['ncu_profile_wall_seconds_campaign_total'], 4)} s. The table shows the mean capture-process wall per workload profile.",
+            "",
+            "## NCU repeatability",
+            "",
+            "| Workload | Repeats | Maximum relative range | Metric |",
+            "| :--- | ---: | ---: | :--- |",
+        ]
+    )
+    for row in rows:
+        lines.append(
+            f"| {row['display_name']} | {row['ncu_repeatability']['repeat_count']} | {_pct(row['ncu_repeatability']['max_relative_range_pct'])} | {row['ncu_repeatability']['max_relative_range_metric']} |"
+        )
     lines.extend(
         [
             "",
