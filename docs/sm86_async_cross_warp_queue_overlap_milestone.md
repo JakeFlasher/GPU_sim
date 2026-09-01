@@ -133,6 +133,11 @@ control       ef231b9c47ccdc8449873b51651fb90de88c3b008bd81ca292c040abcf7a26ce
 report        31562b8fc2788d8735762387f766be4b53c2f3e95fd964695ec7a54e0d9a3b36
 ```
 
+The prospective plan began at commit `812f5a2c`; construction-only amendments
+were committed before the retained final smoke. The exact implementation and
+tracked decision are commit
+`d6ee290e0aca02849382b067ad1ec98542b8fa58`.
+
 ## Reproduction
 
 From an empty canonical root:
