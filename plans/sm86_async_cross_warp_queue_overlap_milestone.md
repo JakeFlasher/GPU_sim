@@ -37,8 +37,10 @@ shared timestamp/result state (33,104 static bytes total). Identification uses
 four active warps; inactive warps still participate in untimed CTA barriers.
 The highest active warp is the measured target and all lower active warps are
 backgrounds. Every active warp owns a private repeated 512-byte source and a
-disjoint 4 KiB shared destination slot. Each group issues eight contiguous
-full-warp 16-byte copies, commits once, and executes `wait_group 0`.
+disjoint 4 KiB shared destination slot. The target issues one eight-copy group
+per epoch. Each background warp issues four such groups before its one
+`wait_group 0`; this bounded four-group population is identical in queued and
+drained and supplies a nonvacuous cache-all overlap manipulation.
 
 - `queued`: background warps issue and commit, then rendezvous. After release,
   backgrounds wait while the target clocks its own issue/commit and wait.
@@ -90,11 +92,12 @@ accounting, transactional overflow, and unchanged timing.
   around the rendezvous changes.
 - Target result stores and overlap reductions occur after measured clocks.
   Every epoch is token-correct and internally additive.
-- For smoke groups `G=64`, copies/group `D=8`, and active warps `W=4`, each
-  endpoint has exactly:
-  - `G*D*W = 2,048` LDGSTS warp instructions;
-  - `16*G*D*W = 32,768` source sectors; and
-  - `4*G*D*W = 8,192` shared LDGSTS wavefronts.
+- For smoke epochs `G=64`, copies/group `D=8`, three four-group backgrounds,
+  and one one-group target, each endpoint has exactly 13 group-equivalents per
+  epoch:
+  - `G*D*13 = 6,656` LDGSTS warp instructions;
+  - `16*G*D*13 = 106,496` source sectors; and
+  - `4*G*D*13 = 26,624` shared LDGSTS wavefronts.
 - Queued and drained NCU work/source metrics are exact and equal within each
   route. The L1 route has at least a 95% L1-hit ratio. The L2 route has at least
   95% L1 misses and 95% LTS hits after prewarm, with no material paired LTS
@@ -152,7 +155,8 @@ useful mechanism no-go, not permission to fit the residual.
 
 Do not capture W8 timing, NCU, NVBit, or replay before every identification
 gate passes. Holdout uses the same 256-thread function, target warp 7, seven
-background warps, and unchanged group geometry. It requires:
+four-group background warps, and the unchanged one-group target geometry (29
+group-equivalents per epoch). It requires:
 
 - at least five of seven queued background intervals overlapping the target in
   at least 95% of epochs, and zero drained overlap;
