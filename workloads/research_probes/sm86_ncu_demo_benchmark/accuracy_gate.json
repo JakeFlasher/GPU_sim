@@ -1,0 +1,49 @@
+{
+  "schema_version": 1,
+  "gate_id": "sm86_accuracy_gate_20pct_v1",
+  "required_workloads": 8,
+  "required_ncu_repeats": 7,
+  "required_simulator_repeats": 7,
+  "checks": {
+    "terminal_cycle_mape_pct": {
+      "maximum": 20.0,
+      "required_coverage": 8
+    },
+    "runtime_equivalent_mape_pct": {
+      "maximum": 20.0,
+      "required_coverage": 8
+    },
+    "issue_cycle_mape_pct": {
+      "maximum": 20.0,
+      "required_coverage": 8
+    },
+    "instruction_throughput_mape_pct": {
+      "maximum": 20.0,
+      "required_coverage": 8
+    },
+    "l1_unified_hit_rate_mape_pct": {
+      "maximum": 20.0,
+      "required_coverage": 8,
+      "maximum_mean_absolute_percentage_point_error": 10.0,
+      "required_percentage_point_coverage": 8
+    },
+    "l2_unified_hit_rate_mape_pct": {
+      "maximum": 20.0,
+      "required_coverage": 8,
+      "maximum_mean_absolute_percentage_point_error": 10.0,
+      "required_percentage_point_coverage": 8
+    },
+    "counter_traffic_mape_pct": {
+      "maximum": 20.0,
+      "required_coverage": 32
+    }
+  },
+  "manual_approval_required": true,
+  "prohibited_shortcuts": [
+    "scored_ncu_values_as_simulator_inputs",
+    "per_workload_offsets",
+    "rate_clamping_to_pass",
+    "dropping_failed_workloads",
+    "collapsing_issue_and_terminal_frontiers"
+  ]
+}

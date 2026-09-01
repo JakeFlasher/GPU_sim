@@ -40,6 +40,7 @@ from workloads.research_probes.validate_sm86_live_cohort import (
 DEFAULT_SPEC = HERE / "benchmark_spec.json"
 DEFAULT_METRICS = HERE / "metric_schema.json"
 DEFAULT_PROFILE = HERE / "host_profile.json"
+DEFAULT_GATE = HERE / "accuracy_gate.json"
 STAGES = ("correctness", "ncu", "nvbit", "static", "simulator")
 SIMULATOR_METRICS = (
     "smsp__inst_executed.sum",
@@ -566,7 +567,10 @@ def _cross_check_ncu_simulator(output_root: Path, workload: Mapping[str, Any], s
 
 
 def _run_simulator(
-    spec: Mapping[str, Any], workload: Mapping[str, Any], output_root: Path
+    spec: Mapping[str, Any],
+    workload: Mapping[str, Any],
+    output_root: Path,
+    repeats: int,
 ) -> dict[str, Any]:
     slug = str(workload["id"])
     destination = output_root / "evidence" / "raw" / "simulator" / slug
@@ -578,15 +582,15 @@ def _run_simulator(
     outputs: list[Path] = []
     walls: list[float] = []
     observations: list[dict[str, Any]] = []
-    for twin in range(1, int(spec["simulator"]["twins"]) + 1):
+    for repeat in range(1, repeats + 1):
         result = _run(
             command,
             timeout_seconds=int(spec["simulator"]["timeout_seconds"]),
             environment=_clean_environment(simulator=True),
         )
-        _require_success(f"{slug}.simulator.twin-{twin}", result)
-        output = destination / f"replay-{twin}.json"
-        stderr = destination / f"replay-{twin}.stderr.txt"
+        _require_success(f"{slug}.simulator.repeat-{repeat}", result)
+        output = destination / f"replay-{repeat}.json"
+        stderr = destination / f"replay-{repeat}.stderr.txt"
         output.write_text(result.stdout, encoding="utf-8")
         stderr.write_text(result.stderr, encoding="utf-8")
         try:
@@ -598,19 +602,28 @@ def _run_simulator(
         observations.append(_validate_simulator_document(document, Path(command[2]), slug))
         outputs.append(output)
         walls.append(result.wall_seconds)
-    if outputs[0].read_bytes() != outputs[1].read_bytes():
-        raise CampaignError(f"{slug}: simulator twins are not byte-identical")
-    if observations[0] != observations[1]:
-        raise CampaignError(f"{slug}: simulator twin observations differ")
+    if any(path.read_bytes() != outputs[0].read_bytes() for path in outputs[1:]):
+        raise CampaignError(f"{slug}: simulator repeats are not byte-identical")
+    if any(observation != observations[0] for observation in observations[1:]):
+        raise CampaignError(f"{slug}: simulator repeat observations differ")
     _cross_check_ncu_simulator(output_root, workload, observations[0])
     (destination / "command.txt").write_text(shlex.join(command) + "\n", encoding="utf-8")
+    wall_mean = statistics.fmean(walls)
+    wall_relative_range = (
+        0.0 if wall_mean == 0 else (max(walls) - min(walls)) / wall_mean * 100.0
+    )
     return {
         "command": command,
         "simulator_binary": _artifact(simulator_binary),
         "outputs": [_artifact(path) for path in outputs],
-        "twin_wall_seconds": walls,
-        "simulator_wall_seconds": statistics.median(walls),
-        "deterministic_twins": True,
+        "repeat_wall_seconds": walls,
+        "repeat_count": repeats,
+        "simulator_wall_seconds_median": statistics.median(walls),
+        "simulator_wall_seconds_mean": wall_mean,
+        "simulator_wall_seconds_minimum": min(walls),
+        "simulator_wall_seconds_maximum": max(walls),
+        "simulator_wall_relative_range_pct": wall_relative_range,
+        "deterministic_repeats": True,
         "observation": observations[0],
     }
 
@@ -621,7 +634,8 @@ def _execute_stage(
     workload: Mapping[str, Any],
     stage: str,
     output_root: Path,
-    repeats: int,
+    ncu_repeats: int,
+    simulator_repeats: int,
 ) -> dict[str, Any]:
     before = _host_snapshot(profile)
     started = _now()
@@ -629,13 +643,13 @@ def _execute_stage(
         if stage == "correctness":
             result = _run_correctness(spec, workload, output_root)
         elif stage == "ncu":
-            result = _run_ncu(spec, workload, output_root, repeats)
+            result = _run_ncu(spec, workload, output_root, ncu_repeats)
         elif stage == "nvbit":
             result = _run_nvbit(spec, workload, output_root)
         elif stage == "static":
             result = _run_static(spec, workload, output_root)
         elif stage == "simulator":
-            result = _run_simulator(spec, workload, output_root)
+            result = _run_simulator(spec, workload, output_root, simulator_repeats)
         else:
             raise CampaignError(f"unknown stage {stage!r}")
     finally:
@@ -673,6 +687,7 @@ def _new_manifest(
     spec_path: Path,
     metrics_path: Path,
     profile_path: Path,
+    gate_path: Path,
     spec: Mapping[str, Any],
     output_root: Path,
 ) -> dict[str, Any]:
@@ -689,6 +704,7 @@ def _new_manifest(
             "spec": _manifest_identity(spec_path),
             "metrics": _manifest_identity(metrics_path),
             "profile": _manifest_identity(profile_path),
+            "gate": _manifest_identity(gate_path),
         },
         "records": [],
         "scientific_boundary": "NCU values are retained only as comparison targets and never passed to simulator commands or profile inputs.",
@@ -717,11 +733,13 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--spec", type=Path, default=DEFAULT_SPEC)
     parser.add_argument("--metrics", type=Path, default=DEFAULT_METRICS)
     parser.add_argument("--profile", type=Path, default=DEFAULT_PROFILE)
+    parser.add_argument("--gate", type=Path, default=DEFAULT_GATE)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--stage", choices=("plan", "all", *STAGES), default="all")
     parser.add_argument("--smoke", action="store_true")
     parser.add_argument("--workload", action="append", default=[])
     parser.add_argument("--ncu-repeats", type=int)
+    parser.add_argument("--simulator-repeats", type=int)
     parser.add_argument("--dry-run", action="store_true")
     return parser
 
@@ -733,23 +751,36 @@ def main(argv: Sequence[str] | None = None) -> int:
         spec_path = args.spec.resolve()
         metrics_path = args.metrics.resolve()
         profile_path = args.profile.resolve()
+        gate_path = args.gate.resolve()
         output_root = args.output.resolve()
         spec = _load_json(spec_path)
         metrics = _load_json(metrics_path)
         profile = _load_json(profile_path)
+        gate = _load_json(gate_path)
         validate_spec.validate_spec(spec, metrics, profile)
+        validate_spec.validate_accuracy_gate(gate)
         workloads = _selected_workloads(spec, args.smoke, args.workload)
-        repeats = args.ncu_repeats
-        if repeats is None:
-            repeats = int(spec["ncu"]["repeats_smoke" if args.smoke else "repeats_final"])
-        if not 1 <= repeats <= int(spec["ncu"]["repeats_final"]):
+        ncu_repeats = args.ncu_repeats
+        if ncu_repeats is None:
+            ncu_repeats = int(spec["ncu"]["repeats_smoke" if args.smoke else "repeats_final"])
+        if not 1 <= ncu_repeats <= int(spec["ncu"]["repeats_final"]):
             raise CampaignError("--ncu-repeats is outside the frozen 1..final-repeat range")
+        simulator_repeats = args.simulator_repeats
+        if simulator_repeats is None:
+            simulator_repeats = int(
+                spec["simulator"]["repeats_smoke" if args.smoke else "repeats_final"]
+            )
+        if not 1 <= simulator_repeats <= int(spec["simulator"]["repeats_final"]):
+            raise CampaignError(
+                "--simulator-repeats is outside the frozen 1..final-repeat range"
+            )
         stages = STAGES if args.stage == "all" else () if args.stage == "plan" else (args.stage,)
         plan = {
             "benchmark_id": spec["benchmark_id"],
             "workloads": [row["id"] for row in workloads],
             "stages": list(stages or STAGES),
-            "ncu_repeats": repeats,
+            "ncu_repeats": ncu_repeats,
+            "simulator_repeats": simulator_repeats,
             "commands": {
                 row["id"]: {
                     stage: _stage_command(spec, row, stage, output_root)
@@ -768,10 +799,25 @@ def main(argv: Sequence[str] | None = None) -> int:
             if manifest.get("inputs", {}).get("spec", {}).get("sha256") != _sha256(spec_path):
                 raise CampaignError("existing campaign manifest is bound to another spec")
         else:
-            manifest = _new_manifest(spec_path, metrics_path, profile_path, spec, output_root)
+            manifest = _new_manifest(
+                spec_path,
+                metrics_path,
+                profile_path,
+                gate_path,
+                spec,
+                output_root,
+            )
         for stage in stages:
             for workload in workloads:
-                record = _execute_stage(spec, profile, workload, stage, output_root, repeats)
+                record = _execute_stage(
+                    spec,
+                    profile,
+                    workload,
+                    stage,
+                    output_root,
+                    ncu_repeats,
+                    simulator_repeats,
+                )
                 manifest["records"].append(record)
                 _write_json(manifest_path, manifest)
                 print(f"completed {stage}: {workload['id']}", flush=True)

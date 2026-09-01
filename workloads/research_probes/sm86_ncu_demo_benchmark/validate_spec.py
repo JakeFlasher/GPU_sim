@@ -18,6 +18,7 @@ REPO_ROOT = HERE.parents[2]
 DEFAULT_SPEC = HERE / "benchmark_spec.json"
 DEFAULT_METRICS = HERE / "metric_schema.json"
 DEFAULT_PROFILE = HERE / "host_profile.json"
+DEFAULT_GATE = HERE / "accuracy_gate.json"
 
 
 class ValidationError(RuntimeError):
@@ -134,6 +135,40 @@ def validate_metrics(metrics: Mapping[str, Any], requested: Sequence[str]) -> No
     )
 
 
+def validate_accuracy_gate(gate: Mapping[str, Any]) -> None:
+    require(gate.get("schema_version") == 1, "accuracy gate schema_version must be 1")
+    require(gate.get("required_workloads") == 8, "accuracy gate must require 8 workloads")
+    require(gate.get("required_ncu_repeats") == 7, "accuracy gate must require 7 NCU repeats")
+    require(
+        gate.get("required_simulator_repeats") == 7,
+        "accuracy gate must require 7 simulator repeats",
+    )
+    expected = {
+        "terminal_cycle_mape_pct": (20.0, 8),
+        "runtime_equivalent_mape_pct": (20.0, 8),
+        "issue_cycle_mape_pct": (20.0, 8),
+        "instruction_throughput_mape_pct": (20.0, 8),
+        "l1_unified_hit_rate_mape_pct": (20.0, 8),
+        "l2_unified_hit_rate_mape_pct": (20.0, 8),
+        "counter_traffic_mape_pct": (20.0, 32),
+    }
+    checks = gate.get("checks")
+    require(isinstance(checks, Mapping) and set(checks) == set(expected), "accuracy gate checks drift")
+    for name, (maximum, coverage) in expected.items():
+        require(checks[name].get("maximum") == maximum, f"{name}: maximum drift")
+        require(
+            checks[name].get("required_coverage") == coverage,
+            f"{name}: coverage drift",
+        )
+    for name in ("l1_unified_hit_rate_mape_pct", "l2_unified_hit_rate_mape_pct"):
+        require(
+            checks[name].get("maximum_mean_absolute_percentage_point_error") == 10.0
+            and checks[name].get("required_percentage_point_coverage") == 8,
+            f"{name}: percentage-point gate drift",
+        )
+    require(gate.get("manual_approval_required") is True, "manual approval must remain required")
+
+
 def validate_spec(spec: Mapping[str, Any], metrics: Mapping[str, Any], profile: Mapping[str, Any]) -> None:
     require(spec.get("schema_version") == 1, "benchmark schema_version must be 1")
     require(spec.get("architecture") == "sm_86", "benchmark architecture must be sm_86")
@@ -172,6 +207,22 @@ def validate_spec(spec: Mapping[str, Any], metrics: Mapping[str, Any], profile: 
         require(not any(name in row["display_name"] for name in forbidden_names), f"{row['id']}: misleading display name")
         require("kernel" in row["functional_analogue"], f"{row['id']}: analogue must say kernel")
     validate_metrics(metrics, spec["ncu"]["metrics"])
+    require(
+        spec.get("accuracy_gate")
+        == "workloads/research_probes/sm86_ncu_demo_benchmark/accuracy_gate.json",
+        "accuracy gate path drift",
+    )
+    require(
+        spec["ncu"].get("repeats_smoke") == 3
+        and spec["ncu"].get("repeats_final") == 7,
+        "NCU repeat contract drift",
+    )
+    require(
+        spec["simulator"].get("repeats_smoke") == 3
+        and spec["simulator"].get("repeats_final") == 7
+        and "twins" not in spec["simulator"],
+        "simulator repeat contract drift",
+    )
     validate_profile(profile, live_host=False)
     require(spec["simulator"]["multi_launch_policy"].startswith("not_admitted"), "v1 multi-launch policy must fail closed")
 
@@ -181,6 +232,7 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument("--spec", type=Path, default=DEFAULT_SPEC)
     result.add_argument("--metrics", type=Path, default=DEFAULT_METRICS)
     result.add_argument("--profile", type=Path, default=DEFAULT_PROFILE)
+    result.add_argument("--gate", type=Path, default=DEFAULT_GATE)
     result.add_argument("--validate-live-host", action="store_true")
     return result
 
@@ -191,7 +243,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         spec = load_object(args.spec)
         metrics = load_object(args.metrics)
         profile = load_object(args.profile)
+        gate = load_object(args.gate)
         validate_spec(spec, metrics, profile)
+        validate_accuracy_gate(gate)
         observed = validate_profile(profile, live_host=args.validate_live_host)
         print(
             json.dumps(

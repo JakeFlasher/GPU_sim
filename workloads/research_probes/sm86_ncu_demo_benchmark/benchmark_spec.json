@@ -1,11 +1,12 @@
 {
   "schema_version": 1,
-  "benchmark_id": "sm86_ncu_demo_benchmark_v1",
-  "status": "frozen_round0_not_run",
+  "benchmark_id": "sm86_ncu_accuracy_recovery_v2",
+  "status": "accuracy_recovery_contract_not_run",
   "frozen_at_revision": "2a2a535a48666dfb29e76b9914c8a4ec8fdaaf69",
   "architecture": "sm_86",
   "profile": "workloads/research_probes/sm86_ncu_demo_benchmark/host_profile.json",
   "metric_schema": "workloads/research_probes/sm86_ncu_demo_benchmark/metric_schema.json",
+  "accuracy_gate": "workloads/research_probes/sm86_ncu_demo_benchmark/accuracy_gate.json",
   "correctness": {
     "timeout_seconds": 180
   },
@@ -16,8 +17,8 @@
     "clock_control": "none",
     "launch_skip": 1,
     "launch_count": 1,
-    "repeats_smoke": 1,
-    "repeats_final": 3,
+    "repeats_smoke": 3,
+    "repeats_final": 7,
     "timeout_seconds": 900,
     "metrics": [
       "gpc__cycles_elapsed.max",
@@ -53,7 +54,8 @@
     "cache_scope": "launch",
     "arch_card": "arch_profiles/cards/sm_86.json",
     "pchase_card": "data/pchase/sm_86_static_card.json",
-    "twins": 2,
+    "repeats_smoke": 3,
+    "repeats_final": 7,
     "timeout_seconds": 900,
     "multi_launch_policy": "not_admitted_in_v1_all_rows_are_one_target_launch"
   },

@@ -60,6 +60,11 @@ def _wide_csv(path: Path, *, duplicate: bool = False) -> None:
 
 def test_plan_binds_ncu_cache_policy_and_metric_projection(tmp_path: Path) -> None:
     spec = _spec()
+    assert spec["ncu"]["repeats_smoke"] == 3
+    assert spec["ncu"]["repeats_final"] == 7
+    assert spec["simulator"]["repeats_smoke"] == 3
+    assert spec["simulator"]["repeats_final"] == 7
+    assert "twins" not in spec["simulator"]
     workload = _workload()
     ncu = campaign._stage_command(spec, workload, "ncu", tmp_path)
     assert ncu[ncu.index("--cache-control") + 1] == "all"

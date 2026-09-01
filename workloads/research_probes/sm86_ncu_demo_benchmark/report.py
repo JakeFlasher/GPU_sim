@@ -164,7 +164,16 @@ def _record_index(
 
 
 def _host_identity(records: Mapping[tuple[str, str], Mapping[str, Any]]) -> dict[str, Any]:
-    fields = ("index", "name", "uuid", "compute_capability", "driver_version")
+    fields = (
+        "index",
+        "name",
+        "uuid",
+        "compute_capability",
+        "driver_version",
+        "graphics_clock_mhz",
+        "sm_clock_mhz",
+        "memory_clock_mhz",
+    )
     identities = {
         tuple(record[boundary].get(field) for field in fields)
         for record in records.values()
@@ -194,8 +203,12 @@ def _verify_stage_artifacts(
         _verify_artifact(record, f"{workload_id}.simulator.output")
         for record in simulator["outputs"]
     ]
-    if len(outputs) != 2 or outputs[0].read_bytes() != outputs[1].read_bytes():
-        raise ReportError(f"{workload_id}: simulator twins are not byte-identical")
+    if len(outputs) < 3 or any(
+        output.read_bytes() != outputs[0].read_bytes() for output in outputs[1:]
+    ):
+        raise ReportError(
+            f"{workload_id}: at least three byte-identical simulator repeats are required"
+        )
     ncu = records[(workload_id, "ncu")]["result"]
     for repeat in ncu["repeats"]:
         _verify_artifact(repeat["report"], f"{workload_id}.ncu.report")
@@ -307,10 +320,28 @@ def _metric_comparison(
     return result
 
 
+def _scalar_comparison(
+    ncu: float | None,
+    simulator: float | None,
+    *,
+    unit: str,
+    simulator_status: str,
+) -> dict[str, object]:
+    return {
+        "unit": unit,
+        "ncu": ncu,
+        "simulator": simulator,
+        "simulator_status": simulator_status,
+        "ape_pct": _ape(simulator, ncu),
+        "absolute_error": _absolute_error(simulator, ncu),
+    }
+
+
 def _row(
     workload: Mapping[str, Any],
     metric_schema: Mapping[str, Any],
     records: Mapping[tuple[str, str], Mapping[str, Any]],
+    hardware: Mapping[str, Any],
 ) -> dict[str, Any]:
     workload_id = str(workload["id"])
     _verify_stage_artifacts(workload_id, records)
@@ -356,21 +387,78 @@ def _row(
 
     gpu_ns = comparisons["gpu_kernel_duration"]["ncu"]["value"]
     gpu_seconds = _finite(gpu_ns, f"{workload_id}.gpu_duration") * 1e-9
+    sm_clock_mhz = _finite(
+        hardware.get("sm_clock_mhz"), f"{workload_id}.sm_clock", positive=True
+    )
+    simulator_runtime_ns = (
+        None if terminal_value is None else terminal_value * 1000.0 / sm_clock_mhz
+    )
+    ncu_instructions = _finite(
+        comparisons["instructions"]["ncu"]["value"],
+        f"{workload_id}.ncu_instructions",
+        positive=True,
+    )
+    simulator_instructions = _finite(
+        comparisons["instructions"]["simulator"]["value"],
+        f"{workload_id}.simulator_instructions",
+        positive=True,
+    )
+    ncu_issue_cycles = _finite(
+        comparisons["sm_active_cycles"]["ncu"]["value"],
+        f"{workload_id}.ncu_issue_cycles",
+        positive=True,
+    )
+    ncu_terminal_cycles = _finite(
+        comparisons["gpc_elapsed_cycles"]["ncu"]["value"],
+        f"{workload_id}.ncu_terminal_cycles",
+        positive=True,
+    )
+    derived = {
+        "runtime_equivalent": _scalar_comparison(
+            float(gpu_ns),
+            simulator_runtime_ns,
+            unit="ns",
+            simulator_status=(
+                "lower_bound" if frontier.get("status") != "complete" else "modeled"
+            ),
+        ),
+        "issue_instruction_throughput": _scalar_comparison(
+            ncu_instructions / ncu_issue_cycles,
+            simulator_instructions / issue,
+            unit="warp_instructions_per_max_active_cycle",
+            simulator_status="issue_only_diagnostic",
+        ),
+        "terminal_instruction_throughput": _scalar_comparison(
+            ncu_instructions / ncu_terminal_cycles,
+            None
+            if terminal_value in (None, 0.0)
+            else simulator_instructions / terminal_value,
+            unit="warp_instructions_per_terminal_cycle",
+            simulator_status=(
+                "lower_bound_derived" if frontier.get("status") != "complete" else "modeled"
+            ),
+        ),
+    }
     ncu_walls = [
         _finite(repeat["ncu_profile_wall_seconds"], f"{workload_id}.ncu_wall", positive=True)
         for repeat in repeats
     ]
-    twin_walls = [
+    simulator_walls = [
         _finite(value, f"{workload_id}.sim_wall", positive=True)
-        for value in simulator_result["twin_wall_seconds"]
+        for value in simulator_result["repeat_wall_seconds"]
     ]
     simulator_wall = _finite(
-        simulator_result["simulator_wall_seconds"],
-        f"{workload_id}.simulator_wall_seconds",
+        simulator_result["simulator_wall_seconds_median"],
+        f"{workload_id}.simulator_wall_seconds_median",
         positive=True,
     )
-    if not math.isclose(simulator_wall, statistics.median(twin_walls), rel_tol=0, abs_tol=1e-12):
-        raise ReportError(f"{workload_id}: simulator wall is not the twin median")
+    if not math.isclose(
+        simulator_wall,
+        statistics.median(simulator_walls),
+        rel_tol=0,
+        abs_tol=1e-12,
+    ):
+        raise ReportError(f"{workload_id}: simulator wall is not the repeat median")
     counter_apes = [comparisons[metric]["ape_pct"] for metric in COUNTER_IDS]
     repeat_spreads = [
         (comparison["ncu"]["relative_range_pct"], metric_id)
@@ -382,28 +470,51 @@ def _row(
         "workload_id": workload_id,
         "display_name": workload["display_name"],
         "functional_analogue": workload["functional_analogue"],
-        "launches": 1,
+        "target_launches_per_process": int(workload["target_launch_count"]),
+        "ncu_launch_samples": len(repeats),
+        "simulator_process_samples": len(simulator_walls),
         "timing": {
             "gpu_kernel_seconds": gpu_seconds,
             "ncu_profile_wall_seconds_mean": _mean(ncu_walls),
             "ncu_profile_wall_seconds_total": sum(ncu_walls),
             "simulator_wall_seconds": simulator_wall,
-            "simulator_twin_wall_seconds_total": sum(twin_walls),
+            "simulator_process_wall_seconds_total": sum(simulator_walls),
+            "simulator_wall_seconds_mean": _mean(simulator_walls),
+            "simulator_wall_seconds_minimum": min(simulator_walls),
+            "simulator_wall_seconds_maximum": max(simulator_walls),
+            "simulator_wall_relative_range_pct": simulator_result[
+                "simulator_wall_relative_range_pct"
+            ],
             "gpu_execution_over_simulator_wall": gpu_seconds / simulator_wall,
             "ncu_profile_wall_over_simulator_wall": _mean(ncu_walls) / simulator_wall,
         },
         "accuracy": {
             "terminal_lower_bound_mape_pct": comparisons["gpc_elapsed_cycles"]["ape_pct"],
             "issue_frontier_mape_pct": comparisons["sm_active_cycles"]["ape_pct"],
+            "runtime_equivalent_mape_pct": derived["runtime_equivalent"]["ape_pct"],
+            "instruction_throughput_mape_pct": derived[
+                "issue_instruction_throughput"
+            ]["ape_pct"],
             "counter_mape_pct": _mean_optional(counter_apes),
             "counter_coverage": sum(value is not None for value in counter_apes),
             "counter_metric_count": len(counter_apes),
         },
         "completion_frontier": dict(frontier),
+        "derived_metrics": derived,
         "ncu_repeatability": {
             "repeat_count": len(repeats),
             "max_relative_range_pct": max_spread,
             "max_relative_range_metric": max_spread_metric,
+        },
+        "simulator_repeatability": {
+            "repeat_count": len(simulator_walls),
+            "wall_relative_range_pct": simulator_result[
+                "simulator_wall_relative_range_pct"
+            ],
+            "deterministic_predictions": simulator_result.get(
+                "deterministic_repeats"
+            )
+            is True,
         },
         "metrics": comparisons,
     }
@@ -416,6 +527,10 @@ def _totals(rows: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     ncu_total = sum(float(row["timing"]["ncu_profile_wall_seconds_total"]) for row in rows)
     terminal = [row["accuracy"]["terminal_lower_bound_mape_pct"] for row in rows]
     issue = [row["accuracy"]["issue_frontier_mape_pct"] for row in rows]
+    runtime = [row["accuracy"]["runtime_equivalent_mape_pct"] for row in rows]
+    throughput = [
+        row["accuracy"]["instruction_throughput_mape_pct"] for row in rows
+    ]
     counter = [
         row["metrics"][metric]["ape_pct"]
         for row in rows
@@ -429,7 +544,8 @@ def _totals(rows: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
             "mape_pct": _mean_optional(mape),
             "mean_absolute_percentage_point_error": _mean_optional(pp),
             "coverage": sum(value is not None for value in mape),
-            "launches": len(rows),
+            "percentage_point_coverage": sum(value is not None for value in pp),
+            "workloads": len(rows),
         }
     worst_repeatability = max(
         rows,
@@ -437,7 +553,13 @@ def _totals(rows: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     )
     return {
         "workloads": len(rows),
-        "launches": sum(int(row["launches"]) for row in rows),
+        "target_launches_per_process": sum(
+            int(row["target_launches_per_process"]) for row in rows
+        ),
+        "ncu_launch_samples": sum(int(row["ncu_launch_samples"]) for row in rows),
+        "simulator_process_samples": sum(
+            int(row["simulator_process_samples"]) for row in rows
+        ),
         "timing": {
             "gpu_kernel_seconds": gpu,
             "ncu_profile_wall_seconds_mean_sum": ncu_mean,
@@ -451,6 +573,14 @@ def _totals(rows: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
             "terminal_lower_bound_coverage": sum(value is not None for value in terminal),
             "issue_frontier_mape_pct": _mean_optional(issue),
             "issue_frontier_coverage": sum(value is not None for value in issue),
+            "runtime_equivalent_mape_pct": _mean_optional(runtime),
+            "runtime_equivalent_coverage": sum(
+                value is not None for value in runtime
+            ),
+            "instruction_throughput_mape_pct": _mean_optional(throughput),
+            "instruction_throughput_coverage": sum(
+                value is not None for value in throughput
+            ),
             "counter_mape_pct": _mean_optional(counter),
             "counter_coverage": sum(value is not None for value in counter),
             "counter_metric_launch_pairs": len(counter),
@@ -461,22 +591,154 @@ def _totals(rows: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
             "workload_id": worst_repeatability["workload_id"],
             "metric_id": worst_repeatability["ncu_repeatability"]["max_relative_range_metric"],
         },
+        "simulator_repeatability": {
+            "maximum_wall_relative_range_pct": max(
+                float(row["simulator_repeatability"]["wall_relative_range_pct"])
+                for row in rows
+            ),
+            "all_predictions_deterministic": all(
+                row["simulator_repeatability"]["deterministic_predictions"] is True
+                for row in rows
+            ),
+        },
     }
 
 
-def _caveats(status: str) -> list[str]:
-    phase = "smoke" if status == "smoke" else "final"
-    repeat_note = (
-        "Smoke results contain one NCU repeat per workload; the final campaign requires three independent repeats."
-        if status == "smoke"
-        else "Final results contain three independent application-replay NCU repeats per workload; raw repeat values remain in JSON."
+def _evaluate_accuracy_gate(
+    gate: Mapping[str, Any],
+    rows: Sequence[Mapping[str, Any]],
+    total: Mapping[str, Any],
+) -> dict[str, Any]:
+    accuracy = total["accuracy"]
+    hit_rates = accuracy["hit_rates"]
+    observed = {
+        "terminal_cycle_mape_pct": (
+            accuracy["terminal_lower_bound_mape_pct"],
+            accuracy["terminal_lower_bound_coverage"],
+        ),
+        "runtime_equivalent_mape_pct": (
+            accuracy["runtime_equivalent_mape_pct"],
+            accuracy["runtime_equivalent_coverage"],
+        ),
+        "issue_cycle_mape_pct": (
+            accuracy["issue_frontier_mape_pct"],
+            accuracy["issue_frontier_coverage"],
+        ),
+        "instruction_throughput_mape_pct": (
+            accuracy["instruction_throughput_mape_pct"],
+            accuracy["instruction_throughput_coverage"],
+        ),
+        "l1_unified_hit_rate_mape_pct": (
+            hit_rates["l1_unified_hit_rate"]["mape_pct"],
+            hit_rates["l1_unified_hit_rate"]["coverage"],
+        ),
+        "l2_unified_hit_rate_mape_pct": (
+            hit_rates["l2_unified_hit_rate"]["mape_pct"],
+            hit_rates["l2_unified_hit_rate"]["coverage"],
+        ),
+        "counter_traffic_mape_pct": (
+            accuracy["counter_mape_pct"],
+            accuracy["counter_coverage"],
+        ),
+    }
+    checks: dict[str, Any] = {}
+    for name, contract in gate["checks"].items():
+        value, coverage = observed[name]
+        passed = (
+            value is not None
+            and float(value) <= float(contract["maximum"])
+            and int(coverage) >= int(contract["required_coverage"])
+        )
+        result: dict[str, Any] = {
+            "value": value,
+            "maximum": contract["maximum"],
+            "coverage": coverage,
+            "required_coverage": contract["required_coverage"],
+        }
+        if "maximum_mean_absolute_percentage_point_error" in contract:
+            metric_id = (
+                "l1_unified_hit_rate"
+                if name.startswith("l1_")
+                else "l2_unified_hit_rate"
+            )
+            summary = hit_rates[metric_id]
+            pp_value = summary["mean_absolute_percentage_point_error"]
+            pp_coverage = summary["percentage_point_coverage"]
+            pp_passed = (
+                pp_value is not None
+                and float(pp_value)
+                <= float(contract["maximum_mean_absolute_percentage_point_error"])
+                and int(pp_coverage)
+                >= int(contract["required_percentage_point_coverage"])
+            )
+            result.update(
+                {
+                    "mean_absolute_percentage_point_error": pp_value,
+                    "maximum_mean_absolute_percentage_point_error": contract[
+                        "maximum_mean_absolute_percentage_point_error"
+                    ],
+                    "percentage_point_coverage": pp_coverage,
+                    "required_percentage_point_coverage": contract[
+                        "required_percentage_point_coverage"
+                    ],
+                }
+            )
+            passed = passed and pp_passed
+        result["passed"] = passed
+        checks[name] = result
+
+    repeat_checks = {
+        "workloads": {
+            "value": len(rows),
+            "required": gate["required_workloads"],
+            "passed": len(rows) >= int(gate["required_workloads"]),
+        },
+        "ncu_repeats_per_workload": {
+            "value": min(int(row["ncu_launch_samples"]) for row in rows),
+            "required": gate["required_ncu_repeats"],
+            "passed": min(int(row["ncu_launch_samples"]) for row in rows)
+            >= int(gate["required_ncu_repeats"]),
+        },
+        "simulator_repeats_per_workload": {
+            "value": min(int(row["simulator_process_samples"]) for row in rows),
+            "required": gate["required_simulator_repeats"],
+            "passed": min(int(row["simulator_process_samples"]) for row in rows)
+            >= int(gate["required_simulator_repeats"]),
+        },
+        "simulator_prediction_determinism": {
+            "value": total["simulator_repeatability"][
+                "all_predictions_deterministic"
+            ],
+            "required": True,
+            "passed": total["simulator_repeatability"][
+                "all_predictions_deterministic"
+            ]
+            is True,
+        },
+    }
+    technical_pass = all(check["passed"] for check in checks.values()) and all(
+        check["passed"] for check in repeat_checks.values()
     )
+    return {
+        "gate_id": gate["gate_id"],
+        "technical_status": "pass" if technical_pass else "fail",
+        "metric_checks": checks,
+        "repeat_checks": repeat_checks,
+        "manual_approval_required": gate["manual_approval_required"],
+        "manual_approval_status": "pending",
+        "candidate_promotable_for_user_review": technical_pass,
+    }
+
+
+def _caveats(status: str, ncu_repeats: int, simulator_repeats: int) -> list[str]:
+    phase = "smoke" if status == "smoke" else "final"
     return [
         "NCU is comparison-only ground truth and is absent from simulator commands and profile inputs.",
         "Cache rates are launch-global weighted rates derived from NCU hit/miss sector sums; direct per-subunit NCU .pct ratios are not used.",
         f"Every {phase} completion frontier is an explicit lower bound with retained unmodeled retirement tails.",
         "GPU/simulator and NCU/simulator values are named time ratios, not unqualified speedups.",
-        repeat_note,
+        f"Results contain {ncu_repeats} independent application-replay NCU launches and {simulator_repeats} independent simulator processes per workload; raw samples remain in JSON.",
+        "Runtime-equivalent values convert terminal simulator cycles with the independently recorded SM clock; incomplete terminal frontiers remain lower bounds.",
     ]
 
 
@@ -487,7 +749,9 @@ def build_report(campaign_path: Path) -> dict[str, Any]:
     spec = _input_document(campaign, "spec")
     metric_schema = _input_document(campaign, "metrics")
     profile = _input_document(campaign, "profile")
+    gate = _input_document(campaign, "gate")
     validate_spec.validate_spec(spec, metric_schema, profile)
+    validate_spec.validate_accuracy_gate(gate)
     workload_ids = [str(workload["id"]) for workload in spec["workloads"]]
     records_present = campaign.get("records", [])
     selected_ids = sorted(
@@ -502,7 +766,7 @@ def build_report(campaign_path: Path) -> dict[str, Any]:
         raise ReportError("report admits exactly the four-row smoke or full frozen matrix")
     records = _record_index(campaign, [str(workload["id"]) for workload in selected])
     host = _host_identity(records)
-    rows = [_row(workload, metric_schema, records) for workload in selected]
+    rows = [_row(workload, metric_schema, records, host) for workload in selected]
     simulator_hashes = {
         records[(str(workload["id"]), "simulator")]["result"]["simulator_binary"]["sha256"]
         for workload in selected
@@ -510,6 +774,10 @@ def build_report(campaign_path: Path) -> dict[str, Any]:
     if len(simulator_hashes) != 1:
         raise ReportError("simulator binary identity changed within the campaign")
     status = "smoke" if len(rows) == 4 else "final"
+    total = _totals(rows)
+    gate_result = _evaluate_accuracy_gate(gate, rows, total)
+    ncu_repeats = min(int(row["ncu_launch_samples"]) for row in rows)
+    simulator_repeats = min(int(row["simulator_process_samples"]) for row in rows)
     return {
         "schema_version": 1,
         "report_id": f"{campaign['benchmark_id']}_{'smoke' if len(rows) == 4 else 'final'}_report_v1",
@@ -531,10 +799,13 @@ def build_report(campaign_path: Path) -> dict[str, Any]:
             "total_mape": "launch-weighted arithmetic mean over covered launch-metric APE values",
             "gpu_execution_over_simulator_wall": "sum NCU gpu__time_duration.sum seconds / sum simulator median process wall seconds",
             "ncu_profile_wall_over_simulator_wall": "sum mean NCU capture-process wall seconds / sum simulator median process wall seconds",
+            "runtime_equivalent_ns": "terminal_modeled_event_cycles * 1000 / observed_sm_clock_mhz",
+            "issue_instruction_throughput": "smsp instructions / maximum active-or-issue cycles",
         },
         "rows": rows,
-        "total": _totals(rows),
-        "caveats": _caveats(status),
+        "total": total,
+        "accuracy_gate": gate_result,
+        "caveats": _caveats(status, ncu_repeats, simulator_repeats),
     }
 
 
@@ -563,34 +834,38 @@ def render_markdown(report: Mapping[str, Any]) -> str:
         "",
         "## Primary accuracy and cost",
         "",
-        "| Workload | Launches | GPU kernel ms | NCU profile s | Simulator s | GPU / simulator | NCU / simulator | Terminal lower-bound MAPE | Issue-frontier MAPE | Counter MAPE |",
-        "| :--- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+        "| Workload | NCU launches / sim runs | GPU kernel ms | NCU profile s | Simulator s | GPU / simulator | Runtime MAPE | Terminal-cycle MAPE | Issue-cycle MAPE | Instruction-throughput MAPE | Counter MAPE |",
+        "| :--- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
     ]
     for row in rows:
         lines.append(
-            "| {name} | {launches} | {gpu} | {ncu} | {sim} | {gpu_ratio} | {ncu_ratio} | {terminal}% | {issue}% | {counter}% |".format(
+            "| {name} | {samples} | {gpu} | {ncu} | {sim} | {gpu_ratio} | {runtime}% | {terminal}% | {issue}% | {throughput}% | {counter}% |".format(
                 name=row["display_name"],
-                launches=row["launches"],
+                samples=f"{row['ncu_launch_samples']} / {row['simulator_process_samples']}",
                 gpu=_fmt(row["timing"]["gpu_kernel_seconds"] * 1000.0, 4),
                 ncu=_fmt(row["timing"]["ncu_profile_wall_seconds_mean"], 4),
                 sim=_fmt(row["timing"]["simulator_wall_seconds"], 4),
                 gpu_ratio=_fmt(row["timing"]["gpu_execution_over_simulator_wall"], 3),
-                ncu_ratio=_fmt(row["timing"]["ncu_profile_wall_over_simulator_wall"], 3),
+                runtime=_fmt(row["accuracy"]["runtime_equivalent_mape_pct"]),
                 terminal=_fmt(row["accuracy"]["terminal_lower_bound_mape_pct"]),
                 issue=_fmt(row["accuracy"]["issue_frontier_mape_pct"]),
+                throughput=_fmt(
+                    row["accuracy"]["instruction_throughput_mape_pct"]
+                ),
                 counter=_fmt(row["accuracy"]["counter_mape_pct"]),
             )
         )
     lines.append(
-        "| **Total / launch-weighted** | {launches} | {gpu} | {ncu} | {sim} | {gpu_ratio} | {ncu_ratio} | {terminal}% | {issue}% | {counter}% |".format(
-            launches=total["launches"],
+        "| **Total / launch-weighted** | {samples} | {gpu} | {ncu} | {sim} | {gpu_ratio} | {runtime}% | {terminal}% | {issue}% | {throughput}% | {counter}% |".format(
+            samples=f"{total['ncu_launch_samples']} / {total['simulator_process_samples']}",
             gpu=_fmt(total["timing"]["gpu_kernel_seconds"] * 1000.0, 4),
             ncu=_fmt(total["timing"]["ncu_profile_wall_seconds_mean_sum"], 4),
             sim=_fmt(total["timing"]["simulator_wall_seconds"], 4),
             gpu_ratio=_fmt(total["timing"]["gpu_execution_over_simulator_wall"], 3),
-            ncu_ratio=_fmt(total["timing"]["ncu_profile_wall_over_simulator_wall"], 3),
+            runtime=_fmt(total["accuracy"]["runtime_equivalent_mape_pct"]),
             terminal=_fmt(total["accuracy"]["terminal_lower_bound_mape_pct"]),
             issue=_fmt(total["accuracy"]["issue_frontier_mape_pct"]),
+            throughput=_fmt(total["accuracy"]["instruction_throughput_mape_pct"]),
             counter=_fmt(total["accuracy"]["counter_mape_pct"]),
         )
     )
@@ -601,13 +876,13 @@ def render_markdown(report: Mapping[str, Any]) -> str:
             "",
             "## NCU repeatability",
             "",
-            "| Workload | Repeats | Maximum relative range | Metric |",
-            "| :--- | ---: | ---: | :--- |",
+            "| Workload | NCU repeats | NCU maximum relative range | Metric | Simulator repeats | Simulator wall relative range |",
+            "| :--- | ---: | ---: | :--- | ---: | ---: |",
         ]
     )
     for row in rows:
         lines.append(
-            f"| {row['display_name']} | {row['ncu_repeatability']['repeat_count']} | {_pct(row['ncu_repeatability']['max_relative_range_pct'])} | {row['ncu_repeatability']['max_relative_range_metric']} |"
+            f"| {row['display_name']} | {row['ncu_repeatability']['repeat_count']} | {_pct(row['ncu_repeatability']['max_relative_range_pct'])} | {row['ncu_repeatability']['max_relative_range_metric']} | {row['simulator_repeatability']['repeat_count']} | {_pct(row['simulator_repeatability']['wall_relative_range_pct'])} |"
         )
     lines.extend(
         [
@@ -632,6 +907,19 @@ def render_markdown(report: Mapping[str, Any]) -> str:
                 st=_fmt(metrics["global_store_sectors"]["ape_pct"]),
                 dram=_fmt(metrics["dram_read_sectors"]["ape_pct"]),
             )
+        )
+    lines.extend(["", "## Accuracy gate", ""])
+    lines.extend(
+        [
+            f"Technical status: **{report['accuracy_gate']['technical_status'].upper()}**. Manual approval: **{report['accuracy_gate']['manual_approval_status']}**.",
+            "",
+            "| Check | Observed | Maximum | Coverage | Required | Pass |",
+            "| :--- | ---: | ---: | ---: | ---: | :---: |",
+        ]
+    )
+    for name, check in report["accuracy_gate"]["metric_checks"].items():
+        lines.append(
+            f"| {name} | {_fmt(check['value'])}% | {_fmt(check['maximum'])}% | {check['coverage']} | {check['required_coverage']} | {'yes' if check['passed'] else 'no'} |"
         )
     lines.extend(["", "## Caveats", ""])
     lines.extend(f"- {caveat}" for caveat in report["caveats"])
@@ -683,7 +971,10 @@ def main(argv: Sequence[str] | None = None) -> int:
                 {
                     "status": "valid",
                     "workloads": len(report["rows"]),
-                    "launches": report["total"]["launches"],
+                    "ncu_launch_samples": report["total"]["ncu_launch_samples"],
+                    "simulator_process_samples": report["total"][
+                        "simulator_process_samples"
+                    ],
                     "output_json": str(output_json),
                     "output_md": str(output_md),
                 },

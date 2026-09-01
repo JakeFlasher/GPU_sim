@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+import json
 
 from workloads.research_probes.sm86_ncu_demo_benchmark import report
 
@@ -55,7 +56,9 @@ def test_total_time_ratios_use_summed_numerators_and_denominators() -> None:
             }
         )
         return {
-            "launches": 1,
+            "target_launches_per_process": 1,
+            "ncu_launch_samples": 7,
+            "simulator_process_samples": 7,
             "timing": {
                 "gpu_kernel_seconds": scale,
                 "ncu_profile_wall_seconds_mean": scale * 2,
@@ -65,11 +68,17 @@ def test_total_time_ratios_use_summed_numerators_and_denominators() -> None:
             "accuracy": {
                 "terminal_lower_bound_mape_pct": scale,
                 "issue_frontier_mape_pct": scale,
+                "runtime_equivalent_mape_pct": scale,
+                "instruction_throughput_mape_pct": scale,
             },
             "workload_id": f"row-{scale}",
             "ncu_repeatability": {
                 "max_relative_range_pct": scale,
                 "max_relative_range_metric": "m",
+            },
+            "simulator_repeatability": {
+                "wall_relative_range_pct": scale,
+                "deterministic_predictions": True,
             },
             "metrics": metrics,
         }
@@ -86,9 +95,11 @@ def test_missing_percentage_formats_without_a_percent_suffix() -> None:
 
 
 def test_caveats_distinguish_smoke_from_final_repeats() -> None:
-    assert any("one NCU repeat" in note for note in report._caveats("smoke"))
-    assert any("three independent" in note for note in report._caveats("final"))
-    assert all("Every smoke" not in note for note in report._caveats("final"))
+    assert any("3 independent" in note for note in report._caveats("smoke", 3, 3))
+    assert any("7 independent" in note for note in report._caveats("final", 7, 7))
+    assert all(
+        "Every smoke" not in note for note in report._caveats("final", 7, 7)
+    )
 
 
 def test_report_campaign_path_is_repository_relative() -> None:
@@ -100,3 +111,61 @@ def test_absent_optional_archive_is_explicit(tmp_path) -> None:
     campaign_path = tmp_path / "campaign_manifest.json"
     campaign_path.write_text("{}", encoding="utf-8")
     assert report._evidence_archive(campaign_path) is None
+
+
+def test_accuracy_gate_requires_all_metric_and_repeat_checks() -> None:
+    gate = json.loads((report.HERE / "accuracy_gate.json").read_text())
+
+    def row(index: int, error: float) -> dict:
+        metrics = {
+            metric: {"ape_pct": error} for metric in report.COUNTER_IDS
+        }
+        metrics.update(
+            {
+                metric: {
+                    "ape_pct": error,
+                    "absolute_percentage_point_error": error / 2,
+                }
+                for metric in report.HIT_RATE_IDS
+            }
+        )
+        return {
+            "workload_id": f"w{index}",
+            "target_launches_per_process": 1,
+            "ncu_launch_samples": 7,
+            "simulator_process_samples": 7,
+            "timing": {
+                "gpu_kernel_seconds": 1.0,
+                "ncu_profile_wall_seconds_mean": 1.0,
+                "ncu_profile_wall_seconds_total": 7.0,
+                "simulator_wall_seconds": 1.0,
+            },
+            "accuracy": {
+                "terminal_lower_bound_mape_pct": error,
+                "issue_frontier_mape_pct": error,
+                "runtime_equivalent_mape_pct": error,
+                "instruction_throughput_mape_pct": error,
+            },
+            "ncu_repeatability": {
+                "max_relative_range_pct": 1.0,
+                "max_relative_range_metric": "m",
+            },
+            "simulator_repeatability": {
+                "wall_relative_range_pct": 1.0,
+                "deterministic_predictions": True,
+            },
+            "metrics": metrics,
+        }
+
+    passing_rows = [row(index, 10.0) for index in range(8)]
+    passing = report._evaluate_accuracy_gate(
+        gate, passing_rows, report._totals(passing_rows)
+    )
+    assert passing["technical_status"] == "pass"
+    assert passing["manual_approval_status"] == "pending"
+    failing_rows = [row(index, 25.0) for index in range(8)]
+    failing = report._evaluate_accuracy_gate(
+        gate, failing_rows, report._totals(failing_rows)
+    )
+    assert failing["technical_status"] == "fail"
+    assert not failing["candidate_promotable_for_user_review"]

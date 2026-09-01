@@ -21,9 +21,11 @@ class BenchmarkSpecTests(unittest.TestCase):
         cls.spec = json.loads((HERE / "benchmark_spec.json").read_text())
         cls.metrics = json.loads((HERE / "metric_schema.json").read_text())
         cls.profile = json.loads((HERE / "host_profile.json").read_text())
+        cls.gate = json.loads((HERE / "accuracy_gate.json").read_text())
 
     def test_frozen_spec_is_valid(self) -> None:
         subject.validate_spec(self.spec, self.metrics, self.profile)
+        subject.validate_accuracy_gate(self.gate)
 
     def test_duplicate_workload_is_rejected(self) -> None:
         mutated = copy.deepcopy(self.spec)
@@ -36,6 +38,12 @@ class BenchmarkSpecTests(unittest.TestCase):
         mutated["ncu"]["metrics"].reverse()
         with self.assertRaisesRegex(subject.ValidationError, "collection order differs"):
             subject.validate_spec(mutated, self.metrics, self.profile)
+
+    def test_accuracy_gate_cannot_relax_twenty_percent(self) -> None:
+        mutated = copy.deepcopy(self.gate)
+        mutated["checks"]["l2_unified_hit_rate_mape_pct"]["maximum"] = 20.1
+        with self.assertRaisesRegex(subject.ValidationError, "maximum drift"):
+            subject.validate_accuracy_gate(mutated)
 
 
 if __name__ == "__main__":
