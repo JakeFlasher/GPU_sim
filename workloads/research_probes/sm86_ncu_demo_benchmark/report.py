@@ -220,6 +220,8 @@ def _ncu_metric(
 ) -> dict[str, object]:
     values: list[float] = []
     statuses: list[str] = []
+    hit_sectors: list[float] = []
+    miss_sectors: list[float] = []
     for repeat in repeats:
         record = repeat["metrics"].get(metric)
         if not isinstance(record, Mapping):
@@ -229,6 +231,13 @@ def _ncu_metric(
         value = record.get("value")
         if value is not None:
             values.append(_finite(value, f"NCU metric {metric}"))
+        hit = record.get("hit_sectors")
+        miss = record.get("miss_sectors")
+        if (hit is None) != (miss is None):
+            raise ReportError(f"NCU metric {metric!r} has an incomplete hit/miss pair")
+        if hit is not None:
+            hit_sectors.append(_finite(hit, f"NCU metric {metric} hit sectors"))
+            miss_sectors.append(_finite(miss, f"NCU metric {metric} miss sectors"))
     if values and len(values) != len(repeats):
         raise ReportError(f"NCU metric {metric!r} has inconsistent repeat coverage")
     mean = None if not values else _mean(values)
@@ -238,7 +247,9 @@ def _ncu_metric(
         if mean in (None, 0.0)
         else (max(values) - min(values)) / float(mean) * 100.0
     )
-    return {
+    if hit_sectors and len(hit_sectors) != len(repeats):
+        raise ReportError(f"NCU metric {metric!r} has inconsistent hit/miss coverage")
+    result: dict[str, object] = {
         "status": "measured" if values else statuses[0],
         "value": median,
         "reduction": "median",
@@ -251,6 +262,20 @@ def _ncu_metric(
         "maximum": None if not values else max(values),
         "relative_range_pct": relative_range,
     }
+    if hit_sectors:
+        result["source_sector_counts"] = {
+            "hit_sectors": {
+                "median": float(statistics.median(hit_sectors)),
+                "repeat_values": hit_sectors,
+                "coverage": len(hit_sectors),
+            },
+            "miss_sectors": {
+                "median": float(statistics.median(miss_sectors)),
+                "repeat_values": miss_sectors,
+                "coverage": len(miss_sectors),
+            },
+        }
+    return result
 
 
 def _simulator_document(record: Mapping[str, Any], workload_id: str) -> dict[str, Any]:
@@ -293,11 +318,26 @@ def _simulator_projection(row: Mapping[str, Any], metric_id: str) -> dict[str, o
     if numeric is None:
         return {"status": "unavailable_zero_denominator", "value": None, "kind": kind}
     numeric = _finite(numeric, f"{metric_id}.simulator")
+    result: dict[str, object] = {"status": "predicted", "value": numeric, "kind": kind}
     if kind == "fraction":
         numeric *= 100.0
+        numerator = _finite(value.get("numerator"), f"{metric_id}.simulator.numerator")
+        denominator = _finite(
+            value.get("denominator"), f"{metric_id}.simulator.denominator", positive=True
+        )
+        if numerator > denominator:
+            raise ReportError(f"{metric_id}: simulator numerator exceeds denominator")
+        result.update(
+            {
+                "value": numeric,
+                "hit_sectors": numerator,
+                "lookup_sectors": denominator,
+                "miss_sectors": denominator - numerator,
+            }
+        )
     elif kind != "exact":
         raise ReportError(f"{metric_id}: unsupported simulator value kind {kind!r}")
-    return {"status": "predicted", "value": numeric, "kind": kind}
+    return result
 
 
 def _metric_comparison(
@@ -317,6 +357,16 @@ def _metric_comparison(
     }
     if metric.get("hit_rate_member"):
         result["absolute_percentage_point_error"] = result["absolute_error"]
+        if ncu_numeric is None or simulator_numeric is None:
+            zero_safe_status = "unavailable"
+        elif ncu_numeric == 0.0:
+            zero_safe_status = (
+                "exact_zero" if simulator_numeric == 0.0 else "zero_target_mismatch"
+            )
+        else:
+            zero_safe_status = "nonzero_target"
+        result["zero_safe_status"] = zero_safe_status
+        result["zero_safe_full_scale_error_pct"] = result["absolute_error"]
     return result
 
 
@@ -365,6 +415,16 @@ def _row(
     simulator_result = simulator_record["result"]
     document = _simulator_document(simulator_record, workload_id)
     launch = document["launches"][0]
+    trace_coverage = launch.get("coverage")
+    if (
+        not isinstance(trace_coverage, Mapping)
+        or trace_coverage.get("kind") != "full"
+        or not isinstance(trace_coverage.get("blocks_observed"), int)
+        or not isinstance(trace_coverage.get("population_blocks"), int)
+        or trace_coverage["blocks_observed"] <= 0
+        or trace_coverage["blocks_observed"] != trace_coverage["population_blocks"]
+    ):
+        raise ReportError(f"{workload_id}: cache report requires exact full trace coverage")
     projections = _projection_map(launch)
     timing = launch.get("timing")
     if not isinstance(timing, Mapping):
@@ -535,6 +595,7 @@ def _row(
             "counter_metric_count": len(counter_apes),
         },
         "completion_frontier": dict(frontier),
+        "trace_coverage": dict(trace_coverage),
         "timing_projection": {
             "scope": (
                 "raw_frontiers"
@@ -592,11 +653,22 @@ def _totals(rows: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     for metric in HIT_RATE_IDS:
         mape = [row["metrics"][metric]["ape_pct"] for row in rows]
         pp = [row["metrics"][metric]["absolute_percentage_point_error"] for row in rows]
+        zero_safe = [row["metrics"][metric].get("zero_safe_status") for row in rows]
         hit_summaries[metric] = {
             "mape_pct": _mean_optional(mape),
+            "nonzero_target_mape_pct": _mean_optional(mape),
             "mean_absolute_percentage_point_error": _mean_optional(pp),
             "coverage": sum(value is not None for value in mape),
+            "nonzero_target_coverage": sum(value is not None for value in mape),
             "percentage_point_coverage": sum(value is not None for value in pp),
+            "zero_safe_coverage": sum(
+                value in {"exact_zero", "zero_target_mismatch", "nonzero_target"}
+                for value in zero_safe
+            ),
+            "exact_zero_targets": sum(value == "exact_zero" for value in zero_safe),
+            "zero_target_mismatches": sum(
+                value == "zero_target_mismatch" for value in zero_safe
+            ),
             "workloads": len(rows),
         }
     worst_repeatability = max(
@@ -918,6 +990,43 @@ def _pct(value: object, digits: int = 2) -> str:
     return "n/a" if value is None else f"{_fmt(value, digits)}%"
 
 
+def _count(value: object) -> str:
+    if value is None:
+        return "unavailable"
+    numeric = float(value)
+    return f"{int(numeric):,}" if numeric.is_integer() else f"{numeric:,.3f}"
+
+
+def _rate_transition(comparison: Mapping[str, Any]) -> str:
+    return (
+        f"{_fmt(comparison['ncu']['value'])}% → "
+        f"{_fmt(comparison['simulator']['value'])}%"
+    )
+
+
+def _count_transition(comparison: Mapping[str, Any]) -> str:
+    ncu = comparison["ncu"]["value"]
+    simulator = comparison["simulator"]["value"]
+    if ncu == 0 and simulator == 0:
+        return "0 → 0 (exact zero)"
+    error = comparison["ape_pct"]
+    suffix = (
+        f"{_pct(error)}"
+        if error is not None
+        else f"abs Δ {_count(comparison['absolute_error'])}"
+    )
+    return f"{_count(ncu)} → {_count(simulator)} ({suffix})"
+
+
+def _hit_rate_interpretation(comparison: Mapping[str, Any]) -> str:
+    return {
+        "exact_zero": "valid exact-zero match",
+        "zero_target_mismatch": "valid zero target; simulator mismatch",
+        "nonzero_target": "valid nonzero target",
+        "unavailable": "measurement unavailable",
+    }[str(comparison["zero_safe_status"])]
+
+
 def render_markdown(report: Mapping[str, Any]) -> str:
     rows = report["rows"]
     total = report["total"]
@@ -1009,25 +1118,88 @@ def render_markdown(report: Mapping[str, Any]) -> str:
     lines.extend(
         [
             "",
-            "## Cache and traffic accuracy",
+            "## Cache accuracy — primary unified observers",
             "",
-            "| Workload | L1 read MAPE / pp | L1 unified MAPE / pp | L2 MAPE / pp | Instructions APE | Global load APE | Global store APE | DRAM read APE |",
-            "| :--- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+            "| Workload | L1 unified NCU → simulator | Abs. error | L2 NCU → simulator | Abs. error |",
+            "| :--- | ---: | ---: | ---: | ---: |",
         ]
     )
     for row in rows:
         metrics = row["metrics"]
-        pair = lambda metric: f"{_pct(metrics[metric]['ape_pct'])} / {_fmt(metrics[metric]['absolute_percentage_point_error'])} pp"
         lines.append(
-            "| {name} | {l1r} | {l1} | {l2} | {inst}% | {ld}% | {st}% | {dram}% |".format(
+            "| {name} | {l1} | {l1_pp} pp | {l2} | {l2_pp} pp |".format(
                 name=row["display_name"],
-                l1r=pair("l1_read_hit_rate"),
-                l1=pair("l1_unified_hit_rate"),
-                l2=pair("l2_unified_hit_rate"),
-                inst=_fmt(metrics["instructions"]["ape_pct"]),
-                ld=_fmt(metrics["global_load_sectors"]["ape_pct"]),
-                st=_fmt(metrics["global_store_sectors"]["ape_pct"]),
-                dram=_fmt(metrics["dram_read_sectors"]["ape_pct"]),
+                l1=_rate_transition(metrics["l1_unified_hit_rate"]),
+                l1_pp=_fmt(
+                    metrics["l1_unified_hit_rate"][
+                        "absolute_percentage_point_error"
+                    ]
+                ),
+                l2=_rate_transition(metrics["l2_unified_hit_rate"]),
+                l2_pp=_fmt(
+                    metrics["l2_unified_hit_rate"][
+                        "absolute_percentage_point_error"
+                    ]
+                ),
+            )
+        )
+    l1_summary = total["accuracy"]["hit_rates"]["l1_unified_hit_rate"]
+    l2_summary = total["accuracy"]["hit_rates"]["l2_unified_hit_rate"]
+    lines.extend(
+        [
+            "",
+            f"L1 unified: {_pct(l1_summary['nonzero_target_mape_pct'])} nonzero-target MAPE and {_fmt(l1_summary['mean_absolute_percentage_point_error'])} pp mean absolute error over {l1_summary['zero_safe_coverage']}/{l1_summary['workloads']} workloads. L2: {_pct(l2_summary['nonzero_target_mape_pct'])} and {_fmt(l2_summary['mean_absolute_percentage_point_error'])} pp over {l2_summary['zero_safe_coverage']}/{l2_summary['workloads']} workloads.",
+            "",
+            "## L1 global-read applicability and validity",
+            "",
+            "APE is undefined when the hardware target is exactly zero. Those rows are retained below using the zero-safe percentage-point error; they are not missing measurements.",
+            "",
+            "| Workload | Exact trace blocks | NCU median hit / miss sectors | NCU → simulator rate | Simulator hit / lookup sectors | Abs. error | Interpretation |",
+            "| :--- | ---: | ---: | ---: | ---: | ---: | :--- |",
+        ]
+    )
+    for row in rows:
+        metric = row["metrics"]["l1_read_hit_rate"]
+        ncu_sources = metric["ncu"]["source_sector_counts"]
+        ncu_hits = ncu_sources["hit_sectors"]["median"]
+        ncu_misses = ncu_sources["miss_sectors"]["median"]
+        simulator = metric["simulator"]
+        coverage = row["trace_coverage"]
+        lines.append(
+            "| {name} | {blocks}/{population} | {ncu_hits} / {ncu_misses} | {rate} | {sim_hits} / {sim_lookups} | {pp} pp | {interpretation} |".format(
+                name=row["display_name"],
+                blocks=coverage["blocks_observed"],
+                population=coverage["population_blocks"],
+                ncu_hits=_count(ncu_hits),
+                ncu_misses=_count(ncu_misses),
+                rate=_rate_transition(metric),
+                sim_hits=_count(simulator["hit_sectors"]),
+                sim_lookups=_count(simulator["lookup_sectors"]),
+                pp=_fmt(metric["absolute_percentage_point_error"]),
+                interpretation=_hit_rate_interpretation(metric),
+            )
+        )
+    read_summary = total["accuracy"]["hit_rates"]["l1_read_hit_rate"]
+    lines.extend(
+        [
+            "",
+            f"L1 read has {read_summary['nonzero_target_coverage']} nonzero targets and {read_summary['exact_zero_targets']} exact-zero targets. Its nonzero-target MAPE is {_pct(read_summary['nonzero_target_mape_pct'])}; its zero-safe mean absolute error is {_fmt(read_summary['mean_absolute_percentage_point_error'])} pp with {read_summary['zero_safe_coverage']}/{read_summary['workloads']} coverage.",
+            "",
+            "## Traffic counter accuracy",
+            "",
+            "| Workload | Instructions NCU → simulator | Global-load sectors | Global-store sectors | DRAM-read sectors |",
+            "| :--- | ---: | ---: | ---: | ---: |",
+        ]
+    )
+    for row in rows:
+        metrics = row["metrics"]
+        lines.append(
+            "| {name} | {inst} | {loads} | {stores} | {dram} |".format(
+                name=row["display_name"],
+                inst=_count_transition(metrics["instructions"]),
+                loads=_count_transition(metrics["global_load_sectors"]),
+                stores=_count_transition(metrics["global_store_sectors"]),
+                dram=_count_transition(metrics["dram_read_sectors"]),
             )
         )
     lines.extend(["", "## Accuracy gate", ""])

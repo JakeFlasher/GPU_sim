@@ -17,12 +17,57 @@ def test_simulator_fraction_is_converted_to_percent() -> None:
         {
             "outcome": {
                 "status": "predicted",
-                "value": {"kind": "fraction", "value": 0.25},
+                "value": {
+                    "kind": "fraction",
+                    "value": 0.25,
+                    "numerator": 25,
+                    "denominator": 100,
+                },
             }
         },
         "l2",
     )
-    assert projected == {"status": "predicted", "value": 25.0, "kind": "fraction"}
+    assert projected == {
+        "status": "predicted",
+        "value": 25.0,
+        "kind": "fraction",
+        "hit_sectors": 25.0,
+        "lookup_sectors": 100.0,
+        "miss_sectors": 75.0,
+    }
+
+
+def test_exact_zero_hit_rate_is_valid_not_unavailable() -> None:
+    comparison = report._metric_comparison(
+        {"hit_rate_member": True},
+        {"value": 0.0},
+        {"value": 0.0},
+    )
+    assert comparison["ape_pct"] is None
+    assert comparison["absolute_percentage_point_error"] == 0.0
+    assert comparison["zero_safe_full_scale_error_pct"] == 0.0
+    assert comparison["zero_safe_status"] == "exact_zero"
+
+
+def test_ncu_hit_miss_sources_retain_zero_hit_denominator() -> None:
+    summary = report._ncu_metric(
+        [
+            {
+                "metrics": {
+                    "m": {
+                        "status": "measured",
+                        "value": 0.0,
+                        "hit_sectors": 0.0,
+                        "miss_sectors": 64.0,
+                    }
+                }
+            }
+            for _ in range(3)
+        ],
+        "m",
+    )
+    assert summary["source_sector_counts"]["hit_sectors"]["median"] == 0.0
+    assert summary["source_sector_counts"]["miss_sectors"]["median"] == 64.0
 
 
 def test_ncu_repeat_mean_preserves_raw_values() -> None:
