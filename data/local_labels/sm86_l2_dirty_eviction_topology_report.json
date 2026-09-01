@@ -1,0 +1,88 @@
+{
+  "schema_version": 1,
+  "milestone": "sm86_l2_dirty_eviction_topology",
+  "status": "complete_exact_dirty_topology_no_write_service",
+  "date": "2026-09-01",
+  "implementation_revision": "0efdc981d3ba82931fe9588ceba55428da77987a",
+  "evidence_root": "results/captures/sm86_l2_dirty_eviction_topology_20260901_v1",
+  "artifacts": {
+    "analysis_report_sha256": "70fbfedf90ee56f7fc50489feed795e99b1405cd29dc3b28de201127d1617a97",
+    "sim_run_sha256": "d923d0acf2f270e17efcd90fd5319f38937e62ee2240a1ff356950058949485e",
+    "source_control_sidecar_sha256": "4cc85d22215b4490db93dcbe3474244be762795c89454714e4102f02fb8cc94a"
+  },
+  "validation": {
+    "workspace_tests_passed": 896,
+    "workspace_tests_ignored": 3,
+    "workspace_tests_failed": 0,
+    "retained_cells": 4,
+    "simulator_outputs": 8,
+    "deterministic_twins": true,
+    "normalized_predecessor_equal": true,
+    "canonical_failure_files": 0
+  },
+  "cells": {
+    "b84_store_none_line_stream_d16_l32": {
+      "store_instructions": 1344,
+      "store_sectors": 43008,
+      "l2_dirty_evicted_sectors": 0,
+      "terminal_dirty_resident_sectors": 43008,
+      "dirty_conservation_sum": 43008,
+      "ncu_dram_write_sectors": {
+        "minimum": 79764,
+        "median": 80780,
+        "maximum": 87684,
+        "role": "independent_directional_comparison_only"
+      }
+    },
+    "b84_store_none_line_stream_d64_l32": {
+      "store_instructions": 5376,
+      "store_sectors": 172032,
+      "l2_dirty_eviction_lines": 122880,
+      "l2_dirty_evicted_sectors": 122880,
+      "terminal_dirty_resident_lines": 49152,
+      "terminal_dirty_resident_sectors": 49152,
+      "dirty_conservation_sum": 172032,
+      "ncu_dram_write_sectors": {
+        "minimum": 157248,
+        "median": 208028,
+        "maximum": 209288,
+        "role": "independent_directional_comparison_only"
+      }
+    },
+    "b84_store_none_line_reuse_d16_l32": {
+      "store_instructions": 1344,
+      "store_sectors": 43008,
+      "l2_dirty_evicted_sectors": 0,
+      "terminal_dirty_resident_sectors": 2688,
+      "dirty_conservation_sum": 2688,
+      "ncu_dram_write_sectors": {
+        "minimum": 0,
+        "median": 1368,
+        "maximum": 1380,
+        "role": "independent_directional_comparison_only"
+      }
+    },
+    "b84_store_none_line_reuse_d64_l32": {
+      "store_instructions": 5376,
+      "store_sectors": 172032,
+      "l2_dirty_evicted_sectors": 0,
+      "terminal_dirty_resident_sectors": 2688,
+      "dirty_conservation_sum": 2688,
+      "ncu_dram_write_sectors": {
+        "minimum": 0,
+        "median": 1232,
+        "maximum": 1604,
+        "role": "independent_directional_comparison_only"
+      }
+    }
+  },
+  "decision": "The shared L2 now tracks exact per-sector dirty state, exposes the transactionally selected victim masks, counts dirty-eviction topology, and reports terminal dirty residency without changing timing, lookup counters, DRAM-read traffic, or typed tails. The exact capacity/reuse discriminator passes. Retain this topology as the input seam for a future finite below-L2 write service; do not equate dirty victims with completed DRAM writes or clear dirty-writeback/coherence.",
+  "scientific_boundary": {
+    "ncu_used_as_implementation_input": false,
+    "writeback_event_scheduled": false,
+    "writeback_latency_identified": false,
+    "writeback_bandwidth_identified": false,
+    "dirty_writeback_tail_cleared": false,
+    "coherence_tail_cleared": false
+  }
+}
