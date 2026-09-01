@@ -1,0 +1,102 @@
+{
+  "schema_version": 1,
+  "milestone": "sm86_store_write_ack_event",
+  "status": "complete_store_ack_event_plumbing",
+  "date": "2026-08-31",
+  "architecture": "sm_86",
+  "hardware": {
+    "device_index": 0,
+    "name": "NVIDIA GeForce RTX 3090 Ti",
+    "uuid": "GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c",
+    "compute_capability": "8.6",
+    "driver": "610.57.04"
+  },
+  "implementation": {
+    "revision": "0041edccda6de152aadeefb74db2276a57e4e220",
+    "sim_run_sha256": "ae2df6f7d52befa0824baafa7ac925bfe87954c737c4343bfd024e1f979cde5a",
+    "candidate_path": "workloads/research_probes/l1tex_admission_backpressure/memory_write_completion_feedback_store_201.json",
+    "candidate_sha256": "f55e0f6a4cb630fd35970bb0ba8d61efda7cf987c6cfe5e136ba37c233d636c0",
+    "candidate_id": 201
+  },
+  "decision": "The existing timing-active STORE feedback frontier is now a real shared-system event. It is scheduled once after the final request of an exact instruction group, caps SM run-ahead, publishes same-warp MEMBAR visibility only when processed, survives warp exit, and participates in terminal drain. It does not clear dirty-writeback, coherence, or RED-RMW tails and does not promote candidate 201 as silicon timing.",
+  "checks": {
+    "cargo_test_workspace": {
+      "passed": 893,
+      "ignored": 3,
+      "failed": 0
+    },
+    "release_build": "passed",
+    "focused_multi_sector_exit_test": "passed",
+    "default_replay_byte_compatibility": "passed",
+    "active_replay_determinism": "passed",
+    "active_replay_normalized_predecessor_equality": "passed"
+  },
+  "replays": [
+    {
+      "cell": "b84_w8_store_line_unique_d1_g0_all",
+      "trace_root": "results/captures/sm86_l1tex_admission_backpressure_20260818_v1/nvbit/b84_w8_store_line_unique_d1_g0_all",
+      "current_active_stdout_sha256": "e86c16b5b70ab535acf4afedf599cfb39489638c4363d98231405059e61082b3",
+      "retained_default_sha256": "8d73d6fd42171d9e0acd13fa5425b7cf3fbc10d4718ef530b8f6b8ce1b18d920",
+      "deterministic_twins": true,
+      "default_byte_equal": true,
+      "normalized_active_predecessor_equal": true,
+      "traffic_and_cache_counters_equal": true,
+      "predecessor_terminal_event": 3999,
+      "current_terminal_event": 4194,
+      "acks_scheduled": 3360,
+      "acks_processed": 3360,
+      "maximum_pending_acks": 29,
+      "latest_issue_time": 3998,
+      "latest_acceptance_time": 4193,
+      "latest_service_completion_time": 4194,
+      "latest_fence_visibility_time": 4194,
+      "terminal_drain_time": 4194
+    },
+    {
+      "cell": "b84_w8_store_line_unique_d16_g0_all",
+      "trace_root": "results/captures/sm86_l1tex_admission_backpressure_20260818_v1/nvbit/b84_w8_store_line_unique_d16_g0_all",
+      "current_active_stdout_sha256": "fbdf4e87602e64455b3c436c4995efb9dd8739833971a9301258fe9f7f3a3e5c",
+      "retained_default_sha256": "30e7b02305f7c631e2ee5d2e047a73d86974da01dcb8b71947c55215714dffa5",
+      "deterministic_twins": true,
+      "default_byte_equal": true,
+      "normalized_active_predecessor_equal": true,
+      "traffic_and_cache_counters_equal": true,
+      "predecessor_terminal_event": 13599,
+      "current_terminal_event": 13794,
+      "diagnostic_last_issue_cycles": 13601,
+      "acks_scheduled": 13440,
+      "acks_processed": 13440,
+      "maximum_pending_acks": 65,
+      "latest_issue_time": 13598,
+      "latest_acceptance_time": 13793,
+      "latest_service_completion_time": 13794,
+      "latest_fence_visibility_time": 13794,
+      "terminal_drain_time": 13794
+    },
+    {
+      "cell": "b84_store_none_line_stream_d16_l32",
+      "trace_root": "results/captures/sm86_memory_retirement_service_20260818_v1/nvbit/b84_store_none_line_stream_d16_l32",
+      "current_active_stdout_sha256": "2cd778e3a968442bf0011bb61f02fb007f55010a579e68becd1a4e3100fa541b",
+      "retained_default_sha256": "018f46a17134fc15669660064fe8e678372254eb48e287fe8eac148d6c692962",
+      "deterministic_twins": true,
+      "default_byte_equal": true,
+      "acks_scheduled": 1344,
+      "acks_processed": 1344,
+      "maximum_pending_acks": 9,
+      "diagnostic_last_issue_cycles": 8565,
+      "current_terminal_event": 11236,
+      "latest_issue_time": 8531,
+      "latest_acceptance_time": 10916,
+      "latest_service_completion_time": 11236,
+      "latest_fence_visibility_time": 11236,
+      "terminal_drain_time": 11236
+    }
+  ],
+  "tail_boundary": {
+    "dirty_writeback": true,
+    "coherence": true,
+    "reduction_read_modify_write_for_store_cells": false,
+    "completion_frontier_status": "incomplete_unmodeled_retirement_tails"
+  },
+  "scientific_boundary": "Retained traces prove deterministic event plumbing and exact request-group conservation. They do not independently identify a silicon STORE acknowledgement latency or implicit kernel-boundary flush. A fresh same-binary matched no-fence, GPU-MEMBAR, and terminal assay is required before any timing promotion or tail clearing."
+}
