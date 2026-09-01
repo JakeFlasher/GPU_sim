@@ -731,7 +731,7 @@ def _evaluate_accuracy_gate(
 
 
 def _caveats(status: str, ncu_repeats: int, simulator_repeats: int) -> list[str]:
-    phase = "smoke" if status == "smoke" else "final"
+    phase = status
     return [
         "NCU is comparison-only ground truth and is absent from simulator commands and profile inputs.",
         "Cache rates are launch-global weighted rates derived from NCU hit/miss sector sums; direct per-subunit NCU .pct ratios are not used.",
@@ -762,7 +762,12 @@ def build_report(campaign_path: Path) -> dict[str, Any]:
         }
     )
     selected = [workload for workload in spec["workloads"] if workload["id"] in selected_ids]
-    if len(selected) not in {4, len(workload_ids)}:
+    admitted_counts = (
+        {len(workload_ids)}
+        if spec.get("matrix_role") == "independent_holdout"
+        else {4, len(workload_ids)}
+    )
+    if len(selected) not in admitted_counts:
         raise ReportError("report admits exactly the four-row smoke or full frozen matrix")
     records = _record_index(campaign, [str(workload["id"]) for workload in selected])
     host = _host_identity(records)
@@ -773,14 +778,20 @@ def build_report(campaign_path: Path) -> dict[str, Any]:
     }
     if len(simulator_hashes) != 1:
         raise ReportError("simulator binary identity changed within the campaign")
-    status = "smoke" if len(rows) == 4 else "final"
+    status = (
+        "holdout"
+        if spec.get("matrix_role") == "independent_holdout"
+        else "smoke"
+        if len(rows) == 4
+        else "final"
+    )
     total = _totals(rows)
     gate_result = _evaluate_accuracy_gate(gate, rows, total)
     ncu_repeats = min(int(row["ncu_launch_samples"]) for row in rows)
     simulator_repeats = min(int(row["simulator_process_samples"]) for row in rows)
     return {
         "schema_version": 1,
-        "report_id": f"{campaign['benchmark_id']}_{'smoke' if len(rows) == 4 else 'final'}_report_v1",
+        "report_id": f"{campaign['benchmark_id']}_{status}_report_v1",
         "status": status,
         "campaign": {
             "path": _portable_path(campaign_path),
@@ -955,7 +966,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         campaign = args.campaign.resolve()
         report = build_report(campaign)
-        prefix = "smoke" if report["status"] == "smoke" else "final"
+        prefix = report["status"]
         output_json = (args.output_json or campaign.parent / f"{prefix}_report.json").resolve()
         output_md = (args.output_md or campaign.parent / f"{prefix}_report.md").resolve()
         json_bytes = _json_bytes(report)

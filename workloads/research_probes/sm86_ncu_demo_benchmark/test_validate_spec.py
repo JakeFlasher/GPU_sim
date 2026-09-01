@@ -54,6 +54,13 @@ class BenchmarkSpecTests(unittest.TestCase):
         )
         subject.validate_spec(calibration_spec, calibration_metrics, self.profile)
 
+    def test_post_candidate_l2_holdout_spec_is_valid(self) -> None:
+        holdout = json.loads((HERE / "cache_lookup_holdout_spec.json").read_text())
+        calibration_metrics = json.loads(
+            (HERE / "cache_calibration_metrics.json").read_text()
+        )
+        subject.validate_spec(holdout, calibration_metrics, self.profile)
+
 
 if __name__ == "__main__":
     unittest.main()

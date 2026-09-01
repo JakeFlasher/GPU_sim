@@ -179,10 +179,24 @@ def validate_spec(spec: Mapping[str, Any], metrics: Mapping[str, Any], profile: 
         "static-control contract drift",
     )
     workloads = spec.get("workloads")
-    require(isinstance(workloads, list) and 6 <= len(workloads) <= 8, "workload count must be 6..8")
+    matrix_role = spec.get("matrix_role", "benchmark")
+    if matrix_role == "independent_holdout":
+        require(
+            isinstance(workloads, list) and 1 <= len(workloads) <= 3,
+            "independent holdout workload count must be 1..3",
+        )
+    else:
+        require(
+            isinstance(workloads, list) and 6 <= len(workloads) <= 8,
+            "workload count must be 6..8",
+        )
     ids = [row["id"] for row in workloads]
     require(len(ids) == len(set(ids)), "workload ids must be unique")
-    require(sum(row["stage"] == "smoke" for row in workloads) >= 4, "at least four smoke rows required")
+    if matrix_role != "independent_holdout":
+        require(
+            sum(row["stage"] == "smoke" for row in workloads) >= 4,
+            "at least four smoke rows required",
+        )
     forbidden_names = ("GPT-2", "BERT", "BFS", "HotSpot", "Pathfinder", "SRAD", "Streamcluster")
     for row in workloads:
         binary = REPO_ROOT / row["binary"]
