@@ -47,6 +47,9 @@ REQUIRED_OUTPUTS = (
     "stats.csv",
     "extra_info/traced_kernel_modules.json",
     "extra_info/enhanced_execution_info.json",
+    "extra_info/unsupported_memory_path.json",
+    "extra_info/unmapped_memory_range.json",
+    "extra_info/cross_allocation_lane_span.json",
 )
 TRACER_PATH = REPO_ROOT / "tools/nvbit_tracer/tracer_tool/tracer_tool.so"
 PB_LIB_PATH = REPO_ROOT / ".toolchain/pb/lib"
@@ -138,14 +141,29 @@ def _output_contract(destination: Path) -> dict[str, object]:
             execution = json.loads(
                 (destination / "extra_info/enhanced_execution_info.json").read_text()
             )
+            selection = mapping.get("selection") if isinstance(mapping, Mapping) else None
             if not isinstance(mapping, Mapping) or not isinstance(
                 mapping.get("launches"), list
             ) or len(mapping["launches"]) != 1:
                 errors.append("traced-kernel mapping must contain one launch")
+            elif not isinstance(selection, Mapping) or (
+                selection.get("accepted_active_launches") != 1
+                or selection.get("active_launch_attempts") != 1
+                or selection.get("concurrent_limit_violations") != 0
+                or selection.get("exact_contract_satisfied") is not True
+            ):
+                errors.append("traced-kernel selection must admit exactly one active launch")
             if not isinstance(execution, Mapping) or not isinstance(
                 execution.get("kernels"), list
             ) or len(execution["kernels"]) != 1:
                 errors.append("enhanced execution metadata must contain one kernel")
+            for sidecar in (
+                "unsupported_memory_path.json",
+                "unmapped_memory_range.json",
+                "cross_allocation_lane_span.json",
+            ):
+                if json.loads((destination / "extra_info" / sidecar).read_text()) != []:
+                    errors.append(f"{sidecar} must contain an empty list")
         except (OSError, ValueError, json.JSONDecodeError, csv.Error) as exc:
             errors.append(f"auxiliary output schema error: {exc}")
     return {
@@ -243,8 +261,15 @@ def _cell(cell_id: str) -> dict[str, object]:
     }
 
 
-def capture(cell_id: str, output_root: Path, timeout_seconds: int) -> int:
-    cell = _cell(cell_id)
+def capture_argv(
+    cell_id: str,
+    argv: list[str],
+    logical_environment: Mapping[str, str],
+    output_root: Path,
+    timeout_seconds: int,
+) -> int:
+    """Capture one caller-bound command with the retained SM86 NVBit runtime."""
+
     relative_output = f"evidence/raw/nvbit/{cell_id}"
     destination = output_root / "evidence" / "raw" / "nvbit" / cell_id
     if destination.exists() and any(destination.iterdir()):
@@ -252,12 +277,12 @@ def capture(cell_id: str, output_root: Path, timeout_seconds: int) -> int:
             f"{cell_id}: destination is nonempty; move the prior capture aside before recapturing"
         )
     destination.mkdir(parents=True, exist_ok=True)
-    argv = _expected_nvbit_argv(cell)
     # Keep the durable logical contract separate from the descriptor-backed
     # effective environment.  The latter contains /proc/self/fd paths whose
     # numbers are intentionally ephemeral and must never be treated as a
     # portable artifact identity.
-    logical_environment = _logical_environment(cell, relative_output, destination)
+    logical_environment = dict(logical_environment)
+    logical_environment["TRACES_FOLDER"] = str(destination.resolve())
     effective_environment = dict(logical_environment)
     started = _now()
     timed_out = False
@@ -423,6 +448,19 @@ def capture(cell_id: str, output_root: Path, timeout_seconds: int) -> int:
         )
     print(f"captured {cell_id}: {trace.stat().st_size} dynamic-trace bytes")
     return 0
+
+
+def capture(cell_id: str, output_root: Path, timeout_seconds: int) -> int:
+    cell = _cell(cell_id)
+    relative_output = f"evidence/raw/nvbit/{cell_id}"
+    destination = output_root / "evidence" / "raw" / "nvbit" / cell_id
+    return capture_argv(
+        cell_id,
+        _expected_nvbit_argv(cell),
+        _logical_environment(cell, relative_output, destination),
+        output_root,
+        timeout_seconds,
+    )
 
 
 def main(argv: list[str] | None = None) -> int:

@@ -9,6 +9,7 @@ use sim_direct_run::{CacheScope, MemoryMode, RunConfig, RunError, run};
 const USAGE: &str = "Usage: sim-run --trace DIR --control FILE --arch-card FILE \
 [--pchase-card FILE] [--mode flat|l1|l1-l2] \
 [--cache-scope launch|stream-l2] [--carded-dram] [--kernel-id ID] \
+[--ncu-shaped-metrics] \
 [--memory-service-candidates FILE] [--memory-admission-candidates FILE] \
 [--memory-admission-feedback FILE]";
 
@@ -29,6 +30,7 @@ fn parse_args(args: impl IntoIterator<Item = OsString>) -> Result<Option<RunConf
     let mut cache_scope = CacheScope::Launch;
     let mut carded_dram_bandwidth = false;
     let mut kernel_id = None;
+    let mut ncu_shaped_metrics = false;
     let mut memory_service_candidates = None;
     let mut memory_admission_candidates = None;
     let mut memory_admission_feedback = None;
@@ -76,6 +78,9 @@ fn parse_args(args: impl IntoIterator<Item = OsString>) -> Result<Option<RunConf
                     RunError::new("arguments", format!("invalid --kernel-id {raw:?}: {error}"))
                 })?);
             }
+            value if value == OsStr::new("--ncu-shaped-metrics") => {
+                ncu_shaped_metrics = true;
+            }
             value if value == OsStr::new("--memory-service-candidates") => {
                 memory_service_candidates = Some(PathBuf::from(take_value(
                     &mut args,
@@ -113,6 +118,7 @@ fn parse_args(args: impl IntoIterator<Item = OsString>) -> Result<Option<RunConf
         cache_scope,
         carded_dram_bandwidth,
         kernel_id,
+        ncu_shaped_metrics,
         memory_service_candidates,
         memory_admission_candidates,
         memory_admission_feedback,
@@ -199,6 +205,33 @@ mod tests {
         .unwrap()
         .unwrap();
         assert_eq!(configured.cache_scope, CacheScope::StreamL2);
+    }
+
+    #[test]
+    fn ncu_shaped_metrics_are_opt_in() {
+        let base = [
+            OsString::from("--trace"),
+            OsString::from("trace"),
+            OsString::from("--control"),
+            OsString::from("control"),
+            OsString::from("--arch-card"),
+            OsString::from("card"),
+        ];
+        assert!(
+            !parse_args(base.clone())
+                .unwrap()
+                .unwrap()
+                .ncu_shaped_metrics
+        );
+        assert!(
+            parse_args(
+                base.into_iter()
+                    .chain([OsString::from("--ncu-shaped-metrics",)])
+            )
+            .unwrap()
+            .unwrap()
+            .ncu_shaped_metrics
+        );
     }
 
     #[test]

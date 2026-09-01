@@ -45,8 +45,11 @@ def _output_launcher(path: Path, *, complete: bool) -> Path:
         f"if {mode}:\n"
         "    (root / 'stats.csv').write_text('kernel mangled name,total_insts,total_reported_insts\\nfoo,1,1\\n')\n"
         "    (root / 'extra_info').mkdir(parents=True, exist_ok=True)\n"
-        "    (root / 'extra_info/traced_kernel_modules.json').write_text(json.dumps({'launches':[{}]}))\n"
+        "    (root / 'extra_info/traced_kernel_modules.json').write_text(json.dumps({'launches':[{}], 'selection': {'accepted_active_launches': 1, 'active_launch_attempts': 1, 'concurrent_limit_violations': 0, 'exact_contract_satisfied': True}}))\n"
         "    (root / 'extra_info/enhanced_execution_info.json').write_text(json.dumps({'kernels':[{}]}))\n"
+        "    (root / 'extra_info/unsupported_memory_path.json').write_text('[]')\n"
+        "    (root / 'extra_info/unmapped_memory_range.json').write_text('[]')\n"
+        "    (root / 'extra_info/cross_allocation_lane_span.json').write_text('[]')\n"
         "    (root / 'threadblocks/device_0').mkdir(parents=True, exist_ok=True)\n"
         "    (root / 'threadblocks/device_0/payload.pb').write_bytes(b'payload')\n",
         encoding="utf-8",

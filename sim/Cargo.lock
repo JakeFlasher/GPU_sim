@@ -263,6 +263,7 @@ dependencies = [
  "serde_json",
  "sim-arch",
  "sim-mem",
+ "sim-run-campaign",
  "sim-sm",
  "sim-trace",
  "tempfile",

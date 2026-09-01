@@ -18,6 +18,7 @@ use std::time::Instant;
 use serde::{Deserialize, Serialize};
 use sim_arch::card::ArchCard;
 use sim_mem::{L1Counters, L2Config, L2Counters, L2Source, PchaseCard};
+use sim_run::emit::{EmitOutcome, Unit, emit_launch};
 use sim_sm::{
     ControlSidecar, DramBw, DramStats, FullKernelReplayResult, IssueModelParams, L2SourceSplit,
     MAX_MEMORY_ADMISSION_CANDIDATES, MAX_MEMORY_SERVICE_CANDIDATES, MemoryAdmissionCandidate,
@@ -105,6 +106,9 @@ pub struct RunConfig {
     pub cache_scope: CacheScope,
     pub carded_dram_bandwidth: bool,
     pub kernel_id: Option<i32>,
+    /// Include the registry-bound simulator projections used for NCU joins.
+    /// The default remains false so existing direct-result JSON is unchanged.
+    pub ncu_shaped_metrics: bool,
     /// Optional schema-1 bounded candidate document. Candidate evaluation is
     /// observational and available only for launch-scoped full-hierarchy replay.
     pub memory_service_candidates: Option<PathBuf>,
@@ -358,9 +362,20 @@ pub struct LaunchReport {
     pub coverage: CoverageReport,
     pub counters: CounterReport,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub metric_predictions: Option<Vec<NcuMetricProjectionReport>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub timing: Option<TimingReport>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cache_handoff: Option<CacheHandoffReport>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct NcuMetricProjectionReport {
+    pub arch: String,
+    pub key: &'static str,
+    pub ncu_metric: &'static str,
+    pub unit: Unit,
+    pub outcome: EmitOutcome,
 }
 
 #[derive(Debug, Serialize)]
@@ -590,6 +605,7 @@ fn launch_report(
     result: FullKernelReplayResult,
     cache_handoff: Option<CacheHandoffReport>,
     expected_memory_admission_feedback: Option<MemoryAdmissionCandidate>,
+    include_metric_predictions: bool,
 ) -> Result<LaunchReport, RunError> {
     let configured_memory_admission_feedback = result.configuration().memory_admission_feedback();
     if configured_memory_admission_feedback != expected_memory_admission_feedback {
@@ -601,6 +617,24 @@ fn launch_report(
         ));
     }
     let binding = result.coverage().launch().clone();
+    let metric_predictions = include_metric_predictions
+        .then(|| {
+            emit_launch(&result).map(|bundle| {
+                bundle
+                    .metrics()
+                    .iter()
+                    .map(|prediction| NcuMetricProjectionReport {
+                        arch: prediction.arch().token().to_owned(),
+                        key: prediction.key(),
+                        ncu_metric: prediction.ncu_metric(),
+                        unit: prediction.unit(),
+                        outcome: *prediction.outcome(),
+                    })
+                    .collect()
+            })
+        })
+        .transpose()
+        .map_err(at("metric projection"))?;
     let coverage = CoverageReport {
         kind: "full",
         blocks_observed: result.coverage().blocks_observed(),
@@ -643,6 +677,7 @@ fn launch_report(
         cluster: binding.cluster(),
         coverage,
         counters: counter_report,
+        metric_predictions,
         timing,
         cache_handoff,
     })
@@ -787,6 +822,7 @@ pub fn run(config: &RunConfig) -> Result<RunReport, RunError> {
     if candidate_inputs == 0
         && config.cache_scope == CacheScope::Launch
         && config.kernel_id.is_none()
+        && !config.ncu_shaped_metrics
         && !specialized_loader_requested
         && !performance_diagnostics_requested
     {
@@ -889,7 +925,12 @@ pub fn run(config: &RunConfig) -> Result<RunReport, RunError> {
                         "direct timing replay requires complete launch coverage",
                     )
                 })?;
-                launches.push(launch_report(result, None, memory_admission_feedback)?);
+                launches.push(launch_report(
+                    result,
+                    None,
+                    memory_admission_feedback,
+                    config.ncu_shaped_metrics,
+                )?);
             }
             None
         }
@@ -931,6 +972,7 @@ pub fn run(config: &RunConfig) -> Result<RunReport, RunError> {
                         seeded_by_kernel_ids: seeded_by_kernel_ids.clone(),
                     }),
                     None,
+                    config.ncu_shaped_metrics,
                 )?);
                 seeded_by_kernel_ids.push(loc.kernel().id);
             }
@@ -987,6 +1029,7 @@ mod tests {
             cache_scope: CacheScope::Launch,
             carded_dram_bandwidth: false,
             kernel_id: None,
+            ncu_shaped_metrics: false,
             memory_service_candidates: None,
             memory_admission_candidates: None,
             memory_admission_feedback: None,
@@ -1006,6 +1049,7 @@ mod tests {
         assert_eq!(report.memory_admission_feedback_candidate_id, None);
         assert_eq!(report.launches.len(), 1);
         assert_eq!(report.launches[0].counters.instructions_issued, 54);
+        assert!(report.launches[0].metric_predictions.is_none());
         assert_eq!(report.launches[0].coverage.blocks_observed, 1);
         let timing = report.launches[0].timing.as_ref().unwrap();
         assert_eq!(timing.readiness.schema_version, 1);
@@ -1027,6 +1071,28 @@ mod tests {
         );
         assert!(json.get("cache_session").is_none());
         assert!(json["launches"][0].get("cache_handoff").is_none());
+    }
+
+    #[test]
+    fn ncu_shaped_metrics_reuse_the_registry_emitter() {
+        let mut config = fixture(MemoryMode::L1L2);
+        config.ncu_shaped_metrics = true;
+        let report = run(&config).unwrap();
+        let metrics = report.launches[0]
+            .metric_predictions
+            .as_ref()
+            .expect("opt-in metric projections must be emitted");
+        assert_eq!(metrics.len(), sim_run::emit::EMITTED_METRIC_COUNT);
+        assert_eq!(metrics[0].ncu_metric, "smsp__inst_executed.sum");
+        assert_eq!(
+            metrics[0].outcome,
+            EmitOutcome::Predicted(sim_run::emit::MetricValue::Exact(54))
+        );
+        assert_eq!(metrics[7].ncu_metric, "gpc__cycles_elapsed.max");
+        assert!(matches!(
+            metrics[7].outcome,
+            EmitOutcome::RequiredUnimplemented { .. }
+        ));
     }
 
     #[test]

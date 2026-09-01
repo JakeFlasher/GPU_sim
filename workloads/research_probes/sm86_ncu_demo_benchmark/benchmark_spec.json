@@ -6,6 +6,9 @@
   "architecture": "sm_86",
   "profile": "workloads/research_probes/sm86_ncu_demo_benchmark/host_profile.json",
   "metric_schema": "workloads/research_probes/sm86_ncu_demo_benchmark/metric_schema.json",
+  "correctness": {
+    "timeout_seconds": 180
+  },
   "ncu": {
     "tool": "/usr/local/cuda-13.2/nsight-compute-2026.1.0/ncu",
     "replay_mode": "application",
@@ -36,6 +39,10 @@
     "dynamic_kernel_limit_start": 0,
     "dynamic_kernel_limit_end": 1,
     "timeout_seconds": 900
+  },
+  "static_control": {
+    "toolkit_bindir": "/usr/local/cuda-13.2/bin",
+    "timeout_seconds": 300
   },
   "simulator": {
     "binary": "sim/target/release/sim-run",

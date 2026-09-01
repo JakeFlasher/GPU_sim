@@ -10,6 +10,7 @@ import shlex
 import signal
 import subprocess
 import sys
+import time
 from contextlib import suppress
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
@@ -29,6 +30,7 @@ class CaptureResult:
     csv: str
     started_at: str
     finished_at: str
+    capture_wall_seconds: float
 
 
 DEFAULT_TIMEOUT_SECONDS = 900
@@ -44,6 +46,7 @@ class BoundedProcessResult:
     stderr: str
     timed_out: bool
     process_group_cleanup: bool
+    wall_seconds: float
 
 
 def _text_output(value: object) -> str:
@@ -124,6 +127,7 @@ def _run_bounded(
 ) -> BoundedProcessResult:
     """Run one NCU subprocess with a process-group deadline."""
 
+    started_ns = time.perf_counter_ns()
     try:
         popen_kwargs: dict[str, object] = {
             "env": environment,
@@ -148,6 +152,7 @@ def _run_bounded(
             stderr,
             False,
             True,
+            (time.perf_counter_ns() - started_ns) / 1_000_000_000,
         )
     except subprocess.TimeoutExpired as exc:
         cleanup_complete = _terminate_process(process)
@@ -169,6 +174,7 @@ def _run_bounded(
             _text_output(stderr),
             True,
             cleanup_complete,
+            (time.perf_counter_ns() - started_ns) / 1_000_000_000,
         )
 
 
@@ -190,6 +196,7 @@ def build_capture_command(
     launch_count: int | None,
     replay_mode: str | None,
     clock_control: str | None,
+    cache_control: str | None = None,
     target: Sequence[str],
 ) -> list[str]:
     if not target:
@@ -213,6 +220,8 @@ def build_capture_command(
         command.extend(("--replay-mode", replay_mode))
     if clock_control:
         command.extend(("--clock-control", clock_control))
+    if cache_control:
+        command.extend(("--cache-control", cache_control))
     if metrics:
         command.extend(("--metrics", metrics))
     for section in sections:
@@ -231,6 +240,7 @@ def collect(
     launch_count: int | None,
     replay_mode: str | None,
     clock_control: str | None,
+    cache_control: str | None = None,
     target: Sequence[str],
     environment: dict[str, str] | None = None,
     timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS,
@@ -255,6 +265,7 @@ def collect(
         launch_count=launch_count,
         replay_mode=replay_mode,
         clock_control=clock_control,
+        cache_control=cache_control,
         target=target,
     )
 
@@ -278,6 +289,7 @@ def collect(
         csv=str(csv_path),
         started_at=started,
         finished_at=finished,
+        capture_wall_seconds=completed.wall_seconds,
     )
     _write_metadata(
         output,
@@ -310,6 +322,8 @@ def collect(
         "--csv",
         "--page",
         "raw",
+        "--print-units",
+        "base",
         "--log-file",
         str(csv_path),
     ]
@@ -334,6 +348,7 @@ def collect(
         export_command=export_command,
         export_return_code=exported.return_code,
         export_timed_out=exported.timed_out,
+        export_wall_seconds=exported.wall_seconds,
     )
     if exported.timed_out:
         raise CaptureError(
@@ -359,6 +374,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--launch-count", type=int, default=1)
     parser.add_argument("--replay-mode", choices=("kernel", "application", "range"))
     parser.add_argument("--clock-control", choices=("base", "boost", "none", "reset"))
+    parser.add_argument("--cache-control", choices=("all", "none"))
     parser.add_argument("target", nargs=argparse.REMAINDER)
     return parser
 
@@ -376,6 +392,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             launch_count=args.launch_count,
             replay_mode=args.replay_mode,
             clock_control=args.clock_control,
+            cache_control=args.cache_control,
             target=target,
             environment=dict(os.environ),
             timeout_seconds=args.timeout,

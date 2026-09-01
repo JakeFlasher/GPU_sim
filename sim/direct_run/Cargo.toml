@@ -22,6 +22,7 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 sim-arch = { path = "../arch" }
 sim-mem = { path = "../mem" }
+sim-run-campaign = { path = "../run" }
 sim-sm = { path = "../sm" }
 sim-trace = { path = "../trace" }
 thiserror = { workspace = true }

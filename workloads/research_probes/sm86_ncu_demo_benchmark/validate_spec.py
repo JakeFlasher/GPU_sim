@@ -123,6 +123,12 @@ def validate_metrics(metrics: Mapping[str, Any], requested: Sequence[str]) -> No
 def validate_spec(spec: Mapping[str, Any], metrics: Mapping[str, Any], profile: Mapping[str, Any]) -> None:
     require(spec.get("schema_version") == 1, "benchmark schema_version must be 1")
     require(spec.get("architecture") == "sm_86", "benchmark architecture must be sm_86")
+    require(spec.get("correctness") == {"timeout_seconds": 180}, "correctness contract drift")
+    require(
+        spec.get("static_control")
+        == {"toolkit_bindir": "/usr/local/cuda-13.2/bin", "timeout_seconds": 300},
+        "static-control contract drift",
+    )
     workloads = spec.get("workloads")
     require(isinstance(workloads, list) and 6 <= len(workloads) <= 8, "workload count must be 6..8")
     ids = [row["id"] for row in workloads]

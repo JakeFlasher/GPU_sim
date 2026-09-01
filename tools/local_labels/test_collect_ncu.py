@@ -19,6 +19,7 @@ def test_build_capture_command_is_direct() -> None:
         launch_count=3,
         replay_mode="kernel",
         clock_control="none",
+        cache_control="all",
         target=["/tmp/workload", "--size", "8"],
     )
     assert command == [
@@ -34,6 +35,8 @@ def test_build_capture_command_is_direct() -> None:
         "kernel",
         "--clock-control",
         "none",
+        "--cache-control",
+        "all",
         "--metrics",
         "a,b",
         "--section",
@@ -61,11 +64,14 @@ def test_invalid_capture_request_is_rejected(
             launch_count=launch_count,
             replay_mode=None,
             clock_control=None,
+            cache_control=None,
             target=target,
         )
 
 
-def _fake_ncu(path: Path, *, export_sleeps: bool = False) -> Path:
+def _fake_ncu(
+    path: Path, *, capture_sleeps: bool = False, export_sleeps: bool = False
+) -> Path:
     path.write_text(
         "#!/usr/bin/env python3\n"
         "import pathlib,sys,time\n"
@@ -75,7 +81,7 @@ def _fake_ncu(path: Path, *, export_sleeps: bool = False) -> Path:
         "    report = pathlib.Path(sys.argv[sys.argv.index('--export') + 1] + '.ncu-rep')\n"
         "    report.parent.mkdir(parents=True, exist_ok=True)\n"
         "    report.write_bytes(b'report')\n"
-        f"    time.sleep({0 if export_sleeps else 3})\n",
+        f"    time.sleep({3 if capture_sleeps else 0})\n",
         encoding="utf-8",
     )
     path.chmod(0o755)
@@ -83,7 +89,7 @@ def _fake_ncu(path: Path, *, export_sleeps: bool = False) -> Path:
 
 
 def test_capture_timeout_is_typed_and_reaps_child(tmp_path: Path) -> None:
-    fake = _fake_ncu(tmp_path / "fake-ncu")
+    fake = _fake_ncu(tmp_path / "fake-ncu", capture_sleeps=True)
     output = tmp_path / "capture"
     with pytest.raises(CaptureError, match="capture timed out"):
         collect(
@@ -95,6 +101,7 @@ def test_capture_timeout_is_typed_and_reaps_child(tmp_path: Path) -> None:
             launch_count=1,
             replay_mode="application",
             clock_control="none",
+            cache_control="all",
             target=["app"],
             environment={},
             timeout_seconds=1,
@@ -103,6 +110,7 @@ def test_capture_timeout_is_typed_and_reaps_child(tmp_path: Path) -> None:
     assert metadata["timed_out"] is True
     assert metadata["timeout_stage"] == "capture"
     assert metadata["timeout_seconds"] == 1
+    assert metadata["capture_wall_seconds"] > 0
 
 
 def test_export_timeout_is_typed_and_reaps_child(tmp_path: Path) -> None:
@@ -118,6 +126,7 @@ def test_export_timeout_is_typed_and_reaps_child(tmp_path: Path) -> None:
             launch_count=1,
             replay_mode="application",
             clock_control="none",
+            cache_control="all",
             target=["app"],
             environment={},
             timeout_seconds=1,
@@ -126,4 +135,29 @@ def test_export_timeout_is_typed_and_reaps_child(tmp_path: Path) -> None:
     assert metadata["timed_out"] is True
     assert metadata["timeout_stage"] == "export"
     assert metadata["export_timed_out"] is True
+    assert metadata["export_wall_seconds"] > 0
     assert (output / "export_command.txt").is_file()
+
+
+def test_success_records_base_unit_export_and_process_walls(tmp_path: Path) -> None:
+    fake = _fake_ncu(tmp_path / "fake-ncu")
+    output = tmp_path / "success"
+    collect(
+        output=output,
+        ncu=str(fake),
+        metrics="metric",
+        sections=[],
+        launch_skip=0,
+        launch_count=1,
+        replay_mode="application",
+        clock_control="none",
+        cache_control="all",
+        target=["app"],
+        environment={},
+        timeout_seconds=1,
+    )
+    metadata = json.loads((output / "metadata.json").read_text(encoding="utf-8"))
+    assert metadata["capture_wall_seconds"] > 0
+    assert metadata["export_wall_seconds"] > 0
+    export = (output / "export_command.txt").read_text(encoding="utf-8")
+    assert "--print-units base" in export

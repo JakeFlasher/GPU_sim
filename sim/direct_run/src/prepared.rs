@@ -251,7 +251,7 @@ impl PreparedReplay {
                 "prepared timing replay requires full launch coverage",
             )
         })?;
-        launch_report(result, None, None)
+        launch_report(result, None, None, false)
     }
 
     /// Replay one launch and wrap it in the same configuration-bearing report
@@ -382,6 +382,7 @@ mod tests {
             cache_scope: CacheScope::Launch,
             carded_dram_bandwidth: false,
             kernel_id: None,
+            ncu_shaped_metrics: false,
             memory_service_candidates: None,
             memory_admission_candidates: None,
             memory_admission_feedback: None,
