@@ -23,6 +23,12 @@ class BenchmarkSpecTests(unittest.TestCase):
         cls.profile = json.loads((HERE / "host_profile.json").read_text())
         cls.gate = json.loads((HERE / "accuracy_gate.json").read_text())
         cls.crosswalk = json.loads((HERE / "timing_crosswalk.json").read_text())
+        cls.count_metrics = json.loads(
+            (HERE / "metric_schema_counts.json").read_text()
+        )
+        cls.count_gate = json.loads(
+            (HERE / "accuracy_gate_counts.json").read_text()
+        )
 
     def test_frozen_spec_is_valid(self) -> None:
         subject.validate_spec(self.spec, self.metrics, self.profile)
@@ -34,6 +40,18 @@ class BenchmarkSpecTests(unittest.TestCase):
         mutated["calibration"]["cells"][0]["simulator_issue_cycles"] += 1
         with self.assertRaisesRegex(subject.ValidationError, "SM-active residual drift"):
             subject.validate_timing_crosswalk(mutated)
+
+    def test_count_target_contract_is_valid(self) -> None:
+        subject.validate_spec(self.spec, self.count_metrics, self.profile)
+        subject.validate_accuracy_gate(self.count_gate)
+
+    def test_count_target_gate_requires_all_six_components(self) -> None:
+        mutated = copy.deepcopy(self.count_gate)
+        mutated["checks"]["cache_lookup_count_normalized_error_pct"][
+            "required_coverage"
+        ] = 47
+        with self.assertRaisesRegex(subject.ValidationError, "coverage drift"):
+            subject.validate_accuracy_gate(mutated)
 
     def test_duplicate_workload_is_rejected(self) -> None:
         mutated = copy.deepcopy(self.spec)

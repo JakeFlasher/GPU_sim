@@ -17,8 +17,11 @@ use std::time::Instant;
 
 use serde::{Deserialize, Serialize};
 use sim_arch::card::ArchCard;
-use sim_mem::{L1Counters, L2Config, L2Counters, L2Source, PchaseCard};
-use sim_run::emit::{EmitOutcome, Unit, emit_launch};
+use sim_mem::{L1Counters, L2Config, L2Counters, L2Source, MemoryOrigin, PchaseCard};
+use sim_run::emit::{
+    EmitOutcome, EmittedMetricKey, FullLaunchPredictions, MetricValue, Unavailable, Unit,
+    emit_launch,
+};
 use sim_sm::{
     ControlSidecar, DramBw, DramStats, FullKernelReplayResult, IssueModelParams, L2SourceSplit,
     MAX_MEMORY_ADMISSION_CANDIDATES, MAX_MEMORY_SERVICE_CANDIDATES, MemoryAdmissionCandidate,
@@ -364,6 +367,8 @@ pub struct LaunchReport {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub metric_predictions: Option<Vec<NcuMetricProjectionReport>>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub cache_lookup_predictions: Option<Vec<CacheLookupPredictionReport>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub timing: Option<TimingReport>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cache_handoff: Option<CacheHandoffReport>,
@@ -376,6 +381,35 @@ pub struct NcuMetricProjectionReport {
     pub ncu_metric: &'static str,
     pub unit: Unit,
     pub outcome: EmitOutcome,
+}
+
+#[derive(Debug, Serialize)]
+pub struct CacheLookupPredictionReport {
+    pub scope: &'static str,
+    pub ncu_hit_metric: &'static str,
+    pub ncu_miss_metric: &'static str,
+    pub status: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub observer: Option<CacheLookupObserverReport>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub timing_state: Option<CacheLookupTimingStateReport>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub detail: Option<Unavailable>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct CacheLookupObserverReport {
+    pub hits: u64,
+    pub misses: u64,
+    pub lookups: u64,
+}
+
+#[derive(Debug, Serialize)]
+pub struct CacheLookupTimingStateReport {
+    pub resident_data_hits: u64,
+    pub remaining_lookups: u64,
+    pub observer_reclassified_lookups: u64,
+    pub role: &'static str,
 }
 
 #[derive(Debug, Serialize)]
@@ -601,6 +635,126 @@ fn counters(
     }
 }
 
+fn cache_lookup_prediction_reports(
+    bundle: &FullLaunchPredictions,
+    l1: Option<&L1Counters>,
+    l2: Option<&L2Counters>,
+) -> Result<Vec<CacheLookupPredictionReport>, RunError> {
+    let specifications = [
+        (
+            EmittedMetricKey::CacheHitRateL1TexReadSector,
+            "l1_global_read",
+            "l1tex__t_sectors_pipe_lsu_mem_global_op_ld_lookup_hit.sum",
+            "l1tex__t_sectors_pipe_lsu_mem_global_op_ld_lookup_miss.sum",
+            l1.map(|counters| counters.origin(MemoryOrigin::Global).hits),
+        ),
+        (
+            EmittedMetricKey::CacheHitRateL1TexSector,
+            "l1_unified",
+            "l1tex__t_sectors_lookup_hit.sum",
+            "l1tex__t_sectors_lookup_miss.sum",
+            l1.map(|counters| counters.hits),
+        ),
+        (
+            EmittedMetricKey::CacheHitRateL2Sector,
+            "l2_l1tex_source",
+            "lts__t_sectors_srcunit_tex_lookup_hit.sum",
+            "lts__t_sectors_srcunit_tex_lookup_miss.sum",
+            l2.map(|counters| counters.hits),
+        ),
+    ];
+    specifications
+        .into_iter()
+        .map(
+            |(key, scope, ncu_hit_metric, ncu_miss_metric, resident_data_hits)| {
+                let prediction = bundle
+                    .metrics()
+                    .iter()
+                    .find(|prediction| prediction.emitted_key() == key)
+                    .ok_or_else(|| {
+                        RunError::new(
+                            "cache lookup projection",
+                            format!("metric source for {scope} is missing"),
+                        )
+                    })?;
+                match prediction.outcome() {
+                    EmitOutcome::Predicted(MetricValue::Fraction {
+                        numerator,
+                        denominator,
+                        ..
+                    }) => {
+                        let misses = denominator.checked_sub(*numerator).ok_or_else(|| {
+                            RunError::new(
+                                "cache lookup projection",
+                                format!("{scope} observer hits exceed lookups"),
+                            )
+                        })?;
+                        let resident_data_hits = resident_data_hits.ok_or_else(|| {
+                            RunError::new(
+                                "cache lookup projection",
+                                format!("{scope} predicted without its cache state"),
+                            )
+                        })?;
+                        let observer_reclassified_lookups = numerator
+                            .checked_sub(resident_data_hits)
+                            .ok_or_else(|| {
+                                RunError::new(
+                                    "cache lookup projection",
+                                    format!(
+                                        "{scope} observer hits are below resident-data hits"
+                                    ),
+                                )
+                            })?;
+                        let remaining_lookups = denominator
+                            .checked_sub(resident_data_hits)
+                            .ok_or_else(|| {
+                                RunError::new(
+                                    "cache lookup projection",
+                                    format!(
+                                        "{scope} resident-data hits exceed total lookups"
+                                    ),
+                                )
+                            })?;
+                        Ok(CacheLookupPredictionReport {
+                            scope,
+                            ncu_hit_metric,
+                            ncu_miss_metric,
+                            status: "predicted",
+                            observer: Some(CacheLookupObserverReport {
+                                hits: *numerator,
+                                misses,
+                                lookups: *denominator,
+                            }),
+                            timing_state: Some(CacheLookupTimingStateReport {
+                                resident_data_hits,
+                                remaining_lookups,
+                                observer_reclassified_lookups,
+                                role: "cache_state_and_events_drive_timing_observer_counts_drive_ncu_validation",
+                            }),
+                            detail: None,
+                        })
+                    }
+                    EmitOutcome::Unavailable(detail) => Ok(CacheLookupPredictionReport {
+                        scope,
+                        ncu_hit_metric,
+                        ncu_miss_metric,
+                        status: "unavailable",
+                        observer: None,
+                        timing_state: None,
+                        detail: Some(*detail),
+                    }),
+                    EmitOutcome::Predicted(_) | EmitOutcome::RequiredUnimplemented { .. } => {
+                        Err(RunError::new(
+                            "cache lookup projection",
+                            format!("{scope} source is not a fraction outcome"),
+                        ))
+                    }
+                }
+            },
+        )
+        .collect()
+}
+
 fn launch_report(
     result: FullKernelReplayResult,
     cache_handoff: Option<CacheHandoffReport>,
@@ -617,24 +771,25 @@ fn launch_report(
         ));
     }
     let binding = result.coverage().launch().clone();
-    let metric_predictions = include_metric_predictions
-        .then(|| {
-            emit_launch(&result).map(|bundle| {
-                bundle
-                    .metrics()
-                    .iter()
-                    .map(|prediction| NcuMetricProjectionReport {
-                        arch: prediction.arch().token().to_owned(),
-                        key: prediction.key(),
-                        ncu_metric: prediction.ncu_metric(),
-                        unit: prediction.unit(),
-                        outcome: *prediction.outcome(),
-                    })
-                    .collect()
+    let (metric_predictions, cache_lookup_predictions) = if include_metric_predictions {
+        let bundle = emit_launch(&result).map_err(at("metric projection"))?;
+        let cache_lookup_predictions =
+            cache_lookup_prediction_reports(&bundle, result.l1(), result.l2())?;
+        let metric_predictions = bundle
+            .metrics()
+            .iter()
+            .map(|prediction| NcuMetricProjectionReport {
+                arch: prediction.arch().token().to_owned(),
+                key: prediction.key(),
+                ncu_metric: prediction.ncu_metric(),
+                unit: prediction.unit(),
+                outcome: *prediction.outcome(),
             })
-        })
-        .transpose()
-        .map_err(at("metric projection"))?;
+            .collect();
+        (Some(metric_predictions), Some(cache_lookup_predictions))
+    } else {
+        (None, None)
+    };
     let coverage = CoverageReport {
         kind: "full",
         blocks_observed: result.coverage().blocks_observed(),
@@ -678,6 +833,7 @@ fn launch_report(
         coverage,
         counters: counter_report,
         metric_predictions,
+        cache_lookup_predictions,
         timing,
         cache_handoff,
     })
@@ -1050,6 +1206,7 @@ mod tests {
         assert_eq!(report.launches.len(), 1);
         assert_eq!(report.launches[0].counters.instructions_issued, 54);
         assert!(report.launches[0].metric_predictions.is_none());
+        assert!(report.launches[0].cache_lookup_predictions.is_none());
         assert_eq!(report.launches[0].coverage.blocks_observed, 1);
         let timing = report.launches[0].timing.as_ref().unwrap();
         assert_eq!(timing.readiness.schema_version, 1);
@@ -1093,6 +1250,33 @@ mod tests {
             metrics[7].outcome,
             EmitOutcome::RequiredUnimplemented { .. }
         ));
+        let cache = report.launches[0]
+            .cache_lookup_predictions
+            .as_ref()
+            .expect("count-based cache projections must accompany NCU metrics");
+        assert_eq!(cache.len(), 3);
+        assert_eq!(cache[0].scope, "l1_global_read");
+        assert_eq!(cache[1].scope, "l1_unified");
+        assert_eq!(cache[2].scope, "l2_l1tex_source");
+        for prediction in cache {
+            let observer = prediction
+                .observer
+                .as_ref()
+                .expect("modeled cache count pair");
+            let timing = prediction
+                .timing_state
+                .as_ref()
+                .expect("timing-state decomposition");
+            assert_eq!(observer.hits + observer.misses, observer.lookups);
+            assert_eq!(
+                timing.resident_data_hits + timing.remaining_lookups,
+                observer.lookups
+            );
+            assert_eq!(
+                timing.resident_data_hits + timing.observer_reclassified_lookups,
+                observer.hits
+            );
+        }
     }
 
     #[test]

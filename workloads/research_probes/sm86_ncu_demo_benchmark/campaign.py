@@ -52,6 +52,23 @@ SIMULATOR_METRICS = (
     "lts__t_sector_hit_rate.pct",
     "gpc__cycles_elapsed.max",
 )
+CACHE_LOOKUP_IDENTITIES = (
+    (
+        "l1_global_read",
+        "l1tex__t_sectors_pipe_lsu_mem_global_op_ld_lookup_hit.sum",
+        "l1tex__t_sectors_pipe_lsu_mem_global_op_ld_lookup_miss.sum",
+    ),
+    (
+        "l1_unified",
+        "l1tex__t_sectors_lookup_hit.sum",
+        "l1tex__t_sectors_lookup_miss.sum",
+    ),
+    (
+        "l2_l1tex_source",
+        "lts__t_sectors_srcunit_tex_lookup_hit.sum",
+        "lts__t_sectors_srcunit_tex_lookup_miss.sum",
+    ),
+)
 TIME_UNITS_TO_NS = {"ns": 1.0, "us": 1_000.0, "ms": 1_000_000.0, "s": 1_000_000_000.0}
 SIMULATOR_ENVIRONMENT_CONTROLS = frozenset(
     {
@@ -400,10 +417,13 @@ def _derive_ncu_metrics(
 
 
 def _run_ncu(
-    spec: Mapping[str, Any], workload: Mapping[str, Any], output_root: Path, repeats: int
+    spec: Mapping[str, Any],
+    metric_schema: Mapping[str, Any],
+    workload: Mapping[str, Any],
+    output_root: Path,
+    repeats: int,
 ) -> dict[str, Any]:
     slug = str(workload["id"])
-    metric_schema = _load_json(REPO_ROOT / str(spec["metric_schema"]))
     rows: list[dict[str, Any]] = []
     for repeat in range(1, repeats + 1):
         destination = output_root / "evidence" / "raw" / "ncu" / f"rep-{repeat}" / slug
@@ -537,6 +557,44 @@ def _validate_simulator_document(
         raise CampaignError(f"{slug}: simulator metric projection order differs")
     if any(row.get("arch") != "sm_86" for row in projections):
         raise CampaignError(f"{slug}: simulator metric architecture differs")
+    cache_counts = launch.get("cache_lookup_predictions")
+    if not isinstance(cache_counts, list) or len(cache_counts) != len(
+        CACHE_LOOKUP_IDENTITIES
+    ):
+        raise CampaignError(f"{slug}: simulator cache count projection count differs")
+    identities = tuple(
+        (
+            row.get("scope"),
+            row.get("ncu_hit_metric"),
+            row.get("ncu_miss_metric"),
+        )
+        for row in cache_counts
+        if isinstance(row, Mapping)
+    )
+    if identities != CACHE_LOOKUP_IDENTITIES:
+        raise CampaignError(f"{slug}: simulator cache count projection identity differs")
+    for row in cache_counts:
+        observer = row.get("observer")
+        timing_state = row.get("timing_state")
+        if (
+            row.get("status") != "predicted"
+            or not isinstance(observer, Mapping)
+            or not isinstance(timing_state, Mapping)
+        ):
+            raise CampaignError(f"{slug}: simulator cache count projection unavailable")
+        hits = int(observer.get("hits", -1))
+        misses = int(observer.get("misses", -1))
+        lookups = int(observer.get("lookups", -1))
+        resident = int(timing_state.get("resident_data_hits", -1))
+        remaining = int(timing_state.get("remaining_lookups", -1))
+        reclassified = int(timing_state.get("observer_reclassified_lookups", -1))
+        if (
+            min(hits, misses, lookups, resident, remaining, reclassified) < 0
+            or hits + misses != lookups
+            or resident + remaining != lookups
+            or resident + reclassified != hits
+        ):
+            raise CampaignError(f"{slug}: simulator cache count conservation differs")
     return {
         "launch": {
             "kernel_name": launch.get("kernel_name"),
@@ -548,6 +606,7 @@ def _validate_simulator_document(
         },
         "semantic": rows,
         "metric_count": len(projections),
+        "cache_lookup_count": len(cache_counts),
         "completion_frontier": launch.get("timing", {}).get("completion_frontier"),
     }
 
@@ -631,6 +690,7 @@ def _run_simulator(
 
 def _execute_stage(
     spec: Mapping[str, Any],
+    metric_schema: Mapping[str, Any],
     profile: Mapping[str, Any],
     workload: Mapping[str, Any],
     stage: str,
@@ -644,7 +704,9 @@ def _execute_stage(
         if stage == "correctness":
             result = _run_correctness(spec, workload, output_root)
         elif stage == "ncu":
-            result = _run_ncu(spec, workload, output_root, ncu_repeats)
+            result = _run_ncu(
+                spec, metric_schema, workload, output_root, ncu_repeats
+            )
         elif stage == "nvbit":
             result = _run_nvbit(spec, workload, output_root)
         elif stage == "static":
@@ -810,8 +872,22 @@ def main(argv: Sequence[str] | None = None) -> int:
         manifest_path = output_root / "campaign_manifest.json"
         if manifest_path.exists():
             manifest = _load_json(manifest_path)
-            if manifest.get("inputs", {}).get("spec", {}).get("sha256") != _sha256(spec_path):
-                raise CampaignError("existing campaign manifest is bound to another spec")
+            expected_inputs = {
+                "spec": spec_path,
+                "metrics": metrics_path,
+                "profile": profile_path,
+                "gate": gate_path,
+                **(
+                    {"timing_crosswalk": timing_crosswalk_path}
+                    if timing_crosswalk_path is not None
+                    else {}
+                ),
+            }
+            for name, path in expected_inputs.items():
+                if manifest.get("inputs", {}).get(name, {}).get("sha256") != _sha256(path):
+                    raise CampaignError(
+                        f"existing campaign manifest is bound to another {name} input"
+                    )
         else:
             manifest = _new_manifest(
                 spec_path,
@@ -826,6 +902,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             for workload in workloads:
                 record = _execute_stage(
                     spec,
+                    metrics,
                     profile,
                     workload,
                     stage,

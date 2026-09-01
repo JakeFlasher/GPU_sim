@@ -28,6 +28,14 @@ COUNTER_IDS = (
     "global_store_sectors",
     "dram_read_sectors",
 )
+CACHE_LOOKUP_COUNT_IDS = (
+    "l1_read_lookup_hits",
+    "l1_read_lookup_misses",
+    "l1_unified_lookup_hits",
+    "l1_unified_lookup_misses",
+    "l2_tex_lookup_hits",
+    "l2_tex_lookup_misses",
+)
 HIT_RATE_IDS = (
     "l1_read_hit_rate",
     "l1_unified_hit_rate",
@@ -303,6 +311,33 @@ def _projection_map(launch: Mapping[str, Any]) -> dict[str, Mapping[str, Any]]:
     return result
 
 
+def _cache_lookup_projection_map(
+    launch: Mapping[str, Any],
+) -> dict[str, Mapping[str, Any]]:
+    rows = launch.get("cache_lookup_predictions")
+    if not isinstance(rows, list) or len(rows) != 3:
+        raise ReportError("simulator output does not contain three cache count projections")
+    result: dict[str, Mapping[str, Any]] = {}
+    for row in rows:
+        if not isinstance(row, Mapping) or not isinstance(row.get("scope"), str):
+            raise ReportError("simulator cache count projection is malformed")
+        scope = str(row["scope"])
+        if scope in result:
+            raise ReportError(f"duplicate simulator cache count scope {scope!r}")
+        if row.get("status") != "predicted" or not isinstance(row.get("observer"), Mapping):
+            raise ReportError(f"simulator cache count scope {scope!r} is unavailable")
+        observer = row["observer"]
+        hits = _finite(observer.get("hits"), f"{scope}.observer.hits")
+        misses = _finite(observer.get("misses"), f"{scope}.observer.misses")
+        lookups = _finite(observer.get("lookups"), f"{scope}.observer.lookups")
+        if hits + misses != lookups:
+            raise ReportError(f"simulator cache count scope {scope!r} does not conserve lookups")
+        result[scope] = row
+    if set(result) != {"l1_global_read", "l1_unified", "l2_l1tex_source"}:
+        raise ReportError("simulator cache count scopes differ")
+    return result
+
+
 def _simulator_projection(row: Mapping[str, Any], metric_id: str) -> dict[str, object]:
     outcome = row.get("outcome")
     if not isinstance(outcome, Mapping):
@@ -370,6 +405,88 @@ def _metric_comparison(
     return result
 
 
+def _derived_hit_rate_comparison(
+    hit: Mapping[str, Any], miss: Mapping[str, Any]
+) -> dict[str, object]:
+    hit_repeats = hit["ncu"]["repeat_values"]
+    miss_repeats = miss["ncu"]["repeat_values"]
+    if len(hit_repeats) != len(miss_repeats) or not hit_repeats:
+        raise ReportError("derived hit-rate count repeats differ")
+    ncu_rates: list[float] = []
+    for hit_value, miss_value in zip(hit_repeats, miss_repeats, strict=True):
+        denominator = float(hit_value) + float(miss_value)
+        if denominator <= 0:
+            raise ReportError("derived hit rate has a zero lookup denominator")
+        ncu_rates.append(float(hit_value) / denominator * 100.0)
+    ncu_mean = statistics.fmean(ncu_rates)
+    ncu_summary: dict[str, object] = {
+        "status": "measured",
+        "value": float(statistics.median(ncu_rates)),
+        "reduction": "median",
+        "mean": ncu_mean,
+        "median": float(statistics.median(ncu_rates)),
+        "repeat_values": ncu_rates,
+        "repeat_count": len(ncu_rates),
+        "coverage": len(ncu_rates),
+        "minimum": min(ncu_rates),
+        "maximum": max(ncu_rates),
+        "relative_range_pct": (
+            None if ncu_mean == 0 else (max(ncu_rates) - min(ncu_rates)) / ncu_mean * 100.0
+        ),
+        "source_sector_counts": {
+            "hit_sectors": {
+                "median": hit["ncu"]["value"],
+                "repeat_values": hit_repeats,
+                "coverage": len(hit_repeats),
+            },
+            "miss_sectors": {
+                "median": miss["ncu"]["value"],
+                "repeat_values": miss_repeats,
+                "coverage": len(miss_repeats),
+            },
+        },
+    }
+    simulator_hits = float(hit["simulator"]["value"])
+    simulator_misses = float(miss["simulator"]["value"])
+    simulator_lookups = simulator_hits + simulator_misses
+    if simulator_lookups <= 0:
+        raise ReportError("simulator derived hit rate has a zero lookup denominator")
+    simulator_summary = {
+        "status": "derived_from_count_targets",
+        "kind": "fraction",
+        "value": simulator_hits / simulator_lookups * 100.0,
+        "hit_sectors": simulator_hits,
+        "miss_sectors": simulator_misses,
+        "lookup_sectors": simulator_lookups,
+    }
+    result = _metric_comparison(
+        {"hit_rate_member": True}, ncu_summary, simulator_summary
+    )
+    result["derived_from_count_targets"] = True
+    return result
+
+
+def _attach_cache_pair_errors(
+    comparisons: Mapping[str, Any], derived: Sequence[Mapping[str, Any]]
+) -> None:
+    for rate in derived:
+        hit = comparisons[str(rate["hit_metric_id"])]
+        miss = comparisons[str(rate["miss_metric_id"])]
+        ncu_total = float(hit["ncu"]["value"]) + float(miss["ncu"]["value"])
+        if ncu_total <= 0:
+            raise ReportError(f"{rate['id']}: NCU cache count pair has zero total")
+        for comparison in (hit, miss):
+            comparison["pair_normalized_absolute_error_pct"] = (
+                abs(
+                    float(comparison["simulator"]["value"])
+                    - float(comparison["ncu"]["value"])
+                )
+                / ncu_total
+                * 100.0
+            )
+            comparison["cache_lookup_pair_id"] = rate["id"]
+
+
 def _scalar_comparison(
     ncu: float | None,
     simulator: float | None,
@@ -426,6 +543,10 @@ def _row(
     ):
         raise ReportError(f"{workload_id}: cache report requires exact full trace coverage")
     projections = _projection_map(launch)
+    count_target_schema = metric_schema.get("schema_version") == 2
+    cache_projections = (
+        _cache_lookup_projection_map(launch) if count_target_schema else {}
+    )
     timing = launch.get("timing")
     if not isinstance(timing, Mapping):
         raise ReportError(f"{workload_id}: simulator timing is missing")
@@ -469,12 +590,43 @@ def _row(
             }
         elif metric_id == "gpu_kernel_duration":
             simulator = {"status": "not_scored", "value": None}
+        elif metric.get("cache_lookup_count_member"):
+            scope = str(metric["cache_lookup_scope"])
+            component = str(metric["cache_lookup_component"])
+            cache_prediction = cache_projections[scope]
+            expected_ncu_metric = cache_prediction[
+                "ncu_hit_metric" if component == "hits" else "ncu_miss_metric"
+            ]
+            if expected_ncu_metric != metric["ncu_metric"]:
+                raise ReportError(
+                    f"{workload_id}: {metric_id} NCU count identity differs"
+                )
+            simulator = {
+                "status": "predicted",
+                "kind": "exact",
+                "value": _finite(
+                    cache_prediction["observer"][component],
+                    f"{workload_id}.{metric_id}.simulator",
+                ),
+                "cache_lookup_scope": scope,
+                "cache_lookup_component": component,
+                "timing_state": dict(cache_prediction["timing_state"]),
+            }
         else:
             projection = projections.get(str(metric["ncu_metric"]))
             if projection is None:
                 raise ReportError(f"{workload_id}: simulator projection {metric['ncu_metric']!r} is missing")
             simulator = _simulator_projection(projection, metric_id)
         comparisons[metric_id] = _metric_comparison(metric, ncu, simulator)
+
+    if count_target_schema:
+        derived_hit_rates = metric_schema["derived_hit_rates"]
+        _attach_cache_pair_errors(comparisons, derived_hit_rates)
+        for rate in derived_hit_rates:
+            comparisons[str(rate["id"])] = _derived_hit_rate_comparison(
+                comparisons[str(rate["hit_metric_id"])],
+                comparisons[str(rate["miss_metric_id"])],
+            )
 
     gpu_ns = comparisons["gpu_kernel_duration"]["ncu"]["value"]
     gpu_seconds = _finite(gpu_ns, f"{workload_id}.gpu_duration") * 1e-9
@@ -649,6 +801,12 @@ def _totals(rows: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
         for row in rows
         for metric in COUNTER_IDS
     ]
+    cache_count_errors = [
+        row["metrics"][metric]["pair_normalized_absolute_error_pct"]
+        for row in rows
+        for metric in CACHE_LOOKUP_COUNT_IDS
+        if metric in row["metrics"]
+    ]
     hit_summaries: dict[str, object] = {}
     for metric in HIT_RATE_IDS:
         mape = [row["metrics"][metric]["ape_pct"] for row in rows]
@@ -714,6 +872,13 @@ def _totals(rows: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
             "counter_mape_pct": _mean_optional(counter),
             "counter_coverage": sum(value is not None for value in counter),
             "counter_metric_launch_pairs": len(counter),
+            "cache_lookup_count_normalized_error_pct": _mean_optional(
+                cache_count_errors
+            ),
+            "cache_lookup_count_coverage": len(cache_count_errors),
+            "cache_lookup_count_maximum_error_pct": (
+                None if not cache_count_errors else max(cache_count_errors)
+            ),
             "hit_rates": hit_summaries,
         },
         "ncu_repeatability": {
@@ -769,6 +934,10 @@ def _evaluate_accuracy_gate(
         "counter_traffic_mape_pct": (
             accuracy["counter_mape_pct"],
             accuracy["counter_coverage"],
+        ),
+        "cache_lookup_count_normalized_error_pct": (
+            accuracy["cache_lookup_count_normalized_error_pct"],
+            accuracy["cache_lookup_count_coverage"],
         ),
     }
     checks: dict[str, Any] = {}
@@ -865,11 +1034,16 @@ def _caveats(
     ncu_repeats: int,
     simulator_repeats: int,
     timing_crosswalk: Mapping[str, Any] | None = None,
+    count_cache_targets: bool = False,
 ) -> list[str]:
     phase = status
     return [
         "NCU is comparison-only ground truth and is absent from simulator commands and profile inputs.",
-        "Cache rates are launch-global weighted rates derived from NCU hit/miss sector sums; direct per-subunit NCU .pct ratios are not used.",
+        (
+            "Cache lookup hit and miss sectors are first-class targets; cache rates are secondary derivations from those count pairs."
+            if count_cache_targets
+            else "Cache rates are launch-global weighted rates derived from NCU hit/miss sector sums; direct per-subunit NCU .pct ratios are not used."
+        ),
         f"Every {phase} raw completion frontier remains explicit, including retained unmodeled retirement tails.",
         (
             "Timing accuracy uses raw simulator frontiers without a measurement crosswalk."
@@ -924,6 +1098,7 @@ def build_report(campaign_path: Path) -> dict[str, Any]:
         _row(workload, metric_schema, records, host, timing_crosswalk)
         for workload in selected
     ]
+    count_cache_targets = metric_schema.get("schema_version") == 2
     simulator_hashes = {
         records[(str(workload["id"]), "simulator")]["result"]["simulator_binary"]["sha256"]
         for workload in selected
@@ -959,6 +1134,7 @@ def build_report(campaign_path: Path) -> dict[str, Any]:
             "ape_pct": "abs(simulator - ncu) / ncu * 100 when ncu > 0",
             "hit_rate_pct": "100 * NCU hit sectors / (hit sectors + miss sectors)",
             "hit_rate_pp_error": "abs(simulator_percent - ncu_percent)",
+            "cache_lookup_count_error": "abs(simulator_count - ncu_count) / (ncu_pair_hits + ncu_pair_misses) * 100",
             "workload_mape": "arithmetic mean over covered launch-metric APE values",
             "total_mape": "launch-weighted arithmetic mean over covered launch-metric APE values",
             "gpu_execution_over_simulator_wall": "sum NCU gpu__time_duration.sum seconds / sum simulator median process wall seconds",
@@ -972,7 +1148,11 @@ def build_report(campaign_path: Path) -> dict[str, Any]:
         "total": total,
         "accuracy_gate": gate_result,
         "caveats": _caveats(
-            status, ncu_repeats, simulator_repeats, timing_crosswalk
+            status,
+            ncu_repeats,
+            simulator_repeats,
+            timing_crosswalk,
+            count_cache_targets,
         ),
     }
 
@@ -1016,6 +1196,14 @@ def _count_transition(comparison: Mapping[str, Any]) -> str:
         else f"abs Δ {_count(comparison['absolute_error'])}"
     )
     return f"{_count(ncu)} → {_count(simulator)} ({suffix})"
+
+
+def _cache_count_transition(comparison: Mapping[str, Any]) -> str:
+    return (
+        f"{_count(comparison['ncu']['value'])} → "
+        f"{_count(comparison['simulator']['value'])} "
+        f"({_pct(comparison['pair_normalized_absolute_error_pct'])} pair-normalized)"
+    )
 
 
 def _hit_rate_interpretation(comparison: Mapping[str, Any]) -> str:
@@ -1115,10 +1303,49 @@ def render_markdown(report: Mapping[str, Any]) -> str:
         lines.append(
             f"| {row['display_name']} | {row['ncu_repeatability']['repeat_count']} | {_pct(row['ncu_repeatability']['max_relative_range_pct'])} | {row['ncu_repeatability']['max_relative_range_metric']} | {row['simulator_repeatability']['repeat_count']} | {_pct(row['simulator_repeatability']['wall_relative_range_pct'])} |"
         )
+    count_targets = all(
+        metric in row["metrics"] for row in rows for metric in CACHE_LOOKUP_COUNT_IDS
+    )
+    if count_targets:
+        lines.extend(
+            [
+                "",
+                "## Cache lookup counts — primary simulator targets",
+                "",
+                "Every cell is `NCU median → simulator`; the error is normalized by that level's NCU hit+miss lookup total, so exact-zero hit targets retain valid coverage.",
+                "",
+                "| Workload | L1-read hits | L1-read misses | L1-unified hits | L1-unified misses | L2 hits | L2 misses |",
+                "| :--- | ---: | ---: | ---: | ---: | ---: | ---: |",
+            ]
+        )
+        for row in rows:
+            metrics = row["metrics"]
+            lines.append(
+                "| {name} | {l1rh} | {l1rm} | {l1h} | {l1m} | {l2h} | {l2m} |".format(
+                    name=row["display_name"],
+                    l1rh=_cache_count_transition(metrics["l1_read_lookup_hits"]),
+                    l1rm=_cache_count_transition(metrics["l1_read_lookup_misses"]),
+                    l1h=_cache_count_transition(metrics["l1_unified_lookup_hits"]),
+                    l1m=_cache_count_transition(metrics["l1_unified_lookup_misses"]),
+                    l2h=_cache_count_transition(metrics["l2_tex_lookup_hits"]),
+                    l2m=_cache_count_transition(metrics["l2_tex_lookup_misses"]),
+                )
+            )
+        cache_accuracy = total["accuracy"]
+        lines.extend(
+            [
+                "",
+                f"Cache-count normalized mean error: {_pct(cache_accuracy['cache_lookup_count_normalized_error_pct'])} over {cache_accuracy['cache_lookup_count_coverage']} count targets; maximum component error: {_pct(cache_accuracy['cache_lookup_count_maximum_error_pct'])}.",
+            ]
+        )
     lines.extend(
         [
             "",
-            "## Cache accuracy — primary unified observers",
+            (
+                "## Cache ratios — secondary derivations from count targets"
+                if count_targets
+                else "## Cache accuracy — primary unified observers"
+            ),
             "",
             "| Workload | L1 unified NCU → simulator | Abs. error | L2 NCU → simulator | Abs. error |",
             "| :--- | ---: | ---: | ---: | ---: |",

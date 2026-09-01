@@ -98,9 +98,14 @@ def validate_profile(profile: Mapping[str, Any], live_host: bool) -> dict[str, A
 
 
 def validate_metrics(metrics: Mapping[str, Any], requested: Sequence[str]) -> None:
-    require(metrics.get("schema_version") == 1, "metric schema_version must be 1")
+    schema_version = metrics.get("schema_version")
+    require(schema_version in {1, 2}, "metric schema_version must be 1 or 2")
     rows = metrics.get("metrics")
-    require(isinstance(rows, list) and len(rows) == 10, "metric schema must contain 10 rows")
+    expected_rows = 10 if schema_version == 1 else 13
+    require(
+        isinstance(rows, list) and len(rows) == expected_rows,
+        f"metric schema must contain {expected_rows} rows",
+    )
     ids = [row["id"] for row in rows]
     ncu = [row["ncu_metric"] for row in rows]
     collected = [
@@ -111,21 +116,52 @@ def validate_metrics(metrics: Mapping[str, Any], requested: Sequence[str]) -> No
     require(len(ids) == len(set(ids)), "metric ids must be unique")
     require(len(ncu) == len(set(ncu)), "NCU metric names must be unique")
     require(collected == list(requested), "benchmark NCU collection order differs from metric schema")
-    hit_rates = [row for row in rows if row.get("hit_rate_member")]
-    require(len(hit_rates) == 3, "exactly three hit-rate metrics are required")
-    require(
-        all(
-            len(row.get("ncu_sources", [])) == 2
-            and row.get("ncu_formula")
-            == "100 * hit_sectors / (hit_sectors + miss_sectors)"
-            for row in hit_rates
-        ),
-        "hit-rate rows must derive from one NCU hit/miss pair",
-    )
-    require(
-        all("percentage_point" in row["error"] for row in hit_rates),
-        "hit-rate rows must require percentage-point error",
-    )
+    if schema_version == 1:
+        hit_rates = [row for row in rows if row.get("hit_rate_member")]
+        require(len(hit_rates) == 3, "exactly three hit-rate metrics are required")
+        require(
+            all(
+                len(row.get("ncu_sources", [])) == 2
+                and row.get("ncu_formula")
+                == "100 * hit_sectors / (hit_sectors + miss_sectors)"
+                for row in hit_rates
+            ),
+            "hit-rate rows must derive from one NCU hit/miss pair",
+        )
+        require(
+            all("percentage_point" in row["error"] for row in hit_rates),
+            "hit-rate rows must require percentage-point error",
+        )
+    else:
+        count_rows = [row for row in rows if row.get("cache_lookup_count_member")]
+        require(len(count_rows) == 6, "count-target schema requires six cache count rows")
+        require(
+            {(row["cache_lookup_scope"], row["cache_lookup_component"]) for row in count_rows}
+            == {
+                ("l1_global_read", "hits"),
+                ("l1_global_read", "misses"),
+                ("l1_unified", "hits"),
+                ("l1_unified", "misses"),
+                ("l2_l1tex_source", "hits"),
+                ("l2_l1tex_source", "misses"),
+            },
+            "cache lookup count scopes/components drift",
+        )
+        derived = metrics.get("derived_hit_rates")
+        require(
+            isinstance(derived, list)
+            and {row["id"] for row in derived}
+            == {"l1_read_hit_rate", "l1_unified_hit_rate", "l2_unified_hit_rate"},
+            "three derived hit-rate reports are required",
+        )
+        by_id = {row["id"] for row in count_rows}
+        require(
+            all(
+                row["hit_metric_id"] in by_id and row["miss_metric_id"] in by_id
+                for row in derived
+            ),
+            "derived hit rates must reference cache count targets",
+        )
     ratios = metrics.get("timing_ratios")
     require(isinstance(ratios, list) and len(ratios) == 2, "two timing ratios are required")
     ratio_ids = {row["id"] for row in ratios}
@@ -137,7 +173,8 @@ def validate_metrics(metrics: Mapping[str, Any], requested: Sequence[str]) -> No
 
 
 def validate_accuracy_gate(gate: Mapping[str, Any]) -> None:
-    require(gate.get("schema_version") == 1, "accuracy gate schema_version must be 1")
+    schema_version = gate.get("schema_version")
+    require(schema_version in {1, 2}, "accuracy gate schema_version must be 1 or 2")
     require(gate.get("required_workloads") == 8, "accuracy gate must require 8 workloads")
     require(gate.get("required_ncu_repeats") == 7, "accuracy gate must require 7 NCU repeats")
     require(
@@ -149,10 +186,17 @@ def validate_accuracy_gate(gate: Mapping[str, Any]) -> None:
         "runtime_equivalent_mape_pct": (20.0, 8),
         "issue_cycle_mape_pct": (20.0, 8),
         "instruction_throughput_mape_pct": (20.0, 8),
-        "l1_unified_hit_rate_mape_pct": (20.0, 8),
-        "l2_unified_hit_rate_mape_pct": (20.0, 8),
         "counter_traffic_mape_pct": (20.0, 32),
     }
+    if schema_version == 1:
+        expected.update(
+            {
+                "l1_unified_hit_rate_mape_pct": (20.0, 8),
+                "l2_unified_hit_rate_mape_pct": (20.0, 8),
+            }
+        )
+    else:
+        expected["cache_lookup_count_normalized_error_pct"] = (20.0, 48)
     checks = gate.get("checks")
     require(isinstance(checks, Mapping) and set(checks) == set(expected), "accuracy gate checks drift")
     for name, (maximum, coverage) in expected.items():
@@ -161,12 +205,13 @@ def validate_accuracy_gate(gate: Mapping[str, Any]) -> None:
             checks[name].get("required_coverage") == coverage,
             f"{name}: coverage drift",
         )
-    for name in ("l1_unified_hit_rate_mape_pct", "l2_unified_hit_rate_mape_pct"):
-        require(
-            checks[name].get("maximum_mean_absolute_percentage_point_error") == 10.0
-            and checks[name].get("required_percentage_point_coverage") == 8,
-            f"{name}: percentage-point gate drift",
-        )
+    if schema_version == 1:
+        for name in ("l1_unified_hit_rate_mape_pct", "l2_unified_hit_rate_mape_pct"):
+            require(
+                checks[name].get("maximum_mean_absolute_percentage_point_error") == 10.0
+                and checks[name].get("required_percentage_point_coverage") == 8,
+                f"{name}: percentage-point gate drift",
+            )
     require(gate.get("manual_approval_required") is True, "manual approval must remain required")
 
 

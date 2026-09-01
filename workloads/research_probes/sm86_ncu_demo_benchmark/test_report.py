@@ -220,3 +220,64 @@ def test_accuracy_gate_requires_all_metric_and_repeat_checks() -> None:
     )
     assert failing["technical_status"] == "fail"
     assert not failing["candidate_promotable_for_user_review"]
+
+
+def test_count_target_gate_uses_all_hit_and_miss_components() -> None:
+    gate = json.loads((report.HERE / "accuracy_gate_counts.json").read_text())
+
+    def row(index: int) -> dict:
+        metrics = {
+            metric: {"ape_pct": 1.0} for metric in report.COUNTER_IDS
+        }
+        metrics.update(
+            {
+                metric: {
+                    "ape_pct": 1.0,
+                    "absolute_percentage_point_error": 0.5,
+                }
+                for metric in report.HIT_RATE_IDS
+            }
+        )
+        metrics.update(
+            {
+                metric: {
+                    "ape_pct": 1.0,
+                    "pair_normalized_absolute_error_pct": 2.0,
+                }
+                for metric in report.CACHE_LOOKUP_COUNT_IDS
+            }
+        )
+        return {
+            "workload_id": f"w{index}",
+            "target_launches_per_process": 1,
+            "ncu_launch_samples": 7,
+            "simulator_process_samples": 7,
+            "timing": {
+                "gpu_kernel_seconds": 1.0,
+                "ncu_profile_wall_seconds_mean": 1.0,
+                "ncu_profile_wall_seconds_total": 7.0,
+                "simulator_wall_seconds": 1.0,
+            },
+            "accuracy": {
+                "terminal_lower_bound_mape_pct": 5.0,
+                "issue_frontier_mape_pct": 5.0,
+                "runtime_equivalent_mape_pct": 5.0,
+                "instruction_throughput_mape_pct": 5.0,
+            },
+            "ncu_repeatability": {
+                "max_relative_range_pct": 1.0,
+                "max_relative_range_metric": "m",
+            },
+            "simulator_repeatability": {
+                "wall_relative_range_pct": 1.0,
+                "deterministic_predictions": True,
+            },
+            "metrics": metrics,
+        }
+
+    rows = [row(index) for index in range(8)]
+    total = report._totals(rows)
+    assert total["accuracy"]["cache_lookup_count_coverage"] == 48
+    assert total["accuracy"]["cache_lookup_count_normalized_error_pct"] == 2.0
+    evaluated = report._evaluate_accuracy_gate(gate, rows, total)
+    assert evaluated["technical_status"] == "pass"

@@ -1,0 +1,164 @@
+{
+  "schema_version": 2,
+  "metric_schema_id": "sm86_ncu_demo_cache_counts_v2",
+  "metrics": [
+    {
+      "id": "gpc_elapsed_cycles",
+      "ncu_metric": "gpc__cycles_elapsed.max",
+      "simulator_source": "launch.timing.terminal_modeled_event_time",
+      "unit": "cycles",
+      "error": "ape_when_ncu_positive",
+      "aggregate": "launch_weighted_mean_ape"
+    },
+    {
+      "id": "sm_active_cycles",
+      "ncu_metric": "sm__cycles_active.max",
+      "simulator_source": "launch.timing.diagnostic_last_issue_cycles",
+      "unit": "cycles",
+      "error": "ape_when_ncu_positive",
+      "aggregate": "launch_weighted_mean_ape"
+    },
+    {
+      "id": "gpu_kernel_duration",
+      "ncu_metric": "gpu__time_duration.sum",
+      "simulator_source": null,
+      "unit": "nanoseconds",
+      "error": "not_scored_used_for_execution_cost_ratio",
+      "aggregate": "sum_per_workload"
+    },
+    {
+      "id": "instructions",
+      "ncu_metric": "smsp__inst_executed.sum",
+      "simulator_source": "launch.counters.instructions_issued",
+      "unit": "count",
+      "error": "ape_when_ncu_positive",
+      "aggregate": "launch_weighted_mean_ape",
+      "counter_mape_member": true
+    },
+    {
+      "id": "global_load_sectors",
+      "ncu_metric": "l1tex__t_sectors_pipe_lsu_mem_global_op_ld.sum",
+      "simulator_source": "metric_predictions.global_load_sectors",
+      "unit": "sectors_32b",
+      "error": "ape_when_ncu_positive_else_exact_zero_match_only",
+      "aggregate": "launch_weighted_mean_ape",
+      "counter_mape_member": true
+    },
+    {
+      "id": "global_store_sectors",
+      "ncu_metric": "l1tex__t_sectors_pipe_lsu_mem_global_op_st.sum",
+      "simulator_source": "metric_predictions.global_store_sectors",
+      "unit": "sectors_32b",
+      "error": "ape_when_ncu_positive_else_exact_zero_match_only",
+      "aggregate": "launch_weighted_mean_ape",
+      "counter_mape_member": true
+    },
+    {
+      "id": "l1_read_lookup_hits",
+      "ncu_metric": "l1tex__t_sectors_pipe_lsu_mem_global_op_ld_lookup_hit.sum",
+      "simulator_source": "cache_lookup_predictions.l1_global_read.observer.hits",
+      "cache_lookup_scope": "l1_global_read",
+      "cache_lookup_component": "hits",
+      "unit": "sectors_32b",
+      "error": "pair_normalized_absolute_error_pct_and_ape_when_positive",
+      "cache_lookup_count_member": true
+    },
+    {
+      "id": "l1_read_lookup_misses",
+      "ncu_metric": "l1tex__t_sectors_pipe_lsu_mem_global_op_ld_lookup_miss.sum",
+      "simulator_source": "cache_lookup_predictions.l1_global_read.observer.misses",
+      "cache_lookup_scope": "l1_global_read",
+      "cache_lookup_component": "misses",
+      "unit": "sectors_32b",
+      "error": "pair_normalized_absolute_error_pct_and_ape_when_positive",
+      "cache_lookup_count_member": true
+    },
+    {
+      "id": "l1_unified_lookup_hits",
+      "ncu_metric": "l1tex__t_sectors_lookup_hit.sum",
+      "simulator_source": "cache_lookup_predictions.l1_unified.observer.hits",
+      "cache_lookup_scope": "l1_unified",
+      "cache_lookup_component": "hits",
+      "unit": "sectors_32b",
+      "error": "pair_normalized_absolute_error_pct_and_ape_when_positive",
+      "cache_lookup_count_member": true
+    },
+    {
+      "id": "l1_unified_lookup_misses",
+      "ncu_metric": "l1tex__t_sectors_lookup_miss.sum",
+      "simulator_source": "cache_lookup_predictions.l1_unified.observer.misses",
+      "cache_lookup_scope": "l1_unified",
+      "cache_lookup_component": "misses",
+      "unit": "sectors_32b",
+      "error": "pair_normalized_absolute_error_pct_and_ape_when_positive",
+      "cache_lookup_count_member": true
+    },
+    {
+      "id": "l2_tex_lookup_hits",
+      "ncu_metric": "lts__t_sectors_srcunit_tex_lookup_hit.sum",
+      "simulator_source": "cache_lookup_predictions.l2_l1tex_source.observer.hits",
+      "cache_lookup_scope": "l2_l1tex_source",
+      "cache_lookup_component": "hits",
+      "unit": "sectors_32b",
+      "error": "pair_normalized_absolute_error_pct_and_ape_when_positive",
+      "cache_lookup_count_member": true
+    },
+    {
+      "id": "l2_tex_lookup_misses",
+      "ncu_metric": "lts__t_sectors_srcunit_tex_lookup_miss.sum",
+      "simulator_source": "cache_lookup_predictions.l2_l1tex_source.observer.misses",
+      "cache_lookup_scope": "l2_l1tex_source",
+      "cache_lookup_component": "misses",
+      "unit": "sectors_32b",
+      "error": "pair_normalized_absolute_error_pct_and_ape_when_positive",
+      "cache_lookup_count_member": true
+    },
+    {
+      "id": "dram_read_sectors",
+      "ncu_metric": "dram__sectors_read.sum",
+      "simulator_source": "launch.counters.dram.read_sectors",
+      "unit": "sectors_32b",
+      "error": "ape_when_ncu_positive_else_exact_zero_match_only",
+      "aggregate": "launch_weighted_mean_ape",
+      "counter_mape_member": true
+    }
+  ],
+  "derived_hit_rates": [
+    {
+      "id": "l1_read_hit_rate",
+      "hit_metric_id": "l1_read_lookup_hits",
+      "miss_metric_id": "l1_read_lookup_misses",
+      "report_name": "L1 global-read"
+    },
+    {
+      "id": "l1_unified_hit_rate",
+      "hit_metric_id": "l1_unified_lookup_hits",
+      "miss_metric_id": "l1_unified_lookup_misses",
+      "report_name": "L1 unified"
+    },
+    {
+      "id": "l2_unified_hit_rate",
+      "hit_metric_id": "l2_tex_lookup_hits",
+      "miss_metric_id": "l2_tex_lookup_misses",
+      "report_name": "L1TEX-origin L2"
+    }
+  ],
+  "timing_ratios": [
+    {
+      "id": "gpu_execution_over_simulator_wall",
+      "numerator": "sum(gpu__time_duration.sum) * 1e-9",
+      "denominator": "simulator_process_wall_seconds"
+    },
+    {
+      "id": "ncu_profile_wall_over_simulator_wall",
+      "numerator": "ncu_process_wall_seconds",
+      "denominator": "simulator_process_wall_seconds"
+    }
+  ],
+  "aggregation": {
+    "cache_lookup_count_error": "abs(simulator_count - ncu_count) / (ncu_pair_hits + ncu_pair_misses) * 100",
+    "cache_lookup_count_coverage": "six count components per workload, including exact-zero hit counts",
+    "hit_rate": "derived only after independently scoring hit and miss counts",
+    "missing_metric": "unavailable with coverage count; never impute zero"
+  }
+}
