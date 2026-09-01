@@ -35,6 +35,9 @@
 //! write-through no-allocate for hierarchy writes in this v0 hypothesis), and
 //! bypass/untagged sector counting for the unified-denominator emission. RED
 //! uses a distinct observer lane and never enters ordinary STG attribution.
+//! L1TEX lookup accounting remains separate from physical hit state: cache-all
+//! LDGSTS merges into allocations from older warp instructions are observed as
+//! lookup hits, while same-instruction sector coalescing remains a miss.
 
 use std::collections::{BTreeMap, HashMap};
 use std::num::NonZeroU32;
@@ -141,6 +144,16 @@ pub enum AccessOutcome {
     Merge,
 }
 
+/// Opaque identity of one logical memory request's L1 lookup batch. A pending
+/// fill whose allocation sequence predates this token is an NCU lookup hit;
+/// merges into a fill created by this same request are sector coalescing and
+/// remain lookup misses.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct L1LookupBatch {
+    first_fill_sequence: u64,
+    pending_merges_are_hits: bool,
+}
+
 /// One origin's accounting lane. It mirrors the unified fields in
 /// [`L1Counters`] but carries no architecture of its own; provenance remains
 /// bound once on the enclosing physical-cache snapshot.
@@ -149,6 +162,9 @@ pub struct L1OriginCounters {
     pub hits: u64,
     pub misses: u64,
     pub merges: u64,
+    /// Misses that merged into a fill allocated by an earlier logical memory
+    /// request. Same-request sector coalescing is deliberately excluded.
+    pub pending_lookup_hits: u64,
     pub stall_events: u64,
     pub line_fills: u64,
     pub line_alloc_misses: u64,
@@ -159,6 +175,10 @@ pub struct L1OriginCounters {
     pub store_sectors: u64,
     pub store_hits: u64,
     pub store_tag_hits: u64,
+    /// Trace-topology lookup hits for write-class sectors. This observer uses
+    /// 64 B lookup allocation within each ideal L1TEX wavefront and does not
+    /// mutate cache tags, fills, replacement, or timing.
+    pub write_lookup_hits: u64,
     /// RED/REDG sectors and sector-valid hits, kept separate from ordinary STG.
     pub reduction_sectors: u64,
     pub reduction_hits: u64,
@@ -174,6 +194,7 @@ pub struct L1Counters {
     pub hits: u64,
     pub misses: u64,
     pub merges: u64,
+    pub pending_lookup_hits: u64,
     pub stall_events: u64,
     pub line_fills: u64,
     pub line_alloc_misses: u64,
@@ -196,6 +217,7 @@ pub struct L1Counters {
     /// `store_hits` stays the v0 unified diagnostic until l1tex store
     /// accounting is scored against labels and one rule wins.
     pub store_tag_hits: u64,
+    pub write_lookup_hits: u64,
     /// RED/REDG sectors and sector-valid hits. They contribute to the unified
     /// L1TEX observer but never to the plain global-store surface.
     pub reduction_sectors: u64,
@@ -210,6 +232,7 @@ pub enum L1CounterField {
     Hits,
     Misses,
     Merges,
+    PendingLookupHits,
     StallEvents,
     LineFills,
     LineAllocMisses,
@@ -220,6 +243,7 @@ pub enum L1CounterField {
     StoreSectors,
     StoreHits,
     StoreTagHits,
+    WriteLookupHits,
     ReductionSectors,
     ReductionHits,
 }
@@ -230,6 +254,7 @@ impl std::fmt::Display for L1CounterField {
             Self::Hits => "hits",
             Self::Misses => "misses",
             Self::Merges => "merges",
+            Self::PendingLookupHits => "pending_lookup_hits",
             Self::StallEvents => "stall_events",
             Self::LineFills => "line_fills",
             Self::LineAllocMisses => "line_alloc_misses",
@@ -240,6 +265,7 @@ impl std::fmt::Display for L1CounterField {
             Self::StoreSectors => "store_sectors",
             Self::StoreHits => "store_hits",
             Self::StoreTagHits => "store_tag_hits",
+            Self::WriteLookupHits => "write_lookup_hits",
             Self::ReductionSectors => "reduction_sectors",
             Self::ReductionHits => "reduction_hits",
         })
@@ -288,6 +314,7 @@ fn origin_counter_mut(counters: &mut L1OriginCounters, field: L1CounterField) ->
         L1CounterField::Hits => &mut counters.hits,
         L1CounterField::Misses => &mut counters.misses,
         L1CounterField::Merges => &mut counters.merges,
+        L1CounterField::PendingLookupHits => &mut counters.pending_lookup_hits,
         L1CounterField::StallEvents => &mut counters.stall_events,
         L1CounterField::LineFills => &mut counters.line_fills,
         L1CounterField::LineAllocMisses => &mut counters.line_alloc_misses,
@@ -298,6 +325,7 @@ fn origin_counter_mut(counters: &mut L1OriginCounters, field: L1CounterField) ->
         L1CounterField::StoreSectors => &mut counters.store_sectors,
         L1CounterField::StoreHits => &mut counters.store_hits,
         L1CounterField::StoreTagHits => &mut counters.store_tag_hits,
+        L1CounterField::WriteLookupHits => &mut counters.write_lookup_hits,
         L1CounterField::ReductionSectors => &mut counters.reduction_sectors,
         L1CounterField::ReductionHits => &mut counters.reduction_hits,
     }
@@ -318,11 +346,15 @@ fn add_origin_fields_checked(
     Ok(next)
 }
 
-fn origin_deltas(counters: &L1OriginCounters) -> [(L1CounterField, u64); 15] {
+fn origin_deltas(counters: &L1OriginCounters) -> [(L1CounterField, u64); 17] {
     [
         (L1CounterField::Hits, counters.hits),
         (L1CounterField::Misses, counters.misses),
         (L1CounterField::Merges, counters.merges),
+        (
+            L1CounterField::PendingLookupHits,
+            counters.pending_lookup_hits,
+        ),
         (L1CounterField::StallEvents, counters.stall_events),
         (L1CounterField::LineFills, counters.line_fills),
         (L1CounterField::LineAllocMisses, counters.line_alloc_misses),
@@ -339,16 +371,21 @@ fn origin_deltas(counters: &L1OriginCounters) -> [(L1CounterField, u64); 15] {
         (L1CounterField::StoreSectors, counters.store_sectors),
         (L1CounterField::StoreHits, counters.store_hits),
         (L1CounterField::StoreTagHits, counters.store_tag_hits),
+        (L1CounterField::WriteLookupHits, counters.write_lookup_hits),
         (L1CounterField::ReductionSectors, counters.reduction_sectors),
         (L1CounterField::ReductionHits, counters.reduction_hits),
     ]
 }
 
-fn unified_deltas(counters: &L1Counters) -> [(L1CounterField, u64); 15] {
+fn unified_deltas(counters: &L1Counters) -> [(L1CounterField, u64); 17] {
     [
         (L1CounterField::Hits, counters.hits),
         (L1CounterField::Misses, counters.misses),
         (L1CounterField::Merges, counters.merges),
+        (
+            L1CounterField::PendingLookupHits,
+            counters.pending_lookup_hits,
+        ),
         (L1CounterField::StallEvents, counters.stall_events),
         (L1CounterField::LineFills, counters.line_fills),
         (L1CounterField::LineAllocMisses, counters.line_alloc_misses),
@@ -365,6 +402,7 @@ fn unified_deltas(counters: &L1Counters) -> [(L1CounterField, u64); 15] {
         (L1CounterField::StoreSectors, counters.store_sectors),
         (L1CounterField::StoreHits, counters.store_hits),
         (L1CounterField::StoreTagHits, counters.store_tag_hits),
+        (L1CounterField::WriteLookupHits, counters.write_lookup_hits),
         (L1CounterField::ReductionSectors, counters.reduction_sectors),
         (L1CounterField::ReductionHits, counters.reduction_hits),
     ]
@@ -377,6 +415,7 @@ impl Default for L1Counters {
             hits: 0,
             misses: 0,
             merges: 0,
+            pending_lookup_hits: 0,
             stall_events: 0,
             line_fills: 0,
             line_alloc_misses: 0,
@@ -387,6 +426,7 @@ impl Default for L1Counters {
             store_sectors: 0,
             store_hits: 0,
             store_tag_hits: 0,
+            write_lookup_hits: 0,
             reduction_sectors: 0,
             reduction_hits: 0,
             by_origin: [L1OriginCounters::default(); 2],
@@ -460,6 +500,7 @@ impl L1Counters {
             hits: self.hits,
             misses: self.misses,
             merges: self.merges,
+            pending_lookup_hits: self.pending_lookup_hits,
             stall_events: self.stall_events,
             line_fills: self.line_fills,
             line_alloc_misses: self.line_alloc_misses,
@@ -470,6 +511,7 @@ impl L1Counters {
             store_sectors: self.store_sectors,
             store_hits: self.store_hits,
             store_tag_hits: self.store_tag_hits,
+            write_lookup_hits: self.write_lookup_hits,
             reduction_sectors: self.reduction_sectors,
             reduction_hits: self.reduction_hits,
         };
@@ -489,6 +531,7 @@ impl L1Counters {
                 L1CounterField::Hits => &mut next.hits,
                 L1CounterField::Misses => &mut next.misses,
                 L1CounterField::Merges => &mut next.merges,
+                L1CounterField::PendingLookupHits => &mut next.pending_lookup_hits,
                 L1CounterField::StallEvents => &mut next.stall_events,
                 L1CounterField::LineFills => &mut next.line_fills,
                 L1CounterField::LineAllocMisses => &mut next.line_alloc_misses,
@@ -499,6 +542,7 @@ impl L1Counters {
                 L1CounterField::StoreSectors => &mut next.store_sectors,
                 L1CounterField::StoreHits => &mut next.store_hits,
                 L1CounterField::StoreTagHits => &mut next.store_tag_hits,
+                L1CounterField::WriteLookupHits => &mut next.write_lookup_hits,
                 L1CounterField::ReductionSectors => &mut next.reduction_sectors,
                 L1CounterField::ReductionHits => &mut next.reduction_hits,
             };
@@ -532,6 +576,11 @@ impl L1Counters {
         let hits = checked_counter_add(L1CounterField::Hits, self.hits, other.hits)?;
         let misses = checked_counter_add(L1CounterField::Misses, self.misses, other.misses)?;
         let merges = checked_counter_add(L1CounterField::Merges, self.merges, other.merges)?;
+        let pending_lookup_hits = checked_counter_add(
+            L1CounterField::PendingLookupHits,
+            self.pending_lookup_hits,
+            other.pending_lookup_hits,
+        )?;
         let stall_events = checked_counter_add(
             L1CounterField::StallEvents,
             self.stall_events,
@@ -576,6 +625,11 @@ impl L1Counters {
             self.store_tag_hits,
             other.store_tag_hits,
         )?;
+        let write_lookup_hits = checked_counter_add(
+            L1CounterField::WriteLookupHits,
+            self.write_lookup_hits,
+            other.write_lookup_hits,
+        )?;
         let reduction_sectors = checked_counter_add(
             L1CounterField::ReductionSectors,
             self.reduction_sectors,
@@ -600,6 +654,7 @@ impl L1Counters {
             hits,
             misses,
             merges,
+            pending_lookup_hits,
             stall_events,
             line_fills,
             line_alloc_misses,
@@ -610,6 +665,7 @@ impl L1Counters {
             store_sectors,
             store_hits,
             store_tag_hits,
+            write_lookup_hits,
             reduction_sectors,
             reduction_hits,
             by_origin,
@@ -855,6 +911,9 @@ pub struct L1Cache {
     line_fills: HashMap<i64, (FillDue, u64)>,
     sector_fills: HashMap<(i64, u8), (FillDue, u64)>,
     fill_seq: NextSequence,
+    /// Active logical request boundary for the lookup observer only. This does
+    /// not participate in tags, MSHR ownership, replacement, or timing.
+    active_lookup_batch: Option<L1LookupBatch>,
     /// Exact earliest timed in-flight fill. `None` means there is no timed
     /// fill (empty or event-driven), while `Some(u64::MAX)` is a real due
     /// cycle. `apply_fills` early-outs when `now` has not reached it.
@@ -891,6 +950,7 @@ impl L1Cache {
             line_fills: HashMap::new(),
             sector_fills: HashMap::new(),
             fill_seq: NextSequence::Available(0),
+            active_lookup_batch: None,
             min_fill_due: None,
             fill_timing: None,
             counters: L1Counters::for_arch(arch),
@@ -923,6 +983,36 @@ impl L1Cache {
             FillKey::Line(line) => self.line_fills.contains_key(&line),
             FillKey::Sector(line, sector) => self.sector_fills.contains_key(&(line, sector)),
         }
+    }
+
+    /// Start an ordinary warp instruction's logical L1 lookup request. Pending
+    /// merges remain misses for this observer. The returned token must be
+    /// retained if an MSHR-stalled remainder is retried later.
+    pub fn begin_lookup_batch(&mut self) -> L1LookupBatch {
+        let batch = L1LookupBatch {
+            first_fill_sequence: self.fill_seq.current(),
+            pending_merges_are_hits: false,
+        };
+        self.active_lookup_batch = Some(batch);
+        batch
+    }
+
+    /// Start a cache-all LDGSTS source lookup. Independent sm_86 calibration
+    /// shows that a merge into an older pending allocation is counted as an
+    /// L1TEX lookup hit for this path; same-instruction coalescing is not.
+    pub fn begin_async_copy_lookup_batch(&mut self) -> L1LookupBatch {
+        let batch = L1LookupBatch {
+            first_fill_sequence: self.fill_seq.current(),
+            pending_merges_are_hits: true,
+        };
+        self.active_lookup_batch = Some(batch);
+        batch
+    }
+
+    /// Resume the observer boundary of a previously stalled logical request.
+    /// Cache behavior is unchanged; only merge attribution consults the token.
+    pub fn resume_lookup_batch(&mut self, batch: L1LookupBatch) {
+        self.active_lookup_batch = Some(batch);
     }
 
     fn timing_name(mode: FillTiming) -> &'static str {
@@ -998,6 +1088,7 @@ impl L1Cache {
                     (L1CounterField::Hits, budget.eligible_sectors),
                     (L1CounterField::Misses, budget.eligible_sectors),
                     (L1CounterField::Merges, budget.eligible_sectors),
+                    (L1CounterField::PendingLookupHits, budget.eligible_sectors),
                     (L1CounterField::StallEvents, budget.eligible_sectors),
                     (L1CounterField::LineFills, budget.eligible_sectors),
                     (L1CounterField::LineAllocMisses, budget.eligible_sectors),
@@ -1014,6 +1105,8 @@ impl L1Cache {
                     (L1CounterField::StoreSectors, budget.store_sectors),
                     (L1CounterField::StoreHits, budget.store_sectors),
                     (L1CounterField::StoreTagHits, budget.store_sectors),
+                    (L1CounterField::WriteLookupHits, budget.store_sectors),
+                    (L1CounterField::WriteLookupHits, budget.reduction_sectors),
                     (L1CounterField::ReductionSectors, budget.reduction_sectors),
                     (L1CounterField::ReductionHits, budget.reduction_sectors),
                 ],
@@ -1253,12 +1346,25 @@ impl L1Cache {
     ) -> Result<CoreAccess, L1AccessError> {
         let line = sector_id >> 2;
         let sector = (sector_id & 3) as u8;
-        if let Some(&(pending, _)) = self.line_fills.get(&line) {
+        if let Some(&(pending, sequence)) = self.line_fills.get(&line) {
             Self::preflight_fill_timing(pending, fill_request.timing())?;
-            let counters = self.counters.add_fields_checked(
-                origin,
-                &[(L1CounterField::Merges, 1), (L1CounterField::Misses, 1)],
-            )?;
+            let counters = if self.active_lookup_batch.is_some_and(|batch| {
+                batch.pending_merges_are_hits && sequence < batch.first_fill_sequence
+            }) {
+                self.counters.add_fields_checked(
+                    origin,
+                    &[
+                        (L1CounterField::Merges, 1),
+                        (L1CounterField::Misses, 1),
+                        (L1CounterField::PendingLookupHits, 1),
+                    ],
+                )?
+            } else {
+                self.counters.add_fields_checked(
+                    origin,
+                    &[(L1CounterField::Merges, 1), (L1CounterField::Misses, 1)],
+                )?
+            };
             self.counters = counters;
             *self.sectors.entry(line).or_default() |= 1 << sector;
             return Ok(CoreAccess::LineMerge { pending });
@@ -1280,12 +1386,26 @@ impl L1Cache {
             self.touch_mru(line)?;
             return Ok(CoreAccess::Hit { ready });
         }
-        if line_resident && let Some(&(pending, _)) = self.sector_fills.get(&(line, sector)) {
+        if line_resident && let Some(&(pending, sequence)) = self.sector_fills.get(&(line, sector))
+        {
             Self::preflight_fill_timing(pending, fill_request.timing())?;
-            let counters = self.counters.add_fields_checked(
-                origin,
-                &[(L1CounterField::Merges, 1), (L1CounterField::Misses, 1)],
-            )?;
+            let counters = if self.active_lookup_batch.is_some_and(|batch| {
+                batch.pending_merges_are_hits && sequence < batch.first_fill_sequence
+            }) {
+                self.counters.add_fields_checked(
+                    origin,
+                    &[
+                        (L1CounterField::Merges, 1),
+                        (L1CounterField::Misses, 1),
+                        (L1CounterField::PendingLookupHits, 1),
+                    ],
+                )?
+            } else {
+                self.counters.add_fields_checked(
+                    origin,
+                    &[(L1CounterField::Merges, 1), (L1CounterField::Misses, 1)],
+                )?
+            };
             self.counters = counters;
             return Ok(CoreAccess::SectorMerge { pending });
         }
@@ -1884,6 +2004,17 @@ impl L1Cache {
         self.probe_write_impl(origin, sector_id, now, WriteAccounting::Reduction)
     }
 
+    /// Record write-class lookup hits derived from the exact instruction's
+    /// sector/wavefront topology. This is emission accounting only: the
+    /// physical write-through/no-allocate L1 trajectory remains unchanged.
+    pub fn count_write_lookup_hits(
+        &mut self,
+        origin: MemoryOrigin,
+        hits: u64,
+    ) -> Result<(), L1AccessError> {
+        self.apply_counter_deltas(origin, &[(L1CounterField::WriteLookupHits, hits)])
+    }
+
     /// Manifest-tagged ineligible sectors (the ported bypass counter).
     /// `atom` marks the write-class (ATOM-token) subset — the caller
     /// owns the token, this cache never sees opcodes.
@@ -2188,6 +2319,7 @@ mod tests {
         assert_eq!(actual.line_fills, expected.line_fills);
         assert_eq!(actual.sector_fills, expected.sector_fills);
         assert_eq!(actual.fill_seq, expected.fill_seq);
+        assert_eq!(actual.active_lookup_batch, expected.active_lookup_batch);
         assert_eq!(actual.min_fill_due, expected.min_fill_due);
         assert_eq!(actual.fill_timing, expected.fill_timing);
         assert_eq!(actual.counters, expected.counters);
@@ -2199,6 +2331,46 @@ mod tests {
             c.line_alloc_misses + c.sector_resident_misses + c.merges,
             "miss == line_alloc + sector_resident + merge"
         );
+    }
+
+    #[test]
+    fn async_copy_lookup_hits_exclude_same_instruction_sector_coalescing() {
+        let mut l1 = cache(16, None);
+        l1.begin_async_copy_lookup_batch();
+        assert!(matches!(
+            access_ev(&mut l1, 0, 0),
+            EvAccess::MissRequest {
+                fill: FillKey::Line(0)
+            }
+        ));
+        assert!(matches!(
+            access_ev(&mut l1, 1, 0),
+            EvAccess::MergedPending {
+                fill: FillKey::Line(0)
+            }
+        ));
+        assert_eq!(l1.counters.merges, 1);
+        assert_eq!(l1.counters.pending_lookup_hits, 0);
+
+        l1.begin_async_copy_lookup_batch();
+        assert!(matches!(
+            access_ev(&mut l1, 2, 0),
+            EvAccess::MergedPending {
+                fill: FillKey::Line(0)
+            }
+        ));
+        assert_eq!(l1.counters.merges, 2);
+        assert_eq!(l1.counters.pending_lookup_hits, 1);
+
+        l1.begin_lookup_batch();
+        assert!(matches!(
+            access_ev(&mut l1, 3, 0),
+            EvAccess::MergedPending {
+                fill: FillKey::Line(0)
+            }
+        ));
+        assert_eq!(l1.counters.merges, 3);
+        assert_eq!(l1.counters.pending_lookup_hits, 1);
     }
 
     fn assert_origin_partition(c: &L1Counters) {
@@ -3240,10 +3412,13 @@ mod tests {
     #[test]
     fn counter_aggregation_overflow_is_named_and_transactional() {
         type Setter = fn(&mut L1Counters, u64);
-        let cases: [(L1CounterField, Setter); 15] = [
+        let cases: [(L1CounterField, Setter); 17] = [
             (L1CounterField::Hits, |c, v| c.hits = v),
             (L1CounterField::Misses, |c, v| c.misses = v),
             (L1CounterField::Merges, |c, v| c.merges = v),
+            (L1CounterField::PendingLookupHits, |c, v| {
+                c.pending_lookup_hits = v
+            }),
             (L1CounterField::StallEvents, |c, v| c.stall_events = v),
             (L1CounterField::LineFills, |c, v| c.line_fills = v),
             (L1CounterField::LineAllocMisses, |c, v| {
@@ -3262,6 +3437,9 @@ mod tests {
             (L1CounterField::StoreSectors, |c, v| c.store_sectors = v),
             (L1CounterField::StoreHits, |c, v| c.store_hits = v),
             (L1CounterField::StoreTagHits, |c, v| c.store_tag_hits = v),
+            (L1CounterField::WriteLookupHits, |c, v| {
+                c.write_lookup_hits = v
+            }),
             (L1CounterField::ReductionSectors, |c, v| {
                 c.reduction_sectors = v
             }),
@@ -3318,6 +3496,8 @@ mod tests {
         total.store_sectors = 11;
         total.store_hits = 12;
         total.store_tag_hits = 13;
+        total.pending_lookup_hits = 16;
+        total.write_lookup_hits = 17;
         total.reduction_sectors = 14;
         total.reduction_hits = 15;
         total = total.with_unified_origin(MemoryOrigin::Global);
@@ -3336,6 +3516,8 @@ mod tests {
         addend.store_sectors = 30;
         addend.store_hits = 31;
         addend.store_tag_hits = 32;
+        addend.pending_lookup_hits = 35;
+        addend.write_lookup_hits = 36;
         addend.reduction_sectors = 33;
         addend.reduction_hits = 34;
         addend = addend.with_unified_origin(MemoryOrigin::Local);
@@ -3355,6 +3537,8 @@ mod tests {
         assert_eq!(total.store_sectors, 41);
         assert_eq!(total.store_hits, 43);
         assert_eq!(total.store_tag_hits, 45);
+        assert_eq!(total.pending_lookup_hits, 51);
+        assert_eq!(total.write_lookup_hits, 53);
         assert_eq!(total.reduction_sectors, 47);
         assert_eq!(total.reduction_hits, 49);
     }

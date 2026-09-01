@@ -40,7 +40,11 @@
 //! stays out (NCU books it under op_atom/op_red). The sim models LDGSTS as
 //! pure bypass with no L1 residency, so those sectors contribute to the
 //! denominator but never to the hit numerator — an honest v0 under-prediction
-//! whose residual localizes the un-modeled LDGSTS-L1-residency effect.
+//! as ordinary cache-all traffic. A sector that merges into a fill allocated
+//! by an earlier logical request is a lookup hit for the NCU observer even
+//! though it is not yet a resident-data hit; same-request sector coalescing is
+//! still a miss. Cache state and response timing continue to use the physical
+//! hit/miss/merge distinction.
 
 use serde::ser::{Serialize, SerializeStruct, Serializer};
 use sim_arch::ArchId;
@@ -939,9 +943,10 @@ fn emit_gmem_st_sectors(snap: &CounterSnapshot) -> Result<EmitOutcome, EmitError
 }
 
 /// `l1tex__t_sector_pipe_lsu_mem_global_op_ld_hit_rate.pct` — the op_ld sector
-/// hit rate. Numerator = modeled eligible hits; denominator folds the
-/// READ-class bypass (LDGSTS) sectors in (they miss L1 structurally in v0, so
-/// they enter the denominator but contribute no hits — the honest residual).
+/// lookup-hit rate. NCU counts resident-data hits plus accesses that merge into
+/// a fill allocated by an earlier logical request. Same-request line-sector
+/// coalescing remains a miss. The denominator also folds in READ-class bypass
+/// (LDGSTS `.BYPASS`) sectors, which cannot hit L1.
 fn emit_l1tex_read_hit_rate(snap: &CounterSnapshot) -> Result<EmitOutcome, EmitError> {
     let key = "cache_hit_rate_l1tex_read_sector";
     let Some(l1) = snap.l1 else {
@@ -950,7 +955,11 @@ fn emit_l1tex_read_hit_rate(snap: &CounterSnapshot) -> Result<EmitOutcome, EmitE
         }));
     };
     let global = l1.origin(MemoryOrigin::Global);
-    let num = global.hits;
+    let num = checked_sum(
+        key,
+        "global-load lookup-hit numerator",
+        &[global.hits, global.pending_lookup_hits],
+    )?;
     let bypass = bypass_read_sectors(key, &global)?;
     let den = checked_sum(
         key,
@@ -963,13 +972,13 @@ fn emit_l1tex_read_hit_rate(snap: &CounterSnapshot) -> Result<EmitOutcome, EmitE
 }
 
 /// `l1tex__t_sector_hit_rate.pct` — the unified L1TEX sector hit rate over all
-/// op classes. v0 numerator uses the sector-valid store/reduction rules
-/// (`store_hits` / `reduction_hits`); the §6.4 line-TAG store rule
-/// (`store_tag_hits`) is the carried alternative, unresolved until l1tex store
-/// accounting is scored. The full bypass stream (atom included) is in the
-/// denominator — `bypass_atom_sectors` must NOT be added on top because it is
-/// already a subset of `bypass_sectors`. RED uses its distinct reduction lane,
-/// so it contributes to this unified observer without entering `op_st`.
+/// op classes. Loads use resident-data hits plus prior-request pending-fill
+/// merges. Write classes use the
+/// independently calibrated 64 B lookup-allocation observer derived from exact
+/// instruction sector/wavefront topology; it changes no cache state or timing.
+/// The full bypass stream (atom included) is in the denominator —
+/// `bypass_atom_sectors` must NOT be added on top because it is already a subset
+/// of `bypass_sectors`.
 fn emit_l1tex_unified_hit_rate(snap: &CounterSnapshot) -> Result<EmitOutcome, EmitError> {
     let key = "cache_hit_rate_l1tex_sector";
     let Some(l1) = snap.l1 else {
@@ -980,7 +989,7 @@ fn emit_l1tex_unified_hit_rate(snap: &CounterSnapshot) -> Result<EmitOutcome, Em
     let num = checked_sum(
         key,
         "unified L1TEX hit-rate numerator",
-        &[l1.hits, l1.store_hits, l1.reduction_hits],
+        &[l1.hits, l1.pending_lookup_hits, l1.write_lookup_hits],
     )?;
     let den = checked_sum(
         key,
@@ -2023,6 +2032,7 @@ mod tests {
             bypass_atom_sectors: 1,
             store_sectors: 5,
             store_hits: 2,
+            write_lookup_hits: 2,
             ..L1OriginCounters::default()
         };
         let local = L1OriginCounters {
@@ -2030,6 +2040,7 @@ mod tests {
             misses: 10,
             store_sectors: 7,
             store_hits: 3,
+            write_lookup_hits: 3,
             untagged_sectors: 2,
             ..L1OriginCounters::default()
         };
@@ -2077,6 +2088,7 @@ mod tests {
         l1.store_hits = 1;
         l1.reduction_sectors = 3;
         l1.reduction_hits = 2;
+        l1.write_lookup_hits = 3;
         let preds = emit(1, Some(l1), None, None).unwrap();
 
         assert_eq!(
@@ -2200,6 +2212,7 @@ mod tests {
         let mut l1 = L1Counters::for_arch(ArchId::Sm86);
         l1.hits = u64::MAX;
         l1.store_hits = 1;
+        l1.write_lookup_hits = 1;
         l1.store_sectors = 1;
         assert_eq!(
             emit(1, Some(l1), None, None),

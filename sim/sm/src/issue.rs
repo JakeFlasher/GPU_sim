@@ -75,8 +75,8 @@ use sim_arch::{
 };
 use sim_mem::{
     AsyncCopyCompletion, CacheOpToken, EvAccess, EvAccessUnobserved, FillKey, L1AccessError,
-    L1Cache, L1Config, L1Counters, L1MutationBudget, L2OpClass, L2Source, LdgstsL1Policy, MemRole,
-    MemoryOrigin, decode_async_copy_completion,
+    L1Cache, L1Config, L1Counters, L1LookupBatch, L1MutationBudget, L2OpClass, L2Source,
+    LdgstsL1Policy, MemRole, MemoryOrigin, decode_async_copy_completion,
 };
 
 use crate::control_bits::{ControlDomainError, DepBarrier, WaitMask};
@@ -2287,6 +2287,25 @@ fn projected_global_memory_issue(
         unique_128b_lines(sectors),
         atomic_l2_requests,
     ))
+}
+
+/// L1TEX write lookup observer calibrated on an independent STORE cohort.
+/// Each ideal wavefront allocates 64 B (two 32 B sectors) at lookup time; one
+/// miss is charged per occupied 64 B lookup unit and the remaining sectors are
+/// lookup hits. This is accounting only and never changes cache state/timing.
+fn projected_l1_write_lookup_hits(kind: AccessKind, sector_arena: &[i64]) -> Option<u64> {
+    let (class, sectors, wavefronts, _, _) = projected_global_memory_issue(kind, sector_arena)?;
+    if !matches!(
+        class,
+        GlobalMemoryIssueClass::Store | GlobalMemoryIssueClass::Reduction
+    ) {
+        return None;
+    }
+    let sectors_per_wavefront = sectors.div_ceil(wavefronts);
+    let misses = wavefronts
+        .checked_mul(sectors_per_wavefront.div_ceil(2))?
+        .min(sectors);
+    Some(sectors - misses)
 }
 
 impl GlobalMemoryIssueDiagnostics {
@@ -6775,6 +6794,7 @@ fn data_ready_time(
             };
             match l1 {
                 Some(l1) => {
+                    l1.begin_lookup_batch();
                     let mut ready = needs_ready
                         .then(|| {
                             checked_cycle_add("L1 hit-pipeline floor", t, params.l1_hit_latency)
@@ -6829,6 +6849,7 @@ fn data_ready_time(
             ..
         } => match (l1, l1_policy) {
             (Some(l1), LdgstsL1Policy::CacheAtAllLevels) => {
+                l1.begin_async_copy_lookup_batch();
                 let mut ready = needs_ready
                     .then(|| {
                         checked_cycle_add("LDGSTS L1 hit-pipeline floor", t, params.l1_hit_latency)
@@ -6902,6 +6923,9 @@ fn data_ready_time(
             let reduction = matches!(kind, AccessKind::GlobalReduction { .. });
             match l1 {
                 Some(l1) => {
+                    if let Some(hits) = projected_l1_write_lookup_hits(kind, sectors) {
+                        l1.count_write_lookup_hits(origin, hits)?;
+                    }
                     for &sector in &sectors[off..off + usize::from(len)] {
                         if reduction {
                             l1.probe_reduction(origin, sector, t)?;
@@ -6970,6 +6994,8 @@ struct Retry {
     /// Access-local finite-admission floor retained from original issue. Only
     /// cacheable LDGSTS retries carry one; ordinary hierarchy traffic uses `None`.
     mshr_floor: Option<NonZeroU32>,
+    /// Original logical request boundary for pending-fill lookup attribution.
+    lookup_batch: L1LookupBatch,
     /// Unresolved slice `warps[warp].sectors[lo..hi]`.
     lo: usize,
     hi: usize,
@@ -7872,6 +7898,7 @@ impl<'a> SmCore<'a> {
                 // into their request mask — one L2 transaction per line
                 // per batch, priced on its worst sector.
                 let target = write_barrier.map(FillTarget::Barrier);
+                let lookup_batch = st.l1.begin_lookup_batch();
                 let mut known = write_barrier
                     .is_some()
                     .then(|| checked_cycle_add("shared L1 hit-pipeline floor", t, p.l1_hit_latency))
@@ -7906,6 +7933,7 @@ impl<'a> SmCore<'a> {
                                 origin,
                                 target,
                                 mshr_floor: None,
+                                lookup_batch,
                                 lo: i,
                                 hi: range.end,
                             });
@@ -7943,6 +7971,7 @@ impl<'a> SmCore<'a> {
                         barrier: write_barrier,
                     })
                     .or_else(|| write_barrier.map(FillTarget::Barrier));
+                let lookup_batch = st.l1.begin_async_copy_lookup_batch();
                 let mut known = (write_barrier.is_some() || source_active)
                     .then(|| {
                         checked_cycle_add(
@@ -7986,6 +8015,7 @@ impl<'a> SmCore<'a> {
                                 origin: MemoryOrigin::Global,
                                 target,
                                 mshr_floor: Some(p.ldgsts_l1_mshr_floor),
+                                lookup_batch,
                                 lo: i,
                                 hi: range.end,
                             });
@@ -8137,6 +8167,9 @@ impl<'a> SmCore<'a> {
                     _ => unreachable!("match arm admits only hierarchy writes"),
                 };
                 let reduction = matches!(kind, AccessKind::GlobalReduction { .. });
+                if let Some(hits) = projected_l1_write_lookup_hits(kind, sectors) {
+                    st.l1.count_write_lookup_hits(origin, hits)?;
+                }
                 for (request_index, &sector_id) in
                     sectors[off..off + usize::from(len)].iter().enumerate()
                 {
@@ -8408,6 +8441,7 @@ impl<'a> SmCore<'a> {
         }
         let mut exact_async = projected_async;
         'retries: for retry in &st.retry {
+            shadow.resume_lookup_batch(retry.lookup_batch);
             let barrier = retry.target.and_then(FillTarget::barrier);
             if let Some(barrier) = barrier {
                 let base = self.warps[retry.warp].barrier_pending[barrier.index()];
@@ -8508,6 +8542,7 @@ impl<'a> SmCore<'a> {
         let mut shadow = st.l1.clone();
         shadow.complete_fill(fill)?;
         'retries: for retry in &st.retry {
+            shadow.resume_lookup_batch(retry.lookup_batch);
             for sector_index in retry.lo..retry.hi {
                 let sector_id = self.warps[retry.warp].sectors[sector_index];
                 match access_shared_l1(
@@ -10406,6 +10441,11 @@ impl<'a> SmCore<'a> {
                     l1_policy: LdgstsL1Policy::CacheAtAllLevels,
                     ..
                 } => {
+                    if matches!(inst.kind, AccessKind::GlobalAsyncCopy { .. }) {
+                        shadow.begin_async_copy_lookup_batch();
+                    } else {
+                        shadow.begin_lookup_batch();
+                    }
                     let origin = match inst.kind {
                         AccessKind::GlobalEligible { .. } | AccessKind::GlobalAsyncCopy { .. } => {
                             MemoryOrigin::Global
@@ -10549,6 +10589,9 @@ impl<'a> SmCore<'a> {
                         _ => unreachable!("match arm admits only hierarchy writes"),
                     };
                     let reduction = matches!(inst.kind, AccessKind::GlobalReduction { .. });
+                    if let Some(hits) = projected_l1_write_lookup_hits(inst.kind, warp.sectors) {
+                        shadow.count_write_lookup_hits(origin, hits)?;
+                    }
                     for &sector_id in &warp.sectors[off..off + usize::from(len)] {
                         if reduction {
                             shadow.probe_reduction(origin, sector_id, self.t)?;
@@ -11576,6 +11619,7 @@ fn drain_retries(
     out: &mut Vec<MemRequest>,
 ) -> Result<(), IssueError> {
     while let Some(mut r) = st.retry.pop_front() {
+        st.l1.resume_lookup_batch(r.lookup_batch);
         let sectors = warps[r.warp].sectors;
         let barrier = r.target.and_then(FillTarget::barrier);
         // Replace the retry entry's ordinary-barrier unit atomically with
@@ -15703,6 +15747,27 @@ mod tests {
     }
 
     #[test]
+    fn write_lookup_observer_uses_two_sectors_per_wavefront_allocation() {
+        let sectors = (0_i64..8).collect::<Vec<_>>();
+        assert_eq!(
+            projected_l1_write_lookup_hits(AccessKind::GlobalStore { off: 0, len: 8 }, &sectors,),
+            Some(4)
+        );
+        assert_eq!(
+            projected_l1_write_lookup_hits(AccessKind::GlobalStore { off: 0, len: 2 }, &sectors,),
+            Some(1)
+        );
+        assert_eq!(
+            projected_l1_write_lookup_hits(AccessKind::GlobalStore { off: 0, len: 1 }, &sectors,),
+            Some(0)
+        );
+        assert_eq!(
+            projected_l1_write_lookup_hits(eligible(0, 4), &sectors),
+            None
+        );
+    }
+
+    #[test]
     fn global_memory_issue_diagnostics_aggregate_and_overflow_transactionally() {
         let mut aggregate = ReadinessDiagnostics::default();
         aggregate
@@ -18119,12 +18184,14 @@ mod tests {
         let MemModel::L1Shared(st) = &mut core.mem else {
             panic!("expected shared mode");
         };
+        let lookup_batch = st.l1.begin_lookup_batch();
         st.retry.push_back(Retry {
             warp: 0,
             instruction: 0,
             origin: MemoryOrigin::Global,
             target: Some(FillTarget::Barrier(barrier(0))),
             mshr_floor: None,
+            lookup_batch,
             lo: 1,
             hi: 2,
         });
@@ -18196,12 +18263,14 @@ mod tests {
         let MemModel::L1Shared(st) = &mut core.mem else {
             panic!("expected shared mode");
         };
+        let lookup_batch = st.l1.begin_lookup_batch();
         st.retry.push_back(Retry {
             warp: 0,
             instruction: 0,
             origin: MemoryOrigin::Global,
             target: Some(FillTarget::Barrier(barrier(0))),
             mshr_floor: None,
+            lookup_batch,
             lo: 1,
             hi: 3,
         });
@@ -18496,12 +18565,14 @@ mod tests {
         let MemModel::L1Shared(st) = &mut core.mem else {
             panic!("expected shared mode");
         };
+        let lookup_batch = st.l1.begin_lookup_batch();
         st.retry.push_back(Retry {
             warp: 0,
             instruction: 0,
             origin: MemoryOrigin::Global,
             target: None,
             mshr_floor: None,
+            lookup_batch,
             lo: 1,
             hi: 2,
         });
@@ -19080,21 +19151,25 @@ mod tests {
             let MemModel::L1Shared(st) = &mut core.mem else {
                 panic!("expected shared mode");
             };
+            let first_lookup_batch = st.l1.begin_lookup_batch();
             st.retry.push_back(Retry {
                 warp: 0,
                 instruction: 1,
                 origin: MemoryOrigin::Global,
                 target: None,
                 mshr_floor: None,
+                lookup_batch: first_lookup_batch,
                 lo: 1,
                 hi: 2,
             });
+            let second_lookup_batch = st.l1.begin_lookup_batch();
             st.retry.push_back(Retry {
                 warp: 0,
                 instruction: 2,
                 origin: MemoryOrigin::Local,
                 target: None,
                 mshr_floor: None,
+                lookup_batch: second_lookup_batch,
                 lo: 2,
                 hi: 3,
             });

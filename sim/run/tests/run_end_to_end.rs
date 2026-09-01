@@ -292,6 +292,11 @@ fn assert_full_launch_emission_matches_singleton_aggregate(
     let aggregate = aggregate_full_launch_set(declaration, [result.clone()])
         .expect("aggregate singleton full launch set");
     assert_eq!(
+        aggregate.l1(),
+        result.l1(),
+        "singleton aggregation must preserve every L1 observer"
+    );
+    assert_eq!(
         aggregate.l2().map(|counters| counters.lookup_hits),
         result.l2().map(|counters| counters.lookup_hits),
         "singleton aggregation must preserve L2 lookup hits"
@@ -787,14 +792,16 @@ fn full_launch_emission_matches_singleton_aggregate_on_real_consumer_path() {
     // The canary's cache-all LDGSTS source now follows its decoded L1 route:
     // eight source sectors coalesce behind one four-sector L1 line fill while
     // the five structurally bypassing sectors retain their independent path.
-    // The resulting shared-L2 observer sees nine sectors, not the historical
-    // all-bypass thirteen; all L1 unified accounting remains thirteen.
+    // Four cache-all sectors merge into the older pending LDGSTS allocation,
+    // so the L1TEX lookup observer reports four hits while physical residency
+    // and timing stay unchanged. The shared-L2 observer sees nine sectors, not
+    // the historical all-bypass thirteen; L1 unified accounting remains 13.
     let expected = ExpectedModeledOutcomes {
         instructions: 54,
         global_load_sectors: 8,
         global_store_sectors: 0,
-        l1_read_fraction: (Some(0.0), 0, 8),
-        l1_unified_fraction: (Some(0.0), 0, 13),
+        l1_read_fraction: (Some(0.5), 4, 8),
+        l1_unified_fraction: (Some(4.0 / 13.0), 4, 13),
         l2_fraction: (Some(5.0 / 9.0), 5, 9),
         dram_read_sectors: 9,
     };
