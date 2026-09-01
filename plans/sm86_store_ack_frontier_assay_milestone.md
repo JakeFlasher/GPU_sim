@@ -30,7 +30,10 @@ payload loop, after the issue loop, and after the optional fence. Every CTA
 writes its own triplet. A second ordinary kernel is enqueued in the same CUDA
 stream and records `%globaltimer` at entry before consuming one payload word.
 CUDA stream ordering makes this a post-completion handoff; no programmatic
-dependent launch is used. The host reports:
+dependent launch is used. A timer-only 250-us queue gate is enqueued before
+the measured pair so both producer and sentinel are already queued when the
+producer begins; the host enqueue duration must fit inside the observed gate.
+The gate is excluded from every reported pair interval. The host reports:
 
 - per-CTA issue and explicit-fence intervals;
 - grid span from earliest start through latest post-fence timestamp;
@@ -50,7 +53,8 @@ Identification matrix:
 - depth: 1, 4, 16, 64;
 - active lanes: 32;
 - layout: unique 128-byte line per lane/operation;
-- arms: control, store-none, store-device; and
+- arms: control, store-none, store-device;
+- a store-device active-lanes-zero calibration for the empty-fence cost; and
 - at least 15 independent process repeats with an odd number of in-process
   trials per cell.
 
@@ -69,11 +73,14 @@ and current simulator twin determinism are mandatory.
 
 - All timestamp triplets are nonzero and ordered.
 - The sentinel global timestamp is not earlier than any CTA post-fence time.
+- The queue gate outlives host enqueue of the complete producer/sentinel pair.
 - STORE arms produce the exact expected payload; control leaves it unchanged.
 - The sentinel reads the expected final payload value for every arm.
 - The two STORE arms have identical payload instruction/request/sector work.
 - `store_device` contains exactly one dynamic device-scope fence per CTA;
   `control` and `store_none` contain none.
+- Loaded device-fence work is reported only after subtracting the matched
+  active-lanes-zero store-device fence interval.
 - Repeats retain the raw trial observations; summaries never replace them.
 - The same arm/cell is deterministic in structural counts. Timing variability
   is reported rather than hidden.
