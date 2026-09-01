@@ -291,6 +291,11 @@ fn assert_full_launch_emission_matches_singleton_aggregate(
     .expect("declare singleton full launch set");
     let aggregate = aggregate_full_launch_set(declaration, [result.clone()])
         .expect("aggregate singleton full launch set");
+    assert_eq!(
+        aggregate.l2().map(|counters| counters.lookup_hits),
+        result.l2().map(|counters| counters.lookup_hits),
+        "singleton aggregation must preserve L2 lookup hits"
+    );
     let aggregate_predictions = emit_all(&aggregate).expect("emit singleton aggregate");
 
     let per_launch_keys = per_launch
@@ -790,7 +795,7 @@ fn full_launch_emission_matches_singleton_aggregate_on_real_consumer_path() {
         global_store_sectors: 0,
         l1_read_fraction: (Some(0.0), 0, 8),
         l1_unified_fraction: (Some(0.0), 0, 13),
-        l2_fraction: (Some(3.0 / 9.0), 3, 9),
+        l2_fraction: (Some(5.0 / 9.0), 5, 9),
         dram_read_sectors: 9,
     };
     for (mode, mode_name) in modes {

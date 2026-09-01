@@ -999,9 +999,11 @@ fn emit_l1tex_unified_hit_rate(snap: &CounterSnapshot) -> Result<EmitOutcome, Em
     )?))
 }
 
-/// `lts__t_sector_hit_rate.pct` — the unified L2 sector hit rate. Every LTS
-/// access from all four L2 source lanes is in `l2.hits`/`l2.misses`;
-/// `write_tag_hits` is already a subset of `hits` (do not add it).
+/// `lts__t_sector_hit_rate.pct` — the modeled L1TEX-origin L2 lookup-hit rate.
+/// `lookup_hits` follows the independently validated hardware observer: valid
+/// data hits, reads merging into an already-pending allocation, and every
+/// write-class sector lookup. The physical `hits`/`misses` split remains
+/// unchanged for response pricing and cache state.
 fn emit_l2_hit_rate(snap: &CounterSnapshot) -> Result<EmitOutcome, EmitError> {
     let key = "cache_hit_rate_l2_sector";
     let Some(l2) = snap.l2 else {
@@ -1015,7 +1017,9 @@ fn emit_l2_hit_rate(snap: &CounterSnapshot) -> Result<EmitOutcome, EmitError> {
         &[l2.hits, l2.misses],
     )?;
     Ok(EmitOutcome::Predicted(MetricValue::fraction(
-        key, l2.hits, den,
+        key,
+        l2.lookup_hits,
+        den,
     )?))
 }
 
@@ -2268,6 +2272,7 @@ mod tests {
         let mut l2 = L2Counters::for_arch(ArchId::Sm86);
         l2.hits = 3;
         l2.misses = 1;
+        l2.lookup_hits = 3;
         let mut dram = DramStats::for_arch(ArchId::Sm86);
         dram.read_sectors = 8415;
         dram.bw_delayed_responses = 0;

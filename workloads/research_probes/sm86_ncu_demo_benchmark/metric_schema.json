@@ -89,10 +89,11 @@
       "id": "l2_unified_hit_rate",
       "ncu_metric": "lts__t_sector_hit_rate.pct",
       "ncu_sources": [
-        "lts__t_sectors_lookup_hit.sum",
-        "lts__t_sectors_lookup_miss.sum"
+        "lts__t_sectors_srcunit_tex_lookup_hit.sum",
+        "lts__t_sectors_srcunit_tex_lookup_miss.sum"
       ],
       "ncu_formula": "100 * hit_sectors / (hit_sectors + miss_sectors)",
+      "ncu_scope": "L1TEX-origin L2 sectors only",
       "simulator_source": "metric_predictions.l2_unified_hit_rate_pct",
       "unit": "percent",
       "error": "mape_when_ncu_positive_and_absolute_percentage_point_error",

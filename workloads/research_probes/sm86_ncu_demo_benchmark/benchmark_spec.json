@@ -31,8 +31,8 @@
       "l1tex__t_sectors_pipe_lsu_mem_global_op_ld_lookup_miss.sum",
       "l1tex__t_sectors_lookup_hit.sum",
       "l1tex__t_sectors_lookup_miss.sum",
-      "lts__t_sectors_lookup_hit.sum",
-      "lts__t_sectors_lookup_miss.sum",
+      "lts__t_sectors_srcunit_tex_lookup_hit.sum",
+      "lts__t_sectors_srcunit_tex_lookup_miss.sum",
       "dram__sectors_read.sum"
     ]
   },

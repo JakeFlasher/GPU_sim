@@ -745,6 +745,11 @@ pub struct L2Counters {
     arch: Option<ArchId>,
     pub hits: u64,
     pub misses: u64,
+    /// NCU-style L1TEX-origin lookup hits. In addition to completed-data hits,
+    /// this counts a read merging into a pending allocation and every
+    /// write-class sector lookup. Cache state and response pricing continue to
+    /// use `hits`/`misses`; this is an observer-only classification.
+    pub lookup_hits: u64,
     /// Miss split (state-machine kinds, not the Python 3C diagnostic).
     pub line_misses: u64,
     pub sector_fill_misses: u64,
@@ -758,6 +763,7 @@ pub struct L2Counters {
 pub enum L2CounterField {
     Hits,
     Misses,
+    LookupHits,
     LineMisses,
     SectorFillMisses,
     WriteTagHits,
@@ -768,6 +774,7 @@ impl std::fmt::Display for L2CounterField {
         f.write_str(match self {
             Self::Hits => "hits",
             Self::Misses => "misses",
+            Self::LookupHits => "lookup_hits",
             Self::LineMisses => "line_misses",
             Self::SectorFillMisses => "sector_fill_misses",
             Self::WriteTagHits => "write_tag_hits",
@@ -822,6 +829,7 @@ impl Default for L2Counters {
             arch: None,
             hits: 0,
             misses: 0,
+            lookup_hits: 0,
             line_misses: 0,
             sector_fill_misses: 0,
             write_tag_hits: 0,
@@ -863,6 +871,11 @@ impl L2Counters {
 
         let hits = checked_counter_add(L2CounterField::Hits, self.hits, other.hits)?;
         let misses = checked_counter_add(L2CounterField::Misses, self.misses, other.misses)?;
+        let lookup_hits = checked_counter_add(
+            L2CounterField::LookupHits,
+            self.lookup_hits,
+            other.lookup_hits,
+        )?;
         let line_misses = checked_counter_add(
             L2CounterField::LineMisses,
             self.line_misses,
@@ -881,6 +894,7 @@ impl L2Counters {
 
         self.hits = hits;
         self.misses = misses;
+        self.lookup_hits = lookup_hits;
         self.line_misses = line_misses;
         self.sector_fill_misses = sector_fill_misses;
         self.write_tag_hits = write_tag_hits;
@@ -901,6 +915,11 @@ impl L2Counters {
             arch: Some(current_arch),
             hits: checked_counter_sub(L2CounterField::Hits, self.hits, baseline.hits)?,
             misses: checked_counter_sub(L2CounterField::Misses, self.misses, baseline.misses)?,
+            lookup_hits: checked_counter_sub(
+                L2CounterField::LookupHits,
+                self.lookup_hits,
+                baseline.lookup_hits,
+            )?,
             line_misses: checked_counter_sub(
                 L2CounterField::LineMisses,
                 self.line_misses,
@@ -1204,6 +1223,7 @@ impl L2Model {
                 .ok_or(L2AccessError::ClockOverflow { clock })?;
             let sector_present = line_present && valid_mask & bit != 0;
             let counted_hit = sector_present || (line_present && class == L2OpClass::WriteAtomic);
+            let lookup_hit = counted_hit || class == L2OpClass::WriteAtomic;
 
             if !line_present {
                 let next_bip_counter =
@@ -1236,6 +1256,7 @@ impl L2Model {
                 let mut delta = L2Counters::for_arch(self.cfg.arch);
                 delta.misses = 1;
                 delta.line_misses = 1;
+                delta.lookup_hits = u64::from(lookup_hit);
                 counters.add_checked(&delta)?;
                 if let Some(next) = next_bip_counter {
                     bip_counter = next;
@@ -1254,6 +1275,7 @@ impl L2Model {
                     value.dirty_mask |= bit;
                 }
                 let mut delta = L2Counters::for_arch(self.cfg.arch);
+                delta.lookup_hits = u64::from(lookup_hit);
                 if counted_hit {
                     delta.hits = 1;
                     if !sector_present && class == L2OpClass::WriteAtomic {
@@ -1364,6 +1386,7 @@ impl L2Model {
             let sector_present = line_present && valid_mask & bit != 0;
             let sector_pending = line_present && pending_mask & bit != 0;
             let counted_hit = sector_present || (line_present && class == L2OpClass::WriteAtomic);
+            let lookup_hit = counted_hit || sector_pending || class == L2OpClass::WriteAtomic;
 
             if !line_present {
                 let next_bip_counter =
@@ -1399,6 +1422,7 @@ impl L2Model {
                 let mut delta = L2Counters::for_arch(self.cfg.arch);
                 delta.misses = 1;
                 delta.line_misses = 1;
+                delta.lookup_hits = u64::from(lookup_hit);
                 counters.add_checked(&delta)?;
                 if let Some(next) = next_bip_counter {
                     bip_counter = next;
@@ -1425,6 +1449,7 @@ impl L2Model {
                     }
                 }
                 let mut delta = L2Counters::for_arch(self.cfg.arch);
+                delta.lookup_hits = u64::from(lookup_hit);
                 if counted_hit {
                     delta.hits = 1;
                     if !sector_present && class == L2OpClass::WriteAtomic {
@@ -2155,6 +2180,10 @@ mod tests {
         assert_eq!(second_token.sector_mask(), 0b0100);
         assert_eq!(resident_way(&l2, 3).pending_mask, 0b0111);
         assert_eq!(l2.counters.misses, 5);
+        assert_eq!(
+            l2.counters.lookup_hits, 2,
+            "pending sectors are lookup hits"
+        );
         assert_eq!(l2.counters.line_misses, 1);
         assert_eq!(l2.counters.sector_fill_misses, 4);
 
@@ -2177,6 +2206,7 @@ mod tests {
         assert!(hit.fill.is_none());
         assert_eq!(preview.fill_mask(), 0);
         assert_eq!(preview.pending_merge_mask(), 0);
+        assert_eq!(l2.counters.lookup_hits, 5);
     }
 
     #[test]
@@ -3223,6 +3253,7 @@ mod tests {
         assert!(!rd(&mut l2, 0, 1), "resident line, new sector");
         assert!(rd(&mut l2, 0, 1));
         assert_eq!(l2.counters.line_misses, 1);
+        assert_eq!(l2.counters.lookup_hits, 2);
         assert_eq!(l2.counters.sector_fill_misses, 1);
         assert_eq!(l2.counters.hits, 2);
         assert_eq!(l2.counters.total().unwrap(), 4);
@@ -3362,6 +3393,10 @@ mod tests {
             "write-allocate: the store's line services a later load"
         );
         assert_eq!(l2.counters.line_misses, 1);
+        assert_eq!(
+            l2.counters.lookup_hits, 2,
+            "write plus reread are lookup hits"
+        );
         assert_eq!(l2.counters.write_tag_hits, 0, "cold path grants no tag hit");
     }
 
@@ -3409,6 +3444,7 @@ mod tests {
         let mut total = L2Counters::for_arch(ArchId::Sm86);
         total.hits = 1;
         total.misses = 2;
+        total.lookup_hits = 6;
         total.line_misses = 3;
         total.sector_fill_misses = 4;
         total.write_tag_hits = 5;
@@ -3416,6 +3452,7 @@ mod tests {
         let mut addend = L2Counters::for_arch(ArchId::Sm86);
         addend.hits = 10;
         addend.misses = 11;
+        addend.lookup_hits = 15;
         addend.line_misses = 12;
         addend.sector_fill_misses = 13;
         addend.write_tag_hits = 14;
@@ -3424,6 +3461,7 @@ mod tests {
         assert_eq!(total.arch(), Some(ArchId::Sm86));
         assert_eq!(total.hits, 11);
         assert_eq!(total.misses, 13);
+        assert_eq!(total.lookup_hits, 21);
         assert_eq!(total.line_misses, 15);
         assert_eq!(total.sector_fill_misses, 17);
         assert_eq!(total.write_tag_hits, 19);
@@ -3435,6 +3473,7 @@ mod tests {
         let mut baseline = L2Counters::for_arch(ArchId::Sm86);
         baseline.hits = 3;
         baseline.misses = 5;
+        baseline.lookup_hits = 7;
         baseline.line_misses = 2;
         baseline.sector_fill_misses = 3;
         baseline.write_tag_hits = 1;
@@ -3442,6 +3481,7 @@ mod tests {
         let mut current = baseline;
         current.hits = 13;
         current.misses = 16;
+        current.lookup_hits = 22;
         current.line_misses = 14;
         current.sector_fill_misses = 16;
         current.write_tag_hits = 15;
@@ -3450,6 +3490,7 @@ mod tests {
         assert_eq!(delta.arch(), Some(ArchId::Sm86));
         assert_eq!(delta.hits, 10);
         assert_eq!(delta.misses, 11);
+        assert_eq!(delta.lookup_hits, 15);
         assert_eq!(delta.line_misses, 12);
         assert_eq!(delta.sector_fill_misses, 13);
         assert_eq!(delta.write_tag_hits, 14);
@@ -3492,9 +3533,10 @@ mod tests {
     #[test]
     fn counter_aggregation_overflow_is_typed_and_transactional() {
         type Setter = fn(&mut L2Counters, u64);
-        let cases: [(L2CounterField, Setter); 5] = [
+        let cases: [(L2CounterField, Setter); 6] = [
             (L2CounterField::Hits, |c, v| c.hits = v),
             (L2CounterField::Misses, |c, v| c.misses = v),
+            (L2CounterField::LookupHits, |c, v| c.lookup_hits = v),
             (L2CounterField::LineMisses, |c, v| c.line_misses = v),
             (L2CounterField::SectorFillMisses, |c, v| {
                 c.sector_fill_misses = v
@@ -3586,9 +3628,10 @@ mod tests {
         assert_eq!(bound, before, "architecture mismatch must precede overflow");
 
         type Setter = fn(&mut L2Counters, u64);
-        let order: [(L2CounterField, Setter); 5] = [
+        let order: [(L2CounterField, Setter); 6] = [
             (L2CounterField::Hits, |c, v| c.hits = v),
             (L2CounterField::Misses, |c, v| c.misses = v),
+            (L2CounterField::LookupHits, |c, v| c.lookup_hits = v),
             (L2CounterField::LineMisses, |c, v| c.line_misses = v),
             (L2CounterField::SectorFillMisses, |c, v| {
                 c.sector_fill_misses = v
