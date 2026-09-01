@@ -2033,6 +2033,7 @@ fn fold_kernel_result(
 ) -> Result<FoldedKernelReplay, ReplayError> {
     let mut instructions_issued: u64 = 0;
     let mut diagnostic_last_issue_cycles: u64 = 0;
+    let mut latest_local_completion_cycles: Option<u64> = None;
     let mut unmodeled_tails = TailFlags::default();
     let mut l1_totals = expect_l1.then(|| L1Counters::for_arch(arch));
     for (&sm_id, result) in &per_sm {
@@ -2044,6 +2045,12 @@ fn fold_kernel_result(
                 addend: result.instructions_issued,
             })?;
         diagnostic_last_issue_cycles = diagnostic_last_issue_cycles.max(result.cycles);
+        if let Some(completion) = result.modeled_local_completion_cycles {
+            latest_local_completion_cycles = Some(
+                latest_local_completion_cycles
+                    .map_or(completion, |current| current.max(completion)),
+            );
+        }
         unmodeled_tails = unmodeled_tails.union(result.unmodeled_tails);
         let found_l1 = result.l1.is_some();
         if found_l1 != expect_l1 {
@@ -2066,11 +2073,14 @@ fn fold_kernel_result(
         });
     }
     let issue_frontier = (instructions_issued != 0).then_some(diagnostic_last_issue_cycles);
-    let terminal_modeled_event_time = match (issue_frontier, last_processed_system_event_time) {
-        (Some(issue), Some(system)) => Some(issue.max(system)),
-        (Some(issue), None) => Some(issue),
-        (None, system) => system,
-    };
+    let terminal_modeled_event_time = [
+        issue_frontier,
+        last_processed_system_event_time,
+        latest_local_completion_cycles,
+    ]
+    .into_iter()
+    .flatten()
+    .max();
     let (l2, l2_by_source, dram) = match l2 {
         Some((counters, split, dram)) => (Some(counters), Some(split), Some(dram)),
         None => (None, None, None),
@@ -3216,6 +3226,7 @@ mod stream_l2_session_tests {
             arch: ArchId::Sm86,
             resource_source: IssueResourceSource::SyntheticTestFixture,
             instruction_front_end: None,
+            memory_issue_pipeline: None,
             l1_hit_latency: 1,
             l1_miss_latency: 2,
             global_flat_latency: 4,
@@ -3229,6 +3240,7 @@ mod stream_l2_session_tests {
                 bypass_payload_bytes_per_cycle: 32,
             },
             ldgsts_cache_all_destination_wavefront_cycles: 2,
+            ldgsts_global_to_shared_transport_latency: 0,
             ldgsts_cache_all_destination_service_wavefronts: 2,
             ldgsts_cache_all_destination_service_cycles: 3,
             max_resident_warps_per_sm: 48,
@@ -5640,6 +5652,7 @@ mod aggregation_tests {
         SmSimResult {
             instructions_issued,
             cycles: 1,
+            modeled_local_completion_cycles: None,
             l1,
             unmodeled_tails: TailFlags::default(),
             readiness: crate::ReadinessDiagnostics::default(),
@@ -10387,6 +10400,7 @@ mod completeness_tests {
             arch: ArchId::Sm86,
             resource_source: IssueResourceSource::SyntheticTestFixture,
             instruction_front_end: None,
+            memory_issue_pipeline: None,
             l1_hit_latency: 1,
             l1_miss_latency: 1,
             global_flat_latency: 1,
@@ -10400,6 +10414,7 @@ mod completeness_tests {
                 bypass_payload_bytes_per_cycle: 32,
             },
             ldgsts_cache_all_destination_wavefront_cycles: 2,
+            ldgsts_global_to_shared_transport_latency: 0,
             ldgsts_cache_all_destination_service_wavefronts: 2,
             ldgsts_cache_all_destination_service_cycles: 3,
             max_resident_warps_per_sm: 48,

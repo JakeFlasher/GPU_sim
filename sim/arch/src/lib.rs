@@ -196,6 +196,44 @@ impl ArchId {
         }
     }
 
+    /// Per-SMSP/SM-shared memory issue front end measured by Huerta et al.
+    /// on Ampere. Five instructions fit before backpressure (four queue slots
+    /// plus the dispatch latch), address/operand work accepts one instruction
+    /// every four cycles per SMSP, and the shared structure accepts one every
+    /// two cycles across the SM.
+    pub const fn memory_issue_pipeline(self) -> Capability<MemoryIssuePipeline> {
+        match self {
+            Self::Sm86 => Capability::available(
+                Self::Sm86,
+                MemoryIssuePipeline {
+                    queue_entries_with_dispatch: 5,
+                    local_initiation_interval_cycles: 4,
+                    shared_accept_interval_cycles: 2,
+                    global_load_uniform_war_cycles: 9,
+                    global_load_regular_war_cycles: 11,
+                    global_store_uniform_32_war_cycles: 10,
+                    global_store_uniform_64_war_cycles: 12,
+                    global_store_uniform_128_war_cycles: 16,
+                    global_store_regular_32_war_cycles: 14,
+                    global_store_regular_64_war_cycles: 16,
+                    global_store_regular_128_war_cycles: 20,
+                    shared_load_war_cycles: 9,
+                    shared_store_uniform_32_war_cycles: 10,
+                    shared_store_uniform_64_war_cycles: 12,
+                    shared_store_uniform_128_war_cycles: 16,
+                    shared_store_regular_32_war_cycles: 12,
+                    shared_store_regular_64_war_cycles: 14,
+                    shared_store_regular_128_war_cycles: 18,
+                    ldgsts_war_cycles: 13,
+                },
+            ),
+            Self::Sm120 => Capability::research_gap(
+                Self::Sm120,
+                "sm_120 memory issue queue, address pipeline, and shared acceptance are not modeled",
+            ),
+        }
+    }
+
     /// Tensor-pipe initiation intervals for the exact matrix instructions
     /// admitted by the sm_86 control-sidecar corpus. These are GA10x-local:
     /// one Tensor Core belongs to each SM partition, and the instruction work
@@ -387,6 +425,7 @@ impl ArchId {
                 LdgstsDestinationWavefrontTiming {
                     projection:
                         LdgstsDestinationWavefrontProjection::SourceCohorts128BytesBanks32Words4Bytes,
+                    global_to_shared_transport_cycles: 19,
                     cycles_per_wavefront: 2,
                     aggregate_service_wavefronts: 2,
                     aggregate_service_cycles: 3,
@@ -780,6 +819,29 @@ pub struct InstructionFrontEnd {
     pub fetch_to_issue_stages: u64,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MemoryIssuePipeline {
+    pub queue_entries_with_dispatch: u32,
+    pub local_initiation_interval_cycles: u64,
+    pub shared_accept_interval_cycles: u64,
+    pub global_load_uniform_war_cycles: u64,
+    pub global_load_regular_war_cycles: u64,
+    pub global_store_uniform_32_war_cycles: u64,
+    pub global_store_uniform_64_war_cycles: u64,
+    pub global_store_uniform_128_war_cycles: u64,
+    pub global_store_regular_32_war_cycles: u64,
+    pub global_store_regular_64_war_cycles: u64,
+    pub global_store_regular_128_war_cycles: u64,
+    pub shared_load_war_cycles: u64,
+    pub shared_store_uniform_32_war_cycles: u64,
+    pub shared_store_uniform_64_war_cycles: u64,
+    pub shared_store_uniform_128_war_cycles: u64,
+    pub shared_store_regular_32_war_cycles: u64,
+    pub shared_store_regular_64_war_cycles: u64,
+    pub shared_store_regular_128_war_cycles: u64,
+    pub ldgsts_war_cycles: u64,
+}
+
 /// Per-SMSP initiation intervals for the sm_86 tensor instructions whose
 /// throughput is architecture-backed and whose SASS forms are classified by
 /// `sim-sm`. A separate named field keeps an unsupported matrix shape from
@@ -880,6 +942,9 @@ pub enum LdgstsDestinationWavefrontProjection {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct LdgstsDestinationWavefrontTiming {
     pub projection: LdgstsDestinationWavefrontProjection,
+    /// Fixed transport between the completed global source and the shared
+    /// destination path in the released Ampere model.
+    pub global_to_shared_transport_cycles: u64,
     /// Dependent completion floor for one warp's committed group.
     pub cycles_per_wavefront: u64,
     /// Rational sustained destination service shared by the resident warps of
@@ -985,6 +1050,16 @@ mod tests {
             Err(CapabilityError::ResearchGap {
                 arch: ArchId::Sm120,
                 capability: "instruction_front_end",
+                reason,
+            }) if !reason.is_empty()
+        ));
+        assert!(matches!(
+            ArchId::Sm120
+                .memory_issue_pipeline()
+                .require("memory_issue_pipeline"),
+            Err(CapabilityError::ResearchGap {
+                arch: ArchId::Sm120,
+                capability: "memory_issue_pipeline",
                 reason,
             }) if !reason.is_empty()
         ));
@@ -1109,6 +1184,37 @@ mod tests {
                 instruction_buffer_entries: 3,
                 fetch_decode_width: 1,
                 fetch_to_issue_stages: 2,
+            }
+        );
+    }
+
+    #[test]
+    fn sm86_memory_issue_pipeline_matches_the_released_rtx3090_model() {
+        assert_eq!(
+            ArchId::Sm86
+                .memory_issue_pipeline()
+                .require("memory_issue_pipeline")
+                .unwrap(),
+            MemoryIssuePipeline {
+                queue_entries_with_dispatch: 5,
+                local_initiation_interval_cycles: 4,
+                shared_accept_interval_cycles: 2,
+                global_load_uniform_war_cycles: 9,
+                global_load_regular_war_cycles: 11,
+                global_store_uniform_32_war_cycles: 10,
+                global_store_uniform_64_war_cycles: 12,
+                global_store_uniform_128_war_cycles: 16,
+                global_store_regular_32_war_cycles: 14,
+                global_store_regular_64_war_cycles: 16,
+                global_store_regular_128_war_cycles: 20,
+                shared_load_war_cycles: 9,
+                shared_store_uniform_32_war_cycles: 10,
+                shared_store_uniform_64_war_cycles: 12,
+                shared_store_uniform_128_war_cycles: 16,
+                shared_store_regular_32_war_cycles: 12,
+                shared_store_regular_64_war_cycles: 14,
+                shared_store_regular_128_war_cycles: 18,
+                ldgsts_war_cycles: 13,
             }
         );
     }
@@ -1274,6 +1380,7 @@ mod tests {
             LdgstsDestinationWavefrontTiming {
                 projection:
                     LdgstsDestinationWavefrontProjection::SourceCohorts128BytesBanks32Words4Bytes,
+                global_to_shared_transport_cycles: 19,
                 cycles_per_wavefront: 2,
                 aggregate_service_wavefronts: 2,
                 aggregate_service_cycles: 3,

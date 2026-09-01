@@ -30,12 +30,17 @@
 //!   resident warps and resident shared-memory bytes stay within their
 //!   architecture-local ceilings and concurrent CTAs use disjoint physical warp
 //!   slots; a finished block frees both resources for a later CTA (wave execution).
+//! - Memory dispatch uses the measured Ampere five-entry SMSP queue (four
+//!   queued instructions plus the dispatch latch), operation/register-width
+//!   WAR timing, one local address/operand acceptance every four cycles, and
+//!   one SM-shared acceptance every two cycles. Cache mutation occurs at that
+//!   shared-accept timestamp rather than scheduler dispatch.
 //!
 //! Memory timing comes in three modes ([`SmMemMode`]):
 //! - **Flat**: no cache model; global-class barriers clear at the flat
 //!   cold-DRAM latency (the pre-L1 v0 behavior).
-//! - **L1Const**: a per-SM sectored L1 probed AT ISSUE TIME with fill
-//!   times known at issue (constant L2-hit latency below the L1) — the
+//! - **L1Const**: a per-SM sectored L1 probed at memory-pipeline shared
+//!   acceptance with fill times known there (constant L2-hit latency below the L1) — the
 //!   sim-mem L1 v0 behavior, kept as the lockstep-differential surface.
 //! - **L1Shared**: the request/response INVERSION for the shared L2
 //!   (design §6.3): an L1 miss's fill time is NOT knowable at issue —
@@ -71,12 +76,13 @@ use serde::{Deserialize, Serialize};
 use sim_arch::card::{ArchCard, CalibError, RequiredIssueResources};
 use sim_arch::{
     ArchId, CtaBarrierIssue, FixedL1TexWritebackPriority, InstructionFrontEnd,
-    LdgstsCompletionThroughput, LdgstsDestinationWavefrontProjection, SharedBankProjection,
+    LdgstsCompletionThroughput, LdgstsDestinationWavefrontProjection, MemoryIssuePipeline,
+    SharedBankProjection,
 };
 use sim_mem::{
     AsyncCopyCompletion, CacheOpToken, EvAccess, EvAccessUnobserved, FillKey, L1AccessError,
     L1Cache, L1Config, L1Counters, L1LookupBatch, L1MutationBudget, L2OpClass, L2Source,
-    LdgstsL1Policy, MemRole, MemoryOrigin, decode_async_copy_completion,
+    LdgstsL1Policy, MemRole, MemoryOrigin, decode_async_copy_completion, opcode_head,
 };
 
 use crate::control_bits::{ControlDomainError, DepBarrier, WaitMask};
@@ -258,6 +264,9 @@ pub struct IssueModelParams {
     /// issue mechanism; production constructors always bind an architecture
     /// capability here.
     pub(crate) instruction_front_end: Option<InstructionFrontEnd>,
+    /// Published per-SMSP and SM-shared memory issue pipeline. `None` is
+    /// restricted to synthetic unit fixtures that isolate another mechanism.
+    pub(crate) memory_issue_pipeline: Option<MemoryIssuePipeline>,
     /// L1 hit data-ready latency (card `l1_hit_latency_cycles`, ceiled).
     pub(crate) l1_hit_latency: u64,
     /// End-to-end L1-miss/L2-HIT data-ready latency (card
@@ -296,6 +305,9 @@ pub struct IssueModelParams {
     /// source-cohort-scoped bank wavefront contributes this many cycles; bypass
     /// copies retain payload fallback until their distinct projection is known.
     pub(crate) ldgsts_cache_all_destination_wavefront_cycles: u64,
+    /// Fixed global-source to shared-destination transport after source data
+    /// becomes available.
+    pub(crate) ldgsts_global_to_shared_transport_latency: u64,
     /// Rational aggregate cache-all destination service shared by one SM.
     pub(crate) ldgsts_cache_all_destination_service_wavefronts: u64,
     pub(crate) ldgsts_cache_all_destination_service_cycles: u64,
@@ -385,6 +397,19 @@ fn ldgsts_cache_all_destination_wavefront_cycles(arch: ArchId) -> Result<u64, Is
     Ok(timing.cycles_per_wavefront)
 }
 
+fn ldgsts_global_to_shared_transport_latency(arch: ArchId) -> Result<u64, IssueError> {
+    let timing = arch
+        .ldgsts_destination_wavefront_timing()
+        .require("ldgsts_destination_wavefront_timing")?;
+    if timing.global_to_shared_transport_cycles == 0 {
+        return Err(IssueError::InvalidLdgstsDestinationWavefrontTiming {
+            arch,
+            cycles_per_wavefront: timing.global_to_shared_transport_cycles,
+        });
+    }
+    Ok(timing.global_to_shared_transport_cycles)
+}
+
 fn ldgsts_cache_all_destination_service_rate(arch: ArchId) -> Result<(u64, u64), IssueError> {
     let timing = arch
         .ldgsts_destination_wavefront_timing()
@@ -421,6 +446,8 @@ impl IssueModelParams {
         let ldgsts_completion_throughput = ldgsts_completion_throughput(arch)?;
         let ldgsts_cache_all_destination_wavefront_cycles =
             ldgsts_cache_all_destination_wavefront_cycles(arch)?;
+        let ldgsts_global_to_shared_transport_latency =
+            ldgsts_global_to_shared_transport_latency(arch)?;
         let (
             ldgsts_cache_all_destination_service_wavefronts,
             ldgsts_cache_all_destination_service_cycles,
@@ -432,6 +459,10 @@ impl IssueModelParams {
                 arch.instruction_front_end()
                     .require("instruction_front_end")?,
             ),
+            memory_issue_pipeline: Some(
+                arch.memory_issue_pipeline()
+                    .require("memory_issue_pipeline")?,
+            ),
             l1_hit_latency: checked_latency("l1_hit_cycles", l1_hit_cycles)?,
             l1_miss_latency: checked_latency("l2_hit_cycles", l2_hit_cycles)?,
             global_flat_latency: checked_latency("dram_cycles", dram_cycles)?,
@@ -442,6 +473,7 @@ impl IssueModelParams {
             ldgsts_l1_mshr_floor,
             ldgsts_completion_throughput,
             ldgsts_cache_all_destination_wavefront_cycles,
+            ldgsts_global_to_shared_transport_latency,
             ldgsts_cache_all_destination_service_wavefronts,
             ldgsts_cache_all_destination_service_cycles,
             max_resident_warps_per_sm: hypotheses.max_resident_warps_per_sm,
@@ -468,6 +500,8 @@ impl IssueModelParams {
         let ldgsts_completion_throughput = ldgsts_completion_throughput(arch)?;
         let ldgsts_cache_all_destination_wavefront_cycles =
             ldgsts_cache_all_destination_wavefront_cycles(arch)?;
+        let ldgsts_global_to_shared_transport_latency =
+            ldgsts_global_to_shared_transport_latency(arch)?;
         let (
             ldgsts_cache_all_destination_service_wavefronts,
             ldgsts_cache_all_destination_service_cycles,
@@ -479,6 +513,10 @@ impl IssueModelParams {
                 arch.instruction_front_end()
                     .require("instruction_front_end")?,
             ),
+            memory_issue_pipeline: Some(
+                arch.memory_issue_pipeline()
+                    .require("memory_issue_pipeline")?,
+            ),
             l1_hit_latency: checked_latency("l1_hit_cycles", latencies.l1_hit)?,
             l1_miss_latency: checked_latency("l2_hit_cycles", latencies.l2_hit)?,
             global_flat_latency: checked_latency("dram_cycles", latencies.dram)?,
@@ -489,6 +527,7 @@ impl IssueModelParams {
             ldgsts_l1_mshr_floor,
             ldgsts_completion_throughput,
             ldgsts_cache_all_destination_wavefront_cycles,
+            ldgsts_global_to_shared_transport_latency,
             ldgsts_cache_all_destination_service_wavefronts,
             ldgsts_cache_all_destination_service_cycles,
             max_resident_warps_per_sm: resources.occupancy.max_resident_warps_per_sm,
@@ -505,6 +544,10 @@ impl IssueModelParams {
 
     pub const fn instruction_front_end(&self) -> Option<InstructionFrontEnd> {
         self.instruction_front_end
+    }
+
+    pub const fn memory_issue_pipeline(&self) -> Option<MemoryIssuePipeline> {
+        self.memory_issue_pipeline
     }
 
     pub const fn l1_hit_latency(&self) -> u64 {
@@ -547,6 +590,10 @@ impl IssueModelParams {
         self.ldgsts_cache_all_destination_wavefront_cycles
     }
 
+    pub const fn ldgsts_global_to_shared_transport_latency(&self) -> u64 {
+        self.ldgsts_global_to_shared_transport_latency
+    }
+
     pub const fn ldgsts_cache_all_destination_service_wavefronts(&self) -> u64 {
         self.ldgsts_cache_all_destination_service_wavefronts
     }
@@ -569,9 +616,14 @@ impl IssueModelParams {
     }
 
     fn ldgsts_completion_ready(&self, source_ready: u64, work: u64) -> Result<u64, IssueError> {
+        let transported = checked_cycle_add(
+            "LDGSTS global-to-shared transport",
+            source_ready,
+            self.ldgsts_global_to_shared_transport_latency,
+        )?;
         checked_cycle_add(
             "LDGSTS payload completion floor",
-            source_ready,
+            transported,
             self.ldgsts_delivery_cycles(work),
         )
     }
@@ -693,12 +745,34 @@ impl IssueModelParams {
                         });
                     }
                 }
+                let memory_issue_pipeline = self
+                    .arch
+                    .memory_issue_pipeline()
+                    .require("memory_issue_pipeline")?;
+                let Some(got_memory_pipeline) = self.memory_issue_pipeline else {
+                    return Err(IssueError::ArchitectureDefaultMismatch {
+                        arch: self.arch,
+                        field: "memory_issue_pipeline_present",
+                        expected: 1,
+                        got: 0,
+                    });
+                };
+                if got_memory_pipeline != memory_issue_pipeline {
+                    return Err(IssueError::ArchitectureDefaultMismatch {
+                        arch: self.arch,
+                        field: "memory_issue_pipeline_configuration",
+                        expected: 1,
+                        got: 0,
+                    });
+                }
                 let shared_additional_wavefront_latency =
                     shared_additional_wavefront_latency(self.arch)?;
                 let ldgsts_l1_mshr_floor = ldgsts_l1_mshr_floor(self.arch)?;
                 let ldgsts_completion_throughput = ldgsts_completion_throughput(self.arch)?;
                 let ldgsts_cache_all_destination_wavefront_cycles =
                     ldgsts_cache_all_destination_wavefront_cycles(self.arch)?;
+                let ldgsts_global_to_shared_transport_latency =
+                    ldgsts_global_to_shared_transport_latency(self.arch)?;
                 let (
                     ldgsts_cache_all_destination_service_wavefronts,
                     ldgsts_cache_all_destination_service_cycles,
@@ -730,6 +804,11 @@ impl IssueModelParams {
                         "ldgsts_cache_all_destination_wavefront_cycles",
                         ldgsts_cache_all_destination_wavefront_cycles,
                         self.ldgsts_cache_all_destination_wavefront_cycles,
+                    ),
+                    (
+                        "ldgsts_global_to_shared_transport_latency",
+                        ldgsts_global_to_shared_transport_latency,
+                        self.ldgsts_global_to_shared_transport_latency,
                     ),
                     (
                         "ldgsts_cache_all_destination_service_wavefronts",
@@ -1240,6 +1319,10 @@ pub enum IssueError {
         expected: usize,
         got: usize,
     },
+    #[error("memory issue-pipeline configuration has invalid {field}={value}")]
+    MemoryIssuePipelineConfigurationInvalid { field: &'static str, value: u64 },
+    #[error("memory issue-pipeline queue on subcore {subcore} is full at t={time}")]
+    MemoryIssuePipelineQueueFull { subcore: usize, time: u64 },
     #[error("L1 access failed: {0}")]
     L1Access(#[from] L1AccessError),
     #[error("L1 configuration is invalid: {0}")]
@@ -1472,6 +1555,8 @@ pub struct ReadinessCauseCycles {
     #[serde(skip_serializing_if = "is_zero_u64")]
     pub memory_admission_queue: u64,
     #[serde(skip_serializing_if = "is_zero_u64")]
+    pub memory_issue_queue: u64,
+    #[serde(skip_serializing_if = "is_zero_u64")]
     pub memory_write_completion: u64,
     pub eligible_not_selected: u64,
 }
@@ -1507,6 +1592,7 @@ impl ReadinessCauseCycles {
         add!(pipeline_branch);
         add!(pipeline_tensor);
         add!(memory_admission_queue);
+        add!(memory_issue_queue);
         add!(memory_write_completion);
         add!(eligible_not_selected);
         *self = next;
@@ -4434,6 +4520,60 @@ impl InstructionFrontEndDiagnostics {
     }
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
+pub struct MemoryIssuePipelineDiagnostics {
+    pub instructions_admitted: u64,
+    pub operand_pipeline_delay_cycles: u64,
+    pub shared_queue_delay_cycles: u64,
+    pub maximum_operand_pipeline_delay_cycles: u64,
+    pub maximum_shared_queue_delay_cycles: u64,
+    pub maximum_queue_occupancy: u64,
+    pub terminal_shared_accept_cycle: u64,
+}
+
+impl MemoryIssuePipelineDiagnostics {
+    pub const fn is_empty(&self) -> bool {
+        self.instructions_admitted == 0
+    }
+
+    fn add_checked(&mut self, addend: &Self) -> Result<(), ReadinessCounterError> {
+        let mut next = *self;
+        for (field, target, value) in [
+            (
+                "readiness.memory_issue_pipeline.instructions_admitted",
+                &mut next.instructions_admitted,
+                addend.instructions_admitted,
+            ),
+            (
+                "readiness.memory_issue_pipeline.operand_pipeline_delay_cycles",
+                &mut next.operand_pipeline_delay_cycles,
+                addend.operand_pipeline_delay_cycles,
+            ),
+            (
+                "readiness.memory_issue_pipeline.shared_queue_delay_cycles",
+                &mut next.shared_queue_delay_cycles,
+                addend.shared_queue_delay_cycles,
+            ),
+        ] {
+            *target = checked_readiness_add(field, *target, value)?;
+        }
+        next.maximum_operand_pipeline_delay_cycles = next
+            .maximum_operand_pipeline_delay_cycles
+            .max(addend.maximum_operand_pipeline_delay_cycles);
+        next.maximum_shared_queue_delay_cycles = next
+            .maximum_shared_queue_delay_cycles
+            .max(addend.maximum_shared_queue_delay_cycles);
+        next.maximum_queue_occupancy = next
+            .maximum_queue_occupancy
+            .max(addend.maximum_queue_occupancy);
+        next.terminal_shared_accept_cycle = next
+            .terminal_shared_accept_cycle
+            .max(addend.terminal_shared_accept_cycle);
+        *self = next;
+        Ok(())
+    }
+}
+
 /// Deterministic causal readiness summary for one SM replay.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 pub struct ReadinessDiagnostics {
@@ -4443,6 +4583,8 @@ pub struct ReadinessDiagnostics {
     pub tied_limiting_causes: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub instruction_front_end: Option<Box<InstructionFrontEndDiagnostics>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub memory_issue_pipeline: Option<Box<MemoryIssuePipelineDiagnostics>>,
     pub async_groups: AsyncReadinessDiagnostics,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub async_instrumentation_order: Option<Box<AsyncInstrumentationOrderDiagnostics>>,
@@ -4495,6 +4637,13 @@ impl ReadinessDiagnostics {
                 current.add_checked(addend_front_end)?;
             } else {
                 next.instruction_front_end = Some(Box::new(*addend_front_end));
+            }
+        }
+        if let Some(addend_memory_pipeline) = addend.memory_issue_pipeline.as_deref() {
+            if let Some(current) = next.memory_issue_pipeline.as_deref_mut() {
+                current.add_checked(addend_memory_pipeline)?;
+            } else {
+                next.memory_issue_pipeline = Some(Box::new(*addend_memory_pipeline));
             }
         }
         next.async_groups.add_checked(&addend.async_groups)?;
@@ -4595,10 +4744,13 @@ impl ReadinessDiagnostics {
     /// Schema 22 makes the existing opt-in STORE/RED write-completion frontier
     /// a drained shared-system event and reports its exact lifecycle. Schema 23
     /// adds the active private-L0/shared-L1 instruction hierarchy, stream-buffer
-    /// prefetcher, and three-entry per-warp instruction buffers.
+    /// prefetcher, and three-entry per-warp instruction buffers. Schema 24 adds
+    /// the active per-SMSP memory queue/address pipeline and SM-shared acceptor.
     pub fn schema_version(&self) -> u32 {
         let feedback = self.memory_admission_feedback.as_deref();
-        if self.instruction_front_end.is_some() {
+        if self.memory_issue_pipeline.is_some() {
+            24
+        } else if self.instruction_front_end.is_some() {
             23
         } else if self.memory_write_ack.is_some() {
             22
@@ -4680,6 +4832,9 @@ pub struct SmSimResult {
     /// tail of the final loads is not counted — write-back completion is
     /// not an issue event).
     pub cycles: u64,
+    /// Latest completion of an active SM-local pipeline after scheduler issue.
+    /// This remains separate from `cycles`, the issue frontier.
+    pub modeled_local_completion_cycles: Option<u64>,
     /// This SM's L1 counters when an L1 model was attached.
     pub l1: Option<L1Counters>,
     /// Explicit capability gaps for write-class tails present in this replay.
@@ -5565,6 +5720,226 @@ struct BufferedInstruction {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MemoryOperandWidth {
+    Bits32,
+    Bits64,
+    Bits128,
+}
+
+fn memory_operand_width(opcode: &str) -> MemoryOperandWidth {
+    if opcode.split('.').any(|modifier| modifier == "128") {
+        MemoryOperandWidth::Bits128
+    } else if opcode.split('.').any(|modifier| modifier == "64") {
+        MemoryOperandWidth::Bits64
+    } else {
+        MemoryOperandWidth::Bits32
+    }
+}
+
+fn memory_address_is_uniform(opcode_text: &str) -> bool {
+    opcode_text
+        .split_once('[')
+        .and_then(|(_, tail)| tail.split_once(']'))
+        .is_some_and(|(address, _)| {
+            address
+                .split(|character: char| !character.is_ascii_alphanumeric())
+                .any(|token| token.starts_with("UR"))
+        })
+}
+
+#[derive(Debug, Clone, Copy)]
+struct MemoryPipelineSlot {
+    operand_ready_latency: u64,
+}
+
+fn memory_pipeline_slot(
+    slot: &IssueSlot,
+    config: MemoryIssuePipeline,
+) -> Option<MemoryPipelineSlot> {
+    let head = opcode_head(slot.opcode_text());
+    let uniform = memory_address_is_uniform(slot.opcode_text());
+    let width = memory_operand_width(
+        slot.opcode_text()
+            .split_ascii_whitespace()
+            .next()
+            .unwrap_or(""),
+    );
+    let store_latency = |shared: bool| match (shared, uniform, width) {
+        (false, true, MemoryOperandWidth::Bits32) => config.global_store_uniform_32_war_cycles,
+        (false, true, MemoryOperandWidth::Bits64) => config.global_store_uniform_64_war_cycles,
+        (false, true, MemoryOperandWidth::Bits128) => config.global_store_uniform_128_war_cycles,
+        (false, false, MemoryOperandWidth::Bits32) => config.global_store_regular_32_war_cycles,
+        (false, false, MemoryOperandWidth::Bits64) => config.global_store_regular_64_war_cycles,
+        (false, false, MemoryOperandWidth::Bits128) => config.global_store_regular_128_war_cycles,
+        (true, true, MemoryOperandWidth::Bits32) => config.shared_store_uniform_32_war_cycles,
+        (true, true, MemoryOperandWidth::Bits64) => config.shared_store_uniform_64_war_cycles,
+        (true, true, MemoryOperandWidth::Bits128) => config.shared_store_uniform_128_war_cycles,
+        (true, false, MemoryOperandWidth::Bits32) => config.shared_store_regular_32_war_cycles,
+        (true, false, MemoryOperandWidth::Bits64) => config.shared_store_regular_64_war_cycles,
+        (true, false, MemoryOperandWidth::Bits128) => config.shared_store_regular_128_war_cycles,
+    };
+    let operand_ready_latency = match head {
+        "LDGSTS" => config.ldgsts_war_cycles,
+        "LDG" | "LD" | "LDC" | "LDL" => {
+            if uniform {
+                config.global_load_uniform_war_cycles
+            } else {
+                config.global_load_regular_war_cycles
+            }
+        }
+        "STG" | "STL" => store_latency(false),
+        "LDS" | "LDSM" => config.shared_load_war_cycles,
+        "STS" => store_latency(true),
+        _ => return None,
+    };
+    Some(MemoryPipelineSlot {
+        operand_ready_latency,
+    })
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+struct MemoryPipelineIssue {
+    operand_ready_at: u64,
+    shared_accept_at: u64,
+}
+
+#[derive(Debug, Clone)]
+struct MemoryIssuePipelineState {
+    config: MemoryIssuePipeline,
+    queue_release_times: [VecDeque<u64>; SUB_CORES],
+    local_completion_ready: [u64; SUB_CORES],
+    shared_accept_ready: u64,
+    diagnostics: MemoryIssuePipelineDiagnostics,
+}
+
+#[derive(Debug, Clone)]
+struct MemoryIssuePipelinePlan {
+    next: MemoryIssuePipelineState,
+    issues: [Option<MemoryPipelineIssue>; SUB_CORES],
+}
+
+impl MemoryIssuePipelineState {
+    fn new(config: MemoryIssuePipeline) -> Result<Self, IssueError> {
+        if config.queue_entries_with_dispatch == 0 {
+            return Err(IssueError::MemoryIssuePipelineConfigurationInvalid {
+                field: "queue_entries_with_dispatch",
+                value: 0,
+            });
+        }
+        for (field, value) in [
+            (
+                "local_initiation_interval_cycles",
+                config.local_initiation_interval_cycles,
+            ),
+            (
+                "shared_accept_interval_cycles",
+                config.shared_accept_interval_cycles,
+            ),
+        ] {
+            if value == 0 {
+                return Err(IssueError::MemoryIssuePipelineConfigurationInvalid { field, value });
+            }
+        }
+        Ok(Self {
+            config,
+            queue_release_times: std::array::from_fn(|_| VecDeque::new()),
+            local_completion_ready: [0; SUB_CORES],
+            shared_accept_ready: 0,
+            diagnostics: MemoryIssuePipelineDiagnostics::default(),
+        })
+    }
+
+    fn prune(&mut self, now: u64) {
+        for queue in &mut self.queue_release_times {
+            while queue.front().is_some_and(|&release| release <= now) {
+                queue.pop_front();
+            }
+        }
+    }
+
+    fn admission_ready_at(&self, subcore: usize) -> u64 {
+        let queue = &self.queue_release_times[subcore];
+        if queue.len() < self.config.queue_entries_with_dispatch as usize {
+            0
+        } else {
+            queue.front().copied().unwrap_or(0)
+        }
+    }
+
+    fn plan(
+        &self,
+        selected: [Option<MemoryPipelineSlot>; SUB_CORES],
+        now: u64,
+    ) -> Result<MemoryIssuePipelinePlan, IssueError> {
+        let mut next = self.clone();
+        let mut issues = [None; SUB_CORES];
+        for (subcore, slot) in selected.into_iter().enumerate() {
+            let Some(slot) = slot else { continue };
+            if next.queue_release_times[subcore].len()
+                >= next.config.queue_entries_with_dispatch as usize
+            {
+                return Err(IssueError::MemoryIssuePipelineQueueFull { subcore, time: now });
+            }
+            let nominal_operand_ready = checked_cycle_add(
+                "memory operand/address readiness",
+                now,
+                slot.operand_ready_latency,
+            )?;
+            let operand_ready_at = nominal_operand_ready.max(next.local_completion_ready[subcore]);
+            next.local_completion_ready[subcore] = checked_cycle_add(
+                "memory local initiation interval",
+                operand_ready_at,
+                next.config.local_initiation_interval_cycles,
+            )?;
+            let shared_accept_at = operand_ready_at.max(next.shared_accept_ready);
+            next.shared_accept_ready = checked_cycle_add(
+                "memory SM-shared acceptance interval",
+                shared_accept_at,
+                next.config.shared_accept_interval_cycles,
+            )?;
+            next.queue_release_times[subcore].push_back(shared_accept_at);
+            let diagnostics = &mut next.diagnostics;
+            diagnostics.instructions_admitted = checked_u64_counter_add(
+                "memory-pipeline admitted instruction",
+                diagnostics.instructions_admitted,
+                1,
+            )?;
+            diagnostics.operand_pipeline_delay_cycles = checked_u64_counter_add(
+                "memory-pipeline operand delay",
+                diagnostics.operand_pipeline_delay_cycles,
+                operand_ready_at - nominal_operand_ready,
+            )?;
+            diagnostics.shared_queue_delay_cycles = checked_u64_counter_add(
+                "memory-pipeline shared queue delay",
+                diagnostics.shared_queue_delay_cycles,
+                shared_accept_at - operand_ready_at,
+            )?;
+            diagnostics.maximum_operand_pipeline_delay_cycles = diagnostics
+                .maximum_operand_pipeline_delay_cycles
+                .max(operand_ready_at - nominal_operand_ready);
+            diagnostics.maximum_shared_queue_delay_cycles = diagnostics
+                .maximum_shared_queue_delay_cycles
+                .max(shared_accept_at - operand_ready_at);
+            diagnostics.maximum_queue_occupancy = diagnostics.maximum_queue_occupancy.max(
+                u64::try_from(next.queue_release_times[subcore].len()).map_err(|_| {
+                    IssueError::CounterOverflow {
+                        counter: "memory-pipeline queue occupancy",
+                    }
+                })?,
+            );
+            diagnostics.terminal_shared_accept_cycle = diagnostics
+                .terminal_shared_accept_cycle
+                .max(shared_accept_at);
+            issues[subcore] = Some(MemoryPipelineIssue {
+                operand_ready_at,
+                shared_accept_at,
+            });
+        }
+        Ok(MemoryIssuePipelinePlan { next, issues })
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ResultWritebackKind {
     FixedHadd2 { bank: u8 },
     L1TexStrongSmU32 { bank: u8 },
@@ -5655,6 +6030,7 @@ enum ReadinessCause {
     PipelineBranch,
     PipelineTensor,
     MemoryAdmissionQueue,
+    MemoryIssueQueue,
     MemoryWriteCompletion,
     ControlStall,
 }
@@ -5752,6 +6128,10 @@ impl ReadinessCauseCycles {
             ReadinessCause::MemoryAdmissionQueue => (
                 "memory-admission queue readiness",
                 &mut self.memory_admission_queue,
+            ),
+            ReadinessCause::MemoryIssueQueue => (
+                "memory issue-pipeline queue readiness",
+                &mut self.memory_issue_queue,
             ),
             ReadinessCause::MemoryWriteCompletion => (
                 "memory write-completion readiness",
@@ -7951,10 +8331,12 @@ pub(crate) struct SmCore<'a> {
     /// pointer-chasing B-tree lookup for every dynamic issue while preserving
     /// the schedule map as the authoritative join/diagnostic surface.
     schedule_slots: Vec<(u64, &'a IssueSlot)>,
+    memory_pipeline_schedule: HashMap<u64, MemoryPipelineSlot>,
     params: IssueModelParams,
     shared_memory_residency: SharedMemoryResidency,
     physical_warp_slots: u32,
     instruction_front_end: Option<InstructionFrontEndState>,
+    memory_issue_pipeline: Option<MemoryIssuePipelineState>,
     mem: MemModel,
     blocks: &'a [BlockReplay],
     block_live_warps: Vec<u32>,
@@ -8042,6 +8424,14 @@ impl<'a> SmCore<'a> {
             .iter()
             .map(|(&pc, slot)| (pc, slot))
             .collect::<Vec<_>>();
+        let mut memory_pipeline_schedule = HashMap::new();
+        if let Some(config) = params.memory_issue_pipeline {
+            for (&pc, slot) in &schedule.by_pc {
+                if let Some(memory_slot) = memory_pipeline_slot(slot, config) {
+                    memory_pipeline_schedule.insert(pc, memory_slot);
+                }
+            }
+        }
         // Validate the complete dynamic/static join and every actor-cardinality
         // conversion before constructing mutable replay state. A later block
         // admission must not discover an unknown PC or overflow after earlier
@@ -8193,7 +8583,11 @@ impl<'a> SmCore<'a> {
         };
         let instruction_front_end = params
             .instruction_front_end
-            .map(|config| InstructionFrontEndState::new(config, params.global_flat_latency))
+            .map(|config| InstructionFrontEndState::new(config, params.l1_miss_latency))
+            .transpose()?;
+        let memory_issue_pipeline = params
+            .memory_issue_pipeline
+            .map(MemoryIssuePipelineState::new)
             .transpose()?;
         let mut barrier_issue = None;
         for slot in schedule.by_pc.values() {
@@ -8249,10 +8643,12 @@ impl<'a> SmCore<'a> {
         let mut core = Self {
             schedule,
             schedule_slots,
+            memory_pipeline_schedule,
             params: *params,
             shared_memory_residency,
             physical_warp_slots,
             instruction_front_end,
+            memory_issue_pipeline,
             mem,
             blocks,
             block_live_warps,
@@ -8407,6 +8803,9 @@ impl<'a> SmCore<'a> {
         if let Some(front_end) = self.instruction_front_end.as_ref() {
             readiness.instruction_front_end = Some(Box::new(front_end.diagnostics));
         }
+        if let Some(memory_pipeline) = self.memory_issue_pipeline.as_ref() {
+            readiness.memory_issue_pipeline = Some(Box::new(memory_pipeline.diagnostics));
+        }
         readiness.memory_service_candidates = self.memory_service_candidates.diagnostics();
         if let Some(feedback) = self.memory_admission_feedback.as_ref() {
             readiness.memory_admission_feedback = Some(Box::new(feedback.diagnostics()));
@@ -8418,6 +8817,11 @@ impl<'a> SmCore<'a> {
         SmSimResult {
             instructions_issued: self.issued,
             cycles: self.t,
+            modeled_local_completion_cycles: self
+                .memory_issue_pipeline
+                .as_ref()
+                .filter(|pipeline| !pipeline.diagnostics.is_empty())
+                .map(|pipeline| pipeline.diagnostics.terminal_shared_accept_cycle),
             l1: self.mem.l1().map(|c| c.counters),
             unmodeled_tails: self.unmodeled_tails,
             readiness,
@@ -8635,9 +9039,10 @@ impl<'a> SmCore<'a> {
         sectors: &'a [i64],
         write_barrier: Option<DepBarrier>,
         destination_wavefronts: u64,
+        memory_time: u64,
         out: &mut Vec<MemRequest>,
     ) -> Result<Option<u64>, IssueError> {
-        let t = self.t;
+        let t = memory_time;
         let p = self.params;
         let emit_admission_witnesses = self.emit_admission_witnesses;
         let MemModel::L1Shared(st) = &mut self.mem else {
@@ -9546,6 +9951,22 @@ impl<'a> SmCore<'a> {
                 base,
                 until,
                 ReadinessCause::InstructionFrontEnd,
+                &mut ready_at,
+                &mut limiting,
+                &mut tied,
+            )?;
+        }
+        if let Some(memory_pipeline) = self.memory_issue_pipeline.as_ref()
+            && self
+                .memory_pipeline_schedule
+                .contains_key(&u64::from(warp.insts[warp.next].pc))
+            && !matches!(kind, AccessKind::PredicatedOffMemory)
+        {
+            observe_readiness_constraint(
+                projected,
+                base,
+                memory_pipeline.admission_ready_at(subcore),
+                ReadinessCause::MemoryIssueQueue,
                 &mut ready_at,
                 &mut limiting,
                 &mut tied,
@@ -10501,6 +10922,18 @@ impl<'a> SmCore<'a> {
         if self.instruction_front_end.is_some() {
             warp_ready = warp_ready.max(self.warps[warp].instruction_front_end_ready_at()?);
         }
+        if let Some(memory_pipeline) = self.memory_issue_pipeline.as_ref() {
+            let state = &self.warps[warp];
+            let pc = u64::from(state.insts[state.next].pc);
+            if self.memory_pipeline_schedule.contains_key(&pc)
+                && !matches!(
+                    state.insts[state.next].kind,
+                    AccessKind::PredicatedOffMemory
+                )
+            {
+                warp_ready = warp_ready.max(memory_pipeline.admission_ready_at(subcore));
+            }
+        }
         if let Some(feedback) = self.memory_admission_feedback.as_ref() {
             let state = &self.warps[warp];
             let admission_ready =
@@ -10766,6 +11199,9 @@ impl<'a> SmCore<'a> {
                 return Ok(Advance::Idle {
                     wake_at: Some(self.t),
                 });
+            }
+            if let Some(memory_pipeline) = self.memory_issue_pipeline.as_mut() {
+                memory_pipeline.prune(self.t);
             }
             self.instruction_front_end_cycle()?;
             let before = out.len();
@@ -11756,6 +12192,27 @@ impl<'a> SmCore<'a> {
         } else {
             self.pick_warps_with_memory_admission::<false>(t)
         };
+        let memory_pipeline_plan =
+            if let Some(memory_pipeline) = self.memory_issue_pipeline.as_ref() {
+                let mut selected = [None; SUB_CORES];
+                for (subcore, pick) in picks.iter().enumerate() {
+                    let Some(warp) = *pick else { continue };
+                    let state = &self.warps[warp];
+                    if matches!(
+                        state.insts[state.next].kind,
+                        AccessKind::PredicatedOffMemory
+                    ) {
+                        continue;
+                    }
+                    selected[subcore] = self
+                        .memory_pipeline_schedule
+                        .get(&u64::from(state.insts[state.next].pc))
+                        .copied();
+                }
+                Some(memory_pipeline.plan(selected, t)?)
+            } else {
+                None
+            };
         let barrier_arrival_times = self.project_barrier_arrival_times(&picks, t)?;
         let mut async_destination_wavefronts = [0; SUB_CORES];
         for (subcore, pick) in picks.iter().enumerate() {
@@ -11949,9 +12406,14 @@ impl<'a> SmCore<'a> {
                 .flatten();
             let observe_async_copy =
                 self.has_async_copy_protocol && async_copy_source_count(inst.kind).is_some();
+            let memory_pipeline_issue = memory_pipeline_plan
+                .as_ref()
+                .and_then(|plan| plan.issues[sc]);
+            let memory_time = memory_pipeline_issue.map_or(t, |issue| issue.shared_accept_at);
 
-            // Memory-model interaction happens at issue time regardless of
-            // whether a dependence barrier consumes the ready time.
+            // Memory hierarchy mutation happens when the local address/operand
+            // stages reach the SM-shared acceptor, not when the scheduler first
+            // dispatches the instruction.
             let data_ready = if matches!(self.mem, MemModel::L1Shared(_)) {
                 self.mem_step_shared(
                     sc,
@@ -11961,13 +12423,14 @@ impl<'a> SmCore<'a> {
                     warp_sectors,
                     write_barrier,
                     async_destination_wavefronts[sc],
+                    memory_time,
                     out,
                 )?
             } else {
                 data_ready_time(
                     inst.kind,
                     warp_sectors,
-                    t,
+                    memory_time,
                     &self.params,
                     self.mem.const_l1_mut(),
                     write_barrier,
@@ -12049,10 +12512,15 @@ impl<'a> SmCore<'a> {
                 self.apply_fixed_result_priority(sc, result_writeback, &mut projected_readiness)?;
             }
             if produces_dynamic_effects && let Some(read_barrier) = control.read_barrier {
-                let read_clear = checked_cycle_add(
-                    "read-dependence barrier visibility",
-                    t,
-                    self.params.read_barrier_latency,
+                let read_clear = memory_pipeline_issue.map_or_else(
+                    || {
+                        checked_cycle_add(
+                            "read-dependence barrier visibility",
+                            t,
+                            self.params.read_barrier_latency,
+                        )
+                    },
+                    |issue| Ok(issue.operand_ready_at),
                 )?;
                 self.warps[wix].stamp_clear(
                     Some(read_barrier),
@@ -12279,6 +12747,9 @@ impl<'a> SmCore<'a> {
                     }
                 }
             }
+        }
+        if let Some(plan) = memory_pipeline_plan {
+            self.memory_issue_pipeline = Some(plan.next);
         }
         self.issued = next_issued;
         self.readiness = projected_readiness;
@@ -12774,7 +13245,7 @@ mod tests {
         assert!(std::mem::size_of::<MemoryAdmissionCandidateState>() <= 24);
         assert!(std::mem::size_of::<ReadinessDiagnostics>() <= 1024);
         assert!(
-            std::mem::size_of::<SmCore<'static>>() <= 3584,
+            std::mem::size_of::<SmCore<'static>>() <= 4096,
             "SmCore grew to {} bytes",
             std::mem::size_of::<SmCore<'static>>()
         );
@@ -12790,6 +13261,7 @@ mod tests {
             arch: ArchId::Sm86,
             resource_source: IssueResourceSource::SyntheticTestFixture,
             instruction_front_end: None,
+            memory_issue_pipeline: None,
             l1_hit_latency: 34,
             l1_miss_latency: 244,
             global_flat_latency: 400,
@@ -12803,6 +13275,7 @@ mod tests {
                 bypass_payload_bytes_per_cycle: 32,
             },
             ldgsts_cache_all_destination_wavefront_cycles: 2,
+            ldgsts_global_to_shared_transport_latency: 0,
             ldgsts_cache_all_destination_service_wavefronts: 2,
             ldgsts_cache_all_destination_service_cycles: 3,
             max_resident_warps_per_sm: 48,
@@ -13829,7 +14302,7 @@ mod tests {
                 .require("instruction_front_end")
                 .unwrap(),
         );
-        front_end_params.global_flat_latency = 4;
+        front_end_params.l1_miss_latency = 4;
 
         let result = simulate_sm(&blocks, &sched, &front_end_params, None).unwrap();
         assert_eq!(result.instructions_issued, 1);
@@ -13843,6 +14316,77 @@ mod tests {
         assert_eq!(diagnostics.instructions_fetched, 1);
         assert_eq!(diagnostics.demand_l0_misses, 1);
         assert_eq!(diagnostics.stream_restarts, 1);
+    }
+
+    #[test]
+    fn memory_issue_pipeline_reproduces_the_published_ampere_burst_table() {
+        let config = ArchId::Sm86
+            .memory_issue_pipeline()
+            .require("memory_issue_pipeline")
+            .unwrap();
+        let expected = [
+            vec![vec![2, 3, 4, 5, 6, 13, 17, 21]],
+            vec![
+                vec![2, 3, 4, 5, 6, 13, 17, 21],
+                vec![2, 3, 4, 5, 6, 15, 19, 23],
+            ],
+            vec![
+                vec![2, 3, 4, 5, 6, 13, 19, 25],
+                vec![2, 3, 4, 5, 6, 15, 21, 27],
+                vec![2, 3, 4, 5, 6, 17, 23, 29],
+            ],
+            vec![
+                vec![2, 3, 4, 5, 6, 13, 21, 29],
+                vec![2, 3, 4, 5, 6, 15, 23, 31],
+                vec![2, 3, 4, 5, 6, 17, 25, 33],
+                vec![2, 3, 4, 5, 6, 19, 27, 35],
+            ],
+        ];
+        for active_subcores in 1..=SUB_CORES {
+            let mut state = MemoryIssuePipelineState::new(config).unwrap();
+            let mut observed = vec![Vec::new(); active_subcores];
+            for now in 2..=64 {
+                state.prune(now);
+                let mut selected = [None; SUB_CORES];
+                for subcore in 0..active_subcores {
+                    if observed[subcore].len() < 8 && state.admission_ready_at(subcore) <= now {
+                        observed[subcore].push(now);
+                        selected[subcore] = Some(MemoryPipelineSlot {
+                            operand_ready_latency: 11,
+                        });
+                    }
+                }
+                state = state.plan(selected, now).unwrap().next;
+                if observed.iter().all(|issues| issues.len() == 8) {
+                    break;
+                }
+            }
+            assert_eq!(observed, expected[active_subcores - 1]);
+        }
+    }
+
+    #[test]
+    fn memory_pipeline_static_war_latencies_follow_the_published_table() {
+        let config = ArchId::Sm86
+            .memory_issue_pipeline()
+            .require("memory_issue_pipeline")
+            .unwrap();
+        let latency = |text: &str| {
+            memory_pipeline_slot(&slot(cb(1), OpClass::Other, text), config)
+                .expect("published memory family")
+                .operand_ready_latency
+        };
+        assert_eq!(latency("LDG.E R0, [R2.64]"), 11);
+        assert_eq!(latency("LDG.E R0, [UR2]"), 9);
+        assert_eq!(latency("STG.E.128 [R2.64], R4"), 20);
+        assert_eq!(latency("STG.E.64 [UR2], R4"), 12);
+        assert_eq!(latency("LDS R0, [R2]"), 9);
+        assert_eq!(latency("STS.64 [R2], R4"), 14);
+        assert_eq!(latency("LDGSTS.E.128 [R2], [R4.64]"), 13);
+        assert!(
+            memory_pipeline_slot(&slot(cb(1), OpClass::Other, "ATOMG.E.ADD [R2], R4"), config)
+                .is_none()
+        );
     }
 
     #[test]

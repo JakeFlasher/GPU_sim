@@ -1227,10 +1227,10 @@ mod tests {
         assert!(report.launches[0].cache_lookup_predictions.is_none());
         assert_eq!(report.launches[0].coverage.blocks_observed, 1);
         let timing = report.launches[0].timing.as_ref().unwrap();
-        assert_eq!(timing.readiness.schema_version, 23);
+        assert_eq!(timing.readiness.schema_version, 24);
         let json = serde_json::to_value(&report).unwrap();
         let readiness = &json["launches"][0]["timing"]["readiness"];
-        assert_eq!(readiness["schema_version"], 23);
+        assert_eq!(readiness["schema_version"], 24);
         assert!(readiness.get("limiting_cycles").is_some());
         assert!(readiness.get("constraint_exposure_cycles").is_some());
         assert!(readiness.get("async_groups").is_some());
