@@ -1124,6 +1124,27 @@ pub enum IssueError {
         "feedback admission reservation was already priced for warp {warp} instruction {instruction}"
     )]
     MemoryAdmissionFeedbackAlreadyPriced { warp: u32, instruction: u32 },
+    #[error(
+        "modeled write acknowledgement is already pending for warp {warp} instruction {instruction}"
+    )]
+    MemoryWriteAckAlreadyPending { warp: u32, instruction: u32 },
+    #[error(
+        "modeled write acknowledgement is not pending for warp {warp} instruction {instruction}"
+    )]
+    MemoryWriteAckNotPending { warp: u32, instruction: u32 },
+    #[error(
+        "modeled write acknowledgement payload changed for warp {warp} instruction {instruction}"
+    )]
+    MemoryWriteAckMismatch { warp: u32, instruction: u32 },
+    #[error(
+        "modeled write acknowledgement for warp {warp} instruction {instruction} arrived at t={got}, expected t={expected}"
+    )]
+    MemoryWriteAckTimeMismatch {
+        warp: u32,
+        instruction: u32,
+        expected: u64,
+        got: u64,
+    },
     #[error("issue diagnostic update failed: {0}")]
     ReadinessDiagnostic(#[from] ReadinessCounterError),
 }
@@ -2875,8 +2896,8 @@ pub struct MemoryAdmissionCandidate {
     #[serde(default, skip_serializing_if = "is_zero_u32")]
     pub l2_miss_service_width_sectors: u32,
     /// Opt-in completion lane: the issuing warp's `MEMBAR.SC.GPU` waits for
-    /// its own latest matching write-service completion. Queue admission still
-    /// releases at service start.
+    /// its own latest matching write-service acknowledgement event. Queue
+    /// admission still releases at service start.
     #[serde(default, skip_serializing_if = "is_false")]
     pub membar_waits_for_service_completion: bool,
     /// Non-occupying visibility/RMW tail after service done. It changes only
@@ -3390,6 +3411,58 @@ pub struct MemoryAdmissionFeedbackDiagnostics {
     pub write_completion_busy_cycles: u64,
 }
 
+/// Lifecycle of the opt-in modeled STORE/RED completion frontier. These are
+/// simulator event timestamps, not silicon acknowledgements: the event makes
+/// the already configured schema-11/12/13 completion relation participate in
+/// shared-system ordering and terminal drain without claiming dirty writeback
+/// or coherence completion.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
+pub struct MemoryWriteAckDiagnostics {
+    pub acks_scheduled: u64,
+    pub acks_processed: u64,
+    pub maximum_pending_acks: u64,
+    pub latest_issue_time: u64,
+    pub latest_acceptance_time: u64,
+    pub latest_service_completion_time: u64,
+    pub latest_fence_visibility_time: u64,
+    pub terminal_drain_time: u64,
+}
+
+impl MemoryWriteAckDiagnostics {
+    pub const fn is_empty(&self) -> bool {
+        self.acks_scheduled == 0 && self.acks_processed == 0
+    }
+
+    fn add_checked(&mut self, addend: &Self) -> Result<(), ReadinessCounterError> {
+        let next = Self {
+            acks_scheduled: checked_readiness_add(
+                "readiness.memory_write_ack.acks_scheduled",
+                self.acks_scheduled,
+                addend.acks_scheduled,
+            )?,
+            acks_processed: checked_readiness_add(
+                "readiness.memory_write_ack.acks_processed",
+                self.acks_processed,
+                addend.acks_processed,
+            )?,
+            maximum_pending_acks: self.maximum_pending_acks.max(addend.maximum_pending_acks),
+            latest_issue_time: self.latest_issue_time.max(addend.latest_issue_time),
+            latest_acceptance_time: self
+                .latest_acceptance_time
+                .max(addend.latest_acceptance_time),
+            latest_service_completion_time: self
+                .latest_service_completion_time
+                .max(addend.latest_service_completion_time),
+            latest_fence_visibility_time: self
+                .latest_fence_visibility_time
+                .max(addend.latest_fence_visibility_time),
+            terminal_drain_time: self.terminal_drain_time.max(addend.terminal_drain_time),
+        };
+        *self = next;
+        Ok(())
+    }
+}
+
 impl MemoryAdmissionFeedbackDiagnostics {
     pub const fn is_empty(&self) -> bool {
         self.candidate.queue_capacity_instructions == 0
@@ -3489,9 +3562,12 @@ pub(crate) struct MemoryAdmissionFeedbackState {
     queues: [VecDeque<MemoryAdmissionFeedbackEntry>; SUB_CORES],
     server_ready: u64,
     warp_completion_ready: Vec<u64>,
+    warp_pending_write_acks: Vec<u32>,
+    pending_write_acks: HashMap<(u32, u32), MemoryWriteAck>,
     completion_lane_ready: Vec<u64>,
     clock_second_issue: Vec<Option<u64>>,
     diagnostics: MemoryAdmissionFeedbackDiagnostics,
+    write_ack_diagnostics: MemoryWriteAckDiagnostics,
     yield_requested: bool,
 }
 
@@ -3505,12 +3581,15 @@ impl MemoryAdmissionFeedbackState {
             queues: std::array::from_fn(|_| VecDeque::new()),
             server_ready: 0,
             warp_completion_ready: Vec::new(),
+            warp_pending_write_acks: Vec::new(),
+            pending_write_acks: HashMap::new(),
             completion_lane_ready: vec![0; usize::from(candidate.write_completion_parallel_lanes)],
             clock_second_issue: Vec::new(),
             diagnostics: MemoryAdmissionFeedbackDiagnostics {
                 candidate,
                 ..MemoryAdmissionFeedbackDiagnostics::default()
             },
+            write_ack_diagnostics: MemoryWriteAckDiagnostics::default(),
             yield_requested: false,
         })
     }
@@ -3562,7 +3641,8 @@ impl MemoryAdmissionFeedbackState {
         if !self.candidate.membar_waits_for_service_completion || !is_gpu_membar_issue(slot) {
             return Some(0);
         }
-        if self.has_unpriced() {
+        if self.has_unpriced() || self.warp_pending_write_acks.get(warp).copied().unwrap_or(0) != 0
+        {
             return None;
         }
         Some(self.warp_completion_ready.get(warp).copied().unwrap_or(0))
@@ -3745,9 +3825,9 @@ impl MemoryAdmissionFeedbackState {
         l2_requests: u64,
         unique_regions: u64,
         issue_time: u64,
-    ) -> Result<(), IssueError> {
+    ) -> Result<Option<MemoryWriteAck>, IssueError> {
         if !self.candidate.matches(operation) {
-            return Ok(());
+            return Ok(None);
         }
         let queue_index = self.queue_index(usize::from(witness.subcore()));
         let entry_index = self.queues[queue_index]
@@ -3875,27 +3955,110 @@ impl MemoryAdmissionFeedbackState {
             self.diagnostics.write_completion_busy_cycles,
             write_completion_busy,
         )?;
-        let warp = usize::try_from(witness.warp()).map_err(|_| IssueError::CounterOverflow {
-            counter: "feedback completion warp index",
-        })?;
-        let required_warp_slots =
-            checked_usize_counter_add("feedback completion warp slots", warp, 1)?;
-        let warp_completion_ready = self
-            .warp_completion_ready
-            .get(warp)
-            .copied()
-            .unwrap_or(0)
-            .max(write_completion_done);
+        let ack = self
+            .candidate
+            .membar_waits_for_service_completion
+            .then_some(MemoryWriteAck {
+                witness,
+                operation,
+                issue_at: issue_time,
+                accepted_at: service_start,
+                service_done_at: service_done,
+                fence_visible_at: write_completion_done,
+            });
+        let pending_plan = if let Some(ack) = ack {
+            let key = (witness.warp(), witness.instruction());
+            if self.pending_write_acks.contains_key(&key) {
+                return Err(IssueError::MemoryWriteAckAlreadyPending {
+                    warp: witness.warp(),
+                    instruction: witness.instruction(),
+                });
+            }
+            let warp =
+                usize::try_from(witness.warp()).map_err(|_| IssueError::CounterOverflow {
+                    counter: "feedback completion warp index",
+                })?;
+            let required_warp_slots =
+                checked_usize_counter_add("feedback completion warp slots", warp, 1)?;
+            let warp_pending = self
+                .warp_pending_write_acks
+                .get(warp)
+                .copied()
+                .unwrap_or(0)
+                .checked_add(1)
+                .ok_or(IssueError::CounterOverflow {
+                    counter: "pending modeled write acknowledgements per warp",
+                })?;
+            let acks_scheduled = checked_u64_counter_add(
+                "modeled write acknowledgements scheduled",
+                self.write_ack_diagnostics.acks_scheduled,
+                1,
+            )?;
+            let pending_total = self.pending_write_acks.len().checked_add(1).ok_or(
+                IssueError::CounterOverflow {
+                    counter: "pending modeled write acknowledgements",
+                },
+            )?;
+            let pending_total =
+                u64::try_from(pending_total).map_err(|_| IssueError::CounterOverflow {
+                    counter: "pending modeled write acknowledgements",
+                })?;
+            Some((
+                key,
+                ack,
+                warp,
+                required_warp_slots,
+                warp_pending,
+                acks_scheduled,
+                pending_total,
+            ))
+        } else {
+            None
+        };
 
         self.queues[queue_index][entry_index].release_at = Some(service_start);
         self.server_ready = service_done;
         if let Some((lane, _)) = completion_lane {
             self.completion_lane_ready[lane] = write_service_done;
         }
-        if self.warp_completion_ready.len() <= warp {
-            self.warp_completion_ready.resize(required_warp_slots, 0);
+        if let Some((
+            key,
+            ack,
+            warp,
+            required_warp_slots,
+            warp_pending,
+            acks_scheduled,
+            pending_total,
+        )) = pending_plan
+        {
+            if self.warp_pending_write_acks.len() <= warp {
+                self.warp_pending_write_acks.resize(required_warp_slots, 0);
+            }
+            self.warp_pending_write_acks[warp] = warp_pending;
+            let replaced = self.pending_write_acks.insert(key, ack);
+            debug_assert!(replaced.is_none(), "write-ack insertion was preflighted");
+            self.write_ack_diagnostics.acks_scheduled = acks_scheduled;
+            self.write_ack_diagnostics.maximum_pending_acks = self
+                .write_ack_diagnostics
+                .maximum_pending_acks
+                .max(pending_total);
+            self.write_ack_diagnostics.latest_issue_time = self
+                .write_ack_diagnostics
+                .latest_issue_time
+                .max(ack.issue_at);
+            self.write_ack_diagnostics.latest_acceptance_time = self
+                .write_ack_diagnostics
+                .latest_acceptance_time
+                .max(ack.accepted_at);
+            self.write_ack_diagnostics.latest_service_completion_time = self
+                .write_ack_diagnostics
+                .latest_service_completion_time
+                .max(ack.service_done_at);
+            self.write_ack_diagnostics.latest_fence_visibility_time = self
+                .write_ack_diagnostics
+                .latest_fence_visibility_time
+                .max(ack.fence_visible_at);
         }
-        self.warp_completion_ready[warp] = warp_completion_ready;
         self.diagnostics.l2_hit_sectors_observed = l2_hit_sectors_observed;
         self.diagnostics.l2_miss_sectors_observed = l2_miss_sectors_observed;
         self.diagnostics.service_busy_cycles = service_busy_cycles;
@@ -3904,6 +4067,67 @@ impl MemoryAdmissionFeedbackState {
         self.diagnostics.write_completion_requests_observed = completion_requests_observed;
         self.diagnostics.write_completion_regions_observed = completion_regions_observed;
         self.diagnostics.write_completion_busy_cycles = completion_busy_cycles;
+        Ok(ack)
+    }
+
+    pub(crate) fn acknowledge_write(
+        &mut self,
+        ack: MemoryWriteAck,
+        now: u64,
+    ) -> Result<(), IssueError> {
+        let key = (ack.witness.warp(), ack.witness.instruction());
+        let expected = self.pending_write_acks.get(&key).copied().ok_or(
+            IssueError::MemoryWriteAckNotPending {
+                warp: ack.witness.warp(),
+                instruction: ack.witness.instruction(),
+            },
+        )?;
+        if expected != ack {
+            return Err(IssueError::MemoryWriteAckMismatch {
+                warp: ack.witness.warp(),
+                instruction: ack.witness.instruction(),
+            });
+        }
+        if now != ack.fence_visible_at {
+            return Err(IssueError::MemoryWriteAckTimeMismatch {
+                warp: ack.witness.warp(),
+                instruction: ack.witness.instruction(),
+                expected: ack.fence_visible_at,
+                got: now,
+            });
+        }
+        let warp =
+            usize::try_from(ack.witness.warp()).map_err(|_| IssueError::CounterOverflow {
+                counter: "write-ack warp index",
+            })?;
+        let pending = self.warp_pending_write_acks.get(warp).copied().unwrap_or(0);
+        let next_pending = pending.checked_sub(1).ok_or(IssueError::CounterUnderflow {
+            counter: "pending modeled write acknowledgements per warp",
+        })?;
+        let acks_processed = checked_u64_counter_add(
+            "modeled write acknowledgements processed",
+            self.write_ack_diagnostics.acks_processed,
+            1,
+        )?;
+        let required_warp_slots =
+            checked_usize_counter_add("write-ack completion warp slots", warp, 1)?;
+        let completion_ready = self
+            .warp_completion_ready
+            .get(warp)
+            .copied()
+            .unwrap_or(0)
+            .max(ack.fence_visible_at);
+
+        let removed = self.pending_write_acks.remove(&key);
+        debug_assert_eq!(removed, Some(ack), "write-ack removal was preflighted");
+        self.warp_pending_write_acks[warp] = next_pending;
+        if self.warp_completion_ready.len() <= warp {
+            self.warp_completion_ready.resize(required_warp_slots, 0);
+        }
+        self.warp_completion_ready[warp] = completion_ready;
+        self.write_ack_diagnostics.acks_processed = acks_processed;
+        self.write_ack_diagnostics.terminal_drain_time =
+            self.write_ack_diagnostics.terminal_drain_time.max(now);
         Ok(())
     }
 
@@ -3914,12 +4138,24 @@ impl MemoryAdmissionFeedbackState {
             .any(|entry| entry.release_at.is_none())
     }
 
+    fn has_pending_write_acks(&self) -> bool {
+        !self.pending_write_acks.is_empty()
+    }
+
+    fn pending_write_ack_count(&self) -> usize {
+        self.pending_write_acks.len()
+    }
+
     fn take_yield_requested(&mut self) -> bool {
         std::mem::take(&mut self.yield_requested)
     }
 
     pub(crate) const fn diagnostics(&self) -> MemoryAdmissionFeedbackDiagnostics {
         self.diagnostics
+    }
+
+    pub(crate) const fn write_ack_diagnostics(&self) -> MemoryWriteAckDiagnostics {
+        self.write_ack_diagnostics
     }
 }
 
@@ -4014,8 +4250,10 @@ pub struct ReadinessDiagnostics {
     pub memory_service_candidates: MemoryServiceCandidateDiagnostics,
     #[serde(skip_serializing_if = "MemoryAdmissionCandidateDiagnostics::is_empty")]
     pub memory_admission_candidates: MemoryAdmissionCandidateDiagnostics,
-    #[serde(skip_serializing_if = "MemoryAdmissionFeedbackDiagnostics::is_empty")]
-    pub memory_admission_feedback: MemoryAdmissionFeedbackDiagnostics,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub memory_admission_feedback: Option<Box<MemoryAdmissionFeedbackDiagnostics>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub memory_write_ack: Option<Box<MemoryWriteAckDiagnostics>>,
 }
 
 impl ReadinessDiagnostics {
@@ -4078,8 +4316,20 @@ impl ReadinessDiagnostics {
             .add_checked(&addend.memory_service_candidates)?;
         next.memory_admission_candidates
             .add_checked(&addend.memory_admission_candidates)?;
-        next.memory_admission_feedback
-            .add_checked(&addend.memory_admission_feedback)?;
+        if let Some(addend_feedback) = addend.memory_admission_feedback.as_deref() {
+            if let Some(current) = next.memory_admission_feedback.as_deref_mut() {
+                current.add_checked(addend_feedback)?;
+            } else {
+                next.memory_admission_feedback = Some(Box::new(*addend_feedback));
+            }
+        }
+        if let Some(addend_ack) = addend.memory_write_ack.as_deref() {
+            if let Some(current) = next.memory_write_ack.as_deref_mut() {
+                current.add_checked(addend_ack)?;
+            } else {
+                next.memory_write_ack = Some(Box::new(*addend_ack));
+            }
+        }
         *self = next;
         Ok(())
     }
@@ -4118,8 +4368,13 @@ impl ReadinessDiagnostics {
     /// adds timing-neutral cross-SMSP coissue and sibling-warp committed-group
     /// population observations. Schema 21 adds a timing-free reconstruction of
     /// selected async issue, commit, and wait events in callback/channel order.
+    /// Schema 22 makes the existing opt-in STORE/RED write-completion frontier
+    /// a drained shared-system event and reports its exact lifecycle.
     pub fn schema_version(&self) -> u32 {
-        if self.async_instrumentation_order.is_some() {
+        let feedback = self.memory_admission_feedback.as_deref();
+        if self.memory_write_ack.is_some() {
+            22
+        } else if self.async_instrumentation_order.is_some() {
             21
         } else if self.async_issue_overlap.is_some() {
             20
@@ -4151,35 +4406,20 @@ impl ReadinessDiagnostics {
             15
         } else if self.bypass_async_copies.is_some() {
             14
-        } else if !self.memory_admission_feedback.is_empty()
-            && (self
-                .memory_admission_feedback
-                .candidate
-                .write_completion_request_cycles
-                != 0
-                || self
-                    .memory_admission_feedback
-                    .candidate
-                    .write_completion_region_cycles
-                    != 0)
-        {
+        } else if feedback.is_some_and(|diagnostics| {
+            diagnostics.candidate.write_completion_request_cycles != 0
+                || diagnostics.candidate.write_completion_region_cycles != 0
+        }) {
             13
-        } else if !self.memory_admission_feedback.is_empty()
-            && self
-                .memory_admission_feedback
-                .candidate
-                .write_completion_latency_cycles
-                != 0
+        } else if feedback
+            .is_some_and(|diagnostics| diagnostics.candidate.write_completion_latency_cycles != 0)
         {
             12
-        } else if !self.memory_admission_feedback.is_empty()
-            && self
-                .memory_admission_feedback
-                .candidate
-                .membar_waits_for_service_completion
+        } else if feedback
+            .is_some_and(|diagnostics| diagnostics.candidate.membar_waits_for_service_completion)
         {
             11
-        } else if !self.memory_admission_feedback.is_empty() {
+        } else if feedback.is_some() {
             10
         } else if !self.memory_admission_candidates.is_empty() {
             9
@@ -4275,6 +4515,20 @@ impl AdmissionRequestWitness {
     pub(crate) const fn request_count(self) -> u16 {
         ((self.0.get() >> 82) & Self::U16_MASK) as u16
     }
+}
+
+/// Exact event payload for one opt-in modeled STORE/RED completion. The
+/// admission witness names the instruction group; the shared-system target
+/// names the owning SM, so identical warp/instruction indices on different SMs
+/// cannot exchange acknowledgements.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct MemoryWriteAck {
+    pub(crate) witness: AdmissionRequestWitness,
+    pub(crate) operation: MemoryOperation,
+    pub(crate) issue_at: u64,
+    pub(crate) accepted_at: u64,
+    pub(crate) service_done_at: u64,
+    pub(crate) fence_visible_at: u64,
 }
 
 /// A memory request the SM emits in L1Shared mode. The system layer
@@ -7267,7 +7521,7 @@ impl<'a> SmCore<'a> {
         l2_requests: u64,
         unique_regions: u64,
         issue_time: u64,
-    ) -> Result<(), IssueError> {
+    ) -> Result<Option<MemoryWriteAck>, IssueError> {
         self.memory_admission_feedback
             .as_mut()
             .ok_or(IssueError::MemoryAdmissionFeedbackReservationMissing {
@@ -7283,6 +7537,26 @@ impl<'a> SmCore<'a> {
                 unique_regions,
                 issue_time,
             )
+    }
+
+    pub(crate) fn complete_memory_write_ack(
+        &mut self,
+        ack: MemoryWriteAck,
+        now: u64,
+    ) -> Result<(), IssueError> {
+        self.memory_admission_feedback
+            .as_mut()
+            .ok_or(IssueError::MemoryWriteAckNotPending {
+                warp: ack.witness.warp(),
+                instruction: ack.witness.instruction(),
+            })?
+            .acknowledge_write(ack, now)
+    }
+
+    pub(crate) fn pending_memory_write_acks(&self) -> usize {
+        self.memory_admission_feedback
+            .as_deref()
+            .map_or(0, MemoryAdmissionFeedbackState::pending_write_ack_count)
     }
 
     #[cfg(test)]
@@ -7335,7 +7609,11 @@ impl<'a> SmCore<'a> {
         let mut readiness = self.readiness.clone();
         readiness.memory_service_candidates = self.memory_service_candidates.diagnostics();
         if let Some(feedback) = self.memory_admission_feedback.as_ref() {
-            readiness.memory_admission_feedback = feedback.diagnostics();
+            readiness.memory_admission_feedback = Some(Box::new(feedback.diagnostics()));
+            let write_ack = feedback.write_ack_diagnostics();
+            if !write_ack.is_empty() {
+                readiness.memory_write_ack = Some(Box::new(write_ack));
+            }
         }
         SmSimResult {
             instructions_issued: self.issued,
@@ -9666,7 +9944,9 @@ impl<'a> SmCore<'a> {
                     || self
                         .memory_admission_feedback
                         .as_ref()
-                        .is_some_and(|state| state.has_unpriced()) =>
+                        .is_some_and(|state| {
+                            state.has_unpriced() || state.has_pending_write_acks()
+                        }) =>
                 {
                     return Ok(Advance::Idle { wake_at: None });
                 }
@@ -15619,7 +15899,7 @@ mod tests {
         feedback
             .reserve(0, 3, 4, AccessKind::GlobalStore { off: 0, len: 1 }, 0)
             .unwrap();
-        feedback
+        let first_ack = feedback
             .complete(
                 AdmissionRequestWitness::new(3, 4, 0, 0, 1).unwrap(),
                 MemoryOperation::Store,
@@ -15629,6 +15909,7 @@ mod tests {
                 1,
                 0,
             )
+            .unwrap()
             .unwrap();
         assert_eq!(feedback.diagnostics().service_busy_cycles, 32);
         assert_eq!(feedback.diagnostics().terminal_service_completion_time, 32);
@@ -15636,7 +15917,7 @@ mod tests {
         feedback
             .reserve(1, 4, 5, AccessKind::GlobalStore { off: 0, len: 1 }, 0)
             .unwrap();
-        feedback
+        let second_ack = feedback
             .complete(
                 AdmissionRequestWitness::new(4, 5, 1, 0, 1).unwrap(),
                 MemoryOperation::Store,
@@ -15646,10 +15927,20 @@ mod tests {
                 1,
                 0,
             )
+            .unwrap()
             .unwrap();
         let membar = slot(cb(1), OpClass::Other, "MEMBAR.SC.GPU");
         let ordinary = slot(cb(1), OpClass::Other, "IADD3");
+        assert_eq!(feedback.completion_ready_at(3, &membar), None);
+        assert_eq!(feedback.completion_ready_at(4, &membar), None);
+        feedback
+            .acknowledge_write(first_ack, first_ack.fence_visible_at)
+            .unwrap();
         assert_eq!(feedback.completion_ready_at(3, &membar), Some(37));
+        assert_eq!(feedback.completion_ready_at(4, &membar), None);
+        feedback
+            .acknowledge_write(second_ack, second_ack.fence_visible_at)
+            .unwrap();
         assert_eq!(feedback.completion_ready_at(4, &membar), Some(69));
         assert_eq!(feedback.completion_ready_at(3, &ordinary), Some(0));
         assert_eq!(feedback.diagnostics().terminal_write_completion_time, 69);
@@ -15660,6 +15951,7 @@ mod tests {
         parallel_candidate.write_completion_request_cycles = 100;
         parallel_candidate.write_completion_parallel_lanes = 2;
         let mut parallel = MemoryAdmissionFeedbackState::checked(parallel_candidate).unwrap();
+        let mut parallel_acks = Vec::new();
         for (warp, subcore) in [(0, 0), (1, 1)] {
             parallel
                 .reserve(
@@ -15670,7 +15962,7 @@ mod tests {
                     0,
                 )
                 .unwrap();
-            parallel
+            let ack = parallel
                 .complete(
                     AdmissionRequestWitness::new(warp as u32, 0, subcore as u8, 0, 1).unwrap(),
                     MemoryOperation::Store,
@@ -15680,6 +15972,15 @@ mod tests {
                     1,
                     0,
                 )
+                .unwrap()
+                .unwrap();
+            parallel_acks.push(ack);
+        }
+        assert_eq!(parallel.completion_ready_at(0, &membar), None);
+        assert_eq!(parallel.completion_ready_at(1, &membar), None);
+        for ack in parallel_acks {
+            parallel
+                .acknowledge_write(ack, ack.fence_visible_at)
                 .unwrap();
         }
         assert_eq!(parallel.completion_ready_at(0, &membar), Some(101));
@@ -15688,10 +15989,11 @@ mod tests {
         assert_eq!(parallel.diagnostics().write_completion_requests_observed, 2);
         assert_eq!(parallel.diagnostics().write_completion_regions_observed, 2);
         let readiness = ReadinessDiagnostics {
-            memory_admission_feedback: parallel.diagnostics(),
+            memory_admission_feedback: Some(Box::new(parallel.diagnostics())),
+            memory_write_ack: Some(Box::new(parallel.write_ack_diagnostics())),
             ..ReadinessDiagnostics::default()
         };
-        assert_eq!(readiness.schema_version(), 13);
+        assert_eq!(readiness.schema_version(), 22);
     }
 
     #[test]

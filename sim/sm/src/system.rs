@@ -20,13 +20,17 @@
 //!   data-ready time, independently of a later joined-sector response.
 //! - `AtomicCompletion` — retains the intrinsic return-completion time of an
 //!   ATOM whose value has no dependence-barrier observer.
+//! - `MemoryWriteAck` — for an explicitly timing-active STORE/RED feedback
+//!   candidate, drains the candidate's already-derived fence-visible frontier
+//!   and only then publishes it to the issuing warp's `MEMBAR.SC.GPU` state.
 //! - `MemResponse` — first completes any fill carried by the same request,
 //!   then completes the originating SM's L1 fill (or clears a direct
 //!   bypass/untagged barrier unit) at exactly the data-ready time and resumes
 //!   that SM. Stale L2 installation never suppresses the SM response.
 //!
-//! Store and reduction mutation-only requests take no response event: they
-//! change L2 state in arrival order and nothing waits on them (v0).
+//! Store and reduction mutation-only requests take no data response. Ordinary
+//! replay changes L2 state in arrival order and nothing waits on them; the
+//! opt-in feedback completion lane adds the typed acknowledgement above.
 //!
 //! Determinism: SM actors are created in ascending traced `sm_id` order,
 //! all scheduling flows through the `(time, seq)` queue, and L2 lookup and
@@ -143,6 +147,10 @@ impl DueTimes {
 
     fn next(&self, ix: usize) -> Option<u64> {
         self.0[ix].peek().map(|&Reverse(t)| t)
+    }
+
+    fn is_empty(&self) -> bool {
+        self.0.iter().all(BinaryHeap::is_empty)
     }
 }
 
@@ -374,8 +382,8 @@ impl L2SourceSplit {
 use crate::issue::{
     AdmissionRequestWitness, Advance, BlockReplay, IssueError, IssueModelParams, MemRequest,
     MemoryAdmissionCandidate, MemoryAdmissionCandidateState, MemoryOperation,
-    MemoryServiceCandidate, ReplayHorizon, ReplyTo, SharedMemoryResidency, SmCore, SmMemMode,
-    SmSimResult, TailFlags, checked_cycle_add, validate_memory_admission_candidates,
+    MemoryServiceCandidate, MemoryWriteAck, ReplayHorizon, ReplyTo, SharedMemoryResidency, SmCore,
+    SmMemMode, SmSimResult, TailFlags, checked_cycle_add, validate_memory_admission_candidates,
     validate_memory_service_candidates,
 };
 use crate::program::FunctionSchedule;
@@ -546,6 +554,12 @@ pub enum SystemError {
     AdmissionObservationHits { sm_id: i32, sectors: u64, hits: u64 },
     #[error("event queue drained with an incomplete memory-admission group on SM {sm_id}")]
     AdmissionObservationIncomplete { sm_id: i32 },
+    #[error(
+        "event queue drained with {pending} modeled write acknowledgement(s) pending on SM {sm_id}"
+    )]
+    MemoryWriteAckPending { sm_id: i32, pending: usize },
+    #[error("event queue drained with modeled write-ack due times still registered")]
+    MemoryWriteAckDueNotDrained,
     #[error(
         "L2 fill schedule mismatch for sector {sector_id}: token={has_token}, ready={has_ready}"
     )]
@@ -770,6 +784,7 @@ enum Ev {
     L2AccessBatch(Box<[MemRequest]>),
     L2Fill(L2FillToken),
     AtomicCompletion,
+    MemoryWriteAck(MemoryWriteAck),
     MemResponse {
         reply: ReplyTo,
         fill: Option<L2FillToken>,
@@ -801,6 +816,7 @@ struct EventPerformanceCounters {
     l2_access_batched_requests: u64,
     l2_fill: u64,
     atomic_completion: u64,
+    memory_write_ack: u64,
     mem_response: u64,
     same_cycle_after_first: u64,
     queue_same_cycle_after_first: u64,
@@ -862,12 +878,17 @@ impl EventPerformanceCounters {
                             counter: "performance L2 access requests",
                         })?;
             }
-            Ev::SmWake | Ev::L2Fill(_) | Ev::AtomicCompletion | Ev::MemResponse { .. } => {
+            Ev::SmWake
+            | Ev::L2Fill(_)
+            | Ev::AtomicCompletion
+            | Ev::MemoryWriteAck(_)
+            | Ev::MemResponse { .. } => {
                 debug_assert_eq!(logical_events, 1);
                 let kind = match event {
                     Ev::SmWake => &mut self.sm_wake,
                     Ev::L2Fill(_) => &mut self.l2_fill,
                     Ev::AtomicCompletion => &mut self.atomic_completion,
+                    Ev::MemoryWriteAck(_) => &mut self.memory_write_ack,
                     Ev::MemResponse { .. } => &mut self.mem_response,
                     Ev::L2Access(_) | Ev::L2AccessBatch(_) => unreachable!(),
                 };
@@ -1620,6 +1641,10 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates(
     // barrier would also livelock: two SMs parked at the same timestamp
     // would bounce off each other's wake events forever.)
     let mut response_due = DueTimes::new(cores.len());
+    // Opt-in STORE/RED completions are self-affecting external events: a
+    // matching MEMBAR remains unpriced until the event is processed, and the
+    // actor must not run past the earliest pending acknowledgement.
+    let mut write_ack_due = DueTimes::new(cores.len());
     // Pending wake times PER SM, deduplicating at the source: a wake is
     // scheduled only when no pending wake at an earlier-or-equal time
     // covers it (an earlier wake re-parks and reschedules if still
@@ -1688,6 +1713,7 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates(
                     &mut cores,
                     &mut queue,
                     &mut response_due,
+                    &mut write_ack_due,
                     &mut wake_due,
                     &mut unpriced,
                     batch_replyless_writes,
@@ -1983,7 +2009,7 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates(
                                     )?;
                             }
                             if feedback_admission {
-                                cores[sm_ix].complete_memory_admission_feedback(
+                                if let Some(ack) = cores[sm_ix].complete_memory_admission_feedback(
                                     completed.witness,
                                     completed.operation,
                                     completed.hit_sectors,
@@ -1991,7 +2017,14 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates(
                                     completed.l2_requests,
                                     completed.unique_regions,
                                     completed.issue_time,
-                                )?;
+                                )? {
+                                    queue.schedule_at(
+                                        ack.fence_visible_at,
+                                        ev.target,
+                                        Ev::MemoryWriteAck(ack),
+                                    )?;
+                                    write_ack_due.push(sm_ix, ack.fence_visible_at);
+                                }
                             }
                         }
                     }
@@ -2095,6 +2128,23 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates(
             Ev::AtomicCompletion => {
                 spin.on_progress_event(ev.time);
             }
+            Ev::MemoryWriteAck(ack) => {
+                write_ack_due.pop_expect("modeled write acknowledgement", sm_ix, ev.time)?;
+                cores[sm_ix].complete_memory_write_ack(ack, ev.time)?;
+                run_sm(
+                    sm_ix,
+                    &mut cores,
+                    &mut queue,
+                    &mut response_due,
+                    &mut write_ack_due,
+                    &mut wake_due,
+                    &mut unpriced,
+                    batch_replyless_writes,
+                    &mut scratch,
+                    params.l1_miss_latency,
+                )?;
+                spin.on_event(ev.time, false)?;
+            }
             Ev::MemResponse { reply, fill } => {
                 if let Some(fill) = fill {
                     pending_l2_ready.preflight_remove(fill, ev.time)?;
@@ -2125,6 +2175,7 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates(
                     &mut cores,
                     &mut queue,
                     &mut response_due,
+                    &mut write_ack_due,
                     &mut wake_due,
                     &mut unpriced,
                     batch_replyless_writes,
@@ -2142,6 +2193,9 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates(
             entries: pending_l2_ready.len(),
         });
     }
+    if !write_ack_due.is_empty() {
+        return Err(SystemError::MemoryWriteAckDueNotDrained);
+    }
     if observe_admission_groups {
         for (ix, observer) in admission_observers
             .as_ref()
@@ -2158,6 +2212,13 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates(
     let mut per_sm = BTreeMap::new();
     let mut unmodeled_tails = TailFlags::default();
     for (ix, core) in cores.iter().enumerate() {
+        let pending_write_acks = core.pending_memory_write_acks();
+        if pending_write_acks != 0 {
+            return Err(SystemError::MemoryWriteAckPending {
+                sm_id: sm_ids[ix],
+                pending: pending_write_acks,
+            });
+        }
         if !core.is_done() {
             return Err(SystemError::Deadlock {
                 sm_id: sm_ids[ix],
@@ -2180,7 +2241,7 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates(
         eprintln!(
             "SIM_EVENT_PERF events_processed={} queue_events_processed={} sm_wake={} \
              l2_access={} l2_access_batches={} l2_access_batched_requests={} l2_fill={} \
-             atomic_completion={} mem_response={} same_cycle_after_first={} \
+             atomic_completion={} memory_write_ack={} mem_response={} same_cycle_after_first={} \
              queue_same_cycle_after_first={} maximum_queue_depth={}",
             performance.processed,
             performance.queue_events_processed,
@@ -2190,6 +2251,7 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates(
             performance.l2_access_batched_requests,
             performance.l2_fill,
             performance.atomic_completion,
+            performance.memory_write_ack,
             performance.mem_response,
             performance.same_cycle_after_first,
             performance.queue_same_cycle_after_first,
@@ -2311,6 +2373,7 @@ fn run_sm(
     cores: &mut [SmCore<'_>],
     queue: &mut EventQueue<Ev>,
     response_due: &mut DueTimes,
+    write_ack_due: &mut DueTimes,
     wake_due: &mut DueTimes,
     unpriced: &mut UnpricedBounds,
     batch_replyless_writes: bool,
@@ -2318,7 +2381,12 @@ fn run_sm(
     l2_hit_latency: u64,
 ) -> Result<bool, SystemError> {
     scratch.clear();
-    let horizon = replay_horizon(response_due.next(ix), unpriced.min(ix));
+    let write_or_unpriced = match (write_ack_due.next(ix), unpriced.min(ix)) {
+        (Some(left), Some(right)) => Some(left.min(right)),
+        (Some(bound), None) | (None, Some(bound)) => Some(bound),
+        (None, None) => None,
+    };
+    let horizon = replay_horizon(response_due.next(ix), write_or_unpriced);
     let issued_before = cores[ix].instructions_issued();
     let adv = cores[ix].advance(horizon, scratch)?;
     let progress = cores[ix].instructions_issued() > issued_before || !scratch.is_empty();
@@ -2493,23 +2561,16 @@ mod tests {
         let sm = &result.per_sm[&0];
         assert_eq!(sm.cycles, 12);
         assert_eq!(sm.readiness.schema_version(), 10);
+        assert!(sm.readiness.memory_write_ack.is_none());
         assert_eq!(sm.readiness.limiting_cycles.memory_admission_queue, 9);
-        assert_eq!(
-            sm.readiness.memory_admission_feedback.instructions_admitted,
-            3
-        );
-        assert_eq!(
-            sm.readiness
-                .memory_admission_feedback
-                .l2_miss_sectors_observed,
-            3
-        );
-        assert_eq!(
-            sm.readiness
-                .memory_admission_feedback
-                .terminal_service_completion_time,
-            30
-        );
+        let feedback = sm
+            .readiness
+            .memory_admission_feedback
+            .as_deref()
+            .expect("feedback candidate diagnostics are present");
+        assert_eq!(feedback.instructions_admitted, 3);
+        assert_eq!(feedback.l2_miss_sectors_observed, 3);
+        assert_eq!(feedback.terminal_service_completion_time, 30);
     }
 
     #[test]
@@ -2589,7 +2650,19 @@ mod tests {
         )
         .unwrap();
         let readiness = &result.per_sm[&0].readiness;
-        assert_eq!(readiness.schema_version(), 11);
+        assert_eq!(readiness.schema_version(), 22);
+        let write_ack = readiness
+            .memory_write_ack
+            .as_deref()
+            .expect("completion feedback emits a drained write acknowledgement");
+        assert_eq!(write_ack.acks_scheduled, 1);
+        assert_eq!(write_ack.acks_processed, 1);
+        assert_eq!(write_ack.latest_issue_time, 1);
+        assert_eq!(write_ack.latest_acceptance_time, 1);
+        assert_eq!(write_ack.latest_service_completion_time, 11);
+        assert_eq!(write_ack.latest_fence_visibility_time, 11);
+        assert_eq!(write_ack.terminal_drain_time, 11);
+        assert_eq!(result.terminal_event_time, Some(11));
         assert_eq!(readiness.limiting_cycles.memory_write_completion, 9);
         assert_eq!(readiness.clock_issue.warps_with_three_reads, 1);
         assert_eq!(
@@ -2618,7 +2691,15 @@ mod tests {
         )
         .unwrap();
         let latency_readiness = &latency_result.per_sm[&0].readiness;
-        assert_eq!(latency_readiness.schema_version(), 12);
+        assert_eq!(latency_readiness.schema_version(), 22);
+        let latency_ack = latency_readiness
+            .memory_write_ack
+            .as_deref()
+            .expect("visibility latency emits a drained write acknowledgement");
+        assert_eq!(latency_ack.latest_service_completion_time, 11);
+        assert_eq!(latency_ack.latest_fence_visibility_time, 14);
+        assert_eq!(latency_ack.terminal_drain_time, 14);
+        assert_eq!(latency_result.terminal_event_time, Some(14));
         assert_eq!(
             latency_readiness.limiting_cycles.memory_write_completion,
             12
@@ -2629,6 +2710,80 @@ mod tests {
                 .maximum_second_to_third_issue_cycles,
             13
         );
+    }
+
+    #[test]
+    fn feedback_write_ack_survives_warp_exit_and_groups_multi_sector_store() {
+        let sched = schedule(vec![(0, slot(cb(1), "STG.E")), (16, slot(cb(1), "EXIT"))]);
+        let blocks = vec![BlockReplay {
+            launch_index: 0,
+            warps: vec![WarpReplay {
+                async_copy_cohorts: None,
+                warp_slot: 0,
+                insts: vec![
+                    ReplayInst {
+                        pc: 0,
+                        kind: AccessKind::GlobalStore { off: 0, len: 2 },
+                    },
+                    ReplayInst {
+                        pc: 16,
+                        kind: AccessKind::NonMemory,
+                    },
+                ],
+                sectors: vec![0, 4],
+            }],
+        }];
+        let candidate = MemoryAdmissionCandidate {
+            candidate_id: 3,
+            scope: MemoryServiceCandidateScope::Sm,
+            operation: MemoryServiceCandidateOperation::Store,
+            queue_capacity_instructions: 1,
+            admission_latency_cycles: 8,
+            l2_hit_sector_units: 1,
+            l2_hit_sector_cycles: 1,
+            l2_miss_sector_units: 1,
+            l2_miss_sector_cycles: 10,
+            l2_miss_service_width_sectors: 0,
+            membar_waits_for_service_completion: true,
+            write_completion_latency_cycles: 0,
+            write_completion_request_cycles: 0,
+            write_completion_region_cycles: 0,
+            write_completion_parallel_lanes: 0,
+        };
+        let mut l2 = l2_model();
+        let result = simulate_kernel_shared_with_residency_and_candidates(
+            &BTreeMap::from([(0, blocks)]),
+            &sched,
+            &params(),
+            SharedMemoryResidency::unconstrained_fixture(),
+            l1_config(),
+            &mut l2,
+            DramBw::Unmodeled { arch: ArchId::Sm86 },
+            &[],
+            &[],
+            Some(candidate),
+        )
+        .unwrap();
+
+        let sm = &result.per_sm[&0];
+        assert_eq!(sm.cycles, 2, "the issuing warp exits before its ack");
+        assert_eq!(result.terminal_event_time, Some(20));
+        let ack = sm
+            .readiness
+            .memory_write_ack
+            .as_deref()
+            .expect("timing-active feedback emits a write ack");
+        assert_eq!(ack.acks_scheduled, 1);
+        assert_eq!(ack.acks_processed, 1);
+        assert_eq!(ack.maximum_pending_acks, 1);
+        assert_eq!(ack.latest_issue_time, 0);
+        assert_eq!(ack.latest_acceptance_time, 0);
+        assert_eq!(ack.latest_service_completion_time, 20);
+        assert_eq!(ack.latest_fence_visibility_time, 20);
+        assert_eq!(ack.terminal_drain_time, 20);
+        assert_eq!(result.l2_by_source.source(L2Source::Store), (2, 0));
+        assert!(result.unmodeled_tails.dirty_writeback);
+        assert!(result.unmodeled_tails.coherence);
     }
 
     #[test]
@@ -2681,7 +2836,11 @@ mod tests {
         )
         .unwrap();
         let sm = &result.per_sm[&0];
-        let diagnostics = sm.readiness.memory_admission_feedback;
+        let diagnostics = sm
+            .readiness
+            .memory_admission_feedback
+            .as_deref()
+            .expect("feedback candidate diagnostics are present");
         assert_eq!(sm.instructions_issued, 4);
         assert_eq!(sm.cycles, 1);
         assert_eq!(diagnostics.instructions_admitted, 4);

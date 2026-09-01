@@ -94,8 +94,8 @@ pub use issue::{
     MemoryAdmissionFeedbackDiagnostics, MemoryOperation, MemoryServiceCandidate,
     MemoryServiceCandidateDiagnostics, MemoryServiceCandidateError,
     MemoryServiceCandidateOperation, MemoryServiceCandidateResult, MemoryServiceCandidateScope,
-    ReadinessCauseCycles, ReadinessCounterError, ReadinessDiagnostics, ReplyTo,
-    ResultWritebackDiagnostics, SmSimResult, TailFlags,
+    MemoryWriteAckDiagnostics, ReadinessCauseCycles, ReadinessCounterError, ReadinessDiagnostics,
+    ReplyTo, ResultWritebackDiagnostics, SmSimResult, TailFlags,
 };
 pub use program::{
     FunctionSchedule, IssueSlot, OpClass, PipelineClass, ProgramError, build_schedules,
