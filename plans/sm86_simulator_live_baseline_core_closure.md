@@ -156,6 +156,14 @@ pairs, but fails the frozen issue, remainder-magnitude, and total-cancellation
 gates. The three-group holdout remains uncaptured, no timing is promoted, and
 `async_copy_shared_visibility` remains required.
 
+The subsequent cross-warp ordering check is complete in
+[`docs/sm86_async_cross_warp_queue_overlap_milestone.md`](../docs/sm86_async_cross_warp_queue_overlap_milestone.md).
+It retains timing-neutral schema-20 cross-SMSP issue/committed-group
+observations and an exact queued/drained live smoke. The construction and route
+gates pass, but per-warp traces reconstruct both orderings identically; the
+cache-all simulator control is non-material, so the full matrix and W8 holdout
+remain unopened. No timing or typed-tail state changes.
+
 ## Acceptance Criteria
 
 - AC-1: A current-host preflight and release build are recorded for the RTX

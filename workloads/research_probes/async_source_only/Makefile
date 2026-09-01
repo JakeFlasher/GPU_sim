@@ -4,7 +4,7 @@ NVCC_FLAGS ?= -std=c++17 -O3 -arch=sm_86 -lineinfo -Xptxas=-v
 
 .PHONY: all clean
 
-all: async_source_only async_visibility_phase async_issue_spacing async_cohort_pairing async_multiline_response async_wait_prefix_order
+all: async_source_only async_visibility_phase async_issue_spacing async_cohort_pairing async_multiline_response async_wait_prefix_order async_cross_warp_queue_overlap
 
 async_source_only: async_source_only.cu
 	$(NVCC) $(NVCC_FLAGS) -o $@ $<
@@ -24,5 +24,8 @@ async_multiline_response: async_multiline_response.cu
 async_wait_prefix_order: async_wait_prefix_order.cu
 	$(NVCC) $(NVCC_FLAGS) -o $@ $<
 
+async_cross_warp_queue_overlap: async_cross_warp_queue_overlap.cu
+	$(NVCC) $(NVCC_FLAGS) -o $@ $<
+
 clean:
-	rm -f async_source_only async_visibility_phase async_issue_spacing async_cohort_pairing async_multiline_response async_wait_prefix_order
+	rm -f async_source_only async_visibility_phase async_issue_spacing async_cohort_pairing async_multiline_response async_wait_prefix_order async_cross_warp_queue_overlap

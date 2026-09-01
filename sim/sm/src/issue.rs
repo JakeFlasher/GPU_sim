@@ -1448,6 +1448,62 @@ impl AsyncReadinessDiagnostics {
     }
 }
 
+/// Timing-neutral cross-warp asynchronous-copy issue observation.
+///
+/// Coissue fields describe effective `LDGSTS` records already selected by the
+/// four SMSP schedulers in one transaction. Committed-group population fields
+/// describe sibling-warp state before any selected instruction mutates its
+/// owning group. None of these counters participates in issue selection,
+/// readiness, hierarchy requests, destination service, or completion time.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
+pub struct AsyncIssueOverlapDiagnostics {
+    pub coissue_cycles: u64,
+    pub coissued_copies: u64,
+    pub cache_all_coissued_copies: u64,
+    pub bypass_coissued_copies: u64,
+    pub mixed_policy_coissue_cycles: u64,
+    /// Structural excess demand for a hypothetical one-acceptance-per-cycle
+    /// interface. This is a copy count, not an elapsed-cycle prediction.
+    pub single_acceptor_excess_copies: u64,
+    pub maximum_coissue_width: u64,
+    pub copies_with_other_warp_committed_groups: u64,
+    pub other_warp_committed_groups_sum: u64,
+    pub maximum_other_warp_committed_groups: u64,
+}
+
+impl AsyncIssueOverlapDiagnostics {
+    pub const fn is_empty(&self) -> bool {
+        self.coissue_cycles == 0 && self.copies_with_other_warp_committed_groups == 0
+    }
+
+    fn add_checked(&mut self, addend: &Self) -> Result<(), ReadinessCounterError> {
+        let mut next = *self;
+        macro_rules! add {
+            ($field:ident) => {
+                next.$field = checked_readiness_add(
+                    concat!("readiness.async_issue_overlap.", stringify!($field)),
+                    next.$field,
+                    addend.$field,
+                )?;
+            };
+        }
+        add!(coissue_cycles);
+        add!(coissued_copies);
+        add!(cache_all_coissued_copies);
+        add!(bypass_coissued_copies);
+        add!(mixed_policy_coissue_cycles);
+        add!(single_acceptor_excess_copies);
+        next.maximum_coissue_width = next.maximum_coissue_width.max(addend.maximum_coissue_width);
+        add!(copies_with_other_warp_committed_groups);
+        add!(other_warp_committed_groups_sum);
+        next.maximum_other_warp_committed_groups = next
+            .maximum_other_warp_committed_groups
+            .max(addend.maximum_other_warp_committed_groups);
+        *self = next;
+        Ok(())
+    }
+}
+
 /// Timing-neutral summary for one class of asynchronous-copy waits.
 ///
 /// Every field is an additive observation over issued waits. `exposure_cycles`
@@ -3883,6 +3939,8 @@ pub struct ReadinessDiagnostics {
     pub tied_limiting_causes: u64,
     pub async_groups: AsyncReadinessDiagnostics,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub async_issue_overlap: Option<Box<AsyncIssueOverlapDiagnostics>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub async_wait_prefix: Option<Box<AsyncWaitPrefixDiagnostics>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub bypass_async_copies: Option<Box<BypassAsyncCopyDiagnostics>>,
@@ -3923,6 +3981,13 @@ impl ReadinessDiagnostics {
             addend.tied_limiting_causes,
         )?;
         next.async_groups.add_checked(&addend.async_groups)?;
+        if let Some(addend_overlap) = addend.async_issue_overlap.as_deref() {
+            if let Some(current) = next.async_issue_overlap.as_deref_mut() {
+                current.add_checked(addend_overlap)?;
+            } else {
+                next.async_issue_overlap = Some(Box::new(*addend_overlap));
+            }
+        }
         if let Some(addend_waits) = addend.async_wait_prefix.as_deref() {
             if let Some(current) = next.async_wait_prefix.as_deref_mut() {
                 current.add_checked(addend_waits)?;
@@ -3987,9 +4052,13 @@ impl ReadinessDiagnostics {
     /// Schema 18 adds a first-response-anchored, timing-neutral destination
     /// reservation-exposure score over those exact cohorts. Schema 19 adds
     /// timing-neutral partial-versus-draining async-wait prefix observations
-    /// for programs containing at least one nonzero wait immediate.
+    /// for programs containing at least one nonzero wait immediate. Schema 20
+    /// adds timing-neutral cross-SMSP coissue and sibling-warp committed-group
+    /// population observations.
     pub fn schema_version(&self) -> u32 {
-        if self.async_wait_prefix.is_some() {
+        if self.async_issue_overlap.is_some() {
+            20
+        } else if self.async_wait_prefix.is_some() {
             19
         } else if self
             .bypass_async_copies
@@ -8962,6 +9031,117 @@ impl<'a> SmCore<'a> {
         Ok(())
     }
 
+    fn project_async_issue_overlap(
+        &self,
+        picks: &[Option<usize>; SUB_CORES],
+        projected: &mut ReadinessDiagnostics,
+    ) -> Result<(), IssueError> {
+        if !self.has_async_copy_protocol {
+            return Ok(());
+        }
+
+        let mut effective_warps = [None; SUB_CORES];
+        let mut copies = 0_u64;
+        let mut cache_all = 0_u64;
+        let mut bypass = 0_u64;
+        for (subcore, pick) in picks.iter().enumerate() {
+            let Some(warp) = *pick else { continue };
+            let kind = self.warps[warp].insts[self.warps[warp].next].kind;
+            if async_copy_source_count(kind).is_none() {
+                continue;
+            }
+            effective_warps[subcore] = Some(warp);
+            copies += 1;
+            match kind {
+                AccessKind::GlobalAsyncCopy {
+                    l1_policy: LdgstsL1Policy::CacheAtAllLevels,
+                    ..
+                } => cache_all += 1,
+                AccessKind::GlobalAsyncCopy {
+                    l1_policy: LdgstsL1Policy::BypassL1,
+                    ..
+                } => bypass += 1,
+                _ => unreachable!("effective async-copy predicate admits only GlobalAsyncCopy"),
+            }
+        }
+        if copies == 0 {
+            return Ok(());
+        }
+
+        let mut observation = AsyncIssueOverlapDiagnostics::default();
+        if copies >= 2 {
+            observation.coissue_cycles = 1;
+            observation.coissued_copies = copies;
+            observation.cache_all_coissued_copies = cache_all;
+            observation.bypass_coissued_copies = bypass;
+            observation.mixed_policy_coissue_cycles = u64::from(cache_all != 0 && bypass != 0);
+            observation.single_acceptor_excess_copies = copies - 1;
+            observation.maximum_coissue_width = copies;
+        }
+
+        debug_assert_eq!(self.warps.len(), self.async_copies.len());
+        let mut committed_total = 0_u64;
+        for (warp, slot) in self.async_copies.iter().enumerate() {
+            if self.warps[warp].done {
+                continue;
+            }
+            let groups = slot
+                .state
+                .as_deref()
+                .map_or(0, |state| state.committed_groups.len());
+            let groups = u64::try_from(groups).map_err(|_| IssueError::CounterOverflow {
+                counter: "async issue overlap committed-group population",
+            })?;
+            committed_total = checked_u64_counter_add(
+                "async issue overlap committed-group population",
+                committed_total,
+                groups,
+            )?;
+        }
+        for warp in effective_warps.into_iter().flatten() {
+            let own_groups = self.async_copies[warp]
+                .state
+                .as_deref()
+                .map_or(0, |state| state.committed_groups.len());
+            let own_groups =
+                u64::try_from(own_groups).map_err(|_| IssueError::CounterOverflow {
+                    counter: "async issue overlap own committed-group population",
+                })?;
+            let other_groups =
+                committed_total
+                    .checked_sub(own_groups)
+                    .ok_or(IssueError::CounterUnderflow {
+                        counter: "async issue overlap other-warp committed-group population",
+                    })?;
+            if other_groups == 0 {
+                continue;
+            }
+            observation.copies_with_other_warp_committed_groups = checked_readiness_add(
+                "readiness.async_issue_overlap.copies_with_other_warp_committed_groups",
+                observation.copies_with_other_warp_committed_groups,
+                1,
+            )?;
+            observation.other_warp_committed_groups_sum = checked_readiness_add(
+                "readiness.async_issue_overlap.other_warp_committed_groups_sum",
+                observation.other_warp_committed_groups_sum,
+                other_groups,
+            )?;
+            observation.maximum_other_warp_committed_groups = observation
+                .maximum_other_warp_committed_groups
+                .max(other_groups);
+        }
+
+        if observation.is_empty() {
+            return Ok(());
+        }
+        if let Some(current) = projected.async_issue_overlap.as_deref_mut() {
+            current.add_checked(&observation)?;
+        } else {
+            projected.async_issue_overlap = Some(Box::new(observation));
+        }
+        Ok(())
+    }
+
     fn project_picked_readiness(
         &self,
         picks: &[Option<usize>; SUB_CORES],
@@ -9060,6 +9240,7 @@ impl<'a> SmCore<'a> {
                 }
             }
         }
+        self.project_async_issue_overlap(picks, &mut projected)?;
         self.project_cta_barrier_diagnostics(picks, barrier_arrival_times, now, &mut projected)?;
         Ok(projected)
     }
@@ -12656,6 +12837,132 @@ mod tests {
     }
 
     #[test]
+    fn async_issue_overlap_distinguishes_same_smsps_from_cross_smsp_mixed_routes() {
+        let sched = schedule(vec![(0, slot(cb(1), OpClass::Other, "LDGSTS.E"))]);
+        let make_blocks = |warp_slots: [i32; 4]| {
+            let policies = [
+                LdgstsL1Policy::CacheAtAllLevels,
+                LdgstsL1Policy::BypassL1,
+                LdgstsL1Policy::CacheAtAllLevels,
+                LdgstsL1Policy::BypassL1,
+            ];
+            vec![BlockReplay {
+                launch_index: 0,
+                warps: warp_slots
+                    .into_iter()
+                    .zip(policies)
+                    .enumerate()
+                    .map(|(index, (warp_slot, policy))| WarpReplay {
+                        async_copy_cohorts: None,
+                        warp_slot,
+                        insts: vec![async_copy_inst_with_policy(0, 0, 1, policy)],
+                        sectors: vec![40 + index as i64],
+                    })
+                    .collect(),
+            }]
+        };
+
+        let same_smsp = simulate_sm(&make_blocks([0, 4, 8, 12]), &sched, &params(), None).unwrap();
+        let cross_smsp = simulate_sm(&make_blocks([0, 1, 2, 3]), &sched, &params(), None).unwrap();
+
+        assert_eq!(same_smsp.instructions_issued, 4);
+        assert_eq!(same_smsp.cycles, 4);
+        assert!(same_smsp.readiness.async_issue_overlap.is_none());
+        assert_eq!(same_smsp.readiness.schema_version(), 1);
+        assert!(
+            serde_json::to_value(&same_smsp.readiness)
+                .unwrap()
+                .get("async_issue_overlap")
+                .is_none(),
+            "serialized predecessor shape must omit an empty observation"
+        );
+
+        assert_eq!(cross_smsp.instructions_issued, 4);
+        assert_eq!(cross_smsp.cycles, 1);
+        assert_eq!(cross_smsp.readiness.schema_version(), 20);
+        assert_eq!(
+            cross_smsp.readiness.async_issue_overlap.as_deref(),
+            Some(&AsyncIssueOverlapDiagnostics {
+                coissue_cycles: 1,
+                coissued_copies: 4,
+                cache_all_coissued_copies: 2,
+                bypass_coissued_copies: 2,
+                mixed_policy_coissue_cycles: 1,
+                single_acceptor_excess_copies: 3,
+                maximum_coissue_width: 4,
+                copies_with_other_warp_committed_groups: 0,
+                other_warp_committed_groups_sum: 0,
+                maximum_other_warp_committed_groups: 0,
+            })
+        );
+    }
+
+    #[test]
+    fn async_issue_overlap_counts_only_other_live_warps_committed_groups() {
+        let sched = schedule(vec![(0, slot(cb(1), OpClass::Other, "LDGSTS.E"))]);
+        let policies = [
+            LdgstsL1Policy::CacheAtAllLevels,
+            LdgstsL1Policy::CacheAtAllLevels,
+            LdgstsL1Policy::CacheAtAllLevels,
+            LdgstsL1Policy::BypassL1,
+        ];
+        let blocks = vec![BlockReplay {
+            launch_index: 0,
+            warps: policies
+                .into_iter()
+                .enumerate()
+                .map(|(warp_slot, policy)| WarpReplay {
+                    async_copy_cohorts: None,
+                    warp_slot: warp_slot as i32,
+                    insts: vec![async_copy_inst_with_policy(0, 0, 1, policy)],
+                    sectors: vec![40 + warp_slot as i64],
+                })
+                .collect(),
+        }];
+        let p = params();
+        let mut core = SmCore::new(&blocks, &sched, &p, SmMemMode::Flat).unwrap();
+        for (warp, groups) in [(0, 2), (1, 1), (2, 2), (3, 2)] {
+            for _ in 0..groups {
+                core.async_copies[warp]
+                    .add_known_async_copy(warp, 0, 64, 0, &p)
+                    .unwrap();
+                assert!(core.async_copies[warp].commit_async_copy_group(0));
+            }
+        }
+        core.warps[0].eligible = u64::MAX;
+        core.warps[1].eligible = u64::MAX;
+        core.warps[2].eligible = u64::MAX;
+
+        let mut requests = Vec::new();
+        assert_eq!(
+            core.advance(ReplayHorizon::Bounded(1), &mut requests)
+                .unwrap(),
+            Advance::Idle { wake_at: Some(1) }
+        );
+        assert!(requests.is_empty());
+        assert_eq!(core.instructions_issued(), 1);
+        assert_eq!(core.now(), 1);
+        assert_eq!(core.result().readiness.schema_version(), 20);
+        assert_eq!(
+            core.result().readiness.async_issue_overlap.as_deref(),
+            Some(&AsyncIssueOverlapDiagnostics {
+                coissue_cycles: 0,
+                coissued_copies: 0,
+                cache_all_coissued_copies: 0,
+                bypass_coissued_copies: 0,
+                mixed_policy_coissue_cycles: 0,
+                single_acceptor_excess_copies: 0,
+                maximum_coissue_width: 0,
+                copies_with_other_warp_committed_groups: 1,
+                // Warp 3's own two retained groups are excluded; its three
+                // siblings own five committed groups.
+                other_warp_committed_groups_sum: 5,
+                maximum_other_warp_committed_groups: 5,
+            })
+        );
+    }
+
+    #[test]
     fn async_copy_payload_rate_is_route_local_and_sector_count_independent() {
         for (policy, opcode, expected_cycles) in [
             (LdgstsL1Policy::CacheAtAllLevels, "LDGSTS.E", 406),
@@ -14911,6 +15218,61 @@ mod tests {
                 field: "readiness.async_wait_prefix.partial.exposure_cycles",
                 accumulated: u64::MAX,
                 addend: 17,
+            })
+        ));
+        assert_eq!(aggregate, before);
+    }
+
+    #[test]
+    fn async_issue_overlap_aggregation_is_checked_and_transactional() {
+        let observation = ReadinessDiagnostics {
+            async_issue_overlap: Some(Box::new(AsyncIssueOverlapDiagnostics {
+                coissue_cycles: 1,
+                coissued_copies: 4,
+                cache_all_coissued_copies: 2,
+                bypass_coissued_copies: 2,
+                mixed_policy_coissue_cycles: 1,
+                single_acceptor_excess_copies: 3,
+                maximum_coissue_width: 4,
+                copies_with_other_warp_committed_groups: 2,
+                other_warp_committed_groups_sum: 7,
+                maximum_other_warp_committed_groups: 5,
+            })),
+            ..ReadinessDiagnostics::default()
+        };
+        let mut aggregate = ReadinessDiagnostics::default();
+        aggregate.add_checked(&observation).unwrap();
+        aggregate.add_checked(&observation).unwrap();
+
+        assert_eq!(aggregate.schema_version(), 20);
+        assert_eq!(
+            aggregate.async_issue_overlap.as_deref(),
+            Some(&AsyncIssueOverlapDiagnostics {
+                coissue_cycles: 2,
+                coissued_copies: 8,
+                cache_all_coissued_copies: 4,
+                bypass_coissued_copies: 4,
+                mixed_policy_coissue_cycles: 2,
+                single_acceptor_excess_copies: 6,
+                maximum_coissue_width: 4,
+                copies_with_other_warp_committed_groups: 4,
+                other_warp_committed_groups_sum: 14,
+                maximum_other_warp_committed_groups: 5,
+            })
+        );
+
+        aggregate
+            .async_issue_overlap
+            .as_deref_mut()
+            .unwrap()
+            .other_warp_committed_groups_sum = u64::MAX;
+        let before = aggregate.clone();
+        assert!(matches!(
+            aggregate.add_checked(&observation),
+            Err(ReadinessCounterError::Overflow {
+                field: "readiness.async_issue_overlap.other_warp_committed_groups_sum",
+                accumulated: u64::MAX,
+                addend: 7,
             })
         ));
         assert_eq!(aggregate, before);

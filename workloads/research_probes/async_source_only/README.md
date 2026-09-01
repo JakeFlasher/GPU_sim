@@ -425,3 +425,31 @@ The issue gate requires at most one cycle, the draining magnitude requires at
 least 64 cycles, and the total never satisfies the cancellation rule. The
 three-group holdout remains uncaptured. No timing is promoted and
 `async_copy_shared_visibility` remains required.
+
+## Cross-warp queue-overlap smoke
+
+`async_cross_warp_queue_overlap` holds eight source/destination positions per
+warp exact while moving four background groups across their wait boundary.
+Queued backgrounds remain committed until the target warp finishes; drained
+backgrounds wait before the target starts. The direct clocks separate target
+issue from wait, and schema 20 reports cross-SMSP coissue plus sibling
+committed-group populations without changing time.
+
+Run the complete bounded smoke and reducer from an empty evidence root:
+
+```bash
+PYTHONDONTWRITEBYTECODE=1 python3 \
+  workloads/research_probes/async_source_only/capture_cross_warp_queue.py \
+  --phase smoke --timeout 900
+PYTHONDONTWRITEBYTECODE=1 python3 \
+  workloads/research_probes/async_source_only/analyze_cross_warp_queue.py
+```
+
+All manipulation, NCU, NVBit, and replay gates pass, but queued and drained
+traces reconstruct identical schema-20 populations. The cache-all modeled
+frontier contrast is only `-1.3125` cycles/group, below the prospective
+16-cycle control gate. The result is
+`complete_cross_warp_queue_control_no_go`; full identification and W8 holdout
+remain absent, timing is unchanged, and `async_copy_shared_visibility` remains
+required. See
+[`docs/sm86_async_cross_warp_queue_overlap_milestone.md`](../../../docs/sm86_async_cross_warp_queue_overlap_milestone.md).

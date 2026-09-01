@@ -241,6 +241,20 @@ issue delta is `+5.000` cycles/epoch, the remainder magnitude is only
 fails before the three-group holdout. Production timing and the typed
 `async_copy_shared_visibility` tail remain unchanged.
 
+The independent
+[cross-warp queue-overlap milestone](sm86_async_cross_warp_queue_overlap_milestone.md)
+is complete as a positive-control no-go. Its final exact-work W4 smoke keeps
+three background warps committed across an identical target group in queued,
+and drains them before the target in the paired arm. Live timestamps, NCU
+routes/work, four NVBit traces, and eight deterministic replays all pass.
+Readiness schema 20 now exposes cross-SMSP LDGSTS coissue and sibling committed
+groups without changing time. However, per-warp traces carry no globally
+comparable cross-warp service order: queued and drained reconstruct identical
+schema-20 populations, and the cache-all modeled frontier delta is only
+`-1.3125` cycles/group, below the frozen material-control gate. Full timing and
+W8 remain unopened. No queue or bypass timing is promoted; the typed tail
+remains.
+
 The 2026-08-17
 [causal-readiness milestone](sm86_causal_readiness_milestone.md) is complete.
 Reason-tagged dependency, async-copy, CTA-generation/arrival-spread, and
