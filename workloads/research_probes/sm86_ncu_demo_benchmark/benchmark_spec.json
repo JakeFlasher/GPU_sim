@@ -119,19 +119,20 @@
       "trace_args": ["--timing_shape", "--warmup", "0", "--reps", "1"]
     },
     {
-      "id": "conv2d_implicit_gemm_bf16_sm80",
-      "display_name": "BF16 implicit-GEMM Conv2D snapshot",
-      "functional_analogue": "CNN neighborhood/stencil-like compute kernel",
+      "id": "embedding_gather_int32_sm80",
+      "display_name": "BF16 embedding gather snapshot",
+      "functional_analogue": "indirect graph/embedding gather kernel",
       "stage": "full",
-      "binary": "workloads/portable_lcd/conv2d_implicit_gemm_bf16_sm80/conv2d_implicit_gemm_bf16_sm80_run",
-      "binary_sha256": "9883fbaf8d08dee40cc5af25bf14b5afdddf17b7d0a6c1f254a91606683a4558",
-      "binary_size_bytes": 702152,
-      "source": "workloads/portable_lcd/conv2d_implicit_gemm_bf16_sm80/main.cu",
-      "timing_shape": {"n": 8, "h": 16, "w": 16, "c": 32, "k": 32, "r": 3, "s": 3, "pad": 1, "stride": 1},
+      "binary": "workloads/portable_lcd/embedding_gather_int32_sm80/embedding_gather_int32_sm80_run",
+      "binary_sha256": "036ad61edd00c513c84c37093aa9bc33438df8754888e0bcc81534474b4644ec",
+      "binary_size_bytes": 118056,
+      "source": "workloads/portable_lcd/embedding_gather_int32_sm80/main.cu",
+      "timing_shape": {"batch": 2, "tokens": 64, "vocab": 1024, "embedding_dim": 256},
+      "timing_overrides": ["--BH", "2", "--Sq", "64", "--Sk", "1024", "--D", "256"],
       "target_launch_count": 1,
       "correctness_args": ["--correctness_shape", "--seed", "42", "--warmup", "1", "--reps", "1", "--output_dir", "{output}"],
-      "ncu_args": ["--timing_shape", "--warmup", "1", "--reps", "1"],
-      "trace_args": ["--timing_shape", "--warmup", "0", "--reps", "1"]
+      "ncu_args": ["--timing_shape", "--warmup", "1", "--reps", "1", "--BH", "2", "--Sq", "64", "--Sk", "1024", "--D", "256"],
+      "trace_args": ["--timing_shape", "--warmup", "0", "--reps", "1", "--BH", "2", "--Sq", "64", "--Sk", "1024", "--D", "256"]
     },
     {
       "id": "gemm_sparse_2to4_bf16_sm80",

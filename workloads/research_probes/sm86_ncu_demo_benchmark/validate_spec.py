@@ -158,8 +158,17 @@ def validate_spec(spec: Mapping[str, Any], metrics: Mapping[str, Any], profile: 
         require(binary.stat().st_size == row["binary_size_bytes"], f"{row['id']}: binary size drift")
         require(row["target_launch_count"] == 1, f"{row['id']}: v1 admits one target launch")
         require(row["correctness_args"][0] == "--correctness_shape", f"{row['id']}: correctness args")
-        require(row["ncu_args"] == ["--timing_shape", "--warmup", "1", "--reps", "1"], f"{row['id']}: NCU args")
-        require(row["trace_args"] == ["--timing_shape", "--warmup", "0", "--reps", "1"], f"{row['id']}: trace args")
+        overrides = row.get("timing_overrides", [])
+        require(
+            row["ncu_args"]
+            == ["--timing_shape", "--warmup", "1", "--reps", "1", *overrides],
+            f"{row['id']}: NCU args",
+        )
+        require(
+            row["trace_args"]
+            == ["--timing_shape", "--warmup", "0", "--reps", "1", *overrides],
+            f"{row['id']}: trace args",
+        )
         require(not any(name in row["display_name"] for name in forbidden_names), f"{row['id']}: misleading display name")
         require("kernel" in row["functional_analogue"], f"{row['id']}: analogue must say kernel")
     validate_metrics(metrics, spec["ncu"]["metrics"])

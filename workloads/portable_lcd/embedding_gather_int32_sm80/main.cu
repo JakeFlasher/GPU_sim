@@ -13,6 +13,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
+#include <limits.h>
 
 #include "../runner_common.h"
 
@@ -35,17 +36,43 @@ static void seed_indices(int32_t *flat, size_t n, uint32_t seed, int32_t vocab_s
 int main(int argc, char **argv) {
     using namespace runner_common;
     Args A = parse_args(argc, argv, PROG);
-    require_accepted_overrides(A, PROG, {});
+    require_accepted_overrides(A, PROG, {.flash_attn_bhsqsk = true});
+
+    int B, S, V, D;
+    const char *shape_point;
+    bool overrides_set = A.has_override_bh || A.has_override_sq
+                      || A.has_override_sk || A.has_override_d;
+    if (A.mode == Mode::Correctness) {
+        if (overrides_set) {
+            fprintf(stderr, "%s: shape_override_in_correctness_mode_rejected\n", PROG);
+            return 2;
+        }
+        B = 2; S = 8; V = 64; D = 128; shape_point = "correctness_00";
+    } else {
+        B = 4; S = 128; V = 4096; D = 2048; shape_point = "timing_00";
+        if (overrides_set) {
+            B = A.has_override_bh ? A.override_bh : B;
+            S = A.has_override_sq ? A.override_sq : S;
+            V = A.has_override_sk ? A.override_sk : V;
+            D = A.has_override_d ? A.override_d : D;
+            if (B <= 0 || S <= 0 || V <= 0 || D <= 0) {
+                fprintf(stderr, "%s: shape_override_positive_dimensions_required (B=%d S=%d V=%d D=%d)\n",
+                        PROG, B, S, V, D);
+                return 2;
+            }
+            int64_t pairs = (int64_t)B * S;
+            if (pairs > INT_MAX || (int64_t)V * D > INT_MAX || pairs * D > INT_MAX) {
+                fprintf(stderr, "%s: shape_override_element_count_exceeds_int32\n", PROG);
+                return 2;
+            }
+            shape_point = "timing_override";
+        }
+    }
+    if (A.shape_point != nullptr) shape_point = A.shape_point;
 
     cudaDeviceProp dp;
     int rc = acquire_device(PROG, A, dp);
     if (rc) return rc;
-
-    int B, S, V, D;
-    const char *shape_point;
-    if (A.mode == Mode::Correctness) { B = 2; S = 8;   V = 64;   D = 128;  shape_point = "correctness_00"; }
-    else                             { B = 4; S = 128; V = 4096; D = 2048; shape_point = "timing_00"; }
-    if (A.shape_point != nullptr) shape_point = A.shape_point;
 
     const size_t n_idx   = (size_t)B * S;
     const size_t n_table = (size_t)V * D;
