@@ -291,9 +291,10 @@ def _run_correctness(
     if len(manifests) != 1:
         raise CampaignError(f"{slug}: expected one correctness manifest, found {len(manifests)}")
     manifest = _load_json(manifests[0])
+    expected_runner_slug = workload.get("runner_slug", slug)
     if (
         manifest.get("mode") != "correctness"
-        or manifest.get("slug") != slug
+        or manifest.get("slug") != expected_runner_slug
         or manifest.get("binary_sha256") != workload["binary_sha256"]
     ):
         raise CampaignError(f"{slug}: correctness manifest identity mismatch")

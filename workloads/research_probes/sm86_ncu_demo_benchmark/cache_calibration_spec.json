@@ -134,19 +134,21 @@
       "trace_args": ["--timing_shape", "--warmup", "0", "--reps", "1"]
     },
     {
-      "id": "flash_attn_bwd_bf16_sm80",
-      "display_name": "BF16 attention backward calibration",
-      "functional_analogue": "attention-gradient tiled memory kernel",
+      "id": "gemm_hmma_fp16_sm80_m128",
+      "display_name": "FP16 HMMA GEMM compact calibration",
+      "functional_analogue": "compact dense FP16 matrix kernel",
       "stage": "full",
-      "binary": "workloads/portable_lcd/flash_attn_bwd_bf16_sm80/flash_attn_bwd_bf16_sm80_run",
-      "binary_sha256": "419a658fbc47da8e4b360c4de6619329c9de84b00885818c12ca60550865acd1",
-      "binary_size_bytes": 377152,
-      "source": "workloads/portable_lcd/flash_attn_bwd_bf16_sm80/main.cu",
-      "timing_shape": {"batch_heads": 4, "query_tokens": 16, "key_tokens": 128, "head_dim": 16},
+      "runner_slug": "gemm_hmma_fp16_sm80",
+      "binary": "workloads/portable_lcd/gemm_hmma_fp16_sm80/gemm_hmma_fp16_sm80_run",
+      "binary_sha256": "829927c7f57d7c46f0a8e51c7de6bb8c7eb7d8de1e963a33e5e9afee7839a750",
+      "binary_size_bytes": 113792,
+      "source": "workloads/portable_lcd/gemm_hmma_fp16_sm80/main.cu",
+      "timing_shape": {"m": 128, "n": 128, "k": 128},
+      "timing_overrides": ["--m", "128", "--n", "128", "--k", "128"],
       "target_launch_count": 1,
       "correctness_args": ["--correctness_shape", "--seed", "42", "--warmup", "1", "--reps", "1", "--output_dir", "{output}"],
-      "ncu_args": ["--timing_shape", "--warmup", "1", "--reps", "1"],
-      "trace_args": ["--timing_shape", "--warmup", "0", "--reps", "1"]
+      "ncu_args": ["--timing_shape", "--warmup", "1", "--reps", "1", "--m", "128", "--n", "128", "--k", "128"],
+      "trace_args": ["--timing_shape", "--warmup", "0", "--reps", "1", "--m", "128", "--n", "128", "--k", "128"]
     }
   ]
 }
