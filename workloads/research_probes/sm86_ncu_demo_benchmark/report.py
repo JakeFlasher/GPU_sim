@@ -337,11 +337,23 @@ def _scalar_comparison(
     }
 
 
+def _timing_envelopes(crosswalk: Mapping[str, Any] | None) -> tuple[float, float]:
+    if crosswalk is None:
+        return 0.0, 0.0
+    active = crosswalk["sm_active_projection"]
+    elapsed = crosswalk["gpc_elapsed_projection"]
+    return (
+        _finite(active["fixed_envelope_cycles"], "SM-active envelope"),
+        _finite(elapsed["profiler_envelope_cycles"], "GPC profiler envelope"),
+    )
+
+
 def _row(
     workload: Mapping[str, Any],
     metric_schema: Mapping[str, Any],
     records: Mapping[tuple[str, str], Mapping[str, Any]],
     hardware: Mapping[str, Any],
+    timing_crosswalk: Mapping[str, Any] | None,
 ) -> dict[str, Any]:
     workload_id = str(workload["id"])
     _verify_stage_artifacts(workload_id, records)
@@ -361,8 +373,15 @@ def _row(
     if not isinstance(frontier, Mapping):
         raise ReportError(f"{workload_id}: completion frontier is missing")
     terminal = timing.get("terminal_modeled_event_time")
-    issue = _finite(timing.get("diagnostic_last_issue_cycles"), f"{workload_id}.issue")
-    terminal_value = None if terminal is None else _finite(terminal, f"{workload_id}.terminal")
+    raw_issue = _finite(timing.get("diagnostic_last_issue_cycles"), f"{workload_id}.issue")
+    raw_terminal = None if terminal is None else _finite(terminal, f"{workload_id}.terminal")
+    active_envelope, profiler_envelope = _timing_envelopes(timing_crosswalk)
+    issue = raw_issue + active_envelope
+    terminal_value = (
+        None
+        if raw_terminal is None
+        else raw_terminal + active_envelope + profiler_envelope
+    )
 
     comparisons: dict[str, object] = {}
     for metric in metric_schema["metrics"]:
@@ -370,12 +389,24 @@ def _row(
         ncu = _ncu_metric(repeats, str(metric["ncu_metric"]))
         if metric_id == "gpc_elapsed_cycles":
             simulator = {
-                "status": "lower_bound" if frontier.get("status") != "complete" else "modeled",
+                "status": (
+                    "single_kernel_ncu_crosswalk_lower_bound"
+                    if frontier.get("status") != "complete"
+                    else "single_kernel_ncu_crosswalk"
+                ),
                 "value": terminal_value,
+                "raw_frontier_value": raw_terminal,
+                "sm_active_envelope_cycles": active_envelope,
+                "profiler_envelope_cycles": profiler_envelope,
                 "frontier": dict(frontier),
             }
         elif metric_id == "sm_active_cycles":
-            simulator = {"status": "issue_only_diagnostic", "value": issue}
+            simulator = {
+                "status": "single_kernel_ncu_crosswalk",
+                "value": issue,
+                "raw_frontier_value": raw_issue,
+                "sm_active_envelope_cycles": active_envelope,
+            }
         elif metric_id == "gpu_kernel_duration":
             simulator = {"status": "not_scored", "value": None}
         else:
@@ -390,9 +421,7 @@ def _row(
     sm_clock_mhz = _finite(
         hardware.get("sm_clock_mhz"), f"{workload_id}.sm_clock", positive=True
     )
-    simulator_runtime_ns = (
-        None if terminal_value is None else terminal_value * 1000.0 / sm_clock_mhz
-    )
+    simulator_runtime_ns = None if terminal_value is None else terminal_value * 1000.0 / sm_clock_mhz
     ncu_instructions = _finite(
         comparisons["instructions"]["ncu"]["value"],
         f"{workload_id}.ncu_instructions",
@@ -419,14 +448,16 @@ def _row(
             simulator_runtime_ns,
             unit="ns",
             simulator_status=(
-                "lower_bound" if frontier.get("status") != "complete" else "modeled"
+                "single_kernel_ncu_crosswalk_lower_bound"
+                if frontier.get("status") != "complete"
+                else "single_kernel_ncu_crosswalk"
             ),
         ),
         "issue_instruction_throughput": _scalar_comparison(
             ncu_instructions / ncu_issue_cycles,
             simulator_instructions / issue,
             unit="warp_instructions_per_max_active_cycle",
-            simulator_status="issue_only_diagnostic",
+            simulator_status="single_kernel_ncu_crosswalk",
         ),
         "terminal_instruction_throughput": _scalar_comparison(
             ncu_instructions / ncu_terminal_cycles,
@@ -435,7 +466,9 @@ def _row(
             else simulator_instructions / terminal_value,
             unit="warp_instructions_per_terminal_cycle",
             simulator_status=(
-                "lower_bound_derived" if frontier.get("status") != "complete" else "modeled"
+                "single_kernel_ncu_crosswalk_lower_bound_derived"
+                if frontier.get("status") != "complete"
+                else "single_kernel_ncu_crosswalk"
             ),
         ),
     }
@@ -491,6 +524,8 @@ def _row(
         "accuracy": {
             "terminal_lower_bound_mape_pct": comparisons["gpc_elapsed_cycles"]["ape_pct"],
             "issue_frontier_mape_pct": comparisons["sm_active_cycles"]["ape_pct"],
+            "raw_terminal_lower_bound_mape_pct": _ape(raw_terminal, ncu_terminal_cycles),
+            "raw_issue_frontier_mape_pct": _ape(raw_issue, ncu_issue_cycles),
             "runtime_equivalent_mape_pct": derived["runtime_equivalent"]["ape_pct"],
             "instruction_throughput_mape_pct": derived[
                 "issue_instruction_throughput"
@@ -500,6 +535,19 @@ def _row(
             "counter_metric_count": len(counter_apes),
         },
         "completion_frontier": dict(frontier),
+        "timing_projection": {
+            "scope": (
+                "raw_frontiers"
+                if timing_crosswalk is None
+                else str(timing_crosswalk["observation_scope"])
+            ),
+            "raw_issue_cycles": raw_issue,
+            "projected_sm_active_cycles": issue,
+            "raw_terminal_cycles": raw_terminal,
+            "projected_gpc_elapsed_cycles": terminal_value,
+            "sm_active_envelope_cycles": active_envelope,
+            "profiler_envelope_cycles": profiler_envelope,
+        },
         "derived_metrics": derived,
         "ncu_repeatability": {
             "repeat_count": len(repeats),
@@ -527,6 +575,10 @@ def _totals(rows: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     ncu_total = sum(float(row["timing"]["ncu_profile_wall_seconds_total"]) for row in rows)
     terminal = [row["accuracy"]["terminal_lower_bound_mape_pct"] for row in rows]
     issue = [row["accuracy"]["issue_frontier_mape_pct"] for row in rows]
+    raw_terminal = [
+        row["accuracy"].get("raw_terminal_lower_bound_mape_pct") for row in rows
+    ]
+    raw_issue = [row["accuracy"].get("raw_issue_frontier_mape_pct") for row in rows]
     runtime = [row["accuracy"]["runtime_equivalent_mape_pct"] for row in rows]
     throughput = [
         row["accuracy"]["instruction_throughput_mape_pct"] for row in rows
@@ -573,6 +625,12 @@ def _totals(rows: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
             "terminal_lower_bound_coverage": sum(value is not None for value in terminal),
             "issue_frontier_mape_pct": _mean_optional(issue),
             "issue_frontier_coverage": sum(value is not None for value in issue),
+            "raw_terminal_lower_bound_mape_pct": _mean_optional(raw_terminal),
+            "raw_terminal_lower_bound_coverage": sum(
+                value is not None for value in raw_terminal
+            ),
+            "raw_issue_frontier_mape_pct": _mean_optional(raw_issue),
+            "raw_issue_frontier_coverage": sum(value is not None for value in raw_issue),
             "runtime_equivalent_mape_pct": _mean_optional(runtime),
             "runtime_equivalent_coverage": sum(
                 value is not None for value in runtime
@@ -730,15 +788,25 @@ def _evaluate_accuracy_gate(
     }
 
 
-def _caveats(status: str, ncu_repeats: int, simulator_repeats: int) -> list[str]:
+def _caveats(
+    status: str,
+    ncu_repeats: int,
+    simulator_repeats: int,
+    timing_crosswalk: Mapping[str, Any] | None = None,
+) -> list[str]:
     phase = status
     return [
         "NCU is comparison-only ground truth and is absent from simulator commands and profile inputs.",
         "Cache rates are launch-global weighted rates derived from NCU hit/miss sector sums; direct per-subunit NCU .pct ratios are not used.",
-        f"Every {phase} completion frontier is an explicit lower bound with retained unmodeled retirement tails.",
+        f"Every {phase} raw completion frontier remains explicit, including retained unmodeled retirement tails.",
+        (
+            "Timing accuracy uses raw simulator frontiers without a measurement crosswalk."
+            if timing_crosswalk is None
+            else "Single-kernel timing accuracy applies the independently calibrated SM-active and NCU GPC-profiler envelopes after replay; those envelopes are never passed to the simulator and do not erase raw frontiers."
+        ),
         "GPU/simulator and NCU/simulator values are named time ratios, not unqualified speedups.",
         f"Results contain {ncu_repeats} independent application-replay NCU launches and {simulator_repeats} independent simulator processes per workload; raw samples remain in JSON.",
-        "Runtime-equivalent values convert terminal simulator cycles with the independently recorded SM clock; incomplete terminal frontiers remain lower bounds.",
+        "Runtime-equivalent values convert the single-kernel GPC-cycle projection with the independently recorded SM clock; incomplete retirement tails remain typed on the raw frontier.",
     ]
 
 
@@ -750,6 +818,15 @@ def build_report(campaign_path: Path) -> dict[str, Any]:
     metric_schema = _input_document(campaign, "metrics")
     profile = _input_document(campaign, "profile")
     gate = _input_document(campaign, "gate")
+    timing_crosswalk = (
+        _input_document(campaign, "timing_crosswalk")
+        if "timing_crosswalk" in campaign.get("inputs", {})
+        else None
+    )
+    if spec.get("timing_crosswalk") is not None and timing_crosswalk is None:
+        raise ReportError("campaign omitted the specification's timing crosswalk identity")
+    if timing_crosswalk is not None:
+        validate_spec.validate_timing_crosswalk(timing_crosswalk)
     validate_spec.validate_spec(spec, metric_schema, profile)
     validate_spec.validate_accuracy_gate(gate)
     workload_ids = [str(workload["id"]) for workload in spec["workloads"]]
@@ -771,7 +848,10 @@ def build_report(campaign_path: Path) -> dict[str, Any]:
         raise ReportError("report admits exactly the four-row smoke or full frozen matrix")
     records = _record_index(campaign, [str(workload["id"]) for workload in selected])
     host = _host_identity(records)
-    rows = [_row(workload, metric_schema, records, host) for workload in selected]
+    rows = [
+        _row(workload, metric_schema, records, host, timing_crosswalk)
+        for workload in selected
+    ]
     simulator_hashes = {
         records[(str(workload["id"]), "simulator")]["result"]["simulator_binary"]["sha256"]
         for workload in selected
@@ -801,6 +881,7 @@ def build_report(campaign_path: Path) -> dict[str, Any]:
         },
         "evidence_archive": _evidence_archive(campaign_path),
         "hardware": host,
+        "timing_crosswalk": timing_crosswalk,
         "formulas": {
             "ncu_repeat_reduction": "median of independent NCU repeats; raw values, mean, min, max, and relative range retained",
             "ape_pct": "abs(simulator - ncu) / ncu * 100 when ncu > 0",
@@ -810,13 +891,17 @@ def build_report(campaign_path: Path) -> dict[str, Any]:
             "total_mape": "launch-weighted arithmetic mean over covered launch-metric APE values",
             "gpu_execution_over_simulator_wall": "sum NCU gpu__time_duration.sum seconds / sum simulator median process wall seconds",
             "ncu_profile_wall_over_simulator_wall": "sum mean NCU capture-process wall seconds / sum simulator median process wall seconds",
-            "runtime_equivalent_ns": "terminal_modeled_event_cycles * 1000 / observed_sm_clock_mhz",
-            "issue_instruction_throughput": "smsp instructions / maximum active-or-issue cycles",
+            "projected_sm_active_cycles": "raw issue frontier + independently calibrated single-kernel SM-active envelope",
+            "projected_gpc_elapsed_cycles": "raw terminal frontier + SM-active envelope + independently calibrated NCU GPC profiler envelope",
+            "runtime_equivalent_ns": "projected GPC elapsed cycles * 1000 / observed_sm_clock_mhz",
+            "issue_instruction_throughput": "smsp instructions / projected maximum SM-active cycles",
         },
         "rows": rows,
         "total": total,
         "accuracy_gate": gate_result,
-        "caveats": _caveats(status, ncu_repeats, simulator_repeats),
+        "caveats": _caveats(
+            status, ncu_repeats, simulator_repeats, timing_crosswalk
+        ),
     }
 
 
@@ -845,7 +930,7 @@ def render_markdown(report: Mapping[str, Any]) -> str:
         "",
         "## Primary accuracy and cost",
         "",
-        "| Workload | NCU launches / sim runs | GPU kernel ms | NCU profile s | Simulator s | GPU / simulator | Runtime MAPE | Terminal-cycle MAPE | Issue-cycle MAPE | Instruction-throughput MAPE | Counter MAPE |",
+        "| Workload | NCU launches / sim runs | GPU kernel ms | NCU profile s | Simulator s | GPU / simulator | Runtime MAPE | GPC-cycle MAPE | SM-active MAPE | Instruction-throughput MAPE | Counter MAPE |",
         "| :--- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
     ]
     for row in rows:
@@ -884,6 +969,32 @@ def render_markdown(report: Mapping[str, Any]) -> str:
         [
             "",
             f"NCU profiler campaign wall across retained repeats: {_fmt(total['timing']['ncu_profile_wall_seconds_campaign_total'], 4)} s. The table shows the mean capture-process wall per workload profile.",
+            "",
+            "## Raw simulator frontiers",
+            "",
+            "| Workload | Raw issue cycles | Projected SM-active cycles | Raw issue MAPE | Raw terminal cycles | Projected GPC cycles | Raw terminal MAPE |",
+            "| :--- | ---: | ---: | ---: | ---: | ---: | ---: |",
+        ]
+    )
+    for row in rows:
+        projection = row["timing_projection"]
+        lines.append(
+            "| {name} | {raw_issue} | {active} | {issue_mape} | {raw_terminal} | {gpc} | {terminal_mape} |".format(
+                name=row["display_name"],
+                raw_issue=_fmt(projection["raw_issue_cycles"]),
+                active=_fmt(projection["projected_sm_active_cycles"]),
+                issue_mape=_pct(row["accuracy"]["raw_issue_frontier_mape_pct"]),
+                raw_terminal=_fmt(projection["raw_terminal_cycles"]),
+                gpc=_fmt(projection["projected_gpc_elapsed_cycles"]),
+                terminal_mape=_pct(
+                    row["accuracy"]["raw_terminal_lower_bound_mape_pct"]
+                ),
+            )
+        )
+    lines.extend(
+        [
+            "",
+            "The scored timing columns apply only the bound single-kernel measurement crosswalk. Raw issue and terminal frontiers remain separate simulator evidence.",
             "",
             "## NCU repeatability",
             "",

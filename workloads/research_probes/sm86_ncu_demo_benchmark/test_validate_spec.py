@@ -22,10 +22,18 @@ class BenchmarkSpecTests(unittest.TestCase):
         cls.metrics = json.loads((HERE / "metric_schema.json").read_text())
         cls.profile = json.loads((HERE / "host_profile.json").read_text())
         cls.gate = json.loads((HERE / "accuracy_gate.json").read_text())
+        cls.crosswalk = json.loads((HERE / "timing_crosswalk.json").read_text())
 
     def test_frozen_spec_is_valid(self) -> None:
         subject.validate_spec(self.spec, self.metrics, self.profile)
         subject.validate_accuracy_gate(self.gate)
+        subject.validate_timing_crosswalk(self.crosswalk)
+
+    def test_timing_crosswalk_recomputes_control_residuals(self) -> None:
+        mutated = copy.deepcopy(self.crosswalk)
+        mutated["calibration"]["cells"][0]["simulator_issue_cycles"] += 1
+        with self.assertRaisesRegex(subject.ValidationError, "SM-active residual drift"):
+            subject.validate_timing_crosswalk(mutated)
 
     def test_duplicate_workload_is_rejected(self) -> None:
         mutated = copy.deepcopy(self.spec)
@@ -56,6 +64,13 @@ class BenchmarkSpecTests(unittest.TestCase):
 
     def test_post_candidate_l2_holdout_spec_is_valid(self) -> None:
         holdout = json.loads((HERE / "cache_lookup_holdout_spec.json").read_text())
+        calibration_metrics = json.loads(
+            (HERE / "cache_calibration_metrics.json").read_text()
+        )
+        subject.validate_spec(holdout, calibration_metrics, self.profile)
+
+    def test_post_candidate_l1_holdout_spec_is_valid(self) -> None:
+        holdout = json.loads((HERE / "l1_lookup_holdout_spec.json").read_text())
         calibration_metrics = json.loads(
             (HERE / "cache_calibration_metrics.json").read_text()
         )

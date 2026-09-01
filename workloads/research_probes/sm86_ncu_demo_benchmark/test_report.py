@@ -94,6 +94,12 @@ def test_missing_percentage_formats_without_a_percent_suffix() -> None:
     assert report._pct(12.5) == "12.50%"
 
 
+def test_timing_crosswalk_preserves_two_distinct_envelopes() -> None:
+    crosswalk = json.loads((report.HERE / "timing_crosswalk.json").read_text())
+    assert report._timing_envelopes(crosswalk) == (1350.5, 2047.5)
+    assert report._timing_envelopes(None) == (0.0, 0.0)
+
+
 def test_caveats_distinguish_smoke_from_final_repeats() -> None:
     assert any("3 independent" in note for note in report._caveats("smoke", 3, 3))
     assert any("7 independent" in note for note in report._caveats("final", 7, 7))

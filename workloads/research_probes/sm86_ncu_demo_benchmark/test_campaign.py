@@ -73,7 +73,7 @@ def test_plan_binds_ncu_cache_policy_and_metric_projection(tmp_path: Path) -> No
     assert ncu[-5:] == ["--timing_shape", "--warmup", "1", "--reps", "1"]
     collected = ncu[ncu.index("--metrics") + 1]
     assert "l1tex__t_sectors_lookup_hit.sum" in collected
-    assert "lts__t_sectors_lookup_miss.sum" in collected
+    assert "lts__t_sectors_srcunit_tex_lookup_miss.sum" in collected
     assert "lts__t_sector_hit_rate.pct" not in collected
     simulator = campaign._stage_command(spec, workload, "simulator", tmp_path)
     assert simulator[-1] == "--ncu-shaped-metrics"

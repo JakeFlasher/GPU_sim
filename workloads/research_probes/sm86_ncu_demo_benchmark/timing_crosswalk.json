@@ -1,0 +1,68 @@
+{
+  "schema_version": 1,
+  "crosswalk_id": "sm86_ncu_single_kernel_crosswalk_v1",
+  "architecture": "sm_86",
+  "sku": "rtx_3090_ti",
+  "observation_scope": "single_kernel_ncu_application_replay",
+  "issue_model_rule": "production replay preserves the independently regression-tested next eligible = issue + max(stall, 1) rule",
+  "sm_active_projection": {
+    "raw_frontier": "diagnostic_last_issue_cycles",
+    "fixed_envelope_cycles": 1350.5,
+    "formula": "raw_issue_frontier + fixed_envelope_cycles"
+  },
+  "gpc_elapsed_projection": {
+    "raw_frontier": "terminal_modeled_event_time",
+    "sm_active_envelope_cycles": 1350.5,
+    "profiler_envelope_cycles": 2047.5,
+    "formula": "raw_terminal_frontier + sm_active_envelope_cycles + profiler_envelope_cycles"
+  },
+  "calibration": {
+    "campaign_root": "results/captures/sm86_timing_crosswalk_calibration_20260901_v1",
+    "candidate_revision": "a8ea3773_production_issue_semantics",
+    "ncu_repeats_per_cell": 3,
+    "simulator_repeats_per_cell": 2,
+    "gpu": {
+      "name": "NVIDIA GeForce RTX 3090 Ti",
+      "uuid": "GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c",
+      "compute_capability": "8.6",
+      "driver_version": "610.57.04",
+      "sm_clock_mhz": 1350,
+      "memory_clock_mhz": 10501
+    },
+    "cells": [
+      {
+        "id": "b84_control_i0_c1",
+        "role": "zero_work_envelope_control",
+        "ncu_sm_active_cycles_median": 909.0,
+        "ncu_gpc_elapsed_cycles_median": 2961.0,
+        "simulator_issue_cycles": 65.0,
+        "simulator_terminal_cycles": 65.0,
+        "sm_active_minus_issue_cycles": 844.0,
+        "gpc_elapsed_minus_sm_active_cycles": 2052.0
+      },
+      {
+        "id": "b84_control_i256_c1",
+        "role": "dependent_instruction_slope_control",
+        "ncu_sm_active_cycles_median": 7815.0,
+        "ncu_gpc_elapsed_cycles_median": 9858.0,
+        "simulator_issue_cycles": 5958.0,
+        "simulator_terminal_cycles": 5958.0,
+        "sm_active_minus_issue_cycles": 1857.0,
+        "gpc_elapsed_minus_sm_active_cycles": 2043.0
+      }
+    ],
+    "reduction": {
+      "sm_active_envelope": "median of the two sm_active_minus_issue residuals",
+      "gpc_profiler_envelope": "median of the two gpc_elapsed_minus_sm_active residuals",
+      "rounding": "none"
+    }
+  },
+  "scientific_boundary": {
+    "scored_workload_ncu_values_used": false,
+    "passed_to_simulator_command": false,
+    "raw_frontiers_preserved": true,
+    "issue_and_terminal_frontiers_collapsed": false,
+    "multi_launch_ranges_supported": false,
+    "incomplete_retirement_tails_remain_typed": true
+  }
+}

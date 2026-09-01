@@ -7,6 +7,7 @@ import argparse
 import hashlib
 import json
 import os
+import statistics
 import subprocess
 import sys
 from pathlib import Path
@@ -169,6 +170,64 @@ def validate_accuracy_gate(gate: Mapping[str, Any]) -> None:
     require(gate.get("manual_approval_required") is True, "manual approval must remain required")
 
 
+def validate_timing_crosswalk(crosswalk: Mapping[str, Any]) -> None:
+    require(crosswalk.get("schema_version") == 1, "timing crosswalk schema_version must be 1")
+    require(crosswalk.get("architecture") == "sm_86", "timing crosswalk architecture drift")
+    require(crosswalk.get("sku") == "rtx_3090_ti", "timing crosswalk SKU drift")
+    require(
+        crosswalk.get("observation_scope") == "single_kernel_ncu_application_replay",
+        "timing crosswalk observation scope drift",
+    )
+    active = crosswalk.get("sm_active_projection")
+    elapsed = crosswalk.get("gpc_elapsed_projection")
+    require(isinstance(active, Mapping), "timing crosswalk SM-active projection is missing")
+    require(isinstance(elapsed, Mapping), "timing crosswalk GPC projection is missing")
+    cells = crosswalk.get("calibration", {}).get("cells")
+    require(isinstance(cells, list) and len(cells) == 2, "timing crosswalk requires two controls")
+    require(
+        {cell.get("id") for cell in cells}
+        == {"b84_control_i0_c1", "b84_control_i256_c1"},
+        "timing crosswalk control identities drift",
+    )
+    sm_residuals: list[float] = []
+    gpc_residuals: list[float] = []
+    for cell in cells:
+        ncu_sm = float(cell["ncu_sm_active_cycles_median"])
+        ncu_gpc = float(cell["ncu_gpc_elapsed_cycles_median"])
+        sim_issue = float(cell["simulator_issue_cycles"])
+        sm_residual = float(cell["sm_active_minus_issue_cycles"])
+        gpc_residual = float(cell["gpc_elapsed_minus_sm_active_cycles"])
+        require(ncu_sm - sim_issue == sm_residual, f"{cell['id']}: SM-active residual drift")
+        require(ncu_gpc - ncu_sm == gpc_residual, f"{cell['id']}: GPC residual drift")
+        sm_residuals.append(sm_residual)
+        gpc_residuals.append(gpc_residual)
+    require(
+        float(active.get("fixed_envelope_cycles")) == statistics.median(sm_residuals),
+        "timing crosswalk SM-active envelope is not the control median",
+    )
+    require(
+        float(elapsed.get("sm_active_envelope_cycles"))
+        == float(active.get("fixed_envelope_cycles")),
+        "timing crosswalk SM-active envelopes differ",
+    )
+    require(
+        float(elapsed.get("profiler_envelope_cycles"))
+        == statistics.median(gpc_residuals),
+        "timing crosswalk profiler envelope is not the control median",
+    )
+    boundary = crosswalk.get("scientific_boundary")
+    require(isinstance(boundary, Mapping), "timing crosswalk scientific boundary is missing")
+    for field in (
+        "scored_workload_ncu_values_used",
+        "passed_to_simulator_command",
+        "issue_and_terminal_frontiers_collapsed",
+        "multi_launch_ranges_supported",
+    ):
+        require(boundary.get(field) is False, f"timing crosswalk boundary {field} must be false")
+    for field in ("raw_frontiers_preserved", "incomplete_retirement_tails_remain_typed"):
+        require(boundary.get(field) is True, f"timing crosswalk boundary {field} must be true")
+
+
 def validate_spec(spec: Mapping[str, Any], metrics: Mapping[str, Any], profile: Mapping[str, Any]) -> None:
     require(spec.get("schema_version") == 1, "benchmark schema_version must be 1")
     require(spec.get("architecture") == "sm_86", "benchmark architecture must be sm_86")
@@ -226,6 +285,14 @@ def validate_spec(spec: Mapping[str, Any], metrics: Mapping[str, Any], profile: 
         == "workloads/research_probes/sm86_ncu_demo_benchmark/accuracy_gate.json",
         "accuracy gate path drift",
     )
+    timing_crosswalk = spec.get("timing_crosswalk")
+    if timing_crosswalk is not None:
+        require(
+            timing_crosswalk
+            == "workloads/research_probes/sm86_ncu_demo_benchmark/timing_crosswalk.json",
+            "timing crosswalk path drift",
+        )
+        validate_timing_crosswalk(load_object(REPO_ROOT / str(timing_crosswalk)))
     require(
         spec["ncu"].get("repeats_smoke") == 3
         and spec["ncu"].get("repeats_final") == 7,

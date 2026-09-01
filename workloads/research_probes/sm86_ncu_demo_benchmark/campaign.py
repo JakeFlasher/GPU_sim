@@ -689,6 +689,7 @@ def _new_manifest(
     metrics_path: Path,
     profile_path: Path,
     gate_path: Path,
+    timing_crosswalk_path: Path | None,
     spec: Mapping[str, Any],
     output_root: Path,
 ) -> dict[str, Any]:
@@ -706,6 +707,11 @@ def _new_manifest(
             "metrics": _manifest_identity(metrics_path),
             "profile": _manifest_identity(profile_path),
             "gate": _manifest_identity(gate_path),
+            **(
+                {"timing_crosswalk": _manifest_identity(timing_crosswalk_path)}
+                if timing_crosswalk_path is not None
+                else {}
+            ),
         },
         "records": [],
         "scientific_boundary": "NCU values are retained only as comparison targets and never passed to simulator commands or profile inputs.",
@@ -758,6 +764,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         metrics = _load_json(metrics_path)
         profile = _load_json(profile_path)
         gate = _load_json(gate_path)
+        timing_crosswalk_path = (
+            None
+            if spec.get("timing_crosswalk") is None
+            else (REPO_ROOT / str(spec["timing_crosswalk"])).resolve()
+        )
+        if timing_crosswalk_path is not None:
+            validate_spec.validate_timing_crosswalk(_load_json(timing_crosswalk_path))
         validate_spec.validate_spec(spec, metrics, profile)
         validate_spec.validate_accuracy_gate(gate)
         workloads = _selected_workloads(spec, args.smoke, args.workload)
@@ -805,6 +818,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 metrics_path,
                 profile_path,
                 gate_path,
+                timing_crosswalk_path,
                 spec,
                 output_root,
             )

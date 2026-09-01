@@ -7,6 +7,7 @@
   "profile": "workloads/research_probes/sm86_ncu_demo_benchmark/host_profile.json",
   "metric_schema": "workloads/research_probes/sm86_ncu_demo_benchmark/metric_schema.json",
   "accuracy_gate": "workloads/research_probes/sm86_ncu_demo_benchmark/accuracy_gate.json",
+  "timing_crosswalk": "workloads/research_probes/sm86_ncu_demo_benchmark/timing_crosswalk.json",
   "correctness": {
     "timeout_seconds": 180
   },
