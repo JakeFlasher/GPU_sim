@@ -129,8 +129,8 @@ report        6d68779a03d25565682f18d3a4d65bbc404e48f032bfd6e920afa87053a85bfb
 
 The captured binary's exact source is committed by this milestone; the live
 runs were based on prospective-plan commit `4c36b672` plus that bounded
-implementation diff. The final implementation commit is recorded in the Git
-history adjacent to this document.
+implementation diff. The exact implementation is commit
+`d9802ec5d9b1c96c4bc4e8e324e62931862474c2`.
 
 ## Reproduction
 
