@@ -175,11 +175,11 @@ def validate_metrics(metrics: Mapping[str, Any], requested: Sequence[str]) -> No
 def validate_accuracy_gate(gate: Mapping[str, Any]) -> None:
     schema_version = gate.get("schema_version")
     require(
-        schema_version in {1, 2, 3, 4},
-        "accuracy gate schema_version must be 1, 2, 3, or 4",
+        schema_version in {1, 2, 3, 4, 5, 6},
+        "accuracy gate schema_version must be 1, 2, 3, 4, 5, or 6",
     )
     required_workloads = gate.get("required_workloads")
-    if schema_version == 4:
+    if schema_version in {4, 6}:
         require(
             isinstance(required_workloads, int) and 6 <= required_workloads <= 32,
             "large-workload accuracy gate must require 6..32 workloads",
@@ -187,17 +187,18 @@ def validate_accuracy_gate(gate: Mapping[str, Any]) -> None:
     else:
         require(required_workloads == 8, "accuracy gate must require 8 workloads")
     require(gate.get("required_ncu_repeats") == 7, "accuracy gate must require 7 NCU repeats")
-    expected_simulator_repeats = 1 if schema_version in {3, 4} else 7
+    expected_simulator_repeats = 1 if schema_version in {3, 4, 5, 6} else 7
     require(
         gate.get("required_simulator_repeats") == expected_simulator_repeats,
         f"accuracy gate must require {expected_simulator_repeats} simulator repeat(s)",
     )
+    aggregate_maximum = 10.0 if schema_version in {5, 6} else 20.0
     expected = {
-        "terminal_cycle_mape_pct": (20.0, required_workloads),
-        "runtime_equivalent_mape_pct": (20.0, required_workloads),
-        "issue_cycle_mape_pct": (20.0, required_workloads),
-        "instruction_throughput_mape_pct": (20.0, required_workloads),
-        "counter_traffic_mape_pct": (20.0, 4 * required_workloads),
+        "terminal_cycle_mape_pct": (aggregate_maximum, required_workloads),
+        "runtime_equivalent_mape_pct": (aggregate_maximum, required_workloads),
+        "issue_cycle_mape_pct": (aggregate_maximum, required_workloads),
+        "instruction_throughput_mape_pct": (aggregate_maximum, required_workloads),
+        "counter_traffic_mape_pct": (aggregate_maximum, 4 * required_workloads),
     }
     if schema_version == 1:
         expected.update(
@@ -208,7 +209,7 @@ def validate_accuracy_gate(gate: Mapping[str, Any]) -> None:
         )
     else:
         expected["cache_lookup_count_normalized_error_pct"] = (
-            20.0,
+            aggregate_maximum,
             6 * required_workloads,
         )
     checks = gate.get("checks")
@@ -226,7 +227,7 @@ def validate_accuracy_gate(gate: Mapping[str, Any]) -> None:
                 and checks[name].get("required_percentage_point_coverage") == 8,
                 f"{name}: percentage-point gate drift",
             )
-    if schema_version == 4:
+    if schema_version in {4, 6}:
         require(
             gate.get("minimum_hardware_cycles_per_workload") == 8000,
             "large-workload hardware cycle floor must be 8000",
@@ -247,6 +248,20 @@ def validate_accuracy_gate(gate: Mapping[str, Any]) -> None:
         require(
             policy.get("previous_demo_non_regression_required") is True,
             "previous demo non-regression must remain required",
+        )
+    if schema_version == 5:
+        policy = gate.get("scientific_policy")
+        require(isinstance(policy, Mapping), "small 10% scientific policy missing")
+        require(
+            policy.get("scored_ncu_values_as_simulator_inputs") is False
+            and policy.get("per_workload_parameters") is False,
+            "small 10% gate must prohibit scored inputs and per-workload parameters",
+        )
+        require(
+            policy.get("metric_families_gated_independently") is True
+            and policy.get("per_workload_errors_reported") is True
+            and policy.get("raw_frontier_non_regression_required") is True,
+            "small 10% gate must retain family, row, and raw-frontier evidence",
         )
     require(gate.get("manual_approval_required") is True, "manual approval must remain required")
 

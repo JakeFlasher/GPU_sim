@@ -36,10 +36,18 @@ class BenchmarkSpecTests(unittest.TestCase):
         cls.large_gate = json.loads(
             (HERE / "accuracy_gate_large_workloads.json").read_text()
         )
+        cls.small_ten_gate = json.loads(
+            (HERE / "accuracy_gate_counts_single_sim_10pct.json").read_text()
+        )
+        cls.large_ten_gate = json.loads(
+            (HERE / "accuracy_gate_large_workloads_10pct.json").read_text()
+        )
 
     def test_frozen_spec_is_valid(self) -> None:
         subject.validate_spec(self.spec, self.count_metrics, self.profile)
         subject.validate_accuracy_gate(self.single_sim_gate)
+        subject.validate_accuracy_gate(self.small_ten_gate)
+        subject.validate_accuracy_gate(self.large_ten_gate)
         subject.validate_timing_crosswalk(self.crosswalk)
 
     def test_timing_crosswalk_recomputes_control_residuals(self) -> None:
@@ -64,6 +72,19 @@ class BenchmarkSpecTests(unittest.TestCase):
         subject.validate_accuracy_gate(self.large_gate)
         mutated = copy.deepcopy(self.large_gate)
         mutated["checks"]["terminal_cycle_mape_pct"]["maximum_per_workload"] = 20.1
+        with self.assertRaisesRegex(subject.ValidationError, "per-workload maximum drift"):
+            subject.validate_accuracy_gate(mutated)
+
+    def test_ten_percent_contract_cannot_be_relaxed(self) -> None:
+        for gate in (self.small_ten_gate, self.large_ten_gate):
+            mutated = copy.deepcopy(gate)
+            mutated["checks"]["terminal_cycle_mape_pct"]["maximum"] = 10.1
+            with self.assertRaisesRegex(subject.ValidationError, "maximum drift"):
+                subject.validate_accuracy_gate(mutated)
+
+    def test_large_ten_percent_contract_retains_twenty_percent_row_guard(self) -> None:
+        mutated = copy.deepcopy(self.large_ten_gate)
+        mutated["checks"]["terminal_cycle_mape_pct"]["maximum_per_workload"] = 10.0
         with self.assertRaisesRegex(subject.ValidationError, "per-workload maximum drift"):
             subject.validate_accuracy_gate(mutated)
 

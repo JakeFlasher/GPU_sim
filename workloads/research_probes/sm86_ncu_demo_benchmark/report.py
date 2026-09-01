@@ -1165,6 +1165,7 @@ def _caveats(
     timing_crosswalk: Mapping[str, Any] | None = None,
     count_cache_targets: bool = False,
     store_completion_feedback: bool = False,
+    ncu_repeat_extension: Mapping[str, Any] | None = None,
 ) -> list[str]:
     phase = status
     simulator_process_note = (
@@ -1198,6 +1199,18 @@ def _caveats(
         notes.append(
             "Replay enables the independently calibrated STORE admission/completion lower-bound candidate 201; dirty writeback and coherence remain typed incomplete tails."
         )
+    if ncu_repeat_extension is not None:
+        notes.append(
+            "The {workload} hardware row retains all {combined} NCU launches after "
+            "its initial {base}-launch batch exceeded the {trigger:.2f}% relative-range "
+            "trigger; the prospective follow-up consulted neither simulator output nor "
+            "accuracy values.".format(
+                workload=ncu_repeat_extension["workload_id"],
+                combined=ncu_repeat_extension["combined_repeat_count"],
+                base=ncu_repeat_extension["base_repeat_count"],
+                trigger=float(ncu_repeat_extension["trigger_relative_range_pct"]),
+            )
+        )
     return notes
 
 
@@ -1219,6 +1232,9 @@ def build_report(campaign_path: Path) -> dict[str, Any]:
         if "memory_admission_feedback" in campaign.get("inputs", {})
         else None
     )
+    ncu_repeat_extension = campaign.get("ncu_repeat_extension")
+    if ncu_repeat_extension is not None and not isinstance(ncu_repeat_extension, Mapping):
+        raise ReportError("campaign NCU repeat extension is malformed")
     if spec.get("timing_crosswalk") is not None and timing_crosswalk is None:
         raise ReportError("campaign omitted the specification's timing crosswalk identity")
     if (
@@ -1301,6 +1317,9 @@ def build_report(campaign_path: Path) -> dict[str, Any]:
                 }
             )
         },
+        "ncu_repeat_extension": (
+            None if ncu_repeat_extension is None else dict(ncu_repeat_extension)
+        ),
         "formulas": {
             "ncu_repeat_reduction": "median of independent NCU repeats; raw values, mean, min, max, and relative range retained",
             "ape_pct": "abs(simulator - ncu) / ncu * 100 when ncu > 0",
@@ -1326,6 +1345,7 @@ def build_report(campaign_path: Path) -> dict[str, Any]:
             timing_crosswalk,
             count_cache_targets,
             feedback_document is not None,
+            ncu_repeat_extension,
         ),
     }
 

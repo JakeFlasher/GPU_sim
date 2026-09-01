@@ -14,6 +14,8 @@ import time
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
+import validate_spec
+
 
 HERE = Path(__file__).resolve().parent
 REPO_ROOT = HERE.parents[2]
@@ -28,6 +30,7 @@ DEFAULT_FEEDBACK = (
     "memory_write_completion_feedback_store_201.json"
 )
 DEFAULT_CROSSWALK = HERE / "timing_crosswalk.json"
+DEFAULT_GATE = HERE / "accuracy_gate_counts_single_sim_10pct.json"
 BASELINE_EVIDENCE = (
     REPO_ROOT
     / "results/captures/sm86_cache_count_targets_20260901_single_sim_final_v1/evidence/raw"
@@ -306,27 +309,31 @@ def _attach_row_transitions(
 
 
 def _render(report: Mapping[str, Any]) -> str:
+    gate_maximum = float(report["aggregate_accuracy_gate_pct"])
     lines = [
         "# Previous eight-workload demo non-regression",
         "",
         f"Revision: `{report['repository_revision']}`.",
         f"Simulator: `{report['simulator_binary_sha256']}`.",
         "",
-        "| Aggregate metric | Approved baseline | Candidate | Non-regressed |",
-        "| :--- | ---: | ---: | :---: |",
+        f"Aggregate accuracy gate: **{gate_maximum:.2f}% per metric family**.",
+        "",
+        "| Aggregate metric | Approved baseline | Candidate | Non-regressed | 10% gate |",
+        "| :--- | ---: | ---: | :---: | :---: |",
     ]
     for name in AGGREGATE_KEYS:
         transition = report["aggregate_transitions"][name]
         lines.append(
             f"| {name} | {transition['baseline']:.4f}% | "
             f"{transition['candidate']:.4f}% | "
-            f"{'yes' if transition['numerically_non_regressed'] else 'no'} |"
+            f"{'yes' if transition['numerically_non_regressed'] else 'no'} | "
+            f"{'yes' if transition['within_accuracy_gate'] else 'no'} |"
         )
     lines.extend(
         [
             "",
-            f"Strict all-metric result: **{'PASS' if report['strict_all_aggregate_metrics_numerically_non_regressed'] else 'FAIL'}**.",
-            f"All candidate aggregate metrics below 20%: **{'yes' if report['all_aggregate_metrics_under_20_pct'] else 'no'}**.",
+            f"Technical result: **{report['technical_status'].upper()}**.",
+            f"All candidate metric-family aggregates at or below {gate_maximum:.2f}%: **{'yes' if report['all_aggregate_metrics_under_gate'] else 'no'}**.",
             "",
             "One deterministic simulator process is used per workload. The approved report's seven NCU repeats remain comparison-only targets and no NCU value appears in a simulator command.",
         ]
@@ -357,6 +364,14 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
     baseline = _load(args.baseline.resolve())
     crosswalk = _load(args.crosswalk.resolve())
     feedback = _load(args.feedback.resolve())
+    gate = _load(args.gate.resolve())
+    validate_spec.validate_accuracy_gate(gate)
+    if set(gate["checks"]) != set(AGGREGATE_KEYS):
+        raise NonRegressionError("accuracy gate metric families differ from the assay")
+    maxima = {float(check["maximum"]) for check in gate["checks"].values()}
+    if len(maxima) != 1:
+        raise NonRegressionError("accuracy gate must use one threshold across metric families")
+    aggregate_gate = maxima.pop()
     if feedback.get("candidates", [{}])[0].get("candidate_id") != 201:
         raise NonRegressionError("feedback candidate 201 is required")
     active = float(crosswalk["sm_active_projection"]["fixed_envelope_cycles"])
@@ -441,6 +456,8 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             "candidate": candidate_aggregate[name],
             "numerically_non_regressed": candidate_aggregate[name]
             <= baseline_aggregate[name] + 1e-12,
+            "within_accuracy_gate": candidate_aggregate[name]
+            <= float(gate["checks"][name]["maximum"]),
         }
         for name in AGGREGATE_KEYS
     }
@@ -453,11 +470,24 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         for command in commands
         for token in command
     )
+    aggregate_non_regression = all(
+        row["numerically_non_regressed"] for row in transitions.values()
+    )
+    aggregate_gate_pass = all(row["within_accuracy_gate"] for row in transitions.values())
+    raw_frontier_non_regression = not raw_frontier_regressions
+    technical_pass = (
+        aggregate_non_regression
+        and aggregate_gate_pass
+        and raw_frontier_non_regression
+    )
     result = {
         "schema_version": 1,
-        "status": "strict_aggregate_non_regression_pass"
-        if all(row["numerically_non_regressed"] for row in transitions.values())
-        else "strict_aggregate_non_regression_fail",
+        "status": (
+            "aggregate_accuracy_and_raw_frontier_non_regression_pass"
+            if technical_pass
+            else "aggregate_accuracy_or_non_regression_fail"
+        ),
+        "technical_status": "pass" if technical_pass else "fail",
         "repository_revision": _git("rev-parse", "HEAD"),
         "repository_branch": _git("branch", "--show-current"),
         "simulator_binary_sha256": _sha256(args.simulator.resolve()),
@@ -466,21 +496,23 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         "baseline_report": {"path": _portable(args.baseline), "sha256": _sha256(args.baseline)},
         "timing_crosswalk": {"path": _portable(args.crosswalk), "sha256": _sha256(args.crosswalk)},
         "memory_admission_feedback": {"path": _portable(args.feedback), "sha256": _sha256(args.feedback)},
+        "accuracy_gate": {"path": _portable(args.gate), "sha256": _sha256(args.gate)},
+        "aggregate_accuracy_gate_pct": aggregate_gate,
         "ncu_values_passed_to_simulator": ncu_values_passed,
         "baseline_aggregate": baseline_aggregate,
         "candidate_aggregate": candidate_aggregate,
         "aggregate_transitions": transitions,
-        "strict_all_aggregate_metrics_numerically_non_regressed": all(
-            row["numerically_non_regressed"] for row in transitions.values()
-        ),
+        "strict_all_aggregate_metrics_numerically_non_regressed": aggregate_non_regression,
         "strict_all_row_metrics_numerically_non_regressed": not row_level_regressions,
         "row_level_numeric_regressions": row_level_regressions,
-        "strict_all_raw_frontiers_numerically_non_regressed": not raw_frontier_regressions,
+        "strict_all_raw_frontiers_numerically_non_regressed": raw_frontier_non_regression,
         "raw_frontier_numeric_regressions": raw_frontier_regressions,
         "non_regression_contract": {
             "level": "aggregate",
             "row_level_tradeoffs_reported": True,
+            "raw_frontier_level": "universal_per_workload",
         },
+        "all_aggregate_metrics_under_gate": aggregate_gate_pass,
         "all_aggregate_metrics_under_20_pct": all(
             value < 20.0 for value in candidate_aggregate.values()
         ),
@@ -497,6 +529,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--simulator", type=Path, default=DEFAULT_SIMULATOR)
     parser.add_argument("--feedback", type=Path, default=DEFAULT_FEEDBACK)
     parser.add_argument("--crosswalk", type=Path, default=DEFAULT_CROSSWALK)
+    parser.add_argument("--gate", type=Path, default=DEFAULT_GATE)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--timeout-seconds", type=int, default=1800)
     return parser
@@ -513,7 +546,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             _render(result), encoding="utf-8"
         )
         print(json.dumps({"status": result["status"], "candidate": result["candidate_aggregate"]}, sort_keys=True))
-        return 0 if result["strict_all_aggregate_metrics_numerically_non_regressed"] else 1
+        return 0 if result["technical_status"] == "pass" else 1
     except (OSError, KeyError, TypeError, ValueError, json.JSONDecodeError, NonRegressionError, subprocess.TimeoutExpired) as error:
         print(f"previous demo non-regression: {error}")
         return 1
