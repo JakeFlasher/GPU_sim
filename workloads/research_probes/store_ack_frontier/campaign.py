@@ -394,6 +394,8 @@ def run_nvbit(
     bridge_keys = {
         "b1_d4_l32_line_unique_g0",
         "b84_d16_l32_line_unique_g0",
+        # Opened only after the identification report authorized holdout.
+        "b84_d64_l32_line_unique_g0",
     }
     bridge = [cell for cell in cells if cell.key in bridge_keys]
     if not bridge:

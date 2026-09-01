@@ -430,7 +430,7 @@ def analyze(root: Path, stage: str) -> dict[str, Any]:
                 abs(value["metrics"]["none_handoff_minus_control_ns"]["median"]),
                 abs(value["loaded_device_fence_ns"]),
             )
-            >= quantum
+            > quantum
             else "below_globaltimer_resolution"
         )
 
@@ -452,7 +452,42 @@ def analyze(root: Path, stage: str) -> dict[str, Any]:
         ),
         "holdout_authorized": qualitative,
     }
-    replay = replay_contract(root, {cell.key: cell for cell in campaign.configured_cells()}, next(iter(clocks)))
+    replay = replay_contract(
+        root,
+        {cell.key: cell for cell in campaign.configured_cells()},
+        next(iter(clocks)),
+    )
+    if replay["available"]:
+        for replay_key, value in replay["cells"].items():
+            cell_key = replay_key.split("/", 1)[0]
+            if cell_key not in per_cell:
+                continue
+            hardware_none = per_cell[cell_key]["metrics"][
+                "none_handoff_minus_control_ns"
+            ]["median"]
+            hardware_device = per_cell[cell_key]["loaded_device_fence_ns"]
+            simulated_none = value["matched_no_fence_tail_ns_at_observed_sm_clock"]
+            simulated_device = value["device_issue_shift_ns_at_observed_sm_clock"]
+            value["live_comparison"] = {
+                "hardware_no_fence_handoff_ns": hardware_none,
+                "simulated_no_fence_tail_ns": simulated_none,
+                "no_fence_absolute_percentage_error": (
+                    abs(simulated_none - hardware_none) / abs(hardware_none) * 100.0
+                    if hardware_none != 0
+                    else None
+                ),
+                "hardware_loaded_device_fence_ns": hardware_device,
+                "simulated_device_issue_shift_ns": simulated_device,
+                "device_fence_absolute_percentage_error": (
+                    abs(simulated_device - hardware_device) / abs(hardware_device) * 100.0
+                    if hardware_device != 0
+                    else None
+                ),
+                "comparison_role": (
+                    "independent new-binary holdout; target values were not "
+                    "candidate inputs"
+                ),
+            }
     if stage == "identification":
         status = (
             "qualified_multicta_fence_terminal_shift_b1_below_resolution"
