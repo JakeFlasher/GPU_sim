@@ -36,14 +36,14 @@ One fixed 256-thread CTA allocates a 32 KiB destination arena plus bounded
 shared timestamp/result state (33,112 static bytes total). Identification uses
 four active warps; inactive warps still participate in untimed CTA barriers.
 The highest active warp is the measured target and all lower active warps are
-backgrounds. Every active warp owns a private 16 KiB aligned source pool and a
-disjoint 4 KiB shared destination slot. Cache-all aliases its eight copies to
-one prewarmed 512-byte position. Bypass uses all 32 disjoint 512-byte positions
-across the four background groups (the target uses the first eight), with the
-entire pool prewarmed into L2. This prevents outstanding `.cg` groups from
-merging the same source sectors while keeping queued/drained vectors exact.
-The target issues one eight-copy group per epoch. Each background warp issues
-four such groups before its one `wait_group 0`; this bounded four-group
+backgrounds. Every active warp owns a private 4 KiB aligned source pool and a
+disjoint 4 KiB shared destination slot containing eight independent 512-byte
+positions. The entire source pool is prewarmed. The target issues one
+eight-copy group per epoch. Each background partitions the same eight source/
+destination positions into four disjoint two-copy groups before its one
+`wait_group 0`. Thus every active warp has identical total source and
+destination work, no group has a shared WAW alias, and only group boundaries
+plus queued/drained wait order differ. The bounded four-group background
 population is identical in queued and drained and supplies a nonvacuous
 cache-all overlap manipulation.
 
@@ -97,12 +97,11 @@ accounting, transactional overflow, and unchanged timing.
   around the rendezvous changes.
 - Target result stores and overlap reductions occur after measured clocks.
   Every epoch is token-correct and internally additive.
-- For smoke epochs `G=64`, copies/group `D=8`, three four-group backgrounds,
-  and one one-group target, each endpoint has exactly 13 group-equivalents per
-  epoch:
-  - `G*D*13 = 6,656` LDGSTS warp instructions;
-  - `16*G*D*13 = 106,496` source sectors; and
-  - `4*G*D*13 = 26,624` shared LDGSTS wavefronts.
+- For smoke epochs `G=64`, eight copies/active warp, and `W=4`, each endpoint
+  has exactly:
+  - `G*8*W = 2,048` LDGSTS warp instructions;
+  - `16*G*8*W = 32,768` source sectors; and
+  - `4*G*8*W = 8,192` shared LDGSTS wavefronts.
 - Queued and drained NCU work/source metrics are exact and equal within each
   route. The L1 route has at least a 95% L1-hit ratio. The L2 route has at least
   95% L1 misses and 95% LTS hits after prewarm, with no material paired LTS
@@ -160,8 +159,8 @@ useful mechanism no-go, not permission to fit the residual.
 
 Do not capture W8 timing, NCU, NVBit, or replay before every identification
 gate passes. Holdout uses the same 256-thread function, target warp 7, seven
-four-group background warps, and the unchanged one-group target geometry (29
-group-equivalents per epoch). It requires:
+four-group/two-copy background warps, and the unchanged eight-copy target
+geometry. It requires:
 
 - at least five of seven queued background intervals overlapping the target in
   at least 95% of epochs, and zero drained overlap;
