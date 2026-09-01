@@ -4,22 +4,23 @@
   "architecture": "sm_86",
   "sku": "rtx_3090_ti",
   "observation_scope": "single_kernel_ncu_application_replay",
-  "issue_model_rule": "production replay preserves the independently regression-tested next eligible = issue + max(stall, 1) rule",
+  "issue_model_rule": "production replay combines next eligible = issue + max(stall, 1) with the published Ampere private-L0I/shared-L1I, eight-line stream-prefetch, one-wide fetch/decode, and three-entry instruction-buffer mechanism",
   "sm_active_projection": {
     "raw_frontier": "diagnostic_last_issue_cycles",
-    "fixed_envelope_cycles": 1350.5,
+    "fixed_envelope_cycles": 847.5,
     "formula": "raw_issue_frontier + fixed_envelope_cycles"
   },
   "gpc_elapsed_projection": {
     "raw_frontier": "terminal_modeled_event_time",
-    "sm_active_envelope_cycles": 1350.5,
+    "sm_active_envelope_cycles": 847.5,
     "profiler_envelope_cycles": 2047.5,
     "formula": "raw_terminal_frontier + sm_active_envelope_cycles + profiler_envelope_cycles"
   },
   "calibration": {
-    "campaign_root": "results/captures/sm86_timing_crosswalk_calibration_20260901_v1",
-    "candidate_revision": "a8ea3773_production_issue_semantics",
+    "campaign_root": "results/captures/sm86_timing_crosswalk_calibration_20260901_frontend_v2",
+    "candidate_revision": "94f50002_published_ampere_instruction_front_end",
     "ncu_repeats_per_cell": 3,
+    "simulator_runs_per_cell": 1,
     "simulator_repeats_per_cell": 2,
     "gpu": {
       "name": "NVIDIA GeForce RTX 3090 Ti",
@@ -35,9 +36,9 @@
         "role": "zero_work_envelope_control",
         "ncu_sm_active_cycles_median": 909.0,
         "ncu_gpc_elapsed_cycles_median": 2961.0,
-        "simulator_issue_cycles": 65.0,
-        "simulator_terminal_cycles": 65.0,
-        "sm_active_minus_issue_cycles": 844.0,
+        "simulator_issue_cycles": 568.0,
+        "simulator_terminal_cycles": 568.0,
+        "sm_active_minus_issue_cycles": 341.0,
         "gpc_elapsed_minus_sm_active_cycles": 2052.0
       },
       {
@@ -45,9 +46,9 @@
         "role": "dependent_instruction_slope_control",
         "ncu_sm_active_cycles_median": 7815.0,
         "ncu_gpc_elapsed_cycles_median": 9858.0,
-        "simulator_issue_cycles": 5958.0,
-        "simulator_terminal_cycles": 5958.0,
-        "sm_active_minus_issue_cycles": 1857.0,
+        "simulator_issue_cycles": 6461.0,
+        "simulator_terminal_cycles": 6461.0,
+        "sm_active_minus_issue_cycles": 1354.0,
         "gpc_elapsed_minus_sm_active_cycles": 2043.0
       }
     ],
@@ -55,6 +56,13 @@
       "sm_active_envelope": "median of the two sm_active_minus_issue residuals",
       "gpc_profiler_envelope": "median of the two gpc_elapsed_minus_sm_active residuals",
       "rounding": "none"
+    },
+    "mechanism_sources": {
+      "paper": "Huerta et al., Dissecting and Modeling the Architecture of Modern GPU Cores, MICRO 2025, sections 5.2, 6, and 7.3",
+      "upstream_repository": "https://github.com/upc-arco/modern-gpu-simulator-micro-2025",
+      "upstream_revision": "117f9d79ab4378969bd90d4fe6fbba6946d15c03",
+      "upstream_rtx3090_config": "simulator-remodeled/gpu-simulator/gpgpu-sim/configs/tested-cfgs/SM86_RTX3090/gpgpusim.config",
+      "local_cold_fill_source": "data/pchase/sm_86_static_card.json dram_latency_cycles; independent clock64 pointer chase"
     }
   },
   "scientific_boundary": {
