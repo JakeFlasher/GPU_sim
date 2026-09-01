@@ -45,6 +45,15 @@ class BenchmarkSpecTests(unittest.TestCase):
         with self.assertRaisesRegex(subject.ValidationError, "maximum drift"):
             subject.validate_accuracy_gate(mutated)
 
+    def test_independent_cache_calibration_spec_is_valid(self) -> None:
+        calibration_spec = json.loads(
+            (HERE / "cache_calibration_spec.json").read_text()
+        )
+        calibration_metrics = json.loads(
+            (HERE / "cache_calibration_metrics.json").read_text()
+        )
+        subject.validate_spec(calibration_spec, calibration_metrics, self.profile)
+
 
 if __name__ == "__main__":
     unittest.main()
