@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "benchmark_id": "sm86_large_workload_expansion_v1",
+  "benchmark_id": "sm86_large_workload_expansion_v2",
   "status": "development_expansion_cohort_frozen_before_simulator_replay",
   "frozen_at_revision": "d2a39af179ae3344f83c4ba10c93b2339f411436",
   "architecture": "sm_86",
@@ -55,6 +55,7 @@
     "cache_scope": "launch",
     "arch_card": "arch_profiles/cards/sm_86.json",
     "pchase_card": "data/pchase/sm_86_static_card.json",
+    "memory_admission_feedback": "workloads/research_probes/l1tex_admission_backpressure/memory_write_completion_feedback_store_201.json",
     "repeats_smoke": 1,
     "repeats_final": 1,
     "timeout_seconds": 1800,

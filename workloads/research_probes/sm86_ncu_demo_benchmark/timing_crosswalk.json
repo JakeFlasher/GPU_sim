@@ -1,27 +1,28 @@
 {
   "schema_version": 1,
-  "crosswalk_id": "sm86_ncu_single_kernel_crosswalk_v1",
+  "crosswalk_id": "sm86_ncu_single_kernel_crosswalk_v2",
   "architecture": "sm_86",
   "sku": "rtx_3090_ti",
   "observation_scope": "single_kernel_ncu_application_replay",
   "issue_model_rule": "production replay combines next eligible = issue + max(stall, 1) with the published Ampere instruction front end and the five-entry per-SMSP memory queue, operation-specific WAR pipeline, four-cycle local initiation, two-cycle SM-shared acceptance, and 19-cycle LDGSTS global-to-shared transport",
   "sm_active_projection": {
     "raw_frontier": "diagnostic_last_issue_cycles",
-    "fixed_envelope_cycles": 1026.5,
+    "fixed_envelope_cycles": 964.0,
     "formula": "raw_issue_frontier + fixed_envelope_cycles"
   },
   "gpc_elapsed_projection": {
     "raw_frontier": "terminal_modeled_event_time",
-    "sm_active_envelope_cycles": 1026.5,
-    "profiler_envelope_cycles": 2047.5,
+    "sm_active_envelope_cycles": 964.0,
+    "profiler_envelope_cycles": 1642.0,
     "formula": "raw_terminal_frontier + sm_active_envelope_cycles + profiler_envelope_cycles"
   },
   "calibration": {
-    "campaign_root": "results/captures/sm86_timing_crosswalk_calibration_20260901_memory_pipeline_v3",
-    "candidate_revision": "0ef5dd0f_published_ampere_memory_issue_pipeline",
-    "ncu_repeats_per_cell": 3,
+    "active_campaign_root": "results/captures/sm86_timing_crosswalk_protocol_calibration_20260901_v1",
+    "profiler_campaign_root": "results/captures/sm86_ncu_launch_envelope_store_calibration_20260901_v1",
+    "candidate_revision": "74f7b303_memory_pipeline_write_feedback_horizon",
+    "ncu_repeats_per_cell": 7,
     "simulator_runs_per_cell": 1,
-    "simulator_repeats_per_cell": 2,
+    "simulator_repeats_per_cell": 1,
     "gpu": {
       "name": "NVIDIA GeForce RTX 3090 Ti",
       "uuid": "GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c",
@@ -32,29 +33,47 @@
     },
     "cells": [
       {
-        "id": "b84_control_i0_c1",
-        "role": "zero_work_envelope_control",
-        "ncu_sm_active_cycles_median": 909.0,
-        "ncu_gpc_elapsed_cycles_median": 2961.0,
+        "id": "b84_control_i0_warm_c1",
+        "role": "matched_protocol_zero_work_active_control",
+        "ncu_sm_active_cycle_repeats": [863, 847, 850, 834, 833, 845, 899],
+        "ncu_sm_active_cycles_median": 847.0,
         "simulator_issue_cycles": 389.0,
         "simulator_terminal_cycles": 390.0,
-        "sm_active_minus_issue_cycles": 520.0,
-        "gpc_elapsed_minus_sm_active_cycles": 2052.0
+        "sm_active_minus_issue_cycles": 458.0
       },
       {
-        "id": "b84_control_i256_c1",
-        "role": "dependent_instruction_slope_control",
-        "ncu_sm_active_cycles_median": 7815.0,
-        "ncu_gpc_elapsed_cycles_median": 9858.0,
+        "id": "b84_control_i256_warm_c1",
+        "role": "matched_protocol_dependent_instruction_active_control",
+        "ncu_sm_active_cycle_repeats": [7755, 7752, 7778, 7737, 7747, 7756, 7745],
+        "ncu_sm_active_cycles_median": 7752.0,
         "simulator_issue_cycles": 6282.0,
         "simulator_terminal_cycles": 6283.0,
-        "sm_active_minus_issue_cycles": 1533.0,
-        "gpc_elapsed_minus_sm_active_cycles": 2043.0
+        "sm_active_minus_issue_cycles": 1470.0
+      }
+    ],
+    "profiler_cells": [
+      {
+        "id": "control_b84_t32_i0",
+        "role": "one_warp_cta_no_memory_profiler_control",
+        "gpc_minus_sm_cycle_repeats": [1640, 1666, 1656, 1655, 1648, 1660, 1664],
+        "gpc_elapsed_minus_sm_active_cycles_median": 1656.0
+      },
+      {
+        "id": "control_b84_t256_i0",
+        "role": "eight_warp_cta_no_memory_profiler_control",
+        "gpc_minus_sm_cycle_repeats": [1612, 1629, 1626, 1605, 1621, 1614, 1625],
+        "gpc_elapsed_minus_sm_active_cycles_median": 1621.0
+      },
+      {
+        "id": "control_b84_t256_i256",
+        "role": "eight_warp_dependent_work_no_memory_profiler_control",
+        "gpc_minus_sm_cycle_repeats": [1642, 1645, 1613, 1628, 1645, 1639, 1643],
+        "gpc_elapsed_minus_sm_active_cycles_median": 1642.0
       }
     ],
     "reduction": {
       "sm_active_envelope": "median of the two sm_active_minus_issue residuals",
-      "gpc_profiler_envelope": "median of the two gpc_elapsed_minus_sm_active residuals",
+      "gpc_profiler_envelope": "median of three per-cell seven-repeat medians of gpc_elapsed_minus_sm_active",
       "rounding": "none"
     },
     "mechanism_sources": {
@@ -63,7 +82,9 @@
       "upstream_revision": "117f9d79ab4378969bd90d4fe6fbba6946d15c03",
       "upstream_rtx3090_config": "simulator-remodeled/gpu-simulator/gpgpu-sim/configs/tested-cfgs/SM86_RTX3090/gpgpusim.config",
       "memory_pipeline_evidence": "Huerta et al. MICRO 2025 section 5.4, Table 1 and Table 2; released RTX3090 memory_subcore_queue_size=4 plus dispatch latch, six local stages, shared dispatch interval 2, and LDGSTS transport 19",
-      "local_cold_fill_source": "data/pchase/sm_86_static_card.json dram_latency_cycles; independent clock64 pointer chase"
+      "local_cold_fill_source": "data/pchase/sm_86_static_card.json dram_latency_cycles; independent clock64 pointer chase",
+      "matched_ncu_protocol": "ordinary warm-up then target selected with --launch-skip 1 --launch-count 1, application replay, externally locked 1350/10501 MHz clocks, --clock-control none, --cache-control all, and the exact scored metric set",
+      "profiler_control_source": "workloads/research_probes/launch_cycle_semantics/ncu_launch_envelope.cu; volatile shared sink, no cudaProfilerStart/Stop, no global-memory target tail"
     }
   },
   "scientific_boundary": {

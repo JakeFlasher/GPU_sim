@@ -80,6 +80,15 @@ def test_plan_binds_ncu_cache_policy_and_metric_projection(tmp_path: Path) -> No
     assert simulator[-1] == "--ncu-shaped-metrics"
 
 
+def test_large_plan_binds_store_completion_feedback(tmp_path: Path) -> None:
+    spec = campaign._load_json(campaign.HERE / "large_workload_spec.json")
+    workload = spec["workloads"][0]
+    simulator = campaign._stage_command(spec, workload, "simulator", tmp_path)
+    feedback = simulator.index("--memory-admission-feedback")
+    assert simulator[feedback + 1] == spec["simulator"]["memory_admission_feedback"]
+    assert simulator[-1] == "--ncu-shaped-metrics"
+
+
 def test_default_plan_keeps_ncu_repeats_and_runs_one_simulator_process(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:

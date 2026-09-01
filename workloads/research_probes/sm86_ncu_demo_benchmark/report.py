@@ -1164,6 +1164,7 @@ def _caveats(
     simulator_repeats: int,
     timing_crosswalk: Mapping[str, Any] | None = None,
     count_cache_targets: bool = False,
+    store_completion_feedback: bool = False,
 ) -> list[str]:
     phase = status
     simulator_process_note = (
@@ -1175,7 +1176,7 @@ def _caveats(
             "per workload; multiple prediction documents must be byte-identical."
         )
     )
-    return [
+    notes = [
         "NCU is comparison-only ground truth and is absent from simulator commands and profile inputs.",
         (
             "Cache lookup hit and miss sectors are first-class targets; cache rates are secondary derivations from those count pairs."
@@ -1193,6 +1194,11 @@ def _caveats(
         simulator_process_note,
         "Runtime-equivalent values convert the single-kernel GPC-cycle projection with the independently recorded SM clock; incomplete retirement tails remain typed on the raw frontier.",
     ]
+    if store_completion_feedback:
+        notes.append(
+            "Replay enables the independently calibrated STORE admission/completion lower-bound candidate 201; dirty writeback and coherence remain typed incomplete tails."
+        )
+    return notes
 
 
 def build_report(campaign_path: Path) -> dict[str, Any]:
@@ -1208,8 +1214,17 @@ def build_report(campaign_path: Path) -> dict[str, Any]:
         if "timing_crosswalk" in campaign.get("inputs", {})
         else None
     )
+    feedback_document = (
+        _input_document(campaign, "memory_admission_feedback")
+        if "memory_admission_feedback" in campaign.get("inputs", {})
+        else None
+    )
     if spec.get("timing_crosswalk") is not None and timing_crosswalk is None:
         raise ReportError("campaign omitted the specification's timing crosswalk identity")
+    if (
+        spec["simulator"].get("memory_admission_feedback") is not None
+    ) != (feedback_document is not None):
+        raise ReportError("campaign simulator feedback identity differs from the specification")
     if timing_crosswalk is not None:
         validate_spec.validate_timing_crosswalk(timing_crosswalk)
     validate_spec.validate_spec(spec, metric_schema, profile)
@@ -1276,6 +1291,16 @@ def build_report(campaign_path: Path) -> dict[str, Any]:
         "evidence_archive": _evidence_archive(campaign_path),
         "hardware": host,
         "timing_crosswalk": timing_crosswalk,
+        "simulator_configuration": {
+            "memory_admission_feedback": (
+                None
+                if feedback_document is None
+                else {
+                    **campaign["inputs"]["memory_admission_feedback"],
+                    "candidate": feedback_document["candidates"][0],
+                }
+            )
+        },
         "formulas": {
             "ncu_repeat_reduction": "median of independent NCU repeats; raw values, mean, min, max, and relative range retained",
             "ape_pct": "abs(simulator - ncu) / ncu * 100 when ncu > 0",
@@ -1300,6 +1325,7 @@ def build_report(campaign_path: Path) -> dict[str, Any]:
             simulator_repeats,
             timing_crosswalk,
             count_cache_targets,
+            feedback_document is not None,
         ),
     }
 
@@ -1390,6 +1416,11 @@ def render_markdown(report: Mapping[str, Any]) -> str:
         f"Revision: `{report['campaign']['repository']['revision']}` on `{report['campaign']['repository']['branch']}`.",
         f"GPU: `{report['hardware']['name']}` (`{report['hardware']['uuid']}`, CC {report['hardware']['compute_capability']}, driver {report['hardware']['driver_version']}).",
         f"Simulator: `{report['campaign']['simulator_binary_sha256']}`.",
+        (
+            "STORE completion feedback: disabled."
+            if report["simulator_configuration"]["memory_admission_feedback"] is None
+            else "STORE completion feedback: candidate `201` (independently calibrated lower bound; dirty writeback/coherence remain incomplete)."
+        ),
         "",
         "## Primary accuracy and cost",
         "",

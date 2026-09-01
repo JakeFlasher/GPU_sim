@@ -267,21 +267,48 @@ def validate_timing_crosswalk(crosswalk: Mapping[str, Any]) -> None:
     require(isinstance(cells, list) and len(cells) == 2, "timing crosswalk requires two controls")
     require(
         {cell.get("id") for cell in cells}
-        == {"b84_control_i0_c1", "b84_control_i256_c1"},
+        == {"b84_control_i0_warm_c1", "b84_control_i256_warm_c1"},
         "timing crosswalk control identities drift",
     )
     sm_residuals: list[float] = []
-    gpc_residuals: list[float] = []
     for cell in cells:
+        repeats = cell.get("ncu_sm_active_cycle_repeats")
+        require(
+            isinstance(repeats, list) and len(repeats) == 7,
+            f"{cell['id']}: requires seven SM-active repeats",
+        )
         ncu_sm = float(cell["ncu_sm_active_cycles_median"])
-        ncu_gpc = float(cell["ncu_gpc_elapsed_cycles_median"])
+        require(
+            ncu_sm == statistics.median(float(value) for value in repeats),
+            f"{cell['id']}: SM-active median drift",
+        )
         sim_issue = float(cell["simulator_issue_cycles"])
         sm_residual = float(cell["sm_active_minus_issue_cycles"])
-        gpc_residual = float(cell["gpc_elapsed_minus_sm_active_cycles"])
         require(ncu_sm - sim_issue == sm_residual, f"{cell['id']}: SM-active residual drift")
-        require(ncu_gpc - ncu_sm == gpc_residual, f"{cell['id']}: GPC residual drift")
         sm_residuals.append(sm_residual)
-        gpc_residuals.append(gpc_residual)
+    profiler_cells = crosswalk.get("calibration", {}).get("profiler_cells")
+    require(
+        isinstance(profiler_cells, list) and len(profiler_cells) == 3,
+        "timing crosswalk requires three profiler controls",
+    )
+    require(
+        {cell.get("id") for cell in profiler_cells}
+        == {"control_b84_t32_i0", "control_b84_t256_i0", "control_b84_t256_i256"},
+        "timing crosswalk profiler control identities drift",
+    )
+    gpc_residuals: list[float] = []
+    for cell in profiler_cells:
+        repeats = cell.get("gpc_minus_sm_cycle_repeats")
+        require(
+            isinstance(repeats, list) and len(repeats) == 7,
+            f"{cell['id']}: requires seven GPC-minus-SM repeats",
+        )
+        residual = float(cell["gpc_elapsed_minus_sm_active_cycles_median"])
+        require(
+            residual == statistics.median(float(value) for value in repeats),
+            f"{cell['id']}: GPC-minus-SM median drift",
+        )
+        gpc_residuals.append(residual)
     require(
         float(active.get("fixed_envelope_cycles")) == statistics.median(sm_residuals),
         "timing crosswalk SM-active envelope is not the control median",
@@ -307,6 +334,39 @@ def validate_timing_crosswalk(crosswalk: Mapping[str, Any]) -> None:
         require(boundary.get(field) is False, f"timing crosswalk boundary {field} must be false")
     for field in ("raw_frontiers_preserved", "incomplete_retirement_tails_remain_typed"):
         require(boundary.get(field) is True, f"timing crosswalk boundary {field} must be true")
+
+
+def validate_simulator_feedback(simulator: Mapping[str, Any]) -> None:
+    feedback = simulator.get("memory_admission_feedback")
+    if feedback is None:
+        return
+    require(
+        feedback
+        == "workloads/research_probes/l1tex_admission_backpressure/memory_write_completion_feedback_store_201.json",
+        "simulator feedback path drift",
+    )
+    document = load_object(REPO_ROOT / str(feedback))
+    require(document.get("schema_version") == 1, "simulator feedback schema drift")
+    candidates = document.get("candidates")
+    require(
+        isinstance(candidates, list)
+        and candidates
+        == [
+            {
+                "candidate_id": 201,
+                "scope": "smsp",
+                "operation": "store",
+                "queue_capacity_instructions": 16,
+                "admission_latency_cycles": 8,
+                "l2_hit_sector_units": 1,
+                "l2_hit_sector_cycles": 1,
+                "l2_miss_sector_units": 1,
+                "l2_miss_sector_cycles": 10,
+                "membar_waits_for_service_completion": True,
+            }
+        ],
+        "simulator STORE completion feedback configuration drift",
+    )
 
 
 def validate_spec(spec: Mapping[str, Any], metrics: Mapping[str, Any], profile: Mapping[str, Any]) -> None:
@@ -402,6 +462,7 @@ def validate_spec(spec: Mapping[str, Any], metrics: Mapping[str, Any], profile: 
         and "twins" not in spec["simulator"],
         "simulator repeat contract drift",
     )
+    validate_simulator_feedback(spec["simulator"])
     validate_profile(profile, live_host=False)
     require(spec["simulator"]["multi_launch_policy"].startswith("not_admitted"), "v1 multi-launch policy must fail closed")
 

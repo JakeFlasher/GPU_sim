@@ -67,6 +67,13 @@ class BenchmarkSpecTests(unittest.TestCase):
         with self.assertRaisesRegex(subject.ValidationError, "per-workload maximum drift"):
             subject.validate_accuracy_gate(mutated)
 
+    def test_large_workload_feedback_is_exact_and_independently_bound(self) -> None:
+        subject.validate_simulator_feedback(self.large_spec["simulator"])
+        mutated = copy.deepcopy(self.large_spec["simulator"])
+        mutated["memory_admission_feedback"] = "candidate.json"
+        with self.assertRaisesRegex(subject.ValidationError, "feedback path drift"):
+            subject.validate_simulator_feedback(mutated)
+
     def test_count_target_gate_requires_all_six_components(self) -> None:
         mutated = copy.deepcopy(self.count_gate)
         mutated["checks"]["cache_lookup_count_normalized_error_pct"][

@@ -239,6 +239,7 @@ def _stage_command(
         trace = output_root / "evidence" / "raw" / "nvbit" / slug
         control = output_root / "evidence" / "raw" / "static" / slug / f"{slug}.control_bits.json"
         simulator = spec["simulator"]
+        feedback = simulator.get("memory_admission_feedback")
         return [
             str(simulator["binary"]),
             "--trace",
@@ -253,6 +254,11 @@ def _stage_command(
             str(simulator["mode"]),
             "--cache-scope",
             str(simulator["cache_scope"]),
+            *(
+                ["--memory-admission-feedback", str(feedback)]
+                if feedback is not None
+                else []
+            ),
             "--ncu-shaped-metrics",
         ]
     raise CampaignError(f"unknown stage {stage!r}")
@@ -694,6 +700,16 @@ def _run_simulator(
             raise CampaignError(f"{slug}: simulator output is not JSON: {error}") from error
         if not isinstance(document, Mapping):
             raise CampaignError(f"{slug}: simulator output root is not an object")
+        feedback_path = spec["simulator"].get("memory_admission_feedback")
+        expected_feedback_id = (
+            None
+            if feedback_path is None
+            else int(_load_json(REPO_ROOT / str(feedback_path))["candidates"][0]["candidate_id"])
+        )
+        if document.get("memory_admission_feedback_candidate_id") != expected_feedback_id:
+            raise CampaignError(
+                f"{slug}: simulator feedback identity differs; expected {expected_feedback_id}"
+            )
         observations.append(_validate_simulator_document(document, Path(command[2]), slug))
         outputs.append(output)
         walls.append(result.wall_seconds)
@@ -818,6 +834,15 @@ def _new_manifest(
                 if timing_crosswalk_path is not None
                 else {}
             ),
+            **(
+                {
+                    "memory_admission_feedback": _manifest_identity(
+                        REPO_ROOT / str(spec["simulator"]["memory_admission_feedback"])
+                    )
+                }
+                if spec["simulator"].get("memory_admission_feedback") is not None
+                else {}
+            ),
         },
         "records": [],
         "scientific_boundary": "NCU values are retained only as comparison targets and never passed to simulator commands or profile inputs.",
@@ -875,6 +900,13 @@ def main(argv: Sequence[str] | None = None) -> int:
             if spec.get("timing_crosswalk") is None
             else (REPO_ROOT / str(spec["timing_crosswalk"])).resolve()
         )
+        memory_admission_feedback_path = (
+            None
+            if spec["simulator"].get("memory_admission_feedback") is None
+            else (
+                REPO_ROOT / str(spec["simulator"]["memory_admission_feedback"])
+            ).resolve()
+        )
         if timing_crosswalk_path is not None:
             validate_spec.validate_timing_crosswalk(_load_json(timing_crosswalk_path))
         validate_spec.validate_spec(spec, metrics, profile)
@@ -922,6 +954,11 @@ def main(argv: Sequence[str] | None = None) -> int:
                 **(
                     {"timing_crosswalk": timing_crosswalk_path}
                     if timing_crosswalk_path is not None
+                    else {}
+                ),
+                **(
+                    {"memory_admission_feedback": memory_admission_feedback_path}
+                    if memory_admission_feedback_path is not None
                     else {}
                 ),
             }
