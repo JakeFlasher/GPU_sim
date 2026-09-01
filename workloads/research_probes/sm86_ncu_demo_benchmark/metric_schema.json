@@ -60,6 +60,11 @@
     {
       "id": "l1_read_hit_rate",
       "ncu_metric": "l1tex__t_sector_pipe_lsu_mem_global_op_ld_hit_rate.pct",
+      "ncu_sources": [
+        "l1tex__t_sectors_pipe_lsu_mem_global_op_ld_lookup_hit.sum",
+        "l1tex__t_sectors_pipe_lsu_mem_global_op_ld_lookup_miss.sum"
+      ],
+      "ncu_formula": "100 * hit_sectors / (hit_sectors + miss_sectors)",
       "simulator_source": "metric_predictions.l1_read_hit_rate_pct",
       "unit": "percent",
       "error": "mape_when_ncu_positive_and_absolute_percentage_point_error",
@@ -69,6 +74,11 @@
     {
       "id": "l1_unified_hit_rate",
       "ncu_metric": "l1tex__t_sector_hit_rate.pct",
+      "ncu_sources": [
+        "l1tex__t_sectors_lookup_hit.sum",
+        "l1tex__t_sectors_lookup_miss.sum"
+      ],
+      "ncu_formula": "100 * hit_sectors / (hit_sectors + miss_sectors)",
       "simulator_source": "metric_predictions.l1_unified_hit_rate_pct",
       "unit": "percent",
       "error": "mape_when_ncu_positive_and_absolute_percentage_point_error",
@@ -78,6 +88,11 @@
     {
       "id": "l2_unified_hit_rate",
       "ncu_metric": "lts__t_sector_hit_rate.pct",
+      "ncu_sources": [
+        "lts__t_sectors_lookup_hit.sum",
+        "lts__t_sectors_lookup_miss.sum"
+      ],
+      "ncu_formula": "100 * hit_sectors / (hit_sectors + miss_sectors)",
       "simulator_source": "metric_predictions.l2_unified_hit_rate_pct",
       "unit": "percent",
       "error": "mape_when_ncu_positive_and_absolute_percentage_point_error",

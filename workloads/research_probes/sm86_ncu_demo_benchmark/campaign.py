@@ -344,6 +344,7 @@ def _parse_ncu_metrics(path: Path, requested: Sequence[str]) -> tuple[dict[str, 
         if metric.endswith(".pct") and canonical > 100:
             raise CampaignError(f"{path}: metric {metric!r} exceeds 100 percent")
         selected[metric] = {
+            "status": "measured",
             "value": canonical,
             "unit": canonical_unit,
             "raw_value": row.metric_value,
@@ -355,10 +356,44 @@ def _parse_ncu_metrics(path: Path, requested: Sequence[str]) -> tuple[dict[str, 
     return selected, _wide_ncu_identity(path)
 
 
+def _derive_ncu_metrics(
+    collected: Mapping[str, Mapping[str, object]],
+    metric_schema: Mapping[str, Any],
+) -> dict[str, object]:
+    derived: dict[str, object] = {}
+    for row in metric_schema["metrics"]:
+        metric = str(row["ncu_metric"])
+        sources = row.get("ncu_sources")
+        if sources is None:
+            derived[metric] = collected[metric]
+            continue
+        if not isinstance(sources, list) or len(sources) != 2:
+            raise CampaignError(f"{row['id']}: NCU hit-rate sources are malformed")
+        hit_source, miss_source = map(str, sources)
+        hit = float(collected[hit_source]["value"])
+        miss = float(collected[miss_source]["value"])
+        denominator = hit + miss
+        value = None if denominator == 0 else 100.0 * hit / denominator
+        derived[metric] = {
+            "status": "unavailable_zero_denominator" if value is None else "measured",
+            "value": value,
+            "unit": "%",
+            "formula": row["ncu_formula"],
+            "hit_sectors": hit,
+            "miss_sectors": miss,
+            "sources": {
+                hit_source: collected[hit_source],
+                miss_source: collected[miss_source],
+            },
+        }
+    return derived
+
+
 def _run_ncu(
     spec: Mapping[str, Any], workload: Mapping[str, Any], output_root: Path, repeats: int
 ) -> dict[str, Any]:
     slug = str(workload["id"])
+    metric_schema = _load_json(REPO_ROOT / str(spec["metric_schema"]))
     rows: list[dict[str, Any]] = []
     for repeat in range(1, repeats + 1):
         destination = output_root / "evidence" / "raw" / "ncu" / f"rep-{repeat}" / slug
@@ -374,7 +409,10 @@ def _run_ncu(
         )
         _require_success(f"{slug}.ncu.rep-{repeat}", result)
         metadata = _load_json(destination / "metadata.json")
-        metrics, identity = _parse_ncu_metrics(destination / "ncu.csv", spec["ncu"]["metrics"])
+        collected, identity = _parse_ncu_metrics(
+            destination / "ncu.csv", spec["ncu"]["metrics"]
+        )
+        metrics = _derive_ncu_metrics(collected, metric_schema)
         if identity["Process Name"] != Path(str(workload["binary"])).name:
             raise CampaignError(f"{slug}: NCU process name differs from workload binary")
         if identity["Device"] != "0" or identity["CC"] != "8.6":
@@ -387,6 +425,7 @@ def _run_ncu(
             "repeat": repeat,
             "identity": identity,
             "metrics": metrics,
+            "collection_metrics": collected,
             "ncu_profile_wall_seconds": float(capture_wall),
             "collector_wall_seconds": result.wall_seconds,
             "report": _artifact(destination / "ncu-report.ncu-rep"),

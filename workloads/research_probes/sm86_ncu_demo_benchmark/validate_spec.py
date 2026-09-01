@@ -101,11 +101,25 @@ def validate_metrics(metrics: Mapping[str, Any], requested: Sequence[str]) -> No
     require(isinstance(rows, list) and len(rows) == 10, "metric schema must contain 10 rows")
     ids = [row["id"] for row in rows]
     ncu = [row["ncu_metric"] for row in rows]
+    collected = [
+        source
+        for row in rows
+        for source in row.get("ncu_sources", [row["ncu_metric"]])
+    ]
     require(len(ids) == len(set(ids)), "metric ids must be unique")
     require(len(ncu) == len(set(ncu)), "NCU metric names must be unique")
-    require(ncu == list(requested), "benchmark NCU metric order differs from metric schema")
+    require(collected == list(requested), "benchmark NCU collection order differs from metric schema")
     hit_rates = [row for row in rows if row.get("hit_rate_member")]
     require(len(hit_rates) == 3, "exactly three hit-rate metrics are required")
+    require(
+        all(
+            len(row.get("ncu_sources", [])) == 2
+            and row.get("ncu_formula")
+            == "100 * hit_sectors / (hit_sectors + miss_sectors)"
+            for row in hit_rates
+        ),
+        "hit-rate rows must derive from one NCU hit/miss pair",
+    )
     require(
         all("percentage_point" in row["error"] for row in hit_rates),
         "hit-rate rows must require percentage-point error",

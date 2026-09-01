@@ -34,7 +34,7 @@ class BenchmarkSpecTests(unittest.TestCase):
     def test_ncu_metric_order_drift_is_rejected(self) -> None:
         mutated = copy.deepcopy(self.spec)
         mutated["ncu"]["metrics"].reverse()
-        with self.assertRaisesRegex(subject.ValidationError, "metric order differs"):
+        with self.assertRaisesRegex(subject.ValidationError, "collection order differs"):
             subject.validate_spec(mutated, self.metrics, self.profile)
 
 

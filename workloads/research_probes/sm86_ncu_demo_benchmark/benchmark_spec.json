@@ -26,9 +26,12 @@
       "smsp__inst_executed.sum",
       "l1tex__t_sectors_pipe_lsu_mem_global_op_ld.sum",
       "l1tex__t_sectors_pipe_lsu_mem_global_op_st.sum",
-      "l1tex__t_sector_pipe_lsu_mem_global_op_ld_hit_rate.pct",
-      "l1tex__t_sector_hit_rate.pct",
-      "lts__t_sector_hit_rate.pct",
+      "l1tex__t_sectors_pipe_lsu_mem_global_op_ld_lookup_hit.sum",
+      "l1tex__t_sectors_pipe_lsu_mem_global_op_ld_lookup_miss.sum",
+      "l1tex__t_sectors_lookup_hit.sum",
+      "l1tex__t_sectors_lookup_miss.sum",
+      "lts__t_sectors_lookup_hit.sum",
+      "lts__t_sectors_lookup_miss.sum",
       "dram__sectors_read.sum"
     ]
   },
