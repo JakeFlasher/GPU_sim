@@ -180,6 +180,18 @@ def test_kernel_join_only_removes_tracer_function_suffix() -> None:
     assert campaign._normalized_kernel_name("kernel__part") == "kernel__part"
 
 
+def test_cpp_kernel_signature_join_ignores_profiler_presentation() -> None:
+    simulator = (
+        "void cutlass::Kernel<cutlass::Shape<64>, "
+        "(cutlass::CacheOperation::Kind)0, false>(cutlass::Kernel<"
+        "cutlass::Shape<64>, (cutlass::CacheOperation::Kind)0, false>::Params)"
+    )
+    ncu = "void Kernel<Shape<64>, 0, 0>(Params)"
+    assert campaign._canonical_cpp_kernel_signature(simulator) == (
+        campaign._canonical_cpp_kernel_signature(ncu)
+    )
+
+
 def test_repository_artifacts_use_portable_paths() -> None:
     path = campaign.REPO_ROOT / "arch_profiles/cards/sm_86.json"
     assert campaign._portable_path(path) == "arch_profiles/cards/sm_86.json"

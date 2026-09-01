@@ -571,19 +571,19 @@ def test_async_source_sector_mutation_is_rejected() -> None:
     assert "async_source_sectors mismatch" in error
 
 
-def test_mixed_atomic_async_source_is_unknown_and_not_promotable() -> None:
+def test_mixed_atomic_async_source_is_partitioned_exactly() -> None:
     expected = SimpleNamespace(
         global_load_sectors=0,
         global_atomic_sectors=8,
         async_source_sectors=32,
     )
-    counters = {"l1": {"hits": 1, "misses": 1, "bypass_sectors": 30}}
+    counters = {"l1": {"hits": 5, "misses": 5, "bypass_sectors": 30}}
     error, snapshot = _async_source_error(counters, expected, "mixed-fixture")
-    assert error is not None
-    assert "unknown for mixed atomic/async traffic" in error
-    assert snapshot["status"] == "unknown"
-    assert snapshot["passed"] is None
-    assert snapshot["promotion_eligible"] is False
+    assert error is None
+    assert snapshot["status"] == "checked"
+    assert snapshot["excluded_atomic_bypass_sectors"] == 8
+    assert snapshot["passed"] is True
+    assert snapshot["promotion_eligible"] is True
 
 
 def test_global_memory_diagnostic_is_required_when_trace_has_global_traffic(

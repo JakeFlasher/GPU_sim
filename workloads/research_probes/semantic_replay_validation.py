@@ -137,35 +137,39 @@ def _async_source_error(
             "promotion_eligible": False,
             "expected_async_source_sectors": expected.async_source_sectors,
         }
-    observed = _int(l1.get("hits")) + _int(l1.get("misses"))
-    # A bypass route contributes to the same trace-visible source total.  A
-    # mixed atomic/async trace has no exact attribution invariant in this
-    # schema, so it is explicitly unknown and must not be promoted as passed.
-    ambiguous = bool(
-        expected.global_atomic_sectors != 0
-        or getattr(expected, "global_atomic_instructions", 0) != 0
+    bypass_sectors = _int(l1.get("bypass_sectors"))
+    atomic_bypass_sectors = expected.global_atomic_sectors
+    if atomic_bypass_sectors > bypass_sectors:
+        snapshot = {
+            "status": "mismatch",
+            "promotion_eligible": False,
+            "expected_atomic_bypass_sectors": atomic_bypass_sectors,
+            "observed_bypass_sectors": bypass_sectors,
+        }
+        return f"{label}: atomic bypass partition exceeds L1 bypass ({snapshot})", snapshot
+    # The L1 hit/miss lane contains cache-at-all ordinary/async reads. The
+    # bypass counter contains both bypass-LDGSTS source sectors and the exact
+    # atomic subset already conserved by global_memory_issue. Subtract that
+    # independently trace-derived atomic subset before joining the two read
+    # routes; no mixed-traffic ambiguity remains.
+    non_atomic_bypass_sectors = bypass_sectors - atomic_bypass_sectors
+    observed = (
+        _int(l1.get("hits"))
+        + _int(l1.get("misses"))
+        + non_atomic_bypass_sectors
     )
-    if not ambiguous:
-        observed += _int(l1.get("bypass_sectors"))
     expected_total = expected.global_load_sectors + expected.async_source_sectors
     snapshot = {
-        "status": "unknown" if ambiguous else "checked",
-        "promotion_eligible": not ambiguous,
-        "unknown_reason": (
-            "atomic and async-source sectors share the observed L1 lane"
-            if ambiguous
-            else None
-        ),
+        "status": "checked",
+        "promotion_eligible": True,
+        "unknown_reason": None,
         "expected_async_source_sectors": expected.async_source_sectors,
         "expected_l1_read_sectors": expected_total,
         "observed_l1_read_sectors": observed,
-        "passed": None if ambiguous else observed == expected_total,
+        "observed_bypass_sectors": bypass_sectors,
+        "excluded_atomic_bypass_sectors": atomic_bypass_sectors,
+        "passed": observed == expected_total,
     }
-    if ambiguous:
-        return (
-            f"{label}: async-source conservation is unknown for mixed atomic/async traffic",
-            snapshot,
-        )
     if observed != expected_total:
         return f"{label}: trace-derived async_source_sectors mismatch ({snapshot})", snapshot
     return None, snapshot

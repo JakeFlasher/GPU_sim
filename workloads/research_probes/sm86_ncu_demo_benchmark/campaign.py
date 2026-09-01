@@ -539,6 +539,39 @@ def _normalized_kernel_name(name: str) -> str:
     return re.sub(r"___[0-9]+$", "", name)
 
 
+def _canonical_cpp_kernel_signature(name: str) -> str:
+    """Normalize the template specialization, not profiler presentation."""
+    value = re.sub(r"(?:(?:[A-Za-z_]\w*)::)+", "", name)
+    value = re.sub(r"\([A-Za-z_]\w*\)(?=[-0-9])", "", value)
+    value = re.sub(r"\bfalse\b", "0", value)
+    value = re.sub(r"\btrue\b", "1", value)
+    value = re.sub(r"\s+", "", value)
+    # NCU abbreviates CUTLASS's function parameter to `(Params)`, while the
+    # ELF demangler expands the complete enclosing specialization again. The
+    # template specialization before the function parameter list is the stable
+    # function identity shared by both presentations.
+    parameter_boundary = value.find(">(")
+    return value if parameter_boundary < 0 else value[: parameter_boundary + 1]
+
+
+def _kernel_names_equivalent(simulator_name: str, ncu_name: str) -> bool:
+    simulator_name = _normalized_kernel_name(simulator_name)
+    if simulator_name == ncu_name:
+        return True
+    if not simulator_name.startswith("_Z"):
+        return False
+    demangled = _run(
+        ["/usr/bin/llvm-cxxfilt", simulator_name],
+        timeout_seconds=5,
+        environment=_clean_environment(simulator=True),
+    )
+    if demangled.timed_out or demangled.return_code != 0:
+        return False
+    return _canonical_cpp_kernel_signature(demangled.stdout.strip()) == (
+        _canonical_cpp_kernel_signature(ncu_name)
+    )
+
+
 def _validate_simulator_document(
     document: Mapping[str, Any], trace: Path, slug: str
 ) -> dict[str, Any]:
@@ -618,7 +651,9 @@ def _cross_check_ncu_simulator(output_root: Path, workload: Mapping[str, Any], s
         return
     ncu = _load_json(ncu_path)["identity"]
     launch = sim["launch"]
-    if _normalized_kernel_name(str(launch["kernel_name"])) != ncu["Kernel Name"]:
+    if not _kernel_names_equivalent(
+        str(launch["kernel_name"]), str(ncu["Kernel Name"])
+    ):
         raise CampaignError(f"{slug}: NCU and simulator kernel names differ")
     if str(tuple(launch["grid"])) != ncu["Grid Size"] or str(tuple(launch["block"])) != ncu["Block Size"]:
         raise CampaignError(f"{slug}: NCU and simulator launch geometry differ")

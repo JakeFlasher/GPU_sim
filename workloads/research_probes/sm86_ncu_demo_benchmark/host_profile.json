@@ -37,11 +37,11 @@
     },
     "tracer": {
       "path": "tools/nvbit_tracer/tracer_tool/tracer_tool.so",
-      "sha256": "0989e5ec62625c5143dfd2e134eadbbcd69ce65ec1c43c305c0ffd5f63aebf75"
+      "sha256": "3f09ce65a4164abcd01e8d6d9b74befffe49e3d164ae74943dbf1e17ec5f2422"
     },
     "runtime_manifest": {
       "path": "tools/nvbit_tracer/tracer_tool.nvbit-runtime-manifest.json",
-      "sha256": "4b51eca80f403ee28dcda1ff7d71141f63dd5a119d59e0eca4625e0d2a17cd4a"
+      "sha256": "891c727539a2820d4a410aa467ac212f58cdd9596afce36b90ed260c3d210eff"
     }
   },
   "round0_observations": {
