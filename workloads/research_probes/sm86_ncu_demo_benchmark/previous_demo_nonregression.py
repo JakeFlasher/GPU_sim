@@ -208,6 +208,69 @@ def _candidate_aggregate(rows: Sequence[Mapping[str, Any]]) -> dict[str, float]:
     }
 
 
+def _attach_row_transitions(
+    baseline: Mapping[str, Any], candidate: dict[str, Any]
+) -> list[dict[str, Any]]:
+    baseline_cache = _mean(
+        [
+            float(baseline["metrics"][metric_id]["pair_normalized_absolute_error_pct"])
+            for hit_id, miss_id, _ in CACHE_PAIRS
+            for metric_id in (hit_id, miss_id)
+        ]
+    )
+    comparisons = (
+        (
+            "cache_lookup_count_normalized_error_pct",
+            baseline_cache,
+            float(candidate["cache_lookup_count_normalized_error_pct"]),
+        ),
+        (
+            "counter_traffic_mape_pct",
+            float(baseline["accuracy"]["counter_mape_pct"]),
+            float(candidate["counter_traffic_mape_pct"]),
+        ),
+        (
+            "instruction_throughput_mape_pct",
+            float(baseline["accuracy"]["instruction_throughput_mape_pct"]),
+            float(candidate["instruction_throughput_mape_pct"]),
+        ),
+        (
+            "issue_cycle_mape_pct",
+            float(baseline["accuracy"]["issue_frontier_mape_pct"]),
+            float(candidate["issue_cycle_mape_pct"]),
+        ),
+        (
+            "runtime_equivalent_mape_pct",
+            float(baseline["accuracy"]["runtime_equivalent_mape_pct"]),
+            float(candidate["runtime_equivalent_mape_pct"]),
+        ),
+        (
+            "terminal_cycle_mape_pct",
+            float(baseline["accuracy"]["terminal_lower_bound_mape_pct"]),
+            float(candidate["terminal_cycle_mape_pct"]),
+        ),
+    )
+    transitions = {
+        name: {
+            "baseline": baseline_value,
+            "candidate": candidate_value,
+            "delta": candidate_value - baseline_value,
+            "numerically_non_regressed": candidate_value <= baseline_value + 1e-12,
+        }
+        for name, baseline_value, candidate_value in comparisons
+    }
+    candidate["metric_transitions"] = transitions
+    return [
+        {
+            "workload_id": candidate["workload_id"],
+            "metric": name,
+            **transition,
+        }
+        for name, transition in transitions.items()
+        if not transition["numerically_non_regressed"]
+    ]
+
+
 def _render(report: Mapping[str, Any]) -> str:
     lines = [
         "# Previous eight-workload demo non-regression",
@@ -234,6 +297,23 @@ def _render(report: Mapping[str, Any]) -> str:
             "One deterministic simulator process is used per workload. The approved report's seven NCU repeats remain comparison-only targets and no NCU value appears in a simulator command.",
         ]
     )
+    regressions = report["row_level_numeric_regressions"]
+    lines.extend(
+        [
+            "",
+            "## Row-level tradeoffs",
+            "",
+            f"Universal per-cell numeric non-regression: **{'yes' if report['strict_all_row_metrics_numerically_non_regressed'] else 'no'}** ({len(regressions)} regressed workload/metric cells). The approved contract is aggregate-level; these cells are retained for manual review.",
+            "",
+            "| Workload | Metric | Baseline | Candidate | Delta |",
+            "| :--- | :--- | ---: | ---: | ---: |",
+        ]
+    )
+    for row in regressions:
+        lines.append(
+            f"| {row['workload_id']} | {row['metric']} | {row['baseline']:.4f}% | "
+            f"{row['candidate']:.4f}% | {row['delta']:+.4f} pp |"
+        )
     return "\n".join(lines) + "\n"
 
 
@@ -301,8 +381,20 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         (destination / "command.txt").write_text(
             shlex.join(command) + "\n", encoding="utf-8"
         )
-        rows.append(_candidate_row(baseline_row, document, active, profiler, sm_clock))
+        candidate_row = _candidate_row(
+            baseline_row, document, active, profiler, sm_clock
+        )
+        rows.append(candidate_row)
         commands.append(command)
+
+    baseline_rows = {str(row["workload_id"]): row for row in baseline["rows"]}
+    row_level_regressions = [
+        regression
+        for row in rows
+        for regression in _attach_row_transitions(
+            baseline_rows[str(row["workload_id"])], row
+        )
+    ]
 
     baseline_aggregate = _baseline_aggregate(baseline)
     candidate_aggregate = _candidate_aggregate(rows)
@@ -326,9 +418,9 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
     )
     result = {
         "schema_version": 1,
-        "status": "strict_non_regression_pass"
+        "status": "strict_aggregate_non_regression_pass"
         if all(row["numerically_non_regressed"] for row in transitions.values())
-        else "strict_non_regression_fail",
+        else "strict_aggregate_non_regression_fail",
         "repository_revision": _git("rev-parse", "HEAD"),
         "repository_branch": _git("branch", "--show-current"),
         "simulator_binary_sha256": _sha256(args.simulator.resolve()),
@@ -344,6 +436,12 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         "strict_all_aggregate_metrics_numerically_non_regressed": all(
             row["numerically_non_regressed"] for row in transitions.values()
         ),
+        "strict_all_row_metrics_numerically_non_regressed": not row_level_regressions,
+        "row_level_numeric_regressions": row_level_regressions,
+        "non_regression_contract": {
+            "level": "aggregate",
+            "row_level_tradeoffs_reported": True,
+        },
         "all_aggregate_metrics_under_20_pct": all(
             value < 20.0 for value in candidate_aggregate.values()
         ),
