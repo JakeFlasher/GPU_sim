@@ -48,3 +48,39 @@ its stages with:
 The final result promotes a typed complete/incomplete modeled-retirement
 frontier, but rejects numerical `gpc__cycles_elapsed.max` emission and generic
 multi-launch range composition.
+
+## NCU launch-envelope control
+
+`ncu_launch_envelope` is a separate control for identifying the NCU-shaped
+single-kernel envelope.  It intentionally has no `cudaProfilerStart/Stop`
+range and accepts `MODE BLOCKS THREADS ITERATIONS WARMUPS`; this permits CTA
+shape, work, and a final global-store tail to be varied independently while
+matching the demo campaign's ordinary warm-up/target protocol. `MODE` is
+`control` (volatile shared-memory sink) or `store` (global output):
+
+```bash
+make -C workloads/research_probes/launch_cycle_semantics ncu_launch_envelope
+ncu --launch-skip 1 --launch-count 1 --replay-mode application \
+  --clock-control none --cache-control all \
+  --metrics gpc__cycles_elapsed.max,sm__cycles_active.max \
+  workloads/research_probes/launch_cycle_semantics/ncu_launch_envelope \
+  control 84 256 0 1
+```
+
+This probe is an independent calibration input.  Scored-workload NCU values
+must not be supplied to it or to the simulator.
+
+## INT8 IMMA issue control
+
+`imma_issue_probe` emits exact inline-PTX
+`mma.sync.aligned.m16n8k16...s8.s8.s32` instructions with one, two, or four
+independent accumulator streams. The one-stream arm exposes dependency
+latency; the multi-stream arms expose steady-state initiation without using a
+scored GEMM. Inspect the built SASS before interpreting the clock result:
+
+```bash
+make -C workloads/research_probes/launch_cycle_semantics imma_issue_probe
+/usr/local/cuda-13.2/bin/cuobjdump --dump-sass \
+  workloads/research_probes/launch_cycle_semantics/imma_issue_probe
+workloads/research_probes/launch_cycle_semantics/imma_issue_probe 31
+```

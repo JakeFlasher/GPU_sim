@@ -1829,6 +1829,7 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates(
                     batch_replyless_writes,
                     &mut scratch,
                     params.l1_miss_latency,
+                    memory_admission_feedback,
                 )?;
                 spin.on_event(ev.time, !progress)?;
             }
@@ -1881,6 +1882,10 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates(
                             reply: req.reply,
                         });
                     }
+                    let feedback_unpriced_removal =
+                        feedback_prices_request(memory_admission_feedback, req)
+                            .then(|| unpriced.prepare_remove(sm_ix, req.issue_time))
+                            .transpose()?;
                     #[cfg(test)]
                     maybe_inject_l2_access_error()?;
 
@@ -2238,6 +2243,9 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates(
                         response_due.push(sm_ix, response.ready);
                         response.unpriced_removal.commit(&mut unpriced);
                     }
+                    if let Some(removal) = feedback_unpriced_removal {
+                        removal.commit(&mut unpriced);
+                    }
                     spin.on_progress_event(ev.time);
                     Ok(())
                 };
@@ -2268,6 +2276,7 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates(
                     batch_replyless_writes,
                     &mut scratch,
                     params.l1_miss_latency,
+                    memory_admission_feedback,
                 )?;
                 spin.on_event(ev.time, false)?;
             }
@@ -2295,6 +2304,7 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates(
                     &mut scratch,
                     params.l1_miss_latency,
                     batch_replyless_writes,
+                    memory_admission_feedback,
                 )?;
                 run_sm(
                     sm_ix,
@@ -2307,6 +2317,7 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates(
                     batch_replyless_writes,
                     &mut scratch,
                     params.l1_miss_latency,
+                    memory_admission_feedback,
                 )?;
                 spin.on_event(ev.time, false)?;
             }
@@ -2434,6 +2445,14 @@ fn batchable_replyless_write(request: MemRequest) -> bool {
         )
 }
 
+fn feedback_prices_request(
+    candidate: Option<MemoryAdmissionCandidate>,
+    request: MemRequest,
+) -> bool {
+    request.admission_witness.is_some()
+        && candidate.is_some_and(|candidate| candidate.matches_operation(request.operation))
+}
+
 #[allow(clippy::too_many_arguments)]
 fn schedule_emitted_requests(
     sm: usize,
@@ -2443,6 +2462,7 @@ fn schedule_emitted_requests(
     scratch: &mut Vec<MemRequest>,
     l2_hit_latency: u64,
     batch_replyless_writes: bool,
+    memory_admission_feedback: Option<MemoryAdmissionCandidate>,
 ) -> Result<(), SystemError> {
     let mut index = 0;
     while index < scratch.len() {
@@ -2481,6 +2501,15 @@ fn schedule_emitted_requests(
             )?;
             unpriced.insert(sm, bound)?;
         }
+        // A timing-active write candidate cannot be priced until this future
+        // L2 access is processed.  The memory issue pipeline may emit the
+        // request several cycles ahead of the actor clock, so retain that
+        // access timestamp as a self-affecting bound just like an unpriced
+        // read response.  Otherwise an unrelated wake can let the SM run past
+        // the event that releases its feedback queue or schedules its ack.
+        if feedback_prices_request(memory_admission_feedback, request) {
+            unpriced.insert(sm, request.issue_time)?;
+        }
         queue.schedule_at(request.issue_time, target, Ev::L2Access(request))?;
         index += 1;
     }
@@ -2506,6 +2535,7 @@ fn run_sm(
     batch_replyless_writes: bool,
     scratch: &mut Vec<MemRequest>,
     l2_hit_latency: u64,
+    memory_admission_feedback: Option<MemoryAdmissionCandidate>,
 ) -> Result<bool, SystemError> {
     scratch.clear();
     let write_or_unpriced = match (write_ack_due.next(ix), unpriced.min(ix)) {
@@ -2527,6 +2557,7 @@ fn run_sm(
         scratch,
         l2_hit_latency,
         batch_replyless_writes,
+        memory_admission_feedback,
     )?;
     if let Advance::Idle {
         wake_at: Some(wake),
@@ -2877,9 +2908,10 @@ mod tests {
             write_completion_region_cycles: 0,
             write_completion_parallel_lanes: 0,
         };
+        let per_sm = BTreeMap::from([(0, blocks)]);
         let mut l2 = l2_model();
         let result = simulate_kernel_shared_with_residency_and_candidates(
-            &BTreeMap::from([(0, blocks)]),
+            &per_sm,
             &sched,
             &params(),
             SharedMemoryResidency::unconstrained_fixture(),
@@ -2911,6 +2943,46 @@ mod tests {
         assert_eq!(result.l2_by_source.source(L2Source::Store), (2, 0));
         assert!(result.unmodeled_tails.dirty_writeback);
         assert!(result.unmodeled_tails.coherence);
+
+        // The architecture memory pipeline timestamps the L2 mutation in the
+        // future relative to scheduler issue.  Feedback pricing must keep that
+        // timestamp in the actor horizon; running past it used to fail with
+        // `HorizonBeforeClock` on real campaign traces.
+        let mut pipeline_params = params();
+        pipeline_params.memory_issue_pipeline = Some(
+            ArchId::Sm86
+                .memory_issue_pipeline()
+                .require("test memory issue pipeline")
+                .unwrap(),
+        );
+        let mut pipeline_l2 = l2_model();
+        let pipeline_result = simulate_kernel_shared_with_residency_and_candidates(
+            &per_sm,
+            &sched,
+            &pipeline_params,
+            SharedMemoryResidency::unconstrained_fixture(),
+            l1_config(),
+            &mut pipeline_l2,
+            DramBw::Unmodeled { arch: ArchId::Sm86 },
+            &[],
+            &[],
+            Some(candidate),
+        )
+        .unwrap();
+        let pipeline_readiness = &pipeline_result.per_sm[&0].readiness;
+        let pipeline = pipeline_readiness
+            .memory_issue_pipeline
+            .as_deref()
+            .expect("store uses the architecture memory pipeline");
+        let pipeline_ack = pipeline_readiness
+            .memory_write_ack
+            .as_deref()
+            .expect("future L2 pricing still drains the write ack");
+        assert_eq!(pipeline.terminal_shared_accept_cycle, 14);
+        assert_eq!(pipeline_ack.latest_issue_time, 14);
+        assert_eq!(pipeline_ack.latest_service_completion_time, 34);
+        assert_eq!(pipeline_ack.terminal_drain_time, 34);
+        assert_eq!(pipeline_result.terminal_event_time, Some(34));
     }
 
     #[test]
@@ -3035,6 +3107,7 @@ mod tests {
             &mut sm0,
             34,
             true,
+            None,
         )
         .unwrap();
         schedule_emitted_requests(
@@ -3045,6 +3118,7 @@ mod tests {
             &mut sm1,
             34,
             true,
+            None,
         )
         .unwrap();
         assert!(sm0.is_empty() && sm1.is_empty());
@@ -3092,6 +3166,7 @@ mod tests {
             &mut legacy,
             34,
             false,
+            None,
         )
         .unwrap();
         assert_eq!(legacy_queue.len(), 2);

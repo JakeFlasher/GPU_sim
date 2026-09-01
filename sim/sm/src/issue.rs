@@ -3267,7 +3267,7 @@ impl MemoryAdmissionCandidate {
         Ok(())
     }
 
-    const fn matches(self, operation: MemoryOperation) -> bool {
+    pub(crate) const fn matches_operation(self, operation: MemoryOperation) -> bool {
         matches!(
             (self.operation, operation),
             (
@@ -3526,7 +3526,7 @@ impl MemoryAdmissionCandidateState {
             .expect("observe is called only for nonempty admission state");
         for runtime in &mut entries[..usize::from(self.count)] {
             let candidate = runtime.result.candidate;
-            if !candidate.matches(operation) {
+            if !candidate.matches_operation(operation) {
                 continue;
             }
             let hit_cycles = candidate_rate_cycles(
@@ -4074,7 +4074,7 @@ impl MemoryAdmissionFeedbackState {
         unique_regions: u64,
         issue_time: u64,
     ) -> Result<Option<MemoryWriteAck>, IssueError> {
-        if !self.candidate.matches(operation) {
+        if !self.candidate.matches_operation(operation) {
             return Ok(None);
         }
         let queue_index = self.queue_index(usize::from(witness.subcore()));
