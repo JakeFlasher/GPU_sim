@@ -161,6 +161,11 @@ probe binary     9944a80c075e823f914a9adb1416acc34be6bb30f6e7e1dab2d03849379d2df
 proto schema     f8204fb93df6c65f96762cc0ffbebf1f9a0cfd78265a844695be1ce2dc54e8ad
 ```
 
+The prospective contract began at commit `312ec4b6`; its compatibility oracle
+was clarified before final reduction. The exact producer, consumer, live
+campaign tooling, and tracked decision are commit
+`7496273138aaa8e81b8e953c097da02c39a73bb1`.
+
 ## Reproduction
 
 The pinned protobuf runtime is required for parsing and stripping tag 14:
