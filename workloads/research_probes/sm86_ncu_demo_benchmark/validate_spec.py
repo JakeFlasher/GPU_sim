@@ -327,7 +327,10 @@ def validate_spec(spec: Mapping[str, Any], metrics: Mapping[str, Any], profile: 
     validate_metrics(metrics, spec["ncu"]["metrics"])
     require(
         spec.get("accuracy_gate")
-        == "workloads/research_probes/sm86_ncu_demo_benchmark/accuracy_gate.json",
+        in {
+            "workloads/research_probes/sm86_ncu_demo_benchmark/accuracy_gate.json",
+            "workloads/research_probes/sm86_ncu_demo_benchmark/accuracy_gate_counts.json",
+        },
         "accuracy gate path drift",
     )
     timing_crosswalk = spec.get("timing_crosswalk")
