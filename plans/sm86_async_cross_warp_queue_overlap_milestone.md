@@ -32,7 +32,8 @@ async-plus-CTA-barrier cells are also consumed. This assay changes neither
 width nor destination work inside a comparison. Its only discriminator is
 whether background groups remain outstanding when the target begins.
 
-One fixed 256-thread CTA allocates 32 KiB of shared memory. Identification uses
+One fixed 256-thread CTA allocates a 32 KiB destination arena plus bounded
+shared timestamp/result state (33,104 static bytes total). Identification uses
 four active warps; inactive warps still participate in untimed CTA barriers.
 The highest active warp is the measured target and all lower active warps are
 backgrounds. Every active warp owns a private repeated 512-byte source and a
