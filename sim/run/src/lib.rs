@@ -1618,7 +1618,27 @@ mod v1_result_compat {
     struct DramStatsWire {
         read_sectors: u64,
         bw_delayed_responses: u64,
+        #[serde(skip_serializing_if = "is_zero_u64")]
+        l2_evicted_lines: u64,
+        #[serde(skip_serializing_if = "is_zero_u64")]
+        l2_evicted_valid_sectors: u64,
+        #[serde(skip_serializing_if = "is_zero_u64")]
+        l2_evicted_pending_lines: u64,
+        #[serde(skip_serializing_if = "is_zero_u64")]
+        l2_evicted_pending_sectors: u64,
+        #[serde(skip_serializing_if = "is_zero_u64")]
+        l2_dirty_eviction_lines: u64,
+        #[serde(skip_serializing_if = "is_zero_u64")]
+        l2_dirty_evicted_sectors: u64,
+        #[serde(skip_serializing_if = "is_zero_u64")]
+        maximum_terminal_l2_dirty_lines: u64,
+        #[serde(skip_serializing_if = "is_zero_u64")]
+        maximum_terminal_l2_dirty_sectors: u64,
         by_origin: OriginPair<DramOriginStatsWire>,
+    }
+
+    fn is_zero_u64(value: &u64) -> bool {
+        *value == 0
     }
 
     impl From<&DramStats> for DramStatsWire {
@@ -1626,6 +1646,14 @@ mod v1_result_compat {
             Self {
                 read_sectors: stats.read_sectors,
                 bw_delayed_responses: stats.bw_delayed_responses,
+                l2_evicted_lines: stats.l2_evicted_lines,
+                l2_evicted_valid_sectors: stats.l2_evicted_valid_sectors,
+                l2_evicted_pending_lines: stats.l2_evicted_pending_lines,
+                l2_evicted_pending_sectors: stats.l2_evicted_pending_sectors,
+                l2_dirty_eviction_lines: stats.l2_dirty_eviction_lines,
+                l2_dirty_evicted_sectors: stats.l2_dirty_evicted_sectors,
+                maximum_terminal_l2_dirty_lines: stats.maximum_terminal_l2_dirty_lines,
+                maximum_terminal_l2_dirty_sectors: stats.maximum_terminal_l2_dirty_sectors,
                 by_origin: OriginPair {
                     global: stats.origin(MemoryOrigin::Global).into(),
                     local: stats.origin(MemoryOrigin::Local).into(),

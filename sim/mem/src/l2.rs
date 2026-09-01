@@ -573,6 +573,7 @@ pub struct L2EventMaskPreview {
     generation: L2AllocationGeneration,
     fill_mask: u8,
     pending_merge_mask: u8,
+    eviction: Option<L2Eviction>,
 }
 
 impl L2EventMaskPreview {
@@ -587,6 +588,13 @@ impl L2EventMaskPreview {
     /// lower-level fetch. They remain lookup misses but issue no duplicate fetch.
     pub const fn pending_merge_mask(self) -> u8 {
         self.pending_merge_mask
+    }
+
+    /// Exact victim selected by this access, if the new line replaces a
+    /// resident allocation. This is topology only: a dirty mask does not imply
+    /// a scheduled or completed lower-level writeback.
+    pub const fn eviction(self) -> Option<L2Eviction> {
+        self.eviction
     }
 
     /// Opaque identity used to register one newly fetched sector's ready time.
@@ -624,6 +632,24 @@ impl L2EventMaskPreview {
 pub struct L2EventMaskAccess {
     pub lookup: L2MaskPreview,
     pub fill: Option<L2FillToken>,
+    pub eviction: Option<L2Eviction>,
+}
+
+/// One exact L2 replacement victim. Masks are line-relative 32 B sectors.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct L2Eviction {
+    pub line_id: i64,
+    pub valid_mask: u8,
+    pub dirty_mask: u8,
+    pub pending_mask: u8,
+}
+
+/// Terminal dirty occupancy of one shared L2 model. This is a gauge, not
+/// additive traffic; launch-set consumers must never sum it across launches.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct L2DirtyResidency {
+    pub lines: usize,
+    pub sectors: usize,
 }
 
 /// Deterministic result of an event fill completion. A stale allocation is a
@@ -683,6 +709,16 @@ pub enum L2AccessError {
         set_key: usize,
         ways: usize,
         associativity: usize,
+    },
+    #[error(
+        "L2 way {way} in set {set_key} has invalid masks: valid={valid_mask:#06b}, dirty={dirty_mask:#06b}, pending={pending_mask:#06b}"
+    )]
+    DirtyMaskInvalid {
+        set_key: usize,
+        way: usize,
+        valid_mask: u8,
+        dirty_mask: u8,
+        pending_mask: u8,
     },
     #[error("L2 replacement set {set_key} is unexpectedly empty")]
     ReplacementSetEmpty { set_key: usize },
@@ -900,6 +936,8 @@ struct Way {
     tag: i64,
     /// Completed/valid-sector bitmask (bit = sector index within the line).
     mask: u8,
+    /// Valid sectors modified by write-class traffic and not yet evicted.
+    dirty_mask: u8,
     /// Event-mode read sectors requested but not yet completed. Pending bits are
     /// deliberately absent from `mask` and never count as physically present.
     pending_mask: u8,
@@ -1001,6 +1039,19 @@ impl L2Model {
             .flat_map(|ways| ways.iter())
             .map(|way| way.pending_mask.count_ones() as usize)
             .sum()
+    }
+
+    /// Dirty sectors still resident after the currently committed access
+    /// stream. The result is a terminal gauge, not a traffic counter.
+    pub fn dirty_residency(&self) -> L2DirtyResidency {
+        let mut result = L2DirtyResidency::default();
+        for way in self.sets.iter().flatten() {
+            if way.dirty_mask != 0 {
+                result.lines += 1;
+                result.sectors += way.dirty_mask.count_ones() as usize;
+            }
+        }
+        result
     }
 
     fn validate_counter_architecture(&self) -> Result<(), L2CounterError> {
@@ -1128,6 +1179,7 @@ impl L2Model {
             });
         }
         validate_srrip_recencies(ways, set_key, self.cfg.replacement)?;
+        validate_way_masks(ways, set_key)?;
 
         let resident = ways.iter().position(|way| way.tag == line_id);
         let mut update = resident.map(|way| PreparedSetUpdate::Update {
@@ -1169,6 +1221,11 @@ impl L2Model {
                     set_key,
                     line_id,
                     bit,
+                    if class == L2OpClass::WriteAtomic {
+                        bit
+                    } else {
+                        0
+                    },
                     0,
                     None,
                     associativity,
@@ -1193,6 +1250,9 @@ impl L2Model {
                     _ => clock,
                 };
                 value.mask |= bit;
+                if class == L2OpClass::WriteAtomic {
+                    value.dirty_mask |= bit;
+                }
                 let mut delta = L2Counters::for_arch(self.cfg.arch);
                 if counted_hit {
                     delta.hits = 1;
@@ -1266,6 +1326,7 @@ impl L2Model {
             });
         }
         validate_srrip_recencies(ways, set_key, self.cfg.replacement)?;
+        validate_way_masks(ways, set_key)?;
 
         let resident = ways.iter().position(|way| way.tag == line_id);
         let mut update = resident.map(|way| PreparedSetUpdate::Update {
@@ -1318,15 +1379,16 @@ impl L2Model {
                 let (generation, next) = next_generation.allocate()?;
                 next_generation = next;
                 allocation_generation = Some(generation);
-                let (initial_valid, initial_pending) = match class {
-                    L2OpClass::Read => (0, bit),
-                    L2OpClass::WriteAtomic => (bit, 0),
+                let (initial_valid, initial_dirty, initial_pending) = match class {
+                    L2OpClass::Read => (0, 0, bit),
+                    L2OpClass::WriteAtomic => (bit, bit, 0),
                 };
                 update = Some(prepare_install(
                     ways,
                     set_key,
                     line_id,
                     initial_valid,
+                    initial_dirty,
                     initial_pending,
                     Some(generation),
                     associativity,
@@ -1358,6 +1420,7 @@ impl L2Model {
                     }
                     L2OpClass::WriteAtomic => {
                         value.mask |= bit;
+                        value.dirty_mask |= bit;
                         value.pending_mask &= !bit;
                     }
                 }
@@ -1412,6 +1475,7 @@ impl L2Model {
             generation,
             fill_mask,
             pending_merge_mask,
+            eviction: update.as_ref().and_then(PreparedSetUpdate::eviction),
         };
         let prepared_fill = (fill_mask != 0).then_some(PreparedL2Fill {
             owner: self.owner,
@@ -1595,6 +1659,7 @@ impl L2Model {
         let access = L2EventMaskAccess {
             lookup: preview.lookup,
             fill: prepared_fill.map(PreparedL2Fill::issue),
+            eviction: preview.eviction,
         };
         Ok((access, value))
     }
@@ -1628,6 +1693,7 @@ impl L2Model {
         }
 
         let set_key = self.set_key(token.line_id)?;
+        validate_way_masks(&self.sets[set_key], set_key)?;
         let Some(way) = self.sets[set_key]
             .iter_mut()
             .find(|way| way.tag == token.line_id)
@@ -1700,6 +1766,7 @@ enum PreparedSetUpdate {
     Replace {
         victim: usize,
         srrip_age: i64,
+        evicted: Way,
         value: Way,
     },
 }
@@ -1713,6 +1780,18 @@ impl PreparedSetUpdate {
         }
     }
 
+    fn eviction(&self) -> Option<L2Eviction> {
+        let Self::Replace { evicted, .. } = self else {
+            return None;
+        };
+        Some(L2Eviction {
+            line_id: evicted.tag,
+            valid_mask: evicted.mask,
+            dirty_mask: evicted.dirty_mask,
+            pending_mask: evicted.pending_mask,
+        })
+    }
+
     fn commit(self, ways: &mut Vec<Way>) {
         match self {
             Self::Update { way, value } => ways[way] = value,
@@ -1720,6 +1799,7 @@ impl PreparedSetUpdate {
             Self::Replace {
                 victim,
                 srrip_age,
+                evicted: _,
                 value,
             } => {
                 if srrip_age != 0 {
@@ -1759,6 +1839,21 @@ fn validate_srrip_recencies(
     Ok(())
 }
 
+fn validate_way_masks(ways: &[Way], set_key: usize) -> Result<(), L2AccessError> {
+    for (way, entry) in ways.iter().enumerate() {
+        if entry.dirty_mask & !entry.mask != 0 || entry.dirty_mask & entry.pending_mask != 0 {
+            return Err(L2AccessError::DirtyMaskInvalid {
+                set_key,
+                way,
+                valid_mask: entry.mask,
+                dirty_mask: entry.dirty_mask,
+                pending_mask: entry.pending_mask,
+            });
+        }
+    }
+    Ok(())
+}
+
 /// `_install_way` port: prepare insertion or replacement without changing
 /// semantic set state. A spare way slot is reserved before the caller's
 /// pre-commit callback so the later insertion cannot allocate.
@@ -1768,6 +1863,7 @@ fn prepare_install(
     set_key: usize,
     tag: i64,
     valid_mask: u8,
+    dirty_mask: u8,
     pending_mask: u8,
     generation: Option<L2AllocationGeneration>,
     associativity: usize,
@@ -1794,6 +1890,7 @@ fn prepare_install(
             value: Way {
                 tag,
                 mask: valid_mask,
+                dirty_mask,
                 pending_mask,
                 generation,
                 recency,
@@ -1833,12 +1930,15 @@ fn prepare_install(
         (victim, 0)
     };
     let recency = insertion_recency(ways, set_key, policy, clock, bip_counter)?;
+    let evicted = ways[victim];
     Ok(PreparedSetUpdate::Replace {
         victim,
         srrip_age,
+        evicted,
         value: Way {
             tag,
             mask: valid_mask,
+            dirty_mask,
             pending_mask,
             generation,
             recency,
@@ -2197,6 +2297,101 @@ mod tests {
     }
 
     #[test]
+    fn dirty_sector_state_and_eviction_payload_are_exact_and_transactional() {
+        let mut l2 = L2Model::new(cfg(128, 1, 1)).unwrap();
+        let write = ev(&mut l2, 0, 0b0011, L2OpClass::WriteAtomic);
+        assert!(write.eviction.is_none());
+        assert_eq!(resident_way(&l2, 0).mask, 0b0011);
+        assert_eq!(resident_way(&l2, 0).dirty_mask, 0b0011);
+        assert_eq!(resident_way(&l2, 0).pending_mask, 0);
+        assert_eq!(
+            l2.dirty_residency(),
+            L2DirtyResidency {
+                lines: 1,
+                sectors: 2
+            }
+        );
+
+        let before = state(&l2);
+        let mut rejected_preview = None;
+        assert_eq!(
+            l2.access_mask_event_transactional(1, 0b0100, L2OpClass::Read, |preview| {
+                rejected_preview = Some(preview);
+                Err::<(), _>(CallbackError::Refused)
+            },),
+            Err(CallbackError::Refused)
+        );
+        assert_eq!(
+            state(&l2),
+            before,
+            "failed callback committed dirty eviction"
+        );
+        assert_eq!(
+            rejected_preview.unwrap().eviction(),
+            Some(L2Eviction {
+                line_id: 0,
+                valid_mask: 0b0011,
+                dirty_mask: 0b0011,
+                pending_mask: 0,
+            })
+        );
+
+        let clean = ev_read(&mut l2, 1, 0b0100);
+        assert_eq!(
+            clean.eviction,
+            Some(L2Eviction {
+                line_id: 0,
+                valid_mask: 0b0011,
+                dirty_mask: 0b0011,
+                pending_mask: 0,
+            })
+        );
+        assert_eq!(l2.dirty_residency(), L2DirtyResidency::default());
+        let fill = clean.fill.unwrap();
+        l2.complete_fill(fill).unwrap();
+        assert_eq!(resident_way(&l2, 1).mask, 0b0100);
+        assert_eq!(resident_way(&l2, 1).dirty_mask, 0);
+
+        ev(&mut l2, 1, 0b1000, L2OpClass::WriteAtomic);
+        assert_eq!(resident_way(&l2, 1).mask, 0b1100);
+        assert_eq!(resident_way(&l2, 1).dirty_mask, 0b1000);
+        let next = ev_read(&mut l2, 2, 0b0001);
+        assert_eq!(
+            next.eviction,
+            Some(L2Eviction {
+                line_id: 1,
+                valid_mask: 0b1100,
+                dirty_mask: 0b1000,
+                pending_mask: 0,
+            })
+        );
+    }
+
+    #[test]
+    fn write_superseding_pending_fill_stays_dirty_across_snapshot_and_stale_completion() {
+        let mut l2 = L2Model::new(cfg(128, 1, 1)).unwrap();
+        let token = ev_read(&mut l2, 0, 0b0001).fill.unwrap();
+        ev(&mut l2, 0, 0b0001, L2OpClass::WriteAtomic);
+        assert_eq!(resident_way(&l2, 0).dirty_mask, 0b0001);
+        assert_eq!(resident_way(&l2, 0).pending_mask, 0);
+
+        let snapshot = l2.try_snapshot().unwrap();
+        assert_eq!(
+            snapshot.dirty_residency(),
+            L2DirtyResidency {
+                lines: 1,
+                sectors: 1
+            }
+        );
+        assert_eq!(resident_way(&snapshot, 0).dirty_mask, 0b0001);
+
+        ev_read(&mut l2, 1, 0b0010);
+        assert_eq!(l2.complete_fill(token).unwrap(), L2FillCompletion::Stale);
+        assert_eq!(resident_way(&l2, 1).dirty_mask, 0);
+        assert_eq!(l2.dirty_residency(), L2DirtyResidency::default());
+    }
+
+    #[test]
     fn immediate_and_event_disciplines_cannot_mix() {
         let mut event = L2Model::new(cfg(1024, 2, 1)).unwrap();
         ev_read(&mut event, 0, 1);
@@ -2549,6 +2744,7 @@ mod tests {
         overfull.sets[0].push(Way {
             tag: 1,
             mask: 1,
+            dirty_mask: 0,
             pending_mask: 0,
             generation: None,
             recency: 0,

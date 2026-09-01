@@ -492,6 +492,26 @@ fn l2_counter_report(value: &L2Counters) -> L2CounterReport {
 pub struct DramCounterReport {
     pub read_sectors: u64,
     pub bandwidth_delayed_responses: u64,
+    #[serde(skip_serializing_if = "is_zero_u64")]
+    pub l2_evicted_lines: u64,
+    #[serde(skip_serializing_if = "is_zero_u64")]
+    pub l2_evicted_valid_sectors: u64,
+    #[serde(skip_serializing_if = "is_zero_u64")]
+    pub l2_evicted_pending_lines: u64,
+    #[serde(skip_serializing_if = "is_zero_u64")]
+    pub l2_evicted_pending_sectors: u64,
+    #[serde(skip_serializing_if = "is_zero_u64")]
+    pub l2_dirty_eviction_lines: u64,
+    #[serde(skip_serializing_if = "is_zero_u64")]
+    pub l2_dirty_evicted_sectors: u64,
+    #[serde(skip_serializing_if = "is_zero_u64")]
+    pub maximum_terminal_l2_dirty_lines: u64,
+    #[serde(skip_serializing_if = "is_zero_u64")]
+    pub maximum_terminal_l2_dirty_sectors: u64,
+}
+
+fn is_zero_u64(value: &u64) -> bool {
+    *value == 0
 }
 
 #[derive(Debug, Serialize)]
@@ -553,6 +573,14 @@ fn counters(
         dram: dram.map(|value| DramCounterReport {
             read_sectors: value.read_sectors,
             bandwidth_delayed_responses: value.bw_delayed_responses,
+            l2_evicted_lines: value.l2_evicted_lines,
+            l2_evicted_valid_sectors: value.l2_evicted_valid_sectors,
+            l2_evicted_pending_lines: value.l2_evicted_pending_lines,
+            l2_evicted_pending_sectors: value.l2_evicted_pending_sectors,
+            l2_dirty_eviction_lines: value.l2_dirty_eviction_lines,
+            l2_dirty_evicted_sectors: value.l2_dirty_evicted_sectors,
+            maximum_terminal_l2_dirty_lines: value.maximum_terminal_l2_dirty_lines,
+            maximum_terminal_l2_dirty_sectors: value.maximum_terminal_l2_dirty_sectors,
         }),
         unmodeled_tails: tail_report(tails),
     }

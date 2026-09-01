@@ -107,8 +107,8 @@ impl UnpricedBounds {
 use sim_arch::{ArchId, L2PendingReadSemantics};
 use sim_engine::{EngineError, EventQueue, TargetId};
 use sim_mem::{
-    L1Config, L2Counters, L2EventMaskPreview, L2FillToken, L2Model, L2PendingSectorKey, L2Source,
-    MemoryOrigin,
+    L1Config, L2Counters, L2DirtyResidency, L2EventMaskPreview, L2Eviction, L2FillToken, L2Model,
+    L2PendingSectorKey, L2Source, MemoryOrigin,
 };
 
 /// Per-actor pending due-times with the one choreography the driver
@@ -1175,6 +1175,7 @@ struct L2SystemCommit {
     origin_source_hits: [u64; 2],
     read_sectors: u64,
     origin_read_sectors: [u64; 2],
+    topology_stats: DramStats,
     dram_free_fp: Option<u128>,
     fill_ready: Option<u64>,
     atomic_completion_ready: Option<u64>,
@@ -1291,7 +1292,7 @@ pub struct DramOriginStats {
     pub bw_delayed_responses: u64,
 }
 
-/// Driver-side DRAM traffic observer.
+/// Driver-side DRAM traffic and timing-neutral lower-level topology observer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DramStats {
     /// Architecture provenance bound by the shared-L2 system. Unbound
@@ -1310,6 +1311,18 @@ pub struct DramStats {
     /// whichever reply-carrying request queues next — this counter
     /// localizes congestion in TIME, not to the causing warp.
     pub bw_delayed_responses: u64,
+    /// L2 replacement topology. Dirty entries are candidate writeback work,
+    /// not scheduled or completed DRAM transactions.
+    pub l2_evicted_lines: u64,
+    pub l2_evicted_valid_sectors: u64,
+    pub l2_evicted_pending_lines: u64,
+    pub l2_evicted_pending_sectors: u64,
+    pub l2_dirty_eviction_lines: u64,
+    pub l2_dirty_evicted_sectors: u64,
+    /// Maximum terminal dirty residency across the launches aggregated into
+    /// this observer. A gauge is never summed as traffic.
+    pub maximum_terminal_l2_dirty_lines: u64,
+    pub maximum_terminal_l2_dirty_sectors: u64,
     by_origin: [DramOriginStats; 2],
 }
 
@@ -1319,6 +1332,14 @@ impl Default for DramStats {
             arch: None,
             read_sectors: 0,
             bw_delayed_responses: 0,
+            l2_evicted_lines: 0,
+            l2_evicted_valid_sectors: 0,
+            l2_evicted_pending_lines: 0,
+            l2_evicted_pending_sectors: 0,
+            l2_dirty_eviction_lines: 0,
+            l2_dirty_evicted_sectors: 0,
+            maximum_terminal_l2_dirty_lines: 0,
+            maximum_terminal_l2_dirty_sectors: 0,
             by_origin: [DramOriginStats::default(); 2],
         }
     }
@@ -1338,6 +1359,57 @@ impl DramStats {
 
     pub fn origin(&self, origin: MemoryOrigin) -> DramOriginStats {
         self.by_origin[origin.index()]
+    }
+
+    fn with_l2_eviction(mut self, eviction: L2Eviction) -> Result<Self, SystemError> {
+        macro_rules! add {
+            ($field:ident, $value:expr, $name:literal) => {
+                self.$field = self
+                    .$field
+                    .checked_add($value)
+                    .ok_or(SystemError::CounterOverflow { counter: $name })?;
+            };
+        }
+        add!(l2_evicted_lines, 1, "L2 evicted lines");
+        add!(
+            l2_evicted_valid_sectors,
+            u64::from(eviction.valid_mask.count_ones()),
+            "L2 evicted valid sectors"
+        );
+        if eviction.pending_mask != 0 {
+            add!(l2_evicted_pending_lines, 1, "L2 evicted pending lines");
+            add!(
+                l2_evicted_pending_sectors,
+                u64::from(eviction.pending_mask.count_ones()),
+                "L2 evicted pending sectors"
+            );
+        }
+        if eviction.dirty_mask != 0 {
+            add!(l2_dirty_eviction_lines, 1, "L2 dirty eviction lines");
+            add!(
+                l2_dirty_evicted_sectors,
+                u64::from(eviction.dirty_mask.count_ones()),
+                "L2 dirty evicted sectors"
+            );
+        }
+        Ok(self)
+    }
+
+    fn with_terminal_l2_dirty_residency(
+        mut self,
+        residency: L2DirtyResidency,
+    ) -> Result<Self, SystemError> {
+        let lines = u64::try_from(residency.lines).map_err(|_| SystemError::CounterOverflow {
+            counter: "terminal L2 dirty resident lines",
+        })?;
+        let sectors =
+            u64::try_from(residency.sectors).map_err(|_| SystemError::CounterOverflow {
+                counter: "terminal L2 dirty resident sectors",
+            })?;
+        self.maximum_terminal_l2_dirty_lines = self.maximum_terminal_l2_dirty_lines.max(lines);
+        self.maximum_terminal_l2_dirty_sectors =
+            self.maximum_terminal_l2_dirty_sectors.max(sectors);
+        Ok(self)
     }
 
     /// Build a coherent synthetic observer from explicit origin lanes.
@@ -1365,6 +1437,14 @@ impl DramStats {
             arch: Some(arch),
             read_sectors,
             bw_delayed_responses,
+            l2_evicted_lines: 0,
+            l2_evicted_valid_sectors: 0,
+            l2_evicted_pending_lines: 0,
+            l2_evicted_pending_sectors: 0,
+            l2_dirty_eviction_lines: 0,
+            l2_dirty_evicted_sectors: 0,
+            maximum_terminal_l2_dirty_lines: 0,
+            maximum_terminal_l2_dirty_sectors: 0,
             by_origin: [global, local],
         })
     }
@@ -1448,6 +1528,24 @@ impl DramStats {
             .ok_or(SystemCounterError::Overflow {
                 counter: "DRAM bandwidth-delayed responses",
             })?;
+        macro_rules! add_topology {
+            ($field:ident, $name:literal) => {
+                self.$field
+                    .checked_add(other.$field)
+                    .ok_or(SystemCounterError::Overflow { counter: $name })?
+            };
+        }
+        let l2_evicted_lines = add_topology!(l2_evicted_lines, "L2 evicted lines");
+        let l2_evicted_valid_sectors =
+            add_topology!(l2_evicted_valid_sectors, "L2 evicted valid sectors");
+        let l2_evicted_pending_lines =
+            add_topology!(l2_evicted_pending_lines, "L2 evicted pending lines");
+        let l2_evicted_pending_sectors =
+            add_topology!(l2_evicted_pending_sectors, "L2 evicted pending sectors");
+        let l2_dirty_eviction_lines =
+            add_topology!(l2_dirty_eviction_lines, "L2 dirty eviction lines");
+        let l2_dirty_evicted_sectors =
+            add_topology!(l2_dirty_evicted_sectors, "L2 dirty evicted sectors");
         let mut by_origin = self.by_origin;
         for origin in MemoryOrigin::ALL {
             let origin_ix = origin.index();
@@ -1468,6 +1566,18 @@ impl DramStats {
             arch: self.arch,
             read_sectors,
             bw_delayed_responses,
+            l2_evicted_lines,
+            l2_evicted_valid_sectors,
+            l2_evicted_pending_lines,
+            l2_evicted_pending_sectors,
+            l2_dirty_eviction_lines,
+            l2_dirty_evicted_sectors,
+            maximum_terminal_l2_dirty_lines: self
+                .maximum_terminal_l2_dirty_lines
+                .max(other.maximum_terminal_l2_dirty_lines),
+            maximum_terminal_l2_dirty_sectors: self
+                .maximum_terminal_l2_dirty_sectors
+                .max(other.maximum_terminal_l2_dirty_sectors),
             by_origin,
         };
         self.validate_origin_partition()?;
@@ -1856,6 +1966,10 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates(
                                         counter: "DRAM origin read sectors",
                                     })?;
                             }
+                            let topology_stats = match preview.eviction() {
+                                Some(eviction) => dram_stats.with_l2_eviction(eviction)?,
+                                None => dram_stats,
+                            };
                             let service_preview = if fetch_sectors > 0 {
                                 let bytes = fetch_sectors.checked_mul(32).ok_or(
                                     SystemError::CounterOverflow {
@@ -1967,6 +2081,7 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates(
                                 origin_source_hits: next_origin_source_hits,
                                 read_sectors: next_read_sectors,
                                 origin_read_sectors: next_origin_read_sectors,
+                                topology_stats,
                                 dram_free_fp: service_preview.map(|(done, _)| done),
                                 fill_ready,
                                 atomic_completion_ready,
@@ -2100,6 +2215,17 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates(
                         dram_stats.by_origin[origin_ix].read_sectors =
                             commit.origin_read_sectors[origin_ix];
                     }
+                    dram_stats.l2_evicted_lines = commit.topology_stats.l2_evicted_lines;
+                    dram_stats.l2_evicted_valid_sectors =
+                        commit.topology_stats.l2_evicted_valid_sectors;
+                    dram_stats.l2_evicted_pending_lines =
+                        commit.topology_stats.l2_evicted_pending_lines;
+                    dram_stats.l2_evicted_pending_sectors =
+                        commit.topology_stats.l2_evicted_pending_sectors;
+                    dram_stats.l2_dirty_eviction_lines =
+                        commit.topology_stats.l2_dirty_eviction_lines;
+                    dram_stats.l2_dirty_evicted_sectors =
+                        commit.topology_stats.l2_dirty_evicted_sectors;
                     if let Some(done) = commit.dram_free_fp
                         && let Some(server) = &mut dram_server
                     {
@@ -2258,6 +2384,7 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates(
             performance.maximum_queue_depth,
         );
     }
+    dram_stats = dram_stats.with_terminal_l2_dirty_residency(staged_l2.dirty_residency())?;
     let result = SystemResult {
         arch,
         per_sm,
@@ -4957,6 +5084,61 @@ mod tests {
             1,
             "committed caller L2 does not contain the replayed store"
         );
+    }
+
+    #[test]
+    fn dirty_store_eviction_topology_is_timing_neutral_and_keeps_tails() {
+        let sched = schedule(vec![
+            (0, slot(cb(1), "STG.E")),
+            (16, slot(cb(1), "STG.E")),
+            (32, slot(cb(1), "EXIT")),
+        ]);
+        let blocks = vec![BlockReplay {
+            launch_index: 0,
+            warps: vec![WarpReplay {
+                async_copy_cohorts: None,
+                warp_slot: 0,
+                insts: vec![
+                    ReplayInst {
+                        pc: 0,
+                        kind: AccessKind::GlobalStore { off: 0, len: 1 },
+                    },
+                    ReplayInst {
+                        pc: 16,
+                        kind: AccessKind::GlobalStore { off: 1, len: 1 },
+                    },
+                    ReplayInst {
+                        pc: 32,
+                        kind: AccessKind::NonMemory,
+                    },
+                ],
+                sectors: vec![0, 4],
+            }],
+        }];
+        let mut l2 = single_way_l2_model();
+        let result = simulate_kernel_shared(
+            &BTreeMap::from([(0, blocks)]),
+            &sched,
+            &params(),
+            l1_config(),
+            &mut l2,
+            DramBw::Unmodeled { arch: ArchId::Sm86 },
+        )
+        .unwrap();
+
+        assert_eq!(result.per_sm[&0].cycles, 3);
+        assert_eq!(result.l2_by_source.source(L2Source::Store), (2, 0));
+        assert_eq!(result.dram.read_sectors, 0);
+        assert_eq!(result.dram.l2_evicted_lines, 1);
+        assert_eq!(result.dram.l2_evicted_valid_sectors, 1);
+        assert_eq!(result.dram.l2_evicted_pending_lines, 0);
+        assert_eq!(result.dram.l2_evicted_pending_sectors, 0);
+        assert_eq!(result.dram.l2_dirty_eviction_lines, 1);
+        assert_eq!(result.dram.l2_dirty_evicted_sectors, 1);
+        assert_eq!(result.dram.maximum_terminal_l2_dirty_lines, 1);
+        assert_eq!(result.dram.maximum_terminal_l2_dirty_sectors, 1);
+        assert!(result.unmodeled_tails.dirty_writeback);
+        assert!(result.unmodeled_tails.coherence);
     }
 
     /// §6.4 split between counting and pricing: an ATOM to a fresh
