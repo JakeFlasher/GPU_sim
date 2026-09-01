@@ -34,9 +34,13 @@ callback/channel order, not a silicon issue cycle, source reply, destination
 service event, or completion time.
 
 Add optional protobuf instruction field tag 14. Default-disabled captures omit
-the field and retain predecessor protobuf bytes. Existing tags and meanings do
-not change. Producer records retain launch/CTA/SM/warp/function/VPC identity in
-their existing hierarchy; the new scalar joins that exact instruction.
+the field; existing tags and meanings do not change. Producer records retain
+launch/CTA/SM/warp/function/VPC identity in their existing hierarchy; the new
+scalar joins that exact instruction. Independent live captures are not required
+to have identical raw protobuf bytes because SM/warp placement and unconstrained
+poll-loop interleaving are capture observations. Compatibility is instead
+established by field absence, a retained legacy replay byte golden, and exact
+ordered-versus-tag-stripped replay normalization of the same capture.
 
 Within every admitted launch:
 
@@ -82,8 +86,9 @@ Before the campaign, run focused synthetic/unit checks:
 2. Two warps use forced A-before-B and B-before-A handshakes; token relations
    reverse exactly while each warp remains program-ordered.
 3. Multi-operand LDGSTS still emits one token, not one per MREF.
-4. Default-disabled capture of a retained one-warp probe keeps its protobuf
-   and replay byte-identical.
+4. Default-disabled capture of a retained one-warp probe emits zero tag-14
+   fields; a retained legacy replay remains byte-identical, and stripping tag
+   14 from an order-enabled capture leaves normalized replay output unchanged.
 5. Python and Rust wire preflights bound the new optional field and reject
    malformed type/range/cardinality cases before protobuf allocation.
 
