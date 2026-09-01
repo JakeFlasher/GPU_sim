@@ -1,0 +1,175 @@
+{
+  "schema_version": 1,
+  "benchmark_id": "sm86_l1_lookup_holdout_v1",
+  "matrix_role": "independent_holdout",
+  "status": "unopened_after_candidate_46936385",
+  "frozen_at_revision": "46936385",
+  "architecture": "sm_86",
+  "profile": "workloads/research_probes/sm86_ncu_demo_benchmark/host_profile.json",
+  "metric_schema": "workloads/research_probes/sm86_ncu_demo_benchmark/cache_calibration_metrics.json",
+  "accuracy_gate": "workloads/research_probes/sm86_ncu_demo_benchmark/accuracy_gate.json",
+  "correctness": {
+    "timeout_seconds": 180
+  },
+  "ncu": {
+    "tool": "/usr/local/cuda-13.2/nsight-compute-2026.1.0/ncu",
+    "replay_mode": "application",
+    "cache_control": "all",
+    "clock_control": "none",
+    "launch_skip": 1,
+    "launch_count": 1,
+    "repeats_smoke": 3,
+    "repeats_final": 7,
+    "timeout_seconds": 900,
+    "metrics": [
+      "gpc__cycles_elapsed.max",
+      "sm__cycles_active.max",
+      "gpu__time_duration.sum",
+      "smsp__inst_executed.sum",
+      "l1tex__t_sectors_pipe_lsu_mem_global_op_ld.sum",
+      "l1tex__t_sectors_pipe_lsu_mem_global_op_st.sum",
+      "l1tex__t_sectors_pipe_lsu_mem_global_op_ld_lookup_hit.sum",
+      "l1tex__t_sectors_pipe_lsu_mem_global_op_ld_lookup_miss.sum",
+      "l1tex__t_sectors_lookup_hit.sum",
+      "l1tex__t_sectors_lookup_miss.sum",
+      "lts__t_sectors_srcunit_tex_lookup_hit.sum",
+      "lts__t_sectors_srcunit_tex_lookup_miss.sum",
+      "dram__sectors_read.sum"
+    ]
+  },
+  "nvbit": {
+    "tracer": "tools/nvbit_tracer/tracer_tool/tracer_tool.so",
+    "runtime_manifest": "tools/nvbit_tracer/tracer_tool.nvbit-runtime-manifest.json",
+    "active_from_start": true,
+    "dynamic_kernel_limit_start": 0,
+    "dynamic_kernel_limit_end": 1,
+    "timeout_seconds": 900
+  },
+  "static_control": {
+    "toolkit_bindir": "/usr/local/cuda-13.2/bin",
+    "timeout_seconds": 300
+  },
+  "simulator": {
+    "binary": "sim/target/release/sim-run",
+    "mode": "l1-l2",
+    "cache_scope": "launch",
+    "arch_card": "arch_profiles/cards/sm_86.json",
+    "pchase_card": "data/pchase/sm_86_static_card.json",
+    "repeats_smoke": 3,
+    "repeats_final": 7,
+    "timeout_seconds": 900,
+    "multi_launch_policy": "not_admitted_holdout_rows_are_one_target_launch_each"
+  },
+  "workloads": [
+    {
+      "id": "gemm_hmma_fp16_sm80_m320_holdout",
+      "display_name": "FP16 HMMA GEMM M320 L1 holdout",
+      "functional_analogue": "unopened extrapolated dense FP16 matrix kernel shape",
+      "stage": "full",
+      "runner_slug": "gemm_hmma_fp16_sm80",
+      "binary": "workloads/portable_lcd/gemm_hmma_fp16_sm80/gemm_hmma_fp16_sm80_run",
+      "binary_sha256": "829927c7f57d7c46f0a8e51c7de6bb8c7eb7d8de1e963a33e5e9afee7839a750",
+      "binary_size_bytes": 113792,
+      "source": "workloads/portable_lcd/gemm_hmma_fp16_sm80/main.cu",
+      "timing_shape": {
+        "m": 320,
+        "n": 320,
+        "k": 320
+      },
+      "timing_overrides": [
+        "--m",
+        "320",
+        "--n",
+        "320",
+        "--k",
+        "320"
+      ],
+      "target_launch_count": 1,
+      "correctness_args": [
+        "--correctness_shape",
+        "--seed",
+        "42",
+        "--warmup",
+        "1",
+        "--reps",
+        "1",
+        "--output_dir",
+        "{output}"
+      ],
+      "ncu_args": [
+        "--timing_shape",
+        "--warmup",
+        "1",
+        "--reps",
+        "1",
+        "--m",
+        "320",
+        "--n",
+        "320",
+        "--k",
+        "320"
+      ],
+      "trace_args": [
+        "--timing_shape",
+        "--warmup",
+        "0",
+        "--reps",
+        "1",
+        "--m",
+        "320",
+        "--n",
+        "320",
+        "--k",
+        "320"
+      ]
+    },
+    {
+      "id": "swiglu_fwd_bf16_sm80_n131072_holdout",
+      "display_name": "BF16 SwiGLU N131072 L1 holdout",
+      "functional_analogue": "unopened reduced elementwise activation kernel shape",
+      "stage": "full",
+      "runner_slug": "swiglu_fwd_bf16_sm80",
+      "binary": "workloads/portable_lcd/swiglu_fwd_bf16_sm80/swiglu_fwd_bf16_sm80_run",
+      "binary_sha256": "a9deef77dc5c117e904770ac2f815ba5b87d9273071184a0490301797e4128d8",
+      "binary_size_bytes": 97712,
+      "source": "workloads/portable_lcd/swiglu_fwd_bf16_sm80/main.cu",
+      "timing_shape": {
+        "elements": 131072
+      },
+      "timing_overrides": [
+        "--n",
+        "131072"
+      ],
+      "target_launch_count": 1,
+      "correctness_args": [
+        "--correctness_shape",
+        "--seed",
+        "42",
+        "--warmup",
+        "1",
+        "--reps",
+        "1",
+        "--output_dir",
+        "{output}"
+      ],
+      "ncu_args": [
+        "--timing_shape",
+        "--warmup",
+        "1",
+        "--reps",
+        "1",
+        "--n",
+        "131072"
+      ],
+      "trace_args": [
+        "--timing_shape",
+        "--warmup",
+        "0",
+        "--reps",
+        "1",
+        "--n",
+        "131072"
+      ]
+    }
+  ]
+}
