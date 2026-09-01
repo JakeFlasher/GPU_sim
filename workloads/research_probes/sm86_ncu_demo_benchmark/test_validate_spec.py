@@ -1,0 +1,42 @@
+#!/usr/bin/env python3
+
+from __future__ import annotations
+
+import copy
+import json
+import sys
+import unittest
+from pathlib import Path
+
+
+HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE))
+
+import validate_spec as subject  # noqa: E402
+
+
+class BenchmarkSpecTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.spec = json.loads((HERE / "benchmark_spec.json").read_text())
+        cls.metrics = json.loads((HERE / "metric_schema.json").read_text())
+        cls.profile = json.loads((HERE / "host_profile.json").read_text())
+
+    def test_frozen_spec_is_valid(self) -> None:
+        subject.validate_spec(self.spec, self.metrics, self.profile)
+
+    def test_duplicate_workload_is_rejected(self) -> None:
+        mutated = copy.deepcopy(self.spec)
+        mutated["workloads"][1]["id"] = mutated["workloads"][0]["id"]
+        with self.assertRaisesRegex(subject.ValidationError, "workload ids must be unique"):
+            subject.validate_spec(mutated, self.metrics, self.profile)
+
+    def test_ncu_metric_order_drift_is_rejected(self) -> None:
+        mutated = copy.deepcopy(self.spec)
+        mutated["ncu"]["metrics"].reverse()
+        with self.assertRaisesRegex(subject.ValidationError, "metric order differs"):
+            subject.validate_spec(mutated, self.metrics, self.profile)
+
+
+if __name__ == "__main__":
+    unittest.main()
