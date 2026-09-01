@@ -172,6 +172,8 @@ def _candidate_row(
         "raw_terminal_cycles": raw_terminal,
         "projected_issue_cycles": projected_issue,
         "projected_terminal_cycles": projected_terminal,
+        "raw_issue_frontier_mape_pct": _ape(raw_issue, ncu_issue),
+        "raw_terminal_lower_bound_mape_pct": _ape(raw_terminal, ncu_terminal),
         "issue_cycle_mape_pct": _ape(projected_issue, ncu_issue),
         "terminal_cycle_mape_pct": _ape(projected_terminal, ncu_terminal),
         "runtime_equivalent_mape_pct": _ape(simulator_runtime, ncu_runtime),
@@ -210,7 +212,7 @@ def _candidate_aggregate(rows: Sequence[Mapping[str, Any]]) -> dict[str, float]:
 
 def _attach_row_transitions(
     baseline: Mapping[str, Any], candidate: dict[str, Any]
-) -> list[dict[str, Any]]:
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     baseline_cache = _mean(
         [
             float(baseline["metrics"][metric_id]["pair_normalized_absolute_error_pct"])
@@ -260,7 +262,7 @@ def _attach_row_transitions(
         for name, baseline_value, candidate_value in comparisons
     }
     candidate["metric_transitions"] = transitions
-    return [
+    projected_regressions = [
         {
             "workload_id": candidate["workload_id"],
             "metric": name,
@@ -269,6 +271,38 @@ def _attach_row_transitions(
         for name, transition in transitions.items()
         if not transition["numerically_non_regressed"]
     ]
+    raw_comparisons = (
+        (
+            "raw_issue_frontier_mape_pct",
+            float(baseline["accuracy"]["raw_issue_frontier_mape_pct"]),
+            float(candidate["raw_issue_frontier_mape_pct"]),
+        ),
+        (
+            "raw_terminal_lower_bound_mape_pct",
+            float(baseline["accuracy"]["raw_terminal_lower_bound_mape_pct"]),
+            float(candidate["raw_terminal_lower_bound_mape_pct"]),
+        ),
+    )
+    raw_transitions = {
+        name: {
+            "baseline": baseline_value,
+            "candidate": candidate_value,
+            "delta": candidate_value - baseline_value,
+            "numerically_non_regressed": candidate_value <= baseline_value + 1e-12,
+        }
+        for name, baseline_value, candidate_value in raw_comparisons
+    }
+    candidate["raw_frontier_transitions"] = raw_transitions
+    raw_regressions = [
+        {
+            "workload_id": candidate["workload_id"],
+            "metric": name,
+            **transition,
+        }
+        for name, transition in raw_transitions.items()
+        if not transition["numerically_non_regressed"]
+    ]
+    return projected_regressions, raw_regressions
 
 
 def _render(report: Mapping[str, Any]) -> str:
@@ -302,6 +336,8 @@ def _render(report: Mapping[str, Any]) -> str:
         [
             "",
             "## Row-level tradeoffs",
+            "",
+            f"Universal raw-frontier non-regression: **{'yes' if report['strict_all_raw_frontiers_numerically_non_regressed'] else 'no'}** ({len(report['raw_frontier_numeric_regressions'])} regressed raw issue/terminal cells). Raw frontiers are simulator evidence before the observation crosswalk.",
             "",
             f"Universal per-cell numeric non-regression: **{'yes' if report['strict_all_row_metrics_numerically_non_regressed'] else 'no'}** ({len(regressions)} regressed workload/metric cells). The approved contract is aggregate-level; these cells are retained for manual review.",
             "",
@@ -388,13 +424,14 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         commands.append(command)
 
     baseline_rows = {str(row["workload_id"]): row for row in baseline["rows"]}
-    row_level_regressions = [
-        regression
-        for row in rows
-        for regression in _attach_row_transitions(
+    row_level_regressions: list[dict[str, Any]] = []
+    raw_frontier_regressions: list[dict[str, Any]] = []
+    for row in rows:
+        projected, raw = _attach_row_transitions(
             baseline_rows[str(row["workload_id"])], row
         )
-    ]
+        row_level_regressions.extend(projected)
+        raw_frontier_regressions.extend(raw)
 
     baseline_aggregate = _baseline_aggregate(baseline)
     candidate_aggregate = _candidate_aggregate(rows)
@@ -438,6 +475,8 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         ),
         "strict_all_row_metrics_numerically_non_regressed": not row_level_regressions,
         "row_level_numeric_regressions": row_level_regressions,
+        "strict_all_raw_frontiers_numerically_non_regressed": not raw_frontier_regressions,
+        "raw_frontier_numeric_regressions": raw_frontier_regressions,
         "non_regression_contract": {
             "level": "aggregate",
             "row_level_tradeoffs_reported": True,
