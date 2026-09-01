@@ -3177,6 +3177,7 @@ mod tests {
         IssueModelParams {
             arch: ArchId::Sm86,
             resource_source: IssueResourceSource::SyntheticTestFixture,
+            instruction_front_end: None,
             l1_hit_latency: 34,
             l1_miss_latency: 244,
             global_flat_latency: 423,

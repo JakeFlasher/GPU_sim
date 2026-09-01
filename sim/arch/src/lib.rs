@@ -162,6 +162,40 @@ impl ArchId {
         }
     }
 
+    /// Instruction front-end structure reported for Ampere by Huerta et al.
+    /// (MICRO 2025) and instantiated by their released RTX 3090 model. The
+    /// lower-level cold-fill latency remains supplied by the active, SKU-bound
+    /// architecture card; this capability fixes only the SM-local hierarchy,
+    /// transport, prefetch, and fetch/decode structure.
+    pub const fn instruction_front_end(self) -> Capability<InstructionFrontEnd> {
+        match self {
+            Self::Sm86 => Capability::available(
+                Self::Sm86,
+                InstructionFrontEnd {
+                    line_bytes: 128,
+                    l0_sets: 8,
+                    l0_ways: 32,
+                    l1_sets: 64,
+                    l1_ways: 16,
+                    l0_to_l1_cycles: 39,
+                    l1_to_l0_cycles: 39,
+                    l1_request_ports: 1,
+                    l1_reply_ports: 1,
+                    stream_buffer_lines: 8,
+                    stream_buffers_per_subcore: 1,
+                    prefetches_per_cycle: 1,
+                    instruction_buffer_entries: 3,
+                    fetch_decode_width: 1,
+                    fetch_to_issue_stages: 2,
+                },
+            ),
+            Self::Sm120 => Capability::research_gap(
+                Self::Sm120,
+                "sm_120 instruction-cache hierarchy, transport, and stream prefetch are not modeled",
+            ),
+        }
+    }
+
     /// Tensor-pipe initiation intervals for the exact matrix instructions
     /// admitted by the sm_86 control-sidecar corpus. These are GA10x-local:
     /// one Tensor Core belongs to each SM partition, and the instruction work
@@ -724,6 +758,28 @@ pub struct IssueHypotheses {
     pub max_resident_warps_per_sm: u32,
 }
 
+/// Per-SM instruction hierarchy and per-SMSP fetch structure. Cache capacities
+/// are `sets * ways * line_bytes`; all port counts and queue widths are
+/// explicit so another architecture cannot silently inherit Ampere geometry.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct InstructionFrontEnd {
+    pub line_bytes: u32,
+    pub l0_sets: u32,
+    pub l0_ways: u32,
+    pub l1_sets: u32,
+    pub l1_ways: u32,
+    pub l0_to_l1_cycles: u64,
+    pub l1_to_l0_cycles: u64,
+    pub l1_request_ports: u32,
+    pub l1_reply_ports: u32,
+    pub stream_buffer_lines: u32,
+    pub stream_buffers_per_subcore: u32,
+    pub prefetches_per_cycle: u32,
+    pub instruction_buffer_entries: u32,
+    pub fetch_decode_width: u32,
+    pub fetch_to_issue_stages: u64,
+}
+
 /// Per-SMSP initiation intervals for the sm_86 tensor instructions whose
 /// throughput is architecture-backed and whose SASS forms are classified by
 /// `sim-sm`. A separate named field keeps an unsupported matrix shape from
@@ -924,6 +980,16 @@ mod tests {
         ));
         assert!(matches!(
             ArchId::Sm120
+                .instruction_front_end()
+                .require("instruction_front_end"),
+            Err(CapabilityError::ResearchGap {
+                arch: ArchId::Sm120,
+                capability: "instruction_front_end",
+                reason,
+            }) if !reason.is_empty()
+        ));
+        assert!(matches!(
+            ArchId::Sm120
                 .tensor_issue_intervals()
                 .require("tensor_issue_intervals"),
             Err(CapabilityError::ResearchGap {
@@ -1016,6 +1082,33 @@ mod tests {
                 hmma_16816_f16_bf16: 16,
                 hmma_sparse_16832_f16_bf16: 16,
                 imma_16816_s8: 8,
+            }
+        );
+    }
+
+    #[test]
+    fn sm86_instruction_front_end_matches_the_released_rtx3090_model() {
+        assert_eq!(
+            ArchId::Sm86
+                .instruction_front_end()
+                .require("instruction_front_end")
+                .unwrap(),
+            InstructionFrontEnd {
+                line_bytes: 128,
+                l0_sets: 8,
+                l0_ways: 32,
+                l1_sets: 64,
+                l1_ways: 16,
+                l0_to_l1_cycles: 39,
+                l1_to_l0_cycles: 39,
+                l1_request_ports: 1,
+                l1_reply_ports: 1,
+                stream_buffer_lines: 8,
+                stream_buffers_per_subcore: 1,
+                prefetches_per_cycle: 1,
+                instruction_buffer_entries: 3,
+                fetch_decode_width: 1,
+                fetch_to_issue_stages: 2,
             }
         );
     }

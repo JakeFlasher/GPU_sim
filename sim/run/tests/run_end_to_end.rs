@@ -879,7 +879,7 @@ fn committed_v2_canary_is_deterministic_canonical_and_sealed() {
     );
     assert_eq!(
         result["diagnostics"]["per_launch"][0]["terminal_modeled_event_time"],
-        json!({"status": "modeled", "value": 54})
+        json!({"status": "modeled", "value": 557})
     );
     assert!(
         result["diagnostics"]

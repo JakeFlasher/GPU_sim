@@ -156,7 +156,7 @@ fn feedback_cli_serializes_the_timing_active_configuration_identity() {
     assert_eq!(report["memory_admission_feedback_candidate_id"], 7);
     assert_eq!(
         report["launches"][0]["timing"]["readiness"]["schema_version"],
-        10
+        23
     );
     assert_eq!(
         report["launches"][0]["timing"]["readiness"]["memory_admission_feedback"]["candidate"],

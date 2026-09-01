@@ -1735,7 +1735,7 @@ mod tests {
     #[test]
     fn private_v1_compatibility_composer_preserves_byte_golden() {
         const EXPECTED_GOLDEN_SHA256: &str =
-            "e251ce81602409221ce0736ce009babfd263e78e511b7ddf01546af3787c2ed8";
+            "616e5e04dc959874fe663e12a6868ed9a9344674689a01a02c4a82ceb6a30b70";
         let golden = include_str!("../tests/fixtures/addr_carry_canary_bundle/result.golden.json");
         assert_eq!(
             Sha256Digest::of(golden.as_bytes()).to_string(),

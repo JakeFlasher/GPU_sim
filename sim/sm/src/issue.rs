@@ -70,8 +70,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use serde::{Deserialize, Serialize};
 use sim_arch::card::{ArchCard, CalibError, RequiredIssueResources};
 use sim_arch::{
-    ArchId, CtaBarrierIssue, FixedL1TexWritebackPriority, LdgstsCompletionThroughput,
-    LdgstsDestinationWavefrontProjection, SharedBankProjection,
+    ArchId, CtaBarrierIssue, FixedL1TexWritebackPriority, InstructionFrontEnd,
+    LdgstsCompletionThroughput, LdgstsDestinationWavefrontProjection, SharedBankProjection,
 };
 use sim_mem::{
     AsyncCopyCompletion, CacheOpToken, EvAccess, EvAccessUnobserved, FillKey, L1AccessError,
@@ -253,6 +253,11 @@ pub struct IssueModelParams {
     /// Deployment architecture whose card and issue hypotheses produced these parameters.
     pub(crate) arch: ArchId,
     pub(crate) resource_source: IssueResourceSource,
+    /// Published SM-local instruction hierarchy and fetch/decode structure.
+    /// `None` exists only for synthetic unit fixtures that isolate another
+    /// issue mechanism; production constructors always bind an architecture
+    /// capability here.
+    pub(crate) instruction_front_end: Option<InstructionFrontEnd>,
     /// L1 hit data-ready latency (card `l1_hit_latency_cycles`, ceiled).
     pub(crate) l1_hit_latency: u64,
     /// End-to-end L1-miss/L2-HIT data-ready latency (card
@@ -423,6 +428,10 @@ impl IssueModelParams {
         Ok(Self {
             arch,
             resource_source: IssueResourceSource::ArchitectureDefaults,
+            instruction_front_end: Some(
+                arch.instruction_front_end()
+                    .require("instruction_front_end")?,
+            ),
             l1_hit_latency: checked_latency("l1_hit_cycles", l1_hit_cycles)?,
             l1_miss_latency: checked_latency("l2_hit_cycles", l2_hit_cycles)?,
             global_flat_latency: checked_latency("dram_cycles", dram_cycles)?,
@@ -466,6 +475,10 @@ impl IssueModelParams {
         Ok(Self {
             arch,
             resource_source: IssueResourceSource::Carded(resources),
+            instruction_front_end: Some(
+                arch.instruction_front_end()
+                    .require("instruction_front_end")?,
+            ),
             l1_hit_latency: checked_latency("l1_hit_cycles", latencies.l1_hit)?,
             l1_miss_latency: checked_latency("l2_hit_cycles", latencies.l2_hit)?,
             global_flat_latency: checked_latency("dram_cycles", latencies.dram)?,
@@ -488,6 +501,10 @@ impl IssueModelParams {
 
     pub const fn resource_source(&self) -> IssueResourceSource {
         self.resource_source
+    }
+
+    pub const fn instruction_front_end(&self) -> Option<InstructionFrontEnd> {
+        self.instruction_front_end
     }
 
     pub const fn l1_hit_latency(&self) -> u64 {
@@ -578,6 +595,104 @@ impl IssueModelParams {
         match self.resource_source {
             IssueResourceSource::ArchitectureDefaults => {
                 let hypotheses = self.arch.issue_hypotheses().require("issue_hypotheses")?;
+                let instruction_front_end = self
+                    .arch
+                    .instruction_front_end()
+                    .require("instruction_front_end")?;
+                let Some(got_front_end) = self.instruction_front_end else {
+                    return Err(IssueError::ArchitectureDefaultMismatch {
+                        arch: self.arch,
+                        field: "instruction_front_end_present",
+                        expected: 1,
+                        got: 0,
+                    });
+                };
+                for (field, expected, got) in [
+                    (
+                        "instruction_front_end.line_bytes",
+                        u64::from(instruction_front_end.line_bytes),
+                        u64::from(got_front_end.line_bytes),
+                    ),
+                    (
+                        "instruction_front_end.l0_sets",
+                        u64::from(instruction_front_end.l0_sets),
+                        u64::from(got_front_end.l0_sets),
+                    ),
+                    (
+                        "instruction_front_end.l0_ways",
+                        u64::from(instruction_front_end.l0_ways),
+                        u64::from(got_front_end.l0_ways),
+                    ),
+                    (
+                        "instruction_front_end.l1_sets",
+                        u64::from(instruction_front_end.l1_sets),
+                        u64::from(got_front_end.l1_sets),
+                    ),
+                    (
+                        "instruction_front_end.l1_ways",
+                        u64::from(instruction_front_end.l1_ways),
+                        u64::from(got_front_end.l1_ways),
+                    ),
+                    (
+                        "instruction_front_end.l0_to_l1_cycles",
+                        instruction_front_end.l0_to_l1_cycles,
+                        got_front_end.l0_to_l1_cycles,
+                    ),
+                    (
+                        "instruction_front_end.l1_to_l0_cycles",
+                        instruction_front_end.l1_to_l0_cycles,
+                        got_front_end.l1_to_l0_cycles,
+                    ),
+                    (
+                        "instruction_front_end.l1_request_ports",
+                        u64::from(instruction_front_end.l1_request_ports),
+                        u64::from(got_front_end.l1_request_ports),
+                    ),
+                    (
+                        "instruction_front_end.l1_reply_ports",
+                        u64::from(instruction_front_end.l1_reply_ports),
+                        u64::from(got_front_end.l1_reply_ports),
+                    ),
+                    (
+                        "instruction_front_end.stream_buffer_lines",
+                        u64::from(instruction_front_end.stream_buffer_lines),
+                        u64::from(got_front_end.stream_buffer_lines),
+                    ),
+                    (
+                        "instruction_front_end.stream_buffers_per_subcore",
+                        u64::from(instruction_front_end.stream_buffers_per_subcore),
+                        u64::from(got_front_end.stream_buffers_per_subcore),
+                    ),
+                    (
+                        "instruction_front_end.prefetches_per_cycle",
+                        u64::from(instruction_front_end.prefetches_per_cycle),
+                        u64::from(got_front_end.prefetches_per_cycle),
+                    ),
+                    (
+                        "instruction_front_end.instruction_buffer_entries",
+                        u64::from(instruction_front_end.instruction_buffer_entries),
+                        u64::from(got_front_end.instruction_buffer_entries),
+                    ),
+                    (
+                        "instruction_front_end.fetch_decode_width",
+                        u64::from(instruction_front_end.fetch_decode_width),
+                        u64::from(got_front_end.fetch_decode_width),
+                    ),
+                    (
+                        "instruction_front_end.fetch_to_issue_stages",
+                        instruction_front_end.fetch_to_issue_stages,
+                        got_front_end.fetch_to_issue_stages,
+                    ),
+                ] {
+                    if got != expected {
+                        return Err(IssueError::ArchitectureDefaultMismatch {
+                            arch: self.arch,
+                            field,
+                            expected,
+                            got,
+                        });
+                    }
+                }
                 let shared_additional_wavefront_latency =
                     shared_additional_wavefront_latency(self.arch)?;
                 let ldgsts_l1_mshr_floor = ldgsts_l1_mshr_floor(self.arch)?;
@@ -1100,6 +1215,31 @@ pub enum IssueError {
 
     #[error("issue capability unavailable: {0}")]
     Capability(#[from] sim_arch::CapabilityError),
+    #[error(
+        "instruction front-end component {component} has invalid {field}={value}; the value must be positive and representable"
+    )]
+    InstructionFrontEndGeometryInvalid {
+        component: &'static str,
+        field: &'static str,
+        value: u64,
+    },
+    #[error("instruction front-end width {field}={value} is not implemented (only one is modeled)")]
+    InstructionFrontEndWidthUnsupported { field: &'static str, value: u32 },
+    #[error("instruction stream order changed: expected function/line {expected:?}, got {got:?}")]
+    InstructionStreamOrder {
+        expected: Option<(i32, u64)>,
+        got: (i32, u64),
+    },
+    #[error("warp {warp} instruction buffer is missing dynamic instruction {instruction} at issue")]
+    InstructionBufferMissing { warp: usize, instruction: usize },
+    #[error(
+        "warp {warp} instruction buffer order changed: expected dynamic instruction {expected}, got {got}"
+    )]
+    InstructionBufferOrder {
+        warp: usize,
+        expected: usize,
+        got: usize,
+    },
     #[error("L1 access failed: {0}")]
     L1Access(#[from] L1AccessError),
     #[error("L1 configuration is invalid: {0}")]
@@ -1304,6 +1444,8 @@ const fn is_false(value: &bool) -> bool {
 /// it.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
 pub struct ReadinessCauseCycles {
+    #[serde(skip_serializing_if = "is_zero_u64")]
+    pub instruction_front_end: u64,
     pub control_stall: u64,
     pub dependence_counter_read: u64,
     #[serde(skip_serializing_if = "is_zero_u64")]
@@ -1346,6 +1488,7 @@ impl ReadinessCauseCycles {
                 )?;
             };
         }
+        add!(instruction_front_end);
         add!(control_stall);
         add!(dependence_counter_read);
         add!(dependence_counter_global_load_operand_read);
@@ -4238,6 +4381,59 @@ impl ResultWritebackDiagnostics {
     }
 }
 
+/// Executed instruction-front-end observations for one SM. Demand counters
+/// describe dynamic instruction fetches; L1 counters describe line requests
+/// after private-L0/stream-buffer filtering. Prefetch counters are kept
+/// separate so demand accuracy cannot be inferred from a collapsed total.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
+pub struct InstructionFrontEndDiagnostics {
+    pub instructions_fetched: u64,
+    pub demand_l0_hits: u64,
+    pub demand_stream_buffer_hits: u64,
+    pub demand_l0_misses: u64,
+    pub demand_l1_hits: u64,
+    pub demand_l1_misses: u64,
+    pub prefetch_requests: u64,
+    pub prefetch_l1_hits: u64,
+    pub prefetch_l1_misses: u64,
+    pub stream_restarts: u64,
+    pub maximum_fetch_latency_cycles: u64,
+}
+
+impl InstructionFrontEndDiagnostics {
+    pub const fn is_empty(&self) -> bool {
+        self.instructions_fetched == 0
+    }
+
+    fn add_checked(&mut self, addend: &Self) -> Result<(), ReadinessCounterError> {
+        let mut next = *self;
+        macro_rules! add {
+            ($field:ident) => {
+                next.$field = checked_readiness_add(
+                    concat!("readiness.instruction_front_end.", stringify!($field)),
+                    next.$field,
+                    addend.$field,
+                )?;
+            };
+        }
+        add!(instructions_fetched);
+        add!(demand_l0_hits);
+        add!(demand_stream_buffer_hits);
+        add!(demand_l0_misses);
+        add!(demand_l1_hits);
+        add!(demand_l1_misses);
+        add!(prefetch_requests);
+        add!(prefetch_l1_hits);
+        add!(prefetch_l1_misses);
+        add!(stream_restarts);
+        next.maximum_fetch_latency_cycles = next
+            .maximum_fetch_latency_cycles
+            .max(addend.maximum_fetch_latency_cycles);
+        *self = next;
+        Ok(())
+    }
+}
+
 /// Deterministic causal readiness summary for one SM replay.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 pub struct ReadinessDiagnostics {
@@ -4245,6 +4441,8 @@ pub struct ReadinessDiagnostics {
     pub constraint_exposure_cycles: ReadinessCauseCycles,
     pub delayed_ready_issues: u64,
     pub tied_limiting_causes: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub instruction_front_end: Option<Box<InstructionFrontEndDiagnostics>>,
     pub async_groups: AsyncReadinessDiagnostics,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub async_instrumentation_order: Option<Box<AsyncInstrumentationOrderDiagnostics>>,
@@ -4292,6 +4490,13 @@ impl ReadinessDiagnostics {
             next.tied_limiting_causes,
             addend.tied_limiting_causes,
         )?;
+        if let Some(addend_front_end) = addend.instruction_front_end.as_deref() {
+            if let Some(current) = next.instruction_front_end.as_deref_mut() {
+                current.add_checked(addend_front_end)?;
+            } else {
+                next.instruction_front_end = Some(Box::new(*addend_front_end));
+            }
+        }
         next.async_groups.add_checked(&addend.async_groups)?;
         if let Some(addend_order) = addend.async_instrumentation_order.as_deref() {
             if let Some(current) = next.async_instrumentation_order.as_deref_mut() {
@@ -4388,10 +4593,14 @@ impl ReadinessDiagnostics {
     /// population observations. Schema 21 adds a timing-free reconstruction of
     /// selected async issue, commit, and wait events in callback/channel order.
     /// Schema 22 makes the existing opt-in STORE/RED write-completion frontier
-    /// a drained shared-system event and reports its exact lifecycle.
+    /// a drained shared-system event and reports its exact lifecycle. Schema 23
+    /// adds the active private-L0/shared-L1 instruction hierarchy, stream-buffer
+    /// prefetcher, and three-entry per-warp instruction buffers.
     pub fn schema_version(&self) -> u32 {
         let feedback = self.memory_admission_feedback.as_deref();
-        if self.memory_write_ack.is_some() {
+        if self.instruction_front_end.is_some() {
+            23
+        } else if self.memory_write_ack.is_some() {
             22
         } else if self.async_instrumentation_order.is_some() {
             21
@@ -4867,6 +5076,494 @@ pub enum Advance {
 const SUB_CORES: usize = 4;
 const DEP_BARRIERS: usize = 6;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+struct InstructionLineKey {
+    function_unique_id: i32,
+    line: u64,
+}
+
+impl InstructionLineKey {
+    fn following(self) -> Option<Self> {
+        Some(Self {
+            function_unique_id: self.function_unique_id,
+            line: self.line.checked_add(1)?,
+        })
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct InstructionCacheEntry {
+    key: InstructionLineKey,
+    ready_at: u64,
+    last_access: u64,
+}
+
+/// Small deterministic set-associative tag store for the instruction path.
+/// A pending line remains a tag hit with its future fill timestamp, matching
+/// the merge behavior needed when many warps execute one code region.
+#[derive(Debug)]
+struct SetAssociativeInstructionCache {
+    sets: Vec<Vec<InstructionCacheEntry>>,
+    ways: usize,
+    access_sequence: u64,
+}
+
+impl SetAssociativeInstructionCache {
+    fn new(component: &'static str, set_count: u32, ways: u32) -> Result<Self, IssueError> {
+        if set_count == 0 {
+            return Err(IssueError::InstructionFrontEndGeometryInvalid {
+                component,
+                field: "sets",
+                value: u64::from(set_count),
+            });
+        }
+        if ways == 0 {
+            return Err(IssueError::InstructionFrontEndGeometryInvalid {
+                component,
+                field: "ways",
+                value: u64::from(ways),
+            });
+        }
+        let set_count = usize::try_from(set_count).map_err(|_| {
+            IssueError::InstructionFrontEndGeometryInvalid {
+                component,
+                field: "sets",
+                value: u64::from(set_count),
+            }
+        })?;
+        let ways =
+            usize::try_from(ways).map_err(|_| IssueError::InstructionFrontEndGeometryInvalid {
+                component,
+                field: "ways",
+                value: u64::from(ways),
+            })?;
+        Ok(Self {
+            sets: (0..set_count).map(|_| Vec::with_capacity(ways)).collect(),
+            ways,
+            access_sequence: 0,
+        })
+    }
+
+    fn set_index(&self, key: InstructionLineKey) -> usize {
+        let function = u64::from(key.function_unique_id.unsigned_abs());
+        usize::try_from((key.line ^ function.rotate_left(17)) % self.sets.len() as u64)
+            .expect("modulo by usize-sized set count fits usize")
+    }
+
+    fn next_access_sequence(&mut self) -> Result<u64, IssueError> {
+        let sequence = self.access_sequence;
+        self.access_sequence =
+            self.access_sequence
+                .checked_add(1)
+                .ok_or(IssueError::CounterOverflow {
+                    counter: "instruction-cache access sequence",
+                })?;
+        Ok(sequence)
+    }
+
+    fn probe(&mut self, key: InstructionLineKey) -> Result<Option<u64>, IssueError> {
+        let sequence = self.next_access_sequence()?;
+        let set = self.set_index(key);
+        let Some(entry) = self.sets[set].iter_mut().find(|entry| entry.key == key) else {
+            return Ok(None);
+        };
+        entry.last_access = sequence;
+        Ok(Some(entry.ready_at))
+    }
+
+    fn reserve(&mut self, key: InstructionLineKey, ready_at: u64) -> Result<(), IssueError> {
+        let sequence = self.next_access_sequence()?;
+        let set = self.set_index(key);
+        if let Some(entry) = self.sets[set].iter_mut().find(|entry| entry.key == key) {
+            entry.ready_at = entry.ready_at.min(ready_at);
+            entry.last_access = sequence;
+            return Ok(());
+        }
+        let entries = &mut self.sets[set];
+        if entries.len() == self.ways {
+            let victim = entries
+                .iter()
+                .enumerate()
+                .min_by_key(|(index, entry)| (entry.last_access, *index))
+                .map(|(index, _)| index)
+                .ok_or(IssueError::InstructionFrontEndGeometryInvalid {
+                    component: "instruction_cache",
+                    field: "full-set victim cardinality",
+                    value: 0,
+                })?;
+            entries.swap_remove(victim);
+        }
+        entries.push(InstructionCacheEntry {
+            key,
+            ready_at,
+            last_access: sequence,
+        });
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct StreamBufferLine {
+    key: InstructionLineKey,
+    ready_at: u64,
+    demanded: bool,
+}
+
+#[derive(Debug, Default)]
+struct InstructionStreamBuffer {
+    lines: VecDeque<StreamBufferLine>,
+    next_line: Option<InstructionLineKey>,
+}
+
+impl InstructionStreamBuffer {
+    fn maintain(&mut self, now: u64) {
+        if self
+            .lines
+            .front()
+            .is_some_and(|line| line.demanded && line.ready_at <= now)
+        {
+            self.lines.pop_front();
+        }
+    }
+
+    fn demand(&mut self, key: InstructionLineKey) -> Option<u64> {
+        let line = self.lines.front_mut()?;
+        if line.key != key {
+            return None;
+        }
+        line.demanded = true;
+        Some(line.ready_at)
+    }
+
+    fn can_restart(&self) -> bool {
+        self.lines.front().is_none_or(|line| !line.demanded)
+    }
+
+    fn restart_after(&mut self, key: InstructionLineKey) {
+        if !self.can_restart() {
+            return;
+        }
+        self.lines.clear();
+        self.next_line = key.following();
+    }
+
+    fn can_prefetch(&self, capacity: usize) -> bool {
+        self.next_line.is_some() && self.lines.len() < capacity
+    }
+
+    fn next_prefetch(&self) -> Option<InstructionLineKey> {
+        self.next_line
+    }
+
+    fn push_prefetch(&mut self, key: InstructionLineKey, ready_at: u64) -> Result<(), IssueError> {
+        if self.next_line != Some(key) {
+            return Err(IssueError::InstructionStreamOrder {
+                expected: self
+                    .next_line
+                    .map(|line| (line.function_unique_id, line.line)),
+                got: (key.function_unique_id, key.line),
+            });
+        }
+        self.lines.push_back(StreamBufferLine {
+            key,
+            ready_at,
+            demanded: false,
+        });
+        self.next_line = key.following();
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+enum InstructionL1RequestKind {
+    Demand,
+    Prefetch,
+}
+
+/// One SM's active instruction hierarchy. Lower-level cold fills use the
+/// independently carded dependent-DRAM latency; L0/L1 geometry and transport
+/// come from the architecture capability above.
+#[derive(Debug)]
+struct InstructionFrontEndState {
+    config: InstructionFrontEnd,
+    l0: [SetAssociativeInstructionCache; SUB_CORES],
+    l1: SetAssociativeInstructionCache,
+    streams: [InstructionStreamBuffer; SUB_CORES],
+    l1_request_ready: u64,
+    l1_reply_ready: u64,
+    l0_response_ready: [u64; SUB_CORES],
+    prefetch_priority: usize,
+    cold_fill_latency: u64,
+    diagnostics: InstructionFrontEndDiagnostics,
+}
+
+impl InstructionFrontEndState {
+    fn new(config: InstructionFrontEnd, cold_fill_latency: u64) -> Result<Self, IssueError> {
+        for (field, value) in [
+            ("line_bytes", u64::from(config.line_bytes)),
+            ("l0_to_l1_cycles", config.l0_to_l1_cycles),
+            ("l1_to_l0_cycles", config.l1_to_l0_cycles),
+            ("l1_request_ports", u64::from(config.l1_request_ports)),
+            ("l1_reply_ports", u64::from(config.l1_reply_ports)),
+            ("stream_buffer_lines", u64::from(config.stream_buffer_lines)),
+            (
+                "stream_buffers_per_subcore",
+                u64::from(config.stream_buffers_per_subcore),
+            ),
+            (
+                "prefetches_per_cycle",
+                u64::from(config.prefetches_per_cycle),
+            ),
+            (
+                "instruction_buffer_entries",
+                u64::from(config.instruction_buffer_entries),
+            ),
+            ("fetch_decode_width", u64::from(config.fetch_decode_width)),
+            ("fetch_to_issue_stages", config.fetch_to_issue_stages),
+            ("cold_fill_latency", cold_fill_latency),
+        ] {
+            if value == 0 {
+                return Err(IssueError::InstructionFrontEndGeometryInvalid {
+                    component: "instruction_front_end",
+                    field,
+                    value,
+                });
+            }
+        }
+        for (field, value) in [
+            ("l1_request_ports", config.l1_request_ports),
+            ("l1_reply_ports", config.l1_reply_ports),
+            (
+                "stream_buffers_per_subcore",
+                config.stream_buffers_per_subcore,
+            ),
+            ("prefetches_per_cycle", config.prefetches_per_cycle),
+            ("fetch_decode_width", config.fetch_decode_width),
+        ] {
+            if value != 1 {
+                return Err(IssueError::InstructionFrontEndWidthUnsupported { field, value });
+            }
+        }
+        let l0 = [
+            SetAssociativeInstructionCache::new("L0I", config.l0_sets, config.l0_ways)?,
+            SetAssociativeInstructionCache::new("L0I", config.l0_sets, config.l0_ways)?,
+            SetAssociativeInstructionCache::new("L0I", config.l0_sets, config.l0_ways)?,
+            SetAssociativeInstructionCache::new("L0I", config.l0_sets, config.l0_ways)?,
+        ];
+        Ok(Self {
+            config,
+            l0,
+            l1: SetAssociativeInstructionCache::new("L1I", config.l1_sets, config.l1_ways)?,
+            streams: std::array::from_fn(|_| InstructionStreamBuffer::default()),
+            l1_request_ready: 0,
+            l1_reply_ready: 0,
+            l0_response_ready: [0; SUB_CORES],
+            prefetch_priority: 0,
+            cold_fill_latency,
+            diagnostics: InstructionFrontEndDiagnostics::default(),
+        })
+    }
+
+    fn instruction_buffer_capacity(&self) -> Result<usize, IssueError> {
+        usize::try_from(self.config.instruction_buffer_entries).map_err(|_| {
+            IssueError::InstructionFrontEndGeometryInvalid {
+                component: "instruction_front_end",
+                field: "instruction_buffer_entries",
+                value: u64::from(self.config.instruction_buffer_entries),
+            }
+        })
+    }
+
+    fn line_key(&self, function_unique_id: i32, pc: u32) -> InstructionLineKey {
+        InstructionLineKey {
+            function_unique_id,
+            line: u64::from(pc) / u64::from(self.config.line_bytes),
+        }
+    }
+
+    fn access_l1(
+        &mut self,
+        key: InstructionLineKey,
+        now: u64,
+        kind: InstructionL1RequestKind,
+    ) -> Result<u64, IssueError> {
+        let request_depart = now.max(self.l1_request_ready);
+        self.l1_request_ready = checked_cycle_add(
+            "instruction L1 request-port availability",
+            request_depart,
+            1,
+        )?;
+        let request_arrival = checked_cycle_add(
+            "instruction L0-to-L1 transport",
+            request_depart,
+            self.config.l0_to_l1_cycles,
+        )?;
+        let line_ready = if let Some(ready_at) = self.l1.probe(key)? {
+            match kind {
+                InstructionL1RequestKind::Demand => {
+                    self.diagnostics.demand_l1_hits = checked_u64_counter_add(
+                        "instruction demand L1 hit",
+                        self.diagnostics.demand_l1_hits,
+                        1,
+                    )?;
+                }
+                InstructionL1RequestKind::Prefetch => {
+                    self.diagnostics.prefetch_l1_hits = checked_u64_counter_add(
+                        "instruction prefetch L1 hit",
+                        self.diagnostics.prefetch_l1_hits,
+                        1,
+                    )?;
+                }
+            }
+            request_arrival.max(ready_at)
+        } else {
+            match kind {
+                InstructionL1RequestKind::Demand => {
+                    self.diagnostics.demand_l1_misses = checked_u64_counter_add(
+                        "instruction demand L1 miss",
+                        self.diagnostics.demand_l1_misses,
+                        1,
+                    )?;
+                }
+                InstructionL1RequestKind::Prefetch => {
+                    self.diagnostics.prefetch_l1_misses = checked_u64_counter_add(
+                        "instruction prefetch L1 miss",
+                        self.diagnostics.prefetch_l1_misses,
+                        1,
+                    )?;
+                }
+            }
+            let ready_at = checked_cycle_add(
+                "instruction L1 cold fill",
+                request_arrival,
+                self.cold_fill_latency,
+            )?;
+            self.l1.reserve(key, ready_at)?;
+            ready_at
+        };
+        let reply_depart = line_ready.max(self.l1_reply_ready);
+        self.l1_reply_ready =
+            checked_cycle_add("instruction L1 reply-port availability", reply_depart, 1)?;
+        checked_cycle_add(
+            "instruction L1-to-L0 transport",
+            reply_depart,
+            self.config.l1_to_l0_cycles,
+        )
+    }
+
+    fn fetch_instruction(
+        &mut self,
+        subcore: usize,
+        function_unique_id: i32,
+        pc: u32,
+        now: u64,
+    ) -> Result<u64, IssueError> {
+        let key = self.line_key(function_unique_id, pc);
+        self.diagnostics.instructions_fetched = checked_u64_counter_add(
+            "instruction front-end fetch",
+            self.diagnostics.instructions_fetched,
+            1,
+        )?;
+        let line_ready = if let Some(ready_at) = self.l0[subcore].probe(key)? {
+            self.diagnostics.demand_l0_hits = checked_u64_counter_add(
+                "instruction demand L0 hit",
+                self.diagnostics.demand_l0_hits,
+                1,
+            )?;
+            ready_at
+        } else if let Some(ready_at) = self.streams[subcore].demand(key) {
+            self.diagnostics.demand_stream_buffer_hits = checked_u64_counter_add(
+                "instruction stream-buffer hit",
+                self.diagnostics.demand_stream_buffer_hits,
+                1,
+            )?;
+            self.l0[subcore].reserve(key, ready_at)?;
+            ready_at
+        } else {
+            self.diagnostics.demand_l0_misses = checked_u64_counter_add(
+                "instruction demand L0 miss",
+                self.diagnostics.demand_l0_misses,
+                1,
+            )?;
+            let ready_at = self.access_l1(key, now, InstructionL1RequestKind::Demand)?;
+            self.l0[subcore].reserve(key, ready_at)?;
+            if self.streams[subcore].can_restart() {
+                self.streams[subcore].restart_after(key);
+                self.diagnostics.stream_restarts = checked_u64_counter_add(
+                    "instruction stream restart",
+                    self.diagnostics.stream_restarts,
+                    1,
+                )?;
+            }
+            ready_at
+        };
+        let response_at = now.max(line_ready).max(self.l0_response_ready[subcore]);
+        self.l0_response_ready[subcore] =
+            checked_cycle_add("instruction L0 response-port availability", response_at, 1)?;
+        let ready_at = checked_cycle_add(
+            "instruction fetch-to-issue pipeline",
+            response_at,
+            self.config.fetch_to_issue_stages,
+        )?;
+        self.diagnostics.maximum_fetch_latency_cycles = self
+            .diagnostics
+            .maximum_fetch_latency_cycles
+            .max(ready_at.saturating_sub(now));
+        Ok(ready_at)
+    }
+
+    fn maintain(&mut self, now: u64) {
+        for stream in &mut self.streams {
+            stream.maintain(now);
+        }
+    }
+
+    fn has_prefetch_work(&self) -> bool {
+        let capacity = self.config.stream_buffer_lines as usize;
+        self.streams
+            .iter()
+            .any(|stream| stream.can_prefetch(capacity))
+    }
+
+    fn prefetch_cycle(&mut self, now: u64) -> Result<(), IssueError> {
+        let capacity = usize::try_from(self.config.stream_buffer_lines).map_err(|_| {
+            IssueError::InstructionFrontEndGeometryInvalid {
+                component: "instruction_front_end",
+                field: "stream_buffer_lines",
+                value: u64::from(self.config.stream_buffer_lines),
+            }
+        })?;
+        let selected = (0..SUB_CORES)
+            .map(|offset| (self.prefetch_priority + offset) % SUB_CORES)
+            .find(|&subcore| self.streams[subcore].can_prefetch(capacity));
+        let Some(subcore) = selected else {
+            return Ok(());
+        };
+        let key =
+            self.streams[subcore]
+                .next_prefetch()
+                .ok_or(IssueError::InstructionStreamOrder {
+                    expected: None,
+                    got: (0, 0),
+                })?;
+        self.diagnostics.prefetch_requests = checked_u64_counter_add(
+            "instruction prefetch request",
+            self.diagnostics.prefetch_requests,
+            1,
+        )?;
+        let ready_at = self.access_l1(key, now, InstructionL1RequestKind::Prefetch)?;
+        self.streams[subcore].push_prefetch(key, ready_at)?;
+        self.prefetch_priority = (subcore + 1) % SUB_CORES;
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct BufferedInstruction {
+    instruction: usize,
+    ready_at: u64,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ResultWritebackKind {
     FixedHadd2 { bank: u8 },
@@ -4940,6 +5637,7 @@ enum DependencyOrigin {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 enum ReadinessCause {
+    InstructionFrontEnd,
     DependenceCounterRead,
     DependenceCounterGlobalLoadOperandRead,
     DependenceCounterGlobalStoreOperandRead,
@@ -4986,6 +5684,10 @@ impl From<DependencyOrigin> for ReadinessCause {
 impl ReadinessCauseCycles {
     fn add_cause(&mut self, cause: ReadinessCause, delta: u64) -> Result<(), IssueError> {
         let (field, counter): (&'static str, &mut u64) = match cause {
+            ReadinessCause::InstructionFrontEnd => (
+                "instruction front-end readiness",
+                &mut self.instruction_front_end,
+            ),
             ReadinessCause::ControlStall => ("control stall readiness", &mut self.control_stall),
             ReadinessCause::DependenceCounterRead => (
                 "read-dependence counter readiness",
@@ -5417,6 +6119,10 @@ struct WarpState<'a> {
     sectors: &'a [i64],
     async_copy_cohorts: Option<&'a AsyncCopyCohortReplay>,
     next: usize,
+    /// Dynamic trace cursor already requested by the fetch scheduler and the
+    /// three-entry instruction buffer (including in-flight fetches).
+    front_end_fetch_cursor: usize,
+    instruction_buffer: VecDeque<BufferedInstruction>,
     next_slot: Option<&'a IssueSlot>,
     /// Issue/admission timestamp at which `next_slot` became the current
     /// instruction. Causal readiness delays are measured from this frontier.
@@ -5483,6 +6189,65 @@ struct BlockState {
 }
 
 impl WarpState<'_> {
+    fn can_fetch_instruction(&self, capacity: usize) -> bool {
+        !self.done
+            && self.front_end_fetch_cursor < self.insts.len()
+            && self.instruction_buffer.len() < capacity
+    }
+
+    fn instruction_front_end_ready_at(&self) -> Option<u64> {
+        let buffered = self.instruction_buffer.front()?;
+        (buffered.instruction == self.next).then_some(buffered.ready_at)
+    }
+
+    fn push_fetched_instruction(
+        &mut self,
+        warp: usize,
+        ready_at: u64,
+        capacity: usize,
+    ) -> Result<(), IssueError> {
+        if !self.can_fetch_instruction(capacity) {
+            return Err(IssueError::InstructionBufferMissing {
+                warp,
+                instruction: self.front_end_fetch_cursor,
+            });
+        }
+        let instruction = self.front_end_fetch_cursor;
+        self.instruction_buffer.push_back(BufferedInstruction {
+            instruction,
+            ready_at,
+        });
+        self.front_end_fetch_cursor = checked_usize_counter_add(
+            "instruction front-end fetch cursor",
+            self.front_end_fetch_cursor,
+            1,
+        )?;
+        Ok(())
+    }
+
+    fn preflight_buffered_issue(&self, warp: usize) -> Result<(), IssueError> {
+        let Some(buffered) = self.instruction_buffer.front() else {
+            return Err(IssueError::InstructionBufferMissing {
+                warp,
+                instruction: self.next,
+            });
+        };
+        if buffered.instruction != self.next {
+            return Err(IssueError::InstructionBufferOrder {
+                warp,
+                expected: self.next,
+                got: buffered.instruction,
+            });
+        }
+        Ok(())
+    }
+
+    fn consume_buffered_issue(&mut self, warp: usize) -> Result<(), IssueError> {
+        self.preflight_buffered_issue(warp)?;
+        self.instruction_buffer.pop_front();
+        Ok(())
+    }
+
     fn next_issue_retires(&self) -> Result<bool, IssueError> {
         let next = checked_usize_counter_add("warp instruction cursor", self.next, 1)?;
         Ok(next == self.insts.len())
@@ -7189,6 +7954,7 @@ pub(crate) struct SmCore<'a> {
     params: IssueModelParams,
     shared_memory_residency: SharedMemoryResidency,
     physical_warp_slots: u32,
+    instruction_front_end: Option<InstructionFrontEndState>,
     mem: MemModel,
     blocks: &'a [BlockReplay],
     block_live_warps: Vec<u32>,
@@ -7425,6 +8191,10 @@ impl<'a> SmCore<'a> {
                 retry: VecDeque::new(),
             }),
         };
+        let instruction_front_end = params
+            .instruction_front_end
+            .map(|config| InstructionFrontEndState::new(config, params.global_flat_latency))
+            .transpose()?;
         let mut barrier_issue = None;
         for slot in schedule.by_pc.values() {
             let PipelineClass::Barrier {
@@ -7482,6 +8252,7 @@ impl<'a> SmCore<'a> {
             params: *params,
             shared_memory_residency,
             physical_warp_slots,
+            instruction_front_end,
             mem,
             blocks,
             block_live_warps,
@@ -7633,6 +8404,9 @@ impl<'a> SmCore<'a> {
     /// [`Advance::Done`].
     pub(crate) fn result(&self) -> SmSimResult {
         let mut readiness = self.readiness.clone();
+        if let Some(front_end) = self.instruction_front_end.as_ref() {
+            readiness.instruction_front_end = Some(Box::new(front_end.diagnostics));
+        }
         readiness.memory_service_candidates = self.memory_service_candidates.diagnostics();
         if let Some(feedback) = self.memory_admission_feedback.as_ref() {
             readiness.memory_admission_feedback = Some(Box::new(feedback.diagnostics()));
@@ -7767,6 +8541,8 @@ impl<'a> SmCore<'a> {
                         sectors: &w.sectors,
                         async_copy_cohorts: w.async_copy_cohorts.as_deref(),
                         next: 0,
+                        front_end_fetch_cursor: 0,
+                        instruction_buffer: VecDeque::new(),
                         next_slot: Some(next_slot),
                         current_since: t,
                         eligible: t,
@@ -8758,6 +9534,24 @@ impl<'a> SmCore<'a> {
         let mut limiting = None;
         let mut tied = 0;
 
+        if self.instruction_front_end.is_some() {
+            let until = warp.instruction_front_end_ready_at().ok_or(
+                IssueError::InstructionBufferMissing {
+                    warp: warp_index,
+                    instruction: warp.next,
+                },
+            )?;
+            observe_readiness_constraint(
+                projected,
+                base,
+                until,
+                ReadinessCause::InstructionFrontEnd,
+                &mut ready_at,
+                &mut limiting,
+                &mut tied,
+            )?;
+        }
+
         if let Some(feedback) = self.memory_admission_feedback.as_ref()
             && feedback.matches_kind(kind)
         {
@@ -9137,6 +9931,60 @@ impl<'a> SmCore<'a> {
             )?;
         }
         Ok(())
+    }
+
+    /// Run one fetch/decode opportunity per SMSP, then one SM-arbitrated stream
+    /// prefetch. The fetch picker mirrors CGGTY: continue the last-issued warp
+    /// while its instruction buffer has room, otherwise choose the youngest
+    /// resident warp with capacity.
+    fn instruction_front_end_cycle(&mut self) -> Result<(), IssueError> {
+        let Some(front_end) = self.instruction_front_end.as_mut() else {
+            return Ok(());
+        };
+        let now = self.t;
+        front_end.maintain(now);
+        let capacity = front_end.instruction_buffer_capacity()?;
+        let fetches: [Option<usize>; SUB_CORES] = std::array::from_fn(|subcore| {
+            let can_fetch = |warp: usize| self.warps[warp].can_fetch_instruction(capacity);
+            match self.hold[subcore] {
+                Some(warp) if can_fetch(warp) => Some(warp),
+                _ => self.subcore_warps[subcore]
+                    .iter()
+                    .copied()
+                    .filter(|&warp| can_fetch(warp))
+                    .max_by_key(|&warp| self.warps[warp].arrival),
+            }
+        });
+        for (subcore, fetch) in fetches.into_iter().enumerate() {
+            let Some(warp) = fetch else { continue };
+            let cursor = self.warps[warp].front_end_fetch_cursor;
+            let pc = self.warps[warp].insts[cursor].pc;
+            let Some(front_end) = self.instruction_front_end.as_mut() else {
+                return Ok(());
+            };
+            let ready_at =
+                front_end.fetch_instruction(subcore, self.schedule.function_unique_id, pc, now)?;
+            self.warps[warp].push_fetched_instruction(warp, ready_at, capacity)?;
+        }
+        if let Some(front_end) = self.instruction_front_end.as_mut() {
+            front_end.prefetch_cycle(now)
+        } else {
+            Ok(())
+        }
+    }
+
+    fn has_instruction_front_end_work(&self) -> Result<bool, IssueError> {
+        let Some(front_end) = self.instruction_front_end.as_ref() else {
+            return Ok(false);
+        };
+        let capacity = front_end.instruction_buffer_capacity()?;
+        Ok(front_end.has_prefetch_work()
+            || self
+                .subcore_warps
+                .iter()
+                .flatten()
+                .copied()
+                .any(|warp| self.warps[warp].can_fetch_instruction(capacity)))
     }
 
     fn project_cta_barrier_diagnostics(
@@ -9650,6 +10498,9 @@ impl<'a> SmCore<'a> {
     /// preserved at the transaction boundary.
     fn issue_ready_at<const CHECK_ASYNC: bool>(&self, subcore: usize, warp: usize) -> Option<u64> {
         let mut warp_ready = self.warps[warp].ready_at()?;
+        if self.instruction_front_end.is_some() {
+            warp_ready = warp_ready.max(self.warps[warp].instruction_front_end_ready_at()?);
+        }
         if let Some(feedback) = self.memory_admission_feedback.as_ref() {
             let state = &self.warps[warp];
             let admission_ready =
@@ -9916,6 +10767,7 @@ impl<'a> SmCore<'a> {
                     wake_at: Some(self.t),
                 });
             }
+            self.instruction_front_end_cycle()?;
             let before = out.len();
             let issued_this_cycle = self.issue_cycle(out)?;
             // A reply-carrying request emitted this cycle tightens the
@@ -9946,7 +10798,7 @@ impl<'a> SmCore<'a> {
             // (resident warps only — retired warps left the sub-core lists;
             // warps waiting on in-flight responses have no computable time and
             // are excluded).
-            let next_t = if self.has_async_copy_protocol {
+            let issue_or_async_time = if self.has_async_copy_protocol {
                 match (
                     self.next_known_issue_time::<true>(),
                     self.next_async_copy_destination_source_time(),
@@ -9958,6 +10810,16 @@ impl<'a> SmCore<'a> {
                 }
             } else {
                 self.next_known_issue_time::<false>()
+            };
+            let front_end_time = self
+                .has_instruction_front_end_work()?
+                .then(|| checked_cycle_add("instruction front-end clock advance", self.t, 1))
+                .transpose()?;
+            let next_t = match (issue_or_async_time, front_end_time) {
+                (Some(issue), Some(front_end)) => Some(issue.min(front_end)),
+                (Some(issue), None) => Some(issue),
+                (None, Some(front_end)) => Some(front_end),
+                (None, None) => None,
             };
             match next_t {
                 Some(nt) => {
@@ -10909,6 +11771,9 @@ impl<'a> SmCore<'a> {
         for (subcore, pick) in picks.iter().enumerate() {
             let Some(wix) = *pick else { continue };
             let w = &self.warps[wix];
+            if self.instruction_front_end.is_some() {
+                w.preflight_buffered_issue(wix)?;
+            }
             let slot = w
                 .next_slot
                 .ok_or(IssueError::MissingIssueSlot { warp: wix })?;
@@ -11232,6 +12097,9 @@ impl<'a> SmCore<'a> {
             }
 
             // Advance the warp's stream.
+            if self.instruction_front_end.is_some() {
+                self.warps[wix].consume_buffered_issue(wix)?;
+            }
             self.warps[wix].next =
                 checked_usize_counter_add("warp instruction cursor", self.warps[wix].next, 1)?;
             if retires_warp {
@@ -11905,7 +12773,11 @@ mod tests {
         assert!(std::mem::size_of::<MemoryAdmissionCandidateDiagnostics>() <= 24);
         assert!(std::mem::size_of::<MemoryAdmissionCandidateState>() <= 24);
         assert!(std::mem::size_of::<ReadinessDiagnostics>() <= 1024);
-        assert!(std::mem::size_of::<SmCore<'static>>() <= 3072);
+        assert!(
+            std::mem::size_of::<SmCore<'static>>() <= 3584,
+            "SmCore grew to {} bytes",
+            std::mem::size_of::<SmCore<'static>>()
+        );
         assert!(
             std::mem::size_of::<MemRequest>() <= 96,
             "MemRequest grew to {} bytes",
@@ -11917,6 +12789,7 @@ mod tests {
         IssueModelParams {
             arch: ArchId::Sm86,
             resource_source: IssueResourceSource::SyntheticTestFixture,
+            instruction_front_end: None,
             l1_hit_latency: 34,
             l1_miss_latency: 244,
             global_flat_latency: 400,
@@ -12018,6 +12891,12 @@ mod tests {
         ldgsts_floor.ldgsts_l1_mshr_floor = NonZeroU32::new(249).unwrap();
         let mut occupancy = baseline;
         occupancy.max_resident_warps_per_sm += 1;
+        let mut front_end = baseline;
+        front_end
+            .instruction_front_end
+            .as_mut()
+            .expect("production constructor binds the front end")
+            .stream_buffer_lines += 1;
 
         for (field, params, expected, got) in [
             (
@@ -12040,6 +12919,16 @@ mod tests {
                 }) if got_field == field && got_expected == expected && got_value == got
             ));
         }
+
+        assert!(matches!(
+            front_end.validate_resource_source(),
+            Err(IssueError::ArchitectureDefaultMismatch {
+                arch: ArchId::Sm86,
+                field: "instruction_front_end.stream_buffer_lines",
+                expected: 8,
+                got: 9,
+            })
+        ));
 
         assert!(matches!(
             crate::replay::ReplayConfiguration::checked(
@@ -12900,6 +13789,60 @@ mod tests {
             insts,
             sectors: Vec::new(),
         }
+    }
+
+    #[test]
+    fn instruction_stream_prefetches_the_next_line_and_merges_same_line_fetches() {
+        let config = ArchId::Sm86
+            .instruction_front_end()
+            .require("instruction_front_end")
+            .unwrap();
+        let mut front_end = InstructionFrontEndState::new(config, 4).unwrap();
+
+        // Demand line 0: 39 cycles to L1 + 4-cycle cold fill + 39 cycles
+        // back to L0 + two fetch/decode stages.
+        assert_eq!(front_end.fetch_instruction(0, 1, 0, 0).unwrap(), 84);
+        front_end.prefetch_cycle(0).unwrap();
+
+        // The next line is already in the stream buffer. A second instruction
+        // in that line then merges through the pending L0 tag.
+        assert_eq!(front_end.fetch_instruction(0, 1, 128, 1).unwrap(), 85);
+        assert_eq!(front_end.fetch_instruction(0, 1, 144, 2).unwrap(), 86);
+        assert_eq!(front_end.diagnostics.demand_l0_misses, 1);
+        assert_eq!(front_end.diagnostics.demand_stream_buffer_hits, 1);
+        assert_eq!(front_end.diagnostics.demand_l0_hits, 1);
+        assert_eq!(front_end.diagnostics.demand_l1_misses, 1);
+        assert_eq!(front_end.diagnostics.prefetch_l1_misses, 1);
+    }
+
+    #[test]
+    fn active_instruction_front_end_delays_first_issue_without_changing_count() {
+        let sched = schedule(vec![(0, slot(cb(1), OpClass::Other, "EXIT"))]);
+        let blocks = vec![BlockReplay {
+            launch_index: 0,
+            warps: vec![warp(0, vec![inst(0)])],
+        }];
+        let mut front_end_params = params();
+        front_end_params.instruction_front_end = Some(
+            ArchId::Sm86
+                .instruction_front_end()
+                .require("instruction_front_end")
+                .unwrap(),
+        );
+        front_end_params.global_flat_latency = 4;
+
+        let result = simulate_sm(&blocks, &sched, &front_end_params, None).unwrap();
+        assert_eq!(result.instructions_issued, 1);
+        assert_eq!(result.cycles, 85);
+        assert_eq!(result.readiness.limiting_cycles.instruction_front_end, 84);
+        let diagnostics = result
+            .readiness
+            .instruction_front_end
+            .as_deref()
+            .expect("active model emits front-end diagnostics");
+        assert_eq!(diagnostics.instructions_fetched, 1);
+        assert_eq!(diagnostics.demand_l0_misses, 1);
+        assert_eq!(diagnostics.stream_restarts, 1);
     }
 
     #[test]

@@ -3215,6 +3215,7 @@ mod stream_l2_session_tests {
         IssueModelParams {
             arch: ArchId::Sm86,
             resource_source: IssueResourceSource::SyntheticTestFixture,
+            instruction_front_end: None,
             l1_hit_latency: 1,
             l1_miss_latency: 2,
             global_flat_latency: 4,
@@ -10385,6 +10386,7 @@ mod completeness_tests {
         let params = IssueModelParams {
             arch: ArchId::Sm86,
             resource_source: IssueResourceSource::SyntheticTestFixture,
+            instruction_front_end: None,
             l1_hit_latency: 1,
             l1_miss_latency: 1,
             global_flat_latency: 1,
