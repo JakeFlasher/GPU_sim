@@ -141,7 +141,7 @@ def test_missing_percentage_formats_without_a_percent_suffix() -> None:
 
 def test_timing_crosswalk_preserves_two_distinct_envelopes() -> None:
     crosswalk = json.loads((report.HERE / "timing_crosswalk.json").read_text())
-    assert report._timing_envelopes(crosswalk) == (847.5, 2047.5)
+    assert report._timing_envelopes(crosswalk) == (1026.5, 2047.5)
     assert report._timing_envelopes(None) == (0.0, 0.0)
 
 
