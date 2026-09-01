@@ -200,6 +200,7 @@ mod tests {
             addrs,
             allocation_id: None,
             address_space: None,
+            lane_mask: None,
         }
     }
 

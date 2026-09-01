@@ -274,6 +274,7 @@ class  PROTOBUF_FUTURE_ADD_EARLY_WARN_UNUSED address final : public ::google::pr
     kStrideFieldNumber = 5,
     kAllocationIdFieldNumber = 7,
     kAddressSpaceFieldNumber = 8,
+    kLaneMaskFieldNumber = 9,
   };
   // repeated int64 addrs = 6;
   [[nodiscard]] int addrs_size()
@@ -368,11 +369,23 @@ class  PROTOBUF_FUTURE_ADD_EARLY_WARN_UNUSED address final : public ::google::pr
   void _internal_set_address_space(::dynamic_trace::MemorySpace value);
 
   public:
+  // optional uint32 lane_mask = 9;
+  [[nodiscard]] bool has_lane_mask()
+      const;
+  void clear_lane_mask() ;
+  [[nodiscard]] ::uint32_t lane_mask() const;
+  void set_lane_mask(::uint32_t value);
+
+  private:
+  ::uint32_t _internal_lane_mask() const;
+  void _internal_set_lane_mask(::uint32_t value);
+
+  public:
   // @@protoc_insertion_point(class_scope:dynamic_trace.address)
  private:
   class _Internal;
   friend class ::google::protobuf::internal::TcParser;
-  static const ::google::protobuf::internal::TcParseTable<3, 8,
+  static const ::google::protobuf::internal::TcParseTable<4, 9,
                                    0, 0,
                                    2>
       _table_;
@@ -405,6 +418,7 @@ class  PROTOBUF_FUTURE_ADD_EARLY_WARN_UNUSED address final : public ::google::pr
     ::int32_t stride_;
     ::uint32_t allocation_id_;
     int address_space_;
+    ::uint32_t lane_mask_;
     PROTOBUF_TSAN_DECLARE_MEMBER
   };
   union { Impl_ _impl_; };
@@ -661,6 +675,35 @@ inline ::dynamic_trace::MemorySpace address::_internal_address_space() const {
 inline void address::_internal_set_address_space(::dynamic_trace::MemorySpace value) {
   ::google::protobuf::internal::TSanWrite(&_impl_);
   _impl_.address_space_ = value;
+}
+
+// optional uint32 lane_mask = 9;
+inline bool address::has_lane_mask() const {
+  bool value = CheckHasBit(_impl_._has_bits_[0], 0x00000100U);
+  return value;
+}
+inline void address::clear_lane_mask() {
+  ::google::protobuf::internal::TSanWrite(&_impl_);
+  _impl_.lane_mask_ = 0u;
+  ClearHasBit(_impl_._has_bits_[0],
+                  0x00000100U);
+}
+inline ::uint32_t address::lane_mask() const {
+  // @@protoc_insertion_point(field_get:dynamic_trace.address.lane_mask)
+  return _internal_lane_mask();
+}
+inline void address::set_lane_mask(::uint32_t value) {
+  _internal_set_lane_mask(value);
+  SetHasBit(_impl_._has_bits_[0], 0x00000100U);
+  // @@protoc_insertion_point(field_set:dynamic_trace.address.lane_mask)
+}
+inline ::uint32_t address::_internal_lane_mask() const {
+  ::google::protobuf::internal::TSanRead(&_impl_);
+  return _impl_.lane_mask_;
+}
+inline void address::_internal_set_lane_mask(::uint32_t value) {
+  ::google::protobuf::internal::TSanWrite(&_impl_);
+  _impl_.lane_mask_ = value;
 }
 
 #ifdef __GNUC__

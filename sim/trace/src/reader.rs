@@ -357,6 +357,14 @@ pub enum TraceError {
         source: LaneError,
     },
     #[error(
+        "{record}: address lane mask 0x{lane_mask:x} is not a subset of instruction mask 0x{instruction_mask:x} (address_lane_mask_outside_instruction_mask)"
+    )]
+    AddressLaneMaskOutsideInstructionMask {
+        record: String,
+        lane_mask: u32,
+        instruction_mask: u32,
+    },
+    #[error(
         "{record}: GLOBAL/GENERIC-space record has active lanes but allocation_id \
          is absent or zero (canonical: allocation_id_missing)"
     )]
@@ -541,6 +549,9 @@ impl TraceError {
                 | LaneError::AddressOverflow { .. }
                 | LaneError::UnknownFormat(_) => Some("compressed_format_malformed"),
             },
+            Self::AddressLaneMaskOutsideInstructionMask { .. } => {
+                Some("address_lane_mask_outside_instruction_mask")
+            }
             Self::AllocationIdMissing { .. } => Some("allocation_id_missing"),
             Self::AllocationsSidecarMissing { .. } => Some("allocations_sidecar_missing"),
             Self::AllocationsSidecarMalformed { .. } => Some("allocations_sidecar_malformed"),
@@ -6347,6 +6358,10 @@ fn read_threadblock(path: &Path) -> Result<pb::Threadblock, TraceError> {
 #[derive(Debug, Clone, Copy)]
 pub struct AddressAccess {
     pub lane_vector: [i64; lanes::LANES_PER_WARP],
+    /// Operand-specific effective lanes. An absent wire field falls back to
+    /// the instruction mask. Async-copy sources narrow this for ignore-src
+    /// zero-fill lanes without hiding the SHARED destination writes.
+    pub lane_mask: u32,
     pub data_width_bytes: i32,
     /// Per-address memory space (address-carrying contract). Absent on legacy
     /// pre-transition traces (the field is unset), where consumers fall back to
@@ -6749,7 +6764,9 @@ fn project_ldgsts_source_cohorts_128b_32x4(
         let source_address = source.lane_vector[lane];
         let destination_address = destination.lane_vector[lane];
         if source_address == lanes::LANE_INACTIVE_SENTINEL {
-            debug_assert_eq!(destination_address, lanes::LANE_INACTIVE_SENTINEL);
+            // cp.async ignore-src lanes still zero-fill their SHARED
+            // destination. They have no source cohort and therefore do not
+            // contribute global sectors or source-coupled delivery work.
             continue;
         }
         if width > 128 {
@@ -6979,10 +6996,18 @@ fn memory_space_is_compatible(class: pb::MemoryOpClass, space: pb::MemorySpace) 
 
 fn decode_address_access(
     addr: &pb::Address,
-    and_mask: u32,
+    instruction_mask: u32,
     inst_width: i32,
     record: &impl Fn() -> String,
 ) -> Result<AddressAccess, TraceError> {
+    let lane_mask = addr.lane_mask.unwrap_or(instruction_mask);
+    if lane_mask & !instruction_mask != 0 {
+        return Err(TraceError::AddressLaneMaskOutsideInstructionMask {
+            record: record(),
+            lane_mask,
+            instruction_mask,
+        });
+    }
     // Match the Python gate's aggregate mask diagnosis before positional
     // reconstruction. A malformed list_all length has higher precedence there;
     // every other per-slot disagreement remains lane_position_mismatch.
@@ -6997,8 +7022,8 @@ fn decode_address_access(
         } else {
             addr.addrs.len()
         };
-        if (and_mask == 0 && real_count > 0)
-            || (and_mask != 0
+        if (lane_mask == 0 && real_count > 0)
+            || (lane_mask != 0
                 && addr.compression_format == lanes::FORMAT_LIST_ALL
                 && real_count == 0)
         {
@@ -7007,7 +7032,7 @@ fn decode_address_access(
     }
 
     let lane_vector =
-        lanes::reconstruct_lane_vector(addr, and_mask).map_err(|source| TraceError::Lane {
+        lanes::reconstruct_lane_vector(addr, lane_mask).map_err(|source| TraceError::Lane {
             record: record(),
             source,
         })?;
@@ -7022,6 +7047,7 @@ fn decode_address_access(
     };
     Ok(AddressAccess {
         lane_vector,
+        lane_mask,
         data_width_bytes,
         address_space,
         allocation_id: addr.allocation_id,
@@ -7651,9 +7677,10 @@ pub fn check_preflighted_allocation_identity(
             continue;
         }
 
+        let access = decode_address_access(addr, meta.and_mask, preflight.inst_width, &record)?;
         let allocation_id = addr.allocation_id.unwrap_or(0);
         if allocation_id == 0 {
-            if meta.and_mask != 0 {
+            if access.lane_mask != 0 {
                 return Err(TraceError::AllocationIdMissing { record: record() });
             }
             continue;
@@ -7667,11 +7694,10 @@ pub fn check_preflighted_allocation_identity(
                 allocation_id,
             });
         };
-        if meta.and_mask == 0 {
+        if access.lane_mask == 0 {
             continue;
         }
 
-        let access = decode_address_access(addr, meta.and_mask, preflight.inst_width, &record)?;
         let base = u128::from(range.base);
         let end = base + u128::from(range.size);
         for (lane, &slot) in access.lane_vector.iter().enumerate() {
@@ -8790,6 +8816,7 @@ mod tests {
                 // gate requires this for a GLOBAL active record.
                 allocation_id: Some(1),
                 address_space: None,
+                lane_mask: None,
             }],
             memory_op_class: Some(pb::MemoryOpClass::Global as i32),
             data_width: Some(4),
@@ -9767,6 +9794,7 @@ mod tests {
             addrs: vec![64],
             allocation_id: None,
             address_space: None,
+            lane_mask: None,
         });
         let collected = memory_access(&inst, || "t".into()).unwrap().unwrap();
 
@@ -9786,6 +9814,40 @@ mod tests {
         assert_eq!(streamed[1].data_width_bytes, 16);
         assert_eq!(streamed[1].lane_vector[0], 0x9000);
         assert_eq!(streamed[1].lane_vector[1], 0x9040);
+    }
+
+    #[test]
+    fn address_lane_mask_can_narrow_async_source_lanes() {
+        let mut inst = mem_inst(0);
+        let mut slots = vec![crate::lanes::LANE_INACTIVE_SENTINEL; 32];
+        slots[0] = 0x7000_0000;
+        inst.addresses[0].compression_format = crate::lanes::FORMAT_LIST_ALL;
+        inst.addresses[0].base_address = 0;
+        inst.addresses[0].stride = 0;
+        inst.addresses[0].addrs = slots;
+        inst.addresses[0].lane_mask = Some(0b01);
+
+        let access = memory_access(&inst, || "narrow-source".into())
+            .unwrap()
+            .unwrap();
+        assert_eq!(access.and_mask, 0b11);
+        assert_eq!(access.accesses[0].lane_mask, 0b01);
+        assert_eq!(access.accesses[0].lane_vector[0], 0x7000_0000);
+        assert_eq!(
+            access.accesses[0].lane_vector[1],
+            crate::lanes::LANE_INACTIVE_SENTINEL
+        );
+    }
+
+    #[test]
+    fn address_lane_mask_cannot_widen_instruction_lanes() {
+        let mut inst = mem_inst(0);
+        inst.addresses[0].lane_mask = Some(0b100);
+        let error = memory_access(&inst, || "widened-source".into()).unwrap_err();
+        assert_eq!(
+            error.typed_reason(),
+            Some("address_lane_mask_outside_instruction_mask")
+        );
     }
 
     #[test]

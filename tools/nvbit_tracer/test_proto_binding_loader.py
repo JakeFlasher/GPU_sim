@@ -76,8 +76,8 @@ assert not any(name in sys.modules for name in loader._CANONICAL_MODULE_NAMES)
 def test_literal_pin_table_covers_exact_tracked_authorities() -> None:
     expected = {
         "address_pb2.py": (
-            2042,
-            "3a22f1db336cac6df4451d8608fb9d3bb81d806840b78e529edcb8c19340cf73",
+            2113,
+            "d3307a8fb59b5915fdcfe863c4c72a0144d32a001632669385689f30b2baef33",
         ),
         "cuda_stream_pb2.py": (
             1455,

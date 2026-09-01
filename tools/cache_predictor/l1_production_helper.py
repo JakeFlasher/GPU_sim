@@ -382,9 +382,12 @@ def _reconstruct_lane_addresses(
     records would underreport accesses and bias the
     prediction.
     """
+    effective_mask = import_trace_contract_mod._address_lane_mask(
+        address_record, and_mask
+    )
     vector, reason = (
         import_trace_contract_mod._reconstruct_lane_vector(
-            address_record, and_mask,
+            address_record, effective_mask,
         )
     )
     if vector is None:

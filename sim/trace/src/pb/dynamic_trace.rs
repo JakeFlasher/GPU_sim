@@ -59,6 +59,14 @@ pub struct Address {
     /// only. See plans/sm86_ldgsts_atoms_operand_adjudication.md.
     #[prost(enumeration = "MemorySpace", optional, tag = "8")]
     pub address_space: ::core::option::Option<i32>,
+    /// Operand-specific effective lane mask. Absent means the legacy
+    /// instruction-level `active_mask & predicate_mask`. LDGSTS/cp.async uses
+    /// this on its GLOBAL source operand to remove lanes whose `ignore-src`
+    /// predicate requests zero-fill, while its SHARED destination retains the
+    /// complete instruction mask. The value must be a subset of the instruction
+    /// mask; consumers reject any widening.
+    #[prost(uint32, optional, tag = "9")]
+    pub lane_mask: ::core::option::Option<u32>,
 }
 /// Effective memory space of an address record's operand. Net-new with the
 /// ASYNC_COPY+ATOM address-carrying contract transition: a single instruction can

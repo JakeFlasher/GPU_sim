@@ -1245,6 +1245,14 @@ static bool space_requires_global_identity(dynamic_trace::MemorySpace space) {
          space == dynamic_trace::MEMORY_SPACE_GENERIC;
 }
 
+static uint32_t effective_address_lane_mask(const inst_trace_t &record) {
+  const uint32_t instruction_mask =
+      record.active_mask & record.predicate_mask;
+  return record.address_lane_mask_present
+             ? record.address_lane_mask & instruction_mask
+             : instruction_mask;
+}
+
 /* Count the 32-byte L2 sectors touched by one address-carrying channel record.
  * Each active+predicated lane contributes the byte interval [addr, addr+width),
  * then overlapping sector intervals are merged.  This deduplicates sectors
@@ -1286,7 +1294,7 @@ static bool trace_sampling_sector_accesses(
   if (!l2_relevant) return true;
   if (record.width <= 0) return false;
 
-  const uint32_t mask = record.active_mask & record.predicate_mask;
+  const uint32_t mask = effective_address_lane_mask(record);
   if (mask == 0) return true;
   const uint64_t width_minus_one =
       static_cast<uint64_t>(record.width - 1);
@@ -1350,7 +1358,7 @@ static TraceSamplingIdentityResult trace_sampling_identity_result(
        space_requires_global_identity(address_space)) ||
       (cls == memory_op_class_classifier::kAsyncCopy &&
        space_requires_global_identity(address_space));
-  const uint32_t mask = record.active_mask & record.predicate_mask;
+  const uint32_t mask = effective_address_lane_mask(record);
   if (!result.required || mask == 0) return result;
 
   uint32_t first_non_zero = 0;
@@ -2287,6 +2295,19 @@ void instrument_function_if_needed(CUcontext ctx, CUfunction func, int device_id
       uint64_t call_ret_imm = 0;
       uint32_t num_of_injects = 0;
 
+      int ldgsts_ignore_src_predicate = -1;
+      bool ldgsts_ignore_src_predicate_is_not = false;
+      if (std::string(instr->getOpcode()).find("LDGSTS") !=
+          std::string::npos) {
+        for (int operand = 0; operand < instr->getNumOperands(); ++operand) {
+          const InstrType::operand_t *candidate = instr->getOperand(operand);
+          if (candidate->type == InstrType::OperandType::PRED) {
+            ldgsts_ignore_src_predicate = candidate->u.pred.num;
+            ldgsts_ignore_src_predicate_is_not = candidate->is_not;
+          }
+        }
+      }
+
       if(inst_parsed->is_tensor_core_op()) {
         inst_parsed->set_tensor_core_instruction_info();
       }
@@ -2383,10 +2404,28 @@ void instrument_function_if_needed(CUcontext ctx, CUfunction func, int device_id
               }else {
                 nvbit_add_call_arg_const_val32(instr, SECRET_UREG_DESC_NOT_USED);
               }
-              // Carry the structural MREF ordinal in the otherwise unused
-              // STANDARD_MEM op_reg_val_2 channel slot.
-              nvbit_add_call_arg_const_val32(instr, mem_oper_idx);
-              nvbit_add_call_arg_const_val32(instr, SECRET_UREG_DESC_NOT_USED);
+              // Carry the structural MREF ordinal plus LDGSTS ignore-src
+              // metadata in op_reg_val_2. Only the GLOBAL source operand
+              // (ordinal 1) consumes the extra predicate; the SHARED
+              // destination remains active so zero-fill writes are preserved.
+              uint32_t mref_metadata =
+                  static_cast<uint32_t>(mem_oper_idx) & MREF_ORDINAL_MASK;
+              const bool carries_ignore_src =
+                  mem_oper_idx == 1 && ldgsts_ignore_src_predicate >= 0;
+              if (carries_ignore_src) {
+                mref_metadata |= MREF_IGNORE_SRC_PRESENT;
+                if (ldgsts_ignore_src_predicate_is_not) {
+                  mref_metadata |= MREF_IGNORE_SRC_NEGATED;
+                }
+              }
+              nvbit_add_call_arg_const_val32(instr, mref_metadata);
+              if (carries_ignore_src) {
+                nvbit_add_call_arg_pred_val_at(
+                    instr, ldgsts_ignore_src_predicate);
+              } else {
+                nvbit_add_call_arg_const_val32(
+                    instr, SECRET_UREG_DESC_NOT_USED);
+              }
               mem_oper_idx--;
             }else if(has_ldc_with_reg || has_ldc_with_ureg) {
               nvbit_add_call_arg_const_val32(instr, MEM_TYPE::CONSTANT_MEM);
@@ -4265,7 +4304,7 @@ void *recv_thread_fun(void *args) {
                   ctx, *ma, ts_cls, ts_address_space);
               ts_identity_available = true;
               if (ts_identity.required &&
-                  (ma->active_mask & ma->predicate_mask) != 0 &&
+                  effective_address_lane_mask(*ma) != 0 &&
                   (ts_identity.any_zero ||
                    ts_identity.multiple_non_zero)) {
                 ts_sector_accesses_valid = false;
@@ -4280,7 +4319,7 @@ void *recv_thread_fun(void *args) {
                 /* Preserve the existing hot-line sketch semantics: every
                  * atomic operand record contributes each active lane's starting
                  * sector, without width expansion or deduplication. */
-                uint32_t ts_mask = ma->active_mask & ma->predicate_mask;
+                uint32_t ts_mask = effective_address_lane_mask(*ma);
                 for (int lane = 0; lane < 32; ++lane) {
                   if (!((ts_mask >> lane) & 1u)) continue;
                   uint64_t sector = ma->addrs_or_reg_val_0[lane] >> 5;
@@ -4371,7 +4410,7 @@ void *recv_thread_fun(void *args) {
           inst = wp.mutable_instructions(wp.instructions_size()-1);
         }
         remaining_injects--;
-        std::bitset<32> mask(ma->active_mask & ma->predicate_mask);
+        std::bitset<32> mask(effective_address_lane_mask(*ma));
         // Memory-class and per-lane data width: applied whenever the
         // arriving operand record is memory (mem_type != NONE),
         // regardless of whether this is the first operand for the
@@ -4576,6 +4615,9 @@ void *recv_thread_fun(void *args) {
           // the instruction-level MemoryOpClass.
           if (addr_space != dynamic_trace::MEMORY_SPACE_UNSPECIFIED) {
             addr->set_address_space(addr_space);
+          }
+          if (ma->address_lane_mask_present != 0) {
+            addr->set_lane_mask(ma->address_lane_mask);
           }
           std::istringstream iss(id_to_opcode_map[opcode_id]);
           std::vector<std::string> tokens;

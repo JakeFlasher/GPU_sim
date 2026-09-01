@@ -76,6 +76,7 @@ fn make_memory(
         addrs,
         allocation_id,
         address_space: Some(address_space),
+        lane_mask: None,
     });
     instruction.addresses.last_mut().unwrap()
 }

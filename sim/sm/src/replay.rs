@@ -5182,6 +5182,11 @@ fn append_staged_async_copy_sectors(
 
     let cohort_projection = match (source_cohorts, sector_cohort_masks) {
         (None, None) => None,
+        (Some(cohorts), Some(masks))
+            if !source_active && cohorts.is_empty() && masks.is_empty() =>
+        {
+            None
+        }
         (Some(cohorts), Some(masks)) => {
             if masks.len() != count {
                 return Err(ReplayError::AsyncCopyCohortProjectionMismatch {
@@ -8263,6 +8268,40 @@ mod space_routing_tests {
         assert_eq!(sectors, before_sectors);
         assert_eq!(sidecar.spans, before_spans);
         assert_eq!(sidecar.sector_membership_masks, masks);
+    }
+
+    #[test]
+    fn zero_fill_async_copy_accepts_empty_source_cohort_projection() {
+        let mut sectors = vec![7];
+        let mut sidecar = AsyncCopyCohortReplay::default();
+        let kind = append_staged_async_copy_sectors(
+            ArchId::Sm86,
+            LdgstsL1Policy::CacheAtAllLevels,
+            0,
+            Some(LdgstsDestinationTopology::default()),
+            Some(&[]),
+            Some(&[]),
+            &mut sectors,
+            &mut sidecar,
+            &[],
+            Path::new("zero_fill.pb"),
+            0,
+            369,
+        )
+        .expect("zero-fill carries no global source cohort");
+        assert!(matches!(
+            kind,
+            AccessKind::GlobalAsyncCopy {
+                off: 1,
+                len: 0,
+                completion_work: 0,
+                l1_policy: LdgstsL1Policy::CacheAtAllLevels,
+            }
+        ));
+        assert_eq!(sectors, [7]);
+        assert!(sidecar.spans.is_empty());
+        assert!(sidecar.cohorts.is_empty());
+        assert!(sidecar.sector_membership_masks.is_empty());
     }
 
     #[test]

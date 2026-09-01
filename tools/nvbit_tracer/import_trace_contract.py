@@ -487,6 +487,11 @@ def _active_lane_indices(and_mask: int) -> list[int]:
     return [i for i in range(_LANES_PER_WARP) if (and_mask >> i) & 1]
 
 
+def _address_lane_mask(addr: Any, instruction_mask: int) -> int:
+    """Return an operand's effective lanes with legacy fallback."""
+    return addr.lane_mask if addr.HasField("lane_mask") else instruction_mask
+
+
 # LOCKSTEP: sim/trace/src/lanes.rs (Rust replay decoder) is an exact port of
 # this function + the per-slot positional check below. Shared golden fixture:
 # tools/nvbit_tracer/lane_reconstruction_golden.json (extend it in the same
@@ -628,6 +633,17 @@ def _reconstruct_instruction_addresses(
     )
     vectors: list[list[int]] = []
     for addr_index, addr in enumerate(inst.addresses):
+        address_mask = _address_lane_mask(addr, and_mask)
+        if address_mask & ~and_mask:
+            return None, ValidationResult(
+                ok=False,
+                typed_reason="address_lane_mask_outside_instruction_mask",
+                detail=(
+                    f"{record_path}: address[{addr_index}] lane_mask="
+                    f"0x{address_mask:x} is not a subset of "
+                    f"(active_mask & predicate_mask)=0x{and_mask:x}"
+                ),
+            )
         if (
             addr.compression_format == _ADDRESS_FORMAT_LIST_ALL
             and len(addr.addrs) != _LANES_PER_WARP
@@ -655,7 +671,7 @@ def _reconstruct_instruction_addresses(
             )
         else:
             real_count = len(addr.addrs)
-        if and_mask == 0 and real_count > 0:
+        if address_mask == 0 and real_count > 0:
             return None, ValidationResult(
                 ok=False,
                 typed_reason="lane_mask_inconsistent",
@@ -671,7 +687,7 @@ def _reconstruct_instruction_addresses(
                 ),
             )
         if (
-            and_mask != 0
+            address_mask != 0
             and addr.compression_format == _ADDRESS_FORMAT_LIST_ALL
             and real_count == 0
         ):
@@ -682,14 +698,14 @@ def _reconstruct_instruction_addresses(
                     f"{record_path}: "
                     f"(active_mask=0x{inst.active_mask:x}) & "
                     f"(predicate_mask=0x{inst.predicate_mask:x}) "
-                    f"is 0x{and_mask:x} (non-zero) but a list_all "
+                    f"address lane mask is 0x{address_mask:x} (non-zero) but a list_all "
                     f"address record carries 32 sentinel entries with "
                     f"zero real addresses; the producer emits a real "
                     f"address at every lane the AND mask gates true"
                 ),
             )
 
-        vector, malformed = _reconstruct_lane_vector(addr, and_mask)
+        vector, malformed = _reconstruct_lane_vector(addr, address_mask)
         if malformed is not None:
             return None, ValidationResult(
                 ok=False,
@@ -702,7 +718,7 @@ def _reconstruct_instruction_addresses(
             )
         assert vector is not None  # invariant: malformed is None
         for lane_index in range(_LANES_PER_WARP):
-            bit_set = bool((and_mask >> lane_index) & 1)
+            bit_set = bool((address_mask >> lane_index) & 1)
             slot = vector[lane_index]
             slot_is_sentinel = slot == LANE_INACTIVE_SENTINEL
             if bit_set and slot_is_sentinel:
@@ -714,8 +730,8 @@ def _reconstruct_instruction_addresses(
                         f"lane {lane_index} reconstructs to "
                         f"LANE_INACTIVE_SENTINEL but bit "
                         f"{lane_index} of "
-                        f"(active_mask & predicate_mask)="
-                        f"0x{and_mask:x} is set; expected a "
+                        f"effective address lane mask="
+                        f"0x{address_mask:x} is set; expected a "
                         f"real address at this lane"
                     ),
                 )
@@ -728,8 +744,8 @@ def _reconstruct_instruction_addresses(
                         f"lane {lane_index} reconstructs to "
                         f"non-sentinel value 0x{slot:x} but bit "
                         f"{lane_index} of "
-                        f"(active_mask & predicate_mask)="
-                        f"0x{and_mask:x} is clear; expected "
+                        f"effective address lane mask="
+                        f"0x{address_mask:x} is clear; expected "
                         f"LANE_INACTIVE_SENTINEL at this lane"
                     ),
                 )
@@ -1632,6 +1648,7 @@ def _check_instruction(
     for addr_index, (addr, vector) in enumerate(
         zip(inst.addresses, decoded_vectors)
     ):
+        address_mask = _address_lane_mask(addr, and_mask)
         # Per-record allocation/range identity check (task11d).
         # Gate: memory_op_class present AND class is GLOBAL AND the
         # address record carries an explicit allocation_id != 0. The
@@ -1682,7 +1699,7 @@ def _check_instruction(
         # address requires identity.
         if (
             global_class
-            and and_mask != 0
+            and address_mask != 0
             and (
                 not addr.HasField("allocation_id")
                 or addr.allocation_id == 0
@@ -1694,8 +1711,8 @@ def _check_instruction(
                 detail=(
                     f"{record_path}: address[{addr_index}] is a "
                     f"GLOBAL memory record with "
-                    f"(active_mask & predicate_mask)="
-                    f"0x{and_mask:x} (non-zero) but "
+                    f"effective address lane mask="
+                    f"0x{address_mask:x} (non-zero) but "
                     f"`allocation_id` is "
                     f"{'absent' if not addr.HasField('allocation_id') else 'zero'}; "
                     f"the producer's per-lane resolution gate "
@@ -1737,7 +1754,7 @@ def _check_instruction(
             base = entry.base_address
             end_excl = base + entry.size_bytes
             for lane_index in range(_LANES_PER_WARP):
-                if not ((and_mask >> lane_index) & 1):
+                if not ((address_mask >> lane_index) & 1):
                     continue
                 slot = vector[lane_index]
                 if slot == LANE_INACTIVE_SENTINEL:

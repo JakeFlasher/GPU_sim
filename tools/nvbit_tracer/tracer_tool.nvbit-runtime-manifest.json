@@ -332,11 +332,11 @@
       "soname": "libutf8_validity.so.34.1.0"
     }
   ],
-  "model_seal_sha256": "80ba6864e2fc1a9a08bf322aaa78dfe08c18790a156df927ec7a548025112c4c",
+  "model_seal_sha256": "33d907187be74261dcefa03b3d2f54e073f9701687347d0454c46dfa50ca183f",
   "runtime_library_path": "/home/jakeshea/GPU_simulator_rebase/.toolchain/pb/lib",
   "schema_version": "nvbit_runtime_dso_manifest.v1",
   "tracer": {
-    "sha256": "0989e5ec62625c5143dfd2e134eadbbcd69ce65ec1c43c305c0ffd5f63aebf75",
-    "size_bytes": 16039392
+    "sha256": "3f09ce65a4164abcd01e8d6d9b74befffe49e3d164ae74943dbf1e17ec5f2422",
+    "size_bytes": 16057392
   }
 }

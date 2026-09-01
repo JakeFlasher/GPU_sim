@@ -74,4 +74,12 @@ message address {
   // space so the identity gate applies allocation resolution to the global side
   // only. See plans/sm86_ldgsts_atoms_operand_adjudication.md.
   optional MemorySpace address_space = 8;
+
+  // Operand-specific effective lane mask. Absent means the legacy
+  // instruction-level `active_mask & predicate_mask`. LDGSTS/cp.async uses
+  // this on its GLOBAL source operand to remove lanes whose `ignore-src`
+  // predicate requests zero-fill, while its SHARED destination retains the
+  // complete instruction mask. The value must be a subset of the instruction
+  // mask; consumers reject any widening.
+  optional uint32 lane_mask = 9;
 }

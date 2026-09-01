@@ -37,6 +37,14 @@ static __managed__ uint64_t reported_dynamic_instr_counter = 0;
 enum MEM_TYPE { NONE = 0, STANDARD_MEM = 1, CONSTANT_MEM = 2, CALL_OR_RET = 3 };
 enum TRACED_REG_TYPE {NO_REGS = 0, MEMORY_REF = 1, REGULAR = 2, REGULAR_2_REGS = 3, REGULAR_4_REGS = 4, UNIFORM = 5, UNIFORM_2_REGS = 6, PREDICATE = 7, UNIFORM_PREDICATE = 8};
 
+// STANDARD_MEM op_reg_val_2 packs the structural MREF ordinal plus the
+// optional LDGSTS/cp.async ignore-src predicate metadata. The ignore-src
+// operand is distinct from the instruction guard: a true value suppresses
+// only the GLOBAL source read while the SHARED destination is zero-filled.
+static constexpr uint32_t MREF_ORDINAL_MASK = 0xffu;
+static constexpr uint32_t MREF_IGNORE_SRC_PRESENT = 1u << 8;
+static constexpr uint32_t MREF_IGNORE_SRC_NEGATED = 1u << 9;
+
 typedef struct {
   int cta_id_x;
   int cta_id_y;
@@ -56,6 +64,8 @@ typedef struct {
   uint32_t ureg_desc_value;
   uint32_t active_mask;
   uint32_t predicate_mask;
+  uint32_t address_lane_mask;
+  uint32_t address_lane_mask_present;
   uint32_t num_of_injects;
   uint32_t per_operand_type;
 } inst_trace_t;

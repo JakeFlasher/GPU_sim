@@ -766,8 +766,13 @@ def lane_ownership_oracle(trace_dir: Path, variant: str, orientation: str) -> di
                     and len(inst.addresses) == 1
                     and int(inst.addresses[0].data_width) == 4
                 ):
+                    address_mask = (
+                        int(inst.addresses[0].lane_mask)
+                        if inst.addresses[0].HasField("lane_mask")
+                        else and_mask
+                    )
                     vector, malformed = _reconstruct_lane_vector(
-                        inst.addresses[0], and_mask
+                        inst.addresses[0], address_mask
                     )
                     if vector is None:
                         raise AnalysisError(
@@ -816,7 +821,12 @@ def lane_ownership_oracle(trace_dir: Path, variant: str, orientation: str) -> di
                 operands: dict[int, list[int]] = {}
                 widths: dict[int, int] = {}
                 for address in inst.addresses:
-                    vector, malformed = _reconstruct_lane_vector(address, and_mask)
+                    address_mask = (
+                        int(address.lane_mask)
+                        if address.HasField("lane_mask")
+                        else and_mask
+                    )
+                    vector, malformed = _reconstruct_lane_vector(address, address_mask)
                     if vector is None:
                         raise AnalysisError(f"{trace_dir}: malformed lane vector: {malformed}")
                     operands[int(address.address_space)] = vector

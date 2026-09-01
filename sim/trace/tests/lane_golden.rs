@@ -105,6 +105,7 @@ fn golden_cases_match() {
             addrs: wire_addrs(case),
             allocation_id: None,
             address_space: None,
+            lane_mask: None,
         };
         let result = reconstruct_lane_vector(&addr, case.and_mask);
         match (&case.error, result) {

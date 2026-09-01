@@ -511,6 +511,8 @@ def _instruction_sector_accesses(inst, itc, ctx: str) -> int:
         if not relevant:
             continue
 
+        address_mask = itc._address_lane_mask(addr, and_mask)
+
         width = int(addr.data_width)
         if width <= 0:
             raise ValueError(f"{addr_ctx}: data_width must be positive, got {width}")
@@ -518,13 +520,13 @@ def _instruction_sector_accesses(inst, itc, ctx: str) -> int:
             raise ValueError(
                 f"{addr_ctx}: data_width {width} != instruction data_width "
                 f"{instruction_width}")
-        lanes, reason = itc._reconstruct_lane_vector(addr, and_mask)
+        lanes, reason = itc._reconstruct_lane_vector(addr, address_mask)
         if lanes is None:
             raise ValueError(f"{addr_ctx}: malformed lane vector: {reason}")
 
         intervals: list[tuple[int, int]] = []
         for lane in range(32):
-            if ((and_mask >> lane) & 1) == 0:
+            if ((address_mask >> lane) & 1) == 0:
                 continue
             base = int(lanes[lane])
             if base < 0 or base > _UINT64_MAX:
@@ -558,7 +560,8 @@ def _accumulate_atomic_sectors(inst, itc, hist: dict[int, int]) -> None:
     if and_mask == 0 or not inst.addresses:
         return
     addr = inst.addresses[0]
-    lanes, _reason = itc._reconstruct_lane_vector(addr, and_mask)
+    address_mask = itc._address_lane_mask(addr, and_mask)
+    lanes, _reason = itc._reconstruct_lane_vector(addr, address_mask)
     if lanes is None:
         return
     sentinel = itc.LANE_INACTIVE_SENTINEL

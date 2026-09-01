@@ -1232,6 +1232,39 @@ class TraceContractValidatorNegativeTest(unittest.TestCase):
             ),
         )
 
+    def test_address_lane_mask_narrows_one_operand(self) -> None:
+        from import_trace_contract import validate_threadblock
+        _tb_pb2, instruction_pb2, _addr_pb2 = _import_pb()
+
+        tb = _make_threadblock_with_instruction(
+            add_address=True,
+            set_memory_op_class=True,
+            memory_op_class_value=instruction_pb2.MEMORY_OP_CLASS_SHARED,
+        )
+        instruction = tb.warps[0].instructions[0]
+        instruction.active_mask = 0b11
+        instruction.predicate_mask = 0b11
+        instruction.addresses[0].lane_mask = 0b01
+        result = validate_threadblock(tb)
+        self.assertTrue(result.ok, msg=f"{result.typed_reason}: {result.detail}")
+
+    def test_address_lane_mask_cannot_widen_instruction_mask(self) -> None:
+        from import_trace_contract import validate_threadblock
+        _tb_pb2, instruction_pb2, _addr_pb2 = _import_pb()
+
+        tb = _make_threadblock_with_instruction(
+            add_address=True,
+            set_memory_op_class=True,
+            memory_op_class_value=instruction_pb2.MEMORY_OP_CLASS_SHARED,
+        )
+        tb.warps[0].instructions[0].addresses[0].lane_mask = 0b10
+        result = validate_threadblock(tb)
+        self.assertFalse(result.ok)
+        self.assertEqual(
+            result.typed_reason,
+            "address_lane_mask_outside_instruction_mask",
+        )
+
     def test_base_delta_with_correct_delta_count_admits(self) -> None:
         """A `base_delta` record with delta count == popcount-1
         admits. The compressed format encodes 32 lane slots via

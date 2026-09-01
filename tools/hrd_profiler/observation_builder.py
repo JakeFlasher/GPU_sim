@@ -606,8 +606,11 @@ def _walk_launch(
                     inst_access_kind = _MEMORY_OP_ACCESS_KIND_UNSPECIFIED
                 accesses_before_inst = len(tb_accesses)
                 for addr_record in inst.addresses:
-                    recon = import_trace_contract._reconstruct_lane_vector(
+                    address_mask = import_trace_contract._address_lane_mask(
                         addr_record, and_mask
+                    )
+                    recon = import_trace_contract._reconstruct_lane_vector(
+                        addr_record, address_mask
                     )
                     lane_vector = recon[0]
                     if lane_vector is None:
@@ -625,7 +628,7 @@ def _walk_launch(
                     if data_width <= 0:
                         continue
                     for lane_index, lane_addr in enumerate(lane_vector):
-                        if not ((and_mask >> lane_index) & 1):
+                        if not ((address_mask >> lane_index) & 1):
                             continue
                         if lane_addr == import_trace_contract.LANE_INACTIVE_SENTINEL:
                             # Active+predicated lane that the

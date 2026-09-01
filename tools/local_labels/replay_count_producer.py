@@ -349,14 +349,17 @@ def walk_threadblock(tb) -> dict:
                 continue
             width = inst.data_width if inst.HasField("data_width") else None
             addr = inst.addresses[0]
-            lanes, reason = _reconstruct_lane_vector(addr, and_mask)
+            address_mask = (
+                int(addr.lane_mask) if addr.HasField("lane_mask") else and_mask
+            )
+            lanes, reason = _reconstruct_lane_vector(addr, address_mask)
             if lanes is None:
                 agg["reconstruction_failures"] += 1
                 continue
             sectors: set[int] = set()
             aligned = True
             for lane in range(32):
-                if not (and_mask >> lane) & 1:
+                if not (address_mask >> lane) & 1:
                     continue
                 a = lanes[lane]
                 w = width or addr.data_width or 4
@@ -369,7 +372,7 @@ def walk_threadblock(tb) -> dict:
                 if a % w != 0:
                     aligned = False
             footprint_lanes = [lanes[i] for i in range(32)
-                               if (and_mask >> i) & 1]
+                               if (address_mask >> i) & 1]
             w = width or addr.data_width or 4
             start = min(footprint_lanes)
             end = max(footprint_lanes) + w

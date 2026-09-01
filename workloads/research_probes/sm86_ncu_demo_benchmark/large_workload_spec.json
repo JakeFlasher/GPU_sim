@@ -4,7 +4,7 @@
   "status": "development_expansion_cohort_frozen_before_simulator_replay",
   "frozen_at_revision": "d2a39af179ae3344f83c4ba10c93b2339f411436",
   "architecture": "sm_86",
-  "profile": "workloads/research_probes/sm86_ncu_demo_benchmark/host_profile.json",
+  "profile": "workloads/research_probes/sm86_ncu_demo_benchmark/host_profile_large_workloads.json",
   "metric_schema": "workloads/research_probes/sm86_ncu_demo_benchmark/metric_schema_counts.json",
   "accuracy_gate": "workloads/research_probes/sm86_ncu_demo_benchmark/accuracy_gate_large_workloads.json",
   "timing_crosswalk": "workloads/research_probes/sm86_ncu_demo_benchmark/timing_crosswalk.json",

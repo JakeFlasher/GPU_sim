@@ -129,7 +129,12 @@ def _operand_sectors(instruction: Any, active_lanes: list[int], index: int) -> i
     if index >= len(instruction.addresses):
         return 0
     address = instruction.addresses[index]
-    values = _address_values(address, active_lanes)
+    operand_lanes = (
+        _active_lanes(int(address.lane_mask))
+        if address.HasField("lane_mask")
+        else active_lanes
+    )
+    values = _address_values(address, operand_lanes)
     width = int(address.data_width or instruction.data_width or 1)
     return len(
         {
@@ -155,7 +160,12 @@ def _atomic_operand_transactions(
     if index >= len(instruction.addresses):
         return 0
     address = instruction.addresses[index]
-    values = _address_values(address, active_lanes)
+    operand_lanes = (
+        _active_lanes(int(address.lane_mask))
+        if address.HasField("lane_mask")
+        else active_lanes
+    )
+    values = _address_values(address, operand_lanes)
     width = int(address.data_width or instruction.data_width or 1)
     intervals = [
         (value, value // 32, (value + width - 1) // 32)

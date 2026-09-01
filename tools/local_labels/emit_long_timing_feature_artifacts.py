@@ -1297,9 +1297,12 @@ def _build_observed_sector_summary(
                 )
                 before = len(sectors)
                 for addr_record in inst.addresses:
+                    address_mask = import_trace_contract._address_lane_mask(
+                        addr_record, and_mask
+                    )
                     lane_vector, _reason = import_trace_contract._reconstruct_lane_vector(
                         addr_record,
-                        and_mask,
+                        address_mask,
                     )
                     if lane_vector is None:
                         continue
@@ -1311,7 +1314,7 @@ def _build_observed_sector_summary(
                     if data_width <= 0:
                         continue
                     for lane_index, lane_addr in enumerate(lane_vector):
-                        if not ((and_mask >> lane_index) & 1):
+                        if not ((address_mask >> lane_index) & 1):
                             continue
                         if lane_addr == import_trace_contract.LANE_INACTIVE_SENTINEL:
                             continue

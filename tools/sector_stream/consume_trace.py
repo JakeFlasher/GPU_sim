@@ -282,9 +282,10 @@ def _record_for_address(
     runs; the ``None`` path is a defensive fallback.
     """
     and_mask = inst.active_mask & inst.predicate_mask
+    address_mask = import_trace_contract._address_lane_mask(addr, and_mask)
 
     lane_vector, recon_reason = (
-        import_trace_contract._reconstruct_lane_vector(addr, and_mask)
+        import_trace_contract._reconstruct_lane_vector(addr, address_mask)
     )
     if lane_vector is None:
         # The validator's contract walk already runs before this
@@ -331,8 +332,8 @@ def _record_for_address(
     )
     return generator.compute_sector_stream(
         lane_addresses=lane_addresses,
-        active_mask=inst.active_mask,
-        predicate_mask=inst.predicate_mask,
+        active_mask=address_mask,
+        predicate_mask=address_mask,
         data_width=data_width,
         memory_op_class=memory_op_class,
         address_space=address_space,

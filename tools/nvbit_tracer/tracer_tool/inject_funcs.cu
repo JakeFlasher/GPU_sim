@@ -68,6 +68,8 @@ extern "C" __device__ __noinline__ void instrument_inst(
   ma.reg_id = SECRET_UREG_DESC_NOT_USED;
   ma.num_of_injects = num_of_injects;
   ma.per_operand_type = per_operand_type;
+  ma.address_lane_mask = active_mask & predicate_mask;
+  ma.address_lane_mask_present = 0;
   if (memory_type == MEM_TYPE::STANDARD_MEM) {
     /* collect memory address information */
     for (int i = 0; i < 32; i++) {
@@ -78,7 +80,21 @@ extern "C" __device__ __noinline__ void instrument_inst(
     // STANDARD_MEM uses reg_id as the structural MREF ordinal. LDGSTS needs
     // this to distinguish its shared destination (0) from global source (1)
     // without inferring operand space from allocation lookup outcomes.
-    ma.reg_id = op_reg_val_2;
+    ma.reg_id = op_reg_val_2 & MREF_ORDINAL_MASK;
+    if ((op_reg_val_2 & MREF_IGNORE_SRC_PRESENT) != 0) {
+      // NVBit exposes the trailing LDGSTS SASS operand in its lowered
+      // source-valid polarity. PTX's `ignore-src` is the inverse semantic:
+      // lanes where this predicate is false zero-fill the destination and do
+      // not issue a GLOBAL read.
+      bool source_valid = op_reg_val_3 != 0;
+      if ((op_reg_val_2 & MREF_IGNORE_SRC_NEGATED) != 0) {
+        source_valid = !source_valid;
+      }
+      const uint32_t source_valid_mask =
+          __ballot_sync(active_mask, source_valid);
+      ma.address_lane_mask &= source_valid_mask;
+      ma.address_lane_mask_present = 1;
+    }
     if(op_reg_val_1 != SECRET_UREG_DESC_NOT_USED) {
       ma.ureg_desc_value = op_reg_val_1;
     }
