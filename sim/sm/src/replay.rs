@@ -743,7 +743,30 @@ struct FoldedKernelReplay {
     l2: Option<L2Counters>,
     l2_by_source: Option<L2SourceSplit>,
     dram: Option<DramStats>,
+    front_end: FrontEndCounters,
     unmodeled_tails: TailFlags,
+}
+
+/// Trace-derived compulsory front-end traffic. Every distinct executed 32-byte
+/// SASS sector must enter the instruction/constant hierarchy at least once;
+/// this observer is independent of the data-cache/L2 timing state.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct FrontEndCounters {
+    compulsory_instruction_read_sectors: u64,
+}
+
+impl FrontEndCounters {
+    pub const fn compulsory_instruction_read_sectors(self) -> u64 {
+        self.compulsory_instruction_read_sectors
+    }
+
+    fn add_checked(self, other: Self) -> Option<Self> {
+        Some(Self {
+            compulsory_instruction_read_sectors: self
+                .compulsory_instruction_read_sectors
+                .checked_add(other.compulsory_instruction_read_sectors)?,
+        })
+    }
 }
 
 /// Completion knowledge for one fully replayed launch.
@@ -890,6 +913,10 @@ impl FullKernelReplayResult {
         self.replay.dram.as_ref()
     }
 
+    pub fn front_end(&self) -> FrontEndCounters {
+        self.replay.front_end
+    }
+
     pub fn unmodeled_tails(&self) -> TailFlags {
         self.replay.unmodeled_tails
     }
@@ -908,6 +935,7 @@ pub struct SampledObservedCounters {
     l2: Option<L2Counters>,
     l2_by_source: Option<L2SourceSplit>,
     dram: Option<DramStats>,
+    front_end: FrontEndCounters,
     unmodeled_tails: TailFlags,
 }
 
@@ -939,6 +967,10 @@ impl SampledObservedCounters {
 
     pub fn dram(&self) -> Option<&DramStats> {
         self.dram.as_ref()
+    }
+
+    pub fn front_end(&self) -> FrontEndCounters {
+        self.front_end
     }
 
     pub fn unmodeled_tails(&self) -> TailFlags {
@@ -1167,6 +1199,7 @@ struct ExtractedKernel {
     records_seen: u64,
     coverage: ExtractedCoverage,
     shared_memory_residency: SharedMemoryResidency,
+    front_end: FrontEndCounters,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -1674,6 +1707,7 @@ fn extract_per_sm_blocks(
     let mut seen_indices: BTreeSet<i64> = BTreeSet::new();
     let mut traced_sm_by_launch_index: BTreeMap<i64, i32> = BTreeMap::new();
     let mut records_seen: u64 = 0;
+    let mut instruction_sectors = BTreeSet::new();
 
     for path in td.threadblock_paths(loc)? {
         let tb = td.validated_threadblock(&path)?;
@@ -1750,6 +1784,7 @@ fn extract_per_sm_blocks(
                         found: inst.function_unique_id(),
                     });
                 }
+                instruction_sectors.insert((inst.function_unique_id(), inst.pc() / 32));
                 if let Some(sm) = inst.sm_id() {
                     match block_sm {
                         None => block_sm = Some(sm),
@@ -1961,6 +1996,13 @@ fn extract_per_sm_blocks(
         records_seen,
         coverage,
         shared_memory_residency,
+        front_end: FrontEndCounters {
+            compulsory_instruction_read_sectors: u64::try_from(instruction_sectors.len()).map_err(
+                |_| IssueError::CounterOverflow {
+                    counter: "compulsory instruction-read sector cardinality",
+                },
+            )?,
+        },
     })
 }
 
@@ -2045,6 +2087,7 @@ fn fold_kernel_result(
         l2,
         l2_by_source,
         dram,
+        front_end: FrontEndCounters::default(),
         unmodeled_tails,
     })
 }
@@ -2084,6 +2127,7 @@ fn classify_kernel_result(
                 l2,
                 l2_by_source,
                 dram,
+                front_end,
                 unmodeled_tails,
             } = replay;
             KernelReplayOutcome::SampledObserved(SampledKernelReplayResult {
@@ -2097,6 +2141,7 @@ fn classify_kernel_result(
                     l2,
                     l2_by_source,
                     dram,
+                    front_end,
                     unmodeled_tails,
                 },
             })
@@ -2629,6 +2674,7 @@ fn replay_kernel_with_schedule_and_l2_and_candidates(
         records_seen,
         coverage,
         shared_memory_residency,
+        front_end,
     } = extract_per_sm_blocks(td, loc, schedule, placement, decode_sectors)?;
     let instrumentation_order = observe_async_instrumentation_order(&per_sm_blocks, schedule)?;
     #[cfg(feature = "campaign")]
@@ -2646,7 +2692,7 @@ fn replay_kernel_with_schedule_and_l2_and_candidates(
     }
     let async_copy_destination_fallback_sms =
         async_copy_destination_fallback_sms(td.memory_payload_contract(), &per_sm_blocks);
-    let replay = match mode {
+    let mut replay = match mode {
         ReplayMemMode::Flat | ReplayMemMode::L1Const(_) => {
             let l1_config = match mode {
                 ReplayMemMode::L1Const(cfg) => Some(cfg),
@@ -2745,6 +2791,7 @@ fn replay_kernel_with_schedule_and_l2_and_candidates(
             replay
         }
     };
+    replay.front_end = front_end;
     Ok(classify_kernel_result(coverage, configuration, replay))
 }
 

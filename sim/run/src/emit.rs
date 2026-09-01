@@ -50,9 +50,9 @@ use serde::ser::{Serialize, SerializeStruct, Serializer};
 use sim_arch::ArchId;
 use sim_mem::{L1CounterError, L1Counters, L1OriginCounters, L2Counters, MemoryOrigin};
 use sim_sm::{
-    DramStats, FullCounterEstimatorProvenance, FullKernelReplayResult, FullLaunchCoverage,
-    FullLaunchSetCounters, FullLaunchTimingDiagnostic, L2SourceSplit, LaunchSetScope,
-    ModeledCompletionFrontier, ReplayConfiguration, SystemCounterError, TailFlags,
+    DramStats, FrontEndCounters, FullCounterEstimatorProvenance, FullKernelReplayResult,
+    FullLaunchCoverage, FullLaunchSetCounters, FullLaunchTimingDiagnostic, L2SourceSplit,
+    LaunchSetScope, ModeledCompletionFrontier, ReplayConfiguration, SystemCounterError, TailFlags,
 };
 
 /// The exact counter fields the emission layer reads, borrowed. The type is
@@ -65,6 +65,7 @@ struct CounterSnapshot<'a> {
     l2: Option<&'a L2Counters>,
     l2_by_source: Option<&'a L2SourceSplit>,
     dram: Option<&'a DramStats>,
+    front_end: FrontEndCounters,
 }
 
 impl<'a> CounterSnapshot<'a> {
@@ -76,6 +77,7 @@ impl<'a> CounterSnapshot<'a> {
             l2: result.l2(),
             l2_by_source: result.l2_by_source(),
             dram: result.dram(),
+            front_end: result.front_end(),
         }
     }
 
@@ -87,6 +89,7 @@ impl<'a> CounterSnapshot<'a> {
             l2: counters.l2(),
             l2_by_source: counters.l2_by_source(),
             dram: counters.dram(),
+            front_end: counters.front_end(),
         }
     }
 
@@ -1032,16 +1035,22 @@ fn emit_l2_hit_rate(snap: &CounterSnapshot) -> Result<EmitOutcome, EmitError> {
     )?))
 }
 
-/// `dram__sectors_read.sum` — DRAM read sectors (v0 read-only demand proxy).
+/// `dram__sectors_read.sum` — data demand plus compulsory executed SASS sectors.
 fn emit_dram_read_sectors(snap: &CounterSnapshot) -> Result<EmitOutcome, EmitError> {
     let Some(dram) = snap.dram else {
         return Ok(EmitOutcome::Unavailable(Unavailable::MemModeLacksUnit {
             needs: MemUnit::Dram,
         }));
     };
-    Ok(EmitOutcome::Predicted(MetricValue::Exact(
-        dram.read_sectors,
-    )))
+    let total = checked_sum(
+        "traffic_dram_read_sectors",
+        "data and compulsory instruction DRAM-read sectors",
+        &[
+            dram.read_sectors,
+            snap.front_end.compulsory_instruction_read_sectors(),
+        ],
+    )?;
+    Ok(EmitOutcome::Predicted(MetricValue::Exact(total)))
 }
 
 const SM86_ONLY: &[ArchId] = &[ArchId::Sm86];
@@ -1704,6 +1713,7 @@ mod tests {
             l2: l2.as_ref(),
             l2_by_source: None,
             dram: dram.as_ref(),
+            front_end: FrontEndCounters::default(),
         })
     }
 
@@ -1737,6 +1747,7 @@ mod tests {
             l2: None,
             l2_by_source: None,
             dram: None,
+            front_end: FrontEndCounters::default(),
         };
         let preds = emit_snapshot(&snapshot).unwrap();
         assert_eq!(
@@ -1837,6 +1848,7 @@ mod tests {
             l2: None,
             l2_by_source: None,
             dram: None,
+            front_end: FrontEndCounters::default(),
         };
         assert_eq!(
             emit_snapshot(&snapshot),
@@ -1853,6 +1865,7 @@ mod tests {
             l2: None,
             l2_by_source: None,
             dram: None,
+            front_end: FrontEndCounters::default(),
         };
         assert_eq!(
             emit_snapshot(&relabelled),
@@ -1875,6 +1888,7 @@ mod tests {
             l2: None,
             l2_by_source: None,
             dram: None,
+            front_end: FrontEndCounters::default(),
         };
         assert_eq!(
             emit_snapshot(&l1_snapshot),
@@ -1897,6 +1911,7 @@ mod tests {
             l2: None,
             l2_by_source: Some(&split),
             dram: None,
+            front_end: FrontEndCounters::default(),
         };
         assert_eq!(
             emit_snapshot(&split_snapshot),
@@ -1920,6 +1935,7 @@ mod tests {
             l2: None,
             l2_by_source: None,
             dram: Some(&dram),
+            front_end: FrontEndCounters::default(),
         };
         assert_eq!(
             emit_snapshot(&dram_snapshot),
@@ -2052,6 +2068,7 @@ mod tests {
             l2: None,
             l2_by_source: None,
             dram: None,
+            front_end: FrontEndCounters::default(),
         };
         let preds = emit_snapshot(&snapshot).unwrap();
 
@@ -2197,6 +2214,7 @@ mod tests {
             l2: None,
             l2_by_source: None,
             dram: None,
+            front_end: FrontEndCounters::default(),
         };
         assert_eq!(
             emit_l1tex_read_hit_rate(&snapshot),

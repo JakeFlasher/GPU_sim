@@ -101,8 +101,8 @@ pub use program::{
     FunctionSchedule, IssueSlot, OpClass, PipelineClass, ProgramError, build_schedules,
 };
 pub use replay::{
-    CoResidency, FullCounterEstimatorProvenance, FullCoverageSource, FullKernelReplayResult,
-    FullLaunchCoverage, FullLaunchSetCounters, FullLaunchSetDeclaration,
+    CoResidency, FrontEndCounters, FullCounterEstimatorProvenance, FullCoverageSource,
+    FullKernelReplayResult, FullLaunchCoverage, FullLaunchSetCounters, FullLaunchSetDeclaration,
     FullLaunchSetDeclarationError, FullLaunchTimingDiagnostic, KernelReplayOutcome,
     LaunchSetAggregationError, LaunchSetCounterComponent, LaunchSetScalarCounter, LaunchSetScope,
     LaunchSetScopeError, ModeledCompletionFrontier, ReplayConfiguration, ReplayError,

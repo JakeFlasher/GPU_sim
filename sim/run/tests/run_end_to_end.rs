@@ -190,7 +190,8 @@ struct ExpectedModeledOutcomes {
     l1_read_fraction: (Option<f64>, u64, u64),
     l1_unified_fraction: (Option<f64>, u64, u64),
     l2_fraction: (Option<f64>, u64, u64),
-    dram_read_sectors: u64,
+    data_dram_read_sectors: u64,
+    compulsory_instruction_read_sectors: u64,
 }
 
 fn exact(value: u64) -> EmitOutcome {
@@ -233,7 +234,7 @@ fn expected_mode_outcomes(
         }
         ReplayMemMode::L1SharedL2 { .. } => (
             fraction(expected.l2_fraction),
-            exact(expected.dram_read_sectors),
+            exact(expected.data_dram_read_sectors + expected.compulsory_instruction_read_sectors),
         ),
     };
     BTreeMap::from([
@@ -266,6 +267,11 @@ fn assert_full_launch_emission_matches_singleton_aggregate(
     assert!(result.coverage().blocks_observed() > 0);
     assert!(result.records_seen() > 0);
     assert_eq!(result.instructions_issued(), result.records_seen());
+    assert_eq!(
+        result.front_end().compulsory_instruction_read_sectors(),
+        expected.compulsory_instruction_read_sectors,
+        "the executable fixture must preserve its exact compulsory code footprint"
+    );
 
     let per_launch = emit_launch(&result).expect("emit full launch");
     assert_eq!(per_launch.configuration(), result.configuration());
@@ -300,6 +306,11 @@ fn assert_full_launch_emission_matches_singleton_aggregate(
         aggregate.l2().map(|counters| counters.lookup_hits),
         result.l2().map(|counters| counters.lookup_hits),
         "singleton aggregation must preserve L2 lookup hits"
+    );
+    assert_eq!(
+        aggregate.front_end(),
+        result.front_end(),
+        "singleton aggregation must preserve compulsory front-end traffic"
     );
     let aggregate_predictions = emit_all(&aggregate).expect("emit singleton aggregate");
 
@@ -803,7 +814,8 @@ fn full_launch_emission_matches_singleton_aggregate_on_real_consumer_path() {
         l1_read_fraction: (Some(0.5), 4, 8),
         l1_unified_fraction: (Some(4.0 / 13.0), 4, 13),
         l2_fraction: (Some(5.0 / 9.0), 5, 9),
-        dram_read_sectors: 9,
+        data_dram_read_sectors: 9,
+        compulsory_instruction_read_sectors: 27,
     };
     for (mode, mode_name) in modes {
         let result = full_replay(&evidence, &issue_params, mode);
@@ -827,7 +839,8 @@ fn full_launch_rates_keep_zero_denominator_nulls_on_real_consumer_path() {
         l1_read_fraction: (None, 0, 0),
         l1_unified_fraction: (None, 0, 0),
         l2_fraction: (None, 0, 0),
-        dram_read_sectors: 0,
+        data_dram_read_sectors: 0,
+        compulsory_instruction_read_sectors: 1,
     };
     for (mode, mode_name) in modes {
         let result = full_replay(&evidence, &issue_params, mode);

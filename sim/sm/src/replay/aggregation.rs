@@ -15,8 +15,8 @@ use crate::issue::TailFlags;
 use crate::system::{DramStats, L2SourceSplit, SystemCounterError};
 
 use super::{
-    FullKernelReplayResult, FullLaunchCoverage, ModeledCompletionFrontier, ReplayConfiguration,
-    ReplayLaunchCoverageBinding, ReplayMemMode,
+    FrontEndCounters, FullKernelReplayResult, FullLaunchCoverage, ModeledCompletionFrontier,
+    ReplayConfiguration, ReplayLaunchCoverageBinding, ReplayMemMode,
 };
 
 /// Declarative launch identity failures. This constructor creates an expected
@@ -263,6 +263,7 @@ impl std::fmt::Display for LaunchSetCounterComponent {
 pub enum LaunchSetScalarCounter {
     InstructionsIssued,
     RecordsSeen,
+    CompulsoryInstructionReadSectors,
 }
 
 impl std::fmt::Display for LaunchSetScalarCounter {
@@ -270,6 +271,7 @@ impl std::fmt::Display for LaunchSetScalarCounter {
         f.write_str(match self {
             Self::InstructionsIssued => "instructions_issued",
             Self::RecordsSeen => "records_seen",
+            Self::CompulsoryInstructionReadSectors => "compulsory_instruction_read_sectors",
         })
     }
 }
@@ -286,6 +288,7 @@ pub struct FullLaunchSetCounters {
     estimator_provenance: FullCounterEstimatorProvenance,
     instructions_issued: u64,
     records_seen: u64,
+    front_end: FrontEndCounters,
     l1: Option<L1Counters>,
     l2: Option<L2Counters>,
     l2_by_source: Option<L2SourceSplit>,
@@ -324,6 +327,10 @@ impl FullLaunchSetCounters {
 
     pub fn records_seen(&self) -> u64 {
         self.records_seen
+    }
+
+    pub fn front_end(&self) -> FrontEndCounters {
+        self.front_end
     }
 
     pub fn l1(&self) -> Option<&L1Counters> {
@@ -815,6 +822,7 @@ pub fn aggregate_full_launch_set(
     let shape = counter_shape(declaration.configuration.memory_mode());
     let mut instructions_issued = 0_u64;
     let mut records_seen = 0_u64;
+    let mut front_end = FrontEndCounters::default();
     let mut l1 = shape.l1.then(|| L1Counters::for_arch(arch));
     let mut l2 = shape.l2.then(|| L2Counters::for_arch(arch));
     let mut l2_by_source = shape.l2_by_source.then(|| L2SourceSplit::for_arch(arch));
@@ -842,6 +850,12 @@ pub fn aggregate_full_launch_set(
                 launch: launch.clone(),
                 counter: LaunchSetScalarCounter::RecordsSeen,
             })?;
+        front_end = front_end.add_checked(result.front_end()).ok_or_else(|| {
+            LaunchSetAggregationError::ScalarOverflow {
+                launch: launch.clone(),
+                counter: LaunchSetScalarCounter::CompulsoryInstructionReadSectors,
+            }
+        })?;
         if let (Some(total), Some(addend)) = (&mut l1, result.l1()) {
             total
                 .add_checked(addend)
@@ -904,6 +918,7 @@ pub fn aggregate_full_launch_set(
         estimator_provenance: FullCounterEstimatorProvenance::ExactFullCoverageReplay,
         instructions_issued,
         records_seen,
+        front_end,
         l1,
         l2,
         l2_by_source,
@@ -1046,6 +1061,7 @@ mod tests {
                 l2,
                 l2_by_source,
                 dram,
+                front_end: FrontEndCounters::default(),
                 unmodeled_tails: TailFlags::default(),
             },
         }
@@ -1064,11 +1080,17 @@ mod tests {
         let first = binding(1);
         let second = binding(2);
         let mut second_result = full_result(second.clone(), configuration, 5, 5);
+        second_result.replay.front_end = FrontEndCounters {
+            compulsory_instruction_read_sectors: 7,
+        };
         second_result.replay.diagnostic_last_issue_cycles = 2_002;
         second_result.replay.last_processed_system_event_time = Some(2_222);
         second_result.replay.terminal_modeled_event_time = Some(2_222);
         second_result.replay.unmodeled_tails.red_rmw = true;
         let mut first_result = full_result(first.clone(), configuration, 3, 3);
+        first_result.replay.front_end = FrontEndCounters {
+            compulsory_instruction_read_sectors: 5,
+        };
         first_result.replay.diagnostic_last_issue_cycles = 1_001;
         first_result.replay.last_processed_system_event_time = Some(1_111);
         first_result.replay.terminal_modeled_event_time = Some(1_111);
@@ -1087,6 +1109,10 @@ mod tests {
         );
         assert_eq!(aggregate.instructions_issued(), 8);
         assert_eq!(aggregate.records_seen(), 8);
+        assert_eq!(
+            aggregate.front_end().compulsory_instruction_read_sectors(),
+            12
+        );
         assert_eq!(aggregate.launch_coverages()[0].launch(), &first);
         assert_eq!(aggregate.launch_coverages()[1].launch(), &second);
         assert_eq!(

@@ -468,6 +468,7 @@ pub struct ReadinessReport {
 pub struct CounterReport {
     pub instructions_issued: u64,
     pub records_seen: u64,
+    pub front_end: FrontEndCounterReport,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub l1: Option<L1CounterReport>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -477,6 +478,11 @@ pub struct CounterReport {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub dram: Option<DramCounterReport>,
     pub unmodeled_tails: TailReport,
+}
+
+#[derive(Debug, Serialize)]
+pub struct FrontEndCounterReport {
+    pub compulsory_instruction_read_sectors: u64,
 }
 
 #[derive(Debug, Serialize)]
@@ -598,6 +604,7 @@ fn completion_frontier_report(value: ModeledCompletionFrontier) -> CompletionFro
 fn counters(
     instructions_issued: u64,
     records_seen: u64,
+    front_end: sim_sm::FrontEndCounters,
     l1: Option<&L1Counters>,
     l2: Option<&L2Counters>,
     l2_by_source: Option<&L2SourceSplit>,
@@ -607,6 +614,9 @@ fn counters(
     CounterReport {
         instructions_issued,
         records_seen,
+        front_end: FrontEndCounterReport {
+            compulsory_instruction_read_sectors: front_end.compulsory_instruction_read_sectors(),
+        },
         l1: l1.map(|value| L1CounterReport {
             hits: value.hits,
             misses: value.misses,
@@ -798,6 +808,7 @@ fn launch_report(
     let counter_report = counters(
         result.instructions_issued(),
         result.records_seen(),
+        result.front_end(),
         result.l1(),
         result.l2(),
         result.l2_by_source(),
@@ -1205,6 +1216,13 @@ mod tests {
         assert_eq!(report.memory_admission_feedback_candidate_id, None);
         assert_eq!(report.launches.len(), 1);
         assert_eq!(report.launches[0].counters.instructions_issued, 54);
+        assert_eq!(
+            report.launches[0]
+                .counters
+                .front_end
+                .compulsory_instruction_read_sectors,
+            27
+        );
         assert!(report.launches[0].metric_predictions.is_none());
         assert!(report.launches[0].cache_lookup_predictions.is_none());
         assert_eq!(report.launches[0].coverage.blocks_observed, 1);
@@ -1250,6 +1268,14 @@ mod tests {
             metrics[7].outcome,
             EmitOutcome::RequiredUnimplemented { .. }
         ));
+        let dram = metrics
+            .iter()
+            .find(|metric| metric.ncu_metric == "dram__sectors_read.sum")
+            .expect("DRAM metric is registered");
+        assert_eq!(
+            dram.outcome,
+            EmitOutcome::Predicted(sim_run::emit::MetricValue::Exact(36))
+        );
         let cache = report.launches[0]
             .cache_lookup_predictions
             .as_ref()
