@@ -32,6 +32,10 @@ class BenchmarkSpecTests(unittest.TestCase):
         cls.single_sim_gate = json.loads(
             (HERE / "accuracy_gate_counts_single_sim.json").read_text()
         )
+        cls.large_spec = json.loads((HERE / "large_workload_spec.json").read_text())
+        cls.large_gate = json.loads(
+            (HERE / "accuracy_gate_large_workloads.json").read_text()
+        )
 
     def test_frozen_spec_is_valid(self) -> None:
         subject.validate_spec(self.spec, self.count_metrics, self.profile)
@@ -53,6 +57,14 @@ class BenchmarkSpecTests(unittest.TestCase):
         mutated = copy.deepcopy(self.single_sim_gate)
         mutated["required_simulator_repeats"] = 7
         with self.assertRaisesRegex(subject.ValidationError, "require 1 simulator"):
+            subject.validate_accuracy_gate(mutated)
+
+    def test_large_workload_contract_is_valid_and_per_row_gated(self) -> None:
+        subject.validate_spec(self.large_spec, self.count_metrics, self.profile)
+        subject.validate_accuracy_gate(self.large_gate)
+        mutated = copy.deepcopy(self.large_gate)
+        mutated["checks"]["terminal_cycle_mape_pct"]["maximum_per_workload"] = 20.1
+        with self.assertRaisesRegex(subject.ValidationError, "per-workload maximum drift"):
             subject.validate_accuracy_gate(mutated)
 
     def test_count_target_gate_requires_all_six_components(self) -> None:

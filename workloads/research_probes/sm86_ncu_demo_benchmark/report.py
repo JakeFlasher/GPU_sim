@@ -976,6 +976,41 @@ def _evaluate_accuracy_gate(
             accuracy["cache_lookup_count_coverage"],
         ),
     }
+    per_workload_values = {
+        "terminal_cycle_mape_pct": [
+            (str(row["workload_id"]), row["accuracy"]["terminal_lower_bound_mape_pct"])
+            for row in rows
+        ],
+        "runtime_equivalent_mape_pct": [
+            (str(row["workload_id"]), row["accuracy"]["runtime_equivalent_mape_pct"])
+            for row in rows
+        ],
+        "issue_cycle_mape_pct": [
+            (str(row["workload_id"]), row["accuracy"]["issue_frontier_mape_pct"])
+            for row in rows
+        ],
+        "instruction_throughput_mape_pct": [
+            (
+                str(row["workload_id"]),
+                row["accuracy"]["instruction_throughput_mape_pct"],
+            )
+            for row in rows
+        ],
+        "counter_traffic_mape_pct": [
+            (f"{row['workload_id']}.{metric}", row["metrics"][metric]["ape_pct"])
+            for row in rows
+            for metric in COUNTER_IDS
+        ],
+        "cache_lookup_count_normalized_error_pct": [
+            (
+                f"{row['workload_id']}.{metric}",
+                row["metrics"][metric]["pair_normalized_absolute_error_pct"],
+            )
+            for row in rows
+            for metric in CACHE_LOOKUP_COUNT_IDS
+            if metric in row["metrics"]
+        ],
+    }
     checks: dict[str, Any] = {}
     for name, contract in gate["checks"].items():
         value, coverage = observed[name]
@@ -990,6 +1025,29 @@ def _evaluate_accuracy_gate(
             "coverage": coverage,
             "required_coverage": contract["required_coverage"],
         }
+        if "maximum_per_workload" in contract:
+            covered = [
+                (identity, float(candidate))
+                for identity, candidate in per_workload_values[name]
+                if candidate is not None
+            ]
+            worst_identity, worst_value = max(
+                covered,
+                key=lambda item: item[1],
+                default=(None, None),
+            )
+            per_workload_passed = (
+                worst_value is not None
+                and worst_value <= float(contract["maximum_per_workload"])
+            )
+            result.update(
+                {
+                    "maximum_observed_per_workload_pct": worst_value,
+                    "maximum_observed_identity": worst_identity,
+                    "maximum_per_workload": contract["maximum_per_workload"],
+                }
+            )
+            passed = passed and per_workload_passed
         if "maximum_mean_absolute_percentage_point_error" in contract:
             metric_id = (
                 "l1_unified_hit_rate"
@@ -1042,6 +1100,28 @@ def _evaluate_accuracy_gate(
             >= required_simulator_processes,
         },
     }
+    if "minimum_hardware_cycles_per_workload" in gate:
+        hardware_cycles = [
+            (
+                str(row["workload_id"]),
+                _finite(
+                    row["metrics"]["gpc_elapsed_cycles"]["ncu"]["value"],
+                    f"{row['workload_id']}.ncu_gpc_cycles",
+                ),
+            )
+            for row in rows
+        ]
+        minimum_identity, minimum_cycles = min(
+            hardware_cycles,
+            key=lambda item: item[1],
+        )
+        required_cycles = int(gate["minimum_hardware_cycles_per_workload"])
+        repeat_checks["hardware_cycle_floor_per_workload"] = {
+            "value": minimum_cycles,
+            "workload_id": minimum_identity,
+            "required": required_cycles,
+            "passed": minimum_cycles >= required_cycles,
+        }
     if required_simulator_processes > 1:
         repeat_checks["simulator_prediction_determinism"] = {
             "value": total["simulator_repeatability"][
@@ -1244,6 +1324,16 @@ def _determinism_label(status: object) -> str:
         "mismatch_observed": "mismatch observed",
         "partially_assessed": "partially assessed",
     }.get(str(status), str(status).replace("_", " "))
+
+
+def _gate_value(value: object) -> str:
+    if value is None:
+        return "n/a"
+    if isinstance(value, bool):
+        return "yes" if value else "no"
+    if isinstance(value, float):
+        return _fmt(value)
+    return str(value)
 
 
 def _count(value: object) -> str:
@@ -1510,13 +1600,26 @@ def render_markdown(report: Mapping[str, Any]) -> str:
         [
             f"Technical status: **{report['accuracy_gate']['technical_status'].upper()}**. Manual approval: **{report['accuracy_gate']['manual_approval_status']}**.",
             "",
-            "| Check | Observed | Maximum | Coverage | Required | Pass |",
-            "| :--- | ---: | ---: | ---: | ---: | :---: |",
+            "| Check | Aggregate | Aggregate max | Worst row/component | Per-row max | Coverage | Required | Pass |",
+            "| :--- | ---: | ---: | :--- | ---: | ---: | ---: | :---: |",
         ]
     )
     for name, check in report["accuracy_gate"]["metric_checks"].items():
         lines.append(
-            f"| {name} | {_fmt(check['value'])}% | {_fmt(check['maximum'])}% | {check['coverage']} | {check['required_coverage']} | {'yes' if check['passed'] else 'no'} |"
+            f"| {name} | {_fmt(check['value'])}% | {_fmt(check['maximum'])}% | {check.get('maximum_observed_identity', 'n/a')} ({_pct(check.get('maximum_observed_per_workload_pct'))}) | {_pct(check.get('maximum_per_workload'))} | {check['coverage']} | {check['required_coverage']} | {'yes' if check['passed'] else 'no'} |"
+        )
+    lines.extend(
+        [
+            "",
+            "## Cohort and sampling checks",
+            "",
+            "| Check | Observed | Required | Limiting workload | Pass |",
+            "| :--- | :--- | :--- | :--- | :---: |",
+        ]
+    )
+    for name, check in report["accuracy_gate"]["repeat_checks"].items():
+        lines.append(
+            f"| {name} | {_gate_value(check['value'])} | {_gate_value(check['required'])} | {check.get('workload_id', 'n/a')} | {'yes' if check['passed'] else 'no'} |"
         )
     lines.extend(["", "## Caveats", ""])
     lines.extend(f"- {caveat}" for caveat in report["caveats"])

@@ -175,22 +175,29 @@ def validate_metrics(metrics: Mapping[str, Any], requested: Sequence[str]) -> No
 def validate_accuracy_gate(gate: Mapping[str, Any]) -> None:
     schema_version = gate.get("schema_version")
     require(
-        schema_version in {1, 2, 3},
-        "accuracy gate schema_version must be 1, 2, or 3",
+        schema_version in {1, 2, 3, 4},
+        "accuracy gate schema_version must be 1, 2, 3, or 4",
     )
-    require(gate.get("required_workloads") == 8, "accuracy gate must require 8 workloads")
+    required_workloads = gate.get("required_workloads")
+    if schema_version == 4:
+        require(
+            isinstance(required_workloads, int) and 6 <= required_workloads <= 32,
+            "large-workload accuracy gate must require 6..32 workloads",
+        )
+    else:
+        require(required_workloads == 8, "accuracy gate must require 8 workloads")
     require(gate.get("required_ncu_repeats") == 7, "accuracy gate must require 7 NCU repeats")
-    expected_simulator_repeats = 1 if schema_version == 3 else 7
+    expected_simulator_repeats = 1 if schema_version in {3, 4} else 7
     require(
         gate.get("required_simulator_repeats") == expected_simulator_repeats,
         f"accuracy gate must require {expected_simulator_repeats} simulator repeat(s)",
     )
     expected = {
-        "terminal_cycle_mape_pct": (20.0, 8),
-        "runtime_equivalent_mape_pct": (20.0, 8),
-        "issue_cycle_mape_pct": (20.0, 8),
-        "instruction_throughput_mape_pct": (20.0, 8),
-        "counter_traffic_mape_pct": (20.0, 32),
+        "terminal_cycle_mape_pct": (20.0, required_workloads),
+        "runtime_equivalent_mape_pct": (20.0, required_workloads),
+        "issue_cycle_mape_pct": (20.0, required_workloads),
+        "instruction_throughput_mape_pct": (20.0, required_workloads),
+        "counter_traffic_mape_pct": (20.0, 4 * required_workloads),
     }
     if schema_version == 1:
         expected.update(
@@ -200,7 +207,10 @@ def validate_accuracy_gate(gate: Mapping[str, Any]) -> None:
             }
         )
     else:
-        expected["cache_lookup_count_normalized_error_pct"] = (20.0, 48)
+        expected["cache_lookup_count_normalized_error_pct"] = (
+            20.0,
+            6 * required_workloads,
+        )
     checks = gate.get("checks")
     require(isinstance(checks, Mapping) and set(checks) == set(expected), "accuracy gate checks drift")
     for name, (maximum, coverage) in expected.items():
@@ -216,6 +226,28 @@ def validate_accuracy_gate(gate: Mapping[str, Any]) -> None:
                 and checks[name].get("required_percentage_point_coverage") == 8,
                 f"{name}: percentage-point gate drift",
             )
+    if schema_version == 4:
+        require(
+            gate.get("minimum_hardware_cycles_per_workload") == 8000,
+            "large-workload hardware cycle floor must be 8000",
+        )
+        for name in expected:
+            require(
+                checks[name].get("maximum_per_workload") == 20.0,
+                f"{name}: per-workload maximum drift",
+            )
+        policy = gate.get("scientific_policy")
+        require(isinstance(policy, Mapping), "large-workload scientific policy missing")
+        for field in (
+            "scored_ncu_values_as_simulator_inputs",
+            "per_workload_parameters",
+            "aggregate_only_gate",
+        ):
+            require(policy.get(field) is False, f"scientific policy {field} must be false")
+        require(
+            policy.get("previous_demo_non_regression_required") is True,
+            "previous demo non-regression must remain required",
+        )
     require(gate.get("manual_approval_required") is True, "manual approval must remain required")
 
 
@@ -335,6 +367,7 @@ def validate_spec(spec: Mapping[str, Any], metrics: Mapping[str, Any], profile: 
             "workloads/research_probes/sm86_ncu_demo_benchmark/accuracy_gate.json",
             "workloads/research_probes/sm86_ncu_demo_benchmark/accuracy_gate_counts.json",
             "workloads/research_probes/sm86_ncu_demo_benchmark/accuracy_gate_counts_single_sim.json",
+            "workloads/research_probes/sm86_ncu_demo_benchmark/accuracy_gate_large_workloads.json",
         },
         "accuracy gate path drift",
     )
@@ -354,7 +387,10 @@ def validate_spec(spec: Mapping[str, Any], metrics: Mapping[str, Any], profile: 
     expected_simulator_repeats = (
         (1, 1)
         if spec.get("accuracy_gate")
-        == "workloads/research_probes/sm86_ncu_demo_benchmark/accuracy_gate_counts_single_sim.json"
+        in {
+            "workloads/research_probes/sm86_ncu_demo_benchmark/accuracy_gate_counts_single_sim.json",
+            "workloads/research_probes/sm86_ncu_demo_benchmark/accuracy_gate_large_workloads.json",
+        }
         else (3, 7)
     )
     require(

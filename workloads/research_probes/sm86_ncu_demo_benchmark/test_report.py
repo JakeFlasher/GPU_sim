@@ -360,3 +360,67 @@ def test_single_simulator_gate_does_not_claim_unmeasured_determinism() -> None:
         "required": "not_required_for_single_process_policy",
         "passed": True,
     }
+
+
+def test_large_workload_gate_rejects_aggregate_pass_with_row_failure() -> None:
+    gate = json.loads((report.HERE / "accuracy_gate_large_workloads.json").read_text())
+
+    def row(index: int, timing_error: float) -> dict:
+        metrics = {metric: {"ape_pct": 10.0} for metric in report.COUNTER_IDS}
+        metrics["gpc_elapsed_cycles"] = {"ncu": {"value": 10000.0}}
+        metrics.update(
+            {
+                metric: {
+                    "ape_pct": 10.0,
+                    "absolute_percentage_point_error": 1.0,
+                }
+                for metric in report.HIT_RATE_IDS
+            }
+        )
+        metrics.update(
+            {
+                metric: {
+                    "ape_pct": 10.0,
+                    "pair_normalized_absolute_error_pct": 10.0,
+                }
+                for metric in report.CACHE_LOOKUP_COUNT_IDS
+            }
+        )
+        return {
+            "workload_id": f"large-{index}",
+            "target_launches_per_process": 1,
+            "ncu_launch_samples": 7,
+            "simulator_process_samples": 1,
+            "timing": {
+                "gpu_kernel_seconds": 1.0,
+                "ncu_profile_wall_seconds_mean": 1.0,
+                "ncu_profile_wall_seconds_total": 7.0,
+                "simulator_wall_seconds": 1.0,
+            },
+            "accuracy": {
+                "terminal_lower_bound_mape_pct": timing_error,
+                "issue_frontier_mape_pct": timing_error,
+                "runtime_equivalent_mape_pct": timing_error,
+                "instruction_throughput_mape_pct": timing_error,
+            },
+            "ncu_repeatability": {
+                "max_relative_range_pct": 1.0,
+                "max_relative_range_metric": "m",
+            },
+            "simulator_repeatability": {
+                "wall_relative_range_pct": None,
+                "deterministic_predictions": None,
+                "prediction_determinism_status": "not_assessed_single_process",
+            },
+            "metrics": metrics,
+        }
+
+    rows = [row(0, 25.0), *[row(index, 10.0) for index in range(1, 7)]]
+    total = report._totals(rows)
+    evaluated = report._evaluate_accuracy_gate(gate, rows, total)
+    terminal = evaluated["metric_checks"]["terminal_cycle_mape_pct"]
+    assert terminal["value"] < 20.0
+    assert terminal["maximum_observed_per_workload_pct"] == 25.0
+    assert terminal["maximum_observed_identity"] == "large-0"
+    assert not terminal["passed"]
+    assert evaluated["technical_status"] == "fail"
