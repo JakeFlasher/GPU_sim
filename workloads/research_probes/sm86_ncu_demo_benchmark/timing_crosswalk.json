@@ -37,7 +37,7 @@
         "ncu_sm_active_cycles_median": 909.0,
         "ncu_gpc_elapsed_cycles_median": 2961.0,
         "simulator_issue_cycles": 389.0,
-        "simulator_terminal_cycles": 389.0,
+        "simulator_terminal_cycles": 390.0,
         "sm_active_minus_issue_cycles": 520.0,
         "gpc_elapsed_minus_sm_active_cycles": 2052.0
       },
@@ -47,7 +47,7 @@
         "ncu_sm_active_cycles_median": 7815.0,
         "ncu_gpc_elapsed_cycles_median": 9858.0,
         "simulator_issue_cycles": 6282.0,
-        "simulator_terminal_cycles": 6282.0,
+        "simulator_terminal_cycles": 6283.0,
         "sm_active_minus_issue_cycles": 1533.0,
         "gpc_elapsed_minus_sm_active_cycles": 2043.0
       }
