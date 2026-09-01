@@ -226,6 +226,25 @@ pub enum TraceError {
         pc: u32,
     },
     #[error(
+        "{record}: instrumentation_order requires same-record {identity} identity (canonical: instrumentation_order_identity_missing)"
+    )]
+    InstrumentationOrderIdentityMissing {
+        record: String,
+        identity: &'static str,
+    },
+    #[error(
+        "{record}: instrumentation_order is present with reserved value zero; producer order is 1-based (canonical: instrumentation_order_zero)"
+    )]
+    InstrumentationOrderZero { record: String },
+    #[error(
+        "{record}: instrumentation_order={current} does not strictly follow prior warp-local order {previous} (canonical: instrumentation_order_not_increasing)"
+    )]
+    InstrumentationOrderNotIncreasing {
+        record: String,
+        previous: u64,
+        current: u64,
+    },
+    #[error(
         "{record}: lane address payload contradicts active_mask & predicate_mask (canonical: lane_mask_inconsistent)"
     )]
     LaneMaskInconsistent { record: String },
@@ -481,6 +500,13 @@ impl TraceError {
             Self::PredicateMaskMissing { .. } => Some("predicate_mask_missing"),
             Self::VpcMissing { .. } => Some("vpc_missing"),
             Self::VpcInconsistentWithPc { .. } => Some("vpc_inconsistent_with_pc"),
+            Self::InstrumentationOrderIdentityMissing { .. } => {
+                Some("instrumentation_order_identity_missing")
+            }
+            Self::InstrumentationOrderZero { .. } => Some("instrumentation_order_zero"),
+            Self::InstrumentationOrderNotIncreasing { .. } => {
+                Some("instrumentation_order_not_increasing")
+            }
             Self::LaneMaskInconsistent { .. } => Some("lane_mask_inconsistent"),
             Self::MemoryOpClassMissing { .. } => {
                 Some("memory_op_class_missing_on_memory_instruction")
@@ -2315,6 +2341,7 @@ pub struct ValidatedWarp {
     warp_id: i32,
     function_unique_id: i32,
     instructions: Vec<ValidatedInstruction>,
+    instrumentation_order_anchors: Vec<CompactInstrumentationOrderAnchor>,
     memories: Vec<ValidatedMemoryInstruction>,
     async_copy_projections: Vec<AsyncCopyProjection>,
     ldgsts_source_cohorts: Vec<LdgstsSourceCohort>,
@@ -2336,6 +2363,7 @@ impl ValidatedWarp {
             .first()
             .map_or(0, |instruction| instruction.function_unique_id);
         let mut instructions = Vec::with_capacity(warp.instructions.len());
+        let mut instrumentation_order_anchors = Vec::new();
         let mut memories = Vec::new();
         let mut async_copy_projections = Vec::new();
         let mut ldgsts_source_cohorts = Vec::new();
@@ -2345,6 +2373,14 @@ impl ValidatedWarp {
         let mut sector_errors = Vec::new();
         let mut shared_word_scratch = Vec::new();
         for (record_ix, instruction) in warp.instructions.into_iter().enumerate() {
+            if let Some(order) = instruction.instrumentation_order {
+                instrumentation_order_anchors.push(CompactInstrumentationOrderAnchor {
+                    order,
+                    instruction_index: u32::try_from(record_ix).unwrap_or_else(|_| {
+                        unreachable!("validated instruction index exceeded u32")
+                    }),
+                });
+            }
             let memory_index = if instruction.memory_op_class.is_some() {
                 let no_error_context = || String::new();
                 let preflight = match preflight_memory_access(&instruction, no_error_context) {
@@ -2552,6 +2588,7 @@ impl ValidatedWarp {
             warp_id: warp.id,
             function_unique_id,
             instructions,
+            instrumentation_order_anchors,
             memories,
             async_copy_projections,
             ldgsts_source_cohorts,
@@ -2573,9 +2610,11 @@ impl ValidatedWarp {
     pub fn instructions(
         &self,
     ) -> impl ExactSizeIterator<Item = ValidatedInstructionRef<'_>> + DoubleEndedIterator + '_ {
-        self.instructions.iter().map(|instruction| {
-            let memory =
-                if instruction.memory_index == u32::MAX {
+        self.instructions
+            .iter()
+            .enumerate()
+            .map(|(instruction_index, instruction)| {
+                let memory = if instruction.memory_index == u32::MAX {
                     None
                 } else {
                     let index = usize::try_from(instruction.memory_index)
@@ -2584,13 +2623,25 @@ impl ValidatedWarp {
                         unreachable!("validated memory index escaped its arena")
                     }))
                 };
-            ValidatedInstructionRef {
-                instruction,
-                memory,
-                function_unique_id: self.function_unique_id,
-                warpid_tb: self.map_key,
-            }
-        })
+                let instrumentation_order =
+                    u32::try_from(instruction_index)
+                        .ok()
+                        .and_then(|instruction_index| {
+                            self.instrumentation_order_anchors
+                                .binary_search_by_key(&instruction_index, |anchor| {
+                                    anchor.instruction_index
+                                })
+                                .ok()
+                                .map(|index| self.instrumentation_order_anchors[index].order)
+                        });
+                ValidatedInstructionRef {
+                    instruction,
+                    memory,
+                    function_unique_id: self.function_unique_id,
+                    warpid_tb: self.map_key,
+                    instrumentation_order,
+                }
+            })
     }
 
     pub fn memory_route<'a>(
@@ -2735,6 +2786,15 @@ struct ValidatedInstruction {
     identity_presence: u8,
 }
 
+/// Sparse order witness for one selected dynamic instruction. Keeping this in
+/// a warp-local arena avoids widening every hot compact instruction when the
+/// opt-in producer field is absent.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct CompactInstrumentationOrderAnchor {
+    order: u64,
+    instruction_index: u32,
+}
+
 impl ValidatedInstruction {
     const SM_ID_PRESENT: u8 = 1 << 0;
     const WARP_SLOT_PRESENT: u8 = 1 << 1;
@@ -2748,6 +2808,7 @@ pub struct ValidatedInstructionRef<'a> {
     memory: Option<&'a ValidatedMemoryInstruction>,
     function_unique_id: i32,
     warpid_tb: i32,
+    instrumentation_order: Option<u64>,
 }
 
 impl<'a> ValidatedInstructionRef<'a> {
@@ -2777,6 +2838,12 @@ impl<'a> ValidatedInstructionRef<'a> {
         } else {
             None
         }
+    }
+
+    /// Existing callback/channel order attached by the opt-in NVBit producer.
+    /// This is an observation token, never a hardware cycle or simulator time.
+    pub const fn instrumentation_order(&self) -> Option<u64> {
+        self.instrumentation_order
     }
 
     pub const fn memory(self) -> Option<&'a ValidatedMemoryInstruction> {
@@ -7495,6 +7562,7 @@ pub fn validate_threadblock_contract(
                 warp_id: warp.id,
             });
         }
+        let mut previous_instrumentation_order = None;
         for (instruction_index, instruction) in warp.instructions.iter().enumerate() {
             let record = || format!("{label} warp={warp_id} inst={instruction_index}");
             let preflight = preflight_memory_access(instruction, &record)?;
@@ -7514,6 +7582,32 @@ pub fn validate_threadblock_contract(
                     expected: expected_function_unique_id,
                     actual: instruction.function_unique_id,
                 });
+            }
+            if let Some(current) = instruction.instrumentation_order {
+                if current == 0 {
+                    return Err(TraceError::InstrumentationOrderZero { record: record() });
+                }
+                for (present, identity) in [
+                    (instruction.sm_id.is_some(), "sm_id"),
+                    (instruction.warpid_sm.is_some(), "warpid_sm"),
+                ] {
+                    if !present {
+                        return Err(TraceError::InstrumentationOrderIdentityMissing {
+                            record: record(),
+                            identity,
+                        });
+                    }
+                }
+                if let Some(previous) = previous_instrumentation_order
+                    && current <= previous
+                {
+                    return Err(TraceError::InstrumentationOrderNotIncreasing {
+                        record: record(),
+                        previous,
+                        current,
+                    });
+                }
+                previous_instrumentation_order = Some(current);
             }
             let Some(preflight) = preflight else {
                 continue;
@@ -7886,7 +7980,7 @@ mod tests {
 
     #[test]
     fn compact_instruction_identity_preserves_optional_i32_values() {
-        let instruction = |pc, sm_id, warpid_sm| pb::Instruction {
+        let instruction = |pc, sm_id, warpid_sm, instrumentation_order| pb::Instruction {
             pc,
             active_mask: Some(1),
             predicate_mask: Some(1),
@@ -7894,6 +7988,7 @@ mod tests {
             warpid_tb: Some(3),
             sm_id,
             warpid_sm,
+            instrumentation_order,
             ..Default::default()
         };
         let compact = ValidatedWarp::from_message(
@@ -7901,8 +7996,8 @@ mod tests {
             pb::Warp {
                 id: 3,
                 instructions: vec![
-                    instruction(4, Some(i32::MIN), Some(i32::MAX)),
-                    instruction(8, None, None),
+                    instruction(4, Some(i32::MIN), Some(i32::MAX), Some(u64::MAX)),
+                    instruction(8, None, None, None),
                 ],
                 ..Default::default()
             },
@@ -7916,8 +8011,97 @@ mod tests {
         assert_eq!(instructions[0].warpid_tb(), 3);
         assert_eq!(instructions[0].sm_id(), Some(i32::MIN));
         assert_eq!(instructions[0].warpid_sm(), Some(i32::MAX));
+        assert_eq!(instructions[0].instrumentation_order(), Some(u64::MAX));
         assert_eq!(instructions[1].sm_id(), None);
         assert_eq!(instructions[1].warpid_sm(), None);
+        assert_eq!(instructions[1].instrumentation_order(), None);
+    }
+
+    #[test]
+    fn instrumentation_order_requires_identity_and_strict_warp_local_order() {
+        let instruction = |order, sm_id, warpid_sm| pb::Instruction {
+            pc: 4,
+            active_mask: Some(1),
+            predicate_mask: Some(1),
+            function_unique_id: 7,
+            warpid_tb: Some(0),
+            sm_id,
+            warpid_sm,
+            vpc: Some(4),
+            instrumentation_order: order,
+            ..Default::default()
+        };
+        let threadblock = |instructions| pb::Threadblock {
+            block_id: Some(pb::Dim3d { x: 0, y: 0, z: 0 }),
+            warps: [(
+                0,
+                pb::Warp {
+                    id: 0,
+                    instructions,
+                },
+            )]
+            .into_iter()
+            .collect(),
+        };
+
+        let missing_sm = threadblock(vec![instruction(Some(1), None, Some(0))]);
+        assert!(matches!(
+            validate_threadblock_contract(
+                &missing_sm,
+                "missing sm",
+                None,
+                MemoryPayloadContract::LegacyExclusion,
+                7,
+            ),
+            Err(TraceError::InstrumentationOrderIdentityMissing {
+                identity: "sm_id",
+                ..
+            })
+        ));
+
+        let regression = threadblock(vec![
+            instruction(Some(2), Some(0), Some(0)),
+            instruction(Some(1), Some(0), Some(0)),
+        ]);
+        assert!(matches!(
+            validate_threadblock_contract(
+                &regression,
+                "regression",
+                None,
+                MemoryPayloadContract::LegacyExclusion,
+                7,
+            ),
+            Err(TraceError::InstrumentationOrderNotIncreasing {
+                previous: 2,
+                current: 1,
+                ..
+            })
+        ));
+
+        let zero = threadblock(vec![instruction(Some(0), Some(0), Some(0))]);
+        assert!(matches!(
+            validate_threadblock_contract(
+                &zero,
+                "zero",
+                None,
+                MemoryPayloadContract::LegacyExclusion,
+                7,
+            ),
+            Err(TraceError::InstrumentationOrderZero { .. })
+        ));
+
+        let valid = threadblock(vec![
+            instruction(Some(1), Some(0), Some(0)),
+            instruction(Some(u64::MAX), Some(0), Some(0)),
+        ]);
+        validate_threadblock_contract(
+            &valid,
+            "valid",
+            None,
+            MemoryPayloadContract::LegacyExclusion,
+            7,
+        )
+        .unwrap();
     }
 
     #[test]
@@ -8615,6 +8799,7 @@ mod tests {
             vpc: Some(16),
             memory_op_access_kind: Some(pb::MemoryOpAccessKind::Load as i32),
             instruction_cache_op: Some(pb::InstructionCacheOp::LdgECa as i32),
+            instrumentation_order: None,
         }
     }
 

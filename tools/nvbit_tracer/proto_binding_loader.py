@@ -113,8 +113,8 @@ BINDING_PINS: tuple[BindingPin, ...] = (
         "instruction_pb2",
         "instruction_pb2.py",
         "instruction.proto",
-        4171,
-        "b80bb0768bf852a3be3c84ee708a18f69a94b2143ba87fbd9afc94edaaba2135",
+        4270,
+        "b43918eff894e2a87f7dd64bc7d1344fc12f300b92534999d0aa100228daa81f",
         ("address_pb2",),
     ),
     BindingPin(

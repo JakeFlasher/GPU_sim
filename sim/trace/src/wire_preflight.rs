@@ -586,10 +586,20 @@ fn scan_instruction(
     limits: ThreadblockLimits,
 ) -> Result<(), WirePreflightError> {
     let mut cursor = WireCursor::new(raw);
+    let mut instrumentation_order_seen = false;
     while let Some(field) = cursor.next_field()? {
         match field.number {
             1..=3 => require_uint32(field)?,
             4 | 6..=13 => require_varint(field)?,
+            14 => {
+                require_varint(field)?;
+                if instrumentation_order_seen {
+                    return Err(WirePreflightError::Malformed(
+                        "duplicate instrumentation_order protobuf field",
+                    ));
+                }
+                instrumentation_order_seen = true;
+            }
             5 => {
                 let address = require_length_delimited(field)?;
                 bump(
@@ -845,6 +855,41 @@ mod tests {
                 Err(WirePreflightError::Malformed(UINT32_VARINT_OUT_OF_RANGE)),
             );
         }
+    }
+
+    #[test]
+    fn instrumentation_order_accepts_full_uint64_and_rejects_duplicate_or_wrong_wire() {
+        assert_eq!(
+            scan_instruction(
+                &varint_field(14, u64::MAX),
+                &mut ThreadblockCounts::default(),
+                THREADBLOCK_LIMITS,
+            ),
+            Ok(()),
+        );
+
+        let mut duplicate = varint_field(14, 0);
+        duplicate.extend(varint_field(14, 1));
+        assert_eq!(
+            scan_instruction(
+                &duplicate,
+                &mut ThreadblockCounts::default(),
+                THREADBLOCK_LIMITS,
+            ),
+            Err(WirePreflightError::Malformed(
+                "duplicate instrumentation_order protobuf field",
+            )),
+        );
+        assert_eq!(
+            scan_instruction(
+                &message_field(14, &[]),
+                &mut ThreadblockCounts::default(),
+                THREADBLOCK_LIMITS,
+            ),
+            Err(WirePreflightError::Malformed(
+                KNOWN_FIELD_WIRE_TYPE_MISMATCH,
+            )),
+        );
     }
 
     #[test]

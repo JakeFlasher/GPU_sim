@@ -189,6 +189,15 @@ message instruction {
   // workloads/simbench_bw/tests/test_predictor_l1_sass_provenance_missing_lockstep.py
   // per BL-20260507-arch-token-multi-surface-lockstep.
   optional InstructionCacheOp instruction_cache_op = 13;
+
+  // Opt-in host-observed order of selected asynchronous-copy instructions.
+  // When SIMBENCH_NVBIT_ASYNC_ORDER=1, the tracer numbers accepted main-channel
+  // instruction creations densely from one within each launch and stamps this
+  // field on exactly LDGSTS, LDGDEPBAR, and DEPBAR.LE SB0,* records. The value
+  // is instrumentation/channel receive order, not a silicon issue cycle,
+  // memory-service event, or completion timestamp. Absence is the legacy and
+  // default-disabled behavior.
+  optional uint64 instrumentation_order = 14;
 }
 
 // Closed 12-token cache-operator vocabulary. The

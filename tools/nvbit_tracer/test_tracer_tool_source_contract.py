@@ -7,6 +7,13 @@ _TRACER_SOURCE = (
 _INJECT_SOURCE = (
     Path(__file__).resolve().parent / "tracer_tool" / "inject_funcs.cu"
 )
+_LDGSTS_CAPTURE_SOURCE = (
+    Path(__file__).resolve().parents[2]
+    / "workloads"
+    / "research_probes"
+    / "ldgsts_burst_release"
+    / "capture_nvbit.py"
+)
 
 
 def test_static_shared_memory_metadata_fails_closed_before_serialization() -> None:
@@ -104,3 +111,35 @@ def test_ldgsts_v3_carries_both_mrefs_with_structural_spaces() -> None:
         'dyn_trace.set_trace_contract_id("sm86_addr_carry_ldgsts_dst_v3");'
         in tracer
     )
+
+
+def test_async_order_is_host_only_and_stamps_instruction_creation_once() -> None:
+    tracer = _TRACER_SOURCE.read_text(encoding="utf-8")
+    inject = _INJECT_SOURCE.read_text(encoding="utf-8")
+
+    assert 'std::getenv("SIMBENCH_NVBIT_ASYNC_ORDER")' in tracer
+    assert "is_async_order_selected_instruction" in tracer
+    assert "async_order_selected_pcs.emplace" in tracer
+    assert "instrumentation_order" not in inject
+
+    launch_reset = tracer.index(
+        "ctx_state->next_async_instrumentation_order = 1;"
+    )
+    receive_publish = tracer.index(
+        "ctx_state->recv_thread_receiving.store(true", launch_reset
+    )
+    assert launch_reset < receive_publish
+
+    creation = tracer.index("if(remaining_injects == 0)")
+    reuse = tracer.index("}else {", creation)
+    setter = tracer.index("inst->set_instrumentation_order(order);")
+    assert creation < setter < reuse
+    assert tracer.count("inst->set_instrumentation_order(order);") == 1
+
+
+def test_ldgsts_capture_explicitly_forwards_async_order_gate() -> None:
+    source = _LDGSTS_CAPTURE_SOURCE.read_text(encoding="utf-8")
+    assert '"--async-order"' in source
+    assert source.count('effective_environment["SIMBENCH_NVBIT_ASYNC_ORDER"]') == 1
+    assert source.count('logical_environment["SIMBENCH_NVBIT_ASYNC_ORDER"]') == 1
+    assert source.count('"async_order_enabled": async_order_enabled') == 2

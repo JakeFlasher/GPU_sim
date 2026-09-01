@@ -142,6 +142,43 @@ class TraceContractValidatorPositiveTest(unittest.TestCase):
             ),
         )
 
+    def test_instrumentation_order_requires_identity_and_strict_warp_order(self) -> None:
+        from import_trace_contract import validate_threadblock
+
+        tb = _make_threadblock_with_instruction()
+        first = tb.warps[0].instructions[0]
+        first.instrumentation_order = 1
+        first.sm_id = 0
+        first.warpid_sm = 0
+        result = validate_threadblock(tb)
+        self.assertTrue(result.ok, msg=f"{result.typed_reason}: {result.detail}")
+
+        first.instrumentation_order = 0
+        result = validate_threadblock(tb)
+        self.assertFalse(result.ok)
+        self.assertEqual(result.typed_reason, "instrumentation_order_zero")
+
+        first.instrumentation_order = 1
+        first.ClearField("sm_id")
+        result = validate_threadblock(tb)
+        self.assertFalse(result.ok)
+        self.assertEqual(
+            result.typed_reason, "instrumentation_order_identity_missing"
+        )
+
+        first.sm_id = 0
+        second = tb.warps[0].instructions.add()
+        second.CopyFrom(first)
+        second.pc = 0x1004
+        second.vpc = 0x1004
+        second.instrumentation_order = 1
+        first.instrumentation_order = 2
+        result = validate_threadblock(tb)
+        self.assertFalse(result.ok)
+        self.assertEqual(
+            result.typed_reason, "instrumentation_order_not_increasing"
+        )
+
     def test_memory_instruction_with_class_admits(self) -> None:
         # SHARED is used here (rather than GLOBAL) because this test
         # exercises the generic memory-op admission path, not

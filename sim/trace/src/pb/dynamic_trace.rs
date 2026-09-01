@@ -310,6 +310,15 @@ pub struct Instruction {
     /// per BL-20260507-arch-token-multi-surface-lockstep.
     #[prost(enumeration = "InstructionCacheOp", optional, tag = "13")]
     pub instruction_cache_op: ::core::option::Option<i32>,
+    /// Opt-in host-observed order of selected asynchronous-copy instructions.
+    /// When SIMBENCH_NVBIT_ASYNC_ORDER=1, the tracer numbers accepted main-channel
+    /// instruction creations densely from one within each launch and stamps this
+    /// field on exactly LDGSTS, LDGDEPBAR, and DEPBAR.LE SB0,* records. The value
+    /// is instrumentation/channel receive order, not a silicon issue cycle,
+    /// memory-service event, or completion timestamp. Absence is the legacy and
+    /// default-disabled behavior.
+    #[prost(uint64, optional, tag = "14")]
+    pub instrumentation_order: ::core::option::Option<u64>,
 }
 /// AC4 enum: memory operation class for each emitted instruction.
 /// MEMORY_OP_CLASS_UNSPECIFIED is the proto3 default zero value and

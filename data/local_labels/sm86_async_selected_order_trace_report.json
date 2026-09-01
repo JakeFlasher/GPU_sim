@@ -1,0 +1,817 @@
+{
+  "assay": "sm86_async_selected_order_trace_v1",
+  "counts": {
+    "classified_epochs": 768,
+    "compatibility_traces": 2,
+    "nvbit_traces": 12,
+    "ordered_replay_outputs": 24,
+    "reused_ncu_reports": 4,
+    "stripped_replay_outputs": 12,
+    "w4_selected_events": 25088,
+    "w8_selected_events": 25856
+  },
+  "criteria": {
+    "default_disabled_emits_zero_order_fields": true,
+    "no_live_or_simulator_timing_gate": true,
+    "normalized_schema20_outputs_equal": true,
+    "ordered_replay_twins_deterministic": true,
+    "schema21_observe_only": true,
+    "tokens_dense_and_per_warp_ordered": true,
+    "w4_arm_classification_512_of_512": true,
+    "w4_exact_counts_and_relations": true,
+    "w8_arm_classification_256_of_256": true,
+    "w8_exact_counts_and_relations": true
+  },
+  "decision": "The timing-free instrumentation-order witness exactly preserves and classifies all forced W4 and W8 queued/drained causal relations. Observe-only schema 21 is deterministic and byte-equal to schema 20 after removing its diagnostic; no simulator timing is authorized.",
+  "default_disabled_compatibility": {
+    "default_instrumentation_order_fields": 0,
+    "default_trace_sha256": "03c83d862aaab7f7e60852c7d07c0fa811f054df47dd7c291bfd9476f2466a7e",
+    "independent_capture_bytes_not_compared": true,
+    "ordered_selected_events": 384,
+    "ordered_tokens_dense": true,
+    "ordered_trace_sha256": "568a9b60f4eea46a8cc5dbeecf9c974d70d4d8696d1799a4f5c5233dad0a2764",
+    "passed": true
+  },
+  "holdout": {
+    "all_epochs_classified": true,
+    "all_normalized_outputs_equal": true,
+    "all_replays_deterministic": true,
+    "cell_count": 4,
+    "cells": {
+      "repeat-1/l2_drained_w8_g64": {
+        "active_warps": 8,
+        "arm": "drained",
+        "capture": {
+          "instructions": 202485,
+          "protobuf_closure": {
+            "dynamic_trace.pb": "3875b3fecefaa3ff7342666e4ba854a53649f75c5ad8a1bd7d2da1980cb3b8f3",
+            "threadblocks/device_0/stream_0/kernel_1/d_0_s_0_k_1_0,0,0.pb": "80be419abb71357b99aa4a7a3f159f8494972d0786113e08663a10d399a2a7fa"
+          },
+          "trace_sha256": "3875b3fecefaa3ff7342666e4ba854a53649f75c5ad8a1bd7d2da1980cb3b8f3",
+          "tracer_sha256": "0989e5ec62625c5143dfd2e134eadbbcd69ce65ec1c43c305c0ffd5f63aebf75"
+        },
+        "groups": 64,
+        "order": {
+          "background_commits_per_epoch": 28,
+          "classified_epochs": 64,
+          "commit_before_target_epochs": 64,
+          "counts": {
+            "commit": 1856,
+            "issue": 4096,
+            "selected": 6464,
+            "wait": 512
+          },
+          "dense_tokens": true,
+          "drained_classified_epochs": 64,
+          "expected_replay_diagnostic": {
+            "commit_events": 1856,
+            "issue_events": 4096,
+            "issue_events_with_other_warp_committed_groups": 3008,
+            "maximum_other_warp_committed_groups": 24,
+            "other_warp_committed_groups_sum": 36169,
+            "protocol_contradictions": 0,
+            "selected_events": 6464,
+            "wait_events": 512
+          },
+          "per_warp_program_order": true,
+          "queued_classified_epochs": 0,
+          "single_sm": 0
+        },
+        "repetition": 1,
+        "replay": {
+          "diagnostic": {
+            "commit_events": 1856,
+            "issue_events": 4096,
+            "issue_events_with_other_warp_committed_groups": 3008,
+            "maximum_other_warp_committed_groups": 24,
+            "other_warp_committed_groups_sum": 36169,
+            "protocol_contradictions": 0,
+            "selected_events": 6464,
+            "wait_events": 512
+          },
+          "normalized_output_equal": true,
+          "ordered_replay_sha256": "f21216935cb2164b585aaca301b4a9610c2f4251899f4f9f4d82939b3f0c2a48",
+          "stripped_replay_sha256": "cda811ac30229e7c60dcfd0e77e0bfbb3f9a4ff9375281b0f5e2b851c5968881",
+          "twins_deterministic": true
+        },
+        "route": "l2"
+      },
+      "repeat-1/l2_queued_w8_g64": {
+        "active_warps": 8,
+        "arm": "queued",
+        "capture": {
+          "instructions": 249191,
+          "protobuf_closure": {
+            "dynamic_trace.pb": "49e623bb35f2ef26475fabc7d1d64f72c234b9bb143e8b3cff3f9f8363d4bf7d",
+            "threadblocks/device_0/stream_0/kernel_1/d_0_s_0_k_1_0,0,0.pb": "07d84dd231bf004c00733aebbfee55a562b3b28779c0ceec7299915df8966a7a"
+          },
+          "trace_sha256": "49e623bb35f2ef26475fabc7d1d64f72c234b9bb143e8b3cff3f9f8363d4bf7d",
+          "tracer_sha256": "0989e5ec62625c5143dfd2e134eadbbcd69ce65ec1c43c305c0ffd5f63aebf75"
+        },
+        "groups": 64,
+        "order": {
+          "background_commits_per_epoch": 28,
+          "classified_epochs": 64,
+          "commit_before_target_epochs": 64,
+          "counts": {
+            "commit": 1856,
+            "issue": 4096,
+            "selected": 6464,
+            "wait": 512
+          },
+          "dense_tokens": true,
+          "drained_classified_epochs": 0,
+          "expected_replay_diagnostic": {
+            "commit_events": 1856,
+            "issue_events": 4096,
+            "issue_events_with_other_warp_committed_groups": 3526,
+            "maximum_other_warp_committed_groups": 28,
+            "other_warp_committed_groups_sum": 50607,
+            "protocol_contradictions": 0,
+            "selected_events": 6464,
+            "wait_events": 512
+          },
+          "per_warp_program_order": true,
+          "queued_classified_epochs": 64,
+          "single_sm": 0
+        },
+        "repetition": 1,
+        "replay": {
+          "diagnostic": {
+            "commit_events": 1856,
+            "issue_events": 4096,
+            "issue_events_with_other_warp_committed_groups": 3526,
+            "maximum_other_warp_committed_groups": 28,
+            "other_warp_committed_groups_sum": 50607,
+            "protocol_contradictions": 0,
+            "selected_events": 6464,
+            "wait_events": 512
+          },
+          "normalized_output_equal": true,
+          "ordered_replay_sha256": "7f5ef553f6acf09d485fc68cc5d25257636b7be3ec0417cfb3553b28ef37aa6e",
+          "stripped_replay_sha256": "4b429d3f724c7a5866cdc46ad99df270fde5035731bed190c46857b98a232068",
+          "twins_deterministic": true
+        },
+        "route": "l2"
+      },
+      "repeat-2/l2_drained_w8_g64": {
+        "active_warps": 8,
+        "arm": "drained",
+        "capture": {
+          "instructions": 202530,
+          "protobuf_closure": {
+            "dynamic_trace.pb": "c6dcb739d8fb984eac75912f72c6d36f236e3fc811e56021a9cdcd15937dca63",
+            "threadblocks/device_0/stream_0/kernel_1/d_0_s_0_k_1_0,0,0.pb": "3c1d6931de50d74263701677f6e96e84f2d31631b0f8f9a07497d7022745d2d2"
+          },
+          "trace_sha256": "c6dcb739d8fb984eac75912f72c6d36f236e3fc811e56021a9cdcd15937dca63",
+          "tracer_sha256": "0989e5ec62625c5143dfd2e134eadbbcd69ce65ec1c43c305c0ffd5f63aebf75"
+        },
+        "groups": 64,
+        "order": {
+          "background_commits_per_epoch": 28,
+          "classified_epochs": 64,
+          "commit_before_target_epochs": 64,
+          "counts": {
+            "commit": 1856,
+            "issue": 4096,
+            "selected": 6464,
+            "wait": 512
+          },
+          "dense_tokens": true,
+          "drained_classified_epochs": 64,
+          "expected_replay_diagnostic": {
+            "commit_events": 1856,
+            "issue_events": 4096,
+            "issue_events_with_other_warp_committed_groups": 3015,
+            "maximum_other_warp_committed_groups": 24,
+            "other_warp_committed_groups_sum": 36195,
+            "protocol_contradictions": 0,
+            "selected_events": 6464,
+            "wait_events": 512
+          },
+          "per_warp_program_order": true,
+          "queued_classified_epochs": 0,
+          "single_sm": 0
+        },
+        "repetition": 2,
+        "replay": {
+          "diagnostic": {
+            "commit_events": 1856,
+            "issue_events": 4096,
+            "issue_events_with_other_warp_committed_groups": 3015,
+            "maximum_other_warp_committed_groups": 24,
+            "other_warp_committed_groups_sum": 36195,
+            "protocol_contradictions": 0,
+            "selected_events": 6464,
+            "wait_events": 512
+          },
+          "normalized_output_equal": true,
+          "ordered_replay_sha256": "cc5b218a61bd66c02bed5cea6c74bdabb881da47e11b945dace14165b168ed56",
+          "stripped_replay_sha256": "b72c19a5f339ec91e267588ed1226e7c43c0dc0451c6d5719e27fb1dc962b3a1",
+          "twins_deterministic": true
+        },
+        "route": "l2"
+      },
+      "repeat-2/l2_queued_w8_g64": {
+        "active_warps": 8,
+        "arm": "queued",
+        "capture": {
+          "instructions": 248696,
+          "protobuf_closure": {
+            "dynamic_trace.pb": "698a25b16b7a89442a0e5bfa5027598bcfec23059f5bcdade8b1340ca86969ed",
+            "threadblocks/device_0/stream_0/kernel_1/d_0_s_0_k_1_0,0,0.pb": "13d2b78234b50adaf438551440b2676e605da36fee3b5b7a5fd5a606bfee274b"
+          },
+          "trace_sha256": "698a25b16b7a89442a0e5bfa5027598bcfec23059f5bcdade8b1340ca86969ed",
+          "tracer_sha256": "0989e5ec62625c5143dfd2e134eadbbcd69ce65ec1c43c305c0ffd5f63aebf75"
+        },
+        "groups": 64,
+        "order": {
+          "background_commits_per_epoch": 28,
+          "classified_epochs": 64,
+          "commit_before_target_epochs": 64,
+          "counts": {
+            "commit": 1856,
+            "issue": 4096,
+            "selected": 6464,
+            "wait": 512
+          },
+          "dense_tokens": true,
+          "drained_classified_epochs": 0,
+          "expected_replay_diagnostic": {
+            "commit_events": 1856,
+            "issue_events": 4096,
+            "issue_events_with_other_warp_committed_groups": 3467,
+            "maximum_other_warp_committed_groups": 28,
+            "other_warp_committed_groups_sum": 50099,
+            "protocol_contradictions": 0,
+            "selected_events": 6464,
+            "wait_events": 512
+          },
+          "per_warp_program_order": true,
+          "queued_classified_epochs": 64,
+          "single_sm": 0
+        },
+        "repetition": 2,
+        "replay": {
+          "diagnostic": {
+            "commit_events": 1856,
+            "issue_events": 4096,
+            "issue_events_with_other_warp_committed_groups": 3467,
+            "maximum_other_warp_committed_groups": 28,
+            "other_warp_committed_groups_sum": 50099,
+            "protocol_contradictions": 0,
+            "selected_events": 6464,
+            "wait_events": 512
+          },
+          "normalized_output_equal": true,
+          "ordered_replay_sha256": "4096ced0df10a94b75a1ba1e382c73a1d9357d40a75bde5495232b81928a709a",
+          "stripped_replay_sha256": "2e3a4a8ab35bb837e2fe52d0d673de4bbf85c817229a7ebecb9d6b9dbcb0f409",
+          "twins_deterministic": true
+        },
+        "route": "l2"
+      }
+    },
+    "passed": true,
+    "stage": "holdout"
+  },
+  "queue_parameter_promotion_authorized": false,
+  "reused_evidence": {
+    "binary": {
+      "path": "/home/jakeshea/GPU_simulator_rebase/workloads/research_probes/async_source_only/async_cross_warp_queue_overlap",
+      "sha256": "9944a80c075e823f914a9adb1416acc34be6bb30f6e7e1dab2d03849379d2dff",
+      "size_bytes": 1394224
+    },
+    "control": {
+      "path": "/home/jakeshea/GPU_simulator_rebase/results/captures/sm86_async_cross_warp_queue_overlap_20260831_v1/static/control_bits.json",
+      "sha256": "ef231b9c47ccdc8449873b51651fb90de88c3b008bd81ca292c040abcf7a26ce",
+      "size_bytes": 2720717
+    },
+    "decoded_instructions": 7688,
+    "passed": true,
+    "reused_ncu_reports": {
+      "l1_drained_w4_g64": {
+        "exact_work": {
+          "sm__sass_l1tex_data_pipe_lsu_wavefronts_mem_shared_op_ldgsts.sum": 8192.0,
+          "sm__sass_l1tex_t_sectors_pipe_lsu_mem_global_op_ldgsts.sum": 32768.0,
+          "smsp__inst_executed_op_ldgsts.sum": 2048.0
+        },
+        "report_sha256": "a0f7ceef6d51150f66d971989c38692b30a0e1c532473022720c858c28fb2f3e"
+      },
+      "l1_queued_w4_g64": {
+        "exact_work": {
+          "sm__sass_l1tex_data_pipe_lsu_wavefronts_mem_shared_op_ldgsts.sum": 8192.0,
+          "sm__sass_l1tex_t_sectors_pipe_lsu_mem_global_op_ldgsts.sum": 32768.0,
+          "smsp__inst_executed_op_ldgsts.sum": 2048.0
+        },
+        "report_sha256": "5ae761569db02e9a72f0b6867b0de0bad09568e9e010afdbebe6fb27803309ee"
+      },
+      "l2_drained_w4_g64": {
+        "exact_work": {
+          "sm__sass_l1tex_data_pipe_lsu_wavefronts_mem_shared_op_ldgsts.sum": 8192.0,
+          "sm__sass_l1tex_t_sectors_pipe_lsu_mem_global_op_ldgsts.sum": 32768.0,
+          "smsp__inst_executed_op_ldgsts.sum": 2048.0
+        },
+        "report_sha256": "5076599fc3baa1d3750a148f7013d0ace36fb00adb96c69cde6da58485a209e2"
+      },
+      "l2_queued_w4_g64": {
+        "exact_work": {
+          "sm__sass_l1tex_data_pipe_lsu_wavefronts_mem_shared_op_ldgsts.sum": 8192.0,
+          "sm__sass_l1tex_t_sectors_pipe_lsu_mem_global_op_ldgsts.sum": 32768.0,
+          "smsp__inst_executed_op_ldgsts.sum": 2048.0
+        },
+        "report_sha256": "a8e562f4819d56e1efe34a82ff064194f7bde763d6f6b6ac0f60ea44ecceb332"
+      }
+    },
+    "source": {
+      "path": "/home/jakeshea/GPU_simulator_rebase/workloads/research_probes/async_source_only/async_cross_warp_queue_overlap.cu",
+      "sha256": "7b37af95e1e4c5e9660e692f8731b17de24b04b6092716b452bfd142528efd1d",
+      "size_bytes": 21913
+    },
+    "static_summary": {
+      "path": "/home/jakeshea/GPU_simulator_rebase/results/captures/sm86_async_cross_warp_queue_overlap_20260831_v1/static/summary.json",
+      "sha256": "6637d4b7ec6be4c2d773ba0f4c8c51825ac2c0407ec645bf2df0508d401ff9cc",
+      "size_bytes": 1936
+    }
+  },
+  "root": "/home/jakeshea/GPU_simulator_rebase/results/captures/sm86_async_selected_order_trace_20260831_v1",
+  "schema_version": 1,
+  "scientific_scope": "instrumentation_order_not_silicon_service_order",
+  "smoke_authorization_sha256": "6c028c94d9c5fdbbfc60e65f89c3963ea0f5db702c730c0435cc67510c431dc6",
+  "status": "complete_selected_order_trace_fidelity",
+  "timing_promotion_authorized": false,
+  "typed_tail_change_authorized": false,
+  "w4": {
+    "all_epochs_classified": true,
+    "all_normalized_outputs_equal": true,
+    "all_replays_deterministic": true,
+    "cell_count": 8,
+    "cells": {
+      "repeat-1/l1_drained_w4_g64": {
+        "active_warps": 4,
+        "arm": "drained",
+        "capture": {
+          "instructions": 124345,
+          "protobuf_closure": {
+            "dynamic_trace.pb": "1e06ea4ff4fa53d3b7b7aa27963c9f2660bffbddec584a17f197424dc79d049d",
+            "threadblocks/device_0/stream_0/kernel_1/d_0_s_0_k_1_0,0,0.pb": "8faf2776ed33acb2f229f07c3a0bcda8534c250fb6c6984245bf414a071baed0"
+          },
+          "trace_sha256": "1e06ea4ff4fa53d3b7b7aa27963c9f2660bffbddec584a17f197424dc79d049d",
+          "tracer_sha256": "0989e5ec62625c5143dfd2e134eadbbcd69ce65ec1c43c305c0ffd5f63aebf75"
+        },
+        "groups": 64,
+        "order": {
+          "background_commits_per_epoch": 12,
+          "classified_epochs": 64,
+          "commit_before_target_epochs": 64,
+          "counts": {
+            "commit": 832,
+            "issue": 2048,
+            "selected": 3136,
+            "wait": 256
+          },
+          "dense_tokens": true,
+          "drained_classified_epochs": 64,
+          "expected_replay_diagnostic": {
+            "commit_events": 832,
+            "issue_events": 2048,
+            "issue_events_with_other_warp_committed_groups": 1167,
+            "maximum_other_warp_committed_groups": 8,
+            "other_warp_committed_groups_sum": 4905,
+            "protocol_contradictions": 0,
+            "selected_events": 3136,
+            "wait_events": 256
+          },
+          "per_warp_program_order": true,
+          "queued_classified_epochs": 0,
+          "single_sm": 0
+        },
+        "repetition": 1,
+        "replay": {
+          "diagnostic": {
+            "commit_events": 832,
+            "issue_events": 2048,
+            "issue_events_with_other_warp_committed_groups": 1167,
+            "maximum_other_warp_committed_groups": 8,
+            "other_warp_committed_groups_sum": 4905,
+            "protocol_contradictions": 0,
+            "selected_events": 3136,
+            "wait_events": 256
+          },
+          "normalized_output_equal": true,
+          "ordered_replay_sha256": "c7229f8b7c634388829fc619a11f72df867aef47e9a18fda11ef064b6f6da7f0",
+          "stripped_replay_sha256": "26635b7f334c7982d6c49b3c0e6f7c1e81755fa9b211a8738709c3186bb8dceb",
+          "twins_deterministic": true
+        },
+        "route": "l1"
+      },
+      "repeat-1/l1_queued_w4_g64": {
+        "active_warps": 4,
+        "arm": "queued",
+        "capture": {
+          "instructions": 143944,
+          "protobuf_closure": {
+            "dynamic_trace.pb": "589281aa53fd6f44a6e9cac8162f632db31cb5643f5eef3cfcd59ecdf6a78a10",
+            "threadblocks/device_0/stream_0/kernel_1/d_0_s_0_k_1_0,0,0.pb": "2c2ef4204c8c5421a22fbc9357f12d9b68b05c7032f7c9a18746fd8559edbbda"
+          },
+          "trace_sha256": "589281aa53fd6f44a6e9cac8162f632db31cb5643f5eef3cfcd59ecdf6a78a10",
+          "tracer_sha256": "0989e5ec62625c5143dfd2e134eadbbcd69ce65ec1c43c305c0ffd5f63aebf75"
+        },
+        "groups": 64,
+        "order": {
+          "background_commits_per_epoch": 12,
+          "classified_epochs": 64,
+          "commit_before_target_epochs": 64,
+          "counts": {
+            "commit": 832,
+            "issue": 2048,
+            "selected": 3136,
+            "wait": 256
+          },
+          "dense_tokens": true,
+          "drained_classified_epochs": 0,
+          "expected_replay_diagnostic": {
+            "commit_events": 832,
+            "issue_events": 2048,
+            "issue_events_with_other_warp_committed_groups": 1680,
+            "maximum_other_warp_committed_groups": 12,
+            "other_warp_committed_groups_sum": 11016,
+            "protocol_contradictions": 0,
+            "selected_events": 3136,
+            "wait_events": 256
+          },
+          "per_warp_program_order": true,
+          "queued_classified_epochs": 64,
+          "single_sm": 0
+        },
+        "repetition": 1,
+        "replay": {
+          "diagnostic": {
+            "commit_events": 832,
+            "issue_events": 2048,
+            "issue_events_with_other_warp_committed_groups": 1680,
+            "maximum_other_warp_committed_groups": 12,
+            "other_warp_committed_groups_sum": 11016,
+            "protocol_contradictions": 0,
+            "selected_events": 3136,
+            "wait_events": 256
+          },
+          "normalized_output_equal": true,
+          "ordered_replay_sha256": "ae99539fef917ff98c6bc8d9f08ba653b8a47d77944792b40e3f5ea0b70628f2",
+          "stripped_replay_sha256": "c066ee8e470f7390819edaa02d26412cfcadd756dcbb8486e49f682dcf63406e",
+          "twins_deterministic": true
+        },
+        "route": "l1"
+      },
+      "repeat-1/l2_drained_w4_g64": {
+        "active_warps": 4,
+        "arm": "drained",
+        "capture": {
+          "instructions": 124345,
+          "protobuf_closure": {
+            "dynamic_trace.pb": "5b9edfef5a9ac62a1dff8952ef3e1f43490f45d928be63087e4d33dc592c656a",
+            "threadblocks/device_0/stream_0/kernel_1/d_0_s_0_k_1_0,0,0.pb": "15aab543f168ce4e87bf393d598746025aefa177ab6ba955e9c67b57ec44f783"
+          },
+          "trace_sha256": "5b9edfef5a9ac62a1dff8952ef3e1f43490f45d928be63087e4d33dc592c656a",
+          "tracer_sha256": "0989e5ec62625c5143dfd2e134eadbbcd69ce65ec1c43c305c0ffd5f63aebf75"
+        },
+        "groups": 64,
+        "order": {
+          "background_commits_per_epoch": 12,
+          "classified_epochs": 64,
+          "commit_before_target_epochs": 64,
+          "counts": {
+            "commit": 832,
+            "issue": 2048,
+            "selected": 3136,
+            "wait": 256
+          },
+          "dense_tokens": true,
+          "drained_classified_epochs": 64,
+          "expected_replay_diagnostic": {
+            "commit_events": 832,
+            "issue_events": 2048,
+            "issue_events_with_other_warp_committed_groups": 1179,
+            "maximum_other_warp_committed_groups": 8,
+            "other_warp_committed_groups_sum": 4895,
+            "protocol_contradictions": 0,
+            "selected_events": 3136,
+            "wait_events": 256
+          },
+          "per_warp_program_order": true,
+          "queued_classified_epochs": 0,
+          "single_sm": 0
+        },
+        "repetition": 1,
+        "replay": {
+          "diagnostic": {
+            "commit_events": 832,
+            "issue_events": 2048,
+            "issue_events_with_other_warp_committed_groups": 1179,
+            "maximum_other_warp_committed_groups": 8,
+            "other_warp_committed_groups_sum": 4895,
+            "protocol_contradictions": 0,
+            "selected_events": 3136,
+            "wait_events": 256
+          },
+          "normalized_output_equal": true,
+          "ordered_replay_sha256": "55b2618d30ce84e66fca859e1246b809b54be7e801adc0b87d5c851c990a348e",
+          "stripped_replay_sha256": "4e33cb0ab47fedc7b3789aa45f102befb3778dd3a1489d04ad1f1382be39afc7",
+          "twins_deterministic": true
+        },
+        "route": "l2"
+      },
+      "repeat-1/l2_queued_w4_g64": {
+        "active_warps": 4,
+        "arm": "queued",
+        "capture": {
+          "instructions": 143899,
+          "protobuf_closure": {
+            "dynamic_trace.pb": "6cc133362a859fbb85a55e0655276825ba4fe8be5da31ef50207c35412a02c99",
+            "threadblocks/device_0/stream_0/kernel_1/d_0_s_0_k_1_0,0,0.pb": "3195842909ef2bf3077810afdf0cf2e327a45dbcb0b395e673c9c0340e293a6d"
+          },
+          "trace_sha256": "6cc133362a859fbb85a55e0655276825ba4fe8be5da31ef50207c35412a02c99",
+          "tracer_sha256": "0989e5ec62625c5143dfd2e134eadbbcd69ce65ec1c43c305c0ffd5f63aebf75"
+        },
+        "groups": 64,
+        "order": {
+          "background_commits_per_epoch": 12,
+          "classified_epochs": 64,
+          "commit_before_target_epochs": 64,
+          "counts": {
+            "commit": 832,
+            "issue": 2048,
+            "selected": 3136,
+            "wait": 256
+          },
+          "dense_tokens": true,
+          "drained_classified_epochs": 0,
+          "expected_replay_diagnostic": {
+            "commit_events": 832,
+            "issue_events": 2048,
+            "issue_events_with_other_warp_committed_groups": 1682,
+            "maximum_other_warp_committed_groups": 12,
+            "other_warp_committed_groups_sum": 11032,
+            "protocol_contradictions": 0,
+            "selected_events": 3136,
+            "wait_events": 256
+          },
+          "per_warp_program_order": true,
+          "queued_classified_epochs": 64,
+          "single_sm": 0
+        },
+        "repetition": 1,
+        "replay": {
+          "diagnostic": {
+            "commit_events": 832,
+            "issue_events": 2048,
+            "issue_events_with_other_warp_committed_groups": 1682,
+            "maximum_other_warp_committed_groups": 12,
+            "other_warp_committed_groups_sum": 11032,
+            "protocol_contradictions": 0,
+            "selected_events": 3136,
+            "wait_events": 256
+          },
+          "normalized_output_equal": true,
+          "ordered_replay_sha256": "8b547a6185144b4f679238d1ec2d647b1e4d5c6560824e5659baff1c876b4a02",
+          "stripped_replay_sha256": "59a0c7da4fc4469f9673ac0c9c004b19ba008420810c30bb8c313da5a3dbf020",
+          "twins_deterministic": true
+        },
+        "route": "l2"
+      },
+      "repeat-2/l1_drained_w4_g64": {
+        "active_warps": 4,
+        "arm": "drained",
+        "capture": {
+          "instructions": 124345,
+          "protobuf_closure": {
+            "dynamic_trace.pb": "419c2d4d23355031ebfc32bb45c5f525083e42fd92bd9f57b11f192528778f6c",
+            "threadblocks/device_0/stream_0/kernel_1/d_0_s_0_k_1_0,0,0.pb": "18ed8a9c0311c176379b1b0083739e1575149871a77041ab924649050f42e4c7"
+          },
+          "trace_sha256": "419c2d4d23355031ebfc32bb45c5f525083e42fd92bd9f57b11f192528778f6c",
+          "tracer_sha256": "0989e5ec62625c5143dfd2e134eadbbcd69ce65ec1c43c305c0ffd5f63aebf75"
+        },
+        "groups": 64,
+        "order": {
+          "background_commits_per_epoch": 12,
+          "classified_epochs": 64,
+          "commit_before_target_epochs": 64,
+          "counts": {
+            "commit": 832,
+            "issue": 2048,
+            "selected": 3136,
+            "wait": 256
+          },
+          "dense_tokens": true,
+          "drained_classified_epochs": 64,
+          "expected_replay_diagnostic": {
+            "commit_events": 832,
+            "issue_events": 2048,
+            "issue_events_with_other_warp_committed_groups": 1169,
+            "maximum_other_warp_committed_groups": 8,
+            "other_warp_committed_groups_sum": 4901,
+            "protocol_contradictions": 0,
+            "selected_events": 3136,
+            "wait_events": 256
+          },
+          "per_warp_program_order": true,
+          "queued_classified_epochs": 0,
+          "single_sm": 0
+        },
+        "repetition": 2,
+        "replay": {
+          "diagnostic": {
+            "commit_events": 832,
+            "issue_events": 2048,
+            "issue_events_with_other_warp_committed_groups": 1169,
+            "maximum_other_warp_committed_groups": 8,
+            "other_warp_committed_groups_sum": 4901,
+            "protocol_contradictions": 0,
+            "selected_events": 3136,
+            "wait_events": 256
+          },
+          "normalized_output_equal": true,
+          "ordered_replay_sha256": "a69884211f4588bee8c40eab92a88982c8b537f3ce02efbeabd623e22df93c70",
+          "stripped_replay_sha256": "9de36c98b3616913f84dd27889f434736a350bf41d3ec0479bc1701920906326",
+          "twins_deterministic": true
+        },
+        "route": "l1"
+      },
+      "repeat-2/l1_queued_w4_g64": {
+        "active_warps": 4,
+        "arm": "queued",
+        "capture": {
+          "instructions": 143881,
+          "protobuf_closure": {
+            "dynamic_trace.pb": "928f035b468c4c99a90e8ca915f31e0b25f58893386e28e96107a0350662c1f3",
+            "threadblocks/device_0/stream_0/kernel_1/d_0_s_0_k_1_0,0,0.pb": "af7d7d66a437c59d3c71c3bd02ff22bfa104bdfd57ecef5cab5fb83cf92594bb"
+          },
+          "trace_sha256": "928f035b468c4c99a90e8ca915f31e0b25f58893386e28e96107a0350662c1f3",
+          "tracer_sha256": "0989e5ec62625c5143dfd2e134eadbbcd69ce65ec1c43c305c0ffd5f63aebf75"
+        },
+        "groups": 64,
+        "order": {
+          "background_commits_per_epoch": 12,
+          "classified_epochs": 64,
+          "commit_before_target_epochs": 64,
+          "counts": {
+            "commit": 832,
+            "issue": 2048,
+            "selected": 3136,
+            "wait": 256
+          },
+          "dense_tokens": true,
+          "drained_classified_epochs": 0,
+          "expected_replay_diagnostic": {
+            "commit_events": 832,
+            "issue_events": 2048,
+            "issue_events_with_other_warp_committed_groups": 1694,
+            "maximum_other_warp_committed_groups": 12,
+            "other_warp_committed_groups_sum": 11074,
+            "protocol_contradictions": 0,
+            "selected_events": 3136,
+            "wait_events": 256
+          },
+          "per_warp_program_order": true,
+          "queued_classified_epochs": 64,
+          "single_sm": 0
+        },
+        "repetition": 2,
+        "replay": {
+          "diagnostic": {
+            "commit_events": 832,
+            "issue_events": 2048,
+            "issue_events_with_other_warp_committed_groups": 1694,
+            "maximum_other_warp_committed_groups": 12,
+            "other_warp_committed_groups_sum": 11074,
+            "protocol_contradictions": 0,
+            "selected_events": 3136,
+            "wait_events": 256
+          },
+          "normalized_output_equal": true,
+          "ordered_replay_sha256": "d08403e09f2e9193114c93cda67415137a7eebdafe01b076b04732c93fc4dc55",
+          "stripped_replay_sha256": "5b22461405ac00121937d6637c15f5aa8c1978e14da48615a4f637980eeaf2b7",
+          "twins_deterministic": true
+        },
+        "route": "l1"
+      },
+      "repeat-2/l2_drained_w4_g64": {
+        "active_warps": 4,
+        "arm": "drained",
+        "capture": {
+          "instructions": 124300,
+          "protobuf_closure": {
+            "dynamic_trace.pb": "86b9f5810e50b64d069d12f1b7027357486f9cb642308d67bee6bfed09900ec2",
+            "threadblocks/device_0/stream_0/kernel_1/d_0_s_0_k_1_0,0,0.pb": "40ca458dee7f4dcb851251672847e43f2f6e33494c691856e04a15ea7536b9a5"
+          },
+          "trace_sha256": "86b9f5810e50b64d069d12f1b7027357486f9cb642308d67bee6bfed09900ec2",
+          "tracer_sha256": "0989e5ec62625c5143dfd2e134eadbbcd69ce65ec1c43c305c0ffd5f63aebf75"
+        },
+        "groups": 64,
+        "order": {
+          "background_commits_per_epoch": 12,
+          "classified_epochs": 64,
+          "commit_before_target_epochs": 64,
+          "counts": {
+            "commit": 832,
+            "issue": 2048,
+            "selected": 3136,
+            "wait": 256
+          },
+          "dense_tokens": true,
+          "drained_classified_epochs": 64,
+          "expected_replay_diagnostic": {
+            "commit_events": 832,
+            "issue_events": 2048,
+            "issue_events_with_other_warp_committed_groups": 1175,
+            "maximum_other_warp_committed_groups": 8,
+            "other_warp_committed_groups_sum": 4925,
+            "protocol_contradictions": 0,
+            "selected_events": 3136,
+            "wait_events": 256
+          },
+          "per_warp_program_order": true,
+          "queued_classified_epochs": 0,
+          "single_sm": 0
+        },
+        "repetition": 2,
+        "replay": {
+          "diagnostic": {
+            "commit_events": 832,
+            "issue_events": 2048,
+            "issue_events_with_other_warp_committed_groups": 1175,
+            "maximum_other_warp_committed_groups": 8,
+            "other_warp_committed_groups_sum": 4925,
+            "protocol_contradictions": 0,
+            "selected_events": 3136,
+            "wait_events": 256
+          },
+          "normalized_output_equal": true,
+          "ordered_replay_sha256": "46ad326ac9411f0f6910227456b0740e61d5560e0ea890c38ee241c611bfa8a8",
+          "stripped_replay_sha256": "cdc1e860c7894e3385aa7ec9964067d70cf62597959904a5676c4f9ba4873992",
+          "twins_deterministic": true
+        },
+        "route": "l2"
+      },
+      "repeat-2/l2_queued_w4_g64": {
+        "active_warps": 4,
+        "arm": "queued",
+        "capture": {
+          "instructions": 143863,
+          "protobuf_closure": {
+            "dynamic_trace.pb": "bcab2054eab8c4ce50009b7a899fa318ceb9872504fb17c7a8e22b2dc47b8ddf",
+            "threadblocks/device_0/stream_0/kernel_1/d_0_s_0_k_1_0,0,0.pb": "4c62e3c1b14bd8413c0726c95361e2fc0196d6ac0ce8eff6106c11657d7f9f08"
+          },
+          "trace_sha256": "bcab2054eab8c4ce50009b7a899fa318ceb9872504fb17c7a8e22b2dc47b8ddf",
+          "tracer_sha256": "0989e5ec62625c5143dfd2e134eadbbcd69ce65ec1c43c305c0ffd5f63aebf75"
+        },
+        "groups": 64,
+        "order": {
+          "background_commits_per_epoch": 12,
+          "classified_epochs": 64,
+          "commit_before_target_epochs": 64,
+          "counts": {
+            "commit": 832,
+            "issue": 2048,
+            "selected": 3136,
+            "wait": 256
+          },
+          "dense_tokens": true,
+          "drained_classified_epochs": 0,
+          "expected_replay_diagnostic": {
+            "commit_events": 832,
+            "issue_events": 2048,
+            "issue_events_with_other_warp_committed_groups": 1696,
+            "maximum_other_warp_committed_groups": 12,
+            "other_warp_committed_groups_sum": 11056,
+            "protocol_contradictions": 0,
+            "selected_events": 3136,
+            "wait_events": 256
+          },
+          "per_warp_program_order": true,
+          "queued_classified_epochs": 64,
+          "single_sm": 0
+        },
+        "repetition": 2,
+        "replay": {
+          "diagnostic": {
+            "commit_events": 832,
+            "issue_events": 2048,
+            "issue_events_with_other_warp_committed_groups": 1696,
+            "maximum_other_warp_committed_groups": 12,
+            "other_warp_committed_groups_sum": 11056,
+            "protocol_contradictions": 0,
+            "selected_events": 3136,
+            "wait_events": 256
+          },
+          "normalized_output_equal": true,
+          "ordered_replay_sha256": "69bf73f1bfcb91e40a9a381e1ee98492675b7c6f6a1eb737dbd88a2a8ec7c719",
+          "stripped_replay_sha256": "19e44bb29f0ecd4e15a3c4eca57bae8465260b1f6656823cef201da9361bef09",
+          "twins_deterministic": true
+        },
+        "route": "l2"
+      }
+    },
+    "passed": true,
+    "stage": "w4"
+  }
+}

@@ -51,6 +51,7 @@ inline constexpr instruction::Impl_::Impl_(
         vpc_{::uint64_t{0u}},
         sm_id_{0},
         memory_op_access_kind_{static_cast< ::dynamic_trace::MemoryOpAccessKind >(0)},
+        instrumentation_order_{::uint64_t{0u}},
         instruction_cache_op_{static_cast< ::dynamic_trace::InstructionCacheOp >(0)} {}
 
 template <typename>
@@ -82,7 +83,7 @@ const ::uint32_t
         protodesc_cold) = {
         0x081, // bitmap
         PROTOBUF_FIELD_OFFSET(::dynamic_trace::instruction, _impl_._has_bits_),
-        16, // hasbit index offset
+        17, // hasbit index offset
         PROTOBUF_FIELD_OFFSET(::dynamic_trace::instruction, _impl_.pc_),
         PROTOBUF_FIELD_OFFSET(::dynamic_trace::instruction, _impl_.active_mask_),
         PROTOBUF_FIELD_OFFSET(::dynamic_trace::instruction, _impl_.predicate_mask_),
@@ -96,6 +97,7 @@ const ::uint32_t
         PROTOBUF_FIELD_OFFSET(::dynamic_trace::instruction, _impl_.vpc_),
         PROTOBUF_FIELD_OFFSET(::dynamic_trace::instruction, _impl_.memory_op_access_kind_),
         PROTOBUF_FIELD_OFFSET(::dynamic_trace::instruction, _impl_.instruction_cache_op_),
+        PROTOBUF_FIELD_OFFSET(::dynamic_trace::instruction, _impl_.instrumentation_order_),
         1,
         2,
         3,
@@ -108,6 +110,7 @@ const ::uint32_t
         10,
         9,
         11,
+        13,
         12,
 };
 
@@ -121,7 +124,7 @@ static const ::_pb::Message* PROTOBUF_NONNULL const file_default_instances[] = {
 const char descriptor_table_protodef_instruction_2eproto[] ABSL_ATTRIBUTE_SECTION_VARIABLE(
     protodesc_cold) = {
     "\n\021instruction.proto\022\rdynamic_trace\032\raddr"
-    "ess.proto\"\366\004\n\013instruction\022\n\n\002pc\030\001 \001(\r\022\030\n"
+    "ess.proto\"\264\005\n\013instruction\022\n\n\002pc\030\001 \001(\r\022\030\n"
     "\013active_mask\030\002 \001(\rH\000\210\001\001\022\033\n\016predicate_mas"
     "k\030\003 \001(\rH\001\210\001\001\022\032\n\022function_unique_id\030\004 \001(\005"
     "\022)\n\taddresses\030\005 \003(\0132\026.dynamic_trace.addr"
@@ -132,37 +135,39 @@ const char descriptor_table_protodef_instruction_2eproto[] ABSL_ATTRIBUTE_SECTIO
     "vpc\030\013 \001(\004H\007\210\001\001\022E\n\025memory_op_access_kind\030"
     "\014 \001(\0162!.dynamic_trace.MemoryOpAccessKind"
     "H\010\210\001\001\022D\n\024instruction_cache_op\030\r \001(\0162!.dy"
-    "namic_trace.InstructionCacheOpH\t\210\001\001B\016\n\014_"
-    "active_maskB\021\n\017_predicate_maskB\022\n\020_memor"
-    "y_op_classB\r\n\013_data_widthB\014\n\n_warpid_tbB"
-    "\014\n\n_warpid_smB\010\n\006_sm_idB\006\n\004_vpcB\030\n\026_memo"
-    "ry_op_access_kindB\027\n\025_instruction_cache_"
-    "op*\317\002\n\rMemoryOpClass\022\037\n\033MEMORY_OP_CLASS_"
-    "UNSPECIFIED\020\000\022\032\n\026MEMORY_OP_CLASS_GLOBAL\020"
-    "\001\022\032\n\026MEMORY_OP_CLASS_SHARED\020\002\022\031\n\025MEMORY_"
-    "OP_CLASS_LOCAL\020\003\022\033\n\027MEMORY_OP_CLASS_TEXT"
-    "URE\020\004\022\033\n\027MEMORY_OP_CLASS_SURFACE\020\005\022\032\n\026ME"
-    "MORY_OP_CLASS_ATOMIC\020\006\022\027\n\023MEMORY_OP_CLAS"
-    "S_TMA\020\007\022\036\n\032MEMORY_OP_CLASS_ASYNC_COPY\020\010\022"
-    "!\n\035MEMORY_OP_CLASS_CLUSTER_DSMEM\020\t\022\030\n\024ME"
-    "MORY_OP_CLASS_TMEM\020\n*\304\001\n\022MemoryOpAccessK"
-    "ind\022%\n!MEMORY_OP_ACCESS_KIND_UNSPECIFIED"
-    "\020\000\022\036\n\032MEMORY_OP_ACCESS_KIND_LOAD\020\001\022\037\n\033ME"
-    "MORY_OP_ACCESS_KIND_STORE\020\002\022 \n\034MEMORY_OP"
-    "_ACCESS_KIND_ATOMIC\020\003\022$\n MEMORY_OP_ACCES"
-    "S_KIND_ASYNC_COPY\020\004*\325\003\n\022InstructionCache"
-    "Op\022$\n INSTRUCTION_CACHE_OP_UNSPECIFIED\020\000"
-    "\022!\n\035INSTRUCTION_CACHE_OP_LDG_E_CA\020\001\022!\n\035I"
-    "NSTRUCTION_CACHE_OP_LDG_E_CG\020\002\022!\n\035INSTRU"
-    "CTION_CACHE_OP_LDG_E_CS\020\003\022!\n\035INSTRUCTION"
-    "_CACHE_OP_LDG_E_EF\020\004\022(\n$INSTRUCTION_CACH"
-    "E_OP_LDG_E_STRONG_SM\020\005\022)\n%INSTRUCTION_CA"
-    "CHE_OP_LDG_E_STRONG_GPU\020\006\022\034\n\030INSTRUCTION"
-    "_CACHE_OP_LDL\020\007\022\034\n\030INSTRUCTION_CACHE_OP_"
-    "STL\020\010\022\037\n\033INSTRUCTION_CACHE_OP_LDGSTS\020\t\022\035"
-    "\n\031INSTRUCTION_CACHE_OP_ATOM\020\n\022\034\n\030INSTRUC"
-    "TION_CACHE_OP_TEX\020\013\022\036\n\032INSTRUCTION_CACHE"
-    "_OP_OTHER\020\014b\006proto3"
+    "namic_trace.InstructionCacheOpH\t\210\001\001\022\"\n\025i"
+    "nstrumentation_order\030\016 \001(\004H\n\210\001\001B\016\n\014_acti"
+    "ve_maskB\021\n\017_predicate_maskB\022\n\020_memory_op"
+    "_classB\r\n\013_data_widthB\014\n\n_warpid_tbB\014\n\n_"
+    "warpid_smB\010\n\006_sm_idB\006\n\004_vpcB\030\n\026_memory_o"
+    "p_access_kindB\027\n\025_instruction_cache_opB\030"
+    "\n\026_instrumentation_order*\317\002\n\rMemoryOpCla"
+    "ss\022\037\n\033MEMORY_OP_CLASS_UNSPECIFIED\020\000\022\032\n\026M"
+    "EMORY_OP_CLASS_GLOBAL\020\001\022\032\n\026MEMORY_OP_CLA"
+    "SS_SHARED\020\002\022\031\n\025MEMORY_OP_CLASS_LOCAL\020\003\022\033"
+    "\n\027MEMORY_OP_CLASS_TEXTURE\020\004\022\033\n\027MEMORY_OP"
+    "_CLASS_SURFACE\020\005\022\032\n\026MEMORY_OP_CLASS_ATOM"
+    "IC\020\006\022\027\n\023MEMORY_OP_CLASS_TMA\020\007\022\036\n\032MEMORY_"
+    "OP_CLASS_ASYNC_COPY\020\010\022!\n\035MEMORY_OP_CLASS"
+    "_CLUSTER_DSMEM\020\t\022\030\n\024MEMORY_OP_CLASS_TMEM"
+    "\020\n*\304\001\n\022MemoryOpAccessKind\022%\n!MEMORY_OP_A"
+    "CCESS_KIND_UNSPECIFIED\020\000\022\036\n\032MEMORY_OP_AC"
+    "CESS_KIND_LOAD\020\001\022\037\n\033MEMORY_OP_ACCESS_KIN"
+    "D_STORE\020\002\022 \n\034MEMORY_OP_ACCESS_KIND_ATOMI"
+    "C\020\003\022$\n MEMORY_OP_ACCESS_KIND_ASYNC_COPY\020"
+    "\004*\325\003\n\022InstructionCacheOp\022$\n INSTRUCTION_"
+    "CACHE_OP_UNSPECIFIED\020\000\022!\n\035INSTRUCTION_CA"
+    "CHE_OP_LDG_E_CA\020\001\022!\n\035INSTRUCTION_CACHE_O"
+    "P_LDG_E_CG\020\002\022!\n\035INSTRUCTION_CACHE_OP_LDG"
+    "_E_CS\020\003\022!\n\035INSTRUCTION_CACHE_OP_LDG_E_EF"
+    "\020\004\022(\n$INSTRUCTION_CACHE_OP_LDG_E_STRONG_"
+    "SM\020\005\022)\n%INSTRUCTION_CACHE_OP_LDG_E_STRON"
+    "G_GPU\020\006\022\034\n\030INSTRUCTION_CACHE_OP_LDL\020\007\022\034\n"
+    "\030INSTRUCTION_CACHE_OP_STL\020\010\022\037\n\033INSTRUCTI"
+    "ON_CACHE_OP_LDGSTS\020\t\022\035\n\031INSTRUCTION_CACH"
+    "E_OP_ATOM\020\n\022\034\n\030INSTRUCTION_CACHE_OP_TEX\020"
+    "\013\022\036\n\032INSTRUCTION_CACHE_OP_OTHER\020\014b\006proto"
+    "3"
 };
 static const ::_pbi::DescriptorTable* PROTOBUF_NONNULL const
     descriptor_table_instruction_2eproto_deps[1] = {
@@ -172,7 +177,7 @@ static ::absl::once_flag descriptor_table_instruction_2eproto_once;
 PROTOBUF_CONSTINIT const ::_pbi::DescriptorTable descriptor_table_instruction_2eproto = {
     false,
     false,
-    1699,
+    1761,
     descriptor_table_protodef_instruction_2eproto,
     "instruction.proto",
     &descriptor_table_instruction_2eproto_once,
@@ -369,16 +374,16 @@ instruction::GetClassData() const {
   return instruction_class_data_.base();
 }
 PROTOBUF_CONSTINIT PROTOBUF_ATTRIBUTE_INIT_PRIORITY1
-const ::_pbi::TcParseTable<4, 13, 1, 0, 2>
+const ::_pbi::TcParseTable<4, 14, 1, 0, 2>
 instruction::_table_ = {
   {
     PROTOBUF_FIELD_OFFSET(instruction, _impl_._has_bits_),
     0, // no _extensions_
-    13, 120,  // max_field_number, fast_idx_mask
+    14, 120,  // max_field_number, fast_idx_mask
     offsetof(decltype(_table_), field_lookup_table),
-    4294959104,  // skipmap
+    4294950912,  // skipmap
     offsetof(decltype(_table_), field_entries),
-    13,  // num_field_entries
+    14,  // num_field_entries
     1,  // num_aux_entries
     offsetof(decltype(_table_), aux_entries),
     instruction_class_data_.base(),
@@ -438,10 +443,13 @@ instruction::_table_ = {
      {96, 11, 0,
       PROTOBUF_FIELD_OFFSET(instruction, _impl_.memory_op_access_kind_)}},
     // optional .dynamic_trace.InstructionCacheOp instruction_cache_op = 13;
-    {::_pbi::TcParser::SingularVarintNoZag1<::uint32_t, offsetof(instruction, _impl_.instruction_cache_op_), 12>(),
-     {104, 12, 0,
+    {::_pbi::TcParser::SingularVarintNoZag1<::uint32_t, offsetof(instruction, _impl_.instruction_cache_op_), 13>(),
+     {104, 13, 0,
       PROTOBUF_FIELD_OFFSET(instruction, _impl_.instruction_cache_op_)}},
-    {::_pbi::TcParser::MiniParse, {}},
+    // optional uint64 instrumentation_order = 14;
+    {::_pbi::TcParser::SingularVarintNoZag1<::uint64_t, offsetof(instruction, _impl_.instrumentation_order_), 12>(),
+     {112, 12, 0,
+      PROTOBUF_FIELD_OFFSET(instruction, _impl_.instrumentation_order_)}},
     {::_pbi::TcParser::MiniParse, {}},
   }}, {{
     65535, 65535
@@ -471,7 +479,9 @@ instruction::_table_ = {
     // optional .dynamic_trace.MemoryOpAccessKind memory_op_access_kind = 12;
     {PROTOBUF_FIELD_OFFSET(instruction, _impl_.memory_op_access_kind_), _Internal::kHasBitsOffset + 11, 0, (0 | ::_fl::kFcOptional | ::_fl::kOpenEnum)},
     // optional .dynamic_trace.InstructionCacheOp instruction_cache_op = 13;
-    {PROTOBUF_FIELD_OFFSET(instruction, _impl_.instruction_cache_op_), _Internal::kHasBitsOffset + 12, 0, (0 | ::_fl::kFcOptional | ::_fl::kOpenEnum)},
+    {PROTOBUF_FIELD_OFFSET(instruction, _impl_.instruction_cache_op_), _Internal::kHasBitsOffset + 13, 0, (0 | ::_fl::kFcOptional | ::_fl::kOpenEnum)},
+    // optional uint64 instrumentation_order = 14;
+    {PROTOBUF_FIELD_OFFSET(instruction, _impl_.instrumentation_order_), _Internal::kHasBitsOffset + 12, 0, (0 | ::_fl::kFcOptional | ::_fl::kUInt64)},
   }},
   {{
       {::_pbi::TcParser::GetTable<::dynamic_trace::address>()},
@@ -495,7 +505,7 @@ PROTOBUF_NOINLINE void instruction::Clear() {
         reinterpret_cast<char*>(&_impl_.warpid_tb_) -
         reinterpret_cast<char*>(&_impl_.pc_)) + sizeof(_impl_.warpid_tb_));
   }
-  if (BatchCheckHasBit(cached_has_bits, 0x00001f00U)) {
+  if (BatchCheckHasBit(cached_has_bits, 0x00003f00U)) {
     ::memset(&_impl_.warpid_sm_, 0, static_cast<::size_t>(
         reinterpret_cast<char*>(&_impl_.instruction_cache_op_) -
         reinterpret_cast<char*>(&_impl_.warpid_sm_)) + sizeof(_impl_.instruction_cache_op_));
@@ -618,10 +628,17 @@ PROTOBUF_NOINLINE void instruction::Clear() {
   }
 
   // optional .dynamic_trace.InstructionCacheOp instruction_cache_op = 13;
-  if (CheckHasBit(cached_has_bits, 0x00001000U)) {
+  if (CheckHasBit(cached_has_bits, 0x00002000U)) {
     target = stream->EnsureSpace(target);
     target = ::_pbi::WireFormatLite::WriteEnumToArray(
         13, this_._internal_instruction_cache_op(), target);
+  }
+
+  // optional uint64 instrumentation_order = 14;
+  if (CheckHasBit(cached_has_bits, 0x00001000U)) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteUInt64ToArray(
+        14, this_._internal_instrumentation_order(), target);
   }
 
   if (ABSL_PREDICT_FALSE(this_._internal_metadata_.have_unknown_fields())) {
@@ -697,7 +714,7 @@ PROTOBUF_NOINLINE void instruction::Clear() {
           this_._internal_warpid_tb());
     }
   }
-  if (BatchCheckHasBit(cached_has_bits, 0x00001f00U)) {
+  if (BatchCheckHasBit(cached_has_bits, 0x00003f00U)) {
     // optional int32 warpid_sm = 9;
     if (CheckHasBit(cached_has_bits, 0x00000100U)) {
       total_size += ::_pbi::WireFormatLite::Int32SizePlusOne(
@@ -718,8 +735,13 @@ PROTOBUF_NOINLINE void instruction::Clear() {
       total_size += 1 +
                     ::_pbi::WireFormatLite::EnumSize(this_._internal_memory_op_access_kind());
     }
-    // optional .dynamic_trace.InstructionCacheOp instruction_cache_op = 13;
+    // optional uint64 instrumentation_order = 14;
     if (CheckHasBit(cached_has_bits, 0x00001000U)) {
+      total_size += ::_pbi::WireFormatLite::UInt64SizePlusOne(
+          this_._internal_instrumentation_order());
+    }
+    // optional .dynamic_trace.InstructionCacheOp instruction_cache_op = 13;
+    if (CheckHasBit(cached_has_bits, 0x00002000U)) {
       total_size += 1 +
                     ::_pbi::WireFormatLite::EnumSize(this_._internal_instruction_cache_op());
     }
@@ -775,7 +797,7 @@ void instruction::MergeImpl(::google::protobuf::MessageLite& to_msg,
       _this->_impl_.warpid_tb_ = from._impl_.warpid_tb_;
     }
   }
-  if (BatchCheckHasBit(cached_has_bits, 0x00001f00U)) {
+  if (BatchCheckHasBit(cached_has_bits, 0x00003f00U)) {
     if (CheckHasBit(cached_has_bits, 0x00000100U)) {
       _this->_impl_.warpid_sm_ = from._impl_.warpid_sm_;
     }
@@ -789,6 +811,9 @@ void instruction::MergeImpl(::google::protobuf::MessageLite& to_msg,
       _this->_impl_.memory_op_access_kind_ = from._impl_.memory_op_access_kind_;
     }
     if (CheckHasBit(cached_has_bits, 0x00001000U)) {
+      _this->_impl_.instrumentation_order_ = from._impl_.instrumentation_order_;
+    }
+    if (CheckHasBit(cached_has_bits, 0x00002000U)) {
       _this->_impl_.instruction_cache_op_ = from._impl_.instruction_cache_op_;
     }
   }

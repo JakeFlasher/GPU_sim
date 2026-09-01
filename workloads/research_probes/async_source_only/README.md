@@ -453,3 +453,32 @@ frontier contrast is only `-1.3125` cycles/group, below the prospective
 remain absent, timing is unchanged, and `async_copy_shared_visibility` remains
 required. See
 [`docs/sm86_async_cross_warp_queue_overlap_milestone.md`](../../../docs/sm86_async_cross_warp_queue_overlap_milestone.md).
+
+## Selected async instrumentation-order trace
+
+The opt-in successor adds protobuf tag 14 to selected LDGSTS issue, commit, and
+SB0-wait records without changing the queue-overlap binary or NCU work. Two W4
+repeats and an untouched W8 L2 holdout preserve dense, per-warp-ordered tokens
+and classify all 768 queued/drained epochs exactly. Schema 21 reconstructs only
+timing-free async group populations; tag-stripped replay normalization proves
+that timing, traffic, prior diagnostics, and typed tails are unchanged.
+
+```bash
+.venv/bin/python \
+  workloads/research_probes/async_source_only/capture_selected_order.py \
+  --phase smoke --timeout 1800
+.venv/bin/python \
+  workloads/research_probes/async_source_only/analyze_selected_order.py \
+  --stage smoke
+.venv/bin/python \
+  workloads/research_probes/async_source_only/capture_selected_order.py \
+  --phase holdout --timeout 1800
+.venv/bin/python \
+  workloads/research_probes/async_source_only/analyze_selected_order.py \
+  --stage complete
+```
+
+The result is `complete_selected_order_trace_fidelity`. This establishes tracer
+and replay order fidelity only; it does not authorize queue or timing changes.
+See
+[`docs/sm86_async_selected_order_trace_milestone.md`](../../../docs/sm86_async_selected_order_trace_milestone.md).

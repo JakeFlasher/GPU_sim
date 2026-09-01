@@ -164,6 +164,14 @@ gates pass, but per-warp traces reconstruct both orderings identically; the
 cache-all simulator control is non-material, so the full matrix and W8 holdout
 remain unopened. No timing or typed-tail state changes.
 
+The trace-fidelity successor is complete in
+[`docs/sm86_async_selected_order_trace_milestone.md`](../docs/sm86_async_selected_order_trace_milestone.md).
+Opt-in protobuf tag 14 and observe-only readiness schema 21 now preserve forced
+cross-warp LDGSTS/commit/wait happens-before relations. All W4 identification
+and W8 holdout epochs classify exactly, and normalized timing/traffic/tail
+output remains byte-identical. The witness is instrumentation order only; it
+does not promote a queue or timing mechanism.
+
 ## Acceptance Criteria
 
 - AC-1: A current-host preflight and release build are recorded for the RTX

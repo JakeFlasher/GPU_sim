@@ -76,3 +76,34 @@ inline bool is_branch_opcode_short(std::string_view opcode) {
          opcode == "BSSY" || opcode == "BSYNC" ||
          opcode == "EXIT" || opcode == "RET";
 }
+
+// Opt-in asynchronous-copy order selection. LDGSTS and LDGDEPBAR are exact
+// short-opcode matches. DEPBAR additionally requires the canonical SASS
+// operand form `DEPBAR.LE SB0, ...`; ordinary SB1--SB5 dependency waits must
+// remain unnumbered. The SASS scanner accepts an optional leading predicate
+// token and treats comma/semicolon as token delimiters.
+inline bool is_async_order_selected_instruction(std::string_view opcode,
+                                                std::string_view sass) {
+  if (opcode == "LDGSTS" || opcode == "LDGDEPBAR") return true;
+  if (opcode != "DEPBAR") return false;
+
+  auto next_token = [&sass]() {
+    while (!sass.empty() &&
+           (sass.front() == ' ' || sass.front() == '\t' ||
+            sass.front() == ',' || sass.front() == ';')) {
+      sass.remove_prefix(1);
+    }
+    const std::size_t end = sass.find_first_of(" \t,;");
+    const std::string_view token = sass.substr(0, end);
+    if (end == std::string_view::npos) {
+      sass = {};
+    } else {
+      sass.remove_prefix(end);
+    }
+    return token;
+  };
+
+  std::string_view mnemonic = next_token();
+  if (!mnemonic.empty() && mnemonic.front() == '@') mnemonic = next_token();
+  return mnemonic == "DEPBAR.LE" && next_token() == "SB0";
+}

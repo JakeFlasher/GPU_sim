@@ -70,6 +70,33 @@ int main() {
   assert(!is_branch_opcode_short("LDG"));
   assert(!is_branch_opcode_short("MEMBAR"));
 
+  // Selected asynchronous-copy order surface. LDGSTS modifiers are carried by
+  // the full SASS text while getOpcodeShort() remains the exact LDGSTS token.
+  assert(is_async_order_selected_instruction(
+      "LDGSTS", "LDGSTS.E.128 [R1], [R2.64] ;"));
+  assert(is_async_order_selected_instruction("LDGDEPBAR", "LDGDEPBAR ;"));
+  assert(is_async_order_selected_instruction(
+      "DEPBAR", "DEPBAR.LE SB0, 0x0 ;"));
+  assert(is_async_order_selected_instruction(
+      "DEPBAR", "@P0 DEPBAR.LE SB0, 0x1, {3,2} ;"));
+
+  // Only the async SB0 wait is selected. Ordinary scoreboard waits, other
+  // DEPBAR modes, near-prefixes, and full opcodes passed in the short-opcode
+  // slot must remain unnumbered.
+  assert(!is_async_order_selected_instruction(
+      "DEPBAR", "DEPBAR.LE SB1, 0x0 ;"));
+  assert(!is_async_order_selected_instruction(
+      "DEPBAR", "DEPBAR.LE SB5, 0x0, {3,2} ;"));
+  assert(!is_async_order_selected_instruction(
+      "DEPBAR", "DEPBAR.GE SB0, 0x0 ;"));
+  assert(!is_async_order_selected_instruction(
+      "DEPBAR", "DEPBAR.LE SB00, 0x0 ;"));
+  assert(!is_async_order_selected_instruction(
+      "LDG", "LDGDEPBAR ;"));
+  assert(!is_async_order_selected_instruction(
+      "LDGSTS.E", "LDGSTS.E.128 [R1], [R2.64] ;"));
+  assert(!is_async_order_selected_instruction("", ""));
+
   // Empty input is well-defined and must NOT match any predicate.
   assert(!is_warp_barrier_opcode_short(""));
   assert(!is_function_terminator_opcode_short(""));

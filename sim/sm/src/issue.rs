@@ -133,6 +133,17 @@ pub(crate) struct AsyncCopyCohortReplay {
     pub(crate) spans: Vec<AsyncCopyCohortSpan>,
     pub(crate) cohorts: Vec<AsyncCopyCohortDescriptor>,
     pub(crate) sector_membership_masks: Vec<u32>,
+    /// Sparse selected-instruction callback/channel order. This shares the
+    /// cold async sidecar allocation but is never consumed by issue timing.
+    pub(crate) instrumentation_order: Vec<InstrumentationOrderAnchor>,
+}
+
+/// One selected dynamic instruction's 1-based callback/channel order token.
+/// `instruction` indexes the owning [`WarpReplay::insts`] stream.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct InstrumentationOrderAnchor {
+    pub(crate) instruction: usize,
+    pub(crate) order: u64,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -1499,6 +1510,48 @@ impl AsyncIssueOverlapDiagnostics {
         next.maximum_other_warp_committed_groups = next
             .maximum_other_warp_committed_groups
             .max(addend.maximum_other_warp_committed_groups);
+        *self = next;
+        Ok(())
+    }
+}
+
+/// Timing-free reconstruction of selected asynchronous-copy protocol events
+/// in the producer's callback/channel order. This diagnostic never feeds the
+/// issue scheduler, memory hierarchy, completion frontiers, or typed tails.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
+pub struct AsyncInstrumentationOrderDiagnostics {
+    pub selected_events: u64,
+    pub issue_events: u64,
+    pub commit_events: u64,
+    pub wait_events: u64,
+    pub issue_events_with_other_warp_committed_groups: u64,
+    pub other_warp_committed_groups_sum: u64,
+    pub maximum_other_warp_committed_groups: u64,
+    pub protocol_contradictions: u64,
+}
+
+impl AsyncInstrumentationOrderDiagnostics {
+    fn add_checked(&mut self, addend: &Self) -> Result<(), ReadinessCounterError> {
+        let mut next = *self;
+        macro_rules! add {
+            ($field:ident) => {
+                next.$field = checked_readiness_add(
+                    concat!("readiness.async_instrumentation_order.", stringify!($field)),
+                    next.$field,
+                    addend.$field,
+                )?;
+            };
+        }
+        add!(selected_events);
+        add!(issue_events);
+        add!(commit_events);
+        add!(wait_events);
+        add!(issue_events_with_other_warp_committed_groups);
+        add!(other_warp_committed_groups_sum);
+        next.maximum_other_warp_committed_groups = next
+            .maximum_other_warp_committed_groups
+            .max(addend.maximum_other_warp_committed_groups);
+        add!(protocol_contradictions);
         *self = next;
         Ok(())
     }
@@ -3939,6 +3992,8 @@ pub struct ReadinessDiagnostics {
     pub tied_limiting_causes: u64,
     pub async_groups: AsyncReadinessDiagnostics,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub async_instrumentation_order: Option<Box<AsyncInstrumentationOrderDiagnostics>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub async_issue_overlap: Option<Box<AsyncIssueOverlapDiagnostics>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub async_wait_prefix: Option<Box<AsyncWaitPrefixDiagnostics>>,
@@ -3981,6 +4036,13 @@ impl ReadinessDiagnostics {
             addend.tied_limiting_causes,
         )?;
         next.async_groups.add_checked(&addend.async_groups)?;
+        if let Some(addend_order) = addend.async_instrumentation_order.as_deref() {
+            if let Some(current) = next.async_instrumentation_order.as_deref_mut() {
+                current.add_checked(addend_order)?;
+            } else {
+                next.async_instrumentation_order = Some(Box::new(*addend_order));
+            }
+        }
         if let Some(addend_overlap) = addend.async_issue_overlap.as_deref() {
             if let Some(current) = next.async_issue_overlap.as_deref_mut() {
                 current.add_checked(addend_overlap)?;
@@ -4054,9 +4116,12 @@ impl ReadinessDiagnostics {
     /// timing-neutral partial-versus-draining async-wait prefix observations
     /// for programs containing at least one nonzero wait immediate. Schema 20
     /// adds timing-neutral cross-SMSP coissue and sibling-warp committed-group
-    /// population observations.
+    /// population observations. Schema 21 adds a timing-free reconstruction of
+    /// selected async issue, commit, and wait events in callback/channel order.
     pub fn schema_version(&self) -> u32 {
-        if self.async_issue_overlap.is_some() {
+        if self.async_instrumentation_order.is_some() {
+            21
+        } else if self.async_issue_overlap.is_some() {
             20
         } else if self.async_wait_prefix.is_some() {
             19

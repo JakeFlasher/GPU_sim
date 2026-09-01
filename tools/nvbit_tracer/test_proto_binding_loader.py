@@ -92,8 +92,8 @@ def test_literal_pin_table_covers_exact_tracked_authorities() -> None:
             "339a921d00e1146472cefad9cf9186a6d5d415053b461826c8e5c91fcfbf2b31",
         ),
         "instruction_pb2.py": (
-            4171,
-            "b80bb0768bf852a3be3c84ee708a18f69a94b2143ba87fbd9afc94edaaba2135",
+            4270,
+            "b43918eff894e2a87f7dd64bc7d1344fc12f300b92534999d0aa100228daa81f",
         ),
         "kernel_pb2.py": (
             2024,
@@ -148,6 +148,27 @@ except FrozenInstanceError:
     pass
 else:
     raise AssertionError("binding bundle is mutable")
+print("ok")
+"""
+    )
+    assert result.stdout.strip() == "ok"
+
+
+def test_instruction_binding_exposes_optional_instrumentation_order_tag14() -> None:
+    result = _run_subprocess(
+        """
+from tools.nvbit_tracer.proto_binding_loader import load_dynamic_trace_bindings
+instruction_pb2 = load_dynamic_trace_bindings().instruction_pb2
+field = instruction_pb2.instruction.DESCRIPTOR.fields_by_name["instrumentation_order"]
+assert field.number == 14
+assert field.has_presence is True
+instruction = instruction_pb2.instruction()
+assert not instruction.HasField("instrumentation_order")
+legacy_bytes = instruction.SerializeToString(deterministic=True)
+instruction.instrumentation_order = 1
+assert instruction.HasField("instrumentation_order")
+assert instruction.instrumentation_order == 1
+assert instruction.SerializeToString(deterministic=True) != legacy_bytes
 print("ok")
 """
     )

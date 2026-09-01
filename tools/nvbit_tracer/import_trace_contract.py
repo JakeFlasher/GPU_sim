@@ -1405,6 +1405,27 @@ def _check_instruction(
             ),
         )
 
+    if inst.HasField("instrumentation_order"):
+        if inst.instrumentation_order == 0:
+            return ValidationResult(
+                ok=False,
+                typed_reason="instrumentation_order_zero",
+                detail=(
+                    f"{record_path}: instrumentation_order is present with "
+                    "reserved value zero; producer order is 1-based"
+                ),
+            )
+        for identity in ("sm_id", "warpid_sm"):
+            if not inst.HasField(identity):
+                return ValidationResult(
+                    ok=False,
+                    typed_reason="instrumentation_order_identity_missing",
+                    detail=(
+                        f"{record_path}: instrumentation_order requires "
+                        f"same-record {identity} identity"
+                    ),
+                )
+
     # memory_op_class owns the instruction-level operation/space family and
     # must be valid before any per-address space can influence allocation
     # identity. Missing/UNSPECIFIED/schema-skew therefore precede compatibility
@@ -1786,6 +1807,7 @@ def validate_threadblock(
 
     for warp_index in sorted(tb.warps.keys()):
         warp = tb.warps[warp_index]
+        previous_instrumentation_order: int | None = None
         for inst_index, inst in enumerate(warp.instructions):
             record_path = (
                 f"{label} warp={warp_index} inst={inst_index}"
@@ -1801,6 +1823,22 @@ def validate_threadblock(
             )
             if result is not None:
                 return result
+            if inst.HasField("instrumentation_order"):
+                current = int(inst.instrumentation_order)
+                if (
+                    previous_instrumentation_order is not None
+                    and current <= previous_instrumentation_order
+                ):
+                    return ValidationResult(
+                        ok=False,
+                        typed_reason="instrumentation_order_not_increasing",
+                        detail=(
+                            f"{record_path}: instrumentation_order={current} "
+                            "does not strictly follow prior warp-local order "
+                            f"{previous_instrumentation_order}"
+                        ),
+                    )
+                previous_instrumentation_order = current
 
     return ValidationResult(ok=True)
 

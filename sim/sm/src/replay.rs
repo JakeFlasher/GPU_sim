@@ -72,12 +72,13 @@ use sim_mem::{
 #[cfg(feature = "campaign")]
 use crate::evidence::AdmittedLaunchEvidence;
 use crate::issue::{
-    AccessKind, AsyncCopyCohortDescriptor, AsyncCopyCohortReplay, AsyncCopyCohortSpan, BlockReplay,
-    IssueError, IssueModelParams, MemoryAdmissionCandidate, MemoryServiceCandidate, ReplayInst,
+    AccessKind, AsyncCopyCohortDescriptor, AsyncCopyCohortReplay, AsyncCopyCohortSpan,
+    AsyncInstrumentationOrderDiagnostics, BlockReplay, InstrumentationOrderAnchor, IssueError,
+    IssueModelParams, MemoryAdmissionCandidate, MemoryServiceCandidate, ReplayInst,
     SharedMemoryResidency, SmSimResult, TailFlags, WarpReplay, simulate_sm_with_residency,
     validate_memory_admission_candidates, validate_memory_service_candidates,
 };
-use crate::program::FunctionSchedule;
+use crate::program::{FunctionSchedule, OpClass};
 use crate::system::{
     DramBw, DramStats, L2SourceSplit, SystemError,
     simulate_kernel_shared_with_residency_and_candidates,
@@ -525,6 +526,39 @@ pub enum ReplayError {
     },
     #[error("duplicate block launch index {index} across threadblock files")]
     DuplicateLaunchIndex { index: i64 },
+    #[error(
+        "instrumentation_order token {order} is duplicated within one launch (SM {sm_id}, block {launch_index}, warp slot {warp_slot}, instruction {instruction})"
+    )]
+    InstrumentationOrderDuplicate {
+        order: u64,
+        sm_id: i32,
+        launch_index: i64,
+        warp_slot: i32,
+        instruction: usize,
+    },
+    #[error("instrumentation_order is not dense and 1-based: expected token {expected}, got {got}")]
+    InstrumentationOrderNotDense { expected: u64, got: u64 },
+    #[error(
+        "selected asynchronous-copy record lacks instrumentation_order (SM {sm_id}, block {launch_index}, warp slot {warp_slot}, instruction {instruction}, pc {pc:#x})"
+    )]
+    InstrumentationOrderMissing {
+        sm_id: i32,
+        launch_index: i64,
+        warp_slot: i32,
+        instruction: usize,
+        pc: u32,
+    },
+    #[error(
+        "non-selected record carries instrumentation_order={order} (SM {sm_id}, block {launch_index}, warp slot {warp_slot}, instruction {instruction}, pc {pc:#x})"
+    )]
+    InstrumentationOrderUnexpected {
+        order: u64,
+        sm_id: i32,
+        launch_index: i64,
+        warp_slot: i32,
+        instruction: usize,
+        pc: u32,
+    },
     #[error(
         "shared-system unmodeled-tail aggregate mismatch: system={system:?}, per_sm={per_sm:?}"
     )]
@@ -1135,6 +1169,274 @@ struct ExtractedKernel {
     shared_memory_residency: SharedMemoryResidency,
 }
 
+#[derive(Debug, Clone, Copy)]
+enum OrderedAsyncEventKind {
+    Issue { effective: bool },
+    Commit,
+    Wait { max_pending_groups: u32 },
+}
+
+#[derive(Debug, Clone, Copy)]
+struct OrderedAsyncEvent {
+    order: u64,
+    launch_index: i64,
+    warp_slot: i32,
+    kind: OrderedAsyncEventKind,
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+struct ObservedAsyncWarpState {
+    open_effective_copies: u64,
+    committed_groups: u64,
+}
+
+fn ordered_async_event_kind(
+    schedule: &FunctionSchedule,
+    instruction: ReplayInst,
+) -> Option<OrderedAsyncEventKind> {
+    let slot = schedule
+        .by_pc
+        .get(&u64::from(instruction.pc))
+        .unwrap_or_else(|| unreachable!("extraction already validated the complete schedule join"));
+    if slot.ldgsts_l1_policy().is_some() {
+        return Some(OrderedAsyncEventKind::Issue {
+            effective: matches!(instruction.kind, AccessKind::GlobalAsyncCopy { .. }),
+        });
+    }
+    match slot.op_class() {
+        OpClass::AsyncCopyCommit => Some(OrderedAsyncEventKind::Commit),
+        OpClass::AsyncCopyWait => Some(OrderedAsyncEventKind::Wait {
+            max_pending_groups: slot
+                .async_copy_wait_max_pending_groups()
+                .expect("async-copy wait slot carries its parsed immediate"),
+        }),
+        OpClass::BlockBarrier | OpClass::Other => None,
+    }
+}
+
+fn checked_order_observation_add(
+    counter: &'static str,
+    lhs: u64,
+    rhs: u64,
+) -> Result<u64, ReplayError> {
+    lhs.checked_add(rhs)
+        .ok_or(IssueError::CounterOverflow { counter }.into())
+}
+
+/// Validate the opt-in selected-record order contract and reconstruct only the
+/// asynchronous-copy group populations it directly observes. The returned map
+/// is attached to readiness after simulation; neither this scan nor its result
+/// is visible to issue selection or any timing/service state.
+fn observe_async_instrumentation_order(
+    per_sm_blocks: &BTreeMap<i32, Vec<BlockReplay>>,
+    schedule: &FunctionSchedule,
+) -> Result<BTreeMap<i32, AsyncInstrumentationOrderDiagnostics>, ReplayError> {
+    let observation_enabled = per_sm_blocks.values().flatten().any(|block| {
+        block.warps.iter().any(|warp| {
+            warp.async_copy_cohorts
+                .as_deref()
+                .is_some_and(|sidecar| !sidecar.instrumentation_order.is_empty())
+        })
+    });
+    if !observation_enabled {
+        return Ok(BTreeMap::new());
+    }
+
+    let mut seen_orders = BTreeSet::new();
+    let mut events_by_sm: BTreeMap<i32, Vec<OrderedAsyncEvent>> = BTreeMap::new();
+    for (&sm_id, blocks) in per_sm_blocks {
+        for block in blocks {
+            for warp in &block.warps {
+                let anchors = warp
+                    .async_copy_cohorts
+                    .as_deref()
+                    .map_or(&[][..], |sidecar| sidecar.instrumentation_order.as_slice());
+                let mut anchor_index = 0;
+                for (instruction_index, &instruction) in warp.insts.iter().enumerate() {
+                    let anchor = anchors
+                        .get(anchor_index)
+                        .filter(|anchor| anchor.instruction == instruction_index)
+                        .copied();
+                    if anchor.is_some() {
+                        anchor_index += 1;
+                    }
+                    let selected = ordered_async_event_kind(schedule, instruction);
+                    match (selected, anchor) {
+                        (Some(kind), Some(anchor)) => {
+                            if !seen_orders.insert(anchor.order) {
+                                return Err(ReplayError::InstrumentationOrderDuplicate {
+                                    order: anchor.order,
+                                    sm_id,
+                                    launch_index: block.launch_index,
+                                    warp_slot: warp.warp_slot,
+                                    instruction: instruction_index,
+                                });
+                            }
+                            events_by_sm
+                                .entry(sm_id)
+                                .or_default()
+                                .push(OrderedAsyncEvent {
+                                    order: anchor.order,
+                                    launch_index: block.launch_index,
+                                    warp_slot: warp.warp_slot,
+                                    kind,
+                                });
+                        }
+                        (Some(_), None) => {
+                            return Err(ReplayError::InstrumentationOrderMissing {
+                                sm_id,
+                                launch_index: block.launch_index,
+                                warp_slot: warp.warp_slot,
+                                instruction: instruction_index,
+                                pc: instruction.pc,
+                            });
+                        }
+                        (None, Some(anchor)) => {
+                            return Err(ReplayError::InstrumentationOrderUnexpected {
+                                order: anchor.order,
+                                sm_id,
+                                launch_index: block.launch_index,
+                                warp_slot: warp.warp_slot,
+                                instruction: instruction_index,
+                                pc: instruction.pc,
+                            });
+                        }
+                        (None, None) => {}
+                    }
+                }
+                debug_assert_eq!(
+                    anchor_index,
+                    anchors.len(),
+                    "compact reader anchor index escaped its instruction stream"
+                );
+            }
+        }
+    }
+
+    for (offset, &got) in seen_orders.iter().enumerate() {
+        let expected = u64::try_from(offset)
+            .ok()
+            .and_then(|offset| offset.checked_add(1))
+            .ok_or(IssueError::CounterOverflow {
+                counter: "instrumentation order density",
+            })?;
+        if got != expected {
+            return Err(ReplayError::InstrumentationOrderNotDense { expected, got });
+        }
+    }
+
+    let mut observations = BTreeMap::new();
+    for (sm_id, mut events) in events_by_sm {
+        events.sort_unstable_by_key(|event| event.order);
+        let mut states: BTreeMap<(i64, i32), ObservedAsyncWarpState> = BTreeMap::new();
+        let mut observation = AsyncInstrumentationOrderDiagnostics::default();
+        for event in events {
+            observation.selected_events = checked_order_observation_add(
+                "async instrumentation selected events",
+                observation.selected_events,
+                1,
+            )?;
+            let warp_key = (event.launch_index, event.warp_slot);
+            match event.kind {
+                OrderedAsyncEventKind::Issue { effective } => {
+                    observation.issue_events = checked_order_observation_add(
+                        "async instrumentation issue events",
+                        observation.issue_events,
+                        1,
+                    )?;
+                    if effective {
+                        let committed_total = states.values().try_fold(0_u64, |total, state| {
+                            checked_order_observation_add(
+                                "async instrumentation committed population",
+                                total,
+                                state.committed_groups,
+                            )
+                        })?;
+                        let own = states
+                            .get(&warp_key)
+                            .map_or(0, |state| state.committed_groups);
+                        let other = committed_total.checked_sub(own).unwrap_or_else(|| {
+                            unreachable!("own groups are included in committed total")
+                        });
+                        if other != 0 {
+                            observation.issue_events_with_other_warp_committed_groups =
+                                checked_order_observation_add(
+                                    "async instrumentation issues with sibling groups",
+                                    observation.issue_events_with_other_warp_committed_groups,
+                                    1,
+                                )?;
+                        }
+                        observation.other_warp_committed_groups_sum =
+                            checked_order_observation_add(
+                                "async instrumentation sibling committed groups",
+                                observation.other_warp_committed_groups_sum,
+                                other,
+                            )?;
+                        observation.maximum_other_warp_committed_groups =
+                            observation.maximum_other_warp_committed_groups.max(other);
+                        let state = states.entry(warp_key).or_default();
+                        state.open_effective_copies = checked_order_observation_add(
+                            "async instrumentation open copies",
+                            state.open_effective_copies,
+                            1,
+                        )?;
+                    }
+                }
+                OrderedAsyncEventKind::Commit => {
+                    observation.commit_events = checked_order_observation_add(
+                        "async instrumentation commit events",
+                        observation.commit_events,
+                        1,
+                    )?;
+                    let state = states.entry(warp_key).or_default();
+                    if state.open_effective_copies == 0 {
+                        observation.protocol_contradictions = checked_order_observation_add(
+                            "async instrumentation protocol contradictions",
+                            observation.protocol_contradictions,
+                            1,
+                        )?;
+                    } else {
+                        state.committed_groups = checked_order_observation_add(
+                            "async instrumentation committed groups",
+                            state.committed_groups,
+                            1,
+                        )?;
+                        state.open_effective_copies = 0;
+                    }
+                }
+                OrderedAsyncEventKind::Wait { max_pending_groups } => {
+                    observation.wait_events = checked_order_observation_add(
+                        "async instrumentation wait events",
+                        observation.wait_events,
+                        1,
+                    )?;
+                    let state = states.entry(warp_key).or_default();
+                    if state.open_effective_copies != 0 {
+                        observation.protocol_contradictions = checked_order_observation_add(
+                            "async instrumentation protocol contradictions",
+                            observation.protocol_contradictions,
+                            1,
+                        )?;
+                        state.open_effective_copies = 0;
+                    }
+                    state.committed_groups =
+                        state.committed_groups.min(u64::from(max_pending_groups));
+                }
+            }
+        }
+        for state in states.values() {
+            observation.protocol_contradictions = checked_order_observation_add(
+                "async instrumentation protocol contradictions",
+                observation.protocol_contradictions,
+                u64::from(state.open_effective_copies != 0)
+                    + u64::from(state.committed_groups != 0),
+            )?;
+        }
+        observations.insert(sm_id, observation);
+    }
+    Ok(observations)
+}
+
 /// Card-derived spatial-placement parameters. Only the architecture/SKU-local SM
 /// range crosses into replay; no label or target value is a simulator input.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1498,6 +1800,14 @@ fn extract_per_sm_blocks(
                         record_ix,
                     )?
                 };
+                if let Some(order) = inst.instrumentation_order() {
+                    async_copy_cohorts
+                        .instrumentation_order
+                        .push(InstrumentationOrderAnchor {
+                            instruction: record_ix,
+                            order,
+                        });
+                }
                 insts.push(ReplayInst {
                     pc: inst.pc(),
                     kind,
@@ -1526,8 +1836,9 @@ fn extract_per_sm_blocks(
                 warp_slot,
                 insts,
                 sectors,
-                async_copy_cohorts: (!async_copy_cohorts.spans.is_empty())
-                    .then(|| Box::new(async_copy_cohorts)),
+                async_copy_cohorts: (!async_copy_cohorts.spans.is_empty()
+                    || !async_copy_cohorts.instrumentation_order.is_empty())
+                .then(|| Box::new(async_copy_cohorts)),
             });
         }
         let Some(sm) = block_sm else {
@@ -2319,6 +2630,7 @@ fn replay_kernel_with_schedule_and_l2_and_candidates(
         coverage,
         shared_memory_residency,
     } = extract_per_sm_blocks(td, loc, schedule, placement, decode_sectors)?;
+    let instrumentation_order = observe_async_instrumentation_order(&per_sm_blocks, schedule)?;
     #[cfg(feature = "campaign")]
     if !memory_service_candidates.is_empty() && matches!(&coverage, ExtractedCoverage::Sampled(_)) {
         return Err(ReplayError::MemoryServiceCandidatesRequireFullCoverage);
@@ -2351,6 +2663,9 @@ fn replay_kernel_with_schedule_and_l2_and_candidates(
                 )?;
                 if async_copy_destination_fallback_sms.contains(sm) {
                     result.unmodeled_tails.ldgsts_dst_shared_timing = true;
+                }
+                if let Some(observation) = instrumentation_order.get(sm) {
+                    result.readiness.async_instrumentation_order = Some(Box::new(*observation));
                 }
                 per_sm.insert(*sm, result);
             }
@@ -2406,6 +2721,12 @@ fn replay_kernel_with_schedule_and_l2_and_candidates(
                 if let Some(result) = sys.per_sm.get_mut(sm) {
                     result.unmodeled_tails.ldgsts_dst_shared_timing = true;
                 }
+            }
+            for (sm, observation) in &instrumentation_order {
+                let result = sys.per_sm.get_mut(sm).unwrap_or_else(|| {
+                    unreachable!("order observation SM escaped the simulated SM roster")
+                });
+                result.readiness.async_instrumentation_order = Some(Box::new(*observation));
             }
             if !async_copy_destination_fallback_sms.is_empty() {
                 sys.unmodeled_tails.ldgsts_dst_shared_timing = true;
@@ -2587,6 +2908,246 @@ pub fn replay_unadmitted_diagnostics(
     let schedule = lookup_schedule(schedules, loc)?;
     let outcome = replay_kernel_with_schedule(td, loc, schedule, arch_card, params, mode)?;
     Ok(UnadmittedReplayDiagnostics::from_outcome(outcome))
+}
+
+#[cfg(test)]
+mod instrumentation_order_tests {
+    use super::*;
+    use crate::control_bits::ControlBits;
+    use crate::program::{IssueSlot, PipelineClass};
+    use sim_mem::LdgstsL1Policy;
+
+    fn slot(op_class: OpClass, ldgsts: bool) -> IssueSlot {
+        IssueSlot {
+            control: ControlBits::new(0, false, 7, 7, 0, 0).unwrap(),
+            op_class,
+            async_copy_wait_max_pending_groups: 0,
+            pipeline_class: PipelineClass::DispatchOnly,
+            mem_role: if ldgsts {
+                MemRole::BypassLoad(CacheOpToken::Ldgsts)
+            } else {
+                MemRole::None
+            },
+            ldgsts_l1_policy: ldgsts.then_some(LdgstsL1Policy::BypassL1),
+            fixed_latency_operands: crate::sass_operands::FixedLatencyOperandStatus::NotApplicable,
+            clocklo_read: false,
+            gpu_membar: false,
+            opcode_text: match op_class {
+                OpClass::AsyncCopyCommit => "LDGDEPBAR",
+                OpClass::AsyncCopyWait => "DEPBAR.LE SB0, 0x0",
+                OpClass::BlockBarrier | OpClass::Other if ldgsts => "LDGSTS.E.BYPASS.128",
+                OpClass::BlockBarrier | OpClass::Other => "IADD3",
+            }
+            .into(),
+        }
+    }
+
+    fn schedule() -> FunctionSchedule {
+        FunctionSchedule {
+            arch: ArchId::Sm86,
+            function_unique_id: 1,
+            kernel_name: "ordered".into(),
+            function_name: "ordered".into(),
+            by_pc: BTreeMap::from([
+                (0, slot(OpClass::Other, true)),
+                (4, slot(OpClass::AsyncCopyCommit, false)),
+                (8, slot(OpClass::AsyncCopyWait, false)),
+                (12, slot(OpClass::Other, false)),
+            ]),
+        }
+    }
+
+    fn warp(warp_slot: i32, orders: [u64; 3]) -> WarpReplay {
+        WarpReplay {
+            warp_slot,
+            insts: vec![
+                ReplayInst {
+                    pc: 0,
+                    kind: AccessKind::GlobalAsyncCopy {
+                        off: 0,
+                        len: 0,
+                        completion_work: 0,
+                        l1_policy: LdgstsL1Policy::BypassL1,
+                    },
+                },
+                ReplayInst {
+                    pc: 4,
+                    kind: AccessKind::NonMemory,
+                },
+                ReplayInst {
+                    pc: 8,
+                    kind: AccessKind::NonMemory,
+                },
+            ],
+            sectors: Vec::new(),
+            async_copy_cohorts: Some(Box::new(AsyncCopyCohortReplay {
+                instrumentation_order: vec![
+                    InstrumentationOrderAnchor {
+                        instruction: 0,
+                        order: orders[0],
+                    },
+                    InstrumentationOrderAnchor {
+                        instruction: 1,
+                        order: orders[1],
+                    },
+                    InstrumentationOrderAnchor {
+                        instruction: 2,
+                        order: orders[2],
+                    },
+                ],
+                ..AsyncCopyCohortReplay::default()
+            })),
+        }
+    }
+
+    fn blocks(first: [u64; 3], second: [u64; 3]) -> BTreeMap<i32, Vec<BlockReplay>> {
+        BTreeMap::from([(
+            0,
+            vec![BlockReplay {
+                launch_index: 0,
+                warps: vec![warp(0, first), warp(1, second)],
+            }],
+        )])
+    }
+
+    #[test]
+    fn selected_order_scan_reconstructs_sibling_committed_population() {
+        let observations =
+            observe_async_instrumentation_order(&blocks([1, 2, 5], [3, 4, 6]), &schedule())
+                .unwrap();
+        assert_eq!(
+            observations[&0],
+            AsyncInstrumentationOrderDiagnostics {
+                selected_events: 6,
+                issue_events: 2,
+                commit_events: 2,
+                wait_events: 2,
+                issue_events_with_other_warp_committed_groups: 1,
+                other_warp_committed_groups_sum: 1,
+                maximum_other_warp_committed_groups: 1,
+                protocol_contradictions: 0,
+            }
+        );
+    }
+
+    #[test]
+    fn selected_order_scan_fails_closed_on_density_partial_or_extra_evidence() {
+        assert!(matches!(
+            observe_async_instrumentation_order(&blocks([1, 2, 5], [1, 4, 6]), &schedule()),
+            Err(ReplayError::InstrumentationOrderDuplicate { order: 1, .. })
+        ));
+
+        assert!(matches!(
+            observe_async_instrumentation_order(&blocks([1, 2, 5], [3, 4, 7]), &schedule()),
+            Err(ReplayError::InstrumentationOrderNotDense {
+                expected: 6,
+                got: 7,
+            })
+        ));
+
+        let mut partial = blocks([1, 2, 5], [3, 4, 6]);
+        partial.get_mut(&0).unwrap()[0].warps[1]
+            .async_copy_cohorts
+            .as_mut()
+            .unwrap()
+            .instrumentation_order
+            .remove(1);
+        assert!(matches!(
+            observe_async_instrumentation_order(&partial, &schedule()),
+            Err(ReplayError::InstrumentationOrderMissing { instruction: 1, .. })
+        ));
+
+        let mut extra = blocks([1, 2, 5], [3, 4, 6]);
+        let warp = &mut extra.get_mut(&0).unwrap()[0].warps[0];
+        warp.insts.push(ReplayInst {
+            pc: 12,
+            kind: AccessKind::NonMemory,
+        });
+        warp.async_copy_cohorts
+            .as_mut()
+            .unwrap()
+            .instrumentation_order
+            .push(InstrumentationOrderAnchor {
+                instruction: 3,
+                order: 7,
+            });
+        assert!(matches!(
+            observe_async_instrumentation_order(&extra, &schedule()),
+            Err(ReplayError::InstrumentationOrderUnexpected { instruction: 3, .. })
+        ));
+    }
+
+    #[test]
+    fn schema_21_aggregation_is_checked_and_observation_only() {
+        let mut aggregate = crate::ReadinessDiagnostics {
+            async_instrumentation_order: Some(Box::new(AsyncInstrumentationOrderDiagnostics {
+                selected_events: 3,
+                issue_events: 1,
+                commit_events: 1,
+                wait_events: 1,
+                issue_events_with_other_warp_committed_groups: 1,
+                other_warp_committed_groups_sum: 2,
+                maximum_other_warp_committed_groups: 2,
+                protocol_contradictions: 0,
+            })),
+            ..crate::ReadinessDiagnostics::default()
+        };
+        aggregate
+            .add_checked(&crate::ReadinessDiagnostics {
+                async_instrumentation_order: Some(Box::new(AsyncInstrumentationOrderDiagnostics {
+                    selected_events: 3,
+                    issue_events: 1,
+                    commit_events: 1,
+                    wait_events: 1,
+                    issue_events_with_other_warp_committed_groups: 0,
+                    other_warp_committed_groups_sum: 0,
+                    maximum_other_warp_committed_groups: 0,
+                    protocol_contradictions: 0,
+                })),
+                ..crate::ReadinessDiagnostics::default()
+            })
+            .unwrap();
+        assert_eq!(aggregate.schema_version(), 21);
+        assert_eq!(
+            aggregate.async_instrumentation_order.as_deref(),
+            Some(&AsyncInstrumentationOrderDiagnostics {
+                selected_events: 6,
+                issue_events: 2,
+                commit_events: 2,
+                wait_events: 2,
+                issue_events_with_other_warp_committed_groups: 1,
+                other_warp_committed_groups_sum: 2,
+                maximum_other_warp_committed_groups: 2,
+                protocol_contradictions: 0,
+            })
+        );
+
+        let mut overflow = crate::ReadinessDiagnostics {
+            async_instrumentation_order: Some(Box::new(AsyncInstrumentationOrderDiagnostics {
+                selected_events: u64::MAX,
+                ..AsyncInstrumentationOrderDiagnostics::default()
+            })),
+            ..crate::ReadinessDiagnostics::default()
+        };
+        let before = overflow.clone();
+        let error = overflow
+            .add_checked(&crate::ReadinessDiagnostics {
+                async_instrumentation_order: Some(Box::new(AsyncInstrumentationOrderDiagnostics {
+                    selected_events: 1,
+                    ..AsyncInstrumentationOrderDiagnostics::default()
+                })),
+                ..crate::ReadinessDiagnostics::default()
+            })
+            .unwrap_err();
+        assert!(matches!(
+            error,
+            crate::ReadinessCounterError::Overflow {
+                field: "readiness.async_instrumentation_order.selected_events",
+                ..
+            }
+        ));
+        assert_eq!(overflow, before);
+    }
 }
 
 #[cfg(test)]
@@ -9178,6 +9739,40 @@ mod replay_identity_tests {
             TailFlags {
                 ldgsts_dst_shared_timing: true,
                 ..TailFlags::default()
+            }
+        );
+    }
+
+    #[test]
+    fn instrumentation_order_survives_wire_compaction_and_flat_extraction() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut instruction = destination_async_copy_inst(false);
+        instruction.instrumentation_order = Some(1);
+        write_trace_with(tmp.path(), instruction);
+        rewrite_as_ldgsts_destination_payload(tmp.path());
+        let td = TraceDir::open_direct_compact(tmp.path()).expect("ordered trace opens compactly");
+        let loc = td.kernels().next().unwrap();
+        let schedule = destination_async_schedule(LdgstsL1Policy::CacheAtAllLevels);
+        let extracted = extract_per_sm_blocks(&td, &loc, &schedule, sm86_test_placement(), false)
+            .expect("ordered instruction extracts");
+        let warp = &extracted.per_sm_blocks[&0][0].warps[0];
+        assert_eq!(
+            warp.async_copy_cohorts
+                .as_deref()
+                .expect("order allocates the cold async sidecar")
+                .instrumentation_order,
+            vec![InstrumentationOrderAnchor {
+                instruction: 0,
+                order: 1,
+            }]
+        );
+        assert_eq!(
+            observe_async_instrumentation_order(&extracted.per_sm_blocks, &schedule).unwrap()[&0],
+            AsyncInstrumentationOrderDiagnostics {
+                selected_events: 1,
+                issue_events: 1,
+                protocol_contradictions: 1,
+                ..AsyncInstrumentationOrderDiagnostics::default()
             }
         );
     }

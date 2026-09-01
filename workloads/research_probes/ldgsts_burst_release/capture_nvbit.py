@@ -135,6 +135,7 @@ def capture(
     order: str,
     timeout: int,
     skip_enhanced: bool,
+    async_order_enabled: bool,
     mode: str,
 ) -> int:
     binary = binary.resolve()
@@ -178,6 +179,8 @@ def capture(
         "ENHANCED_TRACER_MAX_PARSER_INPUT_KB": "256",
         "ENHANCED_TRACER_PER_CUBIN_TIMEOUT_S": "45",
     }
+    if async_order_enabled:
+        logical_environment["SIMBENCH_NVBIT_ASYNC_ORDER"] = "1"
     started = now()
     result: capture_process.NvbitCaptureProcessResult | None = None
     failure: BaseException | None = None
@@ -226,6 +229,8 @@ def capture(
                         "ENHANCED_TRACER_PER_CUBIN_TIMEOUT_S": "45",
                     }
                 )
+                if async_order_enabled:
+                    effective_environment["SIMBENCH_NVBIT_ASYNC_ORDER"] = "1"
                 try:
                     result = capture_process.execute_capture_process(
                         (retained_binary.proc_path, *argv[1:]),
@@ -271,6 +276,7 @@ def capture(
         "argv": argv,
         "mode": mode,
         "skip_enhanced_tracer": skip_enhanced,
+        "async_order_enabled": async_order_enabled,
         "environment": logical_environment,
         "effective_environment": effective_environment,
         "return_code": return_code,
@@ -309,6 +315,7 @@ def capture(
         "order": order,
         "mode": mode,
         "skip_enhanced_tracer": skip_enhanced,
+        "async_order_enabled": async_order_enabled,
         "binary": {"path": str(binary), "sha256": binary_sha256},
         "tracer": {"path": str(TRACER), "sha256": tracer_sha256},
         "runtime_manifest": {"path": str(RUNTIME_MANIFEST), "sha256": runtime_manifest_sha256},
@@ -361,6 +368,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         action="store_true",
         help="retain primary NVBit trace files without the post-execution cubin parser",
     )
+    parser.add_argument(
+        "--async-order",
+        action="store_true",
+        help="enable selected LDGSTS/commit/SB0-wait instrumentation ordering",
+    )
     args = parser.parse_args(argv)
     try:
         return capture(
@@ -375,6 +387,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             order=args.order,
             timeout=args.timeout,
             skip_enhanced=args.skip_enhanced,
+            async_order_enabled=args.async_order,
             mode=args.mode,
         )
     except (OSError, RuntimeError, ValueError) as error:

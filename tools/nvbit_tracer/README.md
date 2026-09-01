@@ -72,6 +72,20 @@ Common outputs include `dynamic_trace.pb`, `stats.csv`,
 `extra_info/enhanced_execution_info.json`, allocation metadata, and
 per-thread-block protobuf payloads.
 
+Selected asynchronous-copy instrumentation order is opt-in:
+
+```bash
+SIMBENCH_NVBIT_ASYNC_ORDER=1 \
+CUDA_INJECTION64_PATH="$REPO_ROOT/tools/nvbit_tracer/tracer_tool/tracer_tool.so" \
+USER_DEFINED_FOLDERS=1 TRACES_FOLDER="$OUT" \
+  /absolute/path/to/cuda-program [arguments]
+```
+
+When enabled, optional instruction protobuf tag 14 records a dense host
+main-channel creation order for `LDGSTS`, `LDGDEPBAR`, and
+`DEPBAR.LE SB0,*`. It is an instrumentation-order token, not a GPU timestamp or
+service/completion measurement. Default-disabled traces omit the field.
+
 Inspect a trace:
 
 ```bash

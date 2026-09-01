@@ -50,6 +50,8 @@
 #include <unordered_set>
 #include <vector>
 #include <regex>
+#include <set>
+#include <string_view>
 
 // MOD. Begin. Enhanced Tracer
 #include <execinfo.h> /* backtrace, backtrace_symbols_fd */
@@ -260,6 +262,13 @@ struct CTXstate {
   // scope (we look it up under mutex before any access), so no extra
   // indirection is needed.
   std::atomic<bool> recv_thread_receiving{false};
+
+  // Next opt-in asynchronous-copy instrumentation-order token for the accepted
+  // launch. The main callback resets it to one before publishing
+  // recv_thread_receiving=true; the single receive thread then advances it only
+  // when a selected packet creates a new protobuf instruction. The existing
+  // release/acquire launch handshake orders reset before consumption.
+  uint64_t next_async_instrumentation_order = 1;
 
   // Per-context device binary version (= `major*10 + minor` for the CUDA
   // device that owns this context). Resolved unconditionally in
@@ -680,6 +689,10 @@ static void write_allocation_sidecar(
  * wiring alone.
  */
 bool phase_injection_enabled = false;
+// Opt-in selected asynchronous-copy instruction numbering. This is a host-side
+// observation of accepted main-channel instruction creation order only: it adds
+// no device call, counter, clock read, atomic, or channel record.
+bool async_order_enabled = false;
 /* Zero-based A/B repeat identity supplied by the retained Python orchestrator.
  * Each injected subprocess is a fresh process, so this immutable process-local
  * value prevents later repeats from overwriting phase_records_0_<launch>.bin. */
@@ -2046,6 +2059,24 @@ void nvbit_at_init() {
               "Number of instructions used to check if kernels with the same name are different");
   GET_VAR_INT(gather_registers, "GATHER_REGISTERS", 0, "Enable gathering of GPU register values. Not available in this version.");
 
+  const char *async_order_env = std::getenv("SIMBENCH_NVBIT_ASYNC_ORDER");
+  if (async_order_env == nullptr || std::string_view(async_order_env) == "0") {
+    async_order_enabled = false;
+  } else if (std::string_view(async_order_env) == "1") {
+    async_order_enabled = true;
+    fprintf(stderr,
+            "[tracer_tool] async_order_enabled=1: selected LDGSTS / "
+            "LDGDEPBAR / DEPBAR.LE SB0 instruction creations will receive "
+            "dense host main-channel order tokens.\n");
+  } else {
+    fprintf(stderr,
+            "FATAL: SIMBENCH_NVBIT_ASYNC_ORDER must be exactly 0, 1, or "
+            "unset; got %s.\n",
+            async_order_env);
+    fflush(stderr);
+    _exit(EXIT_FAILURE);
+  }
+
   /* Non-root measurement NVBit phase-injection contract: env-gated
    * activation switch for the consolidated %clock64 phase-clock
    * tracer extension. When `SIMBENCH_NVBIT_PHASE_INJECT=1`, the
@@ -2123,6 +2154,10 @@ void nvbit_at_init() {
 
 // Key is unique function ID. The next key is PC and finally the Value is the datawidh of the opcode ID of the instruction.
 std::map<int,std::map<int, int>>  pc_to_opcode;
+// Static identities selected for opt-in host-side instrumentation ordering.
+// The pair is (function_unique_id, function-relative vpc). Written during
+// instrumentation and read by the receive thread under recv_container_mutex.
+std::set<std::pair<uint32_t, uint32_t>> async_order_selected_pcs;
 
 /* Set used to avoid re-instrumenting the same functions multiple times */
 std::unordered_set<CUfunction> already_instrumented;
@@ -2188,6 +2223,9 @@ void instrument_function_if_needed(CUcontext ctx, CUfunction func, int device_id
 
       int opcode_id = opcode_to_id_map[instr->getOpcode()];
       int vpc = (int)instr->getOffset();
+      const bool async_order_selected =
+          is_async_order_selected_instruction(instr->getOpcodeShort(),
+                                              instr->getSass());
       // pc_to_opcode is also read (without `mutex`) by recv threads at
       // recv_thread_fun:1503. Serialize writes/reads with recv_container_mutex
       // so multi-context recv threads don't race with concurrent
@@ -2201,6 +2239,11 @@ void instrument_function_if_needed(CUcontext ctx, CUfunction func, int device_id
         // space is a function of the opcode, so a repeat write is idempotent.
         opcode_id_to_address_space[opcode_id] =
             nvbit_memspace_to_proto(instr->getMemorySpace());
+        if (async_order_enabled && async_order_selected) {
+          async_order_selected_pcs.emplace(
+              static_cast<uint32_t>(next_candidate_unique_function_id),
+              static_cast<uint32_t>(vpc));
+        }
       }
 
       std::string inst_str = ReplaceAll(instr->getSass(), ",", " ");
@@ -3304,6 +3347,7 @@ void nvbit_at_cuda_event(CUcontext ctx, int is_exit, nvbit_api_cuda_t cbid,
       // other main-thread mutation (pc_to_opcode, threadblocks, etc.) to the
       // recv thread, which acquire-loads this same flag at :1402 before
       // touching any of that state.
+      ctx_state->next_async_instrumentation_order = 1;
       ctx_state->recv_thread_receiving.store(true, std::memory_order_release);
 
       /* Closure-plan NVBit phase-injection contract: publish the
@@ -4305,6 +4349,23 @@ void *recv_thread_fun(void *args) {
           inst->set_warpid_sm(ma->warpid_sm);
           inst->set_sm_id(ma->sm_id);
           inst->set_vpc(static_cast<uint64_t>(ma->vpc));
+          if (async_order_enabled &&
+              async_order_selected_pcs.find(
+                  {ma->unique_function_id, ma->vpc}) !=
+                  async_order_selected_pcs.end()) {
+            const uint64_t order =
+                ctx_state->next_async_instrumentation_order;
+            if (order == 0 || order == UINT64_MAX) {
+              fprintf(stderr,
+                      "FATAL: selected asynchronous-copy instrumentation "
+                      "order exhausted for function_id=%u vpc=0x%x.\n",
+                      ma->unique_function_id, ma->vpc);
+              fflush(stderr);
+              _exit(EXIT_FAILURE);
+            }
+            inst->set_instrumentation_order(order);
+            ctx_state->next_async_instrumentation_order = order + 1;
+          }
           remaining_injects = ma->num_of_injects;
         }else {
           inst = wp.mutable_instructions(wp.instructions_size()-1);

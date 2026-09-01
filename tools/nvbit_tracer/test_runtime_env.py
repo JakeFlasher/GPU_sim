@@ -83,6 +83,13 @@ def test_capture_environment_removes_loader_and_every_tracer_control() -> None:
     assert sanitized_capture_environment(hostile) == {"PATH": "/trusted/path"}
 
 
+def test_async_order_gate_is_an_explicit_scrubbed_tracer_control() -> None:
+    assert "SIMBENCH_NVBIT_ASYNC_ORDER" in NVBIT_CAPTURE_ENVIRONMENT_CONTROLS
+    assert "SIMBENCH_NVBIT_ASYNC_ORDER" not in sanitized_capture_environment(
+        {"SIMBENCH_NVBIT_ASYNC_ORDER": "1"}
+    )
+
+
 def test_runtime_env_replaces_ambient_loader_path(tmp_path: Path) -> None:
     tracer, pb_lib = _fixture_paths(tmp_path)
     completed = subprocess.CompletedProcess(

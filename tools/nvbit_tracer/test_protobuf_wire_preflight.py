@@ -129,6 +129,28 @@ def test_non_kernel_uint32_fields_reject_overwide_varints() -> None:
             )
 
 
+def test_instrumentation_order_accepts_uint64_and_rejects_duplicate_or_wrong_wire() -> None:
+    _scan_instruction(
+        _varint_field(14, (1 << 64) - 1), {}, _ThreadblockLimits()
+    )
+
+    with pytest.raises(
+        ProtobufWireMalformed,
+        match="duplicate instrumentation_order protobuf field",
+    ):
+        _scan_instruction(
+            _varint_field(14, 0) + _varint_field(14, 1),
+            {},
+            _ThreadblockLimits(),
+        )
+
+    with pytest.raises(
+        ProtobufWireMalformed,
+        match="known protobuf field has incompatible wire type",
+    ):
+        _scan_instruction(_message_field(14, b""), {}, _ThreadblockLimits())
+
+
 def test_split_fields_reject_duplicates_and_wrong_wire_types() -> None:
     duplicate = _varint_field(11, 0) + _varint_field(11, 1)
     with pytest.raises(

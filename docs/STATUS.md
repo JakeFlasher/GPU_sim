@@ -255,6 +255,18 @@ schema-20 populations, and the cache-all modeled frontier delta is only
 W8 remain unopened. No queue or bypass timing is promoted; the typed tail
 remains.
 
+The trace-boundary successor is complete in the
+[selected async instrumentation-order milestone](sm86_async_selected_order_trace_milestone.md).
+Optional protobuf tag 14 now carries dense host channel order for LDGSTS,
+LDGDEPBAR, and SB0 waits; readiness schema 21 reconstructs the corresponding
+async group populations after simulation without changing time. Eight W4 and
+four W8 traces preserve exact 3,136/6,464 selected-event contracts and classify
+all 768 forced queued/drained epochs. Ordered replay twins are deterministic
+and normalize byte-exactly to tag-stripped schema-20 outputs. This repairs the
+per-warp trace's lost cross-warp happens-before evidence, but the token remains
+instrumentation order rather than independent silicon service time. No timing,
+queue parameter, card, or typed-tail state changes.
+
 The 2026-08-17
 [causal-readiness milestone](sm86_causal_readiness_milestone.md) is complete.
 Reason-tagged dependency, async-copy, CTA-generation/arrival-spread, and

@@ -507,12 +507,20 @@ def _scan_instruction(
     limits: _ThreadblockLimits,
 ) -> None:
     cursor = _WireCursor(raw)
+    instrumentation_order_seen = False
     while (field := cursor.next_field()) is not None:
         number, _wire_type, _payload = field
         if 1 <= number <= 3:
             _require_uint32(field)
         elif number == 4 or 6 <= number <= 13:
             _require_varint(field)
+        elif number == 14:
+            _require_varint(field)
+            if instrumentation_order_seen:
+                raise ProtobufWireMalformed(
+                    "duplicate instrumentation_order protobuf field"
+                )
+            instrumentation_order_seen = True
         elif number == 5:
             address = _require_length_delimited(field)
             _bump(

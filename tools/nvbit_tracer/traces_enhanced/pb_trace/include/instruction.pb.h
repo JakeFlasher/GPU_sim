@@ -389,6 +389,7 @@ class  PROTOBUF_FUTURE_ADD_EARLY_WARN_UNUSED instruction final : public ::google
     kVpcFieldNumber = 11,
     kSmIdFieldNumber = 10,
     kMemoryOpAccessKindFieldNumber = 12,
+    kInstrumentationOrderFieldNumber = 14,
     kInstructionCacheOpFieldNumber = 13,
   };
   // repeated .dynamic_trace.address addresses = 5;
@@ -539,6 +540,18 @@ class  PROTOBUF_FUTURE_ADD_EARLY_WARN_UNUSED instruction final : public ::google
   void _internal_set_memory_op_access_kind(::dynamic_trace::MemoryOpAccessKind value);
 
   public:
+  // optional uint64 instrumentation_order = 14;
+  [[nodiscard]] bool has_instrumentation_order()
+      const;
+  void clear_instrumentation_order() ;
+  [[nodiscard]] ::uint64_t instrumentation_order() const;
+  void set_instrumentation_order(::uint64_t value);
+
+  private:
+  ::uint64_t _internal_instrumentation_order() const;
+  void _internal_set_instrumentation_order(::uint64_t value);
+
+  public:
   // optional .dynamic_trace.InstructionCacheOp instruction_cache_op = 13;
   [[nodiscard]] bool has_instruction_cache_op()
       const;
@@ -555,7 +568,7 @@ class  PROTOBUF_FUTURE_ADD_EARLY_WARN_UNUSED instruction final : public ::google
  private:
   class _Internal;
   friend class ::google::protobuf::internal::TcParser;
-  static const ::google::protobuf::internal::TcParseTable<4, 13,
+  static const ::google::protobuf::internal::TcParseTable<4, 14,
                                    1, 0,
                                    2>
       _table_;
@@ -591,6 +604,7 @@ class  PROTOBUF_FUTURE_ADD_EARLY_WARN_UNUSED instruction final : public ::google
     ::uint64_t vpc_;
     ::int32_t sm_id_;
     int memory_op_access_kind_;
+    ::uint64_t instrumentation_order_;
     int instruction_cache_op_;
     PROTOBUF_TSAN_DECLARE_MEMBER
   };
@@ -979,14 +993,14 @@ inline void instruction::_internal_set_memory_op_access_kind(::dynamic_trace::Me
 
 // optional .dynamic_trace.InstructionCacheOp instruction_cache_op = 13;
 inline bool instruction::has_instruction_cache_op() const {
-  bool value = CheckHasBit(_impl_._has_bits_[0], 0x00001000U);
+  bool value = CheckHasBit(_impl_._has_bits_[0], 0x00002000U);
   return value;
 }
 inline void instruction::clear_instruction_cache_op() {
   ::google::protobuf::internal::TSanWrite(&_impl_);
   _impl_.instruction_cache_op_ = 0;
   ClearHasBit(_impl_._has_bits_[0],
-                  0x00001000U);
+                  0x00002000U);
 }
 inline ::dynamic_trace::InstructionCacheOp instruction::instruction_cache_op() const {
   // @@protoc_insertion_point(field_get:dynamic_trace.instruction.instruction_cache_op)
@@ -994,7 +1008,7 @@ inline ::dynamic_trace::InstructionCacheOp instruction::instruction_cache_op() c
 }
 inline void instruction::set_instruction_cache_op(::dynamic_trace::InstructionCacheOp value) {
   _internal_set_instruction_cache_op(value);
-  SetHasBit(_impl_._has_bits_[0], 0x00001000U);
+  SetHasBit(_impl_._has_bits_[0], 0x00002000U);
   // @@protoc_insertion_point(field_set:dynamic_trace.instruction.instruction_cache_op)
 }
 inline ::dynamic_trace::InstructionCacheOp instruction::_internal_instruction_cache_op() const {
@@ -1004,6 +1018,35 @@ inline ::dynamic_trace::InstructionCacheOp instruction::_internal_instruction_ca
 inline void instruction::_internal_set_instruction_cache_op(::dynamic_trace::InstructionCacheOp value) {
   ::google::protobuf::internal::TSanWrite(&_impl_);
   _impl_.instruction_cache_op_ = value;
+}
+
+// optional uint64 instrumentation_order = 14;
+inline bool instruction::has_instrumentation_order() const {
+  bool value = CheckHasBit(_impl_._has_bits_[0], 0x00001000U);
+  return value;
+}
+inline void instruction::clear_instrumentation_order() {
+  ::google::protobuf::internal::TSanWrite(&_impl_);
+  _impl_.instrumentation_order_ = ::uint64_t{0u};
+  ClearHasBit(_impl_._has_bits_[0],
+                  0x00001000U);
+}
+inline ::uint64_t instruction::instrumentation_order() const {
+  // @@protoc_insertion_point(field_get:dynamic_trace.instruction.instrumentation_order)
+  return _internal_instrumentation_order();
+}
+inline void instruction::set_instrumentation_order(::uint64_t value) {
+  _internal_set_instrumentation_order(value);
+  SetHasBit(_impl_._has_bits_[0], 0x00001000U);
+  // @@protoc_insertion_point(field_set:dynamic_trace.instruction.instrumentation_order)
+}
+inline ::uint64_t instruction::_internal_instrumentation_order() const {
+  ::google::protobuf::internal::TSanRead(&_impl_);
+  return _impl_.instrumentation_order_;
+}
+inline void instruction::_internal_set_instrumentation_order(::uint64_t value) {
+  ::google::protobuf::internal::TSanWrite(&_impl_);
+  _impl_.instrumentation_order_ = value;
 }
 
 #ifdef __GNUC__
