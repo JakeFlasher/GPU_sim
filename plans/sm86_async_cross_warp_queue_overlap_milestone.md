@@ -36,11 +36,16 @@ One fixed 256-thread CTA allocates a 32 KiB destination arena plus bounded
 shared timestamp/result state (33,112 static bytes total). Identification uses
 four active warps; inactive warps still participate in untimed CTA barriers.
 The highest active warp is the measured target and all lower active warps are
-backgrounds. Every active warp owns a private repeated 512-byte source and a
-disjoint 4 KiB shared destination slot. The target issues one eight-copy group
-per epoch. Each background warp issues four such groups before its one
-`wait_group 0`; this bounded four-group population is identical in queued and
-drained and supplies a nonvacuous cache-all overlap manipulation.
+backgrounds. Every active warp owns a private 16 KiB aligned source pool and a
+disjoint 4 KiB shared destination slot. Cache-all aliases its eight copies to
+one prewarmed 512-byte position. Bypass uses all 32 disjoint 512-byte positions
+across the four background groups (the target uses the first eight), with the
+entire pool prewarmed into L2. This prevents outstanding `.cg` groups from
+merging the same source sectors while keeping queued/drained vectors exact.
+The target issues one eight-copy group per epoch. Each background warp issues
+four such groups before its one `wait_group 0`; this bounded four-group
+population is identical in queued and drained and supplies a nonvacuous
+cache-all overlap manipulation.
 
 - `queued`: background warps issue and commit, then rendezvous. After release,
   backgrounds wait while the target clocks its own issue/commit and wait.
