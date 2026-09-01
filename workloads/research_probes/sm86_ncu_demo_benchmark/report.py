@@ -709,6 +709,14 @@ def _row(
         abs_tol=1e-12,
     ):
         raise ReportError(f"{workload_id}: simulator wall is not the repeat median")
+    simulator_wall_relative_range = (
+        None
+        if len(simulator_walls) == 1
+        else _finite(
+            simulator_result["simulator_wall_relative_range_pct"],
+            f"{workload_id}.simulator_wall_relative_range_pct",
+        )
+    )
     counter_apes = [comparisons[metric]["ape_pct"] for metric in COUNTER_IDS]
     repeat_spreads = [
         (comparison["ncu"]["relative_range_pct"], metric_id)
@@ -732,9 +740,7 @@ def _row(
             "simulator_wall_seconds_mean": _mean(simulator_walls),
             "simulator_wall_seconds_minimum": min(simulator_walls),
             "simulator_wall_seconds_maximum": max(simulator_walls),
-            "simulator_wall_relative_range_pct": simulator_result[
-                "simulator_wall_relative_range_pct"
-            ],
+            "simulator_wall_relative_range_pct": simulator_wall_relative_range,
             "gpu_execution_over_simulator_wall": gpu_seconds / simulator_wall,
             "ncu_profile_wall_over_simulator_wall": _mean(ncu_walls) / simulator_wall,
         },
@@ -774,9 +780,7 @@ def _row(
         },
         "simulator_repeatability": {
             "repeat_count": len(simulator_walls),
-            "wall_relative_range_pct": simulator_result[
-                "simulator_wall_relative_range_pct"
-            ],
+            "wall_relative_range_pct": simulator_wall_relative_range,
             "deterministic_predictions": simulator_result.get(
                 "deterministic_repeats"
             ),
@@ -861,6 +865,11 @@ def _totals(rows: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     else:
         all_predictions_deterministic = None
         prediction_determinism_status = "partially_assessed"
+    simulator_wall_ranges = [
+        row["simulator_repeatability"]["wall_relative_range_pct"]
+        for row in rows
+        if row["simulator_repeatability"]["wall_relative_range_pct"] is not None
+    ]
     return {
         "workloads": len(rows),
         "target_launches_per_process": sum(
@@ -915,9 +924,10 @@ def _totals(rows: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
             "metric_id": worst_repeatability["ncu_repeatability"]["max_relative_range_metric"],
         },
         "simulator_repeatability": {
-            "maximum_wall_relative_range_pct": max(
-                float(row["simulator_repeatability"]["wall_relative_range_pct"])
-                for row in rows
+            "maximum_wall_relative_range_pct": (
+                None
+                if not simulator_wall_ranges
+                else max(float(value) for value in simulator_wall_ranges)
             ),
             "all_predictions_deterministic": all_predictions_deterministic,
             "prediction_determinism_status": prediction_determinism_status,

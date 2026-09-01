@@ -333,7 +333,7 @@ def test_single_simulator_gate_does_not_claim_unmeasured_determinism() -> None:
                 "max_relative_range_metric": "m",
             },
             "simulator_repeatability": {
-                "wall_relative_range_pct": 0.0,
+                "wall_relative_range_pct": None,
                 "deterministic_predictions": None,
                 "prediction_determinism_status": "not_assessed_single_process",
             },
@@ -343,6 +343,7 @@ def test_single_simulator_gate_does_not_claim_unmeasured_determinism() -> None:
     rows = [row(index) for index in range(8)]
     total = report._totals(rows)
     assert total["simulator_repeatability"]["all_predictions_deterministic"] is None
+    assert total["simulator_repeatability"]["maximum_wall_relative_range_pct"] is None
     assert (
         total["simulator_repeatability"]["prediction_determinism_status"]
         == "not_assessed_single_process"

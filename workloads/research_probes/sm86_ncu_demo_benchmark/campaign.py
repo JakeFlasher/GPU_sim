@@ -670,7 +670,11 @@ def _run_simulator(
     (destination / "command.txt").write_text(shlex.join(command) + "\n", encoding="utf-8")
     wall_mean = statistics.fmean(walls)
     wall_relative_range = (
-        0.0 if wall_mean == 0 else (max(walls) - min(walls)) / wall_mean * 100.0
+        None
+        if repeats == 1
+        else 0.0
+        if wall_mean == 0
+        else (max(walls) - min(walls)) / wall_mean * 100.0
     )
     return {
         "command": command,
