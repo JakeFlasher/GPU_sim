@@ -194,7 +194,9 @@ def _host_identity(records: Mapping[tuple[str, str], Mapping[str, Any]]) -> dict
 
 
 def _verify_stage_artifacts(
-    workload_id: str, records: Mapping[tuple[str, str], Mapping[str, Any]]
+    workload_id: str,
+    records: Mapping[tuple[str, str], Mapping[str, Any]],
+    required_simulator_processes: int,
 ) -> None:
     correctness = records[(workload_id, "correctness")]["result"]
     _verify_artifact(correctness["manifest"], f"{workload_id}.correctness")
@@ -211,11 +213,11 @@ def _verify_stage_artifacts(
         _verify_artifact(record, f"{workload_id}.simulator.output")
         for record in simulator["outputs"]
     ]
-    if len(outputs) < 3 or any(
+    if len(outputs) < required_simulator_processes or any(
         output.read_bytes() != outputs[0].read_bytes() for output in outputs[1:]
     ):
         raise ReportError(
-            f"{workload_id}: at least three byte-identical simulator repeats are required"
+            f"{workload_id}: requires {required_simulator_processes} simulator process(es); multiple outputs must be byte-identical"
         )
     ncu = records[(workload_id, "ncu")]["result"]
     for repeat in ncu["repeats"]:
@@ -521,9 +523,12 @@ def _row(
     records: Mapping[tuple[str, str], Mapping[str, Any]],
     hardware: Mapping[str, Any],
     timing_crosswalk: Mapping[str, Any] | None,
+    required_simulator_processes: int,
 ) -> dict[str, Any]:
     workload_id = str(workload["id"])
-    _verify_stage_artifacts(workload_id, records)
+    _verify_stage_artifacts(
+        workload_id, records, required_simulator_processes
+    )
     ncu_result = records[(workload_id, "ncu")]["result"]
     repeats = ncu_result["repeats"]
     if not isinstance(repeats, list) or not repeats:
@@ -774,8 +779,15 @@ def _row(
             ],
             "deterministic_predictions": simulator_result.get(
                 "deterministic_repeats"
-            )
-            is True,
+            ),
+            "prediction_determinism_status": simulator_result.get(
+                "prediction_determinism_status",
+                (
+                    "verified_byte_identical_processes"
+                    if len(simulator_walls) > 1
+                    else "not_assessed_single_process"
+                ),
+            ),
         },
         "metrics": comparisons,
     }
@@ -833,6 +845,22 @@ def _totals(rows: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
         rows,
         key=lambda row: float(row["ncu_repeatability"]["max_relative_range_pct"] or -1.0),
     )
+    determinism_values = [
+        row["simulator_repeatability"].get("deterministic_predictions")
+        for row in rows
+    ]
+    if any(value is False for value in determinism_values):
+        all_predictions_deterministic: bool | None = False
+        prediction_determinism_status = "mismatch_observed"
+    elif all(value is True for value in determinism_values):
+        all_predictions_deterministic = True
+        prediction_determinism_status = "verified_byte_identical_processes"
+    elif all(value is None for value in determinism_values):
+        all_predictions_deterministic = None
+        prediction_determinism_status = "not_assessed_single_process"
+    else:
+        all_predictions_deterministic = None
+        prediction_determinism_status = "partially_assessed"
     return {
         "workloads": len(rows),
         "target_launches_per_process": sum(
@@ -891,10 +919,8 @@ def _totals(rows: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
                 float(row["simulator_repeatability"]["wall_relative_range_pct"])
                 for row in rows
             ),
-            "all_predictions_deterministic": all(
-                row["simulator_repeatability"]["deterministic_predictions"] is True
-                for row in rows
-            ),
+            "all_predictions_deterministic": all_predictions_deterministic,
+            "prediction_determinism_status": prediction_determinism_status,
         },
     }
 
@@ -986,7 +1012,8 @@ def _evaluate_accuracy_gate(
         result["passed"] = passed
         checks[name] = result
 
-    repeat_checks = {
+    required_simulator_processes = int(gate["required_simulator_repeats"])
+    repeat_checks: dict[str, Any] = {
         "workloads": {
             "value": len(rows),
             "required": gate["required_workloads"],
@@ -1000,11 +1027,13 @@ def _evaluate_accuracy_gate(
         },
         "simulator_repeats_per_workload": {
             "value": min(int(row["simulator_process_samples"]) for row in rows),
-            "required": gate["required_simulator_repeats"],
+            "required": required_simulator_processes,
             "passed": min(int(row["simulator_process_samples"]) for row in rows)
-            >= int(gate["required_simulator_repeats"]),
+            >= required_simulator_processes,
         },
-        "simulator_prediction_determinism": {
+    }
+    if required_simulator_processes > 1:
+        repeat_checks["simulator_prediction_determinism"] = {
             "value": total["simulator_repeatability"][
                 "all_predictions_deterministic"
             ],
@@ -1013,8 +1042,18 @@ def _evaluate_accuracy_gate(
                 "all_predictions_deterministic"
             ]
             is True,
-        },
-    }
+        }
+    else:
+        repeat_checks["simulator_prediction_determinism"] = {
+            "value": total["simulator_repeatability"][
+                "prediction_determinism_status"
+            ],
+            "required": "not_required_for_single_process_policy",
+            "passed": total["simulator_repeatability"][
+                "all_predictions_deterministic"
+            ]
+            is not False,
+        }
     technical_pass = all(check["passed"] for check in checks.values()) and all(
         check["passed"] for check in repeat_checks.values()
     )
@@ -1037,6 +1076,15 @@ def _caveats(
     count_cache_targets: bool = False,
 ) -> list[str]:
     phase = status
+    simulator_process_note = (
+        "One simulator process is run per workload; cross-process prediction "
+        "determinism is intentionally not reassessed in this campaign."
+        if simulator_repeats == 1
+        else (
+            f"Results contain {simulator_repeats} independent simulator processes "
+            "per workload; multiple prediction documents must be byte-identical."
+        )
+    )
     return [
         "NCU is comparison-only ground truth and is absent from simulator commands and profile inputs.",
         (
@@ -1051,7 +1099,8 @@ def _caveats(
             else "Single-kernel timing accuracy applies the independently calibrated SM-active and NCU GPC-profiler envelopes after replay; those envelopes are never passed to the simulator and do not erase raw frontiers."
         ),
         "GPU/simulator and NCU/simulator values are named time ratios, not unqualified speedups.",
-        f"Results contain {ncu_repeats} independent application-replay NCU launches and {simulator_repeats} independent simulator processes per workload; raw samples remain in JSON.",
+        f"Results contain {ncu_repeats} independent application-replay NCU launches per workload; raw samples remain in JSON.",
+        simulator_process_note,
         "Runtime-equivalent values convert the single-kernel GPC-cycle projection with the independently recorded SM clock; incomplete retirement tails remain typed on the raw frontier.",
     ]
 
@@ -1075,6 +1124,7 @@ def build_report(campaign_path: Path) -> dict[str, Any]:
         validate_spec.validate_timing_crosswalk(timing_crosswalk)
     validate_spec.validate_spec(spec, metric_schema, profile)
     validate_spec.validate_accuracy_gate(gate)
+    required_simulator_processes = int(gate["required_simulator_repeats"])
     workload_ids = [str(workload["id"]) for workload in spec["workloads"]]
     records_present = campaign.get("records", [])
     selected_ids = sorted(
@@ -1095,7 +1145,14 @@ def build_report(campaign_path: Path) -> dict[str, Any]:
     records = _record_index(campaign, [str(workload["id"]) for workload in selected])
     host = _host_identity(records)
     rows = [
-        _row(workload, metric_schema, records, host, timing_crosswalk)
+        _row(
+            workload,
+            metric_schema,
+            records,
+            host,
+            timing_crosswalk,
+            required_simulator_processes,
+        )
         for workload in selected
     ]
     count_cache_targets = metric_schema.get("schema_version") == 2
@@ -1168,6 +1225,15 @@ def _fmt(value: object, digits: int = 2) -> str:
 
 def _pct(value: object, digits: int = 2) -> str:
     return "n/a" if value is None else f"{_fmt(value, digits)}%"
+
+
+def _determinism_label(status: object) -> str:
+    return {
+        "verified_byte_identical_processes": "verified byte-identical",
+        "not_assessed_single_process": "not assessed (single process)",
+        "mismatch_observed": "mismatch observed",
+        "partially_assessed": "partially assessed",
+    }.get(str(status), str(status).replace("_", " "))
 
 
 def _count(value: object) -> str:
@@ -1293,15 +1359,15 @@ def render_markdown(report: Mapping[str, Any]) -> str:
             "",
             "The scored timing columns apply only the bound single-kernel measurement crosswalk. Raw issue and terminal frontiers remain separate simulator evidence.",
             "",
-            "## NCU repeatability",
+            "## NCU repeatability and simulator execution policy",
             "",
-            "| Workload | NCU repeats | NCU maximum relative range | Metric | Simulator repeats | Simulator wall relative range |",
-            "| :--- | ---: | ---: | :--- | ---: | ---: |",
+            "| Workload | NCU repeats | NCU maximum relative range | Metric | Simulator processes | Simulator wall relative range | Prediction determinism |",
+            "| :--- | ---: | ---: | :--- | ---: | ---: | :--- |",
         ]
     )
     for row in rows:
         lines.append(
-            f"| {row['display_name']} | {row['ncu_repeatability']['repeat_count']} | {_pct(row['ncu_repeatability']['max_relative_range_pct'])} | {row['ncu_repeatability']['max_relative_range_metric']} | {row['simulator_repeatability']['repeat_count']} | {_pct(row['simulator_repeatability']['wall_relative_range_pct'])} |"
+            f"| {row['display_name']} | {row['ncu_repeatability']['repeat_count']} | {_pct(row['ncu_repeatability']['max_relative_range_pct'])} | {row['ncu_repeatability']['max_relative_range_metric']} | {row['simulator_repeatability']['repeat_count']} | {_pct(row['simulator_repeatability']['wall_relative_range_pct'])} | {_determinism_label(row['simulator_repeatability']['prediction_determinism_status'])} |"
         )
     count_targets = all(
         metric in row["metrics"] for row in rows for metric in CACHE_LOOKUP_COUNT_IDS

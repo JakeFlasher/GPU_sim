@@ -29,10 +29,13 @@ class BenchmarkSpecTests(unittest.TestCase):
         cls.count_gate = json.loads(
             (HERE / "accuracy_gate_counts.json").read_text()
         )
+        cls.single_sim_gate = json.loads(
+            (HERE / "accuracy_gate_counts_single_sim.json").read_text()
+        )
 
     def test_frozen_spec_is_valid(self) -> None:
-        subject.validate_spec(self.spec, self.metrics, self.profile)
-        subject.validate_accuracy_gate(self.gate)
+        subject.validate_spec(self.spec, self.count_metrics, self.profile)
+        subject.validate_accuracy_gate(self.single_sim_gate)
         subject.validate_timing_crosswalk(self.crosswalk)
 
     def test_timing_crosswalk_recomputes_control_residuals(self) -> None:
@@ -44,6 +47,13 @@ class BenchmarkSpecTests(unittest.TestCase):
     def test_count_target_contract_is_valid(self) -> None:
         subject.validate_spec(self.spec, self.count_metrics, self.profile)
         subject.validate_accuracy_gate(self.count_gate)
+        subject.validate_accuracy_gate(self.single_sim_gate)
+
+    def test_single_simulator_gate_requires_one_process(self) -> None:
+        mutated = copy.deepcopy(self.single_sim_gate)
+        mutated["required_simulator_repeats"] = 7
+        with self.assertRaisesRegex(subject.ValidationError, "require 1 simulator"):
+            subject.validate_accuracy_gate(mutated)
 
     def test_count_target_gate_requires_all_six_components(self) -> None:
         mutated = copy.deepcopy(self.count_gate)

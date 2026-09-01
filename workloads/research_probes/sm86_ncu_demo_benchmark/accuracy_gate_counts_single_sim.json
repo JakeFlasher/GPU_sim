@@ -1,0 +1,27 @@
+{
+  "schema_version": 3,
+  "gate_id": "sm86_accuracy_gate_cache_counts_single_sim_20pct_v3",
+  "required_workloads": 8,
+  "required_ncu_repeats": 7,
+  "required_simulator_repeats": 1,
+  "checks": {
+    "terminal_cycle_mape_pct": {"maximum": 20.0, "required_coverage": 8},
+    "runtime_equivalent_mape_pct": {"maximum": 20.0, "required_coverage": 8},
+    "issue_cycle_mape_pct": {"maximum": 20.0, "required_coverage": 8},
+    "instruction_throughput_mape_pct": {"maximum": 20.0, "required_coverage": 8},
+    "cache_lookup_count_normalized_error_pct": {"maximum": 20.0, "required_coverage": 48},
+    "counter_traffic_mape_pct": {"maximum": 20.0, "required_coverage": 32}
+  },
+  "manual_approval_required": true,
+  "simulator_determinism_policy": "single_process_not_reassessed_per_campaign",
+  "prohibited_shortcuts": [
+    "scored_ncu_values_as_simulator_inputs",
+    "ratio_only_cache_targets",
+    "per_workload_offsets",
+    "rate_clamping_to_pass",
+    "dropping_zero_hit_targets",
+    "claiming_repeat_determinism_from_one_simulator_process",
+    "collapsing_observer_counts_into_timing_state",
+    "collapsing_issue_and_terminal_frontiers"
+  ]
+}

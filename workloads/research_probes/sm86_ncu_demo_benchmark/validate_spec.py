@@ -17,9 +17,9 @@ from typing import Any, Mapping, Sequence
 HERE = Path(__file__).resolve().parent
 REPO_ROOT = HERE.parents[2]
 DEFAULT_SPEC = HERE / "benchmark_spec.json"
-DEFAULT_METRICS = HERE / "metric_schema.json"
+DEFAULT_METRICS = HERE / "metric_schema_counts.json"
 DEFAULT_PROFILE = HERE / "host_profile.json"
-DEFAULT_GATE = HERE / "accuracy_gate.json"
+DEFAULT_GATE = HERE / "accuracy_gate_counts_single_sim.json"
 
 
 class ValidationError(RuntimeError):
@@ -174,12 +174,16 @@ def validate_metrics(metrics: Mapping[str, Any], requested: Sequence[str]) -> No
 
 def validate_accuracy_gate(gate: Mapping[str, Any]) -> None:
     schema_version = gate.get("schema_version")
-    require(schema_version in {1, 2}, "accuracy gate schema_version must be 1 or 2")
+    require(
+        schema_version in {1, 2, 3},
+        "accuracy gate schema_version must be 1, 2, or 3",
+    )
     require(gate.get("required_workloads") == 8, "accuracy gate must require 8 workloads")
     require(gate.get("required_ncu_repeats") == 7, "accuracy gate must require 7 NCU repeats")
+    expected_simulator_repeats = 1 if schema_version == 3 else 7
     require(
-        gate.get("required_simulator_repeats") == 7,
-        "accuracy gate must require 7 simulator repeats",
+        gate.get("required_simulator_repeats") == expected_simulator_repeats,
+        f"accuracy gate must require {expected_simulator_repeats} simulator repeat(s)",
     )
     expected = {
         "terminal_cycle_mape_pct": (20.0, 8),
@@ -330,6 +334,7 @@ def validate_spec(spec: Mapping[str, Any], metrics: Mapping[str, Any], profile: 
         in {
             "workloads/research_probes/sm86_ncu_demo_benchmark/accuracy_gate.json",
             "workloads/research_probes/sm86_ncu_demo_benchmark/accuracy_gate_counts.json",
+            "workloads/research_probes/sm86_ncu_demo_benchmark/accuracy_gate_counts_single_sim.json",
         },
         "accuracy gate path drift",
     )
@@ -346,9 +351,18 @@ def validate_spec(spec: Mapping[str, Any], metrics: Mapping[str, Any], profile: 
         and spec["ncu"].get("repeats_final") == 7,
         "NCU repeat contract drift",
     )
+    expected_simulator_repeats = (
+        (1, 1)
+        if spec.get("accuracy_gate")
+        == "workloads/research_probes/sm86_ncu_demo_benchmark/accuracy_gate_counts_single_sim.json"
+        else (3, 7)
+    )
     require(
-        spec["simulator"].get("repeats_smoke") == 3
-        and spec["simulator"].get("repeats_final") == 7
+        (
+            spec["simulator"].get("repeats_smoke"),
+            spec["simulator"].get("repeats_final"),
+        )
+        == expected_simulator_repeats
         and "twins" not in spec["simulator"],
         "simulator repeat contract drift",
     )

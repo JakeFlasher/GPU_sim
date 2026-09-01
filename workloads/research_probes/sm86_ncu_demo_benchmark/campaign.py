@@ -38,9 +38,9 @@ from workloads.research_probes.validate_sm86_live_cohort import (
 
 
 DEFAULT_SPEC = HERE / "benchmark_spec.json"
-DEFAULT_METRICS = HERE / "metric_schema.json"
+DEFAULT_METRICS = HERE / "metric_schema_counts.json"
 DEFAULT_PROFILE = HERE / "host_profile.json"
-DEFAULT_GATE = HERE / "accuracy_gate.json"
+DEFAULT_GATE = HERE / "accuracy_gate_counts_single_sim.json"
 STAGES = ("correctness", "ncu", "nvbit", "static", "simulator")
 SIMULATOR_METRICS = (
     "smsp__inst_executed.sum",
@@ -683,7 +683,12 @@ def _run_simulator(
         "simulator_wall_seconds_minimum": min(walls),
         "simulator_wall_seconds_maximum": max(walls),
         "simulator_wall_relative_range_pct": wall_relative_range,
-        "deterministic_repeats": True,
+        "deterministic_repeats": True if repeats > 1 else None,
+        "prediction_determinism_status": (
+            "verified_byte_identical_processes"
+            if repeats > 1
+            else "not_assessed_single_process"
+        ),
         "observation": observations[0],
     }
 
@@ -843,9 +848,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             raise CampaignError("--ncu-repeats is outside the frozen 1..final-repeat range")
         simulator_repeats = args.simulator_repeats
         if simulator_repeats is None:
-            simulator_repeats = int(
-                spec["simulator"]["repeats_smoke" if args.smoke else "repeats_final"]
-            )
+            simulator_repeats = 1
         if not 1 <= simulator_repeats <= int(spec["simulator"]["repeats_final"]):
             raise CampaignError(
                 "--simulator-repeats is outside the frozen 1..final-repeat range"

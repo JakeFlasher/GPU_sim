@@ -148,6 +148,9 @@ def test_timing_crosswalk_preserves_two_distinct_envelopes() -> None:
 def test_caveats_distinguish_smoke_from_final_repeats() -> None:
     assert any("3 independent" in note for note in report._caveats("smoke", 3, 3))
     assert any("7 independent" in note for note in report._caveats("final", 7, 7))
+    single_process = report._caveats("final", 7, 1)
+    assert any("One simulator process" in note for note in single_process)
+    assert any("not reassessed" in note for note in single_process)
     assert all(
         "Every smoke" not in note for note in report._caveats("final", 7, 7)
     )
@@ -281,3 +284,78 @@ def test_count_target_gate_uses_all_hit_and_miss_components() -> None:
     assert total["accuracy"]["cache_lookup_count_normalized_error_pct"] == 2.0
     evaluated = report._evaluate_accuracy_gate(gate, rows, total)
     assert evaluated["technical_status"] == "pass"
+
+
+def test_single_simulator_gate_does_not_claim_unmeasured_determinism() -> None:
+    gate = json.loads(
+        (report.HERE / "accuracy_gate_counts_single_sim.json").read_text()
+    )
+
+    def row(index: int) -> dict:
+        metrics = {metric: {"ape_pct": 1.0} for metric in report.COUNTER_IDS}
+        metrics.update(
+            {
+                metric: {
+                    "ape_pct": 1.0,
+                    "absolute_percentage_point_error": 0.5,
+                }
+                for metric in report.HIT_RATE_IDS
+            }
+        )
+        metrics.update(
+            {
+                metric: {
+                    "ape_pct": 1.0,
+                    "pair_normalized_absolute_error_pct": 2.0,
+                }
+                for metric in report.CACHE_LOOKUP_COUNT_IDS
+            }
+        )
+        return {
+            "workload_id": f"w{index}",
+            "target_launches_per_process": 1,
+            "ncu_launch_samples": 7,
+            "simulator_process_samples": 1,
+            "timing": {
+                "gpu_kernel_seconds": 1.0,
+                "ncu_profile_wall_seconds_mean": 1.0,
+                "ncu_profile_wall_seconds_total": 7.0,
+                "simulator_wall_seconds": 1.0,
+            },
+            "accuracy": {
+                "terminal_lower_bound_mape_pct": 5.0,
+                "issue_frontier_mape_pct": 5.0,
+                "runtime_equivalent_mape_pct": 5.0,
+                "instruction_throughput_mape_pct": 5.0,
+            },
+            "ncu_repeatability": {
+                "max_relative_range_pct": 1.0,
+                "max_relative_range_metric": "m",
+            },
+            "simulator_repeatability": {
+                "wall_relative_range_pct": 0.0,
+                "deterministic_predictions": None,
+                "prediction_determinism_status": "not_assessed_single_process",
+            },
+            "metrics": metrics,
+        }
+
+    rows = [row(index) for index in range(8)]
+    total = report._totals(rows)
+    assert total["simulator_repeatability"]["all_predictions_deterministic"] is None
+    assert (
+        total["simulator_repeatability"]["prediction_determinism_status"]
+        == "not_assessed_single_process"
+    )
+    evaluated = report._evaluate_accuracy_gate(gate, rows, total)
+    assert evaluated["technical_status"] == "pass"
+    assert evaluated["repeat_checks"]["simulator_repeats_per_workload"] == {
+        "value": 1,
+        "required": 1,
+        "passed": True,
+    }
+    assert evaluated["repeat_checks"]["simulator_prediction_determinism"] == {
+        "value": "not_assessed_single_process",
+        "required": "not_required_for_single_process_policy",
+        "passed": True,
+    }

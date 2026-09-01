@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import json
 from pathlib import Path
 
 import pytest
@@ -62,8 +63,8 @@ def test_plan_binds_ncu_cache_policy_and_metric_projection(tmp_path: Path) -> No
     spec = _spec()
     assert spec["ncu"]["repeats_smoke"] == 3
     assert spec["ncu"]["repeats_final"] == 7
-    assert spec["simulator"]["repeats_smoke"] == 3
-    assert spec["simulator"]["repeats_final"] == 7
+    assert spec["simulator"]["repeats_smoke"] == 1
+    assert spec["simulator"]["repeats_final"] == 1
     assert "twins" not in spec["simulator"]
     workload = _workload()
     ncu = campaign._stage_command(spec, workload, "ncu", tmp_path)
@@ -77,6 +78,18 @@ def test_plan_binds_ncu_cache_policy_and_metric_projection(tmp_path: Path) -> No
     assert "lts__t_sector_hit_rate.pct" not in collected
     simulator = campaign._stage_command(spec, workload, "simulator", tmp_path)
     assert simulator[-1] == "--ncu-shaped-metrics"
+
+
+def test_default_plan_keeps_ncu_repeats_and_runs_one_simulator_process(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    result = campaign.main(
+        ["--output", str(tmp_path / "campaign"), "--stage", "plan"]
+    )
+    assert result == 0
+    plan = json.loads(capsys.readouterr().out)
+    assert plan["ncu_repeats"] == 7
+    assert plan["simulator_repeats"] == 1
 
 
 def test_ncu_parser_preserves_launch_identity_and_normalizes_duration(tmp_path: Path) -> None:
