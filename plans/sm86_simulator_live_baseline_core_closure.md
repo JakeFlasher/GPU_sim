@@ -146,6 +146,16 @@ therefore closes as an identification no-go without opening holdout timing.
 No source-line schema, readiness change, coefficient, or timing promotion is
 supported; the typed async-copy visibility tail remains the honest boundary.
 
+The independent committed-group age continuation is complete in
+[`docs/sm86_async_wait_prefix_order_milestone.md`](../docs/sm86_async_wait_prefix_order_milestone.md).
+It adds the first live `wait_group 1` path and timing-neutral schema-19
+partial/draining wait observation. The replay smoke also exposed and closed an
+Ampere parser gap for ordinary SB1--SB5 wait-mask bits carried by `LDGDEPBAR`.
+Live identification preserves the predicted prefix/remainder signs in all ten
+pairs, but fails the frozen issue, remainder-magnitude, and total-cancellation
+gates. The three-group holdout remains uncaptured, no timing is promoted, and
+`async_copy_shared_visibility` remains required.
+
 ## Acceptance Criteria
 
 - AC-1: A current-host preflight and release build are recorded for the RTX

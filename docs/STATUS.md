@@ -227,6 +227,20 @@ late_fanout` wait delta is positive (median `+9.435` cycles/group), opposite
 the frozen signal. Holdout timing remains unread; schema 18, production
 timing, and `async_copy_shared_visibility` remain unchanged.
 
+The independent
+[wait-prefix ordering milestone](sm86_async_wait_prefix_order_milestone.md)
+is complete as an identification no-go. A fresh two-group assay is the first
+live path to exercise `wait_group 1` before a final `wait_group 0`; it swaps
+one cache-all and one L2-hit bypass group by FIFO age while keeping aggregate
+work exact. Its smoke fixed a real parser gap for compiler-emitted ordinary
+SB1--SB5 wait masks on `LDGDEPBAR`, and readiness schema 19 now exposes
+partial/draining prefix counts and constraint exposure without changing time.
+All 10 live pairs have the expected prefix and remainder directions, but the
+issue delta is `+5.000` cycles/epoch, the remainder magnitude is only
+`47.541`, and total time does not cancel. The frozen identification therefore
+fails before the three-group holdout. Production timing and the typed
+`async_copy_shared_visibility` tail remain unchanged.
+
 The 2026-08-17
 [causal-readiness milestone](sm86_causal_readiness_milestone.md) is complete.
 Reason-tagged dependency, async-copy, CTA-generation/arrival-spread, and

@@ -369,15 +369,18 @@ fn classify(
                     opcode: opcode_text.to_owned(),
                 });
             }
+            // SB0 is the commit protocol's write barrier. NVCC may compose the
+            // instruction with ordinary SB1--SB5 waits; the normal scoreboard
+            // path already enforces those bits before this commit can issue.
             if control.write_barrier.map(|barrier| barrier.wire()) != Some(0)
                 || control.read_barrier.is_some()
-                || control.wait_mask.bits() != 0
+                || control.wait_mask.bits() & 1 != 0
             {
                 return Err(ProgramError::AsyncCopyControlLayout {
                     arch,
                     opcode: opcode_text.to_owned(),
                     control,
-                    expected: "write barrier SB0, no read barrier, and an empty ordinary wait mask",
+                    expected: "write barrier SB0, no read barrier, and an ordinary wait mask that excludes reserved SB0",
                 });
             }
             Ok(OpClass::AsyncCopyCommit)
@@ -1059,6 +1062,11 @@ mod tests {
         let wait = ControlBits::new(4, false, 7, 7, 0, 0).unwrap();
         assert_eq!(
             classify("LDGDEPBAR", commit, None, ArchId::Sm86).unwrap(),
+            OpClass::AsyncCopyCommit
+        );
+        let composed_commit = ControlBits::new(2, true, 0, 7, 0b001110, 0).unwrap();
+        assert_eq!(
+            classify("LDGDEPBAR", composed_commit, None, ArchId::Sm86).unwrap(),
             OpClass::AsyncCopyCommit
         );
         for (opcode, max_pending_groups) in [

@@ -1448,6 +1448,124 @@ impl AsyncReadinessDiagnostics {
     }
 }
 
+/// Timing-neutral summary for one class of asynchronous-copy waits.
+///
+/// Every field is an additive observation over issued waits. `exposure_cycles`
+/// is the required committed-prefix completion frontier relative to the time
+/// the wait became the warp's current instruction; it never participates in
+/// readiness or event timing.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
+pub struct AsyncWaitClassDiagnostics {
+    pub wait_count: u64,
+    pub immediate_sum: u64,
+    pub committed_groups_before: u64,
+    pub consumed_prefix_groups: u64,
+    pub groups_remaining: u64,
+    pub exposure_cycles: u64,
+}
+
+impl AsyncWaitClassDiagnostics {
+    fn add_checked(
+        &mut self,
+        addend: &Self,
+        fields: [&'static str; 6],
+    ) -> Result<(), ReadinessCounterError> {
+        let next = Self {
+            wait_count: checked_readiness_add(fields[0], self.wait_count, addend.wait_count)?,
+            immediate_sum: checked_readiness_add(
+                fields[1],
+                self.immediate_sum,
+                addend.immediate_sum,
+            )?,
+            committed_groups_before: checked_readiness_add(
+                fields[2],
+                self.committed_groups_before,
+                addend.committed_groups_before,
+            )?,
+            consumed_prefix_groups: checked_readiness_add(
+                fields[3],
+                self.consumed_prefix_groups,
+                addend.consumed_prefix_groups,
+            )?,
+            groups_remaining: checked_readiness_add(
+                fields[4],
+                self.groups_remaining,
+                addend.groups_remaining,
+            )?,
+            exposure_cycles: checked_readiness_add(
+                fields[5],
+                self.exposure_cycles,
+                addend.exposure_cycles,
+            )?,
+        };
+        *self = next;
+        Ok(())
+    }
+}
+
+const PARTIAL_ASYNC_WAIT_FIELDS: [&str; 6] = [
+    "readiness.async_wait_prefix.partial.wait_count",
+    "readiness.async_wait_prefix.partial.immediate_sum",
+    "readiness.async_wait_prefix.partial.committed_groups_before",
+    "readiness.async_wait_prefix.partial.consumed_prefix_groups",
+    "readiness.async_wait_prefix.partial.groups_remaining",
+    "readiness.async_wait_prefix.partial.exposure_cycles",
+];
+const DRAINING_ASYNC_WAIT_FIELDS: [&str; 6] = [
+    "readiness.async_wait_prefix.draining.wait_count",
+    "readiness.async_wait_prefix.draining.immediate_sum",
+    "readiness.async_wait_prefix.draining.committed_groups_before",
+    "readiness.async_wait_prefix.draining.consumed_prefix_groups",
+    "readiness.async_wait_prefix.draining.groups_remaining",
+    "readiness.async_wait_prefix.draining.exposure_cycles",
+];
+
+/// Partial (`wait_group N`, `N > 0`) and draining (`wait_group 0`) wait
+/// observations. The enclosing readiness field is allocated only when the
+/// static program contains a nonzero wait immediate, preserving predecessor
+/// wait-zero JSON byte-for-byte.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
+pub struct AsyncWaitPrefixDiagnostics {
+    pub partial: AsyncWaitClassDiagnostics,
+    pub draining: AsyncWaitClassDiagnostics,
+}
+
+impl AsyncWaitPrefixDiagnostics {
+    fn observe(
+        &mut self,
+        immediate: u32,
+        committed_groups_before: u64,
+        consumed_prefix_groups: u64,
+        exposure_cycles: u64,
+    ) -> Result<(), ReadinessCounterError> {
+        let observation = AsyncWaitClassDiagnostics {
+            wait_count: 1,
+            immediate_sum: u64::from(immediate),
+            committed_groups_before,
+            consumed_prefix_groups,
+            groups_remaining: committed_groups_before - consumed_prefix_groups,
+            exposure_cycles,
+        };
+        if immediate == 0 {
+            self.draining
+                .add_checked(&observation, DRAINING_ASYNC_WAIT_FIELDS)
+        } else {
+            self.partial
+                .add_checked(&observation, PARTIAL_ASYNC_WAIT_FIELDS)
+        }
+    }
+
+    fn add_checked(&mut self, addend: &Self) -> Result<(), ReadinessCounterError> {
+        let mut next = *self;
+        next.partial
+            .add_checked(&addend.partial, PARTIAL_ASYNC_WAIT_FIELDS)?;
+        next.draining
+            .add_checked(&addend.draining, DRAINING_ASYNC_WAIT_FIELDS)?;
+        *self = next;
+        Ok(())
+    }
+}
+
 /// Cold, bypass-only per-copy observation. It is boxed out of the scheduler's
 /// inline readiness object and never participates in issue or wait timing.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
@@ -3765,6 +3883,8 @@ pub struct ReadinessDiagnostics {
     pub tied_limiting_causes: u64,
     pub async_groups: AsyncReadinessDiagnostics,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub async_wait_prefix: Option<Box<AsyncWaitPrefixDiagnostics>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub bypass_async_copies: Option<Box<BypassAsyncCopyDiagnostics>>,
     pub cta_barriers: CtaBarrierDiagnostics,
     #[serde(skip_serializing_if = "BarrierPipelineDiagnostics::is_empty")]
@@ -3803,6 +3923,13 @@ impl ReadinessDiagnostics {
             addend.tied_limiting_causes,
         )?;
         next.async_groups.add_checked(&addend.async_groups)?;
+        if let Some(addend_waits) = addend.async_wait_prefix.as_deref() {
+            if let Some(current) = next.async_wait_prefix.as_deref_mut() {
+                current.add_checked(addend_waits)?;
+            } else {
+                next.async_wait_prefix = Some(Box::new(*addend_waits));
+            }
+        }
         if let Some(addend_bypass) = addend.bypass_async_copies.as_deref() {
             if let Some(current) = next.bypass_async_copies.as_deref_mut() {
                 current.add_checked(addend_bypass)?;
@@ -3858,9 +3985,13 @@ impl ReadinessDiagnostics {
     /// Schema 17 joins exact source-sector responses to flexible destination
     /// cohorts and reports a parameter-free source/topology-overlap candidate.
     /// Schema 18 adds a first-response-anchored, timing-neutral destination
-    /// reservation-exposure score over those exact cohorts.
+    /// reservation-exposure score over those exact cohorts. Schema 19 adds
+    /// timing-neutral partial-versus-draining async-wait prefix observations
+    /// for programs containing at least one nonzero wait immediate.
     pub fn schema_version(&self) -> u32 {
-        if self
+        if self.async_wait_prefix.is_some() {
+            19
+        } else if self
             .bypass_async_copies
             .as_deref()
             .is_some_and(|diagnostics| diagnostics.cohort_overlap_groups_observed != 0)
@@ -6744,6 +6875,9 @@ impl<'a> SmCore<'a> {
                 OpClass::AsyncCopyCommit | OpClass::AsyncCopyWait
             ) || slot.mem_role == sim_mem::MemRole::BypassLoad(CacheOpToken::Ldgsts)
         });
+        let has_nonzero_async_wait = schedule.by_pc.values().any(|slot| {
+            slot.op_class == OpClass::AsyncCopyWait && slot.async_copy_wait_max_pending_groups != 0
+        });
         for block in blocks {
             let live_warp_count = block
                 .warps
@@ -6923,6 +7057,11 @@ impl<'a> SmCore<'a> {
         } else {
             None
         };
+        let readiness = ReadinessDiagnostics {
+            async_wait_prefix: has_nonzero_async_wait
+                .then(|| Box::new(AsyncWaitPrefixDiagnostics::default())),
+            ..ReadinessDiagnostics::default()
+        };
         let mut core = Self {
             schedule,
             schedule_slots,
@@ -6945,7 +7084,7 @@ impl<'a> SmCore<'a> {
             ldgsts_destination_pipe_ready: 0,
             result_writebacks,
             unmodeled_tails,
-            readiness: ReadinessDiagnostics::default(),
+            readiness,
             memory_service_candidates: MemoryServiceCandidateState::default(),
             emit_admission_witnesses: false,
             memory_admission_feedback: None,
@@ -8300,6 +8439,36 @@ impl<'a> SmCore<'a> {
         if self.has_async_copy_protocol && slot.op_class == OpClass::AsyncCopyWait {
             let prefix = self.async_copies[warp_index]
                 .async_wait_prefix_len(slot.async_copy_wait_max_pending_groups);
+            let committed_groups_before = self.async_copies[warp_index]
+                .state
+                .as_deref()
+                .map_or(0, |state| state.committed_groups.len());
+            let wait_frontier = self.async_copies[warp_index]
+                .state
+                .as_deref()
+                .and_then(|state| {
+                    state
+                        .committed_groups
+                        .iter()
+                        .take(prefix)
+                        .map(|group| group.completion_time)
+                        .max()
+                })
+                .unwrap_or(0);
+            if let Some(diagnostics) = projected.async_wait_prefix.as_deref_mut() {
+                diagnostics.observe(
+                    slot.async_copy_wait_max_pending_groups,
+                    u64::try_from(committed_groups_before).map_err(|_| {
+                        IssueError::CounterOverflow {
+                            counter: "async-wait committed-group cardinality diagnostic",
+                        }
+                    })?,
+                    u64::try_from(prefix).map_err(|_| IssueError::CounterOverflow {
+                        counter: "async-wait consumed-prefix cardinality diagnostic",
+                    })?,
+                    wait_frontier.saturating_sub(base),
+                )?;
+            }
             if let Some(state) = self.async_copies[warp_index].state.as_deref() {
                 for group in state.committed_groups.iter().take(prefix) {
                     debug_assert!(
@@ -12382,6 +12551,111 @@ mod tests {
     }
 
     #[test]
+    fn async_wait_prefix_observation_separates_partial_and_draining_waits() {
+        let sched = schedule(vec![
+            (0, slot(cb(1), OpClass::Other, "LDGSTS.E")),
+            (16, async_commit_slot()),
+            (32, slot(cb(1), OpClass::Other, "LDGSTS.E")),
+            (48, async_commit_slot()),
+            (64, async_wait_slot(1)),
+            (80, async_wait_slot(0)),
+            (96, slot(cb(1), OpClass::Other, "EXIT")),
+        ]);
+        let blocks = vec![BlockReplay {
+            launch_index: 0,
+            warps: vec![WarpReplay {
+                async_copy_cohorts: None,
+                warp_slot: 0,
+                insts: vec![
+                    async_copy_inst(0, 0, 1),
+                    inst(16),
+                    async_copy_inst(32, 1, 1),
+                    inst(48),
+                    inst(64),
+                    inst(80),
+                    inst(96),
+                ],
+                sectors: vec![40, 80],
+            }],
+        }];
+        let result = simulate_sm(&blocks, &sched, &params(), None).unwrap();
+        let mut unobserved_core = SmCore::new(&blocks, &sched, &params(), SmMemMode::Flat).unwrap();
+        unobserved_core.readiness.async_wait_prefix = None;
+        let mut out = Vec::new();
+        assert_eq!(
+            unobserved_core
+                .advance(ReplayHorizon::Unbounded, &mut out)
+                .unwrap(),
+            Advance::Done
+        );
+        assert!(out.is_empty());
+        let unobserved = unobserved_core.result();
+
+        assert_eq!(result.cycles, 406);
+        assert_eq!(result.cycles, unobserved.cycles);
+        assert_eq!(result.instructions_issued, unobserved.instructions_issued);
+        assert_eq!(
+            result.readiness.async_groups,
+            unobserved.readiness.async_groups
+        );
+        assert_eq!(
+            result.readiness.limiting_cycles,
+            unobserved.readiness.limiting_cycles
+        );
+        assert_eq!(
+            result.readiness.constraint_exposure_cycles,
+            unobserved.readiness.constraint_exposure_cycles
+        );
+        assert_eq!(result.readiness.schema_version(), 19);
+        assert_eq!(
+            result.readiness.async_wait_prefix.as_deref(),
+            Some(&AsyncWaitPrefixDiagnostics {
+                partial: AsyncWaitClassDiagnostics {
+                    wait_count: 1,
+                    immediate_sum: 1,
+                    committed_groups_before: 2,
+                    consumed_prefix_groups: 1,
+                    groups_remaining: 1,
+                    exposure_cycles: 397,
+                },
+                draining: AsyncWaitClassDiagnostics {
+                    wait_count: 1,
+                    immediate_sum: 0,
+                    committed_groups_before: 1,
+                    consumed_prefix_groups: 1,
+                    groups_remaining: 0,
+                    exposure_cycles: 3,
+                },
+            })
+        );
+    }
+
+    #[test]
+    fn wait_zero_only_program_preserves_predecessor_readiness_json() {
+        let sched = schedule(vec![
+            (0, slot(cb(1), OpClass::Other, "LDGSTS.E")),
+            (16, async_commit_slot()),
+            (32, async_wait_slot(0)),
+            (48, slot(cb(1), OpClass::Other, "EXIT")),
+        ]);
+        let blocks = vec![BlockReplay {
+            launch_index: 0,
+            warps: vec![WarpReplay {
+                async_copy_cohorts: None,
+                warp_slot: 0,
+                insts: vec![async_copy_inst(0, 0, 1), inst(16), inst(32), inst(48)],
+                sectors: vec![40],
+            }],
+        }];
+        let result = simulate_sm(&blocks, &sched, &params(), None).unwrap();
+        let readiness_json = serde_json::to_value(&result.readiness).unwrap();
+
+        assert_eq!(result.readiness.schema_version(), 1);
+        assert!(result.readiness.async_wait_prefix.is_none());
+        assert!(readiness_json.get("async_wait_prefix").is_none());
+    }
+
+    #[test]
     fn async_copy_payload_rate_is_route_local_and_sector_count_independent() {
         for (policy, opcode, expected_cycles) in [
             (LdgstsL1Policy::CacheAtAllLevels, "LDGSTS.E", 406),
@@ -14579,6 +14853,64 @@ mod tests {
                 field: "readiness.control_stall",
                 accumulated: u64::MAX,
                 addend: 1,
+            })
+        ));
+        assert_eq!(aggregate, before);
+    }
+
+    #[test]
+    fn async_wait_prefix_aggregation_is_checked_and_transactional() {
+        let observation = ReadinessDiagnostics {
+            async_wait_prefix: Some(Box::new(AsyncWaitPrefixDiagnostics {
+                partial: AsyncWaitClassDiagnostics {
+                    wait_count: 1,
+                    immediate_sum: 2,
+                    committed_groups_before: 3,
+                    consumed_prefix_groups: 1,
+                    groups_remaining: 2,
+                    exposure_cycles: 17,
+                },
+                draining: AsyncWaitClassDiagnostics {
+                    wait_count: 1,
+                    immediate_sum: 0,
+                    committed_groups_before: 2,
+                    consumed_prefix_groups: 2,
+                    groups_remaining: 0,
+                    exposure_cycles: 11,
+                },
+            })),
+            ..ReadinessDiagnostics::default()
+        };
+        let mut aggregate = ReadinessDiagnostics::default();
+        aggregate.add_checked(&observation).unwrap();
+        aggregate.add_checked(&observation).unwrap();
+
+        let waits = aggregate.async_wait_prefix.as_deref().unwrap();
+        assert_eq!(aggregate.schema_version(), 19);
+        assert_eq!(waits.partial.wait_count, 2);
+        assert_eq!(waits.partial.immediate_sum, 4);
+        assert_eq!(waits.partial.committed_groups_before, 6);
+        assert_eq!(waits.partial.consumed_prefix_groups, 2);
+        assert_eq!(waits.partial.groups_remaining, 4);
+        assert_eq!(waits.partial.exposure_cycles, 34);
+        assert_eq!(waits.draining.wait_count, 2);
+        assert_eq!(waits.draining.committed_groups_before, 4);
+        assert_eq!(waits.draining.consumed_prefix_groups, 4);
+        assert_eq!(waits.draining.exposure_cycles, 22);
+
+        aggregate
+            .async_wait_prefix
+            .as_deref_mut()
+            .unwrap()
+            .partial
+            .exposure_cycles = u64::MAX;
+        let before = aggregate.clone();
+        assert!(matches!(
+            aggregate.add_checked(&observation),
+            Err(ReadinessCounterError::Overflow {
+                field: "readiness.async_wait_prefix.partial.exposure_cycles",
+                accumulated: u64::MAX,
+                addend: 17,
             })
         ));
         assert_eq!(aggregate, before);

@@ -388,3 +388,40 @@ requires a negative median and at least eight negative repeats. Both holdout
 timing flags remain false. See
 [`docs/sm86_async_source_line_coordinates_milestone.md`](../../../docs/sm86_async_source_line_coordinates_milestone.md)
 for the retained identities, counts, values, and decision.
+
+## Wait-prefix ordering discriminator
+
+`async_wait_prefix_order` is the first live probe in this tree to keep two
+nonempty asynchronous-copy groups committed across `wait_group 1`. It swaps
+one repeated cache-all `.ca` copy and one L2-hit bypass `.cg` copy between the
+oldest and newest group while preserving their source and destination
+marginals. The prefix wait consumes only the oldest group; a following
+`wait_group 0` drains the remainder and provides a cancellation control.
+
+Run the vertical smoke, then the frozen ten-pair identification:
+
+```bash
+PYTHONDONTWRITEBYTECODE=1 python3 \
+  workloads/research_probes/async_source_only/capture_wait_prefix.py \
+  --phase smoke --timeout 900
+PYTHONDONTWRITEBYTECODE=1 python3 \
+  workloads/research_probes/async_source_only/capture_wait_prefix.py \
+  --phase direct --repeats 10 --timeout 300
+PYTHONDONTWRITEBYTECODE=1 python3 \
+  workloads/research_probes/async_source_only/analyze_wait_prefix.py
+```
+
+The smoke exposed and fixed one real simulator admission gap: valid Ampere
+`LDGDEPBAR` can carry ordinary SB1--SB5 wait-mask bits while reserving SB0 for
+the asynchronous-copy protocol. Readiness schema 19 now reports partial and
+draining wait-prefix exposure separately without affecting timing; programs
+containing only `wait_group 0` retain byte-identical predecessor JSON.
+
+The complete identification has the FIFO phase directions in all ten pairs,
+but fails the prospective transfer rule. `l2_old - l1_old` is `+5.000`
+cycles/epoch during issue/commit, `+187.530` at the prefix wait, `0.000` for
+the oldest consume, `-47.541` at the draining wait, and `+144.989` in total.
+The issue gate requires at most one cycle, the draining magnitude requires at
+least 64 cycles, and the total never satisfies the cancellation rule. The
+three-group holdout remains uncaptured. No timing is promoted and
+`async_copy_shared_visibility` remains required.
