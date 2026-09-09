@@ -170,6 +170,8 @@ pub enum AnchoredReadError {
     RetainedDescriptorModeInvalid { path: PathBuf },
     #[error("descriptor-anchored artifact is not a regular file: {path}")]
     NotRegular { path: PathBuf },
+    #[error("threadblock payload tree contains a non-protobuf regular file: {path}")]
+    NonProtobuf { path: PathBuf },
     #[error("descriptor-anchored artifact generation metadata is invalid: {path}")]
     GenerationIdentityInvalid { path: PathBuf },
     #[error("descriptor-anchored artifact {path} has size {actual}, expected {expected}")]
@@ -398,6 +400,80 @@ impl AnchoredDir {
             maximum_bytes,
             maximum_file_bytes,
             bytes_seen: 0,
+            reject_non_pb: false,
+        };
+        self.read_pb_tree_from(directory, relative, 0, &mut state)?;
+        state
+            .files
+            .sort_by(|left, right| left.relative.cmp(&right.relative));
+        Ok(AnchoredTree {
+            files: state.files,
+            bytes: state.bytes_seen,
+        })
+    }
+
+    /// Read a payload tree while rejecting regular files whose names are not
+    /// protobuf payloads.  The ordinary helper retains its historical
+    /// filtering behavior for generic callers; trace admission uses this
+    /// strict form so Python and Rust consume the same directory contract.
+    pub(crate) fn read_pb_tree_strict(
+        &self,
+        relative: &Path,
+        maximum_files: u64,
+        maximum_bytes: u64,
+    ) -> Result<AnchoredTree, AnchoredReadError> {
+        self.read_pb_tree_with_file_limit_strict(
+            relative,
+            maximum_files,
+            maximum_bytes,
+            MAX_TREE_FILE_BYTES,
+        )
+    }
+
+    pub(crate) fn read_pb_tree_with_file_limit_strict(
+        &self,
+        relative: &Path,
+        maximum_files: u64,
+        maximum_bytes: u64,
+        maximum_file_bytes: u64,
+    ) -> Result<AnchoredTree, AnchoredReadError> {
+        self.read_pb_tree_with_file_limit_mode(
+            relative,
+            maximum_files,
+            maximum_bytes,
+            maximum_file_bytes,
+            true,
+        )
+    }
+
+    fn read_pb_tree_with_file_limit_mode(
+        &self,
+        relative: &Path,
+        maximum_files: u64,
+        maximum_bytes: u64,
+        maximum_file_bytes: u64,
+        reject_non_pb: bool,
+    ) -> Result<AnchoredTree, AnchoredReadError> {
+        let directory =
+            self.open_directory(relative, false)?
+                .ok_or_else(|| AnchoredReadError::Io {
+                    path: self.root.join(relative),
+                    source: std::io::Error::from(std::io::ErrorKind::NotFound),
+                })?;
+        let entry_limit = maximum_files
+            .checked_mul(TREE_ENTRIES_PER_PAYLOAD)
+            .and_then(|value| value.checked_add(MIN_TREE_ENTRY_BUDGET))
+            .unwrap_or(u64::MAX);
+        let mut state = TreeState {
+            files: Vec::new(),
+            identities: BTreeMap::new(),
+            entries_seen: 0,
+            entry_limit,
+            maximum_files,
+            maximum_bytes,
+            maximum_file_bytes,
+            bytes_seen: 0,
+            reject_non_pb,
         };
         self.read_pb_tree_from(directory, relative, 0, &mut state)?;
         state
@@ -453,6 +529,76 @@ impl AnchoredDir {
             maximum_bytes,
             maximum_file_bytes,
             bytes_seen: 0,
+            reject_non_pb: false,
+        };
+        self.roster_pb_tree_from(directory, relative, 0, &mut state)?;
+        state
+            .files
+            .sort_by(|left, right| left.relative.cmp(&right.relative));
+        Ok(AnchoredTreeRoster {
+            files: state.files,
+            bytes: state.bytes_seen,
+        })
+    }
+
+    pub(crate) fn roster_pb_tree_strict(
+        &self,
+        relative: &Path,
+        maximum_files: u64,
+        maximum_bytes: u64,
+    ) -> Result<AnchoredTreeRoster, AnchoredReadError> {
+        self.roster_pb_tree_with_file_limit_strict(
+            relative,
+            maximum_files,
+            maximum_bytes,
+            MAX_TREE_FILE_BYTES,
+        )
+    }
+
+    pub(crate) fn roster_pb_tree_with_file_limit_strict(
+        &self,
+        relative: &Path,
+        maximum_files: u64,
+        maximum_bytes: u64,
+        maximum_file_bytes: u64,
+    ) -> Result<AnchoredTreeRoster, AnchoredReadError> {
+        self.roster_pb_tree_with_file_limit_mode(
+            relative,
+            maximum_files,
+            maximum_bytes,
+            maximum_file_bytes,
+            true,
+        )
+    }
+
+    fn roster_pb_tree_with_file_limit_mode(
+        &self,
+        relative: &Path,
+        maximum_files: u64,
+        maximum_bytes: u64,
+        maximum_file_bytes: u64,
+        reject_non_pb: bool,
+    ) -> Result<AnchoredTreeRoster, AnchoredReadError> {
+        let directory =
+            self.open_directory(relative, false)?
+                .ok_or_else(|| AnchoredReadError::Io {
+                    path: self.root.join(relative),
+                    source: std::io::Error::from(std::io::ErrorKind::NotFound),
+                })?;
+        let entry_limit = maximum_files
+            .checked_mul(TREE_ENTRIES_PER_PAYLOAD)
+            .and_then(|value| value.checked_add(MIN_TREE_ENTRY_BUDGET))
+            .unwrap_or(u64::MAX);
+        let mut state = RosterState {
+            files: Vec::new(),
+            identities: BTreeMap::new(),
+            entries_seen: 0,
+            entry_limit,
+            maximum_files,
+            maximum_bytes,
+            maximum_file_bytes,
+            bytes_seen: 0,
+            reject_non_pb,
         };
         self.roster_pb_tree_from(directory, relative, 0, &mut state)?;
         state
@@ -585,7 +731,11 @@ impl AnchoredDir {
                         generation,
                     });
                 }
-                FileType::RegularFile => {}
+                FileType::RegularFile => {
+                    if state.reject_non_pb {
+                        return Err(AnchoredReadError::NonProtobuf { path: child_path });
+                    }
+                }
                 _ => return Err(AnchoredReadError::NotRegular { path: child_path }),
             }
         }
@@ -730,7 +880,11 @@ impl AnchoredDir {
                         file,
                     });
                 }
-                FileType::RegularFile => {}
+                FileType::RegularFile => {
+                    if state.reject_non_pb {
+                        return Err(AnchoredReadError::NonProtobuf { path: child_path });
+                    }
+                }
                 _ => return Err(AnchoredReadError::NotRegular { path: child_path }),
             }
         }
@@ -817,6 +971,7 @@ struct TreeState {
     maximum_bytes: u64,
     maximum_file_bytes: u64,
     bytes_seen: u64,
+    reject_non_pb: bool,
 }
 
 struct RosterState {
@@ -828,6 +983,7 @@ struct RosterState {
     maximum_bytes: u64,
     maximum_file_bytes: u64,
     bytes_seen: u64,
+    reject_non_pb: bool,
 }
 
 fn retained_descriptor_label(raw_fd: u32) -> PathBuf {
@@ -1175,6 +1331,26 @@ mod tests {
             reader.roster_pb_tree(Path::new("tree"), 1, u64::MAX),
             Err(AnchoredReadError::TreeByteLimitExceeded { path, limit })
                 if path == payload && limit == MAX_TREE_FILE_BYTES
+        ));
+    }
+
+    #[test]
+    fn strict_tree_loader_rejects_non_protobuf_regular_files() {
+        let temp = tempfile::tempdir().unwrap();
+        let tree = temp.path().join("tree");
+        std::fs::create_dir(&tree).unwrap();
+        std::fs::write(tree.join("payload.pb"), b"payload").unwrap();
+        std::fs::write(tree.join("junk.txt"), b"unexpected").unwrap();
+        let reader = AnchoredDir::open(temp.path()).unwrap();
+        assert!(matches!(
+            reader.read_pb_tree_strict(Path::new("tree"), 2, 64),
+            Err(AnchoredReadError::NonProtobuf { path })
+                if path == tree.join("junk.txt")
+        ));
+        assert!(matches!(
+            reader.roster_pb_tree_strict(Path::new("tree"), 2, 64),
+            Err(AnchoredReadError::NonProtobuf { path })
+                if path == tree.join("junk.txt")
         ));
     }
 

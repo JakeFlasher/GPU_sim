@@ -951,6 +951,11 @@ after metric parsing was generalized. It now locates the quoted or unquoted
 `ID`/`Kernel Name` header and validates the same row shape; both encodings join
 to the retained launch identity.
 
+The Python admission contract rejected regular non-`.pb` files below
+`threadblocks/`, but Rust's anchored tree reader silently skipped them. Strict
+Rust tree readers now reject the same non-protobuf entries, keeping direct
+replay and admission behavior aligned.
+
 Capture destination setup also followed an empty symlinked directory and could
 write a new trace outside the requested output root. Destination resolution now
 rejects leaf and parent symlink components before `mkdir`; the normal retained
