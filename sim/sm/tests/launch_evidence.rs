@@ -1179,9 +1179,10 @@ fn threadblock_tree_ceiling_failures_retain_payload_role() {
     let tree_root = entry_ceiling.root.join("trace/threadblocks");
     // A one-payload manifest permits 1 * 8 + 1024 traversed entries. The
     // canonical fixture already contributes four entries, so 1029 ignored
-    // regular files cross the traversal ceiling without changing payload count.
+    // directories cross the traversal ceiling without introducing a
+    // non-protobuf regular file that the strict payload reader must reject.
     for index in 0..1029 {
-        fs::write(tree_root.join(format!("ignored-{index:04}.txt")), b"")
+        fs::create_dir(tree_root.join(format!("ignored-{index:04}")))
             .expect("add ignored tree entry");
     }
     let error = admission_error(
