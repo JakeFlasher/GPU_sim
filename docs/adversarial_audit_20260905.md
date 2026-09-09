@@ -847,6 +847,10 @@ an unbounded JSON document before validation. It now caps card input at 16 MiB,
 rejecting oversized or non-UTF-8 files before parsing while preserving the
 retained card path.
 
+The same loader followed a symlinked card leaf or parent directory. It now
+rejects symlink components before reading the card, keeping Python and anchored
+Rust card identity tied to the requested file.
+
 Carded L2 geometry also allowed a capacity whose per-slice set count was
 fractional, silently flooring away part of the declared cache. The carded
 constructor now rejects non-integral per-slice set geometry and capacities with

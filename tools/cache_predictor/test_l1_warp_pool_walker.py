@@ -71,3 +71,15 @@ def test_card_size_is_bounded(tmp_path):
     path.write_bytes(b"{" + b" " * (16 * 1024 * 1024) + b"}")
     with pytest.raises(WalkerConfigError, match="exceeds"):
         resolve_line_capacity(path)
+
+
+def test_card_path_rejects_leaf_and_parent_symlinks(tmp_path):
+    target = _card(tmp_path)
+    leaf = tmp_path / "leaf.json"
+    leaf.symlink_to(target)
+    with pytest.raises(WalkerConfigError, match="contains a symlink"):
+        resolve_line_capacity(leaf)
+    parent = tmp_path / "parent"
+    parent.symlink_to(tmp_path, target_is_directory=True)
+    with pytest.raises(WalkerConfigError, match="contains a symlink"):
+        resolve_line_capacity(parent / target.name)

@@ -137,7 +137,13 @@ class WalkGeometry(NamedTuple):
 
 
 def _load_card(card_path: Path | None) -> dict:
-    path = card_path or DEFAULT_CARD_PATH
+    path = (card_path or DEFAULT_CARD_PATH).expanduser()
+    if not path.is_absolute():
+        path = Path.cwd() / path
+    path = path.absolute()
+    if any(component.is_symlink() for component in (path, *path.parents)):
+        raise WalkerConfigError(f"card path contains a symlink: {path}")
+    path = path.resolve()
     # Preserve decimal lexemes until their resolver validates semantics; a
     # binary64 conversion would round large card integers before validation.
     try:
