@@ -1,6 +1,6 @@
 # Current status
 
-Updated 2026-09-08.
+Updated 2026-09-09.
 
 The end to end SM86 path is operational: NVBit traces and control sidecars are
 read by `sim-trace`, replayed by the SM and memory models, and emitted through
@@ -20,6 +20,8 @@ The current SM86 comparison set is:
 | `results/captures/sm86_fresh_locked_ncu_large_20260904_v10` | Large NCU input set | 7 workload shapes, seven repeats |
 | `results/captures/sm86_regenerated_workloads_small_20260905_v1` | Fresh full small replay | 8 correctness, NCU, NVBit, static, and simulator stages completed |
 | `results/captures/sm86_regenerated_workloads_large_20260905_v1` | Fresh full large replay | 7 correctness, NCU, NVBit, static, and simulator stages completed |
+| `results/captures/sm86_postmerge_campaign_small_20260909_v1` | Post-merge clock-qualified small campaign | 8/8 all stages; NCU observation joined; causal probe recorded |
+| `results/captures/sm86_postmerge_campaign_large_20260909_v1` | Post-merge clock-qualified large campaign | 7/7 all stages; NCU observation joined; causal probe recorded |
 
 The simulator reports separate issue, modeled-event, completion, and launch
 frontiers. An incomplete retirement tail is represented as typed state rather
@@ -36,6 +38,21 @@ trees are under `/data1/archive/results_misc_20260908`. After this cleanup, all
 Campaign snapshots bind dynamic traces and threadblock payloads before
 materialization. The release campaign runner and direct replay path both pass
 their focused package checks, and the retained canary fixture remains runnable.
+
+The post-merge clock-qualified full campaigns at revision `9df50c47` are
+retained under `results/captures/sm86_postmerge_campaign_small_20260909_v1`
+and `results/captures/sm86_postmerge_campaign_large_20260909_v1`. All 8 small
+and 7 large rows completed correctness, seven-repeat NCU, NVBit, static SASS,
+and simulator stages with zero clock-contract mismatches. Simulator commands
+now attach the matching raw NCU CSV through the observation-only `--ncu-csv`
+surface; 15/15 outputs contain the parsed launch observation. Each manifest
+also records the native causal-frontier probe (26 exact events, 19 causal,
+one collapsed region, two reified regions, unchanged final cycle 9).
+
+The same-input post-merge differential replay preserved every scored counter
+and raw issue/terminal frontier for all 8 small and 7 large retained traces.
+Fresh NCU medians are diagnostic because capture/profile sessions are not the
+frozen scorer inputs; no per-workload timing or traffic constants were fitted.
 
 ## Run the live path
 

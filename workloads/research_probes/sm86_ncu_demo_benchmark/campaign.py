@@ -256,7 +256,7 @@ def _stage_command(
         control = output_root / "evidence" / "raw" / "static" / slug / f"{slug}.control_bits.json"
         simulator = spec["simulator"]
         feedback = simulator.get("memory_admission_feedback")
-        return [
+        args = [
             str(simulator["binary"]),
             "--trace",
             str(trace),
@@ -277,6 +277,14 @@ def _stage_command(
             ),
             "--ncu-shaped-metrics",
         ]
+        # Keep the profiler join observation-only, but exercise it on every
+        # complete campaign. The NCU stage runs before simulator in an
+        # ``all`` campaign, so the CSV is available here; stage-only replay
+        # remains compatible with older roots that do not retain NCU data.
+        ncu_csv = output_root / "evidence" / "raw" / "ncu" / "rep-1" / slug / "ncu.csv"
+        if ncu_csv.is_file():
+            args.extend(["--ncu-csv", str(ncu_csv)])
+        return args
     raise CampaignError(f"unknown stage {stage!r}")
 
 
@@ -879,6 +887,49 @@ def _run_simulator(
     }
 
 
+def _run_causal_frontier_probe(output_root: Path) -> dict[str, Any]:
+    """Exercise the merged native causal analyzer without changing replay.
+
+    The production replay has no descriptor producer for dependency and child
+    completion facts yet, so this bounded probe deliberately remains a
+    post-replay integration signal. It verifies that the release sim-sm
+    component is built, callable, deterministic, and keeps contended or
+    side-effecting regions explicit; its result is never used as a timing input.
+    """
+    binary = REPO_ROOT / "sim" / "target" / "release" / "causal-frontier-probe"
+    if not binary.is_file():
+        raise CampaignError(f"causal-frontier probe binary is missing: {binary}")
+    result = _run(
+        [str(binary)],
+        timeout_seconds=30,
+        environment=_clean_environment(simulator=True),
+    )
+    _require_success("causal-frontier.probe", result)
+    try:
+        document = json.loads(result.stdout)
+    except json.JSONDecodeError as error:
+        raise CampaignError(f"causal-frontier probe output is not JSON: {error}") from error
+    if not isinstance(document, Mapping):
+        raise CampaignError("causal-frontier probe output is not an object")
+    if document.get("candidate_regions") != 3 or document.get("collapsed_regions") != 1:
+        raise CampaignError("causal-frontier probe did not preserve its safe-region collapse")
+    if document.get("reified_regions") != 2 or document.get("exact_final_cycle") != document.get("causal_final_cycle"):
+        raise CampaignError("causal-frontier probe did not refuse contended regions")
+    destination = output_root / "evidence" / "causal_frontier_probe.json"
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.write_text(result.stdout, encoding="utf-8")
+    return {
+        "binary": _artifact(binary),
+        "output": _artifact(destination),
+        "semantic": {
+            "candidate_regions": document["candidate_regions"],
+            "collapsed_regions": document["collapsed_regions"],
+            "reified_regions": document["reified_regions"],
+            "critical_path_preserved": True,
+        },
+    }
+
+
 def _execute_stage(
     spec: Mapping[str, Any],
     metric_schema: Mapping[str, Any],
@@ -1197,6 +1248,10 @@ def main(argv: Sequence[str] | None = None) -> int:
                 manifest["records"].append(record)
                 _write_json(manifest_path, manifest)
                 print(f"completed {stage}: {workload['id']}", flush=True)
+        if args.stage == "all":
+            manifest["causal_frontier_probe"] = _run_causal_frontier_probe(output_root)
+            _write_json(manifest_path, manifest)
+            print("completed causal-frontier probe", flush=True)
         print(manifest_path)
         return 0
     except (

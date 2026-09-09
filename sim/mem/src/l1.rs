@@ -1203,6 +1203,42 @@ impl L1Cache {
         })
     }
 
+    /// Check recency headroom for fills that will be applied before one
+    /// access-level MRU touch.  The ordinary mutation budget only covers the
+    /// access itself; due fills are a separate lazy transition and can consume
+    /// stamps first.  Count every due fill conservatively (sector fills may be
+    /// dropped after an eviction), so a near-exhaustion path is redirected to
+    /// the transactional shadow replay instead of publishing a partial fill.
+    fn preflight_due_fill_recency(
+        &self,
+        now: u64,
+        extra_touches: u64,
+    ) -> Result<(), L1AccessError> {
+        let due_fills = self
+            .line_fills
+            .values()
+            .filter(|&&(due, ..)| due.timed().is_some_and(|time| time <= now))
+            .count()
+            .checked_add(
+                self.sector_fills
+                    .values()
+                    .filter(|&&(due, _)| due.timed().is_some_and(|time| time <= now))
+                    .count(),
+            )
+            .and_then(|count| u64::try_from(count).ok())
+            .ok_or(L1AccessError::SequenceOverflow {
+                sequence: "recency",
+                current: self.next_stamp.current(),
+            })?;
+        let uses = due_fills
+            .checked_add(extra_touches)
+            .ok_or(L1AccessError::SequenceOverflow {
+                sequence: "recency",
+                current: self.next_stamp.current(),
+            })?;
+        self.next_stamp.preflight("recency", uses)
+    }
+
     fn apply_counter_deltas(
         &mut self,
         origin: MemoryOrigin,
@@ -1354,6 +1390,7 @@ impl L1Cache {
             Self::checked_time_add("hit visibility", retry_at, self.cfg.hit_latency)?;
             Self::checked_time_add("miss visibility", retry_at, self.cfg.miss_latency)?;
         }
+        self.preflight_due_fill_recency(now, 1)?;
         Ok(())
     }
 
@@ -2213,7 +2250,9 @@ impl L1Cache {
             recency_touches: 1,
             ..L1MutationBudget::for_origin(origin)
         };
-        if self.preflight_mutation_budget(budget).is_err() {
+        if self.preflight_mutation_budget(budget).is_err()
+            || self.preflight_due_fill_recency(now, 1).is_err()
+        {
             let mut shadow = self.clone();
             let hit = shadow.probe_write_impl(origin, sector_id, now, WriteAccounting::Store)?;
             *self = shadow;
@@ -2238,7 +2277,9 @@ impl L1Cache {
             recency_touches: 1,
             ..L1MutationBudget::for_origin(origin)
         };
-        if self.preflight_mutation_budget(budget).is_err() {
+        if self.preflight_mutation_budget(budget).is_err()
+            || self.preflight_due_fill_recency(now, 1).is_err()
+        {
             let mut shadow = self.clone();
             let hit =
                 shadow.probe_write_impl(origin, sector_id, now, WriteAccounting::Reduction)?;
@@ -2902,6 +2943,63 @@ mod tests {
             })
         );
         assert_cache_state_eq(&overflow, &before);
+    }
+
+    #[test]
+    fn due_fill_and_hit_recency_overflow_is_transactional() {
+        let mut l1 = L1Cache::new(L1Config {
+            arch: ArchId::Sm86,
+            line_capacity: 8,
+            mshr_count: Some(1),
+            hit_latency: 1,
+            miss_latency: 2,
+        })
+        .unwrap();
+        assert_eq!(
+            l1.access_eligible_unobserved(MemoryOrigin::Global, 0, 0)
+                .unwrap(),
+            AccessOutcome::MissLineAlloc
+        );
+        // Applying the due line fill needs one stamp; the hit that follows
+        // needs another.  The old fast path checked only the latter and could
+        // publish the fill before returning the overflow.
+        l1.next_stamp = NextSequence::Available(u64::MAX);
+        let before = l1.clone();
+        assert!(matches!(
+            l1.access_eligible_unobserved(MemoryOrigin::Global, 0, 2),
+            Err(L1AccessError::SequenceOverflow {
+                sequence: "recency",
+                current,
+            }) if current == u64::MAX
+        ));
+        assert_cache_state_eq(&l1, &before);
+    }
+
+    #[test]
+    fn due_fill_and_store_recency_overflow_is_transactional() {
+        let mut l1 = L1Cache::new(L1Config {
+            arch: ArchId::Sm86,
+            line_capacity: 8,
+            mshr_count: Some(1),
+            hit_latency: 1,
+            miss_latency: 2,
+        })
+        .unwrap();
+        assert_eq!(
+            l1.access_eligible_unobserved(MemoryOrigin::Global, 0, 0)
+                .unwrap(),
+            AccessOutcome::MissLineAlloc
+        );
+        l1.next_stamp = NextSequence::Available(u64::MAX);
+        let before = l1.clone();
+        assert!(matches!(
+            l1.probe_store(MemoryOrigin::Global, 0, 2),
+            Err(L1AccessError::SequenceOverflow {
+                sequence: "recency",
+                current,
+            }) if current == u64::MAX
+        ));
+        assert_cache_state_eq(&l1, &before);
     }
 
     #[test]

@@ -23,6 +23,10 @@ thiserror = { workspace = true }
 prost = { workspace = true }
 tempfile = { workspace = true }
 
+[[bin]]
+name = "causal-frontier-probe"
+path = "src/bin/causal_frontier_probe.rs"
+
 [[test]]
 name = "launch_evidence"
 path = "tests/launch_evidence.rs"

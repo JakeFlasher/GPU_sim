@@ -13,6 +13,11 @@ reports the region as reified.
 `--ncu-csv PATH`, with `--ncu-launch ID` required for multi-launch exports. The
 result places raw timing and resource/dependency projections under
 `ncu_observation`. NCU values never enter replay configuration or timing.
+Kernel identity falls back to the raw export's `Kernel Name` column when
+`launch__kernel_name` is empty. FMA and LSU instruction counts remain separate
+optional observations and are never substituted for total issue activity.
+The smsp__inst_executed.sum total and .avg per-SMSP roll-up are also kept as
+distinct observations.
 
 The direct SM86 probe is in
 [`workloads/prototype_sector_probe`](../workloads/prototype_sector_probe/).
@@ -24,5 +29,15 @@ model boundary.
 The descriptor bridge does not invent register operands, CTA-wide barriers,
 unsupported memory roles, or child completion timestamps. A future producer
 must supply those facts before causal summaries are used to change native
-replay scheduling. No top-tier novelty or silicon cycle-accuracy claim follows
+replay scheduling. Planner wall-clock telemetry is runtime-only and omitted
+from serialized reports so identical analyses remain byte-deterministic. No
+top-tier novelty or silicon cycle-accuracy claim follows
 from this integration alone.
+
+The normal SM86 campaign now exercises both merged observation surfaces. After
+the NCU stage, `campaign.py` passes the matching raw CSV to `sim-run`, where it
+is serialized under `ncu_observation` without entering replay configuration.
+The `--stage all` path also runs the release `causal-frontier-probe` and records
+its collapse/reification report in the campaign manifest. This makes the
+merged components executable and regression-visible while preserving the
+production timing boundary until a real descriptor producer is available.

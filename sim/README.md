@@ -12,12 +12,15 @@ The workspace contains the executable replay path:
 - `sim-sm::causal_frontier`: opt-in causal-frontier analysis for explicit
   descriptor streams; it is observational until a producer supplies dependency
   and completion facts.
+- `causal-frontier-probe`: bounded release-build integration probe used by the
+  full campaign to verify safe collapse and contended reification.
 
 Build the runner with:
 
 ```bash
 cargo build --release --manifest-path sim/Cargo.toml -p sim-run
 cargo build --release --manifest-path sim/Cargo.toml -p sim-run-campaign
+cargo build --release --manifest-path sim/Cargo.toml -p sim-sm --bin causal-frontier-probe
 ```
 
 For an observation-only NCU join, append `--ncu-csv PROFILE.csv` and, for a

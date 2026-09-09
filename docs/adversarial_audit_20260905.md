@@ -758,6 +758,60 @@ evaluation object as a clean row-count-complete run, yielding `status=None`.
 `run.py` now gates any parsed row missing an evaluation status while preserving
 known non-PASSED statuses as reportable evidence.
 
+The causal-frontier prototype merge was reviewed against the standalone
+`/home/jakeshea/GPU_prototypes` crate. Its descriptor/event/scoreboard/mini-GPU
+modules remain a separate dependency-free experiment because their state model
+does not match the production replay types; the compatible schedule bridge and
+observation-only NCU surface are merged. The causal analyzer now canonicalizes
+each program by sequence before both exact and collapse passes, preventing an
+arrival-order permutation from changing candidate-region accounting.
+
+The merged NCU CSV reader had accepted `nan`/`inf` and truncated fractional
+integer metrics. It now rejects non-finite values and fractional or negative
+integer fields, with focused parser coverage; NCU observations remain strictly
+comparison data and never configure replay.
+
+The same integer parser had a precision trap: large decimal/exponent spellings
+could pass through `f64` and round before conversion. NCU integer fields now
+accept only exact decimal `u64` text, preserving values above the floating-point
+exactness range without lossy conversion.
+
+A retained raw NCU export also left `launch__kernel_name` empty while its
+`Kernel Name` column carried the real kernel signature. The observation parser
+now falls back to that column and retains the prototype's separate FMA/LSU
+instruction observations without inventing a total-issue count.
+
+NVIDIA's current [Nsight Compute Profiling Guide](https://docs.nvidia.com/nsight-compute/ProfilingGuide/index.html)
+defines .sum as the total across hardware-unit instances and .avg as their
+average. The reader no longer uses smsp__inst_executed.avg as a fallback total;
+it exposes that average separately and only feeds the exact .sum into
+resource-dependency totals.
+
+The causal-frontier event-reduction counter used saturating subtraction, which
+could hide an internal accounting mismatch. Region reduction and its arithmetic
+now use checked operations and return a typed completion-overflow error instead.
+
+The causal report also exposed wall-clock `planner_time_ns` in its serialized
+shape, making repeated analyses differ even when their event and cycle results
+matched. Planner timing remains available in memory for telemetry but is now
+excluded from serialized scientific output.
+
+The L1 fast path preflighted the access MRU stamp but not the due fills that
+are lazily installed before that access. Near the u64 stamp limit this could
+publish a fill and then fail the access, leaving partial cache state. Due-fill
+recency is now preflighted conservatively and near-limit paths use the existing
+shadow transaction; hit and store rollback regressions cover the boundary.
+
+Post-merge validation rebuilt sim-run, passed 26 direct-run feature-library
+tests, 127 sim-mem tests, 440 campaign-enabled sim-sm tests, 169
+campaign-enabled sim-trace tests, and the dependency-free prototype cargo
+check. A retained HMMA small replay and a
+SwiGLU large feedback replay both exited silently; the large replay matched its
+retained 15,173-byte JSON exactly, while two fresh HMMA runs were byte-identical.
+The raw `/tmp/gpu_sector_probe_s1.csv` export also joined successfully and
+reported its quoted kernel signature, RTX 3090 Ti device, LSU count, and global
+load/store sectors.
+
 
 `ManifestBuilder.lint_and_write` now honors its atomic-write contract by
 serializing to a same-directory temporary file and replacing the destination

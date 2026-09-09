@@ -104,6 +104,9 @@ pub struct CausalFrontierReport {
     pub reified_regions: u64,
     pub candidate_instructions: u64,
     pub collapsed_instructions: u64,
+    /// Runtime-only planner telemetry. It is deliberately excluded from the
+    /// serialized report so repeated analyses remain byte-deterministic.
+    #[serde(skip_serializing)]
     pub planner_time_ns: u128,
 }
 
@@ -112,6 +115,7 @@ pub enum CausalFrontierError {
     EmptyProgram,
     InvalidPhysicalWarp { physical_warp: i32 },
     DuplicatePhysicalWarp { physical_warp: i32 },
+    DuplicateSequence { physical_warp: i32, sequence: u64 },
     InvalidTiming { sequence: u64 },
     CompletionOverflow { sequence: u64 },
     PcNotInSchedule { pc: u64 },
@@ -130,6 +134,13 @@ impl std::fmt::Display for CausalFrontierError {
                     "physical warp {physical_warp} appears in multiple programs"
                 )
             }
+            Self::DuplicateSequence {
+                physical_warp,
+                sequence,
+            } => write!(
+                f,
+                "physical warp {physical_warp} repeats instruction sequence {sequence}"
+            ),
             Self::InvalidTiming { sequence } => {
                 write!(
                     f,
@@ -207,7 +218,11 @@ fn append_instruction(
             sequence: instruction.sequence,
         })?;
     *warp_ready.entry(instruction.physical_warp).or_default() = next_issue;
-    dispatch_ready[smsp] = issue.saturating_add(1);
+    dispatch_ready[smsp] = issue
+        .checked_add(1)
+        .ok_or(CausalFrontierError::CompletionOverflow {
+            sequence: instruction.sequence,
+        })?;
     pipeline_ready[smsp][pipe] = next_issue;
     releases.push(done);
     *completion = (*completion).max(done);
@@ -231,7 +246,17 @@ pub fn summarize(
     let mut physical = HashSet::new();
     let mut active_per_smsp = [0usize; SMSP_COUNT as usize];
     let mut ordered = Vec::new();
-    for (program_index, program) in programs.iter().enumerate() {
+    // Producers may stream records in arrival order. Canonicalize each
+    // physical-warp program before both the exact recurrence and the causal
+    // region scan; otherwise the two passes can disagree about which adjacent
+    // instructions form a collapse candidate.
+    let mut canonical_programs = Vec::with_capacity(programs.len());
+    for program in programs {
+        let mut canonical = program.clone();
+        canonical.sort_by_key(|instruction| instruction.sequence);
+        canonical_programs.push(canonical);
+    }
+    for (program_index, program) in canonical_programs.iter().enumerate() {
         let Some(first) = program.first() else {
             return Err(CausalFrontierError::EmptyProgram);
         };
@@ -241,10 +266,17 @@ pub fn summarize(
             });
         }
         active_per_smsp[subcore(first.physical_warp)?] += 1;
+        let mut sequences = HashSet::with_capacity(program.len());
         for (index, instruction) in program.iter().enumerate() {
             if instruction.physical_warp != first.physical_warp {
                 return Err(CausalFrontierError::DuplicatePhysicalWarp {
                     physical_warp: instruction.physical_warp,
+                });
+            }
+            if !sequences.insert(instruction.sequence) {
+                return Err(CausalFrontierError::DuplicateSequence {
+                    physical_warp: first.physical_warp,
+                    sequence: instruction.sequence,
                 });
             }
             exact_events = exact_events
@@ -252,7 +284,12 @@ pub fn summarize(
                 .ok_or(CausalFrontierError::CompletionOverflow {
                     sequence: instruction.sequence,
                 })?;
-            ordered.push((instruction.sequence, program_index, index));
+            ordered.push((
+                instruction.sequence,
+                instruction.physical_warp,
+                program_index,
+                index,
+            ));
         }
     }
     ordered.sort_unstable();
@@ -261,9 +298,9 @@ pub fn summarize(
     let mut pipeline_ready = [[0u64; 3]; SMSP_COUNT as usize];
     let mut in_flight_done: [[Vec<u64>; 3]; SMSP_COUNT as usize] =
         std::array::from_fn(|_| std::array::from_fn(|_| Vec::new()));
-    for (_, program_index, instruction_index) in &ordered {
+    for (_, _, program_index, instruction_index) in &ordered {
         append_instruction(
-            programs[*program_index][*instruction_index],
+            canonical_programs[*program_index][*instruction_index],
             &mut warp_ready,
             &mut dispatch_ready,
             &mut pipeline_ready,
@@ -273,7 +310,7 @@ pub fn summarize(
     }
     let mut causal_events = exact_events;
     let causal_final = exact_final;
-    for program in programs {
+    for program in &canonical_programs {
         let mut index = 0;
         while index < program.len() {
             let first = program[index];
@@ -303,7 +340,17 @@ pub fn summarize(
             }
             collapsed += 1;
             collapsed_instructions += length as u64;
-            causal_events = causal_events.saturating_sub(2 * length as u64 - 1);
+            let reduction = (length as u64)
+                .checked_mul(2)
+                .and_then(|value| value.checked_sub(1))
+                .ok_or(CausalFrontierError::CompletionOverflow {
+                    sequence: first.sequence,
+                })?;
+            causal_events = causal_events.checked_sub(reduction).ok_or(
+                CausalFrontierError::CompletionOverflow {
+                    sequence: first.sequence,
+                },
+            )?;
             // The exact recurrence above is retained as the causal frontier;
             // summarization changes event representation, not completion time.
             index = end;
@@ -322,4 +369,89 @@ pub fn summarize(
         collapsed_instructions,
         planner_time_ns: planner_start.elapsed().as_nanos(),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const SCALAR: PipelineClass = PipelineClass::ScalarAlu {
+        latency_cycles: 1,
+        initiation_interval_cycles: 1,
+        in_flight_capacity: 8,
+    };
+
+    fn instruction(sequence: u64, external_side_effect: bool) -> CausalFrontierInstruction {
+        CausalFrontierInstruction {
+            sequence,
+            physical_warp: 0,
+            pipeline: SCALAR,
+            latency_cycles: 1,
+            initiation_interval_cycles: 1,
+            in_flight_capacity: 8,
+            completion_units: 1,
+            control_clean: true,
+            dependency_free: true,
+            external_side_effect,
+        }
+    }
+
+    #[test]
+    fn canonicalizes_unsorted_program_before_region_scan() {
+        let mut unsorted = vec![
+            instruction(2, false),
+            instruction(0, false),
+            instruction(1, true),
+        ];
+        unsorted[0].latency_cycles = 10;
+        let report = summarize(std::slice::from_ref(&unsorted)).unwrap();
+        let sorted = vec![unsorted[1], unsorted[2], unsorted[0]];
+        let sorted_report = summarize(&[sorted]).unwrap();
+        assert_eq!(report.exact_final_cycle, sorted_report.exact_final_cycle);
+        assert_eq!(report.candidate_regions, 0);
+        assert_eq!(report.collapsed_regions, 0);
+        assert_eq!(report.reified_regions, 0);
+    }
+
+    #[test]
+    fn rejects_reused_physical_warp_programs() {
+        let error =
+            summarize(&[vec![instruction(0, false)], vec![instruction(1, false)]]).unwrap_err();
+        assert_eq!(
+            error,
+            CausalFrontierError::DuplicatePhysicalWarp { physical_warp: 0 }
+        );
+    }
+
+    #[test]
+    fn rejects_duplicate_sequences_within_one_program() {
+        let error = summarize(&[vec![instruction(4, false), instruction(4, false)]]).unwrap_err();
+        assert_eq!(
+            error,
+            CausalFrontierError::DuplicateSequence {
+                physical_warp: 0,
+                sequence: 4,
+            }
+        );
+    }
+
+    #[test]
+    fn equal_sequence_cross_warp_order_is_input_order_independent() {
+        let mut second = instruction(0, false);
+        second.physical_warp = 1;
+        let first = instruction(0, false);
+        let a = summarize(&[vec![first], vec![second]]).unwrap();
+        let b = summarize(&[vec![second], vec![first]]).unwrap();
+        assert_eq!(
+            (a.exact_event_count, a.exact_final_cycle),
+            (b.exact_event_count, b.exact_final_cycle)
+        );
+    }
+
+    #[test]
+    fn serialized_report_excludes_runtime_planner_telemetry() {
+        let report = summarize(&[vec![instruction(0, false)]]).unwrap();
+        let value = serde_json::to_value(report).unwrap();
+        assert!(value.get("planner_time_ns").is_none());
+    }
 }

@@ -45,5 +45,9 @@ For a GPU run, use the commands in [docs/runbook_host.md](docs/runbook_host.md).
 The current engine status and retained SM86 comparison roots are in
 [docs/STATUS.md](docs/STATUS.md).
 
+The latest clock-qualified small/large campaign and same-input regression
+comparison are in
+[docs/postmerge_campaign_comparison_20260909.md](docs/postmerge_campaign_comparison_20260909.md).
+
 The prototype integration and its NCU sector probe are documented in
 [docs/prototype_causal_frontier.md](docs/prototype_causal_frontier.md).
