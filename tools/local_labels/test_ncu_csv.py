@@ -23,6 +23,14 @@ def test_parse_unquoted_csv_fields() -> None:
     assert values[0].metric_value == 42.0
 
 
+def test_parse_text_with_utf8_bom() -> None:
+    values = parse_ncu_csv(
+        "\ufeffID,Kernel Name,Metric Name,Metric Unit,Metric Value\n"
+        "0,copy(float*),smsp__inst_executed.sum,inst,42\n"
+    )
+    assert values[0].kernel_id == 0
+
+
 def test_missing_columns_are_rejected() -> None:
     with pytest.raises(NcuCsvError, match="missing NCU CSV columns"):
         parse_ncu_csv('"Metric Name","Metric Value"\n"a","1"\n')

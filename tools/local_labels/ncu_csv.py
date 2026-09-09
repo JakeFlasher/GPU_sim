@@ -133,6 +133,7 @@ def parse_ncu_csv(text: str) -> list[NcuMetricValue]:
     # NCU normally quotes every CSV field, but CSV itself does not require
     # quoting. Locate the first recognizable header so both forms (and the
     # profiler's optional preamble) use the same parser path.
+    text = text.removeprefix("\ufeff")
     raw_lines = text.splitlines()
     header_index = None
     for index, line in enumerate(raw_lines):

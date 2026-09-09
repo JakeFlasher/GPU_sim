@@ -940,6 +940,7 @@ NCU stage.
 The shared NCU CSV reader only recognized lines beginning with a quote, so a
 valid unquoted CSV export was reported as empty. Header discovery now accepts
 both quoted and unquoted CSV fields while still skipping profiler preambles.
+The text API also strips a leading UTF-8 BOM, matching file-based loading.
 
 Capture destination setup also followed an empty symlinked directory and could
 write a new trace outside the requested output root. Destination resolution now
