@@ -828,6 +828,10 @@ capacity or latency labeled with another dimension to be consumed as bytes or
 cycles. It now rejects mismatched units while preserving legacy cards that omit
 the optional unit field.
 
+The Python pchase resolver had the same explicit-unit gap as its Rust twin.
+Capacity and latency resolvers now reject mismatched labels in both languages;
+the retained SM86 card resolves to 98,304 bytes and 33.0016/243.6152 cycles.
+
 Carded L2 geometry also allowed a capacity whose per-slice set count was
 fractional, silently flooring away part of the declared cache. The carded
 constructor now rejects non-integral per-slice set geometry and capacities with

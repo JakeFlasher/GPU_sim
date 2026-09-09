@@ -151,6 +151,10 @@ def _card_int(prop: dict, prop_name: str) -> int:
     """Audit a card-VALUED integer: positive, integral, finite, and
     not a bool/string masquerading through coercion."""
     raw = _require_value(prop, prop_name)
+    if prop_name.endswith("_bytes") and prop.get("unit") not in (None, "bytes"):
+        raise WalkerConfigError(
+            f"{prop_name} unit {prop.get('unit')!r} is not bytes; fail closed"
+        )
     if isinstance(raw, bool) or not isinstance(raw, (int, float)) \
             or not math.isfinite(raw) or raw != int(raw) or raw < 1:
         raise WalkerConfigError(
@@ -166,6 +170,10 @@ def _card_positive_float(prop: dict | None, prop_name: str) -> float:
             "card latencies unavailable; an unsourced latency constant "
             "is rejected")
     raw = _require_value(prop, prop_name)
+    if prop.get("unit") not in (None, "cycles_per_dependent_load"):
+        raise WalkerConfigError(
+            f"{prop_name} unit {prop.get('unit')!r} is not cycles_per_dependent_load; fail closed"
+        )
     if isinstance(raw, bool) or not isinstance(raw, (int, float)) \
             or not math.isfinite(raw) or raw <= 0:
         raise WalkerConfigError(
