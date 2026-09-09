@@ -828,6 +828,12 @@ capacity or latency labeled with another dimension to be consumed as bytes or
 cycles. It now rejects mismatched units while preserving legacy cards that omit
 the optional unit field.
 
+Carded L2 geometry also allowed a capacity whose per-slice set count was
+fractional, silently flooring away part of the declared cache. The carded
+constructor now rejects non-integral per-slice set geometry and capacities with
+slice remainders; the generic analytical configuration keeps its documented
+flooring behavior.
+
 The causal-frontier event-reduction counter used saturating subtraction, which
 could hide an internal accounting mismatch. Region reduction and its arithmetic
 now use checked operations and return a typed completion-overflow error instead.

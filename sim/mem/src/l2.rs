@@ -304,8 +304,9 @@ impl L2Config {
                 associativity: cfg.associativity,
             },
         )?;
-        let bytes_per_slice = cfg.capacity_bytes / u64::from(cfg.num_slices);
-        if bytes_per_slice % u64::from(bytes_per_set) != 0 {
+        let slices = u64::from(cfg.num_slices);
+        let bytes_per_slice = cfg.capacity_bytes / slices;
+        if cfg.capacity_bytes % slices != 0 || bytes_per_slice % u64::from(bytes_per_set) != 0 {
             return Err(L2ConfigError::NonIntegralSetCount {
                 capacity: cfg.capacity_bytes,
                 line: cfg.line_bytes,
@@ -3357,6 +3358,22 @@ mod tests {
                 line: 128,
                 slices: 6,
                 associativity: 16,
+            })
+        ));
+        // A capacity with a one-byte remainder must also fail; checking only
+        // the floored per-slice value would otherwise hide that remainder.
+        assert!(matches!(
+            L2Config::from_carded_geometry(
+                "sm_86",
+                6_291_457,
+                128,
+                32,
+                6,
+                Some(L2_WRITE_ALLOCATE_POLICY),
+            ),
+            Err(L2ConfigError::NonIntegralSetCount {
+                capacity: 6_291_457,
+                ..
             })
         ));
     }
