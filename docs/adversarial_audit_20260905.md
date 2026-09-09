@@ -818,6 +818,11 @@ Latency values with an explicit unit are now required to describe cycles,
 preventing a card that labels a latency in seconds or nanoseconds from being
 silently consumed as cycle timing.
 
+Consumed card blocks also accepted whitespace-only provenance strings. Latency,
+L2 geometry, and DRAM bandwidth inputs now require non-empty provenance text so
+their measured or documented origin cannot disappear while values remain
+executable.
+
 The causal-frontier event-reduction counter used saturating subtraction, which
 could hide an internal accounting mismatch. Region reduction and its arithmetic
 now use checked operations and return a typed completion-overflow error instead.

@@ -1038,6 +1038,7 @@ impl ArchCard {
     pub fn require_l2_geometry(&self) -> Result<&L2Geometry, CalibError> {
         let arch = self.sku_id()?.arch();
         let geometry = self.l2_geometry.require_for_arch(arch, "l2_geometry")?;
+        Self::require_nonempty_text("l2_geometry.provenance", &geometry.provenance)?;
         Self::require_positive_u64("l2_geometry.capacity_bytes", geometry.capacity_bytes)?;
         Self::require_positive_u32("l2_geometry.sector_bytes", geometry.sector_bytes)?;
         Self::require_positive_u32("l2_geometry.num_slices", geometry.num_slices)?;
@@ -1086,7 +1087,22 @@ impl ArchCard {
 
     pub fn require_dram_bandwidth(&self) -> Result<&DramBandwidth, CalibError> {
         let arch = self.sku_id()?.arch();
-        self.dram_bandwidth.require_for_arch(arch, "dram_bandwidth")
+        let bandwidth = self
+            .dram_bandwidth
+            .require_for_arch(arch, "dram_bandwidth")?;
+        Self::require_nonempty_text("dram_bandwidth.provenance", &bandwidth.provenance)?;
+        Ok(bandwidth)
+    }
+
+    fn require_nonempty_text(field: &'static str, value: &str) -> Result<(), CalibError> {
+        if value.trim().is_empty() {
+            return Err(CalibError::InvalidCardValue {
+                field,
+                value: value.to_owned(),
+                requirement: "non-empty provenance text",
+            });
+        }
+        Ok(())
     }
 
     fn require_positive_u32(field: &'static str, value: u32) -> Result<(), CalibError> {
@@ -1197,6 +1213,7 @@ impl ArchCard {
     /// default.
     pub fn require_latency(&self, kind: LatencyKind) -> Result<f64, CalibError> {
         let lat = self.latencies()?;
+        Self::require_nonempty_text("latencies_cycles.provenance", &lat.provenance)?;
         let entry = match kind {
             LatencyKind::L1Hit => &lat.l1_hit,
             LatencyKind::L2Hit => &lat.l2_hit,
@@ -1915,6 +1932,46 @@ mod tests {
             Err(CalibError::InvalidCardValue {
                 field: "latencies_cycles.l1_hit.value",
                 requirement: "latency unit must describe cycles",
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn consumed_card_blocks_require_provenance_text() {
+        let latency = load_mutated_card("sm_86.json", |card| {
+            card["latencies_cycles"]["provenance"] = serde_json::json!(" ");
+        })
+        .unwrap();
+        assert!(matches!(
+            latency.required_latencies(),
+            Err(CalibError::InvalidCardValue {
+                field: "latencies_cycles.provenance",
+                requirement: "non-empty provenance text",
+                ..
+            })
+        ));
+
+        let l2 = load_mutated_card("sm_86.json", |card| {
+            card["l2_geometry"]["provenance"] = serde_json::json!("");
+        })
+        .unwrap();
+        assert!(matches!(
+            l2.require_l2_geometry(),
+            Err(CalibError::InvalidCardValue {
+                field: "l2_geometry.provenance",
+                ..
+            })
+        ));
+
+        let dram = load_mutated_card("sm_86.json", |card| {
+            card["dram_bandwidth"]["provenance"] = serde_json::json!("\t");
+        })
+        .unwrap();
+        assert!(matches!(
+            dram.require_dram_bandwidth(),
+            Err(CalibError::InvalidCardValue {
+                field: "dram_bandwidth.provenance",
                 ..
             })
         ));
