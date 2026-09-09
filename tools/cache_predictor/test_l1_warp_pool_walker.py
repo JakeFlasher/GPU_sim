@@ -64,3 +64,10 @@ def test_card_integer_bounds_match_rust_resolvers(tmp_path):
 
     with pytest.raises(WalkerConfigError, match="does not fit u32"):
         resolve_mshr_count(path)
+
+
+def test_card_size_is_bounded(tmp_path):
+    path = tmp_path / "oversized-card.json"
+    path.write_bytes(b"{" + b" " * (16 * 1024 * 1024) + b"}")
+    with pytest.raises(WalkerConfigError, match="exceeds"):
+        resolve_line_capacity(path)

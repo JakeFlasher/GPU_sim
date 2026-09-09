@@ -95,6 +95,7 @@ DOCUMENTED_DEFAULT_MSHR_COUNT = 32
 MSHR_SENSITIVITY_COUNTS = (16, 32, 64)
 MAX_JSON_U64 = (1 << 64) - 1
 MAX_JSON_U32 = (1 << 32) - 1
+MAX_CARD_BYTES = 16 * 1024 * 1024
 
 
 class WalkerConfigError(Exception):
@@ -139,7 +140,19 @@ def _load_card(card_path: Path | None) -> dict:
     path = card_path or DEFAULT_CARD_PATH
     # Preserve decimal lexemes until their resolver validates semantics; a
     # binary64 conversion would round large card integers before validation.
-    return json.loads(path.read_text(encoding="utf-8"), parse_float=Decimal)
+    try:
+        raw = path.read_bytes()
+    except OSError as error:
+        raise WalkerConfigError(f"cannot read card {path}: {error}") from error
+    if len(raw) > MAX_CARD_BYTES:
+        raise WalkerConfigError(
+            f"card {path} exceeds the {MAX_CARD_BYTES}-byte limit; fail closed"
+        )
+    try:
+        text = raw.decode("utf-8-sig")
+    except UnicodeDecodeError as error:
+        raise WalkerConfigError(f"card {path} is not valid UTF-8") from error
+    return json.loads(text, parse_float=Decimal)
 
 
 def _require_value(prop: dict, prop_name: str):

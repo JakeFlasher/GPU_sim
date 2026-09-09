@@ -842,6 +842,11 @@ which could turn a malformed capacity or MSHR declaration into oversized cache
 state. It now enforces the same width limits before deriving line capacity or
 MSHR count.
 
+Python pchase card loading also lacked Rust's bounded-file read and could ingest
+an unbounded JSON document before validation. It now caps card input at 16 MiB,
+rejecting oversized or non-UTF-8 files before parsing while preserving the
+retained card path.
+
 Carded L2 geometry also allowed a capacity whose per-slice set count was
 fractional, silently flooring away part of the declared cache. The carded
 constructor now rejects non-integral per-slice set geometry and capacities with
