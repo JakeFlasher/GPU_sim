@@ -99,6 +99,15 @@ def _portable_path(path: Path) -> str:
         return str(resolved)
 
 
+def _resolve_no_symlink(path: Path) -> Path:
+    candidate = path if path.is_absolute() else REPO_ROOT / path
+    candidate = candidate.absolute()
+    for component in (candidate, *candidate.parents):
+        if component.is_symlink():
+            raise CampaignError(f"path must not traverse a symlink: {path}")
+    return candidate.resolve()
+
+
 def _content_id(path: Path) -> str:
     """Return a stable content identity for replay inputs and outputs.
 
@@ -113,6 +122,7 @@ def _content_id(path: Path) -> str:
 
 
 def _artifact(path: Path) -> dict[str, object]:
+    path = _resolve_no_symlink(path)
     if not path.is_file() or path.stat().st_size == 0:
         raise CampaignError(f"missing or empty artifact: {path}")
     return {
@@ -281,7 +291,11 @@ def _stage_command(
         # complete campaign. The NCU stage runs before simulator in an
         # ``all`` campaign, so the CSV is available here; stage-only replay
         # remains compatible with older roots that do not retain NCU data.
-        ncu_csv = output_root / "evidence" / "raw" / "ncu" / "rep-1" / slug / "ncu.csv"
+        ncu_csv_candidate = output_root / "evidence" / "raw" / "ncu" / "rep-1" / slug / "ncu.csv"
+        # Resolve through the no-follow guard before probing or hashing NCU
+        # inputs. A symlink introduced after campaign startup must not redirect
+        # the observation join to bytes outside the retained campaign root.
+        ncu_csv = _resolve_no_symlink(ncu_csv_candidate)
         if ncu_csv.is_file():
             args.extend(["--ncu-csv", str(ncu_csv)])
         return args
@@ -289,12 +303,40 @@ def _stage_command(
 
 
 def _manifest_identity(path: Path) -> dict[str, object]:
+    path = _resolve_no_symlink(path)
     document = _load_json(path)
     return {
         "path": _portable_path(path),
         "content_id": _content_id(path),
         "schema_version": document.get("schema_version"),
     }
+
+
+def _validate_record_artifacts(value: object) -> None:
+    """Revalidate every persisted artifact identity before campaign resume."""
+    if isinstance(value, Mapping):
+        if "path" in value and "content_id" in value:
+            path_value = value["path"]
+            content_id = value["content_id"]
+            try:
+                artifact_path = _resolve_no_symlink(Path(path_value))
+            except (CampaignError, TypeError):
+                artifact_path = None
+            if (
+                not isinstance(path_value, str)
+                or not isinstance(content_id, str)
+                or artifact_path is None
+                or not artifact_path.is_file()
+                or _content_id(artifact_path) != content_id
+            ):
+                raise CampaignError(
+                    f"campaign artifact identity is stale or missing: {path_value!r}"
+                )
+        for child in value.values():
+            _validate_record_artifacts(child)
+    elif isinstance(value, list):
+        for child in value:
+            _validate_record_artifacts(child)
 
 
 def _host_snapshot(
@@ -791,7 +833,9 @@ def _validate_simulator_document(
 
 def _cross_check_ncu_simulator(output_root: Path, workload: Mapping[str, Any], sim: Mapping[str, Any]) -> None:
     slug = str(workload["id"])
-    ncu_path = output_root / "evidence" / "raw" / "ncu" / "rep-1" / slug / "normalized.json"
+    ncu_path = _resolve_no_symlink(
+        output_root / "evidence" / "raw" / "ncu" / "rep-1" / slug / "normalized.json"
+    )
     if not ncu_path.is_file():
         return
     ncu = _load_json(ncu_path)["identity"]
@@ -804,6 +848,78 @@ def _cross_check_ncu_simulator(output_root: Path, workload: Mapping[str, Any], s
         raise CampaignError(f"{slug}: NCU and simulator launch geometry differ")
     if launch["device_id"] != int(ncu["Device"]):
         raise CampaignError(f"{slug}: NCU and simulator device indices differ")
+
+
+def _compare_ncu_simulator(
+    document: Mapping[str, Any], normalized: Mapping[str, Any], slug: str
+) -> dict[str, Any]:
+    """Report comparable metric errors without making NCU a replay input."""
+    def finite_number(value: object) -> bool:
+        return (
+            isinstance(value, (int, float))
+            and not isinstance(value, bool)
+            and math.isfinite(float(value))
+        )
+
+    launches = document.get("launches")
+    metrics = normalized.get("metrics")
+    if (
+        not isinstance(launches, list)
+        or len(launches) != 1
+        or not isinstance(launches[0], Mapping)
+        or not isinstance(metrics, Mapping)
+    ):
+        raise CampaignError(f"{slug}: cannot compare malformed NCU/simulator documents")
+    predictions = launches[0].get("metric_predictions")
+    if not isinstance(predictions, list):
+        raise CampaignError(f"{slug}: simulator metric predictions are missing")
+    simulator_values: dict[str, float] = {}
+    for prediction in predictions:
+        if not isinstance(prediction, Mapping):
+            continue
+        outcome = prediction.get("outcome")
+        if not isinstance(outcome, Mapping) or outcome.get("status") != "predicted":
+            continue
+        value = outcome.get("value")
+        if not isinstance(value, Mapping) or not finite_number(value.get("value")):
+            continue
+        simulator_values[str(prediction.get("ncu_metric"))] = float(value["value"])
+    comparison: dict[str, dict[str, Any]] = {}
+    for metric, observed in metrics.items():
+        if not isinstance(observed, Mapping) or not finite_number(observed.get("value")):
+            continue
+        predicted = simulator_values.get(str(metric))
+        if predicted is None:
+            continue
+        measured = float(observed["value"])
+        comparison[str(metric)] = {
+            "simulator": predicted,
+            "ncu": measured,
+            "absolute_error": abs(predicted - measured),
+            "zero_baseline_match": (
+                None if measured != 0 else predicted == 0
+            ),
+            "absolute_percentage_error": (
+                None
+                if measured == 0
+                else 100.0 * abs(predicted - measured) / abs(measured)
+            ),
+        }
+    errors = [
+        row["absolute_percentage_error"]
+        for row in comparison.values()
+        if row["absolute_percentage_error"] is not None
+    ]
+    zero_mismatches = sum(
+        row["zero_baseline_match"] is False for row in comparison.values()
+    )
+    return {
+        "status": "diagnostic_mismatch" if zero_mismatches else "diagnostic",
+        "metrics": comparison,
+        "coverage": len(comparison),
+        "zero_baseline_mismatches": zero_mismatches,
+        "maximum_absolute_percentage_error": max(errors) if errors else None,
+    }
 
 
 def _run_simulator(
@@ -839,6 +955,59 @@ def _run_simulator(
             raise CampaignError(f"{slug}: simulator output is not JSON: {error}") from error
         if not isinstance(document, Mapping):
             raise CampaignError(f"{slug}: simulator output root is not an object")
+        ncu_csv = output_root / "evidence" / "raw" / "ncu" / "rep-1" / slug / "ncu.csv"
+        ncu_observation = document.get("ncu_observation")
+        if ncu_csv.is_file():
+            if not isinstance(ncu_observation, Mapping):
+                raise CampaignError(
+                    f"{slug}: simulator output omitted the observation-only NCU join"
+                )
+            launch_id = ncu_observation.get("launch_id")
+            kernel_name = ncu_observation.get("kernel_name")
+            device = ncu_observation.get("device")
+            if (
+                isinstance(launch_id, bool)
+                or not isinstance(launch_id, int)
+                or launch_id < 0
+                or not isinstance(kernel_name, str)
+                or not kernel_name.strip()
+                or not isinstance(device, str)
+                or not device.strip()
+            ):
+                raise CampaignError(
+                    f"{slug}: simulator NCU observation has incomplete launch identity"
+                )
+            normalized_path = _resolve_no_symlink(ncu_csv.with_name("normalized.json"))
+            if not normalized_path.is_file():
+                raise CampaignError(f"{slug}: NCU normalized identity is missing")
+            normalized_document = _load_json(normalized_path)
+            normalized_csv = normalized_document.get("csv")
+            if (
+                not isinstance(normalized_csv, Mapping)
+                or normalized_csv.get("content_id") != _content_id(ncu_csv)
+            ):
+                raise CampaignError(f"{slug}: raw NCU CSV bytes differ from normalized input")
+            normalized_identity = normalized_document.get("identity")
+            if not isinstance(normalized_identity, Mapping):
+                raise CampaignError(f"{slug}: NCU normalized identity is malformed")
+            normalized_id_text = normalized_identity.get("ID")
+            if (
+                not isinstance(normalized_id_text, str)
+                or not normalized_id_text.isascii()
+                or not normalized_id_text.isdigit()
+            ):
+                raise CampaignError(f"{slug}: NCU normalized launch ID is malformed")
+            normalized_launch_id = int(normalized_id_text)
+            if launch_id != normalized_launch_id:
+                raise CampaignError(f"{slug}: raw and normalized NCU launch IDs differ")
+            if not _kernel_names_equivalent(
+                str(ncu_observation["kernel_name"]),
+                str(normalized_identity.get("Kernel Name", "")),
+            ):
+                raise CampaignError(f"{slug}: raw and normalized NCU kernel names differ")
+            ncu_comparison = _compare_ncu_simulator(
+                document, normalized_document, slug
+            )
         feedback_path = spec["simulator"].get("memory_admission_feedback")
         expected_feedback_id = (
             None
@@ -883,6 +1052,8 @@ def _run_simulator(
             if repeats > 1
             else "not_assessed_single_process"
         ),
+        "ncu_observation_present": True if ncu_csv.is_file() else None,
+        "ncu_comparison": ncu_comparison if ncu_csv.is_file() else None,
         "observation": observations[0],
     }
 
@@ -1061,6 +1232,15 @@ def _new_manifest(
                 if spec["simulator"].get("memory_admission_feedback") is not None
                 else {}
             ),
+            "simulator_binary": _artifact(
+                REPO_ROOT / str(spec["simulator"]["binary"])
+            ),
+            "workload_binaries": {
+                str(workload["id"]): _artifact(
+                    REPO_ROOT / str(workload["binary"])
+                )
+                for workload in spec["workloads"]
+            },
         },
         "records": [],
         "clock_contract": {
@@ -1117,11 +1297,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     try:
         os.chdir(REPO_ROOT)
-        spec_path = args.spec.resolve()
-        metrics_path = args.metrics.resolve()
-        profile_path = args.profile.resolve()
-        gate_path = args.gate.resolve()
-        output_root = args.output.resolve()
+        spec_path = _resolve_no_symlink(args.spec)
+        metrics_path = _resolve_no_symlink(args.metrics)
+        profile_path = _resolve_no_symlink(args.profile)
+        gate_path = _resolve_no_symlink(args.gate)
+        output_root = _resolve_no_symlink(args.output)
         spec = _load_json(spec_path)
         metrics = _load_json(metrics_path)
         profile = _load_json(profile_path)
@@ -1140,7 +1320,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 raise CampaignError(
                     f"selected spec is missing its {spec_key} declaration"
                 )
-            declared_path = (REPO_ROOT / declared).resolve()
+            declared_path = _resolve_no_symlink(REPO_ROOT / declared)
             if selected_path != declared_path:
                 raise CampaignError(
                     f"{argument_name} path differs from selected spec declaration"
@@ -1148,14 +1328,16 @@ def main(argv: Sequence[str] | None = None) -> int:
         timing_crosswalk_path = (
             None
             if spec.get("timing_crosswalk") is None
-            else (REPO_ROOT / str(spec["timing_crosswalk"])).resolve()
+            else _resolve_no_symlink(REPO_ROOT / str(spec["timing_crosswalk"]))
         )
         memory_admission_feedback_path = (
             None
             if spec["simulator"].get("memory_admission_feedback") is None
             else (
-                REPO_ROOT / str(spec["simulator"]["memory_admission_feedback"])
-            ).resolve()
+                _resolve_no_symlink(
+                    REPO_ROOT / str(spec["simulator"]["memory_admission_feedback"])
+                )
+            )
         )
         if timing_crosswalk_path is not None:
             validate_spec.validate_timing_crosswalk(_load_json(timing_crosswalk_path))
@@ -1197,6 +1379,20 @@ def main(argv: Sequence[str] | None = None) -> int:
         manifest_path = output_root / "campaign_manifest.json"
         if manifest_path.exists():
             manifest = _load_json(manifest_path)
+            repository = manifest.get("repository")
+            current_revision = _git("rev-parse", "HEAD")
+            current_branch = _git("branch", "--show-current")
+            if (
+                not isinstance(repository, Mapping)
+                or repository.get("revision") != current_revision
+                or repository.get("branch") != current_branch
+            ):
+                raise CampaignError(
+                    "existing campaign manifest is bound to another repository revision"
+                )
+            recorded_inputs = manifest.get("inputs")
+            if not isinstance(recorded_inputs, Mapping):
+                raise CampaignError("existing campaign manifest has malformed inputs")
             expected_inputs = {
                 "spec": spec_path,
                 "metrics": metrics_path,
@@ -1212,16 +1408,61 @@ def main(argv: Sequence[str] | None = None) -> int:
                     if memory_admission_feedback_path is not None
                     else {}
                 ),
+                "simulator_binary": REPO_ROOT / str(spec["simulator"]["binary"]),
             }
             for name, path in expected_inputs.items():
-                recorded = manifest.get("inputs", {}).get(name, {})
+                recorded = recorded_inputs.get(name, {})
+                if path == REPO_ROOT / str(spec["simulator"]["binary"]):
+                    expected_identity = _artifact(path)
+                else:
+                    expected_identity = _manifest_identity(path)
                 if (
-                    recorded.get("path") != _portable_path(path)
-                    or recorded.get("content_id") != _content_id(path)
+                    recorded.get("path") != expected_identity["path"]
+                    or recorded.get("content_id") != expected_identity["content_id"]
                 ):
                     raise CampaignError(
                         f"existing campaign manifest is bound to another {name} input"
                     )
+            expected_workload_binaries = {
+                str(workload["id"]): _artifact(
+                    REPO_ROOT / str(workload["binary"])
+                )
+                for workload in spec["workloads"]
+            }
+            recorded_workload_binaries = recorded_inputs.get(
+                "workload_binaries"
+            )
+            if recorded_workload_binaries != expected_workload_binaries:
+                raise CampaignError(
+                    "existing campaign manifest is bound to another workload binary set"
+                )
+            records = manifest.get("records")
+            if not isinstance(records, list):
+                raise CampaignError("existing campaign manifest has malformed records")
+            seen_records: set[tuple[object, object]] = set()
+            for record in records:
+                if not isinstance(record, Mapping):
+                    raise CampaignError("existing campaign manifest has a malformed record")
+                stage = record.get("stage")
+                workload_id = record.get("workload_id")
+                if (
+                    not isinstance(stage, str)
+                    or stage not in STAGES
+                    or not isinstance(workload_id, str)
+                    or not workload_id
+                ):
+                    raise CampaignError(
+                        "existing campaign manifest has an invalid stage/workload record"
+                    )
+                key = (stage, workload_id)
+                if key in seen_records:
+                    raise CampaignError(
+                        "existing campaign manifest contains duplicate stage/workload records"
+                    )
+                seen_records.add(key)
+            _validate_record_artifacts(records)
+            if "causal_frontier_probe" in manifest:
+                _validate_record_artifacts(manifest["causal_frontier_probe"])
             contract = manifest.get("clock_contract", {})
             recorded_clock_requirement = (
                 contract.get("reference_clocks_required", False)
