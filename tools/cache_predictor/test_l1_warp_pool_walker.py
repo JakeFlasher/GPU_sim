@@ -43,3 +43,10 @@ def test_explicit_capacity_unit_must_be_bytes(tmp_path):
 def test_explicit_latency_unit_must_be_cycles(tmp_path):
     with pytest.raises(WalkerConfigError, match="is not cycles_per_dependent_load"):
         resolve_latencies(_card(tmp_path, latency_unit="nanoseconds"))
+
+
+def test_large_decimal_capacity_is_not_rounded(tmp_path):
+    path = _card(tmp_path)
+    path.write_text(path.read_text().replace("98304", "9007199254740993.0", 1))
+    with pytest.raises(WalkerConfigError, match="9007199254740993"):
+        resolve_line_capacity(path)

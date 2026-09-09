@@ -832,6 +832,11 @@ The Python pchase resolver had the same explicit-unit gap as its Rust twin.
 Capacity and latency resolvers now reject mismatched labels in both languages;
 the retained SM86 card resolves to 98,304 bytes and 33.0016/243.6152 cycles.
 
+Its JSON loader also narrowed decimal integers to binary64 before `_card_int`,
+so large capacities could be accepted under a rounded value. It now loads
+decimal tokens as `Decimal` until integer validation; a `9007199254740993.0`
+probe is rejected using the original value rather than a rounded substitute.
+
 Carded L2 geometry also allowed a capacity whose per-slice set count was
 fractional, silently flooring away part of the declared cache. The carded
 constructor now rejects non-integral per-slice set geometry and capacities with

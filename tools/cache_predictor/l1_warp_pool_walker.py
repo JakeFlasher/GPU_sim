@@ -78,6 +78,7 @@ from __future__ import annotations
 import heapq
 import json
 import math
+from decimal import Decimal
 from pathlib import Path
 from typing import Iterable, NamedTuple, Sequence
 
@@ -134,7 +135,9 @@ class WalkGeometry(NamedTuple):
 
 def _load_card(card_path: Path | None) -> dict:
     path = card_path or DEFAULT_CARD_PATH
-    return json.loads(path.read_text(encoding="utf-8"))
+    # Preserve decimal lexemes until their resolver validates semantics; a
+    # binary64 conversion would round large card integers before validation.
+    return json.loads(path.read_text(encoding="utf-8"), parse_float=Decimal)
 
 
 def _require_value(prop: dict, prop_name: str):
@@ -155,7 +158,7 @@ def _card_int(prop: dict, prop_name: str) -> int:
         raise WalkerConfigError(
             f"{prop_name} unit {prop.get('unit')!r} is not bytes; fail closed"
         )
-    if isinstance(raw, bool) or not isinstance(raw, (int, float)) \
+    if isinstance(raw, bool) or not isinstance(raw, (int, float, Decimal)) \
             or not math.isfinite(raw) or raw != int(raw) or raw < 1:
         raise WalkerConfigError(
             f"{prop_name} value {raw!r} is not a positive integer; "
@@ -174,7 +177,7 @@ def _card_positive_float(prop: dict | None, prop_name: str) -> float:
         raise WalkerConfigError(
             f"{prop_name} unit {prop.get('unit')!r} is not cycles_per_dependent_load; fail closed"
         )
-    if isinstance(raw, bool) or not isinstance(raw, (int, float)) \
+    if isinstance(raw, bool) or not isinstance(raw, (int, float, Decimal)) \
             or not math.isfinite(raw) or raw <= 0:
         raise WalkerConfigError(
             f"{prop_name} value {raw!r} is not a positive finite "
