@@ -474,10 +474,15 @@ def _run_correctness(
 
 
 def _wide_ncu_identity(path: Path) -> dict[str, object]:
-    lines = [line for line in path.read_text(encoding="utf-8-sig").splitlines() if line.lstrip().startswith('"')]
-    rows = list(csv.reader(lines))
-    if len(rows) < 3 or "Kernel Name" not in rows[0]:
+    with path.open(encoding="utf-8-sig", newline="") as stream:
+        rows = list(csv.reader(stream))
+    header_index = next(
+        (index for index, row in enumerate(rows) if {"ID", "Kernel Name"}.issubset(row)),
+        None,
+    )
+    if header_index is None or len(rows) - header_index < 3:
         raise CampaignError(f"{path}: expected NCU 2026 wide CSV")
+    rows = rows[header_index:]
     header = rows[0]
     by_name = {name: index for index, name in enumerate(header)}
     data = [row for row in rows[2:] if len(row) == len(header) and row[by_name["Kernel Name"]].strip()]
