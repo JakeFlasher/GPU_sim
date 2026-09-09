@@ -515,6 +515,8 @@ def _parse_ncu_metrics(path: Path, requested: Sequence[str]) -> tuple[dict[str, 
         if len(rows) != 1:
             raise CampaignError(f"{path}: metric {metric!r} has {len(rows)} rows")
         row = rows[0]
+        if row.kernel_id is not None and row.kernel_id < 0:
+            raise CampaignError(f"{path}: metric {metric!r} has a negative launch ID")
         canonical, canonical_unit = _canonical_ncu_value(metric, row)
         if not math.isfinite(canonical) or canonical < 0:
             raise CampaignError(f"{path}: metric {metric!r} is invalid")
