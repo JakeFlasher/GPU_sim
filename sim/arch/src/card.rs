@@ -468,21 +468,85 @@ pub struct LatenciesCycles {
     pub provenance: String,
 }
 
+/// Convert a JSON number to a positive integer without routing through f64.
+///
+/// `serde_json::Number::as_f64()` rounds decimal tokens.  For example,
+/// `4294967295.0000001` becomes `4294967295.0`, which used to make an
+/// out-of-range resource value look valid.  The workspace enables
+/// `arbitrary_precision`, so `Number::to_string()` retains the numeric token
+/// and lets this helper check its decimal/exponent form exactly while still
+/// accepting the integer-valued decimal form emitted by Python (`3.0`).
+fn exact_positive_integer(number: &serde_json::Number, maximum: u64) -> Option<u64> {
+    let token = number.to_string();
+    let (mantissa, exponent) = match token.find(['e', 'E']) {
+        Some(index) => {
+            let exponent = token[index + 1..].parse::<i64>().ok()?;
+            (&token[..index], exponent)
+        }
+        None => (token.as_str(), 0),
+    };
+    if mantissa.starts_with('-') {
+        return None;
+    }
+    let (whole, fraction) = match mantissa.find('.') {
+        Some(index) => (&mantissa[..index], &mantissa[index + 1..]),
+        None => (mantissa, ""),
+    };
+    if whole.is_empty()
+        || !whole.bytes().all(|byte| byte.is_ascii_digit())
+        || !fraction.bytes().all(|byte| byte.is_ascii_digit())
+    {
+        return None;
+    }
+
+    let mut digits = String::with_capacity(whole.len() + fraction.len());
+    digits.push_str(whole);
+    digits.push_str(fraction);
+    let scale = exponent.checked_sub(i64::try_from(fraction.len()).ok()?)?;
+    let significant = digits.trim_start_matches('0');
+    if significant.is_empty() {
+        return None;
+    }
+
+    let integer_digits = if scale >= 0 {
+        let zeros = usize::try_from(scale).ok()?;
+        let total = significant.len().checked_add(zeros)?;
+        if total > 20 {
+            return None;
+        }
+        let mut expanded = String::with_capacity(total);
+        expanded.push_str(significant);
+        expanded.extend(std::iter::repeat_n('0', zeros));
+        expanded
+    } else {
+        let fractional_digits = usize::try_from(scale.checked_neg()?).ok()?;
+        if fractional_digits >= digits.len()
+            || !digits[digits.len() - fractional_digits..]
+                .bytes()
+                .all(|byte| byte == b'0')
+        {
+            return None;
+        }
+        digits[..digits.len() - fractional_digits]
+            .trim_start_matches('0')
+            .to_owned()
+    };
+
+    if integer_digits.is_empty() || integer_digits.len() > 20 {
+        return None;
+    }
+    let value = integer_digits.bytes().try_fold(0_u64, |value, byte| {
+        value.checked_mul(10)?.checked_add(u64::from(byte - b'0'))
+    })?;
+    (value > 0 && value <= maximum).then_some(value)
+}
+
 fn deserialize_positive_u32<'de, D>(deserializer: D) -> Result<u32, D::Error>
 where
     D: serde::Deserializer<'de>,
 {
     let number = serde_json::Number::deserialize(deserializer)?;
-    if let Some(value) = number.as_u64()
-        && (1..=u64::from(u32::MAX)).contains(&value)
-    {
-        return Ok(value as u32);
-    }
-    if let Some(value) = number.as_f64()
-        && value.is_finite()
-        && value.fract() == 0.0
-        && (1.0..=f64::from(u32::MAX)).contains(&value)
-    {
+    if let Some(value) = exact_positive_integer(&number, u64::from(u32::MAX)) {
         return Ok(value as u32);
     }
     Err(serde::de::Error::custom(
@@ -497,17 +561,8 @@ where
     D: serde::Deserializer<'de>,
 {
     let number = serde_json::Number::deserialize(deserializer)?;
-    if let Some(value) = number.as_u64()
-        && (1..=MAX_EXACT_JSON_INTEGER_U64).contains(&value)
-    {
+    if let Some(value) = exact_positive_integer(&number, MAX_EXACT_JSON_INTEGER_U64) {
         return Ok(value);
-    }
-    if let Some(value) = number.as_f64()
-        && value.is_finite()
-        && value.fract() == 0.0
-        && (1.0..=MAX_EXACT_JSON_INTEGER_U64 as f64).contains(&value)
-    {
-        return Ok(value as u64);
     }
     Err(serde::de::Error::custom(
         "resource value must be a positive exact cross-language JSON integer",
@@ -1746,6 +1801,7 @@ mod tests {
         for bad in [
             r#"{"read":9007199254740992,"non_memory_write":1}"#,
             r#"{"read":9007199254740993.0,"non_memory_write":1}"#,
+            r#"{"read":9007199254740991.000001,"non_memory_write":1}"#,
             r#"{"read":18446744073709551616,"non_memory_write":1}"#,
         ] {
             assert!(
@@ -1753,6 +1809,19 @@ mod tests {
                 "{bad}"
             );
         }
+        assert!(
+            serde_json::from_str::<SmspResources>(
+                r#"{"count":4294967295.0000001,"issue_ports":1}"#
+            )
+            .is_err(),
+            "a decimal just above u32::MAX must not round into the admitted range"
+        );
+        assert_eq!(
+            serde_json::from_str::<SmspResources>(r#"{"count":4294967295.0,"issue_ports":1}"#)
+                .unwrap()
+                .count,
+            u32::MAX
+        );
     }
 
     #[test]
