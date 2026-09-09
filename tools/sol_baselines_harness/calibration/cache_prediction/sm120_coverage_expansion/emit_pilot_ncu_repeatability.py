@@ -6,7 +6,7 @@ cell in the pilot lookup
 (``harvest_tier2_pilot._PILOT_PATH_LOOKUP``), captures
 per-cell 3-run L1 / L2 hit rates + per-metric mean + CV +
 closed-vocabulary failure tokens, and writes the result to
-``scripts/baselines_harness/calibration/cache_prediction/sm120_pilot_ncu_repeatability_v1.toml``.
+``tools/sol_baselines_harness/calibration/cache_prediction/sm120_pilot_ncu_repeatability_v1.toml``.
 
 CLAUDE.md Critical Rule 1: NCU is calibration-only on
 sm_120; this driver MUST NOT ship in the deployed framework

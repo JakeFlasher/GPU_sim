@@ -23,7 +23,7 @@ accumulators in the conv and norm reductions.
 ## sm_86 the calibration workstream result (R12)
 
 All 16 sol-execbench workloads PASSED. Sidecar at
-`scripts/baselines_harness/.harness_traces/problem_066_resnet_block_with_time_embedding__cuda_cpp__sm86/full_correctness_v1.json`;
+`tools/sol_baselines_harness/.harness_traces/problem_066_resnet_block_with_time_embedding__cuda_cpp__sm86/full_correctness_v1.json`;
 SHA-256 cross-stamped in bundle manifest + ledger.
 
 ## Architecture-coupling caveats

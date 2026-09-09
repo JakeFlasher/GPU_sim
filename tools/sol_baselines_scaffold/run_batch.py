@@ -1,7 +1,7 @@
 """Operator-callable batch driver for corpus-expansion batches.
 
 Wraps the existing scaffold + pack + validate chain
-(`scripts/baselines_scaffold/{scaffold,pack,validate}.py`) so a
+(`tools/sol_baselines_scaffold/{scaffold,pack,validate}.py`) so a
 single helper call drives the chain per slug in a
 corpus-expansion batch manifest. The driver runs in two modes:
 
@@ -35,8 +35,11 @@ from typing import Any, Callable, Iterable
 
 _HERE = Path(__file__).resolve().parent
 _REPO_ROOT = _HERE.parents[1]
-if str(_REPO_ROOT / "scripts") not in sys.path:
-    sys.path.insert(0, str(_REPO_ROOT / "scripts"))
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+from tools.sol_baselines_scaffold._bootstrap import install_package_aliases
+
+install_package_aliases()
 
 from baselines_scaffold.generate import (  # noqa: E402
     DEFAULT_BENCHMARK_ROOT,

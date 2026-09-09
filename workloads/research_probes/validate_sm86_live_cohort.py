@@ -761,7 +761,7 @@ def _validate_nvbit_environment_record(
         record = replay_resume.load_json_strict(record_path)
     except (OSError, UnicodeDecodeError, ValueError, json.JSONDecodeError) as exc:
         raise ValueError(f"{cell_id}: NVBit effective-environment record is not strict JSON") from exc
-    if not isinstance(record, Mapping) or set(record) != {
+    required_record_keys = {
         "schema_version",
         "kind",
         "cell",
@@ -789,8 +789,20 @@ def _validate_nvbit_environment_record(
         "output_contract_error",
         "started_at",
         "finished_at",
-    }:
+    }
+    optional_record_keys = {"allow_multiple_launches"}
+    if (
+        not isinstance(record, Mapping)
+        or not required_record_keys.issubset(record)
+        or set(record) - required_record_keys - optional_record_keys
+    ):
         raise ValueError(f"{cell_id}: NVBit effective-environment schema is malformed")
+    if "allow_multiple_launches" in record and not isinstance(
+        record["allow_multiple_launches"], bool
+    ):
+        raise ValueError(
+            f"{cell_id}: allow_multiple_launches must be a boolean"
+        )
     if (
         record.get("schema_version") != 1
         or record.get("kind") != "sanitized_nvbit_capture_environment"
@@ -1022,7 +1034,14 @@ def _validate_nvbit_stage(
     if selection.get("accepted_channel_records") != _required_int(stat, "total_reported_insts", f"{cell_id}/nvbit.stats"):
         raise ValueError(f"{cell_id}: NVBit mapping/stat record counts differ")
     mapping_launch = launches[0]
-    if not isinstance(mapping_launch, Mapping) or mapping_launch.get("accepted_launch_index") != 0 or mapping_launch.get("trace_launch_id") != 1 or mapping_launch.get("device_id") != 0 or mapping_launch.get("stream_id") != 0:
+    if (
+        not isinstance(mapping_launch, Mapping)
+        or mapping_launch.get("accepted_launch_index") != 0
+        or mapping_launch.get("trace_launch_id") != 1
+        or mapping_launch.get("device_id") != 0
+        or type(mapping_launch.get("stream_id")) is not int
+        or not 0 <= mapping_launch["stream_id"] <= (1 << 63) - 1
+    ):
         raise ValueError(f"{cell_id}: NVBit mapping launch identity is malformed")
     module = mapping_launch.get("module")
     if not isinstance(module, Mapping) or module.get("status") not in {"no_stable_static_module", "stable_static_module"}:

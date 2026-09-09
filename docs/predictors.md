@@ -2,7 +2,7 @@
 
 > **Historical scope.** This page records the predecessor analytical predictor
 > lanes, their gates, and their negative evidence. The active project is the
-> event-driven Rust simulator described by root `CLAUDE.md` and
+> event-driven Rust simulator described by root `AGENTS.md` and
 > [`docs/ARCHITECTURE.md`](ARCHITECTURE.md); this page is not a competing
 > deployment contract or publication headline. NCU values remain validation
 > targets, and the current binding headline is `gpc__cycles_elapsed.max`.

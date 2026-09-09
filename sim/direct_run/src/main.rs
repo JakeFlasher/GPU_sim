@@ -1,4 +1,5 @@
 use std::ffi::{OsStr, OsString};
+use std::io::{self, Write};
 use std::path::PathBuf;
 use std::process::ExitCode;
 #[cfg(feature = "performance-counters")]
@@ -12,6 +13,17 @@ const USAGE: &str = "Usage: sim-run --trace DIR --control FILE --arch-card FILE 
 [--ncu-shaped-metrics] \
 [--memory-service-candidates FILE] [--memory-admission-candidates FILE] \
 [--memory-admission-feedback FILE]";
+
+fn write_success_document_to<W: Write>(document: &str, writer: &mut W) -> io::Result<()> {
+    writer.write_all(document.as_bytes())?;
+    writer.write_all(b"\n")?;
+    writer.flush()
+}
+
+fn write_success_document(document: &str) -> io::Result<()> {
+    let mut stdout = io::stdout().lock();
+    write_success_document_to(document, &mut stdout)
+}
 
 fn take_value(
     args: &mut impl Iterator<Item = OsString>,
@@ -129,8 +141,13 @@ fn main() -> ExitCode {
     let config = match parse_args(std::env::args_os().skip(1)) {
         Ok(Some(config)) => config,
         Ok(None) => {
-            println!("{USAGE}");
-            return ExitCode::SUCCESS;
+            return match write_success_document(USAGE) {
+                Ok(()) => ExitCode::SUCCESS,
+                Err(error) => {
+                    eprintln!("output: {error}");
+                    ExitCode::FAILURE
+                }
+            };
         }
         Err(error) => {
             eprintln!("{error}\n{USAGE}");
@@ -150,8 +167,13 @@ fn main() -> ExitCode {
                             serialization_started.elapsed().as_nanos()
                         );
                     }
-                    println!("{json}");
-                    ExitCode::SUCCESS
+                    match write_success_document(&json) {
+                        Ok(()) => ExitCode::SUCCESS,
+                        Err(error) => {
+                            eprintln!("output: {error}");
+                            ExitCode::FAILURE
+                        }
+                    }
                 }
                 Err(error) => {
                     eprintln!("output: {error}");
@@ -173,6 +195,29 @@ fn main() -> ExitCode {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    struct ClosedWriter;
+
+    impl Write for ClosedWriter {
+        fn write(&mut self, _buf: &[u8]) -> io::Result<usize> {
+            Err(io::Error::new(io::ErrorKind::BrokenPipe, "closed"))
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn success_output_propagates_closed_stdout() {
+        let mut writer = ClosedWriter;
+        assert_eq!(
+            write_success_document_to("{}", &mut writer)
+                .unwrap_err()
+                .kind(),
+            io::ErrorKind::BrokenPipe
+        );
+    }
 
     #[test]
     fn help_is_standalone() {

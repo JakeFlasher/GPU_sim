@@ -9,7 +9,7 @@ sidecar.
 
 The wire format is documented in [JSONL_SCHEMA.md](JSONL_SCHEMA.md).
 
-## Build and test
+## Build
 
 Build directly in the repository:
 
@@ -18,17 +18,7 @@ source tools/nvbit_tracer/pinned_build_env.sh  # optional compatibility env
 make -C tools/nvbit_tracer/metric_extractor ARCH=sm_86
 ```
 
-The current source supports `sm_86` and `sm_100a` build targets. Add and test
-architecture handling before selecting another target.
-
-Host-only tests do not require a GPU:
-
-```bash
-make -C tools/nvbit_tracer/metric_extractor run-test-classifier
-make -C tools/nvbit_tracer/metric_extractor run-test-saturating-counter
-make -C tools/nvbit_tracer/metric_extractor run-test-tier2-sha256
-make -C tools/nvbit_tracer/metric_extractor run-test-tier2-marker-metadata
-```
+The current source supports `sm_86` and `sm_100a` build targets.
 
 Clean generated files with:
 

@@ -386,7 +386,7 @@ All ten issue deltas are zero, but all ten `early_fanout - late_fanout` wait
 deltas are positive, with median `+9.435` cycles/group; the frozen signal
 requires a negative median and at least eight negative repeats. Both holdout
 timing flags remain false. See
-[`docs/sm86_async_source_line_coordinates_milestone.md`](../../../docs/sm86_async_source_line_coordinates_milestone.md)
+[`docs/STATUS.md`](../../../docs/STATUS.md)
 for the retained identities, counts, values, and decision.
 
 ## Wait-prefix ordering discriminator
@@ -452,7 +452,7 @@ frontier contrast is only `-1.3125` cycles/group, below the prospective
 `complete_cross_warp_queue_control_no_go`; full identification and W8 holdout
 remain absent, timing is unchanged, and `async_copy_shared_visibility` remains
 required. See
-[`docs/sm86_async_cross_warp_queue_overlap_milestone.md`](../../../docs/sm86_async_cross_warp_queue_overlap_milestone.md).
+[`docs/STATUS.md`](../../../docs/STATUS.md).
 
 ## Selected async instrumentation-order trace
 
@@ -481,4 +481,4 @@ that timing, traffic, prior diagnostics, and typed tails are unchanged.
 The result is `complete_selected_order_trace_fidelity`. This establishes tracer
 and replay order fidelity only; it does not authorize queue or timing changes.
 See
-[`docs/sm86_async_selected_order_trace_milestone.md`](../../../docs/sm86_async_selected_order_trace_milestone.md).
+[`docs/STATUS.md`](../../../docs/STATUS.md).

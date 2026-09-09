@@ -55,11 +55,11 @@ from sol_baselines_harness.metrics.cache_predictor import (
 # ``cache_predictor.py`` (the existing deployed predictor path).
 _CALIBRATOR_PARAMS_BY_ARCH_VARIANT: Final[dict[tuple[str, str], str]] = {
     ("sm_120", "coverage_expansion_v1"): (
-        "scripts/baselines_harness/calibration/cache_prediction/"
+        "tools/sol_baselines_harness/calibration/cache_prediction/"
         "isotonic_params_sm120_coverage_expansion_v1.toml"
     ),
     ("sm_86", "pilot_v1"): (
-        "scripts/baselines_harness/calibration/cache_prediction/"
+        "tools/sol_baselines_harness/calibration/cache_prediction/"
         "isotonic_params_sm86.toml"
     ),
 }
@@ -67,11 +67,11 @@ _CALIBRATOR_PARAMS_BY_ARCH_VARIANT: Final[dict[tuple[str, str], str]] = {
 
 _LEDGER_PATH_BY_ARCH_VARIANT: Final[dict[tuple[str, str], str]] = {
     ("sm_120", "coverage_expansion_v1"): (
-        "scripts/baselines_harness/calibration/cache_prediction/"
+        "tools/sol_baselines_harness/calibration/cache_prediction/"
         "label_ledger_v1_sm120_coverage_expansion_v1.toml"
     ),
     ("sm_86", "pilot_v1"): (
-        "scripts/baselines_harness/calibration/cache_prediction/"
+        "tools/sol_baselines_harness/calibration/cache_prediction/"
         "label_ledger_v1_sm86_pilot_v1.toml"
     ),
 }
@@ -81,11 +81,11 @@ _VALIDATION_SPLIT_PATH_BY_ARCH_VARIANT: Final[
     dict[tuple[str, str], str]
 ] = {
     ("sm_120", "coverage_expansion_v1"): (
-        "scripts/baselines_harness/calibration/cache_prediction/"
+        "tools/sol_baselines_harness/calibration/cache_prediction/"
         "historical_label_split_v1_sm120_coverage_expansion_v1.toml"
     ),
     ("sm_86", "pilot_v1"): (
-        "scripts/baselines_harness/calibration/cache_prediction/"
+        "tools/sol_baselines_harness/calibration/cache_prediction/"
         "historical_label_split_v1_sm86_pilot_v1.toml"
     ),
 }
@@ -277,8 +277,8 @@ def load_calibrator_for_arch_variant(
 
     # File exists path: delegate to the deployed loader with
     # path overrides. The loader runs the same schema / arch /
-    # metric-family / ledger-SHA / split-SHA / anchor-shape
-    # gates against the variant-resolved paths. Returns a
+    # metric-family / anchor-shape checks against the variant-resolved
+    # path. Returns a
     # fitted IsotonicCalibrator (or TypedUnavailableSidecar
     # when the sidecar's calibrator_status is typed_unavailable).
     return load_calibrator_for_arch(

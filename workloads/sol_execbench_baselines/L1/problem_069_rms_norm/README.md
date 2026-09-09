@@ -47,7 +47,7 @@ Launch is on `at::cuda::getCurrentCUDAStream()` per CLAUDE.md Rule 7.
 Hardware: NVIDIA GeForce RTX 5060 Laptop GPU (sm_120). Evaluation ran
 through the native `sol-execbench` CLI (no Docker); the cache /
 manifest identify this run by `native_env_hash` (see
-`scripts/baselines_harness/native_env.py`).
+`tools/sol_baselines_harness/native_env.py`).
 
 ## Architecture-coupling caveats
 

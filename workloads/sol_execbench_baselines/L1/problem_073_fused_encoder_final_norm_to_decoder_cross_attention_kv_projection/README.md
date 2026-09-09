@@ -36,7 +36,7 @@ tolerance on sm_86.
 
 All 16 sol-execbench workloads PASSED on this 3090 Ti host after
 the R11 refactor. Sidecar at
-`scripts/baselines_harness/.harness_traces/problem_073_fused_encoder_final_norm_to_decoder_cross_attention_kv_projection__cuda_cpp__sm86/full_correctness_v1.json`;
+`tools/sol_baselines_harness/.harness_traces/problem_073_fused_encoder_final_norm_to_decoder_cross_attention_kv_projection__cuda_cpp__sm86/full_correctness_v1.json`;
 SHA-256 cross-stamped in bundle manifest + ledger.
 
 ## Architecture-coupling caveats

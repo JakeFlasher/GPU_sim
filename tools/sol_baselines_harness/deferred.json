@@ -1,7 +1,7 @@
 {
   "schema": {
     "version": 4,
-    "source_of_truth": "scripts/baselines_harness/calibration/sm86_coverage_ledger_v1.toml",
+    "source_of_truth": "tools/sol_baselines_harness/calibration/sm86_coverage_ledger_v1.toml",
     "source_of_truth_sha256": "54a45c171e84f8c0b65ab7425d411abc4941202eeb9eb018bf19712fc3871d06",
     "fields": {
       "slug": "Internal problem slug.",

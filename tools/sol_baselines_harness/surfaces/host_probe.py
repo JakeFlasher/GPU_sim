@@ -2,9 +2,9 @@
 
 Read-only end-to-end: ``nvidia-smi`` for device identity (name,
 compute capability, driver version); ``nvcc --version`` for the CUDA
-toolchain version; filesystem checks for NVTX header + library
-presence (no link attempted — the header/library probe is a directory
-scan only).
+toolchain version; ``cudaRuntimeGetVersion`` for the loaded runtime;
+and filesystem checks for NVTX header + library presence (no link
+attempted — the header/library probe is a directory scan only).
 
 Used by the surfaces CLI to populate the orchestrator's host
 fingerprint before driving any surface plugin.
@@ -13,6 +13,8 @@ fingerprint before driving any surface plugin.
 from __future__ import annotations
 
 import datetime
+import ctypes
+import ctypes.util
 import os
 import re
 import shutil
@@ -30,6 +32,7 @@ def _run(cmd: List[str], timeout: float = 10.0) -> Tuple[int, str, str]:
             cmd,
             capture_output=True,
             text=True,
+            errors="replace",
             timeout=timeout,
             check=False,
         )
@@ -44,8 +47,65 @@ def _probe_nvcc_version() -> str:
     rc, stdout, _ = _run(["nvcc", "--version"])
     if rc != 0:
         return "unknown"
+    match = re.search(r"\bV(\d+\.\d+\.\d+)\b", stdout)
+    if match:
+        return match.group(1)
     match = re.search(r"release (\d+\.\d+)", stdout)
     return match.group(1) if match else "unknown"
+
+
+def _probe_cuda_runtime_version() -> str:
+    """Read the CUDA runtime's linked version via ``cudaRuntimeGetVersion``.
+
+    ``nvcc --version`` reports the compiler toolchain, which can differ from
+    the runtime loaded by the evaluator. Keep this host-fingerprint field
+    tied to the runtime API and return ``unknown`` when no usable cudart is
+    available instead of substituting the compiler version.
+    """
+    candidates: List[str] = []
+    for env_var in ("CUDA_HOME", "CUDA_PATH"):
+        base = os.environ.get(env_var)
+        if base:
+            candidates.extend(
+                [
+                    str(Path(base) / "lib64" / "libcudart.so"),
+                    str(
+                        Path(base)
+                        / "targets"
+                        / "x86_64-linux"
+                        / "lib"
+                        / "libcudart.so"
+                    ),
+                ]
+            )
+    nvcc = shutil.which("nvcc")
+    if nvcc:
+        nvcc_root = Path(nvcc).resolve().parent.parent
+        candidates.append(
+            str(nvcc_root / "targets" / "x86_64-linux" / "lib" / "libcudart.so")
+        )
+    discovered = ctypes.util.find_library("cudart")
+    if discovered:
+        candidates.append(discovered)
+    candidates.extend(["libcudart.so", "libcudart.so.13"])
+
+    seen = set()
+    for candidate in candidates:
+        if candidate in seen:
+            continue
+        seen.add(candidate)
+        try:
+            cudart = ctypes.CDLL(candidate)
+            get_version = cudart.cudaRuntimeGetVersion
+            get_version.argtypes = [ctypes.POINTER(ctypes.c_int)]
+            get_version.restype = ctypes.c_int
+            value = ctypes.c_int()
+            if get_version(ctypes.byref(value)) != 0 or value.value <= 0:
+                continue
+            return f"{value.value // 1000}.{(value.value % 1000) // 10}"
+        except (AttributeError, OSError):
+            continue
+    return "unknown"
 
 
 def _probe_device() -> Tuple[str, str, str]:
@@ -152,13 +212,14 @@ def probe_host() -> HostInfo:
     """Assemble a ``HostInfo`` from local read-only probes."""
     device_name, compute_capability, driver_version = _probe_device()
     nvcc_version = _probe_nvcc_version()
+    runtime_version = _probe_cuda_runtime_version()
     nvtx_header, nvtx_library = _probe_nvtx_paths()
     return HostInfo(
         kind=_classify_host_kind(compute_capability),
         device_name=device_name,
         compute_capability=compute_capability,
         driver_version=driver_version,
-        cuda_runtime_version=nvcc_version,
+        cuda_runtime_version=runtime_version,
         captured_at_utc=datetime.datetime.now(
             datetime.timezone.utc
         ).isoformat(),

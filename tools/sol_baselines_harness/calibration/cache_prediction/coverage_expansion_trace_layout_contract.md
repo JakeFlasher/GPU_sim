@@ -108,7 +108,8 @@ resolved or when name suffix and manifest host disagree.
 ### `effective_arch_for_bundle(bundle_name, manifest_dict=None) -> Optional[str]`
 
 Convenience wrapper returning just the arch tag or `None`. Never
-raises; callers needing the typed-reason failure modes use
+raises; it returns `None` when an explicit suffix disagrees with a
+manifest host. Callers needing the typed-reason failure modes use
 `evidence_key_for_bundle`.
 
 ### `report.py` integration

@@ -3,7 +3,7 @@
 > **RETIRED SUBTREE — HISTORICAL/NON-OPERATIVE.** This README preserves the
 > dissolved SOL-ExecBench counter-free/B200 evaluation snapshot. Its nested
 > `CLAUDE.md`, paths, nine-rule list, and surface descriptions are historical
-> context only; they do not override root `CLAUDE.md`, active label schemas,
+> context only; they do not override root `AGENTS.md`, active label schemas,
 > `tools/local_labels/`, host runbooks, or accepted ADRs. Do not use this page to
 > authorize NCU, clock, driver, privilege, or external-provider operations.
 
@@ -30,7 +30,7 @@ host-driver work, CUTLASS / CUDA C++ submission surface only, no evaluator-state
 exploits, default-stream discipline, precision-is-contractual, IISWC paper
 folder is operator-only), two-phase mission, five counter-free analytic
 surfaces, architecture portability discipline, and submission format are not
-current project policy. Root `CLAUDE.md`, active schemas, runbooks, and ADRs
+current project policy. Root `AGENTS.md`, active schemas, runbooks, and ADRs
 control current operations.
 
 ## Two-phase mission
@@ -49,8 +49,8 @@ control current operations.
 | `third_party/cutlass/` | Active unified-tree vendor path: official CUTLASS v4.6.1, scoped to `examples/`, `include/`, and `tools/`; see `third_party/cutlass.provenance.json` for the pinned commit/tree/digest. The upstream package's declared dependency remains separate; the build harness supplies `CUTLASS_DIR`. |
 | `cutlass/` | Historical pre-dissolve path retained only in this archived description; it is not a live checkout dependency. |
 | `baselines/` | The 235 *.cu template solutions, `baselines/{L1,L2,Quant,FIB}/<slug>/{cutlass,cuda_cpp}/` (see `baselines/README.md`) |
-| `scripts/baselines_harness/` | Wraps the native `sol-execbench` CLI as a host subprocess; entry point for the five counter-free analytic surfaces |
-| `scripts/baselines_scaffold/` | Emits `solution.json` + parent README boilerplate; lints forbidden surfaces |
+| `tools/sol_baselines_harness/` | Wraps the native `sol-execbench` CLI as a host subprocess; entry point for the five counter-free analytic surfaces |
+| `tools/sol_baselines_scaffold/` | Emits `solution.json` + parent README boilerplate; lints forbidden surfaces |
 | `nvbit_tracer/metric_extractor/` | Surface 1: non-root NVBit injector + metric extractor (per-warp histograms via JSONL + opt-in Tier-2 address-trace sidecar). |
 | `references/NVIDIA_Manuals/solbench_problems/` | 235 problem specs (PyTorch reference `run()` is the behavioral contract) |
 | `references/NVIDIA_Manuals/` | NVIDIA reference doc mirror + crawler scripts |
@@ -82,7 +82,7 @@ not assume every surface emits on every host.
 5. **`compute-sanitizer`** (memcheck / racecheck / synccheck / initcheck)
 
 Artifacts land at
-`scripts/baselines_harness/.harness_traces/<slug>__<lang>/{nvbit_metrics,cupti,nsys,static,sanitizer}/`.
+`tools/sol_baselines_harness/.harness_traces/<slug>__<lang>/{nvbit_metrics,cupti,nsys,static,sanitizer}/`.
 
 ## Quickstart
 
@@ -130,7 +130,7 @@ $EDITOR baselines/L1/${problem}/cutlass/solution.json
 $EDITOR baselines/L1/${problem}/README.md
 
 # Local correctness check on sm_120 (speedup not gated):
-python scripts/baselines_harness/run.py \
+python tools/sol_baselines_harness/run.py \
     --baseline baselines/L1/${problem}/cutlass
 ```
 

@@ -623,6 +623,11 @@ fn validate_l2_coherence(
             hits: l2.hits,
         });
     }
+    l2.validate_lookup_observer()
+        .map_err(|source| LaunchSetAggregationError::L2Counter {
+            launch: launch.clone(),
+            source,
+        })?;
     Ok(())
 }
 
@@ -949,6 +954,10 @@ mod tests {
             resource_source: IssueResourceSource::SyntheticTestFixture,
             instruction_front_end: None,
             memory_issue_pipeline: None,
+            scalar_execution_pipeline: None,
+            ldgsts_l1_hit_return_service: None,
+            constant_memory_return_service: None,
+            immediate_constant_cache: None,
             l1_hit_latency: 2,
             l1_miss_latency: 20,
             global_flat_latency: 100,
@@ -966,6 +975,7 @@ mod tests {
             ldgsts_cache_all_destination_service_wavefronts: 2,
             ldgsts_cache_all_destination_service_cycles: 3,
             max_resident_warps_per_sm: 48,
+            max_resident_blocks_per_sm: u32::MAX,
         }
     }
 
@@ -1060,6 +1070,7 @@ mod tests {
                 diagnostic_last_issue_cycles: 999,
                 last_processed_system_event_time: Some(1_234),
                 terminal_modeled_event_time: Some(1_234),
+                sm_active_terminal_event_time: Some(1_234),
                 l1,
                 l2,
                 l2_by_source,

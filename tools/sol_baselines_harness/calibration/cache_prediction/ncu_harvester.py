@@ -327,6 +327,7 @@ def _run_checked_ncu(argv: tuple[str, ...]):
             argv,
             capture_output=True,
             text=True,
+            errors="replace",
             check=False,
             timeout=600,
         )
@@ -395,6 +396,7 @@ def _probe_ncu_version_stdout(
             [path, "--version"],
             capture_output=True,
             text=True,
+            errors="replace",
             check=False,
             timeout=30,
         )
@@ -441,6 +443,7 @@ def _probe_nvidia_smi_device_info(
             ],
             capture_output=True,
             text=True,
+            errors="replace",
             check=False,
             timeout=30,
         )

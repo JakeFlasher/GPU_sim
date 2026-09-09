@@ -39,6 +39,10 @@ struct AllocationRecord {
   uint64_t size;
   uint32_t allocation_id;
   bool alive;
+  // True for stream-ordered memory-pool allocations, which are not owned by
+  // the CUDA context that submitted the allocation operation.  This field is
+  // internal metadata and is not serialized in allocations.json.
+  bool context_independent = false;
 };
 
 // Register a new allocation in the per-context registry. `ctx` must
@@ -49,13 +53,30 @@ struct AllocationRecord {
 // If `base` is 0 or `size` is 0, the call is a no-op and returns 0.
 // Such calls indicate a producer bug or driver oddity; the caller
 // should already have filtered them.
+// Ranges whose half-open endpoint overflows uint64 are also rejected.
+// Overlap with another live mapping is rejected, except exact-base reuse
+// when the previous allocation is already queued in the pending async-free
+// table; that reuse receives a fresh allocation_id.
 uint32_t register_allocation(
+    void *ctx, uint64_t base, uint64_t size, int device_id);
+
+// Register an allocation produced by the stream-ordered memory pool APIs.
+// These allocations are not associated with a CUDA context and may be freed
+// or accessed while a different context is current.  They therefore live in
+// a process-wide address map; `ctx` is retained only as the historical
+// creator/context_id attached to the sidecar record.
+uint32_t register_context_independent_allocation(
     void *ctx, uint64_t base, uint64_t size, int device_id);
 
 // Mark the allocation at (ctx, base) freed. Removes from the live
 // per-context map but preserves the history entry with alive=false.
 // Calls on an unknown (ctx, base) pair are a no-op.
 void mark_allocation_freed(void *ctx, uint64_t base);
+
+// Context destruction releases context-bound allocations and VMM reservations
+// that were not explicitly freed. Stream-ordered pool allocations remain live
+// in the process-wide map because CUDA does not associate them with a context.
+void retire_context_allocations(void *ctx);
 
 // Mark the half-open range [ptr, ptr+size) freed in `ctx`. For each
 // live allocation that intersects the range, marks the original
@@ -69,15 +90,36 @@ void mark_allocation_freed(void *ctx, uint64_t base);
 //   * interior unmap (base < ptr AND ptr+size < base+orig_size): two
 //     survivors for [base, ptr) and [ptr+size, base+orig_size).
 //   * no overlap: no-op.
-// Sentinel inputs (nullptr ctx, ptr==0, size==0) are no-ops. This is
+// Sentinel inputs (nullptr ctx, ptr==0, size==0), and overflowing endpoints,
+// are no-ops. This is
 // the correct primitive for cuMemUnmap, which can legally unmap any
 // sub-range of a previously cuMemMap-bound region.
 void mark_allocation_freed_range(void *ctx, uint64_t ptr, uint64_t size);
 
-// Look up the allocation containing `addr` in `ctx`'s live map.
-// Returns 0 if no live allocation matches (the proto3 unresolved
-// sentinel for the wire field).
+// Look up the allocation containing `addr` in `ctx`'s live map. Returns 0 if
+// no live allocation matches, or if a pending older async-free generation
+// overlaps the address and the launch identity is therefore ambiguous (the
+// proto3 unresolved sentinel for the wire field).
 uint32_t lookup_allocation_id(void *ctx, uint64_t addr);
+
+// Capture the live allocation generations visible at a launch boundary. The
+// two vectors are sorted by base address and remain separate because
+// context-bound and context-independent mappings have different lookup
+// precedence. Keeping the sorted index in the snapshot makes delayed channel
+// lookups logarithmic in the number of live allocations instead of rescanning
+// every generation for every lane. The snapshot is immutable after return, so
+// delayed channel records cannot be relabeled by a later async free/reuse
+// operation.
+struct AllocationSnapshot {
+  std::vector<AllocationRecord> context_bound;
+  std::vector<AllocationRecord> context_independent;
+};
+AllocationSnapshot snapshot_live_allocations(void *ctx);
+
+// Resolve an address against a launch snapshot. Returns 0 for no match or for
+// overlapping generations, preserving the unresolved wire sentinel.
+uint32_t lookup_allocation_id_in_snapshot(
+    const AllocationSnapshot &snapshot, uint64_t addr);
 
 // Record a stream-ordered async free as pending. Stream-ordered
 // frees (cuMemFreeAsync, cuMemFreeAsync_ptsz) only complete after
@@ -89,7 +131,7 @@ uint32_t lookup_allocation_id(void *ctx, uint64_t addr);
 // already-dead allocation and produce a spurious
 // `unmapped_memory_range` typed exclusion. Instead, this entry
 // captures the currently-live `allocation_id` for `(ctx, base)`,
-// queues `(ctx, stream, base, allocation_id)` into a per-stream
+// queues `(ctx, stream_id, base, allocation_id)` into a per-stream
 // pending list, and keeps the allocation alive=true in the
 // registry; the matching `retire_pending_frees_for_*` call
 // (driven by a sync-point hook) flips THAT specific
@@ -100,26 +142,23 @@ uint32_t lookup_allocation_id(void *ctx, uint64_t addr);
 // and the eventual sync retires the OLD id without touching the
 // new one.
 //
-// `stream == nullptr` is a valid stream key — CUDA's
-// stream-ordered allocator accepts the default stream (NULL)
-// when a current context exists. Sentinel inputs (nullptr ctx,
-// base==0) are no-ops. A pending free for (ctx, base) where the
+// `stream_id` is the driver-assigned stream identity. Sentinel inputs
+// (nullptr ctx, base==0) are no-ops. A pending free for (ctx, base) where the
 // allocation is unknown (already freed, or never registered) is
 // also a no-op so a noisy or out-of-order trace cannot corrupt
 // registry state.
-void register_pending_async_free(void *ctx, void *stream, uint64_t base);
+void register_pending_async_free(void *ctx, int64_t stream_id, uint64_t base);
 
-// Retire all pending async frees on `(ctx, stream)`. For each
+// Retire all pending async frees on `(ctx, stream_id)`. For each
 // retired entry, marks the SPECIFIC captured allocation_id
 // freed (alive=false in history) and removes the live-map entry
 // at (ctx, base) only if it still points to that same
 // allocation_id (handles same-base reuse before retirement).
 // Called from the cuStreamSynchronize / cuStreamSynchronize_ptsz
 // / cuStreamQuery (success-only) hooks on success exit, where
-// stream completion is proven by the sync/query. `stream` may
-// be NULL (default stream). No-op when ctx is null or no
-// pending entries exist for the (ctx, stream) key.
-void retire_pending_frees_for_stream(void *ctx, void *stream);
+// stream completion is proven by the sync/query. No-op when ctx is null or no
+// pending entries exist for the (ctx, stream_id) key.
+void retire_pending_frees_for_stream(void *ctx, int64_t stream_id);
 
 // Retire all pending async frees across every stream in `ctx`.
 // Called from the cuCtxSynchronize / cuCtxSynchronize_v2 hooks
@@ -132,13 +171,13 @@ void retire_pending_frees_for_context(void *ctx);
 
 // Diagnostic snapshot of the pending-async-free state, for
 // host-only unit tests. Returns a vector of records in
-// deterministic order (sorted by ctx, then stream, then base).
+// deterministic order (sorted by ctx, then stream_id, then base).
 // Each record carries the `allocation_id` captured at queue time
 // so tests can assert the same-base-reuse-before-sync invariant.
 // Production code should not need this.
 struct PendingFreeRecord {
   void *ctx;
-  void *stream;
+  int64_t stream_id;
   uint64_t base;
   uint32_t allocation_id;
 };
@@ -170,7 +209,8 @@ std::vector<PendingFreeRecord> snapshot_pending_frees_for_testing();
 // Register a virtual address reservation in the per-context
 // reservation tracker. NOT a live allocation — kernels cannot
 // access this range until cuMemMap binds physical backing.
-// Sentinel inputs (nullptr ctx, addr==0, size==0) are no-ops.
+// Sentinel inputs (nullptr ctx, addr==0, size==0), and overflowing endpoints,
+// are no-ops.
 void register_vmm_reservation(void *ctx, uint64_t addr, uint64_t size);
 
 // Release a virtual address reservation. If any live allocation
@@ -179,8 +219,8 @@ void register_vmm_reservation(void *ctx, uint64_t addr, uint64_t size);
 // clearing the reservation entry; this preserves the registry
 // invariant "live map points only at currently-mapped ranges"
 // even when the producer/driver permits a partial-cleanup
-// sequence. Sentinel inputs are no-ops. A release on an
-// unknown (ctx, addr) is also a no-op.
+// sequence. Sentinel inputs are no-ops. A release on an unknown (ctx, addr)
+// or with an overflowing endpoint is also a no-op.
 void release_vmm_reservation(void *ctx, uint64_t addr);
 
 struct VmmReservationRecord {

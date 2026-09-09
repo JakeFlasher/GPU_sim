@@ -41,22 +41,23 @@ from pathlib import Path
 
 _HERE = Path(__file__).resolve().parent
 _REPO_ROOT = _HERE.parents[3]
-if str(_REPO_ROOT / "scripts") not in sys.path:
-    sys.path.insert(0, str(_REPO_ROOT / "scripts"))
+_TOOLS_ROOT = _REPO_ROOT / "tools"
+if str(_TOOLS_ROOT) not in sys.path:
+    sys.path.insert(0, str(_TOOLS_ROOT))
 
-from baselines_harness.calibration.cache_prediction.corpus_expansion_batch import (  # noqa: E402
+from sol_baselines_harness.calibration.cache_prediction.corpus_expansion_batch import (  # noqa: E402
     CORPUS_EXPANSION_BATCH_SCHEMA_VERSION,
     CorpusExpansionBatchError,
     load_corpus_expansion_batch_manifest,
 )
-from baselines_harness.calibration.cache_prediction.verified_dispatch_families import (  # noqa: E402
+from sol_baselines_harness.calibration.cache_prediction.verified_dispatch_families import (  # noqa: E402
     VerifiedDispatchFamiliesError,
     load_verified_dispatch_families,
 )
 
 
 HOST_ARCH_MANIFEST_RELATIVE_PATH: str = (
-    "scripts/baselines_harness/calibration/cache_prediction/"
+    "tools/sol_baselines_harness/calibration/cache_prediction/"
     "host_arch_availability_v1.toml"
 )
 

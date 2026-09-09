@@ -99,7 +99,9 @@ def _effective_environment(
     return environment
 
 
-def _output_contract(destination: Path) -> dict[str, object]:
+def _output_contract(
+    destination: Path, *, allow_multiple_launches: bool = False
+) -> dict[str, object]:
     """Check the complete NVBit artifact set before reporting success."""
 
     missing = [
@@ -131,9 +133,14 @@ def _output_contract(destination: Path) -> dict[str, object]:
                     }
                     if row.get("kernel mangled name"):
                         rows.append(row)
-            if len(rows) != 1:
+            if not rows:
+                errors.append("stats.csv must contain at least one kernel row")
+            elif not allow_multiple_launches and len(rows) != 1:
                 errors.append("stats.csv must contain exactly one kernel row")
-            elif rows[0].get("total_insts") != rows[0].get("total_reported_insts"):
+            elif any(
+                row.get("total_insts") != row.get("total_reported_insts")
+                for row in rows
+            ):
                 errors.append("stats.csv total_insts differs from total_reported_insts")
             mapping = json.loads(
                 (destination / "extra_info/traced_kernel_modules.json").read_text()
@@ -142,20 +149,66 @@ def _output_contract(destination: Path) -> dict[str, object]:
                 (destination / "extra_info/enhanced_execution_info.json").read_text()
             )
             selection = mapping.get("selection") if isinstance(mapping, Mapping) else None
-            if not isinstance(mapping, Mapping) or not isinstance(
-                mapping.get("launches"), list
-            ) or len(mapping["launches"]) != 1:
+            launches = mapping.get("launches") if isinstance(mapping, Mapping) else None
+            if not isinstance(launches, list) or not launches:
+                errors.append("traced-kernel mapping must contain launch entries")
+            elif not allow_multiple_launches and len(launches) != 1:
                 errors.append("traced-kernel mapping must contain one launch")
-            elif not isinstance(selection, Mapping) or (
-                selection.get("accepted_active_launches") != 1
-                or selection.get("active_launch_attempts") != 1
-                or selection.get("concurrent_limit_violations") != 0
+            elif len(launches) != len(rows):
+                errors.append(
+                    f"traced-kernel launch rows={len(launches)} differ from stats rows={len(rows)}"
+                )
+            if isinstance(launches, list) and launches:
+                launch_ids = []
+                accepted_indices = []
+                for launch in launches:
+                    if not isinstance(launch, Mapping):
+                        continue
+                    launch_ids.append(launch.get("trace_launch_id"))
+                    accepted_indices.append(launch.get("accepted_launch_index"))
+                if (
+                    len(launch_ids) != len(launches)
+                    or any(type(value) is not int for value in launch_ids)
+                    or len(set(launch_ids)) != len(launch_ids)
+                ):
+                    errors.append("traced-kernel launch IDs must be unique integers")
+                if accepted_indices != list(range(len(launches))):
+                    errors.append(
+                        "traced-kernel accepted launch indices must be contiguous"
+                    )
+            if not isinstance(selection, Mapping) or (
+                selection.get("concurrent_limit_violations") != 0
                 or selection.get("exact_contract_satisfied") is not True
             ):
+                errors.append("traced-kernel selection contract is not satisfied")
+            elif not allow_multiple_launches and (
+                selection.get("accepted_active_launches") != 1
+                or selection.get("active_launch_attempts") != 1
+            ):
                 errors.append("traced-kernel selection must admit exactly one active launch")
+            if isinstance(selection, Mapping) and isinstance(launches, list):
+                if selection.get("module_mapping_count") != len(launches):
+                    errors.append(
+                        "traced-kernel module mapping count differs from launches"
+                    )
+                try:
+                    reported_total = sum(
+                        int(row["total_reported_insts"]) for row in rows
+                    )
+                except (KeyError, TypeError, ValueError):
+                    reported_total = None
+                if (
+                    reported_total is not None
+                    and selection.get("accepted_channel_records") != reported_total
+                ):
+                    errors.append(
+                        "traced-kernel channel count differs from stats totals"
+                    )
             if not isinstance(execution, Mapping) or not isinstance(
                 execution.get("kernels"), list
-            ) or len(execution["kernels"]) != 1:
+            ) or not execution["kernels"]:
+                errors.append("enhanced execution metadata must contain kernel entries")
+            elif not allow_multiple_launches and len(execution["kernels"]) != 1:
                 errors.append("enhanced execution metadata must contain one kernel")
             for sidecar in (
                 "unsupported_memory_path.json",
@@ -267,6 +320,7 @@ def capture_argv(
     logical_environment: Mapping[str, str],
     output_root: Path,
     timeout_seconds: int,
+    allow_multiple_launches: bool = False,
 ) -> int:
     """Capture one caller-bound command with the retained SM86 NVBit runtime."""
 
@@ -335,6 +389,7 @@ def capture_argv(
                         "stdout": subprocess.PIPE,
                         "stderr": subprocess.PIPE,
                         "text": True,
+                        "errors": "replace",
                     }
                     if os.name == "nt":
                         popen_kwargs["creationflags"] = getattr(
@@ -395,6 +450,7 @@ def capture_argv(
         "kind": "sanitized_nvbit_capture_environment",
         "cell": cell_id,
         "argv": argv,
+        "allow_multiple_launches": allow_multiple_launches,
         "output": relative_output,
         "launch_mode": "env_i_exact_allowlist",
         "environment": logical_environment,
@@ -430,7 +486,9 @@ def capture_argv(
         raise RuntimeError(f"{cell_id}: NVBit runtime provenance failed: {runtime_error}")
     if return_code != 0:
         raise RuntimeError(f"{cell_id}: NVBit capture exited {return_code}; see {destination / 'stderr.txt'}")
-    output_contract = _output_contract(destination)
+    output_contract = _output_contract(
+        destination, allow_multiple_launches=allow_multiple_launches
+    )
     environment_record.update(
         {
             "payload_file_count": output_contract["payload_file_count"],
@@ -450,7 +508,13 @@ def capture_argv(
     return 0
 
 
-def capture(cell_id: str, output_root: Path, timeout_seconds: int) -> int:
+def capture(
+    cell_id: str,
+    output_root: Path,
+    timeout_seconds: int,
+    *,
+    allow_multiple_launches: bool = False,
+) -> int:
     cell = _cell(cell_id)
     relative_output = f"evidence/raw/nvbit/{cell_id}"
     destination = output_root / "evidence" / "raw" / "nvbit" / cell_id
@@ -460,6 +524,7 @@ def capture(cell_id: str, output_root: Path, timeout_seconds: int) -> int:
         _logical_environment(cell, relative_output, destination),
         output_root,
         timeout_seconds,
+        allow_multiple_launches=allow_multiple_launches,
     )
 
 
@@ -468,6 +533,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--cell", action="append", dest="cells")
     parser.add_argument("--output-root", type=Path, default=Path(DEFAULT_OUTPUT_ROOT))
     parser.add_argument("--timeout", type=int, default=DEFAULT_TIMEOUT_SECONDS)
+    parser.add_argument(
+        "--allow-multiple-launches",
+        action="store_true",
+        help="accept a lossless multi-kernel trace instead of enforcing one launch",
+    )
     args = parser.parse_args(argv)
     if type(args.timeout) is not int or not 1 <= args.timeout <= MAX_TIMEOUT_SECONDS:
         parser.error(f"--timeout must be between 1 and {MAX_TIMEOUT_SECONDS} seconds")
@@ -475,7 +545,12 @@ def main(argv: list[str] | None = None) -> int:
     failures: list[str] = []
     for cell_id in cells:
         try:
-            capture(cell_id, args.output_root.expanduser().resolve(), args.timeout)
+            capture(
+                cell_id,
+                args.output_root.expanduser().resolve(),
+                args.timeout,
+                allow_multiple_launches=args.allow_multiple_launches,
+            )
         except (OSError, RuntimeError, ValueError) as exc:
             print(str(exc), file=sys.stderr)
             failures.append(cell_id)

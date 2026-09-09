@@ -10,6 +10,7 @@ default = []
 campaign = []
 
 [dependencies]
+sim-arch = { path = "../arch" }
 csv = { workspace = true }
 libc = { workspace = true }
 prost = { workspace = true }

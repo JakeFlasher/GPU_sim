@@ -410,6 +410,7 @@ def _block_index_from_message(
     *,
     grid_x: int,
     grid_y: int,
+    grid_z: int,
     grid_dim: int,
     tb_path: Path,
 ) -> int:
@@ -443,6 +444,21 @@ def _block_index_from_message(
     tb_x = int(tb_message.block_id.x)
     tb_y = int(tb_message.block_id.y)
     tb_z = int(tb_message.block_id.z)
+    # Validate each coordinate before flattening.  Flattening alone is not a
+    # sufficient bounds check: a negative coordinate can cancel a positive
+    # coordinate (for example ``(-1, 1, 0)`` in a 4x4x1 grid flattens to 3),
+    # causing malformed producer data to alias a different valid CTA.  Rust's
+    # canonical ``block_launch_index`` rejects per-axis violations first; keep
+    # this Python consumer in lockstep with that contract.
+    if (
+        tb_x < 0 or tb_y < 0 or tb_z < 0
+        or tb_x >= grid_x or tb_y >= grid_y or tb_z >= grid_z
+    ):
+        raise L1ProductionHelperThreadblockMalformed(
+            f"threadblock proto at {tb_path.name!r} has "
+            f"block_id=({tb_x},{tb_y},{tb_z}) outside grid "
+            f"axes [0,{grid_x})x[0,{grid_y})x[0,{grid_z})"
+        )
     block_index = _flatten_block_id(
         tb_x, tb_y, tb_z,
         grid_x=grid_x, grid_y=grid_y,
@@ -464,6 +480,7 @@ def _walk_threadblock_protos(
     *,
     grid_x: int,
     grid_y: int,
+    grid_z: int,
     grid_dim: int,
     retained_threadblock_pb_payloads: list[bytes] | None = None,
 ) -> list[TraceRecord]:
@@ -508,6 +525,7 @@ def _walk_threadblock_protos(
             tb_message,
             grid_x=grid_x,
             grid_y=grid_y,
+            grid_z=grid_z,
             grid_dim=grid_dim,
             tb_path=tb_path,
         )
@@ -822,6 +840,7 @@ def predict_l1_from_trace_dir(
             import_trace_contract_mod,
             grid_x=grid_x,
             grid_y=grid_y,
+            grid_z=grid_z,
             grid_dim=grid_dim,
             retained_threadblock_pb_payloads=(
                 retained_threadblock_pb_payloads

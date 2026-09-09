@@ -15,100 +15,11 @@
 
 #include <stdint.h>
 
-// Versioning for the per-launch JSON-L schema. Bumped whenever a wire field
-// is added, removed, renamed, retyped, or interpreted differently. The
-// constants are introduced up front so consumers and reference parsers can
-// pin against them from the first byte the tool ever writes. The
-// tool_version bump records the field-content transition for
-// `instruction_class_histogram` from the empty placeholder to a real sparse
-// map; the schema_version is unchanged because the field shape is the same
-// object type the placeholder advertised.
-// Versioning history:
-//
-// * ``0.0.8-branch-active-mask``: branch-active-lanes histogram landed.
-// * ``0.0.9-global-ordinal`` (Round 2): ``g_launch_index`` semantics
-//   changed — now counts every observed kernel-launch CBID, including
-//   filter-skipped framework kernels. Per the schema's own bump rule
-//   (tool_version bumps on any tool-side change that affects emitted
-//   values), the version slot was advanced.
-// * ``0.0.10-cuda-stream-id`` (Round 4): ``stream_ordinal`` semantics
-//   changed — the producer now calls ``cuStreamGetId()`` and stores
-//   the raw CUDA stream ID, the same identity CUPTI Activity emits in
-//   its ``streamId`` field. Pre-Round-4 the slot carried a
-//   first-observation ordinal that was NOT comparable across surfaces;
-//   Codex's Round-3 review caught this as an AC-8 blocker. The
-//   on-disk ``schema_version`` stays at 1 because the field is still
-//   an integer; only the value identity shifted, which the tool
-//   version slot tracks.
-// * ``0.0.11-saturating-counters`` (Round 5, current): three
-//   bounded-memory semantics changed simultaneously per Codex's
-//   Round-4 review. (a) per-launch counter atomicAdds now route
-//   through ``saturating_atomic_add_u64`` (see
-//   ``saturating_counter.h``) so saturation clamps at ``UINT64_MAX``
-//   instead of wrapping; the JSON-L ``substatus.saturated_counters``
-//   field carries the real per-launch count, not a literal ``0``. (b)
-//   the per-launch artifact cap is now real: when the full record
-//   would exceed the cap, the writer emits a bounded replacement
-//   record with identity fields + null metric values +
-//   ``substatus.truncated = true`` +
-//   ``waiver_reason = per_launch_artifact_cap_exceeded`` instead of
-//   flushing the oversize payload with the flag flipped. (c) the
-//   per-process budget skip path: once the accepted-launch count
-//   exceeds the allocated slot pool, subsequent kernels run
-//   uninstrumented and emit a ``launch_kind =
-//   per_process_budget_exceeded`` record with
-//   ``substatus.skipped = true`` and
-//   ``waiver_reason = per_process_budget_exceeded``; the previous
-//   modulo slot reuse is removed. All three are field-content
-//   transitions; the ``schema_version`` stays at 1 because the
-//   field shapes are unchanged.
-// * ``0.0.12-calibrated-confidence`` (Round 6, current): three
-//   wire-content changes landed simultaneously. (a) The
-//   bounded-replacement record now emits ``bank_conflicts:0`` and a
-//   33-element zero ``branch_active_lanes_hist`` instead of the
-//   Round-5 ``null`` / ``[]`` (which made the strict parser reject
-//   every truncation / budget-skip record). (b) The terminal
-//   ``filter_stats.json`` writer now merges via flock + max + atomic
-//   rename so a zero-counter atexit process cannot overwrite a
-//   nonzero file. (c) The four Tier-1 confidence labels
-//   (sector_efficiency_global_load, sector_efficiency_global_store,
-//   bank_conflicts, branch_active_lanes_hist) are promoted from
-//   ``"placeholder"`` to ``"calibrated"`` after the T24 synthetic
-//   calibration corpus passed every AC-4 verdict. All three are
-//   field-content transitions; the ``schema_version`` stays at 1
-//   because the field shapes are unchanged.
-// * ``0.0.13-record-skipped-paths`` (Round 7): the
-//   per-record ``filter_stats_snapshot`` embeds
-//   ``representative_skipped_paths`` alongside the existing
-//   integer counters. Codex's Round-6 review caught that the
-//   pre-Round-7 in-record snapshot only carried counters, so the
-//   harness-side reconciler could not recover the framework module
-//   attribution (e.g. libtorch / libcublas / libcudnn) the AC-6
-//   audit requires when ``nvbit_at_term`` misses the terminal
-//   write. The new field is a strings array capped at
-//   ``MAX_REPRESENTATIVE_SKIPPED_PATHS = 10`` (matching the
-//   producer's in-process cap). The Round-7 release left
-//   ``schema_version`` at 1; Round 8's review caught that as a
-//   wire-discipline violation (a required field with no default
-//   IS a wire-incompatible change) and bumps the slot to 2.
-// * ``0.0.14-schema-v2`` (Round 8, current): three wire changes
-//   landed together. (a) ``schema_version`` bumps from 1 to 2 to
-//   correctly record that
-//   ``filter_stats_snapshot.representative_skipped_paths`` is a
-//   required field on every emitted record. The parser is
-//   version-aware: schema-v2 records require the field; schema-v1
-//   historical records default the field to ``[]`` so the
-//   pre-Round-7 preserved evidence still parses. (b) The terminal
-//   ``filter_stats.json`` merge writer's snapshot, ``take_max()``,
-//   and JSON emit now cover the three previously-omitted counters
-//   ``graph_launches_seen``, ``graph_launches_not_observed``, and
-//   ``unknown_opcode_count`` — Codex's Round-7 review caught the
-//   partial coverage. (c) The Python reconciler's
-//   contradiction-detector + rewrite paths cover those same
-//   three counters. All three are wire-content transitions; the
-//   parser version check is the load-bearing part.
-#define METRIC_EXTRACTOR_SCHEMA_VERSION 2
-#define METRIC_EXTRACTOR_TOOL_VERSION   "0.0.14-schema-v2"
+// Schema-v4 context_id and stream_id are CUDA Driver identities local to the
+// captured process. Stream topology may be compared across runs, but raw
+// numeric IDs cannot establish cross-run correspondence.
+#define METRIC_EXTRACTOR_SCHEMA_VERSION 4
+#define METRIC_EXTRACTOR_TOOL_VERSION   "0.0.16-driver-stream-identity"
 
 // Default cap on the per-process pool of LaunchMetrics slots. The slot pool
 // is allocated lazily in nvbit_tool_init() (which is the only NVBit

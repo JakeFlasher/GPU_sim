@@ -3,13 +3,12 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use serde::Serialize;
 use sim_arch::card::ArchCard;
-use sim_sm::{
-    ControlSidecar, IssueModelParams, ReplayMemMode, build_schedules, replay_trace_kernel,
-};
-use sim_trace::{AnchoredDir, ExecInfo, TraceDir, kernel_grid, pb};
+use sim_sm::{IssueModelParams, ReplayMemMode, build_schedules, replay_trace_kernel};
+use sim_trace::{AnchoredDir, TraceDir, kernel_grid, pb};
 
 use super::{
-    CacheScope, LaunchReport, RunConfig, RunError, RunReport, at, launch_report, resolve_mode,
+    CacheScope, LaunchReport, RunConfig, RunError, RunReport, at, launch_report, load_arch_card,
+    load_control_sidecar, resolve_mode,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -92,7 +91,7 @@ impl PreparedReplay {
             reject_sampling_declarations(&config.trace_dir)?;
         }
 
-        let arch_card = ArchCard::load(&config.arch_card).map_err(at("architecture card"))?;
+        let arch_card = load_arch_card(&config.arch_card)?;
         let arch = arch_card.arch_id().map_err(at("architecture card"))?;
         let latencies = arch_card
             .required_latencies()
@@ -107,9 +106,14 @@ impl PreparedReplay {
         .map_err(at("issue configuration"))?;
         let mode = resolve_mode(config, &arch_card, issue)?;
         let trace = TraceDir::open_direct_compact(&config.trace_dir).map_err(at("trace"))?;
-        let exec = ExecInfo::load_from_trace_dir(trace.root()).map_err(at("execution info"))?;
-        let control = ControlSidecar::load_for_arch(&config.control_bits, arch)
-            .map_err(at("control bits"))?;
+        let exec = trace.exec_info().ok_or_else(|| {
+            RunError::new(
+                "execution info",
+                "direct trace loader did not retain execution metadata",
+            )
+        })?;
+        let control = load_control_sidecar(&config.control_bits, arch)?;
+        super::validate_direct_control_identity(&config.control_bits, &exec, &control)?;
         let schedules = build_schedules(&exec, &control).map_err(at("schedule"))?;
         let launches = trace
             .kernels()

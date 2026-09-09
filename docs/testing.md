@@ -1,40 +1,19 @@
-# Testing
+# Running the live path
 
-Tests answer whether code behaves as intended. They do not authorize later
-work.
-
-Use the smallest relevant check while iterating:
+Use a release build and one representative trace as the default smoke path:
 
 ```bash
-cd sim
-cargo test -p sim-engine
-cargo test -p sim-trace
-cargo test -p sim-sm
-cargo test -p sim-mem
-cargo test -p sim-run
-
-# Optional retained campaign runner and evidence adapter
-cargo test -p sim-run-campaign
-cargo test -p sim-sm --features campaign --test launch_evidence
+cargo build --release --manifest-path sim/Cargo.toml -p sim-run
+sim/target/release/sim-run --help
 ```
 
-Python examples:
+For a retained trace, follow [runbook_host.md](runbook_host.md) and inspect the
+result JSON plus stderr. Python utilities can be compiled without running a
+campaign:
 
 ```bash
-.venv/bin/python -m pytest -q
-.venv/bin/python -m pytest -q eval/tests/test_direct_score.py
-.venv/bin/python -m pytest -q arch_profiles/tests
-.venv/bin/python -m pytest -q tools/nvbit_tracer/test_capture_process.py
+python -m compileall -q eval workloads/research_probes tools/nvbit_tracer
 ```
 
-Before a broad handoff, run the suites touched by the change. Hardware tests
-may use the available GPUs, NCU, NVBit, clocks, and administrative commands.
-A skipped hardware test is simply not executed; it neither passes nor blocks
-unrelated implementation.
-
-The full SOL/campaign suites are intentionally excluded from bare `pytest`.
-Invoke them by path through `.claude/skills/run-sol-campaign/SKILL.md` when that
-capability is in scope.
-
-Do not create audit-only test suites that inspect Git state, prompt text,
-reviewer counts, hashes, receipt chains, or workflow status.
+Keep checks close to the changed path. Do not add process-only approval,
+manifest, or digest checks around a simulator replay.

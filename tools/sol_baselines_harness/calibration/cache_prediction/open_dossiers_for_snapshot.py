@@ -15,7 +15,7 @@ runs.
 
 Usage (from the repo root):
 
-    .venv/bin/python scripts/baselines_harness/calibration/cache_prediction/open_dossiers_for_snapshot.py \\
+    .venv/bin/python tools/sol_baselines_harness/calibration/cache_prediction/open_dossiers_for_snapshot.py \\
         --snapshot-path .humanize/diagnostic-baselines/intermediate-baseline-<sha>.toml
 
 The dossier directory defaults to
@@ -49,10 +49,11 @@ from typing import Any, Iterable, Mapping
 
 _HERE = Path(__file__).resolve().parent
 _REPO_ROOT = _HERE.parents[3]
-if str(_REPO_ROOT / "scripts") not in sys.path:
-    sys.path.insert(0, str(_REPO_ROOT / "scripts"))
+_TOOLS_ROOT = _REPO_ROOT / "tools"
+if str(_TOOLS_ROOT) not in sys.path:
+    sys.path.insert(0, str(_TOOLS_ROOT))
 
-from baselines_harness.calibration.cache_prediction.snapshot_dossier_walker import (  # noqa: E402
+from sol_baselines_harness.calibration.cache_prediction.snapshot_dossier_walker import (  # noqa: E402
     SNAPSHOT_DOSSIER_WALKER_REL_ERR_THRESHOLD,
     STATUS_MEASURED,
     SnapshotDossierWalkerError,

@@ -57,6 +57,6 @@ noting for this pattern:
 ## Counter-free artifacts
 
 Counter-free analytics bundle path:
-`scripts/baselines_harness/.harness_traces/problem_012_fused_cos_sin_embedding_generation__cuda_cpp/`
+`tools/sol_baselines_harness/.harness_traces/problem_012_fused_cos_sin_embedding_generation__cuda_cpp/`
 (produced by the M4 surfaces orchestrator fanout; status pending
 the local 3090 Ti pipeline run that is part of M4).

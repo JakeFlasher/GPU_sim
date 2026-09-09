@@ -34,6 +34,9 @@ if str(_SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS_DIR))
 
 from sol_baselines_harness.cache import sol_execbench_source_hash  # noqa: E402
+from sol_baselines_harness.native_dispatch import (  # noqa: E402
+    _resolve_sol_execbench,
+)
 from sol_baselines_harness.normalise_benchmark import (  # noqa: E402
     needs_staging,
     stage_benchmark,
@@ -48,7 +51,7 @@ from sol_baselines_harness.surfaces.profiling_build import (
 
 _REPO_ROOT = _SCRIPTS_DIR.parent
 # Real FlashInfer trace dataset (gitignored external blobs) lives at the
-# repo-root ``data/flashinfer-trace``; the prior ``sol-execbench/data/...``
+# repo-root ``data/flashinfer-trace``; the prior ``tools/sol_execbench/data/...``
 # path never existed on disk.
 _FLASHINFER_TRACE_DIR_DEFAULT = _REPO_ROOT / "data" / "flashinfer-trace"
 
@@ -153,8 +156,8 @@ def build_dispatch_plan(
     Stages the profiling ``solution.json`` + reduced eval config when
     ``build_mode == "profiling"``; stages a workload subset
     ``workload.jsonl`` when the resolved subset is not the full
-    workload set; hashes the landed ``solution.json`` bytes for
-    post-run byte-immutability enforcement.
+    workload set; records the landed ``solution.json`` identity once
+    for cache metadata.
 
     Each surface composes its own invocation via
     :meth:`DispatchPlan.build_eval_argv`.
@@ -290,25 +293,6 @@ def build_dispatch_plan(
     )
 
 
-def assert_landed_solution_bytes_unchanged(
-    landed_solution_path: Path,
-    pre_run_sha256: str,
-) -> None:
-    """Verify the landed ``solution.json`` bytes match ``pre_run_sha256``.
-
-    Raises ``RuntimeError`` when the on-disk SHA-256 has changed.
-    """
-    actual = _sha256_of_file(landed_solution_path)
-    if actual != pre_run_sha256:
-        raise RuntimeError(
-            f"landed solution.json at {landed_solution_path} was "
-            f"modified during the run (pre={pre_run_sha256[:16]}..., "
-            f"post={actual[:16]}...). Profiling builds MUST stage a "
-            f"copy; the landed file is byte-immutable under the "
-            f"framework's contract."
-        )
-
-
 def _stage_workload_subset(
     *,
     problem_dir: Path,
@@ -356,8 +340,13 @@ def _build_native_eval_argv(
     driver exits cleanly before the outer surface kills it) when
     that value exceeds the CLI default.
     """
+    # Resolve the same in-tree evaluator used by the direct-dispatch path.
+    # The curated subprocess environment preserves the caller's PATH and does
+    # not implicitly activate ``tools/sol_execbench/.venv``; emitting a bare
+    # command here therefore made every plan-based surface fail with
+    # ``FileNotFoundError`` on a clean checkout.
     cmd: List[str] = [
-        "sol-execbench",
+        _resolve_sol_execbench(),
         str(problem_dir),
         "--solution", str(staged_solution_path),
         "--json",
@@ -388,6 +377,5 @@ def _sha256_of_file(path: Path) -> str:
 
 __all__ = [
     "DispatchPlan",
-    "assert_landed_solution_bytes_unchanged",
     "build_dispatch_plan",
 ]

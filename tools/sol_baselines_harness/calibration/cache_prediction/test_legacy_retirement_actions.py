@@ -1178,6 +1178,7 @@ def test_retired_cli_help_remains_available(
         env=env,
         capture_output=True,
         text=True,
+        errors="replace",
         check=False,
     )
 

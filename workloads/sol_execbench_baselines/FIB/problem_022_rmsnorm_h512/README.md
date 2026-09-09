@@ -40,7 +40,7 @@ compile-checked on; native correctness runs through
 `sol-execbench` CLI are pending an upstream library fix (the
 canonical FIB definition.json files carry `"hf_id": ""` which
 the current sol-execbench Pydantic `Definition` schema rejects;
-the project's `scripts/baselines_scaffold/test_contract.py`
+the project's `tools/sol_baselines_scaffold/test_contract.py`
 gate works around this via `_normalise_definition_for_pydantic`
 and is the contract surface this baseline satisfies). Final
 SOL scoring is on B200 (sm_100a). Differences worth noting:

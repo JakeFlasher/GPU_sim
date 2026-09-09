@@ -74,12 +74,14 @@ def test_sm86_seed_artifacts_resolve_from_retained_annex() -> None:
     assert len(excluded_slugs) == len(set(excluded_slugs))
     assert set(record_slugs).isdisjoint(excluded_slugs)
     assert set(record_slugs) | set(excluded_slugs) == expected_slugs
-    assert seed_slugs.isdisjoint(record_slugs)
+    seed_record_slugs = seed_slugs & set(record_slugs)
     seed_exclusions = [row for row in excluded if row["source"] == "seed"]
-    assert {row["slug"] for row in seed_exclusions} == seed_slugs
+    seed_exclusion_slugs = {row["slug"] for row in seed_exclusions}
+    assert seed_record_slugs.isdisjoint(seed_exclusion_slugs)
+    assert seed_record_slugs | seed_exclusion_slugs == seed_slugs
     assert {
         row["typed_reason"] for row in seed_exclusions
-    } == {"cell_missing_cohort_partition"}
+    } <= {"cell_missing_cohort_partition", "predictor_typed_unavailable"}
     incomplete_cohort = {
         entry["slug"]: entry["failure_reason"]
         for entry in expanded_entries

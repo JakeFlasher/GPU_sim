@@ -272,6 +272,17 @@ fn write_case(root: &Path, mutation: &str) {
                 .unwrap()
                 .x = 0;
         }
+        "negative_register_count" => {
+            trace
+                .gpu_device
+                .get_mut(&0)
+                .unwrap()
+                .streams
+                .get_mut(&0)
+                .unwrap()
+                .kernels[0]
+                .number_of_registers = -1;
+        }
         "legacy_shared_memory_nonzero" => {
             trace
                 .gpu_device

@@ -23,9 +23,9 @@ accumulators for the conv reduction.
 
 All 16 sol-execbench workloads PASSED on this 3090 Ti host. The
 full 16-row correctness sidecar is tracked at
-`scripts/baselines_harness/.harness_traces/problem_006_hyena_depthwise_conv1d_split_gate__cuda_cpp__sm86/full_correctness_v1.json`;
+`tools/sol_baselines_harness/.harness_traces/problem_006_hyena_depthwise_conv1d_split_gate__cuda_cpp__sm86/full_correctness_v1.json`;
 its SHA-256 is cross-stamped in both the bundle manifest and
-`scripts/baselines_harness/calibration/cache_prediction/sm86_pilot_correctness_v1.toml`.
+`tools/sol_baselines_harness/calibration/cache_prediction/sm86_pilot_correctness_v1.toml`.
 
 ## Architecture-coupling caveats
 

@@ -1161,6 +1161,38 @@
         }
       }
     },
+    "smActiveObservationFrontier": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "issue_lower_bound_cycles",
+        "issue_cycles",
+        "terminal_lower_bound_cycles",
+        "terminal_cycles",
+        "envelope_cycles",
+        "role"
+      ],
+      "properties": {
+        "issue_lower_bound_cycles": { "$ref": "#/$defs/u64" },
+        "issue_cycles": { "$ref": "#/$defs/u64" },
+        "terminal_lower_bound_cycles": {
+          "oneOf": [
+            { "$ref": "#/$defs/u64" },
+            { "type": "null" }
+          ]
+        },
+        "terminal_cycles": {
+          "oneOf": [
+            { "$ref": "#/$defs/u64" },
+            { "type": "null" }
+          ]
+        },
+        "envelope_cycles": { "$ref": "#/$defs/u64" },
+        "role": {
+          "const": "architecture_scoped_sm_active_observation_boundary_not_raw_lower_bound"
+        }
+      }
+    },
     "launchDiagnostic": {
       "type": "object",
       "additionalProperties": false,
@@ -1179,6 +1211,9 @@
         },
         "terminal_modeled_event_time": {
           "$ref": "#/$defs/modeledEventTime"
+        },
+        "sm_active_observation_frontier": {
+          "$ref": "#/$defs/smActiveObservationFrontier"
         },
         "binding_cycles_role": {
           "const": "diagnostic_only_not_binding_prediction"

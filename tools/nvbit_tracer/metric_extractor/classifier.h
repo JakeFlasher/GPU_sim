@@ -5,10 +5,8 @@
 // AC-7 buckets (ffma / mufu / ldg / stg / lds / sts / hmma / wgmma /
 // tcgen05 / tma / dsmem / bra / barrier / warpsync / unknown).
 //
-// Lives in a header (as opposed to inside metric_extractor.cu) so a host-
-// only regression test can call the function directly without pulling in
-// NVBit's CUDA dependencies, mirroring the discipline of
-// nvbit_tracer/isa_def/test_opcode_map.cc.
+// Lives in a header so host-side tooling can call the function without
+// pulling in NVBit's CUDA dependencies.
 //
 // The function is `inline` (header-only) so multiple translation units
 // that include it do not generate duplicate symbols at link time. No
@@ -31,8 +29,7 @@
 // NVBit's host-side memory-space enum. The header is part of NVBit's
 // public interface and contains only constexpr definitions plus the
 // MemorySpace / OperandType enums — no CUDA runtime dependency — so it
-// is safe to include from the host-only regression test alongside the
-// ISA maps above.
+// is safe to include alongside the ISA maps above.
 #include "../nvbit_release/core/instr_types.h"
 
 // Memory-space-side classification. Returns INSTR_CLASS_DSMEM for the
@@ -46,8 +43,7 @@
 // shadowing the canonical mnemonic-driven routing for non-DSMEM ops.
 //
 // The function is host-only and pure: no NVBit / CUDA dependencies, no
-// global state. test_classifier.cc exercises every InstrType::MemorySpace
-// enum value to lock in the DSMEM-only routing convention.
+// global state. The DSMEM-only routing convention is explicit here.
 inline InstructionClass classify_memory_space(InstrType::MemorySpace ms) {
     if (ms == InstrType::MemorySpace::DISTRIBUTED_SHARED) {
         return INSTR_CLASS_DSMEM;
@@ -178,12 +174,12 @@ inline InstructionClass classify_op_pair(unsigned opcode,
 // Mnemonic-driven classifier. Encapsulates the same Blackwell → Hopper →
 // Ampere lookup chain that classify_instr() uses (with the full-mnemonic
 // then token-0 fallback), but takes a `const std::string&` instead of an
-// NVBit `Instr*` so a host-only regression test can exercise the chain
-// without pulling in NVBit's CUDA dependencies.
+// NVBit `Instr*` so host-side tooling can exercise the chain without
+// pulling in NVBit's CUDA dependencies.
 //
 // Returns INSTR_CLASS_UNKNOWN when no map contains the mnemonic; otherwise
 // returns classify_op_pair() applied to the looked-up (opcode, category)
-// pair. Locked in by test_classifier.cc as the AC-7 routing authority.
+// pair used by the runtime classifier.
 inline InstructionClass classify_mnemonic(const std::string& mnemonic) {
     if (mnemonic.empty()) return INSTR_CLASS_UNKNOWN;
     auto lookup = [](const std::string& key) -> const OpcodeChar* {

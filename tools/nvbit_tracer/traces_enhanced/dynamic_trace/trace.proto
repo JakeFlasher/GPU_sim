@@ -14,7 +14,7 @@ message Trace {
   map<int64,gpu_device> gpu_device = 6;
 
   // Trace-contract identity + capability. Net-new with the ASYNC_COPY+ATOM
-  // address-carrying contract transition (additive, per the CLAUDE.md wire-
+  // address-carrying contract transition (additive, per the AGENTS.md wire-
   // extension policy). `trace_contract_id` names the emitted contract so an
   // old exclusion-semantics trace (field absent/empty) is never silently
   // cross-compared with a new address-carrying one. `memory_payload_classes`

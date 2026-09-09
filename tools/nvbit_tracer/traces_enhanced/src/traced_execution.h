@@ -83,19 +83,19 @@ public:
 
     void set_benchmark_name(std::string benchmark_name);
 
-    void add_traced_kernel(std::string kernel_name, unsigned int unique_function_id, traced_kernel *kernel, uint64_t func_addr, bool is_captured_from_binary);
+    bool add_traced_kernel(std::string kernel_name, unsigned int unique_function_id, traced_kernel *kernel, uint64_t func_addr, bool is_captured_from_binary);
 
-    void add_no_binary_kernel(std::string kernel_name, unsigned int unique_function_id, uint64_t func_addr, unsigned int architecture_version, std::map<int,std::string> &captured_instrs , bool is_captured_from_binary);
+    bool add_no_binary_kernel(std::string kernel_name, unsigned int unique_function_id, uint64_t func_addr, unsigned int architecture_version, std::map<int,std::string> &captured_instrs , bool is_captured_from_binary);
 
-    void add_instruction_to_a_kernel(std::string kernel_name, std::vector<std::string> instruction_part1, std::vector<std::string> instruction_part2, int threshold_unique_kernel_checking, std::string full_instruction_str);
+    bool add_instruction_to_a_kernel(std::string kernel_name, std::vector<std::string> instruction_part1, std::vector<std::string> instruction_part2, int threshold_unique_kernel_checking, std::string full_instruction_str);
 
-    void add_register_usage_to_a_kernel_instruction(std::string kernel_name, unsigned pc, std::string reg_file_name, unsigned num_regs);
+    bool add_register_usage_to_a_kernel_instruction(std::string kernel_name, unsigned pc, std::string reg_file_name, unsigned num_regs);
 
-    void add_register_usage_to_a_kernel(std::string kernel_name, std::map<unsigned int, std::map<std::string, unsigned int>> &reg_usage, std::map<unsigned int, std::tuple<std::string, int>> &call_target_by_pc);
+    bool add_register_usage_to_a_kernel(std::string kernel_name, std::map<unsigned int, std::map<std::string, unsigned int>> &reg_usage, std::map<unsigned int, std::tuple<std::string, int>> &call_target_by_pc);
 
     void remove_useless_kernels();
     
-    void remove_specific_kernel(std::string kernel_name);
+    bool remove_specific_kernel(std::string kernel_name);
 
     void print(FILE *fp);
 
@@ -105,5 +105,5 @@ private:
     std::map<uint64_t, unsigned int> m_func_addr_to_unique_function_id;
     std::string m_benchmark_name;
 
-    void generate_kernel_maps();
+    bool generate_kernel_maps();
 };

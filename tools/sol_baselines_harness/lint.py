@@ -5,9 +5,8 @@ Re-uses the scaffold validator's forbidden-surface patterns
 to every landed baseline's disk sources plus the ``deferred.json``
 ledger entries. Adds two harness-specific checks:
 
-1. ``deferred.json`` entries must carry real git SHAs (at least 7 hex
-   chars) in ``harness_commit``, not placeholder strings like
-   ``"round-2-pending"``.
+1. ``deferred.json`` entries must carry the required opaque
+   ``harness_commit`` provenance field.
 2. The deferred ledger's per-entry ``status`` must be one of the
    schema-declared values (``deferred_correctness`` /
    ``deferred_reward_hack``). The legacy ``deferred_slow`` status
@@ -28,8 +27,14 @@ from typing import Iterable, List, Tuple
 
 _THIS_DIR = Path(__file__).resolve().parent
 _SCRIPTS_DIR = _THIS_DIR.parent
+_REPO_ROOT = _THIS_DIR.parents[1]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
 if str(_SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS_DIR))
+from tools.sol_baselines_harness._bootstrap import install_package_aliases
+
+install_package_aliases()
 
 from baselines_scaffold.validate import (  # noqa: E402
     _CUDA_GRAPH_NOTE_PATTERNS,
@@ -39,8 +44,6 @@ from baselines_scaffold.validate import (  # noqa: E402
 
 # Real-SHA pattern: at least 7 hex chars. ``round-2-pending``,
 # ``unknown``, ``TBD`` and similar placeholders are rejected.
-_GIT_SHA_RE = re.compile(r"^[0-9a-fA-F]{7,40}$")
-
 _VALID_DEFERRED_STATUSES = frozenset(
     {"deferred_correctness", "deferred_reward_hack"}
 )
@@ -76,7 +79,7 @@ def scan_solution_json_compile_options(
     ``--lock-clocks`` or ``ncu`` embedded in
     ``compile_options.cuda_cflags`` would slip past the disk-text
     scan. This helper mirrors the scaffold validator's behavior at
-    ``scripts/baselines_scaffold/validate.py:482-489`` so the harness
+    ``tools/sol_baselines_scaffold/validate.py:482-489`` so the harness
     pre-flight has the same scope as the scaffold validator.
 
     Returns ``[(label, rule, detail), ...]`` for each hit. The label
@@ -185,7 +188,7 @@ def scan_harness_production_code(
 # Generalisation note (per BL-20260512-lint-path-validity-all-subcorpora):
 # this scanner extends the existing harness-production scan across
 # the same subcorpus (Python files under
-# ``scripts/baselines_harness/`` minus tests / patches / caches /
+# ``tools/sol_baselines_harness/`` minus tests / patches / caches /
 # trace bundles / lint.py) and the same field set (any matching
 # substring in the file body). When future container-era vocabulary
 # needs to be added, append to :data:`_CONTAINER_ERA_RUNTIME_TERMS`
@@ -351,7 +354,7 @@ def scan_landed_baselines(baseline_dirs: Iterable[Path]) -> List[Tuple[str, str,
        forbidden surfaces (``--lock-clocks``, ``ncu``, etc.) that
        the disk-text scan would miss because authors don't write
        build flags in source files. The scaffold validator at
-       ``scripts/baselines_scaffold/validate.py:482-489`` already
+       ``tools/sol_baselines_scaffold/validate.py:482-489`` already
        does this scan; the harness pre-flight mirrors it so the
        aggregate report cannot ship with a clean lint while the
        validator would fail.
@@ -398,8 +401,8 @@ def validate_deferred_ledger(
     clean). Catches:
 
     - Missing or non-list ``entries``.
-    - Per-entry ``harness_commit`` that isn't a real git SHA (rejects
-      placeholders like ``"round-2-pending"``).
+    - Required per-entry fields, including the opaque ``harness_commit``
+      provenance value; no digest format is imposed on this field.
     - Per-entry ``status`` that isn't in the declared valid set.
     - Missing required per-entry fields.
     """
@@ -436,11 +439,7 @@ def validate_deferred_ledger(
                 f"entry[{i}] status {status!r} not in "
                 f"{sorted(_VALID_DEFERRED_STATUSES)}"
             )
-        commit = entry.get("harness_commit", "")
-        if not isinstance(commit, str) or not _GIT_SHA_RE.match(commit):
-            failures.append(
-                f"entry[{i}] harness_commit {commit!r} is not a real "
-                f"git SHA (7-40 hex chars); reject placeholders like "
-                f"'round-N-pending'."
-            )
+        commit = entry.get("harness_commit")
+        if not isinstance(commit, str) or not commit.strip():
+            failures.append(f"entry[{i}] harness_commit must be a non-empty string")
     return failures

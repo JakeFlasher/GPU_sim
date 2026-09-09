@@ -41,9 +41,13 @@
 #include "../../isa_def/kepler_opcode.h"
 
 #include <iostream>
+#include <limits>
 #include <regex>
+#include <stdexcept>
+#include <utility>
 
-void get_opcode_map(const std::unordered_map<std::string, OpcodeChar> *&OpcodeMap, int binary_verion) {
+bool get_opcode_map(const std::unordered_map<std::string, OpcodeChar> *&OpcodeMap, int binary_verion) {
+  OpcodeMap = nullptr;
   if(binary_verion == BLACKWELL_RTX_BINART_VERSION)
     OpcodeMap = &Blackwell_OpcodeMap;
   else if (binary_verion == ADA_BINART_VERSION)
@@ -67,8 +71,9 @@ void get_opcode_map(const std::unordered_map<std::string, OpcodeChar> *&OpcodeMa
     printf("unsupported binary version: %d\n",
            binary_verion);
     fflush(stdout);
-    exit(0);
+    return false;
   }
+  return true;
 }
 
 bool is_reserved_reg(unsigned int reg_id, TraceEnhancedOperandType reg_type) {
@@ -141,20 +146,40 @@ unsigned int get_number_of_uses_per_operand(traced_instruction &trace_inst, unsi
         num_uses = 4;
       }
     }else if(trace_inst.is_tensor_core_op()) {
-      assert(trace_inst.get_tensor_core_instruction_info().is_set);
+      if (!trace_inst.get_tensor_core_instruction_info().is_set) {
+        throw std::logic_error(
+            "tensor-core register demand requested without shape metadata");
+      }
+      const Tensor_core_instruction_information& tensor_info =
+          trace_inst.get_tensor_core_instruction_info();
+      const bool integer_tensor =
+          trace_inst.get_op_code().find("BMMA") != std::string::npos ||
+          trace_inst.get_op_code().find("IMMA") != std::string::npos;
       if((operand_pos == 0) || (operand_pos == 3)) {
-        unsigned int operand_bit_size = trace_inst.get_tensor_core_instruction_info().operand_bit_size;
-        if( (trace_inst.get_op_code().find("BMMA") != std::string::npos) || trace_inst.get_op_code().find("IMMA") != std::string::npos) {
+        unsigned int operand_bit_size = tensor_info.operand_bit_size;
+        if (integer_tensor) {
           operand_bit_size = 32;
         }
-        num_uses = (trace_inst.get_tensor_core_instruction_info().size_m * trace_inst.get_tensor_core_instruction_info().size_n * operand_bit_size) / 1024;
+        num_uses = (tensor_info.size_m * tensor_info.size_n * operand_bit_size) / 1024;
         
       }else if(operand_pos == 1) {
-        num_uses = (trace_inst.get_tensor_core_instruction_info().size_m * trace_inst.get_tensor_core_instruction_info().size_k * trace_inst.get_tensor_core_instruction_info().operand_bit_size) / 1024;
-        num_uses = num_uses / 2;
+        num_uses = (tensor_info.size_m * tensor_info.size_k * tensor_info.operand_bit_size) / 1024;
+        // HMMA floating-point fragments use packed 16-bit values in .b32
+        // registers, so the historical factor of two converts element
+        // demand to register demand. Dense IMMA/BMMA integer fragments are
+        // already represented in the PTX element width used above (for
+        // example, two .b32 A registers for m16n8k16.s8). Sparse integer
+        // instructions retain half of A, so preserve that reduction only for
+        // the sparse A fragment.
+        if (!integer_tensor ||
+            tensor_info.is_sparse) {
+          num_uses = num_uses / 2;
+        }
       }else if(operand_pos == 2) {
-        num_uses = (trace_inst.get_tensor_core_instruction_info().size_k * trace_inst.get_tensor_core_instruction_info().size_n * trace_inst.get_tensor_core_instruction_info().operand_bit_size) / 1024;
-        num_uses = num_uses / 2;
+        num_uses = (tensor_info.size_k * tensor_info.size_n * tensor_info.operand_bit_size) / 1024;
+        if (!integer_tensor) {
+          num_uses = num_uses / 2;
+        }
       }
     }else if( (trace_inst.get_op_code().find("F2") != std::string::npos) || (trace_inst.get_op_code().find("2F") != std::string::npos)) {
       std::size_t size64pos = trace_inst.get_op_code().find("64");
@@ -202,7 +227,6 @@ s2r_operand_type get_s2r_operand_type(std::string operand_string) {
   }else if(operand_string.find("LTMASK") != std::string::npos) {
     operand_type = LTMASK_S2R_OPERAND_TYPE;
   }
-  assert(operand_type != NONE_S2R_OPERAND_TYPE);
   return operand_type;
 }
 
@@ -220,8 +244,16 @@ traced_instruction::traced_instruction(std::string pc_string, unsigned pc_num, s
     m_is_predicate_negate = is_predicate_negate;
     m_predicate_register = predicate_register;
     m_register_usage = std::make_unique<register_usage>(0, 0, 0, 0);
-    assert(encoded_instruction.size() == 2);
-    m_control_bits = std::make_unique<control_bits>(encoded_instruction[1], CCPos_arch_7x_8x);
+    if (encoded_instruction.size() >= 2) {
+        m_control_bits = std::make_unique<control_bits>(
+            encoded_instruction[1], CCPos_arch_7x_8x);
+    } else {
+        // Pre-Volta SASS carries no second control-word token in the
+        // cuobjdump output consumed by this parser. Preserve the encoded
+        // instruction word but expose an explicit zero/default control block
+        // instead of indexing past the vector in release builds.
+        m_control_bits = std::make_unique<control_bits>();
+    }
     m_simulation_opcode = NO_OP;
     m_num_destination_registers = 0;
 }
@@ -245,15 +277,18 @@ traced_instruction::traced_instruction(std::string pc_string, unsigned pc_num, s
     m_num_destination_registers = 0;
 }
 
-traced_instruction::traced_instruction() {
-    // Used for Deserializing
-}
+traced_instruction::traced_instruction()
+    : traced_instruction(
+          "", 0, "NOP", std::vector<std::string>{}, false, false, false, 0) {}
 
 traced_instruction::~traced_instruction() {
     m_operands.clear();
 }
 
 void traced_instruction::add_operand(std::unique_ptr<traced_operand> operand) {
+    if (operand == nullptr) {
+        throw std::invalid_argument("cannot attach a null traced operand");
+    }
     m_operands.push_back(std::move(operand));
 }
 
@@ -266,8 +301,7 @@ std::size_t traced_instruction::get_num_operands() {
 }
 
 traced_operand& traced_instruction::get_operand(unsigned int idx) {
-    assert(idx < m_operands.size());
-    return *m_operands[idx];
+    return *m_operands.at(idx);
 }
 
 bool traced_instruction::get_is_imad() {
@@ -320,7 +354,7 @@ void traced_instruction::set_op_code(std::string op_code) {
     }
 }
 
-void traced_instruction::add_register_usage(std::string reg_file_name, unsigned num_regs) {
+bool traced_instruction::add_register_usage(std::string reg_file_name, unsigned num_regs) {
     if(reg_file_name == std::string("UGPR")) {
         m_register_usage->set_num_uniform_registers(num_regs);
     }else if(reg_file_name == std::string("UPRED")) {
@@ -330,14 +364,14 @@ void traced_instruction::add_register_usage(std::string reg_file_name, unsigned 
     }else if(reg_file_name == std::string("PRED")) {
         m_register_usage->set_num_regular_predicate_registers(num_regs);
     }else {
-        std::cerr << "ERROR: Invalid register file name: " << reg_file_name << std::endl;
-        fflush(stderr);
-        abort();
+        return false;
     }
+    return true;
 }
 
-void traced_instruction::add_call_target(std::string target_name, int target_id) {
+bool traced_instruction::add_call_target(std::string target_name, int target_id) {
     m_operands.push_back(std::make_unique<traced_operand>(target_name, target_id));
+    return true;
 }
 
 void traced_instruction::calculate_num_destination_registers() {
@@ -393,7 +427,9 @@ control_bits &traced_instruction::get_control_bits() {
 
 bool traced_instruction::is_first_operand_of_mref_cbank_desc_using_regular_reg(unsigned int idx_op)
 {
-    assert(idx_op < m_operands.size());
+    if (idx_op >= m_operands.size()) {
+        throw std::out_of_range("traced operand index out of range");
+    }
     bool is_first_operand_of_mref_using_regular_reg = false;
     if ((m_operands[idx_op]->get_operand_type() == TraceEnhancedOperandType::MREF) || (m_operands[idx_op]->get_operand_type() == TraceEnhancedOperandType::CBANK) || (m_operands[idx_op]->get_operand_type() == TraceEnhancedOperandType::DESC))
     {
@@ -418,7 +454,6 @@ bool traced_instruction::is_first_operand_of_mref_cbank_desc_using_regular_reg(u
                 found = true;
             }
         }
-        assert(found);
     }
     return is_first_operand_of_mref_using_regular_reg;
 }
@@ -427,9 +462,12 @@ Tensor_core_instruction_information& traced_instruction::get_tensor_core_instruc
     return m_tensor_core_instruction_info;
 }
 
-void traced_instruction::set_tensor_core_instruction_info() {
-  assert(is_tensor_core_op());
+bool traced_instruction::set_tensor_core_instruction_info() {
+  if (!is_tensor_core_op()) {
+    return false;
+  }
   if(!m_tensor_core_instruction_info.is_set) {
+    try {
     std::smatch matches;
     std::string op_code = get_op_code();
     std::regex pattern(R"(\d+)");
@@ -440,6 +478,9 @@ void traced_instruction::set_tensor_core_instruction_info() {
     for (std::sregex_iterator i = begin; i != end; ++i) {
         std::smatch match = *i;
         numbers.push_back(match.str());
+    }
+    if (numbers.empty()) {
+      return false;
     }
     unsigned int operand_bit_size = 1;
     if(numbers.size() > 1) {
@@ -455,16 +496,26 @@ void traced_instruction::set_tensor_core_instruction_info() {
       size_m = 16;
       pos_n = 2;
     }else{
-      assert("Invalid size_m in tensor core instruction. " && false);
+      return false;
     }
-    assert(numbers[0].substr(pos_n, 1) == "8");
+    if (pos_n >= numbers[0].size() || numbers[0][pos_n] != '8') {
+      return false;
+    }
     size_k = std::stoi(numbers[0].substr(pos_n + 1));
     m_tensor_core_instruction_info = Tensor_core_instruction_information(size_m, size_n, size_k, operand_bit_size, is_sparse, is_16816_fp32_1688_fp32);
+    } catch (const std::exception &) {
+      return false;
+    }
   }
+  return m_tensor_core_instruction_info.is_set;
 }
 
 void traced_instruction::set_simulation_opcode(const std::unordered_map<std::string, OpcodeChar> *OpcodeMap, std::string str_op) {
     std::vector<std::string> opcode_tokens = get_opcode_tokens(str_op);
+    if (OpcodeMap == nullptr || opcode_tokens.empty()) {
+        m_simulation_opcode = NO_OP;
+        return;
+    }
     std::string opcode1 = opcode_tokens[0];
 
     std::unordered_map<std::string, OpcodeChar>::const_iterator it =
@@ -542,39 +593,141 @@ bool traced_instruction::Serialize(rapidjson::Writer<rapidjson::StringBuffer> * 
     return true;
 }
 
+void traced_instruction::swap_state(traced_instruction &other) noexcept
+{
+    using std::swap;
+    swap(m_pc_string, other.m_pc_string);
+    swap(m_pc_num, other.m_pc_num);
+    swap(m_op_code, other.m_op_code);
+    swap(m_is_predicated, other.m_is_predicated);
+    swap(m_is_uniform_predicate, other.m_is_uniform_predicate);
+    swap(m_is_predicate_negate, other.m_is_predicate_negate);
+    swap(m_predicate_register, other.m_predicate_register);
+    swap(m_encoded_instruction, other.m_encoded_instruction);
+    swap(m_operands, other.m_operands);
+    swap(m_num_destination_registers, other.m_num_destination_registers);
+    swap(m_register_usage, other.m_register_usage);
+    swap(m_control_bits, other.m_control_bits);
+    swap(m_is_imad, other.m_is_imad);
+    swap(m_is_imad_wide, other.m_is_imad_wide);
+    swap(m_contains_setp, other.m_contains_setp);
+    swap(m_membar_type, other.m_membar_type);
+    swap(m_tensor_core_instruction_info, other.m_tensor_core_instruction_info);
+    swap(m_simulation_opcode, other.m_simulation_opcode);
+}
+
 bool traced_instruction::Deserialize(const rapidjson::Value &obj)
 {
+    // Decode into an initialized candidate so a malformed nested operand,
+    // control block, or register-usage object cannot leave a reused
+    // instruction partially updated.
+    traced_instruction candidate(
+        "", 0, "NOP", std::vector<std::string>{}, false, false, false, 0);
+    if (!candidate.deserialize_in_place(obj)) {
+        return false;
+    }
+    swap_state(candidate);
+    return true;
+}
+
+bool traced_instruction::deserialize_in_place(const rapidjson::Value &obj)
+{
+    std::string pc_string;
+    std::string op_code;
+    const auto is_uint_field = [&obj](const char *name) {
+        return obj.HasMember(name) && obj[name].IsInt64() &&
+               obj[name].GetInt64() >= 0 &&
+               static_cast<uint64_t>(obj[name].GetInt64()) <=
+                   std::numeric_limits<unsigned int>::max();
+    };
+    if (!obj.IsObject() || !HasUniqueObjectMembers(obj) ||
+        !obj.HasMember("pc_string_hex") ||
+        !ReadString(obj["pc_string_hex"], pc_string) ||
+        !is_uint_field("pc_num_dec") || !obj.HasMember("op_code") ||
+        !ReadString(obj["op_code"], op_code) ||
+        get_opcode_tokens(op_code).empty() ||
+        !obj.HasMember("is_predicated") ||
+        !obj["is_predicated"].IsBool() ||
+        !obj.HasMember("is_uniform_predicate") ||
+        !obj["is_uniform_predicate"].IsBool() ||
+        !obj.HasMember("is_predicate_negate") ||
+        !obj["is_predicate_negate"].IsBool() ||
+        !is_uint_field("predicate_register") ||
+        !is_uint_field("num_destination_registers") ||
+        !obj.HasMember("encoded_instruction") ||
+        !obj["encoded_instruction"].IsArray() ||
+        obj["encoded_instruction"].Size() > 2 ||
+        !obj.HasMember("operands") || !obj["operands"].IsArray() ||
+        !obj.HasMember("control_bits") || !obj["control_bits"].IsObject() ||
+        !obj.HasMember("register_usage") ||
+        !obj["register_usage"].IsObject()) {
+        return false;
+    }
+
+    m_encoded_instruction.clear();
+    m_operands.clear();
+    m_register_usage.reset();
+    m_control_bits.reset();
+
     m_is_imad = false;
     m_is_imad_wide = false;
     m_membar_type = MEMBAR_TRACED_NONE;
     m_contains_setp = false;
-    m_pc_string = obj["pc_string_hex"].GetString();
+    m_pc_string = std::move(pc_string);
     m_pc_num = obj["pc_num_dec"].GetInt64();
-    set_op_code( obj["op_code"].GetString());
+    try {
+        std::size_t parsed = 0;
+        const unsigned long pc_from_hex =
+            std::stoul(m_pc_string, &parsed, 16);
+        if (parsed != m_pc_string.size() ||
+            pc_from_hex != static_cast<unsigned long>(m_pc_num)) {
+            return false;
+        }
+    } catch (const std::exception &) {
+        return false;
+    }
+    set_op_code(op_code);
     m_simulation_opcode = NO_OP;
     m_is_predicated = obj["is_predicated"].GetBool();
     m_is_uniform_predicate = obj["is_uniform_predicate"].GetBool();
     m_is_predicate_negate = obj["is_predicate_negate"].GetBool();
     m_predicate_register = obj["predicate_register"].GetInt64();
+    if ((!m_is_predicated &&
+         (m_is_uniform_predicate || m_is_predicate_negate ||
+          m_predicate_register != 0)) ||
+        (m_is_predicated &&
+         m_predicate_register > static_cast<unsigned int>(PT))) {
+        return false;
+    }
 
     const rapidjson::Value &encoded_instruction = obj["encoded_instruction"];
     for (rapidjson::SizeType i = 0; i < encoded_instruction.Size(); i++)
     {
-        m_encoded_instruction.push_back(encoded_instruction[i].GetString());
+        std::string encoded_word;
+        if (!ReadString(encoded_instruction[i], encoded_word)) {
+            return false;
+        }
+        m_encoded_instruction.push_back(std::move(encoded_word));
     }
 
     m_num_destination_registers = obj["num_destination_registers"].GetInt64();
     m_register_usage = std::make_unique<register_usage>();
-    m_register_usage->Deserialize(obj["register_usage"]);
+    if (!m_register_usage->Deserialize(obj["register_usage"])) {
+        return false;
+    }
 
     m_control_bits = std::make_unique<control_bits>();
-    m_control_bits->Deserialize(obj["control_bits"]);
+    if (!m_control_bits->Deserialize(obj["control_bits"])) {
+        return false;
+    }
 
     const rapidjson::Value &operands = obj["operands"];
     for (rapidjson::SizeType i = 0; i < operands.Size(); i++)
     {
         std::unique_ptr<traced_operand> operand = std::make_unique<traced_operand>();
-        operand->Deserialize(operands[i]);
+        if (!operand->Deserialize(operands[i])) {
+            return false;
+        }
         m_operands.push_back(std::move(operand));
     }
 

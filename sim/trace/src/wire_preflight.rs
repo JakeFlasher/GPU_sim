@@ -1,8 +1,11 @@
-//! Allocation-free protobuf wire preflight for repeated decoded structures.
+//! Bounded protobuf wire preflight for repeated decoded structures.
 //!
 //! Raw artifact byte limits do not bound decoded heap amplification: a repeated
 //! empty submessage occupies two wire bytes but still constructs a Rust value.
-//! These implementation-owned ceilings are checked before Prost sees the bytes.
+//! These implementation-owned ceilings are checked before Prost sees the bytes;
+//! map-key sets are bounded by the corresponding repeated-entry ceilings.
+
+use std::collections::BTreeSet;
 
 const MAX_GROUP_NESTING: u32 = 64;
 
@@ -71,11 +74,24 @@ struct WireField<'a> {
 
 const KNOWN_FIELD_WIRE_TYPE_MISMATCH: &str = "known protobuf field has incompatible wire type";
 const UINT32_VARINT_OUT_OF_RANGE: &str = "protobuf uint32 field exceeds uint32 range";
+const INT32_VARINT_OUT_OF_RANGE: &str = "protobuf int32 field is not a valid sign-extended value";
+const DUPLICATE_MAP_KEY: &str = "protobuf map contains a duplicate key";
+const DUPLICATE_MAP_KEY_FIELD: &str = "protobuf map entry contains a duplicate key field";
+const DUPLICATE_MAP_VALUE_FIELD: &str = "protobuf map entry contains a duplicate value field";
 const SIGN_EXTENDED_INT32_MIN: u64 = 0xffff_ffff_8000_0000;
 
 fn require_varint(field: WireField<'_>) -> Result<(), WirePreflightError> {
     match field.value {
         WireValue::Varint(_) => Ok(()),
+        _ => Err(WirePreflightError::Malformed(
+            KNOWN_FIELD_WIRE_TYPE_MISMATCH,
+        )),
+    }
+}
+
+fn require_varint_value(field: WireField<'_>) -> Result<u64, WirePreflightError> {
+    match field.value {
+        WireValue::Varint(value) => Ok(value),
         _ => Err(WirePreflightError::Malformed(
             KNOWN_FIELD_WIRE_TYPE_MISMATCH,
         )),
@@ -89,6 +105,29 @@ fn require_uint32(field: WireField<'_>) -> Result<(), WirePreflightError> {
         _ => Err(WirePreflightError::Malformed(
             KNOWN_FIELD_WIRE_TYPE_MISMATCH,
         )),
+    }
+}
+
+fn require_int32(field: WireField<'_>) -> Result<(), WirePreflightError> {
+    // Protobuf's generic int32 decoder truncates a wider varint before the
+    // signed conversion. Trace IDs, dimensions, widths, strides, and enum
+    // fields are identity-bearing contract values, so admitting that wire form
+    // would allow a malformed producer value to alias a different valid trace.
+    // This is an application-level anti-truncation policy, intentionally
+    // stricter than generic protobuf compatibility.
+    require_int32_value(field).map(|_| ())
+}
+
+fn require_int32_value(field: WireField<'_>) -> Result<i32, WirePreflightError> {
+    let value = require_varint_value(field)?;
+    validate_int32_value(value)
+}
+
+fn validate_int32_value(value: u64) -> Result<i32, WirePreflightError> {
+    if i32::try_from(value).is_ok() || value >= SIGN_EXTENDED_INT32_MIN {
+        Ok(value as i32)
+    } else {
+        Err(WirePreflightError::Malformed(INT32_VARINT_OUT_OF_RANGE))
     }
 }
 
@@ -309,7 +348,7 @@ fn scan_packed_root_classes(
 ) -> Result<(), WirePreflightError> {
     let mut cursor = WireCursor::new(raw);
     while !cursor.is_empty() {
-        cursor.read_varint()?;
+        validate_int32_value(cursor.read_varint()?)?;
         bump_memory_payload_class(counts, limits)?;
     }
     Ok(())
@@ -321,20 +360,31 @@ fn scan_trace(
     limits: RootLimits,
 ) -> Result<(), WirePreflightError> {
     let mut cursor = WireCursor::new(raw);
+    // Prost implements protobuf maps with last-entry-wins semantics. Trace
+    // maps are identity-bearing, so retain bounded key sets and reject an
+    // encoded duplicate before generated decoding can hide it.
+    let mut device_keys = BTreeSet::new();
     while let Some(field) = cursor.next_field()? {
         match field.number {
             1 | 3 | 7 => {
                 require_length_delimited(field)?;
             }
-            2 | 4 | 5 => require_varint(field)?,
+            2 | 4 => require_int32(field)?,
+            5 => require_varint(field)?,
             6 => {
                 let map_entry = require_length_delimited(field)?;
                 bump(&mut counts.devices, 1, limits.devices, "gpu devices")?;
                 bump_root_node(counts, limits)?;
-                scan_device_map_entry(map_entry, counts, limits)?;
+                let key = scan_device_map_entry(map_entry, counts, limits)?;
+                if !device_keys.insert(key) {
+                    return Err(WirePreflightError::Malformed(DUPLICATE_MAP_KEY));
+                }
             }
             8 => match require_repeated_varint(field)? {
-                None => bump_memory_payload_class(counts, limits)?,
+                None => {
+                    require_int32(field)?;
+                    bump_memory_payload_class(counts, limits)?;
+                }
                 Some(packed) => scan_packed_root_classes(packed, counts, limits)?,
             },
             _ => {}
@@ -347,12 +397,22 @@ fn scan_device_map_entry(
     raw: &[u8],
     counts: &mut RootCounts,
     limits: RootLimits,
-) -> Result<(), WirePreflightError> {
+) -> Result<u64, WirePreflightError> {
     let mut cursor = WireCursor::new(raw);
+    let mut key = None;
+    let mut value_seen = false;
     while let Some(field) = cursor.next_field()? {
         match field.number {
-            1 => require_varint(field)?,
+            1 => {
+                if key.replace(require_varint_value(field)?).is_some() {
+                    return Err(WirePreflightError::Malformed(DUPLICATE_MAP_KEY_FIELD));
+                }
+            }
             2 => {
+                if value_seen {
+                    return Err(WirePreflightError::Malformed(DUPLICATE_MAP_VALUE_FIELD));
+                }
+                value_seen = true;
                 let device = require_length_delimited(field)?;
                 bump_root_node(counts, limits)?;
                 scan_device(device, counts, limits)?;
@@ -360,7 +420,7 @@ fn scan_device_map_entry(
             _ => {}
         }
     }
-    Ok(())
+    Ok(key.unwrap_or_default())
 }
 
 fn scan_device(
@@ -369,6 +429,9 @@ fn scan_device(
     limits: RootLimits,
 ) -> Result<(), WirePreflightError> {
     let mut cursor = WireCursor::new(raw);
+    // Stream keys are part of the launch identity; duplicate encoded entries
+    // must not collapse into one generated-map value.
+    let mut stream_keys = BTreeSet::new();
     while let Some(field) = cursor.next_field()? {
         match field.number {
             1 => require_uint32(field)?,
@@ -376,7 +439,10 @@ fn scan_device(
                 let map_entry = require_length_delimited(field)?;
                 bump(&mut counts.streams, 1, limits.streams, "CUDA streams")?;
                 bump_root_node(counts, limits)?;
-                scan_stream_map_entry(map_entry, counts, limits)?;
+                let key = scan_stream_map_entry(map_entry, counts, limits)?;
+                if !stream_keys.insert(key) {
+                    return Err(WirePreflightError::Malformed(DUPLICATE_MAP_KEY));
+                }
             }
             _ => {}
         }
@@ -388,12 +454,22 @@ fn scan_stream_map_entry(
     raw: &[u8],
     counts: &mut RootCounts,
     limits: RootLimits,
-) -> Result<(), WirePreflightError> {
+) -> Result<u64, WirePreflightError> {
     let mut cursor = WireCursor::new(raw);
+    let mut key = None;
+    let mut value_seen = false;
     while let Some(field) = cursor.next_field()? {
         match field.number {
-            1 => require_varint(field)?,
+            1 => {
+                if key.replace(require_varint_value(field)?).is_some() {
+                    return Err(WirePreflightError::Malformed(DUPLICATE_MAP_KEY_FIELD));
+                }
+            }
             2 => {
+                if value_seen {
+                    return Err(WirePreflightError::Malformed(DUPLICATE_MAP_VALUE_FIELD));
+                }
+                value_seen = true;
                 let stream = require_length_delimited(field)?;
                 bump_root_node(counts, limits)?;
                 scan_stream(stream, counts, limits)?;
@@ -401,7 +477,7 @@ fn scan_stream_map_entry(
             _ => {}
         }
     }
-    Ok(())
+    Ok(key.unwrap_or_default())
 }
 
 fn scan_stream(
@@ -444,7 +520,8 @@ fn scan_kernel(
     let mut split_fields_seen = [false; 2];
     while let Some(field) = cursor.next_field()? {
         match field.number {
-            1 | 3 | 5..=7 => require_varint(field)?,
+            1 | 3 | 5 => require_int32(field)?,
+            6 | 7 => require_varint(field)?,
             // Field 4 is a legacy int32, but valid shared-memory sizes are
             // nonnegative and participate in the uint32 split-field contract.
             // Rejecting an over-wide raw varint here prevents generated decoders
@@ -478,7 +555,7 @@ fn scan_dim3d(raw: &[u8]) -> Result<(), WirePreflightError> {
     let mut cursor = WireCursor::new(raw);
     while let Some(field) = cursor.next_field()? {
         if matches!(field.number, 1..=3) {
-            require_varint(field)?;
+            require_int32(field)?;
         }
     }
     Ok(())
@@ -515,6 +592,9 @@ fn scan_threadblock(
     limits: ThreadblockLimits,
 ) -> Result<(), WirePreflightError> {
     let mut cursor = WireCursor::new(raw);
+    // Warp map keys select the replay lane grouping and therefore cannot use
+    // the generic last-entry-wins map behavior.
+    let mut warp_keys = BTreeSet::new();
     while let Some(field) = cursor.next_field()? {
         match field.number {
             1 => {
@@ -526,7 +606,10 @@ fn scan_threadblock(
                 let map_entry = require_length_delimited(field)?;
                 bump(&mut counts.warps, 1, limits.warps, "threadblock warps")?;
                 bump_threadblock_node(counts, limits)?;
-                scan_warp_map_entry(map_entry, counts, limits)?;
+                let key = scan_warp_map_entry(map_entry, counts, limits)?;
+                if !warp_keys.insert(key) {
+                    return Err(WirePreflightError::Malformed(DUPLICATE_MAP_KEY));
+                }
             }
             _ => {}
         }
@@ -538,12 +621,22 @@ fn scan_warp_map_entry(
     raw: &[u8],
     counts: &mut ThreadblockCounts,
     limits: ThreadblockLimits,
-) -> Result<(), WirePreflightError> {
+) -> Result<i32, WirePreflightError> {
     let mut cursor = WireCursor::new(raw);
+    let mut key = None;
+    let mut value_seen = false;
     while let Some(field) = cursor.next_field()? {
         match field.number {
-            1 => require_varint(field)?,
+            1 => {
+                if key.replace(require_int32_value(field)?).is_some() {
+                    return Err(WirePreflightError::Malformed(DUPLICATE_MAP_KEY_FIELD));
+                }
+            }
             2 => {
+                if value_seen {
+                    return Err(WirePreflightError::Malformed(DUPLICATE_MAP_VALUE_FIELD));
+                }
+                value_seen = true;
                 let warp = require_length_delimited(field)?;
                 bump_threadblock_node(counts, limits)?;
                 scan_warp(warp, counts, limits)?;
@@ -551,7 +644,7 @@ fn scan_warp_map_entry(
             _ => {}
         }
     }
-    Ok(())
+    Ok(key.unwrap_or_default())
 }
 
 fn scan_warp(
@@ -562,7 +655,7 @@ fn scan_warp(
     let mut cursor = WireCursor::new(raw);
     while let Some(field) = cursor.next_field()? {
         match field.number {
-            1 => require_varint(field)?,
+            1 => require_int32(field)?,
             2 => {
                 let instruction = require_length_delimited(field)?;
                 bump(
@@ -590,7 +683,8 @@ fn scan_instruction(
     while let Some(field) = cursor.next_field()? {
         match field.number {
             1..=3 => require_uint32(field)?,
-            4 | 6..=13 => require_varint(field)?,
+            4 | 6..=10 | 12..=13 => require_int32(field)?,
+            11 => require_varint(field)?,
             14 => {
                 require_varint(field)?;
                 if instrumentation_order_seen {
@@ -660,7 +754,9 @@ fn scan_address(
     while let Some(field) = cursor.next_field()? {
         match field.number {
             2 | 7 => require_uint32(field)?,
-            1 | 3..=5 | 8 => require_varint(field)?,
+            1 | 3 | 5 | 8 => require_int32(field)?,
+            4 => require_varint(field)?,
+            9 => require_uint32(field)?,
             6 => match require_repeated_varint(field)? {
                 None => bump_lane_value(&mut address_lane_values, counts, limits)?,
                 Some(packed) => {
@@ -738,6 +834,121 @@ mod tests {
             Err(WirePreflightError::Malformed(
                 KNOWN_FIELD_WIRE_TYPE_MISMATCH,
             ))
+        );
+    }
+
+    #[test]
+    fn duplicate_map_keys_are_rejected_before_prost_decode() {
+        let device_entry = {
+            let mut entry = varint_field(1, 0);
+            entry.extend(message_field(2, &[]));
+            entry
+        };
+        let mut duplicate_devices = message_field(6, &device_entry);
+        duplicate_devices.extend(message_field(6, &device_entry));
+        assert_eq!(
+            preflight_trace(&duplicate_devices),
+            Err(WirePreflightError::Malformed(DUPLICATE_MAP_KEY)),
+        );
+
+        let stream_entry = {
+            let mut entry = varint_field(1, 0);
+            entry.extend(message_field(2, &[]));
+            entry
+        };
+        let mut device = message_field(2, &stream_entry);
+        device.extend(message_field(2, &stream_entry));
+        let mut device_entry = varint_field(1, 0);
+        device_entry.extend(message_field(2, &device));
+        assert_eq!(
+            preflight_trace(&message_field(6, &device_entry)),
+            Err(WirePreflightError::Malformed(DUPLICATE_MAP_KEY)),
+        );
+
+        let warp_entry = {
+            let mut entry = varint_field(1, 0);
+            entry.extend(message_field(2, &[]));
+            entry
+        };
+        let mut duplicate_warps = message_field(2, &warp_entry);
+        duplicate_warps.extend(message_field(2, &warp_entry));
+        assert_eq!(
+            preflight_threadblock(&duplicate_warps),
+            Err(WirePreflightError::Malformed(DUPLICATE_MAP_KEY)),
+        );
+    }
+
+    #[test]
+    fn duplicate_map_key_fields_and_overwide_warp_keys_are_rejected() {
+        let mut duplicate_key = varint_field(1, 0);
+        duplicate_key.extend(varint_field(1, 0));
+        duplicate_key.extend(message_field(2, &[]));
+        assert_eq!(
+            preflight_trace(&message_field(6, &duplicate_key)),
+            Err(WirePreflightError::Malformed(DUPLICATE_MAP_KEY_FIELD)),
+        );
+
+        let mut overwide_key = varint_field(1, 1_u64 << 32);
+        overwide_key.extend(message_field(2, &[]));
+        assert_eq!(
+            preflight_threadblock(&message_field(2, &overwide_key)),
+            Err(WirePreflightError::Malformed(INT32_VARINT_OUT_OF_RANGE)),
+        );
+    }
+
+    #[test]
+    fn duplicate_map_value_fields_are_rejected_before_prost_decode() {
+        let mut device_entry = varint_field(1, 0);
+        device_entry.extend(message_field(2, &[]));
+        device_entry.extend(message_field(2, &[]));
+        assert_eq!(
+            preflight_trace(&message_field(6, &device_entry)),
+            Err(WirePreflightError::Malformed(DUPLICATE_MAP_VALUE_FIELD)),
+        );
+
+        let mut stream_entry = varint_field(1, 0);
+        stream_entry.extend(message_field(2, &[]));
+        stream_entry.extend(message_field(2, &[]));
+        let mut device = varint_field(1, 0);
+        device.extend(message_field(2, &stream_entry));
+        let mut device_entry = varint_field(1, 0);
+        device_entry.extend(message_field(2, &device));
+        assert_eq!(
+            preflight_trace(&message_field(6, &device_entry)),
+            Err(WirePreflightError::Malformed(DUPLICATE_MAP_VALUE_FIELD)),
+        );
+
+        let mut warp_entry = varint_field(1, 0);
+        warp_entry.extend(message_field(2, &[]));
+        warp_entry.extend(message_field(2, &[]));
+        assert_eq!(
+            preflight_threadblock(&message_field(2, &warp_entry)),
+            Err(WirePreflightError::Malformed(DUPLICATE_MAP_VALUE_FIELD)),
+        );
+    }
+
+    #[test]
+    fn embedded_warp_id_rejects_truncating_int32_varints() {
+        assert_eq!(
+            scan_warp(
+                &varint_field(1, (1_u64 << 32) + 1),
+                &mut ThreadblockCounts::default(),
+                THREADBLOCK_LIMITS,
+            ),
+            Err(WirePreflightError::Malformed(INT32_VARINT_OUT_OF_RANGE)),
+        );
+    }
+
+    #[test]
+    fn repeated_memory_payload_enum_rejects_truncating_int32_varints() {
+        let overwide = (1_u64 << 32) + 1;
+        assert_eq!(
+            preflight_trace(&varint_field(8, overwide)),
+            Err(WirePreflightError::Malformed(INT32_VARINT_OUT_OF_RANGE)),
+        );
+        assert_eq!(
+            preflight_trace(&message_field(8, &varint(overwide))),
+            Err(WirePreflightError::Malformed(INT32_VARINT_OUT_OF_RANGE)),
         );
     }
 
@@ -855,6 +1066,49 @@ mod tests {
                 Err(WirePreflightError::Malformed(UINT32_VARINT_OUT_OF_RANGE)),
             );
         }
+    }
+
+    #[test]
+    fn signed_int32_fields_reject_truncating_middle_varints() {
+        let overwide = (1_u64 << 32) + 1;
+        let mut trace = varint_field(2, overwide);
+        trace.extend(varint_field(4, overwide));
+        assert_eq!(
+            scan_trace(&trace, &mut RootCounts::default(), ROOT_LIMITS),
+            Err(WirePreflightError::Malformed(INT32_VARINT_OUT_OF_RANGE)),
+        );
+        assert_eq!(
+            scan_instruction(
+                &varint_field(4, overwide),
+                &mut ThreadblockCounts::default(),
+                THREADBLOCK_LIMITS,
+            ),
+            Err(WirePreflightError::Malformed(INT32_VARINT_OUT_OF_RANGE)),
+        );
+        assert_eq!(
+            scan_dim3d(&varint_field(1, overwide)),
+            Err(WirePreflightError::Malformed(INT32_VARINT_OUT_OF_RANGE)),
+        );
+        assert_eq!(
+            scan_address(
+                &varint_field(5, overwide),
+                &mut ThreadblockCounts::default(),
+                THREADBLOCK_LIMITS,
+            ),
+            Err(WirePreflightError::Malformed(INT32_VARINT_OUT_OF_RANGE)),
+        );
+    }
+
+    #[test]
+    fn address_lane_mask_rejects_overwide_uint32_before_decode() {
+        assert_eq!(
+            scan_address(
+                &varint_field(9, (1_u64 << 32) + 1),
+                &mut ThreadblockCounts::default(),
+                THREADBLOCK_LIMITS,
+            ),
+            Err(WirePreflightError::Malformed(UINT32_VARINT_OUT_OF_RANGE)),
+        );
     }
 
     #[test]

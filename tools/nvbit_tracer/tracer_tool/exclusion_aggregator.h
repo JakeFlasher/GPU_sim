@@ -103,7 +103,7 @@ void aggregate(
 // If a typed_reason has zero entries, the corresponding output file
 // is still written as an empty JSON array `[]` so consumers never see
 // "file missing" as a degenerate case.
-void serialize_exclusion_sidecars(
+bool serialize_exclusion_sidecars(
     const std::string &dir_path,
     const std::string &device_tag,
     std::function<std::string(uint32_t)> slug_of_function_id);

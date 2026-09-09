@@ -29,7 +29,7 @@ through the native `sol-execbench` CLI (no Docker shim). The cache /
 manifest now key on `native_env_hash` (the SHA-256 over python /
 torch / nvcc / cuda-runtime / cutlass-tree / cudnn /
 sol_execbench-package versions, see
-`scripts/baselines_harness/native_env.py`), so captured traces are
+`tools/sol_baselines_harness/native_env.py`), so captured traces are
 identified by that hash rather than by any container digest. The
 benchmark `definition.json` was staged at
 `.tmp_staged_benchmarks/FlashInfer-Bench/001_fused_add_rmsnorm_h2048/definition.json`

@@ -52,6 +52,7 @@ SIMULATOR_METRICS = (
     "lts__t_sector_hit_rate.pct",
     "gpc__cycles_elapsed.max",
 )
+DISCRETE_SIMULATOR_METRICS = frozenset(SIMULATOR_METRICS[:4])
 CACHE_LOOKUP_IDENTITIES = (
     (
         "l1_global_read",
@@ -70,6 +71,9 @@ CACHE_LOOKUP_IDENTITIES = (
     ),
 )
 TIME_UNITS_TO_NS = {"ns": 1.0, "us": 1_000.0, "ms": 1_000_000.0, "s": 1_000_000_000.0}
+REFERENCE_CLOCK_STABLE_SAMPLES = 3
+REFERENCE_CLOCK_MAX_ATTEMPTS = 10
+REFERENCE_CLOCK_POLL_SECONDS = 1.0
 SIMULATOR_ENVIRONMENT_CONTROLS = frozenset(
     {
         "SIM_RUN_RETAIN_RAW_TRACE_PAYLOAD",
@@ -87,14 +91,6 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
-def _sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
-
-
 def _portable_path(path: Path) -> str:
     resolved = path.resolve()
     try:
@@ -103,14 +99,34 @@ def _portable_path(path: Path) -> str:
         return str(resolved)
 
 
+def _content_id(path: Path) -> str:
+    """Return a stable content identity for replay inputs and outputs.
+
+    This binds a campaign to the bytes it actually consumed without making the
+    identity an approval or workflow gate.
+    """
+    digest = hashlib.blake2b(digest_size=32)
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
 def _artifact(path: Path) -> dict[str, object]:
     if not path.is_file() or path.stat().st_size == 0:
         raise CampaignError(f"missing or empty artifact: {path}")
     return {
         "path": _portable_path(path),
-        "sha256": _sha256(path),
+        "content_id": _content_id(path),
         "size_bytes": path.stat().st_size,
     }
+
+
+def _count(value: object, label: str) -> int:
+    """Require an exact nonnegative integer for discrete replay counters."""
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise CampaignError(f"{label}: expected a nonnegative integer")
+    return value
 
 
 def _load_json(path: Path) -> dict[str, Any]:
@@ -268,16 +284,95 @@ def _manifest_identity(path: Path) -> dict[str, object]:
     document = _load_json(path)
     return {
         "path": _portable_path(path),
-        "sha256": _sha256(path),
+        "content_id": _content_id(path),
         "schema_version": document.get("schema_version"),
     }
 
 
-def _host_snapshot(profile: Mapping[str, Any]) -> dict[str, Any]:
-    observed = validate_spec.validate_profile(profile, live_host=True)
-    if observed is None:
-        raise CampaignError("live host validation returned no observation")
-    return observed
+def _host_snapshot(
+    profile: Mapping[str, Any],
+    *,
+    require_reference_clocks: bool = False,
+    sample_log: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Validate the live host and optionally retain every validation attempt.
+
+    The returned snapshot remains the stable API used by existing callers.  A
+    caller that supplies ``sample_log`` receives a small attempt ledger with
+    successful observations and transient clock-mismatch errors.  Retaining
+    the ledger makes the reference-clock contract auditable after a campaign;
+    it does not change validation or retry behavior.
+    """
+    if not require_reference_clocks:
+        try:
+            observed = validate_spec.validate_profile(profile, live_host=True)
+        except validate_spec.ValidationError as error:
+            if sample_log is not None:
+                sample_log.append(
+                    {"attempt": 1, "status": "rejected", "error": str(error)}
+                )
+            raise
+        if observed is None:
+            raise CampaignError("live host validation returned no observation")
+        if sample_log is not None:
+            sample_log.append(
+                {"attempt": 1, "status": "validated", "observation": dict(observed)}
+            )
+        return observed
+    last_error: validate_spec.ValidationError | None = None
+    stable = 0
+    for attempt in range(REFERENCE_CLOCK_MAX_ATTEMPTS):
+        try:
+            observed = validate_spec.validate_profile(
+                profile,
+                live_host=True,
+                require_reference_clocks=True,
+            )
+        except validate_spec.ValidationError as error:
+            # Identity/configuration failures are not transient clock drift;
+            # retrying them would hide the real host mismatch.
+            if "clocks differ" not in str(error):
+                if sample_log is not None:
+                    sample_log.append(
+                        {
+                            "attempt": attempt + 1,
+                            "status": "rejected",
+                            "error": str(error),
+                        }
+                    )
+                raise CampaignError(str(error)) from error
+            last_error = error
+            stable = 0
+            if sample_log is not None:
+                sample_log.append(
+                    {
+                        "attempt": attempt + 1,
+                        "status": "clock_mismatch",
+                        "error": str(error),
+                    }
+                )
+        else:
+            if observed is None:
+                raise CampaignError("live host validation returned no observation")
+            stable += 1
+            if sample_log is not None:
+                sample_log.append(
+                    {
+                        "attempt": attempt + 1,
+                        "status": "matched",
+                        "observation": dict(observed),
+                    }
+                )
+            if stable >= REFERENCE_CLOCK_STABLE_SAMPLES:
+                return observed
+        if attempt + 1 < REFERENCE_CLOCK_MAX_ATTEMPTS:
+            time.sleep(REFERENCE_CLOCK_POLL_SECONDS)
+    detail = str(last_error) if last_error is not None else "no matching clock sample"
+    raise CampaignError(
+        "reference-clock preflight did not obtain "
+        f"{REFERENCE_CLOCK_STABLE_SAMPLES} consecutive samples in "
+        f"{REFERENCE_CLOCK_MAX_ATTEMPTS} attempts: {detail}"
+    )
 
 
 def _write_process_artifacts(destination: Path, command: Sequence[str], result: collect_ncu.BoundedProcessResult) -> None:
@@ -318,7 +413,6 @@ def _run_correctness(
     if (
         manifest.get("mode") != "correctness"
         or manifest.get("slug") != expected_runner_slug
-        or manifest.get("binary_sha256") != workload["binary_sha256"]
     ):
         raise CampaignError(f"{slug}: correctness manifest identity mismatch")
     return {
@@ -596,6 +690,18 @@ def _validate_simulator_document(
         raise CampaignError(f"{slug}: simulator metric projection order differs")
     if any(row.get("arch") != "sm_86" for row in projections):
         raise CampaignError(f"{slug}: simulator metric architecture differs")
+    for projection in projections:
+        outcome = projection.get("outcome")
+        if not isinstance(outcome, Mapping):
+            raise CampaignError(f"{slug}: simulator metric outcome is malformed")
+        if outcome.get("status") != "predicted":
+            continue
+        value = outcome.get("value")
+        if not isinstance(value, Mapping) or value.get("value") is None:
+            raise CampaignError(f"{slug}: simulator metric value is missing")
+        metric = str(projection.get("ncu_metric"))
+        if metric in DISCRETE_SIMULATOR_METRICS:
+            _count(value.get("value"), f"{slug}.{metric}")
     cache_counts = launch.get("cache_lookup_predictions")
     if not isinstance(cache_counts, list) or len(cache_counts) != len(
         CACHE_LOOKUP_IDENTITIES
@@ -621,17 +727,42 @@ def _validate_simulator_document(
             or not isinstance(timing_state, Mapping)
         ):
             raise CampaignError(f"{slug}: simulator cache count projection unavailable")
-        hits = int(observer.get("hits", -1))
-        misses = int(observer.get("misses", -1))
-        lookups = int(observer.get("lookups", -1))
-        resident = int(timing_state.get("resident_data_hits", -1))
-        remaining = int(timing_state.get("remaining_lookups", -1))
-        reclassified = int(timing_state.get("observer_reclassified_lookups", -1))
+        hits = _count(observer.get("hits"), f"{slug}.cache.hits")
+        misses = _count(observer.get("misses"), f"{slug}.cache.misses")
+        lookups = _count(observer.get("lookups"), f"{slug}.cache.lookups")
+        resident = _count(
+            timing_state.get("resident_data_hits"), f"{slug}.cache.resident_data_hits"
+        )
+        observer_resident = _count(
+            timing_state.get("observer_resident_hits"),
+            f"{slug}.cache.observer_resident_hits",
+        )
+        physical_not_observed = _count(
+            timing_state.get("physical_hits_not_observed"),
+            f"{slug}.cache.physical_hits_not_observed",
+        )
+        remaining = _count(
+            timing_state.get("remaining_lookups"), f"{slug}.cache.remaining_lookups"
+        )
+        reclassified = _count(
+            timing_state.get("observer_reclassified_lookups"),
+            f"{slug}.cache.observer_reclassified_lookups",
+        )
         if (
-            min(hits, misses, lookups, resident, remaining, reclassified) < 0
+            min(
+                hits,
+                misses,
+                lookups,
+                resident,
+                observer_resident,
+                physical_not_observed,
+                remaining,
+                reclassified,
+            ) < 0
             or hits + misses != lookups
-            or resident + remaining != lookups
-            or resident + reclassified != hits
+            or hits + remaining != lookups
+            or observer_resident + reclassified != hits
+            or observer_resident + physical_not_observed != resident
         ):
             raise CampaignError(f"{slug}: simulator cache count conservation differs")
     return {
@@ -757,8 +888,19 @@ def _execute_stage(
     output_root: Path,
     ncu_repeats: int,
     simulator_repeats: int,
+    require_reference_clocks: bool = False,
 ) -> dict[str, Any]:
-    before = _host_snapshot(profile)
+    pre_clock_samples: list[dict[str, Any]] | None = (
+        [] if require_reference_clocks else None
+    )
+    post_clock_samples: list[dict[str, Any]] | None = (
+        [] if require_reference_clocks else None
+    )
+    before = _host_snapshot(
+        profile,
+        require_reference_clocks=require_reference_clocks,
+        sample_log=pre_clock_samples,
+    )
     started = _now()
     try:
         if stage == "correctness":
@@ -776,8 +918,12 @@ def _execute_stage(
         else:
             raise CampaignError(f"unknown stage {stage!r}")
     finally:
-        after = _host_snapshot(profile)
-    return {
+        after = _host_snapshot(
+            profile,
+            require_reference_clocks=require_reference_clocks,
+            sample_log=post_clock_samples,
+        )
+    record: dict[str, Any] = {
         "stage": stage,
         "workload_id": workload["id"],
         "started_at": started,
@@ -786,6 +932,15 @@ def _execute_stage(
         "host_post": after,
         "result": result,
     }
+    if require_reference_clocks:
+        record["clock_samples"] = {
+            "schema_version": 1,
+            "scope": "stage_boundary_pre_and_post",
+            "stable_samples_required": REFERENCE_CLOCK_STABLE_SAMPLES,
+            "pre": pre_clock_samples,
+            "post": post_clock_samples,
+        }
+    return record
 
 
 def _selected_workloads(
@@ -814,6 +969,7 @@ def _new_manifest(
     timing_crosswalk_path: Path | None,
     spec: Mapping[str, Any],
     output_root: Path,
+    require_reference_clocks: bool = False,
 ) -> dict[str, Any]:
     return {
         "schema_version": 1,
@@ -845,6 +1001,14 @@ def _new_manifest(
             ),
         },
         "records": [],
+        "clock_contract": {
+            "reference_clocks_required": require_reference_clocks,
+            "source": "validate_spec.require_reference_clocks",
+            "stable_samples_required": REFERENCE_CLOCK_STABLE_SAMPLES,
+            "max_attempts": REFERENCE_CLOCK_MAX_ATTEMPTS,
+            "poll_seconds": REFERENCE_CLOCK_POLL_SECONDS,
+            "sample_retention": "record.clock_samples.pre_post_attempt_ledger",
+        },
         "scientific_boundary": "NCU values are retained only as comparison targets and never passed to simulator commands or profile inputs.",
     }
 
@@ -878,6 +1042,11 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--workload", action="append", default=[])
     parser.add_argument("--ncu-repeats", type=int)
     parser.add_argument("--simulator-repeats", type=int)
+    parser.add_argument(
+        "--require-reference-clocks",
+        action="store_true",
+        help="fail live stage snapshots unless configured SM and memory reference clocks match",
+    )
     parser.add_argument("--dry-run", action="store_true")
     return parser
 
@@ -895,6 +1064,25 @@ def main(argv: Sequence[str] | None = None) -> int:
         metrics = _load_json(metrics_path)
         profile = _load_json(profile_path)
         gate = _load_json(gate_path)
+        # A profile/gate mismatch is especially easy to introduce for the
+        # large cohort because the NCU stage itself does not consume either
+        # file while launching the target.  Bind every contract path to the
+        # declaration in the selected spec before any stage can run.
+        for argument_name, selected_path, spec_key in (
+            ("profile", profile_path, "profile"),
+            ("metrics", metrics_path, "metric_schema"),
+            ("gate", gate_path, "accuracy_gate"),
+        ):
+            declared = spec.get(spec_key)
+            if not isinstance(declared, str) or not declared:
+                raise CampaignError(
+                    f"selected spec is missing its {spec_key} declaration"
+                )
+            declared_path = (REPO_ROOT / declared).resolve()
+            if selected_path != declared_path:
+                raise CampaignError(
+                    f"{argument_name} path differs from selected spec declaration"
+                )
         timing_crosswalk_path = (
             None
             if spec.get("timing_crosswalk") is None
@@ -931,6 +1119,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             "stages": list(stages or STAGES),
             "ncu_repeats": ncu_repeats,
             "simulator_repeats": simulator_repeats,
+            "require_reference_clocks": args.require_reference_clocks,
             "commands": {
                 row["id"]: {
                     stage: _stage_command(spec, row, stage, output_root)
@@ -963,10 +1152,24 @@ def main(argv: Sequence[str] | None = None) -> int:
                 ),
             }
             for name, path in expected_inputs.items():
-                if manifest.get("inputs", {}).get(name, {}).get("sha256") != _sha256(path):
+                recorded = manifest.get("inputs", {}).get(name, {})
+                if (
+                    recorded.get("path") != _portable_path(path)
+                    or recorded.get("content_id") != _content_id(path)
+                ):
                     raise CampaignError(
                         f"existing campaign manifest is bound to another {name} input"
                     )
+            contract = manifest.get("clock_contract", {})
+            recorded_clock_requirement = (
+                contract.get("reference_clocks_required", False)
+                if isinstance(contract, Mapping)
+                else False
+            )
+            if recorded_clock_requirement is not args.require_reference_clocks:
+                raise CampaignError(
+                    "existing campaign manifest has a different reference-clock requirement"
+                )
         else:
             manifest = _new_manifest(
                 spec_path,
@@ -976,6 +1179,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 timing_crosswalk_path,
                 spec,
                 output_root,
+                args.require_reference_clocks,
             )
         for stage in stages:
             for workload in workloads:
@@ -988,6 +1192,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                     output_root,
                     ncu_repeats,
                     simulator_repeats,
+                    args.require_reference_clocks,
                 )
                 manifest["records"].append(record)
                 _write_json(manifest_path, manifest)

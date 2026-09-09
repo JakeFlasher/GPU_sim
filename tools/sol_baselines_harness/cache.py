@@ -26,11 +26,10 @@ Speedup vs the PyTorch reference is **diagnostic only** under the
 correctness-only landing contract — a PASSED-but-slow row replays
 normally. Non-PASSED rows are never replayed; they are recomputed.
 
-``sol_execbench_source_hash`` is the **Git tree hash** of the vendored
-``sol-execbench`` subdirectory at the current HEAD, computed via
-``git rev-parse HEAD:sol-execbench``. Top-level commits that only
-touch ``scripts/baselines_harness/``, ``baselines/``, or report
-artifacts do NOT invalidate cached PASS traces.
+``sol_execbench_source_hash`` is a bounded content fingerprint of the
+Git-visible ``tools/sol_execbench`` working tree. It includes tracked edits
+and non-ignored files, so an uncommitted evaluator change cannot reuse a
+stale cached trace.
 
 ``native_env_hash`` is the SHA-256 of a canonical-order JSON over the
 seven host-environment components defined in
@@ -57,7 +56,7 @@ REPO_ROOT = _SCRIPTS_DIR.parent
 if str(_SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS_DIR))
 
-from baselines_harness.native_env import (  # noqa: E402
+from tools.sol_baselines_harness.native_env import (  # noqa: E402
     DegradedNativeEnvError,
     compute_native_env_hash,
     missing_components,
@@ -66,6 +65,15 @@ from baselines_harness.native_env import (  # noqa: E402
 
 VALID_BUILD_MODES = frozenset({"judge", "profiling"})
 EMPTY_SURFACE_SET: FrozenSet[str] = frozenset()
+
+
+def _is_digest_text(value: Any) -> bool:
+    """Return whether ``value`` is a canonical lowercase SHA-256 spelling."""
+    return (
+        isinstance(value, str)
+        and len(value) == 64
+        and all(character in "0123456789abcdef" for character in value)
+    )
 
 
 @dataclass(frozen=True)
@@ -78,7 +86,7 @@ class CacheKey:
       contents in canonical order (name + definition + spec fields +
       sources).
     * ``sol_execbench_source_hash`` — Git tree hash of the vendored
-      ``sol-execbench/`` directory.
+      ``tools/sol_execbench/`` directory.
     * ``native_env_hash`` — SHA-256 of the seven-component native-env
       fingerprint computed by :mod:`baselines_harness.native_env`.
       Strict identity, no asymmetric fallback.
@@ -182,30 +190,51 @@ def solution_source_hash(solution_dict: Dict[str, Any]) -> str:
 
 
 def sol_execbench_source_hash() -> str:
-    """Resolve the vendored ``sol-execbench`` subdirectory's Git tree hash.
+    """Fingerprint the Git-visible evaluator working tree content.
 
-    Returns the tree hash from ``git rev-parse HEAD:sol-execbench``
-    (anchored on the repo root) so the value changes only when the
-    evaluator source tree actually changes.
-
-    Falls back to ``"unknown"`` when git is unavailable or the
-    invocation fails; the cache key then mismatches every prior record
-    and forces a fresh run.
+    ``git ls-files`` excludes the evaluator's managed virtualenv and other
+    ignored build output while including tracked modifications and non-ignored
+    additions. A failed listing or read returns ``"unknown"`` so callers
+    cannot reuse a cache entry whose evaluator identity is unavailable.
     """
     try:
         proc = subprocess.run(
-            ["git", "rev-parse", "HEAD:sol-execbench"],
+            ["git", "ls-files", "--cached", "--modified", "--others",
+             "--exclude-standard", "--", "tools/sol_execbench"],
             cwd=str(REPO_ROOT),
             capture_output=True,
             text=True,
+            errors="replace",
             check=False,
-            timeout=5.0,
+            timeout=10.0,
         )
     except (FileNotFoundError, subprocess.SubprocessError):
         return "unknown"
     if proc.returncode != 0:
         return "unknown"
-    return proc.stdout.strip() or "unknown"
+    # ``git ls-files`` can emit a tracked file twice when it is modified in
+    # the worktree (once from ``--cached`` and once from ``--modified``).
+    # Hash the working-tree content exactly once, in a canonical path order,
+    # so the identity is independent of whether an edit is staged.
+    paths = sorted({line for line in proc.stdout.splitlines() if line})
+    if not paths:
+        return "unknown"
+    digest = hashlib.sha256()
+    try:
+        for relative_text in paths:
+            relative = Path(relative_text)
+            if relative.is_absolute() or relative.parts[:2] != ("tools", "sol_execbench"):
+                return "unknown"
+            path = REPO_ROOT / relative
+            payload = path.read_bytes()
+            encoded = relative.as_posix().encode("utf-8")
+            digest.update(len(encoded).to_bytes(8, "big"))
+            digest.update(encoded)
+            digest.update(len(payload).to_bytes(8, "big"))
+            digest.update(payload)
+    except (OSError, ValueError):
+        return "unknown"
+    return digest.hexdigest()
 
 
 def environment_libs_tuple(
@@ -242,10 +271,29 @@ def derive(
         if missing:
             raise DegradedNativeEnvError(missing, components)
         native_env_hash = compute_native_env_hash(components)
+    elif (
+        not _is_digest_text(native_env_hash)
+        or native_env_hash == "unknown"
+    ):
+        # A caller-supplied empty, non-string, or sentinel value is just as
+        # unusable as one produced by the live probe. Allowing it into a key
+        # would make an unidentifiable cache entry appear replayable.
+        raise DegradedNativeEnvError(
+            ["native_env_hash"],
+            {"native_env_hash": native_env_hash},
+        )
+    evaluator_hash = sol_execbench_source_hash()
+    if evaluator_hash == "unknown":
+        # The evaluator source is part of cache identity.  A missing Git
+        # listing or unreadable source must therefore disable replay rather
+        # than produce an ``unknown == unknown`` cache hit.
+        raise DegradedNativeEnvError(
+            ["sol_execbench_source"], {"sol_execbench_source": "unknown"}
+        )
     sset = tuple(sorted(surface_set)) if surface_set else tuple()
     return CacheKey(
         solution_source_hash=solution_source_hash(solution_dict),
-        sol_execbench_source_hash=sol_execbench_source_hash(),
+        sol_execbench_source_hash=evaluator_hash,
         native_env_hash=native_env_hash,
         environment_libs=environment_libs_tuple(environment_libs),
         build_mode=build_mode,
@@ -271,7 +319,7 @@ def current_baseline_key(
     """Derive a ``CacheKey`` from a baseline's current on-disk state.
 
     Reads ``baseline_dir/solution.json`` for ``solution_source_hash``,
-    resolves the current ``sol-execbench`` subdirectory tree hash, and
+    resolves the current ``tools/sol_execbench`` subdirectory tree hash, and
     computes the native-env fingerprint (or accepts a pre-computed one
     via the optional ``native_env_hash`` / ``native_env_components_value``
     pair). Used by the aggregate report's cache-keyed replay gate.
@@ -298,7 +346,10 @@ _FORBIDDEN_CACHE_RECORD_FIELDS = (
 
 
 _REQUIRED_CACHE_RECORD_FIELDS = (
+    "solution_source_hash",
+    "sol_execbench_source_hash",
     "native_env_hash",
+    "environment_libs",
     "build_mode",
     "surface_set",
 )
@@ -307,8 +358,10 @@ _REQUIRED_CACHE_RECORD_FIELDS = (
 def _record_is_v2_native(record: Any) -> bool:
     """Return True iff ``record`` is a v2-native cache record.
 
-    The strict shape: a dict carrying every required field
-    (``native_env_hash``, ``build_mode``, ``surface_set``) AND no
+    The strict shape: a dict carrying every required identity field
+    (``solution_source_hash``, ``sol_execbench_source_hash``,
+    ``native_env_hash``, ``environment_libs``, ``build_mode``,
+    ``surface_set``) AND no
     Docker-era forbidden field
     (``docker_image_digest``, ``profiling_image_digest``,
     ``dispatch_mode``, ``dispatch_kind``, ``docker_digest``).
@@ -319,6 +372,42 @@ def _record_is_v2_native(record: Any) -> bool:
         if field_name not in record:
             return False
     if any(k in record for k in _FORBIDDEN_CACHE_RECORD_FIELDS):
+        return False
+    # Cache files are operator-visible JSON and may be truncated or edited
+    # independently of the harness.  Reject malformed field shapes here so a
+    # bad record cannot reach tuple conversion in ``key_matches_record`` and
+    # abort an otherwise recoverable report run.
+    native_hash = record.get("native_env_hash")
+    if not _is_digest_text(native_hash):
+        return False
+    solution_hash = record.get("solution_source_hash")
+    if not _is_digest_text(solution_hash):
+        return False
+    evaluator_hash = record.get("sol_execbench_source_hash")
+    if not _is_digest_text(evaluator_hash):
+        return False
+    build_mode = record.get("build_mode")
+    if not isinstance(build_mode, str) or build_mode not in VALID_BUILD_MODES:
+        return False
+    surface_set = record.get("surface_set")
+    if (
+        not isinstance(surface_set, list)
+        or any(not isinstance(name, str) for name in surface_set)
+        or surface_set != sorted(surface_set)
+        or len(set(surface_set)) != len(surface_set)
+    ):
+        return False
+    environment_libs = record.get("environment_libs")
+    if not isinstance(environment_libs, list):
+        return False
+    if any(
+        not isinstance(pair, list)
+        or len(pair) != 2
+        or any(not isinstance(value, str) for value in pair)
+        for pair in environment_libs
+    ):
+        return False
+    if environment_libs != sorted(environment_libs):
         return False
     return True
 
@@ -393,9 +482,21 @@ def key_matches_record(key: CacheKey, record: Dict[str, Any]) -> bool:
     :class:`DegradedNativeEnvError`), so by the time a ``CacheKey``
     reaches this function its identity is fully resolved.
     """
-    stored_libs = tuple(
-        tuple(pair) for pair in record.get("environment_libs", [])
-    )
+    # Treat malformed on-disk records as cache misses.  ``load_cache_index``
+    # filters current-format entries, but this helper is public and callers
+    # can supply a record directly.
+    if not isinstance(record, dict) or not _record_is_v2_native(record):
+        return False
+    if not all(
+        _is_digest_text(value)
+        for value in (
+            key.solution_source_hash,
+            key.sol_execbench_source_hash,
+            key.native_env_hash,
+        )
+    ):
+        return False
+    stored_libs = tuple(tuple(pair) for pair in record.get("environment_libs", []))
     if record.get("solution_source_hash") != key.solution_source_hash:
         return False
     if record.get("sol_execbench_source_hash") != key.sol_execbench_source_hash:
@@ -404,7 +505,7 @@ def key_matches_record(key: CacheKey, record: Dict[str, Any]) -> bool:
         return False
     if record.get("build_mode", "judge") != key.build_mode:
         return False
-    if tuple(record.get("surface_set", [])) != key.surface_set:
+    if tuple(record["surface_set"]) != key.surface_set:
         return False
     if record.get("native_env_hash") != key.native_env_hash:
         return False

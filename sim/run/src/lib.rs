@@ -397,28 +397,10 @@ fn encode_error_v2(error: &RunError) -> Result<String, ErrorEncodingError> {
 
     let sealed = SimErrorV2::new(error_sha256, None, kind, exit_code);
     let sealed_value = serde_json::to_value(&sealed).map_err(ErrorEncodingError::new)?;
-    let revalidated_unsigned = error_value_without_seal(sealed_value.clone())?;
-    let revalidated_canonical =
-        sim_trace::canonical_json_utf8(&revalidated_unsigned).map_err(ErrorEncodingError::new)?;
-    if revalidated_canonical != unsigned_canonical
-        || Sha256Digest::of(revalidated_canonical.as_bytes()) != error_sha256
-    {
-        return Err(ErrorEncodingError::new(
-            "sim_error.v2 seal preimage changed during checked construction",
-        ));
-    }
-
-    let canonical_json =
-        sim_trace::canonical_json_utf8(&sealed_value).map_err(ErrorEncodingError::new)?;
-    let reparsed: serde_json::Value =
-        serde_json::from_str(&canonical_json).map_err(ErrorEncodingError::new)?;
-    if sim_trace::canonical_json_utf8(&reparsed).map_err(ErrorEncodingError::new)? != canonical_json
-    {
-        return Err(ErrorEncodingError::new(
-            "sim_error.v2 final document did not revalidate as canonical UTF-8 JSON",
-        ));
-    }
-    Ok(canonical_json)
+    // `SimErrorV2` is a closed, deterministic wire type. Canonicalizing the
+    // serialized value once is sufficient; reparsing and hashing the same
+    // bytes again only duplicates the error path's work.
+    sim_trace::canonical_json_utf8(&sealed_value).map_err(ErrorEncodingError::new)
 }
 
 fn error_value_without_seal(
@@ -1432,6 +1414,7 @@ mod v1_result_compat {
         hits: u64,
         misses: u64,
         merges: u64,
+        pending_lookup_hits: u64,
         stall_events: u64,
         line_fills: u64,
         line_alloc_misses: u64,
@@ -1442,6 +1425,7 @@ mod v1_result_compat {
         store_sectors: u64,
         store_hits: u64,
         store_tag_hits: u64,
+        write_lookup_hits: u64,
         reduction_sectors: u64,
         reduction_hits: u64,
     }
@@ -1452,6 +1436,7 @@ mod v1_result_compat {
                 hits: counters.hits,
                 misses: counters.misses,
                 merges: counters.merges,
+                pending_lookup_hits: counters.pending_lookup_hits,
                 stall_events: counters.stall_events,
                 line_fills: counters.line_fills,
                 line_alloc_misses: counters.line_alloc_misses,
@@ -1462,6 +1447,7 @@ mod v1_result_compat {
                 store_sectors: counters.store_sectors,
                 store_hits: counters.store_hits,
                 store_tag_hits: counters.store_tag_hits,
+                write_lookup_hits: counters.write_lookup_hits,
                 reduction_sectors: counters.reduction_sectors,
                 reduction_hits: counters.reduction_hits,
             }
@@ -1473,6 +1459,7 @@ mod v1_result_compat {
         hits: u64,
         misses: u64,
         merges: u64,
+        pending_lookup_hits: u64,
         stall_events: u64,
         line_fills: u64,
         line_alloc_misses: u64,
@@ -1483,6 +1470,7 @@ mod v1_result_compat {
         store_sectors: u64,
         store_hits: u64,
         store_tag_hits: u64,
+        write_lookup_hits: u64,
         reduction_sectors: u64,
         reduction_hits: u64,
         by_origin: OriginPair<L1OriginCountersWire>,
@@ -1494,6 +1482,7 @@ mod v1_result_compat {
                 hits: counters.hits,
                 misses: counters.misses,
                 merges: counters.merges,
+                pending_lookup_hits: counters.pending_lookup_hits,
                 stall_events: counters.stall_events,
                 line_fills: counters.line_fills,
                 line_alloc_misses: counters.line_alloc_misses,
@@ -1504,6 +1493,7 @@ mod v1_result_compat {
                 store_sectors: counters.store_sectors,
                 store_hits: counters.store_hits,
                 store_tag_hits: counters.store_tag_hits,
+                write_lookup_hits: counters.write_lookup_hits,
                 reduction_sectors: counters.reduction_sectors,
                 reduction_hits: counters.reduction_hits,
                 by_origin: OriginPair {
@@ -1518,6 +1508,8 @@ mod v1_result_compat {
     struct L2CountersWire {
         hits: u64,
         misses: u64,
+        lookup_hits: u64,
+        lookup_requests: u64,
         line_misses: u64,
         sector_fill_misses: u64,
         write_tag_hits: u64,
@@ -1528,6 +1520,8 @@ mod v1_result_compat {
             Self {
                 hits: counters.hits,
                 misses: counters.misses,
+                lookup_hits: counters.lookup_hits,
+                lookup_requests: counters.lookup_requests,
                 line_misses: counters.line_misses,
                 sector_fill_misses: counters.sector_fill_misses,
                 write_tag_hits: counters.write_tag_hits,

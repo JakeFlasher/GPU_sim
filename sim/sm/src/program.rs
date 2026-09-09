@@ -22,7 +22,7 @@ use sim_mem::{
 };
 use sim_trace::ExecInfo;
 
-use crate::control_bits::{ControlBits, ControlSidecar, DepBarrier, WaitMask};
+use crate::control_bits::{ControlBits, ControlSidecar, DepBarrier, FunctionControl, WaitMask};
 use crate::sass_operands::{FixedLatencyOperandStatus, project_fixed_latency_operands};
 
 #[derive(Debug, thiserror::Error)]
@@ -46,6 +46,8 @@ pub enum ProgramError {
     ControlLayoutCapability(#[from] CapabilityError),
     #[error("tensor-pipeline capability is unavailable: {0}")]
     TensorPipelineCapability(#[source] CapabilityError),
+    #[error("scalar execution-pipeline capability is unavailable: {0}")]
+    ScalarExecutionPipelineCapability(#[source] CapabilityError),
     #[error("CTA-barrier issue capability is unavailable: {0}")]
     CtaBarrierPipelineCapability(#[source] CapabilityError),
     #[error("branch-resolution capability is unavailable: {0}")]
@@ -158,6 +160,14 @@ pub enum PipelineClass {
         /// Earliest number of cycles between issues to one SMSP's Tensor Core.
         initiation_interval_cycles: u64,
     },
+    ScalarAlu {
+        /// Architecture-local pipelined INT/FP execution path.  The queue
+        /// and latency are consumed by the replay actor; this field remains
+        /// explicit so unsupported families cannot inherit it silently.
+        latency_cycles: u64,
+        initiation_interval_cycles: u64,
+        in_flight_capacity: u32,
+    },
 }
 
 impl PipelineClass {
@@ -173,6 +183,10 @@ impl PipelineClass {
             } => Some(warp_initiation_interval_cycles),
             Self::Tensor {
                 initiation_interval_cycles,
+            } => Some(initiation_interval_cycles),
+            Self::ScalarAlu {
+                initiation_interval_cycles,
+                ..
             } => Some(initiation_interval_cycles),
         }
     }
@@ -519,6 +533,14 @@ fn parse_u32_literal(text: &str) -> Option<u32> {
     }
 }
 
+fn parse_direct_branch_target(opcode_text: &str) -> Option<u64> {
+    let operands = opcode_text.strip_prefix("BRA ")?.trim();
+    let target = operands
+        .rsplit_once(',')
+        .map_or(operands, |(_, target)| target.trim());
+    parse_u32_literal(target).map(u64::from)
+}
+
 fn classify_pipeline(
     pc: u64,
     opcode_text: &str,
@@ -538,10 +560,7 @@ fn classify_pipeline(
         });
     }
     let opcode = opcode_text.split_ascii_whitespace().next().unwrap_or("");
-    let branch_target = opcode_text
-        .strip_prefix("BRA ")
-        .and_then(parse_u32_literal)
-        .map(u64::from);
+    let branch_target = parse_direct_branch_target(opcode_text);
     if let Some(target) = branch_target
         && target != pc
         && predicate.is_some()
@@ -559,6 +578,22 @@ fn classify_pipeline(
         };
         return Ok(PipelineClass::Branch {
             next_issue_interval_cycles,
+        });
+    }
+    // Ampere's integer and FP32 scalar instructions enter the finite
+    // pipelined execution window described by the architecture card.  Memory
+    // and tensor heads are handled below/through the dedicated classifiers;
+    // SFU, uniform, and control-only forms remain dispatch-only until their
+    // own resources are carded.
+    if matches!(head, "IADD3" | "LOP3" | "IMAD" | "FADD" | "FFMA" | "FMUL") {
+        let pipeline = arch
+            .scalar_execution_pipeline()
+            .require("scalar_execution_pipeline")
+            .map_err(ProgramError::ScalarExecutionPipelineCapability)?;
+        return Ok(PipelineClass::ScalarAlu {
+            latency_cycles: pipeline.latency_cycles,
+            initiation_interval_cycles: pipeline.initiation_interval_cycles,
+            in_flight_capacity: pipeline.in_flight_capacity,
         });
     }
     if !matches!(head, "HMMA" | "IMMA" | "BMMA" | "DMMA") {
@@ -585,11 +620,101 @@ fn classify_pipeline(
     })
 }
 
+/// Return the architectural predicate register named by a sidecar predicate
+/// token (`@P0`, `@!P0`) or an SASS destination operand (`P0,`).  Keeping the
+/// register identity in the compact-loop shape check matters: a preceding
+/// `ISETP P1` does not provide the value consumed by a branch guarded by
+/// `@P0`.
+fn predicate_register(token: &str) -> Option<&str> {
+    let token = token.strip_prefix('@').unwrap_or(token);
+    let token = token.strip_prefix('!').unwrap_or(token);
+    let digits = token.strip_prefix('P')?;
+    (digits.len() == 1 && digits.as_bytes()[0] <= b'6').then_some(token)
+}
+
+/// Return the destination predicate of an integer predicate-setting SASS
+/// instruction. Other predicate-setting heads remain on the ordinary branch
+/// path until they have an independent transfer study; a branch's dynamic
+/// condition is never inferred from textual control flow alone.
+fn predicate_producer_register(opcode_text: &str) -> Option<&str> {
+    (opcode_head(opcode_text) == "ISETP")
+        .then(|| opcode_text.split_ascii_whitespace().nth(1))
+        .flatten()
+        .and_then(|operand| predicate_register(operand.trim_end_matches(',')))
+}
+
+/// Conservative static shape boundary for the compact-loop branch handoff.
+/// The independent SM86 control matrix exercises a 48-byte back edge; the
+/// 64-byte ceiling keeps the promoted rule tied to that compact SASS shape and
+/// leaves all longer production loops on the established compiler/three-cycle
+/// branch path.
+const COMPACT_BACKWARD_PREDICATE_MAX_DISTANCE_BYTES: u64 = 64;
+
+fn compact_backward_predicate_interval(
+    pc: u64,
+    opcode_text: &str,
+    pipeline_class: PipelineClass,
+    function: &FunctionControl,
+    branch_predicate: Option<&str>,
+    arch: ArchId,
+) -> Result<Option<u64>, ProgramError> {
+    if !matches!(pipeline_class, PipelineClass::Branch { .. }) {
+        return Ok(None);
+    }
+    let Some(target) = parse_direct_branch_target(opcode_text) else {
+        return Ok(None);
+    };
+    if target >= pc || pc - target > COMPACT_BACKWARD_PREDICATE_MAX_DISTANCE_BYTES {
+        return Ok(None);
+    }
+    let Some(branch_predicate) = branch_predicate.and_then(predicate_register) else {
+        return Ok(None);
+    };
+    let Some(previous_pc) = pc.checked_sub(16) else {
+        return Ok(None);
+    };
+    if !function.by_pc.get(&previous_pc).is_some_and(|producer| {
+        // The identification control has a non-yielding stall-13 predicate
+        // producer; other predicate schedules have not been promoted and
+        // remain on the ordinary branch path.
+        predicate_producer_register(&producer.opcode_text)
+            .is_some_and(|producer_predicate| producer_predicate == branch_predicate)
+            && producer.control.stall == 13
+            && !producer.control.yield_flag
+    }) {
+        return Ok(None);
+    }
+    let timing = arch
+        .branch_resolution()
+        .require("branch_resolution")
+        .map_err(ProgramError::BranchPipelineCapability)?;
+    Ok(Some(timing.uniform_backward_predicate_interval_cycles))
+}
+
 fn sidecar_arch_id(arch: &str) -> Result<ArchId, ProgramError> {
     ArchId::parse_deploy(arch).map_err(|source| ProgramError::UnsupportedArchitecture {
         arch: arch.to_owned(),
         source,
     })
+}
+
+/// A dense HMMA issue interval is only observable as a scheduler bottleneck
+/// when a function exposes enough independent tensor sites to keep the
+/// sub-core tensor path saturated.  The released SM86 model's base effective
+/// interval is 32 cycles; short functions with fewer than eight static dense
+/// sites use the independently measured 16-cycle initiation cadence and let
+/// their other (memory/control) frontiers determine completion.  This is a
+/// static SASS-shape rule, not a workload-name or NCU-target fit.
+const DENSE_HMMA_SATURATION_SITES: usize = 2 * 4;
+
+fn effective_dense_hmma_interval(static_dense_sites: usize, base_interval: u64) -> u64 {
+    // Two independent sites per each of the four SM86 sub-cores are needed
+    // before a loop can continuously expose the saturated execution arm.
+    if static_dense_sites < DENSE_HMMA_SATURATION_SITES {
+        base_interval / 2
+    } else {
+        base_interval
+    }
 }
 
 /// Join every kernel in `exec` against `sidecar`, keyed by
@@ -664,13 +789,29 @@ pub fn build_schedules(
                     inst.predicate.as_deref(),
                     sidecar_arch,
                 )?;
-                let pipeline_class = classify_pipeline(
+                let mut pipeline_class = classify_pipeline(
                     pc,
                     &inst.opcode_text,
                     inst.control,
                     inst.predicate.as_deref(),
                     sidecar_arch,
                 )?;
+                // Keep the sidecar predicate available while selecting the
+                // compact-loop special case.  The resulting IssueSlot does
+                // not duplicate this guard string, so selection happens here
+                // rather than in a later pass over the slots.
+                if let Some(interval) = compact_backward_predicate_interval(
+                    pc,
+                    &inst.opcode_text,
+                    pipeline_class,
+                    function,
+                    inst.predicate.as_deref(),
+                    sidecar_arch,
+                )? {
+                    pipeline_class = PipelineClass::Branch {
+                        next_issue_interval_cycles: interval,
+                    };
+                }
                 let async_copy_wait_max_pending_groups =
                     parse_async_copy_wait(&inst.opcode_text).unwrap_or(0);
                 let fixed_latency_operands =
@@ -696,6 +837,39 @@ pub fn build_schedules(
                 ))
             })
             .collect::<Result<_, ProgramError>>()?;
+        let dense_tensor_sites = by_pc
+            .values()
+            .filter(|slot| {
+                matches!(slot.pipeline_class, PipelineClass::Tensor { .. })
+                    && slot
+                        .opcode_text()
+                        .split_ascii_whitespace()
+                        .next()
+                        .is_some_and(|opcode| opcode.starts_with("HMMA.16816"))
+            })
+            .count();
+        let by_pc = by_pc
+            .into_iter()
+            .map(|(pc, mut slot)| {
+                if let PipelineClass::Tensor {
+                    initiation_interval_cycles,
+                } = slot.pipeline_class
+                    && slot
+                        .opcode_text()
+                        .split_ascii_whitespace()
+                        .next()
+                        .is_some_and(|opcode| opcode.starts_with("HMMA.16816"))
+                {
+                    slot.pipeline_class = PipelineClass::Tensor {
+                        initiation_interval_cycles: effective_dense_hmma_interval(
+                            dense_tensor_sites,
+                            initiation_interval_cycles,
+                        ),
+                    };
+                }
+                (pc, slot)
+            })
+            .collect();
         schedules.insert(
             fuid,
             FunctionSchedule {
@@ -787,7 +961,14 @@ mod tests {
             }
         );
         assert_eq!(s.by_pc[&0].op_class, OpClass::Other);
-        assert_eq!(s.by_pc[&0].pipeline_class, PipelineClass::DispatchOnly);
+        assert_eq!(
+            s.by_pc[&0].pipeline_class,
+            PipelineClass::ScalarAlu {
+                latency_cycles: 4,
+                initiation_interval_cycles: 2,
+                in_flight_capacity: 8,
+            }
+        );
         let FixedLatencyOperandStatus::Projected(operands) = s.by_pc[&0].fixed_latency_operands()
         else {
             panic!("IADD3 operand projection is missing")
@@ -800,7 +981,7 @@ mod tests {
     }
 
     #[test]
-    fn operand_projection_gap_is_retained_without_changing_dispatch_timing() {
+    fn operand_projection_gap_is_retained_with_scalar_execution_timing() {
         let mut sc = sidecar(&[0]);
         let instruction = sc
             .functions
@@ -812,7 +993,14 @@ mod tests {
         instruction.control = ControlBits::new(1, false, 7, 7, 0, 1).unwrap();
         let schedules = build_schedules(&exec_info(&[0]), &sc).unwrap();
         let slot = &schedules[&1].by_pc[&0];
-        assert_eq!(slot.pipeline_class, PipelineClass::DispatchOnly);
+        assert_eq!(
+            slot.pipeline_class,
+            PipelineClass::ScalarAlu {
+                latency_cycles: 4,
+                initiation_interval_cycles: 2,
+                in_flight_capacity: 8,
+            }
+        );
         assert!(matches!(
             slot.fixed_latency_operands(),
             FixedLatencyOperandStatus::Gap(_)
@@ -952,6 +1140,19 @@ mod tests {
             }
         );
         assert_eq!(
+            classify_pipeline(
+                0x20,
+                "BRA P1, 0x0",
+                branch_control,
+                Some("@P0"),
+                ArchId::Sm86,
+            )
+            .unwrap(),
+            PipelineClass::Branch {
+                next_issue_interval_cycles: 3,
+            }
+        );
+        assert_eq!(
             classify_pipeline(0, "BRA 0x20", branch_control, None, ArchId::Sm86).unwrap(),
             PipelineClass::DispatchOnly
         );
@@ -960,6 +1161,8 @@ mod tests {
                 .unwrap(),
             PipelineClass::DispatchOnly
         );
+        assert_eq!(parse_direct_branch_target("BRA P1, 0x40"), Some(0x40));
+        assert_eq!(parse_direct_branch_target("BRA R2"), None);
         assert!(matches!(
             classify_pipeline(
                 0,
@@ -979,7 +1182,95 @@ mod tests {
 
         assert_eq!(
             classify_pipeline_test("IMAD R0, R0, R1, R2", ArchId::Sm86).unwrap(),
-            PipelineClass::DispatchOnly
+            PipelineClass::ScalarAlu {
+                latency_cycles: 4,
+                initiation_interval_cycles: 2,
+                in_flight_capacity: 8,
+            }
+        );
+    }
+
+    #[test]
+    fn compact_backward_predicate_branch_is_selected_only_from_sass_shape() {
+        let mut compact = sidecar(&[0, 16, 32]);
+        let function = compact.functions.get_mut("my_kernel").unwrap();
+        function.by_pc.get_mut(&16).unwrap().opcode_text =
+            "ISETP.NE.AND P0, PT, R0, RZ, PT".to_owned();
+        function.by_pc.get_mut(&16).unwrap().control =
+            ControlBits::new(13, false, 7, 7, 0, 0).unwrap();
+        let branch = function.by_pc.get_mut(&32).unwrap();
+        branch.opcode_text = "BRA 0x0".to_owned();
+        branch.predicate = Some("@P0".to_owned());
+        branch.control = ControlBits::new(5, true, 7, 7, 0, 0).unwrap();
+        let schedules = build_schedules(&exec_info(&[0, 16, 32]), &compact).unwrap();
+        assert_eq!(
+            schedules[&1].by_pc[&32].pipeline_class,
+            PipelineClass::Branch {
+                next_issue_interval_cycles: 9,
+            }
+        );
+
+        // A longer back edge with the same branch control remains on the
+        // ordinary three-cycle target-resolution path: distance, not a
+        // workload identity, selects the compact handoff capability.
+        let mut long = sidecar(&[0, 16, 80]);
+        let function = long.functions.get_mut("my_kernel").unwrap();
+        function.by_pc.get_mut(&16).unwrap().opcode_text =
+            "ISETP.NE.AND P0, PT, R0, RZ, PT".to_owned();
+        function.by_pc.get_mut(&16).unwrap().control =
+            ControlBits::new(13, false, 7, 7, 0, 0).unwrap();
+        let branch = function.by_pc.get_mut(&80).unwrap();
+        branch.opcode_text = "BRA 0x0".to_owned();
+        branch.predicate = Some("@P0".to_owned());
+        branch.control = ControlBits::new(5, true, 7, 7, 0, 0).unwrap();
+        let schedules = build_schedules(&exec_info(&[0, 16, 80]), &long).unwrap();
+        assert_eq!(
+            schedules[&1].by_pc[&80].pipeline_class,
+            PipelineClass::Branch {
+                next_issue_interval_cycles: 3,
+            }
+        );
+
+        // The preceding predicate producer must be the value consumed by the
+        // branch.  Matching only `ISETP` + stall-13 + adjacency would promote
+        // this P1 producer even though the branch reads P0.
+        let mut different_predicate = sidecar(&[0, 16, 32]);
+        let function = different_predicate.functions.get_mut("my_kernel").unwrap();
+        function.by_pc.get_mut(&16).unwrap().opcode_text =
+            "ISETP.NE.AND P1, PT, R0, RZ, PT".to_owned();
+        function.by_pc.get_mut(&16).unwrap().control =
+            ControlBits::new(13, false, 7, 7, 0, 0).unwrap();
+        let branch = function.by_pc.get_mut(&32).unwrap();
+        branch.opcode_text = "BRA 0x0".to_owned();
+        branch.predicate = Some("@P0".to_owned());
+        branch.control = ControlBits::new(5, true, 7, 7, 0, 0).unwrap();
+        let schedules = build_schedules(&exec_info(&[0, 16, 32]), &different_predicate).unwrap();
+        assert_eq!(
+            schedules[&1].by_pc[&32].pipeline_class,
+            PipelineClass::Branch {
+                next_issue_interval_cycles: 3,
+            }
+        );
+
+        // P7 is the textual alias for PT (the hardwired true predicate), not
+        // a writable predicate register. It must not satisfy the compact
+        // producer/consumer identity check.
+        let mut true_predicate = sidecar(&[0, 16, 32]);
+        let function = true_predicate.functions.get_mut("my_kernel").unwrap();
+        function.by_pc.get_mut(&16).unwrap().opcode_text =
+            "ISETP.NE.AND P7, PT, R0, RZ, PT".to_owned();
+        function.by_pc.get_mut(&16).unwrap().control =
+            ControlBits::new(13, false, 7, 7, 0, 0).unwrap();
+        let branch = function.by_pc.get_mut(&32).unwrap();
+        branch.opcode_text = "BRA 0x0".to_owned();
+        branch.predicate = Some("@P7".to_owned());
+        branch.control = ControlBits::new(5, true, 7, 7, 0, 0).unwrap();
+        let schedules = build_schedules(&exec_info(&[0, 16, 32]), &true_predicate).unwrap();
+        assert_eq!(
+            schedules[&1].by_pc[&32].pipeline_class,
+            PipelineClass::Branch {
+                next_issue_interval_cycles: 3,
+            }
         );
     }
 
@@ -1227,8 +1518,8 @@ mod tests {
     #[test]
     fn sm86_tensor_pipeline_classifier_admits_complete_sidecar_inventory() {
         for (opcode, expected_interval) in [
-            ("HMMA.16816.F32", 16),
-            ("HMMA.16816.F32.BF16", 16),
+            ("HMMA.16816.F32", 32),
+            ("HMMA.16816.F32.BF16", 32),
             ("HMMA.SP.16832.F32.BF16", 16),
             ("IMMA.16816.S8.S8", 8),
         ] {
@@ -1243,8 +1534,57 @@ mod tests {
     }
 
     #[test]
-    fn non_tensor_opcode_is_explicitly_dispatch_only() {
-        for opcode in ["IADD3 R0, R1, R2, RZ", "XHMMA.16816.F32 R0", ""] {
+    fn dense_hmma_static_saturation_boundary_preserves_both_cadences() {
+        assert_eq!(effective_dense_hmma_interval(0, 32), 16);
+        assert_eq!(
+            effective_dense_hmma_interval(DENSE_HMMA_SATURATION_SITES - 1, 32),
+            16
+        );
+        assert_eq!(
+            effective_dense_hmma_interval(DENSE_HMMA_SATURATION_SITES, 32),
+            32
+        );
+        assert_eq!(effective_dense_hmma_interval(16, 32), 32);
+    }
+
+    #[test]
+    fn schedule_join_applies_dense_hmma_saturation_from_static_shape() {
+        for (site_count, expected) in [
+            (DENSE_HMMA_SATURATION_SITES - 1, 16),
+            (DENSE_HMMA_SATURATION_SITES, 32),
+        ] {
+            let pcs: Vec<u64> = (0..site_count).map(|index| index as u64 * 16).collect();
+            let mut sidecar = sidecar(&pcs);
+            for instruction in sidecar
+                .functions
+                .get_mut("my_kernel")
+                .unwrap()
+                .by_pc
+                .values_mut()
+            {
+                instruction.opcode_text = "HMMA.16816.F32.BF16 R0, R2, R4, R6".to_owned();
+            }
+            let schedules = build_schedules(&exec_info(&pcs), &sidecar).unwrap();
+            assert!(schedules[&1].by_pc.values().all(|slot| {
+                slot.pipeline_class
+                    == PipelineClass::Tensor {
+                        initiation_interval_cycles: expected,
+                    }
+            }));
+        }
+    }
+
+    #[test]
+    fn scalar_opcode_candidate_is_explicit_and_other_forms_stay_dispatch_only() {
+        assert_eq!(
+            classify_pipeline_test("IADD3 R0, R1, R2, RZ", ArchId::Sm86).unwrap(),
+            PipelineClass::ScalarAlu {
+                latency_cycles: 4,
+                initiation_interval_cycles: 2,
+                in_flight_capacity: 8,
+            }
+        );
+        for opcode in ["XHMMA.16816.F32 R0", ""] {
             assert_eq!(
                 classify_pipeline_test(opcode, ArchId::Sm86).unwrap(),
                 PipelineClass::DispatchOnly,

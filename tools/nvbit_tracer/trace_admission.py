@@ -522,11 +522,6 @@ class AdmittedTraceSources:
                     raise ImmutableArtifactError(
                         f"admitted trace source size changed: {relative_path}"
                     )
-                if hashlib.sha256(snapshot.payload).hexdigest() != source.sha256:
-                    raise ImmutableArtifactError(
-                        "admitted trace source SHA-256 changed: "
-                        f"{relative_path}"
-                    )
             except BaseException as exc:
                 try:
                     self._monitor.verify_unchanged()
@@ -1083,6 +1078,11 @@ def _ordered_launches(root: Any) -> list[tuple[int, int, Any]]:
                 )
             for kernel in sorted(stream.kernels, key=lambda item: int(item.id)):
                 launch_id = (int(device_key), int(stream_key), int(kernel.id))
+                if int(kernel.id) <= 0:
+                    raise TraceAdmissionError(
+                        "trace_launch_identity_mismatch",
+                        f"root launch {launch_id} has non-positive kernel id",
+                    )
                 if launch_id in launch_ids:
                     raise TraceAdmissionError(
                         "trace_launch_identity_mismatch",
@@ -1099,6 +1099,12 @@ def _ordered_launches(root: Any) -> list[tuple[int, int, Any]]:
                         "function_unique_id_invalid",
                         f"root launch {launch_id} has function_unique_id "
                         f"{kernel.function_unique_id}",
+                    )
+                if int(kernel.number_of_registers) < 0:
+                    raise TraceAdmissionError(
+                        "trace_launch_registers_invalid",
+                        f"root launch {launch_id} has negative number_of_registers "
+                        f"{kernel.number_of_registers}",
                     )
                 geometry = (
                     int(kernel.grid_dim.x),
@@ -1118,16 +1124,6 @@ def _ordered_launches(root: Any) -> list[tuple[int, int, Any]]:
     return launches
 
 
-def _import_threadblock_pb2() -> Any:
-    try:
-        return _load_authenticated_bindings().threadblock_pb2
-    except (
-        TraceContractTrackedBindingsCorrupt,
-        TraceContractRuntimePrerequisiteMissing,
-    ) as exc:
-        _raise_admission_prerequisite(exc)
-
-
 def _launch_summary(
     launch_index: int,
     device_id: int,
@@ -1143,6 +1139,12 @@ def _launch_summary(
             "trace_launch_shared_memory_invalid",
             f"launch {launch_id} has negative combined shared-memory bytes "
             f"{combined_shared_bytes}",
+        )
+    if int(kernel.number_of_registers) < 0:
+        raise TraceAdmissionError(
+            "trace_launch_registers_invalid",
+            f"launch {launch_id} has negative number_of_registers "
+            f"{kernel.number_of_registers}",
         )
 
     has_static = kernel.HasField("shared_memory_static_bytes")
@@ -1363,7 +1365,10 @@ def _require_trace_admission_snapshot(
             parent = PurePosixPath(path).parent.as_posix()
             payloads_by_parent.setdefault(parent, []).append(path)
 
-        threadblock_pb2 = _import_threadblock_pb2()
+        bindings = _load_authenticated_bindings()
+        threadblock_pb2 = bindings.threadblock_pb2
+        instruction_pb2_mod = bindings.instruction_pb2
+        address_pb2_mod = bindings.address_pb2
         consumed_paths: set[str] = set()
         threadblock_count = 0
         instruction_count = 0
@@ -1475,6 +1480,8 @@ def _require_trace_admission_snapshot(
                     allocations=allocations,
                     memory_payload_contract_id=root.trace_contract_id,
                     expected_function_unique_id=int(kernel.function_unique_id),
+                    instruction_pb2_mod=instruction_pb2_mod,
+                    address_pb2_mod=address_pb2_mod,
                 )
                 if not contract.ok:
                     raise TraceAdmissionError(

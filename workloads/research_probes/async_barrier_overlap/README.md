@@ -13,7 +13,7 @@ The final v4 campaign is complete under
 SourceCounters sentinels, 36 separate NVBit captures, replay diagnostics, and
 the held-out decision. The result retains causal readiness but rejects a fixed
 CTA-barrier latency; see
-`docs/sm86_barrier_pipeline_cache_handoff_milestone.md` for the configured
+`docs/STATUS.md` for the configured
 successor.
 
 Build and run an ordinary correctness sample:

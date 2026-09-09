@@ -11,6 +11,7 @@ pub mod anchored;
 #[cfg(feature = "campaign")]
 pub mod digest;
 pub mod exec_info;
+pub mod json;
 pub mod lanes;
 pub mod pb;
 pub mod reader;
@@ -25,11 +26,13 @@ pub use digest::{
     CanonicalJsonError, Sha256Digest, Sha256DigestError, canonical_json, canonical_json_utf8,
 };
 pub use exec_info::{ExecInfo, ExecInfoError, KernelStaticInfo};
+pub use json::strict_json_from_slice;
 pub use lanes::{LANE_INACTIVE_SENTINEL, LANES_PER_WARP, LaneError, reconstruct_lane_vector};
 pub use reader::{
     AddressAccess, AllocationRegistry, KernelLoc, MemoryAccess, MemoryAccessMeta, TraceDir,
-    TraceError, TraceStats, TraceValidationSummary, block_launch_index, check_allocation_identity,
-    kernel_grid, memory_access, validate_threadblock_contract, visit_memory_access,
+    TraceError, TraceLineage, TraceStats, TraceValidationSummary, block_launch_index,
+    check_allocation_identity, kernel_grid, memory_access, validate_threadblock_contract,
+    visit_memory_access,
 };
 #[cfg(feature = "campaign")]
 pub use reader::{

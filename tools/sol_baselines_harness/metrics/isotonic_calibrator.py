@@ -52,9 +52,10 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass, field
-from typing import Any, Iterable, Mapping, Sequence
+from typing import TYPE_CHECKING, Any, Iterable, Mapping, Sequence
 
-from sklearn.isotonic import IsotonicRegression
+if TYPE_CHECKING:
+    from sklearn.isotonic import IsotonicRegression
 
 from sol_baselines_harness.metrics.framework_contract import (
     CellJoinKey,
@@ -80,6 +81,7 @@ CALIBRATOR_TYPED_REASONS: frozenset[str] = frozenset({
     "calibration_input_contains_validation_only_slug",
     "calibration_input_missing_split_assignment",
     "calibrator_not_fitted",
+    "calibration_dependency_missing",
 })
 
 
@@ -277,6 +279,13 @@ def _select_admitted(
 def _fit_head(
     raw: Sequence[float], labels: Sequence[float],
 ) -> IsotonicRegression:
+    try:
+        from sklearn.isotonic import IsotonicRegression
+    except ImportError as exc:
+        raise IsotonicCalibratorError(
+            "calibration_dependency_missing",
+            "scikit-learn is required to fit the isotonic calibrator",
+        ) from exc
     head = IsotonicRegression(out_of_bounds="clip")
     head.fit(list(raw), list(labels))
     return head
@@ -299,8 +308,8 @@ class IsotonicCalibrator:
     """
 
     def __init__(self) -> None:
-        self._l1_head: IsotonicRegression | None = None
-        self._l2_head: IsotonicRegression | None = None
+        self._l1_head: Any | None = None
+        self._l2_head: Any | None = None
         self._admitted_cell_count: int = 0
 
     @property

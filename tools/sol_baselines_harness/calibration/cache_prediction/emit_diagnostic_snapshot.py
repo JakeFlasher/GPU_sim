@@ -9,19 +9,17 @@ root.
 
 Supported operator invocation (from the repo root):
 
-    .venv/bin/python scripts/baselines_harness/calibration/cache_prediction/emit_diagnostic_snapshot.py
+    .venv/bin/python tools/sol_baselines_harness/calibration/cache_prediction/emit_diagnostic_snapshot.py
 
 The direct script-path form is the documented contract: the
-module inserts `<repo_root>/scripts` onto `sys.path` at import
-time, which makes the `baselines_harness` package discoverable
+module inserts `<repo_root>/tools` onto `sys.path` at import
+time, which makes the `sol_baselines_harness` package discoverable
 to the script body. The `python -m
-baselines_harness.calibration.cache_prediction.emit_diagnostic_snapshot`
+sol_baselines_harness.calibration.cache_prediction.emit_diagnostic_snapshot`
 form does NOT work from the repo root because
-`baselines_harness` lives under `scripts/` and is not on
+`sol_baselines_harness` lives under `tools/` and is not on
 Python's module-discovery path before the script body runs;
-operators MUST use the direct script path. A subprocess smoke
-test in `test_emit_diagnostic_snapshot.py` pins the supported
-surface against regression.
+operators MUST use the direct script path.
 
 The CLI prints a structured snapshot summary (output path,
 denominator-box partition counts, dual-gate verdicts) and exits
@@ -50,10 +48,10 @@ from typing import Callable
 
 _HERE = Path(__file__).resolve().parent
 _REPO_ROOT = _HERE.parents[3]
-if str(_REPO_ROOT / "scripts") not in sys.path:
-    sys.path.insert(0, str(_REPO_ROOT / "scripts"))
+if str(_REPO_ROOT / "tools") not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT / "tools"))
 
-from baselines_harness.calibration.cache_prediction.intermediate_baseline import (  # noqa: E402
+from sol_baselines_harness.calibration.cache_prediction.intermediate_baseline import (  # noqa: E402
     CLI_EXIT_BOTH_GATES_PASS,
     CLI_EXIT_SCHEMA_OR_CONTRACT_GATE_FAIL,
     CLI_EXIT_USER_ACCEPTANCE_GATE_FAIL,
@@ -275,7 +273,7 @@ def _build_parser() -> argparse.ArgumentParser:
         help=(
             "explicit host-arch availability manifest path "
             "(default: in-tree "
-            "scripts/baselines_harness/calibration/"
+            "tools/sol_baselines_harness/calibration/"
             "cache_prediction/host_arch_availability_v1.toml)"
         ),
     )
@@ -286,7 +284,7 @@ def _build_parser() -> argparse.ArgumentParser:
         help=(
             "explicit calibration/validation split manifest "
             "path (default: in-tree "
-            "scripts/baselines_harness/calibration/"
+            "tools/sol_baselines_harness/calibration/"
             "cache_prediction/calibration_validation_split_v1.toml)"
         ),
     )

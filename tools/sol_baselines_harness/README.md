@@ -1,4 +1,4 @@
-# `scripts/baselines_harness/`
+# `tools/sol_baselines_harness/`
 
 Drive *.cu template solutions through the official `sol-execbench`
 evaluator, emit per-workload report rows, score against the SOL Score
@@ -6,9 +6,9 @@ formula (when local arch config is available), aggregate across all
 landed pilots, lint the surface, and record the deferred-ledger of
 pilots that fail correctness. The harness is also the layering point
 for the six counter-free analytic surfaces described in
-[`../../CLAUDE.md`](../../CLAUDE.md) §"Counter-Free Analytics Framework".
+[`../../AGENTS.md`](../../AGENTS.md) and the retained campaign skill.
 
-> **Contract realignment landed (2026-05-13).** The project's
+> **Current contract.** The project's
 > landing contract is **correctness-only** — `speedup_factor` against
 > the PyTorch reference is diagnostic, not gating. The legacy
 > `deferred_slow` status retired. `report.py` now gates cache replay,
@@ -17,9 +17,6 @@ for the six counter-free analytic surfaces described in
 > survives as a diagnostic column in `report.json` / `report.md`.
 > SOL Score 0.3 – 0.5+ from the online judge is the reporting band
 > for template solutions (not a rejection threshold).
->
-> Some passages below still describe the prior speed-gate behavior —
-> they are kept as historical context. CLAUDE.md is the binding spec.
 
 The module is intentionally split so each concern is independently
 testable:
@@ -32,11 +29,10 @@ testable:
 | `parse_trace.py` | Read JSONL `Trace` lines from the upstream evaluator via the live Pydantic schema (no schema duplication). |
 | `normalise_benchmark.py` | Stage a Pydantic-compatible copy of the downloaded benchmark directory (empty-string optional fields → `None`). |
 | `score.py` | SOL Score wrapper. When `SOLAR/configs/arch/5060.yaml` is present AND the slug has a builder in `solar_analysis.py:_REGISTRY`, the canonical `local_sol_score_5060` column is the median of `compute_score(t_k_5060, t_b_5060, t_sol_5060)` across the baseline's workloads, with `t_sol_5060` from SOLAR Stage 4. Falls back to `"unknown_t_sol"` when the YAML is absent OR the slug has no registered builder. |
-| `cache.py` | Cache-key derivation (`solution_source_hash` + `sol_execbench_source_hash` + `native_env_hash` + `environment_libs` + `build_mode` + `surface_set`); PASSED-only replay. Strict-equality match on every component; any `"unknown"` component raises `DegradedNativeEnvError` at derive time. |
+| `cache.py` | Cache-key derivation (`solution_source_hash` + `sol_execbench_source_hash` + `native_env_hash` + `environment_libs` + `build_mode` + `surface_set`); PASSED-only replay. Strict-equality match on every component; unknown or malformed digest identities are rejected before reuse. |
 | `lint.py` | Forbidden-surface scan over landed sources, harness production code, and `deferred.json` hygiene gate. |
 | `report.py` | Aggregate JSON + Markdown report across every landed baseline; lint pre-flight gate. |
 | `deferred.json` | Ledger of pilots that failed correctness; schema documented inline. |
-| `tests/` | Pytest cases for `score` / `cache` / `lint` / harness-internals. |
 
 ## Prerequisites
 
@@ -45,21 +41,21 @@ Three things must exist before running the harness:
 1. **Benchmark data** (one-time, ~few GB):
 
    ```sh
-   ./sol-execbench/scripts/download_data.sh
+   ./tools/sol_execbench/scripts/download_data.sh
    ```
 
    Subsets land at
-   `sol-execbench/data/benchmark/{L1,L2,Quant,FlashInfer-Bench}/<NNN_name>/`.
+   `tools/sol_execbench/data/benchmark/{L1,L2,Quant,FlashInfer-Bench}/<NNN_name>/`.
 
 2. **Native `sol-execbench` install** (one-time):
 
    ```sh
-   uv sync --project sol-execbench
+   uv sync --project tools/sol_execbench
    ```
 
    The command installs the upstream package and CLI. Its declared CUTLASS
    dependency remains independently versioned; the active harness build path
-   overrides header search with the hash-fingerprinted
+   overrides header search with the pinned
    `third_party/cutlass/` v4.6.1 tree via `CUTLASS_DIR`.
 
 3. **Host CUDA toolchain** (host-side, one-time):
@@ -86,7 +82,7 @@ The SOLAR local-arch config (`SOLAR/configs/arch/5060.yaml`) is
 ### Single-baseline run
 
 ```sh
-python scripts/baselines_harness/run.py \
+python tools/sol_baselines_harness/run.py \
     --baseline baselines/FIB/problem_001_fused_add_rmsnorm_h2048/cuda_cpp
 ```
 
@@ -102,11 +98,11 @@ Output: JSON with `rows[]` (one entry per workload), `expected_rows`,
 ### Aggregate report across every landed baseline
 
 ```sh
-python scripts/baselines_harness/report.py
+python tools/sol_baselines_harness/report.py
 ```
 
 Walks every `baselines/<cat>/<slug>/<lang>/` directory. For each
-baseline, the candidate trace is `scripts/baselines_harness/.harness_traces/<slug>__<lang>.json`
+baseline, the candidate trace is `tools/sol_baselines_harness/.harness_traces/<slug>__<lang>.json`
 (the report's own deterministic stamp location). If a caller-
 supplied `--trace-dir` is also present, legacy `round-*-trace*.json`
 files there are scanned as a fallback. A candidate replays only
@@ -114,11 +110,11 @@ when its stored `CacheKey` matches the freshly derived key (see
 [Cache-key semantics](#cache-key-semantics)), every row is `PASSED`,
 AND every row's `speedup_factor > 1.0`. Otherwise the baseline is
 re-run through `run_baseline`, a fresh trace is written to
-`scripts/baselines_harness/.harness_traces/<slug>__<lang>.json`,
+`tools/sol_baselines_harness/.harness_traces/<slug>__<lang>.json`,
 and the cache index is stamped for the next invocation. Outputs:
 
-- `scripts/baselines_harness/report.json` — machine-readable.
-- `scripts/baselines_harness/report.md` — human-readable.
+- `tools/sol_baselines_harness/report.json` — machine-readable.
+- `tools/sol_baselines_harness/report.md` — human-readable.
 
 The report is **lint-gated and write-protected**: when the
 forbidden-surface scan or `deferred.json` hygiene check fails, the
@@ -129,7 +125,7 @@ No stale `report.json` / `report.md` survives a dirty lint run.
 ### Dry-run
 
 ```sh
-python scripts/baselines_harness/run.py \
+python tools/sol_baselines_harness/run.py \
     --baseline baselines/.../cuda_cpp \
     --print-cmd
 ```
@@ -186,7 +182,7 @@ contention-free.
       "category": "FIB",
       "slug": "problem_001_fused_add_rmsnorm_h2048",
       "language": "cuda_cpp",
-      "trace": "/<repo>/scripts/baselines_harness/.harness_traces/problem_001_fused_add_rmsnorm_h2048__cuda_cpp.json",
+      "trace": "/<repo>/tools/sol_baselines_harness/.harness_traces/problem_001_fused_add_rmsnorm_h2048__cuda_cpp.json",
       "workload_count": 7,
       "all_passed": true,
       "meets_speed_gate": true,
@@ -238,7 +234,7 @@ paragraph.
 
 The aggregate report (`report.py`) maintains a per-trace cache index
 at `--cache-file` (default
-`scripts/baselines_harness/.harness_cache.json`). A candidate trace
+`tools/sol_baselines_harness/.harness_cache.json`). A candidate trace
 is replayed only when ALL of:
 
 1. The trace path appears in the cache index.
@@ -249,7 +245,7 @@ is replayed only when ALL of:
 
 If any of those fails, `report.py` re-runs the baseline through
 `run_baseline`, writes a fresh trace to
-`scripts/baselines_harness/.harness_traces/<slug>__<language>.json`,
+`tools/sol_baselines_harness/.harness_traces/<slug>__<language>.json`,
 and stamps the new key into the cache index before continuing.
 
 The key tuple is:
@@ -262,7 +258,7 @@ The key tuple is:
 | Component | Source |
 |---|---|
 | `solution_source_hash` | SHA-256 over the canonical-order solution content (name + definition + languages + entry_point + binding + dependencies + `compile_options.{cflags, cuda_cflags, ld_flags}` + per-source `(path, content)`). `compile_options` sub-keys are iterated in sorted order, but element order within each list is preserved verbatim because flag order can be semantically significant. Mirrors the upstream `Solution._compute_hash` plus the `compile_options` coverage (a build-flag-only edit must bust the cache). |
-| `sol_execbench_source_hash` | `git rev-parse HEAD:sol-execbench` from the repo root — the Git tree hash of the vendored `sol-execbench/` subdirectory at the current HEAD. Changes only when the evaluator source tree changes; a top-level commit that only touches `scripts/baselines_harness/` or `baselines/` leaves this hash invariant, so cached PASS traces remain replay-eligible across harness-only commits. Falls back to `"unknown"` outside a git tree (deliberately busts the cache). |
+| `sol_execbench_source_hash` | `git rev-parse HEAD:tools/sol_execbench` from the repo root — the Git tree hash of the vendored `tools/sol_execbench/` subdirectory at the current HEAD. Changes only when the evaluator source tree changes; a top-level commit that only touches `tools/sol_baselines_harness/` or `baselines/` leaves this hash invariant, so cached PASS traces remain replay-eligible across harness-only commits. Falls back to `"unknown"` outside a git tree (deliberately busts the cache). |
 | `native_env_hash` | SHA-256 over a canonical-order JSON of ten host-environment components (`python_version`, `torch_version`, `nvcc_version`, `cuda_runtime_version`, `cutlass_tree_hash`, `cudnn_version`, `sol_execbench_package_version`, `nvcc_ccbin`, `cxx_compiler`, `c_compiler`). Strict identity: any component reading `"unknown"` raises `DegradedNativeEnvError` at derive time so a degraded fingerprint is never silently reused. The raw component dict is persisted in the cache record so debugging can inspect which component differed without re-probing. |
 | `environment_libs` | Sorted tuple of `(name, version)` pairs from the upstream evaluation's `environment.libs` field (e.g. `("torch", "2.4.0")`). Extracted from the trace's recorded `environment_libs` field. |
 | `build_mode` | `"judge"` or `"profiling"`. Separates the canonical judge build (byte-identical to the landed `solution.json`) from the profiling build (staged solution with `-DSOLBENCH_PROFILING` always and `-DSOLBENCH_HAS_NVTX` conditional on host probes). |
@@ -284,7 +280,7 @@ silent replay of a deferred row would let stale evidence rot.
 
 A landed `solution.json` belongs under `baselines/`. A pilot that
 fails one or more workloads belongs in
-`scripts/baselines_harness/deferred.json` instead.
+`tools/sol_baselines_harness/deferred.json` instead.
 
 ```json
 {
@@ -360,7 +356,7 @@ Internal category → downloader subset name (mirrors
 The harness's `_resolve_problem_dir` consumes this map: a baseline at
 `baselines/FIB/problem_001_fused_add_rmsnorm_h2048/cuda_cpp/` resolves
 its `solution.json.definition` field against
-`sol-execbench/data/benchmark/FlashInfer-Bench/001_fused_add_rmsnorm_h2048/`.
+`tools/sol_execbench/data/benchmark/FlashInfer-Bench/001_fused_add_rmsnorm_h2048/`.
 
 ## Local-vs-leaderboard disclaimer
 
@@ -374,7 +370,7 @@ keep them straight:
    trials, 256 MB L2 clear, subprocess isolation, 300 s timeout,
    clocks locked at 1.5 GHz via `nvidia-smi`. This is the published
    description.
-3. **Local `sol-execbench/` checkout** (this harness) has CLI
+3. **Local `tools/sol_execbench/` checkout** (this harness) has CLI
    `--timeout` defaulting to 600 s; `core/bench/timing.py` defaults
    to a CUPTI-based timer; L2-cache clear sizes itself off the actual
    device's L2. Use for local sanity-check timing — **never quote its
@@ -384,7 +380,7 @@ The aggregate report emits two distinct score columns:
 
 - `local_sol_score_5060` — the canonical local SOL Score column. The
   per-workload SOLAR Stage 4 derivation is wired via
-  `scripts/baselines_harness/solar_analysis.py:_REGISTRY` (one builder
+  `tools/sol_baselines_harness/solar_analysis.py:_REGISTRY` (one builder
   per landed slug; populated across Rounds 8 → 18 for the current
   8-pilot corpus). For each row in a registered baseline, `t_sol_5060`
   comes from `solar_analysis.t_sol_for_baseline_workload()`, which
@@ -476,7 +472,7 @@ kernel problems.
   for the baseline (strict equality on every component; no asymmetric
   fallback) AND every row is `PASSED`. Source edits, host toolchain
   bumps (torch / nvcc / cuDNN / runtime CUDA / CUTLASS tree),
-  `sol-execbench/` subdirectory tree-hash changes, and evaluator
+  `tools/sol_execbench/` subdirectory tree-hash changes, and evaluator
   library bumps all bust the cache deterministically — no stale PASS
   can be laundered through a slug-substring trace match.
 

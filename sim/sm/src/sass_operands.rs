@@ -416,12 +416,13 @@ fn parse_destination(text: &str, predicate: bool) -> Result<SassRegisterOperand,
     let operand = parse_register(text)
         .map_err(|()| text.to_owned())?
         .ok_or_else(|| text.to_owned())?;
-    let expected_file = if predicate {
-        SassRegisterFile::Predicate
+    let valid_file = if predicate {
+        operand.register.file == SassRegisterFile::Predicate
+            && matches!(operand.register.index, Some(0..=6))
     } else {
-        SassRegisterFile::Regular
+        operand.register.file == SassRegisterFile::Regular
     };
-    if operand.register.file != expected_file || operand.has_destination_modifier() {
+    if !valid_file || operand.has_destination_modifier() {
         return Err(text.to_owned());
     }
     Ok(operand)
@@ -447,7 +448,18 @@ fn parse_source(
         .or_else(|| text.strip_prefix('~'))
         .unwrap_or(text);
     match parse_register(text) {
-        Ok(Some(register)) => Ok(SassSourceOperand::Register(register)),
+        Ok(Some(register))
+            if matches!(
+                register.register.file,
+                SassRegisterFile::Regular | SassRegisterFile::Uniform
+            ) && !register.logical_not =>
+        {
+            Ok(SassSourceOperand::Register(register))
+        }
+        Ok(Some(_)) => Err(FixedLatencyOperandGapReason::UnsupportedSource {
+            slot,
+            operand: text.to_owned(),
+        }),
         Err(()) => Err(FixedLatencyOperandGapReason::UnsupportedSource {
             slot,
             operand: text.to_owned(),
@@ -464,13 +476,19 @@ fn parse_source(
 }
 
 fn parse_predicate_source(text: &str) -> Result<SassRegisterOperand, String> {
+    let mut predicate_text = text.trim();
+    if let Some(rest) = predicate_text.strip_prefix('!') {
+        predicate_text = rest;
+    }
+    if predicate_text.starts_with('!') || predicate_text.contains('.') {
+        return Err(text.to_owned());
+    }
     let operand = parse_register(text)
         .map_err(|()| text.to_owned())?
         .ok_or_else(|| text.to_owned())?;
-    if !matches!(
-        operand.register.file,
-        SassRegisterFile::Predicate | SassRegisterFile::UniformPredicate
-    ) || operand.reused
+    if operand.register.file != SassRegisterFile::Predicate
+        || !matches!(operand.register.index, None | Some(0..=6))
+        || operand.reused
         || operand.arithmetic_negated
         || operand.bitwise_not
         || operand.absolute
@@ -717,6 +735,23 @@ mod tests {
         assert_eq!(projected.predicate_sources().len(), 2);
         assert!(projected.predicate_sources()[1].logical_not());
         assert_eq!(projected.sm86_regular_source_bank_reads(), [0, 1]);
+    }
+
+    #[test]
+    fn predicate_domain_rejects_aliases_and_data_sources() {
+        for text in [
+            "IADD3.X R0, R1, R2, R3, P7, P7",
+            "IADD3 R0, P7, R1, R2, R3",
+            "IADD3 R0, P0, P1, R2, R3",
+            "IADD3.X R0, R1, R2, R3, UP0, !UPT",
+            "IADD3.X R0, R1, R2, R3, !!P0, P0.H0",
+            "IADD3 R0, !R1, R2, R3",
+        ] {
+            assert!(!matches!(
+                project_fixed_latency_operands(text, control(0), ArchId::Sm86),
+                FixedLatencyOperandStatus::Projected(_)
+            ));
+        }
     }
 
     #[test]

@@ -17,14 +17,18 @@
 //! sm_86 values.
 
 use std::collections::BTreeSet;
+use std::io::Read;
 use std::path::Path;
 
+use crate::json::strict_json_from_slice;
 use crate::{
     ArchError, ArchId, ArchIdentity, BareLdgECardDeclaration, BareLdgECardDeclarationError,
     BareLdgEDefault, BuildArch, CapabilityError, CapabilityStatus, Sku,
 };
 use serde::Deserialize;
 use serde::de::DeserializeOwned;
+
+const MAX_ARCH_CARD_BYTES: u64 = 16 * 1024 * 1024;
 
 #[derive(Debug, thiserror::Error)]
 pub enum CalibError {
@@ -33,6 +37,12 @@ pub enum CalibError {
         path: String,
         #[source]
         source: std::io::Error,
+    },
+    #[error("card {path} is {observed} bytes, exceeding implementation limit {limit}")]
+    ResourceLimit {
+        path: String,
+        observed: u64,
+        limit: u64,
     },
     #[error("could not parse card {path}: {source}")]
     Parse {
@@ -728,17 +738,14 @@ pub struct ArchCard {
 
 impl ArchCard {
     pub fn load(path: &Path) -> Result<Self, CalibError> {
-        let raw = std::fs::read(path).map_err(|source| CalibError::Io {
-            path: path.display().to_string(),
-            source,
-        })?;
+        let raw = read_bounded_card(path, MAX_ARCH_CARD_BYTES)?;
         Self::parse(path, &raw)
     }
 
     /// Parse already-loaded card bytes through the same validation path as
     /// [`ArchCard::load`].
     pub fn parse(path: &Path, raw: &[u8]) -> Result<Self, CalibError> {
-        let raw: RawArchCard = serde_json::from_slice(raw).map_err(|source| CalibError::Parse {
+        let raw: RawArchCard = strict_json_from_slice(raw).map_err(|source| CalibError::Parse {
             path: path.display().to_string(),
             source,
         })?;
@@ -757,6 +764,13 @@ impl ArchCard {
                 field: "sku",
                 value: raw.sku,
                 requirement: "SKU must belong to card arch_id",
+            });
+        }
+        if raw.sm_count == 0 {
+            return Err(CalibError::InvalidCardValue {
+                field: "sm_count",
+                value: raw.sm_count.to_string(),
+                requirement: "positive integer representable as u32",
             });
         }
         let mut card = Self {
@@ -950,20 +964,69 @@ impl ArchCard {
     /// block must never be retrievable by labeling it sm_120.
     pub fn require_l1_geometry(&self) -> Result<&L1Geometry, CalibError> {
         let arch = self.sku_id()?.arch();
-        self.l1_geometry.require_for_arch(arch, "l1_geometry")
+        let geometry = self.l1_geometry.require_for_arch(arch, "l1_geometry")?;
+        Self::require_positive_u64("l1_geometry.l1tex_bytes", geometry.l1tex_bytes)?;
+        Self::require_positive_u32("l1_geometry.ways", geometry.ways)?;
+        Self::require_positive_u64("l1_geometry.default_l1_bytes", geometry.default_l1_bytes)?;
+        Self::require_positive_u64("l1_geometry.max_shared_bytes", geometry.max_shared_bytes)?;
+        Self::require_positive_u32("l1_geometry.sets", geometry.sets)?;
+        if geometry.default_l1_bytes > geometry.l1tex_bytes {
+            return Err(CalibError::InvalidCardValue {
+                field: "l1_geometry.default_l1_bytes",
+                value: geometry.default_l1_bytes.to_string(),
+                requirement: "must not exceed l1_geometry.l1tex_bytes",
+            });
+        }
+        Ok(geometry)
     }
 
     pub fn require_l2_geometry(&self) -> Result<&L2Geometry, CalibError> {
         let arch = self.sku_id()?.arch();
-        self.l2_geometry.require_for_arch(arch, "l2_geometry")
+        let geometry = self.l2_geometry.require_for_arch(arch, "l2_geometry")?;
+        Self::require_positive_u64("l2_geometry.capacity_bytes", geometry.capacity_bytes)?;
+        Self::require_positive_u32("l2_geometry.sector_bytes", geometry.sector_bytes)?;
+        Self::require_positive_u32("l2_geometry.num_slices", geometry.num_slices)?;
+        Self::require_positive_u32("l2_geometry.line_bytes", geometry.line_bytes)?;
+        if geometry.line_bytes % geometry.sector_bytes != 0 {
+            return Err(CalibError::InvalidCardValue {
+                field: "l2_geometry.line_bytes",
+                value: geometry.line_bytes.to_string(),
+                requirement: "must be an integer multiple of l2_geometry.sector_bytes",
+            });
+        }
+        if geometry.capacity_bytes < u64::from(geometry.line_bytes) {
+            return Err(CalibError::InvalidCardValue {
+                field: "l2_geometry.capacity_bytes",
+                value: geometry.capacity_bytes.to_string(),
+                requirement: "must be at least one L2 line",
+            });
+        }
+        Ok(geometry)
     }
 
     pub fn require_nvml_reference_operating_point(
         &self,
     ) -> Result<&NvmlReferenceOperatingPoint, CalibError> {
         let arch = self.sku_id()?.arch();
-        self.nvml_reference_operating_point
-            .require_for_arch(arch, "nvml_reference_operating_point")
+        let operating_point = self
+            .nvml_reference_operating_point
+            .require_for_arch(arch, "nvml_reference_operating_point")?;
+        if !operating_point.sm_clock_ref_mhz.is_finite()
+            || operating_point.sm_clock_ref_mhz <= 0.0
+            || !operating_point.max_sm_clock_mhz.is_finite()
+            || operating_point.max_sm_clock_mhz <= 0.0
+            || operating_point.max_sm_clock_mhz < operating_point.sm_clock_ref_mhz
+            || operating_point
+                .short_burst_sm_clock_ref_mhz
+                .is_some_and(|value| !value.is_finite() || value <= 0.0)
+        {
+            return Err(CalibError::InvalidCardValue {
+                field: "nvml_reference_operating_point",
+                value: "non-finite, non-positive, or inverted clock range".to_owned(),
+                requirement: "positive finite clocks with max >= reference",
+            });
+        }
+        Ok(operating_point)
     }
 
     pub fn require_dram_bandwidth(&self) -> Result<&DramBandwidth, CalibError> {
@@ -1126,6 +1189,29 @@ impl ArchCard {
     }
 }
 
+fn read_bounded_card(path: &Path, limit: u64) -> Result<Vec<u8>, CalibError> {
+    let file = std::fs::File::open(path).map_err(|source| CalibError::Io {
+        path: path.display().to_string(),
+        source,
+    })?;
+    let mut raw = Vec::new();
+    file.take(limit.saturating_add(1))
+        .read_to_end(&mut raw)
+        .map_err(|source| CalibError::Io {
+            path: path.display().to_string(),
+            source,
+        })?;
+    let observed = u64::try_from(raw.len()).unwrap_or(u64::MAX);
+    if observed > limit {
+        return Err(CalibError::ResourceLimit {
+            path: path.display().to_string(),
+            observed,
+            limit,
+        });
+    }
+    Ok(raw)
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used)] // unwrap in tests is an assertion, not error handling
 mod tests {
@@ -1138,6 +1224,36 @@ mod tests {
             .join(name)
             .canonicalize()
             .expect("card exists in-repo")
+    }
+
+    #[test]
+    fn bounded_card_read_rejects_oversized_input() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("card.json");
+        std::fs::write(&path, b"12345").unwrap();
+        assert!(matches!(
+            read_bounded_card(&path, 4),
+            Err(CalibError::ResourceLimit {
+                observed: 5,
+                limit: 4,
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn duplicate_json_members_are_rejected_before_card_decode() {
+        let raw = std::fs::read(card_path("sm_86.json")).unwrap();
+        let text = String::from_utf8(raw).unwrap();
+        let duplicate = text.replacen(
+            "\"arch_id\": \"sm_86\"",
+            "\"arch_id\": \"sm_86\", \"arch_id\": \"sm_86\"",
+            1,
+        );
+        let error = ArchCard::parse(Path::new("sm_86.json"), duplicate.as_bytes()).unwrap_err();
+        assert!(matches!(error, CalibError::Parse { source, .. } if source
+            .to_string()
+            .contains("duplicate JSON member")));
     }
 
     fn load_mutated_card(
@@ -1637,6 +1753,58 @@ mod tests {
                 "{bad}"
             );
         }
+    }
+
+    #[test]
+    fn sm_count_must_be_positive() {
+        assert!(matches!(
+            load_mutated_card("sm_86.json", |card| {
+                card["sm_count"] = serde_json::json!(0);
+            }),
+            Err(CalibError::InvalidCardValue {
+                field: "sm_count",
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn present_geometry_and_clock_ranges_are_validated() {
+        let l1 = load_mutated_card("sm_86.json", |card| {
+            card["l1_geometry"]["ways"] = serde_json::json!(0);
+        })
+        .unwrap();
+        assert!(matches!(
+            l1.require_l1_geometry(),
+            Err(CalibError::InvalidCardValue {
+                field: "l1_geometry.ways",
+                ..
+            })
+        ));
+
+        let l2 = load_mutated_card("sm_86.json", |card| {
+            card["l2_geometry"]["line_bytes"] = serde_json::json!(33);
+        })
+        .unwrap();
+        assert!(matches!(
+            l2.require_l2_geometry(),
+            Err(CalibError::InvalidCardValue {
+                field: "l2_geometry.line_bytes",
+                ..
+            })
+        ));
+
+        let clocks = load_mutated_card("sm_86.json", |card| {
+            card["nvml_reference_operating_point"]["max_sm_clock_mhz"] = serde_json::json!(1000.0);
+        })
+        .unwrap();
+        assert!(matches!(
+            clocks.require_nvml_reference_operating_point(),
+            Err(CalibError::InvalidCardValue {
+                field: "nvml_reference_operating_point",
+                ..
+            })
+        ));
     }
 
     #[test]

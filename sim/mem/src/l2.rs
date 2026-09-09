@@ -739,7 +739,7 @@ pub enum L2AccessError {
     Counter(#[from] L2CounterError),
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct L2Counters {
     /// Architecture provenance bound by the owning [`L2Model`].
     arch: Option<ArchId>,
@@ -750,6 +750,13 @@ pub struct L2Counters {
     /// write-class sector lookup. Cache state and response pricing continue to
     /// use `hits`/`misses`; this is an observer-only classification.
     pub lookup_hits: u64,
+    /// NCU-style lookup denominator.  It is deliberately separate from the
+    /// physical `hits + misses` stream because L2 write packetization can
+    /// collapse several physical sector mutations into one lookup observer
+    /// unit.  Legacy/direct cache accesses populate it one sector at a time;
+    /// the shared-system replay replaces the observer totals with its
+    /// request/coalescing accounting after the event stream drains.
+    pub lookup_requests: u64,
     /// Miss split (state-machine kinds, not the Python 3C diagnostic).
     pub line_misses: u64,
     pub sector_fill_misses: u64,
@@ -764,6 +771,7 @@ pub enum L2CounterField {
     Hits,
     Misses,
     LookupHits,
+    LookupRequests,
     LineMisses,
     SectorFillMisses,
     WriteTagHits,
@@ -775,6 +783,7 @@ impl std::fmt::Display for L2CounterField {
             Self::Hits => "hits",
             Self::Misses => "misses",
             Self::LookupHits => "lookup_hits",
+            Self::LookupRequests => "lookup_requests",
             Self::LineMisses => "line_misses",
             Self::SectorFillMisses => "sector_fill_misses",
             Self::WriteTagHits => "write_tag_hits",
@@ -798,6 +807,8 @@ pub enum L2CounterError {
     },
     #[error("L2 counter total overflows u64: hits={hits}, misses={misses}")]
     TotalOverflow { hits: u64, misses: u64 },
+    #[error("L2 lookup observer hits exceed requests: hits={hits}, requests={requests}")]
+    LookupHitsExceedRequests { hits: u64, requests: u64 },
 }
 
 fn checked_counter_add(
@@ -821,20 +832,6 @@ fn checked_counter_sub(
             current,
             baseline,
         })
-}
-
-impl Default for L2Counters {
-    fn default() -> Self {
-        Self {
-            arch: None,
-            hits: 0,
-            misses: 0,
-            lookup_hits: 0,
-            line_misses: 0,
-            sector_fill_misses: 0,
-            write_tag_hits: 0,
-        }
-    }
 }
 
 impl L2Counters {
@@ -876,6 +873,11 @@ impl L2Counters {
             self.lookup_hits,
             other.lookup_hits,
         )?;
+        let lookup_requests = checked_counter_add(
+            L2CounterField::LookupRequests,
+            self.lookup_requests,
+            other.lookup_requests,
+        )?;
         let line_misses = checked_counter_add(
             L2CounterField::LineMisses,
             self.line_misses,
@@ -895,6 +897,7 @@ impl L2Counters {
         self.hits = hits;
         self.misses = misses;
         self.lookup_hits = lookup_hits;
+        self.lookup_requests = lookup_requests;
         self.line_misses = line_misses;
         self.sector_fill_misses = sector_fill_misses;
         self.write_tag_hits = write_tag_hits;
@@ -919,6 +922,11 @@ impl L2Counters {
                 L2CounterField::LookupHits,
                 self.lookup_hits,
                 baseline.lookup_hits,
+            )?,
+            lookup_requests: checked_counter_sub(
+                L2CounterField::LookupRequests,
+                self.lookup_requests,
+                baseline.lookup_requests,
             )?,
             line_misses: checked_counter_sub(
                 L2CounterField::LineMisses,
@@ -945,6 +953,19 @@ impl L2Counters {
                 hits: self.hits,
                 misses: self.misses,
             })
+    }
+
+    /// Validate the observer-only lookup pair.  The physical cache stream is
+    /// intentionally not required to equal this pair: packetization and
+    /// source-side coalescing can make their denominators different.
+    pub fn validate_lookup_observer(&self) -> Result<(), L2CounterError> {
+        if self.lookup_hits > self.lookup_requests {
+            return Err(L2CounterError::LookupHitsExceedRequests {
+                hits: self.lookup_hits,
+                requests: self.lookup_requests,
+            });
+        }
+        Ok(())
     }
 }
 
@@ -978,6 +999,12 @@ pub struct L2Model {
     clock: i64,
     bip_counter: u64,
     counters: L2Counters,
+    /// Last observer totals committed at a launch boundary.  During a launch
+    /// the physical event path temporarily increments the same public counter
+    /// fields; keeping this separate witness lets the boundary replace that
+    /// provisional stream without erasing a retained stream-L2 history.
+    observer_lookup_hits: u64,
+    observer_lookup_requests: u64,
     owner: L2ModelOwner,
     next_generation: NextAllocationGeneration,
     access_discipline: Option<L2AccessDiscipline>,
@@ -1033,6 +1060,8 @@ impl L2Model {
             clock: 0,
             bip_counter: 0,
             counters: L2Counters::for_arch(arch),
+            observer_lookup_hits: 0,
+            observer_lookup_requests: 0,
             owner,
             next_generation: NextAllocationGeneration::Available(0),
             access_discipline: None,
@@ -1048,6 +1077,51 @@ impl L2Model {
     pub fn counters(&self) -> Result<&L2Counters, L2CounterError> {
         self.validate_counter_architecture()?;
         Ok(&self.counters)
+    }
+
+    /// Replace the observer-only lookup totals after a shared-system replay has
+    /// applied its source/request coalescing rule.  Physical cache state,
+    /// replacement metadata, and the `hits`/`misses` response-pricing counters
+    /// are untouched.  The caller supplies cumulative totals so retained
+    /// stream sessions remain monotonic across launch boundaries.
+    pub fn replace_lookup_observer(
+        &mut self,
+        lookup_hits: u64,
+        lookup_requests: u64,
+    ) -> Result<(), L2AccessError> {
+        self.validate_counter_architecture()?;
+        if lookup_hits > lookup_requests {
+            return Err(L2AccessError::Counter(
+                L2CounterError::LookupHitsExceedRequests {
+                    hits: lookup_hits,
+                    requests: lookup_requests,
+                },
+            ));
+        }
+        // This API receives cumulative observer totals at a retained
+        // multi-launch boundary.  A lower replacement would silently erase
+        // history and make the next `checked_delta_since` underflow (or, if
+        // consumed directly, misreport a negative launch contribution).
+        // Reject both regressions before changing either field.
+        if lookup_hits < self.observer_lookup_hits {
+            return Err(L2AccessError::Counter(L2CounterError::Underflow {
+                field: L2CounterField::LookupHits,
+                current: lookup_hits,
+                baseline: self.observer_lookup_hits,
+            }));
+        }
+        if lookup_requests < self.observer_lookup_requests {
+            return Err(L2AccessError::Counter(L2CounterError::Underflow {
+                field: L2CounterField::LookupRequests,
+                current: lookup_requests,
+                baseline: self.observer_lookup_requests,
+            }));
+        }
+        self.counters.lookup_hits = lookup_hits;
+        self.counters.lookup_requests = lookup_requests;
+        self.observer_lookup_hits = lookup_hits;
+        self.observer_lookup_requests = lookup_requests;
+        Ok(())
     }
 
     /// Number of event-mode sectors requested but not yet completed. A launch
@@ -1114,6 +1188,8 @@ impl L2Model {
             clock: self.clock,
             bip_counter: self.bip_counter,
             counters: self.counters,
+            observer_lookup_hits: self.observer_lookup_hits,
+            observer_lookup_requests: self.observer_lookup_requests,
             owner: self.owner,
             next_generation: self.next_generation,
             access_discipline: self.access_discipline,
@@ -1257,6 +1333,7 @@ impl L2Model {
                 delta.misses = 1;
                 delta.line_misses = 1;
                 delta.lookup_hits = u64::from(lookup_hit);
+                delta.lookup_requests = 1;
                 counters.add_checked(&delta)?;
                 if let Some(next) = next_bip_counter {
                     bip_counter = next;
@@ -1276,6 +1353,7 @@ impl L2Model {
                 }
                 let mut delta = L2Counters::for_arch(self.cfg.arch);
                 delta.lookup_hits = u64::from(lookup_hit);
+                delta.lookup_requests = 1;
                 if counted_hit {
                     delta.hits = 1;
                     if !sector_present && class == L2OpClass::WriteAtomic {
@@ -1386,8 +1464,12 @@ impl L2Model {
             let sector_present = line_present && valid_mask & bit != 0;
             let sector_pending = line_present && pending_mask & bit != 0;
             let counted_hit = sector_present || (line_present && class == L2OpClass::WriteAtomic);
+            // L2's tag-stage lookup observer counts a pending allocation as a
+            // hit.  This is distinct from `counted_hit`: the latter drives
+            // data presence/response pricing, while the former mirrors the
+            // operation-level NCU lookup counter (including same-mask sector
+            // coalescing).
             let lookup_hit = counted_hit || sector_pending || class == L2OpClass::WriteAtomic;
-
             if !line_present {
                 let next_bip_counter =
                     if self.cfg.replacement == L2Replacement::Bip {
@@ -1423,6 +1505,7 @@ impl L2Model {
                 delta.misses = 1;
                 delta.line_misses = 1;
                 delta.lookup_hits = u64::from(lookup_hit);
+                delta.lookup_requests = 1;
                 counters.add_checked(&delta)?;
                 if let Some(next) = next_bip_counter {
                     bip_counter = next;
@@ -1450,6 +1533,7 @@ impl L2Model {
                 }
                 let mut delta = L2Counters::for_arch(self.cfg.arch);
                 delta.lookup_hits = u64::from(lookup_hit);
+                delta.lookup_requests = 1;
                 if counted_hit {
                     delta.hits = 1;
                     if !sector_present && class == L2OpClass::WriteAtomic {
@@ -2065,6 +2149,8 @@ mod tests {
         clock: i64,
         bip_counter: u64,
         counters: L2Counters,
+        observer_lookup_hits: u64,
+        observer_lookup_requests: u64,
         next_generation: NextAllocationGeneration,
         access_discipline: Option<L2AccessDiscipline>,
     }
@@ -2077,6 +2163,8 @@ mod tests {
             clock: l2.clock,
             bip_counter: l2.bip_counter,
             counters: l2.counters,
+            observer_lookup_hits: l2.observer_lookup_hits,
+            observer_lookup_requests: l2.observer_lookup_requests,
             next_generation: l2.next_generation,
             access_discipline: l2.access_discipline,
         }
@@ -2107,6 +2195,48 @@ mod tests {
             assert_eq!(state(&l2), before, "{policy:?} source was mutated");
             assert_ne!(state(&snapshot), before, "{policy:?} snapshot is aliased");
         }
+    }
+
+    #[test]
+    fn lookup_observer_replacement_is_cumulative_and_transactional() {
+        let mut l2 = L2Model::new(cfg(1024, 2, 1)).unwrap();
+        l2.replace_lookup_observer(5, 7).unwrap();
+        let before = state(&l2);
+
+        assert!(matches!(
+            l2.replace_lookup_observer(4, 6),
+            Err(L2AccessError::Counter(L2CounterError::Underflow {
+                field: L2CounterField::LookupHits,
+                current: 4,
+                baseline: 5,
+            }))
+        ));
+        assert_eq!(state(&l2), before);
+
+        assert!(matches!(
+            l2.replace_lookup_observer(5, 6),
+            Err(L2AccessError::Counter(L2CounterError::Underflow {
+                field: L2CounterField::LookupRequests,
+                current: 6,
+                baseline: 7,
+            }))
+        ));
+        assert_eq!(state(&l2), before);
+
+        // Equal cumulative totals are a valid no-op update.
+        l2.replace_lookup_observer(5, 7).unwrap();
+        assert_eq!(state(&l2), before);
+
+        // A launch may have provisionally incremented the physical lookup
+        // fields before the packetized observer is finalized.  The observer
+        // replacement is valid when it remains monotonic relative to the
+        // committed observer baseline, even if it is below that provisional
+        // physical value.
+        l2.access(0, 0, L2OpClass::WriteAtomic).unwrap();
+        assert!(l2.counters.lookup_hits > 5);
+        l2.replace_lookup_observer(5, 8).unwrap();
+        assert_eq!(l2.counters.lookup_hits, 5);
+        assert_eq!(l2.counters.lookup_requests, 8);
     }
 
     #[test]

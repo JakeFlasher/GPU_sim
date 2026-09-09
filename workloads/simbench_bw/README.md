@@ -38,15 +38,14 @@ and verification target are decoupled, so the operator never re-reads the
 runbook from a stale post-checkout worktree.
 
 All evidence claims produced by this harness are bound by the Two-Device
-Local Development Model evidence statuses per `CLAUDE.md`:
+Local Development Model evidence statuses per `AGENTS.md`:
 `Offline-verified`, `Verified-live-sm_86`, `Verified-live-sm_120`, and
 `Cross-arch-verified`. Cross-arch promotion requires matching live evidence
 on both local arches (RTX 3090 Ti sm_86 and RTX 5060 laptop sm_120). The
 producer-side helpers `dual_workload_pairing_index.py`,
 `cupti_dual_source_live_admission.py`, and `nvml_metadata_verifier.py`
 underwrite AC-15 / AC-16 promotions and enforce strict sidecar identity
-contracts; see `CLAUDE.md` "Two-Device Local Development Model" for the
-discipline they implement.
+contracts; see `AGENTS.md` for the current project scope and simulator rules.
 
 ## Quick Start
 

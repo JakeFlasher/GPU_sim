@@ -82,7 +82,7 @@ class HostInfo:
     field encodes the
     operator's intent and lands in the manifest's ``host.kind`` slot:
 
-    * ``local_sm_86`` — local RTX 3090 Ti (Phase 1 smoke target).
+    * ``local_sm_8_6`` — local RTX 3090 Ti (Phase 1 smoke target).
     * ``local_sm_120`` — a future RTX 5060 cloud host
       (Tier-2 cross-arch calibration target when
       allocated).
@@ -186,7 +186,7 @@ class Surface(ABC):
             Path to the landed baseline (``baselines/<cat>/<slug>/<lang>/``).
         problem_dir
             Path to the matching benchmark spec
-            (``sol-execbench/data/benchmark/<subset>/<NNN_name>/``).
+            (``tools/sol_execbench/data/benchmark/<subset>/<NNN_name>/``).
         bundle_dir
             Target ``.harness_traces/<slug>__<lang>/`` directory; the
             surface writes its artifacts under

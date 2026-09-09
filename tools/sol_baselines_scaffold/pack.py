@@ -21,7 +21,7 @@ downstream validate step will detect the drift via Pydantic source-
 path checks and fail.
 
 Usage:
-    python scripts/baselines_scaffold/pack.py \\
+    python tools/sol_baselines_scaffold/pack.py \\
         --baseline baselines/FIB/problem_001_fused_add_rmsnorm_h2048/cuda_cpp
 
 The tool fails closed (exit 2, nothing written) when:
@@ -167,7 +167,7 @@ def pack(baseline_dir: Path) -> Path:
 
 def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="scripts/baselines_scaffold/pack.py",
+        prog="tools/sol_baselines_scaffold/pack.py",
         description=(
             "Regenerate solution.json.sources[].content from disk in "
             "deterministic order. Idempotent."

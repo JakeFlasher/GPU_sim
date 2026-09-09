@@ -1,21 +1,21 @@
 {
-  "schema_version": 1,
-  "profile_id": "local_rtx3090ti_sm86_ncu_demo_v1",
-  "device_index": 0,
-  "expected": {
-    "name": "NVIDIA GeForce RTX 3090 Ti",
-    "uuid": "GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c",
-    "compute_capability": "8.6",
-    "driver_version": "610.57.04",
-    "sm_count": 84,
-    "l2_capacity_bytes": 6291456,
-    "l2_line_bytes": 128,
-    "l2_sector_bytes": 32
+  "artifacts": {
+    "arch_card": {
+      "path": "arch_profiles/cards/sm_86.json"
+    },
+    "pchase_card": {
+      "path": "data/pchase/sm_86_static_card.json"
+    },
+    "runtime_manifest": {
+      "path": "tools/nvbit_tracer/tracer_tool.nvbit-runtime-manifest.json"
+    },
+    "tracer": {
+      "path": "tools/nvbit_tracer/tracer_tool/tracer_tool.so"
+    }
   },
   "clock_policy": {
-    "mode": "observe_pre_post_no_sudo",
-    "expected_reference_sm_clock_mhz": 1350,
     "expected_reference_memory_clock_mhz": 10501,
+    "expected_reference_sm_clock_mhz": 1350,
     "manual_lock_commands_if_required": [
       "sudo nvidia-smi -i 0 -pm 1",
       "sudo nvidia-smi -i 0 -lgc 1350,1350",
@@ -24,42 +24,37 @@
     "manual_restore_commands": [
       "sudo nvidia-smi -i 0 -rgc",
       "sudo nvidia-smi -i 0 -rmc"
-    ]
+    ],
+    "mode": "observe_pre_post_no_sudo"
   },
-  "artifacts": {
-    "arch_card": {
-      "path": "arch_profiles/cards/sm_86.json",
-      "sha256": "12c72f8b16ac369fe8ab877f39850bfc1e5cbb3b16d0b2d45a43b14c66ffe1da"
-    },
-    "pchase_card": {
-      "path": "data/pchase/sm_86_static_card.json",
-      "sha256": "e87d2e208f5326a8083d1a54799864953a62ed1fece1b628583cf8d5cafc581d"
-    },
-    "tracer": {
-      "path": "tools/nvbit_tracer/tracer_tool/tracer_tool.so",
-      "sha256": "3f09ce65a4164abcd01e8d6d9b74befffe49e3d164ae74943dbf1e17ec5f2422"
-    },
-    "runtime_manifest": {
-      "path": "tools/nvbit_tracer/tracer_tool.nvbit-runtime-manifest.json",
-      "sha256": "891c727539a2820d4a410aa467ac212f58cdd9596afce36b90ed260c3d210eff"
-    }
-  },
-  "round0_observations": {
-    "sim_run_binary": {
-      "path": "sim/target/release/sim-run",
-      "sha256": "d923d0acf2f270e17efcd90fd5319f38937e62ee2240a1ff356950058949485e",
-      "role": "historical_pre_projection_identity_not_current_campaign_authority"
-    }
+  "device_index": 0,
+  "expected": {
+    "compute_capability": "8.6",
+    "driver_version": "610.57.04",
+    "l2_capacity_bytes": 6291456,
+    "l2_line_bytes": 128,
+    "l2_sector_bytes": 32,
+    "name": "NVIDIA GeForce RTX 3090 Ti",
+    "sm_count": 84,
+    "uuid": "GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c"
   },
   "ncu": {
-    "path": "/usr/local/cuda-13.2/nsight-compute-2026.1.0/ncu",
-    "version": "2026.1.0.0",
     "application_replay_requires_deterministic_launches": true,
     "cache_control": "all",
-    "clock_control": "none"
+    "clock_control": "none",
+    "path": "/usr/local/cuda-13.2/nsight-compute-2026.1.0/ncu",
+    "version": "2026.1.0.0"
   },
   "primary_sources": [
     "https://docs.nvidia.com/nsight-compute/ProfilingGuide/",
     "https://docs.nvidia.com/nsight-compute/NsightComputeCli/"
-  ]
+  ],
+  "profile_id": "local_rtx3090ti_sm86_ncu_demo_v1",
+  "round0_observations": {
+    "sim_run_binary": {
+      "path": "sim/target/release/sim-run",
+      "role": "historical_pre_projection_identity_not_current_campaign_authority"
+    }
+  },
+  "schema_version": 1
 }

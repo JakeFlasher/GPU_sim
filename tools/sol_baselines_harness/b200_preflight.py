@@ -43,7 +43,7 @@ Recommended probes (record status but do NOT block Phase 2):
   - ``cupti``: CUPTI shared lib resolves on the linker path; sample
     activity-enable call OK (Surface 2).
   - ``nvbit_metrics_tool``:
-    ``nvbit_tracer/metric_extractor/metric_extractor.so`` exists and
+    ``tools/nvbit_tracer/metric_extractor/metric_extractor.so`` exists and
     its ``cuobjdump --list-elf`` output covers the host architecture.
     On a B200 host (compute capability ``10.x``) the probe escalates
     to ``failed`` when ``sm_100a`` is missing from the cubin list —
@@ -90,9 +90,9 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 # `nvbit_metrics_tool` host-conditional escalation that turns a
 # wrong-arch `.so` into a blocker on a B200 host. Phase-1 still
 # requires the rest of the toolchain — nvcc, driver, cuda_runtime,
-# device, cutlass, cache_replay_native_available, nvbit_metrics_tool
+# device, cutlass, and nvbit_metrics_tool
 # — so a local smoke run cannot silently skip a missing CUTLASS
-# checkout or a broken nvcc.
+# checkout or a broken nvcc. Cache replay uses the tracked Python/Rust engine.
 MODE_PHASE_1_LOCAL_SMOKE = "phase1-local-smoke"
 MODE_PHASE_2_B200_FANOUT = "phase2-b200-fanout"
 _VALID_MODES = (MODE_PHASE_1_LOCAL_SMOKE, MODE_PHASE_2_B200_FANOUT)
@@ -111,7 +111,6 @@ _REQUIRED_PROBES = (
     # assumes these surfaces are reachable.
     "nvbit_metrics_tool",        # Canonical NVBit metric extractor (Surface 1).
     "sm_100a_cubin_disasm",      # nvdisasm consumes sm_100a cubin output (Surface 4 ext).
-    "cache_replay_native_available",  # Compiled cache-replay throughput floor (Surface 7).
 )
 
 # Probes that the B200-fanout contract requires but that the
@@ -139,15 +138,6 @@ _RECOMMENDED_PROBES = (
     "storage",
 )
 
-# Operator opt-out for cache_replay_native_available — when this env
-# is set, that probe degrades from required-for-fanout to
-# required-prefer (substatus records the operator opt-out instead of
-# blocking). The 235-pilot fanout's < 2 h replay budget is no longer
-# guaranteed when the slow Python backend is engaged; the operator
-# accepts that tradeoff explicitly.
-_PYTHON_REPLAY_FANOUT_OPT_OUT_ENV = "SIMBENCH_ALLOW_PYTHON_REPLAY_FANOUT"
-
-
 def _run(
     cmd: List[str],
     timeout: float = 30.0,
@@ -158,6 +148,7 @@ def _run(
             cmd,
             capture_output=True,
             text=True,
+            errors="replace",
             timeout=timeout,
             check=False,
         )
@@ -316,7 +307,7 @@ def probe_sm_100a_compile() -> Dict[str, Any]:
          with ``-gencode arch=compute_100a,code=sm_100a``. Toolchain-level
          "nvcc accepts B200 codegen at all" check.
       2. ``metric_extractor_compile``: compiles
-         ``nvbit_tracer/metric_extractor/{metric_extractor.cu,
+         ``tools/nvbit_tracer/metric_extractor/{metric_extractor.cu,
          inject_funcs.cu}`` with the same ``-I`` and per-source ``-Xptxas``
          flags the tool's Makefile uses. Tool-specific "the new sources
          survive a B200 cross-compile" check. Skipped (status reported as
@@ -384,8 +375,8 @@ def probe_sm_100a_compile() -> Dict[str, Any]:
         }
 
         # --- Sub-step 2: cross-compile the metric_extractor sources. ---
-        me_dir = REPO_ROOT / "nvbit_tracer" / "metric_extractor"
-        nvbit_include = REPO_ROOT / "nvbit_tracer" / "nvbit_release" / "core"
+        me_dir = REPO_ROOT / "tools" / "nvbit_tracer" / "metric_extractor"
+        nvbit_include = REPO_ROOT / "tools" / "nvbit_tracer" / "nvbit_release" / "core"
         me_main = me_dir / "metric_extractor.cu"
         me_inject = me_dir / "inject_funcs.cu"
 
@@ -626,7 +617,7 @@ def probe_nvbit_metrics_tool() -> Dict[str, Any]:
     Reports:
 
     - ``unavailable`` when the `.so` has not been built yet (operator
-      should run ``make -C nvbit_tracer/metric_extractor``).
+      should run ``make -C tools/nvbit_tracer/metric_extractor``).
     - ``failed`` when the host is a B200 (compute capability ``10.x``)
       and the built `.so` does not include an ``sm_100a`` cubin. The
       operator must rebuild for the B200 target before fanout — the
@@ -646,14 +637,14 @@ def probe_nvbit_metrics_tool() -> Dict[str, Any]:
     "wrong-arch `.so` slipping into a B200 fanout" failure mode is
     therefore caught at the gate, not just recorded as advisory.
     """
-    so = REPO_ROOT / "nvbit_tracer" / "metric_extractor" / "metric_extractor.so"
+    so = REPO_ROOT / "tools" / "nvbit_tracer" / "metric_extractor" / "metric_extractor.so"
     if not so.is_file():
         return {
             "status": "unavailable",
             "expected_path": str(so),
             "waiver_reason": (
                 "metric_extractor.so not built; run "
-                "`make -C nvbit_tracer/metric_extractor`."
+                "`make -C tools/nvbit_tracer/metric_extractor`."
             ),
         }
 
@@ -696,7 +687,7 @@ def probe_nvbit_metrics_tool() -> Dict[str, Any]:
                 f"metric_extractor.so on this B200 host (cc={compute_cap}) "
                 f"lacks an sm_100a cubin (cubins_present={cubins}); "
                 "rebuild with "
-                "`make -C nvbit_tracer/metric_extractor ARCH=sm_100a` "
+                "`make -C tools/nvbit_tracer/metric_extractor ARCH=sm_100a` "
                 "(or a multi-arch build covering both sm_86 and sm_100a) "
                 "before kicking off the 235-baseline fanout."
             ),
@@ -942,6 +933,7 @@ def _run_in(
             cwd=str(cwd),
             capture_output=True,
             text=True,
+            errors="replace",
             timeout=timeout,
             check=False,
         )
@@ -950,170 +942,6 @@ def _run_in(
         return 127, "", f"command not found: {cmd[0]}"
     except subprocess.TimeoutExpired:
         return 124, "", f"command timed out after {timeout}s: {' '.join(cmd)}"
-
-
-def probe_cache_replay_native_available() -> Dict[str, Any]:
-    """Check the compiled cache-replay extension AND its measured throughput.
-
-    Reports ``ok`` only when ALL of:
-      1. ``cache_analytics_replay_native`` is importable.
-      2. A 4 M-record synthetic microbench (sector-lookup pattern)
-         clears
-         ``THROUGHPUT_FLOOR_SECTOR_LOOKUPS_PER_SEC = 20_000_000``.
-
-    Reports ``degraded`` when the extension is importable but
-    throughput is below floor — the 235-pilot fanout's < 2 h replay
-    budget is no longer guaranteed but a local single-pilot run can
-    proceed.
-
-    Reports ``unavailable`` when the extension does not import. The
-    operator opt-out env ``SIMBENCH_ALLOW_PYTHON_REPLAY_FANOUT=1``
-    downgrades this case to ``degraded`` so the operator can run
-    the slow Python fallback explicitly. The orchestrator's
-    ``ready_for_phase_2`` logic excludes the ``degraded`` status
-    from blockers.
-
-    Import-only success without measured throughput is NOT a
-    valid ``ok`` path; the throughput floor must be measured.
-    """
-    operator_opt_out = bool(os.environ.get(_PYTHON_REPLAY_FANOUT_OPT_OUT_ENV))
-    THROUGHPUT_FLOOR_SECTOR_LOOKUPS_PER_SEC = 20_000_000
-
-    try:
-        import cache_analytics_replay_native  # type: ignore  # pyright: ignore[reportMissingImports]
-    except ImportError as exc:
-        substatus = {
-            "import_error": str(exc),
-            "expected_module": "cache_analytics_replay_native",
-            "operator_opt_out_env": _PYTHON_REPLAY_FANOUT_OPT_OUT_ENV,
-            "operator_opt_out_engaged": operator_opt_out,
-            "throughput_floor_sector_lookups_per_sec":
-                THROUGHPUT_FLOOR_SECTOR_LOOKUPS_PER_SEC,
-        }
-        if operator_opt_out:
-            return {
-                "status": "degraded",
-                "substatus": substatus,
-                "waiver_reason": (
-                    "Compiled cache_analytics_replay_native extension is "
-                    f"not built; {_PYTHON_REPLAY_FANOUT_OPT_OUT_ENV}=1 "
-                    "downgrades this probe from required-for-fanout to "
-                    "required-prefer. The Python backend is the fallback "
-                    "and the 235-pilot < 2 h replay budget is no longer "
-                    "guaranteed."
-                ),
-            }
-        return {
-            "status": "unavailable",
-            "substatus": substatus,
-            "waiver_reason": (
-                "Compiled cache_analytics_replay_native extension is "
-                "not importable. Build it via the M4 milestone before "
-                f"the 235-pilot fanout, or set "
-                f"{_PYTHON_REPLAY_FANOUT_OPT_OUT_ENV}=1 to accept the "
-                "slower Python replay path with a 'degraded' substatus."
-            ),
-        }
-
-    # Extension is importable — run the throughput microbench.
-    bench_result = _run_replay_throughput_microbench(
-        cache_analytics_replay_native,
-        floor_lookups_per_sec=THROUGHPUT_FLOOR_SECTOR_LOOKUPS_PER_SEC,
-    )
-
-    substatus = {
-        "module_loaded_from": getattr(
-            cache_analytics_replay_native, "__file__", "<built-in>"
-        ),
-        "throughput_floor_sector_lookups_per_sec":
-            THROUGHPUT_FLOOR_SECTOR_LOOKUPS_PER_SEC,
-        **bench_result,
-    }
-    if bench_result.get("microbench_status") == "ok":
-        return {"status": "ok", "substatus": substatus}
-    if bench_result.get("microbench_status") == "below_floor":
-        return {
-            "status": "degraded",
-            "substatus": substatus,
-            "waiver_reason": (
-                "Compiled cache_analytics_replay_native imported, "
-                f"but microbench measured "
-                f"{bench_result.get('measured_lookups_per_sec', 0):.0f} "
-                f"lookups/sec — below the "
-                f"{THROUGHPUT_FLOOR_SECTOR_LOOKUPS_PER_SEC} floor "
-                "required for the 235-pilot fanout's < 2 h replay "
-                "budget. Local single-pilot runs may proceed."
-            ),
-        }
-    # Microbench errored out (e.g. extension's API changed
-    # incompatibly).
-    return {
-        "status": "failed",
-        "substatus": substatus,
-        "waiver_reason": (
-            "cache_analytics_replay_native imported but the "
-            f"throughput microbench failed: "
-            f"{bench_result.get('error', 'unknown error')}"
-        ),
-    }
-
-
-def _run_replay_throughput_microbench(
-    extension: Any,
-    *,
-    floor_lookups_per_sec: int,
-) -> Dict[str, Any]:
-    """Run a 4 M-record synthetic sector-lookup microbench against the
-    compiled cache-replay extension.
-
-    Returns a dict with ``microbench_status`` in
-    {ok, below_floor, error}, plus measured fields when reachable.
-
-    The extension's API surface is not yet fixed (it's M4 work). The
-    canonical entry point this probe expects is
-    ``extension.replay_microbench(num_records: int) -> float`` that
-    returns the elapsed seconds. If the extension does NOT yet
-    expose that symbol, the probe records the API mismatch as an
-    error and lets the operator decide whether to ship a stub.
-    """
-    NUM_RECORDS = 4_000_000
-
-    try:
-        replay_microbench = getattr(extension, "replay_microbench", None)
-        if replay_microbench is None:
-            return {
-                "microbench_status": "error",
-                "error": (
-                    "extension does not expose replay_microbench(n) "
-                    "entry point; throughput microbench cannot run"
-                ),
-            }
-        elapsed = float(replay_microbench(NUM_RECORDS))
-    except Exception as exc:
-        return {
-            "microbench_status": "error",
-            "error": f"replay_microbench raised: {type(exc).__name__}: {exc}",
-        }
-
-    if elapsed <= 0:
-        return {
-            "microbench_status": "error",
-            "error": (
-                f"replay_microbench returned non-positive elapsed="
-                f"{elapsed!r}"
-            ),
-        }
-
-    lookups_per_sec = NUM_RECORDS / elapsed
-    status = "ok" if lookups_per_sec >= floor_lookups_per_sec else "below_floor"
-    return {
-        "microbench_status": status,
-        "microbench_records": NUM_RECORDS,
-        "elapsed_sec": elapsed,
-        "measured_lookups_per_sec": lookups_per_sec,
-    }
-
-
 
 
 def _required_probes_for_mode(mode: str) -> Tuple[str, ...]:
@@ -1168,7 +996,6 @@ def build_manifest(
         "cutlass": probe_cutlass(),
         "sm_100a_compile_proof": probe_sm_100a_compile(),
         "sm_100a_cubin_disasm": probe_sm_100a_cubin_disasm(),
-        "cache_replay_native_available": probe_cache_replay_native_available(),
         "nsys": probe_nsys(),
         "compute_sanitizer": probe_compute_sanitizer(),
         "cupti": probe_cupti(),
@@ -1179,16 +1006,12 @@ def build_manifest(
     required_probes = _required_probes_for_mode(mode)
     recommended_probes = _recommended_probes_for_mode(mode)
 
-    # Required-for-fanout blocker computation. A `cache_replay_native_available`
-    # probe with status `degraded` does NOT block (operator opt-out via
-    # SIMBENCH_ALLOW_PYTHON_REPLAY_FANOUT=1). Every other required probe
-    # must be `ok`.
+    # Required-for-fanout blocker computation. Every required probe must be
+    # `ok`; cache replay is provided by the tracked Python/Rust engine.
     blockers: List[str] = []
     for name in required_probes:
         s = checks.get(name, {}).get("status")
         if s == "ok":
-            continue
-        if name == "cache_replay_native_available" and s == "degraded":
             continue
         blockers.append(name)
 
@@ -1229,13 +1052,21 @@ def build_manifest(
         "recommended_probes": list(recommended_probes),
         "checks": checks,
         "blockers": blockers,
-        "ready_for_phase_2": not blockers,
+        # A local-smoke run deliberately omits the phase-2 architecture
+        # probes. Keep its own readiness explicit so that manifest cannot be
+        # reused to authorize a B200 fanout.
+        "ready_for_local_smoke": (
+            mode == MODE_PHASE_1_LOCAL_SMOKE and not blockers
+        ),
+        "ready_for_phase_2": (
+            mode == MODE_PHASE_2_B200_FANOUT and not blockers
+        ),
     }
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="scripts/baselines_harness/b200_preflight.py",
+        prog="tools/sol_baselines_harness/b200_preflight.py",
         description=(
             "Probe the current host for the toolchain prerequisites of "
             "the six counter-free analytic surfaces; emit "
@@ -1246,19 +1077,16 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--output",
         type=Path,
-        default=REPO_ROOT
-        / "scripts"
-        / "baselines_harness"
-        / "b200_ready_manifest.json",
+        default=REPO_ROOT / "tools" / "sol_baselines_harness" / "b200_ready_manifest.json",
         help="Output manifest path.",
     )
     parser.add_argument(
         "--artifact-path",
         type=Path,
-        default=REPO_ROOT / "scripts" / "baselines_harness" / ".harness_traces",
+        default=REPO_ROOT / "tools" / "sol_baselines_harness" / ".harness_traces",
         help=(
             "Path the storage probe checks for free disk space "
-            "(default: scripts/baselines_harness/.harness_traces). "
+            "(default: tools/sol_baselines_harness/.harness_traces). "
             "Walks upward if the path doesn't exist yet."
         ),
     )
@@ -1293,9 +1121,10 @@ def main(argv: Optional[List[str]] = None) -> int:
             f"b200_preflight: failed to emit manifest: {exc}\n"
         )
         return 2
-    if manifest["ready_for_phase_2"]:
+    if manifest["ready_for_phase_2"] or manifest["ready_for_local_smoke"]:
         print(
-            f"b200_preflight: READY ({args.output}). "
+            f"b200_preflight: READY ({args.output}) "
+            f"[{manifest['mode']}]. "
             f"Required probes ok; recommended probe statuses recorded."
         )
         return 0

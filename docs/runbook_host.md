@@ -24,11 +24,11 @@ sudo -n true
 cd sim
 cargo build
 cargo build --release -p sim-run
-cargo test --all-targets
 ```
 
-Research campaign simulator actions run the same release build incrementally
-before replay and reject cached JSON that predates the binary or its inputs.
+Replay the release binary directly after a change and inspect its JSON and
+stderr. Run a package-specific test only when the changed behavior needs a
+contract check.
 
 ## Build the NVBit tracer
 
@@ -42,8 +42,8 @@ Override tool locations in the environment when the defaults are not suitable:
 
 ```bash
 make -C tools/nvbit_tracer \
-  CUDA_INSTALL_PATH=/opt/cuda-13.2 \
-  PROTOC=/path/to/protoc \
+  CUDA_INSTALL_PATH=/usr/local/cuda-13.2 \
+  PROTOC="$PWD/.toolchain/pb/bin/protoc" \
   NVCC_CCBIN=/usr/bin/g++-14
 ```
 

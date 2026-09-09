@@ -259,7 +259,7 @@ _EXPLICIT_PREDICTOR_DESIGN_COVERAGE_BY_CELL: Mapping[
 # the path because both are anchored to the same canonical
 # filesystem layout.
 _HOST_ARCH_MANIFEST_RELATIVE_PATH: str = (
-    "scripts/baselines_harness/calibration/"
+    "tools/sol_baselines_harness/calibration/"
     "cache_prediction/host_arch_availability_v1.toml"
 )
 
@@ -284,7 +284,7 @@ def _read_in_tree_host_arch_manifest_entries() -> list[Mapping[str, Any]]:
     manifest is malformed there the diagnostic fails closed.
     """
     here = Path(__file__).resolve()
-    # `.../scripts/baselines_harness/metrics/predictor_design_coverage.py`
+    # `.../tools/sol_baselines_harness/metrics/predictor_design_coverage.py`
     # The repo root sits four `.parent` hops above this file.
     repo_root = here.parents[3]
     manifest_path = repo_root / _HOST_ARCH_MANIFEST_RELATIVE_PATH
@@ -293,7 +293,7 @@ def _read_in_tree_host_arch_manifest_entries() -> list[Mapping[str, Any]]:
     try:
         raw = manifest_path.read_bytes()
         data = tomllib.loads(raw.decode("utf-8"))
-    except (OSError, tomllib.TOMLDecodeError):
+    except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError):
         return []
     problems = data.get("problems", [])
     if not isinstance(problems, list):

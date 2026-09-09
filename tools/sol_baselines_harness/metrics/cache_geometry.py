@@ -227,7 +227,7 @@ _STATIC_DEVICE_CARD_PROVENANCE: dict[str, dict[str, str]] = {
         "associativity_l2": (
             "Empirical sweep on 2026-05-26 over candidates "
             "{4, 8, 16, 32, 64} via "
-            "`scripts/baselines_harness/calibration/cache_prediction/"
+            "`tools/sol_baselines_harness/calibration/cache_prediction/"
             "sm120_l2_associativity_probe/sweep_associativity.py`. "
             "Drove the set-associative simulator on 33 sm_120 "
             "historical-label cells with clean Tier-2 NVBit traces; "

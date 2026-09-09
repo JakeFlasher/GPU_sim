@@ -32,13 +32,16 @@
 #include <atomic>
 #include <bitset>
 #include <climits>
+#include <cctype>
 #include <cstdlib>
+#include <cstring>
 #include <inttypes.h>
 #include <iostream>
 #include <iterator>
 #include <limits>
 #include <map>
 #include <mutex>
+#include <new>
 #include <sched.h>
 #include <sstream>
 #include <stdint.h>
@@ -101,6 +104,14 @@
 
 /* contains definition of the inst_trace_t structure */
 #include "common.h"
+
+// CUDA 12+ assigns one program-unique stream ID to every driver/runtime
+// stream. Keep this declaration explicit because NVBit's vendored CUDA
+// headers do not expose every driver entry point on all toolkit builds.
+extern "C" CUresult cuStreamGetId(CUstream hStream,
+                                  unsigned long long *streamId);
+extern "C" CUresult cuStreamGetId_ptsz(CUstream hStream,
+                                        unsigned long long *streamId);
 
 /* Header-only short-opcode classifiers for the phase-injection block. */
 #include "phase_classifier.h"
@@ -200,6 +211,7 @@ static_assert(
 
 /* Channel used to communicate from GPU to CPU receiving thread */
 #define CHANNEL_SIZE (1l << 20)
+static constexpr size_t MAX_PHASE_RECORD_BUFFER_BYTES = 64ULL * 1024ULL * 1024ULL;
 
 int num_devices = 0;
 
@@ -223,8 +235,9 @@ struct CTXstate {
   int device_id = -1;
 
   /* Channel used to communicate from GPU to CPU receiving thread */
-  ChannelDev* channel_dev;
+  ChannelDev* channel_dev = nullptr;
   ChannelHost channel_host;
+  bool instruction_channel_initialized = false;
 
   // Recv-thread lifecycle state:
   //   - main thread stores WORKING in nvbit_tool_init → init_context_state,
@@ -262,6 +275,27 @@ struct CTXstate {
   // scope (we look it up under mutex before any access), so no extra
   // indirection is needed.
   std::atomic<bool> recv_thread_receiving{false};
+
+  // Identity of the accepted launch currently producing channel records.
+  // These values are per-context because receiver threads can drain launches
+  // from different contexts on the same device concurrently; a device-global
+  // stream/kernel snapshot would let one context label another context's
+  // records.
+  std::atomic<int64_t> active_stream_id{-1};
+  std::atomic<int> active_kernel_id{-1};
+
+  // nvbit_tool_init can be entered by the first graph kernel while its stream
+  // is still being captured. CUDA rejects the channel allocations in that
+  // state, so initialization is deferred until the matching end-capture
+  // callback succeeds.
+  bool tool_init_deferred = false;
+  bool tool_init_complete = false;
+
+  // Immutable allocation view for the accepted launch. Channel delivery can
+  // lag host API callbacks, so resolving addresses against the live registry
+  // at receive time would let an async free/reuse relabel an older kernel.
+  nvbit_tracer::AllocationSnapshot active_allocation_snapshot;
+  bool active_allocation_snapshot_valid = false;
 
   // Next opt-in asynchronous-copy instrumentation-order token for the accepted
   // launch. The main callback resets it to one before publishing
@@ -459,6 +493,163 @@ std::mutex recv_container_mutex;
 /* map to store context state */
 std::unordered_map<CUcontext, CTXstate*> ctx_state_map;
 
+// Number of active stream captures per context. The callback map lets
+// nvbit_tool_init defer CUDA allocations without guessing which stream is
+// current; nested captures are released one-for-one at successful end-capture.
+std::unordered_map<CUcontext, unsigned> active_capture_counts;
+
+// Pool handles are opaque process-local objects. Cache their location at
+// creation/query time so an allocation made while a stream is being captured
+// can be attributed without issuing capture-invalidating pool queries.
+struct MemoryPoolIdentity {
+  CUmemLocationType location_type = CU_MEM_LOCATION_TYPE_DEVICE;
+  int location_id = -1;
+};
+std::unordered_map<CUmemoryPool, MemoryPoolIdentity> memory_pool_identity_map;
+
+// Resolve the driver-assigned stream ID carried on the trace wire. Resolve on
+// every accepted launch rather than caching by the
+// opaque handle: CUDA may recycle a destroyed handle, and per-thread default
+// streams can share a sentinel handle while representing different streams.
+extern bool skip_callback_flag;
+
+static int64_t stream_ordinal_for(CUstream stream, bool per_thread_default) {
+  const CUstream identity_stream =
+      per_thread_default && stream == nullptr ? CU_STREAM_PER_THREAD : stream;
+  unsigned long long driver_stream_id = 0;
+  const bool previous_skip = skip_callback_flag;
+  skip_callback_flag = true;
+  const CUresult stream_id_status = per_thread_default
+      ? cuStreamGetId_ptsz(identity_stream, &driver_stream_id)
+      : cuStreamGetId(identity_stream, &driver_stream_id);
+  skip_callback_flag = previous_skip;
+
+  if (stream_id_status != CUDA_SUCCESS ||
+      driver_stream_id >
+          static_cast<unsigned long long>(std::numeric_limits<int64_t>::max())) {
+    std::ostringstream detail;
+    detail << "cuStreamGetId status=" << static_cast<int>(stream_id_status)
+           << " stream_id=" << driver_stream_id;
+    fail_device_identity("stream identity", detail.str());
+  }
+  const int64_t ordinal = static_cast<int64_t>(driver_stream_id);
+  return ordinal;
+}
+
+// Stream-ordered pool pointers are process-wide under the 64-bit unified
+// addressing contract. Verify that the device identity used by the registry
+// is suitable for this process before publishing an allocation.
+static int checked_uva_device_ordinal(int device_ordinal, const char *stage) {
+  if (sizeof(void *) < sizeof(uint64_t)) {
+    fail_device_identity(stage,
+                         "context-independent allocations require a 64-bit process");
+  }
+  const int checked_ordinal =
+      checked_device_id_value(device_ordinal, stage);
+  int unified_addressing = 0;
+  const bool skip_before_attribute = skip_callback_flag;
+  skip_callback_flag = true;
+  const CUresult attribute_status = cuDeviceGetAttribute(
+      &unified_addressing, CU_DEVICE_ATTRIBUTE_UNIFIED_ADDRESSING,
+      checked_ordinal);
+  skip_callback_flag = skip_before_attribute;
+  if (attribute_status != CUDA_SUCCESS || unified_addressing == 0) {
+    std::ostringstream detail;
+    detail << "device " << checked_ordinal
+           << " does not report unified addressing (CUresult="
+           << static_cast<int>(attribute_status)
+           << ", value=" << unified_addressing << ")";
+    fail_device_identity(stage, detail.str());
+  }
+  return checked_ordinal;
+}
+
+// CUDA graph capture returns a pointer before the allocation node executes,
+// but pointer attributes for that graph-owned pointer are invalid until a graph
+// launch. Querying cuStreamIsCapturing is a non-enqueueing operation and is
+// safe from this callback when re-entry is suppressed.
+static bool stream_capture_active(CUstream stream, bool per_thread_default) {
+  const CUstream identity_stream =
+      per_thread_default && stream == nullptr ? CU_STREAM_PER_THREAD : stream;
+  CUstreamCaptureStatus capture_status = CU_STREAM_CAPTURE_STATUS_NONE;
+  const bool previous_skip = skip_callback_flag;
+  skip_callback_flag = true;
+  const CUresult status =
+      cuStreamIsCapturing(identity_stream, &capture_status);
+  skip_callback_flag = previous_skip;
+  return status == CUDA_SUCCESS &&
+         capture_status == CU_STREAM_CAPTURE_STATUS_ACTIVE;
+}
+
+// Resolve a captured pool allocation from metadata cached when its pool was
+// created or returned by a device-pool query. cuMemPoolGetAttribute is not
+// capture-safe (on CUDA 13.3 it returns CUDA_ERROR_NOT_PERMITTED and
+// invalidates the capture), so unknown pools deliberately remain unresolved.
+static bool cached_pool_device_ordinal(CUmemoryPool pool, int *device_ordinal) {
+  if (pool == nullptr || device_ordinal == nullptr) return false;
+  auto it = memory_pool_identity_map.find(pool);
+  if (it == memory_pool_identity_map.end() ||
+      it->second.location_type != CU_MEM_LOCATION_TYPE_DEVICE ||
+      it->second.location_id < 0) {
+    return false;
+  }
+  *device_ordinal = it->second.location_id;
+  return true;
+}
+
+static int allocation_device_ordinal_or_fail(
+    CUdeviceptr ptr, CUmemoryPool pool, const CTXstate *ctx_state,
+    CUstream stream, bool per_thread_default, const char *stage) {
+  if (stream_capture_active(stream, per_thread_default)) {
+    int cached_device = -1;
+    if (pool != nullptr && cached_pool_device_ordinal(pool, &cached_device)) {
+      return checked_uva_device_ordinal(cached_device, stage);
+    }
+    // cuMemAllocAsync uses the current pool of the submitting stream's device.
+    // A captured default allocation therefore has a checked context identity;
+    // for an explicit unknown pool we fail closed at the caller instead of
+    // assigning a potentially wrong cross-device identity.
+    if (pool == nullptr) {
+      return checked_uva_device_ordinal(
+          checked_stored_context_device_id(ctx_state, stage), stage);
+    }
+    return -1;
+  }
+
+  // Outside capture the driver has materialized the allocation, and its
+  // pointer attribute is the authoritative device even for a pool on a
+  // different device than the submitting stream.
+  if (sizeof(void *) < sizeof(uint64_t)) {
+    fail_device_identity(stage,
+                         "context-independent allocations require a 64-bit process");
+  }
+  int device_ordinal = -1;
+  const bool previous_skip = skip_callback_flag;
+  skip_callback_flag = true;
+  const CUresult status = cuPointerGetAttribute(
+      &device_ordinal, CU_POINTER_ATTRIBUTE_DEVICE_ORDINAL, ptr);
+  skip_callback_flag = previous_skip;
+  if (status != CUDA_SUCCESS) {
+    std::ostringstream detail;
+    detail << "cuPointerGetAttribute(device ordinal) returned CUresult="
+           << static_cast<int>(status) << " ptr=0x" << std::hex
+           << static_cast<uint64_t>(ptr);
+    fail_device_identity(stage, detail.str());
+  }
+  return checked_uva_device_ordinal(device_ordinal, stage);
+}
+
+static CTXstate *lookup_context_state_or_fail(CUcontext ctx,
+                                               const char *stage) {
+  auto it = ctx_state_map.find(ctx);
+  if (it == ctx_state_map.end() || it->second == nullptr) {
+    std::ostringstream detail;
+    detail << "context handle " << ctx << " is not registered";
+    fail_device_identity(stage, detail.str());
+  }
+  return it->second;
+}
+
 /* skip flag used to avoid re-entry on the nvbit_callback when issuing
  * flush_channel kernel call.
  *
@@ -615,7 +806,7 @@ struct FunctionNameKeyHash {
 struct AcceptedModuleMapping {
   uint64_t accepted_launch_index = 0;
   int device_id = -1;
-  int stream_id = -1;
+  int64_t stream_id = -1;
   uint32_t trace_launch_id = 0;
   std::string kernel_name;
   std::string resolution_source;
@@ -659,7 +850,7 @@ std::vector<AcceptedModuleMapping> accepted_module_mappings;
  * directory creation + log line are NVBit-tracer-side
  * concerns the registry should not know about. */
 void create_folder(const char *folder_path);  // forward decl
-static void write_allocation_sidecar(
+static bool write_allocation_sidecar(
     const std::string &dir_path) {
   create_folder(dir_path.c_str());
   std::string filename = dir_path + "/allocations.json";
@@ -667,15 +858,25 @@ static void write_allocation_sidecar(
   if (!ofs) {
     std::cerr << "Failed to open " << filename
               << " for writing." << std::endl;
-    return;
+    return false;
   }
   nvbit_tracer::serialize_history_json(ofs);
+  ofs.flush();
+  if (!ofs) {
+    std::cerr << "Failed while writing " << filename << std::endl;
+    return false;
+  }
   ofs.close();
+  if (!ofs) {
+    std::cerr << "Failed to close " << filename << std::endl;
+    return false;
+  }
   std::size_t count =
       nvbit_tracer::snapshot_history().size();
   std::cout << "Serialized allocation registry to " << filename
             << " (" << count << " entries)"
             << std::endl;
+  return true;
 }
 
 /* Closure-plan NVBit phase-injection contract: env-gated activation
@@ -721,8 +922,9 @@ static long long phase_flush_timeout_iters() {
     const char *env = std::getenv("SIMBENCH_PHASE_FLUSH_TIMEOUT_ITERS");
     if (env != nullptr && env[0] != '\0') {
       char *endp = nullptr;
+      errno = 0;
       long long parsed = std::strtoll(env, &endp, 10);
-      if (endp != env && *endp == '\0' && parsed > 0) {
+      if (errno == 0 && endp != env && *endp == '\0' && parsed > 0) {
         return parsed;
       }
       fprintf(stderr,
@@ -734,6 +936,55 @@ static long long phase_flush_timeout_iters() {
     return kDefault;
   }();
   return val;
+}
+
+static int checked_sampling_scope_int(uint64_t value, const char *field) {
+  if (value > static_cast<uint64_t>(std::numeric_limits<int>::max())) {
+    fprintf(stderr,
+            "FATAL: sampling scope %s=%" PRIu64
+            " exceeds the signed metadata domain\n",
+            field, value);
+    fflush(stderr);
+    _exit(EXIT_FAILURE);
+  }
+  return static_cast<int>(value);
+}
+
+static int checked_kernel_launch_id(int value) {
+  if (value <= 0 || value >= INT_MAX) {
+    fprintf(stderr,
+            "FATAL: per-device kernel launch id %d cannot be advanced "
+            "without leaving the positive metadata domain\n",
+            value);
+    fflush(stderr);
+    _exit(EXIT_FAILURE);
+  }
+  return value;
+}
+
+static int next_candidate_function_id_or_fail(int current) {
+  if (current < 0 || current >= INT_MAX - 1) {
+    fprintf(stderr,
+            "FATAL: static function identity counter %d cannot be advanced "
+            "without leaving the positive int32 metadata domain\n",
+            current);
+    fflush(stderr);
+    _exit(EXIT_FAILURE);
+  }
+  return current + 1;
+}
+
+static void require_record_alignment(uint32_t byte_count,
+                                     size_t record_size,
+                                     const char *channel) {
+  if (record_size == 0 || byte_count % record_size != 0) {
+    fprintf(stderr,
+            "FATAL: %s channel returned %" PRIu32
+            " bytes, not a whole-record multiple of %zu\n",
+            channel, byte_count, record_size);
+    fflush(stderr);
+    _exit(EXIT_FAILURE);
+  }
 }
 
 /* Should we terminate the program once we are done tracing? */
@@ -767,7 +1018,7 @@ struct TsBlockStat {
  * atomic-sector hot-line sketch. Guarded by recv_container_mutex like the
  * threadblocks map they parallel. */
 std::map<std::string, TsBlockStat> ts_block_stats;
-std::map<uint64_t, long> ts_atomic_sectors;
+std::map<uint64_t, uint64_t> ts_atomic_sectors;
 bool ts_atomic_sectors_overflow = false;
 static const size_t TS_ATOMIC_SECTORS_CAP = 1u << 20;
 /* A malformed width or arithmetic overflow must not be serialized as a
@@ -781,7 +1032,7 @@ bool ts_serialized_bytes_valid = true;
  * gate totals + selected payload describe exactly that launch, mirroring the
  * consumers' first_launch_dir convention. -1 == unset. */
 int ts_scope_device = -1;
-int ts_scope_stream = -1;
+int64_t ts_scope_stream = -1;
 int ts_scope_kernel = -1;
 /* The scoped launch's grid/block dims, captured at its launch entry (where the
  * dims are authoritative from the launch params) so the sidecar is shape-bound;
@@ -797,8 +1048,8 @@ void create_folder(const char *folder_path);  // forward decl
  * write_allocation_sidecar; a no-op when trace sampling is off. Block cta coords
  * are emitted verbatim (the consumer flattens with the true grid_dim from the
  * launch record). */
-static void write_trace_sampling_sidecar(const std::string &dir_path) {
-  if (trace_sampling_mode == 0) return;
+static bool write_trace_sampling_sidecar(const std::string &dir_path) {
+  if (trace_sampling_mode == 0) return true;
   create_folder(dir_path.c_str());
   std::string filename = trace_sampling_sidecar_path.empty()
                              ? dir_path + "/trace_sampling_capture.json"
@@ -806,19 +1057,31 @@ static void write_trace_sampling_sidecar(const std::string &dir_path) {
   std::ofstream ofs(filename);
   if (!ofs) {
     std::cerr << "Failed to open " << filename << " for writing." << std::endl;
-    return;
+    return false;
   }
-  long atomic_total = 0;
-  std::vector<long> atomic_counts;
+  uint64_t atomic_total = 0;
+  std::vector<uint64_t> atomic_counts;
   atomic_counts.reserve(ts_atomic_sectors.size());
   for (const auto &kv : ts_atomic_sectors) {
-    atomic_total += kv.second;
-    atomic_counts.push_back(kv.second);
+    const uint64_t count = kv.second;
+    if (atomic_total > std::numeric_limits<uint64_t>::max() - count) {
+      std::cerr << "Trace-sampling atomic-sector total overflowed"
+                << std::endl;
+      return false;
+    }
+    atomic_total += count;
+    atomic_counts.push_back(count);
   }
   std::sort(atomic_counts.rbegin(), atomic_counts.rend());
-  long atomic_top256 = 0;
-  for (size_t i = 0; i < atomic_counts.size() && i < 256; ++i)
+  uint64_t atomic_top256 = 0;
+  for (size_t i = 0; i < atomic_counts.size() && i < 256; ++i) {
+    if (atomic_top256 > std::numeric_limits<uint64_t>::max() - atomic_counts[i]) {
+      std::cerr << "Trace-sampling atomic top-256 total overflowed"
+                << std::endl;
+      return false;
+    }
     atomic_top256 += atomic_counts[i];
+  }
   if (trace_sampling_mode == 2) {
     for (const auto &kv : ts_block_stats) {
       if (kv.second.records > 0 && kv.second.serialized_bytes == 0) {
@@ -880,10 +1143,20 @@ static void write_trace_sampling_sidecar(const std::string &dir_path) {
     }
   }
   ofs << "]\n}\n";
+  ofs.flush();
+  if (!ofs) {
+    std::cerr << "Failed while writing " << filename << std::endl;
+    return false;
+  }
   ofs.close();
+  if (!ofs) {
+    std::cerr << "Failed to close " << filename << std::endl;
+    return false;
+  }
   std::cout << "Wrote trace-sampling capture sidecar to " << filename
             << " (mode " << trace_sampling_mode << ", " << ts_block_stats.size()
             << " blocks)" << std::endl;
+  return true;
 }
 
 /* Deterministic accepted-launch -> loaded-module mapping.  Consumers use the
@@ -946,8 +1219,10 @@ static bool write_module_origin_sidecar(const std::string& dir_path) {
            << "\", \"resolution_source\": \""
            << nvbit_tracer::JsonEscape(mapping.resolution_source)
            << "\", \"module\": {\"status\": \""
-           << mapping.origin.status << "\", \"reason\": \""
-           << mapping.origin.reason << "\", \"path_at_capture\": \""
+           << nvbit_tracer::JsonEscape(mapping.origin.status)
+           << "\", \"reason\": \""
+           << nvbit_tracer::JsonEscape(mapping.origin.reason)
+           << "\", \"path_at_capture\": \""
            << nvbit_tracer::JsonEscape(mapping.origin.path)
            << "\", \"basename\": \""
            << nvbit_tracer::JsonEscape(mapping.origin.basename)
@@ -1061,26 +1336,23 @@ static int resolve_binary_version_for_current_device() {
   _exit(EXIT_FAILURE);
 }
 
-// Per-device kernel launch counter and current stream id.
+// Per-device kernel launch counter. The in-flight stream/kernel pair lives in
+// each context's CTXstate; keeping it there prevents cross-context receiver
+// misattribution when two contexts share a device.
 //
-// Both are written by the main thread under the global mutex (kernel_id at
-// :1176, current_stream_id at :1135) but read by the recv thread WITHOUT
-// the mutex at :1389, :1390, :1406 when it is processing channel data for
-// the currently-in-flight kernel. That is a cross-thread data race on the
-// old `std::vector<int>` representation.
+// The device launch counter is written by the main thread under the global
+// mutex and is used only to allocate globally unique launch IDs. The receiver
+// reads the active launch pair from its own CTXstate, so contexts sharing a
+// device cannot overwrite one another's stream/kernel snapshot.
 //
 // Fixed-size atomic arrays give us a proper acquire/release handshake:
 // the main thread's atomic store at :1176 is release-ordered, and the
-// recv thread's atomic load on `recv_thread_receiving` at :1402 acquires
-// that ordering transitively, making the updated kernel_id visible. Where
-// the recv thread reads kernel_id before the receiving-handshake load
-// (e.g. line :1389-1390 right after channel->recv returns), the explicit
-// acquire-load on kernel_id itself provides the direct synchronization.
+// recv thread's atomic load on `recv_thread_receiving` acquires that ordering
+// transitively, making the per-context active launch pair visible.
 //
 // Device identities are checked against both the runtime-reported device count
 // and TRACER_MAX_DEVICES before any access reaches these arrays.
 std::atomic<int> kernel_id[TRACER_MAX_DEVICES]{};
-std::atomic<int> current_stream_id[TRACER_MAX_DEVICES]{};
 
 // MOD. Begin. Enhanced Tracer
 int next_candidate_unique_function_id = 0;
@@ -1091,7 +1363,7 @@ std::set<int> opcodes_id_ldgsts;
 // global allocation-identity gate applies. Written under recv_container_mutex
 // during instrumentation and read lock-free by recv threads (same discipline as
 // pc_to_opcode; instrumentation of a static instruction completes before its
-// dynamic records are received). See plans/sm86_ldgsts_atoms_operand_adjudication.md.
+// dynamic records are received). See docs/STATUS.md.
 std::map<int, int> opcode_id_to_address_space;
 int threshold_unique_kernel_checking;
 std::string variant_delimiter_str = "___";
@@ -1181,7 +1453,7 @@ static const char *op_class_to_schema_string(
  * exempt from the global allocation-id rule. Destination-bearing V3
  * ASYNC_COPY records both LDGSTS MREFs and uses their structural ordinal to
  * stamp the GLOBAL source and SHARED destination independently. See
- * plans/sm86_ldgsts_atoms_operand_adjudication.md. */
+ * docs/STATUS.md. */
 static bool is_excluded_op_class(
     memory_op_class_classifier::Value cls) {
   return cls == memory_op_class_classifier::kTexture ||
@@ -1342,6 +1614,15 @@ struct TraceSamplingIdentityResult {
   uint32_t allocation_id = 0;
 };
 
+static uint32_t lookup_launch_allocation_id(
+    const CTXstate *ctx_state, CUcontext ctx, uint64_t address) {
+  if (ctx_state != nullptr && ctx_state->active_allocation_snapshot_valid) {
+    return nvbit_tracer::lookup_allocation_id_in_snapshot(
+        ctx_state->active_allocation_snapshot, address);
+  }
+  return nvbit_tracer::lookup_allocation_id(ctx, address);
+}
+
 /* Run the exact allocation-identity decision used by payload emission early
  * enough that counting-only mode sees it too.  A record excluded from the full
  * address payload must invalidate v2 sector evidence rather than remain a
@@ -1350,7 +1631,8 @@ static TraceSamplingIdentityResult trace_sampling_identity_result(
     CUcontext ctx,
     const inst_trace_t &record,
     memory_op_class_classifier::Value cls,
-    dynamic_trace::MemorySpace address_space) {
+    dynamic_trace::MemorySpace address_space,
+    const CTXstate *ctx_state = nullptr) {
   TraceSamplingIdentityResult result;
   result.required =
       cls == memory_op_class_classifier::kGlobal ||
@@ -1364,8 +1646,8 @@ static TraceSamplingIdentityResult trace_sampling_identity_result(
   uint32_t first_non_zero = 0;
   for (unsigned lane = 0; lane < 32; ++lane) {
     if (((mask >> lane) & 1u) == 0) continue;
-    const uint32_t lane_id = nvbit_tracer::lookup_allocation_id(
-        ctx, record.addrs_or_reg_val_0[lane]);
+    const uint32_t lane_id = lookup_launch_allocation_id(
+        ctx_state, ctx, record.addrs_or_reg_val_0[lane]);
     if (lane_id == 0) {
       result.any_zero = true;
     } else if (first_non_zero == 0) {
@@ -1413,11 +1695,21 @@ std::string get_program_path() {
     enum Constexpr { MAX_SIZE = 1024 };
     void *array[MAX_SIZE];
     size = backtrace(array, MAX_SIZE);
-    char** calls;
-    calls = backtrace_symbols(array, size);
-    std::string program_caller = calls[size-1];
-    std::string program_path = program_caller.substr(0, program_caller.find_last_of("("));
-    return program_path;
+    if (size == 0) {
+        return {};
+    }
+    char **calls = backtrace_symbols(array, size);
+    if (calls == nullptr || calls[size - 1] == nullptr) {
+        free(calls);
+        return {};
+    }
+    std::string program_caller = calls[size - 1];
+    free(calls);
+    const std::size_t open_paren = program_caller.find_last_of('(');
+    if (open_paren == std::string::npos) {
+        return program_caller;
+    }
+    return program_caller.substr(0, open_paren);
 }
 
 dynamic_trace::Trace dyn_trace;
@@ -1553,7 +1845,7 @@ bool has_the_kernel_been_traced(std::string kernel_name, std::map<int, std::stri
   return has_been_traced;
 }
 
-void parse_sass(int binary_version, const std::filesystem::directory_entry &entry) {
+bool parse_sass(int binary_version, const std::filesystem::directory_entry &entry) {
   std::string absolute_sass_path = resolve_output_path(cwd, sass_path);
   std::string sass_file = absolute_sass_path + "/" + entry.path().stem().string() + ".sass";
   std::ifstream ifs_sass; // input file stream
@@ -1562,7 +1854,7 @@ void parse_sass(int binary_version, const std::filesystem::directory_entry &entr
   {
     std::cerr << "Error opening file " << sass_file << std::endl;
     fflush(stderr);
-    abort();
+    return false;
   }
   
   bool is_starting_reading_kernel = false;
@@ -1580,7 +1872,11 @@ void parse_sass(int binary_version, const std::filesystem::directory_entry &entr
       if ((stripped_line.find("Function") != std::string::npos))
       {
         std::vector<std::string> aux_splitted = split_string(stripped_line, ' ');
-        assert(aux_splitted.size() == 3);
+        if (aux_splitted.size() != 3) {
+          std::cerr << "Malformed cuobjdump Function line in " << sass_file
+                    << std::endl;
+          return false;
+        }
         kernel_name = aux_splitted[2];
         current_traced_kernel = new traced_kernel(kernel_name, static_cast<unsigned>(binary_version));
         is_starting_reading_kernel = true;
@@ -1599,13 +1895,26 @@ void parse_sass(int binary_version, const std::filesystem::directory_entry &entr
         if(has_been_traced) {
           std::string final_kernel_name = kernel_name + variant_delimiter_str + std::to_string(variant_id);
           auto it_search_funct = map_kernel_name_to_func_addr.find(kernel_name);
-          assert(it_search_funct != map_kernel_name_to_func_addr.end());
+          if (it_search_funct == map_kernel_name_to_func_addr.end()) {
+            std::cerr << "No traced function address for SASS kernel "
+                      << kernel_name << std::endl;
+            delete current_traced_kernel;
+            return false;
+          }
           all_kernels_key_instructions_by_pc[kernel_name][variant_id].sass_has_been_parsed = true;
           current_traced_kernel->set_kernel_name(final_kernel_name);
-          m_enhanced_traced_execution->add_traced_kernel(final_kernel_name, all_kernels_key_instructions_by_pc[kernel_name][variant_id].unique_function_id, current_traced_kernel, it_search_funct->second, true);
+          if (!m_enhanced_traced_execution->add_traced_kernel(
+                  final_kernel_name,
+                  all_kernels_key_instructions_by_pc[kernel_name][variant_id]
+                      .unique_function_id,
+                  current_traced_kernel, it_search_funct->second, true)) {
+            current_traced_kernel = nullptr;
+            return false;
+          }
           current_traced_kernel = nullptr;
         }else {
           delete current_traced_kernel;
+          current_traced_kernel = nullptr;
         }
       }
       else if (stripped_line.find("headerflags") == std::string::npos)
@@ -1615,14 +1924,45 @@ void parse_sass(int binary_version, const std::filesystem::directory_entry &entr
         std::vector<std::string> aux_list2;
         if (binary_version >= 70)
         {
-          assert(!ifs_sass.eof());
+          if (ifs_sass.eof()) {
+            delete current_traced_kernel;
+            return false;
+          }
           aux_list2 = split_string(read_stripped_line(ifs_sass), ' ');
+          if (aux_list2.empty()) {
+            delete current_traced_kernel;
+            return false;
+          }
         }
-        current_traced_kernel->add_instruction(aux_list, aux_list2, threshold_unique_kernel_checking, stripped_line);
+        if (aux_list.empty()) {
+          delete current_traced_kernel;
+          return false;
+        }
+        try {
+          if (!current_traced_kernel->add_instruction(
+                  aux_list, aux_list2, threshold_unique_kernel_checking,
+                  stripped_line)) {
+            delete current_traced_kernel;
+            return false;
+          }
+        } catch (const std::exception &error) {
+          std::cerr << "Malformed SASS instruction in " << sass_file << ": "
+                    << error.what() << std::endl;
+          delete current_traced_kernel;
+          return false;
+        }
       }
     }
   }
+  if (current_traced_kernel != nullptr) {
+    delete current_traced_kernel;
+    return false;
+  }
+  if (ifs_sass.bad()) {
+    return false;
+  }
   ifs_sass.close();
+  return true;
 }
 
 std::string replaceEnclosedSubstring(std::string str, const std::string &replacement)
@@ -1637,15 +1977,30 @@ std::string replaceEnclosedSubstring(std::string str, const std::string &replace
   return str;
 }
 
-void parse_rfu_instruction_info(std::vector<std::string> splitted_text, std::vector<std::string> reg_order, std::string full_instruction_str, std::map<int, std::string> &key_instructions_by_pc,
+bool parse_rfu_instruction_info(std::vector<std::string> splitted_text, std::vector<std::string> reg_order, std::string full_instruction_str, std::map<int, std::string> &key_instructions_by_pc,
   std::map<unsigned int, std::map<std::string, unsigned int>> &reg_usage_by_pc, std::map<unsigned int, std::tuple<std::string, int>> &call_target_by_pc, std::map<int, std::string> &full_inst_call_or_ret_by_pc, std::set<unsigned int> &call_or_ret_pcs_not_to_consider)
 {
-  unsigned pc = std::stoul(splitted_text[0], nullptr, 16);
+  if (splitted_text.empty() || reg_order.empty()) return false;
+  unsigned pc = 0;
+  try {
+    std::size_t parsed = 0;
+    const unsigned long parsed_pc = std::stoul(splitted_text[0], &parsed, 16);
+    if (parsed != splitted_text[0].size() ||
+        parsed_pc > static_cast<unsigned long>(std::numeric_limits<int>::max())) {
+      return false;
+    }
+    pc = static_cast<unsigned>(parsed_pc);
+  } catch (const std::exception &) {
+    return false;
+  }
   bool is_all_reg_use_gathered = false;
   int num_already_visited_reg_files = 0;
   std::string instruction_str = full_instruction_str;
   instruction_str = replaceInstructionNewExtraInformation(instruction_str);
   std::string sass_string = create_sass_instr(instruction_str, true, "//");
+  if (sass_string.empty()) {
+    return false;
+  }
   if(track_this_instruction(reg_usage_by_pc.size(), threshold_unique_kernel_checking, instruction_str)){
     key_instructions_by_pc[pc] = sass_string;
   }
@@ -1692,14 +2047,29 @@ void parse_rfu_instruction_info(std::vector<std::string> splitted_text, std::vec
     }
     else
     {
-      unsigned num_regs = std::stoul(splitted_text[i]);
-      std::string reg_file_name = reg_order[reg_order.size() - num_already_visited_reg_files];
+      if (num_already_visited_reg_files <= 0 ||
+          static_cast<std::size_t>(num_already_visited_reg_files) >
+              reg_order.size()) {
+        return false;
+      }
+      const char *first = splitted_text[i].data();
+      const char *last = first + splitted_text[i].size();
+      unsigned long parsed_regs = 0;
+      const auto result = std::from_chars(first, last, parsed_regs, 10);
+      if (result.ec != std::errc{} || result.ptr != last ||
+          parsed_regs > std::numeric_limits<unsigned>::max()) {
+        return false;
+      }
+      unsigned num_regs = static_cast<unsigned>(parsed_regs);
+      std::string reg_file_name =
+          reg_order[reg_order.size() - num_already_visited_reg_files];
       reg_usage_by_pc[pc][reg_file_name] = num_regs;
     }
   }
+  return true;
 }
 
-void parse_rfu(const std::filesystem::directory_entry &entry) {
+bool parse_rfu(const std::filesystem::directory_entry &entry) {
   std::string absolute_rfu_path = resolve_output_path(cwd, register_usage_path);
   std::string rfu_file = absolute_rfu_path + "/" + entry.path().stem().string() + ".rfu";
   std::ifstream ifs_rfu; // input file stream
@@ -1708,7 +2078,7 @@ void parse_rfu(const std::filesystem::directory_entry &entry) {
   {
     std::cerr << "Error opening file " << rfu_file << std::endl;
     fflush(stderr);
-    abort();
+    return false;
   }
   
   bool is_starting_reading_kernel = false;
@@ -1749,8 +2119,11 @@ void parse_rfu(const std::filesystem::directory_entry &entry) {
         bool has_been_traced = has_the_kernel_been_traced(kernel_name, key_instructions_by_pc, full_call_or_ret_inst_by_pc, variant_id, true, true, call_or_ret_pcs_not_to_consider);
         if(has_been_traced) {
           std::string final_kernel_name = kernel_name + variant_delimiter_str + std::to_string(variant_id);
+          if (!m_enhanced_traced_execution->add_register_usage_to_a_kernel(
+                  final_kernel_name, reg_usage_by_pc, call_target_by_pc)) {
+            return false;
+          }
           all_kernels_key_instructions_by_pc[kernel_name][variant_id].rfu_has_been_parsed = true;
-          m_enhanced_traced_execution->add_register_usage_to_a_kernel(final_kernel_name, reg_usage_by_pc, call_target_by_pc);
         }
         key_instructions_by_pc.clear();
         reg_usage_by_pc.clear();
@@ -1763,13 +2136,29 @@ void parse_rfu(const std::filesystem::directory_entry &entry) {
           if(is_code_region_started && (stripped_line.find(":") == std::string::npos) &&
             (stripped_line.find(".weak") == std::string::npos) && (stripped_line.find(".type") == std::string::npos)
             && (stripped_line.find(".size") == std::string::npos)) {
-            parse_rfu_instruction_info(splitted_text, reg_order, stripped_line, key_instructions_by_pc, reg_usage_by_pc, call_target_by_pc, full_call_or_ret_inst_by_pc, call_or_ret_pcs_not_to_consider);
+            if (!parse_rfu_instruction_info(splitted_text, reg_order, stripped_line,
+                                            key_instructions_by_pc, reg_usage_by_pc,
+                                            call_target_by_pc,
+                                            full_call_or_ret_inst_by_pc,
+                                            call_or_ret_pcs_not_to_consider)) {
+              return false;
+            }
           }else if( (splitted_text[0].find("0000") != std::string::npos) && (stripped_line.find("//") != std::string::npos) && (stripped_line.find(":") == std::string::npos) &&
             (stripped_line.find(".weak") == std::string::npos) && (stripped_line.find(".type") == std::string::npos)
             && (stripped_line.find(".size") == std::string::npos)) {
             is_code_region_started = true;
-            parse_rfu_instruction_info(splitted_text, reg_order, stripped_line, key_instructions_by_pc, reg_usage_by_pc, call_target_by_pc, full_call_or_ret_inst_by_pc, call_or_ret_pcs_not_to_consider);
+            if (!parse_rfu_instruction_info(splitted_text, reg_order, stripped_line,
+                                            key_instructions_by_pc, reg_usage_by_pc,
+                                            call_target_by_pc,
+                                            full_call_or_ret_inst_by_pc,
+                                            call_or_ret_pcs_not_to_consider)) {
+              return false;
+            }
           }else if(splitted_text[0].find(".text") != std::string::npos) {
+            if (splitted_text[0].size() <= 6 ||
+                splitted_text[0].back() != ':') {
+              return false;
+            }
             kernel_name = splitted_text[0].substr(6);
             kernel_name.pop_back(); // Remove the last  : char
           }
@@ -1777,7 +2166,11 @@ void parse_rfu(const std::filesystem::directory_entry &entry) {
       }
     }
   }
+  if (is_starting_reading_kernel || ifs_rfu.bad()) {
+    return false;
+  }
   ifs_rfu.close();
+  return true;
 }
 // MOD. End. Enhanced Tracer
 
@@ -1918,7 +2311,7 @@ static void handle_module_origin_event(CUcontext ctx, int is_exit,
 }
 
 static AcceptedModuleMapping resolve_accepted_module_mapping(
-    CUcontext ctx, CUfunction function, int device_id, int stream_id,
+    CUcontext ctx, CUfunction function, int device_id, int64_t stream_id,
     uint32_t trace_launch_id) {
   AcceptedModuleMapping mapping;
   mapping.accepted_launch_index = active_launch_gate.accepted_launches() - 1;
@@ -2173,8 +2566,8 @@ std::unordered_set<CUfunction> already_instrumented;
 /* instrument each memory instruction adding a call to the above instrumentation
  * function */
 void instrument_function_if_needed(CUcontext ctx, CUfunction func, int device_id) {
-  assert(ctx_state_map.find(ctx) != ctx_state_map.end());
-  CTXstate* ctx_state = ctx_state_map[ctx];
+  CTXstate* ctx_state = lookup_context_state_or_fail(
+      ctx, "instrument_function_if_needed/context");
   device_id = checked_device_id_value(
       device_id, "instrument_function_if_needed/stop_report");
   if (device_id != ctx_state->device_id) {
@@ -2204,7 +2597,8 @@ void instrument_function_if_needed(CUcontext ctx, CUfunction func, int device_id
     std::string current_kernel_name(nvbit_get_func_name(ctx, f, true));
     uint64_t addr_funct = (uint64_t)nvbit_get_func_addr(ctx, f);
     
-    next_candidate_unique_function_id++;
+    next_candidate_unique_function_id =
+        next_candidate_function_id_or_fail(next_candidate_unique_function_id);
 
     const std::vector<Instr *> &instrs = nvbit_get_instrs(ctx, f);
     if (verbose) {
@@ -2223,6 +2617,16 @@ void instrument_function_if_needed(CUcontext ctx, CUfunction func, int device_id
         instr->printDecoded();
       }
 
+      const uint32_t raw_vpc = instr->getOffset();
+      if (raw_vpc > static_cast<uint32_t>(std::numeric_limits<int>::max())) {
+        fprintf(stderr,
+                "FATAL: static SASS PC offset 0x%" PRIx32
+                " exceeds the signed map-key domain\n",
+                raw_vpc);
+        fflush(stderr);
+        _exit(EXIT_FAILURE);
+      }
+
       if (opcode_to_id_map.find(instr->getOpcode()) == opcode_to_id_map.end()) {
         int opcode_id = opcode_to_id_map.size();
         opcode_to_id_map[instr->getOpcode()] = opcode_id;
@@ -2230,7 +2634,7 @@ void instrument_function_if_needed(CUcontext ctx, CUfunction func, int device_id
       }
 
       int opcode_id = opcode_to_id_map[instr->getOpcode()];
-      int vpc = (int)instr->getOffset();
+      int vpc = static_cast<int>(raw_vpc);
       const bool async_order_selected =
           is_async_order_selected_instruction(instr->getOpcodeShort(),
                                               instr->getSass());
@@ -2272,6 +2676,13 @@ void instrument_function_if_needed(CUcontext ctx, CUfunction func, int device_id
       }
 
       std::shared_ptr<traced_instruction> inst_parsed = create_no_binay_instruction(vpc, inst_str);
+      if (inst_parsed == nullptr) {
+        fprintf(stderr,
+                "FATAL: failed to parse static SASS instruction at PC 0x%x: %s\n",
+                static_cast<unsigned int>(vpc), inst_str.c_str());
+        fflush(stderr);
+        _exit(EXIT_FAILURE);
+      }
       inst_parsed->set_simulation_opcode(OpcodeMap, inst_parsed->get_op_code());
 
       if(is_call_or_ret && !is_rel_type) {
@@ -2309,7 +2720,14 @@ void instrument_function_if_needed(CUcontext ctx, CUfunction func, int device_id
       }
 
       if(inst_parsed->is_tensor_core_op()) {
-        inst_parsed->set_tensor_core_instruction_info();
+        if (!inst_parsed->set_tensor_core_instruction_info()) {
+          fprintf(stderr,
+                  "FATAL: unsupported tensor-core instruction shape at PC "
+                  "0x%x; refusing to publish incomplete register metadata.\n",
+                  instr->getOffset());
+          fflush(stderr);
+          _exit(EXIT_FAILURE);
+        }
       }
       for(int i = 0; i < instr->getNumOperands(); ++i){
         const InstrType::operand_t *op = instr->getOperand(i);
@@ -2330,7 +2748,17 @@ void instrument_function_if_needed(CUcontext ctx, CUfunction func, int device_id
         }else if( (op->type == InstrType::OperandType::CBANK) && (instr->getOperand(i)->u.cbank.has_reg_offset || (std::string(op->str).find("UR") != std::string::npos) ) ) {
           if(std::string(op->str).find("UR") != std::string::npos) {
             has_ldc_with_ureg = true;
-            ldc_reg_id = get_ur_register(std::string(op->str));
+            unsigned int uniform_register_id = 0;
+            if (!get_ur_register(std::string(op->str), uniform_register_id) ||
+                uniform_register_id > static_cast<unsigned int>(URZ)) {
+              fprintf(stderr,
+                      "FATAL: malformed uniform register in constant-bank "
+                      "operand at PC 0x%x: %s\n",
+                      static_cast<unsigned int>(vpc), op->str);
+              fflush(stderr);
+              _exit(EXIT_FAILURE);
+            }
+            ldc_reg_id = static_cast<int>(uniform_register_id);
           }else {
             has_ldc_with_reg = true;
             ldc_reg_id = instr->getOperand(i)->u.cbank.reg_offset;
@@ -2380,6 +2808,15 @@ void instrument_function_if_needed(CUcontext ctx, CUfunction func, int device_id
         per_operand_type[0] = traced_operand_instrument(TRACED_REG_TYPE::NO_REGS, 0, 0);
         num_of_injects++;
       }
+      if (num_mref > 2) {
+        fprintf(stderr,
+                "FATAL: instruction at PC 0x%x has %d memory references; "
+                "the tracer supports at most two and will not publish "
+                "ambiguous operand attribution.\n",
+                instr->getOffset(), num_mref);
+        fflush(stderr);
+        _exit(EXIT_FAILURE);
+      }
 
       for(unsigned int i = 0; i < num_of_injects; i++) {
           /* insert call to the instrumentation function with its arguments */
@@ -2394,9 +2831,8 @@ void instrument_function_if_needed(CUcontext ctx, CUfunction func, int device_id
           nvbit_add_call_arg_const_val32(instr, per_operand_type[i].reg_type);
 
           if(per_operand_type[i].reg_type == TRACED_REG_TYPE::MEMORY_REF) {
-            if (mem_oper_idx >= 0) {
-              nvbit_add_call_arg_const_val32(instr, MEM_TYPE::STANDARD_MEM);
-              assert(num_mref <= 2);
+              if (mem_oper_idx >= 0) {
+                nvbit_add_call_arg_const_val32(instr, MEM_TYPE::STANDARD_MEM);
               nvbit_add_call_arg_mref_addr64(instr, mem_oper_idx);
               nvbit_add_call_arg_const_val32(instr, (int)instr->getSize());
               if(memref_idx_with_desc.find(mem_oper_idx) != memref_idx_with_desc.end()) {
@@ -2501,8 +2937,15 @@ void instrument_function_if_needed(CUcontext ctx, CUfunction func, int device_id
             nvbit_add_call_arg_const_val32(instr, SECRET_UREG_DESC_NOT_USED);
             nvbit_add_call_arg_const_val32(instr, SECRET_UREG_DESC_NOT_USED);
           }else {
-            assert(per_operand_type[i].reg_type == TRACED_REG_TYPE::NO_REGS);
-            assert(num_of_injects == 1);
+            if (per_operand_type[i].reg_type != TRACED_REG_TYPE::NO_REGS ||
+                num_of_injects != 1) {
+              fprintf(stderr,
+                      "FATAL: unsupported instrumentation operand layout at "
+                      "PC 0x%x; refusing to publish a malformed record.\n",
+                      instr->getOffset());
+              fflush(stderr);
+              _exit(EXIT_FAILURE);
+            }
             nvbit_add_call_arg_const_val32(instr, MEM_TYPE::NONE);
             nvbit_add_call_arg_const_val64(instr, SECRET_UREG_DESC_NOT_USED);
             nvbit_add_call_arg_const_val32(instr, SECRET_UREG_DESC_NOT_USED);
@@ -2697,7 +3140,16 @@ void instrument_function_if_needed(CUcontext ctx, CUfunction func, int device_id
     pthread_mutex_lock(&mutex);
     int variant_id = 0;
     auto it_map_already_instrumented = map_function_to_kernel_name_and_variant_id.find(f);
-    assert(it_map_already_instrumented == map_function_to_kernel_name_and_variant_id.end());
+    if (it_map_already_instrumented !=
+        map_function_to_kernel_name_and_variant_id.end()) {
+      fprintf(stderr,
+              "FATAL: function was already assigned an instrumentation "
+              "identity before registration completed; refusing to overwrite "
+              "the existing launch mapping.\n");
+      fflush(stderr);
+      pthread_mutex_unlock(&mutex);
+      _exit(EXIT_FAILURE);
+    }
 
     auto it_already_traced = all_kernels_key_instructions_by_pc.find(current_kernel_name);
     if (it_already_traced == all_kernels_key_instructions_by_pc.end())
@@ -2854,18 +3306,24 @@ static long long phase_test_stall_teardown_iters() {
 void *phase_recv_thread_fun(void *args) {
   CUcontext ctx = (CUcontext)args;
   pthread_mutex_lock(&mutex);
-  assert(ctx_state_map.find(ctx) != ctx_state_map.end());
-  CTXstate* ctx_state = ctx_state_map[ctx];
+  CTXstate* ctx_state = lookup_context_state_or_fail(
+      ctx, "phase_recv_thread_fun/context");
   checked_stored_context_device_id(ctx_state,
                                    "phase_recv_thread_fun/context device");
   ChannelHost* ch_host = &ctx_state->phase_channel_host;
   pthread_mutex_unlock(&mutex);
 
-  char *recv_buffer = (char *)malloc(CHANNEL_SIZE);
+  char *recv_buffer = static_cast<char *>(malloc(CHANNEL_SIZE));
+  if (recv_buffer == nullptr) {
+    fail_device_identity("phase_recv_thread_fun/receive buffer allocation",
+                         "malloc(CHANNEL_SIZE) returned null");
+  }
   while (ctx_state->phase_recv_thread_done.load(std::memory_order_acquire) ==
          RecvThreadState::WORKING) {
     uint32_t num_recv_bytes = ch_host->recv(recv_buffer, CHANNEL_SIZE);
     if (num_recv_bytes > 0) {
+      require_record_alignment(num_recv_bytes, sizeof(phase_clock_record_t),
+                               "phase");
       uint32_t num_processed_bytes = 0;
       while (num_processed_bytes < num_recv_bytes) {
         phase_clock_record_t *pcr =
@@ -2919,10 +3377,28 @@ void *phase_recv_thread_fun(void *args) {
          * coherent at the per-launch boundary. */
         {
           std::lock_guard<std::mutex> blk(ctx_state->phase_records_buffer_mutex);
-          ctx_state->phase_records_buffer.insert(
-              ctx_state->phase_records_buffer.end(),
-              (char*)pcr,
-              (char*)pcr + sizeof(phase_clock_record_t));
+          if (ctx_state->phase_records_buffer.size() >
+              MAX_PHASE_RECORD_BUFFER_BYTES - sizeof(phase_clock_record_t)) {
+            fprintf(stderr,
+                    "FATAL: phase-record buffer exceeded %zu-byte bound; "
+                    "refusing an unbounded host allocation\n",
+                    MAX_PHASE_RECORD_BUFFER_BYTES);
+            fflush(stderr);
+            _exit(EXIT_FAILURE);
+          }
+          try {
+            ctx_state->phase_records_buffer.insert(
+                ctx_state->phase_records_buffer.end(),
+                (char*)pcr,
+                (char*)pcr + sizeof(phase_clock_record_t));
+          } catch (const std::bad_alloc &) {
+            fprintf(stderr,
+                    "FATAL: phase-record buffer allocation failed at %zu "
+                    "bytes\n",
+                    ctx_state->phase_records_buffer.size());
+            fflush(stderr);
+            _exit(EXIT_FAILURE);
+          }
         }
         num_processed_bytes += sizeof(phase_clock_record_t);
       }
@@ -2944,6 +3420,74 @@ static FILE *statsFile = NULL;
 static bool first_call = true;
 static unsigned int pending_devices_to_finish = 0;
 
+static FILE *open_stats_file(const char *mode) {
+  FILE *file = fopen(stats_location.c_str(), mode);
+  if (file == nullptr) {
+    fprintf(stderr, "FATAL: could not open tracer stats file %s with mode %s: %s\n",
+            stats_location.c_str(), mode, strerror(errno));
+    fflush(stderr);
+    _exit(EXIT_FAILURE);
+  }
+  return file;
+}
+
+static void fatal_stats_io(const char *operation) {
+  const char *detail = errno != 0 ? strerror(errno) : "unknown I/O error";
+  fprintf(stderr, "FATAL: tracer stats I/O failed during %s for %s: %s\n",
+          operation, stats_location.c_str(), detail);
+  fflush(stderr);
+  _exit(EXIT_FAILURE);
+}
+
+static void checked_stats_write(int result, const char *operation) {
+  if (result < 0) fatal_stats_io(operation);
+}
+
+static void checked_stats_close(FILE *file) {
+  if (fclose(file) != 0) fatal_stats_io("close");
+}
+
+static uint64_t checked_dimension_product(uint64_t lhs, uint64_t rhs,
+                                          const char *label) {
+  if (rhs != 0 && lhs > std::numeric_limits<uint64_t>::max() / rhs) {
+    fprintf(stderr,
+            "FATAL: launch %s product overflows the uint64 stats domain "
+            "(lhs=%" PRIu64 ", rhs=%" PRIu64 ")\n",
+            label, lhs, rhs);
+    fflush(stderr);
+    _exit(EXIT_FAILURE);
+  }
+  return lhs * rhs;
+}
+
+static void init_context_state(CUcontext ctx);
+static int resolve_binary_version_for_current_device();
+
+static void checked_cuda_runtime_status(cudaError_t status,
+                                        const char *operation) {
+  if (status != cudaSuccess) {
+    fprintf(stderr, "FATAL: CUDA runtime call %s failed: %s\n", operation,
+            cudaGetErrorString(status));
+    fflush(stderr);
+    _exit(EXIT_FAILURE);
+  }
+}
+
+/* The instruction tracer's launch state is scoped to one ordinary
+ * cuLaunchKernel callback: one pending launch, one per-context channel
+ * handshake, and one active stream/kernel identity.  CUDA graph replay does
+ * not provide that entry/exit pair for each node; NVBit exposes the separate
+ * nvbit_at_graph_node_launch() callback instead.  Until this tracer has a
+ * graph-specific queue and per-node channel identities, accepting a graph
+ * launch would produce an apparently successful but empty (or misattributed)
+ * dynamic_trace.pb.  Fail at the graph boundary so callers cannot mistake
+ * that artifact for a valid capture.
+ */
+static bool is_graph_launch_callback(nvbit_api_cuda_t cbid) {
+  return cbid == API_CUDA_cuGraphLaunch ||
+         cbid == API_CUDA_cuGraphLaunch_ptsz;
+}
+
 void nvbit_at_cuda_event(CUcontext ctx, int is_exit, nvbit_api_cuda_t cbid,
                          const char *name, void *params, CUresult *pStatus) {
   // std::cout << "nvbit_at_cuda_event: "  << cbid << std::endl; fflush(stdout);
@@ -2955,13 +3499,66 @@ void nvbit_at_cuda_event(CUcontext ctx, int is_exit, nvbit_api_cuda_t cbid,
       return;
   }
 
-  assert(ctx_state_map.find(ctx) != ctx_state_map.end());
-  CTXstate* ctx_state = ctx_state_map[ctx];
+  CTXstate* ctx_state = lookup_context_state_or_fail(
+      ctx, "nvbit_at_cuda_event/context");
 
   if (is_module_origin_event(cbid)) {
     handle_module_origin_event(ctx, is_exit, cbid, params, pStatus);
     pthread_mutex_unlock(&mutex);
     return;
+  }
+
+  // A graph used while the profiler is inactive is outside the requested
+  // capture region and must not change application behavior. Reject only a
+  // graph launch that would otherwise be part of the active trace.
+  if (is_graph_launch_callback(cbid) && active_region) {
+    fprintf(stderr,
+            "FATAL: graph_node_capture_unsupported: %s observed, but "
+            "tracer_tool has no per-node channel identity/flush path; "
+            "refusing to publish an empty or misattributed graph capture.\n",
+            is_exit ? "cuGraphLaunch exit" : "cuGraphLaunch entry");
+    fflush(stderr);
+    pthread_mutex_unlock(&mutex);
+    _exit(EXIT_FAILURE);
+  }
+
+  const bool capture_begin =
+      cbid == API_CUDA_cuStreamBeginCapture ||
+      cbid == API_CUDA_cuStreamBeginCapture_ptsz ||
+      cbid == API_CUDA_cuStreamBeginCapture_v2 ||
+      cbid == API_CUDA_cuStreamBeginCapture_v2_ptsz;
+  const bool capture_end = cbid == API_CUDA_cuStreamEndCapture ||
+                           cbid == API_CUDA_cuStreamEndCapture_ptsz;
+  // Commit capture bookkeeping only after the API succeeds.  An entry-side
+  // increment would leave a stale count when cuStreamBeginCapture rejects the
+  // request, causing later ordinary launches to defer initialization forever.
+  if (capture_begin && is_exit && pStatus && *pStatus == CUDA_SUCCESS) {
+    ++active_capture_counts[ctx];
+  } else if (capture_end && is_exit && pStatus &&
+             *pStatus == CUDA_SUCCESS) {
+    auto capture_it = active_capture_counts.find(ctx);
+    if (capture_it != active_capture_counts.end()) {
+      if (capture_it->second <= 1) {
+        active_capture_counts.erase(capture_it);
+      } else {
+        --capture_it->second;
+      }
+    }
+    // A deferred tool initialization is completed only after every capture
+    // owned by this context has ended, so its CUDA allocations are legal.
+    auto state_it = ctx_state_map.find(ctx);
+    if (state_it != ctx_state_map.end() && state_it->second != nullptr &&
+        state_it->second->tool_init_deferred &&
+        active_capture_counts.find(ctx) == active_capture_counts.end()) {
+      CTXstate *deferred_state = state_it->second;
+      skip_callback_flag = true;
+      init_context_state(ctx);
+      deferred_state->binary_version = resolve_binary_version_for_current_device();
+      binary_version = deferred_state->binary_version;
+      deferred_state->tool_init_deferred = false;
+      deferred_state->tool_init_complete = true;
+      skip_callback_flag = false;
+    }
   }
 
   if (first_call == true) {
@@ -2983,28 +3580,87 @@ void nvbit_at_cuda_event(CUcontext ctx, int is_exit, nvbit_api_cuda_t cbid,
       }
     }
 
-    statsFile = fopen(stats_location.c_str(), "w");
-    fprintf(statsFile,
+    statsFile = open_stats_file("w");
+    const int header_written = fprintf(statsFile,
             "device_id, stream_id, kernel id, kernel mangled name, grid_dimX, grid_dimY, grid_dimZ, "
             "#blocks, block_dimX, block_dimY, block_dimZ, #threads, "
             "total_insts, total_reported_insts\n");
-    fclose(statsFile);
+    checked_stats_write(header_written, "header write");
+    checked_stats_close(statsFile);
   }
 
-  if (cbid == API_CUDA_cuMemcpyHtoD_v2) {
+  const bool is_h2d_sync =
+      cbid == API_CUDA_cuMemcpyHtoD ||
+      cbid == API_CUDA_cuMemcpyHtoD_v2 ||
+      cbid == API_CUDA_cuMemcpyHtoD_v2_ptds;
+  const bool is_h2d_async =
+      cbid == API_CUDA_cuMemcpyHtoDAsync ||
+      cbid == API_CUDA_cuMemcpyHtoDAsync_v2 ||
+      cbid == API_CUDA_cuMemcpyHtoDAsync_v2_ptsz;
+  if (is_h2d_sync || is_h2d_async) {
     if (!is_exit && active_launch_gate.region_active()) {
-      cuMemcpyHtoD_v2_params *p = (cuMemcpyHtoD_v2_params *)params;
-      uint64_t stream_key = 0;// Memcpy unless they are asynchronous, they are always in stream 0.
-      char buffer[1024];
+      // Synchronous copies target either the legacy or per-thread default
+      // stream, while asynchronous copies carry an explicit stream. The
+      // trace wire carries driver-assigned IDs, so resolve the matching
+      // default-stream variant rather than assuming stream zero.
+      const bool per_thread_default_memcpy =
+          cbid == API_CUDA_cuMemcpyHtoD_v2_ptds ||
+          cbid == API_CUDA_cuMemcpyHtoDAsync_v2_ptsz;
+      CUdeviceptr dst_device = 0;
+      size_t byte_count = 0;
+      CUstream copy_stream = nullptr;
+      if (cbid == API_CUDA_cuMemcpyHtoD) {
+        const auto *p = static_cast<const cuMemcpyHtoD_params *>(params);
+        dst_device = static_cast<CUdeviceptr>(p->dstDevice);
+        byte_count = static_cast<size_t>(p->ByteCount);
+      } else if (cbid == API_CUDA_cuMemcpyHtoD_v2) {
+        const auto *p = static_cast<const cuMemcpyHtoD_v2_params *>(params);
+        dst_device = p->dstDevice;
+        byte_count = p->ByteCount;
+      } else if (cbid == API_CUDA_cuMemcpyHtoD_v2_ptds) {
+        const auto *p =
+            static_cast<const cuMemcpyHtoD_v2_ptds_params *>(params);
+        dst_device = p->dstDevice;
+        byte_count = p->ByteCount;
+      } else if (cbid == API_CUDA_cuMemcpyHtoDAsync) {
+        const auto *p =
+            static_cast<const cuMemcpyHtoDAsync_params *>(params);
+        dst_device = static_cast<CUdeviceptr>(p->dstDevice);
+        byte_count = static_cast<size_t>(p->ByteCount);
+        copy_stream = p->hStream;
+      } else if (cbid == API_CUDA_cuMemcpyHtoDAsync_v2) {
+        const auto *p =
+            static_cast<const cuMemcpyHtoDAsync_v2_params *>(params);
+        dst_device = p->dstDevice;
+        byte_count = p->ByteCount;
+        copy_stream = p->hStream;
+      } else {
+        const auto *p = static_cast<const cuMemcpyHtoDAsync_v2_ptsz_params *>(
+            params);
+        dst_device = p->dstDevice;
+        byte_count = p->ByteCount;
+        copy_stream = p->hStream;
+      }
+      const int64_t stream_key =
+          stream_ordinal_for(copy_stream, per_thread_default_memcpy);
+      char buffer[128];
       const int device_id = checked_current_context_device_id(
           ctx_state, "nvbit_at_cuda_event/cuMemcpyHtoD_v2");
-      sprintf(buffer, "MemcpyHtoD,0x%016llx,%lu", p->dstDevice, p->ByteCount);
+      const int written = snprintf(
+          buffer, sizeof(buffer), "MemcpyHtoD,0x%016" PRIx64 ",%zu",
+          static_cast<uint64_t>(dst_device), byte_count);
+      if (written < 0 || static_cast<size_t>(written) >= sizeof(buffer)) {
+        fprintf(stderr, "FATAL: CUDA memcpy event description exceeded its buffer\n");
+        fflush(stderr);
+        _exit(EXIT_FAILURE);
+      }
       // Serialize dyn_trace mutation against any concurrent recv-thread
       // writes on other contexts.
       {
         std::lock_guard<std::mutex> rcm_lock(recv_container_mutex);
         dynamic_trace::gpu_device &gpu_dev = (*dyn_trace.mutable_gpu_device())[device_id];
         dynamic_trace::cuda_stream &stream = (*gpu_dev.mutable_streams())[stream_key];
+        stream.set_id(stream_key);
         stream.add_ordered_cuda_events(buffer);
       }
     }
@@ -3122,15 +3778,26 @@ void nvbit_at_cuda_event(CUcontext ctx, int is_exit, nvbit_api_cuda_t cbid,
                 nvbit_get_func_name(ctx, kernel_func, true));
         fflush(stderr);
         nvbit_enable_instrumented(ctx, kernel_func, false);
-        stop_report[device_id] = true;
+        if (stop_report != nullptr) stop_report[device_id] = true;
         pthread_mutex_unlock(&mutex);
         return;
       }
       if (launch_decision == nvbit_tracer::ActiveLaunchDecision::kInactive) {
         nvbit_enable_instrumented(ctx, kernel_func, false);
-        stop_report[device_id] = true;
+        if (stop_report != nullptr) stop_report[device_id] = true;
         pthread_mutex_unlock(&mutex);
         return;
+      }
+
+      if (ctx_state->recv_thread_receiving.load(std::memory_order_acquire)) {
+        fprintf(stderr,
+                "FATAL: overlapping accepted launches in CUDA context %p "
+                "cannot share one receiver launch identity; refusing to "
+                "merge their channel records.\n",
+                static_cast<void *>(ctx));
+        fflush(stderr);
+        pthread_mutex_unlock(&mutex);
+        _exit(EXIT_FAILURE);
       }
 
       /* Canonical phase leaves intentionally retain the admitted
@@ -3144,14 +3811,53 @@ void nvbit_at_cuda_event(CUcontext ctx, int is_exit, nvbit_api_cuda_t cbid,
         if (!phase_record_writer.AdmitDevice(device_id,
                                              &phase_device_error)) {
           simbench_nvbit::FailPhaseRecordAuthority("single-device admission",
-                                      phase_device_error);
+                                     phase_device_error);
         }
       }
 
+      const bool per_thread_default_launch =
+          cbid == API_CUDA_cuLaunchKernel_ptsz ||
+          cbid == API_CUDA_cuLaunchKernelEx_ptsz;
+      const int64_t stream_key =
+          stream_ordinal_for(kernel_stream, per_thread_default_launch);
+
+      // Some NVBit releases omit nvbit_tool_init for a graph node launched
+      // after stream capture. Initialize lazily at the first post-capture
+      // kernel callback; CUDA channel allocations are legal once capture is
+      // inactive. If this callback is itself part of capture, leave the node
+      // uninstrumented and let the later graph-launch callback retry.
+      if (!is_exit && !ctx_state->tool_init_complete) {
+        const bool capture_active =
+            stream_capture_active(kernel_stream, per_thread_default_launch);
+        if (!capture_active) {
+          skip_callback_flag = true;
+          init_context_state(ctx);
+          ctx_state->binary_version = resolve_binary_version_for_current_device();
+          binary_version = ctx_state->binary_version;
+          ctx_state->tool_init_deferred = false;
+          ctx_state->tool_init_complete = true;
+          skip_callback_flag = false;
+        } else {
+          ctx_state->tool_init_deferred = true;
+          int expected_counter = 0;
+          kernel_id[launch_device_id].compare_exchange_strong(
+              expected_counter, 1, std::memory_order_relaxed,
+              std::memory_order_relaxed);
+          pthread_mutex_unlock(&mutex);
+          return;
+        }
+      }
+      int expected_counter = 0;
+      kernel_id[launch_device_id].compare_exchange_strong(
+          expected_counter, 1, std::memory_order_relaxed,
+          std::memory_order_relaxed);
+
+      const int launch_kernel_id = checked_kernel_launch_id(
+          kernel_id[device_id].load(std::memory_order_acquire));
       pending_accepted_launch.accepted = true;
       pending_accepted_launch.device_id = device_id;
       pending_accepted_launch.trace_launch_id = static_cast<uint32_t>(
-          kernel_id[device_id].load(std::memory_order_acquire));
+          launch_kernel_id);
       pending_accepted_launch.total_insts_at_entry =
           total_dynamic_instr_counter;
       pending_accepted_launch.reported_insts_at_entry =
@@ -3175,15 +3881,15 @@ void nvbit_at_cuda_event(CUcontext ctx, int is_exit, nvbit_api_cuda_t cbid,
       // claim the shape slot.
       if (trace_sampling_mode != 0 && !ts_scope_dims_captured) {
         ts_scope_device = device_id;
-        ts_scope_stream = 0;
-        ts_scope_kernel = static_cast<int>(
-            pending_accepted_launch.trace_launch_id);
-        ts_scope_grid_x = static_cast<int>(grid_dim_x);
-        ts_scope_grid_y = static_cast<int>(grid_dim_y);
-        ts_scope_grid_z = static_cast<int>(grid_dim_z);
-        ts_scope_block_x = static_cast<int>(block_dim_x);
-        ts_scope_block_y = static_cast<int>(block_dim_y);
-        ts_scope_block_z = static_cast<int>(block_dim_z);
+        ts_scope_stream = stream_key;
+        ts_scope_kernel = checked_sampling_scope_int(
+            pending_accepted_launch.trace_launch_id, "kernel");
+        ts_scope_grid_x = checked_sampling_scope_int(grid_dim_x, "grid.x");
+        ts_scope_grid_y = checked_sampling_scope_int(grid_dim_y, "grid.y");
+        ts_scope_grid_z = checked_sampling_scope_int(grid_dim_z, "grid.z");
+        ts_scope_block_x = checked_sampling_scope_int(block_dim_x, "block.x");
+        ts_scope_block_y = checked_sampling_scope_int(block_dim_y, "block.y");
+        ts_scope_block_z = checked_sampling_scope_int(block_dim_z, "block.z");
         ts_scope_dims_captured = true;
       }
       
@@ -3285,17 +3991,25 @@ void nvbit_at_cuda_event(CUcontext ctx, int is_exit, nvbit_api_cuda_t cbid,
         }
       }
 
-      get_opcode_map(OpcodeMap, binary_version);
+      if (!get_opcode_map(OpcodeMap, binary_version)) {
+        fprintf(stderr,
+                "FATAL: unsupported binary_version=%d; cannot map traced opcodes\n",
+                binary_version);
+        fflush(stderr);
+        _exit(EXIT_FAILURE);
+      }
       instrument_function_if_needed(ctx, kernel_func, device_id);
       accepted_module_mappings.push_back(resolve_accepted_module_mapping(
-          ctx, kernel_func, device_id, 0,
+          ctx, kernel_func, device_id, stream_key,
           pending_accepted_launch.trace_launch_id));
 
       nvbit_enable_instrumented(ctx, kernel_func, true);
       stop_report[device_id] = false;
 
-      char buffer[1024];
-      sprintf(buffer, std::string(traces_location+"/kernel-%d.trace").c_str(), kernel_id[device_id].load(std::memory_order_acquire));
+      const std::string kernel_trace_name =
+          "kernel-" +
+          std::to_string(launch_kernel_id) +
+          ".trace";
 
       // Serialize the entire pre-launch dyn_trace mutation block against
       // any concurrent recv-thread writes from other contexts. We look up
@@ -3310,7 +4024,14 @@ void nvbit_at_cuda_event(CUcontext ctx, int is_exit, nvbit_api_cuda_t cbid,
         if (!stop_report[device_id]) {
           int variant_id = 0;
           auto it_map_already_instrumented = map_function_to_kernel_name_and_variant_id.find(kernel_func);
-          assert(it_map_already_instrumented != map_function_to_kernel_name_and_variant_id.end());
+          if (it_map_already_instrumented ==
+              map_function_to_kernel_name_and_variant_id.end()) {
+            fprintf(stderr,
+                    "FATAL: accepted kernel has no instrumentation identity; "
+                    "refusing to publish an unbound trace launch.\n");
+            fflush(stderr);
+            _exit(EXIT_FAILURE);
+          }
           variant_id = std::get<1>(it_map_already_instrumented->second);
           std::string kernel_name(nvbit_get_func_name(ctx, kernel_func, true));
 
@@ -3319,16 +4040,19 @@ void nvbit_at_cuda_event(CUcontext ctx, int is_exit, nvbit_api_cuda_t cbid,
           std::string final_kernel_name = kernel_name + variant_delimiter_str + std::to_string(variant_id);
 
           auto it_map_unique_function_id = map_function_name_to_unique_function_id_with_variant.find(final_kernel_name);
-          assert(it_map_unique_function_id != map_function_name_to_unique_function_id_with_variant.end());
+          if (it_map_unique_function_id ==
+              map_function_name_to_unique_function_id_with_variant.end()) {
+            fprintf(stderr,
+                    "FATAL: accepted kernel has no function-unique identity; "
+                    "refusing to publish an unbound trace launch.\n");
+            fflush(stderr);
+            _exit(EXIT_FAILURE);
+          }
           dyn_trace.set_binary_version(binary_version);
-          auto stream_map = gpu_dev.streams();
-          uint64_t stream_key = (uint64_t)kernel_stream;
-          stream_key = 0; // We use 0 as stream key for now, as we do not support multiple streams yet. WIPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPP
-          current_stream_id[device_id].store(stream_key, std::memory_order_release);
           dynamic_trace::cuda_stream &stream = (*gpu_dev.mutable_streams())[stream_key];
           stream.set_id(stream_key);
           dynamic_trace::kernel *ker = stream.add_kernels();
-          ker->set_id(kernel_id[device_id].load(std::memory_order_acquire));
+          ker->set_id(launch_kernel_id);
           ker->set_name(final_kernel_name);
           ker->set_function_unique_id(it_map_unique_function_id->second);
           ker->set_size_shared_memory(
@@ -3359,31 +4083,58 @@ void nvbit_at_cuda_event(CUcontext ctx, int is_exit, nvbit_api_cuda_t cbid,
         }
 
         // This will be a relative path to the traces file
-        sprintf(buffer,"kernel-%d.trace", kernel_id[device_id].load(std::memory_order_acquire));
         if (!stop_report[device_id]) {
-          uint64_t stream_key = (uint64_t)kernel_stream;
-          stream_key = 0; // We use 0 as stream key for now, as we do not support multiple streams yet. WIPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPP
           dynamic_trace::cuda_stream &stream = (*gpu_dev.mutable_streams())[stream_key];
-          stream.add_ordered_cuda_events(buffer);
+          stream.add_ordered_cuda_events(kernel_trace_name);
         }
       }
 
-      statsFile = fopen(stats_location.c_str(), "a");
-      unsigned blocks = grid_dim_x * grid_dim_y * grid_dim_z;
-      unsigned threads = block_dim_x * block_dim_y * block_dim_z;
+      // Publish this context's launch identity before arming its receiver.
+      // The receiver acquires recv_thread_receiving below, so these stores are
+      // visible even when another context on the same device is active.
+      ctx_state->active_stream_id.store(stream_key, std::memory_order_release);
+      ctx_state->active_kernel_id.store(launch_kernel_id,
+                                        std::memory_order_release);
 
-      fprintf(statsFile, "%d, %d, %s, %s, %d, %d, %d, %d, %d, %d, %d, %d, ", device_id , current_stream_id[device_id].load(std::memory_order_acquire), buffer,
-              nvbit_get_func_name(ctx, kernel_func, true), grid_dim_x, grid_dim_y,
-              grid_dim_z, blocks, block_dim_x, block_dim_y, block_dim_z,
-              threads);
+      statsFile = open_stats_file("a");
+      // Keep launch-shape products in the same 64-bit domain consumed by
+      // the stats readers.  Multiplying as `unsigned` silently wrapped large
+      // legal grids before they reached `stats.csv`.
+      const uint64_t blocks = checked_dimension_product(
+          checked_dimension_product(static_cast<uint64_t>(grid_dim_x),
+                                    static_cast<uint64_t>(grid_dim_y),
+                                    "grid plane"),
+          static_cast<uint64_t>(grid_dim_z), "grid volume");
+      const uint64_t threads = checked_dimension_product(
+          checked_dimension_product(static_cast<uint64_t>(block_dim_x),
+                                    static_cast<uint64_t>(block_dim_y),
+                                    "block plane"),
+          static_cast<uint64_t>(block_dim_z), "block volume");
 
-      fclose(statsFile);
+      const int launch_row_written = fprintf(
+          statsFile,
+          "%d, %" PRId64 ", %s, %s, %u, %u, %u, %" PRIu64
+          ", %u, %u, %u, %" PRIu64 ", ",
+          device_id,
+          stream_key,
+          kernel_trace_name.c_str(), nvbit_get_func_name(ctx, kernel_func, true),
+          grid_dim_x, grid_dim_y, grid_dim_z, blocks, block_dim_x, block_dim_y,
+          block_dim_z, threads);
+      checked_stats_write(launch_row_written, "launch row write");
+      checked_stats_close(statsFile);
 
       const uint32_t this_launch_id =
           pending_accepted_launch.trace_launch_id;
       kernel_id[device_id].fetch_add(1, std::memory_order_acq_rel);
-      // Release-store publishes both the kernel_id increment above and every
-      // other main-thread mutation (pc_to_opcode, threadblocks, etc.) to the
+      // Snapshot allocation generations before releasing the launch handshake.
+      // The receiver may process channel records after an async free/reuse API
+      // callback has run, so resolving against the live registry at receive
+      // time would relabel an older kernel's addresses.
+      ctx_state->active_allocation_snapshot =
+          nvbit_tracer::snapshot_live_allocations(ctx);
+      ctx_state->active_allocation_snapshot_valid = true;
+      // Release-store publishes the active launch identity and every other
+      // main-thread mutation (pc_to_opcode, threadblocks, etc.) to the
       // recv thread, which acquire-loads this same flag at :1402 before
       // touching any of that state.
       ctx_state->next_async_instrumentation_order = 1;
@@ -3425,16 +4176,10 @@ void nvbit_at_cuda_event(CUcontext ctx, int is_exit, nvbit_api_cuda_t cbid,
         _exit(EXIT_FAILURE);
       }
       /* make sure current kernel is completed */
-      cudaDeviceSynchronize();
-      // GET CUDA ERROR:
-      cudaError_t cuErr = cudaGetLastError();
-      if (cuErr != cudaSuccess) {
-        fprintf(stdout, "CUDA error in file '%s' in line %i : %s.\n", __FILE__,
-                __LINE__, cudaGetErrorString(cuErr));
-        fflush(stdout);
-        abort();
-      }
-      assert(cuErr == cudaSuccess);
+      checked_cuda_runtime_status(
+          cudaDeviceSynchronize(), "cudaDeviceSynchronize(kernel completion)");
+      checked_cuda_runtime_status(cudaGetLastError(),
+                                  "cudaGetLastError(kernel completion)");
 
       /* make sure we prevent re-entry on the nvbit_callback when issuing
        * the flush_channel kernel */
@@ -3443,8 +4188,10 @@ void nvbit_at_cuda_event(CUcontext ctx, int is_exit, nvbit_api_cuda_t cbid,
       /* issue flush of channel so we are sure all the memory accesses
        * have been pushed */
       flush_channel<<<1, 1>>>(ctx_state->channel_dev);
-      cudaDeviceSynchronize();
-      assert(cudaGetLastError() == cudaSuccess);
+      checked_cuda_runtime_status(cudaDeviceSynchronize(),
+                                  "cudaDeviceSynchronize(trace flush)");
+      checked_cuda_runtime_status(cudaGetLastError(),
+                                  "cudaGetLastError(trace flush)");
 
       /* Closure-plan NVBit phase-injection contract: per-launch
        * phase-channel flush + drain. Only when env-gated activation
@@ -3471,8 +4218,10 @@ void nvbit_at_cuda_event(CUcontext ctx, int is_exit, nvbit_api_cuda_t cbid,
           ctx_state->phase_channel_dev != nullptr) {
         flush_phase_channel<<<1, 1>>>(ctx_state->phase_channel_dev,
                                       phase_this_launch_id);
-        cudaDeviceSynchronize();
-        assert(cudaGetLastError() == cudaSuccess);
+        checked_cuda_runtime_status(
+            cudaDeviceSynchronize(), "cudaDeviceSynchronize(phase flush)");
+        checked_cuda_runtime_status(cudaGetLastError(),
+                                    "cudaGetLastError(phase flush)");
         /* Wait for the recv thread to publish
          * `phase_completed_flush_launch_index == phase_this_launch_id`.
          * The generation-valued counter makes the wait race-free: an
@@ -3526,7 +4275,14 @@ void nvbit_at_cuda_event(CUcontext ctx, int is_exit, nvbit_api_cuda_t cbid,
               ctx_state->phase_records_buffer_mutex);
           const size_t REC_SZ = sizeof(phase_clock_record_t);
           const size_t total = ctx_state->phase_records_buffer.size();
-          assert(total % REC_SZ == 0);
+          if (REC_SZ == 0 || total % REC_SZ != 0) {
+            fprintf(stderr,
+                    "FATAL: phase-record buffer has %zu bytes, not a "
+                    "whole-record multiple of %zu\n",
+                    total, REC_SZ);
+            fflush(stderr);
+            _exit(EXIT_FAILURE);
+          }
           for (size_t off = 0; off < total; off += REC_SZ) {
             const phase_clock_record_t *r =
                 reinterpret_cast<const phase_clock_record_t *>(
@@ -3613,12 +4369,14 @@ void nvbit_at_cuda_event(CUcontext ctx, int is_exit, nvbit_api_cuda_t cbid,
           reported_dynamic_instr_counter -
           pending_accepted_launch.reported_insts_at_entry;
 
-      statsFile = fopen(stats_location.c_str(), "a");
-      fprintf(statsFile, "%llu,%llu",
-              (unsigned long long)total_insts_per_kernel,
-              (unsigned long long)reported_insts_per_kernel);
-      fprintf(statsFile, "\n");
-      fclose(statsFile);
+      statsFile = open_stats_file("a");
+      const int totals_written = fprintf(
+          statsFile, "%llu,%llu",
+          (unsigned long long)total_insts_per_kernel,
+          (unsigned long long)reported_insts_per_kernel);
+      checked_stats_write(totals_written, "kernel totals write");
+      checked_stats_write(fprintf(statsFile, "\n"), "kernel totals newline");
+      checked_stats_close(statsFile);
       
       if (!stop_report[device_id]) {
         create_folder(threadblock_trace_path.c_str());
@@ -3634,7 +4392,9 @@ void nvbit_at_cuda_event(CUcontext ctx, int is_exit, nvbit_api_cuda_t cbid,
         while(it_tb != threadblocks.end()) {
           std::string tb_string_id = it_tb->first;
           ThreadblockStringParseInfo tb_info = parse_tb_string_id(tb_string_id);
-          if((tb_info.device_id == device_id) && (tb_info.stream_id == current_stream_id[device_id].load(std::memory_order_acquire)) && (tb_info.kernel_id == (kernel_id[device_id].load(std::memory_order_acquire)-1))) {
+          if((tb_info.device_id == device_id) &&
+             (tb_info.stream_id == ctx_state->active_stream_id.load(std::memory_order_acquire)) &&
+             (tb_info.kernel_id == ctx_state->active_kernel_id.load(std::memory_order_acquire))) {
             // Create hierarchical folder structure
             std::string device_folder = threadblock_trace_path + "/device_" + std::to_string(tb_info.device_id);
             std::string stream_folder = device_folder + "/stream_" + std::to_string(tb_info.stream_id);
@@ -3669,12 +4429,33 @@ void nvbit_at_cuda_event(CUcontext ctx, int is_exit, nvbit_api_cuda_t cbid,
             if (ts_do_write) {
               std::string tb_file = kernel_folder + "/" + tb_string_id + ".pb";
               std::ofstream ofs_tb(tb_file, std::ios::out | std::ios::binary);
+              if (!ofs_tb) {
+                fprintf(stderr,
+                        "FATAL: failed to open threadblock trace %s for writing\n",
+                        tb_file.c_str());
+                fflush(stderr);
+                _exit(EXIT_FAILURE);
+              }
               if (!tb.SerializeToOstream(&ofs_tb)) {
-                std::cerr << "Failed to write threadblock content." << std::endl;
-                fflush(stdout);
-                abort();
+                fprintf(stderr, "FATAL: failed to serialize threadblock trace %s\n",
+                        tb_file.c_str());
+                fflush(stderr);
+                _exit(EXIT_FAILURE);
+              }
+              ofs_tb.flush();
+              if (!ofs_tb) {
+                fprintf(stderr, "FATAL: failed while writing threadblock trace %s\n",
+                        tb_file.c_str());
+                fflush(stderr);
+                _exit(EXIT_FAILURE);
               }
               ofs_tb.close();
+              if (!ofs_tb) {
+                fprintf(stderr, "FATAL: failed to close threadblock trace %s\n",
+                        tb_file.c_str());
+                fflush(stderr);
+                _exit(EXIT_FAILURE);
+              }
             }
             tb.Clear();
             it_tb = threadblocks.erase(it_tb);
@@ -3696,6 +4477,56 @@ void nvbit_at_cuda_event(CUcontext ctx, int is_exit, nvbit_api_cuda_t cbid,
               dynamic_kernel_limit_end) {
         active_region = false;
         active_launch_gate.ProfilerStop();
+      }
+    }
+  } else if (cbid == API_CUDA_cuMemPoolCreate) {
+    // Cache pool location before a stream can enter capture.  Querying pool
+    // attributes from an active capture is not permitted on current drivers,
+    // while the create parameters are the authoritative location contract.
+    if (is_exit && pStatus && *pStatus == CUDA_SUCCESS) {
+      cuMemPoolCreate_params *p = (cuMemPoolCreate_params *)params;
+      if (p->pool != nullptr && *p->pool != nullptr &&
+          p->poolProps != nullptr) {
+        memory_pool_identity_map[*p->pool] = MemoryPoolIdentity{
+            p->poolProps->location.type, p->poolProps->location.id};
+      }
+    }
+  } else if (cbid == API_CUDA_cuMemPoolDestroy) {
+    if (is_exit && pStatus && *pStatus == CUDA_SUCCESS) {
+      cuMemPoolDestroy_params *p = (cuMemPoolDestroy_params *)params;
+      memory_pool_identity_map.erase(p->pool);
+    }
+  } else if (cbid == API_CUDA_cuDeviceGetDefaultMemPool) {
+    // Default device pools are not created through cuMemPoolCreate, so seed
+    // their identities from the device argument when the handle is returned.
+    if (is_exit && pStatus && *pStatus == CUDA_SUCCESS) {
+      cuDeviceGetDefaultMemPool_params *p =
+          (cuDeviceGetDefaultMemPool_params *)params;
+      if (p->pool_out != nullptr && *p->pool_out != nullptr) {
+        memory_pool_identity_map[*p->pool_out] = MemoryPoolIdentity{
+            CU_MEM_LOCATION_TYPE_DEVICE, static_cast<int>(p->dev)};
+      }
+    }
+  } else if (cbid == API_CUDA_cuDeviceGetMemPool) {
+    // cuDeviceGetMemPool returns the current device pool.  Device pools are
+    // the only pools accepted by this API, so the device argument identifies
+    // the location without another capture-unsafe query.
+    if (is_exit && pStatus && *pStatus == CUDA_SUCCESS) {
+      cuDeviceGetMemPool_params *p = (cuDeviceGetMemPool_params *)params;
+      if (p->pool != nullptr && *p->pool != nullptr) {
+        memory_pool_identity_map[*p->pool] = MemoryPoolIdentity{
+            CU_MEM_LOCATION_TYPE_DEVICE, static_cast<int>(p->dev)};
+      }
+    }
+  } else if (cbid == API_CUDA_cuMemGetMemPool) {
+    // The location argument is supplied by the caller.  Cache only concrete
+    // device locations; host/managed pools have no fixed backing ordinal.
+    if (is_exit && pStatus && *pStatus == CUDA_SUCCESS) {
+      cuMemGetMemPool_params *p = (cuMemGetMemPool_params *)params;
+      if (p->pool != nullptr && *p->pool != nullptr && p->location != nullptr &&
+          p->location->type == CU_MEM_LOCATION_TYPE_DEVICE) {
+        memory_pool_identity_map[*p->pool] = MemoryPoolIdentity{
+            p->location->type, p->location->id};
       }
     }
   } else if (cbid == API_CUDA_cuMemAlloc_v2) {
@@ -3848,20 +4679,26 @@ void nvbit_at_cuda_event(CUcontext ctx, int is_exit, nvbit_api_cuda_t cbid,
      * registry tracks the requested range, mirroring the
      * synchronous cuMemAlloc_v2 hook's behavior.
      *
-     * Async allocations register the same way synchronous ones do:
-     * once the API returns CUDA_SUCCESS the device pointer is
-     * valid for stream-ordered use. The stream-ordering caveat
-     * applies to the FREE side, not the allocation side. */
+     * Async allocations are context-independent under CUDA's unified
+     * addressing contract. Outside graph capture the returned pointer gives
+     * the authoritative device; capture uses the checked submitting context
+     * because graph-owned pointer attributes are not valid yet. */
     if (is_exit && pStatus && *pStatus == CUDA_SUCCESS) {
       cuMemAllocAsync_params *p = (cuMemAllocAsync_params *)params;
       if (p->dptr != nullptr) {
         uint64_t base = static_cast<uint64_t>(*p->dptr);
         uint64_t size = static_cast<uint64_t>(p->bytesize);
         if (base != 0 && size > 0) {
-          const int device_id = checked_stored_context_device_id(
-              ctx_state, "nvbit_at_cuda_event/allocation registry");
-          nvbit_tracer::register_allocation(
-              ctx, base, size, device_id);
+          const bool per_thread_default_alloc =
+              cbid == API_CUDA_cuMemAllocAsync_ptsz;
+          const int device_id = allocation_device_ordinal_or_fail(
+              static_cast<CUdeviceptr>(base), nullptr, ctx_state, p->hStream,
+              per_thread_default_alloc,
+              "nvbit_at_cuda_event/async allocation device");
+          if (device_id >= 0) {
+            nvbit_tracer::register_context_independent_allocation(
+                ctx, base, size, device_id);
+          }
         }
       }
     }
@@ -3873,7 +4710,8 @@ void nvbit_at_cuda_event(CUcontext ctx, int is_exit, nvbit_api_cuda_t cbid,
      * CUstream hStream;`. The pool selector does not change the
      * registry's view of the allocation: the device pointer is in
      * the same address space as cuMemAllocAsync allocations and is
-     * tracked the same way. */
+     * tracked the same way. Outside capture the returned pointer identifies
+     * the backing device; capture uses the cached pool location. */
     if (is_exit && pStatus && *pStatus == CUDA_SUCCESS) {
       cuMemAllocFromPoolAsync_params *p =
           (cuMemAllocFromPoolAsync_params *)params;
@@ -3881,10 +4719,16 @@ void nvbit_at_cuda_event(CUcontext ctx, int is_exit, nvbit_api_cuda_t cbid,
         uint64_t base = static_cast<uint64_t>(*p->dptr);
         uint64_t size = static_cast<uint64_t>(p->bytesize);
         if (base != 0 && size > 0) {
-          const int device_id = checked_stored_context_device_id(
-              ctx_state, "nvbit_at_cuda_event/allocation registry");
-          nvbit_tracer::register_allocation(
-              ctx, base, size, device_id);
+          const bool per_thread_default_alloc =
+              cbid == API_CUDA_cuMemAllocFromPoolAsync_ptsz;
+          const int device_id = allocation_device_ordinal_or_fail(
+              static_cast<CUdeviceptr>(base), p->pool, ctx_state, p->hStream,
+              per_thread_default_alloc,
+              "nvbit_at_cuda_event/pool allocation device");
+          if (device_id >= 0) {
+            nvbit_tracer::register_context_independent_allocation(
+                ctx, base, size, device_id);
+          }
         }
       }
     }
@@ -3900,23 +4744,25 @@ void nvbit_at_cuda_event(CUcontext ctx, int is_exit, nvbit_api_cuda_t cbid,
      * Marking the allocation dead at API exit would create false
      * `unmapped_memory_range` exclusions for those still-running
      * kernels' lane-address records. Conservative semantics:
-     * queue the (ctx, stream, base) into the registry's
+     * queue the (ctx, stream_id, base) into the registry's
      * pending-free list and keep alive=true; the matching
      * cuStreamSynchronize / cuStreamQuery (success-only) /
      * cuCtxSynchronize / cuCtxSynchronize_v2 hook below retires
      * the pending free at the proven completion boundary.
      *
-     * `hStream == NULL` is a valid default-stream case (the
-     * stream-ordered allocator accepts the default stream when
-     * a current context exists); it is passed through as a
-     * valid stream key, NOT a sentinel drop. */
+     * Stream identity is resolved with the matching regular or ptsz driver
+     * stream-ID entry point, so NULL and per-thread-default streams cannot
+     * alias by raw handle. */
     if (is_exit && pStatus && *pStatus == CUDA_SUCCESS) {
       cuMemFreeAsync_params *p = (cuMemFreeAsync_params *)params;
       uint64_t base = static_cast<uint64_t>(p->dptr);
-      void *stream = static_cast<void *>(p->hStream);
+      const bool per_thread_default_free =
+          cbid == API_CUDA_cuMemFreeAsync_ptsz;
       if (base != 0) {
+        const int64_t stream_id =
+            stream_ordinal_for(p->hStream, per_thread_default_free);
         nvbit_tracer::register_pending_async_free(
-            ctx, stream, base);
+            ctx, stream_id, base);
       }
     }
   } else if (cbid == API_CUDA_cuStreamSynchronize ||
@@ -3926,18 +4772,21 @@ void nvbit_at_cuda_event(CUcontext ctx, int is_exit, nvbit_api_cuda_t cbid,
      * exit proves every operation enqueued on hStream before this
      * call has completed; that is the boundary where an earlier
      * cuMemFreeAsync on the same stream is guaranteed to have
-     * executed. Retire any pending async frees on (ctx, stream)
+     * executed. Retire any pending async frees on (ctx, stream_id)
      * here. cuStreamWaitEvent does NOT prove completion (it only
      * proves the wait operation was queued), so retirement is
      * deliberately NOT wired into that hook.
      *
-     * `hStream == NULL` is the CUDA default stream; pass through
-     * as a valid stream key. */
+     * Stream identity is resolved with the matching regular or ptsz driver
+     * stream-ID entry point. */
     if (is_exit && pStatus && *pStatus == CUDA_SUCCESS) {
       cuStreamSynchronize_params *p =
           (cuStreamSynchronize_params *)params;
-      void *stream = static_cast<void *>(p->hStream);
-      nvbit_tracer::retire_pending_frees_for_stream(ctx, stream);
+      const bool per_thread_default_sync =
+          cbid == API_CUDA_cuStreamSynchronize_ptsz;
+      const int64_t stream_id =
+          stream_ordinal_for(p->hStream, per_thread_default_sync);
+      nvbit_tracer::retire_pending_frees_for_stream(ctx, stream_id);
     }
   } else if (cbid == API_CUDA_cuStreamQuery ||
              cbid == API_CUDA_cuStreamQuery_ptsz) {
@@ -3947,12 +4796,15 @@ void nvbit_at_cuda_event(CUcontext ctx, int is_exit, nvbit_api_cuda_t cbid,
      * proof shape as cuStreamSynchronize); CUDA_ERROR_NOT_READY
      * means work is still in flight and pending frees must NOT
      * be retired. The is_exit + *pStatus == CUDA_SUCCESS gate
-     * cleanly rejects the not-ready case. `hStream == NULL` is
-     * the default stream. */
+     * cleanly rejects the not-ready case. Stream identity is resolved with the
+     * matching regular or ptsz driver stream-ID entry point. */
     if (is_exit && pStatus && *pStatus == CUDA_SUCCESS) {
       cuStreamQuery_params *p = (cuStreamQuery_params *)params;
-      void *stream = static_cast<void *>(p->hStream);
-      nvbit_tracer::retire_pending_frees_for_stream(ctx, stream);
+      const bool per_thread_default_query =
+          cbid == API_CUDA_cuStreamQuery_ptsz;
+      const int64_t stream_id =
+          stream_ordinal_for(p->hStream, per_thread_default_query);
+      nvbit_tracer::retire_pending_frees_for_stream(ctx, stream_id);
     }
   } else if (cbid == API_CUDA_cuCtxSynchronize) {
     /* Context synchronization (cbid 17). No params: a successful
@@ -3970,13 +4822,19 @@ void nvbit_at_cuda_event(CUcontext ctx, int is_exit, nvbit_api_cuda_t cbid,
   } else if (cbid == API_CUDA_cuCtxSynchronize_v2) {
     /* Context synchronization v2 (cbid 800). Param shape:
      * `CUcontext ctx;`. Same proven-completion semantics as
-     * cuCtxSynchronize; the v2 variant just makes the context
-     * an explicit parameter rather than implicit. Retire
-     * pending async frees across the explicit ctx. */
+     * cuCtxSynchronize. A non-NULL parameter synchronizes that
+     * context; CUDA treats NULL as the current context. Retire
+     * pending async frees across the resolved context. */
     if (is_exit && pStatus && *pStatus == CUDA_SUCCESS) {
       cuCtxSynchronize_v2_params *p =
           (cuCtxSynchronize_v2_params *)params;
-      void *explicit_ctx = static_cast<void *>(p->ctx);
+      // CUDA treats a NULL context as the current context for
+      // cuCtxSynchronize_v2.  NVBit supplies that current context in
+      // the callback's `ctx` argument, so use it instead of silently
+      // leaving successful stream-ordered frees pending forever.
+      void *explicit_ctx = p->ctx != nullptr
+                               ? static_cast<void *>(p->ctx)
+                               : static_cast<void *>(ctx);
       if (explicit_ctx != nullptr) {
         nvbit_tracer::retire_pending_frees_for_context(explicit_ctx);
       }
@@ -4081,20 +4939,35 @@ void nvbit_at_cuda_event(CUcontext ctx, int is_exit, nvbit_api_cuda_t cbid,
 
 bool is_number(const std::string &s) {
   std::string::const_iterator it = s.begin();
-  while (it != s.end() && std::isdigit(*it))
+  while (it != s.end() &&
+         std::isdigit(static_cast<unsigned char>(*it)))
     ++it;
   return !s.empty() && it == s.end();
 }
 
 unsigned get_datawidth_from_opcode(const std::vector<std::string> &opcode) {
   for (unsigned i = 0; i < opcode.size(); ++i) {
+    if (opcode[i].empty()) {
+      continue;
+    }
     if (is_number(opcode[i])) {
-      return (std::stoi(opcode[i], NULL) / 8);
-    } else if (opcode[i][0] == 'U' && is_number(opcode[i].substr(1))) {
+      errno = 0;
+      char *end = nullptr;
+      const unsigned long bits = std::strtoul(opcode[i].c_str(), &end, 10);
+      if (errno == 0 && end != opcode[i].c_str() && *end == '\0' &&
+          bits <= std::numeric_limits<unsigned>::max()) {
+        return static_cast<unsigned>(bits) / 8;
+      }
+    } else if (opcode[i][0] == 'U' && opcode[i].size() > 1 &&
+               is_number(opcode[i].substr(1))) {
       // handle the U* case
-      unsigned bits;
-      sscanf(opcode[i].c_str(), "U%u", &bits);
-      return bits / 8;
+      errno = 0;
+      char *end = nullptr;
+      const unsigned long bits = std::strtoul(opcode[i].c_str() + 1, &end, 10);
+      if (errno == 0 && end != opcode[i].c_str() + 1 && *end == '\0' &&
+          bits <= std::numeric_limits<unsigned>::max()) {
+        return static_cast<unsigned>(bits) / 8;
+      }
     }
   }
 
@@ -4108,6 +4981,50 @@ bool check_opcode_contain(const std::vector<std::string> &opcode,
       return true;
 
   return false;
+}
+
+static bool checked_signed_difference_i32(uint64_t current, uint64_t previous,
+                                          int &difference) {
+  if (current >= previous) {
+    const uint64_t delta = current - previous;
+    if (delta > static_cast<uint64_t>(std::numeric_limits<int32_t>::max()))
+      return false;
+    difference = static_cast<int>(delta);
+    return true;
+  }
+  const uint64_t delta = previous - current;
+  constexpr uint64_t INT32_MIN_MAGNITUDE =
+      static_cast<uint64_t>(std::numeric_limits<int32_t>::max()) + 1u;
+  if (delta > INT32_MIN_MAGNITUDE)
+    return false;
+  if (delta == INT32_MIN_MAGNITUDE) {
+    difference = std::numeric_limits<int32_t>::min();
+  } else {
+    difference = -static_cast<int>(delta);
+  }
+  return true;
+}
+
+static bool checked_signed_difference_i64(uint64_t current, uint64_t previous,
+                                          int64_t &difference) {
+  if (current >= previous) {
+    const uint64_t delta = current - previous;
+    if (delta > static_cast<uint64_t>(std::numeric_limits<int64_t>::max()))
+      return false;
+    difference = static_cast<int64_t>(delta);
+    return true;
+  }
+  const uint64_t delta = previous - current;
+  constexpr uint64_t INT64_MIN_MAGNITUDE =
+      static_cast<uint64_t>(std::numeric_limits<int64_t>::max()) + 1u;
+  if (delta > INT64_MIN_MAGNITUDE)
+    return false;
+  if (delta == INT64_MIN_MAGNITUDE) {
+    difference = std::numeric_limits<int64_t>::min();
+  } else {
+    difference = -static_cast<int64_t>(delta);
+  }
+  return true;
 }
 
 bool base_stride_compress(const uint64_t *addrs, const std::bitset<32> &mask,
@@ -4124,15 +5041,18 @@ bool base_stride_compress(const uint64_t *addrs, const std::bitset<32> &mask,
     if (mask.test(s) && !first_bit1_found) {
       first_bit1_found = true;
       base_addr = addrs[s];
-      if (s < 31 && mask.test(s + 1))
-        stride = addrs[s + 1] - addrs[s];
-      else {
+      if (s < 31 && mask.test(s + 1)) {
+        if (!checked_signed_difference_i32(addrs[s + 1], addrs[s], stride))
+          return false;
+      } else {
         const_stride = false;
         break;
       }
     } else if (first_bit1_found && !last_bit1_found) {
       if (mask.test(s)) {
-        int diff_addr = addrs[s] - addrs[s - 1];
+        int diff_addr = 0;
+        if (!checked_signed_difference_i32(addrs[s], addrs[s - 1], diff_addr))
+          return false;
         if (stride != diff_addr) {
           const_stride = false;
           break;
@@ -4150,7 +5070,7 @@ bool base_stride_compress(const uint64_t *addrs, const std::bitset<32> &mask,
   return const_stride;
 }
 
-void base_delta_compress(const uint64_t *addrs, const std::bitset<32> &mask,
+bool base_delta_compress(const uint64_t *addrs, const std::bitset<32> &mask,
                          uint64_t &base_addr, std::vector<long long> &deltas) {
 
   // save the delta from the previous address
@@ -4162,28 +5082,37 @@ void base_delta_compress(const uint64_t *addrs, const std::bitset<32> &mask,
       first_bit1_found = true;
       last_address = addrs[s];
     } else if (mask.test(s) && first_bit1_found) {
-      deltas.push_back(addrs[s] - last_address);
+      int64_t delta = 0;
+      if (!checked_signed_difference_i64(addrs[s], last_address, delta))
+        return false;
+      deltas.push_back(static_cast<long long>(delta));
       last_address = addrs[s];
     }
   }
+  return true;
 }
 
 void *recv_thread_fun(void *args) {
   CUcontext ctx = (CUcontext)args;
   pthread_mutex_lock(&mutex);
   /* get context state from map */
-  assert(ctx_state_map.find(ctx) != ctx_state_map.end());
-  CTXstate* ctx_state = ctx_state_map[ctx];
+  CTXstate* ctx_state = lookup_context_state_or_fail(
+      ctx, "recv_thread_fun/context");
   const int device_id = checked_stored_context_device_id(
       ctx_state, "recv_thread_fun/per-device counters");
   ChannelHost* ch_host = &ctx_state->channel_host;
   pthread_mutex_unlock(&mutex);
 
-  char *recv_buffer = (char *)malloc(CHANNEL_SIZE);
+  char *recv_buffer = static_cast<char *>(malloc(CHANNEL_SIZE));
+  if (recv_buffer == nullptr) {
+    fail_device_identity("recv_thread_fun/receive buffer allocation",
+                         "malloc(CHANNEL_SIZE) returned null");
+  }
 
   while (ctx_state->recv_thread_done.load(std::memory_order_acquire) == RecvThreadState::WORKING) {
     uint32_t num_recv_bytes = ch_host->recv(recv_buffer, CHANNEL_SIZE);
     if (num_recv_bytes > 0) {
+      require_record_alignment(num_recv_bytes, sizeof(inst_trace_t), "trace");
       uint32_t num_processed_bytes = 0;
       // The receiving flag is the consumer-path gate.  An inactive launch
       // never arms it; any unexpected channel record from that period is
@@ -4191,8 +5120,9 @@ void *recv_thread_fun(void *args) {
       // and contaminating that launch's protobuf/sampling output.
       const bool batch_is_accepted =
           ctx_state->recv_thread_receiving.load(std::memory_order_acquire);
-      // Acquire-load the per-device counters only after the accepted-flag
-      // acquire.  This observes the entry callback's launch id / stream stores.
+      // Acquire-load the active launch pair only after the accepted-flag
+      // acquire. These values belong to this context, so another context on
+      // the same device cannot relabel this batch.
       //
       // IMPORTANT: these acquire-loads are LOAD-BEARING and must not be
       // "optimized" away as redundant with the receiving-flag handshake.
@@ -4203,11 +5133,11 @@ void *recv_thread_fun(void *args) {
       // (kernel_id++, pc_to_opcode[…]=…, dyn_trace.mutable_*) and the recv
       // THREAD's CPU-side reads. The only happens-before chain is via the
       // atomic `recv_thread_receiving` release/acquire pair.
-      const int stream_id_snap = batch_is_accepted
-          ? current_stream_id[device_id].load(std::memory_order_acquire)
+      const int64_t stream_id_snap = batch_is_accepted
+          ? ctx_state->active_stream_id.load(std::memory_order_acquire)
           : -1;
       const int kernel_id_snap = batch_is_accepted
-          ? kernel_id[device_id].load(std::memory_order_acquire)
+          ? ctx_state->active_kernel_id.load(std::memory_order_acquire)
           : -1;
       // Acquire the container lock for the entire batch. This serializes
       // the recv thread's writes to `dyn_trace`, `threadblocks`,
@@ -4236,7 +5166,7 @@ void *recv_thread_fun(void *args) {
         }
         accepted_channel_records.fetch_add(1, std::memory_order_relaxed);
         // Key: d_{device}_s_{stream}_k_{kernel}_{cta_id_x},{cta_id_y},{cta_id_z}
-        std::string tb_string_id = "d_" + std::to_string(device_id) + "_s_" + std::to_string(stream_id_snap) + "_k_" + std::to_string(kernel_id_snap-1) + "_" + std::to_string(ma->cta_id_x) + "," +
+        std::string tb_string_id = "d_" + std::to_string(device_id) + "_s_" + std::to_string(stream_id_snap) + "_k_" + std::to_string(kernel_id_snap) + "_" + std::to_string(ma->cta_id_x) + "," +
                                    std::to_string(ma->cta_id_y) + "," +
                                    std::to_string(ma->cta_id_z);
         TraceSamplingIdentityResult ts_identity;
@@ -4248,7 +5178,7 @@ void *recv_thread_fun(void *args) {
         // counting-only then skips the payload build, and any later launch is
         // skipped entirely so it never pollutes the gate totals or the payload.
         if (trace_sampling_mode != 0) {
-          int ts_launch_kernel = kernel_id_snap - 1;
+          int ts_launch_kernel = kernel_id_snap;
           const bool ts_scope_valid = ts_scope_dims_captured &&
                                       ts_scope_device >= 0 &&
                                       ts_scope_stream >= 0 &&
@@ -4301,7 +5231,7 @@ void *recv_thread_fun(void *args) {
                 ts.sector_accesses += record_sector_accesses;
               }
               ts_identity = trace_sampling_identity_result(
-                  ctx, *ma, ts_cls, ts_address_space);
+                  ctx, *ma, ts_cls, ts_address_space, ctx_state);
               ts_identity_available = true;
               if (ts_identity.required &&
                   effective_address_lane_mask(*ma) != 0 &&
@@ -4323,9 +5253,16 @@ void *recv_thread_fun(void *args) {
                 for (int lane = 0; lane < 32; ++lane) {
                   if (!((ts_mask >> lane) & 1u)) continue;
                   uint64_t sector = ma->addrs_or_reg_val_0[lane] >> 5;
-                  if (ts_atomic_sectors.size() < TS_ATOMIC_SECTORS_CAP ||
-                      ts_atomic_sectors.find(sector) != ts_atomic_sectors.end()) {
-                    ts_atomic_sectors[sector]++;
+                  auto atomic_sector = ts_atomic_sectors.find(sector);
+                  if (atomic_sector != ts_atomic_sectors.end()) {
+                    if (atomic_sector->second ==
+                        std::numeric_limits<uint64_t>::max()) {
+                      ts_atomic_sectors_overflow = true;
+                    } else {
+                      atomic_sector->second++;
+                    }
+                  } else if (ts_atomic_sectors.size() < TS_ATOMIC_SECTORS_CAP) {
+                    ts_atomic_sectors.emplace(sector, 1);
                   } else {
                     ts_atomic_sectors_overflow = true;
                   }
@@ -4577,7 +5514,7 @@ void *recv_thread_fun(void *args) {
               ts_identity_available
                   ? ts_identity
                   : trace_sampling_identity_result(
-                        ctx, *ma, cls, addr_space);
+                        ctx, *ma, cls, addr_space, ctx_state);
           if (identity.required && mask.any()) {
             if (identity.any_zero) {
               nvbit_tracer::aggregate(
@@ -4631,6 +5568,7 @@ void *recv_thread_fun(void *args) {
           addr->set_data_width(get_datawidth_from_opcode(tokens));
 
           bool base_stride_success = false;
+          bool base_delta_success = false;
           uint64_t base_addr = 0;
           int stride = 0;
           std::vector<long long> deltas;
@@ -4641,7 +5579,8 @@ void *recv_thread_fun(void *args) {
                 base_stride_compress(ma->addrs_or_reg_val_0, mask, base_addr, stride);
             if (!base_stride_success) {
               // if base+stride fails, try base+delta format
-              base_delta_compress(ma->addrs_or_reg_val_0, mask, base_addr, deltas);
+              base_delta_success = base_delta_compress(
+                  ma->addrs_or_reg_val_0, mask, base_addr, deltas);
             }
           }
 
@@ -4650,7 +5589,7 @@ void *recv_thread_fun(void *args) {
             addr->set_compression_format(address_format::base_stride);
             addr->set_base_address(base_addr);
             addr->set_stride(stride);
-          } else if (!base_stride_success && enable_compress) {
+          } else if (!base_stride_success && base_delta_success && enable_compress) {
             // base + delta format
             addr->set_compression_format(address_format::base_delta);
             addr->set_base_address(base_addr);
@@ -4860,6 +5799,21 @@ static ParserInputStat stat_parser_input(const std::filesystem::path &path) {
   return {true, sz};
 }
 
+static std::string shell_quote(const std::string &value) {
+  std::string quoted;
+  quoted.reserve(value.size() + 2);
+  quoted.push_back('\'');
+  for (char c : value) {
+    if (c == '\'') {
+      quoted.append("'\\''");
+    } else {
+      quoted.push_back(c);
+    }
+  }
+  quoted.push_back('\'');
+  return quoted;
+}
+
 void enhanced_tracer() {
   create_folder(extrainfo_path.c_str());
   create_folder(cubin_path.c_str());
@@ -4885,7 +5839,10 @@ void enhanced_tracer() {
     fflush(stderr);
     _exit(EXIT_FAILURE);
   }
-  std::string command_get_cubin = "cd " + cubin_path + " && cuobjdump " + program_path + " -xelf all -arch=sm_" + std::to_string(binary_version);
+  std::string command_get_cubin =
+      "cd " + shell_quote(cubin_path) + " && cuobjdump " +
+      shell_quote(program_path) + " -xelf all -arch=sm_" +
+      std::to_string(binary_version);
   std::cout << "Generating extra information for the enhanced traces of benchmark: " << program_name << std::endl;
   int cubin_extract_result = system(command_get_cubin.c_str());
   bool cubin_extraction_succeeded = (cubin_extract_result == 0);
@@ -4906,8 +5863,13 @@ void enhanced_tracer() {
   {
     std::string aux_cubin = entry.path().filename().string();
     std::string base_name = entry.path().stem().string();
-    std::string command_get_register_usage = "cd " + register_usage_path + " && nvdisasm -lrm count ../cubin/" + aux_cubin + " > " + base_name + ".rfu";
-    std::string command_get_sass = "cd " + sass_path + " && cuobjdump -sass ../cubin/" + aux_cubin + " > " + base_name + ".sass";
+    std::string command_get_register_usage =
+        "cd " + shell_quote(register_usage_path) +
+        " && nvdisasm -lrm count ../cubin/" + shell_quote(aux_cubin) +
+        " > " + shell_quote(base_name + ".rfu");
+    std::string command_get_sass =
+        "cd " + shell_quote(sass_path) + " && cuobjdump -sass ../cubin/" +
+        shell_quote(aux_cubin) + " > " + shell_quote(base_name + ".sass");
     std::cout << "Parsing cubin: " << aux_cubin << std::endl;
 
     SubprocessResult rfu_res = run_subprocess_with_timeout(
@@ -4987,8 +5949,14 @@ void enhanced_tracer() {
     // Both producers exited 0 (or returned via the tolerated nvdisasm
     // branch with the .rfu input present), both files exist, and both
     // are within the size budget. Run the in-process parsers.
-    parse_sass(binary_version, entry);
-    parse_rfu(entry);
+    if (!parse_sass(binary_version, entry)) {
+      std::cerr << "Warning: failed to parse SASS output "
+                << entry.path().string() << std::endl;
+    }
+    if (!parse_rfu(entry)) {
+      std::cerr << "Warning: failed to parse register-usage output "
+                << entry.path().string() << std::endl;
+    }
   }
   } // end if (cubin_extraction_succeeded)
   for(auto kernel_name : all_kernels_key_instructions_by_pc) {
@@ -5000,9 +5968,36 @@ void enhanced_tracer() {
         std::cout << "Traced instructions: " << std::endl;
         print_map(variant.key_instructions_by_pc);
         auto it_already_captured_instr = map_func_addr_to_pc_to_sass_instr.find(variant.func_addr);
-        assert(it_already_captured_instr != map_func_addr_to_pc_to_sass_instr.end());
+        if (it_already_captured_instr == map_func_addr_to_pc_to_sass_instr.end()) {
+          fprintf(stderr,
+                  "FATAL: parsed-kernel fallback has no captured SASS map for "
+                  "function address 0x%" PRIx64 "\n",
+                  static_cast<uint64_t>(variant.func_addr));
+          fflush(stderr);
+          _exit(EXIT_FAILURE);
+        }
         std::string kernel_name_to_add = variant.original_kernel_name + variant_delimiter_str + std::to_string(variant.variant_id);
-        m_enhanced_traced_execution->add_no_binary_kernel(kernel_name_to_add, variant.unique_function_id, variant.func_addr, binary_version, it_already_captured_instr->second, false);
+        if (m_enhanced_traced_execution->has_kernel(kernel_name_to_add) &&
+            !m_enhanced_traced_execution->remove_specific_kernel(
+                kernel_name_to_add)) {
+          fprintf(stderr,
+                  "FATAL: failed to discard partial auxiliary metadata for "
+                  "kernel %s before fallback reconstruction\n",
+                  kernel_name_to_add.c_str());
+          fflush(stderr);
+          _exit(EXIT_FAILURE);
+        }
+        if (!m_enhanced_traced_execution->add_no_binary_kernel(
+                kernel_name_to_add, variant.unique_function_id,
+                variant.func_addr, binary_version,
+                it_already_captured_instr->second, false)) {
+          fprintf(stderr,
+                  "FATAL: failed to construct no-binary fallback metadata "
+                  "for kernel %s\n",
+                  kernel_name_to_add.c_str());
+          fflush(stderr);
+          _exit(EXIT_FAILURE);
+        }
       }
     }
   }
@@ -5013,7 +6008,15 @@ void enhanced_tracer() {
     remove_folder(register_usage_path.c_str());
   }
   m_enhanced_traced_execution->remove_useless_kernels();
-  m_enhanced_traced_execution->SerializeToFile(extrainfo_path +"/enhanced_execution_info.json");
+  const std::string execution_info_path =
+      extrainfo_path + "/enhanced_execution_info.json";
+  if (!m_enhanced_traced_execution->SerializeToFile(execution_info_path)) {
+    fprintf(stderr,
+            "FATAL: failed to publish enhanced execution metadata %s\n",
+            execution_info_path.c_str());
+    fflush(stderr);
+    _exit(EXIT_FAILURE);
+  }
 }
 
 void nvbit_at_ctx_init(CUcontext ctx) {
@@ -5022,7 +6025,10 @@ void nvbit_at_ctx_init(CUcontext ctx) {
   if (verbose) {
       printf("Tracer: Starting context %p\n", ctx);
   }
-  assert(ctx_state_map.find(ctx) == ctx_state_map.end());
+  if (ctx_state_map.find(ctx) != ctx_state_map.end()) {
+    fail_device_identity("nvbit_at_ctx_init/duplicate context",
+                         "context handle is already registered");
+  }
   CTXstate* ctx_state = new CTXstate;
   ctx_state_map[ctx] = ctx_state;
   // Application allocations may occur before NVBit calls nvbit_tool_init at
@@ -5037,9 +6043,13 @@ void nvbit_at_ctx_init(CUcontext ctx) {
   pthread_mutex_unlock(&mutex);
 }
 
-void init_context_state(CUcontext ctx) {
-  CTXstate* ctx_state = ctx_state_map[ctx];
-  if(is_first_init_context_call) {
+static void init_context_state(CUcontext ctx) {
+  CTXstate* ctx_state = lookup_context_state_or_fail(
+      ctx, "init_context_state/context");
+  if (ctx_state->instruction_channel_initialized) {
+    return;
+  }
+  if (stop_report == nullptr) {
     is_first_init_context_call = false;
     const cudaError_t stop_report_status =
         cudaMallocManaged(&stop_report, num_devices * sizeof(bool));
@@ -5051,14 +6061,17 @@ void init_context_state(CUcontext ctx) {
       fail_device_identity("init_context_state/stop_report allocation",
                            detail.str());
     }
-    for(int i = 0; i < num_devices; ++i) {
-      stop_report[i] = false;
-      // Relaxed is sufficient here: init_context_state runs under the global
-      // mutex and the recv thread for any context is not spawned until after
-      // channel_host.init() below, so there is no reader to race with yet.
-      kernel_id[i].store(1, std::memory_order_relaxed);
-      current_stream_id[i].store(0, std::memory_order_relaxed);
-    }
+    for (int i = 0; i < num_devices; ++i) stop_report[i] = false;
+  }
+  // A context may have deferred tool initialization during graph capture, or
+  // NVBit may have initialized a context that never reached nvbit_tool_init.
+  // In either case the global counter must be seeded before the first launch;
+  // zero is reserved for the uninitialized state and cannot be advanced.
+  for (int i = 0; i < num_devices; ++i) {
+    int expected = 0;
+    kernel_id[i].compare_exchange_strong(
+        expected, 1, std::memory_order_relaxed,
+        std::memory_order_relaxed);
   }
   ctx_state->device_id = checked_current_context_device_id(
       ctx_state, "init_context_state/context device");
@@ -5066,9 +6079,18 @@ void init_context_state(CUcontext ctx) {
   // WORKING on its very first iteration, which happens strictly after
   // channel_host.init() spawns it below.
   ctx_state->recv_thread_done.store(RecvThreadState::WORKING, std::memory_order_release);
-  cudaMallocManaged(&ctx_state->channel_dev, sizeof(ChannelDev));
+  ctx_state->channel_dev = nullptr;
+  const cudaError_t channel_status =
+      cudaMallocManaged(&ctx_state->channel_dev, sizeof(ChannelDev));
+  if (channel_status != cudaSuccess || ctx_state->channel_dev == nullptr) {
+    std::ostringstream detail;
+    detail << "cudaMallocManaged(channel_dev) status="
+           << static_cast<int>(channel_status);
+    fail_device_identity("init_context_state/channel allocation", detail.str());
+  }
   ctx_state->channel_host.init((int)ctx_state_map.size() - 1, CHANNEL_SIZE,
                                ctx_state->channel_dev, recv_thread_fun, ctx);
+  ctx_state->instruction_channel_initialized = true;
   nvbit_set_tool_pthread(ctx_state->channel_host.get_thread());
 
   /* Closure-plan NVBit phase-injection contract: when the env-gated
@@ -5081,7 +6103,16 @@ void init_context_state(CUcontext ctx) {
   if (phase_injection_enabled) {
     ctx_state->phase_recv_thread_done.store(RecvThreadState::WORKING,
                                             std::memory_order_release);
-    cudaMallocManaged(&ctx_state->phase_channel_dev, sizeof(ChannelDev));
+    const cudaError_t phase_channel_status =
+        cudaMallocManaged(&ctx_state->phase_channel_dev, sizeof(ChannelDev));
+    if (phase_channel_status != cudaSuccess ||
+        ctx_state->phase_channel_dev == nullptr) {
+      std::ostringstream detail;
+      detail << "cudaMallocManaged(phase_channel_dev) status="
+             << static_cast<int>(phase_channel_status);
+      fail_device_identity("init_context_state/phase channel allocation",
+                           detail.str());
+    }
     ctx_state->phase_channel_host.init((int)ctx_state_map.size() + 1024,
                                        CHANNEL_SIZE,
                                        ctx_state->phase_channel_dev,
@@ -5092,13 +6123,25 @@ void init_context_state(CUcontext ctx) {
 
 void nvbit_tool_init(CUcontext ctx) {
   pthread_mutex_lock(&mutex);
-  assert(ctx_state_map.find(ctx) != ctx_state_map.end());
+  CTXstate* ctx_state = lookup_context_state_or_fail(
+      ctx, "nvbit_tool_init/context");
+  if (ctx_state->tool_init_complete) {
+    pthread_mutex_unlock(&mutex);
+    return;
+  }
+  if (active_capture_counts.find(ctx) != active_capture_counts.end()) {
+    // CUDA graph capture disallows the managed allocations used by the NVBit
+    // channel. End-capture will complete initialization before graph launch.
+    ctx_state->tool_init_deferred = true;
+    pthread_mutex_unlock(&mutex);
+    return;
+  }
   // Tool-owned CUDA setup calls re-enter nvbit_at_cuda_event. Suppress those
   // callbacks so the allocation registry never consumes partially initialized
   // device identity or records tracer-owned managed allocations.
   skip_callback_flag = true;
   init_context_state(ctx);
-  CTXstate* ctx_state = ctx_state_map[ctx];
+  ctx_state = lookup_context_state_or_fail(ctx, "nvbit_tool_init/context");
   // Resolve binary_version per-context from the current CUDA device's
   // compute capability, unconditionally. nvbit_tool_init is the
   // correct hook per the upstream NVBit warning: "Do not call CUDA memory
@@ -5119,6 +6162,7 @@ void nvbit_tool_init(CUcontext ctx) {
   // the global (enhanced_tracer/parse_sass) see a current value when
   // they run.
   binary_version = ctx_state->binary_version;
+  ctx_state->tool_init_complete = true;
   fprintf(stderr,
           "INFO: tracer binary_version initialised per-context from "
           "device compute capability at tool-init: binary_version=%d "
@@ -5137,9 +6181,13 @@ void nvbit_at_ctx_term(CUcontext ctx) {
       printf("Tracer: Terminating context %p\n", ctx);
   }
   /* get context state from map */
-  assert(ctx_state_map.find(ctx) != ctx_state_map.end());
-  CTXstate* ctx_state = ctx_state_map[ctx];
+  CTXstate* ctx_state = lookup_context_state_or_fail(
+      ctx, "nvbit_at_ctx_term/context");
   pending_devices_to_finish--;
+  // Context destruction releases context-bound allocations regardless of
+  // whether another CUDA context remains active. Pool allocations are kept in
+  // the separate process-wide map and are retired only by their async free.
+  nvbit_tracer::retire_context_allocations(ctx);
   if(pending_devices_to_finish == 0) {
     // Final dyn_trace finalization + serialization. Take recv_container_mutex
     // around the writes and the SerializeToOstream call. At this point any
@@ -5156,11 +6204,22 @@ void nvbit_at_ctx_term(CUcontext ctx) {
       // to carry presence-bearing static and dynamic shared-memory components
       // whose sum equals the legacy combined field.
       dyn_trace.set_trace_contract_id("sm86_addr_carry_ldgsts_dst_v3");
-      dyn_trace.add_memory_payload_classes(dynamic_trace::MEMORY_OP_CLASS_GLOBAL);
-      dyn_trace.add_memory_payload_classes(dynamic_trace::MEMORY_OP_CLASS_SHARED);
-      dyn_trace.add_memory_payload_classes(dynamic_trace::MEMORY_OP_CLASS_LOCAL);
-      dyn_trace.add_memory_payload_classes(dynamic_trace::MEMORY_OP_CLASS_ATOMIC);
-      dyn_trace.add_memory_payload_classes(dynamic_trace::MEMORY_OP_CLASS_ASYNC_COPY);
+      const dynamic_trace::MemoryOpClass retained_capabilities[] = {
+          dynamic_trace::MEMORY_OP_CLASS_GLOBAL,
+          dynamic_trace::MEMORY_OP_CLASS_SHARED,
+          dynamic_trace::MEMORY_OP_CLASS_LOCAL,
+          dynamic_trace::MEMORY_OP_CLASS_ATOMIC,
+          dynamic_trace::MEMORY_OP_CLASS_ASYNC_COPY};
+      for (const auto capability : retained_capabilities) {
+        bool present = false;
+        for (int i = 0; i < dyn_trace.memory_payload_classes_size(); ++i) {
+          if (dyn_trace.memory_payload_classes(i) == capability) {
+            present = true;
+            break;
+          }
+        }
+        if (!present) dyn_trace.add_memory_payload_classes(capability);
+      }
       // Ensure the serialized trace reports a device binary_version that
       // actually corresponds to one of the contexts that contributed the
       // recorded kernels. In mixed-architecture multi-context runs the
@@ -5206,16 +6265,36 @@ void nvbit_at_ctx_term(CUcontext ctx) {
       std::string filename = traces_path + "/dynamic_trace.pb";
       std::ofstream ofs(filename, std::ios::binary);
       if (!ofs) {
-        std::cerr << "Failed to open file " << filename << " for writing." << std::endl;
-      } else {
-        if (!dyn_trace.SerializeToOstream(&ofs)) {
-          std::cerr << "Failed to serialize dyn_trace." << std::endl;
-        } else {
-          std::cout << "Serialized protocol buffer written to " << filename << std::endl;
-          dyn_trace.Clear();
-        }
-        ofs.close();
+        fprintf(stderr, "FATAL: failed to open dynamic trace %s for writing\n",
+                filename.c_str());
+        fflush(stderr);
+        _exit(EXIT_FAILURE);
       }
+      if (!dyn_trace.SerializeToOstream(&ofs)) {
+        fprintf(stderr, "FATAL: failed to serialize dynamic trace %s\n",
+                filename.c_str());
+        fflush(stderr);
+        _exit(EXIT_FAILURE);
+      }
+      ofs.flush();
+      if (!ofs) {
+        fprintf(stderr, "FATAL: failed while writing dynamic trace %s\n",
+                filename.c_str());
+        fflush(stderr);
+        _exit(EXIT_FAILURE);
+      }
+      ofs.close();
+      if (!ofs) {
+        fprintf(stderr, "FATAL: failed to close dynamic trace %s\n",
+                filename.c_str());
+        fflush(stderr);
+        _exit(EXIT_FAILURE);
+      }
+      std::cout << "Serialized protocol buffer written to " << filename << std::endl;
+      // Keep the process-global trace accumulated across sequential CUDA
+      // contexts. NVBit may destroy one context before creating the next;
+      // clearing here would make the final dynamic_trace.pb silently omit
+      // every kernel emitted by earlier contexts.
     }
     /* Allocation registry sidecar. Always written (regardless
      * of skip_enhanced_tracer) because the allocations.json
@@ -5224,10 +6303,19 @@ void nvbit_at_ctx_term(CUcontext ctx) {
      * The path mirrors the global `extrainfo_path` so it
      * lives under the same `traces/extra_info/` tree as
      * `enhanced_execution_info.json`. */
-    write_allocation_sidecar(extrainfo_path);
+    const bool allocation_sidecar_written =
+        write_allocation_sidecar(extrainfo_path);
     /* Trace-sampling capture sidecar (per-block counts / selected-block set);
      * a no-op unless a trace-sampling capture mode is active. */
-    write_trace_sampling_sidecar(extrainfo_path);
+    const bool sampling_sidecar_written =
+        write_trace_sampling_sidecar(extrainfo_path);
+    if (!allocation_sidecar_written || !sampling_sidecar_written) {
+      fprintf(stderr,
+              "FATAL: required trace sidecar publication failed; refusing "
+              "to publish an incomplete capture\n");
+      fflush(stderr);
+      _exit(EXIT_FAILURE);
+    }
     const bool module_origin_sidecar_written =
         write_module_origin_sidecar(extrainfo_path);
     exact_capture_contract_failed =
@@ -5274,9 +6362,15 @@ void nvbit_at_ctx_term(CUcontext ctx) {
               : (binary_version > 0 ? binary_version : 0);
       const std::string device_tag =
           "sm_" + std::to_string(bin_ver);
-      nvbit_tracer::serialize_exclusion_sidecars(
-          extrainfo_path, device_tag,
-          slug_of_function_unique_id);
+      if (!nvbit_tracer::serialize_exclusion_sidecars(
+              extrainfo_path, device_tag,
+              slug_of_function_unique_id)) {
+        fprintf(stderr,
+                "FATAL: typed-exclusion sidecar publication failed; "
+                "refusing to publish an incomplete trace\n");
+        fflush(stderr);
+        _exit(EXIT_FAILURE);
+      }
     }
     if (skip_enhanced_tracer) {
       std::cout << "Skipping the enhanced tracer (SKIP_ENHANCED_TRACER=1)" << std::endl;
@@ -5286,19 +6380,27 @@ void nvbit_at_ctx_term(CUcontext ctx) {
       std::cout << "Terminated the enhanced tracer" << std::endl;
     }
   }
-  // Release-store STOP so the recv thread's acquire-load at :1385 observes
-  // it on its next iteration and exits the WORKING loop. Then acquire-load
-  // FINISHED in a sched_yield spin so we don't burn a whole CPU core and
-  // don't block other threads unnecessarily. The recv thread does not need
-  // to acquire the global mutex in the path from :1385 → :1494, so holding
-  // the mutex here while spinning cannot deadlock; it only serializes
-  // additional callback entries behind this termination, which is fine.
-  ctx_state->recv_thread_done.store(RecvThreadState::STOP, std::memory_order_release);
-  while (ctx_state->recv_thread_done.load(std::memory_order_acquire) != RecvThreadState::FINISHED) {
-    sched_yield();
+  // A context can be created and destroyed without ever reaching
+  // nvbit_tool_init (for example, an allocation-only CUDA probe). In that
+  // path no receiver thread or channel exists, so waiting for FINISHED would
+  // deadlock forever. Only perform the stop/join/free sequence after channel
+  // initialization has actually published a receiver.
+  if (ctx_state->instruction_channel_initialized) {
+    // Release-store STOP so the recv thread's acquire-load at :1385 observes
+    // it on its next iteration and exits the WORKING loop. Then acquire-load
+    // FINISHED in a sched_yield spin so we don't burn a whole CPU core.
+    ctx_state->recv_thread_done.store(RecvThreadState::STOP,
+                                      std::memory_order_release);
+    while (ctx_state->recv_thread_done.load(std::memory_order_acquire) !=
+           RecvThreadState::FINISHED) {
+      sched_yield();
+    }
+    ctx_state->channel_host.destroy(false);
   }
-  ctx_state->channel_host.destroy(false);
-  cudaFree(ctx_state->channel_dev);
+  if (ctx_state->channel_dev != nullptr) {
+    cudaFree(ctx_state->channel_dev);
+    ctx_state->channel_dev = nullptr;
+  }
   /* Closure-plan NVBit phase-injection contract: tear down the
    * per-context phase channel symmetrically with its allocation in
    * init_context_state. Only allocated when phase_injection_enabled
@@ -5354,6 +6456,18 @@ void nvbit_at_ctx_term(CUcontext ctx) {
     }
   }
   skip_callback_flag = false;
+  // All receiver threads that consult ctx_state_map have finished before this
+  // point. Remove the entry before freeing the state so a later CUDA context
+  // handle cannot resolve to a dangling CTXstate pointer. On the timeout path
+  // the phase receiver may still be live, but it already holds its CTXstate
+  // pointer and never consults the map again, so the lookup can be removed
+  // there as well while the state itself remains intentionally leaked until
+  // process teardown.
+  // Capture counts are keyed by the same opaque context handle. Clear them
+  // before a handle can be recycled for a later context, otherwise a stale
+  // count would incorrectly defer tool initialization.
+  active_capture_counts.erase(ctx);
+  ctx_state_map.erase(ctx);
   if (!phase_teardown_timed_out) {
     delete ctx_state;
   }

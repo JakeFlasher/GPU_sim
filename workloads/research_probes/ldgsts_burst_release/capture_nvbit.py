@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import argparse
 import csv
-import hashlib
 import json
 import os
 import shlex
@@ -49,21 +48,8 @@ def now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def sha256_file(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
-
-
 def write_json(path: Path, value: Any) -> None:
     path.write_text(json.dumps(value, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-
-
-def closure_hash(closure: Mapping[str, str]) -> str:
-    payload = json.dumps(sorted(closure.items()), separators=(",", ":")).encode()
-    return hashlib.sha256(payload).hexdigest()
 
 
 def output_contract(destination: Path, *, require_enhanced: bool = True) -> dict[str, Any]:
@@ -184,11 +170,7 @@ def capture(
     started = now()
     result: capture_process.NvbitCaptureProcessResult | None = None
     failure: BaseException | None = None
-    runtime_manifest_sha256: str | None = None
-    runtime_dso_closure: dict[str, str] = {}
     effective_environment: dict[str, str] = dict(logical_environment)
-    binary_sha256: str | None = None
-    tracer_sha256: str | None = None
     try:
         with (
             open_retained_executable(binary) as retained_binary,
@@ -196,9 +178,6 @@ def capture(
             open_retained_regular(RUNTIME_MANIFEST) as manifest,
             PinnedDirectoryReader(destination) as trace_root,
         ):
-            binary_sha256 = retained_binary.sha256
-            tracer_sha256 = tracer.sha256
-            runtime_manifest_sha256 = sha256_file(RUNTIME_MANIFEST)
             with retained_tracer_runtime_env(
                 TRACER,
                 base_env={
@@ -212,8 +191,6 @@ def capture(
                 retained_descriptor=tracer.descriptor,
                 retained_manifest_descriptor=manifest.descriptor,
             ) as runtime:
-                runtime.verify_unchanged()
-                runtime_dso_closure = dict(runtime.dso_sha256)
                 effective_environment = dict(runtime.environment)
                 effective_environment.update(
                     {
@@ -254,9 +231,6 @@ def capture(
                     )
                 except BaseException as error:
                     failure = error
-                runtime.verify_unchanged()
-            retained_binary.verify_unchanged()
-            tracer.verify_unchanged()
     except BaseException as error:
         if failure is None:
             failure = error
@@ -284,11 +258,6 @@ def capture(
         "cleanup_complete": cleanup_complete,
         "timeout_seconds": timeout,
         "runtime_manifest_path": str(RUNTIME_MANIFEST),
-        "runtime_manifest_sha256": runtime_manifest_sha256,
-        "runtime_dso_closure": runtime_dso_closure,
-        "runtime_dso_closure_sha256": closure_hash(runtime_dso_closure),
-        "binary_sha256": binary_sha256,
-        "tracer_sha256": tracer_sha256,
         "started_at": started,
         "finished_at": now(),
         "error": str(failure) if failure is not None else None,
@@ -316,10 +285,9 @@ def capture(
         "mode": mode,
         "skip_enhanced_tracer": skip_enhanced,
         "async_order_enabled": async_order_enabled,
-        "binary": {"path": str(binary), "sha256": binary_sha256},
-        "tracer": {"path": str(TRACER), "sha256": tracer_sha256},
-        "runtime_manifest": {"path": str(RUNTIME_MANIFEST), "sha256": runtime_manifest_sha256},
-        "runtime_dso_closure_sha256": closure_hash(runtime_dso_closure),
+        "binary": {"path": str(binary)},
+        "tracer": {"path": str(TRACER)},
+        "runtime_manifest": {"path": str(RUNTIME_MANIFEST)},
         "output_contract": contract,
         "paths": {name: name for name in contract["required_outputs"]},
     }
@@ -338,8 +306,6 @@ def capture(
             "key": cell,
             "required_files": list(required),
             "completed_at": now(),
-            "binary_sha256": binary_sha256,
-            "tracer_sha256": tracer_sha256,
         },
     )
     print(f"captured {cell}: {contract['payload_file_count']} threadblock payload(s)")

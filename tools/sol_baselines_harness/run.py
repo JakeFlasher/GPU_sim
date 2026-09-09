@@ -3,7 +3,7 @@
 
 Reads ``solution.json`` from each ``--baseline`` directory, resolves
 the matching benchmark ``definition.json`` under
-``sol-execbench/data/benchmark/<subset>/<NNN_name>/``, and invokes the
+``tools/sol_execbench/data/benchmark/<subset>/<NNN_name>/``, and invokes the
 upstream CLI as a native subprocess via
 ``baselines_harness.native_dispatch``. The CLI is invoked with
 ``--json`` and the JSONL ``Trace`` lines that come back are parsed
@@ -39,11 +39,11 @@ measurements (and ``reference_latency_ms`` for that matter). Default
 ``--workers 1`` keeps every row contention-free.
 
 Usage:
-    python scripts/baselines_harness/run.py \\
+    python tools/sol_baselines_harness/run.py \\
         --baseline baselines/FIB/problem_001_fused_add_rmsnorm_h2048/cuda_cpp
 
     # Dry-run: print the constructed command and exit.
-    python scripts/baselines_harness/run.py \\
+    python tools/sol_baselines_harness/run.py \\
         --baseline baselines/.../cuda_cpp \\
         --print-cmd
 """
@@ -59,8 +59,14 @@ from typing import Any, Dict, List, Optional
 
 _THIS_DIR = Path(__file__).resolve().parent
 _SCRIPTS_DIR = _THIS_DIR.parent
+_REPO_ROOT = _THIS_DIR.parents[1]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
 if str(_SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS_DIR))
+from tools.sol_baselines_harness._bootstrap import install_package_aliases
+
+install_package_aliases()
 
 from baselines_scaffold.generate import (  # noqa: E402
     DEFAULT_BENCHMARK_ROOT,
@@ -127,8 +133,8 @@ def _resolve_problem_dir(
     if not bench_dir.is_dir():
         raise SystemExit(
             f"error: benchmark directory not found at {bench_dir}. Run "
-            f"./sol-execbench/scripts/download_data.sh to populate "
-            f"sol-execbench/data/benchmark/{subset}/, or check the "
+            f"./tools/sol_execbench/scripts/download_data.sh to populate "
+            f"tools/sol_execbench/data/benchmark/{subset}/, or check the "
             f"solution's definition field against the downloader name."
         )
     return bench_dir
@@ -246,12 +252,12 @@ def run_baseline(
     - The parsed row count does not match the benchmark's ``workload.jsonl``
       line count (under-runs and over-runs both surface).
 
-    Non-PASSED rows themselves do not count as harness failure — they
-    are the harness's primary signal and are written out so the
-    deferred-ledger writer can branch on them. But silently-missing
-    rows or upstream crashes do count as failure: the deferred ledger
-    requires per-pilot evidence rather than environment-driven empty
-    runs.
+    Known non-PASSED statuses themselves do not count as harness failure —
+    they are the harness's primary signal and are written out so the
+    deferred-ledger writer can branch on them. A parsed row with no
+    evaluation status is malformed and does count as failure, as do
+    silently-missing rows or upstream crashes: the deferred ledger requires
+    per-pilot evidence rather than environment-driven empty runs.
     """
     solution_path = baseline_dir / "solution.json"
     if not solution_path.is_file():
@@ -273,12 +279,12 @@ def run_baseline(
     else:
         problem_dir = canonical_problem_dir
     expected_rows = _count_expected_workloads(problem_dir)
-    # The upstream ``sol-execbench`` Click CLI does not define a
+    # The upstream ``tools/sol_execbench`` Click CLI does not define a
     # ``--workers`` option, so forwarding ``--workers N`` here would
     # fail at argument parsing before any workload is evaluated.
     # Multi-worker parallelism for B200 phase-2 fan-out will be
     # implemented at the harness orchestration layer (running
-    # multiple ``sol-execbench`` subprocesses concurrently across
+    # multiple ``tools/sol_execbench`` subprocesses concurrently across
     # baselines), not by passing a flag the upstream CLI rejects.
     # The ``workers`` parameter is preserved as the harness's
     # public contract — callers still pass it, the value is
@@ -366,17 +372,21 @@ def _collect_failure_reasons(
             f"workload row count mismatch: expected {expected_rows} from "
             f"workload.jsonl, parsed {len(rows)}"
         )
-    if parse_errors and not rows:
+    if any(not isinstance(row.get("status"), str) for row in rows):
         reasons.append(
-            f"{len(parse_errors)} unparseable JSONL line(s) and zero "
-            f"validated Trace rows"
+            "one or more parsed Trace rows is missing an evaluation status"
+        )
+    if parse_errors:
+        reasons.append(
+            f"{len(parse_errors)} unparseable JSONL line(s) prevented "
+            f"complete Trace validation"
         )
     return reasons
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="scripts/baselines_harness/run.py",
+        prog="tools/sol_baselines_harness/run.py",
         description=(
             "Drive one baseline through the official sol-execbench CLI; "
             "emit one report row per workload."

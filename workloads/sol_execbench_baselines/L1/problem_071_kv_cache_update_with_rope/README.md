@@ -8,10 +8,10 @@
 | Variant                     | `cuda_cpp`                                                                                  |
 | Evidence                    | `Profiled-local-sm_120`                                                                     |
 | Evidence (sm_86)            | `Profiled-local-sm_86`                                                                      |
-| Local correctness           | All workloads PASSED on the live sm_120 host; full per-workload evidence in `scripts/baselines_harness/.harness_traces/problem_071_kv_cache_update_with_rope__cuda_cpp/trace.json`. |
+| Local correctness           | All workloads PASSED on the live sm_120 host; full per-workload evidence in `tools/sol_baselines_harness/.harness_traces/problem_071_kv_cache_update_with_rope__cuda_cpp/trace.json`. |
 | Local speedup vs reference  | diagnostic only                                                                             |
 | SOL Score (online judge)    | <not yet submitted; Phase-2 deliverable, target band 0.3 – 0.5+>                            |
-| Counter-free artifacts      | Profiled via the Stage-3 surfaces orchestrator; manifest at `scripts/baselines_harness/.harness_traces/problem_071_kv_cache_update_with_rope__cuda_cpp/manifest.json` records the per-surface status set. |
+| Counter-free artifacts      | Profiled via the Stage-3 surfaces orchestrator; manifest at `tools/sol_baselines_harness/.harness_traces/problem_071_kv_cache_update_with_rope__cuda_cpp/manifest.json` records the per-surface status set. |
 
 ## Approach
 

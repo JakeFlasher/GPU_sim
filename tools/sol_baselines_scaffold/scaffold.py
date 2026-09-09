@@ -6,7 +6,7 @@ Given an internal problem slug, a target language (``cutlass`` or
 ``sol-execbench/examples/{cutlass,cuda_cpp}/<exemplar>/``, this tool:
 
 1. Resolves the benchmark directory under
-   ``sol-execbench/data/benchmark/<subset>/<NNN_name>/`` and confirms
+   ``tools/sol_execbench/data/benchmark/<subset>/<NNN_name>/`` and confirms
    ``definition.json`` exists.
 2. Copies the exemplar's editable source files
    (``kernel.h``, ``kernel.cu``, ``main.cpp``) into
@@ -23,7 +23,7 @@ Given an internal problem slug, a target language (``cutlass`` or
    (entry source first, remaining sorted lexicographically by ``path``).
 
 Usage:
-    python scripts/baselines_scaffold/scaffold.py \\
+    python tools/sol_baselines_scaffold/scaffold.py \\
         --slug problem_001_fused_add_rmsnorm_h2048 \\
         --language cuda_cpp \\
         --exemplar cuda_cpp/rmsnorm
@@ -34,7 +34,7 @@ The scaffolder fails closed (exit code 2, nothing written) when:
 - ``--slug`` is missing from
   ``tools/sol_baselines_scaffold/sol_pattern_mapping.md``.
 - The resolved benchmark ``definition.json`` is missing (the error
-  message points at ``./sol-execbench/scripts/download_data.sh``).
+  message points at ``./tools/sol_execbench/scripts/download_data.sh``).
 - The exemplar path does not exist under
   ``sol-execbench/examples/{cutlass,cuda_cpp}/``.
 - The target directory already exists (no clobber).
@@ -52,8 +52,14 @@ from typing import Any, Dict, List, Optional, Tuple
 
 _THIS_DIR = Path(__file__).resolve().parent
 _SCRIPTS_DIR = _THIS_DIR.parent
+_REPO_ROOT = _THIS_DIR.parents[1]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
 if str(_SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS_DIR))
+from tools.sol_baselines_scaffold._bootstrap import install_package_aliases
+
+install_package_aliases()
 
 from baselines_scaffold.generate import (  # noqa: E402
     DEFAULT_BENCHMARK_ROOT,
@@ -66,7 +72,7 @@ from baselines_scaffold.generate import (  # noqa: E402
     parse_mapping,
 )
 
-DEFAULT_EXAMPLES_ROOT = REPO_ROOT / "sol-execbench" / "examples"
+DEFAULT_EXAMPLES_ROOT = REPO_ROOT / "tools" / "sol_execbench" / "examples"
 
 
 def _detect_local_arch_tag(
@@ -164,8 +170,8 @@ def resolve_benchmark_dir(
     if not definition.is_file():
         raise ScaffoldError(
             f"Benchmark definition missing at {definition}. Run "
-            f"./sol-execbench/scripts/download_data.sh to populate "
-            f"sol-execbench/data/benchmark/{subset}/, or check the slug "
+            f"./tools/sol_execbench/scripts/download_data.sh to populate "
+            f"tools/sol_execbench/data/benchmark/{subset}/, or check the slug "
             f"resolution rule (^problem_ is stripped to yield the "
             f"downloader name)."
         )
@@ -537,18 +543,18 @@ def conform_existing_solution_to_local_sm86(solution_path: Path) -> bool:
 def _validate_against_live_schema(solution_dict: Dict[str, Any]) -> None:
     """Defer to the live ``Solution`` Pydantic model.
 
-    Imported lazily because ``sol-execbench`` may not be on the
+    Imported lazily because ``tools/sol_execbench`` may not be on the
     PYTHONPATH in all invocation contexts; on import failure we surface
-    a clear error and abort. (The validator is also exercised by
-    ``validate.py`` and ``test_contract.py`` downstream.)
+    a clear error and abort. The focused scaffold contract tests exercise
+    this boundary as well.
     """
     try:
-        sys.path.insert(0, str(REPO_ROOT / "sol-execbench" / "src"))
+        sys.path.insert(0, str(REPO_ROOT / "tools" / "sol_execbench" / "src"))
         from sol_execbench.core.data.solution import Solution  # noqa: E402
     except ImportError as exc:
         raise ScaffoldError(
             f"Cannot import live Solution Pydantic model: {exc}. Ensure "
-            f"sol-execbench/src is on the PYTHONPATH or invoke from the "
+            f"tools/sol_execbench/src is on the PYTHONPATH or invoke from the "
             f"repo root."
         ) from exc
     try:
@@ -760,7 +766,7 @@ def _emit_parent_readme(
 |-----------------------------|------------------------------------------------------------------------|
 | Problem                     | <one-line description from the markdown spec>                          |
 | Reference spec              | `references/NVIDIA_Manuals/solbench_problems/{slug}.md`                |
-| Benchmark problem_dir       | `sol-execbench/data/benchmark/{subset}/{bench_name}/`                  |
+| Benchmark problem_dir       | `tools/sol_execbench/data/benchmark/{subset}/{bench_name}/`                  |
 | Variant                     | `{language}`                                                           |
 | Evidence                    | `Compile-checked-{resolved_arch_tag}`                                  |
 | Local speedup vs reference  | <diagnostic only; `< 1.0` is acceptable>                               |
@@ -798,7 +804,7 @@ noting for this pattern:
 
 def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="scripts/baselines_scaffold/scaffold.py",
+        prog="tools/sol_baselines_scaffold/scaffold.py",
         description=(
             "Copy an exemplar tree, DPS-convert the entry function, "
             "rename kernel symbols, and emit a Pydantic-valid solution.json."

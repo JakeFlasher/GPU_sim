@@ -55,6 +55,7 @@ import shutil
 import subprocess
 import sys
 import tomllib
+from functools import lru_cache
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
@@ -63,7 +64,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1].parent
 # environment override remains available for an operator-managed external
 # tree, but no absent Docker-era path is used as an implicit build input.
 CUTLASS_DIR_DEFAULT = str(REPO_ROOT / "third_party" / "cutlass")
-SOL_EXECBENCH_PYPROJECT = REPO_ROOT / "sol-execbench" / "pyproject.toml"
+SOL_EXECBENCH_PYPROJECT = REPO_ROOT / "tools" / "sol_execbench" / "pyproject.toml"
 
 
 def default_cutlass_dir() -> Path:
@@ -195,6 +196,7 @@ def _run(cmd: List[str], timeout: float = 10.0) -> Tuple[int, str, str]:
             cmd,
             capture_output=True,
             text=True,
+            errors="replace",
             timeout=timeout,
             check=False,
         )
@@ -205,12 +207,67 @@ def _run(cmd: List[str], timeout: float = 10.0) -> Tuple[int, str, str]:
     return proc.returncode, proc.stdout, proc.stderr
 
 
+def _managed_evaluator_python() -> Optional[Path]:
+    """Return the in-tree interpreter used by native dispatch, if present.
+
+    Direct harness entrypoints are often launched with the host Python while
+    :mod:`native_dispatch` runs ``tools/sol_execbench/.venv/bin/sol-execbench``.
+    Version probes must describe that evaluator environment, otherwise a
+    perfectly runnable host is incorrectly marked as a degraded identity.
+    An explicit evaluator binary remains operator-managed and is left to its
+    caller; the fallback below only covers the repository's canonical venv.
+    """
+    if os.environ.get("SOL_EXECBENCH_BIN"):
+        return None
+    candidate = REPO_ROOT / "tools" / "sol_execbench" / ".venv" / "bin" / "python"
+    if not candidate.is_file() or not os.access(candidate, os.X_OK):
+        return None
+    if os.path.realpath(sys.executable) == os.path.realpath(str(candidate)):
+        return None
+    return candidate
+
+
+@lru_cache(maxsize=8)
+def _managed_evaluator_query(
+    statement: str, interpreter_path: str
+) -> Optional[str]:
+    """Evaluate a small version probe in the native evaluator Python."""
+    rc, stdout, _ = _run(
+        [interpreter_path, "-c", statement],
+        timeout=15.0,
+    )
+    if rc != 0 or not stdout.strip():
+        return None
+    # Imports can emit warnings before the value; the probe's final line is
+    # the only line intended as data.
+    value = stdout.strip().splitlines()[-1].strip()
+    return value or None
+
+
+def _managed_evaluator_value(statement: str) -> Optional[str]:
+    """Run a version probe using the currently selected evaluator Python."""
+    interpreter = _managed_evaluator_python()
+    if interpreter is None:
+        return None
+    return _managed_evaluator_query(statement, str(interpreter))
+
+
 def python_version() -> str:
+    managed = _managed_evaluator_value(
+        "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}')"
+    )
+    if managed:
+        return managed
     info = sys.version_info
     return f"{info.major}.{info.minor}.{info.micro}"
 
 
 def torch_version() -> str:
+    managed = _managed_evaluator_value(
+        "import torch; print(getattr(torch, '__version__', ''))"
+    )
+    if managed:
+        return managed
     try:
         import torch  # type: ignore
     except Exception:
@@ -225,11 +282,22 @@ def nvcc_version() -> str:
     rc, stdout, _ = _run(["nvcc", "--version"])
     if rc != 0:
         return UNKNOWN
+    # The release field omits the compiler patch/build number. Prefer the
+    # full ``V13.3.73`` token so a patch-level nvcc change cannot reuse
+    # binaries captured under an earlier compiler revision.
+    match = re.search(r"\bV(\d+\.\d+\.\d+)\b", stdout)
+    if match:
+        return match.group(1)
     match = re.search(r"release (\d+\.\d+)", stdout)
     return match.group(1) if match else UNKNOWN
 
 
 def cuda_runtime_version() -> str:
+    managed = _managed_evaluator_value(
+        "import torch; print(getattr(getattr(torch, 'version', None), 'cuda', ''))"
+    )
+    if managed:
+        return managed
     try:
         import torch  # type: ignore
     except Exception:
@@ -335,6 +403,23 @@ def _parse_cudnn_header(header: Path) -> Optional[str]:
 
 
 def cudnn_version() -> str:
+    managed = _managed_evaluator_value(
+        """import pathlib, re, nvidia.cudnn
+for root in nvidia.cudnn.__path__:
+    path = pathlib.Path(root) / 'include' / 'cudnn_version.h'
+    if not path.is_file():
+        continue
+    text = path.read_text(encoding='utf-8', errors='replace')
+    major = re.search(r'#define\\s+CUDNN_MAJOR\\s+(\\d+)', text)
+    minor = re.search(r'#define\\s+CUDNN_MINOR\\s+(\\d+)', text)
+    patch = re.search(r'#define\\s+CUDNN_PATCHLEVEL\\s+(\\d+)', text)
+    if major and minor:
+        print(f'{major.group(1)}.{minor.group(1)}.{patch.group(1) if patch else \"0\"}')
+        break
+"""
+    )
+    if managed:
+        return managed
     try:
         import nvidia.cudnn_frontend as _frontend  # type: ignore
         version = getattr(_frontend, "__version__", None)

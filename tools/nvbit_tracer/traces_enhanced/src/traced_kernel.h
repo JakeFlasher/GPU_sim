@@ -29,6 +29,7 @@
 #pragma once
 
 #include <string>
+#include <cstddef>
 #include <vector>
 #include <map>
 #include <set>
@@ -38,7 +39,7 @@
 
 #include "traced_instruction.h"
 
-bool track_this_instruction(int icount, int threshold_unique_kernel_checking, std::string opcode_str);
+bool track_this_instruction(std::size_t icount, int threshold_unique_kernel_checking, std::string opcode_str);
 
 std::shared_ptr<traced_instruction> create_no_binay_instruction(unsigned int pc, std::string full_instruction_str);
 
@@ -76,17 +77,17 @@ class traced_kernel : public JSONBase {
 
         void set_is_captured_from_binary(bool is_captured_from_binary);
 
-        void add_instruction(std::vector<std::string> instruction_part1, std::vector<std::string> instruction_part2, int threshold_unique_kernel_checking, std::string full_instruction_str);
+        bool add_instruction(std::vector<std::string> instruction_part1, std::vector<std::string> instruction_part2, int threshold_unique_kernel_checking, std::string full_instruction_str);
         
-        void add_no_binary_instruction(unsigned int pc, std::string full_instruction_str);
+        bool add_no_binary_instruction(unsigned int pc, std::string full_instruction_str);
 
-        void add_register_usage(unsigned int pc, std::string reg_file_name, unsigned int num_regs);
+        bool add_register_usage(unsigned int pc, std::string reg_file_name, unsigned int num_regs);
 
-        void add_call_target(unsigned int pc, std::string target_name, int target_id);
+        bool add_call_target(unsigned int pc, std::string target_name, int target_id);
 
         traced_instruction& get_instruction(std::string pc);
 
-        void set_opcode_map();
+        bool set_opcode_map();
 
     private:
         std::string m_kernel_name;

@@ -28,13 +28,33 @@
 
 #include "traced_operand.h"
 
+#include <algorithm>
 #include <iostream>
 #include <cmath>
+#include <limits>
+#include <stdexcept>
 
 #include "string_utilities.h"
 
+namespace {
+
+bool has_empty_plus_component(const std::string &text) {
+    for (std::size_t i = 0; i < text.size(); ++i) {
+        if (text[i] == '+' &&
+            (i == 0 || i + 1 == text.size() || text[i + 1] == '+')) {
+            return true;
+        }
+    }
+    return false;
+}
+
+} // namespace
+
 traced_operand::traced_operand(std::string operand_string)
 {
+    if (operand_string.empty()) {
+        throw std::invalid_argument("empty operand");
+    }
     m_is_reuse_bit_set = false;
     m_has_inmediate = false;
     m_has_reg = false;
@@ -65,25 +85,29 @@ traced_operand::traced_operand(std::string operand_string)
 
     m_is_negative_reg = false;
     m_is_absolute_reg = false;
-    if ((operand_string[0] == '-') && ((operand_string[1] == 'R') || (operand_string[1] == 'U') || (operand_string[1] == 'P') || (operand_string[1] == 'c')))
+    if (operand_string.size() >= 2 && (operand_string[0] == '-') && ((operand_string[1] == 'R') || (operand_string[1] == 'U') || (operand_string[1] == 'P') || (operand_string[1] == 'c')))
     {
         idx_first_reg_num++;
         m_is_negative_reg = true;
     }
-    else if ((operand_string[0] == '|') && ((operand_string[1] == 'R') || (operand_string[1] == 'U') || (operand_string[1] == 'P') || (operand_string[1] == 'c')))
+    else if (operand_string.size() >= 2 && (operand_string[0] == '|') && ((operand_string[1] == 'R') || (operand_string[1] == 'U') || (operand_string[1] == 'P') || (operand_string[1] == 'c')))
     {
         idx_first_reg_num++;
         m_is_absolute_reg = true;
-    }else if ((operand_string[0] == '~') && ((operand_string[1] == 'R') || (operand_string[1] == 'U') || (operand_string[1] == 'P') || (operand_string[1] == 'c')))
+    }else if (operand_string.size() >= 2 && (operand_string[0] == '~') && ((operand_string[1] == 'R') || (operand_string[1] == 'U') || (operand_string[1] == 'P') || (operand_string[1] == 'c')))
     {
         idx_first_reg_num++;
-    }else if( (operand_string[0] == '-') && (operand_string[1] == '|') && ((operand_string[2] == 'R') || (operand_string[2] == 'U') || (operand_string[2] == 'P') || (operand_string[1] == 'c'))){
+    }else if( operand_string.size() >= 3 && (operand_string[0] == '-') && (operand_string[1] == '|') && ((operand_string[2] == 'R') || (operand_string[2] == 'U') || (operand_string[2] == 'P') || (operand_string[1] == 'c'))){
         idx_first_reg_num += 2;
         m_is_negative_reg = true;
         m_is_absolute_reg = true;
     }
 
     bool skip_idx_inc = false;
+
+    if (idx_first_reg_num >= operand_string.size()) {
+        throw std::invalid_argument("operand prefix has no payload");
+    }
 
     if (operand_string[idx_first_reg_num] == 'R')
     {
@@ -144,7 +168,8 @@ traced_operand::traced_operand(std::string operand_string)
     else
     {
         skip_idx_inc = true;
-        if (operand_string.find("0x") == std::string::npos)
+        if (operand_string.find("0x") == std::string::npos &&
+            operand_string.find("0X") == std::string::npos)
         {
             try
             {
@@ -152,14 +177,17 @@ traced_operand::traced_operand(std::string operand_string)
                 {
                     operand_string = ReplaceAll(operand_string, "QNAN", "NAN");
                 }
-                std::stod(operand_string);
+                std::size_t parsed = 0;
+                std::stod(operand_string, &parsed);
+                if (parsed != operand_string.size()) {
+                    throw std::invalid_argument(
+                        "immediate operand has trailing characters");
+                }
                 m_operand_type = TraceEnhancedOperandType::IMM_DOUBLE;
             }
-            catch (const std::invalid_argument &ia)
+            catch (const std::invalid_argument &)
             {
-                std::cerr << "ERROR: Operand type not recognized: " << operand_string << std::endl;
-                fflush(stderr);
-                abort();
+                throw;
             }
         }
         else
@@ -215,6 +243,17 @@ traced_operand::traced_operand(std::string operand_string)
         break;
     case TraceEnhancedOperandType::MREF:
     {
+        if (number_string.size() < 2 || number_string.back() != ']' ||
+            std::count(number_string.begin(), number_string.end(), '[') != 0 ||
+            std::count(number_string.begin(), number_string.end(), ']') != 1) {
+            throw std::invalid_argument("malformed memory reference operand");
+        }
+        const std::string memory_reference =
+            number_string.substr(0, number_string.size() - 1);
+        if (memory_reference.empty() ||
+            has_empty_plus_component(memory_reference)) {
+            throw std::invalid_argument("malformed memory reference operand");
+        }
         std::string cleaned_operands = ReplaceAll(number_string, "]", "");
         std::vector<std::string> splitted_operands = split_string(cleaned_operands, '+');
         for (unsigned i = 0; i < splitted_operands.size(); i++)
@@ -223,18 +262,21 @@ traced_operand::traced_operand(std::string operand_string)
             {
                 int reserved_reg = RZ;
                 int first_substring_pos = 1;
-                int search_dot = splitted_operands[i].find_first_of('.');
-                int las_substring_pos = search_dot == -1 ? (splitted_operands[i].size() - 1) : (search_dot - 1);
+                const std::size_t search_dot = splitted_operands[i].find_first_of('.');
+                const std::size_t register_end =
+                    search_dot == std::string::npos ? splitted_operands[i].size()
+                                                    : search_dot;
                 if (splitted_operands[i][0] == 'U')
                 {
                     reserved_reg = URZ;
                     first_substring_pos++;
                 }
-                if (search_dot == -1)
-                {
-                    fflush(stdout);
+                if (register_end <= static_cast<std::size_t>(first_substring_pos)) {
+                    throw std::invalid_argument("empty memory-reference register");
                 }
-                std::string reg_string = splitted_operands[i].substr(first_substring_pos, las_substring_pos);
+                std::string reg_string = splitted_operands[i].substr(
+                    first_substring_pos,
+                    register_end - static_cast<std::size_t>(first_substring_pos));
                 set_reg_num(reg_string, reserved_reg, 'Z');
             }
             else
@@ -246,8 +288,22 @@ traced_operand::traced_operand(std::string operand_string)
     break;
     case TraceEnhancedOperandType::CBANK:
     {
+        if (number_string.size() < 4 || number_string.front() != '[' ||
+            number_string.back() != ']' ||
+            std::count(number_string.begin(), number_string.end(), '[') != 2 ||
+            std::count(number_string.begin(), number_string.end(), ']') != 2) {
+            throw std::invalid_argument("malformed constant-bank operand");
+        }
         std::string cleaned_operands = ReplaceAll(number_string, "]", "");
         std::vector<std::string> splitted_operands = split_string(cleaned_operands, '[');
+        if (splitted_operands.size() != 2 || splitted_operands[0].empty() ||
+            splitted_operands[1].empty() ||
+            std::any_of(splitted_operands.begin(), splitted_operands.end(),
+                        [](const std::string &part) {
+                            return has_empty_plus_component(part);
+                        })) {
+            throw std::invalid_argument("malformed constant-bank operand");
+        }
         for (unsigned i = 0; i < splitted_operands.size(); i++)
         {
             std::vector<std::string> splitted_operands2 = split_string(splitted_operands[i], '+');
@@ -257,18 +313,23 @@ traced_operand::traced_operand(std::string operand_string)
                 {
                     int reserved_reg = RZ;
                     int first_substring_pos = 1;
-                    int search_dot = splitted_operands2[j].find_first_of('.');
-                    int las_substring_pos = search_dot == -1 ? (splitted_operands2[j].size() - 1) : (search_dot - 1);
+                    const std::size_t search_dot =
+                        splitted_operands2[j].find_first_of('.');
+                    const std::size_t register_end =
+                        search_dot == std::string::npos
+                            ? splitted_operands2[j].size()
+                            : search_dot;
                     if (splitted_operands2[j][0] == 'U')
                     {
                         reserved_reg = URZ;
                         first_substring_pos++;
                     }
-                    if (search_dot == -1)
-                    {
-                        fflush(stdout);
+                    if (register_end <= static_cast<std::size_t>(first_substring_pos)) {
+                        throw std::invalid_argument("empty constant-bank register");
                     }
-                    std::string reg_string = splitted_operands2[j].substr(first_substring_pos, las_substring_pos);
+                    std::string reg_string = splitted_operands2[j].substr(
+                        first_substring_pos,
+                        register_end - static_cast<std::size_t>(first_substring_pos));
                     set_reg_num(reg_string, reserved_reg, 'Z');
                 }
                 else
@@ -297,23 +358,38 @@ traced_operand::traced_operand(std::string operand_string, int target_unique_fun
     m_operands_inmediates.clear();
 }
 
-traced_operand::traced_operand() {
-    // Used for Deserializing
-}
+traced_operand::traced_operand()
+    : traced_operand("RZ") {}
 
 void traced_operand::set_reg_num(std::string operand_string, int reserved_reg_num, char reserved_reg_char)
 {
-    if (operand_string[0] == reserved_reg_char)
+    const std::size_t modifier = operand_string.find('.');
+    const std::string register_token = operand_string.substr(0, modifier);
+    if (register_token.empty()) {
+        throw std::invalid_argument("empty register operand");
+    }
+    if (register_token.front() == '+' || register_token.front() == '-') {
+        throw std::invalid_argument("register operand has a sign");
+    }
+    if (register_token.size() == 1 && register_token[0] == reserved_reg_char)
     {
         m_operand_reg_number = reserved_reg_num;
     }
-    else if (reserved_reg_char == 'T' && operand_string[0] == 'R')
+    else if (reserved_reg_char == 'T' && register_token == "R")
     {
         m_operand_reg_number = PR;
     }
     else
     {
-        m_operand_reg_number = std::stoul(operand_string, nullptr, 10);
+        std::size_t parsed = 0;
+        const unsigned long value = std::stoul(register_token, &parsed, 10);
+        if (parsed != register_token.size() ||
+            (reserved_reg_char == 'T' &&
+             value > static_cast<unsigned long>(PR)) ||
+            value > static_cast<unsigned long>(std::numeric_limits<int>::max())) {
+            throw std::invalid_argument("register operand is outside its register-file domain");
+        }
+        m_operand_reg_number = static_cast<int>(value);
     }
     m_has_reg = true;
 }
@@ -323,11 +399,21 @@ void traced_operand::add_inmediate(std::string operand_string, TraceEnhancedOper
     double inmediate;
     if (operand_type == TraceEnhancedOperandType::IMM_DOUBLE)
     {
-        inmediate = std::stod(operand_string);
+        std::size_t parsed = 0;
+        inmediate = std::stod(operand_string, &parsed);
+        if (parsed != operand_string.size()) {
+            throw std::invalid_argument("immediate operand has trailing characters");
+        }
     }
     else
     {
-        inmediate = static_cast<double>(std::stoul(operand_string, nullptr, 16));
+        std::size_t parsed = 0;
+        const unsigned long long value =
+            std::stoull(operand_string, &parsed, 16);
+        if (parsed != operand_string.size()) {
+            throw std::invalid_argument("hex immediate operand has trailing characters");
+        }
+        inmediate = static_cast<double>(value);
     }
     m_operands_inmediates.push_back(inmediate);
     m_has_inmediate = true;
@@ -495,29 +581,89 @@ bool traced_operand::Serialize(rapidjson::Writer<rapidjson::StringBuffer> *write
 
 bool traced_operand::Deserialize(const rapidjson::Value &obj)
 {
-    m_operand_string = obj["operand_string"].GetString();
-
+    std::string operand_string;
+    std::string operand_type_name;
+    if (!obj.IsObject() || !HasUniqueObjectMembers(obj) ||
+        !obj.HasMember("operand_string") ||
+        !ReadString(obj["operand_string"], operand_string) ||
+        !obj.HasMember("operand_modifiers") ||
+        !obj["operand_modifiers"].IsArray() ||
+        !obj.HasMember("operand_type") ||
+        !ReadString(obj["operand_type"], operand_type_name) || !obj.HasMember("has_reg") ||
+        !obj["has_reg"].IsBool() || !obj.HasMember("is_negative_reg") ||
+        !obj["is_negative_reg"].IsBool() ||
+        !obj.HasMember("is_absolute_reg") ||
+        !obj["is_absolute_reg"].IsBool() ||
+        !obj.HasMember("operand_reg_number") ||
+        !obj["operand_reg_number"].IsInt() ||
+        !obj.HasMember("has_inmediate") ||
+        !obj["has_inmediate"].IsBool() ||
+        !obj.HasMember("operand_inmmediates") ||
+        !obj["operand_inmmediates"].IsArray() ||
+        !obj.HasMember("is_reuse_bit_set") ||
+        !obj["is_reuse_bit_set"].IsBool()) {
+        return false;
+    }
+    std::vector<std::string> parsed_modifiers;
     const rapidjson::Value &modifiers = obj["operand_modifiers"];
     for (rapidjson::SizeType i = 0; i < modifiers.Size(); i++)
     {
-        m_modifiers.push_back(modifiers[i].GetString());
+        std::string modifier;
+        if (!ReadString(modifiers[i], modifier)) {
+            return false;
+        }
+        parsed_modifiers.push_back(std::move(modifier));
+    }
+    TraceEnhancedOperandType operand_type;
+    try {
+        operand_type = get_operand_type(operand_type_name);
+    } catch (const std::exception &) {
+        return false;
+    }
+    const bool has_reg = obj["has_reg"].GetBool();
+    const bool is_negative_reg = obj["is_negative_reg"].GetBool();
+    const bool is_absolute_reg = obj["is_absolute_reg"].GetBool();
+    const int operand_reg_number = obj["operand_reg_number"].GetInt();
+    const bool has_inmediate = obj["has_inmediate"].GetBool();
+
+    const int register_limit =
+        operand_type == TraceEnhancedOperandType::REG
+            ? RZ
+            : operand_type == TraceEnhancedOperandType::UREG
+                ? URZ
+                : operand_type == TraceEnhancedOperandType::PRED ||
+                        operand_type == TraceEnhancedOperandType::UPRED
+                    ? PR
+                    : -1;
+    if (register_limit >= 0 &&
+        (operand_reg_number < 0 || operand_reg_number > register_limit)) {
+        return false;
     }
 
-    m_operand_type = get_operand_type(obj["operand_type"].GetString());
-    m_has_reg = obj["has_reg"].GetBool();
-    m_is_negative_reg = obj["is_negative_reg"].GetBool();
-    m_is_absolute_reg = obj["is_absolute_reg"].GetBool();
-    m_operand_reg_number = obj["operand_reg_number"].GetInt();
-
-    m_has_inmediate = obj["has_inmediate"].GetBool();
-
+    std::vector<double> parsed_inmediates;
     const rapidjson::Value &operands_inmediates = obj["operand_inmmediates"];
     for (rapidjson::SizeType i = 0; i < operands_inmediates.Size(); i++)
     {
-        m_operands_inmediates.push_back(operands_inmediates[i].GetDouble());
+        if (!operands_inmediates[i].IsNumber()) {
+            return false;
+        }
+        parsed_inmediates.push_back(operands_inmediates[i].GetDouble());
     }
 
-    m_is_reuse_bit_set = obj["is_reuse_bit_set"].GetBool();
+    const bool is_reuse_bit_set = obj["is_reuse_bit_set"].GetBool();
+
+    // Commit only after every field and nested value has validated.  Callers
+    // may reuse an operand object after a malformed retry.
+    m_operand_string = operand_string;
+    m_modifiers = std::move(parsed_modifiers);
+    m_operand_type = operand_type;
+    m_has_reg = has_reg;
+    m_is_negative_reg = is_negative_reg;
+    m_is_absolute_reg = is_absolute_reg;
+    m_operand_reg_number = operand_reg_number;
+    m_has_inmediate = has_inmediate;
+    m_operands_inmediates = std::move(parsed_inmediates);
+    m_is_reuse_bit_set = is_reuse_bit_set;
 
     return true;
 }

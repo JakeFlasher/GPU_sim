@@ -30,12 +30,15 @@
 
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 
+use crate::json::strict_json_from_slice;
 use serde::Deserialize;
 
 /// Path of the exec-info file inside a trace dir.
 const EXEC_INFO_RELPATH: &str = "extra_info/enhanced_execution_info.json";
+const MAX_EXEC_INFO_BYTES: u64 = 64 * 1024 * 1024;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ExecInfoError {
@@ -44,6 +47,12 @@ pub enum ExecInfoError {
         path: PathBuf,
         #[source]
         source: std::io::Error,
+    },
+    #[error("exec info {path} is {observed} bytes, exceeding implementation limit {limit}")]
+    ResourceLimit {
+        path: PathBuf,
+        observed: u64,
+        limit: u64,
     },
     #[error("failed to parse {path}: {source}")]
     Parse {
@@ -55,6 +64,8 @@ pub enum ExecInfoError {
     EmptyKernels,
     #[error("kernel {kernel_name:?}: empty static instruction table")]
     EmptyInstructions { kernel_name: String },
+    #[error("kernel {kernel_name:?}: unique_function_id {id} is not positive")]
+    InvalidFunctionId { kernel_name: String, id: i32 },
     #[error("duplicate unique_function_id {id} (kernels {first:?} and {second:?})")]
     DuplicateFunctionId {
         id: i32,
@@ -136,10 +147,7 @@ impl ExecInfo {
     /// Load and validate `<trace_dir>/extra_info/enhanced_execution_info.json`.
     pub fn load_from_trace_dir(trace_dir: &Path) -> Result<Self, ExecInfoError> {
         let path = trace_dir.join(EXEC_INFO_RELPATH);
-        let raw = std::fs::read(&path).map_err(|source| ExecInfoError::Io {
-            path: path.clone(),
-            source,
-        })?;
+        let raw = read_bounded_exec_info(&path, MAX_EXEC_INFO_BYTES)?;
         Self::parse(&path, &raw)
     }
 
@@ -147,7 +155,7 @@ impl ExecInfo {
     /// for binding the raw digest before invoking this semantic validator.
     pub fn parse(path: &Path, raw: &[u8]) -> Result<Self, ExecInfoError> {
         let parsed: RawExecInfo =
-            serde_json::from_slice(raw).map_err(|source| ExecInfoError::Parse {
+            strict_json_from_slice(raw).map_err(|source| ExecInfoError::Parse {
                 path: path.to_path_buf(),
                 source,
             })?;
@@ -160,6 +168,12 @@ impl ExecInfo {
         }
         let mut kernels: BTreeMap<i32, KernelStaticInfo> = BTreeMap::new();
         for k in raw.kernels {
+            if k.unique_function_id <= 0 {
+                return Err(ExecInfoError::InvalidFunctionId {
+                    kernel_name: k.kernel_name,
+                    id: k.unique_function_id,
+                });
+            }
             if k.instructions.is_empty() {
                 return Err(ExecInfoError::EmptyInstructions {
                     kernel_name: k.kernel_name,
@@ -209,6 +223,29 @@ impl ExecInfo {
     }
 }
 
+fn read_bounded_exec_info(path: &Path, limit: u64) -> Result<Vec<u8>, ExecInfoError> {
+    let file = std::fs::File::open(path).map_err(|source| ExecInfoError::Io {
+        path: path.to_path_buf(),
+        source,
+    })?;
+    let mut raw = Vec::new();
+    file.take(limit.saturating_add(1))
+        .read_to_end(&mut raw)
+        .map_err(|source| ExecInfoError::Io {
+            path: path.to_path_buf(),
+            source,
+        })?;
+    let observed = u64::try_from(raw.len()).unwrap_or(u64::MAX);
+    if observed > limit {
+        return Err(ExecInfoError::ResourceLimit {
+            path: path.to_path_buf(),
+            observed,
+            limit,
+        });
+    }
+    Ok(raw)
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
@@ -245,6 +282,54 @@ mod tests {
             k.static_pcs.iter().copied().collect::<Vec<_>>(),
             [0, 16, 32]
         );
+    }
+
+    #[test]
+    fn duplicate_json_members_are_rejected_before_exec_info_decode() {
+        let path = Path::new("enhanced_execution_info.json");
+        let duplicate_root = br#"{
+            "benchmark_name": "first",
+            "benchmark_name": "second",
+            "kernels": []
+        }"#;
+        let error = ExecInfo::parse(path, duplicate_root).unwrap_err();
+        assert!(
+            matches!(error, ExecInfoError::Parse { source, .. } if source
+            .to_string()
+            .contains("duplicate JSON member"))
+        );
+
+        let duplicate_nested = br#"{
+            "benchmark_name": "bench",
+            "kernels": [{
+                "kernel_name": "k",
+                "unique_function_id": 1,
+                "architecture_version": 86,
+                "instructions": [{"pc_string_hex": "0", "pc_num_dec": 0}],
+                "instructions": []
+            }]
+        }"#;
+        let error = ExecInfo::parse(path, duplicate_nested).unwrap_err();
+        assert!(
+            matches!(error, ExecInfoError::Parse { source, .. } if source
+            .to_string()
+            .contains("duplicate JSON member"))
+        );
+    }
+
+    #[test]
+    fn bounded_exec_info_read_rejects_oversized_input() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("enhanced_execution_info.json");
+        std::fs::write(&path, b"12345").unwrap();
+        assert!(matches!(
+            read_bounded_exec_info(&path, 4),
+            Err(ExecInfoError::ResourceLimit {
+                observed: 5,
+                limit: 4,
+                ..
+            })
+        ));
     }
 
     #[test]
@@ -289,6 +374,17 @@ mod tests {
             err,
             ExecInfoError::DuplicateFunctionId { id: 1, .. }
         ));
+    }
+
+    #[test]
+    fn nonpositive_function_id_rejected() {
+        for id in [0, -1] {
+            let err = ExecInfo::from_raw(raw(&kernel_json("k___0", id, &[0]))).unwrap_err();
+            assert!(matches!(
+                err,
+                ExecInfoError::InvalidFunctionId { id: actual, .. } if actual == id
+            ));
+        }
     }
 
     #[test]

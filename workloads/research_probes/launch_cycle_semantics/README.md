@@ -70,6 +70,17 @@ ncu --launch-skip 1 --launch-count 1 --replay-mode application \
 This probe is an independent calibration input.  Scored-workload NCU values
 must not be supplied to it or to the simulator.
 
+## Exact locked physical-control snapshot
+
+The seven-repeat, externally locked exact-control snapshot for the two
+dependent-chain arms is retained in
+[`sm86_locked_physical_control_exact_20260904_v3`](../../../results/captures/sm86_locked_physical_control_exact_20260904_v3/).
+Its [machine-readable summary](../../../results/captures/sm86_locked_physical_control_exact_20260904_v3/exact_control_summary.json)
+records the protocol, executable/source identities, repeat vectors, and
+medians.  The snapshot is comparison-only: it demonstrates that the SM and
+GPC observation deltas do not justify restoring a universal fixed 964-cycle
+tail, and it is not a simulator tuning target.
+
 ## INT8 IMMA issue control
 
 `imma_issue_probe` emits exact inline-PTX

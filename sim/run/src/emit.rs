@@ -1012,10 +1012,10 @@ fn emit_l1tex_unified_hit_rate(snap: &CounterSnapshot) -> Result<EmitOutcome, Em
 }
 
 /// `lts__t_sector_hit_rate.pct` — the modeled L1TEX-origin L2 lookup-hit rate.
-/// `lookup_hits` follows the independently validated hardware observer: valid
-/// data hits, reads merging into an already-pending allocation, and every
-/// write-class sector lookup. The physical `hits`/`misses` split remains
-/// unchanged for response pricing and cache state.
+/// `lookup_hits`/`lookup_requests` follow the independently validated observer
+/// stream.  The physical `hits`/`misses` split remains unchanged for response
+/// pricing and cache state, because write packetization can make the two
+/// denominators differ.
 fn emit_l2_hit_rate(snap: &CounterSnapshot) -> Result<EmitOutcome, EmitError> {
     let key = "cache_hit_rate_l2_sector";
     let Some(l2) = snap.l2 else {
@@ -1023,11 +1023,17 @@ fn emit_l2_hit_rate(snap: &CounterSnapshot) -> Result<EmitOutcome, EmitError> {
             needs: MemUnit::Lts,
         }));
     };
-    let den = checked_sum(
-        key,
-        "unified L2 hit-rate denominator",
-        &[l2.hits, l2.misses],
-    )?;
+    let den = if l2.lookup_requests != 0 {
+        l2.lookup_requests
+    } else {
+        // Compatibility for legacy/synthetic snapshots created before the
+        // observer denominator was introduced.
+        checked_sum(
+            key,
+            "unified L2 hit-rate denominator",
+            &[l2.hits, l2.misses],
+        )?
+    };
     Ok(EmitOutcome::Predicted(MetricValue::fraction(
         key,
         l2.lookup_hits,

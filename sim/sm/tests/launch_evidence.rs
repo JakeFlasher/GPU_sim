@@ -1417,6 +1417,34 @@ fn absent_sampling_declaration_and_binary_gap_fail_closed() {
 }
 
 #[test]
+fn canonical_sidecar_binary_basename_must_match_execution_benchmark() {
+    let fixture = fixture();
+    let control_path = fixture.root.join("control/canary_sm86.control_bits.json");
+    let mut sidecar: Value =
+        serde_json::from_slice(&fs::read(&control_path).expect("read control sidecar"))
+            .expect("parse control sidecar");
+    sidecar["binary"] = json!("bin/unrelated_rebuilt_kernel");
+    write_json(&control_path, &sidecar);
+
+    let mut manifest = fixture.manifest.clone();
+    manifest["artifacts"]["control_bits_sidecar"] =
+        artifact(&fixture.root, "control/canary_sm86.control_bits.json");
+    write_json(&fixture.manifest_path, &manifest);
+
+    assert!(matches!(
+        admission_error(
+            &fixture.manifest_path,
+            "canonical stale sidecar unexpectedly admitted",
+        ),
+        ManifestError::IdentityMismatch {
+            artifact: ManifestArtifactToken::ControlBitsSidecar,
+            edge: "benchmark_name->control_bits_sidecar.binary",
+            ..
+        }
+    ));
+}
+
+#[test]
 fn unknown_fields_noncanonical_paths_and_digest_spelling_are_rejected() {
     let unknown_fixture = fixture();
     let mut manifest = unknown_fixture.manifest.clone();

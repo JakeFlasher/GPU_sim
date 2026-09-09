@@ -5,7 +5,7 @@ from NVIDIA SOL-ExecBench's official Python references. These are
 **profiling targets** for the counter-free analytics framework, not
 optimized kernels. SOL Scores in the **0.3 – 0.5+** band are accepted
 when these eventually go through the online judge. See
-[`../CLAUDE.md`](../CLAUDE.md) for the binding project contract.
+[`../../AGENTS.md`](../../AGENTS.md) for the binding project contract.
 
 ### Landing contract (correctness-only)
 
@@ -19,7 +19,7 @@ A *.cu under `baselines/` is **landed** when:
 `speedup_factor` against the PyTorch reference is recorded as
 diagnostic data only — a *.cu with `speedup_factor < 1.0` still
 lands. The legacy `deferred_slow` status is retired.
-`scripts/baselines_harness/deferred.json` now only records
+`tools/sol_baselines_harness/deferred.json` now only records
 `deferred_correctness` (workload correctness failure) and
 `deferred_reward_hack` (evaluator-state exploit; should be empty).
 
@@ -122,7 +122,7 @@ The `sol-execbench` CLI is on `PATH` once `uv sync` has installed the
 `sol-execbench` package from `sol-execbench/pyproject.toml`. There is no
 Docker shim in the dispatch path — the harness, the manifest, and the
 cache all key on `native_env_hash` (see
-`scripts/baselines_harness/native_env.py`).
+`tools/sol_baselines_harness/native_env.py`).
 
 The `<problem_dir>` argument supplies `definition.json` + `workload.jsonl`;
 our `solution.json` supplies the kernel sources. The solution's
@@ -130,7 +130,7 @@ our `solution.json` supplies the kernel sources. The solution's
 
 ## Rules digest
 
-See [`../CLAUDE.md`](../CLAUDE.md) for binding rules. Highlights:
+See [`../../AGENTS.md`](../../AGENTS.md) for binding rules. Highlights:
 
 - No NCU; no `nvidia-smi` clock-locking on any device (including local 5060).
 - No privileged CUPTI; no host-driver work.

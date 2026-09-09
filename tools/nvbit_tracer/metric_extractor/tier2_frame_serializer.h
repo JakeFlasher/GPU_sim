@@ -1,12 +1,10 @@
 // nvbit_tracer/metric_extractor/tier2_frame_serializer.h
 //
 // Header-only Tier-2 sidecar frame writer. Hosts the file-write portion of the
-// per-launch producer so the same code path is exercised by both the
-// NVBit-injected runtime caller in metric_extractor.cu AND the standalone
-// host-side regression binary test_tier2_marker_metadata. The runtime caller
-// is responsible for opening the file, computing the per-launch UID, and
-// running NVBit-side TMA descriptor expansion; the serializer accepts a
-// precomputed TmaExpansionResult array and never invokes NVBit.
+// per-launch producer. The runtime caller is responsible for opening the
+// file, computing the per-launch UID, and running NVBit-side TMA descriptor
+// expansion; the serializer accepts a precomputed TmaExpansionResult array
+// and never invokes NVBit.
 
 #ifndef NVBIT_TRACER_METRIC_EXTRACTOR_TIER2_FRAME_SERIALIZER_H_
 #define NVBIT_TRACER_METRIC_EXTRACTOR_TIER2_FRAME_SERIALIZER_H_
@@ -33,8 +31,7 @@ struct TmaExpansionResult {
 };
 
 // Per-frame serializer output. The runtime caller projects this onto its own
-// Tier2EmitResult shape; the regression binary asserts on the diagnostic
-// fields directly.
+// Tier2EmitResult shape used by the runtime writer.
 struct Tier2FrameSerializeOutput {
     bool emitted;
     bool truncated;
@@ -226,11 +223,8 @@ static inline void tier2_serialize_frame_body(
         hdr[5] = (160 >> 8) & 0xff;
         hdr[6] = 0x02; hdr[7] = 0x01;
         // binary_sha256 at file offset 16 (hdr index 12), 32 bytes.
-        // The serializer round-trips whatever value the caller supplies; the
-        // production caller in metric_extractor.cu currently passes 32 zeros
-        // as a placeholder (the v1.0 schema explicitly tolerates that), but
-        // the test binary passes non-zero values to verify the seed
-        // derivation depends on this field.
+        // Copy the caller-supplied binary identity. Seed derivation consumes
+        // this field along with the launch identity.
         for (int i = 0; i < 32; ++i) hdr[12 + i] = binary_sha256[i];
         const uint32_t launch_uid_off = 48 - 4;
         for (int i = 0; i < 8; ++i) {

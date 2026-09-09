@@ -28,9 +28,21 @@
 
 #include "control_bits.h"
 
+#include <stdexcept>
+
 control_bits::control_bits(std::string encoded_instruction_part, int shift_to_get_control_codes)
 {
-    unsigned long long encoded_instruction_part_num = std::stoul(encoded_instruction_part, nullptr, 16);
+    if (encoded_instruction_part.empty() ||
+        encoded_instruction_part.front() == '+' ||
+        encoded_instruction_part.front() == '-') {
+        throw std::invalid_argument("encoded instruction is not unsigned hex");
+    }
+    std::size_t parsed = 0;
+    const unsigned long long encoded_instruction_part_num =
+        std::stoull(encoded_instruction_part, &parsed, 16);
+    if (parsed != encoded_instruction_part.size()) {
+        throw std::invalid_argument("encoded instruction has trailing characters");
+    }
     unsigned long long control_bits_num = encoded_instruction_part_num >> shift_to_get_control_codes;
     m_stall_count = (control_bits_num & 0x0000f) >> 0;
     m_is_yield = !((control_bits_num & 0x00010) >> 4);
@@ -156,6 +168,22 @@ bool control_bits::Serialize(rapidjson::Writer<rapidjson::StringBuffer> *writer)
 
 bool control_bits::Deserialize(const rapidjson::Value &obj)
 {
+    if (!obj.IsObject() || !HasUniqueObjectMembers(obj) ||
+        !obj.HasMember("stall_count") ||
+        !obj["stall_count"].IsInt() || !obj.HasMember("is_yield") ||
+        !obj["is_yield"].IsBool() ||
+        !obj.HasMember("is_new_read_barrier") ||
+        !obj["is_new_read_barrier"].IsBool() ||
+        !obj.HasMember("is_new_write_barrier") ||
+        !obj["is_new_write_barrier"].IsBool() ||
+        !obj.HasMember("id_new_read_barrier") ||
+        !obj["id_new_read_barrier"].IsInt() ||
+        !obj.HasMember("id_new_write_barrier") ||
+        !obj["id_new_write_barrier"].IsInt() ||
+        !obj.HasMember("wait_barrier_bits") ||
+        !obj["wait_barrier_bits"].IsInt()) {
+        return false;
+    }
     m_stall_count = obj["stall_count"].GetInt();
     set_is_yield(obj["is_yield"].GetBool());
     m_is_new_read_barrier = obj["is_new_read_barrier"].GetBool();

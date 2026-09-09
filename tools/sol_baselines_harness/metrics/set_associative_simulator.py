@@ -1,7 +1,7 @@
 """Set-associative sectored L2 cache simulator.
 
 Consumes a cache-geometry spec from
-`scripts/baselines_harness/metrics/cache_geometry.py` and models
+`tools/sol_baselines_harness/metrics/cache_geometry.py` and models
 the L2 as per-slice per-set per-way slot arrays where each slot
 holds one 128 B line with four 32 B sectors and per-sector valid
 bits. Replacement applies the Zhang USENIX'24 two-phase rule:

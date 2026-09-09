@@ -13,9 +13,11 @@
 //! web-verified 2026-07-06).
 
 use std::collections::BTreeMap;
+use std::io::Read;
 use std::path::Path;
 
 use serde::Deserialize;
+use serde::de::{DeserializeSeed, Error as _, MapAccess, SeqAccess, Visitor};
 use sim_arch::{ArchError, ArchId, CapabilityError};
 
 /// The exact `parser_contract.control_layout` this decoder implements. If a
@@ -31,6 +33,7 @@ const EXPECTED_LAYOUT: [(&str, &str); 8] = [
     ("reuse", "bits 17:20"),
     ("reserved_must_be_zero", "bits 21:22"),
 ];
+const MAX_CONTROL_SIDECAR_BYTES: u64 = 64 * 1024 * 1024;
 
 pub const BARRIER_NONE: Option<DepBarrier> = None;
 
@@ -106,6 +109,12 @@ pub enum ControlBitsError {
         path: String,
         #[source]
         source: std::io::Error,
+    },
+    #[error("control sidecar {path} is {observed} bytes, exceeding implementation limit {limit}")]
+    ResourceLimit {
+        path: String,
+        observed: u64,
+        limit: u64,
     },
     #[error("could not parse sidecar {path}: {source}")]
     Parse {
@@ -334,6 +343,121 @@ struct RawSidecar {
     summary: RawSummary,
 }
 
+struct StrictJsonSeed;
+
+struct StrictJsonVisitor;
+
+impl<'de> DeserializeSeed<'de> for StrictJsonSeed {
+    type Value = ();
+
+    fn deserialize<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        deserializer.deserialize_any(StrictJsonVisitor)
+    }
+}
+
+impl<'de> Visitor<'de> for StrictJsonVisitor {
+    type Value = ();
+
+    fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("a JSON value")
+    }
+
+    fn visit_bool<E>(self, _value: bool) -> Result<Self::Value, E> {
+        Ok(())
+    }
+
+    fn visit_i64<E>(self, _value: i64) -> Result<Self::Value, E> {
+        Ok(())
+    }
+
+    fn visit_u64<E>(self, _value: u64) -> Result<Self::Value, E> {
+        Ok(())
+    }
+
+    fn visit_f64<E>(self, _value: f64) -> Result<Self::Value, E> {
+        Ok(())
+    }
+
+    fn visit_str<E>(self, _value: &str) -> Result<Self::Value, E> {
+        Ok(())
+    }
+
+    fn visit_string<E>(self, _value: String) -> Result<Self::Value, E> {
+        Ok(())
+    }
+
+    fn visit_none<E>(self) -> Result<Self::Value, E> {
+        Ok(())
+    }
+
+    fn visit_unit<E>(self) -> Result<Self::Value, E> {
+        Ok(())
+    }
+
+    fn visit_some<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        StrictJsonSeed.deserialize(deserializer)
+    }
+
+    fn visit_seq<A>(self, mut sequence: A) -> Result<Self::Value, A::Error>
+    where
+        A: SeqAccess<'de>,
+    {
+        while sequence.next_element_seed(StrictJsonSeed)?.is_some() {}
+        Ok(())
+    }
+
+    fn visit_map<A>(self, mut object: A) -> Result<Self::Value, A::Error>
+    where
+        A: MapAccess<'de>,
+    {
+        let mut keys = BTreeMap::new();
+        while let Some(key) = object.next_key::<String>()? {
+            if keys.insert(key.clone(), ()).is_some() {
+                return Err(A::Error::custom(format!(
+                    "duplicate JSON object key {key:?}"
+                )));
+            }
+            object.next_value_seed(StrictJsonSeed)?;
+        }
+        Ok(())
+    }
+}
+
+fn reject_duplicate_json_keys(raw: &[u8]) -> Result<(), serde_json::Error> {
+    let mut deserializer = serde_json::Deserializer::from_slice(raw);
+    StrictJsonSeed.deserialize(&mut deserializer)?;
+    deserializer.end()
+}
+
+fn read_bounded_control_sidecar(path: &Path, limit: u64) -> Result<Vec<u8>, ControlBitsError> {
+    let file = std::fs::File::open(path).map_err(|source| ControlBitsError::Io {
+        path: path.display().to_string(),
+        source,
+    })?;
+    let mut raw = Vec::new();
+    file.take(limit.saturating_add(1))
+        .read_to_end(&mut raw)
+        .map_err(|source| ControlBitsError::Io {
+            path: path.display().to_string(),
+            source,
+        })?;
+    let observed = u64::try_from(raw.len()).unwrap_or(u64::MAX);
+    if observed > limit {
+        return Err(ControlBitsError::ResourceLimit {
+            path: path.display().to_string(),
+            observed,
+            limit,
+        });
+    }
+    Ok(raw)
+}
+
 /// One instruction's static scheduling record, keyed by pc in
 /// [`FunctionControl::by_pc`].
 #[derive(Debug, Clone)]
@@ -375,10 +499,7 @@ impl ControlSidecar {
 
     /// Load and validate a sidecar for a canonical deployment architecture.
     pub fn load_for_arch(path: &Path, expected_arch: ArchId) -> Result<Self, ControlBitsError> {
-        let raw = std::fs::read(path).map_err(|source| ControlBitsError::Io {
-            path: path.display().to_string(),
-            source,
-        })?;
+        let raw = read_bounded_control_sidecar(path, MAX_CONTROL_SIDECAR_BYTES)?;
         Self::parse_for_arch(path, &raw, expected_arch)
     }
 
@@ -388,6 +509,10 @@ impl ControlSidecar {
         raw: &[u8],
         expected_arch: ArchId,
     ) -> Result<Self, ControlBitsError> {
+        reject_duplicate_json_keys(raw).map_err(|source| ControlBitsError::Parse {
+            path: path.display().to_string(),
+            source,
+        })?;
         let sidecar: RawSidecar =
             serde_json::from_slice(raw).map_err(|source| ControlBitsError::Parse {
                 path: path.display().to_string(),
@@ -700,6 +825,34 @@ mod tests {
         assert_eq!(f.by_pc.len(), 1);
         assert_eq!(f.by_pc[&0].control.stall, 2);
         assert!(f.by_pc[&0].opcode_text.starts_with("IMAD.MOV"));
+    }
+
+    #[test]
+    fn duplicate_json_object_keys_are_rejected_before_sidecar_decode() {
+        let error = ControlSidecar::parse_for_arch(
+            Path::new("duplicate.json"),
+            br#"{"functions":{"k":[],"k":[]}}"#,
+            ArchId::Sm86,
+        )
+        .unwrap_err();
+        assert!(
+            matches!(error, ControlBitsError::Parse { source, .. } if source.to_string().contains("duplicate JSON object key"))
+        );
+    }
+
+    #[test]
+    fn bounded_control_sidecar_read_rejects_oversized_input() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("control_bits.json");
+        std::fs::write(&path, b"12345").unwrap();
+        assert!(matches!(
+            read_bounded_control_sidecar(&path, 4),
+            Err(ControlBitsError::ResourceLimit {
+                observed: 5,
+                limit: 4,
+                ..
+            })
+        ));
     }
 
     #[test]

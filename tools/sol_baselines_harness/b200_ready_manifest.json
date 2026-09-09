@@ -1,11 +1,11 @@
 {
   "schema_version": 2,
-  "captured_at_utc": "2026-05-28T04:04:44.560821+00:00",
-  "mode": "phase1-local-smoke",
+  "captured_at_utc": "2026-09-08T21:03:28.944568+00:00",
+  "mode": "phase2-b200-fanout",
   "host": {
-    "kernel": "Linux-7.0.5-arch1-1-x86_64-with-glibc2.43",
+    "kernel": "Linux-7.2.2-arch1-1-x86_64-with-glibc2.44",
     "arch": "x86_64",
-    "python_version": "3.12.12",
+    "python_version": "3.14.7",
     "hostname": "cachyos-x8664"
   },
   "required_probes": [
@@ -14,13 +14,12 @@
     "cuda_runtime",
     "device",
     "cutlass",
+    "sm_100a_compile_proof",
     "nvbit_metrics_tool",
-    "cache_replay_native_available"
+    "sm_100a_cubin_disasm"
   ],
   "required_prefer_probes": [],
   "recommended_probes": [
-    "sm_100a_compile_proof",
-    "sm_100a_cubin_disasm",
     "nsys",
     "compute_sanitizer",
     "cupti",
@@ -29,19 +28,19 @@
   "checks": {
     "nvcc": {
       "status": "ok",
-      "version": "13.2",
+      "version": "13.3",
       "command": "nvcc --version",
       "exit_code": 0
     },
     "driver": {
       "status": "ok",
-      "version": "595.71.05",
+      "version": "610.57.04",
       "command": "nvidia-smi --query-gpu=driver_version",
       "exit_code": 0
     },
     "cuda_runtime": {
       "status": "ok",
-      "version_from_nvcc": "13.2",
+      "version_from_nvcc": "13.3",
       "note": "runtime version inferred from nvcc; for an authoritative reading run cudaRuntimeGetVersion() via a host stub compile."
     },
     "device": {
@@ -51,13 +50,13 @@
       "is_sm_100_family": false,
       "is_sm_120_family": false,
       "memory_total": "24564 MiB",
-      "memory_free": "23841 MiB",
+      "memory_free": "23887 MiB",
       "phase_2_target": false
     },
     "cutlass": {
       "status": "ok",
-      "version": "4.4.2",
-      "header_path": "/home/jakeshea/3090ti_5060laptop_cross_study/3090ti_5060laptop_cross_study/solbench_baseline/cutlass/include/cutlass/version.h"
+      "version": "4.6.1",
+      "header_path": "/home/jakeshea/GPU_simulator_rebase/third_party/cutlass/include/cutlass/version.h"
     },
     "sm_100a_compile_proof": {
       "status": "ok",
@@ -75,8 +74,8 @@
             "metric_extractor.cu",
             "inject_funcs.cu"
           ],
-          "command_metric_extractor_cu": "nvcc -dc -c -std=c++11 -I/home/jakeshea/3090ti_5060laptop_cross_study/3090ti_5060laptop_cross_study/solbench_baseline/nvbit_tracer/nvbit_release/core -Xptxas -cloning=no -Xcompiler -Wall -gencode arch=compute_100a,code=sm_100a -Xcompiler -fPIC metric_extractor.cu",
-          "command_inject_funcs_cu": "nvcc -I/home/jakeshea/3090ti_5060laptop_cross_study/3090ti_5060laptop_cross_study/solbench_baseline/nvbit_tracer/nvbit_release/core -Xptxas -astoolspatch --keep-device-functions -gencode arch=compute_100a,code=sm_100a -Xcompiler -Wall -Xcompiler -fPIC -c inject_funcs.cu"
+          "command_metric_extractor_cu": "nvcc -dc -c -std=c++11 -I/home/jakeshea/GPU_simulator_rebase/tools/nvbit_tracer/nvbit_release/core -Xptxas -cloning=no -Xcompiler -Wall -gencode arch=compute_100a,code=sm_100a -Xcompiler -fPIC metric_extractor.cu",
+          "command_inject_funcs_cu": "nvcc -I/home/jakeshea/GPU_simulator_rebase/tools/nvbit_tracer/nvbit_release/core -Xptxas -astoolspatch --keep-device-functions -gencode arch=compute_100a,code=sm_100a -Xcompiler -Wall -Xcompiler -fPIC -c inject_funcs.cu"
         }
       }
     },
@@ -88,17 +87,6 @@
         "extracted_cubins_count": 2,
         "sass_found_in_cubin": "stub_sm_100a.2.sm_100a.cubin"
       }
-    },
-    "cache_replay_native_available": {
-      "status": "degraded",
-      "substatus": {
-        "import_error": "No module named 'cache_analytics_replay_native'",
-        "expected_module": "cache_analytics_replay_native",
-        "operator_opt_out_env": "SIMBENCH_ALLOW_PYTHON_REPLAY_FANOUT",
-        "operator_opt_out_engaged": true,
-        "throughput_floor_sector_lookups_per_sec": 20000000
-      },
-      "waiver_reason": "Compiled cache_analytics_replay_native extension is not built; SIMBENCH_ALLOW_PYTHON_REPLAY_FANOUT=1 downgrades this probe from required-for-fanout to required-prefer. The Python backend is the fallback and the 235-pilot < 2 h replay budget is no longer guaranteed."
     },
     "nsys": {
       "status": "ok",
@@ -114,9 +102,9 @@
     },
     "nvbit_metrics_tool": {
       "status": "ok",
-      "library_path": "/home/jakeshea/3090ti_5060laptop_cross_study/3090ti_5060laptop_cross_study/solbench_baseline/nvbit_tracer/metric_extractor/metric_extractor.so",
-      "size_bytes": 3787832,
-      "mtime_utc": "2026-05-28T04:02:38.010988+00:00",
+      "library_path": "/home/jakeshea/GPU_simulator_rebase/tools/nvbit_tracer/metric_extractor/metric_extractor.so",
+      "size_bytes": 3806008,
+      "mtime_utc": "2026-09-08T16:32:27.398813+00:00",
       "substatus": {
         "cubins_present": [
           "sm_86"
@@ -129,12 +117,13 @@
     "storage": {
       "status": "ok",
       "warn": false,
-      "path": "/home/jakeshea/3090ti_5060laptop_cross_study/3090ti_5060laptop_cross_study/solbench_baseline/scripts/baselines_harness/.harness_traces",
-      "free_gb": 518.29,
+      "path": "tools/sol_baselines_harness",
+      "free_gb": 222.02,
       "total_gb": 951.87,
       "warn_threshold_gb": 20.0
     }
   },
   "blockers": [],
+  "ready_for_local_smoke": false,
   "ready_for_phase_2": true
 }

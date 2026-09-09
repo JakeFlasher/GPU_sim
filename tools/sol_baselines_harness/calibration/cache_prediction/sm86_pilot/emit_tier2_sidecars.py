@@ -176,6 +176,7 @@ def _metric_extractor_so_contains_sm86_cubin() -> bool:
             check=False,
             capture_output=True,
             text=True,
+            errors="replace",
             timeout=30,
         )
     except (subprocess.SubprocessError, FileNotFoundError):
@@ -296,6 +297,7 @@ def _run_single_workload_tier2(
                 check=False,
                 capture_output=True,
                 text=True,
+                errors="replace",
                 timeout=timeout_s * 2,
                 env=env,
             )

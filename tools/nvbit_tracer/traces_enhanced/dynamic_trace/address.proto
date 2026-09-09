@@ -12,7 +12,7 @@ package dynamic_trace;
 // dedicated enum (not MemoryOpClass) because instruction.proto imports
 // address.proto — reusing MemoryOpClass here would be a circular import — and
 // because a space is semantically distinct from an op class. Additive per the
-// CLAUDE.md wire-extension policy; absent on pre-transition traces.
+// AGENTS.md wire-extension policy; absent on pre-transition traces.
 enum MemorySpace {
   MEMORY_SPACE_UNSPECIFIED = 0;
   MEMORY_SPACE_GLOBAL = 1;
@@ -72,7 +72,7 @@ message address {
   // MemoryOpClass as the space, as before the transition). For a global-source /
   // shared-destination instruction (LDGSTS) each address record carries its own
   // space so the identity gate applies allocation resolution to the global side
-  // only. See plans/sm86_ldgsts_atoms_operand_adjudication.md.
+  // only. See docs/STATUS.md.
   optional MemorySpace address_space = 8;
 
   // Operand-specific effective lane mask. Absent means the legacy

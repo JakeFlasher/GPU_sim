@@ -4,7 +4,7 @@
 Walks every landed baseline under ``baselines/<cat>/<slug>/<lang>/``,
 either replays the latest cached harness trace (when one exists) or
 runs the baseline fresh, then emits a JSON + Markdown aggregate report
-to ``scripts/baselines_harness/report.{json,md}``.
+to ``tools/sol_baselines_harness/report.{json,md}``.
 
 Each landed baseline contributes one row containing the slowest-
 workload ``speedup_factor``, the per-baseline ``local_sol_score``
@@ -19,8 +19,8 @@ pointer to the trace JSON used. The aggregate report carries:
   hygiene); the report refuses to write when either fails.
 
 Usage:
-    python scripts/baselines_harness/report.py
-    python scripts/baselines_harness/report.py --output-json /tmp/r.json
+    python tools/sol_baselines_harness/report.py
+    python tools/sol_baselines_harness/report.py --output-json /tmp/r.json
 """
 
 from __future__ import annotations
@@ -37,8 +37,13 @@ from typing import Any, Dict, List, Optional, Tuple
 _THIS_DIR = Path(__file__).resolve().parent
 _SCRIPTS_DIR = _THIS_DIR.parent
 REPO_ROOT = _SCRIPTS_DIR.parent
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 if str(_SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS_DIR))
+from tools.sol_baselines_harness._bootstrap import install_package_aliases
+
+install_package_aliases()
 
 from baselines_scaffold.generate import (  # noqa: E402
     DEFAULT_BENCHMARK_ROOT,
@@ -230,7 +235,10 @@ def _nvbit_metrics_summary_for_bundle(
     from baselines_harness.metric_extractor.static_sidecar import (
         join_static_sidecar,
     )
-    from baselines_harness.metric_extractor.wall_clock_join import join_bundle
+    from baselines_harness.metric_extractor.wall_clock_join import (
+        join_bundle,
+        nvbit_join_key,
+    )
 
     records, errors = parse_launches_jsonl(nvbit_path)
     ptxas_path = bundle_dir / "static" / "ptxas-v.txt"
@@ -293,39 +301,10 @@ def _nvbit_metrics_summary_for_bundle(
     joined_artifact_rows: List[Dict[str, Any]] = []
     for rec in enriched:
         cs = rec.get("cross_surface_join_key") or {}
-        # Reconstruct the full composite tuple from the NVBit record
-        # so the report-side lookup matches what the joiner used.
-        # This mirrors ``_nvbit_join_key`` in
-        # ``baselines_harness.metric_extractor.wall_clock_join`` —
-        # graph_launch_not_observed records skip the lookup (their
-        # join_key is None on the JoinedRow).
-        full_key: Optional[Tuple[Any, ...]] = None
-        if rec.get("launch_kind") != "graph_launch_not_observed":
-            demangled = cs.get("demangled_kernel_name")
-            ordinal = cs.get("kernel_ordinal_in_workload")
-            grid = cs.get("grid_xyz")
-            block = cs.get("block_xyz")
-            smem = cs.get("dynamic_smem")
-            stream = cs.get("stream_ordinal")
-            if (
-                isinstance(demangled, str)
-                and demangled
-                and ordinal is not None
-                and isinstance(grid, list)
-                and isinstance(block, list)
-                and smem is not None
-                and stream is not None
-            ):
-                full_key = (
-                    cs.get("workload_index"),
-                    cs.get("evaluator_config_hash"),
-                    demangled,
-                    int(ordinal),
-                    tuple(grid),
-                    tuple(block),
-                    int(smem),
-                    int(stream),
-                )
+        # Use the same strict key builder as the wall-clock joiner so
+        # context/stream namespace rules cannot drift between the two
+        # report paths.
+        full_key = nvbit_join_key(rec)
         wc_status = (
             wc_status_by_key.get(full_key) if full_key is not None else None
         )
@@ -348,6 +327,7 @@ def _nvbit_metrics_summary_for_bundle(
             "block_dim": rec.get("block_dim"),
             "dynamic_smem": rec.get("dynamic_smem"),
             "stream_ordinal": cs.get("stream_ordinal"),
+            "context_id": cs.get("context_id"),
             "static_sidecar": rec.get("static_sidecar"),
             "static_sidecar_join_status": rec.get(
                 "static_sidecar_join_status"
@@ -520,7 +500,11 @@ def _gather_baseline_row(
             and stored_record is not None
             and key_matches_record(current_key, stored_record)
         )
-        if identity_matches and is_passed_trace(cand_rows):
+        if (
+            identity_matches
+            and is_passed_trace(cand_rows)
+            and _trace_is_clean_full(cand_payload)
+        ):
             rows = cand_rows
             replayed_trace_path = cand_path
         elif (
@@ -558,7 +542,11 @@ def _gather_baseline_row(
             # caught the scheme mismatch.
             rows = cand_rows
             replayed_trace_path = cand_path
-        elif identity_matches and cand_rows:
+        elif (
+            identity_matches
+            and cand_rows
+            and not _trace_has_structural_failure(cand_payload)
+        ):
             # Fresh-run-failure fallback is only safe when the
             # on-disk trace's identity is verifiably current
             # (cache key still matches the freshly-computed
@@ -962,7 +950,10 @@ def _find_trace_candidate(
             payload = json.loads(bundle.read_text(encoding="utf-8"))
         except json.JSONDecodeError:
             payload = None
-        if isinstance(payload, dict):
+        rows = payload.get("rows") if isinstance(payload, dict) else None
+        if isinstance(payload, dict) and isinstance(rows, list) and all(
+            isinstance(row, dict) for row in rows
+        ):
             return (bundle, payload)
     if trace_dir is not None:
         slug = baseline_dir.parent.name
@@ -971,7 +962,13 @@ def _find_trace_candidate(
                 payload = json.loads(c.read_text(encoding="utf-8"))
             except json.JSONDecodeError:
                 continue
-            if slug in str(payload.get("baseline", "")):
+            rows = payload.get("rows") if isinstance(payload, dict) else None
+            if (
+                isinstance(payload, dict)
+                and isinstance(rows, list)
+                and all(isinstance(row, dict) for row in rows)
+                and slug in str(payload.get("baseline", ""))
+            ):
                 return (c, payload)
     return None
 
@@ -1017,7 +1014,7 @@ def _persist_fresh_trace(
     """Persist a freshly produced trace to the bundle's ``trace.json``.
 
     Trace destination is the bundle directory
-    ``scripts/baselines_harness/.harness_traces/<slug>__<lang>/trace.json``.
+    ``tools/sol_baselines_harness/.harness_traces/<slug>__<lang>/trace.json``.
     The bundle dir is created on-demand so the counter-free surfaces
     orchestrator can drop ``manifest.json`` and per-surface artifact
     subdirectories alongside it.
@@ -1235,15 +1232,59 @@ def _trace_is_clean_full(cand_payload: Dict[str, Any]) -> bool:
     the only signal available, and that already covers the
     common cases.
     """
-    gate_reasons = cand_payload.get("gate_reasons")
-    if isinstance(gate_reasons, list) and gate_reasons:
-        return False
-    expected_count = cand_payload.get("expected_workload_count")
-    if isinstance(expected_count, int) and expected_count > 0:
-        rows = cand_payload.get("rows") or []
-        if not isinstance(rows, list) or len(rows) != expected_count:
+    if "gate_reasons" in cand_payload:
+        gate_reasons = cand_payload["gate_reasons"]
+        if not isinstance(gate_reasons, list) or gate_reasons:
             return False
+    if "expected_workload_count" not in cand_payload:
+        return True
+    expected_count = cand_payload["expected_workload_count"]
+    if type(expected_count) is not int or expected_count < 0:
+        return False
+    rows = cand_payload.get("rows") or []
+    if not isinstance(rows, list):
+        return False
+    if expected_count > 0 and len(rows) != expected_count:
+        return False
+    if expected_count == 0 and rows:
+        return False
     return True
+
+
+def _trace_has_structural_failure(cand_payload: Dict[str, Any]) -> bool:
+    """Return True when gate reasons indicate incomplete evaluator output.
+
+    A complete trace with honest non-PASSED rows remains useful fallback
+    evidence. Parse errors, evaluator failures, zero rows, and row-count
+    mismatches must never be promoted after a failed fresh run.
+    """
+    if "gate_reasons" not in cand_payload:
+        reasons = []
+    else:
+        reasons = cand_payload["gate_reasons"]
+    if not isinstance(reasons, list):
+        return True
+    for reason in reasons:
+        if not isinstance(reason, str):
+            return True
+        if (
+            reason.startswith("evaluator exited")
+            or reason.startswith("row count mismatch")
+            or reason == "zero rows parsed"
+            or "unparseable JSONL" in reason
+        ):
+            return True
+    if "expected_workload_count" in cand_payload:
+        expected_count = cand_payload["expected_workload_count"]
+        if type(expected_count) is not int or expected_count < 0:
+            return True
+        if expected_count > 0:
+            rows = cand_payload.get("rows")
+            if not isinstance(rows, list) or len(rows) != expected_count:
+                return True
+        elif cand_payload.get("rows"):
+            return True
+    return False
 
 
 def _manifest_identity_matches_current(
@@ -2025,7 +2066,7 @@ def _persist_fresh_manifest(
     builder.native_env_hash = fresh_native_env_hash
     builder.native_env_components = dict(components)
     builder.workload_subset = []
-    builder.workload_selection_policy = "all"
+    builder.workload_selection_policy = "full-fanout"
     builder.config_overrides = {}
     builder.eval_timeout_s = float(eval_timeout_s)
     builder.reference_timing_enabled = True
@@ -2060,9 +2101,7 @@ def _stamp_cache_record(
 
 
 _REPORT_EXCLUSION_LEDGER_PATH = (
-    REPO_ROOT
-    / "scripts"
-    / "baselines_harness"
+    _THIS_DIR
     / "tests"
     / "fixtures"
     / "evidence_consistency_exclusions.json"
@@ -2217,7 +2256,7 @@ def _render_markdown(report: Dict[str, Any]) -> str:
         f"**{report['local_arch_yaml_present']}**. The canonical "
         f"`local_sol_score` column is the per-workload SOLAR Stage 4 "
         f"score for slugs covered by a builder in "
-        f"`scripts/baselines_harness/solar_analysis.py:_REGISTRY` AND "
+        f"`tools/sol_baselines_harness/solar_analysis.py:_REGISTRY` AND "
         f"whose precision token has a matching `MAC_per_cycle_*` key "
         f"in the resolved arch yaml; slugs that fail either check "
         f"honestly emit `{UNKNOWN_T_SOL}`. The "
@@ -2316,7 +2355,7 @@ def _render_markdown(report: Dict[str, Any]) -> str:
 
 def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="scripts/baselines_harness/report.py",
+        prog="tools/sol_baselines_harness/report.py",
         description=(
             "Walk every landed baseline; emit a JSON + Markdown "
             "aggregate report with slowest-workload speedups, "
@@ -2349,19 +2388,19 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--deferred-ledger",
         type=Path,
-        default=REPO_ROOT / "scripts" / "baselines_harness" / "deferred.json",
+        default=_THIS_DIR / "deferred.json",
         help="Path to the deferred.json ledger.",
     )
     parser.add_argument(
         "--output-json",
         type=Path,
-        default=REPO_ROOT / "scripts" / "baselines_harness" / "report.json",
+        default=_THIS_DIR / "report.json",
         help="JSON output path.",
     )
     parser.add_argument(
         "--output-md",
         type=Path,
-        default=REPO_ROOT / "scripts" / "baselines_harness" / "report.md",
+        default=_THIS_DIR / "report.md",
         help="Markdown output path.",
     )
     parser.add_argument(
@@ -2376,7 +2415,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--cache-file",
         type=Path,
-        default=REPO_ROOT / "scripts" / "baselines_harness" / ".harness_cache.json",
+        default=_THIS_DIR / ".harness_cache.json",
         help=(
             "Per-trace cache index used to gate replay. Stores a "
             "CacheKey serialisation for each trace path that the "
@@ -2436,7 +2475,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             sys.stderr.write(f"  - {slug}\n")
         sys.stderr.write(
             "Re-run the harness for each affected baseline (e.g. "
-            "python scripts/baselines_harness/run.py --baseline "
+            "python tools/sol_baselines_harness/run.py --baseline "
             "baselines/<cat>/<slug>/<lang>) before regenerating "
             "the aggregate report.\n"
         )

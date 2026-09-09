@@ -29,3 +29,16 @@ status. Pilots in the deferred ledger are NOT committed under
 ``baselines/``; they remain in a staging area or in the deferred
 ledger only.
 """
+
+import sys as _sys
+
+_sys.modules.setdefault("sol_baselines_harness", _sys.modules[__name__])
+_sys.modules.setdefault("baselines_harness", _sys.modules[__name__])
+
+# Keep the identity-bearing module shared across qualified and compatibility
+# imports. Without this registration, ``baselines_harness.native_env`` could
+# be loaded a second time and produce a distinct exception class.
+from . import native_env as _native_env
+
+_sys.modules.setdefault("sol_baselines_harness.native_env", _native_env)
+_sys.modules.setdefault("baselines_harness.native_env", _native_env)

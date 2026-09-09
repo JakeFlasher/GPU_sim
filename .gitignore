@@ -24,6 +24,7 @@ sim/trace/pbgen/target/
 
 # NVBit/CUDA build outputs
 tools/nvbit_tracer/tracer_tool/*.o
+tools/nvbit_tracer/tracer_tool/*.d
 tools/nvbit_tracer/tracer_tool/*.so
 tools/nvbit_tracer/tracer_tool/trace_printer
 tools/nvbit_tracer/tracer_tool/tests/*_test

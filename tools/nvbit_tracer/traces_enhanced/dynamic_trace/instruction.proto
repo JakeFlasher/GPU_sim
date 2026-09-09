@@ -10,7 +10,7 @@ import "address.proto";
 // contract violation. The nine original plan classes follow; the
 // tenth value MEMORY_OP_CLASS_TMEM was added for Blackwell
 // (sm_100) tensor-memory accesses via the `tcgen05.{ld,st}`
-// family (mnemonics `LDT` / `STT`). Per the CLAUDE.md wire-
+// family (mnemonics `LDT` / `STT`). Per the AGENTS.md wire-
 // extension policy this is an additive enum extension: producer
 // emits the new value, consumer accepts it; old readers that
 // only knew 0-9 either route the new value through their
@@ -167,7 +167,7 @@ message instruction {
   // cache operator decide whether this access touches the modeled
   // L1 line state".
   //
-  // Per CLAUDE.md "Two-Device Local Development Model" and
+  // Per AGENTS.md "Two-Device Local Development Model" and
   // BL-20260505, the classifier records the actual SASS encoding
   // (Ampere LDG.E.CA -> LDG_E_CA; Blackwell LDG.E.STRONG.SM ->
   // LDG_E_STRONG_SM), NOT the semantic equivalent class. The
@@ -207,7 +207,7 @@ message instruction {
 // it as `predictor_l1_sass_provenance_missing` (the tracer did
 // not classify the cache operator for this instruction).
 //
-// Per CLAUDE.md wire-extension policy, this is an additive enum
+// Per AGENTS.md wire-extension policy, this is an additive enum
 // extension: producer emits the new values, consumer accepts them;
 // old readers that only know the enum entries at producer-side
 // build time route unknown values through their catch-all path.

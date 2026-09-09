@@ -106,7 +106,6 @@ from pathlib import Path
 from typing import Any, Callable, Dict, Optional
 
 import tempfile
-import yaml  # type: ignore
 
 _THIS_DIR = Path(__file__).resolve().parent
 _SCRIPTS_DIR = _THIS_DIR.parent
@@ -164,6 +163,10 @@ def _arch_supports_precision(
     if precision_token not in ALLOWED_PRECISION_TOKENS:
         return False
     if not arch_yaml.is_file():
+        return False
+    try:
+        import yaml  # type: ignore
+    except ImportError:
         return False
     try:
         arch = yaml.safe_load(arch_yaml.read_text(encoding="utf-8"))
@@ -1160,6 +1163,10 @@ def predict_t_sol_ms(
         arch_yaml if arch_yaml is not None else _resolved_local_arch_yaml()
     )
     if resolved_yaml is None or not resolved_yaml.is_file():
+        return None
+    try:
+        import yaml  # type: ignore
+    except ImportError:
         return None
     if not _arch_supports_precision(precision, resolved_yaml):
         return None

@@ -115,14 +115,6 @@ class CrossCheckReport:
         return all(v.verdict in ("pass", "skip") for v in self.verdicts)
 
 
-def _sha256_file(path: Path) -> str:
-    h = hashlib.sha256()
-    with path.open("rb") as fh:
-        for chunk in iter(lambda: fh.read(8192), b""):
-            h.update(chunk)
-    return h.hexdigest()
-
-
 def _sha256_bytes(data: bytes) -> str:
     h = hashlib.sha256()
     h.update(data)
@@ -135,11 +127,12 @@ def scan_static_sass(sass_path: Path) -> StaticScanResult:
     or unreadable file raises ``FileNotFoundError``; an empty file
     contributes zero to every bucket.
     """
-    text = sass_path.read_text(encoding="utf-8", errors="replace")
+    raw = sass_path.read_bytes()
+    text = raw.decode("utf-8", errors="replace")
     result = StaticScanResult(
         source_path=str(sass_path),
-        source_sha256=_sha256_file(sass_path),
-        source_bytes=sass_path.stat().st_size,
+        source_sha256=_sha256_bytes(raw),
+        source_bytes=len(raw),
     )
     for bucket, patterns in _BUCKET_MNEMONIC_PATTERNS.items():
         matches: List[str] = []
@@ -169,32 +162,50 @@ def aggregate_dynamic_buckets(
     across every record in a ``launches.jsonl`` bundle for the
     Blackwell-specific instruction buckets.
     """
+    try:
+        raw = launches_path.read_bytes()
+    except OSError as exc:
+        raise ValueError(
+            f"{launches_path}: cannot read launches.jsonl: {exc}"
+        ) from exc
     result = DynamicAggregateResult(
         bundle_path=str(launches_path),
-        bundle_sha256=_sha256_file(launches_path),
+        bundle_sha256=_sha256_bytes(raw),
         records_seen=0,
     )
     # Initialise the bucket totals so a bundle with zero records
     # produces explicit zeros rather than a missing key.
     for bucket in _ARCH_BLACKWELL_ONLY_BUCKETS:
         result.bucket_sums[bucket] = 0
-    with launches_path.open("r", encoding="utf-8") as fh:
-        for raw_line in fh:
-            line = raw_line.strip()
-            if not line:
-                continue
-            try:
-                rec = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            result.records_seen += 1
-            hist = rec.get("instruction_class_histogram")
-            if not isinstance(hist, dict):
-                continue
-            for bucket in _ARCH_BLACKWELL_ONLY_BUCKETS:
-                val = hist.get(bucket, 0)
-                if isinstance(val, int) and not isinstance(val, bool):
-                    result.bucket_sums[bucket] += val
+    try:
+        lines = raw.decode("utf-8").splitlines()
+    except UnicodeDecodeError as exc:
+        raise ValueError(
+            f"{launches_path}: launches.jsonl is not valid UTF-8"
+        ) from exc
+    for line_number, raw_line in enumerate(lines, 1):
+        line = raw_line.strip()
+        if not line:
+            continue
+        try:
+            rec = json.loads(line)
+        except json.JSONDecodeError as exc:
+            raise ValueError(
+                f"{launches_path}:{line_number}: malformed JSONL record: "
+                f"{exc.msg}"
+            ) from exc
+        if not isinstance(rec, dict):
+            raise ValueError(
+                f"{launches_path}:{line_number}: JSONL record must be an object"
+            )
+        result.records_seen += 1
+        hist = rec.get("instruction_class_histogram")
+        if not isinstance(hist, dict):
+            continue
+        for bucket in _ARCH_BLACKWELL_ONLY_BUCKETS:
+            val = hist.get(bucket, 0)
+            if isinstance(val, int) and not isinstance(val, bool):
+                result.bucket_sums[bucket] += val
     return result
 
 

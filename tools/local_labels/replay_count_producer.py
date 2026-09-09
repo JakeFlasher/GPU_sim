@@ -128,6 +128,7 @@ _KIND_STORE = 2
 
 _SECTOR_BYTES = 32
 _TEX_SURFACE_WAVEFRONTS_PER_INST = 4
+_UNSUPPORTED_MEMORY_PATH_MAX_BYTES = 16 * 1024 * 1024
 
 DEFAULT_EMISSIONS_OUT = "data/local_labels/replay_count_emissions_sm_86.json"
 
@@ -154,6 +155,92 @@ class ClosedIdentityError(RuntimeError):
     def __init__(self, typed_reason: str, detail: str) -> None:
         super().__init__(detail)
         self.typed_reason = typed_reason
+
+
+def _reject_duplicate_json_pairs(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    value: dict[str, object] = {}
+    for key, item in pairs:
+        if key in value:
+            raise ValueError(f"duplicate JSON key {key!r}")
+        value[key] = item
+    return value
+
+
+def _load_unsupported_memory_path(path: Path) -> list[dict]:
+    """Load the exclusion sidecar without duplicate-key or size fallbacks."""
+    try:
+        with path.open("rb") as stream:
+            raw = stream.read(_UNSUPPORTED_MEMORY_PATH_MAX_BYTES + 1)
+    except OSError as exc:
+        raise TraceSupportInsufficientError(
+            f"unsupported-memory sidecar read failed: {exc}"
+        ) from exc
+    if len(raw) > _UNSUPPORTED_MEMORY_PATH_MAX_BYTES:
+        raise TraceSupportInsufficientError(
+            f"unsupported-memory sidecar exceeds {_UNSUPPORTED_MEMORY_PATH_MAX_BYTES} bytes"
+        )
+    try:
+        value = json.loads(raw, object_pairs_hook=_reject_duplicate_json_pairs)
+    except (UnicodeDecodeError, json.JSONDecodeError, RecursionError, ValueError) as exc:
+        raise TraceSupportInsufficientError(
+            f"unsupported-memory sidecar is malformed: {exc}"
+        ) from exc
+    if not isinstance(value, list) or any(not isinstance(entry, dict) for entry in value):
+        raise TraceSupportInsufficientError(
+            "unsupported-memory sidecar must be a JSON array of objects"
+        )
+    return value
+
+
+def _scope_exclusion_entries(
+    entries: list[dict], selected_function_id: int | None,
+) -> list[dict]:
+    """Select exclusions by the tracer's function-unique identity."""
+    if not entries:
+        return []
+    if selected_function_id is None or selected_function_id <= 0:
+        raise TraceSupportInsufficientError(
+            "unsupported-memory sidecar cannot be scoped to one function"
+        )
+    selected = selected_function_id
+    scoped: list[dict] = []
+    for entry in entries:
+        raw_id = entry.get("kernel_unique_id")
+        if type(raw_id) is not int or raw_id <= 0:
+            raise TraceSupportInsufficientError(
+                "unsupported-memory sidecar has an invalid kernel_unique_id"
+            )
+        if type(entry.get("schema_version")) is not int or entry["schema_version"] != 1:
+            raise TraceSupportInsufficientError(
+                "unsupported-memory sidecar has an unsupported schema_version"
+            )
+        if entry.get("typed_reason") != "unsupported_memory_path":
+            raise TraceSupportInsufficientError(
+                "unsupported-memory sidecar has an invalid typed_reason"
+            )
+        for field in ("device", "slug", "excluded_op_class"):
+            if not isinstance(entry.get(field), str) or not entry[field]:
+                raise TraceSupportInsufficientError(
+                    f"unsupported-memory sidecar has an invalid {field}"
+                )
+        if "path_resolved" in entry and type(entry["path_resolved"]) is not bool:
+            raise TraceSupportInsufficientError(
+                "unsupported-memory sidecar has an invalid path_resolved"
+            )
+        for field, minimum in (("instruction_pc", 0), ("count", 1)):
+            value = entry.get(field)
+            if type(value) is not int or value < minimum:
+                raise TraceSupportInsufficientError(
+                    f"unsupported-memory sidecar has an invalid {field}"
+                )
+        function_id = raw_id
+        if function_id == selected:
+            scoped.append(entry)
+    if not scoped:
+        raise TraceSupportInsufficientError(
+            f"unsupported-memory sidecar has no entries for function {selected}"
+        )
+    return scoped
 
 
 def assert_exact_support(trace_dir: Path, sidecar: dict) -> None:
@@ -281,12 +368,14 @@ def split_atomic_counts(
         count = int(entry.get("count", 0))
         if not kernel:
             return None
-        candidate_maps = [
-            pcs
-            for name, maps in opcode_by_function_pc.items()
-            if kernel in name
-            for pcs in maps
-        ]
+        # The sidecar's ``slug`` is the exact function symbol used by the
+        # tracer.  A substring match is unsafe here: symbols such as
+        # ``foo`` and ``foo_variant`` can coexist in one cubin, and a missing
+        # ``foo`` entry would otherwise silently borrow ``foo_variant``'s
+        # opcode family at the same PC.  That turns an unresolved ATOM/RED
+        # attribution into a scored (but wrong) metric.  Require an exact
+        # symbol key and fail closed when the symbol is absent.
+        candidate_maps = opcode_by_function_pc.get(kernel, [])
         families = {
             _atomic_family(pcs[pc])
             for pcs in candidate_maps if pc in pcs
@@ -430,7 +519,7 @@ def walk_trace_dir(trace_dir: Path) -> dict:
 
     # Restrict to the lowest (device, stream, kernel) launch — the one the
     # label measured — via the shared launch-scoping helper.
-    first_launch_root, first_kernel_id = first_launch_dir(trace_dir)
+    first_launch_root, _first_kernel_id = first_launch_dir(trace_dir)
     total = {
         "inst_records": 0,
         "requests": defaultdict(int),
@@ -442,6 +531,7 @@ def walk_trace_dir(trace_dir: Path) -> dict:
         "reconstruction_failures": 0,
         "threadblock_files": 0,
     }
+    selected_function_id: int | None = None
     for pb_path in sorted(first_launch_root.rglob("*.pb")):
         tb = threadblock_pb2.threadblock()
         tb.ParseFromString(pb_path.read_bytes())
@@ -453,6 +543,16 @@ def walk_trace_dir(trace_dir: Path) -> dict:
         total["misaligned_ld"] += agg["misaligned_ld"]
         total["misaligned_st"] += agg["misaligned_st"]
         total["reconstruction_failures"] += agg["reconstruction_failures"]
+        for warp in tb.warps.values():
+            for inst in warp.instructions:
+                function_id = int(inst.function_unique_id)
+                if function_id > 0:
+                    if selected_function_id is None:
+                        selected_function_id = function_id
+                    elif function_id != selected_function_id:
+                        raise TraceSupportInsufficientError(
+                            "selected launch carries multiple function_unique_id values"
+                        )
         for key, n in agg["requests"].items():
             total["requests"][key] += n
         for kind, n in agg["local_word_requests"].items():
@@ -461,17 +561,12 @@ def walk_trace_dir(trace_dir: Path) -> dict:
     entries_by_class: dict[str, list[dict]] = defaultdict(list)
     ex_path = trace_dir / "extra_info" / "unsupported_memory_path.json"
     if ex_path.is_file():
-        all_entries = json.loads(ex_path.read_text(encoding="utf-8"))
-        # Launch-scope the exclusion entries too when their
-        # kernel_unique_id matches the selected launch; entries with a
-        # foreign id belong to launches the label did not measure.
-        scoped = [e for e in all_entries
-                  if int(e.get("kernel_unique_id", -1)) == first_kernel_id]
-        if not scoped and all_entries:
-            # Conservative fallback: ids do not align with the launch
-            # tree; keep everything (over-counting only ever routes to
-            # typed paths, never silent scores).
-            scoped = all_entries
+        all_entries = _load_unsupported_memory_path(ex_path)
+        # Exclusion entries identify the static function, not the launch
+        # directory.  Scope by the function_unique_id carried by the selected
+        # launch's dynamic instructions; comparing against kernel_<id> would
+        # accidentally include every entry on the mismatch fallback.
+        scoped = _scope_exclusion_entries(all_entries, selected_function_id)
         for entry in scoped:
             cls = entry.get("excluded_op_class")
             pc = int(entry.get("instruction_pc", -1))
@@ -800,7 +895,11 @@ def emit_for_cell(cell: dict, contract: dict) -> dict:
     except TraceSupportInsufficientError as exc:
         record["cell_status"] = _typed(exc.typed_reason, str(exc))
         return record
-    walk = walk_trace_dir(trace_dir)
+    try:
+        walk = walk_trace_dir(trace_dir)
+    except TraceSupportInsufficientError as exc:
+        record["cell_status"] = _typed(exc.typed_reason, str(exc))
+        return record
     opcode_by_pc = None
     if walk.get("excluded_op_class_pc_counts", {}).get("ATOMIC"):
         binary = _binary_for_cell(cell)

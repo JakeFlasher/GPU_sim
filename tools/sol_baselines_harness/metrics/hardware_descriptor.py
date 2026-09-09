@@ -20,9 +20,8 @@ encodable, that's a model-redesign event, not a one-hot append.
 
 This module is the input-contract anchor: the pooled head, when
 trained, consumes only the fields declared here. The structural
-guard tests in
-``scripts/baselines_harness/tests/test_hardware_descriptor.py``
-lock the dataclass shape so the contract cannot drift opaquely.
+contract is kept local to this module so the dataclass shape cannot
+drift opaquely.
 
 The ``from_cache_geometry`` adapter pulls the six values from the
 output of

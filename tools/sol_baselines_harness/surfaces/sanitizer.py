@@ -82,6 +82,7 @@ class SanitizerSurface(Surface):
                 ["compute-sanitizer", "--version"],
                 capture_output=True,
                 text=True,
+                errors="replace",
                 check=False,
                 timeout=5.0,
             )
@@ -224,6 +225,7 @@ class SanitizerSurface(Surface):
                     argv,
                     capture_output=True,
                     text=True,
+                    errors="replace",
                     check=False,
                     env=subprocess_env,
                     timeout=self.per_tool_timeout_s,

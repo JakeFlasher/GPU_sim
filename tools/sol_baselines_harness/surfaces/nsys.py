@@ -78,6 +78,7 @@ class NsysSurface(Surface):
                 ["nsys", "--version"],
                 capture_output=True,
                 text=True,
+                errors="replace",
                 check=False,
                 timeout=5.0,
             )
@@ -157,6 +158,7 @@ class NsysSurface(Surface):
                 argv,
                 capture_output=True,
                 text=True,
+                errors="replace",
                 check=False,
                 env=subprocess_env,
                 timeout=self.eval_timeout_s,

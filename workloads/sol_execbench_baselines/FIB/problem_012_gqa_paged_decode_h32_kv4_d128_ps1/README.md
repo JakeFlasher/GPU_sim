@@ -80,7 +80,7 @@ baselines/FIB/problem_012_gqa_paged_decode_h32_kv4_d128_ps1/
 ```
 
 Smoke-correctness gate:
-`scripts/baselines_harness/tests/test_problem_012_gqa_paged_decode_smoke_v1.py`
+`tools/sol_baselines_harness/tests/test_problem_012_gqa_paged_decode_smoke_v1.py`
 (2 tests; compiles the kernel + matches the reference
 within `max_atol=0.01` / `matched_ratio>=0.99` on
 workload-1 axes + the empty-batch boundary).

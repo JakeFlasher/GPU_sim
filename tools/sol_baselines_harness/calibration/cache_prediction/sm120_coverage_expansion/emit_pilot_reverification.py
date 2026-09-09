@@ -239,6 +239,7 @@ def _run_sol_execbench(
             check=False,
             capture_output=True,
             text=True,
+            errors="replace",
             timeout=timeout_s * 4,
             env=env,
         )

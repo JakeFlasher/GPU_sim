@@ -1,8 +1,8 @@
 """Stage a Pydantic-compatible copy of a benchmark directory.
 
-The upstream ``sol-execbench`` evaluator constructs ``Definition`` from
+The upstream ``tools/sol_execbench`` evaluator constructs ``Definition`` from
 ``definition.json`` via plain ``Definition(**dict)``. The downloaded
-``sol-execbench/data/benchmark/*/*/definition.json`` files set
+``tools/sol_execbench/data/benchmark/*/*/definition.json`` files set
 ``"hf_id": ""`` (and similarly for ``op_type`` /
 ``custom_inputs_entrypoint``) for problems without a HuggingFace model
 lineage, but ``sol_execbench/core/data/definition.py`` declares those
@@ -17,7 +17,7 @@ run the evaluator against the normalised copy.
 Conventions:
 
 - Source of truth for the canonical benchmark path remains
-  ``sol-execbench/data/benchmark/<subset>/<NNN_name>/``. Parent
+  ``tools/sol_execbench/data/benchmark/<subset>/<NNN_name>/``. Parent
   ``README.md`` files cite this path, NOT the staged one (architecture-
   portability discipline; staging is harness-internal).
 - Staging root defaults to
@@ -29,7 +29,7 @@ Conventions:
 - The stager is idempotent: re-running with the same source produces
   the same output.
 
-Reference for the bug: ``sol-execbench/src/sol_execbench/cli/main.py``
+Reference for the bug: ``tools/sol_execbench/src/sol_execbench/cli/main.py``
 calls ``Definition(**json.loads(path.read_text()))`` without a
 normaliser; the downloaded data is incompatible.
 """
@@ -89,7 +89,7 @@ def stage_benchmark(
     if not canonical_dir.is_dir():
         raise FileNotFoundError(
             f"Canonical benchmark directory not found at {canonical_dir}. "
-            f"Run ./sol-execbench/scripts/download_data.sh to populate the "
+            f"Run ./tools/sol_execbench/scripts/download_data.sh to populate the "
             f"benchmark tree."
         )
     canonical_dir = canonical_dir.resolve()

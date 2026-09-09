@@ -428,6 +428,7 @@ def live_tier2_harvest_fn(
             check=False,
             capture_output=True,
             text=True,
+            errors="replace",
             timeout=timeout_s * 2,
             env=env,
         )

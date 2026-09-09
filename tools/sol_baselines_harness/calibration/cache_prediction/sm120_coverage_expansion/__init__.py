@@ -13,7 +13,7 @@ triple (`isotonic_params_sm120.toml`,
 baseline. Modules in this subpackage READ those artifacts to
 build the ladder's diagnostics and env inputs; they do NOT
 mutate any of them. Immutability is gated by
-`scripts/baselines_harness/tests/test_baseline_artifacts_immutability.py`.
+`tools/sol_baselines_harness/tests/test_baseline_artifacts_immutability.py`.
 
 Importing this package does NOT touch disk, run NCU, or launch
 any subprocess; emission is invoked explicitly through

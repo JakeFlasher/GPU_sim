@@ -185,6 +185,7 @@ def _run_binary_and_parse(
             cwd=str(binary.parent),
             capture_output=True,
             text=True,
+            errors="replace",
             check=False,
             timeout=60,
         )

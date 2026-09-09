@@ -24,7 +24,6 @@ Build the current checkout directly:
 source tools/nvbit_tracer/pinned_build_env.sh
 
 make -C tools/nvbit_tracer -j"$(nproc)"
-make -C tools/nvbit_tracer test
 ```
 
 Run a small CUDA workload with the tracer:

@@ -5,7 +5,7 @@ arch derivation, default bundle-dir resolution for fresh emissions,
 and the overwrite-into-locked-sm_120-bundle guard.
 
 Implements the DEC-B-RESOLVED sibling-dir layout documented at
-`scripts/baselines_harness/calibration/cache_prediction/
+`tools/sol_baselines_harness/calibration/cache_prediction/
 coverage_expansion_trace_layout_contract.md`.
 
 Three accepted bundle-name forms:
@@ -47,7 +47,7 @@ BUNDLE_NAME_RE: Final[re.Pattern] = re.compile(
     # preserves uppercase (e.g. ``problem_079_ImageNet_83``). The canonical
     # form never contains ``.`` / ``-`` (those are truncated away upstream
     # by sm86_port_scope.canonical_slug), so the bundle name stays parseable.
-    r"^(?P<slug>problem_\d+_[A-Za-z0-9_]+)"
+    r"^(?P<slug>problem_[0-9]+_[A-Za-z0-9_]+)"
     r"__(?P<lang>cuda_cpp|cutlass)"
     # Optional arch suffix, with an optional ``_cov`` coverage-variant
     # marker: the design contract emits a fresh ``…__sm86_cov`` provenance-valid bundle for
@@ -88,11 +88,14 @@ def parse_bundle_name(
     name: str,
 ) -> Optional[Tuple[str, str, Optional[str]]]:
     """Return ``(slug, language, arch_suffix_or_None)`` or ``None`` if
-    the name does not match the contract regex."""
+    the name does not match the contract regex. Accepted underscore spellings
+    normalize to the same ``sm86`` / ``sm120`` identity as manifest hosts."""
     m = BUNDLE_NAME_RE.match(name)
     if m is None:
         return None
-    return (m.group("slug"), m.group("lang"), m.group("arch"))
+    suffix = m.group("arch")
+    suffix = {"sm_86": "sm86", "sm_120": "sm120"}.get(suffix, suffix)
+    return (m.group("slug"), m.group("lang"), suffix)
 
 
 # host.kind -> arch_suffix for the default bundle-dir resolver.
@@ -147,6 +150,16 @@ def default_bundle_dir(
     return traces_root / f"{slug}__{language}__{suffix}"
 
 
+def _manifest_host_kind(manifest: object) -> Optional[str]:
+    if not isinstance(manifest, dict):
+        return None
+    host = manifest.get("host")
+    if not isinstance(host, dict):
+        return None
+    kind = host.get("kind")
+    return kind if isinstance(kind, str) else None
+
+
 def assert_no_sm120_overwrite(
     bundle_dir: Path, host_kind: Optional[str]
 ) -> None:
@@ -185,7 +198,7 @@ def assert_no_sm120_overwrite(
         m = json.loads(manifest_path.read_text())
     except Exception:
         return
-    existing_kind = (m.get("host", {}) or {}).get("kind")
+    existing_kind = _manifest_host_kind(m)
     if existing_kind == "local_sm_120":
         suggested = bundle_dir.parent / f"{bundle_dir.name}__sm86"
         raise TraceLayoutViolation(
@@ -237,7 +250,7 @@ def evidence_key_for_bundle(
 
     manifest_arch: Optional[str] = None
     if manifest_dict is not None:
-        host_kind = (manifest_dict.get("host", {}) or {}).get("kind")
+        host_kind = _manifest_host_kind(manifest_dict)
         if host_kind == "local_sm_8_6":
             manifest_arch = "sm86"
         elif host_kind == "local_sm_120":
@@ -273,10 +286,18 @@ def effective_arch_for_bundle(
         return None
     _slug, _lang, suffix = parsed
     if suffix is not None:
+        if manifest_dict is not None:
+            host_kind = _manifest_host_kind(manifest_dict)
+            manifest_arch = {
+                "local_sm_8_6": "sm86",
+                "local_sm_120": "sm120",
+            }.get(host_kind)
+            if manifest_arch is not None and manifest_arch != suffix:
+                return None
         return suffix
     if manifest_dict is None:
         return None
-    host_kind = (manifest_dict.get("host", {}) or {}).get("kind")
+    host_kind = _manifest_host_kind(manifest_dict)
     if host_kind == "local_sm_8_6":
         return "sm86"
     if host_kind == "local_sm_120":

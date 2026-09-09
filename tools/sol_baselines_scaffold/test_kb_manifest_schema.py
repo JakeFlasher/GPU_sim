@@ -8,9 +8,18 @@ import sqlite3
 import sys
 from pathlib import Path
 
+import pytest
+
 
 ROOT = Path(__file__).resolve().parents[2]
 KB = ROOT / "scripts/kb"
+pytestmark = pytest.mark.skipif(
+    not all(
+        path.is_file()
+        for path in (KB / "route_query.py", KB / "build_manifest.py")
+    ),
+    reason="optional KB manifest sources are unavailable",
+)
 
 
 def _load_router():

@@ -56,7 +56,7 @@ use sim_trace::reader::{
     PreflightedMemoryAccess, preflight_memory_access, project_effective_data_bytes,
     project_shared_bank_wavefronts_32x4,
 };
-use sim_trace::{KernelLoc, TraceDir, TraceError, kernel_grid};
+use sim_trace::{KernelLoc, TraceDir, TraceError, TraceLineage, kernel_grid};
 #[cfg(feature = "campaign")]
 use sim_trace::{
     LosslessFullProvenance, TraceSamplingMethod, TraceSamplingSidecar, WaveSegmentSubsetProvenance,
@@ -74,9 +74,10 @@ use crate::evidence::AdmittedLaunchEvidence;
 use crate::issue::{
     AccessKind, AsyncCopyCohortDescriptor, AsyncCopyCohortReplay, AsyncCopyCohortSpan,
     AsyncInstrumentationOrderDiagnostics, BlockReplay, InstrumentationOrderAnchor, IssueError,
-    IssueModelParams, MemoryAdmissionCandidate, MemoryServiceCandidate, ReplayInst,
-    SharedMemoryResidency, SmSimResult, TailFlags, WarpReplay, simulate_sm_with_residency,
-    validate_memory_admission_candidates, validate_memory_service_candidates,
+    IssueModelParams, IssueResourceSource, MemoryAdmissionCandidate, MemoryServiceCandidate,
+    ReplayInst, SharedMemoryResidency, SmSimResult, TailFlags, WarpReplay,
+    simulate_sm_with_residency, validate_memory_admission_candidates,
+    validate_memory_service_candidates,
 };
 use crate::program::{FunctionSchedule, OpClass};
 use crate::system::{
@@ -739,6 +740,7 @@ struct FoldedKernelReplay {
     diagnostic_last_issue_cycles: u64,
     last_processed_system_event_time: Option<u64>,
     terminal_modeled_event_time: Option<u64>,
+    sm_active_terminal_event_time: Option<u64>,
     l1: Option<L1Counters>,
     l2: Option<L2Counters>,
     l2_by_source: Option<L2SourceSplit>,
@@ -832,6 +834,32 @@ pub struct FullKernelReplayResult {
     replay: FoldedKernelReplay,
 }
 
+/// A separate, architecture-scoped GPC observation frontier.  The underlying
+/// modeled event frontier remains available as `lower_bound_cycles`; this
+/// projection adds only the independently measured SM86 front-end/semaphore
+/// envelope and never consumes an NCU target or the timing crosswalk.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GpcObservationFrontier {
+    pub lower_bound_cycles: u64,
+    pub envelope_cycles: u64,
+    pub grid_blocks: u64,
+    pub grid_log2: u32,
+    pub cycles: u64,
+}
+
+/// SM-domain physical observation frontier. The replay's issue and terminal
+/// timestamps remain the unadjusted modeled lower bounds; this explicit
+/// projection adds only the independently measured SM-active observation
+/// boundary and retains both values for auditability.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SmActiveObservationFrontier {
+    pub issue_lower_bound_cycles: u64,
+    pub issue_cycles: u64,
+    pub terminal_lower_bound_cycles: Option<u64>,
+    pub terminal_cycles: Option<u64>,
+    pub envelope_cycles: u64,
+}
+
 impl FullKernelReplayResult {
     pub fn coverage(&self) -> &FullLaunchCoverage {
         &self.coverage
@@ -861,9 +889,18 @@ impl FullKernelReplayResult {
         &self.replay.per_sm
     }
 
-    /// Maximum per-SM issue frontier (`last local issue timestamp + 1`). This is
-    /// an issue-only diagnostic, not an NCU cycle prediction.
+    /// Maximum per-SM issue frontier (`last local issue timestamp + 1`). This
+    /// is the unadjusted causal scheduler/event lower bound. Consumers that
+    /// need the silicon `sm__cycles_active` observation domain must use the
+    /// explicit [`Self::sm_active_observation_frontier`] projection.
     pub fn diagnostic_last_issue_cycles(&self) -> u64 {
+        self.replay.diagnostic_last_issue_cycles
+    }
+
+    /// Unadjusted issue frontier used by causal replay diagnostics. The value
+    /// is kept separate from the architecture-scoped observation projection;
+    /// it is never a hardware target or a fitted correction.
+    pub fn modeled_issue_lower_bound_cycles(&self) -> u64 {
         self.replay.diagnostic_last_issue_cycles
     }
 
@@ -874,12 +911,83 @@ impl FullKernelReplayResult {
     }
 
     /// Maximum timestamp covered by the modeled event set: the checked issue
-    /// frontier (`last local issue timestamp + 1`) and any successfully processed
-    /// shared-system event. If [`Self::modeled_completion_frontier`] is
-    /// incomplete, this raw value is only a lower bound. It is never an NCU
-    /// cycle prediction.
+    /// frontier (`last local issue timestamp + 1`) and any successfully
+    /// processed shared-system event. This remains an unadjusted lower bound;
+    /// the explicit SM-active projection adds the observation boundary.
     pub fn terminal_modeled_event_time(&self) -> Option<u64> {
         self.replay.terminal_modeled_event_time
+    }
+
+    /// Unadjusted terminal modeled-event lower bound.
+    pub fn modeled_terminal_lower_bound_cycles(&self) -> Option<u64> {
+        self.replay.terminal_modeled_event_time
+    }
+
+    /// SM-active terminal lower bound with post-issue MemoryWriteAck events
+    /// excluded from the observation endpoint.  Acknowledgement events remain
+    /// in the full modeled frontier and still affect any dependent issue; this
+    /// accessor only keeps the two observation domains distinct.
+    pub fn sm_active_terminal_event_time(&self) -> Option<u64> {
+        self.replay.sm_active_terminal_event_time
+    }
+
+    /// Return the architecture-modeled GPC observation frontier for a full
+    /// shared-L2 replay.  `None` is reserved for a non-shared compatibility
+    /// mode, an empty frontier, an unsupported architecture capability, or a
+    /// checked arithmetic overflow; the physical lower-bound field above is
+    /// never replaced or hidden.
+    pub fn gpc_observation_frontier(&self) -> Option<GpcObservationFrontier> {
+        if !matches!(
+            self.configuration.memory_mode,
+            ReplayMemMode::L1SharedL2 { .. }
+        ) {
+            return None;
+        }
+        let lower_bound_cycles = self.modeled_terminal_lower_bound_cycles()?;
+        let grid_blocks = self.coverage.launch().grid_blocks().ok()?;
+        let envelope = self
+            .arch()
+            .gpc_observation_envelope()
+            .require("gpc_observation_envelope")
+            .ok()?;
+        let (envelope_cycles, grid_log2) = envelope.cycles_for_grid(grid_blocks)?;
+        let cycles = lower_bound_cycles.checked_add(envelope_cycles)?;
+        Some(GpcObservationFrontier {
+            lower_bound_cycles,
+            envelope_cycles,
+            grid_blocks,
+            grid_log2,
+            cycles,
+        })
+    }
+
+    /// Return the explicit SM-active physical observation frontier for a
+    /// shared-L2 replay. The replay clock remains unadjusted; this projection
+    /// adds the architecture-scoped observation boundary while retaining the
+    /// causal lower bounds in the same structure.
+    pub fn sm_active_observation_frontier(&self) -> Option<SmActiveObservationFrontier> {
+        if !matches!(
+            self.configuration.memory_mode,
+            ReplayMemMode::L1SharedL2 { .. }
+        ) {
+            return None;
+        }
+        let issue_lower_bound_cycles = self.modeled_issue_lower_bound_cycles();
+        let envelope_cycles = self.configuration.sm_active_activation_cycles();
+        if issue_lower_bound_cycles == 0 && self.replay.terminal_modeled_event_time.is_none() {
+            return None;
+        }
+        let issue_cycles = issue_lower_bound_cycles.checked_add(envelope_cycles)?;
+        let terminal_lower_bound_cycles = self.modeled_terminal_lower_bound_cycles();
+        let terminal_cycles =
+            terminal_lower_bound_cycles.and_then(|cycles| cycles.checked_add(envelope_cycles));
+        Some(SmActiveObservationFrontier {
+            issue_lower_bound_cycles,
+            issue_cycles,
+            terminal_lower_bound_cycles,
+            terminal_cycles,
+            envelope_cycles,
+        })
     }
 
     /// Typed launch-retirement diagnostic. Consumers must distinguish a
@@ -887,11 +995,11 @@ impl FullKernelReplayResult {
     pub fn modeled_completion_frontier(&self) -> ModeledCompletionFrontier {
         if self.replay.unmodeled_tails.is_empty() {
             ModeledCompletionFrontier::Complete {
-                cycles: self.replay.terminal_modeled_event_time,
+                cycles: self.modeled_terminal_lower_bound_cycles(),
             }
         } else {
             ModeledCompletionFrontier::Incomplete {
-                lower_bound_cycles: self.replay.terminal_modeled_event_time,
+                lower_bound_cycles: self.modeled_terminal_lower_bound_cycles(),
                 unmodeled_tails: self.replay.unmodeled_tails,
             }
         }
@@ -2031,6 +2139,26 @@ fn fold_kernel_result(
     last_processed_system_event_time: Option<u64>,
     l2: Option<(L2Counters, L2SourceSplit, DramStats)>,
 ) -> Result<FoldedKernelReplay, ReplayError> {
+    fold_kernel_result_with_sm_active_time(
+        arch,
+        per_sm,
+        records_seen,
+        expect_l1,
+        last_processed_system_event_time,
+        last_processed_system_event_time,
+        l2,
+    )
+}
+
+fn fold_kernel_result_with_sm_active_time(
+    arch: ArchId,
+    per_sm: BTreeMap<i32, SmSimResult>,
+    records_seen: u64,
+    expect_l1: bool,
+    last_processed_system_event_time: Option<u64>,
+    sm_active_terminal_event_time: Option<u64>,
+    l2: Option<(L2Counters, L2SourceSplit, DramStats)>,
+) -> Result<FoldedKernelReplay, ReplayError> {
     let mut instructions_issued: u64 = 0;
     let mut diagnostic_last_issue_cycles: u64 = 0;
     let mut latest_local_completion_cycles: Option<u64> = None;
@@ -2093,6 +2221,14 @@ fn fold_kernel_result(
         diagnostic_last_issue_cycles,
         last_processed_system_event_time,
         terminal_modeled_event_time,
+        sm_active_terminal_event_time: [
+            issue_frontier,
+            sm_active_terminal_event_time,
+            latest_local_completion_cycles,
+        ]
+        .into_iter()
+        .flatten()
+        .max(),
         l1: l1_totals,
         l2,
         l2_by_source,
@@ -2133,6 +2269,7 @@ fn classify_kernel_result(
                 diagnostic_last_issue_cycles: _,
                 last_processed_system_event_time: _,
                 terminal_modeled_event_time: _,
+                sm_active_terminal_event_time: _,
                 l1,
                 l2,
                 l2_by_source,
@@ -2268,6 +2405,31 @@ impl ReplayConfiguration {
     pub fn co_residency(&self) -> CoResidency {
         self.co_residency
     }
+
+    /// Return the residual architecture-scoped SM-active observation boundary
+    /// used by the explicit frontier projection. Once the causal IMC path is
+    /// active, the independent 964-cycle legacy residual is not additive: it
+    /// represented the missing constant-bank work and would double-charge the
+    /// same silicon interval. The current SM86 causal lane therefore exposes a
+    /// zero residual while retaining the historical capability for old data.
+    pub fn sm_active_activation_cycles(&self) -> u64 {
+        if !matches!(self.memory_mode, ReplayMemMode::L1SharedL2 { .. })
+            || !matches!(
+                self.issue_params.resource_source(),
+                IssueResourceSource::ArchitectureDefaults
+            )
+        {
+            return 0;
+        }
+        if self.issue_params.immediate_constant_cache().is_some() {
+            return 0;
+        }
+        self.issue_params
+            .arch
+            .sm_active_observation_envelope()
+            .require("sm_active_observation_envelope")
+            .map_or(0, |envelope| envelope.cycles())
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -2289,6 +2451,8 @@ pub enum ReplaySessionError {
     EmptyStream { device_id: i64, stream_id: i64 },
     #[error("replay session is bound to trace root {expected}, got {got}")]
     TraceRootMismatch { expected: PathBuf, got: PathBuf },
+    #[error("replay session is bound to a different loaded trace lineage")]
+    TraceLineageMismatch,
     #[error("replay session is bound to device {expected}, got {got}")]
     DeviceMismatch { expected: i64, got: i64 },
     #[error("replay session is bound to stream {expected}, got {got}")]
@@ -2338,6 +2502,7 @@ pub enum ReplaySessionError {
 /// rebuilt by the ordinary one-launch system path on every call.
 pub struct StreamL2ReplaySession {
     trace_root: PathBuf,
+    trace_lineage: TraceLineage,
     configuration: ReplayConfiguration,
     placement: PlacementConfig,
     device_id: i64,
@@ -2383,6 +2548,7 @@ impl StreamL2ReplaySession {
         let l2 = L2Model::new(l2_config).map_err(ReplayError::from)?;
         Ok(Self {
             trace_root: td.root().to_path_buf(),
+            trace_lineage: td.lineage(),
             configuration,
             placement,
             device_id,
@@ -2443,6 +2609,9 @@ impl StreamL2ReplaySession {
                 expected: self.trace_root.clone(),
                 got: td.root().to_path_buf(),
             });
+        }
+        if td.lineage() != self.trace_lineage {
+            return Err(ReplaySessionError::TraceLineageMismatch);
         }
         if loc.device_id() != self.device_id {
             return Err(ReplaySessionError::DeviceMismatch {
@@ -2789,12 +2958,13 @@ fn replay_kernel_with_schedule_and_l2_and_candidates(
             }
             require_replay_arch(schedule.arch, sys.arch, "system result")?;
             let system_unmodeled_tails = sys.unmodeled_tails;
-            let replay = fold_kernel_result(
+            let replay = fold_kernel_result_with_sm_active_time(
                 schedule.arch,
                 sys.per_sm,
                 records_seen,
                 true,
                 sys.terminal_event_time,
+                sys.sm_active_terminal_event_time,
                 Some((launch_l2, sys.l2_by_source, sys.dram)),
             )?;
             require_system_tail_consistency(system_unmodeled_tails, replay.unmodeled_tails)?;
@@ -3227,6 +3397,10 @@ mod stream_l2_session_tests {
             resource_source: IssueResourceSource::SyntheticTestFixture,
             instruction_front_end: None,
             memory_issue_pipeline: None,
+            scalar_execution_pipeline: None,
+            ldgsts_l1_hit_return_service: None,
+            constant_memory_return_service: None,
+            immediate_constant_cache: None,
             l1_hit_latency: 1,
             l1_miss_latency: 2,
             global_flat_latency: 4,
@@ -3244,6 +3418,7 @@ mod stream_l2_session_tests {
             ldgsts_cache_all_destination_service_wavefronts: 2,
             ldgsts_cache_all_destination_service_cycles: 3,
             max_resident_warps_per_sm: 48,
+            max_resident_blocks_per_sm: u32::MAX,
         }
     }
 
@@ -3592,6 +3767,57 @@ mod stream_l2_session_tests {
             (1, 0)
         );
         assert!(session.is_complete());
+    }
+
+    #[test]
+    fn same_path_reopened_trace_cannot_reuse_stream_l2_state() {
+        // A path check alone is insufficient: a caller can replace the files
+        // in place and reopen a valid trace with the same launch IDs.  The
+        // retained L2 state must not be combined with that new payload.
+        let tmp = tempfile::tempdir().unwrap();
+        write_trace(
+            tmp.path(),
+            &[
+                (1, 1, vec![load(1, BASE, 4)]),
+                (2, 2, vec![load(2, BASE, 4)]),
+            ],
+        );
+        let trace = TraceDir::open_direct(tmp.path()).unwrap();
+        let locs: Vec<_> = trace.kernels().collect();
+        let schedules = schedules(&[1, 2]);
+        let card = sm86_test_card();
+        let params = params();
+        let mode = shared_mode(2, 256);
+        let mut session = StreamL2ReplaySession::new(&trace, &card, &params, mode, 0, 0).unwrap();
+        session
+            .replay_next(&trace, &locs[0], &schedules, &card, &params, mode)
+            .unwrap();
+        let before = session.cumulative_l2_counters();
+
+        let replacement = tempfile::tempdir().unwrap();
+        write_trace(
+            replacement.path(),
+            &[
+                (1, 1, vec![load(1, BASE + 128, 4)]),
+                (2, 2, vec![load(2, BASE + 128, 4)]),
+            ],
+        );
+        for relative in [
+            "dynamic_trace.pb",
+            "extra_info/allocations.json",
+            "threadblocks/device_0/stream_0/kernel_1/d_0_s_0_k_1_0,0,0.pb",
+            "threadblocks/device_0/stream_0/kernel_2/d_0_s_0_k_2_0,0,0.pb",
+        ] {
+            std::fs::copy(replacement.path().join(relative), tmp.path().join(relative)).unwrap();
+        }
+        let reopened = TraceDir::open_direct(tmp.path()).unwrap();
+        let reopened_loc = reopened.kernels().nth(1).unwrap();
+        assert!(matches!(
+            session.replay_next(&reopened, &reopened_loc, &schedules, &card, &params, mode),
+            Err(ReplaySessionError::TraceLineageMismatch)
+        ));
+        assert_eq!(session.completed_launches(), 1);
+        assert_eq!(session.cumulative_l2_counters(), before);
     }
 
     #[test]
@@ -4965,8 +5191,7 @@ fn project_async_copy_completion_work(
             rhs: units_per_byte,
         },
     )?;
-    if payload_work != 0
-        && l1_policy == LdgstsL1Policy::BypassL1
+    if l1_policy == LdgstsL1Policy::BypassL1
         && let Some(topology) = destination_topology
     {
         let payload_work_compact = u32::try_from(payload_work).map_err(|_| {
@@ -4978,9 +5203,13 @@ fn project_async_copy_completion_work(
                 max_completion_work: ASYNC_COPY_COMPOSITE_PAYLOAD_WORK_MAX,
             }
         })?;
+        // A topology-only copy has executing destination lanes but no source
+        // cohort. The compact observation token uses one reserved cohort slot
+        // to keep the token non-inactive; the detailed sidecar remains empty.
+        let source_cohorts = topology.source_cohorts.max(1);
         return encode_async_copy_payload_and_topology(
             payload_work_compact,
-            topology.source_cohorts,
+            source_cohorts,
             topology.destination_line_fanout_total,
             topology.cache_all_bank_wavefronts_max,
             topology.bypass_wavefronts_max,
@@ -8335,11 +8564,20 @@ mod space_routing_tests {
     fn zero_fill_async_copy_accepts_empty_source_cohort_projection() {
         let mut sectors = vec![7];
         let mut sidecar = AsyncCopyCohortReplay::default();
+        let destination_topology = LdgstsDestinationTopology {
+            destination_line_fanout_total: 4,
+            destination_line_fanout_max: 4,
+            cache_all_bank_wavefronts_total: 4,
+            cache_all_bank_wavefronts_max: 4,
+            bypass_wavefronts_total: 4,
+            bypass_wavefronts_max: 4,
+            ..LdgstsDestinationTopology::default()
+        };
         let kind = append_staged_async_copy_sectors(
             ArchId::Sm86,
             LdgstsL1Policy::CacheAtAllLevels,
             0,
-            Some(LdgstsDestinationTopology::default()),
+            Some(destination_topology),
             Some(&[]),
             Some(&[]),
             &mut sectors,
@@ -8355,14 +8593,54 @@ mod space_routing_tests {
             AccessKind::GlobalAsyncCopy {
                 off: 1,
                 len: 0,
-                completion_work: 0,
+                completion_work,
                 l1_policy: LdgstsL1Policy::CacheAtAllLevels,
-            }
+            } if completion_work > 0
         ));
         assert_eq!(sectors, [7]);
         assert!(sidecar.spans.is_empty());
         assert!(sidecar.cohorts.is_empty());
         assert!(sidecar.sector_membership_masks.is_empty());
+
+        let mut bypass_sectors = vec![7];
+        let mut bypass_sidecar = AsyncCopyCohortReplay::default();
+        let bypass_kind = append_staged_async_copy_sectors(
+            ArchId::Sm86,
+            LdgstsL1Policy::BypassL1,
+            0,
+            Some(destination_topology),
+            Some(&[]),
+            Some(&[]),
+            &mut bypass_sectors,
+            &mut bypass_sidecar,
+            &[],
+            Path::new("zero_fill_bypass.pb"),
+            0,
+            370,
+        )
+        .expect("bypass zero-fill carries a topology-only completion token");
+        assert!(matches!(
+            bypass_kind,
+            AccessKind::GlobalAsyncCopy {
+                off: 1,
+                len: 0,
+                completion_work,
+                l1_policy: LdgstsL1Policy::BypassL1,
+            } if matches!(
+                sim_mem::decode_async_copy_completion(completion_work),
+                sim_mem::AsyncCopyCompletion::PayloadAndObservedTopology {
+                    payload_work: 0,
+                    source_cohorts: 1,
+                    destination_lines: 4,
+                    max_bank_wavefronts: 4,
+                    max_bypass_wavefronts: 4,
+                }
+            )
+        ));
+        assert_eq!(bypass_sectors, [7]);
+        assert!(bypass_sidecar.spans.is_empty());
+        assert!(bypass_sidecar.cohorts.is_empty());
+        assert!(bypass_sidecar.sector_membership_masks.is_empty());
     }
 
     #[test]
@@ -10401,6 +10679,10 @@ mod completeness_tests {
             resource_source: IssueResourceSource::SyntheticTestFixture,
             instruction_front_end: None,
             memory_issue_pipeline: None,
+            scalar_execution_pipeline: None,
+            ldgsts_l1_hit_return_service: None,
+            constant_memory_return_service: None,
+            immediate_constant_cache: None,
             l1_hit_latency: 1,
             l1_miss_latency: 1,
             global_flat_latency: 1,
@@ -10418,6 +10700,7 @@ mod completeness_tests {
             ldgsts_cache_all_destination_service_wavefronts: 2,
             ldgsts_cache_all_destination_service_cycles: 3,
             max_resident_warps_per_sm: 48,
+            max_resident_blocks_per_sm: u32::MAX,
         };
         replay_kernel_with_schedule_and_l2_and_candidates(
             &td,

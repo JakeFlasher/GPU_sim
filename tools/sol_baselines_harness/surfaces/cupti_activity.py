@@ -1,7 +1,7 @@
 """``CUPTIActivitySurface`` — CUPTI Activity wall-clock attribution.
 
 Consumes the env-gated extension to
-``sol-execbench/src/sol_execbench/core/bench/timing.py``: when
+``tools/sol_execbench/src/sol_execbench/core/bench/timing.py``: when
 ``SOLBENCH_CUPTI_ACTIVITY_OUT=<path>`` is exported into the native
 ``sol-execbench`` evaluator subprocess (via
 ``plan.env_overrides`` curated through ``build_subprocess_env``), the
@@ -65,7 +65,7 @@ class CUPTIActivitySurface(Surface):
             return SurfaceProbeResult(
                 status=SURFACE_STATUS_UNAVAILABLE,
                 waiver_reason=(
-                    "sol-execbench/src/sol_execbench/core/bench/timing.py "
+                    "tools/sol_execbench/src/sol_execbench/core/bench/timing.py "
                     "not found; cannot verify the env-gated CUPTI sink."
                 ),
             )
@@ -82,7 +82,7 @@ class CUPTIActivitySurface(Surface):
                 waiver_reason=(
                     f"upstream timing.py at {timing_path} does not carry "
                     f"the {_SINK_ENV_VAR} env-gated sink branch; apply "
-                    f"scripts/baselines_harness/patches/cupti_activity_sink.patch."
+                    f"tools/sol_baselines_harness/patches/cupti_activity_sink.patch."
                 ),
             )
         # Negative invariant: the patched callback MUST NOT have
@@ -165,6 +165,7 @@ class CUPTIActivitySurface(Surface):
                 argv,
                 capture_output=True,
                 text=True,
+                errors="replace",
                 check=False,
                 env=subprocess_env,
                 timeout=self.eval_timeout_s,
@@ -235,7 +236,7 @@ class CUPTIActivitySurface(Surface):
                     f"CUPTI surface produced no Activity records in "
                     f"{path}. The env-gated sink in upstream "
                     f"sol-execbench/.../timing.py did not fire; verify "
-                    f"the patch at scripts/baselines_harness/patches/"
+                    f"the patch at tools/sol_baselines_harness/patches/"
                     f"cupti_activity_sink.patch is applied to the "
                     f"installed ``sol-execbench`` package's copy of "
                     f"timing.py."
@@ -259,7 +260,11 @@ def _find_upstream_timing_py() -> Optional[Path]:
     """Locate the upstream ``timing.py`` carrying the env-gated sink."""
     here = Path(__file__).resolve()
     for ancestor in here.parents:
-        candidate = ancestor / "sol-execbench" / "src" / "sol_execbench" / "core" / "bench" / "timing.py"
+        # The repository's source tree uses the underscore package
+        # directory (``tools/sol_execbench``).  Keep the lookup rooted
+        # at each ancestor so this also works when the harness is copied
+        # into a larger checkout; do not depend on the caller's cwd.
+        candidate = ancestor / "tools" / "sol_execbench" / "src" / "sol_execbench" / "core" / "bench" / "timing.py"
         if candidate.is_file():
             return candidate
     return None

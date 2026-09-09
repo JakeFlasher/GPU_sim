@@ -3,7 +3,7 @@
 The upstream evaluator (invoked with ``--json``) prints one
 ``Trace``-shaped JSON object per line to stdout. This module reads
 those lines through the live ``Trace`` Pydantic schema at
-``sol-execbench/src/sol_execbench/core/data/trace.py`` — we do NOT
+``tools/sol_execbench/src/sol_execbench/core/data/trace.py`` — we do NOT
 re-define the schema, only wrap the parse.
 """
 
@@ -22,12 +22,12 @@ _REPO_ROOT = _SCRIPTS_DIR.parent
 def _import_trace_model():
     """Import the live ``Trace`` Pydantic model (lazy)."""
     try:
-        sys.path.insert(0, str(_REPO_ROOT / "sol-execbench" / "src"))
+        sys.path.insert(0, str(_REPO_ROOT / "tools" / "sol_execbench" / "src"))
         from sol_execbench.core.data.trace import Trace  # noqa: E402
     except ImportError as exc:
         raise RuntimeError(
             f"Cannot import live Trace Pydantic model: {exc}. Ensure "
-            f"sol-execbench/src is importable."
+            f"tools/sol_execbench/src is importable."
         ) from exc
     return Trace
 

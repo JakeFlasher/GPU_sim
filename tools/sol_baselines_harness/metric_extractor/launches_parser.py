@@ -29,6 +29,8 @@ class LaunchRecord:
     launch_kind: str
     launch_index: int
     ctx_id: int
+    context_id: int
+    identity_namespace: str
     stream_id: int
     raw: Dict[str, Any] = field(default_factory=dict)
 
@@ -51,6 +53,8 @@ _REQUIRED_TOP_FIELDS = (
     "launch_kind",
     "launch_index",
     "ctx_id",
+    "context_id",
+    "identity_namespace",
     "stream_id",
     "grid_dim",
     "block_dim",
@@ -106,11 +110,13 @@ _REQUIRED_CROSS_SURFACE_JOIN_KEY_INT_OR_NULL = (
 _REQUIRED_CROSS_SURFACE_JOIN_KEY_STR_OR_NULL = (
     "evaluator_config_hash",
     "demangled_kernel_name",
+    "identity_namespace",
 )
 _REQUIRED_CROSS_SURFACE_JOIN_KEY_INT = (
     "kernel_ordinal_in_workload",
     "dynamic_smem",
     "stream_ordinal",
+    "context_id",
 )
 _REQUIRED_CROSS_SURFACE_JOIN_KEY_XYZ = (
     "grid_xyz",
@@ -252,21 +258,36 @@ def _validate_record(rec: Dict[str, Any]) -> Optional[str]:
         if forbidden in rec:
             return (
                 f"forbidden timing field present: {forbidden!r}; "
-                f"the metric extractor calls zero CUPTI APIs by "
-                f"construction, so wall-clock fields are a "
-                f"contract violation."
+                "the metric extractor emits identity metadata only; "
+                "wall-clock fields belong to the separate CUPTI activity surface."
             )
     for key in rec:
         for prefix in _FORBIDDEN_TOP_FIELD_PREFIXES:
             if key.startswith(prefix):
                 return (
                     f"forbidden timing field prefix: {key!r} starts "
-                    f"with {prefix!r}; the metric extractor calls zero "
-                    f"CUPTI APIs by construction, so wall-clock fields "
-                    f"are a contract violation."
+                    f"with {prefix!r}; wall-clock fields belong to the "
+                    "separate CUPTI activity surface."
                 )
     for key in _REQUIRED_TOP_FIELDS:
         if key not in rec:
+            if (
+                key == "context_id"
+                and _is_strict_int(rec.get("schema_version"))
+                and rec["schema_version"] < 4
+            ):
+                # Older records lack the explicit context identity; preserve
+                # parsing but make their cross-surface join unjoinable rather
+                # than inventing a mapping.
+                rec[key] = -1
+                continue
+            if (
+                key == "identity_namespace"
+                and _is_strict_int(rec.get("schema_version"))
+                and rec["schema_version"] < 4
+            ):
+                rec[key] = "legacy"
+                continue
             return f"missing required field: {key!r}"
     if not _is_strict_int(rec["schema_version"]):
         return (
@@ -287,6 +308,13 @@ def _validate_record(rec: Dict[str, Any]) -> Optional[str]:
             f"ctx_id must be a non-bool integer, got "
             f"{type(rec['ctx_id']).__name__}: {rec['ctx_id']!r}"
         )
+    if not _is_strict_int(rec["context_id"]):
+        return (
+            f"context_id must be a non-bool integer, got "
+            f"{type(rec['context_id']).__name__}: {rec['context_id']!r}"
+        )
+    if not isinstance(rec["identity_namespace"], str) or not rec["identity_namespace"]:
+        return "identity_namespace must be a non-empty string"
     if not _is_strict_int(rec["stream_id"]):
         return (
             f"stream_id must be a non-bool integer, got "
@@ -525,6 +553,9 @@ def _validate_record(rec: Dict[str, Any]) -> Optional[str]:
             )
     for sub in _REQUIRED_CROSS_SURFACE_JOIN_KEY_STR_OR_NULL:
         if sub not in cskey:
+            if sub == "identity_namespace" and rec["schema_version"] < 4:
+                cskey[sub] = "legacy"
+                continue
             return (
                 f"cross_surface_join_key missing required sub-field: {sub!r}"
             )
@@ -535,6 +566,9 @@ def _validate_record(rec: Dict[str, Any]) -> Optional[str]:
             )
     for sub in _REQUIRED_CROSS_SURFACE_JOIN_KEY_INT:
         if sub not in cskey:
+            if sub == "context_id" and rec["schema_version"] < 4:
+                cskey[sub] = -1
+                continue
             return (
                 f"cross_surface_join_key missing required sub-field: {sub!r}"
             )
@@ -543,6 +577,12 @@ def _validate_record(rec: Dict[str, Any]) -> Optional[str]:
                 f"cross_surface_join_key.{sub} must be a non-bool integer, "
                 f"got {type(cskey[sub]).__name__}: {cskey[sub]!r}"
             )
+    if cskey.get("identity_namespace") != rec["identity_namespace"]:
+        return "cross_surface_join_key.identity_namespace differs from identity_namespace"
+    if cskey["context_id"] != rec["context_id"]:
+        return "cross_surface_join_key.context_id differs from context_id"
+    if cskey["stream_ordinal"] != rec["stream_id"]:
+        return "cross_surface_join_key.stream_ordinal differs from stream_id"
     for sub in _REQUIRED_CROSS_SURFACE_JOIN_KEY_XYZ:
         if sub not in cskey:
             return (
@@ -829,6 +869,8 @@ def parse_launches_jsonl(
                     launch_kind=str(payload["launch_kind"]),
                     launch_index=int(payload["launch_index"]),
                     ctx_id=int(payload["ctx_id"]),
+                    context_id=int(payload["context_id"]),
+                    identity_namespace=str(payload["identity_namespace"]),
                     stream_id=int(payload["stream_id"]),
                     raw=payload,
                 )

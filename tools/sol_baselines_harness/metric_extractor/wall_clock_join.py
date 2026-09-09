@@ -21,44 +21,37 @@ either side to exactly one of five buckets:
 * ``unjoinable`` — a key field is missing from either side, so the
   joiner cannot decide which bucket the launch belongs in.
 
-The join key is the eight-field composite tuple:
+The join records each side's identity namespace as provenance and retains
+this composite diagnostic tuple:
 ``(workload_index, evaluator_config_hash, kernel_name_mangled,
 kernel_ordinal_in_workload, grid_xyz, block_xyz, dynamic_smem,
-stream_ordinal)``. The schema doc uses ``demangled_kernel_name`` as
-the canonical name field; in practice CUPTI Activity emits the
+stream_ordinal, context_id)``. CUPTI Activity normally emits the
 **mangled** symbol in its ``name`` slot, so the joiner matches by
 mangled name (NVBit's ``kernel_name_mangled`` top-level field) and
 records the demangled name on the matched row as auxiliary
-information. This keeps the join deterministic across hosts whose
+information. Numeric stream/context IDs are diagnostics only and are never
+compared across processes. This keeps the join deterministic across hosts whose
 demangler libraries diverge.
 
-The CUPTI side does not natively emit ``kernel_ordinal_in_workload``
-(it has ``correlation_id``, which is a per-CUDA-driver-call counter
-distinct from the workload-local launch ordinal). The joiner
-synthesises an ordinal by walking the ``activity.jsonl`` in arrival
-order and assigning 0..N to kernel-launch records (CUPTI activity
-kind ``CONCURRENT_KERNEL`` = 10, with kind=5 + ``cbid == None`` as
-a fallback). The NVBit producer's ``kernel_ordinal_in_workload``
-counts every observed kernel-launch CBID (including filter-skipped
-framework kernels), so the synthetic CUPTI ordinal and the NVBit
-ordinal share the same counting domain and align by construction.
+The CUPTI side does not natively emit ``kernel_ordinal_in_workload``.
+Its correlation ID is local to the CUPTI process and is not compared
+with the NVBit launch ordinal. The joiner retains a local arrival index
+for diagnostics only and pairs records by singleton launch signature.
 
-The eight-field tuple this joiner indexes on:
+The diagnostic tuple fields are:
 
 * ``workload_index`` (int|null) — None-tolerant: when either side
   hasn't populated it the field is treated as agreeing.
 * ``evaluator_config_hash`` (str|null) — None-tolerant identically.
-* ``demangled_kernel_name`` (str) — required; matched strictly.
-  NVBit reads ``cross_surface_join_key.demangled_kernel_name``;
-  CUPTI reads the sink's ``demangled_kernel_name`` field with
-  ``raw_name`` / ``name`` as fallbacks.
-* ``kernel_ordinal_in_workload`` (int) — required; matched strictly.
+* ``kernel_name_mangled`` (str) — required; matched strictly. NVBit reads
+  its raw mangled field; CUPTI reads ``name``/``raw_name`` with demangled
+  text as a fallback.
+* ``kernel_ordinal_in_workload`` (int) — retained as a local diagnostic.
 * ``grid_xyz`` / ``block_xyz`` ([3]int) — required; matched strictly.
 * ``dynamic_smem`` (int) — required; matched strictly.
-* ``stream_ordinal`` (int) — required; matched strictly. The NVBit
-  producer derives this from ``cuStreamGetId()``, the same CUDA
-  stream identity CUPTI Activity's ``streamId`` field carries.
-  Both surfaces therefore share the stream-ID namespace.
+* ``identity_namespace`` (string) — required provenance; it is never used as
+  a launch key.
+* ``stream_ordinal`` / ``context_id`` (int) — local diagnostics, never joined.
 """
 
 from __future__ import annotations
@@ -69,30 +62,26 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 
-# CUPTI Activity record kinds that correspond to kernel launches the
-# matched join cares about. CONCURRENT_KERNEL (kind=10) is what
-# sol-execbench's subscriber emits for every kernel; KERNEL (kind=5) is
-# a fallback emitted by older CUPTI versions. Other kinds (memcpy=1,
-# memset=4, runtime=5/cbid present) are unrelated to kernel launches
-# and are filtered out of the join.
-_KERNEL_RECORD_KINDS = frozenset({10})
+# CUPTI Activity record kinds that correspond to kernel launches. CUDA's
+# stable enum values are KERNEL=3 and CONCURRENT_KERNEL=10; runtime API
+# records are kind=5 and must never be interpreted as kernels.
+_KERNEL_RECORD_KINDS = frozenset({3, 10})
 
-# CUPTI records carry ``cbid``-bearing API records under kind=5 too.
-# The disambiguator is the ``cbid`` field: kernel-launch records
-# carry ``cbid=null``, while CUDA API records carry an integer cbid
-# (e.g. ``cuModuleLoadFatBinary`` = 17, ``cuLaunchKernel`` = 392).
-# Kind=5 records with ``cbid == null`` are the kernel half.
+
+def _is_nonnegative_int(value: Any) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool) and value >= 0
+
+
+def _is_xyz_int_triple(value: Any) -> bool:
+    return (
+        isinstance(value, list)
+        and len(value) == 3
+        and all(_is_nonnegative_int(item) for item in value)
+    )
+
 def _is_kernel_launch_record(rec: Dict[str, Any]) -> bool:
     """True when ``rec`` is a CUPTI kernel-launch record."""
-    kind = rec.get("kind")
-    if kind in _KERNEL_RECORD_KINDS:
-        return True
-    # kind == 5 with cbid == None covers older CUPTI versions that
-    # filed kernel records under KERNEL (5) instead of CONCURRENT_KERNEL
-    # (10). The cbid disambiguates against CUDA API records.
-    if kind == 5 and rec.get("cbid") is None and rec.get("name"):
-        return True
-    return False
+    return rec.get("kind") in _KERNEL_RECORD_KINDS
 
 
 # Locked-vocabulary status enum. Both halves of the join machinery
@@ -151,32 +140,45 @@ class JoinSummary:
 
 
 def _read_jsonl_lines(path: Path) -> List[Dict[str, Any]]:
-    """Read a JSON-L file into a list of dicts, tolerating empty lines."""
+    """Read a JSON-L file into a list of dicts, tolerating empty lines.
+
+    A malformed or non-object line is an input-integrity failure.  Silently
+    dropping it would make the later bucket totals look complete while
+    omitting a launch from one surface.
+    """
     if not path.is_file():
         return []
     out: List[Dict[str, Any]] = []
-    for raw in path.read_text(encoding="utf-8").splitlines():
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except UnicodeDecodeError as exc:
+        raise ValueError(f"{path}: invalid UTF-8 JSONL input") from exc
+    except OSError as exc:
+        raise ValueError(f"{path}: cannot read JSONL input: {exc}") from exc
+    for line_number, raw in enumerate(lines, 1):
         s = raw.strip()
         if not s:
             continue
         try:
             obj = json.loads(s)
-        except json.JSONDecodeError:
-            continue
-        if isinstance(obj, dict):
-            out.append(obj)
+        except json.JSONDecodeError as exc:
+            raise ValueError(
+                f"{path}:{line_number}: malformed JSONL record: {exc.msg}"
+            ) from exc
+        if not isinstance(obj, dict):
+            raise ValueError(
+                f"{path}:{line_number}: JSONL record must be an object"
+            )
+        out.append(obj)
     return out
 
 
-def _nvbit_join_key(rec: Dict[str, Any]) -> Optional[Tuple[Any, ...]]:
+def nvbit_join_key(rec: Dict[str, Any]) -> Optional[Tuple[Any, ...]]:
     """Return the composite key tuple from an NVBit launch record.
 
-    The tuple's name field uses
-    ``cross_surface_join_key.demangled_kernel_name`` as the
-    canonical name field. NVBit's top-level ``kernel_name_mangled``
-    is auxiliary evidence only — the join key is on the demangled
-    name so it matches CUPTI's ``demangled_kernel_name`` field the
-    sink emits.
+    The tuple's name field uses the raw mangled kernel symbol. The
+    demangled spelling remains auxiliary evidence because demangling
+    implementations can differ between the two processes.
 
     Returns ``None`` (signalling ``unjoinable``) when any required
     field is missing OR when the record's launch_kind is
@@ -188,39 +190,49 @@ def _nvbit_join_key(rec: Dict[str, Any]) -> Optional[Tuple[Any, ...]]:
     cs = rec.get("cross_surface_join_key")
     if not isinstance(cs, dict):
         return None
-    demangled = cs.get("demangled_kernel_name")
+    if cs.get("identity_namespace") not in {"cuda_driver", "cupti_activity"}:
+        return None
+    name = rec.get("kernel_name_mangled")
+    if not isinstance(name, str) or not name:
+        name = cs.get("demangled_kernel_name")
     ordinal = cs.get("kernel_ordinal_in_workload")
     grid = cs.get("grid_xyz")
     block = cs.get("block_xyz")
     smem = cs.get("dynamic_smem")
     stream = cs.get("stream_ordinal")
+    context = cs.get("context_id")
     if (
-        not isinstance(demangled, str)
-        or not demangled
-        or ordinal is None
-        or smem is None
-        or stream is None
+        not isinstance(name, str)
+        or not name
+        or not _is_nonnegative_int(ordinal)
+        or not _is_nonnegative_int(smem)
     ):
         return None
-    if not isinstance(grid, list) or not isinstance(block, list):
+    if not _is_xyz_int_triple(grid) or not _is_xyz_int_triple(block):
         return None
     return (
         cs.get("workload_index"),
         cs.get("evaluator_config_hash"),
-        demangled,
+        name,
         int(ordinal),
         tuple(grid),
         tuple(block),
         int(smem),
-        int(stream),
+        int(stream) if _is_nonnegative_int(stream) else -1,
+        int(context) if _is_nonnegative_int(context) else -1,
     )
 
 
+def _join_spine(key: Tuple[Any, ...]) -> Tuple[Any, ...]:
+    """Stable launch signature shared across separate processes."""
+    return (key[2], key[4], key[5], key[6])
+
+
 def _cupti_kernel_records(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """Filter CUPTI activity rows to kernel-launch records, in arrival
-    order. Adds a synthetic ``kernel_ordinal_in_workload`` field so the
-    joiner can build a comparable composite key without modifying
-    cupti_activity surface emission.
+    """Filter CUPTI activity rows to kernel-launch records.
+
+    The local arrival index is retained for diagnostics only; it is not
+    used as a cross-process identity.
     """
     out: List[Dict[str, Any]] = []
     ordinal = 0
@@ -247,48 +259,49 @@ def _cupti_full_join_key(
     enter the tuple as ``None`` so the matcher can compare them
     against the NVBit-side values directly.
 
-    The required fields are: ``demangled_kernel_name``,
-    ``kernel_ordinal_in_workload`` (synthesized via
-    ``_synthetic_kernel_ordinal``), ``grid_xyz``, ``block_xyz``,
-    ``dynamic_smem``, ``stream_ordinal``.
+    The required fields are: raw kernel name,
+    ``kernel_ordinal_in_workload`` (local diagnostic index), ``grid_xyz``,
+    ``block_xyz``, ``dynamic_smem``, ``stream_ordinal``, ``context_id``.
     """
-    demangled = rec.get("demangled_kernel_name")
-    if not isinstance(demangled, str) or not demangled:
-        # Fall back to the raw mangled name if the sink-side demangle
-        # failed; without a name there is nothing to match against.
-        raw = rec.get("name") or rec.get("raw_name")
-        if not isinstance(raw, str) or not raw:
-            return None, "missing kernel name"
-        demangled = raw
+    # Prefer the raw mangled CUPTI name; demangled text is only a fallback
+    # for activity bindings that do not expose the raw symbol.
+    name = rec.get("name") or rec.get("raw_name")
+    if not isinstance(name, str) or not name:
+        name = rec.get("demangled_kernel_name")
+    if not isinstance(name, str) or not name:
+        return None, "missing kernel name"
+    if rec.get("identity_namespace") != "cupti_activity":
+        return None, "incompatible CUPTI identity namespace"
     ordinal = rec.get("_synthetic_kernel_ordinal")
-    if not isinstance(ordinal, int):
+    if not _is_nonnegative_int(ordinal):
         return None, "missing synthetic kernel ordinal"
     grid = rec.get("grid_xyz")
-    if grid is None:
+    if not _is_xyz_int_triple(grid):
         return None, "missing grid_xyz"
     block = rec.get("block_xyz")
-    if block is None:
+    if not _is_xyz_int_triple(block):
         return None, "missing block_xyz"
     smem = rec.get("dynamic_smem")
-    if smem is None:
+    if not _is_nonnegative_int(smem):
         return None, "missing dynamic_smem"
-    # The NVBit producer emits the raw CUDA stream ID (from
-    # ``cuStreamGetId()``); CUPTI's ``stream_id`` field carries the
-    # same identity. We compare them directly without an
-    # intermediate normalizer — both surfaces share the CUDA
-    # stream-ID namespace by construction.
+    # Stream/context IDs are retained as diagnostics only. They are local to
+    # each process and are deliberately excluded from the launch signature.
     stream_id = rec.get("stream_id")
-    if stream_id is None:
-        return None, "missing stream_ordinal"
+    if not _is_nonnegative_int(stream_id):
+        stream_id = -1
+    context_id = rec.get("context_id")
+    if not _is_nonnegative_int(context_id):
+        context_id = -1
     return (
         rec.get("workload_index"),  # None until harness injects
         rec.get("evaluator_config_hash"),  # None until harness injects
-        demangled,
+        name,
         int(ordinal),
         tuple(grid),
         tuple(block),
         int(smem),
         int(stream_id),
+        int(context_id),
     ), None
 
 
@@ -296,7 +309,7 @@ def _full_keys_match(
     nvbit_key: Tuple[Any, ...],
     cupti_key: Tuple[Any, ...],
 ) -> Optional[str]:
-    """Return ``None`` when the two 8-tuples represent the same launch,
+    """Return ``None`` when the two tuples represent the same launch,
     otherwise a string naming the first disagreement.
 
     The matching is field-by-field with a None-tolerance rule for the
@@ -304,8 +317,9 @@ def _full_keys_match(
     ``evaluator_config_hash``): when EITHER side has ``None`` the
     fields are treated as agreeing (we can't disprove the match from
     no-info); when BOTH sides have concrete values they must equal.
-    The remaining six fields are strict: the eight-field tuple is
-    the composite key, so they must match exactly.
+    Name, grid, block, and dynamic shared memory are strict. Launch
+    ordinal and numeric stream/context IDs are process-local diagnostics
+    and are excluded from this comparison.
     """
     # Optional fields — None-tolerant.
     for idx, name in ((0, "workload_index"), (1, "evaluator_config_hash")):
@@ -315,16 +329,11 @@ def _full_keys_match(
             continue
         if n_val != c_val:
             return f"{name} nvbit={n_val!r} cupti={c_val!r}"
-    # Required fields — strict equality.
+    # Stable launch signature — strict equality.
     if nvbit_key[2] != cupti_key[2]:
         return (
-            f"demangled_kernel_name nvbit={nvbit_key[2]!r} "
+            f"kernel_name_mangled nvbit={nvbit_key[2]!r} "
             f"cupti={cupti_key[2]!r}"
-        )
-    if nvbit_key[3] != cupti_key[3]:
-        return (
-            f"kernel_ordinal_in_workload nvbit={nvbit_key[3]} "
-            f"cupti={cupti_key[3]}"
         )
     if tuple(nvbit_key[4]) != tuple(cupti_key[4]):
         return (
@@ -340,10 +349,6 @@ def _full_keys_match(
         return (
             f"dynamic_smem nvbit={nvbit_key[6]} cupti={cupti_key[6]}"
         )
-    if int(nvbit_key[7]) != int(cupti_key[7]):
-        return (
-            f"stream_ordinal nvbit={nvbit_key[7]} cupti={cupti_key[7]}"
-        )
     return None
 
 
@@ -352,42 +357,31 @@ def join_launches_against_cupti(
     cupti_records: List[Dict[str, Any]],
 ) -> JoinSummary:
     """Perform the post-hoc wall-clock join using the full
-    eight-field tuple.
+    diagnostic tuple.
 
     Returns a ``JoinSummary`` whose ``rows`` partition every NVBit
     and CUPTI launch into exactly one bucket. The function is
     side-effect-free and tolerant of partial inputs.
 
-    The matching key is the FULL composite tuple
-    ``(workload_index, evaluator_config_hash, demangled_kernel_name,
-    kernel_ordinal_in_workload, grid_xyz, block_xyz, dynamic_smem,
-    stream_ordinal)``. Both halves of the tuple come from comparable
-    fields:
+    The matching key is the launch signature
+    ``(kernel_name_mangled, grid_xyz, block_xyz, dynamic_smem)``.
+    The remaining tuple fields are retained for diagnostics:
 
-    * NVBit side: ``cross_surface_join_key.demangled_kernel_name`` +
-      the seven other tuple slots from the JSON-L record's
+    * NVBit side: ``kernel_name_mangled`` + the remaining tuple slots from the
+      JSON-L record's
       ``cross_surface_join_key`` object.
-    * CUPTI side: ``demangled_kernel_name`` from the sol-execbench
-      sink's demangle output + synthesized global ordinal from
-      arrival order + ``grid_xyz`` / ``block_xyz`` /
-      ``dynamic_smem`` / normalized ``stream_id`` from the sink's
-      shape-field extensions.
+    * CUPTI side: raw ``name``/``raw_name`` + launch shape fields / local IDs from the
+      sink's shape-field extensions.
 
     Missing required fields on either side land in ``unjoinable`` with
-    a typed waiver naming the missing field. A spine match
-    (``demangled_kernel_name`` + ``kernel_ordinal_in_workload``) that
-    fails the full-tuple check lands in ``unjoinable`` rather than
-    ``matched``.
+    a typed waiver naming the missing field. A repeated signature is
+    ambiguous; it is never paired by arrival order.
     """
     kernel_cupti = _cupti_kernel_records(cupti_records)
 
-    # Build an index of NVBit records keyed by the matching spine
-    # (demangled name, synthetic ordinal). Multiple NVBit records with
-    # the same spine count toward ``ambiguous``. The full eight-field
-    # tuple lives alongside each entry so the post-spine match check
-    # can use it without re-deriving.
+    # Build an index of NVBit records keyed by the stable launch signature.
     nvbit_index: Dict[
-        Tuple[str, int],
+        Tuple[Any, ...],
         List[Tuple[Dict[str, Any], Tuple[Any, ...]]],
     ] = {}
     nvbit_unjoinable: List[Dict[str, Any]] = []
@@ -396,17 +390,17 @@ def join_launches_against_cupti(
         if rec.get("launch_kind") == "graph_launch_not_observed":
             nvbit_graph_not_observed.append(rec)
             continue
-        key = _nvbit_join_key(rec)
+        key = nvbit_join_key(rec)
         if key is None:
             nvbit_unjoinable.append(rec)
             continue
-        # Spine = (demangled_kernel_name, ordinal). The remaining six
-        # tuple fields are verified after the spine lookup.
-        spine: Tuple[str, int] = (key[2], int(key[3]))
+        # Spine = stable launch signature; process-local ordinals and IDs
+        # are deliberately excluded.
+        spine = _join_spine(key)
         nvbit_index.setdefault(spine, []).append((rec, key))
 
     cupti_index: Dict[
-        Tuple[str, int],
+        Tuple[Any, ...],
         List[Tuple[Dict[str, Any], Tuple[Any, ...]]],
     ] = {}
     cupti_unjoinable: List[Tuple[Dict[str, Any], str]] = []
@@ -415,7 +409,7 @@ def join_launches_against_cupti(
         if cupti_key is None:
             cupti_unjoinable.append((rec, reason or "missing key field"))
             continue
-        spine = (cupti_key[2], int(cupti_key[3]))
+        spine = _join_spine(cupti_key)
         cupti_index.setdefault(spine, []).append((rec, cupti_key))
 
     rows: List[JoinedRow] = []
@@ -427,7 +421,7 @@ def join_launches_against_cupti(
         first_nvbit, full_key = nvbit_for_spine[0]
         nvbit_extras = [r for r, _ in nvbit_for_spine[1:]]
         cupti_rec_list = [r for r, _ in cupti_for_spine]
-        if len(nvbit_for_spine) > 1:
+        if len(nvbit_for_spine) > 1 or len(cupti_for_spine) > 1:
             rows.append(JoinedRow(
                 join_status=JOIN_STATUS_AMBIGUOUS,
                 join_key=full_key,
@@ -436,8 +430,9 @@ def join_launches_against_cupti(
                 nvbit_extras=nvbit_extras,
                 cupti_records=cupti_rec_list,
                 waiver_reason=(
-                    f"{len(nvbit_for_spine)} NVBit launches share the "
-                    f"join spine {spine!r} within one matched run"
+                    f"launch signature {spine!r} is repeated "
+                    f"(nvbit={len(nvbit_for_spine)}, "
+                    f"cupti={len(cupti_for_spine)}); pairing is ambiguous"
                 ),
             ))
             bucket_counts[JOIN_STATUS_AMBIGUOUS] += 1
@@ -546,7 +541,9 @@ def _duration_from_cupti(rec: Dict[str, Any]) -> Optional[int]:
     """Return ``end_ns - start_ns`` from a CUPTI record, or ``None``."""
     start = rec.get("start_ns")
     end = rec.get("end_ns")
-    if not isinstance(start, int) or not isinstance(end, int):
+    if not _is_nonnegative_int(start) or not _is_nonnegative_int(end):
+        return None
+    if end < start:
         return None
     return end - start
 

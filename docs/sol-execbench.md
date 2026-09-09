@@ -3,7 +3,7 @@
 > **Scoped historical/evaluation documentation.** SOL-ExecBench remains an
 > evaluation corpus and subtree-specific toolchain. Its former counter-free and
 > no-clock wording does not govern the active simulator or root measurement
-> protocol. For current project policy use root `CLAUDE.md`,
+> protocol. For current project policy use root `AGENTS.md`,
 > [`docs/README.md`](README.md), and accepted ADRs; for historical subtree context
 > use [`sol_execbench/CAMPAIGN_CONTEXT.md`](sol_execbench/CAMPAIGN_CONTEXT.md) only.
 
@@ -88,7 +88,7 @@ downstream kernel optimization is out of scope.
 > evaluation subtree's former counter-free/no-clock surfaces and its offline-label
 > discussion. They are not current root measurement policy, simulator inputs, or
 > permission to run NCU, mutate clocks, or calibrate the active simulator. Current
-> labels and capture authority come from root `CLAUDE.md`, active schemas, and
+> labels and capture authority come from root `AGENTS.md`, active schemas, and
 > `tools/local_labels/`.
 
 ---

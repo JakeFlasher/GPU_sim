@@ -9,9 +9,8 @@
 // branch active-mask histogram.
 //
 // Wall-clock attribution is intentionally NOT collected here. CUPTI Activity
-// owns wall-clock; this tool calls zero CUPTI APIs by construction so it
-// cannot collide with the in-process CUPTI subscriber that sol-execbench's
-// timing path already runs.
+// owns wall-clock. This tool queries only CUDA Driver context/stream IDs;
+// calling CUPTI here conflicts with NVBit's instrumentation subscriber.
 //
 // Build:
 //   make ARCH=sm_86       — local 3090 Ti.
@@ -45,6 +44,7 @@
 #include <array>
 #include <atomic>
 #include <fstream>
+#include <limits>
 #include <mutex>
 #include <regex>
 #include <sstream>
@@ -89,9 +89,8 @@
 #include "isa_def/operation_type.h"
 #include "isa_def/trace_opcode.h"
 
-// Pure host-side instruction-class router. Lives in a header so the
-// host-only regression test at test_classifier.cc can call the function
-// directly without pulling in NVBit's CUDA dependencies.
+// Pure host-side instruction-class router shared without NVBit's CUDA
+// dependencies.
 #include "classifier.h"
 
 // --------------------------------------------------------------------------
@@ -114,16 +113,10 @@ static uint32_t        g_max_launch_slots  = 0;
 // without writing into the records array.
 static TierTwoBuffer*  g_tier2_pool        = nullptr;
 
-// Global observed-launch counter. Increments on EVERY kernel-launch CBID
-// the hook observes — regardless of whether the user-module filter
-// accepts or skips the kernel. This is the canonical
-// ``kernel_ordinal_in_workload`` per AC-8: the value MUST match what
-// the matched ``cupti_activity`` Surface 2 run sees across the exact
-// same launch sequence, so any framework kernel (torch / cuBLAS / cuDNN)
-// the filter rejects still consumes an ordinal slot. Round-1 review
-// caught the prior semantic where this counter skipped filtered
-// launches; the post-hoc join then mis-attributed user-kernel
-// matches whenever CUPTI recorded a framework kernel first.
+// Global observed-launch counter. Increments on every kernel-launch CBID
+// the hook observes, including launches skipped by the user-module filter.
+// This preserves the launch order needed by any independently captured
+// CUPTI activity run; process-local stream IDs remain namespace-tagged.
 static uint64_t        g_launch_index      = 0;
 
 // Dense accepted-launch counter. Used ONLY for the ring-buffer slot
@@ -836,10 +829,7 @@ static InstructionClass classify_instr(Instr* instr) {
     }
     const char* opc_c = instr->getOpcode();
     if (opc_c == nullptr || *opc_c == '\0') return INSTR_CLASS_UNKNOWN;
-    // Delegate to the host-side mnemonic classifier in classifier.h so
-    // the routing logic is exercised by test_classifier.cc end-to-end
-    // (the pure (opcode, category) router and the lookup-chain are the
-    // same pair of functions tested there).
+    // Use the shared mnemonic lookup and opcode/category router.
     return classify_mnemonic(std::string(opc_c));
 }
 
@@ -1121,8 +1111,9 @@ static void instrument_function_if_needed(CUcontext ctx, CUfunction func) {
                     // Cache modifier extracted from the SASS opcode
                     // string. NVBit exposes the opcode as a string
                     // (e.g. ``LDG.E.CG``) via ``Instr::getOpcode()``;
-                    // the suffix tokens encode the modifier. Mapping
-                    // pinned by the schema's enum at line 130-137:
+                    // the suffix tokens encode the modifier. Mapping follows
+                    // CompactAccessRecordV1's cache_modifier enum in
+                    // dynamic_trace/trace.proto:
                     // 0 = default_or_none, 1 = ca, 2 = cg, 3 = cs,
                     // 4 = cv, 5 = lu, 255 = unknown. The default
                     // discipline for an opcode with no recognized
@@ -1815,62 +1806,55 @@ static void write_filter_stats_json() {
 }
 
 // --------------------------------------------------------------------------
-// AC-8 stream identity resolver. Round-4 review: the prior
-// first-observation-ordinal scheme assigned NVBit-local integers that
-// were NOT comparable to CUPTI Activity's ``streamId`` field — CUPTI
-// emits a context-unique stream ID that the CUDA driver assigns
-// independently of NVBit's handle observation order. The cross-surface
-// join's stream slot therefore needs both surfaces to use the SAME
-// stream-ID namespace.
-//
-// Resolution: call ``cuStreamGetId(CUstream, unsigned long long*)``
-// (CUDA 12.0+, available on the project's CUDA 13.2 host). This
-// returns the same stream ID CUPTI's activity records carry. We
-// cache the result per ``CUstream`` to avoid repeated driver calls;
-// the cache is keyed on the handle pointer because ``cuStreamGetId``
-// itself takes a handle and is deterministic per handle within a
-// CUDA context.
-//
-// The function returns ``int64_t`` (signed) so a driver-side failure
-// can surface a negative sentinel without colliding with any real
-// CUDA stream ID. A negative value tells the JSON-L emitter the
-// stream identity is not resolvable for this launch; the AC-8 join
-// then lands the record in ``unjoinable``.
-// --------------------------------------------------------------------------
-
-static std::mutex g_stream_ordinal_mu;
-static std::unordered_map<CUstream, uint64_t> g_stream_id_cache;
-
-// Sentinel returned when ``cuStreamGetId`` fails or the driver does
-// not implement it. The joiner treats any negative ``stream_ordinal``
-// as an unresolved stream identity → ``unjoinable``.
+// Driver identities distinguish context lifetimes, recycled stream handles,
+// and per-thread default streams. They are local to this process; the
+// post-hoc join must not compare them numerically with another run's IDs.
 static constexpr int64_t kStreamIdUnresolved = -1;
+static constexpr const char* kDriverIdentityNamespace = "cuda_driver";
 
-// Forward declaration for ``cuStreamGetId`` (CUDA 12.0+). NVBit's
-// vendored headers expose the driver API symbol metadata but NOT a
-// declaration of every API entry point — and ``#include <cuda.h>``
-// conflicts with NVBit's ``generated_cuda_meta.h``. Linker resolves
-// the symbol against ``libcuda.so`` which is already linked into the
-// metric_extractor tool via the Makefile's ``-lcuda``.
-extern "C" CUresult cuStreamGetId(CUstream hStream,
-                                  unsigned long long* streamId);
+struct StreamIdentity {
+    int64_t context_id = kStreamIdUnresolved;
+    int64_t stream_id = kStreamIdUnresolved;
+};
 
-static int64_t resolve_stream_ordinal(CUstream stream) {
-    std::lock_guard<std::mutex> lk(g_stream_ordinal_mu);
-    auto it = g_stream_id_cache.find(stream);
-    if (it != g_stream_id_cache.end()) {
-        return static_cast<int64_t>(it->second);
+static std::atomic<bool> g_identity_failure_reported{false};
+
+// NVBit's vendored headers do not declare every Driver entry point.
+extern "C" CUresult cuCtxGetId(CUcontext context, unsigned long long* contextId);
+extern "C" CUresult cuStreamGetId(CUstream stream, unsigned long long* streamId);
+extern "C" CUresult cuStreamGetId_ptsz(CUstream stream, unsigned long long* streamId);
+
+static StreamIdentity resolve_stream_identity(
+    CUcontext context, CUstream stream, bool per_thread_default = false) {
+    const CUstream identity_stream =
+        per_thread_default && stream == nullptr ? CU_STREAM_PER_THREAD : stream;
+    unsigned long long context_id = 0;
+    unsigned long long stream_id = 0;
+    const CUresult context_rc = cuCtxGetId(context, &context_id);
+    const CUresult stream_rc = per_thread_default
+        ? cuStreamGetId_ptsz(identity_stream, &stream_id)
+        : cuStreamGetId(identity_stream, &stream_id);
+    const auto max_id =
+        static_cast<unsigned long long>(std::numeric_limits<int64_t>::max());
+    if (context_rc != CUDA_SUCCESS || stream_rc != CUDA_SUCCESS ||
+        context_id > max_id || stream_id > max_id) {
+        bool expected = false;
+        if (g_identity_failure_reported.compare_exchange_strong(
+                expected, true, std::memory_order_relaxed)) {
+            fprintf(stderr,
+                    "[metric_extractor] driver identity unresolved: "
+                    "context_rc=%d stream_rc=%d context=%p stream=%p "
+                    "per_thread_default=%u\n",
+                    static_cast<int>(context_rc), static_cast<int>(stream_rc),
+                    static_cast<void*>(context), static_cast<void*>(stream),
+                    per_thread_default ? 1u : 0u);
+        }
+        return {};
     }
-    unsigned long long stream_id_raw = 0;
-    const CUresult rc = cuStreamGetId(stream, &stream_id_raw);
-    if (rc != CUDA_SUCCESS) {
-        // Driver call failed (e.g. the function is unavailable on a
-        // pre-12.0 driver or the stream handle is invalid). Cache the
-        // unresolved sentinel so we don't retry on every launch.
-        return kStreamIdUnresolved;
-    }
-    g_stream_id_cache[stream] = stream_id_raw;
-    return static_cast<int64_t>(stream_id_raw);
+    StreamIdentity identity;
+    identity.context_id = static_cast<int64_t>(context_id);
+    identity.stream_id = static_cast<int64_t>(stream_id);
+    return identity;
 }
 
 // --------------------------------------------------------------------------
@@ -1887,13 +1871,14 @@ struct LaunchContext {
     std::string kernel_name_demangled;
     std::string kernel_name_mangled;
     uint64_t    function_uid;
-    uint64_t    ctx_id;
-    // Raw CUDA stream ID from ``cuStreamGetId()`` — same namespace
-    // CUPTI Activity's ``streamId`` field carries, so the AC-8
-    // cross-surface join can compare the slot directly. Negative
-    // values are the ``kStreamIdUnresolved`` sentinel; the joiner
-    // treats them as ``unjoinable``.
-    int64_t     stream_ordinal;
+    uint64_t    ctx_id = 0;
+    // Raw context pointer for process-local diagnostics. The fields below
+    // are driver IDs used to describe this run's stream topology.
+    int64_t     context_id = kStreamIdUnresolved;
+    // Program-lifetime stream ID from cuStreamGetId. Negative
+    // values mean the driver identity query failed; the joiner treats
+    // the record as unjoinable.
+    int64_t     stream_ordinal = kStreamIdUnresolved;
     // ``launch_index`` is the global observed-launch ordinal (AC-8's
     // ``kernel_ordinal_in_workload`` field) — counts EVERY observed
     // kernel-launch CBID including filter-skipped framework kernels.
@@ -1930,6 +1915,15 @@ struct LaunchContext {
     bool        binary_sha256_valid;
 };
 
+static void set_stream_identity(LaunchContext& lc, CUcontext context,
+                                CUstream stream,
+                                bool per_thread_default = false) {
+    const StreamIdentity identity =
+        resolve_stream_identity(context, stream, per_thread_default);
+    lc.context_id = identity.context_id;
+    lc.stream_ordinal = identity.stream_id;
+}
+
 }  // namespace
 
 // Single pending context; the launch mutex serialises enter→exit so a
@@ -1959,7 +1953,7 @@ static void handle_graph_launch_event(CUcontext ctx, int is_exit,
 // are appended to pending_node_records before cuGraphLaunch-exit fires.
 //
 // On cuGraphLaunch-exit:
-//   1. Lift state[stream] out of the map (under g_graph_state_mu).
+//   1. Lift state[(context, stream)] out of the map (under g_graph_state_mu).
 //   2. cudaStreamSynchronize(stream) to wait for the graph's kernels to
 //      finish — slot reads and any future metric-counter reads must
 //      happen post-sync.
@@ -1975,8 +1969,29 @@ struct GraphLaunchState {
     std::vector<LaunchContext> pending_node_records;
 };
 
+struct GraphLaunchKey {
+    CUcontext context;
+    CUstream stream;
+
+    bool operator==(const GraphLaunchKey& other) const {
+        return context == other.context && stream == other.stream;
+    }
+};
+
+struct GraphLaunchKeyHash {
+    size_t operator()(const GraphLaunchKey& key) const {
+        const size_t context_hash =
+            std::hash<uintptr_t>()(reinterpret_cast<uintptr_t>(key.context));
+        const size_t stream_hash =
+            std::hash<uintptr_t>()(reinterpret_cast<uintptr_t>(key.stream));
+        return context_hash ^ (stream_hash + static_cast<size_t>(0x9e3779b9u) +
+                               (context_hash << 6) + (context_hash >> 2));
+    }
+};
+
 static std::mutex g_graph_state_mu;
-static std::unordered_map<CUstream, GraphLaunchState> g_pending_graph_states;
+static std::unordered_map<GraphLaunchKey, GraphLaunchState, GraphLaunchKeyHash>
+    g_pending_graph_states;
 
 static const char* DEFAULT_LAUNCHES_PATH =
     "./metric_extractor_launches.jsonl";
@@ -2283,6 +2298,8 @@ static void write_bounded_replacement_record_locked(
     oss << "\"schema_version\":" << METRIC_EXTRACTOR_SCHEMA_VERSION << ",";
     oss << "\"tool_version\":\""
         << json_escape(METRIC_EXTRACTOR_TOOL_VERSION) << "\",";
+    oss << "\"identity_namespace\":\""
+        << kDriverIdentityNamespace << "\",";
     oss << "\"launch_kind\":\"" << json_escape(lc.launch_kind) << "\",";
     if (lc.launch_kind != "graph_launch_not_observed") {
         oss << "\"kernel_name\":\""
@@ -2292,6 +2309,7 @@ static void write_bounded_replacement_record_locked(
         oss << "\"function_uid\":" << lc.function_uid << ",";
     }
     oss << "\"ctx_id\":" << lc.ctx_id << ",";
+    oss << "\"context_id\":" << lc.context_id << ",";
     oss << "\"stream_id\":" << lc.stream_ordinal << ",";
     oss << "\"launch_index\":" << lc.launch_index << ",";
     append_xyz(oss, "grid_dim", lc.grid_dim); oss << ",";
@@ -2335,6 +2353,8 @@ static void write_bounded_replacement_record_locked(
     oss << "},";
     oss << "\"static_sidecar\":null,";
     oss << "\"cross_surface_join_key\":{";
+    oss << "\"identity_namespace\":\""
+        << kDriverIdentityNamespace << "\",";
     oss << "\"workload_index\":null,";
     oss << "\"evaluator_config_hash\":null,";
     if (lc.launch_kind != "graph_launch_not_observed") {
@@ -2348,6 +2368,7 @@ static void write_bounded_replacement_record_locked(
     append_xyz(oss, "block_xyz", lc.block_dim); oss << ",";
     oss << "\"dynamic_smem\":" << lc.dynamic_smem << ",";
     oss << "\"stream_ordinal\":" << lc.stream_ordinal;
+    oss << ",\"context_id\":" << lc.context_id;
     oss << "},";
     oss << "\"substatus\":{";
     oss << "\"truncated\":" << (is_truncated ? "true" : "false") << ",";
@@ -2783,6 +2804,8 @@ static void write_launch_jsonl_record(const LaunchContext& lc) {
     oss << "\"schema_version\":" << METRIC_EXTRACTOR_SCHEMA_VERSION << ",";
     oss << "\"tool_version\":\""
         << json_escape(METRIC_EXTRACTOR_TOOL_VERSION) << "\",";
+    oss << "\"identity_namespace\":\""
+        << kDriverIdentityNamespace << "\",";
     oss << "\"launch_kind\":\"" << json_escape(lc.launch_kind) << "\",";
     if (lc.launch_kind != "graph_launch_not_observed") {
         oss << "\"kernel_name\":\""
@@ -2792,6 +2815,7 @@ static void write_launch_jsonl_record(const LaunchContext& lc) {
         oss << "\"function_uid\":" << lc.function_uid << ",";
     }
     oss << "\"ctx_id\":" << lc.ctx_id << ",";
+    oss << "\"context_id\":" << lc.context_id << ",";
     oss << "\"stream_id\":" << lc.stream_ordinal << ",";
     oss << "\"launch_index\":" << lc.launch_index << ",";
     append_xyz(oss, "grid_dim", lc.grid_dim); oss << ",";
@@ -2959,6 +2983,8 @@ static void write_launch_jsonl_record(const LaunchContext& lc) {
     // when it lands; the tool emits null for those slots so the field
     // shape stays stable.
     oss << "\"cross_surface_join_key\":{";
+    oss << "\"identity_namespace\":\""
+        << kDriverIdentityNamespace << "\",";
     oss << "\"workload_index\":null,";
     oss << "\"evaluator_config_hash\":null,";
     if (lc.launch_kind != "graph_launch_not_observed") {
@@ -2971,7 +2997,8 @@ static void write_launch_jsonl_record(const LaunchContext& lc) {
     append_xyz(oss, "grid_xyz", lc.grid_dim); oss << ",";
     append_xyz(oss, "block_xyz", lc.block_dim); oss << ",";
     oss << "\"dynamic_smem\":" << lc.dynamic_smem << ",";
-    oss << "\"stream_ordinal\":" << lc.stream_ordinal;
+    oss << "\"stream_ordinal\":" << lc.stream_ordinal << ",";
+    oss << "\"context_id\":" << lc.context_id;
     oss << "},";
 
     // Build the substatus block with the REAL saturated_counters value
@@ -3052,11 +3079,12 @@ static void write_launch_jsonl_record(const LaunchContext& lc) {
 
 static void write_graph_launch_not_observed_record(CUcontext ctx,
                                                     CUstream stream,
-                                                    uint64_t launch_index) {
+                                                    uint64_t launch_index,
+                                                    bool per_thread_default) {
     LaunchContext lc;
     lc.function_uid = 0;
     lc.ctx_id = reinterpret_cast<uintptr_t>(ctx);
-    lc.stream_ordinal = resolve_stream_ordinal(stream);
+    set_stream_identity(lc, ctx, stream, per_thread_default);
     lc.launch_index = launch_index;
     // graph_launch_not_observed records never read a slot — the synthesised
     // record carries placeholder metric values. Pin slot_index to 0 so
@@ -3438,6 +3466,12 @@ static bool is_launch_cbid(nvbit_api_cuda_t cbid) {
            (cbid == API_CUDA_cuLaunchCooperativeKernel_ptsz);
 }
 
+static bool is_per_thread_default_launch(nvbit_api_cuda_t cbid) {
+    return (cbid == API_CUDA_cuLaunchKernel_ptsz) ||
+           (cbid == API_CUDA_cuLaunchKernelEx_ptsz) ||
+           (cbid == API_CUDA_cuLaunchCooperativeKernel_ptsz);
+}
+
 static CUfunction extract_func_from_launch_params(nvbit_api_cuda_t cbid,
                                                    void* params) {
     if (cbid == API_CUDA_cuLaunchKernelEx ||
@@ -3622,8 +3656,9 @@ void nvbit_at_cuda_event(CUcontext ctx, int is_exit, nvbit_api_cuda_t cbid,
                         p->config->blockDimZ;
                     g_pending_launch_context.dynamic_smem =
                         p->config->sharedMemBytes;
-                    g_pending_launch_context.stream_ordinal =
-                        resolve_stream_ordinal(p->config->hStream);
+                    set_stream_identity(
+                        g_pending_launch_context, ctx, p->config->hStream,
+                        is_per_thread_default_launch(cbid));
                 }
             } else if (cbid == API_CUDA_cuLaunchCooperativeKernel ||
                        cbid == API_CUDA_cuLaunchCooperativeKernel_ptsz) {
@@ -3636,8 +3671,9 @@ void nvbit_at_cuda_event(CUcontext ctx, int is_exit, nvbit_api_cuda_t cbid,
                 g_pending_launch_context.block_dim[1] = p->blockDimY;
                 g_pending_launch_context.block_dim[2] = p->blockDimZ;
                 g_pending_launch_context.dynamic_smem = p->sharedMemBytes;
-                g_pending_launch_context.stream_ordinal =
-                    resolve_stream_ordinal(p->hStream);
+                set_stream_identity(
+                    g_pending_launch_context, ctx, p->hStream,
+                    is_per_thread_default_launch(cbid));
             } else {
                 auto* p = static_cast<cuLaunchKernel_params*>(params);
                 g_pending_launch_context.grid_dim[0]  = p->gridDimX;
@@ -3647,8 +3683,9 @@ void nvbit_at_cuda_event(CUcontext ctx, int is_exit, nvbit_api_cuda_t cbid,
                 g_pending_launch_context.block_dim[1] = p->blockDimY;
                 g_pending_launch_context.block_dim[2] = p->blockDimZ;
                 g_pending_launch_context.dynamic_smem = p->sharedMemBytes;
-                g_pending_launch_context.stream_ordinal =
-                    resolve_stream_ordinal(p->hStream);
+                set_stream_identity(
+                    g_pending_launch_context, ctx, p->hStream,
+                    is_per_thread_default_launch(cbid));
             }
             g_last_launch_accepted = false;
             g_pending_budget_skipped_record = true;
@@ -3752,8 +3789,9 @@ void nvbit_at_cuda_event(CUcontext ctx, int is_exit, nvbit_api_cuda_t cbid,
                     p->config->blockDimZ;
                 g_pending_launch_context.dynamic_smem =
                     p->config->sharedMemBytes;
-                g_pending_launch_context.stream_ordinal =
-                    resolve_stream_ordinal(p->config->hStream);
+                set_stream_identity(
+                    g_pending_launch_context, ctx, p->config->hStream,
+                    is_per_thread_default_launch(cbid));
                 if (p->config->attrs != nullptr) {
                     for (unsigned i = 0; i < p->config->numAttrs; ++i) {
                         if (p->config->attrs[i].id ==
@@ -3778,8 +3816,9 @@ void nvbit_at_cuda_event(CUcontext ctx, int is_exit, nvbit_api_cuda_t cbid,
             g_pending_launch_context.block_dim[1] = p->blockDimY;
             g_pending_launch_context.block_dim[2] = p->blockDimZ;
             g_pending_launch_context.dynamic_smem = p->sharedMemBytes;
-            g_pending_launch_context.stream_ordinal =
-                resolve_stream_ordinal(p->hStream);
+            set_stream_identity(
+                g_pending_launch_context, ctx, p->hStream,
+                is_per_thread_default_launch(cbid));
         } else {
             auto* p = static_cast<cuLaunchKernel_params*>(params);
             g_pending_launch_context.grid_dim[0] = p->gridDimX;
@@ -3789,8 +3828,9 @@ void nvbit_at_cuda_event(CUcontext ctx, int is_exit, nvbit_api_cuda_t cbid,
             g_pending_launch_context.block_dim[1] = p->blockDimY;
             g_pending_launch_context.block_dim[2] = p->blockDimZ;
             g_pending_launch_context.dynamic_smem = p->sharedMemBytes;
-            g_pending_launch_context.stream_ordinal =
-                resolve_stream_ordinal(p->hStream);
+            set_stream_identity(
+                g_pending_launch_context, ctx, p->hStream,
+                is_per_thread_default_launch(cbid));
         }
 
         g_accepted_launches.fetch_add(1, std::memory_order_relaxed);
@@ -3927,7 +3967,7 @@ void nvbit_at_graph_node_launch(CUcontext ctx, CUfunction func,
         skip_lc.kernel_name_mangled = mangled_name;
         skip_lc.function_uid = nvbit_get_func_addr(ctx, func);
         skip_lc.ctx_id = reinterpret_cast<uintptr_t>(ctx);
-        skip_lc.stream_ordinal = resolve_stream_ordinal(stream);
+        set_stream_identity(skip_lc, ctx, stream);
         skip_lc.launch_index = my_launch_index;
         skip_lc.slot_index = 0;
         for (int i = 0; i < 3; ++i) {
@@ -3942,7 +3982,7 @@ void nvbit_at_graph_node_launch(CUcontext ctx, CUfunction func,
         skip_lc.waiver_reason = "per_process_budget_exceeded";
         {
             std::lock_guard<std::mutex> lk(g_graph_state_mu);
-            auto it = g_pending_graph_states.find(stream);
+            auto it = g_pending_graph_states.find(GraphLaunchKey{ctx, stream});
             if (it != g_pending_graph_states.end()) {
                 it->second.pending_node_records.push_back(
                     std::move(skip_lc));
@@ -3998,7 +4038,7 @@ void nvbit_at_graph_node_launch(CUcontext ctx, CUfunction func,
     lc.kernel_name_mangled = mangled_name;
     lc.function_uid = nvbit_get_func_addr(ctx, func);
     lc.ctx_id = reinterpret_cast<uintptr_t>(ctx);
-    lc.stream_ordinal = resolve_stream_ordinal(stream);
+    set_stream_identity(lc, ctx, stream);
     lc.launch_index = my_launch_index;
     lc.slot_index = my_slot_index;
     for (int i = 0; i < 3; ++i) {
@@ -4014,7 +4054,7 @@ void nvbit_at_graph_node_launch(CUcontext ctx, CUfunction func,
 
     {
         std::lock_guard<std::mutex> lk(g_graph_state_mu);
-        auto it = g_pending_graph_states.find(stream);
+        auto it = g_pending_graph_states.find(GraphLaunchKey{ctx, stream});
         if (it != g_pending_graph_states.end()) {
             it->second.pending_node_records.push_back(std::move(lc));
         } else {
@@ -4063,7 +4103,7 @@ static void handle_graph_launch_event(CUcontext ctx, int is_exit,
         // g_launch_mutex across the driver call, the per-node hook's
         // own brief acquisition of g_launch_mutex would deadlock
         // (the mutex is non-recursive). Use the dedicated
-        // g_graph_state_mu for the per-stream state map.
+        // g_graph_state_mu for the per-(context, stream) state map.
         g_graph_launches_seen.fetch_add(1, std::memory_order_relaxed);
         std::lock_guard<std::mutex> lk(g_graph_state_mu);
         GraphLaunchState state;
@@ -4076,11 +4116,11 @@ static void handle_graph_launch_event(CUcontext ctx, int is_exit,
         // exit; if it didn't, dropping the stale snapshot is the
         // right recovery — we never hold pending records across
         // boundaries).
-        g_pending_graph_states[stream] = std::move(state);
+        g_pending_graph_states[GraphLaunchKey{ctx, stream}] = std::move(state);
         return;
     }
 
-    // is_exit == true: drain the per-stream state. Take ownership of
+    // is_exit == true: drain the per-(context, stream) state. Take ownership of
     // the GraphLaunchState (lift it out of the map) before any
     // synchronization or file I/O so the next cuGraphLaunch on the
     // same stream sees a clean slot.
@@ -4088,7 +4128,7 @@ static void handle_graph_launch_event(CUcontext ctx, int is_exit,
     bool had_state = false;
     {
         std::lock_guard<std::mutex> lk(g_graph_state_mu);
-        auto it = g_pending_graph_states.find(stream);
+        auto it = g_pending_graph_states.find(GraphLaunchKey{ctx, stream});
         if (it != g_pending_graph_states.end()) {
             lifted = std::move(it->second);
             g_pending_graph_states.erase(it);
@@ -4146,8 +4186,9 @@ static void handle_graph_launch_event(CUcontext ctx, int is_exit,
         my_launch_index = g_launch_index;
         g_launch_index++;
         pthread_mutex_unlock(&g_launch_mutex);
-        write_graph_launch_not_observed_record(ctx, stream,
-                                                my_launch_index);
+        write_graph_launch_not_observed_record(
+            ctx, stream, my_launch_index,
+            cbid == API_CUDA_cuGraphLaunch_ptsz);
         return;
     }
 

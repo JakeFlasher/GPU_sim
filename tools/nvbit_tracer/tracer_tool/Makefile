@@ -1,8 +1,21 @@
-NVCC_CCBIN?=$(CXX)
+.DEFAULT_GOAL := all
+CUDA_INSTALL_PATH ?= $(if $(wildcard /usr/local/cuda-13.2/bin/nvcc),/usr/local/cuda-13.2,$(shell dirname $(shell dirname $(shell command -v nvcc))))
+NVCC_CCBIN?=$(if $(wildcard /usr/bin/g++-14),/usr/bin/g++-14,$(CXX))
 NVCC?=$(CUDA_INSTALL_PATH)/bin/nvcc -ccbin=$(NVCC_CCBIN) -D_FORCE_INLINES
 PTXAS?=$(CUDA_INSTALL_PATH)/bin/ptxas
 
 DEBUG_TOOL?=0
+
+# Keep direct subdirectory builds on the repository-pinned protobuf runtime.
+# The parent Makefile exports these values, but invoking this Makefile directly
+# previously fell through to the host protobuf (currently 7.36) and paired it
+# with the checked-in 7.34 generated code.
+PB_PREFIX ?= $(abspath ../../../.toolchain/pb)
+PKG_CONFIG ?= pkg-config
+PKG_CONFIG_FLAGS ?= --define-prefix
+PKG_CONFIG_PATH ?= $(PB_PREFIX)/lib/pkgconfig
+PROTOC ?= $(PB_PREFIX)/bin/protoc
+export PKG_CONFIG_PATH PROTOC
 
 OPTFLAGS=
 
@@ -67,13 +80,16 @@ TRACER_INCLUDES=-I$(NVBIT_PATH) $(PROTOBUF_CFLAGS)
 
 SOURCES=$(wildcard *.cu)
 
-OBJECTS=$(SOURCES:.cu=.o)
+# Device code is architecture-specific.  Keep the architecture in the object
+# name so switching ARCH cannot reuse an object compiled for another target
+# (for example, an sm_86 object when linking the default ARCH=all tool).
+TRACER_TOOL_OBJECT=tracer_tool.$(ARCH).o
+INJECT_FUNCS_OBJECT=inject_funcs.$(ARCH).o
+OBJECTS=$(filter-out tracer_tool.o inject_funcs.o,$(SOURCES:.cu=.o)) \
+	$(TRACER_TOOL_OBJECT) $(INJECT_FUNCS_OBJECT)
+DEPFILES=$(OBJECTS:.o=.d) $(HOST_OBJECTS:.o=.d)
 
-# Host-only C++ translation units linked into tracer_tool.so. Each is
-# kept as a separate .cc so the same translation unit also builds
-# into a host-only unit-test binary under tests/, with no NVBit /
-# CUDA / nvcc surface leaking into the test (mirrors the
-# phase_classifier / memory_op_class test pattern).
+# Host-only C++ translation units linked into tracer_tool.so.
 #
 #   allocation_registry.cc — per-context allocator registry that
 #     tracer_tool.cu's cuMemAlloc/cuMemFree hooks and
@@ -115,36 +131,36 @@ TRACE_PRINTER = trace_printer
 all: traces_enhanced $(NVBIT_TOOL) trace_printer
 
 $(NVBIT_TOOL): $(OBJECTS) $(HOST_OBJECTS) $(NVBIT_PATH)/libnvbit.a traces_enhanced
-	$(NVCC) -arch=$(ARCH) $(OPTFLAGS) $(OBJECTS) $(HOST_OBJECTS) $(TRACES_ENHANCED_OBJ) $(TRACES_ENHANCED_PROTOCOL_BUFFER_OBJ) $(LIBS) $(NVCC_PATH) -Xlinker --no-as-needed -lcuda -Xlinker --as-needed -lcudart_static $(PROTOBUF_LIBS) -shared -o $@
+	$(NVCC) -arch=$(ARCH) $(OPTFLAGS) $(OBJECTS) $(HOST_OBJECTS) $(TRACES_ENHANCED_OBJ) $(TRACES_ENHANCED_PROTOCOL_BUFFER_OBJ) $(LIBS) $(NVCC_PATH) -Xlinker --no-as-needed -lcuda -Xlinker --as-needed -lcudart_static $(PROTOBUF_LIBS) -Xlinker -z -Xlinker defs -shared -o $@
 
 # allocation_registry.cc is host-only C++ (no CUDA / NVBit / nvcc).
 # Build it with g++ + -fPIC so it can link into the shared tracer .so
 # AND into the host-only unit-test binary below.
-allocation_registry.o: allocation_registry.cc allocation_registry.h
-	$(CXX) -std=c++20 -Wall -Wextra -fPIC $(OPTFLAGS) -c $< -o $@
+allocation_registry.o: allocation_registry.cc allocation_registry.h Makefile
+	$(CXX) -std=c++20 -Wall -Wextra -fPIC $(OPTFLAGS) -MMD -MP -MF $(@:.o=.d) -MT $@ -c $< -o $@
 
 # exclusion_aggregator.cc is host-only C++ (same constraints as
 # allocation_registry.cc). Builds the typed-exclusion sidecar
 # accumulator that recv_thread_fun feeds; serialized to
 # traces/extra_info/{unsupported_memory_path,unmapped_memory_range}.json
 # at trace finalization.
-exclusion_aggregator.o: exclusion_aggregator.cc exclusion_aggregator.h
-	$(CXX) -std=c++20 -Wall -Wextra -fPIC $(OPTFLAGS) -c $< -o $@
+exclusion_aggregator.o: exclusion_aggregator.cc exclusion_aggregator.h Makefile
+	$(CXX) -std=c++20 -Wall -Wextra -fPIC $(OPTFLAGS) -MMD -MP -MF $(@:.o=.d) -MT $@ -c $< -o $@
 
 # Descriptor-relative phase-record publication helper. This host-only object
 # owns the retained TRACES_FOLDER descriptor and is linked into tracer_tool.so.
-phase_record_writer.o: phase_record_writer.cc phase_record_writer.h phase_record_path.h
-	$(CXX) -std=c++20 -Wall -Wextra -fPIC $(OPTFLAGS) -c $< -o $@
+phase_record_writer.o: phase_record_writer.cc phase_record_writer.h phase_record_path.h Makefile
+	$(CXX) -std=c++20 -Wall -Wextra -fPIC $(OPTFLAGS) -MMD -MP -MF $(@:.o=.d) -MT $@ -c $< -o $@
 
 # Generated protobuf headers the tracer .cu files consume via
 # `#include "../traces_enhanced/pb_trace/include/instruction.pb.h"` (and
 # trace.pb.h, address.pb.h). The headers live in the traces_enhanced
 # subbuild but the .cu files depend on their wire layout: when
-# `instruction.proto` changes, both `tracer_tool.o` and `inject_funcs.o`
+# `instruction.proto` changes, both architecture-specific CUDA objects
 # MUST be re-emitted before the .so is relinked. Without this dependency
 # `make -C tools/nvbit_tracer/tracer_tool` would re-generate
 # `instruction.pb.{h,cc}` (because traces_enhanced is a phony recursive
-# build) but reuse stale `tracer_tool.o` against new `instruction.pb.o`,
+# build) but reuse a stale tracer object against new `instruction.pb.o`,
 # producing a tracer .so whose protobuf layout disagrees with the .pb.o
 # it was linked against — the failure mode is a glibc malloc abort the
 # first time `recv_thread_fun` deserializes a message.
@@ -173,10 +189,25 @@ TRACES_ENHANCED_PB_HEADERS = \
 %.o: %.cu common.h $(TRACES_ENHANCED_PB_HEADERS) | traces_enhanced
 	$(NVCC) -dc -c -std=c++20 $(TRACER_INCLUDES) -Xptxas -cloning=no -Xcompiler -Wall -arch=$(ARCH) $(OPTFLAGS) -Xcompiler -fPIC $< -o $@
 
-tracer_tool.o: active_launch_gate.h module_origin_resolver.h phase_record_writer.h phase_record_path.h ../metric_extractor/tier2_sha256.h
+$(TRACER_TOOL_OBJECT): Makefile tracer_tool.cu common.h $(TRACES_ENHANCED_PB_HEADERS) \
+	active_launch_gate.h module_origin_resolver.h phase_record_writer.h phase_record_path.h ../metric_extractor/tier2_sha256.h \
+	../traces_enhanced/src/traced_execution.h ../traces_enhanced/src/traced_kernel.h \
+	../traces_enhanced/src/traced_instruction.h ../traces_enhanced/src/traced_operand.h \
+	../traces_enhanced/src/control_bits.h ../traces_enhanced/src/register_usage.h | traces_enhanced
+	$(NVCC) -dc -c -MMD -MP -MF $(@:.o=.d) -MT $@ -std=c++20 $(TRACER_INCLUDES) -Xptxas -cloning=no -Xcompiler -Wall -arch=$(ARCH) $(OPTFLAGS) -Xcompiler -fPIC tracer_tool.cu -o $@
 
-inject_funcs.o: inject_funcs.cu common.h $(TRACES_ENHANCED_PB_HEADERS) | traces_enhanced
-	$(NVCC) $(TRACER_INCLUDES) $(MAXRREGCOUNT_FLAG) -Xptxas -astoolspatch --keep-device-functions -arch=$(ARCH) -Xcompiler -Wall -Xcompiler -fPIC -c $< -o $@
+# Compatibility target for callers that explicitly request tracer_tool.o.  The
+# live link uses TRACER_TOOL_OBJECT, so this copy cannot contaminate another
+# architecture's build.
+tracer_tool.o: $(TRACER_TOOL_OBJECT)
+	cp $< $@
+
+$(INJECT_FUNCS_OBJECT): inject_funcs.cu Makefile common.h $(TRACES_ENHANCED_PB_HEADERS) | traces_enhanced
+	$(NVCC) $(TRACER_INCLUDES) $(MAXRREGCOUNT_FLAG) -Xptxas -astoolspatch --keep-device-functions -MMD -MP -MF $(@:.o=.d) -MT $@ -arch=$(ARCH) -Xcompiler -Wall -Xcompiler -fPIC -c $< -o $@
+
+# Compatibility target for callers that explicitly request inject_funcs.o.
+inject_funcs.o: $(INJECT_FUNCS_OBJECT)
+	cp $< $@
 
 # MOD. Begin. ENHANCED TRACES
 traces_enhanced:
@@ -188,108 +219,10 @@ traces_enhanced:
 trace_printer: traces_enhanced
 	$(NVCC) -std=c++20 $(TRACER_INCLUDES) $(OPTFLAGS) -o $(TRACE_PRINTER) $(TRACES_ENHANCED_OBJ) $(TRACES_ENHANCED_PROTOCOL_BUFFER_OBJ) trace_printer.cc $(PROTOBUF_LIBS)
 
-# phase_classifier_test: standalone host-only unit test for the three
-# opcode-short predicates in phase_classifier.h. Compiles with g++ alone
-# (no NVBit, no CUDA, no nvcc) so the test surface is reachable on hosts
-# without a GPU toolchain.
-TESTS_DIR=tests
-PHASE_CLASSIFIER_TEST_BIN=$(TESTS_DIR)/phase_classifier_test
-PHASE_CLASSIFIER_TEST_SRC=$(TESTS_DIR)/phase_classifier_test.cc
-
-$(PHASE_CLASSIFIER_TEST_BIN): $(PHASE_CLASSIFIER_TEST_SRC) phase_classifier.h
-	$(CXX) -std=c++20 -Wall -Wextra -O2 -o $@ $(PHASE_CLASSIFIER_TEST_SRC)
-
-# memory_op_class_test: standalone host-only unit test for the
-# `classify` helper in memory_op_class.h. Same g++-only build pattern as
-# phase_classifier_test — no NVBit, no protobuf, no nvcc — so the
-# classifier surface stays reachable on hosts without a GPU toolchain.
-MEMORY_OP_CLASS_TEST_BIN=$(TESTS_DIR)/memory_op_class_test
-MEMORY_OP_CLASS_TEST_SRC=$(TESTS_DIR)/memory_op_class_test.cc
-
-$(MEMORY_OP_CLASS_TEST_BIN): $(MEMORY_OP_CLASS_TEST_SRC) memory_op_class.h
-	$(CXX) -std=c++20 -Wall -Wextra -O2 -o $@ $(MEMORY_OP_CLASS_TEST_SRC)
-
-# memory_op_access_kind_test: standalone host-only unit test for the
-# `classify` helper in memory_op_access_kind.h. The access-kind
-# classifier is orthogonal to the memory-op-class classifier: it tags
-# the direction (load / store / atomic / async-copy) rather than the
-# memory space. Same g++-only build pattern — no NVBit, no protobuf,
-# no nvcc — so the producer-side write-policy classifier stays
-# reachable on hosts without a GPU toolchain.
-MEMORY_OP_ACCESS_KIND_TEST_BIN=$(TESTS_DIR)/memory_op_access_kind_test
-MEMORY_OP_ACCESS_KIND_TEST_SRC=$(TESTS_DIR)/memory_op_access_kind_test.cc
-
-$(MEMORY_OP_ACCESS_KIND_TEST_BIN): $(MEMORY_OP_ACCESS_KIND_TEST_SRC) memory_op_access_kind.h
-	$(CXX) -std=c++20 -Wall -Wextra -O2 -o $@ $(MEMORY_OP_ACCESS_KIND_TEST_SRC)
-
-# allocation_registry_test: standalone host-only unit test for the
-# per-context allocation registry in allocation_registry.cc. Same g++-
-# only pattern: no NVBit, no CUDA driver headers, no nvcc. The test
-# casts pointer constants to the registry's `void *` context handle
-# parameter so it is reachable on hosts without a GPU toolchain.
-ALLOCATION_REGISTRY_TEST_BIN=$(TESTS_DIR)/allocation_registry_test
-ALLOCATION_REGISTRY_TEST_SRC=$(TESTS_DIR)/allocation_registry_test.cc
-
-$(ALLOCATION_REGISTRY_TEST_BIN): $(ALLOCATION_REGISTRY_TEST_SRC) allocation_registry.h allocation_registry.cc
-	$(CXX) -std=c++20 -Wall -Wextra -O2 -o $@ $(ALLOCATION_REGISTRY_TEST_SRC) allocation_registry.cc
-
-# exclusion_aggregator_test: standalone host-only unit test for the
-# typed-exclusion accumulator. Same g++-only build pattern, no NVBit/
-# CUDA dependency.
-EXCLUSION_AGGREGATOR_TEST_BIN=$(TESTS_DIR)/exclusion_aggregator_test
-EXCLUSION_AGGREGATOR_TEST_SRC=$(TESTS_DIR)/exclusion_aggregator_test.cc
-
-$(EXCLUSION_AGGREGATOR_TEST_BIN): $(EXCLUSION_AGGREGATOR_TEST_SRC) exclusion_aggregator.h exclusion_aggregator.cc
-	$(CXX) -std=c++20 -Wall -Wextra -O2 -o $@ $(EXCLUSION_AGGREGATOR_TEST_SRC) exclusion_aggregator.cc
-
-# path_resolver_test: standalone host-only unit test for the
-# `resolve_output_path` helper in path_resolver.h. Same g++-only
-# build pattern: no NVBit, no CUDA, no nvcc. The helper itself is
-# a header-only inline; the test simply includes the header.
-PATH_RESOLVER_TEST_BIN=$(TESTS_DIR)/path_resolver_test
-PATH_RESOLVER_TEST_SRC=$(TESTS_DIR)/path_resolver_test.cc
-
-$(PATH_RESOLVER_TEST_BIN): $(PATH_RESOLVER_TEST_SRC) path_resolver.h
-	$(CXX) -std=c++20 -Wall -Wextra -O2 -o $@ $(PATH_RESOLVER_TEST_SRC)
-
-ACTIVE_LAUNCH_GATE_TEST_BIN=$(TESTS_DIR)/active_launch_gate_test
-ACTIVE_LAUNCH_GATE_TEST_SRC=$(TESTS_DIR)/active_launch_gate_test.cc
-
-$(ACTIVE_LAUNCH_GATE_TEST_BIN): $(ACTIVE_LAUNCH_GATE_TEST_SRC) active_launch_gate.h
-	$(CXX) -std=c++20 -Wall -Wextra -O2 -o $@ $(ACTIVE_LAUNCH_GATE_TEST_SRC)
-
-MODULE_ORIGIN_RESOLVER_TEST_BIN=$(TESTS_DIR)/module_origin_resolver_test
-MODULE_ORIGIN_RESOLVER_TEST_SRC=$(TESTS_DIR)/module_origin_resolver_test.cc
-ACTIVE_RANGE_SOURCE_TEST=$(TESTS_DIR)/active_range_source_test.py
-
-$(MODULE_ORIGIN_RESOLVER_TEST_BIN): $(MODULE_ORIGIN_RESOLVER_TEST_SRC) module_origin_resolver.h ../metric_extractor/tier2_sha256.h
-	$(CXX) -std=c++20 -Wall -Wextra -O2 -o $@ $(MODULE_ORIGIN_RESOLVER_TEST_SRC)
-
-# phase_record_writer_test: standalone hostile-filesystem regression for the
-# exact helper linked into the live tracer. Test-only hooks bind post-create
-# link-count races, write/fsync/close failures, PID ownership, cleanup-error
-# precedence, and fatal integration; no CUDA, NVBit, protobuf, or nvcc
-# dependency is present.
-PHASE_RECORD_WRITER_TEST_BIN=$(TESTS_DIR)/phase_record_writer_test
-PHASE_RECORD_WRITER_TEST_SRC=$(TESTS_DIR)/phase_record_writer_test.cc
-
-$(PHASE_RECORD_WRITER_TEST_BIN): $(PHASE_RECORD_WRITER_TEST_SRC) phase_record_writer.cc phase_record_writer.h phase_record_path.h
-	$(CXX) -std=c++20 -Wall -Wextra -O2 -DSIMBENCH_PHASE_RECORD_WRITER_TESTING -o $@ $(PHASE_RECORD_WRITER_TEST_SRC) phase_record_writer.cc
-
-unit-tests: $(PHASE_CLASSIFIER_TEST_BIN) $(MEMORY_OP_CLASS_TEST_BIN) $(MEMORY_OP_ACCESS_KIND_TEST_BIN) $(ALLOCATION_REGISTRY_TEST_BIN) $(EXCLUSION_AGGREGATOR_TEST_BIN) $(PATH_RESOLVER_TEST_BIN) $(ACTIVE_LAUNCH_GATE_TEST_BIN) $(MODULE_ORIGIN_RESOLVER_TEST_BIN) $(PHASE_RECORD_WRITER_TEST_BIN)
-	./$(PHASE_CLASSIFIER_TEST_BIN)
-	./$(MEMORY_OP_CLASS_TEST_BIN)
-	./$(MEMORY_OP_ACCESS_KIND_TEST_BIN)
-	./$(ALLOCATION_REGISTRY_TEST_BIN)
-	./$(EXCLUSION_AGGREGATOR_TEST_BIN)
-	./$(PATH_RESOLVER_TEST_BIN)
-	./$(ACTIVE_LAUNCH_GATE_TEST_BIN)
-	./$(MODULE_ORIGIN_RESOLVER_TEST_BIN)
-	./$(PHASE_RECORD_WRITER_TEST_BIN)
-	python3 $(ACTIVE_RANGE_SOURCE_TEST)
-
 clean:
-	rm -f *.so *.o trace_printer $(PHASE_CLASSIFIER_TEST_BIN) $(MEMORY_OP_CLASS_TEST_BIN) $(MEMORY_OP_ACCESS_KIND_TEST_BIN) $(ALLOCATION_REGISTRY_TEST_BIN) $(EXCLUSION_AGGREGATOR_TEST_BIN) $(PATH_RESOLVER_TEST_BIN) $(ACTIVE_LAUNCH_GATE_TEST_BIN) $(MODULE_ORIGIN_RESOLVER_TEST_BIN) $(PHASE_RECORD_WRITER_TEST_BIN)
+	rm -f *.so *.o *.d trace_printer $(PHASE_CLASSIFIER_TEST_BIN) $(MEMORY_OP_CLASS_TEST_BIN) $(MEMORY_OP_ACCESS_KIND_TEST_BIN) $(ALLOCATION_REGISTRY_TEST_BIN) $(EXCLUSION_AGGREGATOR_TEST_BIN) $(PATH_RESOLVER_TEST_BIN) $(ACTIVE_LAUNCH_GATE_TEST_BIN) $(MODULE_ORIGIN_RESOLVER_TEST_BIN) $(PHASE_RECORD_WRITER_TEST_BIN)
 	$(MAKE) clean -C $(TRACES_ENHANCED_DIR)
 
-.PHONY: all traces_enhanced unit-tests clean
+.PHONY: all traces_enhanced clean
+
+-include $(DEPFILES)

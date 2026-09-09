@@ -2,12 +2,9 @@
 //
 // Pure host + device helper: count the distinct 32-byte memory sectors
 // touched by a set of per-lane global memory accesses. Used by the
-// `count_global_mem_access` injected device callback and by the host-only
-// regression test that locks in the algorithm against the Round-5 single-
-// sector-only bug Codex flagged (an access at `addr=24, bytes=16` touches
-// BOTH sector 0 and sector 1; the pre-Round-6 algorithm counted only
-// sector 0, undercounting transferred bytes for any access that crosses a
-// 32-byte boundary).
+// `count_global_mem_access` injected device callback. An access at
+// `addr=24, bytes=16` touches sectors 0 and 1; both contribute to the
+// transferred-byte count.
 //
 // Algorithm:
 //   For each lane access (addr, bytes):
@@ -38,8 +35,8 @@
 
 #define METRIC_EXTRACTOR_DISTINCT_SECTOR_CAP 128
 
-// __host__ __device__ so the device callback in inject_funcs.cu calls the
-// same function the host-only regression in test_classifier.cc exercises.
+// __host__ __device__ so the device callback in inject_funcs.cu can reuse
+// this pure helper.
 // Marked inline so multiple translation units that include the header do
 // not generate duplicate symbols at link time.
 //
@@ -49,9 +46,9 @@
 // `bytes_per_access`: per-lane access size in bytes (from `Instr::getSize()`).
 //
 // Returns the count of distinct 32-byte sectors touched by any lane.
-// When n <= 0 or bytes_per_access <= 0, returns 0 (defensive — neither
-// the device callback nor the host test should reach this path with
-// pathological inputs, but the early-return prevents a spurious
+// When n <= 0 or bytes_per_access <= 0, returns 0 (defensive — the
+// device callback should not reach this path with pathological inputs,
+// but the early-return prevents a spurious
 // out-of-range write to the local sector array).
 #ifdef __CUDACC__
 __host__ __device__

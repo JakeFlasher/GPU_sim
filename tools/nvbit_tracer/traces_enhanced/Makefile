@@ -1,4 +1,15 @@
 MKDIR_P = mkdir -p
+.DEFAULT_GOAL := traces_enhanced
+
+# Keep this subbuild runnable on its own as well as through the parent tracer
+# Makefile. Callers may override these paths explicitly.
+CUDA_INSTALL_PATH ?= $(if $(wildcard /usr/local/cuda-13.2/bin/nvcc),/usr/local/cuda-13.2,$(shell dirname $(shell dirname $(shell command -v nvcc))))
+PB_PREFIX ?= $(abspath ../../../.toolchain/pb)
+PKG_CONFIG ?= pkg-config
+PKG_CONFIG_FLAGS ?= --define-prefix
+PKG_CONFIG_PATH ?= $(PB_PREFIX)/lib/pkgconfig
+PROTOC ?= $(PB_PREFIX)/bin/protoc
+export PKG_CONFIG_PATH PROTOC
 
 ODIR=obj
 SRCDIR=src
@@ -16,7 +27,6 @@ TRACES_ENHANCED_DIR=.
 TRACES_ENHANCED_OBJ=$(wildcard $(TRACES_ENHANCED_DIR)/obj/*.o)
 
 # Protocol Buffer setup
-PROTOC?=protoc
 PROTO_FILES=$(wildcard $(TRACES_ENHANCED_PROTO_DIR)/*.proto)
 
 # Define directories for generated files
@@ -29,8 +39,6 @@ PROTO_OBJ_DIR=$(PROTO_GEN_DIR)/obj
 # pinned prefix is checkout-local, while its .pc files retain the path from the
 # checkout where the environment was created; --define-prefix relocates those
 # paths from the .pc file's current directory.
-PKG_CONFIG?=pkg-config
-PKG_CONFIG_FLAGS?=--define-prefix
 PROTOBUF_INCLUDES:=$(shell $(PKG_CONFIG) $(PKG_CONFIG_FLAGS) --cflags protobuf 2>/dev/null)
 PROTOBUF_LIBS:=$(shell $(PKG_CONFIG) $(PKG_CONFIG_FLAGS) --libs protobuf 2>/dev/null)
 ifeq ($(PROTOBUF_INCLUDES),)
@@ -62,6 +70,7 @@ LIBS=-lz -pthread $(PROTOBUF_LIBS)
 
 SOURCES := $(shell find $(SRCDIR) -name '*.cc')
 OBJ := $(patsubst $(SRCDIR)/%,$(ODIR)/%,$(SOURCES:.cc=.o))
+DEPFILES := $(OBJ:.o=.d) $(PROTO_OBJS:.o=.d)
 
 .PHONY: traces_enhanced directories protobuf clean depend
 
@@ -75,15 +84,17 @@ ${ODIR} $(PROTO_SRC_DIR) $(PROTO_HDR_DIR) $(PROTO_OBJ_DIR):
 depend: $(OBJ)
 
 $(ODIR)/%.o: $(SRCDIR)/%.cc | ${ODIR}
-	$(CXX) -c -o $@ $< $(CFLAGS)
+	$(CXX) -c -MMD -MP -MF $(@:.o=.d) -MT $@ -o $@ $< $(CFLAGS)
+
+$(OBJ) $(PROTO_OBJS): Makefile
 
 # Protocol buffer compilation rules
 $(PROTO_SRC_DIR)/%.pb.cc $(PROTO_HDR_DIR)/%.pb.h: $(TRACES_ENHANCED_PROTO_DIR)/%.proto | $(PROTO_SRC_DIR) $(PROTO_HDR_DIR)
 	$(PROTOC) --cpp_out=$(PROTO_SRC_DIR) --proto_path=$(TRACES_ENHANCED_PROTO_DIR) $<
 	@mv $(PROTO_SRC_DIR)/$*.pb.h $(PROTO_HDR_DIR)/$*.pb.h
 
-$(PROTO_OBJ_DIR)/%.pb.o: $(PROTO_SRC_DIR)/%.pb.cc $(PROTO_HDR_DIR)/%.pb.h | $(PROTO_OBJ_DIR)
-	$(CXX) -c $(TRACE_PROTO_INCLUDES) -fPIC -o $@ $<
+$(PROTO_OBJ_DIR)/%.pb.o: $(PROTO_SRC_DIR)/%.pb.cc $(PROTO_HDR_DIR)/%.pb.h | $(PROTO_OBJ_DIR) $(PROTO_HDRS)
+	$(CXX) -c -MMD -MP -MF $(@:.o=.d) -MT $@ $(TRACE_PROTO_INCLUDES) -fPIC -o $@ $<
 
 
 # Generate Protocol Buffer files
@@ -94,3 +105,7 @@ protobuf: $(PROTO_SRCS) $(PROTO_HDRS) $(PROTO_OBJS)
 clean:
 	rm -rf $(ODIR)
 	rm -rf $(PROTO_OBJ_DIR)
+
+# Include after the object lists and default goal are defined. Makefile is also
+# an object prerequisite so existing objects gain depfiles on their next build.
+-include $(DEPFILES)

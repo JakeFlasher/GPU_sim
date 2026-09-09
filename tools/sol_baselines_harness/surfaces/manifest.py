@@ -43,6 +43,8 @@ from __future__ import annotations
 
 import datetime
 import json
+import os
+import tempfile
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set
@@ -56,6 +58,15 @@ from sol_baselines_harness.surfaces.base import (
 )
 
 MANIFEST_SCHEMA_VERSION = 2
+
+
+def _is_digest_text(value: Any, *, lengths: tuple[int, ...] = (64,)) -> bool:
+    """Return whether ``value`` is lowercase hexadecimal digest text."""
+    return (
+        isinstance(value, str)
+        and len(value) in lengths
+        and all(character in "0123456789abcdef" for character in value)
+    )
 
 
 class ManifestLintError(ValueError):
@@ -257,10 +268,28 @@ class ManifestBuilder:
         manifest = self.as_dict()
         lint_manifest(manifest, workload_subset_max=workload_subset_max)
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(
-            json.dumps(manifest, indent=2, sort_keys=True) + "\n",
-            encoding="utf-8",
-        )
+        serialized = json.dumps(manifest, indent=2, sort_keys=True) + "\n"
+        temporary_path: Optional[str] = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                "w",
+                encoding="utf-8",
+                dir=path.parent,
+                prefix=f".{path.name}.",
+                suffix=".tmp",
+                delete=False,
+            ) as temporary:
+                temporary_path = temporary.name
+                temporary.write(serialized)
+                temporary.flush()
+            os.replace(temporary_path, path)
+            temporary_path = None
+        finally:
+            if temporary_path is not None:
+                try:
+                    os.unlink(temporary_path)
+                except FileNotFoundError:
+                    pass
         return manifest
 
 
@@ -321,6 +350,34 @@ def lint_manifest(
         raise ManifestLintError(
             f"manifest.host.kind must be a non-empty string; got {host_kind!r}"
         )
+    for field_name in (
+        "device_name",
+        "compute_capability",
+        "driver_version",
+        "cuda_runtime_version",
+        "captured_at_utc",
+    ):
+        value = host.get(field_name)
+        if not isinstance(value, str) or not value:
+            raise ManifestLintError(
+                f"manifest.host.{field_name} must be a non-empty string; "
+                f"got {value!r}"
+            )
+    slug = manifest.get("slug")
+    if (
+        not isinstance(slug, str)
+        or not slug
+        or "/" in slug
+        or "\\" in slug
+    ):
+        raise ManifestLintError(
+            f"manifest.slug must be a non-empty path-safe string; got {slug!r}"
+        )
+    if manifest.get("language") not in ("cuda_cpp", "cutlass"):
+        raise ManifestLintError(
+            "manifest.language must be 'cuda_cpp' or 'cutlass'; got "
+            f"{manifest.get('language')!r}"
+        )
     if "arch_tag" not in manifest:
         raise ManifestLintError(
             "manifest is missing top-level field 'arch_tag'; the v2 "
@@ -345,10 +402,100 @@ def lint_manifest(
                 f"(set to null when not applicable)."
             )
     native_env_components_value = manifest.get("native_env_components")
-    if not isinstance(native_env_components_value, dict):
+    if not isinstance(native_env_components_value, dict) or any(
+        not isinstance(key, str) or not isinstance(value, str)
+        for key, value in native_env_components_value.items()
+    ):
         raise ManifestLintError(
-            f"native_env_components must be a dict; got "
-            f"{type(native_env_components_value).__name__}"
+            "native_env_components must be a dict of string keys and values; "
+            f"got {native_env_components_value!r}"
+        )
+    surface_set = manifest.get("surface_set")
+    if (
+        not isinstance(surface_set, list)
+        or any(not isinstance(name, str) for name in surface_set)
+        or surface_set != sorted(surface_set)
+        or len(set(surface_set)) != len(surface_set)
+        or not set(surface_set).issubset(VALID_SURFACES)
+    ):
+        raise ManifestLintError(
+            "surface_set must be a sorted list of unique names from "
+            f"{sorted(VALID_SURFACES)}; got {surface_set!r}"
+        )
+    if manifest.get("build_mode") not in ("judge", "profiling"):
+        raise ManifestLintError(
+            "build_mode must be 'judge' or 'profiling'; got "
+            f"{manifest.get('build_mode')!r}"
+        )
+    if manifest.get("workload_selection_policy") not in (
+        "lowest-index-default",
+        "full-fanout",
+        "explicit",
+    ):
+        raise ManifestLintError(
+            "workload_selection_policy has an unsupported value: "
+            f"{manifest.get('workload_selection_policy')!r}"
+        )
+    for field_name in ("evaluator_tree_hash", "native_env_hash"):
+        value = manifest.get(field_name)
+        digest_lengths = (40, 64) if field_name == "evaluator_tree_hash" else (64,)
+        if value is not None and not _is_digest_text(value, lengths=digest_lengths):
+            raise ManifestLintError(
+                f"{field_name} must be null or lowercase hexadecimal digest "
+                f"text with length {digest_lengths}; got "
+                f"{value!r}"
+            )
+    config_overrides = manifest.get("config_overrides")
+    if not isinstance(config_overrides, dict):
+        raise ManifestLintError(
+            f"config_overrides must be a dict; got "
+            f"{type(config_overrides).__name__}"
+        )
+    eval_timeout = manifest.get("eval_timeout_s")
+    if eval_timeout is not None and (
+        isinstance(eval_timeout, bool)
+        or not isinstance(eval_timeout, (int, float))
+        or eval_timeout < 0
+    ):
+        raise ManifestLintError(
+            f"eval_timeout_s must be null or a non-negative number; got "
+            f"{eval_timeout!r}"
+        )
+    reference_timing = manifest.get("reference_timing_enabled")
+    if reference_timing is not None and not isinstance(reference_timing, bool):
+        raise ManifestLintError(
+            "reference_timing_enabled must be null or bool; got "
+            f"{reference_timing!r}"
+        )
+    dispatch_command = manifest.get("dispatch_command")
+    if not isinstance(dispatch_command, dict):
+        raise ManifestLintError(
+            f"dispatch_command must be a dict; got "
+            f"{type(dispatch_command).__name__}"
+        )
+    if "argv" in dispatch_command and (
+        not isinstance(dispatch_command["argv"], list)
+        or any(not isinstance(arg, str) for arg in dispatch_command["argv"])
+    ):
+        raise ManifestLintError("dispatch_command.argv must be a list of strings")
+    if "env_overrides" in dispatch_command and not isinstance(
+        dispatch_command["env_overrides"], dict
+    ):
+        raise ManifestLintError("dispatch_command.env_overrides must be a dict")
+    for field_name in ("nvtx_header_present", "nvtx_library_present"):
+        if not isinstance(manifest.get(field_name), bool):
+            raise ManifestLintError(
+                f"{field_name} must be bool; got {manifest.get(field_name)!r}"
+            )
+    invocation_order = manifest.get("surface_invocation_order")
+    if (
+        not isinstance(invocation_order, list)
+        or any(not isinstance(name, str) for name in invocation_order)
+        or len(set(invocation_order)) != len(invocation_order)
+        or not set(invocation_order).issubset(VALID_SURFACES)
+    ):
+        raise ManifestLintError(
+            "surface_invocation_order must be a list of unique surface names"
         )
     ws = manifest.get("workload_subset")
     if not isinstance(ws, list):
@@ -357,7 +504,7 @@ def lint_manifest(
         )
     seen: Set[int] = set()
     for idx in ws:
-        if not isinstance(idx, int) or idx < 0:
+        if type(idx) is not int or idx < 0:
             raise ManifestLintError(
                 f"workload_subset entries must be non-negative integers; "
                 f"got {idx!r}"
@@ -390,6 +537,48 @@ def lint_manifest(
             raise ManifestLintError(
                 f"manifest.surfaces[{name!r}] must be a dict"
             )
+        for field_name in (
+            "tool_version",
+            "schema_version",
+            "impl_version",
+            "artifact_path",
+            "waiver_reason",
+            "start_utc",
+            "end_utc",
+            "stdout_tail",
+            "stderr_tail",
+        ):
+            value = entry.get(field_name)
+            if value is not None and not isinstance(value, str):
+                raise ManifestLintError(
+                    f"manifest.surfaces[{name!r}].{field_name} must be "
+                    f"a string or null; got {value!r}"
+                )
+        command = entry.get("command")
+        if not isinstance(command, list) or any(
+            not isinstance(arg, str) for arg in command
+        ):
+            raise ManifestLintError(
+                f"manifest.surfaces[{name!r}].command must be a list of strings"
+            )
+        exit_code = entry.get("exit_code")
+        if type(exit_code) is not int:
+            raise ManifestLintError(
+                f"manifest.surfaces[{name!r}].exit_code must be an int; "
+                f"got {exit_code!r}"
+            )
+        for field_name in ("size_bytes", "compressed_size_bytes"):
+            value = entry.get(field_name)
+            if type(value) is not int or value < 0:
+                raise ManifestLintError(
+                    f"manifest.surfaces[{name!r}].{field_name} must be a "
+                    f"non-negative int; got {value!r}"
+                )
+        for field_name in ("substatus", "cache_identity"):
+            if not isinstance(entry.get(field_name), dict):
+                raise ManifestLintError(
+                    f"manifest.surfaces[{name!r}].{field_name} must be a dict"
+                )
         status = entry.get("status")
         if status not in SURFACE_STATUSES:
             raise ManifestLintError(
@@ -399,14 +588,14 @@ def lint_manifest(
             )
         if status == SURFACE_STATUS_OK:
             artifact_path = entry.get("artifact_path")
-            if not artifact_path:
+            if not isinstance(artifact_path, str) or not artifact_path:
                 raise ManifestLintError(
                     f"manifest.surfaces[{name!r}].status=ok requires a "
                     f"non-empty artifact_path"
                 )
         elif status in ("unavailable", "blocked", "skipped"):
             waiver = entry.get("waiver_reason")
-            if not waiver:
+            if not isinstance(waiver, str) or not waiver:
                 raise ManifestLintError(
                     f"manifest.surfaces[{name!r}].status={status} requires "
                     f"a non-empty waiver_reason"
@@ -419,13 +608,13 @@ def lint_manifest(
                     f"a non-empty command list"
                 )
             exit_code = entry.get("exit_code")
-            if not isinstance(exit_code, int):
-                raise ManifestLintError(
-                    f"manifest.surfaces[{name!r}].status=failed requires "
-                    f"exit_code to be an int; got "
-                    f"{type(exit_code).__name__}"
-                )
-            if not (entry.get("stderr_tail") or entry.get("waiver_reason")):
+            if not (
+                isinstance(entry.get("stderr_tail"), str)
+                and entry.get("stderr_tail")
+            ) and not (
+                isinstance(entry.get("waiver_reason"), str)
+                and entry.get("waiver_reason")
+            ):
                 raise ManifestLintError(
                     f"manifest.surfaces[{name!r}].status=failed requires "
                     f"stderr_tail or waiver_reason to be non-empty"

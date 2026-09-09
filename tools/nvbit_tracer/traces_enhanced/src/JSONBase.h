@@ -40,9 +40,12 @@ class JSONBase {
         std::string Serialize() const;
         bool Deserialize(const std::string &s);
 
+        static bool HasUniqueObjectMembers(const rapidjson::Value &value);
+
         virtual bool Deserialize(const rapidjson::Value &obj) = 0;
         virtual bool Serialize(rapidjson::Writer<rapidjson::StringBuffer> *writer) const = 0;
 
     protected:
         bool InitDocument(const std::string &s, rapidjson::Document &doc);
+        static bool ReadString(const rapidjson::Value &value, std::string &out);
 };

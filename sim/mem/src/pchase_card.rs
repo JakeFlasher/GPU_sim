@@ -19,16 +19,19 @@
 //!   modeled).
 
 use std::collections::BTreeMap;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
 use serde_json::value::RawValue;
 use sim_arch::{
     ArchError, ArchId, CapabilityError, L1Replacement as ArchL1Replacement,
-    L1SetMapping as ArchL1SetMapping,
+    L1SetMapping as ArchL1SetMapping, strict_json_from_slice,
 };
 
 use crate::l1::LINE_BYTES;
+
+const MAX_PCHASE_CARD_BYTES: u64 = 16 * 1024 * 1024;
 
 #[derive(Debug, thiserror::Error)]
 pub enum PchaseCardError {
@@ -37,6 +40,12 @@ pub enum PchaseCardError {
         path: PathBuf,
         #[source]
         source: std::io::Error,
+    },
+    #[error("P-chase card {path} is {observed} bytes, exceeding implementation limit {limit}")]
+    ResourceLimit {
+        path: PathBuf,
+        observed: u64,
+        limit: u64,
     },
     #[error("failed to parse {path}: {source}")]
     Parse {
@@ -160,17 +169,14 @@ pub struct PchaseCard {
 
 impl PchaseCard {
     pub fn load(path: &Path) -> Result<Self, PchaseCardError> {
-        let raw = std::fs::read(path).map_err(|source| PchaseCardError::Io {
-            path: path.to_path_buf(),
-            source,
-        })?;
+        let raw = read_bounded_pchase_card(path, MAX_PCHASE_CARD_BYTES)?;
         Self::parse(path, &raw)
     }
 
     /// Parse already-snapshotted card bytes through the ordinary semantic gate.
     pub fn parse(path: &Path, raw: &[u8]) -> Result<Self, PchaseCardError> {
         let card: RawCard =
-            serde_json::from_slice(raw).map_err(|source| PchaseCardError::Parse {
+            strict_json_from_slice(raw).map_err(|source| PchaseCardError::Parse {
                 path: path.to_path_buf(),
                 source,
             })?;
@@ -518,6 +524,29 @@ impl PchaseCard {
     }
 }
 
+fn read_bounded_pchase_card(path: &Path, limit: u64) -> Result<Vec<u8>, PchaseCardError> {
+    let file = std::fs::File::open(path).map_err(|source| PchaseCardError::Io {
+        path: path.to_path_buf(),
+        source,
+    })?;
+    let mut raw = Vec::new();
+    file.take(limit.saturating_add(1))
+        .read_to_end(&mut raw)
+        .map_err(|source| PchaseCardError::Io {
+            path: path.to_path_buf(),
+            source,
+        })?;
+    let observed = u64::try_from(raw.len()).unwrap_or(u64::MAX);
+    if observed > limit {
+        return Err(PchaseCardError::ResourceLimit {
+            path: path.to_path_buf(),
+            observed,
+            limit,
+        });
+    }
+    Ok(raw)
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
@@ -541,6 +570,36 @@ mod tests {
 
     fn card(json: &str) -> PchaseCard {
         card_for_arch(json, "sm_86")
+    }
+
+    #[test]
+    fn bounded_pchase_card_read_rejects_oversized_input() {
+        let path =
+            std::env::temp_dir().join(format!("sim-mem-pchase-bound-{}.json", std::process::id()));
+        std::fs::write(&path, b"12345").unwrap();
+        assert!(matches!(
+            read_bounded_pchase_card(&path, 4),
+            Err(PchaseCardError::ResourceLimit {
+                observed: 5,
+                limit: 4,
+                ..
+            })
+        ));
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn duplicate_json_members_are_rejected_before_pchase_decode() {
+        let raw = br#"{"arch":"sm_86","arch":"sm_86","properties":{}}"#;
+        let error = match PchaseCard::parse(Path::new("sm_86_static_card.json"), raw) {
+            Ok(_) => panic!("duplicate JSON member unexpectedly decoded"),
+            Err(error) => error,
+        };
+        assert!(
+            matches!(error, PchaseCardError::Parse { source, .. } if source
+            .to_string()
+            .contains("duplicate JSON member"))
+        );
     }
 
     fn card_integer(raw: &str) -> Result<u64, PchaseCardError> {

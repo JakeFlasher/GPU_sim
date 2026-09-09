@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Final
 
 _REPO_ROOT: Final[Path] = Path(__file__).resolve().parents[3]
-_CAL: Final[Path] = _REPO_ROOT / "scripts" / "baselines_harness" / "calibration"
+_CAL: Final[Path] = _REPO_ROOT / "tools" / "sol_baselines_harness" / "calibration"
 _COVERAGE_LEDGER: Final[Path] = _CAL / "sm86_coverage_ledger_v1.toml"
 _VALIDATION_REPORT: Final[Path] = _CAL / "cache_prediction" / "sm86_validation_report_v1.toml"
 _OUT: Final[Path] = _CAL / "sm86_ac9_closeout_v1.toml"

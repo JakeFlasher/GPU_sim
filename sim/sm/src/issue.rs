@@ -19,9 +19,11 @@
 //!   so independent non-tensor work may issue while the tensor pipe is busy.
 //! - Exact predicated stall-5/yield branches carry architecture-local
 //!   readiness: ten cycles for the characterized forward construction and
-//!   three target-resolution cycles for uniform backward loops. The latter is
-//!   shorter than the encoded stall and is therefore diagnostic unless a
-//!   later fetch model exposes it.
+//!   three target-resolution cycles for ordinary uniform backward loops. A
+//!   separate compact-loop classifier admits the measured nine-cycle
+//!   next-issue handoff when a fresh predicate immediately feeds a backward
+//!   edge no more than 64 bytes away; longer/other forms retain the ordinary
+//!   control path.
 //! - `BAR.*` (classified by the sidecar's opcode text) is a block-wide
 //!   barrier: generation semantics — it releases when every unfinished
 //!   warp of the block is waiting at it (warps that already finished do
@@ -66,23 +68,30 @@
 //! The instruction COUNT produced by replay is placement- and
 //! timing-invariant: every traced record issues exactly once, so
 //! `instructions_issued` is exact regardless of the cycle model's fidelity.
+//! The timing-active shared-L2 replay retains an unadjusted causal clock.  A
+//! separate architecture-scoped SM-active observation projection can add its
+//! measured launch boundary without contaminating event timestamps.
 
+use std::cell::RefCell;
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::num::{NonZeroU32, NonZeroU128};
+use std::rc::Rc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use serde::{Deserialize, Serialize};
 use sim_arch::card::{ArchCard, CalibError, RequiredIssueResources};
 use sim_arch::{
-    ArchId, CtaBarrierIssue, FixedL1TexWritebackPriority, InstructionFrontEnd,
-    LdgstsCompletionThroughput, LdgstsDestinationWavefrontProjection, MemoryIssuePipeline,
-    SharedBankProjection,
+    ArchId, ConstantMemoryReturnService, CtaBarrierIssue, FixedL1TexWritebackPriority,
+    ImmediateConstantCache, InstructionFrontEnd, LdgstsCompletionThroughput,
+    LdgstsDestinationWavefrontProjection, LdgstsL1HitReturnService, MemoryIssuePipeline,
+    ScalarExecutionPipeline, SharedBankProjection,
 };
 use sim_mem::{
     AsyncCopyCompletion, CacheOpToken, EvAccess, EvAccessUnobserved, FillKey, L1AccessError,
-    L1Cache, L1Config, L1Counters, L1LookupBatch, L1MutationBudget, L2OpClass, L2Source,
-    LdgstsL1Policy, MemRole, MemoryOrigin, decode_async_copy_completion, opcode_head,
+    L1Cache, L1Config, L1Counters, L1LookupBatch, L1MutationBudget, L1WriteLookupObserver,
+    L1WriteLookupObserverPlan, L2OpClass, L2Source, LdgstsL1Policy, MemRole, MemoryOrigin,
+    decode_async_copy_completion, opcode_head,
 };
 
 use crate::control_bits::{ControlDomainError, DepBarrier, WaitMask};
@@ -267,6 +276,20 @@ pub struct IssueModelParams {
     /// Published per-SMSP and SM-shared memory issue pipeline. `None` is
     /// restricted to synthetic unit fixtures that isolate another mechanism.
     pub(crate) memory_issue_pipeline: Option<MemoryIssuePipeline>,
+    /// Research-only scalar INT/FP execution occupancy. Production
+    /// constructors intentionally leave it unset until an independent
+    /// scheduler-port model replaces the rejected single-stream candidate.
+    pub(crate) scalar_execution_pipeline: Option<ScalarExecutionPipeline>,
+    /// Source-hit return cadence for cacheable asynchronous copies.
+    pub(crate) ldgsts_l1_hit_return_service: Option<LdgstsL1HitReturnService>,
+    /// Additional SM-side return service for static `LDG.*.CONSTANT` loads.
+    /// Synthetic fixtures may omit it; production SM86 constructors bind the
+    /// architecture capability.
+    pub(crate) constant_memory_return_service: Option<ConstantMemoryReturnService>,
+    /// Per-SMSP immediate-constant cache used by CBANK operands. Synthetic
+    /// fixtures leave this absent so they continue to exercise only the
+    /// explicitly selected mechanism.
+    pub(crate) immediate_constant_cache: Option<ImmediateConstantCache>,
     /// L1 hit data-ready latency (card `l1_hit_latency_cycles`, ceiled).
     pub(crate) l1_hit_latency: u64,
     /// End-to-end L1-miss/L2-HIT data-ready latency (card
@@ -315,6 +338,10 @@ pub struct IssueModelParams {
     /// template architectures return a typed capability gap until their
     /// occupancy evidence is carded.
     pub(crate) max_resident_warps_per_sm: u32,
+    /// Resident-CTA ceiling per SM. This is separate from warp and
+    /// shared-memory residency (SM86 permits at most 16 CTAs even when fewer
+    /// than 48 warps are resident).
+    pub(crate) max_resident_blocks_per_sm: u32,
 }
 
 pub(crate) fn checked_cycle_add(
@@ -442,6 +469,12 @@ impl IssueModelParams {
     ) -> Result<Self, IssueError> {
         let hypotheses = arch.issue_hypotheses().require("issue_hypotheses")?;
         let shared_additional_wavefront_latency = shared_additional_wavefront_latency(arch)?;
+        let ldgsts_l1_hit_return_service = arch
+            .ldgsts_l1_hit_return_service()
+            .require("ldgsts_l1_hit_return_service")?;
+        let constant_memory_return_service = arch
+            .constant_memory_return_service()
+            .require("constant_memory_return_service")?;
         let ldgsts_l1_mshr_floor = ldgsts_l1_mshr_floor(arch)?;
         let ldgsts_completion_throughput = ldgsts_completion_throughput(arch)?;
         let ldgsts_cache_all_destination_wavefront_cycles =
@@ -463,6 +496,13 @@ impl IssueModelParams {
                 arch.memory_issue_pipeline()
                     .require("memory_issue_pipeline")?,
             ),
+            scalar_execution_pipeline: None,
+            ldgsts_l1_hit_return_service: Some(ldgsts_l1_hit_return_service),
+            constant_memory_return_service: Some(constant_memory_return_service),
+            immediate_constant_cache: Some(
+                arch.immediate_constant_cache()
+                    .require("immediate_constant_cache")?,
+            ),
             l1_hit_latency: checked_latency("l1_hit_cycles", l1_hit_cycles)?,
             l1_miss_latency: checked_latency("l2_hit_cycles", l2_hit_cycles)?,
             global_flat_latency: checked_latency("dram_cycles", dram_cycles)?,
@@ -477,6 +517,7 @@ impl IssueModelParams {
             ldgsts_cache_all_destination_service_wavefronts,
             ldgsts_cache_all_destination_service_cycles,
             max_resident_warps_per_sm: hypotheses.max_resident_warps_per_sm,
+            max_resident_blocks_per_sm: hypotheses.max_resident_blocks_per_sm,
         })
     }
 
@@ -496,6 +537,12 @@ impl IssueModelParams {
         let latencies = card.required_latencies()?;
         let resources = card.required_issue_resources()?;
         let shared_additional_wavefront_latency = shared_additional_wavefront_latency(arch)?;
+        let ldgsts_l1_hit_return_service = arch
+            .ldgsts_l1_hit_return_service()
+            .require("ldgsts_l1_hit_return_service")?;
+        let constant_memory_return_service = arch
+            .constant_memory_return_service()
+            .require("constant_memory_return_service")?;
         let ldgsts_l1_mshr_floor = ldgsts_l1_mshr_floor(arch)?;
         let ldgsts_completion_throughput = ldgsts_completion_throughput(arch)?;
         let ldgsts_cache_all_destination_wavefront_cycles =
@@ -517,6 +564,13 @@ impl IssueModelParams {
                 arch.memory_issue_pipeline()
                     .require("memory_issue_pipeline")?,
             ),
+            scalar_execution_pipeline: None,
+            ldgsts_l1_hit_return_service: Some(ldgsts_l1_hit_return_service),
+            constant_memory_return_service: Some(constant_memory_return_service),
+            immediate_constant_cache: Some(
+                arch.immediate_constant_cache()
+                    .require("immediate_constant_cache")?,
+            ),
             l1_hit_latency: checked_latency("l1_hit_cycles", latencies.l1_hit)?,
             l1_miss_latency: checked_latency("l2_hit_cycles", latencies.l2_hit)?,
             global_flat_latency: checked_latency("dram_cycles", latencies.dram)?,
@@ -531,6 +585,7 @@ impl IssueModelParams {
             ldgsts_cache_all_destination_service_wavefronts,
             ldgsts_cache_all_destination_service_cycles,
             max_resident_warps_per_sm: resources.occupancy.max_resident_warps_per_sm,
+            max_resident_blocks_per_sm: resources.occupancy.max_blocks,
         })
     }
 
@@ -548,6 +603,22 @@ impl IssueModelParams {
 
     pub const fn memory_issue_pipeline(&self) -> Option<MemoryIssuePipeline> {
         self.memory_issue_pipeline
+    }
+
+    pub const fn scalar_execution_pipeline(&self) -> Option<ScalarExecutionPipeline> {
+        self.scalar_execution_pipeline
+    }
+
+    pub const fn ldgsts_l1_hit_return_service(&self) -> Option<LdgstsL1HitReturnService> {
+        self.ldgsts_l1_hit_return_service
+    }
+
+    pub const fn constant_memory_return_service(&self) -> Option<ConstantMemoryReturnService> {
+        self.constant_memory_return_service
+    }
+
+    pub const fn immediate_constant_cache(&self) -> Option<ImmediateConstantCache> {
+        self.immediate_constant_cache
     }
 
     pub const fn l1_hit_latency(&self) -> u64 {
@@ -641,6 +712,10 @@ impl IssueModelParams {
 
     pub const fn max_resident_warps_per_sm(&self) -> u32 {
         self.max_resident_warps_per_sm
+    }
+
+    pub const fn max_resident_blocks_per_sm(&self) -> u32 {
+        self.max_resident_blocks_per_sm
     }
 
     pub(crate) fn validate_resource_source(&self) -> Result<(), IssueError> {
@@ -765,6 +840,18 @@ impl IssueModelParams {
                         got: 0,
                     });
                 }
+                let immediate_constant_cache = self
+                    .arch
+                    .immediate_constant_cache()
+                    .require("immediate_constant_cache")?;
+                if self.immediate_constant_cache != Some(immediate_constant_cache) {
+                    return Err(IssueError::ArchitectureDefaultMismatch {
+                        arch: self.arch,
+                        field: "immediate_constant_cache_configuration",
+                        expected: 1,
+                        got: 0,
+                    });
+                }
                 let shared_additional_wavefront_latency =
                     shared_additional_wavefront_latency(self.arch)?;
                 let ldgsts_l1_mshr_floor = ldgsts_l1_mshr_floor(self.arch)?;
@@ -834,6 +921,11 @@ impl IssueModelParams {
                         "max_resident_warps_per_sm",
                         u64::from(hypotheses.max_resident_warps_per_sm),
                         u64::from(self.max_resident_warps_per_sm),
+                    ),
+                    (
+                        "max_resident_blocks_per_sm",
+                        u64::from(hypotheses.max_resident_blocks_per_sm),
+                        u64::from(self.max_resident_blocks_per_sm),
                     ),
                 ];
                 for (field, expected, got) in fields {
@@ -1076,6 +1168,14 @@ pub enum IssueError {
         live_warps: u32,
         arch: ArchId,
         max_resident_warps: u32,
+    },
+    #[error(
+        "block {launch_index} exceeds architecture {arch} resident-block limit {max_resident_blocks}"
+    )]
+    BlockCountResidencyLimitExceeded {
+        launch_index: i64,
+        arch: ArchId,
+        max_resident_blocks: u32,
     },
     #[error(
         "architecture {arch} has invalid shared-memory capacity {max_bytes_per_sm} bytes per SM"
@@ -1323,6 +1423,18 @@ pub enum IssueError {
     MemoryIssuePipelineConfigurationInvalid { field: &'static str, value: u64 },
     #[error("memory issue-pipeline queue on subcore {subcore} is full at t={time}")]
     MemoryIssuePipelineQueueFull { subcore: usize, time: u64 },
+    #[error(
+        "scalar execution pipeline configuration is invalid: latency={latency}, initiation={initiation}, capacity={capacity}"
+    )]
+    ScalarExecutionPipelineConfigurationInvalid {
+        latency: u64,
+        initiation: u64,
+        capacity: u32,
+    },
+    #[error("scalar execution pipeline queue on subcore {subcore} is full at t={time}")]
+    ScalarExecutionPipelineQueueFull { subcore: usize, time: u64 },
+    #[error("immediate constant-cache configuration is invalid")]
+    ImmediateConstantCacheConfigurationInvalid,
     #[error("L1 access failed: {0}")]
     L1Access(#[from] L1AccessError),
     #[error("L1 configuration is invalid: {0}")]
@@ -1553,6 +1665,8 @@ pub struct ReadinessCauseCycles {
     pub pipeline_branch: u64,
     pub pipeline_tensor: u64,
     #[serde(skip_serializing_if = "is_zero_u64")]
+    pub pipeline_alu: u64,
+    #[serde(skip_serializing_if = "is_zero_u64")]
     pub memory_admission_queue: u64,
     #[serde(skip_serializing_if = "is_zero_u64")]
     pub memory_issue_queue: u64,
@@ -1591,6 +1705,7 @@ impl ReadinessCauseCycles {
         add!(pipeline_barrier);
         add!(pipeline_branch);
         add!(pipeline_tensor);
+        add!(pipeline_alu);
         add!(memory_admission_queue);
         add!(memory_issue_queue);
         add!(memory_write_completion);
@@ -2436,30 +2551,27 @@ enum GlobalMemoryIssueClass {
 }
 
 fn maximum_sector_multiplicity(sectors: &[i64]) -> u64 {
-    sectors
-        .iter()
-        .enumerate()
-        .map(|(index, sector)| {
-            1 + sectors[index + 1..]
-                .iter()
-                .filter(|candidate| *candidate == sector)
-                .count() as u64
-        })
-        .max()
-        .unwrap_or(0)
+    // This runs for every global issue candidate. Count aliases once instead
+    // of rescanning the suffix for every sector; wide vector accesses stay
+    // linear in their validated sector span.
+    let mut counts = HashMap::new();
+    let mut maximum = 0_u64;
+    for &sector in sectors {
+        let count = counts.entry(sector).or_insert(0_u64);
+        *count += 1;
+        maximum = maximum.max(*count);
+    }
+    maximum
 }
 
 fn unique_128b_lines(sectors: &[i64]) -> u64 {
-    sectors
-        .iter()
-        .enumerate()
-        .filter(|(index, sector)| {
-            let line = sector.div_euclid(4);
-            !sectors[..*index]
-                .iter()
-                .any(|prior| prior.div_euclid(4) == line)
-        })
-        .count() as u64
+    // Keep line uniqueness linear as well; the previous prefix scan became
+    // quadratic on large coalesced spans.
+    let mut lines = HashSet::new();
+    for &sector in sectors {
+        lines.insert(sector.div_euclid(4));
+    }
+    u64::try_from(lines.len()).unwrap_or(u64::MAX)
 }
 
 fn projected_global_memory_issue(
@@ -4574,6 +4686,61 @@ impl MemoryIssuePipelineDiagnostics {
     }
 }
 
+/// Causal accounting for the SM86 Immediate Constant Cache (IMC) path. These
+/// counters describe simulator line probes and replay stalls; they are
+/// observation-only and are never used as a fitted timing correction.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
+pub struct ImmediateConstantCacheDiagnostics {
+    pub references: u64,
+    pub lookup_hits: u64,
+    pub lookup_misses: u64,
+    /// Lookup misses that found an already outstanding line reservation.
+    /// This is the simulator's pending-merge class, not NCU's tag-hit field.
+    pub pending_tag_hits: u64,
+    /// Lookup misses that allocated a new line request.
+    pub tag_misses: u64,
+    pub pending_merges: u64,
+    pub lines_filled: u64,
+    /// Number of selected instructions parked behind an IMC response. This
+    /// is an event count, not NCU's overlapping warp-cycle stall metric.
+    pub miss_wait_events: u64,
+    /// Scheduler issue opportunities consumed by those waits. This is an
+    /// SM-side causal count and is not directly comparable to NCU stalls.
+    pub miss_wait_cycles: u64,
+    pub maximum_pending_lines: u64,
+}
+
+impl ImmediateConstantCacheDiagnostics {
+    pub const fn is_empty(&self) -> bool {
+        self.references == 0
+    }
+
+    fn add_checked(&mut self, addend: &Self) -> Result<(), ReadinessCounterError> {
+        let mut next = *self;
+        macro_rules! add {
+            ($field:ident) => {
+                next.$field = checked_readiness_add(
+                    concat!("readiness.immediate_constant_cache.", stringify!($field)),
+                    next.$field,
+                    addend.$field,
+                )?;
+            };
+        }
+        add!(references);
+        add!(lookup_hits);
+        add!(lookup_misses);
+        add!(pending_tag_hits);
+        add!(tag_misses);
+        add!(pending_merges);
+        add!(lines_filled);
+        add!(miss_wait_events);
+        add!(miss_wait_cycles);
+        next.maximum_pending_lines = next.maximum_pending_lines.max(addend.maximum_pending_lines);
+        *self = next;
+        Ok(())
+    }
+}
+
 /// Deterministic causal readiness summary for one SM replay.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 pub struct ReadinessDiagnostics {
@@ -4585,7 +4752,11 @@ pub struct ReadinessDiagnostics {
     pub instruction_front_end: Option<Box<InstructionFrontEndDiagnostics>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub memory_issue_pipeline: Option<Box<MemoryIssuePipelineDiagnostics>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub immediate_constant_cache: Option<Box<ImmediateConstantCacheDiagnostics>>,
     pub async_groups: AsyncReadinessDiagnostics,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub scalar_execution_pipeline: Option<Box<ScalarExecutionPipelineDiagnostics>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub async_instrumentation_order: Option<Box<AsyncInstrumentationOrderDiagnostics>>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -4646,7 +4817,21 @@ impl ReadinessDiagnostics {
                 next.memory_issue_pipeline = Some(Box::new(*addend_memory_pipeline));
             }
         }
+        if let Some(addend_immediate_constant) = addend.immediate_constant_cache.as_deref() {
+            if let Some(current) = next.immediate_constant_cache.as_deref_mut() {
+                current.add_checked(addend_immediate_constant)?;
+            } else {
+                next.immediate_constant_cache = Some(Box::new(*addend_immediate_constant));
+            }
+        }
         next.async_groups.add_checked(&addend.async_groups)?;
+        if let Some(addend_scalar) = addend.scalar_execution_pipeline.as_deref() {
+            if let Some(current) = next.scalar_execution_pipeline.as_deref_mut() {
+                current.add_checked(addend_scalar)?;
+            } else {
+                next.scalar_execution_pipeline = Some(Box::new(*addend_scalar));
+            }
+        }
         if let Some(addend_order) = addend.async_instrumentation_order.as_deref() {
             if let Some(current) = next.async_instrumentation_order.as_deref_mut() {
                 current.add_checked(addend_order)?;
@@ -4746,9 +4931,13 @@ impl ReadinessDiagnostics {
     /// adds the active private-L0/shared-L1 instruction hierarchy, stream-buffer
     /// prefetcher, and three-entry per-warp instruction buffers. Schema 24 adds
     /// the active per-SMSP memory queue/address pipeline and SM-shared acceptor.
+    /// Schema 25 adds causal per-SMSP Immediate Constant Cache probe and
+    /// replay accounting; these counters remain observation-only.
     pub fn schema_version(&self) -> u32 {
         let feedback = self.memory_admission_feedback.as_deref();
-        if self.memory_issue_pipeline.is_some() {
+        if self.immediate_constant_cache.is_some() {
+            25
+        } else if self.memory_issue_pipeline.is_some() {
             24
         } else if self.instruction_front_end.is_some() {
             23
@@ -4828,9 +5017,10 @@ impl ReadinessDiagnostics {
 pub struct SmSimResult {
     /// Exact: one per traced record fed in.
     pub instructions_issued: u64,
-    /// Directional v0 cycle count (time of last issue + 1; the response
-    /// tail of the final loads is not counted — write-back completion is
-    /// not an issue event).
+    /// Unadjusted modeled SM clock frontier (time of last issue + 1). An
+    /// explicit observation projection may add an architecture-scoped launch
+    /// boundary; that boundary is not hidden in this causal timestamp. The
+    /// response tail of final loads is not counted here.
     pub cycles: u64,
     /// Latest completion of an active SM-local pipeline after scheduler issue.
     /// This remains separate from `cycles`, the issue frontier.
@@ -4951,6 +5141,16 @@ pub struct MemRequest {
     /// and DRAM-fetch requirement from this value and rejects incoherent
     /// `(source, operation, reply)` combinations before hierarchy mutation.
     pub operation: MemoryOperation,
+    /// Static SASS marker for a regular-register constant load.  Constant
+    /// loads still use the normal global allocation/cache state, but their
+    /// response may cross a distinct SM-side return path on SM86.
+    pub(crate) constant_load: bool,
+    /// Static pressure-class marker. The broad constant marker is retained
+    /// for provenance; only this narrower marker is allowed to price the
+    /// measured multi-site return-service delay. Response timing is attached
+    /// to each `FillWaiter`, so this request-level copy never prices a folded
+    /// fill.
+    pub(crate) constant_deep: bool,
     pub reply: ReplyTo,
     pub(crate) admission_witness: Option<AdmissionRequestWitness>,
 }
@@ -5064,11 +5264,12 @@ impl MemRequest {
         }
     }
 
-    fn fold_sector_origin(&mut self, origin: MemoryOrigin, sector_bit: u8) {
+    fn fold_sector_origin(&mut self, origin: MemoryOrigin, sector_bit: u8, constant_load: bool) {
         self.sector_mask |= sector_bit;
         if origin == MemoryOrigin::Local {
             self.local_sector_mask |= sector_bit;
         }
+        self.constant_load |= constant_load;
     }
 
     /// An L1 fill request (line alloc or resident-sector fetch): Read
@@ -5083,6 +5284,8 @@ impl MemRequest {
         origin: MemoryOrigin,
         fill: FillKey,
         response_id: ResponseId,
+        constant_load: bool,
+        constant_deep: bool,
     ) -> Self {
         let sector_bit = 1 << (sector_id & 3) as u8;
         Self {
@@ -5093,6 +5296,8 @@ impl MemRequest {
             local_sector_mask: Self::local_mask(origin, sector_bit),
             source: L2Source::L1Fill,
             operation: MemoryOperation::Read,
+            constant_load,
+            constant_deep,
             reply: ReplyTo::L1Fill { fill, response_id },
             admission_witness: None,
         }
@@ -5101,7 +5306,13 @@ impl MemRequest {
     /// A follow-up sector fetch for a merge onto an older in-flight
     /// fill: same provenance and class as the fill, no reply (the
     /// waiter rides the original fill's response).
-    fn l1_followup_fetch(issue_time: u64, sector_id: i64, origin: MemoryOrigin) -> Self {
+    fn l1_followup_fetch(
+        issue_time: u64,
+        sector_id: i64,
+        origin: MemoryOrigin,
+        constant_load: bool,
+        constant_deep: bool,
+    ) -> Self {
         let sector_bit = 1 << (sector_id & 3) as u8;
         Self {
             issue_time,
@@ -5111,6 +5322,8 @@ impl MemRequest {
             local_sector_mask: Self::local_mask(origin, sector_bit),
             source: L2Source::L1Fill,
             operation: MemoryOperation::Read,
+            constant_load,
+            constant_deep,
             reply: ReplyTo::None,
             admission_witness: None,
         }
@@ -5149,6 +5362,8 @@ impl MemRequest {
             local_sector_mask: Self::local_mask(origin, sector_bit),
             source: L2Source::Store,
             operation,
+            constant_load: false,
+            constant_deep: false,
             reply: ReplyTo::None,
             admission_witness: None,
         }
@@ -5256,7 +5471,7 @@ struct InstructionCacheEntry {
 /// Small deterministic set-associative tag store for the instruction path.
 /// A pending line remains a tag hit with its future fill timestamp, matching
 /// the merge behavior needed when many warps execute one code region.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct SetAssociativeInstructionCache {
     sets: Vec<Vec<InstructionCacheEntry>>,
     ways: usize,
@@ -5317,11 +5532,12 @@ impl SetAssociativeInstructionCache {
     }
 
     fn probe(&mut self, key: InstructionLineKey) -> Result<Option<u64>, IssueError> {
-        let sequence = self.next_access_sequence()?;
         let set = self.set_index(key);
-        let Some(entry) = self.sets[set].iter_mut().find(|entry| entry.key == key) else {
+        let Some(index) = self.sets[set].iter().position(|entry| entry.key == key) else {
             return Ok(None);
         };
+        let sequence = self.next_access_sequence()?;
+        let entry = &mut self.sets[set][index];
         entry.last_access = sequence;
         Ok(Some(entry.ready_at))
     }
@@ -5364,7 +5580,7 @@ struct StreamBufferLine {
     demanded: bool,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 struct InstructionStreamBuffer {
     lines: VecDeque<StreamBufferLine>,
     next_line: Option<InstructionLineKey>,
@@ -5438,7 +5654,7 @@ enum InstructionL1RequestKind {
 /// One SM's active instruction hierarchy. Lower-level cold fills use the
 /// independently carded dependent-DRAM latency; L0/L1 geometry and transport
 /// come from the architecture capability above.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct InstructionFrontEndState {
     config: InstructionFrontEnd,
     l0: [SetAssociativeInstructionCache; SUB_CORES],
@@ -5680,6 +5896,76 @@ impl InstructionFrontEndState {
             .any(|stream| stream.can_prefetch(capacity))
     }
 
+    /// Keep the normal fetch path allocation-free.  A shadow cycle is needed
+    /// only near checked counter, cache-sequence, or timestamp boundaries,
+    /// where a later fetch error could otherwise leave an earlier fetch
+    /// partially committed.
+    fn needs_transactional_cycle(&self, fetches: &[Option<usize>; SUB_CORES], now: u64) -> bool {
+        let fetch_count = fetches.iter().flatten().count();
+        let prefetch_count = usize::from(self.has_prefetch_work());
+        let access_count = fetch_count.saturating_add(prefetch_count);
+        let fetches_u64 = u64::try_from(fetch_count).unwrap_or(u64::MAX);
+        let accesses_u64 = u64::try_from(access_count).unwrap_or(u64::MAX);
+        let sequence_increments = accesses_u64.saturating_mul(2);
+        let counter_overflows = |value: u64, amount: u64| value.checked_add(amount).is_none();
+
+        if counter_overflows(self.diagnostics.instructions_fetched, fetches_u64)
+            || counter_overflows(self.diagnostics.demand_l0_hits, fetches_u64)
+            || counter_overflows(self.diagnostics.demand_stream_buffer_hits, fetches_u64)
+            || counter_overflows(self.diagnostics.demand_l0_misses, fetches_u64)
+            || counter_overflows(self.diagnostics.demand_l1_hits, accesses_u64)
+            || counter_overflows(self.diagnostics.demand_l1_misses, accesses_u64)
+            || counter_overflows(
+                self.diagnostics.prefetch_requests,
+                u64::try_from(prefetch_count).unwrap_or(u64::MAX),
+            )
+            || counter_overflows(
+                self.diagnostics.prefetch_l1_hits,
+                u64::try_from(prefetch_count).unwrap_or(u64::MAX),
+            )
+            || counter_overflows(
+                self.diagnostics.prefetch_l1_misses,
+                u64::try_from(prefetch_count).unwrap_or(u64::MAX),
+            )
+            || counter_overflows(self.diagnostics.stream_restarts, fetches_u64)
+            || self
+                .l1
+                .access_sequence
+                .checked_add(sequence_increments)
+                .is_none()
+            || self.l1_request_ready.checked_add(accesses_u64).is_none()
+            || self.l1_reply_ready.checked_add(accesses_u64).is_none()
+        {
+            return true;
+        }
+        for (subcore, fetch) in fetches.iter().enumerate() {
+            if fetch.is_some()
+                && (self.l0[subcore].access_sequence.checked_add(2).is_none()
+                    || self.l0_response_ready[subcore].checked_add(1).is_none())
+            {
+                return true;
+            }
+        }
+        let mut maximum_delay = 0_u64;
+        for delta in [
+            1,
+            self.config.l0_to_l1_cycles,
+            self.cold_fill_latency,
+            1,
+            self.config.l1_to_l0_cycles,
+            1,
+            self.config.fetch_to_issue_stages,
+        ] {
+            let Some(next) = maximum_delay.checked_add(delta) else {
+                return true;
+            };
+            maximum_delay = next;
+        }
+        now.checked_add(maximum_delay).is_none()
+            || self.l1_request_ready.checked_add(maximum_delay).is_none()
+            || self.l1_reply_ready.checked_add(maximum_delay).is_none()
+    }
+
     fn prefetch_cycle(&mut self, now: u64) -> Result<(), IssueError> {
         let capacity = usize::try_from(self.config.stream_buffer_lines).map_err(|_| {
             IssueError::InstructionFrontEndGeometryInvalid {
@@ -5747,6 +6033,88 @@ fn memory_address_is_uniform(opcode_text: &str) -> bool {
         })
 }
 
+/// Identify regular-register constant-cache-qualified loads from static SASS.
+/// They continue through the normal global/L1/L2 allocation path; the marker
+/// only selects the SM86 constant-return service when the shared system prices
+/// the response.  Keeping this classification textual avoids treating dynamic
+/// trace metadata or measured NCU values as simulator inputs.
+fn is_constant_load_opcode(opcode_text: &str) -> bool {
+    let opcode = opcode_text.split_ascii_whitespace().next().unwrap_or("");
+    opcode.split('.').any(|modifier| modifier == "CONSTANT")
+        && matches!(opcode_head(opcode_text), "LDG" | "LD" | "LDC" | "LDL")
+}
+
+fn is_u16_opcode(opcode_text: &str) -> bool {
+    opcode_text
+        .split_ascii_whitespace()
+        .next()
+        .is_some_and(|opcode| opcode.split('.').any(|modifier| modifier == "U16"))
+}
+
+/// Count distinct static constant-load request streams. The released SM86
+/// memory model has a five-entry local memory dispatch window (four queue
+/// entries plus its dispatch latch); a stream count beyond that window is the
+/// conservative point at which the L0C/GCC transport can remain occupied.
+/// This is derived solely from SASS shape, never from a workload id or an NCU
+/// target.
+fn constant_stream_count(schedule: &FunctionSchedule) -> usize {
+    schedule
+        .by_pc
+        .values()
+        .filter(|slot| is_constant_load_opcode(slot.opcode_text()))
+        .count()
+}
+
+fn deep_constant_load(
+    slot: &IssueSlot,
+    stream_count: usize,
+    queue_entries_with_dispatch: u32,
+) -> bool {
+    let pressure_threshold = usize::try_from(queue_entries_with_dispatch)
+        .unwrap_or(usize::MAX)
+        .saturating_add(1);
+    let stream_pressure = stream_count > pressure_threshold;
+    let halfword_pressure = is_u16_opcode(slot.opcode_text())
+        && stream_count >= pressure_threshold
+        && slot
+            .control
+            .write_barrier
+            .is_some_and(|barrier| barrier.wire() > 2);
+    is_constant_load_opcode(slot.opcode_text())
+        && ((!is_u16_opcode(slot.opcode_text()) && stream_pressure) || halfword_pressure)
+}
+
+fn is_u16_global_store_opcode(opcode_text: &str) -> bool {
+    opcode_head(opcode_text) == "STG"
+        && opcode_text
+            .split_ascii_whitespace()
+            .next()
+            .is_some_and(|opcode| opcode.split('.').any(|modifier| modifier == "U16"))
+}
+
+/// Select the observer-only write-tag window for the narrow memory shape for
+/// which it is defined: a global U16 store stream paired with constant-space
+/// global loads and no shared-memory traffic.  Other kernels retain the
+/// topology-only write observer until their own independent cache policy is
+/// characterized; this prevents a partial policy from silently changing
+/// unrelated read/write rows.
+pub(crate) fn stateful_write_lookup_observer_enabled(schedule: &FunctionSchedule) -> bool {
+    let mut has_constant_load = false;
+    let mut has_u16_store = false;
+    let mut has_other_global_store = false;
+    let mut has_shared_memory = false;
+    for slot in schedule.by_pc.values() {
+        let head = opcode_head(slot.opcode_text());
+        has_constant_load |= is_constant_load_opcode(slot.opcode_text());
+        has_u16_store |= is_u16_global_store_opcode(slot.opcode_text());
+        if matches!(head, "STG" | "STL") && !is_u16_global_store_opcode(slot.opcode_text()) {
+            has_other_global_store = true;
+        }
+        has_shared_memory |= matches!(head, "LDS" | "LDSM" | "STS" | "STSM");
+    }
+    has_constant_load && has_u16_store && !has_other_global_store && !has_shared_memory
+}
+
 #[derive(Debug, Clone, Copy)]
 struct MemoryPipelineSlot {
     operand_ready_latency: u64,
@@ -5755,6 +6123,7 @@ struct MemoryPipelineSlot {
 fn memory_pipeline_slot(
     slot: &IssueSlot,
     config: MemoryIssuePipeline,
+    deep_constant: bool,
 ) -> Option<MemoryPipelineSlot> {
     let head = opcode_head(slot.opcode_text());
     let uniform = memory_address_is_uniform(slot.opcode_text());
@@ -5781,7 +6150,9 @@ fn memory_pipeline_slot(
     let operand_ready_latency = match head {
         "LDGSTS" => config.ldgsts_war_cycles,
         "LDG" | "LD" | "LDC" | "LDL" => {
-            if uniform {
+            if deep_constant {
+                config.constant_load_war_cycles
+            } else if uniform {
                 config.global_load_uniform_war_cycles
             } else {
                 config.global_load_regular_war_cycles
@@ -5816,6 +6187,159 @@ struct MemoryIssuePipelineState {
 struct MemoryIssuePipelinePlan {
     next: MemoryIssuePipelineState,
     issues: [Option<MemoryPipelineIssue>; SUB_CORES],
+}
+
+/// Scheduler-visible occupancy for the architecture's scalar INT/FP
+/// execution stream.  Dispatch remains one instruction per SMSP cycle; an
+/// entry reserves a future execution slot and leaves the window when that
+/// slot starts.  This captures finite pipelined service without turning the
+/// model into a register scoreboard or a per-cycle global scan.
+/// Research-only scalar resource candidate. It is intentionally not wired
+/// into production IssueModelParams; the issue-port campaign found that a
+/// single generic queue does not transfer across independent and mixed
+/// workloads. Keeping the implementation here makes future probes
+/// reproducible without silently changing the deployed lane.
+#[allow(dead_code)]
+#[derive(Debug, Clone)]
+struct ScalarExecutionPipelineState {
+    config: ScalarExecutionPipeline,
+    release_times: [VecDeque<u64>; SUB_CORES],
+    next_service: [u64; SUB_CORES],
+    diagnostics: ScalarExecutionPipelineDiagnostics,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
+pub struct ScalarExecutionPipelineDiagnostics {
+    pub instructions_admitted: u64,
+    pub service_busy_cycles: u64,
+    pub queue_delay_cycles: u64,
+    pub maximum_queue_occupancy: u64,
+}
+
+impl ScalarExecutionPipelineDiagnostics {
+    fn add_checked(&mut self, addend: &Self) -> Result<(), ReadinessCounterError> {
+        let mut next = *self;
+        for (field, target, value) in [
+            (
+                "readiness.scalar_execution_pipeline.instructions_admitted",
+                &mut next.instructions_admitted,
+                addend.instructions_admitted,
+            ),
+            (
+                "readiness.scalar_execution_pipeline.service_busy_cycles",
+                &mut next.service_busy_cycles,
+                addend.service_busy_cycles,
+            ),
+            (
+                "readiness.scalar_execution_pipeline.queue_delay_cycles",
+                &mut next.queue_delay_cycles,
+                addend.queue_delay_cycles,
+            ),
+        ] {
+            *target = checked_readiness_add(field, *target, value)?;
+        }
+        next.maximum_queue_occupancy = next
+            .maximum_queue_occupancy
+            .max(addend.maximum_queue_occupancy);
+        *self = next;
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone)]
+struct ScalarExecutionPipelinePlan {
+    next: ScalarExecutionPipelineState,
+}
+
+#[allow(dead_code)]
+impl ScalarExecutionPipelineState {
+    fn new(config: ScalarExecutionPipeline) -> Result<Self, IssueError> {
+        if config.latency_cycles == 0
+            || config.initiation_interval_cycles == 0
+            || config.in_flight_capacity == 0
+        {
+            return Err(IssueError::ScalarExecutionPipelineConfigurationInvalid {
+                latency: config.latency_cycles,
+                initiation: config.initiation_interval_cycles,
+                capacity: config.in_flight_capacity,
+            });
+        }
+        Ok(Self {
+            config,
+            release_times: std::array::from_fn(|_| VecDeque::new()),
+            next_service: [0; SUB_CORES],
+            diagnostics: ScalarExecutionPipelineDiagnostics::default(),
+        })
+    }
+
+    fn prune(&mut self, now: u64) {
+        for queue in &mut self.release_times {
+            while queue.front().is_some_and(|&release| release <= now) {
+                queue.pop_front();
+            }
+        }
+    }
+
+    fn admission_ready_at(&self, subcore: usize) -> u64 {
+        let queue = &self.release_times[subcore];
+        if queue.len() < self.config.in_flight_capacity as usize {
+            0
+        } else {
+            queue.front().copied().unwrap_or(0)
+        }
+    }
+
+    fn plan(
+        &self,
+        selected: [Option<PipelineClass>; SUB_CORES],
+        now: u64,
+    ) -> Result<ScalarExecutionPipelinePlan, IssueError> {
+        let mut next = self.clone();
+        for (subcore, slot) in selected.into_iter().enumerate() {
+            let Some(PipelineClass::ScalarAlu { .. }) = slot else {
+                continue;
+            };
+            if next.release_times[subcore].len() >= self.config.in_flight_capacity as usize {
+                return Err(IssueError::ScalarExecutionPipelineQueueFull { subcore, time: now });
+            }
+            let ready_for_service = checked_cycle_add(
+                "scalar execution pipeline latency",
+                now,
+                self.config.latency_cycles,
+            )?;
+            let service_start = ready_for_service.max(next.next_service[subcore]);
+            next.next_service[subcore] = checked_cycle_add(
+                "scalar execution pipeline initiation",
+                service_start,
+                self.config.initiation_interval_cycles,
+            )?;
+            next.release_times[subcore].push_back(service_start);
+            let diagnostics = &mut next.diagnostics;
+            diagnostics.instructions_admitted = checked_u64_counter_add(
+                "scalar execution pipeline admitted instruction",
+                diagnostics.instructions_admitted,
+                1,
+            )?;
+            diagnostics.service_busy_cycles = checked_u64_counter_add(
+                "scalar execution pipeline service work",
+                diagnostics.service_busy_cycles,
+                self.config.initiation_interval_cycles,
+            )?;
+            diagnostics.queue_delay_cycles = checked_u64_counter_add(
+                "scalar execution pipeline queue delay",
+                diagnostics.queue_delay_cycles,
+                service_start.saturating_sub(ready_for_service),
+            )?;
+            diagnostics.maximum_queue_occupancy = diagnostics.maximum_queue_occupancy.max(
+                u64::try_from(next.release_times[subcore].len()).map_err(|_| {
+                    IssueError::CounterOverflow {
+                        counter: "scalar execution pipeline queue occupancy",
+                    }
+                })?,
+            );
+        }
+        Ok(ScalarExecutionPipelinePlan { next })
+    }
 }
 
 impl MemoryIssuePipelineState {
@@ -6029,6 +6553,7 @@ enum ReadinessCause {
     PipelineBarrier,
     PipelineBranch,
     PipelineTensor,
+    PipelineAlu,
     MemoryAdmissionQueue,
     MemoryIssueQueue,
     MemoryWriteCompletion,
@@ -6125,6 +6650,9 @@ impl ReadinessCauseCycles {
             ReadinessCause::PipelineTensor => {
                 ("tensor-pipeline readiness", &mut self.pipeline_tensor)
             }
+            ReadinessCause::PipelineAlu => {
+                ("scalar-ALU pipeline readiness", &mut self.pipeline_alu)
+            }
             ReadinessCause::MemoryAdmissionQueue => (
                 "memory-admission queue readiness",
                 &mut self.memory_admission_queue,
@@ -6218,7 +6746,9 @@ struct AsyncCopyGroup {
     completion_time: u64,
 }
 
-/// One bypass LDGSTS instruction retained inside its asynchronous-copy group.
+/// One source-bearing bypass LDGSTS instruction retained inside its
+/// asynchronous-copy group. Topology-only zero-payload copies remain in the
+/// group protocol but do not enter this source-response observation sidecar.
 /// The production readiness path continues to use [`AsyncCopyGroup`]'s
 /// established aggregate fields; this sidecar preserves the event ordering
 /// needed to evaluate a future per-copy delivery model without changing time.
@@ -6508,6 +7038,9 @@ struct WarpState<'a> {
     /// instruction. Causal readiness delays are measured from this frontier.
     current_since: u64,
     eligible: u64,
+    /// Earliest cycle at which the current instruction may be re-issued after
+    /// an immediate-constant-cache miss. Zero means no pending IMC request.
+    imc_wait_until: u64,
     /// Compiler-emitted `DEPBAR.LE SB1..SB5, 0x0[, {..}]` operands for the
     /// current instruction. This is cached when `next_slot` changes so
     /// scheduler scans use the ordinary barrier counter/clear path without
@@ -6578,31 +7111,6 @@ impl WarpState<'_> {
     fn instruction_front_end_ready_at(&self) -> Option<u64> {
         let buffered = self.instruction_buffer.front()?;
         (buffered.instruction == self.next).then_some(buffered.ready_at)
-    }
-
-    fn push_fetched_instruction(
-        &mut self,
-        warp: usize,
-        ready_at: u64,
-        capacity: usize,
-    ) -> Result<(), IssueError> {
-        if !self.can_fetch_instruction(capacity) {
-            return Err(IssueError::InstructionBufferMissing {
-                warp,
-                instruction: self.front_end_fetch_cursor,
-            });
-        }
-        let instruction = self.front_end_fetch_cursor;
-        self.instruction_buffer.push_back(BufferedInstruction {
-            instruction,
-            ready_at,
-        });
-        self.front_end_fetch_cursor = checked_usize_counter_add(
-            "instruction front-end fetch cursor",
-            self.front_end_fetch_cursor,
-            1,
-        )?;
-        Ok(())
     }
 
     fn preflight_buffered_issue(&self, warp: usize) -> Result<(), IssueError> {
@@ -6976,24 +7484,26 @@ impl AsyncCopySlot {
         if let Some(copy) = bypass_copy {
             let (sector_membership_masks, cohorts) =
                 build_bypass_cohort_observation(warp, add, delivery_work, copy, params)?;
-            self.state
-                .as_deref_mut()
-                .expect("an observed bypass copy has allocated async-copy state")
-                .bypass_copies
-                .push(BypassAsyncCopyObservation {
-                    group: id,
-                    instruction: copy.instruction,
-                    pending_sources: add,
-                    source_completion_time: 0,
-                    delivery_work,
-                    source_cohorts: copy.source_cohorts,
-                    destination_lines: copy.destination_lines,
-                    max_bank_wavefronts: copy.max_bank_wavefronts,
-                    max_bypass_wavefronts: copy.max_bypass_wavefronts,
-                    sector_off: copy.sector_off,
-                    sector_membership_masks,
-                    cohorts,
-                });
+            if delivery_work != 0 {
+                self.state
+                    .as_deref_mut()
+                    .expect("an observed bypass copy has allocated async-copy state")
+                    .bypass_copies
+                    .push(BypassAsyncCopyObservation {
+                        group: id,
+                        instruction: copy.instruction,
+                        pending_sources: add,
+                        source_completion_time: 0,
+                        delivery_work,
+                        source_cohorts: copy.source_cohorts,
+                        destination_lines: copy.destination_lines,
+                        max_bank_wavefronts: copy.max_bank_wavefronts,
+                        max_bypass_wavefronts: copy.max_bypass_wavefronts,
+                        sector_off: copy.sector_off,
+                        sector_membership_masks,
+                        cohorts,
+                    });
+            }
         }
         Ok(id)
     }
@@ -7302,10 +7812,17 @@ impl AsyncCopySlot {
             let payload_completion =
                 params.ldgsts_completion_ready(copy.source_completion_time, copy.delivery_work)?;
             per_copy_completion = per_copy_completion.max(payload_completion);
-            let topology_penalty = bypass_topology_candidate_penalty(
-                copy.max_bypass_wavefronts,
-                copy.max_bank_wavefronts,
-            )?;
+            // A topology-only ignore-src copy has no source response stream;
+            // retain its topology counters, but do not synthesize a bypass
+            // candidate penalty from a zero-payload group.
+            let topology_penalty = if copy.delivery_work == 0 {
+                0
+            } else {
+                bypass_topology_candidate_penalty(
+                    copy.max_bypass_wavefronts,
+                    copy.max_bank_wavefronts,
+                )?
+            };
             topology_candidate_penalty_cycles = checked_u64_counter_add(
                 "bypass topology candidate penalty diagnostic",
                 topology_candidate_penalty_cycles,
@@ -7747,7 +8264,8 @@ impl WarpState<'_> {
                 .max(dependency_ready)
                 .max(self.cta_barrier_ready)
                 .max(self.barrier_pipeline_ready)
-                .max(self.branch_pipeline_ready),
+                .max(self.branch_pipeline_ready)
+                .max(self.imc_wait_until),
         )
     }
 }
@@ -7758,7 +8276,13 @@ fn async_copy_source_count(kind: AccessKind) -> Option<u16> {
             len,
             completion_work,
             ..
-        } if completion_work != 0 => Some(len),
+        } if !matches!(
+            decode_async_copy_completion(completion_work),
+            AsyncCopyCompletion::Inactive
+        ) =>
+        {
+            Some(len)
+        }
         AccessKind::GlobalAsyncCopy { .. }
         | AccessKind::NonMemory
         | AccessKind::PredicatedOffMemory
@@ -8131,6 +8655,13 @@ struct Retry {
     warp: usize,
     instruction: usize,
     origin: MemoryOrigin,
+    /// Whether the stalled logical load uses the SM86 constant-cache return
+    /// path. Retries retain the marker so a later fill cannot silently lose
+    /// the response delay.
+    constant_load: bool,
+    /// Whether this constant load uses the measured multi-site operand path.
+    /// This remains separate from the broad constant marker above.
+    constant_deep: bool,
     /// Completion identity of the stalled instruction. A present ordinary
     /// barrier holds one pending replacement unit until the entry drains;
     /// asynchronous-copy source units were counted at original issue and retain
@@ -8151,6 +8682,10 @@ struct FillWaiter {
     warp: usize,
     target: FillTarget,
     units: u32,
+    /// Whether this waiter consumes the measured deep constant-return path.
+    /// The marker is per waiter because one folded physical fill can serve
+    /// ordinary and constant loads with different return-service latencies.
+    constant_deep: bool,
 }
 
 /// Completion units cleared when one keyed L1 fill completes. Inline for the
@@ -8162,24 +8697,35 @@ enum Waiters {
 }
 
 impl Waiters {
-    fn add(&mut self, warp: usize, target: FillTarget) -> Result<(), IssueError> {
+    fn add(
+        &mut self,
+        warp: usize,
+        target: FillTarget,
+        constant_deep: bool,
+    ) -> Result<(), IssueError> {
         let new_waiter = FillWaiter {
             warp,
             target,
             units: 1,
+            constant_deep,
         };
         match self {
-            Self::One(waiter) if waiter.warp == warp && waiter.target == target => {
+            Self::One(waiter)
+                if waiter.warp == warp
+                    && waiter.target == target
+                    && waiter.constant_deep == constant_deep =>
+            {
                 waiter.units = checked_u32_counter_add("fill waiter unit", waiter.units, 1)?;
             }
             Self::One(waiter) => {
                 *self = Self::Many(vec![*waiter, new_waiter]);
             }
             Self::Many(waiters) => {
-                if let Some(waiter) = waiters
-                    .iter_mut()
-                    .find(|waiter| waiter.warp == warp && waiter.target == target)
-                {
+                if let Some(waiter) = waiters.iter_mut().find(|waiter| {
+                    waiter.warp == warp
+                        && waiter.target == target
+                        && waiter.constant_deep == constant_deep
+                }) {
                     waiter.units = checked_u32_counter_add("fill waiter unit", waiter.units, 1)?;
                 } else {
                     waiters.push(new_waiter);
@@ -8220,6 +8766,41 @@ fn accumulate_waiter_removals(
             checked_u32_counter_add("response async-copy remove budget", *remove, waiter.units)?;
     }
     Ok(())
+}
+
+fn checked_constant_return_time(
+    base: u64,
+    constant_deep: bool,
+    params: &IssueModelParams,
+    operation: &'static str,
+) -> Result<u64, IssueError> {
+    if !constant_deep {
+        return Ok(base);
+    }
+    let extra = params
+        .constant_memory_return_service
+        .map_or(0, |service| service.additional_cycles);
+    base.checked_add(extra).ok_or(IssueError::TimeOverflow {
+        operation,
+        base,
+        delta: extra,
+    })
+}
+
+fn fill_waiter_ready_time(
+    waiter: FillWaiter,
+    response_time: u64,
+    params: &IssueModelParams,
+) -> Result<u64, IssueError> {
+    if !waiter.constant_deep || waiter.target.barrier().is_none() {
+        return Ok(response_time);
+    }
+    checked_constant_return_time(
+        response_time,
+        true,
+        params,
+        "constant response return latency",
+    )
 }
 
 fn project_async_copy_removal(
@@ -8267,6 +8848,9 @@ struct SharedL2State {
     response_owner: ResponseOwner,
     /// Exact response-bearing request tokens still expected from the system.
     outstanding_replies: HashSet<ReplyTo>,
+    /// Response identities indexed separately so admission checks do not scan
+    /// every outstanding token for each sector in a wide instruction.
+    outstanding_response_ids: HashMap<ResponseId, ReplyTo>,
     /// Barrier units cleared when the keyed L1 fill completes.
     fill_waiters: HashMap<FillKey, Waiters>,
     /// Per in-flight LINE fill: the sector bits already sent to the L2
@@ -8283,7 +8867,7 @@ struct SharedL2State {
     fill_masks: HashMap<i64, u8>,
     /// Line fills emitted during the CURRENT emission batch (one
     /// `advance` or `on_response` call — the window whose requests are
-    /// still unscheduled in the caller's `out`): line id → index in
+    /// still unscheduled in the caller's `out`): line id → first index in
     /// `out`. A merge onto one of these FOLDS its sector into the fill
     /// request's mask, so the sector participates in worst-of-mask
     /// pricing regardless of which warp/instruction/retry-entry of the
@@ -8292,7 +8876,7 @@ struct SharedL2State {
     /// the priced arm depend on batch boundaries instead of physics).
     /// Cleared at every batch entry; indices are only valid because
     /// each batch starts with an empty `out`.
-    line_folds: Vec<(i64, usize)>,
+    line_folds: HashMap<i64, usize>,
     retry: VecDeque<Retry>,
 }
 
@@ -8323,15 +8907,302 @@ impl MemModel {
     }
 }
 
+/// Extract the constant-bank line keys used by an instruction's SASS text.
+/// Immediate constants are operands of the form `c[bank][offset]` or
+/// `cx[bank][offset]`; indexed `LDC`/`LDC.*` operations use a different cache
+/// and are intentionally excluded here, while uniform `ULDC`/`ULDC.*`
+/// operands remain on the IMC path as observed by NCU.  The parser is deliberately narrow:
+/// malformed/non-numeric references are ignored rather than guessed, while
+/// the trusted static sidecar remains the source of the instruction itself.
+fn immediate_constant_lines(opcode_text: &str, line_bytes: u32) -> Box<[u64]> {
+    // `opcode_head` strips width/cache modifiers (for example `ULDC.64`)
+    // using the same grammar as the rest of the SASS classifier.  On SM86,
+    // the remodeled scheduler probes CBANK operands on both ordinary ALU
+    // instructions and uniform `ULDC` forms; NCU's IMC request counter also
+    // includes those uniform references.  Only the true indexed `LDC` load
+    // uses the separate constant-memory path, so exclude that head while
+    // retaining ULDC/ULDC.64 CBANK operands.
+    if opcode_head(opcode_text) == "LDC" || line_bytes == 0 {
+        return Box::new([]);
+    }
+    let bytes = opcode_text.as_bytes();
+    let mut lines = Vec::new();
+    let mut cursor = 0usize;
+    while cursor + 3 < bytes.len() {
+        let is_c = bytes[cursor] == b'c'
+            && (bytes[cursor + 1] == b'['
+                || (bytes[cursor + 1] == b'x'
+                    && cursor + 2 < bytes.len()
+                    && bytes[cursor + 2] == b'['));
+        if !is_c {
+            cursor += 1;
+            continue;
+        }
+        let first_open = if bytes[cursor + 1] == b'[' {
+            cursor + 1
+        } else {
+            cursor + 2
+        };
+        let Some(first_close) = bytes[first_open + 1..]
+            .iter()
+            .position(|&value| value == b']')
+            .map(|offset| first_open + 1 + offset)
+        else {
+            cursor += 1;
+            continue;
+        };
+        let second_open = first_close + 1;
+        if second_open >= bytes.len() || bytes[second_open] != b'[' {
+            cursor = first_close + 1;
+            continue;
+        }
+        let Some(second_close) = bytes[second_open + 1..]
+            .iter()
+            .position(|&value| value == b']')
+            .map(|offset| second_open + 1 + offset)
+        else {
+            cursor = second_open + 1;
+            continue;
+        };
+        let parse_literal = |slice: &[u8]| -> Option<u64> {
+            let text = std::str::from_utf8(slice).ok()?.trim();
+            if text.is_empty() {
+                return None;
+            }
+            if let Some(hex) = text.strip_prefix("0x").or_else(|| text.strip_prefix("0X")) {
+                u64::from_str_radix(hex, 16).ok()
+            } else {
+                text.parse().ok()
+            }
+        };
+        let bank = parse_literal(&bytes[first_open + 1..first_close]);
+        let offset = parse_literal(&bytes[second_open + 1..second_close]);
+        if let (Some(bank), Some(offset)) = (bank, offset) {
+            let address = bank
+                .checked_mul(65_536)
+                .and_then(|base| base.checked_add(offset));
+            if let Some(address) = address {
+                let line = address / u64::from(line_bytes);
+                if !lines.contains(&line) {
+                    lines.push(line);
+                }
+            }
+        }
+        cursor = second_close + 1;
+    }
+    lines.sort_unstable();
+    lines.into_boxed_slice()
+}
+
+#[derive(Debug, Clone, Copy)]
+struct ImmediateConstantPending {
+    line: u64,
+    ready_at: u64,
+}
+
+#[derive(Debug, Clone)]
+struct ImmediateConstantCacheState {
+    config: ImmediateConstantCache,
+    /// Per-set LRU tags, oldest at the front.  A line key is used as its tag
+    /// identity after the set index has been derived; this is sufficient for
+    /// the closed constant-address domain and avoids address aliases.
+    sets: Vec<VecDeque<u64>>,
+    pending: Vec<ImmediateConstantPending>,
+    /// The pipelined SM-shared L1C access path admits lines at its measured
+    /// initiation interval while the MSHR count bounds lines outstanding.
+    next_service: u64,
+    diagnostics: ImmediateConstantCacheDiagnostics,
+}
+
+impl ImmediateConstantCacheState {
+    fn new(config: ImmediateConstantCache) -> Result<Self, IssueError> {
+        if config.sets == 0
+            || config.line_bytes == 0
+            || config.ways == 0
+            || config.mshr_entries == 0
+            || config.access_queue_entries == 0
+            || config.miss_initiation_interval_cycles == 0
+            || config.sm_structure_latency_cycles == 0
+            || config.l0_to_l1_cycles == 0
+            || config.switch_after_miss_cycles == 0
+        {
+            return Err(IssueError::ImmediateConstantCacheConfigurationInvalid);
+        }
+        Ok(Self {
+            config,
+            sets: (0..config.sets).map(|_| VecDeque::new()).collect(),
+            pending: Vec::new(),
+            next_service: 0,
+            diagnostics: ImmediateConstantCacheDiagnostics::default(),
+        })
+    }
+
+    fn set_index(&self, line: u64) -> usize {
+        (line % u64::from(self.config.sets)) as usize
+    }
+
+    fn contains(&self, line: u64) -> bool {
+        self.sets[self.set_index(line)].contains(&line)
+    }
+
+    fn pending_ready(&self, line: u64) -> Option<u64> {
+        self.pending
+            .iter()
+            .find(|entry| entry.line == line)
+            .map(|entry| entry.ready_at)
+    }
+
+    fn touch(&mut self, line: u64) {
+        let set_index = self.set_index(line);
+        let set = &mut self.sets[set_index];
+        if let Some(position) = set.iter().position(|&tag| tag == line) {
+            set.remove(position);
+        }
+        set.push_back(line);
+        while set.len() > self.config.ways as usize {
+            set.pop_front();
+        }
+    }
+
+    fn complete_ready(&mut self, now: u64) {
+        let mut ready = Vec::new();
+        self.pending.retain(|entry| {
+            if entry.ready_at <= now {
+                ready.push(entry.line);
+                false
+            } else {
+                true
+            }
+        });
+        // `pending` is issue order. Preserve it when multiple lines have
+        // become ready since the last scheduler step: sorting by line address
+        // would change same-timestamp fill order and therefore LRU victims.
+        // Pending-line identity is unique by `reserve`, so no deduplication is
+        // needed here.
+        // Diagnostic counters are observational; the execution state itself
+        // remains checked. Saturation keeps a pathological trace from turning
+        // reporting into a scheduler failure.
+        self.diagnostics.lines_filled = self
+            .diagnostics
+            .lines_filled
+            .saturating_add(u64::try_from(ready.len()).unwrap_or(u64::MAX));
+        for line in ready {
+            self.touch(line);
+        }
+    }
+
+    /// Reserve every currently missing line referenced by one instruction.
+    /// Returns the earliest time at which the instruction may be re-issued;
+    /// `None` means all references are already resident.  New misses use one
+    /// pipelined L1C service lane; an existing pending line is shared by all
+    /// waiting warps on that SMSP.
+    fn reserve(
+        &mut self,
+        lines: &[u64],
+        now: u64,
+        upper_level_latency: u64,
+    ) -> Result<Option<u64>, IssueError> {
+        let mut wait_until: Option<u64> = None;
+        // `upper_level_latency` is the carded L1/L2 response frontier used by
+        // the shared event system.  The 11-stage local structure and its
+        // 39-cycle transport are already represented in the NCU-calibrated
+        // response frontier for this replay; adding them here would charge
+        // the same path twice.  The local fields remain part of the capability
+        // identity and diagnostics, while this actor waits on the single
+        // externally observable response timestamp.
+        let miss_latency = upper_level_latency;
+        for &line in lines {
+            self.diagnostics.references = self.diagnostics.references.saturating_add(1);
+            if self.contains(line) {
+                self.diagnostics.lookup_hits = self.diagnostics.lookup_hits.saturating_add(1);
+                continue;
+            }
+            self.diagnostics.lookup_misses = self.diagnostics.lookup_misses.saturating_add(1);
+            if let Some(ready) = self.pending_ready(line) {
+                self.diagnostics.pending_tag_hits =
+                    self.diagnostics.pending_tag_hits.saturating_add(1);
+                self.diagnostics.pending_merges = self.diagnostics.pending_merges.saturating_add(1);
+                wait_until = Some(wait_until.map_or(ready, |current| current.max(ready)));
+                continue;
+            }
+            if self.pending.len() >= self.config.mshr_entries as usize {
+                if let Some(ready) = self.pending.iter().map(|entry| entry.ready_at).min() {
+                    wait_until = Some(wait_until.map_or(ready, |current| current.max(ready)));
+                }
+                continue;
+            }
+            let start = now.max(self.next_service);
+            let ready = start
+                .checked_add(miss_latency)
+                .ok_or(IssueError::TimeOverflow {
+                    operation: "immediate constant-cache line response",
+                    base: start,
+                    delta: miss_latency,
+                })?;
+            // The 11-stage L1C structure is a pipelined queue: its one-entry
+            // access port accepts a new line each cycle while earlier misses
+            // continue through the latency stages.  Serializing the port by
+            // the full response latency would turn independent CBANK misses
+            // into a bandwidth bottleneck that the released SM86 model does
+            // not have.  Keep the response timestamp serialized only by the
+            // measured initiation interval (one cycle for the characterized
+            // queue), while `ready_at` still carries the full miss latency.
+            self.next_service = start
+                .checked_add(self.config.miss_initiation_interval_cycles)
+                .ok_or(IssueError::TimeOverflow {
+                    operation: "immediate constant-cache service initiation",
+                    base: start,
+                    delta: self.config.miss_initiation_interval_cycles,
+                })?;
+            self.pending.push(ImmediateConstantPending {
+                line,
+                ready_at: ready,
+            });
+            self.diagnostics.tag_misses = self.diagnostics.tag_misses.saturating_add(1);
+            self.diagnostics.maximum_pending_lines = self
+                .diagnostics
+                .maximum_pending_lines
+                .max(u64::try_from(self.pending.len()).unwrap_or(u64::MAX));
+            wait_until = Some(wait_until.map_or(ready, |current| current.max(ready)));
+        }
+        Ok(wait_until)
+    }
+
+    fn diagnostics(&self) -> ImmediateConstantCacheDiagnostics {
+        self.diagnostics
+    }
+}
+
+#[derive(Debug)]
+struct ImmediateConstantPlan {
+    picks: [Option<usize>; SUB_CORES],
+    cache: Option<Box<[ImmediateConstantCacheState; SUB_CORES]>>,
+    waits: [Option<(usize, u64)>; SUB_CORES],
+    miss_observed: bool,
+}
+
 /// Resumable single-SM replay actor. See the module docs for the mode
 /// semantics and the run-ahead (horizon) contract.
+#[derive(Debug)]
+struct SharedWriteLookupRuntime {
+    observer: Option<Rc<RefCell<L1WriteLookupObserver>>>,
+    /// Per-SMSP source-hit return-port frontiers for cacheable LDGSTS.
+    async_l1_hit_service_ready: [u64; SUB_CORES],
+}
+
 pub(crate) struct SmCore<'a> {
     schedule: &'a FunctionSchedule,
     /// Static schedule values in PC order. Contiguous binary search avoids a
     /// pointer-chasing B-tree lookup for every dynamic issue while preserving
     /// the schedule map as the authoritative join/diagnostic surface.
     schedule_slots: Vec<(u64, &'a IssueSlot)>,
-    memory_pipeline_schedule: HashMap<u64, MemoryPipelineSlot>,
+    memory_pipeline_schedule: Box<HashMap<u64, MemoryPipelineSlot>>,
+    /// Static PCs that enter the measured multi-site constant operand path.
+    constant_path_pcs: Box<HashSet<u64>>,
+    /// Pre-parsed immediate-constant line references keyed by static PC.
+    immediate_constant_schedule: Box<HashMap<u32, Box<[u64]>>>,
+    /// Private IMC/L0C state for each SMSP; absent for synthetic fixtures.
+    immediate_constant_cache: Option<Box<[ImmediateConstantCacheState; SUB_CORES]>>,
     params: IssueModelParams,
     shared_memory_residency: SharedMemoryResidency,
     physical_warp_slots: u32,
@@ -8361,6 +9232,11 @@ pub(crate) struct SmCore<'a> {
     /// Earliest issue time of each SMSP's local Tensor Core. This timeline is
     /// kernel-local but survives CTA retirement/admission waves on the SM.
     tensor_pipe_ready: [u64; SUB_CORES],
+    /// Finite scalar INT/FP execution windows, one per SMSP.
+    scalar_execution_pipeline: Option<Box<ScalarExecutionPipelineState>>,
+    /// Cold shared observer/async-return state is boxed to keep the actor's
+    /// compact hot structure within the established 4 KiB bound.
+    shared_write_lookup_runtime: Box<SharedWriteLookupRuntime>,
     /// Earliest free cycle of the cache-all LDGSTS destination service shared
     /// by every resident warp on this SM.
     ldgsts_destination_pipe_ready: u64,
@@ -8369,16 +9245,22 @@ pub(crate) struct SmCore<'a> {
     /// admitted sm_86 STRONG.SM scalar load form.
     result_writebacks: Option<ResultWritebackState>,
     unmodeled_tails: TailFlags,
-    readiness: ReadinessDiagnostics,
+    /// Box the cold diagnostic aggregate so adding a new observation surface
+    /// cannot inflate the scheduler's hot actor beyond its compact-size
+    /// invariant.
+    readiness: Box<ReadinessDiagnostics>,
     memory_service_candidates: MemoryServiceCandidateState,
     emit_admission_witnesses: bool,
     memory_admission_feedback: Option<Box<MemoryAdmissionFeedbackState>>,
     issued: u64,
     t: u64,
+    /// Latest modeled SM-local completion frontier that can occur after the
+    /// last issue (for example, a terminal CTA-barrier release).
+    local_completion_time: Option<u64>,
     arrival_stamp: u64,
     resident_warps: u32,
     resident_shared_memory_bytes: u64,
-    resident_warp_slots: HashSet<i32>,
+    resident_warp_slots: Box<HashSet<i32>>,
     unfinished_warps: usize,
     next_block: usize,
 }
@@ -8396,6 +9278,24 @@ impl<'a> SmCore<'a> {
         params: &IssueModelParams,
         shared_memory_residency: SharedMemoryResidency,
         mode: SmMemMode,
+    ) -> Result<Self, IssueError> {
+        Self::new_with_residency_and_observer(
+            blocks,
+            schedule,
+            params,
+            shared_memory_residency,
+            mode,
+            None,
+        )
+    }
+
+    pub(crate) fn new_with_residency_and_observer(
+        blocks: &'a [BlockReplay],
+        schedule: &'a FunctionSchedule,
+        params: &IssueModelParams,
+        shared_memory_residency: SharedMemoryResidency,
+        mode: SmMemMode,
+        write_lookup_observer: Option<Rc<RefCell<L1WriteLookupObserver>>>,
     ) -> Result<Self, IssueError> {
         params.validate_resource_source()?;
         if shared_memory_residency.max_bytes_per_sm() == 0 {
@@ -8424,10 +9324,49 @@ impl<'a> SmCore<'a> {
             .iter()
             .map(|(&pc, slot)| (pc, slot))
             .collect::<Vec<_>>();
+        let constant_streams = constant_stream_count(schedule);
+        let constant_pressure_threshold = params
+            .memory_issue_pipeline
+            .map_or(u32::MAX, |config| config.queue_entries_with_dispatch);
+        let constant_path_pcs = schedule
+            .by_pc
+            .iter()
+            .filter_map(|(&pc, slot)| {
+                deep_constant_load(slot, constant_streams, constant_pressure_threshold)
+                    .then_some(pc)
+            })
+            .collect::<HashSet<_>>();
+        let immediate_constant_config = matches!(mode, SmMemMode::L1Shared(_))
+            .then_some(params.immediate_constant_cache)
+            .flatten();
+        let immediate_constant_schedule =
+            immediate_constant_config.map_or_else(HashMap::new, |config| {
+                schedule
+                    .by_pc
+                    .iter()
+                    .filter_map(|(&pc, slot)| {
+                        let lines = immediate_constant_lines(slot.opcode_text(), config.line_bytes);
+                        (!lines.is_empty()).then_some((pc as u32, lines))
+                    })
+                    .collect()
+            });
+        let immediate_constant_cache: Option<Box<[ImmediateConstantCacheState; SUB_CORES]>> =
+            immediate_constant_config
+                .map(|config| {
+                    Ok::<Box<[ImmediateConstantCacheState; SUB_CORES]>, IssueError>(Box::new([
+                        ImmediateConstantCacheState::new(config)?,
+                        ImmediateConstantCacheState::new(config)?,
+                        ImmediateConstantCacheState::new(config)?,
+                        ImmediateConstantCacheState::new(config)?,
+                    ]))
+                })
+                .transpose()?;
         let mut memory_pipeline_schedule = HashMap::new();
         if let Some(config) = params.memory_issue_pipeline {
             for (&pc, slot) in &schedule.by_pc {
-                if let Some(memory_slot) = memory_pipeline_slot(slot, config) {
+                if let Some(memory_slot) =
+                    memory_pipeline_slot(slot, config, constant_path_pcs.contains(&pc))
+                {
                     memory_pipeline_schedule.insert(pc, memory_slot);
                 }
             }
@@ -8466,6 +9405,13 @@ impl<'a> SmCore<'a> {
                     live_warps,
                     arch: params.arch,
                     max_resident_warps: params.max_resident_warps_per_sm,
+                });
+            }
+            if live_warps != 0 && params.max_resident_blocks_per_sm == 0 {
+                return Err(IssueError::BlockCountResidencyLimitExceeded {
+                    launch_index: block.launch_index,
+                    arch: params.arch,
+                    max_resident_blocks: params.max_resident_blocks_per_sm,
                 });
             }
             if live_warps != 0
@@ -8575,9 +9521,10 @@ impl<'a> SmCore<'a> {
                 l1: L1Cache::new(cfg)?,
                 response_owner: allocate_response_owner()?,
                 outstanding_replies: HashSet::new(),
+                outstanding_response_ids: HashMap::new(),
                 fill_waiters: HashMap::new(),
                 fill_masks: HashMap::new(),
-                line_folds: Vec::new(),
+                line_folds: HashMap::new(),
                 retry: VecDeque::new(),
             }),
         };
@@ -8589,6 +9536,22 @@ impl<'a> SmCore<'a> {
             .memory_issue_pipeline
             .map(MemoryIssuePipelineState::new)
             .transpose()?;
+        let scalar_execution_pipeline = params
+            .scalar_execution_pipeline
+            .map(ScalarExecutionPipelineState::new)
+            .transpose()?
+            .map(Box::new);
+        let stateful_write_lookup_observer = stateful_write_lookup_observer_enabled(schedule);
+        let write_lookup_observer = if stateful_write_lookup_observer {
+            match write_lookup_observer {
+                Some(observer) => Some(observer),
+                None => Some(Rc::new(RefCell::new(
+                    L1WriteLookupObserver::for_arch(params.arch).map_err(IssueError::from)?,
+                ))),
+            }
+        } else {
+            None
+        };
         let mut barrier_issue = None;
         for slot in schedule.by_pc.values() {
             let PipelineClass::Barrier {
@@ -8643,7 +9606,10 @@ impl<'a> SmCore<'a> {
         let mut core = Self {
             schedule,
             schedule_slots,
-            memory_pipeline_schedule,
+            memory_pipeline_schedule: Box::new(memory_pipeline_schedule),
+            constant_path_pcs: Box::new(constant_path_pcs),
+            immediate_constant_schedule: Box::new(immediate_constant_schedule),
+            immediate_constant_cache,
             params: *params,
             shared_memory_residency,
             physical_warp_slots,
@@ -8662,23 +9628,36 @@ impl<'a> SmCore<'a> {
             barrier_issue,
             barrier_pipe_ready: 0,
             tensor_pipe_ready: [0; SUB_CORES],
+            scalar_execution_pipeline,
+            shared_write_lookup_runtime: Box::new(SharedWriteLookupRuntime {
+                observer: write_lookup_observer,
+                async_l1_hit_service_ready: [0; SUB_CORES],
+            }),
             ldgsts_destination_pipe_ready: 0,
             result_writebacks,
             unmodeled_tails,
-            readiness,
+            readiness: Box::new(readiness),
             memory_service_candidates: MemoryServiceCandidateState::default(),
             emit_admission_witnesses: false,
             memory_admission_feedback: None,
             issued: 0,
+            // Keep the scheduler/event clock anchored at zero.  The
+            // architecture-scoped SM-active observation boundary is an
+            // explicit output projection (see `sm_active_observation_frontier`)
+            // rather than hidden in every readiness timestamp and cumulative
+            // diagnostic.  This preserves the causal lower-bound semantics of
+            // the issue model and prevents a fixed observation interval from
+            // being charged once per resident SM or per event.
             t: 0,
+            local_completion_time: None,
             arrival_stamp: 0,
             resident_warps: 0,
             resident_shared_memory_bytes: 0,
-            resident_warp_slots: HashSet::new(),
+            resident_warp_slots: Box::new(HashSet::new()),
             unfinished_warps: 0,
             next_block: 0,
         };
-        core.admit_blocks(0)?;
+        core.admit_blocks(core.t)?;
         Ok(core)
     }
 
@@ -8799,12 +9778,45 @@ impl<'a> SmCore<'a> {
     /// Result snapshot; meaningful once [`Self::advance`] returned
     /// [`Advance::Done`].
     pub(crate) fn result(&self) -> SmSimResult {
-        let mut readiness = self.readiness.clone();
+        let mut readiness = (*self.readiness).clone();
         if let Some(front_end) = self.instruction_front_end.as_ref() {
             readiness.instruction_front_end = Some(Box::new(front_end.diagnostics));
         }
         if let Some(memory_pipeline) = self.memory_issue_pipeline.as_ref() {
             readiness.memory_issue_pipeline = Some(Box::new(memory_pipeline.diagnostics));
+        }
+        if let Some(cache) = self.immediate_constant_cache.as_ref() {
+            let mut diagnostics = ImmediateConstantCacheDiagnostics::default();
+            for state in cache.iter() {
+                let addend = state.diagnostics();
+                diagnostics.references = diagnostics.references.saturating_add(addend.references);
+                diagnostics.lookup_hits =
+                    diagnostics.lookup_hits.saturating_add(addend.lookup_hits);
+                diagnostics.lookup_misses = diagnostics
+                    .lookup_misses
+                    .saturating_add(addend.lookup_misses);
+                diagnostics.pending_tag_hits = diagnostics
+                    .pending_tag_hits
+                    .saturating_add(addend.pending_tag_hits);
+                diagnostics.tag_misses = diagnostics.tag_misses.saturating_add(addend.tag_misses);
+                diagnostics.pending_merges = diagnostics
+                    .pending_merges
+                    .saturating_add(addend.pending_merges);
+                diagnostics.lines_filled =
+                    diagnostics.lines_filled.saturating_add(addend.lines_filled);
+                diagnostics.miss_wait_events = diagnostics
+                    .miss_wait_events
+                    .saturating_add(addend.miss_wait_events);
+                diagnostics.miss_wait_cycles = diagnostics
+                    .miss_wait_cycles
+                    .saturating_add(addend.miss_wait_cycles);
+                diagnostics.maximum_pending_lines = diagnostics
+                    .maximum_pending_lines
+                    .max(addend.maximum_pending_lines);
+            }
+            if !diagnostics.is_empty() {
+                readiness.immediate_constant_cache = Some(Box::new(diagnostics));
+            }
         }
         readiness.memory_service_candidates = self.memory_service_candidates.diagnostics();
         if let Some(feedback) = self.memory_admission_feedback.as_ref() {
@@ -8814,23 +9826,109 @@ impl<'a> SmCore<'a> {
                 readiness.memory_write_ack = Some(Box::new(write_ack));
             }
         }
+        let pipeline_completion = self
+            .memory_issue_pipeline
+            .as_ref()
+            .filter(|pipeline| !pipeline.diagnostics.is_empty())
+            .map(|pipeline| pipeline.diagnostics.terminal_shared_accept_cycle);
+        let modeled_local_completion_cycles =
+            match (pipeline_completion, self.local_completion_time) {
+                (Some(pipeline), Some(local)) => Some(pipeline.max(local)),
+                (Some(value), None) | (None, Some(value)) => Some(value),
+                (None, None) => None,
+            };
         SmSimResult {
             instructions_issued: self.issued,
             cycles: self.t,
-            modeled_local_completion_cycles: self
-                .memory_issue_pipeline
-                .as_ref()
-                .filter(|pipeline| !pipeline.diagnostics.is_empty())
-                .map(|pipeline| pipeline.diagnostics.terminal_shared_accept_cycle),
+            modeled_local_completion_cycles,
             l1: self.mem.l1().map(|c| c.counters),
             unmodeled_tails: self.unmodeled_tails,
             readiness,
         }
     }
 
+    /// Retire one warp after its final instruction has become semantically
+    /// complete. Ordinary instructions call this immediately; a final
+    /// BAR.SYNC calls it from the CTA-release path so the barrier remains a
+    /// real synchronization point.
+    fn retire_warp(&mut self, subcore: usize, warp_index: usize, t: u64) -> Result<(), IssueError> {
+        if self.warps[warp_index].done {
+            return Ok(());
+        }
+        let block = self.warps[warp_index].block;
+        let pos = self.warps[warp_index].pos_in_subcore;
+        if self.subcore_warps[subcore].get(pos).copied() != Some(warp_index) {
+            return Err(IssueError::CounterUnderflow {
+                counter: "sub-core resident warp",
+            });
+        }
+        // A final BAR.SYNC is parked with itself in the CGGTY hold slot while
+        // it waits for the CTA rendezvous.  Clear that slot before removing
+        // the warp: swap_remove can otherwise leave a stale index that now
+        // names a different resident warp (or a done warp), changing the
+        // next pick/fetch decision after release.  Ordinary retirement also
+        // benefits from the same invariant.
+        if self.hold[subcore] == Some(warp_index) {
+            self.hold[subcore] = None;
+        }
+        self.warps[warp_index].done = true;
+        self.warps[warp_index].next_slot = None;
+        self.warps[warp_index].ordinary_dependency_wait_mask = WaitMask::NONE;
+        self.warps[warp_index].at_block_barrier = false;
+        self.warps[warp_index].block_barrier_dispatch = None;
+        self.warps[warp_index].block_barrier_arrival = None;
+        self.unfinished_warps =
+            self.unfinished_warps
+                .checked_sub(1)
+                .ok_or(IssueError::CounterUnderflow {
+                    counter: "unfinished warp",
+                })?;
+        self.block_states[block].unfinished = self.block_states[block]
+            .unfinished
+            .checked_sub(1)
+            .ok_or(IssueError::CounterUnderflow {
+                counter: "block unfinished warp",
+            })?;
+
+        // Retire from the sub-core pick list (swap-remove + position fix-up)
+        // so scans remain bounded by resident warps.
+        self.subcore_warps[subcore].swap_remove(pos);
+        if let Some(&moved) = self.subcore_warps[subcore].get(pos) {
+            self.warps[moved].pos_in_subcore = pos;
+        }
+
+        if self.block_states[block].unfinished == 0 {
+            let state = &self.block_states[block];
+            self.resident_warps = self.resident_warps.checked_sub(state.warp_count).ok_or(
+                IssueError::CounterUnderflow {
+                    counter: "resident warp",
+                },
+            )?;
+            self.resident_shared_memory_bytes = self
+                .resident_shared_memory_bytes
+                .checked_sub(state.shared_memory_bytes)
+                .ok_or(IssueError::CounterUnderflow {
+                    counter: "resident shared-memory byte",
+                })?;
+            for &warp_slot in &state.warp_slots {
+                let removed = self.resident_warp_slots.remove(&warp_slot);
+                if !removed {
+                    return Err(IssueError::ResidentWarpSlotMissing {
+                        launch_index: self.warps[state.first_warp].launch_index,
+                        warp_slot,
+                    });
+                }
+            }
+            let admit_at = checked_cycle_add("block-wave admission", t, 1)?;
+            self.admit_blocks(admit_at)?;
+        }
+        Ok(())
+    }
+
     /// Admit blocks in launch order while all modeled constraints allow: the
-    /// resident-warp ceiling, the architecture-card shared-memory capacity, and
-    /// disjoint physical warp slots across concurrent CTAs. A colliding later CTA
+    /// resident-block and resident-warp ceilings, the architecture-card
+    /// shared-memory capacity, and disjoint physical warp slots across
+    /// concurrent CTAs. A colliding later CTA
     /// waits for the earlier CTA to retire; reuse after retirement is valid. A
     /// block whose warps are ALL empty occupies no residency (it can never retire
     /// through the issue path, so counting it would leak resources and block later
@@ -8844,6 +9942,16 @@ impl<'a> SmCore<'a> {
             } else {
                 self.shared_memory_residency.bytes_per_cta()
             };
+            let resident_blocks = self
+                .block_states
+                .iter()
+                .filter(|state| state.unfinished != 0)
+                .count() as u32;
+            let next_resident_blocks = resident_blocks
+                .checked_add(u32::from(live_warps != 0))
+                .ok_or(IssueError::CounterOverflow {
+                    counter: "resident blocks",
+                })?;
             let Some(next_resident_warps) = self.resident_warps.checked_add(live_warps) else {
                 // Construction proved this CTA fits alone, so an overflowing sum
                 // can only mean it must wait for the current wave to retire.
@@ -8875,7 +9983,8 @@ impl<'a> SmCore<'a> {
                 .iter()
                 .any(|slot| self.resident_warp_slots.contains(slot));
             if self.resident_warps > 0
-                && (next_resident_warps > self.params.max_resident_warps_per_sm
+                && (next_resident_blocks > self.params.max_resident_blocks_per_sm
+                    || next_resident_warps > self.params.max_resident_warps_per_sm
                     || next_resident_shared_memory_bytes
                         > self.shared_memory_residency.max_bytes_per_sm()
                     || slots_collide)
@@ -8950,6 +10059,7 @@ impl<'a> SmCore<'a> {
                         next_slot: Some(next_slot),
                         current_since: t,
                         eligible: t,
+                        imc_wait_until: 0,
                         ordinary_dependency_wait_mask: next_slot.ordinary_dependency_wait_mask(),
                         barrier_clear: [0; DEP_BARRIERS],
                         barrier_origin: [DependencyOrigin::Unknown; DEP_BARRIERS],
@@ -9036,6 +10146,8 @@ impl<'a> SmCore<'a> {
         wix: usize,
         instruction: usize,
         kind: AccessKind,
+        constant_load: bool,
+        constant_deep: bool,
         sectors: &'a [i64],
         write_barrier: Option<DepBarrier>,
         destination_wavefronts: u64,
@@ -9045,6 +10157,14 @@ impl<'a> SmCore<'a> {
         let t = memory_time;
         let p = self.params;
         let emit_admission_witnesses = self.emit_admission_witnesses;
+        let shared_write_lookup_observer = self.shared_write_lookup_runtime.observer.clone();
+        // The observer is shared across SM actors, but an instruction's memory
+        // step is still a transaction: later request/counter validation may
+        // fail after the write stream has been classified.  Prepare only the
+        // touched sets and publish the plan after the complete step succeeds;
+        // this avoids both leaked tags and an O(total-set-count) clone on every
+        // store instruction.
+        let mut staged_write_lookup_plan: Option<L1WriteLookupObserverPlan> = None;
         let MemModel::L1Shared(st) = &mut self.mem else {
             unreachable!("mem_step_shared is only dispatched in shared mode")
         };
@@ -9093,12 +10213,20 @@ impl<'a> SmCore<'a> {
                         target,
                         None,
                         origin,
+                        constant_load,
+                        constant_deep,
                         sectors[i],
                         ResponseId::new(st.response_owner, wix, instruction, i),
                         t,
                         out,
                     ) {
                         Ok(Some(ready)) => {
+                            let ready = checked_constant_return_time(
+                                ready,
+                                constant_deep && target.and_then(FillTarget::barrier).is_some(),
+                                &p,
+                                "constant L1-hit return latency",
+                            )?;
                             if let Some(current) = &mut known {
                                 *current = (*current).max(ready);
                             }
@@ -9112,6 +10240,8 @@ impl<'a> SmCore<'a> {
                                 warp: wix,
                                 instruction,
                                 origin,
+                                constant_load,
+                                constant_deep,
                                 target,
                                 mshr_floor: None,
                                 lookup_batch,
@@ -9132,6 +10262,12 @@ impl<'a> SmCore<'a> {
                 l1_policy: LdgstsL1Policy::CacheAtAllLevels,
             } => {
                 let source_active = completion_work != 0;
+                let hit_service_interval = self
+                    .params
+                    .ldgsts_l1_hit_return_service
+                    .map_or(0, |service| service.interval_cycles);
+                let mut hit_service_ready =
+                    self.shared_write_lookup_runtime.async_l1_hit_service_ready[subcore];
                 let range = off..off + usize::from(len);
                 let delivery_work = async_copy_completion_work(kind).unwrap_or(0);
                 let async_group = if source_active {
@@ -9170,12 +10306,25 @@ impl<'a> SmCore<'a> {
                         target,
                         Some(p.ldgsts_l1_mshr_floor),
                         MemoryOrigin::Global,
+                        false,
+                        false,
                         sectors[i],
                         ResponseId::new(st.response_owner, wix, instruction, i),
                         t,
                         out,
                     ) {
                         Ok(Some(ready)) => {
+                            let ready = if hit_service_interval == 0 {
+                                ready
+                            } else {
+                                let serviced = ready.max(hit_service_ready);
+                                hit_service_ready = serviced
+                                    .checked_add(hit_service_interval)
+                                    .ok_or(IssueError::CounterOverflow {
+                                        counter: "async L1 hit service timeline",
+                                    })?;
+                                serviced
+                            };
                             if let Some(group) = async_group {
                                 async_copies[wix]
                                     .complete_async_copy_sources(wix, group, None, 1, ready, &p)?;
@@ -9194,6 +10343,8 @@ impl<'a> SmCore<'a> {
                                 warp: wix,
                                 instruction,
                                 origin: MemoryOrigin::Global,
+                                constant_load: false,
+                                constant_deep: false,
                                 target,
                                 mshr_floor: Some(p.ldgsts_l1_mshr_floor),
                                 lookup_batch,
@@ -9205,6 +10356,8 @@ impl<'a> SmCore<'a> {
                         Err(SharedAccessError::Issue(source)) => return Err(source),
                     }
                 }
+                self.shared_write_lookup_runtime.async_l1_hit_service_ready[subcore] =
+                    hit_service_ready;
                 Ok(known)
             }
             AccessKind::GlobalBypass { off, len, .. }
@@ -9251,16 +10404,6 @@ impl<'a> SmCore<'a> {
                 } else {
                     st.l1.count_untagged(origin, u64::from(len))?;
                 }
-                if len == 0 {
-                    // Degenerate record (fully predicated-off lanes are
-                    // legal on the wire): no sectors, no requests. Only a
-                    // present write barrier consumes the L2-hit visibility.
-                    return if write_barrier.is_some() {
-                        p.store_visibility_ready(t).map(Some)
-                    } else {
-                        Ok(None)
-                    };
-                }
                 let async_group = if async_copy {
                     let delivery_work = async_copy_completion_work(kind).unwrap_or(0);
                     let exact_cohorts = warps[wix]
@@ -9296,6 +10439,17 @@ impl<'a> SmCore<'a> {
                 } else {
                     None
                 };
+                if len == 0 {
+                    // Degenerate records have no source requests. A topology
+                    // carrying only executing ignore-src lanes still owns an
+                    // async group, so create it before returning; otherwise a
+                    // later commit/wait would silently drop destination work.
+                    return if write_barrier.is_some() {
+                        p.store_visibility_ready(t).map(Some)
+                    } else {
+                        Ok(None)
+                    };
+                }
                 for i in off..off + usize::from(len) {
                     let sector_id = sectors[i];
                     let response_id = ResponseId::new(st.response_owner, wix, instruction, i);
@@ -9331,6 +10485,8 @@ impl<'a> SmCore<'a> {
                         local_sector_mask: 0,
                         source,
                         operation,
+                        constant_load: false,
+                        constant_deep: false,
                         reply,
                         admission_witness: None,
                     });
@@ -9348,7 +10504,17 @@ impl<'a> SmCore<'a> {
                     _ => unreachable!("match arm admits only hierarchy writes"),
                 };
                 let reduction = matches!(kind, AccessKind::GlobalReduction { .. });
-                if let Some(hits) = projected_l1_write_lookup_hits(kind, sectors) {
+                let store_sectors = &sectors[off..off + usize::from(len)];
+                if shared_write_lookup_observer.is_some()
+                    && matches!(kind, AccessKind::GlobalStore { .. })
+                {
+                    let plan = if let Some(observer) = shared_write_lookup_observer.as_ref() {
+                        observer.borrow().plan_batch(store_sectors)?
+                    } else {
+                        unreachable!("shared observer branch has no observer")
+                    };
+                    staged_write_lookup_plan = Some(plan);
+                } else if let Some(hits) = projected_l1_write_lookup_hits(kind, sectors) {
                     st.l1.count_write_lookup_hits(origin, hits)?;
                 }
                 for (request_index, &sector_id) in
@@ -9391,11 +10557,18 @@ impl<'a> SmCore<'a> {
                 }
                 // A present write barrier is priced at the L2-hit arm (as in
                 // L1Const); stores and reductions do not wait on responses.
-                if write_barrier.is_some() {
-                    p.store_visibility_ready(t).map(Some)
+                let visibility_ready = if write_barrier.is_some() {
+                    p.store_visibility_ready(t).map(Some)?
                 } else {
-                    Ok(None)
+                    None
+                };
+                if let Some(plan) = staged_write_lookup_plan {
+                    st.l1.count_write_lookup_hits(origin, plan.hits())?;
+                    if let Some(observer) = shared_write_lookup_observer.as_ref() {
+                        observer.borrow_mut().commit_plan(plan);
+                    }
                 }
+                Ok(visibility_ready)
             }
         }
     }
@@ -9446,7 +10619,7 @@ impl<'a> SmCore<'a> {
                 if !st.l1.is_fill_in_flight(fill) {
                     return Err(IssueError::ResponseFillNotInFlight { fill });
                 }
-                if let FillKey::Line(line) = fill
+                if let FillKey::Line { line, .. } = fill
                     && !st.fill_masks.contains_key(&line)
                 {
                     return Err(IssueError::FillMaskMissing { line });
@@ -9460,6 +10633,7 @@ impl<'a> SmCore<'a> {
         let mut async_removals = HashMap::new();
         if let Some(waiters) = st.fill_waiters.get(&fill) {
             waiters.try_for_each(|waiter| {
+                fill_waiter_ready_time(waiter, now, &self.params)?;
                 accumulate_waiter_removals(&mut removals, &mut async_removals, waiter)
             })?;
         }
@@ -9560,11 +10734,7 @@ impl<'a> SmCore<'a> {
                     retry.instruction,
                     sector_index,
                 );
-                if let Some(&reply) = st
-                    .outstanding_replies
-                    .iter()
-                    .find(|reply| reply.response_id() == Some(response_id))
-                {
+                if let Some(&reply) = st.outstanding_response_ids.get(&response_id) {
                     return Err(IssueError::ResponseTokenAlreadyOutstanding { reply });
                 }
             }
@@ -9708,9 +10878,27 @@ impl<'a> SmCore<'a> {
         if st.retry.is_empty() {
             return Ok(());
         }
-        let observes_hit_ready = st.retry.iter().any(|retry| retry.target.is_some());
-        let hit_timing_fits =
-            !observes_hit_ready || now.checked_add(self.params.l1_hit_latency).is_some();
+        let observes_hit_ready = st
+            .retry
+            .iter()
+            .any(|retry| retry.target.and_then(FillTarget::barrier).is_some());
+        let hit_timing_fits = !observes_hit_ready
+            || st
+                .retry
+                .iter()
+                .filter(|retry| retry.target.and_then(FillTarget::barrier).is_some())
+                .all(|retry| {
+                    now.checked_add(self.params.l1_hit_latency)
+                        .is_some_and(|hit_ready| {
+                            checked_constant_return_time(
+                                hit_ready,
+                                retry.constant_deep,
+                                &self.params,
+                                "constant retry L1-hit return latency",
+                            )
+                            .is_ok()
+                        })
+                });
         let response_timing_fits = now.checked_add(self.params.l1_miss_latency).is_some();
         if hit_timing_fits && response_timing_fits {
             return Ok(());
@@ -9735,11 +10923,17 @@ impl<'a> SmCore<'a> {
                     retry.mshr_floor,
                 )? {
                     SharedL1Access::Hit { .. } => {
-                        if retry.target.is_some() {
-                            checked_cycle_add(
+                        if retry.target.and_then(FillTarget::barrier).is_some() {
+                            let hit_ready = checked_cycle_add(
                                 "retry L1 hit visibility",
                                 now,
                                 self.params.l1_hit_latency,
+                            )?;
+                            checked_constant_return_time(
+                                hit_ready,
+                                retry.constant_deep,
+                                &self.params,
+                                "constant retry L1-hit return latency",
                             )?;
                         }
                     }
@@ -9785,7 +10979,12 @@ impl<'a> SmCore<'a> {
             ReplyTo::None => return Err(IssueError::UnexpectedMutationOnlyResponse),
             _ => {}
         }
-        if !st.outstanding_replies.contains(&reply) {
+        let response_id = reply
+            .response_id()
+            .ok_or(IssueError::UnexpectedMutationOnlyResponse)?;
+        if !st.outstanding_replies.contains(&reply)
+            || st.outstanding_response_ids.get(&response_id) != Some(&reply)
+        {
             return Err(IssueError::ResponseTokenNotOutstanding { reply });
         }
         if let ReplyTo::Warp { warp, barrier, .. } = reply
@@ -9828,7 +11027,12 @@ impl<'a> SmCore<'a> {
                 });
             }
         };
-        if !st.outstanding_replies.remove(&reply) {
+        let response_id = reply
+            .response_id()
+            .ok_or(IssueError::UnexpectedMutationOnlyResponse)?;
+        if !st.outstanding_replies.remove(&reply)
+            || st.outstanding_response_ids.remove(&response_id) != Some(reply)
+        {
             return Err(IssueError::ResponseTokenRemovalFailed { reply });
         }
         // New emission batch (the retry drain below may emit).
@@ -9837,7 +11041,7 @@ impl<'a> SmCore<'a> {
         let async_copies = &mut self.async_copies;
         match reply {
             ReplyTo::L1Fill { fill, .. } => {
-                if let FillKey::Line(line) = fill
+                if let FillKey::Line { line, .. } = fill
                     && st.fill_masks.remove(&line).is_none()
                 {
                     return Err(IssueError::FillMaskMissing { line });
@@ -9845,13 +11049,14 @@ impl<'a> SmCore<'a> {
                 st.l1.complete_fill(fill)?;
                 if let Some(waiters) = st.fill_waiters.remove(&fill) {
                     waiters.try_for_each(|waiter| {
+                        let ready = fill_waiter_ready_time(waiter, now, &params)?;
                         if let Some(group) = waiter.target.async_group() {
                             async_copies[waiter.warp].complete_async_copy_sources(
                                 waiter.warp,
                                 group,
                                 None,
                                 waiter.units,
-                                now,
+                                ready,
                                 &params,
                             )?;
                         }
@@ -9860,7 +11065,7 @@ impl<'a> SmCore<'a> {
                                 waiter.warp,
                                 barrier,
                                 waiter.units,
-                                now,
+                                ready,
                             )?;
                         }
                         Ok(())
@@ -10322,6 +11527,21 @@ impl<'a> SmCore<'a> {
                 &mut tied,
             )?;
         }
+        if matches!(slot.pipeline_class, PipelineClass::ScalarAlu { .. }) {
+            let until = self
+                .scalar_execution_pipeline
+                .as_ref()
+                .map_or(0, |pipeline| pipeline.admission_ready_at(subcore));
+            observe_readiness_constraint(
+                projected,
+                base,
+                until,
+                ReadinessCause::PipelineAlu,
+                &mut ready_at,
+                &mut limiting,
+                &mut tied,
+            )?;
+        }
 
         let effective_ready = ready_at.max(base);
         if effective_ready > base {
@@ -10359,12 +11579,22 @@ impl<'a> SmCore<'a> {
     /// while its instruction buffer has room, otherwise choose the youngest
     /// resident warp with capacity.
     fn instruction_front_end_cycle(&mut self) -> Result<(), IssueError> {
-        let Some(front_end) = self.instruction_front_end.as_mut() else {
+        let Some(original_state) = self.instruction_front_end.take() else {
             return Ok(());
         };
         let now = self.t;
-        front_end.maintain(now);
-        let capacity = front_end.instruction_buffer_capacity()?;
+        let mut original = Some(original_state);
+        let capacity = match original
+            .as_ref()
+            .expect("front-end state owns the active cycle")
+            .instruction_buffer_capacity()
+        {
+            Ok(capacity) => capacity,
+            Err(error) => {
+                self.instruction_front_end = original;
+                return Err(error);
+            }
+        };
         let fetches: [Option<usize>; SUB_CORES] = std::array::from_fn(|subcore| {
             let can_fetch = |warp: usize| self.warps[warp].can_fetch_instruction(capacity);
             match self.hold[subcore] {
@@ -10376,22 +11606,85 @@ impl<'a> SmCore<'a> {
                     .max_by_key(|&warp| self.warps[warp].arrival),
             }
         });
+        let use_shadow = original
+            .as_ref()
+            .expect("front-end state owns the active cycle")
+            .needs_transactional_cycle(&fetches, now);
+        let mut front_end = if use_shadow {
+            original
+                .as_ref()
+                .expect("shadow cycle retains original front-end state")
+                .clone()
+        } else {
+            original
+                .take()
+                .expect("normal cycle takes ownership of front-end state")
+        };
+        front_end.maintain(now);
+        let mut fetched = [None; SUB_CORES];
         for (subcore, fetch) in fetches.into_iter().enumerate() {
             let Some(warp) = fetch else { continue };
             let cursor = self.warps[warp].front_end_fetch_cursor;
             let pc = self.warps[warp].insts[cursor].pc;
-            let Some(front_end) = self.instruction_front_end.as_mut() else {
-                return Ok(());
+            let ready_at = match front_end.fetch_instruction(
+                subcore,
+                self.schedule.function_unique_id,
+                pc,
+                now,
+            ) {
+                Ok(ready_at) => ready_at,
+                Err(error) => {
+                    self.instruction_front_end = if use_shadow {
+                        original
+                    } else {
+                        Some(front_end)
+                    };
+                    return Err(error);
+                }
             };
-            let ready_at =
-                front_end.fetch_instruction(subcore, self.schedule.function_unique_id, pc, now)?;
-            self.warps[warp].push_fetched_instruction(warp, ready_at, capacity)?;
+            fetched[subcore] = Some((warp, ready_at));
         }
-        if let Some(front_end) = self.instruction_front_end.as_mut() {
-            front_end.prefetch_cycle(now)
-        } else {
-            Ok(())
+        if let Err(error) = front_end.prefetch_cycle(now) {
+            self.instruction_front_end = if use_shadow {
+                original
+            } else {
+                Some(front_end)
+            };
+            return Err(error);
         }
+        // Validate every warp-side commit before applying the first one. The
+        // checks mirror `push_fetched_instruction`; after they pass, direct
+        // field updates cannot fail and preserve the cycle transaction.
+        for &(warp, _) in fetched.iter().flatten() {
+            let state = &self.warps[warp];
+            if !state.can_fetch_instruction(capacity)
+                || state.front_end_fetch_cursor.checked_add(1).is_none()
+            {
+                let error = IssueError::InstructionBufferMissing {
+                    warp,
+                    instruction: state.front_end_fetch_cursor,
+                };
+                self.instruction_front_end = if use_shadow {
+                    original
+                } else {
+                    Some(front_end)
+                };
+                return Err(error);
+            }
+        }
+        for &(warp, ready_at) in fetched.iter().flatten() {
+            let state = &mut self.warps[warp];
+            let instruction = state.front_end_fetch_cursor;
+            state.instruction_buffer.push_back(BufferedInstruction {
+                instruction,
+                ready_at,
+            });
+            state.front_end_fetch_cursor = instruction
+                .checked_add(1)
+                .expect("front-end fetch cursor was preflighted");
+        }
+        self.instruction_front_end = Some(front_end);
+        Ok(())
     }
 
     fn has_instruction_front_end_work(&self) -> Result<bool, IssueError> {
@@ -10427,11 +11720,15 @@ impl<'a> SmCore<'a> {
         for (subcore, pick) in picks.iter().enumerate() {
             let Some(warp_index) = *pick else { continue };
             let warp = &self.warps[warp_index];
-            let retires = warp.next_issue_retires()?;
             let slot = warp
                 .next_slot
                 .ok_or(IssueError::MissingIssueSlot { warp: warp_index })?;
-            let arrives = !retires && slot.op_class == OpClass::BlockBarrier;
+            let reaches_end = warp.next_issue_retires()?;
+            // A final barrier is still a CTA participant. Its retirement is
+            // deferred until the generation releases, so it must be counted
+            // as an arrival rather than an immediate retirement.
+            let arrives = slot.op_class == OpClass::BlockBarrier;
+            let retires = reaches_end && !arrives;
             if !retires && !arrives {
                 continue;
             }
@@ -10795,7 +12092,7 @@ impl<'a> SmCore<'a> {
         barrier_arrival_times: &[Option<u64>; SUB_CORES],
         now: u64,
     ) -> Result<ReadinessDiagnostics, IssueError> {
-        let mut projected = self.readiness.clone();
+        let mut projected = (*self.readiness).clone();
         for (subcore, pick) in picks.iter().enumerate() {
             if let Some(warp) = *pick {
                 self.project_selected_readiness(subcore, warp, now, &mut projected)?;
@@ -10961,6 +12258,10 @@ impl<'a> SmCore<'a> {
                 self.block_states[self.warps[warp].block].barrier_rearm_ready
             }
             Some(PipelineClass::Tensor { .. }) => self.tensor_pipe_ready[subcore],
+            Some(PipelineClass::ScalarAlu { .. }) => self
+                .scalar_execution_pipeline
+                .as_ref()
+                .map_or(0, |pipeline| pipeline.admission_ready_at(subcore)),
             Some(PipelineClass::DispatchOnly) | None => 0,
         };
         Some(warp_ready.max(pipeline_ready))
@@ -11060,9 +12361,6 @@ impl<'a> SmCore<'a> {
             else {
                 continue;
             };
-            if self.warps[warp].next_issue_retires()? {
-                continue;
-            }
             let arrival = checked_cycle_add(
                 "CTA-barrier arrival service",
                 server_ready.max(now),
@@ -11194,6 +12492,11 @@ impl<'a> SmCore<'a> {
         }
         let mut horizon = horizon;
         while self.unfinished_warps > 0 {
+            if let Some(cache) = self.immediate_constant_cache.as_mut() {
+                for state in cache.iter_mut() {
+                    state.complete_ready(self.t);
+                }
+            }
             self.enqueue_ready_async_copy_destinations()?;
             if horizon.reached(self.t) {
                 return Ok(Advance::Idle {
@@ -11202,6 +12505,9 @@ impl<'a> SmCore<'a> {
             }
             if let Some(memory_pipeline) = self.memory_issue_pipeline.as_mut() {
                 memory_pipeline.prune(self.t);
+            }
+            if let Some(scalar_pipeline) = self.scalar_execution_pipeline.as_mut() {
+                scalar_pipeline.prune(self.t);
             }
             self.instruction_front_end_cycle()?;
             let before = out.len();
@@ -11303,6 +12609,8 @@ impl<'a> SmCore<'a> {
     fn preflight_issue_timing(
         &self,
         kind: AccessKind,
+        constant_deep: bool,
+        memory_time: Option<u64>,
         write_barrier: Option<DepBarrier>,
         read_barrier: Option<DepBarrier>,
         stall: u8,
@@ -11334,6 +12642,18 @@ impl<'a> SmCore<'a> {
             } => {
                 checked_cycle_add(
                     "tensor-pipeline availability",
+                    t,
+                    initiation_interval_cycles,
+                )?;
+            }
+            PipelineClass::ScalarAlu {
+                latency_cycles,
+                initiation_interval_cycles,
+                ..
+            } => {
+                checked_cycle_add("scalar execution pipeline latency", t, latency_cycles)?;
+                checked_cycle_add(
+                    "scalar execution pipeline initiation",
                     t,
                     initiation_interval_cycles,
                 )?;
@@ -11381,10 +12701,16 @@ impl<'a> SmCore<'a> {
                     checked_cycle_add("L1 hit-pipeline floor", t, self.params.l1_hit_latency)?;
                 }
                 MemModel::L1Shared(_) if needs_ready => {
-                    checked_cycle_add(
+                    let hit_ready = checked_cycle_add(
                         "shared L1 hit-pipeline floor",
-                        t,
+                        memory_time.unwrap_or(t),
                         self.params.l1_hit_latency,
+                    )?;
+                    checked_constant_return_time(
+                        hit_ready,
+                        constant_deep && write_barrier.is_some(),
+                        &self.params,
+                        "constant L1-hit return latency",
                     )?;
                 }
                 MemModel::Flat | MemModel::L1Const(_) | MemModel::L1Shared(_) => {}
@@ -11533,11 +12859,7 @@ impl<'a> SmCore<'a> {
                             preflight_line_fill_mask(st, sector_id)?;
                             let response_id =
                                 ResponseId::new(st.response_owner, wix, warp.next, sector_index);
-                            if let Some(&reply) = st
-                                .outstanding_replies
-                                .iter()
-                                .find(|reply| reply.response_id() == Some(response_id))
-                            {
+                            if let Some(&reply) = st.outstanding_response_ids.get(&response_id) {
                                 return Err(IssueError::ResponseTokenAlreadyOutstanding { reply });
                             }
                         }
@@ -11572,11 +12894,7 @@ impl<'a> SmCore<'a> {
                         for sector_index in off..off + usize::from(len) {
                             let response_id =
                                 ResponseId::new(st.response_owner, wix, warp.next, sector_index);
-                            if let Some(&reply) = st
-                                .outstanding_replies
-                                .iter()
-                                .find(|reply| reply.response_id() == Some(response_id))
-                            {
+                            if let Some(&reply) = st.outstanding_response_ids.get(&response_id) {
                                 return Err(IssueError::ResponseTokenAlreadyOutstanding { reply });
                             }
                         }
@@ -11608,11 +12926,7 @@ impl<'a> SmCore<'a> {
                         for sector_index in off..off + usize::from(len) {
                             let response_id =
                                 ResponseId::new(st.response_owner, wix, warp.next, sector_index);
-                            if let Some(&reply) = st
-                                .outstanding_replies
-                                .iter()
-                                .find(|reply| reply.response_id() == Some(response_id))
-                            {
+                            if let Some(&reply) = st.outstanding_response_ids.get(&response_id) {
                                 return Err(IssueError::ResponseTokenAlreadyOutstanding { reply });
                             }
                         }
@@ -11887,10 +13201,18 @@ impl<'a> SmCore<'a> {
                         _ => unreachable!("match arm admits only hierarchy writes"),
                     };
                     let reduction = matches!(inst.kind, AccessKind::GlobalReduction { .. });
-                    if let Some(hits) = projected_l1_write_lookup_hits(inst.kind, warp.sectors) {
+                    let store_sectors = &warp.sectors[off..off + usize::from(len)];
+                    if self.shared_write_lookup_runtime.observer.is_some()
+                        && matches!(inst.kind, AccessKind::GlobalStore { .. })
+                    {
+                        let hits = shadow.observe_write_lookup_batch(store_sectors)?;
+                        shadow.count_write_lookup_hits(origin, hits)?;
+                    } else if let Some(hits) =
+                        projected_l1_write_lookup_hits(inst.kind, warp.sectors)
+                    {
                         shadow.count_write_lookup_hits(origin, hits)?;
                     }
-                    for &sector_id in &warp.sectors[off..off + usize::from(len)] {
+                    for &sector_id in store_sectors {
                         if reduction {
                             shadow.probe_reduction(origin, sector_id, self.t)?;
                         } else {
@@ -11899,6 +13221,209 @@ impl<'a> SmCore<'a> {
                     }
                 }
                 AccessKind::NonMemory
+                | AccessKind::PredicatedOffMemory
+                | AccessKind::Shared { .. } => {}
+            }
+        }
+        Ok(())
+    }
+
+    /// Check the per-SMSP cacheable-LDGSTS hit-return service timeline before
+    /// the issue transaction touches the shared L1 or allocates an async-copy
+    /// group.  The ordinary budget preflight proves L1 counters and MSHR
+    /// capacity, but the service frontier is a separate counter that is only
+    /// advanced for observed hits.  Near `u64::MAX`, replay the selected
+    /// memory batch on a private L1 shadow so misses and pending merges do not
+    /// cause a false rejection (or allow an overflow after an earlier hit has
+    /// already mutated the real cache).
+    fn preflight_async_l1_hit_service(
+        &self,
+        picks: &[Option<usize>; SUB_CORES],
+        memory_times: &[u64; SUB_CORES],
+    ) -> Result<(), IssueError> {
+        let Some(service) = self.params.ldgsts_l1_hit_return_service else {
+            return Ok(());
+        };
+        let interval = service.interval_cycles;
+        if interval == 0 {
+            return Ok(());
+        }
+
+        // Stay allocation-free on the normal path.  The exact shadow is only
+        // needed when charging every possible observed sector could overflow
+        // the current service frontier.
+        let mut needs_shadow = false;
+        for (subcore, pick) in picks.iter().enumerate() {
+            let Some(wix) = *pick else { continue };
+            let warp = &self.warps[wix];
+            let slot = warp
+                .next_slot
+                .ok_or(IssueError::MissingIssueSlot { warp: wix })?;
+            let write_barrier = if self.has_async_copy_protocol {
+                ordinary_write_barrier(slot)
+            } else {
+                slot.control.write_barrier
+            };
+            let AccessKind::GlobalAsyncCopy {
+                len,
+                completion_work,
+                l1_policy: LdgstsL1Policy::CacheAtAllLevels,
+                ..
+            } = warp.insts[warp.next].kind
+            else {
+                continue;
+            };
+            if write_barrier.is_none() && completion_work == 0 {
+                continue;
+            }
+            if len == 0 {
+                continue;
+            }
+            let Some(hit_ready) = memory_times[subcore].checked_add(self.params.l1_hit_latency)
+            else {
+                // The ordinary timing preflight normally catches this first;
+                // keep this shadow decision conservative if that contract is
+                // widened later.
+                needs_shadow = true;
+                continue;
+            };
+            let Some(additional) = interval.checked_mul(u64::from(len) - 1) else {
+                needs_shadow = true;
+                continue;
+            };
+            let frontier = self.shared_write_lookup_runtime.async_l1_hit_service_ready[subcore];
+            let Some(first_service) = frontier.max(hit_ready).checked_add(interval) else {
+                needs_shadow = true;
+                continue;
+            };
+            if first_service.checked_add(additional).is_none() {
+                needs_shadow = true;
+            }
+        }
+        if !needs_shadow {
+            return Ok(());
+        }
+
+        let MemModel::L1Shared(st) = &self.mem else {
+            return Ok(());
+        };
+        let mut shadow = st.l1.clone();
+        let mut service_ready = self.shared_write_lookup_runtime.async_l1_hit_service_ready;
+
+        for (subcore, pick) in picks.iter().enumerate() {
+            let Some(wix) = *pick else { continue };
+            let warp = &self.warps[wix];
+            let slot = warp
+                .next_slot
+                .ok_or(IssueError::MissingIssueSlot { warp: wix })?;
+            let kind = warp.insts[warp.next].kind;
+            let write_barrier = if self.has_async_copy_protocol {
+                ordinary_write_barrier(slot)
+            } else {
+                slot.control.write_barrier
+            };
+            let now = memory_times[subcore];
+            match kind {
+                AccessKind::GlobalEligible { off, len, .. }
+                | AccessKind::LocalLoad { off, len }
+                | AccessKind::GlobalAsyncCopy {
+                    off,
+                    len,
+                    l1_policy: LdgstsL1Policy::CacheAtAllLevels,
+                    ..
+                } => {
+                    let (origin, mshr_floor, cacheable_async, source_active) = match kind {
+                        AccessKind::GlobalEligible { .. } => {
+                            (MemoryOrigin::Global, None, false, false)
+                        }
+                        AccessKind::LocalLoad { .. } => (MemoryOrigin::Local, None, false, false),
+                        AccessKind::GlobalAsyncCopy {
+                            completion_work, ..
+                        } => (
+                            MemoryOrigin::Global,
+                            Some(self.params.ldgsts_l1_mshr_floor),
+                            true,
+                            completion_work != 0,
+                        ),
+                        _ => unreachable!("match arm admits only cacheable L1 accesses"),
+                    };
+                    let observe_ready = write_barrier.is_some() || source_active;
+                    if cacheable_async {
+                        shadow.begin_async_copy_lookup_batch();
+                    } else {
+                        shadow.begin_lookup_batch();
+                    }
+                    let end =
+                        off.checked_add(usize::from(len))
+                            .ok_or(IssueError::CounterOverflow {
+                                counter: "issue sector cursor",
+                            })?;
+                    let sectors =
+                        warp.sectors
+                            .get(off..end)
+                            .ok_or(IssueError::CounterOverflow {
+                                counter: "issue sector cursor",
+                            })?;
+                    for &sector in sectors {
+                        let access = access_shared_l1(
+                            &mut shadow,
+                            origin,
+                            sector,
+                            now,
+                            observe_ready,
+                            mshr_floor,
+                        )?;
+                        if cacheable_async
+                            && observe_ready
+                            && let SharedL1Access::Hit { ready: Some(ready) } = access
+                        {
+                            let serviced = ready.max(service_ready[subcore]);
+                            service_ready[subcore] = serviced.checked_add(interval).ok_or(
+                                IssueError::CounterOverflow {
+                                    counter: "async L1 hit service timeline",
+                                },
+                            )?;
+                        }
+                        if matches!(access, SharedL1Access::Stalled) {
+                            break;
+                        }
+                    }
+                }
+                AccessKind::GlobalStore { off, len }
+                | AccessKind::GlobalReduction { off, len, .. }
+                | AccessKind::LocalStore { off, len } => {
+                    let end =
+                        off.checked_add(usize::from(len))
+                            .ok_or(IssueError::CounterOverflow {
+                                counter: "issue sector cursor",
+                            })?;
+                    let sectors =
+                        warp.sectors
+                            .get(off..end)
+                            .ok_or(IssueError::CounterOverflow {
+                                counter: "issue sector cursor",
+                            })?;
+                    let origin = if matches!(kind, AccessKind::LocalStore { .. }) {
+                        MemoryOrigin::Local
+                    } else {
+                        MemoryOrigin::Global
+                    };
+                    let reduction = matches!(kind, AccessKind::GlobalReduction { .. });
+                    for &sector in sectors {
+                        if reduction {
+                            shadow.probe_reduction(origin, sector, now)?;
+                        } else {
+                            shadow.probe_store(origin, sector, now)?;
+                        }
+                    }
+                }
+                AccessKind::GlobalBypass { .. }
+                | AccessKind::GlobalUntagged { .. }
+                | AccessKind::GlobalAsyncCopy {
+                    l1_policy: LdgstsL1Policy::BypassL1,
+                    ..
+                }
+                | AccessKind::NonMemory
                 | AccessKind::PredicatedOffMemory
                 | AccessKind::Shared { .. } => {}
             }
@@ -11925,28 +13450,37 @@ impl<'a> SmCore<'a> {
             });
         }
 
-        let mut block_deltas: [Option<(usize, usize, usize)>; SUB_CORES] = [None; SUB_CORES];
+        // (block, ordinary retirements, barrier arrivals, final-barrier
+        // arrivals). Final barrier arrivals retire only after the generation
+        // releases, so they must not be included in `ordinary retirements`.
+        let mut block_deltas: [Option<(usize, usize, usize, usize)>; SUB_CORES] = [None; SUB_CORES];
+        let mut released_blocks: [Option<usize>; SUB_CORES] = [None; SUB_CORES];
         let mut total_retirements = 0usize;
         for &wix in picks.iter().flatten() {
             let warp = &self.warps[wix];
-            let retires = warp.next_issue_retires()?;
             let slot = warp
                 .next_slot
                 .ok_or(IssueError::MissingIssueSlot { warp: wix })?;
+            let reaches_end = warp.next_issue_retires()?;
+            let arrives = slot.op_class == OpClass::BlockBarrier;
+            let retires = reaches_end && !arrives;
             let entry_index = block_deltas
                 .iter()
-                .position(|entry| entry.is_some_and(|(block, _, _)| block == warp.block))
+                .position(|entry| entry.is_some_and(|(block, _, _, _)| block == warp.block))
                 .or_else(|| block_deltas.iter().position(Option::is_none))
                 .ok_or(IssueError::CounterOverflow {
                     counter: "per-cycle block accounting",
                 })?;
-            let entry = block_deltas[entry_index].get_or_insert((warp.block, 0, 0));
+            let entry = block_deltas[entry_index].get_or_insert((warp.block, 0, 0, 0));
             if retires {
                 entry.1 = checked_usize_counter_add("block retirement", entry.1, 1)?;
                 total_retirements =
                     checked_usize_counter_add("unfinished warp retirement", total_retirements, 1)?;
-            } else if slot.op_class == OpClass::BlockBarrier {
+            } else if arrives {
                 entry.2 = checked_usize_counter_add("block barrier waiter", entry.2, 1)?;
+                if reaches_end {
+                    entry.3 = checked_usize_counter_add("final block barrier arrival", entry.3, 1)?;
+                }
             }
         }
 
@@ -11957,7 +13491,7 @@ impl<'a> SmCore<'a> {
         )?;
         let mut residency_released = 0u32;
         let mut shared_memory_released = 0u64;
-        for (block, retirements, arrivals) in block_deltas.into_iter().flatten() {
+        for (block, retirements, arrivals, final_arrivals) in block_deltas.into_iter().flatten() {
             let state = &self.block_states[block];
             let unfinished =
                 state
@@ -11973,7 +13507,28 @@ impl<'a> SmCore<'a> {
                     counter: "block barrier waiter",
                 });
             }
+            let mut post_release_unfinished = unfinished;
             if waiting > 0 && waiting == unfinished {
+                let existing_final_arrivals = self.warps
+                    [state.first_warp..state.first_warp + state.admitted_warps]
+                    .iter()
+                    .filter(|warp| warp.at_block_barrier && warp.next == warp.insts.len())
+                    .count();
+                let final_retirements = checked_usize_counter_add(
+                    "final block barrier retirement",
+                    existing_final_arrivals,
+                    final_arrivals,
+                )?;
+                post_release_unfinished = unfinished.checked_sub(final_retirements).ok_or(
+                    IssueError::CounterUnderflow {
+                        counter: "final block barrier unfinished warp",
+                    },
+                )?;
+                total_retirements = checked_usize_counter_add(
+                    "unfinished warp retirement",
+                    total_retirements,
+                    final_retirements,
+                )?;
                 let mut last_arrival = self.t;
                 for warp in &self.warps[state.first_warp..state.first_warp + state.admitted_warps] {
                     if let Some(arrival) = warp.block_barrier_arrival {
@@ -11995,7 +13550,10 @@ impl<'a> SmCore<'a> {
                     )?;
                 }
             }
-            if unfinished == 0 {
+            // A block can become empty as part of the barrier release when its
+            // final instructions are BAR.SYNC. `post_release_unfinished`
+            // accounts for that deferred retirement before releasing residency.
+            if post_release_unfinished == 0 {
                 for &warp_slot in &state.warp_slots {
                     if !self.resident_warp_slots.contains(&warp_slot) {
                         return Err(IssueError::ResidentWarpSlotMissing {
@@ -12004,6 +13562,12 @@ impl<'a> SmCore<'a> {
                         });
                     }
                 }
+                let release_index = released_blocks.iter().position(Option::is_none).ok_or(
+                    IssueError::CounterOverflow {
+                        counter: "CTA barrier diagnostic released block",
+                    },
+                )?;
+                released_blocks[release_index] = Some(block);
                 residency_released = checked_u32_counter_add(
                     "resident warp retirement",
                     residency_released,
@@ -12016,6 +13580,11 @@ impl<'a> SmCore<'a> {
                 )?;
             }
         }
+        self.unfinished_warps.checked_sub(total_retirements).ok_or(
+            IssueError::CounterUnderflow {
+                counter: "unfinished warp",
+            },
+        )?;
         self.resident_warps.checked_sub(residency_released).ok_or(
             IssueError::CounterUnderflow {
                 counter: "resident warp",
@@ -12026,7 +13595,179 @@ impl<'a> SmCore<'a> {
             .ok_or(IssueError::CounterUnderflow {
                 counter: "resident shared-memory byte",
             })?;
+        if released_blocks.iter().any(Option::is_some) {
+            // `retire_warp` admits the next launch only after applying these
+            // releases.  Validate that entire admission chain now, while the
+            // issue cycle is still transactional; otherwise a deferred counter
+            // overflow (for example, the arrival-stamp increment) could retire
+            // an earlier warp before returning its error.
+            let mut projected_resident_slots = (*self.resident_warp_slots).clone();
+            let mut projected_resident_blocks = self
+                .block_states
+                .iter()
+                .filter(|state| state.unfinished != 0)
+                .count() as u32;
+            for block in released_blocks.into_iter().flatten() {
+                projected_resident_blocks = projected_resident_blocks.checked_sub(1).ok_or(
+                    IssueError::CounterUnderflow {
+                        counter: "resident block",
+                    },
+                )?;
+                for &warp_slot in &self.block_states[block].warp_slots {
+                    let removed = projected_resident_slots.remove(&warp_slot);
+                    if !removed {
+                        return Err(IssueError::ResidentWarpSlotMissing {
+                            launch_index: self.warps[self.block_states[block].first_warp]
+                                .launch_index,
+                            warp_slot,
+                        });
+                    }
+                }
+            }
+            self.preflight_block_admissions(
+                self.resident_warps.checked_sub(residency_released).ok_or(
+                    IssueError::CounterUnderflow {
+                        counter: "resident warp",
+                    },
+                )?,
+                self.unfinished_warps.checked_sub(total_retirements).ok_or(
+                    IssueError::CounterUnderflow {
+                        counter: "unfinished warp",
+                    },
+                )?,
+                self.resident_shared_memory_bytes
+                    .checked_sub(shared_memory_released)
+                    .ok_or(IssueError::CounterUnderflow {
+                        counter: "resident shared-memory byte",
+                    })?,
+                projected_resident_blocks,
+                projected_resident_slots,
+                self.arrival_stamp,
+            )?;
+        }
         Ok(next_issued)
+    }
+
+    /// Validate admissions that a successful retirement will trigger without
+    /// mutating the actor.  The commit path in [`retire_warp`] repeats these
+    /// already-checked operations; keeping this pass side-effect free preserves
+    /// the issue-cycle transaction boundary when a checked counter can fail.
+    fn preflight_block_admissions(
+        &self,
+        mut resident_warps: u32,
+        mut unfinished_warps: usize,
+        mut resident_shared_memory_bytes: u64,
+        mut resident_blocks: u32,
+        mut resident_warp_slots: HashSet<i32>,
+        mut arrival_stamp: u64,
+    ) -> Result<(), IssueError> {
+        let mut next_block = self.next_block;
+        while next_block < self.blocks.len() {
+            let block = &self.blocks[next_block];
+            let live_warps = self.block_live_warps[next_block];
+            let shared_memory_bytes = if live_warps == 0 {
+                0
+            } else {
+                self.shared_memory_residency.bytes_per_cta()
+            };
+            let next_resident_blocks = resident_blocks
+                .checked_add(u32::from(live_warps != 0))
+                .ok_or(IssueError::CounterOverflow {
+                    counter: "resident blocks",
+                })?;
+            let Some(next_resident_warps) = resident_warps.checked_add(live_warps) else {
+                if resident_warps > 0 {
+                    break;
+                }
+                return Err(IssueError::CounterOverflow {
+                    counter: "resident warp",
+                });
+            };
+            let Some(next_resident_shared_memory_bytes) =
+                resident_shared_memory_bytes.checked_add(shared_memory_bytes)
+            else {
+                if resident_warps > 0 {
+                    break;
+                }
+                return Err(IssueError::CounterOverflow {
+                    counter: "resident shared-memory byte",
+                });
+            };
+            let pending_slots = block
+                .warps
+                .iter()
+                .filter(|warp| !warp.insts.is_empty())
+                .map(|warp| warp.warp_slot)
+                .collect::<Vec<_>>();
+            let slots_collide = pending_slots
+                .iter()
+                .any(|slot| resident_warp_slots.contains(slot));
+            if resident_warps > 0
+                && (next_resident_blocks > self.params.max_resident_blocks_per_sm
+                    || next_resident_warps > self.params.max_resident_warps_per_sm
+                    || next_resident_shared_memory_bytes
+                        > self.shared_memory_residency.max_bytes_per_sm()
+                    || slots_collide)
+            {
+                break;
+            }
+
+            // Keep the preflight in lockstep with `admit_blocks`: this
+            // checked addition is otherwise the last fallible counter before
+            // the first warp of a successor CTA is appended.
+            let admitted_warps =
+                usize::try_from(live_warps).map_err(|_| IssueError::CounterOverflow {
+                    counter: "admitted warp cardinality",
+                })?;
+            unfinished_warps = unfinished_warps.checked_add(admitted_warps).ok_or(
+                IssueError::CounterOverflow {
+                    counter: "unfinished warp",
+                },
+            )?;
+
+            // Construction validates every dynamic PC and physical slot, but
+            // repeat the fallible joins here so this preflight remains a true
+            // boundary if an in-memory replay is assembled by a future caller.
+            for warp in &block.warps {
+                let slot =
+                    u32::try_from(warp.warp_slot).map_err(|_| IssueError::WarpSlotOutOfRange {
+                        launch_index: block.launch_index,
+                        warp_slot: warp.warp_slot,
+                        arch: self.params.arch,
+                        physical_warp_slots: self.physical_warp_slots,
+                    })?;
+                if slot >= self.physical_warp_slots {
+                    return Err(IssueError::WarpSlotOutOfRange {
+                        launch_index: block.launch_index,
+                        warp_slot: warp.warp_slot,
+                        arch: self.params.arch,
+                        physical_warp_slots: self.physical_warp_slots,
+                    });
+                }
+                if !warp.insts.is_empty() {
+                    lookup_dense(
+                        &self.schedule_slots,
+                        self.schedule,
+                        warp.insts[0].pc,
+                        block.launch_index,
+                        warp.warp_slot,
+                    )?;
+                }
+            }
+            arrival_stamp = checked_u64_counter_add(
+                "warp arrival stamp",
+                arrival_stamp,
+                u64::from(live_warps),
+            )?;
+            next_block = checked_usize_counter_add("next block", next_block, 1)?;
+            resident_blocks = next_resident_blocks;
+            resident_warps = next_resident_warps;
+            resident_shared_memory_bytes = next_resident_shared_memory_bytes;
+            for slot in pending_slots {
+                resident_warp_slots.insert(slot);
+            }
+        }
+        Ok(())
     }
 
     fn preflight_result_writeback_priority(
@@ -12183,15 +13924,74 @@ impl<'a> SmCore<'a> {
         Ok(())
     }
 
+    /// Probe the per-SMSP Immediate Constant Cache for the selected
+    /// instructions.  A tag miss consumes an issue attempt but does not
+    /// dispatch or advance the warp; the warp is parked until the line's
+    /// deterministic GCC/L1C return time.  The state is cloned first so a
+    /// later cycle-preflight error cannot leave a partially reserved constant
+    /// request behind.
+    fn preflight_immediate_constant(
+        &self,
+        picks: [Option<usize>; SUB_CORES],
+        now: u64,
+    ) -> Result<ImmediateConstantPlan, IssueError> {
+        let Some(mut cache) = self.immediate_constant_cache.clone() else {
+            return Ok(ImmediateConstantPlan {
+                picks,
+                cache: None,
+                waits: [None; SUB_CORES],
+                miss_observed: false,
+            });
+        };
+        let mut effective = picks;
+        let mut waits = [None; SUB_CORES];
+        let mut miss_observed = false;
+        for (subcore, pick) in picks.into_iter().enumerate() {
+            let Some(warp) = pick else { continue };
+            let state = &self.warps[warp];
+            let pc = state.insts[state.next].pc;
+            let Some(lines) = self.immediate_constant_schedule.get(&pc) else {
+                continue;
+            };
+            if lines.is_empty() {
+                continue;
+            }
+            if state.imc_wait_until > now {
+                effective[subcore] = None;
+                waits[subcore] = Some((warp, state.imc_wait_until));
+                miss_observed = true;
+                continue;
+            }
+            if let Some(ready) = cache[subcore].reserve(lines, now, self.params.l1_miss_latency)?
+                && ready > now
+            {
+                effective[subcore] = None;
+                waits[subcore] = Some((warp, ready));
+                miss_observed = true;
+            }
+        }
+        Ok(ImmediateConstantPlan {
+            picks: effective,
+            cache: Some(cache),
+            waits,
+            miss_observed,
+        })
+    }
+
     /// One issue cycle at `self.t` across the four sub-cores. Returns
     /// whether anything issued.
     fn issue_cycle(&mut self, out: &mut Vec<MemRequest>) -> Result<bool, IssueError> {
         let t = self.t;
-        let picks = if self.has_async_copy_protocol {
+        let selected = if self.has_async_copy_protocol {
             self.pick_warps_with_memory_admission::<true>(t)
         } else {
             self.pick_warps_with_memory_admission::<false>(t)
         };
+        let imc_plan = self.preflight_immediate_constant(selected, t)?;
+        let picks = imc_plan.picks;
+        let mut imc_cache = imc_plan.cache;
+        let imc_waits = imc_plan.waits;
+        let imc_miss_observed = imc_plan.miss_observed;
         let memory_pipeline_plan =
             if let Some(memory_pipeline) = self.memory_issue_pipeline.as_ref() {
                 let mut selected = [None; SUB_CORES];
@@ -12210,6 +14010,19 @@ impl<'a> SmCore<'a> {
                         .copied();
                 }
                 Some(memory_pipeline.plan(selected, t)?)
+            } else {
+                None
+            };
+        let scalar_execution_pipeline_plan =
+            if let Some(scalar_pipeline) = self.scalar_execution_pipeline.as_ref() {
+                let selected = std::array::from_fn(|subcore| {
+                    picks[subcore].and_then(|warp| {
+                        let slot = self.warps[warp].next_slot?;
+                        matches!(slot.pipeline_class, PipelineClass::ScalarAlu { .. })
+                            .then_some(slot.pipeline_class)
+                    })
+                });
+                Some(scalar_pipeline.plan(selected, t)?)
             } else {
                 None
             };
@@ -12234,8 +14047,15 @@ impl<'a> SmCore<'a> {
             let slot = w
                 .next_slot
                 .ok_or(IssueError::MissingIssueSlot { warp: wix })?;
-            let retires_warp = w.next_issue_retires()?;
+            let reaches_end = w.next_issue_retires()?;
+            // Final BAR.SYNC participates in the CTA rendezvous and retires
+            // only once that generation releases.
+            let retires_warp = reaches_end && slot.op_class != OpClass::BlockBarrier;
             let kind = w.insts[w.next].kind;
+            let constant_deep = is_constant_load_opcode(slot.opcode_text())
+                && self
+                    .constant_path_pcs
+                    .contains(&u64::from(w.insts[w.next].pc));
             validate_async_copy_completion_work(kind, wix)?;
             let write_barrier = if self.has_async_copy_protocol {
                 ordinary_write_barrier(slot)
@@ -12308,6 +14128,11 @@ impl<'a> SmCore<'a> {
             }
             self.preflight_issue_timing(
                 kind,
+                constant_deep,
+                memory_pipeline_plan
+                    .as_ref()
+                    .and_then(|plan| plan.issues[subcore])
+                    .map(|issue| issue.shared_accept_at),
                 write_barrier,
                 slot.control.read_barrier,
                 slot.control.stall,
@@ -12318,6 +14143,13 @@ impl<'a> SmCore<'a> {
             )?;
         }
         self.preflight_issue_memory(&picks, &async_destination_wavefronts)?;
+        let memory_times = std::array::from_fn(|subcore| {
+            memory_pipeline_plan
+                .as_ref()
+                .and_then(|plan| plan.issues[subcore])
+                .map_or(t, |issue| issue.shared_accept_at)
+        });
+        self.preflight_async_l1_hit_service(&picks, &memory_times)?;
         self.preflight_result_writeback_priority(&picks)?;
         let next_issued = self.preflight_issue_accounting(&picks, &barrier_arrival_times)?;
         // Diagnostics are preflighted last so an observational counter can
@@ -12327,6 +14159,9 @@ impl<'a> SmCore<'a> {
             self.project_picked_readiness(&picks, &barrier_arrival_times, t)?;
         let projected_memory_service_candidates =
             self.project_memory_service_candidates(&picks, t)?;
+        if let Some(plan) = scalar_execution_pipeline_plan.as_ref() {
+            projected_readiness.scalar_execution_pipeline = Some(Box::new(plan.next.diagnostics));
+        }
         let memory_admission_feedback_plan =
             if let Some(feedback) = self.memory_admission_feedback.as_ref() {
                 let mut issues = [None; SUB_CORES];
@@ -12354,7 +14189,10 @@ impl<'a> SmCore<'a> {
             state.pending.retain(|event| event.writeback_at >= t);
         }
 
-        let mut issued_this_cycle = false;
+        // An IMC miss consumes the SMSP issue opportunity even though no
+        // traced instruction is dispatched.  Keep it separate from the exact
+        // executed-instruction counter below.
+        let mut issued_this_cycle = imc_miss_observed;
         for (sc, pick) in picks.into_iter().enumerate() {
             let Some(wix) = pick else { continue };
             issued_this_cycle = true;
@@ -12373,6 +14211,8 @@ impl<'a> SmCore<'a> {
                 retires_warp,
                 result_writeback,
                 clock_read,
+                constant_load,
+                constant_deep,
             ) = {
                 let w = &self.warps[wix];
                 let slot = w
@@ -12388,9 +14228,15 @@ impl<'a> SmCore<'a> {
                     w.next,
                     w.insts[w.next],
                     w.sectors,
-                    w.next_issue_retires()?,
+                    {
+                        let reaches_end = w.next_issue_retires()?;
+                        reaches_end && slot.op_class != OpClass::BlockBarrier
+                    },
                     result_writeback_kind(slot, self.params.arch),
                     is_clocklo_issue(slot),
+                    is_constant_load_opcode(slot.opcode_text()),
+                    self.constant_path_pcs
+                        .contains(&u64::from(w.insts[w.next].pc)),
                 )
             };
             let produces_dynamic_effects = !matches!(inst.kind, AccessKind::PredicatedOffMemory);
@@ -12406,6 +14252,20 @@ impl<'a> SmCore<'a> {
                 .flatten();
             let observe_async_copy =
                 self.has_async_copy_protocol && async_copy_source_count(inst.kind).is_some();
+
+            // The instruction has passed its IMC probe and is now dispatched;
+            // touch each resident line in the cloned cache state.  A line that
+            // was just filled is already present after `complete_ready` at the
+            // top of this scheduler iteration.
+            if let Some(cache) = imc_cache.as_mut()
+                && let Some(lines) = self.immediate_constant_schedule.get(&inst.pc)
+            {
+                for &line in lines {
+                    cache[sc].touch(line);
+                }
+            }
+            self.warps[wix].imc_wait_until = 0;
+
             let memory_pipeline_issue = memory_pipeline_plan
                 .as_ref()
                 .and_then(|plan| plan.issues[sc]);
@@ -12420,6 +14280,8 @@ impl<'a> SmCore<'a> {
                     wix,
                     instruction,
                     inst.kind,
+                    constant_load,
+                    constant_deep,
                     warp_sectors,
                     write_barrier,
                     async_destination_wavefronts[sc],
@@ -12476,6 +14338,7 @@ impl<'a> SmCore<'a> {
                         initiation_interval_cycles,
                     )?;
                 }
+                PipelineClass::ScalarAlu { .. } => {}
                 PipelineClass::DispatchOnly => {}
             }
             // Yield semantics per the CGGTY paper: the yield bit means
@@ -12570,53 +14433,17 @@ impl<'a> SmCore<'a> {
             }
             self.warps[wix].next =
                 checked_usize_counter_add("warp instruction cursor", self.warps[wix].next, 1)?;
+            let final_block_barrier = slot_class == OpClass::BlockBarrier
+                && self.warps[wix].next == self.warps[wix].insts.len();
             if retires_warp {
-                self.warps[wix].done = true;
+                self.retire_warp(sc, wix, t)?;
+            } else if final_block_barrier {
+                // Keep a final barrier warp unfinished and parked until the
+                // CTA rendezvous. There is intentionally no next issue slot;
+                // the release path retires it after all participants arrive.
                 self.warps[wix].next_slot = None;
                 self.warps[wix].ordinary_dependency_wait_mask = WaitMask::NONE;
-                self.unfinished_warps =
-                    self.unfinished_warps
-                        .checked_sub(1)
-                        .ok_or(IssueError::CounterUnderflow {
-                            counter: "unfinished warp",
-                        })?;
-                self.block_states[blk_ix].unfinished = self.block_states[blk_ix]
-                    .unfinished
-                    .checked_sub(1)
-                    .ok_or(IssueError::CounterUnderflow {
-                        counter: "block unfinished warp",
-                    })?;
-                // Retire from the sub-core pick list (swap-remove +
-                // position fix-up) so pick/skip-ahead scans stay
-                // bounded by RESIDENT warps, not warps-ever-admitted.
-                let pos = self.warps[wix].pos_in_subcore;
-                self.subcore_warps[sc].swap_remove(pos);
-                if let Some(&moved) = self.subcore_warps[sc].get(pos) {
-                    self.warps[moved].pos_in_subcore = pos;
-                }
-                if self.block_states[blk_ix].unfinished == 0 {
-                    self.resident_warps = self
-                        .resident_warps
-                        .checked_sub(self.block_states[blk_ix].warp_count)
-                        .ok_or(IssueError::CounterUnderflow {
-                            counter: "resident warp",
-                        })?;
-                    self.resident_shared_memory_bytes = self
-                        .resident_shared_memory_bytes
-                        .checked_sub(self.block_states[blk_ix].shared_memory_bytes)
-                        .ok_or(IssueError::CounterUnderflow {
-                            counter: "resident shared-memory byte",
-                        })?;
-                    for &warp_slot in &self.block_states[blk_ix].warp_slots {
-                        let removed = self.resident_warp_slots.remove(&warp_slot);
-                        debug_assert!(
-                            removed,
-                            "retirement preflight proved every resident slot present"
-                        );
-                    }
-                    let admit_at = checked_cycle_add("block-wave admission", t, 1)?;
-                    self.admit_blocks(admit_at)?;
-                }
+                self.warps[wix].eligible = t;
             } else {
                 let next_pc = self.warps[wix].insts[self.warps[wix].next].pc;
                 let next_slot = lookup_dense(
@@ -12630,6 +14457,7 @@ impl<'a> SmCore<'a> {
                 self.warps[wix].ordinary_dependency_wait_mask =
                     next_slot.ordinary_dependency_wait_mask();
                 self.warps[wix].current_since = t;
+                self.warps[wix].imc_wait_until = 0;
                 self.warps[wix].cta_barrier_ready = 0;
                 self.warps[wix].barrier_pipeline_ready = 0;
                 self.warps[wix].branch_pipeline_ready = 0;
@@ -12705,6 +14533,22 @@ impl<'a> SmCore<'a> {
                     )?;
                 }
                 let release_at = checked_cycle_add("block-barrier release", latest_arrival, 1)?;
+                self.local_completion_time = Some(
+                    self.local_completion_time
+                        .map_or(release_at, |current| current.max(release_at)),
+                );
+                // Final BAR.SYNC instructions advanced their warps to the end
+                // of stream but deliberately left them unfinished above.
+                // Collect those participants before clearing the barrier
+                // flags, then retire them through the common residency path.
+                let final_barrier_warps = self.warps[first..first + count]
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(offset, warp)| {
+                        (warp.at_block_barrier && warp.next == warp.insts.len())
+                            .then_some(first + offset)
+                    })
+                    .collect::<Vec<_>>();
                 for w in &mut self.warps[first..first + count] {
                     if w.at_block_barrier {
                         let own_arrival = w
@@ -12746,13 +14590,43 @@ impl<'a> SmCore<'a> {
                         }
                     }
                 }
+                for warp_index in final_barrier_warps {
+                    let subcore = self.warps[warp_index]
+                        .warp_slot
+                        .rem_euclid(SUB_CORES as i32) as usize;
+                    // Admission of the next CTA is causally after the barrier
+                    // release, not after the last warp's dispatch cycle.
+                    self.retire_warp(subcore, warp_index, release_at)?;
+                }
             }
         }
         if let Some(plan) = memory_pipeline_plan {
             self.memory_issue_pipeline = Some(plan.next);
         }
+        if let Some(plan) = scalar_execution_pipeline_plan {
+            self.scalar_execution_pipeline = Some(Box::new(plan.next));
+        }
+        for &(warp, ready) in imc_waits.iter().flatten() {
+            self.warps[warp].imc_wait_until = ready;
+        }
+        if let Some(cache) = imc_cache.as_mut() {
+            for wait in imc_waits.iter().flatten() {
+                let subcore = self.warps[wait.0].warp_slot.rem_euclid(SUB_CORES as i32) as usize;
+                cache[subcore].diagnostics.miss_wait_events = cache[subcore]
+                    .diagnostics
+                    .miss_wait_events
+                    .saturating_add(1);
+                cache[subcore].diagnostics.miss_wait_cycles = cache[subcore]
+                    .diagnostics
+                    .miss_wait_cycles
+                    .saturating_add(1);
+            }
+        }
+        if imc_cache.is_some() {
+            self.immediate_constant_cache = imc_cache;
+        }
         self.issued = next_issued;
-        self.readiness = projected_readiness;
+        *self.readiness = projected_readiness;
         self.memory_service_candidates = projected_memory_service_candidates;
         if let Some(plan) = memory_admission_feedback_plan {
             self.memory_admission_feedback
@@ -12773,6 +14647,7 @@ fn add_fill_waiter(
     fill: FillKey,
     warp: usize,
     target: Option<FillTarget>,
+    constant_deep: bool,
 ) -> Result<(), IssueError> {
     let Some(target) = target else {
         return Ok(());
@@ -12784,16 +14659,17 @@ fn add_fill_waiter(
                 warp,
                 target,
                 units: 1,
+                constant_deep,
             }));
         }
-        Entry::Occupied(mut o) => o.get_mut().add(warp, target)?,
+        Entry::Occupied(mut o) => o.get_mut().add(warp, target, constant_deep)?,
     }
     Ok(())
 }
 
 fn preflight_line_fill_mask(st: &SharedL2State, sector_id: i64) -> Result<(), IssueError> {
     let line = sector_id >> 2;
-    let fill_in_flight = st.l1.is_fill_in_flight(FillKey::Line(line));
+    let fill_in_flight = st.l1.is_line_fill_in_flight(line);
     let has_mask = st.fill_masks.contains_key(&line);
     match (fill_in_flight, has_mask) {
         (true, false) => Err(IssueError::FillMaskMissing { line }),
@@ -12803,9 +14679,16 @@ fn preflight_line_fill_mask(st: &SharedL2State, sector_id: i64) -> Result<(), Is
 }
 
 fn register_response(st: &mut SharedL2State, reply: ReplyTo) -> Result<(), IssueError> {
+    let response_id = reply
+        .response_id()
+        .ok_or(IssueError::UnexpectedMutationOnlyResponse)?;
+    if let Some(&existing) = st.outstanding_response_ids.get(&response_id) {
+        return Err(IssueError::ResponseTokenAlreadyOutstanding { reply: existing });
+    }
     if !st.outstanding_replies.insert(reply) {
         return Err(IssueError::ResponseTokenAlreadyOutstanding { reply });
     }
+    st.outstanding_response_ids.insert(response_id, reply);
     Ok(())
 }
 
@@ -12887,6 +14770,8 @@ fn access_shared(
     target: Option<FillTarget>,
     mshr_floor: Option<NonZeroU32>,
     origin: MemoryOrigin,
+    constant_load: bool,
+    constant_deep: bool,
     sector_id: i64,
     response_id: ResponseId,
     now: u64,
@@ -12905,18 +14790,26 @@ fn access_shared(
     {
         SharedL1Access::Hit { ready } => Ok(ready),
         SharedL1Access::MissRequest { fill } => {
-            let request = MemRequest::l1_fill(now, sector_id, origin, fill, response_id);
+            let request = MemRequest::l1_fill(
+                now,
+                sector_id,
+                origin,
+                fill,
+                response_id,
+                constant_load,
+                constant_deep,
+            );
             register_response(st, request.reply)?;
             out.push(request);
-            if let FillKey::Line(line) = fill {
+            if let FillKey::Line { line, .. } = fill {
                 st.fill_masks.insert(line, sbit);
-                st.line_folds.push((line, out.len() - 1));
+                st.line_folds.entry(line).or_insert(out.len() - 1);
             }
-            add_fill_waiter(st, warps, fill, wix, target)?;
+            add_fill_waiter(st, warps, fill, wix, target, constant_deep)?;
             Ok(None)
         }
         SharedL1Access::MergedPending { fill } => {
-            if let FillKey::Line(line) = fill {
+            if let FillKey::Line { line, .. } = fill {
                 // Pairing invariant (proven at the 2026-07-07 gate): a
                 // line-pending merge always has a live fill_masks entry
                 // (created at MissRequest, removed at the response that
@@ -12931,10 +14824,16 @@ fn access_shared(
                     }))?;
                 if *sent & sbit == 0 {
                     *sent |= sbit;
-                    if let Some(&(_, ix)) = st.line_folds.iter().find(|&&(l, _)| l == line) {
-                        out[ix].fold_sector_origin(origin, sbit);
+                    if let Some(&ix) = st.line_folds.get(&line) {
+                        out[ix].fold_sector_origin(origin, sbit, constant_load);
                     } else {
-                        out.push(MemRequest::l1_followup_fetch(now, sector_id, origin));
+                        out.push(MemRequest::l1_followup_fetch(
+                            now,
+                            sector_id,
+                            origin,
+                            constant_load,
+                            constant_deep,
+                        ));
                     }
                 }
                 // Re-touch of an already-sent sector: MSHR merge, no
@@ -12942,7 +14841,7 @@ fn access_shared(
             }
             // Sector-fill merges need nothing: that sector's fetch was
             // sent with its own request.
-            add_fill_waiter(st, warps, fill, wix, target)?;
+            add_fill_waiter(st, warps, fill, wix, target, constant_deep)?;
             Ok(None)
         }
         SharedL1Access::Stalled => Err(SharedAccessError::Stalled),
@@ -12978,12 +14877,20 @@ fn drain_retries(
                 r.target,
                 r.mshr_floor,
                 r.origin,
+                r.constant_load,
+                r.constant_deep,
                 sectors[r.lo],
                 ResponseId::new(st.response_owner, r.warp, r.instruction, r.lo),
                 now,
                 out,
             ) {
                 Ok(Some(ready)) => {
+                    let ready = checked_constant_return_time(
+                        ready,
+                        r.constant_deep && barrier.is_some(),
+                        params,
+                        "constant retry L1-hit return latency",
+                    )?;
                     if let Some(group) = r.target.and_then(FillTarget::async_group) {
                         async_copies[r.warp]
                             .complete_async_copy_sources(r.warp, group, None, 1, ready, params)?;
@@ -13238,6 +15145,76 @@ mod tests {
     }
 
     #[test]
+    fn immediate_constant_parser_excludes_indexed_constant_loads() {
+        // True LDC uses the indexed constant-memory path even when a width
+        // modifier is present; its bracketed operand must not create an IMC
+        // miss in the scheduler.  Uniform ULDC is part of the IMC path.
+        assert_eq!(
+            &*immediate_constant_lines("ULDC.64 UR8, c[0x0][0x118]", 64),
+            &[4]
+        );
+        assert!(immediate_constant_lines("LDC.64 R2, c[0x0][0x118]", 64).is_empty());
+    }
+
+    #[test]
+    fn immediate_constant_parser_keeps_cbank_operands_and_deduplicates_lines() {
+        let lines = immediate_constant_lines("IADD3 R7, R7, c[0x0][0x0], c[0x0][0x20]", 64);
+        assert_eq!(&*lines, &[0]);
+        assert_eq!(
+            &*immediate_constant_lines("ISETP.LT.AND P0, PT, RZ, c[0x0][0x180], PT", 64),
+            &[6]
+        );
+    }
+
+    #[test]
+    fn immediate_constant_cache_pipeline_overlaps_line_fills() {
+        let config = ArchId::Sm86
+            .immediate_constant_cache()
+            .require("immediate_constant_cache")
+            .unwrap();
+        let mut cache = ImmediateConstantCacheState::new(config).unwrap();
+        let ready = cache.reserve(&[0, 5], 0, 244).unwrap();
+        assert_eq!(ready, Some(245));
+        assert_eq!(cache.pending.len(), 2);
+        assert_eq!(cache.pending[0].ready_at, 244);
+        assert_eq!(cache.pending[1].ready_at, 245);
+        assert_eq!(cache.next_service, 2);
+        assert_eq!(cache.diagnostics.tag_misses, 2);
+
+        // A second warp observes the first line as an outstanding reservation,
+        // not as another miss request; completion makes it resident.
+        let merged = cache.reserve(&[0], 1, 244).unwrap();
+        assert_eq!(merged, Some(244));
+        assert_eq!(cache.diagnostics.pending_merges, 1);
+        cache.complete_ready(244);
+        assert!(cache.contains(0));
+        assert!(!cache.contains(5));
+    }
+
+    #[test]
+    fn immediate_constant_cache_fills_ready_lines_in_issue_order() {
+        let config = ImmediateConstantCache {
+            sets: 1,
+            line_bytes: 64,
+            ways: 1,
+            mshr_entries: 2,
+            access_queue_entries: 1,
+            miss_initiation_interval_cycles: 1,
+            sm_structure_latency_cycles: 1,
+            l0_to_l1_cycles: 1,
+            switch_after_miss_cycles: 1,
+        };
+        let mut cache = ImmediateConstantCacheState::new(config).unwrap();
+        // Line 2 is issued first and is ready first; line 1 is issued second.
+        // Both are completed together after a scheduler jump. The latest fill
+        // (line 1) must be the resident one in this one-way set.
+        assert_eq!(cache.reserve(&[2], 0, 4).unwrap(), Some(4));
+        assert_eq!(cache.reserve(&[1], 1, 4).unwrap(), Some(5));
+        cache.complete_ready(10);
+        assert_eq!(cache.sets[0].as_slices().0, &[1]);
+    }
+
+    #[test]
     fn disabled_candidate_storage_stays_off_the_hot_inline_path() {
         assert!(std::mem::size_of::<MemoryServiceCandidateDiagnostics>() <= 24);
         assert!(std::mem::size_of::<MemoryServiceCandidateState>() <= 24);
@@ -13262,6 +15239,10 @@ mod tests {
             resource_source: IssueResourceSource::SyntheticTestFixture,
             instruction_front_end: None,
             memory_issue_pipeline: None,
+            scalar_execution_pipeline: None,
+            ldgsts_l1_hit_return_service: None,
+            constant_memory_return_service: None,
+            immediate_constant_cache: None,
             l1_hit_latency: 34,
             l1_miss_latency: 244,
             global_flat_latency: 400,
@@ -13279,6 +15260,7 @@ mod tests {
             ldgsts_cache_all_destination_service_wavefronts: 2,
             ldgsts_cache_all_destination_service_cycles: 3,
             max_resident_warps_per_sm: 48,
+            max_resident_blocks_per_sm: u32::MAX,
         }
     }
 
@@ -14289,6 +16271,75 @@ mod tests {
     }
 
     #[test]
+    fn instruction_cache_miss_reservation_consumes_one_access_sequence() {
+        let mut cache = SetAssociativeInstructionCache::new("L0I", 1, 1).unwrap();
+        let key = InstructionLineKey {
+            function_unique_id: 1,
+            line: 0,
+        };
+        assert_eq!(cache.probe(key).unwrap(), None);
+        cache.reserve(key, 4).unwrap();
+        assert_eq!(cache.access_sequence, 1);
+        assert_eq!(cache.probe(key).unwrap(), Some(4));
+        assert_eq!(cache.access_sequence, 2);
+
+        // A miss immediately before the final representable sequence must
+        // still reserve successfully; probing an absent tag has no LRU touch.
+        let mut boundary = SetAssociativeInstructionCache::new("L0I", 1, 1).unwrap();
+        boundary.access_sequence = u64::MAX - 1;
+        assert_eq!(boundary.probe(key).unwrap(), None);
+        boundary.reserve(key, 8).unwrap();
+        assert_eq!(boundary.access_sequence, u64::MAX);
+    }
+
+    #[test]
+    fn instruction_front_end_fetch_overflow_is_transactional() {
+        let config = ArchId::Sm86
+            .instruction_front_end()
+            .require("instruction_front_end")
+            .unwrap();
+        let sched = schedule(vec![
+            (0, slot(cb(1), OpClass::Other, "EXIT")),
+            (128, slot(cb(1), OpClass::Other, "EXIT")),
+        ]);
+        let blocks = vec![BlockReplay {
+            launch_index: 0,
+            warps: vec![warp(0, vec![inst(0)]), warp(1, vec![inst(128)])],
+        }];
+        let mut p = params();
+        p.instruction_front_end = Some(config);
+        p.l1_miss_latency = 4;
+        let mut core = SmCore::new(&blocks, &sched, &p, SmMemMode::Flat).unwrap();
+        let sequence_before = {
+            let front_end = core
+                .instruction_front_end
+                .as_mut()
+                .expect("fixture enables the instruction front end");
+            front_end.l1.access_sequence = u64::MAX - 1;
+            front_end.l1.access_sequence
+        };
+        let mut out = Vec::new();
+
+        assert!(matches!(
+            core.advance(ReplayHorizon::Unbounded, &mut out),
+            Err(IssueError::CounterOverflow {
+                counter: "instruction-cache access sequence"
+            })
+        ));
+        assert!(out.is_empty());
+        assert_eq!(core.warps[0].front_end_fetch_cursor, 0);
+        assert_eq!(core.warps[1].front_end_fetch_cursor, 0);
+        assert!(core.warps[0].instruction_buffer.is_empty());
+        assert!(core.warps[1].instruction_buffer.is_empty());
+        let front_end = core
+            .instruction_front_end
+            .as_ref()
+            .expect("front end remains installed after failed cycle");
+        assert_eq!(front_end.l1.access_sequence, sequence_before);
+        assert_eq!(front_end.diagnostics.instructions_fetched, 0);
+    }
+
+    #[test]
     fn active_instruction_front_end_delays_first_issue_without_changing_count() {
         let sched = schedule(vec![(0, slot(cb(1), OpClass::Other, "EXIT"))]);
         let blocks = vec![BlockReplay {
@@ -14372,7 +16423,7 @@ mod tests {
             .require("memory_issue_pipeline")
             .unwrap();
         let latency = |text: &str| {
-            memory_pipeline_slot(&slot(cb(1), OpClass::Other, text), config)
+            memory_pipeline_slot(&slot(cb(1), OpClass::Other, text), config, false)
                 .expect("published memory family")
                 .operand_ready_latency
         };
@@ -14384,9 +16435,56 @@ mod tests {
         assert_eq!(latency("STS.64 [R2], R4"), 14);
         assert_eq!(latency("LDGSTS.E.128 [R2], [R4.64]"), 13);
         assert!(
-            memory_pipeline_slot(&slot(cb(1), OpClass::Other, "ATOMG.E.ADD [R2], R4"), config)
-                .is_none()
+            memory_pipeline_slot(
+                &slot(cb(1), OpClass::Other, "ATOMG.E.ADD [R2], R4"),
+                config,
+                false
+            )
+            .is_none()
         );
+    }
+
+    #[test]
+    fn constant_pressure_boundary_comes_from_memory_window_and_u16_barrier() {
+        let six = schedule(
+            (0..6)
+                .map(|pc| {
+                    (
+                        pc * 16,
+                        slot(cb(1), OpClass::Other, "LDG.E.CONSTANT R0, [R2.64]"),
+                    )
+                })
+                .collect(),
+        );
+        assert_eq!(constant_stream_count(&six), 6);
+        let six_slot = &six.by_pc[&0];
+        assert!(!deep_constant_load(six_slot, 6, 5));
+
+        let seven = schedule(
+            (0..7)
+                .map(|pc| {
+                    (
+                        pc * 16,
+                        slot(cb(1), OpClass::Other, "LDG.E.CONSTANT R0, [R2.64]"),
+                    )
+                })
+                .collect(),
+        );
+        assert_eq!(constant_stream_count(&seven), 7);
+        assert!(deep_constant_load(&seven.by_pc[&0], 7, 5));
+
+        let u16_short = slot(
+            ControlBits::new(1, true, 2, 7, 0, 0).unwrap(),
+            OpClass::Other,
+            "LDG.E.U16.CONSTANT R0, [R2.64]",
+        );
+        let u16_long = slot(
+            ControlBits::new(1, true, 3, 7, 0, 0).unwrap(),
+            OpClass::Other,
+            "LDG.E.U16.CONSTANT R0, [R2.64]",
+        );
+        assert!(!deep_constant_load(&u16_short, 6, 5));
+        assert!(deep_constant_load(&u16_long, 6, 5));
     }
 
     #[test]
@@ -15254,6 +17352,56 @@ mod tests {
         assert!(core.async_copies[0].state.is_none());
         assert_eq!(*core.l1_counters().unwrap(), before);
         assert!(requests.is_empty());
+    }
+
+    #[test]
+    fn bypass_topology_only_zero_fill_keeps_async_group() {
+        let completion_work = sim_mem::encode_async_copy_payload_and_topology(0, 1, 1, 1, 1)
+            .expect("topology-only bypass token");
+        let sched = schedule(vec![
+            (0, slot(cb(1), OpClass::Other, "LDGSTS.E.BYPASS")),
+            (16, async_commit_slot()),
+            (32, async_wait_slot(0)),
+            (48, slot(cb(1), OpClass::Other, "EXIT")),
+        ]);
+        let blocks = vec![BlockReplay {
+            launch_index: 0,
+            warps: vec![WarpReplay {
+                async_copy_cohorts: None,
+                warp_slot: 0,
+                insts: vec![
+                    ReplayInst {
+                        pc: 0,
+                        kind: AccessKind::GlobalAsyncCopy {
+                            off: 0,
+                            len: 0,
+                            completion_work,
+                            l1_policy: LdgstsL1Policy::BypassL1,
+                        },
+                    },
+                    inst(16),
+                    inst(32),
+                    inst(48),
+                ],
+                sectors: Vec::new(),
+            }],
+        }];
+        let mut core = shared_core(&blocks, &sched, &params());
+        let mut requests = Vec::new();
+        assert!(core.issue_cycle(&mut requests).unwrap());
+        let group = core.async_copies[0]
+            .state
+            .as_deref()
+            .and_then(|state| state.open_group)
+            .expect("zero-fill topology must open an async group");
+        assert_eq!(group.pending_sources, 0);
+        assert_eq!(group.delivery_work, 0);
+        assert!(requests.is_empty());
+        assert_eq!(
+            core.advance(ReplayHorizon::Unbounded, &mut requests)
+                .unwrap(),
+            Advance::Done
+        );
     }
 
     #[test]
@@ -16802,7 +18950,7 @@ mod tests {
             "colliding CTA was admitted concurrently"
         );
         assert_eq!(core.block_states.len(), 1);
-        assert_eq!(core.resident_warp_slots, HashSet::from([0]));
+        assert_eq!(&*core.resident_warp_slots, &HashSet::from([0]));
 
         let mut out = Vec::new();
         assert_eq!(
@@ -16814,7 +18962,7 @@ mod tests {
             "retirement did not admit the waiting CTA"
         );
         assert_eq!(core.block_states.len(), 2);
-        assert_eq!(core.resident_warp_slots, HashSet::from([0]));
+        assert_eq!(&*core.resident_warp_slots, &HashSet::from([0]));
 
         assert_eq!(
             core.advance(ReplayHorizon::Unbounded, &mut out).unwrap(),
@@ -16887,6 +19035,169 @@ mod tests {
         assert_eq!(r.readiness.cta_barriers.max_arrival_spread_cycles, 12);
         assert_eq!(r.readiness.cta_barriers.total_rendezvous_warp_cycles, 14);
         assert_eq!(r.readiness.limiting_cycles.cta_barrier_rendezvous, 14);
+    }
+
+    #[test]
+    fn terminal_block_barrier_waits_for_all_participants() {
+        // A barrier can legally be the final instruction in a kernel.  It
+        // still has CTA rendezvous semantics: the first warp must not retire
+        // the block before the other participant arrives.
+        let sched = schedule(vec![(0, barrier_pipeline_slot(cb(1)))]);
+        let blocks = vec![BlockReplay {
+            launch_index: 0,
+            warps: vec![warp(0, vec![inst(0)]), warp(1, vec![inst(0)])],
+        }];
+        let result = simulate_sm(&blocks, &sched, &params(), None).unwrap();
+        assert_eq!(result.instructions_issued, 2);
+        assert_eq!(result.readiness.cta_barriers.generations, 1);
+        assert_eq!(result.modeled_local_completion_cycles, Some(5));
+    }
+
+    #[test]
+    fn terminal_barrier_release_clears_the_held_warp_slot() {
+        // A final BAR.SYNC is held while waiting for its CTA peers.  Once the
+        // generation releases, retirement must clear the CGGTY hold pointer;
+        // otherwise the index can alias a later swap-removed/admitted warp.
+        let sched = schedule(vec![(0, barrier_pipeline_slot(cb(1)))]);
+        let blocks = vec![BlockReplay {
+            launch_index: 0,
+            warps: vec![warp(0, vec![inst(0)]), warp(1, vec![inst(0)])],
+        }];
+        let mut core = SmCore::new(&blocks, &sched, &params(), SmMemMode::Flat).unwrap();
+        let mut out = Vec::new();
+        assert_eq!(
+            core.advance(ReplayHorizon::Unbounded, &mut out).unwrap(),
+            Advance::Done
+        );
+        assert_eq!(core.hold, [None; SUB_CORES]);
+        assert!(core.warps.iter().all(|warp| warp.done));
+    }
+
+    #[test]
+    fn terminal_barrier_missing_resident_slot_is_transactional() {
+        // The deferred final-barrier retirement path must run the same
+        // residency preflight as ordinary retirement.  Corrupting the slot
+        // witness should fail before dispatch, not after one participant has
+        // been retired.
+        let sched = schedule(vec![(0, barrier_pipeline_slot(cb(1)))]);
+        let blocks = vec![BlockReplay {
+            launch_index: 12,
+            warps: vec![warp(0, vec![inst(0)]), warp(1, vec![inst(0)])],
+        }];
+        let mut core = SmCore::new(&blocks, &sched, &params(), SmMemMode::Flat).unwrap();
+        assert!(core.resident_warp_slots.remove(&1));
+        let before = (
+            core.instructions_issued(),
+            core.unfinished_warps,
+            core.resident_warps,
+            core.subcore_warps.each_ref().map(Vec::clone),
+            core.hold,
+        );
+        let mut out = Vec::new();
+        assert!(matches!(
+            core.advance(ReplayHorizon::Unbounded, &mut out),
+            Err(IssueError::ResidentWarpSlotMissing {
+                launch_index: 12,
+                warp_slot: 1,
+            })
+        ));
+        assert!(out.is_empty());
+        assert_eq!(
+            (
+                core.instructions_issued(),
+                core.unfinished_warps,
+                core.resident_warps,
+                core.subcore_warps.each_ref().map(Vec::clone),
+                core.hold,
+            ),
+            before
+        );
+        assert!(core.warps.iter().all(|warp| !warp.done && warp.next == 0));
+    }
+
+    #[test]
+    fn one_warp_terminal_block_barrier_still_forms_a_generation() {
+        let sched = schedule(vec![(0, barrier_pipeline_slot(cb(1)))]);
+        let blocks = vec![BlockReplay {
+            launch_index: 0,
+            warps: vec![warp(0, vec![inst(0)])],
+        }];
+        let result = simulate_sm(&blocks, &sched, &params(), None).unwrap();
+        assert_eq!(result.instructions_issued, 1);
+        assert_eq!(result.readiness.cta_barriers.generations, 1);
+        assert_eq!(result.readiness.cta_barriers.total_arrival_spread_cycles, 0);
+        assert_eq!(result.modeled_local_completion_cycles, Some(3));
+    }
+
+    #[test]
+    fn terminal_barrier_participant_retires_after_mixed_generation_release() {
+        let sched = schedule(vec![
+            (0, barrier_pipeline_slot(cb(1))),
+            (16, slot(cb(1), OpClass::Other, "EXIT")),
+        ]);
+        let blocks = vec![BlockReplay {
+            launch_index: 0,
+            warps: vec![warp(0, vec![inst(0)]), warp(1, vec![inst(0), inst(16)])],
+        }];
+        let result = simulate_sm(&blocks, &sched, &params(), None).unwrap();
+        assert_eq!(result.instructions_issued, 3);
+        assert_eq!(result.readiness.cta_barriers.generations, 1);
+        assert_eq!(result.readiness.barrier_pipeline.generations_completed, 1);
+        assert!(
+            result
+                .modeled_local_completion_cycles
+                .is_some_and(|cycles| cycles >= 3)
+        );
+    }
+
+    #[test]
+    fn block_after_terminal_barrier_is_admitted_at_release_time() {
+        let sched = schedule(vec![
+            (0, barrier_pipeline_slot(cb(1))),
+            (16, slot(cb(1), OpClass::Other, "EXIT")),
+        ]);
+        let blocks = vec![
+            BlockReplay {
+                launch_index: 0,
+                warps: vec![warp(0, vec![inst(0)]), warp(1, vec![inst(0)])],
+            },
+            BlockReplay {
+                launch_index: 1,
+                warps: vec![warp(0, vec![inst(16)]), warp(1, vec![inst(16)])],
+            },
+        ];
+        let result = simulate_sm(&blocks, &sched, &params(), None).unwrap();
+        assert_eq!(result.instructions_issued, 4);
+        assert!(result.cycles >= 6, "cycles={}", result.cycles);
+    }
+
+    #[test]
+    fn barrier_release_after_early_waiter_is_not_time_travel() {
+        // Warp 0 parks at a final barrier first.  Warp 1 exits much later;
+        // that retirement is the event that makes the barrier releasable, so
+        // release/admission cannot use the historical arrival+1 timestamp.
+        let sched = schedule(vec![
+            (0, barrier_pipeline_slot(cb(1))),
+            (16, slot(cb(12), OpClass::Other, "FFMA")),
+            (32, slot(cb(1), OpClass::Other, "EXIT")),
+            (48, slot(cb(1), OpClass::Other, "EXIT")),
+        ]);
+        let blocks = vec![
+            BlockReplay {
+                launch_index: 0,
+                warps: vec![warp(0, vec![inst(0)]), warp(1, vec![inst(16), inst(32)])],
+            },
+            BlockReplay {
+                launch_index: 1,
+                warps: vec![warp(0, vec![inst(48)])],
+            },
+        ];
+        let result = simulate_sm(&blocks, &sched, &params(), None).unwrap();
+        assert_eq!(result.instructions_issued, 4);
+        // The successor CTA must wait until the delayed participant's
+        // retirement (t=12) plus the release/admission edge, rather than being
+        // admitted at the stale first-arrival timestamp (t=3/4).
+        assert!(result.cycles >= 14, "cycles={}", result.cycles);
     }
 
     #[test]
@@ -17198,6 +19509,13 @@ mod tests {
             ),
             None
         );
+    }
+
+    #[test]
+    fn large_sector_projection_preserves_alias_and_line_counts() {
+        let sectors: Vec<i64> = (0..4096).map(|index| i64::from(index % 8)).collect();
+        assert_eq!(maximum_sector_multiplicity(&sectors), 512);
+        assert_eq!(unique_128b_lines(&sectors), 2);
     }
 
     #[test]
@@ -17949,7 +20267,7 @@ mod tests {
                 .unwrap();
         assert_eq!(core.next_block, 1);
         assert_eq!(core.resident_shared_memory_bytes, 64);
-        assert_eq!(core.resident_warp_slots, HashSet::from([0]));
+        assert_eq!(&*core.resident_warp_slots, &HashSet::from([0]));
 
         let mut out = Vec::new();
         assert_eq!(
@@ -17958,7 +20276,7 @@ mod tests {
         );
         assert_eq!(core.next_block, 2);
         assert_eq!(core.resident_shared_memory_bytes, 64);
-        assert_eq!(core.resident_warp_slots, HashSet::from([1]));
+        assert_eq!(&*core.resident_warp_slots, &HashSet::from([1]));
 
         assert_eq!(
             core.advance(ReplayHorizon::Unbounded, &mut out).unwrap(),
@@ -17980,6 +20298,115 @@ mod tests {
         assert!(matches!(err, IssueError::PcNotInSchedule { pc: 999, .. }));
     }
 
+    #[test]
+    fn admission_overflow_during_retirement_rejects_entire_issue_cycle_before_mutation() {
+        let sched = schedule(vec![(0, slot(cb(1), OpClass::Other, "EXIT"))]);
+        let blocks = vec![
+            BlockReplay {
+                launch_index: 8,
+                warps: vec![warp(0, vec![inst(0)])],
+            },
+            BlockReplay {
+                launch_index: 9,
+                warps: vec![warp(1, vec![inst(0)])],
+            },
+        ];
+        let mut parameters = params();
+        parameters.max_resident_warps_per_sm = 1;
+        let mut core = SmCore::new(&blocks, &sched, &parameters, SmMemMode::Flat).unwrap();
+        // The second block is waiting for the first to retire.  Corrupt only
+        // the admission stamp: retirement will otherwise mutate the first
+        // warp before the deferred successor admission reports overflow.
+        core.arrival_stamp = u64::MAX;
+        let before = (
+            core.instructions_issued(),
+            core.unfinished_warps,
+            core.resident_warps,
+            core.subcore_warps.each_ref().map(Vec::clone),
+            core.hold,
+            core.warps
+                .iter()
+                .map(|warp| (warp.next, warp.eligible, warp.done))
+                .collect::<Vec<_>>(),
+        );
+        let mut out = Vec::new();
+
+        assert!(matches!(
+            core.advance(ReplayHorizon::Unbounded, &mut out),
+            Err(IssueError::CounterOverflow {
+                counter: "warp arrival stamp"
+            })
+        ));
+        assert!(out.is_empty());
+        assert_eq!(
+            (
+                core.instructions_issued(),
+                core.unfinished_warps,
+                core.resident_warps,
+                core.subcore_warps.each_ref().map(Vec::clone),
+                core.hold,
+                core.warps
+                    .iter()
+                    .map(|warp| (warp.next, warp.eligible, warp.done))
+                    .collect::<Vec<_>>(),
+            ),
+            before
+        );
+    }
+
+    #[test]
+    fn unfinished_warp_overflow_during_retirement_is_transactional() {
+        let sched = schedule(vec![(0, slot(cb(1), OpClass::Other, "EXIT"))]);
+        let blocks = vec![
+            BlockReplay {
+                launch_index: 10,
+                warps: vec![warp(0, vec![inst(0)])],
+            },
+            BlockReplay {
+                launch_index: 11,
+                warps: vec![warp(1, vec![inst(0)]), warp(2, vec![inst(0)])],
+            },
+        ];
+        let mut parameters = params();
+        parameters.max_resident_warps_per_sm = 2;
+        let mut core = SmCore::new(&blocks, &sched, &parameters, SmMemMode::Flat).unwrap();
+        core.unfinished_warps = usize::MAX;
+        let before = (
+            core.instructions_issued(),
+            core.unfinished_warps,
+            core.resident_warps,
+            core.subcore_warps.each_ref().map(Vec::clone),
+            core.hold,
+            core.warps
+                .iter()
+                .map(|warp| (warp.next, warp.eligible, warp.done))
+                .collect::<Vec<_>>(),
+        );
+        let mut out = Vec::new();
+
+        assert!(matches!(
+            core.advance(ReplayHorizon::Unbounded, &mut out),
+            Err(IssueError::CounterOverflow {
+                counter: "unfinished warp"
+            })
+        ));
+        assert!(out.is_empty());
+        assert_eq!(
+            (
+                core.instructions_issued(),
+                core.unfinished_warps,
+                core.resident_warps,
+                core.subcore_warps.each_ref().map(Vec::clone),
+                core.hold,
+                core.warps
+                    .iter()
+                    .map(|warp| (warp.next, warp.eligible, warp.done))
+                    .collect::<Vec<_>>(),
+            ),
+            before
+        );
+    }
+
     // ------------------------------------------------------------------
     // SmCore event-mode (L1Shared) tests: a manual driver stands in for
     // the system layer.
@@ -17991,6 +20418,88 @@ mod tests {
         p: &IssueModelParams,
     ) -> SmCore<'a> {
         SmCore::new(blocks, sched, p, SmMemMode::L1Shared(l1_config())).unwrap()
+    }
+
+    #[test]
+    fn async_l1_hit_service_overflow_is_transactional() {
+        let sched = schedule(vec![(0, slot(cb(1), OpClass::Other, "LDGSTS.E"))]);
+        let blocks = vec![BlockReplay {
+            launch_index: 0,
+            warps: vec![WarpReplay {
+                async_copy_cohorts: None,
+                warp_slot: 0,
+                insts: vec![async_copy_inst(0, 0, 1)],
+                sectors: vec![0],
+            }],
+        }];
+        let mut p = params();
+        p.ldgsts_l1_hit_return_service = Some(LdgstsL1HitReturnService { interval_cycles: 1 });
+        let mut core = shared_core(&blocks, &sched, &p);
+
+        // Warm the event-mode L1 so the cacheable source enters the hit-return
+        // service timeline after the async group has been allocated.
+        let fill = {
+            let MemModel::L1Shared(st) = &mut core.mem else {
+                panic!("fixture must use shared L1");
+            };
+            let EvAccess::MissRequest { fill } = st
+                .l1
+                .access_eligible_ev(MemoryOrigin::Global, 0, 0)
+                .unwrap()
+            else {
+                panic!("cold source must allocate an L1 fill");
+            };
+            st.l1.complete_fill(fill).unwrap();
+            fill
+        };
+        let _ = fill;
+        core.shared_write_lookup_runtime.async_l1_hit_service_ready[0] = u64::MAX;
+        let before_l1 = *core.l1_counters().unwrap();
+        let before_group = core.async_copies[0].state.as_deref().map(|state| {
+            (
+                state.open_group.map(|group| {
+                    (
+                        group.id,
+                        group.pending_sources,
+                        group.source_completion_time,
+                        group.delivery_work,
+                        group.destination_wavefronts,
+                        group.completion_time,
+                    )
+                }),
+                state.committed_groups.len(),
+                state.bypass_copies.len(),
+            )
+        });
+        let mut requests = Vec::new();
+
+        assert!(matches!(
+            core.issue_cycle(&mut requests),
+            Err(IssueError::CounterOverflow {
+                counter: "async L1 hit service timeline"
+            })
+        ));
+        assert_eq!(core.instructions_issued(), 0);
+        assert_eq!(core.warps[0].next, 0);
+        assert_eq!(*core.l1_counters().unwrap(), before_l1);
+        let after_group = core.async_copies[0].state.as_deref().map(|state| {
+            (
+                state.open_group.map(|group| {
+                    (
+                        group.id,
+                        group.pending_sources,
+                        group.source_completion_time,
+                        group.delivery_work,
+                        group.destination_wavefronts,
+                        group.completion_time,
+                    )
+                }),
+                state.committed_groups.len(),
+                state.bypass_copies.len(),
+            )
+        });
+        assert_eq!(after_group, before_group);
+        assert!(requests.is_empty());
     }
 
     #[test]
@@ -18486,6 +20995,78 @@ mod tests {
         assert_eq!(counters.misses, 2);
         assert_eq!(counters.merges, 1);
         assert_eq!(counters.bypass_sectors, 0);
+    }
+
+    #[test]
+    fn mixed_constant_and_ordinary_fill_waiters_keep_return_latency_local() {
+        let mut ordinary = cb(1);
+        ordinary.write_barrier = Some(barrier(0));
+        let mut constant = cb(1);
+        constant.write_barrier = Some(barrier(0));
+        // Seven static constant streams cross the SM86 pressure threshold,
+        // making the constant load at pc=16 consume the deep return path.
+        let sched = schedule(vec![
+            (0, slot(ordinary, OpClass::Other, "LDG.E.CA")),
+            (16, slot(constant, OpClass::Other, "LDG.E.CONSTANT")),
+            (32, slot(cb(1), OpClass::Other, "EXIT")),
+            (48, slot(cb(1), OpClass::Other, "LDG.E.CONSTANT")),
+            (64, slot(cb(1), OpClass::Other, "LDG.E.CONSTANT")),
+            (80, slot(cb(1), OpClass::Other, "LDG.E.CONSTANT")),
+            (96, slot(cb(1), OpClass::Other, "LDG.E.CONSTANT")),
+            (112, slot(cb(1), OpClass::Other, "LDG.E.CONSTANT")),
+            (128, slot(cb(1), OpClass::Other, "LDG.E.CONSTANT")),
+        ]);
+        let blocks = vec![BlockReplay {
+            launch_index: 0,
+            warps: vec![
+                WarpReplay {
+                    async_copy_cohorts: None,
+                    warp_slot: 0,
+                    insts: vec![
+                        ReplayInst {
+                            pc: 0,
+                            kind: eligible(0, 1),
+                        },
+                        inst(32),
+                    ],
+                    sectors: vec![0],
+                },
+                WarpReplay {
+                    async_copy_cohorts: None,
+                    warp_slot: 1,
+                    insts: vec![
+                        ReplayInst {
+                            pc: 16,
+                            kind: eligible(0, 1),
+                        },
+                        inst(32),
+                    ],
+                    sectors: vec![0],
+                },
+            ],
+        }];
+        let mut p = params();
+        p.memory_issue_pipeline = Some(
+            ArchId::Sm86
+                .memory_issue_pipeline()
+                .require("memory_issue_pipeline")
+                .unwrap(),
+        );
+        p.constant_memory_return_service = Some(ConstantMemoryReturnService {
+            additional_cycles: 8,
+        });
+        let mut core = shared_core(&blocks, &sched, &p);
+        let mut requests = Vec::new();
+        assert_eq!(
+            core.advance(ReplayHorizon::Unbounded, &mut requests)
+                .unwrap(),
+            Advance::Done
+        );
+        assert_eq!(requests.len(), 1, "same-line loads share one physical fill");
+        let reply = requests[0].reply;
+        core.on_response(reply, 244, &mut Vec::new()).unwrap();
+        assert_eq!(core.warps[0].barrier_clear[0], 244);
+        assert_eq!(core.warps[1].barrier_clear[0], 252);
     }
 
     #[test]
@@ -19380,7 +21961,7 @@ mod tests {
         let MemModel::L1Const(l1) = &core.mem else {
             panic!("expected constant L1 mode");
         };
-        assert!(l1.is_fill_in_flight(FillKey::Line(0)));
+        assert!(l1.is_line_fill_in_flight(0));
     }
 
     #[test]
@@ -19436,7 +22017,7 @@ mod tests {
         let MemModel::L1Const(l1) = &core.mem else {
             panic!("expected constant L1 mode");
         };
-        assert!(l1.is_fill_in_flight(FillKey::Line(0)));
+        assert!(l1.is_line_fill_in_flight(0));
     }
 
     #[test]
@@ -19492,8 +22073,8 @@ mod tests {
         let MemModel::L1Const(l1) = &core.mem else {
             panic!("expected constant L1 mode");
         };
-        assert!(!l1.is_fill_in_flight(FillKey::Line(0)));
-        assert!(!l1.is_fill_in_flight(FillKey::Line(2)));
+        assert!(!l1.is_line_fill_in_flight(0));
+        assert!(!l1.is_line_fill_in_flight(2));
     }
 
     #[test]
@@ -19626,7 +22207,7 @@ mod tests {
         };
         assert!(st.l1.is_fill_in_flight(fill));
         assert!(st.fill_waiters.contains_key(&fill));
-        if let FillKey::Line(line) = fill {
+        if let FillKey::Line { line, .. } = fill {
             assert!(st.fill_masks.contains_key(&line));
         }
     }
@@ -19676,6 +22257,8 @@ mod tests {
             warp: 0,
             instruction: 0,
             origin: MemoryOrigin::Global,
+            constant_load: false,
+            constant_deep: false,
             target: Some(FillTarget::Barrier(barrier(0))),
             mshr_floor: None,
             lookup_batch,
@@ -19708,9 +22291,96 @@ mod tests {
         assert_eq!(retry.warp, 0);
         assert_eq!(retry.lo, 1);
         assert_eq!(retry.hi, 2);
-        if let FillKey::Line(line) = fill {
+        if let FillKey::Line { line, .. } = fill {
             assert!(st.fill_masks.contains_key(&line));
         }
+    }
+
+    #[test]
+    fn deep_constant_retry_overflow_is_preflighted_before_response_mutation() {
+        let mut load = cb(1);
+        load.write_barrier = Some(barrier(0));
+        let mut consumer = cb(1);
+        consumer.wait_mask = wait_mask(1);
+        let sched = schedule(vec![
+            (0, slot(load, OpClass::Other, "LDG.E.CONSTANT")),
+            (16, slot(consumer, OpClass::Other, "EXIT")),
+        ]);
+        let blocks = vec![BlockReplay {
+            launch_index: 0,
+            warps: vec![WarpReplay {
+                async_copy_cohorts: None,
+                warp_slot: 0,
+                insts: vec![
+                    ReplayInst {
+                        pc: 0,
+                        kind: eligible(0, 1),
+                    },
+                    inst(16),
+                ],
+                sectors: vec![0, 0],
+            }],
+        }];
+        let mut p = params();
+        p.l1_hit_latency = 1;
+        p.l1_miss_latency = 2;
+        p.constant_memory_return_service = Some(ConstantMemoryReturnService {
+            additional_cycles: 8,
+        });
+        let l1 = L1Config {
+            hit_latency: 1,
+            miss_latency: 2,
+            ..l1_config()
+        };
+        let mut core = SmCore::new(&blocks, &sched, &p, SmMemMode::L1Shared(l1)).unwrap();
+        let mut requests = Vec::new();
+        assert_eq!(
+            core.advance(ReplayHorizon::Unbounded, &mut requests)
+                .unwrap(),
+            Advance::Idle { wake_at: None }
+        );
+        let reply = requests[0].reply;
+        core.warps[0].barrier_pending[0] = 2;
+        let MemModel::L1Shared(st) = &mut core.mem else {
+            panic!("expected shared mode");
+        };
+        let lookup_batch = st.l1.begin_lookup_batch();
+        st.retry.push_back(Retry {
+            warp: 0,
+            instruction: 0,
+            origin: MemoryOrigin::Global,
+            constant_load: true,
+            constant_deep: true,
+            target: Some(FillTarget::Barrier(barrier(0))),
+            mshr_floor: None,
+            lookup_batch,
+            lo: 1,
+            hi: 2,
+        });
+        let before_l1 = *core.l1_counters().unwrap();
+        let before_pending = core.warps[0].barrier_pending[0];
+        let mut emitted = Vec::new();
+        let now = u64::MAX - 2;
+        let error = core.on_response(reply, now, &mut emitted).unwrap_err();
+        assert!(matches!(
+            error,
+            IssueError::TimeOverflow {
+                operation: "constant retry L1-hit return latency",
+                ..
+            }
+        ));
+        assert!(emitted.is_empty());
+        assert_eq!(core.outstanding_responses(), 1);
+        assert_eq!(core.warps[0].barrier_pending[0], before_pending);
+        assert_eq!(*core.l1_counters().unwrap(), before_l1);
+        let MemModel::L1Shared(st) = &core.mem else {
+            panic!("expected shared mode");
+        };
+        assert!(st.l1.is_fill_in_flight(match reply {
+            ReplyTo::L1Fill { fill, .. } => fill,
+            _ => panic!("expected L1 fill reply"),
+        }));
+        assert_eq!(st.retry.len(), 1);
     }
 
     #[test]
@@ -19755,6 +22425,8 @@ mod tests {
             warp: 0,
             instruction: 0,
             origin: MemoryOrigin::Global,
+            constant_load: false,
+            constant_deep: false,
             target: Some(FillTarget::Barrier(barrier(0))),
             mshr_floor: None,
             lookup_batch,
@@ -19871,7 +22543,10 @@ mod tests {
         assert!(matches!(
             core.on_response(
                 ReplyTo::L1Fill {
-                    fill: FillKey::Line(999),
+                    fill: FillKey::Line {
+                        line: 999,
+                        generation: 0,
+                    },
                     response_id,
                 },
                 423,
@@ -20057,6 +22732,8 @@ mod tests {
             warp: 0,
             instruction: 0,
             origin: MemoryOrigin::Global,
+            constant_load: false,
+            constant_deep: false,
             target: None,
             mshr_floor: None,
             lookup_batch,
@@ -20519,7 +23196,7 @@ mod tests {
         assert!(matches!(
             out[0].reply,
             ReplyTo::L1Fill {
-                fill: FillKey::Line(10),
+                fill: FillKey::Line { line: 10, .. },
                 ..
             }
         ));
@@ -20530,6 +23207,40 @@ mod tests {
             Advance::Done
         );
         assert_eq!(core.result().cycles, 245);
+    }
+
+    #[test]
+    fn constant_load_marker_reaches_shared_fill_request() {
+        let mut load = cb(1);
+        load.write_barrier = Some(barrier(0));
+        let sched = schedule(vec![(
+            0,
+            slot(load, OpClass::Other, "LDG.E.U16.CONSTANT R0, [R2.64]"),
+        )]);
+        let blocks = vec![BlockReplay {
+            launch_index: 0,
+            warps: vec![WarpReplay {
+                async_copy_cohorts: None,
+                warp_slot: 0,
+                insts: vec![ReplayInst {
+                    pc: 0,
+                    kind: AccessKind::GlobalEligible {
+                        off: 0,
+                        len: 2,
+                        token: CacheOpToken::LdgECa,
+                    },
+                }],
+                sectors: vec![40, 41],
+            }],
+        }];
+        let mut core = shared_core(&blocks, &sched, &params());
+        let mut out = Vec::new();
+        let _advance = core.advance(ReplayHorizon::Unbounded, &mut out).unwrap();
+        assert_eq!(out.len(), 1);
+        assert!(out[0].constant_load);
+        // The broad constant marker must not imply the pressure-class return
+        // service for a low-stream U16 load.
+        assert!(!out[0].constant_deep);
     }
 
     #[test]
@@ -20577,6 +23288,8 @@ mod tests {
                 None,
                 None,
                 MemoryOrigin::Local,
+                false,
+                false,
                 41,
                 response_id,
                 1,
@@ -20643,6 +23356,8 @@ mod tests {
                 warp: 0,
                 instruction: 1,
                 origin: MemoryOrigin::Global,
+                constant_load: false,
+                constant_deep: false,
                 target: None,
                 mshr_floor: None,
                 lookup_batch: first_lookup_batch,
@@ -20654,6 +23369,8 @@ mod tests {
                 warp: 0,
                 instruction: 2,
                 origin: MemoryOrigin::Local,
+                constant_load: false,
+                constant_deep: false,
                 target: None,
                 mshr_floor: None,
                 lookup_batch: second_lookup_batch,
@@ -20767,7 +23484,7 @@ mod tests {
         assert!(matches!(
             out[0].reply,
             ReplyTo::L1Fill {
-                fill: FillKey::Line(10),
+                fill: FillKey::Line { line: 10, .. },
                 ..
             }
         ));
@@ -20851,14 +23568,14 @@ mod tests {
         assert!(matches!(
             out[0].reply,
             ReplyTo::L1Fill {
-                fill: FillKey::Line(20),
+                fill: FillKey::Line { line: 20, .. },
                 ..
             }
         ));
         assert!(matches!(
             out[1].reply,
             ReplyTo::L1Fill {
-                fill: FillKey::Line(10),
+                fill: FillKey::Line { line: 10, .. },
                 ..
             }
         ));

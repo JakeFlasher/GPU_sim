@@ -4,7 +4,7 @@ disk evidence and the closed-vocabulary reducer.
 Run directly:
 
     python -m baselines_harness.calibration.cache_prediction.sm120_coverage_expansion.emit_ladder \\
-        --output scripts/baselines_harness/calibration/cache_prediction/sm120_coverage_readiness_ladder_v1.toml \\
+        --output tools/sol_baselines_harness/calibration/cache_prediction/sm120_coverage_readiness_ladder_v1.toml \\
         [--captured-at-utc 2026-05-27T08:00:00+00:00]
 
 Determinism: with the same disk state AND the same explicit
@@ -115,7 +115,7 @@ def render_manifest_toml(manifest: LadderManifest) -> str:
         "# Closed vocabulary: see ``_LADDER_STATES`` in"
     )
     lines.append(
-        "# ``scripts/baselines_harness/calibration/cache_prediction/"
+        "# ``tools/sol_baselines_harness/calibration/cache_prediction/"
     )
     lines.append(
         "# sm120_coverage_expansion/ladder_states.py``."
@@ -180,7 +180,7 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
         default=_DEFAULT_OUTPUT,
         help=(
             "Output path. Defaults to the canonical location at "
-            "scripts/baselines_harness/calibration/cache_prediction/"
+            "tools/sol_baselines_harness/calibration/cache_prediction/"
             "sm120_coverage_readiness_ladder_v1.toml"
         ),
     )

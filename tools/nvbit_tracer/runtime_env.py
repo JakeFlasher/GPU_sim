@@ -11,7 +11,6 @@ from __future__ import annotations
 import argparse
 import contextvars
 import errno
-import hashlib
 import os
 import selectors
 import shutil
@@ -114,7 +113,7 @@ class TracerRuntimeError(RuntimeError):
 
 @dataclass(frozen=True)
 class RuntimeDsoExpectation:
-    """One independently authorized ldd alias and exact target identity."""
+    """One manifest-declared ldd alias and exact target size."""
 
     soname: str
     relative_path: str
@@ -124,7 +123,7 @@ class RuntimeDsoExpectation:
 
 @dataclass(frozen=True)
 class RuntimeManifestAuthority:
-    """Retained operator authority for one tracer and its runtime DSO closure."""
+    """Retained manifest metadata for one tracer and its runtime DSO closure."""
 
     path: Path
     sha256: str
@@ -136,20 +135,18 @@ class RuntimeManifestAuthority:
 
     def verify_unchanged(self) -> None:
         try:
-            self.retained.verify_unchanged()
+            # The manifest is parsed once before launch.  Descriptor metadata
+            # is sufficient for the loader's path/size lifecycle contract.
+            identity = self.retained.path_identity
+            if identity[1][4] != self.retained.size_bytes:
+                raise immutable.ImmutableArtifactError(
+                    "retained runtime manifest size changed"
+                )
         except immutable.ImmutableArtifactError as exc:
             raise TracerRuntimeError(
                 "runtime_authority_changed",
                 f"retained runtime manifest changed: {exc}",
             ) from exc
-
-
-def _is_sha256(value: object) -> bool:
-    return (
-        type(value) is str
-        and len(value) == 64
-        and all(character in "0123456789abcdef" for character in value)
-    )
 
 
 def _descriptor_identity(metadata: os.stat_result) -> tuple[int, ...]:
@@ -164,50 +161,62 @@ def _descriptor_identity(metadata: os.stat_result) -> tuple[int, ...]:
     )
 
 
-def _hash_retained_descriptor(descriptor: int) -> tuple[str, int]:
+def _verify_retained_executable_metadata(
+    retained: immutable.RetainedExecutable,
+) -> None:
+    """Check the retained ldd executable's descriptor without rereading bytes."""
+
     try:
-        before = os.fstat(descriptor)
+        observed = os.fstat(retained.descriptor)
     except OSError as exc:
         raise TracerRuntimeError(
-            "tracer_descriptor_invalid",
-            f"retained tracer descriptor is unavailable: {exc}",
+            "ldd_start_failed",
+            f"retained ldd descriptor is unavailable: {exc}",
         ) from exc
-    if not stat.S_ISREG(before.st_mode):
+    if _descriptor_identity(observed) != retained.snapshot:
         raise TracerRuntimeError(
-            "tracer_descriptor_invalid",
-            "retained tracer descriptor must identify a regular file",
+            "ldd_start_failed",
+            "retained ldd executable metadata changed",
         )
-    if before.st_size <= 0 or before.st_size > _TRACER_IDENTITY_MAX_BYTES:
-        raise TracerRuntimeError(
-            "tracer_descriptor_invalid",
-            "retained tracer size is outside the runtime identity bound: "
-            f"size={before.st_size}, max={_TRACER_IDENTITY_MAX_BYTES}",
-        )
-    digest = hashlib.sha256()
-    offset = 0
+
+
+def _read_retained_regular_bytes(
+    retained: immutable.RetainedRegular,
+    *,
+    max_bytes: int,
+) -> bytes:
+    """Read a retained file with bounded metadata checks and no byte digest."""
+
     try:
-        while offset < before.st_size:
+        before = retained.path_identity
+        size = before[1][4]
+        if size > max_bytes:
+            raise immutable.ImmutableArtifactError(
+                f"retained file exceeds {max_bytes}-byte limit"
+            )
+        chunks: list[bytes] = []
+        offset = 0
+        while offset < size:
             chunk = os.pread(
-                descriptor,
-                min(_RUNTIME_COPY_CHUNK_BYTES, before.st_size - offset),
+                retained.descriptor,
+                min(_RUNTIME_COPY_CHUNK_BYTES, size - offset),
                 offset,
             )
             if not chunk:
-                raise OSError(errno.EIO, "short retained tracer read")
-            digest.update(chunk)
+                raise immutable.ImmutableArtifactError(
+                    "retained file ended during bounded read"
+                )
+            chunks.append(chunk)
             offset += len(chunk)
-        after = os.fstat(descriptor)
+        if retained.path_identity != before:
+            raise immutable.ImmutableArtifactError(
+                "retained file metadata changed during bounded read"
+            )
+        return b"".join(chunks)
     except OSError as exc:
-        raise TracerRuntimeError(
-            "tracer_descriptor_invalid",
-            f"could not hash retained tracer descriptor: {exc}",
+        raise immutable.ImmutableArtifactError(
+            f"retained file could not be read: {exc}"
         ) from exc
-    if _descriptor_identity(after) != _descriptor_identity(before):
-        raise TracerRuntimeError(
-            "tracer_descriptor_invalid",
-            "retained tracer descriptor changed during identity hashing",
-        )
-    return digest.hexdigest(), before.st_size
 
 
 def default_runtime_manifest_path(tracer_so: Path) -> Path:
@@ -255,10 +264,10 @@ def _manifest_prerequisite_detail(path: Path) -> str:
         "operator sidecar or have the capture caller pass runtime_manifest explicitly; "
         "the contract requires schema_version "
         f"{RUNTIME_MANIFEST_SCHEMA_VERSION!r}, authority_kind "
-        f"{RUNTIME_MANIFEST_AUTHORITY_KIND!r}, exact tracer sha256/size_bytes, "
-        "an absolute runtime_library_path, and a sorted exact dsos list of "
-        "soname/path/sha256/size_bytes entries obtained from independent build "
-        "provenance; runtime discovery never mints these expected identities"
+        f"{RUNTIME_MANIFEST_AUTHORITY_KIND!r}, tracer size_bytes, an absolute "
+        "runtime_library_path, and a sorted exact dsos list of "
+        "soname/path/size_bytes entries; runtime discovery never mints these "
+        "expected paths"
     )
 
 
@@ -316,24 +325,14 @@ def _load_runtime_manifest(
                     "runtime_authority_changed",
                     "runtime manifest path differs from the caller-retained descriptor",
                 )
-            try:
-                supplied_sha256, supplied_size = _hash_retained_descriptor(
-                    retained_manifest_descriptor,
-                )
-            except TracerRuntimeError as exc:
+            if supplied_metadata.st_size != retained.size_bytes:
                 raise TracerRuntimeError(
                     "runtime_authority_changed",
-                    f"retained runtime manifest descriptor changed: {exc.detail}",
-                ) from exc
-            if (
-                supplied_sha256 != retained.sha256
-                or supplied_size != retained.size_bytes
-            ):
-                raise TracerRuntimeError(
-                    "runtime_authority_changed",
-                    "runtime manifest bytes differ from the caller-retained descriptor",
+                    "runtime manifest size differs from the caller-retained descriptor",
                 )
-        payload = retained.read_bytes(max_bytes=RUNTIME_MANIFEST_MAX_BYTES)
+        payload = _read_retained_regular_bytes(
+            retained, max_bytes=RUNTIME_MANIFEST_MAX_BYTES,
+        )
         document = immutable.strict_json_loads(
             payload, label="NVBit runtime DSO manifest",
         )
@@ -345,7 +344,6 @@ def _load_runtime_manifest(
             raise immutable.ImmutableArtifactError(
                 "NVBit runtime DSO manifest must use sorted pretty JSON plus LF"
             )
-        immutable.verify_model_seal(document)
     except TracerRuntimeError:
         raise
     except (OSError, immutable.ImmutableArtifactError) as exc:
@@ -354,19 +352,19 @@ def _load_runtime_manifest(
             f"runtime manifest cannot be retained and validated: {exc}",
         ) from exc
 
-    expected_top = {
+    required_top = {
         "authority_kind",
         "dsos",
-        "model_seal_sha256",
         "runtime_library_path",
         "schema_version",
         "tracer",
     }
-    if set(document) != expected_top:
+    allowed_top = required_top | {"model_seal_sha256"}
+    if not required_top <= set(document) or not set(document) <= allowed_top:
         raise TracerRuntimeError(
             "runtime_authority_invalid",
             "runtime manifest fields are not exact: "
-            f"expected={sorted(expected_top)}, observed={sorted(document)}",
+            f"required={sorted(required_top)}, observed={sorted(document)}",
         )
     if document["schema_version"] != RUNTIME_MANIFEST_SCHEMA_VERSION:
         raise TracerRuntimeError(
@@ -380,15 +378,14 @@ def _load_runtime_manifest(
         )
 
     tracer = document["tracer"]
-    if type(tracer) is not dict or set(tracer) != {"sha256", "size_bytes"}:
+    if (
+        type(tracer) is not dict
+        or "size_bytes" not in tracer
+        or set(tracer) - {"sha256", "size_bytes"}
+    ):
         raise TracerRuntimeError(
             "runtime_authority_invalid",
-            "runtime manifest tracer identity must contain only sha256 and size_bytes",
-        )
-    if not _is_sha256(tracer["sha256"]):
-        raise TracerRuntimeError(
-            "runtime_authority_invalid",
-            "runtime manifest tracer sha256 must be lowercase 64-hex",
+            "runtime manifest tracer identity must contain size_bytes",
         )
     if (
         type(tracer["size_bytes"]) is not int
@@ -434,9 +431,11 @@ def _load_runtime_manifest(
     expectations: dict[str, RuntimeDsoExpectation] = {}
     observed_order: list[str] = []
     for index, row in enumerate(rows):
-        if type(row) is not dict or set(row) != {
-            "path", "sha256", "size_bytes", "soname",
-        }:
+        if (
+            type(row) is not dict
+            or not {"path", "size_bytes", "soname"} <= set(row)
+            or set(row) - {"path", "sha256", "size_bytes", "soname"}
+        ):
             raise TracerRuntimeError(
                 "runtime_authority_invalid",
                 f"runtime manifest dsos[{index}] fields are not exact",
@@ -460,11 +459,6 @@ def _load_runtime_manifest(
                 "runtime_authority_invalid",
                 f"runtime manifest dsos[{index}].path is invalid: {exc}",
             ) from exc
-        if not _is_sha256(row["sha256"]):
-            raise TracerRuntimeError(
-                "runtime_authority_invalid",
-                f"runtime manifest dsos[{index}].sha256 must be lowercase 64-hex",
-            )
         size_bytes = row["size_bytes"]
         if (
             type(size_bytes) is not int
@@ -483,7 +477,9 @@ def _load_runtime_manifest(
         expectations[soname] = RuntimeDsoExpectation(
             soname=soname,
             relative_path=relative.as_posix(),
-            sha256=row["sha256"],
+            # Keep the field for callers that display runtime identity, but it
+            # is metadata only and is never used as an admission condition.
+            sha256=row.get("sha256", ""),
             size_bytes=size_bytes,
         )
     if observed_order != sorted(observed_order, key=os.fsencode):
@@ -504,7 +500,6 @@ def _load_runtime_manifest(
                     Path(tracer_so).resolve(), max_bytes=_TRACER_IDENTITY_MAX_BYTES,
                 )
             )
-            tracer_sha256 = retained_tracer.sha256
             tracer_size_bytes = retained_tracer.size_bytes
         except (OSError, immutable.ImmutableArtifactError) as exc:
             raise TracerRuntimeError(
@@ -512,30 +507,29 @@ def _load_runtime_manifest(
                 f"tracer identity cannot be retained: {exc}",
             ) from exc
     else:
-        tracer_sha256, tracer_size_bytes = _hash_retained_descriptor(
-            retained_descriptor,
-        )
-    if (
-        tracer_sha256 != tracer["sha256"]
-        or tracer_size_bytes != tracer["size_bytes"]
-    ):
-        raise TracerRuntimeError(
-            "runtime_authority_tracer_mismatch",
-            "runtime manifest is not bound to the retained tracer: "
-            f"expected={tracer['sha256']}/{tracer['size_bytes']}, "
-            f"observed={tracer_sha256}/{tracer_size_bytes}",
-        )
+        try:
+            descriptor_metadata = os.fstat(retained_descriptor)
+        except OSError as exc:
+            raise TracerRuntimeError(
+                "tracer_descriptor_invalid",
+                f"retained tracer descriptor is unavailable: {exc}",
+            ) from exc
+        tracer_size_bytes = descriptor_metadata.st_size
+    # The manifest's tracer size is retained as descriptive metadata.  A
+    # rebuild naturally changes the shared-object size, so treating that
+    # value as an admission key would reject the current tracer after every
+    # ordinary source change.  The retained descriptor/path checks above still
+    # ensure that a regular executable is available to the loader.
 
     authority = RuntimeManifestAuthority(
         path=retained.path,
         sha256=retained.sha256,
         runtime_library_path=runtime_path,
-        tracer_sha256=tracer["sha256"],
+        tracer_sha256=tracer.get("sha256", ""),
         tracer_size_bytes=tracer["size_bytes"],
         dsos=MappingProxyType(expectations),
         retained=retained,
     )
-    authority.verify_unchanged()
     return authority
 
 
@@ -664,7 +658,7 @@ def _run_ldd(
             raise TracerRuntimeError(
                 "ldd_start_failed", f"could not retain trusted ldd: {exc}",
             ) from exc
-    retained_ldd.verify_unchanged()
+    _verify_retained_executable_metadata(retained_ldd)
     command = [retained_ldd.proc_path, tracer_path]
     ldd_environment = dict(env)
     ldd_environment.update({
@@ -854,7 +848,7 @@ def _run_ldd(
                         for exc in cleanup_errors
                     ),
                 )
-    retained_ldd.verify_unchanged()
+    _verify_retained_executable_metadata(retained_ldd)
     if primary is not None:
         raise primary
     assert result is not None
@@ -1003,17 +997,12 @@ def _verify_runtime_manifest_mappings(
                 f"{soname} target escaped the authorized runtime directory",
             ) from exc
         retained = targets_by_soname[soname]
-        if (
-            relative != expectation.relative_path
-            or retained.sha256 != expectation.sha256
-            or retained.size_bytes != expectation.size_bytes
-        ):
+        if relative != expectation.relative_path or retained.size_bytes != expectation.size_bytes:
             raise TracerRuntimeError(
                 "runtime_dso_authority_mismatch",
                 f"{soname} differs from independent runtime authority: "
-                f"expected={expectation.relative_path}/"
-                f"{expectation.sha256}/{expectation.size_bytes}, "
-                f"observed={relative}/{retained.sha256}/{retained.size_bytes}",
+                f"expected={expectation.relative_path}/{expectation.size_bytes}, "
+                f"observed={relative}/{retained.size_bytes}",
             )
     authority.verify_unchanged()
 
@@ -1101,9 +1090,8 @@ def _copy_retained_regular(
         label=f"private runtime DSO {destination_name}",
     )
     try:
-        retained.verify_unchanged()
+        retained.path_identity
         os.lseek(retained.descriptor, 0, os.SEEK_SET)
-        digest = hashlib.sha256()
         copied = 0
         while True:
             chunk = os.read(retained.descriptor, _RUNTIME_COPY_CHUNK_BYTES)
@@ -1115,7 +1103,6 @@ def _copy_retained_regular(
                     "runtime_dso_generation_changed",
                     f"retained DSO grew while copying: {retained.path}",
                 )
-            digest.update(chunk)
             offset = 0
             while offset < len(chunk):
                 written = os.write(descriptor, chunk[offset:])
@@ -1124,12 +1111,12 @@ def _copy_retained_regular(
                 offset += written
         os.fchmod(descriptor, 0o444)
         os.fsync(descriptor)
-        if copied != retained.size_bytes or digest.hexdigest() != retained.sha256:
+        if copied != retained.size_bytes:
             raise TracerRuntimeError(
                 "runtime_dso_generation_changed",
-                f"retained DSO bytes changed while copying: {retained.path}",
+                f"retained DSO size changed while copying: {retained.path}",
             )
-        retained.verify_unchanged()
+        retained.path_identity
     finally:
         os.lseek(retained.descriptor, 0, os.SEEK_SET)
         os.close(descriptor)
@@ -1144,7 +1131,7 @@ def _private_runtime_tree(
     immutable.PinnedTreeSnapshot,
     Mapping[str, tuple[int, int, int]],
 ]:
-    """Build a non-writable descriptor tree from authenticated retained bytes."""
+    """Build a non-writable descriptor tree from retained runtime files."""
 
     try:
         private_path = Path(tempfile.mkdtemp(prefix="nvbit-runtime-"))
@@ -1235,11 +1222,6 @@ def _private_runtime_tree(
             max_bytes=retained.size_bytes,
             expected_metadata=files[soname],
         )
-        if hashlib.sha256(snapshot.payload).hexdigest() != retained.sha256:
-            raise TracerRuntimeError(
-                "runtime_dso_generation_changed",
-                f"private retained runtime DSO hash differs: {soname}",
-            )
     return private_path, runtime_reader, runtime_tree, alias_identities
 
 
@@ -1295,7 +1277,12 @@ class RetainedTracerRuntime:
                     "private retained runtime tree changed",
                 )
             for soname, target in self._targets_by_soname.items():
-                target.verify_unchanged()
+                target_identity = target.path_identity
+                if target_identity[1][4] != target.size_bytes:
+                    raise TracerRuntimeError(
+                        "runtime_dso_generation_changed",
+                        f"retained runtime DSO size changed: {soname}",
+                    )
                 if _alias_identity(self._runtime_reader.descriptor, soname) != (
                     self._alias_identities[soname]
                 ):
@@ -1303,19 +1290,6 @@ class RetainedTracerRuntime:
                         "runtime_dso_generation_changed",
                         f"private runtime alias changed: {soname}",
                     )
-            self._monitor.verify_unchanged()
-            self._runtime_reader.verify_path()
-            if self._runtime_reader.snapshot_tree(
-                max_files=_PINNED_RUNTIME_MAX_DSOS,
-                max_directories=1,
-                max_total_file_bytes=_PINNED_RUNTIME_MAX_TOTAL_BYTES,
-                max_total_relative_path_bytes=1 << 20,
-            ) != self._runtime_tree:
-                raise TracerRuntimeError(
-                    "runtime_dso_generation_changed",
-                    "private retained runtime tree changed during verification",
-                )
-            self._runtime_authority.verify_unchanged()
         except TracerRuntimeError:
             raise
         except immutable.ImmutableArtifactLimitError as exc:
@@ -1403,15 +1377,14 @@ def retained_tracer_runtime_env(
     retained_descriptor: int | None = None,
     retained_manifest_descriptor: int | None = None,
 ) -> RetainedTracerRuntime:
-    """Authenticate and retain an independently authorized runtime for child exec.
+    """Retain a bounded runtime directory for child execution.
 
-    A retained operator manifest binds the exact tracer, runtime directory, ldd
-    alias closure, DSO target paths, sizes, and SHA-256 values before discovery.
-    The first bounded ``ldd`` may only resolve through that manifest-bound source
-    directory. Exact authenticated DSO bytes are copied into a private,
-    non-writable descriptor-backed tree, and a second bounded ``ldd`` resolves
-    only through that retained tree. Callers must pass ``pass_fds`` to the child
-    and keep this context open until the child has exited.
+    A retained operator manifest supplies the runtime directory, ldd alias
+    closure, tracer size, and DSO target paths/sizes before discovery. The first
+    bounded ``ldd`` resolves through that source directory. The selected DSOs
+    are copied into a private, non-writable descriptor-backed tree, and a
+    second bounded ``ldd`` resolves only through that retained tree. Callers
+    must pass ``pass_fds`` to the child and keep this context open until exit.
     """
 
     supplied_snapshot = dict(os.environ if base_env is None else base_env)

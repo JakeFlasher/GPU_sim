@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "Frozen prefix of TraceInstrOpcode enum members in declaration order. New members MUST be appended to the tail after this prefix; reorders or middle-insertions are forbidden per the additive-enum rule (CLAUDE.md wire-extension policy). The prefix can be advanced (i.e., extended with newly-stable members) only via explicit plan amendment.",
+  "description": "Frozen prefix of TraceInstrOpcode enum members in declaration order. New members MUST be appended to the tail after this prefix; reorders or middle-insertions are forbidden per the additive-enum rule (AGENTS.md wire-extension policy). The prefix can be advanced (i.e., extended with newly-stable members) only via explicit plan amendment.",
   "frozen_through_member": "OP_QMMA",
   "frozen_through_round": "pre-21",
   "members": [

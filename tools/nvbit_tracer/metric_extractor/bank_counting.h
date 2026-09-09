@@ -2,8 +2,7 @@
 //
 // Pure host + device helper: count the number of 32-bank shared-memory
 // bank conflicts produced by a set of per-lane shared loads/stores.
-// Used by the `count_shared_bank_conflicts_cb` injected device callback
-// and by the host-only regression in test_classifier.cc.
+// Used by the `count_shared_bank_conflicts_cb` injected device callback.
 //
 // Canonical 32-bank shared-memory model (Volta+):
 //   - Bank id = (addr / 4) & 31 — i.e. each 4-byte word lives in a bank
@@ -37,8 +36,8 @@
 
 #include <stdint.h>
 
-// __host__ __device__ so the device callback in inject_funcs.cu and the
-// host-only test in test_classifier.cc call the same function. Marked
+// __host__ __device__ so the device callback in inject_funcs.cu can call
+// this pure helper. Marked
 // inline so multiple translation units that include the header do not
 // generate duplicate symbols at link time.
 //

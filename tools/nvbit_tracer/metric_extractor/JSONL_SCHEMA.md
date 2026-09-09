@@ -13,103 +13,15 @@ parser update + a `schema_version` bump.
 
 ## Versioning
 
-- `schema_version` (integer) — bumped on ANY wire-incompatible change:
-  field added with no default, field removed, field renamed, field
-  retyped, or interpretation of an existing field changed. Adding an
-  optional field with a documented default is NOT a wire-incompatible
-  change. Current value: **2**. The Round-8 bump from 1 to 2 records
-  the Round-7 addition of `filter_stats_snapshot.representative_skipped_paths`
-  as a required field (no default) — Codex's Round-7 review caught
-  that the Round-7 release left the slot at 1, violating the
-  wire-discipline rule documented above. The parser is version-aware:
-  schema-v2 records require the new field; schema-v1 historical
-  records (pre-Round-7 preserved evidence bundles) default the field
-  to `[]` so the round trip on captured artifacts still succeeds.
-- `tool_version` (string) — semantic-version-like string identifying
-  the `metric_extractor` build that produced the record. Current
-  value: `"0.0.14-schema-v2"`. Bumped on any tool-side change
-  that affects emitted values, even when the schema itself stays at the
-  same `schema_version`. Recent bumps:
-  - `0.0.9-global-ordinal`: `launch_index` now counts every observed
-    kernel-launch CBID (including filter-skipped framework kernels);
-    see the `launch_index` row below.
-  - `0.0.10-cuda-stream-id`: `stream_id` / `cross_surface_join_key.stream_ordinal`
-    now carry the raw CUDA stream ID from `cuStreamGetId()` — the
-    same identity CUPTI Activity emits in its `streamId` field; see
-    the `cross_surface_join_key` row below.
-  - `0.0.11-saturating-counters`: three bounded-memory field-content
-    transitions landed together. (a) Every per-launch counter
-    `atomicAdd` (histogram buckets, `tma_count`, sector bytes, branch
-    histogram, bank conflicts) now routes through a saturating helper
-    that clamps at `UINT64_MAX`; `substatus.saturated_counters`
-    carries the real per-launch overflow count instead of a literal
-    `0`. (b) When the full record would exceed
-    `METRIC_EXTRACTOR_PER_LAUNCH_ARTIFACT_CAP_BYTES` (10 MiB), the
-    writer DISCARDS the oversize payload and emits a bounded
-    replacement record with identity fields + null metrics +
-    `substatus.truncated = true` +
-    `waiver_reason = "per_launch_artifact_cap_exceeded"`. The
-    pre-Round-5 behavior of flipping the flag on the oversize line is
-    gone. (c) A new `launch_kind = "per_process_budget_exceeded"`
-    is emitted when an accepted kernel lands after the slot pool is
-    fully consumed; the record carries `substatus.skipped = true` +
-    `waiver_reason = "per_process_budget_exceeded"` and the kernel
-    runs uninstrumented. Pre-Round-5 the producer reused slot indices
-    via modulo and silently shrank the instrumented set. See the
-    `substatus` and `filter_stats_snapshot` rows below for the
-    new sub-fields.
-  - `0.0.12-calibrated-confidence`: three wire-content changes
-    landed together. (a) The Round-5 bounded-replacement record
-    emitted `bank_conflicts:null` and
-    `branch_active_lanes_hist:[]` which the strict parser rejected;
-    the writer now emits `bank_conflicts:0` (integer) and a
-    33-element zero array so every truncation / budget-skip record
-    round-trips cleanly through the surface parser. (b) The
-    terminal `filter_stats.json` writer now merges via
-    `flock(LOCK_EX)` + `max()` of existing-vs-in-process counters +
-    union of `representative_skipped_paths` capped at 10, then
-    atomically renames a per-PID temp file into place. A
-    late-arriving zero-counter process can no longer overwrite a
-    nonzero file. (c) The four Tier-1 confidence labels
-    (`sector_efficiency_global_load`,
-    `sector_efficiency_global_store`, `bank_conflicts`,
-    `branch_active_lanes_hist`) are promoted from `"placeholder"`
-    to `"calibrated"` after the T24 synthetic calibration corpus
-    passed every AC-4 verdict end-to-end on sm_86. The
-    `instruction_class_histogram` confidence stays `"high"` (direct
-    measurement, no calibration step); `static_sidecar` stays
-    `"placeholder"` (the harness-side sidecar join populates its
-    sub-fields without a calibration corpus of its own).
-  - `0.0.13-record-skipped-paths`: per-record
-    `filter_stats_snapshot` now embeds
-    `representative_skipped_paths` as a strings array (capped at 10,
-    matching the in-process producer cap). The harness-side
-    reconciler reads this list when `nvbit_at_term` misses the
-    terminal `filter_stats.json` write — the previous shape gave
-    the reconciler counters only, so the standalone audit artifact
-    lost the AC-6 framework module attribution (`libtorch.so`,
-    `libcublas.so`, etc.). Codex's Round-6 review caught this as a
-    blocking AC-6 gap. The Round-7 release left `schema_version`
-    at 1; Round 8's review caught that as a wire-discipline violation
-    (a required field with no default IS wire-incompatible) and
-    bumps the slot to 2.
-  - `0.0.14-schema-v2`: three wire changes landed together.
-    (a) `schema_version` bumps from 1 to 2 to correctly record that
-    `filter_stats_snapshot.representative_skipped_paths` is a
-    required field on every emitted record. The parser is
-    version-aware: schema-v2 records require the field; schema-v1
-    historical records default the field to `[]` so the pre-Round-7
-    preserved evidence bundles still parse. (b) The terminal
-    `filter_stats.json` merge writer now covers three counters that
-    Round 7's `take_max()` merge omitted: `graph_launches_seen`,
-    `graph_launches_not_observed`, and `unknown_opcode_count`.
-    Codex's Round-7 review caught the partial coverage — those
-    three counters could drift between the in-record state and the
-    standalone audit artifact when `nvbit_at_term` missed. (c) The
-    Python reconciler's contradiction-detector + rewrite loops
-    cover the same three counters.
-- Both fields are **mandatory** on every line. The parser rejects a
-  line missing either.
+`schema_version` is **4**. Bump it when a field is added, removed, renamed,
+retyped, or semantically redefined without a compatible default. The current
+`tool_version` is `"0.0.16-driver-stream-identity"`.
+
+Schema-v4 records carry CUDA Driver context and stream IDs plus
+`identity_namespace = "cuda_driver"`. These IDs are valid only within the
+capture process; the wall-clock join never compares them numerically with CUPTI
+activity IDs. Older schema-v1 through v3 records remain parseable for retained
+evidence, but their cross-surface join is unjoinable.
 
 ## Truncation
 
@@ -130,8 +42,10 @@ parser update + a `schema_version` bump.
 | `kernel_name` | string | — | required for `regular` / `cooperative` / `graph_node_traced`; absent for `graph_launch_not_observed` | demangled C++ symbol from `nvbit_get_func_name(..., /*mangled=*/false)`. |
 | `kernel_name_mangled` | string | — | same presence as `kernel_name` | mangled symbol from `nvbit_get_func_name(..., /*mangled=*/true)`. Used as the cross-surface CUPTI join fallback. |
 | `function_uid` | integer | — | same presence as `kernel_name` | NVBit-process-local function uid; NOT cross-surface — see `kernel_ordinal_in_workload` for the CUPTI join. |
-| `ctx_id` | integer | — | required | `(uintptr_t)CUcontext` cast to uint64; opaque process-local id. |
-| `stream_id` | integer | — | required | raw CUDA stream ID from `cuStreamGetId(CUstream, &id)`. This is the same identity the matched `cupti_activity` Surface 2 run's `streamId` field carries, so both surfaces use a common namespace for the AC-8 cross-surface stream comparison. A negative value (`-1`) is the `kStreamIdUnresolved` sentinel returned when the driver call fails — the AC-8 joiner treats that as `unjoinable` because `stream_ordinal` is a required composite-key field. |
+| `ctx_id` | integer | — | required | `(uintptr_t)CUcontext` cast to uint64; opaque process-local pointer identity. |
+| `identity_namespace` | string | — | required | `"cuda_driver"` for this producer. The joiner refuses numeric comparison with CUPTI activity IDs. |
+| `context_id` | integer | — | required | process-local context ID from `cuCtxGetId`; `-1` means the Driver identity query failed. |
+| `stream_id` | integer | — | required | program-lifetime stream ID from `cuStreamGetId` or its `_ptsz` entry point. `-1` means the Driver identity query failed. |
 | `launch_index` | integer | — | required | global launch order within the matched run; monotonic, 0-based, incremented on **every observed kernel-launch CBID** (including launches the user-module filter skipped). This is the AC-8 `kernel_ordinal_in_workload` field — its value MUST align with what the matched `cupti_activity` Surface 2 run sees over the same launch sequence, including filtered framework (torch / CUB / cuBLAS / cuDNN) kernels CUPTI counts but NVBit drops. Pre-Round-2 the producer incremented only on accepted launches; the Round-2 → Round-3 `tool_version` bump records the semantic transition. |
 | `grid_dim` | array[3] of integers | counts | required | `[gridDimX, gridDimY, gridDimZ]`. |
 | `block_dim` | array[3] of integers | counts | required | `[blockDimX, blockDimY, blockDimZ]`. |
@@ -145,10 +59,10 @@ parser update + a `schema_version` bump.
 | `branch_active_lanes_hist` | array[33] of integers | counts | required | per-launch histogram of branch-warp-instance divergence. For every instrumented instruction the classifier routes to `INSTR_CLASS_BRA` (BRA / JMP / EXIT / BRX / CALL / RET, etc. — the same bucket set the instruction-class histogram's `bra` field counts), the injected `count_branch_active_mask_cb` device callback computes the popcount of the warp-collective predicate mask (`__ballot_sync(__activemask(), predicate)`) and atomicAdds 1 into the bucket at that index. The array length is exactly 33 because a 32-lane warp's predicate-true count is bounded to `[0, 32]` inclusive. Bucket 0 counts warp-instances where every active lane evaluated the predicate to false (no lane took the branch this warp-instance); bucket 32 counts fully-active warp-instances (unconditional / always-true branches); bucket 16 is the AC-4 canonical "predicated branch with 16 active lanes" landing zone. A bucket value of `0` is a TRUE observation meaning "no branch warp-instances landed in that bucket this launch" — NOT a placeholder. **Confidence label**: `"calibrated"` under `tool_version >= 0.0.12-calibrated-confidence` (T25 promoted it after the T24 predicated-branch fixture verdicted `branch_active_lanes_hist[16] >= 1`). |
 | `confidence` | object{string→string} | — | required | per-field confidence label; values: `"placeholder"` (default while metric counters are absent OR while the synthetic-calibration tolerance gate hasn't run yet), `"low"`, `"calibrated"`, `"high"`, `"static_only"`, plus `"absent"` for fields whose absence is itself a true negative observation rather than an unwired pathway. Keys mirror the metric-value field names. **Current per-field labels under `tool_version >= 0.0.12-calibrated-confidence`**: `instruction_class_histogram` → `"high"` (instrumentation directly counts buckets; no calibration needed); `tma_descriptor` → `"high"` when the launch sampled at least one TMA instruction, `"absent"` otherwise; `sector_efficiency_global_load` / `sector_efficiency_global_store` → `"calibrated"` (T24 corpus passed every AC-4 verdict end-to-end on sm_86); `bank_conflicts` → `"calibrated"` (T24 32-way-conflict + broadcast fixtures both passed); `branch_active_lanes_hist` → `"calibrated"` (T24 16-active predicated-branch fixture passed); `static_sidecar` → `"placeholder"` (the harness-side static-sidecar join populates its sub-fields without a calibration corpus of its own). |
 | `static_sidecar` | object\|null | — | required | placeholder shape with sub-fields `registers_per_thread` (integer\|null), `dynamic_smem_per_block` (integer\|null), `theoretical_occupancy_warps` (integer\|null), `local_memory_spill_bytes` (integer\|null). **Placeholder**: `null` (sidecar join lands with the harness surface plugin). |
-| `cross_surface_join_key` | object | — | required | composite key for post-hoc CUPTI Activity join. Sub-fields: `workload_index` (integer\|null), `evaluator_config_hash` (string\|null), `demangled_kernel_name` (string\|null), `kernel_ordinal_in_workload` (integer; equals top-level `launch_index`. Post-Round-2 the value counts every observed kernel-launch CBID — including filter-skipped framework kernels — so the matched `cupti_activity` Surface 2 run's view aligns by construction), `grid_xyz` ([3] of integers), `block_xyz` ([3] of integers), `dynamic_smem` (integer), `stream_ordinal` (integer; raw CUDA stream ID from `cuStreamGetId()` — same value the top-level `stream_id` carries. Post-Round-4 both NVBit and CUPTI Activity use this identity, so the AC-8 stream-slot comparison is direct. A negative value (`-1`) is the `kStreamIdUnresolved` sentinel and lands the record in `unjoinable`). |
+| `cross_surface_join_key` | object | — | required | composite key for post-hoc attribution. Sub-fields: `identity_namespace` (`"cuda_driver"`), `workload_index` (integer\|null), `evaluator_config_hash` (string\|null), `demangled_kernel_name` (string\|null), `kernel_ordinal_in_workload` (integer), `grid_xyz` ([3] of integers), `block_xyz` ([3] of integers), `dynamic_smem` (integer), `stream_ordinal` (integer), and `context_id` (integer). Driver IDs are local to this process and are never compared numerically with CUPTI IDs. Negative identity values make the record unjoinable. |
 | `substatus` | object | — | required | run-time status flags. Sub-fields: `truncated` (bool; `true` only on a record where the writer emitted a bounded replacement because the full record would have exceeded `METRIC_EXTRACTOR_PER_LAUNCH_ARTIFACT_CAP_BYTES` — when `true`, the metric values are null/empty and `waiver_reason = "per_launch_artifact_cap_exceeded"`), `skipped` (bool; `true` on per-process-budget skip records — when `true`, the kernel ran uninstrumented because the slot pool was fully consumed, the metric values are null/empty, and `waiver_reason = "per_process_budget_exceeded"`), `saturated_counters` (integer; count of per-launch counter overflows clamped at `UINT64_MAX` — incremented by the device-side saturating helper exactly once per saturation event), `is_graph_node` (bool), `is_cooperative` (bool), `waiver_reason` (string\|null; non-null when status is degraded — values include `"per_launch_artifact_cap_exceeded"`, `"per_process_budget_exceeded"`, `"graph launches not enumerated by tool"`). |
 | `filter_stats_snapshot` | object | — | required | the running `filter_stats.json` counter snapshot at the moment the record was emitted. Sub-fields: `accepted_launches`, `skipped_launches`, `module_origin_miss_count`, `cooperative_launches`, `graph_node_launches`, `graph_node_accepted`, `graph_node_skipped`, `graph_launches_seen`, `graph_launches_not_observed`, `per_process_budget_skipped` (count of accepted kernels that landed AFTER the slot pool was fully consumed; non-zero means at least one `launch_kind = "per_process_budget_exceeded"` record exists in the JSON-L), `unknown_opcode_count`, `representative_skipped_paths` (array of strings, capped at 10; the framework module paths the user-module filter rejected — torch / CUB / cuBLAS / cuDNN / etc. — captured here per-record so the harness-side reconciler can recover the AC-6 module attribution when `nvbit_at_term` misses the terminal `filter_stats.json` write). The snapshot is included so a downstream consumer can reconstruct the running state from any single record without separately ingesting `filter_stats.json`. |
-| `host` | object | — | required | host snapshot at first emit. Sub-fields: `compute_capability` (string; e.g. `"8.6"`, `"10.0"`, `"12.0"`), `cuda_runtime_version` (integer), `nvbit_tool_version` (matches top-level `tool_version`), `arch_label` (string; `"local_sm_<CC>"` or `"b200_sm_100a"` per CLAUDE.md evidence labels). |
+| `host` | object | — | required | host snapshot at first emit. Sub-fields: `compute_capability` (string; e.g. `"8.6"`, `"10.0"`, `"12.0"`), `cuda_runtime_version` (integer), `nvbit_tool_version` (matches top-level `tool_version`), `arch_label` (string; `"local_sm_<CC>"` or `"b200_sm_100a"` per AGENTS.md evidence labels). |
 
 ### `launch_kind = graph_launch_not_observed` shape
 

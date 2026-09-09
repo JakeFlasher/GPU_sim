@@ -7,7 +7,7 @@ carries the authoritative ``evidence_label``. The evidence-label consistency
 surface (``tests/test_evidence_label_consistency.py``) requires the same label
 to appear at two further sites:
 
-  * ``scripts/baselines_harness/report.md`` — one aggregate table row per
+  * ``tools/sol_baselines_harness/report.md`` — one aggregate table row per
     bundle, whose trace column points at the committed
     ``.harness_traces/<slug>__<lang>__sm86/trace.json``.
   * ``baselines/<category>/<slug>/README.md`` — an
@@ -130,7 +130,7 @@ def _bundle_row(
     if category is None:
         raise ValueError(f"{bundle_key}: no unique baselines/<cat>/{slug}/README.md")
     trace_rel = (
-        f"scripts/baselines_harness/.harness_traces/{bundle_key}/trace.json"
+        f"tools/sol_baselines_harness/.harness_traces/{bundle_key}/trace.json"
     )
     return {
         "category": category,
@@ -257,6 +257,12 @@ def emit(
     keys = managed_bundle_keys(traces_dir)
     managed_set = set(keys)
     rows = [_bundle_row(k, traces_dir, baselines_dir) for k in keys]
+
+    if not report_md.is_file():
+        raise SystemExit(
+            f"{report_md} is missing; run report.py first to create the "
+            "aggregate report before adding sm_86 coverage rows."
+        )
 
     new_report = augment_report_md(
         report_md.read_text(encoding="utf-8"), rows, managed_set

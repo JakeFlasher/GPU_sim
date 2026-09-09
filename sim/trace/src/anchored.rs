@@ -26,6 +26,7 @@ const FILE_FLAGS: OFlags = OFlags::RDONLY
 const MAX_TREE_DEPTH: usize = 16;
 const MIN_TREE_ENTRY_BUDGET: u64 = 1_024;
 const TREE_ENTRIES_PER_PAYLOAD: u64 = 8;
+const MAX_TREE_FILE_BYTES: u64 = 64 * 1024 * 1024;
 
 /// Stable filesystem identity used to reject hard-link aliases during loading.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -363,6 +364,21 @@ impl AnchoredDir {
         maximum_files: u64,
         maximum_bytes: u64,
     ) -> Result<AnchoredTree, AnchoredReadError> {
+        self.read_pb_tree_with_file_limit(
+            relative,
+            maximum_files,
+            maximum_bytes,
+            MAX_TREE_FILE_BYTES,
+        )
+    }
+
+    pub(crate) fn read_pb_tree_with_file_limit(
+        &self,
+        relative: &Path,
+        maximum_files: u64,
+        maximum_bytes: u64,
+        maximum_file_bytes: u64,
+    ) -> Result<AnchoredTree, AnchoredReadError> {
         let directory =
             self.open_directory(relative, false)?
                 .ok_or_else(|| AnchoredReadError::Io {
@@ -380,6 +396,7 @@ impl AnchoredDir {
             entry_limit,
             maximum_files,
             maximum_bytes,
+            maximum_file_bytes,
             bytes_seen: 0,
         };
         self.read_pb_tree_from(directory, relative, 0, &mut state)?;
@@ -402,6 +419,21 @@ impl AnchoredDir {
         maximum_files: u64,
         maximum_bytes: u64,
     ) -> Result<AnchoredTreeRoster, AnchoredReadError> {
+        self.roster_pb_tree_with_file_limit(
+            relative,
+            maximum_files,
+            maximum_bytes,
+            MAX_TREE_FILE_BYTES,
+        )
+    }
+
+    pub(crate) fn roster_pb_tree_with_file_limit(
+        &self,
+        relative: &Path,
+        maximum_files: u64,
+        maximum_bytes: u64,
+        maximum_file_bytes: u64,
+    ) -> Result<AnchoredTreeRoster, AnchoredReadError> {
         let directory =
             self.open_directory(relative, false)?
                 .ok_or_else(|| AnchoredReadError::Io {
@@ -419,6 +451,7 @@ impl AnchoredDir {
             entry_limit,
             maximum_files,
             maximum_bytes,
+            maximum_file_bytes,
             bytes_seen: 0,
         };
         self.roster_pb_tree_from(directory, relative, 0, &mut state)?;
@@ -519,12 +552,13 @@ impl AnchoredDir {
                             path: child_path.clone(),
                             limit: state.maximum_bytes,
                         })?;
-                    let generation = inspect_opened_regular(fd, child_path.clone(), remaining)
+                    let file_limit = remaining.min(state.maximum_file_bytes);
+                    let generation = inspect_opened_regular(fd, child_path.clone(), file_limit)
                         .map_err(|error| match error {
                             AnchoredReadError::SizeLimitExceeded { .. } => {
                                 AnchoredReadError::TreeByteLimitExceeded {
                                     path: child_path.clone(),
-                                    limit: state.maximum_bytes,
+                                    limit: file_limit,
                                 }
                             }
                             other => other,
@@ -662,12 +696,13 @@ impl AnchoredDir {
                             path: child_path.clone(),
                             limit: state.maximum_bytes,
                         })?;
-                    let file = read_opened_regular(fd, child_path.clone(), None, remaining)
+                    let file_limit = remaining.min(state.maximum_file_bytes);
+                    let file = read_opened_regular(fd, child_path.clone(), None, file_limit)
                         .map_err(|error| match error {
                             AnchoredReadError::SizeLimitExceeded { .. } => {
                                 AnchoredReadError::TreeByteLimitExceeded {
                                     path: child_path.clone(),
-                                    limit: state.maximum_bytes,
+                                    limit: file_limit,
                                 }
                             }
                             other => other,
@@ -780,6 +815,7 @@ struct TreeState {
     entry_limit: u64,
     maximum_files: u64,
     maximum_bytes: u64,
+    maximum_file_bytes: u64,
     bytes_seen: u64,
 }
 
@@ -790,6 +826,7 @@ struct RosterState {
     entry_limit: u64,
     maximum_files: u64,
     maximum_bytes: u64,
+    maximum_file_bytes: u64,
     bytes_seen: u64,
 }
 
@@ -1117,6 +1154,27 @@ mod tests {
         assert!(matches!(
             reader.read_rostered_regular(&roster.files[0].relative, roster.files[0].generation,),
             Err(AnchoredReadError::ChangedSinceRoster { .. })
+        ));
+    }
+
+    #[test]
+    fn tree_loader_rejects_one_oversized_payload_before_allocating_bytes() {
+        let temp = tempfile::tempdir().unwrap();
+        let tree = temp.path().join("tree");
+        std::fs::create_dir(&tree).unwrap();
+        let payload = tree.join("payload.pb");
+        let file = File::create(&payload).unwrap();
+        file.set_len(MAX_TREE_FILE_BYTES + 1).unwrap();
+        let reader = AnchoredDir::open(temp.path()).unwrap();
+        assert!(matches!(
+            reader.read_pb_tree(Path::new("tree"), 1, u64::MAX),
+            Err(AnchoredReadError::TreeByteLimitExceeded { path, limit })
+                if path == payload && limit == MAX_TREE_FILE_BYTES
+        ));
+        assert!(matches!(
+            reader.roster_pb_tree(Path::new("tree"), 1, u64::MAX),
+            Err(AnchoredReadError::TreeByteLimitExceeded { path, limit })
+                if path == payload && limit == MAX_TREE_FILE_BYTES
         ));
     }
 

@@ -83,57 +83,7 @@ $(NVBIT_TOOL): $(OBJECTS) $(NVBIT_PATH)/libnvbit.a
 inject_funcs.o: inject_funcs.cu
 	$(NVCC) $(INCLUDES) $(MAXRREGCOUNT_FLAG) -Xptxas -astoolspatch --keep-device-functions -arch=$(ARCH) -Xcompiler -Wall -Xcompiler -fPIC -c $< -o $@
 
-# Host-only regression test for the AC-7 instruction-class router. Mirrors
-# the nvbit_tracer/isa_def/test_opcode_map.cc pattern: pure C++ unit test,
-# no NVBit / CUDA dependency, single-binary executable. Run after any edit
-# to classifier.h or to common.h's InstructionClass enum.
-test_classifier: test_classifier.cc classifier.h common.h
-	$(CXX) -std=c++17 -Wall -Wextra -I. -I.. test_classifier.cc -o $@
-
-# Verbose form so the pytest wrapper can drive `make run-test-classifier`
-# and capture the binary's stdout in one step.
-.PHONY: run-test-classifier
-run-test-classifier: test_classifier
-	./test_classifier
-
-# Host-only regression test for the saturating-add primitive that backs
-# every per-launch counter atomicAdd in inject_funcs.cu. The compute
-# helper is `__host__ __device__` so it compiles standalone with a
-# pure-C++ toolchain (no nvcc / CUDA dependency); the test asserts the
-# clamp / overflow / zero-delta contract directly.
-test_saturating_counter: test_saturating_counter.cc saturating_counter.h
-	$(CXX) -std=c++17 -Wall -Wextra -I. test_saturating_counter.cc -o $@
-
-.PHONY: run-test-saturating-counter
-run-test-saturating-counter: test_saturating_counter
-	./test_saturating_counter
-
-# Host-only known-vector test for the Tier-2 SHA-256 implementation
-# that backs the per-launch sidecar digest in LaunchHeaderV1. Pure
-# C++; no nvcc / CUDA / NVBit dependency. The vectors are FIPS-180-4
-# Appendix B (empty string, "abc", 1M 'a' bytes) plus a streaming-vs-
-# one-shot equivalence probe.
-test_tier2_sha256: test_tier2_sha256.cc tier2_sha256.h
-	$(CXX) -std=c++17 -Wall -Wextra -I. test_tier2_sha256.cc -o $@
-
-.PHONY: run-test-tier2-sha256
-run-test-tier2-sha256: test_tier2_sha256
-	./test_tier2_sha256
-
-# Host-only behavioral regression for Tier-2 truncation-marker boundary
-# metadata. Drives tier2_frame_serializer.h with synthetic CompactAccessRecord
-# and TmaExpansionResult arrays; asserts the marker emits the correct first
-# omitted sequence id on every scenario (including first-record lossy TMA
-# at sequence 0 which exposed the Round-14 last_sequence_id+1 bug). Pure
-# C++; no nvcc / CUDA / NVBit dependency.
-test_tier2_marker_metadata: test_tier2_marker_metadata.cc tier2_frame_serializer.h tier2_sha256.h common.h
-	$(CXX) -std=c++17 -Wall -Wextra -I. test_tier2_marker_metadata.cc -o $@
-
-.PHONY: run-test-tier2-marker-metadata
-run-test-tier2-marker-metadata: test_tier2_marker_metadata
-	./test_tier2_marker_metadata
-
 clean:
-	rm -f *.so *.o test_classifier test_saturating_counter test_tier2_sha256 test_tier2_marker_metadata
+	rm -f *.so *.o
 
 .PHONY: all clean

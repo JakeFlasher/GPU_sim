@@ -468,6 +468,7 @@ def _default_source_commit_resolver() -> str:
             ["git", "rev-parse", "HEAD"],
             capture_output=True,
             text=True,
+            errors="replace",
             check=False,
             timeout=5,
         )

@@ -19,6 +19,7 @@ import bisect
 import ctypes
 import ctypes.util
 import statistics
+import sys
 from collections.abc import Callable
 from dataclasses import dataclass
 from functools import partial
@@ -58,6 +59,14 @@ def _summarize_statistics(
     raise ValueError(f"Unknown return_mode: {return_mode}")
 
 
+def _validate_repetition_counts(warmup: int, rep: int) -> None:
+    """Reject invalid iteration counts before allocating benchmark state."""
+    if type(warmup) is not int or warmup < 0:
+        raise ValueError(f"warmup must be a non-negative integer, got {warmup!r}")
+    if type(rep) is not int or rep <= 0:
+        raise ValueError(f"rep must be a positive integer, got {rep!r}")
+
+
 def _get_empty_cache_for_benchmark(device) -> torch.Tensor:
     """Create a 256 MB buffer for clearing L2 cache before benchmark runs."""
     # Double the L2 cache size just to be safe
@@ -86,15 +95,29 @@ _libstdcxx.__cxa_demangle.argtypes = [
     ctypes.POINTER(ctypes.c_size_t),
     ctypes.POINTER(ctypes.c_int),
 ]
-_libstdcxx.__cxa_demangle.restype = ctypes.c_char_p
+_libstdcxx.__cxa_demangle.restype = ctypes.c_void_p
+# Resolve free from the process-wide symbol scope so an LD_PRELOAD allocator
+# interposes the deallocator that matches the allocator used by libstdc++.
+_libc = ctypes.CDLL(None)
+_libc.free.argtypes = [ctypes.c_void_p]
+_libc.free.restype = None
 
 
 def _demangle(name: str) -> str:
     status = ctypes.c_int()
     result = _libstdcxx.__cxa_demangle(name.encode(), None, None, ctypes.byref(status))
-    if status.value != 0:
+    if not result:
         return name
-    return result.decode().replace(" >", ">")
+    try:
+        if status.value != 0:
+            return name
+        try:
+            demangled = ctypes.string_at(result).decode()
+        except UnicodeDecodeError:
+            return name
+        return demangled.replace(" >", ">")
+    finally:
+        _libc.free(result)
 
 
 @dataclass(frozen=True)
@@ -203,6 +226,8 @@ def bench_gpu_time_with_cupti(
         >>> print(f"Median GPU time: {np.median(times):.3f} ms")
     """
 
+    _validate_repetition_counts(warmup, rep)
+
     # CUPTI buffer callbacks
     def func_buffer_requested():
         buffer_size = 8 * 1024 * 1024
@@ -226,87 +251,96 @@ def bench_gpu_time_with_cupti(
         import os as _os
         _sink_path = _os.environ.get("SOLBENCH_CUPTI_ACTIVITY_OUT")
         _sink_fp = open(_sink_path, "a") if _sink_path else None
-        for activity in activities:
-            if _sink_fp is not None:
-                # Composite-key fields for the cross-surface join
-                # contract. An extension: in addition to the original
-                # (kind, start_ns, end_ns, name, correlation_id, cbid)
-                # tuple, the sink now emits raw_name +
-                # demangled_kernel_name plus the launch-shape fields
-                # (grid_xyz, block_xyz, dynamic_smem, stream_id) that
-                # the post-hoc nvbit_metrics joiner needs to verify
-                # the full composite tuple. Every new field uses ``getattr(..., None)``
-                # for portability across CUPTI versions that do not
-                # expose the underlying attribute (e.g. on driver/
-                # activity kinds that lack a grid dim).
-                _raw_name = getattr(activity, "name", None)
-                _demangled = None
-                if _raw_name is not None and activity.kind == (
-                    cupti.ActivityKind.CONCURRENT_KERNEL
+        try:
+            for activity in activities:
+                if _sink_fp is not None:
+                    # Composite-key fields for the cross-surface join
+                    # contract. An extension: in addition to the original
+                    # (kind, start_ns, end_ns, name, correlation_id, cbid)
+                    # tuple, the sink now emits raw_name +
+                    # demangled_kernel_name plus the launch-shape fields
+                    # (grid_xyz, block_xyz, dynamic_smem, context_id, stream_id) that
+                    # the post-hoc nvbit_metrics joiner needs to verify
+                    # the full composite tuple. Every new field uses ``getattr(..., None)``
+                    # for portability across CUPTI versions that do not
+                    # expose the underlying attribute (e.g. on driver/
+                    # activity kinds that lack a grid dim).
+                    _raw_name = getattr(activity, "name", None)
+                    _demangled = None
+                    if _raw_name is not None and activity.kind == (
+                        cupti.ActivityKind.CONCURRENT_KERNEL
+                    ):
+                        try:
+                            _demangled = _demangle(_raw_name)
+                        except Exception:  # noqa: BLE001
+                            _demangled = None
+                    _grid_x = getattr(activity, "grid_x", None)
+                    _grid_y = getattr(activity, "grid_y", None)
+                    _grid_z = getattr(activity, "grid_z", None)
+                    _block_x = getattr(activity, "block_x", None)
+                    _block_y = getattr(activity, "block_y", None)
+                    _block_z = getattr(activity, "block_z", None)
+                    _dyn_smem = getattr(activity, "dynamic_shared_memory", None)
+                    if _dyn_smem is None:
+                        _dyn_smem = getattr(activity, "dynamic_smem", None)
+                    _context_id = getattr(activity, "context_id", None)
+                    if _context_id is None:
+                        _context_id = getattr(activity, "contextId", None)
+                    _stream_id = getattr(activity, "stream_id", None)
+                    if _stream_id is None:
+                        _stream_id = getattr(activity, "streamId", None)
+                    _sink_fp.write(_json.dumps({
+                        "kind": int(activity.kind),
+                        "identity_namespace": "cupti_activity",
+                        "start_ns": getattr(activity, "start", None),
+                        "end_ns": getattr(activity, "end", None),
+                        "name": _raw_name,
+                        "raw_name": _raw_name,
+                        "demangled_kernel_name": _demangled,
+                        "correlation_id": getattr(activity, "correlation_id", None),
+                        "cbid": getattr(activity, "cbid", None),
+                        "grid_xyz": (
+                            [_grid_x, _grid_y, _grid_z]
+                            if _grid_x is not None
+                            and _grid_y is not None
+                            and _grid_z is not None
+                            else None
+                        ),
+                        "block_xyz": (
+                            [_block_x, _block_y, _block_z]
+                            if _block_x is not None
+                            and _block_y is not None
+                            and _block_z is not None
+                            else None
+                        ),
+                        "dynamic_smem": _dyn_smem,
+                        "context_id": _context_id,
+                        "stream_id": _stream_id,
+                    }) + "\n")
+                if activity.kind in (
+                    cupti.ActivityKind.CONCURRENT_KERNEL,
+                    cupti.ActivityKind.MEMCPY,
+                    cupti.ActivityKind.MEMSET,
                 ):
-                    try:
-                        _demangled = _demangle(_raw_name)
-                    except Exception:  # noqa: BLE001
-                        _demangled = None
-                _grid_x = getattr(activity, "grid_x", None)
-                _grid_y = getattr(activity, "grid_y", None)
-                _grid_z = getattr(activity, "grid_z", None)
-                _block_x = getattr(activity, "block_x", None)
-                _block_y = getattr(activity, "block_y", None)
-                _block_z = getattr(activity, "block_z", None)
-                _dyn_smem = getattr(activity, "dynamic_shared_memory", None)
-                if _dyn_smem is None:
-                    _dyn_smem = getattr(activity, "dynamic_smem", None)
-                _stream_id = getattr(activity, "stream_id", None)
-                _sink_fp.write(_json.dumps({
-                    "kind": int(activity.kind),
-                    "start_ns": getattr(activity, "start", None),
-                    "end_ns": getattr(activity, "end", None),
-                    "name": _raw_name,
-                    "raw_name": _raw_name,
-                    "demangled_kernel_name": _demangled,
-                    "correlation_id": getattr(activity, "correlation_id", None),
-                    "cbid": getattr(activity, "cbid", None),
-                    "grid_xyz": (
-                        [_grid_x, _grid_y, _grid_z]
-                        if _grid_x is not None
-                        and _grid_y is not None
-                        and _grid_z is not None
-                        else None
-                    ),
-                    "block_xyz": (
-                        [_block_x, _block_y, _block_z]
-                        if _block_x is not None
-                        and _block_y is not None
-                        and _block_z is not None
-                        else None
-                    ),
-                    "dynamic_smem": _dyn_smem,
-                    "stream_id": _stream_id,
-                }) + "\n")
-            if activity.kind in (
-                cupti.ActivityKind.CONCURRENT_KERNEL,
-                cupti.ActivityKind.MEMCPY,
-                cupti.ActivityKind.MEMSET,
-            ):
-                # Kernel activity
-                kernels.append(CuptiKernelInfo.from_activity(activity))
-            elif activity.kind in (
-                cupti.ActivityKind.RUNTIME,
-                cupti.ActivityKind.DRIVER,
-            ):
-                # Runtime or Driver activity
-                launches.append(
-                    (
-                        activity.start,
-                        activity.end,
-                        activity.correlation_id,
-                        activity.cbid,
-                        activity.kind,
+                    # Kernel activity
+                    kernels.append(CuptiKernelInfo.from_activity(activity))
+                elif activity.kind in (
+                    cupti.ActivityKind.RUNTIME,
+                    cupti.ActivityKind.DRIVER,
+                ):
+                    # Runtime or Driver activity
+                    launches.append(
+                        (
+                            activity.start,
+                            activity.end,
+                            activity.correlation_id,
+                            activity.cbid,
+                            activity.kind,
+                        )
                     )
-                )
-        if _sink_fp is not None:
-            _sink_fp.close()
+        finally:
+            if _sink_fp is not None:
+                _sink_fp.close()
 
     # Check if args are provided (determines how we call fn)
     if setup is None:
@@ -339,33 +373,49 @@ def bench_gpu_time_with_cupti(
     launches: list[tuple[float, float, int, int, int]] = []
     kernels: list[CuptiKernelInfo] = []
     iter_timestamps = []
-    cupti.activity_enable(cupti.ActivityKind.RUNTIME)
-    cupti.activity_enable(cupti.ActivityKind.CONCURRENT_KERNEL)
-    cupti.activity_enable(cupti.ActivityKind.DRIVER)
-    cupti.activity_enable(cupti.ActivityKind.MEMCPY)
-    cupti.activity_enable(cupti.ActivityKind.MEMSET)
-    cupti.activity_register_callbacks(
-        func_buffer_requested, partial(func_buffer_completed, launches, kernels)
-    )
-    torch.cuda.synchronize()
-    for _ in range(rep):
-        args = runner_args()
-        if cold_l2_cache:
-            _clear_cache(buffer)
-        start_cpu = cupti.get_timestamp()
-        runner(args)
-        end_cpu = cupti.get_timestamp()
-        # keep this synchronize here to ensure timestamps are consistent
+    enabled_kinds = []
+    cleanup_errors: list[BaseException] = []
+    try:
+        for kind in (
+            cupti.ActivityKind.RUNTIME,
+            cupti.ActivityKind.CONCURRENT_KERNEL,
+            cupti.ActivityKind.DRIVER,
+            cupti.ActivityKind.MEMCPY,
+            cupti.ActivityKind.MEMSET,
+        ):
+            cupti.activity_enable(kind)
+            enabled_kinds.append(kind)
+        cupti.activity_register_callbacks(
+            func_buffer_requested, partial(func_buffer_completed, launches, kernels)
+        )
         torch.cuda.synchronize()
-        iter_timestamps.append((start_cpu, end_cpu))
-    torch.cuda.synchronize()
-    cupti.activity_flush_all(0)
-    cupti.activity_disable(cupti.ActivityKind.RUNTIME)
-    cupti.activity_disable(cupti.ActivityKind.CONCURRENT_KERNEL)
-    cupti.activity_disable(cupti.ActivityKind.DRIVER)
-    cupti.activity_disable(cupti.ActivityKind.MEMCPY)
-    cupti.activity_disable(cupti.ActivityKind.MEMSET)
-    cupti.finalize()
+        for _ in range(rep):
+            args = runner_args()
+            if cold_l2_cache:
+                _clear_cache(buffer)
+            start_cpu = cupti.get_timestamp()
+            runner(args)
+            end_cpu = cupti.get_timestamp()
+            # keep this synchronize here to ensure timestamps are consistent
+            torch.cuda.synchronize()
+            iter_timestamps.append((start_cpu, end_cpu))
+        torch.cuda.synchronize()
+        cupti.activity_flush_all(0)
+    finally:
+        for kind in reversed(enabled_kinds):
+            try:
+                cupti.activity_disable(kind)
+            except BaseException as exc:
+                cleanup_errors.append(exc)
+        try:
+            cupti.finalize()
+        except BaseException as exc:
+            cleanup_errors.append(exc)
+        # Preserve an in-flight benchmark exception, but never silently
+        # return measurements when teardown itself failed on an otherwise
+        # successful run.
+        if cleanup_errors and sys.exc_info()[0] is None:
+            raise RuntimeError("CUPTI activity teardown failed") from cleanup_errors[0]
 
     def generate_kernel_string(kernel: CuptiKernelInfo):
         # No start, end, correlation_id is considered in the kernel string
@@ -451,6 +501,7 @@ def bench_time_with_cuda_events(
     float | list[float]
         Benchmark result(s) in milliseconds.
     """
+    _validate_repetition_counts(warmup, rep)
     cache = _get_empty_cache_for_benchmark(device)
     start_events = [torch.cuda.Event(enable_timing=True) for _ in range(rep)]
     end_events = [torch.cuda.Event(enable_timing=True) for _ in range(rep)]
@@ -529,6 +580,7 @@ def time_runnable(
     float | list[float]
         Benchmark result(s) in milliseconds.
     """
+    _validate_repetition_counts(warmup, rep)
     total_iterations = warmup + rep
     allocator = ShiftingMemoryPoolAllocator(inputs, outputs, total_iterations)
     with torch.cuda.device(device):
@@ -548,6 +600,8 @@ def time_runnable(
                 setup=allocator.get_unique_args,
                 device=device,
             )
+        else:
+            raise ValueError(f"Unknown timing methodology: {methodology}")
         if not times:
             raise ValueError(f"No timing results for methodology: {methodology}")
         return _summarize_statistics(times, return_mode)

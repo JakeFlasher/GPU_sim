@@ -720,6 +720,16 @@ def _reconstruct_instruction_addresses(
         for lane_index in range(_LANES_PER_WARP):
             bit_set = bool((address_mask >> lane_index) & 1)
             slot = vector[lane_index]
+            if bit_set and slot < 0 and slot != LANE_INACTIVE_SENTINEL:
+                return None, ValidationResult(
+                    ok=False,
+                    typed_reason="compressed_format_malformed",
+                    detail=(
+                        f"{record_path}: address[{addr_index}] lane "
+                        f"{lane_index} reconstructs to invalid negative "
+                        f"address {slot}; only the inactive sentinel is allowed"
+                    ),
+                )
             slot_is_sentinel = slot == LANE_INACTIVE_SENTINEL
             if bit_set and slot_is_sentinel:
                 return None, ValidationResult(
@@ -1672,7 +1682,7 @@ def _check_instruction(
         # (GLOBAL only), exactly as before the transition, so the frozen M1
         # anchor and every old trace validate unchanged. `address_pb2_mod`
         # may be None if a caller did not thread it (only the legacy path is
-        # then reachable). See plans/sm86_ldgsts_atoms_operand_adjudication.md.
+        # then reachable). See docs/STATUS.md.
         if addr.HasField("address_space") and address_pb2_mod is not None:
             requires_global_identity = addr.address_space in (
                 address_pb2_mod.MEMORY_SPACE_GLOBAL,
@@ -1791,6 +1801,8 @@ def validate_threadblock(
     allocations: dict[int, AllocationEntry] | None = None,
     memory_payload_contract_id: str | None = None,
     expected_function_unique_id: int | None = None,
+    instruction_pb2_mod: Any | None = None,
+    address_pb2_mod: Any | None = None,
 ) -> ValidationResult:
     """Validate ``tb`` (a parsed ``dynamic_trace.threadblock`` proto)
     against the AC4 per-instruction contract.
@@ -1816,11 +1828,23 @@ def validate_threadblock(
     ``expected_function_unique_id`` binds each structurally valid instruction
     to its root launch before payload-shape and allocation-identity checks.
 
+    ``instruction_pb2_mod`` and ``address_pb2_mod`` may be supplied by a
+    caller that validates many threadblocks in one admission transaction.  The
+    modules are immutable capabilities; reusing them avoids re-running the
+    binding loader for every payload file.
+
     Returns a ``ValidationResult``. The first record that violates
     the contract short-circuits the walk; remaining records in this
     threadblock are not inspected.
     """
-    _threadblock_pb2, instruction_pb2_mod, address_pb2_mod = _import_pb_modules()
+    if instruction_pb2_mod is None or address_pb2_mod is None:
+        _threadblock_pb2, loaded_instruction_pb2, loaded_address_pb2 = (
+            _import_pb_modules()
+        )
+        if instruction_pb2_mod is None:
+            instruction_pb2_mod = loaded_instruction_pb2
+        if address_pb2_mod is None:
+            address_pb2_mod = loaded_address_pb2
 
     for warp_index in sorted(tb.warps.keys()):
         warp = tb.warps[warp_index]

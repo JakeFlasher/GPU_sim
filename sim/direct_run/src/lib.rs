@@ -9,8 +9,7 @@ pub use prepared::{
     CoverageAdmission, KernelKey, KernelSelector, PreparedLaunchIdentity, PreparedReplay,
 };
 
-use std::io::Read;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::str::FromStr;
 #[cfg(feature = "performance-counters")]
 use std::time::Instant;
@@ -23,15 +22,16 @@ use sim_run::emit::{
     emit_launch,
 };
 use sim_sm::{
-    ControlSidecar, DramBw, DramStats, FullKernelReplayResult, IssueModelParams, L2SourceSplit,
-    MAX_MEMORY_ADMISSION_CANDIDATES, MAX_MEMORY_SERVICE_CANDIDATES, MemoryAdmissionCandidate,
-    MemoryServiceCandidate, ModeledCompletionFrontier, ReadinessDiagnostics, ReplayMemMode,
+    ControlSidecar, DramBw, DramStats, FullKernelReplayResult, GpcObservationFrontier,
+    IssueModelParams, L2SourceSplit, MAX_MEMORY_ADMISSION_CANDIDATES,
+    MAX_MEMORY_SERVICE_CANDIDATES, MemoryAdmissionCandidate, MemoryServiceCandidate,
+    ModeledCompletionFrontier, ReadinessDiagnostics, ReplayMemMode, SmActiveObservationFrontier,
     StreamL2ReplaySession, TailFlags, build_schedules, replay_trace_kernel,
     replay_trace_kernel_with_memory_admission_candidates,
     replay_trace_kernel_with_memory_admission_feedback,
     replay_trace_kernel_with_memory_service_candidates,
 };
-use sim_trace::{ExecInfo, TraceDir};
+use sim_trace::{AnchoredDir, ExecInfo, TraceDir, strict_json_from_slice};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MemoryMode {
@@ -166,6 +166,111 @@ fn at<E: std::fmt::Display>(stage: &'static str) -> impl FnOnce(E) -> RunError {
     move |error| RunError::new(stage, error.to_string())
 }
 
+const MAX_DIRECT_CARD_BYTES: u64 = 16 * 1024 * 1024;
+const MAX_DIRECT_CONTROL_BYTES: u64 = 64 * 1024 * 1024;
+
+/// Read one direct-replay input from a no-follow anchored parent and retain the
+/// exact generation that was parsed. Direct mode has no campaign manifest, so
+/// this is the boundary that prevents a concurrent path replacement from
+/// silently changing cards or control metadata during a run.
+fn read_direct_input(
+    path: &Path,
+    stage: &'static str,
+    maximum_bytes: u64,
+) -> Result<Vec<u8>, RunError> {
+    let parent = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    let name = path
+        .file_name()
+        .ok_or_else(|| RunError::new(stage, "input path has no file name"))?;
+    let relative = Path::new(name);
+    let reader = AnchoredDir::open(parent).map_err(at(stage))?;
+    let file = reader
+        .read_bounded_regular(relative, maximum_bytes)
+        .map_err(at(stage))?;
+    let expected = file.generation_identity();
+    let raw = file.into_raw();
+    let actual = reader
+        .inspect_regular_generation(relative)
+        .map_err(at(stage))?;
+    if actual != expected {
+        return Err(RunError::new(
+            stage,
+            format!("input {} changed after its snapshot", path.display()),
+        ));
+    }
+    Ok(raw)
+}
+
+pub(crate) fn load_arch_card(path: &Path) -> Result<ArchCard, RunError> {
+    let raw = read_direct_input(path, "architecture card", MAX_DIRECT_CARD_BYTES)?;
+    ArchCard::parse(path, &raw).map_err(at("architecture card"))
+}
+
+pub(crate) fn load_pchase_card(path: &Path) -> Result<PchaseCard, RunError> {
+    let raw = read_direct_input(path, "P-chase card", MAX_DIRECT_CARD_BYTES)?;
+    PchaseCard::parse(path, &raw).map_err(at("P-chase card"))
+}
+
+pub(crate) fn load_control_sidecar(
+    path: &Path,
+    arch: sim_arch::ArchId,
+) -> Result<ControlSidecar, RunError> {
+    let raw = read_direct_input(path, "control bits", MAX_DIRECT_CONTROL_BYTES)?;
+    ControlSidecar::parse_for_arch(path, &raw, arch).map_err(at("control bits"))
+}
+
+/// Bind a canonical direct-replay sidecar to the executable named by the
+/// trace. Research sidecars may intentionally use a transformed filename
+/// (for example a holdout shape) and retain their existing compatibility; a
+/// canonical `<benchmark>.control_bits.json` has no such disambiguator, so a
+/// different recorded binary basename is an unsafe join.
+pub(crate) fn validate_direct_control_identity(
+    control_path: &Path,
+    exec: &ExecInfo,
+    control: &ControlSidecar,
+) -> Result<(), RunError> {
+    if exec.benchmark_name.is_empty() {
+        return Err(RunError::new(
+            "identity",
+            "trace execution info has an empty benchmark_name",
+        ));
+    }
+    let expected_stem = exec
+        .benchmark_name
+        .strip_suffix("_run")
+        .unwrap_or(&exec.benchmark_name);
+    let expected_filename = format!("{expected_stem}.control_bits.json");
+    let is_canonical_filename =
+        control_path.file_name().and_then(|name| name.to_str()) == Some(expected_filename.as_str());
+    if !is_canonical_filename {
+        return Ok(());
+    }
+
+    let actual_binary = Path::new(&control.binary)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .filter(|name| !name.is_empty())
+        .ok_or_else(|| {
+            RunError::new(
+                "identity",
+                format!("canonical control sidecar {expected_filename:?} has no binary basename"),
+            )
+        })?;
+    if actual_binary != exec.benchmark_name && actual_binary != expected_stem {
+        return Err(RunError::new(
+            "identity",
+            format!(
+                "canonical control sidecar binary {actual_binary:?} does not match trace benchmark {:?} (accepted {:?} or {:?})",
+                exec.benchmark_name, exec.benchmark_name, expected_stem
+            ),
+        ));
+    }
+    Ok(())
+}
+
 fn parse_memory_service_candidates(bytes: &[u8]) -> Result<Vec<MemoryServiceCandidate>, RunError> {
     if u64::try_from(bytes.len()).unwrap_or(u64::MAX) > MAX_CANDIDATE_FILE_BYTES {
         return Err(RunError::new(
@@ -177,7 +282,7 @@ fn parse_memory_service_candidates(bytes: &[u8]) -> Result<Vec<MemoryServiceCand
         ));
     }
     let document: MemoryServiceCandidateDocument =
-        serde_json::from_slice(bytes).map_err(at("memory-service candidates"))?;
+        strict_json_from_slice(bytes).map_err(at("memory-service candidates"))?;
     if document.schema_version != 1 {
         return Err(RunError::new(
             "memory-service candidates",
@@ -224,11 +329,15 @@ fn load_memory_service_candidates(
     path: Option<&PathBuf>,
 ) -> Result<Option<Vec<MemoryServiceCandidate>>, RunError> {
     path.map(|path| {
-        let file = std::fs::File::open(path).map_err(at("memory-service candidates"))?;
-        let mut bytes = Vec::new();
-        file.take(MAX_CANDIDATE_FILE_BYTES + 1)
-            .read_to_end(&mut bytes)
-            .map_err(at("memory-service candidates"))?;
+        // Candidate documents affect timing decisions just like cards and
+        // control metadata. Read them through the same no-follow, bounded
+        // generation check so a concurrent replacement cannot silently alter
+        // the replay inputs.
+        let bytes = read_direct_input(
+            path,
+            "memory-service candidates",
+            MAX_CANDIDATE_FILE_BYTES + 1,
+        )?;
         parse_memory_service_candidates(&bytes)
     })
     .transpose()
@@ -260,7 +369,7 @@ fn parse_memory_admission_document(
         ));
     }
     let document: MemoryAdmissionCandidateDocument =
-        serde_json::from_slice(bytes).map_err(at(stage))?;
+        strict_json_from_slice(bytes).map_err(at(stage))?;
     if document.schema_version != 1 {
         return Err(RunError::new(
             stage,
@@ -311,11 +420,11 @@ fn load_memory_admission_candidates(
     path: Option<&PathBuf>,
 ) -> Result<Option<Vec<MemoryAdmissionCandidate>>, RunError> {
     path.map(|path| {
-        let file = std::fs::File::open(path).map_err(at("memory-admission candidates"))?;
-        let mut bytes = Vec::new();
-        file.take(MAX_CANDIDATE_FILE_BYTES + 1)
-            .read_to_end(&mut bytes)
-            .map_err(at("memory-admission candidates"))?;
+        let bytes = read_direct_input(
+            path,
+            "memory-admission candidates",
+            MAX_CANDIDATE_FILE_BYTES + 1,
+        )?;
         parse_memory_admission_candidates(&bytes)
     })
     .transpose()
@@ -325,11 +434,11 @@ fn load_memory_admission_feedback(
     path: Option<&PathBuf>,
 ) -> Result<Option<MemoryAdmissionCandidate>, RunError> {
     path.map(|path| {
-        let file = std::fs::File::open(path).map_err(at("memory-admission feedback"))?;
-        let mut bytes = Vec::new();
-        file.take(MAX_CANDIDATE_FILE_BYTES + 1)
-            .read_to_end(&mut bytes)
-            .map_err(at("memory-admission feedback"))?;
+        let bytes = read_direct_input(
+            path,
+            "memory-admission feedback",
+            MAX_CANDIDATE_FILE_BYTES + 1,
+        )?;
         parse_memory_admission_feedback(&bytes)
     })
     .transpose()
@@ -407,6 +516,18 @@ pub struct CacheLookupObserverReport {
 #[derive(Debug, Serialize)]
 pub struct CacheLookupTimingStateReport {
     pub resident_data_hits: u64,
+    /// Physical resident hits represented by the observer numerator.  L2
+    /// write packetization can leave some physical hits outside the NCU lookup
+    /// stream; retaining this split keeps that fact explicit instead of
+    /// forcing an invalid `observer_hits >= resident_hits` invariant.
+    pub observer_resident_hits: u64,
+    /// Physical cache hits that were not represented in the packetized lookup
+    /// observer.  This is diagnostic decomposition only and never changes the
+    /// emitted numerator/denominator.
+    pub physical_hits_not_observed: u64,
+    /// Lookup-observer misses (`lookups - observer hits`).  This is kept in
+    /// the observer domain; it is not the complement of physical resident
+    /// hits, which can exceed the packetized observer denominator.
     pub remaining_lookups: u64,
     pub observer_reclassified_lookups: u64,
     pub role: &'static str,
@@ -441,8 +562,74 @@ pub struct TimingReport {
     pub diagnostic_last_issue_cycles: u64,
     pub last_processed_modeled_system_event_time: Option<u64>,
     pub terminal_modeled_event_time: Option<u64>,
+    /// SM-active terminal lower bound with service-acknowledgement events kept
+    /// in a separate observation domain.  The complete modeled-event frontier
+    /// above remains the authoritative event-queue timestamp.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sm_active_terminal_frontier: Option<SmActiveTerminalFrontierReport>,
+    /// Explicit SM-active physical observation frontier. The raw lower bounds
+    /// above remain unchanged and are retained inside this projection.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sm_active_observation_frontier: Option<SmActiveObservationFrontierReport>,
+    /// Architecture-scoped GPC observation frontier. The raw modeled event
+    /// lower bound above remains separate so a profiler boundary cannot be
+    /// mistaken for physical cache or SM execution time.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub gpc_observation_frontier: Option<GpcObservationFrontierReport>,
     pub completion_frontier: CompletionFrontierReport,
     pub readiness: ReadinessReport,
+}
+
+#[derive(Debug, Serialize)]
+pub struct GpcObservationFrontierReport {
+    pub lower_bound_cycles: u64,
+    pub envelope_cycles: u64,
+    pub grid_blocks: u64,
+    pub grid_log2: u32,
+    pub cycles: u64,
+    pub role: &'static str,
+}
+
+#[derive(Debug, Serialize)]
+pub struct SmActiveObservationFrontierReport {
+    pub issue_lower_bound_cycles: u64,
+    pub issue_cycles: u64,
+    pub terminal_lower_bound_cycles: Option<u64>,
+    pub terminal_cycles: Option<u64>,
+    pub envelope_cycles: u64,
+    pub role: &'static str,
+}
+
+#[derive(Debug, Serialize)]
+pub struct SmActiveTerminalFrontierReport {
+    pub cycles: Option<u64>,
+    pub role: &'static str,
+}
+
+impl From<SmActiveObservationFrontier> for SmActiveObservationFrontierReport {
+    fn from(value: SmActiveObservationFrontier) -> Self {
+        Self {
+            issue_lower_bound_cycles: value.issue_lower_bound_cycles,
+            issue_cycles: value.issue_cycles,
+            terminal_lower_bound_cycles: value.terminal_lower_bound_cycles,
+            terminal_cycles: value.terminal_cycles,
+            envelope_cycles: value.envelope_cycles,
+            role: "architecture_scoped_sm_active_observation_boundary_not_raw_lower_bound",
+        }
+    }
+}
+
+impl From<GpcObservationFrontier> for GpcObservationFrontierReport {
+    fn from(value: GpcObservationFrontier) -> Self {
+        Self {
+            lower_bound_cycles: value.lower_bound_cycles,
+            envelope_cycles: value.envelope_cycles,
+            grid_blocks: value.grid_blocks,
+            grid_log2: value.grid_log2,
+            cycles: value.cycles,
+            role: "architecture_scoped_gpc_observation_boundary_not_timing_crosswalk",
+        }
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -490,10 +677,14 @@ pub struct L1CounterReport {
     pub hits: u64,
     pub misses: u64,
     pub merges: u64,
+    pub pending_lookup_hits: u64,
     pub stall_events: u64,
     pub line_fills: u64,
     pub bypass_sectors: u64,
     pub store_sectors: u64,
+    pub store_hits: u64,
+    pub store_tag_hits: u64,
+    pub write_lookup_hits: u64,
     pub reduction_sectors: u64,
 }
 
@@ -501,6 +692,8 @@ pub struct L1CounterReport {
 pub struct L2CounterReport {
     pub hits: u64,
     pub misses: u64,
+    pub lookup_hits: u64,
+    pub lookup_requests: u64,
     pub line_misses: u64,
     pub sector_fill_misses: u64,
     pub write_tag_hits: u64,
@@ -537,6 +730,8 @@ fn l2_counter_report(value: &L2Counters) -> L2CounterReport {
     L2CounterReport {
         hits: value.hits,
         misses: value.misses,
+        lookup_hits: value.lookup_hits,
+        lookup_requests: value.lookup_requests,
         line_misses: value.line_misses,
         sector_fill_misses: value.sector_fill_misses,
         write_tag_hits: value.write_tag_hits,
@@ -621,10 +816,14 @@ fn counters(
             hits: value.hits,
             misses: value.misses,
             merges: value.merges,
+            pending_lookup_hits: value.pending_lookup_hits,
             stall_events: value.stall_events,
             line_fills: value.line_fills,
             bypass_sectors: value.bypass_sectors,
             store_sectors: value.store_sectors,
+            store_hits: value.store_hits,
+            store_tag_hits: value.store_tag_hits,
+            write_lookup_hits: value.write_lookup_hits,
             reduction_sectors: value.reduction_sectors,
         }),
         l2: l2.map(l2_counter_report),
@@ -705,23 +904,42 @@ fn cache_lookup_prediction_reports(
                                 format!("{scope} predicted without its cache state"),
                             )
                         })?;
-                        let observer_reclassified_lookups = numerator
-                            .checked_sub(resident_data_hits)
-                            .ok_or_else(|| {
-                                RunError::new(
-                                    "cache lookup projection",
-                                    format!(
-                                        "{scope} observer hits are below resident-data hits"
-                                    ),
+                        let (observer_resident_hits, observer_reclassified_lookups,
+                            physical_hits_not_observed) =
+                            if *numerator >= resident_data_hits {
+                                (
+                                    resident_data_hits,
+                                    numerator.checked_sub(resident_data_hits).ok_or_else(|| {
+                                        RunError::new(
+                                            "cache lookup projection",
+                                            format!("{scope} observer hit decomposition overflow"),
+                                        )
+                                    })?,
+                                    0,
                                 )
-                            })?;
+                            } else {
+                                (
+                                    *numerator,
+                                    0,
+                                    resident_data_hits.checked_sub(*numerator).ok_or_else(|| {
+                                        RunError::new(
+                                            "cache lookup projection",
+                                            format!("{scope} physical hit decomposition underflow"),
+                                        )
+                                    })?,
+                                )
+                            };
+                        // The observer denominator is packetized and can be
+                        // smaller than physical resident hits.  Its remaining
+                        // population is therefore the observer miss count,
+                        // never `denominator - resident_data_hits`.
                         let remaining_lookups = denominator
-                            .checked_sub(resident_data_hits)
+                            .checked_sub(*numerator)
                             .ok_or_else(|| {
                                 RunError::new(
                                     "cache lookup projection",
                                     format!(
-                                        "{scope} resident-data hits exceed total lookups"
+                                        "{scope} observer hits exceed total lookups"
                                     ),
                                 )
                             })?;
@@ -737,6 +955,8 @@ fn cache_lookup_prediction_reports(
                             }),
                             timing_state: Some(CacheLookupTimingStateReport {
                                 resident_data_hits,
+                                observer_resident_hits,
+                                physical_hits_not_observed,
                                 remaining_lookups,
                                 observer_reclassified_lookups,
                                 role: "cache_state_and_events_drive_timing_observer_counts_drive_ncu_validation",
@@ -826,6 +1046,12 @@ fn launch_report(
         diagnostic_last_issue_cycles: result.diagnostic_last_issue_cycles(),
         last_processed_modeled_system_event_time: result.last_processed_modeled_system_event_time(),
         terminal_modeled_event_time: result.terminal_modeled_event_time(),
+        sm_active_terminal_frontier: Some(SmActiveTerminalFrontierReport {
+            cycles: result.sm_active_terminal_event_time(),
+            role: "causal_sm_active_terminal_lower_bound_excludes_memory_write_ack_events",
+        }),
+        sm_active_observation_frontier: result.sm_active_observation_frontier().map(Into::into),
+        gpc_observation_frontier: result.gpc_observation_frontier().map(Into::into),
         completion_frontier: completion_frontier_report(result.modeled_completion_frontier()),
         readiness: ReadinessReport {
             schema_version: readiness_schema_version,
@@ -871,7 +1097,7 @@ fn resolve_mode(
             "--pchase-card is required for l1 and l1-l2 modes",
         )
     })?;
-    let pchase = PchaseCard::load(pchase_path).map_err(at("P-chase card"))?;
+    let pchase = load_pchase_card(pchase_path)?;
     let geometry = pchase
         .resolve_walk_geometry_for_arch(issue.arch(), None)
         .map_err(at("L1 geometry"))?;
@@ -996,7 +1222,7 @@ pub fn run(config: &RunConfig) -> Result<RunReport, RunError> {
         return PreparedReplay::prepare(config, CoverageAdmission::ExistingDirectBehavior)?
             .replay_all_report();
     }
-    let arch_card = ArchCard::load(&config.arch_card).map_err(at("architecture card"))?;
+    let arch_card = load_arch_card(&config.arch_card)?;
     let arch = arch_card.arch_id().map_err(at("architecture card"))?;
     let latencies = arch_card
         .required_latencies()
@@ -1035,13 +1261,18 @@ pub fn run(config: &RunConfig) -> Result<RunReport, RunError> {
     let trace_ns = trace_started.elapsed().as_nanos();
     #[cfg(feature = "performance-counters")]
     let exec_started = Instant::now();
-    let exec = ExecInfo::load_from_trace_dir(trace.root()).map_err(at("execution info"))?;
+    let exec = trace.exec_info().ok_or_else(|| {
+        RunError::new(
+            "execution info",
+            "direct trace loader did not retain execution metadata",
+        )
+    })?;
     #[cfg(feature = "performance-counters")]
     let exec_ns = exec_started.elapsed().as_nanos();
     #[cfg(feature = "performance-counters")]
     let control_started = Instant::now();
-    let control =
-        ControlSidecar::load_for_arch(&config.control_bits, arch).map_err(at("control bits"))?;
+    let control = load_control_sidecar(&config.control_bits, arch)?;
+    validate_direct_control_identity(&config.control_bits, &exec, &control)?;
     #[cfg(feature = "performance-counters")]
     let control_ns = control_started.elapsed().as_nanos();
     #[cfg(feature = "performance-counters")]
@@ -1183,6 +1414,7 @@ pub fn run(config: &RunConfig) -> Result<RunReport, RunError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tempfile::NamedTempFile;
 
     fn fixture(mode: MemoryMode) -> RunConfig {
         let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -1249,6 +1481,29 @@ mod tests {
     }
 
     #[test]
+    fn direct_input_loader_accepts_current_directory_filename() {
+        let file = NamedTempFile::new_in(".").unwrap();
+        let name = file.path().file_name().unwrap().to_owned();
+        let raw = read_direct_input(Path::new(&name), "test input", 1024).unwrap();
+        assert!(raw.is_empty());
+    }
+
+    #[test]
+    fn canonical_control_sidecar_rejects_different_binary() {
+        let config = fixture(MemoryMode::Flat);
+        let trace = TraceDir::open_direct_compact(&config.trace_dir).unwrap();
+        let exec = ExecInfo::load_from_trace_dir(trace.root()).unwrap();
+        let card = ArchCard::load(&config.arch_card).unwrap();
+        let mut control =
+            ControlSidecar::load_for_arch(&config.control_bits, card.arch_id().unwrap()).unwrap();
+        control.binary = "bin/unrelated_rebuilt_kernel".to_owned();
+        let error = validate_direct_control_identity(&config.control_bits, &exec, &control)
+            .expect_err("canonical stale sidecar must be rejected");
+        assert_eq!(error.stage(), "identity");
+        assert!(error.detail().contains("unrelated_rebuilt_kernel"));
+    }
+
+    #[test]
     fn ncu_shaped_metrics_reuse_the_registry_emitter() {
         let mut config = fixture(MemoryMode::L1L2);
         config.ncu_shaped_metrics = true;
@@ -1284,6 +1539,27 @@ mod tests {
         assert_eq!(cache[0].scope, "l1_global_read");
         assert_eq!(cache[1].scope, "l1_unified");
         assert_eq!(cache[2].scope, "l2_l1tex_source");
+        let gpc_frontier = report.launches[0]
+            .timing
+            .as_ref()
+            .and_then(|timing| timing.gpc_observation_frontier.as_ref())
+            .expect("SM86 shared replay exposes the GPC observation frontier");
+        assert_eq!(gpc_frontier.grid_blocks, 1);
+        assert_eq!(gpc_frontier.envelope_cycles, 1776);
+        assert_eq!(
+            gpc_frontier.cycles,
+            gpc_frontier.lower_bound_cycles + gpc_frontier.envelope_cycles
+        );
+        let sm_active_frontier = report.launches[0]
+            .timing
+            .as_ref()
+            .and_then(|timing| timing.sm_active_observation_frontier.as_ref())
+            .expect("SM86 shared replay exposes the SM-active observation frontier");
+        assert_eq!(sm_active_frontier.envelope_cycles, 0);
+        assert_eq!(
+            sm_active_frontier.issue_cycles,
+            sm_active_frontier.issue_lower_bound_cycles + sm_active_frontier.envelope_cycles
+        );
         for prediction in cache {
             let observer = prediction
                 .observer
@@ -1294,13 +1570,14 @@ mod tests {
                 .as_ref()
                 .expect("timing-state decomposition");
             assert_eq!(observer.hits + observer.misses, observer.lookups);
+            assert_eq!(observer.hits + timing.remaining_lookups, observer.lookups);
             assert_eq!(
-                timing.resident_data_hits + timing.remaining_lookups,
-                observer.lookups
+                timing.observer_resident_hits + timing.observer_reclassified_lookups,
+                observer.hits
             );
             assert_eq!(
-                timing.resident_data_hits + timing.observer_reclassified_lookups,
-                observer.hits
+                timing.observer_resident_hits + timing.physical_hits_not_observed,
+                timing.resident_data_hits
             );
         }
     }
@@ -1362,6 +1639,14 @@ mod tests {
                 .unwrap_err()
                 .to_string()
                 .contains("must not be empty")
+        );
+        assert!(
+            parse_memory_service_candidates(
+                br#"{"schema_version":1,"schema_version":1,"candidates":[]}"#
+            )
+            .unwrap_err()
+            .to_string()
+            .contains("duplicate JSON member")
         );
         assert!(
             parse_memory_service_candidates(&vec![b' '; 65 * 1024])
@@ -1443,6 +1728,14 @@ mod tests {
         )
         .unwrap();
         assert_eq!(candidates[0].candidate_id, 3);
+        assert!(
+            parse_memory_admission_candidates(
+                br#"{"schema_version":1,"schema_version":1,"candidates":[]}"#
+            )
+            .unwrap_err()
+            .to_string()
+            .contains("duplicate JSON member")
+        );
 
         let mut config = fixture(MemoryMode::Flat);
         config.memory_admission_candidates = Some(PathBuf::from("admission.json"));

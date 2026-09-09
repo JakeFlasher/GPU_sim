@@ -446,7 +446,7 @@ def enumerate_canonical_solbench_problems(
 
     if repo_root is None:
         # Walk up from this module to the repo root:
-        # <repo>/scripts/baselines_harness/calibration/
+        # <repo>/tools/sol_baselines_harness/calibration/
         # cache_prediction/accuracy_diagnostic.py.
         repo_root = Path(__file__).resolve().parents[4]
 
@@ -2689,6 +2689,7 @@ def _resolve_implementation_commit_sha_from_git(
             cwd=str(repo_root),
             capture_output=True,
             text=True,
+            errors="replace",
             timeout=10,
             check=False,
         )
@@ -2724,6 +2725,7 @@ def _verify_commit_sha_resolves(
             cwd=str(repo_root),
             capture_output=True,
             text=True,
+            errors="replace",
             timeout=10,
             check=False,
         )
@@ -2735,7 +2737,7 @@ def _verify_commit_sha_resolves(
 
 
 _DIAGNOSTIC_MODULE_PATH_IN_TREE: str = (
-    "scripts/baselines_harness/calibration/cache_prediction/accuracy_diagnostic.py"
+    "tools/sol_baselines_harness/calibration/cache_prediction/accuracy_diagnostic.py"
 )
 
 
@@ -2762,6 +2764,7 @@ def _verify_diagnostic_module_exists_at_sha(
             cwd=str(repo_root),
             capture_output=True,
             text=True,
+            errors="replace",
             timeout=10,
             check=False,
         )
@@ -3618,7 +3621,7 @@ def detect_cohort_classification(
 # ---------------------------------------------------------------------------
 
 HOST_ARCH_MANIFEST_RELATIVE_PATH: str = (
-    "scripts/baselines_harness/calibration/cache_prediction/"
+    "tools/sol_baselines_harness/calibration/cache_prediction/"
     "host_arch_availability_v1.toml"
 )
 
@@ -3629,7 +3632,7 @@ HOST_ARCH_MANIFEST_RELATIVE_PATH: str = (
 # calibration_only train rel-err and validation_only
 # validation rel-err as independent fields.
 CALIBRATION_VALIDATION_SPLIT_RELATIVE_PATH: str = (
-    "scripts/baselines_harness/calibration/cache_prediction/"
+    "tools/sol_baselines_harness/calibration/cache_prediction/"
     "calibration_validation_split_v1.toml"
 )
 
@@ -5516,7 +5519,7 @@ def build_accuracy_diagnostic_report(
     Defaults:
       * `repo_root` derived from the module path.
       * `baselines_root` = `<repo_root>/baselines/`.
-      * `ledger_path` = `<repo_root>/scripts/baselines_harness/
+      * `ledger_path` = `<repo_root>/tools/sol_baselines_harness/
         calibration/cache_prediction/label_ledger_v1_full_partition.toml`.
       * `implementation_commit_sha` = result of `git rev-parse HEAD`
         in `repo_root`, or the literal sentinel `git_unavailable`
@@ -5545,7 +5548,7 @@ def build_accuracy_diagnostic_report(
         baselines_root = repo_root / "baselines"
     if ledger_path is None:
         ledger_path = (
-            repo_root / "scripts" / "baselines_harness" / "calibration"
+            repo_root / "tools" / "sol_baselines_harness" / "calibration"
             / "cache_prediction" / "label_ledger_v1_full_partition.toml"
         )
     if implementation_commit_sha is None:

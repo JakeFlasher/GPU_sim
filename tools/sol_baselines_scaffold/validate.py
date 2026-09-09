@@ -39,10 +39,10 @@ Exit codes:
   stderr).
 
 Usage:
-    python scripts/baselines_scaffold/validate.py \\
+    python tools/sol_baselines_scaffold/validate.py \\
         --baseline baselines/FIB/problem_001_fused_add_rmsnorm_h2048/cuda_cpp
 
-    python scripts/baselines_scaffold/validate.py --all
+    python tools/sol_baselines_scaffold/validate.py --all
 """
 
 from __future__ import annotations
@@ -57,8 +57,14 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 _THIS_DIR = Path(__file__).resolve().parent
 _SCRIPTS_DIR = _THIS_DIR.parent
+_REPO_ROOT = _THIS_DIR.parents[1]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
 if str(_SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS_DIR))
+from tools.sol_baselines_scaffold._bootstrap import install_package_aliases
+
+install_package_aliases()
 
 from baselines_scaffold.generate import ( # noqa: E402
     DEFAULT_BENCHMARK_ROOT,
@@ -251,13 +257,13 @@ class ValidationError(Exception):
 def _import_pydantic_models():
     """Import the live ``Solution`` / ``Definition`` Pydantic models."""
     try:
-        sys.path.insert(0, str(REPO_ROOT / "sol-execbench" / "src"))
+        sys.path.insert(0, str(REPO_ROOT / "tools" / "sol_execbench" / "src"))
         from sol_execbench.core.data.solution import Solution # noqa: E402
         from sol_execbench.core.data.definition import Definition # noqa: E402
     except ImportError as exc:
         raise ValidationError(
             f"Cannot import live Pydantic models: {exc}. Ensure "
-            f"sol-execbench/src is importable."
+            f"tools/sol_execbench/src is importable."
         ) from exc
     return Solution, Definition
 
@@ -641,7 +647,7 @@ def _expected_canonical_problem_dir(
 ) -> str:
     """Return the canonical benchmark path the README must cite.
 
-    Shape: ``sol-execbench/data/benchmark/<subset>/<NNN_name>/`` (with
+    Shape: ``tools/sol_execbench/data/benchmark/<subset>/<NNN_name>/`` (with
     trailing slash). Uses the solution's ``definition`` field for the
     NNN_name and the baseline path's category for the subset.
     """
@@ -649,7 +655,7 @@ def _expected_canonical_problem_dir(
     category = parents[1].name if len(parents) >= 2 else ""
     subset = SUBSET_MAP.get(category, "")
     bench_name = solution_dict.get("definition", "")
-    return f"sol-execbench/data/benchmark/{subset}/{bench_name}/"
+    return f"tools/sol_execbench/data/benchmark/{subset}/{bench_name}/"
 
 
 def _check_parent_readme(
@@ -781,7 +787,7 @@ def _load_definition(
     if not bench_path.is_file():
         raise ValidationError(
             f"Matching benchmark definition.json not found at {bench_path}. "
-            f"Run ./sol-execbench/scripts/download_data.sh to populate, or "
+            f"Run ./tools/sol_execbench/scripts/download_data.sh to populate, or "
             f"check the solution's definition field."
         )
     return bench_path, json.loads(bench_path.read_text(encoding="utf-8"))
@@ -854,7 +860,7 @@ def _iter_all_baselines(output_root: Path) -> Iterable[Path]:
 
 def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="scripts/baselines_scaffold/validate.py",
+        prog="tools/sol_baselines_scaffold/validate.py",
         description=(
             "Two-layer contract gate: live Pydantic Solution/Definition "
             "parse + project lint (vendor-as-language reject, DPS "

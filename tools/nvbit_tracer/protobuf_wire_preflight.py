@@ -1,9 +1,10 @@
-"""Allocation-free protobuf wire cardinality preflight.
+"""Bounded protobuf wire cardinality preflight.
 
 Raw-byte limits do not bound decoded object amplification: repeated empty
 submessages occupy two bytes each but allocate full protobuf objects. These
 implementation-owned limits are checked before either Python protobuf or Prost
-decodes forward trace artifacts.
+decodes forward trace artifacts; map-key sets are bounded by the corresponding
+repeated-entry ceilings.
 """
 
 from __future__ import annotations
@@ -18,6 +19,10 @@ _KNOWN_FIELD_WIRE_TYPE_MISMATCH: Final = (
     "known protobuf field has incompatible wire type"
 )
 _UINT32_VARINT_OUT_OF_RANGE: Final = "protobuf uint32 field exceeds uint32 range"
+_INT32_VARINT_OUT_OF_RANGE: Final = "protobuf int32 field is not a valid sign-extended value"
+_DUPLICATE_MAP_KEY: Final = "protobuf map contains a duplicate key"
+_DUPLICATE_MAP_KEY_FIELD: Final = "protobuf map entry contains a duplicate key field"
+_DUPLICATE_MAP_VALUE_FIELD: Final = "protobuf map entry contains a duplicate value field"
 
 
 class ProtobufWireMalformed(ValueError):
@@ -152,12 +157,40 @@ def _require_varint(field: tuple[int, int, int | memoryview | None]) -> None:
         raise ProtobufWireMalformed(_KNOWN_FIELD_WIRE_TYPE_MISMATCH)
 
 
+def _require_varint_value(
+    field: tuple[int, int, int | memoryview | None],
+) -> int:
+    _number, wire_type, payload = field
+    if wire_type != 0 or not isinstance(payload, int):
+        raise ProtobufWireMalformed(_KNOWN_FIELD_WIRE_TYPE_MISMATCH)
+    return payload
+
+
 def _require_uint32(field: tuple[int, int, int | memoryview | None]) -> None:
     _number, wire_type, payload = field
     if wire_type != 0 or not isinstance(payload, int):
         raise ProtobufWireMalformed(_KNOWN_FIELD_WIRE_TYPE_MISMATCH)
     if payload > _UINT32_MAX:
         raise ProtobufWireMalformed(_UINT32_VARINT_OUT_OF_RANGE)
+
+
+def _require_int32(field: tuple[int, int, int | memoryview | None]) -> None:
+    # Generic protobuf decoders truncate wider int32 varints. These fields are
+    # trace identity/shape contract values, so reject the aliasing wire forms
+    # before Python or Prost materializes them.
+    _require_int32_value(field)
+
+
+def _require_int32_value(
+    field: tuple[int, int, int | memoryview | None],
+) -> int:
+    return _validate_int32_value(_require_varint_value(field))
+
+
+def _validate_int32_value(payload: int) -> int:
+    if not (payload <= 0x7FFF_FFFF or payload >= _SIGN_EXTENDED_INT32_MIN):
+        raise ProtobufWireMalformed(_INT32_VARINT_OUT_OF_RANGE)
+    return payload if payload <= 0x7FFF_FFFF else payload - (1 << 64)
 
 
 def _require_shared_memory_int32(
@@ -214,7 +247,7 @@ def _scan_packed_root_classes(
 ) -> None:
     cursor = _WireCursor(raw)
     while not cursor.empty():
-        cursor.read_varint()
+        _validate_int32_value(cursor.read_varint())
         _bump(
             counts,
             "memory_payload_classes",
@@ -230,11 +263,16 @@ def _scan_trace(
     limits: _RootLimits,
 ) -> None:
     cursor = _WireCursor(raw)
+    # Generated protobuf maps are last-entry-wins; trace map keys are
+    # identity-bearing, so retain a bounded set and reject encoded duplicates.
+    device_keys: set[int] = set()
     while (field := cursor.next_field()) is not None:
         number, _wire_type, _payload = field
         if number in {1, 3, 7}:
             _require_length_delimited(field)
-        elif number in {2, 4, 5}:
+        elif number in {2, 4}:
+            _require_int32(field)
+        elif number == 5:
             _require_varint(field)
         elif number == 6:
             map_entry = _require_length_delimited(field)
@@ -246,10 +284,14 @@ def _scan_trace(
                 limits.decoded_nodes,
                 "root decoded nodes",
             )
-            _scan_device_map_entry(map_entry, counts, limits)
+            key = _scan_device_map_entry(map_entry, counts, limits)
+            if key in device_keys:
+                raise ProtobufWireMalformed(_DUPLICATE_MAP_KEY)
+            device_keys.add(key)
         elif number == 8:
             packed = _require_repeated_varint(field)
             if packed is None:
+                _require_int32(field)
                 _bump(
                     counts,
                     "memory_payload_classes",
@@ -265,13 +307,20 @@ def _scan_device_map_entry(
     raw: memoryview,
     counts: dict[str, int],
     limits: _RootLimits,
-) -> None:
+) -> int:
     cursor = _WireCursor(raw)
+    key: int | None = None
+    value_seen = False
     while (field := cursor.next_field()) is not None:
         number, _wire_type, _payload = field
         if number == 1:
-            _require_varint(field)
+            if key is not None:
+                raise ProtobufWireMalformed(_DUPLICATE_MAP_KEY_FIELD)
+            key = _require_varint_value(field)
         elif number == 2:
+            if value_seen:
+                raise ProtobufWireMalformed(_DUPLICATE_MAP_VALUE_FIELD)
+            value_seen = True
             device = _require_length_delimited(field)
             _bump(
                 counts,
@@ -281,6 +330,7 @@ def _scan_device_map_entry(
                 "root decoded nodes",
             )
             _scan_device(device, counts, limits)
+    return 0 if key is None else key
 
 
 def _scan_device(
@@ -289,6 +339,9 @@ def _scan_device(
     limits: _RootLimits,
 ) -> None:
     cursor = _WireCursor(raw)
+    # Stream keys participate in launch identity and cannot be silently
+    # replaced by a later encoded map entry.
+    stream_keys: set[int] = set()
     while (field := cursor.next_field()) is not None:
         number, _wire_type, _payload = field
         if number == 1:
@@ -303,20 +356,30 @@ def _scan_device(
                 limits.decoded_nodes,
                 "root decoded nodes",
             )
-            _scan_stream_map_entry(map_entry, counts, limits)
+            key = _scan_stream_map_entry(map_entry, counts, limits)
+            if key in stream_keys:
+                raise ProtobufWireMalformed(_DUPLICATE_MAP_KEY)
+            stream_keys.add(key)
 
 
 def _scan_stream_map_entry(
     raw: memoryview,
     counts: dict[str, int],
     limits: _RootLimits,
-) -> None:
+) -> int:
     cursor = _WireCursor(raw)
+    key: int | None = None
+    value_seen = False
     while (field := cursor.next_field()) is not None:
         number, _wire_type, _payload = field
         if number == 1:
-            _require_varint(field)
+            if key is not None:
+                raise ProtobufWireMalformed(_DUPLICATE_MAP_KEY_FIELD)
+            key = _require_varint_value(field)
         elif number == 2:
+            if value_seen:
+                raise ProtobufWireMalformed(_DUPLICATE_MAP_VALUE_FIELD)
+            value_seen = True
             stream = _require_length_delimited(field)
             _bump(
                 counts,
@@ -326,6 +389,7 @@ def _scan_stream_map_entry(
                 "root decoded nodes",
             )
             _scan_stream(stream, counts, limits)
+    return 0 if key is None else key
 
 
 def _scan_stream(
@@ -376,7 +440,9 @@ def _scan_kernel(
     split_fields: set[int] = set()
     while (field := cursor.next_field()) is not None:
         number, _wire_type, _payload = field
-        if number == 1 or number == 3 or 5 <= number <= 7:
+        if number in {1, 3, 5}:
+            _require_int32(field)
+        elif number in {6, 7}:
             _require_varint(field)
         # Field 4 is a legacy int32, but valid shared-memory sizes are
         # nonnegative and participate in the uint32 split-field contract.
@@ -410,7 +476,7 @@ def _scan_dim3d(raw: memoryview) -> None:
     while (field := cursor.next_field()) is not None:
         number, _wire_type, _payload = field
         if 1 <= number <= 3:
-            _require_varint(field)
+            _require_int32(field)
 
 
 def preflight_trace_protobuf(raw: bytes) -> None:
@@ -425,6 +491,8 @@ def _scan_threadblock(
     limits: _ThreadblockLimits,
 ) -> None:
     cursor = _WireCursor(raw)
+    # Warp keys select replay lane grouping; duplicate entries are malformed.
+    warp_keys: set[int] = set()
     while (field := cursor.next_field()) is not None:
         number, _wire_type, _payload = field
         if number == 1:
@@ -447,20 +515,30 @@ def _scan_threadblock(
                 limits.decoded_nodes,
                 "threadblock decoded nodes",
             )
-            _scan_warp_map_entry(map_entry, counts, limits)
+            key = _scan_warp_map_entry(map_entry, counts, limits)
+            if key in warp_keys:
+                raise ProtobufWireMalformed(_DUPLICATE_MAP_KEY)
+            warp_keys.add(key)
 
 
 def _scan_warp_map_entry(
     raw: memoryview,
     counts: dict[str, int],
     limits: _ThreadblockLimits,
-) -> None:
+) -> int:
     cursor = _WireCursor(raw)
+    key: int | None = None
+    value_seen = False
     while (field := cursor.next_field()) is not None:
         number, _wire_type, _payload = field
         if number == 1:
-            _require_varint(field)
+            if key is not None:
+                raise ProtobufWireMalformed(_DUPLICATE_MAP_KEY_FIELD)
+            key = _require_int32_value(field)
         elif number == 2:
+            if value_seen:
+                raise ProtobufWireMalformed(_DUPLICATE_MAP_VALUE_FIELD)
+            value_seen = True
             warp = _require_length_delimited(field)
             _bump(
                 counts,
@@ -470,6 +548,7 @@ def _scan_warp_map_entry(
                 "threadblock decoded nodes",
             )
             _scan_warp(warp, counts, limits)
+    return 0 if key is None else key
 
 
 def _scan_warp(
@@ -481,7 +560,7 @@ def _scan_warp(
     while (field := cursor.next_field()) is not None:
         number, _wire_type, _payload = field
         if number == 1:
-            _require_varint(field)
+            _require_int32(field)
         elif number == 2:
             instruction = _require_length_delimited(field)
             _bump(
@@ -512,7 +591,9 @@ def _scan_instruction(
         number, _wire_type, _payload = field
         if 1 <= number <= 3:
             _require_uint32(field)
-        elif number == 4 or 6 <= number <= 13:
+        elif number == 4 or 6 <= number <= 10 or 12 <= number <= 13:
+            _require_int32(field)
+        elif number == 11:
             _require_varint(field)
         elif number == 14:
             _require_varint(field)
@@ -584,8 +665,12 @@ def _scan_address(
         number, _wire_type, _payload = field
         if number in {2, 7}:
             _require_uint32(field)
-        elif number == 1 or 3 <= number <= 5 or number == 8:
+        elif number in {1, 3, 5, 8}:
+            _require_int32(field)
+        elif number == 4:
             _require_varint(field)
+        elif number == 9:
+            _require_uint32(field)
         elif number == 6:
             packed = _require_repeated_varint(field)
             if packed is None:

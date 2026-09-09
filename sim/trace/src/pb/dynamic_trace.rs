@@ -56,7 +56,7 @@ pub struct Address {
     /// MemoryOpClass as the space, as before the transition). For a global-source /
     /// shared-destination instruction (LDGSTS) each address record carries its own
     /// space so the identity gate applies allocation resolution to the global side
-    /// only. See plans/sm86_ldgsts_atoms_operand_adjudication.md.
+    /// only. See docs/STATUS.md.
     #[prost(enumeration = "MemorySpace", optional, tag = "8")]
     pub address_space: ::core::option::Option<i32>,
     /// Operand-specific effective lane mask. Absent means the legacy
@@ -78,7 +78,7 @@ pub struct Address {
 /// dedicated enum (not MemoryOpClass) because instruction.proto imports
 /// address.proto — reusing MemoryOpClass here would be a circular import — and
 /// because a space is semantically distinct from an op class. Additive per the
-/// CLAUDE.md wire-extension policy; absent on pre-transition traces.
+/// AGENTS.md wire-extension policy; absent on pre-transition traces.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
 #[repr(i32)]
 pub enum MemorySpace {
@@ -295,7 +295,7 @@ pub struct Instruction {
     /// cache operator decide whether this access touches the modeled
     /// L1 line state".
     ///
-    /// Per CLAUDE.md "Two-Device Local Development Model" and
+    /// Per AGENTS.md "Two-Device Local Development Model" and
     /// BL-20260505, the classifier records the actual SASS encoding
     /// (Ampere LDG.E.CA -> LDG_E_CA; Blackwell LDG.E.STRONG.SM ->
     /// LDG_E_STRONG_SM), NOT the semantic equivalent class. The
@@ -334,7 +334,7 @@ pub struct Instruction {
 /// contract violation. The nine original plan classes follow; the
 /// tenth value MEMORY_OP_CLASS_TMEM was added for Blackwell
 /// (sm_100) tensor-memory accesses via the `tcgen05.{ld,st}`
-/// family (mnemonics `LDT` / `STT`). Per the CLAUDE.md wire-
+/// family (mnemonics `LDT` / `STT`). Per the AGENTS.md wire-
 /// extension policy this is an additive enum extension: producer
 /// emits the new value, consumer accepts it; old readers that
 /// only knew 0-9 either route the new value through their
@@ -450,7 +450,7 @@ impl MemoryOpAccessKind {
 /// it as `predictor_l1_sass_provenance_missing` (the tracer did
 /// not classify the cache operator for this instruction).
 ///
-/// Per CLAUDE.md wire-extension policy, this is an additive enum
+/// Per AGENTS.md wire-extension policy, this is an additive enum
 /// extension: producer emits the new values, consumer accepts them;
 /// old readers that only know the enum entries at producer-side
 /// build time route unknown values through their catch-all path.
@@ -546,7 +546,7 @@ pub struct Trace {
     #[prost(btree_map = "int64, message", tag = "6")]
     pub gpu_device: ::prost::alloc::collections::BTreeMap<i64, GpuDevice>,
     /// Trace-contract identity + capability. Net-new with the ASYNC_COPY+ATOM
-    /// address-carrying contract transition (additive, per the CLAUDE.md wire-
+    /// address-carrying contract transition (additive, per the AGENTS.md wire-
     /// extension policy). `trace_contract_id` names the emitted contract so an
     /// old exclusion-semantics trace (field absent/empty) is never silently
     /// cross-compared with a new address-carrying one. `memory_payload_classes`

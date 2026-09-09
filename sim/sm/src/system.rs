@@ -37,9 +37,11 @@
 //! fill mutation occur only in their typed event handlers — two runs over the
 //! same inputs produce bit-identical schedules and counters.
 
+use std::cell::RefCell;
 use std::cmp::Reverse;
 use std::collections::{BTreeMap, BinaryHeap, HashMap};
 use std::num::NonZeroU64;
+use std::rc::Rc;
 
 /// Per-SM lower bounds on responses to requests whose `L2Access` has
 /// been SCHEDULED but not yet PROCESSED (so the true response time is
@@ -254,6 +256,7 @@ impl L2SourceSplit {
                     local: local.hits[source_ix],
                 })?;
         }
+        split.validate_origin_partition()?;
         Ok(split)
     }
 
@@ -272,6 +275,24 @@ impl L2SourceSplit {
             let source_ix = source as usize;
             let global_sectors = self.origin_sectors[MemoryOrigin::Global.index()][source_ix];
             let local_sectors = self.origin_sectors[MemoryOrigin::Local.index()][source_ix];
+            let global_hits = self.origin_hits[MemoryOrigin::Global.index()][source_ix];
+            let local_hits = self.origin_hits[MemoryOrigin::Local.index()][source_ix];
+            if global_hits > global_sectors {
+                return Err(SystemCounterError::L2OriginHitExceedsSectors {
+                    origin: MemoryOrigin::Global,
+                    l2_source: source,
+                    hits: global_hits,
+                    sectors: global_sectors,
+                });
+            }
+            if local_hits > local_sectors {
+                return Err(SystemCounterError::L2OriginHitExceedsSectors {
+                    origin: MemoryOrigin::Local,
+                    l2_source: source,
+                    hits: local_hits,
+                    sectors: local_sectors,
+                });
+            }
             let sectors = global_sectors.checked_add(local_sectors).ok_or(
                 SystemCounterError::L2OriginPartitionOverflow {
                     counter: "sectors",
@@ -290,8 +311,6 @@ impl L2SourceSplit {
                 });
             }
 
-            let global_hits = self.origin_hits[MemoryOrigin::Global.index()][source_ix];
-            let local_hits = self.origin_hits[MemoryOrigin::Local.index()][source_ix];
             let hits = global_hits.checked_add(local_hits).ok_or(
                 SystemCounterError::L2OriginPartitionOverflow {
                     counter: "hits",
@@ -307,6 +326,13 @@ impl L2SourceSplit {
                     unified: self.hits[source_ix],
                     global: global_hits,
                     local: local_hits,
+                });
+            }
+            if self.hits[source_ix] > self.sectors[source_ix] {
+                return Err(SystemCounterError::L2SourceHitExceedsSectors {
+                    l2_source: source,
+                    hits: self.hits[source_ix],
+                    sectors: self.sectors[source_ix],
                 });
             }
         }
@@ -380,13 +406,14 @@ impl L2SourceSplit {
 }
 
 use crate::issue::{
-    AdmissionRequestWitness, Advance, BlockReplay, IssueError, IssueModelParams, MemRequest,
-    MemoryAdmissionCandidate, MemoryAdmissionCandidateState, MemoryOperation,
+    AccessKind, AdmissionRequestWitness, Advance, BlockReplay, IssueError, IssueModelParams,
+    MemRequest, MemoryAdmissionCandidate, MemoryAdmissionCandidateState, MemoryOperation,
     MemoryServiceCandidate, MemoryWriteAck, ReplayHorizon, ReplyTo, SharedMemoryResidency, SmCore,
-    SmMemMode, SmSimResult, TailFlags, checked_cycle_add, validate_memory_admission_candidates,
-    validate_memory_service_candidates,
+    SmMemMode, SmSimResult, TailFlags, checked_cycle_add, stateful_write_lookup_observer_enabled,
+    validate_memory_admission_candidates, validate_memory_service_candidates,
 };
 use crate::program::FunctionSchedule;
+use sim_mem::L1WriteLookupObserver;
 
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
 pub enum SystemCounterError {
@@ -412,6 +439,23 @@ pub enum SystemCounterError {
         unified: u64,
         global: u64,
         local: u64,
+    },
+    #[error(
+        "L2 {l2_source:?} hit count exceeds unified sector count: hits={hits}, sectors={sectors}"
+    )]
+    L2SourceHitExceedsSectors {
+        l2_source: L2Source,
+        hits: u64,
+        sectors: u64,
+    },
+    #[error(
+        "L2 {origin:?}/{l2_source:?} hit count exceeds origin sector count: hits={hits}, sectors={sectors}"
+    )]
+    L2OriginHitExceedsSectors {
+        origin: MemoryOrigin,
+        l2_source: L2Source,
+        hits: u64,
+        sectors: u64,
     },
     #[error("DRAM origin partition for {counter} overflows u64: Global={global}, Local={local}")]
     DramOriginPartitionOverflow {
@@ -1182,6 +1226,11 @@ struct L2SystemCommit {
     response: Option<L2ResponseCommit>,
     observed_sectors: u64,
     observed_hits: u64,
+    /// Observer-only read/atomic contribution. Store/reduction packetization
+    /// is reconstructed from the issuing instruction topology after the event
+    /// stream drains, so it never changes physical L2 state or response time.
+    lookup_observer_requests: u64,
+    lookup_observer_hits: u64,
 }
 
 /// Aggregate DRAM read-bandwidth model (the §6.3 "DRAM
@@ -1608,6 +1657,11 @@ pub(crate) struct SystemResult {
     /// `None` means the queue was empty; `Some(0)` is a real event at time zero.
     /// This is a diagnostic timestamp, not an elapsed-cycle prediction.
     pub(crate) terminal_event_time: Option<u64>,
+    /// Last successfully processed modeled event that is not an opt-in
+    /// MemoryWriteAck.  This preserves an SM-active terminal lower bound when
+    /// a feedback lane drains a service acknowledgement after the final SM
+    /// issue; the full event frontier above remains available separately.
+    pub(crate) sm_active_terminal_event_time: Option<u64>,
 }
 
 /// Run every SM's blocks to completion over one shared L2. `l2` is
@@ -1698,16 +1752,22 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates(
     if let Some(candidate) = memory_admission_feedback {
         candidate.validate_feedback(params.read_barrier_latency)?;
     }
+    let shared_write_lookup_observer = stateful_write_lookup_observer_enabled(schedule)
+        .then(|| L1WriteLookupObserver::for_arch(arch))
+        .transpose()
+        .map_err(IssueError::from)?
+        .map(|observer| Rc::new(RefCell::new(observer)));
     let sm_ids: Vec<i32> = per_sm_blocks.keys().copied().collect();
     let mut cores: Vec<SmCore<'_>> = per_sm_blocks
         .values()
         .map(|blocks| {
-            let mut core = SmCore::new_with_residency(
+            let mut core = SmCore::new_with_residency_and_observer(
                 blocks,
                 schedule,
                 params,
                 shared_memory_residency,
                 SmMemMode::L1Shared(l1_config),
+                shared_write_lookup_observer.clone(),
             )?;
             core.install_memory_service_candidates(memory_service_candidates)?;
             if !memory_admission_candidates.is_empty() {
@@ -1778,6 +1838,7 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates(
 
     let mut spin = SpinGuard::new(cores.len())?;
     let mut terminal_event_time = None;
+    let mut sm_active_terminal_event_time = None;
     #[cfg(feature = "performance-counters")]
     let mut performance = std::env::var_os("SIM_RUN_PERFORMANCE_COUNTERS")
         .is_some()
@@ -1787,8 +1848,12 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates(
     // precedence over snapshot allocation failure. Then replay the entire
     // kernel on a private snapshot and publish it only after event draining,
     // deadlock checks, and result construction all succeed.
+    let initial_lookup_observer = *checked_l2_counters(arch, l2)?;
+    let mut lookup_observer_hits = 0_u64;
+    let mut lookup_observer_requests = 0_u64;
     let mut staged_l2 = l2.try_snapshot()?;
     while let Some(ev) = queue.pop()? {
+        let is_write_ack = matches!(&ev.kind, Ev::MemoryWriteAck(_));
         #[cfg(feature = "performance-counters")]
         if let Some(performance) = performance.as_mut() {
             let queue_depth_before_pop =
@@ -1906,6 +1971,28 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates(
                             pending_l2_ready.preflight_register(preview)?;
                             let requested_sectors = u64::from(lookup.sectors);
                             let counted_hits = u64::from(lookup.counted_hits);
+                            let (lookup_observer_requests, lookup_observer_hits) = match req
+                                .operation
+                            {
+                                MemoryOperation::Read => (
+                                    requested_sectors,
+                                    counted_hits
+                                        .checked_add(u64::from(
+                                            preview.pending_merge_mask().count_ones(),
+                                        ))
+                                        .ok_or(SystemError::CounterOverflow {
+                                            counter: "L2 read lookup observer hits",
+                                        })?,
+                                ),
+                                // ATOM is a returning write-class request.
+                                // The L2 tag-stage observer counts every
+                                // atomic sector as a lookup hit, while
+                                // `counted_hits` continues to describe
+                                // physical data presence for response
+                                // pricing.
+                                MemoryOperation::Atomic => (requested_sectors, requested_sectors),
+                                MemoryOperation::Store | MemoryOperation::Reduction => (0, 0),
+                            };
                             let source_ix = req.source as usize;
                             let origin_masks = [
                                 req.sector_mask & !req.local_sector_mask,
@@ -2031,15 +2118,22 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates(
                                 let latency_ready = bound
                                     .max(fetch_latency_ready.unwrap_or(0))
                                     .max(merged_ready.unwrap_or(0));
-                                let ready = latency_ready.max(bw_ready);
-                                if ready < bound {
+                                let service_ready = latency_ready.max(bw_ready);
+                                // A folded physical fill can serve ordinary
+                                // and deep constant waiters together. Their
+                                // return-service delta is therefore stamped
+                                // per fill waiter by the SM response path;
+                                // this event stays at the shared hierarchy
+                                // ready time and does not over-delay ordinary
+                                // consumers or alter DRAM pricing.
+                                if service_ready < bound {
                                     return Err(SystemError::ResponseBeforeBound {
                                         sm: sm_ix,
-                                        ready,
+                                        ready: service_ready,
                                         bound,
                                     });
                                 }
-                                let delayed = u64::from(ready > latency_ready);
+                                let delayed = u64::from(service_ready > latency_ready);
                                 let next_delayed = dram_stats
                                     .bw_delayed_responses
                                     .checked_add(delayed)
@@ -2053,7 +2147,7 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates(
                                         counter: "DRAM origin bandwidth-delayed responses",
                                     })?;
                                 Some(L2ResponseCommit {
-                                    ready,
+                                    ready: service_ready,
                                     origin_ix: response_origin_ix,
                                     next_delayed,
                                     next_origin_delayed,
@@ -2093,9 +2187,22 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates(
                                 response,
                                 observed_sectors: requested_sectors,
                                 observed_hits: counted_hits,
+                                lookup_observer_requests,
+                                lookup_observer_hits,
                             })
                         },
                     )?;
+
+                    lookup_observer_requests = lookup_observer_requests
+                        .checked_add(commit.lookup_observer_requests)
+                        .ok_or(SystemError::CounterOverflow {
+                            counter: "L2 lookup observer requests",
+                        })?;
+                    lookup_observer_hits = lookup_observer_hits
+                        .checked_add(commit.lookup_observer_hits)
+                        .ok_or(SystemError::CounterOverflow {
+                            counter: "L2 lookup observer hits",
+                        })?;
 
                     if observe_admission_groups && let Some(witness) = req.admission_witness {
                         if let Some(completed) = admission_observers
@@ -2323,6 +2430,9 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates(
             }
         }
         terminal_event_time = Some(ev.time);
+        if !is_write_ack {
+            sm_active_terminal_event_time = Some(ev.time);
+        }
     }
 
     if pending_l2_ready.len() != 0 {
@@ -2345,6 +2455,29 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates(
             }
         }
     }
+
+    // The L2 state machine above deliberately retains every physical sector
+    // mutation.  NCU's L1/TEX-origin write observer is a separate packetized
+    // stream: a regular store wavefront contributes its sectors-per-wavefront
+    // work package, while an explicit `.128` store preserves the full sector
+    // span.  Reconstruct this from the admitted trace/schedule only after the
+    // event stream drains; no target counter or timing value enters the rule.
+    let write_lookup_sectors = l2_write_observer_sectors(per_sm_blocks, schedule)?;
+    let lookup_hits = initial_lookup_observer
+        .lookup_hits
+        .checked_add(lookup_observer_hits)
+        .and_then(|value| value.checked_add(write_lookup_sectors))
+        .ok_or(SystemError::CounterOverflow {
+            counter: "L2 lookup observer hits",
+        })?;
+    let lookup_requests = initial_lookup_observer
+        .lookup_requests
+        .checked_add(lookup_observer_requests)
+        .and_then(|value| value.checked_add(write_lookup_sectors))
+        .ok_or(SystemError::CounterOverflow {
+            counter: "L2 lookup observer requests",
+        })?;
+    staged_l2.replace_lookup_observer(lookup_hits, lookup_requests)?;
 
     let mut per_sm = BTreeMap::new();
     let mut unmodeled_tails = TailFlags::default();
@@ -2404,6 +2537,7 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates(
         dram: dram_stats,
         unmodeled_tails,
         terminal_event_time,
+        sm_active_terminal_event_time,
     };
     *l2 = staged_l2;
     Ok(result)
@@ -2443,6 +2577,73 @@ fn batchable_replyless_write(request: MemRequest) -> bool {
             request.operation,
             MemoryOperation::Store | MemoryOperation::Reduction
         )
+}
+
+/// Reconstruct the SM86 L2 write-observer sector work from the admitted
+/// instruction stream.  Nsight Compute defines an L2 request as carrying up
+/// to four sectors; the simulator's physical event stream intentionally keeps
+/// each sector mutation so cache state and response pricing remain exact.  For
+/// the observer, ordinary store instructions are packetized into one
+/// sectors-per-wavefront work package (`ceil(sectors / ceil(sectors / 4))`).
+/// Explicit 128-bit stores retain their complete sector span because their
+/// SASS encoding already expresses the full-width packet.  This is a
+/// topology rule, not a workload-specific fit, and it is applied equally to
+/// every admitted SM86 launch (including retained stream-L2 launches).
+fn l2_write_observer_sectors(
+    per_sm_blocks: &BTreeMap<i32, Vec<BlockReplay>>,
+    schedule: &FunctionSchedule,
+) -> Result<u64, SystemError> {
+    let mut total = 0_u64;
+    for blocks in per_sm_blocks.values() {
+        for block in blocks {
+            for warp in &block.warps {
+                for inst in &warp.insts {
+                    let (off, len) = match inst.kind {
+                        AccessKind::GlobalStore { off, len }
+                        | AccessKind::GlobalReduction { off, len, .. }
+                        | AccessKind::LocalStore { off, len } => (off, len),
+                        _ => continue,
+                    };
+                    if len == 0 {
+                        continue;
+                    }
+                    let end =
+                        off.checked_add(usize::from(len))
+                            .ok_or(SystemError::CounterOverflow {
+                                counter: "L2 write observer sector span",
+                            })?;
+                    if end > warp.sectors.len() {
+                        return Err(SystemError::CounterOverflow {
+                            counter: "L2 write observer sector span",
+                        });
+                    }
+                    let sectors = u64::from(len);
+                    let slot = schedule.by_pc.get(&u64::from(inst.pc)).ok_or(
+                        SystemError::CounterOverflow {
+                            counter: "L2 write observer schedule join",
+                        },
+                    )?;
+                    let opcode = slot
+                        .opcode_text()
+                        .split_ascii_whitespace()
+                        .next()
+                        .unwrap_or("");
+                    let observed = if opcode.split('.').any(|modifier| modifier == "128") {
+                        sectors
+                    } else {
+                        let wavefronts = sectors.div_ceil(4);
+                        sectors.div_ceil(wavefronts)
+                    };
+                    total = total
+                        .checked_add(observed)
+                        .ok_or(SystemError::CounterOverflow {
+                            counter: "L2 write observer sectors",
+                        })?;
+                }
+            }
+        }
+    }
+    Ok(total)
 }
 
 fn feedback_prices_request(
@@ -3080,6 +3281,8 @@ mod tests {
             local_sector_mask: 0,
             source: L2Source::Store,
             operation,
+            constant_load: false,
+            constant_deep: false,
             reply: ReplyTo::None,
             admission_witness: None,
         }
@@ -3254,6 +3457,10 @@ mod tests {
             resource_source: IssueResourceSource::SyntheticTestFixture,
             instruction_front_end: None,
             memory_issue_pipeline: None,
+            scalar_execution_pipeline: None,
+            ldgsts_l1_hit_return_service: None,
+            constant_memory_return_service: None,
+            immediate_constant_cache: None,
             l1_hit_latency: 34,
             l1_miss_latency: 244,
             global_flat_latency: 423,
@@ -3271,6 +3478,7 @@ mod tests {
             ldgsts_cache_all_destination_service_wavefronts: 2,
             ldgsts_cache_all_destination_service_cycles: 3,
             max_resident_warps_per_sm: 48,
+            max_resident_blocks_per_sm: u32::MAX,
         }
     }
 
@@ -5219,6 +5427,47 @@ mod tests {
         assert!(result.unmodeled_tails.coherence);
     }
 
+    #[test]
+    fn packetized_multi_sector_write_observer_replaces_physical_lookup_count() {
+        // The physical event model records one L2 lookup per sector, while
+        // the observer rewrites ordinary (non-.128) stores into the carded
+        // sectors-per-wavefront packet count. A legitimate packetized count
+        // is therefore lower than the physical lookup counter and must still
+        // complete without a cumulative-observer regression error.
+        let sched = schedule(vec![(0, slot(cb(1), "STG.E")), (16, slot(cb(1), "EXIT"))]);
+        let blocks = vec![BlockReplay {
+            launch_index: 0,
+            warps: vec![WarpReplay {
+                async_copy_cohorts: None,
+                warp_slot: 0,
+                insts: vec![
+                    ReplayInst {
+                        pc: 0,
+                        kind: AccessKind::GlobalStore { off: 0, len: 5 },
+                    },
+                    ReplayInst {
+                        pc: 16,
+                        kind: AccessKind::NonMemory,
+                    },
+                ],
+                sectors: vec![0, 1, 2, 3, 4],
+            }],
+        }];
+        let mut l2 = l2_model();
+        let result = simulate_kernel_shared(
+            &BTreeMap::from([(0, blocks)]),
+            &sched,
+            &params(),
+            l1_config(),
+            &mut l2,
+            carded_bw(),
+        )
+        .unwrap();
+        assert_eq!(result.l2.lookup_requests, 3);
+        assert_eq!(result.l2.lookup_hits, 3);
+        assert_eq!(result.l2.total().unwrap(), 5);
+    }
+
     /// §6.4 split between counting and pricing: an ATOM to a fresh
     /// sector of a RESIDENT line COUNTS as a hit (write-class tag-match
     /// rule) but its reply is PRICED on the DRAM arm — the atomic's
@@ -5659,6 +5908,42 @@ mod tests {
             })
         );
         assert_eq!(dram, dram_before);
+    }
+
+    #[test]
+    fn source_aggregation_rejects_hits_exceeding_source_sectors() {
+        let result = L2SourceSplit::from_origins(
+            ArchId::Sm86,
+            L2OriginSourceStats {
+                sectors: [1, 0, 0, 0],
+                hits: [2, 0, 0, 0],
+            },
+            L2OriginSourceStats::default(),
+        );
+        assert_eq!(
+            result,
+            Err(SystemCounterError::L2OriginHitExceedsSectors {
+                origin: MemoryOrigin::Global,
+                l2_source: L2Source::L1Fill,
+                hits: 2,
+                sectors: 1,
+            })
+        );
+
+        let mut forged = L2SourceSplit::for_arch(ArchId::Sm86);
+        forged.sectors[L2Source::Store as usize] = 1;
+        forged.hits[L2Source::Store as usize] = 2;
+        forged.origin_sectors[MemoryOrigin::Global.index()][L2Source::Store as usize] = 1;
+        forged.origin_hits[MemoryOrigin::Global.index()][L2Source::Store as usize] = 2;
+        assert_eq!(
+            forged.validate_origin_partition(),
+            Err(SystemCounterError::L2OriginHitExceedsSectors {
+                origin: MemoryOrigin::Global,
+                l2_source: L2Source::Store,
+                hits: 2,
+                sectors: 1,
+            })
+        );
     }
 
     #[test]

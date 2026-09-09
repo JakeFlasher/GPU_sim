@@ -28,6 +28,8 @@
 
 #include "register_usage.h"
 
+#include <limits>
+
 register_usage::register_usage(unsigned num_regular, unsigned num_uniform, unsigned num_regular_predicate, unsigned num_uniform_predicate)
 {
     m_num_regular = num_regular;
@@ -41,9 +43,7 @@ register_usage::register_usage(unsigned num_regular, unsigned num_uniform, unsig
 }
 
 register_usage::register_usage()
-{
-    // Used for Deserializing
-}
+    : register_usage(0, 0, 0, 0) {}
 
 unsigned register_usage::get_num_regular_registers() const
 {
@@ -170,6 +170,23 @@ bool register_usage::Serialize(rapidjson::Writer<rapidjson::StringBuffer> *write
 
 bool register_usage::Deserialize(const rapidjson::Value &obj)
 {
+    const auto is_uint64_field = [&obj](const char *name) {
+        return obj.HasMember(name) && obj[name].IsInt64() &&
+               obj[name].GetInt64() >= 0 &&
+               static_cast<uint64_t>(obj[name].GetInt64()) <=
+                   std::numeric_limits<unsigned>::max();
+    };
+    if (!obj.IsObject() || !JSONBase::HasUniqueObjectMembers(obj) ||
+        !is_uint64_field("num_regular") ||
+        !is_uint64_field("num_uniform") ||
+        !is_uint64_field("num_regular_predicate") ||
+        !is_uint64_field("num_uniform_predicate") ||
+        !is_uint64_field("future_max_num_regular") ||
+        !is_uint64_field("future_max_num_uniform") ||
+        !is_uint64_field("future_max_num_regular_predicate") ||
+        !is_uint64_field("future_max_num_uniform_predicate")) {
+        return false;
+    }
     set_num_regular_registers(obj["num_regular"].GetInt64());
     set_num_uniform_registers(obj["num_uniform"].GetInt64());
     set_num_regular_predicate_registers(obj["num_regular_predicate"].GetInt64());

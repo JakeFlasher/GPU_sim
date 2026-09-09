@@ -8,6 +8,9 @@
 //! accidental sm_120 defaults.
 
 pub mod card;
+pub mod json;
+
+pub use json::strict_json_from_slice;
 
 use std::fmt;
 
@@ -106,6 +109,69 @@ impl ArchId {
         }
     }
 
+    /// L1TEX write-lookup request window used by the SM86 observer. The
+    /// physical read-state model remains the conservative fully-associative
+    /// walk selected by `l1_defaults`; this separate window captures the
+    /// sector/tag allocation stream exposed by Ampere's write-allocate,
+    /// sub-sector-write path. Its two tag slots per set index are an
+    /// architecture-level service hypothesis, not a per-workload correction.
+    pub const fn l1_write_lookup_window(self) -> Capability<L1WriteLookupWindow> {
+        match self {
+            Self::Sm86 => Capability::available(
+                Self::Sm86,
+                L1WriteLookupWindow {
+                    set_count: 256,
+                    tag_slots: 2,
+                },
+            ),
+            Self::Sm120 => Capability::research_gap(
+                Self::Sm120,
+                "sm_120 L1TEX write-lookup allocation window is not modeled",
+            ),
+        }
+    }
+
+    /// SM86 GPC-observation envelope measured with an unscored control sweep.
+    /// This is a separate front-end observation boundary, not a replacement
+    /// for the physical SM/event frontier and not the scored-workload timing
+    /// crosswalk.  The grid term captures the small dispatch/startup increase
+    /// observed as the block population grows; unsupported architectures keep
+    /// the capability as an explicit research gap.
+    pub const fn gpc_observation_envelope(self) -> Capability<GpcObservationEnvelope> {
+        match self {
+            Self::Sm86 => Capability::available(
+                Self::Sm86,
+                GpcObservationEnvelope {
+                    base_cycles: 1776,
+                    per_grid_log2_cycles: 8,
+                },
+            ),
+            Self::Sm120 => Capability::research_gap(
+                Self::Sm120,
+                "sm_120 GPC observation envelope is not measured",
+            ),
+        }
+    }
+
+    /// SM-domain active-observation envelope measured with the independent
+    /// `ncu_launch_envelope` control pair.  This boundary covers the fixed
+    /// launch/activation and sampler interval that is present in
+    /// `sm__cycles_active.max` but is not part of an SM-local issue/event
+    /// lower bound.  It is emitted as a separate physical-observation
+    /// frontier; callers must retain the unadjusted lower bound alongside it.
+    pub const fn sm_active_observation_envelope(self) -> Capability<SmActiveObservationEnvelope> {
+        match self {
+            Self::Sm86 => Capability::available(
+                Self::Sm86,
+                SmActiveObservationEnvelope { fixed_cycles: 964 },
+            ),
+            Self::Sm120 => Capability::research_gap(
+                Self::Sm120,
+                "sm_120 SM-active observation envelope is not measured",
+            ),
+        }
+    }
+
     /// L2 defaults are architecture-local hypotheses. The partial
     /// sm_120 card must not inherit these values.
     pub const fn l2_defaults(self) -> Capability<L2Defaults> {
@@ -153,6 +219,7 @@ impl ArchId {
                     non_memory_write_barrier_latency: 25,
                     read_barrier_latency: 8,
                     max_resident_warps_per_sm: 48,
+                    max_resident_blocks_per_sm: 16,
                 },
             ),
             Self::Sm120 => Capability::research_gap(
@@ -211,6 +278,12 @@ impl ArchId {
                     shared_accept_interval_cycles: 2,
                     global_load_uniform_war_cycles: 9,
                     global_load_regular_war_cycles: 11,
+                    // A pressure-class regular constant load crosses the
+                    // released SM86 constant-cache structure (11 cycles) and
+                    // its measured L0↔L1 transport (39 cycles): 50 cycles.
+                    // The ordinary 11-cycle global-load arm remains in force
+                    // for non-pressure constant streams.
+                    constant_load_war_cycles: 11 + 39,
                     global_store_uniform_32_war_cycles: 10,
                     global_store_uniform_64_war_cycles: 12,
                     global_store_uniform_128_war_cycles: 16,
@@ -234,17 +307,97 @@ impl ArchId {
         }
     }
 
-    /// Tensor-pipe initiation intervals for the exact matrix instructions
-    /// admitted by the sm_86 control-sidecar corpus. These are GA10x-local:
-    /// one Tensor Core belongs to each SM partition, and the instruction work
-    /// divided by NVIDIA's per-core throughput gives 16 cycles for dense
-    /// HMMA.16816 and sparse HMMA.SP.16832, and 8 cycles for IMMA.16816.S8.
+    /// Research-only scalar ALU execution candidate for the Ampere SM86 model.
+    /// Huerta et al.'s released RTX 3090 configuration gives the INT/FP paths
+    /// a four-cycle latency and two-cycle initiation interval.  Production
+    /// replay does not bind this single-stream approximation: the independent
+    /// issue-port campaign rejected it as a generic scheduler constraint.
+    pub const fn scalar_execution_pipeline(self) -> Capability<ScalarExecutionPipeline> {
+        match self {
+            Self::Sm86 => Capability::available(
+                Self::Sm86,
+                ScalarExecutionPipeline {
+                    latency_cycles: 4,
+                    initiation_interval_cycles: 2,
+                    in_flight_capacity: 8,
+                },
+            ),
+            Self::Sm120 => Capability::research_gap(
+                Self::Sm120,
+                "sm_120 scalar execution latency, initiation, and in-flight capacity are not modeled",
+            ),
+        }
+    }
+
+    /// Immediate Constant Cache (IMC) geometry and scheduler-facing miss
+    /// behavior for Ampere.  IMC is distinct from the indexed constant cache:
+    /// a `c[bank][offset]` operand is issued but not dispatched on a miss and
+    /// is re-issued after the per-SMSP cache line returns.  The geometry and
+    /// four-cycle greedy-warp switch window come from the released SM86
+    /// remodeling configuration; the upper-level response latency is combined
+    /// with the active SKU memory card by `sim-sm`.
+    pub const fn immediate_constant_cache(self) -> Capability<ImmediateConstantCache> {
+        match self {
+            Self::Sm86 => Capability::available(
+                Self::Sm86,
+                ImmediateConstantCache {
+                    sets: 4,
+                    line_bytes: 64,
+                    ways: 2,
+                    mshr_entries: 32,
+                    access_queue_entries: 1,
+                    miss_initiation_interval_cycles: 1,
+                    sm_structure_latency_cycles: 11,
+                    l0_to_l1_cycles: 39,
+                    switch_after_miss_cycles: 4,
+                },
+            ),
+            Self::Sm120 => Capability::research_gap(
+                Self::Sm120,
+                "sm_120 immediate constant-cache geometry and miss replay are not modeled",
+            ),
+        }
+    }
+
+    /// Additional return-path service for regular-register constant loads on
+    /// SM86.  This is intentionally an *additional* path delay, not a
+    /// replacement for the carded L1/L2 latency arms: the remodeled
+    /// GPGPU-Sim configuration exposes a distinct constant-cache structure
+    /// (`constant_cache_latency_at_sm_structure = 11`), and the independent
+    /// source/stall assay identifies an eight-cycle return-service gap after
+    /// the ordinary hierarchy response is known.  The marker is consumed only
+    /// by response-bearing constant loads; cache tags and observer counts stay
+    /// on their normal paths.
+    pub const fn constant_memory_return_service(self) -> Capability<ConstantMemoryReturnService> {
+        match self {
+            Self::Sm86 => Capability::available(
+                Self::Sm86,
+                ConstantMemoryReturnService {
+                    additional_cycles: 8,
+                },
+            ),
+            Self::Sm120 => Capability::research_gap(
+                Self::Sm120,
+                "sm_120 constant-memory return service is not modeled",
+            ),
+        }
+    }
+
+    /// Tensor-pipe effective service intervals for the exact matrix
+    /// instructions admitted by the sm_86 control-sidecar corpus. These are
+    /// GA10x-local. Dense HMMA.16816 exposes a 32-cycle saturated execution
+    /// interval (the released Ampere model exposes a 32-cycle tensor execution
+    /// latency), while sparse HMMA.SP.16832 and IMMA.16816 retain their
+    /// independently measured 16/8-cycle initiation cadences. Short dense-HMMA
+    /// functions that cannot fill this window use the 16-cycle initiation
+    /// cadence in `sim-sm`; the carded value is the saturated ceiling, not a
+    /// claim that every independent HMMA issue consumes 32 cycles.
     pub const fn tensor_issue_intervals(self) -> Capability<TensorIssueIntervals> {
         match self {
             Self::Sm86 => Capability::available(
                 Self::Sm86,
                 TensorIssueIntervals {
-                    hmma_16816_f16_bf16: 16,
+                    hmma_16816_f16_bf16: 32,
                     hmma_sparse_16832_f16_bf16: 16,
                     imma_16816_s8: 8,
                 },
@@ -283,7 +436,10 @@ impl ArchId {
     /// branch-resolving warp cycles per uniform target directly in NCU; that
     /// target-resolution state is shorter than the compiler's five-cycle BRA
     /// control stall and therefore does not by itself invent an extra issue
-    /// delay.
+    /// delay.  A separate exact-loop control identifies a nine-cycle
+    /// next-issue interval only when a predicated backward branch immediately
+    /// consumes a freshly produced predicate; this is kept as a distinct
+    /// shape-dependent capability rather than applied to every backward jump.
     pub const fn branch_resolution(self) -> Capability<BranchResolution> {
         match self {
             Self::Sm86 => Capability::available(
@@ -291,6 +447,7 @@ impl ArchId {
                 BranchResolution {
                     next_issue_interval_cycles: 10,
                     uniform_backward_target_resolution_cycles: 3,
+                    uniform_backward_predicate_interval_cycles: 9,
                 },
             ),
             Self::Sm120 => Capability::research_gap(
@@ -407,6 +564,24 @@ impl ArchId {
             Self::Sm120 => Capability::research_gap(
                 Self::Sm120,
                 "sm_120 LDGSTS/TMA payload-completion throughput is not modeled",
+            ),
+        }
+    }
+
+    /// Source-side L1TEX return cadence for cacheable non-bulk asynchronous
+    /// copies.  The Ampere SM86 memory structure has a banked source-return
+    /// path; the released Huerta model's four-bank/half-warp service and the
+    /// independent source-hit assay resolve to one accepted source hit every
+    /// eight SM cycles for this replay granularity.  This is a source-return
+    /// service capability, not a cache tag or hit-count rule.
+    pub const fn ldgsts_l1_hit_return_service(self) -> Capability<LdgstsL1HitReturnService> {
+        match self {
+            Self::Sm86 => {
+                Capability::available(Self::Sm86, LdgstsL1HitReturnService { interval_cycles: 8 })
+            }
+            Self::Sm120 => Capability::research_gap(
+                Self::Sm120,
+                "sm_120 LDGSTS L1-hit return service is not modeled",
             ),
         }
     }
@@ -624,12 +799,8 @@ impl<T> Capability<T> {
     pub const fn status(&self) -> CapabilityStatus {
         match &self.state {
             CapabilityState::Available(_) => CapabilityStatus::Available,
-            CapabilityState::ResearchGap { reason } => {
-                CapabilityStatus::ResearchGap { reason: *reason }
-            }
-            CapabilityState::Unsupported { reason } => {
-                CapabilityStatus::Unsupported { reason: *reason }
-            }
+            CapabilityState::ResearchGap { reason } => CapabilityStatus::ResearchGap { reason },
+            CapabilityState::Unsupported { reason } => CapabilityStatus::Unsupported { reason },
         }
     }
 
@@ -760,6 +931,55 @@ pub struct L1Defaults {
     pub set_mapping: L1SetMapping,
 }
 
+/// Architecture-local request/tag window for L1TEX write lookups. This is
+/// intentionally distinct from the physical L1 geometry: NCU's write lookup
+/// counter is a sector observer, while the replay's read-state cache keeps its
+/// independently validated replacement approximation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct L1WriteLookupWindow {
+    pub set_count: u32,
+    pub tag_slots: u32,
+}
+
+/// Architecture-local approximation of the front-end/semaphore boundary that
+/// separates NCU's GPC elapsed-cycle observation from an SM-local modeled
+/// event frontier.  It is deliberately exposed as a diagnostic component so
+/// callers can retain the unadjusted lower bound alongside it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GpcObservationEnvelope {
+    pub base_cycles: u64,
+    pub per_grid_log2_cycles: u64,
+}
+
+/// Fixed SM-clock observation boundary used to expose a physical active-cycle
+/// frontier without rewriting the simulator's raw issue/event lower bounds.
+/// The value is a protocol-specific architecture capability, not an NCU target
+/// and not a workload correction.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SmActiveObservationEnvelope {
+    pub fixed_cycles: u64,
+}
+
+impl SmActiveObservationEnvelope {
+    pub const fn cycles(self) -> u64 {
+        self.fixed_cycles
+    }
+}
+
+impl GpcObservationEnvelope {
+    /// Return `(envelope_cycles, floor_log2(grid_blocks))`. A zero block
+    /// population is not a valid launch and therefore returns `None`.
+    pub fn cycles_for_grid(self, grid_blocks: u64) -> Option<(u64, u32)> {
+        if grid_blocks == 0 {
+            return None;
+        }
+        let log2 = 63_u32.saturating_sub(grid_blocks.leading_zeros());
+        let grid_term = self.per_grid_log2_cycles.checked_mul(u64::from(log2))?;
+        let cycles = self.base_cycles.checked_add(grid_term)?;
+        Some((cycles, log2))
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum L2Replacement {
     Lru,
@@ -795,6 +1015,11 @@ pub struct IssueHypotheses {
     pub non_memory_write_barrier_latency: u64,
     pub read_barrier_latency: u64,
     pub max_resident_warps_per_sm: u32,
+    /// Architectural CTA residency ceiling, independent of the warp and
+    /// shared-memory ceilings.  Ampere exposes a 16-block-per-SM limit even
+    /// for one-warp CTAs; omitting it lets a replay admit 48 one-warp blocks
+    /// and changes the wave schedule.
+    pub max_resident_blocks_per_sm: u32,
 }
 
 /// Per-SM instruction hierarchy and per-SMSP fetch structure. Cache capacities
@@ -826,6 +1051,9 @@ pub struct MemoryIssuePipeline {
     pub shared_accept_interval_cycles: u64,
     pub global_load_uniform_war_cycles: u64,
     pub global_load_regular_war_cycles: u64,
+    /// Operand/read visibility latency for regular-register constant loads.
+    /// SM86 has a distinct L0/L1 constant-cache path.
+    pub constant_load_war_cycles: u64,
     pub global_store_uniform_32_war_cycles: u64,
     pub global_store_uniform_64_war_cycles: u64,
     pub global_store_uniform_128_war_cycles: u64,
@@ -840,6 +1068,45 @@ pub struct MemoryIssuePipeline {
     pub shared_store_regular_64_war_cycles: u64,
     pub shared_store_regular_128_war_cycles: u64,
     pub ldgsts_war_cycles: u64,
+}
+
+/// Architecture-local scalar INT/FP execution resource.  `in_flight_capacity`
+/// bounds the number of dispatched operations whose execution slot has not
+/// yet retired; it is not a generic register scoreboard.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ScalarExecutionPipeline {
+    pub latency_cycles: u64,
+    pub initiation_interval_cycles: u64,
+    pub in_flight_capacity: u32,
+}
+
+/// Architecture-local Immediate Constant Cache (IMC) configuration.  The
+/// cache is private to one SMSP; its miss service is serialized by the
+/// architecture's L1C access queue while a small number of outstanding lines
+/// may be tracked by MSHRs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ImmediateConstantCache {
+    pub sets: u32,
+    pub line_bytes: u32,
+    pub ways: u32,
+    pub mshr_entries: u32,
+    pub access_queue_entries: u32,
+    /// Initiation interval of the pipelined L1C miss path.  The released
+    /// SM86 queue advances one stage per cycle, so independent line misses
+    /// can be admitted every cycle even while their responses are pending.
+    pub miss_initiation_interval_cycles: u64,
+    pub sm_structure_latency_cycles: u64,
+    pub l0_to_l1_cycles: u64,
+    pub switch_after_miss_cycles: u64,
+}
+
+/// Architecture-local additional return-path service for `LDG.*.CONSTANT`.
+/// It is separate from the ordinary cache latency because the same global
+/// address may still mutate normal L1/L2 state while its constant-cache return
+/// consumes a distinct SM-side path.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ConstantMemoryReturnService {
+    pub additional_cycles: u64,
 }
 
 /// Per-SMSP initiation intervals for the sm_86 tensor instructions whose
@@ -867,6 +1134,11 @@ pub struct CtaBarrierIssue {
 pub struct BranchResolution {
     pub next_issue_interval_cycles: u64,
     pub uniform_backward_target_resolution_cycles: u64,
+    /// Measured next-issue interval for the narrow shape in which a uniform
+    /// backward branch immediately follows its predicate producer.  This is
+    /// not a generic branch latency and must be selected only from static
+    /// SASS adjacency.
+    pub uniform_backward_predicate_interval_cycles: u64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -928,6 +1200,14 @@ pub struct LdgstsL1FillAdmission {
 pub struct LdgstsCompletionThroughput {
     pub cache_all_payload_bytes_per_cycle: u64,
     pub bypass_payload_bytes_per_cycle: u64,
+}
+
+/// Architecture-local cadence of the cacheable LDGSTS source-hit return
+/// interface.  It affects only delivery timestamps; L1/L2 observer counts and
+/// replacement state remain independent.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LdgstsL1HitReturnService {
+    pub interval_cycles: u64,
 }
 
 /// Trace-side destination projection admitted for cache-all Ampere `LDGSTS`.
@@ -1147,6 +1427,74 @@ mod tests {
     }
 
     #[test]
+    fn sm86_l1_write_lookup_window_is_architecture_local() {
+        assert_eq!(
+            ArchId::Sm86
+                .l1_write_lookup_window()
+                .require("l1_write_lookup_window")
+                .unwrap(),
+            L1WriteLookupWindow {
+                set_count: 256,
+                tag_slots: 2,
+            }
+        );
+        assert!(matches!(
+            ArchId::Sm120
+                .l1_write_lookup_window()
+                .require("l1_write_lookup_window"),
+            Err(CapabilityError::ResearchGap {
+                arch: ArchId::Sm120,
+                capability: "l1_write_lookup_window",
+                reason,
+            }) if !reason.is_empty()
+        ));
+    }
+
+    #[test]
+    fn sm86_gpc_observation_envelope_is_grid_scoped_and_sm120_is_gap() {
+        let envelope = ArchId::Sm86
+            .gpc_observation_envelope()
+            .require("gpc_observation_envelope")
+            .unwrap();
+        assert_eq!(envelope.cycles_for_grid(1), Some((1776, 0)));
+        assert_eq!(envelope.cycles_for_grid(64), Some((1824, 6)));
+        assert_eq!(envelope.cycles_for_grid(1024), Some((1856, 10)));
+        assert_eq!(envelope.cycles_for_grid(0), None);
+        assert!(matches!(
+            ArchId::Sm120
+                .gpc_observation_envelope()
+                .require("gpc_observation_envelope"),
+            Err(CapabilityError::ResearchGap {
+                arch: ArchId::Sm120,
+                capability: "gpc_observation_envelope",
+                reason,
+            }) if !reason.is_empty()
+        ));
+    }
+
+    #[test]
+    fn sm86_sm_active_observation_envelope_is_architecture_local() {
+        assert_eq!(
+            ArchId::Sm86
+                .sm_active_observation_envelope()
+                .require("sm_active_observation_envelope")
+                .unwrap()
+                .cycles(),
+            964
+        );
+        assert!(matches!(
+            ArchId::Sm120
+                .sm_active_observation_envelope()
+                .require("sm_active_observation_envelope"),
+            Err(CapabilityError::ResearchGap {
+                arch: ArchId::Sm120,
+                capability: "sm_active_observation_envelope",
+                reason,
+            }) if !reason.is_empty()
+        ));
+    }
+
+    #[test]
     fn sm86_tensor_issue_intervals_are_architecture_local() {
         assert_eq!(
             ArchId::Sm86
@@ -1154,7 +1502,7 @@ mod tests {
                 .require("tensor_issue_intervals")
                 .unwrap(),
             TensorIssueIntervals {
-                hmma_16816_f16_bf16: 16,
+                hmma_16816_f16_bf16: 32,
                 hmma_sparse_16832_f16_bf16: 16,
                 imma_16816_s8: 8,
             }
@@ -1189,7 +1537,7 @@ mod tests {
     }
 
     #[test]
-    fn sm86_memory_issue_pipeline_matches_the_released_rtx3090_model() {
+    fn sm86_memory_issue_pipeline_includes_the_released_constant_pressure_path() {
         assert_eq!(
             ArchId::Sm86
                 .memory_issue_pipeline()
@@ -1201,6 +1549,7 @@ mod tests {
                 shared_accept_interval_cycles: 2,
                 global_load_uniform_war_cycles: 9,
                 global_load_regular_war_cycles: 11,
+                constant_load_war_cycles: 11 + 39,
                 global_store_uniform_32_war_cycles: 10,
                 global_store_uniform_64_war_cycles: 12,
                 global_store_uniform_128_war_cycles: 16,
@@ -1253,6 +1602,7 @@ mod tests {
             BranchResolution {
                 next_issue_interval_cycles: 10,
                 uniform_backward_target_resolution_cycles: 3,
+                uniform_backward_predicate_interval_cycles: 9,
             }
         );
         assert!(matches!(

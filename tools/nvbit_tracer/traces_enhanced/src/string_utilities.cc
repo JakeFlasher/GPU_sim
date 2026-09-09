@@ -28,9 +28,13 @@
 
 
 #include <cassert>
+#include <charconv>
+#include <cctype>
 #include <regex>
 #include <sstream>
 #include <iomanip>
+#include <limits>
+#include <system_error>
 
 #include "string_utilities.h"
 
@@ -46,13 +50,20 @@ std::string ReplaceAll(std::string str, const std::string& from, const std::stri
 
 std::string strip_string(const std::string &inpt)
 {
-    auto start_it = inpt.begin();
-    auto end_it = inpt.rbegin();
-    while (std::isspace(*start_it))
-        ++start_it;
-    while (std::isspace(*end_it))
-        ++end_it;
-    return std::string(start_it, end_it.base());
+    // Check the bounds before dereferencing so empty/all-whitespace input is
+    // a valid empty result.  Cast through unsigned char as required by the C
+    // character-classification contract for bytes above ASCII.
+    std::size_t first = 0;
+    while (first < inpt.size() &&
+           std::isspace(static_cast<unsigned char>(inpt[first]))) {
+        ++first;
+    }
+    std::size_t last = inpt.size();
+    while (last > first &&
+           std::isspace(static_cast<unsigned char>(inpt[last - 1]))) {
+        --last;
+    }
+    return inpt.substr(first, last - first);
 }
 
 std::vector<std::string> split_string(const std::string& str, char delim) {
@@ -67,27 +78,50 @@ std::vector<std::string> split_string(const std::string& str, char delim) {
 }
 
 std::string create_sass_instr(std::string full_instruction_str, bool is_substring_delimeter, std::string substring_delimeter) {
-    const char *const delim = " ";
     std::size_t first_idx_sass = full_instruction_str.find_first_of(' ');
+    if (first_idx_sass == std::string::npos) {
+        return {};
+    }
     std::size_t last_idx_sass;
     if(is_substring_delimeter) {
         last_idx_sass = full_instruction_str.find(substring_delimeter);
-        assert(last_idx_sass != std::string::npos);
     } else {
-        last_idx_sass = full_instruction_str.find_last_of(delim);
+        last_idx_sass = full_instruction_str.find_last_of(' ');
     }
-    std::string sass_instr = strip_string(full_instruction_str.substr(first_idx_sass, last_idx_sass - 4));
+    if (last_idx_sass == std::string::npos || last_idx_sass < first_idx_sass) {
+        return {};
+    }
+    std::string sass_instr = strip_string(
+        full_instruction_str.substr(first_idx_sass,
+                                    last_idx_sass - first_idx_sass));
     return sass_instr;
 }
 
-unsigned int get_ur_register(std::string operand_str) {
+bool get_ur_register(const std::string &operand_str, unsigned int &register_id) {
     std::regex e ("UR(\\d+)");
     std::smatch match;
-    unsigned int res = 0;
-    if (std::regex_search(operand_str, match, e) && match.size() > 1) {
-        res = std::stoul(match.str(1));
+    if (!std::regex_search(operand_str, match, e) || match.size() <= 1) {
+        return false;
     }
-    return res;
+    const std::size_t match_start = static_cast<std::size_t>(match.position(0));
+    const std::size_t match_end = match_start + match.length(0);
+    const auto is_identifier_byte = [](char value) {
+        return std::isalnum(static_cast<unsigned char>(value)) || value == '_';
+    };
+    if ((match_start != 0 && is_identifier_byte(operand_str[match_start - 1])) ||
+        (match_end != operand_str.size() && is_identifier_byte(operand_str[match_end]))) {
+        return false;
+    }
+    const std::string digits = match.str(1);
+    const char *first = digits.data();
+    const char *last = first + digits.size();
+    unsigned int parsed = 0;
+    const auto result = std::from_chars(first, last, parsed, 10);
+    if (result.ec != std::errc{} || result.ptr != last) {
+        return false;
+    }
+    register_id = parsed;
+    return true;
 }
 
 
@@ -107,7 +141,11 @@ bool endsWith(const std::string& str, const std::string& suffix) {
 }
 
 ThreadblockStringParseInfo parse_tb_string_id(const std::string &tb_string_id) {
-  ThreadblockStringParseInfo result;
+  // Keep malformed names fail-closed instead of leaving uninitialised fields.
+  // Stream IDs come from cuStreamGetId() and are 64-bit values; using stoi()
+  // here silently made any valid ID above INT32_MAX unjoinable (or threw from
+  // the receiver thread while finalising a capture).
+  ThreadblockStringParseInfo result{-1, -1, -1};
 
   // Find positions of key markers
   size_t d_pos = tb_string_id.find("d_");
@@ -124,10 +162,26 @@ ThreadblockStringParseInfo parse_tb_string_id(const std::string &tb_string_id) {
     std::string stream_str = tb_string_id.substr(s_pos + 2, k_pos - s_pos - 3);
     std::string kernel_str = tb_string_id.substr(k_pos + 2, underscore_after_k - k_pos - 2);
 
-    // Convert to integers
-    result.device_id = std::stoi(device_str);
-    result.stream_id = std::stoi(stream_str);
-    result.kernel_id = std::stoi(kernel_str);
+    auto parse_i64 = [](const std::string &text, int64_t &out) {
+      const char *first = text.data();
+      const char *last = first + text.size();
+      auto parsed = std::from_chars(first, last, out, 10);
+      return parsed.ec == std::errc{} && parsed.ptr == last;
+    };
+    int64_t device = 0;
+    int64_t stream = 0;
+    int64_t kernel = 0;
+    if (!parse_i64(device_str, device) || !parse_i64(stream_str, stream) ||
+        !parse_i64(kernel_str, kernel) ||
+        device < std::numeric_limits<int>::min() ||
+        device > std::numeric_limits<int>::max() ||
+        kernel < std::numeric_limits<int>::min() ||
+        kernel > std::numeric_limits<int>::max()) {
+      return result;
+    }
+    result.device_id = static_cast<int>(device);
+    result.stream_id = stream;
+    result.kernel_id = static_cast<int>(kernel);
   }
 
   return result;

@@ -25,7 +25,7 @@ precision-parity if applicable).
 ## sm_86 the calibration workstream result (R12)
 
 All 16 sol-execbench workloads PASSED. Sidecar at
-`scripts/baselines_harness/.harness_traces/problem_040_conv2d_residual_block__cuda_cpp__sm86/full_correctness_v1.json`;
+`tools/sol_baselines_harness/.harness_traces/problem_040_conv2d_residual_block__cuda_cpp__sm86/full_correctness_v1.json`;
 SHA-256 cross-stamped in bundle manifest + ledger.
 
 ## Architecture-coupling caveats

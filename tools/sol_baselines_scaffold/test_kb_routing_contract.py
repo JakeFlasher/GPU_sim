@@ -5,8 +5,16 @@ from __future__ import annotations
 import importlib.util
 from pathlib import Path
 
+import pytest
+
 
 ROOT = Path(__file__).resolve().parents[2]
+_ROUTING_ROOT = ROOT / "scripts" / "kb"
+_requires_routing_sources = pytest.mark.skipif(
+    not (_ROUTING_ROOT / "routing_contract.py").is_file()
+    or not (_ROUTING_ROOT / "route_query.py").is_file(),
+    reason="optional KB routing sources are unavailable",
+)
 
 
 def _load(name: str, path: Path):
@@ -17,6 +25,7 @@ def _load(name: str, path: Path):
     return module
 
 
+@_requires_routing_sources
 def test_router_and_linter_share_data_only_contract() -> None:
     contract = _load("kb_routing_contract", ROOT / "scripts/kb/routing_contract.py")
     expected = contract.SUBCORPUS_TO_SKILL
@@ -31,6 +40,7 @@ def test_router_and_linter_share_data_only_contract() -> None:
     assert "from routing_contract import (" in linter_text
 
 
+@_requires_routing_sources
 def test_cutlass_layout_anchor_is_compound_and_narrow() -> None:
     router = _load("kb_route_query", ROOT / "scripts/kb/route_query.py")
     matches = [
@@ -54,6 +64,7 @@ def test_cutlass_layout_anchor_is_compound_and_narrow() -> None:
     )
 
 
+@_requires_routing_sources
 def test_measurement_cards_route_to_the_active_measurement_skill() -> None:
     router = _load("kb_route_query_formatter", ROOT / "scripts/kb/route_query.py")
     rendered = router._format_reminder(

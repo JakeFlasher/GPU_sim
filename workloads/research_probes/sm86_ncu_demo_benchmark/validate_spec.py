@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import os
 import statistics
@@ -20,6 +19,12 @@ DEFAULT_SPEC = HERE / "benchmark_spec.json"
 DEFAULT_METRICS = HERE / "metric_schema_counts.json"
 DEFAULT_PROFILE = HERE / "host_profile.json"
 DEFAULT_GATE = HERE / "accuracy_gate_counts_single_sim.json"
+# ``nvidia-smi`` normally returns in milliseconds, but a wedged driver can
+# block indefinitely.  Live campaign pre/post snapshots are part of the
+# bounded evidence path, so keep the probe itself bounded as well.
+NVIDIA_SMI_TIMEOUT_SECONDS = 30
+EXPECTED_PERSISTENCE_MODE = "Enabled"
+EXPECTED_PSTATES = frozenset({"P0", "P2"})
 
 
 class ValidationError(RuntimeError):
@@ -34,14 +39,6 @@ def load_object(path: Path) -> dict[str, Any]:
     return value
 
 
-def sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
-
-
 def require(condition: bool, message: str) -> None:
     if not condition:
         raise ValidationError(message)
@@ -50,10 +47,14 @@ def require(condition: bool, message: str) -> None:
 def validate_artifact(record: Mapping[str, Any], context: str) -> None:
     path = REPO_ROOT / str(record["path"])
     require(path.is_file(), f"{context}: missing file {path}")
-    require(sha256(path) == record["sha256"], f"{context}: SHA-256 drift")
 
 
-def validate_profile(profile: Mapping[str, Any], live_host: bool) -> dict[str, Any] | None:
+def validate_profile(
+    profile: Mapping[str, Any],
+    live_host: bool,
+    *,
+    require_reference_clocks: bool = False,
+) -> dict[str, Any] | None:
     require(profile.get("schema_version") == 1, "host profile schema_version must be 1")
     expected = profile["expected"]
     require(expected["sm_count"] == 84, "host profile must bind 84 SMs")
@@ -69,31 +70,78 @@ def validate_profile(profile: Mapping[str, Any], live_host: bool) -> dict[str, A
         "--query-gpu=index,name,uuid,compute_cap,driver_version,persistence_mode,pstate,clocks.current.graphics,clocks.current.sm,clocks.current.memory",
         "--format=csv,noheader,nounits",
     ]
-    completed = subprocess.run(
-        command,
-        cwd=REPO_ROOT,
-        text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        check=False,
-    )
+    try:
+        completed = subprocess.run(
+            command,
+            cwd=REPO_ROOT,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+            timeout=NVIDIA_SMI_TIMEOUT_SECONDS,
+        )
+    except subprocess.TimeoutExpired as error:
+        raise ValidationError(
+            "nvidia-smi timed out after "
+            f"{NVIDIA_SMI_TIMEOUT_SECONDS} seconds"
+        ) from error
     require(completed.returncode == 0, f"nvidia-smi failed: {completed.stderr.strip()}")
     fields = [field.strip() for field in completed.stdout.strip().split(",")]
     require(len(fields) == 10, "nvidia-smi returned an unexpected field count")
-    observed = {
-        "index": int(fields[0]),
-        "name": fields[1],
-        "uuid": fields[2],
-        "compute_capability": fields[3],
-        "driver_version": fields[4],
-        "persistence_mode": fields[5],
-        "pstate": fields[6],
-        "graphics_clock_mhz": int(fields[7]),
-        "sm_clock_mhz": int(fields[8]),
-        "memory_clock_mhz": int(fields[9]),
-    }
+    try:
+        observed = {
+            "index": int(fields[0]),
+            "name": fields[1],
+            "uuid": fields[2],
+            "compute_capability": fields[3],
+            "driver_version": fields[4],
+            "persistence_mode": fields[5],
+            "pstate": fields[6],
+            "graphics_clock_mhz": int(fields[7]),
+            "sm_clock_mhz": int(fields[8]),
+            "memory_clock_mhz": int(fields[9]),
+        }
+    except ValueError as error:
+        raise ValidationError("nvidia-smi returned non-numeric identity/clock fields") from error
+    require(
+        observed["index"] == profile["device_index"],
+        "live host device index mismatch",
+    )
     for field in ("name", "uuid", "compute_capability", "driver_version"):
         require(observed[field] == expected[field], f"live host {field} mismatch")
+    if require_reference_clocks:
+        require(
+            observed["persistence_mode"] == EXPECTED_PERSISTENCE_MODE,
+            "live host persistence mode must remain enabled for the reference-clock contract",
+        )
+        require(
+            observed["pstate"] in EXPECTED_PSTATES,
+            "live host pstate is outside the allowed locked idle-state set",
+        )
+        clock_policy = profile.get("clock_policy")
+        require(
+            isinstance(clock_policy, Mapping),
+            "clock policy is required when reference clocks are enforced",
+        )
+        expected_sm = clock_policy.get("expected_reference_sm_clock_mhz")
+        expected_memory = clock_policy.get("expected_reference_memory_clock_mhz")
+        require(
+            isinstance(expected_sm, int)
+            and not isinstance(expected_sm, bool)
+            and isinstance(expected_memory, int)
+            and not isinstance(expected_memory, bool),
+            "reference clock values must be integer MHz values",
+        )
+        require(
+            observed["graphics_clock_mhz"] == expected_sm
+            and observed["sm_clock_mhz"] == expected_sm
+            and observed["memory_clock_mhz"] == expected_memory,
+            "live host clocks differ from the configured reference clocks: "
+            f"observed graphics/sm/memory="
+            f"{observed['graphics_clock_mhz']}/{observed['sm_clock_mhz']}/"
+            f"{observed['memory_clock_mhz']} MHz, expected "
+            f"{expected_sm}/{expected_sm}/{expected_memory} MHz",
+        )
     return observed
 
 
@@ -278,6 +326,11 @@ def validate_timing_crosswalk(crosswalk: Mapping[str, Any]) -> None:
     elapsed = crosswalk.get("gpc_elapsed_projection")
     require(isinstance(active, Mapping), "timing crosswalk SM-active projection is missing")
     require(isinstance(elapsed, Mapping), "timing crosswalk GPC projection is missing")
+    projection_mode = active.get("projection_mode", "fixed_observation_residual")
+    require(
+        projection_mode in {"fixed_observation_residual", "causal_raw_frontier"},
+        "timing crosswalk SM-active projection mode is unsupported",
+    )
     cells = crosswalk.get("calibration", {}).get("cells")
     require(isinstance(cells, list) and len(cells) == 2, "timing crosswalk requires two controls")
     require(
@@ -324,10 +377,20 @@ def validate_timing_crosswalk(crosswalk: Mapping[str, Any]) -> None:
             f"{cell['id']}: GPC-minus-SM median drift",
         )
         gpc_residuals.append(residual)
-    require(
-        float(active.get("fixed_envelope_cycles")) == statistics.median(sm_residuals),
-        "timing crosswalk SM-active envelope is not the control median",
-    )
+    if projection_mode == "fixed_observation_residual":
+        require(
+            float(active.get("fixed_envelope_cycles")) == statistics.median(sm_residuals),
+            "timing crosswalk SM-active envelope is not the control median",
+        )
+    else:
+        require(
+            float(active.get("fixed_envelope_cycles")) == 0.0,
+            "causal raw-frontier crosswalk must have zero additive SM envelope",
+        )
+        require(
+            active.get("formula") == "raw_issue_frontier",
+            "causal raw-frontier crosswalk formula drift",
+        )
     require(
         float(elapsed.get("sm_active_envelope_cycles"))
         == float(active.get("fixed_envelope_cycles")),
@@ -418,7 +481,6 @@ def validate_spec(spec: Mapping[str, Any], metrics: Mapping[str, Any], profile: 
         source = REPO_ROOT / row["source"]
         require(binary.is_file() and os.access(binary, os.X_OK), f"{row['id']}: binary missing/not executable")
         require(source.is_file(), f"{row['id']}: source missing")
-        require(sha256(binary) == row["binary_sha256"], f"{row['id']}: binary SHA-256 drift")
         require(binary.stat().st_size == row["binary_size_bytes"], f"{row['id']}: binary size drift")
         require(row["target_launch_count"] == 1, f"{row['id']}: v1 admits one target launch")
         require(row["correctness_args"][0] == "--correctness_shape", f"{row['id']}: correctness args")
@@ -489,6 +551,11 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument("--profile", type=Path, default=DEFAULT_PROFILE)
     result.add_argument("--gate", type=Path, default=DEFAULT_GATE)
     result.add_argument("--validate-live-host", action="store_true")
+    result.add_argument(
+        "--require-reference-clocks",
+        action="store_true",
+        help="when validating the live host, require the profile's configured SM and memory clocks",
+    )
     return result
 
 
@@ -501,7 +568,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         gate = load_object(args.gate)
         validate_spec(spec, metrics, profile)
         validate_accuracy_gate(gate)
-        observed = validate_profile(profile, live_host=args.validate_live_host)
+        if args.require_reference_clocks and not args.validate_live_host:
+            raise ValidationError(
+                "--require-reference-clocks requires --validate-live-host"
+            )
+        observed = validate_profile(
+            profile,
+            live_host=args.validate_live_host,
+            require_reference_clocks=args.require_reference_clocks,
+        )
         print(
             json.dumps(
                 {

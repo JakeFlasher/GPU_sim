@@ -17,6 +17,7 @@
     {"name": "root_function_zero", "mutation": "root_function_zero", "expected_typed_reason": "function_unique_id_invalid"},
     {"name": "zero_grid_axis", "mutation": "zero_grid_axis", "expected_typed_reason": "trace_launch_geometry_invalid"},
     {"name": "zero_block_axis", "mutation": "zero_block_axis", "expected_typed_reason": "trace_launch_geometry_invalid"},
+    {"name": "negative_register_count", "mutation": "negative_register_count", "expected_typed_reason": "trace_launch_registers_invalid"},
     {"name": "legacy_nonzero_shared_memory_has_no_split", "mutation": "legacy_shared_memory_nonzero", "expected_typed_reason": "shared_memory_split_unavailable"},
     {"name": "legacy_contract_rejects_split_fields", "mutation": "legacy_shared_memory_split_unadvertised", "expected_typed_reason": "shared_memory_split_unadvertised"},
     {"name": "split_shared_memory_matching", "mutation": "split_shared_memory_matching", "expected_typed_reason": null},

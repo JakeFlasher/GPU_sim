@@ -41,7 +41,10 @@ import math
 from dataclasses import dataclass
 from typing import Callable, Iterable
 
-import numpy as np
+try:
+    import numpy as np
+except ImportError:  # optional calibration dependency
+    np = None  # type: ignore[assignment]
 
 from sol_baselines_harness.metrics.framework_contract import (
     BOOTSTRAP_RESAMPLES,
@@ -111,6 +114,7 @@ TIERED_GATE_TYPED_REASONS: frozenset[str] = frozenset({
     "tiered_gate_input_invalid",
     "tiered_gate_residuals_empty",
     "tiered_gate_below_smoke_floor",
+    "tiered_gate_dependency_missing",
 })
 
 
@@ -483,6 +487,11 @@ def evaluate_tiered_gate(
             "tiered_gate_input_invalid",
             f"loocv_result must be LOOCVResult; got "
             f"{type(loocv_result).__name__}",
+        )
+    if np is None:
+        raise TieredGateEvaluatorError(
+            "tiered_gate_dependency_missing",
+            "NumPy is required to evaluate bootstrap confidence intervals",
         )
     lookup = (
         partition_lookup

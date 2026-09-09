@@ -2,8 +2,7 @@
 //
 // Pure host + device helper: map a 32-bit warp-collective predicate mask
 // to the histogram bucket index in `branch_active_lanes_hist[0..32]`.
-// Used by the `count_branch_active_mask_cb` injected device callback and
-// by the host-only regression in test_classifier.cc.
+// Used by the `count_branch_active_mask_cb` injected device callback.
 //
 // Semantics:
 //   - Each warp-instance of a branch-class instruction (every opcode the
@@ -17,10 +16,8 @@
 //     branch this warp-instance); a true observation, NOT a placeholder.
 //   - Bucket 32 = fully-active branch (unconditional or always-true
 //     predicate); also a true observation.
-//   - Bucket 16 = AC-4 canonical "predicated branch with 16 active
-//     lanes" — the deterministic regression test in test_classifier.cc
-//     drives three different 16-active lane patterns through this
-//     helper and asserts `hist[16] == 3`.
+//   - Bucket 16 is the canonical "predicated branch with 16 active lanes"
+//     shape.
 //
 // The histogram is divergence-shape blind: two warp-instances with
 // different lane patterns (e.g. `0x0000FFFF` vs `0xFFFF0000`) but the
@@ -33,8 +30,8 @@
 
 #include <stdint.h>
 
-// __host__ __device__ so the device callback in inject_funcs.cu and the
-// host-only test in test_classifier.cc call the same function. Marked
+// __host__ __device__ so the device callback in inject_funcs.cu can call
+// this pure helper. Marked
 // inline so multiple translation units that include the header do not
 // generate duplicate symbols at link time.
 //

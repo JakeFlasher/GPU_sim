@@ -60,7 +60,7 @@ std::string escape_json_string(const std::string &s) {
   return out;
 }
 
-void write_one_typed_sidecar(
+bool write_one_typed_sidecar(
     const std::string &filename,
     const std::string &typed_reason,
     const std::string &device_tag,
@@ -70,7 +70,7 @@ void write_one_typed_sidecar(
   if (!ofs) {
     std::cerr << "Failed to open " << filename
               << " for writing." << std::endl;
-    return;
+    return false;
   }
   ofs << "[";
   bool first = true;
@@ -104,7 +104,17 @@ void write_one_typed_sidecar(
   }
   if (!first) ofs << "\n";
   ofs << "]\n";
+  ofs.flush();
+  if (!ofs) {
+    std::cerr << "Failed while writing " << filename << std::endl;
+    return false;
+  }
   ofs.close();
+  if (!ofs) {
+    std::cerr << "Failed to close " << filename << std::endl;
+    return false;
+  }
+  return true;
 }
 
 }  // namespace
@@ -127,7 +137,7 @@ void aggregate(
   g_aggregator[std::move(key)]++;
 }
 
-void serialize_exclusion_sidecars(
+bool serialize_exclusion_sidecars(
     const std::string &dir_path,
     const std::string &device_tag,
     std::function<std::string(uint32_t)> slug_of_function_id) {
@@ -154,13 +164,13 @@ void serialize_exclusion_sidecars(
   // Write all typed-reason files. If a typed_reason has zero
   // entries, the file is still emitted as `[]` so consumers never
   // see "file missing" as a degenerate case.
-  write_one_typed_sidecar(
+  const bool unsupported_ok = write_one_typed_sidecar(
       dir_path + "/unsupported_memory_path.json",
       "unsupported_memory_path", device_tag, slug_cache, snapshot);
-  write_one_typed_sidecar(
+  const bool unmapped_ok = write_one_typed_sidecar(
       dir_path + "/unmapped_memory_range.json",
       "unmapped_memory_range", device_tag, slug_cache, snapshot);
-  write_one_typed_sidecar(
+  const bool cross_allocation_ok = write_one_typed_sidecar(
       dir_path + "/cross_allocation_lane_span.json",
       "cross_allocation_lane_span", device_tag, slug_cache,
       snapshot);
@@ -187,6 +197,7 @@ void serialize_exclusion_sidecars(
             << ", cross_allocation=" << cross_allocation_count
             << ")"
             << std::endl;
+  return unsupported_ok && unmapped_ok && cross_allocation_ok;
 }
 
 void reset_aggregator_for_testing() {

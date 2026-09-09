@@ -54,7 +54,7 @@ All 16 workloads pass with `speedup_factor` ranging from 8.189x to
 19.836x. Hardware: NVIDIA GeForce RTX 5060 Laptop GPU (sm_120).
 Evaluation ran through the native `sol-execbench` CLI (no Docker); the
 cache / manifest identify this run by `native_env_hash` (see
-`scripts/baselines_harness/native_env.py`).
+`tools/sol_baselines_harness/native_env.py`).
 
 ## Architecture-coupling caveats
 

@@ -1,13 +1,12 @@
 //! Closed v2 wire contracts staged ahead of the production runner cutover.
 
 use std::collections::BTreeSet;
-use std::fmt;
 use std::num::NonZeroU8;
 
-use serde::de::{self, DeserializeOwned, DeserializeSeed, MapAccess, SeqAccess, Visitor};
+use serde::de;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
-use sim_arch::ArchId;
-use sim_sm::TraceBundleIdentity;
+use sim_arch::{ArchId, strict_json_from_slice};
+use sim_sm::{SmActiveObservationFrontier, TraceBundleIdentity};
 use sim_trace::Sha256Digest;
 
 use crate::emit::{
@@ -33,120 +32,6 @@ impl WireError {
     fn validation(message: impl Into<String>) -> Self {
         Self::Validation(message.into())
     }
-}
-
-#[derive(Clone, Copy)]
-struct RejectDuplicateMembers;
-
-impl<'de> DeserializeSeed<'de> for RejectDuplicateMembers {
-    type Value = ();
-
-    fn deserialize<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        deserializer.deserialize_any(self)
-    }
-}
-
-impl<'de> Visitor<'de> for RejectDuplicateMembers {
-    type Value = ();
-
-    fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str("a JSON value without duplicate object members")
-    }
-
-    fn visit_bool<E>(self, _value: bool) -> Result<Self::Value, E> {
-        Ok(())
-    }
-
-    fn visit_i64<E>(self, _value: i64) -> Result<Self::Value, E> {
-        Ok(())
-    }
-
-    fn visit_u64<E>(self, _value: u64) -> Result<Self::Value, E> {
-        Ok(())
-    }
-
-    fn visit_i128<E>(self, _value: i128) -> Result<Self::Value, E> {
-        Ok(())
-    }
-
-    fn visit_u128<E>(self, _value: u128) -> Result<Self::Value, E> {
-        Ok(())
-    }
-
-    fn visit_f64<E>(self, _value: f64) -> Result<Self::Value, E> {
-        Ok(())
-    }
-
-    fn visit_char<E>(self, _value: char) -> Result<Self::Value, E> {
-        Ok(())
-    }
-
-    fn visit_str<E>(self, _value: &str) -> Result<Self::Value, E> {
-        Ok(())
-    }
-
-    fn visit_string<E>(self, _value: String) -> Result<Self::Value, E> {
-        Ok(())
-    }
-
-    fn visit_none<E>(self) -> Result<Self::Value, E> {
-        Ok(())
-    }
-
-    fn visit_some<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        deserializer.deserialize_any(self)
-    }
-
-    fn visit_unit<E>(self) -> Result<Self::Value, E> {
-        Ok(())
-    }
-
-    fn visit_newtype_struct<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        deserializer.deserialize_any(self)
-    }
-
-    fn visit_seq<A>(self, mut sequence: A) -> Result<Self::Value, A::Error>
-    where
-        A: SeqAccess<'de>,
-    {
-        while sequence.next_element_seed(Self)?.is_some() {}
-        Ok(())
-    }
-
-    fn visit_map<A>(self, mut object: A) -> Result<Self::Value, A::Error>
-    where
-        A: MapAccess<'de>,
-    {
-        let mut members = BTreeSet::new();
-        while let Some(member) = object.next_key::<String>()? {
-            if !members.insert(member.clone()) {
-                return Err(de::Error::custom(format!(
-                    "duplicate JSON member {member:?}"
-                )));
-            }
-            object.next_value_seed(Self)?;
-        }
-        Ok(())
-    }
-}
-
-fn strict_json_from_slice<T>(bytes: &[u8]) -> Result<T, WireError>
-where
-    T: DeserializeOwned,
-{
-    let mut duplicate_check = serde_json::Deserializer::from_slice(bytes);
-    RejectDuplicateMembers.deserialize(&mut duplicate_check)?;
-    duplicate_check.end()?;
-    Ok(serde_json::from_slice(bytes)?)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
@@ -470,7 +355,7 @@ impl LaunchKeyV1 {
 
 #[cfg(test)]
 pub(crate) fn parse_launch_key_v1(bytes: &[u8]) -> Result<LaunchKeyV1, WireError> {
-    strict_json_from_slice(bytes)
+    Ok(strict_json_from_slice(bytes)?)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
@@ -1072,14 +957,55 @@ pub(crate) struct PerLaunchDiagnosticV2 {
     launch_key: LaunchKeyV1,
     diagnostic_last_issue_cycles: u64,
     terminal_modeled_event_time: TerminalModeledEventTimeV2,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    sm_active_observation_frontier: Option<SmActiveObservationFrontierWire>,
     binding_cycles_role: &'static str,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct SmActiveObservationFrontierWire {
+    issue_lower_bound_cycles: u64,
+    issue_cycles: u64,
+    terminal_lower_bound_cycles: Option<u64>,
+    terminal_cycles: Option<u64>,
+    envelope_cycles: u64,
+    role: &'static str,
+}
+
+impl From<SmActiveObservationFrontier> for SmActiveObservationFrontierWire {
+    fn from(value: SmActiveObservationFrontier) -> Self {
+        Self {
+            issue_lower_bound_cycles: value.issue_lower_bound_cycles,
+            issue_cycles: value.issue_cycles,
+            terminal_lower_bound_cycles: value.terminal_lower_bound_cycles,
+            terminal_cycles: value.terminal_cycles,
+            envelope_cycles: value.envelope_cycles,
+            role: "architecture_scoped_sm_active_observation_boundary_not_raw_lower_bound",
+        }
+    }
+}
+
 impl PerLaunchDiagnosticV2 {
+    #[allow(dead_code)]
     pub(crate) fn new(
         launch_key: LaunchKeyV1,
         diagnostic_last_issue_cycles: u64,
         terminal_modeled_event_time: Option<u64>,
+    ) -> Self {
+        Self::with_sm_active_frontier(
+            launch_key,
+            diagnostic_last_issue_cycles,
+            terminal_modeled_event_time,
+            None,
+        )
+    }
+
+    pub(crate) fn with_sm_active_frontier(
+        launch_key: LaunchKeyV1,
+        diagnostic_last_issue_cycles: u64,
+        terminal_modeled_event_time: Option<u64>,
+        sm_active_observation_frontier: Option<SmActiveObservationFrontier>,
     ) -> Self {
         let terminal_modeled_event_time = terminal_modeled_event_time.map_or(
             TerminalModeledEventTimeV2::Unavailable {
@@ -1091,6 +1017,7 @@ impl PerLaunchDiagnosticV2 {
             launch_key,
             diagnostic_last_issue_cycles,
             terminal_modeled_event_time,
+            sm_active_observation_frontier: sm_active_observation_frontier.map(Into::into),
             binding_cycles_role: "diagnostic_only_not_binding_prediction",
         }
     }

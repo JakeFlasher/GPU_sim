@@ -46,7 +46,7 @@ Run its six-cell campaign with:
 ```
 
 The campaign matrix and model-selection procedure are defined in
-`docs/sm86_barrier_pipeline_cache_handoff_milestone.md`. NCU and NVBit run as
+`docs/STATUS.md`. NCU and NVBit run as
 separate foreground processes; no profiler metric is read by simulator replay.
 
 Run the resumable stages with:

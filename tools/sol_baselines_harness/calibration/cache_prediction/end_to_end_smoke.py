@@ -847,6 +847,7 @@ def _capture_tier2_trace(
             cwd=str(spec.binary_path.parent),
             capture_output=True,
             text=True,
+            errors="replace",
             check=False,
             timeout=timeout_seconds,
         )
@@ -1181,6 +1182,7 @@ def _git_head_sha(repo_root: Path) -> str:
             cwd=str(repo_root),
             capture_output=True,
             text=True,
+            errors="replace",
             check=False,
             timeout=5,
         )

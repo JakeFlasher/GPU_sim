@@ -244,6 +244,7 @@ struct LaunchDiagnosticWitness {
     diagnostic_last_issue_cycles: u64,
     last_processed_modeled_system_event_time: Option<u64>,
     terminal_modeled_event_time: Option<u64>,
+    sm_active_observation_frontier: Option<sim_sm::SmActiveObservationFrontier>,
     modeled_completion_frontier: sim_sm::ModeledCompletionFrontier,
 }
 
@@ -394,6 +395,7 @@ where
                     last_processed_modeled_system_event_time: predictions
                         .last_processed_modeled_system_event_time(),
                     terminal_modeled_event_time: predictions.terminal_modeled_event_time(),
+                    sm_active_observation_frontier: result.sm_active_observation_frontier(),
                     modeled_completion_frontier: predictions.modeled_completion_frontier(),
                 });
                 per_launch_results.push(PerLaunchResultV2::new(entry.launch_key.clone(), metrics));
@@ -454,10 +456,11 @@ where
                 "aggregate diagnostics differ from per-launch emission diagnostics",
             ));
         }
-        per_launch_diagnostics.push(PerLaunchDiagnosticV2::new(
+        per_launch_diagnostics.push(PerLaunchDiagnosticV2::with_sm_active_frontier(
             witness.launch_key,
             witness.diagnostic_last_issue_cycles,
             witness.terminal_modeled_event_time,
+            witness.sm_active_observation_frontier,
         ));
     }
     let diagnostics =
@@ -761,24 +764,10 @@ fn seal_result_v2(
     )
     .map_err(wire_serialization_error)?;
     let sealed_value = serde_json::to_value(&result).map_err(result_serialization_error)?;
-    let revalidated_unsigned = value_without_member(sealed_value.clone(), "result_sha256")?;
-    let revalidated_canonical =
-        canonical_json_utf8(&revalidated_unsigned).map_err(result_serialization_error)?;
-    if revalidated_canonical != unsigned_canonical
-        || Sha256Digest::of(revalidated_canonical.as_bytes()) != result_sha256
-    {
-        return Err(result_serialization_error(
-            "sim_result.v2 seal preimage changed during checked construction",
-        ));
-    }
+    // `SimResultV2` is a closed, deterministic wire type. One canonical
+    // serialization is enough; reparsing and rehashing the same document only
+    // duplicates the hot result-emission path.
     let canonical_json = canonical_json_utf8(&sealed_value).map_err(result_serialization_error)?;
-    let reparsed: serde_json::Value =
-        serde_json::from_str(&canonical_json).map_err(result_serialization_error)?;
-    if canonical_json_utf8(&reparsed).map_err(result_serialization_error)? != canonical_json {
-        return Err(result_serialization_error(
-            "sim_result.v2 final document did not revalidate as canonical UTF-8 JSON",
-        ));
-    }
     Ok(SimRunOutput {
         canonical_json,
         result_sha256,

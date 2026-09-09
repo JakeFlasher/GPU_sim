@@ -5,7 +5,7 @@ Runs ``live_tier2_harvest_fn`` against every cell in
 cohort), captures per-cell completion + per-cell sidecar
 evidence + closed-vocabulary failure tokens, and writes the
 result to
-``scripts/baselines_harness/calibration/cache_prediction/sm120_pilot_tier2_harvest_status_v1.toml``.
+``tools/sol_baselines_harness/calibration/cache_prediction/sm120_pilot_tier2_harvest_status_v1.toml``.
 
 Idempotent via resume semantics: a cell that already has a
 non-empty parseable sidecar at

@@ -15,9 +15,7 @@
 // * ``saturating_add_u64_compute`` — pure ``__host__ __device__``
 //   function that takes a ``(old_value, delta)`` pair and returns the
 //   clamped ``new_value`` plus an ``overflowed`` flag. No atomics, no
-//   memory access. The host-side tests exercise this directly via a
-//   host-only translation unit (no CUDA dependency) so the saturation
-//   logic is verifiable without needing a CUDA runtime.
+//   memory access.
 // * ``saturating_atomic_add_u64`` — ``__device__``-only wrapper that
 //   composes the compute helper with an ``atomicCAS``-based retry loop.
 //   On the iteration that wins the CAS, it bumps a per-launch
@@ -43,9 +41,8 @@
 // ``__CUDACC__`` is defined by nvcc on every CUDA compilation pass
 // (device and host paths). Plain ``g++`` / ``clang++`` host
 // compilation does not define it, which is the signal we use to
-// stub out the CUDA attribute macros so the compute helper still
-// compiles cleanly in a host-only translation unit (e.g. the
-// ``test_saturating_counter.cc`` regression test).
+// stub out the CUDA attribute macros so the compute helper also compiles
+// cleanly in host-side tooling.
 #ifndef __CUDACC__
 #define __host__
 #define __device__
@@ -54,10 +51,8 @@
 #endif
 
 // Pure compute helper. Returns the clamped new value and whether the
-// addition would have overflowed ``UINT64_MAX``. Both outputs are
-// returned via pointers so the host-side test can call the same
-// function the device wrapper does — no need to maintain two
-// definitions in lockstep.
+// addition would have overflowed ``UINT64_MAX``. Both outputs are returned
+// through pointers for shared host/device use.
 //
 // Contract: if ``delta == 0`` the new value equals the old value and
 // ``overflowed`` is false (a zero-add never saturates). Otherwise

@@ -86,6 +86,7 @@ fn token(err: &LaneError) -> &'static str {
         LaneError::BaseStrideNonContiguous { .. } => "stride_non_contiguous",
         LaneError::BaseDeltaCountInvalid { .. } => "delta_count",
         LaneError::AddressOverflow { .. } => "address_overflow",
+        LaneError::NegativeAddress { .. } => "compressed_format_malformed",
         LaneError::UnknownFormat(_) => "unknown_format",
     }
 }

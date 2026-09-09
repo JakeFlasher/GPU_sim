@@ -17,7 +17,7 @@ use sim_trace::reader::MemoryPayloadContract;
 use sim_trace::{
     AnchoredDir, ArtifactDigestIdentity, CanonicalJsonError, ExecInfo, ExecInfoError,
     FileGenerationIdentity, FileIdentity, Sha256Digest, TraceArtifactIdentity, TraceDir,
-    TraceDirSnapshot, TraceError, TraceSnapshotLimits, canonical_json,
+    TraceDirSnapshot, TraceError, TraceSnapshotLimits, canonical_json, strict_json_from_slice,
 };
 
 use crate::control_bits::{ControlBitsError, ControlSidecar};
@@ -1789,7 +1789,7 @@ fn admit_launch_evidence_in_base(
     let manifest_file_generation = manifest_file.generation_identity();
     let manifest_raw = manifest_file.into_raw();
     let envelope: ManifestVersionEnvelope =
-        serde_json::from_slice(&manifest_raw).map_err(|source| ManifestError::Parse {
+        strict_json_from_slice(&manifest_raw).map_err(|source| ManifestError::Parse {
             path: manifest_path.to_path_buf(),
             source,
         })?;
@@ -1800,7 +1800,7 @@ fn admit_launch_evidence_in_base(
         });
     }
     let manifest: LaunchEvidenceManifest =
-        serde_json::from_slice(&manifest_raw).map_err(|source| ManifestError::Parse {
+        strict_json_from_slice(&manifest_raw).map_err(|source| ManifestError::Parse {
             path: manifest_path.to_path_buf(),
             source,
         })?;
@@ -2119,6 +2119,29 @@ fn admit_launch_evidence_in_base(
         return Err(ManifestError::IdentityFieldMissing {
             field: "control_bits_sidecar.binary",
         });
+    }
+    // A canonical sidecar name is the only producer-side join token available
+    // while the trace contract carries no binary digest.  Bind its embedded
+    // binary basename to the execution metadata before allowing the sidecar
+    // to contribute scheduling controls; otherwise a resealed sidecar from a
+    // different executable can pass the filename and digest checks.
+    let actual_binary = Path::new(&control.binary)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .filter(|name| !name.is_empty())
+        .ok_or_else(|| ManifestError::IdentityMismatch {
+            artifact: ManifestArtifactToken::ControlBitsSidecar,
+            edge: "benchmark_name->control_bits_sidecar.binary",
+            expected: format!("{:?} or {expected_control_stem:?}", exec.benchmark_name),
+            actual: control.binary.clone(),
+        })?;
+    if actual_binary != exec.benchmark_name && actual_binary != expected_control_stem {
+        return Err(identity_mismatch(
+            ManifestArtifactToken::ControlBitsSidecar,
+            "benchmark_name->control_bits_sidecar.binary",
+            format!("{:?} or {expected_control_stem:?}", exec.benchmark_name),
+            actual_binary,
+        ));
     }
     let schedules = build_schedules(&exec, &control)?;
 

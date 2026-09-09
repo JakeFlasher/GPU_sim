@@ -310,6 +310,7 @@ dependencies = [
  "rustix",
  "serde",
  "serde_json",
+ "sim-arch",
  "tempfile",
  "thiserror",
 ]

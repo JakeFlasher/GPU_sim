@@ -1,26 +1,17 @@
 {
-  "schema_version": 1,
-  "benchmark_id": "sm86_ncu_accuracy_recovery_v2",
-  "status": "accuracy_recovery_contract_not_run",
-  "frozen_at_revision": "2a2a535a48666dfb29e76b9914c8a4ec8fdaaf69",
-  "architecture": "sm_86",
-  "profile": "workloads/research_probes/sm86_ncu_demo_benchmark/host_profile.json",
-  "metric_schema": "workloads/research_probes/sm86_ncu_demo_benchmark/metric_schema_counts.json",
   "accuracy_gate": "workloads/research_probes/sm86_ncu_demo_benchmark/accuracy_gate_counts_single_sim.json",
-  "timing_crosswalk": "workloads/research_probes/sm86_ncu_demo_benchmark/timing_crosswalk.json",
+  "architecture": "sm_86",
+  "benchmark_id": "sm86_ncu_accuracy_recovery_v2",
   "correctness": {
     "timeout_seconds": 180
   },
+  "frozen_at_revision": "2a2a535a48666dfb29e76b9914c8a4ec8fdaaf69",
+  "metric_schema": "workloads/research_probes/sm86_ncu_demo_benchmark/metric_schema_counts.json",
   "ncu": {
-    "tool": "/usr/local/cuda-13.2/nsight-compute-2026.1.0/ncu",
-    "replay_mode": "application",
     "cache_control": "all",
     "clock_control": "none",
-    "launch_skip": 1,
     "launch_count": 1,
-    "repeats_smoke": 3,
-    "repeats_final": 7,
-    "timeout_seconds": 900,
+    "launch_skip": 1,
     "metrics": [
       "gpc__cycles_elapsed.max",
       "sm__cycles_active.max",
@@ -35,152 +26,385 @@
       "lts__t_sectors_srcunit_tex_lookup_hit.sum",
       "lts__t_sectors_srcunit_tex_lookup_miss.sum",
       "dram__sectors_read.sum"
-    ]
+    ],
+    "repeats_final": 7,
+    "repeats_smoke": 3,
+    "replay_mode": "application",
+    "timeout_seconds": 900,
+    "tool": "/usr/local/cuda-13.2/nsight-compute-2026.1.0/ncu"
   },
   "nvbit": {
-    "tracer": "tools/nvbit_tracer/tracer_tool/tracer_tool.so",
-    "runtime_manifest": "tools/nvbit_tracer/tracer_tool.nvbit-runtime-manifest.json",
     "active_from_start": true,
-    "dynamic_kernel_limit_start": 0,
     "dynamic_kernel_limit_end": 1,
+    "dynamic_kernel_limit_start": 0,
+    "runtime_manifest": "tools/nvbit_tracer/tracer_tool.nvbit-runtime-manifest.json",
+    "timeout_seconds": 900,
+    "tracer": "tools/nvbit_tracer/tracer_tool/tracer_tool.so"
+  },
+  "profile": "workloads/research_probes/sm86_ncu_demo_benchmark/host_profile.json",
+  "schema_version": 1,
+  "simulator": {
+    "arch_card": "arch_profiles/cards/sm_86.json",
+    "binary": "sim/target/release/sim-run",
+    "cache_scope": "launch",
+    "mode": "l1-l2",
+    "multi_launch_policy": "not_admitted_in_v1_all_rows_are_one_target_launch",
+    "pchase_card": "data/pchase/sm_86_static_card.json",
+    "repeats_final": 1,
+    "repeats_smoke": 1,
     "timeout_seconds": 900
   },
   "static_control": {
-    "toolkit_bindir": "/usr/local/cuda-13.2/bin",
-    "timeout_seconds": 300
+    "timeout_seconds": 300,
+    "toolkit_bindir": "/usr/local/cuda-13.2/bin"
   },
-  "simulator": {
-    "binary": "sim/target/release/sim-run",
-    "mode": "l1-l2",
-    "cache_scope": "launch",
-    "arch_card": "arch_profiles/cards/sm_86.json",
-    "pchase_card": "data/pchase/sm_86_static_card.json",
-    "repeats_smoke": 1,
-    "repeats_final": 1,
-    "timeout_seconds": 900,
-    "multi_launch_policy": "not_admitted_in_v1_all_rows_are_one_target_launch"
-  },
+  "status": "accuracy_recovery_contract_not_run",
+  "timing_crosswalk": "workloads/research_probes/sm86_ncu_demo_benchmark/timing_crosswalk.json",
   "workloads": [
     {
-      "id": "gemm_hmma_bf16_sm80",
+      "binary": "workloads/portable_lcd/gemm_hmma_bf16_sm80/gemm_hmma_bf16_sm80_run",
+      "binary_size_bytes": 113664,
+      "correctness_args": [
+        "--correctness_shape",
+        "--seed",
+        "42",
+        "--warmup",
+        "1",
+        "--reps",
+        "1",
+        "--output_dir",
+        "{output}"
+      ],
       "display_name": "BF16 HMMA GEMM snapshot",
       "functional_analogue": "GPT-style dense BF16 projection kernel",
-      "stage": "smoke",
-      "binary": "workloads/portable_lcd/gemm_hmma_bf16_sm80/gemm_hmma_bf16_sm80_run",
-      "binary_sha256": "55133e328fc16238d78e3dde335b4ce5789a4b3838fb440da41f489f805a1362",
-      "binary_size_bytes": 113664,
+      "id": "gemm_hmma_bf16_sm80",
+      "ncu_args": [
+        "--timing_shape",
+        "--warmup",
+        "1",
+        "--reps",
+        "1"
+      ],
       "source": "workloads/portable_lcd/gemm_hmma_bf16_sm80/main.cu",
-      "timing_shape": {"m": 256, "n": 256, "k": 256},
+      "stage": "smoke",
       "target_launch_count": 1,
-      "correctness_args": ["--correctness_shape", "--seed", "42", "--warmup", "1", "--reps", "1", "--output_dir", "{output}"],
-      "ncu_args": ["--timing_shape", "--warmup", "1", "--reps", "1"],
-      "trace_args": ["--timing_shape", "--warmup", "0", "--reps", "1"]
+      "timing_shape": {
+        "k": 256,
+        "m": 256,
+        "n": 256
+      },
+      "trace_args": [
+        "--timing_shape",
+        "--warmup",
+        "0",
+        "--reps",
+        "1"
+      ]
     },
     {
-      "id": "flash_attn_fwd_bf16_sm80",
+      "binary": "workloads/portable_lcd/flash_attn_fwd_bf16_sm80/flash_attn_fwd_bf16_sm80_run",
+      "binary_size_bytes": 179888,
+      "correctness_args": [
+        "--correctness_shape",
+        "--seed",
+        "42",
+        "--warmup",
+        "1",
+        "--reps",
+        "1",
+        "--output_dir",
+        "{output}"
+      ],
       "display_name": "BF16 FlashAttention forward snapshot",
       "functional_analogue": "BERT-style attention kernel",
-      "stage": "smoke",
-      "binary": "workloads/portable_lcd/flash_attn_fwd_bf16_sm80/flash_attn_fwd_bf16_sm80_run",
-      "binary_sha256": "a272cde4fe06763638021de9cee4bea0ee39c52ee3511bce3abdec01b56f5fe1",
-      "binary_size_bytes": 179888,
+      "id": "flash_attn_fwd_bf16_sm80",
+      "ncu_args": [
+        "--timing_shape",
+        "--warmup",
+        "1",
+        "--reps",
+        "1"
+      ],
       "source": "workloads/portable_lcd/flash_attn_fwd_bf16_sm80/main.cu",
-      "timing_shape": {"batch_heads": 4, "query_tokens": 64, "key_tokens": 128, "head_dim": 16},
+      "stage": "smoke",
       "target_launch_count": 1,
-      "correctness_args": ["--correctness_shape", "--seed", "42", "--warmup", "1", "--reps", "1", "--output_dir", "{output}"],
-      "ncu_args": ["--timing_shape", "--warmup", "1", "--reps", "1"],
-      "trace_args": ["--timing_shape", "--warmup", "0", "--reps", "1"]
+      "timing_shape": {
+        "batch_heads": 4,
+        "head_dim": 16,
+        "key_tokens": 128,
+        "query_tokens": 64
+      },
+      "trace_args": [
+        "--timing_shape",
+        "--warmup",
+        "0",
+        "--reps",
+        "1"
+      ]
     },
     {
-      "id": "layernorm_fwd_bf16_sm80",
+      "binary": "workloads/portable_lcd/layernorm_fwd_bf16_sm80/layernorm_fwd_bf16_sm80_run",
+      "binary_size_bytes": 114112,
+      "correctness_args": [
+        "--correctness_shape",
+        "--seed",
+        "42",
+        "--warmup",
+        "1",
+        "--reps",
+        "1",
+        "--output_dir",
+        "{output}"
+      ],
       "display_name": "BF16 LayerNorm forward snapshot",
       "functional_analogue": "memory-heavy transformer normalization kernel",
-      "stage": "smoke",
-      "binary": "workloads/portable_lcd/layernorm_fwd_bf16_sm80/layernorm_fwd_bf16_sm80_run",
-      "binary_sha256": "edfee9f9588d72a00caf401b2d667ba3dbbb90965fe11acf4d906f7ebc1b33dc",
-      "binary_size_bytes": 114112,
+      "id": "layernorm_fwd_bf16_sm80",
+      "ncu_args": [
+        "--timing_shape",
+        "--warmup",
+        "1",
+        "--reps",
+        "1"
+      ],
       "source": "workloads/portable_lcd/layernorm_fwd_bf16_sm80/main.cu",
-      "timing_shape": {"rows": 64, "hidden": 4096},
+      "stage": "smoke",
       "target_launch_count": 1,
-      "correctness_args": ["--correctness_shape", "--seed", "42", "--warmup", "1", "--reps", "1", "--output_dir", "{output}"],
-      "ncu_args": ["--timing_shape", "--warmup", "1", "--reps", "1"],
-      "trace_args": ["--timing_shape", "--warmup", "0", "--reps", "1"]
+      "timing_shape": {
+        "hidden": 4096,
+        "rows": 64
+      },
+      "trace_args": [
+        "--timing_shape",
+        "--warmup",
+        "0",
+        "--reps",
+        "1"
+      ]
     },
     {
-      "id": "gemm_imma_int8_sm80",
+      "binary": "workloads/portable_lcd/gemm_imma_int8_sm80/gemm_imma_int8_sm80_run",
+      "binary_size_bytes": 105672,
+      "correctness_args": [
+        "--correctness_shape",
+        "--seed",
+        "42",
+        "--warmup",
+        "1",
+        "--reps",
+        "1",
+        "--output_dir",
+        "{output}"
+      ],
       "display_name": "INT8 IMMA GEMM snapshot",
       "functional_analogue": "quantized inference matrix kernel",
-      "stage": "smoke",
-      "binary": "workloads/portable_lcd/gemm_imma_int8_sm80/gemm_imma_int8_sm80_run",
-      "binary_sha256": "44b362cf4d503e1eb4b2791046d2084288b12fc1fc7fde9674a6d538a4b16e4a",
-      "binary_size_bytes": 105672,
+      "id": "gemm_imma_int8_sm80",
+      "ncu_args": [
+        "--timing_shape",
+        "--warmup",
+        "1",
+        "--reps",
+        "1"
+      ],
       "source": "workloads/portable_lcd/gemm_imma_int8_sm80/main.cu",
-      "timing_shape": {"m": 256, "n": 256, "k": 256},
+      "stage": "smoke",
       "target_launch_count": 1,
-      "correctness_args": ["--correctness_shape", "--seed", "42", "--warmup", "1", "--reps", "1", "--output_dir", "{output}"],
-      "ncu_args": ["--timing_shape", "--warmup", "1", "--reps", "1"],
-      "trace_args": ["--timing_shape", "--warmup", "0", "--reps", "1"]
+      "timing_shape": {
+        "k": 256,
+        "m": 256,
+        "n": 256
+      },
+      "trace_args": [
+        "--timing_shape",
+        "--warmup",
+        "0",
+        "--reps",
+        "1"
+      ]
     },
     {
-      "id": "embedding_gather_int32_sm80",
+      "binary": "workloads/portable_lcd/embedding_gather_int32_sm80/embedding_gather_int32_sm80_run",
+      "binary_size_bytes": 118056,
+      "correctness_args": [
+        "--correctness_shape",
+        "--seed",
+        "42",
+        "--warmup",
+        "1",
+        "--reps",
+        "1",
+        "--output_dir",
+        "{output}"
+      ],
       "display_name": "BF16 embedding gather snapshot",
       "functional_analogue": "indirect graph/embedding gather kernel",
-      "stage": "full",
-      "binary": "workloads/portable_lcd/embedding_gather_int32_sm80/embedding_gather_int32_sm80_run",
-      "binary_sha256": "036ad61edd00c513c84c37093aa9bc33438df8754888e0bcc81534474b4644ec",
-      "binary_size_bytes": 118056,
+      "id": "embedding_gather_int32_sm80",
+      "ncu_args": [
+        "--timing_shape",
+        "--warmup",
+        "1",
+        "--reps",
+        "1",
+        "--BH",
+        "2",
+        "--Sq",
+        "64",
+        "--Sk",
+        "1024",
+        "--D",
+        "256"
+      ],
       "source": "workloads/portable_lcd/embedding_gather_int32_sm80/main.cu",
-      "timing_shape": {"batch": 2, "tokens": 64, "vocab": 1024, "embedding_dim": 256},
-      "timing_overrides": ["--BH", "2", "--Sq", "64", "--Sk", "1024", "--D", "256"],
+      "stage": "full",
       "target_launch_count": 1,
-      "correctness_args": ["--correctness_shape", "--seed", "42", "--warmup", "1", "--reps", "1", "--output_dir", "{output}"],
-      "ncu_args": ["--timing_shape", "--warmup", "1", "--reps", "1", "--BH", "2", "--Sq", "64", "--Sk", "1024", "--D", "256"],
-      "trace_args": ["--timing_shape", "--warmup", "0", "--reps", "1", "--BH", "2", "--Sq", "64", "--Sk", "1024", "--D", "256"]
+      "timing_overrides": [
+        "--BH",
+        "2",
+        "--Sq",
+        "64",
+        "--Sk",
+        "1024",
+        "--D",
+        "256"
+      ],
+      "timing_shape": {
+        "batch": 2,
+        "embedding_dim": 256,
+        "tokens": 64,
+        "vocab": 1024
+      },
+      "trace_args": [
+        "--timing_shape",
+        "--warmup",
+        "0",
+        "--reps",
+        "1",
+        "--BH",
+        "2",
+        "--Sq",
+        "64",
+        "--Sk",
+        "1024",
+        "--D",
+        "256"
+      ]
     },
     {
-      "id": "gemm_sparse_2to4_bf16_sm80",
+      "binary": "workloads/portable_lcd/gemm_sparse_2to4_bf16_sm80/gemm_sparse_2to4_bf16_sm80_run",
+      "binary_size_bytes": 118120,
+      "correctness_args": [
+        "--correctness_shape",
+        "--seed",
+        "42",
+        "--warmup",
+        "1",
+        "--reps",
+        "1",
+        "--output_dir",
+        "{output}"
+      ],
       "display_name": "BF16 2:4 sparse GEMM snapshot",
       "functional_analogue": "structured-sparse compute kernel",
-      "stage": "full",
-      "binary": "workloads/portable_lcd/gemm_sparse_2to4_bf16_sm80/gemm_sparse_2to4_bf16_sm80_run",
-      "binary_sha256": "abf792ec7d7e7042ca4a4c21ae611577b50b94fad5c1a6ee534b45b13a22e254",
-      "binary_size_bytes": 118120,
+      "id": "gemm_sparse_2to4_bf16_sm80",
+      "ncu_args": [
+        "--timing_shape",
+        "--warmup",
+        "1",
+        "--reps",
+        "1"
+      ],
       "source": "workloads/portable_lcd/gemm_sparse_2to4_bf16_sm80/main.cu",
-      "timing_shape": {"m": 128, "n": 128, "k": 128, "sparsity": "2:4"},
+      "stage": "full",
       "target_launch_count": 1,
-      "correctness_args": ["--correctness_shape", "--seed", "42", "--warmup", "1", "--reps", "1", "--output_dir", "{output}"],
-      "ncu_args": ["--timing_shape", "--warmup", "1", "--reps", "1"],
-      "trace_args": ["--timing_shape", "--warmup", "0", "--reps", "1"]
+      "timing_shape": {
+        "k": 128,
+        "m": 128,
+        "n": 128,
+        "sparsity": "2:4"
+      },
+      "trace_args": [
+        "--timing_shape",
+        "--warmup",
+        "0",
+        "--reps",
+        "1"
+      ]
     },
     {
-      "id": "silu_fwd_bf16_sm80",
+      "binary": "workloads/portable_lcd/silu_fwd_bf16_sm80/silu_fwd_bf16_sm80_run",
+      "binary_size_bytes": 97656,
+      "correctness_args": [
+        "--correctness_shape",
+        "--seed",
+        "42",
+        "--warmup",
+        "1",
+        "--reps",
+        "1",
+        "--output_dir",
+        "{output}"
+      ],
       "display_name": "BF16 SiLU forward snapshot",
       "functional_analogue": "elementwise activation/streaming kernel",
-      "stage": "full",
-      "binary": "workloads/portable_lcd/silu_fwd_bf16_sm80/silu_fwd_bf16_sm80_run",
-      "binary_sha256": "48d65e6fda1322f0a6a2f4d4ca67a5ef74c587cf373b52d6acc676288eacd4df",
-      "binary_size_bytes": 97656,
+      "id": "silu_fwd_bf16_sm80",
+      "ncu_args": [
+        "--timing_shape",
+        "--warmup",
+        "1",
+        "--reps",
+        "1"
+      ],
       "source": "workloads/portable_lcd/silu_fwd_bf16_sm80/main.cu",
-      "timing_shape": {"elements": 262144},
+      "stage": "full",
       "target_launch_count": 1,
-      "correctness_args": ["--correctness_shape", "--seed", "42", "--warmup", "1", "--reps", "1", "--output_dir", "{output}"],
-      "ncu_args": ["--timing_shape", "--warmup", "1", "--reps", "1"],
-      "trace_args": ["--timing_shape", "--warmup", "0", "--reps", "1"]
+      "timing_shape": {
+        "elements": 262144
+      },
+      "trace_args": [
+        "--timing_shape",
+        "--warmup",
+        "0",
+        "--reps",
+        "1"
+      ]
     },
     {
-      "id": "rmsnorm_fwd_bf16_sm80",
+      "binary": "workloads/portable_lcd/rmsnorm_fwd_bf16_sm80/rmsnorm_fwd_bf16_sm80_run",
+      "binary_size_bytes": 101776,
+      "correctness_args": [
+        "--correctness_shape",
+        "--seed",
+        "42",
+        "--warmup",
+        "1",
+        "--reps",
+        "1",
+        "--output_dir",
+        "{output}"
+      ],
       "display_name": "BF16 RMSNorm forward snapshot",
       "functional_analogue": "LLM normalization/reduction kernel",
-      "stage": "full",
-      "binary": "workloads/portable_lcd/rmsnorm_fwd_bf16_sm80/rmsnorm_fwd_bf16_sm80_run",
-      "binary_sha256": "2897b18afbd4eafdb517abe9764376697535b2251f69cc4d2fea34461849c4d4",
-      "binary_size_bytes": 101776,
+      "id": "rmsnorm_fwd_bf16_sm80",
+      "ncu_args": [
+        "--timing_shape",
+        "--warmup",
+        "1",
+        "--reps",
+        "1"
+      ],
       "source": "workloads/portable_lcd/rmsnorm_fwd_bf16_sm80/main.cu",
-      "timing_shape": {"rows": 64, "hidden": 4096},
+      "stage": "full",
       "target_launch_count": 1,
-      "correctness_args": ["--correctness_shape", "--seed", "42", "--warmup", "1", "--reps", "1", "--output_dir", "{output}"],
-      "ncu_args": ["--timing_shape", "--warmup", "1", "--reps", "1"],
-      "trace_args": ["--timing_shape", "--warmup", "0", "--reps", "1"]
+      "timing_shape": {
+        "hidden": 4096,
+        "rows": 64
+      },
+      "trace_args": [
+        "--timing_shape",
+        "--warmup",
+        "0",
+        "--reps",
+        "1"
+      ]
     }
   ]
 }

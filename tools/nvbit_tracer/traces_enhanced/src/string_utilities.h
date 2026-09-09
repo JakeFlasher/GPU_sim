@@ -28,6 +28,7 @@
 
 #pragma once
 
+#include <stdint.h>
 #include <string>
 #include <vector>
 #include <sstream>
@@ -42,7 +43,7 @@ std::vector<std::string> split_string(const std::string& str, char delim);
 
 std::string create_sass_instr(std::string full_instruction_str, bool is_substring_delimeter, std::string substring_delimeter);
 
-unsigned int get_ur_register(std::string operand_str);
+bool get_ur_register(const std::string &operand_str, unsigned int &register_id);
 
 std::string decimalToHexString(unsigned int num, int num_min_digits);
 
@@ -51,7 +52,9 @@ bool endsWith(const std::string& str, const std::string& suffix);
 struct ThreadblockStringParseInfo
 {
   int device_id;
-  int stream_id;
+  // Trace stream IDs use int64 so distinct CUDA streams can be joined within
+  // the capture without narrowing opaque CUstream handles into 32 bits.
+  int64_t stream_id;
   int kernel_id;
 };
 

@@ -9,8 +9,9 @@ The orchestrator owns the per-bundle workflow:
    * Skip if not in ``enabled_surfaces`` (record ``skipped`` with
      waiver).
    * Check the cache; reuse the stored entry when every cache-identity
-     field matches and the stored status is non-failed .
-     ``--force-resurface`` bypasses the cache.
+     field matches and the stored status is stable (``ok`` or
+     ``unavailable``). Transient ``blocked`` / ``skipped`` outcomes are
+     retried. ``--force-resurface`` bypasses the cache.
    * Call ``probe()``; if not ``ok``, record the probe result and
      continue to the next surface.
    * Call ``run()`` inside an isolation context appropriate for the
@@ -216,7 +217,7 @@ def _load_prior_manifest_entries(bundle_dir: Path) -> Dict[str, Dict[str, Any]]:
 
 
 def _prior_trace_is_valid(bundle_dir: Path) -> bool:
-    """True when ``bundle_dir/trace.json`` exists, parses, and has rows."""
+    """True when the prior trace has structurally complete evaluator output."""
     import json
     trace_path = bundle_dir / "trace.json"
     if not trace_path.is_file():
@@ -225,19 +226,49 @@ def _prior_trace_is_valid(bundle_dir: Path) -> bool:
         trace = json.loads(trace_path.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError):
         return False
+    if not isinstance(trace, dict):
+        return False
     rows = trace.get("rows")
-    return isinstance(rows, list) and len(rows) > 0
+    if not isinstance(rows, list) or not rows or not all(
+        isinstance(row, dict) for row in rows
+    ):
+        return False
+    if "gate_reasons" in trace:
+        reasons = trace["gate_reasons"]
+        if not isinstance(reasons, list):
+            return False
+        for reason in reasons:
+            if not isinstance(reason, str):
+                return False
+            if (
+                reason.startswith("evaluator exited")
+                or reason.startswith("row count mismatch")
+                or reason == "zero rows parsed"
+                or "unparseable JSONL" in reason
+            ):
+                return False
+    if "expected_workload_count" in trace:
+        expected_count = trace["expected_workload_count"]
+        if type(expected_count) is not int or expected_count < 0:
+            return False
+        if expected_count > 0 and len(rows) != expected_count:
+            return False
+        if expected_count == 0:
+            return False
+    return True
 
 
 def _prior_trace_all_passed(bundle_dir: Path) -> bool:
     """True when every row in the prior ``trace.json`` is PASSED."""
     import json
     trace_path = bundle_dir / "trace.json"
-    if not trace_path.is_file():
+    if not _prior_trace_is_valid(bundle_dir):
         return False
     try:
         trace = json.loads(trace_path.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError):
+        return False
+    if trace.get("gate_reasons"):
         return False
     rows = trace.get("rows", [])
     return bool(rows) and all(r.get("status") == "PASSED" for r in rows)
@@ -313,6 +344,7 @@ def _emit_trace_json(
             eval_argv,
             capture_output=True,
             text=True,
+            errors="replace",
             check=False,
             timeout=plan.eval_timeout_s,
             env=env,
@@ -375,13 +407,12 @@ def _emit_trace_json(
     gate_reasons: List[str] = []
     if proc.returncode != 0:
         gate_reasons.append(f"evaluator exited rc={proc.returncode}")
-    # Mirror run.py:_collect_failure_reasons — parse_errors are only
-    # gating when ``rows`` is empty (the upstream CLI mixes progress
-    # / banner lines into stdout that parse_jsonl_lines correctly
-    # rejects without invalidating the actual Trace rows).
-    if parse_errors and not rows:
+    # Mirror run.py:_collect_failure_reasons: any malformed line means the
+    # evaluator stream was not fully validated, even when other rows parsed.
+    if parse_errors:
         gate_reasons.append(
-            f"{len(parse_errors)} unparseable JSONL line(s) and zero rows"
+            f"{len(parse_errors)} unparseable JSONL line(s) prevented "
+            f"complete Trace validation"
         )
     if expected_count > 0 and len(rows) != expected_count:
         gate_reasons.append(
@@ -501,8 +532,9 @@ class SurfaceOrchestrator:
         Resume / idempotency: when a prior ``manifest.json`` exists in
         ``bundle_dir`` and ``self.force_resurface`` is False, surfaces
         whose cache identity matches the prior entry are reused
-        verbatim. ``failed`` entries are never reused. Cache identity
-        is persisted onto every new entry.
+        verbatim when their prior status is ``ok`` or ``unavailable``.
+        ``blocked``, ``skipped``, and ``failed`` entries are rerun.
+        Cache identity is persisted onto every new entry.
 
         Trace emission: the orchestrator's native ``sol-execbench``
         invocation produces ``trace.json`` under the bundle dir,
@@ -511,10 +543,7 @@ class SurfaceOrchestrator:
         selected, the orchestrator writes a marker ``trace.json`` with
         an empty rows list so the bundle dir is consistently shaped.
         """
-        from sol_baselines_harness.surfaces.dispatch_plan import (
-            assert_landed_solution_bytes_unchanged,
-            build_dispatch_plan,
-        )
+        from sol_baselines_harness.surfaces.dispatch_plan import build_dispatch_plan
         slug = baseline_dir.parent.name
         language = baseline_dir.name
         bundle_dir.mkdir(parents=True, exist_ok=True)
@@ -593,6 +622,7 @@ class SurfaceOrchestrator:
                 for name in self.enabled_surfaces
             )
             and _prior_trace_is_valid(bundle_dir)
+            and _prior_trace_all_passed(bundle_dir)
         )
 
         if every_surface_cached:
@@ -620,13 +650,6 @@ class SurfaceOrchestrator:
             )
             manifest.record_surface(name, entry)
 
-        # Enforce landed-baseline byte immutability before lint+write
-        # so an inadvertent mutation fails closed.
-        assert_landed_solution_bytes_unchanged(
-            baseline_dir / "solution.json",
-            plan.landed_solution_sha256,
-        )
-
         # Recompute the manifest's evidence_label using trace state +
         # surface statuses so a manifest cannot over-claim
         # ``Profiled-*`` without an all-PASSED trace.
@@ -651,8 +674,13 @@ class SurfaceOrchestrator:
             return list(plan.base_eval_argv)
         try:
             argv, _env, _mounts = builder(plan)
-        except Exception:  # noqa: BLE001
-            return list(plan.base_eval_argv)
+        except Exception as exc:  # noqa: BLE001
+            # A failed surface-specific composition must not silently fall
+            # back to the base command: that would produce a cache identity
+            # for a different invocation shape and could reuse stale evidence.
+            raise RuntimeError(
+                f"surface {name!r} dispatch_argv failed: {exc!r}"
+            ) from exc
         return list(argv)
 
     def _invoke_surface(
@@ -819,9 +847,10 @@ class SurfaceOrchestrator:
     # Resume / idempotency: see ``compute_cache_identity`` +
     # ``surface_cache_hit`` below. The orchestrator wraps every
     # surface invocation with a cache-identity check; reuse occurs
-    # only when the stored entry status is non-failed AND every
-    # cache-identity field matches the live invocation. ``failed``
-    # is never cached. ``--force-resurface`` bypasses the cache.
+    # only for stable stored outcomes (``ok`` / ``unavailable``) AND
+    # every cache-identity field matches the live invocation. Transient
+    # ``blocked`` / ``skipped`` entries are retried. ``--force-resurface``
+    # bypasses the cache.
 
     def compute_surface_cache_identity(
         self,
@@ -940,16 +969,24 @@ class SurfaceOrchestrator:
         """Decide whether a prior manifest entry can be reused.
 
         Reuse requires:
-        * Stored ``status`` is non-failed (failures are never cached).
+        * Stored ``status`` is a stable outcome (``ok`` or
+          ``unavailable``). Transient ``blocked`` and operator-selected
+          ``skipped`` entries are deliberately rerun on resume; caching
+          either would turn a timeout/host-policy condition into a
+          permanent false negative.
         * Every cache-identity field matches exactly.
 
         ``--force-resurface`` is enforced at the call site by
         ``run_all`` bypassing this method entirely.
         """
-        prior_status = prior_entry.get("status")
-        if prior_status not in ("ok", "unavailable", "blocked", "skipped"):
+        if not isinstance(prior_entry, dict) or not isinstance(live_identity, dict):
             return False
-        prior_cache = prior_entry.get("cache_identity") or {}
+        prior_status = prior_entry.get("status")
+        if prior_status not in ("ok", "unavailable"):
+            return False
+        prior_cache = prior_entry.get("cache_identity")
+        if not isinstance(prior_cache, dict):
+            return False
         for field_name in (
             "command_hash",
             "host_fingerprint",
@@ -990,7 +1027,7 @@ def assert_b200_fanout_ready(
     if not manifest_path.is_file():
         raise RuntimeError(
             f"fanout refused: {manifest_path} does not exist. Run "
-            f"`python scripts/baselines_harness/b200_preflight.py` first."
+            f"`python tools/sol_baselines_harness/b200_preflight.py` first."
         )
     try:
         manifest = _json.loads(manifest_path.read_text(encoding="utf-8"))

@@ -59,11 +59,16 @@ extern "C" __device__ __noinline__ void instrument_inst(
   if ((*((bool *)pstop_report))) {
     if (first_laneid == laneid) {
       atomicAdd((unsigned long long *)ptotal_dynamic_instr_counter, 1);
-      return;
     }
+    // All lanes must take the same exit path.  Returning only from the first
+    // lane leaves the remaining lanes executing later shuffles with a mask
+    // that still names an exited lane, which is undefined for a partial warp.
+    return;
   }
 
-  inst_trace_t ma;
+  // Value-initialize the payload so optional register slots are deterministic
+  // even when a particular operand layout does not populate every field.
+  inst_trace_t ma{};
   ma.ureg_desc_value = SECRET_UREG_DESC_NOT_USED;
   ma.reg_id = SECRET_UREG_DESC_NOT_USED;
   ma.num_of_injects = num_of_injects;
@@ -132,6 +137,9 @@ extern "C" __device__ __noinline__ void instrument_inst(
         }
       }
       if(per_operand_type == TRACED_REG_TYPE::REGULAR_4_REGS) {
+        for (int tid = 0; tid < 32; tid++) {
+          ma.reg_val_1[tid] = __shfl_sync(active_mask, op_reg_val_1, tid);
+        }
         for (int tid = 0; tid < 32; tid++) {
           ma.reg_val_2[tid] = __shfl_sync(active_mask, op_reg_val_2, tid);
         }

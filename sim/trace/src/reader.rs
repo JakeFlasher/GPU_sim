@@ -5,6 +5,7 @@
 //! <trace_dir>/threadblocks/device_<d>/stream_<s>/kernel_<k>/*.pb
 //!                                                 # dynamic_trace.threadblock
 //! <trace_dir>/extra_info/allocations.json         # allocation-identity registry
+//! <trace_dir>/extra_info/enhanced_execution_info.json # static launch metadata
 //! <trace_dir>/trace_sampling.json                 # sampling-provenance sidecar
 //! ```
 //!
@@ -14,19 +15,21 @@
 //! loaders validate protobuf and simulator semantics before exposing replay
 //! inputs.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 #[cfg(test)]
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use prost::Message;
-use serde::de::{DeserializeSeed, IgnoredAny, MapAccess, SeqAccess, Visitor};
+use serde::de::{DeserializeSeed, Error as _, MapAccess, SeqAccess, Visitor};
 
-use crate::anchored::{AnchoredDir, AnchoredFile, AnchoredReadError};
 #[cfg(feature = "campaign")]
-use crate::anchored::{FileGenerationIdentity, FileIdentity};
+use crate::anchored::FileIdentity;
+use crate::anchored::{AnchoredDir, AnchoredFile, AnchoredReadError, FileGenerationIdentity};
 #[cfg(feature = "campaign")]
 use crate::digest::{Sha256, Sha256Digest, canonical_json};
+use crate::exec_info::ExecInfo;
 use crate::lanes::{self, LaneError};
 use crate::pb;
 use crate::wire_preflight::{self, WirePreflightError};
@@ -36,6 +39,8 @@ const DYNAMIC_TRACE_PB_MAX_BYTES: u64 = 1024 * MIB;
 const ALLOCATIONS_JSON_MAX_BYTES: u64 = 16 * MIB;
 #[cfg(feature = "campaign")]
 const TRACE_SAMPLING_JSON_MAX_BYTES: u64 = 64 * MIB;
+#[cfg(feature = "campaign")]
+const CAMPAIGN_THREADBLOCK_FILE_MAX_BYTES: u64 = 768 * MIB;
 const STATS_CSV_MAX_BYTES: u64 = 64 * MIB;
 const DIRECT_THREADBLOCK_FILE_MAX_COUNT: u64 = 1_000_000;
 const DIRECT_THREADBLOCK_TOTAL_MAX_BYTES: u64 = 32 * 1024 * MIB;
@@ -54,6 +59,10 @@ pub enum TraceError {
     },
     #[error("descriptor-anchored trace snapshot failed: {0}")]
     AnchoredSnapshot(#[from] AnchoredReadError),
+    #[error("execution-info admission failed: {0}")]
+    ExecInfo(#[from] crate::exec_info::ExecInfoError),
+    #[error("execution-info file {path} changed after its snapshot")]
+    ExecInfoChanged { path: PathBuf },
     #[error("descriptor-anchored trace snapshot artifact {artifact} read failed: {source}")]
     SnapshotArtifactRead {
         artifact: &'static str,
@@ -131,6 +140,15 @@ pub enum TraceError {
         stream_id: i64,
         kernel_id: i32,
         combined: i32,
+    },
+    #[error(
+        "launch ({device_id}, {stream_id}, {kernel_id}) has negative number_of_registers {registers}"
+    )]
+    TraceLaunchRegistersInvalid {
+        device_id: i64,
+        stream_id: i64,
+        kernel_id: i32,
+        registers: i32,
     },
     #[error(
         "legacy launch ({device_id}, {stream_id}, {kernel_id}) carries split shared-memory fields"
@@ -417,6 +435,14 @@ pub enum TraceError {
         kernel_id: i32,
     },
     #[error(
+        "root launch identity ({device_id}, {stream_id}, {kernel_id}) has a non-positive kernel id"
+    )]
+    LaunchIdentityInvalid {
+        device_id: i64,
+        stream_id: i64,
+        kernel_id: i32,
+    },
+    #[error(
         "kernel locator ({device_id}, {stream_id}, {kernel_id}) does not belong to trace root {root}"
     )]
     KernelLocatorForeign {
@@ -495,6 +521,7 @@ impl TraceError {
             Self::TraceLaunchSharedMemoryInvalid { .. } => {
                 Some("trace_launch_shared_memory_invalid")
             }
+            Self::TraceLaunchRegistersInvalid { .. } => Some("trace_launch_registers_invalid"),
             Self::SharedMemorySplitUnadvertised { .. } => Some("shared_memory_split_unadvertised"),
             Self::SharedMemorySplitUnavailable { .. } => Some("shared_memory_split_unavailable"),
             Self::SharedMemorySplitMissing { .. } => Some("shared_memory_split_missing"),
@@ -548,6 +575,7 @@ impl TraceError {
                 | LaneError::BaseDeltaCountInvalid { .. }
                 | LaneError::AddressOverflow { .. }
                 | LaneError::UnknownFormat(_) => Some("compressed_format_malformed"),
+                LaneError::NegativeAddress { .. } => Some("compressed_format_malformed"),
             },
             Self::AddressLaneMaskOutsideInstructionMask { .. } => {
                 Some("address_lane_mask_outside_instruction_mask")
@@ -565,7 +593,8 @@ impl TraceError {
             Self::ThreadblocksMissing { .. } => Some("trace_launch_payload_missing"),
             Self::DeviceMapKeyMismatch { .. }
             | Self::StreamMapKeyMismatch { .. }
-            | Self::LaunchIdentityDuplicate { .. } => Some("trace_launch_identity_mismatch"),
+            | Self::LaunchIdentityDuplicate { .. }
+            | Self::LaunchIdentityInvalid { .. } => Some("trace_launch_identity_mismatch"),
             Self::KernelLocatorForeign { .. } => Some("kernel_locator_foreign"),
             Self::LaunchGeometryInvalid { .. } => Some("trace_launch_geometry_invalid"),
             Self::ThreadblockRecordsEmpty { .. } => Some("trace_threadblock_empty"),
@@ -975,7 +1004,7 @@ impl TraceDirSnapshot {
             Some(limits) => reader
                 .read_exact_regular(&dynamic_relative, limits.dynamic_trace_pb_size)
                 .map_err(|source| map_manifest_snapshot_read_error("dynamic_trace_pb", source))?,
-            None => reader.read_bounded_regular(&dynamic_relative, u64::MAX)?,
+            None => reader.read_bounded_regular(&dynamic_relative, DYNAMIC_TRACE_PB_MAX_BYTES)?,
         };
         let dynamic_path = root.join("dynamic_trace.pb");
         let mut file_identities = BTreeMap::new();
@@ -1054,12 +1083,26 @@ impl TraceDirSnapshot {
         }
         let stats_csv = stats_file.map(AnchoredFile::into_raw);
 
-        let (maximum_files, maximum_bytes) = limits.map_or((u64::MAX, u64::MAX), |limits| {
-            (limits.threadblock_file_count, limits.threadblock_raw_bytes)
+        let (maximum_files, maximum_bytes) = limits.map_or(
+            (
+                DIRECT_THREADBLOCK_FILE_MAX_COUNT,
+                CAMPAIGN_THREADBLOCK_FILE_MAX_BYTES,
+            ),
+            |limits| (limits.threadblock_file_count, limits.threadblock_raw_bytes),
+        );
+        let maximum_file_bytes = limits.map_or(CAMPAIGN_THREADBLOCK_FILE_MAX_BYTES, |limits| {
+            limits
+                .threadblock_raw_bytes
+                .min(CAMPAIGN_THREADBLOCK_FILE_MAX_BYTES)
         });
         let tree_relative = root_relative.join("threadblocks");
         let mut tree = reader
-            .read_pb_tree(&tree_relative, maximum_files, maximum_bytes)
+            .read_pb_tree_with_file_limit(
+                &tree_relative,
+                maximum_files,
+                maximum_bytes,
+                maximum_file_bytes,
+            )
             .map_err(|source| {
                 map_threadblock_tree_read_error(&root, source, preserve_manifest_artifact_role)
             })?;
@@ -1272,6 +1315,33 @@ fn map_manifest_snapshot_read_error(
     })
 }
 
+const DIRECT_EXEC_INFO_RELATIVE: &str = "extra_info/enhanced_execution_info.json";
+const DIRECT_EXEC_INFO_MAX_BYTES: u64 = 64 * 1024 * 1024;
+
+fn read_direct_exec_info(
+    reader: &AnchoredDir,
+) -> Result<Option<(ExecInfo, FileGenerationIdentity)>, TraceError> {
+    let relative = Path::new(DIRECT_EXEC_INFO_RELATIVE);
+    let path = reader.root().join(relative);
+    let file = match reader
+        .read_optional_bounded_regular(relative, DIRECT_EXEC_INFO_MAX_BYTES)
+        .map_err(TraceError::AnchoredSnapshot)?
+    {
+        Some(file) => file,
+        None => return Ok(None),
+    };
+    let generation = file.generation_identity();
+    let raw = file.into_raw();
+    let exec = ExecInfo::parse(&path, &raw).map_err(TraceError::ExecInfo)?;
+    let actual = reader
+        .inspect_regular_generation(relative)
+        .map_err(TraceError::AnchoredSnapshot)?;
+    if actual != generation {
+        return Err(TraceError::ExecInfoChanged { path });
+    }
+    Ok(Some((exec, generation)))
+}
+
 #[cfg(feature = "campaign")]
 fn capture_optional_snapshot_artifact(
     reader: &AnchoredDir,
@@ -1357,7 +1427,7 @@ struct JsonShapeCounter {
 
 impl JsonShapeCounter {
     fn bump_nodes<E: serde::de::Error>(&mut self) -> Result<(), E> {
-        self.nodes = self.nodes.checked_add(1).unwrap_or(u64::MAX);
+        self.nodes = self.nodes.saturating_add(1);
         if self.nodes > self.maximum_nodes {
             let exceeded = JsonResourceLimit {
                 resource: "json_nodes",
@@ -1371,10 +1441,7 @@ impl JsonShapeCounter {
     }
 
     fn bump_top_level_sequence_entries<E: serde::de::Error>(&mut self) -> Result<(), E> {
-        self.top_level_sequence_entries = self
-            .top_level_sequence_entries
-            .checked_add(1)
-            .unwrap_or(u64::MAX);
+        self.top_level_sequence_entries = self.top_level_sequence_entries.saturating_add(1);
         if let Some(limit) = self.maximum_top_level_sequence_entries
             && self.top_level_sequence_entries > limit
         {
@@ -1489,7 +1556,13 @@ impl<'de> Visitor<'de> for JsonValueVisitor<'_> {
     where
         A: MapAccess<'de>,
     {
-        while object.next_key::<IgnoredAny>()?.is_some() {
+        let mut keys = BTreeSet::new();
+        while let Some(key) = object.next_key::<String>()? {
+            if !keys.insert(key.clone()) {
+                return Err(A::Error::custom(format!(
+                    "duplicate JSON object key {key:?}"
+                )));
+            }
             object.next_value_seed(JsonValueSeed {
                 counter: self.counter,
                 root: false,
@@ -1981,17 +2054,18 @@ pub struct LdgstsDestinationTopology {
     /// Number of flexible 128-byte source cohorts formed by the active lane
     /// transfers. Zero is the exact result for a predicated-off instruction.
     pub source_cohorts: u32,
-    /// Sum of distinct 128-byte destination lines touched independently by
-    /// each source cohort.
+    /// Sum of distinct 128-byte destination lines touched by source-coupled
+    /// cohorts and executing source-ignored zero-fill lanes.
     pub destination_line_fanout_total: u32,
     /// Largest distinct destination-line fanout of any one source cohort.
     pub destination_line_fanout_max: u32,
-    /// Existing cache-all projection: the sum, over source cohorts, of the
-    /// maximum distinct 4-byte-word multiplicity on any of 32 shared banks.
+    /// Existing cache-all projection: the sum, over source cohorts and
+    /// zero-fill destination cohorts, of the maximum distinct 4-byte-word
+    /// multiplicity on any of 32 shared banks.
     pub cache_all_bank_wavefronts_total: u32,
-    /// Largest cache-all bank-word multiplicity of any one source cohort.
+    /// Largest cache-all bank-word multiplicity of any destination cohort.
     pub cache_all_bank_wavefronts_max: u32,
-    /// Trace-derived bypass projection. For each source cohort this adds
+    /// Trace-derived bypass projection. For each destination cohort this adds
     /// `min(active transfers, destination lines * bank wavefronts)` before
     /// summing, so line fanout and bank multiplicity are not collapsed before
     /// their cohort-local interaction is observed.
@@ -2026,6 +2100,8 @@ pub enum LdgstsDestinationProjectionError {
     SourceOperandCount { got: usize },
     #[error("expected exactly one SHARED destination operand, got {got}")]
     DestinationOperandCount { got: usize },
+    #[error("lane {lane} has an active source but no corresponding shared destination")]
+    DestinationLaneMissing { lane: usize },
     #[error(
         "source and destination operand widths differ: source={source_bytes} bytes, destination={destination_bytes} bytes"
     )]
@@ -2074,6 +2150,12 @@ pub enum LdgstsDestinationProjectionError {
     },
     #[error("instruction bypass destination-wavefront sum overflowed u32")]
     BypassWavefrontCountOverflow,
+    #[error("LDGSTS topology field {field}={value} exceeds compact limit {limit}")]
+    CompactTopologyFieldOutOfRange {
+        field: &'static str,
+        value: u32,
+        limit: u8,
+    },
 }
 
 /// Compact, context-free form of a sector-expansion failure. Replay restores the
@@ -2182,7 +2264,7 @@ impl CompactArenaSpan {
         }
     }
 
-    fn slice<'a, T>(self, arena: &'a [T]) -> &'a [T] {
+    fn slice<T>(self, arena: &[T]) -> &[T] {
         let start = usize::try_from(self.start)
             .unwrap_or_else(|_| unreachable!("validated sparse span escaped usize"));
         let end = start
@@ -2208,9 +2290,11 @@ struct CompactLdgstsDestinationTopology {
 impl CompactLdgstsDestinationTopology {
     const UNAVAILABLE: u8 = u8::MAX;
 
-    fn new(topology: Option<LdgstsDestinationTopology>) -> Self {
+    fn new(
+        topology: Option<LdgstsDestinationTopology>,
+    ) -> Result<Self, LdgstsDestinationProjectionError> {
         let Some(topology) = topology else {
-            return Self {
+            return Ok(Self {
                 source_cohorts: Self::UNAVAILABLE,
                 destination_line_fanout_total: 0,
                 destination_line_fanout_max: 0,
@@ -2218,20 +2302,47 @@ impl CompactLdgstsDestinationTopology {
                 cache_all_bank_wavefronts_max: 0,
                 bypass_wavefronts_total: 0,
                 bypass_wavefronts_max: 0,
-            };
+            });
         };
-        let compact = |value: u32| {
-            u8::try_from(value).expect("one 32-lane LDGSTS topology fits the compact u8 domain")
+        let compact = |field: &'static str, value: u32| {
+            if value >= u32::from(Self::UNAVAILABLE) {
+                return Err(
+                    LdgstsDestinationProjectionError::CompactTopologyFieldOutOfRange {
+                        field,
+                        value,
+                        limit: Self::UNAVAILABLE - 1,
+                    },
+                );
+            }
+            Ok(value as u8)
         };
-        Self {
-            source_cohorts: compact(topology.source_cohorts),
-            destination_line_fanout_total: compact(topology.destination_line_fanout_total),
-            destination_line_fanout_max: compact(topology.destination_line_fanout_max),
-            cache_all_bank_wavefronts_total: compact(topology.cache_all_bank_wavefronts_total),
-            cache_all_bank_wavefronts_max: compact(topology.cache_all_bank_wavefronts_max),
-            bypass_wavefronts_total: compact(topology.bypass_wavefronts_total),
-            bypass_wavefronts_max: compact(topology.bypass_wavefronts_max),
-        }
+        Ok(Self {
+            source_cohorts: compact("source_cohorts", topology.source_cohorts)?,
+            destination_line_fanout_total: compact(
+                "destination_line_fanout_total",
+                topology.destination_line_fanout_total,
+            )?,
+            destination_line_fanout_max: compact(
+                "destination_line_fanout_max",
+                topology.destination_line_fanout_max,
+            )?,
+            cache_all_bank_wavefronts_total: compact(
+                "cache_all_bank_wavefronts_total",
+                topology.cache_all_bank_wavefronts_total,
+            )?,
+            cache_all_bank_wavefronts_max: compact(
+                "cache_all_bank_wavefronts_max",
+                topology.cache_all_bank_wavefronts_max,
+            )?,
+            bypass_wavefronts_total: compact(
+                "bypass_wavefronts_total",
+                topology.bypass_wavefronts_total,
+            )?,
+            bypass_wavefronts_max: compact(
+                "bypass_wavefronts_max",
+                topology.bypass_wavefronts_max,
+            )?,
+        })
     }
 
     const fn expand(self) -> Option<LdgstsDestinationTopology> {
@@ -2256,13 +2367,13 @@ impl AsyncCopyProjection {
         destination_topology: Option<LdgstsDestinationTopology>,
         cohort_span: CompactArenaSpan,
         source_sector_mask_span: CompactArenaSpan,
-    ) -> Self {
-        Self {
+    ) -> Result<Self, LdgstsDestinationProjectionError> {
+        Ok(Self {
             effective_data_bytes,
-            destination_topology: CompactLdgstsDestinationTopology::new(destination_topology),
+            destination_topology: CompactLdgstsDestinationTopology::new(destination_topology)?,
             cohort_span,
             source_sector_mask_span,
-        }
+        })
     }
 
     const fn destination_topology(self) -> Option<LdgstsDestinationTopology> {
@@ -2508,12 +2619,20 @@ impl ValidatedWarp {
                         ldgsts_source_sector_cohort_masks
                             .extend(destination_projection.source_sector_cohort_masks);
                     }
-                    async_copy_projections.push(AsyncCopyProjection::new(
-                        effective_data_bytes,
-                        destination_topology,
-                        cohort_span,
-                        source_sector_mask_span,
-                    ));
+                    async_copy_projections.push(
+                        AsyncCopyProjection::new(
+                            effective_data_bytes,
+                            destination_topology,
+                            cohort_span,
+                            source_sector_mask_span,
+                        )
+                        .map_err(|source| {
+                            TraceError::LdgstsDestinationProjection {
+                                record: format!("{label} warp={map_key} inst={record_ix}"),
+                                source,
+                            }
+                        })?,
+                    );
                     index
                 } else {
                     shared_bank_wavefronts_32x4
@@ -3122,6 +3241,9 @@ fn compact_sector_vector_for_operand(
         ));
     }
 
+    // The union count above proves this expansion is bounded by u16::MAX.
+    // Preserve first-seen interval/sector order with a set-backed walk instead
+    // of repeatedly searching and draining the growing covered-interval list.
     let mut staged = Vec::new();
     staged.try_reserve(unique_count).map_err(|_| {
         (
@@ -3132,51 +3254,28 @@ fn compact_sector_vector_for_operand(
             },
         )
     })?;
-    let covered_capacity = intervals.len().min(unique_count);
-    let mut covered: Vec<(i64, i64)> = Vec::new();
-    covered.try_reserve(covered_capacity).map_err(|_| {
+    let mut seen = HashSet::new();
+    seen.try_reserve(unique_count).map_err(|_| {
         (
             ValidatedSectorErrorPhase::AfterStaticRole,
             ValidatedSectorError::CapacityUnavailable {
-                buffer: "covered sector intervals",
-                additional: covered_capacity,
+                buffer: "sector membership set",
+                additional: unique_count,
             },
         )
     })?;
     for (first, last) in intervals {
-        let start = covered.partition_point(|&(_, covered_last)| covered_last < first);
-        let mut cursor = Some(first);
-        for &(covered_first, covered_last) in &covered[start..] {
-            let Some(next) = cursor else { break };
-            if covered_first > last {
+        let mut sector = first;
+        loop {
+            if seen.insert(sector) {
+                staged.push(sector);
+            }
+            if sector == last {
                 break;
             }
-            if next < covered_first {
-                staged.extend(next..=last.min(covered_first.saturating_sub(1)));
-            }
-            cursor = if covered_last >= last {
-                None
-            } else {
-                covered_last
-                    .checked_add(1)
-                    .map(|after_covered| next.max(after_covered))
-            };
-        }
-        if let Some(next) = cursor {
-            staged.extend(next..=last);
-        }
-
-        let left =
-            covered.partition_point(|&(_, covered_last)| covered_last.saturating_add(1) < first);
-        let right = left
-            + covered[left..]
-                .partition_point(|&(covered_first, _)| covered_first <= last.saturating_add(1));
-        if left == right {
-            covered.insert(left, (first, last));
-        } else {
-            let merged = (first.min(covered[left].0), last.max(covered[right - 1].1));
-            covered[left] = merged;
-            covered.drain(left + 1..right);
+            sector = sector
+                .checked_add(1)
+                .unwrap_or_else(|| unreachable!("validated interval end escaped i64"));
         }
     }
     if staged.len() != unique_count {
@@ -3419,6 +3518,13 @@ fn validate_trace_semantics(
                 });
             }
             for kernel in &stream.kernels {
+                if kernel.id <= 0 {
+                    return Err(TraceError::LaunchIdentityInvalid {
+                        device_id: device_key,
+                        stream_id: stream_key,
+                        kernel_id: kernel.id,
+                    });
+                }
                 if !launch_ids.insert((device_key, stream_key, kernel.id)) {
                     return Err(TraceError::LaunchIdentityDuplicate {
                         device_id: device_key,
@@ -3439,6 +3545,14 @@ fn validate_trace_semantics(
                             kernel.id
                         ),
                         got: kernel.function_unique_id,
+                    });
+                }
+                if kernel.number_of_registers < 0 {
+                    return Err(TraceError::TraceLaunchRegistersInvalid {
+                        device_id: device_key,
+                        stream_id: stream_key,
+                        kernel_id: kernel.id,
+                        registers: kernel.number_of_registers,
                     });
                 }
                 if !positive_geometry(kernel.grid_dim.as_ref()) {
@@ -3548,8 +3662,13 @@ fn validate_trace_snapshot_semantics(
 }
 
 pub struct TraceDir {
+    lineage: TraceLineage,
     root: PathBuf,
     trace: pb::Trace,
+    /// Direct loaders retain the parsed execution-info join alongside the
+    /// dynamic snapshot so replay cannot reopen a mutable sidecar by path.
+    /// Campaign evidence carries this join separately in its manifest.
+    exec_info: Option<ExecInfo>,
     memory_payload_contract: MemoryPayloadContract,
     allocations: Option<AllocationRegistry>,
     #[cfg(feature = "campaign")]
@@ -3559,6 +3678,61 @@ pub struct TraceDir {
     payload_by_path: BTreeMap<PathBuf, Vec<u8>>,
     raw_payload_retained: bool,
     threadblock_by_path: BTreeMap<PathBuf, ValidatedThreadblock>,
+}
+
+/// In-process identity of one fully loaded trace snapshot. A `TraceDir` owns
+/// all decoded replay inputs, so retaining this token prevents a stream-L2
+/// session from combining its retained cache state with a separately opened
+/// snapshot that happens to use the same filesystem path and launch IDs.
+#[derive(Debug, Clone)]
+pub struct TraceLineage(Arc<()>);
+
+impl TraceLineage {
+    fn new() -> Self {
+        Self(Arc::new(()))
+    }
+}
+
+impl PartialEq for TraceLineage {
+    fn eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.0, &other.0)
+    }
+}
+
+impl Eq for TraceLineage {}
+
+impl TraceDir {
+    /// Return the immutable in-process lineage token for this loaded snapshot.
+    pub fn lineage(&self) -> TraceLineage {
+        self.lineage.clone()
+    }
+
+    /// Parsed static execution metadata captured with a direct trace load.
+    /// Campaign snapshots return `None` because their evidence admission owns
+    /// the execution-info artifact and generation binding.
+    pub fn exec_info(&self) -> Option<&ExecInfo> {
+        self.exec_info.as_ref()
+    }
+
+    fn verify_direct_generations(
+        &self,
+        reader: &AnchoredDir,
+        expected: &[(PathBuf, FileGenerationIdentity)],
+    ) -> Result<(), TraceError> {
+        for (relative, expected_generation) in expected {
+            let actual = reader.inspect_regular_generation(relative)?;
+            if actual != *expected_generation {
+                return Err(TraceError::ThreadblockPayloadSnapshotInvalid {
+                    root: self.root.clone(),
+                    message: format!(
+                        "direct trace artifact changed while loading: {}",
+                        relative.display()
+                    ),
+                });
+            }
+        }
+        Ok(())
+    }
 }
 
 impl TraceDir {
@@ -3580,23 +3754,39 @@ impl TraceDir {
     pub fn open_direct(root: impl Into<PathBuf>) -> Result<Self, TraceError> {
         let root = root.into();
         let reader = AnchoredDir::open(&root)?;
-        let dynamic_trace_pb = reader
-            .read_bounded_regular(Path::new("dynamic_trace.pb"), DYNAMIC_TRACE_PB_MAX_BYTES)?
-            .into_raw();
+        let dynamic_file = reader
+            .read_bounded_regular(Path::new("dynamic_trace.pb"), DYNAMIC_TRACE_PB_MAX_BYTES)?;
+        let mut generations = vec![(
+            PathBuf::from("dynamic_trace.pb"),
+            dynamic_file.generation_identity(),
+        )];
+        let dynamic_trace_pb = dynamic_file.into_raw();
         if dynamic_trace_pb.is_empty() {
             return Err(TraceError::TraceRootEmpty {
                 path: root.join("dynamic_trace.pb"),
             });
         }
-        let allocations_json = reader
-            .read_optional_bounded_regular(
-                Path::new("extra_info/allocations.json"),
-                ALLOCATIONS_JSON_MAX_BYTES,
-            )?
-            .map(AnchoredFile::into_raw);
-        let stats_csv = reader
-            .read_optional_bounded_regular(Path::new("stats.csv"), STATS_CSV_MAX_BYTES)?
-            .map(AnchoredFile::into_raw);
+        let exec_info = read_direct_exec_info(&reader)?;
+        if let Some((_, generation)) = &exec_info {
+            generations.push((PathBuf::from(DIRECT_EXEC_INFO_RELATIVE), *generation));
+        }
+        let allocations_file = reader.read_optional_bounded_regular(
+            Path::new("extra_info/allocations.json"),
+            ALLOCATIONS_JSON_MAX_BYTES,
+        )?;
+        if let Some(file) = allocations_file.as_ref() {
+            generations.push((
+                PathBuf::from("extra_info/allocations.json"),
+                file.generation_identity(),
+            ));
+        }
+        let allocations_json = allocations_file.map(AnchoredFile::into_raw);
+        let stats_file =
+            reader.read_optional_bounded_regular(Path::new("stats.csv"), STATS_CSV_MAX_BYTES)?;
+        if let Some(file) = stats_file.as_ref() {
+            generations.push((PathBuf::from("stats.csv"), file.generation_identity()));
+        }
+        let stats_csv = stats_file.map(AnchoredFile::into_raw);
         let tree = reader
             .read_pb_tree(
                 Path::new("threadblocks"),
@@ -3623,15 +3813,19 @@ impl TraceDir {
                     message: format!("payload path is not canonical: {relative:?}"),
                 });
             }
+            generations.push((PathBuf::from(relative), entry.file.generation_identity()));
             payload_by_path.insert(root.join(relative), entry.file.into_raw());
         }
-        Self::from_loaded_bytes(
+        let trace = Self::from_loaded_bytes(
             root,
             dynamic_trace_pb,
+            exec_info.map(|(info, _)| info),
             allocations_json,
             stats_csv,
             payload_by_path,
-        )
+        )?;
+        trace.verify_direct_generations(&reader, &generations)?;
+        Ok(trace)
     }
 
     /// Use the complete direct-loader validation path, then release immutable
@@ -3651,23 +3845,39 @@ impl TraceDir {
     pub fn open_direct_streaming(root: impl Into<PathBuf>) -> Result<Self, TraceError> {
         let root = root.into();
         let reader = AnchoredDir::open(&root)?;
-        let dynamic_trace_pb = reader
-            .read_bounded_regular(Path::new("dynamic_trace.pb"), DYNAMIC_TRACE_PB_MAX_BYTES)?
-            .into_raw();
+        let dynamic_file = reader
+            .read_bounded_regular(Path::new("dynamic_trace.pb"), DYNAMIC_TRACE_PB_MAX_BYTES)?;
+        let mut generations = vec![(
+            PathBuf::from("dynamic_trace.pb"),
+            dynamic_file.generation_identity(),
+        )];
+        let dynamic_trace_pb = dynamic_file.into_raw();
         if dynamic_trace_pb.is_empty() {
             return Err(TraceError::TraceRootEmpty {
                 path: root.join("dynamic_trace.pb"),
             });
         }
-        let allocations_json = reader
-            .read_optional_bounded_regular(
-                Path::new("extra_info/allocations.json"),
-                ALLOCATIONS_JSON_MAX_BYTES,
-            )?
-            .map(AnchoredFile::into_raw);
-        let stats_csv = reader
-            .read_optional_bounded_regular(Path::new("stats.csv"), STATS_CSV_MAX_BYTES)?
-            .map(AnchoredFile::into_raw);
+        let exec_info = read_direct_exec_info(&reader)?;
+        if let Some((_, generation)) = &exec_info {
+            generations.push((PathBuf::from(DIRECT_EXEC_INFO_RELATIVE), *generation));
+        }
+        let allocations_file = reader.read_optional_bounded_regular(
+            Path::new("extra_info/allocations.json"),
+            ALLOCATIONS_JSON_MAX_BYTES,
+        )?;
+        if let Some(file) = allocations_file.as_ref() {
+            generations.push((
+                PathBuf::from("extra_info/allocations.json"),
+                file.generation_identity(),
+            ));
+        }
+        let allocations_json = allocations_file.map(AnchoredFile::into_raw);
+        let stats_file =
+            reader.read_optional_bounded_regular(Path::new("stats.csv"), STATS_CSV_MAX_BYTES)?;
+        if let Some(file) = stats_file.as_ref() {
+            generations.push((PathBuf::from("stats.csv"), file.generation_identity()));
+        }
+        let stats_csv = stats_file.map(AnchoredFile::into_raw);
         let roster = reader
             .roster_pb_tree(
                 Path::new("threadblocks"),
@@ -3696,6 +3906,11 @@ impl TraceDir {
             }
             roster_by_path.insert(root.join(relative), (entry.relative, entry.generation));
         }
+        generations.extend(
+            roster_by_path
+                .values()
+                .map(|(relative, generation)| (relative.clone(), *generation)),
+        );
 
         let dynamic_path = root.join("dynamic_trace.pb");
         wire_preflight::preflight_trace(&dynamic_trace_pb).map_err(|error| {
@@ -3742,9 +3957,11 @@ impl TraceDir {
             .as_deref()
             .map(|raw| parse_trace_stats(&stats_path, raw))
             .transpose()?;
-        Ok(Self {
+        let trace = Self {
+            lineage: TraceLineage::new(),
             root,
             trace,
+            exec_info: exec_info.map(|(info, _)| info),
             memory_payload_contract,
             allocations,
             #[cfg(feature = "campaign")]
@@ -3754,7 +3971,9 @@ impl TraceDir {
             payload_by_path: BTreeMap::new(),
             raw_payload_retained: false,
             threadblock_by_path,
-        })
+        };
+        trace.verify_direct_generations(&reader, &generations)?;
+        Ok(trace)
     }
 
     /// Decode a one-read manifest snapshot without reopening any artifact.
@@ -3781,6 +4000,7 @@ impl TraceDir {
         Self::from_loaded_bytes(
             root,
             dynamic_trace_pb,
+            None,
             allocations_json,
             stats_csv,
             threadblock_payload.by_path,
@@ -3794,6 +4014,7 @@ impl TraceDir {
     fn from_loaded_bytes(
         root: PathBuf,
         dynamic_trace_pb: Vec<u8>,
+        exec_info: Option<ExecInfo>,
         allocations_json: Option<Vec<u8>>,
         stats_csv: Option<Vec<u8>>,
         payload_by_path: BTreeMap<PathBuf, Vec<u8>>,
@@ -3831,8 +4052,10 @@ impl TraceDir {
             .map(|raw| parse_trace_stats(&stats_path, raw))
             .transpose()?;
         Ok(Self {
+            lineage: TraceLineage::new(),
             root,
             trace,
+            exec_info,
             memory_payload_contract,
             allocations,
             #[cfg(feature = "campaign")]
@@ -3880,17 +4103,30 @@ impl TraceDir {
     }
 
     /// All kernel launches, in deterministic (device, stream, launch) order.
-    /// Map fields are BTreeMaps (see pbgen), so iteration order is stable.
+    /// Map fields are BTreeMaps (see pbgen), and launch IDs are the producer's
+    /// per-device sequence numbers.  The protobuf repeated-field order is not
+    /// an identity guarantee: a merge/re-encoder can legally reorder kernels.
+    /// Sort each stream by its unique launch ID so this reader agrees with the
+    /// Python admission path (`_ordered_launches`) and stream-L2 replay even
+    /// when the wire vector is out of order.
     pub fn kernels(&self) -> impl Iterator<Item = KernelLoc<'_>> {
-        self.trace.gpu_device.iter().flat_map(|(&device_id, dev)| {
-            dev.streams.iter().flat_map(move |(&stream_id, stream)| {
-                stream.kernels.iter().map(move |kernel| KernelLoc {
-                    device_id,
-                    stream_id,
-                    kernel,
-                })
-            })
-        })
+        let mut launches = Vec::new();
+        for (&device_id, device) in &self.trace.gpu_device {
+            for (&stream_id, stream) in &device.streams {
+                let mut stream_launches: Vec<_> = stream
+                    .kernels
+                    .iter()
+                    .map(|kernel| KernelLoc {
+                        device_id,
+                        stream_id,
+                        kernel,
+                    })
+                    .collect();
+                stream_launches.sort_by_key(|loc| loc.kernel.id);
+                launches.extend(stream_launches);
+            }
+        }
+        launches.into_iter()
     }
 
     fn require_kernel_loc(&self, loc: &KernelLoc<'_>) -> Result<(), TraceError> {
@@ -6747,6 +6983,7 @@ fn project_ldgsts_source_cohorts_128b_32x4(
         .unwrap_or_else(|_| unreachable!("preflight admitted a non-positive operand width"));
     let width_u32 = u32::try_from(width)
         .unwrap_or_else(|_| unreachable!("one source transfer width escaped u32"));
+    let instruction_mask = preflight.meta().and_mask;
 
     const EMPTY_TRANSFER: LdgstsLaneTransfer = LdgstsLaneTransfer {
         source_start: 0,
@@ -6760,15 +6997,12 @@ fn project_ldgsts_source_cohorts_128b_32x4(
     };
     let mut transfers = [EMPTY_TRANSFER; lanes::LANES_PER_WARP];
     let mut transfer_count = 0_usize;
+    let mut zero_fill_words = Vec::new();
+    let mut zero_fill_transfers = 0_u32;
+    let mut projected_words = 0_u64;
     for lane in 0..lanes::LANES_PER_WARP {
         let source_address = source.lane_vector[lane];
         let destination_address = destination.lane_vector[lane];
-        if source_address == lanes::LANE_INACTIVE_SENTINEL {
-            // cp.async ignore-src lanes still zero-fill their SHARED
-            // destination. They have no source cohort and therefore do not
-            // contribute global sectors or source-coupled delivery work.
-            continue;
-        }
         if width > 128 {
             return Err(
                 LdgstsDestinationProjectionError::SourceTransferExceedsCohort {
@@ -6776,6 +7010,61 @@ fn project_ldgsts_source_cohorts_128b_32x4(
                     width_bytes: width,
                 },
             );
+        }
+        if destination_address == lanes::LANE_INACTIVE_SENTINEL
+            && (instruction_mask >> lane) & 1 == 1
+        {
+            return Err(LdgstsDestinationProjectionError::DestinationLaneMissing { lane });
+        }
+        if destination_address == lanes::LANE_INACTIVE_SENTINEL {
+            continue;
+        }
+        if source_address == lanes::LANE_INACTIVE_SENTINEL {
+            // cp.async ignore-src lanes have no global source cohort, but an
+            // executing lane still performs destination zero-fill work. Keep
+            // that work in a separate zero-payload cohort so source sectors
+            // remain empty while async completion stays nonzero.
+            let destination_width_offset = i64::try_from(width - 1)
+                .unwrap_or_else(|_| unreachable!("128-byte transfer width escaped i64"));
+            let destination_last_byte = destination_address
+                .checked_add(destination_width_offset)
+                .ok_or(
+                LdgstsDestinationProjectionError::DestinationIntervalOverflow {
+                    lane,
+                    base: destination_address,
+                    width_bytes: width,
+                },
+            )?;
+            let first_word = destination_address.div_euclid(4);
+            let last_word = destination_last_byte.div_euclid(4);
+            let words = u64::try_from(last_word - first_word + 1).unwrap_or_else(|_| {
+                unreachable!("checked destination interval produced negative words")
+            });
+            projected_words = projected_words.checked_add(words).ok_or(
+                LdgstsDestinationProjectionError::InstructionWordLimit {
+                    words: u64::MAX,
+                    limit: MAX_SHARED_WORDS_PER_INSTRUCTION,
+                },
+            )?;
+            if projected_words > MAX_SHARED_WORDS_PER_INSTRUCTION {
+                return Err(LdgstsDestinationProjectionError::InstructionWordLimit {
+                    words: projected_words,
+                    limit: MAX_SHARED_WORDS_PER_INSTRUCTION,
+                });
+            }
+            let additional = usize::try_from(words)
+                .unwrap_or_else(|_| unreachable!("bounded destination words escaped usize"));
+            zero_fill_words.try_reserve(additional).map_err(|_| {
+                LdgstsDestinationProjectionError::CapacityUnavailable { additional }
+            })?;
+            zero_fill_words.extend(first_word..=last_word);
+            zero_fill_transfers = zero_fill_transfers.checked_add(1).ok_or(
+                LdgstsDestinationProjectionError::InstructionWordLimit {
+                    words: u64::MAX,
+                    limit: MAX_SHARED_WORDS_PER_INSTRUCTION,
+                },
+            )?;
+            continue;
         }
         let source_start = source_address as u64;
         let source_end = source_start.checked_add(width).ok_or(
@@ -6818,7 +7107,6 @@ fn project_ldgsts_source_cohorts_128b_32x4(
     let mut cohort_payload_bytes = 0_u32;
     let mut cohort_ordinal = 0_u8;
     let mut cohorts = Vec::new();
-    let mut projected_words = 0_u64;
     for transfer in &mut transfers[..transfer_count] {
         if cohort_start.is_some_and(|start| transfer.source_end - start > 128) {
             finish_ldgsts_destination_cohort(
@@ -6873,7 +7161,38 @@ fn project_ldgsts_source_cohorts_128b_32x4(
         &mut cohorts,
     )?;
 
-    let topology = recompose_ldgsts_destination_topology(&cohorts)?;
+    let mut topology = recompose_ldgsts_destination_topology(&cohorts)?;
+    if zero_fill_transfers != 0 {
+        let mut zero_cohorts = Vec::new();
+        finish_ldgsts_destination_cohort(
+            &mut zero_fill_words,
+            zero_fill_transfers,
+            0,
+            &mut zero_cohorts,
+        )?;
+        let zero = recompose_ldgsts_destination_topology(&zero_cohorts)?;
+        topology.destination_line_fanout_total = topology
+            .destination_line_fanout_total
+            .checked_add(zero.destination_line_fanout_total)
+            .ok_or(LdgstsDestinationProjectionError::DestinationLineFanoutOverflow)?;
+        topology.destination_line_fanout_max = topology
+            .destination_line_fanout_max
+            .max(zero.destination_line_fanout_max);
+        topology.cache_all_bank_wavefronts_total = topology
+            .cache_all_bank_wavefronts_total
+            .checked_add(zero.cache_all_bank_wavefronts_total)
+            .ok_or(LdgstsDestinationProjectionError::WavefrontCountOverflow)?;
+        topology.cache_all_bank_wavefronts_max = topology
+            .cache_all_bank_wavefronts_max
+            .max(zero.cache_all_bank_wavefronts_max);
+        topology.bypass_wavefronts_total = topology
+            .bypass_wavefronts_total
+            .checked_add(zero.bypass_wavefronts_total)
+            .ok_or(LdgstsDestinationProjectionError::BypassWavefrontCountOverflow)?;
+        topology.bypass_wavefronts_max = topology
+            .bypass_wavefronts_max
+            .max(zero.bypass_wavefronts_max);
+    }
     debug_assert_eq!(
         cohorts
             .iter()
@@ -8619,6 +8938,25 @@ mod tests {
     }
 
     #[test]
+    fn oversized_ldgsts_topology_returns_typed_error_instead_of_panicking() {
+        let mut topology = LdgstsDestinationTopology {
+            source_cohorts: 1,
+            ..LdgstsDestinationTopology::default()
+        };
+        topology.destination_line_fanout_total = 255;
+        assert_eq!(
+            CompactLdgstsDestinationTopology::new(Some(topology)).unwrap_err(),
+            LdgstsDestinationProjectionError::CompactTopologyFieldOutOfRange {
+                field: "destination_line_fanout_total",
+                value: 255,
+                limit: 254,
+            }
+        );
+        topology.destination_line_fanout_total = 254;
+        assert!(CompactLdgstsDestinationTopology::new(Some(topology)).is_ok());
+    }
+
+    #[test]
     fn source_only_async_copy_retains_explicit_destination_projection_fallback() {
         let compact = ValidatedWarp::from_message(
             0,
@@ -8721,20 +9059,56 @@ mod tests {
             address.addrs[1..].fill(crate::lanes::LANE_INACTIVE_SENTINEL);
         }
         overflow.addresses[0].addrs[0] = -2;
-        let preflight = preflight_memory_access(&overflow, || "source overflow".to_owned())
+        let error = preflight_memory_access(&overflow, || "source overflow".to_owned())
+            .expect_err("negative active source must fail before projection");
+        assert!(matches!(
+            error,
+            TraceError::Lane {
+                source: LaneError::NegativeAddress {
+                    lane: 0,
+                    address: -2
+                },
+                ..
+            }
+        ));
+
+        let mut missing_destination = ldgsts_destination_inst(false, 0);
+        missing_destination.addresses[1].lane_mask = Some(0);
+        missing_destination.addresses[1]
+            .addrs
+            .fill(crate::lanes::LANE_INACTIVE_SENTINEL);
+        let preflight =
+            preflight_memory_access(&missing_destination, || "missing destination".to_owned())
+                .unwrap()
+                .unwrap();
+        assert!(matches!(
+            project_ldgsts_source_cohort_wavefronts_128b_32x4(preflight, &mut Vec::new()),
+            Err(LdgstsDestinationProjectionError::DestinationLaneMissing { lane: 0 })
+        ));
+
+        let mut zero_fill = ldgsts_destination_inst(false, 0);
+        zero_fill.addresses[0].lane_mask = Some(0);
+        zero_fill.addresses[0]
+            .addrs
+            .fill(crate::lanes::LANE_INACTIVE_SENTINEL);
+        let preflight = preflight_memory_access(&zero_fill, || "zero fill".to_owned())
             .unwrap()
             .unwrap();
-        assert!(matches!(
-            project_ldgsts_source_cohort_wavefronts_128b_32x4(
-                preflight,
-                &mut Vec::new()
-            ),
-            Err(LdgstsDestinationProjectionError::SourceIntervalOverflow {
-                lane: 0,
-                base,
-                width_bytes: 16,
-            }) if base == u64::MAX - 1
-        ));
+        let topology =
+            project_ldgsts_source_cohort_topology_128b_32x4(preflight, &mut Vec::new()).unwrap();
+        assert_eq!(topology.source_cohorts, 0);
+        assert!(topology.cache_all_bank_wavefronts_total > 0);
+
+        let mut mixed = ldgsts_destination_inst(false, 0);
+        mixed.addresses[0].lane_mask = Some(1);
+        mixed.addresses[0].addrs[1..].fill(crate::lanes::LANE_INACTIVE_SENTINEL);
+        let preflight = preflight_memory_access(&mixed, || "mixed zero fill".to_owned())
+            .unwrap()
+            .unwrap();
+        let mixed_topology =
+            project_ldgsts_source_cohort_topology_128b_32x4(preflight, &mut Vec::new()).unwrap();
+        assert_eq!(mixed_topology.source_cohorts, 1);
+        assert!(mixed_topology.cache_all_bank_wavefronts_total > 0);
     }
 
     #[test]
@@ -8987,6 +9361,49 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "campaign")]
+    fn default_manifest_snapshot_bounds_dynamic_trace_before_materializing() {
+        let tmp = tempfile::tempdir().unwrap();
+        let file = std::fs::File::create(tmp.path().join("dynamic_trace.pb")).unwrap();
+        file.set_len(DYNAMIC_TRACE_PB_MAX_BYTES + 1).unwrap();
+        let error = match TraceDirSnapshot::capture(tmp.path()) {
+            Ok(_) => panic!("oversized dynamic trace was accepted"),
+            Err(error) => error,
+        };
+        assert!(matches!(
+            error,
+            TraceError::AnchoredSnapshot(AnchoredReadError::SizeLimitExceeded {
+                limit: DYNAMIC_TRACE_PB_MAX_BYTES,
+                actual,
+                ..
+            }) if actual == DYNAMIC_TRACE_PB_MAX_BYTES + 1
+        ));
+    }
+
+    #[test]
+    #[cfg(feature = "campaign")]
+    fn default_manifest_snapshot_bounds_threadblock_file_before_materializing() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(tmp.path().join("dynamic_trace.pb"), [0x08, 0x01]).unwrap();
+        let payload = tmp.path().join("threadblocks/payload.pb");
+        std::fs::create_dir_all(payload.parent().unwrap()).unwrap();
+        let file = std::fs::File::create(&payload).unwrap();
+        file.set_len(CAMPAIGN_THREADBLOCK_FILE_MAX_BYTES + 1)
+            .unwrap();
+        let error = match TraceDirSnapshot::capture(tmp.path()) {
+            Ok(_) => panic!("oversized threadblock payload was accepted"),
+            Err(error) => error,
+        };
+        assert!(matches!(
+            error,
+            TraceError::AnchoredSnapshot(AnchoredReadError::TreeByteLimitExceeded {
+                limit: CAMPAIGN_THREADBLOCK_FILE_MAX_BYTES,
+                ..
+            })
+        ));
+    }
+
+    #[test]
     fn root_map_and_function_identities_fail_closed() {
         for mutation in ["device", "stream", "function"] {
             let tmp = tempfile::tempdir().unwrap();
@@ -9033,6 +9450,28 @@ mod tests {
     }
 
     #[test]
+    fn negative_register_count_is_typed_before_payload_join() {
+        let tmp = tempfile::tempdir().unwrap();
+        write_synthetic_trace(tmp.path(), 1);
+        let mut trace = read_synthetic_root(tmp.path());
+        trace
+            .gpu_device
+            .get_mut(&0)
+            .unwrap()
+            .streams
+            .get_mut(&0)
+            .unwrap()
+            .kernels[0]
+            .number_of_registers = -1;
+        write_synthetic_root(tmp.path(), &trace);
+        let error = match TraceDir::open_direct(tmp.path()) {
+            Ok(_) => panic!("negative register count was accepted"),
+            Err(error) => error,
+        };
+        assert_eq!(error.typed_reason(), Some("trace_launch_registers_invalid"));
+    }
+
+    #[test]
     fn duplicate_launch_identity_is_typed() {
         let tmp = tempfile::tempdir().unwrap();
         write_synthetic_trace(tmp.path(), 1);
@@ -9047,6 +9486,29 @@ mod tests {
         stream.kernels.push(stream.kernels[0].clone());
         write_synthetic_root(tmp.path(), &trace);
         let error = TraceDir::open_direct(tmp.path()).err().unwrap();
+        assert_eq!(error.typed_reason(), Some("trace_launch_identity_mismatch"));
+    }
+
+    #[test]
+    fn nonpositive_kernel_id_is_rejected_before_payload_join() {
+        let tmp = tempfile::tempdir().unwrap();
+        write_synthetic_trace(tmp.path(), 1);
+        let mut trace = read_synthetic_root(tmp.path());
+        trace
+            .gpu_device
+            .get_mut(&0)
+            .unwrap()
+            .streams
+            .get_mut(&0)
+            .unwrap()
+            .kernels[0]
+            .id = 0;
+        write_synthetic_root(tmp.path(), &trace);
+        let error = TraceDir::open_direct(tmp.path()).err().unwrap();
+        assert!(matches!(
+            error,
+            TraceError::LaunchIdentityInvalid { kernel_id: 0, .. }
+        ));
         assert_eq!(error.typed_reason(), Some("trace_launch_identity_mismatch"));
     }
 
@@ -9220,6 +9682,38 @@ mod tests {
         }
         assert_eq!(mem_insts, 2);
         assert_eq!(alu_insts, 2);
+    }
+
+    #[test]
+    fn kernels_are_sorted_by_launch_id_when_wire_vector_is_reordered() {
+        let tmp = tempfile::tempdir().unwrap();
+        write_synthetic_trace(tmp.path(), 1);
+
+        // Keep the payload contract valid while constructing the exact case a
+        // protobuf merge/re-encoder can create: the repeated kernel field is
+        // serialized as [2, 1].  The Python admission path sorts this vector
+        // by kernel.id because IDs are the producer's launch sequence.
+        let mut trace = read_synthetic_root(tmp.path());
+        let stream = trace
+            .gpu_device
+            .get_mut(&0)
+            .unwrap()
+            .streams
+            .get_mut(&0)
+            .unwrap();
+        let mut kernel_two = stream.kernels[0].clone();
+        kernel_two.id = 2;
+        stream.kernels = vec![kernel_two, stream.kernels[0].clone()];
+        write_synthetic_root(tmp.path(), &trace);
+
+        let payload = std::fs::read(synthetic_threadblock_path(tmp.path(), 1)).unwrap();
+        let kernel_two_path = synthetic_threadblock_path(tmp.path(), 2);
+        std::fs::create_dir_all(kernel_two_path.parent().unwrap()).unwrap();
+        std::fs::write(kernel_two_path, payload).unwrap();
+
+        let td = TraceDir::open_direct(tmp.path()).unwrap();
+        let ids: Vec<_> = td.kernels().map(|loc| loc.kernel().id).collect();
+        assert_eq!(ids, vec![1, 2]);
     }
 
     #[test]
@@ -10190,9 +10684,12 @@ mod tests {
     }
 
     #[test]
-    fn allocation_crossing_u64_boundary_uses_wide_range_arithmetic() {
+    fn allocation_crossing_signed_boundary_uses_wide_range_arithmetic() {
+        let base = i64::MAX as u64 - 15;
         let registry = AllocationRegistry::from_str(
-            r#"[{"allocation_id":1,"context_id":1,"device_id":0,"base_address":"0xfffffffffffffff0","size_bytes":32,"alive":true}]"#,
+            &format!(
+                r#"[{{"allocation_id":1,"context_id":1,"device_id":0,"base_address":"0x{base:x}","size_bytes":32,"alive":true}}]"#
+            ),
             Path::new("t"),
         )
         .unwrap();
@@ -10200,7 +10697,7 @@ mod tests {
             pb::MemoryOpClass::Global,
             Some(pb::MemorySpace::Global),
             Some(1),
-            u64::MAX - 4,
+            base + 12,
         );
         assert!(check_allocation_identity(&inst, Some(&registry), || "t".into()).is_ok());
     }
@@ -10479,6 +10976,14 @@ mod sampling_sidecar_tests {
                 }) if actual == resource
             ));
         }
+    }
+
+    #[test]
+    fn json_shape_preflight_rejects_duplicate_object_keys() {
+        let error = preflight_json_shape(br#"{"key":1,"key":2}"#, u64::MAX, None).unwrap_err();
+        assert!(
+            matches!(error, JsonPreflightError::Malformed(message) if message.contains("duplicate JSON object key"))
+        );
     }
 
     #[test]

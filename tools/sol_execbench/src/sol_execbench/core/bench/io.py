@@ -519,11 +519,11 @@ def allocate_outputs(
 class ShiftingMemoryPoolAllocator:
     """Pre-allocated memory pool that provides unique ``data_ptr`` per iteration.
 
-    Allocates a buffer only slightly larger than the input tensors
-    (overhead ≈ ``total_iterations × 256`` bytes per tensor).  The source
-    data is retained and copied into an advancing offset of the pool on
-    each call to :meth:`get_unique_args`, so every iteration sees a
-    distinct ``data_ptr`` while VRAM usage stays near 1× input size.
+    Allocates one buffer only slightly larger than each distinct underlying
+    input storage (overhead ≈ ``total_iterations × 256`` bytes per storage).
+    Source bytes are retained and copied into an advancing offset on each
+    call to :meth:`get_unique_args`, so every iteration sees a distinct
+    ``data_ptr`` while VRAM usage stays near 1× input storage size.
 
     Stride patterns (including stride-0 broadcasts from ``expand()``) are
     preserved so that the pool only stores the physical storage footprint,
@@ -537,8 +537,10 @@ class ShiftingMemoryPoolAllocator:
         scalars are returned as-is on every call.
     outputs : list[torch.Tensor]
         Output tensors for destination-passing-style kernels, as returned
-        by :func:`allocate_outputs`.  These are zero-filled at each offset
-        on every call.  Pass an empty list for non-DPS kernels.
+        by :func:`allocate_outputs`. Output-only storages are zero-filled at
+        each offset on every call. If an output intentionally aliases an input
+        storage, the input contents are retained so alias semantics match the
+        direct call. Pass an empty list for non-DPS kernels.
     total_iterations : int
         Total number of :meth:`get_unique_args` calls expected
         (warmup + timed iterations).
@@ -553,74 +555,107 @@ class ShiftingMemoryPoolAllocator:
         outputs: List[torch.Tensor],
         total_iterations: int,
     ) -> None:
+        if type(total_iterations) is not int or total_iterations <= 0:
+            raise ValueError(
+                "total_iterations must be a positive integer, "
+                f"got {total_iterations!r}"
+            )
         self._call_idx = 0
         self._total_iterations = total_iterations
         self._input_entries: List[Dict[str, Any]] = []
         self._output_entries: List[Dict[str, Any]] = []
+        self._storage_groups: Dict[tuple[Any, ...], Dict[str, Any]] = {}
 
         for inp in inputs:
             if not isinstance(inp, torch.Tensor):
                 self._input_entries.append({"scalar": inp})
                 continue
 
-            self._input_entries.append(self._make_pool_entry(inp, total_iterations))
+            self._input_entries.append(
+                self._make_pool_entry(inp, total_iterations, False)
+            )
 
         for out in outputs:
-            self._output_entries.append(self._make_pool_entry(out, total_iterations))
+            self._output_entries.append(
+                self._make_pool_entry(out, total_iterations, True)
+            )
 
-    @staticmethod
-    def _storage_span(tensor: torch.Tensor) -> int:
-        """Number of contiguous storage elements spanned by *tensor*.
-
-        For a standard contiguous tensor this equals ``numel()``.  For
-        broadcast/expanded tensors (stride 0) this is much smaller — only
-        the physically stored elements are counted.
-        """
-        if tensor.numel() == 0:
-            return 0
-        span = 1
-        for s, st in zip(tensor.shape, tensor.stride()):
-            if s > 1:
-                span += (s - 1) * st
-        return span
-
-    @classmethod
     def _make_pool_entry(
-        cls, tensor: torch.Tensor, total_iterations: int
+        self, tensor: torch.Tensor, total_iterations: int, is_output: bool
     ) -> Dict[str, Any]:
         # Negative strides (e.g. from flip()) make storage span math
         # ambiguous — materialise to contiguous up front.
         if any(st < 0 for st in tensor.stride()):
             tensor = tensor.contiguous()
 
-        shape = tuple(tensor.shape)
-        strides = tensor.stride()
-        storage_span = cls._storage_span(tensor)
-        elem_size = tensor.element_size()
-
-        # Shift data_ptr by _POOL_ALIGNMENT bytes each iteration.
-        stride_numel = max(1, cls._POOL_ALIGNMENT // elem_size)
-
-        # Pool only needs storage_span + (iters-1)*stride extra elements.
-        pool_numel = storage_span + (total_iterations - 1) * stride_numel
-        pool = torch.empty(pool_numel, dtype=tensor.dtype, device=tensor.device)
-
-        # Flat 1D view of the physical storage this tensor spans.
-        source = tensor.as_strided((storage_span,), (1,))
+        storage = tensor.untyped_storage()
+        # _cdata identifies the underlying storage even when callers pass
+        # different views.  Keep the storage object alive for the source copy;
+        # data_ptr alone is zero for empty storage and cannot be an identity.
+        key = (tensor.device.type, tensor.device.index, int(storage._cdata))
+        group = self._storage_groups.get(key)
+        if group is None:
+            storage_bytes = int(storage.nbytes())
+            pool_bytes = max(
+                1, storage_bytes + (total_iterations - 1) * self._POOL_ALIGNMENT
+            )
+            pool = torch.empty(pool_bytes, dtype=torch.uint8, device=tensor.device)
+            # Build a byte view over the original storage without allocating a
+            # second full-size tensor. The zero-length wrapper owns no payload;
+            # `set_` supplies the original untyped storage to `copy_` below.
+            source = torch.empty((0,), dtype=torch.uint8, device=tensor.device)
+            source = source.set_(storage, 0, (storage_bytes,), (1,))
+            group = {
+                "storage": storage,
+                "pool": pool,
+                "source": source,
+                "storage_bytes": storage_bytes,
+                "has_input": False,
+            }
+            self._storage_groups[key] = group
+        if not is_output:
+            group["has_input"] = True
 
         return {
-            "pool": pool,
-            "source": source,
-            "shape": shape,
-            "strides": strides,
-            "storage_span": storage_span,
-            "stride_numel": stride_numel,
+            "group": group,
+            "dtype": tensor.dtype,
+            "elem_size": tensor.element_size(),
+            "device": tensor.device,
+            "shape": tuple(tensor.shape),
+            "strides": tuple(tensor.stride()),
+            "storage_offset": int(tensor.storage_offset()),
+            "requires_grad": bool(tensor.requires_grad),
+            "is_conj": bool(tensor.is_conj()),
+            "is_neg": bool(tensor.is_neg()),
         }
+
+    @staticmethod
+    def _view_from_entry(entry: Dict[str, Any], shift_bytes: int) -> torch.Tensor:
+        group = entry["group"]
+        dtype = entry["dtype"]
+        elem_size = entry["elem_size"]
+        offset_bytes = shift_bytes + entry["storage_offset"] * elem_size
+        if offset_bytes % elem_size:
+            raise RuntimeError("memory-pool shift is not aligned for tensor dtype")
+        view = torch.empty((0,), dtype=dtype, device=entry["device"]).set_(
+            group["pool"].untyped_storage(),
+            offset_bytes // elem_size,
+            entry["shape"],
+            entry["strides"],
+        )
+        if entry["requires_grad"]:
+            view.requires_grad_()
+        if entry["is_conj"]:
+            view = view.conj()
+        if entry["is_neg"]:
+            view = view._neg_view()
+        return view
 
     def get_unique_args(self) -> List[Any]:
         """Copy source data into the next pool offset and return views.
 
-        Returns inputs followed by zero-filled outputs (for DPS kernels).
+        Returns inputs followed by output views (zero-filled when their storage
+        is not shared with an input).
         Each call advances the internal offset so every returned tensor has
         a unique ``data_ptr``.  Memory between consecutive calls overlaps —
         only the starting address differs.
@@ -634,23 +669,26 @@ class ShiftingMemoryPoolAllocator:
         result: List[Any] = []
         idx = self._call_idx
 
+        # Copy or clear each physical storage once. This preserves aliasing
+        # between multiple input views while avoiding duplicate pool memory.
+        for group in self._storage_groups.values():
+            start = idx * self._POOL_ALIGNMENT
+            size = group["storage_bytes"]
+            target = group["pool"].narrow(0, start, size)
+            if group["has_input"]:
+                target.copy_(group["source"])
+            else:
+                target.zero_()
+
         for entry in self._input_entries:
             if "scalar" in entry:
                 result.append(entry["scalar"])
                 continue
 
-            start = idx * entry["stride_numel"]
-            entry["pool"].narrow(0, start, entry["storage_span"]).copy_(entry["source"])
-            result.append(
-                entry["pool"].as_strided(entry["shape"], entry["strides"], start)
-            )
+            result.append(self._view_from_entry(entry, idx * self._POOL_ALIGNMENT))
 
         for entry in self._output_entries:
-            start = idx * entry["stride_numel"]
-            entry["pool"].narrow(0, start, entry["storage_span"]).zero_()
-            result.append(
-                entry["pool"].as_strided(entry["shape"], entry["strides"], start)
-            )
+            result.append(self._view_from_entry(entry, idx * self._POOL_ALIGNMENT))
 
         self._call_idx += 1
         return result

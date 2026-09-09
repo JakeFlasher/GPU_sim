@@ -1,10 +1,10 @@
 """Emit a minimal harness trace bundle from sol-execbench-only
 correctness evidence.
 
-The full harness (``scripts/baselines_harness/run.py``) drives
+The full harness (``tools/sol_baselines_harness/run.py``) drives
 ``sol-execbench`` AND the five counter-free analytic surfaces,
 producing a rich
-``scripts/baselines_harness/.harness_traces/<slug>__<lang>/``
+``tools/sol_baselines_harness/.harness_traces/<slug>__<lang>/``
 bundle with per-surface manifests. The
 ``compile_verification_probe`` module then walks those bundles
 to extract per-slug ``compile_verified`` +
@@ -37,7 +37,7 @@ CLI:
     python -m baselines_harness.calibration.cache_prediction.sm120_coverage_expansion.emit_minimal_probe_bundle \\
         --baseline baselines/L1/<slug>/cuda_cpp \\
         [--baseline ...]
-        [--traces-root scripts/baselines_harness/.harness_traces]
+        [--traces-root tools/sol_baselines_harness/.harness_traces]
 
 For each baseline, the helper runs ``sol-execbench`` (the
 in-tree CLI installed in the workspace venv), captures the
@@ -160,6 +160,7 @@ def _run_sol_execbench(
         check=False,
         capture_output=True,
         text=True,
+        errors="replace",
         timeout=1200,
     )
     if proc.returncode != 0:
@@ -296,7 +297,7 @@ def _emit_bundle_for_baseline(
                 "sanitizer) was NOT invoked; only sol-execbench "
                 "correctness was verified. Downstream consumers "
                 "that need surface artifacts should re-run the "
-                "full harness via scripts/baselines_harness/run.py."
+                "full harness via tools/sol_baselines_harness/run.py."
             ),
             "captured_at_utc": captured_at_utc,
         },

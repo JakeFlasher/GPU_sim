@@ -8,12 +8,8 @@
 // field itself) through ``Tier2Sha256Ctx`` while writing them to
 // disk, then seek-patches the digest into the header placeholder.
 //
-// The implementation is header-only and dependency-free so it can be
-// linked into both the C++ host writer in ``metric_extractor.cu`` and
-// into the standalone ``test_tier2_sha256`` known-vector test binary
-// alongside the existing ``test_classifier`` / ``test_saturating_counter``
-// test programs. Vectors covered: FIPS-180-4 empty string, "abc",
-// and the 1M 'a' bytes acceptance test.
+// The implementation is header-only and dependency-free so it can be linked
+// directly into the C++ host writer in ``metric_extractor.cu``.
 
 #ifndef NVBIT_TRACER_METRIC_EXTRACTOR_TIER2_SHA256_H_
 #define NVBIT_TRACER_METRIC_EXTRACTOR_TIER2_SHA256_H_

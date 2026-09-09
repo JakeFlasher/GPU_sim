@@ -54,8 +54,9 @@ pub use cache_op::{
 pub use l1::{
     AccessOutcome, EvAccess, EvAccessUnobserved, FillKey, L1AccessError, L1Cache, L1Config,
     L1ConfigError, L1CounterError, L1CounterField, L1Counters, L1LookupBatch, L1MutationBudget,
-    L1OriginCounters, LINE_BYTES, PreparedSectorExpansion, SECTOR_BYTES, SECTORS_PER_LINE,
-    SectorExpansionError, SectorExpansionPlan,
+    L1OriginCounters, L1WriteLookupObserver, L1WriteLookupObserverPlan, LINE_BYTES,
+    PreparedSectorExpansion, SECTOR_BYTES, SECTORS_PER_LINE, SectorExpansionError,
+    SectorExpansionPlan,
 };
 pub use l2::{
     L2AccessError, L2BuildError, L2Config, L2ConfigError, L2CounterError, L2CounterField,

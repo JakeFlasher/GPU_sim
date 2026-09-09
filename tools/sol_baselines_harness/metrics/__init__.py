@@ -99,7 +99,7 @@ Per CLAUDE.md §"Critical Rules" Rule 1, this package's deployed
 runtime path is NCU-free; ``cache_predictor.py`` and every
 other deployed module must keep the NCU-free invariant.
 Calibration-only NCU access lives under
-``scripts/baselines_harness/calibration/cache_prediction/`` and
+``tools/sol_baselines_harness/calibration/cache_prediction/`` and
 is policed by ``tests/test_ncu_quarantine.py``.
 """
 

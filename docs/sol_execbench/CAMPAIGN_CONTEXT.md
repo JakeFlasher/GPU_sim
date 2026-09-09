@@ -1,9 +1,7 @@
-> **SUBTREE-HISTORICAL:** this file governs the archived SOL-ExecBench
-> sub-project only. Its Rules (no NCU, no clock locking, counter-free B200)
-> are SUPERSEDED by the root CLAUDE.md (2026-07-02 re-founding) for all work
-> outside `docs/sol_execbench/`. See
-> `.claude/knowledge/measurement/pinned-protocol-v21.md` for the current
-> measurement protocol.
+> **SUBTREE-HISTORICAL:** this file preserves the SOL-ExecBench campaign
+> context. Its rules and workflow descriptions are historical. Root
+> `AGENTS.md` controls all work; use the current campaign skill and runbooks
+> for executable commands.
 
 # CLAUDE.md — Project Context
 
@@ -43,7 +41,7 @@ five analytic artifacts cleanly, and the same invocation surface is
 what will be shipped to the B200 provider."
 
 The RTX 5060 Laptop sm_120 host that produced the pre-2026-05-25
-landed manifests under `scripts/baselines_harness/.harness_traces/`
+landed manifests under `tools/sol_baselines_harness/.harness_traces/`
 is no longer attached. Those manifests are retained as a frozen
 evidence trail (legacy compatibility guards only) so the additive-not-
 surgical discipline can be verified on every new arch addition; they
@@ -80,10 +78,9 @@ template solution is acceptable when:
    `local_sol_score` column is diagnostic only** and is NOT
    substitutable for the online-judge SOL Score. (A historical
    variant of the same column name carrying an arch suffix is
-   retained as a back-compat alias in
-   `scripts/baselines_harness/report.json` only; the canonical key
-   `local_sol_score` is enforced in production .py code by
-   `scripts/baselines_harness/tests/test_no_stale_arch_tokens.py`.)
+   retained only in archived output; current report generation emits
+   the canonical `local_sol_score` key from
+   `tools/sol_baselines_harness/report.py`.)
 
 Speed against the PyTorch reference (`speedup_factor`) is recorded as
 diagnostic data only and is **NOT** a landing gate. A *.cu with
@@ -102,7 +99,7 @@ the 8 existing landed pilots.
 
 1. **No NCU / Nsight Compute in the deployed framework path or on
    B200.** The framework's runtime path (the five counter-free analytic
-   surfaces driven by `scripts/baselines_harness/`) and any B200
+   surfaces driven by `tools/sol_baselines_harness/`) and any B200
    invocation MUST NOT depend on `ncu` / `nv-nsight-cu-cli` or
    `.ncu-rep` / `.ncu-repz` artifacts. Tools that depend on NCU access
    do not transfer to our non-root cloud B200 surface, so the deployed
@@ -120,7 +117,7 @@ the 8 existing landed pilots.
    traffic under L2's write-back / no-write-allocate policy and
    biases labels — do not use it as the calibration target. Labels
    feed the cache predictor at
-   `scripts/baselines_harness/metrics/cache_predictor.py`, and ships
+   `tools/sol_baselines_harness/metrics/cache_predictor.py`, and ships
    a calibrated model + per-arch ledger that does NOT need NCU at
    deployment. The deployed framework path and every B200 invocation
    remain NCU-free.
@@ -242,14 +239,13 @@ the 8 existing landed pilots.
   root). A conda-`base` shell on this host may shadow workspace
   packages with installs from a different clone, which silently
   desynchronises the running evaluator from the vendored source
-  the cache key hashes. `scripts/baselines_harness/tests/conftest.py`
-  emits a loud stderr `WARNING: conda env detected …` when
-  `CONDA_DEFAULT_ENV` is set or `VIRTUAL_ENV` points outside the
-  repo `.venv/`. Confirm the env is correct with
+  the cache key hashes. The subprocess builder in
+  `tools/sol_baselines_harness/surfaces/subprocess_env.py` copies only
+  its curated environment allow-list and explicitly scrubs profiling
+  variables between surfaces. Confirm the env is correct with
   `python -c "import sol_execbench, solar, torchview; print(sol_execbench.__file__, solar.__file__, torchview.__file__)"` —
-  every path MUST start with `/home/jakeshea/solbench/`.
-- **When the user corrects an assumption, write the rule to memory
-  immediately** as a feedback memory before continuing.
+  every path must resolve to the in-tree workspace packages for this
+  checkout.
 
 ## Counter-Free Analytics Framework
 
@@ -270,7 +266,7 @@ unprofiled.
 
 | # | Surface | Role | Invocation hook |
 |---|---|---|---|
-| 1 | **NVBit** dynamic per-warp metric histograms (instruction mix, sector efficiency, bank conflicts, branch active-mask) + opt-in Tier-2 address-trace sidecar | Per-launch metric extractor emits JSONL launch records; Tier-2 address dump emits an ordered compact sector-event sidecar when `METRIC_EXTRACTOR_TIER2_ADDRESS_DUMP=1` (env-gate at `nvbit_tracer/metric_extractor/metric_extractor.cu:376-403`). Producer is `nvbit_tracer/metric_extractor/metric_extractor.so` (matches the `b200_preflight.py` `nvbit_metrics_tool` required probe and the `nvbit_metrics` surface plugin at `scripts/baselines_harness/surfaces/nvbit_metrics.py`). | `CUDA_INJECTION64_PATH=nvbit_tracer/metric_extractor/metric_extractor.so` env on the evaluator subprocess |
+| 1 | **NVBit** dynamic per-warp metric histograms (instruction mix, sector efficiency, bank conflicts, branch active-mask) + opt-in Tier-2 address-trace sidecar | Per-launch metric extractor emits JSONL launch records; Tier-2 address dump emits an ordered compact sector-event sidecar when `METRIC_EXTRACTOR_TIER2_ADDRESS_DUMP=1` (env-gate at `nvbit_tracer/metric_extractor/metric_extractor.cu:376-403`). Producer is `nvbit_tracer/metric_extractor/metric_extractor.so` (matches the `b200_preflight.py` `nvbit_metrics_tool` required probe and the `nvbit_metrics` surface plugin at `tools/sol_baselines_harness/surfaces/nvbit_metrics.py`). | `CUDA_INJECTION64_PATH=nvbit_tracer/metric_extractor/metric_extractor.so` env on the evaluator subprocess |
 | 2 | **CUPTI Activity** (non-counter) | Wall-clock attribution per kernel launch and memcpy phase. Must be flushed via `cuptiActivityFlushAll` before reading. **Collision risk:** the upstream `sol-execbench/src/sol_execbench/core/bench/timing.py:426` already uses CUPTI Activity for its own timing path. Prefer extending / harvesting that path over loading a second CUPTI consumer in the same process. When a separate harness invocation is needed, run it as a matched separate eval to avoid double-subscription. | Extension of `core/bench/timing.py` or a matched separate eval invocation |
 | 3 | **Nsight Systems** (with **optional** NVTX ranges) | Application-level correlation. `nsys profile --trace=cuda,nvtx` captures the evaluator subprocess; NVTX-tagged ranges inside the *.cu solution are **best-effort and optional** — submitted kernels must not depend on NVTX being available (judge image may exclude it). When NVTX is desired for richer correlation, ship an instrumented profiling variant (e.g. `kernel_nvtx.cu`) distinct from the canonical submitted *.cu. | `nsys profile --trace=cuda,nvtx --output=…` |
 | 4 | **Static introspection**: `cuobjdump --dump-sass --dump-ptx`, `cuobjdump --list-elf`, `cuobjdump --print-gpu-summary`, `nvdisasm`, `ptxas -v` | Build-time SASS / PTX / register-pressure / spill reports plus per-`.so` cubin arch listing (`--list-elf` proves `sm_100a` is actually present after the B200 build). No runtime dependency. | Post-build hook against `torch.utils.cpp_extension`'s emitted `.so` |
@@ -284,7 +280,7 @@ permissions allow, but is not part of the standard framework pipeline.
 The framework writes one artifact bundle per `(slug, language)` pair:
 
 ```
-scripts/baselines_harness/.harness_traces/
+tools/sol_baselines_harness/.harness_traces/
 └── <slug>__<lang>/
     ├── trace.json              # existing sol-execbench evaluator trace (rows[])
     ├── nvbit_metrics/          # per-launch JSONL records + optional Tier-2 address-trace sidecar
@@ -294,7 +290,7 @@ scripts/baselines_harness/.harness_traces/
     └── sanitizer/              # compute-sanitizer report per tool
 ```
 
-The existing `scripts/baselines_harness/run.py` keeps producing the
+The existing `tools/sol_baselines_harness/run.py` keeps producing the
 top-level `trace.json` (SOL Score / speedup / correctness fields). The
 four additional surfaces are layered on top by Phase-1 work — they do
 NOT change the existing `trace.json` schema.
@@ -316,7 +312,7 @@ Schema:
   "slug": "problem_NNN_<slug>",
   "language": "cuda_cpp | cutlass",
   "host": {
-    "kind": "local_sm_86 | local_sm_120 | b200_sm_100a",
+    "kind": "local_sm_8_6 | local_sm_120 | b200_sm_100a",
     "device_name": "<from nvidia-smi>",
     "compute_capability": "<sm_XXX>",
     "driver_version": "<from nvidia-smi>",
@@ -349,14 +345,14 @@ Schema:
 Before fanning the framework out to all 235 *.cu profiling runs on a
 B200 provider, the operator MUST clear the preflight gate. The
 preflight is implemented at
-`scripts/baselines_harness/b200_preflight.py` and is read-only
+`tools/sol_baselines_harness/b200_preflight.py` and is read-only
 end-to-end (no clock-policy mutation, no NCU, no host-driver work).
 
 Invocation:
 
 ```sh
-python scripts/baselines_harness/b200_preflight.py \
-    --output scripts/baselines_harness/b200_ready_manifest.json
+python tools/sol_baselines_harness/b200_preflight.py \
+    --output tools/sol_baselines_harness/b200_ready_manifest.json
 ```
 
 The manifest captures the host toolchain inventory plus per-probe
@@ -468,8 +464,8 @@ up loses information. Pin them with these examples:
   `surfaces/host_probe.py:_classify_host_kind` from the live
   compute capability. Live 3090 Ti host: `local_sm_8_6`
   (digit-underscored — outlier Ampere shape preserved for the
-  landed-manifest contract; canonical Ampere shape, never
-  `local_sm_86`). Cross-arch sibling 5060 host (historical, no
+  landed-manifest contract; use the digit-underscored spelling).
+  Cross-arch sibling 5060 host (historical, no
   longer attached): `local_sm_120` (glued-digit Blackwell-consumer
   shape; the host.kind token is preserved in the vocabulary
   because the framework still consumes sm_120 evidence artifacts
@@ -484,7 +480,7 @@ up loses information. Pin them with these examples:
   landed manifests while the arch_tag glues the digits for the
   evidence-label suffix.
 - `host_class` — the TOML identifier used by
-  `scripts/baselines_harness/calibration/cache_prediction/
+  `tools/sol_baselines_harness/calibration/cache_prediction/
   host_resource_availability_v1{,_<host_class>}.toml` sibling files.
   The mapping lives in `host_resource_availability.py:60-64`
   (`_HOST_CLASS_TO_MANIFEST_FILENAME`). Examples:
@@ -577,11 +573,11 @@ historical RTX 5060 Laptop cross-arch sibling) into the placeholder
   (NVBit 1.8 SDK) and `nvbit_tracer/isa_def/` (opcode tables) are
   preserved as shared dependencies. The legacy `nvbit_tracer/tracer_tool/`
   Accel-Sim trace dumper was removed in the Scope-B cleanup (2026-05-16).
-- `scripts/baselines_harness/` — drives the native `sol-execbench`
+- `tools/sol_baselines_harness/` — drives the native `sol-execbench`
   CLI as a host subprocess. Produces `trace.json` per (slug, language)
   and is the layering point for the five additional counter-free
   analytic surfaces.
-- `scripts/baselines_scaffold/` — emits `solution.json` + parent
+- `tools/sol_baselines_scaffold/` — emits `solution.json` + parent
   `README.md` boilerplate for each new hand-port; lints the surface
   against the forbidden-pattern catalog.
 - `scripts/kb/` — knowledge-base routing toolchain.

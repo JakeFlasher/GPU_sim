@@ -59,7 +59,7 @@ ALLOW_LIST = (
 # path needs:
 #
 # * ``CUTLASS_DIR`` — the eval driver's CUTLASS build path
-#   (``sol-execbench/src/sol_execbench/driver/templates/build_ext.py``)
+#   (``tools/sol_execbench/src/sol_execbench/driver/templates/build_ext.py``)
 #   reads it. The tracked
 #   ``REPO_ROOT/third_party/cutlass`` v4.6.1 tree is used when neither
 #   the operator env nor the overrides carry one, so a fresh checkout

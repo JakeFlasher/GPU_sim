@@ -1,18 +1,14 @@
-# Plans index
+# Plans
 
-The active research roadmaps are:
+The project follows two short roadmaps:
 
-- `micro2027_ncu_sim_execution_plan.md`
-- `sm86_comprehensive_live_capture_campaign_plan.md`
+- [SM86 simulator roadmap](micro2027_ncu_sim_execution_plan.md) — simulator
+  fidelity and performance work.
+- [Live capture plan](sm86_comprehensive_live_capture_campaign_plan.md) —
+  direct NVBit and NCU workload capture.
+- [Current closure slice](sm86_simulator_live_baseline_core_closure.md) — the
+  active SM86 issue/memory seam.
 
-Other files in this directory are retained technical history from earlier SOL,
-measurement, cache-model, and simulator campaigns. Their experiments, findings,
-and implementation notes may be useful through the opt-in `run-sol-campaign`
-skill. Their old acceptance ladders, RLCR rounds, gates, freeze states,
-authority language, reviewer requirements, and mandatory handoff procedures are
-retired and must not be executed or revived.
-
-When an older plan conflicts with root `AGENTS.md`, `CLAUDE.md`, current code,
-or either active roadmap, the current source wins. Extract a useful technical
-hypothesis and test it directly; do not reconstruct the former process around
-it.
+All implementation decisions should be expressed in code, architecture cards,
+small workload probes, or current result roots. Keep a plan short enough to
+read before running the next replay.

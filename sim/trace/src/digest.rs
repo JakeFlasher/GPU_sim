@@ -294,7 +294,9 @@ fn write_python_json_number(value: &serde_json::Number, out: &mut String) -> Res
     let (mantissa, explicit_exponent) = match unsigned.find(['e', 'E']) {
         Some(at) => (
             &unsigned[..at],
-            unsigned[at + 1..].parse::<i32>().unwrap_or(0),
+            unsigned[at + 1..]
+                .parse::<i32>()
+                .map_err(|_| format!("invalid finite JSON exponent: {rendered}"))?,
         ),
         None => (unsigned, 0),
     };

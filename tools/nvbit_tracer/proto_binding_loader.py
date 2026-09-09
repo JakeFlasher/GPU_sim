@@ -513,7 +513,13 @@ class BindingModuleView:
     def __getattribute__(self, name: str) -> Any:
         if name in {"_module_name", "_token", "_values", "__class__"}:
             return object.__getattribute__(self, name)
-        _validate_bundle_token(object.__getattribute__(self, "_token"))
+        # The complete private-state audit runs once before publication.  A
+        # protobuf module can perform millions of attribute reads while a
+        # capture is decoded; repeating that audit here made admission scale as
+        # ``attribute_reads * full_runtime_scan``.  Keep the publication check
+        # cheap on the hot path and leave the full audit at the transaction
+        # boundary in ``load_dynamic_trace_bindings``.
+        _check_bundle_token(object.__getattribute__(self, "_token"))
         values = object.__getattribute__(self, "_values")
         if name == "__dict__":
             return values
@@ -550,7 +556,7 @@ class DynamicTraceBindings:
         raise FrozenInstanceError("cannot delete from immutable binding bundle")
 
     def _at(self, index: int) -> BindingModuleView:
-        _validate_bundle_token(self._token)
+        _check_bundle_token(self._token)
         return self._views[index]
 
     @property
@@ -596,7 +602,7 @@ class DynamicTraceBindings:
 
     @property
     def modules(self) -> tuple[BindingModuleView, ...]:
-        _validate_bundle_token(self._token)
+        _check_bundle_token(self._token)
         return self._views
 
 
@@ -2113,7 +2119,14 @@ def _raise_poisoned() -> NoReturn:
     )
 
 
-def _validate_bundle_token(token: object) -> None:
+def _check_bundle_token(token: object) -> None:
+    """Check that a capability is still the currently published bundle.
+
+    Full runtime/module namespace validation is deliberately restricted to the
+    load transaction.  This function is called for every generated protobuf
+    attribute lookup, so it must only perform the constant-time publication
+    identity check needed to reject stale or poisoned capabilities.
+    """
     with _LOAD_LOCK:
         if _poisoned_reason is not None:
             _raise_poisoned()
@@ -2125,15 +2138,6 @@ def _validate_bundle_token(token: object) -> None:
             raise ProtoBindingLoaderPoisonedError(
                 "authenticated protobuf capability is no longer published"
             )
-        try:
-            _validate_private_state(_private_state, _loaded)
-        except BaseException as exc:
-            _mark_poisoned(exc)
-            if isinstance(exc, (KeyboardInterrupt, SystemExit)):
-                raise
-            raise ProtoBindingLoaderPoisonedError(
-                "authenticated protobuf private state changed after publication"
-            ) from exc
 
 
 def load_dynamic_trace_bindings() -> DynamicTraceBindings:

@@ -3,11 +3,11 @@
 Runs ``drive_pilot_predictor_cohort`` against every cell
 in the pilot lookup (``harvest_tier2_pilot._PILOT_PATH_LOOKUP``)
 and writes
-``scripts/baselines_harness/calibration/cache_prediction/sm120_pilot_predictor_predictions_v1.toml``.
+``tools/sol_baselines_harness/calibration/cache_prediction/sm120_pilot_predictor_predictions_v1.toml``.
 
 CLI:
 
-  python scripts/baselines_harness/calibration/cache_prediction/sm120_coverage_expansion/emit_pilot_predictor_predictions.py \\
+  python tools/sol_baselines_harness/calibration/cache_prediction/sm120_coverage_expansion/emit_pilot_predictor_predictions.py \\
       --captured-at-utc 2026-05-27T22:00:00+00:00 \\
       [--cells slug1,slug2]
 """

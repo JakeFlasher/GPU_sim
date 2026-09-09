@@ -7,7 +7,7 @@
 | Benchmark problem_dir       | `sol-execbench/data/benchmark/L1/018_fused_rope_with_qk_norm_and_kv_cache_update/`          |
 | Variant                     | `cuda_cpp`                                                                                  |
 | Evidence                    | `Compile-checked-sm_120`                                                                    |
-| Local correctness           | partial: trace.json carries 13 workload rows on the current sm_120 host (mixed PASSED / RUNTIME_ERROR); per-row evidence in `scripts/baselines_harness/.harness_traces/problem_018_fused_rope_with_qk_norm_and_kv_cache_update__cuda_cpp/trace.json`. `report.json` reports `workload_count: 13` for this slug. |
+| Local correctness           | partial: trace.json carries 13 workload rows on the current sm_120 host (mixed PASSED / RUNTIME_ERROR); per-row evidence in `tools/sol_baselines_harness/.harness_traces/problem_018_fused_rope_with_qk_norm_and_kv_cache_update__cuda_cpp/trace.json`. `report.json` reports `workload_count: 13` for this slug. |
 | Local speedup vs reference  | diagnostic only                                                                             |
 | SOL Score (online judge)    | <not yet submitted; Phase-2 deliverable, target band 0.3 – 0.5+>                            |
 | Counter-free artifacts      | <not yet captured; Phase-1 framework deliverable>                                           |

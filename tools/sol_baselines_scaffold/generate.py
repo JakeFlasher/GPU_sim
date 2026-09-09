@@ -1,12 +1,7 @@
 #!/usr/bin/env python3
 """Manifest + slug-resolution primitives for the scaffold toolchain.
 
-This module survived the pivot via ``git mv`` from
-``scripts/baselines_codegen/`` to ``scripts/baselines_scaffold/`` and
-was then slimmed: the legacy ``--slug`` + ``--language`` codegen-emit
-mode (which depended on ``scripts/baselines_scaffold/templates/``) is
-gone now that pilot #1 has landed and the template subtree was
-``git rm``'d. What remains is:
+This module provides:
 
 - ``parse_mapping`` / ``MappingRow`` for the tracked
   ``tools/sol_baselines_scaffold/sol_pattern_mapping.md`` contract.
@@ -21,7 +16,7 @@ gone now that pilot #1 has landed and the template subtree was
   ``definition.json`` presence).
 
 Usage:
-    python scripts/baselines_scaffold/generate.py --manifest-only
+    python tools/sol_baselines_scaffold/generate.py --manifest-only
 """
 
 from __future__ import annotations
@@ -35,7 +30,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 # Bootstrap so ``baselines_scaffold.*`` is importable when this file is run
-# directly (e.g. ``python scripts/baselines_scaffold/generate.py ...``).
+# directly (e.g. ``python tools/sol_baselines_scaffold/generate.py ...``).
 _THIS_DIR = Path(__file__).resolve().parent
 _SCRIPTS_DIR = _THIS_DIR.parent
 if str(_SCRIPTS_DIR) not in sys.path:
@@ -49,7 +44,7 @@ MAPPING_PATH = _THIS_DIR / "sol_pattern_mapping.md"
 DOSSIER_DIR = REPO_ROOT / ".claude" / "knowledge" / "problems"
 PATTERNS_DIR = REPO_ROOT / ".claude" / "knowledge" / "patterns"
 SPEC_DIR = REPO_ROOT / "references" / "NVIDIA_Manuals" / "solbench_problems"
-DEFAULT_BENCHMARK_ROOT = REPO_ROOT / "sol-execbench" / "data" / "benchmark"
+DEFAULT_BENCHMARK_ROOT = REPO_ROOT / "tools" / "sol_execbench" / "data" / "benchmark"
 DEFAULT_OUTPUT_ROOT = REPO_ROOT / "baselines"
 
 # Internal-category → downloader-subset name.
@@ -142,7 +137,7 @@ def derive_benchmark_name(slug: str) -> str:
 
     Internal slug format is ``problem_NNN_<rest>`` (full markdown stem from
     ``references/NVIDIA_Manuals/solbench_problems/``); the downloader places
-    benchmarks under ``sol-execbench/data/benchmark/<subset>/NNN_<rest>/``.
+    benchmarks under ``tools/sol_execbench/data/benchmark/<subset>/NNN_<rest>/``.
     Stripping ``^problem_`` (keeping the digit prefix) gives ``NNN_<rest>``.
     """
     candidate = _SLUG_PREFIX_RE.sub("", slug)
@@ -178,7 +173,7 @@ def load_definition(benchmark_dir: Path, slug: str) -> Dict[str, Any]:
     if not definition.is_file():
         raise FileNotFoundError(
             f"Benchmark definition.json missing for slug {slug!r} at "
-            f"{definition}. Run ./sol-execbench/scripts/download_data.sh "
+            f"{definition}. Run ./tools/sol_execbench/scripts/download_data.sh "
             f"to populate, or check the slug-to-subset mapping."
         )
     return json.loads(definition.read_text(encoding="utf-8"))
@@ -236,7 +231,7 @@ def manifest_for_mapping(
 
 def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="scripts/baselines_scaffold/generate.py",
+        prog="tools/sol_baselines_scaffold/generate.py",
         description=(
             "Print a JSON manifest of every problem row in "
             "tools/sol_baselines_scaffold/sol_pattern_mapping.md (slug, category, "

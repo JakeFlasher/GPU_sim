@@ -58,7 +58,7 @@ LOCAL_PROXY_DISCLAIMER = local_proxy_disclaimer("sm_unknown")
 def _import_upstream_sol_score():
     """Import the standalone ``sol_score`` helper."""
     try:
-        sys.path.insert(0, str(REPO_ROOT / "sol-execbench" / "src"))
+        sys.path.insert(0, str(REPO_ROOT / "tools" / "sol_execbench" / "src"))
         from sol_execbench.sol_score import sol_score  # noqa: E402
     except ImportError as exc:
         raise RuntimeError(

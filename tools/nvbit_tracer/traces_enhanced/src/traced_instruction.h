@@ -71,7 +71,7 @@ bool has_the_operand_type_been_captured(TraceEnhancedOperandType reg_type);
 
 void advance_operand_idx(unsigned int &operand_idx, traced_instruction &static_inst_info);
 
-void get_opcode_map(const std::unordered_map<std::string, OpcodeChar> *&OpcodeMap, int binary_verion);
+bool get_opcode_map(const std::unordered_map<std::string, OpcodeChar> *&OpcodeMap, int binary_verion);
 
 s2r_operand_type get_s2r_operand_type(std::string operand_string);
 
@@ -122,9 +122,9 @@ class traced_instruction : public JSONBase{
 
         void add_operand(std::unique_ptr<traced_operand> operand);
 
-        void add_register_usage(std::string reg_file_name, unsigned num_regs);
+        bool add_register_usage(std::string reg_file_name, unsigned num_regs);
 
-        void add_call_target(std::string target_name, int target_id);
+        bool add_call_target(std::string target_name, int target_id);
 
         void calculate_num_destination_registers();
 
@@ -160,16 +160,19 @@ class traced_instruction : public JSONBase{
 
         Tensor_core_instruction_information& get_tensor_core_instruction_info();
 
-        void set_tensor_core_instruction_info();
+        bool set_tensor_core_instruction_info();
 
         void set_simulation_opcode(const std::unordered_map<std::string, OpcodeChar> *OpcodeMap, std::string str_op);
         op_type get_simulation_opcode();
         bool is_dp_op();
         bool is_load_op();
-        bool is_store_op();
+    bool is_store_op();
         bool is_tensor_core_op();
 
     private:
+        bool deserialize_in_place(const rapidjson::Value& obj);
+        void swap_state(traced_instruction& other) noexcept;
+
         std::string m_pc_string;
         unsigned int m_pc_num;
         std::string m_op_code;

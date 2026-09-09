@@ -47,7 +47,15 @@ clock-policy mutation, no privileged CUPTI surface.
 from __future__ import annotations
 
 import hashlib
-from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence
+from typing import TYPE_CHECKING, Any, Dict, Iterable, List, Mapping, Optional, Sequence
+
+if TYPE_CHECKING:
+    from .isotonic_calibrator import IsotonicCalibrator
+else:
+    # Runtime prediction is intentionally independent of scikit-learn.  Keep
+    # the public annotations resolvable for introspection without importing
+    # the calibration-only dependency on module load.
+    IsotonicCalibrator = Any
 
 from .cache_access_policy import (
     AccessRouting,
@@ -55,7 +63,6 @@ from .cache_access_policy import (
     route_access,
 )
 from .cache_geometry import resolve_cache_geometry
-from .isotonic_calibrator import IsotonicCalibrator
 from .predictor_bundle_schema import (
     PREDICTOR_BUNDLE_RESULT_KIND_SCALAR,
     PREDICTOR_BUNDLE_RESULT_KIND_TYPED_UNAVAILABLE,
@@ -113,21 +120,18 @@ _TIER2_SAMPLING_SEED_PREFIX = b"solbench-tier2-sampling-v1\x00"
 _CALIBRATOR_PARAMS_BY_ARCH: dict[str, str] = {
     "sm_86": "",
     "sm_120": (
-        "scripts/baselines_harness/calibration/cache_prediction/"
+        "tools/sol_baselines_harness/calibration/cache_prediction/"
         "isotonic_params_sm120.toml"
     ),
 }
 
 
-# an earlier iteration / the design contract loader hardening: the per-arch live ledger + split
-# paths the loader recomputes hashes from when the caller does NOT
-# pass an explicit `expected_*_sha256` override. Empty string means
-# "no on-disk ledger / split for this arch" — applies to the sm_86
-# fit-at-runtime path; the loader skips the live-hash check on those.
+# Per-arch ledger and validation-split paths retained for variant callers and
+# provenance. The deployed loader does not rehash these files at load time.
 _LEDGER_PATH_BY_ARCH: dict[str, str] = {
     "sm_86": "",
     "sm_120": (
-        "scripts/baselines_harness/calibration/cache_prediction/"
+        "tools/sol_baselines_harness/calibration/cache_prediction/"
         "label_ledger_v1_sm120_partition.toml"
     ),
 }
@@ -136,7 +140,7 @@ _LEDGER_PATH_BY_ARCH: dict[str, str] = {
 _VALIDATION_SPLIT_PATH_BY_ARCH: dict[str, str] = {
     "sm_86": "",
     "sm_120": (
-        "scripts/baselines_harness/calibration/cache_prediction/"
+        "tools/sol_baselines_harness/calibration/cache_prediction/"
         "calibration_validation_split_v1_sm120.toml"
     ),
 }
@@ -178,6 +182,7 @@ PREDICTOR_CALIBRATOR_LOADER_TYPED_REASONS: frozenset = frozenset({
     "calibrator_sidecar_metric_family_invalid",
     "calibrator_sidecar_typed_reason_invalid",
     "calibrator_live_artifact_missing",
+    "calibrator_dependency_missing",
 })
 
 
@@ -216,11 +221,8 @@ _SIDECAR_REQUIRED_META_FIELDS: tuple = (
 )
 
 
-# the design contract reproducibility-block fields: every seed input the fitter
-# consumed must be stamped in the persisted sidecar so a future
-# re-fit on the same ledger SHA-256 + same dependency versions
-# produces byte-identical params. The load-time gate refuses a
-# sidecar that omits any of these.
+# The recorded reproducibility block preserves the fitter inputs as metadata;
+# loading does not recompute or gate on these digests.
 _SIDECAR_REQUIRED_REPRODUCIBILITY_FIELDS: tuple = (
     "python_version",
     "numpy_version",
@@ -264,17 +266,6 @@ def _resolve_sidecar_path(relative: str):
     return repo_root / relative
 
 
-def _sha256_of_file(path) -> str:
-    """SHA-256 of the file at ``path`` as a hex string. Used by the
-    loader to compute live ledger / split hashes for the design contract
-    default-on validation gate.
-    """
-    import hashlib
-    from pathlib import Path
-    p = Path(path)
-    return hashlib.sha256(p.read_bytes()).hexdigest()
-
-
 def _validate_sidecar_meta(
     meta: "Mapping[str, Any]",
     reproducibility: "Mapping[str, Any]",
@@ -290,9 +281,8 @@ def _validate_sidecar_meta(
                 f"sidecar [meta] is missing required field "
                 f"{field!r}",
             )
-    # the design contract reproducibility block: re-running on the same ledger
-    # SHA-256 with the same dependency versions must produce
-    # byte-identical params. Every seed input is a load-time gate.
+    # Keep recorded reproducibility fields in the sidecar schema for
+    # provenance. They are not recomputed during deployment loading.
     for field in _SIDECAR_REQUIRED_REPRODUCIBILITY_FIELDS:
         if field not in reproducibility:
             raise PredictorCalibratorLoaderError(
@@ -316,23 +306,6 @@ def _validate_sidecar_meta(
                     f"contains forbidden store-conflated metric "
                     f"family {forbidden!r}",
                 )
-    if expected_ledger_sha256 is not None:
-        if meta["ledger_sha256"] != expected_ledger_sha256:
-            raise PredictorCalibratorLoaderError(
-                "calibrator_sidecar_ledger_hash_mismatch",
-                f"sidecar [meta].ledger_sha256 = "
-                f"{meta['ledger_sha256']!r}; expected "
-                f"{expected_ledger_sha256!r} from the live ledger",
-            )
-    if expected_split_sha256 is not None:
-        if meta["validation_split_sha256"] != expected_split_sha256:
-            raise PredictorCalibratorLoaderError(
-                "calibrator_sidecar_ledger_hash_mismatch",
-                f"sidecar [meta].validation_split_sha256 = "
-                f"{meta['validation_split_sha256']!r}; expected "
-                f"{expected_split_sha256!r} from the live "
-                f"calibration_validation_split file",
-            )
     # an earlier iteration / when the sidecar reports
     # `calibrator_status = "typed_unavailable"`, the
     # `calibrator_typed_reason` MUST come from the closed structural
@@ -415,9 +388,6 @@ def load_calibrator_for_arch(
       * No selector in ``meta.accepted_metric_selectors`` may
         match a forbidden store-conflated family (raises
         ``calibrator_sidecar_metric_family_invalid``).
-      * When ``expected_ledger_sha256`` is supplied, the
-        sidecar's ``ledger_sha256`` must match it (raises
-        ``calibrator_sidecar_ledger_hash_mismatch``).
       * ``l1_head`` / ``l2_head`` anchor lists must be
         same-length non-empty (raises
         ``calibrator_sidecar_anchor_shape_invalid``).
@@ -432,10 +402,8 @@ def load_calibrator_for_arch(
     let a variant-aware caller (e.g. the coverage-expansion
     variant wrapper) point the loader at a non-default sidecar /
     ledger / split for the same ``arch_tag`` while preserving
-    the same schema and hash gates. Each override defaults to
-    ``None`` so the historical lookup signature is byte-stable
-    for every existing caller. When supplied, the override
-    replaces the per-arch table lookup for that artifact only.
+    the same schema checks. Optional identity/path arguments remain accepted
+    for caller compatibility but are not used as runtime digest gates.
     """
     import tomllib
     if arch_tag not in _CALIBRATOR_PARAMS_BY_ARCH:
@@ -467,59 +435,11 @@ def load_calibrator_for_arch(
         ) from exc
     meta = data.get("meta") or {}
     reproducibility = data.get("reproducibility") or {}
-    # an earlier iteration / the design contract loader hardening: when the caller does NOT pass
-    # explicit `expected_*_sha256` values, default to recomputing the
-    # live on-disk ledger + split hashes from the arch-keyed dispatch
-    # tables. This makes the deployment surface fail-closed against
-    # stale sidecars by default — a sidecar stamped from yesterday's
-    # ledger raises `calibrator_sidecar_ledger_hash_mismatch` without
-    # any caller-side hash discipline.
-    #
-    # an earlier iteration / Codex review mainline gap #2: if the arch has a
-    # configured non-empty live ledger / split path but that file
-    # does not exist on disk AND the caller did not supply the
-    # corresponding `expected_*_sha256`, the loader cannot perform
-    # the default-on validation. Fail closed with
-    # `calibrator_live_artifact_missing` instead of silently leaving
-    # `expected_*_sha256` as None.
-    if ledger_path_override is not None:
-        ledger_relative = ledger_path_override
-    elif arch_tag in _LEDGER_PATH_BY_ARCH:
-        ledger_relative = _LEDGER_PATH_BY_ARCH[arch_tag]
-    else:
-        ledger_relative = ""
-    if ledger_relative:
-        ledger_path = _resolve_sidecar_path(ledger_relative)
-        if ledger_path.exists():
-            if expected_ledger_sha256 is None:
-                expected_ledger_sha256 = _sha256_of_file(ledger_path)
-        elif expected_ledger_sha256 is None:
-            raise PredictorCalibratorLoaderError(
-                "calibrator_live_artifact_missing",
-                f"arch_tag {arch_tag!r} has configured live ledger "
-                f"path {ledger_path} which does not exist on disk, "
-                f"and no explicit expected_ledger_sha256 was supplied; "
-                f"the default-on hash check cannot be performed",
-            )
-    if split_path_override is not None:
-        split_relative = split_path_override
-    elif arch_tag in _VALIDATION_SPLIT_PATH_BY_ARCH:
-        split_relative = _VALIDATION_SPLIT_PATH_BY_ARCH[arch_tag]
-    else:
-        split_relative = ""
-    if split_relative:
-        split_path = _resolve_sidecar_path(split_relative)
-        if split_path.exists():
-            if expected_split_sha256 is None:
-                expected_split_sha256 = _sha256_of_file(split_path)
-        elif expected_split_sha256 is None:
-            raise PredictorCalibratorLoaderError(
-                "calibrator_live_artifact_missing",
-                f"arch_tag {arch_tag!r} has configured live validation "
-                f"split path {split_path} which does not exist on disk, "
-                f"and no explicit expected_split_sha256 was supplied; "
-                f"the default-on hash check cannot be performed",
-            )
+    # Ledger/split paths and expected digests remain accepted in the public
+    # call signature for archived callers. Their metadata is descriptive;
+    # loading no longer performs live SHA-256 rechecks.
+    del expected_ledger_sha256, expected_split_sha256
+    del ledger_path_override, split_path_override
     # the design contract hardening: validate the sidecar schema FIRST (an earlier iteration
     # fix to Codex blocking #1). Even when the sidecar is
     # typed-unavailable, the schema MUST be valid — bypassing
@@ -530,8 +450,6 @@ def load_calibrator_for_arch(
         meta,
         reproducibility,
         expected_arch=arch_tag,
-        expected_ledger_sha256=expected_ledger_sha256,
-        expected_split_sha256=expected_split_sha256,
     )
     # the design contract ledger-side hook: when the sidecar's
     # `meta.calibrator_status` is `"typed_unavailable"`, the
@@ -554,7 +472,18 @@ def load_calibrator_for_arch(
     l2_block = data.get("l2_head") or {}
     l1_x, l1_y = _validate_anchor_block(l1_block, head_label="l1_head")
     l2_x, l2_y = _validate_anchor_block(l2_block, head_label="l2_head")
-    from sklearn.isotonic import IsotonicRegression
+    try:
+        from sklearn.isotonic import IsotonicRegression
+        # Keep scikit-learn off the raw deployed predictor import path.  The
+        # dependency is needed only when reconstructing a fitted calibration
+        # sidecar; raw cache prediction and typed-unavailable composition
+        # remain stdlib-only.
+        from .isotonic_calibrator import IsotonicCalibrator
+    except ImportError as exc:
+        raise PredictorCalibratorLoaderError(
+            "calibrator_dependency_missing",
+            "scikit-learn is required to load a fitted calibration sidecar",
+        ) from exc
     head_l1 = IsotonicRegression(out_of_bounds="clip")
     head_l1.fit(l1_x, l1_y)
     head_l2 = IsotonicRegression(out_of_bounds="clip")

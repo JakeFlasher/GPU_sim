@@ -137,7 +137,8 @@ pub const ASYNC_COPY_COMPOSITE_PAYLOAD_WORK_MAX: u32 =
 
 /// Meaning of the compact `GlobalAsyncCopy::completion_work` token. Cache-all
 /// records may carry exact timing work. Destination-bearing bypass records
-/// carry payload timing work plus an observational wavefront count; that count
+/// carry payload timing work plus an observational wavefront count; payload
+/// work may be zero for a topology-only `ignore-src` copy, and that count
 /// cannot affect timing until a bypass-specific mechanism is characterized.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AsyncCopyCompletion {
@@ -208,8 +209,7 @@ pub const fn encode_async_copy_payload_and_topology(
     max_bank_wavefronts: u32,
     max_bypass_wavefronts: u32,
 ) -> Option<u32> {
-    if payload_work == 0
-        || payload_work % ASYNC_COPY_COMPOSITE_PAYLOAD_GRANULARITY != 0
+    if !payload_work.is_multiple_of(ASYNC_COPY_COMPOSITE_PAYLOAD_GRANULARITY)
         || source_cohorts == 0
         || destination_lines == 0
         || max_bank_wavefronts == 0
@@ -286,9 +286,10 @@ pub enum AccessKind {
     },
     /// Non-bulk global-to-shared async-copy source. Static classification still
     /// identifies `LDGSTS` as `MemRole::BypassLoad(Ldgsts)`; this dynamic form
-    /// additionally preserves whether the current trace record has an effective
-    /// source. Effective source presence is encoded by `completion_work != 0`,
-    /// including in flat mode where the sector arena is intentionally omitted.
+    /// additionally preserves whether the current trace record has async
+    /// activity. Activity is encoded by a non-inactive completion token,
+    /// including topology-only bypass records whose payload work is zero and
+    /// flat mode where the sector arena is intentionally omitted.
     GlobalAsyncCopy {
         off: usize,
         len: u16,
@@ -412,6 +413,17 @@ mod tests {
                 max_bypass_wavefronts: 3,
             }
         );
+        let topology_only = encode_async_copy_payload_and_topology(0, 1, 1, 1, 1).unwrap();
+        assert_eq!(
+            decode_async_copy_completion(topology_only),
+            AsyncCopyCompletion::PayloadAndObservedTopology {
+                payload_work: 0,
+                source_cohorts: 1,
+                destination_lines: 1,
+                max_bank_wavefronts: 1,
+                max_bypass_wavefronts: 1,
+            }
+        );
         assert_eq!(
             decode_async_copy_completion(encode_async_copy_destination_work(0).unwrap()),
             AsyncCopyCompletion::Inactive
@@ -421,6 +433,7 @@ mod tests {
         assert!(encode_async_copy_payload_and_topology(1025, 8, 24, 1, 3).is_none());
         assert!(encode_async_copy_payload_and_topology(1024, 33, 24, 1, 3).is_none());
         assert!(encode_async_copy_payload_and_topology(1024, 8, 65, 1, 3).is_none());
+        assert!(encode_async_copy_payload_and_topology(0, 0, 1, 1, 1).is_none());
     }
 
     #[test]

@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 from typing import List, Optional, Sequence
@@ -35,8 +36,57 @@ from typing import List, Optional, Sequence
 _THIS_DIR = Path(__file__).resolve().parent
 _HARNESS_DIR = _THIS_DIR.parent
 _SCRIPTS_DIR = _HARNESS_DIR.parent
+_REPO_ROOT = _HARNESS_DIR.parents[1]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
 if str(_SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS_DIR))
+
+
+def _maybe_reexec_with_evaluator_python() -> None:
+    """Run ``run`` under the evaluator's managed Python environment.
+
+    The surface orchestrator fingerprints the Python/Torch/CUDA runtime that
+    executes the evaluator.  A direct invocation such as
+    ``python tools/sol_baselines_harness/surfaces/cli.py run ...`` commonly
+    uses the system interpreter (which has no Torch), while native dispatch
+    correctly selects ``tools/sol_execbench/.venv/bin/sol-execbench``.  That
+    split makes the command fail before dispatch with a degraded fingerprint.
+    Keep ``list``/``dry-run`` lightweight, but for ``run`` select the same
+    in-tree interpreter as the evaluator when the caller cannot import Torch.
+    An explicit ``SOL_EXECBENCH_BIN`` or an already-selected interpreter is
+    left untouched so operator-managed environments retain control.
+    """
+    if len(sys.argv) < 2 or sys.argv[1] != "run":
+        return
+    if os.environ.get("SOL_EXECBENCH_BIN"):
+        return
+    if os.environ.get("SOL_SURFACES_EVALUATOR_PYTHON") == "1":
+        return
+    evaluator_python = (
+        _REPO_ROOT / "tools" / "sol_execbench" / ".venv" / "bin" / "python"
+    )
+    if not evaluator_python.is_file() or not os.access(evaluator_python, os.X_OK):
+        return
+    if os.path.realpath(sys.executable) == os.path.realpath(str(evaluator_python)):
+        return
+    try:
+        import torch  # type: ignore  # noqa: F401
+    except Exception:
+        child_env = os.environ.copy()
+        child_env["SOL_SURFACES_EVALUATOR_PYTHON"] = "1"
+        os.execve(
+            str(evaluator_python),
+            [str(evaluator_python), str(Path(__file__).resolve()), *sys.argv[1:]],
+            child_env,
+        )
+
+
+_maybe_reexec_with_evaluator_python()
+
+from tools.sol_baselines_harness._bootstrap import install_package_aliases
+
+install_package_aliases()
 
 from sol_baselines_harness.surfaces import (  # noqa: E402
     SurfaceOrchestrator,
@@ -174,15 +224,15 @@ def _cmd_run(args: argparse.Namespace) -> int:
     if problem_dir is None or not problem_dir.is_dir():
         sys.stderr.write(
             "error: --problem-dir must point to the matching benchmark "
-            "spec (e.g. sol-execbench/data/benchmark/<subset>/<NNN>/)\n"
+            "spec (e.g. tools/sol_execbench/data/benchmark/<subset>/<NNN>/)\n"
         )
         return 2
     if args.mode == "fanout":
-        manifest_path = REPO_ROOT / "scripts" / "baselines_harness" / "b200_ready_manifest.json"
+        manifest_path = _HARNESS_DIR / "b200_ready_manifest.json"
         if not manifest_path.is_file():
             sys.stderr.write(
                 f"error: --mode fanout requires {manifest_path.relative_to(REPO_ROOT)} "
-                f"to exist. Run `python scripts/baselines_harness/b200_preflight.py` "
+                f"to exist. Run `python tools/sol_baselines_harness/b200_preflight.py` "
                 f"first.\n"
             )
             return 2
@@ -264,10 +314,10 @@ def _default_bundle_dir(
     through the cross-arch trace-layout contract.
 
     ``baselines/<cat>/<slug>/<lang>/`` ->
-      ``scripts/baselines_harness/.harness_traces/<slug>__<lang>/``
+      ``tools/sol_baselines_harness/.harness_traces/<slug>__<lang>/``
         when ``host_kind`` is ``None``, ``local_sm_120``, or
         ``b200_sm_100a`` (legacy un-suffixed canonical form).
-      ``scripts/baselines_harness/.harness_traces/<slug>__<lang>__sm86/``
+      ``tools/sol_baselines_harness/.harness_traces/<slug>__<lang>__sm86/``
         when ``host_kind == "local_sm_8_6"`` (the active 3090 Ti
         host's sm_86 arch-qualified sibling form per DEC-B).
 
@@ -276,9 +326,7 @@ def _default_bundle_dir(
     surfaces CLI, and the tests share one source of truth.
     """
     from sol_baselines_harness.trace_layout import default_bundle_dir
-    traces_root = (
-        REPO_ROOT / "scripts" / "baselines_harness" / ".harness_traces"
-    )
+    traces_root = _HARNESS_DIR / ".harness_traces"
     return default_bundle_dir(
         traces_root=traces_root,
         slug=baseline_dir.parent.name,
@@ -289,7 +337,7 @@ def _default_bundle_dir(
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="scripts/baselines_harness/surfaces/cli.py",
+        prog="tools/sol_baselines_harness/surfaces/cli.py",
         description=(
             "Drive the counter-free analytics framework's six surfaces "
             "(five eval-driving + the passive cache_prediction "
@@ -326,7 +374,7 @@ def _build_parser() -> argparse.ArgumentParser:
         default=None,
         help=(
             "Path to the matching benchmark spec "
-            "(e.g. sol-execbench/data/benchmark/<subset>/<NNN>/)."
+            "(e.g. tools/sol_execbench/data/benchmark/<subset>/<NNN>/)."
         ),
     )
     run_p.add_argument(
@@ -335,7 +383,7 @@ def _build_parser() -> argparse.ArgumentParser:
         default=None,
         help=(
             "Output bundle directory. Default: "
-            "scripts/baselines_harness/.harness_traces/<slug>__<lang>/"
+            "tools/sol_baselines_harness/.harness_traces/<slug>__<lang>/"
         ),
     )
     run_p.add_argument(

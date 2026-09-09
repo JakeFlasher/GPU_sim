@@ -42,10 +42,11 @@ from pathlib import Path
 
 _HERE = Path(__file__).resolve().parent
 _REPO_ROOT = _HERE.parents[3]
-if str(_REPO_ROOT / "scripts") not in sys.path:
-    sys.path.insert(0, str(_REPO_ROOT / "scripts"))
+_TOOLS_ROOT = _REPO_ROOT / "tools"
+if str(_TOOLS_ROOT) not in sys.path:
+    sys.path.insert(0, str(_TOOLS_ROOT))
 
-from baselines_harness.calibration.cache_prediction.accuracy_diagnostic import (  # noqa: E402
+from sol_baselines_harness.calibration.cache_prediction.accuracy_diagnostic import (  # noqa: E402
     AccuracyGateError,
     PerProblemRecordSchemaError,
     parse_diagnostic_report,

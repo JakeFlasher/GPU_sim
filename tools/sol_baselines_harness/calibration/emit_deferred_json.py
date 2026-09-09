@@ -1,4 +1,4 @@
-"""Regenerate `scripts/baselines_harness/deferred.json` from the authoritative
+"""Regenerate `tools/sol_baselines_harness/deferred.json` from the authoritative
 sm_86 coverage ledger (final-closeout milestone).
 
 The coverage ledger `sm86_coverage_ledger_v1.toml` is the single source of truth
@@ -22,10 +22,10 @@ from typing import Final
 
 _REPO_ROOT: Final[Path] = Path(__file__).resolve().parents[3]
 _COVERAGE_LEDGER: Final[Path] = (
-    _REPO_ROOT / "scripts" / "baselines_harness" / "calibration"
+    _REPO_ROOT / "tools" / "sol_baselines_harness" / "calibration"
     / "sm86_coverage_ledger_v1.toml"
 )
-_DEFERRED_JSON: Final[Path] = _REPO_ROOT / "scripts" / "baselines_harness" / "deferred.json"
+_DEFERRED_JSON: Final[Path] = _REPO_ROOT / "tools" / "sol_baselines_harness" / "deferred.json"
 
 SCHEMA_VERSION: Final[int] = 4  # v4: regenerated from the sm_86 coverage ledger (final-closeout milestone)
 
@@ -61,7 +61,7 @@ def build_deferred(repo_root: Path = _REPO_ROOT) -> dict:
     return {
         "schema": {
             "version": SCHEMA_VERSION,
-            "source_of_truth": "scripts/baselines_harness/calibration/sm86_coverage_ledger_v1.toml",
+            "source_of_truth": "tools/sol_baselines_harness/calibration/sm86_coverage_ledger_v1.toml",
             "source_of_truth_sha256": ledger_sha,
             "fields": {
                 "slug": "Internal problem slug.",

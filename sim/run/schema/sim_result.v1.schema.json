@@ -720,6 +720,60 @@
         }
       ]
     },
+    "gpcObservationFrontier": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "lower_bound_cycles",
+        "envelope_cycles",
+        "grid_blocks",
+        "grid_log2",
+        "cycles",
+        "role"
+      ],
+      "properties": {
+        "lower_bound_cycles": { "$ref": "#/definitions/u64" },
+        "envelope_cycles": { "$ref": "#/definitions/u64" },
+        "grid_blocks": { "$ref": "#/definitions/positiveU64" },
+        "grid_log2": { "$ref": "#/definitions/u32" },
+        "cycles": { "$ref": "#/definitions/u64" },
+        "role": {
+          "const": "architecture_scoped_gpc_observation_boundary_not_timing_crosswalk"
+        }
+      }
+    },
+    "smActiveObservationFrontier": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "issue_lower_bound_cycles",
+        "issue_cycles",
+        "terminal_lower_bound_cycles",
+        "terminal_cycles",
+        "envelope_cycles",
+        "role"
+      ],
+      "properties": {
+        "issue_lower_bound_cycles": { "$ref": "#/definitions/u64" },
+        "issue_cycles": { "$ref": "#/definitions/u64" },
+        "terminal_lower_bound_cycles": {
+          "oneOf": [
+            { "$ref": "#/definitions/u64" },
+            { "type": "null" }
+          ]
+        },
+        "terminal_cycles": {
+          "oneOf": [
+            { "$ref": "#/definitions/u64" },
+            { "type": "null" }
+          ]
+        },
+        "envelope_cycles": { "$ref": "#/definitions/u64" },
+        "role": {
+          "const": "architecture_scoped_sm_active_observation_boundary_not_raw_lower_bound"
+        }
+      }
+    },
     "timingDiagnostics": {
       "type": "object",
       "additionalProperties": false,
@@ -731,6 +785,8 @@
       "properties": {
         "diagnostic_last_issue_cycles": { "$ref": "#/definitions/u64" },
         "terminal_modeled_event_time": { "$ref": "#/definitions/modeledEventTime" },
+        "sm_active_observation_frontier": { "$ref": "#/definitions/smActiveObservationFrontier" },
+        "gpc_observation_frontier": { "$ref": "#/definitions/gpcObservationFrontier" },
         "binding_cycles_role": { "const": "diagnostic_only_not_binding_prediction" }
       }
     },
@@ -774,6 +830,7 @@
         "hits": { "$ref": "#/definitions/u64" },
         "misses": { "$ref": "#/definitions/u64" },
         "merges": { "$ref": "#/definitions/u64" },
+        "pending_lookup_hits": { "$ref": "#/definitions/u64" },
         "stall_events": { "$ref": "#/definitions/u64" },
         "line_fills": { "$ref": "#/definitions/u64" },
         "line_alloc_misses": { "$ref": "#/definitions/u64" },
@@ -784,6 +841,7 @@
         "store_sectors": { "$ref": "#/definitions/u64" },
         "store_hits": { "$ref": "#/definitions/u64" },
         "store_tag_hits": { "$ref": "#/definitions/u64" },
+        "write_lookup_hits": { "$ref": "#/definitions/u64" },
         "reduction_sectors": { "$ref": "#/definitions/u64" },
         "reduction_hits": { "$ref": "#/definitions/u64" }
       }
@@ -822,6 +880,7 @@
         "hits": { "$ref": "#/definitions/u64" },
         "misses": { "$ref": "#/definitions/u64" },
         "merges": { "$ref": "#/definitions/u64" },
+        "pending_lookup_hits": { "$ref": "#/definitions/u64" },
         "stall_events": { "$ref": "#/definitions/u64" },
         "line_fills": { "$ref": "#/definitions/u64" },
         "line_alloc_misses": { "$ref": "#/definitions/u64" },
@@ -832,6 +891,7 @@
         "store_sectors": { "$ref": "#/definitions/u64" },
         "store_hits": { "$ref": "#/definitions/u64" },
         "store_tag_hits": { "$ref": "#/definitions/u64" },
+        "write_lookup_hits": { "$ref": "#/definitions/u64" },
         "reduction_sectors": { "$ref": "#/definitions/u64" },
         "reduction_hits": { "$ref": "#/definitions/u64" },
         "by_origin": { "$ref": "#/definitions/l1OriginPair" }
@@ -844,6 +904,8 @@
       "properties": {
         "hits": { "$ref": "#/definitions/u64" },
         "misses": { "$ref": "#/definitions/u64" },
+        "lookup_hits": { "$ref": "#/definitions/u64" },
+        "lookup_requests": { "$ref": "#/definitions/u64" },
         "line_misses": { "$ref": "#/definitions/u64" },
         "sector_fill_misses": { "$ref": "#/definitions/u64" },
         "write_tag_hits": { "$ref": "#/definitions/u64" }

@@ -56,6 +56,10 @@ pub enum LaneError {
     )]
     AddressOverflow { lane: usize, base: u64 },
     #[error(
+        "lane {lane} reconstructs to invalid negative address {address}; only -1 is the inactive sentinel"
+    )]
+    NegativeAddress { lane: usize, address: i64 },
+    #[error(
         "unknown compression_format={0}; supported: list_all(0), base_stride(1), base_delta(2)"
     )]
     UnknownFormat(i32),
@@ -181,6 +185,11 @@ pub fn reconstruct_lane_vector(
         other => return Err(LaneError::UnknownFormat(other)),
     };
 
+    for (lane, &address) in vector.iter().enumerate() {
+        if (and_mask >> lane) & 1 == 1 && address < 0 && address != LANE_INACTIVE_SENTINEL {
+            return Err(LaneError::NegativeAddress { lane, address });
+        }
+    }
     check_lane_positions(&vector, and_mask)?;
     Ok(vector)
 }
@@ -317,6 +326,18 @@ mod tests {
             Err(LaneError::LanePositionMismatch {
                 lane: 1,
                 slot_is_sentinel: true
+            })
+        );
+    }
+
+    #[test]
+    fn non_sentinel_negative_address_is_rejected() {
+        let a = addr(FORMAT_BASE_STRIDE, 0, -4, vec![]);
+        assert_eq!(
+            reconstruct_lane_vector(&a, 0b11),
+            Err(LaneError::NegativeAddress {
+                lane: 1,
+                address: -4,
             })
         );
     }

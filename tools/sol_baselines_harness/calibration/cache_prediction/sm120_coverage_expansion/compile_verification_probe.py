@@ -2,7 +2,7 @@
 
 Refreshes ``sm120_compile_verification_probe_v1.toml`` by walking
 the existing harness trace bundles at
-``scripts/baselines_harness/.harness_traces/<slug>__<lang>/`` and
+``tools/sol_baselines_harness/.harness_traces/<slug>__<lang>/`` and
 extracting per-slug compile + correctness evidence from
 ``manifest.json`` and ``trace.json``.
 
@@ -35,7 +35,7 @@ without probe evidence — the conservative position.
 CLI:
 
     python -m baselines_harness.calibration.cache_prediction.sm120_coverage_expansion.compile_verification_probe \\
-        --output scripts/baselines_harness/calibration/cache_prediction/sm120_compile_verification_probe_v1.toml \\
+        --output tools/sol_baselines_harness/calibration/cache_prediction/sm120_compile_verification_probe_v1.toml \\
         [--captured-at-utc 2026-05-27T09:00:00+00:00]
 
 Re-runs against unchanged disk state produce a byte-identical
@@ -610,7 +610,7 @@ def _render_probe_toml(
         "# Refreshed by walking the harness trace bundles at"
     )
     lines.append(
-        "# ``scripts/baselines_harness/.harness_traces/<slug>__<lang>/``"
+        "# ``tools/sol_baselines_harness/.harness_traces/<slug>__<lang>/``"
     )
     lines.append(
         "# and extracting per-slug compile evidence (any harness"

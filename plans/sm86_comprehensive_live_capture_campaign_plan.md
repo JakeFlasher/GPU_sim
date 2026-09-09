@@ -1,62 +1,26 @@
-# sm_86 direct capture roadmap
+# SM86 live capture plan
 
-## Goal
+Capture one workload at a time with the same executable, launch geometry, and
+architecture profile used by replay. Keep NCU measurements as independent
+comparison data.
 
-Collect a representative RTX 3090 Ti cohort with matched NCU observations,
-NVBit traces, static SASS/control data, and workload metadata for simulator
-development and evaluation.
+## Capture path
 
-## Tools
+1. Build the CUDA workload and NVBit tracer.
+2. Capture the dynamic protobuf trace and SASS control sidecar.
+3. Replay the trace with `sim/target/release/sim-run`.
+4. Collect a matching NCU profile when the GPU is available.
+5. Compare numeric JSON with `eval.direct_score` or the workload report.
 
-NCU, NVBit, CUDA, GPU clock controls, and administrative commands are available.
-Use the direct commands in `docs/runbook_host.md`.
+## Current inputs
 
-## Per-workload procedure
+The latest SM86 NCU inputs are the small and large v10 roots listed in
+`docs/STATUS.md`; the current simulator campaign is v11. New captures should
+use a new scenario directory and keep only the latest usable root for that
+scenario.
 
-1. Build the workload and run its ordinary correctness check.
-2. Record workload name, arguments, shape, GPU, and relevant tool versions.
-3. Run NCU for the selected metric set with enough repeats to estimate variance.
-4. Run NVBit separately with the same workload and launch configuration.
-5. Extract static SASS/control information.
-6. Run the simulator and compare predicted values with the NCU observations.
-7. Record failures as technical issues and continue with other runnable cells.
+## Boundaries
 
-A retry may overwrite or replace a failed experiment output when the researcher
-chooses. No approval artifact is required.
-
-## Initial cohort
-
-Start with a small mix that exercises:
-
-- coalesced and strided memory access;
-- compute-heavy FP32 and tensor-core kernels;
-- shared-memory and barrier behavior;
-- atomics;
-- async copy where supported;
-- short and long kernels;
-- multiple grids and block shapes.
-
-Expand only after the direct path works end to end. This keeps debugging
-bounded without turning the initial set into a permission boundary.
-
-## Output layout
-
-```text
-results/captures/<experiment>/
-  metadata.json
-  ncu-report.ncu-rep
-  ncu.csv
-  nvbit/
-  sass.txt
-  simulator.json
-  comparison.json
-```
-
-Metadata may include tool versions and descriptive identifiers. No checksum,
-receipt, seal, reviewer signature, or admission status is needed.
-
-## Completion criteria
-
-The cohort is useful when its runnable cells have parseable inputs, repeated
-measurements with visible variance, simulator outputs, and numerical comparison
-reports. Excluded workloads should have a short human-readable reason.
+Do not pass NCU values into replay or tuning. Keep raw issue, modeled events,
+completion, and launch observations distinct. If an endpoint is not represented
+by the trace, report it as incomplete instead of adding a guessed tail.

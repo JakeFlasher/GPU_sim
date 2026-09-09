@@ -44,8 +44,11 @@ std::vector<std::string> findThreadblockFiles(int64_t deviceId, int64_t streamId
     std::string prefix = "d_" + std::to_string(deviceId) + "_s_" + std::to_string(streamId) + "_k_" + std::to_string(kernelId) + "_";
     
     try {
-        // Check if the hierarchical directory exists
-        assert(std::filesystem::exists(hierarchicalPath));
+        // A trace may be incomplete or use a different layout; report the
+        // missing directory below instead of aborting a debug build.
+        if (!std::filesystem::is_directory(hierarchicalPath)) {
+            return files;
+        }
         for (const auto& entry : std::filesystem::directory_iterator(hierarchicalPath)) {
             std::string filename = entry.path().filename().string();
             if (filename.find(prefix) == 0) {
@@ -71,7 +74,9 @@ std::tuple<int, int, int> parseBlockCoordinates(const std::string& filename) {
     std::replace(coordStr.begin(), coordStr.end(), ',', ' ');
     std::stringstream ss(coordStr);
     
-    int x, y, z;
+    int x = -1;
+    int y = -1;
+    int z = -1;
     ss >> x >> y >> z;
     return {x, y, z};
 }
@@ -138,6 +143,9 @@ void displayMainMenu(const dynamic_trace::Trace& trace) {
         std::cin >> choice;
         
         if (std::cin.fail()) {
+            if (std::cin.eof()) {
+                return;
+            }
             clearInputBuffer();
             continue;
         }
@@ -181,6 +189,9 @@ void deviceMenu(const dynamic_trace::Trace& trace) {
         std::cin >> device_id;
         
         if (std::cin.fail()) {
+            if (std::cin.eof()) {
+                return;
+            }
             clearInputBuffer();
             continue;
         }
@@ -232,6 +243,9 @@ void streamMenu(const dynamic_trace::Trace& trace, int64_t deviceId) {
         std::cin >> stream_id;
         
         if (std::cin.fail()) {
+            if (std::cin.eof()) {
+                return;
+            }
             clearInputBuffer();
             continue;
         }
@@ -290,6 +304,9 @@ void kernelMenu(const dynamic_trace::Trace& trace, int64_t deviceId, int64_t str
         std::cin >> kernelIndex;
         
         if (std::cin.fail()) {
+            if (std::cin.eof()) {
+                return;
+            }
             clearInputBuffer();
             continue;
         }
@@ -346,6 +363,9 @@ void kernelDetails(const dynamic_trace::Trace& trace, int64_t deviceId, int64_t 
         std::cin >> input;
         
         if (std::cin.fail()) {
+            if (std::cin.eof()) {
+                return;
+            }
             clearInputBuffer();
             continue;
         }
