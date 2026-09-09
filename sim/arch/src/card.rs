@@ -1206,6 +1206,15 @@ impl ArchCard {
         };
         match entry {
             Measured::Value(v) => {
+                if v.unit.as_deref().is_some_and(|unit| {
+                    !matches!(unit, "cycle" | "cycles" | "cycles_per_dependent_load")
+                }) {
+                    return Err(CalibError::InvalidCardValue {
+                        field: kind.value_field(),
+                        value: v.unit.clone().unwrap_or_default(),
+                        requirement: "latency unit must describe cycles",
+                    });
+                }
                 if !v.value.is_finite() || v.value <= 0.0 {
                     return Err(CalibError::InvalidCardValue {
                         field: kind.value_field(),
@@ -1895,6 +1904,20 @@ mod tests {
                 other => panic!("expected typed invalid latency value, got {other:?}"),
             }
         }
+    }
+
+    #[test]
+    fn required_latency_rejects_non_cycle_units() {
+        let mut card = ArchCard::load(&card_path("sm_86.json")).unwrap();
+        measured_mut(&mut card, LatencyKind::L1Hit).unit = Some("nanoseconds".to_owned());
+        assert!(matches!(
+            card.require_latency(LatencyKind::L1Hit),
+            Err(CalibError::InvalidCardValue {
+                field: "latencies_cycles.l1_hit.value",
+                requirement: "latency unit must describe cycles",
+                ..
+            })
+        ));
     }
 
     #[test]

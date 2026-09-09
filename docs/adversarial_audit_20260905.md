@@ -809,6 +809,15 @@ An installed-NCU `--print-fp --print-units base` export was replayed directly;
 decimal launch dimensions `256.00` and `8.00` are accepted as exact integers,
 and the normalized observation remains 9664 ns and 47136 instructions.
 
+Architecture-card resource deserialization had the same `f64` rounding hazard:
+values just above a `u32` or exact-JSON-integer boundary could round down into
+the accepted range. Card integer fields now parse their original decimal or
+exponent token exactly; valid integer-valued decimals remain accepted.
+
+Latency values with an explicit unit are now required to describe cycles,
+preventing a card that labels a latency in seconds or nanoseconds from being
+silently consumed as cycle timing.
+
 The causal-frontier event-reduction counter used saturating subtraction, which
 could hide an internal accounting mismatch. Region reduction and its arithmetic
 now use checked operations and return a typed completion-overflow error instead.
