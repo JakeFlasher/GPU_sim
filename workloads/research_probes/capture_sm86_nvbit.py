@@ -124,12 +124,13 @@ def _output_contract(
     ]
     threadblocks_dir = destination / "threadblocks"
     threadblocks_symlink = threadblocks_dir.is_symlink()
-    payload_paths = (
-        sorted(threadblocks_dir.rglob("*.pb"))
+    threadblocks_entries = (
+        sorted(threadblocks_dir.rglob("*"))
         if threadblocks_dir.is_dir() and not threadblocks_symlink
         else []
     )
-    symlink_payloads = [path for path in payload_paths if path.is_symlink()]
+    symlink_entries = [path for path in threadblocks_entries if path.is_symlink()]
+    payload_paths = [path for path in threadblocks_entries if path.suffix == ".pb"]
     payloads = [
         path
         for path in payload_paths
@@ -140,8 +141,8 @@ def _output_contract(
         errors.append("missing or empty outputs: " + ", ".join(missing))
     if threadblocks_symlink:
         errors.append("threadblocks directory must not be a symlink")
-    if symlink_payloads:
-        errors.append("threadblocks payloads must not be symlinks")
+    if symlink_entries:
+        errors.append("threadblocks entries must not be symlinks")
     if not payloads:
         errors.append("no non-empty threadblocks/*.pb payload files")
     if not errors:

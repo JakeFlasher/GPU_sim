@@ -932,6 +932,10 @@ The payload directory itself could also be replaced by a symlink before
 validation, causing the recursive scan to inspect another tree. The contract
 now rejects a symlinked `threadblocks/` directory before traversal.
 
+The same traversal could skip a symlinked nested directory and thereby hide
+payloads while leaving other files valid. The contract now rejects any symlink
+entry below `threadblocks/` before counting payloads.
+
 NCU wide CSV identity parsing also accepted a negative launch ID until the
 simulator join rejected it later. The campaign parser now rejects negative IDs
 at metric ingestion, keeping malformed profiler identity failures local to the
