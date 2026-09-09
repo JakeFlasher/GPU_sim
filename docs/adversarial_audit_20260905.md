@@ -857,6 +857,12 @@ the upper bound, making a huge exponent an avoidable allocation hazard. Bounds
 are now checked before integer conversion; a `1e1000000` capacity is rejected
 without materializing a million-digit integer.
 
+Warp-pool input construction silently overwrote streams when callers supplied
+duplicate warp keys, because the stream dictionary collapsed them while the
+admission list still retained both entries. The public walker now rejects
+duplicate/unhashable keys, and malformed non-tuple accesses get a typed error
+instead of an uncaught `TypeError`.
+
 Latency conversion had the dual edge case: a positive Decimal such as `1e-400`
 passed the Decimal check but became `0.0` when converted to f64. The resolver
 now rechecks positivity and finiteness after conversion while retaining the

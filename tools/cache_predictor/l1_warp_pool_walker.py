@@ -429,6 +429,10 @@ def _normalize_access(access: tuple) -> tuple[int, int, bool]:
     silently convert bypass records (``l1_eligible=False``) into
     modeled misses — the contract bug the independent review caught.
     """
+    if not isinstance(access, (tuple, list)):
+        raise WarpPoolAccessInvalid(
+            f"access must be a tuple/list with arity 2 or 3; got {access!r}"
+        )
     if len(access) == 2:
         line_id, l1_eligible = access
         return (int(line_id), int(line_id) * SECTORS_PER_LINE,
@@ -485,6 +489,12 @@ def walk_warp_pool(
         raise WalkerConfigError(
             f"warmup_launches={warmup_launches} must be >= 0")
     flat = sector_accounting == "line_flat"
+    try:
+        warp_keys = [key for key, _ in per_warp_accesses]
+        if len(set(warp_keys)) != len(warp_keys):
+            raise WalkerConfigError("warp keys must be unique")
+    except TypeError as error:
+        raise WalkerConfigError("warp keys must be hashable") from error
 
     # Persistent cache state (lines + sector residency) carried
     # across warmup launches into the measured launch.

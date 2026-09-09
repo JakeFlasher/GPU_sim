@@ -8,8 +8,10 @@ from tools.cache_predictor import l1_warp_pool_walker as walker
 
 from tools.cache_predictor.l1_warp_pool_walker import (
     WalkerConfigError,
+    WarpPoolAccessInvalid,
     resolve_latencies,
     resolve_line_capacity,
+    walk_warp_pool,
 )
 
 
@@ -127,3 +129,19 @@ def test_card_path_rejects_leaf_and_parent_symlinks(tmp_path):
     parent.symlink_to(tmp_path, target_is_directory=True)
     with pytest.raises(WalkerConfigError, match="contains a symlink"):
         resolve_line_capacity(parent / target.name)
+
+
+def test_duplicate_warp_keys_cannot_drop_streams():
+    with pytest.raises(WalkerConfigError, match="unique"):
+        walk_warp_pool(
+            [("warp", [(0, True)]), ("warp", [(1, True)])],
+            line_capacity=8, hit_latency=1.0, miss_latency=4.0, mshr_count=1,
+        )
+
+
+def test_non_tuple_access_has_typed_error():
+    with pytest.raises(WarpPoolAccessInvalid, match="tuple/list"):
+        walk_warp_pool(
+            [("warp", [123])], line_capacity=8,
+            hit_latency=1.0, miss_latency=4.0, mshr_count=1,
+        )
