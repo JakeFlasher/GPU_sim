@@ -837,6 +837,11 @@ so large capacities could be accepted under a rounded value. It now loads
 decimal tokens as `Decimal` until integer validation; a `9007199254740993.0`
 probe is rejected using the original value rather than a rounded substitute.
 
+The Python resolver also accepted integers beyond the Rust `u64`/`u32` bounds,
+which could turn a malformed capacity or MSHR declaration into oversized cache
+state. It now enforces the same width limits before deriving line capacity or
+MSHR count.
+
 Carded L2 geometry also allowed a capacity whose per-slice set count was
 fractional, silently flooring away part of the declared cache. The carded
 constructor now rejects non-integral per-slice set geometry and capacities with

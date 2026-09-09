@@ -93,6 +93,8 @@ DEFAULT_CARD_PATH = _REPO_ROOT / "data/pchase/sm_86_static_card.json"
 # the dossier's walker line uses 32 as the per-SM working default.
 DOCUMENTED_DEFAULT_MSHR_COUNT = 32
 MSHR_SENSITIVITY_COUNTS = (16, 32, 64)
+MAX_JSON_U64 = (1 << 64) - 1
+MAX_JSON_U32 = (1 << 32) - 1
 
 
 class WalkerConfigError(Exception):
@@ -159,7 +161,8 @@ def _card_int(prop: dict, prop_name: str) -> int:
             f"{prop_name} unit {prop.get('unit')!r} is not bytes; fail closed"
         )
     if isinstance(raw, bool) or not isinstance(raw, (int, float, Decimal)) \
-            or not math.isfinite(raw) or raw != int(raw) or raw < 1:
+            or not math.isfinite(raw) or raw != int(raw) or raw < 1 \
+            or raw > MAX_JSON_U64:
         raise WalkerConfigError(
             f"{prop_name} value {raw!r} is not a positive integer; "
             "the marker said value but the VALUE fails the audit — "
@@ -193,8 +196,13 @@ def resolve_mshr_count(card_path: Path | None = None) -> MshrConfig:
             "the card has no mshr_outstanding_misses property; an "
             "unsourced MSHR constant is rejected")
     if prop.get("kind") == "value":
+        count = _card_int(prop, "mshr_outstanding_misses")
+        if count > MAX_JSON_U32:
+            raise WalkerConfigError(
+                f"mshr_outstanding_misses value {count!r} does not fit u32; fail closed"
+            )
         return MshrConfig(
-            _card_int(prop, "mshr_outstanding_misses"), "card", None)
+            count, "card", None)
     if prop.get("kind") == "typed":
         return MshrConfig(
             DOCUMENTED_DEFAULT_MSHR_COUNT,
