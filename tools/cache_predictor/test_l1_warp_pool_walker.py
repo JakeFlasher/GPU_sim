@@ -1,6 +1,10 @@
 import json
+from contextlib import contextmanager
+from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
+from tools.cache_predictor import l1_warp_pool_walker as walker
 
 from tools.cache_predictor.l1_warp_pool_walker import (
     WalkerConfigError,
@@ -66,11 +70,30 @@ def test_card_integer_bounds_match_rust_resolvers(tmp_path):
         resolve_mshr_count(path)
 
 
-def test_card_size_is_bounded(tmp_path):
-    path = tmp_path / "oversized-card.json"
-    path.write_bytes(b"{" + b" " * (16 * 1024 * 1024) + b"}")
+def test_card_size_is_bounded(tmp_path, monkeypatch):
+    monkeypatch.setattr(walker, "MAX_CARD_BYTES", 1024)
+    path = _card(tmp_path)
+    exact_limit = path.read_bytes().ljust(walker.MAX_CARD_BYTES, b" ")
+    path.write_bytes(exact_limit)
+    assert resolve_line_capacity(path).capacity_bytes == 98304
+
+    path.write_bytes(exact_limit + b" " * 4096)
+    original_open = Path.open
+    consumed = []
+
+    @contextmanager
+    def tracked_open(card_path, *args, **kwargs):
+        with original_open(card_path, *args, **kwargs) as stream:
+            def read(size=-1):
+                raw = stream.read(size)
+                consumed.append(len(raw))
+                return raw
+            yield SimpleNamespace(read=read)
+
+    monkeypatch.setattr(Path, "open", tracked_open)
     with pytest.raises(WalkerConfigError, match="exceeds"):
         resolve_line_capacity(path)
+    assert consumed and sum(consumed) <= walker.MAX_CARD_BYTES + 1
 
 
 def test_card_path_rejects_leaf_and_parent_symlinks(tmp_path):

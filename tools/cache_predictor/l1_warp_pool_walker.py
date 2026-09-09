@@ -147,7 +147,8 @@ def _load_card(card_path: Path | None) -> dict:
     # Preserve decimal lexemes until their resolver validates semantics; a
     # binary64 conversion would round large card integers before validation.
     try:
-        raw = path.read_bytes()
+        with path.open("rb") as stream:
+            raw = stream.read(MAX_CARD_BYTES + 1)
     except OSError as error:
         raise WalkerConfigError(f"cannot read card {path}: {error}") from error
     if len(raw) > MAX_CARD_BYTES:

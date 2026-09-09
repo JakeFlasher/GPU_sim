@@ -847,6 +847,11 @@ an unbounded JSON document before validation. It now caps card input at 16 MiB,
 rejecting oversized or non-UTF-8 files before parsing while preserving the
 retained card path.
 
+The initial size check still read the entire file before measuring it, so the
+bound did not constrain peak memory. Loading now reads at most 16 MiB plus one
+byte; a sparse 128 MiB card under a 96 MiB address-space limit fails with the
+typed size error rather than `MemoryError`.
+
 The same loader followed a symlinked card leaf or parent directory. It now
 rejects symlink components before reading the card, keeping Python and anchored
 Rust card identity tied to the requested file.
