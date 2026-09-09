@@ -9,6 +9,9 @@ The workspace contains the executable replay path:
 - `sim-engine`: shared event ordering.
 - `sim-run-campaign`: manifest driven CLI and JSON output.
 - `sim-run`: direct replay convenience CLI.
+- `sim-sm::causal_frontier`: opt-in causal-frontier analysis for explicit
+  descriptor streams; it is observational until a producer supplies dependency
+  and completion facts.
 
 Build the runner with:
 
@@ -16,6 +19,10 @@ Build the runner with:
 cargo build --release --manifest-path sim/Cargo.toml -p sim-run
 cargo build --release --manifest-path sim/Cargo.toml -p sim-run-campaign
 ```
+
+For an observation-only NCU join, append `--ncu-csv PROFILE.csv` and, for a
+multi-launch export, `--ncu-launch ID`. The values appear under
+`ncu_observation` and never affect replay timing or architecture parameters.
 
 Run it with a retained NVBit trace and control sidecar as described in
 `docs/runbook_host.md`. Architecture values belong in `arch_profiles/cards`,

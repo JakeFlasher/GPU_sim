@@ -288,6 +288,7 @@ impl PreparedReplay {
             memory_admission_feedback_candidate_id: None,
             launches,
             cache_session: None,
+            ncu_observation: None,
         }
     }
 }
@@ -390,6 +391,8 @@ mod tests {
             memory_service_candidates: None,
             memory_admission_candidates: None,
             memory_admission_feedback: None,
+            ncu_csv: None,
+            ncu_launch: None,
         }
     }
 

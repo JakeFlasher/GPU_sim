@@ -3,6 +3,7 @@
 //! The runner accepts ordinary input paths. It deliberately has no admission
 //! manifest, artifact digest, receipt, publication, or approval layer.
 
+pub mod ncu;
 mod prepared;
 
 pub use prepared::{
@@ -120,6 +121,9 @@ pub struct RunConfig {
     /// Optional schema-1 document containing exactly one timing-active finite
     /// admission candidate.
     pub memory_admission_feedback: Option<PathBuf>,
+    /// Optional observation-only raw NCU CSV. It never changes replay inputs.
+    pub ncu_csv: Option<PathBuf>,
+    pub ncu_launch: Option<u64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -212,6 +216,17 @@ pub(crate) fn load_arch_card(path: &Path) -> Result<ArchCard, RunError> {
 pub(crate) fn load_pchase_card(path: &Path) -> Result<PchaseCard, RunError> {
     let raw = read_direct_input(path, "P-chase card", MAX_DIRECT_CARD_BYTES)?;
     PchaseCard::parse(path, &raw).map_err(at("P-chase card"))
+}
+
+fn load_ncu_observation(
+    path: &Path,
+    launch_id: Option<u64>,
+) -> Result<ncu::NcuObservation, RunError> {
+    let raw = read_direct_input(path, "NCU CSV", 64 * 1024 * 1024)?;
+    let text =
+        std::str::from_utf8(&raw).map_err(|_| RunError::new("NCU CSV", "input is not UTF-8"))?;
+    ncu::NcuObservation::from_csv(text, launch_id)
+        .map_err(|error| RunError::new("NCU CSV", error.to_string()))
 }
 
 pub(crate) fn load_control_sidecar(
@@ -459,6 +474,8 @@ pub struct RunReport {
     pub launches: Vec<LaunchReport>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cache_session: Option<CacheSessionReport>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ncu_observation: Option<ncu::NcuObservation>,
 }
 
 #[derive(Debug, Serialize)]
@@ -1153,6 +1170,17 @@ pub fn run(config: &RunConfig) -> Result<RunReport, RunError> {
             "memory-service, memory-admission, and feedback candidate files are mutually exclusive",
         ));
     }
+    if config.ncu_launch.is_some() && config.ncu_csv.is_none() {
+        return Err(RunError::new(
+            "arguments",
+            "--ncu-launch requires --ncu-csv",
+        ));
+    }
+    let ncu_observation = config
+        .ncu_csv
+        .as_ref()
+        .map(|path| load_ncu_observation(path, config.ncu_launch))
+        .transpose()?;
     if config.cache_scope == CacheScope::StreamL2 && config.memory_mode != MemoryMode::L1L2 {
         return Err(RunError::new(
             "arguments",
@@ -1216,6 +1244,7 @@ pub fn run(config: &RunConfig) -> Result<RunReport, RunError> {
         && config.cache_scope == CacheScope::Launch
         && config.kernel_id.is_none()
         && !config.ncu_shaped_metrics
+        && ncu_observation.is_none()
         && !specialized_loader_requested
         && !performance_diagnostics_requested
     {
@@ -1398,6 +1427,7 @@ pub fn run(config: &RunConfig) -> Result<RunReport, RunError> {
             .map(|candidate| candidate.candidate_id),
         launches,
         cache_session,
+        ncu_observation,
     };
     #[cfg(feature = "performance-counters")]
     if performance_enabled {
@@ -1432,6 +1462,8 @@ mod tests {
             memory_service_candidates: None,
             memory_admission_candidates: None,
             memory_admission_feedback: None,
+            ncu_csv: None,
+            ncu_launch: None,
         }
     }
 

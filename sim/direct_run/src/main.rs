@@ -11,6 +11,7 @@ const USAGE: &str = "Usage: sim-run --trace DIR --control FILE --arch-card FILE 
 [--pchase-card FILE] [--mode flat|l1|l1-l2] \
 [--cache-scope launch|stream-l2] [--carded-dram] [--kernel-id ID] \
 [--ncu-shaped-metrics] \
+[--ncu-csv FILE] [--ncu-launch ID] \
 [--memory-service-candidates FILE] [--memory-admission-candidates FILE] \
 [--memory-admission-feedback FILE]";
 
@@ -43,6 +44,8 @@ fn parse_args(args: impl IntoIterator<Item = OsString>) -> Result<Option<RunConf
     let mut carded_dram_bandwidth = false;
     let mut kernel_id = None;
     let mut ncu_shaped_metrics = false;
+    let mut ncu_csv = None;
+    let mut ncu_launch = None;
     let mut memory_service_candidates = None;
     let mut memory_admission_candidates = None;
     let mut memory_admission_feedback = None;
@@ -93,6 +96,21 @@ fn parse_args(args: impl IntoIterator<Item = OsString>) -> Result<Option<RunConf
             value if value == OsStr::new("--ncu-shaped-metrics") => {
                 ncu_shaped_metrics = true;
             }
+            value if value == OsStr::new("--ncu-csv") => {
+                ncu_csv = Some(PathBuf::from(take_value(&mut args, "--ncu-csv")?));
+            }
+            value if value == OsStr::new("--ncu-launch") => {
+                let raw = take_value(&mut args, "--ncu-launch")?;
+                let raw = raw
+                    .to_str()
+                    .ok_or_else(|| RunError::new("arguments", "--ncu-launch must be UTF-8"))?;
+                ncu_launch = Some(raw.parse::<u64>().map_err(|error| {
+                    RunError::new(
+                        "arguments",
+                        format!("invalid --ncu-launch {raw:?}: {error}"),
+                    )
+                })?);
+            }
             value if value == OsStr::new("--memory-service-candidates") => {
                 memory_service_candidates = Some(PathBuf::from(take_value(
                     &mut args,
@@ -131,6 +149,8 @@ fn parse_args(args: impl IntoIterator<Item = OsString>) -> Result<Option<RunConf
         carded_dram_bandwidth,
         kernel_id,
         ncu_shaped_metrics,
+        ncu_csv,
+        ncu_launch,
         memory_service_candidates,
         memory_admission_candidates,
         memory_admission_feedback,

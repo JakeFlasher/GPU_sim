@@ -16,6 +16,9 @@
 //!   request/response inversion).
 //! - [`replay`] — the trace→SM driver replaying a kernel launch on its
 //!   traced hardware placement (`sm_id` / `warpid_sm`).
+//! - [`causal_frontier`] — an opt-in resource-envelope analysis over explicit
+//!   dynamic descriptors; it preserves native replay and refuses unknown
+//!   dependency or completion semantics.
 //!
 //! Tensor Core initiation contention is modeled per SMSP for the admitted
 //! `sm_86` matrix-instruction forms. CTA barrier instructions dispatch through
@@ -63,6 +66,7 @@
 //! use sim_sm::SystemResult;
 //! ```
 
+pub mod causal_frontier;
 pub mod control_bits;
 #[cfg(feature = "campaign")]
 pub mod evidence;
@@ -72,6 +76,10 @@ pub mod replay;
 pub mod sass_operands;
 mod system;
 
+pub use causal_frontier::{
+    CausalFrontierError, CausalFrontierInstruction, CausalFrontierReport,
+    summarize as summarize_causal_frontier,
+};
 pub use control_bits::{
     BARRIER_NONE, ControlBits, ControlBitsError, ControlDomainError, ControlSidecar, DepBarrier,
     FunctionControl, InstructionControl, WaitMask,

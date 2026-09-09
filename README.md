@@ -5,6 +5,11 @@ SASS and memory traces, the Rust engine replays issue, synchronization, cache,
 and memory events, and the runner emits JSON metrics for comparison with Nsight
 Compute measurements.
 
+The SM crate also exposes an opt-in causal-frontier descriptor analysis. It
+uses the native `PipelineClass` and control schedule, keeps resource and
+completion envelopes explicit, and refuses missing dependency/completion facts;
+it does not alter the established replay path.
+
 The active target is Ampere SM86 (RTX 3090 Ti). SM120 support is exploratory.
 NCU observations are comparison data only; they are never simulator inputs.
 
@@ -39,3 +44,6 @@ python -m eval.direct_score --observed observed.json --predicted predicted.json
 For a GPU run, use the commands in [docs/runbook_host.md](docs/runbook_host.md).
 The current engine status and retained SM86 comparison roots are in
 [docs/STATUS.md](docs/STATUS.md).
+
+The prototype integration and its NCU sector probe are documented in
+[docs/prototype_causal_frontier.md](docs/prototype_causal_frontier.md).

@@ -228,6 +228,30 @@ enum ControlDecodeError {
 }
 
 impl ControlBits {
+    pub const fn stall(self) -> u8 {
+        self.stall
+    }
+
+    pub const fn yield_flag(self) -> bool {
+        self.yield_flag
+    }
+
+    pub const fn write_barrier(self) -> Option<DepBarrier> {
+        self.write_barrier
+    }
+
+    pub const fn read_barrier(self) -> Option<DepBarrier> {
+        self.read_barrier
+    }
+
+    pub const fn wait_mask(self) -> WaitMask {
+        self.wait_mask
+    }
+
+    pub const fn reuse(self) -> u8 {
+        self.reuse
+    }
+
     pub fn new(
         stall: u8,
         yield_flag: bool,
