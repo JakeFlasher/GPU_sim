@@ -168,6 +168,16 @@ pub enum L2ConfigError {
     #[error("num_slices must be >= 1")]
     SlicesZero,
     #[error(
+        "card L2 geometry has non-integral sets per slice: capacity={capacity}B, line={line}B, \
+         slices={slices}, associativity={associativity}"
+    )]
+    NonIntegralSetCount {
+        capacity: u64,
+        line: u32,
+        slices: u32,
+        associativity: u32,
+    },
+    #[error(
         "card l2_geometry.policy is absent — the model write-allocates stores, and a card \
          without a measured policy must fail closed, never assume write-allocate"
     )]
@@ -281,6 +291,28 @@ impl L2Config {
             },
         };
         cfg.validate()?;
+        // Carded geometry is a physical declaration, so preserve the
+        // set-associative contract used by the Python reference validator.
+        // The general L2Config path intentionally retains its historical
+        // max(1, floor(.)) behavior for analytical/degenerated fixtures, but
+        // a card must never silently discard capacity while deriving sets.
+        let bytes_per_set = cfg.line_bytes.checked_mul(cfg.associativity).ok_or(
+            L2ConfigError::NonIntegralSetCount {
+                capacity: cfg.capacity_bytes,
+                line: cfg.line_bytes,
+                slices: cfg.num_slices,
+                associativity: cfg.associativity,
+            },
+        )?;
+        let bytes_per_slice = cfg.capacity_bytes / u64::from(cfg.num_slices);
+        if bytes_per_slice % u64::from(bytes_per_set) != 0 {
+            return Err(L2ConfigError::NonIntegralSetCount {
+                capacity: cfg.capacity_bytes,
+                line: cfg.line_bytes,
+                slices: cfg.num_slices,
+                associativity: cfg.associativity,
+            });
+        }
         Ok(cfg)
     }
 
@@ -3301,6 +3333,31 @@ mod tests {
         assert!(matches!(
             L2Config::from_carded_geometry("sm_86", 64, 128, 32, 6, policy),
             Err(L2ConfigError::CapacityBelowLine { .. })
+        ));
+    }
+
+    #[test]
+    fn carded_constructor_rejects_non_integral_sets_per_slice() {
+        // 6,293,504 B is line-aligned, but after the six-slice partition the
+        // 16-way set size (128 B × 16) does not divide the slice capacity.
+        // The Python set-associative validator reports
+        // `non_integral_set_count`; accepting it here would floor the set
+        // count and silently discard part of the card declaration.
+        assert!(matches!(
+            L2Config::from_carded_geometry(
+                "sm_86",
+                6_293_504,
+                128,
+                32,
+                6,
+                Some(L2_WRITE_ALLOCATE_POLICY),
+            ),
+            Err(L2ConfigError::NonIntegralSetCount {
+                capacity: 6_293_504,
+                line: 128,
+                slices: 6,
+                associativity: 16,
+            })
         ));
     }
 
