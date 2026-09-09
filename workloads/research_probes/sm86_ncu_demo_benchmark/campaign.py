@@ -955,7 +955,9 @@ def _run_simulator(
             raise CampaignError(f"{slug}: simulator output is not JSON: {error}") from error
         if not isinstance(document, Mapping):
             raise CampaignError(f"{slug}: simulator output root is not an object")
-        ncu_csv = output_root / "evidence" / "raw" / "ncu" / "rep-1" / slug / "ncu.csv"
+        ncu_csv = _resolve_no_symlink(
+            output_root / "evidence" / "raw" / "ncu" / "rep-1" / slug / "ncu.csv"
+        )
         ncu_observation = document.get("ncu_observation")
         if ncu_csv.is_file():
             if not isinstance(ncu_observation, Mapping):
@@ -1379,6 +1381,16 @@ def main(argv: Sequence[str] | None = None) -> int:
         manifest_path = output_root / "campaign_manifest.json"
         if manifest_path.exists():
             manifest = _load_json(manifest_path)
+            if manifest.get("schema_version") != 1:
+                raise CampaignError("existing campaign manifest has unsupported schema")
+            if manifest.get("benchmark_id") != spec["benchmark_id"]:
+                raise CampaignError(
+                    "existing campaign manifest belongs to another benchmark"
+                )
+            if manifest.get("output_root") != _portable_path(output_root):
+                raise CampaignError(
+                    "existing campaign manifest is bound to another output root"
+                )
             repository = manifest.get("repository")
             current_revision = _git("rev-parse", "HEAD")
             current_branch = _git("branch", "--show-current")
@@ -1439,6 +1451,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             records = manifest.get("records")
             if not isinstance(records, list):
                 raise CampaignError("existing campaign manifest has malformed records")
+            known_workload_ids = {
+                str(workload["id"]) for workload in spec["workloads"]
+            }
             seen_records: set[tuple[object, object]] = set()
             for record in records:
                 if not isinstance(record, Mapping):
@@ -1450,6 +1465,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                     or stage not in STAGES
                     or not isinstance(workload_id, str)
                     or not workload_id
+                    or workload_id not in known_workload_ids
                 ):
                     raise CampaignError(
                         "existing campaign manifest has an invalid stage/workload record"
