@@ -181,8 +181,8 @@ def _card_int(prop: dict, prop_name: str) -> int:
             f"{prop_name} unit {prop.get('unit')!r} is not bytes; fail closed"
         )
     if isinstance(raw, bool) or not isinstance(raw, (int, float, Decimal)) \
-            or not math.isfinite(raw) or raw != int(raw) or raw < 1 \
-            or raw > MAX_JSON_U64:
+            or not math.isfinite(raw) or raw < 1 or raw > MAX_JSON_U64 \
+            or raw != int(raw):
         raise WalkerConfigError(
             f"{prop_name} value {raw!r} is not a positive integer; "
             "the marker said value but the VALUE fails the audit — "

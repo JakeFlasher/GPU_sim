@@ -70,6 +70,13 @@ def test_card_integer_bounds_match_rust_resolvers(tmp_path):
         resolve_mshr_count(path)
 
 
+def test_huge_exponent_is_rejected_before_integer_materialization(tmp_path):
+    path = _card(tmp_path)
+    path.write_text(path.read_text().replace("98304", "1e1000000", 1))
+    with pytest.raises(WalkerConfigError, match="positive integer"):
+        resolve_line_capacity(path)
+
+
 def test_card_size_is_bounded(tmp_path, monkeypatch):
     monkeypatch.setattr(walker, "MAX_CARD_BYTES", 1024)
     path = _card(tmp_path)

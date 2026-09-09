@@ -852,6 +852,11 @@ bound did not constrain peak memory. Loading now reads at most 16 MiB plus one
 byte; a sparse 128 MiB card under a 96 MiB address-space limit fails with the
 typed size error rather than `MemoryError`.
 
+The bounded Decimal integer check also materialized `int(raw)` before testing
+the upper bound, making a huge exponent an avoidable allocation hazard. Bounds
+are now checked before integer conversion; a `1e1000000` capacity is rejected
+without materializing a million-digit integer.
+
 The same loader followed a symlinked card leaf or parent directory. It now
 rejects symlink components before reading the card, keeping Python and anchored
 Rust card identity tied to the requested file.
