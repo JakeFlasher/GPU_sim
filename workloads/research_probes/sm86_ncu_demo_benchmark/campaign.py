@@ -911,9 +911,20 @@ def _run_causal_frontier_probe(output_root: Path) -> dict[str, Any]:
         raise CampaignError(f"causal-frontier probe output is not JSON: {error}") from error
     if not isinstance(document, Mapping):
         raise CampaignError("causal-frontier probe output is not an object")
-    if document.get("candidate_regions") != 3 or document.get("collapsed_regions") != 1:
+    def probe_count(name: str) -> int:
+        value = document.get(name)
+        if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+            raise CampaignError(f"causal-frontier probe field {name} is not a nonnegative integer")
+        return value
+
+    candidate_regions = probe_count("candidate_regions")
+    collapsed_regions = probe_count("collapsed_regions")
+    reified_regions = probe_count("reified_regions")
+    exact_final_cycle = probe_count("exact_final_cycle")
+    causal_final_cycle = probe_count("causal_final_cycle")
+    if candidate_regions != 3 or collapsed_regions != 1:
         raise CampaignError("causal-frontier probe did not preserve its safe-region collapse")
-    if document.get("reified_regions") != 2 or document.get("exact_final_cycle") != document.get("causal_final_cycle"):
+    if reified_regions != 2 or exact_final_cycle != causal_final_cycle:
         raise CampaignError("causal-frontier probe did not refuse contended regions")
     destination = output_root / "evidence" / "causal_frontier_probe.json"
     destination.parent.mkdir(parents=True, exist_ok=True)

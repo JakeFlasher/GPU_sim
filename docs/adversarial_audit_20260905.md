@@ -796,11 +796,15 @@ shape, making repeated analyses differ even when their event and cycle results
 matched. Planner timing remains available in memory for telemetry but is now
 excluded from serialized scientific output.
 
-The L1 fast path preflighted the access MRU stamp but not the due fills that
-are lazily installed before that access. Near the u64 stamp limit this could
-publish a fill and then fail the access, leaving partial cache state. Due-fill
-recency is now preflighted conservatively and near-limit paths use the existing
-shadow transaction; hit and store rollback regressions cover the boundary.
+The L1 due-fill recency preflight is retained for the near-limit boundary,
+but now uses the maintained minimum-fill timestamp to skip map scans whenever
+no timed fill is due. Exact counting remains only at a due-fill boundary, while
+boundary tests retain the transactional u64::MAX behavior.
+
+The campaign's causal-probe validator compared the two final-cycle fields
+directly, so a malformed output with both fields absent passed the equality
+check. It now requires all checked region and frontier values to be
+nonnegative integers before accepting the integration result.
 
 Post-merge validation rebuilt sim-run, passed 26 direct-run feature-library
 tests, 127 sim-mem tests, 440 campaign-enabled sim-sm tests, 169

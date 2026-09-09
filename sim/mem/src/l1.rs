@@ -1214,6 +1214,12 @@ impl L1Cache {
         now: u64,
         extra_touches: u64,
     ) -> Result<(), L1AccessError> {
+        // The maintained minimum makes the ordinary no-due/future-fill path
+        // constant time. Exact counting remains necessary only at a due-fill
+        // boundary because an evicted sector fill may be dropped.
+        if self.min_fill_due.is_none_or(|minimum| minimum > now) {
+            return self.next_stamp.preflight("recency", extra_touches);
+        }
         let due_fills = self
             .line_fills
             .values()
