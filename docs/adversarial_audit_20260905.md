@@ -928,6 +928,10 @@ The same contract also counted regular payloads while silently ignoring a
 symlinked `threadblocks/*.pb` beside them. It now rejects any symlink payload
 explicitly; retained payload files remain regular files.
 
+The payload directory itself could also be replaced by a symlink before
+validation, causing the recursive scan to inspect another tree. The contract
+now rejects a symlinked `threadblocks/` directory before traversal.
+
 Capture destination setup also followed an empty symlinked directory and could
 write a new trace outside the requested output root. Destination resolution now
 rejects leaf and parent symlink components before `mkdir`; the normal retained
