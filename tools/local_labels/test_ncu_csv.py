@@ -14,6 +14,15 @@ def test_parse_raw_ncu_csv() -> None:
     assert group_by_metric(values)["smsp__inst_executed.sum"] == [42.0]
 
 
+def test_parse_unquoted_csv_fields() -> None:
+    values = parse_ncu_csv(
+        "ID,Kernel Name,Metric Name,Metric Unit,Metric Value\n"
+        "0,copy(float*),smsp__inst_executed.sum,inst,42\n"
+    )
+    assert values[0].kernel_id == 0
+    assert values[0].metric_value == 42.0
+
+
 def test_missing_columns_are_rejected() -> None:
     with pytest.raises(NcuCsvError, match="missing NCU CSV columns"):
         parse_ncu_csv('"Metric Name","Metric Value"\n"a","1"\n')

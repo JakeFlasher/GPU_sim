@@ -130,9 +130,34 @@ def _parse_wide_csv(rows: list[list[str]]) -> list[NcuMetricValue]:
 
 
 def parse_ncu_csv(text: str) -> list[NcuMetricValue]:
-    lines = [line for line in text.splitlines() if line.lstrip().startswith('"')]
-    if not lines:
+    # NCU normally quotes every CSV field, but CSV itself does not require
+    # quoting. Locate the first recognizable header so both forms (and the
+    # profiler's optional preamble) use the same parser path.
+    raw_lines = text.splitlines()
+    header_index = None
+    for index, line in enumerate(raw_lines):
+        try:
+            row = next(csv.reader([line]))
+        except csv.Error:
+            continue
+        fieldnames = set(row)
+        if _LONG_COLUMNS.issubset(fieldnames) or {"ID", "Kernel Name"}.issubset(
+            fieldnames
+        ):
+            header_index = index
+            break
+    if header_index is None:
+        nonempty = next((line for line in raw_lines if line.strip()), None)
+        if nonempty is not None:
+            try:
+                first_row = next(csv.reader([nonempty]))
+            except (csv.Error, StopIteration):
+                first_row = []
+            raise NcuCsvError(
+                f"missing NCU CSV columns: {sorted(_LONG_COLUMNS - set(first_row))}"
+            )
         raise NcuCsvError("no CSV rows found")
+    lines = raw_lines[header_index:]
     rows = list(csv.reader(io.StringIO("\n".join(lines))))
     if not rows:
         raise NcuCsvError("no CSV rows found")

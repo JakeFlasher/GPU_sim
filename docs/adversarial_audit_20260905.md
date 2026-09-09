@@ -937,6 +937,10 @@ simulator join rejected it later. The campaign parser now rejects negative IDs
 at metric ingestion, keeping malformed profiler identity failures local to the
 NCU stage.
 
+The shared NCU CSV reader only recognized lines beginning with a quote, so a
+valid unquoted CSV export was reported as empty. Header discovery now accepts
+both quoted and unquoted CSV fields while still skipping profiler preambles.
+
 Capture destination setup also followed an empty symlinked directory and could
 write a new trace outside the requested output root. Destination resolution now
 rejects leaf and parent symlink components before `mkdir`; the normal retained
