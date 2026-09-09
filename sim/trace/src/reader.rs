@@ -1097,7 +1097,7 @@ impl TraceDirSnapshot {
         });
         let tree_relative = root_relative.join("threadblocks");
         let mut tree = reader
-            .read_pb_tree_with_file_limit_strict(
+            .read_pb_tree_with_file_limit(
                 &tree_relative,
                 maximum_files,
                 maximum_bytes,
@@ -3788,7 +3788,7 @@ impl TraceDir {
         }
         let stats_csv = stats_file.map(AnchoredFile::into_raw);
         let tree = reader
-            .read_pb_tree_strict(
+            .read_pb_tree(
                 Path::new("threadblocks"),
                 DIRECT_THREADBLOCK_FILE_MAX_COUNT,
                 DIRECT_THREADBLOCK_TOTAL_MAX_BYTES,
@@ -3879,7 +3879,7 @@ impl TraceDir {
         }
         let stats_csv = stats_file.map(AnchoredFile::into_raw);
         let roster = reader
-            .roster_pb_tree_strict(
+            .roster_pb_tree(
                 Path::new("threadblocks"),
                 DIRECT_THREADBLOCK_FILE_MAX_COUNT,
                 DIRECT_THREADBLOCK_TOTAL_MAX_BYTES,
