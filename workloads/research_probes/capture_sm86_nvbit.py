@@ -56,6 +56,17 @@ PB_LIB_PATH = REPO_ROOT / ".toolchain/pb/lib"
 RUNTIME_MANIFEST_PATH = default_runtime_manifest_path(TRACER_PATH)
 
 
+def _resolve_symlink_free_path(path: Path) -> Path:
+    candidate = path.expanduser()
+    if not candidate.is_absolute():
+        candidate = Path.cwd() / candidate
+    candidate = candidate.absolute()
+    for component in (candidate, *candidate.parents):
+        if component.is_symlink():
+            raise RuntimeError(f"capture path contains a symlink: {path}")
+    return candidate.resolve()
+
+
 def _runtime_closure_sha256(closure: Mapping[str, str]) -> str:
     payload = json.dumps(sorted(closure.items()), separators=(",", ":")).encode()
     return hashlib.sha256(payload).hexdigest()
@@ -107,17 +118,26 @@ def _output_contract(
     missing = [
         relative
         for relative in REQUIRED_OUTPUTS
-        if not (destination / relative).is_file()
+        if (destination / relative).is_symlink()
+        or not (destination / relative).is_file()
         or (destination / relative).stat().st_size == 0
     ]
-    payloads = sorted(
+    payload_paths = (
+        sorted((destination / "threadblocks").rglob("*.pb"))
+        if (destination / "threadblocks").is_dir()
+        else []
+    )
+    symlink_payloads = [path for path in payload_paths if path.is_symlink()]
+    payloads = [
         path
-        for path in (destination / "threadblocks").rglob("*.pb")
-        if path.is_file() and path.stat().st_size > 0
-    ) if (destination / "threadblocks").is_dir() else []
+        for path in payload_paths
+        if not path.is_symlink() and path.is_file() and path.stat().st_size > 0
+    ]
     errors: list[str] = []
     if missing:
         errors.append("missing or empty outputs: " + ", ".join(missing))
+    if symlink_payloads:
+        errors.append("threadblocks payloads must not be symlinks")
     if not payloads:
         errors.append("no non-empty threadblocks/*.pb payload files")
     if not errors:
@@ -325,7 +345,9 @@ def capture_argv(
     """Capture one caller-bound command with the retained SM86 NVBit runtime."""
 
     relative_output = f"evidence/raw/nvbit/{cell_id}"
-    destination = output_root / "evidence" / "raw" / "nvbit" / cell_id
+    destination = _resolve_symlink_free_path(
+        output_root / "evidence" / "raw" / "nvbit" / cell_id
+    )
     if destination.exists() and any(destination.iterdir()):
         raise RuntimeError(
             f"{cell_id}: destination is nonempty; move the prior capture aside before recapturing"
@@ -547,7 +569,7 @@ def main(argv: list[str] | None = None) -> int:
         try:
             capture(
                 cell_id,
-                args.output_root.expanduser().resolve(),
+                _resolve_symlink_free_path(args.output_root),
                 args.timeout,
                 allow_multiple_launches=args.allow_multiple_launches,
             )

@@ -787,6 +787,28 @@ average. The reader no longer uses smsp__inst_executed.avg as a fallback total;
 it exposes that average separately and only feeds the exact .sum into
 resource-dependency totals.
 
+The NCU CLI also scales each CSV metric by its per-column units row when
+--print-units auto is selected. Importing one retained report reproduced the
+bug: gpu__time_duration.avg changed from 9664 ns in base output to 9.664 us in
+auto output, while the old parser returned 9.664 for a field named gpu_time_ns.
+The reader now normalizes ns/us/ms/s and SI-scaled cycle/instruction/warp/sector
+units, rejects unknown units, and accepts exact integral --print-fp dimensions.
+
+The Python NCU path already strips a UTF-8 BOM, but the direct Rust reader did
+not; a BOM-prefixed otherwise-valid export failed header detection. The Rust
+reader now strips the leading BOM and the release HMMA replay remains silent
+with a parsed launch observation.
+
+Cross-format replay comparison shows one representation caveat: NCU base
+output rounds smsp__inst_executed.avg to 140.29 while auto output retains
+140.285714. Normalized time, total instruction, and sector observations match;
+the average remains an observation with source-format precision, so byte
+identity is not claimed for that field.
+
+An installed-NCU `--print-fp --print-units base` export was replayed directly;
+decimal launch dimensions `256.00` and `8.00` are accepted as exact integers,
+and the normalized observation remains 9664 ns and 47136 instructions.
+
 The causal-frontier event-reduction counter used saturating subtraction, which
 could hide an internal accounting mismatch. Region reduction and its arithmetic
 now use checked operations and return a typed completion-overflow error instead.
@@ -806,7 +828,80 @@ directly, so a malformed output with both fields absent passed the equality
 check. It now requires all checked region and frontier values to be
 nonnegative integers before accepting the integration result.
 
-Post-merge validation rebuilt sim-run, passed 26 direct-run feature-library
+The post-merge simulator stage also recorded NCU output artifacts without
+requiring the simulator JSON to contain its observation-only join. It now
+fails a campaign row when a matching NCU CSV exists but ncu_observation is
+missing, and records the presence bit in the stage result.
+
+The same contract initially accepted an empty observation object. Campaign
+validation now requires a nonnegative launch ID plus nonempty kernel and device
+identity fields; all 8 small and 7 large retained simulator outputs satisfy
+that semantic check.
+
+The raw observation was then bound to the normalized NCU record by launch ID
+and kernel identity. A stale or substituted CSV now fails before the simulator
+row is accepted; all 15 retained raw/normalized pairs match.
+
+The same binding now compares the raw CSV content identity recorded by
+normalized.json. A byte mutation that preserves launch and kernel labels is
+rejected, and all 15 retained CSV artifacts match their normalized identities.
+
+Campaign resume also checked declared inputs without checking the repository
+revision, allowing a later commit to append records to an older manifest. An
+existing manifest now has to match the current branch and commit before any
+stage can append results; a stale-revision resume probe exits with a typed
+campaign error.
+
+The resume contract also lacked a manifest-level simulator executable binding,
+so a same-revision rebuild could mix binary generations. New manifests record
+the simulator binary identity and resume rejects a changed executable. The
+retained 9df campaign manifests intentionally predate this field and are
+therefore treated as historical evidence rather than resumable state.
+
+Workload executables had the same unbound substitution path across correctness,
+NCU, NVBit, and static stages. New manifests also record the identity of every
+declared workload binary; a changed workload set now blocks resume before any
+stage runs.
+
+Resume now recursively revalidates the path/content identity of artifacts
+already recorded in prior stage results. A temporary byte mutation is rejected;
+the retained 9df manifests correctly fail this check only because the current
+simulator binary was rebuilt later.
+
+That recursive check initially omitted the top-level causal-frontier probe
+artifacts and tolerated a non-list records field. Resume now validates the
+probe binary/output too and reports malformed records as a typed campaign
+error; a temporary probe-output mutation is rejected.
+
+Resume also rejects duplicate stage/workload records and non-object records,
+preventing a malformed manifest from presenting repeated or structurally
+invalid evidence as a complete campaign.
+
+Each persisted record must now also name one known stage and a nonempty
+workload ID; a single empty record no longer bypasses the duplicate check.
+
+Malformed manifest inputs are now rejected with the same typed campaign error
+instead of escaping as an AttributeError during resume validation.
+
+Artifact validation also followed symlinks through is_file(), allowing a
+same-content symlink to masquerade as a retained result. New and persisted
+artifacts now reject symlink paths; all retained campaign artifact paths are
+regular files.
+
+The top-level campaign input identities had the same follow-symlink behavior.
+Manifest inputs now reject symlink paths before JSON loading; all retained
+campaign input paths are regular files.
+
+Resolving CLI and declared paths before that check could bypass the leaf
+restriction, including through a symlinked parent directory. Campaign path
+resolution now rejects symlink components before canonicalization; leaf and
+parent symlink probes both fail.
+
+The no-follow boundary is exercised from outside the repository as well:
+absolute normal paths still produce a valid campaign plan after component
+validation.
+
+Post-merge validation rebuilt sim-run, passed 29 direct-run feature-library
 tests, 127 sim-mem tests, 440 campaign-enabled sim-sm tests, 169
 campaign-enabled sim-trace tests, and the dependency-free prototype cargo
 check. A retained HMMA small replay and a
@@ -824,6 +919,51 @@ truncated manifest.
 
 ## Remaining high-value work
 
+The NVBit capture output contract accepted symlinked required artifacts because
+its `is_file()` check followed links; trace admission caught this only later.
+The capture contract now rejects symlinked required outputs immediately, while
+all 15 retained NVBit directories still pass the contract.
+
+The same contract also counted regular payloads while silently ignoring a
+symlinked `threadblocks/*.pb` beside them. It now rejects any symlink payload
+explicitly; retained payload files remain regular files.
+
+Capture destination setup also followed an empty symlinked directory and could
+write a new trace outside the requested output root. Destination resolution now
+rejects leaf and parent symlink components before `mkdir`; the normal retained
+capture roots remain regular paths.
+
+The simulator-stage NCU join had a smaller time-of-check/time-of-use gap: it
+probed and hashed `ncu.csv` through the raw path after command construction.
+The stage now applies the same no-follow resolver before every probe and hash,
+so a symlink introduced between setup and replay is rejected consistently.
+
+An attempted cross-component instruction-count check also exposed an important
+frontier distinction: NVBit `total_reported_insts` is the dynamic trace-record
+population, while simulator `instructions_issued` and NCU
+`smsp__inst_executed.sum` count executed instructions after predication. The
+latter two match across all 15 workloads; the trace-record total must not be
+used as their oracle.
+
+The campaign previously retained NCU and simulator values without a joined
+comparison record. Simulator-stage results now include diagnostic per-metric
+absolute errors and coverage; the retained data identifies large FlashAttention
+backward DRAM-sector error (95.15%) without using NCU values to configure replay.
+
+The comparison initially dropped zero-baseline rows from its maximum error even
+when a simulator value was nonzero. It now records exact-zero matches and
+zero-baseline mismatches separately; all 60 retained comparable rows have no
+zero-baseline mismatch.
+
+Comparison numeric validation also rejected booleans explicitly; Python's bool
+subclassing of int had otherwise allowed malformed true/false values into the
+diagnostic error calculation.
+
+An admission sweep initially used system Python and failed uniformly because
+protobuf 7.34.1 was unavailable. Repeating the same sweep with the pinned
+`.venv` passed all 15 roots with zero stderr, separating an environment
+prerequisite failure from trace validity.
+
 Uniform and tensor execution resources remain an explicit `DispatchOnly`
 boundary until an SM86 card-backed cadence is measured. The retained corpus has
 four `UISETP` sites, no `BRA.U`, and 53 admitted HMMA/IMMA sites; no unsupported
@@ -833,3 +973,10 @@ retained card has no destination-coupling measurement.
 
 The continuous audit remains active; future work should target new
 architecture-backed discriminators or newly observed replay failures.
+
+The primary-source review of [Analyzing and Improving Hardware Modeling of
+Accel-Sim](https://arxiv.org/abs/2401.10082) confirms that modern SMs expose
+independent sub-core pipelines and tensor units, supporting the simulator's
+per-SMSP tensor resource seam. It does not supply a validated SM86 cadence for
+the remaining uniform or SFU forms, so assigning them a guessed interval would
+violate the card-backed timing boundary.

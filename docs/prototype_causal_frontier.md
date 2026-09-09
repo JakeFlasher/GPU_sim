@@ -18,6 +18,8 @@ Kernel identity falls back to the raw export's `Kernel Name` column when
 optional observations and are never substituted for total issue activity.
 The smsp__inst_executed.sum total and .avg per-SMSP roll-up are also kept as
 distinct observations.
+Wide NCU exports are normalized from their per-column units row, so automatic
+time scaling remains expressed in the observation's nanosecond field.
 
 The direct SM86 probe is in
 [`workloads/prototype_sector_probe`](../workloads/prototype_sector_probe/).
