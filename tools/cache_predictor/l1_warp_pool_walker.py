@@ -200,12 +200,21 @@ def _card_positive_float(prop: dict | None, prop_name: str) -> float:
         raise WalkerConfigError(
             f"{prop_name} unit {prop.get('unit')!r} is not cycles_per_dependent_load; fail closed"
         )
-    if isinstance(raw, bool) or not isinstance(raw, (int, float, Decimal)) \
-            or not math.isfinite(raw) or raw <= 0:
+    if isinstance(raw, bool) or not isinstance(raw, (int, float, Decimal)):
         raise WalkerConfigError(
             f"{prop_name} value {raw!r} is not a positive finite "
             "latency; fail closed")
-    return float(raw)
+    try:
+        value = float(raw)
+    except (OverflowError, ValueError) as error:
+        raise WalkerConfigError(
+            f"{prop_name} value {raw!r} is not representable as a finite latency"
+        ) from error
+    if not math.isfinite(value) or value <= 0:
+        raise WalkerConfigError(
+            f"{prop_name} value {raw!r} is not a positive finite latency; fail closed"
+        )
+    return value
 
 
 def resolve_mshr_count(card_path: Path | None = None) -> MshrConfig:

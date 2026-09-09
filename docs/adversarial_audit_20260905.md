@@ -857,6 +857,11 @@ the upper bound, making a huge exponent an avoidable allocation hazard. Bounds
 are now checked before integer conversion; a `1e1000000` capacity is rejected
 without materializing a million-digit integer.
 
+Latency conversion had the dual edge case: a positive Decimal such as `1e-400`
+passed the Decimal check but became `0.0` when converted to f64. The resolver
+now rechecks positivity and finiteness after conversion while retaining the
+smallest representable positive f64 latency.
+
 The same loader followed a symlinked card leaf or parent directory. It now
 rejects symlink components before reading the card, keeping Python and anchored
 Rust card identity tied to the requested file.

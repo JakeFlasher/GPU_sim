@@ -77,6 +77,20 @@ def test_huge_exponent_is_rejected_before_integer_materialization(tmp_path):
         resolve_line_capacity(path)
 
 
+@pytest.mark.parametrize("token", ["1e-400", "1e400", "1" + "0" * 400])
+def test_latency_must_remain_positive_and_finite_after_conversion(tmp_path, token):
+    path = _card(tmp_path)
+    path.write_text(path.read_text().replace("33.0", token, 1))
+    with pytest.raises(WalkerConfigError, match="finite latency"):
+        resolve_latencies(path)
+
+
+def test_representable_subnormal_latency_is_preserved(tmp_path):
+    path = _card(tmp_path)
+    path.write_text(path.read_text().replace("33.0", "5e-324", 1))
+    assert resolve_latencies(path).hit_latency == float.fromhex("0x0.0000000000001p-1022")
+
+
 def test_card_size_is_bounded(tmp_path, monkeypatch):
     monkeypatch.setattr(walker, "MAX_CARD_BYTES", 1024)
     path = _card(tmp_path)
