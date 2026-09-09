@@ -109,6 +109,8 @@ struct RawProperty {
     #[serde(default)]
     value: Option<Box<RawValue>>,
     #[serde(default)]
+    unit: Option<String>,
+    #[serde(default)]
     typed_reason: Option<String>,
 }
 
@@ -308,6 +310,17 @@ impl PchaseCard {
             });
         }
         let raw = Self::require_value(prop, name)?;
+        if prop
+            .unit
+            .as_deref()
+            .is_some_and(|unit| unit != "cycles_per_dependent_load")
+        {
+            return Err(PchaseCardError::ValueInvalid {
+                property: name.to_owned(),
+                raw: prop.unit.clone().unwrap_or_default(),
+                requirement: "must declare unit cycles_per_dependent_load",
+            });
+        }
         let n =
             serde_json::from_str::<f64>(raw.get()).map_err(|_| PchaseCardError::ValueInvalid {
                 property: name.to_owned(),
@@ -340,6 +353,13 @@ impl PchaseCard {
             return Err(PchaseCardError::TypedWithoutDefault {
                 property: name,
                 typed_reason: prop.typed_reason.clone().unwrap_or_default(),
+            });
+        }
+        if prop.unit.as_deref().is_some_and(|unit| unit != "bytes") {
+            return Err(PchaseCardError::ValueInvalid {
+                property: name.clone(),
+                raw: prop.unit.clone().unwrap_or_default(),
+                requirement: "must declare unit bytes",
             });
         }
         let capacity_bytes = Self::card_int(prop, &name)?;
@@ -875,6 +895,33 @@ mod tests {
                 requirement: "must be a JSON number representable as finite f64",
                 ..
             }) if raw == "1e309"
+        ));
+    }
+
+    #[test]
+    fn explicit_card_units_cannot_relabel_geometry_or_latency() {
+        let capacity = card(
+            r#"{"properties": {"l1_capacity_bytes":
+            {"kind": "value", "unit": "cycles_per_dependent_load", "value": 98304}}}"#,
+        );
+        assert!(matches!(
+            capacity.resolve_line_capacity(None),
+            Err(PchaseCardError::ValueInvalid {
+                requirement: "must declare unit bytes",
+                ..
+            })
+        ));
+
+        let latency = card(
+            r#"{"properties": {"latency":
+            {"kind": "value", "unit": "bytes", "value": 33.0}}}"#,
+        );
+        assert!(matches!(
+            PchaseCard::card_positive_float(latency.property("latency").unwrap(), "latency"),
+            Err(PchaseCardError::ValueInvalid {
+                requirement: "must declare unit cycles_per_dependent_load",
+                ..
+            })
         ));
     }
 

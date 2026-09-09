@@ -823,6 +823,11 @@ L2 geometry, and DRAM bandwidth inputs now require non-empty provenance text so
 their measured or documented origin cannot disappear while values remain
 executable.
 
+The P-chase resolver similarly ignored an explicit property unit, allowing a
+capacity or latency labeled with another dimension to be consumed as bytes or
+cycles. It now rejects mismatched units while preserving legacy cards that omit
+the optional unit field.
+
 The causal-frontier event-reduction counter used saturating subtraction, which
 could hide an internal accounting mismatch. Region reduction and its arithmetic
 now use checked operations and return a typed completion-overflow error instead.
