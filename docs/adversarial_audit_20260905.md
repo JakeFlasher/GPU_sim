@@ -884,6 +884,10 @@ Occupancy-derived assignments also coerced boolean or fractional SM IDs through
 `int()`. Assignment validation now requires exact integer IDs before range
 checking, preventing silent CTA-to-SM relabeling.
 
+Empty legacy walker inputs could similarly bypass schedule-policy validation,
+accepting `unknown` policies or missing occupancy assignments. Walker entry
+points now validate the policy and required assignment before traversing blocks.
+
 Latency conversion had the dual edge case: a positive Decimal such as `1e-400`
 passed the Decimal check but became `0.0` when converted to f64. The resolver
 now rechecks positivity and finiteness after conversion while retaining the

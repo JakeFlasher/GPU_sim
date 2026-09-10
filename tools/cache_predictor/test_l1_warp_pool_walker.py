@@ -15,6 +15,8 @@ from tools.cache_predictor.l1_warp_pool_walker import (
 )
 from tools.cache_predictor.l1_walker import (
     L1CtaToSmScheduleAssignmentInvalid,
+    L1CtaToSmScheduleMissingOccupancy,
+    L1CtaToSmScheduleUnknown,
     L1WalkerCapacityInvalid,
     L1WalkerWaysInvalid,
     block_to_sm_id,
@@ -193,3 +195,10 @@ def test_legacy_walkers_reject_zero_sm_count_on_empty_input():
 def test_occupancy_assignment_rejects_coercible_non_integer_ids():
     with pytest.raises(L1CtaToSmScheduleAssignmentInvalid, match="non-integer"):
         block_to_sm_id(0, sm_count=1, schedule_policy="occupancy_derived", occupancy_derived_assignment=[True])
+
+
+def test_empty_legacy_walkers_validate_schedule_policy():
+    with pytest.raises(L1CtaToSmScheduleUnknown):
+        walk_per_sm_l1([], sm_count=1, capacity_bytes=128, schedule_policy="unknown")
+    with pytest.raises(L1CtaToSmScheduleMissingOccupancy):
+        walk_per_sm_per_set_l1([], sm_count=1, capacity_bytes=128, ways=1, schedule_policy="occupancy_derived")

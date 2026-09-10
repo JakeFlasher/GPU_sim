@@ -85,6 +85,23 @@ class L1WalkerCapacityInvalid(Exception):
     TOKEN = "predictor_l1_capacity_invalid"
 
 
+def _validate_schedule_policy(
+    schedule_policy: str,
+    occupancy_derived_assignment: Sequence[int] | None,
+) -> None:
+    if schedule_policy == "unknown":
+        raise L1CtaToSmScheduleUnknown(
+            "cta_to_sm_schedule_policy=unknown; block placement is unavailable"
+        )
+    if schedule_policy == "occupancy_derived" and occupancy_derived_assignment is None:
+        raise L1CtaToSmScheduleMissingOccupancy(
+            "occupancy_derived_assignment required when "
+            "cta_to_sm_schedule_policy=occupancy_derived"
+        )
+    if schedule_policy != "round_robin_homogeneous" and schedule_policy != "occupancy_derived":
+        raise ValueError(f"unrecognized cta_to_sm_schedule_policy {schedule_policy!r}")
+
+
 LINE_SIZE_BYTES: int = 128
 SECTOR_SIZE_BYTES: int = 32
 SECTORS_PER_LINE: int = LINE_SIZE_BYTES // SECTOR_SIZE_BYTES
@@ -382,6 +399,7 @@ def walk_per_sm_l1(
     """
     if isinstance(sm_count, bool) or not isinstance(sm_count, int) or sm_count <= 0:
         raise ValueError(f"sm_count must be >= 1, got {sm_count!r}")
+    _validate_schedule_policy(schedule_policy, occupancy_derived_assignment)
     if isinstance(capacity_bytes, bool) or not isinstance(capacity_bytes, int) \
             or capacity_bytes < LINE_SIZE_BYTES:
         raise L1WalkerCapacityInvalid(
@@ -453,7 +471,11 @@ def l1_miss_stream_per_sm(
     observes; feed it to ``sector_cache_replay.replay_access_stream`` for an
     L1-filtered L2 prediction. Warmup launches do NOT contribute to the stream
     (only the measured launch does)."""
-    if capacity_bytes < LINE_SIZE_BYTES:
+    if isinstance(sm_count, bool) or not isinstance(sm_count, int) or sm_count <= 0:
+        raise ValueError(f"sm_count must be >= 1, got {sm_count!r}")
+    _validate_schedule_policy(schedule_policy, occupancy_derived_assignment)
+    if isinstance(capacity_bytes, bool) or not isinstance(capacity_bytes, int) \
+            or capacity_bytes < LINE_SIZE_BYTES:
         raise L1WalkerCapacityInvalid(
             f"capacity_bytes={capacity_bytes} is below the 128B line granularity"
         )
@@ -831,6 +853,7 @@ def walk_per_sm_per_set_l1(
     """
     if isinstance(sm_count, bool) or not isinstance(sm_count, int) or sm_count <= 0:
         raise ValueError(f"sm_count must be >= 1, got {sm_count!r}")
+    _validate_schedule_policy(schedule_policy, occupancy_derived_assignment)
     if isinstance(ways, bool) or not isinstance(ways, int) or ways < 1:
         raise L1WalkerWaysInvalid(
             f"ways={ways} is invalid; the set-associative walker "
