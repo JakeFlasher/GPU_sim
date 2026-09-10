@@ -13,6 +13,12 @@ from tools.cache_predictor.l1_warp_pool_walker import (
     resolve_line_capacity,
     walk_warp_pool,
 )
+from tools.cache_predictor.l1_walker import (
+    L1WalkerCapacityInvalid,
+    L1WalkerWaysInvalid,
+    walk_per_sm_l1,
+    walk_per_sm_per_set_l1,
+)
 
 
 def _card(tmp_path, *, capacity_unit="bytes", latency_unit="cycles_per_dependent_load"):
@@ -166,3 +172,10 @@ def test_invalid_pool_parameters_fail_closed(kwargs, message):
     base.update(kwargs)
     with pytest.raises(WalkerConfigError, match=message):
         walk_warp_pool([("warp", [(0, True)])], **base)
+
+
+def test_legacy_walker_rejects_non_integral_geometry():
+    with pytest.raises(L1WalkerCapacityInvalid, match="capacity_bytes"):
+        walk_per_sm_l1([], sm_count=1, capacity_bytes=128.5, schedule_policy="round_robin_homogeneous")
+    with pytest.raises(L1WalkerWaysInvalid, match="ways"):
+        walk_per_sm_per_set_l1([], sm_count=1, capacity_bytes=128, ways=1.5, schedule_policy="round_robin_homogeneous")

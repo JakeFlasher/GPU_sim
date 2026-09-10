@@ -872,6 +872,10 @@ inverted latency parameters until the first access. It now validates all pool
 limits and timing values at entry, so invalid configurations fail before cache
 state changes.
 
+The legacy per-SM walker accepted fractional or boolean geometry values until
+they reached modulo, slicing, or capacity arithmetic. Its SM count, capacity,
+ways, and warmup parameters now require exact integer types before traversal.
+
 Latency conversion had the dual edge case: a positive Decimal such as `1e-400`
 passed the Decimal check but became `0.0` when converted to f64. The resolver
 now rechecks positivity and finiteness after conversion while retaining the

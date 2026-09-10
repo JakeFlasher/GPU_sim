@@ -134,7 +134,7 @@ def block_to_sm_id(
 
     ``unknown``: raises ``L1CtaToSmScheduleUnknown``.
     """
-    if sm_count <= 0:
+    if isinstance(sm_count, bool) or not isinstance(sm_count, int) or sm_count <= 0:
         raise ValueError(
             f"sm_count must be >= 1, got {sm_count!r}"
         )
@@ -374,12 +374,14 @@ def walk_per_sm_l1(
     bypass_count + per-SM tallies + the derived hit_rate over
     eligible accesses (counting one event per sector access).
     """
-    if capacity_bytes < LINE_SIZE_BYTES:
+    if isinstance(capacity_bytes, bool) or not isinstance(capacity_bytes, int) \
+            or capacity_bytes < LINE_SIZE_BYTES:
         raise L1WalkerCapacityInvalid(
             f"capacity_bytes={capacity_bytes} is below the "
             f"128B line granularity; at least one line must fit"
         )
-    if warmup_launches < 0:
+    if isinstance(warmup_launches, bool) or not isinstance(warmup_launches, int) \
+            or warmup_launches < 0:
         raise ValueError(
             f"warmup_launches={warmup_launches} must be >= 0; "
             f"0 = no warmup (cold-cache single-launch)."
@@ -819,17 +821,19 @@ def walk_per_sm_per_set_l1(
       - upstream policy / capacity / access exceptions are
         unchanged from the FA walker.
     """
-    if ways < 1:
+    if isinstance(ways, bool) or not isinstance(ways, int) or ways < 1:
         raise L1WalkerWaysInvalid(
             f"ways={ways} is invalid; the set-associative walker "
             f"requires at least one way per set"
         )
-    if capacity_bytes < LINE_SIZE_BYTES:
+    if isinstance(capacity_bytes, bool) or not isinstance(capacity_bytes, int) \
+            or capacity_bytes < LINE_SIZE_BYTES:
         raise L1WalkerCapacityInvalid(
             f"capacity_bytes={capacity_bytes} is below the 128B "
             f"line granularity; at least one line must fit"
         )
-    if warmup_launches < 0:
+    if isinstance(warmup_launches, bool) or not isinstance(warmup_launches, int) \
+            or warmup_launches < 0:
         raise ValueError(
             f"warmup_launches={warmup_launches} must be >= 0; "
             f"0 = no warmup (cold-cache single-launch)."
