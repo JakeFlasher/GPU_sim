@@ -152,7 +152,13 @@ def block_to_sm_id(
                 f"occupancy_derived_assignment length "
                 f"{len(occupancy_derived_assignment)}"
             )
-        sm_id = int(occupancy_derived_assignment[block_index])
+        raw_sm_id = occupancy_derived_assignment[block_index]
+        if isinstance(raw_sm_id, bool) or not isinstance(raw_sm_id, int):
+            raise L1CtaToSmScheduleAssignmentInvalid(
+                f"block_index {block_index} mapped to non-integer sm_id "
+                f"{raw_sm_id!r}"
+            )
+        sm_id = raw_sm_id
         if not (0 <= sm_id < sm_count):
             raise L1CtaToSmScheduleAssignmentInvalid(
                 f"block_index {block_index} mapped to sm_id "

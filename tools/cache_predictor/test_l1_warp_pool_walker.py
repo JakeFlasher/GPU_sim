@@ -14,8 +14,10 @@ from tools.cache_predictor.l1_warp_pool_walker import (
     walk_warp_pool,
 )
 from tools.cache_predictor.l1_walker import (
+    L1CtaToSmScheduleAssignmentInvalid,
     L1WalkerCapacityInvalid,
     L1WalkerWaysInvalid,
+    block_to_sm_id,
     walk_per_sm_l1,
     walk_per_sm_per_set_l1,
 )
@@ -186,3 +188,8 @@ def test_legacy_walkers_reject_zero_sm_count_on_empty_input():
         walk_per_sm_l1([], sm_count=0, capacity_bytes=128, schedule_policy="round_robin_homogeneous")
     with pytest.raises(ValueError, match="sm_count"):
         walk_per_sm_per_set_l1([], sm_count=0, capacity_bytes=128, ways=1, schedule_policy="round_robin_homogeneous")
+
+
+def test_occupancy_assignment_rejects_coercible_non_integer_ids():
+    with pytest.raises(L1CtaToSmScheduleAssignmentInvalid, match="non-integer"):
+        block_to_sm_id(0, sm_count=1, schedule_policy="occupancy_derived", occupancy_derived_assignment=[True])

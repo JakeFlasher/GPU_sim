@@ -880,6 +880,10 @@ An empty legacy-walker workload could still bypass the existing `sm_count > 0`
 check because block mapping never ran. Both legacy walker entry points now
 validate SM count before accepting even an empty input.
 
+Occupancy-derived assignments also coerced boolean or fractional SM IDs through
+`int()`. Assignment validation now requires exact integer IDs before range
+checking, preventing silent CTA-to-SM relabeling.
+
 Latency conversion had the dual edge case: a positive Decimal such as `1e-400`
 passed the Decimal check but became `0.0` when converted to f64. The resolver
 now rechecks positivity and finiteness after conversion while retaining the
