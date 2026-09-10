@@ -863,6 +863,11 @@ admission list still retained both entries. The public walker now rejects
 duplicate/unhashable keys, and malformed non-tuple accesses get a typed error
 instead of an uncaught `TypeError`.
 
+The walker also coerced zero residency and MSHR limits, and accepted NaN or
+inverted latency parameters until the first access. It now validates all pool
+limits and timing values at entry, so invalid configurations fail before cache
+state changes.
+
 Latency conversion had the dual edge case: a positive Decimal such as `1e-400`
 passed the Decimal check but became `0.0` when converted to f64. The resolver
 now rechecks positivity and finiteness after conversion while retaining the

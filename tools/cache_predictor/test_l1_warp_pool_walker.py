@@ -145,3 +145,24 @@ def test_non_tuple_access_has_typed_error():
             [("warp", [123])], line_capacity=8,
             hit_latency=1.0, miss_latency=4.0, mshr_count=1,
         )
+
+
+@pytest.mark.parametrize(
+    "kwargs, message",
+    [
+        ({"mshr_count": 0}, "mshr_count"),
+        ({"co_resident_warps": 0}, "co_resident_warps"),
+        ({"hit_latency": float("nan")}, "latencies"),
+        ({"hit_latency": 5.0, "miss_latency": 4.0}, "latencies"),
+    ],
+)
+def test_invalid_pool_parameters_fail_closed(kwargs, message):
+    base = {
+        "line_capacity": 8,
+        "hit_latency": 1.0,
+        "miss_latency": 4.0,
+        "mshr_count": 1,
+    }
+    base.update(kwargs)
+    with pytest.raises(WalkerConfigError, match=message):
+        walk_warp_pool([("warp", [(0, True)])], **base)

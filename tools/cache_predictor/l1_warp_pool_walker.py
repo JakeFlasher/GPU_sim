@@ -483,12 +483,36 @@ def walk_warp_pool(
     if sector_accounting not in ("two_layer", "line_flat"):
         raise ValueError(
             f"unknown sector_accounting {sector_accounting!r}")
-    if line_capacity <= 0:
+    if isinstance(line_capacity, bool) or not isinstance(line_capacity, int) \
+            or line_capacity <= 0:
         raise WalkerConfigError("line_capacity must be positive")
-    if warmup_launches < 0:
+    if mshr_count is not None and (
+        isinstance(mshr_count, bool) or not isinstance(mshr_count, int) or mshr_count <= 0
+    ):
+        raise WalkerConfigError("mshr_count must be positive or None")
+    if co_resident_warps is not None and (
+        isinstance(co_resident_warps, bool)
+        or not isinstance(co_resident_warps, int)
+        or co_resident_warps <= 0
+    ):
+        raise WalkerConfigError("co_resident_warps must be positive or None")
+    if isinstance(warmup_launches, bool) or not isinstance(warmup_launches, int) \
+            or warmup_launches < 0:
         raise WalkerConfigError(
             f"warmup_launches={warmup_launches} must be >= 0")
     flat = sector_accounting == "line_flat"
+    if (
+        isinstance(hit_latency, bool)
+        or not isinstance(hit_latency, (int, float))
+        or not math.isfinite(float(hit_latency))
+        or hit_latency <= 0
+        or isinstance(miss_latency, bool)
+        or not isinstance(miss_latency, (int, float))
+        or not math.isfinite(float(miss_latency))
+        or miss_latency <= 0
+        or hit_latency >= miss_latency
+    ):
+        raise WalkerConfigError("latencies must be finite, positive, and hit < miss")
     try:
         warp_keys = [key for key, _ in per_warp_accesses]
         if len(set(warp_keys)) != len(warp_keys):
