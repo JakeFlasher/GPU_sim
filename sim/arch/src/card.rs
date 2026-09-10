@@ -1074,12 +1074,14 @@ impl ArchCard {
             || operating_point.max_sm_clock_mhz < operating_point.sm_clock_ref_mhz
             || operating_point
                 .short_burst_sm_clock_ref_mhz
-                .is_some_and(|value| !value.is_finite() || value <= 0.0)
+                .is_some_and(|value| {
+                    !value.is_finite() || value <= 0.0 || value > operating_point.max_sm_clock_mhz
+                })
         {
             return Err(CalibError::InvalidCardValue {
                 field: "nvml_reference_operating_point",
-                value: "non-finite, non-positive, or inverted clock range".to_owned(),
-                requirement: "positive finite clocks with max >= reference",
+                value: "non-finite, non-positive, or out-of-range clock".to_owned(),
+                requirement: "positive finite clocks with short-burst <= max",
             });
         }
         Ok(operating_point)
@@ -1897,6 +1899,20 @@ mod tests {
             clocks.require_nvml_reference_operating_point(),
             Err(CalibError::InvalidCardValue {
                 field: "nvml_reference_operating_point",
+                ..
+            })
+        ));
+
+        let burst = load_mutated_card("sm_86.json", |card| {
+            card["nvml_reference_operating_point"]["short_burst_sm_clock_ref_mhz"] =
+                serde_json::json!(2200.0);
+        })
+        .unwrap();
+        assert!(matches!(
+            burst.require_nvml_reference_operating_point(),
+            Err(CalibError::InvalidCardValue {
+                field: "nvml_reference_operating_point",
+                requirement: "positive finite clocks with short-burst <= max",
                 ..
             })
         ));

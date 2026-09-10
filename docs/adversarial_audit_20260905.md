@@ -823,6 +823,10 @@ L2 geometry, and DRAM bandwidth inputs now require non-empty provenance text so
 their measured or documented origin cannot disappear while values remain
 executable.
 
+The NVML operating-point validator checked that the maximum clock exceeded the
+reference clock but did not bound the optional short-burst reference. It now
+rejects a short-burst value above the declared maximum.
+
 The P-chase resolver similarly ignored an explicit property unit, allowing a
 capacity or latency labeled with another dimension to be consumed as bytes or
 cycles. It now rejects mismatched units while preserving legacy cards that omit
