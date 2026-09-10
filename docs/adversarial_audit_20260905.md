@@ -876,6 +876,10 @@ The legacy per-SM walker accepted fractional or boolean geometry values until
 they reached modulo, slicing, or capacity arithmetic. Its SM count, capacity,
 ways, and warmup parameters now require exact integer types before traversal.
 
+An empty legacy-walker workload could still bypass the existing `sm_count > 0`
+check because block mapping never ran. Both legacy walker entry points now
+validate SM count before accepting even an empty input.
+
 Latency conversion had the dual edge case: a positive Decimal such as `1e-400`
 passed the Decimal check but became `0.0` when converted to f64. The resolver
 now rechecks positivity and finiteness after conversion while retaining the

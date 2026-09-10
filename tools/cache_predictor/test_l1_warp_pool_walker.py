@@ -179,3 +179,10 @@ def test_legacy_walker_rejects_non_integral_geometry():
         walk_per_sm_l1([], sm_count=1, capacity_bytes=128.5, schedule_policy="round_robin_homogeneous")
     with pytest.raises(L1WalkerWaysInvalid, match="ways"):
         walk_per_sm_per_set_l1([], sm_count=1, capacity_bytes=128, ways=1.5, schedule_policy="round_robin_homogeneous")
+
+
+def test_legacy_walkers_reject_zero_sm_count_on_empty_input():
+    with pytest.raises(ValueError, match="sm_count"):
+        walk_per_sm_l1([], sm_count=0, capacity_bytes=128, schedule_policy="round_robin_homogeneous")
+    with pytest.raises(ValueError, match="sm_count"):
+        walk_per_sm_per_set_l1([], sm_count=0, capacity_bytes=128, ways=1, schedule_policy="round_robin_homogeneous")

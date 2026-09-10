@@ -374,6 +374,8 @@ def walk_per_sm_l1(
     bypass_count + per-SM tallies + the derived hit_rate over
     eligible accesses (counting one event per sector access).
     """
+    if isinstance(sm_count, bool) or not isinstance(sm_count, int) or sm_count <= 0:
+        raise ValueError(f"sm_count must be >= 1, got {sm_count!r}")
     if isinstance(capacity_bytes, bool) or not isinstance(capacity_bytes, int) \
             or capacity_bytes < LINE_SIZE_BYTES:
         raise L1WalkerCapacityInvalid(
@@ -821,6 +823,8 @@ def walk_per_sm_per_set_l1(
       - upstream policy / capacity / access exceptions are
         unchanged from the FA walker.
     """
+    if isinstance(sm_count, bool) or not isinstance(sm_count, int) or sm_count <= 0:
+        raise ValueError(f"sm_count must be >= 1, got {sm_count!r}")
     if isinstance(ways, bool) or not isinstance(ways, int) or ways < 1:
         raise L1WalkerWaysInvalid(
             f"ways={ways} is invalid; the set-associative walker "
