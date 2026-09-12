@@ -15,6 +15,7 @@ pub mod json;
 pub mod lanes;
 pub mod pb;
 pub mod reader;
+pub mod semantic;
 mod wire_preflight;
 
 pub use anchored::{

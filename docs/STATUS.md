@@ -1,6 +1,6 @@
 # Current status
 
-Updated 2026-09-09.
+Updated 2026-09-12.
 
 The end to end SM86 path is operational: NVBit traces and control sidecars are
 read by `sim-trace`, replayed by the SM and memory models, and emitted through
@@ -54,6 +54,46 @@ and raw issue/terminal frontier for all 8 small and 7 large retained traces.
 Fresh NCU medians are diagnostic because capture/profile sessions are not the
 frozen scorer inputs; no per-workload timing or traffic constants were fitted.
 
+The SM86 novelty slice now includes a pure `sim-semantics` event and
+partial-order certificate crate, an SM86 NVBit adapter, and the
+`semantic-probe` executable. The adapter preserves lane-byte addresses, alias
+multiplicity, widths, optional masks, allocation IDs, cache operators, and
+placement identity. `tools/semantic_events/sm86_roundtrip_compare.py` runs a
+canonical event round-trip and then the existing cycle-accurate replay. All
+fifteen retained rows round-trip with identical counters, timing, and coverage;
+the sidecar classifier leaves no opcode unresolved. Static constant-cache
+`LDC/ULDC` records still have explicit dynamic memory-class gaps because the
+producer omits that tag; the adapter preserves them as static-only events and
+never routes them through global memory. This is a metadata gap, not a timing
+default.
+
+The first exact-acceleration implementation slice is now present: a versioned
+`sim-semantics::ObservationContract` distinguishes boundary and per-cycle
+claims, `sim-engine::QueueStats` reports virtual clock gaps separately from
+handler events, and schedule-derived causal inputs reject barriers, memory
+roles, and uncharacterized dispatch-only operations before certification.
+The optional dense reference differential now matches all 8 retained small
+SM86 workloads. The event lane recorded 201,105 local idle jumps covering
+3,789,118 virtual cycles across that set; dense mode remains the differential
+reference and no hardware-speed claim is attached. The comparison is
+reproducible with `tools/semantic_events/sm86_reference_compare.py`. The
+retained 7-workload large cohort also matches 7/7; across all 15 rows the event
+lane took 3,793,743 local steps and skipped 6,992,182 virtual cycles, while
+dense mode took 10,785,925 local steps.
+
+The optional `SIM_SM_REFERENCE_TRACE` emits post-event ordering plus canonical
+warp/block boundary projections. The overall projection remains deliberately
+marked incomplete while legacy debug-formatted duplicate fields are retained,
+but L1, shared L2 ownership, async-group state, memory/scalar pipeline state,
+instruction-front-end state, and fixed-clock activity power are now typed. Each
+event carries versioned cache geometry/set/way state, canonical SM response
+owners, pending-fill ready times, typed pending-event payloads, and an
+activity-only power state. The typed L1/L2/async/pipeline/front-end/power root
+record matches between event and dense replay, is complete at quiescent canary
+boundaries, and explicitly reports incomplete ownership timing while an
+outstanding response has no exact due time. The old aggregate projection flag
+is retained as a conservative legacy field for V1 consumers.
+
 ## Run the live path
 
 ```bash
@@ -74,4 +114,5 @@ python -m eval.direct_score --observed observed.json --predicted predicted.json
 2. Replay one representative current trace after each change.
 3. Profile event throughput and allocation cost when a replay exposes a real
    bottleneck.
-4. Add SM120 behavior only from SM120 traces and cards.
+4. Keep new behavior SM86-scoped until a separate architecture scope is
+   explicitly reopened.

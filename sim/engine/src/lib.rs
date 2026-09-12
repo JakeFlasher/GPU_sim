@@ -51,6 +51,8 @@ pub enum EngineError {
         "event queue yielded t={event_time} before its current clock t={now} — queue causality is corrupt"
     )]
     EventBeforeClock { event_time: Time, now: Time },
+    #[error("event queue {counter} overflowed")]
+    StatsOverflow { counter: &'static str },
 }
 
 /// Heap entry ordered by `(time, seq)` only; `kind` deliberately carries no
@@ -80,11 +82,22 @@ enum NextSequence {
     Exhausted,
 }
 
+/// Low-cost queue telemetry for distinguishing virtual clock advancement from
+/// actual handler work. `clock_gap_cycles` counts the cycles crossed between
+/// consecutive popped events; it is not a claim about host speedup.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct QueueStats {
+    pub events_popped: u64,
+    pub clock_gap_cycles: Time,
+    pub last_clock_gap_cycles: Time,
+}
+
 /// Deterministic discrete-event queue with pure next-event clock advance.
 pub struct EventQueue<K> {
     heap: BinaryHeap<Reverse<HeapEntry<K>>>,
     now: Time,
     next_seq: NextSequence,
+    stats: QueueStats,
 }
 
 impl<K> Default for EventQueue<K> {
@@ -99,6 +112,7 @@ impl<K> EventQueue<K> {
             heap: BinaryHeap::new(),
             now: 0,
             next_seq: NextSequence::Available(0),
+            stats: QueueStats::default(),
         }
     }
 
@@ -113,6 +127,12 @@ impl<K> EventQueue<K> {
 
     pub fn is_empty(&self) -> bool {
         self.heap.is_empty()
+    }
+
+    /// Queue telemetry accumulated by successful pops. Scheduling an event
+    /// does not advance the clock and therefore does not affect these values.
+    pub fn stats(&self) -> QueueStats {
+        self.stats
     }
 
     /// Schedule at absolute time `at` (>= now, or a typed error).
@@ -186,6 +206,48 @@ impl<K> EventQueue<K> {
         self.heap.peek().map(|Reverse(HeapEntry(e))| e.time)
     }
 
+    /// Ordered timestamps and insertion sequences for pending events. Payloads
+    /// remain owned by the caller's typed event domain.
+    pub fn pending_order(&self) -> Vec<(Time, u64)> {
+        let mut order = self
+            .heap
+            .iter()
+            .map(|Reverse(HeapEntry(event))| (event.time, event.seq))
+            .collect::<Vec<_>>();
+        order.sort_unstable();
+        order
+    }
+
+    /// Debug-only payload projection for bounded differential traces. The
+    /// caller owns the event semantics; this method never participates in
+    /// ordering or execution.
+    pub fn pending_debug(&self) -> Vec<(Time, u64, String)>
+    where
+        K: std::fmt::Debug,
+    {
+        let mut events = self
+            .heap
+            .iter()
+            .map(|Reverse(HeapEntry(event))| (event.time, event.seq, format!("{:?}", event.kind)))
+            .collect::<Vec<_>>();
+        events.sort_unstable_by_key(|(time, seq, _)| (*time, *seq));
+        events
+    }
+
+    /// Project pending events into a caller-owned typed representation while
+    /// retaining the queue's canonical `(time, sequence)` order. The engine
+    /// never interprets the event payload; this is the typed alternative to
+    /// `pending_debug` for boundary traces.
+    pub fn pending_projected<R>(&self, mut project: impl FnMut(&Event<K>) -> R) -> Vec<R> {
+        let mut events = self
+            .heap
+            .iter()
+            .map(|Reverse(HeapEntry(event))| ((event.time, event.seq), project(event)))
+            .collect::<Vec<_>>();
+        events.sort_unstable_by_key(|(key, _)| *key);
+        events.into_iter().map(|(_, value)| value).collect()
+    }
+
     /// Pop the next event and advance the clock to its timestamp.
     pub fn pop(&mut self) -> Result<Option<Event<K>>, EngineError> {
         if let Some(Reverse(HeapEntry(event))) = self.heap.peek()
@@ -196,10 +258,31 @@ impl<K> EventQueue<K> {
                 now: self.now,
             });
         }
+        let Some(Reverse(HeapEntry(head))) = self.heap.peek() else {
+            return Ok(None);
+        };
+        let clock_gap = head.time - self.now;
+        let events_popped =
+            self.stats
+                .events_popped
+                .checked_add(1)
+                .ok_or(EngineError::StatsOverflow {
+                    counter: "events_popped",
+                })?;
+        let clock_gap_cycles = self.stats.clock_gap_cycles.checked_add(clock_gap).ok_or(
+            EngineError::StatsOverflow {
+                counter: "clock_gap_cycles",
+            },
+        )?;
         let Some(Reverse(HeapEntry(event))) = self.heap.pop() else {
             return Ok(None);
         };
         self.now = event.time;
+        self.stats = QueueStats {
+            events_popped,
+            clock_gap_cycles,
+            last_clock_gap_cycles: clock_gap,
+        };
         Ok(Some(event))
     }
 }
@@ -229,6 +312,31 @@ mod tests {
             .collect();
         // t=5 first (FIFO: target 1 before 3), then t=10 (FIFO: 0 before 2).
         assert_eq!(order, vec![(5, 1), (5, 3), (10, 0), (10, 2)]);
+    }
+
+    #[test]
+    fn reports_virtual_clock_gaps_separately_from_handler_events() {
+        let mut q = EventQueue::new();
+        q.schedule_at(0, TargetId(0), Kind::IssueBatch).unwrap();
+        q.schedule_at(7, TargetId(1), Kind::MemResponse).unwrap();
+        q.schedule_at(7, TargetId(2), Kind::Drain).unwrap();
+
+        q.pop().unwrap();
+        assert_eq!(
+            q.stats(),
+            QueueStats {
+                events_popped: 1,
+                clock_gap_cycles: 0,
+                last_clock_gap_cycles: 0,
+            }
+        );
+        q.pop().unwrap();
+        assert_eq!(q.stats().clock_gap_cycles, 7);
+        assert_eq!(q.stats().last_clock_gap_cycles, 7);
+        q.pop().unwrap();
+        assert_eq!(q.stats().events_popped, 3);
+        assert_eq!(q.stats().clock_gap_cycles, 7);
+        assert_eq!(q.stats().last_clock_gap_cycles, 0);
     }
 
     #[test]

@@ -9,6 +9,7 @@ repository.workspace = true
 default = []
 campaign = ["sim-trace/campaign"]
 performance-counters = []
+reference = []
 
 [dependencies]
 sim-arch = { path = "../arch" }
@@ -16,6 +17,7 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 sim-engine = { path = "../engine" }
 sim-mem = { path = "../mem" }
+sim-semantics = { path = "../semantics" }
 sim-trace = { path = "../trace" }
 thiserror = { workspace = true }
 

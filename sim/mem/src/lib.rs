@@ -62,7 +62,8 @@ pub use l2::{
     L2AccessError, L2BuildError, L2Config, L2ConfigError, L2CounterError, L2CounterField,
     L2Counters, L2DirtyResidency, L2EventMaskAccess, L2EventMaskPreview, L2Eviction,
     L2FillCompletion, L2FillToken, L2MaskPreview, L2Model, L2OpClass, L2Outcome,
-    L2PendingSectorKey, L2Replacement, L2SetIndexError, L2SnapshotError, L2Source, SliceHash,
+    L2PendingSectorIdentity, L2PendingSectorKey, L2ProjectionError, L2Replacement, L2SetIndexError,
+    L2SnapshotError, L2Source, SliceHash,
 };
 pub use pchase_card::{
     GeometryPolicyConfig, LatencyConfig, LineCapacityConfig, MshrConfig, PchaseCard,

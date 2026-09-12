@@ -252,6 +252,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sim-arch",
+ "sim-semantics",
  "thiserror",
 ]
 
@@ -286,6 +287,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "sim-semantics"
+version = "0.0.1"
+dependencies = [
+ "serde",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
 name = "sim-sm"
 version = "0.0.1"
 dependencies = [
@@ -295,6 +305,7 @@ dependencies = [
  "sim-arch",
  "sim-engine",
  "sim-mem",
+ "sim-semantics",
  "sim-trace",
  "tempfile",
  "thiserror",
@@ -311,6 +322,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sim-arch",
+ "sim-semantics",
  "tempfile",
  "thiserror",
 ]

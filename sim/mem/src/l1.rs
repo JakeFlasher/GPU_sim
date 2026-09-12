@@ -43,6 +43,10 @@ use std::collections::{BTreeMap, HashMap};
 use std::num::NonZeroU32;
 
 use sim_arch::{ArchId, L1WriteLookupWindow};
+use sim_semantics::{
+    L1BoundaryState, L1CounterState, L1FillDueState, L1LineFillState, L1SectorFillState,
+    TYPED_STATE_SCHEMA_VERSION,
+};
 
 use crate::MemoryOrigin;
 
@@ -1005,7 +1009,7 @@ impl L1WriteLookupObserver {
     }
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct L1Cache {
     cfg: L1Config,
     /// Fully-associative LRU line pool: monotonic recency stamps.
@@ -1084,6 +1088,182 @@ impl L1Cache {
 
     pub fn arch(&self) -> ArchId {
         self.cfg.arch
+    }
+
+    /// Stable structural projection for bounded differential diagnostics. All
+    /// unordered maps are sorted before formatting; this is an observation
+    /// surface, not an authority token or a production fast path.
+    pub fn boundary_state(&self) -> String {
+        let stamp_of = self
+            .stamp_of
+            .iter()
+            .map(|(&line, &stamp)| (line, stamp))
+            .collect::<Vec<_>>();
+        let mut stamp_of = stamp_of;
+        stamp_of.sort_unstable_by_key(|entry| entry.0);
+        let sectors = self
+            .sectors
+            .iter()
+            .map(|(&line, &mask)| (line, mask))
+            .collect::<Vec<_>>();
+        let mut sectors = sectors;
+        sectors.sort_unstable_by_key(|entry| entry.0);
+        let mut line_fills = self
+            .line_fills
+            .iter()
+            .map(|(&line, &(due, seq, generation))| (line, format!("{due:?}"), seq, generation))
+            .collect::<Vec<_>>();
+        line_fills.sort_unstable_by_key(|entry| entry.0);
+        let mut sector_fills = self
+            .sector_fills
+            .iter()
+            .map(|(&(line, sector, generation), &(due, seq))| {
+                (line, sector, generation, format!("{due:?}"), seq)
+            })
+            .collect::<Vec<_>>();
+        sector_fills.sort_unstable_by_key(|entry| (entry.0, entry.1, entry.2));
+        let mut generations = self
+            .line_generations
+            .iter()
+            .map(|(&line, &generation)| (line, generation))
+            .collect::<Vec<_>>();
+        generations.sort_unstable_by_key(|entry| entry.0);
+        format!(
+            "cfg={:?};by_stamp={:?};stamp_of={:?};sectors={:?};line_fills={:?};sector_fills={:?};generations={:?};next_stamp={:?};fill_seq={:?};active_lookup={:?};min_fill_due={:?};fill_timing={:?};counters={:?};write_observer={:?}",
+            self.cfg,
+            self.by_stamp,
+            stamp_of,
+            sectors,
+            line_fills,
+            sector_fills,
+            generations,
+            self.next_stamp,
+            self.fill_seq,
+            self.active_lookup_batch,
+            self.min_fill_due,
+            self.fill_timing,
+            self.counters,
+            self.write_lookup_observer,
+        )
+    }
+
+    /// Deterministic typed projection of the physical read-state L1. The
+    /// projection carries fill generations and pending maps directly; no
+    /// debug formatting participates in the state contract.
+    pub fn typed_boundary_state(&self) -> L1BoundaryState {
+        let mut line_order = self
+            .by_stamp
+            .iter()
+            .map(|(&stamp, &line)| (stamp, line))
+            .collect::<Vec<_>>();
+        line_order.sort_unstable();
+        let mut stamp_of = self
+            .stamp_of
+            .iter()
+            .map(|(&line, &stamp)| (line, stamp))
+            .collect::<Vec<_>>();
+        stamp_of.sort_unstable();
+        let mut sectors = self
+            .sectors
+            .iter()
+            .map(|(&line, &mask)| (line, mask))
+            .collect::<Vec<_>>();
+        sectors.sort_unstable();
+        let due = |due: FillDue| match due {
+            FillDue::Timed(cycle) => L1FillDueState::Timed { cycle },
+            FillDue::Untimed => L1FillDueState::Untimed,
+        };
+        let mut line_fills = self
+            .line_fills
+            .iter()
+            .map(
+                |(&line, &(fill_due, sequence, generation))| L1LineFillState {
+                    line,
+                    due: due(fill_due),
+                    sequence,
+                    generation,
+                },
+            )
+            .collect::<Vec<_>>();
+        line_fills.sort_by_key(|fill| (fill.line, fill.generation, fill.sequence));
+        let mut sector_fills = self
+            .sector_fills
+            .iter()
+            .map(
+                |(&(line, sector, generation), &(fill_due, sequence))| L1SectorFillState {
+                    line,
+                    sector,
+                    generation,
+                    due: due(fill_due),
+                    sequence,
+                },
+            )
+            .collect::<Vec<_>>();
+        sector_fills.sort_by_key(|fill| (fill.line, fill.sector, fill.generation, fill.sequence));
+        let mut line_generations = self
+            .line_generations
+            .iter()
+            .map(|(&line, &generation)| (line, generation))
+            .collect::<Vec<_>>();
+        line_generations.sort_unstable();
+        let next_stamp = match self.next_stamp {
+            NextSequence::Available(value) => Some(value),
+            NextSequence::Exhausted => None,
+        };
+        let fill_sequence = match self.fill_seq {
+            NextSequence::Available(value) => Some(value),
+            NextSequence::Exhausted => None,
+        };
+        let active_lookup_batch = self
+            .active_lookup_batch
+            .map(|batch| (batch.first_fill_sequence, batch.pending_merges_are_hits));
+        let fill_timing = self.fill_timing.map(|timing| match timing {
+            FillTiming::Constant => "constant".to_owned(),
+            FillTiming::Event => "event".to_owned(),
+        });
+        let counters = self.counters;
+        L1BoundaryState {
+            schema_version: TYPED_STATE_SCHEMA_VERSION,
+            architecture: match self.cfg.arch {
+                ArchId::Sm86 => "sm_86".to_owned(),
+                ArchId::Sm120 => "sm_120".to_owned(),
+            },
+            line_capacity: self.cfg.line_capacity,
+            mshr_count: self.cfg.mshr_count,
+            hit_latency: self.cfg.hit_latency,
+            miss_latency: self.cfg.miss_latency,
+            line_order,
+            stamp_of,
+            sectors,
+            line_fills,
+            sector_fills,
+            line_generations,
+            next_stamp,
+            fill_sequence,
+            active_lookup_batch,
+            min_fill_due: self.min_fill_due,
+            fill_timing,
+            counters: L1CounterState {
+                hits: counters.hits,
+                misses: counters.misses,
+                merges: counters.merges,
+                pending_lookup_hits: counters.pending_lookup_hits,
+                stall_events: counters.stall_events,
+                line_fills: counters.line_fills,
+                line_alloc_misses: counters.line_alloc_misses,
+                sector_resident_misses: counters.sector_resident_misses,
+                bypass_sectors: counters.bypass_sectors,
+                bypass_atom_sectors: counters.bypass_atom_sectors,
+                untagged_sectors: counters.untagged_sectors,
+                store_sectors: counters.store_sectors,
+                store_hits: counters.store_hits,
+                store_tag_hits: counters.store_tag_hits,
+                write_lookup_hits: counters.write_lookup_hits,
+                reduction_sectors: counters.reduction_sectors,
+                reduction_hits: counters.reduction_hits,
+            },
+            write_observer_present: self.write_lookup_observer.is_some(),
+        }
     }
 
     fn mshr_in_use(&self) -> usize {
@@ -2650,6 +2830,26 @@ mod tests {
             miss_latency: 244,
         })
         .unwrap()
+    }
+
+    #[test]
+    fn typed_boundary_projection_preserves_event_fill_generation() {
+        let mut l1 = cache(4, Some(2));
+        let EvAccess::MissRequest { fill } = access_ev(&mut l1, 8, 0) else {
+            panic!("cold access must allocate a fill");
+        };
+        let state = l1.typed_boundary_state();
+        assert_eq!(state.schema_version, TYPED_STATE_SCHEMA_VERSION);
+        assert_eq!(state.line_fills.len(), 1);
+        assert_eq!(state.line_fills[0].line, 2);
+        assert_eq!(
+            state.line_fills[0].generation,
+            match fill {
+                FillKey::Line { generation, .. } => generation,
+                FillKey::Sector { .. } => panic!("cold access must allocate a line fill"),
+            }
+        );
+        assert_eq!(state.fill_timing.as_deref(), Some("event"));
     }
 
     fn assert_cache_state_eq(actual: &L1Cache, expected: &L1Cache) {

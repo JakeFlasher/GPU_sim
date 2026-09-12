@@ -47,6 +47,11 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use sim_arch::{ArchError, ArchId, CapabilityError, L2Replacement as ArchL2Replacement};
+use sim_semantics::{
+    AddressDomain, CanonicalLineKey, L2AccessDisciplineState, L2AllocationState, L2BoundaryState,
+    L2CounterState, L2GeometryState, L2SectorOwnership, L2SectorStatus, L2SetState, L2StateError,
+    L2WayState, TYPED_STATE_SCHEMA_VERSION,
+};
 
 /// Number of 32 B sectors per 128 B line (fixed physical granularity;
 /// the `u8` way masks below hold exactly these four bits).
@@ -232,6 +237,14 @@ pub enum L2SnapshotError {
         #[source]
         source: std::collections::TryReserveError,
     },
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum L2ProjectionError {
+    #[error("typed L2 projection is invalid: {0}")]
+    State(#[from] L2StateError),
+    #[error("typed L2 projection arithmetic overflowed")]
+    Overflow,
 }
 
 /// The one write policy the store path implements (stores allocate in
@@ -545,6 +558,25 @@ pub struct L2PendingSectorKey {
     sector: u8,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct L2PendingSectorIdentity {
+    pub line_id: i64,
+    pub generation: u64,
+    pub sector: u8,
+}
+
+impl L2PendingSectorKey {
+    /// Stable semantic identity for diagnostics. The process-local model owner
+    /// remains private and is intentionally excluded from this projection.
+    pub const fn boundary_identity(self) -> L2PendingSectorIdentity {
+        L2PendingSectorIdentity {
+            line_id: self.line_id,
+            generation: self.generation.0,
+            sector: self.sector,
+        }
+    }
+}
+
 /// Opaque capability for completing sectors fetched by one event-mode read.
 /// Fields are private so callers can route but cannot mint or widen a fill.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -559,6 +591,10 @@ impl L2FillToken {
     /// Sectors whose pending bits this capability may complete.
     pub const fn sector_mask(self) -> u8 {
         self.sector_mask
+    }
+
+    pub const fn boundary_identity(self) -> (i64, u64, u8) {
+        (self.line_id, self.generation.0, self.sector_mask)
     }
 
     /// Identity used to register one authorized sector's pending ready time.
@@ -1078,6 +1114,44 @@ fn require_counter_arch(expected: ArchId, counters: &L2Counters) -> Result<(), L
     Ok(())
 }
 
+fn architecture_name(arch: ArchId) -> &'static str {
+    match arch {
+        ArchId::Sm86 => "sm_86",
+        ArchId::Sm120 => "sm_120",
+    }
+}
+
+fn replacement_name(replacement: L2Replacement) -> &'static str {
+    match replacement {
+        L2Replacement::Lru => "lru",
+        L2Replacement::Srrip => "srrip",
+        L2Replacement::Bip => "bip",
+    }
+}
+
+fn slice_hash_name(hash: SliceHash) -> &'static str {
+    match hash {
+        SliceHash::LineMod => "line_mod",
+        SliceHash::SectorMod => "sector_mod",
+        SliceHash::XorFolded => "xor_folded",
+        SliceHash::KnuthMult => "knuth_mult",
+        SliceHash::ShiftMod => "shift_mod",
+        SliceHash::BitReverse => "bit_reverse",
+    }
+}
+
+fn canonical_line_sort_key(line: &CanonicalLineKey) -> (u8, u64, u64) {
+    match line {
+        CanonicalLineKey::VirtualAbsolute { line_id } => (0, *line_id as u64, 0),
+        CanonicalLineKey::AllocationRelative {
+            allocation_id,
+            line_offset,
+        } => (1, u64::from(*allocation_id), *line_offset),
+        CanonicalLineKey::Physical { line_id } => (2, *line_id, 0),
+        CanonicalLineKey::Unknown { line_id } => (3, line_id.map_or(0, |value| value as u64), 0),
+    }
+}
+
 impl L2Model {
     pub fn new(cfg: L2Config) -> Result<Self, L2BuildError> {
         cfg.validate()?;
@@ -1099,6 +1173,167 @@ impl L2Model {
             next_generation: NextAllocationGeneration::Available(0),
             access_discipline: None,
         })
+    }
+
+    /// Stable structural projection for bounded differential diagnostics.
+    /// Only occupied sets are emitted; empty geometry does not inflate a
+    /// reference trace. Process-local owner identities are intentionally
+    /// omitted because they do not affect modeled ordering.
+    pub fn boundary_state(&self) -> String {
+        let occupied = self
+            .sets
+            .iter()
+            .enumerate()
+            .filter(|(_, ways)| !ways.is_empty())
+            .map(|(set, ways)| (set, ways))
+            .collect::<Vec<_>>();
+        format!(
+            "cfg={:?};num_sets={};clock={};bip_counter={};sets={:?};counters={:?};observer_lookup=({},{});next_generation={:?};discipline={:?}",
+            self.cfg,
+            self.num_sets,
+            self.clock,
+            self.bip_counter,
+            occupied,
+            self.counters,
+            self.observer_lookup_hits,
+            self.observer_lookup_requests,
+            self.next_generation,
+            self.access_discipline,
+        )
+    }
+
+    /// Return a deterministic typed projection of the shared cache state.
+    ///
+    /// The cache model itself knows the line/set/way trajectory but does not
+    /// know which SM response token produced or consumed a pending sector.
+    /// Those requester edges are joined by `sim-sm` at the system boundary;
+    /// this method therefore marks event-discipline ownership incomplete while
+    /// still exposing every cache-resident field needed by that join.
+    pub fn typed_boundary_state(&self) -> Result<L2BoundaryState, L2ProjectionError> {
+        self.validate_counter_architecture()
+            .map_err(|_| L2ProjectionError::Overflow)?;
+        let sets_per_slice = self.num_sets;
+        let mut sets = Vec::new();
+        for (set_key, ways) in self.sets.iter().enumerate() {
+            if ways.is_empty() {
+                continue;
+            }
+            let set_key = u64::try_from(set_key).map_err(|_| L2ProjectionError::Overflow)?;
+            let slice =
+                u32::try_from(set_key / sets_per_slice).map_err(|_| L2ProjectionError::Overflow)?;
+            let set = set_key % sets_per_slice;
+            let mut projected_ways = Vec::with_capacity(ways.len());
+            for way in ways {
+                let line = CanonicalLineKey::VirtualAbsolute { line_id: way.tag };
+                projected_ways.push(L2WayState {
+                    line,
+                    valid_mask: way.mask,
+                    dirty_mask: way.dirty_mask,
+                    pending_mask: way.pending_mask,
+                    recency: way.recency,
+                    generation: way.generation.map(|value| value.0),
+                });
+            }
+            sets.push(L2SetState {
+                slice,
+                set,
+                ways: projected_ways,
+            });
+        }
+
+        let counters = self.counters;
+        let counter_state = L2CounterState {
+            hits: counters.hits,
+            misses: counters.misses,
+            lookup_hits: counters.lookup_hits,
+            lookup_requests: counters.lookup_requests,
+            line_misses: counters.line_misses,
+            sector_fill_misses: counters.sector_fill_misses,
+            write_tag_hits: counters.write_tag_hits,
+        };
+        let mut allocations = Vec::new();
+        for set in &sets {
+            for way in &set.ways {
+                let Some(generation) = way.generation else {
+                    continue;
+                };
+                let mut sectors = Vec::new();
+                for sector in 0..L2_SECTORS_PER_LINE as u8 {
+                    let bit = 1_u8 << sector;
+                    let status = if way.pending_mask & bit != 0 {
+                        Some(L2SectorStatus::Pending)
+                    } else if way.dirty_mask & bit != 0 {
+                        Some(L2SectorStatus::Dirty)
+                    } else if way.valid_mask & bit != 0 {
+                        Some(L2SectorStatus::Valid)
+                    } else {
+                        None
+                    };
+                    if let Some(status) = status {
+                        sectors.push(L2SectorOwnership {
+                            sector,
+                            status,
+                            producer: None,
+                            consumers: Vec::new(),
+                            ready_at: None,
+                        });
+                    }
+                }
+                allocations.push(L2AllocationState {
+                    line: way.line.clone(),
+                    generation,
+                    sectors,
+                });
+            }
+        }
+        allocations.sort_by(|left, right| {
+            canonical_line_sort_key(&left.line)
+                .cmp(&canonical_line_sort_key(&right.line))
+                .then(left.generation.cmp(&right.generation))
+        });
+        let next_generation = match self.next_generation {
+            NextAllocationGeneration::Available(value) => Some(value),
+            NextAllocationGeneration::Exhausted => None,
+        };
+        let access_discipline = self.access_discipline.map(|discipline| match discipline {
+            L2AccessDiscipline::Immediate => L2AccessDisciplineState::Immediate,
+            L2AccessDiscipline::Event => L2AccessDisciplineState::Event,
+        });
+        let event_discipline = matches!(self.access_discipline, Some(L2AccessDiscipline::Event));
+        let state = L2BoundaryState {
+            schema_version: TYPED_STATE_SCHEMA_VERSION,
+            architecture: architecture_name(self.cfg.arch).to_owned(),
+            geometry: L2GeometryState {
+                architecture: architecture_name(self.cfg.arch).to_owned(),
+                capacity_bytes: self.cfg.capacity_bytes,
+                line_bytes: self.cfg.line_bytes,
+                sector_bytes: self.cfg.sector_bytes,
+                num_slices: self.cfg.num_slices,
+                sets_per_slice,
+                associativity: self.cfg.associativity,
+                replacement: replacement_name(self.cfg.replacement).to_owned(),
+                slice_hash: slice_hash_name(self.cfg.slice_hash).to_owned(),
+            },
+            address_domain: AddressDomain::VirtualAbsolute,
+            clock: self.clock,
+            bip_counter: self.bip_counter,
+            access_discipline,
+            counters: counter_state,
+            observer_lookup_hits: self.observer_lookup_hits,
+            observer_lookup_requests: self.observer_lookup_requests,
+            next_generation,
+            sets,
+            allocations,
+            request_owners: Vec::new(),
+            ownership_complete: !event_discipline,
+            unknown_state: if event_discipline {
+                vec!["requester_ownership_join_pending".to_owned()]
+            } else {
+                Vec::new()
+            },
+        };
+        state.validate()?;
+        Ok(state)
     }
 
     pub fn config(&self) -> &L2Config {
@@ -3143,6 +3378,22 @@ mod tests {
             replacement: L2Replacement::Lru,
             slice_hash: SliceHash::LineMod,
         }
+    }
+
+    #[test]
+    fn typed_boundary_projection_normalizes_event_cache_state() {
+        let mut l2 = L2Model::new(cfg(128 * 4, 2, 1)).unwrap();
+        let access = ev_read(&mut l2, 7, 0b0011);
+        let token = access.fill.expect("read miss creates a fill token");
+        let state = l2.typed_boundary_state().unwrap();
+        assert_eq!(state.schema_version, TYPED_STATE_SCHEMA_VERSION);
+        assert_eq!(state.address_domain, AddressDomain::VirtualAbsolute);
+        assert!(!state.ownership_complete);
+        assert_eq!(state.unknown_state, ["requester_ownership_join_pending"]);
+        assert_eq!(state.allocations.len(), 1);
+        assert_eq!(state.allocations[0].generation, token.boundary_identity().1);
+        assert_eq!(state.allocations[0].sectors.len(), 2);
+        assert!(state.validate().is_ok());
     }
 
     /// Pinned against the Python registry (`SLICE_HASH_REGISTRY`) for

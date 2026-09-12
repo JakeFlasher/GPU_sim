@@ -12,6 +12,7 @@ path = "src/lib.rs"
 [features]
 default = []
 performance-counters = ["sim-sm/performance-counters"]
+reference = ["sim-sm/reference"]
 
 [[bin]]
 name = "sim-run"

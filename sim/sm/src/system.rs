@@ -40,6 +40,10 @@
 use std::cell::RefCell;
 use std::cmp::Reverse;
 use std::collections::{BTreeMap, BinaryHeap, HashMap};
+#[cfg(feature = "reference")]
+use std::fs::File;
+#[cfg(feature = "reference")]
+use std::io::{self, BufWriter, Write};
 use std::num::NonZeroU64;
 use std::rc::Rc;
 
@@ -111,6 +115,12 @@ use sim_engine::{EngineError, EventQueue, TargetId};
 use sim_mem::{
     L1Config, L2Counters, L2DirtyResidency, L2EventMaskPreview, L2Eviction, L2FillToken, L2Model,
     L2PendingSectorKey, L2Source, MemoryOrigin,
+};
+#[cfg(feature = "reference")]
+use sim_semantics::{
+    PowerBoundaryState, PowerStateError, QueueBoundaryState, TYPED_STATE_SCHEMA_VERSION,
+    TypedCoreBoundaryState, TypedEventBoundaryRecord, TypedEventIdentity, TypedEventPayload,
+    TypedObservationContract, TypedPendingEvent,
 };
 
 /// Per-actor pending due-times with the one choreography the driver
@@ -405,6 +415,8 @@ impl L2SourceSplit {
     }
 }
 
+#[cfg(feature = "reference")]
+use crate::issue::AdvanceDiagnostics;
 use crate::issue::{
     AccessKind, AdmissionRequestWitness, Advance, BlockReplay, IssueError, IssueModelParams,
     MemRequest, MemoryAdmissionCandidate, MemoryAdmissionCandidateState, MemoryOperation,
@@ -476,6 +488,12 @@ pub enum SystemCounterError {
 
 #[derive(Debug, thiserror::Error)]
 pub enum SystemError {
+    #[cfg(feature = "reference")]
+    #[error("reference trace: {0}")]
+    ReferenceTrace(#[from] ReferenceTraceError),
+    #[cfg(feature = "reference")]
+    #[error("typed power state: {0}")]
+    Power(#[from] PowerStateError),
     #[error(transparent)]
     Counters(#[from] SystemCounterError),
     #[error(transparent)]
@@ -835,6 +853,379 @@ enum Ev {
     },
 }
 
+#[cfg(feature = "reference")]
+fn event_name(event: &Ev) -> &'static str {
+    match event {
+        Ev::SmWake => "sm_wake",
+        Ev::L2Access(_) => "l2_access",
+        Ev::L2AccessBatch(_) => "l2_access_batch",
+        Ev::L2Fill(_) => "l2_fill",
+        Ev::AtomicCompletion => "atomic_completion",
+        Ev::MemoryWriteAck(_) => "memory_write_ack",
+        Ev::MemResponse { .. } => "memory_response",
+    }
+}
+
+#[cfg(feature = "reference")]
+fn reply_kind(reply: ReplyTo) -> &'static str {
+    match reply {
+        ReplyTo::L1Fill { .. } => "l1_fill",
+        ReplyTo::Warp { .. } => "warp",
+        ReplyTo::AsyncCopy { .. } => "async_copy",
+        ReplyTo::None => "none",
+    }
+}
+
+#[cfg(feature = "reference")]
+fn typed_event_payload(event: &Ev) -> TypedEventPayload {
+    match event {
+        Ev::SmWake => TypedEventPayload::SmWake,
+        Ev::L2Access(request) => TypedEventPayload::L2Access {
+            sector_id: request.sector_id,
+            sector_mask: request.sector_mask,
+            source: format!("{:?}", request.source),
+            operation: format!("{:?}", request.operation),
+            reply_kind: reply_kind(request.reply).to_owned(),
+        },
+        Ev::L2AccessBatch(requests) => TypedEventPayload::L2AccessBatch {
+            request_count: u32::try_from(requests.len()).unwrap_or(u32::MAX),
+        },
+        Ev::L2Fill(fill) => {
+            let (line_id, generation, sector_mask) = fill.boundary_identity();
+            TypedEventPayload::L2Fill {
+                line_id,
+                generation,
+                sector_mask,
+            }
+        }
+        Ev::AtomicCompletion => TypedEventPayload::AtomicCompletion,
+        Ev::MemoryWriteAck(_) => TypedEventPayload::MemoryWriteAck,
+        Ev::MemResponse { reply, fill } => TypedEventPayload::MemoryResponse {
+            reply_kind: reply_kind(*reply).to_owned(),
+            has_fill: fill.is_some(),
+        },
+    }
+}
+
+#[cfg(feature = "reference")]
+#[derive(Debug, thiserror::Error)]
+pub enum ReferenceTraceError {
+    #[error("I/O failed: {0}")]
+    Io(#[from] io::Error),
+    #[error("JSON encoding failed: {0}")]
+    Json(#[from] serde_json::Error),
+    #[error("record limit {limit} reached")]
+    RecordLimit { limit: u64 },
+    #[error("SIM_SM_REFERENCE_MAX_RECORDS must be an integer greater than 1, found {value:?}")]
+    InvalidLimit { value: String },
+    #[error("typed L2 projection failed: {0}")]
+    L2Projection(#[from] sim_mem::L2ProjectionError),
+    #[error("typed power projection failed: {0}")]
+    Power(#[from] PowerStateError),
+}
+
+#[cfg(feature = "reference")]
+struct ReferenceTrace {
+    writer: BufWriter<File>,
+    records: u64,
+    max_records: u64,
+}
+
+#[cfg(feature = "reference")]
+impl ReferenceTrace {
+    fn from_env() -> Result<Option<Self>, ReferenceTraceError> {
+        let Some(path) = std::env::var_os("SIM_SM_REFERENCE_TRACE") else {
+            return Ok(None);
+        };
+        let max_records = match std::env::var("SIM_SM_REFERENCE_MAX_RECORDS") {
+            Ok(value) => value
+                .parse::<u64>()
+                .ok()
+                .filter(|&value| value > 1)
+                .ok_or(ReferenceTraceError::InvalidLimit { value })?,
+            Err(std::env::VarError::NotPresent) => 100_000,
+            Err(std::env::VarError::NotUnicode(value)) => {
+                return Err(ReferenceTraceError::InvalidLimit {
+                    value: value.to_string_lossy().into_owned(),
+                });
+            }
+        };
+        let mut trace = Self {
+            writer: BufWriter::new(File::create(path)?),
+            records: 0,
+            max_records,
+        };
+        trace.write(&serde_json::json!({
+            "kind": "header",
+            "schema_version": sim_semantics::BOUNDARY_SCHEMA_VERSION,
+            "typed_state_schema_version": TYPED_STATE_SCHEMA_VERSION,
+            "typed_l2_power_contract": TypedObservationContract::cycle_exact_power(),
+            "typed_root_schema": "typed_event_boundary_v2",
+            "mode": std::env::var("SIM_SM_REFERENCE_MODE").unwrap_or_else(|_| "event".to_owned()),
+            "state_projection_complete": false,
+            "state_projection_incomplete_reason": "legacy_core_debug_projections",
+            "observation_contract": "boundary_projection",
+        }))?;
+        Ok(Some(trace))
+    }
+
+    fn write<T: serde::Serialize>(&mut self, value: &T) -> Result<(), ReferenceTraceError> {
+        if self.records.saturating_add(1) >= self.max_records {
+            return Err(ReferenceTraceError::RecordLimit {
+                limit: self.max_records,
+            });
+        }
+        serde_json::to_writer(&mut self.writer, value)?;
+        self.writer.write_all(b"\n")?;
+        self.records += 1;
+        Ok(())
+    }
+
+    fn record_event(
+        &mut self,
+        time: u64,
+        sequence: u64,
+        target: u32,
+        event: &'static str,
+        event_payload: String,
+        typed_payload: TypedEventPayload,
+        queue: &EventQueue<Ev>,
+        l2: &L2Model,
+        cores: &[SmCore<'_>],
+        sm_ids: &[i32],
+        pending_l2_ready: &PendingL2Ready,
+        power: &PowerBoundaryState,
+    ) -> Result<(), ReferenceTraceError> {
+        let snapshots = cores
+            .iter()
+            .map(SmCore::boundary_snapshot)
+            .collect::<Vec<_>>();
+        let typed_l1_states = cores.iter().map(SmCore::typed_l1_state).collect::<Vec<_>>();
+        let typed_async_copy_states = cores
+            .iter()
+            .map(SmCore::typed_async_copy_states)
+            .collect::<Vec<_>>();
+        let typed_memory_pipeline_states = cores
+            .iter()
+            .map(SmCore::typed_memory_pipeline_state)
+            .collect::<Vec<_>>();
+        let typed_scalar_pipeline_states = cores
+            .iter()
+            .map(SmCore::typed_scalar_pipeline_state)
+            .collect::<Vec<_>>();
+        let typed_front_end_states = cores
+            .iter()
+            .map(SmCore::typed_front_end_state)
+            .collect::<Vec<_>>();
+        let pending = queue.pending_projected(|queued| TypedPendingEvent {
+            time: queued.time,
+            sequence: queued.seq,
+            target: queued.target.0,
+            payload: typed_event_payload(&queued.kind),
+        });
+        let typed_queue = QueueBoundaryState {
+            depth: u64::try_from(queue.len()).unwrap_or(u64::MAX),
+            next_event_time: queue.peek_time(),
+            pending,
+        };
+        let mut typed_l2 = l2.typed_boundary_state()?;
+        let mut owners_by_core = Vec::with_capacity(cores.len());
+        for (ix, core) in cores.iter().enumerate() {
+            let sm_id = sm_ids
+                .get(ix)
+                .copied()
+                .and_then(|value| u32::try_from(value).ok())
+                .unwrap_or(u32::MAX);
+            let owners = core.typed_l2_request_owners(sm_id);
+            typed_l2.request_owners.extend(owners.clone());
+            owners_by_core.push(owners);
+        }
+        for (line_id, generation, sector, ready_at) in pending_l2_ready.typed_entries() {
+            for allocation in &mut typed_l2.allocations {
+                let matches_line = matches!(
+                    &allocation.line,
+                    sim_semantics::CanonicalLineKey::VirtualAbsolute { line_id: candidate }
+                        if *candidate == line_id
+                );
+                if matches_line && allocation.generation == generation {
+                    if let Some(owner) = allocation
+                        .sectors
+                        .iter_mut()
+                        .find(|owner| owner.sector == sector)
+                    {
+                        owner.ready_at = Some(ready_at);
+                    }
+                }
+            }
+        }
+        typed_l2.request_owners.sort_by(|left, right| {
+            (
+                left.request.sm_id,
+                left.request.warp_slot,
+                left.request.instruction,
+                left.request.sector_index,
+                &left.request.response_kind,
+            )
+                .cmp(&(
+                    right.request.sm_id,
+                    right.request.warp_slot,
+                    right.request.instruction,
+                    right.request.sector_index,
+                    &right.request.response_kind,
+                ))
+        });
+        let owners = typed_l2.request_owners.clone();
+        let mut ownership_unknown = Vec::new();
+        for allocation in &mut typed_l2.allocations {
+            for sector in &mut allocation.sectors {
+                if !matches!(sector.status, sim_semantics::L2SectorStatus::Pending) {
+                    continue;
+                }
+                let bit = 1_u8 << sector.sector;
+                let mut consumers = owners
+                    .iter()
+                    .filter(|owner| owner.line == allocation.line && owner.sector_mask & bit != 0)
+                    .map(|owner| owner.request.clone())
+                    .collect::<Vec<_>>();
+                consumers.sort_by(|left, right| {
+                    (
+                        left.sm_id,
+                        left.warp_slot,
+                        left.instruction,
+                        left.sector_index,
+                        &left.response_kind,
+                    )
+                        .cmp(&(
+                            right.sm_id,
+                            right.warp_slot,
+                            right.instruction,
+                            right.sector_index,
+                            &right.response_kind,
+                        ))
+                });
+                sector.consumers = consumers;
+                sector.producer = sector
+                    .consumers
+                    .iter()
+                    .find(|request| request.response_kind == "l1_fill")
+                    .cloned();
+                if sector.producer.is_none() {
+                    ownership_unknown.push(format!(
+                        "pending_sector_without_producer:{}:{}:{}",
+                        format!("{:?}", allocation.line),
+                        allocation.generation,
+                        sector.sector
+                    ));
+                }
+            }
+        }
+        typed_l2.unknown_state = ownership_unknown;
+        typed_l2.ownership_complete = typed_l2.unknown_state.is_empty();
+        typed_l2
+            .validate()
+            .map_err(sim_mem::L2ProjectionError::from)?;
+        let typed_l2_power_completeness =
+            TypedObservationContract::cycle_exact_power().validate(&typed_l2, power);
+        let typed_cores = snapshots
+            .iter()
+            .enumerate()
+            .map(|(ix, snapshot)| TypedCoreBoundaryState {
+                sm_id: sm_ids
+                    .get(ix)
+                    .copied()
+                    .and_then(|value| u32::try_from(value).ok())
+                    .unwrap_or(u32::MAX),
+                cycle: snapshot.cycle,
+                issued: snapshot.issued,
+                resident_warps: snapshot.resident_warps,
+                resident_shared_memory_bytes: snapshot.resident_shared_memory_bytes,
+                unfinished_warps: snapshot.unfinished_warps,
+                next_block: snapshot.next_block,
+                hold: snapshot.hold,
+                subcore_warps: snapshot.subcore_warps.clone(),
+                outstanding_responses: snapshot.outstanding_responses,
+                barrier_pipe_ready: snapshot.barrier_pipe_ready,
+                tensor_pipe_ready: snapshot.tensor_pipe_ready,
+                ldgsts_destination_pipe_ready: snapshot.ldgsts_destination_pipe_ready,
+                warp_states: snapshot.warp_states.clone(),
+                block_states: snapshot.block_states.clone(),
+                l1: typed_l1_states[ix].clone(),
+                front_end: typed_front_end_states[ix].clone(),
+                memory_pipeline: typed_memory_pipeline_states[ix].clone(),
+                scalar_pipeline: typed_scalar_pipeline_states[ix].clone(),
+                async_copy: typed_async_copy_states[ix].clone(),
+                response_owners: owners_by_core[ix].clone(),
+            })
+            .collect::<Vec<_>>();
+        let typed_boundary = TypedEventBoundaryRecord {
+            schema_version: TYPED_STATE_SCHEMA_VERSION,
+            contract: TypedObservationContract::cycle_exact_power(),
+            event: TypedEventIdentity {
+                time,
+                sequence,
+                target,
+                payload: typed_payload.clone(),
+            },
+            queue: typed_queue.clone(),
+            cores: typed_cores,
+            shared_l2: typed_l2.clone(),
+            power: power.clone(),
+            completeness: typed_l2_power_completeness.clone(),
+        };
+        self.write(&serde_json::json!({
+            "kind": "event",
+            "time": time,
+            "sequence": sequence,
+            "target": target,
+            "event": event,
+            "event_payload": event_payload,
+            "typed_event_payload": typed_payload,
+            "queue_depth": queue.len(),
+            "next_event_time": queue.peek_time(),
+            "pending_event_order": queue.pending_order(),
+            "pending_event_payloads": queue.pending_debug(),
+            "typed_queue": typed_queue,
+            "l2_state": l2.boundary_state(),
+            "typed_l2_state": typed_l2,
+            "typed_l1_states": typed_l1_states,
+            "typed_async_copy_states": typed_async_copy_states,
+            "typed_memory_pipeline_states": typed_memory_pipeline_states,
+            "typed_scalar_pipeline_states": typed_scalar_pipeline_states,
+            "typed_front_end_states": typed_front_end_states,
+            "typed_boundary": typed_boundary,
+            "power_state": power,
+            "typed_l2_power_completeness": typed_l2_power_completeness,
+            "cores": snapshots,
+        }))
+    }
+
+    fn finish(
+        mut self,
+        queue: sim_engine::QueueStats,
+        power: &PowerBoundaryState,
+    ) -> Result<(), ReferenceTraceError> {
+        // The footer is best-effort metadata; reserve one record for it by
+        // requiring callers to choose a positive limit and failing before the
+        // next event once the limit is exhausted.
+        if self.records < self.max_records {
+            serde_json::to_writer(
+                &mut self.writer,
+                &serde_json::json!({
+                    "kind": "footer",
+                    "records_before_footer": self.records,
+                    "queue_events_popped": queue.events_popped,
+                    "queue_clock_gap_cycles": queue.clock_gap_cycles,
+                    "power_state": power,
+                    "state_projection_complete": false,
+                }),
+            )?;
+            self.writer.write_all(b"\n")?;
+        }
+        self.writer.flush()?;
+        Ok(())
+    }
+}
+
 enum L2AccessEventRequests {
     Single([MemRequest; 1]),
     Batch(Box<[MemRequest]>),
@@ -1058,6 +1449,25 @@ impl PendingL2Ready {
 
     fn len(&self) -> usize {
         self.0.len()
+    }
+
+    #[cfg(feature = "reference")]
+    fn typed_entries(&self) -> Vec<(i64, u64, u8, u64)> {
+        let mut entries = self
+            .0
+            .iter()
+            .map(|(key, &ready)| {
+                let identity = key.boundary_identity();
+                (
+                    identity.line_id,
+                    identity.generation,
+                    identity.sector,
+                    ready,
+                )
+            })
+            .collect::<Vec<_>>();
+        entries.sort_unstable();
+        entries
     }
 }
 
@@ -1843,6 +2253,10 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates(
     let mut performance = std::env::var_os("SIM_RUN_PERFORMANCE_COUNTERS")
         .is_some()
         .then(EventPerformanceCounters::default);
+    #[cfg(feature = "reference")]
+    let mut reference_trace = ReferenceTrace::from_env()?;
+    #[cfg(feature = "reference")]
+    let mut power_state = PowerBoundaryState::activity_only(None, None);
     // The caller owns `l2` across this boundary. Complete all replay admission
     // and event-system setup first so their established typed errors keep
     // precedence over snapshot allocation failure. Then replay the entire
@@ -1853,7 +2267,15 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates(
     let mut lookup_observer_requests = 0_u64;
     let mut staged_l2 = l2.try_snapshot()?;
     while let Some(ev) = queue.pop()? {
+        #[cfg(feature = "reference")]
+        let reference_event_name = event_name(&ev.kind);
+        #[cfg(feature = "reference")]
+        let reference_event_payload = format!("{:?}", &ev.kind);
+        #[cfg(feature = "reference")]
+        let reference_typed_event_payload = typed_event_payload(&ev.kind);
         let is_write_ack = matches!(&ev.kind, Ev::MemoryWriteAck(_));
+        #[cfg(feature = "reference")]
+        power_state.advance_to(ev.time)?;
         #[cfg(feature = "performance-counters")]
         if let Some(performance) = performance.as_mut() {
             let queue_depth_before_pop =
@@ -2433,6 +2855,25 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates(
         if !is_write_ack {
             sm_active_terminal_event_time = Some(ev.time);
         }
+        #[cfg(feature = "reference")]
+        power_state.record_event(reference_event_name)?;
+        #[cfg(feature = "reference")]
+        if let Some(trace) = reference_trace.as_mut() {
+            trace.record_event(
+                ev.time,
+                ev.seq,
+                ev.target.0,
+                reference_event_name,
+                reference_event_payload,
+                reference_typed_event_payload,
+                &queue,
+                &staged_l2,
+                &cores,
+                &sm_ids,
+                &pending_l2_ready,
+                &power_state,
+            )?;
+        }
     }
 
     if pending_l2_ready.len() != 0 {
@@ -2481,6 +2922,8 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates(
 
     let mut per_sm = BTreeMap::new();
     let mut unmodeled_tails = TailFlags::default();
+    #[cfg(feature = "reference")]
+    let mut advance_diagnostics = AdvanceDiagnostics::default();
     for (ix, core) in cores.iter().enumerate() {
         let pending_write_acks = core.pending_memory_write_acks();
         if pending_write_acks != 0 {
@@ -2504,15 +2947,45 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates(
         }
         unmodeled_tails = unmodeled_tails.union(sm_result.unmodeled_tails);
         per_sm.insert(sm_ids[ix], sm_result);
+        #[cfg(feature = "reference")]
+        {
+            let current = core.advance_diagnostics();
+            advance_diagnostics.calls = advance_diagnostics
+                .calls
+                .checked_add(current.calls)
+                .ok_or(SystemError::CounterOverflow {
+                    counter: "reference advance calls",
+                })?;
+            advance_diagnostics.local_cycle_steps = advance_diagnostics
+                .local_cycle_steps
+                .checked_add(current.local_cycle_steps)
+                .ok_or(SystemError::CounterOverflow {
+                    counter: "reference local cycle steps",
+                })?;
+            advance_diagnostics.idle_jumps = advance_diagnostics
+                .idle_jumps
+                .checked_add(current.idle_jumps)
+                .ok_or(SystemError::CounterOverflow {
+                    counter: "reference idle jumps",
+                })?;
+            advance_diagnostics.skipped_cycles = advance_diagnostics
+                .skipped_cycles
+                .checked_add(current.skipped_cycles)
+                .ok_or(SystemError::CounterOverflow {
+                    counter: "reference skipped cycles",
+                })?;
+        }
     }
     let l2_counters = *checked_l2_counters(arch, &staged_l2)?;
     #[cfg(feature = "performance-counters")]
     if let Some(performance) = performance {
+        let queue_stats = queue.stats();
         eprintln!(
             "SIM_EVENT_PERF events_processed={} queue_events_processed={} sm_wake={} \
              l2_access={} l2_access_batches={} l2_access_batched_requests={} l2_fill={} \
              atomic_completion={} memory_write_ack={} mem_response={} same_cycle_after_first={} \
-             queue_same_cycle_after_first={} maximum_queue_depth={}",
+             queue_same_cycle_after_first={} maximum_queue_depth={} queue_clock_gap_cycles={} \
+             queue_last_clock_gap_cycles={}",
             performance.processed,
             performance.queue_events_processed,
             performance.sm_wake,
@@ -2526,7 +2999,29 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates(
             performance.same_cycle_after_first,
             performance.queue_same_cycle_after_first,
             performance.maximum_queue_depth,
+            queue_stats.clock_gap_cycles,
+            queue_stats.last_clock_gap_cycles,
         );
+    }
+    #[cfg(feature = "reference")]
+    if std::env::var_os("SIM_SM_REFERENCE_MODE").is_some() {
+        let mode =
+            if std::env::var_os("SIM_SM_REFERENCE_MODE").is_some_and(|value| value == "dense") {
+                "dense"
+            } else {
+                "event"
+            };
+        eprintln!(
+            "SIM_REFERENCE_PERF mode={mode} calls={} local_cycle_steps={} idle_jumps={} skipped_cycles={}",
+            advance_diagnostics.calls,
+            advance_diagnostics.local_cycle_steps,
+            advance_diagnostics.idle_jumps,
+            advance_diagnostics.skipped_cycles,
+        );
+    }
+    #[cfg(feature = "reference")]
+    if let Some(trace) = reference_trace {
+        trace.finish(queue.stats(), &power_state)?;
     }
     dram_stats = dram_stats.with_terminal_l2_dirty_residency(staged_l2.dirty_residency())?;
     let result = SystemResult {

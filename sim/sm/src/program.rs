@@ -981,6 +981,82 @@ mod tests {
     }
 
     #[test]
+    fn causal_frontier_rejects_block_barrier_schedule_entry() {
+        let schedules = build_schedules(&exec_info(&[16]), &sidecar(&[16])).unwrap();
+        let error = crate::causal_frontier::CausalFrontierInstruction::from_schedule(
+            &schedules[&1],
+            16,
+            0,
+            0,
+            1,
+            1,
+            true,
+            false,
+        )
+        .unwrap_err();
+        assert_eq!(
+            error,
+            crate::causal_frontier::CausalFrontierError::UnsupportedOperationClass {
+                pc: 16,
+                class: OpClass::BlockBarrier,
+            }
+        );
+    }
+
+    #[test]
+    fn causal_frontier_rejects_memory_schedule_entry() {
+        let mut controls = sidecar(&[0]);
+        controls
+            .functions
+            .get_mut("my_kernel")
+            .expect("test function")
+            .by_pc
+            .get_mut(&0)
+            .expect("test pc")
+            .opcode_text = "LDG.E R0, [R2.64]".to_owned();
+        let schedules = build_schedules(&exec_info(&[0]), &controls).unwrap();
+        let error = crate::causal_frontier::CausalFrontierInstruction::from_schedule(
+            &schedules[&1],
+            0,
+            0,
+            0,
+            1,
+            1,
+            true,
+            false,
+        )
+        .unwrap_err();
+        assert_eq!(
+            error,
+            crate::causal_frontier::CausalFrontierError::UnsupportedMemoryRole { pc: 0 }
+        );
+    }
+
+    #[test]
+    fn causal_frontier_rejects_uncarded_scalar_latency() {
+        let schedules = build_schedules(&exec_info(&[0]), &sidecar(&[0])).unwrap();
+        let error = crate::causal_frontier::CausalFrontierInstruction::from_schedule(
+            &schedules[&1],
+            0,
+            0,
+            0,
+            1,
+            1,
+            true,
+            false,
+        )
+        .unwrap_err();
+        assert_eq!(
+            error,
+            crate::causal_frontier::CausalFrontierError::TimingMismatch {
+                pc: 0,
+                expected: 4,
+                got: 1,
+            }
+        );
+    }
+
+    #[test]
     fn operand_projection_gap_is_retained_with_scalar_execution_timing() {
         let mut sc = sidecar(&[0]);
         let instruction = sc

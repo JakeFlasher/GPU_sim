@@ -93,6 +93,14 @@ use sim_mem::{
     L1WriteLookupObserverPlan, L2OpClass, L2Source, LdgstsL1Policy, MemRole, MemoryOrigin,
     decode_async_copy_completion, opcode_head,
 };
+#[cfg(feature = "reference")]
+use sim_semantics::{
+    AsyncCopyBoundaryState, AsyncGroupBoundaryState, BlockBoundaryState, BoundarySnapshot,
+    CanonicalLineKey, InstructionCacheEntryState, InstructionCacheState,
+    InstructionFrontEndBoundaryState, InstructionStreamLineState, InstructionStreamState,
+    L1BoundaryState, L2RequestKey, L2RequestOwner, L2RequestState, MemoryPipelineBoundaryState,
+    ScalarPipelineBoundaryState, WarpBoundaryState,
+};
 
 use crate::control_bits::{ControlDomainError, DepBarrier, WaitMask};
 use crate::program::{FunctionSchedule, IssueSlot, OpClass, PipelineClass};
@@ -1044,6 +1052,9 @@ pub(crate) enum SmMemMode {
 pub enum IssueError {
     #[error("issue model is unsupported for deployment architecture {arch}")]
     ArchitectureUnsupported { arch: ArchId },
+    #[cfg(feature = "reference")]
+    #[error("SIM_SM_REFERENCE_MODE must be `event` or `dense`, found {mode:?}")]
+    ReferenceModeInvalid { mode: String },
     #[error(
         "one function declares inconsistent CTA-barrier pipeline configurations: expected {expected:?}, got {got:?}"
     )]
@@ -5889,6 +5900,18 @@ impl InstructionFrontEndState {
         }
     }
 
+    /// A demanded head can free a prefetch slot before any warp is eligible
+    /// to issue. It remains a local wake source even when all instruction and
+    /// stream buffers are currently full.
+    fn next_maintenance_time(&self) -> Option<u64> {
+        self.streams
+            .iter()
+            .filter_map(|stream| stream.lines.front())
+            .filter(|line| line.demanded)
+            .map(|line| line.ready_at)
+            .min()
+    }
+
     fn has_prefetch_work(&self) -> bool {
         let capacity = self.config.stream_buffer_lines as usize;
         self.streams
@@ -6991,6 +7014,7 @@ impl AsyncCopyGroup {
 /// Allocated only for warps that issue an effective asynchronous-copy source.
 /// Keeping this uncommon state out of every [`WarpState`] preserves the compact
 /// scheduler scan used by workloads with no `LDGSTS` traffic.
+#[derive(Debug)]
 struct AsyncCopyState {
     /// Non-bulk `cp.async` copies issued since the most recent commit.
     open_group: Option<AsyncCopyGroup>,
@@ -7019,7 +7043,7 @@ impl AsyncCopyState {
 /// Cold sidecar indexed by warp identity. Keeping even the nullable pointer out
 /// of [`WarpState`] preserves that structure's pre-async stride for scheduler
 /// scans while retaining direct, deterministic lookup for source responses.
-#[derive(Default)]
+#[derive(Debug, Default)]
 struct AsyncCopySlot {
     state: Option<Box<AsyncCopyState>>,
 }
@@ -9190,6 +9214,15 @@ struct SharedWriteLookupRuntime {
     async_l1_hit_service_ready: [u64; SUB_CORES],
 }
 
+#[cfg(feature = "reference")]
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) struct AdvanceDiagnostics {
+    pub calls: u64,
+    pub local_cycle_steps: u64,
+    pub idle_jumps: u64,
+    pub skipped_cycles: u64,
+}
+
 pub(crate) struct SmCore<'a> {
     schedule: &'a FunctionSchedule,
     /// Static schedule values in PC order. Contiguous binary search avoids a
@@ -9263,6 +9296,24 @@ pub(crate) struct SmCore<'a> {
     resident_warp_slots: Box<HashSet<i32>>,
     unfinished_warps: usize,
     next_block: usize,
+    /// Test/reference-only switch. The production default retains next-event
+    /// advancement; the reference lane walks locally idle cycles one at a
+    /// time so differential runs can separate clock jumps from state changes.
+    dense_reference: bool,
+    #[cfg(feature = "reference")]
+    advance_diagnostics: AdvanceDiagnostics,
+}
+
+#[cfg(feature = "reference")]
+fn reference_mode_from_env() -> Result<bool, IssueError> {
+    match std::env::var_os("SIM_SM_REFERENCE_MODE") {
+        None => Ok(false),
+        Some(mode) if mode == "event" => Ok(false),
+        Some(mode) if mode == "dense" => Ok(true),
+        Some(mode) => Err(IssueError::ReferenceModeInvalid {
+            mode: mode.to_string_lossy().into_owned(),
+        }),
+    }
 }
 
 impl<'a> SmCore<'a> {
@@ -9603,6 +9654,10 @@ impl<'a> SmCore<'a> {
                 .then(|| Box::new(AsyncWaitPrefixDiagnostics::default())),
             ..ReadinessDiagnostics::default()
         };
+        #[cfg(feature = "reference")]
+        let dense_reference = reference_mode_from_env()?;
+        #[cfg(not(feature = "reference"))]
+        let dense_reference = false;
         let mut core = Self {
             schedule,
             schedule_slots,
@@ -9656,6 +9711,9 @@ impl<'a> SmCore<'a> {
             resident_warp_slots: Box::new(HashSet::new()),
             unfinished_warps: 0,
             next_block: 0,
+            dense_reference,
+            #[cfg(feature = "reference")]
+            advance_diagnostics: AdvanceDiagnostics::default(),
         };
         core.admit_blocks(core.t)?;
         Ok(core)
@@ -9667,6 +9725,353 @@ impl<'a> SmCore<'a> {
     ) -> Result<(), IssueError> {
         self.memory_service_candidates = MemoryServiceCandidateState::checked(candidates)?;
         Ok(())
+    }
+
+    #[cfg(feature = "reference")]
+    pub(crate) fn advance_diagnostics(&self) -> AdvanceDiagnostics {
+        self.advance_diagnostics
+    }
+
+    #[cfg(feature = "reference")]
+    pub(crate) fn typed_l2_request_owners(&self, sm_id: u32) -> Vec<L2RequestOwner> {
+        let MemModel::L1Shared(state) = &self.mem else {
+            return Vec::new();
+        };
+        let mut owners = state
+            .outstanding_response_ids
+            .iter()
+            .map(|(response_id, reply)| {
+                let (line, sector_mask, response_kind) = match reply {
+                    ReplyTo::L1Fill { fill, .. } => match fill {
+                        FillKey::Line { line, .. } => (
+                            CanonicalLineKey::VirtualAbsolute { line_id: *line },
+                            state.fill_masks.get(line).copied().unwrap_or(0),
+                            "l1_fill",
+                        ),
+                        FillKey::Sector { line, sector, .. } => (
+                            CanonicalLineKey::VirtualAbsolute { line_id: *line },
+                            1_u8 << *sector,
+                            "l1_sector_fill",
+                        ),
+                    },
+                    ReplyTo::Warp { .. } => {
+                        (CanonicalLineKey::Unknown { line_id: None }, 0, "warp")
+                    }
+                    ReplyTo::AsyncCopy { .. } => {
+                        (CanonicalLineKey::Unknown { line_id: None }, 0, "async_copy")
+                    }
+                    ReplyTo::None => (CanonicalLineKey::Unknown { line_id: None }, 0, "none"),
+                };
+                let warp_slot = self
+                    .warps
+                    .get(response_id.warp)
+                    .map(|warp| warp.warp_slot)
+                    .unwrap_or(-1);
+                L2RequestOwner {
+                    request: L2RequestKey {
+                        sm_id,
+                        warp_slot,
+                        instruction: u64::try_from(response_id.instruction).unwrap_or(u64::MAX),
+                        sector_index: u32::try_from(response_id.sector_index).unwrap_or(u32::MAX),
+                        response_kind: response_kind.to_owned(),
+                    },
+                    line,
+                    sector_mask,
+                    state: L2RequestState::Outstanding,
+                    due: None,
+                }
+            })
+            .collect::<Vec<_>>();
+        owners.sort_by(|left, right| {
+            (
+                left.request.sm_id,
+                left.request.warp_slot,
+                left.request.instruction,
+                left.request.sector_index,
+                &left.request.response_kind,
+            )
+                .cmp(&(
+                    right.request.sm_id,
+                    right.request.warp_slot,
+                    right.request.instruction,
+                    right.request.sector_index,
+                    &right.request.response_kind,
+                ))
+        });
+        owners
+    }
+
+    #[cfg(feature = "reference")]
+    pub(crate) fn typed_l1_state(&self) -> Option<L1BoundaryState> {
+        self.mem.l1().map(L1Cache::typed_boundary_state)
+    }
+
+    #[cfg(feature = "reference")]
+    pub(crate) fn typed_async_copy_states(&self) -> Vec<Option<AsyncCopyBoundaryState>> {
+        self.async_copies
+            .iter()
+            .map(|slot| {
+                slot.state.as_ref().map(|state| {
+                    let project = |group: AsyncCopyGroup| AsyncGroupBoundaryState {
+                        sequence: group.id.0,
+                        committed_at: group.committed_at,
+                        pending_sources: group.pending_sources,
+                        source_completion_time: group.source_completion_time,
+                        delivery_work: group.delivery_work,
+                        destination_wavefronts: group.destination_wavefronts,
+                        destination_service_queued: group.destination_service_queued,
+                        destination_completion_time: group.destination_completion_time,
+                        completion_time: group.completion_time,
+                    };
+                    AsyncCopyBoundaryState {
+                        open: state.open_group.map(project),
+                        committed: state
+                            .committed_groups
+                            .iter()
+                            .copied()
+                            .map(project)
+                            .collect(),
+                        bypass_observation_count: u64::try_from(state.bypass_copies.len())
+                            .unwrap_or(u64::MAX),
+                    }
+                })
+            })
+            .collect()
+    }
+
+    #[cfg(feature = "reference")]
+    pub(crate) fn typed_memory_pipeline_state(&self) -> Option<MemoryPipelineBoundaryState> {
+        self.memory_issue_pipeline.as_ref().map(|state| {
+            let diagnostics = state.diagnostics;
+            MemoryPipelineBoundaryState {
+                queue_entries_with_dispatch: state.config.queue_entries_with_dispatch,
+                local_initiation_interval_cycles: state.config.local_initiation_interval_cycles,
+                shared_accept_interval_cycles: state.config.shared_accept_interval_cycles,
+                queue_release_times: state
+                    .queue_release_times
+                    .iter()
+                    .map(|queue| queue.iter().copied().collect())
+                    .collect(),
+                local_completion_ready: state.local_completion_ready.to_vec(),
+                shared_accept_ready: state.shared_accept_ready,
+                instructions_admitted: diagnostics.instructions_admitted,
+                operand_pipeline_delay_cycles: diagnostics.operand_pipeline_delay_cycles,
+                shared_queue_delay_cycles: diagnostics.shared_queue_delay_cycles,
+                maximum_operand_pipeline_delay_cycles: diagnostics
+                    .maximum_operand_pipeline_delay_cycles,
+                maximum_shared_queue_delay_cycles: diagnostics.maximum_shared_queue_delay_cycles,
+                maximum_queue_occupancy: diagnostics.maximum_queue_occupancy,
+                terminal_shared_accept_cycle: diagnostics.terminal_shared_accept_cycle,
+            }
+        })
+    }
+
+    #[cfg(feature = "reference")]
+    pub(crate) fn typed_scalar_pipeline_state(&self) -> Option<ScalarPipelineBoundaryState> {
+        self.scalar_execution_pipeline.as_ref().map(|state| {
+            let diagnostics = state.diagnostics;
+            ScalarPipelineBoundaryState {
+                latency_cycles: state.config.latency_cycles,
+                initiation_interval_cycles: state.config.initiation_interval_cycles,
+                in_flight_capacity: state.config.in_flight_capacity,
+                release_times: state
+                    .release_times
+                    .iter()
+                    .map(|queue| queue.iter().copied().collect())
+                    .collect(),
+                next_service: state.next_service.to_vec(),
+                instructions_admitted: diagnostics.instructions_admitted,
+                service_busy_cycles: diagnostics.service_busy_cycles,
+                queue_delay_cycles: diagnostics.queue_delay_cycles,
+                maximum_queue_occupancy: diagnostics.maximum_queue_occupancy,
+            }
+        })
+    }
+
+    #[cfg(feature = "reference")]
+    pub(crate) fn typed_front_end_state(&self) -> Option<InstructionFrontEndBoundaryState> {
+        let state = self.instruction_front_end.as_ref()?;
+        let cache = |cache: &SetAssociativeInstructionCache| InstructionCacheState {
+            ways: u64::try_from(cache.ways).unwrap_or(u64::MAX),
+            access_sequence: cache.access_sequence,
+            sets: cache
+                .sets
+                .iter()
+                .map(|set| {
+                    set.iter()
+                        .map(|entry| InstructionCacheEntryState {
+                            function_unique_id: entry.key.function_unique_id,
+                            line: entry.key.line,
+                            ready_at: entry.ready_at,
+                            last_access: entry.last_access,
+                        })
+                        .collect()
+                })
+                .collect(),
+        };
+        let streams = state
+            .streams
+            .iter()
+            .map(|stream| InstructionStreamState {
+                lines: stream
+                    .lines
+                    .iter()
+                    .map(|line| InstructionStreamLineState {
+                        function_unique_id: line.key.function_unique_id,
+                        line: line.key.line,
+                        ready_at: line.ready_at,
+                        demanded: line.demanded,
+                    })
+                    .collect(),
+                next_line: stream
+                    .next_line
+                    .map(|key| (key.function_unique_id, key.line)),
+            })
+            .collect();
+        let diagnostics = state.diagnostics;
+        Some(InstructionFrontEndBoundaryState {
+            line_bytes: state.config.line_bytes,
+            l0_to_l1_cycles: state.config.l0_to_l1_cycles,
+            l1_to_l0_cycles: state.config.l1_to_l0_cycles,
+            l1_request_ports: state.config.l1_request_ports,
+            l1_reply_ports: state.config.l1_reply_ports,
+            stream_buffer_lines: state.config.stream_buffer_lines,
+            stream_buffers_per_subcore: state.config.stream_buffers_per_subcore,
+            prefetches_per_cycle: state.config.prefetches_per_cycle,
+            instruction_buffer_entries: state.config.instruction_buffer_entries,
+            fetch_decode_width: state.config.fetch_decode_width,
+            fetch_to_issue_stages: state.config.fetch_to_issue_stages,
+            l0: state.l0.iter().map(cache).collect(),
+            l1: cache(&state.l1),
+            streams,
+            l1_request_ready: state.l1_request_ready,
+            l1_reply_ready: state.l1_reply_ready,
+            l0_response_ready: state.l0_response_ready.to_vec(),
+            prefetch_priority: u64::try_from(state.prefetch_priority).unwrap_or(u64::MAX),
+            cold_fill_latency: state.cold_fill_latency,
+            instructions_fetched: diagnostics.instructions_fetched,
+            demand_l0_hits: diagnostics.demand_l0_hits,
+            demand_stream_buffer_hits: diagnostics.demand_stream_buffer_hits,
+            demand_l0_misses: diagnostics.demand_l0_misses,
+            demand_l1_hits: diagnostics.demand_l1_hits,
+            demand_l1_misses: diagnostics.demand_l1_misses,
+            prefetch_requests: diagnostics.prefetch_requests,
+            prefetch_l1_hits: diagnostics.prefetch_l1_hits,
+            prefetch_l1_misses: diagnostics.prefetch_l1_misses,
+            stream_restarts: diagnostics.stream_restarts,
+            maximum_fetch_latency_cycles: diagnostics.maximum_fetch_latency_cycles,
+        })
+    }
+
+    #[cfg(feature = "reference")]
+    pub(crate) fn boundary_snapshot(&self) -> BoundarySnapshot {
+        let warp_states = self
+            .warps
+            .iter()
+            .map(|warp| WarpBoundaryState {
+                warp_slot: warp.warp_slot,
+                next_instruction: u64::try_from(warp.next).unwrap_or(u64::MAX),
+                front_end_fetch_cursor: u64::try_from(warp.front_end_fetch_cursor)
+                    .unwrap_or(u64::MAX),
+                instruction_buffer: warp
+                    .instruction_buffer
+                    .iter()
+                    .map(|buffered| {
+                        (
+                            u64::try_from(buffered.instruction).unwrap_or(u64::MAX),
+                            buffered.ready_at,
+                        )
+                    })
+                    .collect(),
+                eligible: warp.eligible,
+                imc_wait_until: warp.imc_wait_until,
+                barrier_clear: warp.barrier_clear,
+                barrier_pending: warp.barrier_pending,
+                block: u64::try_from(warp.block).unwrap_or(u64::MAX),
+                arrival: warp.arrival,
+                at_block_barrier: warp.at_block_barrier,
+                cta_barrier_ready: warp.cta_barrier_ready,
+                barrier_pipeline_ready: warp.barrier_pipeline_ready,
+                branch_pipeline_ready: warp.branch_pipeline_ready,
+                block_barrier_dispatch: warp.block_barrier_dispatch,
+                block_barrier_arrival: warp.block_barrier_arrival,
+                done: warp.done,
+            })
+            .collect();
+        let block_states = self
+            .block_states
+            .iter()
+            .map(|block| BlockBoundaryState {
+                unfinished: u64::try_from(block.unfinished).unwrap_or(u64::MAX),
+                waiting: u64::try_from(block.waiting).unwrap_or(u64::MAX),
+                warp_count: block.warp_count,
+                shared_memory_bytes: block.shared_memory_bytes,
+                warp_slots: block.warp_slots.to_vec(),
+                first_warp: u64::try_from(block.first_warp).unwrap_or(u64::MAX),
+                admitted_warps: u64::try_from(block.admitted_warps).unwrap_or(u64::MAX),
+                barrier_generation: block.barrier_generation,
+                barrier_first_dispatch: block.barrier_first_dispatch,
+                barrier_first_arrival: block.barrier_first_arrival,
+                barrier_rearm_ready: block.barrier_rearm_ready,
+            })
+            .collect();
+        let hold = self.hold.map(|entry| {
+            entry.and_then(|warp| {
+                self.warps
+                    .get(warp)
+                    .map(|state| u64::try_from(state.warp_slot).unwrap_or(0))
+            })
+        });
+        let subcore_warps = self
+            .subcore_warps
+            .iter()
+            .map(|warps| {
+                warps
+                    .iter()
+                    .filter_map(|&warp| self.warps.get(warp).map(|state| state.warp_slot))
+                    .collect()
+            })
+            .collect();
+        BoundarySnapshot {
+            schema_version: sim_semantics::BOUNDARY_SCHEMA_VERSION,
+            cycle: self.t,
+            issued: self.issued,
+            resident_warps: self.resident_warps,
+            resident_shared_memory_bytes: self.resident_shared_memory_bytes,
+            unfinished_warps: u64::try_from(self.unfinished_warps).unwrap_or(u64::MAX),
+            next_block: u64::try_from(self.next_block).unwrap_or(u64::MAX),
+            hold,
+            subcore_warps,
+            outstanding_responses: u64::try_from(self.outstanding_responses()).unwrap_or(u64::MAX),
+            l1_state: match &self.mem {
+                MemModel::Flat => None,
+                MemModel::L1Const(cache) => Some(cache.boundary_state()),
+                MemModel::L1Shared(state) => Some(state.l1.boundary_state()),
+            },
+            instruction_front_end_state: self
+                .instruction_front_end
+                .as_ref()
+                .map(|state| format!("{state:?}")),
+            memory_issue_pipeline_state: self
+                .memory_issue_pipeline
+                .as_ref()
+                .map(|state| format!("{state:?}")),
+            scalar_execution_pipeline_state: self
+                .scalar_execution_pipeline
+                .as_ref()
+                .map(|state| format!("{state:?}")),
+            async_copy_state: self
+                .async_copies
+                .iter()
+                .map(|slot| slot.state.as_deref().map(|state| format!("{state:?}")))
+                .collect(),
+            barrier_pipe_ready: self.barrier_pipe_ready,
+            tensor_pipe_ready: self.tensor_pipe_ready,
+            ldgsts_destination_pipe_ready: self.ldgsts_destination_pipe_ready,
+            warp_states,
+            block_states,
+            omitted_state: vec!["legacy_core_debug_fields_retained".to_owned()],
+        }
     }
 
     pub(crate) fn enable_memory_admission_observations(&mut self) {
@@ -12477,6 +12882,14 @@ impl<'a> SmCore<'a> {
         horizon: ReplayHorizon,
         out: &mut Vec<MemRequest>,
     ) -> Result<Advance, IssueError> {
+        #[cfg(feature = "reference")]
+        {
+            self.advance_diagnostics.calls = self.advance_diagnostics.calls.checked_add(1).ok_or(
+                IssueError::CounterOverflow {
+                    counter: "reference advance calls",
+                },
+            )?;
+        }
         if let Some(bound) = horizon.bounded_time()
             && bound < self.t
         {
@@ -12508,6 +12921,16 @@ impl<'a> SmCore<'a> {
             }
             if let Some(scalar_pipeline) = self.scalar_execution_pipeline.as_mut() {
                 scalar_pipeline.prune(self.t);
+            }
+            #[cfg(feature = "reference")]
+            {
+                self.advance_diagnostics.local_cycle_steps = self
+                    .advance_diagnostics
+                    .local_cycle_steps
+                    .checked_add(1)
+                    .ok_or(IssueError::CounterOverflow {
+                        counter: "reference local cycle steps",
+                    })?;
             }
             self.instruction_front_end_cycle()?;
             let before = out.len();
@@ -12553,10 +12976,19 @@ impl<'a> SmCore<'a> {
             } else {
                 self.next_known_issue_time::<false>()
             };
-            let front_end_time = self
-                .has_instruction_front_end_work()?
+            let front_end_work = self.has_instruction_front_end_work()?;
+            let front_end_time = front_end_work
                 .then(|| checked_cycle_add("instruction front-end clock advance", self.t, 1))
                 .transpose()?;
+            let maintenance_time = self
+                .instruction_front_end
+                .as_ref()
+                .and_then(InstructionFrontEndState::next_maintenance_time);
+            let front_end_time = match (front_end_time, maintenance_time) {
+                (Some(work), Some(maintenance)) => Some(work.min(maintenance)),
+                (work, None) => work,
+                (None, maintenance) => maintenance,
+            };
             let next_t = match (issue_or_async_time, front_end_time) {
                 (Some(issue), Some(front_end)) => Some(issue.min(front_end)),
                 (Some(issue), None) => Some(issue),
@@ -12567,6 +12999,10 @@ impl<'a> SmCore<'a> {
                 Some(nt) => {
                     let next_cycle = checked_cycle_add("idle-clock advance", self.t, 1)?;
                     let target = nt.max(next_cycle);
+                    // Preserve the next stream-buffer release even if warp
+                    // eligibility is later; releasing a line enables prefetch
+                    // while the core is otherwise stalled.
+                    let can_skip = !self.dense_reference;
                     if let Some(bound) = horizon.bounded_time()
                         && target >= bound
                     {
@@ -12577,7 +13013,25 @@ impl<'a> SmCore<'a> {
                             wake_at: Some(bound),
                         });
                     }
-                    self.t = target;
+                    #[cfg(feature = "reference")]
+                    if can_skip {
+                        let skipped = target - next_cycle;
+                        self.advance_diagnostics.idle_jumps = self
+                            .advance_diagnostics
+                            .idle_jumps
+                            .checked_add(u64::from(skipped != 0))
+                            .ok_or(IssueError::CounterOverflow {
+                                counter: "reference idle jumps",
+                            })?;
+                        self.advance_diagnostics.skipped_cycles = self
+                            .advance_diagnostics
+                            .skipped_cycles
+                            .checked_add(skipped)
+                            .ok_or(IssueError::CounterOverflow {
+                                counter: "reference skipped cycles",
+                            })?;
+                    }
+                    self.t = if can_skip { target } else { next_cycle };
                 }
                 None if self.outstanding_responses() > 0
                     || self
@@ -16290,6 +16744,64 @@ mod tests {
         assert_eq!(boundary.probe(key).unwrap(), None);
         boundary.reserve(key, 8).unwrap();
         assert_eq!(boundary.access_sequence, u64::MAX);
+    }
+
+    #[test]
+    fn demanded_stream_line_wakes_prefetch_before_stalled_warp() {
+        let sched = schedule(vec![(0, slot(cb(1), OpClass::Other, "EXIT"))]);
+        let blocks = vec![BlockReplay {
+            launch_index: 0,
+            warps: vec![warp(0, vec![inst(0); 3])],
+        }];
+        let config = ArchId::Sm86
+            .instruction_front_end()
+            .require("instruction_front_end")
+            .unwrap();
+        let mut p = params();
+        p.instruction_front_end = Some(config);
+        let mut snapshots = Vec::new();
+        for dense in [false, true] {
+            let mut core = SmCore::new(&blocks, &sched, &p, SmMemMode::Flat).unwrap();
+            core.dense_reference = dense;
+            core.warps[0].eligible = 100;
+            core.warps[0].front_end_fetch_cursor = 3;
+            core.warps[0].instruction_buffer = (0..3)
+                .map(|instruction| BufferedInstruction {
+                    instruction,
+                    ready_at: 0,
+                })
+                .collect();
+            let front_end = core.instruction_front_end.as_mut().unwrap();
+            let capacity = u64::from(config.stream_buffer_lines);
+            front_end.streams[0].lines = (0..capacity)
+                .map(|line| StreamBufferLine {
+                    key: InstructionLineKey {
+                        function_unique_id: 1,
+                        line,
+                    },
+                    ready_at: 10,
+                    demanded: line == 0,
+                })
+                .collect();
+            front_end.streams[0].next_line = Some(InstructionLineKey {
+                function_unique_id: 1,
+                line: capacity,
+            });
+            assert!(!core.has_instruction_front_end_work().unwrap());
+            let mut requests = Vec::new();
+            assert_eq!(
+                core.advance(ReplayHorizon::Bounded(50), &mut requests)
+                    .unwrap(),
+                Advance::Idle { wake_at: Some(50) }
+            );
+            assert!(requests.is_empty());
+            assert_eq!(core.issued, 0);
+            let front_end = core.instruction_front_end.as_ref().unwrap();
+            assert_eq!(front_end.diagnostics.prefetch_requests, 1);
+            assert_eq!(front_end.l1_request_ready, 11);
+            snapshots.push(format!("{front_end:?}"));
+        }
+        assert_eq!(snapshots[0], snapshots[1]);
     }
 
     #[test]
