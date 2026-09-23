@@ -10,6 +10,7 @@ use sim_direct_run::{CacheScope, MemoryMode, RunConfig, RunError, run};
 const USAGE: &str = "Usage: sim-run --trace DIR --control FILE --arch-card FILE \
 [--pchase-card FILE] [--mode flat|l1|l1-l2] \
 [--cache-scope launch|stream-l2] [--carded-dram] [--kernel-id ID] \
+[--hypothetical-issue-ports N] \
 [--ncu-shaped-metrics] \
 [--ncu-csv FILE] [--ncu-launch ID] \
 [--memory-service-candidates FILE] [--memory-admission-candidates FILE] \
@@ -42,6 +43,7 @@ fn parse_args(args: impl IntoIterator<Item = OsString>) -> Result<Option<RunConf
     let mut memory_mode = MemoryMode::Flat;
     let mut cache_scope = CacheScope::Launch;
     let mut carded_dram_bandwidth = false;
+    let mut hypothetical_issue_ports = None;
     let mut kernel_id = None;
     let mut ncu_shaped_metrics = false;
     let mut ncu_csv = None;
@@ -92,6 +94,25 @@ fn parse_args(args: impl IntoIterator<Item = OsString>) -> Result<Option<RunConf
                 kernel_id = Some(raw.parse::<i32>().map_err(|error| {
                     RunError::new("arguments", format!("invalid --kernel-id {raw:?}: {error}"))
                 })?);
+            }
+            value if value == OsStr::new("--hypothetical-issue-ports") => {
+                let raw = take_value(&mut args, "--hypothetical-issue-ports")?;
+                let raw = raw.to_str().ok_or_else(|| {
+                    RunError::new("arguments", "--hypothetical-issue-ports must be UTF-8")
+                })?;
+                let ports = raw.parse::<u32>().map_err(|error| {
+                    RunError::new(
+                        "arguments",
+                        format!("invalid --hypothetical-issue-ports {raw:?}: {error}"),
+                    )
+                })?;
+                if !(1..=4).contains(&ports) {
+                    return Err(RunError::new(
+                        "arguments",
+                        "--hypothetical-issue-ports must be in 1..=4",
+                    ));
+                }
+                hypothetical_issue_ports = Some(ports);
             }
             value if value == OsStr::new("--ncu-shaped-metrics") => {
                 ncu_shaped_metrics = true;
@@ -147,6 +168,7 @@ fn parse_args(args: impl IntoIterator<Item = OsString>) -> Result<Option<RunConf
         memory_mode,
         cache_scope,
         carded_dram_bandwidth,
+        hypothetical_issue_ports,
         kernel_id,
         ncu_shaped_metrics,
         ncu_csv,

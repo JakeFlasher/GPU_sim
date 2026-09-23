@@ -370,7 +370,35 @@ supports a mechanism-local accuracy/speed claim.
 
 Publish/retain a negative or model-relative result; do not claim SOTA.
 
-## 6. Measurement and reporting rules
+## 6. Current progress
+
+### M0/M1 probe — measurement boundary
+
+The retained `gemm_hmma_bf16_sm80` row has full NVBit coverage and stable
+seven-repeat NCU labels. After the user locked external SM/memory clocks, three
+fresh NVBit/NCU pairs were collected; the current-source architecture-scoped
+GPC observation frontier is within 0.32–3.65% of the fresh GPC labels, while
+raw `BindingCycles` remains a lower bound. Dirty-writeback/coherence tails
+remain unmodeled. The detailed rows and uncertainty are in
+`docs/sm86_measurement_boundary_20260923.md`. This is a candidate crosswalk,
+not a scored accuracy claim.
+
+### M2/M3 probe — production override and speed
+
+`sim-run --hypothetical-issue-ports N` now routes a bounded issue-width
+override through the real replay and labels it in output. On the retained
+eight-row small cohort, widths 2 and 4 changed frontiers but increased replay
+wall time relative to width 1. A fresh locked-clock GEMM process measured
+0.910 s event-driven, 1.541 s dense-reference, and 1.015 s at issue width 2;
+peak RSS was 57.6–58.1 MB. These are engineering observations; the negative
+issue-width speed result is retained rather than tuned away. See
+`docs/sm86_speed_probe_20260923.md`.
+
+The next discriminating work is a second-cohort crosswalk check, then an issue
+loop profile and one demand-driven optimization only if it improves measured
+replay wall time without weakening the declared model-relative observables.
+
+## 7. Measurement and reporting rules
 
 NCU measurements are independent targets; NVBit observations and architecture
 cards are simulator inputs. Never feed scored NCU values into features,
@@ -387,8 +415,10 @@ Headline metrics remain:
 Functional smoke commands and focused build checks are engineering evidence,
 not hardware validation.
 
-## 7. Current next action
+## 8. Current next action
 
-Start at M0/M1 with one retained SM86 launch. Do not add another ISA, vendor,
-or system layer until M2 has changed the production replay and M3 has a real
-wall-time measurement.
+Next: check the candidate frontier crosswalk on the retained timing-crosswalk
+holdout, record the current host clock/driver mismatch explicitly, then profile
+the issue loop and produce M4 feature/unsupported coverage. Do not add another
+ISA, vendor, or system layer until this crosswalk check and one measured speed
+decision are complete.

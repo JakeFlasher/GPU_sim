@@ -109,6 +109,10 @@ pub struct RunConfig {
     pub memory_mode: MemoryMode,
     pub cache_scope: CacheScope,
     pub carded_dram_bandwidth: bool,
+    /// Optional model-relative issue transaction width. This never changes
+    /// the evidence-bound architecture card; it labels the replay as a
+    /// hypothetical resource experiment.
+    pub hypothetical_issue_ports: Option<u32>,
     pub kernel_id: Option<i32>,
     /// Include the registry-bound simulator projections used for NCU joins.
     /// The default remains false so existing direct-result JSON is unchanged.
@@ -211,6 +215,31 @@ fn read_direct_input(
 pub(crate) fn load_arch_card(path: &Path) -> Result<ArchCard, RunError> {
     let raw = read_direct_input(path, "architecture card", MAX_DIRECT_CARD_BYTES)?;
     ArchCard::parse(path, &raw).map_err(at("architecture card"))
+}
+
+/// Share the established direct-replay issue constructor between ordinary and
+/// prepared replay. The legacy constructor preserves the SM86 model-relative
+/// baseline; the optional issue-port override is layered afterward and is
+/// explicitly labeled hypothetical.
+fn resolve_issue(config: &RunConfig, card: &ArchCard) -> Result<IssueModelParams, RunError> {
+    let arch = card.arch_id().map_err(at("architecture card"))?;
+    let latencies = card
+        .required_latencies()
+        .map_err(at("architecture latencies"))?;
+    let issue = IssueModelParams::from_legacy_card_latencies_for_arch(
+        arch,
+        latencies.l1_hit,
+        latencies.l2_hit,
+        latencies.dram,
+        latencies.shared,
+    )
+    .map_err(at("legacy issue configuration"))?;
+    match config.hypothetical_issue_ports {
+        Some(ports) => issue
+            .with_hypothetical_issue_ports(ports)
+            .map_err(at("hypothetical issue configuration")),
+        None => Ok(issue),
+    }
 }
 
 pub(crate) fn load_pchase_card(path: &Path) -> Result<PchaseCard, RunError> {
@@ -467,6 +496,8 @@ pub struct RunReport {
     pub memory_mode: &'static str,
     pub cache_scope: &'static str,
     pub carded_dram_bandwidth: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hypothetical_issue_ports: Option<u32>,
     pub memory_service_candidate_count: usize,
     pub memory_admission_candidate_count: usize,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1253,17 +1284,7 @@ pub fn run(config: &RunConfig) -> Result<RunReport, RunError> {
     }
     let arch_card = load_arch_card(&config.arch_card)?;
     let arch = arch_card.arch_id().map_err(at("architecture card"))?;
-    let latencies = arch_card
-        .required_latencies()
-        .map_err(at("architecture latencies"))?;
-    let issue = IssueModelParams::from_legacy_card_latencies_for_arch(
-        arch,
-        latencies.l1_hit,
-        latencies.l2_hit,
-        latencies.dram,
-        latencies.shared,
-    )
-    .map_err(at("issue configuration"))?;
+    let issue = resolve_issue(config, &arch_card)?;
     let mode = resolve_mode(config, &arch_card, issue)?;
 
     #[cfg(feature = "performance-counters")]
@@ -1421,6 +1442,7 @@ pub fn run(config: &RunConfig) -> Result<RunReport, RunError> {
         memory_mode: config.memory_mode.token(),
         cache_scope: config.cache_scope.token(),
         carded_dram_bandwidth: config.carded_dram_bandwidth,
+        hypothetical_issue_ports: config.hypothetical_issue_ports,
         memory_service_candidate_count: memory_service_candidates.as_ref().map_or(0, Vec::len),
         memory_admission_candidate_count: memory_admission_candidates.as_ref().map_or(0, Vec::len),
         memory_admission_feedback_candidate_id: memory_admission_feedback
@@ -1457,6 +1479,7 @@ mod tests {
             memory_mode: mode,
             cache_scope: CacheScope::Launch,
             carded_dram_bandwidth: false,
+            hypothetical_issue_ports: None,
             kernel_id: None,
             ncu_shaped_metrics: false,
             memory_service_candidates: None,

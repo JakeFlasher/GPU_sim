@@ -64,6 +64,21 @@ them into a selection score.
 
 ## Immediate work
 
+M0/M1 now has fresh locked-clock paired rows documented in
+[sm86_measurement_boundary_20260923.md](sm86_measurement_boundary_20260923.md):
+the candidate GPC observation frontier is within 0.32–3.65% of three fresh NCU
+GPC rows, while raw BindingCycles remains a lower bound. Dirty-writeback/
+coherence tails remain explicit, so this is a candidate crosswalk rather than
+promoted hardware accuracy.
+M2/M3 now have an executable probe documented in
+[sm86_speed_probe_20260923.md](sm86_speed_probe_20260923.md): event-driven replay
+is faster than the dense reference on one retained trace, while issue-width 2/4
+is currently slower. This is model-relative speed evidence, not a final claim.
+The first M4 coverage inventory is in
+[sm86_feature_coverage_20260923.md](sm86_feature_coverage_20260923.md): eight
+full traces, 2,000 static records, 100 opcode spellings, empty producer-side
+unsupported arrays, and a remaining static-module provenance gap.
+
 Follow the fine-grained milestones in the
 [adversarial roadmap review](roadmap_adversarial_review_20260923.md):
 

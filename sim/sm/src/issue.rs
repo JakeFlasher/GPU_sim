@@ -248,6 +248,10 @@ pub enum IssueResourceSource {
     /// Strict architecture-card resources, restricted to the currently
     /// consumed SM86 topology.
     Carded(RequiredIssueResources),
+    /// Explicit hypothetical issue-port override layered on an admitted card
+    /// or the architecture-default constructor. This is a design-space input,
+    /// never evidence about the physical card.
+    HypotheticalIssuePorts(Option<RequiredIssueResources>),
     /// Unit-test-only lane for boundary tests that need synthetic scheduler
     /// values. This variant does not exist in production builds.
     #[cfg(test)]
@@ -262,6 +266,7 @@ impl IssueResourceSource {
             // does not compile or emit this compatibility field.
             Self::ArchitectureDefaults => "architecture_local_reviewed_hypothesis",
             Self::Carded(_) => "architecture_card",
+            Self::HypotheticalIssuePorts(_) => "hypothetical_issue_ports",
             #[cfg(test)]
             Self::SyntheticTestFixture => "synthetic_test_fixture",
         }
@@ -470,6 +475,29 @@ fn ldgsts_cache_all_destination_service_rate(arch: ArchId) -> Result<(u64, u64),
 }
 
 impl IssueModelParams {
+    /// Change only the issue transaction width for a model-relative design
+    /// experiment. Card geometry, latency sources, and all other scheduler
+    /// resources remain unchanged; the resulting parameter set must be labeled
+    /// hypothetical and cannot be used as a silicon-card identity.
+    pub fn with_hypothetical_issue_ports(mut self, issue_ports: u32) -> Result<Self, IssueError> {
+        if !(1..=4).contains(&issue_ports) {
+            return Err(IssueError::InvalidHypotheticalIssuePorts { issue_ports });
+        }
+        self.validate_resource_source()?;
+        let base = match self.resource_source {
+            IssueResourceSource::ArchitectureDefaults => None,
+            IssueResourceSource::Carded(resources) => Some(resources),
+            IssueResourceSource::HypotheticalIssuePorts(_) => {
+                return Err(IssueError::HypotheticalOverrideAlreadyApplied);
+            }
+            #[cfg(test)]
+            IssueResourceSource::SyntheticTestFixture => None,
+        };
+        self.issue_ports = issue_ports;
+        self.resource_source = IssueResourceSource::HypotheticalIssuePorts(base);
+        Ok(self)
+    }
+
     /// Resolve card latencies plus the retained architecture-local issue
     /// hypotheses. The name is intentionally explicit: this executable lane does
     /// not upgrade 25/8/48 to card facts. A template architecture with missing
@@ -1044,6 +1072,22 @@ impl IssueModelParams {
                 }
                 Ok(())
             }
+            IssueResourceSource::HypotheticalIssuePorts(base) => {
+                if !(1..=4).contains(&self.issue_ports) {
+                    return Err(IssueError::InvalidHypotheticalIssuePorts {
+                        issue_ports: self.issue_ports,
+                    });
+                }
+                // Validate every untouched field using the original path.
+                // The override must not bypass topology or latency checks.
+                let mut original = *self;
+                original.resource_source = match base {
+                    Some(resources) => IssueResourceSource::Carded(resources),
+                    None => IssueResourceSource::ArchitectureDefaults,
+                };
+                original.issue_ports = base.map_or(1, |resources| resources.smsp.issue_ports);
+                original.validate_resource_source()
+            }
             #[cfg(test)]
             IssueResourceSource::SyntheticTestFixture => Ok(()),
         }
@@ -1143,6 +1187,10 @@ pub(crate) enum SmMemMode {
 
 #[derive(Debug, thiserror::Error)]
 pub enum IssueError {
+    #[error("hypothetical issue-port override must be in 1..=4; got {issue_ports}")]
+    InvalidHypotheticalIssuePorts { issue_ports: u32 },
+    #[error("a hypothetical issue-port override was already applied")]
+    HypotheticalOverrideAlreadyApplied,
     #[error("issue model is unsupported for deployment architecture {arch}")]
     ArchitectureUnsupported { arch: ArchId },
     #[cfg(feature = "reference")]

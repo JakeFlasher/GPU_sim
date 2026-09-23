@@ -78,6 +78,7 @@ pub struct PreparedReplay {
     architecture: String,
     memory_mode: &'static str,
     carded_dram_bandwidth: bool,
+    hypothetical_issue_ports: Option<u32>,
     launches: Vec<PreparedLaunchIdentity>,
 }
 
@@ -93,17 +94,7 @@ impl PreparedReplay {
 
         let arch_card = load_arch_card(&config.arch_card)?;
         let arch = arch_card.arch_id().map_err(at("architecture card"))?;
-        let latencies = arch_card
-            .required_latencies()
-            .map_err(at("architecture latencies"))?;
-        let issue = IssueModelParams::from_legacy_card_latencies_for_arch(
-            arch,
-            latencies.l1_hit,
-            latencies.l2_hit,
-            latencies.dram,
-            latencies.shared,
-        )
-        .map_err(at("issue configuration"))?;
+        let issue = super::resolve_issue(config, &arch_card)?;
         let mode = resolve_mode(config, &arch_card, issue)?;
         let trace = TraceDir::open_direct_compact(&config.trace_dir).map_err(at("trace"))?;
         let exec = trace.exec_info().ok_or_else(|| {
@@ -157,6 +148,7 @@ impl PreparedReplay {
             architecture: arch.token().to_owned(),
             memory_mode: config.memory_mode.token(),
             carded_dram_bandwidth: config.carded_dram_bandwidth,
+            hypothetical_issue_ports: config.hypothetical_issue_ports,
             launches,
         })
     }
@@ -283,6 +275,7 @@ impl PreparedReplay {
             memory_mode: self.memory_mode,
             cache_scope: CacheScope::Launch.token(),
             carded_dram_bandwidth: self.carded_dram_bandwidth,
+            hypothetical_issue_ports: self.hypothetical_issue_ports,
             memory_service_candidate_count: 0,
             memory_admission_candidate_count: 0,
             memory_admission_feedback_candidate_id: None,
@@ -386,6 +379,7 @@ mod tests {
             memory_mode: MemoryMode::L1L2,
             cache_scope: CacheScope::Launch,
             carded_dram_bandwidth: false,
+            hypothetical_issue_ports: None,
             kernel_id: None,
             ncu_shaped_metrics: false,
             memory_service_candidates: None,

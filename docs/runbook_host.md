@@ -85,3 +85,13 @@ approval document.
 
 Use repeated runs when variance matters. Record tool versions and GPU state in
 experiment notes when they affect interpretation.
+
+For a model-relative issue-resource sweep, append:
+
+```bash
+--hypothetical-issue-ports 2
+```
+
+The accepted range is `1..=4`. This changes only the modeled issue transaction
+width, labels the JSON output as hypothetical, and does not modify the
+architecture card or claim a physical GPU resource.
