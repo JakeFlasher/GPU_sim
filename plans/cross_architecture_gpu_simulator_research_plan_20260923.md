@@ -411,9 +411,17 @@ zero unmapped memory ranges. Static module origin remains unresolved on all
 rows; this is an explicit provenance limitation.
 
 The first M6 baseline feasibility probe is documented in
-`docs/baseline_feasibility_20260923.md`. The retained Huerta MICRO'25 source
-does not build on this host because its old RapidJSON/header assumptions fail;
-no numeric baseline ranking is reported.
+`docs/baseline_feasibility_20260923.md`, with the Accel-Sim executable overlap
+details in `docs/accelsim_executable_overlap_probe_20260923.md`. Accel-Sim 2.0
+now builds with a local CUDA 12.8 toolchain and completes three native-trace
+replays. Its RTX3070 card and legacy `.traceg` contract do not align with this
+project's RTX3090 Ti/enhanced-protobuf boundary, so the probe remains
+non-scoring and no baseline ranking is reported.
+The Huerta MICRO'25 source also completes the same enhanced-protobuf GEMM with
+its native RTX3090 card; two successful runs are recorded in
+`docs/huerta_micro25_executable_overlap_probe_20260923.md`. Its differing card,
+counter semantics, and protobuf-map runtime instability keep that overlap
+non-scoring as well.
 
 ## 7. Measurement and reporting rules
 
@@ -434,7 +442,8 @@ not hardware validation.
 
 ## 8. Current next action
 
-Next: profile the issue loop, then build the smallest fair baseline overlap
-cell against the locally available modern simulator sources. Keep unsupported
-cells explicit; do not add another ISA, vendor, or system layer until the
-baseline comparison is either valid or explicitly blocked.
+Next: resolve the M6 alignment questions (3090 Ti-compatible card, stable
+protobuf/runtime, and a common trace/observable boundary) without weakening the
+local NCU contract. Keep both executable overlap probes as non-scoring
+evidence and unsupported cells explicit; do not add another ISA, vendor, or
+system layer while that boundary is being resolved.

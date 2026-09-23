@@ -82,10 +82,18 @@ The first architecture design artifact is the
 [SM86 issue-width study](sm86_issue_width_design_study_20260923.md): widths 2/4
 change modeled frontiers but are slower than the baseline. It is a negative,
 model-relative result and does not claim hardware behavior.
-The first M6 baseline feasibility probe is in
-[baseline_feasibility_20260923.md](baseline_feasibility_20260923.md): the
-retained Huerta MICRO'25 build is blocked by old RapidJSON/header assumptions,
-so no invalid numeric baseline comparison is reported.
+The M6 baseline feasibility notes are in
+[baseline_feasibility_20260923.md](baseline_feasibility_20260923.md) and the
+executable overlap record is in
+[accelsim_executable_overlap_probe_20260923.md](accelsim_executable_overlap_probe_20260923.md).
+Accel-Sim 2.0 now builds and completes a native-trace replay, but its native
+SM86 card is RTX 3070 and its legacy trace contract differs from the enhanced
+protobuf capture. The probe is therefore executable overlap evidence only; no
+numeric baseline ranking is reported.
+The Huerta MICRO'25 source has a same-enhanced-trace overlap record in
+[huerta_micro25_executable_overlap_probe_20260923.md](huerta_micro25_executable_overlap_probe_20260923.md);
+its RTX 3090 card, non-NCU counter, and protobuf-map runtime instability keep
+that cell non-scoring.
 
 Follow the fine-grained milestones in the
 [adversarial roadmap review](roadmap_adversarial_review_20260923.md):
