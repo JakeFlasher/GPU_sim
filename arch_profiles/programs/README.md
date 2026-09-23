@@ -40,3 +40,13 @@ words and u32 address wraparound are rejected by the executor rather than
 resolved by host-map order. `async_store` is a deferred global store with an
 explicit submit/wait token; it is not a CUDA/Vortex `cp.async` compatibility
 claim.
+
+The Curry-inspired `simt_its_v1` diamond is a separate functional feasibility
+program. It demonstrates per-lane PCs, a predicate branch, BSSY/BSYNC
+reconvergence, and lane-specific stores:
+
+```bash
+cargo run --manifest-path sim/Cargo.toml -p sim-arch --bin custom_simt_its -- \
+  arch_profiles/specs/simt_its8.json \
+  arch_profiles/programs/simt_its8_diamond.json
+```

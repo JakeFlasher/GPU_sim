@@ -33,3 +33,12 @@ silently borrowing SM86 constants.
 
 NCU values enter only through comparison tools. They do not alter trace
 replay, architecture cards, or simulator parameters.
+
+## User-defined functional seam
+
+`sim-arch::spec` is separate from production `ArchCard`. The bounded
+`simt_u32_v1` executor demonstrates lane arithmetic and resource-relative
+scheduling; the Curry-inspired `simt_its_v1` executor demonstrates per-lane
+PCs with BSSY/BSYNC/BREAK/EXIT semantics. Both are functional feasibility
+backends only. They do not alter the NVBit/SM86 replay and make no timing,
+compiler, RTL, or silicon claim.

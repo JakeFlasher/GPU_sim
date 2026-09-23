@@ -1,19 +1,16 @@
 # Running the live path
 
-Use a release build and one representative trace as the default smoke path:
+The project is judged by the final machine-grounded NCU comparison and
+simulator wall time. Use one representative trace as the smallest executable
+check before a larger run:
 
 ```bash
 cargo build --release --manifest-path sim/Cargo.toml -p sim-run
 sim/target/release/sim-run --help
 ```
 
-For a retained trace, follow [runbook_host.md](runbook_host.md) and inspect the
-result JSON plus stderr. Python utilities can be compiled without running a
-campaign:
-
-```bash
-python -m compileall -q eval workloads/research_probes tools/nvbit_tracer
-```
-
-Keep checks close to the changed path. Do not add process-only approval,
-manifest, or digest checks around a simulator replay.
+For a GPU run, use [runbook_host.md](runbook_host.md), record the exact device,
+clock/cache/replay settings, and inspect the result JSON plus stderr. Focused
+unit or parser checks are optional engineering aids; they are not scientific
+validation and do not create a project gate. Do not add process-only approval,
+manifest, digest, hash, or documentation checks around a simulator replay.

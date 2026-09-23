@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "architecture": "example_its8",
+  "isa": "simt_its_v1",
+  "max_steps": 1000,
+  "instructions": [
+    {"op": "set_lane_id", "dst": 0},
+    {"op": "cmp_lt_imm", "dst": 0, "src": 0, "imm": 4},
+    {"op": "bssy", "barrier": 0, "target": 7},
+    {"op": "branch_if", "pred": 0, "target": 6},
+    {"op": "add_imm", "dst": 1, "src": 0, "imm": 20},
+    {"op": "branch", "target": 7},
+    {"op": "add_imm", "dst": 1, "src": 0, "imm": 10},
+    {"op": "bsync", "barrier": 0},
+    {"op": "add_imm", "dst": 2, "src": 1, "imm": 1},
+    {"op": "store", "base": 300, "stride": 4, "src": 2},
+    {"op": "halt"}
+  ]
+}

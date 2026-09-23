@@ -1,0 +1,43 @@
+{
+  "schema_version": 1,
+  "architecture": "example_its8",
+  "isa": "simt_its_v1",
+  "instruction_set": [
+    "set_lane_id",
+    "cmp_lt_imm",
+    "add_imm",
+    "branch",
+    "branch_if",
+    "bssy",
+    "bsync",
+    "break",
+    "store",
+    "exit",
+    "halt"
+  ],
+  "execution": {
+    "simt_width": 8,
+    "max_resident_groups": 4
+  },
+  "resources": [
+    {
+      "name": "alu",
+      "kind": "compute",
+      "issue_width": 1,
+      "latency_cycles": 1
+    },
+    {
+      "name": "memory",
+      "kind": "memory",
+      "issue_width": 1,
+      "latency_cycles": 20
+    },
+    {
+      "name": "barrier",
+      "kind": "synchronization",
+      "issue_width": 1,
+      "latency_cycles": null
+    }
+  ],
+  "evidence": "unvalidated"
+}

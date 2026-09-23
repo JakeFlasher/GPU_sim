@@ -8,6 +8,7 @@
 //! accidental sm_120 defaults.
 
 pub mod card;
+pub mod its;
 pub mod json;
 pub mod simt;
 pub mod spec;

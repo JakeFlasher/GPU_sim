@@ -1,3 +1,8 @@
+> **Retired research draft (2026-09-23).** This document proposes a cloud
+> SM120/RTL-oriented direction and is not an active project plan. The current
+> scope is local-machine SM86 software simulation judged by NCU accuracy and
+> simulator wall time; see the current roadmap and positioning memo.
+
 # Research Draft: Event-Driven GPU Architectural Simulator (NVArchSim-Inspired)
 
 ## Research Direction

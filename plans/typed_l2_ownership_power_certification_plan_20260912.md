@@ -1,3 +1,5 @@
+> **Historical plan (2026-09-23).** Earlier power/certification proposal; retained historical context, not an active requirement. The active branch reports simulator accuracy and wall time only. See `plans/cross_architecture_gpu_simulator_research_plan_20260923.md`.
+
 # Typed L2 ownership and power state for certified summary regions
 
 ## Decision

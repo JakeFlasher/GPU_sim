@@ -5,10 +5,11 @@ description: Design and implement the event-driven, trace-driven Rust GPU simula
 
 # Design the event-driven GPU simulator
 
-The active project builds a fast Rust simulator for Ampere `sm_86`, followed
-by architecture-appropriate Blackwell `sm_120` support. Work directly from
-code, traces, architecture cards, focused experiments, and tests. Do not create
-audit companions, admission ceremonies, frozen candidates, or review swarms.
+The active project builds a fast Rust simulator for Ampere `sm_86`. `sm_120`
+is exploratory only when a local trace/card and machine are available. Work
+directly from code, traces, architecture cards, and focused executable runs;
+tests are optional engineering aids, not a research gate. Do not create audit
+companions, admission ceremonies, frozen candidates, or review swarms.
 
 ## Current components
 
@@ -25,10 +26,10 @@ campaign adapter is compiled only with the `sim-sm/campaign` feature.
 
 ## Design sources
 
-- Founding note:
-  `references/papers/notes/draft_new_gpu_simulator.md`
+- Research and positioning:
+  `docs/gpu_simulator_research_positioning_20260923.md`
 - Execution plan:
-  `plans/micro2027_ncu_sim_execution_plan.md`
+  `plans/cross_architecture_gpu_simulator_research_plan_20260923.md`
 - Progress log:
   `plans/phase2_sim_core_progress.md`
 - Simulator cards:

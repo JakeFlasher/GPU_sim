@@ -105,18 +105,6 @@ fn fixture_launch_key(process_launch_ordinal: u64) -> Value {
 }
 
 const SAMPLED_BLOCKS: [i32; 12] = [0, 1, 2, 3, 4, 5, 6, 7, 8, 57, 58, 59];
-const CYCLE_STUDY_SECTIONS: [&str; 4] = [
-    "D1 — NCU observable contract",
-    "D2 — Simulator diagnostic candidates",
-    "D3 — SM/GPC topology and spatial mapping",
-    "D4 — Launch composition and emission boundary",
-];
-const CYCLE_STUDY_SUBSECTIONS: [&str; 4] = [
-    "Target-free findings",
-    "Hypotheses only",
-    "Silicon-blocked decisions",
-    "Promotion forbidden until",
-];
 
 fn replay_modes(
     evidence: &AdmittedLaunchEvidence,
@@ -394,79 +382,6 @@ fn replace_trace_with_one_nonmemory_instruction(root: &Path) {
     write_json(&launch_manifest_path, &launch_manifest);
 }
 
-#[derive(Debug)]
-struct StudySubsection {
-    heading: String,
-    body: String,
-}
-
-#[derive(Debug)]
-struct StudySection {
-    heading: String,
-    subsections: Vec<StudySubsection>,
-}
-
-fn cycle_study_path() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../docs/cycles_semantics_study.md")
-}
-
-fn parse_cycle_study(markdown: &str) -> Result<Vec<StudySection>, String> {
-    let mut sections = Vec::new();
-    let mut current: Option<StudySection> = None;
-
-    for line in markdown.lines() {
-        if let Some(heading) = line.strip_prefix("## ") {
-            if let Some(section) = current.take() {
-                sections.push(section);
-            }
-            current = Some(StudySection {
-                heading: heading.to_owned(),
-                subsections: Vec::new(),
-            });
-            continue;
-        }
-
-        if let Some(heading) = line.strip_prefix("### ") {
-            let section = current
-                .as_mut()
-                .ok_or_else(|| format!("subsection {heading:?} precedes every study section"))?;
-            section.subsections.push(StudySubsection {
-                heading: heading.to_owned(),
-                body: String::new(),
-            });
-            continue;
-        }
-
-        let Some(section) = current.as_mut() else {
-            continue;
-        };
-        let Some(subsection) = section.subsections.last_mut() else {
-            if line.trim().is_empty() {
-                continue;
-            }
-            return Err(format!(
-                "study section {:?} has content outside an exact subsection",
-                section.heading
-            ));
-        };
-        subsection.body.push_str(line);
-        subsection.body.push('\n');
-    }
-
-    if let Some(section) = current {
-        sections.push(section);
-    }
-    Ok(sections)
-}
-
-fn study_section_text(section: &StudySection) -> String {
-    let mut text = String::new();
-    for subsection in &section.subsections {
-        text.push_str(&subsection.body);
-    }
-    text
-}
-
 fn sampled_threadblock(block_x: i32) -> Vec<u8> {
     let instruction = sim_trace::pb::Instruction {
         pc: 16,
@@ -668,61 +583,7 @@ fn convert_to_sampled_fixture(root: &Path, launch_manifest: &mut Value) {
 }
 
 #[test]
-fn p8_cycle_study_and_real_runner_guard_are_nonvacuous() {
-    let study_path = cycle_study_path();
-    let markdown = fs::read_to_string(&study_path).expect("read checked-in P8 cycle study");
-    let sections = parse_cycle_study(&markdown).expect("parse P8 cycle study sections");
-
-    assert_eq!(
-        sections.len(),
-        CYCLE_STUDY_SECTIONS.len(),
-        "study must contain exactly D1-D4"
-    );
-    for (section_index, expected_heading) in CYCLE_STUDY_SECTIONS.iter().enumerate() {
-        let section = &sections[section_index];
-        assert_eq!(&section.heading, expected_heading);
-        assert_eq!(
-            section.subsections.len(),
-            CYCLE_STUDY_SUBSECTIONS.len(),
-            "{} must contain exactly the four required subsections",
-            section.heading
-        );
-        for (subsection_index, expected_heading) in CYCLE_STUDY_SUBSECTIONS.iter().enumerate() {
-            let subsection = &section.subsections[subsection_index];
-            assert_eq!(&subsection.heading, expected_heading);
-            assert!(
-                !subsection.body.trim().is_empty(),
-                "{} / {} must be nonempty",
-                section.heading,
-                subsection.heading
-            );
-        }
-    }
-
-    let d1 = study_section_text(&sections[0]);
-    assert!(d1.contains("`gpc__cycles_elapsed.max`"));
-    assert!(d1.contains("counting unit `GPC`"));
-    assert!(d1.contains("maximum counter value across all unit instances"));
-    assert!(d1.contains("unit's clock domain"));
-
-    let d2 = study_section_text(&sections[1]);
-    assert!(d2.contains("`diagnostic_last_issue_cycles`"));
-    assert!(d2.contains("`terminal_modeled_event_time`"));
-    assert!(d2.contains("nonbinding diagnostics"));
-    assert!(d2.contains("selects neither diagnostic"));
-
-    let d3 = study_section_text(&sections[2]);
-    assert!(d3.contains("total `sm_count`"));
-    assert!(d3.contains("no admitted `gpc_count`"));
-    assert!(d3.contains("SM-to-GPC map"));
-    assert!(d3.contains("invents no GPC count"));
-
-    let d4 = study_section_text(&sections[3]);
-    assert!(d4.contains("one timing-diagnostic record per launch"));
-    assert!(d4.contains("explicit model-relative reducer"));
-    assert!(d4.contains("typed `BindingCycles` value"));
-    assert!(d4.contains("Hardware-validated promotion remains forbidden"));
-
+fn real_runner_emits_model_relative_cycles_and_metrics() {
     let output = run_manifest(fixture_root().join("run_manifest.v2.json"))
         .expect("run existing nonempty canary through real v2 consumer");
     let result: Value = serde_json::from_str(output.canonical_json()).unwrap();
