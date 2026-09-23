@@ -398,6 +398,16 @@ The next discriminating work is a second-cohort crosswalk check, then an issue
 loop profile and one demand-driven optimization only if it improves measured
 replay wall time without weakening the declared model-relative observables.
 
+The first architecture design artifact is now the negative issue-width study in
+`docs/sm86_issue_width_design_study_20260923.md`: widths 2/4 alter modeled
+frontiers but are slower than width 1. The result is retained as a design
+finding, not tuned away or promoted to hardware behavior.
+
+The first M6 baseline feasibility probe is documented in
+`docs/baseline_feasibility_20260923.md`. The retained Huerta MICRO'25 source
+does not build on this host because its old RapidJSON/header assumptions fail;
+no numeric baseline ranking is reported.
+
 ## 7. Measurement and reporting rules
 
 NCU measurements are independent targets; NVBit observations and architecture
@@ -417,8 +427,7 @@ not hardware validation.
 
 ## 8. Current next action
 
-Next: check the candidate frontier crosswalk on the retained timing-crosswalk
-holdout, record the current host clock/driver mismatch explicitly, then profile
-the issue loop and produce M4 feature/unsupported coverage. Do not add another
-ISA, vendor, or system layer until this crosswalk check and one measured speed
-decision are complete.
+Next: profile the issue loop, then build the smallest fair baseline overlap
+cell against the locally available modern simulator sources. Keep unsupported
+cells explicit; do not add another ISA, vendor, or system layer until the
+baseline comparison is either valid or explicitly blocked.

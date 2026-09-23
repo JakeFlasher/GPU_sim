@@ -78,6 +78,14 @@ The first M4 coverage inventory is in
 [sm86_feature_coverage_20260923.md](sm86_feature_coverage_20260923.md): eight
 full traces, 2,000 static records, 100 opcode spellings, empty producer-side
 unsupported arrays, and a remaining static-module provenance gap.
+The first architecture design artifact is the
+[SM86 issue-width study](sm86_issue_width_design_study_20260923.md): widths 2/4
+change modeled frontiers but are slower than the baseline. It is a negative,
+model-relative result and does not claim hardware behavior.
+The first M6 baseline feasibility probe is in
+[baseline_feasibility_20260923.md](baseline_feasibility_20260923.md): the
+retained Huerta MICRO'25 build is blocked by old RapidJSON/header assumptions,
+so no invalid numeric baseline comparison is reported.
 
 Follow the fine-grained milestones in the
 [adversarial roadmap review](roadmap_adversarial_review_20260923.md):
