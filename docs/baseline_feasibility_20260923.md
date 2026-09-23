@@ -14,7 +14,7 @@ The locally retained modern-gpu-simulator-micro-2025 source was configured for
 CUDA 13.2 and a temporary makedepend shim, then built for 300 seconds. The
 build did not produce an executable.
 
-The first blocking compiler error is in the retained RapidJSON headers:
+The first host blocking compiler error is in the retained RapidJSON headers:
 
     assignment of read-only member
     rapidjson::GenericStringRef<CharType>::length
@@ -22,6 +22,12 @@ The first blocking compiler error is in the retained RapidJSON headers:
 The source also exposes an old header dependency requiring std::function. This
 is an environment/source compatibility blocker, not evidence about simulator
 accuracy. No source in that external baseline was modified.
+
+A second attempt used a clean Ubuntu 22.04 container, the CUDA 13.2 toolkit,
+the system protobuf headers, and a temporary makedepend shim. Compilation
+advanced substantially but stopped on older assumptions in the baseline's
+CUDA/protobuf interface (`cudaDeviceProp::clockRate` and missing
+protobuf runtime_version.h). No executable was produced.
 
 ## Accel-Sim 2.0
 
