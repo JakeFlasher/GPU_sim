@@ -9,6 +9,37 @@ producer says its dependencies are resolved, its controls are clean, it has no
 external side effect, and it has one completion unit; otherwise the analyzer
 reports the region as reified.
 
+The current analyzer executes the exact and summarized recurrences separately.
+It admits only homogeneous latency/issue/capacity intervals with an exclusive
+SMSP and no incoming pipeline completions. The summary uses a closed-form
+capacity recurrence, materializes the bounded pending-completion state, and
+compares terminal state and issue frontiers with the detailed execution. Mixed
+timing, incoming work, non-contiguous sequences, controls, dependencies, and
+effects remain detailed. Certified regions are emitted individually; their
+frontier values are not summed into elapsed time.
+
+Cycle accuracy is a hard success condition for this analyzer. A mismatch in
+the complete modeled recurrence state or issue/completion frontier returns a
+typed `StateMismatch` error and produces no successful report for consumers to
+treat as certified. The serialized `terminal_state_matches` field remains a
+positive diagnostic witness on successful runs.
+
+Summary eligibility now also requires an explicit complete resident-warp roster
+through `summarize_with_residency`. The legacy `summarize` entry point treats
+residency as unknown and reifies all candidate regions. A candidate list cannot
+prove that a stalled or non-candidate warp is absent; adding an extra resident
+warp to the release probe removes the collapse, while the complete roster keeps
+the original one-region collapse.
+
+The event-order contract also follows the MGPUSim/Akita review: equal-time
+events need an explicit class/phase, and an `L2AccessBatch` sequence reservation
+must not hide logical positions from a future transformer. Retry notifications
+are future state transitions, so timestamp-only endpoint checks cannot certify
+them.
+The typed queue projection preserves batch sequence spans and the next unused
+insertion position; summaries cannot infer hidden ordering from an anchor
+sequence alone.
+
 `sim-run` accepts an observation-only Nsight Compute raw CSV through
 `--ncu-csv PATH`, with `--ncu-launch ID` required for multi-launch exports. The
 result places raw timing and resource/dependency projections under

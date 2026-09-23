@@ -159,7 +159,15 @@ def _load_card(card_path: Path | None) -> dict:
         text = raw.decode("utf-8-sig")
     except UnicodeDecodeError as error:
         raise WalkerConfigError(f"card {path} is not valid UTF-8") from error
-    return json.loads(text, parse_float=Decimal)
+    try:
+        document = json.loads(text, parse_float=Decimal)
+    except json.JSONDecodeError as error:
+        raise WalkerConfigError(f"card {path} is not valid JSON: {error}") from error
+    if not isinstance(document, dict):
+        raise WalkerConfigError(
+            f"card {path} root must be a JSON object; got {type(document).__name__}"
+        )
+    return document
 
 
 def _require_value(prop: dict, prop_name: str):
@@ -414,7 +422,7 @@ class WarpPoolAccessInvalid(Exception):
 
 
 def _normalize_access(access: tuple) -> tuple[int, int, bool]:
-    """Coerce to the canonical ``(line_id, sector_id, l1_eligible)``
+    """Normalize to the canonical ``(line_id, sector_id, l1_eligible)``
     shape under the EXISTING walker's contract (the adapter still
     emits both forms):
 
@@ -435,11 +443,38 @@ def _normalize_access(access: tuple) -> tuple[int, int, bool]:
         )
     if len(access) == 2:
         line_id, l1_eligible = access
-        return (int(line_id), int(line_id) * SECTORS_PER_LINE,
-                bool(l1_eligible))
+        if (
+            isinstance(line_id, bool)
+            or not isinstance(line_id, int)
+            or line_id < 0
+            or not isinstance(l1_eligible, bool)
+        ):
+            raise WarpPoolAccessInvalid(
+                f"access fields must be a nonnegative integer line_id "
+                f"and bool eligibility; got {access!r}"
+            )
+        return line_id, line_id * SECTORS_PER_LINE, l1_eligible
     if len(access) == 3:
         line_id, sector_id, l1_eligible = access
-        return int(line_id), int(sector_id), bool(l1_eligible)
+        if (
+            isinstance(line_id, bool)
+            or not isinstance(line_id, int)
+            or line_id < 0
+            or isinstance(sector_id, bool)
+            or not isinstance(sector_id, int)
+            or sector_id < 0
+            or not isinstance(l1_eligible, bool)
+        ):
+            raise WarpPoolAccessInvalid(
+                f"access fields must be nonnegative integers and bool "
+                f"eligibility; got {access!r}"
+            )
+        if sector_id // SECTORS_PER_LINE != line_id:
+            raise WarpPoolAccessInvalid(
+                f"sector_id {sector_id} does not belong to line_id "
+                f"{line_id}"
+            )
+        return line_id, sector_id, bool(l1_eligible)
     raise WarpPoolAccessInvalid(
         f"access must be (line_id, l1_eligible) or "
         f"(line_id, sector_id, l1_eligible); got {access!r}")
@@ -473,10 +508,10 @@ def walk_warp_pool(
     times with persistent line/sector cache state and DISCARDED
     counters (in-flight fills drain at each launch boundary; warps
     re-admit fresh each launch), then ONE measured launch runs
-    against the warm cache and its counters are returned. When
-    warmup is requested the access streams are materialized so they
-    can be replayed (single-use iterators are only safe at
-    warmup_launches=0).
+    against the warm cache and its counters are returned. The outer
+    access collection is materialized once so one-shot iterators are
+    not consumed by validation. When warmup is requested, each access
+    stream is also materialized so it can be replayed.
     """
     if mode not in ("warp_pool", "round_robin", "concatenated"):
         raise ValueError(f"unknown mode {mode!r}")
@@ -513,6 +548,10 @@ def walk_warp_pool(
         or hit_latency >= miss_latency
     ):
         raise WalkerConfigError("latencies must be finite, positive, and hit < miss")
+    # Validation below iterates the outer collection. Preserve one-shot
+    # callers for the actual launch walk instead of silently turning a
+    # generator workload into an empty result.
+    per_warp_accesses = list(per_warp_accesses)
     try:
         warp_keys = [key for key, _ in per_warp_accesses]
         if len(set(warp_keys)) != len(warp_keys):
@@ -785,7 +824,12 @@ def co_resident_warp_limit(
     """Co-residency from launch geometry + occupancy: resident warps
     per SM = min(blocks-per-SM cap x warps per block, the occupancy
     warp limit)."""
-    if warps_per_block <= 0 or blocks_per_sm_limit <= 0:
-        raise WalkerConfigError("geometry values must be positive")
+    for name, value in (
+        ("warps_per_block", warps_per_block),
+        ("blocks_per_sm_limit", blocks_per_sm_limit),
+        ("occupancy_warp_limit", occupancy_warp_limit),
+    ):
+        if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+            raise WalkerConfigError(f"{name} must be a positive integer")
     return min(warps_per_block * blocks_per_sm_limit,
                occupancy_warp_limit)

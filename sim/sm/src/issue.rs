@@ -95,11 +95,12 @@ use sim_mem::{
 };
 #[cfg(feature = "reference")]
 use sim_semantics::{
-    AsyncCopyBoundaryState, AsyncGroupBoundaryState, BlockBoundaryState, BoundarySnapshot,
-    CanonicalLineKey, InstructionCacheEntryState, InstructionCacheState,
-    InstructionFrontEndBoundaryState, InstructionStreamLineState, InstructionStreamState,
-    L1BoundaryState, L2RequestKey, L2RequestOwner, L2RequestState, MemoryPipelineBoundaryState,
-    ScalarPipelineBoundaryState, WarpBoundaryState,
+    AsyncCopyBoundaryState, AsyncCopyBypassObservationState, AsyncCopyCohortBoundaryState,
+    AsyncGroupBoundaryState, BlockBoundaryState, BoundarySnapshot, CanonicalLineKey,
+    InstructionCacheEntryState, InstructionCacheState, InstructionFrontEndBoundaryState,
+    InstructionStreamLineState, InstructionStreamState, L1BoundaryState, L2RequestKey,
+    L2RequestOwner, L2RequestState, MemoryPipelineBoundaryState, ScalarPipelineBoundaryState,
+    TypedResponseKind, WarpBoundaryState,
 };
 
 use crate::control_bits::{ControlDomainError, DepBarrier, WaitMask};
@@ -237,15 +238,15 @@ impl SharedMemoryResidency {
     }
 }
 
-/// Source of scheduler-resource values. The architecture-default source is
-/// executable; the full card source remains unavailable until every card field
-/// is consumed rather than shadowed by structural constants.
+/// Source of scheduler-resource values. Carded SM86 resources are executable
+/// only when every structural field matches the fixed topology consumed by
+/// this executor; divergent cards fail closed rather than being shadowed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IssueResourceSource {
     /// Existing sm_86-only 25/8/48 architecture-local hypotheses.
     ArchitectureDefaults,
-    /// Strict architecture-card resources. Construction is supported, but replay
-    /// remains unavailable while structural fields are dormant.
+    /// Strict architecture-card resources, restricted to the currently
+    /// consumed SM86 topology.
     Carded(RequiredIssueResources),
     /// Unit-test-only lane for boundary tests that need synthetic scheduler
     /// values. This variant does not exist in production builds.
@@ -269,8 +270,8 @@ impl IssueResourceSource {
 
 /// Timing parameters. The executable configuration combines card latencies
 /// with architecture-local defaults. [`IssueModelParams::from_card`] accepts a
-/// complete card projection, but that source is not executable until the
-/// scheduler consumes all of its structural fields.
+/// complete card projection and executes only topology-compatible structural
+/// resources; divergent card values fail closed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct IssueModelParams {
     /// Deployment architecture whose card and issue hypotheses produced these parameters.
@@ -288,6 +289,12 @@ pub struct IssueModelParams {
     /// constructors intentionally leave it unset until an independent
     /// scheduler-port model replaces the rejected single-stream candidate.
     pub(crate) scalar_execution_pipeline: Option<ScalarExecutionPipeline>,
+    /// Number of independent issue slots available per SMSP.  Carded values
+    /// are consumed by the transaction loop rather than rejected as dormant
+    /// topology fields.
+    pub(crate) issue_ports: u32,
+    /// Whether a second issue transaction may be admitted in the same cycle.
+    pub(crate) dual_issue_supported: bool,
     /// Source-hit return cadence for cacheable asynchronous copies.
     pub(crate) ldgsts_l1_hit_return_service: Option<LdgstsL1HitReturnService>,
     /// Additional SM-side return service for static `LDG.*.CONSTANT` loads.
@@ -505,6 +512,8 @@ impl IssueModelParams {
                     .require("memory_issue_pipeline")?,
             ),
             scalar_execution_pipeline: None,
+            issue_ports: 1,
+            dual_issue_supported: false,
             ldgsts_l1_hit_return_service: Some(ldgsts_l1_hit_return_service),
             constant_memory_return_service: Some(constant_memory_return_service),
             immediate_constant_cache: Some(
@@ -531,8 +540,7 @@ impl IssueModelParams {
 
     /// Construct the strict carded resource lane without a legacy fallback.
     /// Successful construction verifies that all five resource blocks and all
-    /// required latency entries came from the same architecture-bound card. It
-    /// cannot run until the scheduler consumes the dormant structural fields.
+    /// required latency entries came from the same architecture-bound card.
     pub fn from_card(expected_arch: ArchId, card: &ArchCard) -> Result<Self, IssueError> {
         let arch = card.arch_id()?;
         if arch != expected_arch {
@@ -573,6 +581,8 @@ impl IssueModelParams {
                     .require("memory_issue_pipeline")?,
             ),
             scalar_execution_pipeline: None,
+            issue_ports: resources.smsp.issue_ports,
+            dual_issue_supported: resources.dual_issue_supported,
             ldgsts_l1_hit_return_service: Some(ldgsts_l1_hit_return_service),
             constant_memory_return_service: Some(constant_memory_return_service),
             immediate_constant_cache: Some(
@@ -726,9 +736,33 @@ impl IssueModelParams {
         self.max_resident_blocks_per_sm
     }
 
+    pub const fn issue_ports(&self) -> u32 {
+        self.issue_ports
+    }
+
+    pub const fn dual_issue_supported(&self) -> bool {
+        self.dual_issue_supported
+    }
+
     pub(crate) fn validate_resource_source(&self) -> Result<(), IssueError> {
         match self.resource_source {
             IssueResourceSource::ArchitectureDefaults => {
+                if self.issue_ports != 1 || self.dual_issue_supported {
+                    return Err(IssueError::ArchitectureDefaultMismatch {
+                        arch: self.arch,
+                        field: if self.issue_ports != 1 {
+                            "issue_ports"
+                        } else {
+                            "dual_issue_supported"
+                        },
+                        expected: if self.issue_ports != 1 { 1 } else { 0 },
+                        got: if self.issue_ports != 1 {
+                            u64::from(self.issue_ports)
+                        } else {
+                            1
+                        },
+                    });
+                }
                 let hypotheses = self.arch.issue_hypotheses().require("issue_hypotheses")?;
                 let instruction_front_end = self
                     .arch
@@ -948,8 +982,67 @@ impl IssueModelParams {
                 }
                 Ok(())
             }
-            IssueResourceSource::Carded(_) => {
-                Err(IssueError::CardedResourcesNotImplemented { arch: self.arch })
+            IssueResourceSource::Carded(resources) => {
+                let expected = [
+                    (
+                        "smsp.count",
+                        SUB_CORES as u64,
+                        u64::from(resources.smsp.count),
+                    ),
+                    (
+                        "dep_barriers.count",
+                        DEP_BARRIERS as u64,
+                        u64::from(resources.dep_barriers.count),
+                    ),
+                    // Issue-port width and dual issue are now consumed by the
+                    // scheduler.  Keep only the structural count/barrier
+                    // checks here; arbitrary carded widths are valid.
+                    (
+                        "occupancy.max_resident_warps_per_sm",
+                        u64::from(self.max_resident_warps_per_sm),
+                        u64::from(resources.occupancy.max_resident_warps_per_sm),
+                    ),
+                    (
+                        "occupancy.max_blocks",
+                        u64::from(self.max_resident_blocks_per_sm),
+                        u64::from(resources.occupancy.max_blocks),
+                    ),
+                ];
+                for (field, expected, got) in expected {
+                    if expected != got {
+                        return Err(IssueError::CardedResourceMismatch {
+                            arch: self.arch,
+                            field,
+                            expected,
+                            got,
+                        });
+                    }
+                }
+                if resources.smsp.issue_ports == 0 {
+                    return Err(IssueError::CardedResourceMismatch {
+                        arch: self.arch,
+                        field: "smsp.issue_ports",
+                        expected: 1,
+                        got: 0,
+                    });
+                }
+                if self.issue_ports != resources.smsp.issue_ports {
+                    return Err(IssueError::CardedResourceMismatch {
+                        arch: self.arch,
+                        field: "smsp.issue_ports",
+                        expected: u64::from(resources.smsp.issue_ports),
+                        got: u64::from(self.issue_ports),
+                    });
+                }
+                if self.dual_issue_supported != resources.dual_issue_supported {
+                    return Err(IssueError::CardedResourceMismatch {
+                        arch: self.arch,
+                        field: "dual_issue.supported",
+                        expected: if resources.dual_issue_supported { 1 } else { 0 },
+                        got: if self.dual_issue_supported { 1 } else { 0 },
+                    });
+                }
+                Ok(())
             }
             #[cfg(test)]
             IssueResourceSource::SyntheticTestFixture => Ok(()),
@@ -1063,9 +1156,14 @@ pub enum IssueError {
         got: CtaBarrierIssue,
     },
     #[error(
-        "carded issue resources are not implemented for architecture {arch}: the executor does not yet consume smsp.count, smsp.issue_ports, occupancy.max_blocks, dep_barriers.count/storage, or dual_issue.supported"
+        "carded issue resource {field}={got} is incompatible with the consumed SM86 topology; expected {expected} for {arch}"
     )]
-    CardedResourcesNotImplemented { arch: ArchId },
+    CardedResourceMismatch {
+        arch: ArchId,
+        field: &'static str,
+        expected: u64,
+        got: u64,
+    },
     #[error("architecture-default mismatch for {arch}: {field} is {got}, expected {expected}")]
     ArchitectureDefaultMismatch {
         arch: ArchId,
@@ -1676,6 +1774,8 @@ pub struct ReadinessCauseCycles {
     pub pipeline_branch: u64,
     pub pipeline_tensor: u64,
     #[serde(skip_serializing_if = "is_zero_u64")]
+    pub pipeline_sfu: u64,
+    #[serde(skip_serializing_if = "is_zero_u64")]
     pub pipeline_alu: u64,
     #[serde(skip_serializing_if = "is_zero_u64")]
     pub memory_admission_queue: u64,
@@ -1716,6 +1816,7 @@ impl ReadinessCauseCycles {
         add!(pipeline_barrier);
         add!(pipeline_branch);
         add!(pipeline_tensor);
+        add!(pipeline_sfu);
         add!(pipeline_alu);
         add!(memory_admission_queue);
         add!(memory_issue_queue);
@@ -3143,8 +3244,12 @@ impl MemoryServiceCandidateState {
             .entries
             .as_deref()
             .expect("nonempty candidate state owns runtime entries");
-        for index in 0..usize::from(self.count) {
-            entries[index] = runtime_entries[index].result;
+        for (entry, runtime) in entries
+            .iter_mut()
+            .zip(runtime_entries.iter())
+            .take(usize::from(self.count))
+        {
+            *entry = runtime.result;
         }
         MemoryServiceCandidateDiagnostics {
             count: self.count,
@@ -3164,8 +3269,7 @@ impl MemoryServiceCandidateState {
             .entries
             .as_deref_mut()
             .expect("observe is called only for a nonempty candidate state");
-        for index in 0..usize::from(self.count) {
-            let runtime = &mut entries[index];
+        for runtime in entries.iter_mut().take(usize::from(self.count)) {
             let candidate = runtime.result.candidate;
             if !candidate.matches(class) {
                 continue;
@@ -4944,9 +5048,15 @@ impl ReadinessDiagnostics {
     /// the active per-SMSP memory queue/address pipeline and SM-shared acceptor.
     /// Schema 25 adds causal per-SMSP Immediate Constant Cache probe and
     /// replay accounting; these counters remain observation-only.
+    /// Schema 26 separates the uniform/SFU readiness counter from the tensor
+    /// pipeline counter.
     pub fn schema_version(&self) -> u32 {
         let feedback = self.memory_admission_feedback.as_deref();
-        if self.immediate_constant_cache.is_some() {
+        if self.limiting_cycles.pipeline_sfu != 0
+            || self.constraint_exposure_cycles.pipeline_sfu != 0
+        {
+            26
+        } else if self.immediate_constant_cache.is_some() {
             25
         } else if self.memory_issue_pipeline.is_some() {
             24
@@ -5220,6 +5330,14 @@ impl ResponseId {
             sector_index,
         }
     }
+
+    pub(crate) const fn boundary_identity(self) -> (u64, u64, u64) {
+        (
+            self.warp as u64,
+            self.instruction as u64,
+            self.sector_index as u64,
+        )
+    }
 }
 
 /// What the response to one modeled memory request must do at arrival.
@@ -5257,7 +5375,7 @@ pub enum ReplyTo {
 }
 
 impl ReplyTo {
-    const fn response_id(self) -> Option<ResponseId> {
+    pub(crate) const fn response_id(self) -> Option<ResponseId> {
         match self {
             Self::L1Fill { response_id, .. }
             | Self::Warp { response_id, .. }
@@ -5275,12 +5393,19 @@ impl MemRequest {
         }
     }
 
-    fn fold_sector_origin(&mut self, origin: MemoryOrigin, sector_bit: u8, constant_load: bool) {
+    fn fold_sector_origin(
+        &mut self,
+        origin: MemoryOrigin,
+        sector_bit: u8,
+        constant_load: bool,
+        constant_deep: bool,
+    ) {
         self.sector_mask |= sector_bit;
         if origin == MemoryOrigin::Local {
             self.local_sector_mask |= sector_bit;
         }
         self.constant_load |= constant_load;
+        self.constant_deep |= constant_deep;
     }
 
     /// An L1 fill request (line alloc or resident-sector fetch): Read
@@ -5315,12 +5440,15 @@ impl MemRequest {
     }
 
     /// A follow-up sector fetch for a merge onto an older in-flight
-    /// fill: same provenance and class as the fill, no reply (the
-    /// waiter rides the original fill's response).
+    /// fill. It carries its own L1 sector-fill response token: sectored
+    /// MSHRs complete per returned 32-byte child, so the late sector cannot
+    /// clear its waiter when the parent's line child returns.
     fn l1_followup_fetch(
         issue_time: u64,
         sector_id: i64,
         origin: MemoryOrigin,
+        fill: FillKey,
+        response_id: ResponseId,
         constant_load: bool,
         constant_deep: bool,
     ) -> Self {
@@ -5335,7 +5463,7 @@ impl MemRequest {
             operation: MemoryOperation::Read,
             constant_load,
             constant_deep,
-            reply: ReplyTo::None,
+            reply: ReplyTo::L1Fill { fill, response_id },
             admission_witness: None,
         }
     }
@@ -5381,22 +5509,30 @@ impl MemRequest {
     }
 
     pub(crate) fn has_valid_contract(self) -> bool {
-        let base = match (self.source, self.operation, self.reply) {
-            (L2Source::L1Fill, MemoryOperation::Read, ReplyTo::L1Fill { .. } | ReplyTo::None)
-            | (
+        let base = matches!(
+            (self.source, self.operation, self.reply),
+            (
+                L2Source::L1Fill,
+                MemoryOperation::Read,
+                ReplyTo::L1Fill { .. } | ReplyTo::None
+            ) | (
                 L2Source::Bypass,
                 MemoryOperation::Read,
                 ReplyTo::Warp { .. } | ReplyTo::AsyncCopy { .. } | ReplyTo::None,
-            )
-            | (L2Source::Untagged, MemoryOperation::Read, ReplyTo::Warp { .. } | ReplyTo::None)
-            | (L2Source::Bypass, MemoryOperation::Atomic, ReplyTo::Warp { .. } | ReplyTo::None)
-            | (
+            ) | (
+                L2Source::Untagged,
+                MemoryOperation::Read,
+                ReplyTo::Warp { .. } | ReplyTo::None
+            ) | (
+                L2Source::Bypass,
+                MemoryOperation::Atomic,
+                ReplyTo::Warp { .. } | ReplyTo::None
+            ) | (
                 L2Source::Store,
                 MemoryOperation::Store | MemoryOperation::Reduction,
                 ReplyTo::None,
-            ) => true,
-            _ => false,
-        };
+            )
+        );
         let admission = match self.admission_witness {
             None => true,
             Some(witness) => {
@@ -6576,6 +6712,7 @@ enum ReadinessCause {
     PipelineBarrier,
     PipelineBranch,
     PipelineTensor,
+    PipelineSfu,
     PipelineAlu,
     MemoryAdmissionQueue,
     MemoryIssueQueue,
@@ -6672,6 +6809,9 @@ impl ReadinessCauseCycles {
             }
             ReadinessCause::PipelineTensor => {
                 ("tensor-pipeline readiness", &mut self.pipeline_tensor)
+            }
+            ReadinessCause::PipelineSfu => {
+                ("uniform/SFU-pipeline readiness", &mut self.pipeline_sfu)
             }
             ReadinessCause::PipelineAlu => {
                 ("scalar-ALU pipeline readiness", &mut self.pipeline_alu)
@@ -7269,7 +7409,7 @@ fn build_bypass_cohort_observation(
     let bypass_rate = params
         .ldgsts_completion_throughput
         .bypass_payload_bytes_per_cycle;
-    debug_assert!(bypass_rate != 0 && common_rate % bypass_rate == 0);
+    debug_assert!(bypass_rate != 0 && common_rate.is_multiple_of(bypass_rate));
     let work_per_byte = common_rate / bypass_rate;
     let mut payload_work_sum = 0_u64;
     let mut destination_lines_sum = 0_u64;
@@ -7896,7 +8036,15 @@ impl AsyncCopySlot {
                             got: 0,
                         },
                     )?;
-                    debug_assert!(last >= first);
+                    if last < first {
+                        return Err(IssueError::AsyncCopyCohortProjectionInvalid {
+                            warp,
+                            instruction: copy.instruction,
+                            field: "cohort response order",
+                            expected: first,
+                            got: last,
+                        });
+                    }
                     cohort_anchor = Some(cohort_anchor.map_or(first, |anchor| anchor.min(first)));
                     cohort_envelope_end = cohort_envelope_end.max(last);
                 }
@@ -7916,8 +8064,8 @@ impl AsyncCopySlot {
                             got: 0,
                         },
                     )?;
-                    let prearrival_window = first.saturating_sub(cohort_anchor);
-                    let response_stream = last.saturating_sub(first);
+                    let prearrival_window = first - cohort_anchor;
+                    let response_stream = last - first;
                     let prearrival_hidden = cohort.topology_penalty.min(prearrival_window);
                     let topology_after_prearrival = cohort.topology_penalty - prearrival_hidden;
                     let stream_hidden = topology_after_prearrival.min(response_stream);
@@ -7948,7 +8096,7 @@ impl AsyncCopySlot {
                     cohort_response_span = checked_u64_counter_add(
                         "observed bypass cohort response span",
                         cohort_response_span,
-                        last.saturating_sub(first),
+                        last - first,
                     )?;
                     cohort_topology_penalty = checked_u64_counter_add(
                         "observed bypass cohort topology penalty",
@@ -7968,7 +8116,7 @@ impl AsyncCopySlot {
                 cohort_response_envelope = checked_u64_counter_add(
                     "observed bypass cohort response envelope",
                     cohort_response_envelope,
-                    cohort_envelope_end.saturating_sub(cohort_anchor),
+                    cohort_envelope_end - cohort_anchor,
                 )?;
                 cohort_topology_residual_exposure =
                     cohort_topology_residual_exposure.max(copy_residual_exposure);
@@ -8875,32 +9023,31 @@ struct SharedL2State {
     /// Response identities indexed separately so admission checks do not scan
     /// every outstanding token for each sector in a wide instruction.
     outstanding_response_ids: HashMap<ResponseId, ReplyTo>,
+    /// Exact sector mask carried by each outstanding response-bearing request.
+    /// This stays separate from `fill_masks`, which is the physical L2
+    /// exactly-once traffic mask and may include a later child fill.
+    response_masks: HashMap<ResponseId, u8>,
     /// Barrier units cleared when the keyed L1 fill completes.
     fill_waiters: HashMap<FillKey, Waiters>,
     /// Per in-flight LINE fill: the sector bits already sent to the L2
     /// (the fill request's mask plus any follow-up fetches). A merge
     /// onto a sector NOT yet in the mask sends a follow-up sector
-    /// fetch (`ReplyTo::None` — the waiter still rides the original
-    /// fill's response, the documented merge timing); a re-touch of a
-    /// sent sector sends nothing, like the hardware MSHR. Entries die
-    /// with the fill response. Exactly-once is PER FILL, not
+    /// fetch with its own L1 sector response; a re-touch of a sent
+    /// sector sends nothing, like the hardware MSHR. Entries die
+    /// with the parent line response. Exactly-once is PER FILL, not
     /// per-address-epoch: if a resident line with an in-flight SECTOR
     /// fill is evicted and re-allocated, the new fill may re-fetch a
     /// sector whose zombie fetch is still outstanding (rare
     /// eviction-window corner, documented at the 2026-07-07 gate).
     fill_masks: HashMap<i64, u8>,
-    /// Line fills emitted during the CURRENT emission batch (one
-    /// `advance` or `on_response` call — the window whose requests are
-    /// still unscheduled in the caller's `out`): line id → first index in
-    /// `out`. A merge onto one of these FOLDS its sector into the fill
-    /// request's mask, so the sector participates in worst-of-mask
-    /// pricing regardless of which warp/instruction/retry-entry of the
-    /// batch touched it (the MSHR accumulates sectors until the SM
-    /// yields — gate finding 2026-07-07: per-instruction folding made
-    /// the priced arm depend on batch boundaries instead of physics).
+    /// Line fills emitted during the CURRENT timestamped emission batch:
+    /// `(line, issue_time) → first index in out`. A merge onto one of these
+    /// folds its sector into the fill request's mask. Requests for the same
+    /// line at a later local cycle receive an independent sector token; a
+    /// whole `advance` call is not a same-cycle packet boundary.
     /// Cleared at every batch entry; indices are only valid because
     /// each batch starts with an empty `out`.
-    line_folds: HashMap<i64, usize>,
+    line_folds: HashMap<(i64, u64), usize>,
     retry: VecDeque<Retry>,
 }
 
@@ -9265,6 +9412,8 @@ pub(crate) struct SmCore<'a> {
     /// Earliest issue time of each SMSP's local Tensor Core. This timeline is
     /// kernel-local but survives CTA retirement/admission waves on the SM.
     tensor_pipe_ready: [u64; SUB_CORES],
+    /// Independent per-SMSP uniform/SFU initiation timeline.
+    sfu_pipe_ready: [u64; SUB_CORES],
     /// Finite scalar INT/FP execution windows, one per SMSP.
     scalar_execution_pipeline: Option<Box<ScalarExecutionPipelineState>>,
     /// Cold shared observer/async-return state is boxed to keep the actor's
@@ -9285,6 +9434,9 @@ pub(crate) struct SmCore<'a> {
     memory_service_candidates: MemoryServiceCandidateState,
     emit_admission_witnesses: bool,
     memory_admission_feedback: Option<Box<MemoryAdmissionFeedbackState>>,
+    /// Effective picks from the previous transaction in the current logical
+    /// cycle. Distinguishes dispatch progress from a parked IMC miss.
+    last_issue_picks: [Option<usize>; SUB_CORES],
     issued: u64,
     t: u64,
     /// Latest modeled SM-local completion frontier that can occur after the
@@ -9573,6 +9725,7 @@ impl<'a> SmCore<'a> {
                 response_owner: allocate_response_owner()?,
                 outstanding_replies: HashSet::new(),
                 outstanding_response_ids: HashMap::new(),
+                response_masks: HashMap::new(),
                 fill_waiters: HashMap::new(),
                 fill_masks: HashMap::new(),
                 line_folds: HashMap::new(),
@@ -9683,6 +9836,7 @@ impl<'a> SmCore<'a> {
             barrier_issue,
             barrier_pipe_ready: 0,
             tensor_pipe_ready: [0; SUB_CORES],
+            sfu_pipe_ready: [0; SUB_CORES],
             scalar_execution_pipeline,
             shared_write_lookup_runtime: Box::new(SharedWriteLookupRuntime {
                 observer: write_lookup_observer,
@@ -9695,6 +9849,7 @@ impl<'a> SmCore<'a> {
             memory_service_candidates: MemoryServiceCandidateState::default(),
             emit_admission_witnesses: false,
             memory_admission_feedback: None,
+            last_issue_picks: [None; SUB_CORES],
             issued: 0,
             // Keep the scheduler/event clock anchored at zero.  The
             // architecture-scoped SM-active observation boundary is an
@@ -9733,7 +9888,39 @@ impl<'a> SmCore<'a> {
     }
 
     #[cfg(feature = "reference")]
-    pub(crate) fn typed_l2_request_owners(&self, sm_id: u32) -> Vec<L2RequestOwner> {
+    pub(crate) fn typed_l2_request_key(&self, sm_id: u32, reply: ReplyTo) -> Option<L2RequestKey> {
+        let response_id = reply.response_id()?;
+        let response_kind = match reply {
+            ReplyTo::L1Fill {
+                fill: FillKey::Line { .. },
+                ..
+            } => TypedResponseKind::L1Fill,
+            ReplyTo::L1Fill {
+                fill: FillKey::Sector { .. },
+                ..
+            } => TypedResponseKind::L1SectorFill,
+            ReplyTo::Warp { .. } => TypedResponseKind::Warp,
+            ReplyTo::AsyncCopy { .. } => TypedResponseKind::AsyncCopy,
+            ReplyTo::None => return None,
+        };
+        let warp_slot = self.warps.get(response_id.warp)?.warp_slot;
+        let (response_warp, instruction, sector_index) = response_id.boundary_identity();
+        Some(L2RequestKey {
+            sm_id,
+            response_warp,
+            warp_slot,
+            instruction,
+            sector_index,
+            response_kind,
+        })
+    }
+
+    #[cfg(feature = "reference")]
+    pub(crate) fn typed_l2_request_owners(
+        &self,
+        sm_id: u32,
+        response_due: &[(u64, u64, u64, u64, Option<u64>)],
+    ) -> Vec<L2RequestOwner> {
         let MemModel::L1Shared(state) = &self.mem else {
             return Vec::new();
         };
@@ -9741,50 +9928,89 @@ impl<'a> SmCore<'a> {
             .outstanding_response_ids
             .iter()
             .map(|(response_id, reply)| {
+                let direct_identity = self
+                    .warps
+                    .get(response_id.warp)
+                    .and_then(|warp| warp.sectors.get(response_id.sector_index))
+                    .map(|sector_id| {
+                        (
+                            CanonicalLineKey::VirtualAbsolute {
+                                line_id: sector_id.div_euclid(4),
+                            },
+                            1_u8 << sector_id.rem_euclid(4) as u8,
+                        )
+                    });
                 let (line, sector_mask, response_kind) = match reply {
                     ReplyTo::L1Fill { fill, .. } => match fill {
                         FillKey::Line { line, .. } => (
                             CanonicalLineKey::VirtualAbsolute { line_id: *line },
-                            state.fill_masks.get(line).copied().unwrap_or(0),
-                            "l1_fill",
+                            state
+                                .response_masks
+                                .get(response_id)
+                                .copied()
+                                .or_else(|| state.fill_masks.get(line).copied())
+                                .unwrap_or(0),
+                            TypedResponseKind::L1Fill,
                         ),
                         FillKey::Sector { line, sector, .. } => (
                             CanonicalLineKey::VirtualAbsolute { line_id: *line },
-                            1_u8 << *sector,
-                            "l1_sector_fill",
+                            state
+                                .response_masks
+                                .get(response_id)
+                                .copied()
+                                .unwrap_or(1_u8 << *sector),
+                            TypedResponseKind::L1SectorFill,
                         ),
                     },
                     ReplyTo::Warp { .. } => {
-                        (CanonicalLineKey::Unknown { line_id: None }, 0, "warp")
+                        let (line, sector_mask) = direct_identity
+                            .unwrap_or((CanonicalLineKey::Unknown { line_id: None }, 0));
+                        (line, sector_mask, TypedResponseKind::Warp)
                     }
                     ReplyTo::AsyncCopy { .. } => {
-                        (CanonicalLineKey::Unknown { line_id: None }, 0, "async_copy")
+                        let (line, sector_mask) = direct_identity
+                            .unwrap_or((CanonicalLineKey::Unknown { line_id: None }, 0));
+                        (line, sector_mask, TypedResponseKind::AsyncCopy)
                     }
-                    ReplyTo::None => (CanonicalLineKey::Unknown { line_id: None }, 0, "none"),
+                    ReplyTo::None => (
+                        CanonicalLineKey::Unknown { line_id: None },
+                        0,
+                        TypedResponseKind::None,
+                    ),
                 };
                 let warp_slot = self
                     .warps
                     .get(response_id.warp)
                     .map(|warp| warp.warp_slot)
                     .unwrap_or(-1);
+                let (warp, instruction, sector_index) = response_id.boundary_identity();
+                let due = response_due.iter().find(
+                    |(candidate_warp, candidate_instruction, candidate_sector, _, _)| {
+                        (*candidate_warp, *candidate_instruction, *candidate_sector)
+                            == (warp, instruction, sector_index)
+                    },
+                );
                 L2RequestOwner {
                     request: L2RequestKey {
                         sm_id,
+                        response_warp: warp,
                         warp_slot,
-                        instruction: u64::try_from(response_id.instruction).unwrap_or(u64::MAX),
-                        sector_index: u32::try_from(response_id.sector_index).unwrap_or(u32::MAX),
-                        response_kind: response_kind.to_owned(),
+                        instruction,
+                        sector_index,
+                        response_kind,
                     },
                     line,
                     sector_mask,
+                    allocation_generation: due.and_then(|(_, _, _, _, generation)| *generation),
                     state: L2RequestState::Outstanding,
-                    due: None,
+                    due: due.map(|(_, _, _, due, _)| *due),
                 }
             })
             .collect::<Vec<_>>();
         owners.sort_by(|left, right| {
             (
                 left.request.sm_id,
+                left.request.response_warp,
                 left.request.warp_slot,
                 left.request.instruction,
                 left.request.sector_index,
@@ -9792,6 +10018,7 @@ impl<'a> SmCore<'a> {
             )
                 .cmp(&(
                     right.request.sm_id,
+                    right.request.response_warp,
                     right.request.warp_slot,
                     right.request.instruction,
                     right.request.sector_index,
@@ -9804,6 +10031,95 @@ impl<'a> SmCore<'a> {
     #[cfg(feature = "reference")]
     pub(crate) fn typed_l1_state(&self) -> Option<L1BoundaryState> {
         self.mem.l1().map(L1Cache::typed_boundary_state)
+    }
+
+    #[cfg(feature = "reference")]
+    pub(crate) fn typed_local_completion_time(&self) -> Option<u64> {
+        self.local_completion_time
+    }
+
+    #[cfg(feature = "reference")]
+    pub(crate) fn typed_unprojected_timing_state(&self) -> Vec<String> {
+        let mut reasons = Vec::new();
+        if self.sfu_pipe_ready.iter().any(|&ready| ready != 0) {
+            // This resource survives CTA retirement/admission, but schema 15
+            // does not serialize its availability. Never certify an exact
+            // continuation using only the independent tensor frontier.
+            reasons.push("sfu_pipeline_state".to_owned());
+        }
+        if !self.unmodeled_tails.is_empty() {
+            // TailFlags are capability boundaries for completion effects that
+            // are deliberately outside the modeled event stream. Preserve
+            // them as a contract-level refusal instead of allowing a typed
+            // boundary to imply complete writeback/coherence/RMW behavior.
+            reasons.push("unmodeled_completion_tails".to_owned());
+        }
+        if let MemModel::L1Shared(state) = &self.mem
+            && (!state.fill_waiters.is_empty()
+                || !state.fill_masks.is_empty()
+                || !state.line_folds.is_empty()
+                || !state.retry.is_empty())
+        {
+            // These shared-L2 side maps select which parked sector range,
+            // waiter, and per-fill mask transition runs after a response.
+            // L1 tags and response owners alone cannot reconstruct that
+            // transaction boundary.
+            reasons.push("shared_l2_transient_state".to_owned());
+        }
+        if self
+            .typed_l1_state()
+            .is_some_and(|l1| !l1.line_fills.is_empty() || !l1.sector_fills.is_empty())
+        {
+            // The typed response owner carries L2 allocation identity, while
+            // the L1 response handler consumes a private FillKey generation.
+            // Without the owner-to-L1-fill edge, a live response cannot be
+            // resumed exactly even though the L1 fill timing itself is typed.
+            reasons.push("l1_fill_response_identity".to_owned());
+        }
+        if self
+            .warps
+            .iter()
+            .any(|warp| warp.barrier_pending.iter().any(|&pending| pending != 0))
+        {
+            // Response owners retain requester/fill identity, but the typed
+            // owner schema does not yet carry the dependency-barrier index
+            // that each response clears. A live counter is therefore not
+            // sufficient to resume the next issue transition exactly.
+            reasons.push("dependency_barrier_ownership".to_owned());
+        }
+        if self
+            .immediate_constant_cache
+            .as_ref()
+            .is_some_and(|caches| {
+                caches.iter().any(|cache| {
+                    cache.sets.iter().any(|set| !set.is_empty())
+                        || !cache.pending.is_empty()
+                        || cache.next_service != 0
+                        || !cache.diagnostics.is_empty()
+                })
+            })
+        {
+            reasons.push("immediate_constant_cache_state".to_owned());
+        }
+        if self
+            .shared_write_lookup_runtime
+            .async_l1_hit_service_ready
+            .iter()
+            .any(|&ready| ready != 0)
+        {
+            reasons.push("async_l1_hit_service_state".to_owned());
+        }
+        if self.result_writebacks.is_some() {
+            reasons.push("result_writeback_state".to_owned());
+        }
+        if !self.memory_service_candidates.is_empty() {
+            reasons.push("memory_service_candidates".to_owned());
+        }
+        if self.memory_admission_feedback.is_some() {
+            reasons.push("memory_admission_feedback".to_owned());
+        }
+        reasons.sort_unstable();
+        reasons
     }
 
     #[cfg(feature = "reference")]
@@ -9823,6 +10139,48 @@ impl<'a> SmCore<'a> {
                         destination_completion_time: group.destination_completion_time,
                         completion_time: group.completion_time,
                     };
+                    let mut bypass_observations = state
+                        .bypass_copies
+                        .iter()
+                        .map(|copy| AsyncCopyBypassObservationState {
+                            group: copy.group.0,
+                            instruction: u64::try_from(copy.instruction).unwrap_or(u64::MAX),
+                            pending_sources: copy.pending_sources,
+                            source_completion_time: copy.source_completion_time,
+                            delivery_work: copy.delivery_work,
+                            source_cohorts: copy.source_cohorts,
+                            destination_lines: copy.destination_lines,
+                            max_bank_wavefronts: copy.max_bank_wavefronts,
+                            max_bypass_wavefronts: copy.max_bypass_wavefronts,
+                            sector_off: u64::try_from(copy.sector_off).unwrap_or(u64::MAX),
+                            sector_membership_masks: copy.sector_membership_masks.to_vec(),
+                            cohorts: copy
+                                .cohorts
+                                .iter()
+                                .map(|cohort| AsyncCopyCohortBoundaryState {
+                                    pending_sources: cohort.pending_sources,
+                                    first_source_response: cohort.first_source_response,
+                                    last_source_response: cohort.last_source_response,
+                                    payload_work: cohort.payload_work,
+                                    destination_lines: cohort.destination_lines,
+                                    bank_wavefronts: cohort.bank_wavefronts,
+                                    bypass_wavefronts: cohort.bypass_wavefronts,
+                                    topology_penalty: cohort.topology_penalty,
+                                })
+                                .collect(),
+                        })
+                        .collect::<Vec<_>>();
+                    bypass_observations
+                        .sort_by_key(|observation| (observation.group, observation.instruction));
+                    // Aggregate-only fallback captures preserve useful
+                    // diagnostics but do not retain the cohort/membership
+                    // topology required by an exact transition contract.
+                    let bypass_observations_complete =
+                        bypass_observations.iter().all(|observation| {
+                            observation.source_cohorts != 0
+                                && !observation.sector_membership_masks.is_empty()
+                                && !observation.cohorts.is_empty()
+                        });
                     AsyncCopyBoundaryState {
                         open: state.open_group.map(project),
                         committed: state
@@ -9833,6 +10191,9 @@ impl<'a> SmCore<'a> {
                             .collect(),
                         bypass_observation_count: u64::try_from(state.bypass_copies.len())
                             .unwrap_or(u64::MAX),
+                        next_sequence: state.next_sequence,
+                        bypass_observations_complete,
+                        bypass_observations,
                     }
                 })
             })
@@ -10599,10 +10960,10 @@ impl<'a> SmCore<'a> {
                 };
                 // The hit-pipeline floor applies to the whole dependent load
                 // (as in L1Const); misses ride their responses. Line fills
-                // emitted anywhere in THIS emission batch (st.line_folds,
-                // cleared at advance entry) fold later same-line sectors
-                // into their request mask — one L2 transaction per line
-                // per batch, priced on its worst sector.
+                // emitted at the same issue timestamp (st.line_folds,
+                // cleared at batch entry) fold later same-line sectors into
+                // their request mask — one L2 transaction per line per
+                // timestamp, priced on its worst sector.
                 let target = write_barrier.map(FillTarget::Barrier);
                 let lookup_batch = st.l1.begin_lookup_batch();
                 let mut known = write_barrier
@@ -10855,8 +11216,10 @@ impl<'a> SmCore<'a> {
                         Ok(None)
                     };
                 }
-                for i in off..off + usize::from(len) {
-                    let sector_id = sectors[i];
+                for (relative, &sector_id) in
+                    sectors[off..off + usize::from(len)].iter().enumerate()
+                {
+                    let i = off + relative;
                     let response_id = ResponseId::new(st.response_owner, wix, instruction, i);
                     let reply = if let Some(group) = async_group {
                         if let Some(barrier) = write_barrier {
@@ -11440,12 +11803,14 @@ impl<'a> SmCore<'a> {
         {
             return Err(IssueError::ResponseTokenRemovalFailed { reply });
         }
+        st.response_masks.remove(&response_id);
         // New emission batch (the retry drain below may emit).
         st.line_folds.clear();
         let warps = &mut self.warps;
         let async_copies = &mut self.async_copies;
         match reply {
             ReplyTo::L1Fill { fill, .. } => {
+                let releases_mshr = st.l1.fill_releases_mshr(fill);
                 if let FillKey::Line { line, .. } = fill
                     && st.fill_masks.remove(&line).is_none()
                 {
@@ -11476,9 +11841,13 @@ impl<'a> SmCore<'a> {
                         Ok(())
                     })?;
                 }
-                // The completed fill freed an MSHR entry: retry parked
-                // accesses (FIFO) until one stalls again.
-                drain_retries(st, warps, async_copies, now, &params, out)?;
+                // Only an independently occupied MSHR completion can drain
+                // parked accesses. A late sector child shares its parent
+                // line allocation slot and must not cause a speculative
+                // retry while that parent remains in flight.
+                if releases_mshr {
+                    drain_retries(st, warps, async_copies, now, &params, out)?;
+                }
             }
             ReplyTo::Warp { warp, barrier, .. } => {
                 warps[warp].clear_pending(warp, barrier, 1, now)?;
@@ -11927,6 +12296,17 @@ impl<'a> SmCore<'a> {
                 base,
                 self.tensor_pipe_ready[subcore],
                 ReadinessCause::PipelineTensor,
+                &mut ready_at,
+                &mut limiting,
+                &mut tied,
+            )?;
+        }
+        if matches!(slot.pipeline_class, PipelineClass::Sfu { .. }) {
+            observe_readiness_constraint(
+                projected,
+                base,
+                self.sfu_pipe_ready[subcore],
+                ReadinessCause::PipelineSfu,
                 &mut ready_at,
                 &mut limiting,
                 &mut tied,
@@ -12663,6 +13043,7 @@ impl<'a> SmCore<'a> {
                 self.block_states[self.warps[warp].block].barrier_rearm_ready
             }
             Some(PipelineClass::Tensor { .. }) => self.tensor_pipe_ready[subcore],
+            Some(PipelineClass::Sfu { .. }) => self.sfu_pipe_ready[subcore],
             Some(PipelineClass::ScalarAlu { .. }) => self
                 .scalar_execution_pipeline
                 .as_ref()
@@ -12864,6 +13245,25 @@ impl<'a> SmCore<'a> {
         Ok(())
     }
 
+    /// Commit the state transitions that become due while the actor parks at
+    /// an external event horizon. Event mode may jump over idle cycles, but
+    /// release queues and fixed-clock completions must be retired at the
+    /// parked timestamp before typed state is observed.
+    fn park_at_horizon(&mut self, bound: u64) {
+        if let Some(cache) = self.immediate_constant_cache.as_mut() {
+            for state in cache.iter_mut() {
+                state.complete_ready(bound);
+            }
+        }
+        if let Some(memory_pipeline) = self.memory_issue_pipeline.as_mut() {
+            memory_pipeline.prune(bound);
+        }
+        if let Some(scalar_pipeline) = self.scalar_execution_pipeline.as_mut() {
+            scalar_pipeline.prune(bound);
+        }
+        self.t = bound;
+    }
+
     /// Run issue cycles strictly BEFORE `horizon`. Emits memory requests
     /// into `out` (L1Shared mode only).
     ///
@@ -12912,6 +13312,14 @@ impl<'a> SmCore<'a> {
             }
             self.enqueue_ready_async_copy_destinations()?;
             if horizon.reached(self.t) {
+                if let Some(bound) = horizon.bounded_time() {
+                    // A caller may revisit an already parked horizon after a
+                    // same-cycle external event. Retire fixed-clock releases
+                    // at that timestamp before exposing the boundary; the
+                    // ordinary skip path already performs this via
+                    // `park_at_horizon`.
+                    self.park_at_horizon(bound);
+                }
                 return Ok(Advance::Idle {
                     wake_at: Some(self.t),
                 });
@@ -12933,18 +13341,40 @@ impl<'a> SmCore<'a> {
                     })?;
             }
             self.instruction_front_end_cycle()?;
-            let before = out.len();
-            let issued_this_cycle = self.issue_cycle(out)?;
-            // A reply-carrying request emitted this cycle tightens the
-            // safe horizon (mutation-only store traffic cannot affect
-            // this SM and does not).
-            if out[before..].iter().any(|r| r.reply != ReplyTo::None) {
-                let lower_bound = checked_cycle_add(
-                    "self-response horizon",
-                    self.t,
-                    self.params.l1_miss_latency,
-                )?;
-                horizon = horizon.tighten(lower_bound);
+            // Consume the carded per-SMSP issue width in one logical cycle.
+            // A dual-issue card permits a second independently ready warp
+            // transaction. Do not erase control stalls or dependency latency
+            // to synthesize same-warp pairs: no pairing model is implemented.
+            // Each slot has its own preflight/commit boundary; this is not
+            // rollback of an already committed first slot on second-slot error.
+            let issue_width = self
+                .params
+                .issue_ports
+                .max(1)
+                .max(u32::from(self.params.dual_issue_supported).saturating_add(1));
+            let mut issued_this_cycle = false;
+            for _ in 0..issue_width {
+                let before = out.len();
+                let issued = self.issue_cycle(out)?;
+                issued_this_cycle |= issued;
+                // A reply-carrying request emitted this cycle tightens the
+                // safe horizon (mutation-only store traffic cannot affect
+                // this SM and does not).
+                if out[before..].iter().any(|r| r.reply != ReplyTo::None) {
+                    let lower_bound = checked_cycle_add(
+                        "self-response horizon",
+                        self.t,
+                        self.params.l1_miss_latency,
+                    )?;
+                    horizon = horizon.tighten(lower_bound);
+                }
+                // An IMC miss consumes one scheduler opportunity but emits no
+                // instruction pick. Do not replay that same miss across an
+                // arbitrarily wide carded issue loop.
+                let instruction_pick = self.last_issue_picks.iter().any(Option::is_some);
+                if !issued || !instruction_pick {
+                    break;
+                }
             }
             if issued_this_cycle {
                 self.t = checked_cycle_add("issue-clock advance", self.t, 1)?;
@@ -13006,9 +13436,36 @@ impl<'a> SmCore<'a> {
                     if let Some(bound) = horizon.bounded_time()
                         && target >= bound
                     {
+                        // The dense reference still visits locally idle
+                        // cycles strictly before an external horizon. It
+                        // must stop at the horizon itself so the queued event
+                        // is applied before any work at that timestamp.
+                        if self.dense_reference && next_cycle < bound {
+                            self.t = next_cycle;
+                            continue;
+                        }
+                        #[cfg(feature = "reference")]
+                        if can_skip {
+                            let skipped = bound - next_cycle;
+                            self.advance_diagnostics.idle_jumps = self
+                                .advance_diagnostics
+                                .idle_jumps
+                                .checked_add(u64::from(skipped != 0))
+                                .ok_or(IssueError::CounterOverflow {
+                                    counter: "reference idle jumps",
+                                })?;
+                            self.advance_diagnostics.skipped_cycles = self
+                                .advance_diagnostics
+                                .skipped_cycles
+                                .checked_add(skipped)
+                                .ok_or(IssueError::CounterOverflow {
+                                    counter: "reference skipped cycles",
+                                })?;
+                        }
                         // Park AT the horizon instead of jumping past it:
                         // the event there may ready a warp before the
                         // next known timer.
+                        self.park_at_horizon(bound);
                         return Ok(Advance::Idle {
                             wake_at: Some(bound),
                         });
@@ -13041,6 +13498,32 @@ impl<'a> SmCore<'a> {
                             state.has_unpriced() || state.has_pending_write_acks()
                         }) =>
                 {
+                    if let Some(bound) = horizon.bounded_time() {
+                        let next_cycle = checked_cycle_add("idle-clock advance", self.t, 1)?;
+                        if self.dense_reference && next_cycle < bound {
+                            self.t = next_cycle;
+                            continue;
+                        }
+                        #[cfg(feature = "reference")]
+                        if !self.dense_reference {
+                            let skipped = bound - next_cycle;
+                            self.advance_diagnostics.idle_jumps = self
+                                .advance_diagnostics
+                                .idle_jumps
+                                .checked_add(u64::from(skipped != 0))
+                                .ok_or(IssueError::CounterOverflow {
+                                    counter: "reference idle jumps",
+                                })?;
+                            self.advance_diagnostics.skipped_cycles = self
+                                .advance_diagnostics
+                                .skipped_cycles
+                                .checked_add(skipped)
+                                .ok_or(IssueError::CounterOverflow {
+                                    counter: "reference skipped cycles",
+                                })?;
+                        }
+                        self.park_at_horizon(bound);
+                    }
                     return Ok(Advance::Idle { wake_at: None });
                 }
                 None => {
@@ -13096,6 +13579,15 @@ impl<'a> SmCore<'a> {
             } => {
                 checked_cycle_add(
                     "tensor-pipeline availability",
+                    t,
+                    initiation_interval_cycles,
+                )?;
+            }
+            PipelineClass::Sfu {
+                initiation_interval_cycles,
+            } => {
+                checked_cycle_add(
+                    "uniform/SFU pipeline availability",
                     t,
                     initiation_interval_cycles,
                 )?;
@@ -13217,6 +13709,7 @@ impl<'a> SmCore<'a> {
         &self,
         picks: &[Option<usize>; SUB_CORES],
         async_destination_wavefronts: &[u64; SUB_CORES],
+        memory_times: &[u64; SUB_CORES],
     ) -> Result<(), IssueError> {
         let (l1, shared) = match &self.mem {
             MemModel::Flat => return Ok(()),
@@ -13486,9 +13979,11 @@ impl<'a> SmCore<'a> {
         // on a shadow cache. This avoids rejecting valid warm hits while keeping
         // the ordinary hot path allocation-free.
         let mut shadow = l1.clone();
+        let mut same_timestamp_line_folds = HashSet::new();
         for (subcore, pick) in picks.iter().enumerate() {
             let Some(wix) = *pick else { continue };
             let warp = &self.warps[wix];
+            let memory_time = memory_times[subcore];
             let inst = warp.insts[warp.next];
             let slot = warp
                 .next_slot
@@ -13525,7 +14020,7 @@ impl<'a> SmCore<'a> {
                     let mut async_source_ready = if shared.is_none() && async_delivery.is_some() {
                         Some(checked_cycle_add(
                             "LDGSTS L1 hit-pipeline floor",
-                            self.t,
+                            memory_time,
                             self.params.l1_hit_latency,
                         )?)
                     } else {
@@ -13545,24 +14040,35 @@ impl<'a> SmCore<'a> {
                                 &mut shadow,
                                 origin,
                                 sector_id,
-                                self.t,
+                                memory_time,
                                 observe_ready,
                                 mshr_floor,
                             )? {
                                 SharedL1Access::Hit { .. } => {}
-                                SharedL1Access::MissRequest { .. } => {
+                                SharedL1Access::MissRequest { fill } => {
                                     checked_cycle_add(
                                         "self-response horizon",
-                                        self.t,
+                                        memory_time,
                                         self.params.l1_miss_latency,
                                     )?;
+                                    if let FillKey::Line { line, .. } = fill {
+                                        same_timestamp_line_folds.insert((line, memory_time));
+                                    }
                                     pending_add = checked_u32_counter_add(
                                         "issue exact pending-add budget",
                                         pending_add,
                                         1,
                                     )?;
                                 }
-                                SharedL1Access::MergedPending { .. } => {
+                                SharedL1Access::MergedPending { fill } => {
+                                    if let FillKey::Line { line, .. } = fill
+                                        && !same_timestamp_line_folds.contains(&(line, memory_time))
+                                    {
+                                        shadow.reserve_pending_line_sector(
+                                            fill,
+                                            (sector_id & 3) as u8,
+                                        )?;
+                                    }
                                     pending_add = checked_u32_counter_add(
                                         "issue exact pending-add budget",
                                         pending_add,
@@ -13581,9 +14087,12 @@ impl<'a> SmCore<'a> {
                         } else if observe_ready {
                             let (_, ready) = match mshr_floor {
                                 Some(floor) => shadow.access_eligible_with_mshr_floor(
-                                    origin, sector_id, self.t, floor,
+                                    origin,
+                                    sector_id,
+                                    memory_time,
+                                    floor,
                                 )?,
-                                None => shadow.access_eligible(origin, sector_id, self.t)?,
+                                None => shadow.access_eligible(origin, sector_id, memory_time)?,
                             };
                             if let Some(current) = &mut async_source_ready {
                                 *current = (*current).max(ready);
@@ -13592,11 +14101,18 @@ impl<'a> SmCore<'a> {
                             match mshr_floor {
                                 Some(floor) => {
                                     shadow.access_eligible_unobserved_with_mshr_floor(
-                                        origin, sector_id, self.t, floor,
+                                        origin,
+                                        sector_id,
+                                        memory_time,
+                                        floor,
                                     )?;
                                 }
                                 None => {
-                                    shadow.access_eligible_unobserved(origin, sector_id, self.t)?;
+                                    shadow.access_eligible_unobserved(
+                                        origin,
+                                        sector_id,
+                                        memory_time,
+                                    )?;
                                 }
                             }
                         }
@@ -14436,6 +14952,7 @@ impl<'a> SmCore<'a> {
     /// whether anything issued.
     fn issue_cycle(&mut self, out: &mut Vec<MemRequest>) -> Result<bool, IssueError> {
         let t = self.t;
+        self.last_issue_picks = [None; SUB_CORES];
         let selected = if self.has_async_copy_protocol {
             self.pick_warps_with_memory_admission::<true>(t)
         } else {
@@ -14443,6 +14960,7 @@ impl<'a> SmCore<'a> {
         };
         let imc_plan = self.preflight_immediate_constant(selected, t)?;
         let picks = imc_plan.picks;
+        let effective_picks = picks;
         let mut imc_cache = imc_plan.cache;
         let imc_waits = imc_plan.waits;
         let imc_miss_observed = imc_plan.miss_observed;
@@ -14596,13 +15114,13 @@ impl<'a> SmCore<'a> {
                 observe_async_copy,
             )?;
         }
-        self.preflight_issue_memory(&picks, &async_destination_wavefronts)?;
         let memory_times = std::array::from_fn(|subcore| {
             memory_pipeline_plan
                 .as_ref()
                 .and_then(|plan| plan.issues[subcore])
                 .map_or(t, |issue| issue.shared_accept_at)
         });
+        self.preflight_issue_memory(&picks, &async_destination_wavefronts, &memory_times)?;
         self.preflight_async_l1_hit_service(&picks, &memory_times)?;
         self.preflight_result_writeback_priority(&picks)?;
         let next_issued = self.preflight_issue_accounting(&picks, &barrier_arrival_times)?;
@@ -14788,6 +15306,15 @@ impl<'a> SmCore<'a> {
                 } => {
                     self.tensor_pipe_ready[sc] = checked_cycle_add(
                         "tensor-pipeline availability",
+                        t,
+                        initiation_interval_cycles,
+                    )?;
+                }
+                PipelineClass::Sfu {
+                    initiation_interval_cycles,
+                } => {
+                    self.sfu_pipe_ready[sc] = checked_cycle_add(
+                        "uniform/SFU pipeline availability",
                         t,
                         initiation_interval_cycles,
                     )?;
@@ -15088,6 +15615,9 @@ impl<'a> SmCore<'a> {
                 .expect("feedback issue plan requires installed feedback state")
                 .apply_issue(plan, t);
         }
+        if issued_this_cycle {
+            self.last_issue_picks = effective_picks;
+        }
         Ok(issued_this_cycle)
     }
 }
@@ -15206,17 +15736,13 @@ impl From<IssueError> for SharedAccessError {
 /// remainder). Accounting failures remain typed.
 ///
 /// A sector merging onto a line fill emitted during the CURRENT
-/// emission batch (`st.line_folds` — one `advance`/`on_response` call)
+/// emission batch (`st.line_folds`, keyed by line and issue timestamp)
 /// folds its bit into that request's `sector_mask`, so one L2
-/// transaction carries the batch's sectors and worst-of-mask pricing
-/// covers every warp/instruction/retry-entry of the batch. A merge onto
-/// an OLDER in-flight fill emits a follow-up `ReplyTo::None` sector
-/// fetch instead — the L2 must see every fetched sector exactly once
-/// per fill (NCU sector accounting + L2 state fidelity), while the
-/// waiter's timing stays bound to the original fill response (a
-/// documented approximation: the follow-up's bytes may complete after
-/// the waiter cleared, and same-timestamp queue order may process a
-/// follow-up after its parent fill's response).
+/// transaction carries same-cycle sectors and worst-of-mask pricing
+/// covers every warp/instruction/retry-entry at that timestamp. A merge onto
+/// an OLDER in-flight fill emits a follow-up sector fetch with an independent
+/// `FillKey::Sector` response; the L2 must see every fetched sector exactly
+/// once per fill and the waiter clears only at that sector's ready event.
 fn access_shared(
     st: &mut SharedL2State,
     warps: &mut [WarpState<'_>],
@@ -15254,10 +15780,11 @@ fn access_shared(
                 constant_deep,
             );
             register_response(st, request.reply)?;
+            st.response_masks.insert(response_id, sbit);
             out.push(request);
             if let FillKey::Line { line, .. } = fill {
                 st.fill_masks.insert(line, sbit);
-                st.line_folds.entry(line).or_insert(out.len() - 1);
+                st.line_folds.entry((line, now)).or_insert(out.len() - 1);
             }
             add_fill_waiter(st, warps, fill, wix, target, constant_deep)?;
             Ok(None)
@@ -15270,24 +15797,41 @@ fn access_shared(
                 // also completes the fill). Fail LOUD if a future
                 // change breaks it — a fabricated empty mask would
                 // silently re-fetch already-sent sectors.
-                let sent = st
-                    .fill_masks
-                    .get_mut(&line)
-                    .ok_or(SharedAccessError::Issue(IssueError::FillMaskMissing {
-                        line,
-                    }))?;
-                if *sent & sbit == 0 {
-                    *sent |= sbit;
-                    if let Some(&ix) = st.line_folds.get(&line) {
-                        out[ix].fold_sector_origin(origin, sbit, constant_load);
+                let already_sent = st.fill_masks.get(&line).ok_or(SharedAccessError::Issue(
+                    IssueError::FillMaskMissing { line },
+                ))? & sbit
+                    != 0;
+                if !already_sent {
+                    if let Some(&ix) = st.line_folds.get(&(line, now)) {
+                        *st.fill_masks
+                            .get_mut(&line)
+                            .expect("fill mask checked above") |= sbit;
+                        out[ix].fold_sector_origin(origin, sbit, constant_load, constant_deep);
+                        if let Some(response_id) = out[ix].reply.response_id() {
+                            *st.response_masks.entry(response_id).or_insert(0) |= sbit;
+                        }
                     } else {
-                        out.push(MemRequest::l1_followup_fetch(
+                        let sector_fill = st
+                            .l1
+                            .reserve_pending_line_sector(fill, (sector_id & 3) as u8)
+                            .map_err(IssueError::from)?;
+                        *st.fill_masks
+                            .get_mut(&line)
+                            .expect("fill mask checked above") |= sbit;
+                        let request = MemRequest::l1_followup_fetch(
                             now,
                             sector_id,
                             origin,
+                            sector_fill,
+                            response_id,
                             constant_load,
                             constant_deep,
-                        ));
+                        );
+                        register_response(st, request.reply)?;
+                        st.response_masks.insert(response_id, sbit);
+                        out.push(request);
+                        add_fill_waiter(st, warps, sector_fill, wix, target, constant_deep)?;
+                        return Ok(None);
                     }
                 }
                 // Re-touch of an already-sent sector: MSHR merge, no
@@ -15319,10 +15863,9 @@ fn drain_retries(
         // remain owned by their group until a hit or fill completion resolves
         // each sector.
         warps[r.warp].release_pending(r.warp, barrier, 1)?;
-        // The whole drain is ONE emission batch (st.line_folds, cleared
-        // by on_response): a line fill emitted by an earlier retry
-        // entry folds later entries' same-line sectors — same-timestamp
-        // requests must not split one line transaction (gate finding).
+        // The drain is one emission batch, but folds remain timestamp scoped:
+        // a line fill emitted by an earlier retry entry only folds later
+        // same-timestamp sectors; later-cycle sectors receive child tokens.
         while r.lo < r.hi {
             match access_shared(
                 st,
@@ -15694,6 +16237,8 @@ mod tests {
             instruction_front_end: None,
             memory_issue_pipeline: None,
             scalar_execution_pipeline: None,
+            issue_ports: 1,
+            dual_issue_supported: false,
             ldgsts_l1_hit_return_service: None,
             constant_memory_return_service: None,
             immediate_constant_cache: None,
@@ -15858,12 +16403,11 @@ mod tests {
     #[test]
     fn strict_card_constructor_requires_same_architecture_and_all_resources() {
         let production_sm86 = ArchCard::load(&card_path("sm_86.json")).unwrap();
+        let carded = IssueModelParams::from_card(ArchId::Sm86, &production_sm86)
+            .expect("SM86 card now carries the consumed issue resources");
         assert!(matches!(
-            IssueModelParams::from_card(ArchId::Sm86, &production_sm86),
-            Err(IssueError::Calibration(CalibError::BlockResearchGap {
-                block: "smsp",
-                ..
-            }))
+            carded.resource_source(),
+            IssueResourceSource::Carded(_)
         ));
 
         let production_sm120 = ArchCard::load(&card_path("sm_120-laptop.json")).unwrap();
@@ -15878,7 +16422,7 @@ mod tests {
     }
 
     #[test]
-    fn complete_strict_card_lane_constructs_but_cannot_execute() {
+    fn complete_strict_card_lane_executes_only_with_consumed_sm86_topology() {
         let strict =
             IssueModelParams::from_card(ArchId::Sm86, &synthetic_carded_issue_resources()).unwrap();
         let IssueResourceSource::Carded(resources) = strict.resource_source() else {
@@ -15897,22 +16441,46 @@ mod tests {
         assert_eq!(strict.ldgsts_l1_mshr_floor.get(), 248);
         assert_eq!(strict.max_resident_warps_per_sm, 48);
 
-        assert!(matches!(
-            strict.validate_resource_source(),
-            Err(IssueError::CardedResourcesNotImplemented { arch: ArchId::Sm86 })
-        ));
-        assert!(matches!(
-            crate::replay::ReplayConfiguration::checked(strict, crate::replay::ReplayMemMode::Flat,),
-            Err(crate::replay::ReplayError::Issue(
-                IssueError::CardedResourcesNotImplemented { arch: ArchId::Sm86 }
-            ))
-        ));
+        strict.validate_resource_source().unwrap();
+        crate::replay::ReplayConfiguration::checked(strict, crate::replay::ReplayMemMode::Flat)
+            .unwrap();
 
         let sched = schedule(Vec::new());
+        SmCore::new(&[], &sched, &strict, SmMemMode::Flat).unwrap();
+
+        let mut mismatched = strict;
+        if let IssueResourceSource::Carded(resources) = mismatched.resource_source {
+            mismatched.resource_source = IssueResourceSource::Carded(RequiredIssueResources {
+                smsp: resources.smsp,
+                occupancy: resources.occupancy,
+                dep_barriers: resources.dep_barriers,
+                barrier_latencies: resources.barrier_latencies,
+                dual_issue_supported: true,
+            });
+        }
         assert!(matches!(
-            SmCore::new(&[], &sched, &strict, SmMemMode::Flat),
-            Err(IssueError::CardedResourcesNotImplemented { arch: ArchId::Sm86 })
+            mismatched.validate_resource_source(),
+            Err(IssueError::CardedResourceMismatch {
+                field: "dual_issue.supported",
+                expected: 1,
+                got: 0,
+                ..
+            })
         ));
+    }
+
+    #[test]
+    fn carded_issue_width_and_dual_issue_are_consumed() {
+        let path = card_path("sm_86.json");
+        let mut value: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        value["smsp"]["issue_ports"] = serde_json::json!(3);
+        value["dual_issue"]["supported"] = serde_json::json!(true);
+        let card = ArchCard::parse(&path, &serde_json::to_vec(&value).unwrap()).unwrap();
+        let params = IssueModelParams::from_card(ArchId::Sm86, &card).unwrap();
+        assert_eq!(params.issue_ports, 3);
+        assert!(params.dual_issue_supported);
+        params.validate_resource_source().unwrap();
     }
 
     #[test]
@@ -16760,6 +17328,8 @@ mod tests {
         let mut p = params();
         p.instruction_front_end = Some(config);
         let mut snapshots = Vec::new();
+        #[cfg(feature = "reference")]
+        let mut advance_diagnostics = Vec::new();
         for dense in [false, true] {
             let mut core = SmCore::new(&blocks, &sched, &p, SmMemMode::Flat).unwrap();
             core.dense_reference = dense;
@@ -16796,12 +17366,115 @@ mod tests {
             );
             assert!(requests.is_empty());
             assert_eq!(core.issued, 0);
+            assert_eq!(core.t, 50, "a bounded idle return must park the SM clock");
             let front_end = core.instruction_front_end.as_ref().unwrap();
             assert_eq!(front_end.diagnostics.prefetch_requests, 1);
             assert_eq!(front_end.l1_request_ready, 11);
-            snapshots.push(format!("{front_end:?}"));
+            let snapshot = format!("{front_end:?}");
+            assert_eq!(
+                core.advance(ReplayHorizon::Bounded(50), &mut requests)
+                    .unwrap(),
+                Advance::Idle { wake_at: Some(50) }
+            );
+            assert_eq!(core.t, 50);
+            assert_eq!(core.issued, 0);
+            assert_eq!(
+                format!("{:?}", core.instruction_front_end.as_ref().unwrap()),
+                snapshot,
+                "revisiting a parked horizon must not replay front-end work"
+            );
+            snapshots.push(snapshot);
+            #[cfg(feature = "reference")]
+            advance_diagnostics.push(core.advance_diagnostics);
         }
         assert_eq!(snapshots[0], snapshots[1]);
+        #[cfg(feature = "reference")]
+        {
+            assert!(advance_diagnostics[0].skipped_cycles > 0);
+            assert_eq!(advance_diagnostics[1].skipped_cycles, 0);
+            assert!(
+                advance_diagnostics[1].local_cycle_steps > advance_diagnostics[0].local_cycle_steps,
+                "dense mode must walk the idle cycles below the external horizon"
+            );
+        }
+    }
+
+    #[cfg(feature = "reference")]
+    #[test]
+    fn bounded_horizon_prunes_expired_memory_pipeline_releases() {
+        let sched = schedule(vec![(0, slot(cb(1), OpClass::Other, "EXIT"))]);
+        let blocks = vec![BlockReplay {
+            launch_index: 0,
+            warps: vec![warp(0, vec![inst(0)])],
+        }];
+        let mut p = params();
+        p.memory_issue_pipeline = Some(
+            ArchId::Sm86
+                .memory_issue_pipeline()
+                .require("memory_issue_pipeline")
+                .unwrap(),
+        );
+        let mut core = SmCore::new(&blocks, &sched, &p, SmMemMode::Flat).unwrap();
+        let pipeline = core
+            .memory_issue_pipeline
+            .as_mut()
+            .expect("the fixture enables the memory issue pipeline");
+        pipeline.queue_release_times[0].push_back(5);
+        pipeline.diagnostics.instructions_admitted = 1;
+        core.warps[0].eligible = 100;
+
+        assert_eq!(
+            core.advance(ReplayHorizon::Bounded(10), &mut Vec::new())
+                .unwrap(),
+            Advance::Idle { wake_at: Some(10) }
+        );
+        assert_eq!(core.t, 10);
+        let typed = core
+            .typed_memory_pipeline_state()
+            .expect("typed memory pipeline remains installed");
+        assert!(
+            typed
+                .queue_release_times
+                .iter()
+                .flatten()
+                .all(|&release| release >= core.t)
+        );
+    }
+
+    #[cfg(feature = "reference")]
+    #[test]
+    fn already_at_bounded_horizon_prunes_releases_at_that_cycle() {
+        let sched = schedule(vec![(0, slot(cb(1), OpClass::Other, "EXIT"))]);
+        let blocks = vec![BlockReplay {
+            launch_index: 0,
+            warps: vec![warp(0, vec![inst(0)])],
+        }];
+        let mut p = params();
+        p.memory_issue_pipeline = Some(
+            ArchId::Sm86
+                .memory_issue_pipeline()
+                .require("memory_issue_pipeline")
+                .unwrap(),
+        );
+        let mut core = SmCore::new(&blocks, &sched, &p, SmMemMode::Flat).unwrap();
+        let pipeline = core
+            .memory_issue_pipeline
+            .as_mut()
+            .expect("the fixture enables the memory issue pipeline");
+        pipeline.queue_release_times[0].push_back(10);
+        pipeline.diagnostics.instructions_admitted = 1;
+        core.t = 10;
+        core.warps[0].eligible = 100;
+
+        assert_eq!(
+            core.advance(ReplayHorizon::Bounded(10), &mut Vec::new())
+                .unwrap(),
+            Advance::Idle { wake_at: Some(10) }
+        );
+        let typed = core
+            .typed_memory_pipeline_state()
+            .expect("typed memory pipeline remains installed");
+        assert!(typed.queue_release_times.iter().all(Vec::is_empty));
     }
 
     #[test]
@@ -16879,6 +17552,94 @@ mod tests {
         assert_eq!(diagnostics.instructions_fetched, 1);
         assert_eq!(diagnostics.demand_l0_misses, 1);
         assert_eq!(diagnostics.stream_restarts, 1);
+    }
+
+    #[cfg(feature = "reference")]
+    #[test]
+    fn native_memory_pipeline_projection_accepts_maximum_shared_frontier() {
+        let sched = schedule(vec![(0, slot(cb(1), OpClass::Other, "LDS R0, [R2]"))]);
+        let blocks = vec![BlockReplay {
+            launch_index: 0,
+            warps: (0..2)
+                .map(|warp_slot| {
+                    warp(
+                        warp_slot,
+                        vec![ReplayInst {
+                            pc: 0,
+                            kind: AccessKind::Shared { wavefronts: 1 },
+                        }],
+                    )
+                })
+                .collect(),
+        }];
+        let mut p = params();
+        p.memory_issue_pipeline = Some(
+            ArchId::Sm86
+                .memory_issue_pipeline()
+                .require("memory_issue_pipeline")
+                .unwrap(),
+        );
+        let mut core = SmCore::new(&blocks, &sched, &p, SmMemMode::Flat).unwrap();
+        core.t = u64::MAX - 13;
+        for state in &mut core.warps {
+            state.current_since = core.t;
+            state.eligible = core.t;
+        }
+        let mut requests = Vec::new();
+        assert_eq!(
+            core.advance(ReplayHorizon::Unbounded, &mut requests)
+                .unwrap(),
+            Advance::Done
+        );
+        assert!(requests.is_empty());
+        let pipeline = core.typed_memory_pipeline_state().unwrap();
+        // Both operands finish at MAX-4. The shared port accepts the two
+        // SMSPs at MAX-4 and MAX-2, leaving a representable MAX frontier.
+        assert_eq!(pipeline.instructions_admitted, 2);
+        assert_eq!(
+            pipeline.local_completion_ready,
+            vec![u64::MAX, u64::MAX, 0, 0]
+        );
+        assert_eq!(pipeline.terminal_shared_accept_cycle, u64::MAX - 2);
+        assert_eq!(pipeline.shared_accept_ready, u64::MAX);
+        let snapshot = core.boundary_snapshot();
+        let mut typed = sim_semantics::TypedCoreBoundaryState {
+            sm_id: 0,
+            cycle: snapshot.cycle,
+            issued: snapshot.issued,
+            resident_warps: snapshot.resident_warps,
+            resident_shared_memory_bytes: snapshot.resident_shared_memory_bytes,
+            unfinished_warps: snapshot.unfinished_warps,
+            next_block: snapshot.next_block,
+            hold: snapshot.hold,
+            subcore_warps: snapshot.subcore_warps,
+            outstanding_responses: snapshot.outstanding_responses,
+            barrier_pipe_ready: snapshot.barrier_pipe_ready,
+            tensor_pipe_ready: snapshot.tensor_pipe_ready,
+            ldgsts_destination_pipe_ready: snapshot.ldgsts_destination_pipe_ready,
+            warp_states: snapshot.warp_states,
+            block_states: snapshot.block_states,
+            l1: core.typed_l1_state(),
+            front_end: core.typed_front_end_state(),
+            memory_pipeline: Some(pipeline),
+            scalar_pipeline: core.typed_scalar_pipeline_state(),
+            local_completion_time: core.typed_local_completion_time(),
+            unprojected_timing_state: Vec::new(),
+            async_copy: core.typed_async_copy_states(),
+            response_owners: core.typed_l2_request_owners(0, &[]),
+        };
+        assert_eq!(typed.validate(), Ok(()));
+        // Unlike the validation-only bound, the shared port's next actual
+        // timestamp must still fit in the native cycle domain.
+        typed
+            .memory_pipeline
+            .as_mut()
+            .unwrap()
+            .terminal_shared_accept_cycle = u64::MAX;
+        assert_eq!(
+            typed.validate(),
+            Err(sim_semantics::CoreStateError::CounterOverflow)
+        );
     }
 
     #[test]
@@ -17380,6 +18141,75 @@ mod tests {
                 other_warp_committed_groups_sum: 0,
                 maximum_other_warp_committed_groups: 0,
             })
+        );
+    }
+
+    #[test]
+    fn dual_issue_does_not_erase_same_warp_control_stalls() {
+        let sched = schedule(vec![
+            (0, slot(cb(7), OpClass::Other, "NOP")),
+            (16, slot(cb(1), OpClass::Other, "NOP")),
+        ]);
+        let blocks = vec![BlockReplay {
+            launch_index: 0,
+            warps: vec![warp(0, vec![inst(0), inst(16)])],
+        }];
+        let mut p = params();
+        p.dual_issue_supported = true;
+        let result = simulate_sm(&blocks, &sched, &p, None).unwrap();
+        assert_eq!(result.instructions_issued, 2);
+        assert_eq!(result.cycles, 8);
+    }
+
+    #[test]
+    fn extra_issue_slot_serves_independently_ready_warps() {
+        let sched = schedule(vec![(0, slot(cb(1), OpClass::Other, "NOP"))]);
+        let blocks = vec![BlockReplay {
+            launch_index: 0,
+            warps: vec![warp(0, vec![inst(0)]), warp(4, vec![inst(0)])],
+        }];
+        for dual in [false, true] {
+            let mut p = params();
+            p.dual_issue_supported = dual;
+            let result = simulate_sm(&blocks, &sched, &p, None).unwrap();
+            assert_eq!(result.instructions_issued, 2);
+            assert_eq!(result.cycles, if dual { 1 } else { 2 });
+        }
+    }
+
+    #[test]
+    fn sfu_readiness_does_not_increment_tensor_and_aggregates() {
+        let mut local = ReadinessCauseCycles::default();
+        local.add_cause(ReadinessCause::PipelineSfu, 3).unwrap();
+        assert_eq!(local.pipeline_tensor, 0);
+        let mut total = ReadinessCauseCycles::default();
+        total.add_checked(&local).unwrap();
+        assert_eq!(total.pipeline_sfu, 3);
+        assert_eq!(serde_json::to_value(total).unwrap()["pipeline_sfu"], 3);
+        let mut readiness = ReadinessDiagnostics::default();
+        readiness.limiting_cycles = total;
+        assert_eq!(readiness.schema_version(), 26);
+    }
+
+    #[cfg(feature = "reference")]
+    #[test]
+    fn unprojected_sfu_availability_prevents_exact_continuation() {
+        let sched = schedule(vec![(0, slot(cb(1), OpClass::Other, "NOP"))]);
+        let blocks = vec![BlockReplay {
+            launch_index: 0,
+            warps: vec![warp(0, vec![inst(0)])],
+        }];
+        let p = params();
+        let mut core = SmCore::new(&blocks, &sched, &p, SmMemMode::Flat).unwrap();
+        assert!(
+            !core
+                .typed_unprojected_timing_state()
+                .contains(&"sfu_pipeline_state".to_owned())
+        );
+        core.sfu_pipe_ready[0] = 4;
+        assert!(
+            core.typed_unprojected_timing_state()
+                .contains(&"sfu_pipeline_state".to_owned())
         );
     }
 
@@ -18327,6 +19157,103 @@ mod tests {
         assert!(state.bypass_copies.is_empty());
     }
 
+    #[cfg(feature = "reference")]
+    #[test]
+    fn typed_bypass_copy_preserves_native_response_state_with_optional_cohorts() {
+        let sched = schedule(vec![(0, slot(cb(1), OpClass::Other, "LDGSTS.E.BYPASS"))]);
+        for exact_cohorts in [false, true] {
+            let sidecar = exact_cohorts.then(|| {
+                Box::new(AsyncCopyCohortReplay {
+                    spans: vec![AsyncCopyCohortSpan {
+                        instruction: 0,
+                        sector_off: 0,
+                        sector_len: 3,
+                        cohort_off: 0,
+                        cohort_len: 2,
+                        membership_off: 0,
+                    }],
+                    cohorts: vec![
+                        AsyncCopyCohortDescriptor {
+                            payload_bytes: 32,
+                            destination_lines: 1,
+                            bank_wavefronts: 1,
+                            bypass_wavefronts: 1,
+                        },
+                        AsyncCopyCohortDescriptor {
+                            payload_bytes: 32,
+                            destination_lines: 2,
+                            bank_wavefronts: 2,
+                            bypass_wavefronts: 3,
+                        },
+                    ],
+                    sector_membership_masks: vec![0b01, 0b11, 0b10],
+                    instrumentation_order: Vec::new(),
+                })
+            });
+            let blocks = vec![BlockReplay {
+                launch_index: 0,
+                warps: vec![WarpReplay {
+                    async_copy_cohorts: sidecar,
+                    warp_slot: 0,
+                    insts: vec![ReplayInst {
+                        pc: 0,
+                        kind: AccessKind::GlobalAsyncCopy {
+                            off: 0,
+                            len: 3,
+                            completion_work: sim_mem::encode_async_copy_payload_and_topology(
+                                128, 2, 3, 2, 3,
+                            )
+                            .unwrap(),
+                            l1_policy: LdgstsL1Policy::BypassL1,
+                        },
+                    }],
+                    sectors: vec![40, 41, 42],
+                }],
+            }];
+            let mut core = shared_core(&blocks, &sched, &params());
+            let mut requests = Vec::new();
+            assert_eq!(
+                core.advance(ReplayHorizon::Unbounded, &mut requests)
+                    .unwrap(),
+                Advance::Done
+            );
+            assert_eq!(requests.len(), 3);
+            // The warp has retired, but responses and their source sectors
+            // remain addressable by dynamic warp/instruction/sector identity.
+            let owners = core.typed_l2_request_owners(0, &[]);
+            for (sector, owner) in owners.iter().enumerate() {
+                assert_eq!(
+                    owner.line,
+                    CanonicalLineKey::VirtualAbsolute { line_id: 10 }
+                );
+                assert_eq!(owner.sector_mask, 1 << sector);
+            }
+            for completed in 0..=3 {
+                let projected = core.typed_async_copy_states().remove(0).unwrap();
+                assert_eq!(
+                    projected.validate(),
+                    Ok(()),
+                    "exact_cohorts={exact_cohorts}, completed={completed}"
+                );
+                assert_eq!(projected.bypass_observations_complete, exact_cohorts);
+                let copy = &projected.bypass_observations[0];
+                assert_eq!(copy.pending_sources, 3 - completed as u32);
+                assert_eq!(copy.source_cohorts, 2);
+                assert_eq!(copy.cohorts.len(), if exact_cohorts { 2 } else { 0 });
+                if completed < 3 {
+                    let index = [2, 0, 1][completed];
+                    core.on_response(
+                        requests[index].reply,
+                        300 + completed as u64,
+                        &mut Vec::new(),
+                    )
+                    .unwrap();
+                }
+            }
+            assert_eq!(core.outstanding_responses(), 0);
+        }
+    }
+
     fn exact_two_cohort_input<'a>(
         descriptors: &'a [AsyncCopyCohortDescriptor],
         masks: &'a [u32],
@@ -18515,6 +19442,65 @@ mod tests {
         assert_eq!(projected.cohort_topology_stream_hidden_cycles, 10);
         assert_eq!(projected.cohort_topology_residual_exposure_cycles, 0);
         assert_eq!(slot.async_wait_clear_time(0), Some(52));
+    }
+
+    #[test]
+    fn bypass_cohort_projection_rejects_reversed_response_times_in_release() {
+        let p = params();
+        let descriptors = [AsyncCopyCohortDescriptor {
+            payload_bytes: 32,
+            destination_lines: 1,
+            bank_wavefronts: 1,
+            bypass_wavefronts: 1,
+        }];
+        let masks = [0b1];
+        let mut slot = AsyncCopySlot::default();
+        let group = slot
+            .add_pending_async_copy_sources(
+                0,
+                1,
+                64,
+                0,
+                Some(BypassAsyncCopyInput {
+                    instruction: 10,
+                    sector_off: 20,
+                    sector_len: 1,
+                    source_cohorts: 1,
+                    destination_lines: 1,
+                    max_bank_wavefronts: 1,
+                    max_bypass_wavefronts: 1,
+                    cohorts: Some(&descriptors),
+                    sector_membership_masks: Some(&masks),
+                }),
+                &p,
+            )
+            .unwrap();
+        assert!(slot.commit_async_copy_group(10));
+        slot.complete_async_copy_sources(
+            0,
+            group,
+            Some(ResponseId::new(ResponseOwner(1), 0, 10, 20)),
+            1,
+            40,
+            &p,
+        )
+        .unwrap();
+        let committed = {
+            let state = slot.state.as_deref_mut().unwrap();
+            state.bypass_copies[0].cohorts[0].first_source_response = Some(60);
+            state.bypass_copies[0].cohorts[0].last_source_response = Some(50);
+            state.committed_groups[0]
+        };
+
+        assert!(matches!(
+            slot.bypass_copy_projection(0, &committed, &p, 60),
+            Err(IssueError::AsyncCopyCohortProjectionInvalid {
+                field: "cohort response order",
+                expected: 60,
+                got: 50,
+                ..
+            })
+        ));
     }
 
     #[test]
@@ -19681,6 +20667,61 @@ mod tests {
         let result = simulate_sm(&blocks, &sched, &params(), None).unwrap();
         assert_eq!(result.instructions_issued, 4);
         assert!(result.cycles >= 6, "cycles={}", result.cycles);
+    }
+
+    #[cfg(feature = "reference")]
+    #[test]
+    fn typed_local_completion_preserves_terminal_and_retired_cta_frontiers() {
+        let sched = schedule(vec![
+            (0, barrier_pipeline_slot(cb(1))),
+            (16, slot(cb(1), OpClass::Other, "EXIT")),
+        ]);
+        // A terminal barrier wave followed by plain work in reused slots.
+        // The issue clock first trails the known release; the retained
+        // frontier survives the later retirement and remains distinct from
+        // the issue clock.
+        let blocks = vec![
+            BlockReplay {
+                launch_index: 0,
+                warps: vec![warp(0, vec![inst(0)]), warp(1, vec![inst(0)])],
+            },
+            BlockReplay {
+                launch_index: 1,
+                warps: vec![warp(0, vec![inst(0)]), warp(1, vec![inst(0)])],
+            },
+            BlockReplay {
+                launch_index: 2,
+                warps: vec![warp(0, vec![inst(16)]), warp(1, vec![inst(16)])],
+            },
+        ];
+        for dense in [false, true] {
+            let mut core = SmCore::new(&blocks, &sched, &params(), SmMemMode::Flat).unwrap();
+            core.dense_reference = dense;
+            assert_eq!(core.typed_local_completion_time(), None);
+            let mut requests = Vec::new();
+            assert_eq!(
+                core.advance(ReplayHorizon::Bounded(1), &mut requests)
+                    .unwrap(),
+                Advance::Idle { wake_at: Some(1) }
+            );
+            assert_eq!(core.typed_local_completion_time(), Some(5));
+            assert_eq!(core.result().modeled_local_completion_cycles, Some(5));
+            assert!(core.t < 5);
+            assert!(
+                !core
+                    .typed_unprojected_timing_state()
+                    .iter()
+                    .any(|reason| { reason == "local_completion_frontier" })
+            );
+            assert_eq!(
+                core.advance(ReplayHorizon::Unbounded, &mut requests)
+                    .unwrap(),
+                Advance::Done
+            );
+            assert_eq!(core.typed_local_completion_time(), Some(11));
+            assert_eq!(core.result().modeled_local_completion_cycles, Some(11));
+            assert!(requests.is_empty());
+        }
     }
 
     #[test]
@@ -21328,8 +22369,10 @@ mod tests {
         // operand-read clear, it must not steal the later read attribution.
         let mut early_params = params();
         early_params.l1_hit_latency = 1;
+        early_params.l1_miss_latency = 2;
         let early_l1 = L1Config {
             hit_latency: 1,
+            miss_latency: 2,
             ..l1_config()
         };
         let mut early = SmCore::new(
@@ -21348,7 +22391,7 @@ mod tests {
         );
         let mut early_sink = Vec::new();
         early
-            .on_response(early_requests[0].reply, 1, &mut early_sink)
+            .on_response(early_requests[0].reply, 2, &mut early_sink)
             .unwrap();
         assert_eq!(
             early
@@ -21756,6 +22799,8 @@ mod tests {
             2,
             "the floor admits two distinct line fills"
         );
+        #[cfg(feature = "reference")]
+        assert_eq!(core.typed_l1_state().unwrap().validate(), Ok(()));
         let MemModel::L1Shared(st) = &core.mem else {
             panic!("expected shared mode")
         };
@@ -23040,6 +24085,15 @@ mod tests {
             panic!("expected an L1 fill response token");
         };
         let mut out2 = Vec::new();
+        assert_eq!(
+            core.advance(ReplayHorizon::Bounded(300), &mut out2)
+                .unwrap(),
+            Advance::Idle { wake_at: None }
+        );
+        assert_eq!(
+            core.t, 300,
+            "a bounded response wait must advance the local clock to its horizon"
+        );
         assert!(matches!(
             core.on_response(
                 ReplyTo::Warp {
@@ -23464,10 +24518,10 @@ mod tests {
         };
 
         let mut retries = Vec::new();
-        assert_eq!(core.now(), 1);
+        assert_eq!(core.now(), 244);
         assert!(matches!(
             core.on_response(requests[0].reply, 0, &mut retries),
-            Err(IssueError::ResponseBeforeClock { now: 0, clock: 1 })
+            Err(IssueError::ResponseBeforeClock { now: 0, clock: 244 })
         ));
         assert!(matches!(
             core.on_response(
@@ -23476,7 +24530,7 @@ mod tests {
                     barrier: barrier(2),
                     response_id,
                 },
-                1,
+                244,
                 &mut retries,
             ),
             Err(IssueError::ResponseWarpOutOfRange { warp: 1, warps: 1 })
@@ -23488,17 +24542,17 @@ mod tests {
                     barrier: barrier(1),
                     response_id,
                 },
-                1,
+                244,
                 &mut retries,
             ),
             Err(IssueError::ResponseTokenNotOutstanding { .. })
         ));
         assert!(matches!(
-            core.on_response(ReplyTo::None, 1, &mut retries),
+            core.on_response(ReplyTo::None, 244, &mut retries),
             Err(IssueError::UnexpectedMutationOnlyResponse)
         ));
         assert!(retries.is_empty());
-        assert_eq!(core.now(), 1);
+        assert_eq!(core.now(), 244);
         assert_eq!(core.outstanding_responses(), 1);
         assert_eq!(core.warps[0].barrier_pending[2], 1);
         assert_eq!(core.warps[0].barrier_clear[2], 0);
@@ -23510,7 +24564,7 @@ mod tests {
             Err(IssueError::ResponseTokenNotOutstanding { .. })
         ));
         assert!(retries.is_empty());
-        assert_eq!(core.now(), 1);
+        assert_eq!(core.now(), 244);
         assert_eq!(core.outstanding_responses(), 0);
         assert_eq!(core.warps[0].barrier_pending[2], 0);
         assert_eq!(core.warps[0].barrier_clear[2], 244);
@@ -23804,7 +24858,7 @@ mod tests {
                 false,
                 41,
                 response_id,
-                1,
+                0,
                 &mut out,
             )
             .unwrap()
@@ -23935,17 +24989,14 @@ mod tests {
     }
 
     /// §6.4 slice 2 — a LATER instruction merging onto an in-flight
-    /// line fill: a NEW sector sends a follow-up `ReplyTo::None` fetch
+    /// line fill: a NEW sector gets an independent sector response
     /// (the L2 must see it once), a re-touched sector sends nothing
-    /// (MSHR merge), and every waiter still rides the ORIGINAL fill's
-    /// one response.
+    /// (MSHR merge), and each waiter clears on its own returned child.
     #[test]
     fn shared_mode_same_batch_cross_instruction_merge_folds() {
-        // Gate fix 2026-07-07: fold scope is the EMISSION BATCH (one
-        // advance call), not one instruction — a later instruction's
-        // merge onto an earlier instruction's line fill folds into that
-        // request's mask (so worst-of-mask pricing covers it) instead
-        // of splitting off a follow-up fetch.
+        // Folding is scoped to one issue timestamp.  This fixture advances
+        // the same actor through t=0 and t=15, so the later sector must not
+        // inherit the first request's response event.
         let mut load_a = cb(1);
         load_a.write_barrier = Some(barrier(2));
         let mut load_b = cb(1);
@@ -23991,8 +25042,9 @@ mod tests {
             core.advance(ReplayHorizon::Unbounded, &mut out).unwrap(),
             Advance::Idle { wake_at: None }
         );
-        assert_eq!(out.len(), 1, "one line transaction for the whole batch");
-        assert_eq!(out[0].sector_mask, 0b11, "B's sector folded into A's fill");
+        assert_eq!(out.len(), 2, "the late sector owns a separate child");
+        assert_eq!(out[0].sector_mask, 0b01);
+        assert_eq!(out[1].sector_mask, 0b10);
         assert!(matches!(
             out[0].reply,
             ReplyTo::L1Fill {
@@ -24000,21 +25052,38 @@ mod tests {
                 ..
             }
         ));
+        assert!(matches!(
+            out[1].reply,
+            ReplyTo::L1Fill {
+                fill: FillKey::Sector {
+                    line: 10,
+                    sector: 1,
+                    ..
+                },
+                ..
+            }
+        ));
         let mut sink = Vec::new();
         core.on_response(out[0].reply, 244, &mut sink).unwrap();
         assert_eq!(
             core.advance(ReplayHorizon::Unbounded, &mut sink).unwrap(),
+            Advance::Idle { wake_at: None },
+            "the late sector waiter remains pending"
+        );
+        core.on_response(out[1].reply, 260, &mut sink).unwrap();
+        assert_eq!(
+            core.advance(ReplayHorizon::Unbounded, &mut sink).unwrap(),
             Advance::Done,
-            "one response clears both instructions' waiters"
+            "the child response clears the late-sector waiter"
         );
     }
 
     /// A merge onto a fill emitted in an EARLIER batch (the request
     /// already left with the SM's previous yield) cannot fold — it
-    /// sends exactly one follow-up `ReplyTo::None` fetch, and the
-    /// waiter still rides the original fill's response.
+    /// sends exactly one sector follow-up response, and the late
+    /// waiter clears only when that child returns.
     #[test]
-    fn shared_mode_cross_batch_merge_sends_followup_fetch_once() {
+    fn shared_mode_cross_batch_merge_sends_sector_followup_once() {
         let mut load_m = cb(1);
         load_m.write_barrier = Some(barrier(2));
         let mut load_l = cb(1);
@@ -24102,12 +25171,27 @@ mod tests {
         );
         assert_eq!(out2.len(), 1, "exactly one follow-up fetch");
         assert_eq!(out2[0].sector_mask, 0b10, "only the new sector");
-        assert_eq!(out2[0].reply, ReplyTo::None, "no second response");
+        assert!(matches!(
+            out2[0].reply,
+            ReplyTo::L1Fill {
+                fill: FillKey::Sector {
+                    line: 10,
+                    sector: 1,
+                    ..
+                },
+                ..
+            }
+        ));
         assert_eq!(out2[0].source, L2Source::L1Fill);
-        // Fill L's one response clears BOTH its own waiter (barrier 3)
-        // and the merged load's waiter (barrier 2).
+        // Fill L's response clears its own waiter (barrier 3), but the
+        // late-sector waiter (barrier 2) remains until the child response.
         let mut sink = Vec::new();
         core.on_response(out[1].reply, 846, &mut sink).unwrap();
+        assert_eq!(
+            core.advance(ReplayHorizon::Unbounded, &mut sink).unwrap(),
+            Advance::Idle { wake_at: None }
+        );
+        core.on_response(out2[0].reply, 847, &mut sink).unwrap();
         assert_eq!(
             core.advance(ReplayHorizon::Unbounded, &mut sink).unwrap(),
             Advance::Done

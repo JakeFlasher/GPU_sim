@@ -1,8 +1,8 @@
 //! sim-engine: the discrete-event core (design §6.1).
 //!
-//! v0 is a binary-heap min-queue over the current event tuple
-//! `(time, seq, target, kind)` with a strict deterministic total order on
-//! `(time, seq)`, where `seq` is the insertion sequence number. Payload data
+//! v0 is a binary-heap min-queue over events carrying
+//! `(time, seq, sequence_span, target, kind)`, with a strict deterministic total
+//! order on `(time, seq)`, where `seq` is the insertion sequence number. Payload data
 //! belongs in the caller's typed `kind`; there is no separate FFI payload
 //! handle. Two runs over the same inputs therefore produce bit-identical
 //! schedules — a prerequisite for the M2 accuracy gates (a simulator whose
@@ -33,6 +33,9 @@ pub struct Event<K> {
     /// Insertion sequence number: unique, monotonically increasing, and the
     /// deterministic tie-breaker for same-cycle events (FIFO within a cycle).
     pub seq: u64,
+    /// Logical insertion positions reserved by this physical event, including
+    /// `seq`. Preserve the actual reservation independently of its payload.
+    pub sequence_span: NonZeroU64,
     pub target: TargetId,
     pub kind: K,
 }
@@ -135,6 +138,15 @@ impl<K> EventQueue<K> {
         self.stats
     }
 
+    /// Next unused insertion position; `None` means the sequence space is
+    /// exhausted. This cannot be recovered from pending events after pops.
+    pub fn next_sequence(&self) -> Option<u64> {
+        match self.next_seq {
+            NextSequence::Available(sequence) => Some(sequence),
+            NextSequence::Exhausted => None,
+        }
+    }
+
     /// Schedule at absolute time `at` (>= now, or a typed error).
     pub fn schedule_at(&mut self, at: Time, target: TargetId, kind: K) -> Result<u64, EngineError> {
         self.schedule_at_spanning(at, target, kind, NonZeroU64::MIN)
@@ -177,6 +189,7 @@ impl<K> EventQueue<K> {
         self.heap.push(Reverse(HeapEntry(Event {
             time: at,
             seq,
+            sequence_span,
             target,
             kind,
         })));
@@ -238,14 +251,18 @@ impl<K> EventQueue<K> {
     /// retaining the queue's canonical `(time, sequence)` order. The engine
     /// never interprets the event payload; this is the typed alternative to
     /// `pending_debug` for boundary traces.
-    pub fn pending_projected<R>(&self, mut project: impl FnMut(&Event<K>) -> R) -> Vec<R> {
+    pub fn pending_projected<R>(&self, project: impl FnMut(&Event<K>) -> R) -> Vec<R> {
+        // Sort references to the heap entries before invoking the projection.
+        // A typed payload can own a large request batch; sorting `(key, R)`
+        // would move those payloads O(n log n) times and would invoke the
+        // callback in the heap's unspecified iterator order.
         let mut events = self
             .heap
             .iter()
-            .map(|Reverse(HeapEntry(event))| ((event.time, event.seq), project(event)))
+            .map(|Reverse(HeapEntry(event))| event)
             .collect::<Vec<_>>();
-        events.sort_unstable_by_key(|(key, _)| *key);
-        events.into_iter().map(|(_, value)| value).collect()
+        events.sort_unstable_by_key(|event| (event.time, event.seq));
+        events.into_iter().map(project).collect()
     }
 
     /// Pop the next event and advance the clock to its timestamp.
@@ -394,6 +411,23 @@ mod tests {
     }
 
     #[test]
+    fn projected_events_are_callback_ordered_without_reordering_payloads() {
+        let mut q = EventQueue::new();
+        q.schedule_at(10, TargetId(2), Kind::Drain).unwrap();
+        q.schedule_at(5, TargetId(1), Kind::IssueBatch).unwrap();
+        q.schedule_at(10, TargetId(3), Kind::MemResponse).unwrap();
+        q.schedule_at(5, TargetId(4), Kind::Drain).unwrap();
+
+        let mut callback_order = Vec::new();
+        let projected = q.pending_projected(|event| {
+            callback_order.push((event.time, event.seq));
+            (event.time, event.target.0)
+        });
+        assert_eq!(callback_order, vec![(5, 1), (5, 3), (10, 0), (10, 2)]);
+        assert_eq!(projected, vec![(5, 1), (5, 4), (10, 2), (10, 3)]);
+    }
+
+    #[test]
     fn schedule_in_overflow_is_typed() {
         let mut q = EventQueue::new();
         q.schedule_at(1, TargetId(0), Kind::Drain).unwrap();
@@ -442,8 +476,11 @@ mod tests {
             ),
             Ok(0)
         );
+        assert_eq!(q.next_sequence(), Some(4));
         assert_eq!(q.schedule_at(0, TargetId(1), Kind::Drain), Ok(4));
-        assert_eq!(q.pop().unwrap().unwrap().target, TargetId(0));
+        assert_eq!(q.next_sequence(), Some(5));
+        let first = q.pop().unwrap().unwrap();
+        assert_eq!(first.sequence_span, NonZeroU64::new(4).unwrap());
         assert_eq!(q.pop().unwrap().unwrap().target, TargetId(1));
 
         let mut near_limit = EventQueue::new();
@@ -471,6 +508,7 @@ mod tests {
         q.heap.push(Reverse(HeapEntry(Event {
             time: 6,
             seq: 0,
+            sequence_span: NonZeroU64::MIN,
             target: TargetId(0),
             kind: Kind::Drain,
         })));
@@ -506,6 +544,7 @@ mod tests {
             Event {
                 time: 2,
                 seq: 2,
+                sequence_span: NonZeroU64::MIN,
                 target: TargetId(1),
                 kind: Kind::Drain
             }

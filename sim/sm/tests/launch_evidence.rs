@@ -438,7 +438,7 @@ fn canary_admits_to_one_stable_canonical_seal() {
     let first_seal = first.identity().seal_sha256();
     assert_eq!(
         first_seal.to_string(),
-        "ab173443f81eaaa5c26fabe24258d02cab2c5266207ced0f174ebd043a62ef45"
+        "8cb86852dba345d7ae8c6cac83316d5342dfb6dc7f0acd80d71e17a2f1338cca"
     );
     assert!(
         !first.identity().canonical_json().contains("\"bundle_id\"")

@@ -133,8 +133,9 @@ mod tests {
     #[test]
     fn boundary_contract_round_trips_and_is_not_cycle_exact() {
         let contract = ObservationContract::boundary_replay();
-        let encoded = serde_json::to_string(&contract).unwrap();
-        let decoded: ObservationContract = serde_json::from_str(&encoded).unwrap();
+        let encoded = serde_json::to_string(&contract).expect("test fixture should be valid");
+        let decoded: ObservationContract =
+            serde_json::from_str(&encoded).expect("test fixture should be valid");
         assert_eq!(decoded, contract);
         assert!(!contract.requires_per_cycle_state());
         assert_eq!(contract.validate(), Ok(()));

@@ -7,8 +7,9 @@ This module is the public production caller for
 It reads the kernel's grid / block / static-shared metadata
 from ``dynamic_trace.pb``, walks the per-threadblock proto
 files to extract per-block access records with active-lane
-byte addresses, joins those records through the adapter, and
-emits a schema-valid L1 predictor bundle.
+byte addresses (one record per address operand), joins those
+records through the adapter, and emits a schema-valid L1
+predictor bundle.
 
 The protobuf bindings under ``workloads/simbench_bw/_pb_generated/`` are
 tracked authorities. Missing or unusable binding bytes are repository
@@ -29,18 +30,11 @@ concerns belong to the higher-level comparison-runner ingress
 that the layer-aware comparison path will land in a follow-up
 slice.
 
-KNOWN DEFECTS (2026-07-06, recorded; fixes tracked in the
-label-pipeline backlog): (1) the consumed classifier manifests
-are cross-arch contaminated on multi-arch fatbins — see the
-KNOWN DEFECT note in ``l1_cache_op_classifier``'s module
-docstring. (2) This module joins the manifest by ``vpc`` when
-present, but manifest pcs are function-relative, so when the
-function base is nonzero the join never matches and records
-are silently dropped. (3) It applies the FIRST nonzero
-address-record ``data_width`` to ALL of an instruction's
-lanes; the wire contract is per-record width. Both (2) and
-(3) diverge from the wire contract — the Rust replay uses
-function-relative pc + per-record width priority deliberately.
+The walker preserves the wire contract's function-relative PC,
+per-address width, lane mask, and optional SM identity. The
+classifier manifest is supplied by the arch-scoped classifier;
+callers providing a canned manifest remain responsible for
+selecting the matching architecture.
 """
 from __future__ import annotations
 
@@ -60,6 +54,7 @@ from l1_trace_adapter import (  # noqa: E402
     L1TraceAdapterEligibilityDefect,
     L1TraceAdapterGridBlockMissing,
     L1TraceAdapterManifestNotMatched,
+    L1TraceAdapterRecordInvalid,
     TraceRecord,
     build_per_block_l1_accesses,
 )
@@ -484,8 +479,12 @@ def _walk_threadblock_protos(
     grid_dim: int,
     retained_threadblock_pb_payloads: list[bytes] | None = None,
 ) -> list[TraceRecord]:
-    """Walk all per-threadblock proto files and emit
-    TraceRecord entries for each memory instruction.
+    """Walk all per-threadblock proto files and emit one
+    ``TraceRecord`` per address operand of each memory instruction.
+
+    Keeping operands separate preserves the wire contract's per-address
+    width and lane-mask semantics; it also matches the sector-stream
+    consumer and the Rust reader.
 
     Block coordinates come from ``threadblock.block_id``
     (the canonical proto field) — NOT from the filename. An
@@ -572,49 +571,48 @@ def _walk_threadblock_protos(
                 and_mask = active_mask & predicate_mask
                 if and_mask == 0:
                     continue
-                pc_value = (
-                    inst.vpc if inst.HasField("vpc") else inst.pc
+                # The classifier manifest is keyed by the SASS function-
+                # relative offset.  ``vpc`` is an optional widened identity
+                # field and may carry high bits on a future producer; using
+                # it as the join key would silently drop otherwise valid
+                # records once those bits become nonzero.  The wire contract
+                # keeps ``pc`` as the function-relative uint32 offset, so it
+                # is the stable manifest key even when ``vpc`` is present.
+                pc_value = inst.pc
+                # Preserve the optional per-instruction SM identity all the
+                # way into the adapter.  ``derive_cta_to_sm_assignment``
+                # consumes this field to prove a real CTA-to-SM partition;
+                # dropping it here silently downgraded every trace that did
+                # carry SM metadata to the fallback schedule.
+                sm_id = (
+                    int(inst.sm_id) if inst.HasField("sm_id") else None
                 )
-                # Resolve the per-lane byte width from the proto.
-                # Source priority (per the sector-with-line-
-                # allocation contract):
-                #   1. Any address_record's ``data_width`` field
-                #      when non-zero (proto3 scalar default = 0
-                #      is treated as "not emitted").
-                #   2. ``inst.data_width`` when explicitly
-                #      present.
-                # A non-positive width means the tracer emitted
-                # a contract violation; the L1 head's typed
-                # fail-close arm catches this and rejects the
-                # bundle with ``predictor_l1_sass_provenance_missing``
-                # rather than silently undercounting the sector
-                # denominator.
-                data_width: int | None = None
                 for address_record in inst.addresses:
-                    width = int(address_record.data_width)
-                    if width != 0:
-                        data_width = width
-                        break
-                if data_width is None and inst.HasField("data_width"):
-                    data_width = int(inst.data_width)
-                byte_addresses: list[int] = []
-                for address_record in inst.addresses:
-                    byte_addresses.extend(
-                        _reconstruct_lane_addresses(
-                            address_record,
-                            and_mask,
-                            import_trace_contract_mod,
-                        )
+                    byte_addresses = _reconstruct_lane_addresses(
+                        address_record,
+                        and_mask,
+                        import_trace_contract_mod,
                     )
-                if not byte_addresses:
-                    continue
-                records.append(TraceRecord(
-                    block_index=block_index,
-                    pc=f"0x{int(pc_value):x}",
-                    byte_addresses=tuple(byte_addresses),
-                    data_width=data_width,
-                    warp_index=int(warp_index),
-                ))
+                    if not byte_addresses:
+                        continue
+                    # The canonical width rule is per address record: a
+                    # strictly positive record width wins, while proto3's
+                    # zero default (and legacy non-positive values) falls
+                    # back to the already validated instruction width.
+                    record_width = int(address_record.data_width)
+                    if record_width <= 0:
+                        record_width = (
+                            int(inst.data_width)
+                            if inst.HasField("data_width") else None
+                        )
+                    records.append(TraceRecord(
+                        block_index=block_index,
+                        pc=f"0x{int(pc_value):x}",
+                        byte_addresses=tuple(byte_addresses),
+                        data_width=record_width,
+                        warp_index=int(warp_index),
+                        sm_id=sm_id,
+                    ))
     return records
 
 
@@ -887,7 +885,7 @@ def predict_l1_from_trace_dir(
                 "address_record_malformed": str(exc),
             },
         )
-    except L1ProductionHelperInstructionMalformed as exc:
+    except (L1ProductionHelperInstructionMalformed, L1TraceAdapterRecordInvalid) as exc:
         return cp._typed_unavailable_bundle(
             cache_layer="L1TEX",
             typed_reason="predictor_l1_sass_provenance_missing",

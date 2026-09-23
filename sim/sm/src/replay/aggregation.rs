@@ -955,6 +955,8 @@ mod tests {
             instruction_front_end: None,
             memory_issue_pipeline: None,
             scalar_execution_pipeline: None,
+            issue_ports: 1,
+            dual_issue_supported: false,
             ldgsts_l1_hit_return_service: None,
             constant_memory_return_service: None,
             immediate_constant_cache: None,

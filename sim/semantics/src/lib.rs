@@ -7,8 +7,10 @@ use std::collections::{BTreeMap, BTreeSet};
 
 pub mod boundary;
 pub mod certificate;
+pub mod dram;
 pub mod observation;
 pub mod state;
+pub mod transform;
 pub use boundary::{
     BOUNDARY_SCHEMA_VERSION, BlockBoundaryState, BoundarySnapshot, WarpBoundaryState,
 };
@@ -16,31 +18,44 @@ pub use certificate::{
     ExecutionEvidence, FidelityDecision, IntervalCertificate, IntervalProjection, ReifyReason,
     certify_interval,
 };
+pub use dram::{DramBoundaryState, DramStateError};
 pub use observation::{
     OBSERVATION_SCHEMA_VERSION, ObservationContract, ObservationContractError,
     ObservationGranularity,
 };
 pub use state::{
-    AddressDomain, AsyncCopyBoundaryState, AsyncGroupBoundaryState, CanonicalLineKey, Completeness,
+    AddressDomain, AsyncCopyBoundaryState, AsyncCopyBypassObservationState,
+    AsyncCopyCohortBoundaryState, AsyncCopyStateError, AsyncGroupBoundaryState, BoundaryStateError,
+    CanonicalLineKey, Completeness, CoreStateError, EventSequenceError, FrontEndStateError,
     InstructionCacheEntryState, InstructionCacheState, InstructionFrontEndBoundaryState,
     InstructionStreamLineState, InstructionStreamState, L1BoundaryState, L1CounterState,
-    L1FillDueState, L1LineFillState, L1SectorFillState, L2AccessDisciplineState, L2AllocationState,
-    L2BoundaryState, L2CounterState, L2GeometryState, L2RequestKey, L2RequestOwner, L2RequestState,
-    L2SectorOwnership, L2SectorStatus, L2SetState, L2StateError, L2WayState,
-    MemoryPipelineBoundaryState, PowerBoundaryState, PowerClockState, PowerDomainState,
+    L1FillDueState, L1LineFillState, L1SectorFillState, L1StateError, L2AccessDisciplineState,
+    L2AllocationState, L2BoundaryState, L2CounterState, L2GeometryState, L2RequestKey,
+    L2RequestOwner, L2RequestState, L2SectorOwnership, L2SectorStatus, L2SetState, L2StateError,
+    L2WayState, MemoryPipelineBoundaryState, PowerBoundaryState, PowerClockState, PowerDomainState,
     PowerDomainStatus, PowerModelStatus, PowerSampleState, PowerStateError, QueueBoundaryState,
-    ScalarPipelineBoundaryState, TYPED_STATE_SCHEMA_VERSION, TypedContractKind,
-    TypedCoreBoundaryState, TypedEventBoundaryRecord, TypedEventIdentity, TypedEventPayload,
-    TypedObservationContract, TypedPendingEvent,
+    QueueStateError, ScalarPipelineBoundaryState, TYPED_STATE_SCHEMA_VERSION,
+    TypedAdmissionWitness, TypedContractKind, TypedCoreBoundaryState, TypedEventBoundaryRecord,
+    TypedEventIdentity, TypedEventPayload, TypedFillIdentity, TypedL2Source, TypedMemoryOperation,
+    TypedMemoryOrigin, TypedMemoryRequest, TypedObservationContract, TypedPendingEvent,
+    TypedResponseIdentity, TypedResponseKind,
+};
+pub use transform::{
+    ExternalInputFrontier, IdentityBoundaryTransformer, ObservationDelta, StateTransformer,
+    SummaryProof, TRANSFORM_SCHEMA_VERSION, TransformCheckError, TransformError, TransformInput,
+    TransformInterval, TransformIntervalError, TransformReifyReason, TransformerDecision,
+    TransformerOutput, TypedEventTransition, check_proof,
 };
 
 pub const SCHEMA_VERSION: u32 = 1;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Isa {
     NvidiaSm86,
     AmdGfx942,
+    CustomSimtU32,
+    RiscV32I,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -91,6 +106,10 @@ impl LaneMask {
 #[serde(deny_unknown_fields)]
 pub struct NativeInstruction {
     pub isa: Isa,
+    /// Optional width for extensible/custom ISA variants. Built-in vendor
+    /// variants retain their architectural width when this is absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub simt_width: Option<u8>,
     pub device_id: i64,
     pub stream_id: i64,
     pub kernel_id: i32,
@@ -189,6 +208,15 @@ pub enum AddressSpace {
     Generic,
 }
 
+/// Token effects for custom asynchronous operations; distinct from SASS
+/// scheduling-control bits and from a hardware timing observation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "action", rename_all = "snake_case", deny_unknown_fields)]
+pub enum AsyncEffect {
+    Submit { group: u8 },
+    Wait { group: u8 },
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct LaneAddress {
@@ -225,10 +253,15 @@ impl MemoryOperand {
             return Err(SemanticError::InvalidWidth);
         }
         let mut seen = 0u64;
+        let mut previous_lane = None;
         for address in &self.lane_addresses {
             if address.lane >= self.lane_mask.width() {
                 return Err(SemanticError::AddressLane);
             }
+            if previous_lane.is_some_and(|previous| address.lane <= previous) {
+                return Err(SemanticError::AddressLaneOrder);
+            }
+            previous_lane = Some(address.lane);
             let bit = 1u64 << address.lane;
             if seen & bit != 0 || self.lane_mask.bits() & bit == 0 {
                 return Err(SemanticError::AddressLane);
@@ -262,11 +295,11 @@ impl MemoryOperand {
         intervals.sort_unstable();
         let mut merged: Vec<(u64, u64)> = Vec::new();
         for (start, end) in intervals {
-            if let Some(last) = merged.last_mut() {
-                if start <= last.1.saturating_add(1) {
-                    last.1 = last.1.max(end);
-                    continue;
-                }
+            if let Some(last) = merged.last_mut()
+                && start <= last.1.saturating_add(1)
+            {
+                last.1 = last.1.max(end);
+                continue;
             }
             merged.push((start, end));
         }
@@ -311,22 +344,163 @@ pub struct SemanticEvent {
     pub operation: OperationKind,
     pub opcode_text: Option<String>,
     pub control: Option<ControlEvidence>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub async_effect: Option<AsyncEffect>,
     pub memory: Option<MemoryEvent>,
     pub losses: Vec<LossReason>,
 }
+
+/// Validate submit/wait pairing for a sequence that declares custom async
+/// effects. Per-event validation alone cannot detect a missing wait or a
+/// duplicated group; this stateful check is the stronger boundary contract.
+/// Tokens are local to (ISA, device, stream, launch, block, warp), never global
+/// to an interleaved trace. This checks pairing, not functional memory safety.
+pub fn validate_async_effects(events: &[SemanticEvent]) -> Result<(), SemanticError> {
+    let mut pending = BTreeMap::new();
+    for event in events {
+        // Pairing is a stateful extension of the per-event contract, not a
+        // replacement for it. Validate every record here as well so callers
+        // cannot obtain a successful async proof from malformed events that
+        // happen not to carry an effect.
+        event.validate()?;
+        if let Some(effect) = event.async_effect {
+            let native = event.native;
+            let group = match effect {
+                AsyncEffect::Submit { group } | AsyncEffect::Wait { group } => group,
+            };
+            let key = (
+                native.isa,
+                native.device_id,
+                native.stream_id,
+                native.kernel_id,
+                native.block_launch_index,
+                native.warp_id,
+                group,
+            );
+            match effect {
+                AsyncEffect::Submit { group } => {
+                    if pending.insert(key, event.active_lanes).is_some() {
+                        return Err(SemanticError::AsyncGroupReuse { group });
+                    }
+                }
+                AsyncEffect::Wait { group } => match pending.remove(&key) {
+                    None => return Err(SemanticError::AsyncGroupMissing { group }),
+                    Some(mask) if mask != event.active_lanes => {
+                        return Err(SemanticError::MaskWidthMismatch);
+                    }
+                    Some(_) => {}
+                },
+            }
+        }
+    }
+    pending
+        .into_keys()
+        .next()
+        .map_or(Ok(()), |(_, _, _, _, _, _, group)| {
+            Err(SemanticError::AsyncGroupUnfinished { group })
+        })
+}
+
 impl SemanticEvent {
     pub fn validate(&self) -> Result<(), SemanticError> {
+        if self.losses.windows(2).any(|window| window[1] <= window[0]) {
+            return Err(SemanticError::LossesNotCanonical);
+        }
         let effective = self.active_lanes.intersection(self.predicate_lanes)?;
         let expected_width = match self.native.isa {
             Isa::NvidiaSm86 => 32,
             Isa::AmdGfx942 => 64,
+            Isa::CustomSimtU32 | Isa::RiscV32I => self
+                .native
+                .simt_width
+                .ok_or(SemanticError::MaskWidthMismatch)?,
         };
+        if !(1..=64).contains(&expected_width) {
+            return Err(SemanticError::MaskWidthMismatch);
+        }
         if effective.width() != expected_width {
             return Err(SemanticError::MaskWidthMismatch);
+        }
+        if self
+            .native
+            .simt_width
+            .is_some_and(|width| width != expected_width)
+        {
+            return Err(SemanticError::MaskWidthMismatch);
+        }
+        if let Some(effect) = self.async_effect {
+            // The current custom ISA defines whole-group tokens only. A
+            // predicated submit/wait would need per-lane ownership semantics.
+            if effective.count() != u32::from(expected_width) {
+                return Err(SemanticError::OperationMismatch);
+            }
+            let valid = match effect {
+                AsyncEffect::Submit { .. } => self.memory.as_ref().is_some_and(|memory| {
+                    self.operation == OperationKind::Memory
+                        && memory.family == MemoryFamily::Global
+                        && memory.direction == Some(MemoryDirection::Store)
+                }),
+                AsyncEffect::Wait { .. } => {
+                    self.operation == OperationKind::Synchronization && self.memory.is_none()
+                }
+            };
+            if self.native.isa != Isa::CustomSimtU32 || !valid {
+                return Err(SemanticError::OperationMismatch);
+            }
         }
         if let Some(memory) = &self.memory {
             if self.operation != OperationKind::Memory {
                 return Err(SemanticError::OperationMismatch);
+            }
+            if memory.dynamic_class_present != (memory.family != MemoryFamily::Constant) {
+                return Err(SemanticError::MemoryClassPresenceMismatch);
+            }
+            if memory.family == MemoryFamily::Constant
+                && memory.direction != Some(MemoryDirection::Load)
+            {
+                return Err(SemanticError::ConstantDirectionMismatch);
+            }
+            if memory.family == MemoryFamily::Constant
+                && !self
+                    .losses
+                    .contains(&LossReason::DynamicMemoryClassUnavailable)
+            {
+                return Err(SemanticError::MissingLossReason {
+                    reason: LossReason::DynamicMemoryClassUnavailable,
+                });
+            }
+            if memory.dynamic_class_present
+                && memory.direction.is_none()
+                && !self
+                    .losses
+                    .contains(&LossReason::MemoryDirectionUnavailable)
+            {
+                return Err(SemanticError::MissingLossReason {
+                    reason: LossReason::MemoryDirectionUnavailable,
+                });
+            }
+            if memory.dynamic_class_present
+                && effective.bits() != 0
+                && memory.operands.is_empty()
+                && !self.losses.contains(&LossReason::AddressPayloadUnavailable)
+            {
+                return Err(SemanticError::MissingLossReason {
+                    reason: LossReason::AddressPayloadUnavailable,
+                });
+            }
+            if memory.dynamic_class_present
+                && memory
+                    .operands
+                    .iter()
+                    .any(|operand| operand.address_space.is_none())
+                && !self.losses.contains(&LossReason::AddressSpaceUnavailable)
+            {
+                return Err(SemanticError::MissingLossReason {
+                    reason: LossReason::AddressSpaceUnavailable,
+                });
+            }
+            if memory.declared_width.is_some_and(|width| width <= 0) {
+                return Err(SemanticError::InvalidWidth);
             }
             for operand in &memory.operands {
                 operand.validate()?;
@@ -407,6 +581,8 @@ pub enum SemanticError {
     MaskWidthMismatch,
     #[error("operand lane addresses must cover its effective mask exactly once")]
     AddressLane,
+    #[error("operand lane addresses are not in canonical ascending lane order")]
+    AddressLaneOrder,
     #[error("memory width must be positive")]
     InvalidWidth,
     #[error("memory byte span overflows the address domain")]
@@ -419,6 +595,20 @@ pub enum SemanticError {
     CountOverflow,
     #[error("operation and memory payload disagree")]
     OperationMismatch,
+    #[error("dynamic memory-class presence disagrees with the memory family")]
+    MemoryClassPresenceMismatch,
+    #[error("static constant-cache memory must carry a load direction")]
+    ConstantDirectionMismatch,
+    #[error("semantic event is missing required loss reason {reason:?}")]
+    MissingLossReason { reason: LossReason },
+    #[error("semantic event loss reasons are not strictly ordered and unique")]
+    LossesNotCanonical,
+    #[error("async group {group} is submitted more than once")]
+    AsyncGroupReuse { group: u8 },
+    #[error("async group {group} is waited without a submit")]
+    AsyncGroupMissing { group: u8 },
+    #[error("async group {group} remains unfinished")]
+    AsyncGroupUnfinished { group: u8 },
 }
 
 #[cfg(test)]
@@ -426,9 +616,12 @@ mod tests {
     use super::*;
     #[test]
     fn wave64_high_lane_survives_json() {
-        let mask = LaneMask::new(64, 1u64 << 63).unwrap();
-        let json = serde_json::to_string(&mask).unwrap();
-        assert_eq!(serde_json::from_str::<LaneMask>(&json).unwrap(), mask);
+        let mask = LaneMask::new(64, 1u64 << 63).expect("test fixture should be valid");
+        let json = serde_json::to_string(&mask).expect("test fixture should be valid");
+        assert_eq!(
+            serde_json::from_str::<LaneMask>(&json).expect("test fixture should be valid"),
+            mask
+        );
         assert!(serde_json::from_str::<LaneMask>(r#"{"width":32,"bits":4294967296}"#).is_err());
     }
     #[test]
@@ -436,7 +629,7 @@ mod tests {
         let operand = MemoryOperand {
             address_space: Some(AddressSpace::Global),
             allocation_id: Some(7),
-            lane_mask: LaneMask::new(32, 7).unwrap(),
+            lane_mask: LaneMask::new(32, 7).expect("test fixture should be valid"),
             width_bytes: 4,
             lane_addresses: vec![
                 LaneAddress {
@@ -454,12 +647,340 @@ mod tests {
             ],
             native: None,
         };
-        assert_eq!(operand.unique_sectors(32).unwrap(), vec![0, 1, 2]);
-        let decoded: MemoryOperand =
-            serde_json::from_str(&serde_json::to_string(&operand).unwrap()).unwrap();
+        assert_eq!(
+            operand
+                .unique_sectors(32)
+                .expect("test fixture should be valid"),
+            vec![0, 1, 2]
+        );
+        let decoded: MemoryOperand = serde_json::from_str(
+            &serde_json::to_string(&operand).expect("test fixture should be valid"),
+        )
+        .expect("test fixture should be valid");
         assert_eq!(decoded, operand);
-        let mut invalid = operand;
+        let mut invalid = operand.clone();
         invalid.lane_addresses[2].lane = 1;
         assert!(invalid.validate().is_err());
+        let mut unsorted = operand;
+        unsorted.lane_addresses.swap(0, 1);
+        assert!(matches!(
+            unsorted.validate(),
+            Err(SemanticError::AddressLaneOrder)
+        ));
+    }
+
+    #[test]
+    fn memory_class_presence_matches_constant_static_only_contract() {
+        let native = NativeInstruction {
+            isa: Isa::NvidiaSm86,
+            simt_width: None,
+            device_id: 0,
+            stream_id: 0,
+            kernel_id: 1,
+            block_launch_index: 0,
+            warp_id: 0,
+            instruction_index: 0,
+            function_unique_id: 1,
+            pc: 0,
+            vpc: None,
+            sm_id: Some(0),
+            warpid_sm: Some(0),
+            instrumentation_order: None,
+        };
+        let mask = LaneMask::new(32, 1).expect("test fixture should be valid");
+        let mut event = SemanticEvent {
+            ordinal: 0,
+            native,
+            active_lanes: mask,
+            predicate_lanes: mask,
+            operation: OperationKind::Memory,
+            opcode_text: Some("LDG.E".to_owned()),
+            control: None,
+            async_effect: None,
+            memory: Some(MemoryEvent {
+                family: MemoryFamily::Global,
+                direction: Some(MemoryDirection::Load),
+                dynamic_class_present: false,
+                native_cache_op: None,
+                declared_width: Some(4),
+                operands: Vec::new(),
+            }),
+            losses: Vec::new(),
+        };
+        assert!(matches!(
+            event.validate(),
+            Err(SemanticError::MemoryClassPresenceMismatch)
+        ));
+        {
+            let memory = event.memory.as_mut().expect("test fixture should be valid");
+            memory.family = MemoryFamily::Constant;
+            memory.direction = Some(MemoryDirection::Load);
+        }
+        event.losses.push(LossReason::DynamicMemoryClassUnavailable);
+        assert!(event.validate().is_ok());
+        event.losses = vec![
+            LossReason::DynamicMemoryClassUnavailable,
+            LossReason::OpcodeUnavailable,
+        ];
+        assert!(matches!(
+            event.validate(),
+            Err(SemanticError::LossesNotCanonical)
+        ));
+        event.losses = vec![
+            LossReason::DynamicMemoryClassUnavailable,
+            LossReason::DynamicMemoryClassUnavailable,
+        ];
+        assert!(matches!(
+            event.validate(),
+            Err(SemanticError::LossesNotCanonical)
+        ));
+        event.losses = vec![LossReason::DynamicMemoryClassUnavailable];
+        event
+            .memory
+            .as_mut()
+            .expect("test fixture should be valid")
+            .direction = Some(MemoryDirection::Store);
+        assert!(matches!(
+            event.validate(),
+            Err(SemanticError::ConstantDirectionMismatch)
+        ));
+        event
+            .memory
+            .as_mut()
+            .expect("test fixture should be valid")
+            .direction = Some(MemoryDirection::Load);
+        event.losses.clear();
+        assert!(matches!(
+            event.validate(),
+            Err(SemanticError::MissingLossReason {
+                reason: LossReason::DynamicMemoryClassUnavailable
+            })
+        ));
+        event.losses.push(LossReason::DynamicMemoryClassUnavailable);
+        event
+            .memory
+            .as_mut()
+            .expect("test fixture should be valid")
+            .dynamic_class_present = true;
+        assert!(matches!(
+            event.validate(),
+            Err(SemanticError::MemoryClassPresenceMismatch)
+        ));
+    }
+
+    #[test]
+    fn dynamic_memory_gaps_require_explicit_loss_reasons() {
+        let native = NativeInstruction {
+            isa: Isa::NvidiaSm86,
+            simt_width: None,
+            device_id: 0,
+            stream_id: 0,
+            kernel_id: 1,
+            block_launch_index: 0,
+            warp_id: 0,
+            instruction_index: 0,
+            function_unique_id: 1,
+            pc: 0,
+            vpc: None,
+            sm_id: Some(0),
+            warpid_sm: Some(0),
+            instrumentation_order: None,
+        };
+        let mask = LaneMask::new(32, 1).expect("test fixture should be valid");
+        let mut event = SemanticEvent {
+            ordinal: 0,
+            native,
+            active_lanes: mask,
+            predicate_lanes: mask,
+            operation: OperationKind::Memory,
+            opcode_text: Some("LDG.E".to_owned()),
+            control: None,
+            async_effect: None,
+            memory: Some(MemoryEvent {
+                family: MemoryFamily::Global,
+                direction: None,
+                dynamic_class_present: true,
+                native_cache_op: None,
+                declared_width: Some(4),
+                operands: Vec::new(),
+            }),
+            losses: Vec::new(),
+        };
+        assert!(matches!(
+            event.validate(),
+            Err(SemanticError::MissingLossReason {
+                reason: LossReason::MemoryDirectionUnavailable
+            })
+        ));
+        event.losses.push(LossReason::MemoryDirectionUnavailable);
+        assert!(matches!(
+            event.validate(),
+            Err(SemanticError::MissingLossReason {
+                reason: LossReason::AddressPayloadUnavailable
+            })
+        ));
+        event.losses = vec![
+            LossReason::AddressPayloadUnavailable,
+            LossReason::MemoryDirectionUnavailable,
+        ];
+        assert!(event.validate().is_ok());
+        event
+            .memory
+            .as_mut()
+            .expect("test fixture should be valid")
+            .operands = vec![MemoryOperand {
+            address_space: None,
+            allocation_id: None,
+            lane_mask: mask,
+            width_bytes: 4,
+            lane_addresses: vec![LaneAddress {
+                lane: 0,
+                address: 0,
+            }],
+            native: None,
+        }];
+        event.losses.clear();
+        event
+            .memory
+            .as_mut()
+            .expect("test fixture should be valid")
+            .direction = Some(MemoryDirection::Load);
+        assert!(matches!(
+            event.validate(),
+            Err(SemanticError::MissingLossReason {
+                reason: LossReason::AddressSpaceUnavailable
+            })
+        ));
+        event.losses.push(LossReason::AddressSpaceUnavailable);
+        assert!(event.validate().is_ok());
+        event
+            .memory
+            .as_mut()
+            .expect("test fixture should be valid")
+            .declared_width = Some(0);
+        assert!(matches!(event.validate(), Err(SemanticError::InvalidWidth)));
+    }
+
+    #[test]
+    fn custom_simt_width_is_carried_by_native_identity() {
+        let mask = LaneMask::new(4, 0b1111).expect("mask should be valid");
+        let event = SemanticEvent {
+            ordinal: 0,
+            native: NativeInstruction {
+                isa: Isa::CustomSimtU32,
+                simt_width: Some(4),
+                device_id: 0,
+                stream_id: 0,
+                kernel_id: 0,
+                block_launch_index: 0,
+                warp_id: 0,
+                instruction_index: 0,
+                function_unique_id: 0,
+                pc: 0,
+                vpc: None,
+                sm_id: None,
+                warpid_sm: None,
+                instrumentation_order: None,
+            },
+            active_lanes: mask,
+            predicate_lanes: mask,
+            operation: OperationKind::Arithmetic,
+            opcode_text: Some("add_imm".to_owned()),
+            control: None,
+            async_effect: None,
+            memory: None,
+            losses: Vec::new(),
+        };
+        assert!(event.validate().is_ok());
+    }
+
+    #[test]
+    fn async_effect_sequence_rejects_duplicate_missing_and_unfinished_groups() {
+        fn event(effect: AsyncEffect) -> SemanticEvent {
+            let mask = LaneMask::new(8, 0xff).expect("mask should be valid");
+            SemanticEvent {
+                ordinal: 0,
+                native: NativeInstruction {
+                    isa: Isa::CustomSimtU32,
+                    simt_width: Some(8),
+                    device_id: 0,
+                    stream_id: 0,
+                    kernel_id: 0,
+                    block_launch_index: 0,
+                    warp_id: 0,
+                    instruction_index: 0,
+                    function_unique_id: 0,
+                    pc: 0,
+                    vpc: None,
+                    sm_id: None,
+                    warpid_sm: None,
+                    instrumentation_order: None,
+                },
+                active_lanes: mask,
+                predicate_lanes: mask,
+                operation: if matches!(effect, AsyncEffect::Wait { .. }) {
+                    OperationKind::Synchronization
+                } else {
+                    OperationKind::Memory
+                },
+                opcode_text: None,
+                control: None,
+                async_effect: Some(effect),
+                memory: if matches!(effect, AsyncEffect::Submit { .. }) {
+                    Some(MemoryEvent {
+                        family: MemoryFamily::Global,
+                        direction: Some(MemoryDirection::Store),
+                        dynamic_class_present: true,
+                        native_cache_op: None,
+                        declared_width: Some(4),
+                        operands: vec![MemoryOperand {
+                            address_space: Some(AddressSpace::Global),
+                            allocation_id: None,
+                            lane_mask: mask,
+                            width_bytes: 4,
+                            lane_addresses: (0..8)
+                                .map(|lane| LaneAddress {
+                                    lane,
+                                    address: u64::from(lane) * 4,
+                                })
+                                .collect(),
+                            native: None,
+                        }],
+                    })
+                } else {
+                    None
+                },
+                losses: Vec::new(),
+            }
+        }
+        let submit = event(AsyncEffect::Submit { group: 1 });
+        let wait = event(AsyncEffect::Wait { group: 1 });
+        assert!(validate_async_effects(&[submit.clone(), wait.clone()]).is_ok());
+        let mut partial_submit = submit.clone();
+        partial_submit.active_lanes = LaneMask::new(8, 0x01).expect("mask should be valid");
+        assert!(matches!(
+            partial_submit.validate(),
+            Err(SemanticError::OperationMismatch)
+        ));
+        assert!(matches!(
+            validate_async_effects(&[submit.clone(), submit.clone()]),
+            Err(SemanticError::AsyncGroupReuse { group: 1 })
+        ));
+        assert!(matches!(
+            validate_async_effects(std::slice::from_ref(&wait)),
+            Err(SemanticError::AsyncGroupMissing { group: 1 })
+        ));
+        assert!(matches!(
+            validate_async_effects(std::slice::from_ref(&submit)),
+            Err(SemanticError::AsyncGroupUnfinished { group: 1 })
+        ));
+
+        // Group identifiers are local to a warp/launch identity. Interleaved
+        // warps may reuse the same token without aliasing each other's wait.
+        let mut other_submit = submit.clone();
+        other_submit.native.warp_id = 2;
+        let mut other_wait = wait.clone();
+        other_wait.native.warp_id = 2;
+        assert!(validate_async_effects(&[submit, other_submit, other_wait, wait]).is_ok());
     }
 }

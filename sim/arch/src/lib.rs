@@ -9,6 +9,8 @@
 
 pub mod card;
 pub mod json;
+pub mod simt;
+pub mod spec;
 
 pub use json::strict_json_from_slice;
 
@@ -326,6 +328,22 @@ impl ArchId {
                 Self::Sm120,
                 "sm_120 scalar execution latency, initiation, and in-flight capacity are not modeled",
             ),
+        }
+    }
+
+    /// Uniform/SFU cadence used by `MUFU` and uniform special-register forms.
+    /// This is deliberately separate from the generic scalar ALU resource.
+    pub const fn uniform_sfu_cadence(self) -> Capability<UniformSfuCadence> {
+        match self {
+            Self::Sm86 => Capability::available(
+                Self::Sm86,
+                UniformSfuCadence {
+                    initiation_interval_cycles: 4,
+                },
+            ),
+            Self::Sm120 => {
+                Capability::research_gap(Self::Sm120, "sm_120 uniform/SFU cadence is not modeled")
+            }
         }
     }
 
@@ -1078,6 +1096,15 @@ pub struct ScalarExecutionPipeline {
     pub latency_cycles: u64,
     pub initiation_interval_cycles: u64,
     pub in_flight_capacity: u32,
+}
+
+/// Cadence shared by uniform-control and special-function operations.  The
+/// scheduler treats this as an initiation interval (not a latency promise),
+/// allowing carded front ends to expose a distinct SFU/uniform pipe without
+/// borrowing the generic INT/FP queue.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct UniformSfuCadence {
+    pub initiation_interval_cycles: u64,
 }
 
 /// Architecture-local Immediate Constant Cache (IMC) configuration.  The

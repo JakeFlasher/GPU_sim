@@ -155,6 +155,10 @@ def block_to_sm_id(
         raise ValueError(
             f"sm_count must be >= 1, got {sm_count!r}"
         )
+    if isinstance(block_index, bool) or not isinstance(block_index, int) or block_index < 0:
+        raise L1CtaToSmScheduleAssignmentInvalid(
+            f"block_index must be a nonnegative integer, got {block_index!r}"
+        )
     if schedule_policy == "round_robin_homogeneous":
         return block_index % sm_count
     if schedule_policy == "occupancy_derived":
@@ -206,7 +210,7 @@ def address_to_line_id(address: int) -> int:
 def _normalize_access(
     access: tuple,
 ) -> tuple[int, int, bool]:
-    """Coerce a walker access tuple to the canonical
+    """Normalize a walker access tuple to the canonical
     ``(line_id, sector_id, l1_eligible)`` 3-tuple shape.
 
     Two input forms are accepted:
@@ -222,16 +226,48 @@ def _normalize_access(
         sector-with-line-allocation form. ``sector_id`` is the
         GLOBAL sector index = ``byte_address // SECTOR_SIZE_BYTES``;
         the walker computes line residence from
-        ``sector_id // SECTORS_PER_LINE`` for consistency
-        checking against ``line_id``.
-    """
+    ``sector_id // SECTORS_PER_LINE`` for consistency
+            checking against ``line_id``.
+        """
+    if not isinstance(access, (tuple, list)):
+        raise L1WalkerAccessInvalid(
+            f"access must be a tuple/list with arity 2 or 3; got {access!r}"
+        )
     if len(access) == 2:
         line_id, l1_eligible = access
-        sector_id = int(line_id) * SECTORS_PER_LINE
-        return int(line_id), sector_id, bool(l1_eligible)
+        if (
+            isinstance(line_id, bool)
+            or not isinstance(line_id, int)
+            or line_id < 0
+            or not isinstance(l1_eligible, bool)
+        ):
+            raise L1WalkerAccessInvalid(
+                f"access fields must be a nonnegative integer line_id "
+                f"and bool eligibility; got {access!r}"
+            )
+        sector_id = line_id * SECTORS_PER_LINE
+        return line_id, sector_id, l1_eligible
     if len(access) == 3:
         line_id, sector_id, l1_eligible = access
-        return int(line_id), int(sector_id), bool(l1_eligible)
+        if (
+            isinstance(line_id, bool)
+            or not isinstance(line_id, int)
+            or line_id < 0
+            or isinstance(sector_id, bool)
+            or not isinstance(sector_id, int)
+            or sector_id < 0
+            or not isinstance(l1_eligible, bool)
+        ):
+            raise L1WalkerAccessInvalid(
+                f"access fields must be nonnegative integers and bool "
+                f"eligibility; got {access!r}"
+            )
+        if sector_id // SECTORS_PER_LINE != line_id:
+            raise L1WalkerAccessInvalid(
+                f"sector_id {sector_id} does not belong to line_id "
+                f"{line_id}"
+            )
+        return line_id, sector_id, bool(l1_eligible)
     raise L1WalkerAccessInvalid(
         f"walker access must be a 2-tuple "
         f"(line_id, l1_eligible) or 3-tuple "
@@ -479,8 +515,12 @@ def l1_miss_stream_per_sm(
         raise L1WalkerCapacityInvalid(
             f"capacity_bytes={capacity_bytes} is below the 128B line granularity"
         )
-    if warmup_launches < 0:
-        raise ValueError(f"warmup_launches={warmup_launches} must be >= 0")
+    if isinstance(warmup_launches, bool) or not isinstance(warmup_launches, int) \
+            or warmup_launches < 0:
+        raise ValueError(
+            f"warmup_launches={warmup_launches} must be >= 0; "
+            f"0 = no warmup (cold-cache single-launch)."
+        )
     line_capacity = capacity_bytes // LINE_SIZE_BYTES
     per_sm_lru: dict[int, list[int]] = {}
     per_sm_sectors: dict[int, dict[int, set[int]]] = {}
@@ -592,16 +632,34 @@ def apply_carveout_to_capacity(
     Returns the effective per-SM L1 capacity in bytes; raises
     ``L1WalkerCapacityInvalid`` if the result drops below the
     128B line granularity."""
+    for name, value in (
+        ("unified_budget_bytes", unified_budget_bytes),
+        ("static_shared_bytes", static_shared_bytes),
+        ("dynamic_shared_bytes", dynamic_shared_bytes),
+        ("carveout_max_l1_bytes", carveout_max_l1_bytes),
+    ):
+        if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+            raise ValueError(f"{name} must be a nonnegative integer")
+    if default_l1_bytes is not None and (
+        isinstance(default_l1_bytes, bool)
+        or not isinstance(default_l1_bytes, int)
+        or default_l1_bytes < 0
+    ):
+        raise ValueError("default_l1_bytes must be a nonnegative integer")
     if carveout_source == "cuda_func_attribute_carveout_percent":
         if carveout_percent is None:
             raise ValueError(
                 "carveout_percent required when "
                 "carveout_source='cuda_func_attribute_carveout_percent'"
             )
-        if not 0 <= int(carveout_percent) <= 100:
+        if (
+            isinstance(carveout_percent, bool)
+            or not isinstance(carveout_percent, int)
+            or not 0 <= carveout_percent <= 100
+        ):
             raise ValueError(
                 f"carveout_percent={carveout_percent} out of "
-                f"[0, 100] range"
+                f"[0, 100] integer range"
             )
         if default_l1_bytes is None:
             raise L1WalkerDefaultCapacityMissing(
@@ -620,7 +678,7 @@ def apply_carveout_to_capacity(
         # the request to the nearest supported bucket, so the
         # model's interpolation gives a result close to the
         # hardware's actual partition for any carveout_percent.
-        cp = int(carveout_percent)
+        cp = carveout_percent
         delta = carveout_max_l1_bytes - default_l1_bytes
         effective = int(
             carveout_max_l1_bytes - (delta * cp) // 100

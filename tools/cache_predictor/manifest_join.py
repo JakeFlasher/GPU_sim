@@ -93,15 +93,16 @@ def _normalize_pc(pc: Any) -> str:
       - str ``0xN`` (already in classifier wire form)
       - str hex without prefix (e.g., ``0010``)
     """
+    if isinstance(pc, bool) or (isinstance(pc, int) and pc < 0):
+        raise ValueError(f"PC must be a nonnegative integer or hex string: {pc!r}")
     if isinstance(pc, int):
         return f"0x{pc:x}"
     if isinstance(pc, str):
         s = pc.lower().strip()
-        if s.startswith("0x"):
-            hex_part = s[2:].lstrip("0") or "0"
-            return f"0x{hex_part}"
-        # No prefix; assume hex digits.
-        hex_part = s.lstrip("0") or "0"
+        hex_part = s[2:] if s.startswith("0x") else s
+        if not hex_part or any(char not in "0123456789abcdef" for char in hex_part):
+            raise ValueError(f"PC must be a hexadecimal string: {pc!r}")
+        hex_part = hex_part.lstrip("0") or "0"
         return f"0x{hex_part}"
     raise TypeError(
         f"unsupported pc value type {type(pc).__name__}: {pc!r}"
@@ -115,6 +116,10 @@ def _index_manifest_entries(
     out: dict[str, dict[str, Any]] = {}
     for entry in manifest.get("per_pc_instruction_cache_op", []):
         normalized = _normalize_pc(entry["pc"])
+        if normalized in out:
+            raise ValueError(
+                f"manifest contains duplicate normalized PC {normalized}"
+            )
         out[normalized] = entry
     return out
 

@@ -183,8 +183,10 @@
         "non_memory_write_barrier_latency_cycles": { "$ref": "#/definitions/positiveU64" },
         "read_barrier_latency_cycles": { "$ref": "#/definitions/positiveU64" },
         "max_resident_warps_per_sm": { "$ref": "#/definitions/positiveU32" },
+        "issue_ports": { "$ref": "#/definitions/positiveU32" },
+        "dual_issue_supported": { "type": "boolean" },
         "latency_provenance": { "const": "architecture_card" },
-        "issue_hypothesis_provenance": { "const": "architecture_local_reviewed_hypothesis" }
+        "issue_hypothesis_provenance": { "enum": ["architecture_local_reviewed_hypothesis", "architecture_card"] }
       }
     },
     "l1Configuration": {
@@ -787,7 +789,7 @@
         "terminal_modeled_event_time": { "$ref": "#/definitions/modeledEventTime" },
         "sm_active_observation_frontier": { "$ref": "#/definitions/smActiveObservationFrontier" },
         "gpc_observation_frontier": { "$ref": "#/definitions/gpcObservationFrontier" },
-        "binding_cycles_role": { "const": "diagnostic_only_not_binding_prediction" }
+        "binding_cycles_role": { "enum": ["max_of_checked_launch_frontiers_simulator_scope", "diagnostic_only_not_binding_prediction"] }
       }
     },
     "tailFlags": {
@@ -1109,7 +1111,7 @@
         "counters": { "$ref": "#/definitions/counterBundle" },
         "unmodeled_tails": { "$ref": "#/definitions/tailFlags" },
         "timing_composition": {
-          "const": "required_unimplemented_pending_aggregation_semantics_study"
+          "enum": ["max_of_checked_launch_frontiers_simulator_scope", "required_unimplemented_pending_aggregation_semantics_study"]
         }
       }
     },
@@ -1121,6 +1123,16 @@
         "kind": { "const": "exact" },
         "semantics": { "const": "simulator_scope" },
         "value": { "$ref": "#/definitions/u64" }
+      }
+    },
+    "bindingCyclesMetricValue": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "semantics", "value"],
+      "properties": {
+        "kind": {"const": "binding_cycles"},
+        "semantics": {"const": "simulator_scope"},
+        "value": {"$ref": "#/definitions/u64"}
       }
     },
     "fractionMetricValue": {
@@ -1147,6 +1159,15 @@
       "properties": {
         "status": { "const": "predicted" },
         "value": { "$ref": "#/definitions/exactMetricValue" }
+      }
+    },
+    "predictedBindingCycles": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "value"],
+      "properties": {
+        "status": {"const": "predicted"},
+        "value": {"$ref": "#/definitions/bindingCyclesMetricValue"}
       }
     },
     "predictedFraction": {
@@ -1359,7 +1380,7 @@
             "key": { "const": "exec_cycles_gpc_max" },
             "ncu_metric": { "const": "gpc__cycles_elapsed.max" },
             "unit": { "const": "cycles" },
-            "outcome": { "$ref": "#/definitions/requiredBindingCycles" }
+            "outcome": { "oneOf": [{ "$ref": "#/definitions/predictedBindingCycles" }, { "$ref": "#/definitions/requiredBindingCycles" }] }
           }
         }
       ]

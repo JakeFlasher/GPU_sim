@@ -77,8 +77,9 @@ pub mod sass_operands;
 mod system;
 
 pub use causal_frontier::{
-    CausalFrontierError, CausalFrontierInstruction, CausalFrontierReport,
+    CausalFrontierError, CausalFrontierInstruction, CausalFrontierReport, CausalFrontierResidency,
     summarize as summarize_causal_frontier,
+    summarize_with_residency as summarize_causal_frontier_with_residency,
 };
 pub use control_bits::{
     BARRIER_NONE, ControlBits, ControlBitsError, ControlDomainError, ControlSidecar, DepBarrier,

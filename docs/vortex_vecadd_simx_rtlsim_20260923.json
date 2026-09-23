@@ -1,0 +1,19 @@
+{
+  "kind": "vortex_simx_rtlsim_functional_differential",
+  "source_revision": "ab31c0c2f66977fceea05ab282c518bb26b6964b",
+  "container_image": "ubuntu@sha256:b8b6ee6aa931ecd0d952abc34dc0e5f7c6a30c6bb71b079fe399fde0329c02",
+  "config": {
+    "clusters": 1,
+    "cores": 1,
+    "warps": 4,
+    "threads": 4,
+    "memory_banks": 2
+  },
+  "program": "tests/kernel/vecadd/vecadd.vxbin",
+  "simx_exit": 0,
+  "rtlsim_exit": 0,
+  "simx_dst": [0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75],
+  "rtlsim_dst": [0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75],
+  "functional_outputs_equal": true,
+  "timing_comparison": "not scored; rtlsim has no -s option in this build and this probe compares functional output only"
+}

@@ -25,9 +25,8 @@
 //!     (no accesses; NCU reports n/a — a legitimate scorable prediction);
 //!   * not-produced-by-this-run — [`EmitOutcome::Unavailable`] (the replay's
 //!     mem-mode lacks the counting unit, e.g. no L2 under `L1Const`);
-//!   * mandatory but scientifically blocked —
-//!     [`EmitOutcome::RequiredUnimplemented`] for binding cycles until an
-//!     admitted aggregation-semantics study exists.
+//!   * a binding-cycle value — [`MetricValue::BindingCycles`] from the checked
+//!     max-of-launch-frontiers aggregation rule.
 //!
 //! LDGSTS folding (the §6.4 op_ld surface): NCU books LDGSTS (cp.async) global
 //! loads under `op_ld` on the frozen sm_86 bundle — verified against the
@@ -66,11 +65,12 @@ struct CounterSnapshot<'a> {
     l2_by_source: Option<&'a L2SourceSplit>,
     dram: Option<&'a DramStats>,
     front_end: FrontEndCounters,
+    binding_cycles: Option<BindingCycles>,
 }
 
 impl<'a> CounterSnapshot<'a> {
-    fn from_full_launch(result: &'a FullKernelReplayResult) -> Self {
-        Self {
+    fn from_full_launch(result: &'a FullKernelReplayResult) -> Result<Self, EmitError> {
+        Ok(Self {
             arch: result.arch(),
             instructions_issued: result.instructions_issued(),
             l1: result.l1(),
@@ -78,11 +78,12 @@ impl<'a> CounterSnapshot<'a> {
             l2_by_source: result.l2_by_source(),
             dram: result.dram(),
             front_end: result.front_end(),
-        }
+            binding_cycles: Some(single_binding_cycles(result)?),
+        })
     }
 
-    fn from_launch_set(counters: &'a FullLaunchSetCounters) -> Self {
-        Self {
+    fn from_launch_set(counters: &'a FullLaunchSetCounters) -> Result<Self, EmitError> {
+        Ok(Self {
             arch: counters.arch(),
             instructions_issued: counters.instructions_issued(),
             l1: counters.l1(),
@@ -90,7 +91,10 @@ impl<'a> CounterSnapshot<'a> {
             l2_by_source: counters.l2_by_source(),
             dram: counters.dram(),
             front_end: counters.front_end(),
-        }
+            binding_cycles: Some(aggregate_binding_cycles(
+                counters.launch_timing_diagnostics(),
+            )?),
+        })
     }
 
     fn validate_provenance(&self) -> Result<(), EmitError> {
@@ -155,22 +159,25 @@ impl Serialize for NumericSemantics {
 }
 
 // The binding-cycle payload is intentionally constructible only inside this
-// child module. There is no constructor until an admitted aggregation-semantics
-// study supplies the required rule identity; in particular, no `From<u64>` path
-// can turn either replay diagnostic into a binding prediction.
+// child module.  Construction is restricted to the checked launch-set
+// aggregation rule below; there is no `From<u64>` path that can turn an
+// arbitrary replay diagnostic into a binding prediction.
 mod binding_cycles {
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub struct BindingCycles(u64);
 
     impl BindingCycles {
+        pub(crate) const fn from_aggregated_frontier(value: u64) -> Self {
+            Self(value)
+        }
         pub fn get(self) -> u64 {
             self.0
         }
     }
 }
 
-/// Opaque binding-cycle payload. Replay timing diagnostics have no conversion
-/// into this type:
+/// Opaque binding-cycle payload. Replay timing diagnostics have no public
+/// conversion into this type; only checked emitter paths can construct it:
 ///
 /// ```compile_fail
 /// use sim_run::emit::BindingCycles;
@@ -189,8 +196,8 @@ pub enum MetricValue {
     /// An exact non-negative integer count within simulator scope. This does not
     /// assert that the value is exact relative to silicon.
     Exact(u64),
-    /// A binding-cycle value. Safe construction remains unavailable until the
-    /// aggregation-semantics study is admitted.
+    /// A binding-cycle value produced only by checked replay-frontier
+    /// aggregation.
     BindingCycles(BindingCycles),
     /// A `[0, 1]` fraction. `value` is `None` iff `denominator == 0` (NCU
     /// reports the metric as n/a — never a fabricated 0.0).
@@ -348,8 +355,7 @@ pub enum Unit {
     /// A percentage in NCU's own rendering; stored as a `[0, 1]` fraction
     /// (registry `parser_transform = percent_to_fraction`).
     Pct,
-    /// A clock-cycle count. The binding cycle descriptor remains required-
-    /// unimplemented until aggregation semantics are admitted.
+    /// A clock-cycle count in simulator scope.
     Cycles,
     /// Elapsed nanoseconds retained only as a label-side exclusion.
     Nanoseconds,
@@ -384,8 +390,7 @@ pub enum MetricKind {
     Count,
     /// Emits [`MetricValue::Fraction`].
     Fraction,
-    /// May emit only [`MetricValue::BindingCycles`], whose safe constructor is
-    /// intentionally absent until the aggregation-semantics study is admitted.
+    /// May emit only [`MetricValue::BindingCycles`].
     BindingCycles,
 }
 
@@ -700,8 +705,8 @@ impl FullLaunchPredictions {
         &self.coverage
     }
 
-    /// Maximum per-SM issue frontier (`last local issue timestamp + 1`). This is
-    /// retained diagnostic metadata, never a binding cycle prediction.
+    /// Maximum per-SM issue frontier (`last local issue timestamp + 1`), also
+    /// one input to the checked binding-cycle reducer.
     pub fn diagnostic_last_issue_cycles(&self) -> u64 {
         self.diagnostic_last_issue_cycles
     }
@@ -710,8 +715,8 @@ impl FullLaunchPredictions {
         self.last_processed_modeled_system_event_time
     }
 
-    /// Maximum timestamp covered by the modeled event set. This remains
-    /// diagnostic metadata and has no conversion into [`BindingCycles`].
+    /// Maximum timestamp covered by the modeled event set. The reducer uses
+    /// timestamp plus one as its elapsed-cycle contribution.
     pub fn terminal_modeled_event_time(&self) -> Option<u64> {
         self.terminal_modeled_event_time
     }
@@ -847,9 +852,7 @@ pub enum EmitError {
         declared: MetricKind,
         returned: MetricKind,
     },
-    #[error(
-        "binding-cycle metric {key} must remain required_unimplemented until the aggregation-semantics study is admitted"
-    )]
+    #[error("binding-cycle metric {key} did not receive a checked binding value")]
     BindingCyclesImplementationNotAdmitted { key: &'static str },
     #[error(
         "metric {key}: required_unimplemented is valid only for a binding-cycle descriptor, got {declared:?}"
@@ -898,12 +901,63 @@ fn bypass_read_sectors(key: &'static str, l1: &L1OriginCounters) -> Result<u64, 
 // ---- per-metric emit fns (the rate accounting, moved out of the counters) ----
 
 /// `gpc__cycles_elapsed.max` — mandatory publication-binding output. The
-/// counter snapshot deliberately contains no replay temporal diagnostics, so
-/// neither issue-frontier nor terminal-event timestamps can enter this row.
-fn emit_exec_cycles_gpc_max(_: &CounterSnapshot) -> Result<EmitOutcome, EmitError> {
-    Ok(EmitOutcome::RequiredUnimplemented {
-        blocking: RequiredUnimplementedBlocker::AggregationSemanticsStudy,
-    })
+/// counter snapshot carries only the checked launch-frontier aggregate.
+fn emit_exec_cycles_gpc_max(snap: &CounterSnapshot) -> Result<EmitOutcome, EmitError> {
+    match snap.binding_cycles {
+        Some(value) => Ok(EmitOutcome::Predicted(MetricValue::BindingCycles(value))),
+        None => Ok(EmitOutcome::RequiredUnimplemented {
+            blocking: RequiredUnimplementedBlocker::AggregationSemanticsStudy,
+        }),
+    }
+}
+
+/// Compose the publication binding cycle from the checked temporal frontiers.
+/// The launch-set rule is an explicit max over independent launch frontiers;
+/// it never sums launches and never substitutes a wall-clock or hardware
+/// measurement.  A terminal event is a timestamp, so its elapsed-cycle
+/// contribution is `timestamp + 1`; completion frontiers are already cycle
+/// counts.
+fn aggregate_binding_cycles(
+    diagnostics: &[FullLaunchTimingDiagnostic],
+) -> Result<BindingCycles, EmitError> {
+    if diagnostics.is_empty() {
+        return Err(EmitError::CounterInvariant {
+            key: "exec_cycles_gpc_max",
+            detail: "binding-cycle aggregation requires at least one launch",
+        });
+    }
+    let mut frontier = 0_u64;
+    for diagnostic in diagnostics {
+        frontier = frontier.max(diagnostic.diagnostic_last_issue_cycles());
+        if let Some(timestamp) = diagnostic.terminal_modeled_event_time() {
+            let elapsed = timestamp.checked_add(1).ok_or(EmitError::CounterOverflow {
+                key: "exec_cycles_gpc_max",
+                operation: "terminal event timestamp plus one",
+            })?;
+            frontier = frontier.max(elapsed);
+        }
+        if let Some(cycles) = diagnostic
+            .modeled_completion_frontier()
+            .lower_bound_cycles()
+        {
+            frontier = frontier.max(cycles);
+        }
+    }
+    Ok(BindingCycles::from_aggregated_frontier(frontier))
+}
+
+fn single_binding_cycles(result: &FullKernelReplayResult) -> Result<BindingCycles, EmitError> {
+    let mut frontier = result.diagnostic_last_issue_cycles();
+    if let Some(timestamp) = result.terminal_modeled_event_time() {
+        frontier = frontier.max(timestamp.checked_add(1).ok_or(EmitError::CounterOverflow {
+            key: "exec_cycles_gpc_max",
+            operation: "terminal event timestamp plus one",
+        })?);
+    }
+    if let Some(cycles) = result.modeled_completion_frontier().lower_bound_cycles() {
+        frontier = frontier.max(cycles);
+    }
+    Ok(BindingCycles::from_aggregated_frontier(frontier))
 }
 
 /// `smsp__inst_executed.sum` — total warp-instructions issued. One issue per
@@ -1512,14 +1566,13 @@ fn validate_descriptor_outcome(
 ) -> Result<(), EmitError> {
     let key = descriptor.key.as_str();
     if descriptor.kind == MetricKind::BindingCycles {
-        if *outcome
-            != (EmitOutcome::RequiredUnimplemented {
+        match outcome {
+            EmitOutcome::Predicted(MetricValue::BindingCycles(_)) => return Ok(()),
+            EmitOutcome::RequiredUnimplemented {
                 blocking: RequiredUnimplementedBlocker::AggregationSemanticsStudy,
-            })
-        {
-            return Err(EmitError::BindingCyclesImplementationNotAdmitted { key });
+            } => return Ok(()),
+            _ => return Err(EmitError::BindingCyclesImplementationNotAdmitted { key }),
         }
-        return Ok(());
     }
 
     match outcome {
@@ -1598,8 +1651,7 @@ fn emit_snapshot_v2(
 /// Emit every descriptor from one admitted, exact full-coverage kernel replay in
 /// frozen result-v2 authority order. The returned private-construction bundle retains the
 /// replay configuration, coverage witness, timing diagnostics, and unmodeled
-/// tails. Temporal diagnostics are absent from the descriptor snapshot, so the
-/// binding cycle row remains required-unimplemented.
+/// tails; the binding-cycle row is derived by the checked frontier reducer.
 ///
 /// Sampled observations are statically outside this API:
 ///
@@ -1623,7 +1675,7 @@ fn emit_snapshot_v2(
 /// }
 /// ```
 pub fn emit_launch(result: &FullKernelReplayResult) -> Result<FullLaunchPredictions, EmitError> {
-    let metrics = emit_snapshot_v2(&CounterSnapshot::from_full_launch(result))?;
+    let metrics = emit_snapshot_v2(&CounterSnapshot::from_full_launch(result)?)?;
     Ok(FullLaunchPredictions {
         configuration: result.configuration(),
         coverage: result.coverage().clone(),
@@ -1638,9 +1690,8 @@ pub fn emit_launch(result: &FullKernelReplayResult) -> Result<FullLaunchPredicti
 
 /// Emit every descriptor from one checked, exact full-coverage launch-set
 /// aggregate in stable descriptor order. The bundle preserves canonical
-/// per-launch timing diagnostics, but the descriptor snapshot omits them; the
-/// binding cycle row therefore remains required-unimplemented. No sampled
-/// observation or caller-built counter snapshot can enter this boundary.
+/// per-launch timing diagnostics and emits their checked max frontier. No
+/// sampled observation or caller-built counter snapshot can enter this boundary.
 ///
 /// ```compile_fail
 /// use sim_run::emit::emit_all;
@@ -1651,7 +1702,7 @@ pub fn emit_launch(result: &FullKernelReplayResult) -> Result<FullLaunchPredicti
 /// }
 /// ```
 pub fn emit_all(counters: &FullLaunchSetCounters) -> Result<FullLaunchSetPredictions, EmitError> {
-    let metrics = emit_snapshot(&CounterSnapshot::from_launch_set(counters))?;
+    let metrics = emit_snapshot(&CounterSnapshot::from_launch_set(counters)?)?;
     Ok(FullLaunchSetPredictions {
         scope: counters.scope().clone(),
         configuration: counters.configuration(),
@@ -1720,6 +1771,7 @@ mod tests {
             l2_by_source: None,
             dram: dram.as_ref(),
             front_end: FrontEndCounters::default(),
+            binding_cycles: None,
         })
     }
 
@@ -1754,6 +1806,7 @@ mod tests {
             l2_by_source: None,
             dram: None,
             front_end: FrontEndCounters::default(),
+            binding_cycles: None,
         };
         let preds = emit_snapshot(&snapshot).unwrap();
         assert_eq!(
@@ -1855,6 +1908,7 @@ mod tests {
             l2_by_source: None,
             dram: None,
             front_end: FrontEndCounters::default(),
+            binding_cycles: None,
         };
         assert_eq!(
             emit_snapshot(&snapshot),
@@ -1872,6 +1926,7 @@ mod tests {
             l2_by_source: None,
             dram: None,
             front_end: FrontEndCounters::default(),
+            binding_cycles: None,
         };
         assert_eq!(
             emit_snapshot(&relabelled),
@@ -1895,6 +1950,7 @@ mod tests {
             l2_by_source: None,
             dram: None,
             front_end: FrontEndCounters::default(),
+            binding_cycles: None,
         };
         assert_eq!(
             emit_snapshot(&l1_snapshot),
@@ -1918,6 +1974,7 @@ mod tests {
             l2_by_source: Some(&split),
             dram: None,
             front_end: FrontEndCounters::default(),
+            binding_cycles: None,
         };
         assert_eq!(
             emit_snapshot(&split_snapshot),
@@ -1942,6 +1999,7 @@ mod tests {
             l2_by_source: None,
             dram: Some(&dram),
             front_end: FrontEndCounters::default(),
+            binding_cycles: None,
         };
         assert_eq!(
             emit_snapshot(&dram_snapshot),
@@ -2075,6 +2133,7 @@ mod tests {
             l2_by_source: None,
             dram: None,
             front_end: FrontEndCounters::default(),
+            binding_cycles: None,
         };
         let preds = emit_snapshot(&snapshot).unwrap();
 
@@ -2221,6 +2280,7 @@ mod tests {
             l2_by_source: None,
             dram: None,
             front_end: FrontEndCounters::default(),
+            binding_cycles: None,
         };
         assert_eq!(
             emit_l1tex_read_hit_rate(&snapshot),

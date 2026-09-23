@@ -5,7 +5,10 @@
 > does not restrict direct simulator or NCU/NVBit research, and applies only
 > when the opt-in SOL/campaign skill is deliberately invoked.
 
-**Status:** Target-free boundary record only. This document does not select cycle semantics, does not satisfy the `AggregationSemanticsStudy` blocker, and does not promote cycle emission.
+**Status:** Target-free boundary record with a model-relative reducer now
+implemented in `sim-run`. This document does not promote the reducer to an
+NCU/GPC or silicon-equivalent cycle mapping; hardware promotion remains
+blocked.
 
 For the retained campaign path, the applicable metric definitions are in the
 [metric registry](metric-registry.md). This study uses only checked-in code,
@@ -35,15 +38,17 @@ Promotion is forbidden until admitted, launch-identity-bound silicon evidence va
 ### Target-free findings
 
 The campaign simulator exposes `diagnostic_last_issue_cycles` and
-`terminal_modeled_event_time` per launch. Its retained result format treats
-both as nonbinding diagnostics, and [launch aggregation](../sim/sm/src/replay/aggregation.rs)
-preserves them in `launch_timing_diagnostics` without composing a launch-set
-timing scalar. The [cycle emitter](../sim/run/src/emit.rs) receives a counter
-snapshot that deliberately excludes both diagnostics.
+`terminal_modeled_event_time` per launch. [Launch aggregation](../sim/sm/src/replay/aggregation.rs)
+preserves them in `launch_timing_diagnostics`; the [cycle emitter](../sim/run/src/emit.rs)
+uses a checked simulator-scope max reducer over issue, terminal-event-plus-one,
+and modeled-completion frontiers. The emitted value is typed
+`BindingCycles`, not an NCU prediction.
 
 ### Hypotheses only
 
-The two named diagnostics may be evaluated only as nonbinding, directional hypotheses. This study selects neither diagnostic, no function of either diagnostic, and no other simulator frontier as the binding cycle prediction.
+The named diagnostics remain nonbinding diagnostics; the reducer is a
+mechanism-local, model-relative hypothesis. This study selects neither diagnostic
+as a silicon mapping and selects no GPC envelope semantics.
 
 ### Silicon-blocked decisions
 
@@ -75,16 +80,16 @@ Promotion is forbidden until architecture-local authority for the exact SKU admi
 
 ### Target-free findings
 
-[Full launch-set aggregation](../sim/sm/src/replay/aggregation.rs) sums checked counters while retaining one timing-diagnostic record per launch in canonical roster order; it exposes no scalar temporal reducer. The real [`sim_run::run_manifest`](../sim/run/src/lib.rs) consumer serializes those diagnostics under each launch, marks aggregate timing composition `required_unimplemented_pending_aggregation_semantics_study`, and calls [`sim_run::emit::emit_all`](../sim/run/src/emit.rs). The aggregate `exec_cycles_gpc_max` row remains exactly `RequiredUnimplemented(AggregationSemanticsStudy)` and has no numeric binding value.
+[Full launch-set aggregation](../sim/sm/src/replay/aggregation.rs) sums checked counters while retaining one timing-diagnostic record per launch in canonical roster order. The emitter now applies an explicit model-relative reducer: for each launch it takes the maximum of issue cycles, terminal-event timestamp plus one, and modeled completion lower bound; across launches it takes the maximum again. The aggregate `exec_cycles_gpc_max` row is a typed `BindingCycles` value, never a sum or silicon measurement.
 
 ### Hypotheses only
 
-A future multi-launch composition rule is a hypothesis class only. No reducer is named, selected, or encoded by this study, and per-launch preservation must not be mistaken for composition.
+The reducer is deliberately mechanism-local and model-relative. It does not claim the profiler's GPC envelope or establish launch overlap on hardware.
 
 ### Silicon-blocked decisions
 
-How multiple launches compose at the result-emission boundary is undecided. Target-free evidence cannot establish launch overlap, serialization, observation scope, or a lawful scalar composition rule.
+Hardware launch overlap, serialization, and GPC observation scope remain undecided; the simulator rule is not a substitute for those measurements.
 
 ### Promotion forbidden until
 
-Promotion is forbidden until admitted silicon evidence selects both the single-launch semantics and a multi-launch composition rule, policy accepts them, and a separate code change updates emitter and real-consumer regressions together. Completion of this target-free study does not itself promote emission.
+Hardware-validated promotion remains forbidden until silicon evidence selects the corresponding launch-envelope semantics. The implemented reducer is limited to simulator-scope output.

@@ -9,6 +9,7 @@ use std::collections::{HashMap, HashSet};
 use std::time::Instant;
 
 use serde::Serialize;
+use sim_arch::ArchId;
 use sim_mem::MemRole;
 use sim_semantics::{
     ExecutionEvidence, FidelityDecision, IntervalCertificate, ReifyReason, certify_interval,
@@ -46,6 +47,14 @@ impl CausalFrontierInstruction {
         dependency_free: bool,
         external_side_effect: bool,
     ) -> Result<Self, CausalFrontierError> {
+        // The recurrence below models the admitted SM86 four-SMSP topology.
+        // Refuse other architecture schedules instead of silently applying
+        // Ampere subcore placement and claiming cycle-equivalent progress.
+        if schedule.arch() != ArchId::Sm86 {
+            return Err(CausalFrontierError::UnsupportedArchitecture {
+                arch: schedule.arch(),
+            });
+        }
         let slot = schedule
             .issue_slot(pc)
             .ok_or(CausalFrontierError::PcNotInSchedule { pc })?;
@@ -94,6 +103,9 @@ impl CausalFrontierInstruction {
                 in_flight_capacity,
                 ..
             } => (initiation_interval_cycles, in_flight_capacity),
+            PipelineClass::Sfu {
+                initiation_interval_cycles,
+            } => (initiation_interval_cycles, u32::MAX),
         };
         Ok(Self {
             sequence,
@@ -133,8 +145,27 @@ impl CausalFrontierInstruction {
     }
 }
 
+/// Resident population of one SM for the entire descriptor interval.
+///
+/// A complete roster is a producer-supplied premise, independent of the
+/// candidate instruction list. It must include stalled/non-candidate warps.
+/// Native producers must split at population changes or use `Unknown`; a
+/// point-in-time snapshot alone does not exclude later admissions. This is
+/// occupancy evidence for the descriptor model, not a native timing proof.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+#[serde(tag = "status", rename_all = "snake_case")]
+pub enum CausalFrontierResidency {
+    #[default]
+    Unknown,
+    Complete {
+        physical_warps: Vec<i32>,
+    },
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct CausalFrontierReport {
+    /// Canonical declared residency used for summary eligibility.
+    pub residency: CausalFrontierResidency,
     pub exact_event_count: u64,
     pub causal_event_count: u64,
     pub exact_final_cycle: u64,
@@ -181,16 +212,70 @@ pub struct ReifiedRegion {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CausalFrontierError {
     EmptyProgram,
-    InvalidPhysicalWarp { physical_warp: i32 },
-    DuplicatePhysicalWarp { physical_warp: i32 },
-    DuplicateSequence { physical_warp: i32, sequence: u64 },
-    InvalidTiming { sequence: u64 },
-    CompletionOverflow { sequence: u64 },
-    PcNotInSchedule { pc: u64 },
-    UnsupportedOperationClass { pc: u64, class: OpClass },
-    UnsupportedMemoryRole { pc: u64 },
-    UnsupportedPipeline { pc: u64 },
-    TimingMismatch { pc: u64, expected: u64, got: u64 },
+    InvalidPhysicalWarp {
+        physical_warp: i32,
+    },
+    DuplicatePhysicalWarp {
+        physical_warp: i32,
+    },
+    DuplicateResidentWarp {
+        physical_warp: i32,
+    },
+    ProgramWarpNotResident {
+        physical_warp: i32,
+    },
+    DuplicateSequence {
+        physical_warp: i32,
+        sequence: u64,
+    },
+    InvalidTiming {
+        sequence: u64,
+    },
+    CompletionOverflow {
+        sequence: u64,
+    },
+    CounterOverflow {
+        counter: &'static str,
+    },
+    StateMismatch {
+        exact_completion: u64,
+        causal_completion: u64,
+        exact_last_issue: Option<u64>,
+        causal_last_issue: Option<u64>,
+    },
+    ObservationMismatch {
+        sequence: u64,
+        physical_warp: i32,
+        exact_issue: u64,
+        causal_issue: u64,
+        exact_completion: u64,
+        causal_completion: u64,
+    },
+    ObservationCountMismatch {
+        exact: usize,
+        causal: usize,
+    },
+    PcNotInSchedule {
+        pc: u64,
+    },
+    UnsupportedOperationClass {
+        pc: u64,
+        class: OpClass,
+    },
+    UnsupportedMemoryRole {
+        pc: u64,
+    },
+    UnsupportedPipeline {
+        pc: u64,
+    },
+    UnsupportedArchitecture {
+        arch: ArchId,
+    },
+    TimingMismatch {
+        pc: u64,
+        expected: u64,
+        got: u64,
+    },
 }
 
 impl std::fmt::Display for CausalFrontierError {
@@ -204,6 +289,18 @@ impl std::fmt::Display for CausalFrontierError {
                 write!(
                     f,
                     "physical warp {physical_warp} appears in multiple programs"
+                )
+            }
+            Self::DuplicateResidentWarp { physical_warp } => {
+                write!(
+                    f,
+                    "physical warp {physical_warp} is duplicated in the resident roster"
+                )
+            }
+            Self::ProgramWarpNotResident { physical_warp } => {
+                write!(
+                    f,
+                    "program warp {physical_warp} is absent from the complete resident roster"
                 )
             }
             Self::DuplicateSequence {
@@ -222,6 +319,33 @@ impl std::fmt::Display for CausalFrontierError {
             Self::CompletionOverflow { sequence } => {
                 write!(f, "instruction {sequence} completion time overflows")
             }
+            Self::CounterOverflow { counter } => {
+                write!(f, "causal-frontier counter {counter} overflows")
+            }
+            Self::StateMismatch {
+                exact_completion,
+                causal_completion,
+                exact_last_issue,
+                causal_last_issue,
+            } => write!(
+                f,
+                "cycle-accuracy invariant failed: exact completion {exact_completion}, causal completion {causal_completion}, exact last issue {exact_last_issue:?}, causal last issue {causal_last_issue:?}"
+            ),
+            Self::ObservationMismatch {
+                sequence,
+                physical_warp,
+                exact_issue,
+                causal_issue,
+                exact_completion,
+                causal_completion,
+            } => write!(
+                f,
+                "cycle-accuracy observation mismatch at sequence {sequence}, warp {physical_warp}: exact issue/completion {exact_issue}/{exact_completion}, causal {causal_issue}/{causal_completion}"
+            ),
+            Self::ObservationCountMismatch { exact, causal } => write!(
+                f,
+                "cycle-accuracy observation count mismatch: exact {exact}, causal {causal}"
+            ),
             Self::PcNotInSchedule { pc } => write!(f, "pc {pc} is absent from the issue schedule"),
             Self::UnsupportedOperationClass { pc, class } => {
                 write!(
@@ -235,6 +359,10 @@ impl std::fmt::Display for CausalFrontierError {
             Self::UnsupportedPipeline { pc } => {
                 write!(f, "pc {pc} has an uncharacterized dispatch-only pipeline")
             }
+            Self::UnsupportedArchitecture { arch } => write!(
+                f,
+                "causal-frontier topology is only admitted for sm_86; got {arch}"
+            ),
             Self::TimingMismatch { pc, expected, got } => {
                 write!(
                     f,
@@ -252,7 +380,7 @@ fn pipeline_index(pipeline: PipelineClass) -> usize {
         PipelineClass::DispatchOnly
         | PipelineClass::Branch { .. }
         | PipelineClass::Barrier { .. } => 0,
-        PipelineClass::Tensor { .. } => 1,
+        PipelineClass::Tensor { .. } | PipelineClass::Sfu { .. } => 1,
         PipelineClass::ScalarAlu { .. } => 2,
     }
 }
@@ -271,7 +399,7 @@ fn append_instruction(
     pipeline_ready: &mut [[u64; 3]; SMSP_COUNT as usize],
     in_flight_done: &mut [[Vec<u64>; 3]; SMSP_COUNT as usize],
     completion: &mut u64,
-) -> Result<u64, CausalFrontierError> {
+) -> Result<(u64, u64), CausalFrontierError> {
     if instruction.initiation_interval_cycles == 0
         || instruction.in_flight_capacity == 0
         || instruction.completion_units == 0
@@ -316,12 +444,12 @@ fn append_instruction(
     pipeline_ready[smsp][pipe] = next_issue;
     releases.push(done);
     *completion = (*completion).max(done);
-    Ok(issue)
+    Ok((issue, done))
 }
 
 /// Resource state for the descriptor model. Detailed and summarized runs own
 /// independent instances; no timing value is copied between their results.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug)]
 struct ModelState {
     warp_ready: HashMap<i32, u64>,
     dispatch_ready: [u64; SMSP_COUNT as usize],
@@ -329,7 +457,78 @@ struct ModelState {
     in_flight_done: [[Vec<u64>; 3]; SMSP_COUNT as usize],
     completion: u64,
     last_issue: Option<u64>,
+    observations: Vec<InstructionObservation>,
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct InstructionObservation {
+    sequence: u64,
+    physical_warp: i32,
+    issue: u64,
+    completion: u64,
+}
+
+impl PartialEq for ModelState {
+    fn eq(&self, other: &Self) -> bool {
+        self.warp_ready == other.warp_ready
+            && self.dispatch_ready == other.dispatch_ready
+            && self.pipeline_ready == other.pipeline_ready
+            && self.in_flight_done == other.in_flight_done
+            && self.completion == other.completion
+            && self.last_issue == other.last_issue
+    }
+}
+
+impl Eq for ModelState {}
+
+fn ensure_terminal_state_match(
+    exact: &ModelState,
+    causal: &ModelState,
+) -> Result<(), CausalFrontierError> {
+    if exact == causal {
+        return Ok(());
+    }
+    Err(CausalFrontierError::StateMismatch {
+        exact_completion: exact.completion,
+        causal_completion: causal.completion,
+        exact_last_issue: exact.last_issue,
+        causal_last_issue: causal.last_issue,
+    })
+}
+
+fn ensure_observation_match(
+    exact: &ModelState,
+    causal: &ModelState,
+) -> Result<(), CausalFrontierError> {
+    let mut exact_observations = exact.observations.clone();
+    let mut causal_observations = causal.observations.clone();
+    let key =
+        |observation: &InstructionObservation| (observation.sequence, observation.physical_warp);
+    exact_observations.sort_unstable_by_key(key);
+    causal_observations.sort_unstable_by_key(key);
+    if exact_observations.len() != causal_observations.len() {
+        return Err(CausalFrontierError::ObservationCountMismatch {
+            exact: exact_observations.len(),
+            causal: causal_observations.len(),
+        });
+    }
+    if let Some((exact, causal)) = exact_observations
+        .iter()
+        .zip(causal_observations.iter())
+        .find(|(exact, causal)| exact != causal)
+    {
+        return Err(CausalFrontierError::ObservationMismatch {
+            sequence: exact.sequence,
+            physical_warp: exact.physical_warp,
+            exact_issue: exact.issue,
+            causal_issue: causal.issue,
+            exact_completion: exact.completion,
+            causal_completion: causal.completion,
+        });
+    }
+    Ok(())
+}
+
 impl Default for ModelState {
     fn default() -> Self {
         Self {
@@ -339,6 +538,7 @@ impl Default for ModelState {
             in_flight_done: std::array::from_fn(|_| std::array::from_fn(|_| Vec::new())),
             completion: 0,
             last_issue: None,
+            observations: Vec::new(),
         }
     }
 }
@@ -347,7 +547,7 @@ impl ModelState {
         &mut self,
         instruction: CausalFrontierInstruction,
     ) -> Result<(), CausalFrontierError> {
-        let issue = append_instruction(
+        let (issue, completion) = append_instruction(
             instruction,
             &mut self.warp_ready,
             &mut self.dispatch_ready,
@@ -359,6 +559,12 @@ impl ModelState {
             self.last_issue
                 .map_or(issue, |previous| previous.max(issue)),
         );
+        self.observations.push(InstructionObservation {
+            sequence: instruction.sequence,
+            physical_warp: instruction.physical_warp,
+            issue,
+            completion,
+        });
         Ok(())
     }
 
@@ -384,6 +590,19 @@ impl ModelState {
             return Err(ReifyReason::IncomingPipelineWork);
         }
         let projected = certificate.project(start)?;
+        let observations = certificate.issue_completion_times(start)?;
+        for (index, (issue, completion)) in observations.into_iter().enumerate() {
+            let sequence = first
+                .sequence
+                .checked_add(u64::try_from(index).map_err(|_| ReifyReason::ArithmeticOverflow)?)
+                .ok_or(ReifyReason::ArithmeticOverflow)?;
+            self.observations.push(InstructionObservation {
+                sequence,
+                physical_warp: first.physical_warp,
+                issue,
+                completion,
+            });
+        }
         self.warp_ready
             .insert(first.physical_warp, projected.next_issue);
         self.dispatch_ready[smsp] = projected.dispatch_ready;
@@ -404,12 +623,20 @@ impl ModelState {
     }
 }
 
-/// Execute the detailed recurrence and a separate summarized recurrence for
-/// this descriptor model. Single-owner SMSPs are independent, so one interval
-/// can advance without reordering an interacting SMSP. Native kernel replay
-/// continues to use the SM/memory executor and supplies none of these facts.
+/// Analyze descriptors with unknown residency. Candidates remain detailed
+/// because their instruction list cannot establish exclusive ownership.
 pub fn summarize(
     programs: &[Vec<CausalFrontierInstruction>],
+) -> Result<CausalFrontierReport, CausalFrontierError> {
+    summarize_with_residency(programs, CausalFrontierResidency::Unknown)
+}
+
+/// Execute detailed and summarized recurrences with an explicit resident
+/// population. Exclusive SMSPs are independent in this descriptor model.
+/// This does not replace native SM/memory execution or establish its timing.
+pub fn summarize_with_residency(
+    programs: &[Vec<CausalFrontierInstruction>],
+    mut residency: CausalFrontierResidency,
 ) -> Result<CausalFrontierReport, CausalFrontierError> {
     let planner_start = Instant::now();
     if programs.is_empty() {
@@ -417,7 +644,27 @@ pub fn summarize(
     }
     let mut exact_events = 0u64;
     let mut physical = HashSet::new();
-    let mut active_per_smsp = [0u32; SMSP_COUNT as usize];
+    let mut residents_per_smsp = [0u32; SMSP_COUNT as usize];
+    let complete_residents = match &mut residency {
+        CausalFrontierResidency::Unknown => None,
+        CausalFrontierResidency::Complete { physical_warps } => {
+            physical_warps.sort_unstable();
+            let mut residents = HashSet::new();
+            for &physical_warp in physical_warps.iter() {
+                let smsp = subcore(physical_warp)?;
+                if !residents.insert(physical_warp) {
+                    return Err(CausalFrontierError::DuplicateResidentWarp { physical_warp });
+                }
+                // Each physical warp is unique and in the fixed 48-slot SM.
+                residents_per_smsp[smsp] = residents_per_smsp[smsp].checked_add(1).ok_or(
+                    CausalFrontierError::CounterOverflow {
+                        counter: "resident warps per SM partition",
+                    },
+                )?;
+            }
+            Some(residents)
+        }
+    };
     let mut ordered = Vec::new();
     let mut canonical_programs = Vec::with_capacity(programs.len());
     for program in programs {
@@ -434,7 +681,15 @@ pub fn summarize(
                 physical_warp: first.physical_warp,
             });
         }
-        active_per_smsp[subcore(first.physical_warp)?] += 1;
+        subcore(first.physical_warp)?;
+        if complete_residents
+            .as_ref()
+            .is_some_and(|residents| !residents.contains(&first.physical_warp))
+        {
+            return Err(CausalFrontierError::ProgramWarpNotResident {
+                physical_warp: first.physical_warp,
+            });
+        }
         let mut previous = None;
         for (index, instruction) in program.iter().enumerate() {
             if instruction.physical_warp != first.physical_warp {
@@ -470,10 +725,10 @@ pub fn summarize(
 
     let mut causal = ModelState::default();
     let mut causal_events = exact_events;
-    let mut causal_execution_steps = 0;
-    let mut candidate_regions = 0;
-    let mut candidate_instructions = 0;
-    let mut collapsed_instructions = 0;
+    let mut causal_execution_steps = 0_u64;
+    let mut candidate_regions = 0_u64;
+    let mut candidate_instructions = 0_u64;
+    let mut collapsed_instructions = 0_u64;
     let mut certified_regions = Vec::new();
     let mut reified_region_details = Vec::new();
     let mut consumed = vec![0; canonical_programs.len()];
@@ -495,14 +750,31 @@ pub fn summarize(
             }
             scanned_until[program_index] = end;
             if end - index >= 2 {
-                candidate_regions += 1;
-                candidate_instructions += (end - index) as u64;
+                candidate_regions = candidate_regions.checked_add(1).ok_or(
+                    CausalFrontierError::CounterOverflow {
+                        counter: "candidate regions",
+                    },
+                )?;
+                candidate_instructions = candidate_instructions
+                    .checked_add(u64::try_from(end - index).map_err(|_| {
+                        CausalFrontierError::CounterOverflow {
+                            counter: "candidate instructions",
+                        }
+                    })?)
+                    .ok_or(CausalFrontierError::CounterOverflow {
+                        counter: "candidate instructions",
+                    })?;
                 let evidence = program[index..end]
                     .iter()
                     .copied()
                     .map(CausalFrontierInstruction::execution_evidence);
-                let decision =
-                    certify_interval(evidence, active_per_smsp[subcore(first.physical_warp)?]);
+                let decision = if complete_residents.is_some() {
+                    certify_interval(evidence, residents_per_smsp[subcore(first.physical_warp)?])
+                } else {
+                    FidelityDecision::Reify {
+                        reason: ReifyReason::UnknownResidency,
+                    }
+                };
                 let attempt = match decision {
                     FidelityDecision::Summary { certificate } => {
                         causal.apply_summary(first, certificate)
@@ -523,10 +795,18 @@ pub fn summarize(
                                 sequence: first.sequence,
                             },
                         )?;
-                        collapsed_instructions += length;
+                        collapsed_instructions = collapsed_instructions.checked_add(length).ok_or(
+                            CausalFrontierError::CounterOverflow {
+                                counter: "collapsed instructions",
+                            },
+                        )?;
                         certified_regions.push(region);
                         consumed[program_index] = end;
-                        causal_execution_steps += 1;
+                        causal_execution_steps = causal_execution_steps.checked_add(1).ok_or(
+                            CausalFrontierError::CounterOverflow {
+                                counter: "causal execution steps",
+                            },
+                        )?;
                         continue;
                     }
                     Err(reason) => reified_region_details.push(ReifiedRegion {
@@ -540,9 +820,31 @@ pub fn summarize(
         }
         causal.append(first)?;
         consumed[program_index] = index + 1;
-        causal_execution_steps += 1;
+        causal_execution_steps =
+            causal_execution_steps
+                .checked_add(1)
+                .ok_or(CausalFrontierError::CounterOverflow {
+                    counter: "causal execution steps",
+                })?;
     }
+    let exact_execution_steps =
+        u64::try_from(ordered.len()).map_err(|_| CausalFrontierError::CounterOverflow {
+            counter: "exact execution steps",
+        })?;
+    let collapsed_regions = u64::try_from(certified_regions.len()).map_err(|_| {
+        CausalFrontierError::CounterOverflow {
+            counter: "collapsed regions",
+        }
+    })?;
+    let reified_regions = u64::try_from(reified_region_details.len()).map_err(|_| {
+        CausalFrontierError::CounterOverflow {
+            counter: "reified regions",
+        }
+    })?;
+    ensure_terminal_state_match(&exact, &causal)?;
+    ensure_observation_match(&exact, &causal)?;
     Ok(CausalFrontierReport {
+        residency,
         exact_event_count: exact_events,
         causal_event_count: causal_events,
         exact_final_cycle: exact.completion,
@@ -550,12 +852,12 @@ pub fn summarize(
         critical_path_delta: i128::from(causal.completion) - i128::from(exact.completion),
         exact_last_issue_cycle: exact.last_issue,
         causal_last_issue_cycle: causal.last_issue,
-        exact_execution_steps: ordered.len() as u64,
+        exact_execution_steps,
         causal_execution_steps,
         terminal_state_matches: exact == causal,
         candidate_regions,
-        collapsed_regions: certified_regions.len() as u64,
-        reified_regions: reified_region_details.len() as u64,
+        collapsed_regions,
+        reified_regions,
         candidate_instructions,
         collapsed_instructions,
         certified_regions,
@@ -644,7 +946,13 @@ mod tests {
             in_flight_capacity: 2,
             ..instruction(8, true)
         });
-        let report = summarize(&[program]).unwrap();
+        let report = summarize_with_residency(
+            &[program],
+            CausalFrontierResidency::Complete {
+                physical_warps: vec![0],
+            },
+        )
+        .unwrap();
         assert_eq!(report.exact_final_cycle, 42);
         assert_eq!(report.causal_final_cycle, 42);
         assert_eq!(report.exact_last_issue_cycle, Some(40));
@@ -667,7 +975,13 @@ mod tests {
             in_flight_capacity: 1,
             ..instruction(sequence, false)
         }));
-        let report = summarize(&[program]).unwrap();
+        let report = summarize_with_residency(
+            &[program],
+            CausalFrontierResidency::Complete {
+                physical_warps: vec![0],
+            },
+        )
+        .unwrap();
         assert_eq!(report.collapsed_regions, 0);
         assert_eq!(
             report.reified_region_details[0].reason,
@@ -681,8 +995,13 @@ mod tests {
     fn heterogeneous_latency_cannot_claim_the_first_latency_for_every_instruction() {
         let mut first = instruction(0, false);
         first.latency_cycles = 100;
-        let report =
-            summarize(&[vec![first, instruction(1, false), instruction(2, false)]]).unwrap();
+        let report = summarize_with_residency(
+            &[vec![first, instruction(1, false), instruction(2, false)]],
+            CausalFrontierResidency::Complete {
+                physical_warps: vec![0],
+            },
+        )
+        .unwrap();
         assert_eq!(report.collapsed_regions, 0);
         assert_eq!(
             report.reified_region_details[0].reason,
@@ -710,5 +1029,139 @@ mod tests {
         let report = summarize(&[vec![instruction(0, false)]]).unwrap();
         let value = serde_json::to_value(report).unwrap();
         assert!(value.get("planner_time_ns").is_none());
+    }
+
+    #[test]
+    fn state_mismatch_fails_closed_before_a_report_can_certify_a_skip() {
+        let exact = ModelState::default();
+        let mut causal = ModelState::default();
+        causal.completion = 1;
+        assert!(matches!(
+            ensure_terminal_state_match(&exact, &causal),
+            Err(CausalFrontierError::StateMismatch {
+                exact_completion: 0,
+                causal_completion: 1,
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn observation_count_mismatch_is_not_misreported_as_overflow() {
+        let exact = ModelState::default();
+        let mut causal = ModelState::default();
+        causal.observations.push(InstructionObservation {
+            sequence: 0,
+            physical_warp: 0,
+            issue: 0,
+            completion: 1,
+        });
+        assert_eq!(
+            ensure_observation_match(&exact, &causal),
+            Err(CausalFrontierError::ObservationCountMismatch {
+                exact: 0,
+                causal: 1
+            })
+        );
+    }
+
+    #[test]
+    fn deterministic_adversarial_sweep_preserves_all_issue_and_completion_cycles() {
+        // A tiny local generator keeps this property test reproducible without
+        // adding a dependency or hiding the workload shape in a fixture.
+        let mut seed = 0x9e37_79b9_u64;
+        let mut next = || {
+            seed = seed.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1);
+            // The low bits of this LCG have short periods; using them for
+            // topology and pipeline choices couples otherwise independent axes.
+            seed >> 32
+        };
+        let mut collapsed_regions = 0;
+        let mut reified_regions = 0;
+        for case in 0..256 {
+            let program_count = 1 + (next() % 4) as usize;
+            let mut physical_warps = Vec::with_capacity(program_count);
+            while physical_warps.len() < program_count {
+                let candidate = (next() % 48) as i32;
+                if !physical_warps.contains(&candidate) {
+                    physical_warps.push(candidate);
+                }
+            }
+            let mut programs = Vec::with_capacity(program_count);
+            for &physical_warp in &physical_warps {
+                let length = 1 + (next() % 12) as usize;
+                let latency = 1 + next() % 20;
+                let initiation = 1 + next() % 8;
+                let capacity = 1 + (next() % 4) as u32;
+                let pipeline = if next() & 1 == 0 {
+                    PipelineClass::ScalarAlu {
+                        latency_cycles: latency,
+                        initiation_interval_cycles: initiation,
+                        in_flight_capacity: capacity,
+                    }
+                } else {
+                    PipelineClass::Tensor {
+                        initiation_interval_cycles: initiation,
+                    }
+                };
+                let program = (0..length)
+                    .map(|sequence| CausalFrontierInstruction {
+                        sequence: sequence as u64,
+                        physical_warp,
+                        pipeline,
+                        latency_cycles: latency,
+                        initiation_interval_cycles: initiation,
+                        in_flight_capacity: capacity,
+                        completion_units: if next() % 5 == 0 { 2 } else { 1 },
+                        control_clean: next() % 7 != 0,
+                        dependency_free: next() % 11 != 0,
+                        external_side_effect: next() % 13 == 0,
+                    })
+                    .collect();
+                programs.push(program);
+            }
+            let report = summarize_with_residency(
+                &programs,
+                CausalFrontierResidency::Complete { physical_warps },
+            )
+            .unwrap_or_else(|error| panic!("case {case}: {error}"));
+            collapsed_regions += report.collapsed_regions;
+            reified_regions += report.reified_regions;
+            assert!(report.terminal_state_matches);
+            assert_eq!(
+                report.exact_last_issue_cycle,
+                report.causal_last_issue_cycle
+            );
+
+            // The same descriptors must remain detailed when residency is
+            // unknown, or when stalled non-candidate warps share every SMSP.
+            for residency in [
+                CausalFrontierResidency::Unknown,
+                CausalFrontierResidency::Complete {
+                    physical_warps: (0..48).collect(),
+                },
+            ] {
+                let detailed = summarize_with_residency(&programs, residency)
+                    .unwrap_or_else(|error| panic!("case {case}: {error}"));
+                assert_eq!(detailed.collapsed_regions, 0, "case {case}");
+                assert_eq!(detailed.causal_event_count, detailed.exact_event_count);
+                assert_eq!(detailed.causal_final_cycle, report.causal_final_cycle);
+                assert_eq!(
+                    detailed.causal_last_issue_cycle,
+                    report.causal_last_issue_cycle
+                );
+            }
+        }
+        assert!(
+            collapsed_regions > 0,
+            "adversarial sweep never executed a summary"
+        );
+        assert!(
+            reified_regions > 0,
+            "adversarial sweep never refused a candidate"
+        );
+        eprintln!(
+            "256 cases: {collapsed_regions} summarized regions, {reified_regions} reified regions with complete residency"
+        );
     }
 }

@@ -569,8 +569,9 @@ where
     ))
 }
 
-/// Structural issue resources. These types are schema scaffolding only until a
-/// production card supplies independently admitted architecture-local values.
+/// Structural issue resources. Production cards must supply independently
+/// admitted architecture-local values; the executor binds only supported
+/// topology-compatible projections.
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct SmspResources {
@@ -1186,7 +1187,8 @@ impl ArchCard {
 
     /// Resolve the complete issue-resource scaffold in one fail-closed step.
     /// This projection supplies no defaults and cannot borrow another card's
-    /// values. It does not itself authorize execution of the dormant carded lane.
+    /// values. The SM86 executor consumes a strict topology-compatible subset;
+    /// divergent structural values are rejected at replay construction.
     pub fn required_issue_resources(&self) -> Result<RequiredIssueResources, CalibError> {
         Ok(RequiredIssueResources {
             smsp: *self.require_smsp_resources()?,
@@ -1195,6 +1197,17 @@ impl ArchCard {
             barrier_latencies: *self.require_barrier_latency_resources()?,
             dual_issue_supported: self.require_dual_issue_supported()?,
         })
+    }
+
+    /// True when a card carries at least one scheduler-resource block. This is
+    /// used by compatibility consumers to distinguish an old card with no
+    /// resource schema from a partially migrated card that must fail closed.
+    pub fn has_any_issue_resource_blocks(&self) -> bool {
+        self.smsp.require("smsp").is_ok()
+            || self.occupancy.require("occupancy").is_ok()
+            || self.dep_barriers.require("dep_barriers").is_ok()
+            || self.barrier_latencies.require("barrier_latencies").is_ok()
+            || self.dual_issue.require("dual_issue").is_ok()
     }
 
     /// The latency table, or a typed error if the card predates Phase 1D.
@@ -1633,32 +1646,29 @@ mod tests {
     }
 
     #[test]
-    fn production_cards_keep_issue_resources_absent_and_typed() {
+    fn production_cards_expose_consumed_sm86_resources_and_keep_sm120_typed() {
         for name in ["sm_86.json", "sm_120-laptop.json"] {
             let value: serde_json::Value =
                 serde_json::from_slice(&std::fs::read(card_path(name)).unwrap()).unwrap();
-            for block in [
+            let blocks = [
                 "smsp",
                 "occupancy",
                 "dep_barriers",
                 "barrier_latencies",
                 "dual_issue",
-            ] {
-                assert!(
-                    value.get(block).is_none(),
-                    "{name} unexpectedly carries {block}"
-                );
-            }
-
+            ];
             let card = ArchCard::load(&card_path(name)).unwrap();
-            assert!(matches!(
-                card.required_issue_resources(),
-                Err(CalibError::BlockResearchGap {
-                    block: "smsp",
-                    reason,
-                    ..
-                }) if reason.contains("field absent")
-            ));
+            if name == "sm_86.json" {
+                for block in blocks {
+                    assert!(value.get(block).is_some());
+                }
+                assert!(card.required_issue_resources().is_ok());
+            } else {
+                assert!(matches!(
+                    card.required_issue_resources(),
+                    Err(CalibError::BlockResearchGap { block: "smsp", .. })
+                ));
+            }
         }
     }
 

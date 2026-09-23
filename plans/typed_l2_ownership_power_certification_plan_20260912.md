@@ -2,14 +2,13 @@
 
 ## Decision
 
-The remaining failure is a state-schema failure, not an L2 replacement-policy
-failure or a missing scalar latency. The reference trace currently records a
-single formatted L2 string and omits the requester-owned state that connects a
-shared L2 allocation to an SM response, pending-sector merge, eviction, or
-stale fill. It also has no simulator power state at all. A summary transformer
-cannot be certified from that representation because it cannot prove that the
-post-summary L2 ownership graph, pending response identities, and power
-integration state are the same as the detailed lane.
+The initial failure was a state-schema failure, not an L2 replacement-policy
+failure or a missing scalar latency. The implementation below addressed the
+formatted-L2 and missing-power gaps; the current limitation is the narrower
+summary-transformer contract described in the implementation status. A
+summary transformer still cannot certify an open interval when its ownership
+graph, pending response identities, address domain, or power integration state
+is incomplete.
 
 The implementation should therefore proceed in this order:
 
@@ -43,26 +42,53 @@ response owners and pending-fill ready times, emits typed pending events, and
 records activity-only power at every reference-trace boundary. The typed root
 record now assembles L1/L2, front-end, pipeline, async, queue, ownership, and
 power state. The SM86 canary produces identical typed event records in event
-and dense modes across all 13 events; the V2 typed root record is complete at
-quiescent canary boundaries and explicitly reifies while an outstanding
-response has no exact due time. The legacy V1
+and dense modes across all 13 events. Boundaries with unmodeled completion
+tails or pre-pricing ownership remain explicitly incomplete; exact due cycles
+and allocation generations are carried through typed owners once the L2 event
+prices the response. The legacy V1
 `state_projection_complete` flag remains false for compatibility with existing
-diagnostic consumers; it is not the V2 typed-root completeness result.
+diagnostic consumers; it is not the typed-root completeness result.
 
 The bounded executable check used the retained address-carry canary with
 `--mode l1-l2`, `SIM_SM_REFERENCE_TRACE`, and both
 `SIM_SM_REFERENCE_MODE=event` and `dense`. It produced 13 event records,
 byte-identical replay JSON, and identical typed L2/power/queue records; the
-terminal modeled event time was 785 cycles. Workspace tests passed after the
-change, including 447 `sim-sm` tests in the reference-enabled build and the
-full workspace suite.
+terminal modeled event time was 785 cycles. The current focused reference
+focused package checks pass 431 `sim-sm` tests and 58 `sim-semantics` tests;
+the full workspace reference sweep passes 461 `sim-sm`, 137 `sim-mem`, and
+58 `sim-semantics` tests.
 
-The typed root now reports `typed_event_boundary_v2`. On the canary it returns
-`incomplete(request_due_time_unknown)` while response-bearing work is still in
-flight and `complete` for the six quiescent post-response boundaries. This is
-the intended fail-closed transition rather than a guessed response timestamp.
+The typed root now reports `typed_event_boundary_v15`. On the canary it returns
+explicit incompleteness for pre-pricing ownership and any workload capability
+tails; exact due cycles and allocation generations are never guessed. This is
+the intended fail-closed transition rather than a guessed allocation identity
+or response timestamp.
+
+Schema 15 also serializes the carded aggregate DRAM server's exact fixed-point
+frontier (rate, clock, cycle quotient, and fractional remainder). The latency-
+only ablation uses an explicit `latency_only` mode; carded bandwidth state is
+not rounded or inferred from traffic counters.
+
+The full embedding replay now carries the L2 allocation generation through
+every response due record. Its 2,456 event/dense typed boundaries match; each
+boundary's completeness is contract-relative and includes ownership, tail,
+and optional timing markers, with no generation inferred from the L1 fill
+identity.
+
+The next checker slice is implemented in `sim-semantics::transform`: typed
+interval/frontier inputs, phase-aware emitted events, summary proofs, and an
+independent structural checker are versioned and fail closed. The included
+identity transformer is a diagnostic reference for complete zero-length typed
+boundaries; non-empty intervals reify until a transition rule is implemented.
+It deliberately performs no native SM skipping or acceleration claim.
 
 ## Evidence and diagnosis
+
+The following design inventory records the original schema gap that motivated
+this plan. The implementation status above is authoritative for the current
+schema-15 code; fields described below as formerly omitted are now typed, and
+the remaining limitations are the explicit fail-closed conditions recorded in
+the status report.
 
 The current schema is explicitly designed to refuse certification. `BoundarySnapshot`
 has string fields for L1, the instruction front end, the memory issue
@@ -104,10 +130,24 @@ relative byte and 32-byte-sector offsets without inventing a physical address
 right basis for a typed address-domain field, but it is not evidence that a
 virtual allocation offset equals a physical L2 slice selection.
 
-The focused local checks confirm the starting point: `sim-semantics` passes 10
-tests, `sim-mem` passes its 48 L2-related unit tests, and the focused
-`sim-sm` run passes 5 selected tests. The full current package counts recorded
-in `docs/STATUS.md` remain the reference campaign evidence. None of these
+The focused local checks confirm the current typed path: `sim-semantics` passes
+58 state/contract tests, `sim-mem` retains its existing L2 coverage, and the
+reference-enabled `sim-sm` package passes 431 unit tests plus its
+integration/doc checks. The typed L2 validator rejects an
+allocation generation without a resident way, a generation frontier below a
+live allocation, a line outside the declared address domain, and any sector
+status that differs from the resident pending/dirty/valid masks. It also checks
+registered SM86 slice-hash formulas against resident virtual line placement,
+rejects orphan complete L1 or direct-response owners, and requires the shared
+owner list to equal the per-core response roster. L1 counter decomposition and
+the active lookup-batch frontier are checked as part of the same boundary
+validation. Boundaries that enable the stateful write-lookup observer reify
+until its tag-window state is serialized. The full current package counts
+recorded in `docs/STATUS.md` remain the reference campaign evidence. Pending
+producer edges now carry the exact L2 fill generation and request identity;
+stale or replyless generation joins stay incomplete. Power validation also
+requires an enabled sampling frontier to remain strictly beyond the elapsed
+domain clock. None of these
 checks exercises a typed L2 ownership transformer or a power transition.
 
 ## Contract that the implementation must satisfy
@@ -151,8 +191,9 @@ stable.
 
 ## Typed state schema
 
-Add version 2 types to `sim-semantics` and keep version 1 deserialization only
-for old diagnostic traces. Do not encode state with `format!("{state:?}")` or
+The live typed root is schema revision 13; retain version 1/full diagnostic
+decoding and the current schema-3 delta storage encoding for old traces. Do not
+encode state with `format!("{state:?}")` or
 use pointer/process identities in a serialized boundary.
 
 The root event record should become conceptually:
@@ -259,10 +300,17 @@ pub struct L2RequestOwner {
     pub response: Option<ResponseKey>,
     pub line: CanonicalLineKey,
     pub sector_mask: u8,
+    pub allocation_generation: Option<u64>,
     pub state: RequestState,
     pub due: Option<u64>,
 }
 ```
+
+The schema-15 `L2RequestKey` carries `response_warp`, the dynamic warp identity
+that remains unique when a physical `warp_slot` is reused after retirement.
+Each `L2RequestOwner` also carries the shared-L2 allocation generation that
+priced the response. This is separate from the L1 fill generation, and any
+producer/consumer join that omits either identity is incomplete.
 
 The exact field names can change, but the ownership relations cannot be
 dropped. For a pending sector, the cache allocation owns the fill capability;
@@ -457,7 +505,7 @@ state and compare it with a detailed replay at every external boundary.
 
 Change:
 
-* `sim/semantics/src/observation.rs`: add contract version 2, address-domain
+* `sim/semantics/src/observation.rs`: keep contract version 2, address-domain
   and power status enums, and contract-aware completeness validation.
 * `sim/semantics/src/boundary.rs`: add `BoundarySnapshotV2`, typed event and
   queue state, and `UnknownField`/`Completeness` types. Keep V1 for reading
@@ -467,7 +515,7 @@ Change:
 
 Acceptance:
 
-* a serialized V2 header names the contract, schema, address domain, and power
+* a serialized current header names the contract, schema, address domain, and power
   status;
 * V1 traces still compare byte-for-byte through the existing path;
 * `is_complete` cannot return true merely because an omission string is empty;
@@ -488,12 +536,25 @@ Change:
 
 Acceptance:
 
-* V1 and V2 projections from the same canary compare equal after canonical
+* legacy and current projections from the same canary compare equal after canonical
   normalization;
 * map insertion order, process allocation order, and debug formatting do not
-  change V2 JSON;
+  change the current typed JSON;
 * malformed or unsupported state returns a typed error and keeps
   `Completeness::Incomplete`.
+
+The typed event payload work is implemented in schema revision 13: batch events
+carry every request, responses carry stable requester/fill identity, and write
+acknowledgements carry their witness and service times. Queue depth/order/
+head-time validation, batch sequence-span preservation, and L2
+set/allocation/request identity invariants are
+also enforced before a typed boundary is emitted.
+
+Schema 11 additionally carries every live bypass asynchronous-copy observation,
+including its `(group, instruction)` producer identity, sector membership masks,
+and per-cohort response frontiers. A count-only or explicitly incomplete
+observation projection remains diagnostic and cannot certify a cycle-exact
+contract.
 
 ### Phase 2: shared L2 state and ownership (1–2 weeks)
 
@@ -624,7 +685,7 @@ issue, completion, memory, launch, and power frontiers into one score.
 
 The work is complete only when all of the following hold:
 
-1. V2 traces are typed end-to-end. No field used by the checker is a debug
+1. Current typed traces are end-to-end. No field used by the checker is a debug
    string, process-local owner token, pointer, or unordered map dump.
 2. The 13-event canary and dense reference have equal typed state at every
    event and equal final replay output.
@@ -661,7 +722,7 @@ power accuracy, or architecture-independent trace validity.
 * **Power model lacks an independent input.** Keep `ActivityOnly`, omit watts,
   and exclude power from performance-only certification. Do not fit power from
   scored NCU rows.
-* **Typed serialization dominates runtime.** Make V2 tracing opt-in and keep
+* **Typed serialization dominates runtime.** Make typed tracing opt-in and keep
   the detailed execution path unchanged; measure serialization separately from
   simulation.
 * **L2 mapping ambiguity changes rankings.** Restrict the result to the

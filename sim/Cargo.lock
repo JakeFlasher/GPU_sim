@@ -234,6 +234,7 @@ version = "0.0.1"
 dependencies = [
  "serde",
  "serde_json",
+ "sim-semantics",
  "tempfile",
  "thiserror",
 ]

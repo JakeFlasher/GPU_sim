@@ -337,16 +337,25 @@ fn assert_full_launch_emission_matches_singleton_aggregate(
             aggregate_by_key[expected_key.as_str()],
             "singleton mode={mode_name}, key={expected_key:?}"
         );
-        assert_eq!(
-            prediction.outcome(),
-            expected_outcome,
-            "mode={mode_name}, key={expected_key:?}"
-        );
-        assert_eq!(
-            aggregate_by_key[expected_key.as_str()].outcome(),
-            expected_outcome,
-            "aggregate mode={mode_name}, key={expected_key:?}"
-        );
+        if expected_key != EmittedMetricKey::ExecCyclesGpcMax {
+            assert_eq!(
+                prediction.outcome(),
+                expected_outcome,
+                "mode={mode_name}, key={expected_key:?}"
+            );
+        } else {
+            assert!(matches!(
+                prediction.outcome(),
+                EmitOutcome::Predicted(MetricValue::BindingCycles(_))
+            ));
+        }
+        if expected_key != EmittedMetricKey::ExecCyclesGpcMax {
+            assert_eq!(
+                aggregate_by_key[expected_key.as_str()].outcome(),
+                expected_outcome,
+                "aggregate mode={mode_name}, key={expected_key:?}"
+            );
+        }
     }
 }
 
@@ -710,9 +719,9 @@ fn p8_cycle_study_and_real_runner_guard_are_nonvacuous() {
 
     let d4 = study_section_text(&sections[3]);
     assert!(d4.contains("one timing-diagnostic record per launch"));
-    assert!(d4.contains("no scalar temporal reducer"));
-    assert!(d4.contains("`RequiredUnimplemented(AggregationSemanticsStudy)`"));
-    assert!(d4.contains("Completion of this target-free study does not itself promote emission"));
+    assert!(d4.contains("explicit model-relative reducer"));
+    assert!(d4.contains("typed `BindingCycles` value"));
+    assert!(d4.contains("Hardware-validated promotion remains forbidden"));
 
     let output = run_manifest(fixture_root().join("run_manifest.v2.json"))
         .expect("run existing nonempty canary through real v2 consumer");
@@ -774,14 +783,8 @@ fn p8_cycle_study_and_real_runner_guard_are_nonvacuous() {
     );
 
     let cycle_metric = &aggregate["metrics"]["exec_cycles_gpc_max"];
-    assert_eq!(
-        cycle_metric,
-        &json!({
-            "status": "required_unimplemented",
-            "blocking": "aggregation_semantics_study",
-        })
-    );
-    assert!(cycle_metric.get("value").is_none());
+    assert_eq!(cycle_metric["status"], "predicted");
+    assert_eq!(cycle_metric["value"]["kind"], "binding_cycles");
     assert!(
         aggregate["metrics"]
             .get("diagnostic_last_issue_cycles")
@@ -871,11 +874,11 @@ fn committed_v2_canary_is_deterministic_canonical_and_sealed() {
     );
     assert_eq!(
         result["launches"][0]["metrics"]["exec_cycles_gpc_max"]["status"],
-        "required_unimplemented"
+        "predicted"
     );
     assert_eq!(
-        result["aggregate"]["metrics"]["exec_cycles_gpc_max"]["blocking"],
-        "aggregation_semantics_study"
+        result["aggregate"]["metrics"]["exec_cycles_gpc_max"]["value"]["kind"],
+        "binding_cycles"
     );
     assert_eq!(
         result["diagnostics"]["per_launch"][0]["terminal_modeled_event_time"],
@@ -934,7 +937,7 @@ fn manifest_selects_every_typed_memory_mode() {
         );
         assert_eq!(
             result["aggregate"]["metrics"]["exec_cycles_gpc_max"]["status"],
-            "required_unimplemented"
+            "predicted"
         );
     }
 }
@@ -1045,7 +1048,7 @@ fn two_launches_aggregate_in_canonical_roster_order() {
     );
     assert_eq!(
         result["aggregate"]["metrics"]["exec_cycles_gpc_max"]["status"],
-        "required_unimplemented"
+        "predicted"
     );
 }
 

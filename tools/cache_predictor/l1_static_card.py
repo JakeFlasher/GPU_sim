@@ -115,8 +115,15 @@ class L1StaticCardEntryInvalid(Exception):
 
 def _load_table_schema() -> dict:
     """Load the bundled JSON Schema for the static-card table."""
-    with _TABLE_SCHEMA_PATH.open("r", encoding="utf-8") as fh:
-        return json.load(fh)
+    try:
+        with _TABLE_SCHEMA_PATH.open("r", encoding="utf-8") as fh:
+            return json.load(fh)
+    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+        raise L1StaticCardEntryInvalid(
+            arch=None,
+            raw_l1_ways=None,
+            validation_message=f"table schema is not valid JSON: {exc}",
+        ) from exc
 
 
 def load_l1_static_card_table(
@@ -141,7 +148,14 @@ def load_l1_static_card_table(
         ``l1_ways`` value plus the validation error message.
     """
     path = table_path or _TABLE_PATH
-    raw = json.loads(path.read_text(encoding="utf-8"))
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+        raise L1StaticCardEntryInvalid(
+            arch=None,
+            raw_l1_ways=None,
+            validation_message=f"table is not valid JSON: {exc}",
+        ) from exc
 
     # Strict schema validation BEFORE any field coercion. This
     # catches l1_ways=0 (violates minimum=1), l1_ways="4" or
@@ -172,7 +186,7 @@ def load_l1_static_card_table(
                     row = raw["entries"][row_index]
                     offending_arch = row.get("arch")
                     offending_l1_ways = row.get("l1_ways")
-        except (TypeError, KeyError, IndexError):
+        except (AttributeError, TypeError, KeyError, IndexError):
             pass
         raise L1StaticCardEntryInvalid(
             arch=offending_arch,
@@ -197,6 +211,12 @@ def load_l1_static_card_table(
                 if l1_ways_raw is not None else None
             ),
         )
+        if e.arch in entries:
+            raise L1StaticCardEntryInvalid(
+                arch=e.arch,
+                raw_l1_ways=l1_ways_raw,
+                validation_message="duplicate architecture entry",
+            )
         entries[e.arch] = e
     return entries
 

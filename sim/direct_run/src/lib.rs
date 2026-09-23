@@ -1553,7 +1553,7 @@ mod tests {
         assert_eq!(metrics[7].ncu_metric, "gpc__cycles_elapsed.max");
         assert!(matches!(
             metrics[7].outcome,
-            EmitOutcome::RequiredUnimplemented { .. }
+            EmitOutcome::Predicted(sim_run::emit::MetricValue::BindingCycles(_))
         ));
         let dram = metrics
             .iter()

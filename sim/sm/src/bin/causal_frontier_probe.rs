@@ -4,7 +4,10 @@
 //! keeps the descriptor producer explicit and exercises the native analyzer's
 //! collapse/refusal behavior in the same release build used by campaigns.
 
-use sim_sm::{CausalFrontierInstruction, PipelineClass, summarize_causal_frontier};
+use sim_sm::{
+    CausalFrontierInstruction, CausalFrontierResidency, PipelineClass, summarize_causal_frontier,
+    summarize_causal_frontier_with_residency,
+};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let scalar = PipelineClass::ScalarAlu {
@@ -41,7 +44,26 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     refused.sequence = 4;
     refused.external_side_effect = true;
     third.push(refused);
-    let report = summarize_causal_frontier(&[first, second, third])?;
-    println!("{}", serde_json::to_string(&report)?);
+    let programs = [first, second, third];
+    let report = summarize_causal_frontier_with_residency(
+        &programs,
+        CausalFrontierResidency::Complete {
+            physical_warps: vec![0, 1, 5],
+        },
+    )?;
+    let unknown = summarize_causal_frontier(&programs)?;
+    // Warp 4 owns SMSP 0 too, even though it has no candidate instructions.
+    let extra_resident = summarize_causal_frontier_with_residency(
+        &programs,
+        CausalFrontierResidency::Complete {
+            physical_warps: vec![0, 1, 4, 5],
+        },
+    )?;
+    let mut output = serde_json::to_value(report)?;
+    output["residency_cases"] = serde_json::json!({
+        "unknown": unknown,
+        "extra_resident": extra_resident,
+    });
+    println!("{}", serde_json::to_string(&output)?);
     Ok(())
 }

@@ -9,6 +9,8 @@ use sim_arch::{ArchId, strict_json_from_slice};
 use sim_sm::{SmActiveObservationFrontier, TraceBundleIdentity};
 use sim_trace::Sha256Digest;
 
+#[cfg(test)]
+use crate::emit::BindingCycles;
 use crate::emit::{
     EMITTED_METRIC_COUNT, EmitOutcome, EmittedMetricKey, MemUnit, MetricPrediction, MetricValue,
     RequiredUnimplementedBlocker, Unavailable,
@@ -819,7 +821,8 @@ fn validate_metric_outcome(key: EmittedMetricKey, outcome: &EmitOutcome) -> Resu
         ) => true,
         (
             EmittedMetricKey::ExecCyclesGpcMax,
-            EmitOutcome::RequiredUnimplemented {
+            EmitOutcome::Predicted(MetricValue::BindingCycles(_))
+            | EmitOutcome::RequiredUnimplemented {
                 blocking: RequiredUnimplementedBlocker::AggregationSemanticsStudy,
             },
         ) => true,
@@ -1018,7 +1021,7 @@ impl PerLaunchDiagnosticV2 {
             diagnostic_last_issue_cycles,
             terminal_modeled_event_time,
             sm_active_observation_frontier: sm_active_observation_frontier.map(Into::into),
-            binding_cycles_role: "diagnostic_only_not_binding_prediction",
+            binding_cycles_role: "max_of_checked_launch_frontiers_simulator_scope",
         }
     }
 }
@@ -2135,9 +2138,11 @@ mod tests {
             (EmittedMetricKey::CacheHitRateL2Sector, fraction),
             (
                 EmittedMetricKey::ExecCyclesGpcMax,
-                EmitOutcome::RequiredUnimplemented {
-                    blocking: RequiredUnimplementedBlocker::AggregationSemanticsStudy,
-                },
+                EmitOutcome::Predicted(MetricValue::BindingCycles(
+                    // Test-only wire token; production construction remains
+                    // private to the checked emitter.
+                    BindingCycles::from_aggregated_frontier(1),
+                )),
             ),
         ]
     }
@@ -2158,10 +2163,7 @@ mod tests {
             .map(|key| key.as_str())
             .collect();
         assert_eq!(keys, expected);
-        assert_eq!(
-            value["exec_cycles_gpc_max"]["status"],
-            "required_unimplemented"
-        );
+        assert_eq!(value["exec_cycles_gpc_max"]["status"], "predicted");
     }
 
     #[test]

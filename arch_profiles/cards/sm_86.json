@@ -111,5 +111,23 @@
     "locked_sm_clock_mhz": 1350,
     "locked_mem_clock_mhz": 10501,
     "provenance": "Vendor spec: RTX 3090 Ti, GDDR6X 21 Gbps/pin x 384-bit bus = 1008 GB/s peak. The protocol-v2.1 locked memory clock 10501 MHz (-lmc) IS the full-data-rate point (10501 MHz x 2 = 21002 MT/s), so the vendor peak applies at the locked operating point unscaled; 1350 MHz is the same -lgc SM lock the latencies_cycles table was measured under, giving ~746.7 bytes per SM-cycle aggregate. Vendor-documented + locked-protocol derivation \u2014 never an NCU value (Rule 1). PEAK is a documented-default service-rate hypothesis: achievable GDDR6X efficiency is below peak and unmeasured on this host; a bandwidth microbench under the locked protocol supersedes this value when captured."
+  },
+  "smsp": {
+    "count": 4,
+    "issue_ports": 1
+  },
+  "occupancy": {
+    "max_resident_warps_per_sm": 48,
+    "max_blocks": 16
+  },
+  "dep_barriers": {
+    "count": 6
+  },
+  "barrier_latencies": {
+    "read": 8,
+    "non_memory_write": 25
+  },
+  "dual_issue": {
+    "supported": false
   }
 }

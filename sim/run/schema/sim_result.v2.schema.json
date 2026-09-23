@@ -194,11 +194,13 @@
         "max_resident_warps_per_sm": {
           "$ref": "#/$defs/positiveU32"
         },
+        "issue_ports": { "$ref": "#/$defs/positiveU32" },
+        "dual_issue_supported": { "type": "boolean" },
         "latency_provenance": {
           "const": "architecture_card"
         },
         "issue_hypothesis_provenance": {
-          "const": "architecture_local_reviewed_hypothesis"
+          "enum": ["architecture_local_reviewed_hypothesis", "architecture_card"]
         }
       }
     },
@@ -691,6 +693,16 @@
         }
       }
     },
+    "bindingCyclesMetricValue": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "semantics", "value"],
+      "properties": {
+        "kind": {"const": "binding_cycles"},
+        "semantics": {"const": "simulator_scope"},
+        "value": {"$ref": "#/$defs/u64"}
+      }
+    },
     "fractionMetricValue": {
       "type": "object",
       "additionalProperties": false,
@@ -742,6 +754,15 @@
         "value": {
           "$ref": "#/$defs/exactMetricValue"
         }
+      }
+    },
+    "predictedBindingCycles": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "value"],
+      "properties": {
+        "status": {"const": "predicted"},
+        "value": {"$ref": "#/$defs/bindingCyclesMetricValue"}
       }
     },
     "predictedFraction": {
@@ -1118,7 +1139,7 @@
           ]
         },
         "exec_cycles_gpc_max": {
-          "$ref": "#/$defs/requiredBindingCycles"
+          "oneOf": [{ "$ref": "#/$defs/predictedBindingCycles" }, { "$ref": "#/$defs/requiredBindingCycles" }]
         }
       },
       "description": "Exactly the seven implemented secondary metrics plus the binding cycles metric. Timing diagnostics cannot appear in this map."
@@ -1216,7 +1237,7 @@
           "$ref": "#/$defs/smActiveObservationFrontier"
         },
         "binding_cycles_role": {
-          "const": "diagnostic_only_not_binding_prediction"
+          "enum": ["max_of_checked_launch_frontiers_simulator_scope", "diagnostic_only_not_binding_prediction"]
         }
       }
     },

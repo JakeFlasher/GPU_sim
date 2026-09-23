@@ -160,7 +160,11 @@ fn cli_emits_only_one_canonical_v2_result_on_success() {
     let parsed = assert_success_document(&output.stdout);
     assert_eq!(
         parsed["aggregate"]["metrics"]["exec_cycles_gpc_max"]["status"],
-        "required_unimplemented"
+        "predicted"
+    );
+    assert_eq!(
+        parsed["aggregate"]["metrics"]["exec_cycles_gpc_max"]["value"]["kind"],
+        "binding_cycles"
     );
 }
 

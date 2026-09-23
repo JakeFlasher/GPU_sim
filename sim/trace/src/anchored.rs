@@ -54,13 +54,13 @@ impl FileGenerationIdentity {
     fn from_stat(stat: &rustix::fs::Stat) -> Option<Self> {
         Some(Self {
             identity: FileIdentity {
-                device: u64::try_from(stat.st_dev).ok()?,
-                inode: u64::try_from(stat.st_ino).ok()?,
+                device: stat.st_dev,
+                inode: stat.st_ino,
             },
             size_bytes: u64::try_from(stat.st_size).ok()?,
-            modified_seconds: i64::try_from(stat.st_mtime).ok()?,
+            modified_seconds: stat.st_mtime,
             modified_nanoseconds: i64::try_from(stat.st_mtime_nsec).ok()?,
-            changed_seconds: i64::try_from(stat.st_ctime).ok()?,
+            changed_seconds: stat.st_ctime,
             changed_nanoseconds: i64::try_from(stat.st_ctime_nsec).ok()?,
         })
     }
@@ -479,11 +479,11 @@ impl AnchoredDir {
                 limit: MAX_TREE_DEPTH,
             });
         }
-        let mut entries = Dir::read_from(&directory).map_err(|source| AnchoredReadError::Io {
+        let entries = Dir::read_from(&directory).map_err(|source| AnchoredReadError::Io {
             path: self.root.join(relative),
             source: source.into(),
         })?;
-        while let Some(entry) = entries.next() {
+        for entry in entries {
             let entry = entry.map_err(|source| AnchoredReadError::Io {
                 path: self.root.join(relative),
                 source: source.into(),
@@ -547,13 +547,12 @@ impl AnchoredDir {
                                 source: source.into(),
                             }
                         })?;
-                    let remaining = state
-                        .maximum_bytes
-                        .checked_sub(state.bytes_seen)
-                        .ok_or_else(|| AnchoredReadError::TreeByteLimitExceeded {
+                    let remaining = state.maximum_bytes.checked_sub(state.bytes_seen).ok_or(
+                        AnchoredReadError::TreeByteLimitExceeded {
                             path: child_path.clone(),
                             limit: state.maximum_bytes,
-                        })?;
+                        },
+                    )?;
                     let file_limit = remaining.min(state.maximum_file_bytes);
                     let generation = inspect_opened_regular(fd, child_path.clone(), file_limit)
                         .map_err(|error| match error {
@@ -568,7 +567,7 @@ impl AnchoredDir {
                     let next_bytes = state
                         .bytes_seen
                         .checked_add(generation.size_bytes())
-                        .ok_or_else(|| AnchoredReadError::TreeByteLimitExceeded {
+                        .ok_or(AnchoredReadError::TreeByteLimitExceeded {
                             path: child_path,
                             limit: state.maximum_bytes,
                         })?;
@@ -625,11 +624,11 @@ impl AnchoredDir {
                 limit: MAX_TREE_DEPTH,
             });
         }
-        let mut entries = Dir::read_from(&directory).map_err(|source| AnchoredReadError::Io {
+        let entries = Dir::read_from(&directory).map_err(|source| AnchoredReadError::Io {
             path: self.root.join(relative),
             source: source.into(),
         })?;
-        while let Some(entry) = entries.next() {
+        for entry in entries {
             let entry = entry.map_err(|source| AnchoredReadError::Io {
                 path: self.root.join(relative),
                 source: source.into(),
@@ -693,13 +692,12 @@ impl AnchoredDir {
                                 source: source.into(),
                             }
                         })?;
-                    let remaining = state
-                        .maximum_bytes
-                        .checked_sub(state.bytes_seen)
-                        .ok_or_else(|| AnchoredReadError::TreeByteLimitExceeded {
+                    let remaining = state.maximum_bytes.checked_sub(state.bytes_seen).ok_or(
+                        AnchoredReadError::TreeByteLimitExceeded {
                             path: child_path.clone(),
                             limit: state.maximum_bytes,
-                        })?;
+                        },
+                    )?;
                     let file_limit = remaining.min(state.maximum_file_bytes);
                     let file = read_opened_regular(fd, child_path.clone(), None, file_limit)
                         .map_err(|error| match error {
@@ -711,14 +709,12 @@ impl AnchoredDir {
                             }
                             other => other,
                         })?;
-                    let next_bytes =
-                        state
-                            .bytes_seen
-                            .checked_add(file.size_bytes())
-                            .ok_or_else(|| AnchoredReadError::TreeByteLimitExceeded {
-                                path: child_path,
-                                limit: state.maximum_bytes,
-                            })?;
+                    let next_bytes = state.bytes_seen.checked_add(file.size_bytes()).ok_or(
+                        AnchoredReadError::TreeByteLimitExceeded {
+                            path: child_path,
+                            limit: state.maximum_bytes,
+                        },
+                    )?;
                     if let Some(first) = state
                         .identities
                         .insert(file.identity(), child_relative.clone())

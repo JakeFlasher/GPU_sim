@@ -2,8 +2,8 @@
 //!
 //! The runner accepts no command-line overrides, environment-selected modes, or
 //! target values. Every replay input is admitted through `sim-sm`, exact launch
-//! sets use the checked aggregation algebra, and binding cycles remain the typed
-//! `required_unimplemented` emission produced by [`emit`].
+//! sets use the checked aggregation algebra, and binding cycles are emitted by
+//! the explicit max-of-launch-frontiers rule in [`emit`].
 
 pub mod emit;
 mod build_provenance {
@@ -952,7 +952,7 @@ fn issue_configuration_error(component: &'static str, error: IssueError) -> RunE
             let unavailable = matches!(
                 &other,
                 IssueError::ArchitectureUnsupported { .. }
-                    | IssueError::CardedResourcesNotImplemented { .. }
+                    | IssueError::CardedResourceMismatch { .. }
                     | IssueError::Capability(_)
             );
             configuration_error(component, other, unavailable)
@@ -996,14 +996,27 @@ fn resolve_configuration(
         .arch_card()
         .required_latencies()
         .map_err(|source| calib_arch_card_error("architecture-card latencies", source))?;
-    let issue_params = sim_sm::IssueModelParams::from_legacy_card_latencies_for_arch(
-        arch,
-        latencies.l1_hit,
-        latencies.l2_hit,
-        latencies.dram,
-        latencies.shared,
-    )
-    .map_err(|source| issue_configuration_error("issue hypotheses", source))?;
+    // Prefer the complete carded scheduler lane.  A pre-resource-block
+    // historical fixture remains readable through the explicit legacy
+    // compatibility path; newly admitted cards with any resource block must
+    // never borrow architecture defaults.
+    let issue_params = match first.arch_card().required_issue_resources() {
+        Ok(_) => sim_sm::IssueModelParams::from_card(arch, first.arch_card())
+            .map_err(|source| issue_configuration_error("carded issue resources", source))?,
+        Err(sim_arch::card::CalibError::BlockResearchGap { .. })
+            if !first.arch_card().has_any_issue_resource_blocks() =>
+        {
+            sim_sm::IssueModelParams::from_legacy_card_latencies_for_arch(
+                arch,
+                latencies.l1_hit,
+                latencies.l2_hit,
+                latencies.dram,
+                latencies.shared,
+            )
+            .map_err(|source| issue_configuration_error("issue hypotheses", source))?
+        }
+        Err(source) => return Err(calib_arch_card_error("issue resources", source)),
+    };
     let issue_wire = IssueConfigurationWire::from(issue_params);
 
     let (replay_mode, mode_wire, l1_wire, l2_wire, dram_wire) = match requested {
@@ -1156,6 +1169,8 @@ enum ReplayModeWire {
 #[derive(Clone, Serialize)]
 struct IssueConfigurationWire {
     arch: &'static str,
+    issue_ports: u32,
+    dual_issue_supported: bool,
     l1_hit_latency_cycles: u64,
     l1_miss_latency_cycles: u64,
     global_flat_latency_cycles: u64,
@@ -1171,6 +1186,8 @@ impl From<sim_sm::IssueModelParams> for IssueConfigurationWire {
     fn from(params: sim_sm::IssueModelParams) -> Self {
         Self {
             arch: params.arch().token(),
+            issue_ports: params.issue_ports(),
+            dual_issue_supported: params.dual_issue_supported(),
             l1_hit_latency_cycles: params.l1_hit_latency(),
             l1_miss_latency_cycles: params.l1_miss_latency(),
             global_flat_latency_cycles: params.global_flat_latency(),
@@ -1747,7 +1764,7 @@ mod v1_result_compat {
                 terminal_modeled_event_time: modeled_event_time_wire(
                     result.terminal_modeled_event_time(),
                 ),
-                binding_cycles_role: "diagnostic_only_not_binding_prediction",
+                binding_cycles_role: "max_of_checked_launch_frontiers_simulator_scope",
             },
             unmodeled_tails: result.unmodeled_tails().into(),
         })
@@ -1775,7 +1792,7 @@ mod v1_result_compat {
                 aggregate.dram(),
             ),
             unmodeled_tails: aggregate.unmodeled_tails().into(),
-            timing_composition: "required_unimplemented_pending_aggregation_semantics_study",
+            timing_composition: "max_of_checked_launch_frontiers_simulator_scope",
         }
     }
 

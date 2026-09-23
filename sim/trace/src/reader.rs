@@ -7910,7 +7910,7 @@ pub fn validate_threadblock_contract(
         let mut previous_instrumentation_order = None;
         for (instruction_index, instruction) in warp.instructions.iter().enumerate() {
             let record = || format!("{label} warp={warp_id} inst={instruction_index}");
-            let preflight = preflight_memory_access(instruction, &record)?;
+            let preflight = preflight_memory_access(instruction, record)?;
             let Some(instruction_warp_id) = instruction.warpid_tb else {
                 return Err(TraceError::WarpidTbMissing { record: record() });
             };

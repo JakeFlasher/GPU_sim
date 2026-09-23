@@ -160,6 +160,12 @@ pub enum PipelineClass {
         /// Earliest number of cycles between issues to one SMSP's Tensor Core.
         initiation_interval_cycles: u64,
     },
+    /// Uniform/SFU issue pipe.  It shares the per-SMSP availability timeline
+    /// with tensor work only for arbitration; its cadence is carded
+    /// independently by `ArchId::uniform_sfu_cadence`.
+    Sfu {
+        initiation_interval_cycles: u64,
+    },
     ScalarAlu {
         /// Architecture-local pipelined INT/FP execution path.  The queue
         /// and latency are consumed by the replay actor; this field remains
@@ -182,6 +188,9 @@ impl PipelineClass {
                 ..
             } => Some(warp_initiation_interval_cycles),
             Self::Tensor {
+                initiation_interval_cycles,
+            } => Some(initiation_interval_cycles),
+            Self::Sfu {
                 initiation_interval_cycles,
             } => Some(initiation_interval_cycles),
             Self::ScalarAlu {
@@ -583,8 +592,8 @@ fn classify_pipeline(
     // Ampere's integer and FP32 scalar instructions enter the finite
     // pipelined execution window described by the architecture card.  Memory
     // and tensor heads are handled below/through the dedicated classifiers;
-    // SFU, uniform, and control-only forms remain dispatch-only until their
-    // own resources are carded.
+    // SFU forms use the architecture-local uniform/SFU cadence below; other
+    // uniform/control-only forms remain dispatch-only until characterized.
     if matches!(head, "IADD3" | "LOP3" | "IMAD" | "FADD" | "FFMA" | "FMUL") {
         let pipeline = arch
             .scalar_execution_pipeline()
@@ -594,6 +603,15 @@ fn classify_pipeline(
             latency_cycles: pipeline.latency_cycles,
             initiation_interval_cycles: pipeline.initiation_interval_cycles,
             in_flight_capacity: pipeline.in_flight_capacity,
+        });
+    }
+    if matches!(head, "MUFU" | "RCP" | "RSQ" | "EX2" | "LG2" | "SIN" | "COS") {
+        let cadence = arch
+            .uniform_sfu_cadence()
+            .require("uniform_sfu_cadence")
+            .map_err(ProgramError::ScalarExecutionPipelineCapability)?;
+        return Ok(PipelineClass::Sfu {
+            initiation_interval_cycles: cadence.initiation_interval_cycles,
         });
     }
     if !matches!(head, "HMMA" | "IMMA" | "BMMA" | "DMMA") {
@@ -1052,6 +1070,29 @@ mod tests {
                 pc: 0,
                 expected: 4,
                 got: 1,
+            }
+        );
+    }
+
+    #[test]
+    fn causal_frontier_rejects_non_sm86_topology() {
+        let mut schedules = build_schedules(&exec_info(&[0]), &sidecar(&[0])).unwrap();
+        schedules.get_mut(&1).expect("test schedule").arch = ArchId::Sm120;
+        let error = crate::causal_frontier::CausalFrontierInstruction::from_schedule(
+            &schedules[&1],
+            0,
+            0,
+            0,
+            4,
+            1,
+            true,
+            false,
+        )
+        .unwrap_err();
+        assert_eq!(
+            error,
+            crate::causal_frontier::CausalFrontierError::UnsupportedArchitecture {
+                arch: ArchId::Sm120,
             }
         );
     }
@@ -1667,6 +1708,23 @@ mod tests {
                 "opcode {opcode:?}"
             );
         }
+    }
+
+    #[test]
+    fn uniform_and_sfu_forms_use_their_carded_cadence() {
+        for opcode in ["MUFU.RCP R0, R2", "RCP R0, R2", "RSQ R0, R2"] {
+            assert_eq!(
+                classify_pipeline_test(opcode, ArchId::Sm86).unwrap(),
+                PipelineClass::Sfu {
+                    initiation_interval_cycles: 4,
+                },
+                "opcode {opcode}"
+            );
+        }
+        assert!(matches!(
+            classify_pipeline_test("MUFU.RCP R0, R2", ArchId::Sm120),
+            Err(ProgramError::ScalarExecutionPipelineCapability(_))
+        ));
     }
 
     #[test]

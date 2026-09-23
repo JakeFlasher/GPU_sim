@@ -1,0 +1,34 @@
+{
+  "schema_version": 1,
+  "architecture": "example_simt16",
+  "isa": "simt_u32_v1",
+  "instruction_set": [
+    "set_lane_id",
+    "load",
+    "add_imm",
+    "add",
+    "store",
+    "async_store",
+    "wait_group",
+    "halt"
+  ],
+  "execution": {
+    "simt_width": 16,
+    "max_resident_groups": 1
+  },
+  "resources": [
+    {
+      "name": "alu",
+      "kind": "compute",
+      "issue_width": 1,
+      "latency_cycles": 1
+    },
+    {
+      "name": "memory",
+      "kind": "memory",
+      "issue_width": 1,
+      "latency_cycles": 20
+    }
+  ],
+  "evidence": "unvalidated"
+}

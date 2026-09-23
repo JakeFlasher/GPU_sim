@@ -477,10 +477,22 @@ records needed for simulator and measurement work.
 
 ## Primary research
 
-Bounded source clones are isolated at
-`/tmp/gpu_sim_external_research_20260905`: Accel-Sim `d930ad6d`,
-GPGPU-Sim `a4ce3fea`, MGPUSim `d44e03fd`, NVBit `73092be6`, and ACALSim
-`45f4b745`. Related papers are retained beside the clones.
+The reproducible source baselines are retained at
+`/home/jakeshea/GPU_sims_notes/upstream_research_20260901`: Accel-Sim
+framework `d930ad6d`, its integrated GPGPU-Sim tree `91880c5338`, vanilla
+GPGPU-Sim `a4ce3fea`, and MGPUSim `d8f4c0a7`. ACALSim is retained at
+`/home/jakeshea/acalsim_latest_20260912` (`45f4b745`). NVBit integration is
+reviewed from the repository's `tools/nvbit_tracer` source and pinned release
+artifacts; no external NVBit clone is required for the SM86 replay claim.
+Related papers are retained beside the research checkouts.
+
+Interoperability runs must distinguish the vanilla GPGPU-Sim comparison above
+from the tree integrated by the pinned Accel-Sim framework. The current
+integrated checkout is
+`/home/jakeshea/GPU_sims_notes/upstream_research_20260901/accel-sim-gpgpu-sim_distribution`
+at `91880c53383d5a6a6742bfb1be2c5f34e39c7871`; the framework is pinned
+separately at `d930ad6d02c09bb56867132583735aba0389cff4`. The vanilla
+`a4ce3fea` tree remains an independent comparison baseline.
 
 - [Analyzing and Improving Hardware Modeling of Accel-Sim](https://arxiv.org/abs/2401.10082)
   motivates explicit front-end, result-bus, memory-pipeline, predicate,
@@ -534,10 +546,10 @@ GPGPU-Sim `a4ce3fea`, MGPUSim `d44e03fd`, NVBit `73092be6`, and ACALSim
   specifies that a null `cuCtxSynchronize_v2` context synchronizes the current
   context; the tracer now follows that rule for pending-free retirement.
 - PyTorch’s [tensor view contract](https://docs.pytorch.org/docs/2.14/tensor_view.html#tensor-views)
-  requires view mutations to share the underlying storage; the local PyTorch
-  source clone at `/tmp/gpu_sim_external_research_20260908_pytorch_storage_views`
-  follows this by rebuilding tensors with `set_` from untyped storage while
-  retaining shape, stride, and storage offset.
+  requires view mutations to share the underlying storage; the local timing
+  allocator probe preserves that contract by rebuilding tensors with `set_`
+  from untyped storage while retaining shape, stride, and storage offset. No
+  standalone PyTorch source clone is required for this contract check.
 - NVIDIA’s [CUPTI activity-kind definitions](https://docs.nvidia.com/cupti/13.0.0/api/group__CUPTI__ACTIVITY__API.html)
   assign `KERNEL=3`, `DRIVER=4`, `RUNTIME=5`, and
   `CONCURRENT_KERNEL=10`; the joiner uses these exact serialized values.
@@ -1001,9 +1013,9 @@ campaign-enabled sim-trace tests, and the dependency-free prototype cargo
 check. A retained HMMA small replay and a
 SwiGLU large feedback replay both exited silently; the large replay matched its
 retained 15,173-byte JSON exactly, while two fresh HMMA runs were byte-identical.
-The raw `/tmp/gpu_sector_probe_s1.csv` export also joined successfully and
-reported its quoted kernel signature, RTX 3090 Ti device, LSU count, and global
-load/store sectors.
+The bounded raw sector probe also joined successfully and reported its quoted
+kernel signature, RTX 3090 Ti device, LSU count, and global load/store sectors;
+the temporary CSV export is not retained in the current workspace.
 
 
 `ManifestBuilder.lint_and_write` now honors its atomic-write contract by
@@ -1086,10 +1098,10 @@ protobuf 7.34.1 was unavailable. Repeating the same sweep with the pinned
 `.venv` passed all 15 roots with zero stderr, separating an environment
 prerequisite failure from trace validity.
 
-Uniform and tensor execution resources remain an explicit `DispatchOnly`
-boundary until an SM86 card-backed cadence is measured. The retained corpus has
-four `UISETP` sites, no `BRA.U`, and 53 admitted HMMA/IMMA sites; no unsupported
-form is silently assigned a timing interval. Destination service timing for
+Uniform/control-only execution remains an explicit `DispatchOnly` boundary,
+while the SM86 card-backed SFU cadence covers `MUFU`/`RCP`/`RSQ` forms. The
+retained corpus has four `UISETP` sites, no `BRA.U`, and 53 admitted HMMA/IMMA
+sites; no unsupported form is silently assigned a timing interval. Destination service timing for
 source-only or bypass LDGSTS remains an explicit unmodeled tail where the
 retained card has no destination-coupling measurement.
 
@@ -1099,6 +1111,6 @@ architecture-backed discriminators or newly observed replay failures.
 The primary-source review of [Analyzing and Improving Hardware Modeling of
 Accel-Sim](https://arxiv.org/abs/2401.10082) confirms that modern SMs expose
 independent sub-core pipelines and tensor units, supporting the simulator's
-per-SMSP tensor resource seam. It does not supply a validated SM86 cadence for
-the remaining uniform or SFU forms, so assigning them a guessed interval would
-violate the card-backed timing boundary.
+per-SMSP tensor resource seam. It does not supply a validated cadence for other
+architectures; those remain typed capability gaps rather than inheriting SM86
+values.

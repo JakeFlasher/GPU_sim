@@ -149,10 +149,7 @@ pub fn reconstruct_lane_vector(
             vector
         }
         FORMAT_BASE_DELTA => {
-            let expected = match n_active.checked_sub(1) {
-                Some(count) => count,
-                None => 0,
-            };
+            let expected = n_active.saturating_sub(1);
             if addr.addrs.len() != expected {
                 return Err(LaneError::BaseDeltaCountInvalid {
                     got: addr.addrs.len(),

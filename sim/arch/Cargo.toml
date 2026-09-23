@@ -9,6 +9,7 @@ repository.workspace = true
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
+sim-semantics = { path = "../semantics" }
 
 [dev-dependencies]
 tempfile = { workspace = true }

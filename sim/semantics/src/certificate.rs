@@ -42,6 +42,7 @@ pub enum ReifyReason {
     Dependency,
     ExternalSideEffect,
     CompletionMultiplicity,
+    UnknownResidency,
     OccupancyNotExclusive,
     IncomingPipelineWork,
     ArithmeticOverflow,
@@ -90,23 +91,70 @@ impl IntervalCertificate {
         self.instruction_count
     }
 
+    /// Materialize the exact issue/completion frontier for every instruction
+    /// in this certificate. This is intentionally separate from the compact
+    /// pending-completion projection: a cycle-accuracy checker must be able to
+    /// compare intermediate observations, not only the terminal resource state.
+    pub fn issue_completion_times(self, first_issue: u64) -> Result<Vec<(u64, u64)>, ReifyReason> {
+        let narrow = |time: u128| u64::try_from(time).map_err(|_| ReifyReason::ArithmeticOverflow);
+        let mut observations = Vec::with_capacity(
+            usize::try_from(self.instruction_count).map_err(|_| ReifyReason::ArithmeticOverflow)?,
+        );
+        for index in 0..self.instruction_count {
+            let issue = narrow(
+                u128::from(first_issue)
+                    .checked_add(self.issue_offset(index)?)
+                    .ok_or(ReifyReason::ArithmeticOverflow)?,
+            )?;
+            let completion = narrow(
+                u128::from(issue)
+                    .checked_add(u128::from(self.latency_cycles))
+                    .ok_or(ReifyReason::ArithmeticOverflow)?,
+            )?;
+            observations.push((issue, completion));
+        }
+        Ok(observations)
+    }
+
     // For capacity C, latency L, and initiation interval I:
     // issue(k) = floor(k/C) * max(L, C*I) + (k mod C)*I.
     // This solves t[k] = max(t[k-1]+I, t[k-C]+L) for an empty pipeline.
-    fn issue_offset(self, index: u64) -> u128 {
+    fn issue_offset(self, index: u64) -> Result<u128, ReifyReason> {
         let capacity = u128::from(self.in_flight_capacity);
         let interval = u128::from(self.initiation_interval_cycles);
-        let period = u128::from(self.latency_cycles).max(capacity * interval);
-        u128::from(index) / capacity * period + (u128::from(index) % capacity) * interval
+        let period = u128::from(self.latency_cycles).max(
+            capacity
+                .checked_mul(interval)
+                .ok_or(ReifyReason::ArithmeticOverflow)?,
+        );
+        let full_periods = u128::from(index) / capacity;
+        let in_period = u128::from(index) % capacity;
+        full_periods
+            .checked_mul(period)
+            .and_then(|offset| {
+                in_period
+                    .checked_mul(interval)
+                    .and_then(|tail| offset.checked_add(tail))
+            })
+            .ok_or(ReifyReason::ArithmeticOverflow)
     }
 
     pub fn project(self, first_issue: u64) -> Result<IntervalProjection, ReifyReason> {
         let narrow = |time: u128| u64::try_from(time).map_err(|_| ReifyReason::ArithmeticOverflow);
-        let last = self.issue_offset(self.instruction_count - 1) + u128::from(first_issue);
+        let last = self
+            .issue_offset(self.instruction_count - 1)?
+            .checked_add(u128::from(first_issue))
+            .ok_or(ReifyReason::ArithmeticOverflow)?;
         let last_issue = narrow(last)?;
-        let next_issue = narrow(last + u128::from(self.initiation_interval_cycles))?;
-        let dispatch_ready = narrow(last + 1)?;
-        let last_completion = narrow(last + u128::from(self.latency_cycles))?;
+        let next_issue = narrow(
+            last.checked_add(u128::from(self.initiation_interval_cycles))
+                .ok_or(ReifyReason::ArithmeticOverflow)?,
+        )?;
+        let dispatch_ready = narrow(last.checked_add(1).ok_or(ReifyReason::ArithmeticOverflow)?)?;
+        let last_completion = narrow(
+            last.checked_add(u128::from(self.latency_cycles))
+                .ok_or(ReifyReason::ArithmeticOverflow)?,
+        )?;
         let pending_count = self
             .instruction_count
             .min(u64::from(self.in_flight_capacity))
@@ -119,8 +167,9 @@ impl IntervalCertificate {
         for index in tail_start..self.instruction_count {
             let done = narrow(
                 u128::from(first_issue)
-                    + self.issue_offset(index)
-                    + u128::from(self.latency_cycles),
+                    .checked_add(self.issue_offset(index)?)
+                    .and_then(|value| value.checked_add(u128::from(self.latency_cycles)))
+                    .ok_or(ReifyReason::ArithmeticOverflow)?,
             )?;
             if done > last_issue {
                 pending_completions.push(done);
@@ -189,8 +238,12 @@ fn build_certificate(
         in_flight_capacity: first.in_flight_capacity,
     };
     // Check the arithmetic without allocating a pending-completion vector.
-    let last = certificate.issue_offset(count - 1);
-    if last + u128::from(first.latency_cycles.max(first.initiation_interval_cycles))
+    let last = certificate.issue_offset(count - 1)?;
+    if last
+        .checked_add(u128::from(
+            first.latency_cycles.max(first.initiation_interval_cycles),
+        ))
+        .ok_or(ReifyReason::ArithmeticOverflow)?
         > u128::from(u64::MAX)
     {
         return Err(ReifyReason::ArithmeticOverflow);
@@ -311,7 +364,9 @@ mod tests {
                             }
                             now += 1;
                         }
-                        let projected = certificate.project(start).unwrap();
+                        let projected = certificate
+                            .project(start)
+                            .expect("test fixture should be valid");
                         assert_eq!(
                             projected,
                             IntervalProjection {
@@ -338,5 +393,19 @@ mod tests {
             certificate.project(u64::MAX),
             Err(ReifyReason::ArithmeticOverflow)
         );
+    }
+
+    #[test]
+    fn timing_product_overflow_reifies_instead_of_wrapping() {
+        let certificate = IntervalCertificate {
+            first_sequence: 0,
+            last_sequence: u64::MAX,
+            instruction_count: u64::MAX,
+            pipeline_key: 1,
+            latency_cycles: 4,
+            initiation_interval_cycles: u64::MAX,
+            in_flight_capacity: u32::MAX,
+        };
+        assert_eq!(certificate.project(0), Err(ReifyReason::ArithmeticOverflow));
     }
 }

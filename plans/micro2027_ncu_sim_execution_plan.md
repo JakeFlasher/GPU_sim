@@ -1,5 +1,9 @@
 # SM86 simulator roadmap
 
+This remains the SM86 workstream within the
+[general GPU simulator roadmap](cross_architecture_gpu_simulator_research_plan_20260923.md).
+Keep its silicon evidence separate from the new hypothetical architecture path.
+
 ## Goal
 
 Make the trace driven SM86 simulator useful for workload comparison while

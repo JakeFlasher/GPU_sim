@@ -1106,6 +1106,14 @@ def _run_causal_frontier_probe(output_root: Path) -> dict[str, Any]:
         raise CampaignError("causal-frontier probe did not preserve its safe-region collapse")
     if reified_regions != 2 or exact_final_cycle != causal_final_cycle:
         raise CampaignError("causal-frontier probe did not refuse contended regions")
+    exact_last_issue = probe_count("exact_last_issue_cycle")
+    causal_last_issue = probe_count("causal_last_issue_cycle")
+    exact_steps = probe_count("exact_execution_steps")
+    causal_steps = probe_count("causal_execution_steps")
+    if exact_last_issue != causal_last_issue or document.get("terminal_state_matches") is not True:
+        raise CampaignError("independent causal execution changed issue or terminal resource state")
+    if not 0 < causal_steps < exact_steps:
+        raise CampaignError("causal execution did not replace detailed descriptor steps")
     destination = output_root / "evidence" / "causal_frontier_probe.json"
     destination.parent.mkdir(parents=True, exist_ok=True)
     destination.write_text(result.stdout, encoding="utf-8")
@@ -1117,6 +1125,9 @@ def _run_causal_frontier_probe(output_root: Path) -> dict[str, Any]:
             "collapsed_regions": document["collapsed_regions"],
             "reified_regions": document["reified_regions"],
             "critical_path_preserved": True,
+            "terminal_state_matches": True,
+            "exact_execution_steps": exact_steps,
+            "causal_execution_steps": causal_steps,
         },
     }
 

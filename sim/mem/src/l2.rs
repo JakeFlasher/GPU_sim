@@ -319,7 +319,9 @@ impl L2Config {
         )?;
         let slices = u64::from(cfg.num_slices);
         let bytes_per_slice = cfg.capacity_bytes / slices;
-        if cfg.capacity_bytes % slices != 0 || bytes_per_slice % u64::from(bytes_per_set) != 0 {
+        if !cfg.capacity_bytes.is_multiple_of(slices)
+            || !bytes_per_slice.is_multiple_of(u64::from(bytes_per_set))
+        {
             return Err(L2ConfigError::NonIntegralSetCount {
                 capacity: cfg.capacity_bytes,
                 line: cfg.line_bytes,
@@ -646,6 +648,13 @@ pub struct L2EventMaskPreview {
 }
 
 impl L2EventMaskPreview {
+    /// Shared-L2 allocation generation that owns this access. This is a
+    /// semantic identity used to join the eventual response with the exact
+    /// allocation; it is independent of any L1 fill generation.
+    pub const fn allocation_generation(self) -> u64 {
+        self.generation.0
+    }
+
     /// Missing read sectors that start a new lower-level fetch. Under the
     /// distinct-request discipline this includes already-pending sectors; under
     /// coalescing it excludes [`Self::pending_merge_mask`].
@@ -1140,18 +1149,6 @@ fn slice_hash_name(hash: SliceHash) -> &'static str {
     }
 }
 
-fn canonical_line_sort_key(line: &CanonicalLineKey) -> (u8, u64, u64) {
-    match line {
-        CanonicalLineKey::VirtualAbsolute { line_id } => (0, *line_id as u64, 0),
-        CanonicalLineKey::AllocationRelative {
-            allocation_id,
-            line_offset,
-        } => (1, u64::from(*allocation_id), *line_offset),
-        CanonicalLineKey::Physical { line_id } => (2, *line_id, 0),
-        CanonicalLineKey::Unknown { line_id } => (3, line_id.map_or(0, |value| value as u64), 0),
-    }
-}
-
 impl L2Model {
     pub fn new(cfg: L2Config) -> Result<Self, L2BuildError> {
         cfg.validate()?;
@@ -1185,7 +1182,6 @@ impl L2Model {
             .iter()
             .enumerate()
             .filter(|(_, ways)| !ways.is_empty())
-            .map(|(set, ways)| (set, ways))
             .collect::<Vec<_>>();
         format!(
             "cfg={:?};num_sets={};clock={};bip_counter={};sets={:?};counters={:?};observer_lookup=({},{});next_generation={:?};discipline={:?}",
@@ -1287,8 +1283,8 @@ impl L2Model {
             }
         }
         allocations.sort_by(|left, right| {
-            canonical_line_sort_key(&left.line)
-                .cmp(&canonical_line_sort_key(&right.line))
+            left.line
+                .cmp(&right.line)
                 .then(left.generation.cmp(&right.generation))
         });
         let next_generation = match self.next_generation {
@@ -2698,6 +2694,31 @@ mod tests {
     }
 
     #[test]
+    fn typed_projection_keeps_current_generation_after_stale_completion() {
+        let mut l2 = L2Model::new(cfg(128, 1, 1)).unwrap();
+        let old = ev_read(&mut l2, 0, 0b0001).fill.unwrap();
+        ev_read(&mut l2, 1, 0b0001);
+        let current = ev_read(&mut l2, 0, 0b0001).fill.unwrap();
+        let before = l2.typed_boundary_state().unwrap();
+
+        assert_eq!(l2.complete_fill(old).unwrap(), L2FillCompletion::Stale);
+        let after = l2.typed_boundary_state().unwrap();
+        assert_eq!(after, before, "stale completion changed typed ownership");
+        assert_eq!(after.allocations.len(), 1);
+        assert_eq!(
+            after.allocations[0].generation,
+            current.boundary_identity().1
+        );
+        assert!(after.validate().is_ok());
+
+        assert!(matches!(
+            l2.complete_fill(current).unwrap(),
+            L2FillCompletion::Completed { .. }
+        ));
+        assert!(l2.typed_boundary_state().unwrap().validate().is_ok());
+    }
+
+    #[test]
     fn event_write_validates_immediately_and_supersedes_pending() {
         let mut l2 = L2Model::new(cfg(1024, 2, 1)).unwrap();
         let token = ev_read(&mut l2, 3, 0b0001).fill.unwrap();
@@ -3394,6 +3415,59 @@ mod tests {
         assert_eq!(state.allocations[0].generation, token.boundary_identity().1);
         assert_eq!(state.allocations[0].sectors.len(), 2);
         assert!(state.validate().is_ok());
+    }
+
+    #[test]
+    fn typed_projection_preserves_signed_allocations_and_native_way_order() {
+        for replacement in [L2Replacement::Lru, L2Replacement::Srrip, L2Replacement::Bip] {
+            for slice_hash in [
+                SliceHash::LineMod,
+                SliceHash::SectorMod,
+                SliceHash::XorFolded,
+                SliceHash::KnuthMult,
+                SliceHash::ShiftMod,
+                SliceHash::BitReverse,
+            ] {
+                let mut config = cfg(128 * 8 * 6 * 2, 8, 6);
+                config.replacement = replacement;
+                config.slice_hash = slice_hash;
+                let mut l2 = L2Model::new(config).unwrap();
+                let mut fills = Vec::new();
+                for line in [7, -1, i64::MAX, i64::MIN, 0] {
+                    fills.push(ev_read(&mut l2, line, 0b1010).fill.unwrap());
+                }
+                // Projection is an observation. It must neither mutate the
+                // native cache nor sort the ways that break replacement ties.
+                let before = state(&l2);
+                let projected = l2.typed_boundary_state().unwrap();
+                assert_eq!(state(&l2), before);
+                assert_eq!(
+                    projected
+                        .allocations
+                        .iter()
+                        .map(|a| a.line.clone())
+                        .collect::<Vec<_>>(),
+                    [i64::MIN, -1, 0, 7, i64::MAX]
+                        .map(|line_id| CanonicalLineKey::VirtualAbsolute { line_id })
+                );
+                for set in &projected.sets {
+                    let key = u64::from(set.slice) * l2.num_sets + set.set;
+                    assert_eq!(
+                        set.ways.iter().map(|way| &way.line).collect::<Vec<_>>(),
+                        l2.sets[key as usize]
+                            .iter()
+                            .map(|way| { CanonicalLineKey::VirtualAbsolute { line_id: way.tag } })
+                            .collect::<Vec<_>>()
+                            .iter()
+                            .collect::<Vec<_>>()
+                    );
+                }
+                for fill in fills.into_iter().rev() {
+                    l2.complete_fill(fill).unwrap();
+                    l2.typed_boundary_state().unwrap();
+                }
+            }
+        }
     }
 
     /// Pinned against the Python registry (`SLICE_HASH_REGISTRY`) for

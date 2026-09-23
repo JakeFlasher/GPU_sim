@@ -4,7 +4,9 @@ Consumes cuobjdump SASS output text for one kernel and emits a
 per-PC mapping from program counter to one of 12
 underscore-vocabulary instruction-cache-op tokens. The mapping is
 the input the L1 predictor head consults to decide which dynamic
-trace records contribute L1 line state and which bypass the L1.
+trace records contribute L1 line state and which bypass the L1;
+global stores are retained as ``OTHER`` bypass entries so their L2
+traffic is not silently discarded.
 
 Wire vocabulary (closed set):
 
@@ -39,13 +41,13 @@ L1 predictor head emits typed_unavailable with reason
 absent, the cuobjdump invocation failed, or the kernel section is
 empty.
 
-KNOWN DEFECT (2026-07-06): ``_extract_kernel_section``
-concatenates the kernel's SASS section across EVERY fatbin arch
-slice (and matches function names by substring), so manifests
-produced from multi-arch fatbins are cross-arch contaminated.
-Fix pending in the label-pipeline backlog. The Rust sim does not
-consume these manifests — it classifies from the control-bits
-sidecar's opcode_text instead (``sim/mem/src/cache_op.rs``).
+The live classifier restricts ``cuobjdump`` to the requested GPU
+architecture and selects the first exact ``Function :`` symbol
+section. This keeps same-named kernels in other fatbin slices and
+substring-colliding helper symbols out of the manifest. The Rust
+sim does not consume these manifests — it classifies from the
+control-bits sidecar's opcode_text instead
+(``sim/mem/src/cache_op.rs``).
 """
 from __future__ import annotations
 
@@ -67,6 +69,17 @@ from typing import Any, NamedTuple
 PREDICTOR_L1_SASS_PROVENANCE_MISSING: str = (
     "predictor_l1_sass_provenance_missing"
 )
+
+
+class SassManifestDuplicatePcError(ValueError):
+    """A load-class SASS section emitted more than one mapping for a PC."""
+
+    def __init__(self, pc: str):
+        super().__init__(
+            f"classifier section contains duplicate load-class PC {pc}; "
+            "manifest identity is ambiguous"
+        )
+        self.pc = pc
 
 
 # The 12-token closed enum the schema and the classifier mirror in
@@ -272,11 +285,12 @@ _RULES: tuple[tuple[re.Pattern[str], str], ...] = (
 
 
 # Opcodes the classifier considers candidates for the per-PC
-# manifest. Lines without a load-class opcode (e.g., MOV, EXIT,
-# FADD) are silently skipped because they do not contribute to
-# the L1 line state model.
+# manifest. Global stores are included as ``OTHER`` so they remain
+# visible in the downstream L1-bypass/L2 stream even though they do
+# not allocate the modeled L1 line state. Shared stores are omitted;
+# they do not enter the global L2 stream represented by this head.
 _OPCODE_LOAD_LIKE_RE = re.compile(
-    r"\b(?:LDG|LDGSTS|LDL|STL|ATOM|ATOMS|ATOMG|TEX|TLD)\b"
+    r"\b(?:LDG|LDGSTS|LDL|STL|STG|ATOM|ATOMS|ATOMG|TEX|TLD)\b"
 )
 
 
@@ -371,13 +385,11 @@ def _extract_kernel_section(
     lines of the matched section (empty when ``matched_name`` is
     ``None``).
 
-    KNOWN DEFECT (2026-07-06): the loop re-arms at EVERY matching
-    ``Function :`` header, so on a multi-arch fatbin the returned
-    section is the concatenation of the kernel's section from
-    every arch slice (cross-arch contamination); and the
-    substring match (``kernel_unmangled_name in name``) can merge
-    distinct kernels whose names contain the requested one. Fix
-    pending in the label-pipeline backlog (see module docstring).
+    The caller restricts live ``cuobjdump`` output to one GPU
+    architecture. This helper additionally selects the first
+    exact symbol match and stops at the next ``Function :`` header,
+    so a caller cannot accidentally merge same-named sections or
+    substring-colliding helper symbols.
     """
     matched_name: str | None = None
     in_section = False
@@ -386,10 +398,12 @@ def _extract_kernel_section(
         stripped = line.strip()
         if stripped.startswith("Function :"):
             name = stripped[len("Function :"):].strip()
-            in_section = (
-                name == kernel_unmangled_name
-                or kernel_unmangled_name in name
-            )
+            if in_section:
+                # The requested exact section has ended.  Return the
+                # first match; live callers have already selected one
+                # architecture with cuobjdump.
+                break
+            in_section = name == kernel_unmangled_name
             if in_section:
                 matched_name = name
             continue
@@ -441,6 +455,7 @@ def classify_sass_text(
         )
 
     entries: list[OpMapEntry] = []
+    seen_pcs: set[str] = set()
     saw_any_line = False
     for line in section_text.splitlines():
         if line.strip() == "":
@@ -462,6 +477,9 @@ def classify_sass_text(
             # not contribute to the L1 line state model.
             continue
         token, raw_mnemonic = match
+        if pc in seen_pcs:
+            raise SassManifestDuplicatePcError(pc)
+        seen_pcs.add(pc)
         entries.append(OpMapEntry(
             pc=pc,
             instruction_cache_op=token,
@@ -499,7 +517,7 @@ def classify_sass_text(
             "per_pc_instruction_cache_op": [],
             "diagnostic": (
                 f"kernel section for '{matched_name}' contained no "
-                f"LDG / LDGSTS / LDL / STL / ATOM / TEX class "
+                f"LDG / LDGSTS / LDL / STL / STG / ATOM / TEX class "
                 f"instructions; the L1 predictor head will emit "
                 f"predictor_l1_no_modeled_l1_eligible_accesses"
             ),
@@ -546,15 +564,19 @@ def classify_binary(
     kernel_unmangled_name: str,
     arch_token: str,
 ) -> dict[str, Any]:
-    """End-to-end: invoke ``cuobjdump --dump-sass <binary>``, parse
-    the kernel's section, return a manifest. Fail-closes with
+    """Invoke ``cuobjdump`` for exactly ``arch_token`` and parse
+    the requested kernel's section. Fail-closes with
     ``sass_provenance_status=binary_not_parseable`` when cuobjdump
-    cannot read the file. On multi-arch fatbins the manifest is
-    cross-arch contaminated — see the module-docstring KNOWN
-    DEFECT (2026-07-06)."""
+    cannot read the file."""
     try:
         proc = subprocess.run(
-            ["cuobjdump", "--dump-sass", str(binary_path)],
+            [
+                "cuobjdump",
+                "--dump-sass",
+                "--gpu-architecture",
+                arch_token,
+                str(binary_path),
+            ],
             capture_output=True, text=True, check=False,
         )
     except FileNotFoundError as exc:
@@ -674,6 +696,7 @@ def is_orthogonality_defect(
 
 __all__ = [
     "PREDICTOR_L1_SASS_PROVENANCE_MISSING",
+    "SassManifestDuplicatePcError",
     "INSTRUCTION_CACHE_OP_TOKENS",
     "L1_ELIGIBLE_TOKENS",
     "L1_BYPASS_TOKENS",

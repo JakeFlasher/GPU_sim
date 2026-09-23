@@ -411,6 +411,7 @@ def compute_for_cell(
         lta.L1TraceAdapterManifestNotMatched,
         lta.L1TraceAdapterEligibilityDefect,
         lta.L1TraceAdapterDataWidthInvalid,
+        lta.L1TraceAdapterRecordInvalid,
     ) as exc:
         return _typed_entry(
             slug=slug, shape_point=shape_point, identity=identity,

@@ -16,8 +16,8 @@
 //!   latency/bandwidth completion, or any joined sector's registered original
 //!   ready time. The carded aggregate DRAM byte server ([`DramBw`]) can only
 //!   push newly issued fetches later than the fixed latency arm.
-//! - `L2Fill` — installs a reply-less or mixed-request read fetch at its own
-//!   data-ready time, independently of a later joined-sector response.
+//! - `L2Fill` — installs a mutation-only read fetch at its own data-ready
+//!   time, independently of a returning SM response.
 //! - `AtomicCompletion` — retains the intrinsic return-completion time of an
 //!   ATOM whose value has no dependence-barrier observer.
 //! - `MemoryWriteAck` — for an explicitly timing-active STORE/RED feedback
@@ -108,6 +108,14 @@ impl UnpricedBounds {
     fn min(&self, sm: usize) -> Option<u64> {
         self.0[sm].first_key_value().map(|(&t, _)| t)
     }
+
+    fn is_empty(&self) -> bool {
+        self.0.iter().all(BTreeMap::is_empty)
+    }
+
+    fn pending_entries(&self) -> usize {
+        self.0.iter().map(BTreeMap::len).sum()
+    }
 }
 
 use sim_arch::{ArchId, L2PendingReadSemantics};
@@ -118,24 +126,91 @@ use sim_mem::{
 };
 #[cfg(feature = "reference")]
 use sim_semantics::{
-    PowerBoundaryState, PowerStateError, QueueBoundaryState, TYPED_STATE_SCHEMA_VERSION,
-    TypedCoreBoundaryState, TypedEventBoundaryRecord, TypedEventIdentity, TypedEventPayload,
-    TypedObservationContract, TypedPendingEvent,
+    BoundaryStateError, DramBoundaryState, DramStateError, L2RequestKey, PowerBoundaryState,
+    PowerStateError, QueueBoundaryState, QueueStateError, TYPED_STATE_SCHEMA_VERSION,
+    TypedAdmissionWitness, TypedCoreBoundaryState, TypedEventBoundaryRecord, TypedEventIdentity,
+    TypedEventPayload, TypedFillIdentity, TypedL2Source, TypedMemoryOperation, TypedMemoryOrigin,
+    TypedMemoryRequest, TypedObservationContract, TypedPendingEvent, TypedResponseIdentity,
+    TypedResponseKind,
 };
 
-/// Per-actor pending due-times with the one choreography the driver
-/// repeats for responses and wakes: `push` at scheduling, `pop_expect`
-/// at the matching event (heap order must equal event order), `next`
-/// for horizons/covered checks.
-struct DueTimes(Vec<BinaryHeap<Reverse<u64>>>);
+/// Stable response identity used only at the typed boundary. The process-local
+/// response-owner token remains private; these three fields are the identity
+/// already exposed by the semantic event payload.
+type ResponseBoundaryId = (u64, u64, u64);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct DueEntry {
+    time: u64,
+    insertion: u64,
+    response: Option<ResponseBoundaryId>,
+    l2_allocation_generation: Option<u64>,
+}
+
+impl Ord for DueEntry {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        (self.time, self.insertion).cmp(&(other.time, other.insertion))
+    }
+}
+
+impl PartialOrd for DueEntry {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+/// Per-actor pending due-times with the one choreography the driver repeats
+/// for responses and wakes. Response entries retain their semantic identity,
+/// so a typed snapshot can normalize an exact due cycle and delivery checks
+/// cannot accidentally pair two same-cycle responses by timestamp alone.
+struct DueTimes {
+    entries: Vec<BinaryHeap<Reverse<DueEntry>>>,
+    next_insertion: u64,
+}
 
 impl DueTimes {
     fn new(n: usize) -> Self {
-        Self((0..n).map(|_| BinaryHeap::new()).collect())
+        Self {
+            entries: (0..n).map(|_| BinaryHeap::new()).collect(),
+            next_insertion: 0,
+        }
     }
 
-    fn push(&mut self, ix: usize, t: u64) {
-        self.0[ix].push(Reverse(t));
+    fn push(&mut self, ix: usize, t: u64) -> Result<(), SystemError> {
+        self.push_entry(ix, t, None, None)
+    }
+
+    fn push_response(
+        &mut self,
+        ix: usize,
+        t: u64,
+        response: Option<ResponseBoundaryId>,
+        l2_allocation_generation: Option<u64>,
+    ) -> Result<(), SystemError> {
+        self.push_entry(ix, t, response, l2_allocation_generation)
+    }
+
+    fn push_entry(
+        &mut self,
+        ix: usize,
+        t: u64,
+        response: Option<ResponseBoundaryId>,
+        l2_allocation_generation: Option<u64>,
+    ) -> Result<(), SystemError> {
+        let insertion = self
+            .next_insertion
+            .checked_add(1)
+            .ok_or(SystemError::CounterOverflow {
+                counter: "due-time insertion sequence",
+            })?;
+        self.entries[ix].push(Reverse(DueEntry {
+            time: t,
+            insertion: self.next_insertion,
+            response,
+            l2_allocation_generation,
+        }));
+        self.next_insertion = insertion;
+        Ok(())
     }
 
     fn pop_expect(
@@ -153,16 +228,77 @@ impl DueTimes {
                 got,
             });
         }
-        self.0[ix].pop();
+        self.entries[ix].pop();
+        Ok(())
+    }
+
+    fn pop_response_expect(
+        &mut self,
+        component: &'static str,
+        ix: usize,
+        t: u64,
+        response: Option<ResponseBoundaryId>,
+    ) -> Result<(), SystemError> {
+        let Some(Reverse(entry)) = self.entries[ix].peek().copied() else {
+            return Err(SystemError::DueTimeMismatch {
+                component,
+                sm: ix,
+                expected: t,
+                got: None,
+            });
+        };
+        if entry.time != t {
+            return Err(SystemError::DueTimeMismatch {
+                component,
+                sm: ix,
+                expected: t,
+                got: Some(entry.time),
+            });
+        }
+        if entry.response != response {
+            return Err(SystemError::ResponseIdentityMismatch {
+                component,
+                sm: ix,
+                expected: response,
+                got: entry.response,
+            });
+        }
+        self.entries[ix].pop();
         Ok(())
     }
 
     fn next(&self, ix: usize) -> Option<u64> {
-        self.0[ix].peek().map(|&Reverse(t)| t)
+        self.entries[ix].peek().map(|&Reverse(entry)| entry.time)
+    }
+
+    #[cfg(feature = "reference")]
+    fn response_entries(&self, ix: usize) -> Vec<(ResponseBoundaryId, u64, Option<u64>)> {
+        let mut entries = self.entries[ix]
+            .iter()
+            .filter_map(|Reverse(entry)| {
+                entry.response.map(|response| {
+                    (
+                        response,
+                        entry.time,
+                        entry.l2_allocation_generation,
+                        entry.insertion,
+                    )
+                })
+            })
+            .collect::<Vec<_>>();
+        entries.sort_unstable_by_key(|(_, _, _, insertion)| *insertion);
+        entries
+            .into_iter()
+            .map(|(response, time, generation, _)| (response, time, generation))
+            .collect()
     }
 
     fn is_empty(&self) -> bool {
-        self.0.iter().all(BinaryHeap::is_empty)
+        self.entries.iter().all(BinaryHeap::is_empty)
+    }
+
+    fn pending_entries(&self) -> usize {
+        self.entries.iter().map(BinaryHeap::len).sum()
     }
 }
 
@@ -176,25 +312,13 @@ pub struct L2OriginSourceStats {
 /// Per-[`L2Source`] sector/hit split — the driver-side EMISSION observer
 /// (the cache model itself no longer counts provenance; gate-3 altitude
 /// note c). Indexed by discriminant order.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct L2SourceSplit {
     arch: Option<ArchId>,
     pub sectors: [u64; 4],
     pub hits: [u64; 4],
     origin_sectors: [[u64; 4]; 2],
     origin_hits: [[u64; 4]; 2],
-}
-
-impl Default for L2SourceSplit {
-    fn default() -> Self {
-        Self {
-            arch: None,
-            sectors: [0; 4],
-            hits: [0; 4],
-            origin_sectors: [[0; 4]; 2],
-            origin_hits: [[0; 4]; 2],
-        }
-    }
 }
 
 const L2_SOURCES: [L2Source; 4] = [
@@ -425,6 +549,8 @@ use crate::issue::{
     validate_memory_admission_candidates, validate_memory_service_candidates,
 };
 use crate::program::FunctionSchedule;
+#[cfg(feature = "reference")]
+use sim_mem::FillKey;
 use sim_mem::L1WriteLookupObserver;
 
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
@@ -559,6 +685,15 @@ pub enum SystemError {
         got: Option<u64>,
     },
     #[error(
+        "{component} response identity mismatch for SM index {sm}: expected {expected:?}, queued head was {got:?}"
+    )]
+    ResponseIdentityMismatch {
+        component: &'static str,
+        sm: usize,
+        expected: Option<(u64, u64, u64)>,
+        got: Option<(u64, u64, u64)>,
+    },
+    #[error(
         "L2 request timestamp {issue_time} does not match its event timestamp {event_time} for SM index {sm}"
     )]
     RequestTimeMismatch {
@@ -622,6 +757,14 @@ pub enum SystemError {
     MemoryWriteAckPending { sm_id: i32, pending: usize },
     #[error("event queue drained with modeled write-ack due times still registered")]
     MemoryWriteAckDueNotDrained,
+    #[error("event queue drained with {entries} pending response due-time entries")]
+    ResponseDueNotDrained { entries: usize },
+    #[error("event queue drained with {entries} pending SM wake due-time entries")]
+    WakeDueNotDrained { entries: usize },
+    #[error("event queue drained with {entries} unpriced response-bound entries")]
+    UnpricedBoundsNotDrained { entries: usize },
+    #[error("event queue drained with sm {sm_id} still owning {outstanding} response(s)")]
+    ResponseNotDrained { sm_id: i32, outstanding: usize },
     #[error(
         "L2 fill schedule mismatch for sector {sector_id}: token={has_token}, ready={has_ready}"
     )]
@@ -704,10 +847,7 @@ thread_local! {
         const { std::cell::Cell::new(None) };
 }
 
-fn checked_l2_counters<'a>(
-    expected: ArchId,
-    l2: &'a L2Model,
-) -> Result<&'a L2Counters, SystemError> {
+fn checked_l2_counters(expected: ArchId, l2: &L2Model) -> Result<&L2Counters, SystemError> {
     let counters = l2.counters().map_err(sim_mem::L2AccessError::Counter)?;
     #[cfg(test)]
     let got = TEST_L2_COUNTER_ARCH_OVERRIDE
@@ -715,13 +855,11 @@ fn checked_l2_counters<'a>(
         .or_else(|| counters.arch());
     #[cfg(not(test))]
     let got = counters.arch();
-    let got = got.ok_or_else(|| {
-        sim_mem::L2AccessError::Counter(sim_mem::L2CounterError::Architecture(
-            sim_arch::ArchitectureProvenanceError::Unbound {
-                component: "L2 counters",
-            },
-        ))
-    })?;
+    let got = got.ok_or(sim_mem::L2AccessError::Counter(
+        sim_mem::L2CounterError::Architecture(sim_arch::ArchitectureProvenanceError::Unbound {
+            component: "L2 counters",
+        }),
+    ))?;
     if got != expected {
         return Err(
             sim_mem::L2AccessError::Counter(sim_mem::L2CounterError::Architecture(
@@ -867,42 +1005,110 @@ fn event_name(event: &Ev) -> &'static str {
 }
 
 #[cfg(feature = "reference")]
-fn reply_kind(reply: ReplyTo) -> &'static str {
-    match reply {
-        ReplyTo::L1Fill { .. } => "l1_fill",
-        ReplyTo::Warp { .. } => "warp",
-        ReplyTo::AsyncCopy { .. } => "async_copy",
-        ReplyTo::None => "none",
-    }
-}
-
-#[cfg(feature = "reference")]
 fn typed_event_payload(event: &Ev) -> TypedEventPayload {
+    let typed_response_kind = |reply: ReplyTo| match reply {
+        ReplyTo::L1Fill {
+            fill: FillKey::Line { .. },
+            ..
+        } => Some(TypedResponseKind::L1Fill),
+        ReplyTo::L1Fill {
+            fill: FillKey::Sector { .. },
+            ..
+        } => Some(TypedResponseKind::L1SectorFill),
+        ReplyTo::Warp { .. } => Some(TypedResponseKind::Warp),
+        ReplyTo::AsyncCopy { .. } => Some(TypedResponseKind::AsyncCopy),
+        ReplyTo::None => None,
+    };
+    let typed_origin = |origin: MemoryOrigin| match origin {
+        MemoryOrigin::Global => TypedMemoryOrigin::Global,
+        MemoryOrigin::Local => TypedMemoryOrigin::Local,
+    };
+    let typed_source = |source: L2Source| match source {
+        L2Source::L1Fill => TypedL2Source::L1Fill,
+        L2Source::Bypass => TypedL2Source::Bypass,
+        L2Source::Untagged => TypedL2Source::Untagged,
+        L2Source::Store => TypedL2Source::Store,
+    };
+    let typed_operation = |operation: MemoryOperation| match operation {
+        MemoryOperation::Read => TypedMemoryOperation::Read,
+        MemoryOperation::Store => TypedMemoryOperation::Store,
+        MemoryOperation::Atomic => TypedMemoryOperation::Atomic,
+        MemoryOperation::Reduction => TypedMemoryOperation::Reduction,
+    };
+    let response = |reply: ReplyTo| {
+        reply.response_id().map(|id| {
+            let (warp, instruction, sector_index) = id.boundary_identity();
+            TypedResponseIdentity {
+                warp,
+                instruction,
+                sector_index,
+                response_kind: typed_response_kind(reply)
+                    .expect("response id always has a response kind"),
+            }
+        })
+    };
+    let request_payload = |request: &MemRequest| TypedMemoryRequest {
+        issue_time: request.issue_time,
+        sector_id: request.sector_id,
+        origin: typed_origin(request.origin),
+        sector_mask: request.sector_mask,
+        local_sector_mask: request.local_sector_mask,
+        source: typed_source(request.source),
+        operation: typed_operation(request.operation),
+        constant_load: request.constant_load,
+        constant_deep: request.constant_deep,
+        reply: response(request.reply),
+        admission_witness: request
+            .admission_witness
+            .map(|witness| TypedAdmissionWitness {
+                warp: witness.warp(),
+                instruction: witness.instruction(),
+                subcore: witness.subcore(),
+                request_index: witness.request_index(),
+                request_count: witness.request_count(),
+            }),
+    };
     match event {
         Ev::SmWake => TypedEventPayload::SmWake,
         Ev::L2Access(request) => TypedEventPayload::L2Access {
-            sector_id: request.sector_id,
-            sector_mask: request.sector_mask,
-            source: format!("{:?}", request.source),
-            operation: format!("{:?}", request.operation),
-            reply_kind: reply_kind(request.reply).to_owned(),
+            request: request_payload(request),
         },
         Ev::L2AccessBatch(requests) => TypedEventPayload::L2AccessBatch {
-            request_count: u32::try_from(requests.len()).unwrap_or(u32::MAX),
+            requests: requests.iter().map(request_payload).collect(),
         },
         Ev::L2Fill(fill) => {
             let (line_id, generation, sector_mask) = fill.boundary_identity();
             TypedEventPayload::L2Fill {
-                line_id,
-                generation,
-                sector_mask,
+                fill: TypedFillIdentity {
+                    line_id,
+                    generation,
+                    sector_mask,
+                },
             }
         }
         Ev::AtomicCompletion => TypedEventPayload::AtomicCompletion,
-        Ev::MemoryWriteAck(_) => TypedEventPayload::MemoryWriteAck,
+        Ev::MemoryWriteAck(ack) => TypedEventPayload::MemoryWriteAck {
+            warp: ack.witness.warp(),
+            instruction: ack.witness.instruction(),
+            subcore: ack.witness.subcore(),
+            request_index: ack.witness.request_index(),
+            request_count: ack.witness.request_count(),
+            operation: typed_operation(ack.operation),
+            issue_at: ack.issue_at,
+            accepted_at: ack.accepted_at,
+            service_done_at: ack.service_done_at,
+            fence_visible_at: ack.fence_visible_at,
+        },
         Ev::MemResponse { reply, fill } => TypedEventPayload::MemoryResponse {
-            reply_kind: reply_kind(*reply).to_owned(),
-            has_fill: fill.is_some(),
+            reply: response(*reply),
+            fill: fill.map(|fill| {
+                let (line_id, generation, sector_mask) = fill.boundary_identity();
+                TypedFillIdentity {
+                    line_id,
+                    generation,
+                    sector_mask,
+                }
+            }),
         },
     }
 }
@@ -920,8 +1126,14 @@ pub enum ReferenceTraceError {
     InvalidLimit { value: String },
     #[error("typed L2 projection failed: {0}")]
     L2Projection(#[from] sim_mem::L2ProjectionError),
+    #[error("typed DRAM projection failed: {0}")]
+    Dram(#[from] DramStateError),
     #[error("typed power projection failed: {0}")]
     Power(#[from] PowerStateError),
+    #[error("typed queue projection failed: {0}")]
+    Queue(#[from] QueueStateError),
+    #[error("typed boundary structure validation failed: {0}")]
+    Boundary(#[from] BoundaryStateError),
 }
 
 #[cfg(feature = "reference")]
@@ -929,6 +1141,134 @@ struct ReferenceTrace {
     writer: BufWriter<File>,
     records: u64,
     max_records: u64,
+    previous_event: Option<serde_json::Value>,
+}
+
+#[cfg(feature = "reference")]
+const DEFAULT_REFERENCE_TRACE_MAX_RECORDS: u64 = 8_192;
+
+/// Lossless replacements relative to the preceding event record. Equal-length
+/// arrays keep their positions; a shape change replaces the entire container.
+/// Every state is still projected after every event, independently of which
+/// component the event is expected to change.
+#[cfg(feature = "reference")]
+#[derive(Clone, serde::Serialize)]
+#[serde(untagged)]
+enum ReferencePathSegment {
+    Field(String),
+    Index(usize),
+}
+
+#[cfg(feature = "reference")]
+#[cfg(test)]
+#[derive(serde::Serialize)]
+struct ReferenceReplacement<'a> {
+    path: Vec<ReferencePathSegment>,
+    value: &'a serde_json::Value,
+}
+
+#[cfg(feature = "reference")]
+#[derive(serde::Serialize)]
+#[serde(tag = "op", rename_all = "snake_case")]
+enum ReferenceOperation<'a> {
+    Replace {
+        path: Vec<ReferencePathSegment>,
+        value: &'a serde_json::Value,
+    },
+    Splice {
+        path: Vec<ReferencePathSegment>,
+        start: usize,
+        delete_count: usize,
+        values: Vec<&'a serde_json::Value>,
+    },
+}
+
+#[cfg(feature = "reference")]
+#[cfg(test)]
+fn reference_replacements<'a>(
+    previous: &serde_json::Value,
+    current: &'a serde_json::Value,
+    path: &mut Vec<ReferencePathSegment>,
+    changes: &mut Vec<ReferenceReplacement<'a>>,
+) {
+    use serde_json::Value;
+    if previous == current {
+        return;
+    }
+    match (previous, current) {
+        (Value::Object(old), Value::Object(new)) if old.keys().eq(new.keys()) => {
+            for (key, value) in new {
+                path.push(ReferencePathSegment::Field(key.clone()));
+                reference_replacements(&old[key], value, path, changes);
+                path.pop();
+            }
+        }
+        (Value::Array(old), Value::Array(new)) if old.len() == new.len() => {
+            for (index, (old, new)) in old.iter().zip(new).enumerate() {
+                path.push(ReferencePathSegment::Index(index));
+                reference_replacements(old, new, path, changes);
+                path.pop();
+            }
+        }
+        _ => changes.push(ReferenceReplacement {
+            path: path.clone(),
+            value: current,
+        }),
+    }
+}
+
+#[cfg(feature = "reference")]
+fn reference_operations<'a>(
+    previous: &serde_json::Value,
+    current: &'a serde_json::Value,
+    path: &mut Vec<ReferencePathSegment>,
+    changes: &mut Vec<ReferenceOperation<'a>>,
+) {
+    use serde_json::Value;
+    if previous == current {
+        return;
+    }
+    match (previous, current) {
+        (Value::Object(old), Value::Object(new)) if old.keys().eq(new.keys()) => {
+            for (key, value) in new {
+                path.push(ReferencePathSegment::Field(key.clone()));
+                reference_operations(&old[key], value, path, changes);
+                path.pop();
+            }
+        }
+        (Value::Array(old), Value::Array(new)) if old.len() == new.len() => {
+            for (index, (old, new)) in old.iter().zip(new).enumerate() {
+                path.push(ReferencePathSegment::Index(index));
+                reference_operations(old, new, path, changes);
+                path.pop();
+            }
+        }
+        (Value::Array(old), Value::Array(new)) => {
+            let prefix = old
+                .iter()
+                .zip(new)
+                .take_while(|(left, right)| *left == *right)
+                .count();
+            let suffix_limit = (old.len() - prefix).min(new.len() - prefix);
+            let mut suffix = 0;
+            while suffix < suffix_limit
+                && old[old.len() - 1 - suffix] == new[new.len() - 1 - suffix]
+            {
+                suffix += 1;
+            }
+            let new_end = new.len() - suffix;
+            changes.push(ReferenceOperation::Splice {
+                path: path.clone(),
+                start: prefix,
+                delete_count: old.len() - prefix - suffix,
+                values: new[prefix..new_end].iter().collect(),
+            });
+        }
+        _ => changes.push(ReferenceOperation::Replace {
+            path: path.clone(),
+            value: current,
+        }),
+    }
 }
 
 #[cfg(feature = "reference")]
@@ -943,7 +1283,7 @@ impl ReferenceTrace {
                 .ok()
                 .filter(|&value| value > 1)
                 .ok_or(ReferenceTraceError::InvalidLimit { value })?,
-            Err(std::env::VarError::NotPresent) => 100_000,
+            Err(std::env::VarError::NotPresent) => DEFAULT_REFERENCE_TRACE_MAX_RECORDS,
             Err(std::env::VarError::NotUnicode(value)) => {
                 return Err(ReferenceTraceError::InvalidLimit {
                     value: value.to_string_lossy().into_owned(),
@@ -954,13 +1294,16 @@ impl ReferenceTrace {
             writer: BufWriter::new(File::create(path)?),
             records: 0,
             max_records,
+            previous_event: None,
         };
         trace.write(&serde_json::json!({
             "kind": "header",
             "schema_version": sim_semantics::BOUNDARY_SCHEMA_VERSION,
             "typed_state_schema_version": TYPED_STATE_SCHEMA_VERSION,
             "typed_l2_power_contract": TypedObservationContract::cycle_exact_power(),
-            "typed_root_schema": "typed_event_boundary_v2",
+            "typed_root_schema": format!("typed_event_boundary_v{TYPED_STATE_SCHEMA_VERSION}"),
+            "reference_record_schema_version": 3,
+            "event_encoding": "full_then_delta_v2",
             "mode": std::env::var("SIM_SM_REFERENCE_MODE").unwrap_or_else(|_| "event".to_owned()),
             "state_projection_complete": false,
             "state_projection_incomplete_reason": "legacy_core_debug_projections",
@@ -970,7 +1313,7 @@ impl ReferenceTrace {
     }
 
     fn write<T: serde::Serialize>(&mut self, value: &T) -> Result<(), ReferenceTraceError> {
-        if self.records.saturating_add(1) >= self.max_records {
+        if self.records >= self.max_records {
             return Err(ReferenceTraceError::RecordLimit {
                 limit: self.max_records,
             });
@@ -981,20 +1324,47 @@ impl ReferenceTrace {
         Ok(())
     }
 
+    fn write_event(&mut self, value: serde_json::Value) -> Result<(), ReferenceTraceError> {
+        // Move the previous state out so the writer can be borrowed without
+        // cloning either potentially large boundary.
+        if let Some(previous) = self.previous_event.take() {
+            let mut changes = Vec::new();
+            reference_operations(&previous, &value, &mut Vec::new(), &mut changes);
+            #[derive(serde::Serialize)]
+            struct Delta<'a> {
+                kind: &'static str,
+                base_record: u64,
+                operations: Vec<ReferenceOperation<'a>>,
+            }
+            self.write(&Delta {
+                kind: "event_delta",
+                base_record: self.records - 1,
+                operations: changes,
+            })?;
+        } else {
+            self.write(&value)?;
+        }
+        self.previous_event = Some(value);
+        Ok(())
+    }
+
+    #[allow(clippy::too_many_arguments)]
     fn record_event(
         &mut self,
         time: u64,
         sequence: u64,
         target: u32,
         event: &'static str,
-        event_payload: String,
+        sequence_span: u64,
         typed_payload: TypedEventPayload,
         queue: &EventQueue<Ev>,
         l2: &L2Model,
         cores: &[SmCore<'_>],
         sm_ids: &[i32],
+        response_due: &DueTimes,
         pending_l2_ready: &PendingL2Ready,
         power: &PowerBoundaryState,
+        dram_server: Option<&DramServer>,
     ) -> Result<(), ReferenceTraceError> {
         let snapshots = cores
             .iter()
@@ -1020,14 +1390,18 @@ impl ReferenceTrace {
         let pending = queue.pending_projected(|queued| TypedPendingEvent {
             time: queued.time,
             sequence: queued.seq,
+            phase: 0,
+            sequence_span: queued.sequence_span.get(),
             target: queued.target.0,
             payload: typed_event_payload(&queued.kind),
         });
         let typed_queue = QueueBoundaryState {
             depth: u64::try_from(queue.len()).unwrap_or(u64::MAX),
             next_event_time: queue.peek_time(),
+            next_sequence: queue.next_sequence(),
             pending,
         };
+        typed_queue.validate()?;
         let mut typed_l2 = l2.typed_boundary_state()?;
         let mut owners_by_core = Vec::with_capacity(cores.len());
         for (ix, core) in cores.iter().enumerate() {
@@ -1036,31 +1410,28 @@ impl ReferenceTrace {
                 .copied()
                 .and_then(|value| u32::try_from(value).ok())
                 .unwrap_or(u32::MAX);
-            let owners = core.typed_l2_request_owners(sm_id);
+            let due = response_due
+                .response_entries(ix)
+                .into_iter()
+                .map(|((warp, instruction, sector), time, generation)| {
+                    (warp, instruction, sector, time, generation)
+                })
+                .collect::<Vec<_>>();
+            let owners = core.typed_l2_request_owners(sm_id, &due);
             typed_l2.request_owners.extend(owners.clone());
             owners_by_core.push(owners);
         }
-        for (line_id, generation, sector, ready_at) in pending_l2_ready.typed_entries() {
-            for allocation in &mut typed_l2.allocations {
-                let matches_line = matches!(
-                    &allocation.line,
-                    sim_semantics::CanonicalLineKey::VirtualAbsolute { line_id: candidate }
-                        if *candidate == line_id
-                );
-                if matches_line && allocation.generation == generation {
-                    if let Some(owner) = allocation
-                        .sectors
-                        .iter_mut()
-                        .find(|owner| owner.sector == sector)
-                    {
-                        owner.ready_at = Some(ready_at);
-                    }
-                }
-            }
-        }
+        let ready_by_sector = pending_l2_ready
+            .typed_entries()
+            .into_iter()
+            .map(|(line, generation, sector, ready, producer)| {
+                ((line, generation, sector), (ready, producer))
+            })
+            .collect::<BTreeMap<_, _>>();
         typed_l2.request_owners.sort_by(|left, right| {
             (
                 left.request.sm_id,
+                left.request.response_warp,
                 left.request.warp_slot,
                 left.request.instruction,
                 left.request.sector_index,
@@ -1068,64 +1439,137 @@ impl ReferenceTrace {
             )
                 .cmp(&(
                     right.request.sm_id,
+                    right.request.response_warp,
                     right.request.warp_slot,
                     right.request.instruction,
                     right.request.sector_index,
                     &right.request.response_kind,
                 ))
         });
-        let owners = typed_l2.request_owners.clone();
+        let mut owners_by_line = BTreeMap::<_, Vec<_>>::new();
+        for owner in &typed_l2.request_owners {
+            owners_by_line.entry(&owner.line).or_default().push(owner);
+        }
         let mut ownership_unknown = Vec::new();
+        // A response owner may be observed before the L2 event that prices
+        // its request. Record that ambiguity even when no live allocation
+        // bucket exists; otherwise the root could claim complete ownership
+        // for an orphan L1 response and the structural validator would have
+        // to reject an otherwise valid diagnostic boundary.
+        for owner in &typed_l2.request_owners {
+            if matches!(owner.line, sim_semantics::CanonicalLineKey::Unknown { .. }) {
+                continue;
+            }
+            let Some(generation) = owner.allocation_generation else {
+                ownership_unknown.push(format!(
+                    "request_allocation_generation_unknown:{:?}",
+                    owner.request
+                ));
+                continue;
+            };
+            if !typed_l2.allocations.iter().any(|allocation| {
+                allocation.line == owner.line && allocation.generation == generation
+            }) {
+                ownership_unknown.push(format!(
+                    "request_allocation_missing:{:?}:{}",
+                    owner.line, generation
+                ));
+            }
+        }
         for allocation in &mut typed_l2.allocations {
+            let line_owners = owners_by_line.get(&allocation.line);
+            if line_owners
+                .into_iter()
+                .flatten()
+                .any(|owner| owner.allocation_generation.is_none())
+            {
+                ownership_unknown.push(format!(
+                    "request_allocation_generation_unknown:{:?}:{}",
+                    allocation.line, allocation.generation
+                ));
+            }
             for sector in &mut allocation.sectors {
+                if let sim_semantics::CanonicalLineKey::VirtualAbsolute { line_id } =
+                    &allocation.line
+                {
+                    sector.ready_at = ready_by_sector
+                        .get(&(*line_id, allocation.generation, sector.sector))
+                        .map(|(ready, _)| *ready);
+                }
                 if !matches!(sector.status, sim_semantics::L2SectorStatus::Pending) {
                     continue;
                 }
                 let bit = 1_u8 << sector.sector;
-                let mut consumers = owners
-                    .iter()
-                    .filter(|owner| owner.line == allocation.line && owner.sector_mask & bit != 0)
+                // Buckets retain the canonical requester order established
+                // above. A sector only visits requesters of its own line.
+                let consumers = line_owners
+                    .into_iter()
+                    .flatten()
+                    .filter(|owner| {
+                        owner.allocation_generation == Some(allocation.generation)
+                            && owner.sector_mask & bit != 0
+                    })
                     .map(|owner| owner.request.clone())
                     .collect::<Vec<_>>();
-                consumers.sort_by(|left, right| {
-                    (
-                        left.sm_id,
-                        left.warp_slot,
-                        left.instruction,
-                        left.sector_index,
-                        &left.response_kind,
-                    )
-                        .cmp(&(
-                            right.sm_id,
-                            right.warp_slot,
-                            right.instruction,
-                            right.sector_index,
-                            &right.response_kind,
-                        ))
-                });
                 sector.consumers = consumers;
-                sector.producer = sector
-                    .consumers
-                    .iter()
-                    .find(|request| request.response_kind == "l1_fill")
+                let producer = match &allocation.line {
+                    sim_semantics::CanonicalLineKey::VirtualAbsolute { line_id } => ready_by_sector
+                        .get(&(*line_id, allocation.generation, sector.sector))
+                        .and_then(|(_, producer)| producer.clone()),
+                    _ => None,
+                };
+                sector.producer = producer
+                    .as_ref()
+                    .filter(|request| sector.consumers.iter().any(|consumer| consumer == *request))
                     .cloned();
+                if producer.is_some() && sector.producer.is_none() {
+                    ownership_unknown.push(format!(
+                        "pending_sector_producer_not_consumer:{:?}:{}:{}",
+                        allocation.line, allocation.generation, sector.sector
+                    ));
+                }
                 if sector.producer.is_none() {
                     ownership_unknown.push(format!(
-                        "pending_sector_without_producer:{}:{}:{}",
-                        format!("{:?}", allocation.line),
-                        allocation.generation,
-                        sector.sector
+                        "pending_sector_without_producer:{:?}:{}:{}",
+                        allocation.line, allocation.generation, sector.sector
                     ));
                 }
             }
         }
+        // A pending-ready ledger can outlive its resident allocation after an
+        // eviction. Preserve that stale-fill ambiguity explicitly; otherwise
+        // a queue fill with no live L2 allocation could still obtain a
+        // complete typed projection.
+        for (line_id, generation, sector) in ready_by_sector.keys() {
+            let represented_pending = typed_l2.allocations.iter().any(|allocation| {
+                matches!(
+                    allocation.line,
+                    sim_semantics::CanonicalLineKey::VirtualAbsolute { line_id: candidate }
+                        if candidate == *line_id
+                ) && allocation.generation == *generation
+                    && allocation.sectors.iter().any(|state| {
+                        state.sector == *sector
+                            && matches!(state.status, sim_semantics::L2SectorStatus::Pending)
+                    })
+            });
+            if !represented_pending {
+                ownership_unknown.push(format!(
+                    "pending_fill_allocation_unknown:{}:{}:{}",
+                    line_id, generation, sector
+                ));
+            }
+        }
+        ownership_unknown.sort();
+        ownership_unknown.dedup();
         typed_l2.unknown_state = ownership_unknown;
         typed_l2.ownership_complete = typed_l2.unknown_state.is_empty();
         typed_l2
             .validate()
             .map_err(sim_mem::L2ProjectionError::from)?;
-        let typed_l2_power_completeness =
-            TypedObservationContract::cycle_exact_power().validate(&typed_l2, power);
+        let typed_dram = dram_server
+            .map(DramServer::typed_boundary_state)
+            .transpose()?
+            .unwrap_or(DramBoundaryState::LatencyOnly);
         let typed_cores = snapshots
             .iter()
             .enumerate()
@@ -1153,49 +1597,44 @@ impl ReferenceTrace {
                 front_end: typed_front_end_states[ix].clone(),
                 memory_pipeline: typed_memory_pipeline_states[ix].clone(),
                 scalar_pipeline: typed_scalar_pipeline_states[ix].clone(),
+                local_completion_time: cores[ix].typed_local_completion_time(),
+                unprojected_timing_state: cores[ix].typed_unprojected_timing_state(),
                 async_copy: typed_async_copy_states[ix].clone(),
                 response_owners: owners_by_core[ix].clone(),
             })
             .collect::<Vec<_>>();
+        let typed_l2_power_completeness =
+            TypedObservationContract::cycle_exact_power().validate(&typed_l2, power, &typed_cores);
         let typed_boundary = TypedEventBoundaryRecord {
             schema_version: TYPED_STATE_SCHEMA_VERSION,
             contract: TypedObservationContract::cycle_exact_power(),
             event: TypedEventIdentity {
                 time,
                 sequence,
+                sequence_span,
+                phase: 0,
                 target,
                 payload: typed_payload.clone(),
             },
             queue: typed_queue.clone(),
             cores: typed_cores,
             shared_l2: typed_l2.clone(),
+            dram: typed_dram,
             power: power.clone(),
             completeness: typed_l2_power_completeness.clone(),
         };
-        self.write(&serde_json::json!({
+        typed_boundary.validate_structure()?;
+        // `typed_boundary` is the canonical state. The old formatted core/L2
+        // projections were diagnostic duplicates and made every boundary much
+        // larger; the versioned root retains all typed fields and the legacy
+        // completeness flag remains in the header for old consumers.
+        self.write_event(serde_json::json!({
             "kind": "event",
             "time": time,
             "sequence": sequence,
             "target": target,
             "event": event,
-            "event_payload": event_payload,
-            "typed_event_payload": typed_payload,
-            "queue_depth": queue.len(),
-            "next_event_time": queue.peek_time(),
-            "pending_event_order": queue.pending_order(),
-            "pending_event_payloads": queue.pending_debug(),
-            "typed_queue": typed_queue,
-            "l2_state": l2.boundary_state(),
-            "typed_l2_state": typed_l2,
-            "typed_l1_states": typed_l1_states,
-            "typed_async_copy_states": typed_async_copy_states,
-            "typed_memory_pipeline_states": typed_memory_pipeline_states,
-            "typed_scalar_pipeline_states": typed_scalar_pipeline_states,
-            "typed_front_end_states": typed_front_end_states,
             "typed_boundary": typed_boundary,
-            "power_state": power,
-            "typed_l2_power_completeness": typed_l2_power_completeness,
-            "cores": snapshots,
         }))
     }
 
@@ -1204,23 +1643,21 @@ impl ReferenceTrace {
         queue: sim_engine::QueueStats,
         power: &PowerBoundaryState,
     ) -> Result<(), ReferenceTraceError> {
-        // The footer is best-effort metadata; reserve one record for it by
-        // requiring callers to choose a positive limit and failing before the
-        // next event once the limit is exhausted.
-        if self.records < self.max_records {
-            serde_json::to_writer(
-                &mut self.writer,
-                &serde_json::json!({
-                    "kind": "footer",
-                    "records_before_footer": self.records,
-                    "queue_events_popped": queue.events_popped,
-                    "queue_clock_gap_cycles": queue.clock_gap_cycles,
-                    "power_state": power,
-                    "state_projection_complete": false,
-                }),
-            )?;
-            self.writer.write_all(b"\n")?;
-        }
+        // `max_records` bounds data records. The footer is metadata emitted
+        // after that bound so a run that ends exactly at the limit remains a
+        // valid lossless stream.
+        serde_json::to_writer(
+            &mut self.writer,
+            &serde_json::json!({
+                "kind": "footer",
+                "records_before_footer": self.records,
+                "queue_events_popped": queue.events_popped,
+                "queue_clock_gap_cycles": queue.clock_gap_cycles,
+                "power_state": power,
+                "state_projection_complete": false,
+            }),
+        )?;
+        self.writer.write_all(b"\n")?;
         self.writer.flush()?;
         Ok(())
     }
@@ -1365,8 +1802,15 @@ impl EventPerformanceCounters {
     }
 }
 
+#[derive(Debug, Clone)]
+struct PendingL2ReadyEntry {
+    ready: u64,
+    #[cfg(feature = "reference")]
+    producer: Option<L2RequestKey>,
+}
+
 #[derive(Default)]
-struct PendingL2Ready(HashMap<L2PendingSectorKey, u64>);
+struct PendingL2Ready(HashMap<L2PendingSectorKey, PendingL2ReadyEntry>);
 
 impl PendingL2Ready {
     fn merged_ready(&self, preview: L2EventMaskPreview) -> Result<Option<u64>, SystemError> {
@@ -1378,7 +1822,7 @@ impl PendingL2Ready {
             let ready = self
                 .0
                 .get(&key)
-                .copied()
+                .map(|entry| entry.ready)
                 .ok_or(SystemError::PendingL2ReadyMissing { key })?;
             latest = Some(latest.map_or(ready, |current: u64| current.max(ready)));
         }
@@ -1390,28 +1834,57 @@ impl PendingL2Ready {
             let Some(key) = preview.fill_sector_key(sector) else {
                 continue;
             };
-            if let Some(&ready) = self.0.get(&key) {
-                return Err(SystemError::PendingL2ReadyAlreadyRegistered { key, ready });
+            if let Some(entry) = self.0.get(&key) {
+                return Err(SystemError::PendingL2ReadyAlreadyRegistered {
+                    key,
+                    ready: entry.ready,
+                });
             }
         }
         Ok(())
     }
 
+    #[cfg(not(feature = "reference"))]
     fn register(&mut self, fill: L2FillToken, ready: u64) -> Result<(), SystemError> {
+        self.register_entry(
+            fill,
+            PendingL2ReadyEntry {
+                ready,
+                #[cfg(feature = "reference")]
+                producer: None,
+            },
+        )
+    }
+
+    #[cfg(feature = "reference")]
+    fn register_with_producer(
+        &mut self,
+        fill: L2FillToken,
+        ready: u64,
+        producer: Option<L2RequestKey>,
+    ) -> Result<(), SystemError> {
+        self.register_entry(fill, PendingL2ReadyEntry { ready, producer })
+    }
+
+    fn register_entry(
+        &mut self,
+        fill: L2FillToken,
+        entry: PendingL2ReadyEntry,
+    ) -> Result<(), SystemError> {
         for sector in 0..4 {
             let Some(key) = fill.pending_sector_key(sector) else {
                 continue;
             };
-            if let Some(&existing_ready) = self.0.get(&key) {
+            if let Some(existing) = self.0.get(&key) {
                 return Err(SystemError::PendingL2ReadyAlreadyRegistered {
                     key,
-                    ready: existing_ready,
+                    ready: existing.ready,
                 });
             }
         }
         for sector in 0..4 {
             if let Some(key) = fill.pending_sector_key(sector) {
-                self.0.insert(key, ready);
+                self.0.insert(key, entry.clone());
             }
         }
         Ok(())
@@ -1425,7 +1898,7 @@ impl PendingL2Ready {
             let ready = self
                 .0
                 .get(&key)
-                .copied()
+                .map(|entry| entry.ready)
                 .ok_or(SystemError::PendingL2ReadyRemovalMissing { key })?;
             if ready != now {
                 return Err(SystemError::PendingL2ReadyTimeMismatch {
@@ -1452,17 +1925,18 @@ impl PendingL2Ready {
     }
 
     #[cfg(feature = "reference")]
-    fn typed_entries(&self) -> Vec<(i64, u64, u8, u64)> {
+    fn typed_entries(&self) -> Vec<(i64, u64, u8, u64, Option<L2RequestKey>)> {
         let mut entries = self
             .0
             .iter()
-            .map(|(key, &ready)| {
+            .map(|(key, entry)| {
                 let identity = key.boundary_identity();
                 (
                     identity.line_id,
                     identity.generation,
                     identity.sector,
-                    ready,
+                    entry.ready,
+                    entry.producer.clone(),
                 )
             })
             .collect::<Vec<_>>();
@@ -1632,6 +2106,10 @@ struct L2SystemCommit {
     topology_stats: DramStats,
     dram_free_fp: Option<u128>,
     fill_ready: Option<u64>,
+    /// Shared-L2 allocation generation associated with a returning response.
+    /// The L1 fill generation is a separate identity domain and must not be
+    /// used for this join.
+    response_l2_allocation_generation: Option<u64>,
     atomic_completion_ready: Option<u64>,
     response: Option<L2ResponseCommit>,
     observed_sectors: u64,
@@ -1651,12 +2129,9 @@ struct L2SystemCommit {
 /// read-miss sector stream: each fetching sector demands 32 B, and a
 /// reply-carrying request or intrinsically returning ATOM cannot complete
 /// before BOTH its latency arm and the server's completion of ITS OWN request's
-/// bytes. Bytes of reply-less read follow-up fetches (late merges) are served
-/// but price no response — the merged waiter still clears on the original
-/// response, so under congestion a follow-up's bytes may complete
-/// after its waiter cleared (the documented merge-timing
-/// approximation; the cost surfaces on later requests). Uncongested
-/// streams see pure latency (the server only ever ADDS delay).
+/// bytes. Late L1 merges carry their own sector response, so the waiting warp
+/// clears at that child sector's ready event. Uncongested streams see pure
+/// latency (the server only ever ADDS delay).
 ///
 /// v0 scope: DRAM READS only — write data validates Store/RED sectors without
 /// a fetch, while ATOM's returning RMW read fetches missing sectors. Dirty
@@ -1695,6 +2170,15 @@ struct DramServer {
 }
 
 impl DramServer {
+    #[cfg(feature = "reference")]
+    fn typed_boundary_state(&self) -> Result<DramBoundaryState, DramStateError> {
+        DramBoundaryState::from_fixed_point(
+            u64::try_from(self.bytes_per_sec).map_err(|_| DramStateError::InvalidRate)?,
+            u64::try_from(self.sm_clock_hz).map_err(|_| DramStateError::InvalidRate)?,
+            self.free_fp,
+        )
+    }
+
     /// The caller (`simulate_kernel_shared`) rejects zero rates with a
     /// typed error before construction — no clamping here (a clamp
     /// would turn a bad card into a silently absurd 1 B/s server and
@@ -1752,7 +2236,7 @@ pub struct DramOriginStats {
 }
 
 /// Driver-side DRAM traffic and timing-neutral lower-level topology observer.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct DramStats {
     /// Architecture provenance bound by the shared-L2 system. Unbound
     /// synthetic stats are rejected before aggregation or emission.
@@ -1765,10 +2249,9 @@ pub struct DramStats {
     pub read_sectors: u64,
     /// Responses whose ready time the bandwidth server pushed PAST the
     /// latency arm (0 in uncongested runs and in `Unmodeled` mode).
-    /// Attribution caveat: reply-less follow-up fetches add bytes but
-    /// price nothing, so under congestion their service cost lands on
-    /// whichever reply-carrying request queues next — this counter
-    /// localizes congestion in TIME, not to the causing warp.
+    /// Late sector follow-ups carry their own completion response and are
+    /// therefore included in the same latency-arm accounting as any other
+    /// reply-bearing read.
     pub bw_delayed_responses: u64,
     /// L2 replacement topology. Dirty entries are candidate writeback work,
     /// not scheduled or completed DRAM transactions.
@@ -1783,25 +2266,6 @@ pub struct DramStats {
     pub maximum_terminal_l2_dirty_lines: u64,
     pub maximum_terminal_l2_dirty_sectors: u64,
     by_origin: [DramOriginStats; 2],
-}
-
-impl Default for DramStats {
-    fn default() -> Self {
-        Self {
-            arch: None,
-            read_sectors: 0,
-            bw_delayed_responses: 0,
-            l2_evicted_lines: 0,
-            l2_evicted_valid_sectors: 0,
-            l2_evicted_pending_lines: 0,
-            l2_evicted_pending_sectors: 0,
-            l2_dirty_eviction_lines: 0,
-            l2_dirty_evicted_sectors: 0,
-            maximum_terminal_l2_dirty_lines: 0,
-            maximum_terminal_l2_dirty_sectors: 0,
-            by_origin: [DramOriginStats::default(); 2],
-        }
-    }
 }
 
 impl DramStats {
@@ -2243,7 +2707,7 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates(
         let target = u32::try_from(ix)
             .map_err(|_| SystemError::ActorCountOutOfRange { count: cores.len() })?;
         queue.schedule_at(0, TargetId(target), Ev::SmWake)?;
-        wake_due.push(ix, 0);
+        wake_due.push(ix, 0)?;
     }
 
     let mut spin = SpinGuard::new(cores.len())?;
@@ -2269,8 +2733,6 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates(
     while let Some(ev) = queue.pop()? {
         #[cfg(feature = "reference")]
         let reference_event_name = event_name(&ev.kind);
-        #[cfg(feature = "reference")]
-        let reference_event_payload = format!("{:?}", &ev.kind);
         #[cfg(feature = "reference")]
         let reference_typed_event_payload = typed_event_payload(&ev.kind);
         let is_write_ack = matches!(&ev.kind, Ev::MemoryWriteAck(_));
@@ -2605,6 +3067,8 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates(
                                 topology_stats,
                                 dram_free_fp: service_preview.map(|(done, _)| done),
                                 fill_ready,
+                                response_l2_allocation_generation: (req.reply != ReplyTo::None)
+                                    .then(|| preview.allocation_generation()),
                                 atomic_completion_ready,
                                 response,
                                 observed_sectors: requested_sectors,
@@ -2626,8 +3090,9 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates(
                             counter: "L2 lookup observer hits",
                         })?;
 
-                    if observe_admission_groups && let Some(witness) = req.admission_witness {
-                        if let Some(completed) = admission_observers
+                    if observe_admission_groups
+                        && let Some(witness) = req.admission_witness
+                        && let Some(completed) = admission_observers
                             .as_mut()
                             .expect("enabled admission observer storage")[sm_ix]
                             .observe(
@@ -2639,42 +3104,41 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates(
                                 commit.observed_hits,
                                 req.sector_id,
                             )?
-                        {
-                            if observe_admission {
-                                admission_states
-                                    .as_mut()
-                                    .expect("enabled admission candidate storage")[sm_ix]
-                                    .observe(
-                                        usize::from(completed.witness.subcore()),
-                                        usize::try_from(completed.witness.warp()).map_err(
-                                            |_| SystemError::CounterOverflow {
-                                                counter: "memory-admission witness warp",
-                                            },
-                                        )?,
-                                        completed.operation,
-                                        completed.hit_sectors,
-                                        completed.miss_sectors,
-                                        completed.issue_time,
-                                    )?;
-                            }
-                            if feedback_admission {
-                                if let Some(ack) = cores[sm_ix].complete_memory_admission_feedback(
-                                    completed.witness,
+                    {
+                        if observe_admission {
+                            admission_states
+                                .as_mut()
+                                .expect("enabled admission candidate storage")[sm_ix]
+                                .observe(
+                                    usize::from(completed.witness.subcore()),
+                                    usize::try_from(completed.witness.warp()).map_err(|_| {
+                                        SystemError::CounterOverflow {
+                                            counter: "memory-admission witness warp",
+                                        }
+                                    })?,
                                     completed.operation,
                                     completed.hit_sectors,
                                     completed.miss_sectors,
-                                    completed.l2_requests,
-                                    completed.unique_regions,
                                     completed.issue_time,
-                                )? {
-                                    queue.schedule_at(
-                                        ack.fence_visible_at,
-                                        ev.target,
-                                        Ev::MemoryWriteAck(ack),
-                                    )?;
-                                    write_ack_due.push(sm_ix, ack.fence_visible_at);
-                                }
-                            }
+                                )?;
+                        }
+                        if feedback_admission
+                            && let Some(ack) = cores[sm_ix].complete_memory_admission_feedback(
+                                completed.witness,
+                                completed.operation,
+                                completed.hit_sectors,
+                                completed.miss_sectors,
+                                completed.l2_requests,
+                                completed.unique_regions,
+                                completed.issue_time,
+                            )?
+                        {
+                            queue.schedule_at(
+                                ack.fence_visible_at,
+                                ev.target,
+                                Ev::MemoryWriteAck(ack),
+                            )?;
+                            write_ack_due.push(sm_ix, ack.fence_visible_at)?;
                         }
                     }
 
@@ -2688,6 +3152,14 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates(
                         });
                     }
                     if let (Some(fill), Some(ready)) = (l2_access.fill, commit.fill_ready) {
+                        #[cfg(feature = "reference")]
+                        {
+                            let typed_sm_id = u32::try_from(sm_ids[sm_ix]).unwrap_or(u32::MAX);
+                            let producer =
+                                cores[sm_ix].typed_l2_request_key(typed_sm_id, req.reply);
+                            pending_l2_ready.register_with_producer(fill, ready, producer)?;
+                        }
+                        #[cfg(not(feature = "reference"))]
                         pending_l2_ready.register(fill, ready)?;
                     }
                     // A response that becomes ready with its own new fill carries the
@@ -2769,7 +3241,12 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates(
                         dram_stats.bw_delayed_responses = response.next_delayed;
                         dram_stats.by_origin[response.origin_ix].bw_delayed_responses =
                             response.next_origin_delayed;
-                        response_due.push(sm_ix, response.ready);
+                        response_due.push_response(
+                            sm_ix,
+                            response.ready,
+                            req.reply.response_id().map(|id| id.boundary_identity()),
+                            commit.response_l2_allocation_generation,
+                        )?;
                         response.unpriced_removal.commit(&mut unpriced);
                     }
                     if let Some(removal) = feedback_unpriced_removal {
@@ -2820,7 +3297,12 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates(
                     let _completion = staged_l2.complete_fill(fill)?;
                     pending_l2_ready.commit_remove(fill);
                 }
-                response_due.pop_expect("memory response", sm_ix, ev.time)?;
+                response_due.pop_response_expect(
+                    "memory response",
+                    sm_ix,
+                    ev.time,
+                    reply.response_id().map(|id| id.boundary_identity()),
+                )?;
                 scratch.clear();
                 cores[sm_ix].on_response(reply, ev.time, &mut scratch)?;
                 // Retries the completion unblocked become L2 accesses at
@@ -2864,14 +3346,16 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates(
                 ev.seq,
                 ev.target.0,
                 reference_event_name,
-                reference_event_payload,
+                ev.sequence_span.get(),
                 reference_typed_event_payload,
                 &queue,
                 &staged_l2,
                 &cores,
                 &sm_ids,
+                &response_due,
                 &pending_l2_ready,
                 &power_state,
+                dram_server.as_ref(),
             )?;
         }
     }
@@ -2883,6 +3367,21 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates(
     }
     if !write_ack_due.is_empty() {
         return Err(SystemError::MemoryWriteAckDueNotDrained);
+    }
+    if !response_due.is_empty() {
+        return Err(SystemError::ResponseDueNotDrained {
+            entries: response_due.pending_entries(),
+        });
+    }
+    if !wake_due.is_empty() {
+        return Err(SystemError::WakeDueNotDrained {
+            entries: wake_due.pending_entries(),
+        });
+    }
+    if !unpriced.is_empty() {
+        return Err(SystemError::UnpricedBoundsNotDrained {
+            entries: unpriced.pending_entries(),
+        });
     }
     if observe_admission_groups {
         for (ix, observer) in admission_observers
@@ -2936,6 +3435,13 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates(
             return Err(SystemError::Deadlock {
                 sm_id: sm_ids[ix],
                 outstanding: core.outstanding_responses(),
+            });
+        }
+        let outstanding = core.outstanding_responses();
+        if outstanding != 0 {
+            return Err(SystemError::ResponseNotDrained {
+                sm_id: sm_ids[ix],
+                outstanding,
             });
         }
         let mut sm_result = core.result();
@@ -3262,7 +3768,7 @@ fn run_sm(
         let covered = wake_due.next(ix).is_some_and(|t| t <= wake);
         if !covered {
             queue.schedule_at(wake, TargetId(target), Ev::SmWake)?;
-            wake_due.push(ix, wake);
+            wake_due.push(ix, wake)?;
         }
     }
     Ok(progress)
@@ -3283,6 +3789,109 @@ mod tests {
     use crate::issue::{MemoryServiceCandidateOperation, MemoryServiceCandidateScope};
 
     use super::*;
+
+    #[cfg(feature = "reference")]
+    #[test]
+    fn reference_delta_preserves_nulls_shape_changes_and_array_order() {
+        use serde_json::json;
+        let original = json!({
+            "cores": [{"cycle": 1, "hold": null}, {"cycle": 2, "hold": [7]}],
+            "queue": [{"time": 3, "sequence": 1}, {"time": 3, "sequence": 2}],
+            "ownership": {"old": 1},
+        });
+        let next = json!({
+            "cores": [{"cycle": 1, "hold": null}, {"cycle": 4, "hold": []}],
+            "queue": [{"time": 3, "sequence": 2}],
+            "ownership": {"new": null},
+        });
+        let mut changes = Vec::new();
+        reference_replacements(&original, &next, &mut Vec::new(), &mut changes);
+        let mut restored = original.clone();
+        for change in &changes {
+            let mut destination = &mut restored;
+            for segment in &change.path {
+                destination = match segment {
+                    ReferencePathSegment::Field(key) => destination.get_mut(key).unwrap(),
+                    ReferencePathSegment::Index(index) => destination.get_mut(*index).unwrap(),
+                };
+            }
+            *destination = change.value.clone();
+        }
+        assert_eq!(restored, next);
+        assert_eq!(changes.len(), 4);
+        changes.clear();
+        reference_replacements(&next, &next, &mut Vec::new(), &mut changes);
+        assert!(changes.is_empty());
+    }
+
+    #[cfg(feature = "reference")]
+    #[test]
+    fn reference_operations_use_one_ordered_splice_for_changed_arrays() {
+        use serde_json::json;
+        let original = json!({"state": {"unknown": [1, 2, 3, 4]}});
+        let next = json!({"state": {"unknown": [1, 8, 9, 4, 5]}});
+        let mut operations = Vec::new();
+        reference_operations(&original, &next, &mut Vec::new(), &mut operations);
+        assert_eq!(operations.len(), 1);
+        match &operations[0] {
+            ReferenceOperation::Splice {
+                path,
+                start,
+                delete_count,
+                values,
+            } => {
+                assert_eq!(path.len(), 2);
+                assert_eq!(*start, 1);
+                assert_eq!(*delete_count, 3);
+                assert_eq!(values.len(), 4);
+            }
+            ReferenceOperation::Replace { .. } => panic!("changed array used a full replacement"),
+        }
+    }
+
+    #[cfg(feature = "reference")]
+    #[test]
+    fn reference_trace_record_limit_has_no_off_by_one() {
+        let file = tempfile::NamedTempFile::new().unwrap();
+        let mut trace = ReferenceTrace {
+            writer: BufWriter::new(std::fs::File::create(file.path()).unwrap()),
+            records: 0,
+            max_records: 2,
+            previous_event: None,
+        };
+        trace.write(&serde_json::json!({"kind": "header"})).unwrap();
+        trace.write(&serde_json::json!({"kind": "event"})).unwrap();
+        assert_eq!(trace.records, 2);
+        assert!(matches!(
+            trace.write(&serde_json::json!({"kind": "footer"})),
+            Err(ReferenceTraceError::RecordLimit { limit: 2 })
+        ));
+    }
+
+    #[cfg(feature = "reference")]
+    #[test]
+    fn reference_trace_footer_is_written_at_exact_data_limit() {
+        let file = tempfile::NamedTempFile::new().unwrap();
+        let trace = ReferenceTrace {
+            writer: BufWriter::new(std::fs::File::create(file.path()).unwrap()),
+            records: 2,
+            max_records: 2,
+            previous_event: None,
+        };
+        trace
+            .finish(
+                sim_engine::QueueStats::default(),
+                &PowerBoundaryState::activity_only(None, None),
+            )
+            .unwrap();
+        let lines = std::fs::read_to_string(file.path()).unwrap();
+        assert!(lines.lines().last().is_some_and(|line| {
+            serde_json::from_str::<serde_json::Value>(line)
+                .ok()
+                .and_then(|value| value.get("kind").cloned())
+                == Some(serde_json::Value::String("footer".to_owned()))
+        }));
+    }
 
     #[test]
     fn admission_observer_reconstructs_one_instruction_from_ordered_l2_requests() {
@@ -3824,17 +4433,24 @@ mod tests {
 
         let first = queue.pop().unwrap().unwrap();
         assert_eq!((first.time, first.seq, first.target), (5, 0, TargetId(0)));
+        assert_eq!(first.sequence_span.get(), 2);
         assert!(matches!(
-            first.kind,
+            &first.kind,
             Ev::L2AccessBatch(requests) if requests.len() == 2
+        ));
+        #[cfg(feature = "reference")]
+        assert!(matches!(
+            typed_event_payload(&first.kind),
+            TypedEventPayload::L2AccessBatch { requests } if requests.len() == 2
         ));
         let second = queue.pop().unwrap().unwrap();
         assert_eq!(
             (second.time, second.seq, second.target),
             (5, 2, TargetId(1))
         );
+        assert_eq!(second.sequence_span.get(), 2);
         assert!(matches!(
-            second.kind,
+            &second.kind,
             Ev::L2AccessBatch(requests) if requests.len() == 2
         ));
         let third = queue.pop().unwrap().unwrap();
@@ -3876,6 +4492,75 @@ mod tests {
             legacy_queue.pop().unwrap().unwrap().kind,
             Ev::L2Access(_)
         ));
+    }
+
+    #[test]
+    fn emitted_batch_accepts_multiple_completed_admission_witness_groups() {
+        let mut queue = EventQueue::new();
+        let mut unpriced = UnpricedBounds(vec![BTreeMap::new()]);
+        let first_witness = AdmissionRequestWitness::new(2, 7, 1, 0, 1).unwrap();
+        let second_witness = AdmissionRequestWitness::new(3, 9, 2, 0, 1).unwrap();
+        let mut requests = vec![
+            MemRequest {
+                admission_witness: Some(first_witness),
+                ..replyless_request(5, 4, MemoryOperation::Store)
+            },
+            MemRequest {
+                admission_witness: Some(second_witness),
+                ..replyless_request(5, 5, MemoryOperation::Reduction)
+            },
+        ];
+
+        // Native scheduling batches consecutive replyless STORE/RED requests
+        // by issue time.  Admission witnesses are consumed in order inside
+        // the batch, so a batch may contain two already-complete instruction
+        // groups; it is not restricted to one (warp, instruction, subcore)
+        // identity.
+        schedule_emitted_requests(
+            0,
+            TargetId(0),
+            &mut queue,
+            &mut unpriced,
+            &mut requests,
+            34,
+            true,
+            None,
+        )
+        .unwrap();
+        let queued = queue.pop().unwrap().unwrap();
+        let Ev::L2AccessBatch(batch) = queued.kind else {
+            panic!("native scheduler did not emit an L2 access batch");
+        };
+        assert_eq!(batch.len(), 2);
+
+        let mut observer = AdmissionInstructionObserver::default();
+        let first = observer
+            .observe(
+                0,
+                batch[0].admission_witness.unwrap(),
+                batch[0].operation,
+                batch[0].issue_time,
+                1,
+                1,
+                batch[0].sector_id,
+            )
+            .unwrap()
+            .expect("the first one-request group completes in the batch");
+        assert_eq!(first.witness, first_witness);
+        let second = observer
+            .observe(
+                0,
+                batch[1].admission_witness.unwrap(),
+                batch[1].operation,
+                batch[1].issue_time,
+                1,
+                0,
+                batch[1].sector_id,
+            )
+            .unwrap()
+            .expect("the second one-request group completes in the same batch");
+        assert_eq!(second.witness, second_witness);
+        assert!(observer.pending.is_none());
     }
 
     #[cfg(feature = "performance-counters")]
@@ -3953,6 +4638,8 @@ mod tests {
             instruction_front_end: None,
             memory_issue_pipeline: None,
             scalar_execution_pipeline: None,
+            issue_ports: 1,
+            dual_issue_supported: false,
             ldgsts_l1_hit_return_service: None,
             constant_memory_return_service: None,
             immediate_constant_cache: None,
@@ -4252,6 +4939,41 @@ mod tests {
         assert_eq!(result.l2_by_source.source(L2Source::Bypass), (0, 0));
         assert_eq!(result.dram.read_sectors, 1);
         assert_eq!(result.terminal_event_time, Some(423));
+    }
+
+    #[test]
+    fn cacheable_async_copy_mshr_floor_replays_under_pressure() {
+        let sched = cacheable_async_copy_schedule(true);
+        let mut blocks = cacheable_async_copy_blocks(true);
+        blocks[0].warps[0].insts[0].kind = AccessKind::GlobalAsyncCopy {
+            off: 0,
+            len: 3,
+            completion_work: 1536,
+            l1_policy: LdgstsL1Policy::CacheAtAllLevels,
+        };
+        blocks[0].warps[0].sectors = vec![40, 44, 48];
+        let mut parameters = params();
+        parameters.ldgsts_l1_mshr_floor = NonZeroU32::new(2).unwrap();
+        let mut cfg = l1_config();
+        cfg.mshr_count = Some(1);
+        let mut l2 = l2_model();
+        let result = simulate_kernel_shared(
+            &BTreeMap::from([(0, blocks)]),
+            &sched,
+            &parameters,
+            cfg,
+            &mut l2,
+            carded_bw(),
+        )
+        .unwrap();
+
+        // Two sources are admitted at t=0. The third waits for the first
+        // response at t=423 and returns at t=846, then delivery takes 24 cycles.
+        assert_eq!(result.per_sm[&0].instructions_issued, 4);
+        assert_eq!(result.per_sm[&0].cycles, 872);
+        assert_eq!(result.per_sm[&0].l1.unwrap().stall_events, 1);
+        assert_eq!(result.dram.read_sectors, 3);
+        assert_eq!(result.terminal_event_time, Some(846));
     }
 
     #[test]
@@ -4773,7 +5495,7 @@ mod tests {
     #[test]
     fn due_time_mismatch_preserves_the_queued_head() {
         let mut due = DueTimes::new(1);
-        due.push(0, 7);
+        due.push(0, 7).unwrap();
         assert!(matches!(
             due.pop_expect("test", 0, 8),
             Err(SystemError::DueTimeMismatch {
@@ -4784,6 +5506,37 @@ mod tests {
             })
         ));
         assert_eq!(due.next(0), Some(7));
+    }
+
+    #[test]
+    fn response_due_identity_mismatch_preserves_same_cycle_head() {
+        let mut due = DueTimes::new(1);
+        let first = (1, 2, 3);
+        let second = (4, 5, 6);
+        due.push_response(0, 7, Some(first), Some(9)).unwrap();
+        #[cfg(feature = "reference")]
+        assert_eq!(due.response_entries(0), vec![(first, 7, Some(9))]);
+        let error = due
+            .pop_response_expect("response", 0, 7, Some(second))
+            .unwrap_err();
+        match error {
+            SystemError::ResponseIdentityMismatch {
+                component,
+                sm,
+                expected,
+                got,
+            } => {
+                assert_eq!(component, "response");
+                assert_eq!(sm, 0);
+                assert_eq!(expected, Some(second));
+                assert_eq!(got, Some(first));
+            }
+            other => panic!("unexpected due error: {other}"),
+        }
+        assert_eq!(due.next(0), Some(7));
+        due.pop_response_expect("response", 0, 7, Some(first))
+            .unwrap();
+        assert_eq!(due.next(0), None);
     }
 
     /// A reply-producing load can be the final instruction. Its issue
@@ -5230,8 +5983,24 @@ mod tests {
             .expect("fill preview exposes its opaque sector identity");
         let mut pending = PendingL2Ready::default();
         pending.preflight_register(first_preview).unwrap();
+        #[cfg(feature = "reference")]
+        let producer = L2RequestKey {
+            sm_id: 7,
+            response_warp: 7,
+            warp_slot: 3,
+            instruction: 11,
+            sector_index: 2,
+            response_kind: sim_semantics::TypedResponseKind::L1Fill,
+        };
+        #[cfg(feature = "reference")]
+        pending
+            .register_with_producer(fill, 423, Some(producer.clone()))
+            .unwrap();
+        #[cfg(not(feature = "reference"))]
         pending.register(fill, 423).unwrap();
         assert_eq!(pending.len(), 1);
+        #[cfg(feature = "reference")]
+        assert_eq!(pending.typed_entries()[0].4, Some(producer));
         assert!(matches!(
             pending.preflight_register(first_preview),
             Err(SystemError::PendingL2ReadyAlreadyRegistered {
@@ -5409,60 +6178,84 @@ mod tests {
 
     #[test]
     fn write_supersession_keeps_the_original_read_response_and_removal() {
-        let mut load = cb(1);
-        load.write_barrier = Some(barrier(0));
-        let mut consumer = cb(1);
-        consumer.wait_mask = wait_mask(0b000001);
-        let sched = schedule(vec![
-            (0, slot(load, "LDG.E")),
-            (16, slot(consumer, "EXIT")),
-            (32, slot(cb(1), "STG.E")),
-            (48, slot(cb(1), "EXIT")),
-        ]);
-        let storer = vec![BlockReplay {
-            launch_index: 1,
-            warps: vec![WarpReplay {
-                async_copy_cohorts: None,
-                warp_slot: 0,
-                insts: vec![
-                    ReplayInst {
-                        pc: 32,
-                        kind: AccessKind::GlobalStore { off: 0, len: 1 },
-                    },
-                    ReplayInst {
-                        pc: 48,
-                        kind: AccessKind::NonMemory,
-                    },
-                ],
-                sectors: vec![4],
-            }],
-        }];
-        let per_sm = BTreeMap::from([(0, dependent_load_blocks(4)), (7, storer)]);
-        let mut l2 = l2_model();
+        for (opcode, access, source) in [
+            (
+                "LDG.E",
+                AccessKind::GlobalEligible {
+                    off: 0,
+                    len: 1,
+                    token: CacheOpToken::LdgECa,
+                },
+                L2Source::L1Fill,
+            ),
+            (
+                "LDG.E.CG",
+                AccessKind::GlobalBypass {
+                    off: 0,
+                    len: 1,
+                    l2_requests: 0,
+                    token: CacheOpToken::LdgECg,
+                },
+                L2Source::Bypass,
+            ),
+        ] {
+            let mut load = cb(1);
+            load.write_barrier = Some(barrier(0));
+            let mut consumer = cb(1);
+            consumer.wait_mask = wait_mask(0b000001);
+            let sched = schedule(vec![
+                (0, slot(load, opcode)),
+                (16, slot(consumer, "EXIT")),
+                (32, slot(cb(1), "STG.E")),
+                (48, slot(cb(1), "EXIT")),
+            ]);
+            let storer = vec![BlockReplay {
+                launch_index: 1,
+                warps: vec![WarpReplay {
+                    async_copy_cohorts: None,
+                    warp_slot: 0,
+                    insts: vec![
+                        ReplayInst {
+                            pc: 32,
+                            kind: AccessKind::GlobalStore { off: 0, len: 1 },
+                        },
+                        ReplayInst {
+                            pc: 48,
+                            kind: AccessKind::NonMemory,
+                        },
+                    ],
+                    sectors: vec![4],
+                }],
+            }];
+            let mut reader = dependent_load_blocks(4);
+            reader[0].warps[0].insts[0].kind = access;
+            let per_sm = BTreeMap::from([(0, reader), (7, storer)]);
+            let mut l2 = l2_model();
 
-        let result = simulate_kernel_shared(
-            &per_sm,
-            &sched,
-            &params(),
-            l1_config(),
-            &mut l2,
-            carded_bw(),
-        )
-        .unwrap();
+            let result = simulate_kernel_shared(
+                &per_sm,
+                &sched,
+                &params(),
+                l1_config(),
+                &mut l2,
+                carded_bw(),
+            )
+            .unwrap();
 
-        assert_eq!((result.l2.misses, result.l2.hits), (1, 1));
-        assert_eq!(result.l2.write_tag_hits, 1);
-        assert_eq!(result.l2_by_source.source(L2Source::L1Fill), (1, 0));
-        assert_eq!(result.l2_by_source.source(L2Source::Store), (1, 1));
-        assert_eq!(result.dram.read_sectors, 1);
-        assert_eq!(result.per_sm[&0].cycles, 424);
-        assert_eq!(
-            l2.preview_mask(1, 0b0001, L2OpClass::Read)
-                .unwrap()
-                .present_sectors,
-            1,
-            "the store-valid sector survives the original read completion"
-        );
+            assert_eq!((result.l2.misses, result.l2.hits), (1, 1));
+            assert_eq!(result.l2.write_tag_hits, 1);
+            assert_eq!(result.l2_by_source.source(source), (1, 0));
+            assert_eq!(result.l2_by_source.source(L2Source::Store), (1, 1));
+            assert_eq!(result.dram.read_sectors, 1);
+            assert_eq!(result.per_sm[&0].cycles, 424);
+            assert_eq!(
+                l2.preview_mask(1, 0b0001, L2OpClass::Read)
+                    .unwrap()
+                    .present_sectors,
+                1,
+                "the store-valid sector survives the original read completion"
+            );
+        }
     }
 
     #[test]
@@ -5622,11 +6415,11 @@ mod tests {
         );
     }
 
-    /// A cross-batch L1 merge emits a reply-less follow-up read. Its L2 token
+    /// A cross-batch L1 merge emits a sector follow-up read. Its L2 token
     /// must survive independently of the original line-fill response and install
     /// at its own data-ready event, even after the SM has finished.
     #[test]
-    fn replyless_followup_fetch_receives_a_fill_only_completion() {
+    fn sector_followup_fetch_receives_its_own_completion() {
         let mut load_m = cb(1);
         load_m.write_barrier = Some(barrier(2));
         let mut load_l = cb(1);
@@ -5694,7 +6487,11 @@ mod tests {
         .unwrap();
 
         assert_eq!(r.per_sm[&0].instructions_issued, 4);
-        assert_eq!(r.per_sm[&0].cycles, 458);
+        // The consumer must remain parked until the late sector's own
+        // response at t=846.  The original approximation attached this
+        // waiter to the earlier line fill and let the consumer issue at
+        // t=457 (458 elapsed cycles).
+        assert_eq!(r.per_sm[&0].cycles, 847);
         assert_eq!(r.l2.misses, 3);
         assert_eq!(r.l2.line_misses, 2);
         assert_eq!(r.l2.sector_fill_misses, 1);
@@ -5705,7 +6502,74 @@ mod tests {
                 .unwrap()
                 .present_sectors,
             2,
-            "reply-less sector did not install after the original response"
+            "late sector did not install after its own response"
+        );
+    }
+
+    /// A single actor advance may issue requests at several local times before
+    /// the first response horizon.  A later same-line sector must retain its
+    /// own issue timestamp; folding it into the first request would make its
+    /// arrival appear earlier than causality permits.
+    #[test]
+    fn same_advance_late_sector_keeps_its_issue_timestamp() {
+        let sched = schedule(vec![
+            (0, slot(cb(15), "LDG.E")),
+            (16, slot(cb(1), "LDG.E")),
+            (32, slot(cb(1), "EXIT")),
+        ]);
+        let blocks = vec![BlockReplay {
+            launch_index: 0,
+            warps: vec![WarpReplay {
+                async_copy_cohorts: None,
+                warp_slot: 0,
+                insts: vec![
+                    ReplayInst {
+                        pc: 0,
+                        kind: AccessKind::GlobalEligible {
+                            off: 0,
+                            len: 1,
+                            token: CacheOpToken::LdgECa,
+                        },
+                    },
+                    ReplayInst {
+                        pc: 16,
+                        kind: AccessKind::GlobalEligible {
+                            off: 1,
+                            len: 1,
+                            token: CacheOpToken::LdgECa,
+                        },
+                    },
+                    ReplayInst {
+                        pc: 32,
+                        kind: AccessKind::NonMemory,
+                    },
+                ],
+                // Two sectors in one L2 line, issued at t=0 and t=15.
+                sectors: vec![40, 41],
+            }],
+        }];
+        let mut core = SmCore::new_with_residency(
+            &blocks,
+            &sched,
+            &params(),
+            SharedMemoryResidency::unconstrained_fixture(),
+            SmMemMode::L1Shared(l1_config()),
+        )
+        .unwrap();
+        let mut requests = Vec::new();
+        assert_eq!(
+            core.advance(ReplayHorizon::Bounded(244), &mut requests)
+                .unwrap(),
+            Advance::Done
+        );
+
+        assert_eq!(
+            requests
+                .iter()
+                .map(|request| (request.issue_time, request.sector_id, request.sector_mask))
+                .collect::<Vec<_>>(),
+            vec![(0, 40, 0b0001), (15, 41, 0b0010)],
+            "a later sector cannot inherit the earlier request's arrival time"
         );
     }
 
@@ -6503,10 +7367,17 @@ mod tests {
             },
         )
         .unwrap();
+        dram_total.maximum_terminal_l2_dirty_lines = 3;
+        dram_total.maximum_terminal_l2_dirty_sectors = 7;
+        let mut dram_addend = dram_addend;
+        dram_addend.maximum_terminal_l2_dirty_lines = 5;
+        dram_addend.maximum_terminal_l2_dirty_sectors = 4;
 
         dram_total.add_checked(&dram_addend).unwrap();
         assert_eq!(dram_total.read_sectors, 8);
         assert_eq!(dram_total.bw_delayed_responses, 3);
+        assert_eq!(dram_total.maximum_terminal_l2_dirty_lines, 5);
+        assert_eq!(dram_total.maximum_terminal_l2_dirty_sectors, 7);
         assert_eq!(
             dram_total.origin(MemoryOrigin::Global),
             DramOriginStats {

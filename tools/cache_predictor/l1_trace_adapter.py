@@ -41,9 +41,10 @@ Surfaces:
     matching typed_unavailable arm (the upstream layer should
     have already short-circuited; this is a defensive guard).
 
-NOTE: manifests from multi-arch fatbins are cross-arch
-contaminated — see the KNOWN DEFECT (2026-07-06) note in
-``l1_cache_op_classifier``'s module docstring.
+The live classifier is invoked with the requested architecture,
+so manifests produced by the current path do not mix same-named
+sections from other fatbin slices. Callers that provide a canned
+manifest remain responsible for selecting the matching arch.
 """
 from __future__ import annotations
 
@@ -151,6 +152,12 @@ class L1TraceAdapterDataWidthInvalid(Exception):
         }
 
 
+class L1TraceAdapterRecordInvalid(Exception):
+    """A trace record has malformed fields; no access stream can be emitted."""
+
+    TOKEN = "predictor_l1_sass_provenance_missing"
+
+
 class L1TraceAdapterEligibilityDefect(Exception):
     """Raised when a manifest entry's ``l1_eligible`` field
     fails strict admission: the value is not a real ``bool``,
@@ -256,69 +263,73 @@ class TraceRecord(NamedTuple):
 
 def _normalize_pc(pc: object) -> str:
     """Mirror the manifest's PC normalization: lowercase 0x-hex."""
-    if isinstance(pc, int):
+    if isinstance(pc, int) and not isinstance(pc, bool) and pc >= 0:
         return f"0x{pc:x}"
     if isinstance(pc, str):
         s = pc.lower().strip()
-        if s.startswith("0x"):
-            hex_part = s[2:].lstrip("0") or "0"
-            return f"0x{hex_part}"
-        hex_part = s.lstrip("0") or "0"
-        return f"0x{hex_part}"
-    raise TypeError(
-        f"unsupported pc value type {type(pc).__name__}: {pc!r}"
+        digits = s[2:] if s.startswith("0x") else s
+        if digits and all(char in "0123456789abcdef" for char in digits):
+            return f"0x{digits.lstrip('0') or '0'}"
+    raise L1TraceAdapterRecordInvalid(
+        f"pc must be a nonnegative integer or hexadecimal string; got {pc!r}"
     )
 
 
 def _materialize_record(raw: "TraceRecord | dict") -> TraceRecord:
-    """Coerce a raw trace record (TraceRecord or dict) to a
-    TraceRecord. Shared by the per-block and per-warp builders so
-    both materialize identically."""
+    """Validate both input forms before normalizing their PC and address list.
+
+    Integer PCs are byte offsets, while string PCs are hexadecimal. Never
+    stringify another type or truncate numeric fields before validating them.
+    """
     if isinstance(raw, TraceRecord):
-        return raw
-    if isinstance(raw, dict):
-        # PC normalization: when the caller passes an
-        # integer-typed PC (proto `uint32 pc` field),
-        # format it as a hex string so the downstream
-        # `_normalize_pc` reads it as hex rather than as
-        # a decimal-coerced string. The bug this fix
-        # closes: `str(16)` would be `"16"` which
-        # `_normalize_pc` then interprets as hex
-        # `0x16` instead of the correct `0x10`,
-        # silently dropping the access on the manifest
-        # join. Strings pass through unchanged so the
-        # already-hex string path is preserved.
-        raw_pc = raw["pc"]
-        if isinstance(raw_pc, int) and not isinstance(
-            raw_pc, bool,
-        ):
-            pc_str = f"0x{raw_pc:x}"
-        else:
-            pc_str = str(raw_pc)
-        return TraceRecord(
-            block_index=int(raw["block_index"]),
-            pc=pc_str,
-            byte_addresses=tuple(int(a) for a in raw["byte_addresses"]),
-            data_width=(
-                int(raw["data_width"])
-                if "data_width" in raw and raw["data_width"] is not None
-                else None
-            ),
-            warp_index=(
-                int(raw["warp_index"])
-                if "warp_index" in raw and raw["warp_index"] is not None
-                else None
-            ),
-            sm_id=(
-                int(raw["sm_id"])
-                if "sm_id" in raw and raw["sm_id"] is not None
-                else None
-            ),
+        record = raw
+    elif isinstance(raw, dict):
+        for required in ("block_index", "pc", "byte_addresses"):
+            if required not in raw:
+                raise L1TraceAdapterRecordInvalid(f"missing field {required}")
+        record = TraceRecord(
+            block_index=raw["block_index"],
+            pc=raw["pc"],
+            byte_addresses=raw["byte_addresses"],
+            data_width=raw.get("data_width"),
+            warp_index=raw.get("warp_index"),
+            sm_id=raw.get("sm_id"),
         )
-    raise TypeError(
-        f"trace_records must yield TraceRecord or dict; "
-        f"got {type(raw).__name__}"
-    )
+    else:
+        raise L1TraceAdapterRecordInvalid(
+            f"trace_records must yield TraceRecord or dict; "
+            f"got {type(raw).__name__}"
+        )
+    for name in ("block_index", "warp_index", "sm_id"):
+        value = getattr(record, name)
+        if value is None and name != "block_index":
+            continue
+        if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+            raise L1TraceAdapterRecordInvalid(
+                f"{name} must be a nonnegative integer; got {value!r}"
+            )
+    pc = _normalize_pc(record.pc)
+    if record.data_width is not None and (
+        isinstance(record.data_width, bool)
+        or not isinstance(record.data_width, int)
+        or record.data_width <= 0
+    ):
+        raise L1TraceAdapterDataWidthInvalid(
+            pc=pc, block_index=record.block_index, data_width=record.data_width,
+            detail="data_width must be a positive integer",
+        )
+    if not isinstance(record.byte_addresses, (tuple, list)):
+        raise L1TraceAdapterRecordInvalid("byte_addresses must be a sequence")
+    if any(
+        isinstance(address, bool)
+        or not isinstance(address, int)
+        or address < 0
+        for address in record.byte_addresses
+    ):
+        raise L1TraceAdapterRecordInvalid(
+            "byte_addresses must contain nonnegative integers"
+        )
+    return record._replace(pc=pc, byte_addresses=tuple(record.byte_addresses))
 
 
 def build_per_block_l1_accesses(
@@ -356,17 +367,17 @@ def build_per_block_l1_accesses(
       unrecognized PC is not a fail-close — it's just a
       non-load instruction the classifier didn't tag).
     """
-    if not isinstance(sm_count, int) or sm_count <= 0:
+    if isinstance(sm_count, bool) or not isinstance(sm_count, int) or sm_count <= 0:
         raise L1TraceAdapterGridBlockMissing(
             f"sm_count must be a positive int, got "
             f"{sm_count!r}"
         )
-    if not grid_dim:
+    if isinstance(grid_dim, bool) or not isinstance(grid_dim, int) or grid_dim <= 0:
         raise L1TraceAdapterGridBlockMissing(
             "trace lacks grid_dim metadata; CTAs cannot be "
             "mapped to SMs without it"
         )
-    if not block_dim:
+    if isinstance(block_dim, bool) or not isinstance(block_dim, int) or block_dim <= 0:
         raise L1TraceAdapterGridBlockMissing(
             "trace lacks block_dim metadata; the walker uses "
             "block_dim to estimate per-SM occupancy when "
@@ -405,6 +416,19 @@ def build_per_block_l1_accesses(
         pc = _normalize_pc(entry["pc"])
         token = entry.get("instruction_cache_op")
         serialized = entry.get("l1_eligible")
+        if pc in pc_lookup:
+            previous_token, previous_eligibility = pc_lookup[pc]
+            raise L1TraceAdapterEligibilityDefect(
+                pc=pc,
+                instruction_cache_op=token,
+                serialized_l1_eligible=serialized,
+                expected_l1_eligible=previous_eligibility,
+                detail=(
+                    "manifest contains duplicate PC entries; "
+                    f"previous token={previous_token!r}, "
+                    f"eligibility={previous_eligibility!r}"
+                ),
+            )
         if token not in INSTRUCTION_CACHE_OP_TOKENS:
             raise L1TraceAdapterEligibilityDefect(
                 pc=pc,
@@ -574,7 +598,7 @@ def build_per_warp_l1_accesses(
                 f"identity (use build_per_block_l1_accesses for "
                 f"block-level callers)"
             )
-    if not grid_dim:
+    if isinstance(grid_dim, bool) or not isinstance(grid_dim, int) or grid_dim <= 0:
         raise L1TraceAdapterGridBlockMissing(
             "trace lacks grid_dim metadata; CTAs cannot be "
             "mapped to SMs without it"
@@ -659,13 +683,23 @@ class CtaToSmDerivation(NamedTuple):
 def _record_block_and_sm(raw: TraceRecord | dict) -> tuple[int, int | None]:
     """Extract ``(block_index, sm_id_or_None)`` from a TraceRecord or dict."""
     if isinstance(raw, TraceRecord):
-        return int(raw.block_index), (None if raw.sm_id is None else int(raw.sm_id))
-    if isinstance(raw, dict):
-        sm = raw.get("sm_id")
-        return int(raw["block_index"]), (None if sm is None else int(sm))
-    raise TypeError(
-        f"trace record must be a TraceRecord or dict, got {type(raw).__name__}"
-    )
+        block_index, sm_id = raw.block_index, raw.sm_id
+    elif isinstance(raw, dict):
+        if "block_index" not in raw:
+            raise L1TraceAdapterRecordInvalid("missing field block_index")
+        block_index, sm_id = raw["block_index"], raw.get("sm_id")
+    else:
+        raise L1TraceAdapterRecordInvalid(
+            f"trace record must be a TraceRecord or dict; got {type(raw).__name__}"
+        )
+    for name, value in (("block_index", block_index), ("sm_id", sm_id)):
+        if value is not None and (
+            isinstance(value, bool) or not isinstance(value, int) or value < 0
+        ):
+            raise L1TraceAdapterRecordInvalid(
+                f"{name} must be a nonnegative integer; got {value!r}"
+            )
+    return block_index, sm_id
 
 
 def derive_cta_to_sm_assignment(
@@ -689,9 +723,9 @@ def derive_cta_to_sm_assignment(
 
     Reads only ``block_index`` + ``sm_id``; ``pc`` / ``byte_addresses`` are
     ignored here (the access decode is ``build_per_block_l1_accesses``)."""
-    if not isinstance(sm_count, int) or sm_count <= 0:
+    if isinstance(sm_count, bool) or not isinstance(sm_count, int) or sm_count <= 0:
         raise ValueError(f"sm_count must be a positive int, got {sm_count!r}")
-    if not isinstance(grid_dim, int) or grid_dim <= 0:
+    if isinstance(grid_dim, bool) or not isinstance(grid_dim, int) or grid_dim <= 0:
         raise L1TraceAdapterGridBlockMissing(
             f"grid_dim must be a positive int, got {grid_dim!r}"
         )
@@ -747,6 +781,7 @@ __all__ = [
     "L1CtaToSmConflictingObservation",
     "L1CtaToSmPartialMetadata",
     "L1TraceAdapterDataWidthInvalid",
+    "L1TraceAdapterRecordInvalid",
     "L1TraceAdapterEligibilityDefect",
     "L1TraceAdapterGridBlockMissing",
     "L1TraceAdapterManifestNotMatched",

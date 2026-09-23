@@ -240,11 +240,15 @@ pub fn from_instruction(
         if !instruction.addresses.is_empty() {
             return Err(AdapterError::NativeField("addresses on non-memory record"));
         }
-        let static_memory = if operation == OperationKind::Memory
+        if operation == OperationKind::Memory
             && classification
                 .as_ref()
                 .is_some_and(|value| matches!(sm86_opcode_head(&value.opcode_text), "LDC" | "ULDC"))
         {
+            if let Some(raw) = instruction.instruction_cache_op {
+                pb::InstructionCacheOp::try_from(raw)
+                    .map_err(|_| AdapterError::NativeField("cache operator"))?;
+            }
             // Constant-cache loads are deliberately absent from the dynamic
             // memory payload. Keep a static-only event so the SM model can
             // account for its cycle-visible issue/return path.
@@ -266,8 +270,7 @@ pub fn from_instruction(
             None
         } else {
             None
-        };
-        static_memory
+        }
     };
     losses.sort_unstable();
     losses.dedup();
@@ -279,6 +282,7 @@ pub fn from_instruction(
         operation,
         opcode_text,
         control,
+        async_effect: None,
         memory,
         losses,
     };
@@ -306,6 +310,11 @@ pub fn to_instruction(event: &SemanticEvent) -> Result<pb::Instruction, AdapterE
         ..Default::default()
     };
     if let Some(memory) = &event.memory {
+        // Static constant-cache events intentionally have no dynamic memory
+        // class, but their native cache operator and declared width are still
+        // observable metadata and must survive a semantic round-trip.
+        instruction.instruction_cache_op = memory.native_cache_op;
+        instruction.data_width = memory.declared_width;
         if memory.dynamic_class_present {
             instruction.memory_op_class = Some(wire_family(memory.family)? as i32);
         } else if memory.family != MemoryFamily::Constant {
@@ -316,10 +325,6 @@ pub fn to_instruction(event: &SemanticEvent) -> Result<pb::Instruction, AdapterE
         if memory.dynamic_class_present {
             instruction.memory_op_access_kind =
                 memory.direction.map(|kind| wire_direction(kind) as i32);
-            instruction.instruction_cache_op = memory.native_cache_op;
-        }
-        if memory.dynamic_class_present {
-            instruction.data_width = memory.declared_width;
         }
         for operand in &memory.operands {
             let Some(NativeOperand::NvidiaSm86 {
@@ -465,6 +470,7 @@ pub fn identity(
 ) -> NativeInstruction {
     NativeInstruction {
         isa: Isa::NvidiaSm86,
+        simt_width: None,
         device_id,
         stream_id,
         kernel_id,
@@ -584,5 +590,58 @@ mod tests {
         let event = from_instruction(0, native, &instruction, None).unwrap();
         let decoded = serde_json::from_slice(&serde_json::to_vec(&event).unwrap()).unwrap();
         assert_eq!(to_instruction(&decoded).unwrap(), instruction);
+    }
+
+    #[test]
+    fn static_constant_metadata_survives_without_dynamic_memory_class() {
+        let instruction = pb::Instruction {
+            pc: 32,
+            active_mask: Some(1),
+            predicate_mask: Some(1),
+            function_unique_id: 1,
+            warpid_tb: Some(0),
+            warpid_sm: Some(0),
+            sm_id: Some(0),
+            data_width: Some(8),
+            instruction_cache_op: Some(pb::InstructionCacheOp::Other as i32),
+            ..Default::default()
+        };
+        let native = identity(0, 7, 1, 0, 0, 0, &instruction);
+        let classification = InstructionClassification {
+            opcode_text: "LDC.64".to_owned(),
+            operation: OperationKind::Memory,
+            control: None,
+        };
+        let event = from_instruction(0, native, &instruction, Some(classification)).unwrap();
+        let decoded = serde_json::from_slice(&serde_json::to_vec(&event).unwrap()).unwrap();
+        let roundtrip = to_instruction(&decoded).unwrap();
+        assert_eq!(roundtrip.memory_op_class, None);
+        assert_eq!(roundtrip.data_width, instruction.data_width);
+        assert_eq!(
+            roundtrip.instruction_cache_op,
+            instruction.instruction_cache_op
+        );
+    }
+
+    #[test]
+    fn static_constant_rejects_unknown_cache_operator() {
+        let instruction = pb::Instruction {
+            pc: 32,
+            active_mask: Some(1),
+            predicate_mask: Some(1),
+            function_unique_id: 1,
+            instruction_cache_op: Some(i32::MAX),
+            ..Default::default()
+        };
+        let native = identity(0, 7, 1, 0, 0, 0, &instruction);
+        let classification = InstructionClassification {
+            opcode_text: "LDC.32".to_owned(),
+            operation: OperationKind::Memory,
+            control: None,
+        };
+        assert!(matches!(
+            from_instruction(0, native, &instruction, Some(classification)),
+            Err(AdapterError::NativeField("cache operator"))
+        ));
     }
 }

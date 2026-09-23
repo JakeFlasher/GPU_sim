@@ -13,6 +13,11 @@ it does not alter the established replay path.
 The active target is Ampere SM86 (RTX 3090 Ti). SM120 support is exploratory.
 NCU observations are comparison data only; they are never simulator inputs.
 
+The [general GPU simulator roadmap](plans/cross_architecture_gpu_simulator_research_plan_20260923.md)
+adds a staged user-defined architecture path alongside this SM86 validation
+anchor. Configurability, functional execution and cross-architecture validation
+are work in progress, not current claims of arbitrary GPU support.
+
 ## Data path
 
 ```text
@@ -44,6 +49,8 @@ python -m eval.direct_score --observed observed.json --predicted predicted.json
 For a GPU run, use the commands in [docs/runbook_host.md](docs/runbook_host.md).
 The current engine status and retained SM86 comparison roots are in
 [docs/STATUS.md](docs/STATUS.md).
+The latest adversarial closure and bounded residuals are in
+[docs/adversarial_code_review_20260923.md](docs/adversarial_code_review_20260923.md).
 
 The latest clock-qualified small/large campaign and same-input regression
 comparison are in

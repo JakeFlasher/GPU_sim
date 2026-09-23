@@ -200,7 +200,7 @@ fn sha256_compress(state: &mut [u32; 8], chunk: &[u8]) {
         b = a;
         a = temp1.wrapping_add(temp2);
     }
-    for (slot, value) in state.iter_mut().zip([a, b, c, d, e, f, g, h].into_iter()) {
+    for (slot, value) in state.iter_mut().zip([a, b, c, d, e, f, g, h]) {
         *slot = slot.wrapping_add(value);
     }
 }
@@ -402,7 +402,7 @@ fn canonical_python_json_with_ascii_policy(
         serde_json::Value::Object(values) => {
             out.push('{');
             let mut entries = values.iter().collect::<Vec<_>>();
-            entries.sort_by(|(left, _), (right, _)| left.cmp(right));
+            entries.sort_by_key(|(left, _)| *left);
             for (index, (key, value)) in entries.into_iter().enumerate() {
                 if index > 0 {
                     out.push(',');
