@@ -43,3 +43,23 @@ not be scored by fixed-trace replay.
 Run the same inventory over the retained timing-crosswalk holdout and the
 larger regenerated cohort. Add a typed unsupported reason only when a concrete
 input or replay path produces it; do not infer support from opcode names alone.
+
+
+## Holdout and larger-cohort expansion
+
+The same parser inventory now covers two additional retained cohorts:
+
+| Cohort | Rows | Static records | Distinct opcodes | Class counts (compute/memory/control/tensor/collective) | Unsupported memory paths | Unmapped ranges | Static module status |
+| --- | ---: | ---: | ---: | --- | ---: | ---: | --- |
+| timing-crosswalk holdout | 3 | 856 | 75 | 559/198/84/15/0 | 0 | 0 | 3 origin_unresolved |
+| regenerated large | 7 | 3,536 | 130 | 2,625/581/296/33/1 | 0 | 0 | 7 origin_unresolved |
+
+All ten rows retained exact active-launch contracts and full replay coverage.
+The larger cohort adds collective behavior and broader tensor/control
+spellings, while the producer-side unsupported arrays remain empty.
+
+The persistent static-module origin_unresolved status is now the dominant
+coverage/provenance gap across all 18 inventoried rows (8 small + 3 holdout +
+7 large). It does not prevent replay because the control sidecar is separately
+generated from the captured binary, but it prevents treating module identity as
+closed evidence. This remains an explicit M4 limitation.

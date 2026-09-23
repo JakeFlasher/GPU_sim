@@ -63,3 +63,20 @@ candidate is a demand-driven issue-loop optimization, evaluated against the
 width-1 baseline and the dense reference. If profiling shows no safe
 optimization opportunity, keep this negative result and choose a different
 trace-safe resource axis rather than tuning a width constant.
+
+
+## Timing-crosswalk holdout check
+
+The same override was run twice per cell on three retained timing holdout
+traces. Baseline versus width 2 produced:
+
+| Workload | Width 1 wall | Width 2 wall | Width 1 GPC frontier | Width 2 GPC frontier |
+| --- | ---: | ---: | ---: | ---: |
+| FP16 HMMA GEMM M224 | 0.689 s | 0.692 s | 11,570 | 11,569 |
+| INT8 IMMA GEMM M192 | 0.304 s | 0.304 s | 8,982 | 8,982 |
+| BF16 FlashAttention BH2 SQ96 SK96 | 0.063 s | 0.070 s | 13,959 | 13,959 |
+
+The holdout confirms that the override remains fail-closed and mostly neutral
+for this small sample; it does not create a speedup. The design conclusion is
+therefore stable enough to retain as a negative result, not as a universal
+scheduler claim.

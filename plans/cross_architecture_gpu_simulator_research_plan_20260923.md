@@ -401,7 +401,14 @@ replay wall time without weakening the declared model-relative observables.
 The first architecture design artifact is now the negative issue-width study in
 `docs/sm86_issue_width_design_study_20260923.md`: widths 2/4 alter modeled
 frontiers but are slower than width 1. The result is retained as a design
-finding, not tuned away or promoted to hardware behavior.
+finding, not tuned away or promoted to hardware behavior. The three-row timing
+holdout reproduces the same neutral/slower conclusion.
+
+The M4 inventory is now expanded to 18 rows (8 small + 3 timing holdout + 7
+regenerated large): 6,392 static records, 130 distinct opcode spellings in
+the largest cohort, zero producer-side unsupported memory-path entries, and
+zero unmapped memory ranges. Static module origin remains unresolved on all
+rows; this is an explicit provenance limitation.
 
 The first M6 baseline feasibility probe is documented in
 `docs/baseline_feasibility_20260923.md`. The retained Huerta MICRO'25 source
