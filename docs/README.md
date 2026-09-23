@@ -1,6 +1,7 @@
 # Documentation
 
 - [Research and positioning memo](gpu_simulator_research_positioning_20260923.md) — web-researched scope, prior art, claim boundary, and paper agenda.
+- [Adversarial roadmap review](roadmap_adversarial_review_20260923.md) — concrete claim gaps, prior-art collisions, and stop/fallback rules.
 - [CurryGPU functional-architecture study](curry_gpu_its_study_20260923.md) — local primary-source analysis and the bounded functional ITS seam.
 - [General software GPU simulator roadmap](../plans/cross_architecture_gpu_simulator_research_plan_20260923.md) — active implementation direction and NCU/speed completion bar.
 - [Custom architecture design sweep](custom_architecture_design_sweep_20260923.md) — model-relative SIMT/async resource experiment.

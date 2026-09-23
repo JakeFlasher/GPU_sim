@@ -7,6 +7,10 @@ with the evidence and prior-art review in
 It keeps the SM86 NVBit/NCU path and the bounded custom-SIMT feasibility seam;
 its completion bar is final NCU accuracy plus simulator wall time.
 
+The [adversarial roadmap review](../docs/roadmap_adversarial_review_20260923.md)
+expands the current milestones into executable steps, exit criteria, and
+fallback decisions.
+
 The following files are retained context, not active gates or instructions:
 
 - [SM86 simulator roadmap](micro2027_ncu_sim_execution_plan.md)

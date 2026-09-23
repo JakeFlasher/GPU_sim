@@ -28,6 +28,8 @@ campaign adapter is compiled only with the `sim-sm/campaign` feature.
 
 - Research and positioning:
   `docs/gpu_simulator_research_positioning_20260923.md`
+- Adversarial roadmap review:
+  `docs/roadmap_adversarial_review_20260923.md`
 - Execution plan:
   `plans/cross_architecture_gpu_simulator_research_plan_20260923.md`
 - Progress log:

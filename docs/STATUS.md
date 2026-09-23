@@ -64,16 +64,17 @@ them into a selection score.
 
 ## Immediate work
 
-1. Run a release sim-run replay and the matching NCU launch observation under
-   the same declared conditions.
-2. Measure simulator wall time on the same trace and host.
-3. Route one architecture-spec scheduler, issue, cache, or memory-resource
-   parameter into the production replay.
-4. Compare the resulting accuracy/speed point with applicable Accel-Sim 2.0,
-   Huerta MICRO'25, and FlashGPU-sim runs when their workload/hardware support
-   overlaps.
-5. Use one consequential configurable design study before expanding the custom
-   ISA surface.
+Follow the fine-grained milestones in the
+[adversarial roadmap review](roadmap_adversarial_review_20260923.md):
+
+1. close one same-launch NCU/simulator measurement boundary;
+2. route one explicit hypothetical resource override into production replay;
+3. measure replay-only wall time/RSS before and after one speed mechanism;
+4. publish feature/unsupported coverage; and
+5. use the mechanism in one architecture design study.
+
+Do not add another ISA or system layer before the first three items produce
+executable evidence.
 
 ## Historical material
 

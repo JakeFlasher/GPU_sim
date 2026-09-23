@@ -16,7 +16,8 @@ they are never simulator inputs. RTL, Verilator, FPGA, physical-design, and
 silicon-internal simulation are outside the project scope.
 
 The [research and positioning memo](docs/gpu_simulator_research_positioning_20260923.md)
-records the literature boundary and paper agenda. The [general GPU simulator
+records the literature boundary and paper agenda. The [adversarial roadmap review](docs/roadmap_adversarial_review_20260923.md)
+tracks claim gaps and milestone exit criteria. The [general GPU simulator
 roadmap](plans/cross_architecture_gpu_simulator_research_plan_20260923.md)
 adds a staged user-defined architecture path alongside this SM86 validation
 anchor. The CurryGPU functional-architecture study and bounded per-lane-PC ITS
