@@ -37,6 +37,12 @@ probe. Its official release supports modern Hopper features and reports broad
 H100 validation; those published values remain literature context, not a local
 comparison.
 
+The official Ubuntu 24.04/CUDA 12.8 container was also attempted from the
+published package tag. Most layers downloaded, but two registry layers entered
+repeated network retries and the pull was terminated without a usable image.
+This is an external environment failure; no baseline number is inferred from
+it.
+
 ## M6 decision
 
 Do not report a numerical baseline ranking yet. Continue with the local
