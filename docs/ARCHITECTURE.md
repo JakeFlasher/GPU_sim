@@ -1,44 +1,48 @@
 # Architecture
 
-The simulator is an event driven replay engine. A workload is captured once,
-then replayed against an architecture card without executing the original CUDA
-program.
+## Native trace replay
 
 ```text
-NVBit
-  | dynamic protobuf + control sidecars
-  v
-sim-trace  -- decode, validate, compact
-  v
-sim-sm     -- warp state, dependencies, issue, barriers, async copies
-  v
-sim-mem    -- L1/TEX, L2, DRAM request and completion state
-  v
-sim-engine -- event queue and system progress
-  v
-  sim-run-campaign -- manifest-driven CLI, JSON result/error output
-  sim-run           -- direct trace replay CLI
+NVBit -> enhanced protobuf + control sidecars
+      -> sim-trace -> sim-sm <-> sim-mem
+                         \-> sim-engine event ordering
+                         \-> sim-run JSON -> independent NCU comparison
 ```
 
-`sim-arch` owns architecture capabilities and defaults. `sim-trace` owns wire
-formats and trace directory readers. `sim-sm` owns per-warp and per-CTA
-scheduling. `sim-mem` models cache and memory service. `sim-engine` provides
-shared event ordering. `sim-run` and `sim-direct-run` provide command line
-entry points: `sim-run-campaign` for manifest workflows and `sim-run` for
-direct trace replay.
+`sim-trace` reads trace evidence; `sim-sm` handles scheduling, dependencies,
+barriers, and async operations; `sim-mem` models cache and memory service.
+`sim-engine` supplies deterministic event ordering. Native replay does not
+execute the original CUDA program again.
 
-Architecture dependent values live in `arch_profiles/cards`. The SM86 card is
-the production path. Unsupported capabilities fail explicitly instead of
-silently borrowing SM86 constants.
+Native architecture cards select supported geometry/timing. Direct and prepared
+replay consume the carded scheduler-resource blocks. Resource-less legacy
+fixtures have an explicit compatibility path; partial blocks reject. An
+optional scalar/profile override changes issue width, labels it hypothetical,
+and disables independent dual-issue widening. It cannot alter traced semantics.
 
-NCU values enter only through comparison tools. They do not alter trace
-replay, architecture cards, or simulator parameters.
+Package `sim-run` (`sim/direct_run`) provides the direct CLI and `sim_direct_run`
+library. Package `sim-run-campaign` (`sim/run`, library `sim_run`) retains the
+campaign CLI and shared emitters. NCU joins add observations after replay, never
+model inputs. See [components](COMPONENTS.md) and [profiles](archprofile.md).
 
-## User-defined functional seam
+## Custom functional/resource model
 
-`sim-arch::spec` is separate from production `ArchCard`. The bounded
-`simt_u32_v1` executor demonstrates lane arithmetic and resource-relative
-scheduling; the Curry-inspired `simt_its_v1` executor demonstrates per-lane
-PCs with BSSY/BSYNC/BREAK/EXIT semantics. Both are functional feasibility
-backends only. They do not alter the NVBit/SM86 replay and make no timing,
-compiler, RTL, or silicon claim.
+```text
+ArchitectureSpec + SimtProgram
+  -> sim-arch::simt (functional state)
+  -> sim-arch::simt_pipeline (dependencies and resource tasks)
+  -> sim-sm::custom (resident groups and bounded shared barriers)
+  -> sim-engine::pipeline (issue/completion events)
+  -> custom-program-run JSON (functional state + model-relative timing)
+```
+
+The custom frontend shares the event engine, not the native SM86 scoreboard or
+`sim-mem` cache hierarchy. It supports in-order per-group issue with independent
+resource overlap, latency/initiation/in-flight limits, and bounded residency.
+The `simt_u32_v1` instruction set is fixed; resource bindings do not define new
+instruction semantics. [Program contracts](../arch_profiles/programs/README.md)
+state address-space, barrier, atomic, and collective limits.
+
+The separate `simt_its_v1` executor demonstrates per-lane control flow and
+reconvergence without a timing backend. Neither custom frontend promises
+arbitrary binary/ABI compatibility, vendor-equivalent timing, or RTL behavior.

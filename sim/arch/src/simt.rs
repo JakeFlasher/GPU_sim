@@ -4,11 +4,13 @@
 //! SIMT group using a tiny, explicit ISA (`simt_u32_v1`) and the lane width
 //! from [`crate::spec::ArchitectureSpec`]. Its purpose is to prove that a
 //! user-supplied architecture definition can feed an executable functional
-//! backend alongside a hypothetical resource schedule. It does not emulate
-//! unaligned/byte accesses, multiple resident groups, or a vendor GPU ISA.
+//! backend alongside a hypothetical resource schedule. The functional
+//! `SimtExecutor` executes one group; `simt_pipeline`/`sim-sm::custom` provide
+//! bounded multi-group resource scheduling. It does not emulate unaligned/
+//! byte accesses or a vendor GPU ISA.
 
 use crate::json::strict_json_from_slice;
-use crate::spec::{ArchitectureSpec, ResourceKind, SpecError};
+use crate::spec::ArchitectureSpec;
 use serde::{Deserialize, Serialize};
 use sim_semantics::{
     AddressSpace, AsyncEffect, Isa, LaneAddress, LaneMask, MemoryDirection, MemoryEvent,
@@ -36,6 +38,11 @@ pub enum SimtInstruction {
         base: u32,
         stride: u32,
     },
+    LoadShared {
+        dst: u8,
+        base: u32,
+        stride: u32,
+    },
     AddImm {
         dst: u8,
         src: u8,
@@ -46,10 +53,29 @@ pub enum SimtInstruction {
         lhs: u8,
         rhs: u8,
     },
+    BroadcastLane0 {
+        dst: u8,
+        src: u8,
+    },
+    ReduceAdd {
+        dst: u8,
+        src: u8,
+    },
     Store {
         base: u32,
         stride: u32,
         src: u8,
+    },
+    StoreShared {
+        base: u32,
+        stride: u32,
+        src: u8,
+    },
+    AtomicAddShared {
+        base: u32,
+        stride: u32,
+        src: u8,
+        dst: u8,
     },
     AsyncStore {
         base: u32,
@@ -59,6 +85,12 @@ pub enum SimtInstruction {
     },
     WaitGroup {
         group: u8,
+    },
+    /// Whole-CTA rendezvous. The bounded multi-group frontend requires each
+    /// generation id to occur at most once per group so static participation
+    /// and cross-group dependencies remain unambiguous.
+    GroupBarrier {
+        id: u8,
     },
     Halt,
 }
@@ -71,6 +103,8 @@ struct RawSimtProgram {
     isa: String,
     #[serde(default)]
     initial_memory: BTreeMap<u32, u32>,
+    #[serde(default)]
+    initial_shared_memory: BTreeMap<u32, u32>,
     instructions: Vec<SimtInstruction>,
 }
 
@@ -80,6 +114,7 @@ pub struct SimtProgram {
     architecture: String,
     isa: String,
     initial_memory: BTreeMap<u32, u32>,
+    initial_shared_memory: BTreeMap<u32, u32>,
     instructions: Vec<SimtInstruction>,
 }
 
@@ -152,11 +187,15 @@ impl SimtProgram {
         for &address in raw.initial_memory.keys() {
             word_end(address)?;
         }
+        for &address in raw.initial_shared_memory.keys() {
+            word_end(address)?;
+        }
         Ok(Self {
             schema_version: raw.schema_version,
             architecture: raw.architecture,
             isa: raw.isa,
             initial_memory: raw.initial_memory,
+            initial_shared_memory: raw.initial_shared_memory,
             instructions: raw.instructions,
         })
     }
@@ -176,16 +215,29 @@ impl SimtProgram {
     pub fn initial_memory(&self) -> &BTreeMap<u32, u32> {
         &self.initial_memory
     }
+
+    pub fn initial_shared_memory(&self) -> &BTreeMap<u32, u32> {
+        &self.initial_shared_memory
+    }
 }
 
 fn validate_registers(instruction: &SimtInstruction) -> Result<(), SimtError> {
     let registers = match instruction {
-        SimtInstruction::SetLaneId { dst } | SimtInstruction::Load { dst, .. } => vec![*dst],
-        SimtInstruction::AddImm { dst, src, .. } => vec![*dst, *src],
+        SimtInstruction::SetLaneId { dst }
+        | SimtInstruction::Load { dst, .. }
+        | SimtInstruction::LoadShared { dst, .. } => vec![*dst],
+        SimtInstruction::AddImm { dst, src, .. }
+        | SimtInstruction::BroadcastLane0 { dst, src }
+        | SimtInstruction::ReduceAdd { dst, src } => {
+            vec![*dst, *src]
+        }
         SimtInstruction::Add { dst, lhs, rhs } => vec![*dst, *lhs, *rhs],
-        SimtInstruction::Store { src, .. } => vec![*src],
+        SimtInstruction::Store { src, .. } | SimtInstruction::StoreShared { src, .. } => {
+            vec![*src]
+        }
+        SimtInstruction::AtomicAddShared { src, dst, .. } => vec![*src, *dst],
         SimtInstruction::AsyncStore { src, .. } => vec![*src],
-        SimtInstruction::WaitGroup { .. } => Vec::new(),
+        SimtInstruction::WaitGroup { .. } | SimtInstruction::GroupBarrier { .. } => Vec::new(),
         SimtInstruction::Halt => Vec::new(),
     };
     if registers
@@ -205,6 +257,7 @@ pub struct FunctionalResult {
     pub instructions_executed: u64,
     pub registers: Vec<Vec<u32>>,
     pub memory: BTreeMap<u32, u32>,
+    pub shared_memory: BTreeMap<u32, u32>,
 }
 
 pub struct SimtExecutor<'a> {
@@ -237,149 +290,243 @@ impl<'a> SimtExecutor<'a> {
                 return Err(SimtError::UnsupportedInstruction(name.to_owned()));
             }
         }
-        if spec.execution().max_resident_groups() < 1 {
-            return Err(SimtError::Spec(SpecError::InvalidValue {
-                field: "execution.max_resident_groups",
-                detail: "must be positive".to_owned(),
-            }));
-        }
         Ok(Self { spec, program })
     }
 
     pub fn run(&self) -> Result<FunctionalResult, SimtError> {
-        let width = usize::from(self.spec.execution().simt_width());
-        let mut registers = vec![vec![0u32; REGISTER_COUNT]; width];
+        let mut group = SimtGroupState::new(self.spec.execution().simt_width())?;
         let mut memory = self.program.initial_memory().clone();
-        let mut pending_async = BTreeMap::<u8, Vec<(u32, u32, u32)>>::new();
-        let mut instructions_executed = 0u64;
-
+        let mut shared_memory = self.program.initial_shared_memory().clone();
         for instruction in self.program.instructions() {
-            let (base, stride, writes) = match instruction {
-                SimtInstruction::Load { base, stride, .. } => (Some(*base), *stride, false),
-                SimtInstruction::Store { base, stride, .. }
-                | SimtInstruction::AsyncStore { base, stride, .. } => (Some(*base), *stride, true),
-                _ => (None, 0, false),
-            };
-            if let Some(base) = base {
-                let mut ranges = Vec::with_capacity(width);
-                for lane in 0..width {
-                    let address = lane_address(base, stride, lane)?;
-                    let end = word_end(address)?;
-                    if writes
-                        && ranges.iter().any(|(prior_start, prior_end)| {
-                            ranges_overlap(address, end, *prior_start, *prior_end)
-                        })
-                    {
-                        return Err(SimtError::AliasingStore(address));
-                    }
-                    if pending_async
-                        .values()
-                        .flatten()
-                        .any(|(pending, pending_end, _)| {
-                            ranges_overlap(address, end, *pending, *pending_end)
-                        })
-                    {
-                        return Err(SimtError::PendingMemoryAccess(address));
-                    }
-                    ranges.push((address, end));
+            group.execute(instruction, &mut memory, &mut shared_memory)?;
+        }
+        group.finish(self.spec, &memory, &shared_memory)
+    }
+}
+
+/// Functional lane state that survives a whole-CTA barrier. The CTA caller
+/// owns address-space maps; groups must not keep private copies of shared data.
+pub struct SimtGroupState {
+    registers: Vec<Vec<u32>>,
+    pending_async: BTreeMap<u8, Vec<(u32, u32, u32)>>,
+    instructions_executed: u64,
+}
+
+impl SimtGroupState {
+    pub fn new(width: u8) -> Result<Self, SimtError> {
+        if !(1..=64).contains(&width) {
+            return Err(SimtError::InvalidProgram("SIMT width must be in 1..=64"));
+        }
+        Ok(Self {
+            registers: vec![vec![0; REGISTER_COUNT]; usize::from(width)],
+            pending_async: BTreeMap::new(),
+            instructions_executed: 0,
+        })
+    }
+
+    pub fn execute(
+        &mut self,
+        instruction: &SimtInstruction,
+        memory: &mut BTreeMap<u32, u32>,
+        shared_memory: &mut BTreeMap<u32, u32>,
+    ) -> Result<(), SimtError> {
+        validate_registers(instruction)?;
+        let width = self.registers.len();
+        let Self {
+            registers,
+            pending_async,
+            instructions_executed,
+        } = self;
+        let (base, stride, writes) = match instruction {
+            SimtInstruction::Load { base, stride, .. }
+            | SimtInstruction::LoadShared { base, stride, .. } => (Some(*base), *stride, false),
+            SimtInstruction::Store { base, stride, .. }
+            | SimtInstruction::StoreShared { base, stride, .. }
+            | SimtInstruction::AtomicAddShared { base, stride, .. }
+            | SimtInstruction::AsyncStore { base, stride, .. } => (Some(*base), *stride, true),
+            _ => (None, 0, false),
+        };
+        if let Some(base) = base {
+            let mut ranges = Vec::with_capacity(width);
+            for lane in 0..width {
+                let address = lane_address(base, stride, lane)?;
+                let end = word_end(address)?;
+                if writes
+                    && !matches!(instruction, SimtInstruction::AtomicAddShared { .. })
+                    && ranges.iter().any(|(prior_start, prior_end)| {
+                        ranges_overlap(address, end, *prior_start, *prior_end)
+                    })
+                {
+                    return Err(SimtError::AliasingStore(address));
                 }
-            }
-            instructions_executed = instructions_executed
-                .checked_add(1)
-                .ok_or(SimtError::InstructionCountOverflow)?;
-            match *instruction {
-                SimtInstruction::SetLaneId { dst } => {
-                    for (lane, registers) in registers.iter_mut().enumerate() {
-                        registers[usize::from(dst)] = lane as u32;
-                    }
+                if !matches!(
+                    instruction,
+                    SimtInstruction::LoadShared { .. }
+                        | SimtInstruction::StoreShared { .. }
+                        | SimtInstruction::AtomicAddShared { .. }
+                ) && pending_async
+                    .values()
+                    .flatten()
+                    .any(|(pending, pending_end, _)| {
+                        ranges_overlap(address, end, *pending, *pending_end)
+                    })
+                {
+                    return Err(SimtError::PendingMemoryAccess(address));
                 }
-                SimtInstruction::Load { dst, base, stride } => {
-                    let values = registers
-                        .iter()
-                        .enumerate()
-                        .map(|(lane, _)| {
-                            let address = lane_address(base, stride, lane)?;
-                            memory
-                                .get(&address)
-                                .copied()
-                                .ok_or(SimtError::MissingMemoryAddress(address))
-                        })
-                        .collect::<Result<Vec<_>, _>>()?;
-                    for (registers, value) in registers.iter_mut().zip(values) {
-                        registers[usize::from(dst)] = value;
-                    }
-                }
-                SimtInstruction::AddImm { dst, src, imm } => {
-                    for registers in &mut registers {
-                        registers[usize::from(dst)] =
-                            registers[usize::from(src)].wrapping_add_signed(imm);
-                    }
-                }
-                SimtInstruction::Add { dst, lhs, rhs } => {
-                    for registers in &mut registers {
-                        registers[usize::from(dst)] =
-                            registers[usize::from(lhs)].wrapping_add(registers[usize::from(rhs)]);
-                    }
-                }
-                SimtInstruction::Store { base, stride, src } => {
-                    for (lane, registers) in registers.iter().enumerate() {
-                        let address = lane_address(base, stride, lane)?;
-                        memory.insert(address, registers[usize::from(src)]);
-                    }
-                }
-                SimtInstruction::AsyncStore {
-                    base,
-                    stride,
-                    src,
-                    group,
-                } => {
-                    if pending_async.contains_key(&group) {
-                        return Err(SimtError::AsyncGroupReuse(group));
-                    }
-                    let stores = registers
-                        .iter()
-                        .enumerate()
-                        .map(|(lane, registers)| {
-                            let address = lane_address(base, stride, lane)?;
-                            let end = word_end(address)?;
-                            Ok::<(u32, u32, u32), SimtError>((
-                                address,
-                                end,
-                                registers[usize::from(src)],
-                            ))
-                        })
-                        .collect::<Result<Vec<_>, _>>()?;
-                    pending_async.insert(group, stores);
-                }
-                SimtInstruction::WaitGroup { group } => {
-                    let stores = pending_async
-                        .remove(&group)
-                        .ok_or(SimtError::MissingAsyncGroup(group))?;
-                    for (address, _end, value) in stores {
-                        memory.insert(address, value);
-                    }
-                }
-                SimtInstruction::Halt => break,
+                ranges.push((address, end));
             }
         }
-        if let Some(group) = pending_async.keys().next().copied() {
+        *instructions_executed = instructions_executed
+            .checked_add(1)
+            .ok_or(SimtError::InstructionCountOverflow)?;
+        match *instruction {
+            SimtInstruction::SetLaneId { dst } => {
+                for (lane, registers) in registers.iter_mut().enumerate() {
+                    registers[usize::from(dst)] = lane as u32;
+                }
+            }
+            SimtInstruction::Load { dst, base, stride }
+            | SimtInstruction::LoadShared { dst, base, stride } => {
+                let source = if matches!(instruction, SimtInstruction::LoadShared { .. }) {
+                    &*shared_memory
+                } else {
+                    &*memory
+                };
+                let values = registers
+                    .iter()
+                    .enumerate()
+                    .map(|(lane, _)| {
+                        let address = lane_address(base, stride, lane)?;
+                        source
+                            .get(&address)
+                            .copied()
+                            .ok_or(SimtError::MissingMemoryAddress(address))
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
+                for (registers, value) in registers.iter_mut().zip(values) {
+                    registers[usize::from(dst)] = value;
+                }
+            }
+            SimtInstruction::AddImm { dst, src, imm } => {
+                for registers in registers.iter_mut() {
+                    registers[usize::from(dst)] =
+                        registers[usize::from(src)].wrapping_add_signed(imm);
+                }
+            }
+            SimtInstruction::BroadcastLane0 { dst, src } => {
+                let value = registers[0][usize::from(src)];
+                for registers in registers.iter_mut() {
+                    registers[usize::from(dst)] = value;
+                }
+            }
+            SimtInstruction::ReduceAdd { dst, src } => {
+                let value = registers.iter().fold(0_u32, |sum, registers| {
+                    sum.wrapping_add(registers[usize::from(src)])
+                });
+                for registers in registers.iter_mut() {
+                    registers[usize::from(dst)] = value;
+                }
+            }
+            SimtInstruction::Add { dst, lhs, rhs } => {
+                for registers in registers.iter_mut() {
+                    registers[usize::from(dst)] =
+                        registers[usize::from(lhs)].wrapping_add(registers[usize::from(rhs)]);
+                }
+            }
+            SimtInstruction::Store { base, stride, src }
+            | SimtInstruction::StoreShared { base, stride, src } => {
+                let destination = if matches!(instruction, SimtInstruction::StoreShared { .. }) {
+                    &mut *shared_memory
+                } else {
+                    &mut *memory
+                };
+                for (lane, registers) in registers.iter().enumerate() {
+                    let address = lane_address(base, stride, lane)?;
+                    destination.insert(address, registers[usize::from(src)]);
+                }
+            }
+            SimtInstruction::AtomicAddShared {
+                base,
+                stride,
+                src,
+                dst,
+            } => {
+                for (lane, registers) in registers.iter_mut().enumerate() {
+                    let address = lane_address(base, stride, lane)?;
+                    let old = shared_memory
+                        .get(&address)
+                        .copied()
+                        .ok_or(SimtError::MissingMemoryAddress(address))?;
+                    shared_memory.insert(address, old.wrapping_add(registers[usize::from(src)]));
+                    registers[usize::from(dst)] = old;
+                }
+            }
+            SimtInstruction::AsyncStore {
+                base,
+                stride,
+                src,
+                group,
+            } => {
+                if pending_async.contains_key(&group) {
+                    return Err(SimtError::AsyncGroupReuse(group));
+                }
+                let stores = registers
+                    .iter()
+                    .enumerate()
+                    .map(|(lane, registers)| {
+                        let address = lane_address(base, stride, lane)?;
+                        let end = word_end(address)?;
+                        Ok::<(u32, u32, u32), SimtError>((
+                            address,
+                            end,
+                            registers[usize::from(src)],
+                        ))
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
+                pending_async.insert(group, stores);
+            }
+            SimtInstruction::WaitGroup { group } => {
+                let stores = pending_async
+                    .remove(&group)
+                    .ok_or(SimtError::MissingAsyncGroup(group))?;
+                for (address, _end, value) in stores {
+                    memory.insert(address, value);
+                }
+            }
+            SimtInstruction::GroupBarrier { .. } | SimtInstruction::Halt => {
+                if let Some(group) = pending_async.keys().next().copied() {
+                    return Err(SimtError::UnfinishedAsyncGroup(group));
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    pub fn finish(
+        self,
+        spec: &ArchitectureSpec,
+        memory: &BTreeMap<u32, u32>,
+        shared_memory: &BTreeMap<u32, u32>,
+    ) -> Result<FunctionalResult, SimtError> {
+        if let Some(group) = self.pending_async.keys().next().copied() {
             return Err(SimtError::UnfinishedAsyncGroup(group));
         }
-
         Ok(FunctionalResult {
-            architecture: self.spec.architecture().to_owned(),
-            isa: self.spec.isa().to_owned(),
-            simt_width: self.spec.execution().simt_width(),
-            instructions_executed,
-            registers,
-            memory,
+            architecture: spec.architecture().to_owned(),
+            isa: spec.isa().to_owned(),
+            simt_width: spec.execution().simt_width(),
+            instructions_executed: self.instructions_executed,
+            registers: self.registers,
+            memory: memory.clone(),
+            shared_memory: shared_memory.clone(),
         })
     }
 }
 
-/// A deterministic timing result for one bounded custom SIMT group. This is
-/// deliberately a tiny event schedule, not a replacement for `sim-engine` or
-/// the SM86 timing model.
+/// A deterministic timing result for one bounded custom SIMT group, projected
+/// from the shared `sim-engine` dependency/resource pipeline. It is not the
+/// native SM86 timing model.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct TimingEvent {
     pub instruction_index: u64,
@@ -391,6 +538,7 @@ pub struct TimingEvent {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct TimingResult {
+    pub timing_model: &'static str,
     pub architecture: String,
     pub isa: String,
     pub simt_width: u8,
@@ -411,124 +559,62 @@ impl<'a> SimtTimingExecutor<'a> {
     }
 
     pub fn run(&self) -> Result<TimingResult, SimtError> {
-        // Timing success must not accept a program that has undefined functional
-        // effects (e.g. an uninitialized load or an unconsumed async token).
         SimtExecutor::new(self.spec, self.program)?.run()?;
-        let width = u64::from(self.spec.execution().simt_width());
-        let mut now = 0u64;
-        let mut pending = BTreeMap::<u8, u64>::new();
-        let mut resource_next = BTreeMap::<String, u64>::new();
-        let mut events = Vec::with_capacity(self.program.instructions().len());
+        let resources = crate::simt_pipeline::resources(self.spec)?;
+        let tasks = crate::simt_pipeline::tasks(self.spec, self.program)?;
+        let schedule = sim_engine::pipeline::schedule(&resources, &[tasks], 1)?;
+        self.project_schedule(&schedule.groups[0])
+    }
 
-        for (instruction_index, instruction) in self.program.instructions().iter().enumerate() {
-            let instruction_index = u64::try_from(instruction_index)
-                .map_err(|_| SimtError::InstructionCountOverflow)?;
-            match instruction {
-                SimtInstruction::SetLaneId { .. }
-                | SimtInstruction::AddImm { .. }
-                | SimtInstruction::Add { .. } => {
-                    let resource = self.resource("alu")?;
-                    let start = reserve_resource(&mut resource_next, resource, now, 1)?;
-                    let span = issue_span(1, resource.issue_width())?;
-                    let complete = checked_cycle(start, span, resource.latency_cycles())?;
-                    now = complete;
-                    events.push(TimingEvent {
-                        instruction_index,
-                        operation: operation_name(instruction).to_owned(),
-                        resource: Some(resource.name().to_owned()),
-                        start_cycle: start,
-                        complete_cycle: complete,
-                    });
-                }
-                SimtInstruction::Load { .. } | SimtInstruction::Store { .. } => {
-                    let resource = self.resource("memory")?;
-                    let start = reserve_resource(&mut resource_next, resource, now, width)?;
-                    let span = issue_span(width, resource.issue_width())?;
-                    let complete = checked_cycle(start, span, resource.latency_cycles())?;
-                    now = complete;
-                    events.push(TimingEvent {
-                        instruction_index,
-                        operation: operation_name(instruction).to_owned(),
-                        resource: Some(resource.name().to_owned()),
-                        start_cycle: start,
-                        complete_cycle: complete,
-                    });
-                }
-                SimtInstruction::AsyncStore { group, .. } => {
-                    if pending.contains_key(group) {
-                        return Err(SimtError::AsyncGroupReuse(*group));
-                    }
-                    let resource = self.resource("memory")?;
-                    let start = reserve_resource(&mut resource_next, resource, now, width)?;
-                    let span = issue_span(width, resource.issue_width())?;
-                    let complete = checked_cycle(start, span, resource.latency_cycles())?;
-                    pending.insert(*group, complete);
-                    now = start.checked_add(span).ok_or(SimtError::CycleOverflow)?;
-                    events.push(TimingEvent {
-                        instruction_index,
-                        operation: operation_name(instruction).to_owned(),
-                        resource: Some(resource.name().to_owned()),
-                        start_cycle: start,
-                        complete_cycle: complete,
-                    });
-                }
-                SimtInstruction::WaitGroup { group } => {
-                    let ready = pending
-                        .remove(group)
-                        .ok_or(SimtError::MissingAsyncGroup(*group))?;
-                    let start = now;
-                    now = now.max(ready);
-                    events.push(TimingEvent {
-                        instruction_index,
-                        operation: operation_name(instruction).to_owned(),
-                        resource: None,
-                        start_cycle: start,
-                        complete_cycle: now,
-                    });
-                }
-                SimtInstruction::Halt => {
-                    if let Some(group) = pending.keys().next().copied() {
-                        return Err(SimtError::UnfinishedAsyncGroup(group));
-                    }
-                    events.push(TimingEvent {
-                        instruction_index,
-                        operation: operation_name(instruction).to_owned(),
-                        resource: None,
-                        start_cycle: now,
-                        complete_cycle: now,
-                    });
-                }
+    /// Shared by the single-program CLI and the production multi-group backend.
+    pub fn project_schedule(
+        &self,
+        intervals: &[sim_engine::pipeline::Interval],
+    ) -> Result<TimingResult, SimtError> {
+        if intervals.len() != self.program.instructions().len() {
+            return Err(SimtError::InvalidProgram("timing schedule length mismatch"));
+        }
+        let tasks = crate::simt_pipeline::tasks(self.spec, self.program)?;
+        for (index, (task, interval)) in tasks.iter().zip(intervals).enumerate() {
+            if interval.complete < interval.start
+                || interval.start < index as u64
+                || task
+                    .dependencies
+                    .iter()
+                    .any(|dependency| interval.start < intervals[*dependency].complete)
+            {
+                return Err(SimtError::InvalidProgram(
+                    "timing schedule violates issue or dependency order",
+                ));
             }
         }
-
+        let events: Vec<_> = self
+            .program
+            .instructions()
+            .iter()
+            .zip(intervals)
+            .enumerate()
+            .map(|(i, (instruction, interval))| TimingEvent {
+                instruction_index: i as u64,
+                operation: operation_name(instruction).to_owned(),
+                resource: tasks[i]
+                    .resource
+                    .map(|r| self.spec.resources()[r].name().to_owned()),
+                start_cycle: interval.start,
+                complete_cycle: interval.complete,
+            })
+            .collect();
         let semantic_events = self.semantic_events(&events)?;
         validate_async_effects(&semantic_events).map_err(|_| SimtError::SemanticProjection)?;
         Ok(TimingResult {
+            timing_model: "dependency_resource_v2",
             architecture: self.spec.architecture().to_owned(),
             isa: self.spec.isa().to_owned(),
             simt_width: self.spec.execution().simt_width(),
-            final_cycle: now,
+            final_cycle: events.iter().map(|e| e.complete_cycle).max().unwrap_or(0),
             events,
             semantic_events,
         })
-    }
-
-    fn resource(&self, name: &str) -> Result<&crate::spec::ResourceSpec, SimtError> {
-        let resource = self
-            .spec
-            .resources()
-            .iter()
-            .find(|resource| resource.name() == name)
-            .ok_or_else(|| SimtError::MissingResource(name.to_owned()))?;
-        let kind = if name == "alu" {
-            ResourceKind::Compute
-        } else {
-            ResourceKind::Memory
-        };
-        if resource.kind() != kind {
-            return Err(SimtError::InvalidProgram("timing resource kind mismatch"));
-        }
-        Ok(resource)
     }
 
     fn semantic_events(&self, timing: &[TimingEvent]) -> Result<Vec<SemanticEvent>, SimtError> {
@@ -563,7 +649,8 @@ impl<'a> SimtTimingExecutor<'a> {
                 };
                 let (operation, memory) = match instruction {
                     SimtInstruction::SetLaneId { .. } => (OperationKind::SpecialRegister, None),
-                    SimtInstruction::Load { base, stride, .. } => {
+                    SimtInstruction::Load { base, stride, .. }
+                    | SimtInstruction::LoadShared { base, stride, .. } => {
                         let addresses = (0..self.spec.execution().simt_width())
                             .map(|lane| {
                                 Ok(LaneAddress {
@@ -579,13 +666,25 @@ impl<'a> SimtTimingExecutor<'a> {
                         (
                             OperationKind::Memory,
                             Some(MemoryEvent {
-                                family: MemoryFamily::Global,
+                                family: if matches!(instruction, SimtInstruction::LoadShared { .. })
+                                {
+                                    MemoryFamily::Shared
+                                } else {
+                                    MemoryFamily::Global
+                                },
                                 direction: Some(MemoryDirection::Load),
                                 dynamic_class_present: true,
                                 native_cache_op: None,
                                 declared_width: Some(4),
                                 operands: vec![MemoryOperand {
-                                    address_space: Some(AddressSpace::Global),
+                                    address_space: Some(
+                                        if matches!(instruction, SimtInstruction::LoadShared { .. })
+                                        {
+                                            AddressSpace::Shared
+                                        } else {
+                                            AddressSpace::Global
+                                        },
+                                    ),
                                     allocation_id: None,
                                     lane_mask,
                                     width_bytes: 4,
@@ -598,12 +697,30 @@ impl<'a> SimtTimingExecutor<'a> {
                     SimtInstruction::AddImm { .. } | SimtInstruction::Add { .. } => {
                         (OperationKind::Arithmetic, None)
                     }
+                    SimtInstruction::BroadcastLane0 { .. } => (OperationKind::LaneExchange, None),
+                    SimtInstruction::ReduceAdd { .. } => (OperationKind::LaneExchange, None),
                     SimtInstruction::Store { base, stride, .. }
+                    | SimtInstruction::StoreShared { base, stride, .. }
+                    | SimtInstruction::AtomicAddShared { base, stride, .. }
                     | SimtInstruction::AsyncStore { base, stride, .. } => {
                         // Asynchrony is a token effect, not a different data
                         // movement operation. This writes registers to global
                         // memory; it is not a global-to-shared async copy.
-                        let (family, direction) = (MemoryFamily::Global, MemoryDirection::Store);
+                        let family = if matches!(
+                            instruction,
+                            SimtInstruction::StoreShared { .. }
+                                | SimtInstruction::AtomicAddShared { .. }
+                        ) {
+                            MemoryFamily::Shared
+                        } else {
+                            MemoryFamily::Global
+                        };
+                        let direction =
+                            if matches!(instruction, SimtInstruction::AtomicAddShared { .. }) {
+                                MemoryDirection::Atomic
+                            } else {
+                                MemoryDirection::Store
+                            };
                         let addresses = (0..self.spec.execution().simt_width())
                             .map(|lane| {
                                 Ok(LaneAddress {
@@ -625,7 +742,17 @@ impl<'a> SimtTimingExecutor<'a> {
                                 native_cache_op: None,
                                 declared_width: Some(4),
                                 operands: vec![MemoryOperand {
-                                    address_space: Some(AddressSpace::Global),
+                                    address_space: Some(
+                                        if matches!(
+                                            instruction,
+                                            SimtInstruction::StoreShared { .. }
+                                                | SimtInstruction::AtomicAddShared { .. }
+                                        ) {
+                                            AddressSpace::Shared
+                                        } else {
+                                            AddressSpace::Global
+                                        },
+                                    ),
                                     allocation_id: None,
                                     lane_mask,
                                     width_bytes: 4,
@@ -635,7 +762,9 @@ impl<'a> SimtTimingExecutor<'a> {
                             }),
                         )
                     }
-                    SimtInstruction::WaitGroup { .. } => (OperationKind::Synchronization, None),
+                    SimtInstruction::WaitGroup { .. } | SimtInstruction::GroupBarrier { .. } => {
+                        (OperationKind::Synchronization, None)
+                    }
                     SimtInstruction::Halt => (OperationKind::NoOp, None),
                 };
                 let event = SemanticEvent {
@@ -667,20 +796,26 @@ impl<'a> SimtTimingExecutor<'a> {
     }
 }
 
-fn operation_name(instruction: &SimtInstruction) -> &'static str {
+pub fn operation_name(instruction: &SimtInstruction) -> &'static str {
     match instruction {
         SimtInstruction::SetLaneId { .. } => "set_lane_id",
         SimtInstruction::Load { .. } => "load",
+        SimtInstruction::LoadShared { .. } => "load_shared",
         SimtInstruction::AddImm { .. } => "add_imm",
         SimtInstruction::Add { .. } => "add",
+        SimtInstruction::BroadcastLane0 { .. } => "broadcast_lane0",
+        SimtInstruction::ReduceAdd { .. } => "reduce_add",
         SimtInstruction::Store { .. } => "store",
+        SimtInstruction::StoreShared { .. } => "store_shared",
+        SimtInstruction::AtomicAddShared { .. } => "atomic_add_shared",
         SimtInstruction::AsyncStore { .. } => "async_store",
         SimtInstruction::WaitGroup { .. } => "wait_group",
+        SimtInstruction::GroupBarrier { .. } => "group_barrier",
         SimtInstruction::Halt => "halt",
     }
 }
 
-fn lane_address(base: u32, stride: u32, lane: usize) -> Result<u32, SimtError> {
+pub(crate) fn lane_address(base: u32, stride: u32, lane: usize) -> Result<u32, SimtError> {
     let lane = u32::try_from(lane).map_err(|_| SimtError::AddressOverflow)?;
     base.checked_add(stride.checked_mul(lane).ok_or(SimtError::AddressOverflow)?)
         .ok_or(SimtError::AddressOverflow)
@@ -698,36 +833,6 @@ fn word_end(address: u32) -> Result<u32, SimtError> {
 
 fn ranges_overlap(left_start: u32, left_end: u32, right_start: u32, right_end: u32) -> bool {
     left_start <= right_end && right_start <= left_end
-}
-
-fn issue_span(operations: u64, issue_width: u32) -> Result<u64, SimtError> {
-    let width = u64::from(issue_width);
-    operations
-        .checked_add(width - 1)
-        .map(|value| value / width)
-        .ok_or(SimtError::CycleOverflow)
-}
-
-fn reserve_resource(
-    resource_next: &mut BTreeMap<String, u64>,
-    resource: &crate::spec::ResourceSpec,
-    now: u64,
-    operations: u64,
-) -> Result<u64, SimtError> {
-    let start = now.max(*resource_next.get(resource.name()).unwrap_or(&0));
-    let next = start
-        .checked_add(issue_span(operations, resource.issue_width())?)
-        .ok_or(SimtError::CycleOverflow)?;
-    resource_next.insert(resource.name().to_owned(), next);
-    Ok(start)
-}
-
-fn checked_cycle(start: u64, span: u64, latency: Option<u64>) -> Result<u64, SimtError> {
-    let latency = latency.ok_or(SimtError::UnknownLatency)?;
-    start
-        .checked_add(span)
-        .and_then(|cycle| cycle.checked_add(latency))
-        .ok_or(SimtError::CycleOverflow)
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -795,7 +900,9 @@ pub enum SimtError {
     #[error("custom SIMT semantic-event projection failed validation")]
     SemanticProjection,
     #[error("architecture spec error: {0}")]
-    Spec(#[from] SpecError),
+    Spec(#[from] crate::spec::SpecError),
+    #[error(transparent)]
+    Pipeline(#[from] sim_engine::pipeline::PipelineError),
 }
 
 #[cfg(test)]
@@ -894,7 +1001,7 @@ mod tests {
             .run()
             .expect("timing program should terminate");
         assert_eq!(timing.simt_width, 8);
-        assert_eq!(timing.final_cycle, 32);
+        assert_eq!(timing.final_cycle, 33);
         assert!(
             timing
                 .events
@@ -928,6 +1035,113 @@ mod tests {
                 .lane_addresses[7]
                 .address,
             228
+        );
+    }
+
+    #[test]
+    fn independent_alu_issues_while_memory_is_in_flight() {
+        let program = SimtProgram::parse(
+            Path::new("pipeline_overlap.json"),
+            include_bytes!("../../../arch_profiles/programs/simt_u32_pipeline_overlap.json"),
+        )
+        .expect("overlap program should parse");
+        let timing = SimtTimingExecutor::new(&spec(), &program)
+            .expect("timing identities should match")
+            .run()
+            .expect("overlap program should terminate");
+        let load = timing
+            .events
+            .iter()
+            .find(|event| event.operation == "load")
+            .expect("load event should exist");
+        let independent_alu = timing
+            .events
+            .iter()
+            .find(|event| event.instruction_index == 2)
+            .expect("independent ALU event should exist");
+        assert!(independent_alu.start_cycle < load.complete_cycle);
+        assert_eq!(timing.final_cycle, 37);
+    }
+
+    #[test]
+    fn shared_memory_has_separate_functional_and_semantic_state() {
+        let spec = ArchitectureSpec::parse(
+            Path::new("shared.json"),
+            include_bytes!("../../../arch_profiles/specs/simt_u32_shared.json"),
+        )
+        .expect("shared spec should parse");
+        let program = SimtProgram::parse(
+            Path::new("shared_program.json"),
+            include_bytes!("../../../arch_profiles/programs/simt_u32_shared.json"),
+        )
+        .expect("shared program should parse");
+        let functional = SimtExecutor::new(&spec, &program)
+            .expect("shared identities should match")
+            .run()
+            .expect("shared program should execute");
+        assert!(functional.memory.is_empty());
+        assert_eq!(functional.shared_memory.get(&200), Some(&15));
+        let timing = SimtTimingExecutor::new(&spec, &program)
+            .expect("shared timing identities should match")
+            .run()
+            .expect("shared timing should execute");
+        let load = timing
+            .semantic_events
+            .iter()
+            .find(|event| event.opcode_text.as_deref() == Some("load_shared"))
+            .expect("shared load event should exist");
+        let memory = load.memory.as_ref().expect("shared load carries memory");
+        assert_eq!(memory.family, MemoryFamily::Shared);
+        assert_eq!(memory.operands[0].address_space, Some(AddressSpace::Shared));
+    }
+
+    #[test]
+    fn atomic_and_collective_semantics_are_typed() {
+        let atomic_spec = ArchitectureSpec::parse(
+            Path::new("atomic.json"),
+            include_bytes!("../../../arch_profiles/specs/simt_u32_atomic.json"),
+        )
+        .expect("atomic spec should parse");
+        let atomic_program = SimtProgram::parse(
+            Path::new("atomic_program.json"),
+            include_bytes!("../../../arch_profiles/programs/simt_u32_atomic.json"),
+        )
+        .expect("atomic program should parse");
+        let atomic = SimtTimingExecutor::new(&atomic_spec, &atomic_program)
+            .expect("atomic timing should initialize")
+            .run()
+            .expect("atomic timing should execute");
+        let atomic_memory = atomic
+            .semantic_events
+            .iter()
+            .find_map(|event| event.memory.as_ref())
+            .expect("atomic event should carry memory semantics");
+        assert_eq!(atomic_memory.family, MemoryFamily::Shared);
+        assert_eq!(atomic_memory.direction, Some(MemoryDirection::Atomic));
+        assert_eq!(
+            atomic_memory.operands[0].address_space,
+            Some(AddressSpace::Shared)
+        );
+
+        let collective_spec = ArchitectureSpec::parse(
+            Path::new("collective.json"),
+            include_bytes!("../../../arch_profiles/specs/simt_u32_collective.json"),
+        )
+        .expect("collective spec should parse");
+        let collective_program = SimtProgram::parse(
+            Path::new("collective_program.json"),
+            include_bytes!("../../../arch_profiles/programs/simt_u32_collective.json"),
+        )
+        .expect("collective program should parse");
+        let collective = SimtTimingExecutor::new(&collective_spec, &collective_program)
+            .expect("collective timing should initialize")
+            .run()
+            .expect("collective timing should execute");
+        assert!(
+            collective
+                .semantic_events
+                .iter()
+                .any(|event| event.operation == OperationKind::LaneExchange)
         );
     }
 

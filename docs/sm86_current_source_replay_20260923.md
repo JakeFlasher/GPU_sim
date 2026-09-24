@@ -1,3 +1,5 @@
+> **Dated replay record.** Use current status and project memory for active claims; this comparison is revision-relative evidence.
+
 # SM86 current-source replay check — 2026-09-23
 
 The current release binary was run against a retained post-merge SM86 trace.

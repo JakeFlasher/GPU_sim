@@ -10,6 +10,7 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 sim-semantics = { path = "../semantics" }
+sim-engine = { path = "../engine" }
 
 [dev-dependencies]
 tempfile = { workspace = true }

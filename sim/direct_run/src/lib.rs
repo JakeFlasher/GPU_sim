@@ -16,7 +16,8 @@ use std::str::FromStr;
 use std::time::Instant;
 
 use serde::{Deserialize, Serialize};
-use sim_arch::card::ArchCard;
+use sim_arch::card::{ArchCard, CalibError};
+use sim_arch::spec::{ArchitectureSpec, ResourceKind};
 use sim_mem::{L1Counters, L2Config, L2Counters, L2Source, MemoryOrigin, PchaseCard};
 use sim_run::emit::{
     EmitOutcome, EmittedMetricKey, FullLaunchPredictions, MetricValue, Unavailable, Unit,
@@ -113,6 +114,10 @@ pub struct RunConfig {
     /// the evidence-bound architecture card; it labels the replay as a
     /// hypothetical resource experiment.
     pub hypothetical_issue_ports: Option<u32>,
+    /// Optional trace-safe architecture resource profile. The current
+    /// production bridge consumes only its `alu`/`memory` issue-width pair;
+    /// it never changes the traced SASS semantics or vendor card identity.
+    pub architecture_spec: Option<PathBuf>,
     pub kernel_id: Option<i32>,
     /// Include the registry-bound simulator projections used for NCU joins.
     /// The default remains false so existing direct-result JSON is unchanged.
@@ -218,28 +223,153 @@ pub(crate) fn load_arch_card(path: &Path) -> Result<ArchCard, RunError> {
 }
 
 /// Share the established direct-replay issue constructor between ordinary and
-/// prepared replay. The legacy constructor preserves the SM86 model-relative
-/// baseline; the optional issue-port override is layered afterward and is
-/// explicitly labeled hypothetical.
-fn resolve_issue(config: &RunConfig, card: &ArchCard) -> Result<IssueModelParams, RunError> {
+/// prepared replay. Direct replay must consume the same carded scheduler
+/// resources as the campaign path; otherwise changing `smsp.issue_ports`,
+/// occupancy, or dual-issue state in a user card silently has no effect.
+/// The optional scalar/profile issue-width override is layered afterward and
+/// is explicitly labeled hypothetical.
+fn resolve_issue_with_metadata(
+    config: &RunConfig,
+    card: &ArchCard,
+) -> Result<(IssueModelParams, Option<u32>), RunError> {
     let arch = card.arch_id().map_err(at("architecture card"))?;
-    let latencies = card
-        .required_latencies()
-        .map_err(at("architecture latencies"))?;
-    let issue = IssueModelParams::from_legacy_card_latencies_for_arch(
-        arch,
-        latencies.l1_hit,
-        latencies.l2_hit,
-        latencies.dram,
-        latencies.shared,
-    )
-    .map_err(at("legacy issue configuration"))?;
-    match config.hypothetical_issue_ports {
+    let issue = match card.required_issue_resources() {
+        Ok(_) => IssueModelParams::from_card(arch, card).map_err(at("issue configuration"))?,
+        Err(CalibError::BlockResearchGap { .. }) if !card.has_any_issue_resource_blocks() => {
+            // Keep old cards readable through an explicit compatibility path.
+            // The moment a card carries any scheduler block, partial schemas
+            // fail closed instead of borrowing architecture-local defaults.
+            let latencies = card
+                .required_latencies()
+                .map_err(at("architecture latencies"))?;
+            IssueModelParams::from_legacy_card_latencies_for_arch(
+                arch,
+                latencies.l1_hit,
+                latencies.l2_hit,
+                latencies.dram,
+                latencies.shared,
+            )
+            .map_err(at("legacy issue configuration"))?
+        }
+        Err(error) => return Err(at("issue configuration")(error)),
+    };
+    if config.hypothetical_issue_ports.is_some() && config.architecture_spec.is_some() {
+        return Err(RunError::new(
+            "arguments",
+            "--hypothetical-issue-ports and --architecture-spec are mutually exclusive",
+        ));
+    }
+    let architecture_spec_issue_ports = config
+        .architecture_spec
+        .as_deref()
+        .map(|path| trace_safe_issue_ports(path, arch))
+        .transpose()?;
+    let requested_issue_ports = architecture_spec_issue_ports.or(config.hypothetical_issue_ports);
+    let issue = match requested_issue_ports {
         Some(ports) => issue
             .with_hypothetical_issue_ports(ports)
             .map_err(at("hypothetical issue configuration")),
         None => Ok(issue),
+    }?;
+    Ok((issue, architecture_spec_issue_ports))
+}
+
+/// Resolve the deliberately narrow architecture-spec bridge into the one
+/// trace-safe production resource currently exposed by `sim-sm`. A custom
+/// functional ISA, multi-group capacity, or arbitrary resource graph cannot
+/// be applied to a fixed SASS trace and therefore fails closed here.
+fn trace_safe_issue_ports(path: &Path, arch: sim_arch::ArchId) -> Result<u32, RunError> {
+    let raw = read_direct_input(path, "architecture spec", MAX_DIRECT_CARD_BYTES)?;
+    let spec = ArchitectureSpec::parse(path, &raw).map_err(at("architecture spec"))?;
+    if spec.architecture() != arch.token() {
+        return Err(RunError::new(
+            "architecture spec",
+            format!(
+                "trace-safe profile architecture {:?} does not match card {:?}",
+                spec.architecture(),
+                arch.token()
+            ),
+        ));
     }
+    if spec.isa() != "trace_sass_v1" {
+        return Err(RunError::new(
+            "architecture spec",
+            format!(
+                "ISA {:?} is functional-only; production SASS replay requires trace_sass_v1",
+                spec.isa()
+            ),
+        ));
+    }
+    if spec.instruction_set().len() != 1 || spec.instruction_set()[0] != "trace_sass" {
+        return Err(RunError::new(
+            "architecture spec",
+            "trace-safe issue profile must declare only the trace_sass operation",
+        ));
+    }
+    if spec.execution().simt_width() != 32 || spec.execution().max_resident_groups() != 1 {
+        return Err(RunError::new(
+            "architecture spec",
+            "trace-safe SM86 profile requires simt_width=32 and max_resident_groups=1",
+        ));
+    }
+    let find = |name: &str| {
+        spec.resources()
+            .iter()
+            .find(|resource| resource.name() == name)
+    };
+    let alu = find("alu").ok_or_else(|| {
+        RunError::new(
+            "architecture spec",
+            "trace-safe profile requires an alu resource",
+        )
+    })?;
+    let memory = find("memory").ok_or_else(|| {
+        RunError::new(
+            "architecture spec",
+            "trace-safe profile requires a memory resource",
+        )
+    })?;
+    if spec.resources().len() != 2 || !spec.operation_resources().is_empty() {
+        return Err(RunError::new(
+            "architecture spec",
+            "trace-safe issue profile must contain only unbound alu and memory resources",
+        ));
+    }
+    if alu.kind() != ResourceKind::Compute || memory.kind() != ResourceKind::Memory {
+        return Err(RunError::new(
+            "architecture spec",
+            "trace-safe alu/memory resources have incompatible kinds",
+        ));
+    }
+    if alu.issue_width() != memory.issue_width() {
+        return Err(RunError::new(
+            "architecture spec",
+            "trace-safe profile must use one shared issue width for alu and memory",
+        ));
+    }
+    if alu.latency_cycles().is_some() || memory.latency_cycles().is_some() {
+        return Err(RunError::new(
+            "architecture spec",
+            "trace-safe issue profile must omit latency_cycles; this bridge consumes issue width only",
+        ));
+    }
+    if alu.initiation_interval() != 1
+        || memory.initiation_interval() != 1
+        || alu.max_in_flight().is_some()
+        || memory.max_in_flight().is_some()
+    {
+        return Err(RunError::new(
+            "architecture spec",
+            "trace-safe issue profile must use initiation_interval=1 and omit max_in_flight; this bridge consumes issue width only",
+        ));
+    }
+    if !(1..=4).contains(&alu.issue_width()) {
+        return Err(RunError::new(
+            "architecture spec",
+            "trace-safe issue width must be in 1..=4",
+        ));
+    }
+    Ok(alu.issue_width())
 }
 
 pub(crate) fn load_pchase_card(path: &Path) -> Result<PchaseCard, RunError> {
@@ -498,6 +628,8 @@ pub struct RunReport {
     pub carded_dram_bandwidth: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub hypothetical_issue_ports: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub architecture_spec: Option<String>,
     pub memory_service_candidate_count: usize,
     pub memory_admission_candidate_count: usize,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1284,7 +1416,7 @@ pub fn run(config: &RunConfig) -> Result<RunReport, RunError> {
     }
     let arch_card = load_arch_card(&config.arch_card)?;
     let arch = arch_card.arch_id().map_err(at("architecture card"))?;
-    let issue = resolve_issue(config, &arch_card)?;
+    let (issue, architecture_spec_issue_ports) = resolve_issue_with_metadata(config, &arch_card)?;
     let mode = resolve_mode(config, &arch_card, issue)?;
 
     #[cfg(feature = "performance-counters")]
@@ -1442,7 +1574,13 @@ pub fn run(config: &RunConfig) -> Result<RunReport, RunError> {
         memory_mode: config.memory_mode.token(),
         cache_scope: config.cache_scope.token(),
         carded_dram_bandwidth: config.carded_dram_bandwidth,
-        hypothetical_issue_ports: config.hypothetical_issue_ports,
+        hypothetical_issue_ports: config
+            .hypothetical_issue_ports
+            .or(architecture_spec_issue_ports),
+        architecture_spec: config
+            .architecture_spec
+            .as_ref()
+            .map(|path| path.display().to_string()),
         memory_service_candidate_count: memory_service_candidates.as_ref().map_or(0, Vec::len),
         memory_admission_candidate_count: memory_admission_candidates.as_ref().map_or(0, Vec::len),
         memory_admission_feedback_candidate_id: memory_admission_feedback
@@ -1480,6 +1618,7 @@ mod tests {
             cache_scope: CacheScope::Launch,
             carded_dram_bandwidth: false,
             hypothetical_issue_ports: None,
+            architecture_spec: None,
             kernel_id: None,
             ncu_shaped_metrics: false,
             memory_service_candidates: None,
@@ -1533,6 +1672,63 @@ mod tests {
         );
         assert!(json.get("cache_session").is_none());
         assert!(json["launches"][0].get("cache_handoff").is_none());
+    }
+
+    #[test]
+    fn direct_issue_resolution_consumes_carded_scheduler_fields() {
+        let path =
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../arch_profiles/cards/sm_86.json");
+        let mut value: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        value["smsp"]["issue_ports"] = serde_json::json!(3);
+        value["dual_issue"]["supported"] = serde_json::json!(true);
+        let card = ArchCard::parse(&path, &serde_json::to_vec(&value).unwrap()).unwrap();
+        let mut config = fixture(MemoryMode::Flat);
+        config.hypothetical_issue_ports = None;
+
+        let issue = resolve_issue_with_metadata(&config, &card)
+            .expect("complete card should resolve")
+            .0;
+        assert_eq!(issue.issue_ports(), 3);
+        assert!(issue.dual_issue_supported());
+    }
+
+    #[test]
+    fn architecture_spec_routes_trace_safe_issue_profile_into_replay() {
+        let mut config = fixture(MemoryMode::Flat);
+        let profile = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../arch_profiles/specs/sm86_trace_issue_profile.json");
+        config.architecture_spec = Some(profile.clone());
+        let report = run(&config).expect("trace-safe architecture profile should replay");
+        assert_eq!(report.hypothetical_issue_ports, Some(1));
+        let expected = profile.display().to_string();
+        assert_eq!(report.architecture_spec.as_deref(), Some(expected.as_str()));
+    }
+
+    #[test]
+    fn functional_architecture_spec_cannot_be_applied_to_sass_replay() {
+        let mut config = fixture(MemoryMode::Flat);
+        config.architecture_spec = Some(
+            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("../../arch_profiles/specs/simt_u32_minimal.json"),
+        );
+        let error = run(&config).expect_err("functional ISA must not enter SASS replay");
+        assert!(error.to_string().contains("does not match card"));
+    }
+
+    #[test]
+    fn trace_safe_profile_rejects_unconsumed_pipeline_fields() {
+        let profile = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../arch_profiles/specs/sm86_trace_issue_profile.json");
+        let mut value: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&profile).unwrap()).unwrap();
+        value["resources"][0]["initiation_interval"] = serde_json::json!(2);
+        let file = NamedTempFile::new().unwrap();
+        std::fs::write(file.path(), serde_json::to_vec(&value).unwrap()).unwrap();
+        let mut config = fixture(MemoryMode::Flat);
+        config.architecture_spec = Some(file.path().to_path_buf());
+        let error = run(&config).expect_err("ignored pipeline fields must fail closed");
+        assert!(error.to_string().contains("initiation_interval=1"));
     }
 
     #[test]

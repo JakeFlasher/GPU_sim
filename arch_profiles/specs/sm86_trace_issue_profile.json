@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "architecture": "sm_86",
+  "isa": "trace_sass_v1",
+  "instruction_set": ["trace_sass"],
+  "execution": {
+    "simt_width": 32,
+    "max_resident_groups": 1
+  },
+  "resources": [
+    {
+      "name": "alu",
+      "kind": "compute",
+      "issue_width": 1
+    },
+    {
+      "name": "memory",
+      "kind": "memory",
+      "issue_width": 1
+    }
+  ],
+  "evidence": "unvalidated"
+}

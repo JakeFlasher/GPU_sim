@@ -1,4 +1,14 @@
-# Research direction for a publishable multi-architecture GPU simulator
+# Historical research direction — 2026-09-10
+
+> **Superseded scope notice (2026-09-24).** This memo is retained for prior-art
+> context only. Its heterogeneous SM86+CDNA3/MI300X, chiplet/fabric, and
+> held-out-silicon agenda is not the active project plan. The current scope is
+> software-only trace-driven architectural simulation anchored on SM86, with
+> NCU/NVBit measurements used only as independent machine observations. Use
+> `docs/gpu_simulator_research_positioning_20260923.md` and
+> `plans/cross_architecture_gpu_simulator_research_plan_20260923.md` as the
+> current direction; do not revive RTL, Verilator, FPGA, or unavailable-AMD
+> requirements from this historical memo.
 
 ## Executive verdict
 

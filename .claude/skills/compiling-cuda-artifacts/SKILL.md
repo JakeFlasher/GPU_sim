@@ -105,7 +105,7 @@ See `blackwell-compatibility.md` for the Blackwell-specific compat matrix.
 
 ## Hard rules
 
-Compilation guidance is source-level/read-only; follow root `CLAUDE.md` for
+Compilation guidance is source-level/read-only; follow root `AGENTS.md` for
 privilege, evidence, and architecture-local contracts. The toolchain is built
 at `tools/nvbit_tracer/` for the NVBit tracer specifically.
 

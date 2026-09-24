@@ -30,7 +30,7 @@
   "device_index": 0,
   "expected": {
     "compute_capability": "8.6",
-    "driver_version": "610.57.04",
+    "driver_version": "615.71.09",
     "l2_capacity_bytes": 6291456,
     "l2_line_bytes": 128,
     "l2_sector_bytes": 32,
@@ -49,11 +49,11 @@
     "https://docs.nvidia.com/nsight-compute/ProfilingGuide/",
     "https://docs.nvidia.com/nsight-compute/NsightComputeCli/"
   ],
-  "profile_id": "local_rtx3090ti_sm86_ncu_demo_v1",
+  "profile_id": "local_rtx3090ti_sm86_ncu_demo_20260924",
   "round0_observations": {
     "sim_run_binary": {
       "path": "sim/target/release/sim-run",
-      "role": "historical_pre_projection_identity_not_current_campaign_authority"
+      "role": "current_live_probe_authority"
     }
   },
   "schema_version": 1

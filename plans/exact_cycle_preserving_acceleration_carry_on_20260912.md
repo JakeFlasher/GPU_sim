@@ -1,4 +1,11 @@
-# Exact Cycle-Preserving GPU Acceleration: Carry-On Implementation Plan
+# Historical exact-cycle acceleration plan — 2026-09-12
+
+> **Archive-only notice (2026-09-24).** This plan records an earlier
+> acceleration study. Its SM86 event/dense observations remain useful context,
+> but AMD/CDNA3, gem5, and any RTL/Verilator or certification language are not
+> active requirements. The current completion bar is the software-only SM86
+> NCU/profile boundary, one production resource intervention, and replay wall
+> time; see `plans/cross_architecture_gpu_simulator_research_plan_20260923.md`.
 
 **Decision.** Continue with an accelerated execution lane, but define its
 contract as *model-relative observational equivalence*. The detailed SM86

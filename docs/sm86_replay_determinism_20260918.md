@@ -1,3 +1,5 @@
+> **Dated determinism record.** This supports the recorded implementation only; it is not a future-parallelism guarantee or scientific validation gate.
+
 # SM86 replay determinism probe
 
 The release `sim-run` binary was invoked twice in each reference mode with the

@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "architecture": "example_simt8",
+  "isa": "simt_u32_v1",
+  "initial_shared_memory": {
+    "100": 10,
+    "104": 11,
+    "108": 12,
+    "112": 13,
+    "116": 14,
+    "120": 15,
+    "124": 16,
+    "128": 17
+  },
+  "instructions": [
+    {"op": "set_lane_id", "dst": 0},
+    {"op": "load_shared", "dst": 1, "base": 100, "stride": 4},
+    {"op": "add_imm", "dst": 2, "src": 1, "imm": 5},
+    {"op": "store_shared", "base": 200, "stride": 4, "src": 2},
+    {"op": "halt"}
+  ]
+}

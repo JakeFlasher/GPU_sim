@@ -105,8 +105,14 @@ CurryGPU gives us a precise generality ladder:
 The active implementation now adds only the first bounded step: an
 ITS-functional example with per-lane PCs and reconvergence barriers. It has no
 cycle timing, compiler, RTL, or silicon claim. The existing simt_u32_v1
-functional/timing probe remains unchanged and continues to serve as the
-resource-schedule feasibility oracle.
+functional/timing probe now also includes explicit global/shared address-space
+operations, separate dependency domains, and a bounded whole-CTA
+`group_barrier` slice in `sim-sm::custom`; ordered shared producer/consumer
+values propagate, while inter-group atomics, arbitrary reductions, and
+weak-memory outcomes remain outside the functional contract. The bounded slice
+also covers deterministic shared atomic RMW, lane-0 broadcast, and one
+deterministic lane reduction, but not general collectives or hardware
+throughput.
 
 The runnable smoke command is:
 
@@ -117,6 +123,6 @@ The runnable smoke command is:
 The retained diamond produces eight stores [11, 12, 13, 14, 25, 26, 27, 28]
 with all lanes retired. This is functional semantics evidence only.
 
-The next timing step remains separate: route one user-editable scheduler or
-resource parameter into the production SM86 replay and compare its accuracy
-and wall time against final NCU observations.
+The trace-safe SM86 issue-width profile and bounded custom resource/event path
+are now implemented. The next semantic step should be selected by a concrete
+design question; do not expand into a compiler or arbitrary ISA generator.

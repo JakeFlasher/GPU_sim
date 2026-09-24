@@ -36,7 +36,7 @@ This is the meta-router. It exists so the agent can pick the right specialty ski
 
 1. **Specific instruction or mnemonic?** → `interpreting-ptx-isa` (or `analyzing-sass-nvbit-traces` if SASS layer).
 2. **Tuning a specific kernel for SM120/SM100 Blackwell?** → `tuning-blackwell-sm120-kernels`.
-3. **Measurement and label questions?** Start with root `CLAUDE.md`, the active
+3. **Measurement and label questions?** Start with root `AGENTS.md`, the active
    `tools/local_labels/` runbook/schemas, and any cited NVBit tracing docs. The
    `measurement/` cards and `validating-nonroot-gpu-measurement` skill are retained
    historical references; they do not define current permission or capture policy.
@@ -44,12 +44,13 @@ This is the meta-router. It exists so the agent can pick the right specialty ski
 5. **Build / compilation / fatbin / -gencode question?** → `compiling-cuda-artifacts`.
 6. **"Why does feature X exist", "which patent introduced Y", "Tesla → Blackwell history"?** → `reasoning-about-nvidia-architecture-history`.
 7. **Designing/implementing the ACTIVE Rust simulator (sim/) or consulting simulator prior art?** → `designing-gpu-simulator`.
-8. **None of the above match cleanly?** Read `.claude/knowledge/INDEX.md` for the full inventory.
+8. **None of the above match cleanly?** Read `.claude/knowledge/INDEX.md` when
+   present; otherwise use tracked `docs/` and `references/`.
 
 ## Scope boundary
 
 This router is not a measurement, privilege, or simulator permission system.
-Root `CLAUDE.md` governs agent workflow. The stable scientific boundaries are:
+Root `AGENTS.md` governs agent workflow. The stable scientific boundaries are:
 
 1. **Targets-never-features:** NCU and other hardware values are labels/validation
    targets only; they never enter simulator inputs, architecture constants, or
@@ -62,11 +63,15 @@ Root `CLAUDE.md` governs agent workflow. The stable scientific boundaries are:
 If a card or imported skill still says "NCU is forbidden" or "no clock locking",
 treat it as stale historical text and do not apply it.
 
+This checkout may not include the optional `.claude/knowledge/` corpus. A
+missing card is not a reason to loop; use the tracked project docs, source, and
+owner runbook.
+
 ## When in doubt
 
-`.claude/knowledge/INDEX.md` is the comprehensive topic-router inventory.
-`.claude/knowledge/patents/INDEX.md` is the 24-card sub-router for architectural-history questions.
-`.claude/knowledge/patents/problem-playbook.md` is the question-driven sister router for that subcorpus.
+When present, `.claude/knowledge/INDEX.md` is the comprehensive topic-router
+inventory; the patent indexes are optional supporting routers. In this checkout
+the tracked `references/` tree is the fallback source set.
 
 ## Mechanical lookup
 

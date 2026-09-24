@@ -68,6 +68,7 @@
 
 pub mod causal_frontier;
 pub mod control_bits;
+pub mod custom;
 #[cfg(feature = "campaign")]
 pub mod evidence;
 mod issue;

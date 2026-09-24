@@ -11,6 +11,7 @@ pub mod card;
 pub mod its;
 pub mod json;
 pub mod simt;
+pub mod simt_pipeline;
 pub mod spec;
 
 pub use json::strict_json_from_slice;

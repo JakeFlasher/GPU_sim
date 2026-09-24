@@ -2,10 +2,10 @@
   "schema_version": 1,
   "architecture": "example_simt8",
   "isa": "simt_u32_v1",
-  "instruction_set": ["set_lane_id", "add_imm", "add", "store", "async_store", "wait_group", "halt"],
+  "instruction_set": ["set_lane_id", "load", "add_imm", "add", "store", "async_store", "wait_group", "halt"],
   "execution": {
     "simt_width": 8,
-    "max_resident_groups": 4
+    "max_resident_groups": 1
   },
   "resources": [
     {

@@ -11,6 +11,7 @@ const USAGE: &str = "Usage: sim-run --trace DIR --control FILE --arch-card FILE 
 [--pchase-card FILE] [--mode flat|l1|l1-l2] \
 [--cache-scope launch|stream-l2] [--carded-dram] [--kernel-id ID] \
 [--hypothetical-issue-ports N] \
+[--architecture-spec FILE] \
 [--ncu-shaped-metrics] \
 [--ncu-csv FILE] [--ncu-launch ID] \
 [--memory-service-candidates FILE] [--memory-admission-candidates FILE] \
@@ -44,6 +45,7 @@ fn parse_args(args: impl IntoIterator<Item = OsString>) -> Result<Option<RunConf
     let mut cache_scope = CacheScope::Launch;
     let mut carded_dram_bandwidth = false;
     let mut hypothetical_issue_ports = None;
+    let mut architecture_spec = None;
     let mut kernel_id = None;
     let mut ncu_shaped_metrics = false;
     let mut ncu_csv = None;
@@ -114,6 +116,10 @@ fn parse_args(args: impl IntoIterator<Item = OsString>) -> Result<Option<RunConf
                 }
                 hypothetical_issue_ports = Some(ports);
             }
+            value if value == OsStr::new("--architecture-spec") => {
+                architecture_spec =
+                    Some(PathBuf::from(take_value(&mut args, "--architecture-spec")?));
+            }
             value if value == OsStr::new("--ncu-shaped-metrics") => {
                 ncu_shaped_metrics = true;
             }
@@ -169,6 +175,7 @@ fn parse_args(args: impl IntoIterator<Item = OsString>) -> Result<Option<RunConf
         cache_scope,
         carded_dram_bandwidth,
         hypothetical_issue_ports,
+        architecture_spec,
         kernel_id,
         ncu_shaped_metrics,
         ncu_csv,

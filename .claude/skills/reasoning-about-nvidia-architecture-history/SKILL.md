@@ -1,13 +1,13 @@
 ---
 name: reasoning-about-nvidia-architecture-history
-description: Patent-grounded NVIDIA GPU architectural-evolution narrative from Tesla (2006) through Blackwell (2024), plus competitor tensor-near-storage IP. Use when prompts ask why a feature exists, which patent introduced X, what changed between generations, the three-rewrites thesis (Fermi memory-side / Volta matrix-path+ITS / Hopper cooperation-boundary), how TMEM/DSMEM/TMA/WGMMA/tcgen05/HMMA evolved, SASS deltas per generation, GPU-codename history (Tesla→Rubin), NVL72/NV-HBI architectural meaning, FP4/NVFP4/MX block-scaling history, or competitor parallels (Microsoft/Intel/Meta/Micron/AMD). Historical context only (the old CLAUDE.md Rule 1–4 numbering it once referenced is retired; current policy is root CLAUDE.md, re-founded 2026-07-02).
+description: Patent-grounded NVIDIA GPU architectural-evolution context from Tesla through Blackwell and competitor tensor-near-storage IP. Use for historical feature origins, generation deltas, or patent questions; current simulator operations still follow root AGENTS.md and active project docs.
 ---
 
 # Reasoning About NVIDIA Architecture History
 
 This skill owns the 24-card patent-and-evolution corpus distilled from
 `references/NVIDIA_patents/NVIDIA_patentd.md`. It is **historical context only**;
-root `CLAUDE.md` and the active evidence/host authorities govern current
+root `AGENTS.md` and the active evidence/host authorities govern current
 operations.
 
 ## Two routers, pick one
@@ -88,7 +88,7 @@ Blackwell extends rewrite #3 (TMEM, dual-die unified GPU, FP4 block-scaling) —
 
 ## Hard rules
 
-- This corpus is **historical/architectural-context only**. Root `CLAUDE.md`, active
+- This corpus is **historical/architectural-context only**. Root `AGENTS.md`, active
   schemas, and owner runbooks govern current privilege, evidence, and
   targets-never-features rules; this corpus cannot authorize operations. Mentions
   of measurement or privileged primitives explain historical design context and

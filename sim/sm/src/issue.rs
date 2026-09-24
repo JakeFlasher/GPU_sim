@@ -494,6 +494,11 @@ impl IssueModelParams {
             IssueResourceSource::SyntheticTestFixture => None,
         };
         self.issue_ports = issue_ports;
+        // The override names the complete issue transaction width.  Retaining
+        // a card's independent dual-issue bit would silently widen a
+        // `--hypothetical-issue-ports 1` experiment back to two transactions
+        // per cycle, contradicting both the CLI and the emitted label.
+        self.dual_issue_supported = false;
         self.resource_source = IssueResourceSource::HypotheticalIssuePorts(base);
         Ok(self)
     }
@@ -1082,8 +1087,19 @@ impl IssueModelParams {
                 // The override must not bypass topology or latency checks.
                 let mut original = *self;
                 original.resource_source = match base {
-                    Some(resources) => IssueResourceSource::Carded(resources),
-                    None => IssueResourceSource::ArchitectureDefaults,
+                    Some(resources) => {
+                        // Validate the untouched card topology against its
+                        // original dual-issue declaration.  The live
+                        // hypothetical value intentionally disables that
+                        // separate admission path because `issue_ports` is
+                        // the complete width named by the override.
+                        original.dual_issue_supported = resources.dual_issue_supported;
+                        IssueResourceSource::Carded(resources)
+                    }
+                    None => {
+                        original.dual_issue_supported = false;
+                        IssueResourceSource::ArchitectureDefaults
+                    }
                 };
                 original.issue_ports = base.map_or(1, |resources| resources.smsp.issue_ports);
                 original.validate_resource_source()
@@ -16528,6 +16544,22 @@ mod tests {
         let params = IssueModelParams::from_card(ArchId::Sm86, &card).unwrap();
         assert_eq!(params.issue_ports, 3);
         assert!(params.dual_issue_supported);
+        params.validate_resource_source().unwrap();
+    }
+
+    #[test]
+    fn hypothetical_issue_width_is_not_widened_by_card_dual_issue() {
+        let path = card_path("sm_86.json");
+        let mut value: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        value["dual_issue"]["supported"] = serde_json::json!(true);
+        let card = ArchCard::parse(&path, &serde_json::to_vec(&value).unwrap()).unwrap();
+        let params = IssueModelParams::from_card(ArchId::Sm86, &card)
+            .unwrap()
+            .with_hypothetical_issue_ports(1)
+            .unwrap();
+        assert_eq!(params.issue_ports(), 1);
+        assert!(!params.dual_issue_supported());
         params.validate_resource_source().unwrap();
     }
 

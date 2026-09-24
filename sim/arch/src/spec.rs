@@ -10,7 +10,7 @@
 
 use crate::json::strict_json_from_slice;
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::io::Read;
 use std::path::Path;
@@ -51,6 +51,10 @@ struct RawResourceSpec {
     issue_width: u32,
     #[serde(default)]
     latency_cycles: Option<u64>,
+    #[serde(default = "one")]
+    initiation_interval: u64,
+    #[serde(default)]
+    max_in_flight: Option<u32>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -64,6 +68,8 @@ struct RawArchitectureSpec {
     execution: RawExecutionSpec,
     resources: Vec<RawResourceSpec>,
     evidence: EvidenceStatus,
+    #[serde(default)]
+    operation_resources: BTreeMap<String, String>,
 }
 
 /// A structurally validated definition for custom functional/timing backends.
@@ -79,6 +85,7 @@ pub struct ArchitectureSpec {
     execution: ExecutionSpec,
     resources: Vec<ResourceSpec>,
     evidence: EvidenceStatus,
+    operation_resources: BTreeMap<String, String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -93,6 +100,8 @@ pub struct ResourceSpec {
     kind: ResourceKind,
     issue_width: u32,
     latency_cycles: Option<u64>,
+    initiation_interval: u64,
+    max_in_flight: Option<u32>,
 }
 
 impl ArchitectureSpec {
@@ -154,10 +163,10 @@ impl ArchitectureSpec {
                 detail: "must be in 1..=64".to_owned(),
             });
         }
-        if raw.execution.max_resident_groups == 0 {
+        if !(1..=64).contains(&raw.execution.max_resident_groups) {
             return Err(SpecError::InvalidValue {
                 field: "execution.max_resident_groups",
-                detail: "must be positive".to_owned(),
+                detail: "must be in 1..=64".to_owned(),
             });
         }
         if raw.resources.is_empty() {
@@ -186,14 +195,30 @@ impl ArchitectureSpec {
                     detail: "must be positive when present".to_owned(),
                 });
             }
+            if resource.initiation_interval == 0 || resource.max_in_flight == Some(0) {
+                return Err(SpecError::InvalidValue {
+                    field: "resources[].initiation_interval/max_in_flight",
+                    detail: "must be positive".to_owned(),
+                });
+            }
             resources.push(ResourceSpec {
                 name: resource.name,
                 kind: resource.kind,
                 issue_width: resource.issue_width,
                 latency_cycles: resource.latency_cycles,
+                initiation_interval: resource.initiation_interval,
+                max_in_flight: resource.max_in_flight,
             });
         }
 
+        for (op, resource) in &raw.operation_resources {
+            if !instruction_names.contains(op) || !names.contains(resource) {
+                return Err(SpecError::InvalidValue {
+                    field: "operation_resources",
+                    detail: format!("unknown operation/resource binding {op} -> {resource}"),
+                });
+            }
+        }
         Ok(Self {
             schema_version: raw.schema_version,
             architecture: raw.architecture,
@@ -205,6 +230,7 @@ impl ArchitectureSpec {
             },
             resources,
             evidence: raw.evidence,
+            operation_resources: raw.operation_resources,
         })
     }
 
@@ -230,6 +256,10 @@ impl ArchitectureSpec {
 
     pub fn resources(&self) -> &[ResourceSpec] {
         &self.resources
+    }
+
+    pub fn operation_resources(&self) -> &BTreeMap<String, String> {
+        &self.operation_resources
     }
 
     pub const fn evidence(&self) -> EvidenceStatus {
@@ -260,9 +290,21 @@ impl ResourceSpec {
         self.issue_width
     }
 
+    pub const fn initiation_interval(&self) -> u64 {
+        self.initiation_interval
+    }
+
+    pub const fn max_in_flight(&self) -> Option<u32> {
+        self.max_in_flight
+    }
+
     pub const fn latency_cycles(&self) -> Option<u64> {
         self.latency_cycles
     }
+}
+
+fn one() -> u64 {
+    1
 }
 
 fn validate_token(field: &'static str, token: &str) -> Result<(), SpecError> {
@@ -394,5 +436,24 @@ mod tests {
         let spec = ArchitectureSpec::parse(Path::new("unknown_latency.json"), unknown_latency)
             .expect("absent latency is an explicit unknown");
         assert_eq!(spec.resources()[0].latency_cycles(), None);
+    }
+
+    #[test]
+    fn resident_group_capacity_is_bounded_for_pipeline_masks() {
+        let raw = br#"{
+          "schema_version": 1,
+          "architecture": "toy",
+          "isa": "toy_isa",
+          "execution": {"simt_width": 8, "max_resident_groups": 65},
+          "resources": [{"name":"alu","kind":"compute","issue_width":1,"latency_cycles":1}],
+          "evidence": "unvalidated"
+        }"#;
+        assert!(matches!(
+            ArchitectureSpec::parse(Path::new("capacity.json"), raw),
+            Err(SpecError::InvalidValue {
+                field: "execution.max_resident_groups",
+                ..
+            })
+        ));
     }
 }

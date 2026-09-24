@@ -1,81 +1,63 @@
 ---
 name: designing-gpu-simulator
-description: Design and implement the event-driven, trace-driven Rust GPU simulator in sim/. Use for the event engine, SM/warp issue model, memory hierarchy, trace replay, architecture cards, direct runner, NCU-shaped outputs, calibration, or simulator performance work.
+description: Design or implement the trace-driven Rust GPU simulator, native SM86 replay, bounded custom SIMT/resource models, architecture cards, NCU-shaped output, or simulator-performance probes.
 ---
 
-# Design the event-driven GPU simulator
+# Designing the GPU simulator
 
-The active project builds a fast Rust simulator for Ampere `sm_86`. `sm_120`
-is exploratory only when a local trace/card and machine are available. Work
-directly from code, traces, architecture cards, and focused executable runs;
-tests are optional engineering aids, not a research gate. Do not create audit
-companions, admission ceremonies, frozen candidates, or review swarms.
+Read root `AGENTS.md`, `docs/STATUS.md`, and `docs/PROJECT_MEMORY.md` before
+changing simulator code. The active path is software architectural simulation:
 
-## Current components
-
-- `sim/engine`: deterministic time-ordered event queue.
-- `sim/trace`: enhanced NVBit protobuf reader and trace semantics.
-- `sim/sm`: control-bit join, warp issue, event-driven replay, and SM state.
-- `sim/mem`: sectored L1, shared L2, MSHRs, and DRAM timing.
-- `sim/arch`: architecture/SKU cards and explicit research gaps.
-- `sim/direct_run`: default `sim-run` CLI over ordinary input paths.
-- `sim/run`: retained optional `sim-run-campaign` manifest interface.
-
-The direct replay API is `sim_sm::replay_trace_kernel`. The historical
-campaign adapter is compiled only with the `sim-sm/campaign` feature.
-
-## Design sources
-
-- Research and positioning:
-  `docs/gpu_simulator_research_positioning_20260923.md`
-- Adversarial roadmap review:
-  `docs/roadmap_adversarial_review_20260923.md`
-- Execution plan:
-  `plans/cross_architecture_gpu_simulator_research_plan_20260923.md`
-- Progress log:
-  `plans/phase2_sim_core_progress.md`
-- Simulator cards:
-  `.claude/knowledge/simulator/`
-- Prior art:
-  `references/papers/knowledge_base/`
-
-## Ground rules
-
-- Batch local actor progress; avoid global per-cycle scans and one queued event
-  per instruction.
-- Read SASS control bits from the sidecar; do not invent scoreboard state when
-  the trace already supplies the dependency information.
-- Keep one typed memory-mode selector: flat, L1, or L1+shared-L2.
-- NCU observations are comparison targets, never same-cell simulator inputs.
-- Architecture constants come from vendor documentation or focused
-  microbenchmarks, not per-workload label fitting.
-- Preserve unknown microarchitecture as an explicit hypothesis or missing
-  model.
-- Use checked arithmetic and typed errors on count/time boundaries.
-
-## Direct commands
-
-```bash
-cd sim
-cargo test -p sim-engine
-cargo test -p sim-trace
-cargo test -p sim-sm
-cargo test -p sim-mem
-cargo test -p sim-run
-
-cargo run -p sim-run -- \
-  --trace TRACE_DIR \
-  --control CONTROL_BITS.json \
-  --arch-card ARCH_CARD.json \
-  --mode flat
+```text
+NVBit/SASS trace -> sim-trace -> sim-sm/sim-mem/sim-engine -> sim-run -> NCU comparison
+custom spec/program -> sim-arch -> sim-sm::custom -> sim-engine -> custom-program-run
 ```
 
-Use `cargo test -p sim-run-campaign` only when the user explicitly asks for
-the retained campaign interface.
+## Source ownership
 
-## Related skills
+- `sim/trace`: NVBit protobuf, sidecars, coverage, semantic adapter.
+- `sim/arch`: evidence-bound cards plus bounded `simt_u32_v1` and `simt_its_v1` examples.
+- `sim/arch/src/simt_pipeline.rs`: fixed custom ISA dependency/resource lowering.
+- `sim/sm`: native warp/CTA replay; `sim/sm::custom`: bounded resident groups/barriers.
+- `sim/mem`: native L1/L2/DRAM service; `sim/engine`: deterministic events and generic pipeline.
+- `sim/direct_run`: package `sim-run`, including the narrow `trace_sass_v1` profile bridge.
+- `sim/run`: retained package `sim-run-campaign` and emitters.
+- `arch_profiles`: cards, specs, programs, and JSON schemas.
+- `tools/custom_simt_differential.py`: independent bounded oracle, not silicon truth.
 
-- PTX semantics: `interpreting-ptx-isa`
-- SASS and tracing: `analyzing-sass-nvbit-traces`
-- Blackwell kernels: `tuning-blackwell-sm120-kernels`
-- Optional SOL/campaign operation: `run-sol-campaign`
+## Scientific boundaries
+
+- NCU/CUPTI measurements are independent labels; never feed scored values into
+  features, tuning, or implementation choices.
+- Keep issue, modeled-event, completion, launch, and unmodeled-tail frontiers
+  separate; do not collapse them into a selection score.
+- A fixed SASS trace supports only `trace_safe` interventions. Changes that can
+  alter control flow, addresses, values, atomics, or participants require a
+  functional frontend or recapture.
+- The custom frontend is fixed-ISA/model-relative. It is not a compiler, ABI,
+  vendor-neutral proprietary decoder, cache-equivalent SM, RTL model, or
+  silicon-equivalent timing reconstruction.
+- Fair Accel-Sim/MGPUSim numerical comparison is deferred until a common
+  hardware/trace/observable/semantics cell exists.
+
+## Implementation loop
+
+Use checked arithmetic and typed errors. Run the smallest executable path after
+each change. For custom changes, use the relevant program and
+`tools/custom_simt_differential.py`; for native changes, replay a retained
+canary or representative trace. Then run focused package tests and only the
+workspace checks needed to support the change. A test suite is engineering
+evidence, not a workflow gate.
+
+## Useful commands
+
+```bash
+cargo test --manifest-path sim/Cargo.toml -p sim-arch --lib
+cargo test --manifest-path sim/Cargo.toml -p sim-sm --lib
+cargo test --manifest-path sim/Cargo.toml -p sim-run --lib
+cargo build --manifest-path sim/Cargo.toml -p sim-sm --bin custom-program-run
+```
+
+Do not add approval, hash/seal, receipt, audit-loop, or reviewer-swarm
+machinery. Historical SOL/campaign artifacts remain retained but are not
+active requirements.

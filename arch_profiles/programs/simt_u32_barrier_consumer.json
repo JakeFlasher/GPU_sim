@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "architecture": "example_simt8",
+  "isa": "simt_u32_v1",
+  "instructions": [
+    {"op": "set_lane_id", "dst": 0},
+    {"op": "add_imm", "dst": 1, "src": 0, "imm": 0},
+    {"op": "add_imm", "dst": 3, "src": 1, "imm": 0},
+    {"op": "add_imm", "dst": 3, "src": 3, "imm": 0},
+    {"op": "group_barrier", "id": 1},
+    {"op": "load_shared", "dst": 2, "base": 400, "stride": 4},
+    {"op": "store_shared", "base": 500, "stride": 4, "src": 2},
+    {"op": "halt"}
+  ]
+}

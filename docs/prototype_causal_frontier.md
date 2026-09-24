@@ -1,3 +1,5 @@
+> **Dated opt-in prototype note.** This analyzer is retained engineering context and does not alter the native replay completion bar or create a workflow gate.
+
 # Causal-frontier prototype integration
 
 The merged prototype surfaces are intentionally opt-in. `sim-sm::causal_frontier`

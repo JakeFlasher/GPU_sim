@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "architecture": "example_simt8",
+  "isa": "simt_u32_v1",
+  "instructions": [
+    {"op": "set_lane_id", "dst": 0},
+    {"op": "reduce_add", "dst": 1, "src": 0},
+    {"op": "add_imm", "dst": 2, "src": 1, "imm": 5},
+    {"op": "halt"}
+  ]
+}

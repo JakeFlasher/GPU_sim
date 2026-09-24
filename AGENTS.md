@@ -26,6 +26,12 @@ The main data path is:
 `NVBit tracer_tool` → `traces_enhanced` protobuf → `sim/trace` → `sim-sm` →
 `sim-mem` → `sim-engine` → NCU-shaped output from `sim-run`.
 
+The compact continuation record is `docs/PROJECT_MEMORY.md`. Read it with
+`docs/STATUS.md` before resuming a long-running task. The repository branch is
+currently `GPUSim_main`; do not infer an `alpha` branch name from older prompts.
+The active custom path is `simt_u32_v1` plus `sim-sm::custom`, while
+`simt_its_v1` is a separate single-group functional example.
+
 ## Outcome-first operating contract
 
 Treat each request as a completion bar, not an invitation to inventory the

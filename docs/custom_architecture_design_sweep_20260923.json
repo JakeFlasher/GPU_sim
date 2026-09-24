@@ -5,42 +5,42 @@
   "rows": [
     {
       "event_count": 5,
-      "final_cycle": 28,
+      "final_cycle": 29,
       "memory_issue_width": 1,
       "semantic_event_count": 5,
       "simt_width": 4
     },
     {
       "event_count": 5,
-      "final_cycle": 26,
+      "final_cycle": 27,
       "memory_issue_width": 2,
       "semantic_event_count": 5,
       "simt_width": 4
     },
     {
       "event_count": 5,
-      "final_cycle": 32,
+      "final_cycle": 33,
       "memory_issue_width": 1,
       "semantic_event_count": 5,
       "simt_width": 8
     },
     {
       "event_count": 5,
-      "final_cycle": 28,
+      "final_cycle": 29,
       "memory_issue_width": 2,
       "semantic_event_count": 5,
       "simt_width": 8
     },
     {
       "event_count": 5,
-      "final_cycle": 40,
+      "final_cycle": 41,
       "memory_issue_width": 1,
       "semantic_event_count": 5,
       "simt_width": 16
     },
     {
       "event_count": 5,
-      "final_cycle": 32,
+      "final_cycle": 33,
       "memory_issue_width": 2,
       "semantic_event_count": 5,
       "simt_width": 16

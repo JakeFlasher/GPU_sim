@@ -1,4 +1,13 @@
-# Adversarial simulator audit
+# Historical adversarial simulator audit — 2026-09-05
+
+> **Archive-only notice (2026-09-24).** This dated audit records older trace,
+> identity, and campaign experiments. It is not an active review/audit loop or
+> completion gate. Hashes, manifests, receipts, and retained comparison data
+> are inert evidence formats; do not revive them as agent workflow machinery.
+> The active scope is software-only NVBit/SASS architectural replay with
+> profile-grounded NCU comparison and simulator wall-time measurement. RTL,
+> Verilator, FPGA, physical-design, and unavailable-silicon work are out of
+> scope.
 
 Updated 2026-09-08.
 

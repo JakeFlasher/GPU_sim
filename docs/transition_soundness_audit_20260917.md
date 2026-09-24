@@ -1,4 +1,11 @@
-# Transition soundness audit
+# Historical transition soundness audit — 2026-09-17
+
+> **Archive-only notice (2026-09-24).** This is a dated technical record, not
+> an active audit process or admission gate. Its prior-art checkouts,
+> manifests, hashes, and receipts are retained as inert data. Current work is
+> limited to software trace-driven architectural simulation, one declared NCU
+> comparison boundary, and simulator wall-time/design evidence; do not revive
+> RTL/Verilator/FPGA or unavailable-AMD requirements from this record.
 
 This bounded review checked the typed transformer against a fresh shallow
 MGPUSim checkout and its primary paper.

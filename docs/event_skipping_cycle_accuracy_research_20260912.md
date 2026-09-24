@@ -1,3 +1,5 @@
+> **Historical research note (2026-09-24).** Retained prior-art and event-skipping analysis. It is not an active implementation plan, comparison gate, or claim of silicon cycle accuracy. Current scope and decisions live in `docs/STATUS.md` and `plans/cross_architecture_gpu_simulator_research_plan_20260923.md`.
+
 # Event Skipping and Cycle Accuracy in GPU Simulators
 
 **Scope.** This report evaluates whether event skipping is a sound and useful

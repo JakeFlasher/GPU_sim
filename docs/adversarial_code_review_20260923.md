@@ -1,4 +1,11 @@
-# Adversarial code review — 2026-09-23
+# Historical adversarial code review — 2026-09-23
+
+> **Superseded scope notice (2026-09-24).** This is a dated engineering
+> record, not an active gate. The current project is software-only trace-driven
+> architectural simulation: NVBit/SASS input, configurable timing/resource
+> models, and NCU/profile observations on available machines. Vortex, SimX,
+> RTL/Verilator, FPGA, physical-design, and silicon-internal work below is
+> retained as historical context and must not be revived as a requirement.
 
 ## Scope
 
@@ -11,8 +18,8 @@ the production SM86 replay path:
 - the engine sequence-span and queue projection changes, carded issue-resource
   selection, L1/L2 typed-state additions, and model-relative binding-cycle
   emission;
-- the independent Python probes, schemas, Vortex configuration/ELF adapters,
-  and retained SimX/rtlsim evidence artifacts.
+- the independent Python probes, schemas, and the retained open-GPU probe
+  artifacts (historical only).
 
 The review treats NCU/rocprof and open-GPU observations as independent
 validation targets. It does not promote any model-relative result to a silicon
@@ -118,16 +125,17 @@ not claimed. The final release-run comparison is retained in
   trace test modules and large error-enum/argument-count lints in `sim-sm`.
   These are not production-library failures; the reviewed production crates
   above are clean. The ordinary full workspace test suite is green.
-- General RISC-V/Vortex decoding, generated compiler/ISS support, cycle-trace
-  parity against RTL, measured simulator speed, and held-out physical-silicon
-  validation remain explicit future research gates. No current artifact claims
-  Curry compatibility, universal configurability, SOTA accuracy, or silicon
-  equivalence.
+- General RISC-V/Vortex decoding and generated compiler/ISS support remain
+  optional historical experiments, not project gates. Measured simulator
+  speed and profile-grounded NCU comparison are the active evidence lanes. No
+  current artifact claims Curry compatibility, universal configurability, SOTA
+  accuracy, or RTL/silicon equivalence.
 
 ## Decision
 
 The reviewed slice is safe to continue developing: malformed custom inputs
 fail closed, functional/timing semantics have an independent oracle, the
 SM86 production path remains card-bound, and evidence boundaries are explicit.
-The project is ready for the next research gate—generated open-ISA semantics
-plus RTL/ISS differential—not for a universal-SOTA claim.
+The active next step is a production resource/design study plus a declared
+NCU observable and replay wall-time measurement—not an RTL/ISS differential
+or a universal-SOTA claim.

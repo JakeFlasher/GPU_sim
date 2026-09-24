@@ -79,6 +79,7 @@ pub struct PreparedReplay {
     memory_mode: &'static str,
     carded_dram_bandwidth: bool,
     hypothetical_issue_ports: Option<u32>,
+    architecture_spec: Option<String>,
     launches: Vec<PreparedLaunchIdentity>,
 }
 
@@ -94,7 +95,8 @@ impl PreparedReplay {
 
         let arch_card = load_arch_card(&config.arch_card)?;
         let arch = arch_card.arch_id().map_err(at("architecture card"))?;
-        let issue = super::resolve_issue(config, &arch_card)?;
+        let (issue, architecture_spec_issue_ports) =
+            super::resolve_issue_with_metadata(config, &arch_card)?;
         let mode = resolve_mode(config, &arch_card, issue)?;
         let trace = TraceDir::open_direct_compact(&config.trace_dir).map_err(at("trace"))?;
         let exec = trace.exec_info().ok_or_else(|| {
@@ -148,7 +150,13 @@ impl PreparedReplay {
             architecture: arch.token().to_owned(),
             memory_mode: config.memory_mode.token(),
             carded_dram_bandwidth: config.carded_dram_bandwidth,
-            hypothetical_issue_ports: config.hypothetical_issue_ports,
+            hypothetical_issue_ports: config
+                .hypothetical_issue_ports
+                .or(architecture_spec_issue_ports),
+            architecture_spec: config
+                .architecture_spec
+                .as_ref()
+                .map(|path| path.display().to_string()),
             launches,
         })
     }
@@ -276,6 +284,7 @@ impl PreparedReplay {
             cache_scope: CacheScope::Launch.token(),
             carded_dram_bandwidth: self.carded_dram_bandwidth,
             hypothetical_issue_ports: self.hypothetical_issue_ports,
+            architecture_spec: self.architecture_spec.clone(),
             memory_service_candidate_count: 0,
             memory_admission_candidate_count: 0,
             memory_admission_feedback_candidate_id: None,
@@ -380,6 +389,7 @@ mod tests {
             cache_scope: CacheScope::Launch,
             carded_dram_bandwidth: false,
             hypothetical_issue_ports: None,
+            architecture_spec: None,
             kernel_id: None,
             ncu_shaped_metrics: false,
             memory_service_candidates: None,
@@ -426,6 +436,30 @@ mod tests {
         assert_eq!(
             serde_json::to_vec(&first).unwrap(),
             serde_json::to_vec(&second).unwrap()
+        );
+    }
+
+    #[test]
+    fn prepared_replay_preserves_trace_safe_profile_metadata() {
+        let mut config = fixture();
+        config.architecture_spec = Some(
+            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("../../arch_profiles/specs/sm86_trace_issue_profile.json"),
+        );
+        let prepared =
+            PreparedReplay::prepare(&config, CoverageAdmission::FullOnlyNoSamplingDeclaration)
+                .expect("trace-safe profile should prepare");
+        let key = prepared.launches().next().expect("fixture launch").0;
+        let report = prepared
+            .replay_report(key)
+            .expect("prepared replay should run");
+        assert_eq!(report.hypothetical_issue_ports, Some(1));
+        assert_eq!(
+            report.architecture_spec,
+            config
+                .architecture_spec
+                .as_ref()
+                .map(|path| path.display().to_string())
         );
     }
 

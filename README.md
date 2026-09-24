@@ -1,69 +1,57 @@
 # GPU simulator
 
-This repository contains a trace driven NVIDIA GPU simulator. NVBit produces
-SASS and memory traces, the Rust engine replays issue, synchronization, cache,
-and memory events, and the runner emits JSON metrics for comparison with Nsight
-Compute measurements.
+Software architectural simulation with two executable frontends:
 
-The SM crate also exposes an opt-in causal-frontier descriptor analysis. It
-uses the native `PipelineClass` and control schedule, keeps resource and
-completion envelopes explicit, and refuses missing dependency/completion facts;
-it does not alter the established replay path.
-
-The active target is Ampere SM86 (RTX 3090 Ti). SM120 support is exploratory
-only when a local trace/card exists. NCU observations are comparison data only;
-they are never simulator inputs. RTL, Verilator, FPGA, physical-design, and
-silicon-internal simulation are outside the project scope.
-
-The [research and positioning memo](docs/gpu_simulator_research_positioning_20260923.md)
-records the literature boundary and paper agenda. The [adversarial roadmap review](docs/roadmap_adversarial_review_20260923.md)
-tracks claim gaps and milestone exit criteria. The [general GPU simulator
-roadmap](plans/cross_architecture_gpu_simulator_research_plan_20260923.md)
-adds a staged user-defined architecture path alongside this SM86 validation
-anchor. The CurryGPU functional-architecture study and bounded per-lane-PC ITS
-example are documented in
-[docs/curry_gpu_its_study_20260923.md](docs/curry_gpu_its_study_20260923.md).
-Configurability, functional execution, and cross-architecture validation are
-work in progress, not current claims of arbitrary GPU support.
-
-## Data path
+- **Native NVIDIA replay:** NVBit SASS/protobuf traces and architecture cards
+  feed the Rust SM, cache/memory, and event models. The active hardware anchor
+  is Ampere SM86 (RTX 3090 Ti); SM120 remains exploratory.
+- **Custom models:** bounded `simt_u32_v1` programs and declarative resources
+  feed `sim-sm::custom` and the shared dependency/event engine. The separate
+  Curry-inspired `simt_its_v1` example is functional-only.
 
 ```text
-CUDA workload -> NVBit trace -> sim-trace -> sim-sm -> sim-mem -> sim-run
-                                      \-> direct NCU comparison in eval/
+NVBit -> traces_enhanced -> sim-trace -> sim-sm / sim-mem / sim-engine -> sim-run
+custom program + ArchitectureSpec -> sim-sm::custom -> sim-engine -> custom-program-run
+NCU observations -------------------------------------> independent comparison
 ```
+
+NCU values are validation targets, never same-workload tuning inputs. The
+project does not require RTL, FPGA, physical design, universal proprietary
+binary decoding, or silicon-equivalent internals. A vendor-neutral event
+representation is not a universal binary decoder.
+
+## Start here
+
+- [Status and remaining boundaries](docs/STATUS.md)
+- [Build, capture, and replay commands](docs/runbook_host.md)
+- [Architecture](docs/ARCHITECTURE.md) and [configuration contracts](docs/archprofile.md)
+- [Research roadmap](plans/cross_architecture_gpu_simulator_research_plan_20260923.md)
+- [Project memory for agent continuations](docs/PROJECT_MEMORY.md)
+- [Documentation and dated evidence](docs/README.md)
+
+From the repository root:
+
+```bash
+cargo build --release --manifest-path sim/Cargo.toml -p sim-run
+sim/target/release/sim-run --help
+cargo run --manifest-path sim/Cargo.toml -p sim-sm --bin custom-program-run --   arch_profiles/specs/simt_u32_pipeline2.json   arch_profiles/programs/simt_u32_barrier_producer.json   arch_profiles/programs/simt_u32_barrier_consumer.json
+```
+
+The custom example produces model-relative timing, not a hardware prediction.
+The instruction-count NCU mapping is demonstrated for one launch; elapsed-cycle
+accuracy and broad paper-quality evaluation remain open. Fair numerical
+Accel-Sim/MGPUSim comparison is **deferred**, not silently completed.
 
 ## Repository map
 
 | Path | Role |
 | --- | --- |
-| `sim/` | Rust workspace: architecture cards, trace reader, SM replay, memory model, runner |
-| `tools/nvbit_tracer/` | NVBit producer and protobuf support |
-| `tools/local_labels/` | Direct NCU capture and metric parsing |
-| `workloads/` | CUDA workloads and focused probes |
-| `arch_profiles/` | Architecture inputs |
-| `eval/direct_score.py` | Small JSON metric comparator |
-| `docs/` | Current architecture, status, and run commands |
-| `plans/` | Current execution roadmaps |
-| `data/`, `references/` | Retained source data and research material |
+| `sim/` | Rust frontends, scheduler, memory model, event engine, runners |
+| `arch_profiles/` | Native cards, hypothetical specs, bounded programs, schemas |
+| `tools/nvbit_tracer/`, `tools/local_labels/` | Separate trace and profiler collection |
+| `workloads/`, `eval/` | Executable inputs and comparison tools |
+| `docs/`, `plans/` | Current contracts, dated observations, research direction |
+| `data/`, `references/` | Retained datasets, source documents, and prior art |
 
-## Fast path
-
-```bash
-cargo build --release --manifest-path sim/Cargo.toml -p sim-run
-python -m eval.direct_score --observed observed.json --predicted predicted.json
-```
-
-For a GPU run, use the commands in [docs/runbook_host.md](docs/runbook_host.md).
-The current engine status and retained SM86 comparison roots are in
-[docs/STATUS.md](docs/STATUS.md).
-The historical cross-architecture review and bounded residuals are in
-[docs/adversarial_code_review_20260923.md](docs/adversarial_code_review_20260923.md);
-it is not an active scope or validation gate.
-
-Historical clock-qualified small/large campaigns and same-input regression
-comparisons are in
-[docs/postmerge_campaign_comparison_20260909.md](docs/postmerge_campaign_comparison_20260909.md).
-
-The prototype integration and its NCU sector probe are documented in
-[docs/prototype_causal_frontier.md](docs/prototype_causal_frontier.md).
+Root [AGENTS.md](AGENTS.md) governs project execution. Historical experiment
+records and retained SOL/campaign capability are not workflow gates.

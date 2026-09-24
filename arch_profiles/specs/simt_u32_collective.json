@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "architecture": "example_simt8",
+  "isa": "simt_u32_v1",
+  "instruction_set": ["set_lane_id", "broadcast_lane0", "add_imm", "halt"],
+  "execution": {"simt_width": 8, "max_resident_groups": 1},
+  "resources": [
+    {"name": "alu", "kind": "compute", "issue_width": 1, "latency_cycles": 1}
+  ],
+  "operation_resources": {"set_lane_id": "alu", "broadcast_lane0": "alu", "add_imm": "alu"},
+  "evidence": "unvalidated"
+}

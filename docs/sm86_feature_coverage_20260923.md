@@ -38,13 +38,6 @@ participants, and values. Changing ISA semantics, warp width, branch behavior,
 atomic order, or address-generation behavior is requires_execution and must
 not be scored by fixed-trace replay.
 
-## Next inventory expansion
-
-Run the same inventory over the retained timing-crosswalk holdout and the
-larger regenerated cohort. Add a typed unsupported reason only when a concrete
-input or replay path produces it; do not infer support from opcode names alone.
-
-
 ## Holdout and larger-cohort expansion
 
 The same parser inventory now covers two additional retained cohorts:
@@ -63,3 +56,7 @@ coverage/provenance gap across all 18 inventoried rows (8 small + 3 holdout +
 7 large). It does not prevent replay because the control sidecar is separately
 generated from the captured binary, but it prevents treating module identity as
 closed evidence. This remains an explicit M4 limitation.
+
+No unsupported reason is inferred from an opcode spelling alone. New typed
+unsupported categories should be added only when a concrete trace or replay
+path produces one; the fair cross-simulator comparison remains deferred.

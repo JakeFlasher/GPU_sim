@@ -95,3 +95,20 @@ For a model-relative issue-resource sweep, append:
 The accepted range is `1..=4`. This changes only the modeled issue transaction
 width, labels the JSON output as hypothetical, and does not modify the
 architecture card or claim a physical GPU resource.
+
+For the narrow production resource-profile bridge, use the explicit
+trace-safe schema instead of a scalar override:
+
+```bash
+sim/target/release/sim-run \
+  --trace TRACE_DIR --control CONTROL_BITS.json \
+  --arch-card arch_profiles/cards/sm_86.json \
+  --architecture-spec arch_profiles/specs/sm86_trace_issue_profile.json \
+  --mode l1-l2
+```
+
+The bridge currently consumes only matching `alu`/`memory` issue widths from a
+`trace_sass_v1` profile. Functional custom ISAs and multi-group specs fail
+closed rather than being applied to a fixed SASS trace; latency, initiation,
+in-flight, extra-resource, and operation-binding fields are rejected because
+this bridge does not consume them.

@@ -2,34 +2,40 @@ queries:
   - prompt: "design event-driven SM timing model in Rust for the new simulator"
     expected_skill: designing-gpu-simulator
     expected_cards:
-      - .claude/knowledge/simulator/nvasim-architecture.md
-      - .claude/knowledge/simulator/rust-des-patterns.md
+      - docs/ARCHITECTURE.md
+      - docs/PROJECT_MEMORY.md
+      - docs/STATUS.md
     forbidden_behavior:
-      - ports nvasim source verbatim instead of designing from cards
-      - skips the pinned-protocol v2.1 capture pin
+      - ports another simulator source verbatim
+      - invents RTL or silicon-equivalence requirements
   - prompt: "what objects must I model in a Blackwell simulator"
     expected_skill: designing-gpu-simulator
     expected_cards:
-      - .claude/knowledge/patents/problem-playbook.md
-      - .claude/knowledge/simulator/nvasim-architecture.md
+      - docs/gpu_simulator_research_positioning_20260923.md
+      - docs/architecture_extensibility_research_20260924.md
     forbidden_behavior:
-      - omits TMEM, tcgen05.mma single-thread issue, FP4/NVFP4, NV-HBI, cluster scheduling, transaction barriers
+      - silently turns SM86 evidence into Blackwell support
+      - claims hardware support without a local trace/card
   - prompt: "is NVArchSim 2012 a good baseline for our validation"
     expected_skill: designing-gpu-simulator
     expected_cards:
-      - .claude/knowledge/measurement/nvarchsim-vs-this-project.md
+      - docs/gpu_simulator_research_positioning_20260923.md
     forbidden_behavior:
-      - cites NVArchSim as 2012 (correct is HPCA 2021, Villa et al.)
+      - cites NVArchSim as 2012 instead of its HPCA 2021 publication
+      - treats literature context as a fair numerical cell
   - prompt: "what's the validation contract for our simulator"
     expected_skill: designing-gpu-simulator
     expected_cards:
-      - .claude/knowledge/measurement/nvarchsim-vs-this-project.md
-      - .claude/knowledge/measurement/nonroot-cloud-contract.md
+      - docs/STATUS.md
+      - docs/runbook_host.md
+      - docs/PROJECT_MEMORY.md
     forbidden_behavior:
-      - proposes counter-free/proxy validation instead of NCU-anchored validation (NCU labels under pinned protocol v2.1 are the REQUIRED ground truth)
+      - feeds NCU labels back into simulator inputs
+      - replaces an unavailable observable with an unlabeled proxy
   - prompt: "Rust priority-queue patterns for an event-driven simulator with deterministic tie-breaking"
     expected_skill: designing-gpu-simulator
     expected_cards:
-      - .claude/knowledge/simulator/rust-des-patterns.md
+      - docs/ARCHITECTURE.md
+      - docs/PROJECT_MEMORY.md
     forbidden_behavior:
       - proposes a non-deterministic tie-break that breaks reproducibility

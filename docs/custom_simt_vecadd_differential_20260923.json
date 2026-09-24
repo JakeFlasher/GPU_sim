@@ -601,6 +601,7 @@
         0
       ]
     ],
+    "shared_memory": {},
     "simt_width": 16
   },
   "reference_timing": {
@@ -615,42 +616,42 @@
         "start_cycle": 0
       },
       {
-        "complete_cycle": 38,
+        "complete_cycle": 37,
         "instruction_index": 1,
         "operation": "load",
         "resource": "memory",
-        "start_cycle": 2
+        "start_cycle": 1
       },
       {
-        "complete_cycle": 74,
+        "complete_cycle": 53,
         "instruction_index": 2,
         "operation": "load",
         "resource": "memory",
-        "start_cycle": 38
+        "start_cycle": 17
       },
       {
-        "complete_cycle": 76,
+        "complete_cycle": 55,
         "instruction_index": 3,
         "operation": "add",
         "resource": "alu",
-        "start_cycle": 74
+        "start_cycle": 53
       },
       {
-        "complete_cycle": 112,
+        "complete_cycle": 91,
         "instruction_index": 4,
         "operation": "store",
         "resource": "memory",
-        "start_cycle": 76
+        "start_cycle": 55
       },
       {
-        "complete_cycle": 112,
+        "complete_cycle": 91,
         "instruction_index": 5,
         "operation": "halt",
         "resource": null,
-        "start_cycle": 112
+        "start_cycle": 91
       }
     ],
-    "final_cycle": 112,
+    "final_cycle": 91,
     "isa": "simt_u32_v1",
     "simt_width": 16
   },
@@ -1254,6 +1255,7 @@
         0
       ]
     ],
+    "shared_memory": {},
     "simt_width": 16
   },
   "rust_timing": {
@@ -1267,42 +1269,42 @@
         "start_cycle": 0
       },
       {
-        "complete_cycle": 38,
+        "complete_cycle": 37,
         "instruction_index": 1,
         "operation": "load",
         "resource": "memory",
-        "start_cycle": 2
+        "start_cycle": 1
       },
       {
-        "complete_cycle": 74,
+        "complete_cycle": 53,
         "instruction_index": 2,
         "operation": "load",
         "resource": "memory",
-        "start_cycle": 38
+        "start_cycle": 17
       },
       {
-        "complete_cycle": 76,
+        "complete_cycle": 55,
         "instruction_index": 3,
         "operation": "add",
         "resource": "alu",
-        "start_cycle": 74
+        "start_cycle": 53
       },
       {
-        "complete_cycle": 112,
+        "complete_cycle": 91,
         "instruction_index": 4,
         "operation": "store",
         "resource": "memory",
-        "start_cycle": 76
+        "start_cycle": 55
       },
       {
-        "complete_cycle": 112,
+        "complete_cycle": 91,
         "instruction_index": 5,
         "operation": "halt",
         "resource": null,
-        "start_cycle": 112
+        "start_cycle": 91
       }
     ],
-    "final_cycle": 112,
+    "final_cycle": 91,
     "isa": "simt_u32_v1",
     "semantic_events": [
       {
@@ -1750,7 +1752,8 @@
         }
       }
     ],
-    "simt_width": 16
+    "simt_width": 16,
+    "timing_model": "dependency_resource_v2"
   },
   "timing_match": true
 }

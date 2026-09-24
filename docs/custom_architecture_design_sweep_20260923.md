@@ -32,11 +32,11 @@ correctness, RTL equivalence, or Curry/Vortex compatibility.
 
 | SIMT width | Memory issue width | Final cycle |
 |---:|---:|---:|
-| 4 | 1 | 28 |
-| 4 | 2 | 26 |
-| 8 | 1 | 32 |
-| 8 | 2 | 28 |
-| 16 | 1 | 40 |
-| 16 | 2 | 32 |
+| 4 | 1 | 29 |
+| 4 | 2 | 27 |
+| 8 | 1 | 33 |
+| 8 | 2 | 29 |
+| 16 | 1 | 41 |
+| 16 | 2 | 33 |
 
 All six rows emitted five timing events and five validated semantic events.

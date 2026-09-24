@@ -68,13 +68,13 @@ Owns the cross-architecture CUDA performance surface. 7 cuda/ cards + 3 best-pra
 - SASS-level performance evidence → `analyzing-sass-nvbit-traces` (instruction-mix from NVBit traces).
 - Blackwell-specific tuning numbers → `tuning-blackwell-sm120-kernels`.
 - Why a feature exists at all (patent reasoning) → `reasoning-about-nvidia-architecture-history`.
-- Measurement/label protocol → root `CLAUDE.md`, active label schemas,
+- Measurement/label protocol → root `AGENTS.md`, active label schemas,
   `tools/local_labels/`, and the owner runbook; the historical
   `validating-nonroot-gpu-measurement` skill is not an operational authority.
 
 ## Scientific boundary
 
 For scored cells, NCU values are prediction targets/labels, never simulator
-features. Follow the current root `CLAUDE.md`, active schemas, and owner runbook
+features. Follow the current root `AGENTS.md`, active schemas, and owner runbook
 for capture and replay state; the historical v2.1 settings are relevant only
 when reproducing that dataset.

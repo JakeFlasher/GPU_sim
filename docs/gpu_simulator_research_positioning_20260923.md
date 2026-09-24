@@ -6,11 +6,11 @@ Scope: software architectural simulation only
 ## Bottom line
 
 Continue this project, but do not call it a current SOTA or universal GPU
-simulator yet. The repository already has a credible NVIDIA SM86 seam:
-NVBit-generated SASS/protobuf traces feed a Rust SM, memory, and event engine.
-The isolated custom-SIMT path demonstrates extensibility, but it does not yet
-drive production timing and therefore cannot support an “arbitrary
-user-defined architecture” claim.
+simulator. The repository has a credible NVIDIA SM86 seam and a bounded custom
+resource frontend: NVBit-generated SASS/protobuf traces feed the native Rust
+SM, memory, and event engine, while custom SIMT programs feed a separate shared
+dependency/resource pipeline. Neither path supports an arbitrary
+user-defined-architecture claim.
 
 The strongest defensible research target is:
 
@@ -44,9 +44,11 @@ systems.
 
 * README.md, sim/trace, sim/sm, sim/mem, and sim/engine describe a real
   NVBit-to-Rust replay path anchored on Ampere SM86.
-* sim-arch::spec and sim-arch::simt now expose bounded simt_u32_v1 and
-  Curry-inspired simt_its_v1 functional examples. They remain feasibility
-  oracles and are not connected to production scheduler/cache timing.
+* sim-arch::spec and sim-arch::simt expose bounded simt_u32_v1 and
+  Curry-inspired simt_its_v1 examples. The simt_u32_v1 subset reaches the
+  shared sim-sm dependency/resource event backend with resident groups,
+  barriers, shared operations, atomics, broadcast, and reduction; it remains
+  model-relative and is not native SASS/cache timing or arbitrary ISA support.
 * The retained approximately 9.7% maximum is a development counter diagnostic,
   not held-out elapsed-time MAPE. Event/dense equality is model-relative
   equivalence, not hardware accuracy.
@@ -61,10 +63,10 @@ systems.
    identity/driver/tool versions and clock/cache/replay settings, and collect a
    matching NVBit trace. Keep issue, event, completion, launch, and tail
    frontiers separate.
-2. **Production configurability:** route one architecture-spec parameter (for
-   example scheduler/issue width or an L1/L2 resource) into the real replay.
-   Demonstrate that the parameter changes timing/resource behavior rather than
-   only parsing.
+2. **Production configurability:** retain the implemented trace-safe issue-width
+   profile and demonstrate its effect on real replay without changing the
+   traced instruction stream. Do not broaden this bridge to functional custom
+   ISAs or unconsumed resource fields.
 3. **Mechanism-level speed:** compare detailed and demand-driven execution on
    identical traces; report wall time, instruction/event counts, host threads,
    and peak memory. Fewer modeled events are not a hardware-speed claim.
@@ -101,7 +103,7 @@ makes no claim of Curry ISA/compiler compatibility. See
 
 The project is viable and worth continuing. The path to a strong submission is
 not a universal hardware framework; it is one measured, falsifiable software
-mechanism that beats applicable baselines on the accuracy–speed frontier while
-letting a user change real GPU timing resources. The active roadmap in
-plans/cross_architecture_gpu_simulator_research_plan_20260923.md records that
-decision.
+mechanism that changes a real GPU timing resource and supports a declared
+accuracy/speed/design claim. The active roadmap records that decision. A fair
+numerical baseline comparison remains deferred until hardware, trace,
+observable, and semantics overlap.

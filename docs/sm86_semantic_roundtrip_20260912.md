@@ -1,3 +1,5 @@
+> **Dated semantic adapter record.** Retained for trace/semantic context; it does not establish hardware accuracy or universal decoder coverage.
+
 # SM86 semantic-event round-trip validation
 
 The new `sim-semantics` crate and `sim-trace` SM86 adapter were checked against

@@ -17,6 +17,8 @@ use std::cmp::Reverse;
 use std::collections::BinaryHeap;
 use std::num::NonZeroU64;
 
+pub mod pipeline;
+
 /// Simulation time in cycles of the modeled clock domain.
 pub type Time = u64;
 

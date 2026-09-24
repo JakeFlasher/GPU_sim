@@ -21,6 +21,13 @@ The check compares architecture/ISA identity, lane width, instruction count,
 all register state, all stores, final cycle, and every timing event (operation,
 resource, issue cycle, and completion cycle).
 
+The timing oracle also mirrors explicit register/memory dependencies, separate
+global/shared address domains, resource initiation intervals, and bounded
+in-flight capacity; it is not a second copy of the Rust event output.
+
+Functional results retain global and shared memory maps separately; the shared
+address-space probe is documented in `custom_shared_memory_20260924.md`.
+
 Memory addresses are byte-addressed, but this feasibility ISA admits only
 four-byte-aligned u32 words. Async submit/wait operations are carried as typed
 custom token effects; the submit event remains a global store (it is not

@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "architecture": "example_simt8",
+  "isa": "simt_u32_v1",
+  "initial_shared_memory": {"400": 10},
+  "instructions": [
+    {"op": "set_lane_id", "dst": 0},
+    {"op": "atomic_add_shared", "base": 400, "stride": 0, "src": 0, "dst": 1},
+    {"op": "halt"}
+  ]
+}

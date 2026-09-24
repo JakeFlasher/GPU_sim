@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "architecture_spec.schema.json",
   "title": "User-defined GPU architecture specification",
-  "description": "Experimental, unvalidated architecture shape for future functional/timing backends. This is not an evidence-bound silicon card.",
+  "description": "Experimental, unvalidated architecture shape for the bounded functional/timing backends. This is not an evidence-bound silicon card.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -49,7 +49,7 @@
         "max_resident_groups": {
           "type": "integer",
           "minimum": 1,
-          "maximum": 4294967295
+          "maximum": 64
         }
       }
     },
@@ -82,6 +82,16 @@
             "minimum": 1,
             "maximum": 4294967295
           },
+          "initiation_interval": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 18446744073709551615
+          },
+          "max_in_flight": {
+            "type": ["integer", "null"],
+            "minimum": 1,
+            "maximum": 4294967295
+          },
           "latency_cycles": {
             "type": [
               "integer",
@@ -92,6 +102,13 @@
             "description": "Absent or null means unknown; a timing backend must not invent a default."
           }
         }
+      }
+    },
+    "operation_resources": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string",
+        "pattern": "^[a-z][a-z0-9_-]*$"
       }
     },
     "evidence": {

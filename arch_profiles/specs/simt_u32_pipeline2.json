@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "architecture": "example_simt8",
+  "isa": "simt_u32_v1",
+  "instruction_set": ["set_lane_id", "load", "load_shared", "add_imm", "add", "store", "store_shared", "async_store", "wait_group", "group_barrier", "halt"],
+  "execution": {
+    "simt_width": 8,
+    "max_resident_groups": 2
+  },
+  "resources": [
+    {"name": "alu", "kind": "compute", "issue_width": 1, "latency_cycles": 1},
+    {"name": "memory", "kind": "memory", "issue_width": 1, "latency_cycles": 20}
+  ],
+  "operation_resources": {
+    "set_lane_id": "alu",
+    "load": "memory",
+    "add_imm": "alu",
+    "add": "alu",
+    "store": "memory",
+    "store_shared": "memory",
+    "async_store": "memory"
+  },
+  "evidence": "unvalidated"
+}

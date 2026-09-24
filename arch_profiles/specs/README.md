@@ -6,11 +6,20 @@ the experimental `sim-arch::spec` path. They are **not** replacements for
 production SM86 replay.
 
 Each specification declares an opaque architecture/ISA token, an admitted
-instruction-name set, SIMT width, resident-group bound, named resources,
+instruction-name set, SIMT width, a resident-group bound, named resources,
 optional timing values, and an evidence status. `unvalidated` means that the
 values are legal experiment inputs but are not claims about physical silicon.
-A timing backend must treat an absent latency as unknown rather than inventing
-a default.
+The bounded pipeline accepts at most 64 resident groups and 64 SIMT lanes.
+The standalone ITS executor supports exactly one resident group; the bounded
+`simt_u32_v1` backend can run multiple resident groups through
+`sim-sm::custom`/`custom-program-run` when their memory effects are disjoint.
+The timing backend consumes declared resources and operation bindings, while
+instruction names still select the fixed `simt_u32_v1` semantics rather than
+defining arbitrary new ISA operations. An absent latency is unknown, never an
+invented default. Resource entries may also declare `initiation_interval` and
+`max_in_flight`; these are consumed by the shared event pipeline rather than
+treated as cosmetic metadata. `operation_resources` can bind admitted bounded
+operations to named resources; unknown operations/resources fail closed.
 
 Validate an example with:
 
@@ -23,3 +32,11 @@ The `simt_u32_minimal.json` example is a small resource-schedule fixture. The
 `simt_its8.json` example is a Curry-inspired functional ITS fixture with
 per-lane PCs and reconvergence barriers. Neither claims Curry compatibility,
 physical accuracy, or production SM86 timing.
+
+`sm86_trace_issue_profile.json` is the deliberately narrow bridge into
+production `sim-run`: it uses `trace_sass_v1`, `simt_width=32`, one resident
+group, and matching `alu`/`memory` issue widths. Passing it with
+`--architecture-spec` changes only the hypothetical production issue width;
+latency, initiation, in-flight, extra-resource, and operation-binding fields
+are rejected because this bridge does not consume them. The fixed NVBit/SASS
+trace and evidence-bound card remain unchanged.

@@ -1,3 +1,5 @@
+> **Historical campaign record (2026-09-09).** Retained measurements are bound to their recorded build/host and are not current SOTA, final accuracy, or workflow authority.
+
 # Post-merge SM86 campaign comparison
 
 Revision `9df50c47760b590c525b3a3a6723225eb2460f84` was rebuilt on the pinned

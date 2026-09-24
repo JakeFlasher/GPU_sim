@@ -1,3 +1,5 @@
+> **Dated engineering note.** Use current `docs/STATUS.md` and `docs/PROJECT_MEMORY.md` for active scope; this file records a model-relative boundary only.
+
 # Cycle metric boundary
 
 Updated 2026-09-23. This is a short engineering note, not a promotion gate.

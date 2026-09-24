@@ -177,35 +177,33 @@ fn validate_instruction(
     }
     if let ItsInstruction::CmpLtImm { dst, .. } | ItsInstruction::BranchIf { pred: dst, .. } =
         instruction
+        && usize::from(*dst) >= PREDICATE_COUNT
     {
-        if usize::from(*dst) >= PREDICATE_COUNT {
-            return Err(ItsError::InvalidProgram("predicate index must be below 8"));
-        }
+        return Err(ItsError::InvalidProgram("predicate index must be below 8"));
     }
     if let ItsInstruction::Branch { target }
     | ItsInstruction::BranchIf { target, .. }
     | ItsInstruction::Bssy { target, .. } = instruction
+        && *target >= instruction_count
     {
-        if *target >= instruction_count {
-            return Err(ItsError::InvalidProgram("branch target is out of range"));
-        }
+        return Err(ItsError::InvalidProgram("branch target is out of range"));
     }
     if let ItsInstruction::Bssy { barrier, .. }
     | ItsInstruction::Bsync { barrier }
     | ItsInstruction::Break { barrier } = instruction
+        && usize::from(*barrier) >= BARRIER_COUNT
     {
-        if usize::from(*barrier) >= BARRIER_COUNT {
-            return Err(ItsError::InvalidProgram("barrier index must be below 16"));
-        }
+        return Err(ItsError::InvalidProgram("barrier index must be below 16"));
     }
-    if let ItsInstruction::Bssy { barrier, target } = instruction {
-        if *target == 0 && *barrier == 0 {
-            // This is legal in principle, but an immediately recursive
-            // reconvergence shape is almost certainly a malformed example.
-            return Err(ItsError::InvalidProgram(
-                "Bssy target must not be the program entry",
-            ));
-        }
+    if let ItsInstruction::Bssy { barrier, target } = instruction
+        && *target == 0
+        && *barrier == 0
+    {
+        // This is legal in principle, but an immediately recursive
+        // reconvergence shape is almost certainly a malformed example.
+        return Err(ItsError::InvalidProgram(
+            "Bssy target must not be the program entry",
+        ));
     }
     Ok(())
 }
@@ -232,23 +230,12 @@ struct LaneState {
     predicates: [bool; PREDICATE_COUNT],
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Default)]
 struct BarrierState {
     valid: bool,
     participation: u64,
     arrived: u64,
     join_pc: usize,
-}
-
-impl Default for BarrierState {
-    fn default() -> Self {
-        Self {
-            valid: false,
-            participation: 0,
-            arrived: 0,
-            join_pc: 0,
-        }
-    }
 }
 
 pub struct ItsExecutor<'a> {
@@ -286,10 +273,10 @@ impl<'a> ItsExecutor<'a> {
                 return Err(ItsError::UnsupportedInstruction(name.to_owned()));
             }
         }
-        if spec.execution().max_resident_groups() < 1 {
+        if spec.execution().max_resident_groups() != 1 {
             return Err(ItsError::Spec(SpecError::InvalidValue {
                 field: "execution.max_resident_groups",
-                detail: "must be positive".to_owned(),
+                detail: "this single-group executor supports exactly one resident group".to_owned(),
             }));
         }
         Ok(Self { spec, program })
@@ -418,11 +405,7 @@ impl<'a> ItsExecutor<'a> {
             ItsInstruction::Bsync { barrier } => {
                 let slot = &mut barriers[usize::from(*barrier)];
                 if !slot.valid {
-                    // BREAK/EXIT may dissolve a token before a remaining
-                    // control-flow edge reaches its textual BSYNC. The
-                    // functional contract treats that use as fallthrough.
-                    for_each_lane(group, width, |lane| lanes[lane].pc = pc + 1);
-                    return Ok(());
+                    return Err(ItsError::InvalidBarrierUse(*barrier));
                 }
                 let participating = group & slot.participation;
                 let nonparticipating = group & !slot.participation;
@@ -639,4 +622,52 @@ pub enum ItsError {
     UnalignedAddress(u32),
     #[error("architecture spec error: {0}")]
     Spec(#[from] SpecError),
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::spec::ArchitectureSpec;
+    use std::path::Path;
+
+    #[test]
+    fn unmatched_bsync_is_rejected_instead_of_falling_through() {
+        let spec = ArchitectureSpec::parse(
+            Path::new("spec.json"),
+            br#"
+            {
+              "schema_version": 1,
+              "architecture": "probe",
+              "isa": "simt_its_v1",
+              "instruction_set": ["bsync", "halt"],
+              "execution": {"simt_width": 1, "max_resident_groups": 1},
+              "resources": [{"name":"alu","kind":"compute","issue_width":1,"latency_cycles":1}],
+              "evidence": "unvalidated"
+            }
+            "#,
+        )
+        .expect("probe spec should parse");
+        let program = ItsProgram::parse(
+            Path::new("program.json"),
+            br#"
+            {
+              "schema_version": 1,
+              "architecture": "probe",
+              "isa": "simt_its_v1",
+              "max_steps": 4,
+              "instructions": [
+                {"op":"bsync", "barrier":0},
+                {"op":"halt"}
+              ]
+            }
+            "#,
+        )
+        .expect("probe program should parse");
+
+        let error = ItsExecutor::new(&spec, &program)
+            .expect("identity and ISA should be accepted")
+            .run()
+            .expect_err("unmatched BSYNC must fail closed");
+        assert!(matches!(error, ItsError::InvalidBarrierUse(0)));
+    }
 }

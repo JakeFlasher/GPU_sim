@@ -32,6 +32,15 @@ wire's `architecture_card` label means source binding, while the simulator's
 model-relative timing and NCU independence rules still apply.
 
 Experimental user-defined shapes are separate from cards under
-`arch_profiles/specs`. They are consumed by `sim-arch::spec` only, carry an
-explicit evidence status, and cannot silently provide SM86/SM120 production
-defaults. See `plans/cross_architecture_gpu_simulator_research_plan_20260923.md`.
+`arch_profiles/specs`. They are consumed by `sim-arch::spec` and, for the
+strict `trace_sass_v1` issue-width profile only, by `sim-run --architecture-spec`.
+They carry an explicit evidence status and cannot silently provide SM86/SM120
+production defaults. Latency, initiation, in-flight, extra-resource, and
+operation-binding fields are rejected by that native bridge when unused. See
+the [custom spec guide](../arch_profiles/specs/README.md) and the
+[current roadmap](../plans/cross_architecture_gpu_simulator_research_plan_20260923.md).
+
+The dated host profile under
+`workloads/research_probes/sm86_ncu_demo_benchmark/host_profile.json` records
+the 2026-09-24 RTX 3090 Ti/driver/clock observation. It is not a replacement
+for architecture-card provenance or an assertion that future hosts match it.

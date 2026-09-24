@@ -29,6 +29,10 @@ tempfile = { workspace = true }
 name = "causal-frontier-probe"
 path = "src/bin/causal_frontier_probe.rs"
 
+[[bin]]
+name = "custom-program-run"
+path = "src/bin/custom_program_run.rs"
+
 [[test]]
 name = "launch_evidence"
 path = "tests/launch_evidence.rs"

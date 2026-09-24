@@ -1,7 +1,8 @@
 # Eval queries for navigating-project-kb (the meta-router skill).
 #
-# This skill is special: it has no knowledge subcorpus of its own — it only
-# owns INDEX.md and the routing prose. Specialty queries that mention
+# This skill is special: it has no knowledge subcorpus of its own — it owns
+# routing prose and points to tracked project docs when optional knowledge
+# cards are absent. Specialty queries that mention
 # specific tokens (e.g., "mma instruction") will always rank a specialty
 # skill rank-1. So the eval queries here intentionally target the
 # meta-router itself: prompts that ask FOR THE INVENTORY, not for content.
@@ -15,37 +16,37 @@ queries:
   - prompt: "give me an overview of the project knowledge base structure"
     expected_skill: navigating-project-kb
     expected_cards:
-      - .claude/knowledge/INDEX.md
+      - docs/PROJECT_MEMORY.md
     forbidden_behavior:
       - skips routing and answers directly without citing
     accept_top3: true
   - prompt: "list the specialty skills available in this repo"
     expected_skill: navigating-project-kb
     expected_cards:
-      - .claude/knowledge/INDEX.md
+      - docs/PROJECT_MEMORY.md
     forbidden_behavior:
       - hardcodes "eight" — the count may change as skills are added
     accept_top3: true
   - prompt: "I am unsure whether this is a PTX or SASS question, where do I start"
     expected_skill: navigating-project-kb
     expected_cards:
-      - .claude/knowledge/INDEX.md
+      - docs/PROJECT_MEMORY.md
     forbidden_behavior:
       - picks one specialty arbitrarily without explaining the disambiguation
     accept_top3: true
   - prompt: "what skill should I use for cluster.sync questions"
     expected_skill: navigating-project-kb
     expected_cards:
-      - .claude/knowledge/INDEX.md
-      - .claude/knowledge/cuda/cuda-clusters-dsmem.md
+      - docs/PROJECT_MEMORY.md
+      - docs/architecture_extensibility_research_20260924.md
     forbidden_behavior:
       - returns generic CUDA tutorial without naming the right skill
     accept_top3: true
   - prompt: "I have a specific question and want the shortest path to the right card"
     expected_skill: navigating-project-kb
     expected_cards:
-      - .claude/knowledge/INDEX.md
-      - .claude/knowledge/patents/problem-playbook.md
+      - docs/PROJECT_MEMORY.md
+      - docs/gpu_simulator_research_positioning_20260923.md
     forbidden_behavior:
       - skips both routers and answers from training priors
     accept_top3: true
