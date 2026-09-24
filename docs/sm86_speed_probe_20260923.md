@@ -76,3 +76,32 @@ The event lane is 1.69x faster end to end and 1.78x faster in replay-only
 time than dense on this fresh trace. The issue-width override remains slower
 than baseline (about 11.5% end-to-end on this row), so it is a real design
 axis but not the speed mechanism.
+
+## M3 bounded optimization: aggregate L1 preflight budgets
+
+The first `perf record` identified `L1Cache::preflight_mutation_budgets` as a
+6.18% top-level cycle consumer. Its input is a batch of small mutation budgets;
+the old path copied and checked the complete counter snapshot once per budget.
+The production semantics do not require those intermediate snapshots because
+the operation is a preflight with no cache-state mutation. The implementation
+now aggregates the 17 checked counter deltas per memory origin, then performs
+at most one checked projection for each origin. Recency, fill-sequence, origin
+partition, and overflow checks remain explicit.
+
+The changed release binary was replayed on the same fresh locked-clock GEMM
+trace three times. The JSON result was equivalent for the reported
+counters/frontiers in the comparison run; event totals remained
+`events_processed=362424`, `queue_events_processed=348088`, and
+`l2_access=185344`.
+
+| Build | Median replay phase | Median process wall | GPC frontier | SM terminal frontier |
+| --- | ---: | ---: | ---: | ---: |
+| before aggregation (3 runs) | 782.036 ms | 894.583 ms | 12,949 | 11,101 |
+| after aggregation (3 runs) | 755.453 ms | 872.462 ms | 12,949 | 11,101 |
+
+This is a 3.4% replay-phase and 2.5% process-wall reduction on this host and
+input. `perf report` after the change no longer places
+`preflight_mutation_budgets` in the top-level 2% list; remaining hot paths
+include queue cloning, issue-cycle work, cache-origin accounting, and trace
+cohort handling. This is simulator engineering evidence, not a hardware-speed
+claim and not a universal workload speedup.

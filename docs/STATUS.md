@@ -82,6 +82,11 @@ The first architecture design artifact is the
 [SM86 issue-width study](sm86_issue_width_design_study_20260923.md): widths 2/4
 change modeled frontiers but are slower than the baseline. It is a negative,
 model-relative result and does not claim hardware behavior.
+The M3 L1-preflight optimization is recorded in
+[sm86_speed_probe_20260923.md](sm86_speed_probe_20260923.md): aggregating
+per-origin counter budgets reduced median replay phase from 782.036 ms to
+755.453 ms on the fresh GEMM while preserving the reported counters and
+frontiers.
 The M6 baseline feasibility notes are in
 [baseline_feasibility_20260923.md](baseline_feasibility_20260923.md) and the
 executable overlap record is in

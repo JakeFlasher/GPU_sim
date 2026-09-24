@@ -317,6 +317,83 @@ fn checked_counter_add(
         .ok_or(L1CounterError::Overflow { field })
 }
 
+// Keep the preflight projection in one fixed-width representation.  A replay
+// batch commonly contains many small budgets from one warp instruction; the
+// old implementation copied the complete counter snapshot once per budget.
+// Aggregating these deltas by origin preserves the same checked arithmetic and
+// provenance lanes while reducing that work to at most two projections.
+const PREFLIGHT_COUNTER_FIELDS: [L1CounterField; 17] = [
+    L1CounterField::Hits,
+    L1CounterField::Misses,
+    L1CounterField::Merges,
+    L1CounterField::PendingLookupHits,
+    L1CounterField::StallEvents,
+    L1CounterField::LineFills,
+    L1CounterField::LineAllocMisses,
+    L1CounterField::SectorResidentMisses,
+    L1CounterField::BypassSectors,
+    L1CounterField::BypassAtomSectors,
+    L1CounterField::UntaggedSectors,
+    L1CounterField::StoreSectors,
+    L1CounterField::StoreHits,
+    L1CounterField::StoreTagHits,
+    L1CounterField::WriteLookupHits,
+    L1CounterField::ReductionSectors,
+    L1CounterField::ReductionHits,
+];
+
+fn preflight_budget_deltas(
+    budget: &L1MutationBudget,
+) -> Result<[(L1CounterField, u64); 17], L1AccessError> {
+    let write_lookup_hits = budget
+        .store_sectors
+        .checked_add(budget.reduction_sectors)
+        .ok_or(L1AccessError::Counter(L1CounterError::Overflow {
+            field: L1CounterField::WriteLookupHits,
+        }))?;
+    Ok([
+        (L1CounterField::Hits, budget.eligible_sectors),
+        (L1CounterField::Misses, budget.eligible_sectors),
+        (L1CounterField::Merges, budget.eligible_sectors),
+        (L1CounterField::PendingLookupHits, budget.eligible_sectors),
+        (L1CounterField::StallEvents, budget.eligible_sectors),
+        (L1CounterField::LineFills, budget.eligible_sectors),
+        (L1CounterField::LineAllocMisses, budget.eligible_sectors),
+        (
+            L1CounterField::SectorResidentMisses,
+            budget.eligible_sectors,
+        ),
+        (L1CounterField::BypassSectors, budget.bypass_sectors),
+        (
+            L1CounterField::BypassAtomSectors,
+            budget.bypass_atom_sectors,
+        ),
+        (L1CounterField::UntaggedSectors, budget.untagged_sectors),
+        (L1CounterField::StoreSectors, budget.store_sectors),
+        (L1CounterField::StoreHits, budget.store_sectors),
+        (L1CounterField::StoreTagHits, budget.store_sectors),
+        (L1CounterField::WriteLookupHits, write_lookup_hits),
+        (L1CounterField::ReductionSectors, budget.reduction_sectors),
+        (L1CounterField::ReductionHits, budget.reduction_sectors),
+    ])
+}
+
+fn preflight_values_deltas(values: [u64; 17]) -> [(L1CounterField, u64); 17] {
+    std::array::from_fn(|index| (PREFLIGHT_COUNTER_FIELDS[index], values[index]))
+}
+
+fn accumulate_preflight_values(
+    values: &mut [u64; 17],
+    budget: &L1MutationBudget,
+) -> Result<(), L1AccessError> {
+    for (index, (field, delta)) in preflight_budget_deltas(budget)?.into_iter().enumerate() {
+        values[index] = values[index]
+            .checked_add(delta)
+            .ok_or(L1AccessError::Counter(L1CounterError::Overflow { field }))?;
+    }
+    Ok(())
+}
+
 fn origin_counter_mut(counters: &mut L1OriginCounters, field: L1CounterField) -> &mut u64 {
     match field {
         L1CounterField::Hits => &mut counters.hits,
@@ -1563,37 +1640,20 @@ impl L1Cache {
         &self,
         budgets: &[L1MutationBudget],
     ) -> Result<(), L1AccessError> {
-        let mut counters = self.counters;
+        let mut aggregated_counter_values = [[0_u64; 17]; 2];
         for budget in budgets {
-            counters = counters.add_fields_checked(
-                budget.origin,
-                &[
-                    (L1CounterField::Hits, budget.eligible_sectors),
-                    (L1CounterField::Misses, budget.eligible_sectors),
-                    (L1CounterField::Merges, budget.eligible_sectors),
-                    (L1CounterField::PendingLookupHits, budget.eligible_sectors),
-                    (L1CounterField::StallEvents, budget.eligible_sectors),
-                    (L1CounterField::LineFills, budget.eligible_sectors),
-                    (L1CounterField::LineAllocMisses, budget.eligible_sectors),
-                    (
-                        L1CounterField::SectorResidentMisses,
-                        budget.eligible_sectors,
-                    ),
-                    (L1CounterField::BypassSectors, budget.bypass_sectors),
-                    (
-                        L1CounterField::BypassAtomSectors,
-                        budget.bypass_atom_sectors,
-                    ),
-                    (L1CounterField::UntaggedSectors, budget.untagged_sectors),
-                    (L1CounterField::StoreSectors, budget.store_sectors),
-                    (L1CounterField::StoreHits, budget.store_sectors),
-                    (L1CounterField::StoreTagHits, budget.store_sectors),
-                    (L1CounterField::WriteLookupHits, budget.store_sectors),
-                    (L1CounterField::WriteLookupHits, budget.reduction_sectors),
-                    (L1CounterField::ReductionSectors, budget.reduction_sectors),
-                    (L1CounterField::ReductionHits, budget.reduction_sectors),
-                ],
+            accumulate_preflight_values(
+                &mut aggregated_counter_values[budget.origin.index()],
+                budget,
             )?;
+        }
+
+        let mut counters = self.counters;
+        for origin in MemoryOrigin::ALL {
+            let values = aggregated_counter_values[origin.index()];
+            if values.iter().any(|&value| value != 0) {
+                counters = counters.add_fields_checked(origin, &preflight_values_deltas(values))?;
+            }
         }
 
         let mut recency_touches = 0u64;

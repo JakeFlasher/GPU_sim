@@ -398,6 +398,14 @@ The next discriminating work is a second-cohort crosswalk check, then an issue
 loop profile and one demand-driven optimization only if it improves measured
 replay wall time without weakening the declared model-relative observables.
 
+That M3 probe is now closed with a bounded L1 preflight optimization: the
+profiled per-budget counter projection is aggregated by memory origin before
+checked mutation. On the same fresh GEMM, median replay fell from 782.036 ms to
+755.453 ms and median process wall from 894.583 ms to 872.462 ms across three
+runs, while the emitted JSON counters/frontiers and event totals remained
+unchanged. The optimization is local to simulator accounting and carries no
+hardware-speed claim.
+
 The first architecture design artifact is now the negative issue-width study in
 `docs/sm86_issue_width_design_study_20260923.md`: widths 2/4 alter modeled
 frontiers but are slower than width 1. The result is retained as a design
@@ -444,6 +452,6 @@ not hardware validation.
 
 Next: resolve the M6 alignment questions (3090 Ti-compatible card, stable
 protobuf/runtime, and a common trace/observable boundary) without weakening the
-local NCU contract. Keep both executable overlap probes as non-scoring
-evidence and unsupported cells explicit; do not add another ISA, vendor, or
+local NCU contract. Keep both executable overlap probes and this M3 speed
+result scoped to their declared evidence; do not add another ISA, vendor, or
 system layer while that boundary is being resolved.
