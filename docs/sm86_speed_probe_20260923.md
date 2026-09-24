@@ -105,3 +105,14 @@ input. `perf report` after the change no longer places
 include queue cloning, issue-cycle work, cache-origin accounting, and trace
 cohort handling. This is simulator engineering evidence, not a hardware-speed
 claim and not a universal workload speedup.
+
+As a bounded cross-workload smoke check after the change, the same release
+binary completed the fresh RMSNorm and SiLU traces with full block coverage:
+
+| Workload | Median process wall | Median replay phase | GPC frontier | SM terminal frontier |
+| --- | ---: | ---: | ---: | ---: |
+| BF16 RMSNorm (64 blocks) | 0.375 s | 298.227 ms | 18,944 | 17,120 |
+| BF16 SiLU (1,024 blocks) | 0.451 s | 358.085 ms | 5,576 | 3,720 |
+
+All six control replays exited successfully. These are post-change smoke
+measurements, not before/after speed claims for those two kernels.
