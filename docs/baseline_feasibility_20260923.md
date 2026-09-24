@@ -2,6 +2,11 @@
 
 Updated 2026-09-23. No cross-simulator numeric claim is made by this note.
 
+The machine-readable M6 matrix is
+[`baseline_matrix_20260924.json`](baseline_matrix_20260924.json). It records
+the local NCU anchor, executable external overlaps, and unsupported cells
+without collapsing them into a ranking.
+
 ## Valid comparison cells
 
 None have been scored yet. A valid cell requires a runnable baseline, the same

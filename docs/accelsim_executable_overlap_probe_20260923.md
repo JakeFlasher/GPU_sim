@@ -60,9 +60,11 @@ same application shape, but two independent mismatches remain:
    cannot be compared to the 3090 Ti NCU row as hardware accuracy.
 2. Accel-Sim consumed its native legacy `.traceg.xz` representation (213,504
    reported instructions), while this project consumed the enhanced protobuf
-   capture for the paired NCU row. The two traces came from the same workload
-   launch shape but are not byte-identical trace contracts; preprocessing and
-   predication accounting differ.
+   capture for the paired NCU row. A bounded comparator found 512 matching
+   warp sequences, 197,120 records, identical effective PC/mask sequences, and
+   zero mismatched warps. That closes the instruction-sequence portion of the
+   concern, but the legacy/native sidecars and simulator observables are still
+   not the same declared contract.
 
 Consequently, the 14,174-cycle result and the 4.87 s process time are retained
 as **executable overlap evidence only**. No error percentage, speed ratio, or

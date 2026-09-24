@@ -1,0 +1,78 @@
+{
+  "schema_version": 1,
+  "updated": "2026-09-24",
+  "purpose": "M6 baseline cells with explicit validity; no forced ranking",
+  "hardware_anchor": {
+    "device": "NVIDIA GeForce RTX 3090 Ti",
+    "compute_capability": "8.6",
+    "driver": "615.71.09",
+    "sm_clock_mhz": 1350,
+    "memory_clock_mhz": 10501,
+    "ncu_observable": "gpc__cycles_elapsed.max",
+    "ncu_launch_id": 0,
+    "ncu_cycles": 13440,
+    "workload": "gemm_hmma_bf16_sm80",
+    "trace_contract": "enhanced_protobuf",
+    "simulator_frontier_cycles": 12949,
+    "simulator_sm_terminal_cycles": 11101,
+    "accuracy_status": "candidate_crosswalk_non_scoring_due_unmodeled_dirty_writeback_and_coherence_tails"
+  },
+  "cells": [
+    {
+      "baseline": "Accel-Sim 2.0",
+      "status": "executable_overlap_non_scoring",
+      "architecture_card": "SM86_RTX3070",
+      "hardware_identity_match": false,
+      "trace_contract": "legacy_traceg_xz",
+      "trace_sequence_comparison": {
+        "warps": 512,
+        "records": 197120,
+        "effective_lane_instructions": 5242880,
+        "pc_effective_mask_mismatched_warps": 0
+      },
+      "replay_runs": 3,
+      "median_wall_seconds": 4.870,
+      "sim_cycles": 14174,
+      "sim_instructions": 5621216,
+      "valid_accuracy_cell": false,
+      "invalid_reasons": [
+        "RTX3070_card_vs_RTX3090Ti_anchor",
+        "legacy_trace_contract_vs_enhanced_protobuf_observable"
+      ],
+      "evidence": "docs/accelsim_executable_overlap_probe_20260923.md"
+    },
+    {
+      "baseline": "Huerta MICRO25 modern-GPU simulator",
+      "status": "executable_overlap_non_scoring",
+      "architecture_card": "SM86_RTX3090",
+      "hardware_identity_match": false,
+      "trace_contract": "enhanced_protobuf",
+      "successful_replay_runs": 2,
+      "successful_wall_seconds": [7.680, 8.233],
+      "sim_cycles": 16708,
+      "sim_instructions": 5242880,
+      "issued_ctas": 512,
+      "valid_accuracy_cell": false,
+      "invalid_reasons": [
+        "RTX3090_card_vs_RTX3090Ti_anchor",
+        "simulator_counter_is_not_declared_NCU_GPC_observable",
+        "upstream_protobuf_map_runtime_instability_on_repeated_invocation"
+      ],
+      "evidence": "docs/huerta_micro25_executable_overlap_probe_20260923.md"
+    },
+    {
+      "baseline": "MGPUSim",
+      "status": "unsupported_no_valid_cell",
+      "architecture_card": "AMD_only_baseline",
+      "hardware_identity_match": false,
+      "trace_contract": "not_overlapping_on_available_host",
+      "valid_accuracy_cell": false,
+      "invalid_reasons": [
+        "AMD_vendor_baseline_without_matching_AMD_hardware_or_trace_card"
+      ],
+      "evidence": "docs/gpu_simulator_research_positioning_20260923.md"
+    }
+  ],
+  "valid_numeric_cells": [],
+  "decision": "Do_not_rank_or_claim_SOTA_until_a_baseline_shares_device_identity_or_an_explicitly_common_model_and_observable"
+}
