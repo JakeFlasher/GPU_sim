@@ -22,7 +22,7 @@
       "baseline": "Accel-Sim 2.0",
       "status": "executable_overlap_non_scoring",
       "architecture_card": "SM86_RTX3070",
-      "hardware_identity_match": false,
+      "hardware_identity_match": "no",
       "trace_contract": "legacy_traceg_xz",
       "trace_sequence_comparison": {
         "warps": 512,
@@ -70,7 +70,7 @@
       "baseline": "Huerta MICRO25 modern-GPU simulator",
       "status": "executable_overlap_non_scoring",
       "architecture_card": "SM86_RTX3090",
-      "hardware_identity_match": false,
+      "hardware_identity_match": "no",
       "trace_contract": "enhanced_protobuf",
       "successful_replay_runs": 2,
       "successful_wall_seconds": [7.680, 8.233],
@@ -89,7 +89,7 @@
       "baseline": "MGPUSim",
       "status": "unsupported_no_valid_cell",
       "architecture_card": "AMD_only_baseline",
-      "hardware_identity_match": false,
+      "hardware_identity_match": "no",
       "trace_contract": "not_overlapping_on_available_host",
       "valid_accuracy_cell": false,
       "invalid_reasons": [
