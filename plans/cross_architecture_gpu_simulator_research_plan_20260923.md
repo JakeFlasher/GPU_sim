@@ -1,7 +1,8 @@
 # General software GPU simulator roadmap
 
-Updated 2026-09-23 after the adversarial roadmap review. This is an
-implementation plan for the alpha branch, not a publication guarantee.
+Updated 2026-09-24 after the adversarial roadmap review and M3/M6 continuation.
+This is an implementation plan for the alpha branch, not a publication
+guarantee.
 
 ## 1. Outcome and falsifiable thesis
 
@@ -394,9 +395,9 @@ peak RSS was 57.6–58.1 MB. These are engineering observations; the negative
 issue-width speed result is retained rather than tuned away. See
 `docs/sm86_speed_probe_20260923.md`.
 
-The next discriminating work is a second-cohort crosswalk check, then an issue
-loop profile and one demand-driven optimization only if it improves measured
-replay wall time without weakening the declared model-relative observables.
+The second-cohort crosswalk and issue-loop profile were completed. The bounded
+L1 preflight optimization below is the retained M3 speed mechanism; no further
+optimization is required before the M6 baseline boundary is resolved.
 
 That M3 probe is now closed with a bounded L1 preflight optimization: the
 profiled per-budget counter projection is aggregated by memory origin before
@@ -454,8 +455,8 @@ not hardware validation.
 
 ## 8. Current next action
 
-Next: resolve the M6 alignment questions (3090 Ti-compatible card, stable
-protobuf/runtime, and a common trace/observable boundary) without weakening the
-local NCU contract. Keep both executable overlap probes and this M3 speed
-result scoped to their declared evidence; do not add another ISA, vendor, or
-system layer while that boundary is being resolved.
+Next: maintain the explicit M6 matrix and seek a supported official baseline
+environment only if it can produce a common device/model/observable cell.
+Otherwise retain the documented non-scoring fallback. Keep both executable
+overlap probes and this M3 speed result scoped to their declared evidence; do
+not add another ISA, vendor, or system layer while that boundary is unresolved.

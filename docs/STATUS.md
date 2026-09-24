@@ -1,6 +1,6 @@
 # Current status
 
-Updated 2026-09-23.
+Updated 2026-09-24.
 
 ## Scope
 
@@ -43,8 +43,9 @@ SM86 replay:
   per-lane-PC diamond with BSSY/BSYNC reconvergence and lane-specific stores.
 * The retained width/issue-width sweep is a hypothetical design probe, not
   silicon accuracy or a universal architecture claim.
-* A custom parameter is not yet a production timing control; the next
-  implementation must route one scheduler/resource choice into sim-sm.
+* `--hypothetical-issue-ports N` is now a bounded production timing control
+  for the trace-safe issue-resource lane; it remains explicitly hypothetical
+  and does not alter vendor card identity.
 
 ## Measurement boundary
 
@@ -87,8 +88,9 @@ The M3 L1-preflight optimization is recorded in
 per-origin counter budgets reduced median replay phase from 782.036 ms to
 755.453 ms on the fresh GEMM while preserving the reported counters and
 frontiers.
-The M6 baseline feasibility notes are in
-[baseline_feasibility_20260923.md](baseline_feasibility_20260923.md) and the
+The M6 baseline feasibility notes and machine-readable matrix are in
+[baseline_feasibility_20260923.md](baseline_feasibility_20260923.md) and
+[baseline_matrix_20260924.json](baseline_matrix_20260924.json). The
 executable overlap record is in
 [accelsim_executable_overlap_probe_20260923.md](accelsim_executable_overlap_probe_20260923.md).
 Accel-Sim 2.0 now builds and completes a native-trace replay, but its native
