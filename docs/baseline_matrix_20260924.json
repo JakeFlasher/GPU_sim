@@ -28,7 +28,9 @@
         "warps": 512,
         "records": 197120,
         "effective_lane_instructions": 5242880,
-        "pc_effective_mask_mismatched_warps": 0
+        "pc_effective_mask_mismatched_warps": 0,
+        "normalized_memory_payload_mismatches": 0,
+        "enhanced_extra_ldgsts_shared_destination_records": 16384
       },
       "replay_runs": 3,
       "median_wall_seconds": 4.870,
@@ -51,7 +53,9 @@
         "warps": 512,
         "records": 197120,
         "effective_lane_instructions": 5242880,
-        "pc_effective_mask_mismatched_warps": 0
+        "pc_effective_mask_mismatched_warps": 0,
+        "normalized_memory_payload_mismatches": 0,
+        "enhanced_extra_ldgsts_shared_destination_records": 16384
       },
       "replay_runs": 3,
       "median_wall_seconds": 6.337,

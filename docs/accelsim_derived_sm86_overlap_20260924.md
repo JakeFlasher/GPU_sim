@@ -21,9 +21,12 @@ official or independently validated RTX 3090 Ti card.
 ## Replay
 
 Input: the native Accel-Sim legacy trace from the same GEMM launch used in the
-earlier overlap probe. The bounded PC/effective-mask comparator found 512
-matching warps, 197,120 records, 5,242,880 effective lane instructions, and
-zero mismatched warp sequences against the enhanced protobuf capture.
+earlier overlap probe. The bounded comparator found 512 matching warps,
+197,120 records, 5,242,880 effective lane instructions, zero PC/effective-mask
+mismatches, and zero normalized memory-payload mismatches against the enhanced
+protobuf capture. The enhanced trace carries an additional shared-destination
+record for each of 16,384 LDGSTS instructions; that is an additive contract
+difference, not a different represented global source stream.
 
 Three derived-profile replays completed:
 

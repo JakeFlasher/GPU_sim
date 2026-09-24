@@ -62,9 +62,12 @@ same application shape, but two independent mismatches remain:
    reported instructions), while this project consumed the enhanced protobuf
    capture for the paired NCU row. A bounded comparator found 512 matching
    warp sequences, 197,120 records, identical effective PC/mask sequences, and
-   zero mismatched warps. That closes the instruction-sequence portion of the
-   concern, but the legacy/native sidecars and simulator observables are still
-   not the same declared contract.
+   zero mismatched warps. A second comparator normalized capture-specific
+   virtual bases and found zero normalized memory-payload mismatches across
+   those records; the enhanced contract additionally carries 16,384 LDGSTS
+   shared-destination records that the legacy format omits. This closes the
+   represented instruction/address-sequence concern, but the simulator
+   observables and architecture card are still not the same declared contract.
 
 Consequently, the 14,174-cycle result and the 4.87 s process time are retained
 as **executable overlap evidence only**. No error percentage, speed ratio, or
