@@ -430,6 +430,10 @@ its native RTX3090 card; two successful runs are recorded in
 `docs/huerta_micro25_executable_overlap_probe_20260923.md`. Its differing card,
 counter semantics, and protobuf-map runtime instability keep that overlap
 non-scoring as well.
+The Accel-Sim follow-up derived profile changes only device-scale geometry and
+locked clocks toward RTX3090 Ti and completes three stable replays, but its
+inherited RTX3070 model fields keep it explicitly non-scoring; see
+`docs/accelsim_derived_sm86_overlap_20260924.md`.
 
 ## 7. Measurement and reporting rules
 

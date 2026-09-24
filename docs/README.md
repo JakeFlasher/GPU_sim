@@ -9,6 +9,7 @@
 - [Baseline feasibility](baseline_feasibility_20260923.md) — first M6 build/overlap probe; no invalid numeric comparison reported.
 - [Baseline matrix](baseline_matrix_20260924.json) — machine-readable valid/unsupported M6 cells with no forced ranking.
 - [Accel-Sim executable overlap](accelsim_executable_overlap_probe_20260923.md) — native-trace build/replay evidence with explicit RTX3070/trace-contract limits.
+- [Accel-Sim derived SM86 overlap](accelsim_derived_sm86_overlap_20260924.md) — device-scale-only profile experiment, explicitly non-scoring.
 - [Huerta MICRO'25 executable overlap](huerta_micro25_executable_overlap_probe_20260923.md) — same-enhanced-trace probe with explicit RTX3090/protobuf limits.
 - [CurryGPU functional-architecture study](curry_gpu_its_study_20260923.md) — local primary-source analysis and the bounded functional ITS seam.
 - [General software GPU simulator roadmap](../plans/cross_architecture_gpu_simulator_research_plan_20260923.md) — active implementation direction and NCU/speed completion bar.

@@ -53,6 +53,13 @@ capture. The exact commands, revisions, and artifacts are in
 `docs/accelsim_executable_overlap_probe_20260923.md`; no accuracy percentage
 or speed ranking is inferred from it.
 
+A follow-up derived profile changed only SM count, memory partitions, and
+locked clock domains toward the RTX 3090 Ti anchor. Three replays completed at
+12,588 cycles, 5,635,808 instructions, and median 6.337 s wall time. Because
+the remaining cache/scheduler/memory fields still come from RTX 3070, this
+remains `derived_profile_non_scoring`; details are in
+`docs/accelsim_derived_sm86_overlap_20260924.md`.
+
 The official Ubuntu 24.04/CUDA 12.8 container was also attempted from the
 published package tag. Most layers downloaded, but two registry layers entered
 repeated network retries and the pull was terminated without a usable image.

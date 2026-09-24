@@ -42,6 +42,31 @@
       "evidence": "docs/accelsim_executable_overlap_probe_20260923.md"
     },
     {
+      "baseline": "Accel-Sim 2.0 derived SM86 profile",
+      "status": "derived_profile_non_scoring",
+      "architecture_card": "SM86_RTX3090Ti_derived_from_RTX3070",
+      "hardware_identity_match": "partial_device_scale_only",
+      "trace_contract": "legacy_traceg_xz",
+      "trace_sequence_comparison": {
+        "warps": 512,
+        "records": 197120,
+        "effective_lane_instructions": 5242880,
+        "pc_effective_mask_mismatched_warps": 0
+      },
+      "replay_runs": 3,
+      "median_wall_seconds": 6.337,
+      "median_peak_rss_kib": 737436,
+      "sim_cycles": 12588,
+      "sim_instructions": 5635808,
+      "valid_accuracy_cell": false,
+      "invalid_reasons": [
+        "cache_scheduler_memory_latency_fields_inherited_from_RTX3070",
+        "legacy_trace_contract_vs_enhanced_protobuf_observable",
+        "derived_card_is_not_official_or_independently_validated"
+      ],
+      "evidence": "docs/accelsim_derived_sm86_overlap_20260924.md"
+    },
+    {
       "baseline": "Huerta MICRO25 modern-GPU simulator",
       "status": "executable_overlap_non_scoring",
       "architecture_card": "SM86_RTX3090",
