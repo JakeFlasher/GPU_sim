@@ -99,6 +99,10 @@ The Huerta MICRO'25 source has a same-enhanced-trace overlap record in
 [huerta_micro25_executable_overlap_probe_20260923.md](huerta_micro25_executable_overlap_probe_20260923.md);
 its RTX 3090 card, non-NCU counter, and protobuf-map runtime instability keep
 that cell non-scoring.
+The derived Accel-Sim SM86 profile probe reduces only device-scale mismatch and
+completes three stable replays, but inherited RTX3070 model fields keep it
+non-scoring; see
+[accelsim_derived_sm86_overlap_20260924.md](accelsim_derived_sm86_overlap_20260924.md).
 
 Follow the fine-grained milestones in the
 [adversarial roadmap review](roadmap_adversarial_review_20260923.md):
