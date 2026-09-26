@@ -983,6 +983,9 @@ enum Ev {
     L2Access(MemRequest),
     L2AccessBatch(Box<[MemRequest]>),
     L2Fill(L2FillToken),
+    /// Historical event name for an intrinsic no-response write-class RMW
+    /// completion. It is used by both returning ATOM and non-returning RED;
+    /// the public traffic counters keep those operations separate.
     AtomicCompletion,
     MemoryWriteAck(MemoryWriteAck),
     MemResponse {
@@ -2102,6 +2105,8 @@ struct L2SystemCommit {
     origin_source_sectors: [u64; 2],
     origin_source_hits: [u64; 2],
     read_sectors: u64,
+    atomic_rmw_read_sectors: u64,
+    reduction_rmw_read_sectors: u64,
     origin_read_sectors: [u64; 2],
     topology_stats: DramStats,
     dram_free_fp: Option<u128>,
@@ -2133,9 +2138,11 @@ struct L2SystemCommit {
 /// clears at that child sector's ready event. Uncongested streams see pure
 /// latency (the server only ever ADDS delay).
 ///
-/// v0 scope: DRAM READS only — write data validates Store/RED sectors without
-/// a fetch, while ATOM's returning RMW read fetches missing sectors. Dirty
-/// writeback, RED's RMW read, and coherence remain typed unmodeled tails.
+/// v0 scope: DRAM READS only — write data validates Store sectors without a
+/// fetch, while returning ATOM and non-returning RED charge missing sectors
+/// for their internal RMW read. Dirty writeback and coherence remain typed
+/// unmodeled tails; RED's value-dependent reduction/serialization semantics
+/// are still outside the event stream.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DramBw {
     /// Latency-only (pre-increment behavior): the ablation mode and the
@@ -2242,11 +2249,19 @@ pub struct DramStats {
     /// synthetic stats are rejected before aggregation or emission.
     arch: Option<ArchId>,
     /// 32 B DRAM read fetches DEMANDED by the run (L2-missing sectors
-    /// of read operations plus missing sectors of returning ATOM RMW reads.
+    /// of read operations plus missing sectors of ATOM and RED internal RMW reads).
     /// Counted in BOTH modes: under `Unmodeled` it audits the ablation's demand
-    /// with no server attached. Plain stores and non-returning RED never enter
-    /// this modeled read-fetch count.
+    /// with no server attached. Plain stores never enter this modeled
+    /// read-fetch count.
     pub read_sectors: u64,
+    /// Missing-sector read demand attributable to returning ATOM operations.
+    /// This is a traffic observer, not a claim that the value-dependent RMW
+    /// serialization is complete.
+    pub atomic_rmw_read_sectors: u64,
+    /// Missing-sector read demand attributable to non-returning RED/REDG
+    /// operations. The reduction result/coherence protocol remains a typed
+    /// tail even though its cold-line read arm is charged here.
+    pub reduction_rmw_read_sectors: u64,
     /// Responses whose ready time the bandwidth server pushed PAST the
     /// latency arm (0 in uncongested runs and in `Unmodeled` mode).
     /// Late sector follow-ups carry their own completion response and are
@@ -2359,6 +2374,8 @@ impl DramStats {
         Ok(Self {
             arch: Some(arch),
             read_sectors,
+            atomic_rmw_read_sectors: 0,
+            reduction_rmw_read_sectors: 0,
             bw_delayed_responses,
             l2_evicted_lines: 0,
             l2_evicted_valid_sectors: 0,
@@ -2445,6 +2462,18 @@ impl DramStats {
                 counter: "DRAM read sectors",
             },
         )?;
+        let atomic_rmw_read_sectors = self
+            .atomic_rmw_read_sectors
+            .checked_add(other.atomic_rmw_read_sectors)
+            .ok_or(SystemCounterError::Overflow {
+                counter: "DRAM atomic RMW read sectors",
+            })?;
+        let reduction_rmw_read_sectors = self
+            .reduction_rmw_read_sectors
+            .checked_add(other.reduction_rmw_read_sectors)
+            .ok_or(SystemCounterError::Overflow {
+                counter: "DRAM reduction RMW read sectors",
+            })?;
         let bw_delayed_responses = self
             .bw_delayed_responses
             .checked_add(other.bw_delayed_responses)
@@ -2488,6 +2517,8 @@ impl DramStats {
         let next = Self {
             arch: self.arch,
             read_sectors,
+            atomic_rmw_read_sectors,
+            reduction_rmw_read_sectors,
             bw_delayed_responses,
             l2_evicted_lines,
             l2_evicted_valid_sectors,
@@ -2923,6 +2954,30 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates(
                                 _ => 0,
                             };
                             let fetch_sectors = u64::from(fetch_mask.count_ones());
+                            let atomic_rmw_read_sectors =
+                                if req.operation == MemoryOperation::Atomic {
+                                    fetch_sectors
+                                } else {
+                                    0
+                                };
+                            let reduction_rmw_read_sectors =
+                                if req.operation == MemoryOperation::Reduction {
+                                    fetch_sectors
+                                } else {
+                                    0
+                                };
+                            let next_atomic_rmw_read_sectors = dram_stats
+                                .atomic_rmw_read_sectors
+                                .checked_add(atomic_rmw_read_sectors)
+                                .ok_or(SystemError::CounterOverflow {
+                                    counter: "DRAM atomic RMW read sectors",
+                                })?;
+                            let next_reduction_rmw_read_sectors = dram_stats
+                                .reduction_rmw_read_sectors
+                                .checked_add(reduction_rmw_read_sectors)
+                                .ok_or(SystemError::CounterOverflow {
+                                    counter: "DRAM reduction RMW read sectors",
+                                })?;
                             let origin_fetches = origin_masks
                                 .map(|mask| u64::from((mask & fetch_mask).count_ones()));
                             let next_read_sectors = dram_stats
@@ -3041,20 +3096,27 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates(
                                 None
                             };
 
-                            let atomic_completion_ready =
-                                if req.operation == MemoryOperation::Atomic && response.is_none() {
-                                    let latency_ready = match fetch_latency_ready {
-                                        Some(ready) => ready,
-                                        None => checked_cycle_add(
-                                            "unobserved ATOM L2-hit completion",
-                                            req.issue_time,
-                                            params.l1_miss_latency,
-                                        )?,
-                                    };
-                                    Some(latency_ready.max(bw_ready))
-                                } else {
-                                    None
+                            let atomic_completion_ready = if matches!(
+                                req.operation,
+                                MemoryOperation::Atomic | MemoryOperation::Reduction
+                            ) && response.is_none()
+                            {
+                                let latency_ready = match fetch_latency_ready {
+                                    Some(ready) => ready,
+                                    None => checked_cycle_add(
+                                        if req.operation == MemoryOperation::Reduction {
+                                            "unobserved RED L2-hit completion"
+                                        } else {
+                                            "unobserved ATOM L2-hit completion"
+                                        },
+                                        req.issue_time,
+                                        params.l1_miss_latency,
+                                    )?,
                                 };
+                                Some(latency_ready.max(bw_ready))
+                            } else {
+                                None
+                            };
 
                             Ok(L2SystemCommit {
                                 source_ix,
@@ -3069,6 +3131,8 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates(
                                 fill_ready,
                                 response_l2_allocation_generation: (req.reply != ReplyTo::None)
                                     .then(|| preview.allocation_generation()),
+                                atomic_rmw_read_sectors: next_atomic_rmw_read_sectors,
+                                reduction_rmw_read_sectors: next_reduction_rmw_read_sectors,
                                 atomic_completion_ready,
                                 response,
                                 observed_sectors: requested_sectors,
@@ -3216,6 +3280,8 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates(
                             commit.origin_source_hits[origin_ix];
                     }
                     dram_stats.read_sectors = commit.read_sectors;
+                    dram_stats.atomic_rmw_read_sectors = commit.atomic_rmw_read_sectors;
+                    dram_stats.reduction_rmw_read_sectors = commit.reduction_rmw_read_sectors;
                     for origin in MemoryOrigin::ALL {
                         let origin_ix = origin.index();
                         dram_stats.by_origin[origin_ix].read_sectors =
@@ -6890,6 +6956,8 @@ mod tests {
         );
         assert_eq!(r.l2.write_tag_hits, 1);
         assert_eq!(r.dram.read_sectors, 1, "ATOM RMW fetches the absent sector");
+        assert_eq!(r.dram.atomic_rmw_read_sectors, 1);
+        assert_eq!(r.dram.reduction_rmw_read_sectors, 0);
         assert_eq!(
             r.unmodeled_tails,
             TailFlags {
@@ -6958,7 +7026,7 @@ mod tests {
     }
 
     #[test]
-    fn reduction_is_write_class_without_read_fetch_or_store_attribution() {
+    fn reduction_charges_cold_rmw_read_without_store_attribution() {
         let sched = schedule(vec![(0, slot(cb(1), "RED.E.ADD.STRONG.GPU"))]);
         let blocks = vec![BlockReplay {
             launch_index: 0,
@@ -6989,7 +7057,12 @@ mod tests {
         .unwrap();
 
         assert_eq!(result.l2_by_source.source(L2Source::Store), (1, 0));
-        assert_eq!(result.dram.read_sectors, 0);
+        assert_eq!(
+            result.dram.read_sectors, 1,
+            "a cold RED line charges its internal RMW read"
+        );
+        assert_eq!(result.dram.atomic_rmw_read_sectors, 0);
+        assert_eq!(result.dram.reduction_rmw_read_sectors, 1);
         let l1 = result.per_sm[&0].l1.unwrap();
         assert_eq!(l1.store_sectors, 0);
         assert_eq!(l1.reduction_sectors, 1);
@@ -7008,7 +7081,7 @@ mod tests {
                 .unwrap()
                 .present_sectors,
             1,
-            "RED write data validates the sector without modeling its RMW read"
+            "RED write data validates the sector while its cold RMW read is charged separately"
         );
     }
 
@@ -7369,13 +7442,19 @@ mod tests {
         .unwrap();
         dram_total.maximum_terminal_l2_dirty_lines = 3;
         dram_total.maximum_terminal_l2_dirty_sectors = 7;
+        dram_total.atomic_rmw_read_sectors = 11;
+        dram_total.reduction_rmw_read_sectors = 13;
         let mut dram_addend = dram_addend;
         dram_addend.maximum_terminal_l2_dirty_lines = 5;
         dram_addend.maximum_terminal_l2_dirty_sectors = 4;
+        dram_addend.atomic_rmw_read_sectors = 17;
+        dram_addend.reduction_rmw_read_sectors = 19;
 
         dram_total.add_checked(&dram_addend).unwrap();
         assert_eq!(dram_total.read_sectors, 8);
         assert_eq!(dram_total.bw_delayed_responses, 3);
+        assert_eq!(dram_total.atomic_rmw_read_sectors, 28);
+        assert_eq!(dram_total.reduction_rmw_read_sectors, 32);
         assert_eq!(dram_total.maximum_terminal_l2_dirty_lines, 5);
         assert_eq!(dram_total.maximum_terminal_l2_dirty_sectors, 7);
         assert_eq!(

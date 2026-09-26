@@ -79,7 +79,8 @@ use crate::issue::{
     simulate_sm_with_residency, validate_memory_admission_candidates,
     validate_memory_service_candidates,
 };
-use crate::program::{FunctionSchedule, OpClass};
+use crate::metrics::TraceMetrics;
+use crate::program::{FunctionSchedule, OpClass, PipelineClass};
 use crate::system::{
     DramBw, DramStats, L2SourceSplit, SystemError,
     simulate_kernel_shared_with_residency_and_candidates,
@@ -746,6 +747,7 @@ struct FoldedKernelReplay {
     l2_by_source: Option<L2SourceSplit>,
     dram: Option<DramStats>,
     front_end: FrontEndCounters,
+    trace_metrics: TraceMetrics,
     unmodeled_tails: TailFlags,
 }
 
@@ -1023,6 +1025,12 @@ impl FullKernelReplayResult {
 
     pub fn front_end(&self) -> FrontEndCounters {
         self.replay.front_end
+    }
+
+    /// Trace-derived dynamic activity and memory-class counts. These are
+    /// independent of NCU and never feed timing configuration.
+    pub fn trace_metrics(&self) -> &TraceMetrics {
+        &self.replay.trace_metrics
     }
 
     pub fn unmodeled_tails(&self) -> TailFlags {
@@ -1308,6 +1316,7 @@ struct ExtractedKernel {
     coverage: ExtractedCoverage,
     shared_memory_residency: SharedMemoryResidency,
     front_end: FrontEndCounters,
+    trace_metrics: TraceMetrics,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -1816,6 +1825,47 @@ fn extract_per_sm_blocks(
     let mut traced_sm_by_launch_index: BTreeMap<i64, i32> = BTreeMap::new();
     let mut records_seen: u64 = 0;
     let mut instruction_sectors = BTreeSet::new();
+    let launch_resources = (loc.kernel().number_of_registers > 0
+        || loc.kernel().size_shared_memory > 0
+        || loc.kernel().shared_memory_static_bytes.is_some()
+        || loc.kernel().shared_memory_dynamic_bytes.is_some()
+        || loc.kernel().shared_memory_carveout_preference_pct.is_some()
+        || loc.kernel().driver_occupancy_limit_blocks.is_some())
+    .then(|| crate::metrics::LaunchResources {
+        block_threads: loc
+            .kernel()
+            .block_dim
+            .as_ref()
+            .map(|dim| {
+                dim.x
+                    .max(0)
+                    .saturating_mul(dim.y.max(0))
+                    .saturating_mul(dim.z.max(0)) as u32
+            })
+            .unwrap_or(0),
+        grid_blocks: loc
+            .kernel()
+            .grid_dim
+            .as_ref()
+            .map(|dim| {
+                u64::from(dim.x.max(0) as u32)
+                    .saturating_mul(u64::from(dim.y.max(0) as u32))
+                    .saturating_mul(u64::from(dim.z.max(0) as u32))
+            })
+            .unwrap_or(0),
+        // TraceDir validated nonnegative counts and the split/total sum.
+        registers_per_thread: loc.kernel().number_of_registers as u32,
+        shared_memory_bytes_per_block: loc.kernel().size_shared_memory as u32,
+        static_shared_memory_bytes: loc.kernel().shared_memory_static_bytes,
+        dynamic_shared_memory_bytes: loc.kernel().shared_memory_dynamic_bytes,
+        shared_memory_carveout_preference_pct: loc.kernel().shared_memory_carveout_preference_pct,
+        driver_occupancy_limit_blocks: loc.kernel().driver_occupancy_limit_blocks,
+    });
+    let mut trace_metrics = TraceMetrics {
+        launch_resources,
+        sectors_decoded: decode_sectors,
+        ..TraceMetrics::default()
+    };
 
     for path in td.threadblock_paths(loc)? {
         let tb = td.validated_threadblock(&path)?;
@@ -1863,6 +1913,8 @@ fn extract_per_sm_blocks(
             let mut insts = Vec::with_capacity(warp.instructions().len());
             let mut sectors: Vec<i64> = Vec::new();
             let mut async_copy_cohorts = AsyncCopyCohortReplay::default();
+            let mut branch_successors = crate::metrics::BranchSuccessors::default();
+            let mut previous_control_flow: Option<(i32, u32, u32)> = None;
             for (record_ix, inst) in warp.instructions().enumerate() {
                 let record_warp_id = inst.warpid_tb();
                 if record_warp_id != warp_id {
@@ -1943,6 +1995,56 @@ fn extract_per_sm_blocks(
                         record_ix,
                     )?
                 };
+                let active_mask_present = inst.active_mask_present();
+                let predicate_mask_present = inst.predicate_mask_present();
+                let (opcode, pipeline) = schedule
+                    .issue_slot(u64::from(inst.pc()))
+                    .map_or(("UNKNOWN", PipelineClass::DispatchOnly), |slot| {
+                        (slot.opcode_text(), slot.pipeline_class())
+                    });
+                trace_metrics.observe_with_mask_presence(
+                    opcode,
+                    inst.active_lanes(),
+                    inst.predicate_on_lanes(),
+                    active_mask_present,
+                    predicate_mask_present,
+                    kind,
+                    pipeline,
+                    &sectors,
+                )?;
+                if active_mask_present && predicate_mask_present {
+                    trace_metrics.observe_coherence(
+                        inst.sm_id(),
+                        inst.predicate_on_lanes(),
+                        kind,
+                        &sectors,
+                    )?;
+                }
+                if active_mask_present {
+                    if let Some((from_function, from_pc, from_active)) = previous_control_flow {
+                        trace_metrics.observe_control_flow(
+                            from_function,
+                            from_pc,
+                            from_active,
+                            inst.function_unique_id(),
+                            inst.pc(),
+                            inst.active_mask(),
+                        )?;
+                    }
+                    previous_control_flow =
+                        Some((inst.function_unique_id(), inst.pc(), inst.active_mask()));
+                    branch_successors.observe(
+                        &mut trace_metrics.branch_targets,
+                        inst.function_unique_id(),
+                        inst.pc(),
+                        inst.active_mask(),
+                        opcode,
+                    )?;
+                } else {
+                    // Do not connect CFG edges or resolve branch successors
+                    // through a record whose lane population is absent.
+                    previous_control_flow = None;
+                }
                 if let Some(order) = inst.instrumentation_order() {
                     async_copy_cohorts
                         .instrumentation_order
@@ -1956,6 +2058,7 @@ fn extract_per_sm_blocks(
                     kind,
                 });
             }
+            branch_successors.finish(&mut trace_metrics.branch_targets)?;
             // Fail-closed traced placement: every roster warp must expose its
             // physical slot. An empty warp has no placement witness and cannot be
             // used to prove either the architecture slot bound or modeled CTA
@@ -2099,6 +2202,7 @@ fn extract_per_sm_blocks(
     for blocks in per_sm_blocks.values_mut() {
         blocks.sort_by_key(|b| b.launch_index);
     }
+    trace_metrics.finish_coherence()?;
     Ok(ExtractedKernel {
         per_sm_blocks,
         records_seen,
@@ -2111,6 +2215,7 @@ fn extract_per_sm_blocks(
                 },
             )?,
         },
+        trace_metrics,
     })
 }
 
@@ -2234,6 +2339,7 @@ fn fold_kernel_result_with_sm_active_time(
         l2_by_source,
         dram,
         front_end: FrontEndCounters::default(),
+        trace_metrics: TraceMetrics::default(),
         unmodeled_tails,
     })
 }
@@ -2275,6 +2381,7 @@ fn classify_kernel_result(
                 l2_by_source,
                 dram,
                 front_end,
+                trace_metrics: _,
                 unmodeled_tails,
             } = replay;
             KernelReplayOutcome::SampledObserved(SampledKernelReplayResult {
@@ -2854,6 +2961,7 @@ fn replay_kernel_with_schedule_and_l2_and_candidates(
         coverage,
         shared_memory_residency,
         front_end,
+        trace_metrics,
     } = extract_per_sm_blocks(td, loc, schedule, placement, decode_sectors)?;
     let instrumentation_order = observe_async_instrumentation_order(&per_sm_blocks, schedule)?;
     #[cfg(feature = "campaign")]
@@ -2972,6 +3080,7 @@ fn replay_kernel_with_schedule_and_l2_and_candidates(
         }
     };
     replay.front_end = front_end;
+    replay.trace_metrics = trace_metrics;
     Ok(classify_kernel_result(coverage, configuration, replay))
 }
 
@@ -3523,6 +3632,8 @@ mod stream_l2_session_tests {
                 cluster_dim: Some(pb::Dim3d { x: 1, y: 1, z: 1 }),
                 shared_memory_static_bytes: None,
                 shared_memory_dynamic_bytes: None,
+                shared_memory_carveout_preference_pct: None,
+                driver_occupancy_limit_blocks: None,
             })
             .collect();
         let stream = pb::CudaStream {
@@ -3881,6 +3992,8 @@ mod stream_l2_session_tests {
                 cluster_dim: Some(pb::Dim3d { x: 1, y: 1, z: 1 }),
                 shared_memory_static_bytes: None,
                 shared_memory_dynamic_bytes: None,
+                shared_memory_carveout_preference_pct: None,
+                driver_occupancy_limit_blocks: None,
             }],
             ordered_cuda_events: Vec::new(),
         };
@@ -5887,6 +6000,7 @@ mod aggregation_tests {
             l1,
             unmodeled_tails: TailFlags::default(),
             readiness: crate::ReadinessDiagnostics::default(),
+            activity: crate::SmActivity::default(),
         }
     }
 
@@ -9476,6 +9590,8 @@ mod replay_identity_tests {
             cluster_dim: Some(pb::Dim3d { x: 1, y: 1, z: 1 }),
             shared_memory_static_bytes: None,
             shared_memory_dynamic_bytes: None,
+            shared_memory_carveout_preference_pct: None,
+            driver_occupancy_limit_blocks: None,
         };
         let stream = pb::CudaStream {
             id: 0,
@@ -10367,6 +10483,8 @@ mod completeness_tests {
             cluster_dim: Some(pb::Dim3d { x: 1, y: 1, z: 1 }),
             shared_memory_static_bytes: None,
             shared_memory_dynamic_bytes: None,
+            shared_memory_carveout_preference_pct: None,
+            driver_occupancy_limit_blocks: None,
         };
         let stream = pb::CudaStream {
             id: 0,

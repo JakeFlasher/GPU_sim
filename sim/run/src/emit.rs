@@ -70,6 +70,15 @@ struct CounterSnapshot<'a> {
 
 impl<'a> CounterSnapshot<'a> {
     fn from_full_launch(result: &'a FullKernelReplayResult) -> Result<Self, EmitError> {
+        // A binding cycle is a publication-facing timing value.  The replay
+        // can still expose its lower-bound and architecture-scoped frontiers
+        // diagnostically, but dirty writeback/coherence (or any other typed
+        // tail) means the launch is not a complete timing observation.
+        let binding_cycles = if result.unmodeled_tails().is_empty() {
+            Some(single_binding_cycles(result)?)
+        } else {
+            None
+        };
         Ok(Self {
             arch: result.arch(),
             instructions_issued: result.instructions_issued(),
@@ -78,11 +87,18 @@ impl<'a> CounterSnapshot<'a> {
             l2_by_source: result.l2_by_source(),
             dram: result.dram(),
             front_end: result.front_end(),
-            binding_cycles: Some(single_binding_cycles(result)?),
+            binding_cycles,
         })
     }
 
     fn from_launch_set(counters: &'a FullLaunchSetCounters) -> Result<Self, EmitError> {
+        let binding_cycles = if counters.unmodeled_tails().is_empty() {
+            Some(aggregate_binding_cycles(
+                counters.launch_timing_diagnostics(),
+            )?)
+        } else {
+            None
+        };
         Ok(Self {
             arch: counters.arch(),
             instructions_issued: counters.instructions_issued(),
@@ -91,9 +107,7 @@ impl<'a> CounterSnapshot<'a> {
             l2_by_source: counters.l2_by_source(),
             dram: counters.dram(),
             front_end: counters.front_end(),
-            binding_cycles: Some(aggregate_binding_cycles(
-                counters.launch_timing_diagnostics(),
-            )?),
+            binding_cycles,
         })
     }
 

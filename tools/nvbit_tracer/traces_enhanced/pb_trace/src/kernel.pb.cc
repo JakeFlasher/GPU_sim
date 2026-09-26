@@ -44,7 +44,9 @@ inline constexpr kernel::Impl_::Impl_(
         shared_memory_base_address_{::int64_t{0}},
         local_memory_base_address_{::int64_t{0}},
         shared_memory_static_bytes_{0u},
-        shared_memory_dynamic_bytes_{0u} {}
+        shared_memory_dynamic_bytes_{0u},
+        shared_memory_carveout_preference_pct_{0},
+        driver_occupancy_limit_blocks_{0u} {}
 
 template <typename>
 constexpr kernel::kernel(::_pbi::ConstantInitialized)
@@ -75,7 +77,7 @@ const ::uint32_t
         protodesc_cold) = {
         0x081, // bitmap
         PROTOBUF_FIELD_OFFSET(::dynamic_trace::kernel, _impl_._has_bits_),
-        15, // hasbit index offset
+        17, // hasbit index offset
         PROTOBUF_FIELD_OFFSET(::dynamic_trace::kernel, _impl_.id_),
         PROTOBUF_FIELD_OFFSET(::dynamic_trace::kernel, _impl_.name_),
         PROTOBUF_FIELD_OFFSET(::dynamic_trace::kernel, _impl_.function_unique_id_),
@@ -88,6 +90,8 @@ const ::uint32_t
         PROTOBUF_FIELD_OFFSET(::dynamic_trace::kernel, _impl_.cluster_dim_),
         PROTOBUF_FIELD_OFFSET(::dynamic_trace::kernel, _impl_.shared_memory_static_bytes_),
         PROTOBUF_FIELD_OFFSET(::dynamic_trace::kernel, _impl_.shared_memory_dynamic_bytes_),
+        PROTOBUF_FIELD_OFFSET(::dynamic_trace::kernel, _impl_.shared_memory_carveout_preference_pct_),
+        PROTOBUF_FIELD_OFFSET(::dynamic_trace::kernel, _impl_.driver_occupancy_limit_blocks_),
         4,
         0,
         5,
@@ -100,6 +104,8 @@ const ::uint32_t
         3,
         10,
         11,
+        12,
+        13,
 };
 
 static const ::_pbi::MigrationSchema
@@ -112,7 +118,7 @@ static const ::_pb::Message* PROTOBUF_NONNULL const file_default_instances[] = {
 const char descriptor_table_protodef_kernel_2eproto[] ABSL_ATTRIBUTE_SECTION_VARIABLE(
     protodesc_cold) = {
     "\n\014kernel.proto\022\rdynamic_trace\032\013dim3d.pro"
-    "to\"\314\003\n\006kernel\022\n\n\002id\030\001 \001(\005\022\014\n\004name\030\002 \001(\t\022"
+    "to\"\370\004\n\006kernel\022\n\n\002id\030\001 \001(\005\022\014\n\004name\030\002 \001(\t\022"
     "\032\n\022function_unique_id\030\003 \001(\005\022\032\n\022size_shar"
     "ed_memory\030\004 \001(\005\022\033\n\023number_of_registers\030\005"
     " \001(\005\022\"\n\032shared_memory_base_address\030\006 \001(\003"
@@ -122,8 +128,13 @@ const char descriptor_table_protodef_kernel_2eproto[] ABSL_ATTRIBUTE_SECTION_VAR
     "cluster_dim\030\n \001(\0132\024.dynamic_trace.dim3d\022"
     "\'\n\032shared_memory_static_bytes\030\013 \001(\rH\000\210\001\001"
     "\022(\n\033shared_memory_dynamic_bytes\030\014 \001(\rH\001\210"
-    "\001\001B\035\n\033_shared_memory_static_bytesB\036\n\034_sh"
-    "ared_memory_dynamic_bytesb\006proto3"
+    "\001\001\0222\n%shared_memory_carveout_preference_"
+    "pct\030\r \001(\005H\002\210\001\001\022*\n\035driver_occupancy_limit"
+    "_blocks\030\016 \001(\rH\003\210\001\001B\035\n\033_shared_memory_sta"
+    "tic_bytesB\036\n\034_shared_memory_dynamic_byte"
+    "sB(\n&_shared_memory_carveout_preference_"
+    "pctB \n\036_driver_occupancy_limit_blocksb\006p"
+    "roto3"
 };
 static const ::_pbi::DescriptorTable* PROTOBUF_NONNULL const
     descriptor_table_kernel_2eproto_deps[1] = {
@@ -133,7 +144,7 @@ static ::absl::once_flag descriptor_table_kernel_2eproto_once;
 PROTOBUF_CONSTINIT const ::_pbi::DescriptorTable descriptor_table_kernel_2eproto = {
     false,
     false,
-    513,
+    685,
     descriptor_table_protodef_kernel_2eproto,
     "kernel.proto",
     &descriptor_table_kernel_2eproto_once,
@@ -219,9 +230,9 @@ kernel::kernel(
                offsetof(Impl_, id_),
            reinterpret_cast<const char*>(&from._impl_) +
                offsetof(Impl_, id_),
-           offsetof(Impl_, shared_memory_dynamic_bytes_) -
+           offsetof(Impl_, driver_occupancy_limit_blocks_) -
                offsetof(Impl_, id_) +
-               sizeof(Impl_::shared_memory_dynamic_bytes_));
+               sizeof(Impl_::driver_occupancy_limit_blocks_));
 
   // @@protoc_insertion_point(copy_constructor:dynamic_trace.kernel)
 }
@@ -236,9 +247,9 @@ inline void kernel::SharedCtor(::_pb::Arena* PROTOBUF_NULLABLE arena) {
   ::memset(reinterpret_cast<char*>(&_impl_) +
                offsetof(Impl_, grid_dim_),
            0,
-           offsetof(Impl_, shared_memory_dynamic_bytes_) -
+           offsetof(Impl_, driver_occupancy_limit_blocks_) -
                offsetof(Impl_, grid_dim_) +
-               sizeof(Impl_::shared_memory_dynamic_bytes_));
+               sizeof(Impl_::driver_occupancy_limit_blocks_));
 }
 kernel::~kernel() {
   // @@protoc_insertion_point(destructor:dynamic_trace.kernel)
@@ -300,16 +311,16 @@ kernel::GetClassData() const {
   return kernel_class_data_.base();
 }
 PROTOBUF_CONSTINIT PROTOBUF_ATTRIBUTE_INIT_PRIORITY1
-const ::_pbi::TcParseTable<4, 12, 3, 41, 2>
+const ::_pbi::TcParseTable<4, 14, 3, 41, 2>
 kernel::_table_ = {
   {
     PROTOBUF_FIELD_OFFSET(kernel, _impl_._has_bits_),
     0, // no _extensions_
-    12, 120,  // max_field_number, fast_idx_mask
+    14, 120,  // max_field_number, fast_idx_mask
     offsetof(decltype(_table_), field_lookup_table),
-    4294963200,  // skipmap
+    4294950912,  // skipmap
     offsetof(decltype(_table_), field_entries),
-    12,  // num_field_entries
+    14,  // num_field_entries
     3,  // num_aux_entries
     offsetof(decltype(_table_), aux_entries),
     kernel_class_data_.base(),
@@ -368,8 +379,14 @@ kernel::_table_ = {
     {::_pbi::TcParser::SingularVarintNoZag1<::uint32_t, offsetof(kernel, _impl_.shared_memory_dynamic_bytes_), 11>(),
      {96, 11, 0,
       PROTOBUF_FIELD_OFFSET(kernel, _impl_.shared_memory_dynamic_bytes_)}},
-    {::_pbi::TcParser::MiniParse, {}},
-    {::_pbi::TcParser::MiniParse, {}},
+    // optional int32 shared_memory_carveout_preference_pct = 13;
+    {::_pbi::TcParser::SingularVarintNoZag1<::uint32_t, offsetof(kernel, _impl_.shared_memory_carveout_preference_pct_), 12>(),
+     {104, 12, 0,
+      PROTOBUF_FIELD_OFFSET(kernel, _impl_.shared_memory_carveout_preference_pct_)}},
+    // optional uint32 driver_occupancy_limit_blocks = 14;
+    {::_pbi::TcParser::SingularVarintNoZag1<::uint32_t, offsetof(kernel, _impl_.driver_occupancy_limit_blocks_), 13>(),
+     {112, 13, 0,
+      PROTOBUF_FIELD_OFFSET(kernel, _impl_.driver_occupancy_limit_blocks_)}},
     {::_pbi::TcParser::MiniParse, {}},
   }}, {{
     65535, 65535
@@ -398,6 +415,10 @@ kernel::_table_ = {
     {PROTOBUF_FIELD_OFFSET(kernel, _impl_.shared_memory_static_bytes_), _Internal::kHasBitsOffset + 10, 0, (0 | ::_fl::kFcOptional | ::_fl::kUInt32)},
     // optional uint32 shared_memory_dynamic_bytes = 12;
     {PROTOBUF_FIELD_OFFSET(kernel, _impl_.shared_memory_dynamic_bytes_), _Internal::kHasBitsOffset + 11, 0, (0 | ::_fl::kFcOptional | ::_fl::kUInt32)},
+    // optional int32 shared_memory_carveout_preference_pct = 13;
+    {PROTOBUF_FIELD_OFFSET(kernel, _impl_.shared_memory_carveout_preference_pct_), _Internal::kHasBitsOffset + 12, 0, (0 | ::_fl::kFcOptional | ::_fl::kInt32)},
+    // optional uint32 driver_occupancy_limit_blocks = 14;
+    {PROTOBUF_FIELD_OFFSET(kernel, _impl_.driver_occupancy_limit_blocks_), _Internal::kHasBitsOffset + 13, 0, (0 | ::_fl::kFcOptional | ::_fl::kUInt32)},
   }},
   {{
       {::_pbi::TcParser::GetTable<::dynamic_trace::dim3d>()},
@@ -440,10 +461,10 @@ PROTOBUF_NOINLINE void kernel::Clear() {
         reinterpret_cast<char*>(&_impl_.number_of_registers_) -
         reinterpret_cast<char*>(&_impl_.id_)) + sizeof(_impl_.number_of_registers_));
   }
-  if (BatchCheckHasBit(cached_has_bits, 0x00000f00U)) {
+  if (BatchCheckHasBit(cached_has_bits, 0x00003f00U)) {
     ::memset(&_impl_.shared_memory_base_address_, 0, static_cast<::size_t>(
-        reinterpret_cast<char*>(&_impl_.shared_memory_dynamic_bytes_) -
-        reinterpret_cast<char*>(&_impl_.shared_memory_base_address_)) + sizeof(_impl_.shared_memory_dynamic_bytes_));
+        reinterpret_cast<char*>(&_impl_.driver_occupancy_limit_blocks_) -
+        reinterpret_cast<char*>(&_impl_.shared_memory_base_address_)) + sizeof(_impl_.driver_occupancy_limit_blocks_));
   }
   _impl_._has_bits_.Clear();
   _internal_metadata_.Clear<::google::protobuf::UnknownFieldSet>();
@@ -567,6 +588,20 @@ PROTOBUF_NOINLINE void kernel::Clear() {
         12, this_._internal_shared_memory_dynamic_bytes(), target);
   }
 
+  // optional int32 shared_memory_carveout_preference_pct = 13;
+  if (CheckHasBit(cached_has_bits, 0x00001000U)) {
+    target =
+        ::google::protobuf::internal::WireFormatLite::WriteInt32ToArrayWithField<13>(
+            stream, this_._internal_shared_memory_carveout_preference_pct(), target);
+  }
+
+  // optional uint32 driver_occupancy_limit_blocks = 14;
+  if (CheckHasBit(cached_has_bits, 0x00002000U)) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteUInt32ToArray(
+        14, this_._internal_driver_occupancy_limit_blocks(), target);
+  }
+
   if (ABSL_PREDICT_FALSE(this_._internal_metadata_.have_unknown_fields())) {
     target =
         ::_pbi::WireFormat::InternalSerializeUnknownFieldsToArray(
@@ -644,7 +679,7 @@ PROTOBUF_NOINLINE void kernel::Clear() {
       }
     }
   }
-  if (BatchCheckHasBit(cached_has_bits, 0x00000f00U)) {
+  if (BatchCheckHasBit(cached_has_bits, 0x00003f00U)) {
     // int64 shared_memory_base_address = 6;
     if (CheckHasBit(cached_has_bits, 0x00000100U)) {
       if (this_._internal_shared_memory_base_address() != 0) {
@@ -668,6 +703,16 @@ PROTOBUF_NOINLINE void kernel::Clear() {
     if (CheckHasBit(cached_has_bits, 0x00000800U)) {
       total_size += ::_pbi::WireFormatLite::UInt32SizePlusOne(
           this_._internal_shared_memory_dynamic_bytes());
+    }
+    // optional int32 shared_memory_carveout_preference_pct = 13;
+    if (CheckHasBit(cached_has_bits, 0x00001000U)) {
+      total_size += ::_pbi::WireFormatLite::Int32SizePlusOne(
+          this_._internal_shared_memory_carveout_preference_pct());
+    }
+    // optional uint32 driver_occupancy_limit_blocks = 14;
+    if (CheckHasBit(cached_has_bits, 0x00002000U)) {
+      total_size += ::_pbi::WireFormatLite::UInt32SizePlusOne(
+          this_._internal_driver_occupancy_limit_blocks());
     }
   }
   return this_.MaybeComputeUnknownFieldsSize(total_size,
@@ -744,7 +789,7 @@ void kernel::MergeImpl(::google::protobuf::MessageLite& to_msg,
       }
     }
   }
-  if (BatchCheckHasBit(cached_has_bits, 0x00000f00U)) {
+  if (BatchCheckHasBit(cached_has_bits, 0x00003f00U)) {
     if (CheckHasBit(cached_has_bits, 0x00000100U)) {
       if (from._internal_shared_memory_base_address() != 0) {
         _this->_impl_.shared_memory_base_address_ = from._impl_.shared_memory_base_address_;
@@ -760,6 +805,12 @@ void kernel::MergeImpl(::google::protobuf::MessageLite& to_msg,
     }
     if (CheckHasBit(cached_has_bits, 0x00000800U)) {
       _this->_impl_.shared_memory_dynamic_bytes_ = from._impl_.shared_memory_dynamic_bytes_;
+    }
+    if (CheckHasBit(cached_has_bits, 0x00001000U)) {
+      _this->_impl_.shared_memory_carveout_preference_pct_ = from._impl_.shared_memory_carveout_preference_pct_;
+    }
+    if (CheckHasBit(cached_has_bits, 0x00002000U)) {
+      _this->_impl_.driver_occupancy_limit_blocks_ = from._impl_.driver_occupancy_limit_blocks_;
     }
   }
   _this->_impl_._has_bits_[0] |= cached_has_bits;
@@ -783,8 +834,8 @@ void kernel::InternalSwap(kernel* PROTOBUF_RESTRICT PROTOBUF_NONNULL other) {
   swap(_impl_._has_bits_[0], other->_impl_._has_bits_[0]);
   ::_pbi::ArenaStringPtr::InternalSwap(&_impl_.name_, &other->_impl_.name_, arena);
   ::google::protobuf::internal::memswap<
-      PROTOBUF_FIELD_OFFSET(kernel, _impl_.shared_memory_dynamic_bytes_)
-      + sizeof(kernel::_impl_.shared_memory_dynamic_bytes_)
+      PROTOBUF_FIELD_OFFSET(kernel, _impl_.driver_occupancy_limit_blocks_)
+      + sizeof(kernel::_impl_.driver_occupancy_limit_blocks_)
       - PROTOBUF_FIELD_OFFSET(kernel, _impl_.grid_dim_)>(
           reinterpret_cast<char*>(&_impl_.grid_dim_),
           reinterpret_cast<char*>(&other->_impl_.grid_dim_));

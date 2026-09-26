@@ -104,6 +104,7 @@ use sim_semantics::{
 };
 
 use crate::control_bits::{ControlDomainError, DepBarrier, WaitMask};
+use crate::metrics::{SmActivity, WarpLifetime};
 use crate::program::{FunctionSchedule, IssueSlot, OpClass, PipelineClass};
 use crate::sass_operands::{FixedLatencyOpcode, FixedLatencyOperandStatus};
 
@@ -1663,7 +1664,10 @@ pub enum IssueError {
 /// complete RMW/writeback/coherence implementation.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct TailFlags {
-    /// RED/REDG's read-modify-write read arm is not modeled.
+    /// RED/REDG's value-dependent read/modify/serialize semantics are not
+    /// modeled. Cold-sector read demand is charged separately by the shared
+    /// L2/DRAM observer, but that traffic count is not a complete reduction
+    /// protocol.
     pub red_rmw: bool,
     /// Dirty eviction/writeback traffic is not modeled.
     pub dirty_writeback: bool,
@@ -1752,7 +1756,11 @@ impl MemoryOperation {
     }
 
     pub(crate) const fn fetches_missing_data(self) -> bool {
-        matches!(self, Self::Read | Self::Atomic)
+        // RED is non-returning at the ISA boundary, but the L2 write-class
+        // request still needs the old value for its internal read-modify-
+        // write.  The event model charges that missing-sector read through
+        // the shared DRAM server without fabricating a warp response.
+        matches!(self, Self::Read | Self::Atomic | Self::Reduction)
     }
 }
 
@@ -1972,6 +1980,10 @@ pub struct AsyncReadinessDiagnostics {
     pub destination_local_cycles: u64,
     pub destination_sm_service_cycles: u64,
     pub completion_hidden_before_wait_cycles: u64,
+    /// Trace-derived cache-all LDGSTS destination work. This is an observer
+    /// count, not an NCU store-wavefront claim and not a timing input.
+    pub destination_groups_observed: u64,
+    pub destination_wavefronts_observed: u64,
 }
 
 impl AsyncReadinessDiagnostics {
@@ -1995,6 +2007,8 @@ impl AsyncReadinessDiagnostics {
         add!(destination_local_cycles);
         add!(destination_sm_service_cycles);
         add!(completion_hidden_before_wait_cycles);
+        add!(destination_groups_observed);
+        add!(destination_wavefronts_observed);
         *self = next;
         Ok(())
     }
@@ -5218,6 +5232,8 @@ pub struct SmSimResult {
     /// sample counts and their overlapping exposure fields are not elapsed
     /// kernel cycles.
     pub readiness: ReadinessDiagnostics,
+    /// Model-relative active-warp integral and per-SMSP issue observations.
+    pub activity: SmActivity,
 }
 
 /// Group witness for one sector request belonging to an effective scalar
@@ -5539,8 +5555,9 @@ impl MemRequest {
     }
 
     /// A non-returning hierarchy reduction sector (RED/REDG). Its write data
-    /// validates the sector immediately; the unmodeled RMW read is exposed in
-    /// [`TailFlags`] rather than silently fabricated as traffic.
+    /// validates the sector immediately; the event model separately charges
+    /// a missing-sector RMW read when the L2 line is cold. The remaining
+    /// reduction/coherence semantics stay exposed in [`TailFlags`].
     fn reduction(issue_time: u64, sector_id: i64) -> Self {
         Self::write(
             issue_time,
@@ -7265,6 +7282,7 @@ struct WarpState<'a> {
     /// Issue/admission timestamp at which `next_slot` became the current
     /// instruction. Causal readiness delays are measured from this frontier.
     current_since: u64,
+    admission_time: u64,
     eligible: u64,
     /// Earliest cycle at which the current instruction may be re-issued after
     /// an immediate-constant-cache miss. Zero means no pending IMC request.
@@ -9440,11 +9458,17 @@ pub(crate) struct SmCore<'a> {
     /// pointer-chasing B-tree lookup for every dynamic issue while preserving
     /// the schedule map as the authoritative join/diagnostic surface.
     schedule_slots: Vec<(u64, &'a IssueSlot)>,
-    memory_pipeline_schedule: Box<HashMap<u64, MemoryPipelineSlot>>,
+    /// Static PC-indexed memory timing table. It is sorted once at admission so
+    /// the hot issue loop uses a branch-predictable binary search instead of a
+    /// randomized hash lookup for every resident warp.
+    memory_pipeline_schedule: Box<[(u64, MemoryPipelineSlot)]>,
     /// Static PCs that enter the measured multi-site constant operand path.
-    constant_path_pcs: Box<HashSet<u64>>,
+    /// Sorted static PC set; issue-cycle membership is binary-searched to
+    /// avoid randomized hashing on every resident-warp readiness check.
+    constant_path_pcs: Box<[u64]>,
     /// Pre-parsed immediate-constant line references keyed by static PC.
-    immediate_constant_schedule: Box<HashMap<u32, Box<[u64]>>>,
+    /// Sorted static PC -> immediate-constant line table.
+    immediate_constant_schedule: Box<[(u32, Box<[u64]>)]>,
     /// Private IMC/L0C state for each SMSP; absent for synthetic fixtures.
     immediate_constant_cache: Option<Box<[ImmediateConstantCacheState; SUB_CORES]>>,
     params: IssueModelParams,
@@ -9501,6 +9525,10 @@ pub(crate) struct SmCore<'a> {
     /// Effective picks from the previous transaction in the current logical
     /// cycle. Distinguishes dispatch progress from a parked IMC miss.
     last_issue_picks: [Option<usize>; SUB_CORES],
+    instructions_per_smsp: [u64; SUB_CORES],
+    issue_active_cycles_per_smsp: [u64; SUB_CORES],
+    last_observed_issue: [Option<u64>; SUB_CORES],
+    warp_lifetimes: Vec<WarpLifetime>,
     issued: u64,
     t: u64,
     /// Latest modeled SM-local completion frontier that can occur after the
@@ -9533,6 +9561,27 @@ fn reference_mode_from_env() -> Result<bool, IssueError> {
 }
 
 impl<'a> SmCore<'a> {
+    #[inline]
+    fn memory_pipeline_slot(&self, pc: u64) -> Option<MemoryPipelineSlot> {
+        self.memory_pipeline_schedule
+            .binary_search_by_key(&pc, |(key, _)| *key)
+            .ok()
+            .map(|index| self.memory_pipeline_schedule[index].1)
+    }
+
+    #[inline]
+    fn is_constant_path_pc(&self, pc: u64) -> bool {
+        self.constant_path_pcs.binary_search(&pc).is_ok()
+    }
+
+    #[inline]
+    fn immediate_constant_lines(&self, pc: u32) -> Option<&[u64]> {
+        self.immediate_constant_schedule
+            .binary_search_by_key(&pc, |(key, _)| *key)
+            .ok()
+            .map(|index| self.immediate_constant_schedule[index].1.as_ref())
+    }
+
     /// Build the actor and admit the initial block wave. `blocks` must be
     /// this SM's blocks in launch order; every instruction's pc must
     /// resolve in `schedule` (single-function launches — the replay
@@ -9595,19 +9644,20 @@ impl<'a> SmCore<'a> {
         let constant_pressure_threshold = params
             .memory_issue_pipeline
             .map_or(u32::MAX, |config| config.queue_entries_with_dispatch);
-        let constant_path_pcs = schedule
+        let mut constant_path_pcs = schedule
             .by_pc
             .iter()
             .filter_map(|(&pc, slot)| {
                 deep_constant_load(slot, constant_streams, constant_pressure_threshold)
                     .then_some(pc)
             })
-            .collect::<HashSet<_>>();
+            .collect::<Vec<_>>();
+        constant_path_pcs.sort_unstable();
         let immediate_constant_config = matches!(mode, SmMemMode::L1Shared(_))
             .then_some(params.immediate_constant_cache)
             .flatten();
         let immediate_constant_schedule =
-            immediate_constant_config.map_or_else(HashMap::new, |config| {
+            immediate_constant_config.map_or_else(Vec::new, |config| {
                 schedule
                     .by_pc
                     .iter()
@@ -9615,7 +9665,7 @@ impl<'a> SmCore<'a> {
                         let lines = immediate_constant_lines(slot.opcode_text(), config.line_bytes);
                         (!lines.is_empty()).then_some((pc as u32, lines))
                     })
-                    .collect()
+                    .collect::<Vec<_>>()
             });
         let immediate_constant_cache: Option<Box<[ImmediateConstantCacheState; SUB_CORES]>> =
             immediate_constant_config
@@ -9628,13 +9678,13 @@ impl<'a> SmCore<'a> {
                     ]))
                 })
                 .transpose()?;
-        let mut memory_pipeline_schedule = HashMap::new();
+        let mut memory_pipeline_schedule = Vec::new();
         if let Some(config) = params.memory_issue_pipeline {
             for (&pc, slot) in &schedule.by_pc {
                 if let Some(memory_slot) =
-                    memory_pipeline_slot(slot, config, constant_path_pcs.contains(&pc))
+                    memory_pipeline_slot(slot, config, constant_path_pcs.binary_search(&pc).is_ok())
                 {
-                    memory_pipeline_schedule.insert(pc, memory_slot);
+                    memory_pipeline_schedule.push((pc, memory_slot));
                 }
             }
         }
@@ -9878,9 +9928,9 @@ impl<'a> SmCore<'a> {
         let mut core = Self {
             schedule,
             schedule_slots,
-            memory_pipeline_schedule: Box::new(memory_pipeline_schedule),
-            constant_path_pcs: Box::new(constant_path_pcs),
-            immediate_constant_schedule: Box::new(immediate_constant_schedule),
+            memory_pipeline_schedule: memory_pipeline_schedule.into_boxed_slice(),
+            constant_path_pcs: constant_path_pcs.into_boxed_slice(),
+            immediate_constant_schedule: immediate_constant_schedule.into_boxed_slice(),
             immediate_constant_cache,
             params: *params,
             shared_memory_residency,
@@ -9914,6 +9964,10 @@ impl<'a> SmCore<'a> {
             emit_admission_witnesses: false,
             memory_admission_feedback: None,
             last_issue_picks: [None; SUB_CORES],
+            instructions_per_smsp: [0; SUB_CORES],
+            issue_active_cycles_per_smsp: [0; SUB_CORES],
+            last_observed_issue: [None; SUB_CORES],
+            warp_lifetimes: Vec::new(),
             issued: 0,
             // Keep the scheduler/event clock anchored at zero.  The
             // architecture-scoped SM-active observation boundary is an
@@ -10667,6 +10721,12 @@ impl<'a> SmCore<'a> {
                 (Some(value), None) | (None, Some(value)) => Some(value),
                 (None, None) => None,
             };
+        let activity = SmActivity::from_lifetimes(
+            self.warp_lifetimes.clone(),
+            self.instructions_per_smsp,
+            self.issue_active_cycles_per_smsp,
+            self.params.max_resident_warps_per_sm,
+        );
         SmSimResult {
             instructions_issued: self.issued,
             cycles: self.t,
@@ -10674,6 +10734,7 @@ impl<'a> SmCore<'a> {
             l1: self.mem.l1().map(|c| c.counters),
             unmodeled_tails: self.unmodeled_tails,
             readiness,
+            activity,
         }
     }
 
@@ -10686,12 +10747,20 @@ impl<'a> SmCore<'a> {
             return Ok(());
         }
         let block = self.warps[warp_index].block;
+        let admission_time = self.warps[warp_index].admission_time;
+        let warp_slot = self.warps[warp_index].warp_slot;
         let pos = self.warps[warp_index].pos_in_subcore;
         if self.subcore_warps[subcore].get(pos).copied() != Some(warp_index) {
             return Err(IssueError::CounterUnderflow {
                 counter: "sub-core resident warp",
             });
         }
+        self.warp_lifetimes.push(WarpLifetime {
+            block: self.warps[warp_index].launch_index,
+            warp_slot,
+            admission: admission_time,
+            retirement: checked_cycle_add("warp activity end", t, 1)?,
+        });
         // A final BAR.SYNC is parked with itself in the CGGTY hold slot while
         // it waits for the CTA rendezvous.  Clear that slot before removing
         // the warp: swap_remove can otherwise leave a stale index that now
@@ -10888,6 +10957,7 @@ impl<'a> SmCore<'a> {
                         instruction_buffer: VecDeque::new(),
                         next_slot: Some(next_slot),
                         current_since: t,
+                        admission_time: t,
                         eligible: t,
                         imc_wait_until: 0,
                         ordinary_dependency_wait_mask: next_slot.ordinary_dependency_wait_mask(),
@@ -12001,8 +12071,8 @@ impl<'a> SmCore<'a> {
         }
         if let Some(memory_pipeline) = self.memory_issue_pipeline.as_ref()
             && self
-                .memory_pipeline_schedule
-                .contains_key(&u64::from(warp.insts[warp.next].pc))
+                .memory_pipeline_slot(u64::from(warp.insts[warp.next].pc))
+                .is_some()
             && !matches!(kind, AccessKind::PredicatedOffMemory)
         {
             observe_readiness_constraint(
@@ -12218,6 +12288,17 @@ impl<'a> SmCore<'a> {
                         projected.async_groups.destination_sm_service_cycles,
                         service_cycles,
                     )?;
+                    projected.async_groups.destination_groups_observed = checked_u64_counter_add(
+                        "asynchronous-copy destination groups observed",
+                        projected.async_groups.destination_groups_observed,
+                        u64::from(group.destination_wavefronts != 0),
+                    )?;
+                    projected.async_groups.destination_wavefronts_observed =
+                        checked_u64_counter_add(
+                            "asynchronous-copy destination wavefronts observed",
+                            projected.async_groups.destination_wavefronts_observed,
+                            group.destination_wavefronts,
+                        )?;
                     let hidden = group
                         .completion_time
                         .min(base)
@@ -13071,7 +13152,7 @@ impl<'a> SmCore<'a> {
         if let Some(memory_pipeline) = self.memory_issue_pipeline.as_ref() {
             let state = &self.warps[warp];
             let pc = u64::from(state.insts[state.next].pc);
-            if self.memory_pipeline_schedule.contains_key(&pc)
+            if self.memory_pipeline_slot(pc).is_some()
                 && !matches!(
                     state.insts[state.next].kind,
                     AccessKind::PredicatedOffMemory
@@ -14969,7 +15050,7 @@ impl<'a> SmCore<'a> {
         picks: [Option<usize>; SUB_CORES],
         now: u64,
     ) -> Result<ImmediateConstantPlan, IssueError> {
-        let Some(mut cache) = self.immediate_constant_cache.clone() else {
+        let Some(mut cache) = self.immediate_constant_cache.as_ref().cloned() else {
             return Ok(ImmediateConstantPlan {
                 picks,
                 cache: None,
@@ -14984,7 +15065,7 @@ impl<'a> SmCore<'a> {
             let Some(warp) = pick else { continue };
             let state = &self.warps[warp];
             let pc = state.insts[state.next].pc;
-            let Some(lines) = self.immediate_constant_schedule.get(&pc) else {
+            let Some(lines) = self.immediate_constant_lines(pc) else {
                 continue;
             };
             if lines.is_empty() {
@@ -15040,10 +15121,8 @@ impl<'a> SmCore<'a> {
                     ) {
                         continue;
                     }
-                    selected[subcore] = self
-                        .memory_pipeline_schedule
-                        .get(&u64::from(state.insts[state.next].pc))
-                        .copied();
+                    selected[subcore] =
+                        self.memory_pipeline_slot(u64::from(state.insts[state.next].pc));
                 }
                 Some(memory_pipeline.plan(selected, t)?)
             } else {
@@ -15089,9 +15168,7 @@ impl<'a> SmCore<'a> {
             let retires_warp = reaches_end && slot.op_class != OpClass::BlockBarrier;
             let kind = w.insts[w.next].kind;
             let constant_deep = is_constant_load_opcode(slot.opcode_text())
-                && self
-                    .constant_path_pcs
-                    .contains(&u64::from(w.insts[w.next].pc));
+                && self.is_constant_path_pc(u64::from(w.insts[w.next].pc));
             validate_async_copy_completion_work(kind, wix)?;
             let write_barrier = if self.has_async_copy_protocol {
                 ordinary_write_barrier(slot)
@@ -15271,8 +15348,7 @@ impl<'a> SmCore<'a> {
                     result_writeback_kind(slot, self.params.arch),
                     is_clocklo_issue(slot),
                     is_constant_load_opcode(slot.opcode_text()),
-                    self.constant_path_pcs
-                        .contains(&u64::from(w.insts[w.next].pc)),
+                    self.is_constant_path_pc(u64::from(w.insts[w.next].pc)),
                 )
             };
             let produces_dynamic_effects = !matches!(inst.kind, AccessKind::PredicatedOffMemory);
@@ -15294,7 +15370,7 @@ impl<'a> SmCore<'a> {
             // was just filled is already present after `complete_ready` at the
             // top of this scheduler iteration.
             if let Some(cache) = imc_cache.as_mut()
-                && let Some(lines) = self.immediate_constant_schedule.get(&inst.pc)
+                && let Some(lines) = self.immediate_constant_lines(inst.pc)
             {
                 for &line in lines {
                     cache[sc].touch(line);
@@ -15669,6 +15745,26 @@ impl<'a> SmCore<'a> {
         }
         if imc_cache.is_some() {
             self.immediate_constant_cache = imc_cache;
+        }
+        // Counts are bounded by next_issued, whose checked increment was
+        // preflighted above. Multiple issue ports count only one active cycle.
+        for (subcore, pick) in effective_picks.iter().enumerate() {
+            if pick.is_some() {
+                self.instructions_per_smsp[subcore] = self.instructions_per_smsp[subcore]
+                    .checked_add(1)
+                    .ok_or(IssueError::CounterOverflow {
+                        counter: "instructions per SMSP",
+                    })?;
+                if self.last_observed_issue[subcore] != Some(t) {
+                    self.issue_active_cycles_per_smsp[subcore] = self.issue_active_cycles_per_smsp
+                        [subcore]
+                        .checked_add(1)
+                        .ok_or(IssueError::CounterOverflow {
+                            counter: "issue-active cycles per SMSP",
+                        })?;
+                    self.last_observed_issue[subcore] = Some(t);
+                }
+            }
         }
         self.issued = next_issued;
         *self.readiness = projected_readiness;

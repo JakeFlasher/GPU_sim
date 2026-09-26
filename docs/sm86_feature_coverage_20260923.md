@@ -1,7 +1,11 @@
 # SM86 feature and unsupported coverage — first cohort
 
-Updated 2026-09-23. This is an inventory of the retained eight-row
+Updated 2026-09-23 (historical cohort snapshot). This is an inventory of the retained eight-row
 SM86/SM80-labelled development cohort, not a universal support claim.
+
+The producer-side provenance gap identified by this snapshot was addressed for
+fresh runtime-launched GEMM/RMSNorm captures on 2026-09-26; see
+[the module-origin follow-up](sm86_module_origin_followup_20260926.md).
 
 ## Inputs and coverage
 
@@ -51,11 +55,11 @@ All ten rows retained exact active-launch contracts and full replay coverage.
 The larger cohort adds collective behavior and broader tensor/control
 spellings, while the producer-side unsupported arrays remain empty.
 
-The persistent static-module origin_unresolved status is now the dominant
-coverage/provenance gap across all 18 inventoried rows (8 small + 3 holdout +
-7 large). It does not prevent replay because the control sidecar is separately
-generated from the captured binary, but it prevents treating module identity as
-closed evidence. This remains an explicit M4 limitation.
+The persistent `origin_unresolved` values below remain historical observations
+for the 18 inventoried rows (8 small + 3 holdout + 7 large); they are not
+rewritten retroactively.  Fresh captures now resolve exact module/library
+owners without same-name guesses, while JIT, deleted, opaque, and graph-only
+origins remain explicitly unavailable.
 
 No unsupported reason is inferred from an opcode spelling alone. New typed
 unsupported categories should be added only when a concrete trace or replay

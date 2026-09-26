@@ -214,6 +214,11 @@ def _header_row() -> list[str]:
         "Kernel execution time (ns)",
         "unified L1 cache total requests",
         "unified L2 cache total requests",
+        "DRAM bytes per second",
+        "Memory busy (%)",
+        "Max bandwidth (%)",
+        "Memory pipes busy (%)",
+        "DRAM clock (Hz)",
     ]
 
 
@@ -277,6 +282,11 @@ def _kernel_rows(
             get_gpu__time_duration_sum(kernel),  # noqa: F405
             l1_total_requests,
             get_lts__t_requests_srcunit_tex_sum(kernel),  # noqa: F405
+            get_dram__bytes_sum_per_second(kernel),  # noqa: F405
+            get_gpu__compute_memory_access_throughput_avg_pct_of_peak_sustained_elapsed(kernel),  # noqa: F405
+            get_gpu__compute_memory_request_throughput_avg_pct_of_peak_sustained_elapsed(kernel),  # noqa: F405
+            get_sm__memory_throughput_avg_pct_of_peak_sustained_elapsed(kernel),  # noqa: F405
+            get_dram__cycles_elapsed_avg_per_second(kernel),  # noqa: F405
         ])
         rows.append(app_results)
         print(

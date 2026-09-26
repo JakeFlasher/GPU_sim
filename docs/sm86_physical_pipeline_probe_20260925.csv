@@ -1,0 +1,10 @@
+workload,metric,ncu_value,unit,native_status,native_semantics
+gemm_hmma_bf16_sm80,smsp__inst_executed_pipe_alu.sum,21504,inst,approximate,logical ALU projection is exact on this GEMM cohort but physical assignment is not carried by the trace
+gemm_hmma_bf16_sm80,smsp__inst_executed_pipe_adu.sum,17408,inst,unavailable,static SASS/trace records do not carry dynamic ADU assignment
+gemm_hmma_bf16_sm80,smsp__inst_executed_pipe_cbu.sum,512,inst,unavailable,static SASS/trace records do not carry dynamic CBU assignment
+gemm_hmma_bf16_sm80,smsp__inst_executed_pipe_fma.sum,17920,inst,modeled,logical FMA projection
+gemm_hmma_bf16_sm80,smsp__inst_executed_pipe_fp64.sum,0,inst,unavailable,static SASS/trace records do not carry dynamic FP64 assignment
+gemm_hmma_bf16_sm80,smsp__inst_executed_pipe_lsu.sum,109056,inst,approximate,logical LSU projection includes trace-visible families and remains an attribution gap
+gemm_hmma_bf16_sm80,smsp__inst_executed_pipe_tensor.sum,8192,inst,modeled,logical Tensor projection
+gemm_hmma_bf16_sm80,smsp__inst_executed_pipe_uniform.sum,8192,inst,unavailable,static SASS/trace records do not carry dynamic uniform-pipe assignment
+gemm_hmma_bf16_sm80,smsp__inst_executed_pipe_xu.sum,0,inst,unavailable,static SASS/trace records do not carry dynamic XU assignment

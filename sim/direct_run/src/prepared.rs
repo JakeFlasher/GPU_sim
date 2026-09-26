@@ -106,8 +106,8 @@ impl PreparedReplay {
             )
         })?;
         let control = load_control_sidecar(&config.control_bits, arch)?;
-        super::validate_direct_control_identity(&config.control_bits, &exec, &control)?;
-        let schedules = build_schedules(&exec, &control).map_err(at("schedule"))?;
+        super::validate_direct_control_identity(&config.control_bits, exec, &control)?;
+        let schedules = build_schedules(exec, &control).map_err(at("schedule"))?;
         let launches = trace
             .kernels()
             .map(|loc| {
@@ -255,7 +255,7 @@ impl PreparedReplay {
                 "prepared timing replay requires full launch coverage",
             )
         })?;
-        launch_report(result, None, None, false)
+        launch_report(result, &self.arch_card, None, None, None, false)
     }
 
     /// Replay one launch and wrap it in the same configuration-bearing report
@@ -397,6 +397,7 @@ mod tests {
             memory_admission_feedback: None,
             ncu_csv: None,
             ncu_launch: None,
+            launch_resources: None,
         }
     }
 

@@ -77,6 +77,55 @@ time than dense on this fresh trace. The issue-width override remains slower
 than baseline (about 11.5% end-to-end on this row), so it is a real design
 axis but not the speed mechanism.
 
+## Post-metric-surface replay — 2026-09-25
+
+After adding launch/occupancy coverage, scheduler proxy rows, and explicit
+unclassified pipeline accounting, the same retained GEMM was rerun with the
+performance-instrumented release build. The event and dense lanes retained the
+same event totals (`344,533` events; `330,197` queue events; GPC frontier
+`12,949` cycles):
+
+| Mode | Replay phase | Total process | Relative speed |
+|---|---:|---:|---:|
+| event-driven | 732.3 ms | 844.0 ms | 1.73x / 1.64x vs dense |
+| dense reference | 1,267.2 ms | 1,382.5 ms | baseline |
+
+This is still a model-relative algorithmic comparison, not a claim that the
+simulator runs faster than GPU silicon or than Accel-Sim on an identical host.
+The added metric surface did not change the modeled event frontier.
+The event lane processes the 197,120-instruction trace at approximately
+`269 KIPS` (dense: `156 KIPS`). The published Accel-Sim landscape values of
+`12.5 KIPS` trace-driven and `6 KIPS` execution-driven are useful order-of-
+magnitude context only: they are different hosts, workloads, and simulator
+contracts, so this is not a fair speedup claim.
+
+## Static-PC lookup optimization — 2026-09-25
+
+The hot issue loop previously hashed static memory-pipeline and immediate-
+constant PC tables for every resident-warp readiness check. Those tables are
+immutable after schedule construction, so they now use sorted compact slices
+and binary search. On the same retained GEMM, the complete JSON/event stream
+was byte-equivalent and event totals stayed `344,533`/`330,197`:
+
+| Build | Median replay | Median total wall |
+|---|---:|---:|
+| before static-PC lookup change | 740.95 ms | 857.7 ms |
+| after static-PC lookup change | 732.34 ms | 844.0 ms |
+
+This is a 1.17% replay and 1.60% wall reduction on one host/input. Repeated
+post-change event replays had 727--746 ms replay time; the median above is the
+bounded three-run result. The profile-guided change targets the static lookup
+work; remaining major costs include event queue/hash activity, warp-state
+cloning, and L1 mutation preflight. It is an implementation-speed result, not
+a hardware-speed or simulator-to-Accel-Sim comparison.
+
+The later physical-pipeline candidate-domain surface adds conservative
+per-instruction candidate accounting. On the current release it runs at
+approximately 746 ms replay / 857 ms total wall on the same three-run probe;
+event counts and JSON timing remain unchanged. This small overhead is retained
+as the cost of confidence-aware attribution rather than hidden in the speed
+headline.
+
 ## M3 bounded optimization: aggregate L1 preflight budgets
 
 The first `perf record` identified `L1Cache::preflight_mutation_budgets` as a

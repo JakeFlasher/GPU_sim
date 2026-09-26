@@ -29,4 +29,10 @@ message kernel {
   // including explicit zero values, and their sum must equal field 4.
   optional uint32 shared_memory_static_bytes = 11;
   optional uint32 shared_memory_dynamic_bytes = 12;
+  // Preferred shared-memory carveout percentage captured from the CUDA
+  // function/launch attribute. -1 means no preference/attribute was exposed.
+  optional int32 shared_memory_carveout_preference_pct = 13;
+  // Driver-computed occupancy limit for this function/block/shared-memory
+  // launch shape. This is metadata, not a timing input.
+  optional uint32 driver_occupancy_limit_blocks = 14;
 }

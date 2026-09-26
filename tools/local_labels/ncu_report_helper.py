@@ -178,10 +178,70 @@ def get_lts__t_requests_srcunit_tex_sum(kernel: Any) -> float:
     return _metric(kernel, "lts__t_requests_srcunit_tex.sum")
 
 
+def get_dram__bytes_sum_per_second(kernel: Any) -> float:
+    return _metric(kernel, "dram__bytes.sum.per_second")
+
+
+def get_dram__bytes_read_sum_per_second(kernel: Any) -> float:
+    return _metric(kernel, "dram__bytes_read.sum.per_second")
+
+
+def get_dram__throughput_avg_pct_of_peak_sustained_elapsed(kernel: Any) -> float:
+    return _metric(kernel, "dram__throughput.avg.pct_of_peak_sustained_elapsed")
+
+
+def get_gpu__compute_memory_access_throughput_avg_pct_of_peak_sustained_elapsed(
+    kernel: Any,
+) -> float:
+    return _metric(
+        kernel,
+        "gpu__compute_memory_access_throughput.avg.pct_of_peak_sustained_elapsed",
+    )
+
+
+def get_gpu__compute_memory_request_throughput_avg_pct_of_peak_sustained_elapsed(
+    kernel: Any,
+) -> float:
+    return _metric(
+        kernel,
+        "gpu__compute_memory_request_throughput.avg.pct_of_peak_sustained_elapsed",
+    )
+
+
+def get_sm__memory_throughput_avg_pct_of_peak_sustained_elapsed(
+    kernel: Any,
+) -> float:
+    return _metric(
+        kernel,
+        "sm__memory_throughput.avg.pct_of_peak_sustained_elapsed",
+    )
+
+
+def get_dram__cycles_elapsed_avg_per_second(kernel: Any) -> float:
+    return _metric(kernel, "dram__cycles_elapsed.avg.per_second")
+
+
 def get_L1_Total_Requests(kernel: Any) -> float:
-    return (
-        get_l1tex__t_requests_pipe_lsu_mem_global_op_ld_sum(kernel)
-        + get_l1tex__t_requests_pipe_lsu_mem_global_op_st_sum(kernel)
-        + get_l1tex__t_requests_pipe_lsu_mem_global_op_atom_sum(kernel)
-        + get_l1tex__t_requests_pipe_lsu_mem_global_op_red_sum(kernel)
+    # GA102 exposes the canonical unified counter directly. Older report
+    # sections may omit it, so retain the complete 11-family fallback used by
+    # the original HyFiSS helper rather than silently dropping local,
+    # surface, or texture traffic.
+    direct = _lookup_metric(kernel, "l1tex__t_requests.sum")
+    if direct is not None:
+        return _coerce_number(direct)
+    return sum(
+        _metric(kernel, name)
+        for name in [
+            "l1tex__t_requests_pipe_lsu_mem_local_op_ld.sum",
+            "l1tex__t_requests_pipe_lsu_mem_global_op_ld.sum",
+            "l1tex__t_requests_pipe_tex_mem_surface_op_ld.sum",
+            "l1tex__t_requests_pipe_tex_mem_texture.sum",
+            "l1tex__t_requests_pipe_lsu_mem_global_op_st.sum",
+            "l1tex__t_requests_pipe_lsu_mem_local_op_st.sum",
+            "l1tex__t_requests_pipe_tex_mem_surface_op_st.sum",
+            "l1tex__t_requests_pipe_lsu_mem_global_op_red.sum",
+            "l1tex__t_requests_pipe_tex_mem_surface_op_red.sum",
+            "l1tex__t_requests_pipe_lsu_mem_global_op_atom.sum",
+            "l1tex__t_requests_pipe_tex_mem_surface_op_atom.sum",
+        ]
     )

@@ -1078,6 +1078,7 @@ mod tests {
                 l2_by_source,
                 dram,
                 front_end: FrontEndCounters::default(),
+                trace_metrics: crate::TraceMetrics::default(),
                 unmodeled_tails: TailFlags::default(),
             },
         }

@@ -14,6 +14,7 @@ const USAGE: &str = "Usage: sim-run --trace DIR --control FILE --arch-card FILE 
 [--architecture-spec FILE] \
 [--ncu-shaped-metrics] \
 [--ncu-csv FILE] [--ncu-launch ID] \
+[--launch-resources FILE] \
 [--memory-service-candidates FILE] [--memory-admission-candidates FILE] \
 [--memory-admission-feedback FILE]";
 
@@ -50,6 +51,7 @@ fn parse_args(args: impl IntoIterator<Item = OsString>) -> Result<Option<RunConf
     let mut ncu_shaped_metrics = false;
     let mut ncu_csv = None;
     let mut ncu_launch = None;
+    let mut launch_resources = None;
     let mut memory_service_candidates = None;
     let mut memory_admission_candidates = None;
     let mut memory_admission_feedback = None;
@@ -138,6 +140,10 @@ fn parse_args(args: impl IntoIterator<Item = OsString>) -> Result<Option<RunConf
                     )
                 })?);
             }
+            value if value == OsStr::new("--launch-resources") => {
+                launch_resources =
+                    Some(PathBuf::from(take_value(&mut args, "--launch-resources")?));
+            }
             value if value == OsStr::new("--memory-service-candidates") => {
                 memory_service_candidates = Some(PathBuf::from(take_value(
                     &mut args,
@@ -180,6 +186,7 @@ fn parse_args(args: impl IntoIterator<Item = OsString>) -> Result<Option<RunConf
         ncu_shaped_metrics,
         ncu_csv,
         ncu_launch,
+        launch_resources,
         memory_service_candidates,
         memory_admission_candidates,
         memory_admission_feedback,

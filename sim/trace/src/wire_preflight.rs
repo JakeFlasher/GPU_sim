@@ -518,6 +518,7 @@ fn scan_kernel(
 ) -> Result<(), WirePreflightError> {
     let mut cursor = WireCursor::new(raw);
     let mut split_fields_seen = [false; 2];
+    let mut launch_metadata_seen = [false; 2];
     while let Some(field) = cursor.next_field()? {
         match field.number {
             1 | 3 | 5 => require_int32(field)?,
@@ -544,6 +545,24 @@ fn scan_kernel(
                     ));
                 }
                 split_fields_seen[index] = true;
+            }
+            13 => {
+                require_int32(field)?;
+                if launch_metadata_seen[0] {
+                    return Err(WirePreflightError::Malformed(
+                        "duplicate shared-memory carveout protobuf field",
+                    ));
+                }
+                launch_metadata_seen[0] = true;
+            }
+            14 => {
+                require_uint32(field)?;
+                if launch_metadata_seen[1] {
+                    return Err(WirePreflightError::Malformed(
+                        "duplicate driver occupancy protobuf field",
+                    ));
+                }
+                launch_metadata_seen[1] = true;
             }
             _ => {}
         }
@@ -954,7 +973,7 @@ mod tests {
 
     #[test]
     fn kernel_32_bit_fields_reject_overwide_varints_before_decode() {
-        for field_number in [4, 11, 12] {
+        for field_number in [4, 11, 12, 14] {
             for value in [1_u64 << 32, (1_u64 << 32) + 4_096, 1_u64 << 63] {
                 assert_eq!(
                     scan_kernel(
@@ -977,6 +996,14 @@ mod tests {
                 Err(WirePreflightError::Malformed(UINT32_VARINT_OUT_OF_RANGE)),
             );
         }
+        assert_eq!(
+            scan_kernel(
+                &varint_field(13, 1_u64 << 32),
+                &mut RootCounts::default(),
+                ROOT_LIMITS,
+            ),
+            Err(WirePreflightError::Malformed(INT32_VARINT_OUT_OF_RANGE)),
+        );
         assert_eq!(
             scan_kernel(
                 &varint_field(4, u64::MAX),

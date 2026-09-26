@@ -1628,6 +1628,10 @@ mod v1_result_compat {
     #[derive(Serialize)]
     struct DramStatsWire {
         read_sectors: u64,
+        #[serde(skip_serializing_if = "is_zero_u64")]
+        atomic_rmw_read_sectors: u64,
+        #[serde(skip_serializing_if = "is_zero_u64")]
+        reduction_rmw_read_sectors: u64,
         bw_delayed_responses: u64,
         #[serde(skip_serializing_if = "is_zero_u64")]
         l2_evicted_lines: u64,
@@ -1656,6 +1660,8 @@ mod v1_result_compat {
         fn from(stats: &DramStats) -> Self {
             Self {
                 read_sectors: stats.read_sectors,
+                atomic_rmw_read_sectors: stats.atomic_rmw_read_sectors,
+                reduction_rmw_read_sectors: stats.reduction_rmw_read_sectors,
                 bw_delayed_responses: stats.bw_delayed_responses,
                 l2_evicted_lines: stats.l2_evicted_lines,
                 l2_evicted_valid_sectors: stats.l2_evicted_valid_sectors,

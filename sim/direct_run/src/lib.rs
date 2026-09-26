@@ -3,13 +3,16 @@
 //! The runner accepts ordinary input paths. It deliberately has no admission
 //! manifest, artifact digest, receipt, publication, or approval layer.
 
+mod metrics;
 pub mod ncu;
 mod prepared;
+mod resources;
 
 pub use prepared::{
     CoverageAdmission, KernelKey, KernelSelector, PreparedLaunchIdentity, PreparedReplay,
 };
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 #[cfg(feature = "performance-counters")]
@@ -28,12 +31,12 @@ use sim_sm::{
     IssueModelParams, L2SourceSplit, MAX_MEMORY_ADMISSION_CANDIDATES,
     MAX_MEMORY_SERVICE_CANDIDATES, MemoryAdmissionCandidate, MemoryServiceCandidate,
     ModeledCompletionFrontier, ReadinessDiagnostics, ReplayMemMode, SmActiveObservationFrontier,
-    StreamL2ReplaySession, TailFlags, build_schedules, replay_trace_kernel,
+    StreamL2ReplaySession, TailFlags, TraceMetrics, build_schedules, replay_trace_kernel,
     replay_trace_kernel_with_memory_admission_candidates,
     replay_trace_kernel_with_memory_admission_feedback,
     replay_trace_kernel_with_memory_service_candidates,
 };
-use sim_trace::{AnchoredDir, ExecInfo, TraceDir, strict_json_from_slice};
+use sim_trace::{AnchoredDir, ExecInfo, TraceDir, kernel_grid, strict_json_from_slice};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MemoryMode {
@@ -133,6 +136,9 @@ pub struct RunConfig {
     /// Optional observation-only raw NCU CSV. It never changes replay inputs.
     pub ncu_csv: Option<PathBuf>,
     pub ncu_launch: Option<u64>,
+    /// Optional CUPTI launch-resource JSONL observation. This is metadata only;
+    /// it never changes replay scheduling or cache configuration.
+    pub launch_resources: Option<PathBuf>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -653,6 +659,15 @@ pub struct LaunchReport {
     pub cluster: (u32, u32, u32),
     pub coverage: CoverageReport,
     pub counters: CounterReport,
+    /// Trace-derived dynamic activity. This is observation-only and is never
+    /// used as an architecture or timing input.
+    pub trace_metrics: TraceMetrics,
+    /// Model-relative active-warp integrals and per-SMSP issue observations.
+    pub sm_activity: BTreeMap<i32, sim_sm::SmActivity>,
+    /// Extended native metric projection. Values marked approximate or
+    /// unavailable are intentionally not part of the frozen seven-plus-one
+    /// publication vector.
+    pub native_metrics: metrics::NativeMetrics,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub metric_predictions: Option<Vec<NcuMetricProjectionReport>>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -921,6 +936,10 @@ fn l2_counter_report(value: &L2Counters) -> L2CounterReport {
 #[derive(Debug, Serialize)]
 pub struct DramCounterReport {
     pub read_sectors: u64,
+    #[serde(skip_serializing_if = "is_zero_u64")]
+    pub atomic_rmw_read_sectors: u64,
+    #[serde(skip_serializing_if = "is_zero_u64")]
+    pub reduction_rmw_read_sectors: u64,
     pub bandwidth_delayed_responses: u64,
     #[serde(skip_serializing_if = "is_zero_u64")]
     pub l2_evicted_lines: u64,
@@ -976,6 +995,7 @@ fn completion_frontier_report(value: ModeledCompletionFrontier) -> CompletionFro
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn counters(
     instructions_issued: u64,
     records_seen: u64,
@@ -1010,6 +1030,8 @@ fn counters(
         l2_by_source: l2_by_source.map(l2_source_counter_report),
         dram: dram.map(|value| DramCounterReport {
             read_sectors: value.read_sectors,
+            atomic_rmw_read_sectors: value.atomic_rmw_read_sectors,
+            reduction_rmw_read_sectors: value.reduction_rmw_read_sectors,
             bandwidth_delayed_responses: value.bw_delayed_responses,
             l2_evicted_lines: value.l2_evicted_lines,
             l2_evicted_valid_sectors: value.l2_evicted_valid_sectors,
@@ -1167,6 +1189,8 @@ fn cache_lookup_prediction_reports(
 
 fn launch_report(
     result: FullKernelReplayResult,
+    arch_card: &ArchCard,
+    external_resources: Option<&resources::LaunchResourceObservation>,
     cache_handoff: Option<CacheHandoffReport>,
     expected_memory_admission_feedback: Option<MemoryAdmissionCandidate>,
     include_metric_predictions: bool,
@@ -1215,6 +1239,12 @@ fn launch_report(
         result.dram(),
         result.unmodeled_tails(),
     );
+    let sm_activity = result
+        .per_sm()
+        .iter()
+        .map(|(&sm, value)| (sm, value.activity.clone()))
+        .collect();
+    let native_metrics = metrics::project(&result, arch_card, external_resources)?;
     let mut readiness = ReadinessDiagnostics::default();
     for per_sm in result.per_sm().values() {
         readiness
@@ -1249,6 +1279,9 @@ fn launch_report(
         cluster: binding.cluster(),
         coverage,
         counters: counter_report,
+        trace_metrics: result.trace_metrics().clone(),
+        sm_activity,
+        native_metrics,
         metric_predictions,
         cache_lookup_predictions,
         timing,
@@ -1410,11 +1443,23 @@ pub fn run(config: &RunConfig) -> Result<RunReport, RunError> {
         && ncu_observation.is_none()
         && !specialized_loader_requested
         && !performance_diagnostics_requested
+        && config.launch_resources.is_none()
     {
         return PreparedReplay::prepare(config, CoverageAdmission::ExistingDirectBehavior)?
             .replay_all_report();
     }
     let arch_card = load_arch_card(&config.arch_card)?;
+    if config.kernel_id.is_some() && config.launch_resources.is_some() {
+        return Err(RunError::new(
+            "arguments",
+            "--kernel-id cannot be combined with --launch-resources because CUPTI correlation identity is not present in the trace contract",
+        ));
+    }
+    let mut external_resources = config
+        .launch_resources
+        .as_ref()
+        .map(|path| resources::ResourceObservations::load(path))
+        .transpose()?;
     let arch = arch_card.arch_id().map_err(at("architecture card"))?;
     let (issue, architecture_spec_issue_ports) = resolve_issue_with_metadata(config, &arch_card)?;
     let mode = resolve_mode(config, &arch_card, issue)?;
@@ -1454,12 +1499,12 @@ pub fn run(config: &RunConfig) -> Result<RunReport, RunError> {
     #[cfg(feature = "performance-counters")]
     let control_started = Instant::now();
     let control = load_control_sidecar(&config.control_bits, arch)?;
-    validate_direct_control_identity(&config.control_bits, &exec, &control)?;
+    validate_direct_control_identity(&config.control_bits, exec, &control)?;
     #[cfg(feature = "performance-counters")]
     let control_ns = control_started.elapsed().as_nanos();
     #[cfg(feature = "performance-counters")]
     let schedule_started = Instant::now();
-    let schedules = build_schedules(&exec, &control).map_err(at("schedule"))?;
+    let schedules = build_schedules(exec, &control).map_err(at("schedule"))?;
     #[cfg(feature = "performance-counters")]
     let schedule_ns = schedule_started.elapsed().as_nanos();
 
@@ -1505,8 +1550,25 @@ pub fn run(config: &RunConfig) -> Result<RunReport, RunError> {
                         "direct timing replay requires complete launch coverage",
                     )
                 })?;
+                let external = external_resources
+                    .as_mut()
+                    .map(|records| {
+                        records.take(
+                            loc.device_id(),
+                            loc.stream_id(),
+                            &loc.kernel().name,
+                            kernel_grid(loc.kernel()).map_err(at("launch resource identity"))?,
+                            loc.kernel()
+                                .block_dim
+                                .as_ref()
+                                .map(|dim| (dim.x as u32, dim.y as u32, dim.z as u32)),
+                        )
+                    })
+                    .transpose()?;
                 launches.push(launch_report(
                     result,
+                    &arch_card,
+                    external.as_ref(),
                     None,
                     memory_admission_feedback,
                     config.ncu_shaped_metrics,
@@ -1544,8 +1606,25 @@ pub fn run(config: &RunConfig) -> Result<RunReport, RunError> {
                         "direct timing replay requires complete launch coverage",
                     )
                 })?;
+                let external = external_resources
+                    .as_mut()
+                    .map(|records| {
+                        records.take(
+                            loc.device_id(),
+                            loc.stream_id(),
+                            &loc.kernel().name,
+                            kernel_grid(loc.kernel()).map_err(at("launch resource identity"))?,
+                            loc.kernel()
+                                .block_dim
+                                .as_ref()
+                                .map(|dim| (dim.x as u32, dim.y as u32, dim.z as u32)),
+                        )
+                    })
+                    .transpose()?;
                 launches.push(launch_report(
                     result,
+                    &arch_card,
+                    external.as_ref(),
                     Some(CacheHandoffReport {
                         scope: config.cache_scope.token(),
                         sequence_index,
@@ -1589,6 +1668,9 @@ pub fn run(config: &RunConfig) -> Result<RunReport, RunError> {
         cache_session,
         ncu_observation,
     };
+    if let Some(resources) = external_resources.as_ref() {
+        resources.finish()?;
+    }
     #[cfg(feature = "performance-counters")]
     if performance_enabled {
         eprintln!(
@@ -1626,6 +1708,7 @@ mod tests {
             memory_admission_feedback: None,
             ncu_csv: None,
             ncu_launch: None,
+            launch_resources: None,
         }
     }
 
@@ -1773,6 +1856,7 @@ mod tests {
         assert!(matches!(
             metrics[7].outcome,
             EmitOutcome::Predicted(sim_run::emit::MetricValue::BindingCycles(_))
+                | EmitOutcome::RequiredUnimplemented { .. }
         ));
         let dram = metrics
             .iter()
@@ -1831,6 +1915,122 @@ mod tests {
                 timing.resident_data_hits
             );
         }
+    }
+
+    #[test]
+    fn native_metric_projection_keeps_model_values_and_typed_gaps_separate() {
+        let report = run(&fixture(MemoryMode::L1L2)).unwrap();
+        let native = &report.launches[0].native_metrics;
+        assert_eq!(native.schema_version, 1);
+        assert_eq!(native.architecture, "sm_86");
+        assert_eq!(native.sm_count, 84);
+        assert!(native.active_sm_count <= native.sm_count);
+        assert_eq!(native.metrics["warp_instructions"].value, Some(54.0));
+        assert!(matches!(
+            native.metrics["registers_per_thread"].status,
+            "modeled" | "unavailable"
+        ));
+        assert!(matches!(
+            native.metrics["theoretical_occupancy_pct"].status,
+            "approximate" | "unavailable"
+        ));
+        assert_eq!(
+            native.metrics["shared_memory_config_size"].status,
+            "unavailable"
+        );
+        assert_eq!(native.metrics["power_watts"].status, "unavailable");
+        assert_eq!(native.metrics["dram_write_sectors"].status, "unavailable");
+        assert_eq!(
+            native.metrics["dram_read_bytes_per_second_estimate"].status,
+            "approximate"
+        );
+        assert_eq!(
+            native.metrics["dram_read_bytes_per_second_estimate"].ncu_metric,
+            None
+        );
+        assert_eq!(
+            native.metrics["dram_read_bandwidth_pct_estimate"].status,
+            "approximate"
+        );
+        let flat = run(&fixture(MemoryMode::Flat)).unwrap();
+        let flat_native = &flat.launches[0].native_metrics;
+        assert_eq!(
+            flat_native.metrics["dram_read_bytes_per_second_estimate"].status,
+            "unavailable"
+        );
+        assert_eq!(
+            flat_native.metrics["dram_read_bandwidth_pct_estimate"].status,
+            "unavailable"
+        );
+        assert!(matches!(
+            native.metrics["dirty_writeback_demand_sectors"].status,
+            "approximate" | "unavailable"
+        ));
+        assert!(
+            native
+                .metrics
+                .contains_key("dirty_writeback_demand_lower_bound_sectors")
+        );
+        assert_eq!(
+            native.metrics["branch_target_divergent_branches"].status,
+            "approximate"
+        );
+        assert_eq!(
+            native.metrics["branch_target_divergent_branches"].unit,
+            "branches"
+        );
+        assert_eq!(
+            native.metrics["ncu_pipeline_alu_instructions"].status,
+            "approximate"
+        );
+        assert!(
+            native
+                .metrics
+                .contains_key("scheduler_proxy_long_scoreboard_cycles")
+        );
+        assert!(native.metrics.contains_key("occupancy_limit_warps"));
+        assert!(native.metrics.contains_key("warp_instructions_avg"));
+        assert_eq!(
+            native.metrics["physical_pipeline_adu_instructions"].status,
+            "unavailable"
+        );
+        assert_eq!(
+            native.metrics["physical_pipeline_assignment_pct"].status,
+            "unavailable"
+        );
+        assert!(
+            native
+                .metrics
+                .contains_key("branch_target_divergent_minority_threads")
+        );
+        assert!(native.metrics.contains_key("physical_pipeline_unique_pct"));
+        assert!(
+            native
+                .metrics
+                .contains_key("physical_pipeline_ambiguous_pct")
+        );
+        assert!(native.metrics.contains_key("physical_pipeline_unknown_pct"));
+        assert!(native.metrics.contains_key("cfg_unique_edges"));
+        assert!(native.metrics.contains_key("cfg_disjoint_path_switches"));
+        assert!(
+            native
+                .metrics
+                .contains_key("coherence_cross_sm_sector_overlap")
+        );
+        assert!(
+            native
+                .metrics
+                .contains_key("coherence_cross_sm_read_write_sectors")
+        );
+        assert!(
+            native
+                .metrics
+                .contains_key("coherence_cross_sm_write_write_sectors")
+        );
+        assert_eq!(
+            native.metrics["eligible_warps"].semantics,
+            "ready-warp population is not sampled at every hardware scheduler cycle"
+        );
     }
 
     #[test]

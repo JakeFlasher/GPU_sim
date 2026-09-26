@@ -151,6 +151,24 @@ pub enum TraceError {
         registers: i32,
     },
     #[error(
+        "launch ({device_id}, {stream_id}, {kernel_id}) has invalid shared-memory carveout preference {preference}"
+    )]
+    TraceLaunchCarveoutInvalid {
+        device_id: i64,
+        stream_id: i64,
+        kernel_id: i32,
+        preference: i32,
+    },
+    #[error(
+        "launch ({device_id}, {stream_id}, {kernel_id}) has invalid driver occupancy limit {blocks}"
+    )]
+    TraceLaunchOccupancyInvalid {
+        device_id: i64,
+        stream_id: i64,
+        kernel_id: i32,
+        blocks: u32,
+    },
+    #[error(
         "legacy launch ({device_id}, {stream_id}, {kernel_id}) carries split shared-memory fields"
     )]
     SharedMemorySplitUnadvertised {
@@ -522,6 +540,8 @@ impl TraceError {
                 Some("trace_launch_shared_memory_invalid")
             }
             Self::TraceLaunchRegistersInvalid { .. } => Some("trace_launch_registers_invalid"),
+            Self::TraceLaunchCarveoutInvalid { .. } => Some("trace_launch_carveout_invalid"),
+            Self::TraceLaunchOccupancyInvalid { .. } => Some("trace_launch_occupancy_invalid"),
             Self::SharedMemorySplitUnadvertised { .. } => Some("shared_memory_split_unadvertised"),
             Self::SharedMemorySplitUnavailable { .. } => Some("shared_memory_split_unavailable"),
             Self::SharedMemorySplitMissing { .. } => Some("shared_memory_split_missing"),
@@ -2711,6 +2731,12 @@ impl ValidatedWarp {
                 sm_id: instruction.sm_id.unwrap_or_default(),
                 warpid_sm: instruction.warpid_sm.unwrap_or_default(),
                 identity_presence,
+                active_mask_present: instruction.active_mask.is_some(),
+                predicate_mask_present: instruction.predicate_mask.is_some(),
+                active_mask: instruction.active_mask.unwrap_or_default(),
+                predicate_on_lanes: (instruction.active_mask.unwrap_or_default()
+                    & instruction.predicate_mask.unwrap_or_default())
+                .count_ones() as u8,
             });
         }
         Ok(Self {
@@ -2914,6 +2940,12 @@ struct ValidatedInstruction {
     sm_id: i32,
     warpid_sm: i32,
     identity_presence: u8,
+    active_mask_present: bool,
+    predicate_mask_present: bool,
+    // Preserve lane identity as well as population: per-lane successor PCs
+    // cannot be reconstructed from popcounts when a warp splits/reconverges.
+    active_mask: u32,
+    predicate_on_lanes: u8,
 }
 
 /// Sparse order witness for one selected dynamic instruction. Keeping this in
@@ -2942,6 +2974,23 @@ pub struct ValidatedInstructionRef<'a> {
 }
 
 impl<'a> ValidatedInstructionRef<'a> {
+    /// Lane populations validated before compaction; no profiler values.
+    pub const fn active_lanes(&self) -> u8 {
+        self.instruction.active_mask.count_ones() as u8
+    }
+    pub const fn active_mask_present(&self) -> bool {
+        self.instruction.active_mask_present
+    }
+    pub const fn predicate_mask_present(&self) -> bool {
+        self.instruction.predicate_mask_present
+    }
+    pub const fn active_mask(&self) -> u32 {
+        self.instruction.active_mask
+    }
+    pub const fn predicate_on_lanes(&self) -> u8 {
+        self.instruction.predicate_on_lanes
+    }
+
     pub const fn pc(&self) -> u32 {
         self.instruction.pc
     }
@@ -3553,6 +3602,32 @@ fn validate_trace_semantics(
                         stream_id: stream_key,
                         kernel_id: kernel.id,
                         registers: kernel.number_of_registers,
+                    });
+                }
+                if kernel
+                    .shared_memory_carveout_preference_pct
+                    .is_some_and(|preference| !(-1..=100).contains(&preference))
+                {
+                    return Err(TraceError::TraceLaunchCarveoutInvalid {
+                        device_id: device_key,
+                        stream_id: stream_key,
+                        kernel_id: kernel.id,
+                        preference: kernel
+                            .shared_memory_carveout_preference_pct
+                            .expect("checked as present"),
+                    });
+                }
+                if kernel
+                    .driver_occupancy_limit_blocks
+                    .is_some_and(|blocks| blocks == 0)
+                {
+                    return Err(TraceError::TraceLaunchOccupancyInvalid {
+                        device_id: device_key,
+                        stream_id: stream_key,
+                        kernel_id: kernel.id,
+                        blocks: kernel
+                            .driver_occupancy_limit_blocks
+                            .expect("checked as present"),
                     });
                 }
                 if !positive_geometry(kernel.grid_dim.as_ref()) {
@@ -8351,7 +8426,7 @@ mod tests {
         )
         .unwrap();
         let instructions = compact.instructions().collect::<Vec<_>>();
-        assert_eq!(std::mem::size_of::<ValidatedInstruction>(), 20);
+        assert_eq!(std::mem::size_of::<ValidatedInstruction>(), 24);
         assert_eq!(instructions[0].function_unique_id(), 7);
         assert_eq!(instructions[0].warpid_tb(), 3);
         assert_eq!(instructions[0].sm_id(), Some(i32::MIN));
@@ -9222,6 +9297,8 @@ mod tests {
             cluster_dim: Some(pb::Dim3d { x: 1, y: 1, z: 1 }),
             shared_memory_static_bytes: None,
             shared_memory_dynamic_bytes: None,
+            shared_memory_carveout_preference_pct: None,
+            driver_occupancy_limit_blocks: None,
         };
         let stream = pb::CudaStream {
             id: 0,
@@ -9469,6 +9546,35 @@ mod tests {
             Err(error) => error,
         };
         assert_eq!(error.typed_reason(), Some("trace_launch_registers_invalid"));
+    }
+
+    #[test]
+    fn launch_metadata_ranges_fail_closed_before_payload_join() {
+        for (carveout, occupancy, expected) in [
+            (Some(101), None, "trace_launch_carveout_invalid"),
+            (Some(-2), None, "trace_launch_carveout_invalid"),
+            (None, Some(0), "trace_launch_occupancy_invalid"),
+        ] {
+            let tmp = tempfile::tempdir().unwrap();
+            write_synthetic_trace(tmp.path(), 1);
+            let mut trace = read_synthetic_root(tmp.path());
+            let kernel = &mut trace
+                .gpu_device
+                .get_mut(&0)
+                .unwrap()
+                .streams
+                .get_mut(&0)
+                .unwrap()
+                .kernels[0];
+            kernel.shared_memory_carveout_preference_pct = carveout;
+            kernel.driver_occupancy_limit_blocks = occupancy;
+            write_synthetic_root(tmp.path(), &trace);
+            let error = match TraceDir::open_direct(tmp.path()) {
+                Ok(_) => panic!("invalid launch metadata was accepted"),
+                Err(error) => error,
+            };
+            assert_eq!(error.typed_reason(), Some(expected));
+        }
     }
 
     #[test]
@@ -9750,7 +9856,7 @@ mod tests {
                 .instructions()
                 .any(|instruction| instruction.memory().is_none())
         );
-        assert!(std::mem::size_of::<ValidatedInstruction>() <= 20);
+        assert!(std::mem::size_of::<ValidatedInstruction>() <= 24);
         assert!(std::mem::size_of::<ValidatedMemoryInstruction>() <= 24);
 
         let mut replacement = pb::Threadblock::decode(std::fs::read(&path).unwrap().as_slice())
@@ -9992,6 +10098,8 @@ mod tests {
             cluster_dim: Some(pb::Dim3d { x: 1, y: 1, z: 1 }),
             shared_memory_static_bytes: None,
             shared_memory_dynamic_bytes: None,
+            shared_memory_carveout_preference_pct: None,
+            driver_occupancy_limit_blocks: None,
         };
         let tb = pb::Threadblock {
             block_id: Some(pb::Dim3d { x: 2, y: 0, z: 0 }),

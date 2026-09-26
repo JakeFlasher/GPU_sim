@@ -72,6 +72,7 @@ pub mod custom;
 #[cfg(feature = "campaign")]
 pub mod evidence;
 mod issue;
+pub mod metrics;
 pub mod program;
 pub mod replay;
 pub mod sass_operands;
@@ -106,6 +107,10 @@ pub use issue::{
     MemoryServiceCandidateOperation, MemoryServiceCandidateResult, MemoryServiceCandidateScope,
     MemoryWriteAckDiagnostics, ReadinessCauseCycles, ReadinessCounterError, ReadinessDiagnostics,
     ReplyTo, ResultWritebackDiagnostics, SmSimResult, TailFlags,
+};
+pub use metrics::{
+    ControlFlowGraph, InstructionActivity, MemoryTraffic, PhysicalPipelineAttribution, SmActivity,
+    TraceMetrics, WarpLifetime,
 };
 pub use program::{
     FunctionSchedule, IssueSlot, OpClass, PipelineClass, ProgramError, build_schedules,

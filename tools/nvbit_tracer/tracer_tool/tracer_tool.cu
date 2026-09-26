@@ -750,56 +750,11 @@ struct ModuleKey {
   }
 };
 
-struct LibraryKey {
-  CUcontext ctx;
-  CUlibrary library;
-  bool operator==(const LibraryKey& other) const {
-    return ctx == other.ctx && library == other.library;
-  }
-};
-
-struct FunctionKey {
-  CUcontext ctx;
-  CUfunction function;
-  bool operator==(const FunctionKey& other) const {
-    return ctx == other.ctx && function == other.function;
-  }
-};
-
-struct FunctionNameKey {
-  CUcontext ctx;
-  std::string name;
-  bool operator==(const FunctionNameKey& other) const {
-    return ctx == other.ctx && name == other.name;
-  }
-};
-
 struct PointerPairHash {
   template <typename Key>
   size_t operator()(const Key& key) const noexcept {
     return std::hash<void*>()(key.ctx) ^
            (std::hash<void*>()(key.module) << 1);
-  }
-};
-
-struct LibraryKeyHash {
-  size_t operator()(const LibraryKey& key) const noexcept {
-    return std::hash<void*>()(key.ctx) ^
-           (std::hash<void*>()(key.library) << 1);
-  }
-};
-
-struct FunctionKeyHash {
-  size_t operator()(const FunctionKey& key) const noexcept {
-    return std::hash<void*>()(key.ctx) ^
-           (std::hash<void*>()(key.function) << 1);
-  }
-};
-
-struct FunctionNameKeyHash {
-  size_t operator()(const FunctionNameKey& key) const noexcept {
-    return std::hash<void*>()(key.ctx) ^
-           (std::hash<std::string>()(key.name) << 1);
   }
 };
 
@@ -815,12 +770,12 @@ struct AcceptedModuleMapping {
 
 std::unordered_map<ModuleKey, std::string, PointerPairHash>
     loaded_module_origins;
-std::unordered_map<LibraryKey, std::string, LibraryKeyHash>
-    loaded_library_origins;
-std::unordered_map<FunctionKey, std::string, FunctionKeyHash>
-    loaded_function_origins;
-std::unordered_map<FunctionNameKey, std::string, FunctionNameKeyHash>
-    loaded_function_name_origins;
+// CUDA libraries are context-independent. Their lifetime ends at library
+// unload, not at the destruction of the context that observed the load.
+std::unordered_map<CUlibrary, std::string> loaded_library_origins;
+// A caller may convert CUkernel to a context-bound CUfunction before launch.
+// Retain the observed exact module/library association, never a symbol name.
+std::unordered_map<ModuleKey, CUlibrary, PointerPairHash> loaded_library_modules;
 std::vector<AcceptedModuleMapping> accepted_module_mappings;
 
 }  // namespace
@@ -2205,24 +2160,11 @@ static bool is_module_origin_event(nvbit_api_cuda_t cbid) {
          cbid == API_CUDA_cuLibraryUnload;
 }
 
-static void register_function_origin(CUcontext ctx, CUfunction function,
-                                     const std::string& function_name,
-                                     const std::string& origin) {
-  if (function == nullptr || origin.empty()) return;
-  loaded_function_origins[FunctionKey{ctx, function}] = origin;
-  if (!function_name.empty()) {
-    loaded_function_name_origins[FunctionNameKey{ctx, function_name}] = origin;
-  }
-  const char* nvbit_name = nvbit_get_func_name(ctx, function, true);
-  if (nvbit_name != nullptr && nvbit_name[0] != '\0') {
-    loaded_function_name_origins[
-        FunctionNameKey{ctx, std::string(nvbit_name)}] = origin;
-  }
-}
-
-/* Capture load-time provenance before a framework can unlink a temporary
- * module. Deleted paths remain explicitly typed unavailable at launch time;
- * this registry never substitutes a guessed benchmark_kernel.so. */
+/* Retain observed load origins, never a guessed benchmark filename. There
+ * is deliberately no function-name registry: symbol names are module-local,
+ * so two live modules may contain the same kernel name. Query the owner of
+ * the exact launch handle instead, including CUDA's context-less CUkernel
+ * launch convention. No eager function enumeration or disassembly is needed. */
 static void handle_module_origin_event(CUcontext ctx, int is_exit,
                                        nvbit_api_cuda_t cbid, void* params,
                                        CUresult* status) {
@@ -2255,27 +2197,18 @@ static void handle_module_origin_event(CUcontext ctx, int is_exit,
             nvbit_tracer::LookupAddressInProcessMaps(p->fatCubin).path;
       break;
     }
-    case API_CUDA_cuModuleGetFunction: {
-      auto* p = static_cast<cuModuleGetFunction_params*>(params);
-      if (p->hfunc == nullptr || *p->hfunc == nullptr || p->hmod == nullptr)
-        break;
-      auto origin = loaded_module_origins.find(ModuleKey{ctx, p->hmod});
-      if (origin != loaded_module_origins.end())
-        register_function_origin(ctx, *p->hfunc,
-                                 p->name == nullptr ? "" : p->name,
-                                 origin->second);
-      break;
-    }
     case API_CUDA_cuModuleUnload: {
       auto* p = static_cast<cuModuleUnload_params*>(params);
-      if (p->hmod != nullptr)
+      if (p->hmod != nullptr) {
         loaded_module_origins.erase(ModuleKey{ctx, p->hmod});
+        loaded_library_modules.erase(ModuleKey{ctx, p->hmod});
+      }
       break;
     }
     case API_CUDA_cuLibraryLoadData: {
       auto* p = static_cast<cuLibraryLoadData_params*>(params);
       if (p->library != nullptr && *p->library != nullptr)
-        loaded_library_origins[LibraryKey{ctx, *p->library}] =
+        loaded_library_origins[*p->library] =
             nvbit_tracer::LookupAddressInProcessMaps(p->code).path;
       break;
     }
@@ -2283,26 +2216,36 @@ static void handle_module_origin_event(CUcontext ctx, int is_exit,
       auto* p = static_cast<cuLibraryLoadFromFile_params*>(params);
       if (p->library != nullptr && *p->library != nullptr &&
           p->fileName != nullptr)
-        loaded_library_origins[LibraryKey{ctx, *p->library}] = p->fileName;
+        loaded_library_origins[*p->library] = p->fileName;
+      break;
+    }
+    case API_CUDA_cuLibraryUnload: {
+      auto* p = static_cast<cuLibraryUnload_params*>(params);
+      if (p->library != nullptr) {
+        loaded_library_origins.erase(p->library);
+        for (auto it = loaded_library_modules.begin();
+             it != loaded_library_modules.end();) {
+          if (it->second == p->library) it = loaded_library_modules.erase(it);
+          else ++it;
+        }
+      }
       break;
     }
     case API_CUDA_cuKernelGetFunction: {
       auto* p = static_cast<cuKernelGetFunction_params*>(params);
       if (p->pFunc == nullptr || *p->pFunc == nullptr || p->kernel == nullptr)
         break;
+      const bool previous_skip = skip_callback_flag;
+      skip_callback_flag = true;
       CUlibrary library = nullptr;
-      if (cuKernelGetLibrary(&library, p->kernel) != CUDA_SUCCESS ||
-          library == nullptr)
-        break;
-      auto origin = loaded_library_origins.find(LibraryKey{ctx, library});
-      if (origin != loaded_library_origins.end())
-        register_function_origin(ctx, *p->pFunc, "", origin->second);
-      break;
-    }
-    case API_CUDA_cuLibraryUnload: {
-      auto* p = static_cast<cuLibraryUnload_params*>(params);
-      if (p->library != nullptr)
-        loaded_library_origins.erase(LibraryKey{ctx, p->library});
+      CUmodule module = nullptr;
+      if (cuKernelGetLibrary(&library, p->kernel) == CUDA_SUCCESS &&
+          library != nullptr &&
+          cuFuncGetModule(&module, *p->pFunc) == CUDA_SUCCESS &&
+          module != nullptr) {
+        loaded_library_modules[ModuleKey{ctx, module}] = library;
+      }
+      skip_callback_flag = previous_skip;
       break;
     }
     default:
@@ -2322,31 +2265,44 @@ static AcceptedModuleMapping resolve_accepted_module_mapping(
   if (name != nullptr) mapping.kernel_name = name;
 
   std::string raw_origin;
-  auto by_function = loaded_function_origins.find(FunctionKey{ctx, function});
-  if (by_function != loaded_function_origins.end()) {
-    raw_origin = by_function->second;
-    mapping.resolution_source = "function_registry";
-  }
-  if (raw_origin.empty()) {
-    CUmodule module = nullptr;
-    if (cuFuncGetModule(&module, function) == CUDA_SUCCESS && module != nullptr) {
-      auto by_module = loaded_module_origins.find(ModuleKey{ctx, module});
-      if (by_module != loaded_module_origins.end()) {
-        raw_origin = by_module->second;
-        mapping.resolution_source = "module_registry";
-      } else {
-        mapping.resolution_source = "module_registry_miss";
+  const bool previous_skip = skip_callback_flag;
+  skip_callback_flag = true;
+  CUmodule module = nullptr;
+  if (cuFuncGetModule(&module, function) == CUDA_SUCCESS && module != nullptr) {
+    auto origin = loaded_module_origins.find(ModuleKey{ctx, module});
+    if (origin != loaded_module_origins.end()) {
+      raw_origin = origin->second;
+      mapping.resolution_source = "module_registry";
+    } else {
+      mapping.resolution_source = "module_registry_miss";
+      auto library_owner = loaded_library_modules.find(ModuleKey{ctx, module});
+      if (library_owner != loaded_library_modules.end()) {
+        auto library_origin = loaded_library_origins.find(library_owner->second);
+        if (library_origin != loaded_library_origins.end()) {
+          raw_origin = library_origin->second;
+          mapping.resolution_source = "library_function_registry";
+        }
       }
     }
   }
-  if (raw_origin.empty() && !mapping.kernel_name.empty()) {
-    auto by_name = loaded_function_name_origins.find(
-        FunctionNameKey{ctx, mapping.kernel_name});
-    if (by_name != loaded_function_name_origins.end()) {
-      raw_origin = by_name->second;
-      mapping.resolution_source = "function_name_registry";
+  if (raw_origin.empty()) {
+    // cuLaunchKernel/cuLaunchKernelEx also accept CUkernel cast to CUfunction.
+    // Such handles reject cuFuncGetModule in the usual case; retrying the
+    // exact owner query after a module-registry miss also covers lazy library
+    // loading without falling back to a same-named function.
+    CUlibrary library = nullptr;
+    if (cuKernelGetLibrary(&library, reinterpret_cast<CUkernel>(function)) ==
+            CUDA_SUCCESS && library != nullptr) {
+      auto origin = loaded_library_origins.find(library);
+      if (origin != loaded_library_origins.end()) {
+        raw_origin = origin->second;
+        mapping.resolution_source = "library_registry";
+      } else {
+        mapping.resolution_source = "library_registry_miss";
+      }
     }
   }
+  skip_callback_flag = previous_skip;
   if (mapping.resolution_source.empty())
     mapping.resolution_source = "origin_unresolved";
   mapping.origin = nvbit_tracer::EvaluateModuleOrigin(raw_origin);
@@ -3499,14 +3455,15 @@ void nvbit_at_cuda_event(CUcontext ctx, int is_exit, nvbit_api_cuda_t cbid,
       return;
   }
 
-  CTXstate* ctx_state = lookup_context_state_or_fail(
-      ctx, "nvbit_at_cuda_event/context");
-
+  // cuLibrary* is context-independent and may run before any context exists.
   if (is_module_origin_event(cbid)) {
     handle_module_origin_event(ctx, is_exit, cbid, params, pStatus);
     pthread_mutex_unlock(&mutex);
     return;
   }
+
+  CTXstate* ctx_state = lookup_context_state_or_fail(
+      ctx, "nvbit_at_cuda_event/context");
 
   // A graph used while the profiler is inactive is outside the requested
   // capture region and must not change application behavior. Reject only a
@@ -3686,6 +3643,7 @@ void nvbit_at_cuda_event(CUcontext ctx, int is_exit, nvbit_api_cuda_t cbid,
     unsigned grid_dim_x, grid_dim_y, grid_dim_z;
     unsigned block_dim_x, block_dim_y, block_dim_z;
     unsigned shared_mem_bytes;
+    int shared_memory_carveout_preference_pct = -1;
     // Cluster dimension from cudaLaunchAttributeClusterDimension /
     // CU_LAUNCH_ATTRIBUTE_CLUSTER_DIMENSION (id=4 per
     // nvbit_release/core/cuda.h:2207). Only cuLaunchKernelEx
@@ -3717,7 +3675,11 @@ void nvbit_at_cuda_event(CUcontext ctx, int is_exit, nvbit_api_cuda_t cbid,
             cluster_dim_x = p_ex->config->attrs[i].value.clusterDim.x;
             cluster_dim_y = p_ex->config->attrs[i].value.clusterDim.y;
             cluster_dim_z = p_ex->config->attrs[i].value.clusterDim.z;
-            break;
+          }
+          if (p_ex->config->attrs[i].id ==
+              CU_LAUNCH_ATTRIBUTE_PREFERRED_SHARED_MEMORY_CARVEOUT) {
+            shared_memory_carveout_preference_pct = static_cast<int>(
+                p_ex->config->attrs[i].value.sharedMemCarveout);
           }
         }
       }
@@ -3734,6 +3696,27 @@ void nvbit_at_cuda_event(CUcontext ctx, int is_exit, nvbit_api_cuda_t cbid,
       shared_mem_bytes = p_ker->sharedMemBytes;
       // cluster_dim_* already initialized to (1,1,1) — plain
       // cuLaunchKernel has no cluster support.
+    }
+    // A launch attribute overrides the function preference. For ordinary
+    // launches, retain the function-level preference when the driver exposes
+    // it; absence is a typed trace metadata gap, not zero shared memory.
+    if (shared_memory_carveout_preference_pct < 0) {
+      int function_carveout = -1;
+      const CUresult carveout_res = cuFuncGetAttribute(
+          &function_carveout,
+          CU_FUNC_ATTRIBUTE_PREFERRED_SHARED_MEMORY_CARVEOUT,
+          kernel_func);
+      if (carveout_res == CUDA_SUCCESS) {
+        shared_memory_carveout_preference_pct = function_carveout;
+      }
+    }
+    if (shared_memory_carveout_preference_pct < -1 ||
+        shared_memory_carveout_preference_pct > 100) {
+      fprintf(stderr,
+              "FATAL: shared_memory_carveout_attribute_invalid: %d\n",
+              shared_memory_carveout_preference_pct);
+      fflush(stderr);
+      _exit(EXIT_FAILURE);
     }
     // cuLaunchKernel/cuLaunchKernelEx require a current context. Query it only
     // after CBID dispatch, then status/bounds-check and compare it with the
@@ -3923,6 +3906,14 @@ void nvbit_at_cuda_event(CUcontext ctx, int is_exit, nvbit_api_cuda_t cbid,
       const uint32_t nregs = function_config.num_registers;
       const uint32_t shmem_static_nbytes =
           function_config.shmem_static_nbytes;
+      if (nregs > static_cast<uint32_t>(std::numeric_limits<int32_t>::max())) {
+        fprintf(stderr,
+                "FATAL: register_attribute_out_of_range: %u exceeds the "
+                "int32 protobuf field. Aborting.\n",
+                nregs);
+        fflush(stderr);
+        _exit(EXIT_FAILURE);
+      }
       const uint64_t shmem_combined_nbytes =
           static_cast<uint64_t>(shmem_static_nbytes) +
           static_cast<uint64_t>(shared_mem_bytes);
@@ -3934,6 +3925,27 @@ void nvbit_at_cuda_event(CUcontext ctx, int is_exit, nvbit_api_cuda_t cbid,
                 shmem_combined_nbytes);
         fflush(stderr);
         _exit(EXIT_FAILURE);
+      }
+      int driver_occupancy_limit_blocks = -1;
+      const uint64_t block_threads = static_cast<uint64_t>(block_dim_x) *
+                                     static_cast<uint64_t>(block_dim_y) *
+                                     static_cast<uint64_t>(block_dim_z);
+      if (block_threads <= static_cast<uint64_t>(std::numeric_limits<int>::max())) {
+        int occupancy_blocks = 0;
+        const CUresult occupancy_res = cuOccupancyMaxActiveBlocksPerMultiprocessor(
+            &occupancy_blocks,
+            kernel_func,
+            static_cast<int>(block_threads),
+            static_cast<size_t>(shared_mem_bytes));
+        if (occupancy_res == CUDA_SUCCESS && occupancy_blocks > 0) {
+          driver_occupancy_limit_blocks = occupancy_blocks;
+        } else if (verbose) {
+          fprintf(stderr,
+                  "INFO: cuOccupancyMaxActiveBlocksPerMultiprocessor failed: result=%d block_threads=%llu shared=%u\n",
+                  static_cast<int>(occupancy_res),
+                  static_cast<unsigned long long>(block_threads),
+                  shared_mem_bytes);
+        }
       }
 
       {
@@ -4061,6 +4073,14 @@ void nvbit_at_cuda_event(CUcontext ctx, int is_exit, nvbit_api_cuda_t cbid,
               static_cast<uint32_t>(shmem_static_nbytes));
           ker->set_shared_memory_dynamic_bytes(
               static_cast<uint32_t>(shared_mem_bytes));
+          if (shared_memory_carveout_preference_pct >= 0) {
+            ker->set_shared_memory_carveout_preference_pct(
+                shared_memory_carveout_preference_pct);
+          }
+          if (driver_occupancy_limit_blocks >= 0) {
+            ker->set_driver_occupancy_limit_blocks(
+                static_cast<uint32_t>(driver_occupancy_limit_blocks));
+          }
           ker->set_number_of_registers(nregs);
           ker->set_shared_memory_base_address((uint64_t)nvbit_get_shmem_base_addr(ctx));
           ker->set_local_memory_base_address((uint64_t)nvbit_get_local_mem_base_addr(ctx));
@@ -6467,6 +6487,16 @@ void nvbit_at_ctx_term(CUcontext ctx) {
   // before a handle can be recycled for a later context, otherwise a stale
   // count would incorrectly defer tool initialization.
   active_capture_counts.erase(ctx);
+  // Context-bound module handles can be recycled after destruction. Libraries
+  // are intentionally retained until their separate cuLibraryUnload event.
+  for (auto it = loaded_module_origins.begin(); it != loaded_module_origins.end();) {
+    if (it->first.ctx == ctx) it = loaded_module_origins.erase(it);
+    else ++it;
+  }
+  for (auto it = loaded_library_modules.begin(); it != loaded_library_modules.end();) {
+    if (it->first.ctx == ctx) it = loaded_library_modules.erase(it);
+    else ++it;
+  }
   ctx_state_map.erase(ctx);
   if (!phase_teardown_timed_out) {
     delete ctx_state;

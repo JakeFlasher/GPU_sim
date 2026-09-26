@@ -40,3 +40,17 @@ group, and matching `alu`/`memory` issue widths. Passing it with
 latency, initiation, in-flight, extra-resource, and operation-binding fields
 are rejected because this bridge does not consume them. The fixed NVBit/SASS
 trace and evidence-bound card remain unchanged.
+
+`custom-program-run` also emits per-resource diagnostics for each declarative
+run: task count, total work, service cycles, peak in-flight population, and
+model-relative utilization. `ideal_work_capacity` accounts for both issue
+width and initiation interval (`ceil(final_cycle / initiation_interval) *
+issue_width`), while `peak_in_flight` follows completion events and therefore
+matches the `max_in_flight` capacity domain. This makes resource-level
+architecture studies reproducible instead of reducing a specification to one
+final-cycle scalar; these values are not hardware utilization counters.
+The JSON also carries schedule-level causal diagnostics: last issue and
+completion frontiers, the explicit dependency-path bound, the largest
+serialized resource-work bound, their conservative lower-bound gap, and the
+declared bottleneck resource. The gap is an unattributed model interval, not
+an NCU or elapsed-silicon measurement.

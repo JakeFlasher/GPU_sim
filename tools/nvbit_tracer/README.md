@@ -6,8 +6,28 @@ extractor, and small CUDA smoke workloads.
 
 ## Build
 
+For the repository-pinned CUDA/protobuf stack, initialize the validated host
+toolchain first. This is important when the shell exports an incompatible
+`NVCC_CCBIN` (for example GCC 16 with CUDA 13.2):
+
 ```bash
+source tools/nvbit_tracer/pinned_build_env.sh
 make -C tools/nvbit_tracer -j"$(nproc)"
+```
+
+The environment script checks CUDA 13.2, GCC 14, protoc/protobuf 34.x, and
+exports the protobuf runtime path needed by `tracer_tool.so` and
+`trace_printer`. If using a different toolchain, override the variables
+explicitly rather than inheriting an ambient `NVCC_CCBIN`.
+
+Without the pinned environment, the equivalent SM86 build is:
+
+```bash
+make -C tools/nvbit_tracer \
+  CUDA_INSTALL_PATH=/usr/local/cuda-13.2 \
+  PROTOC="$PWD/.toolchain/pb/bin/protoc" \
+  NVCC_CCBIN=/usr/bin/g++-14 \
+  -j"$(nproc)"
 ```
 
 Override `CUDA_INSTALL_PATH`, `PROTOC`, or `NVCC_CCBIN` when the host uses a
@@ -18,7 +38,11 @@ Build the metric extractor separately with
 
 ## Capture
 
+Keep the pinned environment active in the capture shell so protobuf/Abseil
+runtime libraries resolve for both the injected tracer and `trace_printer`:
+
 ```bash
+source tools/nvbit_tracer/pinned_build_env.sh
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 OUT="$REPO_ROOT/results/captures/manual"
 mkdir -p "$OUT"
@@ -30,6 +54,17 @@ USER_DEFINED_FOLDERS=1 TRACES_FOLDER="$OUT" \
 A capture normally contains `dynamic_trace.pb`, `stats.csv`, enhanced launch
 metadata, allocation metadata, and per-thread-block protobuf payloads. Inspect
 it with `tracer_tool/trace_printer "$OUT"`.
+
+`extra_info/traced_kernel_modules.json` is the accepted-launch provenance
+sidecar.  The producer resolves the exact launch handle to its CUDA module or
+context-independent library, then records a regular-file path and SHA-256
+when one is available.  JIT, deleted, opaque, and graph-only code remains an
+explicit `no_stable_static_module` result rather than a guessed benchmark path.
+
+The bounded ownership regression is runnable on an SM86 host with
+`bash tools/nvbit_tracer/smoketest/module_origin.sh`; it exercises same-name
+module handles, context-independent libraries, unload/reload, and an
+anonymous in-memory cubin.
 
 Set `SIMBENCH_NVBIT_ASYNC_ORDER=1` to retain the optional host creation order
 for selected asynchronous-copy instructions. It is an ordering token, not a

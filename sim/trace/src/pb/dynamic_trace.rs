@@ -161,6 +161,10 @@ pub struct Kernel {
     pub shared_memory_static_bytes: ::core::option::Option<u32>,
     #[prost(uint32, optional, tag = "12")]
     pub shared_memory_dynamic_bytes: ::core::option::Option<u32>,
+    #[prost(int32, optional, tag = "13")]
+    pub shared_memory_carveout_preference_pct: ::core::option::Option<i32>,
+    #[prost(uint32, optional, tag = "14")]
+    pub driver_occupancy_limit_blocks: ::core::option::Option<u32>,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct CudaStream {

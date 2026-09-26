@@ -28,6 +28,27 @@ final_cycle: 45
 completion_events: 10
 ```
 
+The JSON result now also reports one row per declared resource. For this probe
+the ALU resource carries 5 tasks/5 service cycles and the memory resource
+carries 3 tasks/24 service cycles; the completion-based peak in-flight
+populations are 2 for ALU and 3 for memory.
+Utilization is reported against the model's final-cycle/resource-width
+capacity; for resources with an initiation interval above one, the denominator
+now counts only the corresponding initiation slots (`ceil(final_cycle / II) *
+issue_width`). The report also exposes this denominator as
+`ideal_work_capacity`. It is a design-space diagnostic, not a silicon
+utilization counter. `peak_in_flight` follows scheduled completion rather than
+the final initiation beat, so it describes the same outstanding-work domain as
+the resource's `max_in_flight` limit.
+
+The result additionally emits `schedule_diagnostics`, a causal decomposition
+for architecture-design sweeps. The two-group probe reports a completion
+frontier of 45 cycles, a 32-cycle explicit dependency-path bound, a 24-cycle
+serialized memory-work bound, and a 13-cycle residual gap. `bottleneck_resource`
+is `memory`. These are conservative bounds and a residual interval within the
+declared event model; they are not elapsed-silicon or NCU counters, and the
+gap is deliberately not attributed to a proprietary hardware cause.
+
 The backend rejects global conflicts and same-phase shared conflicts; a
 matching `group_barrier` allows ordered shared producer/consumer accesses and
 propagates values through the shared map. It does not invent memory consistency
