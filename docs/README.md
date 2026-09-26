@@ -29,6 +29,7 @@
 - [SM86 module-origin follow-up](sm86_module_origin_followup_20260926.md) — module/library enumeration and hashed accepted-launch provenance.
 - [SM86 read-bandwidth projection](sm86_read_bandwidth_projection_20260926.md) — read-only modeled throughput estimates kept separate from total NCU DRAM throughput.
 - [SM86 direct DRAM-rate capture](sm86_dram_rate_capture_20260926.md) — direct GA102 NCU read-rate/throughput labels and Rust round-trip.
+- [SM86 speed cohort](sm86_speed_cohort_20260927.md) — phase-separated event-driven release replay across GEMM, RMSNorm, and SiLU.
 - [NCU/HyFiSS profiler crosswalk](nvprof_hyfiss_crosswalk_20260926.md) — MICRO'24 profiler vocabulary, implementation crosswalk, and claim boundary.
 - [SM86 profiler crosswalk holdout](sm86_profiler_crosswalk_holdout_20260926.csv) — fresh three-workload NCU observations for the newly retained profiler families.
 - [SM86 branch-domain experiment](sm86_branch_domain_experiment_20260925.csv) — divergent and uniform branch-target counts against NCU.

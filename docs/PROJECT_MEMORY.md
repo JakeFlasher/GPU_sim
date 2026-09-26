@@ -114,6 +114,9 @@ root [AGENTS.md](../AGENTS.md) remains the project execution profile.
   stripping an NVBit instance suffix, so legitimate names ending in
   `___<digits>` remain joinable.  The Rust NCU CSV parser rejects unterminated
   quoted fields instead of silently accepting malformed observations.
+  A phase-separated event-driven release replay cohort across GEMM, RMSNorm,
+  and SiLU is retained in `docs/sm86_speed_cohort_20260927.md`; it is a
+  turnaround observation, not a universal speed or accuracy claim.
   Immutable memory/constant PC tables in the issue hot loop now use sorted
   compact slices instead of randomized hash lookups; the retained GEMM event
   stream is byte-equivalent and replay is about 1--2% faster in the bounded
