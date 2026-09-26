@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "architecture": "example_its_dynamic",
+  "isa": "simt_its_v1",
+  "max_steps": 1000,
+  "initial_memory": {"0": 100, "4": 101, "8": 102, "12": 103, "16": 104, "20": 105, "24": 106, "28": 107},
+  "instructions": [
+    {"op": "set_lane_id", "dst": 0},
+    {"op": "mul_imm", "dst": 1, "src": 0, "imm": 4},
+    {"op": "load_indirect", "dst": 2, "address": 1},
+    {"op": "store_indirect", "address": 1, "src": 2},
+    {"op": "halt"}
+  ]
+}

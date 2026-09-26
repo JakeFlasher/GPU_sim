@@ -44,13 +44,34 @@ pub struct MemoryTraffic {
 /// when an instruction has multiple legal paths. `candidate_instructions` is
 /// therefore an upper-bound membership count, while unique/ambiguous/unknown
 /// populations expose attribution confidence without inventing a pipe sample.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct PhysicalPipelineAttribution {
     pub total_warp_instructions: u64,
     pub unique_instructions: u64,
     pub ambiguous_instructions: u64,
     pub unknown_instructions: u64,
     pub candidate_instructions: BTreeMap<String, u64>,
+    /// Deterministic model-selected pipe for each record with a nonempty
+    /// candidate domain. This is an executable pressure-balancing policy, not
+    /// a reconstruction of the hardware's dynamic selector.
+    pub selected_instructions: BTreeMap<String, u64>,
+    pub selected_unknown_instructions: u64,
+    pub selection_policy: &'static str,
+}
+
+impl Default for PhysicalPipelineAttribution {
+    fn default() -> Self {
+        Self {
+            total_warp_instructions: 0,
+            unique_instructions: 0,
+            ambiguous_instructions: 0,
+            unknown_instructions: 0,
+            candidate_instructions: BTreeMap::new(),
+            selected_instructions: BTreeMap::new(),
+            selected_unknown_instructions: 0,
+            selection_policy: "min_selected_then_lexical_v1",
+        }
+    }
 }
 
 /// Lane-consistent dynamic control-flow graph reconstructed from consecutive
@@ -743,6 +764,29 @@ impl TraceMetrics {
                 .or_default();
             add(entry, 1)?;
         }
+        if candidates.is_empty() {
+            add(&mut self.physical_pipeline.selected_unknown_instructions, 1)?;
+        } else {
+            let selected = candidates
+                .iter()
+                .min_by_key(|candidate| {
+                    (
+                        self.physical_pipeline
+                            .selected_instructions
+                            .get(**candidate)
+                            .copied()
+                            .unwrap_or(0),
+                        **candidate,
+                    )
+                })
+                .expect("nonempty candidate domain");
+            let entry = self
+                .physical_pipeline
+                .selected_instructions
+                .entry((*selected).to_owned())
+                .or_default();
+            add(entry, 1)?;
+        }
         if matches!(head, "BRA" | "BRX" | "BRXU" | "JMP" | "JMX" | "JMXU") {
             add(&mut self.branch_warp_instructions, 1)?;
             add(
@@ -1166,6 +1210,12 @@ mod tests {
         assert_eq!(m.physical_pipeline.unknown_instructions, 0);
         assert_eq!(m.physical_pipeline.candidate_instructions["adu"], 1);
         assert_eq!(m.physical_pipeline.candidate_instructions["cbu"], 1);
+        assert_eq!(m.physical_pipeline.selected_instructions["adu"], 1);
+        assert_eq!(m.physical_pipeline.selected_unknown_instructions, 0);
+        assert_eq!(
+            m.physical_pipeline.selection_policy,
+            "min_selected_then_lexical_v1"
+        );
     }
 
     #[test]
@@ -1266,5 +1316,14 @@ mod tests {
         assert_eq!(m.coherence.cross_sm_read_write_sectors, 1);
         assert_eq!(m.coherence.cross_sm_write_write_sectors, 1);
         assert!(m.coherence_lines.is_empty());
+    }
+
+    #[test]
+    fn coherence_domain_retains_unknown_sm_records_for_fail_closed_consumers() {
+        let mut m = TraceMetrics::default();
+        m.observe_coherence(None, 0xff, AccessKind::GlobalStore { off: 0, len: 1 }, &[0])
+            .unwrap();
+        assert_eq!(m.coherence.unknown_sm_or_line_records, 1);
+        assert_eq!(m.coherence.cross_sm_sector_overlap, 0);
     }
 }

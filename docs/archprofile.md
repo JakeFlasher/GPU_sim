@@ -1,46 +1,42 @@
-# Architecture profiles
+# Configuration contracts
 
-Architecture cards live in `arch_profiles/cards` and are the only source for
-architecture-specific geometry and timing defaults.
+[Input index](../arch_profiles/README.md) lists cards/specs/programs/schemas.
+Native cards are architecture-bound inputs, but not every mechanism is carded:
+`sim/arch/src/lib.rs` also contains architecture-local capability definitions.
+Do not silently substitute values across architectures or treat every value as
+an independently measured hardware fact.
 
-```text
-arch token -> profile loader -> ArchProfile -> sim-arch/sim-sm/sim-mem
-```
+## Separate four kinds of input
 
-The active cards are `sm_86` and exploratory `sm_120`. A card carries device
-identity, compute capability, SM/cache geometry, latency values, and explicit
-research-gap markers for unsupported behavior. The loader rejects unknown or
-ambiguous tokens instead of borrowing another architecture's values.
+1. **Native card:** `arch_profiles/cards/sm_86.json` plus p-chase data for
+   L1/L1-L2. Keep provenance and historical operating points unchanged when
+   reorganizing docs. The retained SM120 card is exploratory, not this run's target.
+2. **Hypothetical resources:** `ArchitectureSpec` under `arch_profiles/specs`.
+   Custom execution consumes width/latency/initiation/capacity and bindings.
+   The native `trace_sass_v1` bridge accepts only documented matching issue widths;
+   unused fields reject. Functional custom programs cannot replace SASS inputs.
+3. **Captured launch metadata:** trace resources and an optional independent
+   CUPTI resource observation. Driver-selected carveout is not the preference
+   percentage. The join validates symbol/geometry/resources; it does not alter
+   replay timing/cache state.
+4. **Validation labels:** NCU CSV data is joined after replay, never used to
+   tune the same scored workload's inputs or model selection.
 
-To add a card:
+The carded 25/8-cycle barrier values and occupancy/resources include declared
+architecture-local hypotheses. `architecture_card` identifies a source, not
+scientific certification. Unavailable capability fields stay typed gaps.
 
-1. Add the JSON card and update the schema.
-2. Keep values that are not measured as typed research gaps.
-3. Add the card to the loader's profile list.
-4. Run a release build and replay a representative trace.
+## Operational configuration
 
-The simulator reads cards at launch; workload scripts must not embed card
-constants.
+- Rust version/components: `rust-toolchain.toml`; dependencies: `sim/Cargo.lock`.
+- Native producer build: `tools/nvbit_tracer/pinned_build_env.sh`, which checks
+  CUDA 13.2, GCC 14, protoc 34.1 and protobuf 34.1.0 on this setup.
+- Python test imports: `pytest.ini`; use the existing `.venv` when needed.
+- Agent routing: root `AGENTS.md`; project memory/status are concise entrypoints.
+  Global Codex model/hooks/settings affect other projects and are not rewritten
+  for repository cleanup. Project memory mirrors are outside Git.
+- Local state/captures/builds remain ignored by `.gitignore`; no new lifecycle
+  hooks, mandatory gates or duplicate `.codex` runtime defaults are introduced.
 
-The SM86 scheduler-resource block (`smsp`, `occupancy`, `dep_barriers`,
-`barrier_latencies`, and `dual_issue`) is an architecture-bound input surface,
-not proof that every value was independently microbenchmarked. In particular,
-the `25`/`8` barrier latencies and occupancy ceilings retain their
-architecture-local reviewed-hypothesis status; card binding prevents identity
-mixing but does not upgrade provenance to silicon measurement. The result
-wire's `architecture_card` label means source binding, while the simulator's
-model-relative timing and NCU independence rules still apply.
-
-Experimental user-defined shapes are separate from cards under
-`arch_profiles/specs`. They are consumed by `sim-arch::spec` and, for the
-strict `trace_sass_v1` issue-width profile only, by `sim-run --architecture-spec`.
-They carry an explicit evidence status and cannot silently provide SM86/SM120
-production defaults. Latency, initiation, in-flight, extra-resource, and
-operation-binding fields are rejected by that native bridge when unused. See
-the [custom spec guide](../arch_profiles/specs/README.md) and the
-[current roadmap](../plans/cross_architecture_gpu_simulator_research_plan_20260923.md).
-
-The dated host profile under
-`workloads/research_probes/sm86_ncu_demo_benchmark/host_profile.json` records
-the 2026-09-24 RTX 3090 Ti/driver/clock observation. It is not a replacement
-for architecture-card provenance or an assertion that future hosts match it.
+[Runbook](runbook_host.md) owns the commands; [history](HISTORY.md) owns dated
+GPU UUID/driver/clock observations, which are not permanent host identity.

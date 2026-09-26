@@ -1,79 +1,33 @@
 ---
 name: navigating-project-kb
-description: Routes the agent to the correct distilled knowledge card before answering CUDA, PTX, SASS, NVBit, CUPTI, Blackwell, Hopper, NVIDIA-architecture, measurement, or simulator-prior-art questions in this GPU simulator project. Use as the meta-router when a prompt could match multiple specialty skills, when the agent is unsure which subcorpus owns the topic, or when a question explicitly cites the project knowledge base, INDEX.md, or one of the specialty skills. Triggers also include phrases like "where is X documented", "which card explains Y", "find the right knowledge card", and "look this up in the KB". Always prefer this skill over generic training priors when the prompt touches project GPU/NVIDIA topics.
+description: Route GPU/CUDA/PTX/SASS/NVBit/simulator questions to the smallest tracked project source or optional knowledge card. Use when ownership is unclear; prefer a specialty skill when the mnemonic or workflow is specific.
 ---
 
-# Navigating the Project Knowledge Base
+# Project knowledge router
 
-This is the meta-router. It exists so the agent can pick the right specialty skill *or* the right card directly, without re-deriving the routing every time.
+Read root `AGENTS.md`, then `docs/PROJECT_MEMORY.md` and `docs/STATUS.md` for
+the current SM86 project state. The optional `.claude/knowledge/` corpus is not
+present in this checkout; do not loop on missing cards. Use tracked source,
+`docs/`, `plans/`, `references/`, and owner runbooks instead.
 
-## When to invoke
+## Route by question
 
-- Prompt mentions GPU/CUDA/PTX/SASS/Blackwell/Hopper/NVIDIA, but the specific specialty (PTX vs SASS vs measurement vs patents) is unclear.
-- User explicitly asks "where is X documented" / "which card explains Y" / "look this up in the KB".
-- An earlier specialty skill turned out to be the wrong owner.
+| Question | Skill/source |
+| --- | --- |
+| Native Rust simulator, replay, cards, event queue, L1/L2/DRAM | `designing-gpu-simulator`, `docs/ARCHITECTURE.md`, `docs/experimental_diagnostics.md` |
+| SASS/cubin/NVBit/opcode/trace | `analyzing-sass-nvbit-traces`, `tools/nvbit_tracer/README.md` |
+| PTX mnemonic or memory ordering | `interpreting-ptx-isa`, `references/NVIDIA_Manuals/ptx_isa/` |
+| nvcc/fatbin/cubin/JIT trajectory | `compiling-cuda-artifacts`, `references/NVIDIA_Manuals/nvcc_guide/` |
+| CUDA occupancy/coalescing/scheduling/synchronization | `optimizing-cuda-kernels`, `references/NVIDIA_Manuals/` |
+| NVIDIA architectural history/patents | `reasoning-about-nvidia-architecture-history`, `references/NVIDIA_patents/` |
+| SOL/campaign baseline | opt-in `run-sol-campaign` / `implementing-sol-baselines`; preserve retained data |
 
-## What this skill does
+## Non-negotiable project boundaries
 
-1. Names the specialty skills and what each owns.
-2. Tells the agent how to pick one.
-3. Points to the smallest useful source set.
-
-## The specialty skills
-
-| Skill | Owns | Trigger keywords |
-|---|---|---|
-| `interpreting-ptx-isa` | PTX instruction semantics, mnemonics, inline PTX | `mma`, `wgmma`, `tcgen05`, `cp.async`, `mbarrier`, `ldmatrix`, `bar.sync`, `cvt`, `setp`, `shfl.sync`, `ptxas` |
-| `analyzing-sass-nvbit-traces` | SASS opcodes, tooling (cuobjdump/nvdisasm/cu++filt/nvprune), NVBit instrumentation | `SASS`, `nvbit`, `cuobjdump`, `nvdisasm`, `unknown opcode`, `binary instrumentation` |
-| `tuning-blackwell-sm120-kernels` | sm_120 / sm_100 / Blackwell-specific tuning, cluster ceilings, TMEM, FP4/MX | `sm_120`, `sm_120a`, `sm_100`, `Blackwell`, `RTX PRO 6000`, `B200`, `GB202`, `TMEM`, `tcgen05.mma`, `NVFP4`, `MX format` |
-| `validating-nonroot-gpu-measurement` | RETIRED (historical no-NCU/no-root contract; kept for archaeology only — do NOT apply its rules) | — |
-| `optimizing-cuda-kernels` | Coalescing, occupancy, register file, warp scheduling/divergence, sync, memory hierarchy | `coalesc`, `occupancy`, `__launch_bounds__`, `register pressure`, `bank conflict`, `warp scheduler`, `cluster.sync`, `DSMEM`, `L2 persistence` |
-| `compiling-cuda-artifacts` | nvcc flags, fatbin, PTX/cubin trajectory, separate compilation | `nvcc`, `fatbin`, `cubin`, `-gencode`, `-arch`, `-Xptxas`, `-keep`, `-lineinfo`, `JIT` |
-| `reasoning-about-nvidia-architecture-history` | Tesla→Blackwell evolution, patent provenance, three rewrites, competitor IP | `patent`, `Fermi rewrite`, `Volta rewrite`, `Hopper rewrite`, `evolution`, `historical`, `architectural codename`, `tcgen05` history |
-| `designing-gpu-simulator` | ACTIVE design skill — building the event-driven Rust simulator and its NCU comparison path; NVArchSim cards are prior-art background | `simulator`, `event-driven`, `nvasim`, `modeling paper`, `NVArchSim`, `GPGPU-Sim`, `Accel-Sim`, `sim/`, `sim-trace`, `sim-engine`, `sim-sm`, `sim-mem`, `prost`, `event queue`, `control bits sidecar`, `L1`, `MSHR`, `cache-op`, `L2`, `slice hash`, `DRAM`, `MemRequest/MemResponse`, `livelock`, `request/response inversion`, `Rust workspace` |
-
-## How to pick one
-
-1. **Specific instruction or mnemonic?** → `interpreting-ptx-isa` (or `analyzing-sass-nvbit-traces` if SASS layer).
-2. **Tuning a specific kernel for SM120/SM100 Blackwell?** → `tuning-blackwell-sm120-kernels`.
-3. **Measurement and label questions?** Start with root `AGENTS.md`, the active
-   `tools/local_labels/` runbook/schemas, and any cited NVBit tracing docs. The
-   `measurement/` cards and `validating-nonroot-gpu-measurement` skill are retained
-   historical references; they do not define current permission or capture policy.
-4. **General CUDA performance (occupancy, coalescing, divergence, sync, memory)?** → `optimizing-cuda-kernels`.
-5. **Build / compilation / fatbin / -gencode question?** → `compiling-cuda-artifacts`.
-6. **"Why does feature X exist", "which patent introduced Y", "Tesla → Blackwell history"?** → `reasoning-about-nvidia-architecture-history`.
-7. **Designing/implementing the ACTIVE Rust simulator (sim/) or consulting simulator prior art?** → `designing-gpu-simulator`.
-8. **None of the above match cleanly?** Read `.claude/knowledge/INDEX.md` when
-   present; otherwise use tracked `docs/` and `references/`.
-
-## Scope boundary
-
-This router is not a measurement, privilege, or simulator permission system.
-Root `AGENTS.md` governs agent workflow. The stable scientific boundaries are:
-
-1. **Targets-never-features:** NCU and other hardware values are labels/validation
-   targets only; they never enter simulator inputs, architecture constants, or
-   same-cell calibration.
-2. Capture and label work uses the relevant tools, schemas, and experiment
-   metadata. A missing optional historical artifact does not stop unrelated work.
-3. Architecture-local facts come from the selected architecture card or direct
-   evidence. A research gap is unavailable/unsupported, never an sm_86 fallback.
-
-If a card or imported skill still says "NCU is forbidden" or "no clock locking",
-treat it as stale historical text and do not apply it.
-
-This checkout may not include the optional `.claude/knowledge/` corpus. A
-missing card is not a reason to loop; use the tracked project docs, source, and
-owner runbook.
-
-## When in doubt
-
-When present, `.claude/knowledge/INDEX.md` is the comprehensive topic-router
-inventory; the patent indexes are optional supporting routers. In this checkout
-the tracked `references/` tree is the fallback source set.
-
-## Mechanical lookup
-
-If the prompt cites a specific card path like `.claude/knowledge/X/Y.md`, just open it directly.
-If it cites a referenced source like `references/NVIDIA_Manuals/...`, use the corresponding skill above based on subdirectory.
+NCU/CUPTI values are independent labels, never same-cell replay inputs.
+Architecture cards do not inherit missing values from another architecture.
+Fixed SASS replay supports trace-safe resource changes only; value/address/CFG,
+atomic-order, or participant changes need a functional frontend or recapture.
+Literature numbers and external simulator overlap are not local validation.
+Root `AGENTS.md` controls permissions and workflow; this file only routes
+knowledge and does not create gates, review loops, or tool bans.

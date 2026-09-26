@@ -4,6 +4,25 @@ Tests are bounded engineering checks. They do not replace NCU measurements,
 do not create approval gates, and do not turn a model-relative result into
 silicon validation.
 
+## Current handoff smoke
+
+From the repository root, the current consolidation is exercised with:
+
+```bash
+cargo test --manifest-path sim/Cargo.toml --workspace --quiet
+cargo test --manifest-path sim/Cargo.toml -p sim-sm --features campaign --quiet
+cargo build --release --manifest-path sim/Cargo.toml -p sim-run -p sim-arch
+sim/target/release/custom_simt_its \
+  arch_profiles/specs/simt_its_dynamic.json \
+  arch_profiles/programs/simt_its_dynamic.json --trace
+```
+
+The last output is validated against
+`arch_profiles/schema/simt_its_trace.schema.json`. A retained native canary or
+representative SM86 trace should still be replayed with a bounded timeout after
+native metric changes. Do not treat the schema check as proof of native replay
+compatibility: `custom_its_dynamic_v1` is explicitly a separate frontend.
+
 ## Focused checks
 
 From the repository root:

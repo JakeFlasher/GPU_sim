@@ -1,3 +1,6 @@
+> Dated context; current capabilities and open work are in [STATUS](STATUS.md).
+> Historical completion claims and next-step prose are not active instructions.
+
 # Adversarial review and research synthesis — 2026-09-24
 
 Continuation state is summarized in [PROJECT_MEMORY.md](PROJECT_MEMORY.md);

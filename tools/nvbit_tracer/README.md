@@ -58,8 +58,10 @@ it with `tracer_tool/trace_printer "$OUT"`.
 `extra_info/traced_kernel_modules.json` is the accepted-launch provenance
 sidecar.  The producer resolves the exact launch handle to its CUDA module or
 context-independent library, then records a regular-file path and SHA-256
-when one is available.  JIT, deleted, opaque, and graph-only code remains an
-explicit `no_stable_static_module` result rather than a guessed benchmark path.
+when one is available. JIT, deleted and opaque origins can remain
+`no_stable_static_module` rather than a guessed benchmark path. Active graph
+launch capture is separately rejected as `graph_node_capture_unsupported`;
+it does not produce a successful graph-node trace.
 
 The bounded ownership regression is runnable on an SM86 host with
 `bash tools/nvbit_tracer/smoketest/module_origin.sh`; it exercises same-name

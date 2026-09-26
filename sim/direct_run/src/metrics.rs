@@ -91,6 +91,9 @@ impl Metric {
 #[derive(Debug, Serialize)]
 pub struct NativeMetrics {
     pub schema_version: u32,
+    /// Version of the open-ended native metric map. The outer report schema
+    /// remains stable while metric additions can be consumed deliberately.
+    pub metric_surface_version: u32,
     pub architecture: &'static str,
     pub sm_count: u32,
     pub active_sm_count: u32,
@@ -588,6 +591,7 @@ pub(super) fn project(
         );
         return Ok(NativeMetrics {
             schema_version: 1,
+            metric_surface_version: 2,
             architecture: result.arch().token(),
             sm_count,
             active_sm_count,
@@ -966,6 +970,43 @@ pub(super) fn project(
             ),
         );
     }
+    for (pipe, count) in &physical.selected_instructions {
+        m.insert(
+            format!("physical_pipeline_selected_{pipe}_instructions"),
+            Metric::approximate_count(
+                None,
+                "inst",
+                u128::from(*count),
+                "deterministic trace-order pressure-balancing selection from the conservative candidate domain; not an NCU physical-pipe counter",
+            ),
+        );
+    }
+    m.insert(
+        "physical_pipeline_selected_unknown_instructions".into(),
+        Metric::approximate_count(
+            None,
+            "inst",
+            u128::from(physical.selected_unknown_instructions),
+            "trace records with no physical-pipe candidate; no selection is fabricated",
+        ),
+    );
+    let selected = physical
+        .selected_instructions
+        .values()
+        .copied()
+        .map(u128::from)
+        .sum::<u128>();
+    m.insert(
+        "physical_pipeline_selected_assignment_pct".into(),
+        Metric::ratio(
+            None,
+            "%",
+            selected * 100,
+            u128::from(physical.total_warp_instructions),
+            true,
+            "share of trace records assigned by the deterministic candidate-selection policy; hardware dynamic selection remains unavailable",
+        ),
+    );
     for (opcode, activity) in &trace.by_opcode {
         let key = opcode.to_ascii_lowercase();
         add_count_row(
@@ -1332,6 +1373,60 @@ pub(super) fn project(
                     None,
                     unit,
                     "flat replay does not decode global sector addresses",
+                )
+            },
+        );
+    }
+    // A deliberately abstract coherence service envelope for decoded traces:
+    // one model service cycle per cross-SM overlapping 32-byte sector. This
+    // is a mechanism-local design knob, not a measured protocol latency; the
+    // native completion tail remains asserted and no NCU coherence counter is
+    // synthesized.
+    let coherence_lower_bound = result.modeled_terminal_lower_bound_cycles();
+    let coherence_width = u128::from(trace.coherence.cross_sm_sector_overlap);
+    let coherence_topology_complete = trace.coherence.unknown_sm_or_line_records == 0;
+    let coherence_scenario_end = coherence_lower_bound.and_then(|lower| {
+        u64::try_from(coherence_width)
+            .ok()
+            .and_then(|width| lower.checked_add(width))
+    });
+    for (key, value, semantics) in [
+        (
+            "coherence_completion_frontier_cycles",
+            coherence_lower_bound.map(u128::from),
+            "last modeled event before the abstract cross-SM coherence service envelope; lower bound only",
+        ),
+        (
+            "coherence_completion_scenario_end_cycles",
+            coherence_scenario_end.map(u128::from),
+            "modeled terminal frontier plus one abstract service cycle per overlapping cross-SM sector under the declared scenario policy; not a protocol timing claim",
+        ),
+        (
+            "coherence_completion_service_width_cycles",
+            Some(coherence_width),
+            "abstract service-width component of the cross-SM coherence envelope; not a hardware counter",
+        ),
+    ] {
+        m.insert(
+            key.into(),
+            if trace.sectors_decoded && coherence_topology_complete {
+                match value {
+                    Some(value) => Metric::approximate_count(None, "cycle", value, semantics),
+                    None => Metric::unavailable(
+                        None,
+                        "cycle",
+                        "requires a modeled terminal event frontier",
+                    ),
+                }
+            } else {
+                Metric::unavailable(
+                    None,
+                    "cycle",
+                    if !trace.sectors_decoded {
+                        "flat replay does not decode cross-SM sector topology"
+                    } else {
+                        "cross-SM topology contains unknown SM/sector records"
+                    },
                 )
             },
         );
@@ -1851,6 +1946,78 @@ pub(super) fn project(
         }
     }
     if trace.launch_resources.is_none() {
+        // Launch geometry is part of the validated replay-coverage witness,
+        // even for legacy traces that predate the optional launch-resource
+        // sidecar. Keep that evidence instead of turning it into a typed gap.
+        // Resource-dependent limits (registers/shared memory/driver choice)
+        // remain unavailable below.
+        let launch = result.coverage().launch();
+        let (gx, gy, gz) = launch.grid();
+        let grid_blocks = u64::from(gx)
+            .checked_mul(u64::from(gy))
+            .and_then(|value| value.checked_mul(u64::from(gz)));
+        if let Some((bx, by, bz)) = launch.block() {
+            if let Some(block_threads) = u64::from(bx)
+                .checked_mul(u64::from(by))
+                .and_then(|value| value.checked_mul(u64::from(bz)))
+            {
+                add_count_row(
+                    &mut m,
+                    "block_threads",
+                    Some("launch__block_size"),
+                    "thread/block",
+                    block_threads,
+                    "validated replay launch geometry; resource sidecar is absent",
+                );
+                add_count_row(
+                    &mut m,
+                    "block_size",
+                    Some("launch__block_size"),
+                    "thread/block",
+                    block_threads,
+                    "validated replay launch geometry; resource sidecar is absent",
+                );
+                let warps_per_block = block_threads.div_ceil(32);
+                let warp_limited_blocks =
+                    u128::from(max_warps) / u128::from(warps_per_block.max(1));
+                m.insert(
+                    "warps_per_block_theoretical".into(),
+                    Metric::count(
+                        None,
+                        "warp/block",
+                        u128::from(warps_per_block),
+                        "validated replay launch geometry divided by the SM86 warp size; no register/shared sidecar",
+                    ),
+                );
+                m.insert(
+                    "occupancy_limit_warps".into(),
+                    Metric::approximate_count(
+                        Some("launch__occupancy_limit_warps"),
+                        "block/SM",
+                        warp_limited_blocks,
+                        "warp-capacity-limited blocks/SM from validated launch geometry and carded resident-warp capacity; register/shared limits remain separate",
+                    ),
+                );
+            }
+        }
+        if let Some(grid_blocks) = grid_blocks {
+            add_count_row(
+                &mut m,
+                "grid_blocks",
+                Some("launch__grid_size"),
+                "block",
+                grid_blocks,
+                "validated replay launch geometry; resource sidecar is absent",
+            );
+            add_count_row(
+                &mut m,
+                "grid_size",
+                Some("launch__grid_size"),
+                "block",
+                grid_blocks,
+                "validated replay launch geometry; resource sidecar is absent",
+            );
+        }
         for (key, unit, reason) in [
             (
                 "registers_per_thread",
@@ -2120,6 +2287,42 @@ pub(super) fn project(
             None,
             "cycle",
             "serialized terminal-dirty service demand only; excludes queue position and flush visibility",
+        ),
+        (
+            "dirty_writeback_completion_frontier_cycles",
+            None,
+            "cycle",
+            "requires shared-L2 replay to expose the modeled terminal event frontier",
+        ),
+        (
+            "dirty_writeback_completion_scenario_end_cycles",
+            None,
+            "cycle",
+            "requires shared-L2 replay, card SM clock, and validated DRAM peak",
+        ),
+        (
+            "dirty_writeback_completion_service_width_cycles",
+            None,
+            "cycle",
+            "requires shared-L2 replay, card SM clock, and validated DRAM peak",
+        ),
+        (
+            "coherence_completion_frontier_cycles",
+            None,
+            "cycle",
+            "requires decoded cross-SM topology and a modeled terminal event frontier",
+        ),
+        (
+            "coherence_completion_scenario_end_cycles",
+            None,
+            "cycle",
+            "requires decoded cross-SM topology and a modeled terminal event frontier",
+        ),
+        (
+            "coherence_completion_service_width_cycles",
+            None,
+            "cycle",
+            "requires decoded cross-SM topology",
         ),
         (
             "atomic_rmw_read_sectors",
@@ -2446,9 +2649,85 @@ pub(super) fn project(
             ),
         );
         let dirty_writeback_demand_sectors = u128::from(dram.l2_dirty_evicted_sectors)
-            .saturating_add(u128::from(dram.maximum_terminal_l2_dirty_sectors));
+            .checked_add(u128::from(dram.maximum_terminal_l2_dirty_sectors))
+            .ok_or_else(|| {
+                RunError::new("native metric writeback", "dirty-demand counter overflow")
+            })?;
         let dirty_eviction_sectors = u128::from(dram.l2_dirty_evicted_sectors);
         let terminal_dirty_sectors = u128::from(dram.maximum_terminal_l2_dirty_sectors);
+        // Explicit model-relative completion envelope. The lower edge is the
+        // last modeled event; the scenario end appends serialized service for
+        // all dirty demand. Protocol ordering, compression, queue position,
+        // and profiler flush visibility remain outside this approximation.
+        let writeback_service_cycles = card
+            .require_dram_bandwidth()
+            .ok()
+            .and_then(|bandwidth| bandwidth.validated_peak_bytes_per_second().ok())
+            .and_then(|peak| {
+                clock.and_then(|hz| {
+                    dirty_writeback_demand_sectors
+                        .checked_mul(32)
+                        .and_then(|bytes| bytes.checked_mul(u128::from(hz)))
+                        .and_then(|work| {
+                            u128::from(peak)
+                                .checked_sub(1)
+                                .and_then(|rounding| work.checked_add(rounding))
+                        })
+                        .and_then(|work| work.checked_div(u128::from(peak)))
+                })
+            });
+        let writeback_lower_bound = result.modeled_terminal_lower_bound_cycles();
+        let writeback_scenario_end = writeback_lower_bound.and_then(|lower| {
+            writeback_service_cycles.and_then(|service| {
+                u64::try_from(service)
+                    .ok()
+                    .and_then(|service| lower.checked_add(service))
+            })
+        });
+        m.insert(
+            "dirty_writeback_completion_frontier_cycles".into(),
+            match writeback_lower_bound {
+                Some(lower) => Metric::approximate_count(
+                    None,
+                    "cycle",
+                    u128::from(lower),
+                    "last modeled event before the explicit dirty-writeback completion scenario; frontier only",
+                ),
+                None => Metric::unavailable(None, "cycle", "requires a modeled terminal event frontier"),
+            },
+        );
+        m.insert(
+            "dirty_writeback_completion_scenario_end_cycles".into(),
+            match writeback_scenario_end {
+                Some(end) => Metric::approximate_count(
+                    None,
+                    "cycle",
+                    u128::from(end),
+                    "modeled terminal frontier plus serialized dirty-demand service under the declared peak-service scenario; excludes coherence/protocol and profiler flush visibility",
+                ),
+                None => Metric::unavailable(
+                    None,
+                    "cycle",
+                    "requires a modeled terminal frontier, card SM clock, and validated DRAM peak",
+                ),
+            },
+        );
+        m.insert(
+            "dirty_writeback_completion_service_width_cycles".into(),
+            match writeback_service_cycles {
+                Some(width) => Metric::approximate_count(
+                    None,
+                    "cycle",
+                    width,
+                    "serialized service-width component of the dirty-writeback completion envelope; not a physical completion tail",
+                ),
+                None => Metric::unavailable(
+                    None,
+                    "cycle",
+                    "requires the card SM clock and validated DRAM peak",
+                ),
+            },
+        );
         m.insert(
             "dirty_writeback_demand_lower_bound_sectors".into(),
             Metric::approximate_count(
@@ -2658,6 +2937,7 @@ pub(super) fn project(
     });
     Ok(NativeMetrics {
         schema_version: 1,
+        metric_surface_version: 2,
         architecture: "sm_86",
         sm_count,
         active_sm_count,

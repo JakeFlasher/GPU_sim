@@ -1,3 +1,6 @@
+> Dated context; current capabilities and open work are in [STATUS](STATUS.md).
+> Historical completion claims and next-step prose are not active instructions.
+
 # GPU simulator SOTA and capability matrix
 
 Updated 2026-09-24. This inventory records public numerical results from

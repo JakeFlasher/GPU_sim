@@ -1922,6 +1922,7 @@ mod tests {
         let report = run(&fixture(MemoryMode::L1L2)).unwrap();
         let native = &report.launches[0].native_metrics;
         assert_eq!(native.schema_version, 1);
+        assert_eq!(native.metric_surface_version, 2);
         assert_eq!(native.architecture, "sm_86");
         assert_eq!(native.sm_count, 84);
         assert!(native.active_sm_count <= native.sm_count);
@@ -1934,6 +1935,13 @@ mod tests {
             native.metrics["theoretical_occupancy_pct"].status,
             "approximate" | "unavailable"
         ));
+        assert_eq!(native.metrics["block_threads"].value, Some(32.0));
+        assert_eq!(native.metrics["grid_blocks"].value, Some(1.0));
+        assert_eq!(
+            native.metrics["warps_per_block_theoretical"].value,
+            Some(1.0)
+        );
+        assert_eq!(native.metrics["occupancy_limit_warps"].value, Some(48.0));
         assert_eq!(
             native.metrics["shared_memory_config_size"].status,
             "unavailable"
@@ -1970,6 +1978,16 @@ mod tests {
             native
                 .metrics
                 .contains_key("dirty_writeback_demand_lower_bound_sectors")
+        );
+        assert!(
+            native
+                .metrics
+                .contains_key("dirty_writeback_completion_scenario_end_cycles")
+        );
+        assert!(
+            native
+                .metrics
+                .contains_key("coherence_completion_scenario_end_cycles")
         );
         assert_eq!(
             native.metrics["branch_target_divergent_branches"].status,
@@ -2010,6 +2028,11 @@ mod tests {
                 .contains_key("physical_pipeline_ambiguous_pct")
         );
         assert!(native.metrics.contains_key("physical_pipeline_unknown_pct"));
+        assert!(
+            native
+                .metrics
+                .contains_key("physical_pipeline_selected_assignment_pct")
+        );
         assert!(native.metrics.contains_key("cfg_unique_edges"));
         assert!(native.metrics.contains_key("cfg_disjoint_path_switches"));
         assert!(

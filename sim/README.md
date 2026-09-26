@@ -17,8 +17,9 @@ after replay and never alter simulator parameters.
 ## Bounded custom path
 
 - `sim-arch::spec`: validated hypothetical resources and operation bindings.
-- `sim-arch::simt`: fixed `simt_u32_v1` functional/timing semantics plus the
-  separate single-group `simt_its_v1` functional example.
+- `sim-arch::simt`: fixed `simt_u32_v1` functional/timing semantics.
+- `sim-arch::its`: separate single-group `simt_its_v1` functional example
+  with optional `custom_its_dynamic_v1` execution records.
 - `sim-arch::simt_pipeline`: register/memory dependency lowering.
 - `sim-sm::custom` and `custom-program-run`: resident-group scheduling through
   the shared dependency/resource engine.
@@ -38,3 +39,6 @@ cargo test --manifest-path sim/Cargo.toml --workspace --all-targets
 
 For native commands see [`docs/runbook_host.md`](../docs/runbook_host.md). For
 custom inputs see [`arch_profiles/programs/README.md`](../arch_profiles/programs/README.md).
+Current limitations and the compact continuation record live in
+[`docs/STATUS.md`](../docs/STATUS.md) and [`docs/PROJECT_MEMORY.md`](../docs/PROJECT_MEMORY.md);
+dated reports are indexed by [`docs/HISTORY.md`](../docs/HISTORY.md).

@@ -33,6 +33,10 @@ The `simt_u32_minimal.json` example is a small resource-schedule fixture. The
 per-lane PCs and reconvergence barriers. Neither claims Curry compatibility,
 physical accuracy, or production SM86 timing.
 
+`simt_its_dynamic.json` is a matching bounded fixture for the opt-in
+execution-generated trace demonstration; it exercises value-derived indirect
+addresses and remains separate from native SM86 replay.
+
 `sm86_trace_issue_profile.json` is the deliberately narrow bridge into
 production `sim-run`: it uses `trace_sass_v1`, `simt_width=32`, one resident
 group, and matching `alu`/`memory` issue widths. Passing it with

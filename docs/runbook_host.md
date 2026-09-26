@@ -54,7 +54,7 @@ make -C tools/nvbit_tracer \
 source tools/nvbit_tracer/pinned_build_env.sh
 mkdir -p traces/my_run
 CUDA_INJECTION64_PATH="$PWD/tools/nvbit_tracer/tracer_tool/tracer_tool.so" \
-TRACES_FOLDER="$PWD/traces/my_run" \
+USER_DEFINED_FOLDERS=1 TRACES_FOLDER="$PWD/traces/my_run" \
   /absolute/path/to/workload [workload arguments]
 ```
 
@@ -85,7 +85,8 @@ CUDA_INJECTION64_PATH=/tmp/cupti_launch_resources.so \
   /absolute/path/to/workload [workload arguments]
 
 sim/target/release/sim-run --trace TRACE_DIR --control CONTROL_BITS.json \
-  --arch-card arch_profiles/cards/sm_86.json --mode l1-l2 \
+  --arch-card arch_profiles/cards/sm_86.json \
+  --pchase-card data/pchase/sm_86_static_card.json --mode l1-l2 \
   --launch-resources results/my_run/launch_resources.jsonl
 ```
 
@@ -150,7 +151,7 @@ sim/target/release/sim-run \
   --trace TRACE_DIR --control CONTROL_BITS.json \
   --arch-card arch_profiles/cards/sm_86.json \
   --architecture-spec arch_profiles/specs/sm86_trace_issue_profile.json \
-  --mode l1-l2
+  --pchase-card data/pchase/sm_86_static_card.json --mode l1-l2
 ```
 
 The bridge currently consumes only matching `alu`/`memory` issue widths from a

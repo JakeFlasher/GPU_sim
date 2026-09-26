@@ -14,9 +14,13 @@ use std::path::Path;
 
 pub const ITS_PROGRAM_SCHEMA_VERSION: u32 = 1;
 pub const ITS_ISA: &str = "simt_its_v1";
+pub const ITS_TRACE_SCHEMA_VERSION: u32 = 1;
+pub const ITS_TRACE_CONTRACT: &str = "custom_its_dynamic_v1";
 const MAX_PROGRAM_BYTES: u64 = 1024 * 1024;
 const MAX_INSTRUCTIONS: usize = 4096;
 const MAX_STEPS: u64 = 10_000_000;
+const MAX_TRACE_RECORDS: usize = 100_000;
+const MAX_TRACE_ESTIMATED_BYTES: usize = 32 * 1024 * 1024;
 const REGISTER_COUNT: usize = 32;
 const PREDICATE_COUNT: usize = 8;
 const BARRIER_COUNT: usize = 16;
@@ -25,15 +29,55 @@ const WORD_BYTES: u32 = 4;
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "op", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ItsInstruction {
-    SetLaneId { dst: u8 },
-    CmpLtImm { dst: u8, src: u8, imm: i32 },
-    AddImm { dst: u8, src: u8, imm: i32 },
-    Branch { target: u32 },
-    BranchIf { pred: u8, target: u32 },
-    Bssy { barrier: u8, target: u32 },
-    Bsync { barrier: u8 },
-    Break { barrier: u8 },
-    Store { base: u32, stride: u32, src: u8 },
+    SetLaneId {
+        dst: u8,
+    },
+    CmpLtImm {
+        dst: u8,
+        src: u8,
+        imm: i32,
+    },
+    AddImm {
+        dst: u8,
+        src: u8,
+        imm: i32,
+    },
+    MulImm {
+        dst: u8,
+        src: u8,
+        imm: u32,
+    },
+    /// Aligned u32 access through a lane register, evaluated at execution.
+    LoadIndirect {
+        dst: u8,
+        address: u8,
+    },
+    StoreIndirect {
+        address: u8,
+        src: u8,
+    },
+    Branch {
+        target: u32,
+    },
+    BranchIf {
+        pred: u8,
+        target: u32,
+    },
+    Bssy {
+        barrier: u8,
+        target: u32,
+    },
+    Bsync {
+        barrier: u8,
+    },
+    Break {
+        barrier: u8,
+    },
+    Store {
+        base: u32,
+        stride: u32,
+        src: u8,
+    },
     Exit,
     Halt,
 }
@@ -158,7 +202,12 @@ fn validate_instruction(
     instruction_count: u32,
 ) -> Result<(), ItsError> {
     let registers = match instruction {
-        ItsInstruction::SetLaneId { dst } | ItsInstruction::AddImm { dst, .. } => vec![*dst],
+        ItsInstruction::SetLaneId { dst } => vec![*dst],
+        ItsInstruction::AddImm { dst, src, .. } | ItsInstruction::MulImm { dst, src, .. } => {
+            vec![*dst, *src]
+        }
+        ItsInstruction::LoadIndirect { dst, address } => vec![*dst, *address],
+        ItsInstruction::StoreIndirect { address, src } => vec![*address, *src],
         ItsInstruction::CmpLtImm { src, .. } => vec![*src],
         ItsInstruction::Store { src, .. } => vec![*src],
         ItsInstruction::Branch { .. }
@@ -219,6 +268,24 @@ pub struct ItsResult {
     pub pcs: Vec<usize>,
     pub active_lanes: Vec<bool>,
     pub memory: BTreeMap<u32, u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dynamic_trace: Option<Vec<ItsTraceRecord>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dynamic_trace_schema_version: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dynamic_trace_contract: Option<&'static str>,
+}
+
+/// Execution-generated records, not NVBit/SASS and not hardware timestamps.
+/// Successors include reconvergence releases; inactive lanes have no successor.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ItsTraceRecord {
+    pub sequence: u64,
+    pub pc: usize,
+    pub active_mask: u64,
+    pub instruction: ItsInstruction,
+    pub lane_addresses: BTreeMap<usize, u32>,
+    pub lane_successors: BTreeMap<usize, usize>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -283,6 +350,14 @@ impl<'a> ItsExecutor<'a> {
     }
 
     pub fn run(&self) -> Result<ItsResult, ItsError> {
+        self.run_internal(false)
+    }
+
+    pub fn run_traced(&self) -> Result<ItsResult, ItsError> {
+        self.run_internal(true)
+    }
+
+    fn run_internal(&self, capture: bool) -> Result<ItsResult, ItsError> {
         let width = usize::from(self.spec.execution().simt_width());
         let mut lanes = vec![
             LaneState {
@@ -297,6 +372,8 @@ impl<'a> ItsExecutor<'a> {
         let mut barriers = [BarrierState::default(); BARRIER_COUNT];
         let mut memory = self.program.initial_memory.clone();
         let mut steps = 0_u64;
+        let mut dynamic_trace = capture.then(Vec::new);
+        let mut trace_estimated_bytes = 0_usize;
 
         while lanes.iter().any(|lane| lane.active) {
             if steps >= self.program.max_steps {
@@ -314,6 +391,31 @@ impl<'a> ItsExecutor<'a> {
                 .get(pc)
                 .ok_or(ItsError::PcOutOfRange(pc))?;
             steps = steps.checked_add(1).ok_or(ItsError::StepOverflow)?;
+            // Addresses must be sampled before execution: dst may overwrite
+            // the register that supplied a load address. Never regenerate a
+            // trace from final register state or from a prior captured path.
+            let lane_addresses = if capture {
+                if steps as usize > MAX_TRACE_RECORDS {
+                    return Err(ItsError::TraceLimit);
+                }
+                lane_indices(group, width)
+                    .filter_map(|lane| {
+                        let address = match instruction {
+                            ItsInstruction::LoadIndirect { address, .. }
+                            | ItsInstruction::StoreIndirect { address, .. } => {
+                                Ok(lanes[lane].regs[usize::from(*address)])
+                            }
+                            ItsInstruction::Store { base, stride, .. } => {
+                                lane_address(*base, *stride, lane)
+                            }
+                            _ => return None,
+                        };
+                        Some(address.map(|address| (lane, address)))
+                    })
+                    .collect::<Result<BTreeMap<_, _>, _>>()?
+            } else {
+                BTreeMap::new()
+            };
             self.execute_group(
                 instruction,
                 pc,
@@ -323,6 +425,31 @@ impl<'a> ItsExecutor<'a> {
                 &mut memory,
             )?;
             fire_ready_barriers(&mut lanes, &mut barriers);
+            if let Some(trace) = dynamic_trace.as_mut() {
+                let record_bytes = 128_usize
+                    .checked_add(lane_addresses.len().saturating_mul(24))
+                    .and_then(|bytes| {
+                        bytes.checked_add(lane_indices(group, width).count().saturating_mul(24))
+                    })
+                    .ok_or(ItsError::TraceLimit)?;
+                trace_estimated_bytes = trace_estimated_bytes
+                    .checked_add(record_bytes)
+                    .ok_or(ItsError::TraceLimit)?;
+                if trace_estimated_bytes > MAX_TRACE_ESTIMATED_BYTES {
+                    return Err(ItsError::TraceLimit);
+                }
+                trace.push(ItsTraceRecord {
+                    sequence: steps - 1,
+                    pc,
+                    active_mask: group,
+                    instruction: instruction.clone(),
+                    lane_addresses,
+                    lane_successors: lane_indices(group, width)
+                        .filter(|&lane| lanes[lane].active && lanes[lane].blocked_by.is_none())
+                        .map(|lane| (lane, lanes[lane].pc))
+                        .collect(),
+                });
+            }
         }
 
         let registers = lanes
@@ -343,6 +470,9 @@ impl<'a> ItsExecutor<'a> {
             pcs: lanes.iter().map(|lane| lane.pc).collect(),
             active_lanes: lanes.iter().map(|lane| lane.active).collect(),
             memory,
+            dynamic_trace,
+            dynamic_trace_schema_version: capture.then_some(ITS_TRACE_SCHEMA_VERSION),
+            dynamic_trace_contract: capture.then_some(ITS_TRACE_CONTRACT),
         })
     }
 
@@ -376,6 +506,39 @@ impl<'a> ItsExecutor<'a> {
                         lanes[lane].regs[usize::from(*src)].wrapping_add_signed(*imm);
                     lanes[lane].pc = pc + 1;
                 });
+            }
+            ItsInstruction::MulImm { dst, src, imm } => {
+                for_each_lane(group, width, |lane| {
+                    lanes[lane].regs[usize::from(*dst)] =
+                        lanes[lane].regs[usize::from(*src)].wrapping_mul(*imm);
+                    lanes[lane].pc = pc + 1;
+                });
+            }
+            ItsInstruction::LoadIndirect { dst, address } => {
+                for lane in lane_indices(group, width) {
+                    let address = lanes[lane].regs[usize::from(*address)];
+                    word_end(address)?;
+                    let value = *memory
+                        .get(&address)
+                        .ok_or(ItsError::UninitializedLoad(address))?;
+                    lanes[lane].regs[usize::from(*dst)] = value;
+                    lanes[lane].pc = pc + 1;
+                }
+            }
+            ItsInstruction::StoreIndirect { address, src } => {
+                let mut writes = BTreeMap::new();
+                for lane in lane_indices(group, width) {
+                    let address = lanes[lane].regs[usize::from(*address)];
+                    word_end(address)?;
+                    if writes
+                        .insert(address, lanes[lane].regs[usize::from(*src)])
+                        .is_some()
+                    {
+                        return Err(ItsError::AliasingStore(address));
+                    }
+                }
+                memory.extend(writes);
+                for_each_lane(group, width, |lane| lanes[lane].pc = pc + 1);
             }
             ItsInstruction::Branch { target } => {
                 for_each_lane(group, width, |lane| lanes[lane].pc = *target as usize);
@@ -555,6 +718,9 @@ fn operation_name(instruction: &ItsInstruction) -> &'static str {
         ItsInstruction::SetLaneId { .. } => "set_lane_id",
         ItsInstruction::CmpLtImm { .. } => "cmp_lt_imm",
         ItsInstruction::AddImm { .. } => "add_imm",
+        ItsInstruction::MulImm { .. } => "mul_imm",
+        ItsInstruction::LoadIndirect { .. } => "load_indirect",
+        ItsInstruction::StoreIndirect { .. } => "store_indirect",
         ItsInstruction::Branch { .. } => "branch",
         ItsInstruction::BranchIf { .. } => "branch_if",
         ItsInstruction::Bssy { .. } => "bssy",
@@ -602,6 +768,10 @@ pub enum ItsError {
     UnsupportedInstruction(String),
     #[error("ITS step limit {0} exceeded")]
     StepLimit(u64),
+    #[error("ITS dynamic trace exceeds its record/byte resource bound")]
+    TraceLimit,
+    #[error("ITS load from uninitialized word {0:#x}")]
+    UninitializedLoad(u32),
     #[error("ITS step counter overflowed")]
     StepOverflow,
     #[error("ITS lane PC {0} is out of range")]
@@ -669,5 +839,104 @@ mod tests {
             .run()
             .expect_err("unmatched BSYNC must fail closed");
         assert!(matches!(error, ItsError::InvalidBarrierUse(0)));
+    }
+
+    #[test]
+    fn traced_execution_regenerates_value_dependent_addresses() {
+        let spec = ArchitectureSpec::parse(
+            Path::new("spec.json"),
+            br#"
+            {
+              "schema_version": 1,
+              "architecture": "probe",
+              "isa": "simt_its_v1",
+              "instruction_set": ["set_lane_id", "mul_imm", "load_indirect", "halt"],
+              "execution": {"simt_width": 4, "max_resident_groups": 1},
+              "resources": [{"name":"alu","kind":"compute","issue_width":1,"latency_cycles":1}],
+              "evidence": "unvalidated"
+            }
+            "#,
+        )
+        .expect("probe spec should parse");
+        let program = ItsProgram::parse(
+            Path::new("program.json"),
+            br#"
+            {
+              "schema_version": 1,
+              "architecture": "probe",
+              "isa": "simt_its_v1",
+              "max_steps": 8,
+              "initial_memory": {"0": 10, "4": 11, "8": 12, "12": 13},
+              "instructions": [
+                {"op":"set_lane_id", "dst":0},
+                {"op":"mul_imm", "dst":1, "src":0, "imm":4},
+                {"op":"load_indirect", "dst":2, "address":1},
+                {"op":"halt"}
+              ]
+            }
+            "#,
+        )
+        .expect("probe program should parse");
+        let result = ItsExecutor::new(&spec, &program)
+            .expect("identity and ISA should be accepted")
+            .run_traced()
+            .expect("dynamic execution should complete");
+        assert_eq!(
+            result.dynamic_trace_schema_version,
+            Some(ITS_TRACE_SCHEMA_VERSION)
+        );
+        assert_eq!(result.dynamic_trace_contract, Some(ITS_TRACE_CONTRACT));
+        let load = result
+            .dynamic_trace
+            .as_ref()
+            .expect("trace should be present")
+            .iter()
+            .find(|record| matches!(record.instruction, ItsInstruction::LoadIndirect { .. }))
+            .expect("load record should be present");
+        assert_eq!(
+            load.lane_addresses,
+            [(0, 0), (1, 4), (2, 8), (3, 12)].into_iter().collect()
+        );
+        assert_eq!(result.registers[3][2], 13);
+    }
+
+    #[test]
+    fn traced_execution_fails_closed_at_record_resource_bound() {
+        let spec = ArchitectureSpec::parse(
+            Path::new("spec.json"),
+            br#"
+            {
+              "schema_version": 1,
+              "architecture": "probe",
+              "isa": "simt_its_v1",
+              "instruction_set": ["branch", "halt"],
+              "execution": {"simt_width": 1, "max_resident_groups": 1},
+              "resources": [{"name":"alu","kind":"compute","issue_width":1,"latency_cycles":1}],
+              "evidence": "unvalidated"
+            }
+            "#,
+        )
+        .expect("probe spec should parse");
+        let program = ItsProgram::parse(
+            Path::new("program.json"),
+            br#"
+            {
+              "schema_version": 1,
+              "architecture": "probe",
+              "isa": "simt_its_v1",
+              "max_steps": 10000000,
+              "instructions": [
+                {"op":"branch", "target":0},
+                {"op":"halt"}
+              ]
+            }
+            "#,
+        )
+        .expect("probe program should parse");
+        let error = ItsExecutor::new(&spec, &program)
+            .expect("identity and ISA should be accepted")
+            .run_traced()
+            .expect_err("trace resource bound must fail closed");
+        assert!(matches!(error, ItsError::TraceLimit));
     }
 }

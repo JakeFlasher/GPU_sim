@@ -4,7 +4,7 @@ Software architectural simulation with two executable frontends:
 
 - **Native NVIDIA replay:** NVBit SASS/protobuf traces and architecture cards
   feed the Rust SM, cache/memory, and event models. The active hardware anchor
-  is Ampere SM86 (RTX 3090 Ti); SM120 remains exploratory.
+  is Ampere SM86 (RTX 3090 Ti); other retained cards are not validated by this work.
 - **Custom models:** bounded `simt_u32_v1` programs and declarative resources
   feed `sim-sm::custom` and the shared dependency/event engine. The separate
   Curry-inspired `simt_its_v1` example is functional-only.
@@ -28,19 +28,24 @@ representation is not a universal binary decoder.
 - [Research roadmap](plans/cross_architecture_gpu_simulator_research_plan_20260923.md)
 - [Project memory for agent continuations](docs/PROJECT_MEMORY.md)
 - [Documentation and dated evidence](docs/README.md)
+- [History and stale-context map](docs/HISTORY.md)
 
 From the repository root:
 
 ```bash
 cargo build --release --manifest-path sim/Cargo.toml -p sim-run
 sim/target/release/sim-run --help
-cargo run --manifest-path sim/Cargo.toml -p sim-sm --bin custom-program-run --   arch_profiles/specs/simt_u32_pipeline2.json   arch_profiles/programs/simt_u32_barrier_producer.json   arch_profiles/programs/simt_u32_barrier_consumer.json
+cargo run --manifest-path sim/Cargo.toml -p sim-sm --bin custom-program-run -- \
+  arch_profiles/specs/simt_u32_pipeline2.json \
+  arch_profiles/programs/simt_u32_barrier_producer.json \
+  arch_profiles/programs/simt_u32_barrier_consumer.json
 ```
 
 The custom example produces model-relative timing, not a hardware prediction.
-The instruction-count NCU mapping is demonstrated for one launch; elapsed-cycle
-accuracy and broad paper-quality evaluation remain open. Fair numerical
-Accel-Sim/MGPUSim comparison is **deferred**, not silently completed.
+Instruction-count mappings exist for retained SM86 examples; complete elapsed
+timing, mechanism-backed completion/routing and independent evaluation remain
+open. [Diagnostics](docs/experimental_diagnostics.md) do not close these gaps.
+No fair full numerical Accel-Sim/MGPUSim comparison has been established.
 
 ## Repository map
 

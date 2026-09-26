@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "simt_its_trace.schema.json",
+  "title": "Bounded custom ITS dynamic trace",
+  "description": "Execution-generated records from simt_its_v1; never a native NVBit/SASS trace.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "architecture",
+    "isa",
+    "simt_width",
+    "steps",
+    "registers",
+    "predicates",
+    "pcs",
+    "active_lanes",
+    "memory",
+    "dynamic_trace_schema_version",
+    "dynamic_trace_contract",
+    "dynamic_trace"
+  ],
+  "properties": {
+    "architecture": {"type": "string"},
+    "isa": {"const": "simt_its_v1"},
+    "simt_width": {"type": "integer", "minimum": 1, "maximum": 32},
+    "steps": {"type": "integer", "minimum": 0},
+    "registers": {"type": "array"},
+    "predicates": {"type": "array"},
+    "pcs": {"type": "array"},
+    "active_lanes": {"type": "array"},
+    "memory": {"type": "object"},
+    "dynamic_trace_schema_version": {"const": 1},
+    "dynamic_trace_contract": {"const": "custom_its_dynamic_v1"},
+    "dynamic_trace": {
+      "type": "array",
+      "maxItems": 100000,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["sequence", "pc", "active_mask", "instruction", "lane_addresses", "lane_successors"],
+        "properties": {
+          "sequence": {"type": "integer", "minimum": 0},
+          "pc": {"type": "integer", "minimum": 0},
+          "active_mask": {"type": "integer", "minimum": 0},
+          "instruction": {"type": "object"},
+          "lane_addresses": {"type": "object", "additionalProperties": {"type": "integer", "minimum": 0}},
+          "lane_successors": {"type": "object", "additionalProperties": {"type": "integer", "minimum": 0}}
+        }
+      }
+    }
+  }
+}

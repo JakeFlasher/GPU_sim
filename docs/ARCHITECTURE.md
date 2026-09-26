@@ -46,3 +46,10 @@ state address-space, barrier, atomic, and collective limits.
 The separate `simt_its_v1` executor demonstrates per-lane control flow and
 reconvergence without a timing backend. Neither custom frontend promises
 arbitrary binary/ABI compatibility, vendor-equivalent timing, or RTL behavior.
+
+## Observation-only extensions
+
+`sim/direct_run/src/metrics.rs` produces versioned native metrics after replay;
+completion scenarios do not add events. `sim/sm/src/metrics.rs` selects candidate
+pipe labels in extraction order, not issue order. The separate ITS dynamic JSON
+trace is not input to `sim-trace`. See [diagnostic contract](experimental_diagnostics.md).

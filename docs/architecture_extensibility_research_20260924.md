@@ -1,3 +1,6 @@
+> Dated context; current capabilities and open work are in [STATUS](STATUS.md).
+> Historical completion claims and next-step prose are not active instructions.
+
 # Architecture-extensibility boundary research — 2026-09-24
 
 ## Finding
@@ -76,8 +79,10 @@ The following are intentionally still unsupported rather than hidden:
   bounded slice now has lane-0 broadcast, deterministic lane reduction, and
   shared atomic RMW, but excludes inter-group atomics, fences, weak-memory
   outcomes, and partial participation);
-* native trace regeneration after value-dependent interventions (a new
-  functional/frontend capture is required);
+* native trace regeneration after value-dependent interventions. The bounded
+  `simt_its_v1 --trace` frontend can now generate execution records for its own
+  custom ISA, but that output is not native SASS and cannot be fed into the
+  SM86 scoring path;
 * a universal vendor-independent binary decoder (native adapters are added only
   for available, evidence-producing trace formats);
 * silicon-equivalent timing internals. NCU/CUPTI observations remain external

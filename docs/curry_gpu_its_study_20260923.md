@@ -1,3 +1,6 @@
+> Dated context; current capabilities and open work are in [STATUS](STATUS.md).
+> Historical completion claims and next-step prose are not active instructions.
+
 # CurryGPU functional-architecture study
 
 Updated 2026-09-23 from the locally cloned CurryGPU article corpus.
@@ -122,6 +125,14 @@ The runnable smoke command is:
 
 The retained diamond produces eight stores [11, 12, 13, 14, 25, 26, 27, 28]
 with all lanes retired. This is functional semantics evidence only.
+
+The bounded ITS frontend now also has an opt-in `--trace` output mode. It
+records executed PCs, active masks, lane addresses, and observed successors
+after each group step. `simt_its_dynamic.json` exercises `set_lane_id ->
+mul_imm -> load_indirect -> store_indirect`, proving that values computed by
+the functional executor regenerate addresses rather than replaying fixed
+addresses. The result remains custom-ISA evidence: it is not accepted by the
+native SM86 SASS path and carries no hardware timing claim.
 
 The trace-safe SM86 issue-width profile and bounded custom resource/event path
 are now implemented. The next semantic step should be selected by a concrete

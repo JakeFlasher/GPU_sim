@@ -1,3 +1,6 @@
+> Dated context; current capabilities and open work are in [STATUS](../docs/STATUS.md).
+> Historical completion claims and next-step prose are not active instructions.
+
 # SM86 live capture plan
 
 Capture one workload at a time with the same executable, launch geometry, and

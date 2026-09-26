@@ -1,3 +1,6 @@
+> Dated context; current capabilities and open work are in [STATUS](../docs/STATUS.md).
+> Historical completion claims and next-step prose are not active instructions.
+
 # SM86 baseline closure slice
 
 This slice covers the live Rust path from trace loading through SM issue and
