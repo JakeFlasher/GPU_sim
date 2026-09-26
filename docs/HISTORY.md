@@ -99,3 +99,29 @@ git diff --check                                                               P
 The skill-creator validator could not run because the available Python
 environments lack PyYAML; edited frontmatter was inspected manually. This is a
 tool-environment limitation, not a validator pass claim.
+
+## 2026-09-26 trace-contract refinement
+
+The bounded `custom_its_dynamic_v1` output now reports the accumulated UTF-8
+JSON byte length of its individual records, enforces that 32 MiB record budget
+in addition to the 100,000-record cap, and preserves partially arrived barrier
+lanes in `lane_blocked_by`. The schema, executable diagnostics note, project
+memory and program guide were updated together. A focused reconvergence test
+and a wide-store stress probe cover the blocked-lane and serialized-byte
+failure paths; the result envelope remains outside the byte accounting.
+
+Additional validation after the baseline commit:
+
+```text
+cargo test --manifest-path sim/Cargo.toml --workspace --quiet                   PASS
+cargo test --manifest-path sim/Cargo.toml -p sim-sm --features campaign --quiet PASS
+cargo build --release --manifest-path sim/Cargo.toml -p sim-run -p sim-arch   PASS
+arch_profiles JSON/schema validation + custom ITS trace validation             PASS
+retained SM86 address-carry canary replay (l1-l2, ncu-shaped metrics)          PASS
+`sim-arch` strict Clippy                                                     PASS
+```
+
+Strict workspace Clippy remains red on pre-existing `sim-sm` findings such as
+large error variants and high-arity replay helpers; the changed ITS package is
+clean under `-D warnings`. This is recorded as lint debt, not hidden as a
+validation pass.

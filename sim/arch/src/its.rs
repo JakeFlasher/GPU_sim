@@ -20,7 +20,7 @@ const MAX_PROGRAM_BYTES: u64 = 1024 * 1024;
 const MAX_INSTRUCTIONS: usize = 4096;
 const MAX_STEPS: u64 = 10_000_000;
 const MAX_TRACE_RECORDS: usize = 100_000;
-const MAX_TRACE_ESTIMATED_BYTES: usize = 32 * 1024 * 1024;
+const MAX_TRACE_SERIALIZED_BYTES: usize = 32 * 1024 * 1024;
 const REGISTER_COUNT: usize = 32;
 const PREDICATE_COUNT: usize = 8;
 const BARRIER_COUNT: usize = 16;
@@ -274,6 +274,8 @@ pub struct ItsResult {
     pub dynamic_trace_schema_version: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub dynamic_trace_contract: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dynamic_trace_serialized_bytes: Option<u64>,
 }
 
 /// Execution-generated records, not NVBit/SASS and not hardware timestamps.
@@ -286,6 +288,9 @@ pub struct ItsTraceRecord {
     pub instruction: ItsInstruction,
     pub lane_addresses: BTreeMap<usize, u32>,
     pub lane_successors: BTreeMap<usize, usize>,
+    /// Lanes blocked at the end of this record remain explicit instead of
+    /// being mistaken for an unobserved successor.
+    pub lane_blocked_by: BTreeMap<usize, u8>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -373,7 +378,7 @@ impl<'a> ItsExecutor<'a> {
         let mut memory = self.program.initial_memory.clone();
         let mut steps = 0_u64;
         let mut dynamic_trace = capture.then(Vec::new);
-        let mut trace_estimated_bytes = 0_usize;
+        let mut trace_serialized_bytes = 0_usize;
 
         while lanes.iter().any(|lane| lane.active) {
             if steps >= self.program.max_steps {
@@ -395,7 +400,7 @@ impl<'a> ItsExecutor<'a> {
             // the register that supplied a load address. Never regenerate a
             // trace from final register state or from a prior captured path.
             let lane_addresses = if capture {
-                if steps as usize > MAX_TRACE_RECORDS {
+                if steps > MAX_TRACE_RECORDS as u64 {
                     return Err(ItsError::TraceLimit);
                 }
                 lane_indices(group, width)
@@ -426,19 +431,7 @@ impl<'a> ItsExecutor<'a> {
             )?;
             fire_ready_barriers(&mut lanes, &mut barriers);
             if let Some(trace) = dynamic_trace.as_mut() {
-                let record_bytes = 128_usize
-                    .checked_add(lane_addresses.len().saturating_mul(24))
-                    .and_then(|bytes| {
-                        bytes.checked_add(lane_indices(group, width).count().saturating_mul(24))
-                    })
-                    .ok_or(ItsError::TraceLimit)?;
-                trace_estimated_bytes = trace_estimated_bytes
-                    .checked_add(record_bytes)
-                    .ok_or(ItsError::TraceLimit)?;
-                if trace_estimated_bytes > MAX_TRACE_ESTIMATED_BYTES {
-                    return Err(ItsError::TraceLimit);
-                }
-                trace.push(ItsTraceRecord {
+                let record = ItsTraceRecord {
                     sequence: steps - 1,
                     pc,
                     active_mask: group,
@@ -448,7 +441,20 @@ impl<'a> ItsExecutor<'a> {
                         .filter(|&lane| lanes[lane].active && lanes[lane].blocked_by.is_none())
                         .map(|lane| (lane, lanes[lane].pc))
                         .collect(),
-                });
+                    lane_blocked_by: lane_indices(group, width)
+                        .filter_map(|lane| lanes[lane].blocked_by.map(|barrier| (lane, barrier)))
+                        .collect(),
+                };
+                let serialized_bytes = serde_json::to_vec(&record)
+                    .map_err(|error| ItsError::TraceSerialization(error.to_string()))?
+                    .len();
+                trace_serialized_bytes = trace_serialized_bytes
+                    .checked_add(serialized_bytes)
+                    .ok_or(ItsError::TraceLimit)?;
+                if trace_serialized_bytes > MAX_TRACE_SERIALIZED_BYTES {
+                    return Err(ItsError::TraceLimit);
+                }
+                trace.push(record);
             }
         }
 
@@ -473,6 +479,7 @@ impl<'a> ItsExecutor<'a> {
             dynamic_trace,
             dynamic_trace_schema_version: capture.then_some(ITS_TRACE_SCHEMA_VERSION),
             dynamic_trace_contract: capture.then_some(ITS_TRACE_CONTRACT),
+            dynamic_trace_serialized_bytes: capture.then_some(trace_serialized_bytes as u64),
         })
     }
 
@@ -768,8 +775,10 @@ pub enum ItsError {
     UnsupportedInstruction(String),
     #[error("ITS step limit {0} exceeded")]
     StepLimit(u64),
-    #[error("ITS dynamic trace exceeds its record/byte resource bound")]
+    #[error("ITS dynamic trace exceeds its record/serialized-byte resource bound")]
     TraceLimit,
+    #[error("ITS dynamic trace record could not be serialized: {0}")]
+    TraceSerialization(String),
     #[error("ITS load from uninitialized word {0:#x}")]
     UninitializedLoad(u32),
     #[error("ITS step counter overflowed")]
@@ -886,6 +895,22 @@ mod tests {
             Some(ITS_TRACE_SCHEMA_VERSION)
         );
         assert_eq!(result.dynamic_trace_contract, Some(ITS_TRACE_CONTRACT));
+        let trace = result
+            .dynamic_trace
+            .as_ref()
+            .expect("trace should be present");
+        let expected_record_bytes = trace
+            .iter()
+            .map(|record| {
+                serde_json::to_vec(record)
+                    .expect("trace record should serialize")
+                    .len()
+            })
+            .sum::<usize>();
+        assert_eq!(
+            result.dynamic_trace_serialized_bytes,
+            Some(expected_record_bytes as u64)
+        );
         let load = result
             .dynamic_trace
             .as_ref()
@@ -898,6 +923,59 @@ mod tests {
             [(0, 0), (1, 4), (2, 8), (3, 12)].into_iter().collect()
         );
         assert_eq!(result.registers[3][2], 13);
+    }
+
+    #[test]
+    fn traced_execution_keeps_partially_arrived_barrier_lanes_explicit() {
+        let spec = ArchitectureSpec::parse(
+            Path::new("spec.json"),
+            br#"
+            {
+              "schema_version": 1,
+              "architecture": "probe",
+              "isa": "simt_its_v1",
+              "instruction_set": ["set_lane_id", "cmp_lt_imm", "bssy", "branch_if", "branch", "bsync", "halt"],
+              "execution": {"simt_width": 2, "max_resident_groups": 1},
+              "resources": [{"name":"alu","kind":"compute","issue_width":1,"latency_cycles":1}],
+              "evidence": "unvalidated"
+            }
+            "#,
+        )
+        .expect("probe spec should parse");
+        let program = ItsProgram::parse(
+            Path::new("program.json"),
+            br#"
+            {
+              "schema_version": 1,
+              "architecture": "probe",
+              "isa": "simt_its_v1",
+              "max_steps": 32,
+              "instructions": [
+                {"op":"set_lane_id", "dst":0},
+                {"op":"cmp_lt_imm", "dst":0, "src":0, "imm":1},
+                {"op":"bssy", "barrier":0, "target":5},
+                {"op":"branch_if", "pred":0, "target":5},
+                {"op":"branch", "target":6},
+                {"op":"bsync", "barrier":0},
+                {"op":"halt"}
+              ]
+            }
+            "#,
+        )
+        .expect("probe program should parse");
+        let result = ItsExecutor::new(&spec, &program)
+            .expect("identity and ISA should be accepted")
+            .run_traced()
+            .expect("partial barrier arrival should complete");
+        let bsync = result
+            .dynamic_trace
+            .as_ref()
+            .expect("trace should be present")
+            .iter()
+            .find(|record| matches!(record.instruction, ItsInstruction::Bsync { .. }))
+            .expect("bsync record should be present");
+        assert_eq!(bsync.lane_blocked_by, [(0, 0)].into_iter().collect());
+        assert!(!bsync.lane_successors.contains_key(&0));
     }
 
     #[test]

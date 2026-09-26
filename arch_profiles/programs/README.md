@@ -83,7 +83,9 @@ cargo run --manifest-path sim/Cargo.toml -p sim-arch --bin custom_simt_its -- \
 `custom_simt_its ... --trace` enables an execution-generated dynamic record
 for this bounded ITS frontend. `simt_its_dynamic.json` demonstrates values
 computed at run time becoming indirect load/store addresses; the emitted
-records contain the executed PC, active mask, lane addresses, and observed
-successors. This is execution evidence for the custom functional ISA only,
-not a regenerated native SASS trace or a silicon timing model. The opt-in
-output is versioned by `arch_profiles/schema/simt_its_trace.schema.json`.
+records contain the executed PC, active mask, lane addresses, runnable
+successors, and explicit barrier-blocked lanes. Capture is bounded at 100,000
+records and 32 MiB of serialized record bytes. This is execution evidence for
+the custom functional ISA only, not a regenerated native SASS trace or a
+silicon timing model. The opt-in output is versioned by
+`arch_profiles/schema/simt_its_trace.schema.json`.

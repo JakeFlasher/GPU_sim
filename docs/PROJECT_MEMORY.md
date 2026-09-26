@@ -15,7 +15,8 @@ records. Do not load every linked report. Root [AGENTS.md](../AGENTS.md) is poli
   collectives. It does not share native cache timing.
 - `simt_its_v1`: single-group functional per-lane PCs plus indirect u32 memory;
   `custom_simt_its SPEC PROGRAM --trace` emits `custom_its_dynamic_v1` JSON.
-  Trace cap is 100k records plus a 32 MiB **estimate**, not an RSS/JSON-byte cap.
+  Trace cap is 100k records plus 32 MiB of accumulated serialized bytes for the
+  individual JSON records (the result envelope is not counted), not an RSS cap.
 - Native `schema_version=1`, `metric_surface_version=2`; the metric map is
   additive. Dirty-writeback/coherence scenario rows are postprocessing formulas.
   `min_selected_then_lexical_v1` balances candidate counts in extraction order,
@@ -37,9 +38,10 @@ records. Do not load every linked report. Root [AGENTS.md](../AGENTS.md) is poli
 
 ## Next concrete seams
 
-Finish mechanism-backed memory/pipeline execution if requested; tighten the ITS
-trace schema/budget and reconvergence-successor semantics; use same-domain,
-content-bound independent captures for evaluation. Strict Clippy has known
+Finish mechanism-backed memory/pipeline execution if requested; extend the ITS
+trace schema and reconvergence-successor semantics with independent input-
+varying tests; use same-domain, content-bound independent captures for
+evaluation. Strict Clippy has known
 pre-existing debt. Do not turn these into automatic review/workflow loops.
 
 ## Operational anchors

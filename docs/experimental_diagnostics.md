@@ -47,13 +47,19 @@ reject. This is neither CUDA/PTX compilation nor regenerated native SASS.
 Without `--trace` the new trace fields are omitted. With it, output adds
 `dynamic_trace_schema_version=1`, `dynamic_trace_contract=custom_its_dynamic_v1`
 and `dynamic_trace` records (sequence, PC, active mask, instruction, lane
-addresses, immediate unblocked successors). Addresses are sampled before an
-instruction overwrites registers. Successors for lanes blocked at reconvergence
-are omitted; the current output is not a complete per-lane CFG edge oracle.
+addresses, immediate unblocked successors, and an explicit `lane_blocked_by`
+barrier map). Addresses are sampled before an instruction overwrites registers.
+The successor map is only for lanes that remain runnable after the instruction;
+the blocked map records lanes still waiting at a barrier. This remains an
+execution trace for the custom frontend, not a complete per-lane CFG edge oracle
+or a native trace regeneration path.
 
-Capture stops at 100,000 records or the 32 MiB **estimated** record budget
-(`128 + 24 * address_entries + 24 * active_lanes` per step). This is not a
-hard process-RSS or serialized-byte guarantee. Input/step limits also apply.
+Capture stops at 100,000 records or when the accumulated UTF-8 JSON byte lengths
+of the individual records exceed 32 MiB. The reported
+`dynamic_trace_serialized_bytes` is that record-byte sum; it intentionally
+excludes the enclosing result object and JSON array punctuation, so it is a
+deterministic record-resource bound rather than a process-RSS or whole-output
+size guarantee. Input/step limits also apply.
 The [trace schema](../arch_profiles/schema/simt_its_trace.schema.json) validates
 the envelope, not complete operand/state semantics. Tightening these contracts
 and adding independent input-varying branch/reconvergence tests remains open.

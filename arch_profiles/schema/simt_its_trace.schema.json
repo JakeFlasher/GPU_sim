@@ -17,6 +17,7 @@
     "memory",
     "dynamic_trace_schema_version",
     "dynamic_trace_contract",
+    "dynamic_trace_serialized_bytes",
     "dynamic_trace"
   ],
   "properties": {
@@ -31,20 +32,31 @@
     "memory": {"type": "object"},
     "dynamic_trace_schema_version": {"const": 1},
     "dynamic_trace_contract": {"const": "custom_its_dynamic_v1"},
+    "dynamic_trace_serialized_bytes": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 33554432,
+      "description": "Sum of UTF-8 JSON byte lengths of individual dynamic_trace records; result envelope and array punctuation are excluded."
+    },
     "dynamic_trace": {
       "type": "array",
       "maxItems": 100000,
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["sequence", "pc", "active_mask", "instruction", "lane_addresses", "lane_successors"],
+        "required": ["sequence", "pc", "active_mask", "instruction", "lane_addresses", "lane_successors", "lane_blocked_by"],
         "properties": {
           "sequence": {"type": "integer", "minimum": 0},
           "pc": {"type": "integer", "minimum": 0},
           "active_mask": {"type": "integer", "minimum": 0},
           "instruction": {"type": "object"},
           "lane_addresses": {"type": "object", "additionalProperties": {"type": "integer", "minimum": 0}},
-          "lane_successors": {"type": "object", "additionalProperties": {"type": "integer", "minimum": 0}}
+          "lane_successors": {"type": "object", "additionalProperties": {"type": "integer", "minimum": 0}},
+          "lane_blocked_by": {
+            "type": "object",
+            "description": "Lane index to bounded BSSY/BSYNC barrier slot when the lane remains blocked after this record.",
+            "additionalProperties": {"type": "integer", "minimum": 0, "maximum": 15}
+          }
         }
       }
     }

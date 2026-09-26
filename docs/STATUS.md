@@ -36,8 +36,9 @@ limitations: [experimental diagnostics](experimental_diagnostics.md).
 
 ITS trace fields identify `custom_its_dynamic_v1` / version 1. The current
 schema validates a broad output shape; its fields are not a native adapter.
-Its memory cap is estimated and blocked-lane successor recording still needs
-stronger tests. [Schemas and inputs](../arch_profiles/README.md).
+Capture is bounded at 100k records and 32 MiB of accumulated serialized record
+bytes (not whole-process memory); `lane_blocked_by` keeps barrier-waiting lanes
+explicit. [Schemas and inputs](../arch_profiles/README.md).
 
 The tracer resolves exact module/library owners for stable regular files.
 Anonymous/JIT/deleted origins can remain unavailable. Active CUDA graph
