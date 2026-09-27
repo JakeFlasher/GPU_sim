@@ -10,7 +10,7 @@ to load and which claims not to revive.
 
 * Repository: `/home/jakeshea/GPU_simulator_rebase`, branch `GPUSim_main`.
 * The bounded-campaign continuation is represented by commits `9614f62b`,
-  `e9d750f6`, `506c6d6e`, and `5112ae23`; inspect `HEAD` for the current tip. Commit
+  `e9d750f6`, `506c6d6e`, `5112ae23`, `0731a292`, and `32785a6e`; inspect `HEAD` for the current tip. Commit
   `2d761986` is the earlier PhaseFuse starting point, not the current evidence
   baseline.
 * Active source of truth: `AGENTS.md` -> `docs/PROJECT_MEMORY.md` ->
