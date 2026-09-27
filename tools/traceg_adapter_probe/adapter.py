@@ -162,7 +162,7 @@ def _bounded_read(path: Path, limit: int, code: RefusalCode) -> bytes:
         with path.open("rb") as handle:
             raw = handle.read(limit + 1)
     except FileNotFoundError as exc:
-        raise AdapterRefusal(code, f"not a file: {path}") from exc
+        raise AdapterRefusal(RefusalCode.INPUT_MISSING, f"not a file: {path}") from exc
     except OSError as exc:
         raise AdapterRefusal(code, f"cannot read {path}: {exc}") from exc
     if len(raw) > limit:
