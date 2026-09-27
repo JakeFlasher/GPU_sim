@@ -24,8 +24,10 @@ records. Do not load every linked report. Root [AGENTS.md](../AGENTS.md) is poli
   `min_selected_then_lexical_v1` balances candidate counts in extraction order,
   not scheduler pressure or dynamic hardware routing. See [diagnostics](experimental_diagnostics.md).
 - `sim-run --fast-frontier-only` is an opt-in trace-derived PhaseFuse lane. It
-  skips native timing replay, certifies only narrow scalar regions, and reports
-  refusal reasons; its output is not a timing prediction or NCU replacement.
+  skips native timing replay, certifies only narrow scalar regions at a proven
+  single-launch mask-metadata/empty boundary, and reports non-full-population
+  refusal reasons; its
+  output is not a timing prediction or NCU replacement.
 - `ptx_subset_compile` lowers a small text subset into `simt_its_v1`; it is a
   functional compiler/assembler seam, not arbitrary PTX, CUDA ABI or SASS.
 - Custom `operation_resources` may be a scalar or an alternative list. The
@@ -56,8 +58,14 @@ records. Do not load every linked report. Root [AGENTS.md](../AGENTS.md) is poli
   TEX-only simulator versus all-source NCU L2 totals are not a valid L2 score.
 - Stable module/library files can be identified. JIT/opaque origins remain
   unavailable; active graph launches are rejected, not successfully captured.
-- Full Accel-Sim/MGPUSim comparison has not run; confirm scope before resuming.
-  Old “all future tasks closed” session/ledger statements are superseded.
+- Full Accel-Sim/MGPUSim comparison has not run; a tiny Accel-Sim parser/timing
+  compatibility smoke is recorded in the external-baseline contract, not a
+  score. Confirm scope before resuming. Old “all future tasks closed”
+  session/ledger statements are superseded.
+- A bounded live RTX 3090 Ti/NCU microbench holdout now exists in
+  `docs/sm86_independent_holdout_20260927.md`; its instruction/store/atomic/
+  reduction counter rows match, but clocks were unlocked and DRAM domains do
+  not match, so it is not timing accuracy evidence.
 
 ## Next concrete seams
 
@@ -66,9 +74,11 @@ Run Phase 0 correctness/refusal work before any empirical score; Phase 2/3
 requires independent hardware or matched external frontends and must not be
 silently approximated.
 The current bounded ledger is [SM86 next-experiment results](sm86_next_experiment_results_20260927.md).
+The external common-input decision is [SM86 external baseline contract](sm86_external_baseline_contract_20260927.md).
 
 Use the PhaseFuse fast lane to gather refusal/certificate populations (static
-register-projection evidence and a complete traced SM roster are now required), the
+register-projection evidence, complete launch scope, and a proven empty
+single-warp boundary are now required), the
 bounded PTX subset for value-dependent functional studies, and the custom route
 contract for controlled scheduling experiments. Extend the opt-in writeback and
 directory queues only after native event/config evidence is independently

@@ -14,9 +14,17 @@ pub struct InstructionActivity {
     /// Dynamic records whose producer omitted the active lane mask. These
     /// are not treated as all-lanes-inactive instructions.
     pub active_mask_missing_instructions: u64,
+    /// Dynamic records with a present but non-full active-lane mask. Fast
+    /// scalar certification refuses these because the descriptor does not
+    /// retain per-record lane populations.
+    pub active_mask_nonfull_instructions: u64,
     /// Dynamic records whose producer omitted the predicate mask. Effective
     /// predicate-on populations remain unknown for these records.
     pub predicate_mask_missing_instructions: u64,
+    /// Dynamic records whose effective predicate population is not the active
+    /// warp population. This remains an observation, not a scalar timing
+    /// adjustment; conservative fast certification refuses it.
+    pub predicate_mask_nonfull_instructions: u64,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
@@ -310,6 +318,9 @@ impl InstructionActivity {
         add(&mut self.warp_instructions, 1)?;
         if active_mask_present {
             add(&mut self.active_thread_instructions, u64::from(active))?;
+            if active != 32 {
+                add(&mut self.active_mask_nonfull_instructions, 1)?;
+            }
         } else {
             add(&mut self.active_mask_missing_instructions, 1)?;
         }
@@ -322,6 +333,9 @@ impl InstructionActivity {
                 &mut self.predicated_off_warp_instructions,
                 u64::from(effective == 0),
             )?;
+            if effective != active {
+                add(&mut self.predicate_mask_nonfull_instructions, 1)?;
+            }
         } else if !predicate_mask_present {
             add(&mut self.predicate_mask_missing_instructions, 1)?;
         }

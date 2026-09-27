@@ -217,6 +217,19 @@ pub enum ReplayError {
         active_masks_missing: u64,
         predicate_masks_missing: u64,
     },
+    #[error("fast frontier requires complete unsampled trace coverage")]
+    FastFrontierRequiresFullCoverage,
+    #[error(
+        "fast frontier requires a single launch with no concurrent stream context; launches={launches}"
+    )]
+    FastFrontierLaunchScopeUnknown { launches: usize },
+    #[error(
+        "fast frontier requires active and predicate-mask presence on every dynamic record; active_missing={active_missing}, predicate_missing={predicate_missing}"
+    )]
+    FastFrontierMasksIncomplete {
+        active_missing: u64,
+        predicate_missing: u64,
+    },
     #[error("SM {sm_id} L1 counter aggregation failed: {source}")]
     L1Aggregation {
         sm_id: i32,
@@ -913,6 +926,7 @@ fn fast_scalar_segments(
     let mut segments = Vec::new();
     let mut program = Vec::new();
     let mut prior_destinations: Vec<SassRegister> = Vec::new();
+    let mut segment_start = None;
 
     fn register_overlap(left: SassRegister, right: SassRegister) -> bool {
         if left.file() != right.file() {
@@ -930,13 +944,15 @@ fn fast_scalar_segments(
 
     let flush = |segments: &mut Vec<Vec<CausalFrontierInstruction>>,
                  program: &mut Vec<CausalFrontierInstruction>,
-                 prior_destinations: &mut Vec<SassRegister>| {
-        if program.len() >= 2 {
+                 prior_destinations: &mut Vec<SassRegister>,
+                 segment_start: &mut Option<usize>| {
+        if program.len() >= 2 && *segment_start == Some(0) {
             segments.push(std::mem::take(program));
         } else {
             program.clear();
         }
         prior_destinations.clear();
+        *segment_start = None;
     };
     for (sequence, instruction) in warp.insts.iter().enumerate() {
         let descriptor = match (|| {
@@ -1009,17 +1025,30 @@ fn fast_scalar_segments(
             Some((descriptor, current_destinations))
         })() {
             Some((descriptor, destinations)) => {
+                if program.is_empty() {
+                    segment_start = Some(sequence);
+                }
                 prior_destinations.extend(destinations);
                 descriptor
             }
             None => {
-                flush(&mut segments, &mut program, &mut prior_destinations);
+                flush(
+                    &mut segments,
+                    &mut program,
+                    &mut prior_destinations,
+                    &mut segment_start,
+                );
                 continue;
             }
         };
         program.push(descriptor);
     }
-    flush(&mut segments, &mut program, &mut prior_destinations);
+    flush(
+        &mut segments,
+        &mut program,
+        &mut prior_destinations,
+        &mut segment_start,
+    );
     segments
 }
 
@@ -1089,7 +1118,36 @@ pub fn fast_frontier_for_trace(
 ) -> Result<FastFrontierSummary, ReplayError> {
     let placement = PlacementConfig::from_arch_card(arch_card, schedule.arch)?;
     require_trace_architecture(td, schedule.arch)?;
+    let launches = td.kernels().count();
+    if launches != 1 {
+        return Err(ReplayError::FastFrontierLaunchScopeUnknown { launches });
+    }
     let extracted = extract_per_sm_blocks(td, loc, schedule, placement, false)?;
+    if !matches!(&extracted.coverage, ExtractedCoverage::Full(_)) {
+        return Err(ReplayError::FastFrontierRequiresFullCoverage);
+    }
+    let active_missing = extracted
+        .trace_metrics
+        .instructions
+        .active_mask_missing_instructions;
+    let predicate_missing = extracted
+        .trace_metrics
+        .instructions
+        .predicate_mask_missing_instructions;
+    let active_nonfull = extracted
+        .trace_metrics
+        .instructions
+        .active_mask_nonfull_instructions;
+    let predicate_nonfull = extracted
+        .trace_metrics
+        .instructions
+        .predicate_mask_nonfull_instructions;
+    if active_missing != 0 || predicate_missing != 0 {
+        return Err(ReplayError::FastFrontierMasksIncomplete {
+            active_missing,
+            predicate_missing,
+        });
+    }
     let mut summary = FastFrontierSummary {
         contract: "sm86_fast_exact_scalar_regions_v1",
         architecture: schedule.arch.token(),
@@ -1116,6 +1174,45 @@ pub fn fast_frontier_for_trace(
             })?;
         Ok::<(), ReplayError>(())
     };
+    if active_nonfull != 0 || predicate_nonfull != 0 {
+        // The compact descriptor does not retain per-record predicate
+        // populations. Preserve the fast-only executable contract, but refuse
+        // the whole launch rather than treating predicated scalar work as an
+        // all-lane empty-boundary recurrence.
+        for blocks in extracted.per_sm_blocks.values() {
+            add(
+                "blocks_seen",
+                &mut summary.blocks_seen,
+                u64::try_from(blocks.len()).map_err(|_| ReplayError::FastFrontier {
+                    detail: "block count exceeds u64".to_owned(),
+                })?,
+            )?;
+            for block in blocks {
+                add(
+                    "warps_seen",
+                    &mut summary.warps_seen,
+                    u64::try_from(block.warps.len()).map_err(|_| ReplayError::FastFrontier {
+                        detail: "warp count exceeds u64".to_owned(),
+                    })?,
+                )?;
+                for _ in &block.warps {
+                    if active_nonfull != 0 {
+                        increment_fast_reason(
+                            &mut summary.refusal_reasons,
+                            "nonfull_active_population",
+                        )?;
+                    }
+                    if predicate_nonfull != 0 {
+                        increment_fast_reason(
+                            &mut summary.refusal_reasons,
+                            "nonfull_predicate_population",
+                        )?;
+                    }
+                }
+            }
+        }
+        return Ok(summary);
+    }
     for blocks in extracted.per_sm_blocks.values() {
         // The causal analyzer's `Complete` premise is the full physical
         // roster for the interval, not the current CTA's local warp list.
@@ -1130,16 +1227,22 @@ pub fn fast_frontier_for_trace(
             sorted.sort_unstable();
             sorted.windows(2).any(|pair| pair[0] == pair[1])
         };
+        // The current compact trace has no CTA start/end epochs or incoming
+        // pipeline snapshot.  Only one traced warp on one block can therefore
+        // satisfy the analyzer's empty-boundary premise; all other rosters
+        // remain explicit refusals instead of fresh-state certificates.
+        let single_empty_boundary = blocks.len() == 1 && residents.len() == 1;
         for block in blocks {
             add("blocks_seen", &mut summary.blocks_seen, 1)?;
-            if roster_has_reuse {
-                increment_fast_reason(&mut summary.refusal_reasons, "resident_roster_slot_reuse")?;
+            if roster_has_reuse || !single_empty_boundary {
+                let reason = if roster_has_reuse {
+                    "resident_roster_slot_reuse"
+                } else {
+                    "incoming_pipeline_or_residency_unknown"
+                };
                 for _warp in &block.warps {
                     add("warps_seen", &mut summary.warps_seen, 1)?;
-                    increment_fast_reason(
-                        &mut summary.refusal_reasons,
-                        "resident_roster_incomplete",
-                    )?;
+                    increment_fast_reason(&mut summary.refusal_reasons, reason)?;
                 }
                 continue;
             }
@@ -4133,6 +4236,28 @@ mod stream_l2_session_tests {
 
     fn full(outcome: KernelReplayOutcome) -> FullKernelReplayResult {
         outcome.into_full().expect("synthetic trace is complete")
+    }
+
+    #[test]
+    fn fast_frontier_refuses_multi_launch_context() {
+        let tmp = tempfile::tempdir().unwrap();
+        write_trace(
+            tmp.path(),
+            &[
+                (1, 1, vec![load(1, BASE, 4)]),
+                (2, 2, vec![load(2, BASE, 4)]),
+            ],
+        );
+        let trace = TraceDir::open_direct(tmp.path()).unwrap();
+        let loc = trace.kernels().next().unwrap();
+        let schedules = schedules(&[1, 2]);
+        let error =
+            fast_frontier_for_trace(&trace, &loc, schedules.get(&1).unwrap(), &sm86_test_card())
+                .unwrap_err();
+        assert!(matches!(
+            error,
+            ReplayError::FastFrontierLaunchScopeUnknown { launches: 2 }
+        ));
     }
 
     #[test]
@@ -11463,6 +11588,26 @@ mod completeness_tests {
     }
 
     #[test]
+    fn fast_frontier_refuses_sampled_coverage_before_certification() {
+        let tmp = tempfile::tempdir().unwrap();
+        let sidecar = payload_bound_subset();
+        write_grid_trace(tmp.path(), 60, 1, &SELECTED_BLOCKS, Some(&sidecar));
+        let trace = TraceDir::open(tmp.path()).unwrap();
+        let loc = trace.kernels().next().unwrap();
+        let schedule = FunctionSchedule {
+            arch: ArchId::Sm86,
+            function_unique_id: 1,
+            kernel_name: "sampled".into(),
+            function_name: "sampled".into(),
+            by_pc: StdMap::new(),
+        };
+        assert!(matches!(
+            fast_frontier_for_trace(&trace, &loc, &schedule, &sm86_test_card()),
+            Err(ReplayError::FastFrontierRequiresFullCoverage)
+        ));
+    }
+
+    #[test]
     fn sampled_replay_rejects_memory_candidates_before_discarding_diagnostics() {
         let tmp = tempfile::tempdir().unwrap();
         let sidecar = payload_bound_subset();
@@ -12080,6 +12225,7 @@ mod fast_frontier_unit_tests {
         assert_eq!(fast_scalar_segments(&warp(&[0, 16]), &schedule).len(), 1);
         assert!(fast_scalar_segments(&warp(&[0, 32]), &schedule).is_empty());
         assert!(fast_scalar_segments(&warp(&[0, 0]), &schedule).is_empty());
+        assert!(fast_scalar_segments(&warp(&[0, 99, 16]), &schedule).is_empty());
         let unknown = FunctionSchedule {
             by_pc: BTreeMap::from([(
                 0,

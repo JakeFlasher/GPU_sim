@@ -19,8 +19,12 @@ bounded Rust/fixture tests, including a synthetic final service-only tail for
 E4. A descriptor-only E6 scale probe now covers the full 112-case
 sorted/shuffled N=1k..64k × region/residency matrix with child RSS;
 compact-trace parsing-inclusive scaling remains open. Independent SM86/NCU
-holdouts (E9), and matched external baselines (E10) remain open and must not be
-represented by these unit results.
+progress now includes a fresh 13-case one-block/one-warp counter holdout with
+content-bound trace/NCU/replay artifacts; unlocked clocks and DRAM-domain
+mismatch keep it non-scoring for timing. E10 now has a pinned capability audit
+and a three-record Accel-Sim executable compatibility smoke, not a numeric
+baseline. Full locked-clock timing/cache holdouts and a strict protobuf-to-
+`.traceg` adapter remain open and must not be represented by these results.
 The reproducible local ledger is [SM86 bounded next-experiment results](../docs/sm86_next_experiment_results_20260927.md).
 
 ## Claim tiers

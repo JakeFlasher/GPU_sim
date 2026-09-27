@@ -5,7 +5,7 @@
 //! planner telemetry. It is intentionally not a native trace or timing
 //! prediction. A separate wrapper can collect process RSS for each case.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::time::Instant;
 
 use sim_sm::{
@@ -27,17 +27,24 @@ fn usage() -> &'static str {
      --residency {complete,unknown} --order {sorted,shuffled} --seed S"
 }
 
-fn parse_options() -> Result<Options, String> {
-    let mut args = std::env::args().skip(1);
+fn parse_options_from<I>(arguments: I) -> Result<Options, String>
+where
+    I: IntoIterator<Item = String>,
+{
+    let mut args = arguments.into_iter();
     let mut n = None;
     let mut region_len = None;
     let mut complete_residency = None;
     let mut shuffled = None;
     let mut seed = 0_u64;
+    let mut seen = HashSet::new();
     while let Some(flag) = args.next() {
+        if !seen.insert(flag.clone()) {
+            return Err(format!("duplicate option {flag}"));
+        }
         let value = args
             .next()
-            .ok_or_else(|| format!("missing value for {flag}; usage: {}", usage()))?;
+            .ok_or_else(|| format!("missing value for {flag}"))?;
         match flag.as_str() {
             "--n" => n = Some(value.parse::<usize>().map_err(|_| "invalid --n")?),
             "--region-len" => {
@@ -65,9 +72,12 @@ fn parse_options() -> Result<Options, String> {
             _ => return Err(format!("unknown option {flag}; usage: {}", usage())),
         }
     }
-    let n = n.ok_or_else(|| format!("--n is required; usage: {}", usage()))?;
-    if n == 0 || n > 1_000_000 {
-        return Err("--n must be in 1..=1000000".to_owned());
+    let n = n.ok_or_else(|| "--n is required".to_owned())?;
+    // Four non-empty programs are required by the descriptor analyzer.  The
+    // previous lower bound of one allowed n=1..3 to construct empty sibling
+    // programs and fail later with an opaque EmptyProgram error.
+    if !(4..=1_000_000).contains(&n) {
+        return Err("--n must be in 4..=1000000 (four programs are required)".to_owned());
     }
     Ok(Options {
         n,
@@ -77,6 +87,10 @@ fn parse_options() -> Result<Options, String> {
         shuffled: shuffled.ok_or_else(|| "--order is required".to_owned())?,
         seed,
     })
+}
+
+fn parse_options() -> Result<Options, String> {
+    parse_options_from(std::env::args().skip(1))
 }
 
 fn shuffle<T>(values: &mut [T], mut state: u64) {
@@ -217,4 +231,54 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }))?
     );
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn valid_arguments(n: usize) -> Vec<String> {
+        [
+            "--n",
+            &n.to_string(),
+            "--region-len",
+            "8",
+            "--residency",
+            "complete",
+            "--order",
+            "sorted",
+            "--seed",
+            "7",
+        ]
+        .into_iter()
+        .map(str::to_owned)
+        .collect()
+    }
+
+    #[test]
+    fn rejects_sizes_that_create_empty_programs() {
+        for n in [0, 1, 2, 3, 1_000_001] {
+            assert!(parse_options_from(valid_arguments(n)).is_err(), "n={n}");
+        }
+        assert!(parse_options_from(valid_arguments(4)).is_ok());
+    }
+
+    #[test]
+    fn rejects_duplicate_or_unknown_options() {
+        let mut duplicate = valid_arguments(4);
+        duplicate.extend(["--n".to_owned(), "4".to_owned()]);
+        assert!(
+            parse_options_from(duplicate)
+                .unwrap_err()
+                .contains("duplicate option --n")
+        );
+
+        let mut unknown = valid_arguments(4);
+        unknown.extend(["--bogus".to_owned(), "1".to_owned()]);
+        assert!(
+            parse_options_from(unknown)
+                .unwrap_err()
+                .contains("unknown option --bogus")
+        );
+    }
 }

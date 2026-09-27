@@ -285,3 +285,33 @@ preserved terminal state; complete residency collapsed only eligible regions,
 unknown residency collapsed none, and `region_len=1` collapsed none. This is
 descriptor/analyzer scaling with RSS, not native trace parsing or silicon
 speedup.
+
+## 2026-09-27 live holdout and PhaseFuse boundary correction
+
+The host audit confirmed a live RTX 3090 Ti (UUID
+`GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c`, SM86, driver 615.71.09), and the
+existing small metric-domain campaign completed 13 fresh one-block/one-warp
+read/atomic/reduction/control/store cases with NVBit and NCU. Warp instruction,
+global-store, atomic and reduction counter populations matched; clocks were not
+locked and DRAM domains differed, so the result is non-scoring counter-contract
+evidence. Details and content identities are in
+[`docs/sm86_independent_holdout_20260927.md`](sm86_independent_holdout_20260927.md).
+
+The matched-baseline audit also ran a three-record one-CTA Accel-Sim smoke
+(`gpu_tot_sim_cycle=5024`, `gpu_tot_sim_insn=96`, one CTA) after discovering
+that legacy `.traceg` parsing requires an explicit `RZ`→`R255` normalization.
+This is a T1 executable compatibility datum, not an SM86/NCU timing score; the
+strict E10A–E10C adapter/refusal contract is in
+[`docs/sm86_external_baseline_contract_20260927.md`](sm86_external_baseline_contract_20260927.md).
+
+An adversarial PhaseFuse review found and corrected a P0 false-certificate
+path: sampled/multi-launch traces, non-full lane populations, multi-block or
+multi-warp rosters, and suffix regions after discarded prefixes now refuse;
+single-launch empty-boundary assumptions are explicit. The fast lane returns
+typed/refusal summaries rather than treating those contexts as fresh pipeline
+state.
+
+The hardened PhaseFuse wrapper was rerun for five repeats across all 112 matrix
+cases (560 rows, zero failures/timeouts/truncations); executable/source
+identities are recorded by the wrapper and in the latest E6 ledger row. The
+scaling result remains descriptor/analyzer evidence, not native trace timing.

@@ -136,6 +136,23 @@ because its dynamic records lack the static register-projection evidence
 required by the strengthened PhaseFuse contract; that is an explicit refusal,
 not a speed or accuracy result.
 
+On the verified local RTX 3090 Ti, the bounded independent counter holdout can
+be regenerated in a fresh output directory with:
+
+```bash
+python workloads/research_probes/sm86_metric_domains/run.py \
+  --output results/captures/sm86_independent_holdout_$(date +%Y%m%d_%H%M%S)_v1 \
+  --size small --suite domains
+python workloads/research_probes/sm86_metric_domains/run.py \
+  --output results/captures/sm86_independent_holdout_$(date +%Y%m%d_%H%M%S)_writeback_v1 \
+  --size small --suite writeback
+```
+
+This path records device identity, NVBit trace, NCU report/CSV, replay input
+hashes and a comparison CSV. It is deliberately non-scoring unless clocks,
+metric domains, and dirty-flush/ownership contracts are independently closed;
+see [the holdout report](sm86_independent_holdout_20260927.md).
+
 Do not add hash/seal, receipt, reviewer, freeze, or mandatory test-pyramid
 machinery around the simulator. Retained manifests/checksums are data formats,
 not authority over code or agents.

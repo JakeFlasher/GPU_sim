@@ -15,7 +15,7 @@ research is complete. Start with [memory](PROJECT_MEMORY.md); use
 | `ptx_subset_v1` frontend | Bounded text-to-`simt_its_v1` compiler for lane ID, integer arithmetic, predicates, labels, indirect u32 load/store, exit | Functional subset only; no ABI, calls, atomics, vector types, arbitrary PTX or SASS |
 | Dirty-sector writeback queue | Explicit `--dirty-writeback-capacity-sectors` native SM86 launch path; shared read/write fixed-point service, transactional eviction admission, same-line hazard, tokenized completion | Opt-in bounded model; coherence ownership/visibility and resident dirty flush semantics remain tails |
 | Coherence directory service | Explicit `--coherence-service-cycles N --coherence-capacity-sectors N` launch path; ordered L2-request directory transitions, pending-visibility completion, local/texture-domain refusal, and separate completion counters | Requires full unsampled decoded topology and a cold-start assumption; L1-hidden accesses, resident ownership, protocol fences and native visibility scope remain outside the model |
-| PhaseFuse fast frontier | Trace-derived scalar-region certificate/refusal report via `sim-run --fast-frontier-only`; complete traced SM roster and static register RAW/WAW evidence are required | Conservative analysis only; skips native timing, refuses unknown register provenance/slot reuse, and cannot certify memory, barriers, dynamic pipes or silicon |
+| PhaseFuse fast frontier | Trace-derived scalar-region certificate/refusal report via `sim-run --fast-frontier-only`; complete unsampled single-launch mask metadata, one empty-boundary warp, and static register RAW/WAW evidence are required; non-full populations become refusals | Conservative analysis only; skips native timing, refuses multi-launch/roster/prefix contexts, unknown register provenance/slot reuse, and cannot certify memory, barriers, dynamic pipes or silicon |
 
 Custom barriers require matching lengths/positions/IDs, one use per ID, and
 all participants resident. Same-phase shared conflicts and inter-group global
@@ -85,6 +85,11 @@ requirements.
 The latest bounded evidence ledger is
 [sm86_next_experiment_results_20260927.md](sm86_next_experiment_results_20260927.md).
 
+The first live RTX 3090 Ti/NCU microbench holdout is summarized in
+[sm86_independent_holdout_20260927.md](sm86_independent_holdout_20260927.md).
+The matched-external capability and tiny Accel-Sim smoke contract is
+[sm86_external_baseline_contract_20260927.md](sm86_external_baseline_contract_20260927.md).
+
 Native coherence/visibility and resident dirty-flush integration, native physical-pipe routing,
 execution-driven SASS regeneration, same-domain independent timing/cache
 validation, and general compiler/ISA support remain open. Their absence is not
@@ -93,8 +98,11 @@ custom alternative-resource scheduler plus a transactional dirty-sector queue
 are implemented as explicit bounded seams, not as substitutes for those native
 mechanisms; see [options](sm86_sota_simulator_options_20260926.md).
 
-No full Accel-Sim/MGPUSim comparison has been performed; the [baseline matrix](baseline_matrix_20260924.json)
-is non-scoring. Earlier runs excluded AMD/SM120 and full external execution;
+No full Accel-Sim/MGPUSim comparison has been performed; a three-record
+Accel-Sim compatibility smoke is documented in the
+[external baseline contract](sm86_external_baseline_contract_20260927.md), and
+the [baseline matrix](baseline_matrix_20260924.json) remains non-scoring.
+Earlier runs excluded AMD/SM120 and full external execution;
 follow the latest explicit user scope rather than silently reviving or
 permanently forbidding those tasks. SOL/campaign data and old research remain
 retained. [Roadmap](../plans/cross_architecture_gpu_simulator_research_plan_20260923.md)
