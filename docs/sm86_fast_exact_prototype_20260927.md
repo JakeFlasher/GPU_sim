@@ -203,7 +203,9 @@ events. Pending ownership is not visible until completion; unrelated
 zero-service lines do not inherit the service lane's head-of-line timestamp.
 Local-sector and texture domains, unknown SM/sector topology, and incomplete
 lane masks refuse the run. The directory starts cold and cannot import
-L1-hidden/resident ownership, fences, protocol messages, or resident flushes;
+L1-hidden/resident ownership; a same-launch L1 hit after a remote writer has no
+modeled invalidation callback. Fences, protocol messages, and resident flushes
+remain outside the seam;
 this remains a bounded mechanism experiment rather than coherence
 reconstruction.
 

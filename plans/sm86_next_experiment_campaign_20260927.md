@@ -20,9 +20,13 @@ bounded Rust/fixture tests, including a synthetic final service-only tail for
 E4. A descriptor-only E6 scale probe now covers the full 112-case
 sorted/shuffled N=1k..64k × region/residency matrix with child RSS;
 compact-trace parsing-inclusive scaling remains open. Independent SM86/NCU
-progress now includes a fresh 13-case one-block/one-warp counter holdout with
-content-bound trace/NCU/replay artifacts; unlocked clocks and DRAM-domain
-mismatch keep it non-scoring for timing. E10 now has a pinned capability audit,
+progress now includes a 13-case one-block/one-warp counter-domain development
+rerun with content-bound trace/NCU/replay artifacts; it reuses the existing
+metric-domain source/case population. Unlocked clocks and DRAM-domain
+mismatch keep it non-scoring for timing. This is a development rerun of the
+existing metric-domain source/case matrix, not an independent holdout. The
+ordered stream session now rejects coherence (directory state is not persisted)
+and sampled carded writeback is refused. E10 now has a pinned capability audit,
 a strict parser/round-trip probe, and a three-record Accel-Sim executable
 compatibility smoke, not a numeric baseline. Full locked-clock timing/cache
 holdouts and E10B parser integration/common-endpoint scoring remain open and

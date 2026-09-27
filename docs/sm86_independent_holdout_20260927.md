@@ -1,9 +1,10 @@
-# Independent SM86 microbench holdout — 2026-09-27
+# SM86 microbench development rerun — 2026-09-27
 
-This is a bounded live RTX 3090 Ti/NVBit/NCU holdout, not a publication-grade
-timing score. It was run after the prior bounded campaign on a fresh device
-identity and fresh microbenchmark output directories. No large workload or
-external simulator was run.
+This is a bounded live RTX 3090 Ti/NVBit/NCU **development rerun**, not an
+independent held-out workload or publication-grade timing score. It reused the
+SM86 metric-domain source/case matrix in fresh output directories; the captured
+NCU/trace outputs are new, but the workload/source population is not held out.
+No large workload or external simulator was run.
 
 ## Host identity
 
@@ -20,15 +21,15 @@ Capture/replay repository revision at measurement time:
 ```
 
 The clocks were **not locked**, so these measurements are not used for an
-elapsed-time accuracy claim. The device/driver tuple is recorded to prevent
-confusing this capture with the older development corpus.
+elapsed-time accuracy claim. The device/driver tuple binds this rerun to the
+older development corpus rather than mislabeling it as an independent holdout.
 
 The prerequisite audit confirms why a locked repeat was not attempted: the
 current user has no passwordless administrative privilege (`sudo -n true` is
-not available), `nvidia-smi -rgc` and `-rmc` refuse clock changes with a
-permission error, and `nvidia-smi -lmci` reports runtime memory-clock
-switching. This is a typed environment blocker, not a silently relaxed clock
-policy.
+not available), and the attempted `nvidia-smi -rgc`/`-rmc` reset probes were
+denied with a permission error. `nvidia-smi -lmci` reports runtime
+memory-clock switching. No clock state was changed or claimed restored. This
+is a typed environment blocker, not a silently relaxed clock policy.
 
 The prerequisite probe is preserved at
 `results/captures/sm86_locked_clock_prerequisite_20260927_v1/` (ignored local

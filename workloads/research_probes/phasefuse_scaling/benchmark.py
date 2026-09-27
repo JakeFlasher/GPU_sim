@@ -194,6 +194,8 @@ def validate_contract(payload: object, expected: dict[str, object]) -> list[str]
             failures.append("exact_execution_steps must equal n_records")
         if payload["causal_execution_steps"] > payload["exact_execution_steps"]:
             failures.append("causal_execution_steps exceeds exact_execution_steps")
+        if payload["exact_final_cycle"] != payload["causal_final_cycle"]:
+            failures.append("exact_final_cycle and causal_final_cycle differ")
         if candidate_regions != collapsed_regions + reified_regions:
             failures.append("candidate_regions must equal collapsed_regions + reified_regions")
         if candidate_instructions > n_records:
@@ -212,6 +214,18 @@ def validate_contract(payload: object, expected: dict[str, object]) -> list[str]
                     reason_total += count
             if reason_total != reified_regions:
                 failures.append("refusal_reasons total must equal reified_regions")
+        residency = payload.get("residency")
+        region_len = payload.get("region_len")
+        if residency == "unknown":
+            if collapsed_regions != 0:
+                failures.append("unknown residency cannot collapse any region")
+            if reified_regions != candidate_regions:
+                failures.append("unknown residency must reify every candidate region")
+        if region_len == 1 and candidate_regions != 0:
+            failures.append("region_len=1 cannot produce candidate regions")
+        if residency == "complete" and isinstance(region_len, int) and region_len >= 2:
+            if collapsed_regions == 0:
+                failures.append("complete residency with region_len>=2 must collapse a region")
     if payload.get("terminal_state_matches") is not True:
         failures.append("terminal_state_matches is not true")
     return failures

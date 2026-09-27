@@ -10,7 +10,7 @@ to load and which claims not to revive.
 
 * Repository: `/home/jakeshea/GPU_simulator_rebase`, branch `GPUSim_main`.
 * The bounded-campaign continuation is represented by commits `9614f62b`,
-  `e9d750f6`, and `506c6d6e`; inspect `HEAD` for the current tip. Commit
+  `e9d750f6`, `506c6d6e`, and `5112ae23`; inspect `HEAD` for the current tip. Commit
   `2d761986` is the earlier PhaseFuse starting point, not the current evidence
   baseline.
 * Active source of truth: `AGENTS.md` -> `docs/PROJECT_MEMORY.md` ->
@@ -220,7 +220,8 @@ The next bounded memory slice adds `--coherence-service-cycles N` plus
 `--coherence-capacity-sectors N`. It refuses flat or incomplete decoded
 topology, tracks ordered L2-request directory transitions, waits response
 service behind cross-SM transfers, and reports separate completion counters;
-L1-hidden accesses, fences, resident flushes and protocol ownership remain
+L1-hidden accesses (including same-launch L1-hit invalidation after a remote
+writer), fences, resident flushes and protocol ownership remain
 explicit limits.
 
 Validation for this slice:
@@ -281,7 +282,7 @@ The per-experiment denominators, refusal classes, output digests and blocked
 T2/T3 gates are retained in
 [`docs/sm86_next_experiment_results_20260927.md`](sm86_next_experiment_results_20260927.md).
 
-The bounded E6 PhaseFuse scale probe additionally covers 112 synthetic
+The bounded E6 PhaseFuse scale probe additionally covers 112 synthetic process
 descriptor cases (`N=1k..64k`, four region lengths, complete/unknown residency,
 sorted/shuffled order) with one child per case. All 112 exited successfully and
 preserved terminal state; complete residency collapsed only eligible regions,
@@ -293,15 +294,16 @@ speedup.
 
 The host audit confirmed a live RTX 3090 Ti (UUID
 `GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c`, SM86, driver 615.71.09), and the
-existing small metric-domain campaign completed 13 fresh one-block/one-warp
-read/atomic/reduction/control/store cases with NVBit and NCU. Warp instruction,
+existing small metric-domain campaign was rerun as 13 one-block/one-warp
+read/atomic/reduction/control/store cases with NVBit and NCU. The source/case
+population is reused development material, not an independent holdout. Warp instruction,
 global-store, atomic and reduction counter populations matched; clocks were not
 locked and DRAM domains differed, so the result is non-scoring counter-contract
 evidence. Details and content identities are in
 [`docs/sm86_independent_holdout_20260927.md`](sm86_independent_holdout_20260927.md).
 The locked-clock follow-up is a typed prerequisite blocker: `sudo -n true` is
-unavailable and `nvidia-smi -rgc`/`-rmc` reject clock changes for this user, so
-no privileged clock modification was attempted.
+unavailable and the attempted `nvidia-smi -rgc`/`-rmc` reset probes were denied
+for this user. No clock state was changed or claimed restored.
 
 The matched-baseline audit also ran a three-record one-CTA Accel-Sim smoke
 (`gpu_tot_sim_cycle=5024`, `gpu_tot_sim_insn=96`, one CTA) after discovering
@@ -309,9 +311,10 @@ that legacy `.traceg` parsing requires an explicit `RZ`→`R255` normalization.
 This is a T1 executable compatibility datum, not an SM86/NCU timing score; the
 strict E10A–E10C adapter/refusal contract is in
 [`docs/sm86_external_baseline_contract_20260927.md`](sm86_external_baseline_contract_20260927.md).
-The strict `sm86_traceg_adapter_probe_v1` now round-trips a synthetic three-
-record full-mask `IADD3` fixture with explicit `EXIT` and refuses the real
-holdout's unsupported `IMAD.MOV.U32` at record 0.
+The strict `sm86_traceg_adapter_probe_v2` now round-trips a synthetic two-record
+full-mask `IADD3` fixture with an actual dynamic `EXIT` and refuses the real
+holdout's unsupported `IMAD.MOV.U32` at record 0. The probe is a self-parser
+round trip, not independent legacy-parser validation.
 
 An adversarial PhaseFuse review found and corrected a P0 false-certificate
 path: sampled/multi-launch traces, non-full lane populations, multi-block or
@@ -324,3 +327,10 @@ The hardened PhaseFuse wrapper was rerun for five repeats across all 112 matrix
 cases (560 rows, zero failures/timeouts/truncations); executable/source
 identities are recorded by the wrapper and in the latest E6 ledger row. The
 scaling result remains descriptor/analyzer evidence, not native trace timing.
+
+The final adapter hardening narrowed E10A to a strict v2 ALU-only,
+control-sidecar-driven representation probe. It requires an actual dynamic
+`EXIT`, refuses memory/branches/predicates and EOF, bounds all inputs, refuses
+output overwrite, and has 24 pinned-protobuf adversarial tests (15 default
+tests plus 9 missing-runtime skips). Its self-parser result is not independent
+legacy-parser validation.

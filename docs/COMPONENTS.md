@@ -12,6 +12,7 @@
 | `sim/direct_run` | Package/binary `sim-run`, library `sim_direct_run`, prepared replay |
 | `sim/run` | Retained package/binary `sim-run-campaign`, library `sim_run`, shared emitters |
 | `tools/nvbit_tracer` | Produce native dynamic trace evidence |
+| `tools/traceg_adapter_probe` | Fail-closed SM86 common-subset protobuf-to-legacy-`.traceg` representation probe; not a timing frontend |
 | `tools/local_labels` | Collect/parse independent NCU observations |
 | `tools/custom_simt_differential.py` | Separately implemented bounded functional/timing reference; not hardware truth |
 | `arch_profiles` | Native cards, hypothetical specs, custom programs, schemas |

@@ -136,7 +136,7 @@ because its dynamic records lack the static register-projection evidence
 required by the strengthened PhaseFuse contract; that is an explicit refusal,
 not a speed or accuracy result.
 
-On the verified local RTX 3090 Ti, the bounded independent counter holdout can
+On the verified local RTX 3090 Ti, the bounded counter-domain development rerun can
 be regenerated in a fresh output directory with:
 
 ```bash
@@ -149,7 +149,8 @@ python workloads/research_probes/sm86_metric_domains/run.py \
 ```
 
 This path records device identity, NVBit trace, NCU report/CSV, replay input
-hashes and a comparison CSV. It is deliberately non-scoring unless clocks,
+hashes and a comparison CSV. It reuses the existing metric-domain source/case
+matrix and is deliberately non-scoring unless clocks,
 metric domains, and dirty-flush/ownership contracts are independently closed;
 see [the holdout report](sm86_independent_holdout_20260927.md).
 
@@ -158,13 +159,13 @@ The strict tiny external-input probe is exercised without a large simulator:
 ```bash
 PYTHONPATH=. .venv/bin/python -m tools.traceg_adapter_probe.adapter \
   --trace DYNAMIC_TRACE.pb --threadblock ONE_BLOCK.pb \
-  --sidecar ENHANCED_EXECUTION_INFO.json --out-dir /tmp/traceg_probe \
-  --allow-eof
+  --control CONTROL_BITS.json --out-dir /tmp/traceg_probe \
+  --exec-info ENHANCED_EXECUTION_INFO.json
 .venv/bin/python -m pytest tools/traceg_adapter_probe/test_adapter.py -q
 ```
 
-`--allow-eof` emits a parser-only non-scoring artifact; explicit `EXIT` is
-required for any future common-endpoint timing attempt. Unsupported opcodes,
+The input must contain an actual dynamic `EXIT`; EOF and synthetic termination
+are refused. Unsupported opcodes,
 register files, masks, address encodings and missing joins return typed
 refusals.
 

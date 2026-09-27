@@ -13,9 +13,10 @@ research is complete. Start with [memory](PROJECT_MEMORY.md); use
 | Custom `simt_u32_v1` | Dependency/resource overlap, resident groups, separate global/shared words, atomic add, broadcast/reduction, bounded CTA barriers | Fixed ISA; no general compiler, weak memory or native cache timing |
 | Custom `simt_its_v1` | Per-lane PCs/predicates, reconvergence, indirect loads/stores, optional versioned execution trace | Single group, functional only; not native SASS regeneration |
 | `ptx_subset_v1` frontend | Bounded text-to-`simt_its_v1` compiler for lane ID, integer arithmetic, predicates, labels, indirect u32 load/store, exit | Functional subset only; no ABI, calls, atomics, vector types, arbitrary PTX or SASS |
-| Dirty-sector writeback queue | Explicit `--dirty-writeback-capacity-sectors` native SM86 launch path; shared read/write fixed-point service, transactional eviction admission, same-line hazard, tokenized completion | Opt-in bounded model; coherence ownership/visibility and resident dirty flush semantics remain tails |
-| Coherence directory service | Explicit `--coherence-service-cycles N --coherence-capacity-sectors N` launch path; ordered L2-request directory transitions, pending-visibility completion, local/texture-domain refusal, and separate completion counters | Requires full unsampled decoded topology and a cold-start assumption; L1-hidden accesses, resident ownership, protocol fences and native visibility scope remain outside the model |
+| Dirty-sector writeback queue | Explicit `--dirty-writeback-capacity-sectors` native SM86 launch path; shared read/write fixed-point service, transactional eviction admission, same-line hazard, tokenized completion, and sampled-coverage refusal | Opt-in bounded model; coherence ownership/visibility and resident dirty flush semantics remain tails |
+| Coherence directory service | Explicit launch-scoped `--coherence-service-cycles N --coherence-capacity-sectors N` path; ordered L2-request directory transitions, pending-visibility completion, local/texture-domain refusal, and separate completion counters | Requires full unsampled decoded topology and a cold-start assumption; L1-hidden accesses/L1 invalidation, resident ownership, protocol fences and native visibility remain outside; stream-L2 sessions reject the opt-in |
 | PhaseFuse fast frontier | Trace-derived scalar-region certificate/refusal report via `sim-run --fast-frontier-only`; complete unsampled single-launch mask metadata, one empty-boundary warp, and static register RAW/WAW evidence are required; non-full populations become refusals | Conservative analysis only; skips native timing, refuses multi-launch/roster/prefix contexts, unknown register provenance/slot reuse, and cannot certify memory, barriers, dynamic pipes or silicon |
+| Tiny `.traceg` capability probe | Strict `sm86_traceg_adapter_probe_v2` one-CTA/one-warp representation round-trip with typed refusals and dynamic `EXIT` | Self-parser evidence only; memory/branches/predicates/other opcodes refuse; no independent Accel-Sim/MGPUSim parser or timing claim |
 
 Custom barriers require matching lengths/positions/IDs, one use per ID, and
 all participants resident. Same-phase shared conflicts and inter-group global
@@ -85,7 +86,7 @@ requirements.
 The latest bounded evidence ledger is
 [sm86_next_experiment_results_20260927.md](sm86_next_experiment_results_20260927.md).
 
-The first live RTX 3090 Ti/NCU microbench holdout is summarized in
+The live RTX 3090 Ti/NCU microbench **development rerun** is summarized in
 [sm86_independent_holdout_20260927.md](sm86_independent_holdout_20260927.md).
 The matched-external capability and tiny Accel-Sim smoke contract is
 [sm86_external_baseline_contract_20260927.md](sm86_external_baseline_contract_20260927.md).

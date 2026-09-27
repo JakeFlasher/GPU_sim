@@ -217,6 +217,8 @@ pub enum ReplayError {
         active_masks_missing: u64,
         predicate_masks_missing: u64,
     },
+    #[error("opt-in dirty writeback service requires complete unsampled launch coverage")]
+    WritebackRequiresFullCoverage,
     #[error("fast frontier requires complete unsampled trace coverage")]
     FastFrontierRequiresFullCoverage,
     #[error(
@@ -3047,6 +3049,8 @@ pub enum ReplaySessionError {
     Replay(#[from] ReplayError),
     #[error("stream-L2 cache scope requires L1SharedL2 replay mode, got {mode:?}")]
     SharedL2ModeRequired { mode: ReplayMemMode },
+    #[error("stream-L2 replay does not persist the opt-in coherence directory; use launch scope")]
+    CoherenceRequiresLaunchScope,
     #[error("trace stream ({device_id}, {stream_id}) contains no kernel launches")]
     EmptyStream { device_id: i64, stream_id: i64 },
     #[error("replay session is bound to trace root {expected}, got {got}")]
@@ -3126,7 +3130,12 @@ impl StreamL2ReplaySession {
     ) -> Result<Self, ReplaySessionError> {
         let configuration = ReplayConfiguration::checked(*params, mode)?;
         let l2_config = match mode {
-            ReplayMemMode::L1SharedL2 { l2, .. } => l2,
+            ReplayMemMode::L1SharedL2 { l2, coherence, .. } => {
+                if coherence.is_some() {
+                    return Err(ReplaySessionError::CoherenceRequiresLaunchScope);
+                }
+                l2
+            }
             _ => return Err(ReplaySessionError::SharedL2ModeRequired { mode }),
         };
         require_trace_architecture(td, configuration.arch())?;
@@ -3462,6 +3471,17 @@ fn replay_kernel_with_schedule_and_l2_and_candidates(
         trace_metrics,
     } = extract_per_sm_blocks(td, loc, schedule, placement, decode_sectors)?;
     let instrumentation_order = observe_async_instrumentation_order(&per_sm_blocks, schedule)?;
+    #[cfg(feature = "campaign")]
+    if matches!(
+        mode,
+        ReplayMemMode::L1SharedL2 {
+            dram: DramBw::CardedWriteback { .. },
+            ..
+        }
+    ) && matches!(&coverage, ExtractedCoverage::Sampled(_))
+    {
+        return Err(ReplayError::WritebackRequiresFullCoverage);
+    }
     if let ReplayMemMode::L1SharedL2 {
         coherence: Some(_), ..
     } = mode
@@ -4276,6 +4296,22 @@ mod stream_l2_session_tests {
         let card = sm86_test_card();
         let params = params();
         let mode = shared_mode(2, 256);
+
+        let coherence_mode = match mode {
+            ReplayMemMode::L1SharedL2 { l1, l2, dram, .. } => ReplayMemMode::L1SharedL2 {
+                l1,
+                l2,
+                dram,
+                coherence: Some(
+                    sim_mem::CoherenceConfig::new(1, 4).expect("coherence config should validate"),
+                ),
+            },
+            _ => unreachable!("fixture mode must be shared L2"),
+        };
+        assert!(matches!(
+            StreamL2ReplaySession::new(&trace, &card, &params, coherence_mode, 0, 0),
+            Err(ReplaySessionError::CoherenceRequiresLaunchScope)
+        ));
 
         for loc in &locs {
             let cold =
@@ -11665,6 +11701,24 @@ mod completeness_tests {
         assert!(matches!(
             replay_outcome_with(tmp.path(), mode, &[candidate], &[]),
             Err(ReplayError::MemoryServiceCandidatesRequireFullCoverage)
+        ));
+        let writeback_mode = match mode {
+            ReplayMemMode::L1SharedL2 { l1, l2, .. } => ReplayMemMode::L1SharedL2 {
+                l1,
+                l2,
+                dram: DramBw::CardedWriteback {
+                    arch: ArchId::Sm86,
+                    bytes_per_sec: 1_000,
+                    sm_clock_hz: 1,
+                    capacity_sectors: 4,
+                },
+                coherence: None,
+            },
+            _ => unreachable!("fixture mode must be shared L2"),
+        };
+        assert!(matches!(
+            replay_outcome_with(tmp.path(), writeback_mode, &[], &[]),
+            Err(ReplayError::WritebackRequiresFullCoverage)
         ));
 
         let admission = MemoryAdmissionCandidate {

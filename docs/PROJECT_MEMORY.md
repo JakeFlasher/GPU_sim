@@ -30,6 +30,9 @@ records. Do not load every linked report. Root [AGENTS.md](../AGENTS.md) is poli
   output is not a timing prediction or NCU replacement.
 - `ptx_subset_compile` lowers a small text subset into `simt_its_v1`; it is a
   functional compiler/assembler seam, not arbitrary PTX, CUDA ABI or SASS.
+- `tools/traceg_adapter_probe` is a strict v2 representation probe for a
+  single full-mask IADD3/FADD launch with an actual dynamic EXIT. It is a
+  self-parser round trip, not independent legacy-parser validation or timing.
 - Custom `operation_resources` may be a scalar or an alternative list. The
   custom event pipeline selects a feasible resource using modeled latency,
   initiation interval and in-flight capacity, and reports the concrete choice;
@@ -45,7 +48,10 @@ records. Do not load every linked report. Root [AGENTS.md](../AGENTS.md) is poli
   replay, excludes local-sector and texture domains, keeps pending ownership
   invisible until completion, and avoids unrelated-line service head-of-line
   delay. The queue starts cold; L1-hidden accesses, resident ownership,
-  protocol fences and native visibility scope remain explicit limits.
+  same-launch L1-hit invalidation, protocol fences and native visibility scope
+  remain explicit limits. Stream-L2 sessions reject this opt-in because the
+  directory is not persisted across launch boundaries. Carded dirty writeback
+  also refuses sampled coverage.
 
 ## Do not repeat earlier overclaims
 
@@ -62,10 +68,10 @@ records. Do not load every linked report. Root [AGENTS.md](../AGENTS.md) is poli
   compatibility smoke is recorded in the external-baseline contract, not a
   score. Confirm scope before resuming. Old “all future tasks closed”
   session/ledger statements are superseded.
-- A bounded live RTX 3090 Ti/NCU microbench holdout now exists in
-  `docs/sm86_independent_holdout_20260927.md`; its instruction/store/atomic/
-  reduction counter rows match, but clocks were unlocked and DRAM domains do
-  not match, so it is not timing accuracy evidence.
+- A bounded live RTX 3090 Ti/NCU development rerun of the existing metric-domain
+  matrix is documented in `docs/sm86_independent_holdout_20260927.md`; its
+  instruction/store/atomic/reduction counter rows match, but it is not
+  independent/held-out, clocks were unlocked, and DRAM domains do not match.
 
 ## Next concrete seams
 

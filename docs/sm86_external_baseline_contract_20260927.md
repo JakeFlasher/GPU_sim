@@ -5,6 +5,11 @@ an external-simulator accuracy result. It uses pinned source checkouts in
 `/tmp/gpu-simulator-sota-20260927` and the retained local overlap records. No
 large external workload was built or executed for this report.
 
+The executable adapter contract is summarized separately in
+[`traceg_adapter_contract.md`](traceg_adapter_contract.md); this report keeps
+the external-capability and endpoint analysis distinct from that local
+self-parser evidence.
+
 ## Decision in one paragraph
 
 Accel-Sim/GPGPU-Sim is the only retained external path that is close enough to
@@ -219,7 +224,7 @@ close the *capability decision*, not manufacture a score.
 
 The bounded probe is implemented outside the simulator core at
 `tools/traceg_adapter_probe/adapter.py` (schema
-`sm86_traceg_adapter_probe_v1`) with these admission conditions:
+`sm86_traceg_adapter_probe_v2`) with these admission conditions:
 
 1. One exact-full SM86 launch, one CTA, one warp, and at most 64 dynamic records.
 2. Every dynamic `(function_unique_id, vpc)` joins exactly once to the
@@ -249,14 +254,14 @@ Acceptance is byte-stable canonical equality and zero refused records after the
 preconditions. This is a T0/T1 adapter result; it says nothing about timing
 accuracy.
 
-The synthetic common-subset fixture passed this round trip for three full-mask
-`IADD3` records plus an explicit `EXIT`:
+The synthetic common-subset fixture passed this round trip for two full-mask
+`IADD3` records plus an actual dynamic `EXIT` record:
 
 ```text
-schema: sm86_traceg_adapter_probe_v1
-record_count: 3
-termination: explicit_exit
-traceg_sha256: 9c29c7b623e51c6b7e87b5c455883bd2eec628a55e66c836412b2ff16f7bc136
+schema: sm86_traceg_adapter_probe_v2
+record_count: 2
+termination: dynamic_exit
+traceg_sha256: 5bc10652701d0e97deb9fd640df3f0c6e03381b9f9c432a059a521e5fa7dfd36
 kernelslist_sha256: beb03d46bd1f5a6c20fdb34aaaeed37de3fc31e5010ff2c5657a7778e3e9a40c
 ```
 
@@ -321,6 +326,8 @@ upgrade E10 from feasibility to a numeric baseline.
 | Vortex/OpenVADL demonstrate arbitrary NVIDIA ISA/compiler generation. | No. | Vortex is RISC-V; compiler/ISA extensibility is a reference direction, not an NVIDIA adapter. |
 | A tiny, common-subset parser/trace experiment is feasible. | Yes, T1 parser/round-trip probe implemented; real holdout outside subset refuses. | One-CTA/one-warp contract above; no large simulation required. |
 
-E10A is complete as a parser/round-trip capability result; E10B parser
-integration and any common-endpoint timing comparison remain open. Keep `E10`
-non-scoring and never replace it with a synthetic cycle score.
+E10A is a bounded self-parser/round-trip capability result; it is not an
+independent legacy-parser validation because the external parser was not
+invoked by the probe. E10B parser integration and any common-endpoint timing
+comparison remain open. Keep `E10` non-scoring and never replace it with a
+synthetic cycle score.

@@ -14,9 +14,9 @@ from workloads.research_probes.phasefuse_scaling.benchmark import (
 
 def _expected() -> dict[str, object]:
     return {
-        "case_key": "n4-r8-complete-sorted-seed7",
+        "case_key": "n4-r1-complete-sorted-seed7",
         "n": 4,
-        "region_len": 8,
+        "region_len": 1,
         "residency": "complete",
         "order": "sorted",
         "seed": 7,
@@ -62,6 +62,13 @@ def test_contract_rejects_malformed_numeric_types_without_raising() -> None:
     payload["n_records"] = "four"
     failures = validate_contract(payload, _expected())
     assert any("n_records" in failure for failure in failures)
+
+
+def test_contract_missing_discriminator_is_reported_without_keyerror() -> None:
+    payload = _contract()
+    payload.pop("residency")
+    failures = validate_contract(payload, _expected())
+    assert any("missing fields" in failure for failure in failures)
 
 
 def test_nonzero_verbose_child_is_a_failure_without_pipe_deadlock() -> None:

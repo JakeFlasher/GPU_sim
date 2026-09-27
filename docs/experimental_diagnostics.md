@@ -108,6 +108,8 @@ one configured service interval per affected sector. The model refuses runs
 with flat/unknown SM or sector topology and reports completion counters
 separately. It does not see L1-hidden accesses, fences, protocol messages,
 resident dirty flushes, or hardware ownership state, so it is not a coherence
-protocol or silicon timing claim.
+protocol or silicon timing claim. In particular, a same-launch resident L1 hit
+after a remote writer has no modeled L1 invalidation callback and remains
+outside this directory seam.
 
 Runnable smoke commands and schema validation are in [testing](testing.md).
