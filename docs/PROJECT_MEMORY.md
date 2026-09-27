@@ -14,9 +14,11 @@ records. Do not load every linked report. Root [AGENTS.md](../AGENTS.md) is poli
   scheduling, resident groups, shared memory, bounded barriers, atomics and
   collectives. It does not share native cache timing.
 - `simt_its_v1`: single-group functional per-lane PCs plus indirect u32 memory;
-  `custom_simt_its SPEC PROGRAM --trace` emits `custom_its_dynamic_v1` JSON.
+  `custom_simt_its SPEC PROGRAM --trace` emits `custom_its_dynamic_v2` JSON.
   Trace cap is 100k records plus 32 MiB of accumulated serialized bytes for the
   individual JSON records (the result envelope is not counted), not an RSS cap.
+  Records include grouped successor masks and explicit BSSY/BSYNC
+  join/resume PCs; this remains a custom functional CFG artifact.
 - Native `schema_version=1`, `metric_surface_version=2`; the metric map is
   additive. Dirty-writeback/coherence scenario rows are postprocessing formulas.
   `min_selected_then_lexical_v1` balances candidate counts in extraction order,
@@ -24,6 +26,16 @@ records. Do not load every linked report. Root [AGENTS.md](../AGENTS.md) is poli
 - `sim-run --fast-frontier-only` is an opt-in trace-derived PhaseFuse lane. It
   skips native timing replay, certifies only narrow scalar regions, and reports
   refusal reasons; its output is not a timing prediction or NCU replacement.
+- `ptx_subset_compile` lowers a small text subset into `simt_its_v1`; it is a
+  functional compiler/assembler seam, not arbitrary PTX, CUDA ABI or SASS.
+- Custom `operation_resources` may be a scalar or an alternative list. The
+  custom event pipeline selects a feasible resource using modeled latency,
+  initiation interval and in-flight capacity, and reports the concrete choice;
+  this is not native SM86 physical-pipe attribution.
+- `sim-mem::writeback` provides an opt-in dirty-sector queue primitive with
+  transactional capacity/timing preflight, fixed-point byte service,
+  same-line fetch hazards and tokenized completion. It is not yet integrated
+  into native replay and does not model coherence ownership/visibility.
 
 ## Do not repeat earlier overclaims
 
@@ -41,10 +53,12 @@ records. Do not load every linked report. Root [AGENTS.md](../AGENTS.md) is poli
 
 ## Next concrete seams
 
-Use the PhaseFuse fast lane to gather refusal/certificate populations, then add
-state-complete summaries only for one mechanism at a time; finish
-mechanism-backed memory/pipeline execution if requested; extend the ITS trace
-schema and reconvergence-successor semantics with further independent
+Use the PhaseFuse fast lane to gather refusal/certificate populations, the
+bounded PTX subset for value-dependent functional studies, and the custom route
+contract for controlled scheduling experiments. Integrate the writeback queue
+only after a native event/config seam is independently validated; then add
+state-complete summaries only for one mechanism at a time; extend the ITS
+trace schema and reconvergence-successor semantics with further independent
 input-varying cases; use same-domain, content-bound independent captures for
 evaluation. Strict Clippy has known
 pre-existing debt. Do not turn these into automatic review/workflow loops.

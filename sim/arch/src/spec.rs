@@ -9,7 +9,8 @@
 //! may be chosen by users; validation here checks shape, not physical accuracy.
 
 use crate::json::strict_json_from_slice;
-use serde::{Deserialize, Serialize};
+use serde::ser::SerializeMap;
+use serde::{Deserialize, Serialize, Serializer};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::io::Read;
@@ -57,7 +58,7 @@ struct RawResourceSpec {
     max_in_flight: Option<u32>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct RawArchitectureSpec {
     schema_version: u32,
@@ -69,7 +70,14 @@ struct RawArchitectureSpec {
     resources: Vec<RawResourceSpec>,
     evidence: EvidenceStatus,
     #[serde(default)]
-    operation_resources: BTreeMap<String, String>,
+    operation_resources: BTreeMap<String, RawResourceBinding>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(untagged)]
+enum RawResourceBinding {
+    Single(String),
+    Alternatives(Vec<String>),
 }
 
 /// A structurally validated definition for custom functional/timing backends.
@@ -85,7 +93,28 @@ pub struct ArchitectureSpec {
     execution: ExecutionSpec,
     resources: Vec<ResourceSpec>,
     evidence: EvidenceStatus,
-    operation_resources: BTreeMap<String, String>,
+    #[serde(serialize_with = "serialize_operation_resources")]
+    operation_resources: BTreeMap<String, Vec<String>>,
+}
+
+fn serialize_operation_resources<S>(
+    bindings: &BTreeMap<String, Vec<String>>,
+    serializer: S,
+) -> Result<S::Ok, S::Error>
+where
+    S: Serializer,
+{
+    // Preserve the schema-v1 scalar representation for fixed bindings while
+    // emitting an array only when an operation has genuine alternatives.
+    let mut map = serializer.serialize_map(Some(bindings.len()))?;
+    for (operation, resources) in bindings {
+        if let [resource] = resources.as_slice() {
+            map.serialize_entry(operation, resource)?;
+        } else {
+            map.serialize_entry(operation, resources)?;
+        }
+    }
+    map.end()
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -211,13 +240,39 @@ impl ArchitectureSpec {
             });
         }
 
-        for (op, resource) in &raw.operation_resources {
-            if !instruction_names.contains(op) || !names.contains(resource) {
+        let mut operation_resources = BTreeMap::new();
+        for (op, binding) in &raw.operation_resources {
+            let alternatives = match binding {
+                RawResourceBinding::Single(resource) => vec![resource.clone()],
+                RawResourceBinding::Alternatives(resources) => resources.clone(),
+            };
+            if alternatives.is_empty()
+                || alternatives
+                    .iter()
+                    .any(|resource| !names.contains(resource))
+            {
                 return Err(SpecError::InvalidValue {
                     field: "operation_resources",
-                    detail: format!("unknown operation/resource binding {op} -> {resource}"),
+                    detail: format!("invalid resource alternatives for {op}"),
                 });
             }
+            let mut unique = BTreeSet::new();
+            if alternatives
+                .iter()
+                .any(|resource| !unique.insert(resource.as_str()))
+            {
+                return Err(SpecError::InvalidValue {
+                    field: "operation_resources",
+                    detail: format!("duplicate resource alternative for {op}"),
+                });
+            }
+            if !instruction_names.contains(op) {
+                return Err(SpecError::InvalidValue {
+                    field: "operation_resources",
+                    detail: format!("unknown operation {op}"),
+                });
+            }
+            operation_resources.insert(op.clone(), alternatives);
         }
         Ok(Self {
             schema_version: raw.schema_version,
@@ -230,7 +285,7 @@ impl ArchitectureSpec {
             },
             resources,
             evidence: raw.evidence,
-            operation_resources: raw.operation_resources,
+            operation_resources,
         })
     }
 
@@ -258,7 +313,7 @@ impl ArchitectureSpec {
         &self.resources
     }
 
-    pub fn operation_resources(&self) -> &BTreeMap<String, String> {
+    pub fn operation_resources(&self) -> &BTreeMap<String, Vec<String>> {
         &self.operation_resources
     }
 
@@ -452,6 +507,55 @@ mod tests {
             ArchitectureSpec::parse(Path::new("capacity.json"), raw),
             Err(SpecError::InvalidValue {
                 field: "execution.max_resident_groups",
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn alternative_resource_bindings_are_unique_and_round_trip_compatibly() {
+        let raw = br#"{
+          "schema_version": 1,
+          "architecture": "toy",
+          "isa": "toy_isa",
+          "instruction_set": ["add_imm"],
+          "execution": {"simt_width": 8, "max_resident_groups": 1},
+          "resources": [
+            {"name":"alu0","kind":"compute","issue_width":1,"latency_cycles":1},
+            {"name":"alu1","kind":"compute","issue_width":1,"latency_cycles":2}
+          ],
+          "operation_resources": {"add_imm": ["alu1", "alu0"]},
+          "evidence": "unvalidated"
+        }"#;
+        let spec = ArchitectureSpec::parse(Path::new("alternatives.json"), raw)
+            .expect("alternative binding should validate");
+        assert_eq!(
+            spec.operation_resources().get("add_imm"),
+            Some(&vec!["alu1".to_owned(), "alu0".to_owned()])
+        );
+        let encoded = serde_json::to_value(&spec).expect("spec should serialize");
+        assert_eq!(
+            encoded["operation_resources"]["add_imm"],
+            serde_json::json!(["alu1", "alu0"])
+        );
+
+        let duplicate = br#"{
+          "schema_version": 1,
+          "architecture": "toy",
+          "isa": "toy_isa",
+          "instruction_set": ["add_imm"],
+          "execution": {"simt_width": 8, "max_resident_groups": 1},
+          "resources": [
+            {"name":"alu0","kind":"compute","issue_width":1,"latency_cycles":1},
+            {"name":"alu1","kind":"compute","issue_width":1,"latency_cycles":2}
+          ],
+          "operation_resources": {"add_imm": ["alu0", "alu0"]},
+          "evidence": "unvalidated"
+        }"#;
+        assert!(matches!(
+            ArchitectureSpec::parse(Path::new("duplicate-alternative.json"), duplicate),
+            Err(SpecError::InvalidValue {
+                field: "operation_resources",
                 ..
             })
         ));

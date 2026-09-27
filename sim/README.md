@@ -23,8 +23,10 @@ replacement; see [`docs/sm86_fast_exact_prototype_20260927.md`](../docs/sm86_fas
 
 - `sim-arch::spec`: validated hypothetical resources and operation bindings.
 - `sim-arch::simt`: fixed `simt_u32_v1` functional/timing semantics.
+- `sim-arch::ptx_subset`: bounded text-to-ITS functional frontend, explicitly
+  rejecting unsupported ABI, memory and ISA forms.
 - `sim-arch::its`: separate single-group `simt_its_v1` functional example
-  with optional `custom_its_dynamic_v1` execution records.
+  with optional `custom_its_dynamic_v2` execution records.
 - `sim-arch::simt_pipeline`: register/memory dependency lowering.
 - `sim-sm::custom` and `custom-program-run`: resident-group scheduling through
   the shared dependency/resource engine.

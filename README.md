@@ -6,8 +6,10 @@ Software architectural simulation with two executable frontends:
   feed the Rust SM, cache/memory, and event models. The active hardware anchor
   is Ampere SM86 (RTX 3090 Ti); other retained cards are not validated by this work.
 - **Custom models:** bounded `simt_u32_v1` programs and declarative resources
-  feed `sim-sm::custom` and the shared dependency/event engine. The separate
-  Curry-inspired `simt_its_v1` example is functional-only.
+  feed `sim-sm::custom` and the shared dependency/event engine; resource
+  alternatives are selected with explicit model timing. The separate
+  Curry-inspired `simt_its_v1` example is functional-only, with a bounded
+  `ptx_subset_v1` frontend and dynamic CFG trace.
 
 ```text
 NVBit -> traces_enhanced -> sim-trace -> sim-sm / sim-mem / sim-engine -> sim-run
@@ -43,9 +45,11 @@ cargo run --manifest-path sim/Cargo.toml -p sim-sm --bin custom-program-run -- \
 ```
 
 The custom example produces model-relative timing, not a hardware prediction.
-Instruction-count mappings exist for retained SM86 examples; complete elapsed
-timing, mechanism-backed completion/routing and independent evaluation remain
-open. [Diagnostics](docs/experimental_diagnostics.md) do not close these gaps.
+Instruction-count mappings exist for retained SM86 examples; native elapsed
+timing, writeback/coherence completion, physical-pipe attribution and
+independent evaluation remain open. The bounded writeback queue, route
+alternatives and PTX subset are executable seams, not silicon claims.
+[Diagnostics](docs/experimental_diagnostics.md) records these limits.
 No fair full numerical Accel-Sim/MGPUSim comparison has been established.
 
 ## Repository map

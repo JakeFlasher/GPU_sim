@@ -9,9 +9,9 @@ to load and which claims not to revive.
 ## Current consolidation baseline
 
 * Repository: `/home/jakeshea/GPU_simulator_rebase`, branch `GPUSim_main`.
-* Code/evidence baseline before this consolidation: commit `4e090116`
-  (`Add SM86 phase-separated speed cohort`); the working tree then contained
-  the SM86 bounded-model and documentation changes under review.
+* Code/evidence baseline before this continuation: commit `2d761986`
+  (`Add PhaseFuse fast SM86 frontier lane`); the working tree then contained
+  the bounded route/compiler and documentation changes under review.
 * Active source of truth: `AGENTS.md` -> `docs/PROJECT_MEMORY.md` ->
   `docs/STATUS.md` -> the narrow source/runbook needed by the task.
 * Current scope: software architectural replay anchored on SM86/RTX 3090 Ti,
@@ -159,3 +159,48 @@ Strict workspace Clippy remains blocked by existing `sim-sm` error-size and
 high-arity findings; no new PhaseFuse-specific lint was observed. External
 SOTA repositories were cloned and inspected only; no large external simulation
 was run.
+
+The follow-up continuation then bumped the opt-in trace contract to
+`custom_its_dynamic_v2`, adding grouped `successor_masks` and explicit
+BSSY/BSYNC join/resume PCs for functional CFG experiments. Native SASS
+regeneration remains explicitly unavailable.
+
+## 2026-09-27 bounded routing/compiler continuation
+
+The custom architecture schema now accepts scalar or alternative resource
+bindings. The shared event pipeline chooses a concrete allowed resource using
+modeled latency, initiation interval and in-flight capacity, exposes the
+selection in timing/resource reports, and preserves scalar JSON compatibility.
+This closes a controlled custom scheduling seam only; native SM86 physical-pipe
+identity remains unavailable in the trace contract.
+
+The `ptx_subset_v1` frontend and `ptx_subset_compile` CLI now lower a bounded
+PTX-like subset into validated `simt_its_v1` programs with explicit source,
+instruction, memory and step limits. Mixed signed memory inputs exercise
+value-dependent successor masks and output stores. Unsupported directives,
+predication, calls, atomics, ABI forms and arbitrary PTX are rejected.
+
+Fresh source inspection also covered FlashGPU-Sim and OpenVADL/LLVM generation
+patterns. No full external simulator or large workload was run. Native
+writeback/coherence completion, physical-pipe reconstruction, execution-driven
+SASS regeneration and arbitrary ISA/compiler generation remain honest gaps. A
+transactional `sim-mem::writeback::WritebackQueue` was added as a reusable
+dirty-sector mechanism primitive; native event-loop integration and coherence
+ownership/visibility remain deliberately deferred rather than overclaimed.
+
+Validation for this continuation:
+
+```text
+cargo test --manifest-path sim/Cargo.toml --workspace --quiet                  PASS
+cargo test --manifest-path sim/Cargo.toml -p sim-sm --features campaign --quiet PASS
+cargo clippy --manifest-path sim/Cargo.toml -p sim-arch --all-targets -- -D warnings PASS
+cargo clippy --manifest-path sim/Cargo.toml -p sim-engine --all-targets -- -D warnings PASS
+cargo clippy --manifest-path sim/Cargo.toml -p sim-mem --lib -- -D warnings PASS
+PTX subset -> ITS v2 mixed-input execution and JSON-schema validation          PASS
+alternative-resource route executable smoke and selected-resource checks       PASS
+```
+
+Strict `sim-sm` and workspace Clippy remain red on pre-existing error-size,
+argument-count and complexity findings; the changed `sim-arch`, `sim-engine`
+and writeback library targets are clean under their focused `-D warnings`
+checks.

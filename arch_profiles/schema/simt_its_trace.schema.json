@@ -30,8 +30,8 @@
     "pcs": {"type": "array"},
     "active_lanes": {"type": "array"},
     "memory": {"type": "object"},
-    "dynamic_trace_schema_version": {"const": 1},
-    "dynamic_trace_contract": {"const": "custom_its_dynamic_v1"},
+    "dynamic_trace_schema_version": {"const": 2},
+    "dynamic_trace_contract": {"const": "custom_its_dynamic_v2"},
     "dynamic_trace_serialized_bytes": {
       "type": "integer",
       "minimum": 0,
@@ -44,7 +44,7 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["sequence", "pc", "active_mask", "instruction", "lane_addresses", "lane_successors", "lane_blocked_by"],
+        "required": ["sequence", "pc", "active_mask", "instruction", "lane_addresses", "lane_successors", "successor_masks", "lane_blocked_by", "reconvergence_join_pc", "reconvergence_resume_pc"],
         "properties": {
           "sequence": {"type": "integer", "minimum": 0},
           "pc": {"type": "integer", "minimum": 0},
@@ -52,11 +52,14 @@
           "instruction": {"type": "object"},
           "lane_addresses": {"type": "object", "additionalProperties": {"type": "integer", "minimum": 0}},
           "lane_successors": {"type": "object", "additionalProperties": {"type": "integer", "minimum": 0}},
+          "successor_masks": {"type": "object", "additionalProperties": {"type": "integer", "minimum": 0}},
           "lane_blocked_by": {
             "type": "object",
             "description": "Lane index to bounded BSSY/BSYNC barrier slot when the lane remains blocked after this record.",
             "additionalProperties": {"type": "integer", "minimum": 0, "maximum": 15}
-          }
+          },
+          "reconvergence_join_pc": {"type": ["integer", "null"], "minimum": 0},
+          "reconvergence_resume_pc": {"type": ["integer", "null"], "minimum": 0}
         }
       }
     }

@@ -42,6 +42,7 @@ Fresh shallow clones were inspected outside the repository at
 | [Vortex](https://github.com/vortexgpgpu/vortex) | `ed4098d` | Open RISC-V SIMT stack with configurable warps, issue width and units; LLVM-based VOLT toolchain. SimX has IPDOM scheduling, barriers, sector caches, write-back LLC rules and an explicit multi-level `flush_caches()` walk. |
 | [EventQueue](https://github.com/cucapra/EventQueue) | `d4b4dd5` | MLIR EQueue dialect separates structure/control from a generic timed event engine and compiler passes. It is a strong extensibility pattern, not NVIDIA SASS compatibility. |
 | [PIMSIM-NN](https://github.com/wangxy-2000/pimsim-nn) | `3e3442b` | Compiler-generated instruction stream + JSON architecture/NoC configuration + event-driven SystemC simulator. It demonstrates an ISA/compiler/simulator contract for a new accelerator, not arbitrary GPU ISA generation. |
+| [FlashGPU-Sim](https://github.com/FlashGPU-Sim/FlashGPU-Sim) | `d20ce45` | Execution-driven modern CUDA simulator with TMA, `mbarrier`, MMA/WGMMA and TritonTrace/NCU validation. Its public configurations target newer GPUs; it is prior art for feature coverage, not local SM86 validation. |
 
 The corresponding papers were read from primary PDFs/arXiv:
 
@@ -70,6 +71,11 @@ The corresponding papers were read from primary PDFs/arXiv:
 - [PIMSIM-NN](https://arxiv.org/abs/2402.18089) shows a concrete
   compiler-to-ISA-to-event-simulator workflow with JSON architecture/NoC
   configuration.
+- [OpenVADL](https://openvadl.github.io/openvadl/) and LLVM TableGen document
+  realistic generated-ISA stages (ISS, encoder/decoder, assembler and LLVM
+  backend) while explicitly leaving a cycle-approximate simulator generator as
+  future work. The local subset therefore stops at a functional executor and
+  assembler-like lowering.
 
 ## What the study rules out
 
@@ -151,3 +157,31 @@ Before claiming a publishable breakthrough, PhaseFuse needs:
 The four native gaps therefore remain open. PhaseFuse resolves a real,
 executable fast-analysis seam and creates a path to close portions of those
 gaps only when the missing state contracts become available.
+
+## Bounded custom routing seam
+
+The custom architecture contract now admits alternative resources per
+operation. Its event scheduler evaluates modeled service completion, issue
+interval and in-flight capacity, records the selected resource, and uses a
+canonical resource-index tie break. The route example is executable and
+reproducible, but it is intentionally not a claim that SM86 physical pipe IDs
+can be recovered from NVBit traces.
+
+## Bounded dirty writeback seam
+
+`sim-mem::writeback::WritebackQueue` consumes the exact dirty/valid/pending
+sector masks already exposed by `L2Eviction`. It performs transactional queue
+capacity checks, fixed-point byte-server timing, same-line fetch-hazard
+tracking and explicit token completions. This is the smallest executable
+mechanism that can be validated without inventing a coherence protocol. It is
+not wired into the native SM86 event loop yet, and therefore does not close
+hardware writeback, ownership or visibility completion.
+
+## Bounded functional compiler seam
+
+`ptx_subset_compile` lowers `ptx_subset_v1` text into a validated
+`simt_its_v1` JSON program. It supports lane ID, integer add/multiply,
+less-than predicates, direct labels, indirect u32 loads/stores and exit. It
+rejects calls, ABI sequences, negated predication, atomics, vector types,
+unknown memory semantics and arbitrary PTX. This makes value-dependent CFG
+experiments reproducible without implying CUDA/PTX/SASS compatibility.

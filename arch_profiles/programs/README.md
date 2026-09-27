@@ -41,6 +41,14 @@ cargo run --manifest-path sim/Cargo.toml -p sim-arch --bin custom_simt_timing --
   arch_profiles/programs/simt_u32_async_store.json
 ```
 
+`simt_u32_route_alternatives.json` demonstrates the bounded hypothetical
+resource-routing contract: an operation may name an alternative set, and the
+dependency/resource scheduler chooses the earliest feasible resource using
+latency, initiation interval and in-flight capacity (canonical resource-index
+order breaks equal ties). The selected resource is reported in timing events.
+This is an executable custom-model experiment, not native SM86 physical-pipe
+attribution.
+
 `simt_u32_vecadd.json` adds initialized memory plus load/add/store operations
 for the functional cross-model comparison against Vortex `vecadd`.
 Loads and stores are 32-bit byte-addressed words; the retained lane probes use
@@ -83,9 +91,24 @@ cargo run --manifest-path sim/Cargo.toml -p sim-arch --bin custom_simt_its -- \
 `custom_simt_its ... --trace` enables an execution-generated dynamic record
 for this bounded ITS frontend. `simt_its_dynamic.json` demonstrates values
 computed at run time becoming indirect load/store addresses; the emitted
-records contain the executed PC, active mask, lane addresses, runnable
-successors, and explicit barrier-blocked lanes. Capture is bounded at 100,000
+records contain the executed PC, active mask, lane addresses, grouped successor
+masks, runnable successors, bounded reconvergence metadata, and explicit
+barrier-blocked lanes. Capture is bounded at 100,000
 records and 32 MiB of serialized record bytes. This is execution evidence for
 the custom functional ISA only, not a regenerated native SASS trace or a
 silicon timing model. The opt-in output is versioned by
 `arch_profiles/schema/simt_its_trace.schema.json`.
+
+`ptx_subset_compile` provides a deliberately bounded text-to-`simt_its_v1`
+frontend for `mov %laneid`, integer add/multiply, compare-less-than, direct
+branch labels, indirect u32 load/store, and exit. For example:
+
+```bash
+cargo run --manifest-path sim/Cargo.toml -p sim-arch --bin ptx_subset_compile -- \
+  example_its arch_profiles/programs/simt_its_subset.ptx /tmp/simt_its_subset.json
+```
+
+This is a functional compiler/assembler seam only: calls, ABI, negated
+predicates, atomics, vector types, arbitrary PTX, and native SASS generation
+are rejected rather than guessed. The contract is `ptx_subset_v1` and remains
+separate from SM86 replay.

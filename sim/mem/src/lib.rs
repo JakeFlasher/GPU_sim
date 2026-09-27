@@ -27,6 +27,8 @@
 //!   calibration is never consumed, Rule 1).
 //! - [`access`]: the shared `MemRole`/`AccessKind` record classification
 //!   (token-preserving, so hierarchy levels can specialize per token).
+//! - [`writeback`]: an opt-in transactional dirty-sector service primitive;
+//!   it is not native SM86 coherence completion.
 //!
 //! Later increment: the DRAM bandwidth model (v0 prices DRAM as the
 //! carded flat latency — no bytes-per-cycle covariate is carded at the
@@ -38,6 +40,7 @@ pub mod cache_op;
 pub mod l1;
 pub mod l2;
 pub mod pchase_card;
+pub mod writeback;
 
 pub use access::{
     ASYNC_COPY_COMPLETION_VALUE_MASK, ASYNC_COPY_COMPOSITE_PAYLOAD_WORK_MAX, AccessKind,
@@ -69,3 +72,4 @@ pub use pchase_card::{
     GeometryPolicyConfig, LatencyConfig, LineCapacityConfig, MshrConfig, PchaseCard,
     PchaseCardError, WalkGeometry,
 };
+pub use writeback::{WritebackCompletion, WritebackError, WritebackPlan, WritebackQueue};

@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "architecture": "example_simt8_route",
+  "isa": "simt_u32_v1",
+  "instruction_set": ["set_lane_id", "add_imm", "halt"],
+  "execution": {"simt_width": 8, "max_resident_groups": 1},
+  "resources": [
+    {"name": "slow_alu", "kind": "compute", "issue_width": 1, "latency_cycles": 8, "initiation_interval": 4, "max_in_flight": 1},
+    {"name": "fast_alu", "kind": "compute", "issue_width": 1, "latency_cycles": 1, "initiation_interval": 1, "max_in_flight": 1}
+  ],
+  "operation_resources": {"set_lane_id": "slow_alu", "add_imm": ["slow_alu", "fast_alu"]},
+  "evidence": "unvalidated"
+}

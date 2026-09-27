@@ -19,7 +19,10 @@ defining arbitrary new ISA operations. An absent latency is unknown, never an
 invented default. Resource entries may also declare `initiation_interval` and
 `max_in_flight`; these are consumed by the shared event pipeline rather than
 treated as cosmetic metadata. `operation_resources` can bind admitted bounded
-operations to named resources; unknown operations/resources fail closed.
+operations to one named resource or an alternative set; alternatives are
+canonicalized by resource index and selected by modeled completion. Unknown or
+duplicate operations/resources fail closed. This custom routing contract is
+not native SM86 physical-pipe attribution.
 
 Validate an example with:
 

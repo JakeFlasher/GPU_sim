@@ -14,8 +14,8 @@ use std::path::Path;
 
 pub const ITS_PROGRAM_SCHEMA_VERSION: u32 = 1;
 pub const ITS_ISA: &str = "simt_its_v1";
-pub const ITS_TRACE_SCHEMA_VERSION: u32 = 1;
-pub const ITS_TRACE_CONTRACT: &str = "custom_its_dynamic_v1";
+pub const ITS_TRACE_SCHEMA_VERSION: u32 = 2;
+pub const ITS_TRACE_CONTRACT: &str = "custom_its_dynamic_v2";
 const MAX_PROGRAM_BYTES: u64 = 1024 * 1024;
 const MAX_INSTRUCTIONS: usize = 4096;
 const MAX_STEPS: u64 = 10_000_000;
@@ -110,6 +110,35 @@ pub struct ItsProgram {
 }
 
 impl ItsProgram {
+    /// Construct a validated fixed-ISA program from a bounded frontend such
+    /// as `ptx_subset_v1`. This does not make the frontend a general compiler.
+    pub fn from_instructions(
+        architecture: impl Into<String>,
+        max_steps: u64,
+        instructions: Vec<ItsInstruction>,
+    ) -> Result<Self, ItsError> {
+        Self::from_instructions_with_memory(architecture, max_steps, instructions, BTreeMap::new())
+    }
+
+    /// Construct a validated program with an explicitly supplied initial
+    /// memory image.  Frontends use this to keep compilation and input data
+    /// separate without editing generated JSON by hand.
+    pub fn from_instructions_with_memory(
+        architecture: impl Into<String>,
+        max_steps: u64,
+        instructions: Vec<ItsInstruction>,
+        initial_memory: BTreeMap<u32, u32>,
+    ) -> Result<Self, ItsError> {
+        Self::from_raw(RawItsProgram {
+            schema_version: ITS_PROGRAM_SCHEMA_VERSION,
+            architecture: architecture.into(),
+            isa: ITS_ISA.to_owned(),
+            initial_memory,
+            max_steps,
+            instructions,
+        })
+    }
+
     pub fn load(path: &Path) -> Result<Self, ItsError> {
         let file = std::fs::File::open(path).map_err(|source| ItsError::Io {
             path: path.display().to_string(),
@@ -288,9 +317,16 @@ pub struct ItsTraceRecord {
     pub instruction: ItsInstruction,
     pub lane_addresses: BTreeMap<usize, u32>,
     pub lane_successors: BTreeMap<usize, usize>,
+    /// Dynamic CFG edges grouped by successor PC. The value is the lane mask
+    /// taking that edge in this executed record.
+    pub successor_masks: BTreeMap<usize, u64>,
     /// Lanes blocked at the end of this record remain explicit instead of
     /// being mistaken for an unobserved successor.
     pub lane_blocked_by: BTreeMap<usize, u8>,
+    /// PC of the explicit BSSY/BSYNC join instruction, if present.
+    pub reconvergence_join_pc: Option<usize>,
+    /// PC at which lanes resume after the join instruction, if representable.
+    pub reconvergence_resume_pc: Option<usize>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -395,6 +431,22 @@ impl<'a> ItsExecutor<'a> {
                 .instructions
                 .get(pc)
                 .ok_or(ItsError::PcOutOfRange(pc))?;
+            let (reconvergence_join_pc, reconvergence_resume_pc) = match instruction {
+                ItsInstruction::Bssy { target, .. } => {
+                    let join_pc = *target as usize;
+                    (Some(join_pc), join_pc.checked_add(1))
+                }
+                ItsInstruction::Bsync { barrier } => barriers
+                    .get(usize::from(*barrier))
+                    .filter(|state| state.valid)
+                    .map(|state| (Some(state.join_pc), state.join_pc.checked_add(1)))
+                    .unwrap_or((None, None)),
+                // A branch may be enclosed by several active barriers; the
+                // bounded executor does not infer an IPDOM from that nesting.
+                // Only explicit BSSY/BSYNC records carry a join target.
+                ItsInstruction::BranchIf { .. } => (None, None),
+                _ => (None, None),
+            };
             steps = steps.checked_add(1).ok_or(ItsError::StepOverflow)?;
             // Addresses must be sampled before execution: dst may overwrite
             // the register that supplied a load address. Never regenerate a
@@ -441,9 +493,19 @@ impl<'a> ItsExecutor<'a> {
                         .filter(|&lane| lanes[lane].active && lanes[lane].blocked_by.is_none())
                         .map(|lane| (lane, lanes[lane].pc))
                         .collect(),
+                    successor_masks: lane_indices(group, width)
+                        .filter(|&lane| lanes[lane].active && lanes[lane].blocked_by.is_none())
+                        .fold(BTreeMap::new(), |mut masks, lane| {
+                            let target = lanes[lane].pc;
+                            let entry = masks.entry(target).or_default();
+                            *entry |= 1_u64 << lane;
+                            masks
+                        }),
                     lane_blocked_by: lane_indices(group, width)
                         .filter_map(|lane| lanes[lane].blocked_by.map(|barrier| (lane, barrier)))
                         .collect(),
+                    reconvergence_join_pc,
+                    reconvergence_resume_pc,
                 };
                 let serialized_bytes = serde_json::to_vec(&record)
                     .map_err(|error| ItsError::TraceSerialization(error.to_string()))?
@@ -503,7 +565,7 @@ impl<'a> ItsExecutor<'a> {
             ItsInstruction::CmpLtImm { dst, src, imm } => {
                 for_each_lane(group, width, |lane| {
                     lanes[lane].predicates[usize::from(*dst)] =
-                        i64::from(lanes[lane].regs[usize::from(*src)]) < i64::from(*imm);
+                        (lanes[lane].regs[usize::from(*src)] as i32) < *imm;
                     lanes[lane].pc = pc + 1;
                 });
             }
@@ -997,6 +1059,19 @@ mod tests {
             branch_successors(&mixed),
             [(0, 7), (1, 5), (2, 7), (3, 5)].into_iter().collect()
         );
+        let mixed_branch = mixed
+            .dynamic_trace
+            .as_ref()
+            .expect("trace should be present")
+            .iter()
+            .find(|record| record.pc == 4)
+            .expect("branch record should be present");
+        assert_eq!(
+            mixed_branch.successor_masks,
+            [(5, 0b1010), (7, 0b0101)].into_iter().collect()
+        );
+        assert_eq!(mixed_branch.reconvergence_join_pc, None);
+        assert_eq!(mixed_branch.reconvergence_resume_pc, None);
         assert_eq!(
             all_true
                 .registers
@@ -1073,6 +1148,8 @@ mod tests {
             .iter()
             .find(|record| matches!(record.instruction, ItsInstruction::Bsync { .. }))
             .expect("bsync record should be present");
+        assert_eq!(bsync.reconvergence_join_pc, Some(5));
+        assert_eq!(bsync.reconvergence_resume_pc, Some(6));
         assert_eq!(bsync.lane_blocked_by, [(0, 0)].into_iter().collect());
         assert!(!bsync.lane_successors.contains_key(&0));
     }

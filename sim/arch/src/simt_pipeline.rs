@@ -111,14 +111,14 @@ pub fn tasks(spec: &ArchitectureSpec, program: &SimtProgram) -> Result<Vec<Task>
                 }
             }
         }
-        let resource = match instruction {
+        let (resource, resource_options) = match instruction {
             SimtInstruction::WaitGroup { group } => {
                 deps.insert(
                     async_groups
                         .remove(group)
                         .ok_or(SimtError::MissingAsyncGroup(*group))?,
                 );
-                None
+                (None, Vec::new())
             }
             SimtInstruction::Halt | SimtInstruction::GroupBarrier { .. } => {
                 if let Some(group) = async_groups.keys().next() {
@@ -128,7 +128,7 @@ pub fn tasks(spec: &ArchitectureSpec, program: &SimtProgram) -> Result<Vec<Task>
                 if matches!(instruction, SimtInstruction::GroupBarrier { .. }) {
                     last_barrier = Some(i);
                 }
-                None
+                (None, Vec::new())
             }
             _ => {
                 if let SimtInstruction::AsyncStore { group, .. } = instruction
@@ -141,25 +141,35 @@ pub fn tasks(spec: &ArchitectureSpec, program: &SimtProgram) -> Result<Vec<Task>
                 } else {
                     "alu"
                 };
-                let name = spec
+                let names = spec
                     .operation_resources()
                     .get(operation_name(instruction))
-                    .map_or(default, String::as_str);
-                let index = spec
-                    .resources()
-                    .iter()
-                    .position(|r| r.name() == name)
-                    .ok_or_else(|| SimtError::MissingResource(name.to_owned()))?;
-                if ![kind, ResourceKind::Custom].contains(&spec.resources()[index].kind()) {
-                    return Err(SimtError::InvalidProgram(
-                        "operation resource kind mismatch",
-                    ));
+                    .cloned()
+                    .unwrap_or_else(|| vec![default.to_owned()]);
+                let mut indices = Vec::with_capacity(names.len());
+                for name in names {
+                    let index = spec
+                        .resources()
+                        .iter()
+                        .position(|r| r.name() == name)
+                        .ok_or_else(|| SimtError::MissingResource(name.clone()))?;
+                    if ![kind, ResourceKind::Custom].contains(&spec.resources()[index].kind()) {
+                        return Err(SimtError::InvalidProgram(
+                            "operation resource kind mismatch",
+                        ));
+                    }
+                    indices.push(index);
                 }
-                Some(index)
+                indices.sort_unstable();
+                match indices.as_slice() {
+                    [index] => (Some(*index), Vec::new()),
+                    _ => (None, indices),
+                }
             }
         };
         tasks.push(Task {
             resource,
+            resource_options,
             work,
             dependencies: deps.into_iter().collect(),
             cross_dependencies: Vec::new(),

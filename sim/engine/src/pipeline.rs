@@ -16,6 +16,8 @@ pub struct Resource {
 #[derive(Debug, Clone)]
 pub struct Task {
     pub resource: Option<usize>,
+    /// Optional alternatives; empty preserves the legacy single binding.
+    pub resource_options: Vec<usize>,
     pub work: u64,
     /// Completion dependencies on earlier tasks in this group.
     pub dependencies: Vec<usize>,
@@ -33,6 +35,8 @@ pub struct Interval {
 #[derive(Debug)]
 pub struct Schedule {
     pub groups: Vec<Vec<Interval>>,
+    /// Concrete resource selected for each task at issue time.
+    pub selected_resources: Vec<Vec<Option<usize>>>,
     pub admissions: Vec<u64>,
     pub retirements: Vec<u64>,
     pub final_cycle: u64,
@@ -78,6 +82,9 @@ pub fn schedule(
         }
         for (i, task) in group.iter().enumerate() {
             if task.resource.is_some_and(|r| r >= resources.len())
+                || task.resource_options.iter().any(|r| *r >= resources.len())
+                || (task.resource.is_some() && !task.resource_options.is_empty())
+                || task.resource_options.windows(2).any(|w| w[0] >= w[1])
                 || task.dependencies.iter().any(|d| *d >= i)
                 || task.cross_dependencies.iter().any(|(owner, task)| {
                     groups.get(*owner).is_none_or(|group| *task >= group.len())
@@ -94,6 +101,7 @@ pub fn schedule(
     let count = groups.len();
     let mut result = Schedule {
         groups: vec![Vec::new(); count],
+        selected_resources: vec![Vec::new(); count],
         admissions: vec![0; count],
         retirements: vec![0; count],
         final_cycle: 0,
@@ -117,7 +125,7 @@ pub fn schedule(
             next_group += 1;
         }
         // Choose earliest ready head; rotate equal-time contention fairly.
-        let mut choice: Option<(u64, usize)> = None;
+        let mut choice: Option<(u64, usize, Option<usize>)> = None;
         for offset in 0..count {
             let g = (round_robin + offset) % count;
             let i = result.groups[g].len();
@@ -140,28 +148,60 @@ pub fn schedule(
             if !cross_ready {
                 continue;
             }
-            if let Some(r) = task.resource {
-                start = start.max(resource_next[r]);
+            let candidates = if task.resource_options.is_empty() {
+                task.resource.into_iter().collect::<Vec<_>>()
+            } else {
+                task.resource_options.clone()
+            };
+            let mut selected = None;
+            let mut selected_start = start;
+            let mut selected_complete = u64::MAX;
+            for r in candidates {
+                let mut candidate_start = start.max(resource_next[r]);
                 if resources[r]
                     .max_in_flight
                     .is_some_and(|cap| pending[r].len() >= cap as usize)
                 {
-                    start = start.max(
+                    candidate_start = candidate_start.max(
                         *pending[r]
                             .iter()
                             .min()
                             .ok_or(PipelineError::Invalid("full empty queue"))?,
                     );
                 }
+                let cfg = &resources[r];
+                let span = task.work.div_ceil(u64::from(cfg.width));
+                let service = span
+                    .checked_mul(cfg.initiation_interval)
+                    .ok_or(PipelineError::Overflow)?;
+                let candidate_complete = candidate_start
+                    .checked_add(
+                        service
+                            .checked_sub(cfg.initiation_interval)
+                            .and_then(|v| v.checked_add(1))
+                            .ok_or(PipelineError::Overflow)?
+                            .checked_add(cfg.latency)
+                            .ok_or(PipelineError::Overflow)?,
+                    )
+                    .ok_or(PipelineError::Overflow)?;
+                if selected.is_none_or(|best| {
+                    (candidate_complete, candidate_start, r)
+                        < (selected_complete, selected_start, best)
+                }) {
+                    selected = Some(r);
+                    selected_start = candidate_start;
+                    selected_complete = candidate_complete;
+                }
             }
-            if choice.is_none_or(|(best, _)| start < best) {
-                choice = Some((start, g));
+            start = selected_start;
+            if choice.is_none_or(|(best, _, _)| start < best) {
+                choice = Some((start, g, selected));
             }
         }
         // Completion before same-time issue: release capacity, then arbitrate.
         if queue
             .peek_time()
-            .is_some_and(|t| choice.is_none_or(|(start, _)| t <= start))
+            .is_some_and(|t| choice.is_none_or(|(start, _, _)| t <= start))
         {
             let event = queue
                 .pop()?
@@ -183,7 +223,7 @@ pub fn schedule(
             }
             continue;
         }
-        let (start, g) = choice.ok_or_else(|| PipelineError::Deadlock {
+        let (start, g, selected_resource) = choice.ok_or_else(|| PipelineError::Deadlock {
             blocked_heads: active
                 .iter()
                 .enumerate()
@@ -193,7 +233,8 @@ pub fn schedule(
         })?;
         now = start;
         let task = &groups[g][result.groups[g].len()];
-        let complete = if let Some(r) = task.resource {
+        result.selected_resources[g].push(selected_resource);
+        let complete = if let Some(r) = selected_resource {
             let cfg = &resources[r];
             let span = task.work.div_ceil(u64::from(cfg.width));
             let service = span
@@ -220,7 +261,7 @@ pub fn schedule(
         group_next[g] = start.checked_add(1).ok_or(PipelineError::Overflow)?;
         result.groups[g].push(Interval { start, complete });
         outstanding[g] += 1;
-        queue.schedule_at(complete, TargetId(g as u32), (g, task.resource))?;
+        queue.schedule_at(complete, TargetId(g as u32), (g, selected_resource))?;
         round_robin = (g + 1) % count;
     }
     result.final_cycle = now;
@@ -252,18 +293,21 @@ mod tests {
             &[vec![
                 Task {
                     resource: Some(0),
+                    resource_options: vec![],
                     work: 1,
                     dependencies: vec![],
                     cross_dependencies: vec![],
                 },
                 Task {
                     resource: Some(1),
+                    resource_options: vec![],
                     work: 8,
                     dependencies: vec![],
                     cross_dependencies: vec![],
                 },
                 Task {
                     resource: Some(0),
+                    resource_options: vec![],
                     work: 1,
                     dependencies: vec![1],
                     cross_dependencies: vec![],
@@ -271,7 +315,7 @@ mod tests {
             ]],
             1,
         )
-        .unwrap();
+        .expect("independent-resource schedule should succeed");
         assert_eq!(result.groups[0][1].start, 1);
         assert_eq!(result.groups[0][2].start, 22);
         assert_eq!(result.final_cycle, 24);
@@ -289,12 +333,14 @@ mod tests {
             &[
                 vec![Task {
                     resource: Some(0),
+                    resource_options: vec![],
                     work: 1,
                     dependencies: vec![],
                     cross_dependencies: vec![],
                 }],
                 vec![Task {
                     resource: Some(0),
+                    resource_options: vec![],
                     work: 1,
                     dependencies: vec![],
                     cross_dependencies: vec![],
@@ -302,7 +348,7 @@ mod tests {
             ],
             1,
         )
-        .unwrap();
+        .expect("resident-capacity schedule should succeed");
         assert_eq!(result.admissions, vec![0, 5]);
         assert_eq!(result.groups[1][0].start, 5);
     }
@@ -319,12 +365,14 @@ mod tests {
             &[
                 vec![Task {
                     resource: Some(0),
+                    resource_options: vec![],
                     work: 1,
                     dependencies: vec![],
                     cross_dependencies: vec![],
                 }],
                 vec![Task {
                     resource: Some(0),
+                    resource_options: vec![],
                     work: 1,
                     dependencies: vec![],
                     cross_dependencies: vec![],
@@ -332,7 +380,7 @@ mod tests {
             ],
             2,
         )
-        .unwrap();
+        .expect("in-flight-capacity schedule should succeed");
         assert_eq!(result.groups[0][0].start, 0);
         assert_eq!(result.groups[1][0].start, 6);
     }
@@ -348,6 +396,7 @@ mod tests {
             }],
             &[vec![Task {
                 resource: Some(0),
+                resource_options: vec![],
                 work: 1,
                 dependencies: vec![],
                 cross_dependencies: vec![],
@@ -370,6 +419,7 @@ mod tests {
                 }],
                 &[vec![Task {
                     resource: Some(1),
+                    resource_options: vec![],
                     work: 1,
                     dependencies: vec![],
                     cross_dependencies: vec![],
@@ -388,6 +438,7 @@ mod tests {
                 }],
                 &[vec![Task {
                     resource: Some(0),
+                    resource_options: vec![],
                     work: 1,
                     dependencies: vec![1],
                     cross_dependencies: vec![],
@@ -396,5 +447,87 @@ mod tests {
             ),
             Err(PipelineError::Invalid(_))
         ));
+    }
+
+    #[test]
+    fn alternative_resources_choose_earliest_completion_and_report_choice() {
+        let result = schedule(
+            &[
+                Resource {
+                    width: 1,
+                    latency: 8,
+                    initiation_interval: 4,
+                    max_in_flight: Some(1),
+                },
+                Resource {
+                    width: 1,
+                    latency: 1,
+                    initiation_interval: 1,
+                    max_in_flight: Some(1),
+                },
+            ],
+            &[vec![
+                Task {
+                    resource: Some(0),
+                    resource_options: vec![],
+                    work: 1,
+                    dependencies: vec![],
+                    cross_dependencies: vec![],
+                },
+                Task {
+                    resource: None,
+                    resource_options: vec![0, 1],
+                    work: 1,
+                    dependencies: vec![],
+                    cross_dependencies: vec![],
+                },
+                Task {
+                    resource: None,
+                    resource_options: vec![0, 1],
+                    work: 1,
+                    dependencies: vec![],
+                    cross_dependencies: vec![],
+                },
+            ]],
+            1,
+        )
+        .expect("alternative-resource schedule should succeed");
+        assert_eq!(
+            result.selected_resources[0],
+            vec![Some(0), Some(1), Some(1)]
+        );
+        assert_eq!(result.groups[0][1].start, 1);
+        assert_eq!(result.groups[0][2].start, 3);
+        assert_eq!(result.final_cycle, 9);
+    }
+
+    #[test]
+    fn equal_alternative_resources_use_deterministic_lowest_index() {
+        let result = schedule(
+            &[
+                Resource {
+                    width: 1,
+                    latency: 1,
+                    initiation_interval: 1,
+                    max_in_flight: None,
+                },
+                Resource {
+                    width: 1,
+                    latency: 1,
+                    initiation_interval: 1,
+                    max_in_flight: None,
+                },
+            ],
+            &[vec![Task {
+                resource: None,
+                resource_options: vec![0, 1],
+                work: 1,
+                dependencies: vec![],
+                cross_dependencies: vec![],
+            }]],
+            1,
+        )
+        .expect("equal-resource schedule should succeed");
+        assert_eq!(result.selected_resources[0], vec![Some(0)]);
     }
 }

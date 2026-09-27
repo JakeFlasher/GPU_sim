@@ -10,6 +10,7 @@
 pub mod card;
 pub mod its;
 pub mod json;
+pub mod ptx_subset;
 pub mod simt;
 pub mod simt_pipeline;
 pub mod spec;

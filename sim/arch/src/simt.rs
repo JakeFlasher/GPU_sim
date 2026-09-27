@@ -563,7 +563,7 @@ impl<'a> SimtTimingExecutor<'a> {
         let resources = crate::simt_pipeline::resources(self.spec)?;
         let tasks = crate::simt_pipeline::tasks(self.spec, self.program)?;
         let schedule = sim_engine::pipeline::schedule(&resources, &[tasks], 1)?;
-        self.project_schedule(&schedule.groups[0])
+        self.project_schedule_with_selection(&schedule.groups[0], &schedule.selected_resources[0])
     }
 
     /// Shared by the single-program CLI and the production multi-group backend.
@@ -573,6 +573,36 @@ impl<'a> SimtTimingExecutor<'a> {
     ) -> Result<TimingResult, SimtError> {
         if intervals.len() != self.program.instructions().len() {
             return Err(SimtError::InvalidProgram("timing schedule length mismatch"));
+        }
+        let tasks = crate::simt_pipeline::tasks(self.spec, self.program)?;
+        if tasks.iter().any(|task| !task.resource_options.is_empty()) {
+            return Err(SimtError::InvalidProgram(
+                "alternative resource bindings require selected resources",
+            ));
+        }
+        let selected = tasks.iter().map(|task| task.resource).collect::<Vec<_>>();
+        self.project_schedule_with_selection(intervals, &selected)
+    }
+
+    pub fn project_schedule_with_selection(
+        &self,
+        intervals: &[sim_engine::pipeline::Interval],
+        selected: &[Option<usize>],
+    ) -> Result<TimingResult, SimtError> {
+        if intervals.len() != self.program.instructions().len() || selected.len() != intervals.len()
+        {
+            return Err(SimtError::InvalidProgram(
+                "timing interval/selection length mismatch",
+            ));
+        }
+        if selected
+            .iter()
+            .flatten()
+            .any(|resource| *resource >= self.spec.resources().len())
+        {
+            return Err(SimtError::InvalidProgram(
+                "timing selection references an unknown resource",
+            ));
         }
         let tasks = crate::simt_pipeline::tasks(self.spec, self.program)?;
         for (index, (task, interval)) in tasks.iter().zip(intervals).enumerate() {
@@ -587,6 +617,53 @@ impl<'a> SimtTimingExecutor<'a> {
                     "timing schedule violates issue or dependency order",
                 ));
             }
+            let chosen = selected[index];
+            let allowed = if task.resource_options.is_empty() {
+                task.resource
+                    .map(|resource| vec![resource])
+                    .unwrap_or_default()
+            } else {
+                task.resource_options.clone()
+            };
+            if allowed.is_empty() {
+                if chosen.is_some() {
+                    return Err(SimtError::InvalidProgram(
+                        "a dependency-only instruction cannot select a resource",
+                    ));
+                }
+            } else if chosen.is_none_or(|resource| !allowed.contains(&resource)) {
+                return Err(SimtError::InvalidProgram(
+                    "timing selection is not allowed for this operation",
+                ));
+            }
+            let expected_complete = if let Some(resource) = chosen {
+                let config = self
+                    .spec
+                    .resources()
+                    .get(resource)
+                    .ok_or(SimtError::InvalidProgram("timing resource is out of range"))?;
+                let span = task.work.div_ceil(u64::from(config.issue_width()));
+                let service = span
+                    .checked_mul(config.initiation_interval())
+                    .ok_or(SimtError::CycleOverflow)?;
+                let last_beat_end = service
+                    .checked_sub(config.initiation_interval())
+                    .and_then(|value| value.checked_add(1))
+                    .ok_or(SimtError::CycleOverflow)?;
+                let latency = config.latency_cycles().ok_or(SimtError::UnknownLatency)?;
+                interval
+                    .start
+                    .checked_add(last_beat_end)
+                    .and_then(|value| value.checked_add(latency))
+                    .ok_or(SimtError::CycleOverflow)?
+            } else {
+                interval.start
+            };
+            if interval.complete != expected_complete {
+                return Err(SimtError::InvalidProgram(
+                    "timing completion does not match selected resource",
+                ));
+            }
         }
         let events: Vec<_> = self
             .program
@@ -597,9 +674,7 @@ impl<'a> SimtTimingExecutor<'a> {
             .map(|(i, (instruction, interval))| TimingEvent {
                 instruction_index: i as u64,
                 operation: operation_name(instruction).to_owned(),
-                resource: tasks[i]
-                    .resource
-                    .map(|r| self.spec.resources()[r].name().to_owned()),
+                resource: selected[i].map(|r| self.spec.resources()[r].name().to_owned()),
                 start_cycle: interval.start,
                 complete_cycle: interval.complete,
             })
@@ -1061,6 +1136,33 @@ mod tests {
             .expect("independent ALU event should exist");
         assert!(independent_alu.start_cycle < load.complete_cycle);
         assert_eq!(timing.final_cycle, 37);
+    }
+
+    #[test]
+    fn selected_resource_projection_rejects_a_disallowed_route() {
+        let spec = ArchitectureSpec::parse(
+            Path::new("route.json"),
+            include_bytes!("../../../arch_profiles/specs/simt_u32_route_alternatives.json"),
+        )
+        .expect("route spec should parse");
+        let program = SimtProgram::parse(
+            Path::new("route_program.json"),
+            include_bytes!("../../../arch_profiles/programs/simt_u32_route_alternatives.json"),
+        )
+        .expect("route program should parse");
+        let executor = SimtTimingExecutor::new(&spec, &program).expect("route should initialize");
+        let resources = crate::simt_pipeline::resources(&spec).expect("resources should lower");
+        let tasks = crate::simt_pipeline::tasks(&spec, &program).expect("tasks should lower");
+        let schedule = sim_engine::pipeline::schedule(&resources, &[tasks], 1)
+            .expect("route schedule should succeed");
+        let mut selected = schedule.selected_resources[0].clone();
+        selected[0] = Some(1);
+        assert!(matches!(
+            executor.project_schedule_with_selection(&schedule.groups[0], &selected),
+            Err(SimtError::InvalidProgram(
+                "timing selection is not allowed for this operation"
+            ))
+        ));
     }
 
     #[test]

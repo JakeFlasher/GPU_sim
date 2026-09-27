@@ -1,0 +1,15 @@
+// Bounded ptx_subset_v1 example. Labels are resolved by ptx_subset_compile.
+.visible .entry lane_branch() {
+  mov.u32 %r0, %laneid;
+  mul.lo.u32 %r1, %r0, 4;
+  ld.global.u32 %r2, [%r1];
+  setp.lt.s32 %p0, %r2, 10;
+  @%p0 bra fast;
+  add.s32 %r2, %r2, 100;
+  bra done;
+fast:
+  add.s32 %r2, %r2, 200;
+done:
+  st.global.u32 [%r1], %r2;
+  exit;
+}

@@ -12,6 +12,8 @@ research is complete. Start with [memory](PROJECT_MEMORY.md); use
 | Native resource override | Carded scheduler; scalar or strict `trace_sass_v1` issue-width override, also in prepared replay | Hypothetical trace-safe width only; no unused latency/resource knobs |
 | Custom `simt_u32_v1` | Dependency/resource overlap, resident groups, separate global/shared words, atomic add, broadcast/reduction, bounded CTA barriers | Fixed ISA; no general compiler, weak memory or native cache timing |
 | Custom `simt_its_v1` | Per-lane PCs/predicates, reconvergence, indirect loads/stores, optional versioned execution trace | Single group, functional only; not native SASS regeneration |
+| `ptx_subset_v1` frontend | Bounded text-to-`simt_its_v1` compiler for lane ID, integer arithmetic, predicates, labels, indirect u32 load/store, exit | Functional subset only; no ABI, calls, atomics, vector types, arbitrary PTX or SASS |
+| Dirty-sector writeback queue | Transactional capacity/timing preflight, fixed-point byte service, same-line fetch hazard, tokenized completion in `sim-mem` | Reusable mechanism primitive only; not wired into native SM86 replay or coherence ownership |
 | PhaseFuse fast frontier | Trace-derived scalar-region certificate/refusal report via `sim-run --fast-frontier-only` | Conservative analysis only; skips native timing and cannot certify memory, barriers, dynamic pipes or silicon |
 
 Custom barriers require matching lengths/positions/IDs, one use per ID, and
@@ -31,15 +33,18 @@ are absent. NCU labels and CUPTI launch metadata remain separate observations.
 `*_completion_frontier_cycles`, `*_completion_scenario_end_cycles`, and
 `*_completion_service_width_cycles` rows are **diagnostic formulas**, not
 writeback or coherence events. Missing decoded/known topology stays unavailable.
-The pipe policy `min_selected_then_lexical_v1` chooses by cumulative candidate
-counts, not issue time, SMSP resources, latency or queue state. Details and
-limitations: [experimental diagnostics](experimental_diagnostics.md).
+The native pipe policy `min_selected_then_lexical_v1` chooses by cumulative
+candidate counts, not issue time, SMSP resources, latency or queue state. The
+custom scheduler additionally supports an explicit alternative-resource set
+with latency, initiation-interval and in-flight-capacity selection; that is a
+hypothetical model and does not recover native SM86 physical-pipe IDs. Details
+and limitations: [experimental diagnostics](experimental_diagnostics.md).
 
-ITS trace fields identify `custom_its_dynamic_v1` / version 1. The current
+ITS trace fields identify `custom_its_dynamic_v2` / version 2. The current
 schema validates a broad output shape; its fields are not a native adapter.
 Capture is bounded at 100k records and 32 MiB of accumulated serialized record
-bytes (not whole-process memory); `lane_blocked_by` keeps barrier-waiting lanes
-explicit. [Schemas and inputs](../arch_profiles/README.md).
+bytes (not whole-process memory); `lane_blocked_by` and explicit join/resume
+PCs keep barrier state visible. [Schemas and inputs](../arch_profiles/README.md).
 
 The PhaseFuse lane is deliberately separate from native replay. It preserves
 trace/control/card identity, emits exact candidate/refusal populations for its
@@ -71,11 +76,13 @@ launches fail explicitly (`graph_node_capture_unsupported`).
 
 ## Open work and scope
 
-Scheduled writeback/visibility/coherence, resource-timed pipe routing, native
-execution-driven regeneration, same-domain independent timing/cache validation,
-and general compiler/ISA support remain open. Their absence is not a proof of
-impossibility. Compiler alternatives were researched, not implemented; see
-[options](sm86_sota_simulator_options_20260926.md).
+Native scheduled writeback/visibility/coherence integration, native physical-pipe routing,
+execution-driven SASS regeneration, same-domain independent timing/cache
+validation, and general compiler/ISA support remain open. Their absence is not
+a proof of impossibility. A bounded `ptx_subset_v1` functional frontend and
+custom alternative-resource scheduler plus a transactional dirty-sector queue
+are implemented as explicit bounded seams, not as substitutes for those native
+mechanisms; see [options](sm86_sota_simulator_options_20260926.md).
 
 No full Accel-Sim/MGPUSim comparison has been performed; the [baseline matrix](baseline_matrix_20260924.json)
 is non-scoring. Earlier runs excluded AMD/SM120 and full external execution;

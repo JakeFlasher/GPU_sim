@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "architecture": "example_simt8_route",
+  "isa": "simt_u32_v1",
+  "initial_memory": {},
+  "instructions": [
+    {"op": "set_lane_id", "dst": 0},
+    {"op": "add_imm", "dst": 1, "src": 0, "imm": 1},
+    {"op": "add_imm", "dst": 2, "src": 1, "imm": 1},
+    {"op": "halt"}
+  ]
+}

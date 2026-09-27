@@ -107,8 +107,9 @@ fn resource_reports(
         .collect::<Vec<_>>();
     let mut occupancy_events = vec![Vec::<(u64, i32)>::new(); reports.len()];
     for (group, group_tasks) in tasks.iter().enumerate() {
-        for (task, interval) in group_tasks.iter().zip(&schedule.groups[group]) {
-            let Some(resource) = task.resource else {
+        for (index, (task, interval)) in group_tasks.iter().zip(&schedule.groups[group]).enumerate()
+        {
+            let Some(resource) = schedule.selected_resources[group][index] else {
                 continue;
             };
             let config = &reports[resource];
@@ -173,8 +174,9 @@ fn resource_reports(
 fn task_service_duration(
     resources: &[sim_engine::pipeline::Resource],
     task: &sim_engine::pipeline::Task,
+    selected: Option<usize>,
 ) -> Result<u64, SimtError> {
-    let Some(resource) = task.resource else {
+    let Some(resource) = selected else {
         return Ok(0);
     };
     let config = resources
@@ -211,7 +213,7 @@ fn schedule_diagnostics(
                 .ok_or(SimtError::InvalidProgram("schedule/task length mismatch"))?;
             saw_task = true;
             last_issue_cycle = last_issue_cycle.max(interval.start);
-            if let Some(resource) = task.resource {
+            if let Some(resource) = schedule.selected_resources[group][index] {
                 let config = resources
                     .get(resource)
                     .ok_or(SimtError::InvalidProgram("task resource is out of range"))?;
@@ -243,7 +245,8 @@ fn schedule_diagnostics(
     for (group, group_tasks) in tasks.iter().enumerate() {
         for (index, task) in group_tasks.iter().enumerate() {
             let node = offsets[group] + index;
-            durations[node] = task_service_duration(&resources, task)?;
+            durations[node] =
+                task_service_duration(&resources, task, schedule.selected_resources[group][index])?;
             let mut deps = BTreeSet::new();
             for dependency in &task.dependencies {
                 deps.insert(offsets[group] + *dependency);
@@ -534,8 +537,10 @@ pub fn run(spec: &ArchitectureSpec, programs: &[SimtProgram]) -> Result<CustomRe
     )?;
     let mut groups = Vec::new();
     for (g, (program, state)) in programs.iter().zip(functional).enumerate() {
-        let mut timing =
-            SimtTimingExecutor::new(spec, program)?.project_schedule(&schedule.groups[g])?;
+        let mut timing = SimtTimingExecutor::new(spec, program)?.project_schedule_with_selection(
+            &schedule.groups[g],
+            &schedule.selected_resources[g],
+        )?;
         for event in &mut timing.semantic_events {
             event.native.warp_id = g as i32;
         }
