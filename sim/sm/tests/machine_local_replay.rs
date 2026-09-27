@@ -128,8 +128,8 @@ fn replay_configuration_json(configuration: ReplayConfiguration) -> serde_json::
                 "l2": l2_config_json(l2),
                 "dram": dram,
                 "coherence": coherence.map(|value| serde_json::json!({
-                    "service_cycles_per_sector": value.service_cycles_per_sector,
-                    "capacity_sectors": value.capacity_sectors,
+                    "service_cycles_per_sector": value.service_cycles_per_sector(),
+                    "capacity_sectors": value.capacity_sectors(),
                 })),
             })
         }

@@ -87,6 +87,7 @@ use crate::issue::{
 };
 use crate::metrics::TraceMetrics;
 use crate::program::{FunctionSchedule, OpClass, PipelineClass};
+use crate::sass_operands::{FixedLatencyOperandStatus, SassRegister, SassSourceOperand};
 use crate::system::{
     DramBw, DramStats, L2SourceSplit, SystemError,
     simulate_kernel_shared_with_residency_and_candidates_with_coherence,
@@ -207,9 +208,15 @@ pub enum ReplayError {
     )]
     MemoryAdmissionCandidatesRequireFullCoverage,
     #[error(
-        "opt-in coherence service requires complete decoded SM/sector topology; decoded={decoded}, unknown_records={unknown_records}"
+        "opt-in coherence service requires a complete decoded topology and lane masks; full_coverage={full_coverage}, decoded={decoded}, unknown_records={unknown_records}, active_masks_missing={active_masks_missing}, predicate_masks_missing={predicate_masks_missing}"
     )]
-    CoherenceTopologyIncomplete { decoded: bool, unknown_records: u64 },
+    CoherenceTopologyIncomplete {
+        full_coverage: bool,
+        decoded: bool,
+        unknown_records: u64,
+        active_masks_missing: u64,
+        predicate_masks_missing: u64,
+    },
     #[error("SM {sm_id} L1 counter aggregation failed: {source}")]
     L1Aggregation {
         sm_id: i32,
@@ -905,6 +912,32 @@ fn fast_scalar_segments(
 ) -> Vec<Vec<CausalFrontierInstruction>> {
     let mut segments = Vec::new();
     let mut program = Vec::new();
+    let mut prior_destinations: Vec<SassRegister> = Vec::new();
+
+    fn register_overlap(left: SassRegister, right: SassRegister) -> bool {
+        if left.file() != right.file() {
+            return false;
+        }
+        let (Some(left_index), Some(right_index)) = (left.index(), right.index()) else {
+            return false;
+        };
+        let left_start = u32::from(left_index);
+        let right_start = u32::from(right_index);
+        let left_end = left_start + u32::from(left.span_registers());
+        let right_end = right_start + u32::from(right.span_registers());
+        left_start < right_end && right_start < left_end
+    }
+
+    let flush = |segments: &mut Vec<Vec<CausalFrontierInstruction>>,
+                 program: &mut Vec<CausalFrontierInstruction>,
+                 prior_destinations: &mut Vec<SassRegister>| {
+        if program.len() >= 2 {
+            segments.push(std::mem::take(program));
+        } else {
+            program.clear();
+        }
+        prior_destinations.clear();
+    };
     for (sequence, instruction) in warp.insts.iter().enumerate() {
         let descriptor = match (|| {
             if !matches!(instruction.kind, AccessKind::NonMemory) {
@@ -918,38 +951,116 @@ fn fast_scalar_segments(
                 return None;
             };
             let control = slot.control();
-            let dependency_free = control.wait_mask().bits() == 0
-                && control.write_barrier().is_none()
-                && control.read_barrier().is_none();
+            if control.wait_mask().bits() != 0
+                || control.write_barrier().is_some()
+                || control.read_barrier().is_some()
+            {
+                return None;
+            }
+            let projection = match slot.fixed_latency_operands() {
+                FixedLatencyOperandStatus::Projected(projection) => projection,
+                // The compact dynamic trace carries no register operands. A
+                // static projection is therefore required before a region can
+                // be certified; unknown provenance must remain a refusal.
+                FixedLatencyOperandStatus::NotApplicable | FixedLatencyOperandStatus::Gap(_) => {
+                    return None;
+                }
+            };
+            let mut current_sources = Vec::new();
+            for source in projection.sources() {
+                if let SassSourceOperand::Register(operand) = source {
+                    current_sources.push(operand.register());
+                }
+            }
+            current_sources.extend(
+                projection
+                    .predicate_sources()
+                    .iter()
+                    .map(|operand| operand.register()),
+            );
+            let current_destinations = projection
+                .destinations()
+                .iter()
+                .map(|operand| operand.register())
+                .collect::<Vec<_>>();
+            if current_sources.iter().any(|source| {
+                prior_destinations
+                    .iter()
+                    .any(|dest| register_overlap(*source, *dest))
+            }) || current_destinations.iter().any(|dest| {
+                prior_destinations
+                    .iter()
+                    .any(|prior| register_overlap(*dest, *prior))
+            }) {
+                return None;
+            }
             let sequence = u64::try_from(sequence).ok()?;
-            CausalFrontierInstruction::from_schedule(
+            let descriptor = CausalFrontierInstruction::from_schedule(
                 schedule,
                 u64::from(instruction.pc),
                 sequence,
                 warp.warp_slot,
                 latency_cycles,
                 1,
-                dependency_free,
+                true,
                 false,
             )
-            .ok()
+            .ok()?;
+            Some((descriptor, current_destinations))
         })() {
-            Some(descriptor) => descriptor,
+            Some((descriptor, destinations)) => {
+                prior_destinations.extend(destinations);
+                descriptor
+            }
             None => {
-                if program.len() >= 2 {
-                    segments.push(std::mem::take(&mut program));
-                } else {
-                    program.clear();
-                }
+                flush(&mut segments, &mut program, &mut prior_destinations);
                 continue;
             }
         };
         program.push(descriptor);
     }
-    if program.len() >= 2 {
-        segments.push(program);
-    }
+    flush(&mut segments, &mut program, &mut prior_destinations);
     segments
+}
+
+fn fast_scalar_refusal_reason(warp: &WarpReplay, schedule: &FunctionSchedule) -> &'static str {
+    let mut saw_scalar = false;
+    let mut saw_unknown_registers = false;
+    let mut saw_control_boundary = false;
+    for instruction in &warp.insts {
+        if !matches!(instruction.kind, AccessKind::NonMemory) {
+            continue;
+        }
+        let Some(slot) = schedule.issue_slot(u64::from(instruction.pc)) else {
+            continue;
+        };
+        if slot.op_class() != OpClass::Other
+            || !matches!(slot.mem_role(), MemRole::None)
+            || !matches!(slot.pipeline_class(), PipelineClass::ScalarAlu { .. })
+        {
+            continue;
+        }
+        saw_scalar = true;
+        if slot.fixed_latency_operands().projected().is_none() {
+            saw_unknown_registers = true;
+        }
+        let control = slot.control();
+        if control.wait_mask().bits() != 0
+            || control.write_barrier().is_some()
+            || control.read_barrier().is_some()
+        {
+            saw_control_boundary = true;
+        }
+    }
+    if saw_unknown_registers {
+        "register_provenance_unavailable"
+    } else if saw_control_boundary {
+        "control_or_dependency_boundary"
+    } else if saw_scalar {
+        "register_dependency_or_short_region"
+    } else {
+        "memory_control_or_non_scalar"
+    }
 }
 
 fn increment_fast_reason(
@@ -967,8 +1078,9 @@ fn increment_fast_reason(
 
 /// Build a conservative fast-frontier report from a real compact trace. The
 /// producer bridge intentionally refuses memory, barriers, dynamic pipelines,
-/// and incomplete scalar regions; callers can use the summary to decide which
-/// ranges are safe to summarize while keeping the ordinary replay as fallback.
+/// unknown register dependencies, and incomplete/slot-reused residency;
+/// callers can use the summary to decide which ranges are safe to summarize
+/// while keeping the ordinary replay as fallback.
 pub fn fast_frontier_for_trace(
     td: &TraceDir,
     loc: &KernelLoc<'_>,
@@ -1005,13 +1117,32 @@ pub fn fast_frontier_for_trace(
         Ok::<(), ReplayError>(())
     };
     for blocks in extracted.per_sm_blocks.values() {
+        // The causal analyzer's `Complete` premise is the full physical
+        // roster for the interval, not the current CTA's local warp list.
+        // Gather every traced block on this SM and refuse slot reuse rather
+        // than accidentally certifying a segment with an omitted competitor.
+        let residents = blocks
+            .iter()
+            .flat_map(|block| block.warps.iter().map(|warp| warp.warp_slot))
+            .collect::<Vec<_>>();
+        let roster_has_reuse = {
+            let mut sorted = residents.clone();
+            sorted.sort_unstable();
+            sorted.windows(2).any(|pair| pair[0] == pair[1])
+        };
         for block in blocks {
             add("blocks_seen", &mut summary.blocks_seen, 1)?;
-            let residents = block
-                .warps
-                .iter()
-                .map(|warp| warp.warp_slot)
-                .collect::<Vec<_>>();
+            if roster_has_reuse {
+                increment_fast_reason(&mut summary.refusal_reasons, "resident_roster_slot_reuse")?;
+                for _warp in &block.warps {
+                    add("warps_seen", &mut summary.warps_seen, 1)?;
+                    increment_fast_reason(
+                        &mut summary.refusal_reasons,
+                        "resident_roster_incomplete",
+                    )?;
+                }
+                continue;
+            }
             let mut candidate_segments = Vec::new();
             for warp in &block.warps {
                 add("warps_seen", &mut summary.warps_seen, 1)?;
@@ -1019,7 +1150,7 @@ pub fn fast_frontier_for_trace(
                 if warp_segments.is_empty() {
                     increment_fast_reason(
                         &mut summary.refusal_reasons,
-                        "memory_control_or_non_scalar",
+                        fast_scalar_refusal_reason(warp, schedule),
                     )?;
                     continue;
                 }
@@ -3231,13 +3362,26 @@ fn replay_kernel_with_schedule_and_l2_and_candidates(
     if let ReplayMemMode::L1SharedL2 {
         coherence: Some(_), ..
     } = mode
-        && (!trace_metrics.sectors_decoded
-            || trace_metrics.coherence.unknown_sm_or_line_records != 0)
     {
-        return Err(ReplayError::CoherenceTopologyIncomplete {
-            decoded: trace_metrics.sectors_decoded,
-            unknown_records: trace_metrics.coherence.unknown_sm_or_line_records,
-        });
+        let full_coverage = matches!(&coverage, ExtractedCoverage::Full(_));
+        let active_masks_missing = trace_metrics.instructions.active_mask_missing_instructions;
+        let predicate_masks_missing = trace_metrics
+            .instructions
+            .predicate_mask_missing_instructions;
+        if !full_coverage
+            || !trace_metrics.sectors_decoded
+            || trace_metrics.coherence.unknown_sm_or_line_records != 0
+            || active_masks_missing != 0
+            || predicate_masks_missing != 0
+        {
+            return Err(ReplayError::CoherenceTopologyIncomplete {
+                full_coverage,
+                decoded: trace_metrics.sectors_decoded,
+                unknown_records: trace_metrics.coherence.unknown_sm_or_line_records,
+                active_masks_missing,
+                predicate_masks_missing,
+            });
+        }
     }
     #[cfg(feature = "campaign")]
     if !memory_service_candidates.is_empty() && matches!(&coverage, ExtractedCoverage::Sampled(_)) {
@@ -11230,6 +11374,52 @@ mod completeness_tests {
     }
 
     #[test]
+    fn coherence_replay_refuses_missing_lane_masks() {
+        let tmp = tempfile::tempdir().unwrap();
+        write_grid_trace(tmp.path(), 1, 1, &[0], None);
+        let path = tmp
+            .path()
+            .join("threadblocks/device_0/stream_0/kernel_1/d_0_s_0_k_1_0,0,0.pb");
+        let mut block = pb::Threadblock::decode(std::fs::read(&path).unwrap().as_slice()).unwrap();
+        let instruction = block
+            .warps
+            .get_mut(&0)
+            .and_then(|warp| warp.instructions.get_mut(0))
+            .expect("fixture instruction");
+        instruction.active_mask = None;
+        instruction.predicate_mask = None;
+        std::fs::write(path, block.encode_to_vec()).unwrap();
+        let mode = ReplayMemMode::L1SharedL2 {
+            l1: sim_mem::L1Config {
+                arch: ArchId::Sm86,
+                line_capacity: 1,
+                mshr_count: Some(1),
+                hit_latency: 1,
+                miss_latency: 1,
+            },
+            l2: sim_mem::L2Config {
+                arch: ArchId::Sm86,
+                capacity_bytes: 128,
+                line_bytes: 128,
+                sector_bytes: 32,
+                num_slices: 1,
+                associativity: 1,
+                replacement: sim_mem::L2Replacement::Lru,
+                slice_hash: sim_mem::SliceHash::LineMod,
+            },
+            dram: DramBw::Unmodeled { arch: ArchId::Sm86 },
+            coherence: Some(
+                sim_mem::CoherenceConfig::new(1, 4).expect("coherence config should validate"),
+            ),
+        };
+        let outcome = replay_outcome_with(tmp.path(), mode, &[], &[]);
+        assert!(matches!(
+            outcome,
+            Err(ReplayError::Trace(TraceError::ActiveMaskMissing { .. }))
+        ));
+    }
+
+    #[test]
     fn incomplete_trace_no_sidecar_is_e_incomplete_trace() {
         let tmp = tempfile::tempdir().unwrap();
         write_grid_trace(tmp.path(), 4, 1, &[0, 1], None); // 2/4 blocks, no sidecar
@@ -11298,6 +11488,24 @@ mod completeness_tests {
             dram: DramBw::Unmodeled { arch: ArchId::Sm86 },
             coherence: None,
         };
+        let coherence_mode = match mode {
+            ReplayMemMode::L1SharedL2 { l1, l2, dram, .. } => ReplayMemMode::L1SharedL2 {
+                l1,
+                l2,
+                dram,
+                coherence: Some(
+                    sim_mem::CoherenceConfig::new(1, 4).expect("coherence config should validate"),
+                ),
+            },
+            _ => unreachable!("fixture mode must be shared L2"),
+        };
+        assert!(matches!(
+            replay_outcome_with(tmp.path(), coherence_mode, &[], &[]),
+            Err(ReplayError::CoherenceTopologyIncomplete {
+                full_coverage: false,
+                ..
+            })
+        ));
         let candidate = MemoryServiceCandidate {
             candidate_id: 1,
             scope: crate::MemoryServiceCandidateScope::Sm,
@@ -11801,5 +12009,87 @@ mod completeness_tests {
             ),
             "expected BlockIdOutOfRange (not a false full-coverage pass), got {err:?}"
         );
+    }
+}
+
+#[cfg(test)]
+mod fast_frontier_unit_tests {
+    use super::*;
+    use crate::control_bits::ControlBits;
+    use crate::program::{FunctionSchedule, IssueSlot, OpClass, PipelineClass};
+    use crate::sass_operands::project_fixed_latency_operands;
+    use sim_mem::MemRole;
+    use std::collections::BTreeMap;
+
+    fn scalar_slot(opcode_text: &str) -> IssueSlot {
+        let control = ControlBits::new(0, false, 7, 7, 0, 0).expect("valid control");
+        IssueSlot {
+            control,
+            op_class: OpClass::Other,
+            async_copy_wait_max_pending_groups: 0,
+            pipeline_class: PipelineClass::ScalarAlu {
+                latency_cycles: 1,
+                initiation_interval_cycles: 1,
+                in_flight_capacity: 4,
+            },
+            mem_role: MemRole::None,
+            ldgsts_l1_policy: None,
+            fixed_latency_operands: project_fixed_latency_operands(
+                opcode_text,
+                control,
+                ArchId::Sm86,
+            ),
+            clocklo_read: false,
+            gpu_membar: false,
+            opcode_text: opcode_text.to_owned(),
+        }
+    }
+
+    fn schedule() -> FunctionSchedule {
+        FunctionSchedule {
+            arch: ArchId::Sm86,
+            function_unique_id: 1,
+            kernel_name: "fast".to_owned(),
+            function_name: "fast".to_owned(),
+            by_pc: BTreeMap::from([
+                (0, scalar_slot("IADD3 R4, R2, R3, R5")),
+                (16, scalar_slot("IADD3 R8, R6, R7, R9")),
+                (32, scalar_slot("IADD3 R10, R4, R7, R11")),
+            ]),
+        }
+    }
+
+    fn warp(pcs: &[u32]) -> WarpReplay {
+        WarpReplay {
+            warp_slot: 0,
+            insts: pcs
+                .iter()
+                .map(|&pc| ReplayInst {
+                    pc,
+                    kind: AccessKind::NonMemory,
+                })
+                .collect(),
+            sectors: Vec::new(),
+            async_copy_cohorts: None,
+        }
+    }
+
+    #[test]
+    fn fast_frontier_requires_static_register_evidence_and_rejects_raw_waw() {
+        let schedule = schedule();
+        assert_eq!(fast_scalar_segments(&warp(&[0, 16]), &schedule).len(), 1);
+        assert!(fast_scalar_segments(&warp(&[0, 32]), &schedule).is_empty());
+        assert!(fast_scalar_segments(&warp(&[0, 0]), &schedule).is_empty());
+        let unknown = FunctionSchedule {
+            by_pc: BTreeMap::from([(
+                0,
+                IssueSlot {
+                    fixed_latency_operands: FixedLatencyOperandStatus::NotApplicable,
+                    ..scalar_slot("IADD3 R4, R2, R3, R5")
+                },
+            )]),
+            ..schedule
+        };
+        assert!(fast_scalar_segments(&warp(&[0, 0]), &unknown).is_empty());
     }
 }

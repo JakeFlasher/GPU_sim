@@ -1317,7 +1317,7 @@ fn launch_report(
         terminal_modeled_event_time: result.terminal_modeled_event_time(),
         sm_active_terminal_frontier: Some(SmActiveTerminalFrontierReport {
             cycles: result.sm_active_terminal_event_time(),
-            role: "causal_sm_active_terminal_lower_bound_excludes_memory_write_ack_events",
+            role: "causal_sm_active_terminal_lower_bound_excludes_write_ack_and_service_only_events",
         }),
         sm_active_observation_frontier: result.sm_active_observation_frontier().map(Into::into),
         gpc_observation_frontier: result.gpc_observation_frontier().map(Into::into),
@@ -1490,6 +1490,19 @@ pub fn run(config: &RunConfig) -> Result<RunReport, RunError> {
         return Err(RunError::new(
             "arguments",
             "--fast-frontier-only cannot combine with timing/resource overrides",
+        ));
+    }
+    if config.fast_frontier_only
+        && (config.memory_mode != MemoryMode::Flat
+            || config.cache_scope != CacheScope::Launch
+            || config.carded_dram_bandwidth
+            || config.dirty_writeback_capacity_sectors.is_some()
+            || config.coherence_service_cycles.is_some()
+            || config.coherence_capacity_sectors.is_some())
+    {
+        return Err(RunError::new(
+            "arguments",
+            "--fast-frontier-only cannot combine with native memory/cache, DRAM, writeback, or coherence settings",
         ));
     }
     if config.fast_frontier_only && config.cache_scope != CacheScope::Launch {
@@ -1989,6 +2002,20 @@ mod tests {
         assert_eq!(summary.blocks_seen, 1);
         assert_eq!(summary.warps_seen, 1);
         assert!(summary.terminal_state_matches);
+    }
+
+    #[test]
+    fn fast_frontier_rejects_unconsumed_memory_options() {
+        let mut config = fixture(MemoryMode::Flat);
+        config.fast_frontier_only = true;
+        config.coherence_service_cycles = Some(2);
+        config.coherence_capacity_sectors = Some(4);
+        let error = run(&config).expect_err("fast-only must reject coherence settings");
+        assert!(
+            error
+                .to_string()
+                .contains("cannot combine with native memory/cache")
+        );
     }
 
     #[test]

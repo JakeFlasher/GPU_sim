@@ -405,7 +405,6 @@ impl TraceMetrics {
                     | sim_mem::CacheOpToken::LdgECs
                     | sim_mem::CacheOpToken::LdgEStrongSm
                     | sim_mem::CacheOpToken::LdgEStrongGpu
-                    | sim_mem::CacheOpToken::Tex
                     | sim_mem::CacheOpToken::Ldgsts
                     | sim_mem::CacheOpToken::LdgECa
                     | sim_mem::CacheOpToken::LdgEEf,
@@ -1325,5 +1324,24 @@ mod tests {
             .unwrap();
         assert_eq!(m.coherence.unknown_sm_or_line_records, 1);
         assert_eq!(m.coherence.cross_sm_sector_overlap, 0);
+    }
+
+    #[test]
+    fn texture_access_is_not_admitted_to_global_coherence_domain() {
+        let mut m = TraceMetrics::default();
+        m.observe_coherence(
+            Some(0),
+            32,
+            AccessKind::GlobalBypass {
+                off: 0,
+                len: 1,
+                token: CacheOpToken::Tex,
+                l2_requests: 1,
+            },
+            &[0],
+        )
+        .unwrap();
+        assert_eq!(m.coherence.decoded_global_lines, 0);
+        assert_eq!(m.coherence.unknown_sm_or_line_records, 1);
     }
 }

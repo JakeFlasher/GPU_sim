@@ -55,6 +55,23 @@ compatibility: `custom_its_dynamic_v2` is explicitly a separate frontend.
 The fast-only output is validated by its contract fields and refusal reasons;
 it is not a substitute for the ordinary replay path.
 
+For the bounded PhaseFuse analyzer scaling probe (synthetic public
+descriptors, not a native trace or timing prediction):
+
+```bash
+cargo build --release --manifest-path sim/Cargo.toml -p sim-sm --bin phasefuse-scale
+python workloads/research_probes/phasefuse_scaling/benchmark.py \
+  --binary sim/target/release/phasefuse-scale \
+  --repeats 3 --output /tmp/phasefuse_scale.jsonl
+```
+
+The probe reports sorted and deterministic-shuffled `N={1k,2k,4k,8k,16k,32k,64k}`
+cases over region length, residency and refusal dimensions. The wrapper adds
+child wall/user/system time, peak RSS, timeout/exit status and raw JSONL plus
+median summaries. It measures descriptor construction and canonicalization
+only; it does not claim trace parsing, native replay or silicon speedup. Each
+child object follows [`phasefuse_scale.v1.schema.json`](../sim/run/schema/phasefuse_scale.v1.schema.json).
+
 ## Focused checks
 
 From the repository root:
@@ -78,6 +95,46 @@ Machine-local trace/sidecar tests may remain ignored when the capture is absent;
 that is an environment limitation, not evidence of success. A full workspace
 green run is useful for regression confidence but is not a numerical baseline
 or hardware-validation result.
+
+## 2026-09-27 Phase-0 bounded campaign checks
+
+The following focused checks exercise the current refusal and mechanism seams
+without running a large external simulator workload:
+
+```bash
+cargo test --manifest-path sim/Cargo.toml -p sim-mem --lib --quiet
+cargo test --manifest-path sim/Cargo.toml -p sim-sm --features campaign --lib --quiet
+cargo test --manifest-path sim/Cargo.toml -p sim-run --lib --quiet
+```
+
+The memory suite contains the queue reference/litmus cases for invalid masks,
+capacity, stale plans, zero-service unrelated lines, and pending visibility.
+The SM campaign suite covers sampled-coverage refusal, missing-mask trace
+admission, texture-domain refusal, cross-SM directory transfer, and separate
+frontier counters. The direct-run suite checks that fast-only mode rejects
+native memory/DRAM/writeback/coherence options it does not consume.
+
+For a retained canary, use the actual option names shown by `sim-run --help`:
+
+```bash
+TRACE=sim/run/tests/fixtures/addr_carry_canary_bundle/trace
+CONTROL=sim/run/tests/fixtures/addr_carry_canary_bundle/control/canary_sm86.control_bits.json
+CARD=sim/run/tests/fixtures/addr_carry_canary_bundle/cards/sm_86.json
+PCHASE=sim/run/tests/fixtures/addr_carry_canary_bundle/cards/sm_86_static_card.json
+sim/target/release/sim-run --trace "$TRACE" --control "$CONTROL" \
+  --arch-card "$CARD" --mode flat --cache-scope launch
+sim/target/release/sim-run --trace "$TRACE" --control "$CONTROL" \
+  --arch-card "$CARD" --pchase-card "$PCHASE" --mode l1-l2 \
+  --coherence-service-cycles 2 --coherence-capacity-sectors 8
+sim/target/release/sim-run --trace "$TRACE" --control "$CONTROL" \
+  --arch-card "$CARD" --mode flat --fast-frontier-only
+```
+
+Record input identity, accepted/refused counts, refusal reasons, output digest,
+and wall/RSS when available. The fast-only canary currently has no certificate
+because its dynamic records lack the static register-projection evidence
+required by the strengthened PhaseFuse contract; that is an explicit refusal,
+not a speed or accuracy result.
 
 Do not add hash/seal, receipt, reviewer, freeze, or mandatory test-pyramid
 machinery around the simulator. Retained manifests/checksums are data formats,

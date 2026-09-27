@@ -235,3 +235,53 @@ The requirement-by-requirement follow-up campaign is recorded in
 It separates local litmus/refusal work from blocked RTX 3090 Ti/NCU holdouts
 and matched external baselines, with explicit no-go conditions for unsupported
 speed or accuracy claims.
+
+## 2026-09-27 bounded-campaign correctness follow-up
+
+The first Phase-0 correctness slice is now implemented and tested. The
+coherence queue validates its constructor-only positive configuration, keeps
+directory ownership pending until the service-completion event, rejects a
+same-line request while visibility is pending, and gives zero-service
+read/read requests their own issue-cycle readiness instead of inheriting a
+global service head-of-line delay. Native integration now maps the physical
+trace `sm_id`, excludes `local_sector_mask` bits from the global directory,
+keeps read/writeback service ordering orthogonal to the coherence lane, and
+excludes writeback/coherence-only events from the SM-active terminal frontier.
+Texture accesses are fail-closed as an unknown global-coherence domain rather
+than being counted as ordinary global reads. Coherence replay rejects sampled
+coverage and incomplete decoded/mask topology; the trace reader itself already
+rejects missing lane masks before replay.
+
+Bounded evidence from this slice:
+
+```text
+cargo test --manifest-path sim/Cargo.toml --workspace --quiet                  PASS
+cargo test --manifest-path sim/Cargo.toml -p sim-sm --features campaign --quiet PASS
+cargo test --manifest-path sim/Cargo.toml -p sim-mem --lib --quiet            PASS (156)
+cargo test --manifest-path sim/Cargo.toml -p sim-run --lib --quiet            PASS (51)
+coherence HOL/pending-visibility/texture/refusal litmus tests                  PASS
+SM86 retained canary flat replay (54 records; 0.01 s shell time)               PASS
+SM86 retained canary coherence-option replay (54 records; 0.00 s shell time)   PASS
+SM86 fast-frontier-only canary (1 block, 1 warp; 0.00 s shell time)            PASS; 0 certificates
+```
+
+These are deterministic mechanism/refusal checks, not independent RTX 3090 Ti
+or NCU accuracy measurements. The directory still starts cold and cannot
+import hidden L1/L2 ownership, resident dirty flushes, fences, or a native
+coherence protocol. PhaseFuse now requires static register projections for
+RAW/WAW-free scalar certificates and gathers the complete traced SM roster;
+unknown register provenance and slot reuse remain refusals. Full workspace
+Clippy remains red only on pre-existing `sim-sm` high-arity/large-error lint
+debt; the changed `sim-mem` target is clean under `-D warnings`.
+
+The per-experiment denominators, refusal classes, output digests and blocked
+T2/T3 gates are retained in
+[`docs/sm86_next_experiment_results_20260927.md`](sm86_next_experiment_results_20260927.md).
+
+The bounded E6 PhaseFuse scale probe additionally covers 112 synthetic
+descriptor cases (`N=1k..64k`, four region lengths, complete/unknown residency,
+sorted/shuffled order) with one child per case. All 112 exited successfully and
+preserved terminal state; complete residency collapsed only eligible regions,
+unknown residency collapsed none, and `region_len=1` collapsed none. This is
+descriptor/analyzer scaling with RSS, not native trace parsing or silicon
+speedup.

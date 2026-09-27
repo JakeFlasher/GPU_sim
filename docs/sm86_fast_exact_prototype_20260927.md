@@ -104,11 +104,13 @@ from a real compact trace and its admitted control schedule. It:
 1. validates the trace architecture and traced placement;
 2. finds contiguous scalar, non-memory, `OpClass::Other` regions;
 3. joins each record to the SM86 schedule and control bits;
-4. invokes the existing state-complete causal certificate with the complete
-   block resident-warp roster;
-5. reports candidate, certified, reified and collapsed populations plus refusal
+4. requires a static fixed-latency register projection and rejects same-warp
+   RAW/WAW hazards before constructing dependency-free descriptors;
+5. invokes the existing state-complete causal certificate with the complete
+   traced-SM resident-warp roster (slot reuse is a refusal);
+6. reports candidate, certified, reified and collapsed populations plus refusal
    reasons; and
-6. never changes native replay state or consumes NCU values.
+7. never changes native replay state or consumes NCU values.
 
 The executable `sim-run --fast-frontier-only` performs only this bounded
 trace-derived analysis. It emits `contract=sm86_fast_exact_scalar_regions_v1`,
@@ -118,9 +120,10 @@ research/profiling lane, not a replacement for ordinary `flat`, `l1`, or
 [`fast_frontier.v1.schema.json`](../sim/run/schema/fast_frontier.v1.schema.json).
 
 The certificate deliberately refuses mixed timing, dependencies, barriers,
-memory roles, non-scalar pipelines, incomplete residency and unsupported
-control. Zero certified regions is a valid result: the fast path must not turn
-an absence of proof into an approximation silently.
+unknown register provenance, slot-reused/incomplete residency, memory roles,
+non-scalar pipelines and unsupported control. Zero certified regions is a valid
+result: the fast path must not turn an absence of proof into an approximation
+silently.
 
 ## Bounded evidence
 
@@ -130,8 +133,14 @@ retained inputs only:
 | Input | Fast-only wall time | Result |
 | --- | ---: | --- |
 | SM86 address-carry canary, 54 records | ~2 ms | 1 block / 1 warp; scalar candidates refused by control guards |
-| September development GEMM, 197,120 instructions / 512 blocks | ~0.20 s | 23,040 scalar candidate instructions; 8,704 regions refused; no native timing replay |
-| September development LayerNorm | ~0.30 s | 165,852 scalar candidate instructions; 53,292 regions refused; no native timing replay |
+| Retained SM86 GEMM, 512 blocks / 512 warps | ~0.22 s | 512 candidate regions (1,024 candidate instructions), 0 certified after register/residency hardening; no native timing replay |
+| Retained SM86 LayerNorm, 64 blocks / 512 warps | ~0.29 s | 88 candidate regions (176 candidate instructions), 0 certified; 469 non-scalar/memory/control refusals; no native timing replay |
+
+The local unit litmus additionally accepts two independent projected scalar
+instructions and refuses same-warp RAW, WAW, unknown-projection, and duplicate
+resident evidence. The retained canary's zero-certificate result is expected
+under this stricter contract; it is not evidence that PhaseFuse is useless or
+that native timing has been reproduced.
 
 The existing event-vs-dense local comparison remains the timing baseline: the
 retained GEMM event lane was about 1.7–1.8× faster than the dense reference with
@@ -182,12 +191,15 @@ open.
 ## Bounded coherence/visibility seam
 
 The opt-in `CoherenceQueue` is a directory-style model over the ordered,
-fully decoded L2-request stream. It gives read/read sharing no service cost and
-charges a configured interval for cross-SM owner transfer or write
-invalidation, with finite in-flight capacity and explicit completion events.
-Unknown SM/sector topology refuses the run. L1-hidden accesses, fences,
-protocol messages, resident flushes and actual hardware ownership remain out of
-contract, so this is a bounded mechanism experiment rather than coherence
+unsampled, fully decoded L2-request stream. It gives read/read sharing no
+service cost and charges a configured interval for cross-SM owner transfer or
+write invalidation, with finite in-flight capacity and explicit completion
+events. Pending ownership is not visible until completion; unrelated
+zero-service lines do not inherit the service lane's head-of-line timestamp.
+Local-sector and texture domains, unknown SM/sector topology, and incomplete
+lane masks refuse the run. The directory starts cold and cannot import
+L1-hidden/resident ownership, fences, protocol messages, or resident flushes;
+this remains a bounded mechanism experiment rather than coherence
 reconstruction.
 
 ## Bounded functional compiler seam

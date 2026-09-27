@@ -2687,10 +2687,11 @@ pub(crate) struct SystemResult {
     /// `None` means the queue was empty; `Some(0)` is a real event at time zero.
     /// This is a diagnostic timestamp, not an elapsed-cycle prediction.
     pub(crate) terminal_event_time: Option<u64>,
-    /// Last successfully processed modeled event that is not an opt-in
-    /// MemoryWriteAck.  This preserves an SM-active terminal lower bound when
-    /// a feedback lane drains a service acknowledgement after the final SM
-    /// issue; the full event frontier above remains available separately.
+    /// Last successfully processed modeled event that is not a write
+    /// acknowledgement or a writeback/coherence-only service completion. This
+    /// preserves an SM-active terminal lower bound when a tail service lane
+    /// drains after the final SM issue; the full event frontier above remains
+    /// available separately.
     pub(crate) sm_active_terminal_event_time: Option<u64>,
 }
 
@@ -2944,7 +2945,10 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates_with_coherenc
         let reference_event_name = event_name(&ev.kind);
         #[cfg(feature = "reference")]
         let reference_typed_event_payload = typed_event_payload(&ev.kind);
-        let is_write_ack = matches!(&ev.kind, Ev::MemoryWriteAck(_));
+        let contributes_to_sm_active = !matches!(
+            &ev.kind,
+            Ev::MemoryWriteAck(_) | Ev::L2WritebackComplete { .. } | Ev::L2CoherenceComplete { .. }
+        );
         #[cfg(feature = "reference")]
         power_state.advance_to(ev.time)?;
         #[cfg(feature = "performance-counters")]
@@ -3185,23 +3189,30 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates_with_coherenc
                             let writeback_eviction = preview
                                 .eviction()
                                 .filter(|eviction| eviction.dirty_mask != 0);
-                            let coherence_plan = if let Some(queue) = &coherence_queue {
-                                Some(queue.preview(CoherenceRequest {
-                                    line_id: line,
-                                    sector_mask: req.sector_mask,
-                                    requester: u8::try_from(sm_ix).map_err(|_| {
-                                        SystemError::Coherence(
-                                            sim_mem::CoherenceError::RequesterOutOfRange(u8::MAX),
-                                        )
-                                    })?,
-                                    is_write: matches!(
-                                        req.operation,
-                                        MemoryOperation::Store
-                                            | MemoryOperation::Atomic
-                                            | MemoryOperation::Reduction
-                                    ),
-                                    issue_cycle: req.issue_time,
-                                })?)
+                            let global_sector_mask = req.sector_mask & !req.local_sector_mask;
+                            let coherence_plan = if global_sector_mask != 0 {
+                                if let Some(queue) = &coherence_queue {
+                                    Some(queue.preview(CoherenceRequest {
+                                        line_id: line,
+                                        sector_mask: global_sector_mask,
+                                        requester: u8::try_from(sm_ids[sm_ix]).map_err(|_| {
+                                            SystemError::Coherence(
+                                                sim_mem::CoherenceError::RequesterOutOfRange(
+                                                    u8::MAX,
+                                                ),
+                                            )
+                                        })?,
+                                        is_write: matches!(
+                                            req.operation,
+                                            MemoryOperation::Store
+                                                | MemoryOperation::Atomic
+                                                | MemoryOperation::Reduction
+                                        ),
+                                        issue_cycle: req.issue_time,
+                                    })?)
+                                } else {
+                                    None
+                                }
                             } else {
                                 None
                             };
@@ -3239,13 +3250,10 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates_with_coherenc
                                         + usize::from(fetch_sectors > 0),
                                 );
                                 if let Some(eviction) = writeback_eviction {
-                                    let not_before = coherence_plan
-                                        .map_or(req.issue_time, |plan| plan.service_done_cycle());
-                                    requests.push(ServiceRequest::writeback_after(
+                                    requests.push(ServiceRequest::writeback(
                                         eviction.line_id,
                                         eviction.dirty_mask,
                                         req.issue_time,
-                                        not_before,
                                     ));
                                 }
                                 if fetch_sectors > 0 {
@@ -3254,13 +3262,10 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates_with_coherenc
                                             counter: "DRAM request bytes",
                                         },
                                     )?;
-                                    let not_before = coherence_plan
-                                        .map_or(req.issue_time, |plan| plan.service_done_cycle());
-                                    requests.push(ServiceRequest::read_line_after(
+                                    requests.push(ServiceRequest::read_line(
                                         bytes,
                                         line,
                                         req.issue_time,
-                                        not_before,
                                     ));
                                 }
                                 let plans = queue.preview_services(&requests)?;
@@ -3768,7 +3773,7 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates_with_coherenc
             }
         }
         terminal_event_time = Some(ev.time);
-        if !is_write_ack {
+        if contributes_to_sm_active {
             sm_active_terminal_event_time = Some(ev.time);
         }
         #[cfg(feature = "reference")]
@@ -7266,6 +7271,51 @@ mod tests {
         assert_eq!(result.dram.coherence_completed_transactions, 1);
         assert_eq!(result.dram.coherence_completed_sectors, 1);
         assert_eq!(result.dram.coherence_completion_frontier, Some(2));
+    }
+
+    #[test]
+    fn service_only_coherence_tail_is_excluded_from_sm_active_frontier() {
+        let sched = schedule(vec![(0, slot(cb(1), "STG.E")), (16, slot(cb(1), "EXIT"))]);
+        let block = |launch_index: i64, warp_slot: i32| BlockReplay {
+            launch_index,
+            warps: vec![WarpReplay {
+                async_copy_cohorts: None,
+                warp_slot,
+                insts: vec![
+                    ReplayInst {
+                        pc: 0,
+                        kind: AccessKind::GlobalStore { off: 0, len: 1 },
+                    },
+                    ReplayInst {
+                        pc: 16,
+                        kind: AccessKind::NonMemory,
+                    },
+                ],
+                sectors: vec![0],
+            }],
+        };
+        let mut l2 = l2_model();
+        let result = simulate_kernel_shared_with_residency_and_candidates_with_coherence(
+            &BTreeMap::from([(0, vec![block(0, 0)]), (1, vec![block(1, 1)])]),
+            &sched,
+            &params(),
+            SharedMemoryResidency::unconstrained_fixture(),
+            l1_config(),
+            &mut l2,
+            DramBw::Unmodeled { arch: ArchId::Sm86 },
+            &[],
+            &[],
+            None,
+            Some(CoherenceConfig::new(1_000, 4).expect("coherence config should validate")),
+        )
+        .expect("service-only tail should drain");
+        assert_eq!(result.dram.coherence_completion_frontier, Some(1_000));
+        assert!(
+            result
+                .sm_active_terminal_event_time
+                .is_some_and(|active| active < 1_000)
+        );
+        assert_eq!(result.terminal_event_time, Some(1_000));
     }
 
     #[test]

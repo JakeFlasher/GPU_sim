@@ -6,7 +6,9 @@
 //! Read/read sharing is free; a read that follows another SM's write, or a
 //! write that invalidates another SM's readers/writer, consumes one configured
 //! service cycle per affected sector. Unknown producer identity must be
-//! rejected by the caller before this queue is enabled.
+//! rejected by the caller before this queue is enabled. The directory starts
+//! cold and has no API for importing resident L1/L2 ownership; callers must
+//! therefore treat a trace with hidden initial state as outside this seam.
 
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -30,8 +32,8 @@ struct LineState {
 /// bounded model and are not architecture-card measurements.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CoherenceConfig {
-    pub service_cycles_per_sector: u64,
-    pub capacity_sectors: u32,
+    service_cycles_per_sector: u64,
+    capacity_sectors: u32,
 }
 
 impl CoherenceConfig {
@@ -49,6 +51,14 @@ impl CoherenceConfig {
             service_cycles_per_sector,
             capacity_sectors,
         })
+    }
+
+    pub const fn service_cycles_per_sector(self) -> u64 {
+        self.service_cycles_per_sector
+    }
+
+    pub const fn capacity_sectors(self) -> u32 {
+        self.capacity_sectors
     }
 }
 
@@ -138,6 +148,10 @@ pub enum CoherenceError {
     TimeRegression { requested: u64, frontier: u64 },
     #[error("coherence transaction is stale (expected epoch {expected}, current {current})")]
     StalePlan { expected: u64, current: u64 },
+    #[error(
+        "coherence line {line_id} has a pending visibility transfer through cycle {ready_cycle}"
+    )]
+    LineVisibilityPending { line_id: i64, ready_cycle: u64 },
     #[error("coherence token {0} is unknown or already completed")]
     UnknownToken(u64),
     #[error("coherence token {token} completed at {at}, before service time {ready}")]
@@ -196,6 +210,20 @@ impl CoherenceQueue {
                 frontier: self.event_frontier,
             });
         }
+        if let Some(pending) = self
+            .pending
+            .values()
+            .find(|pending| pending.plan.request.line_id == request.line_id)
+        {
+            // The directory deliberately refuses to expose an admission-time
+            // reservation as if it were already visible.  The completion event
+            // must retire first, at which point `complete` publishes the
+            // transition into `lines`.
+            return Err(CoherenceError::LineVisibilityPending {
+                line_id: request.line_id,
+                ready_cycle: pending.plan.service_done_cycle,
+            });
+        }
         let line = self
             .lines
             .get(&request.line_id)
@@ -246,7 +274,15 @@ impl CoherenceQueue {
                 requested: requested_capacity,
             });
         }
-        let service_start_cycle = self.free_cycle.max(request.issue_cycle);
+        // A zero-service request is immediately visible at its issue cycle.
+        // It must not inherit the serialized service lane's free cycle, or a
+        // read/read access to an unrelated line would create global
+        // head-of-line delay in response timing.
+        let service_start_cycle = if service_sectors == 0 {
+            request.issue_cycle
+        } else {
+            self.free_cycle.max(request.issue_cycle)
+        };
         let service_duration = u64::from(service_sectors)
             .checked_mul(self.config.service_cycles_per_sector)
             .ok_or(CoherenceError::ArithmeticOverflow)?;
@@ -299,8 +335,14 @@ impl CoherenceQueue {
             .epoch
             .checked_add(1)
             .ok_or(CoherenceError::ArithmeticOverflow)?;
-        self.lines.insert(plan.request.line_id, plan.next_line);
-        self.free_cycle = plan.service_done_cycle;
+        if plan.needs_completion() {
+            // Keep the old visible state until the scheduled completion.  The
+            // plan's `next_line` is committed by `complete`, so a later access
+            // cannot observe ownership before the transfer is visible.
+            self.free_cycle = plan.service_done_cycle;
+        } else {
+            self.lines.insert(plan.request.line_id, plan.next_line);
+        }
         self.event_frontier = plan.request.issue_cycle;
         self.in_flight_sectors = self
             .in_flight_sectors
@@ -341,6 +383,8 @@ impl CoherenceQueue {
             .checked_add(1)
             .ok_or(CoherenceError::ArithmeticOverflow)?;
         self.pending.remove(&token);
+        self.lines
+            .insert(pending.plan.request.line_id, pending.plan.next_line);
         self.in_flight_sectors = self
             .in_flight_sectors
             .checked_sub(pending.plan.service_sectors)
@@ -426,6 +470,94 @@ mod tests {
     }
 
     #[test]
+    fn zero_service_unrelated_line_does_not_inherit_global_service_head() {
+        let mut queue = CoherenceQueue::new(config());
+        let first = queue
+            .preview(CoherenceRequest {
+                line_id: 1,
+                sector_mask: 1,
+                requester: 0,
+                is_write: false,
+                issue_cycle: 0,
+            })
+            .unwrap();
+        queue.commit(first).unwrap();
+        let transfer = queue
+            .preview(CoherenceRequest {
+                line_id: 1,
+                sector_mask: 1,
+                requester: 1,
+                is_write: true,
+                issue_cycle: 0,
+            })
+            .unwrap();
+        assert_eq!(transfer.service_done_cycle(), 2);
+        queue.commit(transfer).unwrap();
+
+        let unrelated = queue
+            .preview(CoherenceRequest {
+                line_id: 2,
+                sector_mask: 1,
+                requester: 2,
+                is_write: false,
+                issue_cycle: 0,
+            })
+            .unwrap();
+        assert_eq!(unrelated.service_sectors(), 0);
+        assert_eq!(unrelated.service_done_cycle(), 0);
+        queue.commit(unrelated).unwrap();
+    }
+
+    #[test]
+    fn pending_transfer_is_not_visible_until_completion() {
+        let mut queue = CoherenceQueue::new(config());
+        let read = queue
+            .preview(CoherenceRequest {
+                line_id: 7,
+                sector_mask: 1,
+                requester: 0,
+                is_write: false,
+                issue_cycle: 0,
+            })
+            .unwrap();
+        queue.commit(read).unwrap();
+        let transfer = queue
+            .preview(CoherenceRequest {
+                line_id: 7,
+                sector_mask: 1,
+                requester: 1,
+                is_write: true,
+                issue_cycle: 1,
+            })
+            .unwrap();
+        queue.commit(transfer).unwrap();
+        assert!(matches!(
+            queue.preview(CoherenceRequest {
+                line_id: 7,
+                sector_mask: 1,
+                requester: 1,
+                is_write: false,
+                issue_cycle: 1,
+            }),
+            Err(CoherenceError::LineVisibilityPending {
+                line_id: 7,
+                ready_cycle: 3,
+            })
+        ));
+        queue.complete(transfer.token(), 3).unwrap();
+        let visible = queue
+            .preview(CoherenceRequest {
+                line_id: 7,
+                sector_mask: 1,
+                requester: 1,
+                is_write: false,
+                issue_cycle: 3,
+            })
+            .unwrap();
+        assert_eq!(visible.service_sectors(), 0);
+    }
+
+    #[test]
     fn invalid_identity_capacity_and_stale_plans_fail_without_mutation() {
         let mut queue = CoherenceQueue::new(CoherenceConfig::new(1, 1).unwrap());
         let before = format!("{queue:?}");
@@ -461,18 +593,49 @@ mod tests {
             .unwrap();
         assert_eq!(write.service_sectors(), 1);
         queue.commit(write).unwrap();
-        let before_capacity = format!("{queue:?}");
+        let mut capacity_queue = CoherenceQueue::new(CoherenceConfig::new(1, 1).unwrap());
+        let capacity_read = capacity_queue
+            .preview(CoherenceRequest {
+                line_id: 10,
+                sector_mask: 1,
+                requester: 0,
+                is_write: false,
+                issue_cycle: 0,
+            })
+            .unwrap();
+        capacity_queue.commit(capacity_read).unwrap();
+        let capacity_transfer = capacity_queue
+            .preview(CoherenceRequest {
+                line_id: 10,
+                sector_mask: 1,
+                requester: 1,
+                is_write: true,
+                issue_cycle: 0,
+            })
+            .unwrap();
+        capacity_queue.commit(capacity_transfer).unwrap();
+        let capacity_read_other = capacity_queue
+            .preview(CoherenceRequest {
+                line_id: 11,
+                sector_mask: 1,
+                requester: 0,
+                is_write: false,
+                issue_cycle: 0,
+            })
+            .unwrap();
+        capacity_queue.commit(capacity_read_other).unwrap();
+        let before_capacity = format!("{capacity_queue:?}");
         assert!(matches!(
-            queue.preview(CoherenceRequest {
-                line_id: 0,
+            capacity_queue.preview(CoherenceRequest {
+                line_id: 11,
                 sector_mask: 1,
                 requester: 2,
                 is_write: true,
-                issue_cycle: 2,
+                issue_cycle: 0,
             }),
             Err(CoherenceError::CapacityExceeded { .. })
         ));
-        assert_eq!(format!("{queue:?}"), before_capacity);
+        assert_eq!(format!("{capacity_queue:?}"), before_capacity);
         let stale = queue
             .preview(CoherenceRequest {
                 line_id: 3,

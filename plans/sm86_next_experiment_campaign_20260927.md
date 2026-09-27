@@ -5,6 +5,24 @@ Updated 2026-09-27 after the adversarial code/scientific/publication review of
 `AGENTS.md` remains policy. No large Accel-Sim/MGPUSim workload is required for
 the local phases.
 
+## Latest bounded progress (2026-09-27)
+
+The first correctness slice has landed: sampled/full and lane-mask admission
+checks are fail-closed; texture and local-sector requests cannot enter the
+global directory; physical `sm_id` is retained; pending directory transitions
+publish only at completion; unrelated zero-service lines avoid global
+head-of-line delay; DRAM read/writeback service is independent of coherence;
+service-only events are excluded from the SM-active terminal frontier; and
+PhaseFuse requires a complete traced-SM roster plus static register RAW/WAW
+evidence. The local E0/E1/E2/E3/E4/E7/E8 checks below are now executable in
+bounded Rust/fixture tests, including a synthetic final service-only tail for
+E4. A descriptor-only E6 scale probe now covers the full 112-case
+sorted/shuffled N=1k..64k × region/residency matrix with child RSS;
+compact-trace parsing-inclusive scaling remains open. Independent SM86/NCU
+holdouts (E9), and matched external baselines (E10) remain open and must not be
+represented by these unit results.
+The reproducible local ledger is [SM86 bounded next-experiment results](../docs/sm86_next_experiment_results_20260927.md).
+
 ## Claim tiers
 
 Do not merge these tiers in one headline:

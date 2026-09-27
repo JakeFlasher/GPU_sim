@@ -39,8 +39,11 @@ records. Do not load every linked report. Root [AGENTS.md](../AGENTS.md) is poli
   coherence ownership/visibility and resident dirty flush remain tails.
 - `sim-mem::coherence` provides an opt-in directory-style service selected by
   `--coherence-service-cycles N --coherence-capacity-sectors N`. It models only
-  ordered, fully decoded L2-request topology; L1-hidden accesses and protocol
-  fence/ownership visibility remain explicit limits.
+  ordered, fully decoded L2-request topology. It refuses sampled/mask-incomplete
+  replay, excludes local-sector and texture domains, keeps pending ownership
+  invisible until completion, and avoids unrelated-line service head-of-line
+  delay. The queue starts cold; L1-hidden accesses, resident ownership,
+  protocol fences and native visibility scope remain explicit limits.
 
 ## Do not repeat earlier overclaims
 
@@ -62,8 +65,10 @@ The ranked experiment program is [SM86 next-experiment campaign](../plans/sm86_n
 Run Phase 0 correctness/refusal work before any empirical score; Phase 2/3
 requires independent hardware or matched external frontends and must not be
 silently approximated.
+The current bounded ledger is [SM86 next-experiment results](sm86_next_experiment_results_20260927.md).
 
-Use the PhaseFuse fast lane to gather refusal/certificate populations, the
+Use the PhaseFuse fast lane to gather refusal/certificate populations (static
+register-projection evidence and a complete traced SM roster are now required), the
 bounded PTX subset for value-dependent functional studies, and the custom route
 contract for controlled scheduling experiments. Extend the opt-in writeback and
 directory queues only after native event/config evidence is independently
@@ -73,6 +78,11 @@ trace schema and reconvergence-successor semantics with further independent
 input-varying cases; use same-domain, content-bound independent captures for
 evaluation. Strict Clippy has known
 pre-existing debt. Do not turn these into automatic review/workflow loops.
+
+PhaseFuse analyzer scaling is runnable through
+`sim/sm/src/bin/phasefuse_scale.rs` and
+`workloads/research_probes/phasefuse_scaling/benchmark.py`; its descriptor-only
+results must not be presented as native trace speedups.
 
 ## Operational anchors
 
