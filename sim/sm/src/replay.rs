@@ -37,6 +37,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
+use serde::Serialize;
+
 use sim_arch::card::{ArchCard, CalibError};
 use sim_arch::{ArchId, LdgstsDestinationWavefrontProjection, Sku};
 #[cfg(test)]
@@ -69,6 +71,10 @@ use sim_mem::{
     is_known_untagged_opcode, opcode_head,
 };
 
+use crate::causal_frontier::{
+    CausalFrontierInstruction, CausalFrontierReport, CausalFrontierResidency,
+    summarize_with_residency,
+};
 #[cfg(feature = "campaign")]
 use crate::evidence::AdmittedLaunchEvidence;
 use crate::issue::{
@@ -577,6 +583,8 @@ pub enum ReplayError {
     GridSizeOverflow { grid: (u32, u32, u32) },
     #[error("incomplete trace: {seen}/{grid_total} launch blocks present")]
     IncompleteTrace { seen: u64, grid_total: u64 },
+    #[error("fast frontier analysis failed: {detail}")]
+    FastFrontier { detail: String },
     #[cfg(feature = "campaign")]
     #[error(
         "trace_sampling sidecar original_grid {sidecar:?} != launch gridDim {launch:?} \
@@ -860,6 +868,252 @@ pub struct SmActiveObservationFrontier {
     pub terminal_lower_bound_cycles: Option<u64>,
     pub terminal_cycles: Option<u64>,
     pub envelope_cycles: u64,
+}
+
+/// Fast-path evidence produced directly from an admitted SM86 trace. This is
+/// deliberately a diagnostic projection: only homogeneous, control-clean,
+/// dependency-free scalar regions with no memory role are offered to the
+/// causal-frontier certificate; every other warp is retained as detailed or
+/// refused. It does not replace native replay timing or prove silicon behavior.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct FastFrontierSummary {
+    pub contract: &'static str,
+    pub architecture: &'static str,
+    pub blocks_seen: u64,
+    pub warps_seen: u64,
+    pub eligible_warps: u64,
+    pub candidate_regions: u64,
+    pub certified_regions: u64,
+    pub reified_regions: u64,
+    pub candidate_instructions: u64,
+    pub collapsed_instructions: u64,
+    pub exact_execution_steps: u64,
+    pub summarized_execution_steps: u64,
+    pub maximum_exact_final_cycle: u64,
+    pub maximum_summarized_final_cycle: u64,
+    pub terminal_state_matches: bool,
+    pub refusal_reasons: BTreeMap<String, u64>,
+}
+
+fn fast_scalar_segments(
+    warp: &WarpReplay,
+    schedule: &FunctionSchedule,
+) -> Vec<Vec<CausalFrontierInstruction>> {
+    let mut segments = Vec::new();
+    let mut program = Vec::new();
+    for (sequence, instruction) in warp.insts.iter().enumerate() {
+        let descriptor = match (|| {
+            if !matches!(instruction.kind, AccessKind::NonMemory) {
+                return None;
+            }
+            let slot = schedule.issue_slot(u64::from(instruction.pc))?;
+            if slot.op_class() != OpClass::Other || !matches!(slot.mem_role(), MemRole::None) {
+                return None;
+            }
+            let PipelineClass::ScalarAlu { latency_cycles, .. } = slot.pipeline_class() else {
+                return None;
+            };
+            let control = slot.control();
+            let dependency_free = control.wait_mask().bits() == 0
+                && control.write_barrier().is_none()
+                && control.read_barrier().is_none();
+            let sequence = u64::try_from(sequence).ok()?;
+            CausalFrontierInstruction::from_schedule(
+                schedule,
+                u64::from(instruction.pc),
+                sequence,
+                warp.warp_slot,
+                latency_cycles,
+                1,
+                dependency_free,
+                false,
+            )
+            .ok()
+        })() {
+            Some(descriptor) => descriptor,
+            None => {
+                if program.len() >= 2 {
+                    segments.push(std::mem::take(&mut program));
+                } else {
+                    program.clear();
+                }
+                continue;
+            }
+        };
+        program.push(descriptor);
+    }
+    if program.len() >= 2 {
+        segments.push(program);
+    }
+    segments
+}
+
+fn increment_fast_reason(
+    reasons: &mut BTreeMap<String, u64>,
+    reason: &str,
+) -> Result<(), ReplayError> {
+    let value = reasons.entry(reason.to_owned()).or_default();
+    *value = value
+        .checked_add(1)
+        .ok_or_else(|| ReplayError::FastFrontier {
+            detail: format!("refusal reason {reason:?} overflows u64"),
+        })?;
+    Ok(())
+}
+
+/// Build a conservative fast-frontier report from a real compact trace. The
+/// producer bridge intentionally refuses memory, barriers, dynamic pipelines,
+/// and incomplete scalar regions; callers can use the summary to decide which
+/// ranges are safe to summarize while keeping the ordinary replay as fallback.
+pub fn fast_frontier_for_trace(
+    td: &TraceDir,
+    loc: &KernelLoc<'_>,
+    schedule: &FunctionSchedule,
+    arch_card: &ArchCard,
+) -> Result<FastFrontierSummary, ReplayError> {
+    let placement = PlacementConfig::from_arch_card(arch_card, schedule.arch)?;
+    require_trace_architecture(td, schedule.arch)?;
+    let extracted = extract_per_sm_blocks(td, loc, schedule, placement, false)?;
+    let mut summary = FastFrontierSummary {
+        contract: "sm86_fast_exact_scalar_regions_v1",
+        architecture: schedule.arch.token(),
+        blocks_seen: 0,
+        warps_seen: 0,
+        eligible_warps: 0,
+        candidate_regions: 0,
+        certified_regions: 0,
+        reified_regions: 0,
+        candidate_instructions: 0,
+        collapsed_instructions: 0,
+        exact_execution_steps: 0,
+        summarized_execution_steps: 0,
+        maximum_exact_final_cycle: 0,
+        maximum_summarized_final_cycle: 0,
+        terminal_state_matches: true,
+        refusal_reasons: BTreeMap::new(),
+    };
+    let add = |counter: &'static str, value: &mut u64, addend: u64| {
+        *value = value
+            .checked_add(addend)
+            .ok_or_else(|| ReplayError::FastFrontier {
+                detail: format!("{counter} overflows u64"),
+            })?;
+        Ok::<(), ReplayError>(())
+    };
+    for blocks in extracted.per_sm_blocks.values() {
+        for block in blocks {
+            add("blocks_seen", &mut summary.blocks_seen, 1)?;
+            let residents = block
+                .warps
+                .iter()
+                .map(|warp| warp.warp_slot)
+                .collect::<Vec<_>>();
+            let mut candidate_segments = Vec::new();
+            for warp in &block.warps {
+                add("warps_seen", &mut summary.warps_seen, 1)?;
+                let warp_segments = fast_scalar_segments(warp, schedule);
+                if warp_segments.is_empty() {
+                    increment_fast_reason(
+                        &mut summary.refusal_reasons,
+                        "memory_control_or_non_scalar",
+                    )?;
+                    continue;
+                }
+                add("eligible_warps", &mut summary.eligible_warps, 1)?;
+                for segment in warp_segments {
+                    // A single segment is analyzed at a time so disjoint
+                    // segments on the same warp never masquerade as one
+                    // contiguous certificate. The complete resident roster
+                    // still prevents certification when another resident warp
+                    // can compete on that SMSP.
+                    candidate_segments.push(segment);
+                }
+            }
+            for segment in candidate_segments {
+                let segment_len =
+                    u64::try_from(segment.len()).map_err(|_| ReplayError::FastFrontier {
+                        detail: "scalar segment length exceeds u64".to_owned(),
+                    })?;
+                let report: CausalFrontierReport = summarize_with_residency(
+                    &[segment],
+                    CausalFrontierResidency::Complete {
+                        physical_warps: residents.clone(),
+                    },
+                )
+                .map_err(|error| ReplayError::FastFrontier {
+                    detail: error.to_string(),
+                })?;
+                // The generic analyzer only increments candidate_regions after
+                // it sees a fully summarizable interval. Keep a producer-side
+                // candidate/refusal witness for scalar runs rejected by a
+                // control/dependency/occupancy guard, so fast-only output does
+                // not confuse "no candidate" with "no scalar work".
+                if report.candidate_regions == 0 {
+                    add("candidate_regions", &mut summary.candidate_regions, 1)?;
+                    add("reified_regions", &mut summary.reified_regions, 1)?;
+                    add(
+                        "candidate_instructions",
+                        &mut summary.candidate_instructions,
+                        segment_len,
+                    )?;
+                    increment_fast_reason(&mut summary.refusal_reasons, "causal_guard_refused")?;
+                }
+                add(
+                    "candidate_regions",
+                    &mut summary.candidate_regions,
+                    report.candidate_regions,
+                )?;
+                add(
+                    "certified_regions",
+                    &mut summary.certified_regions,
+                    u64::try_from(report.certified_regions.len()).map_err(|_| {
+                        ReplayError::FastFrontier {
+                            detail: "certified region count exceeds u64".to_owned(),
+                        }
+                    })?,
+                )?;
+                add(
+                    "reified_regions",
+                    &mut summary.reified_regions,
+                    report.reified_regions,
+                )?;
+                add(
+                    "candidate_instructions",
+                    &mut summary.candidate_instructions,
+                    report.candidate_instructions,
+                )?;
+                add(
+                    "collapsed_instructions",
+                    &mut summary.collapsed_instructions,
+                    report.collapsed_instructions,
+                )?;
+                add(
+                    "exact_execution_steps",
+                    &mut summary.exact_execution_steps,
+                    report.exact_execution_steps,
+                )?;
+                add(
+                    "summarized_execution_steps",
+                    &mut summary.summarized_execution_steps,
+                    report.causal_execution_steps,
+                )?;
+                summary.maximum_exact_final_cycle = summary
+                    .maximum_exact_final_cycle
+                    .max(report.exact_final_cycle);
+                summary.maximum_summarized_final_cycle = summary
+                    .maximum_summarized_final_cycle
+                    .max(report.causal_final_cycle);
+                summary.terminal_state_matches &= report.terminal_state_matches;
+                for detail in report.reified_region_details {
+                    increment_fast_reason(
+                        &mut summary.refusal_reasons,
+                        &format!("reified_{:?}", detail.reason),
+                    )?;
+                }
+            }
+        }
+    }
+    Ok(summary)
 }
 
 impl FullKernelReplayResult {

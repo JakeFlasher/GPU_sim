@@ -14,6 +14,11 @@ The workspace contains two deliberately separate execution paths.
 Architecture cards are evidence-bound inputs. NCU joins are observations added
 after replay and never alter simulator parameters.
 
+`sim-run --fast-frontier-only` is an opt-in PhaseFuse analysis lane. It reads
+the trace/control/card contract, skips native timing replay, and emits only
+conservative scalar-region certificate/refusal evidence. It is not a timing
+replacement; see [`docs/sm86_fast_exact_prototype_20260927.md`](../docs/sm86_fast_exact_prototype_20260927.md).
+
 ## Bounded custom path
 
 - `sim-arch::spec`: validated hypothetical resources and operation bindings.

@@ -1,6 +1,6 @@
 # Current status
 
-Updated 2026-09-26. Source-backed capabilities, not a declaration that all
+Updated 2026-09-27. Source-backed capabilities, not a declaration that all
 research is complete. Start with [memory](PROJECT_MEMORY.md); use
 [history](HISTORY.md) for dated evidence and superseded claims.
 
@@ -12,6 +12,7 @@ research is complete. Start with [memory](PROJECT_MEMORY.md); use
 | Native resource override | Carded scheduler; scalar or strict `trace_sass_v1` issue-width override, also in prepared replay | Hypothetical trace-safe width only; no unused latency/resource knobs |
 | Custom `simt_u32_v1` | Dependency/resource overlap, resident groups, separate global/shared words, atomic add, broadcast/reduction, bounded CTA barriers | Fixed ISA; no general compiler, weak memory or native cache timing |
 | Custom `simt_its_v1` | Per-lane PCs/predicates, reconvergence, indirect loads/stores, optional versioned execution trace | Single group, functional only; not native SASS regeneration |
+| PhaseFuse fast frontier | Trace-derived scalar-region certificate/refusal report via `sim-run --fast-frontier-only` | Conservative analysis only; skips native timing and cannot certify memory, barriers, dynamic pipes or silicon |
 
 Custom barriers require matching lengths/positions/IDs, one use per ID, and
 all participants resident. Same-phase shared conflicts and inter-group global
@@ -40,6 +41,11 @@ Capture is bounded at 100k records and 32 MiB of accumulated serialized record
 bytes (not whole-process memory); `lane_blocked_by` keeps barrier-waiting lanes
 explicit. [Schemas and inputs](../arch_profiles/README.md).
 
+The PhaseFuse lane is deliberately separate from native replay. It preserves
+trace/control/card identity, emits exact candidate/refusal populations for its
+declared recurrence, and never consumes NCU values. It is a fast analysis
+front-end, not a replacement timing model. [Prototype and SOTA study](sm86_fast_exact_prototype_20260927.md).
+
 The tracer resolves exact module/library owners for stable regular files.
 Anonymous/JIT/deleted origins can remain unavailable. Active CUDA graph
 launches fail explicitly (`graph_node_capture_unsupported`).
@@ -60,6 +66,8 @@ launches fail explicitly (`graph_node_capture_unsupported`).
 - [Issue-width study](sm86_issue_width_design_study_20260923.md) is a negative
   model-relative result. The [tail sensitivity](sm86_tail_sensitivity_20260926.md)
   is arithmetic under assumed coefficients, not a consequential hardware study.
+- [PhaseFuse](sm86_fast_exact_prototype_20260927.md) reports bounded fast-only
+  trace analysis; its wall times exclude native timing replay by design.
 
 ## Open work and scope
 

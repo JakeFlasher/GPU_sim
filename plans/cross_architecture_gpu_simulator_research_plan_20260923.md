@@ -20,6 +20,7 @@ arbitrary postprocessing formula establishes a novel hardware mechanism.
 | Value-dependent behavior | Single-group ITS functional execution and custom trace | Complete successor contract, stronger tests; separate native/PTX frontend if required |
 | Accuracy | Retained SM86 trace/NCU pairs | Same-source-domain counters, content-bound independent holdout and tail mapping |
 | Speed | Event/dense path and phase counters | Repeated phase/RSS measurements on unchanged semantics, before/after evidence |
+| Fast research prototype | `sim-run --fast-frontier-only` / `sm86_fast_exact_prototype_20260927.md` | Certificate rate, refusal reasons, planner-inclusive wall time and boundary-state differential |
 | Architecture contribution | Width override and custom resource scheduling | A real mechanism whose intervention changes a defensible design decision |
 | Toolchain | PTX, Vortex/VOLT and OpenVADL options researched | User-selected input/output ABI and concrete semantic/compiler subset |
 | External baseline | Non-scoring Accel-Sim/Huerta overlap | Explicit scope and common hardware/workload/observable before numerical comparison |
@@ -28,6 +29,11 @@ Fixed replay can vary timing/resources only when instructions, addresses,
 predicates and participants remain valid. A value/CFG/atomic-order intervention
 requires execution or recapture. Keep model-relative, functional, silicon and
 simulator-performance results separate; do not select a frontier by its NCU fit.
+
+The current prototype direction is PhaseFuse: exact trace counters plus sparse
+event timing plus state-complete scalar certificates with detailed fallback.
+It is intentionally not a claim that native writeback/coherence, physical-pipe
+routing, SASS CFG regeneration, or general compiler generation are closed.
 
 Earlier full-completion and “consequential tail study” claims were withdrawn:
 scenario arithmetic is not completion of the mechanism. Older plans are

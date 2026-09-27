@@ -12,6 +12,7 @@ const USAGE: &str = "Usage: sim-run --trace DIR --control FILE --arch-card FILE 
 [--cache-scope launch|stream-l2] [--carded-dram] [--kernel-id ID] \
 [--hypothetical-issue-ports N] \
 [--architecture-spec FILE] \
+[--fast-frontier-only] \
 [--ncu-shaped-metrics] \
 [--ncu-csv FILE] [--ncu-launch ID] \
 [--launch-resources FILE] \
@@ -47,6 +48,7 @@ fn parse_args(args: impl IntoIterator<Item = OsString>) -> Result<Option<RunConf
     let mut carded_dram_bandwidth = false;
     let mut hypothetical_issue_ports = None;
     let mut architecture_spec = None;
+    let mut fast_frontier_only = false;
     let mut kernel_id = None;
     let mut ncu_shaped_metrics = false;
     let mut ncu_csv = None;
@@ -122,6 +124,9 @@ fn parse_args(args: impl IntoIterator<Item = OsString>) -> Result<Option<RunConf
                 architecture_spec =
                     Some(PathBuf::from(take_value(&mut args, "--architecture-spec")?));
             }
+            value if value == OsStr::new("--fast-frontier-only") => {
+                fast_frontier_only = true;
+            }
             value if value == OsStr::new("--ncu-shaped-metrics") => {
                 ncu_shaped_metrics = true;
             }
@@ -184,6 +189,7 @@ fn parse_args(args: impl IntoIterator<Item = OsString>) -> Result<Option<RunConf
         architecture_spec,
         kernel_id,
         ncu_shaped_metrics,
+        fast_frontier_only,
         ncu_csv,
         ncu_launch,
         launch_resources,
@@ -332,6 +338,33 @@ mod tests {
             .unwrap()
             .unwrap()
             .ncu_shaped_metrics
+        );
+    }
+
+    #[test]
+    fn fast_frontier_only_is_opt_in() {
+        let base = [
+            OsString::from("--trace"),
+            OsString::from("trace"),
+            OsString::from("--control"),
+            OsString::from("control"),
+            OsString::from("--arch-card"),
+            OsString::from("card"),
+        ];
+        assert!(
+            !parse_args(base.clone())
+                .unwrap()
+                .unwrap()
+                .fast_frontier_only
+        );
+        assert!(
+            parse_args(
+                base.into_iter()
+                    .chain([OsString::from("--fast-frontier-only")])
+            )
+            .unwrap()
+            .unwrap()
+            .fast_frontier_only
         );
     }
 

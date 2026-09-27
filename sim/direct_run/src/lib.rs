@@ -27,8 +27,8 @@ use sim_run::emit::{
     emit_launch,
 };
 use sim_sm::{
-    ControlSidecar, DramBw, DramStats, FullKernelReplayResult, GpcObservationFrontier,
-    IssueModelParams, L2SourceSplit, MAX_MEMORY_ADMISSION_CANDIDATES,
+    ControlSidecar, DramBw, DramStats, FastFrontierSummary, FullKernelReplayResult,
+    GpcObservationFrontier, IssueModelParams, L2SourceSplit, MAX_MEMORY_ADMISSION_CANDIDATES,
     MAX_MEMORY_SERVICE_CANDIDATES, MemoryAdmissionCandidate, MemoryServiceCandidate,
     ModeledCompletionFrontier, ReadinessDiagnostics, ReplayMemMode, SmActiveObservationFrontier,
     StreamL2ReplaySession, TailFlags, TraceMetrics, build_schedules, replay_trace_kernel,
@@ -125,6 +125,9 @@ pub struct RunConfig {
     /// Include the registry-bound simulator projections used for NCU joins.
     /// The default remains false so existing direct-result JSON is unchanged.
     pub ncu_shaped_metrics: bool,
+    /// Run only the conservative trace-derived fast-frontier analyzer. This
+    /// skips native timing replay and emits no silicon timing claim.
+    pub fast_frontier_only: bool,
     /// Optional schema-1 bounded candidate document. Candidate evaluation is
     /// observational and available only for launch-scoped full-hierarchy replay.
     pub memory_service_candidates: Option<PathBuf>,
@@ -632,6 +635,8 @@ pub struct RunReport {
     pub memory_mode: &'static str,
     pub cache_scope: &'static str,
     pub carded_dram_bandwidth: bool,
+    #[serde(skip_serializing_if = "is_false")]
+    pub fast_frontier_only: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub hypothetical_issue_ports: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -642,9 +647,25 @@ pub struct RunReport {
     pub memory_admission_feedback_candidate_id: Option<u8>,
     pub launches: Vec<LaunchReport>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub fast_frontier: Option<Vec<FastFrontierLaunchReport>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub cache_session: Option<CacheSessionReport>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ncu_observation: Option<ncu::NcuObservation>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct FastFrontierLaunchReport {
+    pub device_id: i64,
+    pub stream_id: i64,
+    pub kernel_id: i32,
+    pub function_unique_id: i32,
+    pub kernel_name: String,
+    pub summary: FastFrontierSummary,
+}
+
+fn is_false(value: &bool) -> bool {
+    !*value
 }
 
 #[derive(Debug, Serialize)]
@@ -1366,6 +1387,32 @@ pub fn run(config: &RunConfig) -> Result<RunReport, RunError> {
             "memory-service, memory-admission, and feedback candidate files are mutually exclusive",
         ));
     }
+    if config.fast_frontier_only && candidate_inputs != 0 {
+        return Err(RunError::new(
+            "arguments",
+            "--fast-frontier-only cannot combine with timing candidate documents",
+        ));
+    }
+    if config.fast_frontier_only
+        && (config.hypothetical_issue_ports.is_some() || config.architecture_spec.is_some())
+    {
+        return Err(RunError::new(
+            "arguments",
+            "--fast-frontier-only cannot combine with timing/resource overrides",
+        ));
+    }
+    if config.fast_frontier_only && config.cache_scope != CacheScope::Launch {
+        return Err(RunError::new(
+            "arguments",
+            "--fast-frontier-only requires --cache-scope launch",
+        ));
+    }
+    if config.fast_frontier_only && config.ncu_shaped_metrics {
+        return Err(RunError::new(
+            "arguments",
+            "--fast-frontier-only cannot emit native NCU-shaped metric projections",
+        ));
+    }
     if config.ncu_launch.is_some() && config.ncu_csv.is_none() {
         return Err(RunError::new(
             "arguments",
@@ -1440,6 +1487,7 @@ pub fn run(config: &RunConfig) -> Result<RunReport, RunError> {
         && config.cache_scope == CacheScope::Launch
         && config.kernel_id.is_none()
         && !config.ncu_shaped_metrics
+        && !config.fast_frontier_only
         && ncu_observation.is_none()
         && !specialized_loader_requested
         && !performance_diagnostics_requested
@@ -1520,6 +1568,56 @@ pub fn run(config: &RunConfig) -> Result<RunReport, RunError> {
                 None => "trace contains no kernel launches".to_owned(),
             },
         ));
+    }
+
+    if config.fast_frontier_only {
+        let mut fast_frontier = Vec::with_capacity(kernel_locs.len());
+        for loc in kernel_locs {
+            let schedule = schedules
+                .get(&loc.kernel().function_unique_id)
+                .ok_or_else(|| {
+                    RunError::new(
+                        "fast frontier",
+                        format!(
+                            "no schedule for function_unique_id {}",
+                            loc.kernel().function_unique_id
+                        ),
+                    )
+                })?;
+            let summary = sim_sm::fast_frontier_for_trace(&trace, &loc, schedule, &arch_card)
+                .map_err(at("fast frontier"))?;
+            fast_frontier.push(FastFrontierLaunchReport {
+                device_id: loc.device_id(),
+                stream_id: loc.stream_id(),
+                kernel_id: loc.kernel().id,
+                function_unique_id: loc.kernel().function_unique_id,
+                kernel_name: loc.kernel().name.clone(),
+                summary,
+            });
+        }
+        return Ok(RunReport {
+            schema_version: 1,
+            simulator_version: env!("CARGO_PKG_VERSION"),
+            architecture: arch.token().to_owned(),
+            memory_mode: config.memory_mode.token(),
+            cache_scope: config.cache_scope.token(),
+            carded_dram_bandwidth: config.carded_dram_bandwidth,
+            fast_frontier_only: true,
+            hypothetical_issue_ports: config
+                .hypothetical_issue_ports
+                .or(architecture_spec_issue_ports),
+            architecture_spec: config
+                .architecture_spec
+                .as_ref()
+                .map(|path| path.display().to_string()),
+            memory_service_candidate_count: 0,
+            memory_admission_candidate_count: 0,
+            memory_admission_feedback_candidate_id: None,
+            launches: Vec::new(),
+            fast_frontier: Some(fast_frontier),
+            cache_session: None,
+            ncu_observation,
+        });
     }
 
     let mut launches = Vec::with_capacity(kernel_locs.len());
@@ -1653,6 +1751,7 @@ pub fn run(config: &RunConfig) -> Result<RunReport, RunError> {
         memory_mode: config.memory_mode.token(),
         cache_scope: config.cache_scope.token(),
         carded_dram_bandwidth: config.carded_dram_bandwidth,
+        fast_frontier_only: false,
         hypothetical_issue_ports: config
             .hypothetical_issue_ports
             .or(architecture_spec_issue_ports),
@@ -1665,6 +1764,7 @@ pub fn run(config: &RunConfig) -> Result<RunReport, RunError> {
         memory_admission_feedback_candidate_id: memory_admission_feedback
             .map(|candidate| candidate.candidate_id),
         launches,
+        fast_frontier: None,
         cache_session,
         ncu_observation,
     };
@@ -1703,6 +1803,7 @@ mod tests {
             architecture_spec: None,
             kernel_id: None,
             ncu_shaped_metrics: false,
+            fast_frontier_only: false,
             memory_service_candidates: None,
             memory_admission_candidates: None,
             memory_admission_feedback: None,
@@ -1755,6 +1856,24 @@ mod tests {
         );
         assert!(json.get("cache_session").is_none());
         assert!(json["launches"][0].get("cache_handoff").is_none());
+    }
+
+    #[test]
+    fn fast_frontier_only_runs_fixture_without_native_timing_replay() {
+        let mut config = fixture(MemoryMode::Flat);
+        config.fast_frontier_only = true;
+        let report = run(&config).expect("fast frontier fixture should run");
+        assert!(report.fast_frontier_only);
+        assert!(report.launches.is_empty());
+        let summary = &report
+            .fast_frontier
+            .as_ref()
+            .expect("fast frontier report should be present")[0]
+            .summary;
+        assert_eq!(summary.contract, "sm86_fast_exact_scalar_regions_v1");
+        assert_eq!(summary.blocks_seen, 1);
+        assert_eq!(summary.warps_seen, 1);
+        assert!(summary.terminal_state_matches);
     }
 
     #[test]

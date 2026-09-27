@@ -1,0 +1,87 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "fast_frontier.v1.schema.json",
+  "title": "SM86 PhaseFuse fast-frontier report v1",
+  "description": "Trace-derived conservative analysis; no native timing replay or silicon claim.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "simulator_version",
+    "architecture",
+    "memory_mode",
+    "cache_scope",
+    "carded_dram_bandwidth",
+    "fast_frontier_only",
+    "memory_service_candidate_count",
+    "memory_admission_candidate_count",
+    "launches",
+    "fast_frontier"
+  ],
+  "properties": {
+    "schema_version": {"const": 1},
+    "simulator_version": {"type": "string", "minLength": 1},
+    "architecture": {"const": "sm_86"},
+    "memory_mode": {"enum": ["flat", "l1", "l1-l2"]},
+    "cache_scope": {"const": "launch"},
+    "carded_dram_bandwidth": {"type": "boolean"},
+    "fast_frontier_only": {"const": true},
+    "hypothetical_issue_ports": {"type": "integer", "minimum": 1, "maximum": 4},
+    "architecture_spec": {"type": "string"},
+    "memory_service_candidate_count": {"const": 0},
+    "memory_admission_candidate_count": {"const": 0},
+    "launches": {"type": "array", "maxItems": 0},
+    "fast_frontier": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 4096,
+      "items": {"$ref": "#/$defs/launch"}
+    },
+    "ncu_observation": {"type": "object"}
+  },
+  "$defs": {
+    "u64": {"type": "integer", "minimum": 0},
+    "launch": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["device_id", "stream_id", "kernel_id", "function_unique_id", "kernel_name", "summary"],
+      "properties": {
+        "device_id": {"type": "integer"},
+        "stream_id": {"type": "integer"},
+        "kernel_id": {"type": "integer"},
+        "function_unique_id": {"type": "integer"},
+        "kernel_name": {"type": "string"},
+        "summary": {"$ref": "#/$defs/summary"}
+      }
+    },
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "contract", "architecture", "blocks_seen", "warps_seen", "eligible_warps",
+        "candidate_regions", "certified_regions", "reified_regions",
+        "candidate_instructions", "collapsed_instructions", "exact_execution_steps",
+        "summarized_execution_steps", "maximum_exact_final_cycle",
+        "maximum_summarized_final_cycle", "terminal_state_matches", "refusal_reasons"
+      ],
+      "properties": {
+        "contract": {"const": "sm86_fast_exact_scalar_regions_v1"},
+        "architecture": {"const": "sm_86"},
+        "blocks_seen": {"$ref": "#/$defs/u64"},
+        "warps_seen": {"$ref": "#/$defs/u64"},
+        "eligible_warps": {"$ref": "#/$defs/u64"},
+        "candidate_regions": {"$ref": "#/$defs/u64"},
+        "certified_regions": {"$ref": "#/$defs/u64"},
+        "reified_regions": {"$ref": "#/$defs/u64"},
+        "candidate_instructions": {"$ref": "#/$defs/u64"},
+        "collapsed_instructions": {"$ref": "#/$defs/u64"},
+        "exact_execution_steps": {"$ref": "#/$defs/u64"},
+        "summarized_execution_steps": {"$ref": "#/$defs/u64"},
+        "maximum_exact_final_cycle": {"$ref": "#/$defs/u64"},
+        "maximum_summarized_final_cycle": {"$ref": "#/$defs/u64"},
+        "terminal_state_matches": {"type": "boolean"},
+        "refusal_reasons": {"type": "object", "additionalProperties": {"$ref": "#/$defs/u64"}}
+      }
+    }
+  }
+}

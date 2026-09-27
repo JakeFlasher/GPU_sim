@@ -1,6 +1,6 @@
 # Continuation memory
 
-Updated 2026-09-26. Read this first; [STATUS](STATUS.md) owns current capability
+Updated 2026-09-27. Read this first; [STATUS](STATUS.md) owns current capability
 claims, [runbook](runbook_host.md) owns commands, [HISTORY](HISTORY.md) owns dated
 records. Do not load every linked report. Root [AGENTS.md](../AGENTS.md) is policy.
 
@@ -21,6 +21,9 @@ records. Do not load every linked report. Root [AGENTS.md](../AGENTS.md) is poli
   additive. Dirty-writeback/coherence scenario rows are postprocessing formulas.
   `min_selected_then_lexical_v1` balances candidate counts in extraction order,
   not scheduler pressure or dynamic hardware routing. See [diagnostics](experimental_diagnostics.md).
+- `sim-run --fast-frontier-only` is an opt-in trace-derived PhaseFuse lane. It
+  skips native timing replay, certifies only narrow scalar regions, and reports
+  refusal reasons; its output is not a timing prediction or NCU replacement.
 
 ## Do not repeat earlier overclaims
 
@@ -38,8 +41,10 @@ records. Do not load every linked report. Root [AGENTS.md](../AGENTS.md) is poli
 
 ## Next concrete seams
 
-Finish mechanism-backed memory/pipeline execution if requested; extend the ITS
-trace schema and reconvergence-successor semantics with further independent
+Use the PhaseFuse fast lane to gather refusal/certificate populations, then add
+state-complete summaries only for one mechanism at a time; finish
+mechanism-backed memory/pipeline execution if requested; extend the ITS trace
+schema and reconvergence-successor semantics with further independent
 input-varying cases; use same-domain, content-bound independent captures for
 evaluation. Strict Clippy has known
 pre-existing debt. Do not turn these into automatic review/workflow loops.

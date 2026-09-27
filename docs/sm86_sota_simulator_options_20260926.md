@@ -5,6 +5,9 @@ simulator execution was performed for this report. Current implementation and
 measurement limits are in [STATUS](STATUS.md); the broader literature extraction
 remains in the [dated matrix](gpu_simulator_sota_matrix_20260924.md).
 
+The newer source/paper review and the locally executable PhaseFuse prototype are
+recorded in [the 2026-09-27 study](sm86_fast_exact_prototype_20260927.md).
+
 ## Shortlist by question
 
 | Need | Option | What must not be assumed |

@@ -116,15 +116,16 @@ pub use program::{
     FunctionSchedule, IssueSlot, OpClass, PipelineClass, ProgramError, build_schedules,
 };
 pub use replay::{
-    CoResidency, FrontEndCounters, FullCounterEstimatorProvenance, FullCoverageSource,
-    FullKernelReplayResult, FullLaunchCoverage, FullLaunchSetCounters, FullLaunchSetDeclaration,
-    FullLaunchSetDeclarationError, FullLaunchTimingDiagnostic, GpcObservationFrontier,
-    KernelReplayOutcome, LaunchSetAggregationError, LaunchSetCounterComponent,
-    LaunchSetScalarCounter, LaunchSetScope, LaunchSetScopeError, ModeledCompletionFrontier,
-    ReplayConfiguration, ReplayError, ReplayLaunchCoverageBinding,
+    CoResidency, FastFrontierSummary, FrontEndCounters, FullCounterEstimatorProvenance,
+    FullCoverageSource, FullKernelReplayResult, FullLaunchCoverage, FullLaunchSetCounters,
+    FullLaunchSetDeclaration, FullLaunchSetDeclarationError, FullLaunchTimingDiagnostic,
+    GpcObservationFrontier, KernelReplayOutcome, LaunchSetAggregationError,
+    LaunchSetCounterComponent, LaunchSetScalarCounter, LaunchSetScope, LaunchSetScopeError,
+    ModeledCompletionFrontier, ReplayConfiguration, ReplayError, ReplayLaunchCoverageBinding,
     ReplayLaunchCoverageBindingError, ReplayMemMode, ReplaySessionError,
     SmActiveObservationFrontier, StreamL2ReplaySession, aggregate_full_launch_set,
-    replay_trace_kernel, replay_trace_kernel_with_memory_admission_candidates,
+    fast_frontier_for_trace, replay_trace_kernel,
+    replay_trace_kernel_with_memory_admission_candidates,
     replay_trace_kernel_with_memory_admission_feedback,
     replay_trace_kernel_with_memory_service_candidates,
 };

@@ -10,6 +10,7 @@ Read one entry point, then the relevant contract. Dated reports are opt-in.
 | Data flow and package ownership | [Architecture](ARCHITECTURE.md), [components](COMPONENTS.md) |
 | Cards, profiles, examples, schemas | [Configuration](archprofile.md), [input index](../arch_profiles/README.md) |
 | Diagnostic formulas and ITS trace limits | [Experimental diagnostics](experimental_diagnostics.md) |
+| Fast SM86 research prototype and SOTA study | [PhaseFuse](sm86_fast_exact_prototype_20260927.md) |
 | Focused validation | [Testing](testing.md) |
 | Design choices and alternatives | [Roadmap](../plans/cross_architecture_gpu_simulator_research_plan_20260923.md), [SOTA options](sm86_sota_simulator_options_20260926.md) |
 | Dated measurements, prior reviews and session corrections | [HISTORY](HISTORY.md) |

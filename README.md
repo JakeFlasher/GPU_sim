@@ -26,6 +26,7 @@ representation is not a universal binary decoder.
 - [Build, capture, and replay commands](docs/runbook_host.md)
 - [Architecture](docs/ARCHITECTURE.md) and [configuration contracts](docs/archprofile.md)
 - [Research roadmap](plans/cross_architecture_gpu_simulator_research_plan_20260923.md)
+- [PhaseFuse fast SM86 prototype and SOTA study](docs/sm86_fast_exact_prototype_20260927.md)
 - [Project memory for agent continuations](docs/PROJECT_MEMORY.md)
 - [Documentation and dated evidence](docs/README.md)
 - [History and stale-context map](docs/HISTORY.md)

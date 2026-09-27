@@ -15,6 +15,12 @@ cargo build --release --manifest-path sim/Cargo.toml -p sim-run -p sim-arch
 sim/target/release/custom_simt_its \
   arch_profiles/specs/simt_its_dynamic.json \
   arch_profiles/programs/simt_its_dynamic.json --trace
+
+# Conservative fast-only scalar-region analysis; does not run native timing.
+sim/target/release/sim-run \
+  --trace TRACE_DIR --control CONTROL_BITS.json \
+  --arch-card arch_profiles/cards/sm_86.json \
+  --mode flat --fast-frontier-only
 ```
 
 The last output is validated against
@@ -22,6 +28,8 @@ The last output is validated against
 representative SM86 trace should still be replayed with a bounded timeout after
 native metric changes. Do not treat the schema check as proof of native replay
 compatibility: `custom_its_dynamic_v1` is explicitly a separate frontend.
+The fast-only output is validated by its contract fields and refusal reasons;
+it is not a substitute for the ordinary replay path.
 
 ## Focused checks
 

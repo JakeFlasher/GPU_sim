@@ -1,6 +1,6 @@
 # Project history and stale-context map
 
-Updated 2026-09-26. This is a compact index, not a second status file. Read
+Updated 2026-09-27. This is a compact index, not a second status file. Read
 [PROJECT_MEMORY](PROJECT_MEMORY.md) and [STATUS](STATUS.md) for current work.
 Raw traces, result trees, reference manuals, old plans, and old Codex
 transcripts remain retained; this file tells a future session which material
@@ -129,3 +129,33 @@ validation pass.
 The follow-up ITS regression runs one program against all-true and mixed loaded
 predicate inputs, verifies different successor masks and lane results, and
 leaves native SASS regeneration explicitly out of scope.
+
+## 2026-09-27 SOTA review and PhaseFuse prototype
+
+Fresh shallow clones of Accel-Sim, GPGPU-Sim, MGPUSim, Vortex, EventQueue and
+PIMSIM-NN were inspected outside the repository, alongside primary PDFs for
+Accel-Sim 2020, Accel-Sim 2.0, MGPUSim, Vortex, EQueue, PIMSIM-NN and deterministic
+Accel-Sim parallelization. No external large-workload simulator was built or
+run. The resulting design note is [PhaseFuse](sm86_fast_exact_prototype_20260927.md).
+
+The repository now has an opt-in `sim-run --fast-frontier-only` path. It reads
+the actual SM86 trace/control/card, skips native timing replay, and emits a
+typed scalar-region certificate/refusal report. Retained canary/GEMM/LayerNorm
+fast-only smoke runs completed successfully; the ordinary event replay remains
+the timing reference. This closes the missing producer/CLI seam for the narrow
+causal analyzer, not any native hardware gap.
+
+Validation for this pass:
+
+```text
+cargo test --manifest-path sim/Cargo.toml --workspace --quiet                 PASS
+cargo test --manifest-path sim/Cargo.toml -p sim-sm --features campaign --quiet PASS
+cargo clippy --manifest-path sim/Cargo.toml -p sim-arch --all-targets -- -D warnings PASS
+fast_frontier.v1 schema validation on retained canary output                 PASS
+ordinary SM86 flat/l1-l2 canary replay (54 records each)                    PASS
+```
+
+Strict workspace Clippy remains blocked by existing `sim-sm` error-size and
+high-arity findings; no new PhaseFuse-specific lint was observed. External
+SOTA repositories were cloned and inspected only; no large external simulation
+was run.
