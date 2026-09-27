@@ -39,8 +39,8 @@ records. Do not load every linked report. Root [AGENTS.md](../AGENTS.md) is poli
 ## Next concrete seams
 
 Finish mechanism-backed memory/pipeline execution if requested; extend the ITS
-trace schema and reconvergence-successor semantics with independent input-
-varying tests; use same-domain, content-bound independent captures for
+trace schema and reconvergence-successor semantics with further independent
+input-varying cases; use same-domain, content-bound independent captures for
 evaluation. Strict Clippy has known
 pre-existing debt. Do not turn these into automatic review/workflow loops.
 

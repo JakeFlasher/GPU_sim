@@ -62,6 +62,8 @@ deterministic record-resource bound rather than a process-RSS or whole-output
 size guarantee. Input/step limits also apply.
 The [trace schema](../arch_profiles/schema/simt_its_trace.schema.json) validates
 the envelope, not complete operand/state semantics. Tightening these contracts
-and adding independent input-varying branch/reconvergence tests remains open.
+and adding more independent input-varying branch/reconvergence cases remains
+open. The executor regression suite now runs the same program with all-true and
+mixed loaded predicates and checks the emitted successor masks and lane values.
 
 Runnable smoke commands and schema validation are in [testing](testing.md).

@@ -926,6 +926,105 @@ mod tests {
     }
 
     #[test]
+    fn traced_execution_tracks_input_dependent_branch_paths() {
+        let spec = ArchitectureSpec::parse(
+            Path::new("spec.json"),
+            br#"
+            {
+              "schema_version": 1,
+              "architecture": "probe",
+              "isa": "simt_its_v1",
+              "instruction_set": ["set_lane_id", "mul_imm", "load_indirect", "cmp_lt_imm", "branch_if", "add_imm", "branch", "halt"],
+              "execution": {"simt_width": 4, "max_resident_groups": 1},
+              "resources": [{"name":"alu","kind":"compute","issue_width":1,"latency_cycles":1}],
+              "evidence": "unvalidated"
+            }
+            "#,
+        )
+        .expect("probe spec should parse");
+        let program = |memory: &str| {
+            ItsProgram::parse(
+                Path::new("program.json"),
+                format!(
+                    r#"{{
+                      "schema_version": 1,
+                      "architecture": "probe",
+                      "isa": "simt_its_v1",
+                      "max_steps": 32,
+                      "initial_memory": {memory},
+                      "instructions": [
+                        {{"op":"set_lane_id", "dst":0}},
+                        {{"op":"mul_imm", "dst":1, "src":0, "imm":4}},
+                        {{"op":"load_indirect", "dst":2, "address":1}},
+                        {{"op":"cmp_lt_imm", "dst":0, "src":2, "imm":10}},
+                        {{"op":"branch_if", "pred":0, "target":7}},
+                        {{"op":"add_imm", "dst":2, "src":2, "imm":100}},
+                        {{"op":"branch", "target":8}},
+                        {{"op":"add_imm", "dst":2, "src":2, "imm":200}},
+                        {{"op":"halt"}}
+                      ]
+                    }}"#
+                )
+                .as_bytes(),
+            )
+            .expect("input variant should parse")
+        };
+        let all_true = ItsExecutor::new(&spec, &program(r#"{"0":1,"4":2,"8":3,"12":4}"#))
+            .expect("identity and ISA should be accepted")
+            .run_traced()
+            .expect("all-true branch variant should complete");
+        let mixed = ItsExecutor::new(&spec, &program(r#"{"0":1,"4":12,"8":3,"12":14}"#))
+            .expect("identity and ISA should be accepted")
+            .run_traced()
+            .expect("mixed branch variant should complete");
+
+        let branch_successors = |result: &ItsResult| {
+            result
+                .dynamic_trace
+                .as_ref()
+                .expect("trace should be present")
+                .iter()
+                .find(|record| record.pc == 4)
+                .expect("branch record should be present")
+                .lane_successors
+                .clone()
+        };
+        assert_eq!(
+            branch_successors(&all_true),
+            [(0, 7), (1, 7), (2, 7), (3, 7)].into_iter().collect()
+        );
+        assert_eq!(
+            branch_successors(&mixed),
+            [(0, 7), (1, 5), (2, 7), (3, 5)].into_iter().collect()
+        );
+        assert_eq!(
+            all_true
+                .registers
+                .iter()
+                .map(|lane| lane[2])
+                .collect::<Vec<_>>(),
+            [201, 202, 203, 204]
+        );
+        assert_eq!(
+            mixed
+                .registers
+                .iter()
+                .map(|lane| lane[2])
+                .collect::<Vec<_>>(),
+            [201, 112, 203, 114]
+        );
+        let mixed_add_masks = mixed
+            .dynamic_trace
+            .as_ref()
+            .expect("trace should be present")
+            .iter()
+            .filter(|record| matches!(record.instruction, ItsInstruction::AddImm { .. }))
+            .map(|record| record.active_mask)
+            .collect::<Vec<_>>();
+        assert_eq!(mixed_add_masks, [0b1010, 0b0101]);
+    }
+
+    #[test]
     fn traced_execution_keeps_partially_arrived_barrier_lanes_explicit() {
         let spec = ArchitectureSpec::parse(
             Path::new("spec.json"),

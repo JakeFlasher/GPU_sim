@@ -125,3 +125,7 @@ Strict workspace Clippy remains red on pre-existing `sim-sm` findings such as
 large error variants and high-arity replay helpers; the changed ITS package is
 clean under `-D warnings`. This is recorded as lint debt, not hidden as a
 validation pass.
+
+The follow-up ITS regression runs one program against all-true and mixed loaded
+predicate inputs, verifies different successor masks and lane results, and
+leaves native SASS regeneration explicitly out of scope.
