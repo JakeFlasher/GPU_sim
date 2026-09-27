@@ -212,3 +212,20 @@ The follow-up native writeback checks additionally passed the synthetic
 single-way dirty-eviction system case, direct `sim-run` carded read/write
 equivalence on the retained SM86 canary, and release CLI execution with an
 explicit writeback capacity. No large external simulator workload was run.
+
+The next bounded memory slice adds `--coherence-service-cycles N` plus
+`--coherence-capacity-sectors N`. It refuses flat or incomplete decoded
+topology, tracks ordered L2-request directory transitions, waits response
+service behind cross-SM transfers, and reports separate completion counters;
+L1-hidden accesses, fences, resident flushes and protocol ownership remain
+explicit limits.
+
+Validation for this slice:
+
+```text
+cargo test --manifest-path sim/Cargo.toml --workspace --quiet                  PASS
+cargo test --manifest-path sim/Cargo.toml -p sim-sm --features campaign --quiet PASS
+cargo test --manifest-path sim/Cargo.toml -p sim-mem --lib --quiet            PASS
+synthetic cross-SM owner-transfer directory completion                         PASS
+release direct coherence/writeback CLI smoke and default read equivalence       PASS
+```

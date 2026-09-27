@@ -118,7 +118,12 @@ pub fn compile_subset_with_memory(
             ));
         }
         if line == "{" {
-            if entry_declarations != 1 || entry_braced || entry_closed {
+            if entry_declarations != 1
+                || entry_braced
+                || entry_closed
+                || !pending.is_empty()
+                || !labels.is_empty()
+            {
                 return Err(invalid(
                     line_number,
                     "an opening brace is only allowed immediately after .entry",
@@ -558,6 +563,10 @@ mod tests {
         ));
         assert!(matches!(
             compile_subset(".entry kernel() {\nexit;\n}\nexit;", "probe", 8),
+            Err(PtxSubsetError::Invalid { .. })
+        ));
+        assert!(matches!(
+            compile_subset(".entry kernel()\nexit;\n{", "probe", 8),
             Err(PtxSubsetError::Invalid { .. })
         ));
     }

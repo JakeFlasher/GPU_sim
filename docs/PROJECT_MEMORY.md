@@ -37,10 +37,14 @@ records. Do not load every linked report. Root [AGENTS.md](../AGENTS.md) is poli
   service, same-line fetch hazards and tokenized completion. Native launch
   replay enables it only through explicit `--dirty-writeback-capacity-sectors`;
   coherence ownership/visibility and resident dirty flush remain tails.
+- `sim-mem::coherence` provides an opt-in directory-style service selected by
+  `--coherence-service-cycles N --coherence-capacity-sectors N`. It models only
+  ordered, fully decoded L2-request topology; L1-hidden accesses and protocol
+  fence/ownership visibility remain explicit limits.
 
 ## Do not repeat earlier overclaims
 
-- The four native gaps are **not closed**: coherence/resident dirty flush,
+- The four native gaps are **not closed**: full coherence/resident dirty flush,
   timed physical-pipe selection, value-dependent SASS regeneration, and a
   general ISA/compiler. The user accepted bounded models and requested compiler
   alternatives; current heuristics are not full models of those mechanisms.
@@ -56,8 +60,9 @@ records. Do not load every linked report. Root [AGENTS.md](../AGENTS.md) is poli
 
 Use the PhaseFuse fast lane to gather refusal/certificate populations, the
 bounded PTX subset for value-dependent functional studies, and the custom route
-contract for controlled scheduling experiments. Extend the opt-in writeback
-queue only after native event/config evidence is independently validated; then add
+contract for controlled scheduling experiments. Extend the opt-in writeback and
+directory queues only after native event/config evidence is independently
+validated; then add
 state-complete summaries only for one mechanism at a time; extend the ITS
 trace schema and reconvergence-successor semantics with further independent
 input-varying cases; use same-domain, content-bound independent captures for

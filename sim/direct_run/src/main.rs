@@ -11,6 +11,7 @@ const USAGE: &str = "Usage: sim-run --trace DIR --control FILE --arch-card FILE 
 [--pchase-card FILE] [--mode flat|l1|l1-l2] \
 [--cache-scope launch|stream-l2] [--carded-dram] [--kernel-id ID] \
 [--dirty-writeback-capacity-sectors N] \
+[--coherence-service-cycles N --coherence-capacity-sectors N] \
 [--hypothetical-issue-ports N] \
 [--architecture-spec FILE] \
 [--fast-frontier-only] \
@@ -48,6 +49,8 @@ fn parse_args(args: impl IntoIterator<Item = OsString>) -> Result<Option<RunConf
     let mut cache_scope = CacheScope::Launch;
     let mut carded_dram_bandwidth = false;
     let mut dirty_writeback_capacity_sectors = None;
+    let mut coherence_service_cycles = None;
+    let mut coherence_capacity_sectors = None;
     let mut hypothetical_issue_ports = None;
     let mut architecture_spec = None;
     let mut fast_frontier_only = false;
@@ -115,6 +118,44 @@ fn parse_args(args: impl IntoIterator<Item = OsString>) -> Result<Option<RunConf
                     ));
                 }
                 dirty_writeback_capacity_sectors = Some(capacity);
+            }
+            value if value == OsStr::new("--coherence-service-cycles") => {
+                let raw = take_value(&mut args, "--coherence-service-cycles")?;
+                let raw = raw.to_str().ok_or_else(|| {
+                    RunError::new("arguments", "--coherence-service-cycles must be UTF-8")
+                })?;
+                let cycles = raw.parse::<u64>().map_err(|error| {
+                    RunError::new(
+                        "arguments",
+                        format!("invalid --coherence-service-cycles {raw:?}: {error}"),
+                    )
+                })?;
+                if cycles == 0 {
+                    return Err(RunError::new(
+                        "arguments",
+                        "--coherence-service-cycles must be positive",
+                    ));
+                }
+                coherence_service_cycles = Some(cycles);
+            }
+            value if value == OsStr::new("--coherence-capacity-sectors") => {
+                let raw = take_value(&mut args, "--coherence-capacity-sectors")?;
+                let raw = raw.to_str().ok_or_else(|| {
+                    RunError::new("arguments", "--coherence-capacity-sectors must be UTF-8")
+                })?;
+                let capacity = raw.parse::<u32>().map_err(|error| {
+                    RunError::new(
+                        "arguments",
+                        format!("invalid --coherence-capacity-sectors {raw:?}: {error}"),
+                    )
+                })?;
+                if capacity == 0 {
+                    return Err(RunError::new(
+                        "arguments",
+                        "--coherence-capacity-sectors must be positive",
+                    ));
+                }
+                coherence_capacity_sectors = Some(capacity);
             }
             value if value == OsStr::new("--kernel-id") => {
                 let raw = take_value(&mut args, "--kernel-id")?;
@@ -210,6 +251,8 @@ fn parse_args(args: impl IntoIterator<Item = OsString>) -> Result<Option<RunConf
         cache_scope,
         carded_dram_bandwidth,
         dirty_writeback_capacity_sectors,
+        coherence_service_cycles,
+        coherence_capacity_sectors,
         hypothetical_issue_ports,
         architecture_spec,
         kernel_id,
@@ -480,5 +523,25 @@ mod tests {
         ])
         .expect_err("zero capacity must fail at argument parsing");
         assert_eq!(error.stage(), "arguments");
+    }
+
+    #[test]
+    fn coherence_service_pair_is_explicit() {
+        let parsed = parse_args([
+            OsString::from("--trace"),
+            OsString::from("trace"),
+            OsString::from("--control"),
+            OsString::from("control"),
+            OsString::from("--arch-card"),
+            OsString::from("card"),
+            OsString::from("--coherence-service-cycles"),
+            OsString::from("2"),
+            OsString::from("--coherence-capacity-sectors"),
+            OsString::from("8"),
+        ])
+        .unwrap()
+        .unwrap();
+        assert_eq!(parsed.coherence_service_cycles, Some(2));
+        assert_eq!(parsed.coherence_capacity_sectors, Some(8));
     }
 }

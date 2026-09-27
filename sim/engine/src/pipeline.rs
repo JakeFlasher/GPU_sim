@@ -177,6 +177,15 @@ pub fn schedule(
                     saw_overflow = true;
                     continue;
                 };
+                // A one-beat operation can complete well before the end of
+                // a long initiation interval. The reservation endpoint must
+                // be representable too, not just its completion timestamp.
+                // Otherwise a seemingly faster but unrepresentable route
+                // would hide a viable alternative and fail only at issue.
+                if candidate_start.checked_add(service).is_none() {
+                    saw_overflow = true;
+                    continue;
+                }
                 let Some(last_beat_end) = service
                     .checked_sub(cfg.initiation_interval)
                     .and_then(|v| v.checked_add(1))
@@ -592,5 +601,51 @@ mod tests {
         )
         .expect("the representable alternative should be selected");
         assert_eq!(result.selected_resources[0], vec![Some(1)]);
+    }
+
+    #[test]
+    fn overflowing_reservation_does_not_hide_a_viable_route() {
+        let result = schedule(
+            &[
+                Resource {
+                    width: 1,
+                    latency: 1,
+                    initiation_interval: u64::MAX,
+                    max_in_flight: None,
+                },
+                Resource {
+                    width: 1,
+                    latency: 2,
+                    initiation_interval: 1,
+                    max_in_flight: None,
+                },
+            ],
+            &[vec![
+                Task {
+                    resource: None,
+                    resource_options: vec![],
+                    work: 0,
+                    dependencies: vec![],
+                    cross_dependencies: vec![],
+                },
+                Task {
+                    resource: None,
+                    resource_options: vec![0, 1],
+                    work: 1,
+                    dependencies: vec![],
+                    cross_dependencies: vec![],
+                },
+            ]],
+            1,
+        )
+        .expect("a reservation overflow must not defeat the representable route");
+        assert_eq!(result.selected_resources[0], vec![None, Some(1)]);
+        assert_eq!(
+            result.groups[0][1],
+            Interval {
+                start: 1,
+                complete: 4
+            }
+        );
     }
 }

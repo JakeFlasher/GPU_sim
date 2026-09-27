@@ -179,6 +179,17 @@ executable mechanism that can be validated without inventing a coherence
 protocol; ownership, visibility and resident dirty flush completion remain
 open.
 
+## Bounded coherence/visibility seam
+
+The opt-in `CoherenceQueue` is a directory-style model over the ordered,
+fully decoded L2-request stream. It gives read/read sharing no service cost and
+charges a configured interval for cross-SM owner transfer or write
+invalidation, with finite in-flight capacity and explicit completion events.
+Unknown SM/sector topology refuses the run. L1-hidden accesses, fences,
+protocol messages, resident flushes and actual hardware ownership remain out of
+contract, so this is a bounded mechanism experiment rather than coherence
+reconstruction.
+
 ## Bounded functional compiler seam
 
 `ptx_subset_compile` lowers `ptx_subset_v1` text into a validated

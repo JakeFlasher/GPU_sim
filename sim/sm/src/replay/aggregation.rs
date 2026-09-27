@@ -1021,6 +1021,7 @@ mod tests {
                     slice_hash: SliceHash::LineMod,
                 },
                 dram: DramBw::Unmodeled { arch: ArchId::Sm86 },
+                coherence: None,
             },
         )
         .unwrap()

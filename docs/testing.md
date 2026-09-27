@@ -38,6 +38,13 @@ sim/target/release/sim-run \
   --arch-card arch_profiles/cards/sm_86.json \
   --pchase-card PCHASE_CARD.json --mode l1-l2 --carded-dram \
   --dirty-writeback-capacity-sectors 64
+
+# Opt-in ordered-L2 directory service (hypothetical, not protocol timing).
+sim/target/release/sim-run \
+  --trace TRACE_DIR --control CONTROL_BITS.json \
+  --arch-card arch_profiles/cards/sm_86.json \
+  --pchase-card PCHASE_CARD.json --mode l1-l2 \
+  --coherence-service-cycles 2 --coherence-capacity-sectors 64
 ```
 
 The last output is validated against

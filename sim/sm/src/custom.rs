@@ -40,6 +40,11 @@ pub struct CustomResult {
 
 #[derive(Debug, Serialize)]
 pub struct CustomScheduleDiagnostics {
+    /// Identifies the interpretation of the reported lower-bound fields. The
+    /// scheduler first greedily chooses one concrete route for each task, so
+    /// these are bounds for that selected route assignment, not a universal
+    /// optimum over all legal alternative-resource assignments.
+    pub lower_bound_scope: &'static str,
     /// Latest task issue timestamp in the shared event schedule.
     pub last_issue_cycle: u64,
     /// Latest task completion timestamp (equal to the schedule frontier).
@@ -52,6 +57,8 @@ pub struct CustomScheduleDiagnostics {
     /// lower bound excluding startup, latency, admission and arbitration.
     pub resource_serial_work_bound_cycles: u64,
     /// Maximum of the two conservative model-relative lower bounds above.
+    /// The bound is conditional on the scheduler's selected resource route;
+    /// it is not an optimization lower bound across alternative routes.
     pub model_lower_bound_cycles: u64,
     /// Completion frontier minus the lower bound (checked, never saturated).
     /// This residual is not attributed to a particular hardware cause.
@@ -338,6 +345,7 @@ fn schedule_diagnostics(
     let bottleneck_resource =
         bottleneck_index.map(|index| spec.resources()[index].name().to_owned());
     Ok(CustomScheduleDiagnostics {
+        lower_bound_scope: "selected_route_assignment_v1",
         last_issue_cycle: if saw_task { last_issue_cycle } else { 0 },
         completion_frontier_cycle,
         dependency_critical_path_cycles,
@@ -653,6 +661,10 @@ mod tests {
         assert_eq!(result.resources[1].task_count, 3);
         assert_eq!(result.resources[1].peak_in_flight, 3);
         let diagnostics = &result.schedule_diagnostics;
+        assert_eq!(
+            diagnostics.lower_bound_scope,
+            "selected_route_assignment_v1"
+        );
         assert_eq!(diagnostics.last_issue_cycle, 45);
         assert_eq!(diagnostics.completion_frontier_cycle, 45);
         assert_eq!(diagnostics.dependency_critical_path_cycles, 32);

@@ -150,6 +150,7 @@ fn replay_modes(
                     l1,
                     l2,
                     dram: DramBw::Unmodeled { arch },
+                    coherence: None,
                 },
                 "l1-shared-l2",
             ),

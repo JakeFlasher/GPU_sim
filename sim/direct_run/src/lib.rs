@@ -21,7 +21,9 @@ use std::time::Instant;
 use serde::{Deserialize, Serialize};
 use sim_arch::card::{ArchCard, CalibError};
 use sim_arch::spec::{ArchitectureSpec, ResourceKind};
-use sim_mem::{L1Counters, L2Config, L2Counters, L2Source, MemoryOrigin, PchaseCard};
+use sim_mem::{
+    CoherenceConfig, L1Counters, L2Config, L2Counters, L2Source, MemoryOrigin, PchaseCard,
+};
 use sim_run::emit::{
     EmitOutcome, EmittedMetricKey, FullLaunchPredictions, MetricValue, Unavailable, Unit,
     emit_launch,
@@ -117,6 +119,11 @@ pub struct RunConfig {
     /// sectors. This requires carded DRAM, launch-scoped L1-L2 replay, and
     /// never changes the default read-only carded path.
     pub dirty_writeback_capacity_sectors: Option<u32>,
+    /// Optional bounded directory service latency. Requires launch-scoped
+    /// L1-L2 replay; this is not a measured SM86 coherence protocol latency.
+    pub coherence_service_cycles: Option<u64>,
+    /// Optional bounded directory in-flight sector capacity.
+    pub coherence_capacity_sectors: Option<u32>,
     /// Optional model-relative issue transaction width. This never changes
     /// the evidence-bound architecture card; it labels the replay as a
     /// hypothetical resource experiment.
@@ -641,6 +648,10 @@ pub struct RunReport {
     pub carded_dram_bandwidth: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub dirty_writeback_capacity_sectors: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub coherence_service_cycles: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub coherence_capacity_sectors: Option<u32>,
     #[serde(skip_serializing_if = "is_false")]
     pub fast_frontier_only: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -989,6 +1000,12 @@ pub struct DramCounterReport {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub writeback_completion_frontier: Option<u64>,
     #[serde(skip_serializing_if = "is_zero_u64")]
+    pub coherence_completed_transactions: u64,
+    #[serde(skip_serializing_if = "is_zero_u64")]
+    pub coherence_completed_sectors: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub coherence_completion_frontier: Option<u64>,
+    #[serde(skip_serializing_if = "is_zero_u64")]
     pub maximum_terminal_l2_dirty_lines: u64,
     #[serde(skip_serializing_if = "is_zero_u64")]
     pub maximum_terminal_l2_dirty_sectors: u64,
@@ -1078,6 +1095,9 @@ fn counters(
             writeback_completed_sectors: value.writeback_completed_sectors,
             writeback_completed_bytes: value.writeback_completed_bytes,
             writeback_completion_frontier: value.writeback_completion_frontier,
+            coherence_completed_transactions: value.coherence_completed_transactions,
+            coherence_completed_sectors: value.coherence_completed_sectors,
+            coherence_completion_frontier: value.coherence_completion_frontier,
             maximum_terminal_l2_dirty_lines: value.maximum_terminal_l2_dirty_lines,
             maximum_terminal_l2_dirty_sectors: value.maximum_terminal_l2_dirty_sectors,
         }),
@@ -1347,6 +1367,24 @@ fn resolve_mode(
             "dirty writeback requires --mode l1-l2 together with --carded-dram",
         ));
     }
+    if config.coherence_service_cycles == Some(0) || config.coherence_capacity_sectors == Some(0) {
+        return Err(RunError::new(
+            "arguments",
+            "coherence service cycles and capacity must be positive",
+        ));
+    }
+    if config.coherence_capacity_sectors.is_some() != config.coherence_service_cycles.is_some() {
+        return Err(RunError::new(
+            "arguments",
+            "coherence service cycles and capacity must be supplied together",
+        ));
+    }
+    if config.coherence_service_cycles.is_some() && config.memory_mode != MemoryMode::L1L2 {
+        return Err(RunError::new(
+            "arguments",
+            "coherence service requires --mode l1-l2",
+        ));
+    }
     if config.memory_mode == MemoryMode::Flat {
         if config.carded_dram_bandwidth {
             return Err(RunError::new(
@@ -1412,7 +1450,18 @@ fn resolve_mode(
     } else {
         DramBw::Unmodeled { arch: issue.arch() }
     };
-    Ok(ReplayMemMode::L1SharedL2 { l1, l2, dram })
+    let coherence = config
+        .coherence_service_cycles
+        .zip(config.coherence_capacity_sectors)
+        .map(|(cycles, capacity)| CoherenceConfig::new(cycles, capacity))
+        .transpose()
+        .map_err(at("coherence configuration"))?;
+    Ok(ReplayMemMode::L1SharedL2 {
+        l1,
+        l2,
+        dram,
+        coherence,
+    })
 }
 
 pub fn run(config: &RunConfig) -> Result<RunReport, RunError> {
@@ -1521,6 +1570,12 @@ pub fn run(config: &RunConfig) -> Result<RunReport, RunError> {
             "dirty writeback currently requires --cache-scope launch",
         ));
     }
+    if config.coherence_service_cycles.is_some() && config.cache_scope != CacheScope::Launch {
+        return Err(RunError::new(
+            "arguments",
+            "coherence service currently requires --cache-scope launch",
+        ));
+    }
     let memory_service_candidates =
         load_memory_service_candidates(config.memory_service_candidates.as_ref())?;
     let memory_admission_candidates =
@@ -1538,6 +1593,7 @@ pub fn run(config: &RunConfig) -> Result<RunReport, RunError> {
         && !config.ncu_shaped_metrics
         && !config.fast_frontier_only
         && config.dirty_writeback_capacity_sectors.is_none()
+        && config.coherence_service_cycles.is_none()
         && ncu_observation.is_none()
         && !specialized_loader_requested
         && !performance_diagnostics_requested
@@ -1653,6 +1709,8 @@ pub fn run(config: &RunConfig) -> Result<RunReport, RunError> {
             cache_scope: config.cache_scope.token(),
             carded_dram_bandwidth: config.carded_dram_bandwidth,
             dirty_writeback_capacity_sectors: config.dirty_writeback_capacity_sectors,
+            coherence_service_cycles: config.coherence_service_cycles,
+            coherence_capacity_sectors: config.coherence_capacity_sectors,
             fast_frontier_only: true,
             hypothetical_issue_ports: config
                 .hypothetical_issue_ports
@@ -1803,6 +1861,8 @@ pub fn run(config: &RunConfig) -> Result<RunReport, RunError> {
         cache_scope: config.cache_scope.token(),
         carded_dram_bandwidth: config.carded_dram_bandwidth,
         dirty_writeback_capacity_sectors: config.dirty_writeback_capacity_sectors,
+        coherence_service_cycles: config.coherence_service_cycles,
+        coherence_capacity_sectors: config.coherence_capacity_sectors,
         fast_frontier_only: false,
         hypothetical_issue_ports: config
             .hypothetical_issue_ports
@@ -1852,6 +1912,8 @@ mod tests {
             cache_scope: CacheScope::Launch,
             carded_dram_bandwidth: false,
             dirty_writeback_capacity_sectors: None,
+            coherence_service_cycles: None,
+            coherence_capacity_sectors: None,
             hypothetical_issue_ports: None,
             architecture_spec: None,
             kernel_id: None,

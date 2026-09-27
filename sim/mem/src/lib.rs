@@ -29,6 +29,8 @@
 //!   (token-preserving, so hierarchy levels can specialize per token).
 //! - [`writeback`]: an opt-in transactional dirty-sector service primitive;
 //!   it is not native SM86 coherence completion.
+//! - [`coherence`]: an opt-in ordered-L2 directory/service experiment;
+//!   it is not a protocol implementation.
 //!
 //! Later increment: the DRAM bandwidth model (v0 prices DRAM as the
 //! carded flat latency — no bytes-per-cycle covariate is carded at the
@@ -37,6 +39,7 @@
 
 pub mod access;
 pub mod cache_op;
+pub mod coherence;
 pub mod l1;
 pub mod l2;
 pub mod pchase_card;
@@ -53,6 +56,10 @@ pub use cache_op::{
     BARE_LDG_E_DEFAULTS_TO_CA, CacheOpError, CacheOpToken, LdgstsL1Policy,
     classify_ldgsts_l1_policy, classify_opcode_checked, classify_opcode_for_arch,
     derive_l1_eligible, opcode_head,
+};
+pub use coherence::{
+    CoherenceCompletion, CoherenceConfig, CoherenceError, CoherencePlan, CoherenceQueue,
+    CoherenceRequest,
 };
 pub use l1::{
     AccessOutcome, EvAccess, EvAccessUnobserved, FillKey, L1AccessError, L1Cache, L1Config,

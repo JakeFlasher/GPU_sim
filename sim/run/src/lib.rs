@@ -1099,7 +1099,12 @@ fn resolve_configuration(
                 }
             };
             (
-                ReplayMemMode::L1SharedL2 { l1, l2, dram },
+                ReplayMemMode::L1SharedL2 {
+                    l1,
+                    l2,
+                    dram,
+                    coherence: None,
+                },
                 ReplayModeWire::L1SharedL2 {
                     dram_bandwidth: match dram_bandwidth {
                         ManifestDramBandwidth::Carded => "carded",

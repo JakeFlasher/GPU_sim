@@ -66,9 +66,9 @@ use sim_trace::{
 
 use sim_mem::{
     ASYNC_COPY_COMPLETION_VALUE_MASK, ASYNC_COPY_COMPOSITE_PAYLOAD_WORK_MAX, CacheOpToken,
-    L2Config, L2Counters, L2Model, LdgstsL1Policy, MemRole, encode_async_copy_destination_work,
-    encode_async_copy_payload_and_topology, encode_async_copy_payload_work,
-    is_known_untagged_opcode, opcode_head,
+    CoherenceConfig, L2Config, L2Counters, L2Model, LdgstsL1Policy, MemRole,
+    encode_async_copy_destination_work, encode_async_copy_payload_and_topology,
+    encode_async_copy_payload_work, is_known_untagged_opcode, opcode_head,
 };
 
 use crate::causal_frontier::{
@@ -89,7 +89,7 @@ use crate::metrics::TraceMetrics;
 use crate::program::{FunctionSchedule, OpClass, PipelineClass};
 use crate::system::{
     DramBw, DramStats, L2SourceSplit, SystemError,
-    simulate_kernel_shared_with_residency_and_candidates,
+    simulate_kernel_shared_with_residency_and_candidates_with_coherence,
 };
 
 mod aggregation;
@@ -206,6 +206,10 @@ pub enum ReplayError {
         "memory-admission candidates require full launch coverage; sampled replay discards per-SM timing diagnostics"
     )]
     MemoryAdmissionCandidatesRequireFullCoverage,
+    #[error(
+        "opt-in coherence service requires complete decoded SM/sector topology; decoded={decoded}, unknown_records={unknown_records}"
+    )]
+    CoherenceTopologyIncomplete { decoded: bool, unknown_records: u64 },
     #[error("SM {sm_id} L1 counter aggregation failed: {source}")]
     L1Aggregation {
         sm_id: i32,
@@ -2686,6 +2690,7 @@ pub enum ReplayMemMode {
         l1: L1Config,
         l2: L2Config,
         dram: DramBw,
+        coherence: Option<CoherenceConfig>,
     },
 }
 
@@ -3101,7 +3106,12 @@ fn validate_replay_mode_architecture(arch: ArchId, mode: ReplayMemMode) -> Resul
         ReplayMemMode::L1Const(l1) => {
             require_replay_arch(arch, l1.arch, "L1 configuration")?;
         }
-        ReplayMemMode::L1SharedL2 { l1, l2, dram } => {
+        ReplayMemMode::L1SharedL2 {
+            l1,
+            l2,
+            dram,
+            coherence: _,
+        } => {
             require_replay_arch(arch, l1.arch, "L1 configuration")?;
             require_replay_arch(arch, l2.arch, "L2 configuration")?;
             require_replay_arch(arch, dram.arch(), "DRAM configuration")?;
@@ -3218,6 +3228,17 @@ fn replay_kernel_with_schedule_and_l2_and_candidates(
         trace_metrics,
     } = extract_per_sm_blocks(td, loc, schedule, placement, decode_sectors)?;
     let instrumentation_order = observe_async_instrumentation_order(&per_sm_blocks, schedule)?;
+    if let ReplayMemMode::L1SharedL2 {
+        coherence: Some(_), ..
+    } = mode
+        && (!trace_metrics.sectors_decoded
+            || trace_metrics.coherence.unknown_sm_or_line_records != 0)
+    {
+        return Err(ReplayError::CoherenceTopologyIncomplete {
+            decoded: trace_metrics.sectors_decoded,
+            unknown_records: trace_metrics.coherence.unknown_sm_or_line_records,
+        });
+    }
     #[cfg(feature = "campaign")]
     if !memory_service_candidates.is_empty() && matches!(&coverage, ExtractedCoverage::Sampled(_)) {
         return Err(ReplayError::MemoryServiceCandidatesRequireFullCoverage);
@@ -3265,7 +3286,12 @@ fn replay_kernel_with_schedule_and_l2_and_candidates(
                 None,
             )?
         }
-        ReplayMemMode::L1SharedL2 { l1, l2, dram } => {
+        ReplayMemMode::L1SharedL2 {
+            l1,
+            l2,
+            dram,
+            coherence,
+        } => {
             let mut fresh_l2;
             let l2_model = match retained_l2 {
                 Some(model) => {
@@ -3287,7 +3313,7 @@ fn replay_kernel_with_schedule_and_l2_and_candidates(
                 return Err(ReplayError::RetainedL2NotDrained { pending_sectors });
             }
             let counters_before = *l2_model.counters()?;
-            let mut sys = simulate_kernel_shared_with_residency_and_candidates(
+            let mut sys = simulate_kernel_shared_with_residency_and_candidates_with_coherence(
                 &per_sm_blocks,
                 schedule,
                 params,
@@ -3298,6 +3324,7 @@ fn replay_kernel_with_schedule_and_l2_and_candidates(
                 memory_service_candidates,
                 memory_admission_candidates,
                 memory_admission_feedback,
+                coherence,
             )?;
             let pending_sectors = l2_model.pending_sector_count();
             if pending_sectors != 0 {
@@ -3807,6 +3834,7 @@ mod stream_l2_session_tests {
                 slice_hash: SliceHash::LineMod,
             },
             dram: DramBw::Unmodeled { arch: ArchId::Sm86 },
+            coherence: None,
         }
     }
 
@@ -6222,6 +6250,7 @@ mod aggregation_tests {
                 slice_hash: sim_mem::SliceHash::LineMod,
             },
             dram: DramBw::Unmodeled { arch: ArchId::Sm86 },
+            coherence: None,
         };
         (params, mode)
     }
@@ -11267,6 +11296,7 @@ mod completeness_tests {
                 slice_hash: sim_mem::SliceHash::LineMod,
             },
             dram: DramBw::Unmodeled { arch: ArchId::Sm86 },
+            coherence: None,
         };
         let candidate = MemoryServiceCandidate {
             candidate_id: 1,

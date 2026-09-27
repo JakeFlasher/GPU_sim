@@ -14,6 +14,7 @@ research is complete. Start with [memory](PROJECT_MEMORY.md); use
 | Custom `simt_its_v1` | Per-lane PCs/predicates, reconvergence, indirect loads/stores, optional versioned execution trace | Single group, functional only; not native SASS regeneration |
 | `ptx_subset_v1` frontend | Bounded text-to-`simt_its_v1` compiler for lane ID, integer arithmetic, predicates, labels, indirect u32 load/store, exit | Functional subset only; no ABI, calls, atomics, vector types, arbitrary PTX or SASS |
 | Dirty-sector writeback queue | Explicit `--dirty-writeback-capacity-sectors` native SM86 launch path; shared read/write fixed-point service, transactional eviction admission, same-line hazard, tokenized completion | Opt-in bounded model; coherence ownership/visibility and resident dirty flush semantics remain tails |
+| Coherence directory service | Explicit `--coherence-service-cycles N --coherence-capacity-sectors N` launch path; ordered L2-request directory transitions and separate completion counters | Requires fully decoded SM/sector topology; L1-hidden accesses, protocol ownership, fences and visibility scope remain outside the model |
 | PhaseFuse fast frontier | Trace-derived scalar-region certificate/refusal report via `sim-run --fast-frontier-only` | Conservative analysis only; skips native timing and cannot certify memory, barriers, dynamic pipes or silicon |
 
 Custom barriers require matching lengths/positions/IDs, one use per ID, and

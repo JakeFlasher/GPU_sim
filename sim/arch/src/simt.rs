@@ -610,6 +610,7 @@ impl<'a> SimtTimingExecutor<'a> {
         for (index, (task, interval)) in tasks.iter().zip(intervals).enumerate() {
             if interval.complete < interval.start
                 || interval.start < index as u64
+                || (index != 0 && interval.start <= intervals[index - 1].start)
                 || task
                     .dependencies
                     .iter()
@@ -1182,6 +1183,33 @@ mod tests {
             executor.project_schedule_with_selection(&schedule.groups[0], &selected),
             Err(SimtError::InvalidProgram(
                 "timing selection is not allowed for this operation"
+            ))
+        ));
+    }
+
+    #[test]
+    fn selected_resource_projection_rejects_non_increasing_issue_times() {
+        let spec = ArchitectureSpec::parse(
+            Path::new("route.json"),
+            include_bytes!("../../../arch_profiles/specs/simt_u32_route_alternatives.json"),
+        )
+        .expect("route spec should parse");
+        let program = SimtProgram::parse(
+            Path::new("route_program.json"),
+            include_bytes!("../../../arch_profiles/programs/simt_u32_route_alternatives.json"),
+        )
+        .expect("route program should parse");
+        let executor = SimtTimingExecutor::new(&spec, &program).expect("route should initialize");
+        let resources = crate::simt_pipeline::resources(&spec).expect("resources should lower");
+        let tasks = crate::simt_pipeline::tasks(&spec, &program).expect("tasks should lower");
+        let schedule = sim_engine::pipeline::schedule(&resources, &[tasks], 1)
+            .expect("route schedule should succeed");
+        let mut intervals = schedule.groups[0].clone();
+        intervals[1].start = intervals[0].start;
+        assert!(matches!(
+            executor.project_schedule_with_selection(&intervals, &schedule.selected_resources[0]),
+            Err(SimtError::InvalidProgram(
+                "timing schedule violates issue or dependency order"
             ))
         ));
     }

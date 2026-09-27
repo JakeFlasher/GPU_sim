@@ -88,10 +88,12 @@ impl PreparedReplay {
         config: &RunConfig,
         coverage_admission: CoverageAdmission,
     ) -> Result<Self, RunError> {
-        if config.dirty_writeback_capacity_sectors.is_some() {
+        if config.dirty_writeback_capacity_sectors.is_some()
+            || config.coherence_service_cycles.is_some()
+        {
             return Err(RunError::new(
                 "prepared replay",
-                "dirty writeback requires the ordinary launch replay path",
+                "opt-in memory service requires the ordinary launch replay path",
             ));
         }
         require_launch_cold_ordinary(config)?;
@@ -290,6 +292,8 @@ impl PreparedReplay {
             cache_scope: CacheScope::Launch.token(),
             carded_dram_bandwidth: self.carded_dram_bandwidth,
             dirty_writeback_capacity_sectors: None,
+            coherence_service_cycles: None,
+            coherence_capacity_sectors: None,
             fast_frontier_only: false,
             hypothetical_issue_ports: self.hypothetical_issue_ports,
             architecture_spec: self.architecture_spec.clone(),
@@ -398,6 +402,8 @@ mod tests {
             cache_scope: CacheScope::Launch,
             carded_dram_bandwidth: false,
             dirty_writeback_capacity_sectors: None,
+            coherence_service_cycles: None,
+            coherence_capacity_sectors: None,
             hypothetical_issue_ports: None,
             architecture_spec: None,
             kernel_id: None,

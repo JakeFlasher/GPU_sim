@@ -88,7 +88,12 @@ fn replay_configuration_json(configuration: ReplayConfiguration) -> serde_json::
             "kind": "l1_const",
             "l1": l1_config_json(l1),
         }),
-        ReplayMemMode::L1SharedL2 { l1, l2, dram } => {
+        ReplayMemMode::L1SharedL2 {
+            l1,
+            l2,
+            dram,
+            coherence,
+        } => {
             let dram = match dram {
                 sim_sm::DramBw::Unmodeled { arch } => serde_json::json!({
                     "kind": "unmodeled",
@@ -122,6 +127,10 @@ fn replay_configuration_json(configuration: ReplayConfiguration) -> serde_json::
                 "l1": l1_config_json(l1),
                 "l2": l2_config_json(l2),
                 "dram": dram,
+                "coherence": coherence.map(|value| serde_json::json!({
+                    "service_cycles_per_sector": value.service_cycles_per_sector,
+                    "capacity_sectors": value.capacity_sectors,
+                })),
             })
         }
     };
@@ -243,7 +252,12 @@ fn real_trace_replays_under_issue_model() {
                     sm_clock_hz: bw.locked_sm_clock_hz().expect("carded SM clock valid"),
                 }
             };
-            ReplayMemMode::L1SharedL2 { l1, l2, dram }
+            ReplayMemMode::L1SharedL2 {
+                l1,
+                l2,
+                dram,
+                coherence: None,
+            }
         }
     };
 

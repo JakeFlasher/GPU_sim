@@ -101,4 +101,13 @@ default carded path is unchanged. Completion counters/frontier are reported
 separately from read traffic. This remains a bounded model, not a coherence
 directory or a claim about resident dirty flush/ownership visibility.
 
+`--coherence-service-cycles N --coherence-capacity-sectors N` additionally
+enables a small directory-style service on the ordered L2-request stream. A
+read/read share is free; cross-SM owner transfer or write invalidation charges
+one configured service interval per affected sector. The model refuses runs
+with flat/unknown SM or sector topology and reports completion counters
+separately. It does not see L1-hidden accesses, fences, protocol messages,
+resident dirty flushes, or hardware ownership state, so it is not a coherence
+protocol or silicon timing claim.
+
 Runnable smoke commands and schema validation are in [testing](testing.md).

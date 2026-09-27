@@ -121,8 +121,9 @@ impl UnpricedBounds {
 use sim_arch::{ArchId, L2PendingReadSemantics};
 use sim_engine::{EngineError, EventQueue, TargetId};
 use sim_mem::{
-    L1Config, L2Counters, L2DirtyResidency, L2EventMaskPreview, L2Eviction, L2FillToken, L2Model,
-    L2PendingSectorKey, L2Source, MemoryOrigin, ServicePlan, ServiceRequest, WritebackQueue,
+    CoherenceConfig, CoherencePlan, CoherenceQueue, CoherenceRequest, L1Config, L2Counters,
+    L2DirtyResidency, L2EventMaskPreview, L2Eviction, L2FillToken, L2Model, L2PendingSectorKey,
+    L2Source, MemoryOrigin, ServicePlan, ServiceRequest, WritebackQueue,
 };
 #[cfg(feature = "reference")]
 use sim_semantics::{
@@ -634,6 +635,8 @@ pub enum SystemError {
     L2(#[from] sim_mem::L2AccessError),
     #[error(transparent)]
     Writeback(#[from] sim_mem::WritebackError),
+    #[error(transparent)]
+    Coherence(#[from] sim_mem::CoherenceError),
     #[error(
         "event queue drained with sm {sm_id} unfinished ({outstanding} response(s) recorded \
          outstanding) — request/response wiring invariant broken"
@@ -809,6 +812,10 @@ pub enum SystemError {
         "event queue drained with {sectors} dirty writeback sectors and {entries} pending completions"
     )]
     WritebackNotDrained { sectors: u32, entries: usize },
+    #[error(
+        "event queue drained with {sectors} coherence service sectors and {entries} pending completions"
+    )]
+    CoherenceNotDrained { sectors: u32, entries: usize },
     #[error("{counter} counter overflows u64")]
     CounterOverflow { counter: &'static str },
 }
@@ -996,6 +1003,9 @@ enum Ev {
     L2WritebackComplete {
         plan: ServicePlan,
     },
+    L2CoherenceComplete {
+        plan: CoherencePlan,
+    },
     MemoryWriteAck(MemoryWriteAck),
     MemResponse {
         reply: ReplyTo,
@@ -1012,6 +1022,7 @@ fn event_name(event: &Ev) -> &'static str {
         Ev::L2Fill(_) => "l2_fill",
         Ev::AtomicCompletion => "atomic_completion",
         Ev::L2WritebackComplete { .. } => "l2_writeback_complete",
+        Ev::L2CoherenceComplete { .. } => "l2_coherence_complete",
         Ev::MemoryWriteAck(_) => "memory_write_ack",
         Ev::MemResponse { .. } => "memory_response",
     }
@@ -1104,6 +1115,13 @@ fn typed_event_payload(event: &Ev) -> TypedEventPayload {
             token: plan.token(),
             line_id: plan.line_id().unwrap_or_default(),
             dirty_mask: plan.dirty_mask(),
+            service_done_at: plan.service_done_cycle(),
+        },
+        Ev::L2CoherenceComplete { plan } => TypedEventPayload::CoherenceCompletion {
+            token: plan.token(),
+            line_id: plan.request_line_id(),
+            sector_mask: plan.request_sector_mask(),
+            service_sectors: plan.service_sectors(),
             service_done_at: plan.service_done_cycle(),
         },
         Ev::MemoryWriteAck(ack) => TypedEventPayload::MemoryWriteAck {
@@ -1707,6 +1725,8 @@ struct EventPerformanceCounters {
     l2_access_batched_requests: u64,
     l2_fill: u64,
     atomic_completion: u64,
+    writeback_completion: u64,
+    coherence_completion: u64,
     memory_write_ack: u64,
     mem_response: u64,
     same_cycle_after_first: u64,
@@ -1772,6 +1792,8 @@ impl EventPerformanceCounters {
             Ev::SmWake
             | Ev::L2Fill(_)
             | Ev::AtomicCompletion
+            | Ev::L2WritebackComplete { .. }
+            | Ev::L2CoherenceComplete { .. }
             | Ev::MemoryWriteAck(_)
             | Ev::MemResponse { .. } => {
                 debug_assert_eq!(logical_events, 1);
@@ -1779,6 +1801,8 @@ impl EventPerformanceCounters {
                     Ev::SmWake => &mut self.sm_wake,
                     Ev::L2Fill(_) => &mut self.l2_fill,
                     Ev::AtomicCompletion => &mut self.atomic_completion,
+                    Ev::L2WritebackComplete { .. } => &mut self.writeback_completion,
+                    Ev::L2CoherenceComplete { .. } => &mut self.coherence_completion,
                     Ev::MemoryWriteAck(_) => &mut self.memory_write_ack,
                     Ev::MemResponse { .. } => &mut self.mem_response,
                     Ev::L2Access(_) | Ev::L2AccessBatch(_) => unreachable!(),
@@ -2128,6 +2152,7 @@ struct L2SystemCommit {
     dram_free_fp: Option<u128>,
     read_service: Option<ServicePlan>,
     writeback: Option<ServicePlan>,
+    coherence: Option<CoherencePlan>,
     fill_ready: Option<u64>,
     /// Shared-L2 allocation generation associated with a returning response.
     /// The L1 fill generation is a separate identity domain and must not be
@@ -2324,6 +2349,11 @@ pub struct DramStats {
     pub writeback_completed_sectors: u64,
     pub writeback_completed_bytes: u64,
     pub writeback_completion_frontier: Option<u64>,
+    /// Opt-in directory-service completion observations, separate from
+    /// writeback and read-traffic counters.
+    pub coherence_completed_transactions: u64,
+    pub coherence_completed_sectors: u64,
+    pub coherence_completion_frontier: Option<u64>,
     /// Maximum terminal dirty residency across the launches aggregated into
     /// this observer. A gauge is never summed as traffic.
     pub maximum_terminal_l2_dirty_lines: u64,
@@ -2435,6 +2465,9 @@ impl DramStats {
             writeback_completed_sectors: 0,
             writeback_completed_bytes: 0,
             writeback_completion_frontier: None,
+            coherence_completed_transactions: 0,
+            coherence_completed_sectors: 0,
+            coherence_completion_frontier: None,
             maximum_terminal_l2_dirty_lines: 0,
             maximum_terminal_l2_dirty_sectors: 0,
             by_origin: [global, local],
@@ -2601,6 +2634,23 @@ impl DramStats {
                 .into_iter()
                 .chain(other.writeback_completion_frontier)
                 .max(),
+            coherence_completed_transactions: self
+                .coherence_completed_transactions
+                .checked_add(other.coherence_completed_transactions)
+                .ok_or(SystemCounterError::Overflow {
+                    counter: "completed coherence transactions",
+                })?,
+            coherence_completed_sectors: self
+                .coherence_completed_sectors
+                .checked_add(other.coherence_completed_sectors)
+                .ok_or(SystemCounterError::Overflow {
+                    counter: "completed coherence sectors",
+                })?,
+            coherence_completion_frontier: self
+                .coherence_completion_frontier
+                .into_iter()
+                .chain(other.coherence_completion_frontier)
+                .max(),
             maximum_terminal_l2_dirty_lines: self
                 .maximum_terminal_l2_dirty_lines
                 .max(other.maximum_terminal_l2_dirty_lines),
@@ -2679,6 +2729,7 @@ pub(crate) fn simulate_kernel_shared_with_residency(
 }
 
 #[allow(clippy::too_many_arguments)]
+#[cfg(test)]
 pub(crate) fn simulate_kernel_shared_with_residency_and_candidates(
     per_sm_blocks: &BTreeMap<i32, Vec<BlockReplay>>,
     schedule: &FunctionSchedule,
@@ -2690,6 +2741,35 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates(
     memory_service_candidates: &[MemoryServiceCandidate],
     memory_admission_candidates: &[MemoryAdmissionCandidate],
     memory_admission_feedback: Option<MemoryAdmissionCandidate>,
+) -> Result<SystemResult, SystemError> {
+    simulate_kernel_shared_with_residency_and_candidates_with_coherence(
+        per_sm_blocks,
+        schedule,
+        params,
+        shared_memory_residency,
+        l1_config,
+        l2,
+        dram,
+        memory_service_candidates,
+        memory_admission_candidates,
+        memory_admission_feedback,
+        None,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn simulate_kernel_shared_with_residency_and_candidates_with_coherence(
+    per_sm_blocks: &BTreeMap<i32, Vec<BlockReplay>>,
+    schedule: &FunctionSchedule,
+    params: &IssueModelParams,
+    shared_memory_residency: SharedMemoryResidency,
+    l1_config: L1Config,
+    l2: &mut L2Model,
+    dram: DramBw,
+    memory_service_candidates: &[MemoryServiceCandidate],
+    memory_admission_candidates: &[MemoryAdmissionCandidate],
+    memory_admission_feedback: Option<MemoryAdmissionCandidate>,
+    coherence_config: Option<CoherenceConfig>,
 ) -> Result<SystemResult, SystemError> {
     let arch = schedule.arch;
     require_arch(arch, params.arch, "issue parameters")?;
@@ -2830,6 +2910,7 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates(
         )?),
         _ => None,
     };
+    let mut coherence_queue = coherence_config.map(CoherenceQueue::new);
     let mut dram_stats = DramStats::for_arch(arch);
     for ix in 0..cores.len() {
         let target = u32::try_from(ix)
@@ -3098,7 +3179,32 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates(
                                 Some(eviction) => dram_stats.with_l2_eviction(eviction)?,
                                 None => dram_stats,
                             };
-                            let writeback_eviction = preview.eviction();
+                            // Clean replacements remain topology observations;
+                            // only a nonzero dirty mask reserves writeback
+                            // service capacity.
+                            let writeback_eviction = preview
+                                .eviction()
+                                .filter(|eviction| eviction.dirty_mask != 0);
+                            let coherence_plan = if let Some(queue) = &coherence_queue {
+                                Some(queue.preview(CoherenceRequest {
+                                    line_id: line,
+                                    sector_mask: req.sector_mask,
+                                    requester: u8::try_from(sm_ix).map_err(|_| {
+                                        SystemError::Coherence(
+                                            sim_mem::CoherenceError::RequesterOutOfRange(u8::MAX),
+                                        )
+                                    })?,
+                                    is_write: matches!(
+                                        req.operation,
+                                        MemoryOperation::Store
+                                            | MemoryOperation::Atomic
+                                            | MemoryOperation::Reduction
+                                    ),
+                                    issue_cycle: req.issue_time,
+                                })?)
+                            } else {
+                                None
+                            };
                             let service_preview = if fetch_sectors > 0 {
                                 let bytes = fetch_sectors.checked_mul(32).ok_or(
                                     SystemError::CounterOverflow {
@@ -3133,10 +3239,13 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates(
                                         + usize::from(fetch_sectors > 0),
                                 );
                                 if let Some(eviction) = writeback_eviction {
-                                    requests.push(ServiceRequest::writeback(
+                                    let not_before = coherence_plan
+                                        .map_or(req.issue_time, |plan| plan.service_done_cycle());
+                                    requests.push(ServiceRequest::writeback_after(
                                         eviction.line_id,
                                         eviction.dirty_mask,
                                         req.issue_time,
+                                        not_before,
                                     ));
                                 }
                                 if fetch_sectors > 0 {
@@ -3145,10 +3254,13 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates(
                                             counter: "DRAM request bytes",
                                         },
                                     )?;
-                                    requests.push(ServiceRequest::read_line(
+                                    let not_before = coherence_plan
+                                        .map_or(req.issue_time, |plan| plan.service_done_cycle());
+                                    requests.push(ServiceRequest::read_line_after(
                                         bytes,
                                         line,
                                         req.issue_time,
+                                        not_before,
                                     ));
                                 }
                                 let plans = queue.preview_services(&requests)?;
@@ -3216,7 +3328,10 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates(
                                 let unpriced_removal = unpriced.prepare_remove(sm_ix, bound)?;
                                 let latency_ready = bound
                                     .max(fetch_latency_ready.unwrap_or(0))
-                                    .max(merged_ready.unwrap_or(0));
+                                    .max(merged_ready.unwrap_or(0))
+                                    .max(
+                                        coherence_plan.map_or(0, |plan| plan.service_done_cycle()),
+                                    );
                                 let service_ready = latency_ready.max(bw_ready);
                                 // A folded physical fill can serve ordinary
                                 // and deep constant waiters together. Their
@@ -3273,7 +3388,9 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates(
                                         params.l1_miss_latency,
                                     )?,
                                 };
-                                Some(latency_ready.max(bw_ready))
+                                Some(latency_ready.max(bw_ready).max(
+                                    coherence_plan.map_or(0, |plan| plan.service_done_cycle()),
+                                ))
                             } else {
                                 None
                             };
@@ -3290,6 +3407,7 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates(
                                 dram_free_fp: service_preview.map(|(done, _)| done),
                                 read_service,
                                 writeback: writeback_service,
+                                coherence: coherence_plan,
                                 fill_ready,
                                 response_l2_allocation_generation: (req.reply != ReplyTo::None)
                                     .then(|| preview.allocation_generation()),
@@ -3314,6 +3432,11 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates(
                             service_plans.push(plan);
                         }
                         writeback_queue.commit_services(&service_plans)?;
+                    }
+                    if let Some(coherence_queue) = coherence_queue.as_mut()
+                        && let Some(plan) = commit.coherence
+                    {
+                        coherence_queue.commit(plan)?;
                     }
 
                     lookup_observer_requests = lookup_observer_requests
@@ -3404,6 +3527,15 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates(
                             plan.service_done_cycle(),
                             ev.target,
                             Ev::L2WritebackComplete { plan },
+                        )?;
+                    }
+                    if let Some(plan) = commit.coherence
+                        && plan.needs_completion()
+                    {
+                        queue.schedule_at(
+                            plan.service_done_cycle(),
+                            ev.target,
+                            Ev::L2CoherenceComplete { plan },
                         )?;
                     }
                     // A response that becomes ready with its own new fill carries the
@@ -3545,6 +3677,31 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates(
                 );
                 spin.on_progress_event(ev.time);
             }
+            Ev::L2CoherenceComplete { plan } => {
+                let queue = coherence_queue.as_mut().ok_or(SystemError::Coherence(
+                    sim_mem::CoherenceError::ArithmeticOverflow,
+                ))?;
+                let completion = queue.complete(plan.token(), ev.time)?;
+                dram_stats.coherence_completed_transactions = dram_stats
+                    .coherence_completed_transactions
+                    .checked_add(1)
+                    .ok_or(SystemError::CounterOverflow {
+                        counter: "completed coherence transactions",
+                    })?;
+                dram_stats.coherence_completed_sectors = dram_stats
+                    .coherence_completed_sectors
+                    .checked_add(u64::from(completion.service_sectors))
+                    .ok_or(SystemError::CounterOverflow {
+                        counter: "completed coherence sectors",
+                    })?;
+                dram_stats.coherence_completion_frontier = Some(
+                    dram_stats
+                        .coherence_completion_frontier
+                        .unwrap_or(0)
+                        .max(ev.time),
+                );
+                spin.on_progress_event(ev.time);
+            }
             Ev::MemoryWriteAck(ack) => {
                 write_ack_due.pop_expect("modeled write acknowledgement", sm_ix, ev.time)?;
                 cores[sm_ix].complete_memory_write_ack(ack, ev.time)?;
@@ -3647,6 +3804,15 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates(
         if writeback_queue.in_flight_sectors() != 0 || pending_entries != 0 {
             return Err(SystemError::WritebackNotDrained {
                 sectors: writeback_queue.in_flight_sectors(),
+                entries: pending_entries,
+            });
+        }
+    }
+    if let Some(coherence_queue) = coherence_queue.as_ref() {
+        let pending_entries = coherence_queue.pending_tokens().count();
+        if coherence_queue.in_flight_sectors() != 0 || pending_entries != 0 {
+            return Err(SystemError::CoherenceNotDrained {
+                sectors: coherence_queue.in_flight_sectors(),
                 entries: pending_entries,
             });
         }
@@ -3775,7 +3941,8 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates(
         eprintln!(
             "SIM_EVENT_PERF events_processed={} queue_events_processed={} sm_wake={} \
              l2_access={} l2_access_batches={} l2_access_batched_requests={} l2_fill={} \
-             atomic_completion={} memory_write_ack={} mem_response={} same_cycle_after_first={} \
+             atomic_completion={} writeback_completion={} coherence_completion={} \
+             memory_write_ack={} mem_response={} same_cycle_after_first={} \
              queue_same_cycle_after_first={} maximum_queue_depth={} queue_clock_gap_cycles={} \
              queue_last_clock_gap_cycles={}",
             performance.processed,
@@ -3786,6 +3953,8 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates(
             performance.l2_access_batched_requests,
             performance.l2_fill,
             performance.atomic_completion,
+            performance.writeback_completion,
+            performance.coherence_completion,
             performance.memory_write_ack,
             performance.mem_response,
             performance.same_cycle_after_first,
@@ -7015,6 +7184,88 @@ mod tests {
             1,
             "committed caller L2 does not contain the replayed store"
         );
+    }
+
+    #[test]
+    fn opt_in_coherence_directory_services_cross_sm_owner_transfer() {
+        let mut store_cb = cb(1);
+        store_cb.read_barrier = Some(barrier(1));
+        let sched = schedule(
+            [
+                (0, slot(store_cb, "STG.E")),
+                (16, slot(cb(1), "EXIT")),
+                (32, {
+                    let mut load = cb(1);
+                    load.write_barrier = Some(barrier(0));
+                    slot(load, "LDG.E")
+                }),
+                (48, {
+                    let mut consumer = cb(1);
+                    consumer.wait_mask = wait_mask(0b000001);
+                    slot(consumer, "EXIT")
+                }),
+            ]
+            .into_iter()
+            .collect(),
+        );
+        let storer = vec![BlockReplay {
+            launch_index: 0,
+            warps: vec![WarpReplay {
+                async_copy_cohorts: None,
+                warp_slot: 0,
+                insts: vec![
+                    ReplayInst {
+                        pc: 0,
+                        kind: AccessKind::GlobalStore { off: 0, len: 1 },
+                    },
+                    ReplayInst {
+                        pc: 16,
+                        kind: AccessKind::NonMemory,
+                    },
+                ],
+                sectors: vec![4],
+            }],
+        }];
+        let loader = vec![BlockReplay {
+            launch_index: 1,
+            warps: vec![WarpReplay {
+                async_copy_cohorts: None,
+                warp_slot: 0,
+                insts: vec![
+                    ReplayInst {
+                        pc: 32,
+                        kind: AccessKind::GlobalEligible {
+                            off: 0,
+                            len: 1,
+                            token: CacheOpToken::LdgECa,
+                        },
+                    },
+                    ReplayInst {
+                        pc: 48,
+                        kind: AccessKind::NonMemory,
+                    },
+                ],
+                sectors: vec![4],
+            }],
+        }];
+        let mut l2 = l2_model();
+        let result = simulate_kernel_shared_with_residency_and_candidates_with_coherence(
+            &BTreeMap::from([(0, storer), (1, loader)]),
+            &sched,
+            &params(),
+            SharedMemoryResidency::unconstrained_fixture(),
+            l1_config(),
+            &mut l2,
+            DramBw::Unmodeled { arch: ArchId::Sm86 },
+            &[],
+            &[],
+            None,
+            Some(CoherenceConfig::new(2, 4).expect("coherence config should validate")),
+        )
+        .expect("bounded coherence replay should complete");
+        assert_eq!(result.dram.coherence_completed_transactions, 1);
+        assert_eq!(result.dram.coherence_completed_sectors, 1);
+        assert_eq!(result.dram.coherence_completion_frontier, Some(2));
     }
 
     #[test]

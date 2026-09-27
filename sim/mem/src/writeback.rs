@@ -15,6 +15,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 const SECTOR_BYTES: u64 = 32;
 const SECTOR_MASK: u8 = 0b1111;
 static NEXT_QUEUE_ID: AtomicU64 = AtomicU64::new(1);
+static NEXT_BATCH_ID: AtomicU64 = AtomicU64::new(1);
 
 /// A byte-server reservation request.
 ///
@@ -26,6 +27,7 @@ static NEXT_QUEUE_ID: AtomicU64 = AtomicU64::new(1);
 pub struct ServiceRequest {
     bytes: u64,
     issue_cycle: u64,
+    not_before_cycle: u64,
     line_id: Option<i64>,
     dirty_mask: u8,
 }
@@ -37,6 +39,7 @@ impl ServiceRequest {
         Self {
             bytes,
             issue_cycle,
+            not_before_cycle: issue_cycle,
             line_id: None,
             dirty_mask: 0,
         }
@@ -45,9 +48,24 @@ impl ServiceRequest {
     /// Build a read reservation whose fetch arrival must wait for the latest
     /// writeback of `line_id`. Reads do not consume dirty-sector capacity.
     pub const fn read_line(bytes: u64, line_id: i64, issue_cycle: u64) -> Self {
+        Self::read_line_after(bytes, line_id, issue_cycle, issue_cycle)
+    }
+
+    /// Build a read reservation for `line_id` with an explicit lower bound on
+    /// service start. This is useful when a caller has already preflighted a
+    /// cache visibility/fill dependency; the request remains chronologically
+    /// ordered by `issue_cycle`, while the byte server waits until
+    /// `not_before_cycle`.
+    pub const fn read_line_after(
+        bytes: u64,
+        line_id: i64,
+        issue_cycle: u64,
+        not_before_cycle: u64,
+    ) -> Self {
         Self {
             bytes,
             issue_cycle,
+            not_before_cycle,
             line_id: Some(line_id),
             dirty_mask: 0,
         }
@@ -56,9 +74,22 @@ impl ServiceRequest {
     /// Build a dirty-sector writeback reservation. The queue validates the
     /// four-sector mask before producing a plan.
     pub const fn writeback(line_id: i64, dirty_mask: u8, issue_cycle: u64) -> Self {
+        Self::writeback_after(line_id, dirty_mask, issue_cycle, issue_cycle)
+    }
+
+    /// Build a dirty-sector writeback reservation with an explicit service
+    /// lower bound. The lower bound is not a second event and does not advance
+    /// the queue's chronological frontier.
+    pub const fn writeback_after(
+        line_id: i64,
+        dirty_mask: u8,
+        issue_cycle: u64,
+        not_before_cycle: u64,
+    ) -> Self {
         Self {
             bytes: (dirty_mask.count_ones() as u64) * SECTOR_BYTES,
             issue_cycle,
+            not_before_cycle,
             line_id: Some(line_id),
             dirty_mask,
         }
@@ -71,6 +102,10 @@ impl ServiceRequest {
     pub const fn issue_cycle(self) -> u64 {
         self.issue_cycle
     }
+
+    pub const fn not_before_cycle(self) -> u64 {
+        self.not_before_cycle
+    }
 }
 
 /// A preflighted byte-server reservation.
@@ -81,11 +116,15 @@ impl ServiceRequest {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ServicePlan {
     owner_id: u64,
+    batch_id: u64,
+    batch_len: u64,
+    batch_index: u64,
     token: u64,
     line_id: Option<i64>,
     dirty_mask: u8,
     bytes: u64,
     issue_cycle: u64,
+    not_before_cycle: u64,
     service_start_cycle: u64,
     service_done_cycle: u64,
     expected_epoch: u64,
@@ -119,6 +158,10 @@ impl ServicePlan {
 
     pub const fn issue_cycle(self) -> u64 {
         self.issue_cycle
+    }
+
+    pub const fn not_before_cycle(self) -> u64 {
+        self.not_before_cycle
     }
 
     pub const fn service_start_cycle(self) -> u64 {
@@ -172,6 +215,10 @@ impl WritebackPlan {
         self.service.service_done_cycle()
     }
 
+    pub const fn not_before_cycle(self) -> u64 {
+        self.service.not_before_cycle()
+    }
+
     /// Expose the immutable service reservation for an atomic mixed read /
     /// writeback commit. The returned plan carries its private provenance and
     /// dirty-sector metadata; it cannot be forged with a struct literal.
@@ -201,7 +248,9 @@ struct PendingWriteback {
 /// `capacity_sectors` is a queue capacity in 32-byte beats. The service rate
 /// uses fixed-point `cycle * bytes_per_sec` units, matching the native DRAM
 /// read observer's arithmetic without introducing floating point.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// A queue is intentionally not `Clone`: each plan belongs to one mutable
+/// queue, and copying its owner/epoch would let plans cross divergent states.
+#[derive(Debug, PartialEq, Eq)]
 pub struct WritebackQueue {
     queue_id: u64,
     capacity_sectors: u32,
@@ -229,6 +278,8 @@ pub enum WritebackError {
     RateZero,
     #[error("writeback queue identity space is exhausted")]
     QueueIdExhausted,
+    #[error("service reservation identity space is exhausted")]
+    ReservationIdExhausted,
     #[error("writeback fixed-point arithmetic overflow")]
     ArithmeticOverflow,
     #[error("service request must reserve at least one byte")]
@@ -269,11 +320,7 @@ impl WritebackQueue {
         if bytes_per_sec == 0 || sm_clock_hz == 0 {
             return Err(WritebackError::RateZero);
         }
-        let queue_id = NEXT_QUEUE_ID
-            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |value| {
-                value.checked_add(1)
-            })
-            .map_err(|_| WritebackError::QueueIdExhausted)?;
+        let queue_id = allocate_id(&NEXT_QUEUE_ID).ok_or(WritebackError::QueueIdExhausted)?;
         Ok(Self {
             queue_id,
             capacity_sectors,
@@ -365,7 +412,8 @@ impl WritebackQueue {
         self.epoch
             .checked_add(1)
             .ok_or(WritebackError::ArithmeticOverflow)?;
-        self.preview_services_from_state(requests)
+        let batch_id = allocate_id(&NEXT_BATCH_ID).ok_or(WritebackError::ReservationIdExhausted)?;
+        self.preview_services_from_state(requests, batch_id)
     }
 
     /// Preflight a dirty eviction without mutating queue state. The caller
@@ -377,6 +425,7 @@ impl WritebackQueue {
         issue_cycle: u64,
     ) -> Result<Option<WritebackPlan>, WritebackError> {
         validate_eviction(eviction)?;
+        self.check_event_time(issue_cycle)?;
         if eviction.dirty_mask == 0 {
             return Ok(None);
         }
@@ -403,29 +452,44 @@ impl WritebackQueue {
         }
         let request_count =
             u64::try_from(plans.len()).map_err(|_| WritebackError::ArithmeticOverflow)?;
-        let next_token = self
-            .next_token
-            .checked_add(request_count)
-            .ok_or(WritebackError::ArithmeticOverflow)?;
-        let next_epoch = self.next_epoch()?;
-        for plan in plans {
+        let batch_id = plans[0].batch_id;
+        for (index, plan) in plans.iter().enumerate() {
             if plan.owner_id != self.queue_id {
                 return Err(WritebackError::ForeignPlan {
                     expected: self.queue_id,
                     actual: plan.owner_id,
                 });
             }
+            if plan.expected_epoch != self.epoch {
+                return Err(WritebackError::StalePlan {
+                    expected: plan.expected_epoch,
+                    current: self.epoch,
+                });
+            }
+            if plan.batch_id != batch_id
+                || plan.batch_len != request_count
+                || plan.batch_index
+                    != u64::try_from(index).map_err(|_| WritebackError::ArithmeticOverflow)?
+            {
+                return Err(WritebackError::PlanMismatch);
+            }
         }
+        let next_token = self
+            .next_token
+            .checked_add(request_count)
+            .ok_or(WritebackError::ArithmeticOverflow)?;
+        let next_epoch = self.next_epoch()?;
         let requests = plans
             .iter()
             .map(|plan| ServiceRequest {
                 bytes: plan.bytes,
                 issue_cycle: plan.issue_cycle,
+                not_before_cycle: plan.not_before_cycle,
                 line_id: plan.line_id,
                 dirty_mask: plan.dirty_mask,
             })
             .collect::<Vec<_>>();
-        let expected = self.preview_services_from_state(&requests)?;
+        let expected = self.preview_services_from_state(&requests, batch_id)?;
         if expected.len() != plans.len()
             || expected
                 .iter()
@@ -435,29 +499,39 @@ impl WritebackQueue {
             return Err(WritebackError::PlanMismatch);
         }
 
-        // All fallible work is complete. Apply the virtual state in one
-        // non-failing section, preserving transactional cache integration.
         let final_plan = plans.last().ok_or(WritebackError::PlanMismatch)?;
-        self.free_fp = final_plan.done_fp;
         let dirty_sectors = plans.iter().try_fold(0_u32, |total, plan| {
             total
                 .checked_add(plan.dirty_sectors())
                 .ok_or(WritebackError::ArithmeticOverflow)
         })?;
-        self.in_flight_sectors = self
+        let next_in_flight_sectors = self
             .in_flight_sectors
             .checked_add(dirty_sectors)
             .ok_or(WritebackError::ArithmeticOverflow)?;
-        for plan in plans {
-            if plan.dirty_mask != 0 {
+        // Derive infallible insertion records before changing queue state.
+        let writebacks = plans
+            .iter()
+            .filter(|plan| plan.is_writeback())
+            .map(|plan| {
                 let line_id = plan.line_id.ok_or(WritebackError::DirtyLineMissing {
                     dirty_mask: plan.dirty_mask,
                 })?;
-                self.latest_by_line
-                    .insert(line_id, (plan.token, plan.done_fp));
-                self.pending
-                    .insert(plan.token, PendingWriteback { plan: *plan });
-            }
+                if self.pending.contains_key(&plan.token) {
+                    return Err(WritebackError::PlanMismatch);
+                }
+                Ok((line_id, *plan))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+
+        // All fallible checks are complete. Allocation failure follows Rust's
+        // allocator abort behavior, not a recoverable partial-commit error.
+        self.free_fp = final_plan.done_fp;
+        self.in_flight_sectors = next_in_flight_sectors;
+        for (line_id, plan) in writebacks {
+            self.latest_by_line
+                .insert(line_id, (plan.token, plan.done_fp));
+            self.pending.insert(plan.token, PendingWriteback { plan });
         }
         self.next_token = next_token;
         self.event_frontier_cycle = plans
@@ -495,10 +569,9 @@ impl WritebackQueue {
     }
 
     /// Apply a scheduled completion acknowledgement. The latest same-line
-    /// hazard is removed only when its own token completes. Acknowledgements
-    /// may arrive out of order; the event frontier advances monotonically but
-    /// never rejects a ready completion merely because another completion was
-    /// observed at a later cycle.
+    /// hazard is removed only when its own token completes. Tokens may be
+    /// acknowledged out of service order, but all acknowledgements must carry
+    /// the current or a later event cycle; retroactive completion is rejected.
     pub fn complete(
         &mut self,
         token: u64,
@@ -515,6 +588,7 @@ impl WritebackQueue {
                 ready: pending.plan.service_done_cycle,
             });
         }
+        self.check_event_time(at_cycle)?;
         let next_epoch = self.next_epoch()?;
         let dirty_sectors = pending.plan.dirty_sectors();
         let next_in_flight = self
@@ -538,7 +612,7 @@ impl WritebackQueue {
         if remove_latest {
             self.latest_by_line.remove(&line_id);
         }
-        self.event_frontier_cycle = self.event_frontier_cycle.max(at_cycle);
+        self.event_frontier_cycle = at_cycle;
         self.epoch = next_epoch;
         Ok(WritebackCompletion {
             token,
@@ -551,11 +625,16 @@ impl WritebackQueue {
     fn preview_services_from_state(
         &self,
         requests: &[ServiceRequest],
+        batch_id: u64,
     ) -> Result<Vec<ServicePlan>, WritebackError> {
         let mut free_fp = self.free_fp;
         let mut in_flight_sectors = self.in_flight_sectors;
         let mut event_frontier_cycle = self.event_frontier_cycle;
-        let mut latest_by_line = self.latest_by_line.clone();
+        // Only dirty lines changed by this batch need virtual state. Avoid an
+        // O(number of pending lines) clone for every individual read request.
+        let mut batch_latest_by_line = BTreeMap::<i64, u128>::new();
+        let batch_len =
+            u64::try_from(requests.len()).map_err(|_| WritebackError::ArithmeticOverflow)?;
         let mut plans = Vec::with_capacity(requests.len());
         for (index, request) in requests.iter().copied().enumerate() {
             validate_request(request)?;
@@ -576,11 +655,17 @@ impl WritebackQueue {
                 });
             }
             let issue_fp = self.scale_cycle(request.issue_cycle)?;
+            let not_before_fp = self.scale_cycle(request.not_before_cycle)?;
             let line_ready_fp = request
                 .line_id
-                .and_then(|line_id| latest_by_line.get(&line_id).map(|(_, ready)| *ready))
+                .and_then(|line_id| {
+                    batch_latest_by_line
+                        .get(&line_id)
+                        .copied()
+                        .or_else(|| self.latest_by_line.get(&line_id).map(|(_, ready)| *ready))
+                })
                 .unwrap_or(0);
-            let service_start_fp = free_fp.max(issue_fp).max(line_ready_fp);
+            let service_start_fp = free_fp.max(issue_fp).max(not_before_fp).max(line_ready_fp);
             let service_fp = u128::from(request.bytes)
                 .checked_mul(self.sm_clock_hz)
                 .ok_or(WritebackError::ArithmeticOverflow)?;
@@ -596,11 +681,15 @@ impl WritebackQueue {
                 .ok_or(WritebackError::ArithmeticOverflow)?;
             let plan = ServicePlan {
                 owner_id: self.queue_id,
+                batch_id,
+                batch_len,
+                batch_index: offset,
                 token,
                 line_id: request.line_id,
                 dirty_mask: request.dirty_mask,
                 bytes: request.bytes,
                 issue_cycle: request.issue_cycle,
+                not_before_cycle: request.not_before_cycle,
                 service_start_cycle,
                 service_done_cycle,
                 expected_epoch: self.epoch,
@@ -609,10 +698,13 @@ impl WritebackQueue {
             plans.push(plan);
             free_fp = done_fp;
             in_flight_sectors = requested_capacity;
-            if request.dirty_mask != 0
-                && let Some(line_id) = request.line_id
-            {
-                latest_by_line.insert(line_id, (token, done_fp));
+            if request.dirty_mask != 0 {
+                match request.line_id {
+                    Some(line_id) => {
+                        batch_latest_by_line.insert(line_id, done_fp);
+                    }
+                    None => unreachable!("dirty requests are validated with a line identity"),
+                }
             }
             event_frontier_cycle = request.issue_cycle;
         }
@@ -642,13 +734,17 @@ impl WritebackQueue {
     }
 
     fn ceil_cycle(&self, fixed: u128) -> Result<u64, WritebackError> {
-        let cycle = fixed
-            .checked_add(self.bytes_per_sec - 1)
-            .ok_or(WritebackError::ArithmeticOverflow)?
-            .checked_div(self.bytes_per_sec)
-            .ok_or(WritebackError::ArithmeticOverflow)?;
+        let cycle = fixed.div_ceil(self.bytes_per_sec);
         u64::try_from(cycle).map_err(|_| WritebackError::ArithmeticOverflow)
     }
+}
+
+fn allocate_id(counter: &AtomicU64) -> Option<u64> {
+    counter
+        .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |value| {
+            value.checked_add(1)
+        })
+        .ok()
 }
 
 fn validate_request(request: ServiceRequest) -> Result<(), WritebackError> {
@@ -734,12 +830,12 @@ mod tests {
     #[test]
     fn capacity_and_invalid_masks_fail_without_mutating_queue() {
         let mut queue = WritebackQueue::new(1, 2048, 32).expect("queue should initialize");
-        let before = queue.clone();
+        let before = format!("{queue:?}");
         assert!(matches!(
             queue.submit(eviction(1, 0b0011, 0b0011), 0),
             Err(WritebackError::CapacityExceeded { .. })
         ));
-        assert_eq!(queue, before);
+        assert_eq!(format!("{queue:?}"), before);
         assert!(matches!(
             queue.submit(
                 L2Eviction {
@@ -752,7 +848,7 @@ mod tests {
             ),
             Err(WritebackError::DirtyPendingOverlap { .. })
         ));
-        assert_eq!(queue, before);
+        assert_eq!(format!("{queue:?}"), before);
     }
 
     #[test]
@@ -810,14 +906,14 @@ mod tests {
             .preview(eviction(9, 0b0001, 0b0001), 0)
             .expect("preview should succeed")
             .expect("plan should exist");
-        let before = queue.clone();
+        let before = format!("{queue:?}");
         let mut forged = plan.service;
         forged.bytes += 32;
         assert_eq!(
             queue.commit_service(forged),
             Err(WritebackError::PlanMismatch)
         );
-        assert_eq!(queue, before);
+        assert_eq!(format!("{queue:?}"), before);
     }
 
     #[test]
@@ -873,27 +969,92 @@ mod tests {
     }
 
     #[test]
+    fn read_line_waits_for_dirty_hazard_and_not_before_does_not_reorder_event() {
+        let mut queue = WritebackQueue::new(2, 2048, 32).expect("queue should initialize");
+        let write = queue
+            .preview_services(&[ServiceRequest::writeback(4, 1, 0)])
+            .expect("write preview should succeed");
+        queue
+            .commit_services(&write)
+            .expect("write commit should succeed");
+        let read = queue
+            .preview_services(&[ServiceRequest::read_line_after(
+                32,
+                4,
+                1,
+                write[0].service_done_cycle() + 2,
+            )])
+            .expect("read preview should succeed");
+        assert_eq!(read[0].issue_cycle(), 1);
+        assert_eq!(
+            read[0].service_start_cycle(),
+            write[0].service_done_cycle() + 2
+        );
+        queue
+            .commit_services(&read)
+            .expect("read commit should succeed");
+        assert_eq!(queue.event_frontier_cycle(), 1);
+    }
+
+    #[test]
+    fn future_not_before_is_not_a_second_event() {
+        let mut queue = WritebackQueue::new(2, 2048, 32).expect("queue should initialize");
+        let plans = queue
+            .preview_services(&[ServiceRequest::read_line_after(32, 9, 0, 100)])
+            .expect("preview should succeed");
+        assert_eq!(queue.event_frontier_cycle(), 0);
+        assert_eq!(plans[0].not_before_cycle(), 100);
+        assert_eq!(plans[0].service_start_cycle(), 100);
+        queue
+            .commit_services(&plans)
+            .expect("commit should succeed");
+        assert_eq!(queue.event_frontier_cycle(), 0);
+    }
+
+    #[test]
+    fn truncated_or_reordered_batches_are_rejected_transactionally() {
+        let mut queue = WritebackQueue::new(4, 2048, 32).expect("queue should initialize");
+        let plans = queue
+            .preview_services(&[
+                ServiceRequest::writeback(1, 1, 0),
+                ServiceRequest::read_line(32, 1, 0),
+            ])
+            .expect("batch preview should succeed");
+        let before = format!("{queue:?}");
+        assert_eq!(
+            queue.commit_services(&plans[..1]),
+            Err(WritebackError::PlanMismatch)
+        );
+        assert_eq!(format!("{queue:?}"), before);
+        assert_eq!(
+            queue.commit_services(&[plans[1], plans[0]]),
+            Err(WritebackError::PlanMismatch)
+        );
+        assert_eq!(format!("{queue:?}"), before);
+    }
+
+    #[test]
     fn time_regression_and_ack_then_past_fetch_are_rejected_without_mutation() {
         let mut queue = WritebackQueue::new(2, 2048, 32).expect("queue should initialize");
         let plan = queue
             .submit(eviction(1, 1, 1), 5)
             .expect("submit should succeed")
             .expect("plan should exist");
-        let before = queue.clone();
+        let before = format!("{queue:?}");
         assert!(matches!(
             queue.preview_read(32, 4),
             Err(WritebackError::TimeRegression { .. })
         ));
-        assert_eq!(queue, before);
+        assert_eq!(format!("{queue:?}"), before);
         queue
             .complete(plan.token(), plan.service_done_cycle())
             .expect("completion should succeed");
-        let after = queue.clone();
+        let after = format!("{queue:?}");
         assert!(matches!(
             queue.fetch_arrival(1, 4),
             Err(WritebackError::TimeRegression { .. })
         ));
-        assert_eq!(queue, after);
+        assert_eq!(format!("{queue:?}"), after);
     }
 
     #[test]
@@ -907,19 +1068,19 @@ mod tests {
             .submit(eviction(1, 1, 1), 0)
             .expect("submit should succeed")
             .expect("plan should exist");
-        let before = queue.clone();
+        let before = format!("{queue:?}");
         assert!(matches!(
             queue.complete(plan.token(), plan.service_done_cycle() - 1),
             Err(WritebackError::EarlyCompletion { .. })
         ));
-        assert_eq!(queue, before);
+        assert_eq!(format!("{queue:?}"), before);
         queue.epoch = u64::MAX;
-        let before = queue.clone();
+        let before = format!("{queue:?}");
         assert_eq!(
             queue.complete(plan.token(), plan.service_done_cycle()),
             Err(WritebackError::ArithmeticOverflow)
         );
-        assert_eq!(queue, before);
+        assert_eq!(format!("{queue:?}"), before);
     }
 
     #[test]

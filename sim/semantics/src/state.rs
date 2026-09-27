@@ -3075,6 +3075,13 @@ pub enum TypedEventPayload {
         dirty_mask: u8,
         service_done_at: u64,
     },
+    CoherenceCompletion {
+        token: u64,
+        line_id: i64,
+        sector_mask: u8,
+        service_sectors: u32,
+        service_done_at: u64,
+    },
     MemoryWriteAck {
         warp: u32,
         instruction: u32,
@@ -3290,7 +3297,12 @@ impl TypedEventPayload {
                 Ok(())
             }
             Self::SmWake | Self::AtomicCompletion => Ok(()),
-            Self::WritebackCompletion { .. } => Ok(()),
+            Self::WritebackCompletion {
+                service_done_at, ..
+            } => check("writeback_completion", "service_done_at", *service_done_at),
+            Self::CoherenceCompletion {
+                service_done_at, ..
+            } => check("coherence_completion", "service_done_at", *service_done_at),
         }
     }
 
