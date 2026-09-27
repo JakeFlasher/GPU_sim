@@ -58,6 +58,11 @@ records. Do not load every linked report. Root [AGENTS.md](../AGENTS.md) is poli
 
 ## Next concrete seams
 
+The ranked experiment program is [SM86 next-experiment campaign](../plans/sm86_next_experiment_campaign_20260927.md).
+Run Phase 0 correctness/refusal work before any empirical score; Phase 2/3
+requires independent hardware or matched external frontends and must not be
+silently approximated.
+
 Use the PhaseFuse fast lane to gather refusal/certificate populations, the
 bounded PTX subset for value-dependent functional studies, and the custom route
 contract for controlled scheduling experiments. Extend the opt-in writeback and

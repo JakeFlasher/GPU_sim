@@ -77,6 +77,11 @@ launches fail explicitly (`graph_node_capture_unsupported`).
 
 ## Open work and scope
 
+The next-experiment acceptance bar is tracked in
+[the SM86 campaign plan](../plans/sm86_next_experiment_campaign_20260927.md);
+its phases distinguish local litmus evidence from hardware and matched-baseline
+requirements.
+
 Native coherence/visibility and resident dirty-flush integration, native physical-pipe routing,
 execution-driven SASS regeneration, same-domain independent timing/cache
 validation, and general compiler/ISA support remain open. Their absence is not

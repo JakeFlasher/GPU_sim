@@ -229,3 +229,9 @@ cargo test --manifest-path sim/Cargo.toml -p sim-mem --lib --quiet            PA
 synthetic cross-SM owner-transfer directory completion                         PASS
 release direct coherence/writeback CLI smoke and default read equivalence       PASS
 ```
+
+The requirement-by-requirement follow-up campaign is recorded in
+[`plans/sm86_next_experiment_campaign_20260927.md`](../plans/sm86_next_experiment_campaign_20260927.md).
+It separates local litmus/refusal work from blocked RTX 3090 Ti/NCU holdouts
+and matched external baselines, with explicit no-go conditions for unsupported
+speed or accuracy claims.
