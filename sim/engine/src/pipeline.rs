@@ -90,7 +90,8 @@ pub fn schedule(
                     groups.get(*owner).is_none_or(|group| *task >= group.len())
                         || (*owner == g && *task >= i)
                 })
-                || (task.resource.is_some() && task.work == 0)
+                || ((task.resource.is_some() || !task.resource_options.is_empty())
+                    && task.work == 0)
             {
                 return Err(PipelineError::Invalid(
                     "bad resource, work or dependency index",
@@ -156,6 +157,7 @@ pub fn schedule(
             let mut selected = None;
             let mut selected_start = start;
             let mut selected_complete = u64::MAX;
+            let mut saw_overflow = false;
             for r in candidates {
                 let mut candidate_start = start.max(resource_next[r]);
                 if resources[r]
@@ -171,19 +173,24 @@ pub fn schedule(
                 }
                 let cfg = &resources[r];
                 let span = task.work.div_ceil(u64::from(cfg.width));
-                let service = span
-                    .checked_mul(cfg.initiation_interval)
-                    .ok_or(PipelineError::Overflow)?;
-                let candidate_complete = candidate_start
-                    .checked_add(
-                        service
-                            .checked_sub(cfg.initiation_interval)
-                            .and_then(|v| v.checked_add(1))
-                            .ok_or(PipelineError::Overflow)?
-                            .checked_add(cfg.latency)
-                            .ok_or(PipelineError::Overflow)?,
-                    )
-                    .ok_or(PipelineError::Overflow)?;
+                let Some(service) = span.checked_mul(cfg.initiation_interval) else {
+                    saw_overflow = true;
+                    continue;
+                };
+                let Some(last_beat_end) = service
+                    .checked_sub(cfg.initiation_interval)
+                    .and_then(|v| v.checked_add(1))
+                else {
+                    saw_overflow = true;
+                    continue;
+                };
+                let Some(candidate_complete) = candidate_start
+                    .checked_add(last_beat_end)
+                    .and_then(|v| v.checked_add(cfg.latency))
+                else {
+                    saw_overflow = true;
+                    continue;
+                };
                 if selected.is_none_or(|best| {
                     (candidate_complete, candidate_start, r)
                         < (selected_complete, selected_start, best)
@@ -192,6 +199,9 @@ pub fn schedule(
                     selected_start = candidate_start;
                     selected_complete = candidate_complete;
                 }
+            }
+            if selected.is_none() && saw_overflow {
+                return Err(PipelineError::Overflow);
             }
             start = selected_start;
             if choice.is_none_or(|(best, _, _)| start < best) {
@@ -529,5 +539,58 @@ mod tests {
         )
         .expect("equal-resource schedule should succeed");
         assert_eq!(result.selected_resources[0], vec![Some(0)]);
+    }
+
+    #[test]
+    fn zero_work_alternatives_fail_closed() {
+        assert!(matches!(
+            schedule(
+                &[Resource {
+                    width: 1,
+                    latency: 1,
+                    initiation_interval: 1,
+                    max_in_flight: None,
+                }],
+                &[vec![Task {
+                    resource: None,
+                    resource_options: vec![0],
+                    work: 0,
+                    dependencies: vec![],
+                    cross_dependencies: vec![],
+                }]],
+                1,
+            ),
+            Err(PipelineError::Invalid(_))
+        ));
+    }
+
+    #[test]
+    fn overflowing_alternative_does_not_hide_a_viable_route() {
+        let result = schedule(
+            &[
+                Resource {
+                    width: 1,
+                    latency: u64::MAX,
+                    initiation_interval: 1,
+                    max_in_flight: None,
+                },
+                Resource {
+                    width: 1,
+                    latency: 1,
+                    initiation_interval: 1,
+                    max_in_flight: None,
+                },
+            ],
+            &[vec![Task {
+                resource: None,
+                resource_options: vec![0, 1],
+                work: 1,
+                dependencies: vec![],
+                cross_dependencies: vec![],
+            }]],
+            1,
+        )
+        .expect("the representable alternative should be selected");
+        assert_eq!(result.selected_resources[0], vec![Some(1)]);
     }
 }

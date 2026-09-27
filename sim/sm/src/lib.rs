@@ -40,6 +40,9 @@
 //! Schema 10 runs one opt-in feedback candidate that parks full-queue warps,
 //! yields for exact L2 pricing, and reschedules subsequent issue/cache order.
 //! Ordinary replay and schemas 1–9 remain unchanged.
+//! Direct launch replay also has a separate opt-in dirty-sector writeback
+//! service (`--dirty-writeback-capacity-sectors`); it shares the carded byte
+//! server with read fetches but does not model coherence ownership.
 //! For the exact sm_86 scalar STRONG.SM/HADD2 forms, an SMSP-local same-bank
 //! writeback collision grants HADD2 and delays the barrier-observed load result
 //! by one cycle; readiness schema 4 reports that event. Queue capacity and

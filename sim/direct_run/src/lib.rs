@@ -113,6 +113,10 @@ pub struct RunConfig {
     pub memory_mode: MemoryMode,
     pub cache_scope: CacheScope,
     pub carded_dram_bandwidth: bool,
+    /// Optional opt-in dirty-L2-eviction writeback queue capacity in 32-byte
+    /// sectors. This requires carded DRAM, launch-scoped L1-L2 replay, and
+    /// never changes the default read-only carded path.
+    pub dirty_writeback_capacity_sectors: Option<u32>,
     /// Optional model-relative issue transaction width. This never changes
     /// the evidence-bound architecture card; it labels the replay as a
     /// hypothetical resource experiment.
@@ -635,6 +639,8 @@ pub struct RunReport {
     pub memory_mode: &'static str,
     pub cache_scope: &'static str,
     pub carded_dram_bandwidth: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dirty_writeback_capacity_sectors: Option<u32>,
     #[serde(skip_serializing_if = "is_false")]
     pub fast_frontier_only: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -975,6 +981,14 @@ pub struct DramCounterReport {
     #[serde(skip_serializing_if = "is_zero_u64")]
     pub l2_dirty_evicted_sectors: u64,
     #[serde(skip_serializing_if = "is_zero_u64")]
+    pub writeback_completed_lines: u64,
+    #[serde(skip_serializing_if = "is_zero_u64")]
+    pub writeback_completed_sectors: u64,
+    #[serde(skip_serializing_if = "is_zero_u64")]
+    pub writeback_completed_bytes: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub writeback_completion_frontier: Option<u64>,
+    #[serde(skip_serializing_if = "is_zero_u64")]
     pub maximum_terminal_l2_dirty_lines: u64,
     #[serde(skip_serializing_if = "is_zero_u64")]
     pub maximum_terminal_l2_dirty_sectors: u64,
@@ -1060,6 +1074,10 @@ fn counters(
             l2_evicted_pending_sectors: value.l2_evicted_pending_sectors,
             l2_dirty_eviction_lines: value.l2_dirty_eviction_lines,
             l2_dirty_evicted_sectors: value.l2_dirty_evicted_sectors,
+            writeback_completed_lines: value.writeback_completed_lines,
+            writeback_completed_sectors: value.writeback_completed_sectors,
+            writeback_completed_bytes: value.writeback_completed_bytes,
+            writeback_completion_frontier: value.writeback_completion_frontier,
             maximum_terminal_l2_dirty_lines: value.maximum_terminal_l2_dirty_lines,
             maximum_terminal_l2_dirty_sectors: value.maximum_terminal_l2_dirty_sectors,
         }),
@@ -1315,6 +1333,20 @@ fn resolve_mode(
     arch_card: &ArchCard,
     issue: IssueModelParams,
 ) -> Result<ReplayMemMode, RunError> {
+    if config.dirty_writeback_capacity_sectors == Some(0) {
+        return Err(RunError::new(
+            "arguments",
+            "dirty writeback capacity must be positive",
+        ));
+    }
+    if config.dirty_writeback_capacity_sectors.is_some()
+        && (config.memory_mode != MemoryMode::L1L2 || !config.carded_dram_bandwidth)
+    {
+        return Err(RunError::new(
+            "arguments",
+            "dirty writeback requires --mode l1-l2 together with --carded-dram",
+        ));
+    }
     if config.memory_mode == MemoryMode::Flat {
         if config.carded_dram_bandwidth {
             return Err(RunError::new(
@@ -1360,12 +1392,22 @@ fn resolve_mode(
         let card = arch_card
             .require_dram_bandwidth()
             .map_err(at("DRAM bandwidth"))?;
-        DramBw::Carded {
-            arch: issue.arch(),
-            bytes_per_sec: card
-                .validated_peak_bytes_per_second()
-                .map_err(at("DRAM bandwidth"))?,
-            sm_clock_hz: card.locked_sm_clock_hz().map_err(at("DRAM clock"))?,
+        let bytes_per_sec = card
+            .validated_peak_bytes_per_second()
+            .map_err(at("DRAM bandwidth"))?;
+        let sm_clock_hz = card.locked_sm_clock_hz().map_err(at("DRAM clock"))?;
+        match config.dirty_writeback_capacity_sectors {
+            Some(capacity_sectors) => DramBw::CardedWriteback {
+                arch: issue.arch(),
+                bytes_per_sec,
+                sm_clock_hz,
+                capacity_sectors,
+            },
+            None => DramBw::Carded {
+                arch: issue.arch(),
+                bytes_per_sec,
+                sm_clock_hz,
+            },
         }
     } else {
         DramBw::Unmodeled { arch: issue.arch() }
@@ -1472,6 +1514,13 @@ pub fn run(config: &RunConfig) -> Result<RunReport, RunError> {
             "--memory-admission-feedback currently requires --cache-scope launch",
         ));
     }
+    if config.dirty_writeback_capacity_sectors.is_some() && config.cache_scope != CacheScope::Launch
+    {
+        return Err(RunError::new(
+            "arguments",
+            "dirty writeback currently requires --cache-scope launch",
+        ));
+    }
     let memory_service_candidates =
         load_memory_service_candidates(config.memory_service_candidates.as_ref())?;
     let memory_admission_candidates =
@@ -1488,6 +1537,7 @@ pub fn run(config: &RunConfig) -> Result<RunReport, RunError> {
         && config.kernel_id.is_none()
         && !config.ncu_shaped_metrics
         && !config.fast_frontier_only
+        && config.dirty_writeback_capacity_sectors.is_none()
         && ncu_observation.is_none()
         && !specialized_loader_requested
         && !performance_diagnostics_requested
@@ -1602,6 +1652,7 @@ pub fn run(config: &RunConfig) -> Result<RunReport, RunError> {
             memory_mode: config.memory_mode.token(),
             cache_scope: config.cache_scope.token(),
             carded_dram_bandwidth: config.carded_dram_bandwidth,
+            dirty_writeback_capacity_sectors: config.dirty_writeback_capacity_sectors,
             fast_frontier_only: true,
             hypothetical_issue_ports: config
                 .hypothetical_issue_ports
@@ -1751,6 +1802,7 @@ pub fn run(config: &RunConfig) -> Result<RunReport, RunError> {
         memory_mode: config.memory_mode.token(),
         cache_scope: config.cache_scope.token(),
         carded_dram_bandwidth: config.carded_dram_bandwidth,
+        dirty_writeback_capacity_sectors: config.dirty_writeback_capacity_sectors,
         fast_frontier_only: false,
         hypothetical_issue_ports: config
             .hypothetical_issue_ports
@@ -1799,6 +1851,7 @@ mod tests {
             memory_mode: mode,
             cache_scope: CacheScope::Launch,
             carded_dram_bandwidth: false,
+            dirty_writeback_capacity_sectors: None,
             hypothetical_issue_ports: None,
             architecture_spec: None,
             kernel_id: None,

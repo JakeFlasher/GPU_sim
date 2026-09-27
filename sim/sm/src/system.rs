@@ -122,7 +122,7 @@ use sim_arch::{ArchId, L2PendingReadSemantics};
 use sim_engine::{EngineError, EventQueue, TargetId};
 use sim_mem::{
     L1Config, L2Counters, L2DirtyResidency, L2EventMaskPreview, L2Eviction, L2FillToken, L2Model,
-    L2PendingSectorKey, L2Source, MemoryOrigin,
+    L2PendingSectorKey, L2Source, MemoryOrigin, ServicePlan, ServiceRequest, WritebackQueue,
 };
 #[cfg(feature = "reference")]
 use sim_semantics::{
@@ -632,6 +632,8 @@ pub enum SystemError {
     L2Snapshot(#[from] sim_mem::L2SnapshotError),
     #[error(transparent)]
     L2(#[from] sim_mem::L2AccessError),
+    #[error(transparent)]
+    Writeback(#[from] sim_mem::WritebackError),
     #[error(
         "event queue drained with sm {sm_id} unfinished ({outstanding} response(s) recorded \
          outstanding) — request/response wiring invariant broken"
@@ -803,6 +805,10 @@ pub enum SystemError {
     },
     #[error("event queue drained with {entries} pending L2 sector ready-time entries")]
     PendingL2ReadyNotDrained { entries: usize },
+    #[error(
+        "event queue drained with {sectors} dirty writeback sectors and {entries} pending completions"
+    )]
+    WritebackNotDrained { sectors: u32, entries: usize },
     #[error("{counter} counter overflows u64")]
     CounterOverflow { counter: &'static str },
 }
@@ -987,6 +993,9 @@ enum Ev {
     /// completion. It is used by both returning ATOM and non-returning RED;
     /// the public traffic counters keep those operations separate.
     AtomicCompletion,
+    L2WritebackComplete {
+        plan: ServicePlan,
+    },
     MemoryWriteAck(MemoryWriteAck),
     MemResponse {
         reply: ReplyTo,
@@ -1002,6 +1011,7 @@ fn event_name(event: &Ev) -> &'static str {
         Ev::L2AccessBatch(_) => "l2_access_batch",
         Ev::L2Fill(_) => "l2_fill",
         Ev::AtomicCompletion => "atomic_completion",
+        Ev::L2WritebackComplete { .. } => "l2_writeback_complete",
         Ev::MemoryWriteAck(_) => "memory_write_ack",
         Ev::MemResponse { .. } => "memory_response",
     }
@@ -1090,6 +1100,12 @@ fn typed_event_payload(event: &Ev) -> TypedEventPayload {
             }
         }
         Ev::AtomicCompletion => TypedEventPayload::AtomicCompletion,
+        Ev::L2WritebackComplete { plan } => TypedEventPayload::WritebackCompletion {
+            token: plan.token(),
+            line_id: plan.line_id().unwrap_or_default(),
+            dirty_mask: plan.dirty_mask(),
+            service_done_at: plan.service_done_cycle(),
+        },
         Ev::MemoryWriteAck(ack) => TypedEventPayload::MemoryWriteAck {
             warp: ack.witness.warp(),
             instruction: ack.witness.instruction(),
@@ -2110,6 +2126,8 @@ struct L2SystemCommit {
     origin_read_sectors: [u64; 2],
     topology_stats: DramStats,
     dram_free_fp: Option<u128>,
+    read_service: Option<ServicePlan>,
+    writeback: Option<ServicePlan>,
     fill_ready: Option<u64>,
     /// Shared-L2 allocation generation associated with a returning response.
     /// The L1 fill generation is a separate identity domain and must not be
@@ -2138,11 +2156,11 @@ struct L2SystemCommit {
 /// clears at that child sector's ready event. Uncongested streams see pure
 /// latency (the server only ever ADDS delay).
 ///
-/// v0 scope: DRAM READS only — write data validates Store sectors without a
-/// fetch, while returning ATOM and non-returning RED charge missing sectors
-/// for their internal RMW read. Dirty writeback and coherence remain typed
-/// unmodeled tails; RED's value-dependent reduction/serialization semantics
-/// are still outside the event stream.
+/// Default `Carded` scope remains DRAM READS only — write data validates Store
+/// sectors without a fetch, while returning ATOM and non-returning RED charge
+/// missing sectors for their internal RMW read. The opt-in `CardedWriteback`
+/// variant adds a bounded dirty-sector service lane; coherence ownership and
+/// visibility, and RED's value-dependent serialization, remain typed tails.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DramBw {
     /// Latency-only (pre-increment behavior): the ablation mode and the
@@ -2155,12 +2173,32 @@ pub enum DramBw {
         bytes_per_sec: u64,
         sm_clock_hz: u64,
     },
+    /// Opt-in carded service with transactional dirty-sector writeback.
+    /// Capacity is measured in 32-byte dirty sectors; this remains a bounded
+    /// native replay experiment, not a coherence/ownership protocol.
+    CardedWriteback {
+        arch: ArchId,
+        bytes_per_sec: u64,
+        sm_clock_hz: u64,
+        capacity_sectors: u32,
+    },
 }
 
 impl DramBw {
     pub const fn arch(self) -> ArchId {
         match self {
-            Self::Unmodeled { arch } | Self::Carded { arch, .. } => arch,
+            Self::Unmodeled { arch }
+            | Self::Carded { arch, .. }
+            | Self::CardedWriteback { arch, .. } => arch,
+        }
+    }
+
+    pub const fn writeback_capacity_sectors(self) -> Option<u32> {
+        match self {
+            Self::CardedWriteback {
+                capacity_sectors, ..
+            } => Some(capacity_sectors),
+            _ => None,
         }
     }
 }
@@ -2203,6 +2241,9 @@ impl DramServer {
                 bytes_per_sec: u128::from(bytes_per_sec),
                 sm_clock_hz: u128::from(sm_clock_hz),
             }),
+            // The opt-in writeback path owns the shared byte server through
+            // `WritebackQueue`; no independent read server is created here.
+            DramBw::CardedWriteback { .. } => None,
         }
     }
 
@@ -2268,14 +2309,21 @@ pub struct DramStats {
     /// therefore included in the same latency-arm accounting as any other
     /// reply-bearing read.
     pub bw_delayed_responses: u64,
-    /// L2 replacement topology. Dirty entries are candidate writeback work,
-    /// not scheduled or completed DRAM transactions.
+    /// L2 replacement topology. In the default read-only path dirty entries
+    /// are candidate writeback work; the opt-in writeback variant also reports
+    /// separate completion counters below.
     pub l2_evicted_lines: u64,
     pub l2_evicted_valid_sectors: u64,
     pub l2_evicted_pending_lines: u64,
     pub l2_evicted_pending_sectors: u64,
     pub l2_dirty_eviction_lines: u64,
     pub l2_dirty_evicted_sectors: u64,
+    /// Opt-in scheduled writeback completion observations. These remain zero
+    /// on the default read-only DRAM path.
+    pub writeback_completed_lines: u64,
+    pub writeback_completed_sectors: u64,
+    pub writeback_completed_bytes: u64,
+    pub writeback_completion_frontier: Option<u64>,
     /// Maximum terminal dirty residency across the launches aggregated into
     /// this observer. A gauge is never summed as traffic.
     pub maximum_terminal_l2_dirty_lines: u64,
@@ -2383,6 +2431,10 @@ impl DramStats {
             l2_evicted_pending_sectors: 0,
             l2_dirty_eviction_lines: 0,
             l2_dirty_evicted_sectors: 0,
+            writeback_completed_lines: 0,
+            writeback_completed_sectors: 0,
+            writeback_completed_bytes: 0,
+            writeback_completion_frontier: None,
             maximum_terminal_l2_dirty_lines: 0,
             maximum_terminal_l2_dirty_sectors: 0,
             by_origin: [global, local],
@@ -2526,6 +2578,29 @@ impl DramStats {
             l2_evicted_pending_sectors,
             l2_dirty_eviction_lines,
             l2_dirty_evicted_sectors,
+            writeback_completed_lines: self
+                .writeback_completed_lines
+                .checked_add(other.writeback_completed_lines)
+                .ok_or(SystemCounterError::Overflow {
+                    counter: "completed L2 writeback lines",
+                })?,
+            writeback_completed_sectors: self
+                .writeback_completed_sectors
+                .checked_add(other.writeback_completed_sectors)
+                .ok_or(SystemCounterError::Overflow {
+                    counter: "completed L2 writeback sectors",
+                })?,
+            writeback_completed_bytes: self
+                .writeback_completed_bytes
+                .checked_add(other.writeback_completed_bytes)
+                .ok_or(SystemCounterError::Overflow {
+                    counter: "completed L2 writeback bytes",
+                })?,
+            writeback_completion_frontier: self
+                .writeback_completion_frontier
+                .into_iter()
+                .chain(other.writeback_completion_frontier)
+                .max(),
             maximum_terminal_l2_dirty_lines: self
                 .maximum_terminal_l2_dirty_lines
                 .max(other.maximum_terminal_l2_dirty_lines),
@@ -2635,11 +2710,20 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates(
     // Fail closed on a zero bandwidth rate: a clamped server would be
     // absurd (1 B/s) or silently inert (0 Hz), and a 1 B/s server arms
     // the fixed-point u64 ceiling on large traces.
-    if let DramBw::Carded {
-        bytes_per_sec,
-        sm_clock_hz,
-        ..
-    } = dram
+    let rate = match dram {
+        DramBw::Carded {
+            bytes_per_sec,
+            sm_clock_hz,
+            ..
+        }
+        | DramBw::CardedWriteback {
+            bytes_per_sec,
+            sm_clock_hz,
+            ..
+        } => Some((bytes_per_sec, sm_clock_hz)),
+        DramBw::Unmodeled { .. } => None,
+    };
+    if let Some((bytes_per_sec, sm_clock_hz)) = rate
         && (bytes_per_sec == 0 || sm_clock_hz == 0)
     {
         return Err(SystemError::DramBandwidthInvalid {
@@ -2733,6 +2817,19 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates(
     let mut pending_l2_ready = PendingL2Ready::default();
     let mut l2_by_source = L2SourceSplit::for_arch(arch);
     let mut dram_server = DramServer::new(dram);
+    let mut writeback_queue = match dram {
+        DramBw::CardedWriteback {
+            capacity_sectors,
+            bytes_per_sec,
+            sm_clock_hz,
+            ..
+        } => Some(WritebackQueue::new(
+            capacity_sectors,
+            bytes_per_sec,
+            sm_clock_hz,
+        )?),
+        _ => None,
+    };
     let mut dram_stats = DramStats::for_arch(arch);
     for ix in 0..cores.len() {
         let target = u32::try_from(ix)
@@ -3001,20 +3098,83 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates(
                                 Some(eviction) => dram_stats.with_l2_eviction(eviction)?,
                                 None => dram_stats,
                             };
+                            let writeback_eviction = preview.eviction();
                             let service_preview = if fetch_sectors > 0 {
                                 let bytes = fetch_sectors.checked_mul(32).ok_or(
                                     SystemError::CounterOverflow {
                                         counter: "DRAM request bytes",
                                     },
                                 )?;
-                                match &dram_server {
-                                    Some(server) => Some(server.preview(req.issue_time, bytes)?),
-                                    None => None,
+                                match (&dram_server, &writeback_queue) {
+                                    (Some(server), None) => {
+                                        Some(server.preview(req.issue_time, bytes)?)
+                                    }
+                                    (None, Some(_queue)) => None,
+                                    (None, None) => None,
+                                    (Some(_), Some(_)) => {
+                                        return Err(SystemError::Writeback(
+                                            sim_mem::WritebackError::PlanMismatch,
+                                        ));
+                                    }
                                 }
                             } else {
                                 None
                             };
-                            let bw_ready = service_preview.map_or(0, |(_, ready)| ready);
+                            let (read_service, writeback_service) = if let Some(queue) =
+                                &writeback_queue
+                            {
+                                if let Some(eviction) = writeback_eviction {
+                                    // Validate the exact L2 victim masks before
+                                    // constructing the combined service reservation.
+                                    queue.preview(eviction, req.issue_time)?;
+                                }
+                                let mut requests = Vec::with_capacity(
+                                    usize::from(writeback_eviction.is_some())
+                                        + usize::from(fetch_sectors > 0),
+                                );
+                                if let Some(eviction) = writeback_eviction {
+                                    requests.push(ServiceRequest::writeback(
+                                        eviction.line_id,
+                                        eviction.dirty_mask,
+                                        req.issue_time,
+                                    ));
+                                }
+                                if fetch_sectors > 0 {
+                                    let bytes = fetch_sectors.checked_mul(32).ok_or(
+                                        SystemError::CounterOverflow {
+                                            counter: "DRAM request bytes",
+                                        },
+                                    )?;
+                                    requests.push(ServiceRequest::read_line(
+                                        bytes,
+                                        line,
+                                        req.issue_time,
+                                    ));
+                                }
+                                let plans = queue.preview_services(&requests)?;
+                                let writeback = if writeback_eviction.is_some() {
+                                    Some(*plans.first().ok_or(SystemError::Writeback(
+                                        sim_mem::WritebackError::PlanMismatch,
+                                    ))?)
+                                } else {
+                                    None
+                                };
+                                let read_index = usize::from(writeback_eviction.is_some());
+                                let read = if fetch_sectors > 0 {
+                                    Some(*plans.get(read_index).ok_or(SystemError::Writeback(
+                                        sim_mem::WritebackError::PlanMismatch,
+                                    ))?)
+                                } else {
+                                    None
+                                };
+                                (read, writeback)
+                            } else {
+                                (None, None)
+                            };
+                            let bw_ready = read_service
+                                .map(|plan| plan.service_done_cycle())
+                                .or_else(|| service_preview.map(|(_, ready)| ready))
+                                .unwrap_or(0);
 
                             let fetch_latency_ready = if fetch_sectors > 0 {
                                 let operation = if req.reply != ReplyTo::None {
@@ -3128,6 +3288,8 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates(
                                 origin_read_sectors: next_origin_read_sectors,
                                 topology_stats,
                                 dram_free_fp: service_preview.map(|(done, _)| done),
+                                read_service,
+                                writeback: writeback_service,
                                 fill_ready,
                                 response_l2_allocation_generation: (req.reply != ReplyTo::None)
                                     .then(|| preview.allocation_generation()),
@@ -3142,6 +3304,17 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates(
                             })
                         },
                     )?;
+
+                    if let Some(writeback_queue) = writeback_queue.as_mut() {
+                        let mut service_plans = Vec::with_capacity(2);
+                        if let Some(plan) = commit.writeback {
+                            service_plans.push(plan);
+                        }
+                        if let Some(plan) = commit.read_service {
+                            service_plans.push(plan);
+                        }
+                        writeback_queue.commit_services(&service_plans)?;
+                    }
 
                     lookup_observer_requests = lookup_observer_requests
                         .checked_add(commit.lookup_observer_requests)
@@ -3225,6 +3398,13 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates(
                         }
                         #[cfg(not(feature = "reference"))]
                         pending_l2_ready.register(fill, ready)?;
+                    }
+                    if let Some(plan) = commit.writeback {
+                        queue.schedule_at(
+                            plan.service_done_cycle(),
+                            ev.target,
+                            Ev::L2WritebackComplete { plan },
+                        )?;
                     }
                     // A response that becomes ready with its own new fill carries the
                     // token so installation precedes delivery in one event. A mixed
@@ -3334,6 +3514,37 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates(
             Ev::AtomicCompletion => {
                 spin.on_progress_event(ev.time);
             }
+            Ev::L2WritebackComplete { plan } => {
+                let queue = writeback_queue.as_mut().ok_or(SystemError::Writeback(
+                    sim_mem::WritebackError::PlanMismatch,
+                ))?;
+                let completion = queue.complete(plan.token(), ev.time)?;
+                dram_stats.writeback_completed_lines = dram_stats
+                    .writeback_completed_lines
+                    .checked_add(1)
+                    .ok_or(SystemError::CounterOverflow {
+                        counter: "completed L2 writeback lines",
+                    })?;
+                dram_stats.writeback_completed_sectors = dram_stats
+                    .writeback_completed_sectors
+                    .checked_add(u64::from(completion.dirty_mask.count_ones()))
+                    .ok_or(SystemError::CounterOverflow {
+                        counter: "completed L2 writeback sectors",
+                    })?;
+                dram_stats.writeback_completed_bytes = dram_stats
+                    .writeback_completed_bytes
+                    .checked_add(completion.dirty_mask.count_ones() as u64 * 32)
+                    .ok_or(SystemError::CounterOverflow {
+                        counter: "completed L2 writeback bytes",
+                    })?;
+                dram_stats.writeback_completion_frontier = Some(
+                    dram_stats
+                        .writeback_completion_frontier
+                        .unwrap_or(0)
+                        .max(ev.time),
+                );
+                spin.on_progress_event(ev.time);
+            }
             Ev::MemoryWriteAck(ack) => {
                 write_ack_due.pop_expect("modeled write acknowledgement", sm_ix, ev.time)?;
                 cores[sm_ix].complete_memory_write_ack(ack, ev.time)?;
@@ -3430,6 +3641,15 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates(
         return Err(SystemError::PendingL2ReadyNotDrained {
             entries: pending_l2_ready.len(),
         });
+    }
+    if let Some(writeback_queue) = writeback_queue.as_ref() {
+        let pending_entries = writeback_queue.pending_tokens().count();
+        if writeback_queue.in_flight_sectors() != 0 || pending_entries != 0 {
+            return Err(SystemError::WritebackNotDrained {
+                sectors: writeback_queue.in_flight_sectors(),
+                entries: pending_entries,
+            });
+        }
     }
     if !write_ack_due.is_empty() {
         return Err(SystemError::MemoryWriteAckDueNotDrained);
@@ -6850,6 +7070,62 @@ mod tests {
         assert_eq!(result.dram.maximum_terminal_l2_dirty_sectors, 1);
         assert!(result.unmodeled_tails.dirty_writeback);
         assert!(result.unmodeled_tails.coherence);
+    }
+
+    #[test]
+    fn dirty_store_eviction_writeback_path_schedules_and_completes() {
+        let sched = schedule(vec![
+            (0, slot(cb(1), "STG.E")),
+            (16, slot(cb(1), "STG.E")),
+            (32, slot(cb(1), "EXIT")),
+        ]);
+        let blocks = vec![BlockReplay {
+            launch_index: 0,
+            warps: vec![WarpReplay {
+                async_copy_cohorts: None,
+                warp_slot: 0,
+                insts: vec![
+                    ReplayInst {
+                        pc: 0,
+                        kind: AccessKind::GlobalStore { off: 0, len: 1 },
+                    },
+                    ReplayInst {
+                        pc: 16,
+                        kind: AccessKind::GlobalStore { off: 1, len: 1 },
+                    },
+                    ReplayInst {
+                        pc: 32,
+                        kind: AccessKind::NonMemory,
+                    },
+                ],
+                sectors: vec![0, 4],
+            }],
+        }];
+        let mut l2 = single_way_l2_model();
+        let result = simulate_kernel_shared(
+            &BTreeMap::from([(0, blocks)]),
+            &sched,
+            &params(),
+            l1_config(),
+            &mut l2,
+            DramBw::CardedWriteback {
+                arch: ArchId::Sm86,
+                bytes_per_sec: 1_008_000_000_000,
+                sm_clock_hz: 1_350_000_000,
+                capacity_sectors: 1,
+            },
+        )
+        .unwrap();
+        assert_eq!(result.per_sm[&0].cycles, 3);
+        assert_eq!(result.dram.l2_dirty_evicted_sectors, 1);
+        assert_eq!(result.dram.writeback_completed_lines, 1);
+        assert_eq!(result.dram.writeback_completed_sectors, 1);
+        assert_eq!(result.dram.writeback_completed_bytes, 32);
+        let completion = result
+            .dram
+            .writeback_completion_frontier
+            .expect("writeback completion must be observed");
+        assert!(result.terminal_event_time.unwrap() >= completion);
     }
 
     #[test]

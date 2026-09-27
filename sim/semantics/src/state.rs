@@ -3069,6 +3069,12 @@ pub enum TypedEventPayload {
         fill: TypedFillIdentity,
     },
     AtomicCompletion,
+    WritebackCompletion {
+        token: u64,
+        line_id: i64,
+        dirty_mask: u8,
+        service_done_at: u64,
+    },
     MemoryWriteAck {
         warp: u32,
         instruction: u32,
@@ -3284,6 +3290,7 @@ impl TypedEventPayload {
                 Ok(())
             }
             Self::SmWake | Self::AtomicCompletion => Ok(()),
+            Self::WritebackCompletion { .. } => Ok(()),
         }
     }
 

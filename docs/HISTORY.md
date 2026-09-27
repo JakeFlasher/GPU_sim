@@ -182,11 +182,14 @@ predication, calls, atomics, ABI forms and arbitrary PTX are rejected.
 
 Fresh source inspection also covered FlashGPU-Sim and OpenVADL/LLVM generation
 patterns. No full external simulator or large workload was run. Native
-writeback/coherence completion, physical-pipe reconstruction, execution-driven
-SASS regeneration and arbitrary ISA/compiler generation remain honest gaps. A
+coherence/resident dirty-flush completion, physical-pipe reconstruction,
+execution-driven SASS regeneration and arbitrary ISA/compiler generation remain
+honest gaps. A
 transactional `sim-mem::writeback::WritebackQueue` was added as a reusable
-dirty-sector mechanism primitive; native event-loop integration and coherence
-ownership/visibility remain deliberately deferred rather than overclaimed.
+dirty-sector mechanism primitive. The follow-up adds an explicit direct
+`sim-run --dirty-writeback-capacity-sectors N` launch path using one shared
+read/write byte service and separate completion counters; coherence
+ownership/visibility and resident dirty flush remain deliberately unclaimed.
 
 Validation for this continuation:
 
@@ -204,3 +207,8 @@ Strict `sim-sm` and workspace Clippy remain red on pre-existing error-size,
 argument-count and complexity findings; the changed `sim-arch`, `sim-engine`
 and writeback library targets are clean under their focused `-D warnings`
 checks.
+
+The follow-up native writeback checks additionally passed the synthetic
+single-way dirty-eviction system case, direct `sim-run` carded read/write
+equivalence on the retained SM86 canary, and release CLI execution with an
+explicit writeback capacity. No large external simulator workload was run.

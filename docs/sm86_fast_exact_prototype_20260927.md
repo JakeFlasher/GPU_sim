@@ -170,12 +170,14 @@ can be recovered from NVBit traces.
 ## Bounded dirty writeback seam
 
 `sim-mem::writeback::WritebackQueue` consumes the exact dirty/valid/pending
-sector masks already exposed by `L2Eviction`. It performs transactional queue
-capacity checks, fixed-point byte-server timing, same-line fetch-hazard
-tracking and explicit token completions. This is the smallest executable
-mechanism that can be validated without inventing a coherence protocol. It is
-not wired into the native SM86 event loop yet, and therefore does not close
-hardware writeback, ownership or visibility completion.
+sector masks already exposed by `L2Eviction`. With explicit
+`--dirty-writeback-capacity-sectors N`, native launch replay performs
+transactional queue-capacity checks, shared fixed-point byte-server timing for
+read fetches and dirty writebacks, same-line fetch-hazard tracking and explicit
+token completions. The default carded path is unchanged. This is the smallest
+executable mechanism that can be validated without inventing a coherence
+protocol; ownership, visibility and resident dirty flush completion remain
+open.
 
 ## Bounded functional compiler seam
 

@@ -31,6 +31,13 @@ sim/target/release/sim-run \
   --trace TRACE_DIR --control CONTROL_BITS.json \
   --arch-card arch_profiles/cards/sm_86.json \
   --mode flat --fast-frontier-only
+
+# Opt-in bounded dirty-sector writeback; default carded replay is unchanged.
+sim/target/release/sim-run \
+  --trace TRACE_DIR --control CONTROL_BITS.json \
+  --arch-card arch_profiles/cards/sm_86.json \
+  --pchase-card PCHASE_CARD.json --mode l1-l2 --carded-dram \
+  --dirty-writeback-capacity-sectors 64
 ```
 
 The last output is validated against

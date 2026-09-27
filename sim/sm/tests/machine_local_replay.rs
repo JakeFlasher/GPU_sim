@@ -104,6 +104,18 @@ fn replay_configuration_json(configuration: ReplayConfiguration) -> serde_json::
                     "bytes_per_sec": bytes_per_sec,
                     "sm_clock_hz": sm_clock_hz,
                 }),
+                sim_sm::DramBw::CardedWriteback {
+                    arch,
+                    bytes_per_sec,
+                    sm_clock_hz,
+                    capacity_sectors,
+                } => serde_json::json!({
+                    "kind": "carded_writeback",
+                    "arch": arch.token(),
+                    "bytes_per_sec": bytes_per_sec,
+                    "sm_clock_hz": sm_clock_hz,
+                    "capacity_sectors": capacity_sectors,
+                }),
             };
             serde_json::json!({
                 "kind": "l1_shared_l2",

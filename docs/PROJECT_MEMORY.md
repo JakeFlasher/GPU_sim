@@ -33,13 +33,14 @@ records. Do not load every linked report. Root [AGENTS.md](../AGENTS.md) is poli
   initiation interval and in-flight capacity, and reports the concrete choice;
   this is not native SM86 physical-pipe attribution.
 - `sim-mem::writeback` provides an opt-in dirty-sector queue primitive with
-  transactional capacity/timing preflight, fixed-point byte service,
-  same-line fetch hazards and tokenized completion. It is not yet integrated
-  into native replay and does not model coherence ownership/visibility.
+  transactional capacity/timing preflight, fixed-point shared read/write
+  service, same-line fetch hazards and tokenized completion. Native launch
+  replay enables it only through explicit `--dirty-writeback-capacity-sectors`;
+  coherence ownership/visibility and resident dirty flush remain tails.
 
 ## Do not repeat earlier overclaims
 
-- The four native gaps are **not closed**: scheduled writeback/coherence,
+- The four native gaps are **not closed**: coherence/resident dirty flush,
   timed physical-pipe selection, value-dependent SASS regeneration, and a
   general ISA/compiler. The user accepted bounded models and requested compiler
   alternatives; current heuristics are not full models of those mechanisms.
@@ -55,8 +56,8 @@ records. Do not load every linked report. Root [AGENTS.md](../AGENTS.md) is poli
 
 Use the PhaseFuse fast lane to gather refusal/certificate populations, the
 bounded PTX subset for value-dependent functional studies, and the custom route
-contract for controlled scheduling experiments. Integrate the writeback queue
-only after a native event/config seam is independently validated; then add
+contract for controlled scheduling experiments. Extend the opt-in writeback
+queue only after native event/config evidence is independently validated; then add
 state-complete summaries only for one mechanism at a time; extend the ITS
 trace schema and reconvergence-successor semantics with further independent
 input-varying cases; use same-domain, content-bound independent captures for

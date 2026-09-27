@@ -94,8 +94,11 @@ not a CUDA compiler, PTX ABI/linker, assembler for SASS, or timing frontend.
 mechanism seam. It accepts exact `L2Eviction` masks, rejects dirty/pending
 overlap, preflights finite dirty-sector capacity, prices a deterministic
 fixed-point byte service, tracks same-line fetch hazards, and requires a
-tokenized completion acknowledgement. It is reusable executable evidence, not
-native replay completion and not a coherence directory; the native event-loop
-integration remains an explicit follow-up.
+tokenized completion acknowledgement. `sim-run --mode l1-l2 --carded-dram
+--dirty-writeback-capacity-sectors N` enables this queue for one launch and
+uses the same opt-in byte server for read fetches and dirty writebacks. The
+default carded path is unchanged. Completion counters/frontier are reported
+separately from read traffic. This remains a bounded model, not a coherence
+directory or a claim about resident dirty flush/ownership visibility.
 
 Runnable smoke commands and schema validation are in [testing](testing.md).

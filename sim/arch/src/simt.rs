@@ -605,6 +605,8 @@ impl<'a> SimtTimingExecutor<'a> {
             ));
         }
         let tasks = crate::simt_pipeline::tasks(self.spec, self.program)?;
+        let mut resource_next = vec![0_u64; self.spec.resources().len()];
+        let mut pending = vec![Vec::<u64>::new(); self.spec.resources().len()];
         for (index, (task, interval)) in tasks.iter().zip(intervals).enumerate() {
             if interval.complete < interval.start
                 || interval.start < index as u64
@@ -651,6 +653,25 @@ impl<'a> SimtTimingExecutor<'a> {
                     .and_then(|value| value.checked_add(1))
                     .ok_or(SimtError::CycleOverflow)?;
                 let latency = config.latency_cycles().ok_or(SimtError::UnknownLatency)?;
+                if interval.start < resource_next[resource] {
+                    return Err(SimtError::InvalidProgram(
+                        "timing schedule violates resource initiation order",
+                    ));
+                }
+                pending[resource].retain(|complete| *complete > interval.start);
+                if config
+                    .max_in_flight()
+                    .is_some_and(|capacity| pending[resource].len() >= capacity as usize)
+                {
+                    return Err(SimtError::InvalidProgram(
+                        "timing schedule violates resource in-flight capacity",
+                    ));
+                }
+                resource_next[resource] = interval
+                    .start
+                    .checked_add(service)
+                    .ok_or(SimtError::CycleOverflow)?;
+                pending[resource].push(interval.complete);
                 interval
                     .start
                     .checked_add(last_beat_end)

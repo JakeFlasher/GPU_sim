@@ -13,7 +13,7 @@ research is complete. Start with [memory](PROJECT_MEMORY.md); use
 | Custom `simt_u32_v1` | Dependency/resource overlap, resident groups, separate global/shared words, atomic add, broadcast/reduction, bounded CTA barriers | Fixed ISA; no general compiler, weak memory or native cache timing |
 | Custom `simt_its_v1` | Per-lane PCs/predicates, reconvergence, indirect loads/stores, optional versioned execution trace | Single group, functional only; not native SASS regeneration |
 | `ptx_subset_v1` frontend | Bounded text-to-`simt_its_v1` compiler for lane ID, integer arithmetic, predicates, labels, indirect u32 load/store, exit | Functional subset only; no ABI, calls, atomics, vector types, arbitrary PTX or SASS |
-| Dirty-sector writeback queue | Transactional capacity/timing preflight, fixed-point byte service, same-line fetch hazard, tokenized completion in `sim-mem` | Reusable mechanism primitive only; not wired into native SM86 replay or coherence ownership |
+| Dirty-sector writeback queue | Explicit `--dirty-writeback-capacity-sectors` native SM86 launch path; shared read/write fixed-point service, transactional eviction admission, same-line hazard, tokenized completion | Opt-in bounded model; coherence ownership/visibility and resident dirty flush semantics remain tails |
 | PhaseFuse fast frontier | Trace-derived scalar-region certificate/refusal report via `sim-run --fast-frontier-only` | Conservative analysis only; skips native timing and cannot certify memory, barriers, dynamic pipes or silicon |
 
 Custom barriers require matching lengths/positions/IDs, one use per ID, and
@@ -76,7 +76,7 @@ launches fail explicitly (`graph_node_capture_unsupported`).
 
 ## Open work and scope
 
-Native scheduled writeback/visibility/coherence integration, native physical-pipe routing,
+Native coherence/visibility and resident dirty-flush integration, native physical-pipe routing,
 execution-driven SASS regeneration, same-domain independent timing/cache
 validation, and general compiler/ISA support remain open. Their absence is not
 a proof of impossibility. A bounded `ptx_subset_v1` functional frontend and

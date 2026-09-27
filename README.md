@@ -46,9 +46,10 @@ cargo run --manifest-path sim/Cargo.toml -p sim-sm --bin custom-program-run -- \
 
 The custom example produces model-relative timing, not a hardware prediction.
 Instruction-count mappings exist for retained SM86 examples; native elapsed
-timing, writeback/coherence completion, physical-pipe attribution and
-independent evaluation remain open. The bounded writeback queue, route
-alternatives and PTX subset are executable seams, not silicon claims.
+timing, coherence ownership/visibility, resident dirty flush, physical-pipe
+attribution and independent evaluation remain open. The opt-in bounded
+writeback queue, route alternatives and PTX subset are executable seams, not
+silicon claims.
 [Diagnostics](docs/experimental_diagnostics.md) records these limits.
 No fair full numerical Accel-Sim/MGPUSim comparison has been established.
 

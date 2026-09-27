@@ -88,6 +88,12 @@ impl PreparedReplay {
         config: &RunConfig,
         coverage_admission: CoverageAdmission,
     ) -> Result<Self, RunError> {
+        if config.dirty_writeback_capacity_sectors.is_some() {
+            return Err(RunError::new(
+                "prepared replay",
+                "dirty writeback requires the ordinary launch replay path",
+            ));
+        }
         require_launch_cold_ordinary(config)?;
         if coverage_admission == CoverageAdmission::FullOnlyNoSamplingDeclaration {
             reject_sampling_declarations(&config.trace_dir)?;
@@ -283,6 +289,7 @@ impl PreparedReplay {
             memory_mode: self.memory_mode,
             cache_scope: CacheScope::Launch.token(),
             carded_dram_bandwidth: self.carded_dram_bandwidth,
+            dirty_writeback_capacity_sectors: None,
             fast_frontier_only: false,
             hypothetical_issue_ports: self.hypothetical_issue_ports,
             architecture_spec: self.architecture_spec.clone(),
@@ -390,6 +397,7 @@ mod tests {
             memory_mode: MemoryMode::L1L2,
             cache_scope: CacheScope::Launch,
             carded_dram_bandwidth: false,
+            dirty_writeback_capacity_sectors: None,
             hypothetical_issue_ports: None,
             architecture_spec: None,
             kernel_id: None,

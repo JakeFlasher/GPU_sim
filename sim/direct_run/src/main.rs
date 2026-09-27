@@ -10,6 +10,7 @@ use sim_direct_run::{CacheScope, MemoryMode, RunConfig, RunError, run};
 const USAGE: &str = "Usage: sim-run --trace DIR --control FILE --arch-card FILE \
 [--pchase-card FILE] [--mode flat|l1|l1-l2] \
 [--cache-scope launch|stream-l2] [--carded-dram] [--kernel-id ID] \
+[--dirty-writeback-capacity-sectors N] \
 [--hypothetical-issue-ports N] \
 [--architecture-spec FILE] \
 [--fast-frontier-only] \
@@ -46,6 +47,7 @@ fn parse_args(args: impl IntoIterator<Item = OsString>) -> Result<Option<RunConf
     let mut memory_mode = MemoryMode::Flat;
     let mut cache_scope = CacheScope::Launch;
     let mut carded_dram_bandwidth = false;
+    let mut dirty_writeback_capacity_sectors = None;
     let mut hypothetical_issue_ports = None;
     let mut architecture_spec = None;
     let mut fast_frontier_only = false;
@@ -91,6 +93,28 @@ fn parse_args(args: impl IntoIterator<Item = OsString>) -> Result<Option<RunConf
             }
             value if value == OsStr::new("--carded-dram") => {
                 carded_dram_bandwidth = true;
+            }
+            value if value == OsStr::new("--dirty-writeback-capacity-sectors") => {
+                let raw = take_value(&mut args, "--dirty-writeback-capacity-sectors")?;
+                let raw = raw.to_str().ok_or_else(|| {
+                    RunError::new(
+                        "arguments",
+                        "--dirty-writeback-capacity-sectors must be UTF-8",
+                    )
+                })?;
+                let capacity = raw.parse::<u32>().map_err(|error| {
+                    RunError::new(
+                        "arguments",
+                        format!("invalid --dirty-writeback-capacity-sectors {raw:?}: {error}"),
+                    )
+                })?;
+                if capacity == 0 {
+                    return Err(RunError::new(
+                        "arguments",
+                        "--dirty-writeback-capacity-sectors must be positive",
+                    ));
+                }
+                dirty_writeback_capacity_sectors = Some(capacity);
             }
             value if value == OsStr::new("--kernel-id") => {
                 let raw = take_value(&mut args, "--kernel-id")?;
@@ -185,6 +209,7 @@ fn parse_args(args: impl IntoIterator<Item = OsString>) -> Result<Option<RunConf
         memory_mode,
         cache_scope,
         carded_dram_bandwidth,
+        dirty_writeback_capacity_sectors,
         hypothetical_issue_ports,
         architecture_spec,
         kernel_id,
@@ -426,5 +451,34 @@ mod tests {
             parsed.memory_admission_feedback,
             Some(PathBuf::from("feedback.json"))
         );
+    }
+
+    #[test]
+    fn dirty_writeback_capacity_path_is_explicit_and_bounded() {
+        let parsed = parse_args([
+            OsString::from("--trace"),
+            OsString::from("trace"),
+            OsString::from("--control"),
+            OsString::from("control"),
+            OsString::from("--arch-card"),
+            OsString::from("card"),
+            OsString::from("--dirty-writeback-capacity-sectors"),
+            OsString::from("4"),
+        ])
+        .unwrap()
+        .unwrap();
+        assert_eq!(parsed.dirty_writeback_capacity_sectors, Some(4));
+        let error = parse_args([
+            OsString::from("--trace"),
+            OsString::from("trace"),
+            OsString::from("--control"),
+            OsString::from("control"),
+            OsString::from("--arch-card"),
+            OsString::from("card"),
+            OsString::from("--dirty-writeback-capacity-sectors"),
+            OsString::from("0"),
+        ])
+        .expect_err("zero capacity must fail at argument parsing");
+        assert_eq!(error.stage(), "arguments");
     }
 }

@@ -72,4 +72,6 @@ pub use pchase_card::{
     GeometryPolicyConfig, LatencyConfig, LineCapacityConfig, MshrConfig, PchaseCard,
     PchaseCardError, WalkGeometry,
 };
-pub use writeback::{WritebackCompletion, WritebackError, WritebackPlan, WritebackQueue};
+pub use writeback::{
+    ServicePlan, ServiceRequest, WritebackCompletion, WritebackError, WritebackPlan, WritebackQueue,
+};
