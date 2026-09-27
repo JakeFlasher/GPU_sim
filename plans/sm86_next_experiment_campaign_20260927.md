@@ -68,6 +68,8 @@ and failure reason. No silent drops.
 | E6 | PhaseFuse accounting/scaling | Generated traces at 1K/10K/100K records; detailed vs fast | Report planner-inclusive wall/RSS and actual per-op work; no asymptotic speed claim from collapsed counters |
 | E7 | Route/PTX malformed-input matrix | Overflowing alternate route, zero work, malformed punctuation/entry/exit, atomic temp sentinel | Typed rejection; valid fixtures preserve outputs; default scalar route unchanged |
 | E8 | Default-off differential | Flat, carded, writeback-disabled, coherence-disabled replay on retained canary | Timing/counters/frontiers byte-identical except explicitly additive omitted fields |
+| E9 | Architecture-decision stability | Frozen cache/issue/occupancy/memory interventions and detailed reference ranking | Kendall/Spearman and top-k agreement reported; no NCU-driven selection |
+| E10 | Matched microtrace baseline | Small compatible Accel-Sim/GPGPU-Sim subset, or capability-mismatch record | Numeric comparison only when frontend/ISA/domain match; otherwise explicit mismatch |
 
 Recommended bounded commands:
 
@@ -80,6 +82,39 @@ cargo clippy --manifest-path sim/Cargo.toml -p sim-engine --all-targets -- -D wa
 cargo clippy --manifest-path sim/Cargo.toml -p sim-mem --lib -- -D warnings
 /usr/bin/time -v sim/target/release/sim-run ...
 ```
+
+### PhaseFuse-specific protocol
+
+The fast lane is not accepted on final-cycle equality alone. Use the causal
+frontier API and the fast producer with deterministic small descriptors:
+
+1. **Complete residency:** two CTAs on one SM/SMSP, full flattened roster,
+   block-only roster, unknown roster, extra stalled warp, slot reuse and
+   population-change boundaries. A certificate with an omitted co-resident CTA
+   is a false certificate.
+2. **Incoming pipeline state:** pending work at `start-1`, exactly `start`, a
+   different pipe, multiple pending completions, and sibling-CTA work. Compare
+   every issue/completion observation and terminal state.
+3. **Register dependencies:** SASS RAW, WAW, predicate and 64-bit-span pairs
+   with clean control bits. Use native scoreboard/readiness as the oracle;
+   unknown register provenance must refuse rather than certify.
+4. **Negative sweep:** up to 256 seeded descriptors covering stalls, yields,
+   reuse, barriers, async copy, completion units, unknown timing, duplicate
+   residents, equal-time ordering and near-overflow arithmetic. Every refusal
+   needs a mechanism-specific reason.
+5. **Risk coverage:** publish candidate/certified/reified/collapsed counts and
+   reason histograms by mechanism. A generic refusal bucket must not hide a
+   known risk class.
+6. **Planner-inclusive scaling:** N={1k,2k,4k,8k,16k,32k,64k}, 1–4 SMSPs,
+   region lengths 1/2/8/64, five repetitions, `/usr/bin/time -v`, wall/user/sys
+   time and peak RSS. Measure sorted and shuffled inputs separately because the
+   current canonicalization sort is O(N log N). Never call collapsed event
+   counts a speedup.
+
+Acceptance requires zero false certificates, complete residency and register
+evidence, exact terminal-state equality for every certificate, and measured
+planner-inclusive scaling. High refusal is acceptable; silent candidate loss is
+not.
 
 ## Phase 2 — independent SM86 holdout (requires RTX 3090 Ti + NCU)
 
