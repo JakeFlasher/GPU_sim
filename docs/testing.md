@@ -47,7 +47,7 @@ sim/target/release/sim-run \
   --coherence-service-cycles 2 --coherence-capacity-sectors 64
 ```
 
-The last output is validated against
+The custom ITS output above is validated against
 `arch_profiles/schema/simt_its_trace.schema.json`. A retained native canary or
 representative SM86 trace should still be replayed with a bounded timeout after
 native metric changes. Do not treat the schema check as proof of native replay
@@ -152,6 +152,21 @@ This path records device identity, NVBit trace, NCU report/CSV, replay input
 hashes and a comparison CSV. It is deliberately non-scoring unless clocks,
 metric domains, and dirty-flush/ownership contracts are independently closed;
 see [the holdout report](sm86_independent_holdout_20260927.md).
+
+The strict tiny external-input probe is exercised without a large simulator:
+
+```bash
+PYTHONPATH=. .venv/bin/python -m tools.traceg_adapter_probe.adapter \
+  --trace DYNAMIC_TRACE.pb --threadblock ONE_BLOCK.pb \
+  --sidecar ENHANCED_EXECUTION_INFO.json --out-dir /tmp/traceg_probe \
+  --allow-eof
+.venv/bin/python -m pytest tools/traceg_adapter_probe/test_adapter.py -q
+```
+
+`--allow-eof` emits a parser-only non-scoring artifact; explicit `EXIT` is
+required for any future common-endpoint timing attempt. Unsupported opcodes,
+register files, masks, address encodings and missing joins return typed
+refusals.
 
 Do not add hash/seal, receipt, reviewer, freeze, or mandatory test-pyramid
 machinery around the simulator. Retained manifests/checksums are data formats,

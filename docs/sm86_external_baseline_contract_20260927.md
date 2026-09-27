@@ -217,8 +217,9 @@ close the *capability decision*, not manufacture a score.
 
 ### E10A — strict protobuf-to-`.traceg` adapter and round trip
 
-Create a temporary converter outside the simulator core (or a campaign tool)
-with these admission conditions:
+The bounded probe is implemented outside the simulator core at
+`tools/traceg_adapter_probe/adapter.py` (schema
+`sm86_traceg_adapter_probe_v1`) with these admission conditions:
 
 1. One exact-full SM86 launch, one CTA, one warp, and at most 64 dynamic records.
 2. Every dynamic `(function_unique_id, vpc)` joins exactly once to the
@@ -247,6 +248,21 @@ record:
 Acceptance is byte-stable canonical equality and zero refused records after the
 preconditions. This is a T0/T1 adapter result; it says nothing about timing
 accuracy.
+
+The synthetic common-subset fixture passed this round trip for three full-mask
+`IADD3` records plus an explicit `EXIT`:
+
+```text
+schema: sm86_traceg_adapter_probe_v1
+record_count: 3
+termination: explicit_exit
+traceg_sha256: 9c29c7b623e51c6b7e87b5c455883bd2eec628a55e66c836412b2ff16f7bc136
+kernelslist_sha256: beb03d46bd1f5a6c20fdb34aaaeed37de3fc31e5010ff2c5657a7778e3e9a40c
+```
+
+Running the same probe against the first real SM86 holdout records refused at
+record 0 with `unsupported_opcode` (`IMAD.MOV.U32`), as required by the strict
+common-subset contract. This is a typed refusal, not silent opcode mapping.
 
 ### E10B — MGPUSim parser-only check
 
@@ -303,8 +319,8 @@ upgrade E10 from feasibility to a numeric baseline.
 | MGPUSim is an SM86 baseline. | No. | Public NVIDIA platform is H100/A100 only and timings are explicitly experimental. |
 | FlashGPU-Sim's RTX5090/H100 results validate SM86. | No. | Different maintained architectures and NCU metric domain. |
 | Vortex/OpenVADL demonstrate arbitrary NVIDIA ISA/compiler generation. | No. | Vortex is RISC-V; compiler/ISA extensibility is a reference direction, not an NVIDIA adapter. |
-| A tiny, common-subset parser/trace experiment is feasible. | Yes, pending E10A implementation. | One-CTA/one-warp contract above; no large simulation required. |
+| A tiny, common-subset parser/trace experiment is feasible. | Yes, T1 parser/round-trip probe implemented; real holdout outside subset refuses. | One-CTA/one-warp contract above; no large simulation required. |
 
-Until E10A--E10C either pass with a declared common endpoint or produce the
-explicit mismatch record, keep `E10` in the campaign ledger as
-`capability_match_open`; never replace it with a synthetic cycle score.
+E10A is complete as a parser/round-trip capability result; E10B parser
+integration and any common-endpoint timing comparison remain open. Keep `E10`
+non-scoring and never replace it with a synthetic cycle score.

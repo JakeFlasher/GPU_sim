@@ -15,12 +15,27 @@ Driver: 615.71.09
 Observed clocks before campaign: 210 MHz SM, 405 MHz memory
 CUDA: 13.4.92
 Nsight Compute: 2026.1.0.0
-Repository revision: e9d750f6e21373659186013a50f9f595d30d9a3b
+Capture/replay repository revision at measurement time:
+`e9d750f6e21373659186013a50f9f595d30d9a3b`
 ```
 
 The clocks were **not locked**, so these measurements are not used for an
 elapsed-time accuracy claim. The device/driver tuple is recorded to prevent
 confusing this capture with the older development corpus.
+
+The prerequisite audit confirms why a locked repeat was not attempted: the
+current user has no passwordless administrative privilege (`sudo -n true` is
+not available), `nvidia-smi -rgc` and `-rmc` refuse clock changes with a
+permission error, and `nvidia-smi -lmci` reports runtime memory-clock
+switching. This is a typed environment blocker, not a silently relaxed clock
+policy.
+
+The prerequisite probe is preserved at
+`results/captures/sm86_locked_clock_prerequisite_20260927_v1/` (ignored local
+capture): host-state SHA-256 `dac85e57475671c7374fa795bdf93b6f0a364772e45063037cc114ec35d35254`,
+timestamp SHA-256 `6a2b426c1b807f1bd59c64d524f774455ae53764f51c86526a6ceadb36467a9c`,
+and permission-probe SHA-256
+`fab7d2019102e13f1c664a5e23189e716da473ead02600d031f79e295ede7ea6`.
 
 Raw ignored campaign directories (preserved locally) are:
 

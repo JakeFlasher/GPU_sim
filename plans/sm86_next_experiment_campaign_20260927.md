@@ -1,9 +1,10 @@
 # SM86 next-experiment campaign
 
 Updated 2026-09-27 after the adversarial code/scientific/publication review of
-`9614f62b`. This is a technical experiment plan, not a workflow gate. Root
-`AGENTS.md` remains policy. No large Accel-Sim/MGPUSim workload is required for
-the local phases.
+`9614f62b`; bounded correctness and holdout follow-ups landed in `e9d750f6`
+and `506c6d6e`. This is a technical experiment plan, not a workflow gate.
+Root `AGENTS.md` remains policy. No large Accel-Sim/MGPUSim workload is
+required for the local phases.
 
 ## Latest bounded progress (2026-09-27)
 
@@ -14,17 +15,18 @@ publish only at completion; unrelated zero-service lines avoid global
 head-of-line delay; DRAM read/writeback service is independent of coherence;
 service-only events are excluded from the SM-active terminal frontier; and
 PhaseFuse requires a complete traced-SM roster plus static register RAW/WAW
-evidence. The local E0/E1/E2/E3/E4/E7/E8 checks below are now executable in
+evidence. The local E0/E1/E2/E3/E4/E5/E7/E8 checks below are now executable in
 bounded Rust/fixture tests, including a synthetic final service-only tail for
 E4. A descriptor-only E6 scale probe now covers the full 112-case
 sorted/shuffled N=1k..64k × region/residency matrix with child RSS;
 compact-trace parsing-inclusive scaling remains open. Independent SM86/NCU
 progress now includes a fresh 13-case one-block/one-warp counter holdout with
 content-bound trace/NCU/replay artifacts; unlocked clocks and DRAM-domain
-mismatch keep it non-scoring for timing. E10 now has a pinned capability audit
-and a three-record Accel-Sim executable compatibility smoke, not a numeric
-baseline. Full locked-clock timing/cache holdouts and a strict protobuf-to-
-`.traceg` adapter remain open and must not be represented by these results.
+mismatch keep it non-scoring for timing. E10 now has a pinned capability audit,
+a strict parser/round-trip probe, and a three-record Accel-Sim executable
+compatibility smoke, not a numeric baseline. Full locked-clock timing/cache
+holdouts and E10B parser integration/common-endpoint scoring remain open and
+must not be represented by these results.
 The reproducible local ledger is [SM86 bounded next-experiment results](../docs/sm86_next_experiment_results_20260927.md).
 
 ## Claim tiers
@@ -39,8 +41,9 @@ Do not merge these tiers in one headline:
 | T3 | SOTA comparison | Matched traces/workloads/frontends, versions/configurations, cycle/counter/wall/RSS results |
 | T4 | Architecture decisions | Frozen interventions, detailed/native reference ranking stability and confidence intervals |
 
-The current repository has T0 evidence and bounded T1 seams. It does **not**
-yet have T2--T4 evidence.
+The current repository has T0 evidence and bounded T1 seams. The 13-case
+holdout is narrow T2 counter-contract evidence only; it is not T2 timing/cache
+accuracy. The repository does not yet have full T2, T3, or T4 evidence.
 
 ## Phase 0 — correctness blockers before scoring
 

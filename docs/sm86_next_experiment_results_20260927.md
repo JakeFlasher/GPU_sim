@@ -2,9 +2,10 @@
 
 Updated 2026-09-27. This is the local Phase-0/Phase-1 evidence ledger for
 [`plans/sm86_next_experiment_campaign_20260927.md`](../plans/sm86_next_experiment_campaign_20260927.md).
-It contains no independent RTX 3090 Ti/NCU holdout and no full external
-simulator run. Counts below are implementation/litmus evidence, not silicon
-accuracy.
+It includes a bounded independent RTX 3090 Ti/NCU counter holdout and a tiny
+external compatibility smoke, but no locked-clock timing/cache score and no
+full external simulator run. Counts below are implementation/litmus evidence
+or explicitly non-scoring counter evidence, not silicon timing accuracy.
 
 ## Input identity and environment
 
@@ -32,7 +33,7 @@ accuracy.
 | E7 | Route/PTX malformed-input matrix | 55 route tests, 75 arch tests, 21 engine tests pass | 0 new failures | focused Cargo tests |
 | E8 | Default-off differential | retained carded vs dirty-writeback canary launch objects | all launch counters/timing/metrics byte-identical; only top-level opt-in field differs | launch SHA `7be451161ab6e5a7a558e526534d5669a06acf38d2f7a9c3d04ff73b6792e453` |
 | E9 | Independent NCU holdout | 13 fresh one-block/one-warp SM86 cases; instruction, store, atomic and reduction counters match NCU | timing/cache score refused: clocks unlocked, DRAM domains differ, no dirty flush completion | [`sm86_independent_holdout_20260927.md`](sm86_independent_holdout_20260927.md) |
-| E10 | Matched external microtrace | pinned capability audit plus three-record Accel-Sim smoke (`gpu_tot_sim_cycle=5024`, `gpu_tot_sim_insn=96`, one CTA) | T1 executable compatibility only; no common SM86/NCU timing cell | [`sm86_external_baseline_contract_20260927.md`](sm86_external_baseline_contract_20260927.md) |
+| E10 | Matched external microtrace | strict `sm86_traceg_adapter_probe_v1` round-trip passes a three-record full-mask fixture; real holdout refuses unsupported opcode; Accel-Sim smoke reports 5,024 cycles/96 instructions | T1 parser/executable compatibility only; no common SM86/NCU timing cell | [`sm86_external_baseline_contract_20260927.md`](sm86_external_baseline_contract_20260927.md) |
 
 ## Fast-only retained traces
 

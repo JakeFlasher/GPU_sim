@@ -12,7 +12,7 @@ Read one entry point, then the relevant contract. Dated reports are opt-in.
 | Diagnostic formulas and ITS trace limits | [Experimental diagnostics](experimental_diagnostics.md) |
 | Fast SM86 research prototype and SOTA study | [PhaseFuse](sm86_fast_exact_prototype_20260927.md) |
 | Focused validation | [Testing](testing.md) |
-| Design choices and alternatives | [Roadmap](../plans/cross_architecture_gpu_simulator_research_plan_20260923.md), [SOTA options](sm86_sota_simulator_options_20260926.md) |
+| Design choices and alternatives | [Experiment campaign](../plans/sm86_next_experiment_campaign_20260927.md), [roadmap](../plans/cross_architecture_gpu_simulator_research_plan_20260923.md), [SOTA options](sm86_sota_simulator_options_20260926.md) |
 | Dated measurements, prior reviews and session corrections | [HISTORY](HISTORY.md) |
 | Retained archived experiments | [Archive](archive/README.md) |
 | SOL/campaign work, only when requested | [SOL overview](sol-execbench.md) |

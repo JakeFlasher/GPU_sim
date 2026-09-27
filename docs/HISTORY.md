@@ -9,9 +9,10 @@ to load and which claims not to revive.
 ## Current consolidation baseline
 
 * Repository: `/home/jakeshea/GPU_simulator_rebase`, branch `GPUSim_main`.
-* Code/evidence baseline before this continuation: commit `2d761986`
-  (`Add PhaseFuse fast SM86 frontier lane`); the working tree then contained
-  the bounded route/compiler and documentation changes under review.
+* The bounded-campaign continuation is represented by commits `9614f62b`,
+  `e9d750f6`, and `506c6d6e`; inspect `HEAD` for the current tip. Commit
+  `2d761986` is the earlier PhaseFuse starting point, not the current evidence
+  baseline.
 * Active source of truth: `AGENTS.md` -> `docs/PROJECT_MEMORY.md` ->
   `docs/STATUS.md` -> the narrow source/runbook needed by the task.
 * Current scope: software architectural replay anchored on SM86/RTX 3090 Ti,
@@ -35,7 +36,8 @@ Reports named with `YYYYMMDD` are retained observations. They may contain
 development counters, old paths, or superseded interpretations. Prefer the
 current summaries above; only open a dated report when its row is needed.
 
-* `sm86_measurement_boundary*`, `sm86_metric_*`, `sm86_full_metric_holdout*`:
+* `sm86_measurement_boundary*`, `sm86_metric_*`, `sm86_full_metric_holdout*`,
+  `sm86_independent_holdout_20260927.md`:
   SM86/NCU mappings and metric-domain evidence.
 * `sm86_writeback_experiment*`, `sm86_coherence_domain*`,
   `sm86_memory_topology*`, `sm86_*completion_model*`:
@@ -51,16 +53,17 @@ current summaries above; only open a dated report when its row is needed.
 
 ## Plans and historical context
 
-`plans/cross_architecture_gpu_simulator_research_plan_20260923.md` is the only
-active roadmap. The other plans are historical context for acceleration,
-heterogeneous/AMD ideas, old baseline campaigns, or typed-L2/power proposals;
-they do not create implementation obligations. `docs/archive/` and retained
-SOL/campaign trees are preserved but inactive unless the user explicitly asks
-for them.
+`plans/sm86_next_experiment_campaign_20260927.md` is the active bounded
+experiment/acceptance plan; `plans/cross_architecture_gpu_simulator_research_plan_20260923.md`
+is the broader design roadmap. The other plans are historical context for
+acceleration, heterogeneous/AMD ideas, old baseline campaigns, or typed-L2/
+power proposals; they do not create implementation obligations. `docs/archive/`
+and retained SOL/campaign trees are preserved but inactive unless the user
+explicitly asks for them.
 
 ## Session/context cleanup
 
-The current Codex task is titled **SM86 documentation consolidation and
+The prior Codex task was titled **SM86 documentation consolidation and
 validated handoff**. Earlier GPU-simulator research sessions were renamed as
 historical context and should not be loaded by default. Raw Codex session
 records remain outside the repository and are not rewritten. The project-local
@@ -296,6 +299,9 @@ global-store, atomic and reduction counter populations matched; clocks were not
 locked and DRAM domains differed, so the result is non-scoring counter-contract
 evidence. Details and content identities are in
 [`docs/sm86_independent_holdout_20260927.md`](sm86_independent_holdout_20260927.md).
+The locked-clock follow-up is a typed prerequisite blocker: `sudo -n true` is
+unavailable and `nvidia-smi -rgc`/`-rmc` reject clock changes for this user, so
+no privileged clock modification was attempted.
 
 The matched-baseline audit also ran a three-record one-CTA Accel-Sim smoke
 (`gpu_tot_sim_cycle=5024`, `gpu_tot_sim_insn=96`, one CTA) after discovering
@@ -303,6 +309,9 @@ that legacy `.traceg` parsing requires an explicit `RZ`→`R255` normalization.
 This is a T1 executable compatibility datum, not an SM86/NCU timing score; the
 strict E10A–E10C adapter/refusal contract is in
 [`docs/sm86_external_baseline_contract_20260927.md`](sm86_external_baseline_contract_20260927.md).
+The strict `sm86_traceg_adapter_probe_v1` now round-trips a synthetic three-
+record full-mask `IADD3` fixture with explicit `EXIT` and refuses the real
+holdout's unsupported `IMAD.MOV.U32` at record 0.
 
 An adversarial PhaseFuse review found and corrected a P0 false-certificate
 path: sampled/multi-launch traces, non-full lane populations, multi-block or

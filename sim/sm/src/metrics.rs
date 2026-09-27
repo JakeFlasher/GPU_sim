@@ -1090,6 +1090,26 @@ mod tests {
     }
 
     #[test]
+    fn nonfull_lane_populations_are_observed_without_being_silently_full() {
+        let mut m = TraceMetrics::default();
+        m.observe_with_mask_presence(
+            "IADD3",
+            16,
+            8,
+            true,
+            true,
+            AccessKind::NonMemory,
+            crate::PipelineClass::DispatchOnly,
+            &[],
+        )
+        .unwrap();
+        assert_eq!(m.instructions.active_mask_nonfull_instructions, 1);
+        assert_eq!(m.instructions.predicate_mask_nonfull_instructions, 1);
+        assert_eq!(m.instructions.active_mask_missing_instructions, 0);
+        assert_eq!(m.instructions.predicate_mask_missing_instructions, 0);
+    }
+
+    #[test]
     fn memory_topology_separates_unique_lines_from_atomic_aliases() {
         let mut m = TraceMetrics::default();
         m.observe(

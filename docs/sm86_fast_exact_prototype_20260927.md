@@ -130,8 +130,10 @@ an approximation silently.
 
 ## Bounded evidence
 
-No external simulator was built or run. The local release fast lane was run on
-retained inputs only:
+No large external simulator workload was built or run. A three-record
+Accel-Sim compatibility smoke is recorded separately in
+[the external-baseline contract](sm86_external_baseline_contract_20260927.md).
+The local release fast lane was run on retained inputs only:
 
 | Input | Fast-only wall time | Result |
 | --- | ---: | --- |
