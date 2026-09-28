@@ -22,7 +22,7 @@ queries:
       - docs/gpu_simulator_research_positioning_20260923.md
     forbidden_behavior:
       - cites NVArchSim as 2012 instead of its HPCA 2021 publication
-      - treats literature context as a fair numerical cell
+      - treats literature aggregates as per-kernel ground truth or a same-card executable timing cell; the registered Accel-Sim aggregate ceilings/floors are a separate target lane
   - prompt: "what's the validation contract for our simulator"
     expected_skill: designing-gpu-simulator
     expected_cards:

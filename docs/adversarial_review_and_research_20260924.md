@@ -1,3 +1,5 @@
+
+> **2026-09-28 interpretation correction.** This dated report preserves its executable/overlap observations, but any `non-scoring`, `matched baseline`, or hardware-mismatch wording applies only to a direct executable cycle score. NCU on the local RTX 3090 Ti is detailed ground truth; published Accel-Sim aggregates are active accuracy-ceiling/throughput-speed-floor targets, registered in `docs/accelsim_literature_lower_bound_manifest_20260928.json`, not per-kernel ground truth.
 > Dated context; current capabilities and open work are in [STATUS](STATUS.md).
 > Historical completion claims and next-step prose are not active instructions.
 
@@ -49,7 +51,9 @@ declared scope:
    ALU/memory overlap, enforces producer readiness, tracks initiation interval
    and in-flight capacity, and emits completion events.
 
-The fair numerical Accel-Sim/MGPUSim comparison remains intentionally deferred.
+The fair **direct executable-cycle** Accel-Sim/MGPUSim comparison remains
+intentionally deferred. The published Accel-Sim aggregate floor lane is active
+through the 2026-09-28 manifest and local NCU ground truth.
 
 ## What the review found
 

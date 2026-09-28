@@ -1,4 +1,4 @@
-//! Compile the bounded `ptx_subset_v1` source frontend into a simt_its_v1 JSON
+//! Compile the bounded `ptx_subset_v2` source frontend into a simt_its_v1 JSON
 //! program. This is a functional lowering seam, not an assembler, CUDA
 //! compiler, or native SASS generator.
 use std::collections::BTreeMap;

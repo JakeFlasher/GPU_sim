@@ -162,7 +162,10 @@ Before claiming a publishable breakthrough, PhaseFuse needs:
 * a producer that supplies complete boundary state at every candidate edge;
 * planner-inclusive wall time and peak memory, not only collapsed event counts;
 * same-domain independent NCU validation of deterministic counters and timing
-  envelopes, with NCU never entering replay decisions;
+  envelopes, with NCU never entering replay decisions; evaluate the separate
+  Accel-Sim literature accuracy ceilings/throughput-speed floors from
+  `accelsim_literature_lower_bound_manifest_20260928.json` without treating
+  them as per-kernel truth;
 * architecture-decision stability across cache, issue, occupancy and memory
   interventions; and
 * explicit fallback rates. A high refusal rate is preferable to a false exact
@@ -211,9 +214,10 @@ reconstruction.
 
 ## Bounded functional compiler seam
 
-`ptx_subset_compile` lowers `ptx_subset_v1` text into a validated
+`ptx_subset_compile` lowers `ptx_subset_v2` text into a validated
 `simt_its_v1` JSON program. It supports lane ID, integer add/multiply,
-less-than predicates, direct labels, indirect u32 loads/stores and exit. It
-rejects calls, ABI sequences, negated predication, atomics, vector types,
-unknown memory semantics and arbitrary PTX. This makes value-dependent CFG
+less-than predicates, direct labels, indirect u32 loads/stores, deterministic
+functional indirect atomic-add, and exit. It rejects calls, ABI sequences,
+negated predication, fences/memory-model forms, vector types, unknown memory
+semantics and arbitrary PTX. This makes value-dependent CFG
 experiments reproducible without implying CUDA/PTX/SASS compatibility.

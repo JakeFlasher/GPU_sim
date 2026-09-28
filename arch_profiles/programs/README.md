@@ -101,7 +101,8 @@ silicon timing model. The opt-in output is versioned by
 
 `ptx_subset_compile` provides a deliberately bounded text-to-`simt_its_v1`
 frontend for `mov %laneid`, integer add/multiply, compare-less-than, direct
-branch labels, indirect u32 load/store, and exit. For example:
+branch labels, indirect u32 load/store, deterministic indirect atomic-add,
+and exit. For example:
 
 ```bash
 cargo run --manifest-path sim/Cargo.toml -p sim-arch --bin ptx_subset_compile -- \
@@ -109,6 +110,7 @@ cargo run --manifest-path sim/Cargo.toml -p sim-arch --bin ptx_subset_compile --
 ```
 
 This is a functional compiler/assembler seam only: calls, ABI, negated
-predicates, atomics, vector types, arbitrary PTX, and native SASS generation
-are rejected rather than guessed. The contract is `ptx_subset_v1` and remains
+predicates, fences/memory-model forms, vector types, arbitrary PTX, and native
+SASS generation are rejected rather than guessed. Deterministic functional
+indirect atomic-add is admitted. The contract is `ptx_subset_v2` and remains
 separate from SM86 replay.

@@ -28,9 +28,11 @@ existing metric-domain source/case matrix, not an independent holdout. The
 ordered stream session now rejects coherence (directory state is not persisted)
 and sampled carded writeback is refused. E10 now has a pinned capability audit,
 a strict parser/round-trip probe, and a three-record Accel-Sim executable
-compatibility smoke, not a numeric baseline. Full locked-clock timing/cache
-holdouts and E10B parser integration/common-endpoint scoring remain open and
-must not be represented by these results.
+compatibility smoke, not a direct NCU timing baseline. The published Accel-Sim
+aggregate accuracy-ceiling/throughput-speed-floor lane is registered separately
+as E10-L; full locked-clock timing/cache holdouts and optional E10-P direct
+executable timing remain open and must not be conflated with the literature
+target.
 The reproducible local ledger is [SM86 bounded next-experiment results](../docs/sm86_next_experiment_results_20260927.md).
 
 ## Claim tiers
@@ -42,7 +44,7 @@ Do not merge these tiers in one headline:
 | T0 | Deterministic implementation and declared recurrence | Rust/property/metamorphic tests, exact output comparison, bounded resource limits |
 | T1 | Bounded writeback/directory/PhaseFuse mechanism behavior | Complete synthetic topology, hand oracle, zero false certificates, explicit refusals |
 | T2 | SM86 empirical behavior | Independent RTX 3090 Ti/NVBit/NCU holdouts, frozen cards/parameters, same metric domains |
-| T3 | SOTA comparison | Matched traces/workloads/frontends, versions/configurations, cycle/counter/wall/RSS results |
+| T3 | SOTA/literature comparison | Local NCU-backed accuracy must meet registered error ceilings, and host/toolchain-matched simulator speed must meet throughput/speedup floors; optional direct executable timing additionally requires matched traces/frontends |
 | T4 | Architecture decisions | Frozen interventions, detailed/native reference ranking stability and confidence intervals |
 
 The current repository has T0 evidence and bounded T1 seams. The 13-case
@@ -98,7 +100,9 @@ and failure reason. No silent drops.
 | E7 | Route/PTX malformed-input matrix | Overflowing alternate route, zero work, malformed punctuation/entry/exit, atomic temp sentinel | Typed rejection; valid fixtures preserve outputs; default scalar route unchanged |
 | E8 | Default-off differential | Flat, carded, writeback-disabled, coherence-disabled replay on retained canary | Timing/counters/frontiers byte-identical except explicitly additive omitted fields |
 | E9 | Architecture-decision stability | Frozen cache/issue/occupancy/memory interventions and detailed reference ranking | Kendall/Spearman and top-k agreement reported; no NCU-driven selection |
-| E10 | Matched microtrace baseline | Small compatible Accel-Sim/GPGPU-Sim subset, or capability-mismatch record | Numeric comparison only when frontend/ISA/domain match; otherwise explicit mismatch |
+| E10 | Independent parser smoke | Small enhanced-protobuf to legacy `.traceg` subset checked by a pinned external parser/executable | Canonical structural equality and typed refusals; executable cycles are not NCU timing |
+| E10-L | Accel-Sim literature-floor attainment | Content-bound [`accelsim_literature_lower_bound_manifest_20260928.json`](../docs/accelsim_literature_lower_bound_manifest_20260928.json) plus local NCU-backed simulator results | Accuracy error must be at or below each declared ceiling; throughput/speedup must meet or exceed each declared floor; unmatched domains remain explicitly unmatched |
+| E10-P | Optional direct external timing | Matched external frontend/card/endpoint only if independently available | Not required for the literature-floor lane; refuse rather than substitute an RTX3070 executable cycle for NCU |
 
 Recommended bounded commands:
 
@@ -167,7 +171,16 @@ MAE/MAPE/bias/RMSE, median and 95% bootstrap cycle error, max error, rank
 correlation, coverage and refusal rate. NCU values may only be targets after
 replay; they cannot select parameters or model branches.
 
-## Phase 3 — matched external baselines (capability matrix first)
+## Phase 3A — Accel-Sim literature lower-bound evaluation
+
+Load and validate the content-bound literature manifest. For each declared
+domain, compare local simulator output to independent NCU measurements and then
+test attainment against the recorded accuracy ceiling or speed floor. Different
+published hardware does not erase the target, but it prevents a per-kernel
+ground-truth claim. Preserve source, workload population, endpoint, units,
+statistic, and uncertainty; do not merge unlike rows into one universal score.
+
+## Phase 3B — optional matched executable baselines
 
 Do not run full suites. Use a small matched microtrace subset only when the
 frontend, ISA and metric domain are compatible:
@@ -181,8 +194,9 @@ frontend, ISA and metric domain are compatible:
 - FlashGPU-Sim: modern execution-driven feature reference; its RTX 5090/H100/
   B200 results are not SM86 numbers.
 
-If a matched baseline cannot be built or mapped, report “capability mismatch”
-instead of fabricating a numeric comparison.
+If a matched executable baseline cannot be built or mapped, retain the parser
+smoke and report “capability mismatch” for this optional lane. Do not block or
+replace the literature-floor evaluation, and do not fabricate an NCU comparison.
 
 ## Phase 4 — publication analyses
 

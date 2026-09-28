@@ -292,8 +292,12 @@ def _small_explicit_exit_bundle(tmp_path: Path) -> dict[str, Path]:
     for pc in (0, 16, 32, 48):
         instruction = warp.instructions.add()
         instruction.pc = pc
-        instruction.active_mask = 0xFFFF_FFFF
-        instruction.predicate_mask = 0xFFFF_FFFF
+        # EXIT is a legacy zero-mask terminal marker.  Keeping the source
+        # dynamic mask zero makes the external and local instruction
+        # endpoints observe the same nonterminal work rather than silently
+        # projecting a full-mask EXIT to zero.
+        instruction.active_mask = 0 if pc == 48 else 0xFFFF_FFFF
+        instruction.predicate_mask = 0 if pc == 48 else 0xFFFF_FFFF
         instruction.function_unique_id = 1
         instruction.warpid_tb = 0
         instruction.vpc = pc
@@ -333,6 +337,28 @@ def test_real_protobuf_round_trip_with_dynamic_exit(tmp_path: Path) -> None:
     assert terminal and len(parsed) == 3
     assert parsed[0].src_regs[-1] == "R255"
     assert parsed[1].opcode == "FADD"
+
+
+def test_full_mask_dynamic_exit_is_not_projected_to_external_marker(tmp_path: Path) -> None:
+    from tools.traceg_adapter_probe.adapter import adapt
+
+    paths = _small_explicit_exit_bundle(tmp_path)
+    bindings = _load_bindings_or_skip()
+    threadblock = bindings.threadblock_pb2.threadblock()
+    threadblock.ParseFromString(paths["threadblock"].read_bytes())
+    terminal = threadblock.warps[0].instructions[-1]
+    terminal.active_mask = 0xFFFF_FFFF
+    terminal.predicate_mask = 0xFFFF_FFFF
+    paths["threadblock"].write_bytes(threadblock.SerializeToString())
+    with pytest.raises(AdapterRefusal) as raised:
+        adapt(
+            paths["trace"],
+            paths["threadblock"],
+            paths["control"],
+            tmp_path / "out",
+            exec_info_path=paths["exec_info"],
+        )
+    assert raised.value.code is RefusalCode.TERMINATION_MALFORMED
 
 
 def test_retained_canary_refuses_memory_projection(tmp_path: Path) -> None:

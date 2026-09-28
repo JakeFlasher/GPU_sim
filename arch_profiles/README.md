@@ -9,7 +9,7 @@
 | `specs/*.json` | `sim-arch::spec` | Hypothetical named resources; see [specs](specs/README.md) |
 | `programs/simt_u32_*.json` | `custom-program-run`, custom functional/timing CLI | Fixed u32 semantics; see [programs](programs/README.md) |
 | `programs/simt_its*.json` | `custom_simt_its` | Single-group functional ITS, not SASS/PTX |
-| `programs/*.ptx` admitted subset | `ptx_subset_compile` | `ptx_subset_v1` functional lowering only; not CUDA/PTX/SASS compatibility |
+| `programs/*.ptx` admitted subset | `ptx_subset_compile` | `ptx_subset_v2` functional lowering only; not CUDA/PTX/SASS compatibility |
 
 [Configuration guide](../docs/archprofile.md) separates cards, overrides and
 observations. Do not merge native and hypothetical numerical defaults, rewrite
@@ -20,8 +20,9 @@ dated driver observations as current, or change measured values during docs clea
 - `schema/arch_profile.schema.json`: native profile syntax; loaders add semantics.
 - `schema/architecture_spec.schema.json`: resource/spec syntax.
 - `schema/simt_program.schema.json`: `simt_u32_v1` input only, not ITS.
-- `schema/simt_its_trace.schema.json`: opt-in ITS **output shape**, version 2 /
-  `custom_its_dynamic_v2`. Its nested state/instruction fields are permissive;
+- `schema/simt_its_trace.schema.json`: opt-in ITS **output shape**, version 3 /
+  `custom_its_dynamic_v3`, including bounded per-lane register/predicate
+  snapshots. Its nested state/instruction fields are permissive;
   JSON-schema validation alone does not establish execution correctness.
   `sim/arch/src/its.rs` is the ITS input validator.
 

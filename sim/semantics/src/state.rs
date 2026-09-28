@@ -3082,6 +3082,46 @@ pub enum TypedEventPayload {
         service_sectors: u32,
         service_done_at: u64,
     },
+    L1VisibilityCompletion {
+        token: u64,
+        line_id: i64,
+        sector_mask: u8,
+        service_sectors: u32,
+        service_done_at: u64,
+    },
+    L1VisibilityAccess {
+        sequence: u64,
+        requester: u8,
+        line_id: i64,
+        sector_mask: u8,
+        is_write: bool,
+        l1_resident_after: bool,
+        fill_will_reside: bool,
+        fill_generation: Option<u32>,
+        hit: bool,
+        issue_cycle: u64,
+    },
+    L1VisibilityFence {
+        sequence: u64,
+        requester: u8,
+        pc: u32,
+        issue_cycle: u64,
+        scope: String,
+        order: String,
+    },
+    L1FillVisible {
+        sequence: u64,
+        requester: u8,
+        line_id: i64,
+        sector_mask: u8,
+        fill_generation: u32,
+        visible_cycle: u64,
+    },
+    L1InvalidateAll {
+        sequence: u64,
+        requester: u8,
+        issue_cycle: u64,
+    },
     MemoryWriteAck {
         warp: u32,
         instruction: u32,
@@ -3303,6 +3343,25 @@ impl TypedEventPayload {
             Self::CoherenceCompletion {
                 service_done_at, ..
             } => check("coherence_completion", "service_done_at", *service_done_at),
+            Self::L1VisibilityCompletion {
+                service_done_at, ..
+            } => check(
+                "l1_visibility_completion",
+                "service_done_at",
+                *service_done_at,
+            ),
+            Self::L1VisibilityAccess { issue_cycle, .. } => {
+                check("l1_visibility_access", "issue_cycle", *issue_cycle)
+            }
+            Self::L1VisibilityFence { issue_cycle, .. } => {
+                check("l1_visibility_fence", "issue_cycle", *issue_cycle)
+            }
+            Self::L1FillVisible { visible_cycle, .. } => {
+                check("l1_fill_visible", "visible_cycle", *visible_cycle)
+            }
+            Self::L1InvalidateAll { issue_cycle, .. } => {
+                check("l1_invalidate_all", "issue_cycle", *issue_cycle)
+            }
         }
     }
 

@@ -94,10 +94,13 @@ This is still a model-relative algorithmic comparison, not a claim that the
 simulator runs faster than GPU silicon or than Accel-Sim on an identical host.
 The added metric surface did not change the modeled event frontier.
 The event lane processes the 197,120-instruction trace at approximately
-`269 KIPS` (dense: `156 KIPS`). The published Accel-Sim landscape values of
-`12.5 KIPS` trace-driven and `6 KIPS` execution-driven are useful order-of-
-magnitude context only: they are different hosts, workloads, and simulator
-contracts, so this is not a fair speedup claim.
+`269 KIPS` (dense: `156 KIPS`). The published Accel-Sim values of `12.5 KIPS`
+trace-driven and `6 KIPS` execution-driven are registered as aggregate
+throughput floors in
+[`accelsim_literature_lower_bound_manifest_20260928.json`](accelsim_literature_lower_bound_manifest_20260928.json).
+They are different host/workload contracts, so this row is not yet an
+attainment claim; a local speed result must record its host/toolchain/protocol
+and compare within the declared throughput domain.
 
 ## Static-PC lookup optimization — 2026-09-25
 

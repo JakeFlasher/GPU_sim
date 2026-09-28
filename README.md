@@ -9,7 +9,7 @@ Software architectural simulation with two executable frontends:
   feed `sim-sm::custom` and the shared dependency/event engine; resource
   alternatives are selected with explicit model timing. The separate
   Curry-inspired `simt_its_v1` example is functional-only, with a bounded
-  `ptx_subset_v1` frontend and dynamic CFG trace.
+  `ptx_subset_v2` frontend and dynamic CFG trace.
 
 ```text
 NVBit -> traces_enhanced -> sim-trace -> sim-sm / sim-mem / sim-engine -> sim-run
@@ -51,7 +51,11 @@ attribution and independent evaluation remain open. The opt-in bounded
 writeback queue, route alternatives and PTX subset are executable seams, not
 silicon claims.
 [Diagnostics](docs/experimental_diagnostics.md) records these limits.
-No fair full numerical Accel-Sim/MGPUSim comparison has been established.
+No same-card executable Accel-Sim/MGPUSim cycle score has been established.
+The retained published Accel-Sim aggregates are tracked separately as
+accuracy-ceiling and throughput/speed-floor targets in
+`docs/accelsim_literature_lower_bound_manifest_20260928.json`; NCU on the
+local RTX 3090 Ti remains the detailed ground truth.
 
 ## Repository map
 

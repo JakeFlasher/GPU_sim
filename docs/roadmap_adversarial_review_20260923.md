@@ -1,5 +1,7 @@
 # Historical adversarial roadmap review
 
+> **2026-09-28 interpretation correction.** This dated report preserves its executable/overlap observations, but any `non-scoring`, `matched baseline`, or hardware-mismatch wording applies only to a direct executable cycle score. NCU on the local RTX 3090 Ti is detailed ground truth; published Accel-Sim aggregates are active accuracy-ceiling/throughput-speed-floor targets, registered in `docs/accelsim_literature_lower_bound_manifest_20260928.json`, not per-kernel ground truth.
+
 Updated 2026-09-24. This is a dated engineering record, not a workflow gate.
 The consolidated current state is [STATUS](STATUS.md),
 [PROJECT_MEMORY](PROJECT_MEMORY.md), and the
@@ -34,9 +36,11 @@ SOTA claim would not close that gap.
 - The custom path is fixed-ISA/model-relative, not an arbitrary ISA/compiler,
   native SASS/cache model, vendor-neutral proprietary decoder, RTL model, or
   silicon-equivalent timing reconstruction.
-- Fair numerical Accel-Sim/MGPUSim comparison is intentionally deferred because
-  the retained overlap cells do not share enough hardware, trace, observable,
-  and semantic identity.
+- Fair direct executable-cycle Accel-Sim/MGPUSim comparison is intentionally
+  deferred because the retained overlap cells do not share enough hardware,
+  trace, observable, and semantic identity. Published Accel-Sim aggregate
+  accuracy ceilings/throughput-speed floors are tracked separately and evaluated against local NCU
+  ground truth.
 
 ## Prior-art conclusion
 

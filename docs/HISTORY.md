@@ -1,6 +1,6 @@
 # Project history and stale-context map
 
-Updated 2026-09-27. This is a compact index, not a second status file. Read
+Updated 2026-09-28. This is a compact index, not a second status file. Read
 [PROJECT_MEMORY](PROJECT_MEMORY.md) and [STATUS](STATUS.md) for current work.
 Raw traces, result trees, reference manuals, old plans, and old Codex
 transcripts remain retained; this file tells a future session which material
@@ -9,15 +9,22 @@ to load and which claims not to revive.
 ## Current consolidation baseline
 
 * Repository: `/home/jakeshea/GPU_simulator_rebase`, branch `GPUSim_main`.
-* The bounded-campaign continuation is represented by commits `9614f62b`,
-  `e9d750f6`, `506c6d6e`, `5112ae23`, `0731a292`, and `32785a6e`; inspect `HEAD` for the current tip. Commit
+* The bounded-campaign continuation is represented by the earlier commits
+  `9614f62b`, `e9d750f6`, `506c6d6e`, `5112ae23`, `0731a292`, and `32785a6e`;
+  inspect `HEAD` for the current tip. The latest consolidation commit carries
+  the current alpha mechanisms and handoff docs. Commit
   `2d761986` is the earlier PhaseFuse starting point, not the current evidence
   baseline.
 * Active source of truth: `AGENTS.md` -> `docs/PROJECT_MEMORY.md` ->
   `docs/STATUS.md` -> the narrow source/runbook needed by the task.
 * Current scope: software architectural replay anchored on SM86/RTX 3090 Ti,
-  with bounded custom functional/resource frontends. NCU/CUPTI are independent
-  labels; no full Accel-Sim/MGPUSim, AMD MI300X, or SM120 execution is implied.
+  with bounded custom functional/resource frontends. NCU/CUPTI are the local
+  ground-truth measurements; CUPTI remains independent launch/resource
+  observation; published/collected Accel-Sim aggregates are registered
+  as accuracy ceilings and throughput/speedup floors to meet or surpass in
+  `accelsim_literature_lower_bound_manifest_20260928.json`; no same-card
+  executable Accel-Sim/MGPUSim cycle score, AMD MI300X, or SM120 execution is
+  implied.
 
 ## Current evidence lanes
 
@@ -29,6 +36,31 @@ to load and which claims not to revive.
 | Custom execution | `curry_gpu_its_study_20260923.md`, `arch_profiles/programs/README.md` | native SASS/PTX/compiler compatibility |
 | Options/prior art | `sm86_sota_simulator_options_20260926.md` | literature numbers as local measurements |
 | Module provenance | `sm86_module_origin_followup_20260926.md` | stable identity for JIT/deleted/opaque/graph-owned code |
+
+## 2026-09-28 alpha campaign, adversarial review, and handoff trim
+
+The alpha development lane completed the combined base/expanded SM86 campaign
+on the local RTX 3090 Ti: 15/15 workloads completed through native CUDA-event
+timing, NVBit capture, simulator replay, and repeated NCU collection. The
+retained performance table is the ignored local file
+`results/alpha/full_3090ti_20260928_r3/performance.csv`; its medians and domain
+separation are summarized in `docs/PROJECT_MEMORY.md`. Companion metric-domain
+and writeback campaigns remain under the ignored `results/alpha/` tree.
+
+The adversarial source review fixed sequence-state poisoning in the memory-order
+ledger, unbounded payload-sidecar reads, duplicate/mixed-generation payload
+writeback, L2 dirty-flush set lookup, L1 visibility sector qualification,
+overbroad fence classification, pipe-identifiability truncation, stale alpha
+binary reuse, fragile NCU/control parsing, and conflated L1/coherence event
+counters. The review ledger is `docs/code_adversarial_review_20260928.md`.
+
+Alpha adapters, value capture, and campaign outputs are path/size-only by
+default; historical content-bound forms require explicit `--bound`. No test
+suite, verification gate, or hash-bound campaign was run for this handoff. The
+Rust affected path received only a build-only compile check. The exact native
+closure blockers remain unchanged: physical pipes, unrestricted compiler/ABI,
+native cache ownership/flush semantics, drift-free locked-clock NCU timing, and
+fully matched external timing domains.
 
 ## Dated reports
 
@@ -71,6 +103,19 @@ memory mirror is `~/.codex/memories/gpu_simulator_rebase.md`; it points here
 and must stay shorter than this file. A future session should not use old
 “complete”, “SOTA”, review-loop, receipt, hash-gate, or historical-branch
 language as current instructions.
+
+## 2026-09-28 interpretation correction: Accel-Sim roles
+
+Earlier dated baseline notes use “non-scoring” and “matched baseline” for the
+optional pinned Accel-Sim executable/derived-card cycle probes. Those facts and
+their numbers remain preserved, but that wording must not reject the separate
+published-aggregate lane. The current contract is: NCU on the local RTX 3090 Ti
+is detailed ground truth; the Accel-Sim literature manifest records aggregate
+accuracy ceilings and throughput/speedup floors that the project must meet or
+surpass; and the pinned executable is parser/representation smoke unless a
+matched direct timing endpoint is independently established. Raw Codex session
+logs and the session index remain archival; only the project-local memory mirror
+is updated for this correction.
 
 ## Consolidation policy
 

@@ -1,5 +1,7 @@
 # Accel-Sim executable overlap probe
 
+> **2026-09-28 interpretation correction.** This dated report preserves its executable/overlap observations, but any `non-scoring`, `matched baseline`, or hardware-mismatch wording applies only to a direct executable cycle score. NCU on the local RTX 3090 Ti is detailed ground truth; published Accel-Sim aggregates are active accuracy-ceiling/throughput-speed-floor targets, registered in `docs/accelsim_literature_lower_bound_manifest_20260928.json`, not per-kernel ground truth.
+
 Updated 2026-09-23. This note records a runnable external-baseline probe; it
 does **not** establish a cross-simulator accuracy ranking or a SOTA claim.
 

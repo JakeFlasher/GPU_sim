@@ -177,12 +177,6 @@ def _sha256_bytes(raw: bytes) -> str:
     return hashlib.sha256(raw).hexdigest()
 
 
-def _sha256(path: Path) -> str:
-    """Compatibility helper with the same bounded-input behavior as ``adapt``."""
-
-    return _sha256_bytes(_bounded_read(path, MAX_TRACEG_BYTES, RefusalCode.INPUT_MISSING))
-
-
 def _has(message: Any, field: str) -> bool:
     try:
         return bool(message.HasField(field))
@@ -583,8 +577,18 @@ def _record_from_messages(
     if static_opcode == "EXIT":
         if static.opcode_text.strip() != "EXIT":
             raise AdapterRefusal(RefusalCode.TERMINATION_MALFORMED, f"EXIT has unexpected operands {static.opcode_text!r}", index)
-        if mask not in (0, WARP_MASK):
-            raise AdapterRefusal(RefusalCode.TERMINATION_MALFORMED, f"EXIT effective mask=0x{mask:08x} is partial", index)
+        # The legacy trace-driven frontend treats EXIT as a zero-mask marker
+        # and therefore excludes it from its thread-instruction counter.  A
+        # full-mask source EXIT would be silently projected to zero below,
+        # making the two endpoints observe different dynamic work.  Admit
+        # only the exact zero-mask form until a richer terminal contract is
+        # available; never hide that semantic projection.
+        if mask != 0:
+            raise AdapterRefusal(
+                RefusalCode.TERMINATION_MALFORMED,
+                f"EXIT effective mask=0x{mask:08x}; the external marker must be zero-mask",
+                index,
+            )
         if (
             len(dynamic.addresses) != 0
             or _has(dynamic, "memory_op_class")
@@ -873,6 +877,7 @@ def adapt(
     *,
     allow_eof: bool = False,
     exec_info_path: Path | None = None,
+    bound: bool = False,
 ) -> dict[str, Any]:
     """Adapt one bounded launch using a control sidecar and explicit EXIT.
 
@@ -919,6 +924,7 @@ def adapt(
     _function_name, static_by_pc, exec_pcs = _resolve_function(control, kernel, function_id, identity)
     records: list[CanonicalRecord] = []
     terminal_pc: int | None = None
+    terminal_record: CanonicalRecord | None = None
     for index, dynamic in enumerate(warp.instructions):
         if not _has(dynamic, "vpc"):
             raise AdapterRefusal(RefusalCode.VPC_MISSING, "vpc presence required", index)
@@ -937,11 +943,23 @@ def adapt(
             terminal_pc = record_pc = _int_field(dynamic.pc, "EXIT.pc", RefusalCode.TERMINATION_MALFORMED)
             if record_pc < 0 or record_pc > UINT32_MAX:
                 raise AdapterRefusal(RefusalCode.TERMINATION_MALFORMED, "EXIT pc does not fit uint32", index)
+            terminal_record = CanonicalRecord(
+                (0, 0, 0),
+                0,
+                terminal_pc,
+                0,
+                "EXIT",
+                (),
+                (),
+                0,
+                (),
+                0,
+            )
         else:
             if terminal_pc is not None:
                 raise AdapterRefusal(RefusalCode.TERMINATION_MALFORMED, "record follows EXIT", index)
             records.append(record)
-    if terminal_pc is None:
+    if terminal_pc is None or terminal_record is None:
         raise AdapterRefusal(RefusalCode.TERMINATION_INCOMPLETE, "source has no dynamic EXIT record; EOF cannot be projected")
     if not records:
         raise AdapterRefusal(RefusalCode.EMPTY_TRACE, "dynamic trace contains only EXIT")
@@ -970,29 +988,60 @@ def adapt(
     list_path = out_dir / "kernelslist.g"
     result_path = out_dir / "adapter_result.json"
     list_bytes = (traceg_path.name + "\n").encode("utf-8")
+    input_identity: dict[str, Any] = {
+        "dynamic_trace": {"path": str(trace_path), "size_bytes": len(trace_bytes)},
+        "threadblock": {"path": str(threadblock_path), "size_bytes": len(tb_bytes)},
+        "control_sidecar": {"path": str(sidecar_path), "size_bytes": len(control_bytes)},
+    }
+    if exec_bytes is not None:
+        input_identity["exec_info"] = {
+            "path": str(exec_info_path or sidecar_path),
+            "size_bytes": len(exec_bytes),
+        }
+    output_identity: dict[str, Any] = {
+        "traceg": {"path": str(traceg_path), "size_bytes": len(traceg_bytes)},
+        "kernelslist": {"path": str(list_path), "size_bytes": len(list_bytes)},
+    }
+    if bound:
+        input_identity["dynamic_trace"]["sha256"] = _sha256_bytes(trace_bytes)
+        input_identity["threadblock"]["sha256"] = _sha256_bytes(tb_bytes)
+        input_identity["control_sidecar"]["sha256"] = _sha256_bytes(control_bytes)
+        if exec_bytes is not None:
+            input_identity["exec_info"]["sha256"] = _sha256_bytes(exec_bytes)
+        output_identity["traceg"]["sha256"] = _sha256_bytes(traceg_bytes)
+        output_identity["kernelslist"]["sha256"] = _sha256_bytes(list_bytes)
     result = {
         "schema": "sm86_traceg_adapter_probe_v2",
         "status": "ok",
         "scoring": False,
+        "development_alpha": not bound,
         "termination": "dynamic_exit",
         "record_count": len(records),
-        "input": {
-            "dynamic_trace_sha256": _sha256_bytes(trace_bytes),
-            "threadblock_sha256": _sha256_bytes(tb_bytes),
-            "control_sidecar_sha256": _sha256_bytes(control_bytes),
-            **({"exec_info_sha256": _sha256_bytes(exec_bytes)} if exec_bytes is not None else {}),
+        "launch": {
+            "kernel_name": str(kernel.name),
+            "kernel_id": _int_field(kernel.id, "kernel.id"),
+            "grid": [1, 1, 1],
+            "block": [32, 1, 1],
+            "shared_memory_bytes": _int_field(kernel.size_shared_memory, "size_shared_memory"),
+            "registers_per_thread": _int_field(kernel.number_of_registers, "number_of_registers"),
+            "binary_version": _int_field(root.binary_version, "binary_version"),
+            "stream_id": stream_id,
+            "shared_base_address": _int_field(kernel.shared_memory_base_address, "shared_memory_base_address"),
+            "local_base_address": _int_field(kernel.local_memory_base_address, "local_memory_base_address"),
+            "nvbit_version": str(root.nvbit_version),
+            "accelsim_tracer_version": _int_field(root.accelsim_version, "accelsim_version"),
+            "lineinfo": 0,
         },
-        "output": {
-            "traceg": str(traceg_path),
-            "traceg_sha256": _sha256_bytes(traceg_bytes),
-            "kernelslist": str(list_path),
-            "kernelslist_sha256": _sha256_bytes(list_bytes),
-        },
+        "input": input_identity,
+        "output": output_identity,
         "canonical_records": [record.as_json() for record in records],
+        # Keep the source/legacy terminal tuple explicit.  In particular, the
+        # zero mask is an admitted contract condition, not an inferred value.
+        "canonical_terminal": terminal_record.as_json(),
         "notes": [
             "legacy grammar round-trip only; no NCU or timing accuracy claim",
             "RZ is canonicalized to legacy R255 in the static operand projection",
-            "termination is an actual dynamic EXIT record; EOF and synthetic EXIT are refused",
+            "termination is an actual zero-mask dynamic EXIT record; EOF, full-mask projection, and synthetic EXIT are refused",
             "memory, predicated, and non-ALU instructions are outside this contract",
         ],
     }
@@ -1015,10 +1064,11 @@ def _cli(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--exec-info", type=Path, help="optional enhanced_execution_info.json used only for fuid/name/PC identity")
     parser.add_argument("--out-dir", type=Path, required=True)
     parser.add_argument("--allow-eof", action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument("--bound", action="store_true", help="opt into content-bound identities")
     args = parser.parse_args(argv)
     control_path = args.control_path or args.control_path_legacy
     try:
-        result = adapt(args.trace, args.threadblock, control_path, args.out_dir, allow_eof=args.allow_eof, exec_info_path=args.exec_info)
+        result = adapt(args.trace, args.threadblock, control_path, args.out_dir, allow_eof=args.allow_eof, exec_info_path=args.exec_info, bound=args.bound)
     except AdapterRefusal as exc:
         print(json.dumps({"status": "refused", "code": exc.code.value, "detail": exc.detail, "record_index": exc.record_index}, sort_keys=True))
         return 2

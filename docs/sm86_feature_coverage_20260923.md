@@ -1,5 +1,7 @@
 # SM86 feature and unsupported coverage — first cohort
 
+> **2026-09-28 interpretation correction.** This dated report preserves its executable/overlap observations, but any `non-scoring`, `matched baseline`, or hardware-mismatch wording applies only to a direct executable cycle score. NCU on the local RTX 3090 Ti is detailed ground truth; published Accel-Sim aggregates are active accuracy-ceiling/throughput-speed-floor targets, registered in `docs/accelsim_literature_lower_bound_manifest_20260928.json`, not per-kernel ground truth.
+
 Updated 2026-09-23 (historical cohort snapshot). This is an inventory of the retained eight-row
 SM86/SM80-labelled development cohort, not a universal support claim.
 
@@ -63,4 +65,6 @@ origins remain explicitly unavailable.
 
 No unsupported reason is inferred from an opcode spelling alone. New typed
 unsupported categories should be added only when a concrete trace or replay
-path produces one; the fair cross-simulator comparison remains deferred.
+path produces one. The fair direct executable-cycle comparison remains
+deferred; published Accel-Sim aggregate floors are evaluated separately against
+local NCU ground truth.

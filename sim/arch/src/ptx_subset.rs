@@ -7,7 +7,7 @@
 use crate::its::{ItsError, ItsInstruction, ItsProgram};
 use std::collections::BTreeMap;
 
-pub const PTX_SUBSET_CONTRACT: &str = "ptx_subset_v1";
+pub const PTX_SUBSET_CONTRACT: &str = "ptx_subset_v2";
 pub const MAX_SOURCE_BYTES: usize = 1024 * 1024;
 pub const MAX_SOURCE_LINES: usize = 100_000;
 pub const MAX_SOURCE_LINE_BYTES: usize = 16 * 1024;
@@ -363,6 +363,20 @@ fn parse_line(line_number: usize, source: &str) -> Result<PendingInstruction, Pt
                 src: parse_register(line_number, &tokens[5])?,
             }))
         }
+        "atom.global.add.u32" => {
+            require_arity(line_number, &tokens, 8)?;
+            require_token(line_number, &tokens, 2, ",")?;
+            require_token(line_number, &tokens, 3, "[")?;
+            require_token(line_number, &tokens, 5, "]")?;
+            require_token(line_number, &tokens, 6, ",")?;
+            Ok(PendingInstruction::Ready(
+                ItsInstruction::AtomicAddIndirect {
+                    dst: parse_register(line_number, &tokens[1])?,
+                    address: parse_register(line_number, &tokens[4])?,
+                    src: parse_register(line_number, &tokens[7])?,
+                },
+            ))
+        }
         "bra" | "bra.uni" => {
             require_arity(line_number, &tokens, 2)?;
             Ok(PendingInstruction::Branch {
@@ -376,7 +390,7 @@ fn parse_line(line_number: usize, source: &str) -> Result<PendingInstruction, Pt
         }
         _ => Err(invalid(
             line_number,
-            format!("unsupported opcode {op:?}; use the documented ptx_subset_v1 subset"),
+            format!("unsupported opcode {op:?}; use the documented ptx_subset_v2 subset"),
         )),
     }
 }
@@ -544,6 +558,26 @@ mod tests {
         assert!(matches!(
             compile_subset("setp.lt.s32 %p8, %r0, 1;\nexit;", "probe", 8),
             Err(PtxSubsetError::Program(ItsError::InvalidProgram(_)))
+        ));
+    }
+
+    #[test]
+    fn compiles_bounded_indirect_atomic_add() {
+        let source = r#"
+            .entry atomic_demo() {
+            mov.u32 %r0, %laneid;
+            atom.global.add.u32 %r2, [%r0], %r0;
+            exit;
+            }
+        "#;
+        let program = compile_subset(source, "probe", 16).expect("atomic subset should compile");
+        assert!(matches!(
+            program.instructions()[1],
+            ItsInstruction::AtomicAddIndirect {
+                dst: 2,
+                address: 0,
+                src: 0
+            }
         ));
     }
 

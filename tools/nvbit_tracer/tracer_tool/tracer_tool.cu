@@ -1136,9 +1136,17 @@ static bool write_module_origin_sidecar(const std::string& dir_path) {
   }
   output << "{\n";
   output << "  \"schema_version\": 1,\n";
-  output << "  \"module_identity\": {\"stable_key\": \"sha256\", "
-            "\"path_semantics\": \"path_at_capture\", "
-            "\"rebind_contract\": \"sha256_required_basename_hint\"},\n";
+  const char* alpha_env = std::getenv("NVBIT_ALPHA_NO_HASH");
+  const bool alpha = alpha_env != nullptr && std::string(alpha_env) == "1";
+  if (alpha) {
+    output << "  \"module_identity\": {\"stable_key\": null, "
+              "\"path_semantics\": \"path_at_capture\", "
+              "\"rebind_contract\": \"alpha_path_only\"},\n";
+  } else {
+    output << "  \"module_identity\": {\"stable_key\": \"sha256\", "
+              "\"path_semantics\": \"path_at_capture\", "
+              "\"rebind_contract\": \"sha256_required_basename_hint\"},\n";
+  }
   output << "  \"selection\": {\"active_from_start\": "
          << (active_from_start ? "true" : "false")
          << ", \"max_accepted_active_launches\": "
@@ -1180,8 +1188,9 @@ static bool write_module_origin_sidecar(const std::string& dir_path) {
            << "\", \"path_at_capture\": \""
            << nvbit_tracer::JsonEscape(mapping.origin.path)
            << "\", \"basename\": \""
-           << nvbit_tracer::JsonEscape(mapping.origin.basename)
-           << "\", \"sha256\": \"" << mapping.origin.sha256 << "\"}}";
+           << nvbit_tracer::JsonEscape(mapping.origin.basename) << "\"";
+    if (!alpha) output << ", \"sha256\": \"" << mapping.origin.sha256 << "\"";
+    output << "}}";
   }
   output << (accepted_module_mappings.empty() ? "" : "\n  ") << "]\n";
   output << "}\n";
@@ -2414,7 +2423,7 @@ void nvbit_at_init() {
   }
   GET_VAR_INT(threshold_unique_kernel_checking, "THRESHOLD_UNIQUE_KERNEL_CHECKING", 10,
               "Number of instructions used to check if kernels with the same name are different");
-  GET_VAR_INT(gather_registers, "GATHER_REGISTERS", 0, "Enable gathering of GPU register values. Not available in this version.");
+  GET_VAR_INT(gather_registers, "GATHER_REGISTERS", 0, "Compatibility knob; protobuf register snapshots are not emitted by this tracer.");
 
   const char *async_order_env = std::getenv("SIMBENCH_NVBIT_ASYNC_ORDER");
   if (async_order_env == nullptr || std::string_view(async_order_env) == "0") {
@@ -6218,7 +6227,19 @@ void nvbit_at_ctx_term(CUcontext ctx) {
       std::lock_guard<std::mutex> rcm_lock(recv_container_mutex);
       dyn_trace.set_nvbit_version(NVBIT_VERSION);
       dyn_trace.set_accelsim_version(TRACER_VERSION);
-      dyn_trace.set_is_gathered_registers_values(static_cast<bool>(gather_registers));
+      // GATHER_REGISTERS is retained as a compatibility knob, but this
+      // tracer does not serialize register snapshots into the protobuf
+      // instruction stream.  Never advertise the capability merely because
+      // the environment variable was set; the separate record_reg_vals NVBit
+      // example has its own text artifact and is normalized by
+      // register_value_adapter.py with an explicit partial-identity claim.
+      if (gather_registers) {
+        fprintf(stderr,
+                "WARNING: GATHER_REGISTERS requested, but enhanced protobuf "
+                "register snapshots are not emitted; keeping "
+                "is_gathered_registers_values=false.\n");
+      }
+      dyn_trace.set_is_gathered_registers_values(false);
       // Trace-contract identity + capability. The v2 contract preserves the
       // address-carrying payload classes and additionally requires every kernel
       // to carry presence-bearing static and dynamic shared-memory components

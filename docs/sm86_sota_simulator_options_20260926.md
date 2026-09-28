@@ -2,8 +2,12 @@
 
 A dated primary-source options summary, not a local ranking. No full external
 simulator execution was performed for this report. Current implementation and
-measurement limits are in [STATUS](STATUS.md); the broader literature extraction
-remains in the [dated matrix](gpu_simulator_sota_matrix_20260924.md).
+measurement limits are in [STATUS](STATUS.md); the broader literature
+extraction remains in the [dated matrix](gpu_simulator_sota_matrix_20260924.md).
+The Accel-Sim aggregate values are registered as accuracy error ceilings and
+throughput/speedup floors in
+[`accelsim_literature_lower_bound_manifest_20260928.json`](accelsim_literature_lower_bound_manifest_20260928.json),
+not as local ground truth; NCU on the RTX 3090 Ti supplies that truth.
 
 The newer source/paper review and the locally executable PhaseFuse prototype are
 recorded in [the 2026-09-27 study](sm86_fast_exact_prototype_20260927.md).
@@ -12,7 +16,7 @@ recorded in [the 2026-09-27 study](sm86_fast_exact_prototype_20260927.md).
 
 | Need | Option | What must not be assumed |
 | --- | --- | --- |
-| Native NVIDIA SASS timing reference | [Accel-Sim/GPGPU-Sim](https://github.com/accel-sim/accel-sim-framework) | Trace adapter, SM86 configuration and counter/end-point alignment still require work. New Hopper support is not validation of this RTX 3090 Ti. |
+| Native NVIDIA SASS timing reference | [Accel-Sim/GPGPU-Sim](https://github.com/accel-sim/accel-sim-framework) | Published aggregates register the external floor lane; the pinned executable is parser smoke unless a direct frontend/endpoint match is established. New Hopper support is not local NCU ground truth. |
 | Value-dependent functional execution | Accel-Sim PTX mode / [GPGPU-Sim](https://github.com/gpgpu-sim/gpgpu-sim_distribution) | PTX is virtual ISA, not the exact compiled SASS. Check the selected version's opcode/runtime support, not an old Fermi manual. |
 | Modern CUDA/Triton execution-driven research | [FlashGPU-Sim](https://github.com/FlashGPU-Sim/FlashGPU-Sim) | Public workflow focuses on newer GPU configurations; reported results are not local SM86 evidence. Porting costs and support are separate from paper claims. |
 | Hybrid-fidelity/stall research | [HyFiSS](https://github.com/ConvolutedDog/HyFiSS), [GATSim](https://slam.ece.utexas.edu/pubs/date17.GATSim.pdf) | Different abstraction levels and validation GPUs; GATSim is older prior art, not a newly released SM86 baseline. |

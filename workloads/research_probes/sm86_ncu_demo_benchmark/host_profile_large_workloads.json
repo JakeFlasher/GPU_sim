@@ -57,5 +57,13 @@
       "role": "historical_pre_projection_identity_not_current_campaign_authority"
     }
   },
-  "schema_version": 1
+  "schema_version": 1,
+  "clock_validation": {
+    "status": "target_configuration_not_currently_admitted",
+    "target_sm_mhz": 1350,
+    "target_memory_mhz": 10501,
+    "required_active_window_check": "reject any sample outside target clocks during every profiled kernel",
+    "latest_observation": "SM 1350 held; memory 10501 to 10251/P2 drift under active stress on driver 615.71.09",
+    "ground_truth": "NCU only after active-window and held-out checks pass"
+  }
 }

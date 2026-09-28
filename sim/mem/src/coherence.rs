@@ -34,6 +34,13 @@ struct LineState {
 pub struct CoherenceConfig {
     service_cycles_per_sector: u64,
     capacity_sectors: u32,
+    /// Enables the separate L1 observation/invalidation event path.  This is
+    /// deliberately part of the typed replay configuration rather than an
+    /// environment variable so a result can be reproduced from its inputs.
+    l1_visibility_protocol: bool,
+    /// Enables resident-hit L1 dirty tracking for the explicit terminal
+    /// writeback experiment. It never implies write-allocate on a cold store.
+    l1_resident_writeback: bool,
 }
 
 impl CoherenceConfig {
@@ -50,7 +57,19 @@ impl CoherenceConfig {
         Ok(Self {
             service_cycles_per_sector,
             capacity_sectors,
+            l1_visibility_protocol: false,
+            l1_resident_writeback: false,
         })
+    }
+
+    /// Enable the bounded L1 visibility experiment for this launch.  The
+    /// directory timing values remain model hypotheses; this flag only selects
+    /// the explicit observation/invalidation event path.
+    pub const fn with_l1_visibility_protocol(self, enabled: bool) -> Self {
+        Self {
+            l1_visibility_protocol: enabled,
+            ..self
+        }
     }
 
     pub const fn service_cycles_per_sector(self) -> u64 {
@@ -59,6 +78,24 @@ impl CoherenceConfig {
 
     pub const fn capacity_sectors(self) -> u32 {
         self.capacity_sectors
+    }
+
+    pub const fn l1_visibility_protocol(self) -> bool {
+        self.l1_visibility_protocol
+    }
+
+    /// Enable resident-hit L1 dirty tracking. The lower writeback queue is
+    /// still required by the replay configuration; this flag only selects the
+    /// cache-state policy.
+    pub const fn with_l1_resident_writeback(self, enabled: bool) -> Self {
+        Self {
+            l1_resident_writeback: enabled,
+            ..self
+        }
+    }
+
+    pub const fn l1_resident_writeback(self) -> bool {
+        self.l1_resident_writeback
     }
 }
 
@@ -417,6 +454,18 @@ mod tests {
 
     fn config() -> CoherenceConfig {
         CoherenceConfig::new(2, 4).expect("config should validate")
+    }
+
+    #[test]
+    fn l1_visibility_selection_is_typed_and_default_off() {
+        let base = config();
+        assert!(!base.l1_visibility_protocol());
+        let enabled = base.with_l1_visibility_protocol(true);
+        assert!(enabled.l1_visibility_protocol());
+        let dirty = enabled.with_l1_resident_writeback(true);
+        assert!(dirty.l1_resident_writeback());
+        assert_eq!(enabled.service_cycles_per_sector(), 2);
+        assert_eq!(enabled.capacity_sectors(), 4);
     }
 
     #[test]

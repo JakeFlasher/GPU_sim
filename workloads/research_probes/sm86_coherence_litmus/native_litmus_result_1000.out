@@ -1,0 +1,1 @@
+LITMUS {"schema":"sm86_message_passing_litmus_v1","iterations":1000,"failures":0,"timeouts":0,"status":"ok"}

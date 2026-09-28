@@ -35,7 +35,15 @@
       {
         "id": "b84_control_i0_warm_c1",
         "role": "matched_protocol_zero_work_active_control",
-        "ncu_sm_active_cycle_repeats": [863, 847, 850, 834, 833, 845, 899],
+        "ncu_sm_active_cycle_repeats": [
+          863,
+          847,
+          850,
+          834,
+          833,
+          845,
+          899
+        ],
         "ncu_sm_active_cycles_median": 847.0,
         "simulator_issue_cycles": 389.0,
         "simulator_terminal_cycles": 390.0,
@@ -44,7 +52,15 @@
       {
         "id": "b84_control_i256_warm_c1",
         "role": "matched_protocol_dependent_instruction_active_control",
-        "ncu_sm_active_cycle_repeats": [7755, 7752, 7778, 7737, 7747, 7756, 7745],
+        "ncu_sm_active_cycle_repeats": [
+          7755,
+          7752,
+          7778,
+          7737,
+          7747,
+          7756,
+          7745
+        ],
         "ncu_sm_active_cycles_median": 7752.0,
         "simulator_issue_cycles": 6282.0,
         "simulator_terminal_cycles": 6283.0,
@@ -55,19 +71,43 @@
       {
         "id": "control_b84_t32_i0",
         "role": "one_warp_cta_no_memory_profiler_control",
-        "gpc_minus_sm_cycle_repeats": [1640, 1666, 1656, 1655, 1648, 1660, 1664],
+        "gpc_minus_sm_cycle_repeats": [
+          1640,
+          1666,
+          1656,
+          1655,
+          1648,
+          1660,
+          1664
+        ],
         "gpc_elapsed_minus_sm_active_cycles_median": 1656.0
       },
       {
         "id": "control_b84_t256_i0",
         "role": "eight_warp_cta_no_memory_profiler_control",
-        "gpc_minus_sm_cycle_repeats": [1612, 1629, 1626, 1605, 1621, 1614, 1625],
+        "gpc_minus_sm_cycle_repeats": [
+          1612,
+          1629,
+          1626,
+          1605,
+          1621,
+          1614,
+          1625
+        ],
         "gpc_elapsed_minus_sm_active_cycles_median": 1621.0
       },
       {
         "id": "control_b84_t256_i256",
         "role": "eight_warp_dependent_work_no_memory_profiler_control",
-        "gpc_minus_sm_cycle_repeats": [1642, 1645, 1613, 1628, 1645, 1639, 1643],
+        "gpc_minus_sm_cycle_repeats": [
+          1642,
+          1645,
+          1613,
+          1628,
+          1645,
+          1639,
+          1643
+        ],
         "gpc_elapsed_minus_sm_active_cycles_median": 1642.0
       }
     ],
@@ -85,7 +125,10 @@
       "local_cold_fill_source": "data/pchase/sm_86_static_card.json dram_latency_cycles; independent clock64 pointer chase",
       "matched_ncu_protocol": "ordinary warm-up then target selected with --launch-skip 1 --launch-count 1, application replay, externally locked 1350/10501 MHz clocks, --clock-control none, --cache-control all, and the exact scored metric set",
       "profiler_control_source": "workloads/research_probes/launch_cycle_semantics/ncu_launch_envelope.cu; volatile shared sink, no cudaProfilerStart/Stop, no global-memory target tail"
-    }
+    },
+    "status": "historical_model_calibration_non_scoring",
+    "status_reason": "Calibration used driver 610.57.04 and targeted 1350/10501 MHz; current 615.71.09 active polls observed memory 10251 MHz/P2, so this artifact cannot authorize locked-clock scoring.",
+    "current_validation_required": "fresh identity plus active per-kernel clock samples and held-out NCU repeats; reject any drift"
   },
   "scientific_boundary": {
     "scored_workload_ncu_values_used": false,
@@ -93,6 +136,8 @@
     "raw_frontiers_preserved": true,
     "issue_and_terminal_frontiers_collapsed": false,
     "multi_launch_ranges_supported": false,
-    "incomplete_retirement_tails_remain_typed": true
+    "incomplete_retirement_tails_remain_typed": true,
+    "literature_floor_manifest": "docs/accelsim_literature_lower_bound_manifest_20260928.json",
+    "literature_accelsim_role": "aggregate accuracy ceilings and throughput/speedup floors; not ground truth or simulator input"
   }
 }

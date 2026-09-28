@@ -1,0 +1,65 @@
+{
+  "artifacts": {
+    "native_capture_delta_2pow31_seed17.out": {
+      "sha256": "37f392daa7bb20bd07af63253ce992cfa4e9aae648aef914abecc2eca4702cdd",
+      "size_bytes": 59430
+    },
+    "native_interpreter_validation_delta_2pow31_seed17.json": {
+      "sha256": "242c1995c305dc37c23417dea2a82c6fe4ec686b93d398a7b3a85b9a864f9ed6",
+      "size_bytes": 410
+    },
+    "native_payload_sidecar_delta_2pow31_seed17.json": {
+      "sha256": "9e30cfa1483ce06b6e64b2a0d8960d777911ad5da4bde0ae1eb52b4256643af9",
+      "size_bytes": 13796
+    },
+    "native_runner_delta_2pow31_seed17.out": {
+      "sha256": "255b9afd1a75b70a99d1db9460ecd4e3b19df376dea121de852e9107f501c919",
+      "size_bytes": 906
+    },
+    "native_validation_delta_2pow31_seed17.json": {
+      "sha256": "5f6f4a2f0d116ca0e28c50f070c399ef69216adf20f5b980d291b22d25741959",
+      "size_bytes": 681
+    },
+    "value.ptx": {
+      "sha256": "3be9a536033d3d385e025e2bc115c43b869cb663ed8079d13aeb5e04773dbc70",
+      "size_bytes": 509
+    },
+    "value.sm_86.cubin": {
+      "sha256": "79fc3b8c3bae3988ecaeaa886ca83d1b040717d21408cfc7b6f1d005fcc94249",
+      "size_bytes": 3240
+    },
+    "value.sm_86.sass.txt": {
+      "sha256": "b47f524634343d8374453aa1615dec36c5c7e2f43614070428da12827733a0bf",
+      "size_bytes": 5705
+    }
+  },
+  "claims": {
+    "native_functional_differential": true,
+    "physical_pipe": false,
+    "static_sass_regeneration": false,
+    "timing": false
+  },
+  "device": {
+    "cc": "8.6",
+    "driver_api": 13040,
+    "name": "NVIDIA GeForce RTX 3090 Ti",
+    "pci": "0000:01:00.0",
+    "uuid": "GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c"
+  },
+  "launch": {
+    "block": [
+      32,
+      1,
+      1
+    ],
+    "delta": 2147483648,
+    "grid": [
+      1,
+      1,
+      1
+    ],
+    "seed": 17
+  },
+  "schema": "sm86_value_differential_artifact_v1",
+  "status": "ok"
+}

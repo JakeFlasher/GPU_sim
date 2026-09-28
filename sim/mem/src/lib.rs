@@ -31,6 +31,9 @@
 //!   it is not native SM86 coherence completion.
 //! - [`coherence`]: an opt-in ordered-L2 directory/service experiment;
 //!   it is not a protocol implementation.
+//! - [`l1_visibility`]: an opt-in stateful per-SM L1 ownership/invalidation
+//!   queue. It requires observations for resident hits and is not attached to
+//!   native replay until the fence/boundary wire contract is complete.
 //!
 //! Later increment: the DRAM bandwidth model (v0 prices DRAM as the
 //! carded flat latency — no bytes-per-cycle covariate is carded at the
@@ -41,7 +44,10 @@ pub mod access;
 pub mod cache_op;
 pub mod coherence;
 pub mod l1;
+pub mod l1_visibility;
 pub mod l2;
+pub mod memory_order;
+pub mod payload;
 pub mod pchase_card;
 pub mod writeback;
 
@@ -63,22 +69,37 @@ pub use coherence::{
 };
 pub use l1::{
     AccessOutcome, EvAccess, EvAccessUnobserved, FillKey, L1AccessError, L1Cache, L1Config,
-    L1ConfigError, L1CounterError, L1CounterField, L1Counters, L1LookupBatch, L1MutationBudget,
-    L1OriginCounters, L1WriteLookupObserver, L1WriteLookupObserverPlan, LINE_BYTES,
+    L1ConfigError, L1CounterError, L1CounterField, L1Counters, L1DirtyFlushPlan, L1DirtyLine,
+    L1DirtyResidency, L1InvalidationResult, L1LookupBatch, L1MutationBudget, L1OriginCounters,
+    L1StorePolicy, L1WriteLookupObserver, L1WriteLookupObserverPlan, LINE_BYTES,
     PreparedSectorExpansion, SECTOR_BYTES, SECTORS_PER_LINE, SectorExpansionError,
     SectorExpansionPlan,
 };
+pub use l1_visibility::{
+    L1AccessObservation, L1FenceObservation, L1FillVisibleObservation, L1InvalidateAllObservation,
+    L1InvalidationTarget, L1VisibilityCompletion, L1VisibilityConfig, L1VisibilityError,
+    L1VisibilityEvent, L1VisibilityPlan, L1VisibilityQueue, VisibilityOrder, VisibilityScope,
+};
 pub use l2::{
     L2AccessError, L2BuildError, L2Config, L2ConfigError, L2CounterError, L2CounterField,
-    L2Counters, L2DirtyResidency, L2EventMaskAccess, L2EventMaskPreview, L2Eviction,
-    L2FillCompletion, L2FillToken, L2MaskPreview, L2Model, L2OpClass, L2Outcome,
-    L2PendingSectorIdentity, L2PendingSectorKey, L2ProjectionError, L2Replacement, L2SetIndexError,
-    L2SnapshotError, L2Source, SliceHash,
+    L2Counters, L2DirtyFlushPlan, L2DirtyLine, L2DirtyResidency, L2EventMaskAccess,
+    L2EventMaskPreview, L2Eviction, L2FillCompletion, L2FillToken, L2MaskPreview, L2Model,
+    L2OpClass, L2Outcome, L2PendingSectorIdentity, L2PendingSectorKey, L2ProjectionError,
+    L2Replacement, L2SetIndexError, L2SnapshotError, L2Source, SliceHash,
+};
+pub use memory_order::{
+    MemoryOrder, MemoryOrderError, MemoryOrderLedgerV1, MemoryOrderScope, MemoryRead,
+    MemoryVisibilityQualifier, MemoryWrite,
+};
+pub use payload::{
+    PayloadCommitLedgerV1, PayloadError, SECTOR_BYTES as PAYLOAD_SECTOR_BYTES, SectorPayloadV1,
+    coalesce_payloads, load_native_payload_sidecar,
 };
 pub use pchase_card::{
     GeometryPolicyConfig, LatencyConfig, LineCapacityConfig, MshrConfig, PchaseCard,
     PchaseCardError, WalkGeometry,
 };
 pub use writeback::{
-    ServicePlan, ServiceRequest, WritebackCompletion, WritebackError, WritebackPlan, WritebackQueue,
+    PayloadWritebackPlan, ServicePlan, ServiceRequest, WritebackCompletion, WritebackError,
+    WritebackPlan, WritebackQueue,
 };

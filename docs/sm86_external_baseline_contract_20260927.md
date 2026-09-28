@@ -1,6 +1,6 @@
 # SM86 external-baseline contract audit
 
-Updated 2026-09-27. This is a source audit and a bounded experiment design, not
+Updated 2026-09-28. This is a source audit and a bounded experiment design, not
 an external-simulator accuracy result. It uses pinned source checkouts in
 `/tmp/gpu-simulator-sota-20260927` and the retained local overlap records. No
 large external workload was built or executed for this report.
@@ -12,19 +12,19 @@ self-parser evidence.
 
 ## Decision in one paragraph
 
-Accel-Sim/GPGPU-Sim is the only retained external path that is close enough to
-attempt a **tiny common-input structural baseline**: its trace-driven frontend
-consumes a legacy NVBit `.traceg` stream and its tree contains an SM86 profile.
-Our enhanced protobuf can be lowered to that legacy subset, but only after a
-strict join with the SASS/control sidecar and after refusing fields that the
-legacy format cannot represent. The resulting one-CTA/one-warp experiment can
-check parser/semantic identity and optionally one small cycle run; it cannot
-be presented as an NCU or SOTA accuracy cell. MGPUSim's NVIDIA frontend reads
-the same legacy `.traceg` grammar, but its public platform only exposes H100
-and A100 and explicitly warns that timings are not validated, so it is a
-parser/capability reference rather than an SM86 numerical baseline. FlashGPU-Sim
-and Vortex are not same-input SM86 timing baselines: the former's maintained
-workflow targets SM90/SM120 PTX/Triton and the latter is a RISC-V GPGPU stack.
+NCU measurements on the local RTX 3090 Ti are the detailed ground truth. The
+retained Accel-Sim papers/results form a separate aggregate lower-bound lane:
+their reported accuracy error ceilings and throughput/speedup floors are targets
+this project must meet or surpass, with source/workload/GPU/metric/endpoint/units/
+statistic recorded
+in [`accelsim_literature_lower_bound_manifest_20260928.json`](accelsim_literature_lower_bound_manifest_20260928.json).
+They are not per-kernel ground-truth labels. The pinned Accel-Sim frontend is
+used for a tiny common-input parser/representation smoke; its optional cycle
+run is not an NCU score. Our enhanced protobuf can be lowered to the legacy
+subset only after a strict SASS/control-sidecar join and typed refusal of
+unrepresentable fields. MGPUSim remains a parser/capability reference, and
+FlashGPU-Sim/Vortex remain architecture/feature references rather than local
+NCU timing baselines.
 
 ## Pinned sources and revisions
 
@@ -98,9 +98,10 @@ The legacy frontend also has architecture-specific parsing and will assert on an
 undefined opcode (`trace_driven.cc:L293-L313`). This is why “the text looks
 similar” is not enough for arbitrary SASS.
 
-## SM86 card and metric mismatch
+## Executable-smoke card and metric scope
 
-The closest card is `SM86_RTX3070`, not the local RTX 3090 Ti card. Its pinned
+The optional executable smoke uses `SM86_RTX3070`, not the local RTX 3090 Ti
+card. Its pinned
 configuration declares compute capability 8.6, 46 clusters/SMs, 16 memory
 channels, 1132 MHz core/interconnect/L2 and 3500.5 MHz DRAM, 1536 threads per
 SM, four schedulers, and Ampere cache/DRAM geometry
@@ -109,7 +110,9 @@ The local anchor is an RTX 3090 Ti (SM86, 84 SMs and a different clock/memory
 card) recorded in `docs/baseline_matrix_20260924.json`; changing only cluster
 count/clock/memory fields does not validate cache, scheduler, latency, or
 address-mapping assumptions. The previously retained derived-profile replay
-therefore remains `derived_profile_non_scoring`.
+therefore remains `derived_profile_non_scoring`. This restriction applies to
+direct executable-cycle scoring only; it does not invalidate the separately
+declared published aggregate lower-bound lane.
 
 The current local overlap record is useful as **representation evidence only**:
 `docs/accelsim_executable_overlap_probe_20260923.md:L29-L77` records 512 matching
@@ -215,7 +218,19 @@ LLVM-based SIMT compiler is a useful comparison for the compiler/ISA gap
 NCU domains are absent. No numeric cross-architecture timing comparison is
 valid.
 
-## Recommended smallest same-input experiment (E10A--E10C)
+## Literature aggregate floor lane (E10-L)
+
+The active external performance target is the content-bound
+[`accelsim_literature_lower_bound_manifest_20260928.json`](accelsim_literature_lower_bound_manifest_20260928.json).
+Its accuracy rows are error ceilings (local simulator error must be no greater
+than the cited value when evaluated against local NCU); its throughput and
+speedup rows are floors (local host/toolchain measurements must be no lower
+than the cited value in the same denominator/protocol). Different published
+GPUs prevent per-kernel ground-truth transfer, but do not erase these declared
+aggregate targets. Every row remains `lower_bound_reference_unmatched` until
+the local workload, endpoint, and measurement protocol are explicitly mapped.
+
+## E10 parser smoke and optional executable lane (E10A--E10P)
 
 This experiment is deliberately smaller than a workload run and is intended to
 close the *capability decision*, not manufacture a score.
@@ -269,34 +284,98 @@ Running the same probe against the first real SM86 holdout records refused at
 record 0 with `unsupported_opcode` (`IMAD.MOV.U32`), as required by the strict
 common-subset contract. This is a typed refusal, not silent opcode mapping.
 
-### E10B — MGPUSim parser-only check
+### E10B — independent Accel-Sim parser check
 
-Feed the generated tiny `.traceg` to the MGPUSim trace reader/tests. Require
-that the header, one block/warp, register names, compressed addresses, and
-terminal record round-trip without unknown-opcode fallback. Do **not** select
-H100/A100 timing or extrapolate it to SM86.
+`tools/traceg_adapter_probe/external_compare.py` now builds the small
+`external_traceg_reader.cc` utility against a caller-supplied pinned
+Accel-Sim/GPGPU-Sim `trace-parser` library. It parses the emitted `.traceg`
+with the external C++ parser, canonicalizes the regular-register/PC/mask/
+opcode/immediate tuple, and compares it with exact canonical equality against
+the adapter records. The utility also checks one closed TB, one warp, explicit
+`EXIT`, SM86 binary metadata, and record-count conservation.
+
+On the retained synthetic three-record fixture, the independent parser passed
+with three records and zero stderr errors. The emitted traceg identity was
+`9933558dbc727f7da17d08f51fa72b9082944435ff2f6e084f230734dde563c2`.
+This closes the E10B parser capability check at T1 representation evidence:
+record fields, the source-compared zero-mask terminal tuple, and the emitted
+launch headers are now canonical-equal; trailing record fields are refused.
+It does **not** validate timing, NCU correspondence, or silicon behavior.
+MGPUSim remains an optional parser-only reference; its public NVIDIA timing
+path is not an SM86 baseline.
 
 ### E10C — bounded one-CTA Accel-Sim run
 
-The already-built Accel-Sim executable was replayed on the three-record
-canary-prefix smoke above. It returned `gpu_tot_sim_cycle=5024`,
+The new external comparison runner can optionally invoke the already-built
+Accel-Sim executable after E10B succeeds. On the three-record synthetic
+fixture it returned `gpu_tot_sim_cycle=5024`,
 `gpu_tot_sim_insn=96`, and `gpu_tot_issued_cta=1` with a 30-second timeout and
-no stderr. Record these as a **T1 executable compatibility datum** only. A
-future automated adapter should report wall time, peak RSS, and the same
-counters separately. Compare only a predeclared common endpoint (for example,
-final modeled event after trace EOF); do not divide by NCU cycles or rank
-against the local simulator. If a future fixture needs an explicit `EXIT` and
-cannot prove one, the correct result is
+no stderr. Record these as a **T1 executable compatibility datum** only. The
+runner preserves the exact command, return code, timeout, stdout digest, and
+reported counters. The admitted fixture requires a content-bound, zero-mask
+dynamic `EXIT`; compare only a predeclared common endpoint ending at that
+explicit terminal after full modeled drain. Do not divide by NCU cycles or rank
+against the local simulator. If a fixture needs an explicit `EXIT` and cannot
+prove one, or the source terminal has a nonzero mask that would be projected to
+the legacy zero-mask marker, the correct result is
 `capability_mismatch: termination-not-represented`.
+
+`tools/traceg_adapter_probe/common_endpoint_probe.py` now automates the same
+common-input run through both the pinned external executable and local
+`sim-run`. Its current synthetic fixture reports Accel-Sim `gpu_tot_sim_cycle`
+of `5024`, configured launch latency `5000`, post-launch external cycle `24`,
+and local `terminal_modeled_event_time` of `328`. The report explicitly marks
+cycle endpoint mapping `not_aligned`. It also compares Accel-Sim's thread-level
+`gpu_tot_sim_insn=96` with local nonterminal
+`active_thread_instructions_excluding_terminal=96`, and the independent parser
+now canonicalizes the explicit external `EXIT` record separately. This closes
+the bounded representation/instruction/terminal-tuple alignment checks for the
+admitted zero-mask marker, but the cycle domains remain different and no
+numerical timing score is claimed. Strict header/configuration crosswalk and
+runner-provenance checks are still required before E10C can be promoted beyond
+T1.
+
+The latest probe also emits SHA-256 provenance for the external parser header /
+library, Accel-Sim executable/configuration, local simulator/cards/control /
+protobuf inputs, and the trace/kernel-list artifacts. This closes provenance
+capture for the bounded T1 probe; it does not close the SM86_RTX3070 versus
+RTX3090Ti architectural crosswalk or turn the `24` versus `328` cycle mismatch
+into a score. External and local subprocess records now also retain wall time,
+child user/system CPU time, and child peak RSS. These fields are repeatability
+provenance, not timing accuracy.
+Three repeated common-input runs now reproduce canonical trace/header/terminal
+equality, instruction count `96`, external counters `5024/96/1`, and local
+terminal `328`. Raw Accel-Sim stdout digests vary between runs, so the runner
+also emits a canonical counter digest; raw stdout hashes are retained as
+provenance rather than treated as determinism evidence.
+The probe now emits `sm86_external_crosswalk_v1` with
+`status=capability_mismatch` and an explicit unmapped-field list (front-end,
+SMSP scheduler, cache/DRAM, control semantics, launch envelope, and drain
+endpoint). This makes the no-score decision machine-readable rather than an
+implicit narrative caveat.
+After the GPU-device restoration on 2026-09-28, three fresh repetitions
+(`/tmp/common_endpoint_repeat_20260928_1.json` through `_3.json`) reproduced
+parser/header/terminal canonical equality, external `5024/96/1`, local terminal
+timestamp `328`, and aligned nonterminal instruction count `96` on every run.
+The raw external stdout digests differed, while the canonical counter digest
+remained
+`0198cf5814ec366a7ca85060ff0f3bc9505e0b29117999adb85232cfe5938b97`. These are
+stronger T1 compatibility evidence for E10, not an E10-L target or timing score:
+the crosswalk remains
+`capability_mismatch` and the `24` versus `328` endpoints remain
+incommensurate.
 
 ### Required refusal matrix
 
 The converter must refuse (with typed reasons) sampled/incomplete captures,
 missing masks, missing sidecar opcode/control joins, high PCs, missing `nregs`,
 UR/predicate/special-register dependencies, multi-operand memory, divergent
-operand masks, excluded memory classes, absent termination evidence, and any
-legacy parser unknown opcode. A refusal is evidence that the contract is
-honest; it is not a failed accuracy run.
+operand masks, excluded memory classes, absent/zero-mask-inconsistent
+termination evidence, trailing fields, header drift, and any legacy parser
+unknown opcode. The executable runner must additionally refuse nonzero exits,
+missing counters, missing trace files, and unexpected stderr at the top level.
+A refusal is evidence that the contract is honest; it is not a failed accuracy
+run.
 
 ## Published claims versus local evidence
 
@@ -311,23 +390,28 @@ hardware are not silently transferable to this SM86 project:
 | [Vortex, MICRO'21](https://doi.org/10.1145/3466752.3480128) | Open RISC-V GPGPU ISA/software/hardware stack. | It is a compiler/ISA extensibility reference; no NVIDIA SASS, SM86 cache model, or NCU-compatible endpoint is established. |
 
 Thus “validated” in a paper or upstream README is a prior-work claim with a
-declared scope, not independent evidence for this repository's RTX 3090 Ti
-anchor. Only content-bound same-domain captures and a common endpoint could
-upgrade E10 from feasibility to a numeric baseline.
+declared scope, not per-kernel ground truth for this repository's RTX 3090 Ti
+anchor. Content-bound same-domain captures and a common endpoint are required
+only to promote the optional E10 executable-cycle lane. The separate literature
+manifest remains an active aggregate accuracy-ceiling/throughput-speed-floor
+lane evaluated with
+local NCU ground truth.
 
 ## Publication/evidence boundary
 
 | Claim | Supported now? | Evidence |
 | --- | --- | --- |
 | Enhanced and legacy captures can share a represented PC/effective-mask/global-address prefix. | Yes, limited. | Retained 512-warp/197,120-record comparator in `docs/accelsim_executable_overlap_probe_20260923.md:L53-L70`. |
-| Our model is faster or more accurate than Accel-Sim on SM86/NCU. | No. | Different card, trace observables, and endpoints; no common numeric cell. |
+| Our model has surpassed the registered Accel-Sim aggregate target. | Not yet established. | Requires a local NCU-backed accuracy report and host/toolchain-matched speed report against the manifest's per-domain ceilings/floors. |
 | MGPUSim is an SM86 baseline. | No. | Public NVIDIA platform is H100/A100 only and timings are explicitly experimental. |
 | FlashGPU-Sim's RTX5090/H100 results validate SM86. | No. | Different maintained architectures and NCU metric domain. |
 | Vortex/OpenVADL demonstrate arbitrary NVIDIA ISA/compiler generation. | No. | Vortex is RISC-V; compiler/ISA extensibility is a reference direction, not an NVIDIA adapter. |
 | A tiny, common-subset parser/trace experiment is feasible. | Yes, T1 parser/round-trip probe implemented; real holdout outside subset refuses. | One-CTA/one-warp contract above; no large simulation required. |
 
-E10A is a bounded self-parser/round-trip capability result; it is not an
-independent legacy-parser validation because the external parser was not
-invoked by the probe. E10B parser integration and any common-endpoint timing
-comparison remain open. Keep `E10` non-scoring and never replace it with a
-synthetic cycle score.
+E10A remains a bounded local adapter result. E10B now has an independent
+Accel-Sim parser invocation and canonical-equality evidence. E10C remains a
+small model-relative executable datum; an E10-P direct SM86/NCU timing score
+remains optional and open because the external card, endpoint, and hardware
+target do not match. E10-L literature-floor attainment is a separate required
+lane using local NCU/host measurements. Keep executable `E10` non-scoring and
+never replace NCU with a synthetic cycle score.

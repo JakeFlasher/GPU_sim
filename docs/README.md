@@ -12,6 +12,7 @@ Read one entry point, then the relevant contract. Dated reports are opt-in.
 | Diagnostic formulas and ITS trace limits | [Experimental diagnostics](experimental_diagnostics.md) |
 | Fast SM86 research prototype and SOTA study | [PhaseFuse](sm86_fast_exact_prototype_20260927.md) |
 | Tiny external trace capability probe | [contract](traceg_adapter_contract.md) |
+| Adversarial review and simplification ledger | [2026-09-28 review](code_adversarial_review_20260928.md) |
 | Focused validation | [Testing](testing.md) |
 | Design choices and alternatives | [Experiment campaign](../plans/sm86_next_experiment_campaign_20260927.md), [roadmap](../plans/cross_architecture_gpu_simulator_research_plan_20260923.md), [SOTA options](sm86_sota_simulator_options_20260926.md) |
 | Dated measurements, prior reviews and session corrections | [HISTORY](HISTORY.md) |

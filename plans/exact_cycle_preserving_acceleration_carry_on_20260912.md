@@ -1,5 +1,7 @@
 # Historical exact-cycle acceleration plan — 2026-09-12
 
+> **2026-09-28 scope correction.** Any Accel-Sim detailed-cycle comparison in this historical plan is an optional matched-executable lane, not the required external baseline. The active contract uses local NCU as ground truth and the published Accel-Sim aggregate manifest as the accuracy-ceiling/throughput-speed-floor target.
+
 > **Archive-only notice (2026-09-24).** This plan records an earlier
 > acceleration study. Its SM86 event/dense observations remain useful context,
 > but AMD/CDNA3, gem5, and any RTL/Verilator or certification language are not

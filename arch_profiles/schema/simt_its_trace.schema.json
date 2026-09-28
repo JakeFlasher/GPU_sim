@@ -30,8 +30,8 @@
     "pcs": {"type": "array"},
     "active_lanes": {"type": "array"},
     "memory": {"type": "object"},
-    "dynamic_trace_schema_version": {"const": 2},
-    "dynamic_trace_contract": {"const": "custom_its_dynamic_v2"},
+    "dynamic_trace_schema_version": {"const": 3},
+    "dynamic_trace_contract": {"const": "custom_its_dynamic_v3"},
     "dynamic_trace_serialized_bytes": {
       "type": "integer",
       "minimum": 0,
@@ -44,12 +44,16 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["sequence", "pc", "active_mask", "instruction", "lane_addresses", "lane_successors", "successor_masks", "lane_blocked_by", "reconvergence_join_pc", "reconvergence_resume_pc"],
+        "required": ["sequence", "pc", "active_mask", "instruction", "lane_registers_before", "lane_registers_after", "lane_predicates_before", "lane_predicates_after", "lane_addresses", "lane_successors", "successor_masks", "lane_blocked_by", "reconvergence_join_pc", "reconvergence_resume_pc"],
         "properties": {
           "sequence": {"type": "integer", "minimum": 0},
           "pc": {"type": "integer", "minimum": 0},
           "active_mask": {"type": "integer", "minimum": 0},
           "instruction": {"type": "object"},
+          "lane_registers_before": {"type": "object", "additionalProperties": {"type": "array", "minItems": 32, "maxItems": 32, "items": {"type": "integer", "minimum": 0, "maximum": 4294967295}}},
+          "lane_registers_after": {"type": "object", "additionalProperties": {"type": "array", "minItems": 32, "maxItems": 32, "items": {"type": "integer", "minimum": 0, "maximum": 4294967295}}},
+          "lane_predicates_before": {"type": "object", "additionalProperties": {"type": "array", "minItems": 8, "maxItems": 8, "items": {"type": "boolean"}}},
+          "lane_predicates_after": {"type": "object", "additionalProperties": {"type": "array", "minItems": 8, "maxItems": 8, "items": {"type": "boolean"}}},
           "lane_addresses": {"type": "object", "additionalProperties": {"type": "integer", "minimum": 0}},
           "lane_successors": {"type": "object", "additionalProperties": {"type": "integer", "minimum": 0}},
           "successor_masks": {"type": "object", "additionalProperties": {"type": "integer", "minimum": 0}},

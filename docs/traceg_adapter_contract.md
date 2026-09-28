@@ -1,9 +1,10 @@
 # Enhanced protobuf → legacy `.traceg` adapter contract
 
-Updated 2026-09-27.  This is a bounded representation probe, not a native
+Updated 2026-09-28.  This is a bounded representation probe, not a native
 simulator input path and not a timing or silicon-validation result.  The
 implementation is `tools/traceg_adapter_probe/adapter.py` and emits schema
-`sm86_traceg_adapter_probe_v2` with `scoring: false`.
+`sm86_traceg_adapter_probe_v2` with `scoring: false`; the default alpha record
+is path/size-only and `--bound` adds the historical digest fields.
 
 ## Admitted projection
 
@@ -28,8 +29,10 @@ The adapter fails closed unless all of the following are true:
   destination and four regular sources.  Integer `IADD3` literals are bounded
   signed 64-bit values.  `RZ` is deliberately canonicalized to legacy `R255`.
 - A static `EXIT` may be present only as the final dynamic record.  Its static
-  text must be exactly `EXIT`, its effective mask is full or zero, and it has
-  no address or memory metadata.  A capture ending at protobuf EOF is
+  text must be exactly `EXIT`, its effective mask must be zero (matching the
+  legacy marker used for terminal accounting), and it has no address or memory
+  metadata.  A full-mask source EXIT is refused rather than silently projected
+  to zero.  A capture ending at protobuf EOF is
   `termination_incomplete`; the adapter never appends an inferred or synthetic
   instruction.  The optional enhanced-execution-info JSON is an identity
   cross-check (`function_unique_id`, function name, and PC set), not an opcode
@@ -50,13 +53,16 @@ refused, so prior output cannot be overwritten) containing:
   explicit terminal `EXIT` copied from the dynamic record;
 - `kernelslist.g`, naming that trace; and
 - `adapter_result.json`, which records `status: "ok"`, `scoring: false`, the
-  dynamic-exit termination kind, canonical records, and SHA-256 digests of the
-  dynamic protobuf, threadblock protobuf, control sidecar, optional identity
-  sidecar, traceg bytes, and kernels list.
+  dynamic-exit termination kind, canonical nonterminal records, a canonical
+  zero-mask terminal tuple, launch/header metadata, and path/size identities of
+  the dynamic protobuf, threadblock protobuf, control sidecar, optional
+  identity sidecar, traceg bytes, and kernels list.
 
-The digest manifest binds the files consumed by this invocation.  It does not
-turn a self-authored fixture into independent hardware evidence and does not
-assert that legacy scheduling or completion semantics equal native SM86.
+The default alpha record deliberately has no digest or verification gate.
+`--bound` opts into the historical digest-bearing record when a promotion
+workflow explicitly needs it. Neither form turns a self-authored fixture into
+independent hardware evidence or asserts that legacy scheduling or completion
+semantics equal native SM86.
 
 ## Refusal vocabulary
 
@@ -81,9 +87,15 @@ it checks one closed TB, required metadata, bounded counts, full masks,
 register tokens, explicit terminal `EXIT`, count equality, and trailing data.  It
 is in the same module as the emitter, so this round trip is implementation
 (equivalence) evidence, **not an independent Accel-Sim/MGPUSim parser result**.
-No external simulator or GPU is invoked by this probe.  A future external
-reader check must be reported separately and must not be promoted to an NCU or
-elapsed-time score.
+The separate `tools/traceg_adapter_probe/external_compare.py` path now builds
+`external_traceg_reader.cc` against a caller-supplied pinned Accel-Sim
+`trace-parser` library and compares external canonical records with the
+adapter result.  This E10B result remains representation/compatibility
+evidence and must not be promoted to an NCU or elapsed-time score.  Its
+optional Accel-Sim executable invocation reports `gpu_tot_sim_cycle` and
+related counters as a model-relative E10C datum only. This executable-smoke
+datum is separate from the published Accel-Sim aggregate-floor manifest and
+must never replace local NCU ground truth.
 
 ## Reproduction and tests
 
@@ -93,6 +105,8 @@ From the repository root:
 python -m tools.traceg_adapter_probe.adapter --help
 pytest -q tools/traceg_adapter_probe/test_adapter.py
 uv run --with protobuf==7.34.1 pytest -q tools/traceg_adapter_probe/test_adapter.py
+python -m tools.traceg_adapter_probe.external_compare --help
+python -m tools.traceg_adapter_probe.common_endpoint_probe --help
 ```
 
 The first test command runs grammar/refusal tests and skips protobuf cases when

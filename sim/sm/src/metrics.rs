@@ -65,6 +65,39 @@ pub struct PhysicalPipelineAttribution {
     pub selected_instructions: BTreeMap<String, u64>,
     pub selected_unknown_instructions: u64,
     pub selection_policy: &'static str,
+    /// A second, timing-aware model-local assignment. It uses candidate
+    /// resource availability, initiation interval and nominal latency, but it
+    /// is not a hardware route observation.
+    #[serde(skip_serializing_if = "is_empty_string_map")]
+    pub scheduled_instructions: BTreeMap<String, u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub schedule_frontier_cycles: Option<u64>,
+    pub schedule_policy: &'static str,
+    /// Per-candidate unconstrained bounds from the same model-local
+    /// availability state used by the greedy assignment. These are feasible
+    /// model ranges, not observations of a silicon route or proof that all
+    /// candidates can be selected simultaneously.
+    #[serde(skip_serializing_if = "is_empty_string_u64_map")]
+    pub candidate_earliest_issue_cycles: BTreeMap<String, u64>,
+    #[serde(skip_serializing_if = "is_empty_string_u64_map")]
+    pub candidate_latest_issue_cycles: BTreeMap<String, u64>,
+    #[serde(skip_serializing_if = "is_empty_string_u64_map")]
+    pub candidate_earliest_completion_cycles: BTreeMap<String, u64>,
+    #[serde(skip_serializing_if = "is_empty_string_u64_map")]
+    pub candidate_latest_completion_cycles: BTreeMap<String, u64>,
+    pub model_interval_records: u64,
+    #[serde(skip)]
+    scheduler_free: BTreeMap<String, u64>,
+    #[serde(skip)]
+    scheduler_sequence: u64,
+}
+
+fn is_empty_string_map(value: &BTreeMap<String, u64>) -> bool {
+    value.is_empty()
+}
+
+fn is_empty_string_u64_map(value: &BTreeMap<String, u64>) -> bool {
+    value.is_empty()
 }
 
 impl Default for PhysicalPipelineAttribution {
@@ -78,6 +111,16 @@ impl Default for PhysicalPipelineAttribution {
             selected_instructions: BTreeMap::new(),
             selected_unknown_instructions: 0,
             selection_policy: "min_selected_then_lexical_v1",
+            scheduled_instructions: BTreeMap::new(),
+            schedule_frontier_cycles: None,
+            schedule_policy: "candidate_earliest_completion_v1_model_only",
+            candidate_earliest_issue_cycles: BTreeMap::new(),
+            candidate_latest_issue_cycles: BTreeMap::new(),
+            candidate_earliest_completion_cycles: BTreeMap::new(),
+            candidate_latest_completion_cycles: BTreeMap::new(),
+            model_interval_records: 0,
+            scheduler_free: BTreeMap::new(),
+            scheduler_sequence: 0,
         }
     }
 }
@@ -680,6 +723,129 @@ impl TraceMetrics {
         None
     }
 
+    fn candidate_schedule_timing(pipeline: crate::PipelineClass) -> (u64, u64) {
+        match pipeline {
+            crate::PipelineClass::DispatchOnly => (1, 1),
+            crate::PipelineClass::Branch {
+                next_issue_interval_cycles,
+            } => (1, next_issue_interval_cycles.max(1)),
+            crate::PipelineClass::Barrier {
+                warp_initiation_interval_cycles,
+                ..
+            } => (1, warp_initiation_interval_cycles.max(1)),
+            crate::PipelineClass::Tensor {
+                initiation_interval_cycles,
+            }
+            | crate::PipelineClass::Sfu {
+                initiation_interval_cycles,
+            } => (1, initiation_interval_cycles.max(1)),
+            crate::PipelineClass::ScalarAlu {
+                latency_cycles,
+                initiation_interval_cycles,
+                ..
+            } => (latency_cycles.max(1), initiation_interval_cycles.max(1)),
+        }
+    }
+
+    fn schedule_candidates(
+        &mut self,
+        candidates: &[&'static str],
+        pipeline: crate::PipelineClass,
+    ) -> Result<(), crate::IssueError> {
+        let sequence = self.physical_pipeline.scheduler_sequence;
+        self.physical_pipeline.scheduler_sequence =
+            sequence
+                .checked_add(1)
+                .ok_or(crate::IssueError::CounterOverflow {
+                    counter: "physical pipeline scheduler sequence",
+                })?;
+        if candidates.is_empty() {
+            return Ok(());
+        }
+        let (latency, initiation_interval) = Self::candidate_schedule_timing(pipeline);
+        let mut selected: Option<(&'static str, u64, u64)> = None;
+        for &candidate in candidates {
+            let free = self
+                .physical_pipeline
+                .scheduler_free
+                .get(candidate)
+                .copied()
+                .unwrap_or(0);
+            let start = sequence.max(free);
+            let completion =
+                start
+                    .checked_add(latency)
+                    .ok_or(crate::IssueError::CounterOverflow {
+                        counter: "physical pipeline scheduler completion",
+                    })?;
+            let better = match selected {
+                None => true,
+                Some((best_candidate, best_start, best_completion)) => {
+                    (completion, start, candidate) < (best_completion, best_start, best_candidate)
+                }
+            };
+            if better {
+                selected = Some((candidate, start, completion));
+            }
+        }
+        let (candidate, start, completion) = selected.expect("candidate domain is nonempty");
+        for &candidate in candidates {
+            let free = self
+                .physical_pipeline
+                .scheduler_free
+                .get(candidate)
+                .copied()
+                .unwrap_or(0);
+            let candidate_start = sequence.max(free);
+            let candidate_completion =
+                candidate_start
+                    .checked_add(latency)
+                    .ok_or(crate::IssueError::CounterOverflow {
+                        counter: "physical pipeline candidate interval completion",
+                    })?;
+            let key = candidate.to_owned();
+            self.physical_pipeline
+                .candidate_earliest_issue_cycles
+                .entry(key.clone())
+                .and_modify(|value| *value = (*value).min(candidate_start))
+                .or_insert(candidate_start);
+            self.physical_pipeline
+                .candidate_latest_issue_cycles
+                .entry(key.clone())
+                .and_modify(|value| *value = (*value).max(candidate_start))
+                .or_insert(candidate_start);
+            self.physical_pipeline
+                .candidate_earliest_completion_cycles
+                .entry(key.clone())
+                .and_modify(|value| *value = (*value).min(candidate_completion))
+                .or_insert(candidate_completion);
+            self.physical_pipeline
+                .candidate_latest_completion_cycles
+                .entry(key)
+                .and_modify(|value| *value = (*value).max(candidate_completion))
+                .or_insert(candidate_completion);
+        }
+        add(&mut self.physical_pipeline.model_interval_records, 1)?;
+        let next_free =
+            start
+                .checked_add(initiation_interval)
+                .ok_or(crate::IssueError::CounterOverflow {
+                    counter: "physical pipeline scheduler availability",
+                })?;
+        self.physical_pipeline
+            .scheduler_free
+            .insert(candidate.to_owned(), next_free);
+        let entry = self
+            .physical_pipeline
+            .scheduled_instructions
+            .entry(candidate.to_owned())
+            .or_default();
+        add(entry, 1)?;
+        let frontier = self.physical_pipeline.schedule_frontier_cycles.unwrap_or(0);
+        self.physical_pipeline.schedule_frontier_cycles = Some(frontier.max(completion));
+        Ok(())
+    }
+
     #[allow(dead_code)]
     pub(crate) fn observe(
         &mut self,
@@ -761,6 +927,7 @@ impl TraceMetrics {
                 predicate_mask_present,
             )?;
         let candidates = Self::physical_candidates(head, &kind, pipeline);
+        self.schedule_candidates(candidates, pipeline)?;
         add(&mut self.physical_pipeline.total_warp_instructions, 1)?;
         if candidates.is_empty() {
             add(&mut self.physical_pipeline.unknown_instructions, 1)?;
@@ -1245,9 +1412,29 @@ mod tests {
         assert_eq!(m.physical_pipeline.candidate_instructions["cbu"], 1);
         assert_eq!(m.physical_pipeline.selected_instructions["adu"], 1);
         assert_eq!(m.physical_pipeline.selected_unknown_instructions, 0);
+        assert_eq!(m.physical_pipeline.scheduled_instructions["adu"], 1);
+        assert_eq!(m.physical_pipeline.schedule_frontier_cycles, Some(1));
+        assert_eq!(m.physical_pipeline.model_interval_records, 1);
+        assert_eq!(
+            m.physical_pipeline.candidate_earliest_issue_cycles["adu"],
+            0
+        );
+        assert_eq!(m.physical_pipeline.candidate_latest_issue_cycles["cbu"], 0);
+        assert_eq!(
+            m.physical_pipeline.candidate_earliest_completion_cycles["adu"],
+            1
+        );
+        assert_eq!(
+            m.physical_pipeline.candidate_latest_completion_cycles["cbu"],
+            1
+        );
         assert_eq!(
             m.physical_pipeline.selection_policy,
             "min_selected_then_lexical_v1"
+        );
+        assert_eq!(
+            m.physical_pipeline.schedule_policy,
+            "candidate_earliest_completion_v1_model_only"
         );
     }
 

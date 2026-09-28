@@ -3,15 +3,21 @@
 
 # GPU simulator SOTA and capability matrix
 
-Updated 2026-09-24. This inventory records public numerical results from
+Updated 2026-09-28. This inventory records public numerical results from
 primary papers, official artifacts, and official project pages. It is not a
 single-score leaderboard: hardware MAPE, cycle ratios, sampling error, KIPS,
-wall-time speedup, and memory footprint are separate quantities.
+wall-time speedup, and memory footprint are separate quantities. Accel-Sim
+rows are registered as aggregate lower-bound targets (error ceilings or
+throughput/speedup floors) in
+[`accelsim_literature_lower_bound_manifest_20260928.json`](accelsim_literature_lower_bound_manifest_20260928.json);
+they are not per-kernel ground truth. NCU measurements on the local RTX 3090 Ti
+are the detailed ground-truth lane.
 
 Comparability labels:
 
 * P0: potentially direct to this project (same SM86/RTX 3090 Ti and same NCU
-  observable). No external published row currently meets P0.
+  observable). No external published row currently meets P0; local NCU remains
+  the ground-truth target.
 * P1: same metric family, but different hardware/workload/configuration.
 * P2: model-relative or sampling error, not silicon accuracy.
 * P3: contextual only (functional/framework/old target/missing metadata).
@@ -49,7 +55,8 @@ Comparability labels:
 The lowest published HW-MAPE values are not directly interchangeable. Sim-FA's
 5.7% is for a narrow Hopper FlashAttention family; MGPUSim's 5.5% is R9 Nano
 execution time; Accel-Sim 2.0's 13.4% is H100; and FlashGPU-Sim's 5.24% is
-an aggregate modern-GPU result across 131 configurations. This project's
+an aggregate modern-GPU result across 131 configurations. These values are
+domain-specific target ceilings/floors, not universal labels. This project's
 current 0% row is an instruction-count mapping, not elapsed-time accuracy.
 
 ## Sampling and workload-reduction variants
@@ -168,10 +175,10 @@ event output; it does not alter the NCU comparison values.
    validation.
 4. Sampling rows cannot support a claim that this simulator is more accurate
    than Accel-Sim; they measure how much detailed work can be skipped.
-5. The next direct comparison should be one same-workload/same-NCU SM86
-   elapsed-cycle row against an external NVIDIA simulator, not a cross-vendor
-   MGPUSim number. Keep external rows P1--P3 and the local baseline matrix
-   non-scoring until then.
+5. The required comparison is local simulator versus NCU, evaluated against the
+   registered Accel-Sim aggregate accuracy ceilings/throughput-speed floors. A same-workload,
+   same-NCU executable comparison against another NVIDIA simulator is an
+   optional E10-P lane, not a prerequisite for the literature-floor lane.
 6. The carveout “missing metric” is not safely solved by copying a preferred
    percentage: CUDA specifies that carveout as a hint, while CUPTI exposes the
    driver-selected `sharedMemoryExecuted` value. The project now supports that

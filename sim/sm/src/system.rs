@@ -27,6 +27,9 @@
 //!   then completes the originating SM's L1 fill (or clears a direct
 //!   bypass/untagged barrier unit) at exactly the data-ready time and resumes
 //!   that SM. Stale L2 installation never suppresses the SM response.
+//! - `L1VisibilityComplete` — only when the typed replay configuration enables
+//!   the L1 visibility protocol, completes a targeted per-SM L1 invalidation
+//!   plan and resumes affected actors at its visibility frontier.
 //!
 //! Store and reduction mutation-only requests take no data response. Ordinary
 //! replay changes L2 state in arrival order and nothing waits on them; the
@@ -121,9 +124,10 @@ impl UnpricedBounds {
 use sim_arch::{ArchId, L2PendingReadSemantics};
 use sim_engine::{EngineError, EventQueue, TargetId};
 use sim_mem::{
-    CoherenceConfig, CoherencePlan, CoherenceQueue, CoherenceRequest, L1Config, L2Counters,
-    L2DirtyResidency, L2EventMaskPreview, L2Eviction, L2FillToken, L2Model, L2PendingSectorKey,
-    L2Source, MemoryOrigin, ServicePlan, ServiceRequest, WritebackQueue,
+    CoherenceConfig, CoherencePlan, CoherenceQueue, CoherenceRequest, L1Config, L1VisibilityConfig,
+    L1VisibilityPlan, L1VisibilityQueue, L2Counters, L2DirtyResidency, L2EventMaskPreview,
+    L2Eviction, L2FillToken, L2Model, L2PendingSectorKey, L2Source, MemoryOrigin, ServicePlan,
+    ServiceRequest, WritebackQueue,
 };
 #[cfg(feature = "reference")]
 use sim_semantics::{
@@ -637,6 +641,26 @@ pub enum SystemError {
     Writeback(#[from] sim_mem::WritebackError),
     #[error(transparent)]
     Coherence(#[from] sim_mem::CoherenceError),
+    #[error(transparent)]
+    L1Visibility(#[from] sim_mem::L1VisibilityError),
+    #[error("L1 visibility protocol requires an opt-in coherence configuration")]
+    L1VisibilityProtocolRequiresCoherence,
+    #[error("resident L1 dirty state requires the carded writeback queue")]
+    L1DirtyWritebackRequiresQueue,
+    #[error("resident L1 dirty state requires the typed L1 visibility protocol")]
+    L1DirtyWritebackRequiresVisibilityProtocol,
+    #[error(
+        "resident L1 writeback is incompatible with timing candidate/feedback lanes until hidden L2 write admissions are modeled"
+    )]
+    L1DirtyWritebackCandidateConflict,
+    #[error(
+        "resident L1/L2 dirty masks overlap on line {line_id}: L1={l1_mask:#06b}, L2={l2_mask:#06b}; payload merge is required"
+    )]
+    L1L2DirtyOverlap {
+        line_id: i64,
+        l1_mask: u8,
+        l2_mask: u8,
+    },
     #[error(
         "event queue drained with sm {sm_id} unfinished ({outstanding} response(s) recorded \
          outstanding) — request/response wiring invariant broken"
@@ -816,6 +840,8 @@ pub enum SystemError {
         "event queue drained with {sectors} coherence service sectors and {entries} pending completions"
     )]
     CoherenceNotDrained { sectors: u32, entries: usize },
+    #[error("L1 visibility completion at {time} conflicts with an existing SM wake for actor {sm}")]
+    L1VisibilityWakeConflict { sm: usize, time: u64 },
     #[error("{counter} counter overflows u64")]
     CounterOverflow { counter: &'static str },
 }
@@ -1006,6 +1032,13 @@ enum Ev {
     L2CoherenceComplete {
         plan: CoherencePlan,
     },
+    L1VisibilityComplete {
+        plan: L1VisibilityPlan,
+    },
+    L1VisibilityAccess(sim_mem::L1AccessObservation),
+    L1VisibilityFence(sim_mem::L1FenceObservation),
+    L1FillVisible(sim_mem::L1FillVisibleObservation),
+    L1InvalidateAll(sim_mem::L1InvalidateAllObservation),
     MemoryWriteAck(MemoryWriteAck),
     MemResponse {
         reply: ReplyTo,
@@ -1023,6 +1056,11 @@ fn event_name(event: &Ev) -> &'static str {
         Ev::AtomicCompletion => "atomic_completion",
         Ev::L2WritebackComplete { .. } => "l2_writeback_complete",
         Ev::L2CoherenceComplete { .. } => "l2_coherence_complete",
+        Ev::L1VisibilityComplete { .. } => "l1_visibility_complete",
+        Ev::L1VisibilityAccess(_) => "l1_visibility_access",
+        Ev::L1VisibilityFence(_) => "l1_visibility_fence",
+        Ev::L1FillVisible(_) => "l1_fill_visible",
+        Ev::L1InvalidateAll(_) => "l1_invalidate_all",
         Ev::MemoryWriteAck(_) => "memory_write_ack",
         Ev::MemResponse { .. } => "memory_response",
     }
@@ -1123,6 +1161,46 @@ fn typed_event_payload(event: &Ev) -> TypedEventPayload {
             sector_mask: plan.request_sector_mask(),
             service_sectors: plan.service_sectors(),
             service_done_at: plan.service_done_cycle(),
+        },
+        Ev::L1VisibilityComplete { plan } => TypedEventPayload::L1VisibilityCompletion {
+            token: plan.token(),
+            line_id: plan.line_id(),
+            sector_mask: plan.sector_mask(),
+            service_sectors: plan.service_sectors(),
+            service_done_at: plan.service_done_cycle(),
+        },
+        Ev::L1VisibilityAccess(observation) => TypedEventPayload::L1VisibilityAccess {
+            sequence: observation.sequence,
+            requester: observation.requester,
+            line_id: observation.line_id,
+            sector_mask: observation.sector_mask,
+            is_write: observation.is_write,
+            l1_resident_after: observation.l1_resident_after,
+            fill_will_reside: observation.fill_will_reside,
+            fill_generation: observation.fill_generation,
+            hit: observation.hit,
+            issue_cycle: observation.issue_cycle,
+        },
+        Ev::L1VisibilityFence(observation) => TypedEventPayload::L1VisibilityFence {
+            sequence: observation.sequence,
+            requester: observation.requester,
+            pc: observation.pc,
+            issue_cycle: observation.issue_cycle,
+            scope: format!("{:?}", observation.scope),
+            order: format!("{:?}", observation.order),
+        },
+        Ev::L1FillVisible(observation) => TypedEventPayload::L1FillVisible {
+            sequence: observation.sequence,
+            requester: observation.requester,
+            line_id: observation.line_id,
+            sector_mask: observation.sector_mask,
+            fill_generation: observation.fill_generation,
+            visible_cycle: observation.visible_cycle,
+        },
+        Ev::L1InvalidateAll(observation) => TypedEventPayload::L1InvalidateAll {
+            sequence: observation.sequence,
+            requester: observation.requester,
+            issue_cycle: observation.issue_cycle,
         },
         Ev::MemoryWriteAck(ack) => TypedEventPayload::MemoryWriteAck {
             warp: ack.witness.warp(),
@@ -1727,6 +1805,7 @@ struct EventPerformanceCounters {
     atomic_completion: u64,
     writeback_completion: u64,
     coherence_completion: u64,
+    l1_visibility_event: u64,
     memory_write_ack: u64,
     mem_response: u64,
     same_cycle_after_first: u64,
@@ -1794,6 +1873,11 @@ impl EventPerformanceCounters {
             | Ev::AtomicCompletion
             | Ev::L2WritebackComplete { .. }
             | Ev::L2CoherenceComplete { .. }
+            | Ev::L1VisibilityComplete { .. }
+            | Ev::L1InvalidateAll(_)
+            | Ev::L1VisibilityAccess(_)
+            | Ev::L1VisibilityFence(_)
+            | Ev::L1FillVisible(_)
             | Ev::MemoryWriteAck(_)
             | Ev::MemResponse { .. } => {
                 debug_assert_eq!(logical_events, 1);
@@ -1803,6 +1887,11 @@ impl EventPerformanceCounters {
                     Ev::AtomicCompletion => &mut self.atomic_completion,
                     Ev::L2WritebackComplete { .. } => &mut self.writeback_completion,
                     Ev::L2CoherenceComplete { .. } => &mut self.coherence_completion,
+                    Ev::L1VisibilityComplete { .. }
+                    | Ev::L1InvalidateAll(_) | Ev::L1VisibilityAccess(_)
+                    | Ev::L1VisibilityFence(_) | Ev::L1FillVisible(_) => {
+                        &mut self.l1_visibility_event
+                    }
                     Ev::MemoryWriteAck(_) => &mut self.memory_write_ack,
                     Ev::MemResponse { .. } => &mut self.mem_response,
                     Ev::L2Access(_) | Ev::L2AccessBatch(_) => unreachable!(),
@@ -2228,6 +2317,10 @@ impl DramBw {
     }
 }
 
+fn writeback_queue_unavailable(dram: DramBw) -> bool {
+    !matches!(dram, DramBw::CardedWriteback { .. })
+}
+
 /// The G/D/1 byte server. Fixed-point time in units of
 /// `cycle × bytes_per_sec` (u128): serving `b` bytes takes
 /// `b × sm_clock_hz` fp-units (= b × Hz / Bps cycles), so no division
@@ -2343,11 +2436,16 @@ pub struct DramStats {
     pub l2_evicted_pending_sectors: u64,
     pub l2_dirty_eviction_lines: u64,
     pub l2_dirty_evicted_sectors: u64,
-    /// Opt-in scheduled writeback completion observations. These remain zero
-    /// on the default read-only DRAM path.
+    /// Opt-in scheduled writeback completion observations, including eviction
+    /// victims and the terminal resident-L2 flush in CardedWriteback mode.
     pub writeback_completed_lines: u64,
     pub writeback_completed_sectors: u64,
     pub writeback_completed_bytes: u64,
+    /// Subset of the writeback completion stream sourced from resident L1
+    /// dirty sectors; L2 eviction/resident flush counters remain separate.
+    pub l1_writeback_completed_lines: u64,
+    pub l1_writeback_completed_sectors: u64,
+    pub l1_writeback_completed_bytes: u64,
     pub writeback_completion_frontier: Option<u64>,
     /// Opt-in directory-service completion observations, separate from
     /// writeback and read-traffic counters.
@@ -2358,6 +2456,8 @@ pub struct DramStats {
     /// this observer. A gauge is never summed as traffic.
     pub maximum_terminal_l2_dirty_lines: u64,
     pub maximum_terminal_l2_dirty_sectors: u64,
+    pub maximum_terminal_l1_dirty_lines: u64,
+    pub maximum_terminal_l1_dirty_sectors: u64,
     by_origin: [DramOriginStats; 2],
 }
 
@@ -2428,6 +2528,18 @@ impl DramStats {
         Ok(self)
     }
 
+    fn with_terminal_l1_dirty_residency(
+        mut self,
+        residency: sim_mem::L1DirtyResidency,
+    ) -> Result<Self, SystemError> {
+        self.maximum_terminal_l1_dirty_lines =
+            self.maximum_terminal_l1_dirty_lines.max(residency.lines);
+        self.maximum_terminal_l1_dirty_sectors = self
+            .maximum_terminal_l1_dirty_sectors
+            .max(residency.sectors);
+        Ok(self)
+    }
+
     /// Build a coherent synthetic observer from explicit origin lanes.
     pub fn from_origins(
         arch: ArchId,
@@ -2464,12 +2576,17 @@ impl DramStats {
             writeback_completed_lines: 0,
             writeback_completed_sectors: 0,
             writeback_completed_bytes: 0,
+            l1_writeback_completed_lines: 0,
+            l1_writeback_completed_sectors: 0,
+            l1_writeback_completed_bytes: 0,
             writeback_completion_frontier: None,
             coherence_completed_transactions: 0,
             coherence_completed_sectors: 0,
             coherence_completion_frontier: None,
             maximum_terminal_l2_dirty_lines: 0,
             maximum_terminal_l2_dirty_sectors: 0,
+            maximum_terminal_l1_dirty_lines: 0,
+            maximum_terminal_l1_dirty_sectors: 0,
             by_origin: [global, local],
         })
     }
@@ -2629,6 +2746,24 @@ impl DramStats {
                 .ok_or(SystemCounterError::Overflow {
                     counter: "completed L2 writeback bytes",
                 })?,
+            l1_writeback_completed_lines: self
+                .l1_writeback_completed_lines
+                .checked_add(other.l1_writeback_completed_lines)
+                .ok_or(SystemCounterError::Overflow {
+                    counter: "completed L1 writeback lines",
+                })?,
+            l1_writeback_completed_sectors: self
+                .l1_writeback_completed_sectors
+                .checked_add(other.l1_writeback_completed_sectors)
+                .ok_or(SystemCounterError::Overflow {
+                    counter: "completed L1 writeback sectors",
+                })?,
+            l1_writeback_completed_bytes: self
+                .l1_writeback_completed_bytes
+                .checked_add(other.l1_writeback_completed_bytes)
+                .ok_or(SystemCounterError::Overflow {
+                    counter: "completed L1 writeback bytes",
+                })?,
             writeback_completion_frontier: self
                 .writeback_completion_frontier
                 .into_iter()
@@ -2657,6 +2792,12 @@ impl DramStats {
             maximum_terminal_l2_dirty_sectors: self
                 .maximum_terminal_l2_dirty_sectors
                 .max(other.maximum_terminal_l2_dirty_sectors),
+            maximum_terminal_l1_dirty_lines: self
+                .maximum_terminal_l1_dirty_lines
+                .max(other.maximum_terminal_l1_dirty_lines),
+            maximum_terminal_l1_dirty_sectors: self
+                .maximum_terminal_l1_dirty_sectors
+                .max(other.maximum_terminal_l1_dirty_sectors),
             by_origin,
         };
         self.validate_origin_partition()?;
@@ -2693,6 +2834,16 @@ pub(crate) struct SystemResult {
     /// drains after the final SM issue; the full event frontier above remains
     /// available separately.
     pub(crate) sm_active_terminal_event_time: Option<u64>,
+    /// Complete eligible-global L1 access observations captured by the
+    /// explicit visibility seam. The default path retains this stream without
+    /// changing replay; the explicit visibility-protocol experiment consumes
+    /// it through tokenized invalidation events.
+    #[allow(dead_code)]
+    pub(crate) l1_visibility_observations: Vec<sim_mem::L1AccessObservation>,
+    #[allow(dead_code)]
+    pub(crate) l1_fence_observations: Vec<sim_mem::L1FenceObservation>,
+    #[allow(dead_code)]
+    pub(crate) l1_fill_visibility_observations: Vec<sim_mem::L1FillVisibleObservation>,
 }
 
 /// Run every SM's blocks to completion over one shared L2. `l2` is
@@ -2756,6 +2907,150 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates(
         memory_admission_feedback,
         None,
     )
+}
+
+/// Drain resident dirty sectors from the per-SM L1s through the explicit
+/// writeback queue. The cache plans are committed only after every lower-level
+/// service has been admitted and completed, so a capacity or stale-plan error
+/// leaves the L1 state dirty rather than silently losing data.
+fn flush_l1_dirty_residency(
+    cores: &mut [SmCore<'_>],
+    l2: &L2Model,
+    writeback_queue: Option<&mut WritebackQueue>,
+    terminal_event_time: &mut Option<u64>,
+    dram_stats: &mut DramStats,
+) -> Result<(), SystemError> {
+    let mut plans = Vec::new();
+    for (ix, core) in cores.iter().enumerate() {
+        *dram_stats = dram_stats.with_terminal_l1_dirty_residency(core.l1_dirty_residency())?;
+        let plan = core.preview_l1_dirty_flush()?;
+        if !plan.lines().is_empty() {
+            plans.push((ix, plan));
+        }
+    }
+    let l2_dirty = l2.preview_dirty_flush();
+    for (_, plan) in &plans {
+        for l1_line in plan.lines() {
+            if let Some(l2_line) = l2_dirty
+                .lines()
+                .iter()
+                .find(|candidate| candidate.line_id == l1_line.line_id)
+                && l1_line.dirty_mask & l2_line.dirty_mask != 0
+            {
+                return Err(SystemError::L1L2DirtyOverlap {
+                    line_id: l1_line.line_id,
+                    l1_mask: l1_line.dirty_mask,
+                    l2_mask: l2_line.dirty_mask,
+                });
+            }
+        }
+    }
+    if plans.is_empty() {
+        return Ok(());
+    }
+    let Some(writeback_queue) = writeback_queue else {
+        return Err(SystemError::L1DirtyWritebackRequiresQueue);
+    };
+    let capacity = usize::try_from(writeback_queue.capacity_sectors()).map_err(|_| {
+        SystemError::CounterOverflow {
+            counter: "terminal L1 writeback capacity",
+        }
+    })?;
+    let mut latest_done = (*terminal_event_time).unwrap_or(0);
+    let mut batch_issue = latest_done;
+    for (ix, plan) in plans {
+        let mut offset = 0usize;
+        while offset < plan.lines().len() {
+            let mut end = offset;
+            let mut sectors = 0usize;
+            while end < plan.lines().len() {
+                let line_sectors = usize::try_from(plan.lines()[end].dirty_mask.count_ones())
+                    .map_err(|_| SystemError::CounterOverflow {
+                        counter: "terminal L1 dirty sectors",
+                    })?;
+                if end == offset && line_sectors > capacity {
+                    return Err(SystemError::Writeback(
+                        sim_mem::WritebackError::CapacityExceeded {
+                            capacity: writeback_queue.capacity_sectors(),
+                            requested: u32::try_from(line_sectors).unwrap_or(u32::MAX),
+                        },
+                    ));
+                }
+                if sectors
+                    .checked_add(line_sectors)
+                    .is_none_or(|total| total > capacity)
+                {
+                    break;
+                }
+                sectors += line_sectors;
+                end += 1;
+            }
+            let requests = plan.lines()[offset..end]
+                .iter()
+                .map(|line| ServiceRequest::writeback(line.line_id, line.dirty_mask, batch_issue))
+                .collect::<Vec<_>>();
+            let service_plans = writeback_queue.preview_services(&requests)?;
+            writeback_queue.commit_services(&service_plans)?;
+            for service in &service_plans {
+                let completion =
+                    writeback_queue.complete(service.token(), service.service_done_cycle())?;
+                latest_done = latest_done.max(completion.service_done_cycle);
+                let sectors = u64::from(completion.dirty_mask.count_ones());
+                dram_stats.writeback_completed_lines = dram_stats
+                    .writeback_completed_lines
+                    .checked_add(1)
+                    .ok_or(SystemError::CounterOverflow {
+                        counter: "completed L1 writeback lines",
+                    })?;
+                dram_stats.writeback_completed_sectors = dram_stats
+                    .writeback_completed_sectors
+                    .checked_add(sectors)
+                    .ok_or(SystemError::CounterOverflow {
+                        counter: "completed L1 writeback sectors",
+                    })?;
+                let bytes = sectors
+                    .checked_mul(32)
+                    .ok_or(SystemError::CounterOverflow {
+                        counter: "completed L1 writeback bytes",
+                    })?;
+                dram_stats.writeback_completed_bytes = dram_stats
+                    .writeback_completed_bytes
+                    .checked_add(bytes)
+                    .ok_or(SystemError::CounterOverflow {
+                        counter: "completed L1 writeback bytes",
+                    })?;
+                dram_stats.l1_writeback_completed_lines = dram_stats
+                    .l1_writeback_completed_lines
+                    .checked_add(1)
+                    .ok_or(SystemError::CounterOverflow {
+                        counter: "completed L1 writeback lines",
+                    })?;
+                dram_stats.l1_writeback_completed_sectors = dram_stats
+                    .l1_writeback_completed_sectors
+                    .checked_add(sectors)
+                    .ok_or(SystemError::CounterOverflow {
+                        counter: "completed L1 writeback sectors",
+                    })?;
+                dram_stats.l1_writeback_completed_bytes = dram_stats
+                    .l1_writeback_completed_bytes
+                    .checked_add(bytes)
+                    .ok_or(SystemError::CounterOverflow {
+                        counter: "completed L1 writeback bytes",
+                    })?;
+            }
+            batch_issue = latest_done;
+            offset = end;
+        }
+        cores[ix].commit_l1_dirty_flush(plan)?;
+    }
+    dram_stats.writeback_completion_frontier = Some(
+        dram_stats
+            .writeback_completion_frontier
+            .unwrap_or(0)
+            .max(latest_done),
+    );
+    *terminal_event_time = Some((*terminal_event_time).unwrap_or(0).max(latest_done));
+    Ok(())
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -2828,9 +3123,29 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates_with_coherenc
         .map_err(IssueError::from)?
         .map(|observer| Rc::new(RefCell::new(observer)));
     let sm_ids: Vec<i32> = per_sm_blocks.keys().copied().collect();
+    let l1_visibility_protocol =
+        coherence_config.is_some_and(CoherenceConfig::l1_visibility_protocol);
+    let l1_resident_writeback =
+        coherence_config.is_some_and(CoherenceConfig::l1_resident_writeback);
+    if l1_resident_writeback && !l1_visibility_protocol {
+        return Err(SystemError::L1DirtyWritebackRequiresVisibilityProtocol);
+    }
+    if l1_resident_writeback
+        && (writeback_queue_unavailable(dram)
+            || !memory_service_candidates.is_empty()
+            || !memory_admission_candidates.is_empty()
+            || memory_admission_feedback.is_some())
+    {
+        return Err(if writeback_queue_unavailable(dram) {
+            SystemError::L1DirtyWritebackRequiresQueue
+        } else {
+            SystemError::L1DirtyWritebackCandidateConflict
+        });
+    }
     let mut cores: Vec<SmCore<'_>> = per_sm_blocks
         .values()
-        .map(|blocks| {
+        .enumerate()
+        .map(|(sm_ix, blocks)| {
             let mut core = SmCore::new_with_residency_and_observer(
                 blocks,
                 schedule,
@@ -2839,6 +3154,16 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates_with_coherenc
                 SmMemMode::L1Shared(l1_config),
                 shared_write_lookup_observer.clone(),
             )?;
+            if l1_visibility_protocol {
+                let requester =
+                    u8::try_from(sm_ids[sm_ix]).map_err(|_| IssueError::CounterOverflow {
+                        counter: "L1 visibility requester domain",
+                    })?;
+                core.enable_l1_visibility_observations(requester)?;
+            }
+            if l1_resident_writeback {
+                core.enable_l1_resident_writeback()?;
+            }
             core.install_memory_service_candidates(memory_service_candidates)?;
             if !memory_admission_candidates.is_empty() {
                 core.enable_memory_admission_observations();
@@ -2873,6 +3198,9 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates_with_coherenc
     #[cfg(not(feature = "performance-counters"))]
     let batch_replyless_writes = memory_admission_feedback.is_none();
     let mut scratch: Vec<MemRequest> = Vec::new();
+    let mut l1_visibility_observations = Vec::new();
+    let mut l1_fence_observations = Vec::new();
+    let mut l1_fill_visibility_observations = Vec::new();
     // Scheduled-but-unapplied response times PER SM: the only external
     // events that can affect an SM's own state, hence its advance
     // horizon. Other SMs' events are deliberately NOT barriers — cross-SM
@@ -2912,6 +3240,15 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates_with_coherenc
         _ => None,
     };
     let mut coherence_queue = coherence_config.map(CoherenceQueue::new);
+    let mut l1_visibility_queue = if l1_visibility_protocol {
+        let config = coherence_config.ok_or(SystemError::L1VisibilityProtocolRequiresCoherence)?;
+        Some(L1VisibilityQueue::new(L1VisibilityConfig::new(
+            config.service_cycles_per_sector(),
+            config.capacity_sectors(),
+        )?))
+    } else {
+        None
+    };
     let mut dram_stats = DramStats::for_arch(arch);
     for ix in 0..cores.len() {
         let target = u32::try_from(ix)
@@ -2947,7 +3284,14 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates_with_coherenc
         let reference_typed_event_payload = typed_event_payload(&ev.kind);
         let contributes_to_sm_active = !matches!(
             &ev.kind,
-            Ev::MemoryWriteAck(_) | Ev::L2WritebackComplete { .. } | Ev::L2CoherenceComplete { .. }
+            Ev::MemoryWriteAck(_)
+                | Ev::L2WritebackComplete { .. }
+                | Ev::L2CoherenceComplete { .. }
+                | Ev::L1VisibilityComplete { .. }
+                | Ev::L1VisibilityAccess(_)
+                | Ev::L1VisibilityFence(_)
+                | Ev::L1FillVisible(_)
+                | Ev::L1InvalidateAll(_)
         );
         #[cfg(feature = "reference")]
         power_state.advance_to(ev.time)?;
@@ -2990,6 +3334,11 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates_with_coherenc
                     &mut unpriced,
                     batch_replyless_writes,
                     &mut scratch,
+                    &mut l1_visibility_observations,
+                    &mut l1_fence_observations,
+                    &mut l1_fill_visibility_observations,
+                    l1_visibility_queue.as_mut(),
+                    &sm_ids,
                     params.l1_miss_latency,
                     memory_admission_feedback,
                 )?;
@@ -3707,6 +4056,117 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates_with_coherenc
                 );
                 spin.on_progress_event(ev.time);
             }
+            Ev::L1VisibilityAccess(observation) => {
+                let visibility_queue = l1_visibility_queue
+                    .as_mut()
+                    .ok_or(SystemError::L1VisibilityProtocolRequiresCoherence)?;
+                let plan = visibility_queue.preview_qualified(
+                    observation,
+                    sim_mem::MemoryVisibilityQualifier::Cacheable,
+                )?;
+                visibility_queue.commit(plan.clone())?;
+                schedule_l1_visibility_completion(
+                    sm_ix,
+                    plan,
+                    &mut queue,
+                    &mut unpriced,
+                    &wake_due,
+                    &sm_ids,
+                    cores.len(),
+                )?;
+                spin.on_progress_event(ev.time);
+            }
+            Ev::L1VisibilityFence(observation) => {
+                let visibility_queue = l1_visibility_queue
+                    .as_mut()
+                    .ok_or(SystemError::L1VisibilityProtocolRequiresCoherence)?;
+                visibility_queue.observe_fence(observation)?;
+                spin.on_progress_event(ev.time);
+            }
+            Ev::L1FillVisible(observation) => {
+                let visibility_queue = l1_visibility_queue
+                    .as_mut()
+                    .ok_or(SystemError::L1VisibilityProtocolRequiresCoherence)?;
+                visibility_queue.observe_fill_visible(observation)?;
+                spin.on_progress_event(ev.time);
+            }
+            Ev::L1InvalidateAll(observation) => {
+                let visibility_queue = l1_visibility_queue
+                    .as_mut()
+                    .ok_or(SystemError::L1VisibilityProtocolRequiresCoherence)?;
+                visibility_queue.observe_invalidate_all(observation)?;
+                spin.on_progress_event(ev.time);
+            }
+            Ev::L1VisibilityComplete { plan } => {
+                let visibility_queue = l1_visibility_queue
+                    .as_mut()
+                    .ok_or(SystemError::L1VisibilityProtocolRequiresCoherence)?;
+                let _completion = visibility_queue.complete(plan.token(), ev.time)?;
+                let mut affected = vec![
+                    sm_ids
+                        .iter()
+                        .position(|candidate| {
+                            u8::try_from(*candidate).ok() == Some(plan.requester())
+                        })
+                        .ok_or(SystemError::EventTargetOutOfRange {
+                            target: u32::from(plan.requester()),
+                            actor_count: cores.len(),
+                        })?,
+                ];
+                for target in plan.invalidations() {
+                    let target_ix = sm_ids
+                        .iter()
+                        .position(|candidate| {
+                            u8::try_from(*candidate).ok() == Some(target.requester)
+                        })
+                        .ok_or(SystemError::EventTargetOutOfRange {
+                            target: u32::from(target.requester),
+                            actor_count: cores.len(),
+                        })?;
+                    cores[target_ix].invalidate_l1(plan.line_id(), target.sector_mask)?;
+                    if !affected.contains(&target_ix) {
+                        affected.push(target_ix);
+                    }
+                }
+                for &target_ix in &affected {
+                    let bound = plan.service_done_cycle();
+                    match unpriced.0[target_ix].get(&bound).copied() {
+                        Some(1) => {
+                            unpriced.0[target_ix].remove(&bound);
+                        }
+                        Some(count) => {
+                            unpriced.0[target_ix].insert(bound, count - 1);
+                        }
+                        None => {
+                            return Err(SystemError::UnpricedBoundMissing {
+                                sm: target_ix,
+                                bound,
+                            });
+                        }
+                    }
+                }
+                for target_ix in affected {
+                    run_sm(
+                        target_ix,
+                        &mut cores,
+                        &mut queue,
+                        &mut response_due,
+                        &mut write_ack_due,
+                        &mut wake_due,
+                        &mut unpriced,
+                        batch_replyless_writes,
+                        &mut scratch,
+                        &mut l1_visibility_observations,
+                        &mut l1_fence_observations,
+                        &mut l1_fill_visibility_observations,
+                        l1_visibility_queue.as_mut(),
+                        &sm_ids,
+                        params.l1_miss_latency,
+                        memory_admission_feedback,
+                    )?;
+                }
+                spin.on_progress_event(ev.time);
+            }
             Ev::MemoryWriteAck(ack) => {
                 write_ack_due.pop_expect("modeled write acknowledgement", sm_ix, ev.time)?;
                 cores[sm_ix].complete_memory_write_ack(ack, ev.time)?;
@@ -3720,6 +4180,11 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates_with_coherenc
                     &mut unpriced,
                     batch_replyless_writes,
                     &mut scratch,
+                    &mut l1_visibility_observations,
+                    &mut l1_fence_observations,
+                    &mut l1_fill_visibility_observations,
+                    l1_visibility_queue.as_mut(),
+                    &sm_ids,
                     params.l1_miss_latency,
                     memory_admission_feedback,
                 )?;
@@ -3766,6 +4231,11 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates_with_coherenc
                     &mut unpriced,
                     batch_replyless_writes,
                     &mut scratch,
+                    &mut l1_visibility_observations,
+                    &mut l1_fence_observations,
+                    &mut l1_fill_visibility_observations,
+                    l1_visibility_queue.as_mut(),
+                    &sm_ids,
                     params.l1_miss_latency,
                     memory_admission_feedback,
                 )?;
@@ -3803,6 +4273,104 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates_with_coherenc
         return Err(SystemError::PendingL2ReadyNotDrained {
             entries: pending_l2_ready.len(),
         });
+    }
+    // Resident L1 dirtiness is an explicit policy experiment. Flush it before
+    // the shared L2 terminal gauge so the two typed frontiers remain distinct.
+    flush_l1_dirty_residency(
+        &mut cores,
+        &staged_l2,
+        writeback_queue.as_mut(),
+        &mut terminal_event_time,
+        &mut dram_stats,
+    )?;
+    let terminal_dirty_residency = staged_l2.dirty_residency();
+    dram_stats = dram_stats.with_terminal_l2_dirty_residency(terminal_dirty_residency)?;
+    // Terminal resident dirty sectors are distinct from eviction victims.
+    // The opt-in CardedWriteback path now admits them transactionally only
+    // after all SM/L2 events have drained; the default path retains the dirty
+    // gauge and its explicit tail flag.
+    if let Some(writeback_queue) = writeback_queue.as_mut() {
+        let terminal_issue = terminal_event_time.unwrap_or(0);
+        let dirty_plan = staged_l2.preview_dirty_flush();
+        if !dirty_plan.lines().is_empty() {
+            let capacity = usize::try_from(writeback_queue.capacity_sectors()).map_err(|_| {
+                SystemError::CounterOverflow {
+                    counter: "terminal writeback capacity",
+                }
+            })?;
+            let mut offset = 0usize;
+            let mut latest_done = terminal_issue;
+            let mut batch_issue = terminal_issue;
+            while offset < dirty_plan.lines().len() {
+                let mut end = offset;
+                let mut sectors = 0usize;
+                while end < dirty_plan.lines().len() {
+                    let line_sectors = usize::try_from(
+                        dirty_plan.lines()[end].dirty_mask.count_ones(),
+                    )
+                    .map_err(|_| SystemError::CounterOverflow {
+                        counter: "terminal dirty sectors",
+                    })?;
+                    if end == offset && line_sectors > capacity {
+                        return Err(SystemError::Writeback(
+                            sim_mem::WritebackError::CapacityExceeded {
+                                capacity: writeback_queue.capacity_sectors(),
+                                requested: u32::try_from(line_sectors).unwrap_or(u32::MAX),
+                            },
+                        ));
+                    }
+                    if sectors
+                        .checked_add(line_sectors)
+                        .is_none_or(|total| total > capacity)
+                    {
+                        break;
+                    }
+                    sectors += line_sectors;
+                    end += 1;
+                }
+                let requests = dirty_plan.lines()[offset..end]
+                    .iter()
+                    .map(|line| {
+                        ServiceRequest::writeback(line.line_id, line.dirty_mask, batch_issue)
+                    })
+                    .collect::<Vec<_>>();
+                let service_plans = writeback_queue.preview_services(&requests)?;
+                writeback_queue.commit_services(&service_plans)?;
+                for service in &service_plans {
+                    let completion =
+                        writeback_queue.complete(service.token(), service.service_done_cycle())?;
+                    latest_done = latest_done.max(completion.service_done_cycle);
+                    dram_stats.writeback_completed_lines = dram_stats
+                        .writeback_completed_lines
+                        .checked_add(1)
+                        .ok_or(SystemError::CounterOverflow {
+                            counter: "completed L2 writeback lines",
+                        })?;
+                    dram_stats.writeback_completed_sectors = dram_stats
+                        .writeback_completed_sectors
+                        .checked_add(u64::from(completion.dirty_mask.count_ones()))
+                        .ok_or(SystemError::CounterOverflow {
+                            counter: "completed L2 writeback sectors",
+                        })?;
+                    dram_stats.writeback_completed_bytes = dram_stats
+                        .writeback_completed_bytes
+                        .checked_add(u64::from(completion.dirty_mask.count_ones()) * 32)
+                        .ok_or(SystemError::CounterOverflow {
+                            counter: "completed L2 writeback bytes",
+                        })?;
+                }
+                batch_issue = latest_done;
+                offset = end;
+            }
+            staged_l2.commit_dirty_flush(dirty_plan)?;
+            dram_stats.writeback_completion_frontier = Some(
+                dram_stats
+                    .writeback_completion_frontier
+                    .unwrap_or(0)
+                    .max(latest_done),
+            );
+            terminal_event_time = Some(terminal_event_time.unwrap_or(0).max(latest_done));
+        }
     }
     if let Some(writeback_queue) = writeback_queue.as_ref() {
         let pending_entries = writeback_queue.pending_tokens().count();
@@ -3946,7 +4514,7 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates_with_coherenc
         eprintln!(
             "SIM_EVENT_PERF events_processed={} queue_events_processed={} sm_wake={} \
              l2_access={} l2_access_batches={} l2_access_batched_requests={} l2_fill={} \
-             atomic_completion={} writeback_completion={} coherence_completion={} \
+             atomic_completion={} writeback_completion={} coherence_completion={} l1_visibility_event={} \
              memory_write_ack={} mem_response={} same_cycle_after_first={} \
              queue_same_cycle_after_first={} maximum_queue_depth={} queue_clock_gap_cycles={} \
              queue_last_clock_gap_cycles={}",
@@ -3960,6 +4528,7 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates_with_coherenc
             performance.atomic_completion,
             performance.writeback_completion,
             performance.coherence_completion,
+            performance.l1_visibility_event,
             performance.memory_write_ack,
             performance.mem_response,
             performance.same_cycle_after_first,
@@ -3989,7 +4558,7 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates_with_coherenc
     if let Some(trace) = reference_trace {
         trace.finish(queue.stats(), &power_state)?;
     }
-    dram_stats = dram_stats.with_terminal_l2_dirty_residency(staged_l2.dirty_residency())?;
+    // The terminal gauge was recorded before any opt-in resident flush above.
     let result = SystemResult {
         arch,
         per_sm,
@@ -3999,6 +4568,9 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates_with_coherenc
         unmodeled_tails,
         terminal_event_time,
         sm_active_terminal_event_time,
+        l1_visibility_observations,
+        l1_fence_observations,
+        l1_fill_visibility_observations,
     };
     *l2 = staged_l2;
     Ok(result)
@@ -4196,6 +4768,11 @@ fn run_sm(
     unpriced: &mut UnpricedBounds,
     batch_replyless_writes: bool,
     scratch: &mut Vec<MemRequest>,
+    l1_visibility_observations: &mut Vec<sim_mem::L1AccessObservation>,
+    l1_fence_observations: &mut Vec<sim_mem::L1FenceObservation>,
+    l1_fill_visibility_observations: &mut Vec<sim_mem::L1FillVisibleObservation>,
+    l1_visibility_queue: Option<&mut L1VisibilityQueue>,
+    _sm_ids: &[i32],
     l2_hit_latency: u64,
     memory_admission_feedback: Option<MemoryAdmissionCandidate>,
 ) -> Result<bool, SystemError> {
@@ -4205,9 +4782,46 @@ fn run_sm(
         (Some(bound), None) | (None, Some(bound)) => Some(bound),
         (None, None) => None,
     };
-    let horizon = replay_horizon(response_due.next(ix), write_or_unpriced);
+    let initial_visibility_events = cores[ix].take_l1_visibility_events();
+    schedule_l1_visibility_events(
+        ix,
+        initial_visibility_events,
+        queue,
+        l1_visibility_observations,
+        l1_fence_observations,
+        l1_fill_visibility_observations,
+        cores.len(),
+    )?;
+    let actor_horizon = replay_horizon(response_due.next(ix), write_or_unpriced);
+    // The opt-in visibility protocol cannot safely run an actor past an
+    // already queued cross-SM invalidation/fill event: its trace-local cache
+    // state was generated before that event and cannot be retracted.  Keep
+    // the legacy run-ahead path unchanged; strict visibility pays a bounded
+    // next-event cap, while same-cycle callback ties and observations already
+    // generated by an actor remain an explicit batch-ahead limitation.
+    let horizon = if l1_visibility_queue.is_some() {
+        queue
+            .peek_time()
+            .filter(|next| *next > queue.now())
+            .map_or(actor_horizon, |next| match actor_horizon {
+                ReplayHorizon::Bounded(bound) => ReplayHorizon::Bounded(bound.min(next)),
+                ReplayHorizon::Unbounded => ReplayHorizon::Bounded(next),
+            })
+    } else {
+        actor_horizon
+    };
     let issued_before = cores[ix].instructions_issued();
     let adv = cores[ix].advance(horizon, scratch)?;
+    let events = cores[ix].take_l1_visibility_events();
+    schedule_l1_visibility_events(
+        ix,
+        events,
+        queue,
+        l1_visibility_observations,
+        l1_fence_observations,
+        l1_fill_visibility_observations,
+        cores.len(),
+    )?;
     let progress = cores[ix].instructions_issued() > issued_before || !scratch.is_empty();
     let target =
         u32::try_from(ix).map_err(|_| SystemError::ActorCountOutOfRange { count: cores.len() })?;
@@ -4232,6 +4846,104 @@ fn run_sm(
         }
     }
     Ok(progress)
+}
+
+fn schedule_l1_visibility_events(
+    ix: usize,
+    events: Vec<sim_mem::L1VisibilityEvent>,
+    queue: &mut EventQueue<Ev>,
+    l1_visibility_observations: &mut Vec<sim_mem::L1AccessObservation>,
+    l1_fence_observations: &mut Vec<sim_mem::L1FenceObservation>,
+    l1_fill_visibility_observations: &mut Vec<sim_mem::L1FillVisibleObservation>,
+    actor_count: usize,
+) -> Result<(), SystemError> {
+    let target = TargetId(
+        u32::try_from(ix).map_err(|_| SystemError::ActorCountOutOfRange { count: actor_count })?,
+    );
+    for event in events {
+        match event {
+            sim_mem::L1VisibilityEvent::Access(observation) => {
+                l1_visibility_observations.push(observation);
+                queue.schedule_at(
+                    observation.issue_cycle,
+                    target,
+                    Ev::L1VisibilityAccess(observation),
+                )?;
+            }
+            sim_mem::L1VisibilityEvent::Fence(observation) => {
+                l1_fence_observations.push(observation);
+                queue.schedule_at(
+                    observation.issue_cycle,
+                    target,
+                    Ev::L1VisibilityFence(observation),
+                )?;
+            }
+            sim_mem::L1VisibilityEvent::FillVisible(observation) => {
+                l1_fill_visibility_observations.push(observation);
+                queue.schedule_at(
+                    observation.visible_cycle,
+                    target,
+                    Ev::L1FillVisible(observation),
+                )?;
+            }
+            sim_mem::L1VisibilityEvent::InvalidateAll(observation) => {
+                queue.schedule_at(
+                    observation.issue_cycle,
+                    target,
+                    Ev::L1InvalidateAll(observation),
+                )?;
+            }
+        }
+    }
+    Ok(())
+}
+
+fn schedule_l1_visibility_completion(
+    ix: usize,
+    plan: L1VisibilityPlan,
+    queue: &mut EventQueue<Ev>,
+    unpriced: &mut UnpricedBounds,
+    wake_due: &DueTimes,
+    sm_ids: &[i32],
+    actor_count: usize,
+) -> Result<(), SystemError> {
+    if !plan.needs_completion() {
+        return Ok(());
+    }
+    let mut affected = vec![ix];
+    for target in plan.invalidations() {
+        let target_ix = sm_ids
+            .iter()
+            .position(|candidate| u8::try_from(*candidate).ok() == Some(target.requester))
+            .ok_or(SystemError::EventTargetOutOfRange {
+                target: u32::from(target.requester),
+                actor_count,
+            })?;
+        if !affected.contains(&target_ix) {
+            affected.push(target_ix);
+        }
+    }
+    queue.schedule_at(
+        plan.service_done_cycle(),
+        TargetId(
+            u32::try_from(ix)
+                .map_err(|_| SystemError::ActorCountOutOfRange { count: actor_count })?,
+        ),
+        Ev::L1VisibilityComplete { plan: plan.clone() },
+    )?;
+    for target_ix in affected {
+        unpriced.insert(target_ix, plan.service_done_cycle())?;
+        if wake_due
+            .next(target_ix)
+            .is_some_and(|time| time <= plan.service_done_cycle())
+        {
+            return Err(SystemError::L1VisibilityWakeConflict {
+                sm: target_ix,
+                time: plan.service_done_cycle(),
+            });
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -5399,6 +6111,35 @@ mod tests {
         assert_eq!(result.l2_by_source.source(L2Source::Bypass), (0, 0));
         assert_eq!(result.dram.read_sectors, 1);
         assert_eq!(result.terminal_event_time, Some(423));
+    }
+
+    #[test]
+    fn visibility_protocol_refuses_cacheable_async_copy_without_payload_contract() {
+        let sched = cacheable_async_copy_schedule(false);
+        let per_sm = BTreeMap::from([(0, cacheable_async_copy_blocks(false))]);
+        let mut l2 = l2_model();
+        let error = simulate_kernel_shared_with_residency_and_candidates_with_coherence(
+            &per_sm,
+            &sched,
+            &params(),
+            SharedMemoryResidency::unconstrained_fixture(),
+            l1_config(),
+            &mut l2,
+            carded_bw(),
+            &[],
+            &[],
+            None,
+            Some(
+                CoherenceConfig::new(1, 4)
+                    .unwrap()
+                    .with_l1_visibility_protocol(true),
+            ),
+        )
+        .expect_err("visibility must refuse cacheable async copy without payload");
+        assert!(matches!(
+            error,
+            SystemError::Issue(IssueError::VisibilityAsyncCopyUnsupported)
+        ));
     }
 
     #[test]
@@ -7265,12 +8006,28 @@ mod tests {
             &[],
             &[],
             None,
-            Some(CoherenceConfig::new(2, 4).expect("coherence config should validate")),
+            Some(
+                CoherenceConfig::new(2, 4)
+                    .expect("coherence config should validate")
+                    .with_l1_visibility_protocol(true),
+            ),
         )
         .expect("bounded coherence replay should complete");
         assert_eq!(result.dram.coherence_completed_transactions, 1);
         assert_eq!(result.dram.coherence_completed_sectors, 1);
         assert_eq!(result.dram.coherence_completion_frontier, Some(2));
+        let mut by_sm = BTreeMap::<u8, Vec<u64>>::new();
+        for observation in &result.l1_visibility_observations {
+            by_sm
+                .entry(observation.requester)
+                .or_default()
+                .push(observation.sequence);
+        }
+        assert!(
+            by_sm
+                .values()
+                .all(|sequences| { sequences.windows(2).all(|window| window[0] < window[1]) })
+        );
     }
 
     #[test]
@@ -7419,14 +8176,251 @@ mod tests {
         .unwrap();
         assert_eq!(result.per_sm[&0].cycles, 3);
         assert_eq!(result.dram.l2_dirty_evicted_sectors, 1);
-        assert_eq!(result.dram.writeback_completed_lines, 1);
-        assert_eq!(result.dram.writeback_completed_sectors, 1);
-        assert_eq!(result.dram.writeback_completed_bytes, 32);
+        assert_eq!(result.dram.maximum_terminal_l2_dirty_sectors, 1);
+        // One evicted dirty sector plus the still-resident terminal sector.
+        assert_eq!(result.dram.writeback_completed_lines, 2);
+        assert_eq!(result.dram.writeback_completed_sectors, 2);
+        assert_eq!(result.dram.writeback_completed_bytes, 64);
+        assert_eq!(l2.dirty_residency(), L2DirtyResidency::default());
         let completion = result
             .dram
             .writeback_completion_frontier
             .expect("writeback completion must be observed");
         assert!(result.terminal_event_time.unwrap() >= completion);
+    }
+
+    #[test]
+    fn resident_dirty_terminal_flush_path_schedules_and_clears_l2_state() {
+        let sched = schedule(vec![(0, slot(cb(1), "STG.E")), (16, slot(cb(1), "EXIT"))]);
+        let blocks = vec![BlockReplay {
+            launch_index: 0,
+            warps: vec![WarpReplay {
+                async_copy_cohorts: None,
+                warp_slot: 0,
+                insts: vec![
+                    ReplayInst {
+                        pc: 0,
+                        kind: AccessKind::GlobalStore { off: 0, len: 1 },
+                    },
+                    ReplayInst {
+                        pc: 16,
+                        kind: AccessKind::NonMemory,
+                    },
+                ],
+                sectors: vec![0],
+            }],
+        }];
+        let mut l2 = l2_model();
+        let result = simulate_kernel_shared(
+            &BTreeMap::from([(0, blocks)]),
+            &sched,
+            &params(),
+            l1_config(),
+            &mut l2,
+            DramBw::CardedWriteback {
+                arch: ArchId::Sm86,
+                bytes_per_sec: 1_008_000_000_000,
+                sm_clock_hz: 1_350_000_000,
+                capacity_sectors: 1,
+            },
+        )
+        .unwrap();
+        assert_eq!(result.dram.l2_dirty_evicted_sectors, 0);
+        assert_eq!(result.dram.maximum_terminal_l2_dirty_lines, 1);
+        assert_eq!(result.dram.maximum_terminal_l2_dirty_sectors, 1);
+        assert_eq!(result.dram.writeback_completed_lines, 1);
+        assert_eq!(result.dram.writeback_completed_sectors, 1);
+        assert_eq!(result.dram.writeback_completed_bytes, 32);
+        assert_eq!(l2.dirty_residency(), L2DirtyResidency::default());
+    }
+
+    #[test]
+    fn resident_dirty_terminal_flush_batches_to_queue_capacity() {
+        let sched = schedule(vec![
+            (0, slot(cb(1), "STG.E")),
+            (16, slot(cb(1), "STG.E")),
+            (32, slot(cb(1), "EXIT")),
+        ]);
+        let blocks = vec![BlockReplay {
+            launch_index: 0,
+            warps: vec![WarpReplay {
+                async_copy_cohorts: None,
+                warp_slot: 0,
+                insts: vec![
+                    ReplayInst {
+                        pc: 0,
+                        kind: AccessKind::GlobalStore { off: 0, len: 1 },
+                    },
+                    ReplayInst {
+                        pc: 16,
+                        kind: AccessKind::GlobalStore { off: 1, len: 1 },
+                    },
+                    ReplayInst {
+                        pc: 32,
+                        kind: AccessKind::NonMemory,
+                    },
+                ],
+                sectors: vec![0, 4],
+            }],
+        }];
+        let mut l2 = l2_model();
+        let result = simulate_kernel_shared(
+            &BTreeMap::from([(0, blocks)]),
+            &sched,
+            &params(),
+            l1_config(),
+            &mut l2,
+            DramBw::CardedWriteback {
+                arch: ArchId::Sm86,
+                bytes_per_sec: 1_008_000_000_000,
+                sm_clock_hz: 1_350_000_000,
+                capacity_sectors: 1,
+            },
+        )
+        .expect("terminal flush should batch resident lines to queue capacity");
+        assert_eq!(result.dram.writeback_completed_lines, 2);
+        assert_eq!(result.dram.writeback_completed_sectors, 2);
+        assert_eq!(l2.dirty_residency(), L2DirtyResidency::default());
+    }
+
+    #[test]
+    fn typed_l1_resident_writeback_flushes_dirty_hit_at_terminal_boundary() {
+        let mut load = cb(1);
+        load.write_barrier = Some(barrier(0));
+        let mut store = cb(1);
+        store.wait_mask = wait_mask(0b000001);
+        let sched = schedule(vec![
+            (0, slot(load, "LDG.E")),
+            (16, slot(store, "STG.E")),
+            (32, slot(cb(1), "EXIT")),
+        ]);
+        let blocks = vec![BlockReplay {
+            launch_index: 0,
+            warps: vec![WarpReplay {
+                async_copy_cohorts: None,
+                warp_slot: 0,
+                insts: vec![
+                    ReplayInst {
+                        pc: 0,
+                        kind: AccessKind::GlobalEligible {
+                            off: 0,
+                            len: 1,
+                            token: CacheOpToken::LdgECa,
+                        },
+                    },
+                    ReplayInst {
+                        pc: 16,
+                        kind: AccessKind::GlobalStore { off: 0, len: 1 },
+                    },
+                    ReplayInst {
+                        pc: 32,
+                        kind: AccessKind::NonMemory,
+                    },
+                ],
+                sectors: vec![0],
+            }],
+        }];
+        let mut l2 = l2_model();
+        let config = CoherenceConfig::new(1, 4)
+            .expect("coherence configuration should validate")
+            .with_l1_visibility_protocol(true)
+            .with_l1_resident_writeback(true);
+        let result = simulate_kernel_shared_with_residency_and_candidates_with_coherence(
+            &BTreeMap::from([(0, blocks)]),
+            &sched,
+            &params(),
+            SharedMemoryResidency::unconstrained_fixture(),
+            l1_config(),
+            &mut l2,
+            DramBw::CardedWriteback {
+                arch: ArchId::Sm86,
+                bytes_per_sec: 1_008_000_000_000,
+                sm_clock_hz: 1_350_000_000,
+                capacity_sectors: 1,
+            },
+            &[],
+            &[],
+            None,
+            Some(config),
+        )
+        .expect("typed L1 resident writeback should drain");
+        assert_eq!(result.dram.maximum_terminal_l1_dirty_lines, 1);
+        assert_eq!(result.dram.maximum_terminal_l1_dirty_sectors, 1);
+        assert_eq!(result.dram.l1_writeback_completed_lines, 1);
+        assert_eq!(result.dram.l1_writeback_completed_sectors, 1);
+        assert_eq!(result.dram.l1_writeback_completed_bytes, 32);
+        assert_eq!(result.dram.writeback_completed_lines, 1);
+        assert!(result.terminal_event_time.is_some());
+    }
+
+    #[test]
+    fn typed_l1_resident_writeback_refuses_line_wider_than_queue() {
+        let mut load = cb(1);
+        load.write_barrier = Some(barrier(0));
+        let mut store = cb(1);
+        store.wait_mask = wait_mask(0b000001);
+        let sched = schedule(vec![
+            (0, slot(load, "LDG.E.128")),
+            (16, slot(store, "STG.E.128")),
+            (32, slot(cb(1), "EXIT")),
+        ]);
+        let blocks = vec![BlockReplay {
+            launch_index: 0,
+            warps: vec![WarpReplay {
+                async_copy_cohorts: None,
+                warp_slot: 0,
+                insts: vec![
+                    ReplayInst {
+                        pc: 0,
+                        kind: AccessKind::GlobalEligible {
+                            off: 0,
+                            len: 4,
+                            token: CacheOpToken::LdgECa,
+                        },
+                    },
+                    ReplayInst {
+                        pc: 16,
+                        kind: AccessKind::GlobalStore { off: 0, len: 4 },
+                    },
+                    ReplayInst {
+                        pc: 32,
+                        kind: AccessKind::NonMemory,
+                    },
+                ],
+                sectors: vec![0, 1, 2, 3],
+            }],
+        }];
+        let mut l2 = l2_model();
+        let config = CoherenceConfig::new(1, 4)
+            .expect("coherence configuration should validate")
+            .with_l1_visibility_protocol(true)
+            .with_l1_resident_writeback(true);
+        let error = simulate_kernel_shared_with_residency_and_candidates_with_coherence(
+            &BTreeMap::from([(0, blocks)]),
+            &sched,
+            &params(),
+            SharedMemoryResidency::unconstrained_fixture(),
+            l1_config(),
+            &mut l2,
+            DramBw::CardedWriteback {
+                arch: ArchId::Sm86,
+                bytes_per_sec: 1_008_000_000_000,
+                sm_clock_hz: 1_350_000_000,
+                capacity_sectors: 1,
+            },
+            &[],
+            &[],
+            None,
+            Some(config),
+        )
+        .expect_err("a resident L1 line wider than the queue must refuse");
+        assert!(matches!(
+            error,
+            SystemError::Writeback(sim_mem::WritebackError::CapacityExceeded {
+                capacity: 1,
+                requested: 4
+            })
+        ));
     }
 
     #[test]
@@ -7603,6 +8597,51 @@ mod tests {
     }
 
     #[test]
+    fn visibility_protocol_refuses_atomic_without_old_new_payload() {
+        let sched = schedule(vec![(0, slot(cb(1), "ATOMG.E.ADD.STRONG.GPU"))]);
+        let blocks = vec![BlockReplay {
+            launch_index: 0,
+            warps: vec![WarpReplay {
+                async_copy_cohorts: None,
+                warp_slot: 0,
+                insts: vec![ReplayInst {
+                    pc: 0,
+                    kind: AccessKind::GlobalBypass {
+                        off: 0,
+                        len: 1,
+                        token: CacheOpToken::Atom,
+                        l2_requests: 1,
+                    },
+                }],
+                sectors: vec![4],
+            }],
+        }];
+        let mut l2 = l2_model();
+        let error = simulate_kernel_shared_with_residency_and_candidates_with_coherence(
+            &BTreeMap::from([(0, blocks)]),
+            &sched,
+            &params(),
+            SharedMemoryResidency::unconstrained_fixture(),
+            l1_config(),
+            &mut l2,
+            DramBw::Unmodeled { arch: ArchId::Sm86 },
+            &[],
+            &[],
+            None,
+            Some(
+                CoherenceConfig::new(1, 4)
+                    .unwrap()
+                    .with_l1_visibility_protocol(true),
+            ),
+        )
+        .expect_err("visibility must refuse ATOM without old/new payload");
+        assert!(matches!(
+            error,
+            SystemError::Issue(IssueError::VisibilityAtomicUnsupported)
+        ));
+    }
+
+    #[test]
     fn reduction_charges_cold_rmw_read_without_store_attribution() {
         let sched = schedule(vec![(0, slot(cb(1), "RED.E.ADD.STRONG.GPU"))]);
         let blocks = vec![BlockReplay {
@@ -7660,6 +8699,50 @@ mod tests {
             1,
             "RED write data validates the sector while its cold RMW read is charged separately"
         );
+    }
+
+    #[test]
+    fn visibility_protocol_refuses_reduction_without_old_new_payload() {
+        let sched = schedule(vec![(0, slot(cb(1), "RED.E.ADD.STRONG.GPU"))]);
+        let blocks = vec![BlockReplay {
+            launch_index: 0,
+            warps: vec![WarpReplay {
+                async_copy_cohorts: None,
+                warp_slot: 0,
+                insts: vec![ReplayInst {
+                    pc: 0,
+                    kind: AccessKind::GlobalReduction {
+                        off: 0,
+                        len: 1,
+                        l2_requests: 1,
+                    },
+                }],
+                sectors: vec![4],
+            }],
+        }];
+        let mut l2 = l2_model();
+        let error = simulate_kernel_shared_with_residency_and_candidates_with_coherence(
+            &BTreeMap::from([(0, blocks)]),
+            &sched,
+            &params(),
+            SharedMemoryResidency::unconstrained_fixture(),
+            l1_config(),
+            &mut l2,
+            DramBw::Unmodeled { arch: ArchId::Sm86 },
+            &[],
+            &[],
+            None,
+            Some(
+                CoherenceConfig::new(1, 4)
+                    .unwrap()
+                    .with_l1_visibility_protocol(true),
+            ),
+        )
+        .expect_err("visibility must refuse RED without old/new payload");
+        assert!(matches!(
+            error,
+            SystemError::Issue(IssueError::VisibilityReductionUnsupported)
+        ));
     }
 
     /// §6.4 slice 2 — worst-of-mask pricing: a 2-sector line fill whose

@@ -2,7 +2,6 @@
 """Small then scaled SM86 metric-domain experiment; no model fitting."""
 import argparse
 import csv
-import hashlib
 import json
 import os
 from pathlib import Path
@@ -11,8 +10,6 @@ import subprocess
 import time
 
 REPO = Path(__file__).resolve().parents[3]
-EXPECTED_DEVICE = ("0", "NVIDIA GeForce RTX 3090 Ti",
-                   "GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c", "8.6", "615.71.09")
 METRICS = [
     "smsp__inst_executed.sum", "smsp__inst_executed_pipe_alu.sum",
     "smsp__inst_executed_pipe_fma.sum", "smsp__inst_executed_pipe_lsu.sum",
@@ -33,10 +30,6 @@ def run(command, directory, label, env=None):
         "exit_code": result.returncode, "seconds": time.monotonic() - start}, indent=2))
     if result.returncode:
         raise RuntimeError(f"{label} failed: {(directory / f'{label}.stderr').read_text()[-2000:]}")
-
-
-def digest(path):
-    return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 def write_comparison(root, size):
@@ -82,34 +75,20 @@ def main():
     source = Path(__file__).with_name(
         "main_writeback.cu" if args.suite == "writeback" else "main.cu"
     )
-    source_record = root / "build.source_sha256"
-    if binary.exists() and (not source_record.exists() or source_record.read_text().strip() != digest(source)):
-        raise RuntimeError("existing binary has no matching source identity; choose a fresh output")
-    if not binary.exists():
-        run(["/usr/local/cuda-13.2/bin/nvcc", "-ccbin=/usr/bin/g++-14", "-arch=sm_86", "-O2", "-lineinfo",
-             source, "-o", binary], root, "build")
-        source_record.write_text(digest(source) + "\n")
+    # Always rebuild in alpha mode.  Without artifact identity binding, a
+    # cached executable would silently mix an old source with a new campaign.
+    run(["/usr/local/cuda-13.2/bin/nvcc", "-ccbin=/usr/bin/g++-14", "-arch=sm_86", "-O2", "-lineinfo",
+         source, "-o", binary], root, "build")
     hardware = subprocess.check_output([
         "nvidia-smi", "--query-gpu=index,name,uuid,compute_cap,driver_version,clocks.current.sm,clocks.current.memory",
         "--format=csv"], text=True)
-    devices = list(csv.reader(hardware.splitlines(), skipinitialspace=True))[1:]
-    if not any(tuple(row[:5]) == EXPECTED_DEVICE for row in devices):
-        raise RuntimeError(f"expected dated device identity {EXPECTED_DEVICE}, got {hardware}")
     (root / "host.csv").write_text(hardware)
     control = root / "control.json"
     run([REPO / ".venv/bin/python", "tools/sass_control/emit_control_bits_sidecar.py", "--binary", binary,
          "--arch", "sm_86", "--toolkit-bindir", "/usr/local/cuda-13.2/bin", "--out", control], root, "control")
-    # Keep tool and input identities for replay comparisons, not as approvals.
     (root / f"{args.size}.inputs.json").write_text(json.dumps({
-        "git_revision": subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip(),
-        "files": {str(p.relative_to(REPO)): hashlib.sha256(p.read_bytes()).hexdigest() for p in [
-            REPO / "sim/target/release/sim-run", REPO / "arch_profiles/cards/sm_86.json",
-            REPO / "data/pchase/sm_86_static_card.json", REPO / "tools/nvbit_tracer/tracer_tool/tracer_tool.so"]},
-        "simulator_binary_sha256": hashlib.sha256((REPO / "sim/target/release/sim-run").read_bytes()).hexdigest(),
-        "binary_sha256": hashlib.sha256(binary.read_bytes()).hexdigest(),
-        "source_sha256": hashlib.sha256(source.read_bytes()).hexdigest(),
         "seed": "i*1664525+1013904223 (u32)",
-        "provenance_note": "simulator/card/trace replay identity only; NCU metrics remain independent",
+        "measurement_role": "alpha_development_probe",
     }, indent=2))
     blocks, iterations = (1, 8) if args.size == "small" else (168, 32)
     if args.suite == "writeback":
@@ -127,15 +106,13 @@ def main():
         if args.suite == "writeback":
             name += f"_b{blocks}_i{iterations}"
         directory = root / name
-        if directory.exists():
-            raise RuntimeError(f"choose a fresh output; refusing to overwrite {directory}")
-        directory.mkdir()
+        directory.mkdir(parents=True, exist_ok=True)
         (directory / "case.json").write_text(json.dumps({
             "case": name, "operation": op, "pattern": pattern, "blocks": blocks,
             "iterations": iterations, "suite": args.suite, "role": "development_probe",
         }, indent=2) + "\n")
         command = [binary, op, pattern, str(blocks), str(iterations)]
-        run(command, directory, "correctness")
+        run(command, directory, "native")
         run([REPO / ".venv/bin/python", "tools/local_labels/collect_ncu.py", "--output", directory / "ncu",
              "--ncu", "/usr/local/cuda-13.2/nsight-compute-2026.1.0/ncu", "--timeout", "180",
              "--launch-count", "1", "--replay-mode", "application", "--clock-control", "none",
@@ -145,6 +122,7 @@ def main():
             env.pop(key, None)
         extra = {
             "CUDA_INJECTION64_PATH": str(REPO / "tools/nvbit_tracer/tracer_tool/tracer_tool.so"),
+            "NVBIT_ALPHA_NO_HASH": "1",
             "LD_LIBRARY_PATH": str(REPO / ".toolchain/pb/lib"),
             "PATH": "/usr/local/cuda-13.2/bin:" + env["PATH"],
             "TRACES_FOLDER": str(directory / "trace"), "USER_DEFINED_FOLDERS": "1",
@@ -157,13 +135,9 @@ def main():
         run(["sim/target/release/sim-run", "--trace", directory / "trace", "--control", control,
              "--arch-card", "arch_profiles/cards/sm_86.json", "--pchase-card", "data/pchase/sm_86_static_card.json",
              "--mode", "l1-l2", "--ncu-shaped-metrics", "--ncu-csv", directory / "ncu/ncu.csv"], directory, "replay")
-        paths = [REPO / "sim/target/release/sim-run", REPO / "arch_profiles/cards/sm_86.json",
-                 REPO / "data/pchase/sm_86_static_card.json", binary, source, control]
-        paths += sorted(p for p in (directory / "trace").rglob("*") if p.is_file())
         (directory / "replay.inputs.json").write_text(json.dumps({
-            "inputs": {str(p): digest(p) for p in paths},
-            "output_sha256": digest(directory / "replay.stdout"),
-            "independent_ncu_csv_sha256": digest(directory / "ncu/ncu.csv"),
+            "measurement_role": "alpha_development_probe",
+            "inputs": [str(REPO / "sim/target/release/sim-run"), str(binary), str(control)],
         }, indent=2) + "\n")
         output = json.loads((directory / "replay.stdout").read_text())
         obs, launch = output["ncu_observation"], output["launches"][0]

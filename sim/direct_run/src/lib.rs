@@ -23,6 +23,7 @@ use sim_arch::card::{ArchCard, CalibError};
 use sim_arch::spec::{ArchitectureSpec, ResourceKind};
 use sim_mem::{
     CoherenceConfig, L1Counters, L2Config, L2Counters, L2Source, MemoryOrigin, PchaseCard,
+    load_native_payload_sidecar,
 };
 use sim_run::emit::{
     EmitOutcome, EmittedMetricKey, FullLaunchPredictions, MetricValue, Unavailable, Unit,
@@ -124,6 +125,14 @@ pub struct RunConfig {
     pub coherence_service_cycles: Option<u64>,
     /// Optional bounded directory in-flight sector capacity.
     pub coherence_capacity_sectors: Option<u32>,
+    /// Select the explicit typed L1 observation/invalidation event path. This
+    /// requires the bounded coherence configuration and is never inferred from
+    /// process-global environment state.
+    pub l1_visibility_protocol: bool,
+    /// Select resident-hit L1 dirty tracking for the explicit terminal
+    /// writeback experiment. This requires carded DRAM, a dirty-writeback
+    /// queue, and the bounded coherence configuration.
+    pub l1_resident_writeback: bool,
     /// Optional model-relative issue transaction width. This never changes
     /// the evidence-bound architecture card; it labels the replay as a
     /// hypothetical resource experiment.
@@ -153,6 +162,9 @@ pub struct RunConfig {
     /// Optional CUPTI launch-resource JSONL observation. This is metadata only;
     /// it never changes replay scheduling or cache configuration.
     pub launch_resources: Option<PathBuf>,
+    /// Optional strict value-bearing payload sidecar. Admission is explicit;
+    /// default replay remains mask-only and does not consume payload bytes.
+    pub native_payload_sidecar: Option<PathBuf>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -647,11 +659,17 @@ pub struct RunReport {
     pub cache_scope: &'static str,
     pub carded_dram_bandwidth: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub native_payload_sidecar_records: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub dirty_writeback_capacity_sectors: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub coherence_service_cycles: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub coherence_capacity_sectors: Option<u32>,
+    #[serde(skip_serializing_if = "is_false")]
+    pub l1_visibility_protocol: bool,
+    #[serde(skip_serializing_if = "is_false")]
+    pub l1_resident_writeback: bool,
     #[serde(skip_serializing_if = "is_false")]
     pub fast_frontier_only: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -997,6 +1015,12 @@ pub struct DramCounterReport {
     pub writeback_completed_sectors: u64,
     #[serde(skip_serializing_if = "is_zero_u64")]
     pub writeback_completed_bytes: u64,
+    #[serde(skip_serializing_if = "is_zero_u64")]
+    pub l1_writeback_completed_lines: u64,
+    #[serde(skip_serializing_if = "is_zero_u64")]
+    pub l1_writeback_completed_sectors: u64,
+    #[serde(skip_serializing_if = "is_zero_u64")]
+    pub l1_writeback_completed_bytes: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub writeback_completion_frontier: Option<u64>,
     #[serde(skip_serializing_if = "is_zero_u64")]
@@ -1009,6 +1033,10 @@ pub struct DramCounterReport {
     pub maximum_terminal_l2_dirty_lines: u64,
     #[serde(skip_serializing_if = "is_zero_u64")]
     pub maximum_terminal_l2_dirty_sectors: u64,
+    #[serde(skip_serializing_if = "is_zero_u64")]
+    pub maximum_terminal_l1_dirty_lines: u64,
+    #[serde(skip_serializing_if = "is_zero_u64")]
+    pub maximum_terminal_l1_dirty_sectors: u64,
 }
 
 fn is_zero_u64(value: &u64) -> bool {
@@ -1094,12 +1122,17 @@ fn counters(
             writeback_completed_lines: value.writeback_completed_lines,
             writeback_completed_sectors: value.writeback_completed_sectors,
             writeback_completed_bytes: value.writeback_completed_bytes,
+            l1_writeback_completed_lines: value.l1_writeback_completed_lines,
+            l1_writeback_completed_sectors: value.l1_writeback_completed_sectors,
+            l1_writeback_completed_bytes: value.l1_writeback_completed_bytes,
             writeback_completion_frontier: value.writeback_completion_frontier,
             coherence_completed_transactions: value.coherence_completed_transactions,
             coherence_completed_sectors: value.coherence_completed_sectors,
             coherence_completion_frontier: value.coherence_completion_frontier,
             maximum_terminal_l2_dirty_lines: value.maximum_terminal_l2_dirty_lines,
             maximum_terminal_l2_dirty_sectors: value.maximum_terminal_l2_dirty_sectors,
+            maximum_terminal_l1_dirty_lines: value.maximum_terminal_l1_dirty_lines,
+            maximum_terminal_l1_dirty_sectors: value.maximum_terminal_l1_dirty_sectors,
         }),
         unmodeled_tails: tail_report(tails),
     }
@@ -1379,6 +1412,24 @@ fn resolve_mode(
             "coherence service cycles and capacity must be supplied together",
         ));
     }
+    if config.l1_visibility_protocol && config.coherence_service_cycles.is_none() {
+        return Err(RunError::new(
+            "arguments",
+            "L1 visibility protocol requires --coherence-service-cycles and --coherence-capacity-sectors",
+        ));
+    }
+    if config.l1_resident_writeback
+        && (config.coherence_service_cycles.is_none()
+            || config.dirty_writeback_capacity_sectors.is_none()
+            || config.memory_mode != MemoryMode::L1L2
+            || !config.carded_dram_bandwidth
+            || !config.l1_visibility_protocol)
+    {
+        return Err(RunError::new(
+            "arguments",
+            "L1 resident writeback requires l1-l2, --carded-dram, --dirty-writeback-capacity-sectors, the coherence service pair, and --l1-visibility-protocol",
+        ));
+    }
     if config.coherence_service_cycles.is_some() && config.memory_mode != MemoryMode::L1L2 {
         return Err(RunError::new(
             "arguments",
@@ -1455,7 +1506,12 @@ fn resolve_mode(
         .zip(config.coherence_capacity_sectors)
         .map(|(cycles, capacity)| CoherenceConfig::new(cycles, capacity))
         .transpose()
-        .map_err(at("coherence configuration"))?;
+        .map_err(at("coherence configuration"))?
+        .map(|value| {
+            value
+                .with_l1_visibility_protocol(config.l1_visibility_protocol)
+                .with_l1_resident_writeback(config.l1_resident_writeback)
+        });
     Ok(ReplayMemMode::L1SharedL2 {
         l1,
         l2,
@@ -1472,6 +1528,15 @@ pub fn run(config: &RunConfig) -> Result<RunReport, RunError> {
     let candidate_inputs = usize::from(config.memory_service_candidates.is_some())
         + usize::from(config.memory_admission_candidates.is_some())
         + usize::from(config.memory_admission_feedback.is_some());
+    let native_payload_sidecar_records = config
+        .native_payload_sidecar
+        .as_ref()
+        .map(|path| {
+            load_native_payload_sidecar(path)
+                .map(|payloads| payloads.len())
+                .map_err(at("native payload sidecar"))
+        })
+        .transpose()?;
     if candidate_inputs > 1 {
         return Err(RunError::new(
             "arguments",
@@ -1490,6 +1555,12 @@ pub fn run(config: &RunConfig) -> Result<RunReport, RunError> {
         return Err(RunError::new(
             "arguments",
             "--fast-frontier-only cannot combine with timing/resource overrides",
+        ));
+    }
+    if config.fast_frontier_only && config.native_payload_sidecar.is_some() {
+        return Err(RunError::new(
+            "arguments",
+            "--fast-frontier-only cannot combine with a native payload sidecar because it skips memory replay",
         ));
     }
     if config.fast_frontier_only
@@ -1589,6 +1660,12 @@ pub fn run(config: &RunConfig) -> Result<RunReport, RunError> {
             "coherence service currently requires --cache-scope launch",
         ));
     }
+    if config.l1_resident_writeback && config.cache_scope != CacheScope::Launch {
+        return Err(RunError::new(
+            "arguments",
+            "L1 resident writeback currently requires --cache-scope launch",
+        ));
+    }
     let memory_service_candidates =
         load_memory_service_candidates(config.memory_service_candidates.as_ref())?;
     let memory_admission_candidates =
@@ -1607,10 +1684,13 @@ pub fn run(config: &RunConfig) -> Result<RunReport, RunError> {
         && !config.fast_frontier_only
         && config.dirty_writeback_capacity_sectors.is_none()
         && config.coherence_service_cycles.is_none()
+        && !config.l1_visibility_protocol
+        && !config.l1_resident_writeback
         && ncu_observation.is_none()
         && !specialized_loader_requested
         && !performance_diagnostics_requested
         && config.launch_resources.is_none()
+        && config.native_payload_sidecar.is_none()
     {
         return PreparedReplay::prepare(config, CoverageAdmission::ExistingDirectBehavior)?
             .replay_all_report();
@@ -1721,9 +1801,12 @@ pub fn run(config: &RunConfig) -> Result<RunReport, RunError> {
             memory_mode: config.memory_mode.token(),
             cache_scope: config.cache_scope.token(),
             carded_dram_bandwidth: config.carded_dram_bandwidth,
+            native_payload_sidecar_records,
             dirty_writeback_capacity_sectors: config.dirty_writeback_capacity_sectors,
             coherence_service_cycles: config.coherence_service_cycles,
             coherence_capacity_sectors: config.coherence_capacity_sectors,
+            l1_visibility_protocol: config.l1_visibility_protocol,
+            l1_resident_writeback: config.l1_resident_writeback,
             fast_frontier_only: true,
             hypothetical_issue_ports: config
                 .hypothetical_issue_ports
@@ -1873,9 +1956,12 @@ pub fn run(config: &RunConfig) -> Result<RunReport, RunError> {
         memory_mode: config.memory_mode.token(),
         cache_scope: config.cache_scope.token(),
         carded_dram_bandwidth: config.carded_dram_bandwidth,
+        native_payload_sidecar_records,
         dirty_writeback_capacity_sectors: config.dirty_writeback_capacity_sectors,
         coherence_service_cycles: config.coherence_service_cycles,
         coherence_capacity_sectors: config.coherence_capacity_sectors,
+        l1_visibility_protocol: config.l1_visibility_protocol,
+        l1_resident_writeback: config.l1_resident_writeback,
         fast_frontier_only: false,
         hypothetical_issue_ports: config
             .hypothetical_issue_ports
@@ -1927,6 +2013,8 @@ mod tests {
             dirty_writeback_capacity_sectors: None,
             coherence_service_cycles: None,
             coherence_capacity_sectors: None,
+            l1_visibility_protocol: false,
+            l1_resident_writeback: false,
             hypothetical_issue_ports: None,
             architecture_spec: None,
             kernel_id: None,
@@ -1938,6 +2026,7 @@ mod tests {
             ncu_csv: None,
             ncu_launch: None,
             launch_resources: None,
+            native_payload_sidecar: None,
         }
     }
 
@@ -2016,6 +2105,55 @@ mod tests {
                 .to_string()
                 .contains("cannot combine with native memory/cache")
         );
+    }
+
+    #[test]
+    fn fast_frontier_rejects_native_payload_sidecar() {
+        let mut config = fixture(MemoryMode::Flat);
+        config.fast_frontier_only = true;
+        config.native_payload_sidecar = Some(
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(
+                "../../workloads/research_probes/sm86_value_differential/native_payload_sidecar_delta_2pow31_seed17.json",
+            ),
+        );
+        let error = run(&config).expect_err("fast-only must reject payload sidecars");
+        assert!(
+            error
+                .to_string()
+                .contains("cannot combine with a native payload sidecar")
+        );
+    }
+
+    #[test]
+    fn l1_visibility_requires_typed_coherence_configuration() {
+        let mut config = fixture(MemoryMode::L1L2);
+        config.l1_visibility_protocol = true;
+        let error = run(&config).expect_err("visibility protocol must require service bounds");
+        assert!(
+            error
+                .to_string()
+                .contains("requires --coherence-service-cycles")
+        );
+    }
+
+    #[test]
+    fn l1_resident_writeback_requires_queue_and_carded_dram() {
+        let mut config = fixture(MemoryMode::L1L2);
+        config.l1_resident_writeback = true;
+        let error = run(&config).expect_err("resident writeback must require its lower queue");
+        assert!(error.to_string().contains("L1 resident writeback requires"));
+    }
+
+    #[test]
+    fn l1_resident_writeback_requires_visibility_with_all_lower_resources() {
+        let mut config = fixture(MemoryMode::L1L2);
+        config.l1_resident_writeback = true;
+        config.dirty_writeback_capacity_sectors = Some(4);
+        config.carded_dram_bandwidth = true;
+        config.coherence_service_cycles = Some(1);
+        config.coherence_capacity_sectors = Some(4);
+        let error = run(&config).expect_err("resident writeback must require visibility protocol");
+        assert!(error.to_string().contains("--l1-visibility-protocol"));
     }
 
     #[test]

@@ -49,10 +49,22 @@ use sim_semantics::{
 };
 
 use crate::MemoryOrigin;
+use crate::SectorPayloadV1;
 
 pub const SECTOR_BYTES: u32 = 32;
 pub const SECTORS_PER_LINE: u32 = 4;
 pub const LINE_BYTES: u32 = SECTOR_BYTES * SECTORS_PER_LINE;
+
+/// Explicit store-state policy for the bounded L1 model. The default retains
+/// the existing write-through/no-allocate hypothesis. `ResidentHitWriteBack`
+/// is a separate experiment: a store marks only an already-valid resident
+/// sector dirty, so it never invents a write-allocate fill or a missing value.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum L1StorePolicy {
+    #[default]
+    WriteThroughNoAllocate,
+    ResidentHitWriteBack,
+}
 
 /// Configuration (card-resolved by `pchase_card`; latencies are integer
 /// cycles — the caller ceils the card's fractional cycle values).
@@ -108,6 +120,71 @@ pub enum L1AccessError {
     },
     #[error("L1 stalled without an in-flight fill")]
     StallWithoutFill,
+    #[error("L1 line {line} sector mask {sector_mask:#06b} is invalid")]
+    InvalidationMaskInvalid { line: i64, sector_mask: u8 },
+    #[error("L1 line {line} invalidation overlaps a pending fill")]
+    InvalidationPendingFill { line: i64 },
+    #[error("L1-wide invalidation overlaps one or more pending fills")]
+    InvalidationAllPendingFill,
+    #[error("L1 line {line} has dirty sectors {dirty_mask:#06b}; flush them before invalidation")]
+    DirtyResidencyBlocksInvalidation { line: i64, dirty_mask: u8 },
+    #[error("L1 line {line} has dirty sectors {dirty_mask:#06b}; flush them before eviction")]
+    DirtyResidencyBlocksEviction { line: i64, dirty_mask: u8 },
+    #[error("L1 line {line} is not resident")]
+    DirtyLineNotResident { line: i64 },
+    #[error(
+        "L1 line {line} dirty mask {dirty_mask:#06b} is not a resident-sector subset {valid_mask:#06b}"
+    )]
+    DirtyMaskInvalid {
+        line: i64,
+        dirty_mask: u8,
+        valid_mask: u8,
+    },
+    #[error(
+        "L1 dirty flush plan is stale for line {line}: expected {expected:#06b}, current {current:#06b}"
+    )]
+    DirtyFlushStale {
+        line: i64,
+        expected: u8,
+        current: u8,
+    },
+    #[error("L1 line {line} sector {sector} has no complete dirty payload")]
+    DirtyPayloadMissing { line: i64, sector: u8 },
+    #[error(transparent)]
+    DirtyPayload(#[from] crate::PayloadError),
+}
+
+/// One L1 line's dirty sectors.  Dirty state is an explicit opt-in seam;
+/// existing native replay remains write-through/no-allocate until a validated
+/// store policy and protocol boundary are supplied.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct L1DirtyLine {
+    pub line_id: i64,
+    pub dirty_mask: u8,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct L1DirtyFlushPlan {
+    lines: Box<[L1DirtyLine]>,
+}
+
+impl L1DirtyFlushPlan {
+    pub fn lines(&self) -> &[L1DirtyLine] {
+        &self.lines
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct L1InvalidationResult {
+    pub line_id: i64,
+    pub requested_mask: u8,
+    pub invalidated_mask: u8,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct L1DirtyResidency {
+    pub lines: u64,
+    pub sectors: u64,
 }
 
 /// Conservative mutation budget used by callers to prove that a multi-access
@@ -1089,6 +1166,7 @@ impl L1WriteLookupObserver {
 #[derive(Debug, Clone)]
 pub struct L1Cache {
     cfg: L1Config,
+    store_policy: L1StorePolicy,
     /// Fully-associative LRU line pool: monotonic recency stamps.
     by_stamp: BTreeMap<u64, i64>,
     stamp_of: HashMap<i64, u64>,
@@ -1097,6 +1175,13 @@ pub struct L1Cache {
     /// Also accumulates for in-flight line allocations (the fill services
     /// every merged sector).
     sectors: HashMap<i64, u8>,
+    /// Explicit opt-in dirty-sector state. The default replay policy does not
+    /// mark stores dirty; the resident-hit experiment uses this map and the
+    /// transactional flush API below.
+    dirty: HashMap<i64, u8>,
+    /// Optional known-byte payloads for the strict value-bearing flush lane.
+    /// Ordinary replay remains mask-only until a producer supplies these.
+    dirty_payloads: HashMap<(i64, u8), SectorPayloadV1>,
     /// In-flight fills: value = (due state, issue_seq) — the seq keeps
     /// same-timestamp same-kind timed fills in issue order like the Python
     /// stable sort. Event fills remain explicitly untimed. Sector fills are
@@ -1147,10 +1232,13 @@ impl L1Cache {
         let arch = cfg.arch;
         Ok(Self {
             cfg,
+            store_policy: L1StorePolicy::WriteThroughNoAllocate,
             by_stamp: BTreeMap::new(),
             stamp_of: HashMap::new(),
             next_stamp: NextSequence::Available(0),
             sectors: HashMap::new(),
+            dirty: HashMap::new(),
+            dirty_payloads: HashMap::new(),
             line_fills: HashMap::new(),
             sector_fills: HashMap::new(),
             line_generations: HashMap::new(),
@@ -1161,6 +1249,16 @@ impl L1Cache {
             write_lookup_observer: None,
             counters: L1Counters::for_arch(arch),
         })
+    }
+
+    /// Select the explicit resident-hit writeback experiment. This does not
+    /// alter cache geometry or fill timing and is intentionally opt-in.
+    pub fn set_store_policy(&mut self, policy: L1StorePolicy) {
+        self.store_policy = policy;
+    }
+
+    pub const fn store_policy(&self) -> L1StorePolicy {
+        self.store_policy
     }
 
     pub fn arch(&self) -> ArchId {
@@ -1185,6 +1283,12 @@ impl L1Cache {
             .collect::<Vec<_>>();
         let mut sectors = sectors;
         sectors.sort_unstable_by_key(|entry| entry.0);
+        let mut dirty = self
+            .dirty
+            .iter()
+            .map(|(&line, &mask)| (line, mask))
+            .collect::<Vec<_>>();
+        dirty.sort_unstable_by_key(|entry| entry.0);
         let mut line_fills = self
             .line_fills
             .iter()
@@ -1206,11 +1310,12 @@ impl L1Cache {
             .collect::<Vec<_>>();
         generations.sort_unstable_by_key(|entry| entry.0);
         format!(
-            "cfg={:?};by_stamp={:?};stamp_of={:?};sectors={:?};line_fills={:?};sector_fills={:?};generations={:?};next_stamp={:?};fill_seq={:?};active_lookup={:?};min_fill_due={:?};fill_timing={:?};counters={:?};write_observer={:?}",
+            "cfg={:?};by_stamp={:?};stamp_of={:?};sectors={:?};dirty={:?};line_fills={:?};sector_fills={:?};generations={:?};next_stamp={:?};fill_seq={:?};active_lookup={:?};min_fill_due={:?};fill_timing={:?};counters={:?};write_observer={:?}",
             self.cfg,
             self.by_stamp,
             stamp_of,
             sectors,
+            dirty,
             line_fills,
             sector_fills,
             generations,
@@ -1809,7 +1914,26 @@ impl L1Cache {
         Ok(())
     }
 
-    fn evict_beyond_capacity(&mut self) {
+    fn preflight_dirty_eviction(&self, additional_line: Option<i64>) -> Result<(), L1AccessError> {
+        let capacity = usize::try_from(self.cfg.line_capacity).unwrap_or(usize::MAX);
+        let additional = additional_line
+            .filter(|line| !self.line_resident(*line))
+            .map_or(0, |_| 1);
+        let evict_count = self
+            .by_stamp
+            .len()
+            .saturating_add(additional)
+            .saturating_sub(capacity);
+        for (&_stamp, &line) in self.by_stamp.iter().take(evict_count) {
+            if let Some(&dirty_mask) = self.dirty.get(&line) {
+                return Err(L1AccessError::DirtyResidencyBlocksEviction { line, dirty_mask });
+            }
+        }
+        Ok(())
+    }
+
+    fn evict_beyond_capacity(&mut self) -> Result<(), L1AccessError> {
+        self.preflight_dirty_eviction(None)?;
         while self.by_stamp.len() as u64 > self.cfg.line_capacity {
             let Some((&stamp, &line)) = self.by_stamp.first_key_value() else {
                 break;
@@ -1824,10 +1948,216 @@ impl L1Cache {
             // resurrect into the new line.
             self.line_generations.remove(&line);
         }
+        Ok(())
     }
 
     fn line_resident(&self, line: i64) -> bool {
         self.stamp_of.contains_key(&line)
+    }
+
+    fn validate_sector_mask(line: i64, sector_mask: u8) -> Result<(), L1AccessError> {
+        if sector_mask == 0 || sector_mask & !(0b1111) != 0 {
+            return Err(L1AccessError::InvalidationMaskInvalid { line, sector_mask });
+        }
+        Ok(())
+    }
+
+    /// Mark resident sectors dirty for an explicit write-policy experiment.
+    /// The default native replay path never calls this method; stores retain
+    /// their existing write-through/no-allocate hypothesis until a validated
+    /// protocol supplies the call and a completion boundary.
+    pub fn mark_dirty(&mut self, line: i64, sector_mask: u8) -> Result<(), L1AccessError> {
+        Self::validate_sector_mask(line, sector_mask)?;
+        let valid_mask = self.sectors.get(&line).copied().unwrap_or(0);
+        if !self.line_resident(line) {
+            return Err(L1AccessError::DirtyLineNotResident { line });
+        }
+        if sector_mask & !valid_mask != 0 {
+            return Err(L1AccessError::DirtyMaskInvalid {
+                line,
+                dirty_mask: sector_mask,
+                valid_mask,
+            });
+        }
+        *self.dirty.entry(line).or_default() |= sector_mask;
+        // A mask-only mutation carries no replacement bytes. Never retain an
+        // older complete payload and present it as this store's value.
+        for sector in 0..4_u8 {
+            if sector_mask & (1_u8 << sector) != 0 {
+                self.dirty_payloads.remove(&(line, sector));
+            }
+        }
+        Ok(())
+    }
+
+    /// Mark one resident sector dirty with a complete known-byte payload.
+    /// This is the value-bearing companion to the legacy mask-only method.
+    pub fn mark_dirty_payload(&mut self, payload: SectorPayloadV1) -> Result<(), L1AccessError> {
+        let line = payload.line_id();
+        let sector = payload.sector();
+        if !self.line_resident(line) {
+            return Err(L1AccessError::DirtyLineNotResident { line });
+        }
+        let valid_mask = self.sectors.get(&line).copied().unwrap_or(0);
+        let bit = 1_u8 << sector;
+        if valid_mask & bit == 0 {
+            return Err(L1AccessError::DirtyMaskInvalid {
+                line,
+                dirty_mask: bit,
+                valid_mask,
+            });
+        }
+        if !payload.is_fully_known() {
+            return Err(L1AccessError::DirtyPayloadMissing { line, sector });
+        }
+        let payload = match self.dirty_payloads.get(&(line, sector)) {
+            Some(previous) => previous.merge(payload)?,
+            None => payload,
+        };
+        self.dirty
+            .insert(line, self.dirty.get(&line).copied().unwrap_or(0) | bit);
+        self.dirty_payloads.insert((line, sector), payload);
+        Ok(())
+    }
+
+    pub fn preview_dirty_payloads(&self) -> Result<Vec<SectorPayloadV1>, L1AccessError> {
+        let mut payloads = Vec::new();
+        for (&line, &mask) in &self.dirty {
+            for sector in 0..4_u8 {
+                if mask & (1 << sector) == 0 {
+                    continue;
+                }
+                let Some(payload) = self.dirty_payloads.get(&(line, sector)).copied() else {
+                    return Err(L1AccessError::DirtyPayloadMissing { line, sector });
+                };
+                if !payload.is_fully_known() {
+                    return Err(L1AccessError::DirtyPayloadMissing { line, sector });
+                }
+                payloads.push(payload);
+            }
+        }
+        payloads.sort_by_key(|payload| (payload.line_id(), payload.sector()));
+        Ok(payloads)
+    }
+
+    /// Return the current dirty-line gauge. This is a state observation, not
+    /// completed traffic; callers must use the transactional flush plan below
+    /// before claiming a writeback completion.
+    pub fn dirty_residency(&self) -> L1DirtyResidency {
+        L1DirtyResidency {
+            lines: u64::try_from(self.dirty.len()).unwrap_or(u64::MAX),
+            sectors: self
+                .dirty
+                .values()
+                .map(|mask| u64::from(mask.count_ones()))
+                .sum(),
+        }
+    }
+
+    /// Snapshot dirty sectors without mutating cache state. The plan is
+    /// committed only after the lower-level service has accepted the exact
+    /// masks, preventing a failed admission from silently clearing dirty data.
+    pub fn preview_dirty_flush(&self) -> L1DirtyFlushPlan {
+        let mut lines = self
+            .dirty
+            .iter()
+            .map(|(&line_id, &dirty_mask)| L1DirtyLine {
+                line_id,
+                dirty_mask,
+            })
+            .collect::<Vec<_>>();
+        lines.sort_unstable_by_key(|line| line.line_id);
+        L1DirtyFlushPlan {
+            lines: lines.into_boxed_slice(),
+        }
+    }
+
+    /// Commit a previously previewed flush after lower-level service has
+    /// accepted it. Resident tags remain present but become clean.
+    pub fn commit_dirty_flush(&mut self, plan: L1DirtyFlushPlan) -> Result<(), L1AccessError> {
+        for line in plan.lines() {
+            let current = self.dirty.get(&line.line_id).copied().unwrap_or(0);
+            if current != line.dirty_mask {
+                return Err(L1AccessError::DirtyFlushStale {
+                    line: line.line_id,
+                    expected: line.dirty_mask,
+                    current,
+                });
+            }
+        }
+        for line in plan.lines() {
+            self.dirty.remove(&line.line_id);
+            for sector in 0..4_u8 {
+                if line.dirty_mask & (1 << sector) != 0 {
+                    self.dirty_payloads.remove(&(line.line_id, sector));
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Invalidate resident sectors after the caller has completed any dirty
+    /// flush and protocol service. Pending fills are rejected rather than
+    /// silently dropped because response tokens need an explicit invalidation
+    /// event/ack path in the SM system.
+    pub fn invalidate(
+        &mut self,
+        line: i64,
+        sector_mask: u8,
+    ) -> Result<L1InvalidationResult, L1AccessError> {
+        Self::validate_sector_mask(line, sector_mask)?;
+        if self.line_fills.contains_key(&line)
+            || self
+                .sector_fills
+                .keys()
+                .any(|(candidate, _, _)| *candidate == line)
+        {
+            return Err(L1AccessError::InvalidationPendingFill { line });
+        }
+        let resident_mask = self.sectors.get(&line).copied().unwrap_or(0);
+        let invalidated_mask = resident_mask & sector_mask;
+        let dirty_mask = self.dirty.get(&line).copied().unwrap_or(0) & invalidated_mask;
+        if dirty_mask != 0 {
+            return Err(L1AccessError::DirtyResidencyBlocksInvalidation { line, dirty_mask });
+        }
+        if invalidated_mask != 0 {
+            let next = resident_mask & !invalidated_mask;
+            if next == 0 {
+                self.sectors.remove(&line);
+                if let Some(stamp) = self.stamp_of.remove(&line) {
+                    self.by_stamp.remove(&stamp);
+                }
+            } else {
+                self.sectors.insert(line, next);
+            }
+        }
+        Ok(L1InvalidationResult {
+            line_id: line,
+            requested_mask: sector_mask,
+            invalidated_mask,
+        })
+    }
+
+    /// Explicit cache-control invalidation for a complete L1. This models
+    /// only the admitted `CCTL.IVALL`-style operation: pending fills and dirty
+    /// sectors refuse because the SM event layer must first account for their
+    /// response/writeback ordering.
+    pub fn invalidate_all(&mut self) -> Result<u64, L1AccessError> {
+        if !self.line_fills.is_empty() || !self.sector_fills.is_empty() {
+            return Err(L1AccessError::InvalidationAllPendingFill);
+        }
+        if let Some((&line, &dirty_mask)) = self.dirty.iter().next() {
+            return Err(L1AccessError::DirtyResidencyBlocksInvalidation { line, dirty_mask });
+        }
+        let sectors = self
+            .sectors
+            .values()
+            .map(|mask| u64::from(mask.count_ones()))
+            .sum();
+        self.by_stamp.clear();
+        self.stamp_of.clear();
+        self.sectors.clear();
+        Ok(sectors)
     }
 
     fn commit_due_fills(
@@ -1838,7 +2168,7 @@ impl L1Cache {
             if kind == 0 {
                 self.line_fills.remove(&line);
                 self.touch_mru(line)?;
-                self.evict_beyond_capacity();
+                self.evict_beyond_capacity()?;
             } else {
                 self.sector_fills.remove(&(line, sector, generation));
                 let generation_matches = self.line_generations.get(&line) == Some(&generation);
@@ -2590,9 +2920,10 @@ impl L1Cache {
         self.commit_latch(FillTiming::Event);
         match fill {
             FillKey::Line { line, .. } => {
+                self.preflight_dirty_eviction(Some(line))?;
                 self.line_fills.remove(&line);
                 self.touch_mru(line)?;
-                self.evict_beyond_capacity();
+                self.evict_beyond_capacity()?;
                 Ok(true)
             }
             FillKey::Sector {
@@ -2651,13 +2982,20 @@ impl L1Cache {
         self.counters = self.counters.add_fields_checked(origin, deltas)?;
         if hit {
             self.touch_mru(line)?;
+            if origin == MemoryOrigin::Global
+                && accounting == WriteAccounting::Store
+                && self.store_policy == L1StorePolicy::ResidentHitWriteBack
+            {
+                self.mark_dirty(line, 1_u8 << sector)?;
+            }
         }
         Ok(hit)
     }
 
-    /// v0 extension: hit-TEST a global-class store sector against the
-    /// current state without allocating on miss (write-through
-    /// no-allocate hypothesis). A store hit re-references the line.
+    /// Hit-test a global-class store sector against the current state without
+    /// allocating on miss. Under the default policy this is a write-through
+    /// no-allocate hypothesis; the explicit resident-hit writeback policy marks
+    /// a valid hit dirty for the terminal flush path.
     /// Counts BOTH candidate hit rules — sector-valid (`store_hits`,
     /// the ported-era diagnostic) and the §6.4 write-class line-TAG
     /// rule (`store_tag_hits`) — without changing state behavior (MRU
@@ -3096,10 +3434,13 @@ mod tests {
         assert_eq!(actual.cfg.mshr_count, expected.cfg.mshr_count);
         assert_eq!(actual.cfg.hit_latency, expected.cfg.hit_latency);
         assert_eq!(actual.cfg.miss_latency, expected.cfg.miss_latency);
+        assert_eq!(actual.store_policy, expected.store_policy);
         assert_eq!(actual.by_stamp, expected.by_stamp);
         assert_eq!(actual.stamp_of, expected.stamp_of);
         assert_eq!(actual.next_stamp, expected.next_stamp);
         assert_eq!(actual.sectors, expected.sectors);
+        assert_eq!(actual.dirty, expected.dirty);
+        assert_eq!(actual.dirty_payloads, expected.dirty_payloads);
         assert_eq!(actual.line_fills, expected.line_fills);
         assert_eq!(actual.sector_fills, expected.sector_fills);
         assert_eq!(actual.line_generations, expected.line_generations);
@@ -3111,12 +3452,158 @@ mod tests {
         assert_eq!(actual.counters, expected.counters);
     }
 
+    #[test]
+    fn resident_hit_writeback_policy_marks_only_valid_store_hits_dirty() {
+        let mut l1 = cache(4, Some(2));
+        l1.set_store_policy(L1StorePolicy::ResidentHitWriteBack);
+        let EvAccess::MissRequest { fill } = access_ev(&mut l1, 0, 0) else {
+            panic!("cold access must allocate a fill");
+        };
+        assert!(complete(&mut l1, fill));
+        assert!(!store(&mut l1, 1, 1), "a cold sector is not a dirty L1 hit");
+        assert_eq!(l1.dirty_residency(), L1DirtyResidency::default());
+        assert!(store(&mut l1, 0, 2), "resident sector must be a store hit");
+        assert_eq!(
+            l1.dirty_residency(),
+            L1DirtyResidency {
+                lines: 1,
+                sectors: 1
+            }
+        );
+        let plan = l1.preview_dirty_flush();
+        l1.commit_dirty_flush(plan).unwrap();
+        assert_eq!(l1.dirty_residency(), L1DirtyResidency::default());
+    }
+
     fn counters_invariant(c: &L1Counters) {
         assert_eq!(
             c.misses,
             c.line_alloc_misses + c.sector_resident_misses + c.merges,
             "miss == line_alloc + sector_resident + merge"
         );
+    }
+
+    #[test]
+    fn dirty_flush_is_transactional_and_invalidation_requires_clean_line() {
+        let mut l1 = cache(4, Some(2));
+        let EvAccess::MissRequest { fill } = access_ev(&mut l1, 0, 0) else {
+            panic!("cold access must allocate a fill");
+        };
+        assert!(complete(&mut l1, fill));
+        l1.mark_dirty(0, 0b0001).unwrap();
+        assert_eq!(
+            l1.dirty_residency(),
+            L1DirtyResidency {
+                lines: 1,
+                sectors: 1
+            }
+        );
+        let plan = l1.preview_dirty_flush();
+        assert_eq!(
+            plan.lines(),
+            &[L1DirtyLine {
+                line_id: 0,
+                dirty_mask: 1
+            }]
+        );
+        assert_eq!(
+            l1.invalidate(0, 1),
+            Err(L1AccessError::DirtyResidencyBlocksInvalidation {
+                line: 0,
+                dirty_mask: 1
+            })
+        );
+        l1.commit_dirty_flush(plan).unwrap();
+        assert_eq!(l1.dirty_residency(), L1DirtyResidency::default());
+        assert_eq!(
+            l1.invalidate(0, 1).unwrap(),
+            L1InvalidationResult {
+                line_id: 0,
+                requested_mask: 1,
+                invalidated_mask: 1
+            }
+        );
+    }
+
+    #[test]
+    fn known_payload_dirty_lane_round_trips_through_flush_plan() {
+        let mut l1 = cache(4, Some(2));
+        let EvAccess::MissRequest { fill } = access_ev(&mut l1, 0, 0) else {
+            panic!("cold access must allocate a fill");
+        };
+        assert!(complete(&mut l1, fill));
+        let payload = SectorPayloadV1::new(9, 0, 0, 1, [7; 32], u32::MAX).unwrap();
+        l1.mark_dirty_payload(payload).unwrap();
+        let captured = l1.preview_dirty_payloads().unwrap();
+        assert_eq!(captured, vec![payload]);
+        let plan = l1.preview_dirty_flush();
+        l1.commit_dirty_flush(plan).unwrap();
+        assert!(l1.preview_dirty_payloads().unwrap().is_empty());
+    }
+
+    #[test]
+    fn mask_only_dirty_flush_refuses_value_bearing_preview() {
+        let mut l1 = cache(4, Some(2));
+        let EvAccess::MissRequest { fill } = access_ev(&mut l1, 0, 0) else {
+            panic!("cold access must allocate a fill");
+        };
+        assert!(complete(&mut l1, fill));
+        l1.mark_dirty(0, 1).unwrap();
+        assert_eq!(
+            l1.preview_dirty_payloads(),
+            Err(L1AccessError::DirtyPayloadMissing { line: 0, sector: 0 })
+        );
+    }
+
+    #[test]
+    fn invalidation_refuses_pending_fill_tokens() {
+        let mut l1 = cache(4, Some(2));
+        let EvAccess::MissRequest { fill } = access_ev(&mut l1, 0, 0) else {
+            panic!("cold access must allocate a fill");
+        };
+        assert_eq!(
+            l1.invalidate(0, 1),
+            Err(L1AccessError::InvalidationPendingFill { line: 0 })
+        );
+        assert!(complete(&mut l1, fill));
+    }
+
+    #[test]
+    fn dirty_line_blocks_capacity_eviction_before_state_mutation() {
+        let mut l1 = cache(1, Some(2));
+        let EvAccess::MissRequest { fill } = access_ev(&mut l1, 0, 0) else {
+            panic!("cold access must allocate a fill");
+        };
+        assert!(complete(&mut l1, fill));
+        l1.mark_dirty(0, 1).unwrap();
+        let EvAccess::MissRequest { fill: replacement } = access_ev(&mut l1, 4, 1) else {
+            panic!("conflicting line must allocate a fill");
+        };
+        assert_eq!(
+            l1.complete_fill(replacement),
+            Err(L1AccessError::DirtyResidencyBlocksEviction {
+                line: 0,
+                dirty_mask: 1
+            })
+        );
+        assert_eq!(l1.dirty_residency().sectors, 1);
+        assert!(l1.is_line_fill_in_flight(1));
+    }
+
+    #[test]
+    fn explicit_all_invalidation_clears_clean_resident_lines() {
+        let mut l1 = cache(4, Some(2));
+        for sector in [0, 4] {
+            let EvAccess::MissRequest { fill } = access_ev(&mut l1, sector, 0) else {
+                panic!("cold access must allocate a fill");
+            };
+            assert!(complete(&mut l1, fill));
+        }
+        assert_eq!(l1.invalidate_all().unwrap(), 2);
+        assert!(matches!(
+            access_ev(&mut l1, 0, 1),
+            EvAccess::MissRequest { .. }
+        ));
     }
 
     #[test]

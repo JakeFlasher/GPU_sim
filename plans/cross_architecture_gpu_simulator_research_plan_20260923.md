@@ -23,7 +23,7 @@ arbitrary postprocessing formula establishes a novel hardware mechanism.
 | Fast research prototype | `sim-run --fast-frontier-only` / `sm86_fast_exact_prototype_20260927.md` | Certificate rate, refusal reasons, planner-inclusive wall time and boundary-state differential |
 | Architecture contribution | Width override and custom resource scheduling | A real mechanism whose intervention changes a defensible design decision |
 | Toolchain | PTX, Vortex/VOLT and OpenVADL options researched | User-selected input/output ABI and concrete semantic/compiler subset |
-| External baseline | Non-scoring Accel-Sim/Huerta overlap | Explicit scope and common hardware/workload/observable before numerical comparison |
+| External baseline | Two separate lanes: published Accel-Sim aggregate accuracy-ceiling/throughput-speed-floor corpus plus optional Accel-Sim/Huerta executable/parser overlap | Local NCU is ground truth; evaluate the registered literature targets, while direct executable timing still requires an explicitly matched frontend/workload/observable |
 
 Fixed replay can vary timing/resources only when instructions, addresses,
 predicates and participants remain valid. A value/CFG/atomic-order intervention

@@ -1,17 +1,32 @@
 # Baseline feasibility — first M6 probe
 
-Updated 2026-09-23. No cross-simulator numeric claim is made by this note.
+Updated 2026-09-28. This dated report retains its executable-probe facts, but
+its interpretation is superseded by the three-lane contract below.
+
+## Interpretation correction (2026-09-28)
+
+NCU measurements on the local RTX 3090 Ti are the detailed ground truth.
+Published/previously collected Accel-Sim aggregates are not ground truth, but
+they are active accuracy ceilings and throughput/speedup floors that this
+project must meet or surpass; see
+[`accelsim_literature_lower_bound_manifest_20260928.json`](accelsim_literature_lower_bound_manifest_20260928.json).
+The pinned executable probes below are parser/representation evidence only and
+are not required to be a same-card timing baseline.
 
 The machine-readable M6 matrix is
 [`baseline_matrix_20260924.json`](baseline_matrix_20260924.json). It records
 the local NCU anchor, executable external overlaps, and unsupported cells
 without collapsing them into a ranking.
 
-## Valid comparison cells
+## Comparison lanes
 
-None have been scored yet. A valid cell requires a runnable baseline, the same
-workload/trace scope, comparable modeled detail, and an identical observable
-definition.
+* **Local NCU lane:** score simulator accuracy against NCU on the RTX 3090 Ti
+  with a content-bound workload, endpoint, and clock protocol.
+* **Literature-floor lane:** evaluate the manifest's per-domain error ceilings
+  and speed floors; different published hardware prevents per-kernel transfer
+  but does not erase the target.
+* **Executable-smoke lane:** validate parser/trace compatibility only. Its
+  cycle counter is not an NCU label.
 
 ## Huerta MICRO'25 source probe — initial host attempt
 
@@ -50,8 +65,8 @@ replay used Accel-Sim's `SM86_RTX3070` card, while the ground-truth host and
 this project card are RTX 3090 Ti. It also consumed Accel-Sim's legacy
 `.traceg.xz` representation rather than this project's enhanced protobuf
 capture. The exact commands, revisions, and artifacts are in
-`docs/accelsim_executable_overlap_probe_20260923.md`; no accuracy percentage
-or speed ranking is inferred from it.
+`docs/accelsim_executable_overlap_probe_20260923.md`; no local NCU accuracy or
+literature-floor attainment is inferred from it.
 
 A follow-up derived profile changed only SM count, memory partitions, and
 locked clock domains toward the RTX 3090 Ti anchor. Three replays completed at
@@ -75,16 +90,17 @@ instructions, 512 issued CTAs, and 7.680/8.233 s process wall time. The exact
 build, command, and outputs are recorded in
 `docs/huerta_micro25_executable_overlap_probe_20260923.md`.
 
-This is still not a valid numeric cell: the card is RTX 3090 rather than the
+This is still not a direct executable NCU cell: the card is RTX 3090 rather than the
 ground-truth RTX 3090 Ti, its counter is not the NCU GPC-cycle observable, and
 repeated invocations can fail in the upstream protobuf map materialization
 (`map.h:1429`). The result is therefore executable overlap evidence only.
 
 ## M6 decision
 
-Do not report a numerical baseline ranking yet. Accel-Sim 2.0 and Huerta
-MICRO'25 now have executable overlap records, but the observed cells remain
-`unsupported_pending_architecture_and_trace_alignment` or
-`executable_overlap_non_scoring`. Continue with the local accuracy/speed and
-design-study evidence while seeking a 3090 Ti-compatible external card and a
-stable common trace/observable boundary.
+Do not report a direct executable-cycle ranking. Accel-Sim 2.0 and Huerta
+MICRO'25 executable overlaps remain parser/representation evidence, while the
+published Accel-Sim aggregate rows are registered accuracy-ceiling and
+throughput/speed-floor targets. Continue
+with local NCU accuracy-ceiling and throughput/speed-floor evidence and report attainment against the
+manifest; a 3090 Ti-compatible external card is not required for the
+literature-floor lane.

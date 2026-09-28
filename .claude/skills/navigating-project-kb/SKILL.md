@@ -28,6 +28,10 @@ NCU/CUPTI values are independent labels, never same-cell replay inputs.
 Architecture cards do not inherit missing values from another architecture.
 Fixed SASS replay supports trace-safe resource changes only; value/address/CFG,
 atomic-order, or participant changes need a functional frontend or recapture.
-Literature numbers and external simulator overlap are not local validation.
+Literature numbers and external simulator overlap are not local NCU ground
+truth. Published Accel-Sim aggregates are active accuracy-ceiling and
+throughput/speed-floor targets recorded in
+`docs/accelsim_literature_lower_bound_manifest_20260928.json`;
+executable overlap remains parser/direct-cycle evidence only.
 Root `AGENTS.md` controls permissions and workflow; this file only routes
 knowledge and does not create gates, review loops, or tool bans.

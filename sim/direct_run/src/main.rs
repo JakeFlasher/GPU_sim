@@ -12,12 +12,15 @@ const USAGE: &str = "Usage: sim-run --trace DIR --control FILE --arch-card FILE 
 [--cache-scope launch|stream-l2] [--carded-dram] [--kernel-id ID] \
 [--dirty-writeback-capacity-sectors N] \
 [--coherence-service-cycles N --coherence-capacity-sectors N] \
+[--l1-visibility-protocol] \
+[--l1-resident-writeback] \
 [--hypothetical-issue-ports N] \
 [--architecture-spec FILE] \
 [--fast-frontier-only] \
 [--ncu-shaped-metrics] \
 [--ncu-csv FILE] [--ncu-launch ID] \
 [--launch-resources FILE] \
+[--native-payload-sidecar FILE] \
 [--memory-service-candidates FILE] [--memory-admission-candidates FILE] \
 [--memory-admission-feedback FILE]";
 
@@ -51,6 +54,8 @@ fn parse_args(args: impl IntoIterator<Item = OsString>) -> Result<Option<RunConf
     let mut dirty_writeback_capacity_sectors = None;
     let mut coherence_service_cycles = None;
     let mut coherence_capacity_sectors = None;
+    let mut l1_visibility_protocol = false;
+    let mut l1_resident_writeback = false;
     let mut hypothetical_issue_ports = None;
     let mut architecture_spec = None;
     let mut fast_frontier_only = false;
@@ -59,6 +64,7 @@ fn parse_args(args: impl IntoIterator<Item = OsString>) -> Result<Option<RunConf
     let mut ncu_csv = None;
     let mut ncu_launch = None;
     let mut launch_resources = None;
+    let mut native_payload_sidecar = None;
     let mut memory_service_candidates = None;
     let mut memory_admission_candidates = None;
     let mut memory_admission_feedback = None;
@@ -157,6 +163,12 @@ fn parse_args(args: impl IntoIterator<Item = OsString>) -> Result<Option<RunConf
                 }
                 coherence_capacity_sectors = Some(capacity);
             }
+            value if value == OsStr::new("--l1-visibility-protocol") => {
+                l1_visibility_protocol = true;
+            }
+            value if value == OsStr::new("--l1-resident-writeback") => {
+                l1_resident_writeback = true;
+            }
             value if value == OsStr::new("--kernel-id") => {
                 let raw = take_value(&mut args, "--kernel-id")?;
                 let raw = raw
@@ -214,6 +226,12 @@ fn parse_args(args: impl IntoIterator<Item = OsString>) -> Result<Option<RunConf
                 launch_resources =
                     Some(PathBuf::from(take_value(&mut args, "--launch-resources")?));
             }
+            value if value == OsStr::new("--native-payload-sidecar") => {
+                native_payload_sidecar = Some(PathBuf::from(take_value(
+                    &mut args,
+                    "--native-payload-sidecar",
+                )?));
+            }
             value if value == OsStr::new("--memory-service-candidates") => {
                 memory_service_candidates = Some(PathBuf::from(take_value(
                     &mut args,
@@ -253,6 +271,8 @@ fn parse_args(args: impl IntoIterator<Item = OsString>) -> Result<Option<RunConf
         dirty_writeback_capacity_sectors,
         coherence_service_cycles,
         coherence_capacity_sectors,
+        l1_visibility_protocol,
+        l1_resident_writeback,
         hypothetical_issue_ports,
         architecture_spec,
         kernel_id,
@@ -261,6 +281,7 @@ fn parse_args(args: impl IntoIterator<Item = OsString>) -> Result<Option<RunConf
         ncu_csv,
         ncu_launch,
         launch_resources,
+        native_payload_sidecar,
         memory_service_candidates,
         memory_admission_candidates,
         memory_admission_feedback,
@@ -538,10 +559,14 @@ mod tests {
             OsString::from("2"),
             OsString::from("--coherence-capacity-sectors"),
             OsString::from("8"),
+            OsString::from("--l1-visibility-protocol"),
+            OsString::from("--l1-resident-writeback"),
         ])
         .unwrap()
         .unwrap();
         assert_eq!(parsed.coherence_service_cycles, Some(2));
         assert_eq!(parsed.coherence_capacity_sectors, Some(8));
+        assert!(parsed.l1_visibility_protocol);
+        assert!(parsed.l1_resident_writeback);
     }
 }

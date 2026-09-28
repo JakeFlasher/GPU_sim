@@ -1,113 +1,93 @@
 # Continuation memory
 
-Updated 2026-09-27. Read this first; [STATUS](STATUS.md) owns current capability
-claims, [runbook](runbook_host.md) owns commands, [HISTORY](HISTORY.md) owns dated
-records. Do not load every linked report. Root [AGENTS.md](../AGENTS.md) is policy.
+Updated 2026-09-28. Read this file first, then [STATUS](STATUS.md) and
+[HISTORY](HISTORY.md). Load dated reports only for the narrow question at hand.
+`AGENTS.md` is the governing repository policy.
 
-## Current state
+## Current scope
 
-- Branch `GPUSim_main`; inspect `git status` before editing. Native hardware
-  target is SM86/RTX 3090 Ti. No AMD/SM120 validation is established here.
-- Native replay consumes fixed NVBit/SASS instructions, predicates, addresses,
-  participants, cards, and control sidecars. NCU is post-replay comparison only.
-- `simt_u32_v1`/`sim-sm::custom`: fixed functional ISA with dependency/resource
-  scheduling, resident groups, shared memory, bounded barriers, atomics and
-  collectives. It does not share native cache timing.
-- `simt_its_v1`: single-group functional per-lane PCs plus indirect u32 memory;
-  `custom_simt_its SPEC PROGRAM --trace` emits `custom_its_dynamic_v2` JSON.
-  Trace cap is 100k records plus 32 MiB of accumulated serialized bytes for the
-  individual JSON records (the result envelope is not counted), not an RSS cap.
-  Records include grouped successor masks and explicit BSSY/BSYNC
-  join/resume PCs; this remains a custom functional CFG artifact.
-- Native `schema_version=1`, `metric_surface_version=2`; the metric map is
-  additive. Dirty-writeback/coherence scenario rows are postprocessing formulas.
-  `min_selected_then_lexical_v1` balances candidate counts in extraction order,
-  not scheduler pressure or dynamic hardware routing. See [diagnostics](experimental_diagnostics.md).
-- `sim-run --fast-frontier-only` is an opt-in trace-derived PhaseFuse lane. It
-  skips native timing replay, certifies only narrow scalar regions at a proven
-  single-launch mask-metadata/empty boundary, and reports non-full-population
-  refusal reasons; its
-  output is not a timing prediction or NCU replacement.
-- `ptx_subset_compile` lowers a small text subset into `simt_its_v1`; it is a
-  functional compiler/assembler seam, not arbitrary PTX, CUDA ABI or SASS.
-- `tools/traceg_adapter_probe` is a strict v2 representation probe for a
-  single full-mask IADD3/FADD launch with an actual dynamic EXIT. It is a
-  self-parser round trip, not independent legacy-parser validation or timing.
-- Custom `operation_resources` may be a scalar or an alternative list. The
-  custom event pipeline selects a feasible resource using modeled latency,
-  initiation interval and in-flight capacity, and reports the concrete choice;
-  this is not native SM86 physical-pipe attribution.
-- `sim-mem::writeback` provides an opt-in dirty-sector queue primitive with
-  transactional capacity/timing preflight, fixed-point shared read/write
-  service, same-line fetch hazards and tokenized completion. Native launch
-  replay enables it only through explicit `--dirty-writeback-capacity-sectors`;
-  coherence ownership/visibility and resident dirty flush remain tails.
-- `sim-mem::coherence` provides an opt-in directory-style service selected by
-  `--coherence-service-cycles N --coherence-capacity-sectors N`. It models only
-  ordered, fully decoded L2-request topology. It refuses sampled/mask-incomplete
-  replay, excludes local-sector and texture domains, keeps pending ownership
-  invisible until completion, and avoids unrelated-line service head-of-line
-  delay. The queue starts cold; L1-hidden accesses, resident ownership,
-  same-launch L1-hit invalidation, protocol fences and native visibility scope
-  remain explicit limits. Stream-L2 sessions reject this opt-in because the
-  directory is not persisted across launch boundaries. Carded dirty writeback
-  also refuses sampled coverage.
+- Repository: `/home/jakeshea/GPU_simulator_rebase`, branch `GPUSim_main`.
+- Native target: SM86 / RTX 3090 Ti. Native replay is
+  NVBit/SASS -> enhanced protobuf -> `sim-trace` -> `sim-sm`/`sim-mem`/
+  `sim-engine` -> `sim-run`.
+- NCU is the detailed local measurement lane and is never used to select
+  simulator parameters. CUPTI is independent launch/resource observation.
+- Alpha development is intentionally unbound: no artifact hashes, freshness
+  gates, verification manifests, correctness gates, or scoring gates are
+  required. Historical/bound forms remain explicit `--bound` promotion paths.
 
-## Do not repeat earlier overclaims
+## Implemented bounded seams
 
-- The four native gaps are **not closed**: full coherence/resident dirty flush,
-  timed physical-pipe selection, value-dependent SASS regeneration, and a
-  general ISA/compiler. The user accepted bounded models and requested compiler
-  alternatives; current heuristics are not full models of those mechanisms.
-- The eight-row September-26 table reuses a September-1 development corpus.
-  Its 3.46% GPC-frontier discrepancy is not held-out elapsed-time accuracy.
-  TEX-only simulator versus all-source NCU L2 totals are not a valid L2 score.
-- Stable module/library files can be identified. JIT/opaque origins remain
-  unavailable; active graph launches are rejected, not successfully captured.
-- Full Accel-Sim/MGPUSim comparison has not run; a tiny Accel-Sim parser/timing
-  compatibility smoke is recorded in the external-baseline contract, not a
-  score. Confirm scope before resuming. Old “all future tasks closed”
-  session/ledger statements are superseded.
-- A bounded live RTX 3090 Ti/NCU development rerun of the existing metric-domain
-  matrix is documented in `docs/sm86_independent_holdout_20260927.md`; its
-  instruction/store/atomic/reduction counter rows match, but it is not
-  independent/held-out, clocks were unlocked, and DRAM domains do not match.
+- Native replay: fixed captured instructions, predicates, addresses,
+  participants, cards, and control sidecars; issue/event/completion/launch
+  frontiers remain separate.
+- Custom `simt_u32_v1`: fixed functional ISA with dependency/resource
+  scheduling, resident groups, shared memory, barriers, atomics, and
+  collectives. Custom `simt_its_v1` is a separate single-group functional
+  executor, not native SASS or a timing backend.
+- `custom_its_dynamic_v3`: bounded per-lane PCs, predicates, successor masks,
+  explicit BSSY/BSYNC join/resume PCs, and optional register/predicate snapshots;
+  limits are 100k records and 32 MiB of serialized record bytes.
+- `ptx_subset_v2`: bounded functional frontend including deterministic indirect
+  atomic-add; it is not arbitrary PTX, CUDA ABI, SASS, or a timing compiler.
+- Native writeback/coherence experiments are opt-in:
+  `--dirty-writeback-capacity-sectors`, `--coherence-service-cycles` plus
+  `--coherence-capacity-sectors`, `--l1-visibility-protocol`, and
+  `--l1-resident-writeback`. They provide typed queues, ownership observations,
+  invalidation events, terminal dirty gauges, and transactional service; they do
+  not establish proprietary cache ownership, eviction, payload, or host-flush
+  semantics.
+- `--native-payload-sidecar` admits bounded value-bearing sidecar records but
+  does not alter default replay or complete a native value/cache protocol.
+- PhaseFuse `--fast-frontier-only` is conservative trace analysis. It refuses
+  sampled/multi-launch/non-full-population/unknown-state cases and is not a
+  timing prediction.
+- The `.traceg` probe is an ALU-only v2 representation contract. Its default
+  alpha output is path/size-only; `--bound` adds historical digest fields.
+- Alpha compiler/value adapters and register capture tools are unbound by
+  default. They remain finite static/value mechanisms, not general compiler or
+  ISA generation.
 
-## Next concrete seams
+## Latest development evidence
 
-The ranked experiment program is [SM86 next-experiment campaign](../plans/sm86_next_experiment_campaign_20260927.md).
-Run Phase 0 correctness/refusal work before any empirical score; Phase 2/3
-requires independent hardware or matched external frontends and must not be
-silently approximated.
-The current bounded ledger is [SM86 next-experiment results](sm86_next_experiment_results_20260927.md).
-The external common-input decision is [SM86 external baseline contract](sm86_external_baseline_contract_20260927.md).
+- Full alpha campaign: `results/alpha/full_3090ti_20260928_r3/performance.csv`
+  (ignored local output, 15/15 workloads completed).
+- Companion campaigns: `results/alpha/metric_domains_*_20260928` and
+  `results/alpha/writeback_*_20260928` (ignored local outputs).
+- Aggregate full-campaign medians: native CUDA-event timing 0.009445 ms;
+  NCU duration 10,144 ns; NCU GPC cycles 13,614; simulator modeled-event
+  cycles 11,780; simulator GPC envelope 13,596; replay wall time 0.665 s.
+  Instruction populations matched all 15 rows. These are development
+  observations, not an elapsed-time accuracy score; clocks were not locked.
+- Read-only clock observation saw target SM/memory values but no drift-free
+  active-window lock admission. The probe did not mutate device state.
+- The literature lane is registered in
+  `docs/accelsim_literature_lower_bound_manifest_20260928.json`; those are
+  aggregate ceilings/floors, not per-kernel ground truth.
 
-Use the PhaseFuse fast lane to gather refusal/certificate populations (static
-register-projection evidence, complete launch scope, and a proven empty
-single-warp boundary are now required), the
-bounded PTX subset for value-dependent functional studies, and the custom route
-contract for controlled scheduling experiments. Extend the opt-in writeback and
-directory queues only after native event/config evidence is independently
-validated; then add
-state-complete summaries only for one mechanism at a time; extend the ITS
-trace schema and reconvergence-successor semantics with further independent
-input-varying cases; use same-domain, content-bound independent captures for
-evaluation. Strict Clippy has known
-pre-existing debt. Do not turn these into automatic review/workflow loops.
+## Unresolved closure blockers
 
-PhaseFuse analyzer scaling is runnable through
-`sim/sm/src/bin/phasefuse_scale.rs` and
-`workloads/research_probes/phasefuse_scaling/benchmark.py`; its descriptor-only
-results must not be presented as native trace speedups.
+Do not relabel these as complete:
 
-## Operational anchors
+1. Proprietary per-instruction physical-pipe/issue witness.
+2. Unrestricted NVIDIA ISA/compiler generation and CUDA ABI contract.
+3. Native cache ownership, eviction, payload, and host-flush semantics.
+4. Drift-free locked-clock NCU timing with active-window evidence.
+5. Fully matched external timing domains or same-card executable score.
+6. General native value-dependent SASS regeneration, calls, atomics, fences,
+   races, and complete memory-order reconstruction.
 
-- Root Cargo flag: `--manifest-path sim/Cargo.toml`.
-- Package `sim-run` = `sim/direct_run`, library `sim_direct_run`;
-  `sim-run-campaign` = `sim/run`, library `sim_run`.
-- L1/L1-L2 modes require `--pchase-card`; flat mode does not.
-- Build each intended binary explicitly; `--bin custom_simt_its` does **not**
-  also rebuild `sim-run` just because both packages are listed.
-- `.claude/knowledge/` is absent here; use tracked source/docs/`references/`.
-- [History](HISTORY.md) records this session's validation and consolidation.
-  Project-local Codex memory mirrors point here; raw session logs stay intact.
+## Development rules and anchors
+
+- Preserve separate observation/model/frontier domains; never collapse a
+  diagnostic formula into native completion or timing accuracy.
+- Keep alpha campaign outputs unbound and independent; do not feed NCU labels
+  into model selection.
+- Inspect focused diffs before edits and preserve unrelated work. Build-only
+  checks are acceptable when needed; do not launch test suites unless the user
+  explicitly changes the alpha policy.
+- Active review ledger: [code adversarial review](code_adversarial_review_20260928.md).
+- Active limitation audit: [remaining limitations](remaining_limitations_audit_20260928.md).
+- Active experiment plan: [SM86 campaign plan](../plans/sm86_next_experiment_campaign_20260927.md).
+- Host commands: [runbook](runbook_host.md). Historical reports and plans are
+  context, not automatic queues.

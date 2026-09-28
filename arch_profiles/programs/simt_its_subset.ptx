@@ -1,4 +1,4 @@
-// Bounded ptx_subset_v1 example. Labels are resolved by ptx_subset_compile.
+// Bounded ptx_subset_v2 example. Labels are resolved by ptx_subset_compile.
 .visible .entry lane_branch() {
   mov.u32 %r0, %laneid;
   mul.lo.u32 %r1, %r0, 4;

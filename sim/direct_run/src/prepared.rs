@@ -90,10 +90,13 @@ impl PreparedReplay {
     ) -> Result<Self, RunError> {
         if config.dirty_writeback_capacity_sectors.is_some()
             || config.coherence_service_cycles.is_some()
+            || config.l1_visibility_protocol
+            || config.l1_resident_writeback
+            || config.native_payload_sidecar.is_some()
         {
             return Err(RunError::new(
                 "prepared replay",
-                "opt-in memory service requires the ordinary launch replay path",
+                "opt-in memory service or payload sidecar requires the ordinary launch replay path",
             ));
         }
         require_launch_cold_ordinary(config)?;
@@ -291,9 +294,12 @@ impl PreparedReplay {
             memory_mode: self.memory_mode,
             cache_scope: CacheScope::Launch.token(),
             carded_dram_bandwidth: self.carded_dram_bandwidth,
+            native_payload_sidecar_records: None,
             dirty_writeback_capacity_sectors: None,
             coherence_service_cycles: None,
             coherence_capacity_sectors: None,
+            l1_visibility_protocol: false,
+            l1_resident_writeback: false,
             fast_frontier_only: false,
             hypothetical_issue_ports: self.hypothetical_issue_ports,
             architecture_spec: self.architecture_spec.clone(),
@@ -404,6 +410,8 @@ mod tests {
             dirty_writeback_capacity_sectors: None,
             coherence_service_cycles: None,
             coherence_capacity_sectors: None,
+            l1_visibility_protocol: false,
+            l1_resident_writeback: false,
             hypothetical_issue_ports: None,
             architecture_spec: None,
             kernel_id: None,
@@ -415,6 +423,7 @@ mod tests {
             ncu_csv: None,
             ncu_launch: None,
             launch_resources: None,
+            native_payload_sidecar: None,
         }
     }
 

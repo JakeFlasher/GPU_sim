@@ -1,0 +1,1 @@
+LITMUS {"schema":"sm86_l1_invalidation_litmus_v1","iterations":1000,"failures":998,"timeouts":0,"producer_won_preload":2,"volatile_failures":0,"consumer_fence_failures":0,"status":"mismatch"}

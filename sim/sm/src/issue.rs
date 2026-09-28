@@ -89,9 +89,9 @@ use sim_arch::{
 };
 use sim_mem::{
     AsyncCopyCompletion, CacheOpToken, EvAccess, EvAccessUnobserved, FillKey, L1AccessError,
-    L1Cache, L1Config, L1Counters, L1LookupBatch, L1MutationBudget, L1WriteLookupObserver,
-    L1WriteLookupObserverPlan, L2OpClass, L2Source, LdgstsL1Policy, MemRole, MemoryOrigin,
-    decode_async_copy_completion, opcode_head,
+    L1Cache, L1Config, L1Counters, L1LookupBatch, L1MutationBudget, L1StorePolicy,
+    L1WriteLookupObserver, L1WriteLookupObserverPlan, L2OpClass, L2Source, LdgstsL1Policy, MemRole,
+    MemoryOrigin, decode_async_copy_completion, opcode_head,
 };
 #[cfg(feature = "reference")]
 use sim_semantics::{
@@ -1516,6 +1516,24 @@ pub enum IssueError {
     FillMaskMissing { line: i64 },
     #[error("line {line} has sector-mask bookkeeping without an in-flight fill")]
     FillMaskWithoutFill { line: i64 },
+    #[error("L1 visibility fill response {response:?} has no exact sector-mask witness")]
+    VisibilityResponseMaskMissing { response: ResponseId },
+    #[error(
+        "L1 visibility fill response {response:?} has invalid sector mask {got:#06b} (expected {expected:#06b})"
+    )]
+    VisibilityResponseMaskInvalid {
+        response: ResponseId,
+        expected: u8,
+        got: u8,
+    },
+    #[error("L1 visibility fill {fill:?} was dropped by an allocation-generation mismatch")]
+    VisibilityFillDropped { fill: FillKey },
+    #[error("L1 visibility protocol does not admit bypass atomic/RMW observation")]
+    VisibilityAtomicUnsupported,
+    #[error("L1 visibility protocol does not admit reduction/RMW observation")]
+    VisibilityReductionUnsupported,
+    #[error("L1 visibility protocol does not admit asynchronous-copy observation")]
+    VisibilityAsyncCopyUnsupported,
     #[error("response-bearing request token {reply:?} is already outstanding")]
     ResponseTokenAlreadyOutstanding { reply: ReplyTo },
     #[error("memory response token {reply:?} disappeared after successful preflight")]
@@ -9099,6 +9117,17 @@ fn project_async_copy_removal(
 /// unrepresentable instead of an `expect()` deep in the memory step.
 struct SharedL2State {
     l1: L1Cache,
+    /// Monotonic tie-breaker for the per-SM visibility stream. Memory cycle
+    /// timestamps alone cannot order equal-cycle fences and accesses.
+    l1_visibility_sequence: u64,
+    /// Complete global eligible L1 observations, including resident hits.
+    /// The native system currently drains this only through the explicit
+    /// opt-in callback API; the legacy L2-only path remains unchanged.
+    l1_visibility_observations: Vec<sim_mem::L1AccessObservation>,
+    l1_fence_observations: Vec<sim_mem::L1FenceObservation>,
+    l1_fill_visibility_observations: Vec<sim_mem::L1FillVisibleObservation>,
+    l1_invalidate_all_observations: Vec<sim_mem::L1InvalidateAllObservation>,
+    l1_visibility_requester: Option<u8>,
     response_owner: ResponseOwner,
     /// Exact response-bearing request tokens still expected from the system.
     outstanding_replies: HashSet<ReplyTo>,
@@ -9133,6 +9162,17 @@ struct SharedL2State {
     retry: VecDeque<Retry>,
 }
 
+impl SharedL2State {
+    fn next_l1_visibility_sequence(&mut self) -> Result<u64, IssueError> {
+        let sequence = self.l1_visibility_sequence;
+        self.l1_visibility_sequence =
+            sequence.checked_add(1).ok_or(IssueError::CounterOverflow {
+                counter: "L1 visibility sequence",
+            })?;
+        Ok(sequence)
+    }
+}
+
 /// The typed memory model an [`SmCore`] runs under (the public
 /// [`SmMemMode`] resolved into owned state).
 enum MemModel {
@@ -9155,6 +9195,13 @@ impl MemModel {
     fn const_l1_mut(&mut self) -> Option<&mut L1Cache> {
         match self {
             MemModel::L1Const(l1) => Some(l1),
+            _ => None,
+        }
+    }
+
+    fn shared_l1_mut(&mut self) -> Option<&mut SharedL2State> {
+        match self {
+            MemModel::L1Shared(state) => Some(state),
             _ => None,
         }
     }
@@ -9836,6 +9883,12 @@ impl<'a> SmCore<'a> {
             SmMemMode::L1Const(cfg) => MemModel::L1Const(L1Cache::new(cfg)?),
             SmMemMode::L1Shared(cfg) => MemModel::L1Shared(SharedL2State {
                 l1: L1Cache::new(cfg)?,
+                l1_visibility_sequence: 0,
+                l1_visibility_observations: Vec::new(),
+                l1_fence_observations: Vec::new(),
+                l1_fill_visibility_observations: Vec::new(),
+                l1_invalidate_all_observations: Vec::new(),
+                l1_visibility_requester: None,
                 response_owner: allocate_response_owner()?,
                 outstanding_replies: HashSet::new(),
                 outstanding_response_ids: HashMap::new(),
@@ -10149,6 +10202,122 @@ impl<'a> SmCore<'a> {
     #[cfg(feature = "reference")]
     pub(crate) fn typed_l1_state(&self) -> Option<L1BoundaryState> {
         self.mem.l1().map(L1Cache::typed_boundary_state)
+    }
+
+    /// Enable complete eligible-global L1 access observations for an explicit
+    /// native visibility experiment. The requester is the independently
+    /// retained physical `sm_id`, not an actor-vector index.
+    pub(crate) fn enable_l1_visibility_observations(
+        &mut self,
+        requester: u8,
+    ) -> Result<(), IssueError> {
+        if requester >= 128 {
+            return Err(IssueError::CounterOverflow {
+                counter: "L1 visibility requester domain",
+            });
+        }
+        let MemModel::L1Shared(st) = &mut self.mem else {
+            return Err(IssueError::ResponseModeMismatch {
+                mode: "L1 visibility requires shared-L2",
+            });
+        };
+        st.l1_visibility_requester = Some(requester);
+        Ok(())
+    }
+
+    pub(crate) fn enable_l1_resident_writeback(&mut self) -> Result<(), IssueError> {
+        let Some(state) = self.mem.shared_l1_mut() else {
+            return Err(IssueError::ResponseModeMismatch {
+                mode: "L1 resident writeback requires shared-L2",
+            });
+        };
+        state
+            .l1
+            .set_store_policy(L1StorePolicy::ResidentHitWriteBack);
+        Ok(())
+    }
+
+    pub(crate) fn l1_dirty_residency(&self) -> sim_mem::L1DirtyResidency {
+        self.mem
+            .l1()
+            .map_or_else(sim_mem::L1DirtyResidency::default, L1Cache::dirty_residency)
+    }
+
+    pub(crate) fn preview_l1_dirty_flush(&self) -> Result<sim_mem::L1DirtyFlushPlan, IssueError> {
+        let MemModel::L1Shared(state) = &self.mem else {
+            return Err(IssueError::ResponseModeMismatch {
+                mode: "L1 dirty flush requires shared-L2",
+            });
+        };
+        Ok(state.l1.preview_dirty_flush())
+    }
+
+    pub(crate) fn commit_l1_dirty_flush(
+        &mut self,
+        plan: sim_mem::L1DirtyFlushPlan,
+    ) -> Result<(), IssueError> {
+        let Some(state) = self.mem.shared_l1_mut() else {
+            return Err(IssueError::ResponseModeMismatch {
+                mode: "L1 dirty flush requires shared-L2",
+            });
+        };
+        state.l1.commit_dirty_flush(plan).map_err(IssueError::from)
+    }
+
+    pub(crate) fn take_l1_visibility_events(&mut self) -> Vec<sim_mem::L1VisibilityEvent> {
+        let MemModel::L1Shared(st) = &mut self.mem else {
+            return Vec::new();
+        };
+        let mut events = st
+            .l1_visibility_observations
+            .drain(..)
+            .map(sim_mem::L1VisibilityEvent::Access)
+            .chain(
+                st.l1_fence_observations
+                    .drain(..)
+                    .map(sim_mem::L1VisibilityEvent::Fence),
+            )
+            .chain(
+                st.l1_fill_visibility_observations
+                    .drain(..)
+                    .map(sim_mem::L1VisibilityEvent::FillVisible),
+            )
+            .chain(
+                st.l1_invalidate_all_observations
+                    .drain(..)
+                    .map(sim_mem::L1VisibilityEvent::InvalidateAll),
+            )
+            .collect::<Vec<_>>();
+        events.sort_unstable_by_key(|event| match event {
+            sim_mem::L1VisibilityEvent::Access(observation) => observation.sequence,
+            sim_mem::L1VisibilityEvent::Fence(observation) => observation.sequence,
+            sim_mem::L1VisibilityEvent::FillVisible(observation) => observation.sequence,
+            sim_mem::L1VisibilityEvent::InvalidateAll(observation) => observation.sequence,
+        });
+        events
+    }
+
+    pub(crate) fn invalidate_l1(
+        &mut self,
+        line_id: i64,
+        sector_mask: u8,
+    ) -> Result<(), IssueError> {
+        let MemModel::L1Shared(st) = &mut self.mem else {
+            return Err(IssueError::ResponseModeMismatch {
+                mode: "L1 invalidation requires shared-L2",
+            });
+        };
+        st.l1.invalidate(line_id, sector_mask)?;
+        Ok(())
+    }
+
+    pub(crate) fn invalidate_l1_all(&mut self) -> Result<u64, IssueError> {
+        let MemModel::L1Shared(st) = &mut self.mem else {
+            return Err(IssueError::ResponseModeMismatch {
+                mode: "L1 invalidation requires shared-L2",
+            });
+        };
+        Ok(st.l1.invalidate_all()?)
     }
 
     #[cfg(feature = "reference")]
@@ -11161,6 +11330,9 @@ impl<'a> SmCore<'a> {
                 completion_work,
                 l1_policy: LdgstsL1Policy::CacheAtAllLevels,
             } => {
+                if st.l1_visibility_requester.is_some() {
+                    return Err(IssueError::VisibilityAsyncCopyUnsupported);
+                }
                 let source_active = completion_work != 0;
                 let hit_service_interval = self
                     .params
@@ -11295,6 +11467,12 @@ impl<'a> SmCore<'a> {
                     }
                     _ => unreachable!("match arm admits only bypass, async-copy, or untagged"),
                 };
+                if operation == MemoryOperation::Atomic && st.l1_visibility_requester.is_some() {
+                    return Err(IssueError::VisibilityAtomicUnsupported);
+                }
+                if async_copy && st.l1_visibility_requester.is_some() {
+                    return Err(IssueError::VisibilityAsyncCopyUnsupported);
+                }
                 if counted {
                     st.l1.count_bypass(
                         origin,
@@ -11423,10 +11601,36 @@ impl<'a> SmCore<'a> {
                     sectors[off..off + usize::from(len)].iter().enumerate()
                 {
                     let mut request = if reduction {
-                        st.l1.probe_reduction(origin, sector_id, t)?;
+                        if st.l1_visibility_requester.is_some() {
+                            return Err(IssueError::VisibilityReductionUnsupported);
+                        }
+                        let hit = st.l1.probe_reduction(origin, sector_id, t)?;
+                        if origin == MemoryOrigin::Global {
+                            record_global_l1_observation(st, sector_id, true, false, hit, None, t)?;
+                        }
                         MemRequest::reduction(t, sector_id)
                     } else {
-                        st.l1.probe_store(origin, sector_id, t)?;
+                        let hit = st.l1.probe_store(origin, sector_id, t)?;
+                        let retained_l1_write = origin == MemoryOrigin::Global
+                            && hit
+                            && st.l1.store_policy() == L1StorePolicy::ResidentHitWriteBack;
+                        if origin == MemoryOrigin::Global {
+                            record_global_l1_observation(
+                                st,
+                                sector_id,
+                                true,
+                                retained_l1_write,
+                                hit,
+                                None,
+                                t,
+                            )?;
+                        }
+                        if retained_l1_write {
+                            // The resident hit is retained dirty in L1; the
+                            // lower L2 mutation occurs only at the explicit
+                            // flush boundary, never also on this issue path.
+                            continue;
+                        }
                         MemRequest::store(t, sector_id, origin)
                     };
                     if origin == MemoryOrigin::Global && emit_admission_witnesses {
@@ -11937,6 +12141,7 @@ impl<'a> SmCore<'a> {
         {
             return Err(IssueError::ResponseTokenRemovalFailed { reply });
         }
+        let response_mask = st.response_masks.get(&response_id).copied();
         st.response_masks.remove(&response_id);
         // New emission batch (the retry drain below may emit).
         st.line_folds.clear();
@@ -11950,7 +12155,46 @@ impl<'a> SmCore<'a> {
                 {
                     return Err(IssueError::FillMaskMissing { line });
                 }
-                st.l1.complete_fill(fill)?;
+                let retained = st.l1.complete_fill(fill)?;
+                if let Some(requester) = st.l1_visibility_requester {
+                    if !retained {
+                        return Err(IssueError::VisibilityFillDropped { fill });
+                    }
+                    let observed_mask =
+                        response_mask.ok_or(IssueError::VisibilityResponseMaskMissing {
+                            response: response_id,
+                        })?;
+                    let (line_id, expected_mask) = match fill {
+                        FillKey::Line { line, .. } => (line, 0b1111),
+                        FillKey::Sector { line, sector, .. } => (line, 1_u8 << sector),
+                    };
+                    let sector_mask = match fill {
+                        FillKey::Line { .. }
+                            if observed_mask != 0 && observed_mask & !0b1111 == 0 =>
+                        {
+                            observed_mask
+                        }
+                        FillKey::Sector { .. } if observed_mask == expected_mask => observed_mask,
+                        _ => {
+                            return Err(IssueError::VisibilityResponseMaskInvalid {
+                                response: response_id,
+                                expected: expected_mask,
+                                got: observed_mask,
+                            });
+                        }
+                    };
+                    let generation = fill_generation(fill);
+                    let sequence = st.next_l1_visibility_sequence()?;
+                    st.l1_fill_visibility_observations
+                        .push(sim_mem::L1FillVisibleObservation {
+                            sequence,
+                            requester,
+                            line_id,
+                            sector_mask,
+                            fill_generation: generation,
+                            visible_cycle: now,
+                        });
+                }
                 if let Some(waiters) = st.fill_waiters.remove(&fill) {
                     waiters.try_for_each(|waiter| {
                         let ready = fill_waiter_ready_time(waiter, now, &params)?;
@@ -15326,6 +15570,8 @@ impl<'a> SmCore<'a> {
                 clock_read,
                 constant_load,
                 constant_deep,
+                cctl_invalidate_all,
+                fence_semantics,
             ) = {
                 let w = &self.warps[wix];
                 let slot = w
@@ -15349,6 +15595,8 @@ impl<'a> SmCore<'a> {
                     is_clocklo_issue(slot),
                     is_constant_load_opcode(slot.opcode_text()),
                     self.is_constant_path_pc(u64::from(w.insts[w.next].pc)),
+                    slot.is_cctl_invalidate_all(),
+                    slot.visibility_fence_semantics(),
                 )
             };
             let produces_dynamic_effects = !matches!(inst.kind, AccessKind::PredicatedOffMemory);
@@ -15411,6 +15659,34 @@ impl<'a> SmCore<'a> {
                     observe_async_copy,
                 )?
             };
+            if cctl_invalidate_all && matches!(self.mem, MemModel::L1Shared(_)) {
+                self.invalidate_l1_all()?;
+                if let MemModel::L1Shared(st) = &mut self.mem
+                    && let Some(requester) = st.l1_visibility_requester
+                {
+                    let sequence = st.next_l1_visibility_sequence()?;
+                    st.l1_invalidate_all_observations
+                        .push(sim_mem::L1InvalidateAllObservation {
+                            sequence,
+                            requester,
+                            issue_cycle: t,
+                        });
+                }
+            }
+            if let Some((scope, order)) = fence_semantics
+                && let MemModel::L1Shared(st) = &mut self.mem
+                && let Some(requester) = st.l1_visibility_requester
+            {
+                let sequence = st.next_l1_visibility_sequence()?;
+                st.l1_fence_observations.push(sim_mem::L1FenceObservation {
+                    sequence,
+                    requester,
+                    pc: inst.pc,
+                    issue_cycle: t,
+                    scope,
+                    order,
+                });
+            }
             if observe_async_copy && let Some(source_ready) = data_ready {
                 // Shared mode already attached the copy's delivery and exact
                 // destination work to its pending group before walking source
@@ -15843,6 +16119,41 @@ enum SharedL1Access {
     Stalled,
 }
 
+fn record_global_l1_observation(
+    st: &mut SharedL2State,
+    sector_id: i64,
+    is_write: bool,
+    l1_resident_after: bool,
+    hit: bool,
+    fill_generation: Option<u32>,
+    issue_cycle: u64,
+) -> Result<(), IssueError> {
+    let Some(requester) = st.l1_visibility_requester else {
+        return Ok(());
+    };
+    let sequence = st.next_l1_visibility_sequence()?;
+    st.l1_visibility_observations
+        .push(sim_mem::L1AccessObservation {
+            sequence,
+            line_id: sector_id >> 2,
+            sector_mask: 1_u8 << (sector_id & 3) as u8,
+            requester,
+            is_write,
+            l1_resident_after,
+            fill_will_reside: fill_generation.is_some(),
+            fill_generation,
+            hit,
+            issue_cycle,
+        });
+    Ok(())
+}
+
+fn fill_generation(fill: FillKey) -> u32 {
+    match fill {
+        FillKey::Line { generation, .. } | FillKey::Sector { generation, .. } => generation,
+    }
+}
+
 fn access_shared_l1(
     l1: &mut L1Cache,
     origin: MemoryOrigin,
@@ -15928,8 +16239,27 @@ fn access_shared(
     )
     .map_err(IssueError::from)?
     {
-        SharedL1Access::Hit { ready } => Ok(ready),
+        SharedL1Access::Hit { ready } => {
+            if origin == MemoryOrigin::Global {
+                record_global_l1_observation(st, sector_id, false, true, true, None, now)?;
+            }
+            Ok(ready)
+        }
         SharedL1Access::MissRequest { fill } => {
+            if origin == MemoryOrigin::Global {
+                // The directory must not publish ownership before the L1 fill
+                // response is visible. A later fill-visible event is required
+                // to make this sector resident in the visibility protocol.
+                record_global_l1_observation(
+                    st,
+                    sector_id,
+                    false,
+                    false,
+                    false,
+                    Some(fill_generation(fill)),
+                    now,
+                )?;
+            }
             let request = MemRequest::l1_fill(
                 now,
                 sector_id,
@@ -15950,6 +16280,17 @@ fn access_shared(
             Ok(None)
         }
         SharedL1Access::MergedPending { fill } => {
+            if origin == MemoryOrigin::Global {
+                record_global_l1_observation(
+                    st,
+                    sector_id,
+                    false,
+                    false,
+                    false,
+                    Some(fill_generation(fill)),
+                    now,
+                )?;
+            }
             if let FillKey::Line { line, .. } = fill {
                 // Pairing invariant (proven at the 2026-07-07 gate): a
                 // line-pending merge always has a live fill_masks entry
@@ -17966,6 +18307,27 @@ mod tests {
 
         let ascii_membar = slot(cb(1), OpClass::Other, "\tMEMBAR.SC.GPU ;");
         assert!(is_gpu_membar_issue(&ascii_membar));
+        assert_eq!(
+            ascii_membar.visibility_fence_semantics(),
+            Some((
+                sim_mem::VisibilityScope::Device,
+                sim_mem::VisibilityOrder::SequentiallyConsistent,
+            ))
+        );
+        assert_eq!(
+            slot(cb(1), OpClass::Other, "MEMBAR.SC.SYS").visibility_fence_semantics(),
+            Some((
+                sim_mem::VisibilityScope::System,
+                sim_mem::VisibilityOrder::SequentiallyConsistent,
+            ))
+        );
+        assert_eq!(
+            slot(cb(1), OpClass::Other, "MEMBAR.CTA").visibility_fence_semantics(),
+            Some((
+                sim_mem::VisibilityScope::Block,
+                sim_mem::VisibilityOrder::SequentiallyConsistent,
+            ))
+        );
     }
 
     #[test]

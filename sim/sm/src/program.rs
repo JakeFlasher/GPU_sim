@@ -296,6 +296,26 @@ impl IssueSlot {
         self.gpu_membar
     }
 
+    pub(crate) fn is_cctl_invalidate_all(&self) -> bool {
+        let text = self.opcode_text.trim_ascii();
+        text.split_ascii_whitespace().next() == Some("CCTL.IVALL")
+    }
+
+    pub(crate) fn visibility_fence_semantics(
+        &self,
+    ) -> Option<(sim_mem::VisibilityScope, sim_mem::VisibilityOrder)> {
+        let token = self.opcode_text.split_ascii_whitespace().next()?;
+        // A scoped load/store is not itself a fence. Admit only the MEMBAR
+        // forms covered by this observation seam, not every *.GPU/*.SYS opcode.
+        let scope = match token {
+            "MEMBAR.CTA" | "MEMBAR.SC.CTA" => sim_mem::VisibilityScope::Block,
+            "MEMBAR.GL" | "MEMBAR.GPU" | "MEMBAR.SC.GPU" => sim_mem::VisibilityScope::Device,
+            "MEMBAR.SYS" | "MEMBAR.SC.SYS" => sim_mem::VisibilityScope::System,
+            _ => return None,
+        };
+        Some((scope, sim_mem::VisibilityOrder::SequentiallyConsistent))
+    }
+
     pub fn opcode_text(&self) -> &str {
         &self.opcode_text
     }

@@ -123,6 +123,13 @@ inline bool Sha256File(const std::string& path, std::string* digest_hex) {
 
 inline ModuleOriginEvidence EvaluateModuleOrigin(const std::string& raw_path) {
   ModuleOriginEvidence evidence;
+  const char* alpha = std::getenv("NVBIT_ALPHA_NO_HASH");
+  if (alpha != nullptr && std::string(alpha) == "1") {
+    evidence.reason = "alpha_path_only";
+    evidence.path = raw_path;
+    evidence.basename = OriginBasename(raw_path);
+    return evidence;
+  }
   if (raw_path.empty()) return evidence;
   if (raw_path.rfind("<inline:", 0) == 0) {
     evidence.reason = "jit_or_anonymous_mapping";

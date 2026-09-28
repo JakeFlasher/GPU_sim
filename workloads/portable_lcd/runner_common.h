@@ -418,6 +418,11 @@ inline void emit_manifest_v2(
     const cudaDeviceProp &dp, const char *mode_str, const char *shape_point,
     double cv_pct, char *manifest_path_out)
 {
+    const char *alpha = std::getenv("SIMBENCH_ALPHA_NO_MANIFEST");
+    if (alpha && !strcmp(alpha, "1")) {
+        manifest_path_out[0] = '\0';
+        return;
+    }
     int rt_ver = 0, drv_ver = 0;
     cudaRuntimeGetVersion(&rt_ver);
     cudaDriverGetVersion(&drv_ver);

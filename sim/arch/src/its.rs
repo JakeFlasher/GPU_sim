@@ -14,8 +14,8 @@ use std::path::Path;
 
 pub const ITS_PROGRAM_SCHEMA_VERSION: u32 = 1;
 pub const ITS_ISA: &str = "simt_its_v1";
-pub const ITS_TRACE_SCHEMA_VERSION: u32 = 2;
-pub const ITS_TRACE_CONTRACT: &str = "custom_its_dynamic_v2";
+pub const ITS_TRACE_SCHEMA_VERSION: u32 = 3;
+pub const ITS_TRACE_CONTRACT: &str = "custom_its_dynamic_v3";
 const MAX_PROGRAM_BYTES: u64 = 1024 * 1024;
 const MAX_INSTRUCTIONS: usize = 4096;
 const MAX_STEPS: u64 = 10_000_000;
@@ -53,6 +53,14 @@ pub enum ItsInstruction {
         address: u8,
     },
     StoreIndirect {
+        address: u8,
+        src: u8,
+    },
+    /// Deterministic functional u32 atomic add through a lane address.
+    /// Aliasing lanes are applied in ascending lane order; this is a custom
+    /// functional contract, not native GPU atomic ordering.
+    AtomicAddIndirect {
+        dst: u8,
         address: u8,
         src: u8,
     },
@@ -111,7 +119,7 @@ pub struct ItsProgram {
 
 impl ItsProgram {
     /// Construct a validated fixed-ISA program from a bounded frontend such
-    /// as `ptx_subset_v1`. This does not make the frontend a general compiler.
+    /// as `ptx_subset_v2`. This does not make the frontend a general compiler.
     pub fn from_instructions(
         architecture: impl Into<String>,
         max_steps: u64,
@@ -237,6 +245,9 @@ fn validate_instruction(
         }
         ItsInstruction::LoadIndirect { dst, address } => vec![*dst, *address],
         ItsInstruction::StoreIndirect { address, src } => vec![*address, *src],
+        ItsInstruction::AtomicAddIndirect { dst, address, src } => {
+            vec![*dst, *address, *src]
+        }
         ItsInstruction::CmpLtImm { src, .. } => vec![*src],
         ItsInstruction::Store { src, .. } => vec![*src],
         ItsInstruction::Branch { .. }
@@ -315,6 +326,14 @@ pub struct ItsTraceRecord {
     pub pc: usize,
     pub active_mask: u64,
     pub instruction: ItsInstruction,
+    /// Complete lane-local architectural state at the record boundary. The
+    /// trace is custom functional evidence, not native SASS; retaining these
+    /// snapshots makes value-dependent replay independently inspectable rather
+    /// than requiring consumers to infer values from successor masks.
+    pub lane_registers_before: BTreeMap<usize, Vec<u32>>,
+    pub lane_registers_after: BTreeMap<usize, Vec<u32>>,
+    pub lane_predicates_before: BTreeMap<usize, Vec<bool>>,
+    pub lane_predicates_after: BTreeMap<usize, Vec<bool>>,
     pub lane_addresses: BTreeMap<usize, u32>,
     pub lane_successors: BTreeMap<usize, usize>,
     /// Dynamic CFG edges grouped by successor PC. The value is the lane mask
@@ -459,7 +478,8 @@ impl<'a> ItsExecutor<'a> {
                     .filter_map(|lane| {
                         let address = match instruction {
                             ItsInstruction::LoadIndirect { address, .. }
-                            | ItsInstruction::StoreIndirect { address, .. } => {
+                            | ItsInstruction::StoreIndirect { address, .. }
+                            | ItsInstruction::AtomicAddIndirect { address, .. } => {
                                 Ok(lanes[lane].regs[usize::from(*address)])
                             }
                             ItsInstruction::Store { base, stride, .. } => {
@@ -472,6 +492,18 @@ impl<'a> ItsExecutor<'a> {
                     .collect::<Result<BTreeMap<_, _>, _>>()?
             } else {
                 BTreeMap::new()
+            };
+            let (lane_registers_before, lane_predicates_before) = if capture {
+                (
+                    lane_indices(group, width)
+                        .map(|lane| (lane, lanes[lane].regs.to_vec()))
+                        .collect(),
+                    lane_indices(group, width)
+                        .map(|lane| (lane, lanes[lane].predicates.to_vec()))
+                        .collect(),
+                )
+            } else {
+                (BTreeMap::new(), BTreeMap::new())
             };
             self.execute_group(
                 instruction,
@@ -488,6 +520,14 @@ impl<'a> ItsExecutor<'a> {
                     pc,
                     active_mask: group,
                     instruction: instruction.clone(),
+                    lane_registers_before,
+                    lane_registers_after: lane_indices(group, width)
+                        .map(|lane| (lane, lanes[lane].regs.to_vec()))
+                        .collect(),
+                    lane_predicates_before,
+                    lane_predicates_after: lane_indices(group, width)
+                        .map(|lane| (lane, lanes[lane].predicates.to_vec()))
+                        .collect(),
                     lane_addresses,
                     lane_successors: lane_indices(group, width)
                         .filter(|&lane| lanes[lane].active && lanes[lane].blocked_by.is_none())
@@ -608,6 +648,19 @@ impl<'a> ItsExecutor<'a> {
                 }
                 memory.extend(writes);
                 for_each_lane(group, width, |lane| lanes[lane].pc = pc + 1);
+            }
+            ItsInstruction::AtomicAddIndirect { dst, address, src } => {
+                for lane in lane_indices(group, width) {
+                    let address = lanes[lane].regs[usize::from(*address)];
+                    word_end(address)?;
+                    let old = *memory
+                        .get(&address)
+                        .ok_or(ItsError::UninitializedLoad(address))?;
+                    let value = old.wrapping_add(lanes[lane].regs[usize::from(*src)]);
+                    memory.insert(address, value);
+                    lanes[lane].regs[usize::from(*dst)] = old;
+                    lanes[lane].pc = pc + 1;
+                }
             }
             ItsInstruction::Branch { target } => {
                 for_each_lane(group, width, |lane| lanes[lane].pc = *target as usize);
@@ -790,6 +843,7 @@ fn operation_name(instruction: &ItsInstruction) -> &'static str {
         ItsInstruction::MulImm { .. } => "mul_imm",
         ItsInstruction::LoadIndirect { .. } => "load_indirect",
         ItsInstruction::StoreIndirect { .. } => "store_indirect",
+        ItsInstruction::AtomicAddIndirect { .. } => "atomic_add_indirect",
         ItsInstruction::Branch { .. } => "branch",
         ItsInstruction::BranchIf { .. } => "branch_if",
         ItsInstruction::Bssy { .. } => "bssy",
@@ -984,6 +1038,55 @@ mod tests {
             load.lane_addresses,
             [(0, 0), (1, 4), (2, 8), (3, 12)].into_iter().collect()
         );
+        assert_eq!(load.lane_registers_before[&0][1], 0);
+        assert_eq!(load.lane_registers_after[&0][2], 10);
+        assert_eq!(load.lane_predicates_before[&0].len(), PREDICATE_COUNT);
+        assert_eq!(load.lane_predicates_after[&0].len(), PREDICATE_COUNT);
+        assert_eq!(result.registers[3][2], 13);
+    }
+
+    #[test]
+    fn indirect_atomic_add_is_deterministic_for_aliasing_lanes() {
+        let spec = ArchitectureSpec::parse(
+            Path::new("spec.json"),
+            br#"
+            {
+              "schema_version": 1,
+              "architecture": "probe",
+              "isa": "simt_its_v1",
+              "instruction_set": ["set_lane_id", "mul_imm", "atomic_add_indirect", "halt"],
+              "execution": {"simt_width": 4, "max_resident_groups": 1},
+              "resources": [{"name":"alu","kind":"compute","issue_width":1,"latency_cycles":1}],
+              "evidence": "unvalidated"
+            }
+            "#,
+        )
+        .expect("probe spec should parse");
+        let program = ItsProgram::parse(
+            Path::new("program.json"),
+            br#"
+            {
+              "schema_version": 1,
+              "architecture": "probe",
+              "isa": "simt_its_v1",
+              "max_steps": 8,
+              "initial_memory": {"0": 10},
+              "instructions": [
+                {"op":"set_lane_id", "dst":0},
+                {"op":"mul_imm", "dst":1, "src":0, "imm":0},
+                {"op":"atomic_add_indirect", "dst":2, "address":1, "src":0},
+                {"op":"halt"}
+              ]
+            }
+            "#,
+        )
+        .expect("atomic probe program should parse");
+        let result = ItsExecutor::new(&spec, &program)
+            .expect("identity and ISA should be accepted")
+            .run()
+            .expect("atomic program should execute");
+        assert_eq!(result.memory.get(&0), Some(&16));
+        assert_eq!(result.registers[0][2], 10);
         assert_eq!(result.registers[3][2], 13);
     }
 

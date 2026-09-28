@@ -35,10 +35,13 @@ needed for that target and are outside this repository’s scope.
 | [NaviSim (PACT 2022)](https://sarchlab.org/navisim_pact_2022.pdf) | AMD RDNA execution-driven simulation and feature-isolation studies. | “General AMD support” is already prior art; defer without AMD hardware. |
 | [VADL](https://arxiv.org/abs/2402.09087) / [OpenVADL](https://github.com/OpenVADL/openvadl) and [TAIDL (MICRO 2025)](https://doi.org/10.1145/3725843.3756075) | User-defined ISA/microarchitecture descriptions and generated functional tools. | A schema or user-defined ISA alone is not a top-tier contribution; the GPU SIMT timing/NCU path must carry the novelty. |
 
-The reported error and speed numbers are not directly comparable: they use
+The reported error and speed numbers are not directly interchangeable: they use
 different hardware, traces, clocks, workload populations, observables, and
-aggregation. This memo uses them to set the comparison boundary, not to rank
-systems.
+aggregation. They nevertheless register an active, per-domain lower-bound
+target lane: error ceilings and throughput/speedup floors are recorded in
+[`accelsim_literature_lower_bound_manifest_20260928.json`](accelsim_literature_lower_bound_manifest_20260928.json)
+and must be met or surpassed by local NCU-backed results. They are not
+per-kernel ground truth or a universal ranking.
 
 ## Evidence from this repository
 
@@ -73,9 +76,12 @@ systems.
 4. **User model:** add one meaningful user-editable scheduler/cache/resource
    organization and one architecture design question. Keep custom functional
    execution separate from trace semantics unless a real frontend is present.
-5. **Fair baselines:** use Accel-Sim 2.0, Huerta MICRO'25, and FlashGPU-sim only
-   where target/workload support overlaps. Treat MGPUSim/NaviSim as AMD
-   references unless matching hardware is available.
+5. **Baselines:** evaluate the registered Accel-Sim aggregate floors against
+   local NCU ground truth with explicit scope metadata. Use Accel-Sim 2.0,
+   Huerta MICRO'25, and FlashGPU-sim executable timing only where a matched
+   frontend/workload/observable exists; otherwise retain parser/feature
+   evidence without inventing a direct cycle score. Treat MGPUSim/NaviSim as
+   AMD references unless matching hardware is available.
 6. **Final evidence:** use the final machine-grounded NCU set for the claim.
    Report per-workload NCU error distributions and simulator wall time; finish
    with an ablation and a consequential design conclusion.
@@ -104,6 +110,7 @@ makes no claim of Curry ISA/compiler compatibility. See
 The project is viable and worth continuing. The path to a strong submission is
 not a universal hardware framework; it is one measured, falsifiable software
 mechanism that changes a real GPU timing resource and supports a declared
-accuracy/speed/design claim. The active roadmap records that decision. A fair
-numerical baseline comparison remains deferred until hardware, trace,
-observable, and semantics overlap.
+accuracy/speed/design claim. The active roadmap records that decision. A direct
+executable numerical cross-simulator comparison remains deferred until
+hardware, trace, observable, and semantics overlap. The literature aggregate
+floor comparison is active now and uses NCU as the local ground truth.

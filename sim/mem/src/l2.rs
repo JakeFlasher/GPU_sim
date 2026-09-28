@@ -730,6 +730,25 @@ pub struct L2DirtyResidency {
     pub sectors: usize,
 }
 
+/// One resident dirty L2 line selected for a terminal flush. The plan is a
+/// state snapshot, not completed traffic.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct L2DirtyLine {
+    pub line_id: i64,
+    pub dirty_mask: u8,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct L2DirtyFlushPlan {
+    lines: Box<[L2DirtyLine]>,
+}
+
+impl L2DirtyFlushPlan {
+    pub fn lines(&self) -> &[L2DirtyLine] {
+        &self.lines
+    }
+}
+
 /// Deterministic result of an event fill completion. A stale allocation is a
 /// no-op, while a matching allocation reports newly valid and duplicate bits
 /// separately so partial and repeated deliveries are explicit.
@@ -797,6 +816,14 @@ pub enum L2AccessError {
         valid_mask: u8,
         dirty_mask: u8,
         pending_mask: u8,
+    },
+    #[error(
+        "L2 dirty flush plan is stale for line {line_id}: expected {expected:#06b}, current {current:#06b}"
+    )]
+    DirtyFlushStale {
+        line_id: i64,
+        expected: u8,
+        current: u8,
     },
     #[error("L2 replacement set {set_key} is unexpectedly empty")]
     ReplacementSetEmpty { set_key: usize },
@@ -1409,6 +1436,55 @@ impl L2Model {
             }
         }
         result
+    }
+
+    /// Snapshot all resident dirty sectors in deterministic line order. This
+    /// is the terminal-flush admission surface; it is distinct from eviction
+    /// topology and does not clear any cache state.
+    pub fn preview_dirty_flush(&self) -> L2DirtyFlushPlan {
+        let mut lines = self
+            .sets
+            .iter()
+            .flatten()
+            .filter(|way| way.dirty_mask != 0)
+            .map(|way| L2DirtyLine {
+                line_id: way.tag,
+                dirty_mask: way.dirty_mask,
+            })
+            .collect::<Vec<_>>();
+        lines.sort_unstable_by_key(|line| line.line_id);
+        L2DirtyFlushPlan {
+            lines: lines.into_boxed_slice(),
+        }
+    }
+
+    /// Clear exactly the dirty masks accepted by a lower-level writeback
+    /// transaction. A stale plan leaves every line unchanged.
+    pub fn commit_dirty_flush(&mut self, plan: L2DirtyFlushPlan) -> Result<(), L2AccessError> {
+        let mut locations = Vec::with_capacity(plan.lines.len());
+        for line in plan.lines() {
+            let set_key = self.set_key(line.line_id)?;
+            let Some(way) = self.sets[set_key].iter().position(|way| way.tag == line.line_id) else {
+                return Err(L2AccessError::DirtyFlushStale {
+                    line_id: line.line_id,
+                    expected: line.dirty_mask,
+                    current: 0,
+                });
+            };
+            let current = self.sets[set_key][way].dirty_mask;
+            if current != line.dirty_mask {
+                return Err(L2AccessError::DirtyFlushStale {
+                    line_id: line.line_id,
+                    expected: line.dirty_mask,
+                    current,
+                });
+            }
+            locations.push((set_key, way));
+        }
+        for (set_key, way) in locations {
+            self.sets[set_key][way].dirty_mask = 0;
+        }
+        Ok(())
     }
 
     fn validate_counter_architecture(&self) -> Result<(), L2CounterError> {
@@ -2814,6 +2890,24 @@ mod tests {
                 pending_mask: 0,
             })
         );
+    }
+
+    #[test]
+    fn terminal_dirty_flush_plan_clears_resident_masks_transactionally() {
+        let mut l2 = L2Model::new(cfg(1024, 2, 1)).unwrap();
+        ev(&mut l2, 3, 0b0101, L2OpClass::WriteAtomic);
+        let plan = l2.preview_dirty_flush();
+        assert_eq!(
+            plan.lines(),
+            &[L2DirtyLine {
+                line_id: 3,
+                dirty_mask: 0b0101
+            }]
+        );
+        l2.commit_dirty_flush(plan).unwrap();
+        assert_eq!(l2.dirty_residency(), L2DirtyResidency::default());
+        assert_eq!(resident_way(&l2, 3).mask, 0b0101);
+        assert_eq!(resident_way(&l2, 3).dirty_mask, 0);
     }
 
     #[test]

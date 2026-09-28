@@ -8,6 +8,7 @@
 //! submitted writeback. It deliberately does not claim ownership,
 //! visibility scope, or physical SM86 completion semantics.
 
+use crate::SectorPayloadV1;
 use crate::l2::L2Eviction;
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -179,6 +180,30 @@ pub struct WritebackPlan {
     service: ServicePlan,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PayloadWritebackPlan {
+    service: WritebackPlan,
+    payloads: Box<[SectorPayloadV1]>,
+}
+
+impl PayloadWritebackPlan {
+    pub const fn service_plan(&self) -> WritebackPlan {
+        self.service
+    }
+
+    pub fn payloads(&self) -> &[SectorPayloadV1] {
+        &self.payloads
+    }
+
+    pub const fn line_id(&self) -> i64 {
+        self.service.line_id()
+    }
+
+    pub const fn dirty_mask(&self) -> u8 {
+        self.service.dirty_mask()
+    }
+}
+
 impl WritebackPlan {
     pub const fn token(self) -> u64 {
         self.service.token()
@@ -306,6 +331,12 @@ pub enum WritebackError {
     EarlyCompletion { token: u64, at: u64, ready: u64 },
     #[error("event time {requested} regresses queue frontier {frontier}")]
     TimeRegression { requested: u64, frontier: u64 },
+    #[error("payload writeback has identity mismatch")]
+    PayloadIdentityMismatch,
+    #[error("payload writeback coverage {got:#06b} does not equal dirty mask {expected:#06b}")]
+    PayloadCoverageMismatch { expected: u8, got: u8 },
+    #[error("payload writeback has no complete payload for line {line_id} sector {sector}")]
+    PayloadMissing { line_id: i64, sector: u8 },
 }
 
 impl WritebackQueue {
@@ -440,6 +471,53 @@ impl WritebackQueue {
             .next()
             .ok_or(WritebackError::PlanMismatch)?;
         Ok(Some(WritebackPlan { service: plan }))
+    }
+
+    /// Preview a value-bearing writeback. Every dirty sector must have one
+    /// complete payload with the same line identity and a matching sector
+    /// bit; the queue itself remains mask/timing compatible with legacy
+    /// callers until this plan is explicitly used by a payload-aware owner.
+    pub fn preview_payload(
+        &self,
+        eviction: L2Eviction,
+        issue_cycle: u64,
+        payloads: &[SectorPayloadV1],
+    ) -> Result<PayloadWritebackPlan, WritebackError> {
+        let service =
+            self.preview(eviction, issue_cycle)?
+                .ok_or(WritebackError::DirtyLineMissing {
+                    dirty_mask: eviction.dirty_mask,
+                })?;
+        let mut covered = 0_u8;
+        for payload in payloads {
+            if payload.line_id() != eviction.line_id
+                || payload.sector() >= 4
+                || covered & (1_u8 << payload.sector()) != 0
+                || payloads.first().is_some_and(|first| {
+                    first.allocation_id() != payload.allocation_id()
+                        || first.allocation_generation() != payload.allocation_generation()
+                })
+            {
+                return Err(WritebackError::PayloadIdentityMismatch);
+            }
+            if !payload.is_fully_known() {
+                return Err(WritebackError::PayloadMissing {
+                    line_id: eviction.line_id,
+                    sector: payload.sector(),
+                });
+            }
+            covered |= 1_u8 << payload.sector();
+        }
+        if covered != eviction.dirty_mask {
+            return Err(WritebackError::PayloadCoverageMismatch {
+                expected: eviction.dirty_mask,
+                got: covered,
+            });
+        }
+        Ok(PayloadWritebackPlan {
+            service,
+            payloads: payloads.to_vec().into_boxed_slice(),
+        })
     }
 
     /// Commit several preflighted read/writeback reservations transactionally.
@@ -1102,6 +1180,26 @@ mod tests {
         assert_eq!(
             overflow_queue.preview_read(u64::MAX, u64::MAX),
             Err(WritebackError::ArithmeticOverflow)
+        );
+    }
+
+    #[test]
+    fn payload_writeback_requires_exact_known_sector_coverage() {
+        let queue = WritebackQueue::new(4, 2048, 32).expect("queue should initialize");
+        let p0 = SectorPayloadV1::new(1, 9, 0, 1, [3; 32], u32::MAX).unwrap();
+        let p1 = SectorPayloadV1::new(1, 9, 1, 2, [4; 32], u32::MAX).unwrap();
+        let plan = queue
+            .preview_payload(eviction(9, 0b0011, 0b0011), 0, &[p0, p1])
+            .unwrap();
+        assert_eq!(plan.line_id(), 9);
+        assert_eq!(plan.dirty_mask(), 0b0011);
+        assert_eq!(plan.payloads(), &[p0, p1]);
+        assert_eq!(
+            queue.preview_payload(eviction(9, 0b0011, 0b0011), 0, &[p0]),
+            Err(WritebackError::PayloadCoverageMismatch {
+                expected: 0b0011,
+                got: 0b0001,
+            })
         );
     }
 }
