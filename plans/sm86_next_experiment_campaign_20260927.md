@@ -1,3 +1,5 @@
+> **Superseded context (2026-09-30).** This file is retained for historical source/data ancestry, not as an active plan or task queue. The compact capability boundary is [`docs/STATUS.md`](../docs/STATUS.md); root `AGENTS.md` controls execution.
+
 # SM86 next-experiment campaign
 
 Updated 2026-09-27 after the adversarial code/scientific/publication review of
@@ -33,7 +35,7 @@ aggregate accuracy-ceiling/throughput-speed-floor lane is registered separately
 as E10-L; full locked-clock timing/cache holdouts and optional E10-P direct
 executable timing remain open and must not be conflated with the literature
 target.
-The reproducible local ledger is [SM86 bounded next-experiment results](../docs/sm86_next_experiment_results_20260927.md).
+The reproducible local ledger is [SM86 bounded next-experiment results](../docs/archive/research_20260930/sm86_next_experiment_results_20260927.md).
 
 ## Claim tiers
 

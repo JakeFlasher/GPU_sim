@@ -202,7 +202,7 @@ This path records device identity, NVBit trace, NCU report/CSV, replay input
 hashes and a comparison CSV. It reuses the existing metric-domain source/case
 matrix and is deliberately non-scoring unless clocks,
 metric domains, and dirty-flush/ownership contracts are independently closed;
-see [the holdout report](sm86_independent_holdout_20260927.md).
+see [the holdout report](archive/research_20260930/sm86_independent_holdout_20260927.md).
 
 The strict tiny external-input probe is exercised without a large simulator:
 
@@ -230,7 +230,7 @@ its JSON shape and content-bound extraction identity before using any row:
 ```bash
 python3 -m json.tool docs/accelsim_literature_lower_bound_manifest_20260928.json >/dev/null
 python3 -m json.tool docs/accelsim_literature_lower_bound_manifest.schema.json >/dev/null
-sha256sum docs/gpu_simulator_sota_matrix_20260924.md \
+sha256sum docs/archive/research_20260930/gpu_simulator_sota_matrix_20260924.md \
   docs/gpu_simulator_sota_matrix_20260924.csv
 .venv/bin/python -m pytest -q tools/test_accelsim_literature_manifest.py
 .venv/bin/python -m pytest -q tools/test_evaluate_accelsim_literature_floor.py

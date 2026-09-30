@@ -1,25 +1,31 @@
 # Documentation map
 
-Read one entry point, then the relevant contract. Dated reports are opt-in.
+Use one compact entry point, then open only the contract or source needed for
+the task. Dated reports are archived and opt-in.
 
-| Need | Source |
+| Need | Start here |
 | --- | --- |
-| Resume work | [PROJECT_MEMORY](PROJECT_MEMORY.md) |
-| Capabilities and actual open work | [STATUS](STATUS.md) |
-| Build/capture/replay | [Host runbook](runbook_host.md) |
-| Data flow and package ownership | [Architecture](ARCHITECTURE.md), [components](COMPONENTS.md) |
-| Cards, profiles, examples, schemas | [Configuration](archprofile.md), [input index](../arch_profiles/README.md) |
-| Diagnostic formulas and ITS trace limits | [Experimental diagnostics](experimental_diagnostics.md) |
-| Fast SM86 research prototype and SOTA study | [PhaseFuse](sm86_fast_exact_prototype_20260927.md) |
-| Tiny external trace capability probe | [contract](traceg_adapter_contract.md) |
-| Adversarial review and simplification ledger | [2026-09-28 review](code_adversarial_review_20260928.md) |
-| Focused validation | [Testing](testing.md) |
-| Design choices and alternatives | [Experiment campaign](../plans/sm86_next_experiment_campaign_20260927.md), [roadmap](../plans/cross_architecture_gpu_simulator_research_plan_20260923.md), [SOTA options](sm86_sota_simulator_options_20260926.md) |
-| Dated measurements, prior reviews and session corrections | [HISTORY](HISTORY.md) |
-| Retained archived experiments | [Archive](archive/README.md) |
-| SOL/campaign work, only when requested | [SOL overview](sol-execbench.md) |
+| Resume a task | [`PROJECT_MEMORY`](PROJECT_MEMORY.md) |
+| Current capability, caveats, and open boundaries | [`STATUS`](STATUS.md) |
+| Dated evidence and supersession map | [`HISTORY`](HISTORY.md) |
+| Build, capture, and replay | [`runbook_host.md`](runbook_host.md) |
+| Data flow and package ownership | [`ARCHITECTURE.md`](ARCHITECTURE.md), [`COMPONENTS.md`](COMPONENTS.md) |
+| Cards, profiles, and schemas | [`archprofile.md`](archprofile.md), [`../arch_profiles/README.md`](../arch_profiles/README.md) |
+| Diagnostic formulas and ITS limits | [`experimental_diagnostics.md`](experimental_diagnostics.md) |
+| Metric semantics and predictors | [`cycles_semantics_study.md`](cycles_semantics_study.md), [`metric-registry.md`](metric-registry.md), [`predictors.md`](predictors.md) |
+| Trace and external adapter contracts | [`nvbit-tracing.md`](nvbit-tracing.md), [`traceg_adapter_contract.md`](traceg_adapter_contract.md) |
+| Focused checks | [`testing.md`](testing.md) |
+| Literature and prior art | [`../references/`](../references/), [`accelsim_literature_lower_bound_manifest_20260928.json`](accelsim_literature_lower_bound_manifest_20260928.json) |
+| Retained dated reports | [`archive/research_20260930/`](archive/research_20260930/) |
+| SOL/campaign work (only when requested) | [`sol-execbench.md`](sol-execbench.md) |
 
-Root [AGENTS.md](../AGENTS.md) is the execution profile. Historical reports,
-receipts, task titles and old completion claims do not override current source
-or user scope. Raw captures, reference manuals, and campaign assets are retained;
-this index is not a reason to load them all into context.
+The active SM86 projection config is
+[`sm86_refined_model_config_20260929.json`](sm86_refined_model_config_20260929.json).
+Its result directories are commonly under ignored `results/alpha/`; filenames
+are not freshness proofs. The active tools are in `tools/`, and native/custom
+implementation contracts remain in source rather than in a research report.
+
+Root [`AGENTS.md`](../AGENTS.md) governs execution. Historical reports, plan
+files, receipts, and task titles do not create gates, advisors, hooks, or
+automatic work. Preserve source, cards, schemas, tests, datasets, and retained
+experiments when trimming context.

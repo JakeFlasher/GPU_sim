@@ -53,6 +53,10 @@ def validate(path: Path) -> dict[str, Any]:
     predicate_true = 0
     input_base = int(result["input_address"]) & 0xFFFF_FFFF
     output_base = int(result["output_address"]) & 0xFFFF_FFFF
+    capture_v2 = capture.get("schema") == "native_value_capture_v2"
+    if capture_v2:
+        input_base = int(result["input_address"])
+        output_base = int(result["output_address"])
     for lane, entry in enumerate(lanes):
         if entry.get("lane") != lane or entry.get("count") != len(EXPECTED_PCS):
             raise ValidationError(f"lane {lane} record count/identity mismatch")
@@ -68,11 +72,16 @@ def validate(path: Path) -> dict[str, Any]:
         if not isinstance(memory, list) or len(memory) != 2:
             raise ValidationError(f"lane {lane} memory record count mismatch")
         load_memory, store_memory = memory
-        expected_input_address = (input_base + lane * 4) & 0xFFFF_FFFF
-        expected_output_address = (output_base + lane * 4) & 0xFFFF_FFFF
-        if (load_memory.get("pc"), load_memory.get("kind"), load_memory.get("address"), load_memory.get("value")) != (0x50, 0, expected_input_address, inputs[lane]):
+        expected_input_address = input_base + lane * 4
+        expected_output_address = output_base + lane * 4
+        load_address = load_memory.get("address_u64", load_memory.get("address"))
+        store_address = store_memory.get("address_u64", store_memory.get("address"))
+        if not capture_v2:
+            expected_input_address &= 0xFFFF_FFFF
+            expected_output_address &= 0xFFFF_FFFF
+        if (load_memory.get("pc"), load_memory.get("kind"), load_address, load_memory.get("value")) != (0x50, 0, expected_input_address, inputs[lane]):
             raise ValidationError(f"lane {lane} load address/value mismatch")
-        if (store_memory.get("pc"), store_memory.get("kind"), store_memory.get("address"), store_memory.get("value")) != (0xB0, 1, expected_output_address, outputs[lane]):
+        if (store_memory.get("pc"), store_memory.get("kind"), store_address, store_memory.get("value")) != (0xB0, 1, expected_output_address, outputs[lane]):
             raise ValidationError(f"lane {lane} store address/value mismatch")
         if load["regs"][2] != inputs[lane]:
             raise ValidationError(f"lane {lane} LDG value mismatch")

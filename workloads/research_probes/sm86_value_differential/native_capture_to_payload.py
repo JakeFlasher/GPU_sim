@@ -2,7 +2,8 @@
 """Convert the native one-warp memory capture into a strict payload sidecar.
 
 The sidecar carries known store bytes and load-return values with explicit
-allocation/base/line/sector identity. It is an input contract for future
+allocation/base/line/sector identity. Capture v2 additionally retains full
+addresses and producer metadata. It is an input contract for future
 value-bearing replay; it does not infer cache ownership, eviction, fences, or
 host-visible flush completion.
 """
@@ -40,6 +41,7 @@ def convert(path: Path) -> dict[str, Any]:
         raise PayloadRefusal("only the complete SM86 one-warp fixture is admitted")
     input_base = int(result["input_address"])
     output_base = int(result["output_address"])
+    capture_v2 = capture.get("schema") == "native_value_capture_v2"
     payloads: list[dict[str, Any]] = []
     observations: list[dict[str, Any]] = []
     lanes = capture.get("lanes")
@@ -52,18 +54,21 @@ def convert(path: Path) -> dict[str, Any]:
         expected_input = input_base + lane * 4
         expected_output = output_base + lane * 4
         for record in memory:
-            address = int(record["address"])
+            address = int(record.get("address_u64", record.get("address")))
             kind = int(record["kind"])
             value = int(record["value"]) & 0xFFFF_FFFF
             if kind == 0:
-                expected = expected_input & 0xFFFF_FFFF
+                expected = expected_input if capture_v2 else expected_input & 0xFFFF_FFFF
                 if address != expected:
                     raise PayloadRefusal(f"lane {lane} load address {address:#x} != expected {expected:#x}")
-                observations.append({"lane": lane, "kind": "load_return", "address_u32": address, "value_u32": value})
+                observations.append({"lane": lane, "kind": "load_return", "address_u64": address,
+                                     "address_u32": address & 0xFFFF_FFFF, "value_u32": value,
+                                     "pc": record.get("pc"), "guard": record.get("guard"),
+                                     "occurrence": record.get("occurrence")})
                 continue
             if kind != 1:
                 raise PayloadRefusal(f"lane {lane} has unknown memory kind {kind}")
-            expected = expected_output & 0xFFFF_FFFF
+            expected = expected_output if capture_v2 else expected_output & 0xFFFF_FFFF
             if address != expected:
                 raise PayloadRefusal(f"lane {lane} store address {address:#x} != expected {expected:#x}")
             byte_offset = address % SECTOR_BYTES
@@ -82,14 +87,23 @@ def convert(path: Path) -> dict[str, Any]:
                 "byte_offset": byte_offset,
                 "bytes_hex": bytes_le.hex(),
                 "known_mask": known_mask,
-                "address_u32": address,
+                "address_u64": address,
+                "address_u32": address & 0xFFFF_FFFF,
                 "lane": lane,
+                "pc": record.get("pc"),
+                "guard": record.get("guard"),
+                "occurrence": record.get("occurrence", len(payloads)),
+                "launch_id": capture.get("launch_id", 0),
+                "function_name": capture.get("function_name", "value_kernel"),
+                "function_unique_id": capture.get("function_unique_id"),
+                "cta": [0, 0, 0],
+                "warp": 0,
                 "sequence": len(payloads) + 1,
             })
     if len(observations) != 32 or len(payloads) != 32:
         raise PayloadRefusal(f"expected 32 loads and 32 stores, got {len(observations)} and {len(payloads)}")
     return {
-        "schema": "native_value_payload_sidecar_v1",
+        "schema": "native_value_payload_sidecar_v2" if capture_v2 else "native_value_payload_sidecar_v1",
         "status": "ok",
         "scoring": False,
         "device": {key: result[key] for key in ("name", "pci", "cc", "driver_api", "uuid_hex")},
@@ -100,6 +114,15 @@ def convert(path: Path) -> dict[str, Any]:
             "initial_memory_known": False,
             "coherence_ownership": False,
             "flush_completion": False,
+            "address_width_bits": 64 if capture_v2 else 32,
+            "join_key": ["launch_id", "function_name", "cta", "warp", "lane", "pc", "occurrence"] if capture_v2 else None,
+        },
+        "baseline": {
+            "input_address_u64": input_base,
+            "output_address_u64": output_base,
+            "input_words_u32": result.get("inputs"),
+            "output_initial_word_u32": 0xA5A5A5A5,
+            "output_initial_bytes_known": True,
         },
         "observations": observations,
         "payloads": payloads,
@@ -114,7 +137,7 @@ def main() -> int:
     try:
         result = convert(args.capture)
     except (OSError, UnicodeDecodeError, json.JSONDecodeError, PayloadRefusal) as exc:
-        print(json.dumps({"schema": "native_value_payload_sidecar_v1", "status": "refused", "detail": str(exc)}, sort_keys=True))
+        print(json.dumps({"schema": "native_value_payload_sidecar_v2", "status": "refused", "detail": str(exc)}, sort_keys=True))
         return 2
     encoded = json.dumps(result, indent=2, sort_keys=True) + "\n"
     if args.output:

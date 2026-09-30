@@ -1,3 +1,5 @@
+> **Superseded context (2026-09-30).** This file is retained for historical source/data ancestry, not as an active plan or task queue. The compact capability boundary is [`docs/STATUS.md`](../docs/STATUS.md); root `AGENTS.md` controls execution.
+
 # Historical exact-cycle acceleration plan — 2026-09-12
 
 > **2026-09-28 scope correction.** Any Accel-Sim detailed-cycle comparison in this historical plan is an optional matched-executable lane, not the required external baseline. The active contract uses local NCU as ground truth and the published Accel-Sim aggregate manifest as the accuracy-ceiling/throughput-speed-floor target.

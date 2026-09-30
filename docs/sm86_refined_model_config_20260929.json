@@ -1,0 +1,338 @@
+{
+  "schema": "sm86_refined_latent_endpoint_config_v1",
+  "updated": "2026-09-30",
+  "branch": "GPUSim_main",
+  "hardware": {
+    "gpu": "NVIDIA GeForce RTX 3090 Ti",
+    "uuid": "GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c",
+    "compute_capability": "8.6",
+    "driver": "615.71.09",
+    "sm_clock_mhz": 1350,
+    "memory_clock_mhz": 10501
+  },
+  "replay_reference": {
+    "trace": "NVBit/SASS -> sim-trace -> sim-sm/sim-mem/sim-engine -> sim-run",
+    "preserve_default_replay": true,
+    "frontiers": [
+      "issue",
+      "event",
+      "completion",
+      "launch_envelope",
+      "typed_tail"
+    ]
+  },
+  "promoted_projection": {
+    "tool": "tools/sm86_ncu_projection_surrogate.py",
+    "feature_mode": "frontier-archetype",
+    "train_campaign": "results/alpha/full_3090ti_20260928_r3",
+    "fresh_cold_campaign": "results/alpha/full_3090ti_20260929_refined_cold_live",
+    "fresh_warm_campaign": "results/alpha/full_3090ti_20260929_refined_warm_live",
+    "shape_cold_matrix": "results/alpha/sm86_flash_bwd_shape_calibration_goal_20260929_refined/shape_matrix.csv",
+    "shape_warm_matrix": "results/alpha/sm86_flash_bwd_shape_calibration_goal_20260929_paired_warm_refined/shape_matrix.csv",
+    "shape_interpolation": "degree-2 Sk interpolation inside exact BH/Sq/D hull",
+    "cache_transfer": "paired local archetype skips generic transfer; unmatched rows use disjoint-family median fallback",
+    "ood_threshold": 3.0,
+    "ncus_are_score_only": true,
+    "fresh_holdout_mape": {
+      "cold_gpc": 0.02655,
+      "cold_duration": 0.02626,
+      "warm_gpc": 0.06314,
+      "warm_duration": 0.06422
+    },
+    "status": "retained_reference_experimental",
+    "promotion_scope": "current related base/large cohorts only; not universal deployment",
+    "generalization": "development/temporal repetition; no independent new-family proof",
+    "ood_policy": "diagnostic_only; unmatched inputs use candidate_fallback and widened interval"
+  },
+  "committee_models": [
+    {
+      "tool": "tools/sm86_tile_lattice_projection.py",
+      "role": "endpoint-lattice uncertainty member",
+      "ncus_are_score_only": true
+    },
+    {
+      "tool": "tools/sm86_endpoint_transform.py",
+      "role": "paired-warm CUDA-event to NCU endpoint crosswalk",
+      "ncus_are_score_only": true
+    },
+    {
+      "tool": "tools/sm86_pmsampling_stall_envelope.py",
+      "role": "statistical stall envelope; not route identity",
+      "ncus_are_score_only": true
+    },
+    {
+      "tool": "tools/sm86_bridge_cache_phase_envelope.py",
+      "role": "body-local bridge cache phase transfer",
+      "ncus_are_score_only": true
+    },
+    {
+      "tool": "tools/sm86_tile_pipeline_envelope.py",
+      "role": "independent-anchor tile/resource max envelope",
+      "ncus_are_score_only": true,
+      "coverage": "exact BH/Sq/D interior Sk hull first; frontier/trace fallback covers every other row",
+      "calibration_matrix": "results/alpha/sm86_flash_bwd_shape_calibration_goal_20260929_refined/shape_matrix.csv",
+      "promoted": false
+    },
+    {
+      "tool": "tools/sm86_cache_reuse_signature.py",
+      "role": "paired cold/warm cache signature ratio envelope",
+      "ncus_are_score_only": true,
+      "coverage": "paired cache rows and exact BH/Sq/D interior Sk hull first; frontier/trace fallback covers every other row",
+      "calibration_matrix": "results/alpha/sm86_flash_bwd_cache_phase_goal_20260929/cache_phase_matrix.csv",
+      "promoted": false
+    },
+    {
+      "tool": "tools/sm86_frontier_ratio_bundle.py",
+      "role": "interval-analysis frontier efficiency plus duration/GPC consistency",
+      "ncus_are_score_only": true,
+      "coverage": "all rows receive candidate intervals",
+      "promoted": false,
+      "result_dir": "results/alpha/sm86_frontier_ratio_bundle_goal_20260929"
+    },
+    {
+      "tool": "tools/sm86_pm_state_envelope.py",
+      "role": "aggregate PM-state phase envelope",
+      "ncus_are_score_only": true,
+      "coverage": "exact PM-shape anchors first; frontier fallback otherwise",
+      "promoted": false,
+      "result_dir": "results/alpha/sm86_pm_state_envelope_goal_20260929"
+    },
+    {
+      "tool": "tools/sm86_stage_interval_projection.py",
+      "role": "GCStack/stage-centric semantic demand max-plus interval",
+      "ncus_are_score_only": true,
+      "coverage": "metadata or sampled-trace stage surface; candidate_fallback for distant rows",
+      "dynamic_mode": "sampled one-threadblock retained; metadata-only remains the fastest default",
+      "promoted": false,
+      "result_dir": "results/alpha/sm86_stage_interval_projection_goal_20260929"
+    },
+    {
+      "tool": "tools/sm86_ncu_projection_surrogate.py",
+      "role": "optional static semantic nearest-neighbor frontier residual sensitivity",
+      "ncus_are_score_only": true,
+      "default_gpc_blend_alpha": 0.0,
+      "default_duration_blend_alpha": 0.0,
+      "coverage": "same candidate/candidate_fallback policy as promoted projector",
+      "promoted": false,
+      "result_dir": "results/alpha/sm86_neighbor_frontier_projection_goal_20260929"
+    },
+    {
+      "tool": "tools/sm86_clock_regime_projection.py",
+      "role": "external-active-clock duration crosswalk",
+      "ncus_are_score_only": true,
+      "coverage": "retains every source prediction row; duration-only adjustment",
+      "promoted": false,
+      "result_dir": "results/alpha/full_3090ti_20260929_stage_clock_sampled_live2"
+    },
+    {
+      "tool": "tools/sm86_ncu_projection_surrogate.py",
+      "role": "same-clock high-regime cohort transfer",
+      "ncus_are_score_only": true,
+      "coverage": "frontier candidate with explicit fallback",
+      "promoted": false,
+      "related_family_holdout": true,
+      "neighbor_variant": "train-only leave-one-out alpha_gpc=0.9 alpha_duration=0.4",
+      "result_dir": "results/alpha/sm86_high_clock_transfer_goal_20260929"
+    },
+    {
+      "tool": "tools/sm86_clock_elasticity.py",
+      "role": "bounded two-component core/memory clock response",
+      "ncus_are_score_only": true,
+      "coverage": "all score rows retain candidate predictions and response intervals",
+      "promoted": false,
+      "related_family_holdout": true,
+      "result_dir": "results/alpha/sm86_clock_elasticity_goal_20260929"
+    },
+    {
+      "tool": "tools/sm86_native_endpoint_ratio.py",
+      "role": "same-regime native CUDA-event to NCU endpoint ratio",
+      "ncus_are_score_only": true,
+      "coverage": "family-disjoint candidate rows",
+      "promoted": false,
+      "result_dir": "results/alpha/sm86_native_endpoint_ratio_goal_20260929"
+    },
+    {
+      "tool": "tools/sm86_warm_cache_scenario_interval.py",
+      "role": "same-regime warm/cold cache response scenario envelope",
+      "ncus_are_score_only": true,
+      "coverage": "all rows retain point and widened scenario interval",
+      "promoted": false,
+      "result_dir": "results/alpha/sm86_warm_cache_scenario_goal_20260929"
+    },
+    {
+      "tool": "tools/sm86_nak_stall_prior_projection.py",
+      "role": "independent NAK/CUPTI semantic stall-prior projection",
+      "ncus_are_score_only": true,
+      "coverage": "candidate or candidate_fallback for every score row",
+      "promoted": false,
+      "independent_source": "results/alpha/sm86_nak_family_cupti_pcsampling_goal_20260930/family_cupti_matrix.json",
+      "result_dir": "results/alpha/sm86_nak_stall_prior_projection_goal_20260930"
+    },
+    {
+      "tool": "tools/sm86_reuse_distance_phase_projection.py",
+      "role": "per-threadblock sector reuse-distance warm/cold phase signature",
+      "ncus_are_score_only": true,
+      "coverage": "candidate for every paired score row; no OOD refusal",
+      "promoted": false,
+      "result_dir": "results/alpha/sm86_reuse_distance_phase_projection_goal_20260930"
+    },
+    {
+      "tool": "tools/sm86_endpoint_domain_committee.py",
+      "role": "fixed GPC frontier/clock plus CUDA-event duration endpoint committee",
+      "ncus_are_score_only": true,
+      "coverage": "15/15 current cold and warm rows",
+      "promoted": false,
+      "result_dir": "results/alpha/sm86_research_followup_20260930"
+    },
+    {
+      "tool": "tools/sm86_native_cupti_surface_projection.py",
+      "role": "native CUPTI PC/scheduler-state endpoint committee",
+      "ncus_are_score_only": true,
+      "coverage": "15/15 current cold and warm candidate rows",
+      "feature_profile": "four",
+      "promoted": false,
+      "cupti_cold_campaign": "results/alpha/sm86_native_cupti_pc_all_20260930",
+      "cupti_warm_campaign": "results/alpha/sm86_native_cupti_pc_warm_20260930",
+      "result_dir": "results/alpha/sm86_native_cupti_surface_projection_goal_20260930/four"
+    },
+    {
+      "tool": "tools/sm86_cupti_opcode_surface_projection.py",
+      "role": "negative CUPTI PC-to-semantic-opcode join sensitivity",
+      "ncus_are_score_only": true,
+      "coverage": "15/15 candidate rows",
+      "promoted": false,
+      "result_dir": "results/alpha/sm86_cupti_opcode_surface_projection_goal_20260930"
+    },
+    {
+      "tool": "tools/sm86_native_event_frontier_crosswalk.py",
+      "role": "native CUDA-event plus replay-frontier endpoint crosswalk",
+      "ncus_are_score_only": true,
+      "coverage": "15/15 current cold and warm candidate rows",
+      "promoted": false,
+      "result_dir": "results/alpha/sm86_native_event_frontier_crosswalk_goal_20260930"
+    },
+    {
+      "tool": "tools/sm86_endpoint_regime_committee.py",
+      "role": "per-endpoint phase/regime committee",
+      "ncus_are_score_only": true,
+      "coverage": "15/15 current cold and warm candidate rows",
+      "promoted": false,
+      "result_dir": "results/alpha/sm86_endpoint_regime_committee_goal_20260930"
+    },
+    {
+      "tool": "tools/sm86_endpoint_regime_router_v2.py",
+      "role": "unknown-clock neutral fallback router",
+      "ncus_are_score_only": true,
+      "coverage": "candidate rows when neutral or independently clock-classified",
+      "promoted": false,
+      "result_dir": "results/alpha/sm86_temporal_committee_goal_20260930"
+    }
+  ],
+  "fresh_campaigns": {
+    "full_cold": "results/alpha/full_3090ti_20260929_refined_cold_live",
+    "full_warm": "results/alpha/full_3090ti_20260929_refined_warm_live",
+    "full_pm_sampling": "results/alpha/full_3090ti_20260929_refined_sampling_live",
+    "flash_cache_phase": "results/alpha/sm86_flash_bwd_cache_phase_goal_20260929",
+    "nak_family_pm_sampling": "results/alpha/sm86_nak_family_pmsampling_goal_20260929",
+    "nak_bridge_template_sensitivity": "results/alpha/sm86_nak_cuda_elf_bridge_mixed_alt_template_20260929",
+    "tile_pipeline_envelope_cold": "results/alpha/sm86_tile_pipeline_envelope_goal_20260929/cold_large.json",
+    "tile_pipeline_envelope_warm": "results/alpha/sm86_tile_pipeline_envelope_goal_20260929/warm_large.json",
+    "cache_reuse_signature_cold": "results/alpha/sm86_cache_reuse_signature_goal_20260929/cold_large.json",
+    "cache_reuse_signature_warm": "results/alpha/sm86_cache_reuse_signature_goal_20260929/warm_large.json",
+    "tile_pipeline_coverage": "results/alpha/sm86_tile_pipeline_envelope_goal_20260929/coverage_summary.json",
+    "cache_reuse_coverage": "results/alpha/sm86_cache_reuse_signature_goal_20260929/coverage_summary.json",
+    "promoted_projection_coverage": "results/alpha/sm86_ncu_projection_frontier_archetype_refined_live_coverage_20260929.json",
+    "frontier_ratio_bundle": "results/alpha/sm86_frontier_ratio_bundle_goal_20260929",
+    "pm_state_envelope": "results/alpha/sm86_pm_state_envelope_goal_20260929",
+    "stage_interval_projection": "results/alpha/sm86_stage_interval_projection_goal_20260929",
+    "stage_interval_live_clock_observation": "results/alpha/full_3090ti_20260929_stage_cold_live/clock_regime_observation.json",
+    "stage_interval_live_clock_comparison": "results/alpha/full_3090ti_20260929_stage_cold_live/model_clock_regime_comparison.json",
+    "stage_interval_live_clock_sampled": "results/alpha/full_3090ti_20260929_stage_clock_sampled_live2/clock_regime_observation.json",
+    "stage_interval_live_clock_sampled_warm": "results/alpha/full_3090ti_20260929_stage_clock_sampled_warm_live/clock_regime_observation.json",
+    "ncu_base_clock_observation": "results/alpha/full_3090ti_20260929_ncu_base_clock_cold_live/clock_regime_observation.json",
+    "ncu_boost_clock_observation": "results/alpha/full_3090ti_20260929_ncu_boost_clock_base_live/clock_regime_observation.json",
+    "clock_context_warm_campaign": "results/alpha/full_3090ti_20260930_clock_context_warm_live",
+    "clock_context_cold_campaign": "results/alpha/full_3090ti_20260930_clock_context_cold_live",
+    "stage_interval_live_clock_sampled_comparison": "results/alpha/full_3090ti_20260929_stage_clock_sampled_live2/model_clock_regime_comparison.json",
+    "clock_regime_projection": "results/alpha/full_3090ti_20260929_stage_clock_sampled_live2/clock_adjusted_projection.json",
+    "high_clock_transfer": "results/alpha/sm86_high_clock_transfer_goal_20260929/coverage_summary.json",
+    "clock_elasticity": "results/alpha/sm86_clock_elasticity_goal_20260929/coverage_summary.json",
+    "clock_elasticity_warm_negative": "results/alpha/sm86_clock_elasticity_warm_goal_20260929/",
+    "native_endpoint_ratio": "results/alpha/sm86_native_endpoint_ratio_goal_20260929/coverage_summary.json",
+    "warm_cache_scenario_interval": "results/alpha/sm86_warm_cache_scenario_goal_20260929/coverage_summary.json",
+    "ncu_clock_endpoint_audit": "results/alpha/sm86_ncu_clock_endpoint_audit_goal_20260930/warm_live.json",
+    "ncu_phase_clock_analysis": "results/alpha/sm86_ncu_phase_clock_analysis_goal_20260930/cold_warm.json",
+    "regime_router_high_cold": "results/alpha/sm86_regime_router_goal_20260930/high_cold.json",
+    "regime_router_high_warm": "results/alpha/sm86_regime_router_goal_20260930/high_warm.json",
+    "nak_long_pma": "results/alpha/sm86_nak_long_pma_goal_20260930_variant/summary.json",
+    "nak_pma_coverage": "results/alpha/sm86_nak_pma_coverage_goal_20260930/coverage.json",
+    "nak_bridge_cupti_pcsampling": "results/alpha/sm86_nak_bridge_pcsampling_goal_20260930/summary.json",
+    "nak_bridge_repeat_cupti_pcsampling": "results/alpha/sm86_nak_bridge_repeat_pcsampling_goal_20260930/summary.json",
+    "nak_family_cupti_pcsampling": "results/alpha/sm86_nak_family_cupti_pcsampling_goal_20260930/family_cupti_matrix.json",
+    "neighbor_frontier_sensitivity": "results/alpha/sm86_neighbor_frontier_projection_goal_20260929/cold_coverage_summary.json",
+    "nak_stall_prior_projection": "results/alpha/sm86_nak_stall_prior_projection_goal_20260930",
+    "reuse_distance_phase_projection": "results/alpha/sm86_reuse_distance_phase_projection_goal_20260930",
+    "endpoint_domain_committee_cold": "results/alpha/sm86_research_followup_20260930/clock_committee/cold_summary.json",
+    "endpoint_domain_committee_warm": "results/alpha/sm86_research_followup_20260930/clock_committee/warm_conservative_summary.json",
+    "native_benchmark_cupti_boundary": "results/alpha/sm86_native_cupti_pc_probe_20260930/README.md",
+    "native_cupti_pc_cold": "results/alpha/sm86_native_cupti_pc_all_20260930/summary.json",
+    "native_cupti_pc_warm": "results/alpha/sm86_native_cupti_pc_warm_20260930/summary.json",
+    "native_cupti_surface_projection": "results/alpha/sm86_native_cupti_surface_projection_goal_20260930/four",
+    "native_cupti_opcode_surface_negative": "results/alpha/sm86_cupti_opcode_surface_projection_goal_20260930",
+    "native_cupti_phase_analysis": "results/alpha/sm86_native_cupti_surface_projection_goal_20260930/phase_analysis.json",
+    "native_cupti_launch_phase_analysis": "results/alpha/sm86_native_cupti_surface_projection_goal_20260930/launch_phase_analysis.json",
+    "native_cupti_launchsplit_projection": "results/alpha/sm86_native_cupti_surface_projection_goal_20260930/four_launchsplit/warm_summary.json",
+    "native_event_frontier_crosswalk": "results/alpha/sm86_native_event_frontier_crosswalk_goal_20260930",
+    "endpoint_regime_committee": "results/alpha/sm86_endpoint_regime_committee_goal_20260930",
+    "endpoint_regime_router_v2": "tools/sm86_endpoint_regime_router_v2.py",
+    "ncu_external_clock_boundary": "results/alpha/sm86_active_clock_probe_5ms_20260930/README.md",
+    "clock_cache_interaction": "results/alpha/sm86_temporal_phase_interaction_goal_20260930/interaction.json",
+    "regime_matrix": "results/alpha/sm86_regime_matrix_goal_20260930/matrix.json",
+    "regime_fraction_blend_sensitivity": "tools/sm86_regime_fraction_blend.py",
+    "endpoint_interval_report_cold": "results/alpha/sm86_temporal_committee_goal_20260930/regime_router_v2_cold_intervals.json",
+    "endpoint_interval_report_warm": "results/alpha/sm86_temporal_warm_committee_goal_20260930/regime_router_v2_warm_intervals.json",
+    "interaction_interval_envelope_cold": "results/alpha/sm86_interaction_scope_corrected_20260930/cold.json",
+    "interaction_interval_envelope_warm": "results/alpha/sm86_interaction_scope_corrected_20260930/warm.json",
+    "interaction_interval_scope_corrected": "results/alpha/sm86_interaction_scope_corrected_20260930",
+    "temporal_cold_campaign": "results/alpha/full_3090ti_20260930_temporal_cold_live2",
+    "temporal_warm_campaign": "results/alpha/full_3090ti_20260930_temporal_warm_live2",
+    "temporal_neutral_summary": "results/alpha/sm86_temporal_committee_goal_20260930/temporal_neutral_summary.json",
+    "temporal_warm_summary": "results/alpha/sm86_temporal_warm_committee_goal_20260930/temporal_warm_summary.json",
+    "temporal_boost_campaign": "results/alpha/full_3090ti_20260930_temporal_boost_cold_live3",
+    "temporal_boost_elastic_summary": "results/alpha/sm86_temporal_boost_committee_goal_20260930/clock_elastic_summary.json",
+    "temporal_boost_warm_campaign": "results/alpha/full_3090ti_20260930_temporal_boost_warm_live2",
+    "temporal_boost_warm_elastic_summary": "results/alpha/sm86_temporal_boost_warm_committee_goal_20260930/clock_elastic_summary.json"
+  },
+  "unresolved_mechanisms": [
+    "per-instruction physical pipe/sub-unit and issue-slot tags",
+    "unrestricted independent SM86 SASS/scheduler/control-word/CUDA ABI generation",
+    "cache-line ownership/read-from/dirty writeback/complete DRAM semantics",
+    "single synchronized NCU/CUPTI/CUDA-event/device-timer/simulator endpoint"
+  ],
+  "external_seam_requirements": "archive/research_20260930/sm86_external_seam_requirements_20260929.md",
+  "coverage_policy": {
+    "all_scored_workloads_receive_prediction": true,
+    "exact_shape_path_preferred": true,
+    "fallback_status": "candidate_fallback",
+    "fallback_interval_widens_with_frontier_distance": true,
+    "never_drop_for_missing_shape": true
+  },
+  "policy": {
+    "no_test_workflow": true,
+    "no_hash_workflow": true,
+    "no_verification_workflow": true,
+    "do_not_claim_mechanism_closure": true
+  },
+  "documentation": {
+    "current_status": "STATUS.md",
+    "continuation_memory": "PROJECT_MEMORY.md",
+    "history_index": "HISTORY.md",
+    "archived_reports": "archive/research_20260930/",
+    "model_role": "fast NCU metric projection; not cycle-accurate silicon simulation"
+  },
+  "speed_claim_policy": {
+    "projection_wall_time_is_postprocessing_only": true,
+    "end_to_end_speedup_requires_acquisition_replay_and_projection": true,
+    "historical_1500x_comparison": "withdrawn_scope_mismatch"
+  }
+}

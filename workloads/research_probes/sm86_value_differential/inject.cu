@@ -41,7 +41,7 @@ extern "C" __device__ __noinline__ void snapshot_memory(
     auto &frame = capture->memory[lane][index];
     frame.pc = pc;
     frame.guard = guard;
-    frame.address = static_cast<uint32_t>(address);
+    frame.address = address;
     frame.kind = kind;
     frame.value = value;
 }

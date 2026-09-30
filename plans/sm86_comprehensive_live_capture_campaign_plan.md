@@ -1,3 +1,5 @@
+> **Superseded context (2026-09-30).** This file is retained for historical source/data ancestry, not as an active plan or task queue. The compact capability boundary is [`docs/STATUS.md`](../docs/STATUS.md); root `AGENTS.md` controls execution.
+
 > Dated context; current capabilities and open work are in [STATUS](../docs/STATUS.md).
 > Historical completion claims and next-step prose are not active instructions.
 

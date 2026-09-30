@@ -1,3 +1,5 @@
+> **Superseded context (2026-09-30).** This file is retained for historical source/data ancestry, not as an active plan or task queue. The compact capability boundary is [`docs/STATUS.md`](../docs/STATUS.md); root `AGENTS.md` controls execution.
+
 > **Historical plan (2026-09-23).** Earlier power/certification proposal; retained historical context, not an active requirement. The active branch reports simulator accuracy and wall time only. See `plans/cross_architecture_gpu_simulator_research_plan_20260923.md`.
 
 # Typed L2 ownership and power state for certified summary regions
@@ -760,7 +762,7 @@ power accuracy, or architecture-independent trace validity.
 6. Local event-skipping research: exact summaries require a state-complete
    transformer and detailed fallback; blanket deletion of GPU events is not a
    sound contract.
-   [`event_skipping_cycle_accuracy_research_20260912.md`](../docs/event_skipping_cycle_accuracy_research_20260912.md).
+   [`../docs/archive/research_20260930/event_skipping_cycle_accuracy_research_20260912.md`](../docs/archive/research_20260930/event_skipping_cycle_accuracy_research_20260912.md).
 
 [^1]: The AccelWattch project page and paper are cited above. The local
      architecture card’s `power_w_median` fields are NVML covariates for probe

@@ -1,3 +1,5 @@
+> **Superseded context (2026-09-30).** This file is retained for historical source/data ancestry, not as an active plan or task queue. The compact capability boundary is [`docs/STATUS.md`](../docs/STATUS.md); root `AGENTS.md` controls execution.
+
 > **Historical plan (2026-09-23).** Earlier cross-vendor/MI300X proposal; retained historical context. The active branch uses the software-only SM86 roadmap and final NCU/simulator-speed evidence. See `plans/cross_architecture_gpu_simulator_research_plan_20260923.md`.
 
 # Heterogeneous GPU simulator novelty plan

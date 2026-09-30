@@ -26,11 +26,12 @@ results, and `STG.E` effective addresses/payload values. It reports 15
 predicate-true lanes and status `ok`.
 
 `native_capture_to_payload.py` converts the 32 captured stores into
-`native_value_payload_sidecar_v1`: each record has allocation identity,
-generation, 128-byte line/32-byte sector coordinates, byte offset, known-byte
-mask, little-endian store bytes, and the original lane/address. Load-return
-observations are retained separately. The sidecar explicitly marks initial
-memory, ownership, and flush completion as unknown.
+`native_value_payload_sidecar_v1` for retained legacy captures, or v2 for new
+captures. V2 preserves full 64-bit addresses, static PC/guard, per-lane
+occurrence, launch/function/CTA/warp metadata, and explicit input/output
+baseline metadata. Load-return observations are retained separately. The
+sidecar explicitly marks ownership and flush completion as unknown, and the
+simulator does not silently join it to native replay events.
 
 `compare_native_interpreter.py` executes the same retained SM86 disassembly in
 the finite interpreter and compares all 32 native lanes on dynamic PCs,

@@ -83,7 +83,7 @@ void nvbit_at_cuda_event(CUcontext ctx, int is_exit, nvbit_api_cuda_t cbid,
         launched = true;
     } else {
         check(cudaDeviceSynchronize());
-        printf("CAPTURE {\"overflow\":%u,\"memory_overflow\":%u,\"nregs\":%u,\"constants\":[", capture->overflow, capture->memory_overflow, nregs);
+        printf("CAPTURE {\"schema\":\"native_value_capture_v2\",\"launch_id\":0,\"function_name\":\"value_kernel\",\"function_unique_id\":null,\"grid\":[1,1,1],\"block\":[32,1,1],\"overflow\":%u,\"memory_overflow\":%u,\"nregs\":%u,\"constants\":[", capture->overflow, capture->memory_overflow, nregs);
         for (unsigned i=0;i<8;++i) printf("%s%u", i ? "," : "", capture->constants[i]);
         printf("],\"lanes\":[");
         for (unsigned lane=0;lane<kLanes;++lane) {
@@ -97,7 +97,7 @@ void nvbit_at_cuda_event(CUcontext ctx, int is_exit, nvbit_api_cuda_t cbid,
             printf("],\"memory\":[");
             for (unsigned i=0;i<capture->memory_count[lane] && i<kMemoryFrames;++i) {
                 auto &m=capture->memory[lane][i];
-                printf("%s{\"pc\":%u,\"guard\":%u,\"address\":%u,\"kind\":%u,\"value\":%u}", i?",":"",m.pc,m.guard,m.address,m.kind,m.value);
+                printf("%s{\"occurrence\":%u,\"pc\":%u,\"guard\":%u,\"address_u64\":%llu,\"address_u32\":%u,\"kind\":%u,\"value\":%u,\"cta\":[0,0,0],\"warp\":0,\"lane\":%u}", i?",":"",i,m.pc,m.guard,(unsigned long long)m.address,(unsigned)(m.address & 0xffffffffu),m.kind,m.value,lane);
             }
             printf("]}");
         }

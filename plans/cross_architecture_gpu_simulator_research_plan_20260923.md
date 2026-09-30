@@ -1,3 +1,5 @@
+> **Superseded context (2026-09-30).** This file is retained for historical source/data ancestry, not as an active plan or task queue. The compact capability boundary is [`docs/STATUS.md`](../docs/STATUS.md); root `AGENTS.md` controls execution.
+
 # SM86 software simulator research roadmap
 
 Updated 2026-09-26; original filename retained for links. [STATUS](../docs/STATUS.md)
@@ -20,7 +22,7 @@ arbitrary postprocessing formula establishes a novel hardware mechanism.
 | Value-dependent behavior | Single-group ITS functional execution and custom trace | Complete successor contract, stronger tests; separate native/PTX frontend if required |
 | Accuracy | Retained SM86 trace/NCU pairs | Same-source-domain counters, content-bound independent holdout and tail mapping |
 | Speed | Event/dense path and phase counters | Repeated phase/RSS measurements on unchanged semantics, before/after evidence |
-| Fast research prototype | `sim-run --fast-frontier-only` / `sm86_fast_exact_prototype_20260927.md` | Certificate rate, refusal reasons, planner-inclusive wall time and boundary-state differential |
+| Fast research prototype | `sim-run --fast-frontier-only` / `../docs/archive/research_20260930/sm86_fast_exact_prototype_20260927.md` | Certificate rate, refusal reasons, planner-inclusive wall time and boundary-state differential |
 | Architecture contribution | Width override and custom resource scheduling | A real mechanism whose intervention changes a defensible design decision |
 | Toolchain | PTX, Vortex/VOLT and OpenVADL options researched | User-selected input/output ABI and concrete semantic/compiler subset |
 | External baseline | Two separate lanes: published Accel-Sim aggregate accuracy-ceiling/throughput-speed-floor corpus plus optional Accel-Sim/Huerta executable/parser overlap | Local NCU is ground truth; evaluate the registered literature targets, while direct executable timing still requires an explicitly matched frontend/workload/observable |

@@ -68,13 +68,30 @@ pub enum PayloadError {
     SidecarPayloadsEmpty,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Deserialize)]
 struct NativePayloadSidecarRaw {
     schema: String,
     status: String,
     payloads: Vec<NativePayloadRecordRaw>,
+    #[serde(default)]
+    baseline: Option<NativePayloadBaselineRaw>,
 }
 
+#[allow(dead_code)]
+#[derive(Debug, Deserialize)]
+struct NativePayloadBaselineRaw {
+    #[serde(default)]
+    input_address_u64: Option<u64>,
+    #[serde(default)]
+    output_address_u64: Option<u64>,
+    #[serde(default)]
+    input_words_u32: Option<Vec<u32>>,
+    #[serde(default)]
+    output_initial_word_u32: Option<u32>,
+}
+
+#[allow(dead_code)]
 #[derive(Debug, Deserialize)]
 struct NativePayloadRecordRaw {
     allocation_id: u64,
@@ -85,12 +102,30 @@ struct NativePayloadRecordRaw {
     bytes_hex: String,
     known_mask: u32,
     sequence: u64,
+    #[serde(default)]
+    address_u64: Option<u64>,
+    #[serde(default)]
+    launch_id: Option<u64>,
+    #[serde(default)]
+    function_name: Option<String>,
+    #[serde(default)]
+    function_unique_id: Option<i64>,
+    #[serde(default)]
+    pc: Option<u32>,
+    #[serde(default)]
+    guard: Option<u32>,
+    #[serde(default)]
+    occurrence: Option<u32>,
+    #[serde(default)]
+    cta: Option<[u32; 3]>,
+    #[serde(default)]
+    warp: Option<u32>,
 }
 
-/// Load the strict `native_value_payload_sidecar_v1` emitted by the native
-/// value differential probe. This is admission/identity evidence only; the
-/// normal replay path does not consume it unless a caller explicitly wires the
-/// returned payloads into a value-bearing cache transaction.
+/// Load the strict v1/v2 sidecar emitted by the native value differential
+/// probe. V2 retains richer producer metadata, but this loader still returns
+/// only the sector payload primitive: normal replay does not consume it unless
+/// a caller explicitly wires a complete value-bearing cache transaction.
 pub fn load_native_payload_sidecar(path: &Path) -> Result<Vec<SectorPayloadV1>, PayloadError> {
     const MAX_BYTES: usize = 64 * 1024 * 1024;
     let file = std::fs::File::open(path).map_err(|error| PayloadError::SidecarJson {
@@ -109,7 +144,10 @@ pub fn load_native_payload_sidecar(path: &Path) -> Result<Vec<SectorPayloadV1>, 
         serde_json::from_slice(&data).map_err(|error| PayloadError::SidecarJson {
             detail: error.to_string(),
         })?;
-    if raw.schema != "native_value_payload_sidecar_v1" || raw.status != "ok" {
+    if raw.schema != "native_value_payload_sidecar_v1"
+        && raw.schema != "native_value_payload_sidecar_v2"
+        || raw.status != "ok"
+    {
         return Err(PayloadError::SidecarSchema);
     }
     if raw.payloads.is_empty() {

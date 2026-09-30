@@ -14,6 +14,7 @@ import json
 import math
 import os
 from pathlib import Path
+import select
 import signal
 import statistics
 import subprocess
@@ -33,6 +34,27 @@ METRICS = [
     "l1tex__t_sectors_pipe_lsu_mem_global_op_st.sum",
     "lts__t_sectors_srcunit_tex_lookup_hit.sum",
     "lts__t_sectors_srcunit_tex_lookup_miss.sum",
+    # Per-kernel clock-domain observations. These are endpoint context, not
+    # physical scheduler/pipe witnesses and are loaded only for score reports.
+    "sm__cycles_elapsed.avg.per_second",
+    "gpc__cycles_elapsed.avg.per_second",
+    "dram__cycles_elapsed.avg.per_second",
+    # Aggregate counters only: these cannot identify a dynamic instruction's
+    # physical route or issue-cycle witness.
+    "smsp__inst_executed_pipe_alu.sum",
+    "smsp__inst_executed_pipe_cbu.sum",
+    "smsp__inst_executed_pipe_fma.sum",
+    "smsp__inst_executed_pipe_fmaheavy.sum",
+    "smsp__inst_executed_pipe_fmalite.sum",
+    "smsp__inst_executed_pipe_fp64.sum",
+    "smsp__inst_executed_pipe_ipa.sum",
+    "smsp__inst_executed_pipe_lsu.sum",
+    "smsp__inst_executed_pipe_tensor.sum",
+    "smsp__inst_executed_pipe_tensor_op_hmma.sum",
+    "smsp__inst_executed_pipe_tensor_op_imma.sum",
+    "smsp__inst_executed_pipe_tex.sum",
+    "smsp__inst_executed_pipe_uniform.sum",
+    "smsp__inst_executed_pipe_xu.sum",
 ]
 
 
@@ -40,17 +62,35 @@ def write_json(path, value):
     path.write_text(json.dumps(value, indent=2, allow_nan=False) + "\n")
 
 
+def wait_for_exit(proc, timeout, result):
+    # Popen.wait(timeout) on this host sleeps up to 50 ms between waitpid
+    # calls. Do not charge that polling delay to simulator replay performance.
+    try:
+        pidfd = os.pidfd_open(proc.pid)
+    except (AttributeError, OSError):
+        result["wait_method"] = "waitpid_polling_fallback"
+        return proc.wait(timeout=timeout)
+    try:
+        result["wait_method"] = "pidfd_readiness"
+        if not select.select([pidfd], [], [], timeout)[0]:
+            raise subprocess.TimeoutExpired(proc.args, timeout)
+        return proc.wait()
+    finally:
+        os.close(pidfd)
+
+
 def execute(command, directory, label, env, timeout):
     directory.mkdir(parents=True, exist_ok=True)
     command = list(map(str, command))
     started = time.monotonic()
-    result = {"command": command, "returncode": None, "timed_out": False}
+    result = {"command": command, "returncode": None, "timed_out": False,
+              "start_unix_ns": time.time_ns()}
     with (directory / f"{label}.stdout").open("w") as out, (directory / f"{label}.stderr").open("w") as err:
         try:
             proc = subprocess.Popen(command, cwd=directory, env=env, stdout=out, stderr=err,
                                     start_new_session=True)
             try:
-                result["returncode"] = proc.wait(timeout=timeout)
+                result["returncode"] = wait_for_exit(proc, timeout, result)
             except subprocess.TimeoutExpired:
                 result["timed_out"] = True
                 for sig in (signal.SIGTERM, signal.SIGKILL):
@@ -67,8 +107,25 @@ def execute(command, directory, label, env, timeout):
                     result["returncode"] = proc.wait(timeout=5)
                 except subprocess.TimeoutExpired:
                     result["returncode"] = -signal.SIGKILL
+            except BaseException:
+                # An interruption must not leave this campaign's subprocess
+                # running while a later invocation starts competing work.
+                try:
+                    os.killpg(proc.pid, signal.SIGTERM)
+                except ProcessLookupError:
+                    pass
+                try:
+                    proc.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    try:
+                        os.killpg(proc.pid, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
+                    proc.wait(timeout=5)
+                raise
         except OSError as exc:
             result["error"] = str(exc)
+    result["end_unix_ns"] = time.time_ns()
     result["wall_seconds"] = time.monotonic() - started
     result["status"] = "completed" if result["returncode"] == 0 and not result["timed_out"] else "failed"
     write_json(directory / f"{label}.process.json", result)
@@ -99,7 +156,7 @@ def read_ncu(path):
     header = rows[header_index]
     unit_index = header_index + 1
     unit_values = rows[unit_index] if unit_index < len(rows) else []
-    unit_markers = {"nsecond", "nanoseconds", "ns", "usecond", "us", "msecond", "ms", "second", "s", "cycle", "cycles"}
+    unit_markers = {"nsecond", "nanoseconds", "ns", "usecond", "us", "msecond", "ms", "second", "s", "cycle", "cycles", "hz", "khz", "mhz", "ghz"}
     has_units = any(value.strip().lower() in unit_markers for value in unit_values)
     units = dict(zip(header, unit_values)) if has_units else {}
     data_start = unit_index + 1 if has_units else unit_index
@@ -230,10 +287,13 @@ def run_workload(workload, args, root, env):
     for rep in range(args.ncu_repeats):
         label = f"ncu_{rep}"
         base = directory / label
-        if step([args.ncu, "--export", base, "--replay-mode", "application",
-                 "--clock-control", "none", "--cache-control", "all",
-                 "--launch-skip", args.warmup, "--launch-count", "1", "--metrics", ",".join(METRICS),
-                 *target_command(binary, workload, args.warmup, 1)], label):
+        ncu_command = [args.ncu, "--export", base, "--replay-mode", "application",
+                       "--clock-control", args.clock_control, "--cache-control", args.cache_control,
+                       "--launch-skip", args.warmup, "--launch-count", "1", "--metrics", ",".join(METRICS)]
+        for section in args.ncu_sections:
+            ncu_command.extend(["--section", section])
+        ncu_command.extend(target_command(binary, workload, args.warmup, 1))
+        if step(ncu_command, label):
             export_label = f"{label}_csv"
             if step([args.ncu, "--import", str(base) + ".ncu-rep", "--csv", "--page", "raw"], export_label):
                 try:
@@ -265,6 +325,11 @@ def summarize(rows):
         summaries.append({
             "id": row["id"], "status": row["status"], "shape": row["shape"],
             "native_mean_ms": native, "replay_wall_seconds": replay, "ncu": ncu_metrics,
+            "aggregate_pipe_counters": {
+                metric: ncu_metrics[metric]
+                for metric in METRICS
+                if metric.startswith("smsp__inst_executed_pipe_")
+            },
             "replay_peak_rss_kb": max((v["peak_rss_kb"] for v in row["replay"] if v["peak_rss_kb"] is not None), default=None),
             "warp_instructions": issued,
             "replay_warp_instructions_per_second": issued / replay["median"] if issued is not None and replay["median"] else None,
@@ -276,14 +341,19 @@ def summarize(rows):
     return summaries
 
 
-def publish(root, rows, total, elapsed):
+def publish(root, rows, total, elapsed, cache_control):
     summaries = summarize(rows)
+    complete = sum(row["status"] == "completed" for row in rows)
+    finished = len(rows) == total
     write_json(root / "summary.json", {
-        "schema": "sm86_alpha_campaign_v1", "status": "finished" if len(rows) == total else "running",
-        "completed_workloads": len(rows), "planned_workloads": total, "elapsed_seconds": elapsed,
+        "schema": "sm86_alpha_campaign_v1",
+        "status": ("finished" if complete == total else "finished_with_errors") if finished else "running",
+        "attempted_workloads": len(rows), "completed_workloads": complete,
+        "planned_workloads": total, "elapsed_seconds": elapsed,
+        "ncu_cache_control": cache_control,
         "measurement_role": "development_performance", "workloads": summaries,
         "limitations": ["no correctness assessment", "no artifact freshness claim", "no drift-free clock claim",
-                        "native warm-cache CUDA event timing and cold-cache NCU durations are separate measurements",
+                        f"native CUDA event timing and NCU cache-control={cache_control} durations are separate measurements",
                         "simulator issue/event/completion/GPC-envelope frontiers are separate; no full elapsed accuracy score",
                         "no proprietary physical-pipe witness or matched external timing result"],
     })
@@ -304,16 +374,50 @@ def publish(root, rows, total, elapsed):
                      "replay_peak_rss_kb": row["replay_peak_rss_kb"],
                      "ncu_repeats": row["ncu"]["gpu__time_duration.sum"]["n"],
                      "failed_stages": ";".join(row["failed_stages"])})
+        for metric, distribution_value in row["aggregate_pipe_counters"].items():
+            flat[-1][metric] = distribution_value["median"]
+        for metric in ("sm__cycles_elapsed.avg.per_second", "gpc__cycles_elapsed.avg.per_second", "dram__cycles_elapsed.avg.per_second"):
+            flat[-1][metric] = row["ncu"].get(metric, {}).get("median")
     if flat:
         with (root / "performance.csv").open("w", newline="") as stream:
             writer = csv.DictWriter(stream, fieldnames=list(flat[0]))
             writer.writeheader()
             writer.writerows(flat)
+    if finished:
+        fields = ["native_mean_ms", "ncu_duration_ns", "ncu_gpc_cycles", "sim_last_issue_cycles",
+                  "sim_event_cycles", "sim_gpc_envelope_cycles", "replay_wall_seconds"]
+        labels = ["Native ms", "NCU ns", "NCU GPC cycles", "Sim last issue", "Sim event",
+                  "Sim GPC envelope", "Replay wall s"]
+        def display(value):
+            return "unavailable" if value is None else f"{value:.6f}" if isinstance(value, float) else str(value)
+        lines = ["# Full SM86 campaign performance", "", f"Campaign: `{root.name}`", "",
+                 f"Completed without recorded stage errors: **{complete}/{total}**; "
+                 f"NCU cache control: **{cache_control}**.", "",
+                 "Native, NCU, simulator frontiers, and host replay are separate timing domains. "
+                 "No elapsed-time accuracy score or all-blockers-resolved claim is made.", "",
+                 "No test suite, artifact hashing, or verification workflow was run. "
+                 "Runtime errors and timeouts remain recorded in process/result files.", "",
+                 "Host replay wall time includes startup, trace loading, simulation, and report output. "
+                 "Per-process files record whether pidfd exit notification or polling fallback was used. "
+                 "Older polling-based wall times are not directly comparable as a speedup.", "",
+                 "| Workload | Status | " + " | ".join(labels) + " |",
+                 "|---|---|" + "---:|" * len(fields)]
+        for row in flat:
+            lines.append("| " + row["workload"] + " | " + row["status"] + " | " +
+                         " | ".join(display(row[field]) for field in fields) + " |")
+        lines.extend(["", "## Across-workload medians", ""])
+        for field, label in zip(fields, labels):
+            values = [row[field] for row in flat if row["status"] == "completed" and row[field] is not None]
+            lines.append(f"- {label}: {display(statistics.median(values) if values else None)} "
+                         f"({len(values)} workloads)")
+        (root / "final_performance.md").write_text("\n".join(lines) + "\n")
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path)
+    parser.add_argument("--cohort", choices=("all", "base", "large"), default="all",
+                        help="Collect a selected cohort; default preserves the full campaign")
     parser.add_argument("--toolkit", type=Path, default=Path("/usr/local/cuda-13.2"))
     parser.add_argument("--cxx", default="/usr/bin/g++-14")
     parser.add_argument("--ncu", default="/usr/local/cuda-13.2/nsight-compute-2026.1.0/ncu")
@@ -324,8 +428,18 @@ def main():
     parser.add_argument("--native-launches", type=int, default=100)
     parser.add_argument("--replay-repeats", type=int, default=3)
     parser.add_argument("--warmup", type=int, default=10)
+    parser.add_argument("--cache-control", choices=("all", "none"), default="all")
+    parser.add_argument("--clock-control", choices=("none", "base", "boost", "force-boost"), default="none",
+                        help="Nsight Compute clock regime; none preserves the historical alpha default")
+    parser.add_argument("--ncu-sections", action="append", default=[],
+                        help="Additional Nsight Compute sections to collect per NCU replay")
     parser.add_argument("--timeout", type=float, default=900)
     args = parser.parse_args()
+    if not math.isfinite(args.timeout) or args.timeout <= 0:
+        parser.error("--timeout must be finite and positive")
+    if any(value <= 0 for value in (args.ncu_repeats, args.native_repeats,
+                                   args.native_launches, args.replay_repeats)) or args.warmup < 0:
+        parser.error("repeat/launch counts must be positive and --warmup nonnegative")
     args.toolkit, args.simulator, args.tracer = args.toolkit.resolve(), args.simulator.resolve(), args.tracer.resolve()
     if args.output is None:
         parent = REPO / "results/alpha"
@@ -336,6 +450,8 @@ def main():
         root.mkdir(parents=True)
     workloads = []
     for cohort, name in (("base", "benchmark_spec.json"), ("large", "large_workload_spec.json")):
+        if args.cohort != "all" and args.cohort != cohort:
+            continue
         for source_workload in json.loads((HERE / name).read_text())["workloads"]:
             workload = dict(source_workload)
             workload["campaign_id"] = f"{cohort}__{workload['id']}"
@@ -360,9 +476,9 @@ def main():
                        "native": [], "replay": [], "ncu": [], "errors": [{"stage": "workload", "error": str(exc)}]}
                 print(f"{workload.get('campaign_id', workload['id'])}: {exc}", flush=True)
             rows.append(row)
-            publish(root, rows, len(workloads), time.monotonic() - started)
+            publish(root, rows, len(workloads), time.monotonic() - started, args.cache_control)
     finally:
-        publish(root, rows, len(workloads), time.monotonic() - started)
+        publish(root, rows, len(workloads), time.monotonic() - started, args.cache_control)
     print(f"Performance results: {root / 'performance.csv'}", flush=True)
     return int(any(row["status"] != "completed" for row in rows))
 
