@@ -1,120 +1,91 @@
 # Continuation memory
 
-**Updated 2026-09-30.** This is the short resume note. Read it, then
-[`STATUS`](STATUS.md), and only then the one archived report needed for a
-specific question. `AGENTS.md` is the governing repository policy. Dated
-reports are retained under [`archive/research_20260930`](archive/research_20260930/)
-and are not an automatic queue.
+**Updated 2026-09-30.** Read this file, then [`STATUS`](STATUS.md), then only
+the one focused archived report required for the next task. Historical reports
+and plans are opt-in context; they are not queues or gates. `AGENTS.md` governs
+execution.
 
 ## Scope and completion bar
 
 - Repository: `/home/jakeshea/GPU_simulator_rebase`, branch `GPUSim_main`.
-- Hardware anchor: NVIDIA RTX 3090 Ti, Ampere SM86. The native path is
-  `NVBit/SASS -> enhanced protobuf -> sim-trace -> sim-sm/sim-mem/sim-engine -> sim-run`.
-- Custom paths are separate: `simt_u32_v1` through `sim-sm::custom`, and the
-  functional-only single-group `simt_its_v1` executor. Neither is native SASS
-  timing.
-- NCU is the detailed comparison target. CUPTI, CUDA events, PMA, and replay
-  counters are independent observations; none silently becomes an NCU label or
-  a physical truth.
-- The useful near-term product is a fast, uncertainty-aware NCU metric
-  projection plus a conservative native replay. It is **not** a claim of
-  cycle-identical silicon simulation. The previous 1,500--2,050x figure is
-  withdrawn: it compared post-processing time for one cohort with replay time
-  for many workloads and excluded acquisition and replay.
+- Hardware anchor: RTX 3090 Ti, SM86, UUID
+  `GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c`, driver 615.71.09.
+- Locked operating point: graphics/SM 1350 MHz, memory 10501 MHz, P0.
+- Native path: `NVBit/SASS -> protobuf -> sim-trace -> sim-sm/sim-mem/
+  sim-engine -> sim-run`.
+- Custom `simt_u32_v1` and functional `simt_its_v1` are not native SASS timing.
+- NCU values are independent comparison targets, never same-workload features.
+- Exact closure requires physical pipe/slot telemetry, unrestricted independent
+  compiler/ABI/linker generation, cache owner/read-from/DRAM telemetry, and a
+  common simulator completion endpoint. Metric projections do not close them.
 
-## Current evidence
+## Current decision
 
-- The retained frontier/archetype projector (`tools/sm86_ncu_projection_surrogate.py`)
-  supplies a candidate point and interval for every current score row. Its
-  strongest results are related-cohort observations, not independent
-  architecture-wide generalization. The archetype/shape path is a reference
-  projector, not a universal deployment decision.
-- Fixed committees cover alternative explanations: frontier ratios, shape and
-  tile envelopes, PM/CUPTI semantic surfaces, clock elasticity, native-event
-  crosswalks, cache/reuse scenarios, and the NAK stall-prior projection. They
-  are mechanism-agnostic approximations and remain non-promoted.
-- The four-cell temporal matrix (`results/alpha/sm86_regime_matrix_goal_20260930/matrix.json`)
-  retains 15/15 rows per cell. Neutral low/unknown cold and warm routes score
-  8.36%/8.08% and 8.02%/7.90% GPC/duration MAPE; independently clock-witnessed
-  boost routes score 9.88%/9.67% and 9.36%/9.76%. These are development
-  observations on related cohorts, not a universal accuracy guarantee.
-- The corrected interaction-envelope reports use opposite-cohort calibration:
-  cold coverage is 13/15 GPC and 15/15 duration; warm coverage is 15/15 GPC
-  and 13/15 duration. Widths are empirical scenario spreads, not confidence
-  intervals. The corrected paths are recorded in the refined model config.
-- Native CUPTI PC campaigns collected 470,506 samples/21,161 records (cold)
-  and 920,753/42,500 records including warmups (warm), with zero reported
-  drops. Decoder v2 separates all-cycle states from no-issue subsets. This is
-  descriptive scheduler/resource evidence, not cache ownership or endpoint
-  identity. `imc_miss` means immediate-constant-cache miss.
-- Independent Mesa NAK SM86 operation-family bodies, a CUDA-ELF template bridge,
-  direct PMA telemetry, repeated CUPTI sampling, and public RM flush controls
-  are retained. They expand the observable feature surface but do not expose
-  proprietary scheduling, cache read-from, or unified timing state.
+The final public/open-RM seam audit is recorded in
+[`sm86_final_external_seam_audit_20260930.md`](archive/research_20260930/sm86_final_external_seam_audit_20260930.md).
+The long-running goal is **blocked** pending a new external endpoint; it is not
+complete and no exact mechanism is being renamed as solved.
 
-## Open physical boundaries
+## Final performance deliverable
 
-These remain explicit unknowns in the model and config:
+Both locked-clock full campaigns completed 15/15 workloads with seven NCU,
+five native, and three replay repeats per workload:
 
-1. exact per-instruction physical pipe, sub-unit, and issue-slot identity;
-2. unrestricted independent SM86 SASS/scheduler/control-word/CUDA-ABI
-   generation;
-3. cache-line ownership, read-from, dirty writeback, and complete DRAM ordering;
-4. one synchronized endpoint for NCU, CUPTI, CUDA events, device timers, and
-   simulator cycles.
+| Campaign | NCU cache | Median NCU | Median GPC | Median native | Median replay |
+|---|---|---:|---:|---:|---:|
+| cold | `all` | 10,080 ns | 13,572 cycles | 0.009448 ms | 0.629196 s |
+| warm | `none` | 8,704 ns | 11,709 cycles | 0.009435 ms | 0.644798 s |
 
-They are not logical prerequisites for useful metric approximation. Surrogates,
-intervals, latent factors, matched interventions, and conservative fallbacks
-can model their effects, but must be labelled as approximations rather than
-renaming the unknown mechanisms as solved.
+Settings use explicit NCU `clock_control: none`; details and raw records are
+under `results/alpha/full_3090ti_20260930_rm_cache_{cold,warm}_live/`.
+
+## Durable evidence
+
+- **Independent codegen:** current ABI-v8 no-template images execute vector,
+  branch, structured-loop, descriptor-memory/cache-sensitive, and
+  reduction/atomic families. The capability ledger is
+  [`sm86_independent_codegen_capability_matrix_20260930.md`](archive/research_20260930/sm86_independent_codegen_capability_matrix_20260930.md).
+  Unsupported classes remain tensor/texture/surface, dynamic shared memory,
+  device functions, relocations, linker/debug/resource synthesis, and arbitrary
+  SM86 forms.
+- **Independent control:** branch, loop, cache-sensitive, and atomic bodies use
+  corrected SM70/SM86 control-field synthesis without copying ptxas control
+  words. This is finite operation-family coverage, not unrestricted scheduling.
+- **Control layout correction:** SM70+/SM86 control bits are delay 0..3,
+  yield 4, write barrier 5..7, read barrier 8..10, wait mask 11..16, reuse
+  17..20. See [`sm86_control_word_decode_correction_20260930.md`](archive/research_20260930/sm86_control_word_decode_correction_20260930.md).
+- **Static issue priors:** correct `NV20_SUBDEVICE_0` RM reads return legacy
+  `fmla32=1`, `imla4=1` and v2 values `0,0,1,0,0,0,0,0,1`. These are static
+  instruction-class priors only; throttle/internal KGR variants are unsupported.
+- **Pipe boundary:** PMA raw fields, NCU PM sampling, open-RM topology and
+  scheduler-contest campaigns expose aggregate/resource state only; no dynamic
+  physical pipe, subunit, issue ordinal, or stable physical SMSP coordinate.
+- **Cache boundary:** public flush controls, PTX `.wb/.cg/.wt`, PTE query,
+  host WT visibility, pointer-chase, and cross-SM latency provide protocol and
+  phase evidence only. PTE owner fields are disabled on production RM; line
+  owner/read-from/dirty-sector/DRAM completion remain unknown.
+- **Timing:** a 1,350,000-clock semantic timer body gives raw QMD/Driver/CUPTI/
+  event/NCU medians 1,000,448/1,000,448/1,000,032/1,004,528/1,001,600 ns
+  with external locks plus `--clock-control none`. Default NCU boost gives
+  715,824 ns. Raw/Driver tail control words differ; this is semantic-body
+  timing, not byte-identical SASS or simulator completion.
 
 ## Scientific invariants
 
 - Keep issue, modeled-event, completion, launch-envelope, and typed-tail
-  frontiers separate. Never collapse them into a scalar route score.
-- Traces and architecture cards are inputs. Scored NCU observations are
-  comparison labels only; they cannot be features, tuning inputs, or route
-  selection criteria for the same workload.
-- Base and large are related cohorts. “15/15 covered” means a prediction row
-  was emitted, not that every possible shape is in-distribution.
-- An unmatched shape receives `candidate_fallback` with a widened interval and
-  an out-of-hull diagnostic. This avoids an OOD refusal for the current input
-  contract, but it does not promise valid accuracy for arbitrary future
-  workloads.
-- Native replay semantics and custom functional semantics stay separate. A
-  passing self-authored probe is implementation evidence, not silicon
-  validation.
-- Projection wall time is reported as post-processing only unless trace
-  acquisition, replay, and native measurement are included in the same cost.
-
-## Active implementation seams
-
-- `sim/mem/src/payload.rs` accepts capture schema v1/v2 and preserves optional
-  launch/function/CTA/warp/PC metadata without changing the replay primitive.
-- `workloads/research_probes/sm86_value_differential/` uses 64-bit addresses,
-  schema-v2 capture, metadata joining, and explicit validation helpers.
-- `workloads/research_probes/sm86_ncu_demo_benchmark/alpha_campaign.py` has
-  bounded process-wait fallback, launch-window clock context, and aggregate
-  NCU/CUDA-event fields. It does not make a physical pipe claim.
-- New tools under `tools/sm86_*` are small research alternatives. Their
-  current status, source inputs, and result locations are summarized in
-  `docs/STATUS.md` and the JSON config; do not infer promotion from filename.
+  frontiers separate.
+- Preserve NCU score-only status and related-cohort/OOD caveats.
+- Preserve content/semantic identity caveats; timestamps do not prove freshness.
+- Treat passing self-authored executions as implementation evidence, not
+  independent silicon validation.
+- Do not introduce test, hash, verification, audit, or approval workflows.
 
 ## Resume procedure
 
-1. Read `docs/STATUS.md` and inspect the narrow source seam.
-2. Decide whether the task is native replay, custom functional execution, or
-   NCU projection; do not mix their contracts.
-3. Use retained result paths only as unbound development evidence. State the
-   cohort, endpoint, intervention, and whether labels influenced fitting.
-4. Prefer a family-disjoint or counter-free holdout and a complete cost
-   comparison before changing the reference projector.
-5. Update the compact entry points. Add a dated report only when it preserves
-   a genuinely new observation; place it directly in the archive and add one
-   line to `HISTORY.md`.
-
-The current research goal remains blocked at the four external boundaries; it
-is not marked complete by this documentation consolidation. No tests, hashing,
-or verification workflows were run for the 2026-09-30 documentation/commit
-pass.
+1. Read this file and `STATUS.md`.
+2. Inspect current `git status` and the narrow source/artifact seam.
+3. Do not rerun the full campaigns unless a new external endpoint changes the
+   measurement contract; their final outputs already exist.
+4. If a privileged/proprietary RM, firmware, profiler, or hardware trace becomes
+   available, update the external seam audit and only then reconsider blocked
+   status. Otherwise preserve the four boundaries explicitly.

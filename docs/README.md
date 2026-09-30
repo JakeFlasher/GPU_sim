@@ -1,31 +1,20 @@
 # Documentation map
 
-Use one compact entry point, then open only the contract or source needed for
-the task. Dated reports are archived and opt-in.
+Use the compact entry points first:
 
 | Need | Start here |
-| --- | --- |
-| Resume a task | [`PROJECT_MEMORY`](PROJECT_MEMORY.md) |
-| Current capability, caveats, and open boundaries | [`STATUS`](STATUS.md) |
-| Dated evidence and supersession map | [`HISTORY`](HISTORY.md) |
-| Build, capture, and replay | [`runbook_host.md`](runbook_host.md) |
-| Data flow and package ownership | [`ARCHITECTURE.md`](ARCHITECTURE.md), [`COMPONENTS.md`](COMPONENTS.md) |
-| Cards, profiles, and schemas | [`archprofile.md`](archprofile.md), [`../arch_profiles/README.md`](../arch_profiles/README.md) |
-| Diagnostic formulas and ITS limits | [`experimental_diagnostics.md`](experimental_diagnostics.md) |
-| Metric semantics and predictors | [`cycles_semantics_study.md`](cycles_semantics_study.md), [`metric-registry.md`](metric-registry.md), [`predictors.md`](predictors.md) |
-| Trace and external adapter contracts | [`nvbit-tracing.md`](nvbit-tracing.md), [`traceg_adapter_contract.md`](traceg_adapter_contract.md) |
-| Focused checks | [`testing.md`](testing.md) |
-| Literature and prior art | [`../references/`](../references/), [`accelsim_literature_lower_bound_manifest_20260928.json`](accelsim_literature_lower_bound_manifest_20260928.json) |
-| Retained dated reports | [`archive/research_20260930/`](archive/research_20260930/) |
-| SOL/campaign work (only when requested) | [`sol-execbench.md`](sol-execbench.md) |
+|---|---|
+| Resume context | [`PROJECT_MEMORY.md`](PROJECT_MEMORY.md) |
+| Current status/boundaries | [`STATUS.md`](STATUS.md) |
+| Supersession/history map | [`HISTORY.md`](HISTORY.md) |
+| Final campaign results | [`archive/research_20260930/sm86_final_performance_handoff_20260930.md`](archive/research_20260930/sm86_final_performance_handoff_20260930.md) |
+| Final seam audit | [`archive/research_20260930/sm86_final_external_seam_audit_20260930.md`](archive/research_20260930/sm86_final_external_seam_audit_20260930.md) |
+| Build/capture/replay | [`runbook_host.md`](runbook_host.md) |
+| Architecture/contracts | [`ARCHITECTURE.md`](ARCHITECTURE.md), [`COMPONENTS.md`](COMPONENTS.md), [`archprofile.md`](archprofile.md) |
+| Model configuration | [`sm86_refined_model_config_20260929.json`](sm86_refined_model_config_20260929.json) |
+| Retained evidence | [`archive/research_20260930/`](archive/research_20260930/) |
+| Historical plans | [`../plans/README.md`](../plans/README.md) |
 
-The active SM86 projection config is
-[`sm86_refined_model_config_20260929.json`](sm86_refined_model_config_20260929.json).
-Its result directories are commonly under ignored `results/alpha/`; filenames
-are not freshness proofs. The active tools are in `tools/`, and native/custom
-implementation contracts remain in source rather than in a research report.
-
-Root [`AGENTS.md`](../AGENTS.md) governs execution. Historical reports, plan
-files, receipts, and task titles do not create gates, advisors, hooks, or
-automatic work. Preserve source, cards, schemas, tests, datasets, and retained
-experiments when trimming context.
+Root `AGENTS.md` governs execution. Archived reports and plans are context,
+not queues, gates, validators, or completion certificates. Preserve source,
+schemas, tests, datasets, and ignored campaign artifacts when trimming context.

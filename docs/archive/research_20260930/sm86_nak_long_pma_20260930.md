@@ -1,5 +1,10 @@
 # Long independent NAK PMA body (2026-09-30)
 
+**Count correction:** the 416/1,560 counts below counted eight-byte transport
+chunks including headers, not decoded samples. Reassembly gives 361/1,364
+complete samples, respectively. Use `sm86_nak_pma_coverage_20260930.md` and
+`coverage_decoded_v2.json`; the original capture/summary files are retained.
+
 The retained short NAK PMA body produced only 52 records. The new
 `tools/sm86_nak_long_pma_capture.py` restores the public tinygrad/NAK producer,
 generates a data-dependent integer/bitwise body, and captures direct PMA.

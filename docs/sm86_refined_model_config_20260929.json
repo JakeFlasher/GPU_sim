@@ -265,7 +265,7 @@
     "regime_router_high_cold": "results/alpha/sm86_regime_router_goal_20260930/high_cold.json",
     "regime_router_high_warm": "results/alpha/sm86_regime_router_goal_20260930/high_warm.json",
     "nak_long_pma": "results/alpha/sm86_nak_long_pma_goal_20260930_variant/summary.json",
-    "nak_pma_coverage": "results/alpha/sm86_nak_pma_coverage_goal_20260930/coverage.json",
+    "nak_pma_coverage": "results/alpha/sm86_nak_pma_coverage_goal_20260930/coverage_decoded_v2.json",
     "nak_bridge_cupti_pcsampling": "results/alpha/sm86_nak_bridge_pcsampling_goal_20260930/summary.json",
     "nak_bridge_repeat_cupti_pcsampling": "results/alpha/sm86_nak_bridge_repeat_pcsampling_goal_20260930/summary.json",
     "nak_family_cupti_pcsampling": "results/alpha/sm86_nak_family_cupti_pcsampling_goal_20260930/family_cupti_matrix.json",
@@ -334,5 +334,64 @@
     "projection_wall_time_is_postprocessing_only": true,
     "end_to_end_speedup_requires_acquisition_replay_and_projection": true,
     "historical_1500x_comparison": "withdrawn_scope_mismatch"
+  },
+  "static_architecture_priors": {
+    "sm_issue_rate_modifiers": {
+      "source": "results/alpha/sm86_rm_issue_modifier_probe_20260930/rm_subdevice_output.json",
+      "legacy": {
+        "imla0": 0,
+        "fmla16": 0,
+        "dp": 0,
+        "fmla32": 1,
+        "ffma": 0,
+        "imla1": 0,
+        "imla2": 0,
+        "imla3": 0,
+        "imla4": 1
+      },
+      "v2": {
+        "indices": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8
+        ],
+        "data": [
+          0,
+          0,
+          1,
+          0,
+          0,
+          0,
+          0,
+          0,
+          1
+        ]
+      },
+      "role": "static instruction-class speed-select prior only; not dynamic pipe/scheduler/issue identity",
+      "promoted": false
+    },
+    "sm86_control_word_fields": {
+      "source": "archive/research_20260930/sm86_control_word_decode_correction_20260930.md",
+      "fields": {
+        "delay": "bits 0..3",
+        "yield": "bit 4",
+        "write_barrier": "bits 5..7",
+        "read_barrier": "bits 8..10",
+        "wait_mask": "bits 11..16",
+        "reuse_mask": "bits 17..20"
+      },
+      "role": "SM70+/SM86 encoding layout; field sensitivity is mechanism-local, not pipe identity",
+      "promoted": false
+    }
+  },
+  "evidence": {
+    "independent_codegen_capability_matrix": "archive/research_20260930/sm86_independent_codegen_capability_matrix_20260930.md",
+    "independent_control_codegen_artifacts": "results/alpha/sm86_abi_v8_independent_control_codegen_20260930"
   }
 }
