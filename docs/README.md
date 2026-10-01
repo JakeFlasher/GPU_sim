@@ -1,20 +1,29 @@
 # Documentation map
 
-Use the compact entry points first:
+Read only the active surface first:
 
 | Need | Start here |
 |---|---|
 | Resume context | [`PROJECT_MEMORY.md`](PROJECT_MEMORY.md) |
-| Current status/boundaries | [`STATUS.md`](STATUS.md) |
+| Current capabilities/boundaries | [`STATUS.md`](STATUS.md) |
+| Predictive replacement contract | [`PREDICTIVE_CLOSURE.md`](PREDICTIVE_CLOSURE.md) |
+| Predictive configuration | [`sm86_predictive_closure_config_20261001.json`](sm86_predictive_closure_config_20261001.json) |
+| Implementation plan | [`../plans/sm86_predictive_closure_implementation_20261001.md`](../plans/sm86_predictive_closure_implementation_20261001.md) |
 | Supersession/history map | [`HISTORY.md`](HISTORY.md) |
-| Final campaign results | [`archive/research_20260930/sm86_final_performance_handoff_20260930.md`](archive/research_20260930/sm86_final_performance_handoff_20260930.md) |
-| Final seam audit | [`archive/research_20260930/sm86_final_external_seam_audit_20260930.md`](archive/research_20260930/sm86_final_external_seam_audit_20260930.md) |
 | Build/capture/replay | [`runbook_host.md`](runbook_host.md) |
-| Architecture/contracts | [`ARCHITECTURE.md`](ARCHITECTURE.md), [`COMPONENTS.md`](COMPONENTS.md), [`archprofile.md`](archprofile.md) |
-| Model configuration | [`sm86_refined_model_config_20260929.json`](sm86_refined_model_config_20260929.json) |
-| Retained evidence | [`archive/research_20260930/`](archive/research_20260930/) |
-| Historical plans | [`../plans/README.md`](../plans/README.md) |
+| Architecture and components | [`ARCHITECTURE.md`](ARCHITECTURE.md), [`COMPONENTS.md`](COMPONENTS.md) |
+| Architecture cards | [`archprofile.md`](archprofile.md) |
+| Test commands | [`testing.md`](testing.md) |
 
-Root `AGENTS.md` governs execution. Archived reports and plans are context,
-not queues, gates, validators, or completion certificates. Preserve source,
-schemas, tests, datasets, and ignored campaign artifacts when trimming context.
+## Evidence navigation
+
+- Final performance: `archive/research_20260930/sm86_final_performance_handoff_20260930.md`
+- Final external seam: `archive/research_20260930/sm86_final_external_seam_audit_20260930.md`
+- Latest physical-pipe recheck: `archive/research_20261001/sm86_physical_pipe_endpoint_recheck_20261001.md`
+- Latest value-lane probes: `archive/research_20261001/`
+- Predictive replacement research: `archive/research_20261001/sm86_predictive_closure_replacement_20261001.md`
+
+Dated reports, old plans, and legacy predictor notes are preserved as opt-in
+context. They are not task queues, gates, validators, or completion claims.
+`AGENTS.md` governs execution. Preserve source, schemas, tests, datasets,
+architecture cards, and historical evidence when trimming context.

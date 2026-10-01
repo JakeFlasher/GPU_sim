@@ -31,11 +31,16 @@ The current bounded producer supplies only lane register snapshots. Missing
 fields remain explicit refusals rather than defaults. The current finite
 scalar slice is implemented by `sm86_value_trace.py` for lane ID,
 immediate/register moves, `IADD3`, `ISETP` predicates, predicated arithmetic,
+`LOP3.LUT` with three GPR/immediate/constant inputs, an 8-bit truth table, and
+the SM86 data-only or predicate-plus-register destination form with `!PT`,
+bounded `SHF.L/R.U32` funnel shifts, and the observed immediate-multiplier
+`IMAD.SHL.U32` plus multiplier-1 `IMAD.IADD` forms,
 initialized `LDG.E`, `STG.E`, numeric `BRA`, `NOP`, and explicit `EXIT`; input-varying lanes,
 addresses, and predicate paths produce different dynamic values. The next native slice is one
 CTA/warp, a pinned SM86 cubin, and a larger `IADD3`/`ISETP`/`BRA`/32-bit
 `LDG`/`STG` subset differentially checked against an independent scalar
-interpreter. Calls, special/uniform registers, indirect branches, async/TMA/
+interpreter. `PLOP3.LUT`, BoolOp/predicate-input variants, and dynamic
+uniform/predicate sources remain refused. Calls, special/uniform registers, indirect branches, async/TMA/
 tensor instructions, races, and atomics without old/new capture are outside
 that admission contract.
 

@@ -3,6 +3,50 @@ use std::collections::BTreeMap;
 
 use serde::Serialize;
 use sim_mem::{AccessKind, CacheOpToken, opcode_head};
+use sim_semantics::{
+    CandidateDomain, EvidenceKind, LatentFactors, LatentModelError, ResourceDemandEnvelope,
+    ResourceDemandInterval,
+};
+
+use crate::sass_operands::FixedLatencyOperandStatus;
+
+/// Static SM86 regular-register bank demand projected from admitted SASS
+/// operands. This is a resource-pressure envelope, not a dynamic physical
+/// pipe, SMSP, or issue-slot observation.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub struct OperandBankPressure {
+    pub projected_records: u64,
+    pub gap_records: u64,
+    pub source_bank_reads: [u64; 2],
+    pub destination_bank_writes: [u64; 2],
+}
+
+impl OperandBankPressure {
+    pub(crate) fn observe(
+        &mut self,
+        status: &FixedLatencyOperandStatus,
+    ) -> Result<(), crate::IssueError> {
+        let projection = match status {
+            FixedLatencyOperandStatus::Projected(projection) => projection,
+            FixedLatencyOperandStatus::Gap(_) => {
+                add(&mut self.gap_records, 1)?;
+                return Ok(());
+            }
+            FixedLatencyOperandStatus::NotApplicable => return Ok(()),
+        };
+        add(&mut self.projected_records, 1)?;
+        let reads = projection.sm86_regular_source_bank_reads();
+        let writes = projection.sm86_regular_destination_bank_writes();
+        for bank in 0..2 {
+            add(&mut self.source_bank_reads[bank], u64::from(reads[bank]))?;
+            add(
+                &mut self.destination_bank_writes[bank],
+                u64::from(writes[bank]),
+            )?;
+        }
+        Ok(())
+    }
+}
 
 /// Dynamic populations, including predicated-off scheduler records.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
@@ -86,6 +130,11 @@ pub struct PhysicalPipelineAttribution {
     #[serde(skip_serializing_if = "is_empty_string_u64_map")]
     pub candidate_latest_completion_cycles: BTreeMap<String, u64>,
     pub model_interval_records: u64,
+    /// Singleton-domain class membership, not a hardware route observation.
+    /// This remains out of the legacy output and is used only by the opt-in
+    /// route-count envelope.
+    #[serde(skip)]
+    mandatory_class_instructions: BTreeMap<String, u64>,
     #[serde(skip)]
     scheduler_free: BTreeMap<String, u64>,
     #[serde(skip)]
@@ -119,10 +168,106 @@ impl Default for PhysicalPipelineAttribution {
             candidate_earliest_completion_cycles: BTreeMap::new(),
             candidate_latest_completion_cycles: BTreeMap::new(),
             model_interval_records: 0,
+            mandatory_class_instructions: BTreeMap::new(),
             scheduler_free: BTreeMap::new(),
             scheduler_sequence: 0,
         }
     }
+}
+
+impl PhysicalPipelineAttribution {
+    /// Aggregate the union of *class* candidates observed in this trace.
+    ///
+    /// This is intentionally a domain, not a route selection: a trace can
+    /// contain both unique and ambiguous instructions, and the union must not
+    /// be mistaken for a per-instruction hardware route assignment.
+    pub fn aggregate_candidate_class_domain(&self) -> Result<CandidateDomain, LatentModelError> {
+        if self.unknown_instructions != 0 {
+            return CandidateDomain::unknown(
+                "some trace instructions have no candidate class domain",
+            );
+        }
+        if self.candidate_instructions.is_empty() {
+            return CandidateDomain::unknown("no dynamic route candidates observed");
+        }
+        CandidateDomain::from_values(self.candidate_instructions.keys().cloned())
+    }
+
+    /// Count ranges over independent class choices. No pressure-balancing
+    /// assignment or scored NCU value participates. Unclassified records may
+    /// add demand to any named class and can also use classes not listed here.
+    pub fn class_count_envelope(&self) -> Result<PipelineClassEnvelope, crate::IssueError> {
+        let mut counts = BTreeMap::new();
+        for (class, &candidate_count) in &self.candidate_instructions {
+            let lower = self
+                .mandatory_class_instructions
+                .get(class)
+                .copied()
+                .unwrap_or(0);
+            let upper = candidate_count
+                .checked_add(self.unknown_instructions)
+                .ok_or(crate::IssueError::CounterOverflow {
+                    counter: "pipeline class upper count",
+                })?;
+            if lower > candidate_count || upper > self.total_warp_instructions {
+                return Err(crate::IssueError::CounterOverflow {
+                    counter: "pipeline class population invariant",
+                });
+            }
+            counts.insert(class.clone(), ClassCountInterval { lower, upper });
+        }
+        Ok(PipelineClassEnvelope {
+            role: "model_class_count_bounds_not_dynamic_physical_pipe_labels",
+            evidence: sim_semantics::EvidenceKind::Hypothesis,
+            total_warp_instructions: self.total_warp_instructions,
+            unclassified_instructions: self.unknown_instructions,
+            unlisted_classes_possible: self.unknown_instructions != 0,
+            counts,
+        })
+    }
+
+    /// Convert candidate pipeline classes into an abstract service-demand
+    /// envelope.  The result is deliberately separate from `selected` and
+    /// `scheduled` diagnostics: it describes feasible resource demand, not a
+    /// physical route assignment.
+    pub fn resource_demand_envelope(&self) -> Result<ResourceDemandEnvelope, LatentModelError> {
+        let mut pools = BTreeMap::new();
+        for (pool, &candidate_count) in &self.candidate_instructions {
+            let lower = self
+                .mandatory_class_instructions
+                .get(pool)
+                .copied()
+                .unwrap_or(0);
+            let upper = candidate_count
+                .checked_add(self.unknown_instructions)
+                .ok_or_else(|| LatentModelError::ResourceDemandOverflow { pool: pool.clone() })?;
+            pools.insert(pool.clone(), ResourceDemandInterval::interval(lower, upper));
+        }
+        ResourceDemandEnvelope::new(
+            self.total_warp_instructions,
+            self.unknown_instructions,
+            pools,
+            EvidenceKind::Hypothesis,
+        )
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct ClassCountInterval {
+    pub lower: u64,
+    pub upper: u64,
+}
+
+/// Independent per-class intervals are not jointly attainable extremes and
+/// do not assert how any particular dynamic instruction was physically routed.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct PipelineClassEnvelope {
+    pub role: &'static str,
+    pub evidence: sim_semantics::EvidenceKind,
+    pub total_warp_instructions: u64,
+    pub unclassified_instructions: u64,
+    pub unlisted_classes_possible: bool,
+    pub counts: BTreeMap<String, ClassCountInterval>,
 }
 
 /// Lane-consistent dynamic control-flow graph reconstructed from consecutive
@@ -186,6 +331,10 @@ pub struct TraceMetrics {
     /// counters; they quantify how much dynamic pipe attribution the trace
     /// contract can support without value or hardware-selection state.
     pub physical_pipeline: PhysicalPipelineAttribution,
+    /// Static operand-bank demand envelope for the admitted SM86 SASS forms;
+    /// it is intentionally separate from physical pipeline attribution.
+    #[serde(skip)]
+    pub operand_bank_pressure: OperandBankPressure,
     pub control_flow: ControlFlowGraph,
     /// Conservative cross-SM sharing domain; not a coherence protocol or
     /// profiler writeback counter.
@@ -422,6 +571,23 @@ fn decoded_sector_stats(kind: AccessKind, sector_arena: &[i64]) -> Option<(u64, 
 }
 
 impl TraceMetrics {
+    /// Lift the existing trace metrics into the factorized latent contract.
+    /// Dynamic route identity remains unknown. The aggregate candidate-class
+    /// vocabulary is not a single per-event route and cannot populate it.
+    /// `class_count_envelope` separately represents the modeled class bounds.
+    pub fn latent_factors(&self) -> Result<LatentFactors, LatentModelError> {
+        let route =
+            CandidateDomain::unknown("dynamic physical route/subunit/issue-slot unobserved")?;
+        let compiler = CandidateDomain::unknown("no independent compiler witness")?;
+        let cache = CandidateDomain::unknown("cache owner/read-from unobserved")?;
+        let timing = CandidateDomain::unknown("endpoint identity not unified")?;
+        Ok(LatentFactors {
+            route,
+            compiler,
+            cache,
+            timing,
+        })
+    }
     const MAX_COHERENCE_LINES: usize = 1_000_000;
 
     pub(crate) fn observe_coherence(
@@ -933,6 +1099,13 @@ impl TraceMetrics {
             add(&mut self.physical_pipeline.unknown_instructions, 1)?;
         } else if candidates.len() == 1 {
             add(&mut self.physical_pipeline.unique_instructions, 1)?;
+            add(
+                self.physical_pipeline
+                    .mandatory_class_instructions
+                    .entry(candidates[0].to_owned())
+                    .or_default(),
+                1,
+            )?;
         } else {
             add(&mut self.physical_pipeline.ambiguous_instructions, 1)?;
         }
@@ -1436,6 +1609,89 @@ mod tests {
             m.physical_pipeline.schedule_policy,
             "candidate_earliest_completion_v1_model_only"
         );
+    }
+
+    #[test]
+    fn operand_bank_pressure_is_a_separate_static_envelope() {
+        let control = crate::control_bits::ControlBits::new(0, false, 7, 7, 0, 0).unwrap();
+        let projected = crate::sass_operands::project_fixed_latency_operands(
+            "FFMA R0, R1, R2, R3",
+            control,
+            sim_arch::ArchId::Sm86,
+        );
+        let mut pressure = OperandBankPressure::default();
+        pressure.observe(&projected).unwrap();
+        assert_eq!(pressure.projected_records, 1);
+        assert_eq!(pressure.gap_records, 0);
+        assert_eq!(pressure.source_bank_reads, [1, 2]);
+        assert_eq!(pressure.destination_bank_writes, [1, 0]);
+
+        let gap = crate::sass_operands::project_fixed_latency_operands(
+            "FFMA R0, R1",
+            control,
+            sim_arch::ArchId::Sm86,
+        );
+        pressure.observe(&gap).unwrap();
+        assert_eq!(pressure.gap_records, 1);
+    }
+
+    #[test]
+    fn latent_factors_keep_dynamic_routes_unknown_beside_class_bounds() {
+        let mut m = TraceMetrics::default();
+        m.observe(
+            "BRA 0x40",
+            32,
+            32,
+            AccessKind::NonMemory,
+            crate::PipelineClass::Branch {
+                next_issue_interval_cycles: 1,
+            },
+            &[],
+        )
+        .unwrap();
+        let factors = m.latent_factors().unwrap();
+        assert!(factors.route.is_unknown());
+        let envelope = m.physical_pipeline.class_count_envelope().unwrap();
+        assert_eq!(
+            envelope.counts["adu"],
+            ClassCountInterval { lower: 0, upper: 1 }
+        );
+        assert_eq!(
+            envelope.counts["cbu"],
+            ClassCountInterval { lower: 0, upper: 1 }
+        );
+        assert_eq!(envelope.evidence, sim_semantics::EvidenceKind::Hypothesis);
+        assert!(factors.compiler.is_unknown());
+        assert!(factors.cache.is_unknown());
+        assert!(factors.timing.is_unknown());
+    }
+
+    #[test]
+    fn resource_demand_envelope_keeps_candidate_route_bounds() {
+        let mut m = TraceMetrics::default();
+        m.observe(
+            "BRA 0x40",
+            32,
+            32,
+            AccessKind::NonMemory,
+            crate::PipelineClass::Branch {
+                next_issue_interval_cycles: 1,
+            },
+            &[],
+        )
+        .unwrap();
+        let envelope = m.physical_pipeline.resource_demand_envelope().unwrap();
+        assert_eq!(envelope.total_events, 1);
+        assert_eq!(envelope.unclassified_events, 0);
+        assert_eq!(
+            envelope.pools["adu"],
+            sim_semantics::ResourceDemandInterval::interval(0, 1)
+        );
+        assert_eq!(
+            envelope.pools["cbu"],
+            sim_semantics::ResourceDemandInterval::interval(0, 1)
+        );
+        assert_eq!(envelope.evidence, sim_semantics::EvidenceKind::Hypothesis);
     }
 
     #[test]

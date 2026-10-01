@@ -93,6 +93,12 @@ sim/target/release/sim-run --trace TRACE_DIR --control CONTROL_BITS.json \
 The joined rows are marked `observed_external` and never alter replay timing
 or cache state. The probe enables only CUPTI kernel-activity records.
 
+To inspect the unknown-preserving mechanism envelope on a retained replay,
+add `--latent-envelope` to `sim-run`. The ordinary output is unchanged without
+the flag; the opt-in document reports candidate-class intervals, simulator
+frontiers, and a simulator-only endpoint descriptor, never NCU labels or a
+physical-pipe assignment.
+
 For memory-domain checks, use the reproducible SM86 probe (small first, then
 168-block scaling). It compares trace-derived instruction/load/ATOM/RED sectors
 and cold RMW read demand against the paired NCU CSV without fitting NCU values:

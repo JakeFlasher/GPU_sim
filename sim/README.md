@@ -10,6 +10,9 @@ The workspace contains two deliberately separate execution paths.
 - `sim-engine`: deterministic event ordering.
 - `sim-run` (`sim/direct_run`): direct trace replay CLI/library.
 - `sim-run-campaign` (`sim/run`): retained manifest/campaign CLI/library.
+- `sim-semantics::latent`: opt-in unknown-preserving route/compiler/cache/
+  timing candidate domains and endpoint/frontier contract; it does not change
+  the native replay path or claim silicon closure.
 
 Architecture cards are evidence-bound inputs. NCU joins are observations added
 after replay and never alter simulator parameters.
@@ -18,6 +21,10 @@ after replay and never alter simulator parameters.
 the trace/control/card contract, skips native timing replay, and emits only
 conservative scalar-region certificate/refusal evidence. It is not a timing
 replacement; see [`docs/sm86_fast_exact_prototype_20260927.md`](../docs/sm86_fast_exact_prototype_20260927.md).
+
+`sim-run --latent-envelope` is a separate opt-in diagnostic projection. It
+adds unknown-preserving route/class bounds and simulator-only frontier/endpoint
+metadata; ordinary output is unchanged when the flag is absent.
 
 ## Bounded custom path
 
@@ -47,6 +54,7 @@ cargo test --manifest-path sim/Cargo.toml --workspace --all-targets
 
 For native commands see [`docs/runbook_host.md`](../docs/runbook_host.md). For
 custom inputs see [`arch_profiles/programs/README.md`](../arch_profiles/programs/README.md).
-Current limitations and the compact continuation record live in
-[`docs/STATUS.md`](../docs/STATUS.md) and [`docs/PROJECT_MEMORY.md`](../docs/PROJECT_MEMORY.md);
-dated reports are indexed by [`docs/HISTORY.md`](../docs/HISTORY.md).
+Current limitations, the predictive replacement contract, and the compact continuation record live in
+[`docs/STATUS.md`](../docs/STATUS.md), [`docs/PREDICTIVE_CLOSURE.md`](../docs/PREDICTIVE_CLOSURE.md),
+and [`docs/PROJECT_MEMORY.md`](../docs/PROJECT_MEMORY.md); dated reports are indexed by
+[`docs/HISTORY.md`](../docs/HISTORY.md).

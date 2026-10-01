@@ -93,6 +93,8 @@ impl PreparedReplay {
             || config.l1_visibility_protocol
             || config.l1_resident_writeback
             || config.native_payload_sidecar.is_some()
+            || config.native_payload_events.is_some()
+            || config.native_payload_events_path.is_some()
         {
             return Err(RunError::new(
                 "prepared replay",
@@ -295,6 +297,8 @@ impl PreparedReplay {
             cache_scope: CacheScope::Launch.token(),
             carded_dram_bandwidth: self.carded_dram_bandwidth,
             native_payload_sidecar_records: None,
+            native_payload_event_count: None,
+            payload_ledger: None,
             dirty_writeback_capacity_sectors: None,
             coherence_service_cycles: None,
             coherence_capacity_sectors: None,
@@ -310,6 +314,7 @@ impl PreparedReplay {
             fast_frontier: None,
             cache_session: None,
             ncu_observation: None,
+            latent_envelope: None,
         }
     }
 }
@@ -424,6 +429,9 @@ mod tests {
             ncu_launch: None,
             launch_resources: None,
             native_payload_sidecar: None,
+            native_payload_events: None,
+            native_payload_events_path: None,
+            latent_envelope: false,
         }
     }
 

@@ -10,6 +10,7 @@
 //! producer can satisfy this contract.
 
 use serde::Deserialize;
+use std::collections::BTreeSet;
 use std::io::Read;
 use std::path::Path;
 
@@ -64,6 +65,16 @@ pub enum PayloadError {
     SidecarMask { index: usize },
     #[error("payload sidecar record {index} has invalid generation")]
     SidecarGeneration { index: usize },
+    #[error("payload sidecar record {index} has invalid identity field {field}")]
+    SidecarIdentity { index: usize, field: &'static str },
+    #[error("payload sidecar record {index} is missing identity field {field}")]
+    SidecarIdentityMissing { index: usize, field: &'static str },
+    #[error("payload sidecar record {index} duplicates a dynamic identity")]
+    SidecarIdentityDuplicate { index: usize },
+    #[error("payload sidecar record {index} matches {candidates} dynamic identities")]
+    SidecarIdentityAmbiguous { index: usize, candidates: usize },
+    #[error("payload sidecar record {index} has no matching dynamic trace identity")]
+    SidecarIdentityNotObserved { index: usize },
     #[error("payload sidecar contains no payload records")]
     SidecarPayloadsEmpty,
 }
@@ -120,13 +131,276 @@ struct NativePayloadRecordRaw {
     cta: Option<[u32; 3]>,
     #[serde(default)]
     warp: Option<u32>,
+    #[serde(default)]
+    lane: Option<u32>,
 }
 
-/// Load the strict v1/v2 sidecar emitted by the native value differential
-/// probe. V2 retains richer producer metadata, but this loader still returns
-/// only the sector payload primitive: normal replay does not consume it unless
-/// a caller explicitly wires a complete value-bearing cache transaction.
-pub fn load_native_payload_sidecar(path: &Path) -> Result<Vec<SectorPayloadV1>, PayloadError> {
+/// Dynamic producer identity retained separately from the cache payload.
+/// Missing fields are valid for historical v1 sidecars but prevent a native
+/// trace join; callers must check [`NativePayloadRecordV1::identity_complete`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NativePayloadIdentityV1 {
+    pub launch_id: Option<u64>,
+    pub function_name: Option<String>,
+    pub function_unique_id: Option<i32>,
+    pub pc: Option<u32>,
+    pub guard: Option<u32>,
+    pub occurrence: Option<u32>,
+    pub cta: Option<[u32; 3]>,
+    pub warp: Option<u32>,
+    pub lane: Option<u32>,
+}
+
+/// Canonical dynamic join key shared by a value sidecar and a future trace
+/// producer. It deliberately excludes address/value fields: those are payload
+/// evidence, not execution identity.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct NativePayloadJoinKey {
+    pub launch_id: u64,
+    pub function_unique_id: i32,
+    pub cta: [u32; 3],
+    pub warp: u32,
+    pub lane: u32,
+    pub pc: u32,
+    pub occurrence: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NativePayloadRecordV1 {
+    payload: SectorPayloadV1,
+    identity: NativePayloadIdentityV1,
+}
+
+impl NativePayloadRecordV1 {
+    pub fn new(
+        payload: SectorPayloadV1,
+        identity: NativePayloadIdentityV1,
+    ) -> Result<Self, PayloadError> {
+        if identity
+            .function_name
+            .as_ref()
+            .is_some_and(|name| name.is_empty())
+        {
+            return Err(PayloadError::SidecarIdentity {
+                index: 0,
+                field: "function_name",
+            });
+        }
+        if identity
+            .function_unique_id
+            .is_some_and(|function_unique_id| function_unique_id <= 0)
+        {
+            return Err(PayloadError::SidecarIdentity {
+                index: 0,
+                field: "function_unique_id",
+            });
+        }
+        if identity.lane.is_some_and(|lane| lane >= 32) {
+            return Err(PayloadError::SidecarIdentity {
+                index: 0,
+                field: "lane",
+            });
+        }
+        Ok(Self { payload, identity })
+    }
+
+    pub const fn payload(&self) -> SectorPayloadV1 {
+        self.payload
+    }
+
+    pub fn identity(&self) -> &NativePayloadIdentityV1 {
+        &self.identity
+    }
+
+    pub fn identity_complete(&self) -> bool {
+        self.identity.launch_id.is_some()
+            && self.identity.function_name.is_some()
+            && self.identity.function_unique_id.is_some()
+            && self.identity.pc.is_some()
+            && self.identity.occurrence.is_some()
+            && self.identity.cta.is_some()
+            && self.identity.warp.is_some()
+            && self.identity.lane.is_some()
+    }
+
+    pub fn join_key(&self) -> Option<NativePayloadJoinKey> {
+        Some(NativePayloadJoinKey {
+            launch_id: self.identity.launch_id?,
+            function_unique_id: self.identity.function_unique_id?,
+            cta: self.identity.cta?,
+            warp: self.identity.warp?,
+            lane: self.identity.lane?,
+            pc: self.identity.pc?,
+            occurrence: self.identity.occurrence?,
+        })
+    }
+
+    pub fn trace_matchable(&self) -> bool {
+        self.identity.pc.is_some()
+            && self.identity.occurrence.is_some()
+            && self.identity.cta.is_some()
+            && self.identity.warp.is_some()
+            && self.identity.lane.is_some()
+    }
+
+    fn enrich_launch_function(&self, key: NativePayloadJoinKey) -> Self {
+        let mut enriched = self.clone();
+        if enriched.identity.launch_id.is_none() {
+            enriched.identity.launch_id = Some(key.launch_id);
+        }
+        if enriched.identity.function_unique_id.is_none() {
+            enriched.identity.function_unique_id = Some(key.function_unique_id);
+        }
+        enriched
+    }
+}
+
+/// Require a complete, unique dynamic join key before any native cache
+/// mutation is attempted. This is intentionally separate from ordinary
+/// payload loading because historical sidecars may be value-valid but
+/// identity-incomplete.
+pub fn require_native_payload_identity(
+    records: &[NativePayloadRecordV1],
+) -> Result<(), PayloadError> {
+    let mut seen = BTreeSet::new();
+    for (index, record) in records.iter().enumerate() {
+        let identity = record.identity();
+        let Some(launch_id) = identity.launch_id else {
+            return Err(PayloadError::SidecarIdentityMissing {
+                index,
+                field: "launch_id",
+            });
+        };
+        if identity.function_name.is_none() {
+            return Err(PayloadError::SidecarIdentityMissing {
+                index,
+                field: "function_name",
+            });
+        }
+        let Some(function_unique_id) = identity.function_unique_id else {
+            return Err(PayloadError::SidecarIdentityMissing {
+                index,
+                field: "function_unique_id",
+            });
+        };
+        let Some(pc) = identity.pc else {
+            return Err(PayloadError::SidecarIdentityMissing { index, field: "pc" });
+        };
+        let Some(occurrence) = identity.occurrence else {
+            return Err(PayloadError::SidecarIdentityMissing {
+                index,
+                field: "occurrence",
+            });
+        };
+        let Some(cta) = identity.cta else {
+            return Err(PayloadError::SidecarIdentityMissing {
+                index,
+                field: "cta",
+            });
+        };
+        let Some(warp) = identity.warp else {
+            return Err(PayloadError::SidecarIdentityMissing {
+                index,
+                field: "warp",
+            });
+        };
+        let Some(lane) = identity.lane else {
+            return Err(PayloadError::SidecarIdentityMissing {
+                index,
+                field: "lane",
+            });
+        };
+        if !seen.insert(NativePayloadJoinKey {
+            launch_id,
+            function_unique_id,
+            cta,
+            warp,
+            lane,
+            pc,
+            occurrence,
+        }) {
+            return Err(PayloadError::SidecarIdentityDuplicate { index });
+        }
+    }
+    Ok(())
+}
+
+/// Join complete sidecar records against an independently collected dynamic
+/// trace identity set. The join is read-only and refuses missing identities;
+/// it does not imply that the matching instruction reached L1 or completed a
+/// writeback.
+pub fn join_native_payload_records(
+    records: &[NativePayloadRecordV1],
+    observed: &BTreeSet<NativePayloadJoinKey>,
+) -> Result<Vec<SectorPayloadV1>, PayloadError> {
+    require_native_payload_identity(records)?;
+    let mut joined = Vec::with_capacity(records.len());
+    for (index, record) in records.iter().enumerate() {
+        let key = record
+            .join_key()
+            .ok_or(PayloadError::SidecarIdentityMissing {
+                index,
+                field: "dynamic_join_key",
+            })?;
+        if !observed.contains(&key) {
+            return Err(PayloadError::SidecarIdentityNotObserved { index });
+        }
+        joined.push(record.payload());
+    }
+    Ok(joined)
+}
+
+/// Fill only missing launch/function fields from a unique trace-key match.
+/// PC/CTA/warp/lane/occurrence are never inferred. This supports regenerated
+/// v1/v2 sidecars while keeping old under-specified records on the refusal arm.
+pub fn enrich_native_payload_records(
+    records: &[NativePayloadRecordV1],
+    observed: &BTreeSet<NativePayloadJoinKey>,
+) -> Result<Vec<NativePayloadRecordV1>, PayloadError> {
+    let mut enriched = Vec::with_capacity(records.len());
+    for (index, record) in records.iter().enumerate() {
+        if !record.trace_matchable() {
+            return Err(PayloadError::SidecarIdentityMissing {
+                index,
+                field: "pc/CTA/warp/lane/occurrence",
+            });
+        }
+        let identity = record.identity();
+        let candidates = observed
+            .iter()
+            .filter(|key| {
+                identity
+                    .launch_id
+                    .is_none_or(|value| value == key.launch_id)
+                    && identity
+                        .function_unique_id
+                        .is_none_or(|value| value == key.function_unique_id)
+                    && identity.cta.is_none_or(|value| value == key.cta)
+                    && identity.warp.is_none_or(|value| value == key.warp)
+                    && identity.lane.is_none_or(|value| value == key.lane)
+                    && identity.pc.is_none_or(|value| value == key.pc)
+                    && identity
+                        .occurrence
+                        .is_none_or(|value| value == key.occurrence)
+            })
+            .copied()
+            .collect::<Vec<_>>();
+        let Some(key) = candidates.first().copied() else {
+            return Err(PayloadError::SidecarIdentityNotObserved { index });
+        };
+        if candidates.len() != 1 {
+            return Err(PayloadError::SidecarIdentityAmbiguous {
+                index,
+                candidates: candidates.len(),
+            });
+        }
+        enriched.push(record.enrich_launch_function(key));
+    }
+    require_native_payload_identity(&enriched)?;
+    Ok(enriched)
+}
+
+fn read_native_payload_sidecar(path: &Path) -> Result<NativePayloadSidecarRaw, PayloadError> {
     const MAX_BYTES: usize = 64 * 1024 * 1024;
     let file = std::fs::File::open(path).map_err(|error| PayloadError::SidecarJson {
         detail: format!("cannot read {}: {error}", path.display()),
@@ -153,49 +427,121 @@ pub fn load_native_payload_sidecar(path: &Path) -> Result<Vec<SectorPayloadV1>, 
     if raw.payloads.is_empty() {
         return Err(PayloadError::SidecarPayloadsEmpty);
     }
-    let mut payloads = Vec::with_capacity(raw.payloads.len());
-    for (index, record) in raw.payloads.into_iter().enumerate() {
-        if record.generation == 0 || record.byte_offset >= SECTOR_BYTES as u8 {
-            return Err(PayloadError::SidecarGeneration { index });
-        }
-        if record.bytes_hex.len() % 2 != 0 {
-            return Err(PayloadError::SidecarBytes { index });
-        }
-        let mut bytes = Vec::with_capacity(record.bytes_hex.len() / 2);
-        for pair in record.bytes_hex.as_bytes().chunks_exact(2) {
-            let high = (pair[0] as char).to_digit(16);
-            let low = (pair[1] as char).to_digit(16);
-            let (Some(high), Some(low)) = (high, low) else {
-                return Err(PayloadError::SidecarBytes { index });
-            };
-            bytes.push(((high << 4) | low) as u8);
-        }
-        if bytes.len() != 4
-            || usize::from(record.byte_offset)
-                .checked_add(bytes.len())
-                .is_none_or(|end| end > SECTOR_BYTES)
-        {
-            return Err(PayloadError::SidecarBytes { index });
-        }
-        let expected_mask = (((1_u64 << bytes.len()) - 1) as u32) << record.byte_offset;
-        if record.known_mask != expected_mask {
-            return Err(PayloadError::SidecarMask { index });
-        }
-        let mut sector_bytes = [0_u8; SECTOR_BYTES];
-        sector_bytes
-            [usize::from(record.byte_offset)..usize::from(record.byte_offset) + bytes.len()]
-            .copy_from_slice(&bytes);
-        payloads.push(SectorPayloadV1::new_with_generation(
-            record.allocation_id,
-            record.generation,
-            record.line_id,
-            record.sector,
-            record.sequence,
-            sector_bytes,
-            record.known_mask,
-        )?);
+    Ok(raw)
+}
+
+fn decode_native_payload_record(
+    index: usize,
+    record: NativePayloadRecordRaw,
+) -> Result<NativePayloadRecordV1, PayloadError> {
+    if record.generation == 0 || record.byte_offset >= SECTOR_BYTES as u8 {
+        return Err(PayloadError::SidecarGeneration { index });
     }
-    Ok(payloads)
+    if record.bytes_hex.len() % 2 != 0 {
+        return Err(PayloadError::SidecarBytes { index });
+    }
+    let mut bytes = Vec::with_capacity(record.bytes_hex.len() / 2);
+    for pair in record.bytes_hex.as_bytes().chunks_exact(2) {
+        let high = (pair[0] as char).to_digit(16);
+        let low = (pair[1] as char).to_digit(16);
+        let (Some(high), Some(low)) = (high, low) else {
+            return Err(PayloadError::SidecarBytes { index });
+        };
+        bytes.push(((high << 4) | low) as u8);
+    }
+    if bytes.len() != 4
+        || usize::from(record.byte_offset)
+            .checked_add(bytes.len())
+            .is_none_or(|end| end > SECTOR_BYTES)
+    {
+        return Err(PayloadError::SidecarBytes { index });
+    }
+    let expected_mask = (((1_u64 << bytes.len()) - 1) as u32) << record.byte_offset;
+    if record.known_mask != expected_mask {
+        return Err(PayloadError::SidecarMask { index });
+    }
+    let mut sector_bytes = [0_u8; SECTOR_BYTES];
+    sector_bytes[usize::from(record.byte_offset)..usize::from(record.byte_offset) + bytes.len()]
+        .copy_from_slice(&bytes);
+    let payload = SectorPayloadV1::new_with_generation(
+        record.allocation_id,
+        record.generation,
+        record.line_id,
+        record.sector,
+        record.sequence,
+        sector_bytes,
+        record.known_mask,
+    )?;
+    if record
+        .function_name
+        .as_ref()
+        .is_some_and(|name| name.is_empty())
+    {
+        return Err(PayloadError::SidecarIdentity {
+            index,
+            field: "function_name",
+        });
+    }
+    let function_unique_id = match record.function_unique_id {
+        Some(value) => {
+            let value = i32::try_from(value).map_err(|_| PayloadError::SidecarIdentity {
+                index,
+                field: "function_unique_id",
+            })?;
+            if value <= 0 {
+                return Err(PayloadError::SidecarIdentity {
+                    index,
+                    field: "function_unique_id",
+                });
+            }
+            Some(value)
+        }
+        None => None,
+    };
+    if record.lane.is_some_and(|lane| lane >= 32) {
+        return Err(PayloadError::SidecarIdentity {
+            index,
+            field: "lane",
+        });
+    }
+    Ok(NativePayloadRecordV1 {
+        payload,
+        identity: NativePayloadIdentityV1 {
+            launch_id: record.launch_id,
+            function_name: record.function_name,
+            function_unique_id,
+            pc: record.pc,
+            guard: record.guard,
+            occurrence: record.occurrence,
+            cta: record.cta,
+            warp: record.warp,
+            lane: record.lane,
+        },
+    })
+}
+
+/// Load the strict v1/v2 sidecar while preserving optional dynamic producer
+/// identity. Historical v1 records remain admissible but report incomplete
+/// identity instead of being silently promoted to a native trace join.
+pub fn load_native_payload_sidecar_records(
+    path: &Path,
+) -> Result<Vec<NativePayloadRecordV1>, PayloadError> {
+    let raw = read_native_payload_sidecar(path)?;
+    raw.payloads
+        .into_iter()
+        .enumerate()
+        .map(|(index, record)| decode_native_payload_record(index, record))
+        .collect()
+}
+
+/// Load only the value-bearing payload primitive. This compatibility helper
+/// intentionally discards producer identity; use
+/// [`load_native_payload_sidecar_records`] before attempting any native join.
+pub fn load_native_payload_sidecar(path: &Path) -> Result<Vec<SectorPayloadV1>, PayloadError> {
+    Ok(load_native_payload_sidecar_records(path)?
+        .into_iter()
+        .map(|record| record.payload)
+        .collect())
 }
 
 /// Merge ordered sidecar stores into complete sectors. The helper is
@@ -424,6 +770,101 @@ pub struct PayloadCommitLedgerV1 {
     dram: Option<SectorPayloadV1>,
 }
 
+/// A sidecar-only forwarding ledger for a complete store payload whose
+/// pre-store memory bytes are unknown.  Unlike [`PayloadCommitLedgerV1`], this
+/// type does not invent an initial baseline: the admitted payload is the first
+/// known L1 value, then the same value is forwarded through logical L2 and
+/// DRAM commits.  It is a conservation/reference ledger, not native cache or
+/// physical-DRAM completion evidence.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PayloadForwardingLedgerV1 {
+    l1: SectorPayloadV1,
+    l2: Option<SectorPayloadV1>,
+    dram: Option<SectorPayloadV1>,
+}
+
+impl PayloadForwardingLedgerV1 {
+    /// Admit one complete value-bearing store as the first known cache value.
+    /// The pre-store baseline remains explicitly unknown.
+    pub fn from_admitted_store(payload: SectorPayloadV1) -> Result<Self, PayloadError> {
+        payload.require_known(u32::MAX)?;
+        Ok(Self {
+            l1: payload,
+            l2: None,
+            dram: None,
+        })
+    }
+
+    pub const fn l1(&self) -> SectorPayloadV1 {
+        self.l1
+    }
+
+    pub const fn l2(&self) -> Option<SectorPayloadV1> {
+        self.l2
+    }
+
+    pub const fn dram(&self) -> Option<SectorPayloadV1> {
+        self.dram
+    }
+
+    fn check_identity(&self, payload: SectorPayloadV1) -> Result<(), PayloadError> {
+        if payload.allocation_id() != self.l1.allocation_id()
+            || payload.allocation_generation() != self.l1.allocation_generation()
+            || payload.line_id() != self.l1.line_id()
+            || payload.sector() != self.l1.sector()
+        {
+            return Err(PayloadError::LedgerIdentityMismatch);
+        }
+        payload.require_known(u32::MAX)
+    }
+
+    /// Forward the admitted value to the logical L2 ledger stage.
+    pub fn commit_l2(&mut self, payload: SectorPayloadV1) -> Result<(), PayloadError> {
+        self.check_identity(payload)?;
+        if self.l2.is_some() {
+            return Err(PayloadError::CommitOrder {
+                expected: "one L2 forwarding commit",
+                got: "duplicate L2 forwarding commit",
+            });
+        }
+        if payload != self.l1 {
+            return Err(PayloadError::LedgerPayloadMismatch);
+        }
+        self.l2 = Some(payload);
+        Ok(())
+    }
+
+    /// Forward the logical L2 value to the logical DRAM ledger stage.
+    pub fn commit_dram(&mut self, payload: SectorPayloadV1) -> Result<(), PayloadError> {
+        self.check_identity(payload)?;
+        let Some(l2) = self.l2 else {
+            return Err(PayloadError::CommitOrder {
+                expected: "L2 forwarding commit",
+                got: "DRAM forwarding commit",
+            });
+        };
+        if self.dram.is_some() {
+            return Err(PayloadError::CommitOrder {
+                expected: "one DRAM forwarding commit",
+                got: "duplicate DRAM forwarding commit",
+            });
+        }
+        if payload != l2 {
+            return Err(PayloadError::LedgerPayloadMismatch);
+        }
+        self.dram = Some(payload);
+        Ok(())
+    }
+
+    pub const fn is_complete(&self) -> bool {
+        self.l2.is_some() && self.dram.is_some()
+    }
+
+    pub fn final_digest(&self) -> Option<u64> {
+        self.dram.map(SectorPayloadV1::digest64)
+    }
+}
+
 impl PayloadCommitLedgerV1 {
     pub fn new(initial: SectorPayloadV1) -> Result<Self, PayloadError> {
         if !initial.is_fully_known() {
@@ -603,6 +1044,26 @@ mod tests {
     }
 
     #[test]
+    fn forwarding_ledger_preserves_unknown_baseline_and_requires_order() {
+        let payload = initial().with_store(0, &[9], 2).unwrap();
+        let mut ledger = PayloadForwardingLedgerV1::from_admitted_store(payload).unwrap();
+        assert_eq!(ledger.l1(), payload);
+        assert_eq!(ledger.l2(), None);
+        assert_eq!(ledger.dram(), None);
+        assert_eq!(
+            ledger.commit_dram(payload),
+            Err(PayloadError::CommitOrder {
+                expected: "L2 forwarding commit",
+                got: "DRAM forwarding commit",
+            })
+        );
+        ledger.commit_l2(payload).unwrap();
+        ledger.commit_dram(payload).unwrap();
+        assert!(ledger.is_complete());
+        assert_eq!(ledger.final_digest(), Some(payload.digest64()));
+    }
+
+    #[test]
     fn native_payload_sidecar_loader_admits_generation_and_mask() {
         let path = std::env::temp_dir().join(format!(
             "sim_mem_payload_sidecar_{}_{}.json",
@@ -673,6 +1134,86 @@ mod tests {
                 && payload.allocation_generation() == 1
                 && payload.known_mask() != 0
         }));
+    }
+
+    #[test]
+    fn native_payload_records_preserve_lane_and_refuse_implicit_dynamic_join() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(
+            "../../workloads/research_probes/sm86_value_differential/native_payload_sidecar_delta_2pow31_seed17.json",
+        );
+        let records = load_native_payload_sidecar_records(&path).unwrap();
+        assert_eq!(records.len(), 32);
+        assert!(!records[0].identity_complete());
+        assert_eq!(records[0].join_key(), None);
+        assert_eq!(records[0].identity().lane, Some(0));
+        assert_eq!(records[31].identity().lane, Some(31));
+        assert_eq!(
+            require_native_payload_identity(&records),
+            Err(PayloadError::SidecarIdentityMissing {
+                index: 0,
+                field: "launch_id"
+            })
+        );
+    }
+
+    #[test]
+    fn complete_payload_records_join_only_observed_dynamic_keys() {
+        let payload = initial();
+        let record = NativePayloadRecordV1 {
+            payload,
+            identity: NativePayloadIdentityV1 {
+                launch_id: Some(4),
+                function_name: Some("kernel".to_owned()),
+                function_unique_id: Some(7),
+                pc: Some(0x20),
+                guard: None,
+                occurrence: Some(3),
+                cta: Some([0, 0, 0]),
+                warp: Some(0),
+                lane: Some(2),
+            },
+        };
+        let key = record.join_key().unwrap();
+        let observed = BTreeSet::from([key]);
+        assert_eq!(
+            join_native_payload_records(&[record.clone()], &observed),
+            Ok(vec![payload])
+        );
+        assert_eq!(
+            join_native_payload_records(&[record], &BTreeSet::new()),
+            Err(PayloadError::SidecarIdentityNotObserved { index: 0 })
+        );
+    }
+
+    #[test]
+    fn trace_enrichment_fills_only_launch_and_function_identity() {
+        let payload = initial();
+        let record = NativePayloadRecordV1::new(
+            payload,
+            NativePayloadIdentityV1 {
+                launch_id: None,
+                function_name: Some("kernel".to_owned()),
+                function_unique_id: None,
+                pc: Some(0x20),
+                guard: None,
+                occurrence: Some(3),
+                cta: Some([0, 0, 0]),
+                warp: Some(0),
+                lane: Some(2),
+            },
+        )
+        .unwrap();
+        let observed = BTreeSet::from([NativePayloadJoinKey {
+            launch_id: 4,
+            function_unique_id: 7,
+            cta: [0, 0, 0],
+            warp: 0,
+            lane: 2,
+            pc: 0x20,
+            occurrence: 3,
+        }]);
+        let enriched = enrich_native_payload_records(&[record], &observed).unwrap();
+        assert_eq!(enriched[0].join_key(), observed.iter().next().copied());
     }
 
     #[test]

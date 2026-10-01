@@ -74,7 +74,7 @@
 
 use std::cell::RefCell;
 use std::collections::hash_map::Entry;
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::num::{NonZeroU32, NonZeroU128};
 use std::rc::Rc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -1532,6 +1532,12 @@ pub enum IssueError {
     VisibilityAtomicUnsupported,
     #[error("L1 visibility protocol does not admit reduction/RMW observation")]
     VisibilityReductionUnsupported,
+    #[error("L1 payload for line {line} sector {sector} cannot attach to its store: {reason}")]
+    PayloadStoreBinding {
+        line: i64,
+        sector: u8,
+        reason: &'static str,
+    },
     #[error("L1 visibility protocol does not admit asynchronous-copy observation")]
     VisibilityAsyncCopyUnsupported,
     #[error("response-bearing request token {reply:?} is already outstanding")]
@@ -9128,6 +9134,10 @@ struct SharedL2State {
     l1_fill_visibility_observations: Vec<sim_mem::L1FillVisibleObservation>,
     l1_invalidate_all_observations: Vec<sim_mem::L1InvalidateAllObservation>,
     l1_visibility_requester: Option<u8>,
+    /// Only payload-event sectors are tracked; default replay allocates no
+    /// value-observation map. Every later store to a watched sector replaces
+    /// its writer, including stores with no corresponding payload event.
+    payload_store_writers: Option<Box<BTreeMap<(i64, u8), Option<PayloadStoreObservation>>>>,
     response_owner: ResponseOwner,
     /// Exact response-bearing request tokens still expected from the system.
     outstanding_replies: HashSet<ReplyTo>,
@@ -9160,6 +9170,22 @@ struct SharedL2State {
     /// each batch starts with an empty `out`.
     line_folds: HashMap<(i64, u64), usize>,
     retry: VecDeque<Retry>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PayloadStoreSite {
+    pub launch_index: i64,
+    pub warp_slot: i32,
+    pub instruction_index: usize,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct PayloadStoreObservation {
+    site: PayloadStoreSite,
+    accepted_at: u64,
+    resident_generation: Option<u32>,
+    retained_dirty: bool,
+    attached: bool,
 }
 
 impl SharedL2State {
@@ -9889,6 +9915,7 @@ impl<'a> SmCore<'a> {
                 l1_fill_visibility_observations: Vec::new(),
                 l1_invalidate_all_observations: Vec::new(),
                 l1_visibility_requester: None,
+                payload_store_writers: None,
                 response_owner: allocate_response_owner()?,
                 outstanding_replies: HashSet::new(),
                 outstanding_response_ids: HashMap::new(),
@@ -10252,6 +10279,21 @@ impl<'a> SmCore<'a> {
         Ok(state.l1.preview_dirty_flush())
     }
 
+    pub(crate) fn payload_observation_enabled(&self) -> bool {
+        matches!(&self.mem, MemModel::L1Shared(state) if state.payload_store_writers.is_some())
+    }
+
+    pub(crate) fn preview_l1_dirty_payloads(
+        &self,
+    ) -> Result<Vec<sim_mem::SectorPayloadV1>, IssueError> {
+        let MemModel::L1Shared(state) = &self.mem else {
+            return Err(IssueError::ResponseModeMismatch {
+                mode: "L1 payload preview requires shared-L2",
+            });
+        };
+        state.l1.preview_dirty_payloads().map_err(IssueError::from)
+    }
+
     pub(crate) fn commit_l1_dirty_flush(
         &mut self,
         plan: sim_mem::L1DirtyFlushPlan,
@@ -10262,6 +10304,129 @@ impl<'a> SmCore<'a> {
             });
         };
         state.l1.commit_dirty_flush(plan).map_err(IssueError::from)
+    }
+
+    pub(crate) fn preview_l1_dirty_payload_admission(
+        &self,
+        payloads: &[sim_mem::SectorPayloadV1],
+        witnesses: &[sim_mem::L1PayloadResidencyWitness],
+    ) -> Result<sim_mem::L1DirtyPayloadAdmissionPlan, IssueError> {
+        let MemModel::L1Shared(state) = &self.mem else {
+            return Err(IssueError::ResponseModeMismatch {
+                mode: "L1 payload admission requires shared-L2",
+            });
+        };
+        state
+            .l1
+            .preview_dirty_payload_admission_with_witness(payloads, witnesses)
+            .map_err(IssueError::from)
+    }
+
+    pub(crate) fn commit_l1_dirty_payload_admission(
+        &mut self,
+        plan: sim_mem::L1DirtyPayloadAdmissionPlan,
+    ) -> Result<(), IssueError> {
+        let MemModel::L1Shared(state) = &mut self.mem else {
+            return Err(IssueError::ResponseModeMismatch {
+                mode: "L1 payload admission requires shared-L2",
+            });
+        };
+        state
+            .l1
+            .commit_dirty_payload_admission(plan)
+            .map_err(IssueError::from)
+    }
+
+    /// Apply one event-time, witness-aware dirty-payload admission as a
+    /// single native-facing operation. The underlying preview/commit pair is
+    /// still exposed internally so a future event producer can retain the
+    /// plan across an explicit scheduling boundary; this convenience path is
+    /// atomic with respect to the current SM actor.
+    #[allow(dead_code)] // no producer currently supplies this event to replay
+    pub(crate) fn admit_l1_dirty_payloads_with_witness(
+        &mut self,
+        payloads: &[sim_mem::SectorPayloadV1],
+        witnesses: &[sim_mem::L1PayloadResidencyWitness],
+    ) -> Result<(), IssueError> {
+        let plan = self.preview_l1_dirty_payload_admission(payloads, witnesses)?;
+        self.commit_l1_dirty_payload_admission(plan)
+    }
+
+    pub(crate) fn watch_l1_payload_sectors(&mut self, payloads: &[sim_mem::SectorPayloadV1]) {
+        if let MemModel::L1Shared(st) = &mut self.mem {
+            let writers = st
+                .payload_store_writers
+                .get_or_insert_with(Default::default);
+            for payload in payloads {
+                writers
+                    .entry((payload.line_id(), payload.sector()))
+                    .or_insert(None);
+            }
+        }
+    }
+
+    /// The public replay path binds the site from the retained trace, never
+    /// from a producer's guessed issue cycle or reused physical warp slot.
+    pub(crate) fn admit_issued_l1_store_payloads(
+        &mut self,
+        site: PayloadStoreSite,
+        at: u64,
+        payloads: &[sim_mem::SectorPayloadV1],
+        witnesses: &[sim_mem::L1PayloadResidencyWitness],
+    ) -> Result<(), IssueError> {
+        let MemModel::L1Shared(st) = &mut self.mem else {
+            return Err(IssueError::ResponseModeMismatch {
+                mode: "store payload admission requires shared-L2",
+            });
+        };
+        for payload in payloads {
+            let line = payload.line_id();
+            let sector = payload.sector();
+            let refuse = |reason| IssueError::PayloadStoreBinding {
+                line,
+                sector,
+                reason,
+            };
+            let writer = st
+                .payload_store_writers
+                .as_ref()
+                .and_then(|writers| writers.get(&(line, sector)))
+                .and_then(Option::as_ref)
+                .ok_or_else(|| refuse("referenced store has not issued"))?;
+            if writer.site != site {
+                return Err(refuse("current writer is a different dynamic store"));
+            }
+            if writer.accepted_at > at {
+                return Err(refuse("payload event precedes modeled store acceptance"));
+            }
+            if !writer.retained_dirty {
+                return Err(refuse("store did not retain this sector dirty in L1"));
+            }
+            if writer.attached {
+                return Err(refuse(
+                    "payload already attached to this dynamic store sector",
+                ));
+            }
+            if st
+                .l1
+                .resident_payload_state(line)
+                .map(|(generation, _)| generation)
+                != writer.resident_generation
+            {
+                return Err(refuse("resident allocation changed after the store"));
+            }
+        }
+        st.l1.attach_observed_store_payloads(payloads, witnesses)?;
+        for payload in payloads {
+            if let Some(Some(writer)) = st
+                .payload_store_writers
+                .as_mut()
+                .and_then(|writers| writers.get_mut(&(payload.line_id(), payload.sector())))
+            {
+                writer.attached = true;
+            }
+        }
+        Ok(())
     }
 
     pub(crate) fn take_l1_visibility_events(&mut self) -> Vec<sim_mem::L1VisibilityEvent> {
@@ -10295,6 +10460,23 @@ impl<'a> SmCore<'a> {
             sim_mem::L1VisibilityEvent::InvalidateAll(observation) => observation.sequence,
         });
         events
+    }
+
+    /// Count visibility observations that have been produced by the SM but
+    /// not yet transferred to the shared event queue.  The system layer drains
+    /// this vector at every actor boundary; `advance` uses the count to stop
+    /// immediately after an issue cycle that created a visibility event,
+    /// preventing strict L1 replay from batching later issue cycles ahead of
+    /// its own same-cycle coherence observation.
+    pub(crate) fn pending_l1_visibility_event_count(&self) -> usize {
+        let MemModel::L1Shared(st) = &self.mem else {
+            return 0;
+        };
+        st.l1_visibility_observations
+            .len()
+            .saturating_add(st.l1_fence_observations.len())
+            .saturating_add(st.l1_fill_visibility_observations.len())
+            .saturating_add(st.l1_invalidate_all_observations.len())
     }
 
     pub(crate) fn invalidate_l1(
@@ -11614,6 +11796,30 @@ impl<'a> SmCore<'a> {
                         let retained_l1_write = origin == MemoryOrigin::Global
                             && hit
                             && st.l1.store_policy() == L1StorePolicy::ResidentHitWriteBack;
+                        if origin == MemoryOrigin::Global
+                            && let Some(writer) =
+                                st.payload_store_writers.as_mut().and_then(|writers| {
+                                    writers.get_mut(&(
+                                        sector_id.div_euclid(4),
+                                        sector_id.rem_euclid(4) as u8,
+                                    ))
+                                })
+                        {
+                            *writer = Some(PayloadStoreObservation {
+                                site: PayloadStoreSite {
+                                    launch_index: warps[wix].launch_index,
+                                    warp_slot: warps[wix].warp_slot,
+                                    instruction_index: instruction,
+                                },
+                                accepted_at: t,
+                                resident_generation: st
+                                    .l1
+                                    .resident_payload_state(sector_id.div_euclid(4))
+                                    .map(|(generation, _)| generation),
+                                retained_dirty: retained_l1_write,
+                                attached: false,
+                            });
+                        }
                         if origin == MemoryOrigin::Global {
                             record_global_l1_observation(
                                 st,
@@ -13741,6 +13947,7 @@ impl<'a> SmCore<'a> {
                 .issue_ports
                 .max(1)
                 .max(u32::from(self.params.dual_issue_supported).saturating_add(1));
+            let visibility_events_before = self.pending_l1_visibility_event_count();
             let mut issued_this_cycle = false;
             for _ in 0..issue_width {
                 let before = out.len();
@@ -13767,6 +13974,15 @@ impl<'a> SmCore<'a> {
             }
             if issued_this_cycle {
                 self.t = checked_cycle_add("issue-clock advance", self.t, 1)?;
+                // Visibility observations are consumed by the shared event
+                // system, not by the issuing SM itself.  Stop after this
+                // issue cycle so the observations at `t` are scheduled and
+                // processed before this actor can issue at `t + 1`.
+                if self.pending_l1_visibility_event_count() > visibility_events_before {
+                    return Ok(Advance::Idle {
+                        wake_at: Some(self.t),
+                    });
+                }
                 if self
                     .memory_admission_feedback
                     .as_mut()
@@ -22591,6 +22807,104 @@ mod tests {
         });
         assert_eq!(after_group, before_group);
         assert!(requests.is_empty());
+    }
+
+    #[test]
+    fn witness_aware_payload_admission_uses_event_mode_residency_without_inference() {
+        let sched = schedule(vec![(0, slot(cb(1), OpClass::Other, "LDG.E"))]);
+        let blocks = vec![BlockReplay {
+            launch_index: 0,
+            warps: vec![WarpReplay {
+                async_copy_cohorts: None,
+                warp_slot: 0,
+                insts: vec![ReplayInst {
+                    pc: 0,
+                    kind: eligible(0, 1),
+                }],
+                sectors: vec![0],
+            }],
+        }];
+        let mut core = shared_core(&blocks, &sched, &params());
+
+        // Establish a model-local resident line through the same event-mode
+        // fill path used by replay. The fill generation and sector mask are
+        // admissible witness fields; the producer allocation identity below
+        // remains independent and is never inferred from the line tag.
+        let (resident_generation, resident_sector_mask) = {
+            let MemModel::L1Shared(state) = &mut core.mem else {
+                panic!("fixture must use shared L1");
+            };
+            let EvAccess::MissRequest { fill } = state
+                .l1
+                .access_eligible_ev(MemoryOrigin::Global, 0, 0)
+                .unwrap()
+            else {
+                panic!("cold sector must allocate an event-mode fill");
+            };
+            state.l1.complete_fill(fill).unwrap();
+            state
+                .l1
+                .resident_payload_state(0)
+                .expect("completed line must expose model residency")
+        };
+        assert_eq!(resident_sector_mask & 1, 1);
+
+        let payload = sim_mem::SectorPayloadV1::new_with_generation(
+            11,
+            3,
+            0,
+            0,
+            1,
+            [0x5a; sim_mem::PAYLOAD_SECTOR_BYTES],
+            u32::MAX,
+        )
+        .unwrap();
+        let witness = sim_mem::L1PayloadResidencyWitness {
+            line_id: 0,
+            allocation_id: payload.allocation_id(),
+            allocation_generation: payload.allocation_generation(),
+            resident_generation,
+            resident_sector_mask,
+        };
+        assert_eq!(core.l1_dirty_residency().sectors, 0);
+        core.admit_l1_dirty_payloads_with_witness(&[payload], &[witness])
+            .unwrap();
+        assert_eq!(core.l1_dirty_residency().sectors, 1);
+
+        // A wrong producer allocation must fail closed before any native
+        // mutation; a line tag alone is never sufficient evidence.
+        let wrong = sim_mem::SectorPayloadV1::new_with_generation(
+            12,
+            3,
+            0,
+            0,
+            2,
+            [0x6b; sim_mem::PAYLOAD_SECTOR_BYTES],
+            u32::MAX,
+        )
+        .unwrap();
+        let error = core
+            .preview_l1_dirty_payload_admission(
+                &[wrong],
+                &[sim_mem::L1PayloadResidencyWitness {
+                    line_id: 0,
+                    allocation_id: payload.allocation_id(),
+                    allocation_generation: payload.allocation_generation(),
+                    resident_generation,
+                    resident_sector_mask,
+                }],
+            )
+            .expect_err("allocation identity must be independently witnessed");
+        assert!(matches!(
+            error,
+            IssueError::L1Access(
+                sim_mem::L1AccessError::DirtyPayloadResidencyWitnessMismatch {
+                    field: "payload allocation identity",
+                    ..
+                }
+            )
+        ));
+        assert_eq!(core.l1_dirty_residency().sectors, 1);
     }
 
     #[test]

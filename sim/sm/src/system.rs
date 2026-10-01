@@ -30,6 +30,11 @@
 //! - `L1VisibilityComplete` — only when the typed replay configuration enables
 //!   the L1 visibility protocol, completes a targeted per-SM L1 invalidation
 //!   plan and resumes affected actors at its visibility frontier.
+//! - `L1PayloadAdmission` — an explicit external producer event that validates
+//!   value-bearing dirty sectors against a trace-bound store site and
+//!   model-local residency witness before the existing transactional terminal
+//!   writeback path; it is never inferred from a device timestamp or ordinary
+//!   replay.
 //!
 //! Store and reduction mutation-only requests take no data response. Ordinary
 //! replay changes L2 state in arrival order and nothing waits on them; the
@@ -124,10 +129,11 @@ impl UnpricedBounds {
 use sim_arch::{ArchId, L2PendingReadSemantics};
 use sim_engine::{EngineError, EventQueue, TargetId};
 use sim_mem::{
-    CoherenceConfig, CoherencePlan, CoherenceQueue, CoherenceRequest, L1Config, L1VisibilityConfig,
-    L1VisibilityPlan, L1VisibilityQueue, L2Counters, L2DirtyResidency, L2EventMaskPreview,
-    L2Eviction, L2FillToken, L2Model, L2PendingSectorKey, L2Source, MemoryOrigin, ServicePlan,
-    ServiceRequest, WritebackQueue,
+    CoherenceConfig, CoherencePlan, CoherenceQueue, CoherenceRequest, L1Config,
+    L1PayloadResidencyWitness, L1VisibilityConfig, L1VisibilityPlan, L1VisibilityQueue, L2Counters,
+    L2DirtyResidency, L2EventMaskPreview, L2Eviction, L2FillToken, L2Model, L2PendingSectorKey,
+    L2Source, MemoryOrigin, NativePayloadJoinKey, PayloadForwardingLedgerV1, SectorPayloadV1,
+    ServicePlan, ServiceRequest, WritebackQueue,
 };
 #[cfg(feature = "reference")]
 use sim_semantics::{
@@ -549,9 +555,10 @@ use crate::issue::AdvanceDiagnostics;
 use crate::issue::{
     AccessKind, AdmissionRequestWitness, Advance, BlockReplay, IssueError, IssueModelParams,
     MemRequest, MemoryAdmissionCandidate, MemoryAdmissionCandidateState, MemoryOperation,
-    MemoryServiceCandidate, MemoryWriteAck, ReplayHorizon, ReplyTo, SharedMemoryResidency, SmCore,
-    SmMemMode, SmSimResult, TailFlags, checked_cycle_add, stateful_write_lookup_observer_enabled,
-    validate_memory_admission_candidates, validate_memory_service_candidates,
+    MemoryServiceCandidate, MemoryWriteAck, PayloadStoreSite, ReplayHorizon, ReplyTo,
+    SharedMemoryResidency, SmCore, SmMemMode, SmSimResult, TailFlags, checked_cycle_add,
+    stateful_write_lookup_observer_enabled, validate_memory_admission_candidates,
+    validate_memory_service_candidates,
 };
 use crate::program::FunctionSchedule;
 #[cfg(feature = "reference")]
@@ -643,6 +650,8 @@ pub enum SystemError {
     Coherence(#[from] sim_mem::CoherenceError),
     #[error(transparent)]
     L1Visibility(#[from] sim_mem::L1VisibilityError),
+    #[error("logical L1 payload forwarding failed: {0}")]
+    PayloadForwarding(String),
     #[error("L1 visibility protocol requires an opt-in coherence configuration")]
     L1VisibilityProtocolRequiresCoherence,
     #[error("resident L1 dirty state requires the carded writeback queue")]
@@ -661,6 +670,12 @@ pub enum SystemError {
         l1_mask: u8,
         l2_mask: u8,
     },
+    #[error("L1 payload admission event targets unknown traced SM {sm_id}")]
+    L1PayloadAdmissionSmUnknown { sm_id: i32 },
+    #[error("L1 payload admission event at t={time} carries no payload records")]
+    L1PayloadAdmissionEmpty { time: u64 },
+    #[error("L1 payload admission event with dynamic identity has no retained store site")]
+    L1PayloadAdmissionWriterMissing,
     #[error(
         "event queue drained with sm {sm_id} unfinished ({outstanding} response(s) recorded \
          outstanding) — request/response wiring invariant broken"
@@ -790,6 +805,8 @@ pub enum SystemError {
     ResponseDueNotDrained { entries: usize },
     #[error("event queue drained with {entries} pending SM wake due-time entries")]
     WakeDueNotDrained { entries: usize },
+    #[error("event queue drained with {entries} pending L1 payload-admission due-time entries")]
+    PayloadAdmissionDueNotDrained { entries: usize },
     #[error("event queue drained with {entries} unpriced response-bound entries")]
     UnpricedBoundsNotDrained { entries: usize },
     #[error("event queue drained with sm {sm_id} still owning {outstanding} response(s)")]
@@ -1019,6 +1036,13 @@ impl SpinGuard {
 #[derive(Debug)]
 enum Ev {
     SmWake,
+    L1PayloadAdmission {
+        #[allow(dead_code)] // consumed by the optional typed reference projection
+        identity_present: bool,
+        writer: Option<PayloadStoreSite>,
+        payloads: Box<[SectorPayloadV1]>,
+        witnesses: Box<[L1PayloadResidencyWitness]>,
+    },
     L2Access(MemRequest),
     L2AccessBatch(Box<[MemRequest]>),
     L2Fill(L2FillToken),
@@ -1050,6 +1074,7 @@ enum Ev {
 fn event_name(event: &Ev) -> &'static str {
     match event {
         Ev::SmWake => "sm_wake",
+        Ev::L1PayloadAdmission { .. } => "l1_payload_admission",
         Ev::L2Access(_) => "l2_access",
         Ev::L2AccessBatch(_) => "l2_access_batch",
         Ev::L2Fill(_) => "l2_fill",
@@ -1132,6 +1157,16 @@ fn typed_event_payload(event: &Ev) -> TypedEventPayload {
     };
     match event {
         Ev::SmWake => TypedEventPayload::SmWake,
+        Ev::L1PayloadAdmission {
+            payloads,
+            witnesses,
+            identity_present,
+            ..
+        } => TypedEventPayload::L1PayloadAdmission {
+            payload_records: u64::try_from(payloads.len()).unwrap_or(u64::MAX),
+            witness_lines: u64::try_from(witnesses.len()).unwrap_or(u64::MAX),
+            identity_present: *identity_present,
+        },
         Ev::L2Access(request) => TypedEventPayload::L2Access {
             request: request_payload(request),
         },
@@ -1806,6 +1841,7 @@ struct EventPerformanceCounters {
     writeback_completion: u64,
     coherence_completion: u64,
     l1_visibility_event: u64,
+    l1_payload_admission: u64,
     memory_write_ack: u64,
     mem_response: u64,
     same_cycle_after_first: u64,
@@ -1869,6 +1905,7 @@ impl EventPerformanceCounters {
                         })?;
             }
             Ev::SmWake
+            | Ev::L1PayloadAdmission { .. }
             | Ev::L2Fill(_)
             | Ev::AtomicCompletion
             | Ev::L2WritebackComplete { .. }
@@ -1883,15 +1920,16 @@ impl EventPerformanceCounters {
                 debug_assert_eq!(logical_events, 1);
                 let kind = match event {
                     Ev::SmWake => &mut self.sm_wake,
+                    Ev::L1PayloadAdmission { .. } => &mut self.l1_payload_admission,
                     Ev::L2Fill(_) => &mut self.l2_fill,
                     Ev::AtomicCompletion => &mut self.atomic_completion,
                     Ev::L2WritebackComplete { .. } => &mut self.writeback_completion,
                     Ev::L2CoherenceComplete { .. } => &mut self.coherence_completion,
                     Ev::L1VisibilityComplete { .. }
-                    | Ev::L1InvalidateAll(_) | Ev::L1VisibilityAccess(_)
-                    | Ev::L1VisibilityFence(_) | Ev::L1FillVisible(_) => {
-                        &mut self.l1_visibility_event
-                    }
+                    | Ev::L1InvalidateAll(_)
+                    | Ev::L1VisibilityAccess(_)
+                    | Ev::L1VisibilityFence(_)
+                    | Ev::L1FillVisible(_) => &mut self.l1_visibility_event,
                     Ev::MemoryWriteAck(_) => &mut self.memory_write_ack,
                     Ev::MemResponse { .. } => &mut self.mem_response,
                     Ev::L2Access(_) | Ev::L2AccessBatch(_) => unreachable!(),
@@ -2446,6 +2484,12 @@ pub struct DramStats {
     pub l1_writeback_completed_lines: u64,
     pub l1_writeback_completed_sectors: u64,
     pub l1_writeback_completed_bytes: u64,
+    /// Logical payload-forwarding records validated at terminal L1 flush.
+    /// These counters prove model-local byte conservation only; they are not
+    /// physical DRAM acknowledgements.
+    pub l1_payload_forwarded_sectors: u64,
+    pub l1_payload_forwarded_bytes: u64,
+    pub l1_payload_forwarding_digest_xor: u64,
     pub writeback_completion_frontier: Option<u64>,
     /// Opt-in directory-service completion observations, separate from
     /// writeback and read-traffic counters.
@@ -2579,6 +2623,9 @@ impl DramStats {
             l1_writeback_completed_lines: 0,
             l1_writeback_completed_sectors: 0,
             l1_writeback_completed_bytes: 0,
+            l1_payload_forwarded_sectors: 0,
+            l1_payload_forwarded_bytes: 0,
+            l1_payload_forwarding_digest_xor: 0,
             writeback_completion_frontier: None,
             coherence_completed_transactions: 0,
             coherence_completed_sectors: 0,
@@ -2764,6 +2811,20 @@ impl DramStats {
                 .ok_or(SystemCounterError::Overflow {
                     counter: "completed L1 writeback bytes",
                 })?,
+            l1_payload_forwarded_sectors: self
+                .l1_payload_forwarded_sectors
+                .checked_add(other.l1_payload_forwarded_sectors)
+                .ok_or(SystemCounterError::Overflow {
+                    counter: "logical L1 payload-forwarded sectors",
+                })?,
+            l1_payload_forwarded_bytes: self
+                .l1_payload_forwarded_bytes
+                .checked_add(other.l1_payload_forwarded_bytes)
+                .ok_or(SystemCounterError::Overflow {
+                    counter: "logical L1 payload-forwarded bytes",
+                })?,
+            l1_payload_forwarding_digest_xor: self.l1_payload_forwarding_digest_xor
+                ^ other.l1_payload_forwarding_digest_xor,
             writeback_completion_frontier: self
                 .writeback_completion_frontier
                 .into_iter()
@@ -2846,6 +2907,27 @@ pub(crate) struct SystemResult {
     pub(crate) l1_fill_visibility_observations: Vec<sim_mem::L1FillVisibleObservation>,
 }
 
+/// Explicit event-time value admission supplied by an external producer.
+/// `time` is a simulator-cycle input from that producer; it is never inferred
+/// from payload sequence or converted from NCU/CUPTI/device timestamps.
+/// Allocation identity comes from the producer, while resident generation and
+/// sector mask are checked against the receiving SM's model-local L1 state.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct L1PayloadAdmissionEvent {
+    pub sm_id: i32,
+    pub time: u64,
+    /// Optional dynamic trace key. Low-level synthetic system tests may omit
+    /// it; the public trace replay adapter requires it and validates it against
+    /// the retained launch before scheduling the event.
+    pub identity: Option<NativePayloadJoinKey>,
+    /// Filled by the public trace replay ingress from the retained dynamic
+    /// store location. Synthetic low-level tests may omit it only when
+    /// `identity` is also absent.
+    pub writer: Option<PayloadStoreSite>,
+    pub payloads: Box<[SectorPayloadV1]>,
+    pub witnesses: Box<[L1PayloadResidencyWitness]>,
+}
+
 /// Run every SM's blocks to completion over one shared L2. `l2` is
 /// caller-constructed (and caller-drained afterwards) so the geometry
 /// resolution stays at the composition root; it must be FRESH per kernel
@@ -2924,12 +3006,21 @@ fn flush_l1_dirty_residency(
     for (ix, core) in cores.iter().enumerate() {
         *dram_stats = dram_stats.with_terminal_l1_dirty_residency(core.l1_dirty_residency())?;
         let plan = core.preview_l1_dirty_flush()?;
+        let payloads = if core.payload_observation_enabled() {
+            // A store-bound value event enables a stricter terminal contract:
+            // every dirty sector must still carry a complete payload before
+            // the mask-only timing queue is allowed to clear it. The queue's
+            // byte server remains a timing model, not a silicon DRAM receipt.
+            core.preview_l1_dirty_payloads()?
+        } else {
+            Vec::new()
+        };
         if !plan.lines().is_empty() {
-            plans.push((ix, plan));
+            plans.push((ix, plan, payloads));
         }
     }
     let l2_dirty = l2.preview_dirty_flush();
-    for (_, plan) in &plans {
+    for (_, plan, _) in &plans {
         for l1_line in plan.lines() {
             if let Some(l2_line) = l2_dirty
                 .lines()
@@ -2958,7 +3049,8 @@ fn flush_l1_dirty_residency(
     })?;
     let mut latest_done = (*terminal_event_time).unwrap_or(0);
     let mut batch_issue = latest_done;
-    for (ix, plan) in plans {
+    let mut forwarded_payloads = Vec::new();
+    for (ix, plan, payloads) in plans {
         let mut offset = 0usize;
         while offset < plan.lines().len() {
             let mut end = offset;
@@ -3042,6 +3134,30 @@ fn flush_l1_dirty_residency(
             offset = end;
         }
         cores[ix].commit_l1_dirty_flush(plan)?;
+        forwarded_payloads.extend(payloads);
+    }
+    for payload in forwarded_payloads {
+        let mut ledger = PayloadForwardingLedgerV1::from_admitted_store(payload)
+            .map_err(|error| SystemError::PayloadForwarding(error.to_string()))?;
+        ledger
+            .commit_l2(payload)
+            .map_err(|error| SystemError::PayloadForwarding(error.to_string()))?;
+        ledger
+            .commit_dram(payload)
+            .map_err(|error| SystemError::PayloadForwarding(error.to_string()))?;
+        dram_stats.l1_payload_forwarded_sectors = dram_stats
+            .l1_payload_forwarded_sectors
+            .checked_add(1)
+            .ok_or(SystemError::CounterOverflow {
+                counter: "logical L1 payload-forwarded sectors",
+            })?;
+        dram_stats.l1_payload_forwarded_bytes = dram_stats
+            .l1_payload_forwarded_bytes
+            .checked_add(32)
+            .ok_or(SystemError::CounterOverflow {
+                counter: "logical L1 payload-forwarded bytes",
+            })?;
+        dram_stats.l1_payload_forwarding_digest_xor ^= payload.digest64();
     }
     dram_stats.writeback_completion_frontier = Some(
         dram_stats
@@ -3066,6 +3182,37 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates_with_coherenc
     memory_admission_candidates: &[MemoryAdmissionCandidate],
     memory_admission_feedback: Option<MemoryAdmissionCandidate>,
     coherence_config: Option<CoherenceConfig>,
+) -> Result<SystemResult, SystemError> {
+    simulate_kernel_shared_with_residency_and_candidates_with_coherence_and_payload_events(
+        per_sm_blocks,
+        schedule,
+        params,
+        shared_memory_residency,
+        l1_config,
+        l2,
+        dram,
+        memory_service_candidates,
+        memory_admission_candidates,
+        memory_admission_feedback,
+        coherence_config,
+        &[],
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn simulate_kernel_shared_with_residency_and_candidates_with_coherence_and_payload_events(
+    per_sm_blocks: &BTreeMap<i32, Vec<BlockReplay>>,
+    schedule: &FunctionSchedule,
+    params: &IssueModelParams,
+    shared_memory_residency: SharedMemoryResidency,
+    l1_config: L1Config,
+    l2: &mut L2Model,
+    dram: DramBw,
+    memory_service_candidates: &[MemoryServiceCandidate],
+    memory_admission_candidates: &[MemoryAdmissionCandidate],
+    memory_admission_feedback: Option<MemoryAdmissionCandidate>,
+    coherence_config: Option<CoherenceConfig>,
+    payload_events: &[L1PayloadAdmissionEvent],
 ) -> Result<SystemResult, SystemError> {
     let arch = schedule.arch;
     require_arch(arch, params.arch, "issue parameters")?;
@@ -3222,6 +3369,10 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates_with_coherenc
     // wasted heap traffic AND an unbounded idle-wake streak the livelock
     // guard could not be told apart from a real spin.
     let mut wake_due = DueTimes::new(cores.len());
+    // Producer-supplied payload admissions are self-affecting cache events;
+    // keep their due frontier separate from responses, write acknowledgements,
+    // and ordinary wakes so an actor cannot run past the mutation.
+    let mut payload_due = DueTimes::new(cores.len());
     let mut unpriced = UnpricedBounds((0..cores.len()).map(|_| BTreeMap::new()).collect());
     let mut pending_l2_ready = PendingL2Ready::default();
     let mut l2_by_source = L2SourceSplit::for_arch(arch);
@@ -3250,11 +3401,43 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates_with_coherenc
         None
     };
     let mut dram_stats = DramStats::for_arch(arch);
+    // Seed actor wakes before producer events.  At equal cycle zero this lets
+    // the actor observe `payload_due` and park before the value mutation is
+    // applied, rather than allowing a queued payload admission to run ahead
+    // of the first modeled issue boundary merely because it was inserted
+    // first.  The separate payload horizon still prevents run-ahead at every
+    // later timestamp.
     for ix in 0..cores.len() {
         let target = u32::try_from(ix)
             .map_err(|_| SystemError::ActorCountOutOfRange { count: cores.len() })?;
         queue.schedule_at(0, TargetId(target), Ev::SmWake)?;
         wake_due.push(ix, 0)?;
+    }
+    for event in payload_events {
+        if event.payloads.is_empty() {
+            return Err(SystemError::L1PayloadAdmissionEmpty { time: event.time });
+        }
+        let target = sm_ids
+            .iter()
+            .position(|candidate| *candidate == event.sm_id)
+            .ok_or(SystemError::L1PayloadAdmissionSmUnknown { sm_id: event.sm_id })?;
+        let target = u32::try_from(target)
+            .map_err(|_| SystemError::ActorCountOutOfRange { count: cores.len() })?;
+        if event.identity.is_some() && event.writer.is_none() {
+            return Err(SystemError::L1PayloadAdmissionWriterMissing);
+        }
+        cores[target as usize].watch_l1_payload_sectors(&event.payloads);
+        queue.schedule_at(
+            event.time,
+            TargetId(target),
+            Ev::L1PayloadAdmission {
+                identity_present: event.identity.is_some(),
+                writer: event.writer,
+                payloads: event.payloads.clone(),
+                witnesses: event.witnesses.clone(),
+            },
+        )?;
+        payload_due.push(target as usize, event.time)?;
     }
 
     let mut spin = SpinGuard::new(cores.len())?;
@@ -3285,6 +3468,7 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates_with_coherenc
         let contributes_to_sm_active = !matches!(
             &ev.kind,
             Ev::MemoryWriteAck(_)
+                | Ev::L1PayloadAdmission { .. }
                 | Ev::L2WritebackComplete { .. }
                 | Ev::L2CoherenceComplete { .. }
                 | Ev::L1VisibilityComplete { .. }
@@ -3332,6 +3516,7 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates_with_coherenc
                     &mut write_ack_due,
                     &mut wake_due,
                     &mut unpriced,
+                    &payload_due,
                     batch_replyless_writes,
                     &mut scratch,
                     &mut l1_visibility_observations,
@@ -3343,6 +3528,40 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates_with_coherenc
                     memory_admission_feedback,
                 )?;
                 spin.on_event(ev.time, !progress)?;
+            }
+            Ev::L1PayloadAdmission {
+                payloads,
+                witnesses,
+                writer,
+                ..
+            } => {
+                payload_due.pop_expect("L1 payload admission", sm_ix, ev.time)?;
+                if let Some(writer) = writer {
+                    cores[sm_ix]
+                        .admit_issued_l1_store_payloads(writer, ev.time, &payloads, &witnesses)?;
+                } else {
+                    cores[sm_ix].admit_l1_dirty_payloads_with_witness(&payloads, &witnesses)?;
+                }
+                run_sm(
+                    sm_ix,
+                    &mut cores,
+                    &mut queue,
+                    &mut response_due,
+                    &mut write_ack_due,
+                    &mut wake_due,
+                    &mut unpriced,
+                    &payload_due,
+                    batch_replyless_writes,
+                    &mut scratch,
+                    &mut l1_visibility_observations,
+                    &mut l1_fence_observations,
+                    &mut l1_fill_visibility_observations,
+                    l1_visibility_queue.as_mut(),
+                    &sm_ids,
+                    params.l1_miss_latency,
+                    memory_admission_feedback,
+                )?;
+                spin.on_progress_event(ev.time);
             }
             kind @ (Ev::L2Access(_) | Ev::L2AccessBatch(_)) => {
                 let requests = match kind {
@@ -4154,6 +4373,7 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates_with_coherenc
                         &mut write_ack_due,
                         &mut wake_due,
                         &mut unpriced,
+                        &payload_due,
                         batch_replyless_writes,
                         &mut scratch,
                         &mut l1_visibility_observations,
@@ -4178,6 +4398,7 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates_with_coherenc
                     &mut write_ack_due,
                     &mut wake_due,
                     &mut unpriced,
+                    &payload_due,
                     batch_replyless_writes,
                     &mut scratch,
                     &mut l1_visibility_observations,
@@ -4229,6 +4450,7 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates_with_coherenc
                     &mut write_ack_due,
                     &mut wake_due,
                     &mut unpriced,
+                    &payload_due,
                     batch_replyless_writes,
                     &mut scratch,
                     &mut l1_visibility_observations,
@@ -4403,6 +4625,11 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates_with_coherenc
             entries: wake_due.pending_entries(),
         });
     }
+    if !payload_due.is_empty() {
+        return Err(SystemError::PayloadAdmissionDueNotDrained {
+            entries: payload_due.pending_entries(),
+        });
+    }
     if !unpriced.is_empty() {
         return Err(SystemError::UnpricedBoundsNotDrained {
             entries: unpriced.pending_entries(),
@@ -4513,7 +4740,7 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates_with_coherenc
         let queue_stats = queue.stats();
         eprintln!(
             "SIM_EVENT_PERF events_processed={} queue_events_processed={} sm_wake={} \
-             l2_access={} l2_access_batches={} l2_access_batched_requests={} l2_fill={} \
+             l1_payload_admission={} l2_access={} l2_access_batches={} l2_access_batched_requests={} l2_fill={} \
              atomic_completion={} writeback_completion={} coherence_completion={} l1_visibility_event={} \
              memory_write_ack={} mem_response={} same_cycle_after_first={} \
              queue_same_cycle_after_first={} maximum_queue_depth={} queue_clock_gap_cycles={} \
@@ -4521,6 +4748,7 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates_with_coherenc
             performance.processed,
             performance.queue_events_processed,
             performance.sm_wake,
+            performance.l1_payload_admission,
             performance.l2_access,
             performance.l2_access_batches,
             performance.l2_access_batched_requests,
@@ -4766,6 +4994,7 @@ fn run_sm(
     write_ack_due: &mut DueTimes,
     wake_due: &mut DueTimes,
     unpriced: &mut UnpricedBounds,
+    payload_due: &DueTimes,
     batch_replyless_writes: bool,
     scratch: &mut Vec<MemRequest>,
     l1_visibility_observations: &mut Vec<sim_mem::L1AccessObservation>,
@@ -4777,11 +5006,14 @@ fn run_sm(
     memory_admission_feedback: Option<MemoryAdmissionCandidate>,
 ) -> Result<bool, SystemError> {
     scratch.clear();
-    let write_or_unpriced = match (write_ack_due.next(ix), unpriced.min(ix)) {
-        (Some(left), Some(right)) => Some(left.min(right)),
-        (Some(bound), None) | (None, Some(bound)) => Some(bound),
-        (None, None) => None,
-    };
+    let write_or_unpriced = [
+        write_ack_due.next(ix),
+        unpriced.min(ix),
+        payload_due.next(ix),
+    ]
+    .into_iter()
+    .flatten()
+    .min();
     let initial_visibility_events = cores[ix].take_l1_visibility_events();
     schedule_l1_visibility_events(
         ix,
@@ -4797,8 +5029,9 @@ fn run_sm(
     // already queued cross-SM invalidation/fill event: its trace-local cache
     // state was generated before that event and cannot be retracted.  Keep
     // the legacy run-ahead path unchanged; strict visibility pays a bounded
-    // next-event cap, while same-cycle callback ties and observations already
-    // generated by an actor remain an explicit batch-ahead limitation.
+    // next-event cap. `SmCore::advance` also yields immediately after the
+    // issuing actor produces a same-cycle visibility observation, so those
+    // callbacks are no longer hidden behind a later local issue batch.
     let horizon = if l1_visibility_queue.is_some() {
         queue
             .peek_time()
@@ -5872,6 +6105,341 @@ mod tests {
             slice_hash: SliceHash::LineMod,
         })
         .unwrap()
+    }
+
+    #[test]
+    fn explicit_l1_payload_event_enters_shared_system_and_flushes_transactionally() {
+        let sched = schedule(vec![(0, slot(cb(1), "LDG.E")), (16, slot(cb(1), "EXIT"))]);
+        let blocks = vec![BlockReplay {
+            launch_index: 0,
+            warps: vec![WarpReplay {
+                async_copy_cohorts: None,
+                warp_slot: 0,
+                insts: vec![
+                    ReplayInst {
+                        pc: 0,
+                        kind: AccessKind::GlobalEligible {
+                            off: 0,
+                            len: 1,
+                            token: CacheOpToken::LdgECa,
+                        },
+                    },
+                    ReplayInst {
+                        pc: 16,
+                        kind: AccessKind::NonMemory,
+                    },
+                ],
+                sectors: vec![0],
+            }],
+        }];
+        let payload = SectorPayloadV1::new_with_generation(
+            7,
+            1,
+            0,
+            0,
+            1,
+            [0x5a; sim_mem::PAYLOAD_SECTOR_BYTES],
+            u32::MAX,
+        )
+        .unwrap();
+        // The first event-mode line allocation starts at model generation 0;
+        // the admission event is deliberately scheduled after the miss can
+        // return, so the witness is checked against an actually resident
+        // sector rather than a tag-only guess.
+        let event = L1PayloadAdmissionEvent {
+            sm_id: 0,
+            time: 500,
+            identity: None,
+            writer: None,
+            payloads: vec![payload].into_boxed_slice(),
+            witnesses: vec![L1PayloadResidencyWitness {
+                line_id: 0,
+                allocation_id: payload.allocation_id(),
+                allocation_generation: payload.allocation_generation(),
+                resident_generation: 0,
+                resident_sector_mask: 1,
+            }]
+            .into_boxed_slice(),
+        };
+        let mut l2 = l2_model();
+        let result =
+            simulate_kernel_shared_with_residency_and_candidates_with_coherence_and_payload_events(
+                &BTreeMap::from([(0, blocks)]),
+                &sched,
+                &params(),
+                SharedMemoryResidency::unconstrained_fixture(),
+                l1_config(),
+                &mut l2,
+                DramBw::CardedWriteback {
+                    arch: ArchId::Sm86,
+                    bytes_per_sec: 1_008_000_000_000,
+                    sm_clock_hz: 1_350_000_000,
+                    capacity_sectors: 1,
+                },
+                &[],
+                &[],
+                None,
+                None,
+                &[event],
+            )
+            .unwrap();
+        assert_eq!(result.dram.maximum_terminal_l1_dirty_sectors, 1);
+        assert_eq!(result.dram.writeback_completed_sectors, 1);
+        assert_eq!(result.dram.writeback_completed_bytes, 32);
+        assert!(
+            result
+                .dram
+                .writeback_completion_frontier
+                .is_some_and(|time| time >= 500)
+        );
+    }
+
+    #[test]
+    fn explicit_l1_payload_event_binds_to_the_observed_resident_store() {
+        let mut load_control = cb(1);
+        load_control.write_barrier = Some(barrier(0));
+        let mut store_control = cb(1);
+        store_control.wait_mask = wait_mask(0b000001);
+        let sched = schedule(vec![
+            (0, slot(load_control, "LDG.E")),
+            (16, slot(store_control, "STG.E")),
+            (32, slot(cb(1), "EXIT")),
+        ]);
+        let blocks = vec![BlockReplay {
+            launch_index: 0,
+            warps: vec![WarpReplay {
+                async_copy_cohorts: None,
+                warp_slot: 0,
+                insts: vec![
+                    ReplayInst {
+                        pc: 0,
+                        kind: AccessKind::GlobalEligible {
+                            off: 0,
+                            len: 1,
+                            token: CacheOpToken::LdgECa,
+                        },
+                    },
+                    ReplayInst {
+                        pc: 16,
+                        kind: AccessKind::GlobalStore { off: 0, len: 1 },
+                    },
+                    ReplayInst {
+                        pc: 32,
+                        kind: AccessKind::NonMemory,
+                    },
+                ],
+                sectors: vec![0],
+            }],
+        }];
+        let payload = SectorPayloadV1::new_with_generation(
+            7,
+            1,
+            0,
+            0,
+            1,
+            [0x6b; sim_mem::PAYLOAD_SECTOR_BYTES],
+            u32::MAX,
+        )
+        .unwrap();
+        let event = L1PayloadAdmissionEvent {
+            sm_id: 0,
+            time: 500,
+            identity: None,
+            writer: Some(PayloadStoreSite {
+                launch_index: 0,
+                warp_slot: 0,
+                instruction_index: 1,
+            }),
+            payloads: vec![payload].into_boxed_slice(),
+            witnesses: vec![L1PayloadResidencyWitness {
+                line_id: 0,
+                allocation_id: payload.allocation_id(),
+                allocation_generation: payload.allocation_generation(),
+                resident_generation: 0,
+                resident_sector_mask: 1,
+            }]
+            .into_boxed_slice(),
+        };
+        let mut l2 = l2_model();
+        let coherence = CoherenceConfig::new(1, 4)
+            .expect("coherence config should validate")
+            .with_l1_visibility_protocol(true)
+            .with_l1_resident_writeback(true);
+        let result =
+            simulate_kernel_shared_with_residency_and_candidates_with_coherence_and_payload_events(
+                &BTreeMap::from([(0, blocks)]),
+                &sched,
+                &params(),
+                SharedMemoryResidency::unconstrained_fixture(),
+                l1_config(),
+                &mut l2,
+                DramBw::CardedWriteback {
+                    arch: ArchId::Sm86,
+                    bytes_per_sec: 1_008_000_000_000,
+                    sm_clock_hz: 1_350_000_000,
+                    capacity_sectors: 1,
+                },
+                &[],
+                &[],
+                None,
+                Some(coherence),
+                &[event],
+            )
+            .expect("store-bound payload should flush");
+        assert_eq!(result.dram.l1_writeback_completed_sectors, 1);
+        assert_eq!(result.dram.l1_writeback_completed_bytes, 32);
+        assert_eq!(result.dram.l1_payload_forwarded_sectors, 1);
+        assert_eq!(result.dram.l1_payload_forwarded_bytes, 32);
+        assert_ne!(result.dram.l1_payload_forwarding_digest_xor, 0);
+    }
+
+    #[test]
+    fn payload_due_frontier_parks_actor_before_future_mutation() {
+        let instruction_count = 20_u32;
+        let schedule = schedule(
+            (0..instruction_count)
+                .map(|index| (u64::from(index) * 16, slot(cb(1), "IADD3")))
+                .collect(),
+        );
+        let blocks = vec![BlockReplay {
+            launch_index: 0,
+            warps: vec![WarpReplay {
+                async_copy_cohorts: None,
+                warp_slot: 0,
+                insts: (0..instruction_count)
+                    .map(|index| ReplayInst {
+                        pc: index * 16,
+                        kind: AccessKind::NonMemory,
+                    })
+                    .collect(),
+                sectors: Vec::new(),
+            }],
+        }];
+        let core = SmCore::new_with_residency(
+            &blocks,
+            &schedule,
+            &params(),
+            SharedMemoryResidency::unconstrained_fixture(),
+            SmMemMode::L1Shared(l1_config()),
+        )
+        .unwrap();
+        let mut cores = vec![core];
+        let mut queue = EventQueue::new();
+        let mut response_due = DueTimes::new(1);
+        let mut write_ack_due = DueTimes::new(1);
+        let mut wake_due = DueTimes::new(1);
+        let mut payload_due = DueTimes::new(1);
+        payload_due.push(0, 5).unwrap();
+        let mut unpriced = UnpricedBounds(vec![BTreeMap::new()]);
+        let mut scratch = Vec::new();
+        let mut access = Vec::new();
+        let mut fences = Vec::new();
+        let mut fills = Vec::new();
+        let progress = run_sm(
+            0,
+            &mut cores,
+            &mut queue,
+            &mut response_due,
+            &mut write_ack_due,
+            &mut wake_due,
+            &mut unpriced,
+            &payload_due,
+            false,
+            &mut scratch,
+            &mut access,
+            &mut fences,
+            &mut fills,
+            None,
+            &[0],
+            244,
+            None,
+        )
+        .unwrap();
+        assert!(progress);
+        assert_eq!(cores[0].instructions_issued(), 5);
+        assert_eq!(payload_due.next(0), Some(5));
+        assert_eq!(wake_due.next(0), Some(5));
+        let queued = queue.pop().unwrap().unwrap();
+        assert_eq!(queued.time, 5);
+        assert!(matches!(queued.kind, Ev::SmWake));
+    }
+
+    #[test]
+    fn visibility_observation_stops_same_actor_batch_ahead() {
+        let instruction_count = 20_u32;
+        let mut slots = vec![(0, slot(cb(1), "LDG.E"))];
+        slots.extend(
+            (1..instruction_count).map(|index| (u64::from(index) * 16, slot(cb(1), "IADD3"))),
+        );
+        let schedule = schedule(slots);
+        let blocks = vec![BlockReplay {
+            launch_index: 0,
+            warps: vec![WarpReplay {
+                async_copy_cohorts: None,
+                warp_slot: 0,
+                insts: std::iter::once(ReplayInst {
+                    pc: 0,
+                    kind: AccessKind::GlobalEligible {
+                        off: 0,
+                        len: 1,
+                        token: CacheOpToken::LdgECa,
+                    },
+                })
+                .chain((1..instruction_count).map(|index| ReplayInst {
+                    pc: index * 16,
+                    kind: AccessKind::NonMemory,
+                }))
+                .collect(),
+                sectors: vec![0],
+            }],
+        }];
+        let mut core = SmCore::new_with_residency(
+            &blocks,
+            &schedule,
+            &params(),
+            SharedMemoryResidency::unconstrained_fixture(),
+            SmMemMode::L1Shared(l1_config()),
+        )
+        .unwrap();
+        core.enable_l1_visibility_observations(0).unwrap();
+        let mut cores = vec![core];
+        let mut queue = EventQueue::new();
+        let mut response_due = DueTimes::new(1);
+        let mut write_ack_due = DueTimes::new(1);
+        let mut wake_due = DueTimes::new(1);
+        let payload_due = DueTimes::new(1);
+        let mut unpriced = UnpricedBounds(vec![BTreeMap::new()]);
+        let mut scratch = Vec::new();
+        let mut access = Vec::new();
+        let mut fences = Vec::new();
+        let mut fills = Vec::new();
+        let mut visibility_queue = L1VisibilityQueue::new(
+            L1VisibilityConfig::new(2, 4).expect("visibility config should validate"),
+        );
+        let progress = run_sm(
+            0,
+            &mut cores,
+            &mut queue,
+            &mut response_due,
+            &mut write_ack_due,
+            &mut wake_due,
+            &mut unpriced,
+            &payload_due,
+            false,
+            &mut scratch,
+            &mut access,
+            &mut fences,
+            &mut fills,
+            Some(&mut visibility_queue),
+            &[0],
+            244,
+            None,
+        )
+        .unwrap();
+        assert!(progress);
+        assert_eq!(cores[0].instructions_issued(), 1);
+        let first = queue.pop().unwrap().unwrap();
+        assert!(matches!(first.kind, Ev::L1VisibilityAccess(_)));
     }
 
     struct L2TestFaultGuard;

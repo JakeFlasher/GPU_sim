@@ -1,14 +1,20 @@
 # Archived material
 
-Archived material is retained for reproducibility and historical context. It
-is not an active dependency, validation gate, acceptance criterion, or task
-queue. The authoritative current scope is `docs/STATUS.md`; resume context is
-`docs/PROJECT_MEMORY.md`; dated evidence is indexed by `docs/HISTORY.md`.
+Archived material is retained for reproducibility and historical context. It is
+not an active dependency, validation gate, acceptance criterion, or task queue.
+The active surface is:
 
-- `research_20260930/` — dated SM86, simulator, prior-art, probe, and review
-  reports moved out of the active documentation surface on 2026-09-30.
-- `vortex/` — earlier Vortex adapter and differential artifacts.
+1. `docs/STATUS.md`
+2. `docs/PROJECT_MEMORY.md`
+3. `docs/PREDICTIVE_CLOSURE.md`
+4. `plans/sm86_predictive_closure_implementation_20261001.md`
 
-Raw campaign outputs remain under their original ignored paths where present.
-Do not infer freshness from a filename or timestamp alone, and do not promote a
-historical claim without an independently defined holdout and endpoint.
+- `research_20260930/` — consolidated SM86 implementation, campaign, and seam
+  evidence.
+- `research_20261001/` — endpoint rechecks, finite value probes, and predictive
+  replacement research.
+- `vortex/` — earlier cross-architecture adapter artifacts.
+
+Raw campaign outputs remain under their original ignored paths. Do not infer
+freshness from filenames or timestamps, and do not promote historical claims
+without an independently defined workload, endpoint, and comparison protocol.

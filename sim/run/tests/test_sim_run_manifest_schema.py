@@ -93,6 +93,56 @@ def test_run_schemas_are_valid_and_accept_canonical_fixtures() -> None:
     )
 
 
+def test_native_payload_event_schema_accepts_explicit_producer_contract() -> None:
+    schema = _load(SCHEMA_ROOT / "native_l1_payload_events.v1.schema.json")
+    jsonschema.Draft202012Validator.check_schema(schema)
+    event = {
+        "schema": "native_l1_payload_events_v1",
+        "status": "ok",
+        "events": [
+            {
+                "cycle": 500,
+                "sm_id": 0,
+                "identity": {
+                    "launch_id": 1,
+                    "function_unique_id": 1,
+                    "cta": [0, 0, 0],
+                    "warp": 0,
+                    "lane": 0,
+                    "pc": 16,
+                    "occurrence": 0,
+                },
+                "witnesses": [
+                    {
+                        "line_id": 0,
+                        "allocation_id": 7,
+                        "allocation_generation": 1,
+                        "resident_generation": 0,
+                        "resident_sector_mask": 1,
+                    }
+                ],
+                "payloads": [
+                    {
+                        "allocation_id": 7,
+                        "generation": 1,
+                        "line_id": 0,
+                        "sector": 0,
+                        "byte_offset": 2,
+                        "bytes_hex": "0102",
+                        "known_mask": 12,
+                        "sequence": 1,
+                    }
+                ],
+            }
+        ],
+    }
+    jsonschema.validate(event, schema)
+    contaminated = copy.deepcopy(event)
+    contaminated["events"][0]["forbidden_target_value"] = 1
+    with pytest.raises(jsonschema.ValidationError):
+        jsonschema.validate(contaminated, schema)
+
+
 def test_manifest_schema_rejects_unknown_and_target_like_inputs() -> None:
     schema = _load(SCHEMA_ROOT / "sim_run_manifest.v1.schema.json")
     manifest = _load(FIXTURE_ROOT / "run_manifest.json")

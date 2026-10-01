@@ -3059,6 +3059,15 @@ impl TypedObservationContract {
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum TypedEventPayload {
     SmWake,
+    /// An explicit value-bearing L1 admission supplied by an external event
+    /// producer. The typed boundary retains only bounded cardinalities; the
+    /// payload bytes and allocation identities remain in the native event
+    /// input and are never treated as hardware completion evidence.
+    L1PayloadAdmission {
+        payload_records: u64,
+        witness_lines: u64,
+        identity_present: bool,
+    },
     L2Access {
         request: TypedMemoryRequest,
     },
@@ -3337,6 +3346,7 @@ impl TypedEventPayload {
                 Ok(())
             }
             Self::SmWake | Self::AtomicCompletion => Ok(()),
+            Self::L1PayloadAdmission { .. } => Ok(()),
             Self::WritebackCompletion {
                 service_done_at, ..
             } => check("writeback_completion", "service_done_at", *service_done_at),

@@ -34,6 +34,28 @@ use crate::lanes::{self, LaneError};
 use crate::pb;
 use crate::wire_preflight::{self, WirePreflightError};
 
+/// Canonical key emitted by the validated trace for a per-lane global memory
+/// record. The alias keeps the trace projection and value-sidecar join on one
+/// identity type without exposing cache or timing semantics here.
+pub type DynamicMemoryJoinIdentity = sim_mem::NativePayloadJoinKey;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub struct DynamicMemoryJoinLocation {
+    pub key: DynamicMemoryJoinIdentity,
+    pub block_id: [u32; 3],
+    pub warp: u32,
+    pub instruction_index: u32,
+    pub launch_index: i64,
+    pub warp_slot: Option<i32>,
+    /// Trace-declared direction for this dynamic GLOBAL occurrence.  A
+    /// payload admission may bind only to `Store`; `None` is retained for
+    /// legacy traces and must fail closed at the value-bearing ingress.
+    pub access_kind: Option<pb::MemoryOpAccessKind>,
+    /// Trace-observed SM placement for the dynamic instruction. This is a
+    /// placement identity, not a physical pipe/SMSP/slot observation.
+    pub sm_id: Option<i32>,
+}
+
 const MIB: u64 = 1024 * 1024;
 const DYNAMIC_TRACE_PB_MAX_BYTES: u64 = 1024 * MIB;
 const ALLOCATIONS_JSON_MAX_BYTES: u64 = 16 * MIB;
@@ -514,6 +536,8 @@ pub enum TraceError {
     },
     #[error("trace validation count {counter} overflows u64")]
     TraceCountOverflow { counter: &'static str },
+    #[error("dynamic memory join identity is duplicated in the validated trace")]
+    DynamicMemoryJoinIdentityDuplicate,
 }
 
 impl TraceError {
@@ -2445,6 +2469,7 @@ impl ValidatedMemoryInstruction {
 /// Compact immutable threadblock produced by the full payload validation walk.
 pub struct ValidatedThreadblock {
     launch_index: i64,
+    block_id: [u32; 3],
     warps: Vec<ValidatedWarp>,
 }
 
@@ -2462,14 +2487,24 @@ impl ValidatedThreadblock {
                 ValidatedWarp::from_message(map_key, warp, payload_contract, label)
             })
             .collect::<Result<Vec<_>, _>>()?;
+        let block_id = threadblock
+            .block_id
+            .as_ref()
+            .map(|id| [id.x as u32, id.y as u32, id.z as u32])
+            .unwrap_or([0, 0, 0]);
         Ok(Self {
             launch_index,
+            block_id,
             warps,
         })
     }
 
     pub const fn launch_index(&self) -> i64 {
         self.launch_index
+    }
+
+    pub const fn block_id(&self) -> [u32; 3] {
+        self.block_id
     }
 
     pub fn warps(&self) -> &[ValidatedWarp] {
@@ -2483,6 +2518,7 @@ pub struct ValidatedWarp {
     warp_id: i32,
     function_unique_id: i32,
     instructions: Vec<ValidatedInstruction>,
+    predicate_on_masks: Vec<u32>,
     instrumentation_order_anchors: Vec<CompactInstrumentationOrderAnchor>,
     memories: Vec<ValidatedMemoryInstruction>,
     async_copy_projections: Vec<AsyncCopyProjection>,
@@ -2505,6 +2541,7 @@ impl ValidatedWarp {
             .first()
             .map_or(0, |instruction| instruction.function_unique_id);
         let mut instructions = Vec::with_capacity(warp.instructions.len());
+        let mut predicate_on_masks = Vec::with_capacity(warp.instructions.len());
         let mut instrumentation_order_anchors = Vec::new();
         let mut memories = Vec::new();
         let mut async_copy_projections = Vec::new();
@@ -2725,6 +2762,9 @@ impl ValidatedWarp {
             if instruction.warpid_sm.is_some() {
                 identity_presence |= ValidatedInstruction::WARP_SLOT_PRESENT;
             }
+            let predicate_on_mask = instruction.active_mask.unwrap_or_default()
+                & instruction.predicate_mask.unwrap_or_default();
+            predicate_on_masks.push(predicate_on_mask);
             instructions.push(ValidatedInstruction {
                 pc: instruction.pc,
                 memory_index,
@@ -2734,9 +2774,7 @@ impl ValidatedWarp {
                 active_mask_present: instruction.active_mask.is_some(),
                 predicate_mask_present: instruction.predicate_mask.is_some(),
                 active_mask: instruction.active_mask.unwrap_or_default(),
-                predicate_on_lanes: (instruction.active_mask.unwrap_or_default()
-                    & instruction.predicate_mask.unwrap_or_default())
-                .count_ones() as u8,
+                predicate_on_lanes: predicate_on_mask.count_ones() as u8,
             });
         }
         Ok(Self {
@@ -2744,6 +2782,7 @@ impl ValidatedWarp {
             warp_id: warp.id,
             function_unique_id,
             instructions,
+            predicate_on_masks,
             instrumentation_order_anchors,
             memories,
             async_copy_projections,
@@ -2795,6 +2834,10 @@ impl ValidatedWarp {
                     memory,
                     function_unique_id: self.function_unique_id,
                     warpid_tb: self.map_key,
+                    instruction_index: u32::try_from(instruction_index).unwrap_or_else(|_| {
+                        unreachable!("validated instruction index exceeded u32")
+                    }),
+                    predicate_on_mask: self.predicate_on_masks[instruction_index],
                     instrumentation_order,
                 }
             })
@@ -2970,6 +3013,8 @@ pub struct ValidatedInstructionRef<'a> {
     memory: Option<&'a ValidatedMemoryInstruction>,
     function_unique_id: i32,
     warpid_tb: i32,
+    instruction_index: u32,
+    predicate_on_mask: u32,
     instrumentation_order: Option<u64>,
 }
 
@@ -2989,6 +3034,14 @@ impl<'a> ValidatedInstructionRef<'a> {
     }
     pub const fn predicate_on_lanes(&self) -> u8 {
         self.instruction.predicate_on_lanes
+    }
+
+    pub const fn predicate_on_mask(&self) -> u32 {
+        self.predicate_on_mask
+    }
+
+    pub const fn instruction_index(&self) -> u32 {
+        self.instruction_index
     }
 
     pub const fn pc(&self) -> u32 {
@@ -4288,6 +4341,93 @@ impl TraceDir {
             .collect::<Result<Vec<_>, _>>()?;
         blocks.sort_by_key(|(index, _)| *index);
         Ok(blocks)
+    }
+
+    /// Project a launch's validated per-lane GLOBAL memory identities using
+    /// the same per-lane memory occurrence convention as the NVBit value
+    /// capture (`0` for the first global-memory record of a lane). The launch
+    /// component is the trace kernel id; a sidecar producer must bind its
+    /// launch_id to that same identity. This is an identity/topology
+    /// projection only: it does not prove L1 residency,
+    /// ownership, or writeback completion.
+    pub fn dynamic_memory_join_locations(
+        &self,
+        loc: &KernelLoc<'_>,
+    ) -> Result<BTreeMap<DynamicMemoryJoinIdentity, DynamicMemoryJoinLocation>, TraceError> {
+        self.require_kernel_loc(loc)?;
+        let launch_id =
+            u64::try_from(loc.kernel.id).map_err(|_| TraceError::TraceCountOverflow {
+                counter: "kernel launch identity",
+            })?;
+        let blocks = self.validated_threadblocks_in_launch_order(loc)?;
+        let mut locations = BTreeMap::new();
+        for (_, block) in blocks {
+            let cta = block.block_id();
+            for warp in block.warps() {
+                let warp_id =
+                    u32::try_from(warp.warp_id()).map_err(|_| TraceError::TraceCountOverflow {
+                        counter: "trace warp identity",
+                    })?;
+                let mut occurrence_by_lane = [0_u32; 32];
+                for instruction in warp.instructions() {
+                    let Some(memory) = instruction.memory() else {
+                        continue;
+                    };
+                    if !matches!(warp.memory_route(memory), Ok(ValidatedMemoryRoute::Global)) {
+                        continue;
+                    }
+                    let mask = instruction.predicate_on_mask();
+                    if mask == 0 {
+                        continue;
+                    }
+                    for lane in 0..32_usize {
+                        if mask & (1_u32 << lane) == 0 {
+                            continue;
+                        }
+                        let occurrence = occurrence_by_lane[lane];
+                        occurrence_by_lane[lane] =
+                            occurrence
+                                .checked_add(1)
+                                .ok_or(TraceError::TraceCountOverflow {
+                                    counter: "per-lane global memory occurrence",
+                                })?;
+                        let key = DynamicMemoryJoinIdentity {
+                            launch_id,
+                            function_unique_id: instruction.function_unique_id(),
+                            cta,
+                            warp: warp_id,
+                            lane: u32::try_from(lane).unwrap_or_else(|_| unreachable!()),
+                            pc: instruction.pc(),
+                            occurrence,
+                        };
+                        let location = DynamicMemoryJoinLocation {
+                            key,
+                            block_id: cta,
+                            warp: warp_id,
+                            instruction_index: instruction.instruction_index(),
+                            launch_index: block.launch_index(),
+                            warp_slot: instruction.warpid_sm(),
+                            access_kind: memory.replay_meta().access_kind,
+                            sm_id: instruction.sm_id(),
+                        };
+                        if locations.insert(key, location).is_some() {
+                            return Err(TraceError::DynamicMemoryJoinIdentityDuplicate);
+                        }
+                    }
+                }
+            }
+        }
+        Ok(locations)
+    }
+
+    pub fn dynamic_memory_join_identities(
+        &self,
+        loc: &KernelLoc<'_>,
+    ) -> Result<BTreeSet<DynamicMemoryJoinIdentity>, TraceError> {
+        Ok(self
+            .dynamic_memory_join_locations(loc)?
+            .into_keys()
+            .collect())
     }
 
     /// Decode one threadblock from the immutable raw bytes captured by the

@@ -108,12 +108,12 @@ pub use issue::{
     MemoryAdmissionFeedbackDiagnostics, MemoryOperation, MemoryServiceCandidate,
     MemoryServiceCandidateDiagnostics, MemoryServiceCandidateError,
     MemoryServiceCandidateOperation, MemoryServiceCandidateResult, MemoryServiceCandidateScope,
-    MemoryWriteAckDiagnostics, ReadinessCauseCycles, ReadinessCounterError, ReadinessDiagnostics,
-    ReplyTo, ResultWritebackDiagnostics, SmSimResult, TailFlags,
+    MemoryWriteAckDiagnostics, PayloadStoreSite, ReadinessCauseCycles, ReadinessCounterError,
+    ReadinessDiagnostics, ReplyTo, ResultWritebackDiagnostics, SmSimResult, TailFlags,
 };
 pub use metrics::{
-    ControlFlowGraph, InstructionActivity, MemoryTraffic, PhysicalPipelineAttribution, SmActivity,
-    TraceMetrics, WarpLifetime,
+    ClassCountInterval, ControlFlowGraph, InstructionActivity, MemoryTraffic, OperandBankPressure,
+    PhysicalPipelineAttribution, PipelineClassEnvelope, SmActivity, TraceMetrics, WarpLifetime,
 };
 pub use program::{
     FunctionSchedule, IssueSlot, OpClass, PipelineClass, ProgramError, build_schedules,
@@ -127,7 +127,7 @@ pub use replay::{
     ModeledCompletionFrontier, ReplayConfiguration, ReplayError, ReplayLaunchCoverageBinding,
     ReplayLaunchCoverageBindingError, ReplayMemMode, ReplaySessionError,
     SmActiveObservationFrontier, StreamL2ReplaySession, aggregate_full_launch_set,
-    fast_frontier_for_trace, replay_trace_kernel,
+    fast_frontier_for_trace, replay_trace_kernel, replay_trace_kernel_with_l1_payload_events,
     replay_trace_kernel_with_memory_admission_candidates,
     replay_trace_kernel_with_memory_admission_feedback,
     replay_trace_kernel_with_memory_service_candidates,
@@ -144,6 +144,6 @@ pub use sass_operands::{
 };
 pub use sim_mem::MemRole;
 pub use system::{
-    DramBw, DramOriginStats, DramStats, L2OriginSourceStats, L2SourceSplit, SystemCounterError,
-    SystemError,
+    DramBw, DramOriginStats, DramStats, L1PayloadAdmissionEvent, L2OriginSourceStats,
+    L2SourceSplit, SystemCounterError, SystemError,
 };

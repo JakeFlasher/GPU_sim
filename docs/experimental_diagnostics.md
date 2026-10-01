@@ -119,8 +119,12 @@ numeric `BRA`,
 with before/after registers, guards, initialized load returns, and stores. An
 optional `sm86_static_sass_artifact_v1` manifest must match the SASS SHA-256
 before execution, binding dynamic values to the static compiler artifact.
-Input-varying lanes, addresses, and predicate paths produce different dynamic
-values, while calls,
+`LOP3.LUT` is admitted for three GPR/immediate/constant inputs, an 8-bit
+truth table, and the SM86 data-only or predicate-plus-register destination
+forms when the trailing predicate is `!PT`, plus bounded `SHF.L/R.U32`
+funnel shifts, immediate-multiplier `IMAD.SHL.U32`, and multiplier-1
+`IMAD.IADD`; input-varying lanes, addresses,
+predicates, and Boolean results produce different dynamic values, while calls,
 special registers, atomics, fences, and unsupported memory forms refuse. This
 closes a small functional dynamic-trace mechanism, not hardware-validated
 SASS regeneration.

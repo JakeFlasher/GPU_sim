@@ -12,7 +12,7 @@ pub use prepared::{
     CoverageAdmission, KernelKey, KernelSelector, PreparedLaunchIdentity, PreparedReplay,
 };
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 #[cfg(feature = "performance-counters")]
@@ -22,19 +22,25 @@ use serde::{Deserialize, Serialize};
 use sim_arch::card::{ArchCard, CalibError};
 use sim_arch::spec::{ArchitectureSpec, ResourceKind};
 use sim_mem::{
-    CoherenceConfig, L1Counters, L2Config, L2Counters, L2Source, MemoryOrigin, PchaseCard,
-    load_native_payload_sidecar,
+    CoherenceConfig, L1Counters, L2Config, L2Counters, L2Source, MemoryOrigin,
+    NativePayloadRecordV1, PayloadForwardingLedgerV1, PchaseCard, SectorPayloadV1,
+    coalesce_payloads, enrich_native_payload_records, join_native_payload_records,
+    load_native_payload_sidecar_records,
 };
 use sim_run::emit::{
     EmitOutcome, EmittedMetricKey, FullLaunchPredictions, MetricValue, Unavailable, Unit,
     emit_launch,
 };
+use sim_semantics::{
+    ClockDomain, EndpointDescriptor, FrontierBound, FrontierVector, LatentFactors, LatentModelError,
+};
 use sim_sm::{
     ControlSidecar, DramBw, DramStats, FastFrontierSummary, FullKernelReplayResult,
-    GpcObservationFrontier, IssueModelParams, L2SourceSplit, MAX_MEMORY_ADMISSION_CANDIDATES,
-    MAX_MEMORY_SERVICE_CANDIDATES, MemoryAdmissionCandidate, MemoryServiceCandidate,
-    ModeledCompletionFrontier, ReadinessDiagnostics, ReplayMemMode, SmActiveObservationFrontier,
-    StreamL2ReplaySession, TailFlags, TraceMetrics, build_schedules, replay_trace_kernel,
+    GpcObservationFrontier, IssueModelParams, L1PayloadAdmissionEvent, L2SourceSplit,
+    MAX_MEMORY_ADMISSION_CANDIDATES, MAX_MEMORY_SERVICE_CANDIDATES, MemoryAdmissionCandidate,
+    MemoryServiceCandidate, ModeledCompletionFrontier, ReadinessDiagnostics, ReplayMemMode,
+    SmActiveObservationFrontier, StreamL2ReplaySession, TailFlags, TraceMetrics, build_schedules,
+    replay_trace_kernel, replay_trace_kernel_with_l1_payload_events,
     replay_trace_kernel_with_memory_admission_candidates,
     replay_trace_kernel_with_memory_admission_feedback,
     replay_trace_kernel_with_memory_service_candidates,
@@ -162,9 +168,21 @@ pub struct RunConfig {
     /// Optional CUPTI launch-resource JSONL observation. This is metadata only;
     /// it never changes replay scheduling or cache configuration.
     pub launch_resources: Option<PathBuf>,
-    /// Optional strict value-bearing payload sidecar. Admission is explicit;
-    /// default replay remains mask-only and does not consume payload bytes.
+    /// Optional strict value-bearing payload sidecar. Admission and the
+    /// sidecar-only logical forwarding ledger are explicit; native replay
+    /// remains mask-only and does not consume payload bytes.
     pub native_payload_sidecar: Option<PathBuf>,
+    /// Optional producer-supplied event-time payload admissions. Each event
+    /// must carry a simulator-cycle timestamp, residency witness, and a
+    /// retained dynamic trace identity. The ordinary CLI does not synthesize
+    /// this vector from a sidecar.
+    pub native_payload_events: Option<Vec<L1PayloadAdmissionEvent>>,
+    /// Optional strict JSON event document (`native_l1_payload_events_v1`).
+    /// This is mutually exclusive with the programmatic event vector.
+    pub native_payload_events_path: Option<PathBuf>,
+    /// Emit the opt-in factorized route/class/frontier envelope. This is a
+    /// diagnostic contract and does not alter replay scheduling or scoring.
+    pub latent_envelope: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -182,6 +200,62 @@ struct MemoryAdmissionCandidateDocument {
 }
 
 const MAX_CANDIDATE_FILE_BYTES: u64 = 64 * 1024;
+const MAX_PAYLOAD_EVENT_FILE_BYTES: u64 = 64 * 1024 * 1024;
+const MAX_PAYLOAD_EVENTS: usize = 1_000_000;
+const MAX_PAYLOADS_PER_EVENT: usize = 4096;
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PayloadEventDocument {
+    schema: String,
+    status: String,
+    events: Vec<PayloadEventRaw>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PayloadEventRaw {
+    cycle: u64,
+    sm_id: i32,
+    identity: PayloadEventIdentityRaw,
+    witnesses: Vec<PayloadEventWitnessRaw>,
+    payloads: Vec<PayloadEventSectorRaw>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PayloadEventIdentityRaw {
+    launch_id: u64,
+    function_unique_id: i32,
+    cta: [u32; 3],
+    warp: u32,
+    lane: u32,
+    pc: u32,
+    occurrence: u32,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PayloadEventWitnessRaw {
+    line_id: i64,
+    allocation_id: u64,
+    allocation_generation: u64,
+    resident_generation: u32,
+    resident_sector_mask: u8,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PayloadEventSectorRaw {
+    allocation_id: u64,
+    generation: u64,
+    line_id: i64,
+    sector: u8,
+    byte_offset: u8,
+    bytes_hex: String,
+    known_mask: u32,
+    sequence: u64,
+}
 
 #[derive(Debug, thiserror::Error)]
 #[error("{stage}: {detail}")]
@@ -247,6 +321,211 @@ fn read_direct_input(
         ));
     }
     Ok(raw)
+}
+
+fn decode_event_bytes(hex: &str, stage: &'static str) -> Result<Vec<u8>, RunError> {
+    if hex.is_empty() || hex.len() % 2 != 0 || hex.len() > 64 {
+        return Err(RunError::new(
+            stage,
+            "event payload bytes_hex must contain 1..=32 complete bytes",
+        ));
+    }
+    let mut bytes = Vec::with_capacity(hex.len() / 2);
+    for pair in hex.as_bytes().chunks_exact(2) {
+        let high = (pair[0] as char)
+            .to_digit(16)
+            .ok_or_else(|| RunError::new(stage, "event payload bytes_hex is not hexadecimal"))?;
+        let low = (pair[1] as char)
+            .to_digit(16)
+            .ok_or_else(|| RunError::new(stage, "event payload bytes_hex is not hexadecimal"))?;
+        bytes.push(((high << 4) | low) as u8);
+    }
+    Ok(bytes)
+}
+
+fn load_native_payload_events(path: &Path) -> Result<Vec<L1PayloadAdmissionEvent>, RunError> {
+    let bytes = read_direct_input(
+        path,
+        "native payload events",
+        MAX_PAYLOAD_EVENT_FILE_BYTES + 1,
+    )?;
+    if u64::try_from(bytes.len()).unwrap_or(u64::MAX) > MAX_PAYLOAD_EVENT_FILE_BYTES {
+        return Err(RunError::new(
+            "native payload events",
+            "event document exceeds the 64 MiB input limit",
+        ));
+    }
+    let document: PayloadEventDocument =
+        strict_json_from_slice(&bytes).map_err(at("native payload events"))?;
+    if document.schema != "native_l1_payload_events_v1" || document.status != "ok" {
+        return Err(RunError::new(
+            "native payload events",
+            "event document schema/status is invalid",
+        ));
+    }
+    if document.events.is_empty() {
+        return Err(RunError::new(
+            "native payload events",
+            "event document must contain at least one event",
+        ));
+    }
+    if document.events.len() > MAX_PAYLOAD_EVENTS {
+        return Err(RunError::new(
+            "native payload events",
+            format!("event count exceeds {MAX_PAYLOAD_EVENTS}"),
+        ));
+    }
+    let mut seen_event_keys = BTreeSet::new();
+    document
+        .events
+        .into_iter()
+        .enumerate()
+        .map(|(event_index, event)| {
+            if event.sm_id < 0 {
+                return Err(RunError::new(
+                    "native payload events",
+                    format!("event {event_index} has negative sm_id"),
+                ));
+            }
+            if event.identity.launch_id == 0 || event.identity.function_unique_id <= 0 {
+                return Err(RunError::new(
+                    "native payload events",
+                    format!("event {event_index} has invalid launch/function identity"),
+                ));
+            }
+            if event.identity.warp >= 32 || event.identity.lane >= 32 {
+                return Err(RunError::new(
+                    "native payload events",
+                    format!("event {event_index} has an out-of-range warp/lane"),
+                ));
+            }
+            if event.payloads.is_empty() || event.witnesses.is_empty() {
+                return Err(RunError::new(
+                    "native payload events",
+                    format!("event {event_index} must carry payloads and witnesses"),
+                ));
+            }
+            if event.payloads.len() > MAX_PAYLOADS_PER_EVENT {
+                return Err(RunError::new(
+                    "native payload events",
+                    format!("event {event_index} exceeds {MAX_PAYLOADS_PER_EVENT} payloads"),
+                ));
+            }
+            let identity = sim_mem::NativePayloadJoinKey {
+                launch_id: event.identity.launch_id,
+                function_unique_id: event.identity.function_unique_id,
+                cta: event.identity.cta,
+                warp: event.identity.warp,
+                lane: event.identity.lane,
+                pc: event.identity.pc,
+                occurrence: event.identity.occurrence,
+            };
+            if !seen_event_keys.insert((identity, event.cycle)) {
+                return Err(RunError::new(
+                    "native payload events",
+                    format!("event {event_index} duplicates an identity at the same cycle"),
+                ));
+            }
+            let witnesses = event
+                .witnesses
+                .into_iter()
+                .map(|witness| {
+                    if witness.allocation_id == 0
+                        || witness.allocation_generation == 0
+                        || witness.resident_sector_mask == 0
+                        || witness.resident_sector_mask & !0b1111 != 0
+                    {
+                        return Err(RunError::new(
+                            "native payload events",
+                            format!("event {event_index} has an invalid residency witness"),
+                        ));
+                    }
+                    Ok(sim_mem::L1PayloadResidencyWitness {
+                        line_id: witness.line_id,
+                        allocation_id: witness.allocation_id,
+                        allocation_generation: witness.allocation_generation,
+                        resident_generation: witness.resident_generation,
+                        resident_sector_mask: witness.resident_sector_mask,
+                    })
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            let payloads = event
+                .payloads
+                .into_iter()
+                .map(|payload| {
+                    if payload.generation == 0
+                        || payload.allocation_id == 0
+                        || payload.sequence == 0
+                        || payload.byte_offset >= 32
+                        || payload.known_mask == 0
+                    {
+                        return Err(RunError::new(
+                            "native payload events",
+                            format!("event {event_index} has invalid payload identity"),
+                        ));
+                    }
+                    let bytes = decode_event_bytes(&payload.bytes_hex, "native payload events")?;
+                    let end = usize::from(payload.byte_offset)
+                        .checked_add(bytes.len())
+                        .ok_or_else(|| {
+                            RunError::new("native payload events", "event payload range overflow")
+                        })?;
+                    if end > sim_mem::PAYLOAD_SECTOR_BYTES {
+                        return Err(RunError::new(
+                            "native payload events",
+                            format!("event {event_index} payload range exceeds one sector"),
+                        ));
+                    }
+                    let width_mask = if bytes.len() == 32 {
+                        u32::MAX
+                    } else {
+                        ((1_u32 << bytes.len()) - 1) << payload.byte_offset
+                    };
+                    if payload.known_mask != width_mask {
+                        return Err(RunError::new(
+                            "native payload events",
+                            format!("event {event_index} has an inconsistent payload mask"),
+                        ));
+                    }
+                    let mut sector_bytes = [0_u8; sim_mem::PAYLOAD_SECTOR_BYTES];
+                    sector_bytes[usize::from(payload.byte_offset)..end].copy_from_slice(&bytes);
+                    SectorPayloadV1::new_with_generation(
+                        payload.allocation_id,
+                        payload.generation,
+                        payload.line_id,
+                        payload.sector,
+                        payload.sequence,
+                        sector_bytes,
+                        payload.known_mask,
+                    )
+                    .map_err(at("native payload events"))
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            for payload in &payloads {
+                if !witnesses.iter().any(|witness| {
+                    witness.line_id == payload.line_id()
+                        && witness.allocation_id == payload.allocation_id()
+                        && witness.allocation_generation == payload.allocation_generation()
+                }) {
+                    return Err(RunError::new(
+                        "native payload events",
+                        format!(
+                            "event {event_index} payload line {} has no matching allocation witness",
+                            payload.line_id()
+                        ),
+                    ));
+                }
+            }
+            Ok(L1PayloadAdmissionEvent {
+                sm_id: event.sm_id,
+                time: event.cycle,
+                identity: Some(identity),
+                writer: None,
+                payloads: payloads.into_boxed_slice(),
+                witnesses: witnesses.into_boxed_slice(),
+            })
+        })
+        .collect()
 }
 
 pub(crate) fn load_arch_card(path: &Path) -> Result<ArchCard, RunError> {
@@ -661,6 +940,10 @@ pub struct RunReport {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub native_payload_sidecar_records: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub native_payload_event_count: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub payload_ledger: Option<PayloadLedgerReport>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub dirty_writeback_capacity_sectors: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub coherence_service_cycles: Option<u64>,
@@ -687,6 +970,136 @@ pub struct RunReport {
     pub cache_session: Option<CacheSessionReport>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ncu_observation: Option<ncu::NcuObservation>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub latent_envelope: Option<LatentEnvelopeReport>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct PayloadLedgerReport {
+    pub role: &'static str,
+    pub status: &'static str,
+    pub baseline_status: &'static str,
+    pub input_records: usize,
+    pub identity_status: &'static str,
+    pub identity_complete_records: usize,
+    pub identity_join: &'static str,
+    pub event_location_binding: &'static str,
+    pub event_location_count: usize,
+    pub complete_sectors: usize,
+    pub logical_l1_commits: usize,
+    pub logical_l2_commits: usize,
+    pub logical_dram_commits: usize,
+    pub hardware_completion: &'static str,
+}
+
+fn build_payload_ledger(
+    payloads: &[SectorPayloadV1],
+    identity_complete_records: usize,
+    identity_join: &'static str,
+    event_location_binding: &'static str,
+    event_location_count: usize,
+) -> Result<PayloadLedgerReport, RunError> {
+    let complete = coalesce_payloads(payloads.to_vec()).map_err(at("payload ledger"))?;
+    let mut logical_l2_commits = 0usize;
+    let mut logical_dram_commits = 0usize;
+    for payload in &complete {
+        let mut ledger = PayloadForwardingLedgerV1::from_admitted_store(*payload)
+            .map_err(at("payload ledger"))?;
+        ledger.commit_l2(*payload).map_err(at("payload ledger"))?;
+        ledger.commit_dram(*payload).map_err(at("payload ledger"))?;
+        logical_l2_commits = logical_l2_commits
+            .checked_add(1)
+            .ok_or_else(|| RunError::new("payload ledger", "L2 commit count overflow"))?;
+        logical_dram_commits = logical_dram_commits
+            .checked_add(1)
+            .ok_or_else(|| RunError::new("payload ledger", "DRAM commit count overflow"))?;
+    }
+    Ok(PayloadLedgerReport {
+        role: "sidecar_only_logical_forwarding_not_native_cache_state",
+        status: "complete_logical_forwarding",
+        baseline_status: "pre_store_bytes_unknown",
+        input_records: payloads.len(),
+        identity_status: if identity_complete_records == payloads.len() {
+            "complete"
+        } else {
+            "incomplete"
+        },
+        identity_complete_records,
+        identity_join,
+        event_location_binding,
+        event_location_count,
+        complete_sectors: complete.len(),
+        logical_l1_commits: complete.len(),
+        logical_l2_commits,
+        logical_dram_commits,
+        hardware_completion: "not_observed",
+    })
+}
+
+#[derive(Debug, Serialize)]
+pub struct LatentEnvelopeReport {
+    pub schema_version: u32,
+    pub role: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub external_endpoint: Option<EndpointDescriptor>,
+    pub launches: Vec<LatentLaunchEnvelopeReport>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct LatentLaunchEnvelopeReport {
+    pub launch_index: usize,
+    pub factors: LatentFactors,
+    pub class_bounds: sim_sm::PipelineClassEnvelope,
+    pub resource_demand: sim_semantics::ResourceDemandEnvelope,
+    pub operand_bank_pressure: sim_sm::OperandBankPressure,
+    pub frontiers: FrontierVector,
+    pub endpoint: EndpointDescriptor,
+}
+
+fn build_latent_envelope(
+    launches: &[LaunchReport],
+    ncu_observed: bool,
+) -> Result<LatentEnvelopeReport, RunError> {
+    let endpoint = TimingReport::simulator_endpoint_descriptor().map_err(at("latent endpoint"))?;
+    let external_endpoint = ncu_observed
+        .then(|| TimingReport::ncu_endpoint_descriptor())
+        .transpose()
+        .map_err(at("latent NCU endpoint"))?;
+    let mut reports = Vec::with_capacity(launches.len());
+    for (launch_index, launch) in launches.iter().enumerate() {
+        let timing = launch.timing.as_ref().ok_or_else(|| {
+            RunError::new(
+                "latent envelope",
+                format!("launch {launch_index} has no simulator timing report"),
+            )
+        })?;
+        reports.push(LatentLaunchEnvelopeReport {
+            launch_index,
+            factors: launch
+                .trace_metrics
+                .latent_factors()
+                .map_err(at("latent factors"))?,
+            class_bounds: launch
+                .trace_metrics
+                .physical_pipeline
+                .class_count_envelope()
+                .map_err(at("latent class bounds"))?,
+            resource_demand: launch
+                .trace_metrics
+                .physical_pipeline
+                .resource_demand_envelope()
+                .map_err(at("latent resource demand"))?,
+            operand_bank_pressure: launch.trace_metrics.operand_bank_pressure.clone(),
+            frontiers: timing.latent_frontiers().map_err(at("latent frontiers"))?,
+            endpoint: endpoint.clone(),
+        });
+    }
+    Ok(LatentEnvelopeReport {
+        schema_version: sim_semantics::LATENT_SCHEMA_VERSION,
+        role: "opt_in_unknown_preserving_model_envelope_not_hardware_truth",
+        external_endpoint,
+        launches: reports,
+    })
 }
 
 #[derive(Debug, Serialize)]
@@ -829,6 +1242,76 @@ pub struct TimingReport {
     pub gpc_observation_frontier: Option<GpcObservationFrontierReport>,
     pub completion_frontier: CompletionFrontierReport,
     pub readiness: ReadinessReport,
+}
+
+impl TimingReport {
+    /// Project the existing simulator-only timing fields into the factorized
+    /// frontier contract. Hardware/profiler endpoints are intentionally left
+    /// unknown; this method does not create a CUDA-event or NCU conversion.
+    pub fn latent_frontiers(&self) -> Result<FrontierVector, LatentModelError> {
+        let modeled_event = self
+            .terminal_modeled_event_time
+            .map_or_else(FrontierBound::unknown, FrontierBound::exact);
+        let typed_tail = match &self.completion_frontier {
+            CompletionFrontierReport::Complete { cycles } => {
+                cycles.map_or_else(FrontierBound::unknown, FrontierBound::exact)
+            }
+            CompletionFrontierReport::IncompleteUnmodeledRetirementTails {
+                lower_bound_cycles,
+                ..
+            } => lower_bound_cycles.map_or_else(FrontierBound::unknown, FrontierBound::lower_bound),
+        };
+        let vector = FrontierVector {
+            issue: FrontierBound::exact(self.diagnostic_last_issue_cycles),
+            modeled_event,
+            launch_envelope: FrontierBound::unknown(),
+            typed_tail,
+            visibility: FrontierBound::unknown(),
+            writeback_service: FrontierBound::unknown(),
+            endpoint_start: FrontierBound::unknown(),
+            endpoint_end: FrontierBound::unknown(),
+        };
+        vector.validate()?;
+        Ok(vector)
+    }
+
+    /// Declare the simulator's own endpoint semantics without implying that
+    /// it is the NCU, CUPTI, CUDA-event, or host endpoint.
+    pub fn simulator_endpoint_descriptor() -> Result<EndpointDescriptor, LatentModelError> {
+        EndpointDescriptor::new(
+            ClockDomain::SimulatorCycles,
+            "first_simulator_modeled_event",
+            "terminal_simulator_modeled_event",
+            vec!["simulator_issue_and_event_queue".to_owned()],
+            vec![
+                "host_submission".to_owned(),
+                "ncu_frontend_wait_for_idle".to_owned(),
+                "profiler_or_host_observer_tail".to_owned(),
+            ],
+            "deterministic_sim_engine_event_order",
+            "simulator_replay_configuration",
+            "architecture_card_model_clock",
+        )
+    }
+
+    /// Declare Nsight Compute's profiler endpoint semantics as an independent
+    /// comparison contract. This descriptor carries no measured duration and
+    /// authorizes no conversion to simulator cycles.
+    pub fn ncu_endpoint_descriptor() -> Result<EndpointDescriptor, LatentModelError> {
+        EndpointDescriptor::new(
+            ClockDomain::NsightCompute,
+            "ncu_frontend_wait_for_idle_then_grid_start",
+            "ncu_grid_completion_semaphore",
+            vec![
+                "profiled_kernel_grid".to_owned(),
+                "ncu_profiler_instrumentation".to_owned(),
+            ],
+            vec!["host_submission".to_owned()],
+            "ncu_profiler_replay_application_endpoint",
+            "ncu_cache_control_policy",
+            "ncu_clock_control_policy",
+        )
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -1021,6 +1504,12 @@ pub struct DramCounterReport {
     pub l1_writeback_completed_sectors: u64,
     #[serde(skip_serializing_if = "is_zero_u64")]
     pub l1_writeback_completed_bytes: u64,
+    #[serde(skip_serializing_if = "is_zero_u64")]
+    pub l1_payload_forwarded_sectors: u64,
+    #[serde(skip_serializing_if = "is_zero_u64")]
+    pub l1_payload_forwarded_bytes: u64,
+    #[serde(skip_serializing_if = "is_zero_u64")]
+    pub l1_payload_forwarding_digest_xor: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub writeback_completion_frontier: Option<u64>,
     #[serde(skip_serializing_if = "is_zero_u64")]
@@ -1125,6 +1614,9 @@ fn counters(
             l1_writeback_completed_lines: value.l1_writeback_completed_lines,
             l1_writeback_completed_sectors: value.l1_writeback_completed_sectors,
             l1_writeback_completed_bytes: value.l1_writeback_completed_bytes,
+            l1_payload_forwarded_sectors: value.l1_payload_forwarded_sectors,
+            l1_payload_forwarded_bytes: value.l1_payload_forwarded_bytes,
+            l1_payload_forwarding_digest_xor: value.l1_payload_forwarding_digest_xor,
             writeback_completion_frontier: value.writeback_completion_frontier,
             coherence_completed_transactions: value.coherence_completed_transactions,
             coherence_completed_sectors: value.coherence_completed_sectors,
@@ -1528,19 +2020,50 @@ pub fn run(config: &RunConfig) -> Result<RunReport, RunError> {
     let candidate_inputs = usize::from(config.memory_service_candidates.is_some())
         + usize::from(config.memory_admission_candidates.is_some())
         + usize::from(config.memory_admission_feedback.is_some());
-    let native_payload_sidecar_records = config
+    if config.native_payload_events.is_some() && config.native_payload_events_path.is_some() {
+        return Err(RunError::new(
+            "arguments",
+            "programmatic native payload events cannot combine with --native-payload-events",
+        ));
+    }
+    let file_payload_events = config
+        .native_payload_events_path
+        .as_ref()
+        .map(|path| load_native_payload_events(path))
+        .transpose()?;
+    let native_payload_events = config.native_payload_events.clone().or(file_payload_events);
+    let native_payload_records = config
         .native_payload_sidecar
         .as_ref()
-        .map(|path| {
-            load_native_payload_sidecar(path)
-                .map(|payloads| payloads.len())
-                .map_err(at("native payload sidecar"))
-        })
+        .map(|path| load_native_payload_sidecar_records(path).map_err(at("native payload sidecar")))
         .transpose()?;
+    let native_payload_sidecar_records = native_payload_records.as_ref().map(Vec::len);
+    let native_payload_event_count = native_payload_events.as_ref().map(Vec::len);
+    let identity_complete_records = native_payload_records.as_ref().map(|records| {
+        records
+            .iter()
+            .filter(|record| record.identity_complete())
+            .count()
+    });
+    let native_payloads = native_payload_records.as_ref().map(|records| {
+        records
+            .iter()
+            .map(|record| record.payload())
+            .collect::<Vec<_>>()
+    });
     if candidate_inputs > 1 {
         return Err(RunError::new(
             "arguments",
             "memory-service, memory-admission, and feedback candidate files are mutually exclusive",
+        ));
+    }
+    if native_payload_events
+        .as_ref()
+        .is_some_and(|events| !events.is_empty() && candidate_inputs != 0)
+    {
+        return Err(RunError::new(
+            "arguments",
+            "event-time payload admissions cannot combine with memory candidate lanes",
         ));
     }
     if config.fast_frontier_only && candidate_inputs != 0 {
@@ -1561,6 +2084,12 @@ pub fn run(config: &RunConfig) -> Result<RunReport, RunError> {
         return Err(RunError::new(
             "arguments",
             "--fast-frontier-only cannot combine with a native payload sidecar because it skips memory replay",
+        ));
+    }
+    if config.fast_frontier_only && native_payload_events.is_some() {
+        return Err(RunError::new(
+            "arguments",
+            "--fast-frontier-only cannot combine with event-time payload admissions",
         ));
     }
     if config.fast_frontier_only
@@ -1586,6 +2115,12 @@ pub fn run(config: &RunConfig) -> Result<RunReport, RunError> {
         return Err(RunError::new(
             "arguments",
             "--fast-frontier-only cannot emit native NCU-shaped metric projections",
+        ));
+    }
+    if config.fast_frontier_only && config.latent_envelope {
+        return Err(RunError::new(
+            "arguments",
+            "--latent-envelope requires native timing replay and cannot combine with --fast-frontier-only",
         ));
     }
     if config.ncu_launch.is_some() && config.ncu_csv.is_none() {
@@ -1666,6 +2201,20 @@ pub fn run(config: &RunConfig) -> Result<RunReport, RunError> {
             "L1 resident writeback currently requires --cache-scope launch",
         ));
     }
+    if native_payload_events
+        .as_ref()
+        .is_some_and(|events| !events.is_empty())
+        && (!matches!(config.memory_mode, MemoryMode::L1L2)
+            || config.cache_scope != CacheScope::Launch
+            || !config.carded_dram_bandwidth
+            || config.dirty_writeback_capacity_sectors.is_none()
+            || !config.l1_resident_writeback)
+    {
+        return Err(RunError::new(
+            "arguments",
+            "event-time payload admissions require launch-scoped l1-l2 replay, carded DRAM, resident writeback, and a dirty-writeback capacity",
+        ));
+    }
     let memory_service_candidates =
         load_memory_service_candidates(config.memory_service_candidates.as_ref())?;
     let memory_admission_candidates =
@@ -1682,6 +2231,7 @@ pub fn run(config: &RunConfig) -> Result<RunReport, RunError> {
         && config.kernel_id.is_none()
         && !config.ncu_shaped_metrics
         && !config.fast_frontier_only
+        && !config.latent_envelope
         && config.dirty_writeback_capacity_sectors.is_none()
         && config.coherence_service_cycles.is_none()
         && !config.l1_visibility_protocol
@@ -1691,6 +2241,7 @@ pub fn run(config: &RunConfig) -> Result<RunReport, RunError> {
         && !performance_diagnostics_requested
         && config.launch_resources.is_none()
         && config.native_payload_sidecar.is_none()
+        && native_payload_events.is_none()
     {
         return PreparedReplay::prepare(config, CoverageAdmission::ExistingDirectBehavior)?
             .replay_all_report();
@@ -1768,6 +2319,121 @@ pub fn run(config: &RunConfig) -> Result<RunReport, RunError> {
             },
         ));
     }
+    if let Some(events) = native_payload_events.as_deref() {
+        let launch_ids = kernel_locs
+            .iter()
+            .filter_map(|loc| u64::try_from(loc.kernel().id).ok())
+            .collect::<BTreeSet<_>>();
+        for (index, event) in events.iter().enumerate() {
+            let Some(identity) = event.identity else {
+                return Err(RunError::new(
+                    "payload events",
+                    format!("event {index} has no retained dynamic identity"),
+                ));
+            };
+            if !launch_ids.contains(&identity.launch_id) {
+                return Err(RunError::new(
+                    "payload events",
+                    format!(
+                        "event {index} launch_id {} is absent from the selected trace launches",
+                        identity.launch_id
+                    ),
+                ));
+            }
+        }
+    }
+
+    // A complete v2 sidecar is joined against the immutable trace snapshot
+    // before replay. Historical/incomplete sidecars remain on the explicit
+    // sidecar-only ledger path and never mutate native cache state.
+    let payload_ledger = match (
+        native_payload_records.as_deref(),
+        native_payloads.as_deref(),
+        identity_complete_records,
+    ) {
+        (Some(records), Some(payloads), Some(identity_complete)) => {
+            let needs_trace_keys = identity_complete == records.len()
+                || records.iter().all(|record| record.trace_matchable());
+            let mut observed = BTreeSet::new();
+            if needs_trace_keys {
+                for loc in &kernel_locs {
+                    observed.extend(
+                        trace
+                            .dynamic_memory_join_identities(loc)
+                            .map_err(at("payload trace identity"))?,
+                    );
+                }
+            }
+            let validate_function_names = |records: &[NativePayloadRecordV1]| {
+                for (index, record) in records.iter().enumerate() {
+                    let Some(function_unique_id) = record.identity().function_unique_id else {
+                        continue;
+                    };
+                    let Some(function_name) = record.identity().function_name.as_deref() else {
+                        continue;
+                    };
+                    let Some(static_info) = exec.kernels.get(&function_unique_id) else {
+                        return Err(RunError::new(
+                            "payload identity join",
+                            format!(
+                                "payload record {index} function_unique_id {function_unique_id} is absent from exec-info"
+                            ),
+                        ));
+                    };
+                    if static_info.function_name != function_name {
+                        return Err(RunError::new(
+                            "payload identity join",
+                            format!(
+                                "payload record {index} function_name {function_name:?} disagrees with exec-info {:?}",
+                                static_info.function_name
+                            ),
+                        ));
+                    }
+                }
+                Ok::<(), RunError>(())
+            };
+            let (joined_payloads, join_status, identity_count, event_binding, event_count) =
+                if identity_complete == records.len() {
+                    validate_function_names(records)?;
+                    (
+                        join_native_payload_records(records, &observed)
+                            .map_err(at("payload identity join"))?,
+                        "matched_trace_identities",
+                        records.len(),
+                        "trace_locations_verified",
+                        records.len(),
+                    )
+                } else if records.iter().all(|record| record.trace_matchable()) {
+                    let enriched = enrich_native_payload_records(records, &observed)
+                        .map_err(at("payload identity enrichment"))?;
+                    validate_function_names(&enriched)?;
+                    (
+                        join_native_payload_records(&enriched, &observed)
+                            .map_err(at("payload identity join"))?,
+                        "enriched_matched_trace_identities",
+                        enriched.len(),
+                        "trace_locations_verified",
+                        enriched.len(),
+                    )
+                } else {
+                    (
+                        payloads.to_vec(),
+                        "not_attempted_incomplete_identity",
+                        identity_complete,
+                        "not_attempted_incomplete_identity",
+                        0,
+                    )
+                };
+            Some(build_payload_ledger(
+                &joined_payloads,
+                identity_count,
+                join_status,
+                event_binding,
+                event_count,
+            )?)
+        }
+        _ => None,
+    };
 
     if config.fast_frontier_only {
         let mut fast_frontier = Vec::with_capacity(kernel_locs.len());
@@ -1802,6 +2468,8 @@ pub fn run(config: &RunConfig) -> Result<RunReport, RunError> {
             cache_scope: config.cache_scope.token(),
             carded_dram_bandwidth: config.carded_dram_bandwidth,
             native_payload_sidecar_records,
+            native_payload_event_count,
+            payload_ledger: None,
             dirty_writeback_capacity_sectors: config.dirty_writeback_capacity_sectors,
             coherence_service_cycles: config.coherence_service_cycles,
             coherence_capacity_sectors: config.coherence_capacity_sectors,
@@ -1822,6 +2490,7 @@ pub fn run(config: &RunConfig) -> Result<RunReport, RunError> {
             fast_frontier: Some(fast_frontier),
             cache_session: None,
             ncu_observation,
+            latent_envelope: None,
         });
     }
 
@@ -1831,6 +2500,21 @@ pub fn run(config: &RunConfig) -> Result<RunReport, RunError> {
     let cache_session = match config.cache_scope {
         CacheScope::Launch => {
             for loc in kernel_locs {
+                let launch_payload_events = native_payload_events
+                    .as_deref()
+                    .map(|events| {
+                        let launch_id = u64::try_from(loc.kernel().id).unwrap_or_default();
+                        events
+                            .iter()
+                            .filter(|event| {
+                                event
+                                    .identity
+                                    .is_some_and(|identity| identity.launch_id == launch_id)
+                            })
+                            .cloned()
+                            .collect::<Vec<_>>()
+                    })
+                    .unwrap_or_default();
                 let outcome = if let Some(candidate) = memory_admission_feedback {
                     replay_trace_kernel_with_memory_admission_feedback(
                         &trace, &loc, &schedules, &arch_card, &issue, mode, candidate,
@@ -1842,6 +2526,16 @@ pub fn run(config: &RunConfig) -> Result<RunReport, RunError> {
                 } else if let Some(candidates) = memory_service_candidates.as_deref() {
                     replay_trace_kernel_with_memory_service_candidates(
                         &trace, &loc, &schedules, &arch_card, &issue, mode, candidates,
+                    )
+                } else if !launch_payload_events.is_empty() {
+                    replay_trace_kernel_with_l1_payload_events(
+                        &trace,
+                        &loc,
+                        &schedules,
+                        &arch_card,
+                        &issue,
+                        mode,
+                        &launch_payload_events,
                     )
                 } else {
                     replay_trace_kernel(&trace, &loc, &schedules, &arch_card, &issue, mode)
@@ -1949,6 +2643,11 @@ pub fn run(config: &RunConfig) -> Result<RunReport, RunError> {
     };
     #[cfg(feature = "performance-counters")]
     let replay_ns = replay_started.elapsed().as_nanos();
+    let latent_envelope = if config.latent_envelope {
+        Some(build_latent_envelope(&launches, ncu_observation.is_some())?)
+    } else {
+        None
+    };
     let report = RunReport {
         schema_version: 1,
         simulator_version: env!("CARGO_PKG_VERSION"),
@@ -1957,6 +2656,8 @@ pub fn run(config: &RunConfig) -> Result<RunReport, RunError> {
         cache_scope: config.cache_scope.token(),
         carded_dram_bandwidth: config.carded_dram_bandwidth,
         native_payload_sidecar_records,
+        native_payload_event_count,
+        payload_ledger,
         dirty_writeback_capacity_sectors: config.dirty_writeback_capacity_sectors,
         coherence_service_cycles: config.coherence_service_cycles,
         coherence_capacity_sectors: config.coherence_capacity_sectors,
@@ -1978,6 +2679,7 @@ pub fn run(config: &RunConfig) -> Result<RunReport, RunError> {
         fast_frontier: None,
         cache_session,
         ncu_observation,
+        latent_envelope,
     };
     if let Some(resources) = external_resources.as_ref() {
         resources.finish()?;
@@ -1997,6 +2699,7 @@ pub fn run(config: &RunConfig) -> Result<RunReport, RunError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use sim_sm::L1PayloadAdmissionEvent;
     use tempfile::NamedTempFile;
 
     fn fixture(mode: MemoryMode) -> RunConfig {
@@ -2027,6 +2730,9 @@ mod tests {
             ncu_launch: None,
             launch_resources: None,
             native_payload_sidecar: None,
+            native_payload_events: None,
+            native_payload_events_path: None,
+            latent_envelope: false,
         }
     }
 
@@ -2073,6 +2779,290 @@ mod tests {
         );
         assert!(json.get("cache_session").is_none());
         assert!(json["launches"][0].get("cache_handoff").is_none());
+    }
+
+    #[test]
+    fn event_time_payloads_require_explicit_writeback_replay_configuration() {
+        let mut config = fixture(MemoryMode::Flat);
+        config.native_payload_events = Some(vec![L1PayloadAdmissionEvent {
+            sm_id: 0,
+            time: 10,
+            identity: None,
+            writer: None,
+            payloads: Vec::new().into_boxed_slice(),
+            witnesses: Vec::new().into_boxed_slice(),
+        }]);
+        let error = run(&config).expect_err("event payloads must not silently use flat replay");
+        assert!(
+            error
+                .to_string()
+                .contains("event-time payload admissions require")
+        );
+    }
+
+    #[test]
+    fn strict_native_payload_event_document_preserves_explicit_cycle_and_identity() {
+        let file = NamedTempFile::new().unwrap();
+        let document = serde_json::json!({
+            "schema": "native_l1_payload_events_v1",
+            "status": "ok",
+            "events": [{
+                "cycle": 500,
+                "sm_id": 0,
+                "identity": {
+                    "launch_id": 1,
+                    "function_unique_id": 1,
+                    "cta": [0, 0, 0],
+                    "warp": 0,
+                    "lane": 0,
+                    "pc": 16,
+                    "occurrence": 0
+                },
+                "witnesses": [{
+                    "line_id": 0,
+                    "allocation_id": 7,
+                    "allocation_generation": 1,
+                    "resident_generation": 0,
+                    "resident_sector_mask": 1
+                }],
+                "payloads": [{
+                    "allocation_id": 7,
+                    "generation": 1,
+                    "line_id": 0,
+                    "sector": 0,
+                    "byte_offset": 0,
+                    "bytes_hex": "0102",
+                    "known_mask": 3,
+                    "sequence": 1
+                }]
+            }]
+        });
+        std::fs::write(file.path(), serde_json::to_vec(&document).unwrap()).unwrap();
+        let events = load_native_payload_events(file.path()).unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].time, 500);
+        assert_eq!(events[0].sm_id, 0);
+        assert_eq!(events[0].payloads.len(), 1);
+        assert_eq!(events[0].witnesses.len(), 1);
+        assert_eq!(events[0].identity.unwrap().pc, 16);
+    }
+
+    #[test]
+    fn event_time_payload_replay_rejects_trace_sm_placement_mismatch() {
+        let mut config = fixture(MemoryMode::L1L2);
+        config.carded_dram_bandwidth = true;
+        config.dirty_writeback_capacity_sectors = Some(4);
+        config.coherence_service_cycles = Some(4);
+        config.coherence_capacity_sectors = Some(4);
+        config.l1_visibility_protocol = true;
+        config.l1_resident_writeback = true;
+        let trace = TraceDir::open_direct_compact(&config.trace_dir).unwrap();
+        let loc = trace.kernels().next().unwrap();
+        let (identity, trace_sm) = trace
+            .dynamic_memory_join_locations(&loc)
+            .unwrap()
+            .into_iter()
+            .next()
+            .map(|(key, location)| (key, location.sm_id.unwrap()))
+            .expect("canary must carry one dynamic global location");
+        config.native_payload_events = Some(vec![L1PayloadAdmissionEvent {
+            sm_id: trace_sm.saturating_add(1),
+            time: 500,
+            identity: Some(identity),
+            writer: None,
+            payloads: Vec::new().into_boxed_slice(),
+            witnesses: Vec::new().into_boxed_slice(),
+        }]);
+        let error = run(&config).expect_err("trace placement mismatch must fail closed");
+        assert!(error.to_string().contains("targets SM"));
+    }
+
+    #[test]
+    fn event_time_payload_replay_rejects_non_store_trace_identity() {
+        let mut config = fixture(MemoryMode::L1L2);
+        config.carded_dram_bandwidth = true;
+        config.dirty_writeback_capacity_sectors = Some(4);
+        config.coherence_service_cycles = Some(4);
+        config.coherence_capacity_sectors = Some(4);
+        config.l1_visibility_protocol = true;
+        config.l1_resident_writeback = true;
+        let trace = TraceDir::open_direct_compact(&config.trace_dir).unwrap();
+        let loc = trace.kernels().next().unwrap();
+        let (identity, trace_sm) = trace
+            .dynamic_memory_join_locations(&loc)
+            .unwrap()
+            .into_iter()
+            .find(|(_, location)| {
+                location.access_kind != Some(sim_trace::pb::MemoryOpAccessKind::Store)
+            })
+            .map(|(key, location)| (key, location.sm_id.unwrap()))
+            .expect("canary must carry a non-store GLOBAL location");
+        config.native_payload_events = Some(vec![L1PayloadAdmissionEvent {
+            sm_id: trace_sm,
+            time: 500,
+            identity: Some(identity),
+            writer: None,
+            payloads: Vec::new().into_boxed_slice(),
+            witnesses: Vec::new().into_boxed_slice(),
+        }]);
+        let error = run(&config).expect_err("payload admission must bind to an observed store");
+        assert!(
+            error
+                .to_string()
+                .contains("non-store or unclassified GLOBAL access")
+        );
+    }
+
+    #[test]
+    fn native_payload_sidecar_builds_sidecar_only_forwarding_ledger() {
+        let mut config = fixture(MemoryMode::Flat);
+        config.native_payload_sidecar = Some(
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(
+                "../../workloads/research_probes/sm86_value_differential/native_payload_sidecar_delta_2pow31_seed17.json",
+            ),
+        );
+        let report = run(&config).expect("payload sidecar fixture should replay");
+        assert_eq!(report.native_payload_sidecar_records, Some(32));
+        let ledger = report
+            .payload_ledger
+            .expect("sidecar should produce a logical forwarding ledger");
+        assert_eq!(ledger.input_records, 32);
+        assert_eq!(ledger.complete_sectors, 4);
+        assert_eq!(ledger.identity_status, "incomplete");
+        assert_eq!(ledger.identity_complete_records, 0);
+        assert_eq!(ledger.identity_join, "not_attempted_incomplete_identity");
+        assert_eq!(
+            ledger.event_location_binding,
+            "not_attempted_incomplete_identity"
+        );
+        assert_eq!(ledger.event_location_count, 0);
+        assert_eq!(ledger.logical_l1_commits, 4);
+        assert_eq!(ledger.logical_l2_commits, 4);
+        assert_eq!(ledger.logical_dram_commits, 4);
+        assert_eq!(ledger.baseline_status, "pre_store_bytes_unknown");
+        assert_eq!(ledger.hardware_completion, "not_observed");
+    }
+
+    #[test]
+    fn partial_payload_sidecar_enriches_and_joins_the_retained_trace_before_replay() {
+        let fixture_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../run/tests/fixtures/addr_carry_canary_bundle");
+        let trace = TraceDir::open_direct_compact(fixture_root.join("trace")).unwrap();
+        let loc = trace.kernels().next().unwrap();
+        let function_name = trace
+            .exec_info()
+            .unwrap()
+            .kernels
+            .get(&loc.kernel().function_unique_id)
+            .unwrap()
+            .function_name
+            .clone();
+        let keys = trace
+            .dynamic_memory_join_identities(&loc)
+            .unwrap()
+            .into_iter()
+            .take(8)
+            .collect::<Vec<_>>();
+        assert_eq!(keys.len(), 8, "canary must provide eight global identities");
+        let sidecar = NamedTempFile::new().unwrap();
+        let payloads = keys
+            .iter()
+            .enumerate()
+            .map(|(index, key)| {
+                serde_json::json!({
+                    "allocation_id": 9,
+                    "generation": 1,
+                    "line_id": 4,
+                    "sector": 0,
+                    "byte_offset": index * 4,
+                    "bytes_hex": "01020304",
+                    "known_mask": 15_u32 << (index * 4),
+                    "sequence": index + 1,
+                    "function_name": function_name,
+                    "pc": key.pc,
+                    "occurrence": key.occurrence,
+                    "cta": key.cta,
+                    "warp": key.warp,
+                    "lane": key.lane
+                })
+            })
+            .collect::<Vec<_>>();
+        let document = serde_json::json!({
+            "schema": "native_value_payload_sidecar_v2",
+            "status": "ok",
+            "payloads": payloads
+        });
+        std::fs::write(sidecar.path(), serde_json::to_vec(&document).unwrap()).unwrap();
+        let mut config = fixture(MemoryMode::Flat);
+        config.native_payload_sidecar = Some(sidecar.path().to_path_buf());
+        let report = run(&config).expect("complete payload identity must join the trace");
+        let ledger = report.payload_ledger.unwrap();
+        assert_eq!(ledger.identity_status, "complete");
+        assert_eq!(ledger.identity_complete_records, 8);
+        assert_eq!(ledger.identity_join, "enriched_matched_trace_identities");
+        assert_eq!(ledger.event_location_binding, "trace_locations_verified");
+        assert_eq!(ledger.event_location_count, 8);
+    }
+
+    #[test]
+    fn timing_report_projects_only_simulator_frontiers_and_endpoint() {
+        let report = run(&fixture(MemoryMode::Flat)).unwrap();
+        let timing = report.launches[0]
+            .timing
+            .as_ref()
+            .expect("fixture should expose timing");
+        let frontiers = timing
+            .latent_frontiers()
+            .expect("fixture frontiers should be internally ordered");
+        assert!(frontiers.issue.lower.is_some());
+        assert!(frontiers.modeled_event.lower.is_some());
+        assert!(frontiers.launch_envelope.lower.is_none());
+        assert!(frontiers.visibility.lower.is_none());
+        let endpoint = TimingReport::simulator_endpoint_descriptor().unwrap();
+        assert_eq!(endpoint.clock_domain, ClockDomain::SimulatorCycles);
+        let ncu_endpoint = TimingReport::ncu_endpoint_descriptor().unwrap();
+        assert_eq!(ncu_endpoint.clock_domain, ClockDomain::NsightCompute);
+        assert!(!endpoint.same_contract_as(&ncu_endpoint));
+        assert!(
+            !endpoint.same_contract_as(
+                &EndpointDescriptor::new(
+                    ClockDomain::NsightCompute,
+                    "first_simulator_modeled_event",
+                    "terminal_simulator_modeled_event",
+                    vec!["simulator_issue_and_event_queue".to_owned()],
+                    vec![
+                        "host_submission".to_owned(),
+                        "ncu_frontend_wait_for_idle".to_owned(),
+                        "profiler_or_host_observer_tail".to_owned(),
+                    ],
+                    "deterministic_sim_engine_event_order",
+                    "simulator_replay_configuration",
+                    "architecture_card_model_clock",
+                )
+                .unwrap()
+            )
+        );
+    }
+
+    #[test]
+    fn latent_envelope_retains_ncu_endpoint_contract_without_cycle_conversion() {
+        let ncu_csv = NamedTempFile::new().unwrap();
+        std::fs::write(ncu_csv.path(), "ID,gpu__time_duration.avg\n,us\n0,1.000\n").unwrap();
+        let mut config = fixture(MemoryMode::Flat);
+        config.ncu_csv = Some(ncu_csv.path().to_path_buf());
+        config.ncu_launch = Some(0);
+        config.latent_envelope = true;
+        let report = run(&config).unwrap();
+        let envelope = report.latent_envelope.unwrap();
+        let external = envelope
+            .external_endpoint
+            .expect("NCU observation must retain a separate endpoint contract");
+        assert_eq!(external.clock_domain, ClockDomain::NsightCompute);
+        assert_eq!(
+            envelope.launches[0].endpoint.clock_domain,
+            ClockDomain::SimulatorCycles
+        );
+        assert!(!envelope.launches[0].endpoint.same_contract_as(&external));
     }
 
     #[test]

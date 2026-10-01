@@ -17,10 +17,12 @@ const USAGE: &str = "Usage: sim-run --trace DIR --control FILE --arch-card FILE 
 [--hypothetical-issue-ports N] \
 [--architecture-spec FILE] \
 [--fast-frontier-only] \
+[--latent-envelope] \
 [--ncu-shaped-metrics] \
 [--ncu-csv FILE] [--ncu-launch ID] \
 [--launch-resources FILE] \
 [--native-payload-sidecar FILE] \
+[--native-payload-events FILE] \
 [--memory-service-candidates FILE] [--memory-admission-candidates FILE] \
 [--memory-admission-feedback FILE]";
 
@@ -59,12 +61,14 @@ fn parse_args(args: impl IntoIterator<Item = OsString>) -> Result<Option<RunConf
     let mut hypothetical_issue_ports = None;
     let mut architecture_spec = None;
     let mut fast_frontier_only = false;
+    let mut latent_envelope = false;
     let mut kernel_id = None;
     let mut ncu_shaped_metrics = false;
     let mut ncu_csv = None;
     let mut ncu_launch = None;
     let mut launch_resources = None;
     let mut native_payload_sidecar = None;
+    let mut native_payload_events_path = None;
     let mut memory_service_candidates = None;
     let mut memory_admission_candidates = None;
     let mut memory_admission_feedback = None;
@@ -204,6 +208,9 @@ fn parse_args(args: impl IntoIterator<Item = OsString>) -> Result<Option<RunConf
             value if value == OsStr::new("--fast-frontier-only") => {
                 fast_frontier_only = true;
             }
+            value if value == OsStr::new("--latent-envelope") => {
+                latent_envelope = true;
+            }
             value if value == OsStr::new("--ncu-shaped-metrics") => {
                 ncu_shaped_metrics = true;
             }
@@ -230,6 +237,12 @@ fn parse_args(args: impl IntoIterator<Item = OsString>) -> Result<Option<RunConf
                 native_payload_sidecar = Some(PathBuf::from(take_value(
                     &mut args,
                     "--native-payload-sidecar",
+                )?));
+            }
+            value if value == OsStr::new("--native-payload-events") => {
+                native_payload_events_path = Some(PathBuf::from(take_value(
+                    &mut args,
+                    "--native-payload-events",
                 )?));
             }
             value if value == OsStr::new("--memory-service-candidates") => {
@@ -282,6 +295,9 @@ fn parse_args(args: impl IntoIterator<Item = OsString>) -> Result<Option<RunConf
         ncu_launch,
         launch_resources,
         native_payload_sidecar,
+        native_payload_events: None,
+        native_payload_events_path,
+        latent_envelope,
         memory_service_candidates,
         memory_admission_candidates,
         memory_admission_feedback,
@@ -458,6 +474,28 @@ mod tests {
     }
 
     #[test]
+    fn latent_envelope_is_opt_in() {
+        let base = [
+            OsString::from("--trace"),
+            OsString::from("trace"),
+            OsString::from("--control"),
+            OsString::from("control"),
+            OsString::from("--arch-card"),
+            OsString::from("card"),
+        ];
+        assert!(!parse_args(base.clone()).unwrap().unwrap().latent_envelope);
+        assert!(
+            parse_args(
+                base.into_iter()
+                    .chain([OsString::from("--latent-envelope")])
+            )
+            .unwrap()
+            .unwrap()
+            .latent_envelope
+        );
+    }
+
+    #[test]
     fn memory_service_candidate_path_is_explicit() {
         let parsed = parse_args([
             OsString::from("--trace"),
@@ -475,6 +513,27 @@ mod tests {
             parsed.memory_service_candidates,
             Some(PathBuf::from("candidates.json"))
         );
+    }
+
+    #[test]
+    fn native_payload_event_path_is_explicit() {
+        let parsed = parse_args([
+            OsString::from("--trace"),
+            OsString::from("trace"),
+            OsString::from("--control"),
+            OsString::from("control"),
+            OsString::from("--arch-card"),
+            OsString::from("card"),
+            OsString::from("--native-payload-events"),
+            OsString::from("events.json"),
+        ])
+        .unwrap()
+        .unwrap();
+        assert_eq!(
+            parsed.native_payload_events_path,
+            Some(PathBuf::from("events.json"))
+        );
+        assert!(parsed.native_payload_events.is_none());
     }
 
     #[test]

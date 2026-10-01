@@ -4,6 +4,14 @@ Tests are bounded engineering checks. They do not replace NCU measurements,
 do not create approval gates, and do not turn a model-relative result into
 silicon validation.
 
+The active predictive-closure configuration is a structural input contract,
+not a score-label or admission workflow:
+
+```bash
+PYTHONPATH=tools python3 tools/validate_sm86_predictive_config.py \
+  docs/sm86_predictive_closure_config_20261001.json
+```
+
 The Rust workspace currently passes its full test suite. A repository-wide
 `pytest tools` sweep is not an admissible simulator gate: the retained
 SOL-ExecBench/FlashInfer reference tests require optional packages such as
@@ -347,7 +355,42 @@ sector, byte-range, known-mask, and sequence identity before constructing
 sector that is not fully known before a `PayloadCommitLedgerV1` transaction.
 
 The real `sim-run` path accepts the opt-in `--native-payload-sidecar FILE`
-argument. It reports the admitted record count and leaves replay scheduling
-unchanged; the current canary smoke admitted 32 records and completed one flat
-launch. This is admission evidence, not a claim that native caches consumed
-the payloads.
+argument. It reports the admitted record count and a separate baseline-unknown
+logical forwarding ledger after complete-sector coalescing, while leaving
+replay scheduling/cache state unchanged; the current canary smoke admitted 32
+records, forwarded four complete sectors through the logical ledger, and
+completed one flat launch. The retained v1 fixture has incomplete dynamic
+identity, so the report marks the native join as not attempted. This is
+conservation/admission evidence, not a claim that native caches consumed the
+payloads or that hardware DRAM completed the writes.
+Complete future v2 records can be checked with the strict
+`join_native_payload_records()` contract against an independently collected
+dynamic-key set before any cache mutation. The direct-run test
+`partial_payload_sidecar_enriches_and_joins_the_retained_trace_before_replay`
+exercises the trace-assisted launch/function enrichment and positive join path
+on the retained canary trace with eight synthetic complete sectors; the report
+also records eight verified event locations while keeping L1 mutation disabled.
+
+The lower-level SM event seam additionally accepts an explicit
+`sim_sm::L1PayloadAdmissionEvent` with a producer-supplied simulator cycle and
+residency witness. Its event-mode tests cover both the low-level transactional
+adapter and a store-bound writer site that admits a complete sector and drains
+it through the transactional writeback queue. This API is not used by ordinary
+`sim-run`; the public replay ingress requires a retained dynamic
+`NativePayloadJoinKey`, and no device/profiler timestamp is converted into its
+cycle field.
+`RunConfig::native_payload_events` is the direct-run composition hook for
+callers that already possess those producer records; the CLI does not
+manufacture or infer them.
+`--native-payload-events FILE` is the strict JSON equivalent for the
+`native_l1_payload_events_v1` document.
+Public replay also binds each event to the trace-observed SM placement; a
+placement mismatch is refused without implying physical SMSP or pipe identity.
+The direct-run adversarial test exercises that refusal with a valid dynamic
+key and an intentionally wrong SM.
+The ingress now also requires the retained dynamic access kind to be
+`Store`, records the retained writer instruction/warp-slot site, and refuses
+an event that precedes that modeled store or targets a superseded writer.
+The strict terminal flush test also checks the logical payload-forwarding
+sector/byte counters and conservation digest; these are model-local and do
+not certify physical DRAM persistence.

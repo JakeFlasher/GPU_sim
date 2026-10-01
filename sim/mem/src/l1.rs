@@ -150,6 +150,14 @@ pub enum L1AccessError {
     },
     #[error("L1 line {line} sector {sector} has no complete dirty payload")]
     DirtyPayloadMissing { line: i64, sector: u8 },
+    #[error("L1 payload admission plan is stale for line {line} sector {sector}")]
+    DirtyPayloadAdmissionStale { line: i64, sector: u8 },
+    #[error("L1 payload residency witness is missing for line {line}")]
+    DirtyPayloadResidencyWitnessMissing { line: i64 },
+    #[error("L1 payload residency witness is duplicated for line {line}")]
+    DirtyPayloadResidencyWitnessDuplicate { line: i64 },
+    #[error("L1 payload residency witness mismatch for line {line}: {field}")]
+    DirtyPayloadResidencyWitnessMismatch { line: i64, field: &'static str },
     #[error(transparent)]
     DirtyPayload(#[from] crate::PayloadError),
 }
@@ -171,6 +179,45 @@ pub struct L1DirtyFlushPlan {
 impl L1DirtyFlushPlan {
     pub fn lines(&self) -> &[L1DirtyLine] {
         &self.lines
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct L1DirtyPayloadExpectation {
+    line: i64,
+    sector: u8,
+    current: Option<SectorPayloadV1>,
+    valid_mask: u8,
+    dirty_mask: u8,
+    generation: Option<u32>,
+}
+
+/// Transactional admission of complete value-bearing dirty sectors. The
+/// caller must already possess a residency/allocation witness; this plan
+/// checks the current L1 residency and preserves the payload allocation
+/// identity, but it does not infer a hardware allocation from a line tag.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct L1DirtyPayloadAdmissionPlan {
+    payloads: Box<[SectorPayloadV1]>,
+    expected: Box<[L1DirtyPayloadExpectation]>,
+}
+
+/// External witness required before value-bearing payloads may be associated
+/// with a resident L1 allocation. `resident_generation` is the L1 allocation
+/// generation observed by the caller; allocation identity/generation belongs
+/// to the value producer. Neither side is inferred from a line tag.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct L1PayloadResidencyWitness {
+    pub line_id: i64,
+    pub allocation_id: u64,
+    pub allocation_generation: u64,
+    pub resident_generation: u32,
+    pub resident_sector_mask: u8,
+}
+
+impl L1DirtyPayloadAdmissionPlan {
+    pub fn payloads(&self) -> &[SectorPayloadV1] {
+        &self.payloads
     }
 }
 
@@ -1261,6 +1308,18 @@ impl L1Cache {
         self.store_policy
     }
 
+    /// Return the model-local allocation generation and resident-sector mask
+    /// for one line. This is the only residency state the cache model can
+    /// supply to a value-bearing admission witness; it is deliberately not a
+    /// physical allocation/owner identity and must be joined with an
+    /// independently observed producer allocation before payload mutation.
+    pub fn resident_payload_state(&self, line: i64) -> Option<(u32, u8)> {
+        let generation = self.line_generations.get(&line).copied()?;
+        let resident_sector_mask = self.sectors.get(&line).copied().unwrap_or(0);
+        self.line_resident(line)
+            .then_some((generation, resident_sector_mask))
+    }
+
     pub fn arch(&self) -> ArchId {
         self.cfg.arch
     }
@@ -2017,6 +2076,188 @@ impl L1Cache {
         self.dirty
             .insert(line, self.dirty.get(&line).copied().unwrap_or(0) | bit);
         self.dirty_payloads.insert((line, sector), payload);
+        Ok(())
+    }
+
+    /// Preflight a complete payload batch without mutating cache state.
+    /// Partial records are coalesced by allocation identity and sequence;
+    /// every resulting sector must be resident and fully known. A mask-only
+    /// dirty sector is refused because a later sidecar cannot prove it is the
+    /// same store generation.
+    pub fn preview_dirty_payload_admission(
+        &self,
+        payloads: &[SectorPayloadV1],
+    ) -> Result<L1DirtyPayloadAdmissionPlan, L1AccessError> {
+        let complete = crate::coalesce_payloads(payloads.to_vec())?;
+        let mut expected = Vec::with_capacity(complete.len());
+        for payload in &complete {
+            let line = payload.line_id();
+            let sector = payload.sector();
+            if !self.line_resident(line) {
+                return Err(L1AccessError::DirtyLineNotResident { line });
+            }
+            let bit = 1_u8 << sector;
+            let valid_mask = self.sectors.get(&line).copied().unwrap_or(0);
+            if valid_mask & bit == 0 {
+                return Err(L1AccessError::DirtyMaskInvalid {
+                    line,
+                    dirty_mask: bit,
+                    valid_mask,
+                });
+            }
+            let current = self.dirty_payloads.get(&(line, sector)).copied();
+            let dirty_mask = self.dirty.get(&line).copied().unwrap_or(0);
+            if dirty_mask & bit != 0 && current.is_none() {
+                return Err(L1AccessError::DirtyPayloadMissing { line, sector });
+            }
+            if let Some(previous) = current {
+                previous.merge(*payload)?;
+            }
+            expected.push(L1DirtyPayloadExpectation {
+                line,
+                sector,
+                current,
+                valid_mask,
+                dirty_mask,
+                generation: self.line_generations.get(&line).copied(),
+            });
+        }
+        Ok(L1DirtyPayloadAdmissionPlan {
+            payloads: complete.into_boxed_slice(),
+            expected: expected.into_boxed_slice(),
+        })
+    }
+
+    /// Admit payloads only after an external allocation/residency witness has
+    /// been checked against the current L1 allocation generation. This is the
+    /// native-facing contract; the ordinary sidecar path intentionally does
+    /// not synthesize these witnesses.
+    pub fn preview_dirty_payload_admission_with_witness(
+        &self,
+        payloads: &[SectorPayloadV1],
+        witnesses: &[L1PayloadResidencyWitness],
+    ) -> Result<L1DirtyPayloadAdmissionPlan, L1AccessError> {
+        self.validate_payload_residency_witnesses(payloads, witnesses)?;
+        self.preview_dirty_payload_admission(payloads)
+    }
+
+    fn validate_payload_residency_witnesses(
+        &self,
+        payloads: &[SectorPayloadV1],
+        witnesses: &[L1PayloadResidencyWitness],
+    ) -> Result<(), L1AccessError> {
+        let mut by_line = BTreeMap::new();
+        for witness in witnesses {
+            if witness.allocation_id == 0 || witness.allocation_generation == 0 {
+                return Err(L1AccessError::DirtyPayloadResidencyWitnessMismatch {
+                    line: witness.line_id,
+                    field: "allocation identity must be nonzero",
+                });
+            }
+            if by_line.insert(witness.line_id, *witness).is_some() {
+                return Err(L1AccessError::DirtyPayloadResidencyWitnessDuplicate {
+                    line: witness.line_id,
+                });
+            }
+        }
+        for payload in payloads {
+            let line = payload.line_id();
+            let witness = by_line
+                .get(&line)
+                .ok_or(L1AccessError::DirtyPayloadResidencyWitnessMissing { line })?;
+            if witness.allocation_id != payload.allocation_id()
+                || witness.allocation_generation != payload.allocation_generation()
+            {
+                return Err(L1AccessError::DirtyPayloadResidencyWitnessMismatch {
+                    line,
+                    field: "payload allocation identity",
+                });
+            }
+            let actual_generation = self.line_generations.get(&line).copied();
+            if actual_generation != Some(witness.resident_generation) {
+                return Err(L1AccessError::DirtyPayloadResidencyWitnessMismatch {
+                    line,
+                    field: "resident allocation generation",
+                });
+            }
+            let actual_mask = self.sectors.get(&line).copied().unwrap_or(0);
+            if witness.resident_sector_mask & !actual_mask != 0 {
+                return Err(L1AccessError::DirtyPayloadResidencyWitnessMismatch {
+                    line,
+                    field: "resident sector mask",
+                });
+            }
+            if witness.resident_sector_mask & (1_u8 << payload.sector()) == 0 {
+                return Err(L1AccessError::DirtyPayloadResidencyWitnessMismatch {
+                    line,
+                    field: "payload sector not witnessed resident",
+                });
+            }
+        }
+        Ok(())
+    }
+
+    /// Attach complete bytes to already-dirty resident sectors after the SM
+    /// has checked the exact dynamic writer and its accept time. Unlike the
+    /// generic admission API this requires, rather than invents, dirty state.
+    /// It cannot validate a dynamic instruction itself; that belongs to the
+    /// issue actor. Any failure leaves the whole cache unchanged.
+    pub fn attach_observed_store_payloads(
+        &mut self,
+        payloads: &[SectorPayloadV1],
+        witnesses: &[L1PayloadResidencyWitness],
+    ) -> Result<(), L1AccessError> {
+        self.validate_payload_residency_witnesses(payloads, witnesses)?;
+        let complete = crate::coalesce_payloads(payloads.to_vec())?;
+        for payload in &complete {
+            if self.dirty.get(&payload.line_id()).copied().unwrap_or(0) & (1_u8 << payload.sector())
+                == 0
+            {
+                return Err(L1AccessError::DirtyPayloadResidencyWitnessMismatch {
+                    line: payload.line_id(),
+                    field: "observed store sector is not dirty",
+                });
+            }
+        }
+        let mut next = self.clone();
+        for payload in complete {
+            next.mark_dirty_payload(payload)?;
+        }
+        *self = next;
+        Ok(())
+    }
+
+    /// Commit a previously preflighted payload batch atomically. Any state
+    /// change after preview causes a typed stale-plan error and leaves this
+    /// cache untouched.
+    pub fn commit_dirty_payload_admission(
+        &mut self,
+        plan: L1DirtyPayloadAdmissionPlan,
+    ) -> Result<(), L1AccessError> {
+        for expected in plan.expected.iter() {
+            let current = self
+                .dirty_payloads
+                .get(&(expected.line, expected.sector))
+                .copied();
+            let valid_mask = self.sectors.get(&expected.line).copied().unwrap_or(0);
+            let dirty_mask = self.dirty.get(&expected.line).copied().unwrap_or(0);
+            let generation = self.line_generations.get(&expected.line).copied();
+            if current != expected.current
+                || valid_mask != expected.valid_mask
+                || dirty_mask != expected.dirty_mask
+                || generation != expected.generation
+            {
+                return Err(L1AccessError::DirtyPayloadAdmissionStale {
+                    line: expected.line,
+                    sector: expected.sector,
+                });
+            }
+        }
+        let mut next = self.clone();
+        for payload in plan.payloads.iter().copied() {
+            next.mark_dirty_payload(payload)?;
+        }
+        *self = next;
         Ok(())
     }
 
@@ -3539,6 +3780,124 @@ mod tests {
         let plan = l1.preview_dirty_flush();
         l1.commit_dirty_flush(plan).unwrap();
         assert!(l1.preview_dirty_payloads().unwrap().is_empty());
+    }
+
+    #[test]
+    fn dirty_payload_admission_is_batch_transactional_and_residency_bound() {
+        let mut l1 = cache(4, Some(2));
+        let EvAccess::MissRequest { fill } = access_ev(&mut l1, 0, 0) else {
+            panic!("cold access must allocate a fill");
+        };
+        assert!(complete(&mut l1, fill));
+        let EvAccess::MissRequest { fill: sector_fill } = access_ev(&mut l1, 1, 1) else {
+            panic!("second sector must allocate a sector fill");
+        };
+        assert!(complete(&mut l1, sector_fill));
+        let p0 = SectorPayloadV1::new(9, 0, 0, 1, [7; 32], u32::MAX).unwrap();
+        let p1 = SectorPayloadV1::new(9, 0, 1, 2, [8; 32], u32::MAX).unwrap();
+        let plan = l1.preview_dirty_payload_admission(&[p1, p0]).unwrap();
+        assert_eq!(plan.payloads(), &[p0, p1]);
+        l1.commit_dirty_payload_admission(plan).unwrap();
+        assert_eq!(l1.preview_dirty_payloads().unwrap(), vec![p0, p1]);
+
+        let untouched = cache(4, Some(2));
+        let bad = SectorPayloadV1::new(9, 4, 0, 1, [1; 32], u32::MAX).unwrap();
+        assert!(matches!(
+            untouched.preview_dirty_payload_admission(&[bad]),
+            Err(L1AccessError::DirtyLineNotResident { line: 4 })
+        ));
+        assert_eq!(untouched.dirty_residency(), L1DirtyResidency::default());
+    }
+
+    #[test]
+    fn dirty_payload_admission_rejects_stale_plan_without_mutation() {
+        let mut l1 = cache(4, Some(2));
+        let EvAccess::MissRequest { fill } = access_ev(&mut l1, 0, 0) else {
+            panic!("cold access must allocate a fill");
+        };
+        assert!(complete(&mut l1, fill));
+        let first = SectorPayloadV1::new(9, 0, 0, 1, [7; 32], u32::MAX).unwrap();
+        let newer = SectorPayloadV1::new(9, 0, 0, 2, [8; 32], u32::MAX).unwrap();
+        let plan = l1.preview_dirty_payload_admission(&[first]).unwrap();
+        l1.mark_dirty_payload(newer).unwrap();
+        let before = l1.preview_dirty_payloads().unwrap();
+        assert!(matches!(
+            l1.commit_dirty_payload_admission(plan),
+            Err(L1AccessError::DirtyPayloadAdmissionStale { line: 0, sector: 0 })
+        ));
+        assert_eq!(l1.preview_dirty_payloads().unwrap(), before);
+    }
+
+    #[test]
+    fn payload_admission_rejects_mask_only_change_after_preview() {
+        let mut l1 = cache(4, Some(2));
+        let EvAccess::MissRequest { fill } = access_ev(&mut l1, 0, 0) else {
+            panic!("expected fill");
+        };
+        assert!(complete(&mut l1, fill));
+        let payload = SectorPayloadV1::new(9, 0, 0, 1, [7; 32], u32::MAX).unwrap();
+        let plan = l1.preview_dirty_payload_admission(&[payload]).unwrap();
+        l1.mark_dirty(0, 1).unwrap();
+        let before = l1.clone();
+        assert_eq!(
+            l1.commit_dirty_payload_admission(plan),
+            Err(L1AccessError::DirtyPayloadAdmissionStale { line: 0, sector: 0 })
+        );
+        assert_cache_state_eq(&l1, &before);
+    }
+
+    #[test]
+    fn payload_admission_rejects_same_tag_reallocation() {
+        let mut l1 = cache(1, Some(2));
+        let EvAccess::MissRequest { fill } = access_ev(&mut l1, 0, 0) else {
+            panic!("expected fill");
+        };
+        assert!(complete(&mut l1, fill));
+        let payload = SectorPayloadV1::new(9, 0, 0, 1, [7; 32], u32::MAX).unwrap();
+        let plan = l1.preview_dirty_payload_admission(&[payload]).unwrap();
+        for (sector, cycle) in [(4, 1), (0, 2)] {
+            let EvAccess::MissRequest { fill } = access_ev(&mut l1, sector, cycle) else {
+                panic!("expected fill");
+            };
+            assert!(complete(&mut l1, fill));
+        }
+        let before = l1.clone();
+        assert_eq!(
+            l1.commit_dirty_payload_admission(plan),
+            Err(L1AccessError::DirtyPayloadAdmissionStale { line: 0, sector: 0 })
+        );
+        assert_cache_state_eq(&l1, &before);
+    }
+
+    #[test]
+    fn payload_admission_requires_matching_residency_witness() {
+        let mut l1 = cache(4, Some(2));
+        let EvAccess::MissRequest { fill } = access_ev(&mut l1, 0, 0) else {
+            panic!("expected fill");
+        };
+        assert!(complete(&mut l1, fill));
+        let payload =
+            SectorPayloadV1::new_with_generation(9, 1, 0, 0, 1, [7; 32], u32::MAX).unwrap();
+        let witness = L1PayloadResidencyWitness {
+            line_id: 0,
+            allocation_id: 9,
+            allocation_generation: 1,
+            resident_generation: l1.line_generations[&0],
+            resident_sector_mask: 1,
+        };
+        let plan = l1
+            .preview_dirty_payload_admission_with_witness(&[payload], &[witness])
+            .unwrap();
+        l1.commit_dirty_payload_admission(plan).unwrap();
+        let mut wrong = witness;
+        wrong.allocation_generation = 2;
+        assert!(matches!(
+            l1.preview_dirty_payload_admission_with_witness(&[payload], &[wrong]),
+            Err(L1AccessError::DirtyPayloadResidencyWitnessMismatch {
+                line: 0,
+                field: "payload allocation identity"
+            })
+        ));
     }
 
     #[test]

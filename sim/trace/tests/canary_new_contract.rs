@@ -8,6 +8,9 @@
 
 use std::path::Path;
 
+use sim_mem::{
+    NativePayloadIdentityV1, NativePayloadRecordV1, SectorPayloadV1, join_native_payload_records,
+};
 use sim_trace::{TraceDir, pb, visit_memory_access};
 
 #[test]
@@ -59,5 +62,52 @@ fn canary_new_contract_trace_passes_reader_identity_and_carries_atomic_async() {
     assert!(
         async_copy > 0,
         "admitted ASYNC_COPY (LDGSTS global source) records present (got {async_copy})"
+    );
+
+    let loc = td.kernels().next().expect("canary has one launch");
+    let identities = td
+        .dynamic_memory_join_identities(&loc)
+        .expect("dynamic global memory identity projection");
+    assert!(
+        !identities.is_empty(),
+        "global memory join identities present"
+    );
+    assert!(
+        identities
+            .iter()
+            .all(|identity| identity.launch_id == u64::try_from(loc.kernel().id).unwrap())
+    );
+    let locations = td
+        .dynamic_memory_join_locations(&loc)
+        .expect("dynamic memory location projection");
+    assert_eq!(locations.len(), identities.len());
+    assert!(locations.values().all(|location| {
+        location.key.cta == location.block_id
+            && location.key.warp == location.warp
+            && location.access_kind.is_some()
+            && location.sm_id.is_some_and(|sm| sm >= 0)
+    }));
+
+    let key = *identities.iter().next().unwrap();
+    let record = NativePayloadRecordV1::new(
+        SectorPayloadV1::new_with_generation(9, 1, 0x100, 0, 1, [0x5a; 32], u32::MAX).unwrap(),
+        NativePayloadIdentityV1 {
+            launch_id: Some(key.launch_id),
+            function_name: Some("canary".to_owned()),
+            function_unique_id: Some(key.function_unique_id),
+            pc: Some(key.pc),
+            guard: None,
+            occurrence: Some(key.occurrence),
+            cta: Some(key.cta),
+            warp: Some(key.warp),
+            lane: Some(key.lane),
+        },
+    )
+    .unwrap();
+    assert_eq!(
+        join_native_payload_records(&[record], &identities)
+            .unwrap()
+            .len(),
+        1
     );
 }

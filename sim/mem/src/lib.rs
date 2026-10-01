@@ -70,10 +70,10 @@ pub use coherence::{
 pub use l1::{
     AccessOutcome, EvAccess, EvAccessUnobserved, FillKey, L1AccessError, L1Cache, L1Config,
     L1ConfigError, L1CounterError, L1CounterField, L1Counters, L1DirtyFlushPlan, L1DirtyLine,
-    L1DirtyResidency, L1InvalidationResult, L1LookupBatch, L1MutationBudget, L1OriginCounters,
-    L1StorePolicy, L1WriteLookupObserver, L1WriteLookupObserverPlan, LINE_BYTES,
-    PreparedSectorExpansion, SECTOR_BYTES, SECTORS_PER_LINE, SectorExpansionError,
-    SectorExpansionPlan,
+    L1DirtyPayloadAdmissionPlan, L1DirtyResidency, L1InvalidationResult, L1LookupBatch,
+    L1MutationBudget, L1OriginCounters, L1PayloadResidencyWitness, L1StorePolicy,
+    L1WriteLookupObserver, L1WriteLookupObserverPlan, LINE_BYTES, PreparedSectorExpansion,
+    SECTOR_BYTES, SECTORS_PER_LINE, SectorExpansionError, SectorExpansionPlan,
 };
 pub use l1_visibility::{
     L1AccessObservation, L1FenceObservation, L1FillVisibleObservation, L1InvalidateAllObservation,
@@ -92,8 +92,11 @@ pub use memory_order::{
     MemoryVisibilityQualifier, MemoryWrite,
 };
 pub use payload::{
-    PayloadCommitLedgerV1, PayloadError, SECTOR_BYTES as PAYLOAD_SECTOR_BYTES, SectorPayloadV1,
-    coalesce_payloads, load_native_payload_sidecar,
+    NativePayloadIdentityV1, NativePayloadJoinKey, NativePayloadRecordV1, PayloadCommitLedgerV1,
+    PayloadError, PayloadForwardingLedgerV1, SECTOR_BYTES as PAYLOAD_SECTOR_BYTES, SectorPayloadV1,
+    coalesce_payloads, enrich_native_payload_records, join_native_payload_records,
+    load_native_payload_sidecar, load_native_payload_sidecar_records,
+    require_native_payload_identity,
 };
 pub use pchase_card::{
     GeometryPolicyConfig, LatencyConfig, LineCapacityConfig, MshrConfig, PchaseCard,

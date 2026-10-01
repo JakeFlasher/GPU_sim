@@ -1,6 +1,8 @@
 {
   "schema": "sm86_refined_latent_endpoint_config_v1",
   "updated": "2026-09-30",
+  "role": "historical committee/projection reference; active predictive contract is separate",
+  "superseded_by": "docs/sm86_predictive_closure_config_20261001.json",
   "branch": "GPUSim_main",
   "hardware": {
     "gpu": "NVIDIA GeForce RTX 3090 Ti",

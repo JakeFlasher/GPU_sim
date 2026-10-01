@@ -1,65 +1,75 @@
 # Current status
 
-**Updated 2026-09-30.** This is the authoritative capability boundary. Read it
-after [`PROJECT_MEMORY`](PROJECT_MEMORY.md). Historical reports under
-`archive/research_20260930/` are evidence records, not active plans.
+**Updated 2026-10-01.** This is the compact capability boundary. Read it after
+[`PROJECT_MEMORY.md`](PROJECT_MEMORY.md). Historical reports are indexed by
+[`HISTORY.md`](HISTORY.md) and are not active plans.
 
 ## Decision
 
-The simulator has a runnable native SM86 replay lane and a retained fast NCU
-projection lane. The full RTX 3090 Ti cold/warm campaigns are complete. The
-research goal is **blocked** under the external-endpoint rule, not complete:
-exact dynamic pipe/slot identity, unrestricted independent compiler/ABI/linker
-generation, native cache ownership/read-from/DRAM completion, and simulator
-completion synchronization remain unavailable through current public tooling.
+The native SM86 replay lane and NCU comparison lane are runnable. Exact
+proprietary-mechanism closure is **blocked**, not complete. The active software
+objective is predictive closure: model hidden mechanisms as route/cache/endpoint
+latent domains and predict the declared NCU metric on held-out workloads.
 
-## Execution surfaces
+## Runnable surfaces
 
 | Surface | Status |
 |---|---|
-| Native replay | Runnable SM86 alpha; issue/event/completion/launch/typed-tail frontiers remain separate |
-| Custom model | Runnable and model-relative; not native SASS timing |
-| NCU projection | Candidate point plus uncertainty interval for current contract; related-cohort evidence only |
-| CUPTI/NAK/PMA/RM probes | Independent observations; no proprietary-state closure |
-| Independent ABI/control ledger | Finite current ABI-v8 families execute without ptxas control words; general closure open |
+| Native replay | SM86 trace-driven issue/memory/event replay; frontiers remain separate |
+| Custom model | `simt_u32_v1` and functional `simt_its_v1`; model-relative only |
+| NCU projection | Candidate point/interval outputs; NCU labels remain score-only |
+| Latent envelope | Opt-in route/compiler/cache/timing candidates and endpoint descriptors |
+| Payload path | Opt-in identity-bound sidecar, residency witness, event ingress, and model ledger |
+| Value lane | Finite value-dependent functional forms; unsupported forms refuse |
+| Predictive closure | First resource-demand/service-rate slice is implemented in the opt-in latent report; calibration, cache quotient, and NCU prediction remain |
 
-## Final performance
+## Final NCU comparison records
 
-Hardware: RTX 3090 Ti UUID `GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c`, SM86,
-driver 615.71.09, locked 1350/10501 MHz, P0.
+Hardware: RTX 3090 Ti, SM86, driver 615.71.09, locked 1350/10501 MHz, P0.
 
-| Campaign | Rows | NCU policy | Median NCU | Median GPC | Median native | Median replay |
-|---|---:|---|---:|---:|---:|---:|
-| `full_3090ti_20260930_rm_cache_cold_live` | 15/15 | clock none/cache all | 10,080 ns | 13,572 | 0.009448 ms | 0.629196 s |
-| `full_3090ti_20260930_rm_cache_warm_live` | 15/15 | clock none/cache none | 8,704 ns | 11,709 | 0.009435 ms | 0.644798 s |
+| Campaign | Rows | Cache policy | Median NCU | Median GPC |
+|---|---:|---|---:|---:|
+| `full_3090ti_20260930_rm_cache_cold_live` | 15/15 | `all` | 10,080 ns | 13,572 |
+| `full_3090ti_20260930_rm_cache_warm_live` | 15/15 | `none` | 8,704 ns | 11,709 |
 
-See [`sm86_final_performance_handoff_20260930.md`](archive/research_20260930/sm86_final_performance_handoff_20260930.md).
-
-## Evidence corrections
-
-- Use `NV20_SUBDEVICE_0` for GR issue controls. Static rate values are
-  available; device-handle `NOT_SUPPORTED` was a targeting error.
-- Use SM70+/SM86 control fields: delay, yield, write barrier, read barrier,
-  wait mask, reuse mask. Earlier SM120-style stall/rbar/misc labels are
-  superseded by [`sm86_control_word_decode_correction_20260930.md`](archive/research_20260930/sm86_control_word_decode_correction_20260930.md).
-- Raw-QMD and Driver timer text differs in tail control words; timing claims are
-  semantic-body-level, not exact SASS-image identity.
+These measurements are independent comparison targets. They do not identify
+pipes, owners, compiler decisions, or a shared simulator endpoint.
 
 ## Four unresolved boundaries
 
-| Boundary | Observable now | Required external closure |
+| Boundary | Observable now | Exact closure would require |
 |---|---|---|
-| Physical pipe/issue | aggregate PMA/NCU, scheduler partition, operand pressure, control sensitivity | dynamic physical pipe/subunit/slot plus SM/SMSP trace |
-| Compiler/ISA/ABI | finite no-template ABI-v8/control families | all-form SM86 encoder, scheduler, resources, relocations, linker, device ABI |
-| Cache ownership/flush | public protocols, PTX operators, reuse/topology/WT observations | line owner/read-from/dirty-sector/DRAM completion telemetry |
-| Unified timing | long raw/Driver/CUPTI/event/NCU crosswalk under explicit clock policy | synchronized simulator completion and endpoint identity |
+| Physical pipe/issue | Aggregate PMA/NCU, scheduler/resource bounds | Dynamic physical route and slot trace |
+| Compiler/ISA/ABI | Finite no-template SM86 families and trace capsules | Unrestricted encoder, scheduler, relocations, linker, device ABI |
+| Cache ownership/flush | Protocol, reuse, topology, model queues | Owner/read-from/dirty-sector/DRAM completion telemetry |
+| Unified timing | Separate simulator/NCU/CUPTI/event descriptors | Synchronized completion endpoint |
 
-## Current entry points
+## Predictive-closure contract
 
-- Model config: `docs/sm86_refined_model_config_20260929.json`
-- Final seam audit: `archive/research_20260930/sm86_final_external_seam_audit_20260930.md`
-- Codegen matrix: `archive/research_20260930/sm86_independent_codegen_capability_matrix_20260930.md`
-- Final performance: `archive/research_20260930/sm86_final_performance_handoff_20260930.md`
-- Build/capture/replay: `runbook_host.md`
+The active replacement is documented in
+[`PREDICTIVE_CLOSURE.md`](PREDICTIVE_CLOSURE.md). Its rules are:
 
-No repository test, hashing, or verification workflow is part of this status.
+- route identity becomes abstract candidate resource demand;
+- compiler/ABI becomes an opaque trace/semantic input boundary;
+- cache ownership becomes sector/reuse plus causal candidate read-from state;
+- timing becomes simulator frontiers plus an explicit NCU observer projection;
+- NCU labels are loaded only after prediction for the score cohort;
+- OOD inputs widen intervals or refuse; they do not receive fabricated precision.
+
+## Immediate implementation
+
+See [`../plans/sm86_predictive_closure_implementation_20261001.md`](../plans/sm86_predictive_closure_implementation_20261001.md). The first slice adds validated resource-demand/service-rate contracts and a `TraceMetrics` adapter. It must preserve ordinary replay and existing output schemas.
+
+## Authoritative entry points
+
+- Predictive config: `docs/sm86_predictive_closure_config_20261001.json`
+- Resume: `docs/PROJECT_MEMORY.md`
+- Active replacement: `docs/PREDICTIVE_CLOSURE.md`
+- Implementation plan: `plans/sm86_predictive_closure_implementation_20261001.md`
+- Build/capture/replay: `docs/runbook_host.md`
+- Architecture/configuration: `docs/ARCHITECTURE.md`, `docs/archprofile.md`
+- Final seam audit: `docs/archive/research_20260930/sm86_final_external_seam_audit_20260930.md`
+- Latest endpoint recheck: `docs/archive/research_20261001/sm86_physical_pipe_endpoint_recheck_20261001.md`
+
+No repository test, hash, verification, audit, or approval workflow is part of
+this status.

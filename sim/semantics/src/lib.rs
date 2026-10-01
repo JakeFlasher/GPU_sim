@@ -8,6 +8,7 @@ use std::collections::{BTreeMap, BTreeSet};
 pub mod boundary;
 pub mod certificate;
 pub mod dram;
+pub mod latent;
 pub mod observation;
 pub mod state;
 pub mod transform;
@@ -19,6 +20,12 @@ pub use certificate::{
     certify_interval,
 };
 pub use dram::{DramBoundaryState, DramStateError};
+pub use latent::{
+    CandidateDomain, ClockDomain, EndpointDescriptor, EventKey, EvidenceKind, FrontierBound,
+    FrontierVector, LATENT_SCHEMA_VERSION, LatentFactors, LatentModelError, LatentSummary,
+    LatentWorld, LatentWorldSet, MechanismEnvelope, MustMay, RESOURCE_DEMAND_SCHEMA_VERSION,
+    ResourceDemandEnvelope, ResourceDemandInterval, ServiceRate, ServiceRateProfile,
+};
 pub use observation::{
     OBSERVATION_SCHEMA_VERSION, ObservationContract, ObservationContractError,
     ObservationGranularity,

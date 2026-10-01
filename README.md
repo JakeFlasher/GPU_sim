@@ -24,6 +24,7 @@ schema is not a universal binary decoder.
 
 - [Current status and open boundaries](docs/STATUS.md)
 - [Continuation memory](docs/PROJECT_MEMORY.md)
+- [Predictive replacement contract](docs/PREDICTIVE_CLOSURE.md)
 - [Build, capture, and replay](docs/runbook_host.md)
 - [Architecture and components](docs/ARCHITECTURE.md) · [configuration](docs/archprofile.md)
 - [Documentation map](docs/README.md) · [history/supersession map](docs/HISTORY.md)

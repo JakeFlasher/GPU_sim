@@ -1464,7 +1464,10 @@ impl L2Model {
         let mut locations = Vec::with_capacity(plan.lines.len());
         for line in plan.lines() {
             let set_key = self.set_key(line.line_id)?;
-            let Some(way) = self.sets[set_key].iter().position(|way| way.tag == line.line_id) else {
+            let Some(way) = self.sets[set_key]
+                .iter()
+                .position(|way| way.tag == line.line_id)
+            else {
                 return Err(L2AccessError::DirtyFlushStale {
                     line_id: line.line_id,
                     expected: line.dirty_mask,

@@ -30,10 +30,10 @@ pub use exec_info::{ExecInfo, ExecInfoError, KernelStaticInfo};
 pub use json::strict_json_from_slice;
 pub use lanes::{LANE_INACTIVE_SENTINEL, LANES_PER_WARP, LaneError, reconstruct_lane_vector};
 pub use reader::{
-    AddressAccess, AllocationRegistry, KernelLoc, MemoryAccess, MemoryAccessMeta, TraceDir,
-    TraceError, TraceLineage, TraceStats, TraceValidationSummary, block_launch_index,
-    check_allocation_identity, kernel_grid, memory_access, validate_threadblock_contract,
-    visit_memory_access,
+    AddressAccess, AllocationRegistry, DynamicMemoryJoinIdentity, DynamicMemoryJoinLocation,
+    KernelLoc, MemoryAccess, MemoryAccessMeta, TraceDir, TraceError, TraceLineage, TraceStats,
+    TraceValidationSummary, block_launch_index, check_allocation_identity, kernel_grid,
+    memory_access, validate_threadblock_contract, visit_memory_access,
 };
 #[cfg(feature = "campaign")]
 pub use reader::{

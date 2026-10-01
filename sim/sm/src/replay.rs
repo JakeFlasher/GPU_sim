@@ -81,7 +81,7 @@ use crate::issue::{
     AccessKind, AsyncCopyCohortDescriptor, AsyncCopyCohortReplay, AsyncCopyCohortSpan,
     AsyncInstrumentationOrderDiagnostics, BlockReplay, InstrumentationOrderAnchor, IssueError,
     IssueModelParams, IssueResourceSource, MemoryAdmissionCandidate, MemoryServiceCandidate,
-    ReplayInst, SharedMemoryResidency, SmSimResult, TailFlags, WarpReplay,
+    PayloadStoreSite, ReplayInst, SharedMemoryResidency, SmSimResult, TailFlags, WarpReplay,
     simulate_sm_with_residency, validate_memory_admission_candidates,
     validate_memory_service_candidates,
 };
@@ -89,8 +89,9 @@ use crate::metrics::TraceMetrics;
 use crate::program::{FunctionSchedule, OpClass, PipelineClass};
 use crate::sass_operands::{FixedLatencyOperandStatus, SassRegister, SassSourceOperand};
 use crate::system::{
-    DramBw, DramStats, L2SourceSplit, SystemError,
+    DramBw, DramStats, L1PayloadAdmissionEvent, L2SourceSplit, SystemError,
     simulate_kernel_shared_with_residency_and_candidates_with_coherence,
+    simulate_kernel_shared_with_residency_and_candidates_with_coherence_and_payload_events,
 };
 
 mod aggregation;
@@ -207,6 +208,29 @@ pub enum ReplayError {
         "memory-admission candidates require full launch coverage; sampled replay discards per-SM timing diagnostics"
     )]
     MemoryAdmissionCandidatesRequireFullCoverage,
+    #[error("L1 payload admission events require shared-L2 replay")]
+    PayloadAdmissionRequiresSharedL2,
+    #[error("L1 payload admission event {index} has no dynamic trace identity")]
+    PayloadAdmissionIdentityMissing { index: usize },
+    #[error("L1 payload admission event {index} does not match a retained dynamic trace identity")]
+    PayloadAdmissionIdentityNotObserved { index: usize },
+    #[error(
+        "L1 payload admission event {index} targets SM {event_sm}, but the retained dynamic instruction is on SM {trace_sm:?}"
+    )]
+    PayloadAdmissionSmMismatch {
+        index: usize,
+        event_sm: i32,
+        trace_sm: Option<i32>,
+    },
+    #[error(
+        "L1 payload admission event {index} binds to a non-store or unclassified GLOBAL access ({access_kind:?})"
+    )]
+    PayloadAdmissionNotStore {
+        index: usize,
+        access_kind: Option<pb::MemoryOpAccessKind>,
+    },
+    #[error("L1 payload admission event {index} has no retained physical warp-slot placement")]
+    PayloadAdmissionWriterPlacementMissing { index: usize },
     #[error(
         "opt-in coherence service requires a complete decoded topology and lane masks; full_coverage={full_coverage}, decoded={decoded}, unknown_records={unknown_records}, active_masks_missing={active_masks_missing}, predicate_masks_missing={predicate_masks_missing}"
     )]
@@ -2506,6 +2530,11 @@ fn extract_per_sm_blocks(
                     pipeline,
                     &sectors,
                 )?;
+                if let Some(slot) = schedule.issue_slot(u64::from(inst.pc())) {
+                    trace_metrics
+                        .operand_bank_pressure
+                        .observe(slot.fixed_latency_operands())?;
+                }
                 if active_mask_present && predicate_mask_present {
                     trace_metrics.observe_coherence(
                         inst.sm_id(),
@@ -3442,6 +3471,38 @@ fn replay_kernel_with_schedule_and_l2_and_candidates(
     memory_admission_candidates: &[MemoryAdmissionCandidate],
     memory_admission_feedback: Option<MemoryAdmissionCandidate>,
 ) -> Result<KernelReplayOutcome, ReplayError> {
+    replay_kernel_with_schedule_and_l2_and_candidates_with_payload_events(
+        td,
+        loc,
+        schedule,
+        arch_card,
+        params,
+        mode,
+        retained_l2,
+        memory_service_candidates,
+        memory_admission_candidates,
+        memory_admission_feedback,
+        &[],
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn replay_kernel_with_schedule_and_l2_and_candidates_with_payload_events(
+    td: &TraceDir,
+    loc: &KernelLoc<'_>,
+    schedule: &FunctionSchedule,
+    arch_card: &ArchCard,
+    params: &IssueModelParams,
+    mode: ReplayMemMode,
+    retained_l2: Option<&mut L2Model>,
+    memory_service_candidates: &[MemoryServiceCandidate],
+    memory_admission_candidates: &[MemoryAdmissionCandidate],
+    memory_admission_feedback: Option<MemoryAdmissionCandidate>,
+    payload_events: &[L1PayloadAdmissionEvent],
+) -> Result<KernelReplayOutcome, ReplayError> {
+    if !payload_events.is_empty() && !matches!(mode, ReplayMemMode::L1SharedL2 { .. }) {
+        return Err(ReplayError::PayloadAdmissionRequiresSharedL2);
+    }
     if !memory_service_candidates.is_empty() && !matches!(mode, ReplayMemMode::L1SharedL2 { .. }) {
         return Err(ReplayError::MemoryServiceCandidatesRequireSharedL2);
     }
@@ -3580,19 +3641,36 @@ fn replay_kernel_with_schedule_and_l2_and_candidates(
                 return Err(ReplayError::RetainedL2NotDrained { pending_sectors });
             }
             let counters_before = *l2_model.counters()?;
-            let mut sys = simulate_kernel_shared_with_residency_and_candidates_with_coherence(
-                &per_sm_blocks,
-                schedule,
-                params,
-                shared_memory_residency,
-                l1,
-                l2_model,
-                dram,
-                memory_service_candidates,
-                memory_admission_candidates,
-                memory_admission_feedback,
-                coherence,
-            )?;
+            let mut sys = if payload_events.is_empty() {
+                simulate_kernel_shared_with_residency_and_candidates_with_coherence(
+                    &per_sm_blocks,
+                    schedule,
+                    params,
+                    shared_memory_residency,
+                    l1,
+                    l2_model,
+                    dram,
+                    memory_service_candidates,
+                    memory_admission_candidates,
+                    memory_admission_feedback,
+                    coherence,
+                )?
+            } else {
+                simulate_kernel_shared_with_residency_and_candidates_with_coherence_and_payload_events(
+                    &per_sm_blocks,
+                    schedule,
+                    params,
+                    shared_memory_residency,
+                    l1,
+                    l2_model,
+                    dram,
+                    memory_service_candidates,
+                    memory_admission_candidates,
+                    memory_admission_feedback,
+                    coherence,
+                    payload_events,
+                )?
+            };
             let pending_sectors = l2_model.pending_sector_count();
             if pending_sectors != 0 {
                 return Err(ReplayError::RetainedL2NotDrained { pending_sectors });
@@ -3691,6 +3769,71 @@ pub fn replay_trace_kernel(
 ) -> Result<KernelReplayOutcome, ReplayError> {
     let schedule = lookup_schedule(schedules, loc)?;
     replay_kernel_with_schedule(td, loc, schedule, arch_card, params, mode)
+}
+
+/// Replay one launch with explicit producer-supplied value-bearing L1 events.
+/// Each event carries its simulator-cycle timestamp and a residency witness;
+/// this API never converts NCU/CUPTI/device time or infers a cycle from payload
+/// sequence. Ordinary replay remains unchanged when this entry point is not
+/// selected.
+pub fn replay_trace_kernel_with_l1_payload_events(
+    td: &TraceDir,
+    loc: &KernelLoc<'_>,
+    schedules: &BTreeMap<i32, FunctionSchedule>,
+    arch_card: &ArchCard,
+    params: &IssueModelParams,
+    mode: ReplayMemMode,
+    payload_events: &[L1PayloadAdmissionEvent],
+) -> Result<KernelReplayOutcome, ReplayError> {
+    if !payload_events.is_empty() && !matches!(mode, ReplayMemMode::L1SharedL2 { .. }) {
+        return Err(ReplayError::PayloadAdmissionRequiresSharedL2);
+    }
+    let schedule = lookup_schedule(schedules, loc)?;
+    let locations = td.dynamic_memory_join_locations(loc)?;
+    let mut bound_events = payload_events.to_vec();
+    for (index, event) in bound_events.iter_mut().enumerate() {
+        let Some(identity) = event.identity else {
+            return Err(ReplayError::PayloadAdmissionIdentityMissing { index });
+        };
+        let Some(location) = locations.get(&identity) else {
+            return Err(ReplayError::PayloadAdmissionIdentityNotObserved { index });
+        };
+        if location.sm_id != Some(event.sm_id) {
+            return Err(ReplayError::PayloadAdmissionSmMismatch {
+                index,
+                event_sm: event.sm_id,
+                trace_sm: location.sm_id,
+            });
+        }
+        if location.access_kind != Some(pb::MemoryOpAccessKind::Store) {
+            return Err(ReplayError::PayloadAdmissionNotStore {
+                index,
+                access_kind: location.access_kind,
+            });
+        }
+        let Some(warp_slot) = location.warp_slot else {
+            return Err(ReplayError::PayloadAdmissionWriterPlacementMissing { index });
+        };
+        event.writer = Some(PayloadStoreSite {
+            launch_index: location.launch_index,
+            warp_slot,
+            instruction_index: usize::try_from(location.instruction_index)
+                .map_err(|_| ReplayError::PayloadAdmissionWriterPlacementMissing { index })?,
+        });
+    }
+    replay_kernel_with_schedule_and_l2_and_candidates_with_payload_events(
+        td,
+        loc,
+        schedule,
+        arch_card,
+        params,
+        mode,
+        None,
+        &[],
+        &[],
+        None,
+        &bound_events,
+    )
 }
 
 /// Replay one launch while evaluating a bounded set of observational streaming

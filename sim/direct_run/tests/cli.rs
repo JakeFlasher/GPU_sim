@@ -81,6 +81,50 @@ fn flat_cli_is_deterministic_and_emits_exact_root_and_launch_identity() {
 }
 
 #[test]
+fn latent_envelope_is_explicit_and_does_not_relabel_route_identity() {
+    let output = run(base_command().arg("--latent-envelope"));
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(
+        report["latent_envelope"]["role"],
+        "opt_in_unknown_preserving_model_envelope_not_hardware_truth"
+    );
+    assert_eq!(
+        report["latent_envelope"]["launches"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+    assert_eq!(
+        report["latent_envelope"]["launches"][0]["factors"]["route"]["status"],
+        "unknown"
+    );
+    assert_eq!(
+        report["latent_envelope"]["launches"][0]["class_bounds"]["role"],
+        "model_class_count_bounds_not_dynamic_physical_pipe_labels"
+    );
+    assert_eq!(
+        report["latent_envelope"]["launches"][0]["resource_demand"]["evidence"],
+        "hypothesis"
+    );
+    assert!(
+        report["latent_envelope"]["launches"][0]["resource_demand"]["pools"]
+            .get("adu")
+            .is_some()
+    );
+    assert!(
+        report["latent_envelope"]["launches"][0]
+            .get("operand_bank_pressure")
+            .is_some()
+    );
+}
+
+#[test]
 fn mutually_exclusive_candidate_flags_fail_as_cli_usage_before_file_access() {
     let output = run(base_command()
         .arg("--memory-service-candidates")

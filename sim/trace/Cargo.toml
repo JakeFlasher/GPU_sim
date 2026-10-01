@@ -11,6 +11,7 @@ campaign = []
 
 [dependencies]
 sim-arch = { path = "../arch" }
+sim-mem = { path = "../mem" }
 sim-semantics = { path = "../semantics" }
 csv = { workspace = true }
 libc = { workspace = true }

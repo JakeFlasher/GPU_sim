@@ -122,6 +122,30 @@ def _operand_value(token: str, regs: dict[int, int], constants: dict[str, int]) 
     return _number(token) & 0xFFFF_FFFF
 
 
+def _lop3_source_value(token: str, regs: dict[int, int], constants: dict[str, int]) -> int:
+    """Read the admitted SM86 data forms without discarding unknown modifiers."""
+    if re.fullmatch(r"R(?:[0-9]+|Z)(?:\.reuse)?", token, re.IGNORECASE):
+        register = token.split(".", 1)[0]
+        if register.upper() != "RZ" and _reg(register) > 255:
+            raise TraceRefusal("register_unsupported", f"unsupported LOP3 source {token!r}")
+        return _operand_value(register, regs, constants)
+    if CBANK.fullmatch(token):
+        return _operand_value(token, regs, constants)
+    if re.fullmatch(r"[+-]?(?:0[xX][0-9a-fA-F]+|[0-9]+)", token):
+        value = _number(token)
+        if -(1 << 31) <= value <= 0xFFFF_FFFF:
+            return value & 0xFFFF_FFFF
+    raise TraceRefusal("lop3_operand_unsupported", f"unsupported LOP3 source {token!r}")
+
+
+def _shf_source_value(token: str, regs: dict[int, int], constants: dict[str, int]) -> int:
+    """Read the bounded SHF GPR/immediate/constant source forms."""
+    try:
+        return _lop3_source_value(token, regs, constants)
+    except TraceRefusal as exc:
+        raise TraceRefusal("shf_operand_unsupported", f"unsupported SHF source {token!r}") from exc
+
+
 def execute(
     sass: bytes,
     *,
@@ -170,7 +194,9 @@ def execute(
             predicate_index = int(pred_text[1:])
             if predicate_index > 7:
                 raise TraceRefusal("predicate_unsupported", record["text"])
-            pred_value = predicates.get(predicate_index, False)
+            if predicate_index not in predicates:
+                raise TraceRefusal("predicate_value_missing", f"no initialized value for P{predicate_index}")
+            pred_value = predicates[predicate_index]
             if pred_value == negated:
                 trace.append({"sequence": len(trace), "pc": record["pc"], "opcode": record["text"], "guard": guard, "registers_before": before, "registers_after": after, "predicates_before": predicates_before, "predicates_after": dict(predicates_before), "loads": loads, "stores": stores})
                 index += 1
@@ -236,6 +262,37 @@ def execute(
             if len(operands) != 4 or operands[1].upper() != "RZ" or operands[2].upper() != "RZ":
                 raise TraceRefusal("opcode_form_unsupported", record["text"])
             regs[_reg(operands[0])] = _operand_value(operands[3], regs, constants)
+        elif opcode == "IMAD.SHL.U32":
+            # Bounded Ampere form observed in SM86 address/index bodies:
+            # D = (A * immediate_power_of_two + C) mod 2^32.  This is an
+            # integer multiply/add datapath idiom, not a general IMAD or a
+            # compiler-generation claim.
+            if len(operands) != 4:
+                raise TraceRefusal("operand_arity", record["text"])
+            if not re.fullmatch(r"[+-]?(?:0[xX][0-9a-fA-F]+|[0-9]+)", operands[2]):
+                raise TraceRefusal("imad_shl_multiplier_unsupported", record["text"])
+            multiplier = _number(operands[2])
+            if (
+                not 0 <= multiplier <= 0xFFFF_FFFF
+                or multiplier == 0
+                or multiplier & (multiplier - 1) != 0
+            ):
+                raise TraceRefusal("imad_shl_multiplier_unsupported", record["text"])
+            left = _operand_value(operands[1], regs, constants)
+            addend = _operand_value(operands[3], regs, constants)
+            regs[_reg(operands[0])] = (left * multiplier + addend) & 0xFFFF_FFFF
+        elif opcode == "IMAD.IADD":
+            # Bounded Ampere idiom observed in address arithmetic:
+            # D = A * 1 + C. Other IMAD.IADD encodings remain refused.
+            if len(operands) != 4:
+                raise TraceRefusal("operand_arity", record["text"])
+            if not re.fullmatch(r"[+-]?(?:0[xX][0-9a-fA-F]+|[0-9]+)", operands[2]):
+                raise TraceRefusal("imad_iadd_multiplier_unsupported", record["text"])
+            if _number(operands[2]) != 1:
+                raise TraceRefusal("imad_iadd_multiplier_unsupported", record["text"])
+            left = _operand_value(operands[1], regs, constants)
+            addend = _operand_value(operands[3], regs, constants)
+            regs[_reg(operands[0])] = (left + addend) & 0xFFFF_FFFF
         elif opcode.startswith("IMAD.WIDE.U32"):
             if len(operands) != 4:
                 raise TraceRefusal("operand_arity", record["text"])
@@ -267,6 +324,84 @@ def execute(
             if len(operands) != 4:
                 raise TraceRefusal("operand_arity", record["text"])
             regs[_reg(operands[0])] = sum(_operand_value(token, regs, constants) for token in operands[1:]) & 0xFFFF_FFFF
+        elif opcode.startswith("SHF."):
+            # The admitted SASS spelling is D, A, B, C, where B/A form the
+            # 64-bit concatenation and C supplies the wrapped shift amount.
+            # PTX defines SHF.L as the high 32 bits and SHF.R as the low 32
+            # bits of [B,A] shifted by C. See the official SHF semantics:
+            # https://docs.nvidia.com/cuda/parallel-thread-execution/#logic-and-shift-instructions-shf
+            pieces = opcode.split(".")
+            if (
+                len(pieces) not in (3, 4)
+                or pieces[0] != "SHF"
+                or pieces[1] not in {"L", "R"}
+                or pieces[2] != "U32"
+                or (len(pieces) == 4 and pieces[3] != "HI")
+                or len(operands) != 4
+            ):
+                raise TraceRefusal("shf_form_unsupported", record["text"])
+            if not REG.fullmatch(operands[0]):
+                raise TraceRefusal("register_unsupported", record["text"])
+            left, high, shift = (
+                _shf_source_value(token, regs, constants) for token in operands[1:]
+            )
+            amount = shift & 0x1F
+            if pieces[1] == "L":
+                result = (high << amount) & 0xFFFF_FFFF
+                if amount:
+                    result |= left >> (32 - amount)
+            else:
+                result = 0
+                if amount:
+                    result = (high << (32 - amount)) & 0xFFFF_FFFF
+                result |= left >> amount
+            regs[_reg(operands[0])] = result & 0xFFFF_FFFF
+        elif opcode == "LOP3.LUT":
+            # SM86's data-only disassembly has Rdst, A, B, C, LUT, !PT;
+            # compiler output may additionally carry Pdst before Rdst.
+            if len(operands) not in (6, 7):
+                raise TraceRefusal("operand_arity", record["text"])
+            if len(operands) == 7:
+                predicate_destination = operands[0].upper()
+                if not re.fullmatch(r"P[0-7]", predicate_destination):
+                    raise TraceRefusal("predicate_destination_unsupported", record["text"])
+                destination_token = operands[1]
+                source_tokens = operands[2:5]
+                lut_token = operands[5]
+                predicate_input = operands[6].upper()
+            else:
+                predicate_destination = None
+                destination_token = operands[0]
+                source_tokens = operands[1:4]
+                lut_token = operands[4]
+                predicate_input = operands[5].upper()
+            if predicate_input != "!PT":
+                raise TraceRefusal("lop3_predicate_unsupported", record["text"])
+            if not REG.fullmatch(destination_token):
+                raise TraceRefusal("register_unsupported", record["text"])
+            lut = _number(lut_token)
+            if not 0 <= lut <= 0xFF:
+                raise TraceRefusal("lut_unsupported", record["text"])
+            left, middle, right = (
+                _lop3_source_value(token, regs, constants)
+                for token in source_tokens
+            )
+            result = 0
+            for bit in range(32):
+                # PTX's basis is A=0xf0, B=0xcc, C=0xaa: A is the
+                # high input bit, not the low bit. Symmetric LUTs (XOR)
+                # cannot distinguish this order, so tests include all LUTs.
+                # https://docs.nvidia.com/cuda/parallel-thread-execution/#logic-and-shift-instructions-lop3
+                lut_index = (
+                    (((left >> bit) & 1) << 2)
+                    | (((middle >> bit) & 1) << 1)
+                    | ((right >> bit) & 1)
+                )
+                if (lut >> lut_index) & 1:
+                    result |= 1 << bit
+            regs[_reg(destination_token)] = result
+            if predicate_destination is not None:
+                predicates[int(predicate_destination[1:])] = result != 0
         elif opcode == "STG.E":
             if len(operands) != 2 or not operands[0].startswith("[") or not operands[0].endswith("]"):
                 raise TraceRefusal("memory_form_unsupported", record["text"])

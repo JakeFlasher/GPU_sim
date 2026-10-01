@@ -1,46 +1,50 @@
 # History and supersession map
 
-**Updated 2026-09-30.** This is a compact navigation index, not an execution
-plan. The authoritative current state is [`STATUS.md`](STATUS.md); resume
-context is [`PROJECT_MEMORY.md`](PROJECT_MEMORY.md). Dated reports and plans
-are preserved as opt-in historical evidence under `archive/` and `plans/`.
+**Updated 2026-10-01.** This is navigation only. The active contract is
+[`STATUS.md`](STATUS.md); continuation context is
+[`PROJECT_MEMORY.md`](PROJECT_MEMORY.md); predictive work is
+[`PREDICTIVE_CLOSURE.md`](PREDICTIVE_CLOSURE.md) and the active plan under
+`plans/`.
 
 ## Supersession policy
 
-- Active contracts live in source, schemas, `STATUS`, `PROJECT_MEMORY`, and the
-  model config—not in dated reports or old plan titles.
-- Historical reports may contain observations, hypotheses, negative results, or
-  superseded interpretations. Read the correction reports before reusing one.
-- Ignored `results/`, `data/`, and `traces/` remain the raw evidence locations;
-  filenames and timestamps do not prove freshness or identity.
-- No report creates a gate, receipt, hash requirement, approval step, test
-  workflow, or automatic queue.
+- Source, schemas, architecture cards, `STATUS`, `PROJECT_MEMORY`, and the
+  active predictive contract define current behavior.
+- Dated reports preserve observations, hypotheses, negative results, and
+  corrections. Open one only when its artifact is needed.
+- All older plan files are historical context unless a future task explicitly
+  names one. They do not create queues, gates, approvals, receipts, or tests.
+- Raw `results/`, `data/`, and `traces/` identities require their own explicit
+  content/semantic comparison; filenames and timestamps are not freshness proof.
+- Preserve campaign source, schemas, tests, datasets, cards, environments, and
+  historical experiments while trimming the active documentation surface.
 
 ## Current durable records
 
-| Record | Purpose |
+| Record | Role |
 |---|---|
-| `sm86_final_external_seam_audit_20260930.md` | Final public/open-RM boundary audit and blocked rationale |
-| `sm86_final_performance_handoff_20260930.md` | Cold/warm 15/15 campaign results |
-| `sm86_independent_codegen_capability_matrix_20260930.md` | Finite no-template ABI/control family ledger |
-| `sm86_causal_corrections_20260930.md` | Handle, control-field, and timer-identity corrections |
-| `sm86_blocker_modeling_v2_20260930.md` | Factorized route/ABI/cache/endpoint model |
-| `sm86_long_timer_clock_lock_20260930.md` | Drift-controlled long-body endpoint crosswalk |
+| `docs/STATUS.md` | Current capability and exact-boundary status |
+| `docs/PROJECT_MEMORY.md` | Short continuation state |
+| `docs/PREDICTIVE_CLOSURE.md` | Active replacement-model contract |
+| `plans/sm86_predictive_closure_implementation_20261001.md` | Active implementation plan |
+| `archive/research_20260930/sm86_final_external_seam_audit_20260930.md` | Final public/open-RM boundary audit |
+| `archive/research_20260930/sm86_final_performance_handoff_20260930.md` | 15/15 cold/warm campaign handoff |
+| `archive/research_20260930/sm86_independent_codegen_capability_matrix_20260930.md` | Finite codegen/control capability ledger |
+| `archive/research_20261001/sm86_predictive_closure_replacement_20261001.md` | Research basis for predictive replacement |
 
 ## Timeline
 
-- **2026-09-05--26:** native/custom simulator seams, early cache/coherence and
-  pipe studies, and prior-art reviews; retained as historical context.
-- **2026-09-27--29:** holdouts, projection alternatives, clock/cache scenarios,
-  NAK/CUPTI/PMA probes, and initial ELF/ABI bridges; all bounded.
-- **2026-09-30:** raw QMD/WFI launch, RM cache controls, corrected full cold/warm
-  campaigns, PMA field sweep, scheduler/operand-bank studies, independent
-  ABI-v8/ELF/control families, long timing crosswalk, final public seam audit,
-  and compact entry-point/supersession refactor. The archive retains the full
-  evidence set; only the navigation surface is authoritative by default.
+- **2026-09-05--26:** native/custom seams, cache/coherence and pipe studies,
+  prior-art review, and early predictor work. Preserved under the archive.
+- **2026-09-27--30:** holdouts, clock/cache scenarios, NAK/CUPTI/PMA probes,
+  bounded ELF/ABI bridges, full cold/warm campaigns, and final seam audit.
+- **2026-10-01:** physical-pipe endpoint recheck, finite value-lane probes,
+  active-surface trim, predictive-closure replacement contract, and the first
+  resource-demand implementation slice (typed demand/service profile,
+  `TraceMetrics` adapter, opt-in latent-report emission, and config parser).
 
 ## Resume rule
 
-Start with `PROJECT_MEMORY.md` and `STATUS.md`. Open one focused archived report
-only when its artifact is needed. Do not load the old session diary or every
-plan/report by default.
+Start with `PROJECT_MEMORY.md` and `STATUS.md`. Read the predictive contract
+before changing model semantics. Open one focused archive report only when its
+source evidence is required. Do not reload the old session diary or every plan.
