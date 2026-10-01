@@ -82,8 +82,8 @@ the memory crate passed 193 tests and the direct runner passed 57 tests.
 Existing machine-local tests remain
 ignored when their external capture environment is absent.
 
-This contract narrows uncertainty representation; it does **not** close the
-four external boundaries in `docs/STATUS.md`.
+This contract narrows uncertainty representation; unobservable internals remain
+black-box modeling domains under `docs/STATUS.md`.
 
 ## Value-bearing sidecar boundary
 

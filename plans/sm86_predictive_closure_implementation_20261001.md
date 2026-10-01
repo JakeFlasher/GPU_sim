@@ -1,109 +1,52 @@
-# SM86 predictive-closure implementation plan
+# SM86 predictive modeling implementation plan
 
-**Status:** active implementation plan, 2026-10-01.
-**Authority:** `AGENTS.md`, `docs/STATUS.md`, `docs/PROJECT_MEMORY.md`, and
-[`docs/PREDICTIVE_CLOSURE.md`](../docs/PREDICTIVE_CLOSURE.md).
-**Supersedes:** older exact-cycle, ownership-certification, cross-architecture,
-and campaign-expansion plans. Those files remain historical source context.
+Updated 2026-10-01. Improve held-out NCU accuracy with analytical/statistical
+models and public black-box measurements. Follow [STATUS](../docs/STATUS.md)
+and [the model contract](../docs/PREDICTIVE_CLOSURE.md); hidden internals are
+not prerequisites. Existing filenames and runtime schemas are retained.
 
-## Goal
+## Implemented
 
-Turn the existing unknown-preserving SM86 replay into an NCU-targeted
-predictive lane without claiming proprietary mechanism closure.
+- `sim-semantics::latent`: demand/profile types and service/observer projections.
+- `sim-sm::metrics`: candidate demand and operand-bank pressure summaries.
+- `sim-run --latent-envelope --predictive-service-profile FILE`: opt-in output;
+  default native replay remains unchanged.
+- `tools/calibrate_sm86_service_profile.py`: preliminary offline fitter.
 
-Completion means the model can emit a declared NCU prediction, simulator-native
-frontiers, route/cache uncertainty, and a family-held-out score report. It does
-not mean recovering physical pipes, cache owners, arbitrary SASS/ABI generation,
-or a shared silicon/simulator clock.
+These are runnable interfaces, not demonstrated accuracy. The example service
+rates and observer padding are uncalibrated; cache summaries describe topology,
+not actual read-from events.
 
-## Non-goals
+## Remaining vertical slices
 
-- no physical SM/SMSP/pipe/slot reconstruction;
-- no unrestricted SM86 assembler, scheduler, linker, or CUDA ABI;
-- no cache-owner/read-from/DRAM receipt claim;
-- no NCU values as same-workload features;
-- no new hash, approval, audit, reviewer, or mandatory workflow machinery;
-- no rerun of completed full campaigns unless the measurement contract changes.
+1. **Interval correctness.** Check empty demand, unknown classes, capacity
+   domains, checked arithmetic, and dependencies. An issue/event upper bound
+   cannot stand in for an unknown completion upper bound. Keep frontiers and
+   their clock/endpoint meanings separate; never reduce them to one ranking score.
+2. **Probe calibration.** Characterize dependency latency, initiation rate,
+   bank contention, occupancy, and memory service on separate probe kernels.
+   Account for timer/loop overhead and parameter identifiability. Record units,
+   operating point, input identity, and uncertainty; do not fit score workloads.
+3. **Cache effects.** Use address/sector/reuse and queueing models. Include cache
+   history and declared synchronization where available. Treat absent physical
+   ownership as a black-box variable; test traffic and causal ordering separately.
+4. **Observer model.** State the NCU metric, replay/cache/clock policy, and work
+   included by the endpoint. Learn/measure nuisance terms on separate data;
+   report missing support instead of substituting another timer or a zero tail.
+5. **Held-out evaluation.** Save predictions before joining NCU targets. Report
+   MAPE, absolute log error, rank correlation, interval coverage/width, per-family
+   failures, and OOD cases. Split by workload family, not repeated launches.
+6. **Cost and integration.** Run the real trace path after each change. Compare
+   default output, termination, counters, memory use, and total trace/replay/model
+   runtime before making a speed or accuracy claim.
 
-## Workstreams
+## Completion bar
 
-### 1. Active contract and configuration
+A declared workload population has independently evaluated NCU predictions with
+reported error, calibrated uncertainty, and reproducible cost. Select numeric
+acceptance targets before inspecting score labels. Do not call the work complete
+from schema checks, self-authored examples, or wide uncalibrated intervals.
 
-- Keep `sim-semantics::latent` as the unknown-preserving boundary.
-- Add a versioned predictive-closure config containing resource-pool names,
-  calibration provenance, endpoint policy, score metric, and OOD behavior.
-- Keep historical committee paths in the archive; active docs point only to the
-  compact contract and this plan.
-
-### 2. Resource-demand quotient
-
-- Add validated abstract resource-pool/service-demand types to
-  `sim-semantics`.
-- Extend `sim-sm::TraceMetrics` with demand counts and candidate-pool intervals
-  separate from selected/scheduled diagnostic assignments.
-- Convert existing physical-pipeline candidate classes and operand-bank
-  pressure into the new demand envelope without assigning silicon routes.
-- Add unit tests for empty pools, overflow, impossible intervals, and JSON
-  round trips.
-
-### 3. Calibration profile
-
-- Define a small JSON profile for positive service rates, initiation intervals,
-  register-bank capacity, memory queue capacity, and endpoint nuisance terms.
-- Add a parser/validator plus the offline
-  `tools/calibrate_sm86_service_profile.py` fitter; fitting consumes probe
-  service observations and never score-workload NCU rows.
-- Reject negative, zero-capacity, inverted, or unknown-unit parameters.
-
-### 4. Cache and value semantics
-
-- Retain current sector/reuse and transactional payload contracts.
-- Add candidate read-from/write-epoch summaries to the predictive envelope.
-- Keep model-local forwarding and writeback completion separate from hardware
-  completion.
-- Reuse current identity and store-before-event checks; do not infer residency.
-
-### 5. NCU observer projection
-
-- Add a typed observer descriptor for cache mode, serialization, clock policy,
-  profiler start/end semantics, and included/excluded work.
-- Project simulator frontiers into an NCU-targeted output without converting
-  CUDA-event/CUPTI/device-timer values into simulator cycles.
-- Preserve the existing ordinary output when the opt-in projection is absent.
-
-### 6. Validation
-
-- Probe cohort: independent synthetic kernels for resource/cache calibration.
-- Development cohort: separate workloads used to freeze model choices.
-- Score cohort: family-held-out NCU labels loaded only after prediction.
-- Report cycle/duration error, interval coverage, counter error, ranking, and
-  unsupported/OOD behavior.
-- Treat self-authored tests as implementation evidence, not independent silicon
-  validation.
-
-## First vertical slice
-
-Implement workstreams 1–3 first:
-
-1. add `ResourceDemandEnvelope` and `ServiceRateProfile` to `sim-semantics`;
-2. expose a `TraceMetrics::resource_demand_envelope()` adapter;
-3. add a compact predictive-closure config and schema validation;
-4. add unit tests and one retained canary projection;
-5. update active docs and the supersession index.
-
-This slice is useful without a new hardware endpoint and does not alter default
-native replay.
-
-## Later slices
-
-- richer endpoint projection over `TimingReport` and calibrated observer
-  padding;
-- cache candidate-set refinement over per-event memory counters;
-- independent probe corpus generation and family-held-out score harness;
-- performance/interval report integration after a new independent corpus exists.
-
-## Stop/research rule
-
-If a proposed implementation requires a physical route, cache owner, arbitrary
-compiler artifact, or synchronized endpoint, stop that seam and return to the
-focused public-source/local-contract research before widening the code change.
+When progress stalls, inspect the failing model assumption and the relevant
+public paper/repository; run a small discriminating experiment rather than
+adding a new framework or searching for inaccessible telemetry.

@@ -1,7 +1,8 @@
 # Experimental diagnostics and ITS trace contract
 
 Updated 2026-09-27. Consolidates the separate writeback, coherence and pipe
-notes. These paths execute, but **do not close the native timing mechanisms**.
+notes. These paths execute as model-local diagnostics; vendor-internal timing
+fields remain black-box inputs to the analytical/statistical model.
 Source: `sim/direct_run/src/metrics.rs`, `sim/sm/src/metrics.rs`,
 `sim/arch/src/its.rs`.
 

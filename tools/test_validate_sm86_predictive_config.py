@@ -35,3 +35,10 @@ def test_predictive_config_rejects_contract_regressions(path: tuple[str, str], v
     raw[path[0]][path[1]] = value
     with pytest.raises(ValueError):
         validate_config(raw)
+
+
+def test_predictive_config_rejects_scope_expansion() -> None:
+    raw = copy.deepcopy(load_config())
+    raw["scope_policy"] = "recover_vendor_internals"
+    with pytest.raises(ValueError):
+        validate_config(raw)

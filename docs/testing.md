@@ -312,7 +312,7 @@ to claim initial memory, cache ownership, coherence, or flush completion.
 admission seam. It requires explicit read-from IDs and release/acquire scope
 for cross-requester visibility, and refuses missing values, unknown read-from
 edges, scope mismatch, and sequence regressions. It is a reference contract,
-not a claim that proprietary hardware fences have been reconstructed.
+not a claim about vendor-internal fence behavior.
 Its `observe_qualified_read` API additionally rejects a plain cacheable
 cross-requester read and requires an explicit volatile/proxy/atomic qualifier,
 matching the independent L1-control litmus.

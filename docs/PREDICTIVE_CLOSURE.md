@@ -1,75 +1,47 @@
-# Predictive closure contract
+# Predictive modeling contract
 
-**Updated 2026-10-01.** This is the active replacement for the blocked exact-
-mechanism objective. It does not claim access to NVIDIA's hidden pipe, cache,
-compiler, or completion state.
+Improve cycle-count and duration prediction with analytical or statistical
+models calibrated from public observations; treat unobservable internals as
+black boxes. [STATUS](STATUS.md) defines scope and implementation maturity.
+The filename is retained for existing links.
 
-## Objective
+## Inputs and outputs
 
-Predict the declared Nsight Compute result for a retained SM86 trace using
-public architecture-card inputs, the dynamic trace, and separately calibrated
-black-box model parameters:
+Inputs: native trace and static SASS/control sidecars, launch resources,
+architecture cards, and separately calibrated model parameters. Custom semantic
+frontends remain distinct from native replay.
 
 ```text
-trace capsule + architecture card
-  -> route/cache latent quotient
-  -> simulator frontiers
-  -> endpoint-specific NCU projection
-  -> held-out NCU comparison
+trace + card + independent calibration
+  -> resource/cache models -> separate simulator frontiers
+  -> endpoint-specific prediction -> independent NCU comparison
 ```
 
-NCU values are score labels only. They are not features, tuning inputs, route
-choices, or training data for the same scored workload.
+Report a point or interval for the named metric, model assumptions, uncertainty,
+and OOD/unsupported cases. `gpc__cycles_elapsed.max` is the primary cycle target;
+duration requires its own unit/endpoint contract. Keep issue, modeled-event,
+completion, launch-envelope, and typed-tail values separate. Do not choose a
+frontier, route, or coefficient using the same workload's scored NCU result.
 
-## Replacement mechanisms
+## Abstractions
 
-| Hidden mechanism | Model replacement |
-|---|---|
-| Physical `(SM,SMSP,pipe,slot)` route | Candidate abstract resource pools, service demand, queue contention, and intervals |
-| Arbitrary SM86 compiler/ABI/linker | Opaque native trace capsule; bounded semantic IR for custom programs |
-| Cache owner/read-from/DRAM receipt | Sectorized cache replay, reuse profiles, causal write/read candidate sets, model-local service completion |
-| Common hardware/simulator endpoint | Separate issue/event/tail frontiers plus an explicit NCU observer descriptor |
+- Resource demand and queue contention replace physical route reconstruction.
+- Native binaries/traces are inputs; existing CUDA tools provide compilation.
+- Sector/reuse/service models represent cache effects. Physical ownership is
+  not required; topology alone does not establish causal read-from edges.
+- An explicit observer model predicts the chosen profiler endpoint. CUDA event,
+  CUPTI, device timer, and simulator time are not interchangeable measurements.
 
-A singleton route, owner, compiler realization, or endpoint is never created by
-balancing pressure or choosing a deterministic tie-breaker.
+## Evaluation
 
-## Active inputs and outputs
+Calibrate on independent probes/development data. Keep final workload families
+separate from fitting and model selection; retain predictions before joining
+score labels. Report cycle/duration error, interval coverage and width, ranking,
+per-family failures, and end-to-end cost. Repeated use of a development cohort
+is not a new independent holdout.
 
-Inputs are trace identity, static opcode/control sidecars, masks, dependencies,
-addresses, launch resources, architecture-card constants, and a calibration
-profile. Outputs are:
-
-- predicted `gpc__cycles_elapsed.max` or declared NCU duration;
-- simulator-native frontiers and endpoint descriptor;
-- candidate/interval route and cache summaries;
-- uncertainty coverage and unsupported/OOD reasons.
-
-The NCU observer projection models the selected cache-control, serialization,
-clock-control, and start/end semantics. It does not convert CUDA-event,
-CUPTI, device-timer, or replay-wall values into simulator cycles by assumption.
-
-## Validation contract
-
-1. Calibrate resource and cache service parameters on independent probe kernels.
-2. Freeze the model before the score cohort.
-3. Predict from trace/card inputs before loading score labels.
-4. Score by family-held-out NCU rows, reporting log error, MAPE, rank
-   correlation, interval coverage, and OOD behavior.
-5. Keep exact external closure blocked unless a new supported endpoint supplies
-   physical route, cache completion, unrestricted codegen, or synchronized
-   completion evidence.
-
-The first implementation seam is the `sim-semantics::latent` resource-demand
-contract and its `sim-sm::TraceMetrics` adapter. The detailed plan is
-[`../plans/sm86_predictive_closure_implementation_20261001.md`](../plans/sm86_predictive_closure_implementation_20261001.md).
-
-The first predictive slice is implemented: `ResourceDemandEnvelope`,
-`ServiceRateProfile`, and `ResourceServiceProjection` validate/project
-abstract demand; `TraceMetrics::resource_demand_envelope()` preserves
-candidate bounds; the opt-in latent report emits service intervals, cache
-candidate summaries, and an NCU observer candidate interval. The checked-in
-profile is explicitly an abstract/pending-probe profile; it does not claim
-silicon calibration or alter default replay. Independent probe data can be
-fit into the same profile format with
-`tools/calibrate_sm86_service_profile.py`; the fitter accepts probe service
-observations, not score-workload NCU rows.
+The current opt-in projection and fitter are preliminary. The supplied service
+profile is uncalibrated; finite intervals are model outputs, not guaranteed
+bounds or confidence intervals. Calibration and held-out accuracy are unfinished.
+See the [active plan](../plans/sm86_predictive_closure_implementation_20261001.md)
+and [configuration](archprofile.md) rather than older report task lists.

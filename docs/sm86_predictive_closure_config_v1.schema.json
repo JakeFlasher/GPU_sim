@@ -67,6 +67,10 @@
     },
     "service_rate_profile": {
       "type": "string"
+    },
+    "scope_policy": {
+      "type": "string",
+      "minLength": 1
     }
   },
   "additionalProperties": false

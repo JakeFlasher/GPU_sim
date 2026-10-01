@@ -13,10 +13,9 @@ g++ -std=c++17 -O2 \
 tools/nvptx_compile_sm86/nvptx_compile_sm86 input.ptx output.cubin sm_86
 ```
 
-The result is a native NVIDIA PTX-to-cubin path. It does **not** provide an
-independent SASS encoder, proprietary CUDA ABI implementation, scheduler
-visibility, or unrestricted native ISA generation; those remain external
-boundaries.
+The result is a native NVIDIA PTX-to-cubin path. It does not provide a complete
+independent SASS/ABI/compiler model or scheduler visibility. Those fields stay
+black-box inputs to analytical/statistical performance models.
 
 For an official PTX linker path that emits a linked cubin rather than only the
 compiler API result:
@@ -35,15 +34,16 @@ tools/nvptx_compile_sm86/nvjitlink_sm86 input.ptx linked.cubin sm_86
 `nvJitLink` supplies NVIDIA's PTX/cubin linker and relocation path (the
 installed library reports version 13.4 even though it is under the local
 `cuda-13.2` toolkit path). It still
-does not expose a public unrestricted SASS encoder, scheduler/control-word
-generator, or CUDA ABI implementation.
+does not expose a complete SASS encoder, scheduler/control-word generator, or
+CUDA ABI implementation; unsupported fields remain black-box model inputs.
 
 The local probe also observed `nvJitLinkAddData` rejecting some valid
 `ptxas`-accepted PTX address-arithmetic forms when the input was not
 NUL-terminated. The adapter now appends the PTX terminator; the corrected
 matrix in `results/alpha/sm86_research_restart_20260929/` links both forms.
-This fixes the adapter bug but still does not make the NVIDIA proprietary
-linker an independent SASS/ABI implementation.
+This fixes the adapter bug but does not turn the vendor linker into an
+independent SASS/ABI implementation; unsupported details remain
+black-box model inputs.
 
 `nvjitlink_launch_sm86.cpp` is a small CUDA Driver API execution adapter for
 loading a linked cubin and launching its `value_kernel`; it is useful for a

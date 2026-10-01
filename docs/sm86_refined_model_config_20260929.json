@@ -305,11 +305,11 @@
     "temporal_boost_warm_campaign": "results/alpha/full_3090ti_20260930_temporal_boost_warm_live2",
     "temporal_boost_warm_elastic_summary": "results/alpha/sm86_temporal_boost_warm_committee_goal_20260930/clock_elastic_summary.json"
   },
-  "unresolved_mechanisms": [
-    "per-instruction physical pipe/sub-unit and issue-slot tags",
-    "unrestricted independent SM86 SASS/scheduler/control-word/CUDA ABI generation",
-    "cache-line ownership/read-from/dirty writeback/complete DRAM semantics",
-    "single synchronized NCU/CUPTI/CUDA-event/device-timer/simulator endpoint"
+  "black_box_model_domains": [
+    "physical route internals (black-box modeling domain)",
+    "compiler, scheduler, and runtime internals (black-box modeling domain)",
+    "cache ownership, read-from, and DRAM internals (black-box modeling domain)",
+    "cross-tool timing and completion semantics (black-box modeling domain)"
   ],
   "external_seam_requirements": "archive/research_20260930/sm86_external_seam_requirements_20260929.md",
   "coverage_policy": {
@@ -323,7 +323,7 @@
     "no_test_workflow": true,
     "no_hash_workflow": true,
     "no_verification_workflow": true,
-    "do_not_claim_mechanism_closure": true
+    "keep_unobservable_internals_black_box": true
   },
   "documentation": {
     "current_status": "STATUS.md",

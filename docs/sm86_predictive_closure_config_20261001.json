@@ -83,12 +83,6 @@
       "rank_correlation"
     ]
   },
-  "supersedes": [
-    "docs/sm86_refined_model_config_20260929.json committee-only projection surface",
-    "plans/exact_cycle_preserving_acceleration_carry_on_20260912.md",
-    "plans/typed_l2_ownership_power_certification_plan_20260912.md",
-    "plans/cross_architecture_gpu_simulator_research_plan_20260923.md"
-  ],
   "active_docs": {
     "status": "docs/STATUS.md",
     "memory": "docs/PROJECT_MEMORY.md",
@@ -96,5 +90,6 @@
     "plan": "plans/sm86_predictive_closure_implementation_20261001.md",
     "history": "docs/HISTORY.md"
   },
-  "service_rate_profile": "docs/sm86_service_rate_profile_20261001.json"
+  "service_rate_profile": "docs/sm86_service_rate_profile_20261001.json",
+  "scope_policy": "analytical_or_statistical_modeling_with_unobservable_internals_black_box"
 }

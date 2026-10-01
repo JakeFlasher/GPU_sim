@@ -12,7 +12,7 @@ The workspace contains two deliberately separate execution paths.
 - `sim-run-campaign` (`sim/run`): retained manifest/campaign CLI/library.
 - `sim-semantics::latent`: opt-in unknown-preserving route/compiler/cache/
   timing candidate domains and endpoint/frontier contract; it does not change
-  the native replay path or claim silicon closure.
+  the native replay path or claim vendor-equivalent hardware behavior.
 
 Architecture cards are evidence-bound inputs. NCU joins are observations added
 after replay and never alter simulator parameters.

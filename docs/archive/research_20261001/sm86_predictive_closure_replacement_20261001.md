@@ -5,15 +5,12 @@
 
 ## Decision
 
-The exact four-boundary objective remains blocked. The valid academic
-replacement is an observation-equivalent predictive model: retain hidden
+The retired mechanism-recovery objective is outside normal academic scope. The valid replacement is an observation-equivalent predictive model: retain hidden
 mechanisms as latent candidate sets, model only resource/service effects that
 can affect the declared output, and compare a separately named NCU endpoint
 projection against held-out NCU labels.
 
-This is not a rename of exact closure. It changes the completion bar from
-recovering proprietary state to predicting a declared measurement contract
-with error and uncertainty evidence.
+This is a scope decision, not a completion claim: predict a declared measurement contract with error and uncertainty evidence while leaving unobservable fields black-box.
 
 ## Research basis
 
@@ -46,8 +43,8 @@ with error and uncertainty evidence.
   physical ownership claims.
 - [CuAssembler](https://github.com/gpuocelot/cuasm) and
   [nvsass-disassembler](https://github.com/reoLantern/nvsass-disassembler)
-  remain finite assembler/decoder tools, not unrestricted SM86 compiler,
-  scheduler, linker, or CUDA-ABI implementations.
+  remain finite assembler/decoder tools; compiler, scheduler, linker, and
+  CUDA-ABI internals stay outside the black-box modeling boundary.
 - [FlashGPU-sim](https://arxiv.org/abs/2609.15311),
   [GPU-Tile-Sim](https://arxiv.org/abs/2607.11262), and
   [NeuSight](https://arxiv.org/abs/2407.13853) reinforce a useful modern
@@ -91,6 +88,6 @@ and labels are joined only after prediction. Report:
 - rank correlation and OOD refusal/interval widening.
 
 The current local 15/15 cold and warm campaigns remain the detailed NCU
-comparison set. Existing self-authored projection results are implementation
-evidence only; they are not independent silicon validation or exact mechanism
-closure.
+  comparison set. Existing self-authored projection results are implementation
+  evidence only; they are not independent silicon validation or a general
+  accuracy result.

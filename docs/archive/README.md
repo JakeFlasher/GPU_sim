@@ -1,20 +1,14 @@
-# Archived material
+# Historical experiment index
 
-Archived material is retained for reproducibility and historical context. It is
-not an active dependency, validation gate, acceptance criterion, or task queue.
-The active surface is:
+Use [STATUS](../STATUS.md) for current scope and [HISTORY](../HISTORY.md) to
+choose one relevant record. Old report next steps are not active instructions.
 
-1. `docs/STATUS.md`
-2. `docs/PROJECT_MEMORY.md`
-3. `docs/PREDICTIVE_CLOSURE.md`
-4. `plans/sm86_predictive_closure_implementation_20261001.md`
+- `research_20260930/`: native/custom implementation, microbenchmarks, modeling
+  alternatives, negative results, and NCU campaigns.
+- `research_20261001/`: value-lane probes and analytical/statistical modeling notes.
+- `vortex/`: earlier cross-architecture adapter experiments.
 
-- `research_20260930/` — consolidated SM86 implementation, campaign, and seam
-  evidence.
-- `research_20261001/` — endpoint rechecks, finite value probes, and predictive
-  replacement research.
-- `vortex/` — earlier cross-architecture adapter artifacts.
-
-Raw campaign outputs remain under their original ignored paths. Do not infer
-freshness from filenames or timestamps, and do not promote historical claims
-without an independently defined workload, endpoint, and comparison protocol.
+Measurements, source, and raw artifacts remain at their existing paths.
+No backup copies are created by this cleanup. Historical reports remain
+unchanged where they are needed to preserve measurement provenance; they are
+not active scope.

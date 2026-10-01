@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 SCHEMA = "sm86_predictive_closure_config_v1"
+SCOPE_POLICY = "analytical_or_statistical_modeling_with_unobservable_internals_black_box"
 REQUIRED = (
     "schema",
     "hardware",
@@ -85,6 +86,8 @@ def validate_config(raw: Any) -> dict[str, Any]:
     if not isinstance(interval_target, (int, float)) or not 0 < interval_target < 1:
         raise ValueError("validation.interval_target must be between 0 and 1")
     _nonempty(raw.get("service_rate_profile"), "service_rate_profile")
+    if raw.get("scope_policy") != SCOPE_POLICY:
+        raise ValueError("scope_policy must keep unobservable internals black-box")
 
     return raw
 

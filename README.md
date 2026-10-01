@@ -16,9 +16,10 @@ NCU observations -------------------------------------------------> comparison o
 ```
 
 NCU values are independent comparison targets, never same-workload tuning
-inputs. The project does not claim RTL equivalence, proprietary binary
-recovery, or universal vendor-internal observability. A vendor-neutral event
-schema is not a universal binary decoder.
+inputs. Unobservable vendor internals remain black-box model variables; the
+project uses analytical/statistical methods rather than pursuing them as
+research goals. A vendor-neutral event schema is not a universal binary
+decoder.
 
 ## Start here
 
