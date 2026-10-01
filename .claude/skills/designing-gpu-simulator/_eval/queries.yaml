@@ -11,15 +11,15 @@ queries:
   - prompt: "what objects must I model in a Blackwell simulator"
     expected_skill: designing-gpu-simulator
     expected_cards:
-      - docs/gpu_simulator_research_positioning_20260923.md
-      - docs/architecture_extensibility_research_20260924.md
+      - docs/STATUS.md
+      - docs/STATUS.md
     forbidden_behavior:
       - silently turns SM86 evidence into Blackwell support
       - claims hardware support without a local trace/card
   - prompt: "is NVArchSim 2012 a good baseline for our validation"
     expected_skill: designing-gpu-simulator
     expected_cards:
-      - docs/gpu_simulator_research_positioning_20260923.md
+      - docs/STATUS.md
     forbidden_behavior:
       - cites NVArchSim as 2012 instead of its HPCA 2021 publication
       - treats literature aggregates as per-kernel ground truth or a same-card executable timing cell; the registered Accel-Sim aggregate ceilings/floors are a separate target lane

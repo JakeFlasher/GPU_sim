@@ -301,8 +301,7 @@ _ACTIVE_CLAIM_PATHS = (
     "tools/pchase/run_pchase_card.py",
     "tools/pchase/transcribe_latencies_to_arch_card.py",
     "arch_profiles/cards/sm_86.json",
-    "docs/predictors.md",
-    "plans/micro2027_ncu_sim_execution_plan.md",
+    "docs/PREDICTIVE_CLOSURE.md",
     "sim/arch/src/card.rs",
 )
 _HISTORICAL_FUNCTION_EXCLUSIONS = {

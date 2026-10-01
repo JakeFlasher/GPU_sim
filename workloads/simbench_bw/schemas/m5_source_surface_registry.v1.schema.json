@@ -108,7 +108,7 @@
           "if": {
             "properties": {
               "path": {
-                "const": "plans/sm86_comprehensive_live_capture_campaign_plan.md"
+                "const": "docs/PREDICTIVE_CLOSURE.md"
               }
             }
           },

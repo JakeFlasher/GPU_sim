@@ -57,4 +57,4 @@ custom inputs see [`arch_profiles/programs/README.md`](../arch_profiles/programs
 Current limitations, the predictive replacement contract, and the compact continuation record live in
 [`docs/STATUS.md`](../docs/STATUS.md), [`docs/PREDICTIVE_CLOSURE.md`](../docs/PREDICTIVE_CLOSURE.md),
 and [`docs/PROJECT_MEMORY.md`](../docs/PROJECT_MEMORY.md); dated reports are indexed by
-[`docs/HISTORY.md`](../docs/HISTORY.md).
+the active docs map.

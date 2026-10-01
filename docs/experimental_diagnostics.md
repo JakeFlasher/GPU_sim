@@ -49,7 +49,7 @@ Earlier GEMM observations (development data, not universal timing): issue/event
 frontier 11,101, writeback scenario end 11,453, coherence scenario end 19,293;
 selector coverage 95.58% with 8,704 unknown records. These cannot identify a
 bottleneck or rank coherence work against writeback. The [scenario table](sm86_tail_sensitivity_20260926.csv)
-retains arithmetic only; [history](HISTORY.md) records the correction.
+retains arithmetic only; the corrected model contract is recorded in this document.
 
 ## Custom ITS trace
 

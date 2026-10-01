@@ -26,4 +26,4 @@ model timing and host performance separate.
 
 Use `--manifest-path sim/Cargo.toml` from the repository root. First run the
 smallest affected executable, then focused tests. Commands: `docs/testing.md`
-and `docs/runbook_host.md`. For prior art use `docs/HISTORY.md` only as needed.
+and `docs/runbook_host.md`. For prior art use the cited primary sources in active research notes only when needed.

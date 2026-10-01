@@ -38,5 +38,4 @@ scientific certification. Unavailable capability fields stay typed gaps.
 - Local state/captures/builds remain ignored by `.gitignore`; no new lifecycle
   hooks, mandatory gates or duplicate `.codex` runtime defaults are introduced.
 
-[Runbook](runbook_host.md) owns the commands; [history](HISTORY.md) owns dated
-GPU UUID/driver/clock observations, which are not permanent host identity.
+[Runbook](runbook_host.md) owns the commands. Hardware identity observations are experiment inputs, not permanent host identity.

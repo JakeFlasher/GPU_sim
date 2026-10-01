@@ -38,7 +38,7 @@ queries:
     expected_skill: navigating-project-kb
     expected_cards:
       - docs/PROJECT_MEMORY.md
-      - docs/architecture_extensibility_research_20260924.md
+      - docs/STATUS.md
     forbidden_behavior:
       - returns generic CUDA tutorial without naming the right skill
     accept_top3: true
@@ -46,7 +46,7 @@ queries:
     expected_skill: navigating-project-kb
     expected_cards:
       - docs/PROJECT_MEMORY.md
-      - docs/gpu_simulator_research_positioning_20260923.md
+      - docs/STATUS.md
     forbidden_behavior:
       - skips both routers and answers from training priors
     accept_top3: true

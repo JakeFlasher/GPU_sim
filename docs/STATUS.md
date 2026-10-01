@@ -41,9 +41,9 @@ and NCU clock control `none`:
 | `all` | 15/15 | 10,080 ns | 13,572 |
 | `none` | 15/15 | 8,704 ns | 11,709 |
 
-These are measurements, not prediction-error results. See [campaign details](archive/research_20260930/sm86_final_performance_handoff_20260930.md).
+These are measurements, not prediction-error results; campaign raw outputs remain under results/.
 
 ## Navigation
 
 [Model contract](PREDICTIVE_CLOSURE.md) · [Configuration](archprofile.md) ·
-[Runbook](runbook_host.md) · [Checks](testing.md) · [History](HISTORY.md).
+[Runbook](runbook_host.md) · [Checks](testing.md).

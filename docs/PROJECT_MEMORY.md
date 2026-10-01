@@ -1,7 +1,7 @@
 # Continuation memory
 
 Updated 2026-10-01. Start here, then [STATUS](STATUS.md); read only the
-contract/source needed for the task. [HISTORY](HISTORY.md) is optional navigation.
+contract/source needed for the task.
 
 ## Research scope
 
@@ -36,6 +36,5 @@ The 2026-09-30 cold/warm campaigns completed 15/15 workloads on RTX 3090 Ti / SM
 UUID `GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c`, driver 615.71.09,
 1350/10501 MHz, P0. This is historical host identity, not a current-device check.
 Raw records: `results/alpha/full_3090ti_20260930_rm_cache_{cold,warm}_live/`.
-Read [the campaign summary](archive/research_20260930/sm86_final_performance_handoff_20260930.md)
-only when those measurements are needed. Preserve datasets, source, tests, and
+Preserve datasets, source, tests, and
 scientific limitations; do not recreate removed policy text or workflow machinery.

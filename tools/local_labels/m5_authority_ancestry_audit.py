@@ -605,7 +605,7 @@ def _validate_registry(payload: bytes, schema_payload: bytes) -> str:
     ) != ("collector", "disabled"):
         _fail("disabled M5 collector source classification changed")
     campaign_plan = by_path.get(
-        "plans/sm86_comprehensive_live_capture_campaign_plan.md"
+        "docs/PREDICTIVE_CLOSURE.md"
     )
     if campaign_plan is None or (
         campaign_plan["category"],

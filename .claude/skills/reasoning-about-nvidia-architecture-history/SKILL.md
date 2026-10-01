@@ -7,8 +7,7 @@ description: "Explain NVIDIA architecture evolution or patent/prior-art context 
 
 Use `references/NVIDIA_patents/` for patent descriptions and
 `references/NVIDIA_Manuals/` for published architecture/programming contracts.
-For simulator prior art use `docs/sm86_sota_simulator_options_20260926.md` and
-the dated matrix linked there. Optional `.claude/knowledge/patents/` indexes
+For simulator prior art use primary-source links in the active predictive contract and repository reference corpus. Optional `.claude/knowledge/patents/` indexes
 are absent here; search the tracked corpus for the named generation/mechanism.
 
 Distinguish patent proposal, published specification, microbenchmark inference,

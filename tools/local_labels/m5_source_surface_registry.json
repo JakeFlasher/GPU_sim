@@ -115,15 +115,15 @@
       "can_collect": false,
       "category": "documentation",
       "lifecycle": "active",
-      "path": "plans/micro2027_ncu_sim_execution_plan.md",
-      "reason": "Authoritative milestone plan; external M5 gates remain binding."
+      "path": "docs/PREDICTIVE_CLOSURE.md",
+      "reason": "Active scheduling plan; legacy design and rank references are not preregistration authority."
     },
     {
       "authority_candidate": false,
       "can_collect": false,
       "category": "documentation",
       "lifecycle": "active",
-      "path": "plans/sm86_comprehensive_live_capture_campaign_plan.md",
+      "path": "docs/PREDICTIVE_CLOSURE.md",
       "reason": "Active scheduling plan; legacy design and rank references are not preregistration authority."
     },
     {

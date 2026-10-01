@@ -14,8 +14,9 @@ production deployment; staging is not permission for destructive actions.
   `sim-mem` / `sim-engine` -> `sim-run`. Hardware anchor is SM86.
 - Custom: `simt_u32_v1` plus `sim-sm::custom`; `simt_its_v1` is a separate
   single-group functional executor, not native SASS or a timing backend.
-- Dated reports and historical plans are opt-in context via `docs/HISTORY.md`,
-  not automatic task queues. Latest explicit user scope overrides old deferrals.
+- Active contracts are in `docs/README.md`, `docs/STATUS.md`, and
+  `docs/PROJECT_MEMORY.md`; deleted archives and superseded plans are not
+  development inputs. Latest explicit user scope overrides old deferrals.
 
 ## Execution
 

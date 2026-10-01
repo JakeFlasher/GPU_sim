@@ -4,5 +4,5 @@ Use [the active SM86 modeling plan](sm86_predictive_closure_implementation_20261
 [STATUS](../docs/STATUS.md) records implementation maturity; the
 [runbook](../docs/runbook_host.md) owns executable commands.
 
-Other plan files are compact historical implementation notes. Their former
-roadmaps and procedural requirements are not development obligations.
+No superseded plan files are retained in this directory. Keep future planning
+in the active document above and update the current docs with any scope change.

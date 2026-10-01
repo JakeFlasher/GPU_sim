@@ -28,8 +28,8 @@ decoder.
 - [Predictive replacement contract](docs/PREDICTIVE_CLOSURE.md)
 - [Build, capture, and replay](docs/runbook_host.md)
 - [Architecture and components](docs/ARCHITECTURE.md) · [configuration](docs/archprofile.md)
-- [Documentation map](docs/README.md) · [history/supersession map](docs/HISTORY.md)
-- [Historical plan index](plans/README.md)
+- [Documentation map](docs/README.md)
+- [Active implementation plan](plans/sm86_predictive_closure_implementation_20261001.md)
 
 From the repository root:
 
@@ -64,7 +64,7 @@ comparison target.
 | `tools/nvbit_tracer/`, `tools/local_labels/` | Trace and profiler collection |
 | `tools/sm86_*.py` | Fast projection and independent research alternatives |
 | `workloads/`, `eval/` | Executable inputs and comparison tools |
-| `docs/`, `plans/` | Compact contracts plus opt-in historical context |
+| `docs/`, `plans/` | Active contracts and the predictive implementation plan |
 | `data/`, `references/` | Retained datasets, source documents, and prior art |
 
 Root [`AGENTS.md`](AGENTS.md) governs project execution. Historical reports

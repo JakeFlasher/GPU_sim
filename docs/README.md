@@ -13,8 +13,8 @@ open only the relevant technical page.
 | Cards and predictive profiles | [Configuration](archprofile.md) |
 | Latent and payload APIs | [Contract](sm86_factorized_latent_contract_20260930.md) |
 | Experimental semantics | [Diagnostics](experimental_diagnostics.md) |
-| Prior measurements | [Evidence navigation](HISTORY.md) |
+| Prior measurements | preserved under results/ and experiment inputs |
 
-`AGENTS.md` governs execution. Prior reports are evidence, not queued work.
+`AGENTS.md` governs execution. Experiment outputs are data, not queued work.
 SOL/campaign source, datasets, environments, schemas, and knowledge cards remain
 in place; this index does not require loading them for unrelated development.
