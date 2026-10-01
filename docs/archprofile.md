@@ -9,7 +9,7 @@ an independently measured hardware fact.
 ## Separate four kinds of input
 
 1. **Native card:** `arch_profiles/cards/sm_86.json` plus p-chase data for
-   L1/L1-L2. Keep provenance and historical operating points unchanged when
+   L1/L1-L2. Keep source notes and historical operating points clear when
    reorganizing docs. The retained SM120 card is exploratory, not this run's target.
 2. **Hypothetical resources:** `ArchitectureSpec` under `arch_profiles/specs`.
    Custom execution consumes width/latency/initiation/capacity and bindings.
@@ -19,8 +19,8 @@ an independently measured hardware fact.
    CUPTI resource observation. Driver-selected carveout is not the preference
    percentage. The join validates symbol/geometry/resources; it does not alter
    replay timing/cache state.
-4. **Validation labels:** NCU CSV data is joined after replay, never used to
-   tune the same scored workload's inputs or model selection.
+4. **NCU measurements:** NCU CSV data is compared after replay and never used
+   to tune the same scored workload's inputs or model selection.
 
 The carded 25/8-cycle barrier values and occupancy/resources include declared
 architecture-local hypotheses. `architecture_card` identifies a source, not

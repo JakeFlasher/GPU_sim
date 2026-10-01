@@ -8,6 +8,13 @@ truth for the declared measurement protocol.
 
 Strictly forbidden: pursuing goals or exact proprietary mechanisms beyond normal academic PhD-level research; improve accuracy through analytical or statistical modeling and treat unobservable internals as black boxes.
 
+The alpha branch permanently excludes M5/M6 authority, receipt, audit,
+provenance, hashing, sealing, approval, freeze, admission, and validation
+workflow artifacts. They must not be restored or required for execution or
+commits; only local runtime safeguards needed for meaningful execution remain.
+The obsolete M5/M6 and CUTLASS-successor campaign surfaces and dedicated tests
+are deleted rather than skipped.
+
 ## Implemented and remaining work
 
 | Surface | Current state |

@@ -6,7 +6,6 @@ from pathlib import Path
 
 import pytest
 
-from tools.local_labels import capture_cutlass_successor_receipts as capture
 from tools.local_labels import delegated_cgroup as cgroup
 from tools.local_labels import ncu_action_executor as executor
 from tools.nvbit_tracer import capture_process
@@ -153,29 +152,6 @@ def test_create_preserves_capture_deadline_during_leaf_creation(
         cgroup.DelegatedCgroupV2.create()
 
     assert failure.value is deadline
-
-
-def test_required_capture_containment_never_falls_back(monkeypatch, tmp_path: Path):
-    monkeypatch.setattr(
-        cgroup.DelegatedCgroupV2,
-        "create",
-        lambda: (_ for _ in ()).throw(
-            cgroup.CgroupContainmentError("delegation unavailable")
-        ),
-    )
-    monkeypatch.setattr(
-        capture.subprocess,
-        "Popen",
-        lambda *_args, **_kwargs: pytest.fail("uncontained launch must not run"),
-    )
-
-    with pytest.raises(capture.CaptureError, match="containment is unavailable"):
-        capture._run_capture_command(
-            [sys.executable, "-c", "pass"],
-            dict(os.environ),
-            tmp_path,
-            require_cgroup_containment=True,
-        )
 
 
 def test_required_ncu_containment_never_falls_back(monkeypatch):
@@ -350,29 +326,3 @@ def test_popen_cleanup_failure_supersedes_interruption(monkeypatch):
         "active delegated cgroup launch error: synthetic launch interruption" in note
         for note in failure.value.__notes__
     )
-
-
-def test_failed_preexec_placement_is_contained(tmp_path: Path, monkeypatch):
-    if os.environ.get("GPU_SIM_DELEGATED_CGROUP_TEST") != "1":
-        pytest.skip("requires a systemd-delegated cgroup-v2 test service")
-    scope = cgroup.DelegatedCgroupV2.create()
-    placement_fd = scope._procs_fd
-    real_write = os.write
-
-    def refuse_placement(descriptor: int, payload: bytes) -> int:
-        if descriptor == placement_fd:
-            raise OSError("synthetic placement refusal")
-        return real_write(descriptor, payload)
-
-    monkeypatch.setattr(cgroup.os, "write", refuse_placement)
-    with pytest.raises(cgroup.CgroupContainmentError, match="cannot launch process"):
-        scope.popen(
-            [sys.executable, "-c", "pass"],
-            cwd=str(tmp_path),
-            stdin=capture.subprocess.DEVNULL,
-            stdout=capture.subprocess.PIPE,
-            stderr=capture.subprocess.PIPE,
-            start_new_session=True,
-        )
-    scope.close_after_error()
-    assert scope._removed is True

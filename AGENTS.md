@@ -38,7 +38,7 @@ Explicit exhaustive research or new correctness evidence can justify more.
 On an interruption, stop safely and report the best falsifiable diagnosis.
 Resolve reversible ambiguity simply; ask only if answers materially change work.
 
-Local reads, edits, builds, bounded validation, GPU execution, and native
+Local reads, edits, builds, bounded checks, GPU execution, and native
 CUDA/NCU/NVBit tools are authorized for requested implementation. Ask before
 external writes, destructive/irreversible changes, purchases, privileged actions
 with material side effects, or material scope expansion. Never reset/clean away
@@ -52,12 +52,12 @@ unrelated work. Inspect the focused diff before and after changes.
 - Keep issue, modeled-event, completion, launch-envelope, and typed-tail
   frontiers separate. Do not collapse them into a scalar selection score;
   use a mechanism-local or explicit partial-order discriminator.
-- Bind retained replay binary/cards/trace/control/output by content identity
-  before claiming freshness; timestamps alone are insufficient.
+- Record the actual replay binary/cards/trace/control/output used for a run;
+  do not turn a digest, receipt, or provenance record into an execution gate.
 - For new host-specific claims, independently check GPU name, UUID, compute
   capability, driver, and device index. A self-consistent manifest is not proof.
 - Separate observations, hypotheses, and inferences. A passing self-authored
-  test is implementation evidence, not independent silicon validation.
+  test is implementation evidence, not an independent hardware measurement.
 - **Do not declare unfinished mechanisms complete by renaming them as
   diagnostics or exclusions.** A formula, count-balancing heuristic, or custom
   example does not establish native completion, hardware scheduling, or SOTA.
@@ -76,15 +76,23 @@ never create reviewer swarms or recurring approval ceremonies.
 
 ## No procedural machinery
 
+**Permanent alpha-scope ban:** do not add, restore, invoke, or maintain any
+M5/M6 authority, receipt, audit, provenance, hashing, signing, approval,
+freeze, sealing, admission, or validation workflow machinery. Do not require
+such artifacts for research execution, model runs, or commits, and do not
+reintroduce them under a different name. Local runtime error handling and
+numerical safeguards may remain where they prevent crashes or nonsensical
+results; they are not approval, evidence, or provenance artifacts.
+
 Do not create/restore/enforce audit, adjudication, verifier, or review loops;
 Fable/RLCR/Humanize advisor protocols (except an explicitly requested one-time
 consultation); cryptographic approval gates, evidence hashes, hash-pinned
 prompts, immutable receipts, authority/provenance chains, freeze/seal/admission
 handoff gates; mandatory wait/data-only/no-execution states; or repository/agent
 hooks that block tools, commits, completion, or handoff for procedural reasons.
-Do not require preservation copies of deleted workflow bureaucracy.
-Historical manifests/checksums/receipts are inert existing data formats, not
-agent authority. Ordinary correctness tests and scientific validation are fine.
+Do not require preservation copies of deleted workflow bureaucracy. Historical
+manifests/checksums/receipts are not agent authority and must not be made
+prerequisites again.
 
 Preserve SOL-ExecBench and measurement-campaign source, schemas, tests, datasets,
 environments, knowledge cards, and historical experiments. Use

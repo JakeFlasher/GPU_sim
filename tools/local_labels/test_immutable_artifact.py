@@ -3234,7 +3234,7 @@ def test_directory_publication_recovers_complete_deterministic_partial(
     output_root.mkdir()
     stage = output_root / ".artifact.staging"
     stage.mkdir()
-    partial = stage / ".value.m5-partial"
+    partial = stage / ".value.partial"
     partial.write_bytes(b"original")
     partial.chmod(0o444)
 
@@ -3246,7 +3246,7 @@ def test_directory_publication_recovers_complete_deterministic_partial(
 
     assert result == output_root / "artifact"
     assert (result / "value").read_bytes() == b"original"
-    assert not (result / ".value.m5-partial").exists()
+    assert not (result / ".value.partial").exists()
 
 
 def test_directory_publication_rechecks_after_authorization_callback(
@@ -4094,7 +4094,7 @@ def test_regular_publication_retires_on_primary_close_failure(
     def record_primary_open(path, flags, *args, **kwargs):
         nonlocal target_descriptor
         descriptor = original_open(path, flags, *args, **kwargs)
-        if path == ".artifact.bin.m5-partial" and flags & os.O_RDWR:
+        if path == ".artifact.bin.partial" and flags & os.O_RDWR:
             target_descriptor = descriptor
         return descriptor
 
@@ -4214,7 +4214,7 @@ def test_regular_publication_retires_post_rename_writer_mutation(
         nonlocal writer
         descriptor = original_open(path, flags, *args, **kwargs)
         if (
-            path == ".artifact.bin.m5-partial"
+            path == ".artifact.bin.partial"
             and flags & os.O_RDWR
             and writer < 0
         ):
@@ -4577,7 +4577,7 @@ def test_regular_publication_rejects_nonexact_pinned_parent_before_mutation(
         )
 
     assert not (tmp_path / "locator.json").exists()
-    assert not (tmp_path / ".locator.json.m5-partial").exists()
+    assert not (tmp_path / ".locator.json.partial").exists()
 
 
 def test_regular_publication_rejects_mismatched_pinned_parent_before_mutation(
@@ -4601,7 +4601,7 @@ def test_regular_publication_rejects_mismatched_pinned_parent_before_mutation(
 
     for parent in (declared, other):
         assert not (parent / "locator.json").exists()
-        assert not (parent / ".locator.json.m5-partial").exists()
+        assert not (parent / ".locator.json.partial").exists()
 
 
 def test_regular_publication_rejects_parent_recreate_during_pinned_close(

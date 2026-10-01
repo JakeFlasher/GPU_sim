@@ -7,6 +7,15 @@ contract/source needed for the task.
 
 Strictly forbidden: pursuing goals or exact proprietary mechanisms beyond normal academic PhD-level research; improve accuracy through analytical or statistical modeling and treat unobservable internals as black boxes.
 
+**Permanent alpha policy:** M5/M6 authority, receipt, audit, provenance,
+hashing, sealing, approval, freeze, admission, and validation workflow
+artifacts are forbidden. Never restore them under a new name or make them a
+precondition for a run or commit. Keep only local runtime safeguards that are
+needed to avoid crashes or nonsensical model output.
+
+The obsolete M5/M6 and CUTLASS-successor authority/receipt campaign surfaces,
+schemas, records, and dedicated tests are deleted; do not recreate them.
+
 Objective: fast SM86 performance prediction, evaluated against independent NCU
 measurements. Never use a scored workload's NCU values as features, calibration
 labels, or implementation-selection criteria. Keep simulator frontiers separate
@@ -36,5 +45,5 @@ The 2026-09-30 cold/warm campaigns completed 15/15 workloads on RTX 3090 Ti / SM
 UUID `GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c`, driver 615.71.09,
 1350/10501 MHz, P0. This is historical host identity, not a current-device check.
 Raw records: `results/alpha/full_3090ti_20260930_rm_cache_{cold,warm}_live/`.
-Preserve datasets, source, tests, and
-scientific limitations; do not recreate removed policy text or workflow machinery.
+Preserve datasets, source, tests, and scientific limitations; do not recreate
+removed policy text or workflow machinery.

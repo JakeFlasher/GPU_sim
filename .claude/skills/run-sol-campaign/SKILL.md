@@ -1,6 +1,6 @@
 ---
 name: run-sol-campaign
-description: Operate and extend the repository's retained SOL-ExecBench and GPU measurement campaign stack. Use for SOL problem execution, baseline/scaffold work, NCU or NVBit campaign capture, trace sampling, calibration, historical campaign replay, or interpreting the campaign's manifests, schemas, receipts, checksums, and evidence. This is an explicit opt-in capability; it never governs unrelated simulator work.
+description: Operate and extend the repository's retained SOL-ExecBench and GPU measurement campaign stack. Use for SOL problem execution, baseline/scaffold work, NCU or NVBit campaign capture, trace sampling, calibration, or historical campaign replay. This is an explicit opt-in capability; it never governs unrelated simulator work.
 ---
 
 # Run SOL Campaign
@@ -11,8 +11,9 @@ historical process conventions into repository-wide agent policy.
 ## Scope boundary
 
 - Apply this skill only when the user asks for SOL or campaign work.
-- Treat hashes, manifests, receipts, frozen labels, and provenance records as
-  data formats used by that stack. Do not use them to decide whether unrelated
+- Do not add or require hashes, manifests, receipts, frozen labels, provenance
+  records, or validation gates. Existing campaign data can be read as plain
+  input when an experiment explicitly needs it, but it never decides whether
   research may proceed.
 - Do not spawn audit/review agents or require external adjudication. Diagnose
   failures from code, data, tests, and tool output, then fix locally.

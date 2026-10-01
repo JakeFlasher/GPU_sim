@@ -186,7 +186,7 @@ _STORAGE_FAILURE_ERRNOS = frozenset({
     ),
 })
 LABEL_DRIVER_STORAGE_MARKER = "LABEL_DRIVER_STORAGE_FAILURE:"
-_FINALIZATION_PARENT_IDENTITY_PREFIX = ".m6-finalization-parent-"
+_FINALIZATION_PARENT_IDENTITY_PREFIX = ".finalization-parent-"
 _CHILD_STDOUT_LIMIT_BYTES = 8 * 1024 * 1024
 _CHILD_STDERR_LIMIT_BYTES = 8 * 1024 * 1024
 _CHILD_PIPE_CHUNK_BYTES = 64 * 1024
@@ -13036,7 +13036,7 @@ def _finalization_parent_identity(
     grandparent = os.fstat(grandparent_descriptor)
     tree = os.fstat(tree_descriptor)
     body = {
-        "artifact_kind": "M6_FINALIZATION_PARENT_IDENTITY",
+        "artifact_kind": "FINALIZATION_PARENT_IDENTITY",
         "schema_version": 1,
         "source_parent_device": source.st_dev,
         "source_parent_inode": source.st_ino,

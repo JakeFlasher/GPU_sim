@@ -65,9 +65,9 @@ _INOTIFY_MAX_DRAIN_EVENTS = 65_536
 _INVENTORY_DIAGNOSTIC_SAMPLE = 8
 _ROLLBACK_GUARD_DIAGNOSTIC_LIMIT = 128
 _DESCRIPTOR_RESOURCE_ERRNOS = frozenset({errno.EMFILE, errno.ENFILE})
-_PARTIAL_SUFFIX = ".m5-partial"
+_PARTIAL_SUFFIX = ".partial"
 _PARTIAL_SUFFIXES = frozenset({
-    ".m5-partial", ".m6-partial", ".ncu-details-partial",
+    ".partial", ".ncu-details-partial",
 })
 _MAX_SAFE_JSON_INTEGER = (1 << 53) - 1
 
@@ -4564,7 +4564,7 @@ def _material_component_error(part: str, *, relative: str, leaf: bool) -> None:
             f"{NAMESPACE_RESERVED_COMPONENT}: {relative}"
         )
     if part.endswith(
-        (".staging", ".m5-partial", ".m6-partial", ".ncu-details-partial")
+        (".staging", ".partial", ".ncu-details-partial")
     ) or ".partial-" in part:
         raise ImmutableArtifactError(
             f"{NAMESPACE_RESERVED_COMPONENT}: {relative}"
@@ -6746,7 +6746,7 @@ def _validate_publication_name(name: str) -> None:
         or encoded.startswith(b".")
         or any(byte < 0x20 or byte == 0x7F for byte in encoded)
         or name.endswith(
-            (".staging", ".m5-partial", ".m6-partial", ".ncu-details-partial")
+            (".staging", ".partial", ".ncu-details-partial")
         )
         or ".partial-" in name
     ):

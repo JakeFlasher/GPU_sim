@@ -88,8 +88,8 @@ downstream kernel optimization is out of scope.
 > evaluation subtree's former counter-free/no-clock surfaces and its offline-label
 > discussion. They are not current root measurement policy, simulator inputs, or
 > permission to run NCU, mutate clocks, or calibrate the active simulator. Current
-> labels and capture authority come from root `AGENTS.md`, active schemas, and
-> `tools/local_labels/`.
+> labels and capture tools are ordinary experiment inputs under
+> `tools/local_labels/`; no authority artifact is required.
 
 ---
 

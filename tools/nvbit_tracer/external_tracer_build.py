@@ -3172,7 +3172,7 @@ def _build_bundle_operation(
         or bundle_dir.name.startswith(".")
         or len(os.fsencode(bundle_dir.name)) > 246
         or bundle_dir.name.endswith(
-            (".staging", ".m5-partial", ".m6-partial", ".ncu-details-partial")
+            (".staging", ".partial", ".ncu-details-partial")
         )
         or ".partial-" in bundle_dir.name
     ):

@@ -275,4 +275,4 @@ response. These APIs
 are unit-tested state machinery only; the native replay path does not call
 them until store policy, fence scope, and lower-level completion are wired.
 
-Runnable smoke commands and schema validation are in [testing](testing.md).
+Runnable smoke commands and input-shape checks are in [testing](testing.md).

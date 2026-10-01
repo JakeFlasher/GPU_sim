@@ -72,15 +72,13 @@ is not part of the versioned campaign result schemas. This keeps ordinary
 native replay and NCU projection outputs byte-compatible while a retained
 trace can opt into the contract.
 
-## Validation
+## Development checks
 
 The module has unit coverage for candidate restriction, finite-world
 `must`/`may` summarization, frontier contradiction/order checks, endpoint
-identity, event-key validation, and JSON round trips. The full workspace run
-passed all crates, including 96 `sim-semantics` tests and 507 `sim-sm` tests;
-the memory crate passed 193 tests and the direct runner passed 57 tests.
-Existing machine-local tests remain
-ignored when their external capture environment is absent.
+identity, event-key checks, and JSON round trips. The full workspace run is
+useful implementation evidence, not an accuracy claim. Machine-local checks
+may be unavailable when their external capture environment is absent.
 
 This contract narrows uncertainty representation; unobservable internals remain
 black-box modeling domains under `docs/STATUS.md`.
