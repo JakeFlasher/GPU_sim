@@ -66,11 +66,13 @@ full campaigns unless the endpoint contract changes.
 
 ## Next code seam
 
-The first vertical slice is implemented: validated abstract resource-pool and
-service-rate types, a `TraceMetrics` resource-demand adapter, a compact config
-and parser, and opt-in latent-report emission. The next slice is calibrated
-service-rate loading plus cache candidate-set and NCU observer projection.
-Default native replay remains unchanged.
+The first predictive slice is implemented: validated abstract resource-pool
+and service-rate types, profile loading, a `TraceMetrics` resource-demand
+adapter, cache candidate summaries, an opt-in NCU observer interval, and an
+offline probe-profile fitter. The checked-in profile is abstract/pending
+independent probe calibration. The next slice is independent probe-corpus
+calibration and family-held-out score reporting;
+default native replay remains unchanged.
 
 ## Evidence and supersession
 

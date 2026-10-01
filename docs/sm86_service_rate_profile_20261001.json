@@ -1,0 +1,62 @@
+{
+  "schema_version": 1,
+  "source": "abstract_sm86_probe_profile_v1_pending_independent_probe_corpus",
+  "pools": {
+    "adu": {
+      "capacity": 1,
+      "initiation_interval_cycles": 1,
+      "latency_lower_cycles": 1,
+      "latency_upper_cycles": 4
+    },
+    "alu": {
+      "capacity": 1,
+      "initiation_interval_cycles": 1,
+      "latency_lower_cycles": 1,
+      "latency_upper_cycles": 4
+    },
+    "cbu": {
+      "capacity": 1,
+      "initiation_interval_cycles": 1,
+      "latency_lower_cycles": 1,
+      "latency_upper_cycles": 4
+    },
+    "fma": {
+      "capacity": 1,
+      "initiation_interval_cycles": 1,
+      "latency_lower_cycles": 1,
+      "latency_upper_cycles": 8
+    },
+    "lsu": {
+      "capacity": 1,
+      "initiation_interval_cycles": 1,
+      "latency_lower_cycles": 1,
+      "latency_upper_cycles": 300
+    },
+    "tensor": {
+      "capacity": 1,
+      "initiation_interval_cycles": 1,
+      "latency_lower_cycles": 1,
+      "latency_upper_cycles": 64
+    },
+    "uniform": {
+      "capacity": 1,
+      "initiation_interval_cycles": 1,
+      "latency_lower_cycles": 1,
+      "latency_upper_cycles": 4
+    },
+    "xu": {
+      "capacity": 1,
+      "initiation_interval_cycles": 1,
+      "latency_lower_cycles": 1,
+      "latency_upper_cycles": 16
+    }
+  },
+  "ncu_start_padding_cycles": {
+    "lower_cycles": 0,
+    "upper_cycles": 256
+  },
+  "ncu_end_padding_cycles": {
+    "lower_cycles": 0,
+    "upper_cycles": 256
+  }
+}

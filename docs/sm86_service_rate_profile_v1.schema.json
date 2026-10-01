@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/gpusim/sm86_service_rate_profile_v1.schema.json",
+  "title": "SM86 abstract service-rate profile",
+  "type": "object",
+  "required": ["schema_version", "source", "pools"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "source": {"type": "string", "minLength": 1},
+    "pools": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": {
+        "type": "object",
+        "required": ["capacity", "initiation_interval_cycles", "latency_lower_cycles", "latency_upper_cycles"],
+        "properties": {
+          "capacity": {"type": "integer", "minimum": 1},
+          "initiation_interval_cycles": {"type": "integer", "minimum": 1},
+          "latency_lower_cycles": {"type": "integer", "minimum": 1},
+          "latency_upper_cycles": {"type": "integer", "minimum": 1}
+        },
+        "additionalProperties": false
+      }
+    },
+    "ncu_start_padding_cycles": {"$ref": "#/$defs/interval"},
+    "ncu_end_padding_cycles": {"$ref": "#/$defs/interval"}
+  },
+  "$defs": {
+    "interval": {
+      "type": "object",
+      "required": ["lower_cycles", "upper_cycles"],
+      "properties": {
+        "lower_cycles": {"type": "integer", "minimum": 0},
+        "upper_cycles": {"type": "integer", "minimum": 0}
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

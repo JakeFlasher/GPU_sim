@@ -84,6 +84,7 @@ def validate_config(raw: Any) -> dict[str, Any]:
     interval_target = validation.get("interval_target")
     if not isinstance(interval_target, (int, float)) or not 0 < interval_target < 1:
         raise ValueError("validation.interval_target must be between 0 and 1")
+    _nonempty(raw.get("service_rate_profile"), "service_rate_profile")
 
     return raw
 

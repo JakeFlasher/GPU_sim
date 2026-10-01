@@ -3,23 +3,71 @@
   "$id": "https://example.invalid/gpusim/sm86_predictive_closure_config_v1.schema.json",
   "title": "SM86 predictive closure configuration",
   "type": "object",
-  "required": ["schema", "hardware", "input_contract", "route_quotient", "cache_quotient", "endpoint_projection", "validation"],
+  "required": [
+    "schema",
+    "hardware",
+    "input_contract",
+    "route_quotient",
+    "cache_quotient",
+    "endpoint_projection",
+    "validation"
+  ],
   "properties": {
-    "schema": {"const": "sm86_predictive_closure_config_v1"},
-    "updated": {"type": "string"},
-    "branch": {"type": "string"},
+    "schema": {
+      "const": "sm86_predictive_closure_config_v1"
+    },
+    "updated": {
+      "type": "string"
+    },
+    "branch": {
+      "type": "string"
+    },
     "hardware": {
       "type": "object",
-      "required": ["gpu", "compute_capability", "driver", "sm_clock_mhz", "memory_clock_mhz"],
+      "required": [
+        "gpu",
+        "compute_capability",
+        "driver",
+        "sm_clock_mhz",
+        "memory_clock_mhz"
+      ],
       "additionalProperties": true
     },
-    "input_contract": {"type": "object", "additionalProperties": true},
-    "route_quotient": {"type": "object", "additionalProperties": true},
-    "cache_quotient": {"type": "object", "additionalProperties": true},
-    "endpoint_projection": {"type": "object", "additionalProperties": true},
-    "validation": {"type": "object", "additionalProperties": true},
-    "supersedes": {"type": "array", "items": {"type": "string"}},
-    "active_docs": {"type": "object", "additionalProperties": {"type": "string"}}
+    "input_contract": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "route_quotient": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "cache_quotient": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "endpoint_projection": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "validation": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "supersedes": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "active_docs": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
+    "service_rate_profile": {
+      "type": "string"
+    }
   },
   "additionalProperties": false
 }

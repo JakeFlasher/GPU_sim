@@ -13,14 +13,30 @@
   },
   "input_contract": {
     "native_trace": "NVBit/SASS -> enhanced protobuf -> sim-trace",
-    "static_sidecars": ["opcode", "control", "launch_resources"],
-    "dynamic_fields": ["pc", "mask", "dependencies", "addresses", "memory_class"],
+    "static_sidecars": [
+      "opcode",
+      "control",
+      "launch_resources"
+    ],
+    "dynamic_fields": [
+      "pc",
+      "mask",
+      "dependencies",
+      "addresses",
+      "memory_class"
+    ],
     "ncu_labels": "score_only_after_prediction"
   },
   "route_quotient": {
     "mode": "abstract_candidate_resource_pools",
     "physical_route_labels": "unknown",
-    "outputs": ["candidate_pools", "service_demand", "earliest_issue", "latest_issue", "expected_issue"],
+    "outputs": [
+      "candidate_pools",
+      "service_demand",
+      "earliest_issue",
+      "latest_issue",
+      "expected_issue"
+    ],
     "calibration": "independent_probe_profile",
     "default_replay_effect": "none"
   },
@@ -29,13 +45,29 @@
     "owner_read_from": "unknown_candidate_set",
     "hardware_dram_completion": "unobserved",
     "model_forwarding": "conservation_only",
-    "cache_control": ["all", "none"]
+    "cache_control": [
+      "all",
+      "none"
+    ]
   },
   "endpoint_projection": {
-    "simulator_frontiers": ["issue", "modeled_event", "launch_envelope", "typed_tail", "visibility", "writeback_service"],
+    "simulator_frontiers": [
+      "issue",
+      "modeled_event",
+      "launch_envelope",
+      "typed_tail",
+      "visibility",
+      "writeback_service"
+    ],
     "ncu_target": "gpc__cycles_elapsed.max",
     "optional_duration_target": "gpu__time_duration",
-    "observer_semantics": ["wait_for_idle", "semaphore_start_end", "serialization", "cache_state", "clock_control"],
+    "observer_semantics": [
+      "wait_for_idle",
+      "semaphore_start_end",
+      "serialization",
+      "cache_state",
+      "clock_control"
+    ],
     "cross_domain_cycle_conversion": "forbidden_without_declared_contract"
   },
   "validation": {
@@ -44,7 +76,12 @@
     "interval_target": 0.9,
     "ncu_same_workload_features": false,
     "ood_policy": "widen_interval_or_refuse",
-    "primary_metrics": ["median_absolute_log_error", "mape", "interval_coverage", "rank_correlation"]
+    "primary_metrics": [
+      "median_absolute_log_error",
+      "mape",
+      "interval_coverage",
+      "rank_correlation"
+    ]
   },
   "supersedes": [
     "docs/sm86_refined_model_config_20260929.json committee-only projection surface",
@@ -58,5 +95,6 @@
     "contract": "docs/PREDICTIVE_CLOSURE.md",
     "plan": "plans/sm86_predictive_closure_implementation_20261001.md",
     "history": "docs/HISTORY.md"
-  }
+  },
+  "service_rate_profile": "docs/sm86_service_rate_profile_20261001.json"
 }

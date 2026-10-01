@@ -99,6 +99,20 @@ the flag; the opt-in document reports candidate-class intervals, simulator
 frontiers, and a simulator-only endpoint descriptor, never NCU labels or a
 physical-pipe assignment.
 
+To add the first abstract service-rate and NCU observer projection, combine
+the flag with the versioned profile:
+
+```bash
+sim/target/release/sim-run --trace TRACE_DIR --control CONTROL_BITS.json \
+  --arch-card arch_profiles/cards/sm_86.json --mode flat \
+  --latent-envelope \
+  --predictive-service-profile docs/sm86_service_rate_profile_20261001.json
+```
+
+The resulting service interval and NCU candidate interval are model outputs;
+the profile is explicitly marked as an abstract/pending-probe source and does
+not alter replay scheduling.
+
 For memory-domain checks, use the reproducible SM86 probe (small first, then
 168-block scaling). It compares trace-derived instruction/load/ATOM/RED sectors
 and cold RMW read demand against the paired NCU CSV without fitting NCU values:

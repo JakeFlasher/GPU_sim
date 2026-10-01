@@ -432,6 +432,7 @@ mod tests {
             native_payload_events: None,
             native_payload_events_path: None,
             latent_envelope: false,
+            predictive_service_profile: None,
         }
     }
 

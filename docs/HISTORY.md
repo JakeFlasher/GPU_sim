@@ -41,7 +41,9 @@
 - **2026-10-01:** physical-pipe endpoint recheck, finite value-lane probes,
   active-surface trim, predictive-closure replacement contract, and the first
   resource-demand implementation slice (typed demand/service profile,
-  `TraceMetrics` adapter, opt-in latent-report emission, and config parser).
+  `TraceMetrics` adapter, cache candidate summary, NCU observer interval,
+  offline probe-profile fitter, opt-in latent-report emission, and config
+  parser).
 
 ## Resume rule
 

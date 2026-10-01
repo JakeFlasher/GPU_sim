@@ -23,6 +23,7 @@ const USAGE: &str = "Usage: sim-run --trace DIR --control FILE --arch-card FILE 
 [--launch-resources FILE] \
 [--native-payload-sidecar FILE] \
 [--native-payload-events FILE] \
+[--predictive-service-profile FILE] \
 [--memory-service-candidates FILE] [--memory-admission-candidates FILE] \
 [--memory-admission-feedback FILE]";
 
@@ -69,6 +70,7 @@ fn parse_args(args: impl IntoIterator<Item = OsString>) -> Result<Option<RunConf
     let mut launch_resources = None;
     let mut native_payload_sidecar = None;
     let mut native_payload_events_path = None;
+    let mut predictive_service_profile = None;
     let mut memory_service_candidates = None;
     let mut memory_admission_candidates = None;
     let mut memory_admission_feedback = None;
@@ -245,6 +247,12 @@ fn parse_args(args: impl IntoIterator<Item = OsString>) -> Result<Option<RunConf
                     "--native-payload-events",
                 )?));
             }
+            value if value == OsStr::new("--predictive-service-profile") => {
+                predictive_service_profile = Some(PathBuf::from(take_value(
+                    &mut args,
+                    "--predictive-service-profile",
+                )?));
+            }
             value if value == OsStr::new("--memory-service-candidates") => {
                 memory_service_candidates = Some(PathBuf::from(take_value(
                     &mut args,
@@ -298,6 +306,7 @@ fn parse_args(args: impl IntoIterator<Item = OsString>) -> Result<Option<RunConf
         native_payload_events: None,
         native_payload_events_path,
         latent_envelope,
+        predictive_service_profile,
         memory_service_candidates,
         memory_admission_candidates,
         memory_admission_feedback,

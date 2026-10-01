@@ -63,8 +63,13 @@ The first implementation seam is the `sim-semantics::latent` resource-demand
 contract and its `sim-sm::TraceMetrics` adapter. The detailed plan is
 [`../plans/sm86_predictive_closure_implementation_20261001.md`](../plans/sm86_predictive_closure_implementation_20261001.md).
 
-The first slice is implemented: `ResourceDemandEnvelope` and
-`ServiceRateProfile` validate abstract demand/calibration data,
-`TraceMetrics::resource_demand_envelope()` preserves candidate bounds, and
-the opt-in latent report emits the demand envelope. Calibration fitting,
-cache candidate-set projection, and endpoint prediction remain later slices.
+The first predictive slice is implemented: `ResourceDemandEnvelope`,
+`ServiceRateProfile`, and `ResourceServiceProjection` validate/project
+abstract demand; `TraceMetrics::resource_demand_envelope()` preserves
+candidate bounds; the opt-in latent report emits service intervals, cache
+candidate summaries, and an NCU observer candidate interval. The checked-in
+profile is explicitly an abstract/pending-probe profile; it does not claim
+silicon calibration or alter default replay. Independent probe data can be
+fit into the same profile format with
+`tools/calibrate_sm86_service_profile.py`; the fitter accepts probe service
+observations, not score-workload NCU rows.

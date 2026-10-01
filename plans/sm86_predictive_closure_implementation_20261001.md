@@ -50,8 +50,9 @@ or a shared silicon/simulator clock.
 
 - Define a small JSON profile for positive service rates, initiation intervals,
   register-bank capacity, memory queue capacity, and endpoint nuisance terms.
-- Add a parser/validator only; calibration fitting remains an offline tool until
-  an independent probe corpus is available.
+- Add a parser/validator plus the offline
+  `tools/calibrate_sm86_service_profile.py` fitter; fitting consumes probe
+  service observations and never score-workload NCU rows.
 - Reject negative, zero-capacity, inverted, or unknown-unit parameters.
 
 ### 4. Cache and value semantics
@@ -95,9 +96,10 @@ native replay.
 
 ## Later slices
 
-- endpoint projection over `TimingReport`;
-- cache candidate-set summary over existing memory counters;
-- offline calibration tooling and family-held-out score harness;
+- richer endpoint projection over `TimingReport` and calibrated observer
+  padding;
+- cache candidate-set refinement over per-event memory counters;
+- independent probe corpus generation and family-held-out score harness;
 - performance/interval report integration after a new independent corpus exists.
 
 ## Stop/research rule

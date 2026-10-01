@@ -32,7 +32,9 @@ use sim_run::emit::{
     emit_launch,
 };
 use sim_semantics::{
-    ClockDomain, EndpointDescriptor, FrontierBound, FrontierVector, LatentFactors, LatentModelError,
+    CacheCandidateSummary, ClockDomain, EndpointDescriptor, FrontierBound, FrontierVector,
+    LatentFactors, LatentModelError, NcuObserverProjection, ResourceServiceProjection,
+    ServiceRateProfile,
 };
 use sim_sm::{
     ControlSidecar, DramBw, DramStats, FastFrontierSummary, FullKernelReplayResult,
@@ -183,6 +185,9 @@ pub struct RunConfig {
     /// Emit the opt-in factorized route/class/frontier envelope. This is a
     /// diagnostic contract and does not alter replay scheduling or scoring.
     pub latent_envelope: bool,
+    /// Optional abstract service-rate profile used only by the opt-in
+    /// predictive envelope. It never changes native replay timing.
+    pub predictive_service_profile: Option<PathBuf>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -200,6 +205,7 @@ struct MemoryAdmissionCandidateDocument {
 }
 
 const MAX_CANDIDATE_FILE_BYTES: u64 = 64 * 1024;
+const MAX_PREDICTIVE_PROFILE_BYTES: u64 = 64 * 1024;
 const MAX_PAYLOAD_EVENT_FILE_BYTES: u64 = 64 * 1024 * 1024;
 const MAX_PAYLOAD_EVENTS: usize = 1_000_000;
 const MAX_PAYLOADS_PER_EVENT: usize = 4096;
@@ -531,6 +537,25 @@ fn load_native_payload_events(path: &Path) -> Result<Vec<L1PayloadAdmissionEvent
 pub(crate) fn load_arch_card(path: &Path) -> Result<ArchCard, RunError> {
     let raw = read_direct_input(path, "architecture card", MAX_DIRECT_CARD_BYTES)?;
     ArchCard::parse(path, &raw).map_err(at("architecture card"))
+}
+
+fn load_predictive_service_profile(
+    path: Option<&PathBuf>,
+) -> Result<Option<ServiceRateProfile>, RunError> {
+    path.map(|path| {
+        let bytes = read_direct_input(
+            path,
+            "predictive service profile",
+            MAX_PREDICTIVE_PROFILE_BYTES,
+        )?;
+        let profile: ServiceRateProfile =
+            strict_json_from_slice(&bytes).map_err(at("predictive service profile"))?;
+        profile
+            .validate()
+            .map_err(at("predictive service profile"))?;
+        Ok(profile)
+    })
+    .transpose()
 }
 
 /// Share the established direct-replay issue constructor between ordinary and
@@ -1051,14 +1076,19 @@ pub struct LatentLaunchEnvelopeReport {
     pub factors: LatentFactors,
     pub class_bounds: sim_sm::PipelineClassEnvelope,
     pub resource_demand: sim_semantics::ResourceDemandEnvelope,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub resource_service_projection: Option<ResourceServiceProjection>,
+    pub cache_candidates: CacheCandidateSummary,
     pub operand_bank_pressure: sim_sm::OperandBankPressure,
     pub frontiers: FrontierVector,
     pub endpoint: EndpointDescriptor,
+    pub ncu_projection: NcuObserverProjection,
 }
 
 fn build_latent_envelope(
     launches: &[LaunchReport],
     ncu_observed: bool,
+    service_profile: Option<&ServiceRateProfile>,
 ) -> Result<LatentEnvelopeReport, RunError> {
     let endpoint = TimingReport::simulator_endpoint_descriptor().map_err(at("latent endpoint"))?;
     let external_endpoint = ncu_observed
@@ -1073,6 +1103,12 @@ fn build_latent_envelope(
                 format!("launch {launch_index} has no simulator timing report"),
             )
         })?;
+        let frontiers = timing.latent_frontiers().map_err(at("latent frontiers"))?;
+        let resource_demand = launch
+            .trace_metrics
+            .physical_pipeline
+            .resource_demand_envelope()
+            .map_err(at("latent resource demand"))?;
         reports.push(LatentLaunchEnvelopeReport {
             launch_index,
             factors: launch
@@ -1084,13 +1120,22 @@ fn build_latent_envelope(
                 .physical_pipeline
                 .class_count_envelope()
                 .map_err(at("latent class bounds"))?,
-            resource_demand: launch
-                .trace_metrics
-                .physical_pipeline
-                .resource_demand_envelope()
-                .map_err(at("latent resource demand"))?,
+            resource_service_projection: service_profile
+                .map(|profile| resource_demand.project_service_cycles(profile))
+                .transpose()
+                .map_err(at("latent service projection"))?,
+            cache_candidates: CacheCandidateSummary::from_topology(
+                launch.trace_metrics.coherence.decoded_global_lines,
+                launch.trace_metrics.coherence.cross_sm_lines,
+                launch.trace_metrics.coherence.cross_sm_read_write_lines,
+                launch.trace_metrics.coherence.cross_sm_write_write_lines,
+            )
+            .map_err(at("latent cache candidates"))?,
+            resource_demand,
             operand_bank_pressure: launch.trace_metrics.operand_bank_pressure.clone(),
-            frontiers: timing.latent_frontiers().map_err(at("latent frontiers"))?,
+            ncu_projection: NcuObserverProjection::from_frontiers(frontiers, service_profile)
+                .map_err(at("latent NCU projection"))?,
+            frontiers,
             endpoint: endpoint.clone(),
         });
     }
@@ -2123,6 +2168,12 @@ pub fn run(config: &RunConfig) -> Result<RunReport, RunError> {
             "--latent-envelope requires native timing replay and cannot combine with --fast-frontier-only",
         ));
     }
+    if config.predictive_service_profile.is_some() && !config.latent_envelope {
+        return Err(RunError::new(
+            "arguments",
+            "--predictive-service-profile requires --latent-envelope",
+        ));
+    }
     if config.ncu_launch.is_some() && config.ncu_csv.is_none() {
         return Err(RunError::new(
             "arguments",
@@ -2134,6 +2185,8 @@ pub fn run(config: &RunConfig) -> Result<RunReport, RunError> {
         .as_ref()
         .map(|path| load_ncu_observation(path, config.ncu_launch))
         .transpose()?;
+    let predictive_service_profile =
+        load_predictive_service_profile(config.predictive_service_profile.as_ref())?;
     if config.cache_scope == CacheScope::StreamL2 && config.memory_mode != MemoryMode::L1L2 {
         return Err(RunError::new(
             "arguments",
@@ -2242,6 +2295,7 @@ pub fn run(config: &RunConfig) -> Result<RunReport, RunError> {
         && config.launch_resources.is_none()
         && config.native_payload_sidecar.is_none()
         && native_payload_events.is_none()
+        && predictive_service_profile.is_none()
     {
         return PreparedReplay::prepare(config, CoverageAdmission::ExistingDirectBehavior)?
             .replay_all_report();
@@ -2644,7 +2698,11 @@ pub fn run(config: &RunConfig) -> Result<RunReport, RunError> {
     #[cfg(feature = "performance-counters")]
     let replay_ns = replay_started.elapsed().as_nanos();
     let latent_envelope = if config.latent_envelope {
-        Some(build_latent_envelope(&launches, ncu_observation.is_some())?)
+        Some(build_latent_envelope(
+            &launches,
+            ncu_observation.is_some(),
+            predictive_service_profile.as_ref(),
+        )?)
     } else {
         None
     };
@@ -2733,6 +2791,7 @@ mod tests {
             native_payload_events: None,
             native_payload_events_path: None,
             latent_envelope: false,
+            predictive_service_profile: None,
         }
     }
 
@@ -3063,6 +3122,32 @@ mod tests {
             ClockDomain::SimulatorCycles
         );
         assert!(!envelope.launches[0].endpoint.same_contract_as(&external));
+    }
+
+    #[test]
+    fn latent_envelope_projects_service_profile_and_ncu_candidate_interval() {
+        let mut config = fixture(MemoryMode::Flat);
+        config.latent_envelope = true;
+        config.predictive_service_profile = Some(
+            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("../../docs/sm86_service_rate_profile_20261001.json"),
+        );
+        let report = run(&config).unwrap();
+        let envelope = report.latent_envelope.unwrap();
+        let launch = &envelope.launches[0];
+        let service = launch
+            .resource_service_projection
+            .as_ref()
+            .expect("profile should emit service projection");
+        assert!(service.upper_cycles >= service.lower_cycles);
+        assert_eq!(
+            launch.ncu_projection.target_metric,
+            "gpc__cycles_elapsed.max"
+        );
+        assert_eq!(
+            launch.ncu_projection.role,
+            "ncu_observer_candidate_interval_not_hardware_endpoint_identity"
+        );
     }
 
     #[test]

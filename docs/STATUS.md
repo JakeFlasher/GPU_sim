@@ -21,7 +21,7 @@ latent domains and predict the declared NCU metric on held-out workloads.
 | Latent envelope | Opt-in route/compiler/cache/timing candidates and endpoint descriptors |
 | Payload path | Opt-in identity-bound sidecar, residency witness, event ingress, and model ledger |
 | Value lane | Finite value-dependent functional forms; unsupported forms refuse |
-| Predictive closure | First resource-demand/service-rate slice is implemented in the opt-in latent report; calibration, cache quotient, and NCU prediction remain |
+| Predictive closure | Opt-in latent report now emits service intervals, cache candidate summaries, and NCU observer candidate intervals; offline probe-profile fitting is available, while the checked-in profile remains abstract/pending-probe |
 
 ## Final NCU comparison records
 
@@ -58,11 +58,12 @@ The active replacement is documented in
 
 ## Immediate implementation
 
-See [`../plans/sm86_predictive_closure_implementation_20261001.md`](../plans/sm86_predictive_closure_implementation_20261001.md). The first slice adds validated resource-demand/service-rate contracts and a `TraceMetrics` adapter. It must preserve ordinary replay and existing output schemas.
+See [`../plans/sm86_predictive_closure_implementation_20261001.md`](../plans/sm86_predictive_closure_implementation_20261001.md). The implemented slice adds validated resource-demand/service-rate contracts, cache candidate summaries, an NCU observer candidate interval, and a `TraceMetrics` adapter. It requires the opt-in service profile and preserves ordinary replay and existing output schemas.
 
 ## Authoritative entry points
 
 - Predictive config: `docs/sm86_predictive_closure_config_20261001.json`
+- Abstract service profile: `docs/sm86_service_rate_profile_20261001.json`
 - Resume: `docs/PROJECT_MEMORY.md`
 - Active replacement: `docs/PREDICTIVE_CLOSURE.md`
 - Implementation plan: `plans/sm86_predictive_closure_implementation_20261001.md`

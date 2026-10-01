@@ -10,6 +10,12 @@ not a score-label or admission workflow:
 ```bash
 PYTHONPATH=tools python3 tools/validate_sm86_predictive_config.py \
   docs/sm86_predictive_closure_config_20261001.json
+
+python3 -m json.tool docs/sm86_service_rate_profile_20261001.json >/dev/null
+
+# Fit a profile only from an independent probe document (no NCU score rows).
+PYTHONPATH=tools python3 tools/calibrate_sm86_service_profile.py \
+  PROBE_SERVICE_OBSERVATIONS.json /tmp/sm86_service_profile.json
 ```
 
 The Rust workspace currently passes its full test suite. A repository-wide

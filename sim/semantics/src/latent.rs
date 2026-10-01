@@ -91,6 +91,10 @@ pub enum LatentModelError {
     EmptyServiceRateProfile,
     #[error("service-rate profile pool {pool} has non-positive capacity or timing")]
     InvalidServiceRate { pool: String },
+    #[error("service-rate profile has no entry for resource pool {pool}")]
+    MissingServiceRate { pool: String },
+    #[error("NCU observer padding interval is inverted")]
+    InvalidObserverPadding,
 }
 
 /// Evidence provenance is intentionally weaker than “hardware truth”.
@@ -747,6 +751,10 @@ pub struct ServiceRateProfile {
     pub schema_version: u32,
     pub source: String,
     pub pools: BTreeMap<String, ServiceRate>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ncu_start_padding_cycles: Option<ServiceCycleInterval>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ncu_end_padding_cycles: Option<ServiceCycleInterval>,
 }
 
 impl ServiceRateProfile {
@@ -776,8 +784,257 @@ impl ServiceRateProfile {
                 return Err(LatentModelError::InvalidServiceRate { pool: pool.clone() });
             }
         }
+        for padding in [self.ncu_start_padding_cycles, self.ncu_end_padding_cycles]
+            .into_iter()
+            .flatten()
+        {
+            if padding.lower_cycles > padding.upper_cycles {
+                return Err(LatentModelError::InvalidObserverPadding);
+            }
+        }
         Ok(())
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ServiceCycleInterval {
+    pub lower_cycles: u64,
+    pub upper_cycles: u64,
+}
+
+/// Projection of abstract demand through a positive service-rate profile.
+/// This is a model interval, not a silicon timing observation.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ResourceServiceProjection {
+    pub schema_version: u32,
+    pub role: &'static str,
+    pub profile_source: String,
+    pub lower_cycles: u64,
+    pub upper_cycles: u64,
+    pub unclassified_events: u64,
+    pub pools: BTreeMap<String, ServiceCycleInterval>,
+}
+
+/// Aggregate cache/coherence candidates that are justified by an address
+/// trace.  These are semantic possibilities, not physical owner or
+/// read-from receipts.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CacheCandidateSummary {
+    pub schema_version: u32,
+    pub role: &'static str,
+    pub decoded_global_lines: u64,
+    pub cross_sm_lines: u64,
+    pub cross_sm_read_write_lines: u64,
+    pub cross_sm_write_write_lines: u64,
+    pub read_from: CandidateDomain,
+    pub owner: CandidateDomain,
+    pub hardware_completion: CandidateDomain,
+}
+
+/// Endpoint-specific NCU projection over simulator frontiers.  Missing
+/// padding deliberately leaves predicted bounds unknown rather than silently
+/// equating simulator completion with NCU completion.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct NcuObserverProjection {
+    pub schema_version: u32,
+    pub role: &'static str,
+    pub target_metric: &'static str,
+    pub simulator_lower_cycles: Option<u64>,
+    pub simulator_upper_cycles: Option<u64>,
+    pub predicted_lower_cycles: Option<u64>,
+    pub predicted_upper_cycles: Option<u64>,
+    pub start_padding_cycles: Option<ServiceCycleInterval>,
+    pub end_padding_cycles: Option<ServiceCycleInterval>,
+    pub conversion: &'static str,
+}
+
+impl NcuObserverProjection {
+    pub fn from_frontiers(
+        frontiers: FrontierVector,
+        profile: Option<&ServiceRateProfile>,
+    ) -> Result<Self, LatentModelError> {
+        frontiers.validate()?;
+        if let Some(profile) = profile {
+            profile.validate()?;
+        }
+        let simulator_lower_cycles = [
+            frontiers.endpoint_end.lower,
+            frontiers.typed_tail.lower,
+            frontiers.modeled_event.lower,
+            frontiers.issue.lower,
+        ]
+        .into_iter()
+        .flatten()
+        .max();
+        let simulator_upper_cycles = [
+            frontiers.endpoint_end.upper,
+            frontiers.typed_tail.upper,
+            frontiers.modeled_event.upper,
+            frontiers.issue.upper,
+        ]
+        .into_iter()
+        .flatten()
+        .max();
+        let start_padding_cycles = profile.and_then(|p| p.ncu_start_padding_cycles);
+        let end_padding_cycles = profile.and_then(|p| p.ncu_end_padding_cycles);
+        let predicted_lower_cycles = match (
+            simulator_lower_cycles,
+            start_padding_cycles,
+            end_padding_cycles,
+        ) {
+            (Some(base), Some(start), Some(end)) => Some(
+                base.checked_add(start.lower_cycles)
+                    .and_then(|value| value.checked_add(end.lower_cycles))
+                    .ok_or_else(|| LatentModelError::ResourceDemandOverflow {
+                        pool: "ncu_observer_lower".to_owned(),
+                    })?,
+            ),
+            _ => None,
+        };
+        let predicted_upper_cycles = match (
+            simulator_upper_cycles,
+            start_padding_cycles,
+            end_padding_cycles,
+        ) {
+            (Some(base), Some(start), Some(end)) => Some(
+                base.checked_add(start.upper_cycles)
+                    .and_then(|value| value.checked_add(end.upper_cycles))
+                    .ok_or_else(|| LatentModelError::ResourceDemandOverflow {
+                        pool: "ncu_observer_upper".to_owned(),
+                    })?,
+            ),
+            _ => None,
+        };
+        Ok(Self {
+            schema_version: RESOURCE_DEMAND_SCHEMA_VERSION,
+            role: "ncu_observer_candidate_interval_not_hardware_endpoint_identity",
+            target_metric: "gpc__cycles_elapsed.max",
+            simulator_lower_cycles,
+            simulator_upper_cycles,
+            predicted_lower_cycles,
+            predicted_upper_cycles,
+            start_padding_cycles,
+            end_padding_cycles,
+            conversion: "declared_cycle_domain_only_no_cuda_event_or_host_conversion",
+        })
+    }
+}
+
+impl CacheCandidateSummary {
+    pub fn from_topology(
+        decoded_global_lines: u64,
+        cross_sm_lines: u64,
+        cross_sm_read_write_lines: u64,
+        cross_sm_write_write_lines: u64,
+    ) -> Result<Self, LatentModelError> {
+        let read_from = if decoded_global_lines == 0 {
+            CandidateDomain::unknown("no decoded global lines")?
+        } else if cross_sm_read_write_lines != 0 || cross_sm_write_write_lines != 0 {
+            CandidateDomain::from_values([
+                "initial_or_prior_write",
+                "same_sm_or_local_forwarding",
+                "cross_sm_write_or_forwarding",
+            ])?
+        } else {
+            CandidateDomain::from_values(["initial_or_prior_write", "same_sm_or_local_forwarding"])?
+        };
+        Ok(Self {
+            schema_version: RESOURCE_DEMAND_SCHEMA_VERSION,
+            role: "trace_topology_candidate_cache_state_not_hardware_receipt",
+            decoded_global_lines,
+            cross_sm_lines,
+            cross_sm_read_write_lines,
+            cross_sm_write_write_lines,
+            read_from,
+            owner: CandidateDomain::unknown("physical cache owner unobserved")?,
+            hardware_completion: CandidateDomain::unknown("hardware completion unobserved")?,
+        })
+    }
+}
+
+impl ResourceDemandEnvelope {
+    pub fn project_service_cycles(
+        &self,
+        profile: &ServiceRateProfile,
+    ) -> Result<ResourceServiceProjection, LatentModelError> {
+        self.validate()?;
+        profile.validate()?;
+        let mut pools = BTreeMap::new();
+        let mut lower_cycles = 0_u64;
+        let mut upper_cycles = 0_u64;
+        let mut max_upper_per_event = 0_u64;
+        for (pool, demand) in &self.pools {
+            let rate = profile
+                .pools
+                .get(pool)
+                .ok_or_else(|| LatentModelError::MissingServiceRate { pool: pool.clone() })?;
+            let lower_work = demand
+                .lower
+                .checked_mul(rate.initiation_interval_cycles)
+                .ok_or_else(|| LatentModelError::ResourceDemandOverflow { pool: pool.clone() })?;
+            let upper_work = demand
+                .upper
+                .checked_mul(rate.initiation_interval_cycles)
+                .ok_or_else(|| LatentModelError::ResourceDemandOverflow { pool: pool.clone() })?;
+            let lower = ceil_div(lower_work, u64::from(rate.capacity))?
+                .checked_add(rate.latency_lower_cycles)
+                .ok_or_else(|| LatentModelError::ResourceDemandOverflow { pool: pool.clone() })?;
+            let upper = ceil_div(upper_work, u64::from(rate.capacity))?
+                .checked_add(rate.latency_upper_cycles)
+                .ok_or_else(|| LatentModelError::ResourceDemandOverflow { pool: pool.clone() })?;
+            max_upper_per_event = max_upper_per_event.max(upper.max(1));
+            lower_cycles = lower_cycles.max(lower);
+            upper_cycles = upper_cycles.max(upper);
+            pools.insert(
+                pool.clone(),
+                ServiceCycleInterval {
+                    lower_cycles: lower,
+                    upper_cycles: upper,
+                },
+            );
+        }
+        let unknown_extra = if self.unclassified_events == 0 {
+            0
+        } else {
+            self.unclassified_events
+                .checked_mul(max_upper_per_event)
+                .ok_or_else(|| LatentModelError::ResourceDemandOverflow {
+                    pool: "unclassified".to_owned(),
+                })?
+        };
+        upper_cycles = upper_cycles.checked_add(unknown_extra).ok_or_else(|| {
+            LatentModelError::ResourceDemandOverflow {
+                pool: "unclassified".to_owned(),
+            }
+        })?;
+        Ok(ResourceServiceProjection {
+            schema_version: RESOURCE_DEMAND_SCHEMA_VERSION,
+            role: "model_service_interval_not_silicon_timing",
+            profile_source: profile.source.clone(),
+            lower_cycles,
+            upper_cycles,
+            unclassified_events: self.unclassified_events,
+            pools,
+        })
+    }
+}
+
+fn ceil_div(numerator: u64, denominator: u64) -> Result<u64, LatentModelError> {
+    if denominator == 0 {
+        return Err(LatentModelError::InvalidServiceRate {
+            pool: "division".to_owned(),
+        });
+    }
+    numerator
+        .checked_add(denominator - 1)
+        .map(|value| value / denominator)
+        .ok_or_else(|| LatentModelError::ResourceDemandOverflow {
+            pool: "division".to_owned(),
+        })
 }
 
 /// One concrete explanation retained in a finite world set.
@@ -1072,6 +1329,8 @@ mod tests {
             schema_version: RESOURCE_DEMAND_SCHEMA_VERSION,
             source: "independent_probe_v1".to_owned(),
             pools,
+            ncu_start_padding_cycles: None,
+            ncu_end_padding_cycles: None,
         };
         assert!(profile.validate().is_ok());
         let encoded = serde_json::to_vec(&profile).unwrap();
@@ -1084,5 +1343,54 @@ mod tests {
             invalid.validate(),
             Err(LatentModelError::InvalidServiceRate { .. })
         ));
+    }
+
+    #[test]
+    fn resource_demand_projects_to_model_service_interval_without_route_selection() {
+        let mut pools = BTreeMap::new();
+        pools.insert("alu".to_owned(), ResourceDemandInterval::interval(2, 4));
+        let demand = ResourceDemandEnvelope::new(4, 0, pools, EvidenceKind::Hypothesis).unwrap();
+        let mut rates = BTreeMap::new();
+        rates.insert(
+            "alu".to_owned(),
+            ServiceRate {
+                capacity: 2,
+                initiation_interval_cycles: 2,
+                latency_lower_cycles: 1,
+                latency_upper_cycles: 3,
+            },
+        );
+        let profile = ServiceRateProfile {
+            schema_version: RESOURCE_DEMAND_SCHEMA_VERSION,
+            source: "independent_probe_v1".to_owned(),
+            pools: rates,
+            ncu_start_padding_cycles: Some(ServiceCycleInterval {
+                lower_cycles: 0,
+                upper_cycles: 2,
+            }),
+            ncu_end_padding_cycles: Some(ServiceCycleInterval {
+                lower_cycles: 1,
+                upper_cycles: 3,
+            }),
+        };
+        let projection = demand.project_service_cycles(&profile).unwrap();
+        assert_eq!(projection.lower_cycles, 3);
+        assert_eq!(projection.upper_cycles, 7);
+        assert_eq!(projection.role, "model_service_interval_not_silicon_timing");
+        let frontiers = FrontierVector {
+            modeled_event: FrontierBound::interval(10, 12).unwrap(),
+            ..FrontierVector::default()
+        };
+        let observer = NcuObserverProjection::from_frontiers(frontiers, Some(&profile)).unwrap();
+        assert_eq!(observer.predicted_lower_cycles, Some(11));
+        assert_eq!(observer.predicted_upper_cycles, Some(17));
+    }
+
+    #[test]
+    fn cache_candidate_summary_keeps_owner_and_completion_unknown() {
+        let summary = CacheCandidateSummary::from_topology(4, 2, 1, 0).unwrap();
+        assert!(summary.owner.is_unknown());
+        assert!(summary.hardware_completion.is_unknown());
+        assert_eq!(summary.read_from.may_values().unwrap().len(), 3);
     }
 }
