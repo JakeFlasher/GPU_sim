@@ -6,9 +6,10 @@ open only the relevant technical page.
 | Need | Document |
 |---|---|
 | Modeling scope and evaluation | [Predictive contract](PREDICTIVE_CLOSURE.md) |
-| Next implementation | [Active plan](../plans/sm86_predictive_closure_implementation_20261001.md) |
+| Next implementation | [Reification/refactor plan](../plans/sm86_reification_refactor_20261001.md) |
 | Build, trace, replay | [Runbook](runbook_host.md) |
 | Focused checks | [Testing](testing.md) |
+| Review history | [Review/refactor history](REVIEW_HISTORY.md) |
 | Architecture and source map | [Architecture](ARCHITECTURE.md), [components](COMPONENTS.md) |
 | Cards and predictive profiles | [Configuration](archprofile.md) |
 | Latent and payload APIs | [Contract](sm86_factorized_latent_contract_20260930.md) |

@@ -319,6 +319,53 @@ def compare_boundary_traces(event_path: pathlib.Path, dense_path: pathlib.Path) 
     }
 
 
+def summarize_native_boundary_refinement(path: pathlib.Path, mode: str) -> dict[str, Any]:
+    """Summarize typed native-boundary closure for an exact-fallback check.
+
+    The reference stream is an independently replayed ``SmCore`` projection;
+    it is not a macro-model oracle.  A record is eligible for preservation only
+    when its typed boundary declares ``complete``.  Any omitted or incomplete
+    field is counted as an exact-replay fallback reason instead of being
+    replaced by a finite estimate.
+    """
+    records = 0
+    complete = 0
+    fallback = 0
+    unknown_fields: dict[str, int] = {}
+    for row in _trace_records(path, mode):
+        if row.get("kind") != "event":
+            continue
+        records += 1
+        boundary = row.get("typed_boundary")
+        completeness = boundary.get("completeness") if isinstance(boundary, dict) else None
+        if completeness == "complete" or (
+            isinstance(completeness, dict) and set(completeness) == {"complete"}
+        ):
+            complete += 1
+            continue
+        fallback += 1
+        if isinstance(completeness, dict) and set(completeness) == {"incomplete"}:
+            values = completeness.get("incomplete", {}).get("unknown", [])
+            if isinstance(values, list):
+                fields = [value for value in values if isinstance(value, str)]
+            else:
+                fields = ["malformed_incomplete_unknown_list"]
+        elif isinstance(completeness, dict) and set(completeness) == {"refused"}:
+            reason = completeness.get("refused", {}).get("reason")
+            fields = [f"refused:{reason}" if isinstance(reason, str) else "refused"]
+        else:
+            fields = ["typed_boundary_completeness_missing_or_malformed"]
+        for field in fields:
+            unknown_fields[field] = unknown_fields.get(field, 0) + 1
+    return {
+        "native_boundary_records": records,
+        "complete_boundary_records": complete,
+        "exact_fallback_boundary_records": fallback,
+        "exact_fallback_required": fallback != 0,
+        "unknown_or_refused_fields": dict(sorted(unknown_fields.items())),
+    }
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--command-file", type=pathlib.Path, action="append", default=[])

@@ -12,7 +12,10 @@ import textwrap
 import unittest
 
 from tools.semantic_events import sm86_reference_compare
-from tools.semantic_events.sm86_reference_compare import compare_boundary_traces
+from tools.semantic_events.sm86_reference_compare import (
+    compare_boundary_traces,
+    summarize_native_boundary_refinement,
+)
 
 
 class BoundaryTraceTests(unittest.TestCase):
@@ -107,6 +110,40 @@ class BoundaryTraceTests(unittest.TestCase):
         dense = self.write("dense", [first, first])
         with self.assertRaisesRegex(RuntimeError, "splice bounds"):
             compare_boundary_traces(event, dense)
+
+    def test_native_boundary_summary_forces_fallback_on_unknown_state(self):
+        event = self.write(
+            "event",
+            [
+                {
+                    "kind": "event",
+                    "typed_boundary": {
+                        "completeness": {
+                            "incomplete": {
+                                "unknown": ["shared_l2_transient_state", "unmodeled_completion_tails"]
+                            }
+                        }
+                    },
+                },
+                {
+                    "kind": "event",
+                    "typed_boundary": {"completeness": "complete"},
+                },
+            ],
+        )
+        self.assertEqual(
+            summarize_native_boundary_refinement(event, "event"),
+            {
+                "native_boundary_records": 2,
+                "complete_boundary_records": 1,
+                "exact_fallback_boundary_records": 1,
+                "exact_fallback_required": True,
+                "unknown_or_refused_fields": {
+                    "shared_l2_transient_state": 1,
+                    "unmodeled_completion_tails": 1,
+                },
+            },
+        )
 
     def test_failed_run_removes_partial_trace(self):
         trace = self.root / "partial.jsonl"

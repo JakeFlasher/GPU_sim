@@ -62,7 +62,8 @@
         "candidate_regions", "certified_regions", "reified_regions",
         "candidate_instructions", "collapsed_instructions", "exact_execution_steps",
         "summarized_execution_steps", "maximum_exact_final_cycle",
-        "maximum_summarized_final_cycle", "terminal_state_matches", "refusal_reasons"
+        "maximum_summarized_final_cycle", "terminal_state_matches", "coverage",
+        "refusal_reasons"
       ],
       "properties": {
         "contract": {"const": "sm86_fast_exact_scalar_regions_v1"},
@@ -80,7 +81,23 @@
         "maximum_exact_final_cycle": {"$ref": "#/$defs/u64"},
         "maximum_summarized_final_cycle": {"$ref": "#/$defs/u64"},
         "terminal_state_matches": {"type": "boolean"},
+        "coverage": {"$ref": "#/$defs/coverage"},
         "refusal_reasons": {"type": "object", "additionalProperties": {"$ref": "#/$defs/u64"}}
+      }
+    },
+    "coverage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "trace_records", "candidate_records", "summarized_records",
+        "reified_records", "uncovered_records"
+      ],
+      "properties": {
+        "trace_records": {"$ref": "#/$defs/u64"},
+        "candidate_records": {"$ref": "#/$defs/u64"},
+        "summarized_records": {"$ref": "#/$defs/u64"},
+        "reified_records": {"$ref": "#/$defs/u64"},
+        "uncovered_records": {"$ref": "#/$defs/u64"}
       }
     }
   }

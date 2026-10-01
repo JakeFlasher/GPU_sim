@@ -303,6 +303,10 @@ pub struct CoherenceObservation {
     pub cross_sm_read_write_sectors: u64,
     pub cross_sm_write_write_sectors: u64,
     pub unknown_sm_or_line_records: u64,
+    /// Count of global records carrying the producer's warp-local
+    /// instrumentation-order token. This never orders different warps/SMs.
+    pub instrumentation_order_records: u64,
+    pub instrumentation_order_missing_records: u64,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -596,6 +600,7 @@ impl TraceMetrics {
         effective: u8,
         kind: AccessKind,
         sector_arena: &[i64],
+        instrumentation_order: Option<u64>,
     ) -> Result<(), crate::IssueError> {
         if effective == 0 {
             return Ok(());
@@ -655,6 +660,11 @@ impl TraceMetrics {
                 return Ok(());
             }
         };
+        if instrumentation_order.is_some() {
+            add(&mut self.coherence.instrumentation_order_records, 1)?;
+        } else {
+            add(&mut self.coherence.instrumentation_order_missing_records, 1)?;
+        }
         let start = off;
         let end = off
             .checked_add(usize::from(len))
@@ -1761,6 +1771,7 @@ mod tests {
                 token: CacheOpToken::LdgECa,
             },
             &sectors,
+            None,
         )
         .unwrap();
         m.observe_coherence(
@@ -1768,6 +1779,7 @@ mod tests {
             32,
             AccessKind::GlobalStore { off: 0, len: 1 },
             &sectors,
+            None,
         )
         .unwrap();
         m.observe_coherence(
@@ -1780,6 +1792,7 @@ mod tests {
                 l2_requests: 1,
             },
             &sectors,
+            None,
         )
         .unwrap();
         m.finish_coherence().unwrap();
@@ -1797,8 +1810,14 @@ mod tests {
     #[test]
     fn coherence_domain_retains_unknown_sm_records_for_fail_closed_consumers() {
         let mut m = TraceMetrics::default();
-        m.observe_coherence(None, 0xff, AccessKind::GlobalStore { off: 0, len: 1 }, &[0])
-            .unwrap();
+        m.observe_coherence(
+            None,
+            0xff,
+            AccessKind::GlobalStore { off: 0, len: 1 },
+            &[0],
+            None,
+        )
+        .unwrap();
         assert_eq!(m.coherence.unknown_sm_or_line_records, 1);
         assert_eq!(m.coherence.cross_sm_sector_overlap, 0);
     }
@@ -1816,6 +1835,7 @@ mod tests {
                 l2_requests: 1,
             },
             &[0],
+            None,
         )
         .unwrap();
         assert_eq!(m.coherence.decoded_global_lines, 0);

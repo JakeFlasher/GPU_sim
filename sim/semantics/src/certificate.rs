@@ -45,6 +45,13 @@ pub enum ReifyReason {
     UnknownResidency,
     OccupancyNotExclusive,
     IncomingPipelineWork,
+    /// Per-warp sequence ordinals are not a globally comparable issue order.
+    /// Without an independent scheduler/arbitration witness, a multi-warp
+    /// interval must remain on the exact path.
+    CrossWarpOrderUnknown,
+    /// No independently derived dependency/effect witness covers the
+    /// candidate interval; producer-supplied booleans are insufficient.
+    MissingIndependentEvidence,
     ArithmeticOverflow,
 }
 

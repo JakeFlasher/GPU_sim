@@ -29,7 +29,8 @@ decoder.
 - [Build, capture, and replay](docs/runbook_host.md)
 - [Architecture and components](docs/ARCHITECTURE.md) · [configuration](docs/archprofile.md)
 - [Documentation map](docs/README.md)
-- [Active implementation plan](plans/sm86_predictive_closure_implementation_20261001.md)
+- [Review/refactor history](docs/REVIEW_HISTORY.md)
+- [Active reification/refactor plan](plans/sm86_reification_refactor_20261001.md)
 
 From the repository root:
 

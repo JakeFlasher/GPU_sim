@@ -16,6 +16,7 @@
         "properties": {
           "capacity": {"type": "integer", "minimum": 1},
           "initiation_interval_cycles": {"type": "integer", "minimum": 1},
+          "capacity_already_applied": {"type": "boolean"},
           "latency_lower_cycles": {"type": "integer", "minimum": 1},
           "latency_upper_cycles": {"type": "integer", "minimum": 1}
         },

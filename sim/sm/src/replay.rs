@@ -72,8 +72,8 @@ use sim_mem::{
 };
 
 use crate::causal_frontier::{
-    CausalFrontierInstruction, CausalFrontierReport, CausalFrontierResidency,
-    summarize_with_residency,
+    CausalFrontierEvidence, CausalFrontierInstruction, CausalFrontierReport,
+    CausalFrontierResidency, summarize_with_residency,
 };
 #[cfg(feature = "campaign")]
 use crate::evidence::AdmittedLaunchEvidence;
@@ -923,7 +923,7 @@ pub struct SmActiveObservationFrontier {
 /// Fast-path evidence produced directly from an admitted SM86 trace. This is
 /// deliberately a diagnostic projection: only homogeneous, control-clean,
 /// dependency-free scalar regions with no memory role are offered to the
-/// causal-frontier certificate; every other warp is retained as detailed or
+/// model-local interval summary; every other warp is retained as detailed or
 /// refused. It does not replace native replay timing or prove silicon behavior.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct FastFrontierSummary {
@@ -942,7 +942,21 @@ pub struct FastFrontierSummary {
     pub maximum_exact_final_cycle: u64,
     pub maximum_summarized_final_cycle: u64,
     pub terminal_state_matches: bool,
+    /// Full-trace denominator for selective compression. Candidate records
+    /// are those inside a scalar segment; reified records are candidates that
+    /// could not be collapsed; uncovered records are every prefix/suffix or
+    /// noncandidate record left on the exact path.
+    pub coverage: FastFrontierCoverage,
     pub refusal_reasons: BTreeMap<String, u64>,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
+pub struct FastFrontierCoverage {
+    pub trace_records: u64,
+    pub candidate_records: u64,
+    pub summarized_records: u64,
+    pub reified_records: u64,
+    pub uncovered_records: u64,
 }
 
 fn fast_scalar_segments(
@@ -972,7 +986,10 @@ fn fast_scalar_segments(
                  program: &mut Vec<CausalFrontierInstruction>,
                  prior_destinations: &mut Vec<SassRegister>,
                  segment_start: &mut Option<usize>| {
-        if program.len() >= 2 && *segment_start == Some(0) {
+        // A valid entry boundary may begin after an unmodelled prefix. Do not
+        // silently discard a safe suffix merely because its local trace index
+        // is nonzero; coverage accounting records the prefix separately.
+        if program.len() >= 2 && segment_start.is_some() {
             segments.push(std::mem::take(program));
         } else {
             program.clear();
@@ -1152,6 +1169,22 @@ pub fn fast_frontier_for_trace(
     if !matches!(&extracted.coverage, ExtractedCoverage::Full(_)) {
         return Err(ReplayError::FastFrontierRequiresFullCoverage);
     }
+    let trace_records = extracted
+        .per_sm_blocks
+        .values()
+        .flat_map(|blocks| blocks.iter())
+        .flat_map(|block| block.warps.iter())
+        .try_fold(0_u64, |count, warp| {
+            count
+                .checked_add(u64::try_from(warp.insts.len()).map_err(|_| {
+                    ReplayError::FastFrontier {
+                        detail: "trace record count exceeds u64".to_owned(),
+                    }
+                })?)
+                .ok_or_else(|| ReplayError::FastFrontier {
+                    detail: "trace record count overflows u64".to_owned(),
+                })
+        })?;
     let active_missing = extracted
         .trace_metrics
         .instructions
@@ -1175,6 +1208,9 @@ pub fn fast_frontier_for_trace(
         });
     }
     let mut summary = FastFrontierSummary {
+        // Keep the v1 wire token for compatibility. Its semantics are now
+        // documented as descriptor-model self-equivalence; native refinement
+        // will receive a distinct contract in a later schema revision.
         contract: "sm86_fast_exact_scalar_regions_v1",
         architecture: schedule.arch.token(),
         blocks_seen: 0,
@@ -1190,6 +1226,11 @@ pub fn fast_frontier_for_trace(
         maximum_exact_final_cycle: 0,
         maximum_summarized_final_cycle: 0,
         terminal_state_matches: true,
+        coverage: FastFrontierCoverage {
+            trace_records,
+            uncovered_records: trace_records,
+            ..FastFrontierCoverage::default()
+        },
         refusal_reasons: BTreeMap::new(),
     };
     let add = |counter: &'static str, value: &mut u64, addend: u64| {
@@ -1298,15 +1339,42 @@ pub fn fast_frontier_for_trace(
                     u64::try_from(segment.len()).map_err(|_| ReplayError::FastFrontier {
                         detail: "scalar segment length exceeds u64".to_owned(),
                     })?;
-                let report: CausalFrontierReport = summarize_with_residency(
-                    &[segment],
-                    CausalFrontierResidency::Complete {
+                summary.coverage.candidate_records = summary
+                    .coverage
+                    .candidate_records
+                    .checked_add(segment_len)
+                    .ok_or_else(|| ReplayError::FastFrontier {
+                        detail: "candidate coverage count overflows u64".to_owned(),
+                    })?;
+                // A suffix discovered after an unmodelled prefix has no
+                // captured entry pipeline/scoreboard state. Retain it in the
+                // coverage denominator, but force the exact/model-local
+                // refusal path until a typed entry boundary is supplied.
+                let closed_entry = segment[0].sequence == 0;
+                if !closed_entry {
+                    increment_fast_reason(
+                        &mut summary.refusal_reasons,
+                        "missing_entry_boundary_state",
+                    )?;
+                }
+                let residency = if closed_entry {
+                    CausalFrontierResidency::CompleteWithEvidence {
                         physical_warps: residents.clone(),
-                    },
-                )
-                .map_err(|error| ReplayError::FastFrontier {
-                    detail: error.to_string(),
-                })?;
+                        evidence: vec![CausalFrontierEvidence {
+                            physical_warp: segment[0].physical_warp,
+                            first_sequence: segment[0].sequence,
+                            last_sequence: segment[segment.len() - 1].sequence,
+                        }],
+                    }
+                } else {
+                    CausalFrontierResidency::Unknown
+                };
+                let report: CausalFrontierReport =
+                    summarize_with_residency(std::slice::from_ref(&segment), residency).map_err(
+                        |error| ReplayError::FastFrontier {
+                            detail: error.to_string(),
+                        },
+                    )?;
                 // The generic analyzer only increments candidate_regions after
                 // it sees a fully summarizable interval. Keep a producer-side
                 // candidate/refusal witness for scalar runs rejected by a
@@ -1351,6 +1419,25 @@ pub fn fast_frontier_for_trace(
                     &mut summary.collapsed_instructions,
                     report.collapsed_instructions,
                 )?;
+                summary.coverage.summarized_records = summary
+                    .coverage
+                    .summarized_records
+                    .checked_add(report.collapsed_instructions)
+                    .ok_or_else(|| ReplayError::FastFrontier {
+                        detail: "summarized coverage count overflows u64".to_owned(),
+                    })?;
+                let reified_records = segment_len
+                    .checked_sub(report.collapsed_instructions)
+                    .ok_or_else(|| ReplayError::FastFrontier {
+                        detail: "collapsed coverage exceeds candidate segment".to_owned(),
+                    })?;
+                summary.coverage.reified_records = summary
+                    .coverage
+                    .reified_records
+                    .checked_add(reified_records)
+                    .ok_or_else(|| ReplayError::FastFrontier {
+                        detail: "reified coverage count overflows u64".to_owned(),
+                    })?;
                 add(
                     "exact_execution_steps",
                     &mut summary.exact_execution_steps,
@@ -1377,6 +1464,13 @@ pub fn fast_frontier_for_trace(
             }
         }
     }
+    summary.coverage.uncovered_records = summary
+        .coverage
+        .trace_records
+        .checked_sub(summary.coverage.candidate_records)
+        .ok_or_else(|| ReplayError::FastFrontier {
+            detail: "candidate coverage exceeds trace record count".to_owned(),
+        })?;
     Ok(summary)
 }
 
@@ -2541,6 +2635,7 @@ fn extract_per_sm_blocks(
                         inst.predicate_on_lanes(),
                         kind,
                         &sectors,
+                        inst.instrumentation_order(),
                     )?;
                 }
                 if active_mask_present {
@@ -12434,5 +12529,17 @@ mod fast_frontier_unit_tests {
             ..schedule
         };
         assert!(fast_scalar_segments(&warp(&[0, 0]), &unknown).is_empty());
+    }
+
+    #[test]
+    fn fast_scalar_segments_retain_a_safe_suffix_after_an_unmodelled_prefix() {
+        let schedule = schedule();
+        let mut prefix_then_scalar = warp(&[0, 16, 32]);
+        prefix_then_scalar.insts[0].kind = AccessKind::Shared { wavefronts: 1 };
+        let segments = fast_scalar_segments(&prefix_then_scalar, &schedule);
+        assert_eq!(segments.len(), 1);
+        assert_eq!(segments[0].len(), 2);
+        assert_eq!(segments[0][0].sequence, 1);
+        assert_eq!(segments[0][1].sequence, 2);
     }
 }

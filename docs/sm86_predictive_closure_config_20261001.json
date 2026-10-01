@@ -87,7 +87,7 @@
     "status": "docs/STATUS.md",
     "memory": "docs/PROJECT_MEMORY.md",
     "contract": "docs/PREDICTIVE_CLOSURE.md",
-    "plan": "plans/sm86_predictive_closure_implementation_20261001.md"
+    "plan": "plans/sm86_reification_refactor_20261001.md"
   },
   "service_rate_profile": "docs/sm86_service_rate_profile_20261001.json",
   "scope_policy": "analytical_or_statistical_modeling_with_unobservable_internals_black_box"

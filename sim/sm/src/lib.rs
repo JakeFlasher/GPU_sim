@@ -82,8 +82,8 @@ pub mod sass_operands;
 mod system;
 
 pub use causal_frontier::{
-    CausalFrontierError, CausalFrontierInstruction, CausalFrontierReport, CausalFrontierResidency,
-    summarize as summarize_causal_frontier,
+    CausalFrontierError, CausalFrontierEvidence, CausalFrontierInstruction, CausalFrontierReport,
+    CausalFrontierResidency, summarize as summarize_causal_frontier,
     summarize_with_residency as summarize_causal_frontier_with_residency,
 };
 pub use control_bits::{
@@ -119,15 +119,16 @@ pub use program::{
     FunctionSchedule, IssueSlot, OpClass, PipelineClass, ProgramError, build_schedules,
 };
 pub use replay::{
-    CoResidency, FastFrontierSummary, FrontEndCounters, FullCounterEstimatorProvenance,
-    FullCoverageSource, FullKernelReplayResult, FullLaunchCoverage, FullLaunchSetCounters,
-    FullLaunchSetDeclaration, FullLaunchSetDeclarationError, FullLaunchTimingDiagnostic,
-    GpcObservationFrontier, KernelReplayOutcome, LaunchSetAggregationError,
-    LaunchSetCounterComponent, LaunchSetScalarCounter, LaunchSetScope, LaunchSetScopeError,
-    ModeledCompletionFrontier, ReplayConfiguration, ReplayError, ReplayLaunchCoverageBinding,
-    ReplayLaunchCoverageBindingError, ReplayMemMode, ReplaySessionError,
-    SmActiveObservationFrontier, StreamL2ReplaySession, aggregate_full_launch_set,
-    fast_frontier_for_trace, replay_trace_kernel, replay_trace_kernel_with_l1_payload_events,
+    CoResidency, FastFrontierCoverage, FastFrontierSummary, FrontEndCounters,
+    FullCounterEstimatorProvenance, FullCoverageSource, FullKernelReplayResult, FullLaunchCoverage,
+    FullLaunchSetCounters, FullLaunchSetDeclaration, FullLaunchSetDeclarationError,
+    FullLaunchTimingDiagnostic, GpcObservationFrontier, KernelReplayOutcome,
+    LaunchSetAggregationError, LaunchSetCounterComponent, LaunchSetScalarCounter, LaunchSetScope,
+    LaunchSetScopeError, ModeledCompletionFrontier, ReplayConfiguration, ReplayError,
+    ReplayLaunchCoverageBinding, ReplayLaunchCoverageBindingError, ReplayMemMode,
+    ReplaySessionError, SmActiveObservationFrontier, StreamL2ReplaySession,
+    aggregate_full_launch_set, fast_frontier_for_trace, replay_trace_kernel,
+    replay_trace_kernel_with_l1_payload_events,
     replay_trace_kernel_with_memory_admission_candidates,
     replay_trace_kernel_with_memory_admission_feedback,
     replay_trace_kernel_with_memory_service_candidates,

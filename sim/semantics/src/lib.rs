@@ -21,12 +21,12 @@ pub use certificate::{
 };
 pub use dram::{DramBoundaryState, DramStateError};
 pub use latent::{
-    CacheCandidateSummary, CandidateDomain, ClockDomain, EndpointDescriptor, EventKey,
-    EvidenceKind, FrontierBound, FrontierVector, LATENT_SCHEMA_VERSION, LatentFactors,
+    CacheCandidateSummary, CacheWitnessDomains, CandidateDomain, ClockDomain, EndpointDescriptor,
+    EventKey, EvidenceKind, FrontierBound, FrontierVector, LATENT_SCHEMA_VERSION, LatentFactors,
     LatentModelError, LatentSummary, LatentWorld, LatentWorldSet, MechanismEnvelope, MustMay,
     NcuObserverProjection, RESOURCE_DEMAND_SCHEMA_VERSION, ResourceDemandEnvelope,
-    ResourceDemandInterval, ResourceServiceProjection, ServiceCycleInterval, ServiceRate,
-    ServiceRateProfile,
+    ResourceDemandInterval, ResourceServiceProjection, ServiceComposition, ServiceCycleInterval,
+    ServiceOverlapMode, ServiceRate, ServiceRateProfile,
 };
 pub use observation::{
     OBSERVATION_SCHEMA_VERSION, ObservationContract, ObservationContractError,
@@ -50,10 +50,12 @@ pub use state::{
     TypedResponseIdentity, TypedResponseKind,
 };
 pub use transform::{
-    ExternalInputFrontier, IdentityBoundaryTransformer, ObservationDelta, StateTransformer,
-    SummaryProof, TRANSFORM_SCHEMA_VERSION, TransformCheckError, TransformError, TransformInput,
-    TransformInterval, TransformIntervalError, TransformReifyReason, TransformerDecision,
-    TransformerOutput, TypedEventTransition, check_proof,
+    ExternalInputFrontier, IdentityBoundaryTransformer, NativeBoundaryRefinementDecision,
+    NativeBoundaryReifyReason, NativeBoundarySide, ObservationDelta, RegionContractError,
+    StateTransformer, SummaryProof, TRANSFORM_SCHEMA_VERSION, TransformCheckError, TransformError,
+    TransformInput, TransformInterval, TransformIntervalError, TransformReifyReason,
+    TransformerDecision, TransformerOutput, TypedEventTransition, TypedRegionContract, check_proof,
+    compare_native_boundary_projection, compare_native_region_contract,
 };
 
 pub const SCHEMA_VERSION: u32 = 1;

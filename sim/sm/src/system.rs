@@ -142,7 +142,7 @@ use sim_semantics::{
     TypedAdmissionWitness, TypedCoreBoundaryState, TypedEventBoundaryRecord, TypedEventIdentity,
     TypedEventPayload, TypedFillIdentity, TypedL2Source, TypedMemoryOperation, TypedMemoryOrigin,
     TypedMemoryRequest, TypedObservationContract, TypedPendingEvent, TypedResponseIdentity,
-    TypedResponseKind,
+    TypedResponseKind, compare_native_region_contract,
 };
 
 /// Stable response identity used only at the typed boundary. The process-local
@@ -1774,6 +1774,12 @@ impl ReferenceTrace {
             completeness: typed_l2_power_completeness.clone(),
         };
         typed_boundary.validate_structure()?;
+        // The fast scalar recurrence currently has no complete typed macro
+        // boundary. Record that conservative decision beside the independent
+        // native projection; this is a diagnostic exact-fallback result and
+        // does not alter replay or become an execution prerequisite.
+        let native_boundary_refinement =
+            compare_native_region_contract(None, &typed_boundary, &typed_boundary);
         // `typed_boundary` is the canonical state. The old formatted core/L2
         // projections were diagnostic duplicates and made every boundary much
         // larger; the versioned root retains all typed fields and the legacy
@@ -1785,6 +1791,7 @@ impl ReferenceTrace {
             "target": target,
             "event": event,
             "typed_boundary": typed_boundary,
+            "native_boundary_refinement": native_boundary_refinement,
         }))
     }
 

@@ -32,9 +32,9 @@ use sim_run::emit::{
     emit_launch,
 };
 use sim_semantics::{
-    CacheCandidateSummary, ClockDomain, EndpointDescriptor, FrontierBound, FrontierVector,
-    LatentFactors, LatentModelError, NcuObserverProjection, ResourceServiceProjection,
-    ServiceRateProfile,
+    CacheCandidateSummary, CacheWitnessDomains, ClockDomain, EndpointDescriptor, FrontierBound,
+    FrontierVector, LatentFactors, LatentModelError, NcuObserverProjection,
+    ResourceServiceProjection, ServiceComposition, ServiceOverlapMode, ServiceRateProfile,
 };
 use sim_sm::{
     ControlSidecar, DramBw, DramStats, FastFrontierSummary, FullKernelReplayResult,
@@ -1078,6 +1078,8 @@ pub struct LatentLaunchEnvelopeReport {
     pub resource_demand: sim_semantics::ResourceDemandEnvelope,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub resource_service_projection: Option<ResourceServiceProjection>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub service_composition: Option<ServiceComposition>,
     pub cache_candidates: CacheCandidateSummary,
     pub operand_bank_pressure: sim_sm::OperandBankPressure,
     pub frontiers: FrontierVector,
@@ -1103,12 +1105,60 @@ fn build_latent_envelope(
                 format!("launch {launch_index} has no simulator timing report"),
             )
         })?;
-        let frontiers = timing.latent_frontiers().map_err(at("latent frontiers"))?;
+        let mut frontiers = timing.latent_frontiers().map_err(at("latent frontiers"))?;
         let resource_demand = launch
             .trace_metrics
             .physical_pipeline
             .resource_demand_envelope()
             .map_err(at("latent resource demand"))?;
+        let cache_candidates = CacheCandidateSummary::from_topology_with_witnesses(
+            launch.trace_metrics.coherence.decoded_global_lines,
+            launch.trace_metrics.coherence.cross_sm_lines,
+            launch.trace_metrics.coherence.cross_sm_read_write_lines,
+            launch.trace_metrics.coherence.cross_sm_write_write_lines,
+            CacheWitnessDomains::from_trace_observation(
+                launch.trace_metrics.sectors_decoded,
+                launch.trace_metrics.coherence.unknown_sm_or_line_records,
+                launch.trace_metrics.coherence.instrumentation_order_records,
+                launch
+                    .trace_metrics
+                    .coherence
+                    .instrumentation_order_missing_records,
+            )
+            .map_err(at("latent cache witnesses"))?,
+        )
+        .map_err(at("latent cache candidates"))?;
+        frontiers.cache_history = cache_candidates.history_frontier();
+        let resource_service_projection = service_profile
+            .map(|profile| resource_demand.project_service_cycles(profile))
+            .transpose()
+            .map_err(at("latent service projection"))?;
+        let service_composition = resource_service_projection
+            .as_ref()
+            .map(|service| {
+                ServiceComposition::new(
+                    frontiers.modeled_event,
+                    FrontierBound {
+                        lower: Some(service.lower_cycles),
+                        upper: Some(service.upper_cycles),
+                    },
+                    ServiceOverlapMode::SerialAfterAdmission,
+                )
+            })
+            .transpose()
+            .map_err(at("latent service composition"))?;
+        if resource_service_projection.is_some() {
+            frontiers.resource_service = service_composition
+                .as_ref()
+                .map(|composition| composition.completion)
+                .unwrap_or_else(FrontierBound::unknown);
+            // The endpoint is elapsed from cycle zero and must include the
+            // newly composed service stage plus any active typed tail.
+            frontiers.endpoint_end = frontiers.simulator_completion();
+            frontiers
+                .validate()
+                .map_err(at("latent service frontier"))?;
+        }
         reports.push(LatentLaunchEnvelopeReport {
             launch_index,
             factors: launch
@@ -1120,17 +1170,9 @@ fn build_latent_envelope(
                 .physical_pipeline
                 .class_count_envelope()
                 .map_err(at("latent class bounds"))?,
-            resource_service_projection: service_profile
-                .map(|profile| resource_demand.project_service_cycles(profile))
-                .transpose()
-                .map_err(at("latent service projection"))?,
-            cache_candidates: CacheCandidateSummary::from_topology(
-                launch.trace_metrics.coherence.decoded_global_lines,
-                launch.trace_metrics.coherence.cross_sm_lines,
-                launch.trace_metrics.coherence.cross_sm_read_write_lines,
-                launch.trace_metrics.coherence.cross_sm_write_write_lines,
-            )
-            .map_err(at("latent cache candidates"))?,
+            resource_service_projection,
+            service_composition,
+            cache_candidates,
             resource_demand,
             operand_bank_pressure: launch.trace_metrics.operand_bank_pressure.clone(),
             ncu_projection: NcuObserverProjection::from_frontiers(frontiers, service_profile)
@@ -1309,12 +1351,16 @@ impl TimingReport {
         let vector = FrontierVector {
             issue: FrontierBound::exact(self.diagnostic_last_issue_cycles),
             modeled_event,
+            resource_service: FrontierBound::unknown(),
             launch_envelope: FrontierBound::unknown(),
             typed_tail,
+            cache_history: FrontierBound::unknown(),
             visibility: FrontierBound::unknown(),
             writeback_service: FrontierBound::unknown(),
-            endpoint_start: FrontierBound::unknown(),
-            endpoint_end: FrontierBound::unknown(),
+            // Native replay starts at cycle zero. The completion endpoint
+            // includes required tails, not just the last processed event.
+            endpoint_start: FrontierBound::exact(0),
+            endpoint_end: typed_tail,
         };
         vector.validate()?;
         Ok(vector)
@@ -1325,9 +1371,9 @@ impl TimingReport {
     pub fn simulator_endpoint_descriptor() -> Result<EndpointDescriptor, LatentModelError> {
         EndpointDescriptor::new(
             ClockDomain::SimulatorCycles,
-            "first_simulator_modeled_event",
-            "terminal_simulator_modeled_event",
-            vec!["simulator_issue_and_event_queue".to_owned()],
+            "simulator_cycle_origin_zero",
+            "simulator_completion_including_required_retirement_tails",
+            vec!["simulator_issue_event_queue_and_required_retirement_tails".to_owned()],
             vec![
                 "host_submission".to_owned(),
                 "ncu_frontend_wait_for_idle".to_owned(),
@@ -3139,15 +3185,26 @@ mod tests {
             .resource_service_projection
             .as_ref()
             .expect("profile should emit service projection");
+        let composition = launch
+            .service_composition
+            .as_ref()
+            .expect("profile should emit an explicit service composition");
         assert!(service.upper_cycles >= service.lower_cycles);
+        assert_eq!(
+            composition.service,
+            FrontierBound::interval(service.lower_cycles, service.upper_cycles).unwrap()
+        );
+        assert_eq!(composition.completion, launch.frontiers.resource_service);
         assert_eq!(
             launch.ncu_projection.target_metric,
             "gpc__cycles_elapsed.max"
         );
         assert_eq!(
             launch.ncu_projection.role,
-            "ncu_observer_candidate_interval_not_hardware_endpoint_identity"
+            "ncu_observer_elapsed_interval_not_hardware_endpoint_identity"
         );
+        assert!(launch.cache_candidates.fence_scope.is_unknown());
+        assert!(launch.cache_candidates.line_generation.is_unknown());
     }
 
     #[test]
@@ -3166,6 +3223,14 @@ mod tests {
         assert_eq!(summary.blocks_seen, 1);
         assert_eq!(summary.warps_seen, 1);
         assert!(summary.terminal_state_matches);
+        assert_eq!(
+            summary.coverage.trace_records,
+            summary.coverage.candidate_records + summary.coverage.uncovered_records
+        );
+        assert_eq!(
+            summary.coverage.candidate_records,
+            summary.coverage.summarized_records + summary.coverage.reified_records
+        );
     }
 
     #[test]

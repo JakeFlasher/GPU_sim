@@ -469,8 +469,16 @@ impl Default for FrontierBound {
 pub struct FrontierVector {
     pub issue: FrontierBound,
     pub modeled_event: FrontierBound,
+    /// Completion of an abstract service schedule composed after the
+    /// simulator's modeled-event frontier. This is model-local state, not a
+    /// physical-pipe or hardware-completion observation.
+    pub resource_service: FrontierBound,
     pub launch_envelope: FrontierBound,
     pub typed_tail: FrontierBound,
+    /// Unresolved cache-history service/visibility tail. This is an
+    /// uncertainty frontier, never a claim that topology overlap is a
+    /// coherence bottleneck.
+    pub cache_history: FrontierBound,
     pub visibility: FrontierBound,
     pub writeback_service: FrontierBound,
     pub endpoint_start: FrontierBound,
@@ -482,8 +490,10 @@ impl FrontierVector {
         for bound in [
             self.issue,
             self.modeled_event,
+            self.resource_service,
             self.launch_envelope,
             self.typed_tail,
+            self.cache_history,
             self.visibility,
             self.writeback_service,
             self.endpoint_start,
@@ -519,6 +529,146 @@ impl FrontierVector {
             }
         }
         Ok(())
+    }
+
+    /// Compose a model-local service interval after a known frontier.
+    /// Unknown sides remain unknown; no sentinel represents an unbounded
+    /// upper side.
+    pub fn compose_after(
+        base: FrontierBound,
+        service: ServiceCycleInterval,
+    ) -> Result<FrontierBound, LatentModelError> {
+        base.validate()?;
+        if service.lower_cycles > service.upper_cycles {
+            return Err(LatentModelError::InvertedFrontier {
+                lower: Some(service.lower_cycles),
+                upper: Some(service.upper_cycles),
+            });
+        }
+        let lower = match base.lower {
+            Some(value) => Some(value.checked_add(service.lower_cycles).ok_or_else(|| {
+                LatentModelError::ResourceDemandOverflow {
+                    pool: "frontier_service_lower".to_owned(),
+                }
+            })?),
+            None => None,
+        };
+        let upper = match base.upper {
+            Some(value) => Some(value.checked_add(service.upper_cycles).ok_or_else(|| {
+                LatentModelError::ResourceDemandOverflow {
+                    pool: "frontier_service_upper".to_owned(),
+                }
+            })?),
+            None => None,
+        };
+        let result = FrontierBound { lower, upper };
+        result.validate()?;
+        Ok(result)
+    }
+
+    /// Compose two frontiers whose overlap policy is explicit. A scalar
+    /// `max(...)` is only valid for the parallel case; serial admission/service
+    /// edges use checked interval addition.
+    pub fn compose_with_overlap(
+        admission: FrontierBound,
+        service: FrontierBound,
+        mode: ServiceOverlapMode,
+    ) -> Result<FrontierBound, LatentModelError> {
+        admission.validate()?;
+        service.validate()?;
+        match mode {
+            ServiceOverlapMode::SerialAfterAdmission => {
+                let lower = match (admission.lower, service.lower) {
+                    (Some(left), Some(right)) => {
+                        Some(left.checked_add(right).ok_or_else(|| {
+                            LatentModelError::ResourceDemandOverflow {
+                                pool: "service_serial_lower".to_owned(),
+                            }
+                        })?)
+                    }
+                    _ => None,
+                };
+                let upper = match (admission.upper, service.upper) {
+                    (Some(left), Some(right)) => {
+                        Some(left.checked_add(right).ok_or_else(|| {
+                            LatentModelError::ResourceDemandOverflow {
+                                pool: "service_serial_upper".to_owned(),
+                            }
+                        })?)
+                    }
+                    _ => None,
+                };
+                let result = FrontierBound { lower, upper };
+                result.validate()?;
+                Ok(result)
+            }
+            ServiceOverlapMode::ParallelPoolMax => {
+                let lower = match (admission.lower, service.lower) {
+                    (Some(left), Some(right)) => Some(left.max(right)),
+                    _ => None,
+                };
+                let upper = match (admission.upper, service.upper) {
+                    (Some(left), Some(right)) => Some(left.max(right)),
+                    _ => None,
+                };
+                let result = FrontierBound { lower, upper };
+                result.validate()?;
+                Ok(result)
+            }
+        }
+    }
+
+    /// Compute elapsed duration from an endpoint start/end interval. The
+    /// caller must establish that both bounds use one clock/origin contract.
+    pub fn elapsed(
+        start: FrontierBound,
+        end: FrontierBound,
+    ) -> Result<FrontierBound, LatentModelError> {
+        start.validate()?;
+        end.validate()?;
+        let lower = match (end.lower, start.upper) {
+            (Some(end), Some(start)) => Some(end.saturating_sub(start)),
+            _ => None,
+        };
+        let upper = match (end.upper, start.lower) {
+            (Some(end), Some(start)) if end >= start => Some(end - start),
+            (Some(_), Some(_)) => {
+                return Err(LatentModelError::FrontierOrder {
+                    earlier: "endpoint_start",
+                    later: "endpoint_end",
+                });
+            }
+            _ => None,
+        };
+        let result = FrontierBound { lower, upper };
+        result.validate()?;
+        Ok(result)
+    }
+
+    /// Completion interval for a declared simulator endpoint. A frontier
+    /// with a known lower side and unknown upper side is an active unbounded
+    /// tail and prevents a finite upper completion bound.
+    pub fn simulator_completion(&self) -> FrontierBound {
+        let bounds = [
+            self.issue,
+            self.modeled_event,
+            self.resource_service,
+            self.typed_tail,
+            self.cache_history,
+            self.writeback_service,
+            self.visibility,
+            self.endpoint_end,
+        ];
+        let lower = bounds.iter().filter_map(|bound| bound.lower).max();
+        let active_unbounded = bounds
+            .iter()
+            .any(|bound| bound.lower.is_some() && bound.upper.is_none());
+        let upper = if active_unbounded {
+            None
+        } else {
+            bounds.iter().filter_map(|bound| bound.upper).max()
+        };
+        FrontierBound { lower, upper }
     }
 }
 
@@ -740,6 +890,11 @@ impl ResourceDemandEnvelope {
 pub struct ServiceRate {
     pub capacity: u32,
     pub initiation_interval_cycles: u64,
+    /// True when the fitted initiation interval already includes the measured
+    /// effect of the probe's service capacity. This prevents projecting an
+    /// aggregate throughput slope and dividing by capacity a second time.
+    #[serde(default)]
+    pub capacity_already_applied: bool,
     pub latency_lower_cycles: u64,
     pub latency_upper_cycles: u64,
 }
@@ -803,6 +958,38 @@ pub struct ServiceCycleInterval {
     pub upper_cycles: u64,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ServiceOverlapMode {
+    SerialAfterAdmission,
+    ParallelPoolMax,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ServiceComposition {
+    pub admission: FrontierBound,
+    pub service: FrontierBound,
+    pub completion: FrontierBound,
+    pub overlap: ServiceOverlapMode,
+}
+
+impl ServiceComposition {
+    pub fn new(
+        admission: FrontierBound,
+        service: FrontierBound,
+        overlap: ServiceOverlapMode,
+    ) -> Result<Self, LatentModelError> {
+        let completion = FrontierVector::compose_with_overlap(admission, service, overlap)?;
+        Ok(Self {
+            admission,
+            service,
+            completion,
+            overlap,
+        })
+    }
+}
+
 /// Projection of abstract demand through a positive service-rate profile.
 /// This is a model interval, not a silicon timing observation.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -815,6 +1002,8 @@ pub struct ResourceServiceProjection {
     pub upper_cycles: u64,
     pub unclassified_events: u64,
     pub pools: BTreeMap<String, ServiceCycleInterval>,
+    pub pool_capacities: BTreeMap<String, u32>,
+    pub composition: ServiceOverlapMode,
 }
 
 /// Aggregate cache/coherence candidates that are justified by an address
@@ -832,6 +1021,71 @@ pub struct CacheCandidateSummary {
     pub read_from: CandidateDomain,
     pub owner: CandidateDomain,
     pub hardware_completion: CandidateDomain,
+    /// Temporal order is separate from topology overlap. It remains unknown
+    /// unless an independent per-access order witness is supplied.
+    pub temporal_order: CandidateDomain,
+    /// Fence scope/order is not inferred from a line-sharing count.
+    pub fence_scope: CandidateDomain,
+    /// Allocation generation/read-from identity is explicit when available;
+    /// line ids alone do not establish it.
+    pub line_generation: CandidateDomain,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CacheWitnessDomains {
+    pub temporal_order: CandidateDomain,
+    pub fence_scope: CandidateDomain,
+    pub line_generation: CandidateDomain,
+}
+
+impl CacheWitnessDomains {
+    pub fn unobserved() -> Result<Self, LatentModelError> {
+        Ok(Self {
+            temporal_order: CandidateDomain::unknown("cross-SM access order unobserved")?,
+            fence_scope: CandidateDomain::unknown("fence scope/order unobserved")?,
+            line_generation: CandidateDomain::unknown(
+                "line generation/read-from identity unobserved",
+            )?,
+        })
+    }
+
+    fn validate(&self) -> Result<(), LatentModelError> {
+        self.temporal_order.validate()?;
+        self.fence_scope.validate()?;
+        self.line_generation.validate()
+    }
+
+    /// Derive only the order witness the compact trace actually carries:
+    /// per-SM record order when all decoded records have bounded identity.
+    /// Cross-SM arbitration, fences, and allocation generations remain
+    /// unknown even in this case.
+    pub fn from_trace_observation(
+        sectors_decoded: bool,
+        unknown_sm_or_line_records: u64,
+        instrumentation_order_records: u64,
+        instrumentation_order_missing_records: u64,
+    ) -> Result<Self, LatentModelError> {
+        let temporal_order = if sectors_decoded
+            && unknown_sm_or_line_records == 0
+            && instrumentation_order_records != 0
+            && instrumentation_order_missing_records == 0
+        {
+            CandidateDomain::with_evidence(
+                ["warp_local_instrumentation_order"],
+                EvidenceKind::Observed,
+            )?
+        } else {
+            CandidateDomain::unknown("within-SM trace order unavailable")?
+        };
+        Ok(Self {
+            temporal_order,
+            fence_scope: CandidateDomain::unknown("fence scope/order unobserved")?,
+            line_generation: CandidateDomain::unknown(
+                "line generation/read-from identity unobserved",
+            )?,
+        })
+    }
 }
 
 /// Endpoint-specific NCU projection over simulator frontiers.  Missing
@@ -861,24 +1115,26 @@ impl NcuObserverProjection {
         if let Some(profile) = profile {
             profile.validate()?;
         }
-        let simulator_lower_cycles = [
-            frontiers.endpoint_end.lower,
-            frontiers.typed_tail.lower,
-            frontiers.modeled_event.lower,
-            frontiers.issue.lower,
-        ]
-        .into_iter()
-        .flatten()
-        .max();
-        let simulator_upper_cycles = [
-            frontiers.endpoint_end.upper,
-            frontiers.typed_tail.upper,
-            frontiers.modeled_event.upper,
-            frontiers.issue.upper,
-        ]
-        .into_iter()
-        .flatten()
-        .max();
+        let endpoint_fields_present = frontiers.endpoint_start.lower.is_some()
+            || frontiers.endpoint_start.upper.is_some()
+            || frontiers.endpoint_end.lower.is_some()
+            || frontiers.endpoint_end.upper.is_some();
+        let simulator_completion = if endpoint_fields_present {
+            // An explicit endpoint pair denotes elapsed duration. A known
+            // endpoint must not hide an active unknown typed-tail upper.
+            let mut completion_end = frontiers.endpoint_end;
+            if (frontiers.typed_tail.upper.is_none() && frontiers.typed_tail.lower.is_some())
+                || (frontiers.cache_history.upper.is_none()
+                    && frontiers.cache_history.lower.is_some())
+            {
+                completion_end.upper = None;
+            }
+            FrontierVector::elapsed(frontiers.endpoint_start, completion_end)?
+        } else {
+            frontiers.simulator_completion()
+        };
+        let simulator_lower_cycles = simulator_completion.lower;
+        let simulator_upper_cycles = simulator_completion.upper;
         let start_padding_cycles = profile.and_then(|p| p.ncu_start_padding_cycles);
         let end_padding_cycles = profile.and_then(|p| p.ncu_end_padding_cycles);
         let predicted_lower_cycles = match (
@@ -907,11 +1163,12 @@ impl NcuObserverProjection {
                         pool: "ncu_observer_upper".to_owned(),
                     })?,
             ),
+            // An active unknown simulator tail has no finite upper endpoint.
             _ => None,
         };
         Ok(Self {
             schema_version: RESOURCE_DEMAND_SCHEMA_VERSION,
-            role: "ncu_observer_candidate_interval_not_hardware_endpoint_identity",
+            role: "ncu_observer_elapsed_interval_not_hardware_endpoint_identity",
             target_metric: "gpc__cycles_elapsed.max",
             simulator_lower_cycles,
             simulator_upper_cycles,
@@ -919,7 +1176,7 @@ impl NcuObserverProjection {
             predicted_upper_cycles,
             start_padding_cycles,
             end_padding_cycles,
-            conversion: "declared_cycle_domain_only_no_cuda_event_or_host_conversion",
+            conversion: "declared_elapsed_cycle_domain_only_no_cuda_event_or_host_conversion",
         })
     }
 }
@@ -931,6 +1188,23 @@ impl CacheCandidateSummary {
         cross_sm_read_write_lines: u64,
         cross_sm_write_write_lines: u64,
     ) -> Result<Self, LatentModelError> {
+        Self::from_topology_with_witnesses(
+            decoded_global_lines,
+            cross_sm_lines,
+            cross_sm_read_write_lines,
+            cross_sm_write_write_lines,
+            CacheWitnessDomains::unobserved()?,
+        )
+    }
+
+    pub fn from_topology_with_witnesses(
+        decoded_global_lines: u64,
+        cross_sm_lines: u64,
+        cross_sm_read_write_lines: u64,
+        cross_sm_write_write_lines: u64,
+        witnesses: CacheWitnessDomains,
+    ) -> Result<Self, LatentModelError> {
+        witnesses.validate()?;
         let read_from = if decoded_global_lines == 0 {
             CandidateDomain::unknown("no decoded global lines")?
         } else if cross_sm_read_write_lines != 0 || cross_sm_write_write_lines != 0 {
@@ -952,7 +1226,26 @@ impl CacheCandidateSummary {
             read_from,
             owner: CandidateDomain::unknown("physical cache owner unobserved")?,
             hardware_completion: CandidateDomain::unknown("hardware completion unobserved")?,
+            temporal_order: witnesses.temporal_order,
+            fence_scope: witnesses.fence_scope,
+            line_generation: witnesses.line_generation,
         })
+    }
+
+    /// Convert unresolved cache history into a separate conservative frontier.
+    /// A shared line does not add a positive delay claim; it only removes a
+    /// finite upper endpoint when owner/read-from/completion state is absent.
+    pub fn history_frontier(&self) -> FrontierBound {
+        if self.cross_sm_lines == 0 {
+            FrontierBound::unknown()
+        } else if self.owner.is_unknown()
+            || self.read_from.is_unknown()
+            || self.hardware_completion.is_unknown()
+        {
+            FrontierBound::lower_bound(0)
+        } else {
+            FrontierBound::exact(0)
+        }
     }
 }
 
@@ -964,6 +1257,7 @@ impl ResourceDemandEnvelope {
         self.validate()?;
         profile.validate()?;
         let mut pools = BTreeMap::new();
+        let mut pool_capacities = BTreeMap::new();
         let mut lower_cycles = 0_u64;
         let mut upper_cycles = 0_u64;
         let mut max_upper_per_event = 0_u64;
@@ -980,10 +1274,20 @@ impl ResourceDemandEnvelope {
                 .upper
                 .checked_mul(rate.initiation_interval_cycles)
                 .ok_or_else(|| LatentModelError::ResourceDemandOverflow { pool: pool.clone() })?;
-            let lower = ceil_div(lower_work, u64::from(rate.capacity))?
+            let lower_service = if rate.capacity_already_applied {
+                lower_work
+            } else {
+                ceil_div(lower_work, u64::from(rate.capacity))?
+            };
+            let upper_service = if rate.capacity_already_applied {
+                upper_work
+            } else {
+                ceil_div(upper_work, u64::from(rate.capacity))?
+            };
+            let lower = lower_service
                 .checked_add(rate.latency_lower_cycles)
                 .ok_or_else(|| LatentModelError::ResourceDemandOverflow { pool: pool.clone() })?;
-            let upper = ceil_div(upper_work, u64::from(rate.capacity))?
+            let upper = upper_service
                 .checked_add(rate.latency_upper_cycles)
                 .ok_or_else(|| LatentModelError::ResourceDemandOverflow { pool: pool.clone() })?;
             max_upper_per_event = max_upper_per_event.max(upper.max(1));
@@ -996,6 +1300,7 @@ impl ResourceDemandEnvelope {
                     upper_cycles: upper,
                 },
             );
+            pool_capacities.insert(pool.clone(), rate.capacity);
         }
         let unknown_extra = if self.unclassified_events == 0 {
             0
@@ -1019,6 +1324,11 @@ impl ResourceDemandEnvelope {
             upper_cycles,
             unclassified_events: self.unclassified_events,
             pools,
+            pool_capacities,
+            // Resource pools are alternative/parallel service frontiers in
+            // this projection; admission-to-observer composition is selected
+            // separately by `ServiceComposition`.
+            composition: ServiceOverlapMode::ParallelPoolMax,
         })
     }
 }
@@ -1259,6 +1569,79 @@ mod tests {
     }
 
     #[test]
+    fn unknown_typed_tail_prevents_finite_completion_upper_bound() {
+        let vector = FrontierVector {
+            issue: FrontierBound::exact(10),
+            modeled_event: FrontierBound::exact(20),
+            typed_tail: FrontierBound::lower_bound(20),
+            ..FrontierVector::default()
+        };
+        let completion = vector.simulator_completion();
+        assert_eq!(completion.lower, Some(20));
+        assert_eq!(completion.upper, None);
+        let observer = NcuObserverProjection::from_frontiers(vector, None).unwrap();
+        assert_eq!(observer.simulator_lower_cycles, Some(20));
+        assert_eq!(observer.simulator_upper_cycles, None);
+        assert_eq!(observer.predicted_upper_cycles, None);
+    }
+
+    #[test]
+    fn elapsed_duration_is_invariant_to_absolute_origin_shift() {
+        let first = FrontierVector::elapsed(
+            FrontierBound::interval(0, 10).unwrap(),
+            FrontierBound::interval(100, 120).unwrap(),
+        )
+        .unwrap();
+        let shifted = FrontierVector::elapsed(
+            FrontierBound::interval(900, 910).unwrap(),
+            FrontierBound::interval(1000, 1020).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(first, shifted);
+        assert_eq!(first, FrontierBound::interval(90, 120).unwrap());
+    }
+
+    #[test]
+    fn observer_projection_uses_elapsed_endpoint_pair_not_absolute_end() {
+        let profile = ServiceRateProfile {
+            schema_version: RESOURCE_DEMAND_SCHEMA_VERSION,
+            source: "probe".to_owned(),
+            pools: BTreeMap::from([(
+                "alu".to_owned(),
+                ServiceRate {
+                    capacity: 1,
+                    initiation_interval_cycles: 1,
+                    capacity_already_applied: false,
+                    latency_lower_cycles: 1,
+                    latency_upper_cycles: 1,
+                },
+            )]),
+            ncu_start_padding_cycles: Some(ServiceCycleInterval {
+                lower_cycles: 0,
+                upper_cycles: 0,
+            }),
+            ncu_end_padding_cycles: Some(ServiceCycleInterval {
+                lower_cycles: 0,
+                upper_cycles: 0,
+            }),
+        };
+        let mut first = FrontierVector {
+            endpoint_start: FrontierBound::exact(0),
+            endpoint_end: FrontierBound::exact(100),
+            ..FrontierVector::default()
+        };
+        let first_projection =
+            NcuObserverProjection::from_frontiers(first, Some(&profile)).unwrap();
+        first.endpoint_start = FrontierBound::exact(900);
+        first.endpoint_end = FrontierBound::exact(1000);
+        let shifted_projection =
+            NcuObserverProjection::from_frontiers(first, Some(&profile)).unwrap();
+        assert_eq!(first_projection.simulator_lower_cycles, Some(100));
+        assert_eq!(first_projection.simulator_upper_cycles, Some(100));
+        assert_eq!(first_projection, shifted_projection);
+    }
+
+    #[test]
     fn endpoint_identity_blocks_cross_domain_comparisons() {
         let raw = EndpointDescriptor::new(
             ClockDomain::DeviceTimer,
@@ -1321,6 +1704,7 @@ mod tests {
             ServiceRate {
                 capacity: 1,
                 initiation_interval_cycles: 1,
+                capacity_already_applied: false,
                 latency_lower_cycles: 1,
                 latency_upper_cycles: 2,
             },
@@ -1356,6 +1740,7 @@ mod tests {
             ServiceRate {
                 capacity: 2,
                 initiation_interval_cycles: 2,
+                capacity_already_applied: false,
                 latency_lower_cycles: 1,
                 latency_upper_cycles: 3,
             },
@@ -1387,10 +1772,143 @@ mod tests {
     }
 
     #[test]
+    fn capacity_adjusted_probe_slope_is_not_divided_by_capacity_again() {
+        let demand = ResourceDemandEnvelope::new(
+            4,
+            0,
+            BTreeMap::from([("alu".to_owned(), ResourceDemandInterval::interval(4, 4))]),
+            EvidenceKind::Hypothesis,
+        )
+        .unwrap();
+        let profile = ServiceRateProfile {
+            schema_version: RESOURCE_DEMAND_SCHEMA_VERSION,
+            source: "independent_throughput_probe_v2".to_owned(),
+            pools: BTreeMap::from([(
+                "alu".to_owned(),
+                ServiceRate {
+                    capacity: 2,
+                    initiation_interval_cycles: 3,
+                    capacity_already_applied: true,
+                    latency_lower_cycles: 2,
+                    latency_upper_cycles: 2,
+                },
+            )]),
+            ncu_start_padding_cycles: None,
+            ncu_end_padding_cycles: None,
+        };
+        let projection = demand.project_service_cycles(&profile).unwrap();
+        assert_eq!(projection.lower_cycles, 14);
+        assert_eq!(
+            projection.pools["alu"],
+            ServiceCycleInterval {
+                lower_cycles: 14,
+                upper_cycles: 14,
+            }
+        );
+    }
+
+    #[test]
+    fn service_composition_makes_overlap_policy_explicit() {
+        let admission = FrontierBound::exact(100);
+        // Serial mode receives a duration; parallel mode receives an
+        // already-originated absolute service frontier. The explicit mode
+        // prevents silently adding and maxing values from different domains.
+        let service = FrontierBound::interval(20, 30).unwrap();
+        let serial =
+            ServiceComposition::new(admission, service, ServiceOverlapMode::SerialAfterAdmission)
+                .unwrap();
+        let parallel = ServiceComposition::new(
+            admission,
+            FrontierBound::interval(110, 130).unwrap(),
+            ServiceOverlapMode::ParallelPoolMax,
+        )
+        .unwrap();
+        assert_eq!(
+            serial.completion,
+            FrontierBound::interval(120, 130).unwrap()
+        );
+        assert_eq!(
+            parallel.completion,
+            FrontierBound::interval(110, 130).unwrap()
+        );
+        assert_ne!(serial.completion, parallel.completion);
+    }
+
+    #[test]
     fn cache_candidate_summary_keeps_owner_and_completion_unknown() {
         let summary = CacheCandidateSummary::from_topology(4, 2, 1, 0).unwrap();
         assert!(summary.owner.is_unknown());
         assert!(summary.hardware_completion.is_unknown());
+        assert!(summary.temporal_order.is_unknown());
+        assert!(summary.fence_scope.is_unknown());
+        assert!(summary.line_generation.is_unknown());
         assert_eq!(summary.read_from.may_values().unwrap().len(), 3);
+    }
+
+    #[test]
+    fn reordered_topology_stays_unknown_without_temporal_witness() {
+        let witnesses = CacheWitnessDomains::unobserved().unwrap();
+        let forward =
+            CacheCandidateSummary::from_topology_with_witnesses(4, 2, 1, 0, witnesses.clone())
+                .unwrap();
+        let reordered =
+            CacheCandidateSummary::from_topology_with_witnesses(4, 2, 1, 0, witnesses).unwrap();
+        assert_eq!(forward.temporal_order, reordered.temporal_order);
+        assert!(forward.temporal_order.is_unknown());
+        assert!(forward.line_generation.is_unknown());
+    }
+
+    #[test]
+    fn supplied_generation_and_fence_witnesses_do_not_promote_owner_or_completion() {
+        let witnesses = CacheWitnessDomains {
+            temporal_order: CandidateDomain::candidate("trace_order_v1").unwrap(),
+            fence_scope: CandidateDomain::candidate("device_scope_fence").unwrap(),
+            line_generation: CandidateDomain::candidate("generation_7").unwrap(),
+        };
+        let summary =
+            CacheCandidateSummary::from_topology_with_witnesses(4, 2, 1, 0, witnesses).unwrap();
+        assert_eq!(summary.temporal_order.must_value(), Some("trace_order_v1"));
+        assert_eq!(summary.fence_scope.must_value(), Some("device_scope_fence"));
+        assert_eq!(summary.line_generation.must_value(), Some("generation_7"));
+        assert!(summary.owner.is_unknown());
+        assert!(summary.hardware_completion.is_unknown());
+    }
+
+    #[test]
+    fn trace_order_witness_is_only_warp_local() {
+        let witnessed = CacheWitnessDomains::from_trace_observation(true, 0, 4, 0).unwrap();
+        assert_eq!(
+            witnessed.temporal_order.must_value(),
+            Some("warp_local_instrumentation_order")
+        );
+        let incomplete = CacheWitnessDomains::from_trace_observation(true, 0, 4, 1).unwrap();
+        assert!(incomplete.temporal_order.is_unknown());
+    }
+
+    #[test]
+    fn generation_change_is_retained_as_a_witness_not_a_new_owner_claim() {
+        let make = |generation: &str| CacheWitnessDomains {
+            temporal_order: CandidateDomain::candidate("warp_local_order").unwrap(),
+            fence_scope: CandidateDomain::candidate("none_observed").unwrap(),
+            line_generation: CandidateDomain::candidate(generation).unwrap(),
+        };
+        let first =
+            CacheCandidateSummary::from_topology_with_witnesses(2, 1, 1, 0, make("generation_1"))
+                .unwrap();
+        let second =
+            CacheCandidateSummary::from_topology_with_witnesses(2, 1, 1, 0, make("generation_2"))
+                .unwrap();
+        assert_ne!(first.line_generation, second.line_generation);
+        assert!(first.owner.is_unknown());
+        assert!(second.hardware_completion.is_unknown());
+    }
+
+    #[test]
+    fn topology_overlap_removes_only_the_cache_history_upper_bound() {
+        let summary = CacheCandidateSummary::from_topology(4, 2, 1, 0).unwrap();
+        assert_eq!(summary.history_frontier(), FrontierBound::lower_bound(0));
+        let no_overlap = CacheCandidateSummary::from_topology(4, 0, 0, 0).unwrap();
+        assert!(no_overlap.history_frontier().lower.is_none());
+        assert!(no_overlap.history_frontier().upper.is_none());
     }
 }

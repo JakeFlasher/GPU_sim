@@ -21,22 +21,33 @@ are deleted rather than skipped.
 |---|---|
 | Native replay | SM86 instruction, memory, and event replay; separate frontiers |
 | Custom frontends | Bounded functional/resource experiments, separate from native timing |
-| Predictive extension | Opt-in resource/service intervals, cache-topology candidates, NCU candidate projection |
-| Calibration | Profile loader and offline fitter exist; supplied rates/padding are uncalibrated examples |
+| Predictive extension | Opt-in resource/service intervals composed into a model-local frontier, cache-topology candidates, NCU candidate projection |
+| Calibration | Profile loader and offline fitter exist; v2 separates latency/throughput/queue/occupancy/contention probes and marks capacity-adjusted slopes; supplied rates remain uncalibrated |
 | Accuracy | This extension has no demonstrated family-held-out cycle accuracy or interval coverage yet |
+| Reification | Typed region contract and native-boundary comparator preserve only complete exact projections; incomplete canary boundaries fall back to replay |
+| Selective coverage | Multi-warp/order and completion-multiplicity guards refuse conservatively; fast-frontier output includes full-trace candidate/reified/uncovered counts |
+| Service composition | Typed serial admission/service composition reaches the elapsed observer projection; parallel pool policy remains explicit and model-local |
+| Cache candidates | Warp-local instrumentation order can be observed when decoded identities are complete; cross-warp order, fence scope, line generation, owner/read-from, and hardware completion remain explicit unknowns |
+| Design evaluation | Three-family calibration/development/held-out NCU join runs post-prediction; model-local service ranking and 16:1 witnessed descriptor-step reduction are reported, while native memory-heavy families remain exact/refused |
 | Payload/value work | Bounded model-local identity, ordering, and conservation checks |
 
-Native replay is unchanged by the predictive flag. Physical routing, compiler
+Native replay is unchanged by the predictive flag. Service demand now feeds an
+explicit model-local completion frontier before observer projection; unknown
+typed tails remove finite upper bounds. Physical routing, compiler
 implementation, and internal cache state are black-box variables, not milestones.
 Topology summaries are not causal read-from histories. Endpoint projections
 require an explicit statistical/modeling assumption rather than timer equality.
 
 ## Next work
 
-Use the [active plan](../plans/sm86_predictive_closure_implementation_20261001.md):
-correct unsupported interval assumptions, calibrate on separate probe data, and
-score untouched workload families. Report error, coverage, OOD behavior, and
-runtime together; no accuracy claim follows from a passing unit suite.
+Use the [reification/refactor plan](../plans/sm86_reification_refactor_20261001.md):
+the interval/endpoint/service-composition, conservative native-boundary
+fallback, order/multiplicity/full-span coverage, identifiable-probe, cache
+witness, and staged evaluation slices are implemented. Second-round work is to
+expand the workload corpus, obtain a native-preserved region with a closed
+typed entry, and test ranking stability under independent uncertainty sweeps.
+Report error, coverage, OOD behavior, compression, memory, and runtime
+together; no accuracy claim follows from a passing unit suite.
 
 ## Retained measurements
 

@@ -1,9 +1,11 @@
-//! Resource-aware causal-frontier analysis for explicit replay descriptors.
+//! Resource-aware model-local frontier analysis for explicit replay
+//! descriptors.
 //!
-//! This is an analysis seam, not a second SM executor. A producer supplies the
-//! dependency and completion facts that the native replay already knows; the
-//! analyzer refuses to summarize unknown effects and preserves the same local
-//! issue/completion envelope when it does summarize an interval.
+//! This is an analysis seam, not a second SM executor and not a native causal
+//! proof. A producer supplies dependency and completion facts for a descriptor
+//! model; the analyzer refuses to summarize unknown effects and preserves the
+//! same *descriptor-model* issue/completion envelope when it does summarize an
+//! interval. Native state refinement is a later, separate contract.
 
 use std::collections::{HashMap, HashSet};
 use std::time::Instant;
@@ -27,6 +29,9 @@ pub struct CausalFrontierInstruction {
     pub latency_cycles: u64,
     pub initiation_interval_cycles: u64,
     pub in_flight_capacity: u32,
+    /// Event-cardinality metadata only. The recurrence owns one completion
+    /// token; values other than one are never summarized and are reported as
+    /// explicit exact-path reifications.
     pub completion_units: u32,
     pub control_clean: bool,
     pub dependency_free: bool,
@@ -160,6 +165,28 @@ pub enum CausalFrontierResidency {
     Complete {
         physical_warps: Vec<i32>,
     },
+    /// Complete residency plus an independently derived witness for every
+    /// interval eligible for the descriptor summary. The legacy `Complete`
+    /// variant deliberately carries no dependency authority.
+    CompleteWithEvidence {
+        physical_warps: Vec<i32>,
+        evidence: Vec<CausalFrontierEvidence>,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct CausalFrontierEvidence {
+    pub physical_warp: i32,
+    pub first_sequence: u64,
+    pub last_sequence: u64,
+}
+
+impl CausalFrontierEvidence {
+    fn covers(self, instruction: CausalFrontierInstruction) -> bool {
+        self.physical_warp == instruction.physical_warp
+            && self.first_sequence <= instruction.sequence
+            && instruction.sequence <= self.last_sequence
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -449,6 +476,8 @@ fn append_instruction(
 
 /// Resource state for the descriptor model. Detailed and summarized runs own
 /// independent instances; no timing value is copied between their results.
+/// Matching this state is model-local self-equivalence, not equivalence to
+/// `SmCore` or to silicon.
 #[derive(Debug)]
 struct ModelState {
     warp_ready: HashMap<i32, u64>,
@@ -632,8 +661,10 @@ pub fn summarize(
 }
 
 /// Execute detailed and summarized recurrences with an explicit resident
-/// population. Exclusive SMSPs are independent in this descriptor model.
-/// This does not replace native SM/memory execution or establish its timing.
+/// population. A single program can use the descriptor recurrence; multiple
+/// warp programs remain detailed unless a future API supplies a globally
+/// comparable issue/arbitration witness. This does not replace native
+/// SM/memory execution or establish its timing.
 pub fn summarize_with_residency(
     programs: &[Vec<CausalFrontierInstruction>],
     mut residency: CausalFrontierResidency,
@@ -645,8 +676,8 @@ pub fn summarize_with_residency(
     let mut exact_events = 0u64;
     let mut physical = HashSet::new();
     let mut residents_per_smsp = [0u32; SMSP_COUNT as usize];
-    let complete_residents = match &mut residency {
-        CausalFrontierResidency::Unknown => None,
+    let (complete_residents, independent_evidence) = match &mut residency {
+        CausalFrontierResidency::Unknown => (None, None),
         CausalFrontierResidency::Complete { physical_warps } => {
             physical_warps.sort_unstable();
             let mut residents = HashSet::new();
@@ -662,7 +693,26 @@ pub fn summarize_with_residency(
                     },
                 )?;
             }
-            Some(residents)
+            (Some(residents), None)
+        }
+        CausalFrontierResidency::CompleteWithEvidence {
+            physical_warps,
+            evidence,
+        } => {
+            physical_warps.sort_unstable();
+            let mut residents = HashSet::new();
+            for &physical_warp in physical_warps.iter() {
+                let smsp = subcore(physical_warp)?;
+                if !residents.insert(physical_warp) {
+                    return Err(CausalFrontierError::DuplicateResidentWarp { physical_warp });
+                }
+                residents_per_smsp[smsp] = residents_per_smsp[smsp].checked_add(1).ok_or(
+                    CausalFrontierError::CounterOverflow {
+                        counter: "resident warps per SM partition",
+                    },
+                )?;
+            }
+            (Some(residents), Some(evidence.clone()))
         }
     };
     let mut ordered = Vec::new();
@@ -704,6 +754,10 @@ pub fn summarize_with_residency(
                 });
             }
             previous = Some(instruction.sequence);
+            // `completion_units` contributes to observed event cardinality,
+            // while the timing recurrence retains one completion token. The
+            // summary path rejects every non-unit value above, so this
+            // accounting cannot create a false compressed transition.
             exact_events = exact_events
                 .checked_add(1 + u64::from(instruction.completion_units))
                 .ok_or(CausalFrontierError::CompletionOverflow {
@@ -740,6 +794,18 @@ pub fn summarize_with_residency(
         }
         let program = &canonical_programs[program_index];
         let first = program[index];
+        if first.completion_units != 1 {
+            // Completion multiplicity is not a report-only counter. The
+            // compact interval certificate materializes one completion token
+            // per instruction, so any descriptor with additional effects is
+            // explicitly reified on the exact path.
+            reified_region_details.push(ReifiedRegion {
+                physical_warp: first.physical_warp,
+                first_sequence: first.sequence,
+                last_sequence: first.sequence,
+                reason: ReifyReason::CompletionMultiplicity,
+            });
+        }
         if index >= scanned_until[program_index] && first.summarizable() {
             let mut end = index + 1;
             while end < program.len()
@@ -764,16 +830,34 @@ pub fn summarize_with_residency(
                     .ok_or(CausalFrontierError::CounterOverflow {
                         counter: "candidate instructions",
                     })?;
-                let evidence = program[index..end]
+                let interval_instructions = program[index..end].to_vec();
+                let evidence = interval_instructions
                     .iter()
                     .copied()
                     .map(CausalFrontierInstruction::execution_evidence);
-                let decision = if complete_residents.is_some() {
-                    certify_interval(evidence, residents_per_smsp[subcore(first.physical_warp)?])
-                } else {
+                let evidence_covers_interval = independent_evidence.as_ref().is_some_and(|items| {
+                    interval_instructions
+                        .iter()
+                        .all(|instruction| items.iter().any(|item| item.covers(*instruction)))
+                });
+                let decision = if canonical_programs.len() > 1 {
+                    // `sequence` is local to each warp. Sorting local ordinals
+                    // is a deterministic implementation detail, not a native
+                    // scheduler witness; never let it certify cross-warp
+                    // contention or same-cycle arbitration.
+                    FidelityDecision::Reify {
+                        reason: ReifyReason::CrossWarpOrderUnknown,
+                    }
+                } else if complete_residents.is_none() {
                     FidelityDecision::Reify {
                         reason: ReifyReason::UnknownResidency,
                     }
+                } else if !evidence_covers_interval {
+                    FidelityDecision::Reify {
+                        reason: ReifyReason::MissingIndependentEvidence,
+                    }
+                } else {
+                    certify_interval(evidence, residents_per_smsp[subcore(first.physical_warp)?])
                 };
                 let attempt = match decision {
                     FidelityDecision::Summary { certificate } => {
@@ -891,6 +975,49 @@ mod tests {
         }
     }
 
+    fn witnessed_residency(
+        physical_warps: Vec<i32>,
+        programs: &[Vec<CausalFrontierInstruction>],
+    ) -> CausalFrontierResidency {
+        let mut evidence = Vec::new();
+        for program in programs {
+            let mut ordered = program.clone();
+            ordered.sort_unstable_by_key(|instruction| instruction.sequence);
+            let physical_warp = ordered
+                .first()
+                .map_or(0, |instruction| instruction.physical_warp);
+            let mut run_start = None;
+            let mut run_last = None;
+            for instruction in ordered {
+                let safe = instruction.control_clean
+                    && instruction.dependency_free
+                    && !instruction.external_side_effect
+                    && instruction.completion_units == 1;
+                if safe {
+                    run_start.get_or_insert(instruction.sequence);
+                    run_last = Some(instruction.sequence);
+                } else if let (Some(first), Some(last)) = (run_start.take(), run_last.take()) {
+                    evidence.push(CausalFrontierEvidence {
+                        physical_warp,
+                        first_sequence: first,
+                        last_sequence: last,
+                    });
+                }
+            }
+            if let (Some(first), Some(last)) = (run_start, run_last) {
+                evidence.push(CausalFrontierEvidence {
+                    physical_warp,
+                    first_sequence: first,
+                    last_sequence: last,
+                });
+            }
+        }
+        CausalFrontierResidency::CompleteWithEvidence {
+            physical_warps,
+            evidence,
+        }
+    }
+
     #[test]
     fn canonicalizes_unsorted_program_before_region_scan() {
         let mut unsorted = vec![
@@ -946,13 +1073,9 @@ mod tests {
             in_flight_capacity: 2,
             ..instruction(8, true)
         });
-        let report = summarize_with_residency(
-            &[program],
-            CausalFrontierResidency::Complete {
-                physical_warps: vec![0],
-            },
-        )
-        .unwrap();
+        let report =
+            summarize_with_residency(&[program.clone()], witnessed_residency(vec![0], &[program]))
+                .unwrap();
         assert_eq!(report.exact_final_cycle, 42);
         assert_eq!(report.causal_final_cycle, 42);
         assert_eq!(report.exact_last_issue_cycle, Some(40));
@@ -975,13 +1098,9 @@ mod tests {
             in_flight_capacity: 1,
             ..instruction(sequence, false)
         }));
-        let report = summarize_with_residency(
-            &[program],
-            CausalFrontierResidency::Complete {
-                physical_warps: vec![0],
-            },
-        )
-        .unwrap();
+        let report =
+            summarize_with_residency(&[program.clone()], witnessed_residency(vec![0], &[program]))
+                .unwrap();
         assert_eq!(report.collapsed_regions, 0);
         assert_eq!(
             report.reified_region_details[0].reason,
@@ -997,9 +1116,10 @@ mod tests {
         first.latency_cycles = 100;
         let report = summarize_with_residency(
             &[vec![first, instruction(1, false), instruction(2, false)]],
-            CausalFrontierResidency::Complete {
-                physical_warps: vec![0],
-            },
+            witnessed_residency(
+                vec![0],
+                &[vec![first, instruction(1, false), instruction(2, false)]],
+            ),
         )
         .unwrap();
         assert_eq!(report.collapsed_regions, 0);
@@ -1021,6 +1141,116 @@ mod tests {
         assert_eq!(
             (a.exact_event_count, a.exact_final_cycle),
             (b.exact_event_count, b.exact_final_cycle)
+        );
+    }
+
+    #[test]
+    fn multi_warp_regions_refuse_without_a_global_issue_witness() {
+        let mut second = instruction(0, false);
+        second.physical_warp = 1;
+        let first = vec![instruction(0, false), instruction(1, false)];
+        let second = vec![
+            second,
+            CausalFrontierInstruction {
+                sequence: 1,
+                physical_warp: 1,
+                ..instruction(1, false)
+            },
+        ];
+        let report = summarize_with_residency(
+            &[first.clone(), second.clone()],
+            witnessed_residency(vec![0, 1], &[first, second]),
+        )
+        .unwrap();
+        assert_eq!(report.collapsed_regions, 0);
+        assert!(
+            report
+                .reified_region_details
+                .iter()
+                .any(|region| { region.reason == ReifyReason::CrossWarpOrderUnknown })
+        );
+        assert_eq!(report.causal_event_count, report.exact_event_count);
+        assert!(report.terminal_state_matches);
+    }
+
+    #[test]
+    fn completion_multiplicity_is_an_explicit_reification_effect() {
+        let program = (0..2)
+            .map(|sequence| CausalFrontierInstruction {
+                sequence,
+                completion_units: 2,
+                ..instruction(sequence, false)
+            })
+            .collect::<Vec<_>>();
+        let report = summarize_with_residency(
+            &[program.clone()],
+            CausalFrontierResidency::Complete {
+                physical_warps: vec![0],
+            },
+        )
+        .unwrap();
+        assert_eq!(report.collapsed_regions, 0);
+        assert_eq!(report.reified_regions, 2);
+        assert!(
+            report
+                .reified_region_details
+                .iter()
+                .all(|region| region.reason == ReifyReason::CompletionMultiplicity)
+        );
+        assert_eq!(report.causal_event_count, report.exact_event_count);
+        assert!(report.terminal_state_matches);
+    }
+
+    #[test]
+    fn producer_dependency_flag_alone_cannot_certify_without_independent_evidence() {
+        let mut program = vec![
+            instruction(0, false),
+            instruction(1, false),
+            instruction(2, false),
+        ];
+        let report = summarize_with_residency(
+            &[program.clone()],
+            CausalFrontierResidency::Complete {
+                physical_warps: vec![0],
+            },
+        )
+        .unwrap();
+        assert_eq!(report.collapsed_regions, 0);
+        assert!(
+            report
+                .reified_region_details
+                .iter()
+                .any(|detail| { detail.reason == ReifyReason::MissingIndependentEvidence })
+        );
+
+        program[2].dependency_free = false;
+        let toggled = summarize_with_residency(
+            &[program],
+            CausalFrontierResidency::Complete {
+                physical_warps: vec![0],
+            },
+        )
+        .unwrap();
+        assert_eq!(toggled.collapsed_regions, 0);
+        assert!(
+            toggled
+                .reified_region_details
+                .iter()
+                .any(|detail| { detail.reason == ReifyReason::MissingIndependentEvidence })
+        );
+    }
+
+    #[test]
+    fn suffix_without_a_closed_entry_boundary_reifies() {
+        let program = vec![instruction(1, false), instruction(2, false)];
+        let report = summarize_with_residency(&[program], CausalFrontierResidency::Unknown)
+            .expect("unknown entry remains a diagnostic report");
+        assert_eq!(report.candidate_regions, 1);
+        assert_eq!(report.collapsed_regions, 0);
+        assert_eq!(report.reified_regions, 1);
+        assert_eq!(
+            report.reified_region_details[0].reason,
+            ReifyReason::UnknownResidency
         );
     }
 
@@ -1122,7 +1352,7 @@ mod tests {
             }
             let report = summarize_with_residency(
                 &programs,
-                CausalFrontierResidency::Complete { physical_warps },
+                witnessed_residency(physical_warps.clone(), &programs),
             )
             .unwrap_or_else(|error| panic!("case {case}: {error}"));
             collapsed_regions += report.collapsed_regions;

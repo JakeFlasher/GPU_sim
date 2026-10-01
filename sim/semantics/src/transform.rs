@@ -8,7 +8,10 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::{Completeness, TypedEventBoundaryRecord, TypedEventIdentity, TypedObservationContract};
+use crate::{
+    Completeness, TypedEventBoundaryRecord, TypedEventIdentity, TypedObservationContract,
+    TypedPendingEvent,
+};
 
 pub const TRANSFORM_SCHEMA_VERSION: u32 = 2;
 const IDENTITY_TRANSFORMER: &str = "identity_boundary_v2";
@@ -107,6 +110,290 @@ pub struct TransformerOutput {
 pub enum TransformerDecision {
     Certify(Box<TransformerOutput>),
     Reify { reason: TransformReifyReason },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum NativeBoundarySide {
+    Summary,
+    Detailed,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", tag = "kind")]
+pub enum NativeBoundaryReifyReason {
+    SummaryStructure {
+        error: String,
+    },
+    DetailedStructure {
+        error: String,
+    },
+    ContractMismatch {
+        side: NativeBoundarySide,
+    },
+    Incomplete {
+        side: NativeBoundarySide,
+        unknown: Vec<String>,
+    },
+    Refused {
+        side: NativeBoundarySide,
+        reason: String,
+    },
+    ProjectionMismatch,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", tag = "decision")]
+pub enum NativeBoundaryRefinementDecision {
+    Preserve,
+    Reify { reason: NativeBoundaryReifyReason },
+}
+
+/// State-complete region contract. A scalar cycle recurrence is not enough to
+/// construct this value: callers must supply both typed boundaries, all
+/// internal effects, and every pending completion token.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TypedRegionContract {
+    pub schema_version: u32,
+    pub contract: TypedObservationContract,
+    pub interval: TransformInterval,
+    pub entry: TypedEventBoundaryRecord,
+    pub internal_effects: Vec<TypedEventTransition>,
+    pub pending_completion_tokens: Vec<TypedPendingEvent>,
+    pub observable_labels: Vec<String>,
+    pub exit: TypedEventBoundaryRecord,
+}
+
+impl TypedRegionContract {
+    pub fn new(
+        contract: TypedObservationContract,
+        interval: TransformInterval,
+        entry: TypedEventBoundaryRecord,
+        internal_effects: Vec<TypedEventTransition>,
+        pending_completion_tokens: Vec<TypedPendingEvent>,
+        observable_labels: Vec<String>,
+        exit: TypedEventBoundaryRecord,
+    ) -> Result<Self, RegionContractError> {
+        let region = Self {
+            schema_version: TRANSFORM_SCHEMA_VERSION,
+            contract,
+            interval,
+            entry,
+            internal_effects,
+            pending_completion_tokens,
+            observable_labels,
+            exit,
+        };
+        region.validate()?;
+        Ok(region)
+    }
+
+    pub fn validate(&self) -> Result<(), RegionContractError> {
+        if self.schema_version != TRANSFORM_SCHEMA_VERSION {
+            return Err(RegionContractError::SchemaVersion);
+        }
+        self.interval
+            .validate()
+            .map_err(|_| RegionContractError::IntervalReversed)?;
+        self.entry
+            .validate_structure()
+            .map_err(|error| RegionContractError::Boundary {
+                side: NativeBoundarySide::Summary,
+                error: error.to_string(),
+            })?;
+        self.exit
+            .validate_structure()
+            .map_err(|error| RegionContractError::Boundary {
+                side: NativeBoundarySide::Detailed,
+                error: error.to_string(),
+            })?;
+        if self.entry.contract != self.contract {
+            return Err(RegionContractError::ContractMismatch {
+                side: NativeBoundarySide::Summary,
+            });
+        }
+        if self.exit.contract != self.contract {
+            return Err(RegionContractError::ContractMismatch {
+                side: NativeBoundarySide::Detailed,
+            });
+        }
+        if (self.entry.event.time, self.entry.event.sequence)
+            != (self.interval.start_cycle, self.interval.start_sequence)
+        {
+            return Err(RegionContractError::EntryOutsideInterval);
+        }
+        if (self.exit.event.time, self.exit.event.sequence)
+            != (self.interval.end_cycle, self.interval.end_sequence)
+        {
+            return Err(RegionContractError::ExitOutsideInterval);
+        }
+        let mut previous = None;
+        for effect in &self.internal_effects {
+            let key = (effect.event.time, effect.phase, effect.event.sequence);
+            if effect.phase != effect.event.phase {
+                return Err(RegionContractError::EffectPhaseMismatch {
+                    sequence: effect.event.sequence,
+                });
+            }
+            if effect.event.time < self.interval.start_cycle
+                || effect.event.time > self.interval.end_cycle
+                || effect.event.sequence < self.interval.start_sequence
+                || effect.event.sequence > self.interval.end_sequence
+            {
+                return Err(RegionContractError::EffectOutsideInterval {
+                    sequence: effect.event.sequence,
+                });
+            }
+            if previous.is_some_and(|old| key < old) {
+                return Err(RegionContractError::EffectOrder {
+                    sequence: effect.event.sequence,
+                });
+            }
+            previous = Some(key);
+        }
+        if self.pending_completion_tokens != self.exit.queue.pending {
+            return Err(RegionContractError::PendingTokenMismatch);
+        }
+        Ok(())
+    }
+
+    pub fn from_summary_proof(proof: &SummaryProof) -> Result<Self, RegionContractError> {
+        Self::new(
+            proof.contract.clone(),
+            proof.interval,
+            proof.entry.clone(),
+            proof.emitted_events.clone(),
+            proof.exit.queue.pending.clone(),
+            Vec::new(),
+            proof.exit.clone(),
+        )
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum RegionContractError {
+    #[error("region contract schema version is unsupported")]
+    SchemaVersion,
+    #[error("region contract interval is reversed")]
+    IntervalReversed,
+    #[error("{side:?} region boundary is structurally invalid: {error}")]
+    Boundary {
+        side: NativeBoundarySide,
+        error: String,
+    },
+    #[error("{side:?} region boundary uses a different typed observation contract")]
+    ContractMismatch { side: NativeBoundarySide },
+    #[error("region entry boundary is outside the declared interval")]
+    EntryOutsideInterval,
+    #[error("region exit boundary is outside the declared interval")]
+    ExitOutsideInterval,
+    #[error("region effect phase disagrees with its typed event phase at sequence {sequence}")]
+    EffectPhaseMismatch { sequence: u64 },
+    #[error("region effect at sequence {sequence} is outside the declared interval")]
+    EffectOutsideInterval { sequence: u64 },
+    #[error("region internal effects are not in engine order at sequence {sequence}")]
+    EffectOrder { sequence: u64 },
+    #[error("region pending completion tokens do not equal the exit queue")]
+    PendingTokenMismatch,
+}
+
+fn boundary_completeness(
+    boundary: &TypedEventBoundaryRecord,
+    contract: &TypedObservationContract,
+    side: NativeBoundarySide,
+) -> Result<(), NativeBoundaryReifyReason> {
+    if boundary.contract != *contract {
+        return Err(NativeBoundaryReifyReason::ContractMismatch { side });
+    }
+    match &boundary.completeness {
+        Completeness::Complete => {}
+        Completeness::Incomplete { unknown } => {
+            return Err(NativeBoundaryReifyReason::Incomplete {
+                side,
+                unknown: unknown.clone(),
+            });
+        }
+        Completeness::Refused { reason } => {
+            return Err(NativeBoundaryReifyReason::Refused {
+                side,
+                reason: reason.clone(),
+            });
+        }
+    }
+    match contract.validate(&boundary.shared_l2, &boundary.power, &boundary.cores) {
+        Completeness::Complete => Ok(()),
+        Completeness::Incomplete { unknown } => {
+            Err(NativeBoundaryReifyReason::Incomplete { side, unknown })
+        }
+        Completeness::Refused { reason } => {
+            Err(NativeBoundaryReifyReason::Refused { side, reason })
+        }
+    }
+}
+
+pub fn compare_native_boundary_projection(
+    summary_exit: &TypedEventBoundaryRecord,
+    detailed_exit: &TypedEventBoundaryRecord,
+    contract: &TypedObservationContract,
+) -> NativeBoundaryRefinementDecision {
+    if let Err(error) = summary_exit.validate_structure() {
+        return NativeBoundaryRefinementDecision::Reify {
+            reason: NativeBoundaryReifyReason::SummaryStructure {
+                error: error.to_string(),
+            },
+        };
+    }
+    if let Err(error) = detailed_exit.validate_structure() {
+        return NativeBoundaryRefinementDecision::Reify {
+            reason: NativeBoundaryReifyReason::DetailedStructure {
+                error: error.to_string(),
+            },
+        };
+    }
+    if let Err(reason) = boundary_completeness(summary_exit, contract, NativeBoundarySide::Summary)
+    {
+        return NativeBoundaryRefinementDecision::Reify { reason };
+    }
+    if let Err(reason) =
+        boundary_completeness(detailed_exit, contract, NativeBoundarySide::Detailed)
+    {
+        return NativeBoundaryRefinementDecision::Reify { reason };
+    }
+    if summary_exit == detailed_exit {
+        NativeBoundaryRefinementDecision::Preserve
+    } else {
+        NativeBoundaryRefinementDecision::Reify {
+            reason: NativeBoundaryReifyReason::ProjectionMismatch,
+        }
+    }
+}
+
+pub fn compare_native_region_contract(
+    summary: Option<&TypedRegionContract>,
+    detailed_entry: &TypedEventBoundaryRecord,
+    detailed_exit: &TypedEventBoundaryRecord,
+) -> NativeBoundaryRefinementDecision {
+    let Some(summary) = summary else {
+        return NativeBoundaryRefinementDecision::Reify {
+            reason: NativeBoundaryReifyReason::SummaryStructure {
+                error: "model_macro_typed_region_contract_missing".to_owned(),
+            },
+        };
+    };
+    if let Err(error) = summary.validate() {
+        return NativeBoundaryRefinementDecision::Reify {
+            reason: NativeBoundaryReifyReason::SummaryStructure {
+                error: error.to_string(),
+            },
+        };
+    }
+    if let NativeBoundaryRefinementDecision::Reify { reason } =
+        compare_native_boundary_projection(&summary.entry, detailed_entry, &summary.contract)
+    {
+        return NativeBoundaryRefinementDecision::Reify { reason };
+    }
+    compare_native_boundary_projection(&summary.exit, detailed_exit, &summary.contract)
 }
 
 pub trait StateTransformer {
@@ -263,11 +550,7 @@ pub fn check_proof(
     if &proof.external_frontier != observed_frontier {
         return Err(TransformCheckError::FrontierEvidenceMismatch);
     }
-    if proof.entry.contract != proof.contract
-        || proof.exit.contract != proof.contract
-        || detailed_exit.contract != proof.contract
-        || proof.entry.completeness != Completeness::Complete
-        || proof.exit.completeness != Completeness::Complete
+    if proof.entry.contract != proof.contract || proof.entry.completeness != Completeness::Complete
     {
         return Err(TransformCheckError::ContractMismatch);
     }
@@ -276,10 +559,6 @@ pub fn check_proof(
         &proof.entry.power,
         &proof.entry.cores,
     ) != Completeness::Complete
-        || proof
-            .contract
-            .validate(&proof.exit.shared_l2, &proof.exit.power, &proof.exit.cores)
-            != Completeness::Complete
     {
         return Err(TransformCheckError::ContractMismatch);
     }
@@ -300,8 +579,11 @@ pub fn check_proof(
     if !proof.emitted_events.is_empty() {
         return Err(TransformCheckError::TransitionMismatch);
     }
-    if &proof.exit != detailed_exit {
-        return Err(TransformCheckError::ExitMismatch);
+    TypedRegionContract::from_summary_proof(proof).map_err(TransformCheckError::RegionContract)?;
+    if let NativeBoundaryRefinementDecision::Reify { reason } =
+        compare_native_boundary_projection(&proof.exit, detailed_exit, &proof.contract)
+    {
+        return Err(TransformCheckError::NativeBoundaryReify { reason });
     }
     Ok(())
 }
@@ -354,6 +636,10 @@ pub enum TransformCheckError {
     Boundary(#[from] crate::BoundaryStateError),
     #[error("summary proof exit does not equal the detailed exit boundary")]
     ExitMismatch,
+    #[error("native boundary refinement requires exact replay: {reason:?}")]
+    NativeBoundaryReify { reason: NativeBoundaryReifyReason },
+    #[error("typed region contract is invalid: {0}")]
+    RegionContract(#[from] RegionContractError),
     #[error("summary proof entry does not equal the independently observed entry boundary")]
     EntryMismatch,
     #[error("summary proof frontier does not equal the independently observed frontier")]
@@ -581,6 +867,56 @@ mod tests {
                 &[],
             ),
             Ok(())
+        );
+    }
+
+    #[test]
+    fn native_boundary_projection_preserves_equal_complete_state() {
+        let value = boundary(0, 0, true);
+        assert_eq!(
+            compare_native_boundary_projection(
+                &value,
+                &value,
+                &TypedObservationContract::cycle_exact_power(),
+            ),
+            NativeBoundaryRefinementDecision::Preserve
+        );
+    }
+
+    #[test]
+    fn native_boundary_projection_reifies_unknown_detailed_state() {
+        let summary = boundary(0, 0, true);
+        let mut detailed = summary.clone();
+        detailed.shared_l2.ownership_complete = false;
+        detailed.shared_l2.unknown_state = vec!["unmodeled_completion_tails".to_owned()];
+        detailed.completeness = Completeness::Incomplete {
+            unknown: vec!["unmodeled_completion_tails".to_owned()],
+        };
+        assert!(matches!(
+            compare_native_boundary_projection(
+                &summary,
+                &detailed,
+                &TypedObservationContract::cycle_exact_power(),
+            ),
+            NativeBoundaryRefinementDecision::Reify {
+                reason: NativeBoundaryReifyReason::Incomplete {
+                    side: NativeBoundarySide::Detailed,
+                    ..
+                }
+            }
+        ));
+    }
+
+    #[test]
+    fn missing_typed_macro_region_forces_exact_replay() {
+        let value = boundary(0, 0, true);
+        assert_eq!(
+            compare_native_region_contract(None, &value, &value),
+            NativeBoundaryRefinementDecision::Reify {
+                reason: NativeBoundaryReifyReason::SummaryStructure {
+                    error: "model_macro_typed_region_contract_missing".to_owned(),
+                },
+            }
         );
     }
 

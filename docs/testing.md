@@ -17,6 +17,45 @@ PYTHONPATH=tools python3 tools/calibrate_sm86_service_profile.py \
   PROBE_SERVICE_OBSERVATIONS.json /tmp/sm86_service_profile.json
 ```
 
+For a declared model-local service intervention, compare profile variants
+against one detailed replay without joining NCU values:
+
+```bash
+PYTHONPATH=tools python3 tools/evaluate_reification_design.py \
+  --sim-run sim/target/release/sim-run \
+  --profile docs/sm86_service_rate_profile_20261001.json \
+  --trace sim/run/tests/fixtures/addr_carry_canary_bundle/trace \
+  --control sim/run/tests/fixtures/addr_carry_canary_bundle/control/canary_sm86.control_bits.json \
+  --arch-card sim/run/tests/fixtures/addr_carry_canary_bundle/cards/sm_86.json \
+  --pchase-card sim/run/tests/fixtures/addr_carry_canary_bundle/cards/sm_86_static_card.json \
+  --scale 1 --scale 2 --scale 4
+```
+
+The report ranks only the declared simulator interval, checks native replay
+invariance, and labels the result model-local; it rejects NCU/CUPTI inputs.
+Pass a separately generated `--fast-frontier-only` JSON with
+`--fast-frontier-report` to add balanced candidate/reified/uncovered coverage
+and compression metrics.
+
+After predictions are materialized, join independent NCU targets in a separate
+step:
+
+```bash
+PYTHONPATH=tools python3 tools/evaluate_prediction_splits.py \
+  PREDICTIONS.json NCU_OBSERVATIONS.json
+```
+
+For raw NCU CSV output, create the observation document first with
+`tools/ncu_csv_to_observation.py`; this adapter has no access to predictions.
+
+The evaluator rejects observed fields inside predictions and reports split
+coverage, interval width, error, refusal/OOD rate, runtime, memory, and
+compression metrics.
+
+For multiple current trace families, use `tools/run_prediction_manifest.py` to
+materialize the calibration/development/held-out prediction document before
+running the NCU CSV adapter and join.
+
 The loader checks shape and numeric domains only. Supplied rates are examples,
 not cycle-accuracy evidence.
 

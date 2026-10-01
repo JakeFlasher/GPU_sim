@@ -1,8 +1,15 @@
 > **Dated opt-in prototype note.** This analyzer is retained engineering context and does not alter the native replay completion bar or create a workflow gate.
 
-# Causal-frontier prototype integration
+# Model-local frontier prototype integration
 
-The merged prototype surfaces are intentionally opt-in. `sim-sm::causal_frontier`
+> Compatibility note: the source module and v1 JSON fields retain the
+> historical `causal_frontier`/`causal_*` names. They currently certify only
+> descriptor-model self-equivalence. They do not certify equivalence to native
+> `SmCore`, hardware scheduling, or silicon timing. A later schema revision
+> will reserve “causal” for independently derived native order/state evidence.
+
+The merged prototype surfaces are intentionally opt-in. The retained
+`sim-sm::causal_frontier` module
 accepts explicit dynamic descriptors and joins each record to the native
 `FunctionSchedule::issue_slot(pc)`. It preserves the simulator's
 `PipelineClass`, decoded control bits, four-SMSP mapping, initiation interval,
@@ -20,11 +27,11 @@ timing, incoming work, non-contiguous sequences, controls, dependencies, and
 effects remain detailed. Certified regions are emitted individually; their
 frontier values are not summed into elapsed time.
 
-Cycle accuracy is a hard success condition for this analyzer. A mismatch in
-the complete modeled recurrence state or issue/completion frontier returns a
-typed `StateMismatch` error and produces no successful report for consumers to
-treat as certified. The serialized `terminal_state_matches` field remains a
-positive diagnostic witness on successful runs.
+Descriptor recurrence equality is a hard success condition for this analyzer.
+A mismatch in the complete modeled recurrence state or issue/completion
+frontier returns a typed `StateMismatch` error. The serialized
+`terminal_state_matches` field is a positive **model-local** diagnostic witness;
+it is not a native-state or hardware-timing certificate.
 
 Summary eligibility now also requires an explicit complete resident-warp roster
 through `summarize_with_residency`. The legacy `summarize` entry point treats

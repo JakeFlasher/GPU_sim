@@ -5,8 +5,8 @@
 //! collapse/refusal behavior in the same release build used by campaigns.
 
 use sim_sm::{
-    CausalFrontierInstruction, CausalFrontierResidency, PipelineClass, summarize_causal_frontier,
-    summarize_causal_frontier_with_residency,
+    CausalFrontierEvidence, CausalFrontierInstruction, CausalFrontierResidency, PipelineClass,
+    summarize_causal_frontier, summarize_causal_frontier_with_residency,
 };
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -45,6 +45,31 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     refused.external_side_effect = true;
     third.push(refused);
     let programs = [first, second, third];
+    let single_warp = (0..16)
+        .map(|sequence| CausalFrontierInstruction {
+            sequence,
+            physical_warp: 0,
+            pipeline: scalar,
+            latency_cycles: 1,
+            initiation_interval_cycles: 1,
+            in_flight_capacity: 8,
+            completion_units: 1,
+            control_clean: true,
+            dependency_free: true,
+            external_side_effect: false,
+        })
+        .collect::<Vec<_>>();
+    let model_local_single_warp = summarize_causal_frontier_with_residency(
+        std::slice::from_ref(&single_warp),
+        CausalFrontierResidency::CompleteWithEvidence {
+            physical_warps: vec![0],
+            evidence: vec![CausalFrontierEvidence {
+                physical_warp: 0,
+                first_sequence: 0,
+                last_sequence: 15,
+            }],
+        },
+    )?;
     let report = summarize_causal_frontier_with_residency(
         &programs,
         CausalFrontierResidency::Complete {
@@ -64,6 +89,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "unknown": unknown,
         "extra_resident": extra_resident,
     });
+    output["model_local_single_warp"] = serde_json::to_value(model_local_single_warp)?;
     println!("{}", serde_json::to_string(&output)?);
     Ok(())
 }
