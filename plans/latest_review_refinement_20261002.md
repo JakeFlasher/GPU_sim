@@ -49,10 +49,6 @@ is exercised only when a complete independent typed boundary is supplied; the
 ordinary native canary remains exact fallback with zero dispatches, and no
 complete two-pass witness exists yet.
 
-R9.2 is complete as a negative witness audit: the bounded canary contains no
-complete typed entry/effect/exit pair, so no self-derived witness is admitted.
-The next positive falsifier is explicit and remains open.
-
 ## Stage ledger
 
 | Stage | Focus | Exit evidence | Status |
