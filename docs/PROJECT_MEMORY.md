@@ -72,13 +72,15 @@ The active second-round program is
 [`second_round_refinement_20261001.md`](../plans/second_round_refinement_20261001.md),
 with **R1 semantic closure and evidence hygiene complete**, **R2 executable
 macro transition seam complete**, and **R3 independent witness/order closure
-complete**; **R4 service/queue semantics is active**. R1 repaired unknown/zero-demand service
+complete**, **R4 service/queue semantics complete**, and **R5 native state
+refinement active**. R1 repaired unknown/zero-demand service
 arithmetic, explicit-endpoint propagation, event ordering, compression
 vocabulary, and split/NCU identity checks. R2 made a nonidentity macro
 decision operational and resumes detailed replay; that model-local seam now
 exists, but native `SmCore` remains untouched. R3 is separating witness
 extraction from descriptor eligibility and now refuses stale/self-witnesses;
-until R5, current rankings, open
+R4 now separates service roles and queue/assignment uncertainty. R5 must
+validate a native boundary; until then, current rankings, open
 intervals, and descriptor/macro probe remain negative/diagnostic evidence and
 black-box internals are not execution prerequisites.
 

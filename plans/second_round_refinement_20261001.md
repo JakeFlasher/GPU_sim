@@ -215,7 +215,7 @@ real witness or a conservative refusal.
   refuse without synthetic lockstep.
 - Completion-token count and pending state match at macro exit.
 
-## R4 — service, queue, and assignment semantics (current stage)
+## R4 — service, queue, and assignment semantics (complete)
 
 ### Goal
 
@@ -333,8 +333,8 @@ GPU overlap models, skipping refinement, or native trace-driven simulators.
 | R1 | **complete (2026-10-01)** | Unknown/zero-demand/optional-pool arithmetic, active completion requirements, event-order semantics, v2 target contracts, finite/open evaluation strata, native projection completeness, and record-vs-step metrics are implemented and tested. |
 | R2 | **complete (2026-10-01)** | `ModelExecutor::execute_decision` consumes Summary/Reify decisions, installs a nonidentity scalar macro or exact fallback, emits effects/pending completions, resumes detailed descriptors, and exposes macro dispatch counters. |
 | R3 | **complete (2026-10-01)** | Eligibility requires a separate fact-complete witness with an allowed origin; stale/producer-premise facts reify, and multi-warp/same-cycle order remains explicit refusal or engine-order checked. |
-| R4 | **active** | Define residual versus replacement service semantics, queue state, assignment correlation, and interval-valued probe parameters. |
-| R5 | queued | Depends on R2 and R3. |
+| R4 | **complete (2026-10-01)** | Service roles, serial queue/frontier semantics, grouped assignment lower/upper envelopes, unknown/zero-demand handling, occupancy/contention labeling, and throughput interval endpoints are implemented and tested. Native metrics remain marginal where no per-record route witness exists. |
+| R5 | **active** | Validate one nontrivial native macro boundary with internal effects/pending tokens and exact fallback. |
 | R6 | queued | Depends on an actual macro path and observer contract. |
 | R7 | queued | Final claim discipline after evidence is complete. |
 
@@ -414,7 +414,7 @@ GPU overlap models, skipping refinement, or native trace-driven simulators.
   refusals, plus the prior workspace and focused evaluation checks. This closes
   the model contract only; it does not infer a hardware scheduler order.
 
-## R4 progress (active)
+## R4 implementation evidence (complete)
 
 - `ServiceStageRole` now distinguishes residual closure, replacement timing,
   and independent post-replay service. The current full-trace demand path is

@@ -47,7 +47,8 @@ The active second-round program is the
 [second-round refinement plan](../plans/second_round_refinement_20261001.md),
 with **R1 semantic closure and evidence hygiene complete**, **R2 executable
 macro transition seam complete**, and **R3 independent witness/order closure
-complete**; **R4 service/queue semantics is active**. R1 removed unsound finite bounds and evaluator ambiguities. R2 now
+complete**, **R4 service/queue semantics complete**, and **R5 native state
+refinement active**. R1 removed unsound finite bounds and evaluator ambiguities. R2 now
 executes a model-local nonidentity transition and exact continuation, while
 R5 still requires a native-preserved region; until R5, model-local descriptor
 reduction and exact fallback are the only supported native compression
