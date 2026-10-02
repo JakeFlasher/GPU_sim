@@ -298,7 +298,10 @@ frontiers but misses independent NCU medians: predicted intervals
 holdout with calibration padding covers its median (`1827..3683` vs `3667`),
 but only 4/5 raw repetitions (one `3721`) and 50.18% lower-point APE. The
 service model is therefore not promoted to hardware accuracy; C2 tail-witness
-work remains active.
+work remains active. `tools/report_sm86_tail_witness.py` makes the missing
+cross-SM temporal order, line generation, owner/read-from, fence scope, and
+hardware completion domains explicit; a model-local complete flag alone cannot
+authorize native dispatch.
 
 ## Retained evidence
 

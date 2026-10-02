@@ -208,7 +208,9 @@ and `3318`. A disjoint store-2 holdout with calibration padding produced a
 finite median interval (`1827..3683`) covering its NCU median `3667`, but only
 4/5 raw repetitions (one reached `3721`) and 50.18% lower-point APE. This is
 observer-model evidence, not a hardware-accuracy claim; C2 tail-witness work
-remains active.
+remains active. The tail-witness report keeps cross-SM temporal order, line
+generation, owner/read-from, fence scope, and hardware completion open even
+when the model-local service queue drains.
 
 The first A5 preflight correctly rejected the dirty checkout; after the
 coherent implementation was committed and rebuilt, independent identity and

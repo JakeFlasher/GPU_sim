@@ -485,4 +485,6 @@ the observed NCU values are not calibration inputs for the same rows. C3's
 explicit service probe closes two model-local store frontiers but misses their
 independent NCU medians, so the current padding/profile is falsified rather
 than promoted. A disjoint store-2 holdout covers its median but not every raw
-repetition (4/5), so repeat dispersion remains unresolved.
+repetition (4/5), so repeat dispersion remains unresolved. The tail-witness
+report also keeps ownership, generation, fence scope, and hardware completion
+open for the same trace.

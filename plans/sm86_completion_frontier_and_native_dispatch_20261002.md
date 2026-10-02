@@ -356,7 +356,8 @@ writeback/coherence service intervention as the next C3 falsifier.
 
 C1 is now complete as a live matrix. C2 is active because the traces still do
 not independently expose all ownership/order/completion domains required for a
-hardware-facing upper.
+hardware-facing upper. `tools/report_sm86_tail_witness.py` now makes those
+missing domains explicit and keeps native dispatch ineligible.
 
 ### C3 — explicit service probe — partial, observer miss
 

@@ -20,6 +20,7 @@ open only the relevant technical page.
 | Completion frontier C1 live evidence | `sm86_completion_frontier_c1_small_summary_v1.json` · `sm86_completion_frontier_c1_visibility_summary_v1.json` |
 | Completion frontier C3 probe | `sm86_completion_frontier_c3_service_probe_v1.json` |
 | Completion frontier C3 holdout | `sm86_completion_frontier_c3_store2_holdout_v1.json` |
+| Tail witness report | `sm86_tail_witness_report_v1.schema.json` · `tools/report_sm86_tail_witness.py` |
 | NCU identity capture | [Identity schema](sm86_ncu_identity_v1.schema.json) · `tools/capture_sm86_ncu_identity.py` |
 | NCU campaign preflight | [Preflight schema](sm86_ncu_campaign_preflight_v1.schema.json) · `tools/preflight_sm86_ncu_campaign.py` |
 | First accuracy campaign | `sm86_accuracy_campaign_v1_{manifest,predictions_pre_ncu,observations_post_ncu,evaluation_join,repetition_summary}.json` |
