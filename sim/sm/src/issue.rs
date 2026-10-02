@@ -94,8 +94,6 @@ use sim_mem::{
     MemoryOrigin, decode_async_copy_completion, opcode_head,
 };
 #[cfg(feature = "reference")]
-use sim_semantics::NativeBoundaryExecutionPath;
-#[cfg(feature = "reference")]
 use sim_semantics::{
     AsyncCopyBoundaryState, AsyncCopyBypassObservationState, AsyncCopyCohortBoundaryState,
     AsyncGroupBoundaryState, BlockBoundaryState, BoundarySnapshot, CanonicalLineKey,
@@ -104,6 +102,8 @@ use sim_semantics::{
     L2RequestOwner, L2RequestState, MemoryPipelineBoundaryState, ScalarPipelineBoundaryState,
     TypedResponseKind, WarpBoundaryState,
 };
+#[cfg(feature = "reference")]
+use sim_semantics::{NativeBoundaryExecutionPath, NativeBoundaryExecutionResult};
 
 use crate::control_bits::{ControlDomainError, DepBarrier, WaitMask};
 use crate::metrics::{SmActivity, WarpLifetime};
@@ -10284,6 +10284,50 @@ impl<'a> SmCore<'a> {
                 .map(Some),
             NativeBoundaryExecutionPath::ExactReplay { .. } => Ok(None),
         }
+    }
+
+    /// Consume the full typed comparator result directly. The contract, not a
+    /// caller-supplied count, supplies the warp and effect cardinality used by
+    /// the native actor transition.
+    #[cfg(feature = "reference")]
+    pub(crate) fn execute_reference_boundary_result(
+        &mut self,
+        result: &NativeBoundaryExecutionResult,
+    ) -> Result<Option<ReferenceScalarMacroExecution>, IssueError> {
+        let NativeBoundaryExecutionResult::TypedMacro { contract } = result else {
+            return Ok(None);
+        };
+        let core = contract
+            .entry
+            .cores
+            .first()
+            .ok_or(IssueError::ReferenceMacroUnsupported {
+                reason: "typed_macro_core_missing",
+            })?;
+        let warp = core
+            .warp_states
+            .first()
+            .ok_or(IssueError::ReferenceMacroUnsupported {
+                reason: "typed_macro_warp_missing",
+            })?;
+        let count = u64::try_from(contract.internal_effects.len()).map_err(|_| {
+            IssueError::ReferenceMacroUnsupported {
+                reason: "typed_macro_effect_count_out_of_range",
+            }
+        })?;
+        let interval = contract
+            .internal_effects
+            .windows(2)
+            .next()
+            .and_then(|effects| effects[1].event.time.checked_sub(effects[0].event.time))
+            .unwrap_or(1)
+            .max(1);
+        self.execute_reference_macro_path(
+            &NativeBoundaryExecutionPath::TypedMacro,
+            warp.warp_slot,
+            count,
+            interval,
+        )
     }
 
     #[cfg(feature = "reference")]

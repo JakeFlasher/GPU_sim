@@ -476,6 +476,11 @@ GPU overlap models, skipping refinement, or native trace-driven simulators.
   matches detailed replay; a `Reify` path performs no macro mutation. This is
   a closed native issue-model seam, while full front-end-enabled SM86 launches
   still conservatively fall back.
+- The native actor also exposes `execute_reference_boundary_result`, which
+  consumes a `NativeBoundaryExecutionResult::TypedMacro` contract to obtain
+  the warp/effect cardinality and interval before dispatching the macro; an
+  `ExactReplay` result is a no-op fallback. The full system writer still
+  selects exact replay for the real front-end-enabled probe.
 - The typed scalar rule now derives first issue from the entry warp readiness
   and can consume a closed front-end instruction-buffer prefix; it still
   refuses absent/noncontiguous buffers and all open pipeline/cache state.
