@@ -56,12 +56,13 @@ from profiler measurements; black-box models are assumptions, not observations.
   Multi-warp/global-order cases remain conservative refusal, and same-cycle
   effect ordering is checked independently of global sequence monotonicity.
 - R5 is complete for a closed native issue-model helper seam only: tests
-  compare a scalar macro entry/exit with detailed replay, but production
-  comparator-selected event-loop dispatch remains unestablished after a
-  bounded native queue/response-owner join failure. The pure-scalar SM86 probe
-  rejects front-end state as not closed and remains exact fallback.
-- The reference issue actor has a test-only typed-macro helper seam; the real
-  SM86 reference probe and production event loop still select exact replay.
+  compare a scalar macro entry/exit with detailed replay, while real SM86
+  comparator-selected dispatch remains open after a bounded native
+  queue/response-owner join failure. The pure-scalar SM86 probe rejects
+  front-end state as not closed and remains exact fallback.
+- The reference issue actor has a closed scalar seam, and P2 exercises the
+  same reference-feature event loop with a synthetic complete witness; the
+  real SM86 reference probe/corpus still selects exact replay.
 - The closed native issue-model seam is exercised with a two-instruction scalar
   macro and detailed suffix; front-end-enabled launches remain exact fallback.
 - Service profiles now mark capacity-adjusted throughput slopes and carry
@@ -71,6 +72,19 @@ from profiler measurements; black-box models are assumptions, not observations.
   explicitly unmodeled (no queue equation), and refuses aggregate-only
   latency identification; occupancy/contention rows remain explicitly
   unmodeled.
+- P4 also removes aggregate latency inference from the v1 compatibility
+  fitter and scores held-out throughput against the stored interval endpoints
+  rather than only the median; interval coverage is explicit and queue
+  depth/capacity remain unmodeled interventions.
+- P5 strengthens evaluation identity: prediction documents require exact
+  workload-to-trace/control/architecture-card/pchase-card/launch bindings;
+  manifest-built NCU rows retain the same semantic binding when available, and
+  the join reports whether both documents were binding-checked. Historical
+  identity remains manifest-labeled rather than independently verified.
+- The design evaluator now makes the negative boundary primary, reports
+  accepted-region coverage separately from dispatch/step counters, and records
+  when compatible prior-art cost inputs were not measured rather than inventing
+  a comparison.
 - Cache candidates preserve warp-local instrumentation order only when the
   producer supplies it; exact cache history now additionally requires temporal
   order, fence scope, line generation, owner/read-from, and completion.
@@ -82,11 +96,11 @@ from profiler measurements; black-box models are assumptions, not observations.
   interval to a typed observer projection; replacement admission and service
   arithmetic are checked; scalar sequence arithmetic checks intermediate
   additions. These are direct API/projection guards, not native speedup.
-- R8.2 production native dispatch is reopened. A synthetic helper seam was
-  attempted, but a bounded native canary exposed a response-owner/queue join
-  failure before a production macro could be consumed; the helper is not
-  production evidence. The retained front-end-enabled corpus remains exact
-  fallback.
+- R8.2 real-corpus native dispatch remains open. A bounded native canary
+  exposed a response-owner/queue join failure before a real production macro
+  could be consumed; separately, P2 has a synthetic complete-witness
+  reference-feature event-loop differential. The retained front-end-enabled
+  corpus remains exact fallback.
 - R8.3 is complete as a conservative typed eligibility rule: latency >1,
   pending queue tokens, front-end/scalar-pipeline state, and nonempty
   instruction buffers refuse before any issue-only summary is treated as
@@ -108,8 +122,8 @@ from profiler measurements; black-box models are assumptions, not observations.
   fallback throughout; R8.2 production macro dispatch remains open.
 - R9.1 attempted the guarded witness/dispatcher path. The native canary has no
   complete independent witness, so it records zero macro dispatches and exact
-  fallback throughout; a positive production fixture remains the next open
-  falsifier.
+  fallback throughout. P2 closes a separate synthetic reference-feature
+  fixture, but it is not a silicon or front-end completion claim.
 - R9.2 completed the two-pass witness audit negatively: no complete typed
   pre/effect/post pair exists in the bounded canary, so self-derived witness
   construction is rejected. The required positive falsifier remains open.
@@ -131,6 +145,21 @@ from profiler measurements; black-box models are assumptions, not observations.
   retained traces: 5,130,860 records, zero accepted candidates, zero native
   macro dispatches, and explicit wall/RSS/refusal accounting. Result:
   `docs/review_round10_20261002/`.
+- P2 now has a positive **synthetic reference-feature event-loop fixture**:
+  an independently supplied complete scalar witness reaches the real
+  `SmWake` dispatch branch, reserves internal event sequence positions,
+  updates the narrow issue/power projection, resumes a detailed suffix, and
+  matches detailed cycles/instruction count. A perturbed typed exit falls back
+  before mutation. This closes the event-loop plumbing seam only; the retained
+  front-end/cache SM86 corpus still has no complete independent witness and
+  records zero native dispatches.
+- P3 closes the narrow native state boundary by refusal: latency >1, release or
+  completion queues, front-end/cursor state, pending responses, barriers,
+  local-completion history, unprojected timing tails, async/cache fills, and
+  unmodeled tails are rejected before macro construction/dispatch. The actor
+  validates every descriptor and continuation lookup before mutation; an
+  independently detailed `SmCore` effect/exit ledger drives the positive
+  synthetic witness.
 
 ## Next useful work
 
@@ -146,22 +175,57 @@ corpus/observer evaluation complete**. R1 repaired unknown/zero-demand service
 arithmetic, explicit-endpoint propagation, event ordering, compression
 vocabulary, and split/NCU identity checks. R2 made a nonidentity macro
 decision operational and resumes detailed replay; that model-local seam now
-exists, but native `SmCore` remains untouched. R3 is separating witness
+exists, while real native `SmCore` traces remain conservative fallback. R3 is separating witness
 extraction from descriptor eligibility and now refuses stale/self-witnesses;
 R4 now separates service roles and queue/assignment uncertainty. R5 validates
-a closed native issue-model helper boundary; production event-loop consumption
-and full front-end-enabled traces still record exact-replay plans. Current
+a closed native issue-model helper boundary, and P2 exercises the production
+reference-feature event loop on a synthetic complete scalar witness; real
+front-end-enabled traces still record exact-replay plans. Current
 rankings, open
 intervals, and descriptor/macro probe remain negative/diagnostic evidence and
 black-box internals are not execution prerequisites. R7 rebuttal/
-claim-discipline is complete; R8.0 review intake, R8.1 soundness guards, and
-R8.2 production dispatch is reopened; R8.3 native eligibility, R8.4 service
-identifiability, R8.5 measurement identity/cost utility, and R8.6
-synchronization are complete; use
+claim-discipline is complete; R8.0 review intake, R8.1 soundness guards, R8.3
+native eligibility, R8.4 service identifiability, R8.5 measurement identity/
+cost utility, and R8.6 synchronization are complete; R8.2 remains open only
+for a real retained SM86 witness after the bounded queue/response failure. The
+P0–P6 completion program is closed with the remaining native/hardware
+falsifiers explicit; use
 [`third_round_rebuttal_20261002.md`](../plans/third_round_rebuttal_20261002.md)
 for the prior evidence map and
 [`latest_review_refinement_20261002.md`](../plans/latest_review_refinement_20261002.md)
 for the active stage ledger and remaining falsifiers.
+
+The next workstream is the accuracy-first NCU completion program in the same
+latest-review plan, beginning at A0 measurement-contract definition. Its
+primary output is independent NCU agreement; simulator wall-clock runtime is
+secondary and no compression/speedup metric is used.
+
+A0 is complete: `docs/sm86_ncu_accuracy_protocol_v1.json` declares the exact
+NCU endpoint/replay/cache/device/repetition contract, required identity/build
+fields, prediction-before-observation artifact rules, and six-family split
+map. The protocol validator and schema tests pass; no new NCU data was
+collected. A1 is next: independently verify the actual device/replay/build
+identity before the first new campaign.
+
+A1 is complete: `tools/capture_sm86_ncu_identity.py` now performs metadata-only
+GPU/NCU/tool/build/input checks and emits a schema-validated identity artifact.
+The current host query finds the expected RTX 3090 Ti/SM86/NCU metric, but the
+dirty worktree is correctly labeled ineligible; no workload profile was
+collected. A2 is next: deterministic baseline repetitions and dispersion.
+
+A2 is complete: `tools/preflight_sm86_ncu_campaign.py` validates the exact
+replay/cache/clock/repetition/prediction-order contract and reports bounded
+termination/dispersion summaries without launching NCU. The current historical
+manifest is correctly not ready for the new five-repetition contract. A3 is
+complete: source-path and family/split closure pass for the historical roster,
+five expansion slots are declared, and preflight requires a valid prediction
+before collection. A4 is complete: the protocol-aligned 15-row prediction
+artifact is prepared before any observation, source-bound, five-repetition
+targeted, and free of NCU values. The service fitter remains probe-only with
+explicit latency/throughput intervals and queue/occupancy/contention
+unmodeled; the supplied profile is explicitly unvalidated. No new NCU
+observations were collected or scored. A5 is next, conditional on clean A1/A2
+eligibility.
 
 ## Retained evidence
 

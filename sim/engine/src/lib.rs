@@ -170,6 +170,23 @@ impl<K> EventQueue<K> {
                 now: self.now,
             });
         }
+        let seq = self.reserve_sequence_span(sequence_span)?;
+        self.heap.push(Reverse(HeapEntry(Event {
+            time: at,
+            seq,
+            sequence_span,
+            target,
+            kind,
+        })));
+        Ok(seq)
+    }
+
+    /// Reserve logical insertion positions without enqueuing a physical
+    /// event.  A selective macro uses this to retain the engine's global
+    /// sequence order for its declared internal effects before scheduling the
+    /// continuation event.  The reservation is intentionally explicit: it is
+    /// not a hidden event and it does not advance the simulation clock.
+    pub fn reserve_sequence_span(&mut self, sequence_span: NonZeroU64) -> Result<u64, EngineError> {
         let (seq, next_seq) = match self.next_seq {
             NextSequence::Available(seq) => {
                 let last = seq
@@ -188,13 +205,6 @@ impl<K> EventQueue<K> {
             }
         };
         self.next_seq = next_seq;
-        self.heap.push(Reverse(HeapEntry(Event {
-            time: at,
-            seq,
-            sequence_span,
-            target,
-            kind,
-        })));
         Ok(seq)
     }
 
@@ -501,6 +511,16 @@ mod tests {
             near_limit.schedule_at(0, TargetId(1), Kind::Drain),
             Ok(u64::MAX - 1)
         );
+    }
+
+    #[test]
+    fn explicit_sequence_reservation_precedes_continuation_event() {
+        let mut q = EventQueue::new();
+        assert_eq!(q.reserve_sequence_span(NonZeroU64::new(2).unwrap()), Ok(0));
+        assert_eq!(q.next_sequence(), Some(2));
+        assert_eq!(q.schedule_at(4, TargetId(0), Kind::Drain), Ok(2));
+        assert_eq!(q.pop().unwrap().unwrap().seq, 2);
+        assert!(q.is_empty());
     }
 
     #[test]

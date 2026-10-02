@@ -109,3 +109,6 @@ def test_design_report_cost_scope_and_native_speedup_claim_are_explicit():
     assert report["detailed_cost"]["scope"].startswith("child_wall_clock")
     assert report["variants"][0]["runtime_delta_ms_vs_detailed"] == 2.0
     assert report["variants"][0]["memory_delta_bytes_vs_detailed"] == 200
+    assert report["negative_boundary_primary_result"] is True
+    assert report["accepted_region_coverage"] is None
+    assert report["compatible_prior_art_comparison"]["performed"] is False

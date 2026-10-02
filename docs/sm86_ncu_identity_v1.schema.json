@@ -1,0 +1,65 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/gpusim/sm86_ncu_identity_v1.schema.json",
+  "title": "SM86 NCU identity capture v1",
+  "type": "object",
+  "required": ["schema", "status", "eligible_for_accuracy", "protocol", "measurement_contract", "hardware", "software", "build", "inputs", "metric_availability", "mismatches"],
+  "properties": {
+    "schema": {"const": "sm86_ncu_identity_v1"},
+    "status": {"enum": ["independently_verified", "mismatch", "unavailable"]},
+    "eligible_for_accuracy": {"type": "boolean"},
+    "protocol": {"type": "string", "minLength": 1},
+    "measurement_contract": {
+      "type": "object",
+      "required": ["target_metric", "endpoint", "clock_domain", "cache_policy", "replay_mode", "launch_identity", "device_index", "repetitions", "clock_control"],
+      "properties": {
+        "target_metric": {"type": "string", "minLength": 1},
+        "endpoint": {"type": "string", "minLength": 1},
+        "clock_domain": {"type": "string", "minLength": 1},
+        "cache_policy": {"type": "string", "minLength": 1},
+        "replay_mode": {"type": "string", "minLength": 1},
+        "launch_identity": {"type": "string", "minLength": 1},
+        "device_index": {"type": "integer", "minimum": 0},
+        "repetitions": {"type": "integer", "minimum": 1},
+        "clock_control": {"type": "string", "minLength": 1}
+      },
+      "additionalProperties": true
+    },
+    "captured_at_utc": {"type": "string", "minLength": 1},
+    "hardware": {"$ref": "#/$defs/hardware"},
+    "software": {"type": "object", "additionalProperties": {"type": ["string", "null"]}},
+    "build": {"type": "object", "required": ["simulator_git_commit", "simulator_build_profile", "simulator_binary", "trace_schema_version", "nvbit_tracer_build", "working_tree_dirty"], "additionalProperties": {"type": ["string", "boolean", "null"]}},
+    "inputs": {"type": "object", "additionalProperties": {"type": ["string", "null"]}},
+    "metric_availability": {"$ref": "#/$defs/metric_availability"},
+    "mismatches": {"type": "array", "items": {"type": "string", "minLength": 1}}
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "hardware": {
+      "type": "object",
+      "required": ["gpu_name", "gpu_uuid", "compute_capability", "driver_version", "device_index", "graphics_clock_mhz", "memory_clock_mhz", "power_state"],
+      "properties": {
+        "gpu_name": {"type": ["string", "null"]},
+        "gpu_uuid": {"type": ["string", "null"]},
+        "compute_capability": {"type": ["string", "null"]},
+        "driver_version": {"type": ["string", "null"]},
+        "device_index": {"type": ["integer", "null"], "minimum": 0},
+        "graphics_clock_mhz": {"type": ["integer", "null"], "minimum": 0},
+        "memory_clock_mhz": {"type": ["integer", "null"], "minimum": 0},
+        "power_state": {"type": ["string", "null"]}
+      },
+      "additionalProperties": false
+    },
+    "metric_availability": {
+      "type": "object",
+      "required": ["chip", "target_metric", "available", "query_command"],
+      "properties": {
+        "chip": {"type": "string", "minLength": 1},
+        "target_metric": {"const": "gpc__cycles_elapsed.max"},
+        "available": {"type": "boolean"},
+        "query_command": {"type": "array", "items": {"type": "string", "minLength": 1}}
+      },
+      "additionalProperties": false
+    }
+  }
+}

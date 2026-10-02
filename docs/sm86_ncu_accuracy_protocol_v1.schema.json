@@ -1,0 +1,138 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/gpusim/sm86_ncu_accuracy_protocol_v1.schema.json",
+  "title": "SM86 accuracy-first NCU measurement protocol v1",
+  "type": "object",
+  "required": [
+    "schema",
+    "status",
+    "measurement_contract",
+    "identity_requirements",
+    "build_requirements",
+    "artifact_contract",
+    "split_contract",
+    "scoring_contract"
+  ],
+  "properties": {
+    "schema": {"const": "sm86_ncu_accuracy_protocol_v1"},
+    "status": {"const": "pre_measurement_contract"},
+    "measurement_contract": {"$ref": "#/$defs/measurement_contract"},
+    "identity_requirements": {"$ref": "#/$defs/identity_requirements"},
+    "build_requirements": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}},
+    "artifact_contract": {"$ref": "#/$defs/artifact_contract"},
+    "split_contract": {"$ref": "#/$defs/split_contract"},
+    "scoring_contract": {"$ref": "#/$defs/scoring_contract"}
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "measurement_contract": {
+      "type": "object",
+      "required": [
+        "target_metric",
+        "ncu_chip",
+        "endpoint",
+        "clock_domain",
+        "unit",
+        "cache_policy",
+        "replay_mode",
+        "launch_scope",
+        "launch_identity",
+        "device_index",
+        "repetitions",
+        "warmup_launches",
+        "clock_control",
+        "prediction_timeout_seconds",
+        "ncu_timeout_seconds"
+      ],
+      "properties": {
+        "target_metric": {"const": "gpc__cycles_elapsed.max"},
+        "ncu_chip": {"const": "ga102"},
+        "endpoint": {"const": "ncu_grid_completion_semaphore"},
+        "clock_domain": {"const": "gpc_cycles"},
+        "unit": {"const": "cycles"},
+        "cache_policy": {"enum": ["all", "none"]},
+        "replay_mode": {"enum": ["kernel", "application", "range", "app-range"]},
+        "launch_scope": {"type": "string", "minLength": 1},
+        "launch_identity": {"type": "string", "minLength": 1},
+        "device_index": {"type": "integer", "minimum": 0},
+        "repetitions": {"type": "integer", "minimum": 5},
+        "warmup_launches": {"type": "integer", "minimum": 0},
+        "clock_control": {"enum": ["none", "base", "default"]},
+        "prediction_timeout_seconds": {"type": "integer", "minimum": 1},
+        "ncu_timeout_seconds": {"type": "integer", "minimum": 1},
+        "mechanism_metrics": {
+          "type": "array",
+          "items": {"type": "string", "minLength": 1}
+        }
+      },
+      "additionalProperties": false
+    },
+    "identity_requirements": {
+      "type": "object",
+      "required": ["architecture", "expected_gpu_name", "independent_check_required", "required_fields", "mismatch_policy"],
+      "properties": {
+        "architecture": {"const": "sm_86"},
+        "expected_gpu_name": {"type": "string", "minLength": 1},
+        "independent_check_required": {"const": true},
+        "required_fields": {
+          "type": "array",
+          "minItems": 7,
+          "items": {"type": "string", "minLength": 1}
+        },
+        "mismatch_policy": {"enum": ["exclude_or_label_historical"]}
+      },
+      "additionalProperties": false
+    },
+    "artifact_contract": {
+      "type": "object",
+      "required": ["prediction_schema", "observation_schema", "evaluation_schema", "prediction_before_observation", "ncu_values_forbidden_in_prediction"],
+      "properties": {
+        "prediction_schema": {"const": "reification_prediction_v2"},
+        "observation_schema": {"const": "ncu_observation_v2"},
+        "evaluation_schema": {"const": "reification_prediction_evaluation_v2"},
+        "prediction_before_observation": {"const": true},
+        "ncu_values_forbidden_in_prediction": {"const": true}
+      },
+      "additionalProperties": false
+    },
+    "split_contract": {
+      "type": "object",
+      "required": ["family_held_out", "no_workload_crossing", "no_family_crossing", "families", "planned_expansion_families"],
+      "properties": {
+        "family_held_out": {"const": true},
+        "no_workload_crossing": {"const": true},
+        "no_family_crossing": {"const": true},
+        "families": {
+          "type": "object",
+          "minProperties": 1,
+          "additionalProperties": {"enum": ["calibration", "development", "held_out"]}
+        },
+        "planned_expansion_families": {
+          "type": "object",
+          "minProperties": 1,
+          "additionalProperties": {
+            "type": "object",
+            "required": ["split", "case_types"],
+            "properties": {
+              "split": {"enum": ["calibration", "development", "held_out"]},
+              "case_types": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}}
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "scoring_contract": {
+      "type": "object",
+      "required": ["finite_interval_coverage", "open_upper_policy", "repetition_summary", "mechanism_counter_policy"],
+      "properties": {
+        "finite_interval_coverage": {"const": "score_only_when_upper_is_finite"},
+        "open_upper_policy": {"const": "report_lower_consistency_separately"},
+        "repetition_summary": {"enum": ["median_iqr_and_all_samples", "mean_ci_and_all_samples"]},
+        "mechanism_counter_policy": {"const": "score_only_when_metric_scope_matches_projection"}
+      },
+      "additionalProperties": false
+    }
+  }
+}

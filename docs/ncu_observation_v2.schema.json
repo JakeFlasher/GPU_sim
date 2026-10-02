@@ -48,8 +48,22 @@
         "endpoint": {"type": "string", "minLength": 1},
         "clock_domain": {"type": "string", "minLength": 1},
         "hardware": {"$ref": "#/$defs/hardware"},
+        "source_binding": {"$ref": "#/$defs/source_binding"},
         "source": {"type": "string", "minLength": 1},
         "identity_status": {"enum": ["manifest_labeled_historical", "caller_labeled_unverified"]}
+      },
+      "additionalProperties": false
+    },
+    "source_binding": {
+      "type": "object",
+      "required": ["workload", "trace", "control", "arch_card", "pchase_card", "launch_identity"],
+      "properties": {
+        "workload": {"type": "string", "minLength": 1},
+        "trace": {"type": "string", "minLength": 1},
+        "control": {"type": "string", "minLength": 1},
+        "arch_card": {"type": "string", "minLength": 1},
+        "pchase_card": {"type": "string", "minLength": 1},
+        "launch_identity": {"type": "string", "minLength": 1}
       },
       "additionalProperties": false
     }

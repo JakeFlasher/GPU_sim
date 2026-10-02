@@ -13,6 +13,14 @@
       "identity_status": "manifest_labeled_historical",
       "metric": "gpc__cycles_elapsed.max",
       "source": "full_3090ti_20260930_temporal_cold_live2/ncu_csv",
+      "source_binding": {
+        "arch_card": "arch_profiles/cards/sm_86.json",
+        "control": "results/alpha/full_3090ti_20260930_temporal_cold_live2/base__embedding_gather_int32_sm80/control.json",
+        "launch_identity": "full_3090ti_20260930_temporal_cold_live2",
+        "pchase_card": "data/pchase/sm_86_static_card.json",
+        "trace": "results/alpha/full_3090ti_20260930_temporal_cold_live2/base__embedding_gather_int32_sm80/trace",
+        "workload": "base__embedding_gather_int32_sm80"
+      },
       "value": 13295.0,
       "workload": "base__embedding_gather_int32_sm80"
     },
@@ -28,6 +36,14 @@
       "identity_status": "manifest_labeled_historical",
       "metric": "gpc__cycles_elapsed.max",
       "source": "full_3090ti_20260930_temporal_cold_live2/ncu_csv",
+      "source_binding": {
+        "arch_card": "arch_profiles/cards/sm_86.json",
+        "control": "results/alpha/full_3090ti_20260930_temporal_cold_live2/base__embedding_gather_int32_sm80/control.json",
+        "launch_identity": "full_3090ti_20260930_temporal_cold_live2",
+        "pchase_card": "data/pchase/sm_86_static_card.json",
+        "trace": "results/alpha/full_3090ti_20260930_temporal_cold_live2/base__embedding_gather_int32_sm80/trace",
+        "workload": "base__embedding_gather_int32_sm80"
+      },
       "value": 13351.0,
       "workload": "base__embedding_gather_int32_sm80"
     },
@@ -43,6 +59,14 @@
       "identity_status": "manifest_labeled_historical",
       "metric": "gpc__cycles_elapsed.max",
       "source": "full_3090ti_20260930_temporal_cold_live2/ncu_csv",
+      "source_binding": {
+        "arch_card": "arch_profiles/cards/sm_86.json",
+        "control": "results/alpha/full_3090ti_20260930_temporal_cold_live2/base__flash_attn_fwd_bf16_sm80/control.json",
+        "launch_identity": "full_3090ti_20260930_temporal_cold_live2",
+        "pchase_card": "data/pchase/sm_86_static_card.json",
+        "trace": "results/alpha/full_3090ti_20260930_temporal_cold_live2/base__flash_attn_fwd_bf16_sm80/trace",
+        "workload": "base__flash_attn_fwd_bf16_sm80"
+      },
       "value": 16136.0,
       "workload": "base__flash_attn_fwd_bf16_sm80"
     },
@@ -58,6 +82,14 @@
       "identity_status": "manifest_labeled_historical",
       "metric": "gpc__cycles_elapsed.max",
       "source": "full_3090ti_20260930_temporal_cold_live2/ncu_csv",
+      "source_binding": {
+        "arch_card": "arch_profiles/cards/sm_86.json",
+        "control": "results/alpha/full_3090ti_20260930_temporal_cold_live2/base__flash_attn_fwd_bf16_sm80/control.json",
+        "launch_identity": "full_3090ti_20260930_temporal_cold_live2",
+        "pchase_card": "data/pchase/sm_86_static_card.json",
+        "trace": "results/alpha/full_3090ti_20260930_temporal_cold_live2/base__flash_attn_fwd_bf16_sm80/trace",
+        "workload": "base__flash_attn_fwd_bf16_sm80"
+      },
       "value": 16014.0,
       "workload": "base__flash_attn_fwd_bf16_sm80"
     },
@@ -73,6 +105,14 @@
       "identity_status": "manifest_labeled_historical",
       "metric": "gpc__cycles_elapsed.max",
       "source": "full_3090ti_20260930_temporal_cold_live2/ncu_csv",
+      "source_binding": {
+        "arch_card": "arch_profiles/cards/sm_86.json",
+        "control": "results/alpha/full_3090ti_20260930_temporal_cold_live2/base__gemm_hmma_bf16_sm80/control.json",
+        "launch_identity": "full_3090ti_20260930_temporal_cold_live2",
+        "pchase_card": "data/pchase/sm_86_static_card.json",
+        "trace": "results/alpha/full_3090ti_20260930_temporal_cold_live2/base__gemm_hmma_bf16_sm80/trace",
+        "workload": "base__gemm_hmma_bf16_sm80"
+      },
       "value": 13686.0,
       "workload": "base__gemm_hmma_bf16_sm80"
     },
@@ -88,6 +128,14 @@
       "identity_status": "manifest_labeled_historical",
       "metric": "gpc__cycles_elapsed.max",
       "source": "full_3090ti_20260930_temporal_cold_live2/ncu_csv",
+      "source_binding": {
+        "arch_card": "arch_profiles/cards/sm_86.json",
+        "control": "results/alpha/full_3090ti_20260930_temporal_cold_live2/base__gemm_hmma_bf16_sm80/control.json",
+        "launch_identity": "full_3090ti_20260930_temporal_cold_live2",
+        "pchase_card": "data/pchase/sm_86_static_card.json",
+        "trace": "results/alpha/full_3090ti_20260930_temporal_cold_live2/base__gemm_hmma_bf16_sm80/trace",
+        "workload": "base__gemm_hmma_bf16_sm80"
+      },
       "value": 13437.0,
       "workload": "base__gemm_hmma_bf16_sm80"
     },
@@ -103,6 +151,14 @@
       "identity_status": "manifest_labeled_historical",
       "metric": "gpc__cycles_elapsed.max",
       "source": "full_3090ti_20260930_temporal_cold_live2/ncu_csv",
+      "source_binding": {
+        "arch_card": "arch_profiles/cards/sm_86.json",
+        "control": "results/alpha/full_3090ti_20260930_temporal_cold_live2/base__gemm_imma_int8_sm80/control.json",
+        "launch_identity": "full_3090ti_20260930_temporal_cold_live2",
+        "pchase_card": "data/pchase/sm_86_static_card.json",
+        "trace": "results/alpha/full_3090ti_20260930_temporal_cold_live2/base__gemm_imma_int8_sm80/trace",
+        "workload": "base__gemm_imma_int8_sm80"
+      },
       "value": 11593.0,
       "workload": "base__gemm_imma_int8_sm80"
     },
@@ -118,6 +174,14 @@
       "identity_status": "manifest_labeled_historical",
       "metric": "gpc__cycles_elapsed.max",
       "source": "full_3090ti_20260930_temporal_cold_live2/ncu_csv",
+      "source_binding": {
+        "arch_card": "arch_profiles/cards/sm_86.json",
+        "control": "results/alpha/full_3090ti_20260930_temporal_cold_live2/base__gemm_imma_int8_sm80/control.json",
+        "launch_identity": "full_3090ti_20260930_temporal_cold_live2",
+        "pchase_card": "data/pchase/sm_86_static_card.json",
+        "trace": "results/alpha/full_3090ti_20260930_temporal_cold_live2/base__gemm_imma_int8_sm80/trace",
+        "workload": "base__gemm_imma_int8_sm80"
+      },
       "value": 11449.0,
       "workload": "base__gemm_imma_int8_sm80"
     },
@@ -133,6 +197,14 @@
       "identity_status": "manifest_labeled_historical",
       "metric": "gpc__cycles_elapsed.max",
       "source": "full_3090ti_20260930_temporal_cold_live2/ncu_csv",
+      "source_binding": {
+        "arch_card": "arch_profiles/cards/sm_86.json",
+        "control": "results/alpha/full_3090ti_20260930_temporal_cold_live2/base__gemm_sparse_2to4_bf16_sm80/control.json",
+        "launch_identity": "full_3090ti_20260930_temporal_cold_live2",
+        "pchase_card": "data/pchase/sm_86_static_card.json",
+        "trace": "results/alpha/full_3090ti_20260930_temporal_cold_live2/base__gemm_sparse_2to4_bf16_sm80/trace",
+        "workload": "base__gemm_sparse_2to4_bf16_sm80"
+      },
       "value": 5791.0,
       "workload": "base__gemm_sparse_2to4_bf16_sm80"
     },
@@ -148,6 +220,14 @@
       "identity_status": "manifest_labeled_historical",
       "metric": "gpc__cycles_elapsed.max",
       "source": "full_3090ti_20260930_temporal_cold_live2/ncu_csv",
+      "source_binding": {
+        "arch_card": "arch_profiles/cards/sm_86.json",
+        "control": "results/alpha/full_3090ti_20260930_temporal_cold_live2/base__gemm_sparse_2to4_bf16_sm80/control.json",
+        "launch_identity": "full_3090ti_20260930_temporal_cold_live2",
+        "pchase_card": "data/pchase/sm_86_static_card.json",
+        "trace": "results/alpha/full_3090ti_20260930_temporal_cold_live2/base__gemm_sparse_2to4_bf16_sm80/trace",
+        "workload": "base__gemm_sparse_2to4_bf16_sm80"
+      },
       "value": 5757.0,
       "workload": "base__gemm_sparse_2to4_bf16_sm80"
     },
@@ -163,6 +243,14 @@
       "identity_status": "manifest_labeled_historical",
       "metric": "gpc__cycles_elapsed.max",
       "source": "full_3090ti_20260930_temporal_cold_live2/ncu_csv",
+      "source_binding": {
+        "arch_card": "arch_profiles/cards/sm_86.json",
+        "control": "results/alpha/full_3090ti_20260930_temporal_cold_live2/base__layernorm_fwd_bf16_sm80/control.json",
+        "launch_identity": "full_3090ti_20260930_temporal_cold_live2",
+        "pchase_card": "data/pchase/sm_86_static_card.json",
+        "trace": "results/alpha/full_3090ti_20260930_temporal_cold_live2/base__layernorm_fwd_bf16_sm80/trace",
+        "workload": "base__layernorm_fwd_bf16_sm80"
+      },
       "value": 21985.0,
       "workload": "base__layernorm_fwd_bf16_sm80"
     },
@@ -178,6 +266,14 @@
       "identity_status": "manifest_labeled_historical",
       "metric": "gpc__cycles_elapsed.max",
       "source": "full_3090ti_20260930_temporal_cold_live2/ncu_csv",
+      "source_binding": {
+        "arch_card": "arch_profiles/cards/sm_86.json",
+        "control": "results/alpha/full_3090ti_20260930_temporal_cold_live2/base__layernorm_fwd_bf16_sm80/control.json",
+        "launch_identity": "full_3090ti_20260930_temporal_cold_live2",
+        "pchase_card": "data/pchase/sm_86_static_card.json",
+        "trace": "results/alpha/full_3090ti_20260930_temporal_cold_live2/base__layernorm_fwd_bf16_sm80/trace",
+        "workload": "base__layernorm_fwd_bf16_sm80"
+      },
       "value": 21996.0,
       "workload": "base__layernorm_fwd_bf16_sm80"
     },
@@ -193,6 +289,14 @@
       "identity_status": "manifest_labeled_historical",
       "metric": "gpc__cycles_elapsed.max",
       "source": "full_3090ti_20260930_temporal_cold_live2/ncu_csv",
+      "source_binding": {
+        "arch_card": "arch_profiles/cards/sm_86.json",
+        "control": "results/alpha/full_3090ti_20260930_temporal_cold_live2/base__rmsnorm_fwd_bf16_sm80/control.json",
+        "launch_identity": "full_3090ti_20260930_temporal_cold_live2",
+        "pchase_card": "data/pchase/sm_86_static_card.json",
+        "trace": "results/alpha/full_3090ti_20260930_temporal_cold_live2/base__rmsnorm_fwd_bf16_sm80/trace",
+        "workload": "base__rmsnorm_fwd_bf16_sm80"
+      },
       "value": 19091.0,
       "workload": "base__rmsnorm_fwd_bf16_sm80"
     },
@@ -208,6 +312,14 @@
       "identity_status": "manifest_labeled_historical",
       "metric": "gpc__cycles_elapsed.max",
       "source": "full_3090ti_20260930_temporal_cold_live2/ncu_csv",
+      "source_binding": {
+        "arch_card": "arch_profiles/cards/sm_86.json",
+        "control": "results/alpha/full_3090ti_20260930_temporal_cold_live2/base__rmsnorm_fwd_bf16_sm80/control.json",
+        "launch_identity": "full_3090ti_20260930_temporal_cold_live2",
+        "pchase_card": "data/pchase/sm_86_static_card.json",
+        "trace": "results/alpha/full_3090ti_20260930_temporal_cold_live2/base__rmsnorm_fwd_bf16_sm80/trace",
+        "workload": "base__rmsnorm_fwd_bf16_sm80"
+      },
       "value": 18954.0,
       "workload": "base__rmsnorm_fwd_bf16_sm80"
     },
@@ -223,6 +335,14 @@
       "identity_status": "manifest_labeled_historical",
       "metric": "gpc__cycles_elapsed.max",
       "source": "full_3090ti_20260930_temporal_cold_live2/ncu_csv",
+      "source_binding": {
+        "arch_card": "arch_profiles/cards/sm_86.json",
+        "control": "results/alpha/full_3090ti_20260930_temporal_cold_live2/base__silu_fwd_bf16_sm80/control.json",
+        "launch_identity": "full_3090ti_20260930_temporal_cold_live2",
+        "pchase_card": "data/pchase/sm_86_static_card.json",
+        "trace": "results/alpha/full_3090ti_20260930_temporal_cold_live2/base__silu_fwd_bf16_sm80/trace",
+        "workload": "base__silu_fwd_bf16_sm80"
+      },
       "value": 5935.0,
       "workload": "base__silu_fwd_bf16_sm80"
     },
@@ -238,6 +358,14 @@
       "identity_status": "manifest_labeled_historical",
       "metric": "gpc__cycles_elapsed.max",
       "source": "full_3090ti_20260930_temporal_cold_live2/ncu_csv",
+      "source_binding": {
+        "arch_card": "arch_profiles/cards/sm_86.json",
+        "control": "results/alpha/full_3090ti_20260930_temporal_cold_live2/base__silu_fwd_bf16_sm80/control.json",
+        "launch_identity": "full_3090ti_20260930_temporal_cold_live2",
+        "pchase_card": "data/pchase/sm_86_static_card.json",
+        "trace": "results/alpha/full_3090ti_20260930_temporal_cold_live2/base__silu_fwd_bf16_sm80/trace",
+        "workload": "base__silu_fwd_bf16_sm80"
+      },
       "value": 5727.0,
       "workload": "base__silu_fwd_bf16_sm80"
     },
@@ -253,6 +381,14 @@
       "identity_status": "manifest_labeled_historical",
       "metric": "gpc__cycles_elapsed.max",
       "source": "full_3090ti_20260930_temporal_cold_live2/ncu_csv",
+      "source_binding": {
+        "arch_card": "arch_profiles/cards/sm_86.json",
+        "control": "results/alpha/full_3090ti_20260930_temporal_cold_live2/large__conv2d_implicit_gemm_bf16_sm80/control.json",
+        "launch_identity": "full_3090ti_20260930_temporal_cold_live2",
+        "pchase_card": "data/pchase/sm_86_static_card.json",
+        "trace": "results/alpha/full_3090ti_20260930_temporal_cold_live2/large__conv2d_implicit_gemm_bf16_sm80/trace",
+        "workload": "large__conv2d_implicit_gemm_bf16_sm80"
+      },
       "value": 12612.0,
       "workload": "large__conv2d_implicit_gemm_bf16_sm80"
     },
@@ -268,6 +404,14 @@
       "identity_status": "manifest_labeled_historical",
       "metric": "gpc__cycles_elapsed.max",
       "source": "full_3090ti_20260930_temporal_cold_live2/ncu_csv",
+      "source_binding": {
+        "arch_card": "arch_profiles/cards/sm_86.json",
+        "control": "results/alpha/full_3090ti_20260930_temporal_cold_live2/large__conv2d_implicit_gemm_bf16_sm80/control.json",
+        "launch_identity": "full_3090ti_20260930_temporal_cold_live2",
+        "pchase_card": "data/pchase/sm_86_static_card.json",
+        "trace": "results/alpha/full_3090ti_20260930_temporal_cold_live2/large__conv2d_implicit_gemm_bf16_sm80/trace",
+        "workload": "large__conv2d_implicit_gemm_bf16_sm80"
+      },
       "value": 12571.0,
       "workload": "large__conv2d_implicit_gemm_bf16_sm80"
     },
@@ -283,6 +427,14 @@
       "identity_status": "manifest_labeled_historical",
       "metric": "gpc__cycles_elapsed.max",
       "source": "full_3090ti_20260930_temporal_cold_live2/ncu_csv",
+      "source_binding": {
+        "arch_card": "arch_profiles/cards/sm_86.json",
+        "control": "results/alpha/full_3090ti_20260930_temporal_cold_live2/large__cross_entropy_fwd_fp32_sm80/control.json",
+        "launch_identity": "full_3090ti_20260930_temporal_cold_live2",
+        "pchase_card": "data/pchase/sm_86_static_card.json",
+        "trace": "results/alpha/full_3090ti_20260930_temporal_cold_live2/large__cross_entropy_fwd_fp32_sm80/trace",
+        "workload": "large__cross_entropy_fwd_fp32_sm80"
+      },
       "value": 9581.0,
       "workload": "large__cross_entropy_fwd_fp32_sm80"
     },
@@ -298,6 +450,14 @@
       "identity_status": "manifest_labeled_historical",
       "metric": "gpc__cycles_elapsed.max",
       "source": "full_3090ti_20260930_temporal_cold_live2/ncu_csv",
+      "source_binding": {
+        "arch_card": "arch_profiles/cards/sm_86.json",
+        "control": "results/alpha/full_3090ti_20260930_temporal_cold_live2/large__cross_entropy_fwd_fp32_sm80/control.json",
+        "launch_identity": "full_3090ti_20260930_temporal_cold_live2",
+        "pchase_card": "data/pchase/sm_86_static_card.json",
+        "trace": "results/alpha/full_3090ti_20260930_temporal_cold_live2/large__cross_entropy_fwd_fp32_sm80/trace",
+        "workload": "large__cross_entropy_fwd_fp32_sm80"
+      },
       "value": 9645.0,
       "workload": "large__cross_entropy_fwd_fp32_sm80"
     },
@@ -313,6 +473,14 @@
       "identity_status": "manifest_labeled_historical",
       "metric": "gpc__cycles_elapsed.max",
       "source": "full_3090ti_20260930_temporal_cold_live2/ncu_csv",
+      "source_binding": {
+        "arch_card": "arch_profiles/cards/sm_86.json",
+        "control": "results/alpha/full_3090ti_20260930_temporal_cold_live2/large__flash_attn_bwd_bf16_sm80/control.json",
+        "launch_identity": "full_3090ti_20260930_temporal_cold_live2",
+        "pchase_card": "data/pchase/sm_86_static_card.json",
+        "trace": "results/alpha/full_3090ti_20260930_temporal_cold_live2/large__flash_attn_bwd_bf16_sm80/trace",
+        "workload": "large__flash_attn_bwd_bf16_sm80"
+      },
       "value": 199937.0,
       "workload": "large__flash_attn_bwd_bf16_sm80"
     },
@@ -328,6 +496,14 @@
       "identity_status": "manifest_labeled_historical",
       "metric": "gpc__cycles_elapsed.max",
       "source": "full_3090ti_20260930_temporal_cold_live2/ncu_csv",
+      "source_binding": {
+        "arch_card": "arch_profiles/cards/sm_86.json",
+        "control": "results/alpha/full_3090ti_20260930_temporal_cold_live2/large__flash_attn_bwd_bf16_sm80/control.json",
+        "launch_identity": "full_3090ti_20260930_temporal_cold_live2",
+        "pchase_card": "data/pchase/sm_86_static_card.json",
+        "trace": "results/alpha/full_3090ti_20260930_temporal_cold_live2/large__flash_attn_bwd_bf16_sm80/trace",
+        "workload": "large__flash_attn_bwd_bf16_sm80"
+      },
       "value": 200589.0,
       "workload": "large__flash_attn_bwd_bf16_sm80"
     },
@@ -343,6 +519,14 @@
       "identity_status": "manifest_labeled_historical",
       "metric": "gpc__cycles_elapsed.max",
       "source": "full_3090ti_20260930_temporal_cold_live2/ncu_csv",
+      "source_binding": {
+        "arch_card": "arch_profiles/cards/sm_86.json",
+        "control": "results/alpha/full_3090ti_20260930_temporal_cold_live2/large__gemm_hmma_fp16_sm80/control.json",
+        "launch_identity": "full_3090ti_20260930_temporal_cold_live2",
+        "pchase_card": "data/pchase/sm_86_static_card.json",
+        "trace": "results/alpha/full_3090ti_20260930_temporal_cold_live2/large__gemm_hmma_fp16_sm80/trace",
+        "workload": "large__gemm_hmma_fp16_sm80"
+      },
       "value": 13682.0,
       "workload": "large__gemm_hmma_fp16_sm80"
     },
@@ -358,6 +542,14 @@
       "identity_status": "manifest_labeled_historical",
       "metric": "gpc__cycles_elapsed.max",
       "source": "full_3090ti_20260930_temporal_cold_live2/ncu_csv",
+      "source_binding": {
+        "arch_card": "arch_profiles/cards/sm_86.json",
+        "control": "results/alpha/full_3090ti_20260930_temporal_cold_live2/large__gemm_hmma_fp16_sm80/control.json",
+        "launch_identity": "full_3090ti_20260930_temporal_cold_live2",
+        "pchase_card": "data/pchase/sm_86_static_card.json",
+        "trace": "results/alpha/full_3090ti_20260930_temporal_cold_live2/large__gemm_hmma_fp16_sm80/trace",
+        "workload": "large__gemm_hmma_fp16_sm80"
+      },
       "value": 13429.0,
       "workload": "large__gemm_hmma_fp16_sm80"
     },
@@ -373,6 +565,14 @@
       "identity_status": "manifest_labeled_historical",
       "metric": "gpc__cycles_elapsed.max",
       "source": "full_3090ti_20260930_temporal_cold_live2/ncu_csv",
+      "source_binding": {
+        "arch_card": "arch_profiles/cards/sm_86.json",
+        "control": "results/alpha/full_3090ti_20260930_temporal_cold_live2/large__rmsnorm_bwd_bf16_sm80/control.json",
+        "launch_identity": "full_3090ti_20260930_temporal_cold_live2",
+        "pchase_card": "data/pchase/sm_86_static_card.json",
+        "trace": "results/alpha/full_3090ti_20260930_temporal_cold_live2/large__rmsnorm_bwd_bf16_sm80/trace",
+        "workload": "large__rmsnorm_bwd_bf16_sm80"
+      },
       "value": 15096.0,
       "workload": "large__rmsnorm_bwd_bf16_sm80"
     },
@@ -388,6 +588,14 @@
       "identity_status": "manifest_labeled_historical",
       "metric": "gpc__cycles_elapsed.max",
       "source": "full_3090ti_20260930_temporal_cold_live2/ncu_csv",
+      "source_binding": {
+        "arch_card": "arch_profiles/cards/sm_86.json",
+        "control": "results/alpha/full_3090ti_20260930_temporal_cold_live2/large__rmsnorm_bwd_bf16_sm80/control.json",
+        "launch_identity": "full_3090ti_20260930_temporal_cold_live2",
+        "pchase_card": "data/pchase/sm_86_static_card.json",
+        "trace": "results/alpha/full_3090ti_20260930_temporal_cold_live2/large__rmsnorm_bwd_bf16_sm80/trace",
+        "workload": "large__rmsnorm_bwd_bf16_sm80"
+      },
       "value": 15416.0,
       "workload": "large__rmsnorm_bwd_bf16_sm80"
     },
@@ -403,6 +611,14 @@
       "identity_status": "manifest_labeled_historical",
       "metric": "gpc__cycles_elapsed.max",
       "source": "full_3090ti_20260930_temporal_cold_live2/ncu_csv",
+      "source_binding": {
+        "arch_card": "arch_profiles/cards/sm_86.json",
+        "control": "results/alpha/full_3090ti_20260930_temporal_cold_live2/large__softmax_safe_bf16_sm80/control.json",
+        "launch_identity": "full_3090ti_20260930_temporal_cold_live2",
+        "pchase_card": "data/pchase/sm_86_static_card.json",
+        "trace": "results/alpha/full_3090ti_20260930_temporal_cold_live2/large__softmax_safe_bf16_sm80/trace",
+        "workload": "large__softmax_safe_bf16_sm80"
+      },
       "value": 15804.0,
       "workload": "large__softmax_safe_bf16_sm80"
     },
@@ -418,6 +634,14 @@
       "identity_status": "manifest_labeled_historical",
       "metric": "gpc__cycles_elapsed.max",
       "source": "full_3090ti_20260930_temporal_cold_live2/ncu_csv",
+      "source_binding": {
+        "arch_card": "arch_profiles/cards/sm_86.json",
+        "control": "results/alpha/full_3090ti_20260930_temporal_cold_live2/large__softmax_safe_bf16_sm80/control.json",
+        "launch_identity": "full_3090ti_20260930_temporal_cold_live2",
+        "pchase_card": "data/pchase/sm_86_static_card.json",
+        "trace": "results/alpha/full_3090ti_20260930_temporal_cold_live2/large__softmax_safe_bf16_sm80/trace",
+        "workload": "large__softmax_safe_bf16_sm80"
+      },
       "value": 15780.0,
       "workload": "large__softmax_safe_bf16_sm80"
     },
@@ -433,6 +657,14 @@
       "identity_status": "manifest_labeled_historical",
       "metric": "gpc__cycles_elapsed.max",
       "source": "full_3090ti_20260930_temporal_cold_live2/ncu_csv",
+      "source_binding": {
+        "arch_card": "arch_profiles/cards/sm_86.json",
+        "control": "results/alpha/full_3090ti_20260930_temporal_cold_live2/large__swiglu_fwd_bf16_sm80_n1048576/control.json",
+        "launch_identity": "full_3090ti_20260930_temporal_cold_live2",
+        "pchase_card": "data/pchase/sm_86_static_card.json",
+        "trace": "results/alpha/full_3090ti_20260930_temporal_cold_live2/large__swiglu_fwd_bf16_sm80_n1048576/trace",
+        "workload": "large__swiglu_fwd_bf16_sm80_n1048576"
+      },
       "value": 13911.0,
       "workload": "large__swiglu_fwd_bf16_sm80_n1048576"
     },
@@ -448,6 +680,14 @@
       "identity_status": "manifest_labeled_historical",
       "metric": "gpc__cycles_elapsed.max",
       "source": "full_3090ti_20260930_temporal_cold_live2/ncu_csv",
+      "source_binding": {
+        "arch_card": "arch_profiles/cards/sm_86.json",
+        "control": "results/alpha/full_3090ti_20260930_temporal_cold_live2/large__swiglu_fwd_bf16_sm80_n1048576/control.json",
+        "launch_identity": "full_3090ti_20260930_temporal_cold_live2",
+        "pchase_card": "data/pchase/sm_86_static_card.json",
+        "trace": "results/alpha/full_3090ti_20260930_temporal_cold_live2/large__swiglu_fwd_bf16_sm80_n1048576/trace",
+        "workload": "large__swiglu_fwd_bf16_sm80_n1048576"
+      },
       "value": 13861.0,
       "workload": "large__swiglu_fwd_bf16_sm80_n1048576"
     }

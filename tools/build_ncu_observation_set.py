@@ -87,9 +87,21 @@ def build_observation_set(
                 f"workload {workload!r} has {len(values)} numeric {contract['metric']} rows; "
                 f"contract declares {contract['repetitions']} repetitions"
             )
+        source_binding = None
+        if all(
+            isinstance(roster_row.get(field), str) and roster_row[field].strip()
+            for field in ("trace", "control", "arch_card", "pchase_card")
+        ):
+            source_binding = {
+                "workload": workload,
+                "trace": roster_row["trace"],
+                "control": roster_row["control"],
+                "arch_card": roster_row["arch_card"],
+                "pchase_card": roster_row["pchase_card"],
+                "launch_identity": contract["launch_identity"],
+            }
         for value in values:
-            observations.append(
-                {
+            row = {
                     "workload": workload,
                     "value": value,
                     "metric": contract["metric"],
@@ -99,7 +111,9 @@ def build_observation_set(
                     "source": source,
                     "identity_status": identity_status,
                 }
-            )
+            if source_binding is not None:
+                row["source_binding"] = source_binding
+            observations.append(row)
     document = {
         "schema": "ncu_observation_v2",
         "source": source,

@@ -95,6 +95,10 @@ pub enum LatentModelError {
         upper: u64,
         total: u64,
     },
+    #[error(
+        "resource demand has {total} events but no named pool or assignment witness for the classified portion"
+    )]
+    ResourceDemandMissingClassification { total: u64 },
     #[error("resource-demand interval for pool {pool} overflows while adding unknown events")]
     ResourceDemandOverflow { pool: String },
     #[error("service-rate profile source must be nonempty")]
@@ -961,6 +965,21 @@ impl ResourceDemandEnvelope {
                 total: self.total_events,
             });
         }
+        // A nonempty envelope with neither a named pool nor an assignment
+        // witness cannot claim that its classified events require zero
+        // service.  Treat that shape as missing classification rather than
+        // manufacturing a finite zero upper bound downstream.  The fully
+        // unclassified case remains valid and is represented by an open
+        // upper endpoint in the service projection.
+        if self.total_events != 0
+            && self.unclassified_events != self.total_events
+            && self.pools.is_empty()
+            && self.assignment_groups.is_empty()
+        {
+            return Err(LatentModelError::ResourceDemandMissingClassification {
+                total: self.total_events,
+            });
+        }
         for (pool, interval) in &self.pools {
             if pool.trim().is_empty() {
                 return Err(LatentModelError::EmptyResourcePool);
@@ -1608,14 +1627,19 @@ impl ResourceDemandEnvelope {
         profile: &ServiceRateProfile,
         marginal: &ResourceServiceProjection,
     ) -> Result<(u64, Option<u64>, &'static str), LatentModelError> {
+        let grouped_events = self
+            .assignment_groups
+            .iter()
+            .try_fold(0_u64, |sum, group| {
+                sum.checked_add(group.event_count).ok_or_else(|| {
+                    LatentModelError::ResourceDemandOverflow {
+                        pool: "assignment_groups".to_owned(),
+                    }
+                })
+            })?;
         if self.unclassified_events != 0
             || self.assignment_groups.is_empty()
-            || self
-                .assignment_groups
-                .iter()
-                .map(|group| group.event_count)
-                .sum::<u64>()
-                != self.total_events
+            || grouped_events != self.total_events
         {
             return Ok((
                 marginal.lower_cycles,
@@ -2255,6 +2279,14 @@ mod tests {
     }
 
     #[test]
+    fn classified_demand_without_pools_is_rejected_instead_of_becoming_zero_service() {
+        assert!(matches!(
+            ResourceDemandEnvelope::new(1, 0, BTreeMap::new(), EvidenceKind::Hypothesis),
+            Err(LatentModelError::ResourceDemandMissingClassification { total: 1 })
+        ));
+    }
+
+    #[test]
     fn zero_demand_does_not_pay_optional_pool_startup_latency() {
         let demand = ResourceDemandEnvelope::new(
             0,
@@ -2587,6 +2619,36 @@ mod tests {
             .unwrap();
         assert_eq!(queue.assignment_upper_cycles, None);
         assert_eq!(queue.completion_frontier.upper, None);
+    }
+
+    #[test]
+    fn grouped_assignment_count_overflow_is_reported_not_wrapped() {
+        let mut demand = ResourceDemandEnvelope {
+            schema_version: RESOURCE_DEMAND_SCHEMA_VERSION,
+            total_events: u64::MAX,
+            unclassified_events: 0,
+            pools: BTreeMap::from([("alu".to_owned(), ResourceDemandInterval::exact(u64::MAX))]),
+            evidence: EvidenceKind::Hypothesis,
+            assignment_groups: vec![
+                ResourceAssignmentGroup {
+                    event_count: u64::MAX,
+                    candidate_pools: BTreeSet::from(["alu".to_owned()]),
+                },
+                ResourceAssignmentGroup {
+                    event_count: 1,
+                    candidate_pools: BTreeSet::from(["alu".to_owned()]),
+                },
+            ],
+        };
+        assert!(matches!(
+            demand.validate(),
+            Err(LatentModelError::ResourceDemandOverflow { pool }) if pool == "assignment_groups"
+        ));
+        // Keep the fixture mutable in the same way callers commonly build an
+        // envelope, so this test also guards against accidental move-only
+        // validation changes.
+        demand.assignment_groups.truncate(1);
+        assert!(demand.validate().is_ok());
     }
 
     #[test]

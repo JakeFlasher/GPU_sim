@@ -49,7 +49,10 @@ and contention rows are likewise holdout diagnostics; their values do not
 silently change the fitted rate profile. Dependent latency is never inferred
 from aggregate throughput. Independent throughput probes retain lower/upper
 initiation-interval endpoints so service uncertainty widens an upper bound
-instead of collapsing to one median slope.
+instead of collapsing to one median slope. The v1 compatibility fitter also
+requires explicit latency rather than inferring it from cycles/events.
+Held-out throughput is scored against the stored interval endpoints, with
+coverage and distance-to-interval reported separately from any point estimate.
 
 The R6 evaluation uses 15 retained SM86 workloads across six operation families
 with a checked family-held-out split, joins NCU only after prediction, and keeps

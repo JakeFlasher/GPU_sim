@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/gpusim/sm86_ncu_campaign_preflight_v1.schema.json",
+  "title": "SM86 NCU campaign preflight report v1",
+  "type": "object",
+  "required": ["schema", "ready_for_collection", "mismatches", "prediction_status", "observation_status", "repetition_policy", "measurement_contract", "collection_performed"],
+  "properties": {
+    "schema": {"const": "sm86_ncu_campaign_preflight_v1"},
+    "ready_for_collection": {"type": "boolean"},
+    "mismatches": {"type": "array", "items": {"type": "string", "minLength": 1}},
+    "prediction_status": {"enum": ["not_checked", "valid", "invalid"]},
+    "observation_status": {"enum": ["not_present", "present_before_collection"]},
+    "repetition_policy": {"type": "object", "additionalProperties": true},
+    "measurement_contract": {"type": "object", "additionalProperties": true},
+    "collection_performed": {"const": false}
+  },
+  "additionalProperties": false
+}

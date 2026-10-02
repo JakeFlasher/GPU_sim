@@ -27,10 +27,10 @@ are deleted rather than skipped.
 | Reification | Typed region contract and native-boundary comparator preserve only complete exact projections; incomplete canary boundaries fall back to replay |
 | Selective coverage | Multi-warp/order and completion-multiplicity guards refuse conservatively; fast-frontier output includes full-trace candidate/reified/uncovered counts |
 | Model macro seam | `sim-sm::ModelExecutor` consumes a certified scalar `MacroTransition`, emits explicit effects/pending completions, and resumes detailed descriptors; this is model-local |
-| Native refinement | A closed two-instruction `SmCore` helper seam remains test evidence only; production comparator-selected event-loop dispatch is reopened after a native queue/response-owner join failure; model certificates bind to every consumed descriptor before mutation and front-end probes remain exact fallback |
+| Native refinement | A closed two-instruction `SmCore` helper seam and a synthetic reference-feature event-loop fixture consume a complete scalar witness, reserve effect sequences, and resume a detailed suffix; latency/completion/front-end/pending/barrier/cache-tail classes refuse before mutation; real front-end/cache SM86 traces remain exact fallback after the canary's unresolved queue/response join |
 | Service composition | Typed residual/replacement/independent-post-replay roles and a serial queue projection are explicit; grouped unknown tails keep queue uppers open and replacement admission is validated; full-trace demand is currently independent post-replay, so it does not silently alter the observer endpoint |
 | Cache candidates | Warp-local instrumentation order can be observed when decoded identities are complete; exact history additionally requires temporal order, fence scope, line generation, owner/read-from, and hardware completion, while unresolved domains remain lower-only/unknown |
-| Design evaluation | Fifteen-workload, six-family calibration/development/held-out NCU join runs post-prediction; v2 target contracts check metric/endpoint/clock/cache/launch/repetition and declared GPU identity plus family split semantics; observations are labeled manifest-historical unless metadata is independently parsed; predicted rows bind intervals to an explicit observer projection; finite intervals, open refusals, model-local partial-order ties, and model-only step reduction are reported, while native front-end traces remain exact/refused |
+| Design evaluation | Fifteen-workload, six-family calibration/development/held-out NCU join runs post-prediction; v2 target contracts check metric/endpoint/clock/cache/launch/repetition and declared GPU identity plus family split semantics; predictions and manifest-built observations bind trace/control/card/launch identities when available; observations are labeled manifest-historical unless metadata is independently parsed; finite intervals, open refusals, accepted/refused coverage, model-local partial-order ties, and model-only step reduction are reported, while native front-end traces remain exact/refused |
 | Payload/value work | Bounded model-local identity, ordering, and conservation checks |
 
 Native replay is unchanged by the predictive flag. Service demand now yields an
@@ -43,6 +43,11 @@ reduction. Physical routing, compiler implementation, and internal cache state
 are black-box variables, not milestones. Topology summaries are not causal
 read-from histories. Endpoint projections require an explicit
 statistical/modeling assumption rather than timer equality.
+
+The P2 synthetic reference-feature fixture is a plumbing/differential result,
+not native corpus compression or hardware speedup: its one dispatch is counted
+in the reference event loop, while the retained SM86 corpus still reports zero
+dispatches and exact fallback.
 
 ## Next work
 
@@ -58,7 +63,8 @@ independent-corpus/observer evaluation complete**, and **R7 rebuttal/claim
 discipline complete**. R1 removed unsound finite
 bounds and evaluator ambiguities. R2 executes a model-local nonidentity
 transition and exact continuation. R5 retains a closed native issue-model
-helper transition, while production event-loop consumption and full
+helper transition, while P2 additionally exercises the production
+reference-feature event loop on a synthetic complete scalar witness; real
 front-end-enabled launches remain exact fallback. R6
 expands the corpus and confirms that native compression, finite observer
 uppers, and hardware accuracy remain unproven; no model-only step reduction is
@@ -73,12 +79,13 @@ The latest independent panel re-review is being addressed by the staged
 [R8 refinement program](../plans/latest_review_refinement_20261002.md).
 R8.0 review intake, R8.1 immediate soundness guards, R8.3 conservative native
 eligibility, R8.4 service/queue identifiability, R8.5 measurement identity and
-cost utility, and R8.6 synchronization are complete. R8.2 production native
-dispatch is **reopened**: a synthetic helper seam exists in history, but a
-bounded native canary exposed a response-owner/queue join failure before any
-production macro could be consumed. The retained front-end-enabled SM86
-corpus remains exact fallback, with no native speedup or hardware causality
-claim. R8.3 exact-falls back for non-unit completion tails, pending tokens, or
+cost utility, and R8.6 synchronization are complete. R8.2 real-corpus native
+dispatch remains **open**: a bounded native canary exposed a response-owner/
+queue join failure before any real production macro could be consumed. P2
+separately closes a synthetic complete-witness reference-feature event-loop
+differential. The retained front-end-enabled SM86 corpus remains exact
+fallback, with no native speedup or hardware causality claim. R8.3
+exact-falls back for non-unit completion tails, pending tokens, or
 untouched future-relevant state rather than calling the scalar recurrence
 state-complete. R8.4 adds explicit residual/replacement service roles and a
 model-local intervention test; the independent-post-replay default remains a
@@ -91,7 +98,8 @@ production macro dispatch.
 
 R9.1 attempted the guarded witness/dispatcher path. The native canary has no
 complete independent witness, so the run records zero native macro dispatches
-and exact fallback throughout; the positive production fixture remains open.
+and exact fallback throughout. P2 closes a separate synthetic reference
+fixture, but does not promote it to a silicon or front-end completion claim.
 
 R9.2 completed the two-pass witness audit negatively: no complete typed
 pre/effect/post pair exists in the bounded canary, so self-derived witness
@@ -119,6 +127,38 @@ R11.0 completed detailed-versus-fast-frontier cost measurements on all 15
 retained traces: 5,130,860 records, zero accepted candidates, and zero native
 macro dispatches. The result reports wall/RSS and refusal coverage, not
 speedup. See [the full cost result](review_round10_20261002/README.md).
+
+The post-review P0–P6 completion program is synchronized and closed. Its final
+real-path falsifier is the current bounded SM86 canary: 10,033 reference
+records, exact fallback, and zero native dispatches. The synthetic
+reference-feature fixture is a differential/plumbing result only. Full Cargo
+workspace tests and all affected Python suites pass; repository-wide pytest is
+not a valid check because the untracked review corpus and optional campaign
+dependencies interrupt collection.
+
+The accuracy-first NCU workstream has completed A0: the exact
+metric/replay/cache/device/repetition contract, identity/build requirements,
+artifact separation, and split rules are declared and schema-tested in
+`docs/sm86_ncu_accuracy_protocol_v1.json`; no new measurements were collected.
+A1 is complete: the metadata-only identity capture path validates GPU/driver/
+clocks, NCU metric availability, tool/build/input identity, and replay/cache
+contract. The current dirty checkout is labeled ineligible and no workload was
+profiled. A2 is complete: the preflight/reporting path validates bounded
+termination, five-repetition policy, dispersion, and prediction-before-
+observation ordering without launching NCU. The current historical manifest is
+correctly not ready for the new protocol. A3 is complete: source-path and
+family/split closure pass, five expansion slots are declared, and missing
+predictions keep preflight unready. A4 is complete: the protocol-aligned
+source-bound 15-row prediction artifact is prepared before observations and
+the service sidecar remains explicitly unvalidated/unmodeled where required.
+No new NCU observations were collected or scored. A5 is next, conditional on
+clean A1/A2 eligibility. The primary outcome is NCU
+accuracy; simulator wall-clock runtime remains secondary, with no
+compression/speedup metric.
+
+The current A5 preflight was run against that manifest/prediction: the
+prediction is valid and no observation exists, but the identity is ineligible
+because the worktree is dirty. No NCU workload command was launched.
 
 ## Retained measurements
 

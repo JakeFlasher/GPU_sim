@@ -258,14 +258,81 @@ dispatch; R8.2 remains the next native research blocker.
 
 R9.1 attempted the optional witness/dispatcher path after that repair. The
 bounded native canary had no complete independent witness, so the guarded run
-recorded zero native macro dispatches and exact fallback throughout. The
-positive production fixture remains open; the required falsifier is a matching
-complete witness that dispatches once and preserves detailed continuation.
+recorded zero native macro dispatches and exact fallback throughout. The real
+SM86 production fixture remains open; P2 later supplies only a synthetic
+reference-feature fixture as the matching falsifier.
 
 R9.2 audited the two-pass witness requirement. No complete typed
 pre/effect/post pair exists in the bounded canary, so constructing a witness
 from the same detailed stream is rejected as self-certification. The positive
 production falsifier remains explicit and unclaimed.
+
+## P2 synthetic reference event-loop closure — 2026-10-02 (complete; real SM86 witness remains open)
+
+The production reference-feature loop now has a bounded positive fixture that
+supplies a complete independently built scalar witness. The comparator-selected
+`TypedMacro` reaches the real `SmWake` dispatcher, reserves the logical effect
+sequence positions, updates the narrow issue/power projection, schedules the
+region-end continuation, and resumes a detailed suffix with the same cycles and
+instruction count as detailed replay. The continuation boundary is compared at
+its own event identity rather than paired with the original pre-event record.
+A perturbed typed exit falls back before queue/core mutation. This is a
+synthetic reference-feature differential, not evidence that the retained
+front-end/cache SM86 corpus can be compressed; that corpus remains exact
+fallback with zero native macro dispatches.
+
+## P3 native state/effect closure — 2026-10-02 (complete; conservative scope)
+
+The accepted native scalar seam now refuses every state class it does not
+consume: non-unit latency and release/completion queues, front-end buffers and
+cursors, pending responses, barriers, local-completion history, unprojected
+timing tails, async/cache fills, and unmodeled tails. Descriptor and
+continuation lookup are validated before any warp, counter, or queue mutation.
+The positive synthetic witness is built from a separate detailed `SmCore`
+effect/exit ledger; equal endpoints from the same transform remain model-only
+tests. This closes the omission boundary by explicit refusal, not by claiming
+native latency, cache, register, or scheduler equivalence.
+
+## P4 service/queue identifiability — 2026-10-02 (complete)
+
+The service layer now has an explicit admission/overlap/completion convention:
+independent post-replay is a sidecar, while residual/replacement roles are
+opt-in model-local interventions. Unknown demand keeps queue and observer
+uppers open, and grouped assignment remains a marginal route envelope rather
+than a hardware schedule. Both v1 compatibility and v2 fitting require an
+explicit dependent-latency observation; queue depth/capacity, occupancy, and
+contention remain unmodeled dimensions without a fitted delay equation.
+Held-out throughput scoring uses lower/upper initiation-interval endpoints and
+reports interval coverage rather than only median-point agreement. No queue
+calibration or hardware scheduler causality is claimed.
+
+## P5 evaluation/utility closure — 2026-10-02 (complete)
+
+Prediction artifacts now require exact workload source bindings, and the
+manifest-built observation set carries matching trace/control/card/launch
+bindings when those fields are available. The post-prediction join compares
+the binding maps and records whether that check ran; standalone caller-labeled
+CSV observations remain explicitly unverified. The committed R6 artifacts were
+regenerated and schema-validated. The design evaluator reports accepted-region
+coverage, refusal/open strata, full child parse/replay/planning/effect/compare/
+output cost, and a primary negative-boundary result. It explicitly records
+that compatible prior-art cost comparison was not performed when inputs were
+not measured under the same trace contract; no dispatch ratio is called a
+speedup.
+
+## P6 integration and final falsification — 2026-10-02 (complete)
+
+The complete revision passes the full Cargo workspace and all affected Python
+prediction/evaluation/schema/fitter suites. A current release reference canary
+terminates in 47 seconds with 10,033 records, a footer, zero complete typed
+boundaries, zero native macro dispatches, and exact fallback. The shorter
+45-second probe timed out before completion, so no runtime claim is attached to
+that bound. Repository-wide pytest collection remains unavailable because the
+untracked review corpus exits during import and broader campaign tests require
+optional packages. The final claim is therefore the unknown-preserving,
+state-closure/refusal methodology plus the synthetic reference-feature
+differential; real native compression, finite hardware prediction, scheduler
+causality, and compatible prior-art speedup remain explicit falsifiers.
 
 ## R10.0 live SM86 development campaign — 2026-10-02 (complete)
 
@@ -305,3 +372,32 @@ on identical inputs. The campaign covered 5,130,860 records, accepted zero
 candidate records, and observed zero native macro dispatches. Detailed replay
 and analyzer wall/RSS costs are reported separately without calling the ratio
 speedup. The result is utility/refusal evidence, not native acceleration.
+
+## A0/A1 accuracy protocol and identity — 2026-10-02 (complete)
+
+The accuracy-first NCU protocol now declares the exact target/replay/cache/
+clock/device/repetition contract, required identity/build/input fields,
+prediction-before-observation artifacts, and family-held-out splits. A metadata-
+only capture path queries `nvidia-smi`, NCU metric availability, CUDA/NCU/Rust/
+Git/build/input identity, and labels mismatches ineligible before any workload
+profile. The current dirty checkout is correctly rejected for a new campaign;
+no NCU workload data was collected in A0/A1.
+
+## A4 mechanism calibration and prediction preparation — 2026-10-02 (complete)
+
+The probe fitter and holdout checks enforce explicit dependent latency and
+independent throughput intervals while leaving queue depth, occupancy, and
+contention unmodeled without equations. A protocol-aligned 15-row prediction
+artifact is prepared before observation collection, source-bound, and contains
+no NCU values. The supplied service profile remains explicitly unvalidated;
+no new NCU observations were collected or scored.
+
+## A2/A3 deterministic preflight and corpus closure — 2026-10-02 (complete)
+
+The campaign preflight now checks the declared replay/cache/clock/repetition
+contract, identity/build eligibility, source paths, prediction-before-
+observation ordering, and bounded repetition termination/dispersion metadata
+without launching NCU. The historical 15-workload roster passes family/split
+and source closure but is correctly ineligible for the new five-repetition
+campaign contract. Five expansion slots (scalar, tensor, memory,
+synchronization, mixed) are declared without collecting data.

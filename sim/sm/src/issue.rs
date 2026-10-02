@@ -10206,30 +10206,9 @@ impl<'a> SmCore<'a> {
             });
         }
         if self.instruction_front_end.is_some() {
-            let count = usize::try_from(instruction_count).map_err(|_| {
-                IssueError::ReferenceMacroUnsupported {
-                    reason: "instruction_count_out_of_range",
-                }
-            })?;
-            if self.warps[warp_index].instruction_buffer.len() < count {
-                return Err(IssueError::ReferenceMacroUnsupported {
-                    reason: "instruction_buffer_does_not_close_macro_entry",
-                });
-            }
-            if !self.warps[warp_index]
-                .instruction_buffer
-                .iter()
-                .take(count)
-                .enumerate()
-                .all(|(index, buffered)| buffered.instruction == next + index)
-            {
-                return Err(IssueError::ReferenceMacroUnsupported {
-                    reason: "instruction_buffer_not_contiguous_at_macro_entry",
-                });
-            }
-            for _ in 0..count {
-                self.warps[warp_index].instruction_buffer.pop_front();
-            }
+            return Err(IssueError::ReferenceMacroUnsupported {
+                reason: "front_end_transition_not_implemented",
+            });
         }
         for instruction in next..end_index {
             let slot = lookup_dense(
@@ -10254,6 +10233,20 @@ impl<'a> SmCore<'a> {
                 });
             }
         }
+        // Resolve the detailed continuation slot before mutating the actor.
+        // A malformed schedule must take exact fallback without leaving a
+        // partially advanced warp behind.
+        let next_slot = if end_index < inst_len {
+            Some(lookup_dense(
+                &self.schedule_slots,
+                self.schedule,
+                self.warps[warp_index].insts[end_index].pc,
+                launch_index,
+                warp_slot,
+            )?)
+        } else {
+            None
+        };
         let subcore = self.warps[warp_index]
             .warp_slot
             .rem_euclid(SUB_CORES as i32) as usize;
@@ -10278,17 +10271,7 @@ impl<'a> SmCore<'a> {
         self.warps[warp_index].next = end_index;
         self.warps[warp_index].eligible = end_cycle;
         self.warps[warp_index].current_since = end_cycle;
-        self.warps[warp_index].next_slot = if end_index < inst_len {
-            Some(lookup_dense(
-                &self.schedule_slots,
-                self.schedule,
-                self.warps[warp_index].insts[end_index].pc,
-                launch_index,
-                warp_slot,
-            )?)
-        } else {
-            None
-        };
+        self.warps[warp_index].next_slot = next_slot;
         self.issued =
             self.issued
                 .checked_add(instruction_count)
@@ -17257,6 +17240,44 @@ mod tests {
                 .unwrap()
                 .is_none()
         );
+    }
+
+    #[cfg(feature = "reference")]
+    #[test]
+    fn reference_scalar_macro_rejects_descriptor_mismatch_without_mutation() {
+        let mut scalar = slot(cb(1), OpClass::Other, "IADD3 R1, R1, 1");
+        scalar.pipeline_class = PipelineClass::ScalarAlu {
+            latency_cycles: 1,
+            initiation_interval_cycles: 1,
+            in_flight_capacity: 8,
+        };
+        let schedule = schedule(vec![
+            (0, scalar),
+            (16, slot(cb(1), OpClass::Other, "BRA 0x20")),
+        ]);
+        let blocks = vec![BlockReplay {
+            launch_index: 0,
+            warps: vec![warp(0, vec![inst(0), inst(16)])],
+        }];
+        let mut core = SmCore::new_with_residency(
+            &blocks,
+            &schedule,
+            &params(),
+            SharedMemoryResidency::unconstrained_fixture(),
+            SmMemMode::Flat,
+        )
+        .unwrap();
+        let before = core.boundary_snapshot();
+        let typed_macro = sim_semantics::native_boundary_execution_path(
+            &sim_semantics::NativeBoundaryRefinementDecision::Preserve,
+        );
+        assert!(matches!(
+            core.execute_reference_macro_path(&typed_macro, 0, 2, 1),
+            Err(IssueError::ReferenceMacroUnsupported {
+                reason: "scalar_macro_descriptor_not_closed"
+            })
+        ));
+        assert_eq!(core.boundary_snapshot(), before);
     }
 
     #[test]

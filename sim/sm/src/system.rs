@@ -55,6 +55,8 @@ use std::fs::File;
 #[cfg(feature = "reference")]
 use std::io::{self, BufWriter, Write};
 use std::num::NonZeroU64;
+#[cfg(feature = "reference")]
+use std::path::PathBuf;
 use std::rc::Rc;
 
 /// Per-SM lower bounds on responses to requests whose `L2Access` has
@@ -145,8 +147,8 @@ use sim_semantics::{
     TypedEventBoundaryRecord, TypedEventIdentity, TypedEventPayload, TypedEventTransition,
     TypedFillIdentity, TypedL2Source, TypedMemoryOperation, TypedMemoryOrigin, TypedMemoryRequest,
     TypedObservationContract, TypedPendingEvent, TypedResponseIdentity, TypedResponseKind,
-    TypedScalarMacroSpec, compare_native_region_contract, execute_typed_scalar_macro,
-    native_boundary_execution_path,
+    TypedScalarMacroSpec, compare_native_boundary_projection, compare_native_region_contract,
+    execute_typed_scalar_macro, native_boundary_execution_path,
 };
 
 /// Stable response identity used only at the typed boundary. The process-local
@@ -1293,7 +1295,7 @@ pub enum ReferenceTraceError {
 }
 
 #[cfg(feature = "reference")]
-#[derive(Debug, Clone, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 struct ReferenceMacroWitness {
     schema: String,
     target: u32,
@@ -1315,12 +1317,18 @@ struct ReferenceTrace {
     witness: Option<ReferenceMacroWitness>,
     pending_native_result: Option<NativeBoundaryExecutionResult>,
     active_native_result: Option<NativeBoundaryExecutionResult>,
+    pending_region_end: Option<TypedEventBoundaryRecord>,
     native_macro_dispatches: u64,
     native_macro_fallbacks: u64,
 }
 
 #[cfg(feature = "reference")]
 const DEFAULT_REFERENCE_TRACE_MAX_RECORDS: u64 = 8_192;
+
+#[cfg(all(feature = "reference", test))]
+thread_local! {
+    static REFERENCE_TRACE_OVERRIDE: RefCell<Option<(PathBuf, Option<PathBuf>)>> = const { RefCell::new(None) };
+}
 
 #[cfg(feature = "reference")]
 fn typed_scalar_macro_spec_from_env() -> Option<TypedScalarMacroSpec> {
@@ -1473,9 +1481,25 @@ fn reference_operations<'a>(
 #[cfg(feature = "reference")]
 impl ReferenceTrace {
     fn from_env() -> Result<Option<Self>, ReferenceTraceError> {
+        #[cfg(test)]
+        if let Some((trace_path, witness_path)) =
+            REFERENCE_TRACE_OVERRIDE.with(|slot| slot.borrow().clone())
+        {
+            return Self::from_paths(trace_path, witness_path);
+        }
         let Some(path) = std::env::var_os("SIM_SM_REFERENCE_TRACE") else {
             return Ok(None);
         };
+        Self::from_paths(
+            PathBuf::from(path),
+            std::env::var_os("SIM_SM_REFERENCE_TYPED_SCALAR_WITNESS").map(PathBuf::from),
+        )
+    }
+
+    fn from_paths(
+        path: PathBuf,
+        witness_path: Option<PathBuf>,
+    ) -> Result<Option<Self>, ReferenceTraceError> {
         let max_records = match std::env::var("SIM_SM_REFERENCE_MAX_RECORDS") {
             Ok(value) => value
                 .parse::<u64>()
@@ -1496,7 +1520,7 @@ impl ReferenceTrace {
             previous_event: None,
             issue_effect_cursors: Vec::new(),
             pending_typed_entry: None,
-            witness: std::env::var_os("SIM_SM_REFERENCE_TYPED_SCALAR_WITNESS")
+            witness: witness_path
                 .map(|path| {
                     let bytes = std::fs::read(path)?;
                     let witness: ReferenceMacroWitness = serde_json::from_slice(&bytes)?;
@@ -1510,6 +1534,7 @@ impl ReferenceTrace {
                 .transpose()?,
             pending_native_result: None,
             active_native_result: None,
+            pending_region_end: None,
             native_macro_dispatches: 0,
             native_macro_fallbacks: 0,
         };
@@ -1541,6 +1566,18 @@ impl ReferenceTrace {
 
     fn note_native_dispatch(&mut self) {
         self.native_macro_dispatches = self.native_macro_dispatches.saturating_add(1);
+    }
+
+    fn expect_region_end(&mut self, exit: TypedEventBoundaryRecord) {
+        self.pending_region_end = Some(exit);
+    }
+
+    fn has_active_native_result(&self) -> bool {
+        self.active_native_result.is_some()
+    }
+
+    fn discard_active_native_result(&mut self) {
+        self.active_native_result = None;
     }
 
     fn native_result_decision(
@@ -1926,6 +1963,31 @@ impl ReferenceTrace {
             completeness: typed_l2_power_completeness.clone(),
         };
         typed_boundary.validate_structure()?;
+        if boundary_phase == "pre"
+            && self
+                .pending_region_end
+                .as_ref()
+                .is_some_and(|expected| typed_boundary.event.time >= expected.event.time)
+        {
+            let expected = self
+                .pending_region_end
+                .take()
+                .expect("pending region-end check was present");
+            if typed_boundary.event != expected.event {
+                return Err(ReferenceTraceError::Witness(
+                    "typed macro continuation event did not reach its declared region end"
+                        .to_owned(),
+                ));
+            }
+            if !matches!(
+                compare_native_boundary_projection(&expected, &typed_boundary, &expected.contract,),
+                sim_semantics::NativeBoundaryRefinementDecision::Preserve
+            ) {
+                return Err(ReferenceTraceError::Witness(
+                    "typed macro continuation boundary disagrees with its declared exit".to_owned(),
+                ));
+            }
+        }
         if self.issue_effect_cursors.len() < cores.len() {
             self.issue_effect_cursors.resize(cores.len(), 0);
         }
@@ -2046,6 +2108,11 @@ impl ReferenceTrace {
         queue: sim_engine::QueueStats,
         power: &PowerBoundaryState,
     ) -> Result<(), ReferenceTraceError> {
+        if self.pending_region_end.is_some() {
+            return Err(ReferenceTraceError::Witness(
+                "typed macro continuation ended before its declared region end".to_owned(),
+            ));
+        }
         // `max_records` bounds data records. The footer is metadata emitted
         // after that bound so a run that ends exactly at the limit remains a
         // valid lossless stream.
@@ -3799,6 +3866,7 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates_with_coherenc
                         &result,
                         &mut queue,
                         &mut wake_due,
+                        Some(&mut power_state),
                         reference_trace.as_mut(),
                     )? {
                         handled_reference_macro = true;
@@ -4770,26 +4838,41 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates_with_coherenc
             sm_active_terminal_event_time = Some(ev.time);
         }
         #[cfg(feature = "reference")]
-        power_state.record_event(reference_event_name)?;
-        #[cfg(feature = "reference")]
-        if let Some(trace) = reference_trace.as_mut() {
-            trace.record_event(
-                ev.time,
-                ev.seq,
-                ev.target.0,
-                reference_event_name,
-                ev.sequence_span.get(),
-                reference_typed_event_payload,
-                &queue,
-                &staged_l2,
-                &cores,
-                &sm_ids,
-                &response_due,
-                &pending_l2_ready,
-                &power_state,
-                dram_server.as_ref(),
-                "post",
-            )?;
+        {
+            let defer_macro_post = reference_trace
+                .as_ref()
+                .is_some_and(ReferenceTrace::has_active_native_result);
+            if defer_macro_post {
+                // The scalar macro already advanced the typed power/core
+                // frontier to its region end.  A second snapshot at the
+                // original event identity would be a time-travelling
+                // pre/post pair; the continuation event is the authoritative
+                // region-end boundary and performs the comparison.
+                if let Some(trace) = reference_trace.as_mut() {
+                    trace.discard_active_native_result();
+                }
+            } else {
+                power_state.record_event(reference_event_name)?;
+                if let Some(trace) = reference_trace.as_mut() {
+                    trace.record_event(
+                        ev.time,
+                        ev.seq,
+                        ev.target.0,
+                        reference_event_name,
+                        ev.sequence_span.get(),
+                        reference_typed_event_payload,
+                        &queue,
+                        &staged_l2,
+                        &cores,
+                        &sm_ids,
+                        &response_due,
+                        &pending_l2_ready,
+                        &power_state,
+                        dram_server.as_ref(),
+                        "post",
+                    )?;
+                }
+            }
         }
     }
 
@@ -5289,27 +5372,91 @@ fn dispatch_reference_macro_event(
     result: &NativeBoundaryExecutionResult,
     queue: &mut EventQueue<Ev>,
     wake_due: &mut DueTimes,
-    trace: Option<&mut ReferenceTrace>,
+    power_state: Option<&mut PowerBoundaryState>,
+    mut trace: Option<&mut ReferenceTrace>,
 ) -> Result<bool, SystemError> {
-    let native_execution = core.execute_reference_boundary_result(result)?;
-    let Some(execution) = native_execution else {
-        if let Some(trace) = trace {
+    let contract = match result {
+        NativeBoundaryExecutionResult::TypedMacro { contract } => contract,
+        NativeBoundaryExecutionResult::ExactReplay { .. } => return Ok(false),
+    };
+    if contract.validate().is_err() {
+        if let Some(trace) = trace.as_deref_mut() {
+            trace.note_native_fallback();
+        }
+        return Ok(false);
+    }
+    // The scalar actor is allowed to consume only a boundary whose logical
+    // effect reservations are immediately after the event that was popped.
+    // Otherwise a witness could make a Preserve decision while the real event
+    // queue already contains work that would receive an ambiguous sequence.
+    let effect_count = u64::try_from(contract.internal_effects.len()).map_err(|_| {
+        IssueError::ReferenceMacroUnsupported {
+            reason: "typed_macro_effect_count_out_of_range",
+        }
+    })?;
+    let Some(effect_span) = NonZeroU64::new(effect_count) else {
+        if let Some(trace) = trace.as_deref_mut() {
             trace.note_native_fallback();
         }
         return Ok(false);
     };
-    if let Some(trace) = trace {
+    let expected_effect_start = contract.entry.event.sequence.checked_add(1).ok_or(
+        IssueError::ReferenceMacroUnsupported {
+            reason: "typed_macro_sequence_overflow",
+        },
+    )?;
+    let expected_exit_sequence = expected_effect_start.checked_add(effect_count).ok_or(
+        IssueError::ReferenceMacroUnsupported {
+            reason: "typed_macro_sequence_overflow",
+        },
+    )?;
+    if contract.entry.event.payload != TypedEventPayload::SmWake
+        || !contract.entry.queue.pending.is_empty()
+        || contract.exit.event.sequence != expected_exit_sequence
+        || queue.next_sequence() != Some(expected_effect_start)
+        || wake_due.next(sm_ix).is_some()
+    {
+        if let Some(trace) = trace.as_deref_mut() {
+            trace.note_native_fallback();
+        }
+        return Ok(false);
+    }
+    // Validate and install the actor transition before consuming queue
+    // sequence space. The actor performs all descriptor/continuation checks
+    // before mutation; an unsupported descriptor therefore falls back without
+    // changing either the core or the event queue.
+    let native_execution = core.execute_reference_boundary_result(result)?;
+    let Some(execution) = native_execution else {
+        if let Some(trace) = trace.as_deref_mut() {
+            trace.note_native_fallback();
+        }
+        return Ok(false);
+    };
+    // Reserve the declared internal effects before the continuation is
+    // inserted.  The continuation therefore receives the contract's
+    // region-end sequence instead of silently reusing the next free sequence
+    // as if the collapsed effects had never existed.
+    let reserved_start = queue.reserve_sequence_span(effect_span)?;
+    debug_assert_eq!(reserved_start, expected_effect_start);
+    if let Some(trace) = trace.as_deref_mut() {
         trace.note_native_dispatch();
     }
     let target = u32::try_from(sm_ix)
         .map_err(|_| SystemError::ActorCountOutOfRange { count: actor_count })?;
-    if wake_due
-        .next(sm_ix)
-        .is_none_or(|wake| wake > execution.end_cycle)
-    {
-        queue.schedule_at(execution.end_cycle, TargetId(target), Ev::SmWake)?;
-        wake_due.push(sm_ix, execution.end_cycle)?;
+    let continuation_seq = queue.schedule_at(execution.end_cycle, TargetId(target), Ev::SmWake)?;
+    if continuation_seq != expected_exit_sequence {
+        return Err(SystemError::Issue(IssueError::ReferenceMacroUnsupported {
+            reason: "typed_macro_continuation_sequence_mismatch",
+        }));
     }
+    if let Some(power_state) = power_state {
+        power_state
+            .record_scalar_macro_completion(contract.entry.event.time, execution.end_cycle)?;
+    }
+    if let Some(trace) = trace.as_deref_mut() {
+        trace.expect_region_end(contract.exit.clone());
+    }
+    wake_due.push(sm_ix, execution.end_cycle)?;
     Ok(true)
 }
 
@@ -5602,6 +5749,7 @@ mod tests {
             witness: None,
             pending_native_result: None,
             active_native_result: None,
+            pending_region_end: None,
             native_macro_dispatches: 0,
             native_macro_fallbacks: 0,
         };
@@ -5628,6 +5776,7 @@ mod tests {
             witness: None,
             pending_native_result: None,
             active_native_result: None,
+            pending_region_end: None,
             native_macro_dispatches: 0,
             native_macro_fallbacks: 0,
         };
@@ -5644,6 +5793,414 @@ mod tests {
                 .and_then(|value| value.get("kind").cloned())
                 == Some(serde_json::Value::String("footer".to_owned()))
         }));
+    }
+
+    #[cfg(feature = "reference")]
+    fn typed_record_fixture(
+        core: &SmCore<'_>,
+        queue: &EventQueue<Ev>,
+        l2: &L2Model,
+        time: u64,
+        sequence: u64,
+        power: &PowerBoundaryState,
+        boundary_phase: &'static str,
+        pending_entry: Option<&TypedEventBoundaryRecord>,
+    ) -> (TypedEventBoundaryRecord, Vec<TypedEventTransition>) {
+        let file = tempfile::NamedTempFile::new().unwrap();
+        let mut trace = ReferenceTrace {
+            writer: BufWriter::new(std::fs::File::create(file.path()).unwrap()),
+            records: 0,
+            max_records: 32,
+            previous_event: None,
+            issue_effect_cursors: Vec::new(),
+            pending_typed_entry: pending_entry.cloned(),
+            witness: None,
+            pending_native_result: None,
+            active_native_result: None,
+            pending_region_end: None,
+            native_macro_dispatches: 0,
+            native_macro_fallbacks: 0,
+        };
+        let response_due = DueTimes::new(1);
+        let pending_l2_ready = PendingL2Ready::default();
+        trace
+            .record_event(
+                time,
+                sequence,
+                0,
+                "sm_wake",
+                1,
+                TypedEventPayload::SmWake,
+                queue,
+                l2,
+                std::slice::from_ref(core),
+                &[0],
+                &response_due,
+                &pending_l2_ready,
+                power,
+                None,
+                boundary_phase,
+            )
+            .unwrap();
+        let value = trace.previous_event.expect("boundary fixture event");
+        (
+            serde_json::from_value(value["typed_boundary"].clone()).unwrap(),
+            serde_json::from_value(value["detailed_internal_effects"].clone()).unwrap(),
+        )
+    }
+
+    #[cfg(feature = "reference")]
+    fn typed_boundary_fixture(
+        core: &SmCore<'_>,
+        queue: &EventQueue<Ev>,
+        l2: &L2Model,
+    ) -> TypedEventBoundaryRecord {
+        let power = PowerBoundaryState::activity_only(None, None);
+        typed_record_fixture(core, queue, l2, 0, 0, &power, "pre", None).0
+    }
+
+    #[cfg(feature = "reference")]
+    fn scalar_macro_fixture() -> (FunctionSchedule, Vec<BlockReplay>) {
+        let mut slots = Vec::new();
+        let mut insts = Vec::new();
+        for index in 0..3_u32 {
+            let pc = u64::from(index) * 16;
+            let mut scalar = slot(cb(1), "IADD3 R1, R1, 1");
+            scalar.pipeline_class = PipelineClass::ScalarAlu {
+                latency_cycles: 1,
+                initiation_interval_cycles: 1,
+                in_flight_capacity: 8,
+            };
+            slots.push((pc, scalar));
+            insts.push(ReplayInst {
+                pc: u32::try_from(pc).unwrap(),
+                kind: AccessKind::NonMemory,
+            });
+        }
+        (
+            schedule(slots),
+            vec![BlockReplay {
+                launch_index: 0,
+                warps: vec![WarpReplay {
+                    async_copy_cohorts: None,
+                    warp_slot: 0,
+                    insts,
+                    sectors: Vec::new(),
+                }],
+            }],
+        )
+    }
+
+    #[cfg(feature = "reference")]
+    #[test]
+    fn reference_dispatcher_consumes_typed_macro_and_reserves_effect_sequences() {
+        let (schedule, blocks) = scalar_macro_fixture();
+        let params = params();
+        let entry_core = SmCore::new_with_residency(
+            &blocks,
+            &schedule,
+            &params,
+            SharedMemoryResidency::unconstrained_fixture(),
+            SmMemMode::Flat,
+        )
+        .unwrap();
+        let mut detailed_core = SmCore::new_with_residency(
+            &blocks,
+            &schedule,
+            &params,
+            SharedMemoryResidency::unconstrained_fixture(),
+            SmMemMode::Flat,
+        )
+        .unwrap();
+        let mut macro_core = SmCore::new_with_residency(
+            &blocks,
+            &schedule,
+            &params,
+            SharedMemoryResidency::unconstrained_fixture(),
+            SmMemMode::Flat,
+        )
+        .unwrap();
+        let l2 = l2_model();
+        let mut queue = EventQueue::new();
+        queue.schedule_at(0, TargetId(0), Ev::SmWake).unwrap();
+        assert_eq!(queue.pop().unwrap().unwrap().seq, 0);
+        let entry = typed_boundary_fixture(&entry_core, &queue, &l2);
+        let spec = TypedScalarMacroSpec {
+            instruction_count: 2,
+            latency_cycles: 1,
+            initiation_interval_cycles: 1,
+            label: "scalar_macro_v1".to_owned(),
+        };
+        let contract = sim_semantics::derive_typed_scalar_macro_region(&entry, &spec).unwrap();
+        assert_eq!(contract.exit.event.time, 2);
+        assert_eq!(contract.exit.event.sequence, 3);
+        let result = NativeBoundaryExecutionResult::TypedMacro { contract };
+        let mut wake_due = DueTimes::new(1);
+        assert!(
+            dispatch_reference_macro_event(
+                &mut macro_core,
+                0,
+                1,
+                &result,
+                &mut queue,
+                &mut wake_due,
+                None,
+                None,
+            )
+            .unwrap()
+        );
+        assert_eq!(queue.next_sequence(), Some(4));
+        let continuation = queue.pop().unwrap().unwrap();
+        assert_eq!((continuation.time, continuation.seq), (2, 3));
+        wake_due
+            .pop_expect("fixture macro continuation", 0, 2)
+            .unwrap();
+
+        let mut detailed_requests = Vec::new();
+        assert!(matches!(
+            detailed_core.advance(ReplayHorizon::Bounded(2), &mut detailed_requests),
+            Ok(Advance::Idle { .. })
+        ));
+        let mut macro_requests = Vec::new();
+        assert!(matches!(
+            macro_core.advance(ReplayHorizon::Unbounded, &mut macro_requests),
+            Ok(Advance::Done)
+        ));
+        assert!(matches!(
+            detailed_core.advance(ReplayHorizon::Unbounded, &mut detailed_requests),
+            Ok(Advance::Done)
+        ));
+        assert_eq!(
+            macro_core.boundary_snapshot(),
+            detailed_core.boundary_snapshot()
+        );
+        assert_eq!(macro_core.result().cycles, detailed_core.result().cycles);
+        assert_eq!(macro_core.result().instructions_issued, 3);
+
+        // A changed continuation identity must fallback before either the
+        // queue reservation or native actor mutation.
+        let mut fallback_core = SmCore::new_with_residency(
+            &blocks,
+            &schedule,
+            &params,
+            SharedMemoryResidency::unconstrained_fixture(),
+            SmMemMode::Flat,
+        )
+        .unwrap();
+        let before = fallback_core.boundary_snapshot();
+        let mut fallback_queue = EventQueue::new();
+        fallback_queue
+            .schedule_at(0, TargetId(0), Ev::SmWake)
+            .unwrap();
+        fallback_queue.pop().unwrap().unwrap();
+        let mut bad = match result {
+            NativeBoundaryExecutionResult::TypedMacro { contract } => contract,
+            NativeBoundaryExecutionResult::ExactReplay { .. } => unreachable!(),
+        };
+        bad.exit.event.sequence = bad.exit.event.sequence.saturating_add(1);
+        let bad_result = NativeBoundaryExecutionResult::TypedMacro { contract: bad };
+        let mut fallback_wake_due = DueTimes::new(1);
+        assert!(
+            !dispatch_reference_macro_event(
+                &mut fallback_core,
+                0,
+                1,
+                &bad_result,
+                &mut fallback_queue,
+                &mut fallback_wake_due,
+                None,
+                None,
+            )
+            .unwrap()
+        );
+        assert_eq!(fallback_core.boundary_snapshot(), before);
+        assert_eq!(fallback_queue.next_sequence(), Some(1));
+        assert!(fallback_wake_due.next(0).is_none());
+    }
+
+    #[cfg(feature = "reference")]
+    #[test]
+    fn reference_event_loop_consumes_witness_and_resumes_detailed_suffix() {
+        let (schedule, blocks) = scalar_macro_fixture();
+        let (_, baseline_blocks) = scalar_macro_fixture();
+        let params = params();
+        let entry_core = SmCore::new_with_residency(
+            &blocks,
+            &schedule,
+            &params,
+            SharedMemoryResidency::unconstrained_fixture(),
+            SmMemMode::L1Shared(l1_config()),
+        )
+        .unwrap();
+        let l2 = l2_model();
+        let mut entry_queue = EventQueue::new();
+        entry_queue.schedule_at(0, TargetId(0), Ev::SmWake).unwrap();
+        entry_queue.pop().unwrap().unwrap();
+        let entry = typed_boundary_fixture(&entry_core, &entry_queue, &l2);
+        let spec = TypedScalarMacroSpec {
+            instruction_count: 2,
+            latency_cycles: 1,
+            initiation_interval_cycles: 1,
+            label: "scalar_macro_v1".to_owned(),
+        };
+        let mut detailed_witness_core = SmCore::new_with_residency(
+            &blocks,
+            &schedule,
+            &params,
+            SharedMemoryResidency::unconstrained_fixture(),
+            SmMemMode::L1Shared(l1_config()),
+        )
+        .unwrap();
+        let mut detailed_witness_requests = Vec::new();
+        assert!(matches!(
+            detailed_witness_core
+                .advance(ReplayHorizon::Bounded(2), &mut detailed_witness_requests),
+            Ok(Advance::Idle { .. })
+        ));
+        let mut detailed_witness_queue = EventQueue::new();
+        detailed_witness_queue
+            .schedule_at(0, TargetId(0), Ev::SmWake)
+            .unwrap();
+        detailed_witness_queue.pop().unwrap().unwrap();
+        detailed_witness_queue
+            .reserve_sequence_span(NonZeroU64::new(3).unwrap())
+            .unwrap();
+        let mut detailed_witness_power = PowerBoundaryState::activity_only(None, None);
+        detailed_witness_power
+            .record_scalar_macro_completion(0, 2)
+            .unwrap();
+        let (detailed_exit, detailed_internal_effects) = typed_record_fixture(
+            &detailed_witness_core,
+            &detailed_witness_queue,
+            &l2,
+            2,
+            3,
+            &detailed_witness_power,
+            "pre",
+            Some(&entry),
+        );
+        let contract = sim_semantics::derive_typed_scalar_macro_region(&entry, &spec).unwrap();
+        let witness = ReferenceMacroWitness {
+            schema: "reification_native_macro_witness_v1".to_owned(),
+            target: 0,
+            start_sequence: 0,
+            spec: spec.clone(),
+            detailed_internal_effects,
+            detailed_labels: vec![spec.label.clone()],
+            detailed_exit,
+        };
+        assert!(matches!(
+            execute_typed_scalar_macro(
+                &entry,
+                &witness.spec,
+                &witness.detailed_internal_effects,
+                &witness.detailed_labels,
+                &witness.detailed_exit,
+            )
+            .unwrap(),
+            NativeBoundaryExecutionResult::TypedMacro { .. }
+        ));
+        let trace_file = tempfile::NamedTempFile::new().unwrap();
+        let witness_file = tempfile::NamedTempFile::new().unwrap();
+        std::fs::write(witness_file.path(), serde_json::to_vec(&witness).unwrap()).unwrap();
+
+        let mut baseline_l2 = l2_model();
+        let baseline = simulate_kernel_shared_with_residency(
+            &BTreeMap::from([(0, baseline_blocks)]),
+            &schedule,
+            &params,
+            SharedMemoryResidency::unconstrained_fixture(),
+            l1_config(),
+            &mut baseline_l2,
+            DramBw::Unmodeled { arch: ArchId::Sm86 },
+        )
+        .unwrap();
+
+        let previous_override = REFERENCE_TRACE_OVERRIDE.with(|slot| {
+            slot.replace(Some((
+                trace_file.path().to_owned(),
+                Some(witness_file.path().to_owned()),
+            )))
+        });
+        let mut macro_l2 = l2_model();
+        let macro_result = simulate_kernel_shared_with_residency(
+            &BTreeMap::from([(0, blocks)]),
+            &schedule,
+            &params,
+            SharedMemoryResidency::unconstrained_fixture(),
+            l1_config(),
+            &mut macro_l2,
+            DramBw::Unmodeled { arch: ArchId::Sm86 },
+        );
+        REFERENCE_TRACE_OVERRIDE.with(|slot| {
+            slot.replace(previous_override);
+        });
+        let macro_result = macro_result.unwrap();
+        assert_eq!(
+            macro_result.per_sm[&0].cycles, baseline.per_sm[&0].cycles,
+            "macro dispatch must preserve the detailed suffix result"
+        );
+        assert_eq!(
+            macro_result.per_sm[&0].instructions_issued,
+            baseline.per_sm[&0].instructions_issued
+        );
+        let footer = std::fs::read_to_string(trace_file.path())
+            .unwrap()
+            .lines()
+            .last()
+            .and_then(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+            .expect("reference trace footer");
+        assert_eq!(footer["kind"], "footer");
+        assert_eq!(footer["native_macro_dispatches"], 1);
+        assert_eq!(footer["native_macro_fallbacks"], 0);
+
+        let (_, bad_blocks) = scalar_macro_fixture();
+        let bad_trace_file = tempfile::NamedTempFile::new().unwrap();
+        let bad_witness_file = tempfile::NamedTempFile::new().unwrap();
+        let mut bad_exit = contract.exit.clone();
+        bad_exit.cores[0].issued = bad_exit.cores[0].issued.saturating_add(1);
+        let bad_witness = ReferenceMacroWitness {
+            schema: "reification_native_macro_witness_v1".to_owned(),
+            target: 0,
+            start_sequence: 0,
+            spec: witness.spec.clone(),
+            detailed_internal_effects: witness.detailed_internal_effects.clone(),
+            detailed_labels: witness.detailed_labels.clone(),
+            detailed_exit: bad_exit,
+        };
+        std::fs::write(
+            bad_witness_file.path(),
+            serde_json::to_vec(&bad_witness).unwrap(),
+        )
+        .unwrap();
+        let previous_override = REFERENCE_TRACE_OVERRIDE.with(|slot| {
+            slot.replace(Some((
+                bad_trace_file.path().to_owned(),
+                Some(bad_witness_file.path().to_owned()),
+            )))
+        });
+        let mut bad_l2 = l2_model();
+        let bad_result = simulate_kernel_shared_with_residency(
+            &BTreeMap::from([(0, bad_blocks)]),
+            &schedule,
+            &params,
+            SharedMemoryResidency::unconstrained_fixture(),
+            l1_config(),
+            &mut bad_l2,
+            DramBw::Unmodeled { arch: ArchId::Sm86 },
+        )
+        .unwrap();
+        REFERENCE_TRACE_OVERRIDE.with(|slot| {
+            slot.replace(previous_override);
+        });
+        assert_eq!(bad_result.per_sm[&0].cycles, baseline.per_sm[&0].cycles);
+        let bad_footer = std::fs::read_to_string(bad_trace_file.path())
+            .unwrap()
+            .lines()
+            .last()
+            .and_then(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+            .expect("perturbed reference trace footer");
+        assert_eq!(bad_footer["native_macro_dispatches"], 0);
     }
 
     #[test]

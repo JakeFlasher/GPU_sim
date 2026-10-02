@@ -36,7 +36,15 @@ def test_builder_keeps_two_repetitions_and_row_identity(tmp_path: Path):
         {
             "schema": "reification_prediction_manifest_v1",
             "target_contract": CONTRACT,
-            "rows": [{"workload": "w", "family": "f", "split": "held_out"}],
+            "rows": [{
+                "workload": "w",
+                "family": "f",
+                "split": "held_out",
+                "trace": "trace",
+                "control": "control",
+                "arch_card": "arch",
+                "pchase_card": "pchase",
+            }],
         },
         tmp_path,
         source="fixture",
@@ -48,6 +56,7 @@ def test_builder_keeps_two_repetitions_and_row_identity(tmp_path: Path):
         row["identity_status"] == "manifest_labeled_historical"
         for row in document["rows"]
     )
+    assert document["rows"][0]["source_binding"]["trace"] == "trace"
 
 
 def test_builder_rejects_wrong_repetition_count(tmp_path: Path):

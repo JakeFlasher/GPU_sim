@@ -190,3 +190,29 @@ def test_target_contract_mismatch_is_rejected_before_join():
             },
             {"schema": "ncu_observation_v2", "identity_status": "manifest_labeled_historical", "target_contract": observation_contract, "rows": []},
         )
+
+
+def test_source_binding_mismatch_is_rejected_before_join():
+    prediction_binding = {
+        "workload": "x",
+        "trace": "trace-a",
+        "control": "control-a",
+        "arch_card": "arch",
+        "pchase_card": "pchase",
+        "launch_identity": CONTRACT["launch_identity"],
+    }
+    observation_binding = {**prediction_binding, "trace": "trace-b"}
+    predictions = {
+        "schema": "reification_prediction_v2",
+        "target_contract": CONTRACT,
+        "source_bindings": [prediction_binding],
+        "rows": [{"workload": "x", "family": "f", "split": "held_out", "status": "predicted", **_prediction(10, 9, 11)}],
+    }
+    observations = {
+        "schema": "ncu_observation_v2",
+        "identity_status": "manifest_labeled_historical",
+        "target_contract": CONTRACT,
+        "rows": [{**_observation("x", 10), "source_binding": observation_binding}],
+    }
+    with pytest.raises(ValueError, match="source binding mismatch"):
+        evaluate_prediction_splits(predictions, observations)

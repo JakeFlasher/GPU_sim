@@ -33,6 +33,14 @@ REQUIRED_HARDWARE_FIELDS = {
     "sm_clock_mhz",
     "device_index",
 }
+SOURCE_BINDING_FIELDS = (
+    "workload",
+    "trace",
+    "control",
+    "arch_card",
+    "pchase_card",
+    "launch_identity",
+)
 
 
 def _finite_number(value: Any, label: str) -> float:
@@ -212,26 +220,60 @@ def validate_prediction_row(row: Any, index: int) -> None:
             _finite_number(row[field], f"prediction row {index}.{field}")
 
 
+def _validate_source_binding(
+    binding: Any,
+    index: int,
+    target_contract: dict[str, Any],
+    label: str,
+) -> dict[str, str]:
+    if not isinstance(binding, dict):
+        raise ValueError(f"{label} source binding {index} must be an object")
+    for field in SOURCE_BINDING_FIELDS:
+        if not isinstance(binding.get(field), str) or not binding[field].strip():
+            raise ValueError(f"{label} source binding {index}.{field} must be nonempty")
+    if binding["launch_identity"] != target_contract["launch_identity"]:
+        raise ValueError(
+            f"{label} source binding {index}.launch_identity disagrees with target_contract"
+        )
+    return {field: binding[field] for field in SOURCE_BINDING_FIELDS}
+
+
+def _validate_source_binding_set(
+    bindings: Any,
+    rows: list[dict[str, Any]],
+    target_contract: dict[str, Any],
+    label: str,
+    *,
+    required: bool,
+) -> dict[str, dict[str, str]]:
+    if bindings is None:
+        if required:
+            raise ValueError(f"{label} source_bindings are required")
+        return {}
+    if not isinstance(bindings, list) or not bindings:
+        raise ValueError(f"{label} source_bindings must be a nonempty array")
+    result: dict[str, dict[str, str]] = {}
+    for index, binding in enumerate(bindings):
+        normalized = _validate_source_binding(binding, index, target_contract, label)
+        workload = normalized["workload"]
+        if workload in result:
+            raise ValueError(f"{label} repeats source binding {workload!r}")
+        result[workload] = normalized
+    expected = {row.get("workload") for row in rows}
+    if set(result) != expected:
+        raise ValueError(
+            f"{label} source bindings must cover exactly the row workloads; "
+            f"missing={sorted(expected - set(result))}, extra={sorted(set(result) - expected)}"
+        )
+    return result
+
+
 def validate_prediction_document(document: Any) -> dict[str, Any]:
     """Validate the executable output document before it is materialized."""
 
     if not isinstance(document, dict) or document.get("schema") != "reification_prediction_v2":
         raise ValueError("prediction document schema must be reification_prediction_v2")
     validate_target_contract(document.get("target_contract"), "prediction", require_hardware=True)
-    bindings = document.get("source_bindings")
-    if bindings is not None:
-        if not isinstance(bindings, list):
-            raise ValueError("prediction source_bindings must be an array")
-        seen_bindings: set[str] = set()
-        for index, binding in enumerate(bindings):
-            if not isinstance(binding, dict):
-                raise ValueError(f"prediction source binding {index} must be an object")
-            for field in ("workload", "trace", "control", "arch_card", "pchase_card", "launch_identity"):
-                if not isinstance(binding.get(field), str) or not binding[field].strip():
-                    raise ValueError(f"prediction source binding {index}.{field} must be nonempty")
-            if binding["workload"] in seen_bindings:
-                raise ValueError(f"prediction repeats source binding {binding['workload']!r}")
-            seen_bindings.add(binding["workload"])
     rows = document.get("rows")
     validate_split_roster(rows, "prediction")
     identities: set[tuple[str, str]] = set()
@@ -241,7 +283,62 @@ def validate_prediction_document(document: Any) -> dict[str, Any]:
         if identity in identities:
             raise ValueError(f"prediction repeats workload/intervention {identity!r}")
         identities.add(identity)
+    _validate_source_binding_set(
+        document.get("source_bindings"),
+        rows,
+        document["target_contract"],
+        "prediction",
+        required=True,
+    )
     return document
+
+
+def prediction_source_bindings(
+    document: dict[str, Any], *, required: bool = False
+) -> dict[str, dict[str, str]]:
+    """Return semantically checked prediction source bindings by workload."""
+
+    target_contract = validate_target_contract(
+        document.get("target_contract"), "prediction", require_hardware=True
+    )
+    rows = document.get("rows")
+    if not isinstance(rows, list):
+        raise ValueError("prediction rows must be an array")
+    return _validate_source_binding_set(
+        document.get("source_bindings"),
+        rows,
+        target_contract,
+        "prediction",
+        required=required,
+    )
+
+
+def observation_source_bindings(document: dict[str, Any]) -> dict[str, dict[str, str]]:
+    """Return checked observation source bindings when the builder supplied them."""
+
+    rows = document.get("rows")
+    if not isinstance(rows, list):
+        raise ValueError("observation rows must be an array")
+    result: dict[str, dict[str, str]] = {}
+    for index, row in enumerate(rows):
+        binding = row.get("source_binding") if isinstance(row, dict) else None
+        if binding is None:
+            continue
+        normalized = _validate_source_binding(
+            binding,
+            index,
+            document["target_contract"],
+            "observation",
+        )
+        workload = normalized["workload"]
+        if isinstance(row, dict) and workload != row.get("workload"):
+            raise ValueError(
+                f"observation row {index}.source_binding.workload disagrees with row workload"
+            )
+        prior = result.setdefault(workload, normalized)
+        if prior != normalized:
+            raise ValueError(f"observation source binding changes for workload {workload!r}")
+    return result
 
 
 def validate_observation_row(
@@ -265,6 +362,14 @@ def validate_observation_row(
         raise ValueError(f"observation row {index}.hardware disagrees with target_contract")
     if row.get("identity_status") != identity_status:
         raise ValueError(f"observation row {index}.identity_status disagrees with document")
+    if row.get("source_binding") is not None:
+        binding = _validate_source_binding(
+            row["source_binding"], index, target_contract, "observation"
+        )
+        if binding["workload"] != row["workload"]:
+            raise ValueError(
+                f"observation row {index}.source_binding.workload disagrees with row workload"
+            )
     _finite_number(row.get("value"), f"observation row {index}.value")
 
 
@@ -286,6 +391,17 @@ def validate_observation_document(document: Any, *, allow_empty: bool = False) -
         raise ValueError("observation rows must be a nonempty array")
     for index, row in enumerate(rows):
         validate_observation_row(row, index, target_contract, identity_status)
+    binding_rows = [row for row in rows if row.get("source_binding") is not None]
+    if binding_rows:
+        bindings = {
+            row["source_binding"]["workload"]: row["source_binding"]
+            for row in binding_rows
+        }
+        expected = {row["workload"] for row in rows}
+        if set(bindings) != expected:
+            raise ValueError(
+                "observation source bindings must cover exactly the row workloads"
+            )
     return document
 
 

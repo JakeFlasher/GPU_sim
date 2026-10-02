@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """Fit an abstract service-rate profile from independent probe observations.
 
-``sm86_service_probe_v1`` remains a compatibility format for old aggregate
-probes. New work should use ``sm86_service_probe_v2`` and provide explicit
+``sm86_service_probe_v1`` remains a compatibility format for old probe
+documents, but it still requires an explicit dependent latency; aggregate
+cycles/events never identify that quantity. New work should use
+``sm86_service_probe_v2`` and provide explicit
 dependent-chain latency and independent-stream throughput observations. Queue
 depth/capacity, occupancy, and contention observations are retained as
 interventions, but the current profile has no queue equation; they are
@@ -51,8 +53,11 @@ def _fit_v1(raw: dict[str, Any], source: str) -> dict[str, Any]:
         cycles = probe.get("cycles")
         events = _positive_int(events, f"probe {index}.events")
         cycles = _positive_int(cycles, f"probe {index}.cycles")
-        latency = probe.get("latency_cycles", max(1, cycles // events))
-        latency = _positive_int(latency, f"probe {index}.latency_cycles")
+        if "latency_cycles" not in probe:
+            raise ValueError(
+                f"probe {index}.latency_cycles is required; aggregate cycles/events cannot identify dependent latency"
+            )
+        latency = _positive_int(probe["latency_cycles"], f"probe {index}.latency_cycles")
         capacity = probe.get("capacity", 1)
         capacity = _positive_int(capacity, f"probe {index}.capacity")
         grouped.setdefault(pool, []).append(
@@ -229,11 +234,27 @@ def evaluate_profile_on_holdout(profile: dict[str, Any], raw: Any) -> dict[str, 
             events = _positive_int(probe.get("events"), f"holdout probe {index}.events")
             cycles = _positive_int(probe.get("cycles"), f"holdout probe {index}.cycles")
             observed = (cycles + events - 1) // events
-            predicted = rate["initiation_interval_cycles"]
-            error = abs(observed - predicted)
-            covered += int(error == 0)
+            predicted_lower = rate["initiation_interval_cycles"]
+            predicted_upper = rate.get("initiation_interval_upper_cycles") or predicted_lower
+            covered_interval = predicted_lower <= observed <= predicted_upper
+            error = (
+                0
+                if covered_interval
+                else min(abs(observed - predicted_lower), abs(observed - predicted_upper))
+            )
+            covered += int(covered_interval)
             absolute_errors.append(error)
-            observations.append({"index": index, "mode": mode, "observed": observed, "predicted": predicted, "error": error})
+            observations.append(
+                {
+                    "index": index,
+                    "mode": mode,
+                    "observed": observed,
+                    "predicted_lower": predicted_lower,
+                    "predicted_upper": predicted_upper,
+                    "covered": covered_interval,
+                    "error": error,
+                }
+            )
         else:
             observations.append({
                 "index": index,
@@ -249,6 +270,7 @@ def evaluate_profile_on_holdout(profile: dict[str, Any], raw: Any) -> dict[str, 
         "observations": observations,
         "identifiable_count": len(absolute_errors),
         "covered_count": covered,
+        "interval_coverage": covered / len(absolute_errors) if absolute_errors else None,
         "mean_absolute_error_cycles": (
             sum(absolute_errors) / len(absolute_errors) if absolute_errors else None
         ),

@@ -3,7 +3,7 @@
   "$id": "https://example.invalid/gpusim/reification_prediction_evaluation_v2.schema.json",
   "title": "Post-prediction reification evaluation join v2",
   "type": "object",
-  "required": ["schema", "target_join", "prediction_stage", "target_contract", "prediction_row_count", "observation_row_count", "joined_row_count", "workload_count", "split_reports", "joined_rows", "selection_used_observation_error"],
+  "required": ["schema", "target_join", "prediction_stage", "target_contract", "prediction_row_count", "observation_row_count", "joined_row_count", "workload_count", "split_reports", "joined_rows", "selection_used_observation_error", "source_bindings_checked"],
   "properties": {
     "schema": {"const": "reification_prediction_evaluation_v2"},
     "target_join": {"const": "independent_ncu_after_prediction"},
@@ -14,6 +14,7 @@
     "joined_row_count": {"type": "integer", "minimum": 0},
     "workload_count": {"type": "integer", "minimum": 1},
     "selection_used_observation_error": {"const": false},
+    "source_bindings_checked": {"type": "boolean"},
     "split_reports": {
       "type": "object",
       "required": ["calibration", "development", "held_out"],

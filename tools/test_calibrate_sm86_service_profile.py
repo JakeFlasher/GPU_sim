@@ -38,6 +38,17 @@ def test_fit_profile_rejects_mixed_pool_capacity() -> None:
         )
 
 
+def test_v1_requires_explicit_dependent_latency_instead_of_aggregate_inference() -> None:
+    with pytest.raises(ValueError, match="aggregate cycles/events cannot identify"):
+        fit_profile(
+            {
+                "schema": "sm86_service_probe_v1",
+                "probes": [{"pool": "alu", "events": 8, "cycles": 32}],
+            },
+            "missing_v1_latency",
+        )
+
+
 def test_v2_requires_separate_identifiable_probe_modes_and_marks_capacity_slope() -> None:
     profile = fit_profile(
         {
@@ -115,6 +126,37 @@ def test_v2_holdout_scores_only_identifiable_probe_modes() -> None:
     assert report["covered_count"] == 2
     assert report["mean_absolute_error_cycles"] == 0
     assert report["observations"][2]["status"] == "unmodeled"
+    assert report["interval_coverage"] == 1.0
+
+
+def test_v2_holdout_scores_throughput_interval_endpoints() -> None:
+    profile = fit_profile(
+        {
+            "schema": "sm86_service_probe_v2",
+            "probes": [
+                {"pool": "alu", "mode": "dependent_latency", "events": 8, "cycles": 32, "latency_cycles": 4},
+                {"pool": "alu", "mode": "independent_throughput", "events": 4, "cycles": 12, "capacity": 2},
+                {"pool": "alu", "mode": "independent_throughput", "events": 4, "cycles": 16, "capacity": 2},
+                {"pool": "alu", "mode": "independent_throughput", "events": 4, "cycles": 20, "capacity": 2},
+            ],
+        },
+        "interval_endpoints",
+    )
+    report = evaluate_profile_on_holdout(
+        profile,
+        {
+            "schema": "sm86_service_probe_v2",
+            "probes": [
+                {"pool": "alu", "mode": "independent_throughput", "events": 8, "cycles": 40, "capacity": 2},
+            ],
+        },
+    )
+    observation = report["observations"][0]
+    assert observation["predicted_lower"] == 4
+    assert observation["predicted_upper"] == 5
+    assert observation["covered"] is True
+    assert report["covered_count"] == 1
+    assert report["interval_coverage"] == 1.0
 
 
 def test_v2_marks_occupancy_and_contention_unmodeled_without_using_their_values():

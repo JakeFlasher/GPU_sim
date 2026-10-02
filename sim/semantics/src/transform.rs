@@ -7,6 +7,7 @@
 //! different rule and its corresponding checker.
 
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 
 use crate::{
     Completeness, PowerDomainStatus, TypedEventBoundaryRecord, TypedEventIdentity,
@@ -162,9 +163,9 @@ pub enum NativeBoundaryRefinementDecision {
     Reify { reason: NativeBoundaryReifyReason },
 }
 
-/// Execution path selected from a native boundary decision. The current
-/// native replay writer only records this plan; it never replaces `SmCore`
-/// execution without a complete macro implementation.
+/// Execution path selected from a native boundary decision. The reference
+/// event loop consumes `TypedMacro` only for the narrow closed scalar fixture;
+/// ordinary front-end/memory traces still take `ExactReplay`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "path")]
 pub enum NativeBoundaryExecutionPath {
@@ -345,6 +346,12 @@ pub fn derive_typed_scalar_macro_region(
         || core.warp_states[0].block_barrier_arrival.is_some()
         || core.barrier_pipe_ready != 0
         || core.block_states.iter().any(|block| block.waiting != 0)
+        || core
+            .block_states
+            .iter()
+            .any(|block| block.barrier_generation != 0)
+        || core.local_completion_time.is_some()
+        || !core.unprojected_timing_state.is_empty()
         || core.outstanding_responses != 0
         || !core.response_owners.is_empty()
         || l1_open
@@ -370,20 +377,46 @@ pub fn derive_typed_scalar_macro_region(
         .next_instruction
         .checked_add(spec.instruction_count)
         .ok_or(RegionContractError::ScalarMacroArithmeticOverflow)?;
-    core.warp_states[0].front_end_fetch_cursor = core.warp_states[0]
-        .front_end_fetch_cursor
-        .checked_add(spec.instruction_count)
-        .ok_or(RegionContractError::ScalarMacroArithmeticOverflow)?;
+    // The accepted issue-only seam has no instruction front end.  Its fetch
+    // cursor is therefore not an actor-owned transition; changing it here
+    // would make the typed contract disagree with the detailed `SmCore`
+    // actor even though no front-end state is present.  Front-end-enabled
+    // entries are refused above until a cursor transition is modeled.
     core.warp_states[0].eligible = end_time;
+    let warp_slot = core.warp_states[0].warp_slot;
+    let subcore = usize::try_from(warp_slot.rem_euclid(
+        i32::try_from(core.subcore_warps.len()).map_err(|_| {
+            RegionContractError::UnsupportedScalarMacro {
+                reason: "subcore_geometry_out_of_range".to_owned(),
+            }
+        })?,
+    ))
+    .map_err(|_| RegionContractError::UnsupportedScalarMacro {
+        reason: "subcore_geometry_out_of_range".to_owned(),
+    })?;
+    if core.hold[subcore].is_some_and(|held| held != u64::try_from(warp_slot).unwrap_or(u64::MAX)) {
+        return Err(RegionContractError::UnsupportedScalarMacro {
+            reason: "different_warp_is_held_on_scalar_subcore".to_owned(),
+        });
+    }
+    core.hold[subcore] = Some(u64::try_from(warp_slot).map_err(|_| {
+        RegionContractError::UnsupportedScalarMacro {
+            reason: "negative_scalar_warp_slot".to_owned(),
+        }
+    })?);
     for domain in &mut exit.power.domains {
         domain.status = PowerDomainStatus::Clocked;
         domain.clocked_cycles = domain
             .clocked_cycles
             .checked_add(duration)
             .ok_or(RegionContractError::ScalarMacroArithmeticOverflow)?;
-        domain.completion_events = domain
-            .completion_events
-            .checked_add(spec.instruction_count)
+        domain.queue_events = domain
+            .queue_events
+            .checked_add(1)
+            .ok_or(RegionContractError::ScalarMacroArithmeticOverflow)?;
+        domain.sm_wake_events = domain
+            .sm_wake_events
+            .checked_add(1)
             .ok_or(RegionContractError::ScalarMacroArithmeticOverflow)?;
         domain.last_cycle = end_time;
     }
@@ -543,14 +576,22 @@ impl TypedRegionContract {
             return Err(RegionContractError::ExitOutsideInterval);
         }
         let mut previous = None;
+        let mut sequence_reservations = BTreeMap::new();
         for effect in &self.internal_effects {
-            effect
-                .event
-                .sequence_end()
-                .map_err(|error| RegionContractError::EffectPayload {
+            let sequence_end = effect.event.sequence_end().map_err(|error| {
+                RegionContractError::EffectPayload {
                     sequence: effect.event.sequence,
                     error: error.to_string(),
-                })?;
+                }
+            })?;
+            if let Some(previous_end) =
+                sequence_reservations.insert(effect.event.sequence, sequence_end)
+            {
+                return Err(RegionContractError::EffectSequenceOverlap {
+                    sequence: effect.event.sequence,
+                    previous_end,
+                });
+            }
             let key = (effect.event.time, effect.phase, effect.event.sequence);
             if effect.phase != effect.event.phase {
                 return Err(RegionContractError::EffectPhaseMismatch {
@@ -588,6 +629,18 @@ impl TypedRegionContract {
                 });
             }
             previous = Some(key);
+        }
+        let mut previous_end = None;
+        for (sequence, sequence_end) in sequence_reservations {
+            if let Some(previous_end) = previous_end
+                && sequence <= previous_end
+            {
+                return Err(RegionContractError::EffectSequenceOverlap {
+                    sequence,
+                    previous_end,
+                });
+            }
+            previous_end = Some(sequence_end);
         }
         if self.pending_completion_tokens != self.exit.queue.pending {
             return Err(RegionContractError::PendingTokenMismatch);
@@ -631,6 +684,10 @@ pub enum RegionContractError {
     EffectOutsideInterval { sequence: u64 },
     #[error("region internal effects are not in engine order at sequence {sequence}")]
     EffectOrder { sequence: u64 },
+    #[error(
+        "region internal effects overlap the reserved sequence space at sequence {sequence} (previous end {previous_end})"
+    )]
+    EffectSequenceOverlap { sequence: u64, previous_end: u64 },
     #[error("region effect payload is malformed at sequence {sequence}: {error}")]
     EffectPayload { sequence: u64, error: String },
     #[error("region pending completion tokens do not equal the exit queue")]
@@ -1437,6 +1494,38 @@ mod tests {
     }
 
     #[test]
+    fn duplicate_internal_effect_sequence_is_rejected_instead_of_counted_twice() {
+        let entry = boundary(0, 0, true);
+        let exit = boundary(1, 2, true);
+        let effect = TypedEventTransition {
+            phase: 0,
+            event: boundary(1, 1, true).event,
+        };
+        let result = TypedRegionContract::new(
+            TypedObservationContract::cycle_exact_power(),
+            TransformInterval {
+                start_cycle: 0,
+                end_cycle: 1,
+                start_sequence: 0,
+                end_sequence: 2,
+                sequence_ordered: true,
+            },
+            entry,
+            vec![effect.clone(), effect],
+            Vec::new(),
+            Vec::new(),
+            exit,
+        );
+        assert!(matches!(
+            result,
+            Err(RegionContractError::EffectSequenceOverlap {
+                sequence: 1,
+                previous_end: 1,
+            })
+        ));
+    }
+
+    #[test]
     fn native_region_comparator_checks_internal_effects_and_labels() {
         let entry = boundary(0, 0, true);
         let exit = boundary(1, 1, true);
@@ -1605,6 +1694,14 @@ mod tests {
         };
         assert!(matches!(
             derive_typed_scalar_macro_region(&unknown, &spec),
+            Err(RegionContractError::Boundary { .. })
+                | Err(RegionContractError::UnsupportedScalarMacro { .. })
+        ));
+
+        let mut unprojected = scalar_entry_boundary();
+        unprojected.cores[0].unprojected_timing_state = vec!["future_scalar_tail".to_owned()];
+        assert!(matches!(
+            derive_typed_scalar_macro_region(&unprojected, &spec),
             Err(RegionContractError::Boundary { .. })
                 | Err(RegionContractError::UnsupportedScalarMacro { .. })
         ));

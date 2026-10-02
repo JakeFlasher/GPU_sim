@@ -2517,6 +2517,45 @@ impl PowerBoundaryState {
         Ok(())
     }
 
+    /// Apply the narrow scalar-macro power projection used by the reference
+    /// event loop.  The macro is accepted only for a closed issue-only region;
+    /// this method records its declared clock/event contribution before the
+    /// continuation event is observed.  It is not a hardware energy model and
+    /// does not manufacture completion tokens.
+    pub fn record_scalar_macro_completion(
+        &mut self,
+        start_cycle: u64,
+        end_cycle: u64,
+    ) -> Result<(), PowerStateError> {
+        if end_cycle < start_cycle {
+            return Err(PowerStateError::TimeTravel);
+        }
+        let mut next = self.clone();
+        next.advance_to(start_cycle)?;
+        for domain in &mut next.domains {
+            if end_cycle < domain.last_cycle {
+                return Err(PowerStateError::TimeTravel);
+            }
+            let delta = end_cycle - domain.last_cycle;
+            domain.status = PowerDomainStatus::Clocked;
+            domain.clocked_cycles = domain
+                .clocked_cycles
+                .checked_add(delta)
+                .ok_or(PowerStateError::CounterOverflow)?;
+            domain.queue_events = domain
+                .queue_events
+                .checked_add(1)
+                .ok_or(PowerStateError::CounterOverflow)?;
+            domain.sm_wake_events = domain
+                .sm_wake_events
+                .checked_add(1)
+                .ok_or(PowerStateError::CounterOverflow)?;
+            domain.last_cycle = end_cycle;
+        }
+        *self = next;
+        Ok(())
+    }
+
     fn record_event_inner(&mut self, event: &str) -> Result<(), PowerStateError> {
         let domain = self.domains.first_mut().ok_or(PowerStateError::NoDomains)?;
         domain.status = PowerDomainStatus::Clocked;

@@ -17,6 +17,7 @@
         "gpu_uuid": "GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c",
         "sm_clock_mhz": 1350
       },
+      "observation_identity_status": "manifest_labeled_historical",
       "observation_metric": "gpc__cycles_elapsed.max",
       "observation_samples": 2,
       "observed": 13323.0,
@@ -46,6 +47,7 @@
         "gpu_uuid": "GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c",
         "sm_clock_mhz": 1350
       },
+      "observation_identity_status": "manifest_labeled_historical",
       "observation_metric": "gpc__cycles_elapsed.max",
       "observation_samples": 2,
       "observed": 16075.0,
@@ -75,6 +77,7 @@
         "gpu_uuid": "GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c",
         "sm_clock_mhz": 1350
       },
+      "observation_identity_status": "manifest_labeled_historical",
       "observation_metric": "gpc__cycles_elapsed.max",
       "observation_samples": 2,
       "observed": 13561.5,
@@ -104,6 +107,7 @@
         "gpu_uuid": "GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c",
         "sm_clock_mhz": 1350
       },
+      "observation_identity_status": "manifest_labeled_historical",
       "observation_metric": "gpc__cycles_elapsed.max",
       "observation_samples": 2,
       "observed": 11521.0,
@@ -133,6 +137,7 @@
         "gpu_uuid": "GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c",
         "sm_clock_mhz": 1350
       },
+      "observation_identity_status": "manifest_labeled_historical",
       "observation_metric": "gpc__cycles_elapsed.max",
       "observation_samples": 2,
       "observed": 5774.0,
@@ -162,6 +167,7 @@
         "gpu_uuid": "GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c",
         "sm_clock_mhz": 1350
       },
+      "observation_identity_status": "manifest_labeled_historical",
       "observation_metric": "gpc__cycles_elapsed.max",
       "observation_samples": 2,
       "observed": 21990.5,
@@ -191,6 +197,7 @@
         "gpu_uuid": "GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c",
         "sm_clock_mhz": 1350
       },
+      "observation_identity_status": "manifest_labeled_historical",
       "observation_metric": "gpc__cycles_elapsed.max",
       "observation_samples": 2,
       "observed": 19022.5,
@@ -220,6 +227,7 @@
         "gpu_uuid": "GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c",
         "sm_clock_mhz": 1350
       },
+      "observation_identity_status": "manifest_labeled_historical",
       "observation_metric": "gpc__cycles_elapsed.max",
       "observation_samples": 2,
       "observed": 5831.0,
@@ -249,6 +257,7 @@
         "gpu_uuid": "GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c",
         "sm_clock_mhz": 1350
       },
+      "observation_identity_status": "manifest_labeled_historical",
       "observation_metric": "gpc__cycles_elapsed.max",
       "observation_samples": 2,
       "observed": 12591.5,
@@ -278,6 +287,7 @@
         "gpu_uuid": "GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c",
         "sm_clock_mhz": 1350
       },
+      "observation_identity_status": "manifest_labeled_historical",
       "observation_metric": "gpc__cycles_elapsed.max",
       "observation_samples": 2,
       "observed": 9613.0,
@@ -307,6 +317,7 @@
         "gpu_uuid": "GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c",
         "sm_clock_mhz": 1350
       },
+      "observation_identity_status": "manifest_labeled_historical",
       "observation_metric": "gpc__cycles_elapsed.max",
       "observation_samples": 2,
       "observed": 200263.0,
@@ -336,6 +347,7 @@
         "gpu_uuid": "GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c",
         "sm_clock_mhz": 1350
       },
+      "observation_identity_status": "manifest_labeled_historical",
       "observation_metric": "gpc__cycles_elapsed.max",
       "observation_samples": 2,
       "observed": 13555.5,
@@ -365,6 +377,7 @@
         "gpu_uuid": "GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c",
         "sm_clock_mhz": 1350
       },
+      "observation_identity_status": "manifest_labeled_historical",
       "observation_metric": "gpc__cycles_elapsed.max",
       "observation_samples": 2,
       "observed": 15256.0,
@@ -394,6 +407,7 @@
         "gpu_uuid": "GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c",
         "sm_clock_mhz": 1350
       },
+      "observation_identity_status": "manifest_labeled_historical",
       "observation_metric": "gpc__cycles_elapsed.max",
       "observation_samples": 2,
       "observed": 15792.0,
@@ -423,6 +437,7 @@
         "gpu_uuid": "GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c",
         "sm_clock_mhz": 1350
       },
+      "observation_identity_status": "manifest_labeled_historical",
       "observation_metric": "gpc__cycles_elapsed.max",
       "observation_samples": 2,
       "observed": 13886.0,
@@ -442,6 +457,7 @@
   "prediction_stage": "pre_observation_document_checked_before_join",
   "schema": "reification_prediction_evaluation_v2",
   "selection_used_observation_error": false,
+  "source_bindings_checked": true,
   "split_reports": {
     "calibration": {
       "finite_interval_coverage": null,

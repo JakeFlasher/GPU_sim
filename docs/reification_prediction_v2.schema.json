@@ -3,7 +3,7 @@
   "$id": "https://example.invalid/gpusim/reification_prediction_v2.schema.json",
   "title": "GPU reification prediction document v2",
   "type": "object",
-  "required": ["schema", "target_contract", "rows"],
+  "required": ["schema", "target_contract", "source_bindings", "rows"],
   "properties": {
     "schema": {"const": "reification_prediction_v2"},
     "intervention": {"type": "string", "minLength": 1},

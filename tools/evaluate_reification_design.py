@@ -251,6 +251,17 @@ def summarize_design_runs(
         "native_speedup_claimed": False,
         "selective_coverage": selective_coverage,
         "hardware_comparison": "not_run_ncu_remains_independent_target",
+        "negative_boundary_primary_result": True,
+        "accepted_region_coverage": (
+            selective_coverage["accepted_fraction"]
+            if selective_coverage is not None
+            else None
+        ),
+        "false_summary_protection": "typed_refusal_fixtures_only_no_independent_baseline",
+        "compatible_prior_art_comparison": {
+            "performed": False,
+            "reason": "prior_art_cost_inputs_not_measured_under_this_trace_contract",
+        },
         "runtime_measurement": "wall_clock_child_process",
         "memory_measurement": "child_peak_rss_usr_bin_time_or_proc_status",
         "architectural_conclusion": (

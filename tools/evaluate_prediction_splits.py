@@ -18,6 +18,8 @@ from typing import Any
 
 from prediction_contract import (
     compare_target_contracts,
+    observation_source_bindings,
+    prediction_source_bindings,
     validate_observation_document,
     validate_observation_row,
     validate_observation_workloads,
@@ -72,6 +74,18 @@ def evaluate_prediction_splits(predictions: dict[str, Any], observations: dict[s
         observations.get("target_contract"), "observation", require_hardware=True
     )
     compare_target_contracts(prediction_contract, observation_contract)
+    prediction_bindings = prediction_source_bindings(predictions)
+    observation_bindings = observation_source_bindings(observations)
+    if prediction_bindings and observation_bindings:
+        if prediction_bindings != observation_bindings:
+            differing = sorted(
+                workload
+                for workload in set(prediction_bindings) | set(observation_bindings)
+                if prediction_bindings.get(workload) != observation_bindings.get(workload)
+            )
+            raise ValueError(
+                f"prediction/observation source binding mismatch for workloads {differing}"
+            )
     prediction_rows = predictions.get("rows")
     observation_rows = observations.get("rows")
     if not isinstance(prediction_rows, list) or not isinstance(observation_rows, list):
@@ -227,6 +241,7 @@ def evaluate_prediction_splits(predictions: dict[str, Any], observations: dict[s
         "split_reports": split_reports,
         "joined_rows": joined,
         "selection_used_observation_error": False,
+        "source_bindings_checked": bool(prediction_bindings and observation_bindings),
     }
 
 
