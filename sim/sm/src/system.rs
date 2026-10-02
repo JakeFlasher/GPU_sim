@@ -5271,7 +5271,10 @@ fn dispatch_reference_macro_event(
     mut trace: Option<&mut ReferenceTrace>,
 ) -> Result<bool, SystemError> {
     if let NativeBoundaryExecutionResult::TypedMacro { contract } = result {
-        if contract.validate().is_err() || contract.internal_effects.is_empty() {
+        if contract.validate().is_err()
+            || contract.internal_effects.is_empty()
+            || !native_issue_state_is_closed(contract)
+        {
             if let Some(trace) = trace.as_deref_mut() {
                 trace.note_native_fallback();
             }
@@ -5298,6 +5301,40 @@ fn dispatch_reference_macro_event(
         wake_due.push(sm_ix, execution.end_cycle)?;
     }
     Ok(true)
+}
+
+#[cfg(feature = "reference")]
+fn native_issue_state_is_closed(contract: &sim_semantics::TypedRegionContract) -> bool {
+    let Some(last_effect) = contract.internal_effects.last() else {
+        return false;
+    };
+    // The current native actor installs issue state only. A completion tail
+    // longer than one cycle, pending response/token state, or a changed
+    // resource/visibility frontier would require an additional native mutation
+    // that this seam does not yet implement, so it must exact-fallback.
+    let completion_tail = contract.exit.event.time.checked_sub(last_effect.event.time);
+    if completion_tail != Some(1) || !contract.pending_completion_tokens.is_empty() {
+        return false;
+    }
+    contract
+        .entry
+        .cores
+        .iter()
+        .zip(&contract.exit.cores)
+        .all(|(entry, exit)| {
+            entry.l1 == exit.l1
+                && entry.front_end == exit.front_end
+                && entry.memory_pipeline == exit.memory_pipeline
+                && entry.scalar_pipeline == exit.scalar_pipeline
+                && entry.local_completion_time == exit.local_completion_time
+                && entry.unprojected_timing_state == exit.unprojected_timing_state
+                && entry.async_copy == exit.async_copy
+                && entry.response_owners == exit.response_owners
+                && entry.block_states == exit.block_states
+                && entry.barrier_pipe_ready == exit.barrier_pipe_ready
+                && entry.tensor_pipe_ready == exit.tensor_pipe_ready
+                && entry.ldgsts_destination_pipe_ready == exit.ldgsts_destination_pipe_ready
+        })
 }
 
 /// Resume one SM actor: advance to its earliest self-affecting external
@@ -5895,6 +5932,40 @@ mod tests {
         );
         assert_eq!(invalid_core.instructions_issued(), 0);
         assert!(invalid_queue.is_empty());
+
+        let mut long_latency = closed_scalar_dispatch_contract(2);
+        if let NativeBoundaryExecutionResult::TypedMacro { contract } = &mut long_latency {
+            contract.interval.end_cycle = 11;
+            contract.exit.event.time = 11;
+            contract.exit.queue.next_sequence = Some(12);
+            contract.exit.power.domains[0].last_cycle = 11;
+            contract.exit.power.domains[0].clocked_cycles = 11;
+            contract.exit.power.domains[0].completion_events = 11;
+        }
+        let mut latency_core = SmCore::new_with_residency(
+            &blocks,
+            &schedule,
+            &params(),
+            SharedMemoryResidency::unconstrained_fixture(),
+            SmMemMode::Flat,
+        )
+        .unwrap();
+        let mut latency_queue = EventQueue::new();
+        let mut latency_wake_due = DueTimes::new(1);
+        assert!(
+            !dispatch_reference_macro_event(
+                &mut latency_core,
+                0,
+                1,
+                &long_latency,
+                &mut latency_queue,
+                &mut latency_wake_due,
+                None,
+            )
+            .unwrap()
+        );
+        assert_eq!(latency_core.instructions_issued(), 0);
+        assert!(latency_queue.is_empty());
     }
 
     #[cfg(feature = "reference")]

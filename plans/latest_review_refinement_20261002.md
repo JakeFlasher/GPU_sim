@@ -40,7 +40,7 @@ verified device identity.
 | R8.0 | Review intake and executable plan | This plan maps every critical/major/open finding to a code seam, test, falsifier, and claim boundary | **complete** |
 | R8.1 | Immediate soundness guards | Mismatched certificates, inconsistent grouped queues, missing observer projections, incomplete cache domains, and unchecked arithmetic refuse before mutation or finite projection | **complete** |
 | R8.2 | Production native decision path | A comparator-selected closed fixture reaches the real event loop, increments a dispatch counter, installs effects/pending state, resumes a detailed suffix, and falls back before mutation when one field is perturbed | **complete** |
-| R8.3 | Native state closure and independent refinement | Nonzero scalar latency/completion/front-end state is either consumed and compared against an independently captured boundary or conservatively refused; self-match tests are not the sole evidence | pending |
+| R8.3 | Native state closure and independent refinement | Nonzero scalar latency/completion/front-end state is either consumed and compared against an independently captured boundary or conservatively refused; self-match tests are not the sole evidence | **complete** |
 | R8.4 | Service/queue semantics and identifiability | Queue unknowns cannot close spuriously; residual/replacement roles have explicit equations and a held-out intervention, or the profile is clearly sidecar-only; latency, throughput, and queue parameters are separately identified | pending |
 | R8.5 | Measurement identity and cost utility | NCU observations are explicitly verified or labeled as manifest-labeled historical data; source/trace/control/card/launch identity is bound; parser/planner/effect/compare/RSS/wall-time cost and accepted/refused coverage are reported without speedup overclaim | pending |
 | R8.6 | Independent evaluation and paper synchronization | New tests/probes, negative results, novelty/prior-art boundary, histories, memory, status, schemas, and rebuttal all agree; full validation passes | pending |
@@ -188,6 +188,35 @@ run artifact, target label, provenance gate, or silicon oracle.
   as non-identifying; it must not silently produce the same “calibrated” rate.
 - Changing an independent-post-replay profile changes only its sidecar unless
   a declared residual/replacement role is selected.
+
+## R8.3 implementation evidence (complete 2026-10-02; conservative native scope)
+
+- The production native dispatcher validates the complete typed region before
+  calling `SmCore`. It requires a nonempty effect ledger, rejects any pending
+  completion token, and checks that scalar/memory pipeline, L1/front-end,
+  async-copy, response-owner, block/barrier, local-completion, and unprojected
+  timing state is unchanged across the typed boundary. These are exactly the
+  state classes the current actor does not install in its macro method.
+- The current native issue actor therefore supports only a unit completion
+  tail: the exit must be one cycle after the last declared issue effect. A
+  latency-10 or otherwise longer completion tail exact-falls back before core
+  mutation. Model-local certificates may still represent larger latency; that
+  is not silently upgraded to a native transition.
+- The optional witness carries a separately supplied detailed effect ledger,
+  observable labels, and detailed exit. The comparator consumes those fields
+  before the dispatcher; the positive event-branch fixture is built from an
+  independently constructed entry/exit/effect region, while perturbed,
+  empty-effect, pending/tail, and exact-replay results all refuse without
+  mutation.
+- Front-end buffer/cursor checks remain in `SmCore::execute_reference_scalar_macro`.
+  The retained front-end-enabled SM86 traces still lack a closed witness and
+  remain exact fallback; no self-match or synthetic endpoint is called native
+  completion.
+
+This closes the omission boundary by refusal rather than pretending to model
+latency, release queues, register values, memory responses, or barriers that
+the actor does not consume. General native latency/completion modeling remains
+an explicit future research stage, not a hidden claim.
 
 ## R8.5 — measurement identity and cost/utility
 

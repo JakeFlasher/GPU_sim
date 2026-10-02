@@ -77,6 +77,14 @@ ordinary detailed path. The witness is a narrow issue-model experiment, not a
 hardware oracle or a mandatory execution artifact. Without it, front-end and
 unresolved-state cases continue to serialize exact fallback.
 
+The native dispatcher is narrower than the model certificate: it requires a
+nonempty effect ledger, no pending completion tokens, a one-cycle completion
+tail, and unchanged scalar/memory/cache/front-end/response/barrier/local-
+completion state that the actor does not install. Non-unit latency (for
+example, a latency-10 probe) exact-falls back before mutation. This refusal is
+intentional state closure, not evidence that native latency or writeback is
+already modeled.
+
 ## Abstractions
 
 - Resource demand and queue contention replace physical route reconstruction.

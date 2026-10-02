@@ -196,7 +196,7 @@ does not produce a front-end-enabled native macro or a finite silicon observer
 upper. R7 now maps every paper/rebuttal claim to its evidence level and
 falsifier.
 
-## Latest panel re-review R8.0/R8.1/R8.2 — 2026-10-02 (R8.2 complete; R8.3 active)
+## Latest panel re-review R8.0/R8.1/R8.2/R8.3 — 2026-10-02 (R8.3 complete; R8.4 active)
 
 The latest independent panel re-review found that the previous R7 wording was
 still too strong in three places: the native decision was serialized but not
@@ -222,5 +222,11 @@ suffix, and exact-falls back before mutation for a rejected or perturbed
 contract. Macro issue effects and dispatch/fallback counters are recorded.
 The retained front-end-enabled SM86 corpus has no closed witness and remains
 exact fallback; this is not native speedup or silicon causality. R8.3 is now
-active on latency/completion/front-end state closure and independently derived
-effect refinement.
+complete on latency/completion/front-end state closure and independently
+derived effect refinement. The dispatcher exact-falls back for non-unit
+completion tails, pending tokens, or any scalar/memory/cache/front-end/
+response/barrier/local-completion state it does not install. A latency-10
+variant and perturbed/empty-effect ledgers are rejected before mutation. The
+validated positive fixture remains a unit-tail issue-model transition; model
+latency summaries are not native completion. R8.4 is active on service/queue
+identifiability.
