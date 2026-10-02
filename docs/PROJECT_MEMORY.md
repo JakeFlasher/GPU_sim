@@ -127,6 +127,10 @@ from profiler measurements; black-box models are assumptions, not observations.
   fresh `cache-control=none` repetitions after all-cache measurements. It is
   observational only; no fitting, cache-causality, or speedup claim is made.
   Result: `docs/review_round9_20261002/`.
+- R11.0 completed detailed-versus-fast-frontier cost measurements on all 15
+  retained traces: 5,130,860 records, zero accepted candidates, zero native
+  macro dispatches, and explicit wall/RSS/refusal accounting. Result:
+  `docs/review_round10_20261002/`.
 
 ## Next useful work
 

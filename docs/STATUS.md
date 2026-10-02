@@ -115,6 +115,11 @@ fresh `cache-control=none` repetitions after the all-cache measurements. The
 contrast is observational only; no fitting, cache-causality, or speedup claim
 is made. See [the contrast result](review_round9_20261002/README.md).
 
+R11.0 completed detailed-versus-fast-frontier cost measurements on all 15
+retained traces: 5,130,860 records, zero accepted candidates, and zero native
+macro dispatches. The result reports wall/RSS and refusal coverage, not
+speedup. See [the full cost result](review_round10_20261002/README.md).
+
 ## Retained measurements
 
 2026-09-30 RTX 3090 Ti campaigns used driver 615.71.09, 1350/10501 MHz, P0,

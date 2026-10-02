@@ -20,6 +20,7 @@ open only the relevant technical page.
 | Live SM86 large campaign | [168-block RTX 3090 Ti result](review_round7_20261002/README.md) |
 | Live SM86 writeback campaign | [Large dirty-stream result](review_round8_20261002/README.md) |
 | Live cache-policy contrast | [All-cache versus none-cache result](review_round9_20261002/README.md) |
+| Full retained-trace cost campaign | [Detailed versus analyzer utility result](review_round10_20261002/README.md) |
 | Latent and payload APIs | [Contract](sm86_factorized_latent_contract_20260930.md) |
 | Experimental semantics | [Diagnostics](experimental_diagnostics.md) |
 | Prior measurements | preserved under results/ and experiment inputs |

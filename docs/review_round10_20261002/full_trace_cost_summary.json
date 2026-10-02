@@ -1,0 +1,331 @@
+{
+  "aggregate": {
+    "mean_detailed_wall_ms": 485.86153333333334,
+    "mean_fast_wall_ms": 297.59166666666664,
+    "speedup_claimed": false,
+    "total_candidate_records": 0,
+    "total_detailed_wall_ms": 7287.923,
+    "total_fast_wall_ms": 4463.875,
+    "total_macro_dispatches": 0,
+    "total_trace_records": 5130860,
+    "total_uncovered_records": 5130860,
+    "workloads": 15
+  },
+  "limitations": [
+    "fast path is an analyzer, not native timing",
+    "fast analyzer candidate acceptance is zero on all retained front-end traces",
+    "wall/RSS include process startup and output; no native macro speedup claim"
+  ],
+  "role": "full_retained_trace_utility_measurement_not_speedup",
+  "rows": [
+    {
+      "detailed_instructions": 47136,
+      "detailed_peak_rss_bytes": 9207808,
+      "detailed_terminal_modeled_event": 11215,
+      "detailed_wall_ms": 77.063,
+      "family": "memory_embedding",
+      "fast_candidate_records": 0,
+      "fast_exact_steps": 0,
+      "fast_macro_dispatches": 0,
+      "fast_peak_rss_bytes": 9244672,
+      "fast_refusal_reasons": {
+        "nonfull_active_population": 64,
+        "nonfull_predicate_population": 64
+      },
+      "fast_summarized_steps": 0,
+      "fast_trace_records": 47136,
+      "fast_uncovered_records": 47136,
+      "fast_wall_ms": 56.302,
+      "split": "held_out",
+      "workload": "base__embedding_gather_int32_sm80"
+    },
+    {
+      "detailed_instructions": 39568,
+      "detailed_peak_rss_bytes": 8835072,
+      "detailed_terminal_modeled_event": 14255,
+      "detailed_wall_ms": 86.872,
+      "family": "attention",
+      "fast_candidate_records": 0,
+      "fast_exact_steps": 0,
+      "fast_macro_dispatches": 0,
+      "fast_peak_rss_bytes": 8663040,
+      "fast_refusal_reasons": {
+        "nonfull_active_population": 16,
+        "nonfull_predicate_population": 16
+      },
+      "fast_summarized_steps": 0,
+      "fast_trace_records": 39568,
+      "fast_uncovered_records": 39568,
+      "fast_wall_ms": 46.483,
+      "split": "held_out",
+      "workload": "base__flash_attn_fwd_bf16_sm80"
+    },
+    {
+      "detailed_instructions": 197120,
+      "detailed_peak_rss_bytes": 33509376,
+      "detailed_terminal_modeled_event": 10074,
+      "detailed_wall_ms": 416.468,
+      "family": "tensor_gemm",
+      "fast_candidate_records": 0,
+      "fast_exact_steps": 0,
+      "fast_macro_dispatches": 0,
+      "fast_peak_rss_bytes": 33353728,
+      "fast_refusal_reasons": {
+        "nonfull_predicate_population": 512
+      },
+      "fast_summarized_steps": 0,
+      "fast_trace_records": 197120,
+      "fast_uncovered_records": 197120,
+      "fast_wall_ms": 242.492,
+      "split": "development",
+      "workload": "base__gemm_hmma_bf16_sm80"
+    },
+    {
+      "detailed_instructions": 157696,
+      "detailed_peak_rss_bytes": 29171712,
+      "detailed_terminal_modeled_event": 9702,
+      "detailed_wall_ms": 334.802,
+      "family": "tensor_gemm",
+      "fast_candidate_records": 0,
+      "fast_exact_steps": 0,
+      "fast_macro_dispatches": 0,
+      "fast_peak_rss_bytes": 28942336,
+      "fast_refusal_reasons": {
+        "nonfull_predicate_population": 512
+      },
+      "fast_summarized_steps": 0,
+      "fast_trace_records": 157696,
+      "fast_uncovered_records": 157696,
+      "fast_wall_ms": 190.45,
+      "split": "development",
+      "workload": "base__gemm_imma_int8_sm80"
+    },
+    {
+      "detailed_instructions": 19968,
+      "detailed_peak_rss_bytes": 8101888,
+      "detailed_terminal_modeled_event": 3133,
+      "detailed_wall_ms": 45.985,
+      "family": "tensor_gemm",
+      "fast_candidate_records": 0,
+      "fast_exact_steps": 0,
+      "fast_macro_dispatches": 0,
+      "fast_peak_rss_bytes": 7995392,
+      "fast_refusal_reasons": {
+        "nonfull_predicate_population": 128
+      },
+      "fast_summarized_steps": 0,
+      "fast_trace_records": 19968,
+      "fast_uncovered_records": 19968,
+      "fast_wall_ms": 31.094,
+      "split": "development",
+      "workload": "base__gemm_sparse_2to4_bf16_sm80"
+    },
+    {
+      "detailed_instructions": 451952,
+      "detailed_peak_rss_bytes": 35954688,
+      "detailed_terminal_modeled_event": 20251,
+      "detailed_wall_ms": 642.837,
+      "family": "normalization",
+      "fast_candidate_records": 0,
+      "fast_exact_steps": 0,
+      "fast_macro_dispatches": 0,
+      "fast_peak_rss_bytes": 36196352,
+      "fast_refusal_reasons": {
+        "nonfull_active_population": 512,
+        "nonfull_predicate_population": 512
+      },
+      "fast_summarized_steps": 0,
+      "fast_trace_records": 451952,
+      "fast_uncovered_records": 451952,
+      "fast_wall_ms": 363.334,
+      "split": "calibration",
+      "workload": "base__layernorm_fwd_bf16_sm80"
+    },
+    {
+      "detailed_instructions": 264704,
+      "detailed_peak_rss_bytes": 24752128,
+      "detailed_terminal_modeled_event": 16463,
+      "detailed_wall_ms": 369.785,
+      "family": "normalization",
+      "fast_candidate_records": 0,
+      "fast_exact_steps": 0,
+      "fast_macro_dispatches": 0,
+      "fast_peak_rss_bytes": 24846336,
+      "fast_refusal_reasons": {
+        "nonfull_predicate_population": 512
+      },
+      "fast_summarized_steps": 0,
+      "fast_trace_records": 264704,
+      "fast_uncovered_records": 264704,
+      "fast_wall_ms": 226.855,
+      "split": "calibration",
+      "workload": "base__rmsnorm_fwd_bf16_sm80"
+    },
+    {
+      "detailed_instructions": 417792,
+      "detailed_peak_rss_bytes": 36851712,
+      "detailed_terminal_modeled_event": 3056,
+      "detailed_wall_ms": 514.042,
+      "family": "elementwise_reduction",
+      "fast_candidate_records": 0,
+      "fast_exact_steps": 0,
+      "fast_macro_dispatches": 0,
+      "fast_peak_rss_bytes": 34439168,
+      "fast_refusal_reasons": {
+        "nonfull_predicate_population": 8192
+      },
+      "fast_summarized_steps": 0,
+      "fast_trace_records": 417792,
+      "fast_uncovered_records": 417792,
+      "fast_wall_ms": 329.328,
+      "split": "held_out",
+      "workload": "base__silu_fwd_bf16_sm80"
+    },
+    {
+      "detailed_instructions": 219008,
+      "detailed_peak_rss_bytes": 23818240,
+      "detailed_terminal_modeled_event": 10299,
+      "detailed_wall_ms": 348.671,
+      "family": "convolution",
+      "fast_candidate_records": 0,
+      "fast_exact_steps": 0,
+      "fast_macro_dispatches": 0,
+      "fast_peak_rss_bytes": 23683072,
+      "fast_refusal_reasons": {
+        "nonfull_predicate_population": 128
+      },
+      "fast_summarized_steps": 0,
+      "fast_trace_records": 219008,
+      "fast_uncovered_records": 219008,
+      "fast_wall_ms": 241.69,
+      "split": "held_out",
+      "workload": "large__conv2d_implicit_gemm_bf16_sm80"
+    },
+    {
+      "detailed_instructions": 292096,
+      "detailed_peak_rss_bytes": 26099712,
+      "detailed_terminal_modeled_event": 8528,
+      "detailed_wall_ms": 370.887,
+      "family": "elementwise_reduction",
+      "fast_candidate_records": 0,
+      "fast_exact_steps": 0,
+      "fast_macro_dispatches": 0,
+      "fast_peak_rss_bytes": 25202688,
+      "fast_refusal_reasons": {
+        "nonfull_active_population": 512,
+        "nonfull_predicate_population": 512
+      },
+      "fast_summarized_steps": 0,
+      "fast_trace_records": 292096,
+      "fast_uncovered_records": 292096,
+      "fast_wall_ms": 232.105,
+      "split": "held_out",
+      "workload": "large__cross_entropy_fwd_fp32_sm80"
+    },
+    {
+      "detailed_instructions": 89676,
+      "detailed_peak_rss_bytes": 20054016,
+      "detailed_terminal_modeled_event": 289859,
+      "detailed_wall_ms": 190.225,
+      "family": "attention",
+      "fast_candidate_records": 0,
+      "fast_exact_steps": 0,
+      "fast_macro_dispatches": 0,
+      "fast_peak_rss_bytes": 19005440,
+      "fast_refusal_reasons": {
+        "nonfull_active_population": 4,
+        "nonfull_predicate_population": 4
+      },
+      "fast_summarized_steps": 0,
+      "fast_trace_records": 89676,
+      "fast_uncovered_records": 89676,
+      "fast_wall_ms": 118.611,
+      "split": "held_out",
+      "workload": "large__flash_attn_bwd_bf16_sm80"
+    },
+    {
+      "detailed_instructions": 197120,
+      "detailed_peak_rss_bytes": 33529856,
+      "detailed_terminal_modeled_event": 10074,
+      "detailed_wall_ms": 412.121,
+      "family": "tensor_gemm",
+      "fast_candidate_records": 0,
+      "fast_exact_steps": 0,
+      "fast_macro_dispatches": 0,
+      "fast_peak_rss_bytes": 33374208,
+      "fast_refusal_reasons": {
+        "nonfull_predicate_population": 512
+      },
+      "fast_summarized_steps": 0,
+      "fast_trace_records": 197120,
+      "fast_uncovered_records": 197120,
+      "fast_wall_ms": 246.666,
+      "split": "development",
+      "workload": "large__gemm_hmma_fp16_sm80"
+    },
+    {
+      "detailed_instructions": 378432,
+      "detailed_peak_rss_bytes": 32788480,
+      "detailed_terminal_modeled_event": 18697,
+      "detailed_wall_ms": 566.452,
+      "family": "normalization",
+      "fast_candidate_records": 0,
+      "fast_exact_steps": 0,
+      "fast_macro_dispatches": 0,
+      "fast_peak_rss_bytes": 32698368,
+      "fast_refusal_reasons": {
+        "nonfull_active_population": 512,
+        "nonfull_predicate_population": 512
+      },
+      "fast_summarized_steps": 0,
+      "fast_trace_records": 378432,
+      "fast_uncovered_records": 378432,
+      "fast_wall_ms": 328.579,
+      "split": "calibration",
+      "workload": "large__rmsnorm_bwd_bf16_sm80"
+    },
+    {
+      "detailed_instructions": 523584,
+      "detailed_peak_rss_bytes": 38477824,
+      "detailed_terminal_modeled_event": 19642,
+      "detailed_wall_ms": 635.682,
+      "family": "elementwise_reduction",
+      "fast_candidate_records": 0,
+      "fast_exact_steps": 0,
+      "fast_macro_dispatches": 0,
+      "fast_peak_rss_bytes": 37941248,
+      "fast_refusal_reasons": {
+        "nonfull_active_population": 512,
+        "nonfull_predicate_population": 512
+      },
+      "fast_summarized_steps": 0,
+      "fast_trace_records": 523584,
+      "fast_uncovered_records": 523584,
+      "fast_wall_ms": 393.998,
+      "split": "held_out",
+      "workload": "large__softmax_safe_bf16_sm80"
+    },
+    {
+      "detailed_instructions": 1835008,
+      "detailed_peak_rss_bytes": 133537792,
+      "detailed_terminal_modeled_event": 9143,
+      "detailed_wall_ms": 2276.031,
+      "family": "elementwise_reduction",
+      "fast_candidate_records": 0,
+      "fast_exact_steps": 0,
+      "fast_macro_dispatches": 0,
+      "fast_peak_rss_bytes": 133165056,
+      "fast_refusal_reasons": {
+        "nonfull_predicate_population": 32768
+      },
+      "fast_summarized_steps": 0,
+      "fast_trace_records": 1835008,
+      "fast_uncovered_records": 1835008,
+      "fast_wall_ms": 1415.888,
+      "split": "held_out",
+      "workload": "large__swiglu_fwd_bf16_sm80_n1048576"
+    }
+  ],
+  "schema": "sm86_reification_cost_campaign_v1",
+  "sim_run": "/home/jakeshea/GPU_simulator_rebase/sim/target/release/sim-run"
+}

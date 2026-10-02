@@ -62,6 +62,10 @@ R10.2 is complete for a two-case live cache-policy contrast: fresh
 `cache-control=none` repetitions were collected after the all-cache
 post-prediction condition; the contrast is observational only.
 
+R11.0 is complete for the retained simulator cost loop: all 15 traces now have
+detailed replay and fast-frontier measurements on identical inputs, with zero
+accepted candidates and explicit refusal coverage.
+
 ## Stage ledger
 
 | Stage | Focus | Exit evidence | Status |
@@ -79,6 +83,7 @@ post-prediction condition; the contrast is observational only.
 | R10.0 | Live SM86 campaign | A bounded live host run records host identity, native/NCU/trace/replay termination, prediction-before-post-observation artifacts, open/refused strata, and no unsupported speedup claim | **complete: 10-case large development probe** |
 | R10.1 | Live writeback campaign | Large dirty streams complete native/trace/replay/NCU runs, preserve writeback tails as unknown/unavailable, and make no speedup or fitted-hardware claim | **complete: 2-case large writeback probe** |
 | R10.2 | Live cache-policy contrast | Fresh none-cache repetitions compare against all-cache observations without fitting or cache-causality claims | **complete: 2-case contrast** |
+| R11.0 | Full retained-trace simulator utility | Detailed versus analyzer wall/RSS/candidate/refusal measurements complete without native-speedup terminology | **complete: 15-workload cost campaign** |
 
 ## R8.1 — immediate soundness guards
 

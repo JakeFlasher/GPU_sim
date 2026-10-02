@@ -297,3 +297,11 @@ repetitions after their all-cache post-prediction measurements. The observed
 median shifts were -158 GPC cycles for the read case and +567 cycles for the
 atomic case, with different repeatability ranges. This is an intervention
 observation, not a cache-causality proof, model-fitting input, or speedup claim.
+
+## R11.0 full retained-trace simulator cost campaign — 2026-10-02 (complete)
+
+All 15 retained SM86 workloads ran detailed replay and fast-frontier analysis
+on identical inputs. The campaign covered 5,130,860 records, accepted zero
+candidate records, and observed zero native macro dispatches. Detailed replay
+and analyzer wall/RSS costs are reported separately without calling the ratio
+speedup. The result is utility/refusal evidence, not native acceleration.
